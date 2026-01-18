@@ -58,8 +58,8 @@ class VolatilitySqueezeStrategy:
             signal = None
             entry_price = latest['close']
             
-            # 최근 5봉 이내에 스퀴즈(0.06 미만)가 있었는지 확인
-            was_squeezed = (bbw.tail(5) < self.bbw_squeeze).any()
+            # 최근 10봉 이내에 스퀴즈(0.06 미만)가 있었는지 확인
+            was_squeezed = (bbw.tail(10) < self.bbw_squeeze).any()
             # 현재는 폭발(0.09 초과)했는지 확인
             is_exploding = latest_bbw > self.bbw_explosion
             
