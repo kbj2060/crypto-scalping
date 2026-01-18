@@ -30,7 +30,7 @@ class CVDFakePressureStrategy:
             if eth_data is None or len(eth_data) < self.price_change_lookback + 5:
                 return None
             
-            # 가격 변화량 필터: Price 변화량(20봉) < 0.3%
+            # 가격 변화량 필터: Price 변화량(20봉) < 0.6%
             recent_data = eth_data.tail(self.price_change_lookback)
             price_max = float(recent_data['high'].max())
             price_min = float(recent_data['low'].min())

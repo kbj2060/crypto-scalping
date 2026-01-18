@@ -54,9 +54,10 @@ class RangeTopBottomStrategy:
             stop_loss = None
             take_profit = range_mid  # 목표: Mid 또는 진입가 대비 0.4%
             
-            # LONG: Price <= RangeLow * 1.001 AND 긴 하단 꼬리
-            if latest_close <= range_low * 1.001:
-                # 긴 하단 꼬리 확인: Low < Close - 0.06% (완화: 기존 0.15%)
+            # LONG: Price <= RangeLow * 1.005 AND 긴 하단 꼬리 (완화: 기존 1.001에서 1.005로 확대)
+            range_low_threshold = range_low * 1.005
+            if latest_close <= range_low_threshold:
+                # 긴 하단 꼬리 확인: Low < Close - 0.06%
                 lower_wick = latest_close - latest_low
                 lower_wick_pct = lower_wick / latest_close
                 if lower_wick_pct >= self.wick_threshold:
@@ -65,9 +66,10 @@ class RangeTopBottomStrategy:
                     take_profit = max(range_mid, entry_price * (1 + 0.004))  # Mid 또는 +0.4%
                     logger.info(f"Range Top/Bottom 롱: 저점 터치, 꼬리={lower_wick_pct:.3%}")
             
-            # SHORT: Price >= RangeHigh * 0.999 AND 긴 상단 꼬리
-            elif latest_close >= range_high * 0.999:
-                # 긴 상단 꼬리 확인: High > Close + 0.06% (완화: 기존 0.15%)
+            # SHORT: Price >= RangeHigh * 0.995 AND 긴 상단 꼬리 (완화: 기존 0.999에서 0.995로 확대)
+            range_high_threshold = range_high * 0.995
+            if latest_close >= range_high_threshold:
+                # 긴 상단 꼬리 확인: High > Close + 0.06%
                 upper_wick = latest_high - latest_close
                 upper_wick_pct = upper_wick / latest_close
                 if upper_wick_pct >= self.wick_threshold:

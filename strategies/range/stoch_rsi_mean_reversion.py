@@ -21,11 +21,11 @@ class StochRSIMeanReversionStrategy:
         self.d_period = 3
         self.stoch_oversold = 20  # StochRSI K < 20
         self.stoch_overbought = 80  # StochRSI K > 80
-        self.rsi_neutral_min = 40  # RSI between 40 and 60
-        self.rsi_neutral_max = 60
+        self.rsi_neutral_min = 35  # RSI between 35 and 65 (완화: 기존 40)
+        self.rsi_neutral_max = 65  # RSI between 35 and 65 (완화: 기존 60)
         self.rsi_long_max = 48  # RSI < 48 (롱)
         self.rsi_short_min = 52  # RSI > 52 (숏)
-        self.macd_hist_threshold = 0.2  # MACD Histogram 절대값 < 0.2
+        self.macd_hist_threshold = 0.5  # MACD Histogram 절대값 < 0.5 (완화: 기존 0.2)
         self.take_profit_min = 0.002  # 0.2%
         self.take_profit_max = 0.0035  # 0.35%
         self.stop_loss = 0.002  # 0.2%
@@ -43,7 +43,7 @@ class StochRSIMeanReversionStrategy:
                 return None
             latest_rsi = float(rsi.iloc[-1])
             
-            # 필터: RSI between 40 and 60 (중립 구간)
+            # 필터: RSI between 35 and 65 (중립 구간)
             if latest_rsi < self.rsi_neutral_min or latest_rsi > self.rsi_neutral_max:
                 return None
             
@@ -65,6 +65,12 @@ class StochRSIMeanReversionStrategy:
             )
             if stoch_rsi is None:
                 return None
+            
+            # stoch_rsi는 dict 형태 {'k': Series, 'd': Series}
+            if not isinstance(stoch_rsi, dict) or 'k' not in stoch_rsi:
+                logger.error(f"Stoch RSI 계산 결과 형식 오류: {type(stoch_rsi)}")
+                return None
+            
             latest_stoch_k = float(stoch_rsi['k'].iloc[-1])
             
             latest = eth_data.iloc[-1]
@@ -102,5 +108,7 @@ class StochRSIMeanReversionStrategy:
             return None
             
         except Exception as e:
+            import traceback
             logger.error(f"Stoch RSI Mean-Reversion 전략 분석 실패: {e}")
+            logger.error(f"에러 상세: {traceback.format_exc()}")
             return None
