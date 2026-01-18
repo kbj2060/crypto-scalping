@@ -48,11 +48,13 @@ class TradingBot:
             self.strategies.append(CVDDeltaStrategy())
         if config.STRATEGIES['volatility_squeeze']:
             self.strategies.append(VolatilitySqueezeStrategy())
-        if config.STRATEGIES['funding_rate']:
+        # 펀딩비 전략: 선물 거래에서만 활성화
+        if config.STRATEGIES['funding_rate'] and self.client.use_futures:
             self.strategies.append(FundingRateStrategy())
         if config.STRATEGIES['orderblock_fvg']:
             self.strategies.append(OrderblockFVGStrategy())
-        if config.STRATEGIES.get('liquidation_spike', False):
+        # 청산 스파이크 전략: 선물 거래에서만 활성화
+        if config.STRATEGIES.get('liquidation_spike', False) and self.client.use_futures:
             self.strategies.append(LiquidationSpikeStrategy())
         
         logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개")
@@ -456,9 +458,13 @@ class TradingBot:
                         logger.info("=" * 60)
                         logger.info("")
                         
-                        # 거래 실행
-                        logger.info("💼 거래 실행 중...")
-                        self.execute_trade(final_signal)
+                        # 거래 실행 (분석 모드에서는 비활성화)
+                        if config.ENABLE_TRADING:
+                            logger.info("💼 거래 실행 중...")
+                            self.execute_trade(final_signal)
+                        else:
+                            logger.info("📊 분석 모드: 거래 실행 비활성화 (ENABLE_TRADING=False)")
+                            logger.info("   신호만 분석하고 실제 거래는 수행하지 않습니다.")
                     else:
                         logger.info("⚠️  신호 조합 실패: 조건을 만족하는 조합이 없습니다")
                 else:

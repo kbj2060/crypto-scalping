@@ -60,8 +60,12 @@ class VolatilitySqueezeStrategy:
             
             # 최근 10봉 이내에 스퀴즈(0.06 미만)가 있었는지 확인
             was_squeezed = (bbw.tail(10) < self.bbw_squeeze).any()
-            # 현재는 폭발(0.09 초과)했는지 확인
-            is_exploding = latest_bbw > self.bbw_explosion
+            # 현재 BBW가 상승세 전환했는지 확인 (이전 봉 대비 증가)
+            if len(bbw) >= 2:
+                prev_bbw = bbw.iloc[-2]
+                is_exploding = latest_bbw > prev_bbw and latest_bbw > self.bbw_squeeze  # 상승 전환 + 스퀴즈 구간 벗어남
+            else:
+                is_exploding = False
             
             if was_squeezed and is_exploding:
                 upper_band = bb['upper'].iloc[-1]

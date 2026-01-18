@@ -60,12 +60,20 @@ class DataCollector:
             
             # 펀딩비 업데이트 (선물 거래에서만)
             if self.client.use_futures:
-                self.eth_funding_rate = self.client.get_funding_rate(config.ETH_SYMBOL)
-                self.btc_funding_rate = self.client.get_funding_rate(config.BTC_SYMBOL)
+                try:
+                    self.eth_funding_rate = self.client.get_funding_rate(config.ETH_SYMBOL)
+                    self.btc_funding_rate = self.client.get_funding_rate(config.BTC_SYMBOL)
+                except Exception as e:
+                    logger.debug(f"펀딩비 조회 실패 (계속 진행): {e}")
+                    self.eth_funding_rate = None
+                    self.btc_funding_rate = None
                 
                 # 청산 데이터 업데이트 (선물 거래에서만)
-                self.update_liquidation_data('ETH')
-                self.update_liquidation_data('BTC')
+                try:
+                    self.update_liquidation_data('ETH')
+                    self.update_liquidation_data('BTC')
+                except Exception as e:
+                    logger.debug(f"청산 데이터 업데이트 실패 (계속 진행): {e}")
             
             if self.eth_data is not None and self.btc_data is not None:
                 eth_latest = self.eth_data.iloc[-1] if len(self.eth_data) > 0 else None

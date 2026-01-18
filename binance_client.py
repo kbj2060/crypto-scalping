@@ -29,8 +29,19 @@ class BinanceClient:
                     config.BINANCE_SECRET_KEY,
                     testnet=True
                 )
-                self.use_futures = True  # 테스트넷에서도 선물 거래 사용 (펀딩비, 청산 데이터 필요)
-                logger.info("바이낸스 테스트넷 클라이언트 초기화 (선물 거래 모드)")
+                # 테스트넷에서 선물 API 접근 가능 여부 확인
+                try:
+                    # 선물 계정 정보 조회로 권한 확인
+                    test_futures = self.client.futures_account()
+                    self.use_futures = True
+                    logger.info("바이낸스 테스트넷 클라이언트 초기화 (선물 거래 모드)")
+                except Exception as e:
+                    # 선물 권한이 없으면 스팟 모드로 전환
+                    self.use_futures = False
+                    logger.warning("테스트넷 선물 API 접근 실패 → 스팟 모드로 전환")
+                    logger.warning(f"  이유: {e}")
+                    logger.warning("  펀딩비 및 청산 스파이크 전략은 비활성화됩니다.")
+                    logger.info("바이낸스 테스트넷 클라이언트 초기화 (스팟 거래 모드)")
             else:
                 self.client = Client(
                     config.BINANCE_API_KEY,
@@ -39,7 +50,7 @@ class BinanceClient:
                 self.use_futures = True  # 실제 거래소는 선물 거래 사용
                 logger.info("바이낸스 실제 거래소 클라이언트 초기화 (선물 거래 모드)")
             
-            # 선물 거래 설정 (레버리지 변경) - 실제 거래소에서만
+            # 선물 거래 설정 (레버리지 변경)
             if self.use_futures:
                 try:
                     self.client.futures_change_leverage(
@@ -289,8 +300,19 @@ class BinanceClient:
                 # 자산 조회 실패 또는 보유 자산 없음 (권한 없으면 정상적으로 None 반환)
                 return None
         except Exception as e:
-            logger.error(f"포지션 조회 실패: {e}")
-            return None
+            error_msg = str(e)
+            # API 키 권한 오류는 조용히 처리 (스팟 모드에서는 정상)
+            if "-2015" in error_msg or "Invalid API-key" in error_msg:
+                if not self.use_futures:
+                    # 스팟 모드에서 권한 없으면 정상 (None 반환)
+                    return None
+                else:
+                    # 선물 모드에서 권한 오류는 경고만
+                    logger.debug(f"포지션 조회 실패 (권한 없음, 계속 진행): {e}")
+                    return None
+            else:
+                logger.error(f"포지션 조회 실패: {e}")
+                return None
     
     def get_balance(self, asset):
         """보유 자산 조회 (스팟 거래용)"""

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class FundingRateStrategy:
     def __init__(self):
         self.name = "Funding Rate"
-        self.funding_threshold = 0.0001  # 0.01% (0.015%에서 완화 - 횡보장에서도 신호 발생)
+        self.funding_threshold = 0.00009  # 0.009% (0.01% 경계값 문제 해결)
     
     def analyze(self, data_collector):
         """펀딩비 전략 분석"""
@@ -33,8 +33,8 @@ class FundingRateStrategy:
             entry_price = latest['close']
             signal = None
             
-            # Long 유리: Funding < -0.015% AND 델타·CVD가 반대 방향 (상승)
-            if eth_funding < -self.funding_threshold:
+            # Long 유리: Funding <= -0.009% AND 델타·CVD가 반대 방향 (상승)
+            if eth_funding <= -self.funding_threshold:
                 if cvd_data is not None:
                     # 스무딩된 델타 사용
                     latest_delta = cvd_data.get('delta_smooth', cvd_data['delta']).iloc[-1]
@@ -52,8 +52,8 @@ class FundingRateStrategy:
                             confidence = 0.85
                         logger.info(f"펀딩비 극단 Long: Funding={eth_funding:.4f}%, 델타/CVD 반대 방향 상승")
             
-            # Short 유리: Funding > 0.015% AND 델타·CVD가 반대 방향 (하락)
-            elif eth_funding > self.funding_threshold:
+            # Short 유리: Funding >= 0.009% AND 델타·CVD가 반대 방향 (하락)
+            elif eth_funding >= self.funding_threshold:
                 if cvd_data is not None:
                     # 스무딩된 델타 사용
                     latest_delta = cvd_data.get('delta_smooth', cvd_data['delta']).iloc[-1]

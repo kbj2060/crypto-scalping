@@ -36,8 +36,8 @@ class OrderblockFVGStrategy:
                 body = abs(candle['close'] - candle['open'])
                 body_pct = body / candle['open']
                 
-                # 강한 캔들: 몸통 0.3% 이상 + 볼륨 1.7배 이상
-                if body_pct >= 0.003 and candle['volume'] >= volume_mean * self.ob_volume_multiplier:
+                # 강한 캔들: 몸통 0.15% 이상 + 볼륨 1.7배 이상 (0.3%에서 완화)
+                if body_pct >= 0.0015 and candle['volume'] >= volume_mean * self.ob_volume_multiplier:
                     if candle['close'] > candle['open']:
                         # 강한 상승 캔들 → Bearish OB
                         return {

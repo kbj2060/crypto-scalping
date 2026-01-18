@@ -24,8 +24,8 @@ class LiquiditySweepStrategy:
             if eth_data is None or len(eth_data) < self.liquidity_lookback + 5:
                 return None
             
-            # 이전 20봉 안의 주요 유동성 찾기
-            recent_data = eth_data.tail(self.liquidity_lookback)
+            # 이전 20봉 안의 주요 유동성 찾기 (현재 캔들 제외)
+            recent_data = eth_data.iloc[:-1].tail(self.liquidity_lookback)
             major_high = recent_data['high'].max()
             major_low = recent_data['low'].min()
             
