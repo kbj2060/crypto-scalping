@@ -3,7 +3,7 @@
 """
 import logging
 import config
-from binance_client import BinanceClient
+from .binance_client import BinanceClient
 
 logger = logging.getLogger(__name__)
 

@@ -6,8 +6,9 @@ import sys
 import os
 import pandas as pd
 import numpy as np
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from indicators import Indicators
+# 프로젝트 루트 경로 추가 (breakout 디렉토리에서 2단계 위로)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from core.indicators import Indicators
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +59,27 @@ class CVDDeltaStrategy:
                 
                 # CVD 저점
                 is_cvd_low = True
+                cvd_value_i = float(recent_cvd.iloc[i])
                 for j in range(i - self.divergence_strength, i + self.divergence_strength + 1):
-                    if j != i and recent_cvd.iloc[j] <= recent_cvd.iloc[i]:
-                        is_cvd_low = False
-                        break
+                    if j != i:
+                        cvd_value_j = float(recent_cvd.iloc[j])
+                        if cvd_value_j <= cvd_value_i:
+                            is_cvd_low = False
+                            break
                 if is_cvd_low:
-                    cvd_lows.append({'index': i, 'value': recent_cvd.iloc[i]})
+                    cvd_lows.append({'index': i, 'value': cvd_value_i})
                 
                 # CVD 고점
                 is_cvd_high = True
+                cvd_value_i = float(recent_cvd.iloc[i])
                 for j in range(i - self.divergence_strength, i + self.divergence_strength + 1):
-                    if j != i and recent_cvd.iloc[j] >= recent_cvd.iloc[i]:
-                        is_cvd_high = False
-                        break
+                    if j != i:
+                        cvd_value_j = float(recent_cvd.iloc[j])
+                        if cvd_value_j >= cvd_value_i:
+                            is_cvd_high = False
+                            break
                 if is_cvd_high:
-                    cvd_highs.append({'index': i, 'value': recent_cvd.iloc[i]})
+                    cvd_highs.append({'index': i, 'value': cvd_value_i})
             
             # Bullish Divergence: 가격 lower-low, CVD higher-low
             if len(price_lows) >= 2 and len(cvd_lows) >= 2:

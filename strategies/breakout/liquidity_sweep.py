@@ -4,8 +4,9 @@
 import logging
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from indicators import Indicators
+# 프로젝트 루트 경로 추가 (breakout 디렉토리에서 2단계 위로)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from core.indicators import Indicators
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,8 @@ class LiquiditySweepStrategy:
             
             # 이전 20봉 안의 주요 유동성 찾기 (현재 캔들 제외)
             recent_data = eth_data.iloc[:-1].tail(self.liquidity_lookback)
-            major_high = recent_data['high'].max()
-            major_low = recent_data['low'].min()
+            major_high = float(recent_data['high'].max())
+            major_low = float(recent_data['low'].min())
             
             # 최신 캔들들
             latest = eth_data.iloc[-1]
@@ -36,32 +37,38 @@ class LiquiditySweepStrategy:
             
             signal = None
             stop_loss = None
-            entry_price = latest['close']
+            entry_price = float(latest['close'])
+            
+            # 최신 캔들 값들을 float로 변환
+            latest_high = float(latest['high'])
+            latest_low = float(latest['low'])
+            latest_close = float(latest['close'])
+            latest_open = float(latest['open'])
             
             # 고점 스윕: 이전 20봉 고점 돌파 → 되돌림 마감 → 진입
-            if latest['high'] > major_high:
+            if latest_high > major_high:
                 # 스윕 바 길이(body) < 전체의 40%
-                sweep_body = abs(latest['close'] - latest['open'])
-                sweep_range = latest['high'] - latest['low']
+                sweep_body = abs(latest_close - latest_open)
+                sweep_range = latest_high - latest_low
                 body_ratio = sweep_body / sweep_range if sweep_range > 0 else 0
                 
                 if body_ratio < self.sweep_body_max_pct:
                     # 스윕 후 반전 캔들 1개 확인 (되돌림 마감)
-                    if prev_candle and latest['close'] < major_high:
+                    if prev_candle and latest_close < major_high:
                         signal = 'SHORT'
                         stop_loss = major_high * (1 + self.stop_loss_percent)
                         logger.info(f"Bearish Sweep: 고점 {major_high:.2f} 돌파 후 되돌림")
             
             # 저점 스윕: 이전 20봉 저점 이탈 → 되돌림 마감 → 진입
-            if latest['low'] < major_low:
+            if latest_low < major_low:
                 # 스윕 바 길이(body) < 전체의 40%
-                sweep_body = abs(latest['close'] - latest['open'])
-                sweep_range = latest['high'] - latest['low']
+                sweep_body = abs(latest_close - latest_open)
+                sweep_range = latest_high - latest_low
                 body_ratio = sweep_body / sweep_range if sweep_range > 0 else 0
                 
                 if body_ratio < self.sweep_body_max_pct:
                     # 스윕 후 반전 캔들 1개 확인 (되돌림 마감)
-                    if prev_candle and latest['close'] > major_low:
+                    if prev_candle and latest_close > major_low:
                         signal = 'LONG'
                         stop_loss = major_low * (1 - self.stop_loss_percent)
                         logger.info(f"Bullish Sweep: 저점 {major_low:.2f} 이탈 후 되돌림")

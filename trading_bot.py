@@ -6,9 +6,7 @@ import time
 import sys
 from datetime import datetime, timedelta
 import config
-from data_collector import DataCollector
-from risk_manager import RiskManager
-from binance_client import BinanceClient
+from core import DataCollector, RiskManager, BinanceClient
 from strategies import (
     LiquiditySweepStrategy,
     BTCEthCorrelationStrategy,
@@ -24,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('trading_bot.log'),
+        logging.FileHandler('logs/trading_bot.log'),
         logging.StreamHandler()
     ]
 )

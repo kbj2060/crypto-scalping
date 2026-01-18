@@ -4,8 +4,9 @@
 import logging
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from indicators import Indicators
+# 프로젝트 루트 경로 추가 (breakout 디렉토리에서 2단계 위로)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from core.indicators import Indicators
 
 logger = logging.getLogger(__name__)
 
