@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 class BTCEthCorrelationStrategy:
     def __init__(self):
         self.name = "BTC/ETH Correlation"
-        self.rsi_long_threshold = 40  # BTC RSI < 40 → ETH 숏 bias
-        self.rsi_short_threshold = 60  # BTC RSI > 60 → ETH 롱 bias
+        self.rsi_long_threshold = 45  # BTC RSI < 45 → ETH 숏 bias (40에서 완화)
+        self.rsi_short_threshold = 55  # BTC RSI > 55 → ETH 롱 bias (60에서 완화)
         self.ma_period = 20
-        self.ma_consecutive = 3  # MA20 위/아래 3봉 연속
+        self.ma_consecutive = 2  # MA20 위/아래 2봉 연속 (3에서 완화)
     
     def analyze(self, data_collector):
         """BTC 연동 모멘텀 전략 분석 (최적 세팅)"""
@@ -58,7 +58,7 @@ class BTCEthCorrelationStrategy:
             entry_price = float(eth_current['close'])
             signal = None
             
-            # 롱 bias: BTC RSI > 60 AND BTC MA20 위 3봉 연속
+            # 롱 bias: BTC RSI > 55 AND BTC MA20 위 2봉 연속
             if btc_rsi_latest > self.rsi_short_threshold and btc_above_ma:
                 # ETH가 상승 추세인지 확인
                 eth_prev = eth_data.iloc[-2] if len(eth_data) >= 2 else None
@@ -67,9 +67,9 @@ class BTCEthCorrelationStrategy:
                     eth_prev_close = float(eth_prev['close'])
                     if eth_current_close > eth_prev_close:
                         signal = 'LONG'
-                        logger.info(f"BTC 연동 롱: BTC RSI={btc_rsi_latest:.2f}, MA20 위 3봉 연속")
+                        logger.info(f"BTC 연동 롱: BTC RSI={btc_rsi_latest:.2f}, MA20 위 {self.ma_consecutive}봉 연속")
             
-            # 숏 bias: BTC RSI < 40 AND BTC MA20 아래 3봉 연속
+            # 숏 bias: BTC RSI < 45 AND BTC MA20 아래 2봉 연속
             elif btc_rsi_latest < self.rsi_long_threshold and btc_below_ma:
                 # ETH가 하락 추세인지 확인
                 eth_prev = eth_data.iloc[-2] if len(eth_data) >= 2 else None
@@ -78,7 +78,7 @@ class BTCEthCorrelationStrategy:
                     eth_prev_close = float(eth_prev['close'])
                     if eth_current_close < eth_prev_close:
                         signal = 'SHORT'
-                        logger.info(f"BTC 연동 숏: BTC RSI={btc_rsi_latest:.2f}, MA20 아래 3봉 연속")
+                        logger.info(f"BTC 연동 숏: BTC RSI={btc_rsi_latest:.2f}, MA20 아래 {self.ma_consecutive}봉 연속")
             
             if signal:
                 return {

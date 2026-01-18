@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class FundingRateStrategy:
     def __init__(self):
         self.name = "Funding Rate"
-        self.funding_threshold = 0.00015  # 0.015% (기존 0.02%에서 완화 - 신호 증가)
+        self.funding_threshold = 0.0001  # 0.01% (0.015%에서 완화 - 횡보장에서도 신호 발생)
     
     def analyze(self, data_collector):
         """펀딩비 전략 분석"""
