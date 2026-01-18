@@ -17,19 +17,23 @@ class BTCEthCorrelationStrategy:
         self.rsi_long_threshold = 45  # BTC RSI < 45 → ETH 숏 bias (40에서 완화)
         self.rsi_short_threshold = 55  # BTC RSI > 55 → ETH 롱 bias (60에서 완화)
         self.ma_period = 20
-        self.ma_consecutive = 2  # MA20 위/아래 2봉 연속 (3에서 완화)
+        self.ma_consecutive = 1  # MA20 위/아래 1봉 연속 (공격적: 기존 2 → BTC 돌파 즉시)
     
     def analyze(self, data_collector):
         """BTC 연동 모멘텀 전략 분석 (최적 세팅)"""
         try:
+            logger.debug(f"🔍 [BTC/ETH Correlation] 전략 분석 시작")
             btc_data = data_collector.get_candles('BTC', count=50)
             eth_data = data_collector.get_candles('ETH', count=50)
             
             if btc_data is None or eth_data is None:
+                logger.debug(f"⚠️ [BTC/ETH Correlation] 데이터 없음: btc={btc_data is not None}, eth={eth_data is not None}")
                 return None
             
             if len(btc_data) < 25 or len(eth_data) < 25:
+                logger.debug(f"⚠️ [BTC/ETH Correlation] 데이터 부족: btc={len(btc_data)}, eth={len(eth_data)}")
                 return None
+            logger.debug(f"🔍 [BTC/ETH Correlation] 데이터 확인 완료: BTC {len(btc_data)}개, ETH {len(eth_data)}개 캔들")
             
             # BTC 지표 계산
             btc_rsi = Indicators.calculate_rsi(btc_data, period=14)
@@ -42,8 +46,11 @@ class BTCEthCorrelationStrategy:
             btc_rsi_latest = float(btc_rsi.iloc[-1])
             btc_current = btc_data.iloc[-1]
             btc_ma_current = float(btc_ma.iloc[-1])
+            btc_price_current = float(btc_current['close'])
             
-            # BTC 임펄스 필터: MA20 위/아래 3봉 연속
+            logger.debug(f"🔍 [BTC/ETH Correlation] BTC 분석 - 가격: {btc_price_current:.2f}, MA20: {btc_ma_current:.2f}, RSI: {btc_rsi_latest:.2f}")
+            
+            # BTC 임펄스 필터: MA20 위/아래 1봉 연속
             btc_above_ma = True
             btc_below_ma = True
             for i in range(1, self.ma_consecutive + 1):
@@ -54,6 +61,9 @@ class BTCEthCorrelationStrategy:
                         btc_above_ma = False
                     if btc_price >= btc_ma_val:
                         btc_below_ma = False
+                    logger.debug(f"🔍 [BTC/ETH Correlation] {i}봉 전 - 가격: {btc_price:.2f}, MA20: {btc_ma_val:.2f}, 위: {btc_price > btc_ma_val}, 아래: {btc_price < btc_ma_val}")
+            
+            logger.debug(f"🔍 [BTC/ETH Correlation] MA20 필터 - 위 {self.ma_consecutive}봉 연속: {btc_above_ma}, 아래 {self.ma_consecutive}봉 연속: {btc_below_ma}")
             
             eth_current = eth_data.iloc[-1]
             entry_price = float(eth_current['close'])

@@ -38,9 +38,9 @@ class BinanceClient:
                 except Exception as e:
                     # 선물 권한이 없으면 스팟 모드로 전환
                     self.use_futures = False
-                    logger.warning("테스트넷 선물 API 접근 실패 → 스팟 모드로 전환")
-                    logger.warning(f"  이유: {e}")
-                    logger.warning("  펀딩비 및 청산 스파이크 전략은 비활성화됩니다.")
+                    logger.debug("테스트넷 선물 API 접근 실패 → 스팟 모드로 전환")
+                    logger.debug(f"  이유: {e}")
+                    logger.debug("  펀딩비 및 청산 스파이크 전략은 비활성화됩니다.")
                     logger.info("바이낸스 테스트넷 클라이언트 초기화 (스팟 거래 모드)")
             else:
                 self.client = Client(
@@ -59,8 +59,8 @@ class BinanceClient:
                     )
                     logger.info(f"레버리지 설정 완료: {config.LEVERAGE}x")
                 except Exception as e:
-                    logger.warning(f"레버리지 설정 실패 (계속 진행): {e}")
-                    logger.warning("API 키에 선물 거래 권한이 없거나 IP 제한이 있을 수 있습니다.")
+                    logger.debug(f"레버리지 설정 실패 (계속 진행): {e}")
+                    logger.debug("API 키에 선물 거래 권한이 없거나 IP 제한이 있을 수 있습니다. (분석 모드에서는 정상)")
         
         except Exception as e:
             error_msg = str(e)

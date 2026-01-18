@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timedelta
 import config
 from core import DataCollector, RiskManager, BinanceClient
+from core.indicators import Indicators
 from strategies import (
     LiquiditySweepStrategy,
     BTCEthCorrelationStrategy,
@@ -14,7 +15,13 @@ from strategies import (
     VolatilitySqueezeStrategy,
     FundingRateStrategy,
     OrderblockFVGStrategy,
-    LiquidationSpikeStrategy
+    LiquidationSpikeStrategy,
+    # 횡보장 Top 5 Mean-Reversion 전략
+    BollingerMeanReversionStrategy,
+    VWAPDeviationStrategy,
+    RangeTopBottomStrategy,
+    StochRSIMeanReversionStrategy,
+    CVDFakePressureStrategy
 )
 
 # 로깅 설정
@@ -36,34 +43,118 @@ class TradingBot:
         self.risk_manager = RiskManager()
         self.client = BinanceClient()
         
-        # 전략 초기화
-        self.strategies = []
+        # 전략 초기화 (폭발장/횡보장 분리)
+        self.breakout_strategies = []
+        self.range_strategies = []
+        
+        # 폭발장 전략
         if config.STRATEGIES['liquidity_sweep']:
-            self.strategies.append(LiquiditySweepStrategy())
+            self.breakout_strategies.append(LiquiditySweepStrategy())
         if config.STRATEGIES['btc_eth_correlation']:
-            self.strategies.append(BTCEthCorrelationStrategy())
+            self.breakout_strategies.append(BTCEthCorrelationStrategy())
         if config.STRATEGIES['cvd_delta']:
-            self.strategies.append(CVDDeltaStrategy())
+            self.breakout_strategies.append(CVDDeltaStrategy())
         if config.STRATEGIES['volatility_squeeze']:
-            self.strategies.append(VolatilitySqueezeStrategy())
+            self.breakout_strategies.append(VolatilitySqueezeStrategy())
         # 펀딩비 전략: 선물 거래에서만 활성화
         if config.STRATEGIES['funding_rate'] and self.client.use_futures:
-            self.strategies.append(FundingRateStrategy())
+            self.breakout_strategies.append(FundingRateStrategy())
         if config.STRATEGIES['orderblock_fvg']:
-            self.strategies.append(OrderblockFVGStrategy())
+            self.breakout_strategies.append(OrderblockFVGStrategy())
         # 청산 스파이크 전략: 선물 거래에서만 활성화
         if config.STRATEGIES.get('liquidation_spike', False) and self.client.use_futures:
-            self.strategies.append(LiquidationSpikeStrategy())
+            self.breakout_strategies.append(LiquidationSpikeStrategy())
         
-        logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개")
+        # 횡보장 전략 (Mean-Reversion 7개)
+        if config.STRATEGIES.get('bollinger_mean_reversion', False):
+            self.range_strategies.append(BollingerMeanReversionStrategy())
+            logger.info("✓ 볼린저 밴드 평균 회귀 전략 활성화")
+        if config.STRATEGIES.get('vwap_deviation', False):
+            self.range_strategies.append(VWAPDeviationStrategy())
+            logger.info("✓ VWAP 편차 평균 회귀 전략 활성화")
+        if config.STRATEGIES.get('range_top_bottom', False):
+            self.range_strategies.append(RangeTopBottomStrategy())
+            logger.info("✓ Range Top/Bottom 반전 전략 활성화")
+        if config.STRATEGIES.get('stoch_rsi_mean_reversion', False):
+            self.range_strategies.append(StochRSIMeanReversionStrategy())
+            logger.info("✓ Stoch RSI 평균 회귀 전략 활성화")
+        if config.STRATEGIES.get('cvd_fake_pressure', False):
+            self.range_strategies.append(CVDFakePressureStrategy())
+            logger.info("✓ CVD Fake Pressure 전략 활성화")
+        
+        # 전체 전략 리스트 (하위 호환성)
+        self.strategies = self.breakout_strategies + self.range_strategies
+        
+        # 시장 모드 상태
+        self.current_market_mode = None  # 'TREND', 'RANGE', 'NEUTRAL'
+        
+        logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개 (폭발장: {len(self.breakout_strategies)}개, 횡보장: {len(self.range_strategies)}개)")
     
     def update_data(self):
         """데이터 업데이트"""
         return self.data_collector.update_data()
     
+    def detect_market_mode(self):
+        """시장 상태 판단 (Trend / Range / Neutral)"""
+        try:
+            eth_data = self.data_collector.get_candles('ETH', count=50)
+            if eth_data is None or len(eth_data) < 30:
+                return 'NEUTRAL'
+            
+            # 1. BBW 계산
+            bb_bands = Indicators.calculate_bollinger_bands(eth_data, period=20, std_dev=2.0)
+            if bb_bands is None:
+                return 'NEUTRAL'
+            bbw = Indicators.calculate_bbw(bb_bands)
+            if bbw is None:
+                return 'NEUTRAL'
+            latest_bbw = float(bbw.iloc[-1])
+            
+            # 2. ADX 계산
+            adx = Indicators.calculate_adx(eth_data, period=14)
+            if adx is None:
+                return 'NEUTRAL'
+            latest_adx = float(adx.iloc[-1])
+            
+            # 3. ATR 증가율 계산
+            atr = Indicators.calculate_atr(eth_data, period=14)
+            if atr is None:
+                return 'NEUTRAL'
+            if len(atr) < 20:
+                return 'NEUTRAL'
+            latest_atr = float(atr.iloc[-1])
+            atr_ma = float(Indicators.calculate_sma(atr, period=20).iloc[-1])
+            atr_increase_pct = ((latest_atr - atr_ma) / atr_ma) * 100 if atr_ma > 0 else 0
+            
+            # 시장 상태 지표 로깅
+            logger.info(f"📊 시장 상태 지표 - BBW: {latest_bbw:.4f}, ADX: {latest_adx:.2f}, ATR 증가율: {atr_increase_pct:.2f}%")
+            
+            # TREND Mode 우선 판단 (추세장이 더 명확할 때 우선)
+            # BBW > 0.008 (0.8%) OR ADX > 25 OR ATR 증가율 > 20%
+            if latest_bbw > 0.008 or latest_adx > 25 or atr_increase_pct > 20:
+                logger.info(f"→ TREND 모드 판단: BBW={latest_bbw:.4f} > 0.008 또는 ADX={latest_adx:.2f} > 25 또는 ATR 증가율={atr_increase_pct:.2f}% > 20%")
+                return 'TREND'
+            
+            # RANGE Mode 판단 (TREND가 아닐 때)
+            # BBW < 0.006 (0.6%) AND ADX < 20
+            if latest_bbw < 0.006 and latest_adx < 20:
+                logger.info(f"→ RANGE 모드 판단: BBW={latest_bbw:.4f} < 0.006 AND ADX={latest_adx:.2f} < 20")
+                return 'RANGE'
+            
+            # Neutral Mode (중간 구간)
+            # BBW: 0.006~0.008 사이 OR ADX: 20~25 사이
+            logger.info(f"→ NEUTRAL 모드: 중간 구간 (BBW: {latest_bbw:.4f}, ADX: {latest_adx:.2f}, ATR 증가율: {atr_increase_pct:.2f}%)")
+            return 'NEUTRAL'
+            
+        except Exception as e:
+            logger.error(f"시장 상태 판단 실패: {e}")
+            return 'NEUTRAL'
+    
     def analyze_strategies(self):
-        """모든 전략 분석"""
-        signals = []
+        """시장 상태에 따라 적절한 전략만 분석"""
+        # 1. 시장 상태 판단
+        market_mode = self.detect_market_mode()
+        self.current_market_mode = market_mode
         
         logger.info("=" * 60)
         logger.info("📊 전략 분석 시작 (3분봉 데이터 기준)")
@@ -74,7 +165,38 @@ class TradingBot:
         btc_data_len = len(self.data_collector.btc_data) if self.data_collector.btc_data is not None else 0
         logger.info(f"📦 데이터 상태 - ETH: {eth_data_len}개 캔들, BTC: {btc_data_len}개 캔들")
         
-        for strategy in self.strategies:
+        # 시장 상태 표시
+        mode_emoji = "🔥" if market_mode == 'TREND' else "📊" if market_mode == 'RANGE' else "⚪"
+        logger.info(f"{mode_emoji} 현재 시장 상태: {market_mode}")
+        
+        all_signals = []
+        
+        # 2. 시장 모드에 따라 전략 분석
+        if market_mode == 'TREND':
+            all_signals = self._analyze_trend_mode()
+        elif market_mode == 'RANGE':
+            all_signals = self._analyze_range_mode()
+        else:
+            logger.info("⚪ Neutral Mode: 거래 금지 (명확한 추세/횡보가 아님)")
+            return []
+        
+        # 3. 전체 요약
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(f"📈 신호 요약 - {market_mode} 모드: {len(all_signals)}개 신호 발견")
+        logger.info("=" * 60)
+        
+        return all_signals
+    
+    def _analyze_trend_mode(self):
+        """추세장(폭발장) 전략 분석 - 신호의 동시성(Confluence) 중요"""
+        signals = []
+        
+        logger.info("")
+        logger.info("🔥 추세장 모드 (Trend Mode) - 폭발장 전략 7개 분석")
+        logger.info("-" * 60)
+        
+        for strategy in self.breakout_strategies:
             try:
                 signal = strategy.analyze(self.data_collector)
                 if signal:
@@ -92,18 +214,66 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
         
-        logger.info("=" * 60)
-        logger.info(f"📈 총 {len(signals)}개의 유효한 신호 발견")
-        logger.info("=" * 60)
+        return signals
+    
+    def _analyze_range_mode(self):
+        """횡보장 전략 분석 - 단일 신호로도 충분"""
+        signals = []
+        
+        logger.info("")
+        logger.info("📊 횡보장 모드 (Range Mode) - 횡보장 전략 5개 분석")
+        logger.info("-" * 60)
+        
+        for strategy in self.range_strategies:
+            try:
+                signal = strategy.analyze(self.data_collector)
+                if signal:
+                    score = signal['confidence']
+                    signal_type = signal['signal']
+                    entry_price = signal.get('entry_price', 0)
+                    
+                    if self.risk_manager.validate_signal(signal):
+                        signals.append(signal)
+                        logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
+                    else:
+                        logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
+                else:
+                    logger.info(f"⚪ {strategy.name:25s} | 신호 없음 | Score: 0.00%")
+            except Exception as e:
+                logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
         
         return signals
     
     def combine_signals(self, signals):
-        """하이브리드 진입 규칙: 점수 기반 + 필수 조합 체크"""
+        """시장 모드에 따라 다른 진입 규칙 적용"""
         if not signals:
             return None
         
-        # 전략별 신호 추출
+        # 현재 시장 모드에 따라 다른 로직 적용
+        if self.current_market_mode == 'TREND':
+            return self._combine_trend_signals(signals)
+        elif self.current_market_mode == 'RANGE':
+            return self._combine_range_signals(signals)
+        else:
+            logger.info("⚪ Neutral Mode: 거래 금지")
+            return None
+    
+    def _combine_trend_signals(self, signals):
+        """추세장 진입 규칙: 신호의 동시성(Confluence) - 최소 2개 이상 동일 방향"""
+        if not signals:
+            return None
+        
+        # 전략별 신호 추출 및 가중치 설정
+        strategy_weights = {
+            'BTC/ETH Correlation': 1,
+            'CVD Delta': 1,
+            'Volatility Squeeze': 2,  # 높은 가중치
+            'Liquidity Sweep': 1,
+            'Orderblock FVG': 1,
+            'Funding Rate': 1,
+            'Liquidation Spike': 2  # 높은 가중치 (즉시 진입 가능)
+        }
+        
         btc_signal = self._get_signal_by_strategy(signals, 'BTC/ETH Correlation')
         cvd_signal = self._get_signal_by_strategy(signals, 'CVD Delta')
         sweep_signal = self._get_signal_by_strategy(signals, 'Liquidity Sweep')
@@ -112,20 +282,113 @@ class TradingBot:
         funding_signal = self._get_signal_by_strategy(signals, 'Funding Rate')
         liquidation_signal = self._get_signal_by_strategy(signals, 'Liquidation Spike')
         
-        # STEP 1: 점수 계산 (7개 전략 중 3점 이상이면 진입 고려)
-        # 7개 전략: Liquidity Sweep, BTC/ETH Correlation, CVD Delta, Volatility Squeeze, 
-        #           Funding Rate, Orderblock FVG, Liquidation Spike
-        long_signals = [s for s in signals if s['signal'] == 'LONG']
-        short_signals = [s for s in signals if s['signal'] == 'SHORT']
+        # 가중치 기반 점수 계산
+        long_score = 0
+        short_score = 0
+        long_signals_list = []
+        short_signals_list = []
         
-        long_score = len(long_signals)
-        short_score = len(short_signals)
-        total_strategies = 7  # 총 7개 전략
+        for signal in signals:
+            strategy_name = signal.get('strategy', '')
+            weight = strategy_weights.get(strategy_name, 1)
+            
+            if signal['signal'] == 'LONG':
+                long_score += weight
+                long_signals_list.append(signal)
+            elif signal['signal'] == 'SHORT':
+                short_score += weight
+                short_signals_list.append(signal)
         
-        # 점수 부족 시 진입 불가 (7개 중 최소 2개 필요 - 개발 초기 모니터링용)
-        if long_score < 2 and short_score < 2:
-            logger.info(f"⚠️  점수 부족: LONG {long_score}/{total_strategies}점, SHORT {short_score}/{total_strategies}점 (최소 2점 필요)")
+        # Liquidation Spike 발생 시 즉시 진입 (방향 반대)
+        if liquidation_signal:
+            if liquidation_signal['signal'] == 'LONG':  # 롱 청산 → 숏 진입
+                logger.info("🎯 청산 스파이크 즉시 진입: 롱 청산 → 숏 진입")
+                return {
+                    'signal': 'SHORT',
+                    'entry_price': liquidation_signal.get('entry_price', 0),
+                    'stop_loss': liquidation_signal.get('stop_loss'),
+                    'confidence': 0.85,
+                    'strategy': 'Liquidation Spike Reversal',
+                    'strategies': ['Liquidation Spike']
+                }
+            elif liquidation_signal['signal'] == 'SHORT':  # 숏 청산 → 롱 진입
+                logger.info("🎯 청산 스파이크 즉시 진입: 숏 청산 → 롱 진입")
+                return {
+                    'signal': 'LONG',
+                    'entry_price': liquidation_signal.get('entry_price', 0),
+                    'stop_loss': liquidation_signal.get('stop_loss'),
+                    'confidence': 0.85,
+                    'strategy': 'Liquidation Spike Reversal',
+                    'strategies': ['Liquidation Spike']
+                }
+        
+        # 최소 2개 이상 전략이 같은 방향을 가리킬 때 진입
+        if long_score >= 2:
+            # CVD 방향성 확인
+            cvd_bullish = cvd_signal and cvd_signal['signal'] == 'LONG'
+            btc_up = btc_signal and btc_signal['signal'] == 'LONG'
+            
+            # 추천 조합: (BTC Up + CVD Up) OR (Squeeze Break + CVD Up)
+            if (btc_up and cvd_bullish) or (squeeze_signal and squeeze_signal['signal'] == 'LONG' and cvd_bullish):
+                avg_confidence = sum(s['confidence'] for s in long_signals_list) / len(long_signals_list)
+                avg_entry = sum(s['entry_price'] for s in long_signals_list) / len(long_signals_list)
+                stop_loss = max([s.get('stop_loss', 0) for s in long_signals_list if s.get('stop_loss')], default=None)
+                
+                logger.info(f"🎯 추세장 롱 진입: 점수 {long_score}점 (최소 2점 필요)")
+                logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals_list])}")
+                return {
+                    'signal': 'LONG',
+                    'entry_price': avg_entry,
+                    'stop_loss': stop_loss,
+                    'confidence': avg_confidence,
+                    'strategy': 'Trend Mode Confluence',
+                    'strategies': [s['strategy'] for s in long_signals_list]
+                }
+        
+        if short_score >= 2:
+            # CVD 방향성 확인
+            cvd_bearish = cvd_signal and cvd_signal['signal'] == 'SHORT'
+            btc_down = btc_signal and btc_signal['signal'] == 'SHORT'
+            
+            # 추천 조합: (BTC Down + CVD Down) OR (Squeeze Break + CVD Down)
+            if (btc_down and cvd_bearish) or (squeeze_signal and squeeze_signal['signal'] == 'SHORT' and cvd_bearish):
+                avg_confidence = sum(s['confidence'] for s in short_signals_list) / len(short_signals_list)
+                avg_entry = sum(s['entry_price'] for s in short_signals_list) / len(short_signals_list)
+                stop_loss = max([s.get('stop_loss', 0) for s in short_signals_list if s.get('stop_loss')], default=None)
+                
+                logger.info(f"🎯 추세장 숏 진입: 점수 {short_score}점 (최소 2점 필요)")
+                logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals_list])}")
+                return {
+                    'signal': 'SHORT',
+                    'entry_price': avg_entry,
+                    'stop_loss': stop_loss,
+                    'confidence': avg_confidence,
+                    'strategy': 'Trend Mode Confluence'
+                }
+        
+        logger.info(f"⚠️  추세장 점수 부족: LONG {long_score}점, SHORT {short_score}점 (최소 2점 필요)")
+        return None
+    
+    def _combine_range_signals(self, signals):
+        """횡보장 진입 규칙: 단일 신호로도 충분 (Mean Reversion)"""
+        if not signals:
             return None
+        
+        # 횡보장은 단일 신호만으로도 진입 가능 (가장 높은 신뢰도 선택)
+        if len(signals) == 1:
+            signal = signals[0].copy()  # 원본 수정 방지
+            if 'strategies' not in signal:
+                signal['strategies'] = [signal.get('strategy', 'Unknown')]
+            logger.info(f"🎯 횡보장 단일 신호 진입: {signal['strategy']}")
+            return signal
+        
+        # 여러 신호가 있을 경우 가장 높은 신뢰도 선택
+        best_signal = max(signals, key=lambda s: s.get('confidence', 0))
+        result = best_signal.copy()  # 원본 수정 방지
+        if 'strategies' not in result:
+            result['strategies'] = [result.get('strategy', 'Unknown')]
+        logger.info(f"🎯 횡보장 최고 신뢰도 신호 선택: {result['strategy']} (신뢰도: {result.get('confidence', 0):.2%})")
+        return result
         
         # STEP 2: 필수 조합 체크
         # CVD 방향성 확인 (양전환/음전환)
@@ -450,7 +713,8 @@ class TradingBot:
                         logger.info(f"   진입가: ${final_signal['entry_price']:.2f}")
                         logger.info(f"   신뢰도: {final_signal['confidence']:.2%}")
                         logger.info(f"   조합 순위: {rank}위")
-                        logger.info(f"   사용 전략: {', '.join(final_signal['strategies'])}")
+                        strategies_list = final_signal.get('strategies', [final_signal.get('strategy', 'Unknown')])
+                        logger.info(f"   사용 전략: {', '.join(strategies_list)}")
                         if final_signal.get('stop_loss'):
                             logger.info(f"   손절가: ${final_signal['stop_loss']:.2f}")
                         logger.info("=" * 60)

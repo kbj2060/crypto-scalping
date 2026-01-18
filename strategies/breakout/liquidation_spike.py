@@ -20,6 +20,7 @@ class LiquidationSpikeStrategy:
     def analyze(self, data_collector):
         """청산 스파이크 전략 분석"""
         try:
+            logger.debug(f"🔍 [Liquidation Spike] 전략 분석 시작")
             # 청산 스파이크 탐지
             spike_data = data_collector.detect_liquidation_spike(
                 symbol='ETH',
@@ -27,7 +28,12 @@ class LiquidationSpikeStrategy:
                 min_volume_threshold=self.min_volume_threshold
             )
             
+            logger.debug(f"🔍 [Liquidation Spike] 탐지 결과 - 스파이크: {spike_data['spike_detected'] if spike_data else False}, 타입: {spike_data.get('spike_type', 'N/A') if spike_data else 'N/A'}")
+            if spike_data:
+                logger.debug(f"🔍 [Liquidation Spike] 상세 - 총 볼륨: {spike_data.get('total_volume', 0):.2f} ETH, 건수: {spike_data.get('count', 0)}, 임계값: {self.min_volume_threshold} ETH")
+            
             if spike_data is None or not spike_data['spike_detected']:
+                logger.debug(f"⚠️ [Liquidation Spike] 스파이크 없음: spike_data={spike_data is not None}, detected={spike_data.get('spike_detected', False) if spike_data else False}")
                 return None
             
             eth_data = data_collector.get_candles('ETH', count=50)

@@ -255,3 +255,108 @@ class Indicators:
         except Exception as e:
             logger.error(f"다이버전스 탐지 실패: {e}")
             return None
+    
+    @staticmethod
+    def calculate_macd(data, fastperiod=12, slowperiod=26, signalperiod=9):
+        """MACD 계산"""
+        try:
+            if len(data) < slowperiod + signalperiod:
+                return None
+            close = data['close'].values
+            macd, signal, hist = talib.MACD(close, fastperiod=fastperiod, slowperiod=slowperiod, signalperiod=signalperiod)
+            return {
+                'macd': pd.Series(macd, index=data.index),
+                'signal': pd.Series(signal, index=data.index),
+                'histogram': pd.Series(hist, index=data.index)
+            }
+        except Exception as e:
+            logger.error(f"MACD 계산 실패: {e}")
+            return None
+    
+    @staticmethod
+    def calculate_atr(data, period=14):
+        """ATR (Average True Range) 계산"""
+        try:
+            if len(data) < period + 1:
+                return None
+            high = data['high'].values
+            low = data['low'].values
+            close = data['close'].values
+            atr = talib.ATR(high, low, close, timeperiod=period)
+            return pd.Series(atr, index=data.index)
+        except Exception as e:
+            logger.error(f"ATR 계산 실패: {e}")
+            return None
+    
+    @staticmethod
+    def calculate_stoch_rsi(data, rsi_period=14, stoch_period=14, k_period=3, d_period=3):
+        """Stochastic RSI 계산"""
+        try:
+            if len(data) < rsi_period + stoch_period + k_period:
+                return None
+            # RSI 계산
+            rsi = Indicators.calculate_rsi(data, period=rsi_period)
+            if rsi is None:
+                return None
+            # Stochastic RSI 계산
+            stoch_k, stoch_d = talib.STOCH(
+                rsi.values, rsi.values, rsi.values,
+                fastk_period=stoch_period,
+                slowk_period=k_period,
+                slowd_period=d_period
+            )
+            return {
+                'k': pd.Series(stoch_k, index=data.index),
+                'd': pd.Series(stoch_d, index=data.index)
+            }
+        except Exception as e:
+            logger.error(f"Stochastic RSI 계산 실패: {e}")
+            return None
+    
+    @staticmethod
+    def calculate_vwap(data, session_start='00:00'):
+        """VWAP 계산 (세션 기준)"""
+        try:
+            if len(data) < 1:
+                return None
+            # 세션별 VWAP 계산 (일일 기준)
+            data_copy = data.copy()
+            data_copy['date'] = data_copy.index.date
+            data_copy['typical_price'] = (data_copy['high'] + data_copy['low'] + data_copy['close']) / 3
+            data_copy['pv'] = data_copy['typical_price'] * data_copy['volume']
+            
+            # 날짜별 그룹화하여 VWAP 계산
+            vwap_list = []
+            for date, group in data_copy.groupby('date'):
+                # 그룹화 컬럼('date')을 제외하고 계산
+                cumsum_pv = group['pv'].cumsum()
+                cumsum_volume = group['volume'].cumsum()
+                vwap_group = cumsum_pv / cumsum_volume
+                vwap_list.append(vwap_group)
+            
+            # 모든 그룹의 VWAP을 하나의 Series로 결합
+            if vwap_list:
+                vwap = pd.concat(vwap_list)
+                # 원본 데이터의 인덱스 순서에 맞게 정렬
+                vwap = vwap.reindex(data.index)
+                return vwap
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"VWAP 계산 실패: {e}")
+            return None
+    
+    @staticmethod
+    def calculate_adx(data, period=14):
+        """ADX (Average Directional Index) 계산 - 추세 강도 지표"""
+        try:
+            if len(data) < period + 1:
+                return None
+            high = data['high'].values
+            low = data['low'].values
+            close = data['close'].values
+            adx = talib.ADX(high, low, close, timeperiod=period)
+            return pd.Series(adx, index=data.index)
+        except Exception as e:
+            logger.error(f"ADX 계산 실패: {e}")
+            return None

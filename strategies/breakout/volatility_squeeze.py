@@ -19,16 +19,19 @@ class VolatilitySqueezeStrategy:
         self.bb_std_dev = 2.0
         self.keltner_period = 20
         self.keltner_multiplier = 1.5
-        self.bbw_squeeze = 0.06  # BBW < 0.06 → 스퀴즈
-        self.bbw_explosion = 0.09  # BBW > 0.09 → 폭발
-        self.volume_explosion = 1.3  # 거래량 1.3배 이상
+        self.bbw_squeeze = 0.08  # BBW < 0.08 → 스퀴즈 (완화: 기존 0.06 → 수축 인정 범위 확대)
+        self.bbw_explosion = 0.007  # BBW > 0.007 (0.7%) → 폭발 (0.5%~1.0% 범위에서 중간값)
+        self.volume_explosion = 1.1  # 거래량 1.1배 이상 (완화: 기존 1.3 → 신호 빈도 증가)
     
     def analyze(self, data_collector):
         """볼륨 스퀴즈 전략 분석 (최적 세팅)"""
         try:
+            logger.debug(f"🔍 [Volatility Squeeze] 전략 분석 시작")
             eth_data = data_collector.get_candles('ETH', count=100)
             if eth_data is None or len(eth_data) < 50:
+                logger.debug(f"⚠️ [Volatility Squeeze] 데이터 부족: eth_data={eth_data is not None}, len={len(eth_data) if eth_data is not None else 0}")
                 return None
+            logger.debug(f"🔍 [Volatility Squeeze] 데이터 확인 완료: {len(eth_data)}개 캔들")
             
             # 볼린저 밴드 계산 (period 20, std_dev 2.0)
             bb = Indicators.calculate_bollinger_bands(eth_data, period=self.bb_period, std_dev=self.bb_std_dev)
@@ -59,30 +62,49 @@ class VolatilitySqueezeStrategy:
             signal = None
             entry_price = latest['close']
             
-            # 최근 10봉 이내에 스퀴즈(0.06 미만)가 있었는지 확인
+            # 최근 10봉 이내에 스퀴즈(0.08 미만)가 있었는지 확인 (완화: 기존 0.06)
             was_squeezed = (bbw.tail(10) < self.bbw_squeeze).any()
-            # 현재 BBW가 상승세 전환했는지 확인 (이전 봉 대비 증가)
+            # 현재 BBW가 폭발 조건을 만족하는지 확인 (이전 봉 대비 증가 + explosion 임계값 초과)
             if len(bbw) >= 2:
-                prev_bbw = bbw.iloc[-2]
-                is_exploding = latest_bbw > prev_bbw and latest_bbw > self.bbw_squeeze  # 상승 전환 + 스퀴즈 구간 벗어남
+                prev_bbw = float(bbw.iloc[-2])
+                latest_bbw_val = float(latest_bbw)
+                is_exploding = latest_bbw_val > prev_bbw and latest_bbw_val > self.bbw_explosion  # 상승 전환 + 폭발 임계값 초과
             else:
                 is_exploding = False
+            
+            prev_bbw_str = f"{prev_bbw:.4f}" if len(bbw) >= 2 else 'N/A'
+            logger.debug(f"🔍 [Volatility Squeeze] BBW 분석 - 현재: {latest_bbw_val:.4f}, 이전: {prev_bbw_str}, 스퀴즈 임계값: {self.bbw_squeeze:.4f}, 폭발 임계값: {self.bbw_explosion:.4f}")
+            logger.debug(f"🔍 [Volatility Squeeze] 조건 체크 - 과거 스퀴즈: {was_squeezed}, 현재 폭발: {is_exploding}")
+            logger.debug(f"🔍 [Volatility Squeeze] 거래량 - 현재: {latest_volume:.0f}, 평균: {latest_volume_sma:.0f}, 배수: {latest_volume/latest_volume_sma:.2f}, 필요: {self.volume_explosion:.1f}")
             
             if was_squeezed and is_exploding:
                 upper_band = bb['upper'].iloc[-1]
                 lower_band = bb['lower'].iloc[-1]
+                latest_close = float(latest['close'])
+                
+                logger.debug(f"🔍 [Volatility Squeeze] 밴드 위치 - 상단: {upper_band:.2f}, 하단: {lower_band:.2f}, 현재가: {latest_close:.2f}")
+                logger.debug(f"🔍 [Volatility Squeeze] 돌파 체크 - 상단 돌파: {latest_close > upper_band}, 하단 돌파: {latest_close < lower_band}")
                 
                 # 폭발 양봉: 상단 돌파 + 거래량
-                if (latest['close'] > upper_band and 
+                if (latest_close > upper_band and 
                     latest_volume >= latest_volume_sma * self.volume_explosion):
                     signal = 'LONG'
-                    logger.info(f"스퀴즈 폭발 Long: 이전 스퀴즈 후 BBW={latest_bbw:.4f}, 상단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
+                    logger.info(f"스퀴즈 폭발 Long: 이전 스퀴즈 후 BBW={latest_bbw_val:.4f}, 상단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
+                elif latest_close > upper_band:
+                    logger.debug(f"⚠️ [Volatility Squeeze] 상단 돌파했으나 거래량 부족: {latest_volume/latest_volume_sma:.2f}배 < {self.volume_explosion:.1f}배 필요")
                 
                 # 폭발 음봉: 하단 돌파 + 거래량
-                elif (latest['close'] < lower_band and 
+                if (latest_close < lower_band and 
                       latest_volume >= latest_volume_sma * self.volume_explosion):
                     signal = 'SHORT'
-                    logger.info(f"스퀴즈 폭발 Short: 이전 스퀴즈 후 BBW={latest_bbw:.4f}, 하단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
+                    logger.info(f"스퀴즈 폭발 Short: 이전 스퀴즈 후 BBW={latest_bbw_val:.4f}, 하단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
+                elif latest_close < lower_band:
+                    logger.debug(f"⚠️ [Volatility Squeeze] 하단 돌파했으나 거래량 부족: {latest_volume/latest_volume_sma:.2f}배 < {self.volume_explosion:.1f}배 필요")
+            else:
+                if not was_squeezed:
+                    logger.debug(f"⚠️ [Volatility Squeeze] 과거 10봉 내 스퀴즈 없음 (최소 BBW: {float(bbw.tail(10).min()):.4f})")
+                if not is_exploding:
+                    logger.debug(f"⚠️ [Volatility Squeeze] 폭발 조건 미충족 (BBW 증가: {latest_bbw_val > prev_bbw if len(bbw) >= 2 else False}, 폭발 임계값: {latest_bbw_val > self.bbw_explosion})")
             
             if signal:
                 return {
