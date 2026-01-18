@@ -17,8 +17,8 @@ class OrderblockFVGStrategy:
         self.ob_touch_min = 0.4  # OB의 40% 구간
         self.ob_touch_max = 0.6  # OB의 60% 구간
         self.fvg_min_gap = 0.0005  # 최소 갭 크기: 0.05% (0.08%에서 완화)
-        self.fvg_retest_min = 0.3  # 갭의 30% 레벨 리테스트 (하한)
-        self.fvg_retest_max = 0.7  # 갭의 70% 레벨 리테스트 (상한)
+        self.fvg_retest_level = 0.5  # 갭의 50% 레벨 리테스트
+        self.fvg_tolerance_pct = 0.1  # 10% 허용 오차 (2%에서 확대)
         self.min_signal_distance = 5  # 최소 신호 거리: 5봉
     
     def find_order_block(self, data, lookback=10):
@@ -97,12 +97,12 @@ class OrderblockFVGStrategy:
                 if fvg_range_pct < self.fvg_min_gap:
                     continue
                 
-                # FVG 30~70% 레벨 리테스트 (범위 확대)
-                fvg_retest_min_level = fvg_bottom + (fvg_range * self.fvg_retest_min)
-                fvg_retest_max_level = fvg_bottom + (fvg_range * self.fvg_retest_max)
+                # FVG 50% 레벨 리테스트 (10% 허용 오차)
+                fvg_50_level = fvg_bottom + (fvg_range * self.fvg_retest_level)
+                fvg_tolerance = fvg_range * self.fvg_tolerance_pct  # 10% 허용 오차
                 
-                # 가격이 FVG 30~70% 범위에 있는지 확인
-                if fvg_retest_min_level <= current_price <= fvg_retest_max_level:
+                # 가격이 FVG 50% 레벨 ±10% 범위에 있는지 확인
+                if abs(current_price - fvg_50_level) <= fvg_tolerance:
                     # OB 터치 시 동일 방향 확인
                     ob_match = False
                     if order_block:

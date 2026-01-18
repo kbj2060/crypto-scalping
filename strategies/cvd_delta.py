@@ -19,11 +19,11 @@ class CVDDeltaStrategy:
         self.price_ema_period = 21
         self.delta_smoothing = 5
         self.delta_spike_multiplier = 2.2  # 평균 델타의 2.2배
-        self.divergence_lookback = 50  # 30에서 50으로 확대
-        self.divergence_strength = 3  # 5에서 3으로 완화 (더 미세한 굴곡 포착)
+        self.divergence_lookback = 60  # 30 -> 60 (더 긴 흐름 파악)
+        self.divergence_strength = 2  # 5 -> 2 (미세한 변곡점도 포착)
     
-    def find_divergence(self, price_data, cvd_data, lookback=50):
-        """CVD 다이버전스 탐지 (Lookback 50, Strength 3)"""
+    def find_divergence(self, price_data, cvd_data, lookback=60):
+        """CVD 다이버전스 탐지 (Lookback 60, Strength 2)"""
         try:
             if len(price_data) < lookback or len(cvd_data) < lookback:
                 return None

@@ -29,8 +29,8 @@ class BinanceClient:
                     config.BINANCE_SECRET_KEY,
                     testnet=True
                 )
-                self.use_futures = False  # 테스트넷은 스팟 거래 사용
-                logger.info("바이낸스 테스트넷 클라이언트 초기화 (스팟 거래 모드)")
+                self.use_futures = True  # 테스트넷에서도 선물 거래 사용 (펀딩비, 청산 데이터 필요)
+                logger.info("바이낸스 테스트넷 클라이언트 초기화 (선물 거래 모드)")
             else:
                 self.client = Client(
                     config.BINANCE_API_KEY,

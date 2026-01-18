@@ -122,9 +122,9 @@ class TradingBot:
         short_score = len(short_signals)
         total_strategies = 7  # 총 7개 전략
         
-        # 점수 부족 시 진입 불가 (7개 중 최소 3개 필요)
-        if long_score < 3 and short_score < 3:
-            logger.info(f"⚠️  점수 부족: LONG {long_score}/{total_strategies}점, SHORT {short_score}/{total_strategies}점 (최소 3점 필요)")
+        # 점수 부족 시 진입 불가 (7개 중 최소 2개 필요 - 개발 초기 모니터링용)
+        if long_score < 2 and short_score < 2:
+            logger.info(f"⚠️  점수 부족: LONG {long_score}/{total_strategies}점, SHORT {short_score}/{total_strategies}점 (최소 2점 필요)")
             return None
         
         # STEP 2: 필수 조합 체크
@@ -139,7 +139,7 @@ class TradingBot:
         
         # 롱 필수 조합 체크
         long_required_combination = False
-        if long_score >= 3:
+        if long_score >= 2:
             # (A) 저점 스윕 + CVD 양전환
             if sweep_signal and sweep_signal['signal'] == 'LONG' and cvd_bullish:
                 long_required_combination = True
@@ -159,7 +159,7 @@ class TradingBot:
         
         # 숏 필수 조합 체크
         short_required_combination = False
-        if short_score >= 3:
+        if short_score >= 2:
             # (A) 고점 스윕 + CVD 음전환
             if sweep_signal and sweep_signal['signal'] == 'SHORT' and cvd_bearish:
                 short_required_combination = True
@@ -178,7 +178,7 @@ class TradingBot:
                     logger.info("✅ 숏 필수 조합 (C): 청산 스파이크 + 고점 스윕")
         
         # STEP 3: 조건 충족 시 진입
-        if long_score >= 3 and long_required_combination:
+        if long_score >= 2 and long_required_combination:
             avg_confidence = sum(s['confidence'] for s in long_signals) / len(long_signals)
             avg_entry = sum(s['entry_price'] for s in long_signals) / len(long_signals)
             stop_loss = max([s.get('stop_loss', 0) for s in long_signals if s.get('stop_loss')], default=None)
@@ -195,7 +195,7 @@ class TradingBot:
                 'combination_rank': 1  # 하이브리드 시스템
             }
         
-        elif short_score >= 3 and short_required_combination:
+        elif short_score >= 2 and short_required_combination:
             avg_confidence = sum(s['confidence'] for s in short_signals) / len(short_signals)
             avg_entry = sum(s['entry_price'] for s in short_signals) / len(short_signals)
             stop_loss = min([s.get('stop_loss', float('inf')) for s in short_signals if s.get('stop_loss')], default=None)
@@ -215,11 +215,11 @@ class TradingBot:
             }
         
         # 필수 조합 미충족
-        if long_score >= 3:
+        if long_score >= 2:
             logger.info(f"⚠️  롱 점수 {long_score}/{total_strategies}점 충족했으나 필수 조합 미충족")
             logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals])}")
             logger.info(f"   필요한 조합: (A) 저점 스윕 + CVD 양전환, (B) FVG/OB + CVD 양전환, (C) 청산 스파이크 + 저점 스윕")
-        if short_score >= 3:
+        if short_score >= 2:
             logger.info(f"⚠️  숏 점수 {short_score}/{total_strategies}점 충족했으나 필수 조합 미충족")
             logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals])}")
             logger.info(f"   필요한 조합: (A) 고점 스윕 + CVD 음전환, (B) OB + CVD 음전환, (C) 청산 스파이크 + 고점 스윕")
