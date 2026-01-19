@@ -23,16 +23,16 @@ STOP_LOSS_PERCENT = float(os.getenv('STOP_LOSS_PERCENT', '0.2'))
 STRATEGIES = {
     # 폭발장 전략
     'btc_eth_correlation': True,
-    'cvd_delta': True,
     'volatility_squeeze': True,
     'orderblock_fvg': True,
-    'liquidation_spike': True,
+    'hma_momentum': True,
+    'mfi_momentum': True,
     # 횡보장 전략 (Top 5 Mean-Reversion)
     'bollinger_mean_reversion': True,
     'vwap_deviation': True,
     'range_top_bottom': True,
     'stoch_rsi_mean_reversion': True,
-    'cvd_fake_pressure': True
+    'cmf_divergence': True
 }
 
 # 시간프레임 설정

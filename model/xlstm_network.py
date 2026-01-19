@@ -15,22 +15,35 @@ class sLSTMCell(nn.Module):
         # Gates: i(input), f(forget), o(output), z(cell input)
         self.weight = nn.Linear(input_dim + hidden_dim, 4 * hidden_dim)
         
+    # xlstm_network.py의 sLSTMCell 수정
     def forward(self, x, h, c, n, f_prev=None):
-        # xLSTM의 핵심: Exponential Gating을 통한 메모리 강화
         combined = torch.cat([x, h], dim=-1)
         gates = self.weight(combined)
         i, f, o, z = gates.chunk(4, dim=-1)
         
-        # Exponential gating (지수 게이팅)
+        # 1. 지수 게이트 입력값 제한 (기존 10 -> 5로 하향 조정)
+        # exp(5)는 약 148로 수치적 안정성이 훨씬 높습니다.
+        i = torch.clamp(i, min=-5, max=5)
+        f = torch.clamp(f, min=-5, max=5)
+        
         i = torch.exp(i)
-        f = torch.exp(f)  # 논문 기반 지수 forget gate
+        f = torch.exp(f)
         
-        # State updates (정규화 포함)
+        # 2. 상태 업데이트
         c_next = f * c + i * torch.tanh(z)
-        n_next = f * n + i  # Normalizer state
+        n_next = f * n + i
         
-        # Hidden state output
-        h_next = torch.sigmoid(o) * (c_next / (n_next + 1e-8))
+        # 3. 상태 변수 폭발 방지 (추가)
+        # 가중치가 커짐에 따라 c와 n이 무한히 커지는 것을 방지합니다.
+        c_next = torch.clamp(c_next, min=-1e6, max=1e6)
+        n_next = torch.clamp(n_next, min=1e-6, max=1e6)
+        
+        h_next = torch.sigmoid(o) * (c_next / n_next)
+        
+        # 4. 최종 출력 nan 체크 및 방어
+        if torch.isnan(h_next).any() or torch.isinf(h_next).any():
+            h_next = torch.nan_to_num(h_next, nan=0.0, posinf=0.0, neginf=0.0)
+            
         return h_next, c_next, n_next
 
 

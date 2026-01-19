@@ -9,8 +9,13 @@ logger = logging.getLogger(__name__)
 
 
 class RiskManager:
-    def __init__(self):
-        self.client = BinanceClient()
+    def __init__(self, backtest_mode=False):
+        """리스크 관리자 초기화
+        
+        Args:
+            backtest_mode: 백테스팅 모드일 경우 True
+        """
+        self.client = BinanceClient(backtest_mode=backtest_mode)
         self.max_position_size = config.MAX_POSITION_SIZE
         self.stop_loss_percent = config.STOP_LOSS_PERCENT / 100
     

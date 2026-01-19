@@ -16,15 +16,15 @@ from core import DataCollector, BinanceClient
 from core.indicators import Indicators
 from strategies import (
     BTCEthCorrelationStrategy,
-    CVDDeltaStrategy,
     VolatilitySqueezeStrategy,
     OrderblockFVGStrategy,
-    LiquidationSpikeStrategy,
+    HMAMomentumStrategy,
+    MFIMomentumStrategy,
     BollingerMeanReversionStrategy,
     VWAPDeviationStrategy,
     RangeTopBottomStrategy,
     StochRSIMeanReversionStrategy,
-    CVDFakePressureStrategy
+    CMFDivergenceStrategy
 )
 
 # AI 강화학습 모듈
@@ -66,14 +66,14 @@ class PPOTrainer:
         # 폭발장 전략
         if config.STRATEGIES.get('btc_eth_correlation', False):
             self.breakout_strategies.append(BTCEthCorrelationStrategy())
-        if config.STRATEGIES.get('cvd_delta', False):
-            self.breakout_strategies.append(CVDDeltaStrategy())
         if config.STRATEGIES.get('volatility_squeeze', False):
             self.breakout_strategies.append(VolatilitySqueezeStrategy())
         if config.STRATEGIES.get('orderblock_fvg', False):
             self.breakout_strategies.append(OrderblockFVGStrategy())
-        if config.STRATEGIES.get('liquidation_spike', False) and self.client.use_futures:
-            self.breakout_strategies.append(LiquidationSpikeStrategy())
+        if config.STRATEGIES.get('hma_momentum', False):
+            self.breakout_strategies.append(HMAMomentumStrategy())
+        if config.STRATEGIES.get('mfi_momentum', False):
+            self.breakout_strategies.append(MFIMomentumStrategy())
         
         # 횡보장 전략
         if config.STRATEGIES.get('bollinger_mean_reversion', False):
@@ -84,8 +84,8 @@ class PPOTrainer:
             self.range_strategies.append(RangeTopBottomStrategy())
         if config.STRATEGIES.get('stoch_rsi_mean_reversion', False):
             self.range_strategies.append(StochRSIMeanReversionStrategy())
-        if config.STRATEGIES.get('cvd_fake_pressure', False):
-            self.range_strategies.append(CVDFakePressureStrategy())
+        if config.STRATEGIES.get('cmf_divergence', False):
+            self.range_strategies.append(CMFDivergenceStrategy())
         
         self.strategies = self.breakout_strategies + self.range_strategies
         
@@ -230,9 +230,7 @@ class PPOTrainer:
                 
                 # 6. 주기적 업데이트 (10개 트랜지션마다)
                 if len(self.agent.memory) >= 10:
-                    logger.info(f"🔄 모델 업데이트 중... (메모리: {len(self.agent.memory)}개)")
                     self.agent.update()
-                    logger.info("✅ 업데이트 완료")
                 
                 # 저장된 데이터는 자동으로 다음 캔들로 진행됨 (대기 불필요)
                 

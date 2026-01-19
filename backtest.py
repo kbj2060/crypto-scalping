@@ -55,20 +55,61 @@ class Backtester:
         self.max_drawdown = 0
         self.peak_equity = initial_capital
         
-    def fetch_1year_data(self, symbol, interval='3m'):
-        """1년치 데이터 수집 (3분봉 기준 약 175,200개)"""
-        logger.info(f"📥 {symbol} 1년치 데이터 수집 시작...")
+        # data 폴더 생성
+        os.makedirs('data', exist_ok=True)
         
-        all_data = []
-        limit = 1000  # 바이낸스 API 최대 제한
+    def get_data_filepath(self, symbol, interval, start_date, end_date):
+        """데이터 파일 경로 생성"""
+        start_str = start_date.strftime('%Y%m%d')
+        end_str = end_date.strftime('%Y%m%d')
+        filename = f"{symbol.lower()}_{interval}_{start_str}_{end_str}.csv"
+        return os.path.join('data', filename)
+    
+    def load_data(self, symbol, interval, start_date, end_date):
+        """저장된 데이터 로드"""
+        filepath = self.get_data_filepath(symbol, interval, start_date, end_date)
         
+        if os.path.exists(filepath):
+            try:
+                logger.info(f"📂 저장된 데이터 로드: {filepath}")
+                df = pd.read_csv(filepath, index_col='timestamp', parse_dates=True)
+                logger.info(f"✅ {symbol} 데이터 로드 완료: {len(df)}개 캔들")
+                logger.info(f"   기간: {df.index[0]} ~ {df.index[-1]}")
+                return df
+            except Exception as e:
+                logger.warning(f"데이터 로드 실패 ({filepath}): {e}")
+                return None
+        return None
+    
+    def save_data(self, df, symbol, interval, start_date, end_date):
+        """데이터 저장"""
+        filepath = self.get_data_filepath(symbol, interval, start_date, end_date)
+        try:
+            df.to_csv(filepath, encoding='utf-8-sig')
+            logger.info(f"💾 데이터 저장 완료: {filepath}")
+        except Exception as e:
+            logger.error(f"데이터 저장 실패 ({filepath}): {e}")
+    
+    def fetch_1year_data(self, symbol, interval='3m', use_cache=True):
+        """1년치 데이터 수집 또는 로드 (3분봉 기준 약 175,200개)"""
         # 1년 전 날짜 계산
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365)
+        
+        # 캐시된 데이터가 있으면 로드
+        if use_cache:
+            cached_data = self.load_data(symbol, interval, start_date, end_date)
+            if cached_data is not None:
+                return cached_data
+        
+        # 데이터 수집
+        logger.info(f"📥 {symbol} 1년치 데이터 수집 시작...")
         start_str = start_date.strftime('%Y-%m-%d')
         end_str = end_date.strftime('%Y-%m-%d')
-        
         logger.info(f"   기간: {start_str} ~ {end_str}")
+        
+        all_data = []
+        limit = 1000  # 바이낸스 API 최대 제한
         
         try:
             # 바이낸스 API는 한 번에 최대 1000개만 가져올 수 있으므로
@@ -81,15 +122,19 @@ class Backtester:
                     current_start_str = current_start.strftime('%Y-%m-%d')
                     current_end_str = current_end.strftime('%Y-%m-%d')
                     
-                    if self.data_collector.client.use_futures:
-                        klines = self.data_collector.client.client.futures_historical_klines(
+                    # 데이터 수집을 위한 별도 클라이언트 (백테스팅 모드 아님)
+                    from core.binance_client import BinanceClient
+                    data_client = BinanceClient(backtest_mode=False)
+                    
+                    if data_client.use_futures:
+                        klines = data_client.client.futures_historical_klines(
                             symbol=symbol,
                             interval=interval,
                             start_str=current_start_str,
                             end_str=current_end_str
                         )
                     else:
-                        klines = self.data_collector.client.client.get_historical_klines(
+                        klines = data_client.client.get_historical_klines(
                             symbol=symbol,
                             interval=interval,
                             start_str=current_start_str,
@@ -141,6 +186,9 @@ class Backtester:
             
             logger.info(f"✅ {symbol} 데이터 수집 완료: {len(df)}개 캔들")
             logger.info(f"   기간: {df.index[0]} ~ {df.index[-1]}")
+            
+            # 데이터 저장
+            self.save_data(df, symbol, interval, start_date, end_date)
             
             return df
             
@@ -304,9 +352,9 @@ class Backtester:
         logger.info("🚀 백테스팅 시작")
         logger.info("=" * 80)
         
-        # 1년치 데이터 수집
-        eth_data = self.fetch_1year_data(config.ETH_SYMBOL)
-        btc_data = self.fetch_1year_data(config.BTC_SYMBOL)
+        # 1년치 데이터 로드 또는 수집
+        eth_data = self.fetch_1year_data(config.ETH_SYMBOL, config.TIMEFRAME, use_cache=True)
+        btc_data = self.fetch_1year_data(config.BTC_SYMBOL, config.TIMEFRAME, use_cache=True)
         
         if eth_data is None or btc_data is None:
             logger.error("데이터 수집 실패")
@@ -323,8 +371,8 @@ class Backtester:
         logger.info(f"백테스팅 기간: {eth_data.index[0]} ~ {eth_data.index[-1]}")
         logger.info(f"총 캔들 수: {len(eth_data)}개")
         
-        # TradingBot 초기화 (전략 로직 사용)
-        bot = TradingBot()
+        # TradingBot 초기화 (백테스팅 모드: API 호출 없이 가상 거래)
+        bot = TradingBot(backtest_mode=True)
         
         # 백테스팅 중에는 trading_bot의 로깅을 억제 (WARNING 이상만)
         trading_bot_logger = logging.getLogger('trading_bot')
@@ -546,3 +594,4 @@ class Backtester:
 if __name__ == '__main__':
     backtester = Backtester(initial_capital=10000)
     backtester.run_backtest()
+

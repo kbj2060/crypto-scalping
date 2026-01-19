@@ -360,3 +360,71 @@ class Indicators:
         except Exception as e:
             logger.error(f"ADX 계산 실패: {e}")
             return None
+    
+    @staticmethod
+    def calculate_wma(data, period):
+        """WMA (Weighted Moving Average) 계산"""
+        try:
+            if len(data) < period:
+                return None
+            close = data['close'].values
+            wma = talib.WMA(close, timeperiod=period)
+            return pd.Series(wma, index=data.index)
+        except Exception as e:
+            logger.error(f"WMA 계산 실패: {e}")
+            return None
+    
+    @staticmethod
+    def calculate_hma(data, period=14):
+        """HMA (Hull Moving Average) 계산
+        
+        HMA는 지연 시간을 최소화하면서도 가격 곡선을 매끄럽게 만드는 지표입니다.
+        
+        계산 과정:
+        1. WMA(Price, n/2) 계산
+        2. WMA(Price, n) 계산
+        3. Raw HMA = 2 * WMA(Price, n/2) - WMA(Price, n)
+        4. HMA = WMA(Raw HMA, sqrt(n))
+        
+        Args:
+            data: DataFrame with 'close' column
+            period: HMA 기간 (기본값: 14)
+        
+        Returns:
+            pd.Series: HMA 값
+        """
+        try:
+            # 충분한 데이터 필요: period + sqrt(period) 정도
+            sqrt_period = int(np.sqrt(period))
+            if sqrt_period < 1:
+                sqrt_period = 1
+            
+            min_length = period + sqrt_period
+            if len(data) < min_length:
+                return None
+            
+            close = data['close'].values
+            
+            # 단계 1: WMA(Price, n/2)와 WMA(Price, n) 계산
+            half_period = int(period / 2)
+            if half_period < 1:
+                half_period = 1
+            
+            wma_half = talib.WMA(close, timeperiod=half_period)
+            wma_full = talib.WMA(close, timeperiod=period)
+            
+            # 단계 2: Raw HMA = 2 * WMA(Price, n/2) - WMA(Price, n)
+            raw_hma = 2 * wma_half - wma_full
+            
+            # 단계 3: HMA = WMA(Raw HMA, sqrt(n))
+            # NaN 값 제거 후 WMA 계산
+            raw_hma_clean = raw_hma[~np.isnan(raw_hma)]
+            if len(raw_hma_clean) < sqrt_period:
+                return None
+            
+            hma_values = talib.WMA(raw_hma, timeperiod=sqrt_period)
+            
+            return pd.Series(hma_values, index=data.index)
+        except Exception as e:
+            logger.error(f"HMA 계산 실패: {e}")
+            return None

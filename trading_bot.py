@@ -11,16 +11,16 @@ from core import DataCollector, RiskManager, BinanceClient
 from core.indicators import Indicators
 from strategies import (
     BTCEthCorrelationStrategy,
-    CVDDeltaStrategy,
     VolatilitySqueezeStrategy,
     OrderblockFVGStrategy,
-    LiquidationSpikeStrategy,
+    HMAMomentumStrategy,
+    MFIMomentumStrategy,
     # 횡보장 Top 5 Mean-Reversion 전략
     BollingerMeanReversionStrategy,
     VWAPDeviationStrategy,
     RangeTopBottomStrategy,
     StochRSIMeanReversionStrategy,
-    CVDFakePressureStrategy
+    CMFDivergenceStrategy
 )
 
 # AI 강화학습 모듈 (선택적)
@@ -74,17 +74,18 @@ class TradingBot:
         # 폭발장 전략
         if config.STRATEGIES['btc_eth_correlation']:
             self.breakout_strategies.append(BTCEthCorrelationStrategy())
-        if config.STRATEGIES['cvd_delta']:
-            self.breakout_strategies.append(CVDDeltaStrategy())
-        if config.STRATEGIES['volatility_squeeze']:
+        if config.STRATEGIES.get('volatility_squeeze', False):
             self.breakout_strategies.append(VolatilitySqueezeStrategy())
-        if config.STRATEGIES['orderblock_fvg']:
+        if config.STRATEGIES.get('orderblock_fvg', False):
             self.breakout_strategies.append(OrderblockFVGStrategy())
-        # 청산 스파이크 전략: 선물 거래에서만 활성화
-        if config.STRATEGIES.get('liquidation_spike', False) and self.client.use_futures:
-            self.breakout_strategies.append(LiquidationSpikeStrategy())
+        if config.STRATEGIES.get('hma_momentum', False):
+            self.breakout_strategies.append(HMAMomentumStrategy())
+            logger.info("✓ HMA 모멘텀 전략 활성화")
+        if config.STRATEGIES.get('mfi_momentum', False):
+            self.breakout_strategies.append(MFIMomentumStrategy())
+            logger.info("✓ MFI 모멘텀 전략 활성화")
         
-        # 횡보장 전략 (Mean-Reversion 7개)
+        # 횡보장 전략 (Mean-Reversion)
         if config.STRATEGIES.get('bollinger_mean_reversion', False):
             self.range_strategies.append(BollingerMeanReversionStrategy())
             logger.info("✓ 볼린저 밴드 평균 회귀 전략 활성화")
@@ -97,9 +98,9 @@ class TradingBot:
         if config.STRATEGIES.get('stoch_rsi_mean_reversion', False):
             self.range_strategies.append(StochRSIMeanReversionStrategy())
             logger.info("✓ Stoch RSI 평균 회귀 전략 활성화")
-        if config.STRATEGIES.get('cvd_fake_pressure', False):
-            self.range_strategies.append(CVDFakePressureStrategy())
-            logger.info("✓ CVD Fake Pressure 전략 활성화")
+        if config.STRATEGIES.get('cmf_divergence', False):
+            self.range_strategies.append(CMFDivergenceStrategy())
+            logger.info("✓ CMF 다이버전스 전략 활성화")
         
         # 전체 전략 리스트 (하위 호환성)
         self.strategies = self.breakout_strategies + self.range_strategies

@@ -16,15 +16,15 @@ import config
 from core import DataCollector, BinanceClient
 from strategies import (
     BTCEthCorrelationStrategy,
-    CVDDeltaStrategy,
     VolatilitySqueezeStrategy,
     OrderblockFVGStrategy,
-    LiquidationSpikeStrategy,
+    HMAMomentumStrategy,
     BollingerMeanReversionStrategy,
     VWAPDeviationStrategy,
     RangeTopBottomStrategy,
     StochRSIMeanReversionStrategy,
-    CVDFakePressureStrategy
+    MFIMomentumStrategy,
+    CMFDivergenceStrategy
 )
 
 # 로깅 설정
@@ -56,14 +56,14 @@ class StrategySignalTester:
         # 폭발장 전략
         if config.STRATEGIES.get('btc_eth_correlation', False):
             self.breakout_strategies.append(BTCEthCorrelationStrategy())
-        if config.STRATEGIES.get('cvd_delta', False):
-            self.breakout_strategies.append(CVDDeltaStrategy())
         if config.STRATEGIES.get('volatility_squeeze', False):
             self.breakout_strategies.append(VolatilitySqueezeStrategy())
         if config.STRATEGIES.get('orderblock_fvg', False):
             self.breakout_strategies.append(OrderblockFVGStrategy())
-        if config.STRATEGIES.get('liquidation_spike', False) and self.client.use_futures:
-            self.breakout_strategies.append(LiquidationSpikeStrategy())
+        if config.STRATEGIES.get('hma_momentum', False):
+            self.breakout_strategies.append(HMAMomentumStrategy())
+        if config.STRATEGIES.get('mfi_momentum', False):
+            self.breakout_strategies.append(MFIMomentumStrategy())
         
         # 횡보장 전략
         if config.STRATEGIES.get('bollinger_mean_reversion', False):
@@ -74,8 +74,8 @@ class StrategySignalTester:
             self.range_strategies.append(RangeTopBottomStrategy())
         if config.STRATEGIES.get('stoch_rsi_mean_reversion', False):
             self.range_strategies.append(StochRSIMeanReversionStrategy())
-        if config.STRATEGIES.get('cvd_fake_pressure', False):
-            self.range_strategies.append(CVDFakePressureStrategy())
+        if config.STRATEGIES.get('cmf_divergence', False):
+            self.range_strategies.append(CMFDivergenceStrategy())
         
         self.strategies = self.breakout_strategies + self.range_strategies
         
@@ -191,9 +191,20 @@ class StrategySignalTester:
         logger.info(f"{'전략명':<30} {'총 신호':<10} {'롱':<10} {'숏':<10} {'롱%':<10} {'숏%':<10}")
         logger.info("-" * 80)
         
+        # 모든 전략에 대해 통계 수집 (신호가 없는 전략도 포함)
+        all_strategy_stats = []
+        for strategy in self.strategies:
+            strategy_name = strategy.name
+            stats = self.signal_stats.get(strategy_name, {
+                'total': 0,
+                'long': 0,
+                'short': 0
+            })
+            all_strategy_stats.append((strategy_name, stats))
+        
         # 신호 수로 정렬
         sorted_strategies = sorted(
-            self.signal_stats.items(),
+            all_strategy_stats,
             key=lambda x: x[1]['total'],
             reverse=True
         )
@@ -224,9 +235,11 @@ class StrategySignalTester:
             
             for strategy_name, stats in sorted_strategies:
                 total = stats['total']
+                # 신호가 발생한 고유 캔들 수
+                signals_by_candle = self.signal_stats.get(strategy_name, {}).get('signals_by_candle', {})
+                unique_candles = len(signals_by_candle)
+                
                 if total > 0:
-                    # 신호가 발생한 고유 캔들 수
-                    unique_candles = len(stats['signals_by_candle'])
                     signal_density = (unique_candles / total_candles * 100) if total_candles > 0 else 0
                     avg_signals_per_candle = total / unique_candles if unique_candles > 0 else 0
                     
@@ -234,6 +247,12 @@ class StrategySignalTester:
                         f"{strategy_name:<30}: "
                         f"신호 발생 캔들 {unique_candles}개 ({signal_density:.2f}%), "
                         f"캔들당 평균 {avg_signals_per_candle:.2f}개 신호"
+                    )
+                else:
+                    logger.info(
+                        f"{strategy_name:<30}: "
+                        f"신호 발생 캔들 0개 (0.00%), "
+                        f"캔들당 평균 0.00개 신호"
                     )
         
         logger.info("")
@@ -244,16 +263,21 @@ class StrategySignalTester:
         
         for strategy_name, stats in sorted_strategies:
             total = stats['total']
+            long_count = stats['long']
+            short_count = stats['short']
+            
             if total > 0:
-                long_count = stats['long']
-                short_count = stats['short']
                 balance_ratio = min(long_count, short_count) / max(long_count, short_count) if max(long_count, short_count) > 0 else 0
-                
                 balance_status = "균형" if balance_ratio > 0.7 else "불균형" if balance_ratio > 0.3 else "매우 불균형"
                 
                 logger.info(
                     f"{strategy_name:<30}: "
                     f"균형 비율 {balance_ratio:.2f} ({balance_status})"
+                )
+            else:
+                logger.info(
+                    f"{strategy_name:<30}: "
+                    f"신호 없음 (분석 불가)"
                 )
         
         logger.info("")
@@ -265,22 +289,19 @@ def main():
     try:
         tester = StrategySignalTester()
         
-        # 전체 데이터 테스트 (스텝 크기 조정 가능)
-        # 빠른 테스트: step=10 (10개마다)
-        # 전체 테스트: step=1 (모든 캔들)
+        # 1주일치 데이터 테스트
+        # 3분 캔들 기준: 1일 = 480개, 1주일 = 3360개
+        start_index = 40
+        candles_per_day = 480  # 3분 캔들: 24시간 * 60분 / 3
+        candles_per_week = candles_per_day * 7  # 1주일
+        end_index = start_index + candles_per_week
         
-        logger.info("전체 데이터 테스트 시작 (스텝=1: 모든 캔들 테스트)")
-        logger.info("주의: 시간이 오래 걸릴 수 있습니다.")
+        logger.info("1주일치 데이터 테스트 시작")
+        logger.info(f"테스트 범위: 인덱스 {start_index} ~ {end_index} (총 {candles_per_week}개 캔들, 약 1주일)")
         logger.info("")
         
-        # 사용자 입력 대기 (선택적)
-        # response = input("계속하시겠습니까? (y/n): ")
-        # if response.lower() != 'y':
-        #     logger.info("테스트 취소")
-        #     return
-        
-        # 전체 테스트
-        tester.test_strategies(start_index=40, end_index=None, step=1)
+        # 1주일치 테스트
+        tester.test_strategies(start_index=start_index, end_index=end_index, step=1)
         
         # 통계 출력
         tester.print_statistics()
