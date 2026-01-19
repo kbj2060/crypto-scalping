@@ -78,7 +78,6 @@ class BTCEthCorrelationStrategy:
                     eth_prev_close = float(eth_prev['close'])
                     if eth_current_close > eth_prev_close:
                         signal = 'LONG'
-                        logger.info(f"BTC 연동 롱: BTC RSI={btc_rsi_latest:.2f}, MA20 위 {self.ma_consecutive}봉 연속")
             
             # 숏 bias: BTC RSI < 45 AND BTC MA20 아래 2봉 연속
             elif btc_rsi_latest < self.rsi_long_threshold and btc_below_ma:
@@ -89,7 +88,6 @@ class BTCEthCorrelationStrategy:
                     eth_prev_close = float(eth_prev['close'])
                     if eth_current_close < eth_prev_close:
                         signal = 'SHORT'
-                        logger.info(f"BTC 연동 숏: BTC RSI={btc_rsi_latest:.2f}, MA20 아래 {self.ma_consecutive}봉 연속")
             
             if signal:
                 return {

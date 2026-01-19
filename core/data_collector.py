@@ -13,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class DataCollector:
-    def __init__(self):
+    def __init__(self, use_saved_data=False):
+        """
+        Args:
+            use_saved_data: True면 저장된 데이터를 로드, False면 실시간 데이터 사용
+        """
         self.client = BinanceClient()
         self.eth_data = None
         self.btc_data = None
@@ -21,6 +25,11 @@ class DataCollector:
         self.btc_funding_rate = None
         self.eth_liquidation_data = []  # 청산 데이터 저장
         self.btc_liquidation_data = []  # BTC 청산 데이터 저장
+        self.use_saved_data = use_saved_data
+        self.current_index = 0  # 저장된 데이터 사용 시 현재 인덱스
+        
+        if use_saved_data:
+            self.load_saved_data()
         
     def fetch_historical_data(self, symbol, interval=config.TIMEFRAME, limit=config.LOOKBACK_PERIOD):
         """과거 캔들 데이터 조회 및 DataFrame 변환"""
@@ -99,17 +108,39 @@ class DataCollector:
     
     def get_latest_candle(self, symbol='ETH'):
         """최신 캔들 데이터 반환"""
-        data = self.eth_data if symbol == 'ETH' else self.btc_data
-        if data is not None and len(data) > 0:
-            return data.iloc[-1]
-        return None
+        if self.use_saved_data:
+            # 저장된 데이터 사용 시: 현재 인덱스의 이전 캔들 반환
+            data = self.eth_data if symbol == 'ETH' else self.btc_data
+            if data is not None and len(data) > 0 and self.current_index > 0:
+                return data.iloc[self.current_index - 1]
+            return None
+        else:
+            # 실시간 데이터 사용 시
+            data = self.eth_data if symbol == 'ETH' else self.btc_data
+            if data is not None and len(data) > 0:
+                return data.iloc[-1]
+            return None
     
     def get_candles(self, symbol='ETH', count=100):
         """최근 N개 캔들 반환"""
-        data = self.eth_data if symbol == 'ETH' else self.btc_data
-        if data is not None and len(data) > 0:
-            return data.tail(count)
-        return None
+        if self.use_saved_data:
+            # 저장된 데이터 사용 시: 현재 인덱스 기준으로 이전 count개 반환
+            data = self.eth_data if symbol == 'ETH' else self.btc_data
+            if data is not None and len(data) > 0:
+                # 현재 인덱스가 충분히 커야 함 (최소 count개 필요)
+                if self.current_index >= count:
+                    start_idx = self.current_index - count
+                    return data.iloc[start_idx:self.current_index]
+                else:
+                    # 부족한 경우 가능한 만큼만 반환
+                    return data.iloc[:self.current_index] if self.current_index > 0 else None
+            return None
+        else:
+            # 실시간 데이터 사용 시
+            data = self.eth_data if symbol == 'ETH' else self.btc_data
+            if data is not None and len(data) > 0:
+                return data.tail(count)
+            return None
     
     def calculate_cvd(self, symbol='ETH', lookback=100, ema_period=21, delta_smoothing=5):
         """CVD (Cumulative Volume Delta) 계산 (최적 세팅)
@@ -266,3 +297,57 @@ class DataCollector:
         except Exception as e:
             logger.error(f"청산 스파이크 탐지 실패 ({symbol}): {e}")
             return None
+    
+    def load_saved_data(self):
+        """저장된 데이터 로드 (학습용)"""
+        try:
+            import os
+            eth_file = f'data/eth_{config.TIMEFRAME}_1year.csv'
+            btc_file = f'data/btc_{config.TIMEFRAME}_1year.csv'
+            
+            if not os.path.exists(eth_file) or not os.path.exists(btc_file):
+                logger.warning(f"저장된 데이터 파일을 찾을 수 없습니다: {eth_file}, {btc_file}")
+                logger.warning("collect_training_data.py를 먼저 실행하세요.")
+                return False
+            
+            # ETH 데이터 로드
+            self.eth_data = pd.read_csv(eth_file, index_col='timestamp', parse_dates=True)
+            logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들")
+            
+            # BTC 데이터 로드
+            self.btc_data = pd.read_csv(btc_file, index_col='timestamp', parse_dates=True)
+            logger.info(f"✅ BTC 데이터 로드: {len(self.btc_data)}개 캔들")
+            
+            # 인덱스 초기화
+            self.current_index = 0
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"저장된 데이터 로드 실패: {e}")
+            return False
+    
+    def get_next_candles(self, count=1):
+        """저장된 데이터에서 다음 N개 캔들 반환 (학습용)"""
+        if not self.use_saved_data or self.eth_data is None:
+            return None
+        
+        if self.current_index + count > len(self.eth_data):
+            return None  # 데이터 끝
+        
+        # 현재 인덱스부터 count개 반환
+        eth_slice = self.eth_data.iloc[self.current_index:self.current_index + count]
+        btc_slice = self.btc_data.iloc[self.current_index:self.current_index + count] if self.btc_data is not None else None
+        
+        self.current_index += count
+        
+        return {
+            'ETH': eth_slice,
+            'BTC': btc_slice
+        }
+    
+    def reset_index(self):
+        """인덱스를 처음으로 리셋 (새 에피소드 시작 시)"""
+        # lookback(40)개가 필요하므로 최소 40부터 시작
+        lookback = 40  # TradingEnvironment의 기본 lookback
+        self.current_index = lookback

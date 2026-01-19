@@ -86,14 +86,12 @@ class StochRSIMeanReversionStrategy:
                 signal = 'LONG'
                 stop_loss_price = entry_price * (1 - self.stop_loss)
                 take_profit_price = entry_price * (1 + self.take_profit_max)  # 0.35%
-                logger.info(f"Stoch RSI 롱: StochK={latest_stoch_k:.2f}, RSI={latest_rsi:.2f}")
             
             # SHORT: StochRSI K > 65 AND RSI > 45 (공격적: 기존 K>80, RSI>52 → K>65, RSI>45)
             elif latest_stoch_k > self.stoch_overbought and latest_rsi > self.rsi_short_min:
                 signal = 'SHORT'
                 stop_loss_price = entry_price * (1 + self.stop_loss)
                 take_profit_price = entry_price * (1 - self.take_profit_max)  # 0.35%
-                logger.info(f"Stoch RSI 숏: StochK={latest_stoch_k:.2f}, RSI={latest_rsi:.2f}")
             
             if signal:
                 return {

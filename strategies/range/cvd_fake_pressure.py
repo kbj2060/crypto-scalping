@@ -62,14 +62,12 @@ class CVDFakePressureStrategy:
                 signal = 'SHORT'
                 stop_loss_price = entry_price * (1 + self.stop_loss)
                 take_profit_price = entry_price * (1 - self.take_profit_max)  # 0.4%
-                logger.info(f"CVD Fake Pressure 숏: CVD 변화={cvd_change/1000:.0f}K, 가격 변화={price_change_pct:.3%}")
             
             # LONG: CVD가 계속 하락 → 그런데 가격은 안 떨어지면 → 롱
             elif cvd_change < -self.cvd_change_threshold:
                 signal = 'LONG'
                 stop_loss_price = entry_price * (1 - self.stop_loss)
                 take_profit_price = entry_price * (1 + self.take_profit_max)  # 0.4%
-                logger.info(f"CVD Fake Pressure 롱: CVD 변화={cvd_change/1000:.0f}K, 가격 변화={price_change_pct:.3%}")
             
             if signal:
                 return {

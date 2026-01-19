@@ -68,13 +68,11 @@ class VWAPDeviationStrategy:
             if deviation <= self.deviation_long_threshold:
                 signal = 'LONG'
                 stop_loss = entry_price * (1 - 0.0025)  # ±0.25% 손절
-                logger.info(f"VWAP 편차 롱: 편차={deviation:.3f}%, VWAP={latest_vwap:.2f}")
             
             # SHORT: Devi >= +0.3%
             elif deviation >= self.deviation_short_threshold:
                 signal = 'SHORT'
                 stop_loss = entry_price * (1 + 0.0025)  # ±0.25% 손절
-                logger.info(f"VWAP 편차 숏: 편차={deviation:.3f}%, VWAP={latest_vwap:.2f}")
             
             if signal:
                 return {

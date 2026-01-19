@@ -141,12 +141,10 @@ class OrderblockFVGStrategy:
                         if fvg['type'] == 'bullish':
                             signal = 'LONG'
                             stop_loss = fvg_bottom * 0.999
-                            logger.info(f"FVG + OB Long: FVG {'즉시 진입' if in_fvg_range else '10% 리테스트'}, OB {'매칭' if ob_match else '없음'}")
                             break
                         elif fvg['type'] == 'bearish':
                             signal = 'SHORT'
                             stop_loss = fvg_top * 1.001
-                            logger.info(f"FVG + OB Short: FVG {'즉시 진입' if in_fvg_range else '10% 리테스트'}, OB {'매칭' if ob_match else '없음'}")
                             break
             
             if signal:

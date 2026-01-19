@@ -89,7 +89,6 @@ class VolatilitySqueezeStrategy:
                 if (latest_close > upper_band and 
                     latest_volume >= latest_volume_sma * self.volume_explosion):
                     signal = 'LONG'
-                    logger.info(f"스퀴즈 폭발 Long: 이전 스퀴즈 후 BBW={latest_bbw_val:.4f}, 상단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
                 elif latest_close > upper_band:
                     logger.debug(f"⚠️ [Volatility Squeeze] 상단 돌파했으나 거래량 부족: {latest_volume/latest_volume_sma:.2f}배 < {self.volume_explosion:.1f}배 필요")
                 
@@ -97,7 +96,6 @@ class VolatilitySqueezeStrategy:
                 if (latest_close < lower_band and 
                       latest_volume >= latest_volume_sma * self.volume_explosion):
                     signal = 'SHORT'
-                    logger.info(f"스퀴즈 폭발 Short: 이전 스퀴즈 후 BBW={latest_bbw_val:.4f}, 하단 돌파, 거래량 {latest_volume/latest_volume_sma:.2f}배")
                 elif latest_close < lower_band:
                     logger.debug(f"⚠️ [Volatility Squeeze] 하단 돌파했으나 거래량 부족: {latest_volume/latest_volume_sma:.2f}배 < {self.volume_explosion:.1f}배 필요")
             else:

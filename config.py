@@ -43,5 +43,5 @@ LOOKBACK_PERIOD = 1500  # 과거 데이터 조회 기간 (1500봉)
 ENABLE_TRADING = False  # True: 거래 실행, False: 분석만 수행 (거래 비활성화)
 
 # AI 강화학습 설정
-ENABLE_AI = False  # True: AI 기반 결정, False: 기존 전략 조합 방식
+ENABLE_AI = True  # True: AI 기반 결정, False: 기존 전략 조합 방식
 AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로

@@ -64,7 +64,6 @@ class RangeTopBottomStrategy:
                     signal = 'LONG'
                     stop_loss = range_low * (1 - self.stop_loss_pct)  # Range 바깥으로 0.3% 이탈
                     take_profit = max(range_mid, entry_price * (1 + 0.004))  # Mid 또는 +0.4%
-                    logger.info(f"Range Top/Bottom 롱: 저점 터치, 꼬리={lower_wick_pct:.3%}")
             
             # SHORT: Price >= RangeHigh * 0.995 AND 긴 상단 꼬리 (공격적: 기존 0.999 → 0.995, 0.5% 오차 허용)
             range_high_threshold = range_high * 0.995
@@ -76,7 +75,6 @@ class RangeTopBottomStrategy:
                     signal = 'SHORT'
                     stop_loss = range_high * (1 + self.stop_loss_pct)  # Range 바깥으로 0.3% 이탈
                     take_profit = min(range_mid, entry_price * (1 - 0.004))  # Mid 또는 -0.4%
-                    logger.info(f"Range Top/Bottom 숏: 고점 터치, 꼬리={upper_wick_pct:.3%}")
             
             if signal:
                 return {

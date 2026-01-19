@@ -47,12 +47,10 @@ class LiquidationSpikeStrategy:
             # 롱 청산 스파이크 (숏 포지션 대량 청산) → 가격 상승 압력 → LONG
             if spike_data['spike_type'] == 'long_liquidation':
                 signal = 'LONG'
-                logger.info(f"롱 청산 스파이크 탐지: {spike_data['total_volume']:.2f} ETH, {spike_data['count']}건")
             
             # 숏 청산 스파이크 (롱 포지션 대량 청산) → 가격 하락 압력 → SHORT
             elif spike_data['spike_type'] == 'short_liquidation':
                 signal = 'SHORT'
-                logger.info(f"숏 청산 스파이크 탐지: {spike_data['total_volume']:.2f} ETH, {spike_data['count']}건")
             
             if signal:
                 return {

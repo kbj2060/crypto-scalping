@@ -93,7 +93,6 @@ class BollingerMeanReversionStrategy:
                 stop_loss = entry_price * (1 - 0.0025)  # ±0.25% 손절
                 take_profit_50 = bb_middle  # 1차 청산: Basis 도달
                 take_profit_100 = entry_price * (1 + 0.004)  # 전체 청산: +0.4%
-                logger.info(f"볼린저 평균 회귀 롱: 하단 밴드 터치, RSI={latest_rsi:.2f}, BBW={latest_bbw:.4f}")
             
             # SHORT: Price >= UpperBB AND RSI > 55 (공격적: 기존 62 → 55)
             if latest_close >= bb_upper and latest_rsi > self.rsi_short_min:
@@ -101,7 +100,6 @@ class BollingerMeanReversionStrategy:
                 stop_loss = entry_price * (1 + 0.0025)  # ±0.25% 손절
                 take_profit_50 = bb_middle  # 1차 청산: Basis 도달
                 take_profit_100 = entry_price * (1 - 0.004)  # 전체 청산: -0.4%
-                logger.info(f"볼린저 평균 회귀 숏: 상단 밴드 터치, RSI={latest_rsi:.2f}, BBW={latest_bbw:.4f}")
             
             if signal:
                 return {

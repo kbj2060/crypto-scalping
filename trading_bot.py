@@ -104,7 +104,7 @@ class TradingBot:
         # 전체 전략 리스트 (하위 호환성)
         self.strategies = self.breakout_strategies + self.range_strategies
         
-        # AI 강화학습 초기화 (선택적)
+        # AI 강화학습 초기화 (추론 모드만)
         self.use_ai = config.ENABLE_AI and TORCH_AVAILABLE
         self.env = None
         self.agent = None
@@ -119,19 +119,27 @@ class TradingBot:
                 state_dim = self.env.get_state_dim()
                 action_dim = 3  # 0: Hold, 1: Long, 2: Short
                 
-                # PPO 에이전트 생성
+                # PPO 에이전트 생성 (추론 모드)
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
                 self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device)
                 
-                # 기존 모델 로드 (있는 경우)
+                # 학습된 모델 로드 (필수)
                 if os.path.exists(config.AI_MODEL_PATH):
                     try:
                         self.agent.load_model(config.AI_MODEL_PATH)
                         logger.info(f"✅ AI 모델 로드 완료: {config.AI_MODEL_PATH}")
+                        logger.info("📊 추론 모드: 학습은 train_ppo.py에서 별도로 수행하세요")
                     except Exception as e:
-                        logger.warning(f"AI 모델 로드 실패 (새 모델로 시작): {e}")
+                        logger.error(f"❌ AI 모델 로드 실패: {e}")
+                        logger.error("먼저 train_ppo.py를 실행하여 모델을 학습하세요")
+                        self.use_ai = False
+                else:
+                    logger.error(f"❌ AI 모델 파일을 찾을 수 없습니다: {config.AI_MODEL_PATH}")
+                    logger.error("먼저 train_ppo.py를 실행하여 모델을 학습하세요")
+                    self.use_ai = False
                 
-                logger.info(f"🤖 AI 강화학습 모드 활성화 - 상태 차원: {state_dim}, 행동 차원: {action_dim}")
+                if self.use_ai:
+                    logger.info(f"🤖 AI 추론 모드 활성화 - 상태 차원: {state_dim}, 행동 차원: {action_dim}")
             except Exception as e:
                 logger.error(f"AI 초기화 실패: {e}")
                 self.use_ai = False
@@ -363,18 +371,8 @@ class TradingBot:
                     reward = self.env.calculate_reward(pnl, False, holding_time)
                     logger.debug(f"💼 포지션 보유 중: {self.current_position}, 수익률 {pnl:.2%}")
             
-            # 5. 트랜지션 저장 (학습용)
-            is_terminal = False  # 연속 환경이므로 False
-            self.agent.store_transition(state, action, log_prob, reward, is_terminal)
-            
-            # 6. 주기적 업데이트 (예: 10개 트랜지션마다)
-            if len(self.agent.memory) >= 10:
-                logger.info("🔄 AI 모델 업데이트 중...")
-                self.agent.update()
-                # 모델 저장
-                os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
-                self.agent.save_model(config.AI_MODEL_PATH)
-                logger.info(f"💾 AI 모델 저장 완료: {config.AI_MODEL_PATH}")
+            # 5. 추론 모드: 학습 없이 행동만 결정
+            # (학습은 train_ppo.py에서 별도로 수행)
                 
         except Exception as e:
             logger.error(f"AI 모드 실행 실패: {e}", exc_info=True)
@@ -1029,51 +1027,53 @@ class TradingBot:
                 logger.info("👀 포지션 모니터링 중...")
                 self.monitor_positions()
                 
-                # 전략 분석
-                signals = self.analyze_strategies()
-                
-                if signals:
-                    logger.info("🔍 신호 조합 분석 중...")
-                    # 신호 결합
-                    final_signal = self.combine_signals(signals)
-                    
-                    if final_signal:
-                        rank = final_signal.get('combination_rank', 'N/A')
-                        logger.info("")
-                        logger.info("🎯" + "=" * 58)
-                        logger.info(f"✅ 최종 거래 결정: {final_signal['signal']}")
-                        logger.info(f"   진입가: ${final_signal['entry_price']:.2f}")
-                        logger.info(f"   신뢰도: {final_signal['confidence']:.2%}")
-                        logger.info(f"   조합 순위: {rank}위")
-                        strategies_list = final_signal.get('strategies', [final_signal.get('strategy', 'Unknown')])
-                        logger.info(f"   사용 전략: {', '.join(strategies_list)}")
-                        if final_signal.get('stop_loss'):
-                            logger.info(f"   손절가: ${final_signal['stop_loss']:.2f}")
-                        logger.info("=" * 60)
-                        logger.info("")
-                        
-                        # 거래 실행 (분석 모드에서는 비활성화)
-                        if config.ENABLE_TRADING:
-                            logger.info("💼 거래 실행 중...")
-                            self.execute_trade(final_signal)
-                        else:
-                            logger.info("📊 분석 모드: 거래 실행 비활성화 (ENABLE_TRADING=False)")
-                            logger.info("   신호만 분석하고 실제 거래는 수행하지 않습니다.")
-                    else:
-                        logger.info("⚠️  신호 조합 실패: 조건을 만족하는 조합이 없습니다")
+                # AI 모드 또는 전략 조합 모드
+                if self.use_ai:
+                    # AI 강화학습 기반 결정
+                    logger.info("🤖 AI 모드: 강화학습 모델 기반 결정")
+                    self._run_ai_mode()
                 else:
-                    logger.info("⚪ 거래 신호 없음: 다음 캔들 대기 중...")
+                    # 전략 분석
+                    signals = self.analyze_strategies()
+                    
+                    if signals:
+                        logger.info("🔍 신호 조합 분석 중...")
+                        # 신호 결합
+                        final_signal = self.combine_signals(signals)
+                        
+                        if final_signal:
+                            rank = final_signal.get('combination_rank', 'N/A')
+                            logger.info("")
+                            logger.info("🎯" + "=" * 58)
+                            logger.info(f"✅ 최종 거래 결정: {final_signal['signal']}")
+                            logger.info(f"   진입가: ${final_signal['entry_price']:.2f}")
+                            logger.info(f"   신뢰도: {final_signal['confidence']:.2%}")
+                            logger.info(f"   조합 순위: {rank}위")
+                            strategies_list = final_signal.get('strategies', [final_signal.get('strategy', 'Unknown')])
+                            logger.info(f"   사용 전략: {', '.join(strategies_list)}")
+                            if final_signal.get('stop_loss'):
+                                logger.info(f"   손절가: ${final_signal['stop_loss']:.2f}")
+                            logger.info("=" * 60)
+                            logger.info("")
+                            
+                            # 거래 실행 (분석 모드에서는 비활성화)
+                            if config.ENABLE_TRADING:
+                                logger.info("💼 거래 실행 중...")
+                                self.execute_trade(final_signal)
+                            else:
+                                logger.info("📊 분석 모드: 거래 실행 비활성화 (ENABLE_TRADING=False)")
+                                logger.info("   신호만 분석하고 실제 거래는 수행하지 않습니다.")
+                        else:
+                            logger.info("⚠️  신호 조합 실패: 조건을 만족하는 조합이 없습니다")
+                    else:
+                        logger.info("⚪ 거래 신호 없음: 다음 캔들 대기 중...")
                 
                 # 다음 캔들까지 카운트다운하며 대기
                 self._wait_for_next_candle()
                 
             except KeyboardInterrupt:
                 logger.info("봇 종료 요청")
-                if self.use_ai and self.agent:
-                    # 모델 저장
-                    os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
-                    self.agent.save_model(config.AI_MODEL_PATH)
-                    logger.info(f"💾 AI 모델 저장 완료: {config.AI_MODEL_PATH}")
+                # 추론 모드에서는 모델 저장하지 않음 (학습은 train_ppo.py에서 수행)
                 break
             except Exception as e:
                 logger.error(f"봇 실행 중 오류: {e}")

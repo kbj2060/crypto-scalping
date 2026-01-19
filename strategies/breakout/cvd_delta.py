@@ -295,7 +295,6 @@ class CVDDeltaStrategy:
                         if has_divergence:
                             # 다이버전스 확인 시 즉시 진입
                             signal = 'LONG'
-                            logger.info(f"CVD 롱: CVD-EMA↑, 가격 EMA 위, 다이버전스 확인 즉시 진입")
                         elif has_delta_spike:
                             # 델타 스파이크는 캔들 반전 확인
                             if prev_candle is not None:
@@ -306,7 +305,6 @@ class CVDDeltaStrategy:
                                              prev_close < prev_open)
                                 if is_bullish or is_reversal:
                                     signal = 'LONG'
-                                    logger.info(f"CVD 롱: CVD-EMA↑, 가격 EMA 위, 델타 스파이크")
             
             # 숏 조건: CVD-EMA ↓ + 가격 EMA 아래 + (다이버전스 또는 델타 스파이크) + 캔들 반전
             elif cvd_ema_prev is not None and cvd_ema_current < cvd_ema_prev:  # CVD-EMA 하락
@@ -321,7 +319,6 @@ class CVDDeltaStrategy:
                         if has_divergence:
                             # 다이버전스 확인 시 즉시 진입
                             signal = 'SHORT'
-                            logger.info(f"CVD 숏: CVD-EMA↓, 가격 EMA 아래, 다이버전스 확인 즉시 진입")
                         elif has_delta_spike:
                             # 델타 스파이크는 캔들 반전 확인
                             if prev_candle is not None:
@@ -332,7 +329,6 @@ class CVDDeltaStrategy:
                                               prev_close > prev_open)
                                 if is_bearish or is_reversal:
                                     signal = 'SHORT'
-                                    logger.info(f"CVD 숏: CVD-EMA↓, 가격 EMA 아래, 델타 스파이크")
             
             if signal:
                 return {
