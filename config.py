@@ -22,11 +22,9 @@ STOP_LOSS_PERCENT = float(os.getenv('STOP_LOSS_PERCENT', '0.2'))
 # 전략 활성화 설정
 STRATEGIES = {
     # 폭발장 전략
-    'liquidity_sweep': True,
     'btc_eth_correlation': True,
     'cvd_delta': True,
     'volatility_squeeze': True,
-    'funding_rate': True,
     'orderblock_fvg': True,
     'liquidation_spike': True,
     # 횡보장 전략 (Top 5 Mean-Reversion)
@@ -43,3 +41,7 @@ LOOKBACK_PERIOD = 1500  # 과거 데이터 조회 기간 (1500봉)
 
 # 거래 실행 설정
 ENABLE_TRADING = False  # True: 거래 실행, False: 분석만 수행 (거래 비활성화)
+
+# AI 강화학습 설정
+ENABLE_AI = False  # True: AI 기반 결정, False: 기존 전략 조합 방식
+AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로

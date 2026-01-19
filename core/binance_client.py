@@ -169,7 +169,12 @@ class BinanceClient:
             )
             return liquidation_orders
         except Exception as e:
-            logger.error(f"청산 주문 조회 실패: {e}")
+            error_msg = str(e)
+            # API 권한 오류는 분석 모드에서는 정상 (DEBUG 레벨로 처리)
+            if "-2015" in error_msg or "permissions" in error_msg.lower():
+                logger.debug(f"청산 주문 조회 실패 (권한 없음, 계속 진행): {e}")
+            else:
+                logger.warning(f"청산 주문 조회 실패: {e}")
             return None
     
     def place_order(self, symbol, side, quantity, order_type='MARKET', 

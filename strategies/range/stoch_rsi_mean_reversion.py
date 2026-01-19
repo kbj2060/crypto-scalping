@@ -19,13 +19,13 @@ class StochRSIMeanReversionStrategy:
         self.stoch_period = 14
         self.k_period = 3
         self.d_period = 3
-        self.stoch_oversold = 20  # StochRSI K < 20
-        self.stoch_overbought = 80  # StochRSI K > 80
-        self.rsi_neutral_min = 35  # RSI between 35 and 65 (완화: 기존 40)
-        self.rsi_neutral_max = 65  # RSI between 35 and 65 (완화: 기존 60)
-        self.rsi_long_max = 48  # RSI < 48 (롱)
-        self.rsi_short_min = 52  # RSI > 52 (숏)
-        self.macd_hist_threshold = 0.5  # MACD Histogram 절대값 < 0.5 (완화: 기존 0.2)
+        self.stoch_oversold = 35  # StochRSI K < 35 (공격적: 기존 20 → 35, K값이 35만 내려가도 과매도)
+        self.stoch_overbought = 65  # StochRSI K > 65 (공격적: 기존 80 → 65, K값이 65만 올라가도 과매수)
+        self.rsi_neutral_min = 35  # RSI between 35 and 65
+        self.rsi_neutral_max = 65  # RSI between 35 and 65
+        self.rsi_long_max = 55  # RSI < 55 (롱, 공격적: 기존 48 → 55, 가격이 중간 아래면 롱 진입 허용)
+        self.rsi_short_min = 45  # RSI > 45 (숏, 공격적: 기존 52 → 45, 가격이 중간 위면 숏 진입 허용)
+        self.macd_hist_threshold = 1.0  # MACD Histogram 절대값 < 1.0 (공격적: 기존 0.5 → 1.0, MACD 필터 사실상 무력화)
         self.take_profit_min = 0.002  # 0.2%
         self.take_profit_max = 0.0035  # 0.35%
         self.stop_loss = 0.002  # 0.2%
@@ -81,14 +81,14 @@ class StochRSIMeanReversionStrategy:
             stop_loss_price = None
             take_profit_price = None
             
-            # LONG: StochRSI K < 20 AND RSI < 48
+            # LONG: StochRSI K < 35 AND RSI < 55 (공격적: 기존 K<20, RSI<48 → K<35, RSI<55)
             if latest_stoch_k < self.stoch_oversold and latest_rsi < self.rsi_long_max:
                 signal = 'LONG'
                 stop_loss_price = entry_price * (1 - self.stop_loss)
                 take_profit_price = entry_price * (1 + self.take_profit_max)  # 0.35%
                 logger.info(f"Stoch RSI 롱: StochK={latest_stoch_k:.2f}, RSI={latest_rsi:.2f}")
             
-            # SHORT: StochRSI K > 80 AND RSI > 52
+            # SHORT: StochRSI K > 65 AND RSI > 45 (공격적: 기존 K>80, RSI>52 → K>65, RSI>45)
             elif latest_stoch_k > self.stoch_overbought and latest_rsi > self.rsi_short_min:
                 signal = 'SHORT'
                 stop_loss_price = entry_price * (1 + self.stop_loss)

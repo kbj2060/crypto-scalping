@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 class VWAPDeviationStrategy:
     def __init__(self):
         self.name = "VWAP Deviation"
-        self.deviation_long_threshold = -0.15  # -0.15% 이하 (완화: 기존 -0.30%)
-        self.deviation_short_threshold = 0.15  # +0.15% 이상 (완화: 기존 +0.30%)
+        self.deviation_long_threshold = -0.10  # -0.10% 이하 (공격적: 기존 -0.15% → -0.10%)
+        self.deviation_short_threshold = 0.10  # +0.10% 이상 (공격적: 기존 +0.15% → +0.10%)
         self.atr_period = 14
-        self.atr_threshold = 5.0  # ATR < 5.0 (완화: 기존 2.5)
+        self.atr_threshold = 5.0  # ATR < 5.0 (공격적: 시장 변동성이 있어도 평균 회귀 분석)
         self.cvd_change_period = 5  # CVD 변화량 5봉
         self.cvd_change_threshold = 200000  # 200K 미만
         self.volume_sma_period = 20

@@ -15,7 +15,7 @@ class LiquidationSpikeStrategy:
     def __init__(self):
         self.name = "Liquidation Spike"
         self.time_window_minutes = 3  # 3분 내 청산 스파이크 탐지
-        self.min_volume_threshold = 5  # 최소 청산 볼륨 (ETH 수량, 10에서 5로 완화)
+        self.min_volume_threshold = 1  # 최소 청산 볼륨 (ETH 수량, 공격적: 5 -> 1, 아주 적은 청산도 신호)
     
     def analyze(self, data_collector):
         """청산 스파이크 전략 분석"""

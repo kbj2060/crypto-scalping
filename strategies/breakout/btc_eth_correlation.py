@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 class BTCEthCorrelationStrategy:
     def __init__(self):
         self.name = "BTC/ETH Correlation"
-        self.rsi_long_threshold = 45  # BTC RSI < 45 → ETH 숏 bias (40에서 완화)
-        self.rsi_short_threshold = 55  # BTC RSI > 55 → ETH 롱 bias (60에서 완화)
+        self.rsi_long_threshold = 49  # BTC RSI < 49 → ETH 숏 bias (공격적: 45 -> 49)
+        self.rsi_short_threshold = 51  # BTC RSI > 51 → ETH 롱 bias (공격적: 55 -> 51)
         self.ma_period = 20
         self.ma_consecutive = 1  # MA20 위/아래 1봉 연속 (공격적: 기존 2 → BTC 돌파 즉시)
     

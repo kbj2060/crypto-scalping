@@ -19,11 +19,11 @@ class BollingerMeanReversionStrategy:
         self.bb_std_dev = 2.0
         self.bbw_ma_period = 50  # BandWidth MA 기간
         self.rsi_period = 14
-        self.rsi_long_max = 42  # RSI < 42 (롱, 완화: 기존 38)
-        self.rsi_short_min = 58  # RSI > 58 (숏, 완화: 기존 62)
+        self.rsi_long_max = 45  # RSI < 45 (롱, 공격적: 기존 38 → 45)
+        self.rsi_short_min = 55  # RSI > 55 (숏, 공격적: 기존 62 → 55)
         self.atr_period = 14
-        self.atr_threshold = 1.2  # ATR < 1.2
-        self.macd_hist_threshold = 0.2  # MACD Histogram 절대값 < 0.2
+        self.atr_threshold = 5.0  # ATR < 5.0 (공격적: 기존 1.2 → 5.0, 웬만큼 움직여도 횡보로 인정)
+        self.macd_hist_threshold = 0.8  # MACD Histogram 절대값 < 0.8 (공격적: 기존 0.2 → 0.8)
     
     def analyze(self, data_collector):
         """볼린저 밴드 평균 회귀 전략 분석"""
@@ -87,7 +87,7 @@ class BollingerMeanReversionStrategy:
             take_profit_50 = None  # 1차 청산: Basis 도달 시 50%
             take_profit_100 = None  # 전체 청산: ±0.4%
             
-            # LONG: Price <= LowerBB AND RSI < 42
+            # LONG: Price <= LowerBB AND RSI < 45 (공격적: 기존 38 → 45)
             if latest_close <= bb_lower and latest_rsi < self.rsi_long_max:
                 signal = 'LONG'
                 stop_loss = entry_price * (1 - 0.0025)  # ±0.25% 손절
@@ -95,7 +95,7 @@ class BollingerMeanReversionStrategy:
                 take_profit_100 = entry_price * (1 + 0.004)  # 전체 청산: +0.4%
                 logger.info(f"볼린저 평균 회귀 롱: 하단 밴드 터치, RSI={latest_rsi:.2f}, BBW={latest_bbw:.4f}")
             
-            # SHORT: Price >= UpperBB AND RSI > 58
+            # SHORT: Price >= UpperBB AND RSI > 55 (공격적: 기존 62 → 55)
             if latest_close >= bb_upper and latest_rsi > self.rsi_short_min:
                 signal = 'SHORT'
                 stop_loss = entry_price * (1 + 0.0025)  # ±0.25% 손절

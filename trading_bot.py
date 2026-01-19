@@ -10,11 +10,9 @@ import config
 from core import DataCollector, RiskManager, BinanceClient
 from core.indicators import Indicators
 from strategies import (
-    LiquiditySweepStrategy,
     BTCEthCorrelationStrategy,
     CVDDeltaStrategy,
     VolatilitySqueezeStrategy,
-    FundingRateStrategy,
     OrderblockFVGStrategy,
     LiquidationSpikeStrategy,
     # 횡보장 Top 5 Mean-Reversion 전략
@@ -24,6 +22,19 @@ from strategies import (
     StochRSIMeanReversionStrategy,
     CVDFakePressureStrategy
 )
+
+# AI 강화학습 모듈 (선택적)
+TORCH_AVAILABLE = False
+if config.ENABLE_AI:
+    try:
+        import torch
+        from model.trading_env import TradingEnvironment
+        from model.ppo_agent import PPOAgent
+        TORCH_AVAILABLE = True
+    except ImportError as e:
+        TORCH_AVAILABLE = False
+        # logger는 아직 정의되지 않았으므로 print 사용
+        print(f"⚠️ AI 모듈 로드 실패 (torch 미설치 가능): {e}")
 
 # 로깅 설정
 # logs 디렉토리가 없으면 생성
@@ -61,17 +72,12 @@ class TradingBot:
         self.range_strategies = []
         
         # 폭발장 전략
-        if config.STRATEGIES['liquidity_sweep']:
-            self.breakout_strategies.append(LiquiditySweepStrategy())
         if config.STRATEGIES['btc_eth_correlation']:
             self.breakout_strategies.append(BTCEthCorrelationStrategy())
         if config.STRATEGIES['cvd_delta']:
             self.breakout_strategies.append(CVDDeltaStrategy())
         if config.STRATEGIES['volatility_squeeze']:
             self.breakout_strategies.append(VolatilitySqueezeStrategy())
-        # 펀딩비 전략: 선물 거래에서만 활성화
-        if config.STRATEGIES['funding_rate'] and self.client.use_futures:
-            self.breakout_strategies.append(FundingRateStrategy())
         if config.STRATEGIES['orderblock_fvg']:
             self.breakout_strategies.append(OrderblockFVGStrategy())
         # 청산 스파이크 전략: 선물 거래에서만 활성화
@@ -98,81 +104,50 @@ class TradingBot:
         # 전체 전략 리스트 (하위 호환성)
         self.strategies = self.breakout_strategies + self.range_strategies
         
-        # 시장 모드 상태
-        self.current_market_mode = None  # 'TREND', 'RANGE', 'NEUTRAL'
+        # AI 강화학습 초기화 (선택적)
+        self.use_ai = config.ENABLE_AI and TORCH_AVAILABLE
+        self.env = None
+        self.agent = None
+        self.current_position = None  # 현재 포지션 상태 (None, 'LONG', 'SHORT')
+        self.entry_price = None  # 진입 가격
+        self.entry_time = None  # 진입 시간
         
-        # 핵심 돌파 전략 개수 계산 (Liquidity Sweep, Funding Rate 제외)
-        core_breakout_count = sum(1 for s in self.breakout_strategies 
-                                 if s.name not in ['Liquidity Sweep', 'Funding Rate'])
-        logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개")
-        logger.info(f"   추세장(돌파): 핵심 {core_breakout_count}개 + 보조 필터, 횡보장: {len(self.range_strategies)}개")
+        if self.use_ai:
+            try:
+                # 트레이딩 환경 생성
+                self.env = TradingEnvironment(self.data_collector, self.strategies)
+                state_dim = self.env.get_state_dim()
+                action_dim = 3  # 0: Hold, 1: Long, 2: Short
+                
+                # PPO 에이전트 생성
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device)
+                
+                # 기존 모델 로드 (있는 경우)
+                if os.path.exists(config.AI_MODEL_PATH):
+                    try:
+                        self.agent.load_model(config.AI_MODEL_PATH)
+                        logger.info(f"✅ AI 모델 로드 완료: {config.AI_MODEL_PATH}")
+                    except Exception as e:
+                        logger.warning(f"AI 모델 로드 실패 (새 모델로 시작): {e}")
+                
+                logger.info(f"🤖 AI 강화학습 모드 활성화 - 상태 차원: {state_dim}, 행동 차원: {action_dim}")
+            except Exception as e:
+                logger.error(f"AI 초기화 실패: {e}")
+                self.use_ai = False
+        
+        logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개 (돌파장: {len(self.breakout_strategies)}개, 횡보장: {len(self.range_strategies)}개)")
+        if self.use_ai:
+            logger.info("🤖 AI 기반 결정 모드 활성화")
+        else:
+            logger.info("📊 기존 전략 조합 모드 활성화")
     
     def update_data(self):
         """데이터 업데이트"""
         return self.data_collector.update_data()
     
-    def detect_market_mode(self):
-        """시장 상태 판단 (Trend / Range / Neutral)"""
-        try:
-            eth_data = self.data_collector.get_candles('ETH', count=50)
-            if eth_data is None or len(eth_data) < 30:
-                return 'NEUTRAL'
-            
-            # 1. BBW 계산
-            bb_bands = Indicators.calculate_bollinger_bands(eth_data, period=20, std_dev=2.0)
-            if bb_bands is None:
-                return 'NEUTRAL'
-            bbw = Indicators.calculate_bbw(bb_bands)
-            if bbw is None:
-                return 'NEUTRAL'
-            latest_bbw = float(bbw.iloc[-1])
-            
-            # 2. ADX 계산
-            adx = Indicators.calculate_adx(eth_data, period=14)
-            if adx is None:
-                return 'NEUTRAL'
-            latest_adx = float(adx.iloc[-1])
-            
-            # 3. ATR 증가율 계산
-            atr = Indicators.calculate_atr(eth_data, period=14)
-            if atr is None:
-                return 'NEUTRAL'
-            if len(atr) < 20:
-                return 'NEUTRAL'
-            latest_atr = float(atr.iloc[-1])
-            atr_ma = float(Indicators.calculate_sma(atr, period=20).iloc[-1])
-            atr_increase_pct = ((latest_atr - atr_ma) / atr_ma) * 100 if atr_ma > 0 else 0
-            
-            # 시장 상태 지표 로깅
-            logger.info(f"📊 시장 상태 지표 - BBW: {latest_bbw:.4f}, ADX: {latest_adx:.2f}, ATR 증가율: {atr_increase_pct:.2f}%")
-            
-            # TREND Mode 우선 판단 (추세장이 더 명확할 때 우선)
-            # BBW > 0.008 (0.8%) OR ADX > 25 OR ATR 증가율 > 20%
-            if latest_bbw > 0.008 or latest_adx > 25 or atr_increase_pct > 20:
-                logger.info(f"→ TREND 모드 판단: BBW={latest_bbw:.4f} > 0.008 또는 ADX={latest_adx:.2f} > 25 또는 ATR 증가율={atr_increase_pct:.2f}% > 20%")
-                return 'TREND'
-            
-            # RANGE Mode 판단 (TREND가 아닐 때)
-            # BBW < 0.006 (0.6%) AND ADX < 20
-            if latest_bbw < 0.006 and latest_adx < 20:
-                logger.info(f"→ RANGE 모드 판단: BBW={latest_bbw:.4f} < 0.006 AND ADX={latest_adx:.2f} < 20")
-                return 'RANGE'
-            
-            # Neutral Mode (중간 구간)
-            # BBW: 0.006~0.008 사이 OR ADX: 20~25 사이
-            logger.info(f"→ NEUTRAL 모드: 중간 구간 (BBW: {latest_bbw:.4f}, ADX: {latest_adx:.2f}, ATR 증가율: {atr_increase_pct:.2f}%)")
-            return 'NEUTRAL'
-            
-        except Exception as e:
-            logger.error(f"시장 상태 판단 실패: {e}")
-            return 'NEUTRAL'
-    
     def analyze_strategies(self):
-        """시장 상태에 따라 적절한 전략만 분석"""
-        # 1. 시장 상태 판단
-        market_mode = self.detect_market_mode()
-        self.current_market_mode = market_mode
-        
+        """모든 전략 분석 (돌파장 + 횡보장)"""
         logger.info("=" * 60)
         logger.info("📊 전략 분석 시작 (3분봉 데이터 기준)")
         logger.info("=" * 60)
@@ -182,50 +157,15 @@ class TradingBot:
         btc_data_len = len(self.data_collector.btc_data) if self.data_collector.btc_data is not None else 0
         logger.info(f"📦 데이터 상태 - ETH: {eth_data_len}개 캔들, BTC: {btc_data_len}개 캔들")
         
-        # 시장 상태 표시
-        mode_emoji = "🔥" if market_mode == 'TREND' else "📊" if market_mode == 'RANGE' else "⚪"
-        logger.info(f"{mode_emoji} 현재 시장 상태: {market_mode}")
-        
         all_signals = []
         
-        # 2. 시장 모드에 따라 전략 분석
-        if market_mode == 'TREND':
-            all_signals = self._analyze_trend_mode()
-        elif market_mode == 'RANGE':
-            all_signals = self._analyze_range_mode()
-        else:
-            logger.info("⚪ Neutral Mode: 거래 금지 (명확한 추세/횡보가 아님)")
-            return []
-        
-        # 3. 전체 요약
+        # 모든 전략 실행 (돌파장 + 횡보장)
         logger.info("")
-        logger.info("=" * 60)
-        logger.info(f"📈 신호 요약 - {market_mode} 모드: {len(all_signals)}개 신호 발견")
-        logger.info("=" * 60)
-        
-        return all_signals
-    
-    def _analyze_trend_mode(self):
-        """추세장(돌파장) 전략 분석 - 핵심 돌파 전략 3개 + 보조 필터"""
-        signals = []
-        
-        # 핵심 돌파 전략 목록
-        core_strategies = ['Volatility Squeeze', 'Orderblock FVG', 'CVD Delta']
-        filter_strategies = ['BTC/ETH Correlation', 'Liquidation Spike']
-        excluded_strategies = ['Liquidity Sweep', 'Funding Rate']
-        
-        logger.info("")
-        logger.info("🔥 추세장 모드 (Trend Mode) - 돌파 전략 최적화")
-        logger.info("   필수 핵심: Volatility Squeeze + Orderblock FVG + CVD Delta")
-        logger.info("   보조 필터: BTC/ETH Correlation (환경), Liquidation Spike (보너스)")
-        logger.info("   제외 전략: Liquidity Sweep, Funding Rate")
+        logger.info("🔥 돌파장 전략 분석")
         logger.info("-" * 60)
         
         for strategy in self.breakout_strategies:
             try:
-                # 제외된 전략은 신호만 수집하고 로그는 생략
-                is_excluded = strategy.name in excluded_strategies
-                
                 signal = strategy.analyze(self.data_collector)
                 if signal:
                     score = signal['confidence']
@@ -233,32 +173,17 @@ class TradingBot:
                     entry_price = signal.get('entry_price', 0)
                     
                     if self.risk_manager.validate_signal(signal):
-                        signals.append(signal)
-                        if not is_excluded:
-                            # 핵심 전략 표시
-                            if strategy.name in core_strategies:
-                                logger.info(f"⭐ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f} [핵심]")
-                            elif strategy.name in filter_strategies:
-                                logger.info(f"🔍 {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f} [보조]")
-                            else:
-                                logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
+                        all_signals.append(signal)
+                        logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
                     else:
-                        if not is_excluded:
-                            logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
+                        logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
                 else:
-                    if not is_excluded:
-                        logger.info(f"⚪ {strategy.name:25s} | 신호 없음 | Score: 0.00%")
+                    logger.info(f"⚪ {strategy.name:25s} | 신호 없음 | Score: 0.00%")
             except Exception as e:
                 logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
         
-        return signals
-    
-    def _analyze_range_mode(self):
-        """횡보장 전략 분석 - 단일 신호로도 충분"""
-        signals = []
-        
         logger.info("")
-        logger.info("📊 횡보장 모드 (Range Mode) - 횡보장 전략 5개 분석")
+        logger.info("📊 횡보장 전략 분석")
         logger.info("-" * 60)
         
         for strategy in self.range_strategies:
@@ -270,7 +195,7 @@ class TradingBot:
                     entry_price = signal.get('entry_price', 0)
                     
                     if self.risk_manager.validate_signal(signal):
-                        signals.append(signal)
+                        all_signals.append(signal)
                         logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
                     else:
                         logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
@@ -279,21 +204,180 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
         
-        return signals
-    
+        # 전체 요약
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(f"📈 신호 요약: {len(all_signals)}개 신호 발견")
+        logger.info("=" * 60)
+        
+        return all_signals
     def combine_signals(self, signals):
-        """시장 모드에 따라 다른 진입 규칙 적용"""
+        """모든 전략 신호 조합 (단일 로직)"""
         if not signals:
             return None
         
-        # 현재 시장 모드에 따라 다른 로직 적용
-        if self.current_market_mode == 'TREND':
-            return self._combine_trend_signals(signals)
-        elif self.current_market_mode == 'RANGE':
-            return self._combine_range_signals(signals)
-        else:
-            logger.info("⚪ Neutral Mode: 거래 금지")
-            return None
+        # 롱/숏 신호 분리
+        long_signals = [s for s in signals if s.get('signal') == 'LONG']
+        short_signals = [s for s in signals if s.get('signal') == 'SHORT']
+        
+        long_score = len(long_signals)
+        short_score = len(short_signals)
+        total_strategies = len(self.strategies)
+        
+        # 최소 2개 이상 전략이 같은 방향을 가리킬 때 진입
+        if long_score >= 2:
+            avg_confidence = sum(s['confidence'] for s in long_signals) / len(long_signals)
+            avg_entry = sum(s['entry_price'] for s in long_signals) / len(long_signals)
+            stop_loss = max([s.get('stop_loss', 0) for s in long_signals if s.get('stop_loss')], default=None)
+            
+            logger.info(f"🎯 롱 진입: {long_score}/{total_strategies}개 전략 신호")
+            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals])}")
+            return {
+                'signal': 'LONG',
+                'entry_price': avg_entry,
+                'stop_loss': stop_loss,
+                'confidence': avg_confidence,
+                'strategy': 'Multi-Strategy Confluence',
+                'strategies': [s['strategy'] for s in long_signals]
+            }
+        
+        if short_score >= 2:
+            avg_confidence = sum(s['confidence'] for s in short_signals) / len(short_signals)
+            avg_entry = sum(s['entry_price'] for s in short_signals) / len(short_signals)
+            stop_loss = min([s.get('stop_loss', float('inf')) for s in short_signals if s.get('stop_loss')], default=None)
+            if stop_loss == float('inf'):
+                stop_loss = None
+            
+            logger.info(f"🎯 숏 진입: {short_score}/{total_strategies}개 전략 신호")
+            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals])}")
+            return {
+                'signal': 'SHORT',
+                'entry_price': avg_entry,
+                'stop_loss': stop_loss,
+                'confidence': avg_confidence,
+                'strategy': 'Multi-Strategy Confluence',
+                'strategies': [s['strategy'] for s in short_signals]
+            }
+        
+        logger.info(f"⚠️  진입 조건 미충족: LONG {long_score}개, SHORT {short_score}개 (최소 2개 필요)")
+        return None
+    
+    def _run_ai_mode(self):
+        """AI 강화학습 기반 결정"""
+        try:
+            # 1. 현재 상태 관측
+            state = self.env.get_observation()
+            if state is None:
+                logger.warning("⚠️ 상태 관측 실패: 다음 캔들 대기")
+                return
+            
+            # 2. AI 행동 결정 (0: Hold, 1: Long, 2: Short)
+            action, log_prob = self.agent.select_action(state)
+            action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
+            action_name = action_names[action]
+            
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info(f"🤖 AI 결정: {action_name}")
+            logger.info("=" * 60)
+            
+            # 3. 현재 가격 확인
+            eth_data = self.data_collector.get_candles('ETH', count=1)
+            if eth_data is None or len(eth_data) == 0:
+                logger.warning("⚠️ 가격 데이터 없음")
+                return
+            
+            current_price = float(eth_data.iloc[-1]['close'])
+            
+            # 4. 행동에 따른 처리
+            reward = 0.0
+            trade_done = False
+            
+            if action == 1:  # LONG
+                if self.current_position != 'LONG':
+                    # 기존 포지션 청산
+                    if self.current_position == 'SHORT' and self.entry_price:
+                        pnl = (self.entry_price - current_price) / self.entry_price
+                        reward = self.env.calculate_reward(pnl, True)
+                        trade_done = True
+                        logger.info(f"💰 숏 포지션 청산: 수익률 {pnl:.2%}")
+                    
+                    # 롱 진입
+                    if config.ENABLE_TRADING:
+                        signal = {
+                            'signal': 'LONG',
+                            'entry_price': current_price,
+                            'stop_loss': None,
+                            'confidence': 0.0,
+                            'strategy': 'AI Decision'
+                        }
+                        if self.execute_trade(signal):
+                            self.current_position = 'LONG'
+                            self.entry_price = current_price
+                            self.entry_time = datetime.now()
+                            logger.info(f"📈 롱 포지션 진입: ${current_price:.2f}")
+                    else:
+                        logger.info(f"📊 분석 모드: 롱 진입 신호 (가격: ${current_price:.2f})")
+                        self.current_position = 'LONG'
+                        self.entry_price = current_price
+                        self.entry_time = datetime.now()
+            
+            elif action == 2:  # SHORT
+                if self.current_position != 'SHORT':
+                    # 기존 포지션 청산
+                    if self.current_position == 'LONG' and self.entry_price:
+                        pnl = (current_price - self.entry_price) / self.entry_price
+                        reward = self.env.calculate_reward(pnl, True)
+                        trade_done = True
+                        logger.info(f"💰 롱 포지션 청산: 수익률 {pnl:.2%}")
+                    
+                    # 숏 진입
+                    if config.ENABLE_TRADING:
+                        signal = {
+                            'signal': 'SHORT',
+                            'entry_price': current_price,
+                            'stop_loss': None,
+                            'confidence': 0.0,
+                            'strategy': 'AI Decision'
+                        }
+                        if self.execute_trade(signal):
+                            self.current_position = 'SHORT'
+                            self.entry_price = current_price
+                            self.entry_time = datetime.now()
+                            logger.info(f"📉 숏 포지션 진입: ${current_price:.2f}")
+                    else:
+                        logger.info(f"📊 분석 모드: 숏 진입 신호 (가격: ${current_price:.2f})")
+                        self.current_position = 'SHORT'
+                        self.entry_price = current_price
+                        self.entry_time = datetime.now()
+            
+            else:  # HOLD
+                # 보유 중인 포지션의 수익률 계산 (보상용)
+                if self.current_position and self.entry_price:
+                    if self.current_position == 'LONG':
+                        pnl = (current_price - self.entry_price) / self.entry_price
+                    else:  # SHORT
+                        pnl = (self.entry_price - current_price) / self.entry_price
+                    
+                    holding_time = (datetime.now() - self.entry_time).total_seconds() / 60 if self.entry_time else 0
+                    reward = self.env.calculate_reward(pnl, False, holding_time)
+                    logger.debug(f"💼 포지션 보유 중: {self.current_position}, 수익률 {pnl:.2%}")
+            
+            # 5. 트랜지션 저장 (학습용)
+            is_terminal = False  # 연속 환경이므로 False
+            self.agent.store_transition(state, action, log_prob, reward, is_terminal)
+            
+            # 6. 주기적 업데이트 (예: 10개 트랜지션마다)
+            if len(self.agent.memory) >= 10:
+                logger.info("🔄 AI 모델 업데이트 중...")
+                self.agent.update()
+                # 모델 저장
+                os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
+                self.agent.save_model(config.AI_MODEL_PATH)
+                logger.info(f"💾 AI 모델 저장 완료: {config.AI_MODEL_PATH}")
+                
+        except Exception as e:
+            logger.error(f"AI 모드 실행 실패: {e}", exc_info=True)
     
     def _combine_trend_signals(self, signals):
         """추세장 진입 규칙: 핵심 돌파 전략 3중주 2개 이상 필수 + 환경 필터"""
@@ -985,6 +1069,11 @@ class TradingBot:
                 
             except KeyboardInterrupt:
                 logger.info("봇 종료 요청")
+                if self.use_ai and self.agent:
+                    # 모델 저장
+                    os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
+                    self.agent.save_model(config.AI_MODEL_PATH)
+                    logger.info(f"💾 AI 모델 저장 완료: {config.AI_MODEL_PATH}")
                 break
             except Exception as e:
                 logger.error(f"봇 실행 중 오류: {e}")
