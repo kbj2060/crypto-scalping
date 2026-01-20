@@ -1,10 +1,29 @@
 """
 xLSTM 기반 신경망 구조
 sLSTM(scalar LSTM) 구조를 사용하여 지수 게이팅(Exponential Gating)과 정규화(Normalization) 구현
+Multi-Head Attention과 심층화된 Actor-Critic 적용
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+class MultiHeadAttention(nn.Module):
+    """시퀀스 데이터의 중요 지점을 포착하기 위한 어텐션 레이어"""
+    def __init__(self, hidden_dim, heads=4):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=heads, batch_first=True)
+        # 어텐션 이후의 정보를 정리할 정규화 층
+        self.norm = nn.LayerNorm(hidden_dim)
+        
+    def forward(self, x):
+        # x: (batch, seq, hidden)
+        # 쿼리, 키, 밸류를 동일하게 설정하여 셀프 어텐션 수행
+        attn_output, _ = self.attn(x, x, x)
+        # 잔차 연결(Residual Connection) 및 정규화
+        x = self.norm(x + attn_output)
+        # 전체 시퀀스 정보를 요약 (가중 평균)
+        return x.mean(dim=1)
 
 
 class sLSTMCell(nn.Module):
@@ -48,23 +67,34 @@ class sLSTMCell(nn.Module):
 
 
 class xLSTMActorCritic(nn.Module):
-    """xLSTM 기반 Actor-Critic 네트워크"""
+    """개선된 xLSTM: Attention과 Deep Actor-Critic 적용"""
     def __init__(self, input_dim, action_dim, hidden_dim=128):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.xlstm_cell = sLSTMCell(input_dim, hidden_dim)
         
-        # Actor: 정책 분포 (Hold, Long, Short)
+        # [로드맵 1] 시퀀스 전체 정보를 읽는 눈 추가
+        self.attention = MultiHeadAttention(hidden_dim, heads=4)
+        
+        # [로드맵 3] 심층화된 Actor: LayerNorm으로 수치 안정성 확보
         self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
+            nn.Linear(hidden_dim, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, action_dim),
             nn.Softmax(dim=-1)
         )
         
-        # Critic: 상태 가치 평가
+        # [로드맵 3] 심층화된 Critic: 가치 평가의 정밀도 향상
         self.critic = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
+            nn.Linear(hidden_dim, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -86,12 +116,20 @@ class xLSTMActorCritic(nn.Module):
         else:
             h, c, n = states
 
-        # 시퀀스 처리
+        # [로드맵 1 적용] 모든 타임스텝의 h를 수집
+        all_h = []
         for t in range(seq_len):
             h, c, n = self.xlstm_cell(x[:, t, :], h, c, n, None)
+            all_h.append(h.unsqueeze(1))
             
-        # Actor와 Critic 출력
-        action_probs = self.actor(h)
-        value = self.critic(h)
+        # (batch, seq_len, hidden_dim) 형태로 결합
+        seq_h = torch.cat(all_h, dim=1)
+        
+        # Attention을 통해 20개 캔들의 핵심 정보를 하나의 컨텍스트로 요약
+        context = self.attention(seq_h)
+        
+        # 강화된 Actor/Critic 출력
+        action_probs = self.actor(context)
+        value = self.critic(context)
         
         return action_probs, value

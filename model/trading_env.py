@@ -1,7 +1,7 @@
 """
 강화학습 트레이딩 환경
 기존 전략 Score와 시장 데이터를 결합하는 환경 인터페이스
-웨이블릿 변환을 이용한 노이즈 제거 포함
+원시 데이터 보존 + Z-Score 정규화
 """
 import numpy as np
 import torch
@@ -18,42 +18,39 @@ class TradingEnvironment:
         Args:
             data_collector: DataCollector 인스턴스
             strategies: 전략 리스트
-            lookback: 웨이블릿 변환을 위한 충분한 샘플 수 (기본 40)
+            lookback: 충분한 샘플 수 (기본 40)
         """
         self.collector = data_collector
         self.strategies = strategies
         self.num_strategies = len(strategies)
-        self.lookback = lookback  # 웨이블릿 변환을 위해 충분한 샘플 확보
+        self.lookback = lookback
         
-        # 전처리 파이프라인 (xLSTM은 -1~1 사이 입력 선호)
-        self.preprocessor = DataPreprocessor(feature_range=(-1, 1))
+        # 전처리 파이프라인 (Z-Score 정규화)
+        self.preprocessor = DataPreprocessor()
+        self.scaler_fitted = False  # 스케일러 학습 여부
 
     def get_observation(self):
         """
-        현재 상태 관측 (웨이블릿 노이즈 제거 + 정규화)
+        현재 상태 관측 (원시 데이터 + Z-Score 정규화)
         
         Returns:
             observation: (1, seq_len, state_dim) 텐서
-                - denoised_prices: 웨이블릿으로 노이즈 제거된 가격 데이터
+                - close_prices: 원시 가격 데이터 (웨이블릿 제거)
                 - volumes: 거래량 데이터
                 - strategy_scores: 각 전략의 신뢰도 점수
         """
         try:
-            # 1. 원본 데이터 수집 (충분한 길이 확보 - 웨이블릿 변환용)
+            # 1. 원본 데이터 수집
             candles = self.collector.get_candles('ETH', count=self.lookback)
             if candles is None or len(candles) < self.lookback:
                 logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: {self.lookback}개)")
                 return None
             
-            # 가격 및 거래량 추출
+            # 가격 및 거래량 추출 (원시 데이터 사용, 웨이블릿 제거)
             close_prices = candles['close'].values.astype(np.float32)
             volumes = candles['volume'].values.astype(np.float32)
             
-            # 2. Wavelet Denoising 적용 (가격 데이터의 노이즈 제거)
-            # 웨이블릿 변환은 시계열 데이터에서 불필요한 노이즈를 제거하고 추세를 선명하게 만듦
-            denoised_prices = self.preprocessor.wavelet_denoising(close_prices)
-            
-            # 3. 기술적 전략 Score 수집
+            # 2. 기술적 전략 Score 수집
             strategy_scores = []
             for strategy in self.strategies:
                 try:
@@ -67,27 +64,29 @@ class TradingEnvironment:
                     logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
                     strategy_scores.append(0.0)
             
-            # 4. 피처 결합 (노이즈 제거된 가격, 거래량, 전략 점수)
+            # 3. 피처 결합 (원시 가격, 거래량, 전략 점수)
             # 마지막 20봉의 윈도우 데이터 생성 (xLSTM 입력용)
             window_size = 20
-            denoised_window = denoised_prices[-window_size:]
+            prices_window = close_prices[-window_size:]
             volumes_window = volumes[-window_size:]
             
             # 전략 점수를 20봉 시퀀스 전체에 복제
-            # 팁: 점수 데이터를 20봉 시퀀스 전체에 붙여주어 xLSTM이 문맥을 이해하게 함
             scores_array = np.array(strategy_scores, dtype=np.float32)
             scores_tiled = np.tile(scores_array, (window_size, 1))  # (20, num_strategies)
             
             # 원시 피처 결합: (20, 2 + num_strategies)
             raw_features = np.column_stack([
-                denoised_window,
+                prices_window,
                 volumes_window,
                 scores_tiled
             ])
             
-            # 5. Min-Max Scaling 적용 (-1~1 범위)
-            # xLSTM의 지수 게이팅 폭발을 막기 위한 핵심 단계
-            normalized_obs = self.preprocessor.fit_transform(raw_features)
+            # 4. Z-Score 정규화 적용 (fit은 학습 시작 전에 이미 완료됨)
+            # transform만 사용하여 가격의 상대적 높낮이 맥락 유지
+            if not self.scaler_fitted:
+                logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
+            
+            normalized_obs = self.preprocessor.transform(raw_features)
             
             # 배치 차원 추가: (1, 20, 2 + num_strategies)
             observation = torch.FloatTensor(normalized_obs).unsqueeze(0)
@@ -98,27 +97,40 @@ class TradingEnvironment:
             logger.error(f"관측 생성 실패: {e}", exc_info=True)
             return None
 
-    def calculate_reward(self, pnl, trade_done, holding_time=0):
+    def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        보상 계산
+        보상 계산 (현실화된 보상 체계 + 비선형 보상)
         
         Args:
             pnl: 손익 (수익률)
             trade_done: 거래 완료 여부
             holding_time: 보유 시간 (분)
+            pnl_change: 이전 스텝 대비 수익률의 변화 (새로 추가)
         Returns:
             reward: 보상값
         """
-        # 수익률 보상 (100배 스케일링)
-        reward = pnl * 100
+        reward = 0.0
         
-        # 거래 횟수 조절 페널티 (수수료)
+        # 1. 미실현 손익의 '변화량'만 보상 (계속 들고 있다고 보상을 퍼주지 않음)
+        # pnl_change가 0이면 보상도 0 (변화가 없으면 보상 없음)
+        reward = pnl_change * 100
+        
+        # 2. 거래가 완료되었을 때만 '실현 수익'에 비선형 보상 부여
         if trade_done:
-            reward -= 0.01
+            if pnl > 0:
+                # 수익이 클수록 보상을 제곱으로 부여하여 큰 수익을 유도
+                # 예: 0.5% 수익 → (0.005 * 100)^2 / 10 = 0.25
+                #     2% 수익 → (0.02 * 100)^2 / 10 = 4.0 (16배 차이!)
+                reward += (pnl * 100) ** 2 / 10
+            else:
+                # 손실은 그대로 페널티 (비선형 적용 안 함)
+                reward += pnl * 20
+            
+            reward -= 0.01  # 수수료 페널티
         
-        # 보유 시간 페널티 (과도한 보유 방지)
-        if holding_time > 0:
-            reward -= holding_time * 0.001
+        # 3. 시간 페널티 완화 (기존 -0.0005 -> -0.0001)
+        # 큰 추세를 끝까지 타도록 유도
+        reward -= 0.0001
         
         return reward
 

@@ -7,6 +7,16 @@ import os
 import sys
 import time
 from datetime import datetime
+from collections import deque
+import numpy as np
+
+# 시각화 모듈 (선택적)
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    plt = None
 
 # 상위 폴더를 경로에 추가 (config, core, strategies 모듈 접근용)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,10 +61,67 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# matplotlib 사용 가능 여부 로깅
+if not MATPLOTLIB_AVAILABLE:
+    logger.warning("matplotlib가 설치되지 않았습니다. 시각화 기능이 비활성화됩니다.")
+    logger.warning("설치 방법: pip install matplotlib")
+
+
+class LiveVisualizer:
+    """학습 리워드를 실시간으로 그래프화하는 클래스"""
+    def __init__(self, window_size=10):
+        if not MATPLOTLIB_AVAILABLE:
+            self.enabled = False
+            return
+        
+        self.enabled = True
+        plt.ion()  # 대화형 모드 활성화
+        self.fig, self.ax = plt.subplots(figsize=(10, 5))
+        self.rewards = []
+        self.moving_avg = []
+        self.window_size = window_size
+        
+        self.ax.set_title("Real-time Training Performance")
+        self.ax.set_xlabel("Episode")
+        self.ax.set_ylabel("Total Reward")
+        self.line1, = self.ax.plot([], [], label='Episode Reward', alpha=0.3, color='blue')
+        self.line2, = self.ax.plot([], [], label=f'Moving Avg ({window_size})', color='red', linewidth=2)
+        self.ax.legend()
+        self.ax.grid(True)
+
+    def update(self, reward):
+        if not self.enabled:
+            return
+        
+        self.rewards.append(reward)
+        
+        # 이동 평균 계산
+        if len(self.rewards) >= self.window_size:
+            avg = np.mean(self.rewards[-self.window_size:])
+        else:
+            avg = np.mean(self.rewards)
+        self.moving_avg.append(avg)
+        
+        # 데이터 업데이트
+        x = np.arange(len(self.rewards))
+        self.line1.set_data(x, self.rewards)
+        self.line2.set_data(x, self.moving_avg)
+        
+        # 화면 범위 자동 조절
+        self.ax.relim()
+        self.ax.autoscale_view()
+        
+        plt.draw()
+        plt.pause(0.01)  # 짧은 휴식으로 그래프 갱신 보장
+
 
 class PPOTrainer:
     """PPO 모델 학습 클래스"""
-    def __init__(self):
+    def __init__(self, enable_visualization=False):
+        """
+        Args:
+            enable_visualization: 시각화 활성화 여부 (기본값: True)
+        """
         # 저장된 데이터 사용 (학습용)
         self.data_collector = DataCollector(use_saved_data=True)
         self.client = BinanceClient()
@@ -96,6 +163,10 @@ class PPOTrainer:
         
         # 트레이딩 환경 생성
         self.env = TradingEnvironment(self.data_collector, self.strategies)
+        
+        # 스케일러 전역 학습 (학습 시작 전 전체 데이터로 한 번만 fit)
+        self._fit_global_scaler()
+        
         state_dim = self.env.get_state_dim()
         action_dim = 3  # 0: Hold, 1: Long, 2: Short
         
@@ -118,16 +189,108 @@ class PPOTrainer:
         self.current_position = None
         self.entry_price = None
         self.entry_time = None
+        self.prev_pnl = 0.0  # 이전 스텝의 수익률 (pnl_change 계산용)
         self.episode_rewards = []
         self.total_steps = 0
+        
+        # 실시간 시각화 초기화 (옵션)
+        if enable_visualization:
+            self.visualizer = LiveVisualizer(window_size=10)
+        else:
+            self.visualizer = None
+    
+    def _fit_global_scaler(self):
+        """전체 학습 데이터셋으로 스케일러 학습 (한 번만 실행)"""
+        try:
+            logger.info("전역 스케일러 학습 시작...")
+            
+            # 전체 데이터 수집
+            if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
+                logger.warning("데이터가 없어 스케일러 학습을 건너뜁니다.")
+                return
+            
+            # 샘플링할 데이터 수 (전체 데이터가 너무 크면 샘플링)
+            total_candles = len(self.data_collector.eth_data)
+            sample_size = min(50000, total_candles)  # 최대 5만개 샘플
+            
+            # 랜덤 샘플링 또는 균등 간격 샘플링
+            if total_candles > sample_size:
+                indices = np.linspace(0, total_candles - 1, sample_size, dtype=int)
+            else:
+                indices = np.arange(total_candles)
+            
+            logger.info(f"스케일러 학습용 데이터: {len(indices)}개 샘플 (전체: {total_candles}개)")
+            
+            # 피처 수집
+            window_size = 20
+            lookback = self.env.lookback
+            all_features = []
+            
+            for idx in indices:
+                if idx < lookback:
+                    continue
+                
+                try:
+                    # 해당 인덱스의 데이터 가져오기
+                    candles = self.data_collector.eth_data.iloc[idx-lookback+1:idx+1]
+                    if len(candles) < lookback:
+                        continue
+                    
+                    # 원시 데이터 추출
+                    close_prices = candles['close'].values.astype(np.float32)
+                    volumes = candles['volume'].values.astype(np.float32)
+                    
+                    # 윈도우 데이터
+                    prices_window = close_prices[-window_size:]
+                    volumes_window = volumes[-window_size:]
+                    
+                    # 전략 점수 (0으로 초기화, 실제 값은 나중에 계산)
+                    strategy_scores = np.zeros(self.env.num_strategies, dtype=np.float32)
+                    scores_tiled = np.tile(strategy_scores, (window_size, 1))
+                    
+                    # 피처 결합
+                    features = np.column_stack([
+                        prices_window,
+                        volumes_window,
+                        scores_tiled
+                    ])
+                    
+                    all_features.append(features)
+                    
+                except Exception as e:
+                    logger.debug(f"인덱스 {idx} 처리 실패: {e}")
+                    continue
+            
+            if len(all_features) == 0:
+                logger.warning("피처 수집 실패, 스케일러 학습 건너뜀")
+                return
+            
+            # 전체 피처 결합
+            all_features_array = np.vstack(all_features)
+            
+            # 스케일러 학습
+            self.env.preprocessor.fit(all_features_array)
+            self.env.scaler_fitted = True
+            
+            logger.info(f"✅ 전역 스케일러 학습 완료: {len(all_features_array)}개 샘플")
+            
+        except Exception as e:
+            logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
+            logger.warning("스케일러 학습 실패, 첫 관측 시 학습합니다.")
         
     def train_episode(self, max_steps=100):
         """한 에피소드 학습"""
         episode_reward = 0.0
         steps = 0
         
-        # 저장된 데이터에서 인덱스 리셋 (새 에피소드 시작)
-        self.data_collector.reset_index()
+        # 저장된 데이터에서 인덱스 리셋 (새 에피소드 시작 - 무작위 시작 인덱스)
+        self.data_collector.reset_index(max_steps=max_steps, random_start=True)
+        
+        # 에피소드 시작 시 이전 수익률 초기화
+        self.prev_pnl = 0.0
+        self.current_position = None
+        self.entry_price = None
+        self.entry_time = None
         
         # 초기 데이터 확인
         if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
@@ -178,20 +341,25 @@ class PPOTrainer:
                 # 4. 보상 계산 및 포지션 업데이트
                 reward = 0.0
                 trade_done = False
+                current_pnl = 0.0
+                pnl_change = 0.0
                 
                 if action == 1:  # LONG
                     if self.current_position != 'LONG':
                         # 기존 포지션 청산
                         if self.current_position == 'SHORT' and self.entry_price:
                             pnl = (self.entry_price - current_price) / self.entry_price
-                            reward = self.env.calculate_reward(pnl, True)
+                            pnl_change = pnl - self.prev_pnl  # 실현 수익의 변화량
+                            reward = self.env.calculate_reward(pnl, True, holding_time=0, pnl_change=pnl_change)
                             trade_done = True
                             logger.info(f"💰 숏 청산: 수익률 {pnl:.2%}, 보상: {reward:.4f}")
+                            self.prev_pnl = 0.0  # 포지션 청산 후 초기화
                         
                         # 롱 진입
                         self.current_position = 'LONG'
                         self.entry_price = current_price
                         self.entry_time = datetime.now()
+                        self.prev_pnl = 0.0  # 새 포지션 진입 시 초기화
                         logger.debug(f"📈 롱 진입: ${current_price:.2f}")
                 
                 elif action == 2:  # SHORT
@@ -199,38 +367,62 @@ class PPOTrainer:
                         # 기존 포지션 청산
                         if self.current_position == 'LONG' and self.entry_price:
                             pnl = (current_price - self.entry_price) / self.entry_price
-                            reward = self.env.calculate_reward(pnl, True)
+                            pnl_change = pnl - self.prev_pnl  # 실현 수익의 변화량
+                            reward = self.env.calculate_reward(pnl, True, holding_time=0, pnl_change=pnl_change)
                             trade_done = True
                             logger.info(f"💰 롱 청산: 수익률 {pnl:.2%}, 보상: {reward:.4f}")
+                            self.prev_pnl = 0.0  # 포지션 청산 후 초기화
                         
                         # 숏 진입
                         self.current_position = 'SHORT'
                         self.entry_price = current_price
                         self.entry_time = datetime.now()
+                        self.prev_pnl = 0.0  # 새 포지션 진입 시 초기화
                         logger.debug(f"📉 숏 진입: ${current_price:.2f}")
                 
                 else:  # HOLD
                     # 보유 중인 포지션의 수익률 계산
                     if self.current_position and self.entry_price:
                         if self.current_position == 'LONG':
-                            pnl = (current_price - self.entry_price) / self.entry_price
+                            current_pnl = (current_price - self.entry_price) / self.entry_price
                         else:  # SHORT
-                            pnl = (self.entry_price - current_price) / self.entry_price
+                            current_pnl = (self.entry_price - current_price) / self.entry_price
+                        
+                        # 이전 스텝 대비 수익률의 변화량 계산
+                        pnl_change = current_pnl - self.prev_pnl
                         
                         holding_time = (datetime.now() - self.entry_time).total_seconds() / 60 if self.entry_time else 0
-                        reward = self.env.calculate_reward(pnl, False, holding_time)
+                        reward = self.env.calculate_reward(current_pnl, False, holding_time, pnl_change)
+                        
+                        # 다음 스텝을 위해 현재 pnl 저장
+                        self.prev_pnl = current_pnl
                 
                 # 5. 트랜지션 저장
-                is_terminal = False
+                is_terminal = (step == actual_steps - 1)  # 에피소드 마지막 스텝 여부
                 self.agent.store_transition(state, action, log_prob, reward, is_terminal)
                 
                 episode_reward += reward
                 steps += 1
                 self.total_steps += 1
                 
-                # 6. 주기적 업데이트 (10개 트랜지션마다)
-                if len(self.agent.memory) >= 10:
-                    self.agent.update()
+                # 6. 주기적 업데이트 (256개 트랜지션마다 - 버퍼 업데이트 방식)
+                if len(self.agent.memory) >= 256:
+                    # 다음 스텝에서 사용할 상태를 미리 관측하여 Bootstrap 값으로 사용
+                    # (인덱스가 이미 증가했으므로 다음 관측이 곧 다음 상태)
+                    next_obs = None
+                    if not is_terminal:
+                        # 다음 인덱스로 이동하여 다음 상태 관측
+                        if self.data_collector.current_index < len(self.data_collector.eth_data):
+                            # 임시로 인덱스 증가 (다음 상태 관측용)
+                            temp_index = self.data_collector.current_index
+                            self.data_collector.current_index += 1
+                            next_obs = self.env.get_observation()
+                            # 인덱스 복원 (실제 증가는 다음 루프에서)
+                            self.data_collector.current_index = temp_index
+                    
+                    # Bootstrap 업데이트 수행
+                    self.agent.update(next_state=next_obs if next_obs is not None else None)
+                    logger.info(f"🚀 Bootstrap 업데이트 완료 (Step: {step}, Memory: {len(self.agent.memory)}, Next Value: {'Yes' if next_obs is not None else 'No'})")
                 
                 # 저장된 데이터는 자동으로 다음 캔들로 진행됨 (대기 불필요)
                 
@@ -270,6 +462,10 @@ class PPOTrainer:
                 
                 episode_reward, steps = result
                 self.episode_rewards.append(episode_reward)
+                
+                # 실시간 그래프 업데이트 (시각화 활성화 시에만)
+                if self.visualizer is not None:
+                    self.visualizer.update(episode_reward)
                 
                 # 통계 출력
                 avg_reward = sum(self.episode_rewards[-10:]) / len(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else episode_reward
@@ -314,13 +510,14 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='PPO 모델 학습')
     parser.add_argument('--episodes', type=int, default=100, help='학습 에피소드 수')
-    parser.add_argument('--steps', type=int, default=100, help='에피소드당 최대 스텝 수')
+    parser.add_argument('--steps', type=int, default=1000, help='에피소드당 최대 스텝 수 (기본값: 1000, 큰 추세 학습용)')
     parser.add_argument('--save-interval', type=int, default=10, help='모델 저장 간격 (에피소드)')
+    parser.add_argument('--no-visualize', action='store_true', help='시각화 비활성화')
     
     args = parser.parse_args()
     
     try:
-        trainer = PPOTrainer()
+        trainer = PPOTrainer(enable_visualization=not args.no_visualize)
         trainer.train(
             num_episodes=args.episodes,
             max_steps_per_episode=args.steps,

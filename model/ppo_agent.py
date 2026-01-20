@@ -14,7 +14,7 @@ class PPOAgent:
     """PPO 알고리즘 기반 강화학습 에이전트"""
     def __init__(self, state_dim, action_dim, hidden_dim=128, device='cpu'):
         self.device = device
-        self.gamma = 0.99  # 할인율
+        self.gamma = 0.999  # 할인율 (인내심 강화: 미래 보상에 더 높은 가치 부여)
         self.lmbda = 0.95  # GAE 파라미터
         self.eps_clip = 0.2  # PPO 클리핑 범위
         self.k_epochs = 10  # 업데이트 반복 횟수
@@ -77,25 +77,37 @@ class PPOAgent:
         return torch.tensor(advantages, dtype=torch.float).unsqueeze(1), \
                torch.tensor(returns, dtype=torch.float).unsqueeze(1)
 
-    def update(self):
-        """PPO 업데이트 수행"""
+    def update(self, next_state=None):
+        """PPO 업데이트 수행
+        
+        Args:
+            next_state: 다음 상태 텐서 (부트스트랩 가치 계산용, None이면 0 사용)
+        """
         if len(self.memory) == 0:
             return
         
-        # 메모리에서 데이터 추출
+        # 1. 메모리에서 데이터 추출
         states = torch.cat([m[0] for m in self.memory], dim=0)
         actions = torch.tensor([m[1] for m in self.memory], dtype=torch.long).unsqueeze(1).to(self.device)
         old_log_probs = torch.tensor([m[2] for m in self.memory], dtype=torch.float).unsqueeze(1).to(self.device)
         rewards = [m[3] for m in self.memory]
         is_terminals = [m[4] for m in self.memory]
 
-        # 현재 가치 함수 계산
+        # 2. 부트스트랩 가치(next_value) 결정 [핵심 추가]
+        next_value = 0
+        if next_state is not None:
+            with torch.no_grad():
+                # 다음 상태의 Value를 예측하여 미래 보상의 기댓값으로 사용
+                _, next_v = self.model(next_state.to(self.device))
+                next_value = next_v.item()
+
+        # 3. 현재 상태들의 가치 계산
         with torch.no_grad():
             _, values = self.model(states)
             values = values.squeeze().cpu().numpy().tolist()
         
-        # GAE 계산
-        advantages, returns = self.compute_gae(rewards, values, is_terminals)
+        # 4. GAE 계산 시 추출한 next_value 전달
+        advantages, returns = self.compute_gae(rewards, values, is_terminals, next_value=next_value)
         advantages = advantages.to(self.device)
         returns = returns.to(self.device)
 

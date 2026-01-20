@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 import time
 import os
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,6 @@ class DataCollector:
         self.btc_data = None
         self.eth_funding_rate = None
         self.btc_funding_rate = None
-        self.eth_liquidation_data = []  # 청산 데이터 저장
-        self.btc_liquidation_data = []  # BTC 청산 데이터 저장
         self.use_saved_data = use_saved_data
         self.current_index = 0  # 저장된 데이터 사용 시 현재 인덱스
         
@@ -77,13 +76,6 @@ class DataCollector:
                     logger.debug(f"펀딩비 조회 실패 (계속 진행): {e}")
                     self.eth_funding_rate = None
                     self.btc_funding_rate = None
-                
-                # 청산 데이터 업데이트 (선물 거래에서만)
-                try:
-                    self.update_liquidation_data('ETH')
-                    self.update_liquidation_data('BTC')
-                except Exception as e:
-                    logger.debug(f"청산 데이터 업데이트 실패 (계속 진행): {e}")
             
             if self.eth_data is not None and self.btc_data is not None:
                 eth_latest = self.eth_data.iloc[-1] if len(self.eth_data) > 0 else None
@@ -184,172 +176,6 @@ class DataCollector:
             logger.error(f"CVD 계산 실패: {e}")
             return None
     
-    def update_liquidation_data(self, symbol='ETH'):
-        """청산 데이터 업데이트 및 스파이크 탐지"""
-        try:
-            liquidation_orders = self.client.get_liquidation_orders(
-                symbol=config.ETH_SYMBOL if symbol == 'ETH' else config.BTC_SYMBOL,
-                limit=100
-            )
-            
-            if liquidation_orders is None or len(liquidation_orders) == 0:
-                return None
-            
-            # 최근 청산 데이터 저장
-            liquidation_list = self.eth_liquidation_data if symbol == 'ETH' else self.btc_liquidation_data
-            
-            # 새로운 청산 주문 추가
-            for order in liquidation_orders:
-                liquidation_list.append({
-                    'time': int(order['time']),
-                    'price': float(order['price']),
-                    'qty': float(order['qty']),
-                    'side': order['side']  # 'BUY' (롱 청산) or 'SELL' (숏 청산)
-                })
-            
-            # 최근 100개만 유지
-            if len(liquidation_list) > 100:
-                liquidation_list = liquidation_list[-100:]
-            
-            if symbol == 'ETH':
-                self.eth_liquidation_data = liquidation_list
-            else:
-                self.btc_liquidation_data = liquidation_list
-            
-            return liquidation_list
-            
-        except Exception as e:
-            logger.error(f"청산 데이터 업데이트 실패 ({symbol}): {e}")
-            return None
-    
-    def detect_liquidation_spike(self, symbol='ETH', time_window_minutes=3, min_volume_threshold=10):
-        """청산 스파이크 탐지
-        
-        Args:
-            symbol: 'ETH' or 'BTC'
-            time_window_minutes: 스파이크 탐지 시간 윈도우 (분)
-            min_volume_threshold: 최소 청산 볼륨 (ETH/BTC 수량)
-        
-        Returns:
-            dict: {
-                'spike_detected': bool,
-                'spike_type': 'long_liquidation' or 'short_liquidation',
-                'total_volume': float,
-                'count': int
-            }
-        """
-        try:
-            # 저장된 데이터 사용 시: CSV의 청산 데이터 사용
-            if self.use_saved_data:
-                data = self.eth_data if symbol == 'ETH' else self.btc_data
-                if data is None or len(data) < time_window_minutes:
-                    return None
-                
-                # 현재 인덱스 기준으로 최근 N개 캔들의 청산 데이터 집계
-                start_idx = max(0, self.current_index - time_window_minutes)
-                end_idx = self.current_index
-                
-                if end_idx <= start_idx:
-                    return None
-                
-                recent_data = data.iloc[start_idx:end_idx]
-                
-                # 롱 청산 (숏 포지션 청산) vs 숏 청산 (롱 포지션 청산)
-                long_liquidation_volume = recent_data['liquidation_long'].sum() if 'liquidation_long' in recent_data.columns else 0.0
-                short_liquidation_volume = recent_data['liquidation_short'].sum() if 'liquidation_short' in recent_data.columns else 0.0
-                
-                # 스파이크 탐지
-                spike_detected = False
-                spike_type = None
-                total_volume = 0
-                count = 0
-                
-                if long_liquidation_volume >= min_volume_threshold:
-                    # 롱 청산 스파이크 (숏 포지션 대량 청산) → 가격 상승 압력
-                    spike_detected = True
-                    spike_type = 'long_liquidation'
-                    total_volume = long_liquidation_volume
-                    count = len(recent_data[recent_data['liquidation_long'] > 0])
-                
-                elif short_liquidation_volume >= min_volume_threshold:
-                    # 숏 청산 스파이크 (롱 포지션 대량 청산) → 가격 하락 압력
-                    spike_detected = True
-                    spike_type = 'short_liquidation'
-                    total_volume = short_liquidation_volume
-                    count = len(recent_data[recent_data['liquidation_short'] > 0])
-                
-                if spike_detected:
-                    return {
-                        'spike_detected': True,
-                        'spike_type': spike_type,
-                        'total_volume': total_volume,
-                        'count': count,
-                        'time_window_minutes': time_window_minutes
-                    }
-                
-                return None
-            
-            # 실시간 데이터 사용 시: 기존 로직 사용
-            liquidation_list = self.eth_liquidation_data if symbol == 'ETH' else self.btc_liquidation_data
-            
-            if len(liquidation_list) < 5:
-                return None
-            
-            # 최근 N분 내 청산 데이터 필터링
-            current_time = int(datetime.now().timestamp() * 1000)
-            time_window_ms = time_window_minutes * 60 * 1000
-            
-            recent_liquidations = [
-                liq for liq in liquidation_list
-                if (current_time - liq['time']) <= time_window_ms
-            ]
-            
-            if len(recent_liquidations) < 3:
-                return None
-            
-            # 롱 청산 (숏 포지션 청산) vs 숏 청산 (롱 포지션 청산)
-            long_liquidation_volume = sum(
-                liq['qty'] for liq in recent_liquidations if liq['side'] == 'BUY'
-            )
-            short_liquidation_volume = sum(
-                liq['qty'] for liq in recent_liquidations if liq['side'] == 'SELL'
-            )
-            
-            # 스파이크 탐지
-            spike_detected = False
-            spike_type = None
-            total_volume = 0
-            count = 0
-            
-            if long_liquidation_volume >= min_volume_threshold:
-                # 롱 청산 스파이크 (숏 포지션 대량 청산) → 가격 상승 압력
-                spike_detected = True
-                spike_type = 'long_liquidation'
-                total_volume = long_liquidation_volume
-                count = len([liq for liq in recent_liquidations if liq['side'] == 'BUY'])
-            
-            elif short_liquidation_volume >= min_volume_threshold:
-                # 숏 청산 스파이크 (롱 포지션 대량 청산) → 가격 하락 압력
-                spike_detected = True
-                spike_type = 'short_liquidation'
-                total_volume = short_liquidation_volume
-                count = len([liq for liq in recent_liquidations if liq['side'] == 'SELL'])
-            
-            if spike_detected:
-                return {
-                    'spike_detected': True,
-                    'spike_type': spike_type,
-                    'total_volume': total_volume,
-                    'count': count,
-                    'time_window_minutes': time_window_minutes
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"청산 스파이크 탐지 실패 ({symbol}): {e}")
-            return None
-    
     def load_saved_data(self):
         """저장된 데이터 로드 (학습용) - eth_3m_1year.csv와 btc_3m_1year.csv만 사용"""
         try:
@@ -365,24 +191,10 @@ class DataCollector:
             
             # ETH 데이터 로드
             self.eth_data = pd.read_csv(eth_file, index_col='timestamp', parse_dates=True)
-            
-            # 청산 데이터 컬럼이 없으면 기본값 0으로 추가
-            if 'liquidation_long' not in self.eth_data.columns:
-                self.eth_data['liquidation_long'] = 0.0
-            if 'liquidation_short' not in self.eth_data.columns:
-                self.eth_data['liquidation_short'] = 0.0
-            
             logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들")
             
             # BTC 데이터 로드
             self.btc_data = pd.read_csv(btc_file, index_col='timestamp', parse_dates=True)
-            
-            # 청산 데이터 컬럼이 없으면 기본값 0으로 추가
-            if 'liquidation_long' not in self.btc_data.columns:
-                self.btc_data['liquidation_long'] = 0.0
-            if 'liquidation_short' not in self.btc_data.columns:
-                self.btc_data['liquidation_short'] = 0.0
-            
             logger.info(f"✅ BTC 데이터 로드: {len(self.btc_data)}개 캔들")
             
             # 인덱스 초기화
@@ -413,11 +225,36 @@ class DataCollector:
             'BTC': btc_slice
         }
     
-    def reset_index(self):
-        """인덱스를 처음으로 리셋 (새 에피소드 시작 시)"""
-        # lookback(40)개가 필요하므로 최소 40부터 시작
-        lookback = 40  # TradingEnvironment의 기본 lookback
-        self.current_index = lookback
+    def reset_index(self, max_steps=100, random_start=True):
+        """인덱스를 리셋 (새 에피소드 시작 시)
+        
+        Args:
+            max_steps: 에피소드당 최대 스텝 수 (무작위 시작 범위 계산용)
+            random_start: True면 무작위 시작 인덱스, False면 고정 인덱스(40)
+        """
+        if self.eth_data is None:
+            return
+        
+        lookback = 40  # TradingEnvironment의 기본 lookback (최소 인덱스)
+        total_candles = len(self.eth_data)
+        
+        if random_start:
+            # 무작위 시작 인덱스: lookback부터 (전체 데이터 - max_steps)까지
+            # 이렇게 하면 에피소드가 끝나기 전에 데이터가 부족해지지 않음
+            # max_steps만큼의 여유를 두어야 하므로 total_candles - max_steps가 최대 시작 인덱스
+            max_start_index = max(lookback, total_candles - max_steps)
+            
+            if max_start_index > lookback:
+                # 무작위로 시작 인덱스 선택
+                self.current_index = random.randint(lookback, max_start_index)
+                logger.debug(f"무작위 시작 인덱스: {self.current_index} (범위: {lookback} ~ {max_start_index})")
+            else:
+                # 데이터가 부족한 경우 최소 인덱스 사용
+                self.current_index = lookback
+                logger.debug(f"데이터 부족으로 최소 인덱스 사용: {self.current_index}")
+        else:
+            # 고정 인덱스 (기존 동작)
+            self.current_index = lookback
     
     def fetch_historical_klines_batch(self, symbol, interval, start_time, end_time):
         """특정 기간의 캔들 데이터를 배치로 조회 (바이낸스 API 제한 고려)
@@ -568,10 +405,6 @@ class DataCollector:
         # 중복 제거
         eth_df = eth_df[~eth_df.index.duplicated(keep='last')]
         
-        # 청산 데이터 컬럼 추가 (기본값 0)
-        eth_df['liquidation_long'] = 0.0
-        eth_df['liquidation_short'] = 0.0
-        
         # CSV 저장
         eth_file = f'data/eth_{timeframe}_1year.csv'
         eth_df.to_csv(eth_file)
@@ -610,10 +443,6 @@ class DataCollector:
         
         # 중복 제거
         btc_df = btc_df[~btc_df.index.duplicated(keep='last')]
-        
-        # 청산 데이터 컬럼 추가 (기본값 0)
-        btc_df['liquidation_long'] = 0.0
-        btc_df['liquidation_short'] = 0.0
         
         # CSV 저장
         btc_file = f'data/btc_{timeframe}_1year.csv'

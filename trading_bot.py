@@ -388,10 +388,6 @@ class TradingBot:
         cvd_signal = self._get_signal_by_strategy(signals, 'CVD Delta')
         squeeze_signal = self._get_signal_by_strategy(signals, 'Volatility Squeeze')
         fvg_signal = self._get_signal_by_strategy(signals, 'Orderblock FVG')
-        liquidation_signal = self._get_signal_by_strategy(signals, 'Liquidation Spike')
-        
-        # Liquidation Spike 발생 시 보너스 점수로 활용 (즉시 진입은 하지 않음)
-        liquidation_bonus = 0.1 if liquidation_signal else 0.0
         
         # LONG 진입 조합 체크
         # 핵심 3중주 (2개 이상 필수): Volatility Squeeze + Orderblock FVG + CVD Delta
@@ -400,7 +396,6 @@ class TradingBot:
         fvg_long = bool(fvg_signal and fvg_signal.get('signal') == 'LONG')
         cvd_long = bool(cvd_signal and cvd_signal.get('signal') == 'LONG')
         btc_long = bool(btc_signal and btc_signal.get('signal') == 'LONG')
-        liquidation_long = bool(liquidation_signal and liquidation_signal.get('signal') == 'SHORT')  # 숏 청산 → 롱 보너스
         
         # 핵심 돌파 전략 3중주 중 2개 이상 필요
         core_signals_count = sum([squeeze_long, fvg_long, cvd_long])
@@ -439,15 +434,8 @@ class TradingBot:
             else:
                 logger.info("⚠️  환경 확인 미통과: BTC 방향 불일치 (보조 필터)")
             
-            # 보너스: Liquidation Spike (돌파의 기폭제)
-            if liquidation_long:
-                active_strategies.append('Liquidation Spike (보너스)')
-                logger.info("✅ 보너스: 청산 스파이크로 돌파 가속화")
-            
             # 평균 신뢰도 계산
             avg_confidence = confidence_sum / confidence_count if confidence_count > 0 else 0
-            if liquidation_long:
-                avg_confidence = min(avg_confidence + liquidation_bonus, 1.0)  # 최대 1.0으로 제한
             
             # 진입가 계산
             avg_entry = sum(entry_prices) / len(entry_prices) if entry_prices else 0
@@ -481,7 +469,6 @@ class TradingBot:
         fvg_short = bool(fvg_signal and fvg_signal.get('signal') == 'SHORT')
         cvd_short = bool(cvd_signal and cvd_signal.get('signal') == 'SHORT')
         btc_short = bool(btc_signal and btc_signal.get('signal') == 'SHORT')
-        liquidation_short = bool(liquidation_signal and liquidation_signal.get('signal') == 'LONG')  # 롱 청산 → 숏 보너스
         
         # 핵심 돌파 전략 3중주 중 2개 이상 필요
         core_signals_count = sum([squeeze_short, fvg_short, cvd_short])
@@ -520,15 +507,8 @@ class TradingBot:
             else:
                 logger.info("⚠️  환경 확인 미통과: BTC 방향 불일치 (보조 필터)")
             
-            # 보너스: Liquidation Spike (돌파의 기폭제)
-            if liquidation_short:
-                active_strategies.append('Liquidation Spike (보너스)')
-                logger.info("✅ 보너스: 청산 스파이크로 돌파 가속화")
-            
             # 평균 신뢰도 계산
             avg_confidence = confidence_sum / confidence_count if confidence_count > 0 else 0
-            if liquidation_short:
-                avg_confidence = min(avg_confidence + liquidation_bonus, 1.0)  # 최대 1.0으로 제한
             
             # 진입가 계산
             avg_entry = sum(entry_prices) / len(entry_prices) if entry_prices else 0
@@ -743,13 +723,6 @@ class TradingBot:
             elif fvg_signal and fvg_signal['signal'] == 'LONG' and cvd_bullish:
                 long_required_combination = True
                 logger.info("✅ 롱 필수 조합 (B): FVG/OB 리테스트 + CVD 양전환")
-            
-            # (C) 청산 스파이크 + 스윕
-            elif liquidation_signal and sweep_signal:
-                if (liquidation_signal['signal'] == 'LONG' and 
-                    sweep_signal['signal'] == 'LONG'):
-                    long_required_combination = True
-                    logger.info("✅ 롱 필수 조합 (C): 청산 스파이크 + 저점 스윕")
         
         # 숏 필수 조합 체크
         short_required_combination = False
@@ -763,13 +736,6 @@ class TradingBot:
             elif fvg_signal and fvg_signal['signal'] == 'SHORT' and cvd_bearish:
                 short_required_combination = True
                 logger.info("✅ 숏 필수 조합 (B): OB 리테스트 + CVD 음전환")
-            
-            # (C) 청산 스파이크 + 고점 스윕
-            elif liquidation_signal and sweep_signal:
-                if (liquidation_signal['signal'] == 'SHORT' and 
-                    sweep_signal['signal'] == 'SHORT'):
-                    short_required_combination = True
-                    logger.info("✅ 숏 필수 조합 (C): 청산 스파이크 + 고점 스윕")
         
         # STEP 3: 조건 충족 시 진입
         if long_score >= 2 and long_required_combination:
