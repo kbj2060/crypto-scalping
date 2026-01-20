@@ -77,11 +77,12 @@ class PPOAgent:
         return torch.tensor(advantages, dtype=torch.float).unsqueeze(1), \
                torch.tensor(returns, dtype=torch.float).unsqueeze(1)
 
-    def update(self, next_state=None):
+    def update(self, next_state=None, episode=1):
         """PPO 업데이트 수행
         
         Args:
             next_state: 다음 상태 텐서 (부트스트랩 가치 계산용, None이면 0 사용)
+            episode: 현재 에피소드 번호 (엔트로피 스케줄러용)
         """
         if len(self.memory) == 0:
             return
@@ -125,11 +126,17 @@ class PPOAgent:
             surr1 = ratio * advantages_normalized
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages_normalized
             
-            # Loss Function
+            # [핵심] 엔트로피 스케줄러 적용
+            # 초기 0.05에서 시작하여 서서히 0.01로 수렴 (인내심 강화)
+            # 에피소드가 진행될수록 탐험을 줄이고 수렴을 강화
+            entropy_coef = max(0.01, 0.05 * (0.998 ** episode))
+            entropy_bonus = entropy_coef * entropy
+            
+            # Loss Function 계산
             actor_loss = -torch.min(surr1, surr2).mean()
             critic_loss = F.mse_loss(values, returns)
-            entropy_bonus = 0.01 * entropy
             
+            # Softmax의 조기 수렴을 방지하기 위해 가변적인 entropy_bonus 사용
             loss = actor_loss + 0.5 * critic_loss - entropy_bonus
             
             # 역전파 및 최적화

@@ -278,8 +278,13 @@ class PPOTrainer:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
             logger.warning("스케일러 학습 실패, 첫 관측 시 학습합니다.")
         
-    def train_episode(self, max_steps=100):
-        """한 에피소드 학습"""
+    def train_episode(self, episode_num, max_steps=1000):
+        """한 에피소드 학습
+        
+        Args:
+            episode_num: 현재 에피소드 번호 (엔트로피 스케줄러용)
+            max_steps: 최대 스텝 수
+        """
         episode_reward = 0.0
         steps = 0
         
@@ -420,9 +425,9 @@ class PPOTrainer:
                             # 인덱스 복원 (실제 증가는 다음 루프에서)
                             self.data_collector.current_index = temp_index
                     
-                    # Bootstrap 업데이트 수행
-                    self.agent.update(next_state=next_obs if next_obs is not None else None)
-                    logger.info(f"🚀 Bootstrap 업데이트 완료 (Step: {step}, Memory: {len(self.agent.memory)}, Next Value: {'Yes' if next_obs is not None else 'No'})")
+                    # Bootstrap 업데이트 수행 (에피소드 번호 전달)
+                    self.agent.update(next_state=next_obs if next_obs is not None else None, episode=episode_num)
+                    logger.info(f"🚀 업데이트 완료 (에피소드: {episode_num}, Step: {step}, Memory: {len(self.agent.memory)}, Next Value: {'Yes' if next_obs is not None else 'No'})")
                 
                 # 저장된 데이터는 자동으로 다음 캔들로 진행됨 (대기 불필요)
                 
@@ -454,8 +459,8 @@ class PPOTrainer:
                 logger.info(f"📚 에피소드 {episode}/{num_episodes}")
                 logger.info(f"{'=' * 60}")
                 
-                # 에피소드 실행
-                result = self.train_episode(max_steps=max_steps_per_episode)
+                # 에피소드 실행 (에피소드 번호 전달)
+                result = self.train_episode(episode_num=episode, max_steps=max_steps_per_episode)
                 if result is None:
                     logger.warning("에피소드 실패, 다음 에피소드로 진행")
                     continue
