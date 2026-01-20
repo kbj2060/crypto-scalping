@@ -5,5 +5,5 @@ TA-Lib==0.4.28
 websocket-client==1.6.4
 python-dotenv==1.0.0
 torch>=2.9.1  # AI 강화학습용 (선택적)
-PyWavelets>=1.4.0  # 웨이블릿 변환용 (선택적)
 scikit-learn>=1.0.0  # MinMaxScaler용 (선택적)
+matplotlib>=3.10.8  # 시각화용 (선택적)

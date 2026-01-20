@@ -29,34 +29,61 @@ class TradingEnvironment:
         self.preprocessor = DataPreprocessor()
         self.scaler_fitted = False  # 스케일러 학습 여부
 
-    def get_observation(self):
+    def get_observation(self, position_info=None):
         """
-        현재 상태 관측 (원시 데이터 + Z-Score 정규화)
+        현재 상태 관측 (7개 핵심 시계열 피처 + Z-Score 정규화 + 포지션 정보)
+        
+        Args:
+            position_info: [포지션(1/0/-1), 미실현PnL, 보유시간(정규화)] 리스트
+                          - 보유시간: (current_index - entry_index) / max_steps (0~1 사이)
+                          None이면 [0.0, 0.0, 0.0]으로 처리
         
         Returns:
-            observation: (1, seq_len, state_dim) 텐서
-                - close_prices: 원시 가격 데이터 (웨이블릿 제거)
-                - volumes: 거래량 데이터
-                - strategy_scores: 각 전략의 신뢰도 점수
+            (obs_seq, obs_info): 튜플
+                - obs_seq: (1, 20, 7) 텐서 - 7개 시계열 피처
+                - obs_info: (1, 13) 텐서 - 전략 점수(10) + 포지션 정보(3)
         """
         try:
-            # 1. 원본 데이터 수집
-            candles = self.collector.get_candles('ETH', count=self.lookback)
-            if candles is None or len(candles) < self.lookback:
-                logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: {self.lookback}개)")
+            # 1. 원본 데이터 수집 (마지막 20봉)
+            candles = self.collector.get_candles('ETH', count=20)
+            if candles is None or len(candles) < 20:
+                logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: 20개)")
                 return None
             
-            # 가격 및 거래량 추출 (원시 데이터 사용, 웨이블릿 제거)
-            close_prices = candles['close'].values.astype(np.float32)
-            volumes = candles['volume'].values.astype(np.float32)
+            close = candles['close'].values.astype(np.float32)
             
-            # 2. 기술적 전략 Score 수집
+            # 2. [해결] 7개 시계열 피처 생성 (차원: 20x7)
+            # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
+            volume_log = np.log1p(candles['volume'].values.astype(np.float32))  # log1p = log(1+x)
+            trades_log = np.log1p(candles['trades'].values.astype(np.float32))
+            
+            seq_features = np.column_stack([
+                (candles['open'].values - close) / (close + 1e-8),  # f1: Open (close 대비)
+                (candles['high'].values - close) / (close + 1e-8),  # f2: High (close 대비)
+                (candles['low'].values - close) / (close + 1e-8),   # f3: Low (close 대비)
+                np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8)),  # f4: Log_Return
+                volume_log,  # f5: Volume (로그 변환 후 Z-Score)
+                trades_log,   # f6: Trades (로그 변환 후 Z-Score)
+                candles['taker_buy_base'].values / (candles['volume'].values + 1e-8)  # f7: Taker_Ratio
+            ])
+            
+            # 3. 전처리 (7개 차원과 정확히 일치해야 함)
+            if not self.scaler_fitted:
+                logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
+            
+            normalized_seq = self.preprocessor.transform(seq_features)
+            obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)  # (1, 20, 7)
+            
+            # 4. 기술적 전략 Score 수집 (LONG/SHORT 부호 인코딩 반영)
             strategy_scores = []
             for strategy in self.strategies:
                 try:
                     result = strategy.analyze(self.collector)
                     if result and 'confidence' in result:
                         score = float(result['confidence'])
+                        # SHORT 신호는 음수로 인코딩
+                        if result.get('signal') == 'SHORT':
+                            score = -score
                         strategy_scores.append(score)
                     else:
                         strategy_scores.append(0.0)
@@ -64,34 +91,14 @@ class TradingEnvironment:
                     logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
                     strategy_scores.append(0.0)
             
-            # 3. 피처 결합 (원시 가격, 거래량, 전략 점수)
-            # 마지막 20봉의 윈도우 데이터 생성 (xLSTM 입력용)
-            window_size = 20
-            prices_window = close_prices[-window_size:]
-            volumes_window = volumes[-window_size:]
+            # 5. [해결] 10개 전략 점수 + 3개 포지션 정보 = 13차원
+            if position_info is None:
+                position_info = [0.0, 0.0, 0.0]
             
-            # 전략 점수를 20봉 시퀀스 전체에 복제
-            scores_array = np.array(strategy_scores, dtype=np.float32)
-            scores_tiled = np.tile(scores_array, (window_size, 1))  # (20, num_strategies)
+            obs_info = np.concatenate([strategy_scores, position_info], dtype=np.float32)
+            obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)  # (1, 13)
             
-            # 원시 피처 결합: (20, 2 + num_strategies)
-            raw_features = np.column_stack([
-                prices_window,
-                volumes_window,
-                scores_tiled
-            ])
-            
-            # 4. Z-Score 정규화 적용 (fit은 학습 시작 전에 이미 완료됨)
-            # transform만 사용하여 가격의 상대적 높낮이 맥락 유지
-            if not self.scaler_fitted:
-                logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
-            
-            normalized_obs = self.preprocessor.transform(raw_features)
-            
-            # 배치 차원 추가: (1, 20, 2 + num_strategies)
-            observation = torch.FloatTensor(normalized_obs).unsqueeze(0)
-            
-            return observation
+            return (obs_seq, obs_info_tensor)
             
         except Exception as e:
             logger.error(f"관측 생성 실패: {e}", exc_info=True)
@@ -99,7 +106,7 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        보상 계산 (현실화된 보상 체계 + 비선형 보상)
+        보상 계산 (현실화된 보상 체계 + 비선형 보상 + 강화된 손실 페널티)
         
         Args:
             pnl: 손익 (수익률)
@@ -109,8 +116,6 @@ class TradingEnvironment:
         Returns:
             reward: 보상값
         """
-        reward = 0.0
-        
         # 1. 미실현 손익의 '변화량'만 보상 (계속 들고 있다고 보상을 퍼주지 않음)
         # pnl_change가 0이면 보상도 0 (변화가 없으면 보상 없음)
         reward = pnl_change * 100
@@ -123,10 +128,14 @@ class TradingEnvironment:
                 #     2% 수익 → (0.02 * 100)^2 / 10 = 4.0 (16배 차이!)
                 reward += (pnl * 100) ** 2 / 10
             else:
-                # 손실은 그대로 페널티 (비선형 적용 안 함)
-                reward += pnl * 20
+                # [수정] 손실 페널티 강화: 손실도 제곱으로 처리하여 큰 하락을 극도로 방어
+                # 수익보다 2배 더 아프게 설계하여 '안전'을 우선시하게 유도
+                # 예: -0.5% 손실 → -(0.005 * 100)^2 / 5 = -0.5
+                #     -2% 손실 → -(0.02 * 100)^2 / 5 = -8.0
+                reward -= (abs(pnl) * 100) ** 2 / 5
             
-            reward -= 0.01  # 수수료 페널티
+            # [수정] 수수료 페널티 현실화 (잦은 매매 방지)
+            reward -= 0.05
         
         # 3. 시간 페널티 완화 (기존 -0.0005 -> -0.0001)
         # 큰 추세를 끝까지 타도록 유도
@@ -135,5 +144,5 @@ class TradingEnvironment:
         return reward
 
     def get_state_dim(self):
-        """상태 차원 반환"""
-        return 2 + self.num_strategies  # market_data(2) + strategy_scores(num_strategies)
+        """상태 차원 반환 (7개 시계열 피처)"""
+        return 7  # 7개 핵심 시계열 피처

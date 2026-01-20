@@ -67,42 +67,41 @@ class sLSTMCell(nn.Module):
 
 
 class xLSTMActorCritic(nn.Module):
-    """개선된 xLSTM: Attention과 Deep Actor-Critic 적용"""
-    def __init__(self, input_dim, action_dim, hidden_dim=128):
+    """개선된 xLSTM: Attention과 Deep Actor-Critic 적용 + Late Fusion"""
+    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128):
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.info_dim = info_dim
         self.xlstm_cell = sLSTMCell(input_dim, hidden_dim)
         
         # [로드맵 1] 시퀀스 전체 정보를 읽는 눈 추가
         self.attention = MultiHeadAttention(hidden_dim, heads=4)
         
+        # Late Fusion: 시퀀스 정보(hidden_dim) + 포지션 정보(info_dim) 결합
+        combined_dim = hidden_dim + info_dim  # 128 + 13 = 141
+        
         # [로드맵 3] 심층화된 Actor: LayerNorm으로 수치 안정성 확보
         self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
+            nn.Linear(combined_dim, 128),
             nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, action_dim),
+            nn.Linear(128, action_dim),
             nn.Softmax(dim=-1)
         )
         
         # [로드맵 3] 심층화된 Critic: 가치 평가의 정밀도 향상
         self.critic = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
+            nn.Linear(combined_dim, 128),
             nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(128, 1)
         )
 
-    def forward(self, x, states=None):
+    def forward(self, x, info=None, states=None):
         """
         Args:
             x: (batch_size, seq_len, input_dim) 입력 시퀀스
+            info: (batch_size, info_dim) 포지션 정보 텐서 (None이면 0으로 채움)
             states: (h, c, n) 튜플 또는 None
         Returns:
             action_probs: (batch_size, action_dim) 행동 확률 분포
@@ -126,10 +125,17 @@ class xLSTMActorCritic(nn.Module):
         seq_h = torch.cat(all_h, dim=1)
         
         # Attention을 통해 20개 캔들의 핵심 정보를 하나의 컨텍스트로 요약
-        context = self.attention(seq_h)
+        context = self.attention(seq_h)  # (batch, hidden_dim)
+        
+        # Late Fusion: 시퀀스 정보와 포지션 정보 결합
+        if info is None:
+            info = torch.zeros(batch_size, self.info_dim).to(x.device)
+        
+        # 결합된 정보: (batch, hidden_dim + info_dim)
+        combined = torch.cat([context, info], dim=-1)
         
         # 강화된 Actor/Critic 출력
-        action_probs = self.actor(context)
-        value = self.critic(context)
+        action_probs = self.actor(combined)
+        value = self.critic(combined)
         
         return action_probs, value

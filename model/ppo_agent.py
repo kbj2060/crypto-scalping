@@ -12,16 +12,22 @@ from .xlstm_network import xLSTMActorCritic
 
 class PPOAgent:
     """PPO 알고리즘 기반 강화학습 에이전트"""
-    def __init__(self, state_dim, action_dim, hidden_dim=128, device='cpu'):
+    def __init__(self, state_dim, action_dim, hidden_dim=128, device='cpu', info_dim=13):
         self.device = device
         self.gamma = 0.999  # 할인율 (인내심 강화: 미래 보상에 더 높은 가치 부여)
         self.lmbda = 0.95  # GAE 파라미터
         self.eps_clip = 0.2  # PPO 클리핑 범위
         self.k_epochs = 10  # 업데이트 반복 횟수
         
-        # 신경망 모델
-        self.model = xLSTMActorCritic(state_dim, action_dim, hidden_dim).to(device)
+        # 신경망 모델 (Late Fusion 구조)
+        self.model = xLSTMActorCritic(state_dim, action_dim, info_dim=info_dim, hidden_dim=hidden_dim).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.0003)
+        
+        # [추가] 학습률 스케줄러: 200번의 업데이트마다 학습률을 절반으로 감소
+        self.scheduler = optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=200, gamma=0.5
+        )
+        
         self.memory = []  # (state, action, log_prob, reward, is_terminal)
 
     def select_action(self, state):
@@ -29,13 +35,17 @@ class PPOAgent:
         상태에 따른 행동 선택
         
         Args:
-            state: (1, seq_len, state_dim) 텐서
+            state: (obs_seq, obs_info) 튜플
+                   - obs_seq: (1, seq_len, state_dim) 시계열 데이터
+                   - obs_info: (1, info_dim) 포지션 정보
         Returns:
             action: 행동 인덱스 (0: Hold, 1: Long, 2: Short)
             log_prob: 로그 확률
         """
         with torch.no_grad():
-            probs, _ = self.model(state)
+            obs_seq, obs_info = state
+            probs, _ = self.model(obs_seq.to(self.device), info=obs_info.to(self.device))
+            
             dist = Categorical(probs)
             action = dist.sample()
             log_prob = dist.log_prob(action)
@@ -87,24 +97,27 @@ class PPOAgent:
         if len(self.memory) == 0:
             return
         
-        # 1. 메모리에서 데이터 추출
-        states = torch.cat([m[0] for m in self.memory], dim=0)
+        # 1. 메모리에서 데이터 추출 (Late Fusion 구조: (obs_seq, obs_info) 튜플)
+        states_seq = torch.cat([m[0][0] for m in self.memory], dim=0).to(self.device)
+        states_info = torch.cat([m[0][1] for m in self.memory], dim=0).to(self.device)
+        
         actions = torch.tensor([m[1] for m in self.memory], dtype=torch.long).unsqueeze(1).to(self.device)
         old_log_probs = torch.tensor([m[2] for m in self.memory], dtype=torch.float).unsqueeze(1).to(self.device)
         rewards = [m[3] for m in self.memory]
         is_terminals = [m[4] for m in self.memory]
 
-        # 2. 부트스트랩 가치(next_value) 결정 [핵심 추가]
+        # 2. 부트스트랩 가치(next_value) 결정
         next_value = 0
         if next_state is not None:
             with torch.no_grad():
                 # 다음 상태의 Value를 예측하여 미래 보상의 기댓값으로 사용
-                _, next_v = self.model(next_state.to(self.device))
+                obs_seq, obs_info = next_state
+                _, next_v = self.model(obs_seq.to(self.device), info=obs_info.to(self.device))
                 next_value = next_v.item()
 
         # 3. 현재 상태들의 가치 계산
         with torch.no_grad():
-            _, values = self.model(states)
+            _, values = self.model(states_seq, info=states_info)
             values = values.squeeze().cpu().numpy().tolist()
         
         # 4. GAE 계산 시 추출한 next_value 전달
@@ -114,7 +127,8 @@ class PPOAgent:
 
         # PPO 업데이트 (k_epochs 반복)
         for _ in range(self.k_epochs):
-            probs, values = self.model(states)
+            probs, values = self.model(states_seq, info=states_info)
+            
             dist = Categorical(probs)
             log_probs = dist.log_prob(actions.squeeze()).unsqueeze(1)
             entropy = dist.entropy().mean()
@@ -145,6 +159,9 @@ class PPOAgent:
             # xLSTM 안정화를 위한 그래디언트 클리핑
             nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
             self.optimizer.step()
+        
+        # 학습 중반 이후 세밀한 조정을 위한 스케줄러 업데이트
+        self.scheduler.step()
         
         # 메모리 초기화
         self.memory = []

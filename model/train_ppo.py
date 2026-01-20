@@ -170,10 +170,10 @@ class PPOTrainer:
         state_dim = self.env.get_state_dim()
         action_dim = 3  # 0: Hold, 1: Long, 2: Short
         
-        # PPO 에이전트 생성
+        # PPO 에이전트 생성 (Late Fusion 구조: info_dim=13)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logger.info(f"디바이스: {device}")
-        self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device)
+        self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device, info_dim=13)
         
         # 기존 모델 로드 (있는 경우)
         if os.path.exists(config.AI_MODEL_PATH):
@@ -188,7 +188,7 @@ class PPOTrainer:
         # 학습 상태
         self.current_position = None
         self.entry_price = None
-        self.entry_time = None
+        self.entry_index = None  # [수정] entry_time 대신 entry_index 사용 (과거 데이터 학습용)
         self.prev_pnl = 0.0  # 이전 스텝의 수익률 (pnl_change 계산용)
         self.episode_rewards = []
         self.total_steps = 0
@@ -200,9 +200,9 @@ class PPOTrainer:
             self.visualizer = None
     
     def _fit_global_scaler(self):
-        """전체 학습 데이터셋으로 스케일러 학습 (한 번만 실행)"""
+        """7개 핵심 시계열 피처 기반 전역 스케일러 학습 (한 번만 실행)"""
         try:
-            logger.info("전역 스케일러 학습 시작...")
+            logger.info("7개 핵심 피처 기반 전역 스케일러 학습 시작...")
             
             # 전체 데이터 수집
             if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
@@ -213,66 +213,63 @@ class PPOTrainer:
             total_candles = len(self.data_collector.eth_data)
             sample_size = min(50000, total_candles)  # 최대 5만개 샘플
             
-            # 랜덤 샘플링 또는 균등 간격 샘플링
+            # 균등 간격 샘플링 (최소 20개는 필요하므로 20부터 시작)
             if total_candles > sample_size:
-                indices = np.linspace(0, total_candles - 1, sample_size, dtype=int)
+                indices = np.linspace(20, total_candles - 1, sample_size, dtype=int)
             else:
-                indices = np.arange(total_candles)
+                indices = np.arange(20, total_candles)
             
             logger.info(f"스케일러 학습용 데이터: {len(indices)}개 샘플 (전체: {total_candles}개)")
             
-            # 피처 수집
+            # 7개 핵심 시계열 피처 수집
             window_size = 20
-            lookback = self.env.lookback
-            all_features = []
+            all_seq_features = []
             
             for idx in indices:
-                if idx < lookback:
+                if idx < window_size:
                     continue
                 
                 try:
-                    # 해당 인덱스의 데이터 가져오기
-                    candles = self.data_collector.eth_data.iloc[idx-lookback+1:idx+1]
-                    if len(candles) < lookback:
+                    # 마지막 20봉 데이터 가져오기
+                    window = self.data_collector.eth_data.iloc[idx-window_size+1:idx+1]
+                    if len(window) < window_size:
                         continue
                     
-                    # 원시 데이터 추출
-                    close_prices = candles['close'].values.astype(np.float32)
-                    volumes = candles['volume'].values.astype(np.float32)
+                    close = window['close'].values.astype(np.float32)
                     
-                    # 윈도우 데이터
-                    prices_window = close_prices[-window_size:]
-                    volumes_window = volumes[-window_size:]
+                    # 7개 시계열 피처 생성
+                    # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
+                    volume_raw = window['volume'].values.astype(np.float32)
+                    trades_raw = window['trades'].values.astype(np.float32)
                     
-                    # 전략 점수 (0으로 초기화, 실제 값은 나중에 계산)
-                    strategy_scores = np.zeros(self.env.num_strategies, dtype=np.float32)
-                    scores_tiled = np.tile(strategy_scores, (window_size, 1))
+                    f1 = (window['open'].values - close) / (close + 1e-8)  # Open (close 대비)
+                    f2 = (window['high'].values - close) / (close + 1e-8)   # High (close 대비)
+                    f3 = (window['low'].values - close) / (close + 1e-8)    # Low (close 대비)
+                    f4 = np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8))  # Log_Return
+                    f5 = np.log1p(volume_raw)  # Volume (로그 변환)
+                    f6 = np.log1p(trades_raw)  # Trades (로그 변환)
+                    f7 = window['taker_buy_base'].values / (volume_raw + 1e-8)  # Taker_Ratio
                     
-                    # 피처 결합
-                    features = np.column_stack([
-                        prices_window,
-                        volumes_window,
-                        scores_tiled
-                    ])
-                    
-                    all_features.append(features)
+                    # 7개 피처 결합: (20, 7)
+                    seq_features = np.column_stack([f1, f2, f3, f4, f5, f6, f7])
+                    all_seq_features.append(seq_features)
                     
                 except Exception as e:
                     logger.debug(f"인덱스 {idx} 처리 실패: {e}")
                     continue
             
-            if len(all_features) == 0:
+            if len(all_seq_features) == 0:
                 logger.warning("피처 수집 실패, 스케일러 학습 건너뜀")
                 return
             
-            # 전체 피처 결합
-            all_features_array = np.vstack(all_features)
+            # 전체 피처 결합: (N*20, 7)
+            all_features_array = np.vstack(all_seq_features)
             
-            # 스케일러 학습
+            # 스케일러 학습 (7개 차원)
             self.env.preprocessor.fit(all_features_array)
             self.env.scaler_fitted = True
             
-            logger.info(f"✅ 전역 스케일러 학습 완료: {len(all_features_array)}개 샘플")
+            logger.info(f"✅ 7개 피처 스케일러 학습 완료: {len(all_features_array)}개 샘플 (ValueError 해결)")
             
         except Exception as e:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
@@ -295,7 +292,7 @@ class PPOTrainer:
         self.prev_pnl = 0.0
         self.current_position = None
         self.entry_price = None
-        self.entry_time = None
+        self.entry_index = None  # [수정] entry_time 대신 entry_index 사용
         
         # 초기 데이터 확인
         if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
@@ -324,26 +321,34 @@ class PPOTrainer:
                 # 인덱스 증가 (다음 캔들로 이동)
                 self.data_collector.current_index += 1
                 
-                # 2. 상태 관측 (전처리 파이프라인 포함)
+                # 2. 포지션 정보 수집 (Late Fusion용)
+                pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
+                # [수정] 캔들 인덱스 차이로 보유 시간 계산 (과거 데이터 학습용)
+                # 에피소드 최대 길이(1000)로 나누어 0~1 사이로 정규화
+                hold_val = (self.data_collector.current_index - self.entry_index) / max_steps if self.entry_index is not None else 0.0
+                pnl_val = self.prev_pnl * 10  # PnL 스케일 조정
+                pos_info = [pos_val, pnl_val, hold_val]
+                
+                # 3. 상태 관측 (전처리 파이프라인 포함 + 포지션 정보)
                 # get_candles가 현재 인덱스 기준으로 이전 lookback개를 반환
-                state = self.env.get_observation()
+                state = self.env.get_observation(position_info=pos_info)
                 if state is None:
                     logger.warning("상태 관측 실패, 다음 캔들로 진행")
                     continue
                 
-                # 2. 행동 선택
+                # 4. 행동 선택
                 action, log_prob = self.agent.select_action(state)
                 action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
                 action_name = action_names[action]
                 
-                # 3. 현재 가격 확인 (현재 인덱스의 캔들)
+                # 5. 현재 가격 확인 (현재 인덱스의 캔들)
                 if self.data_collector.current_index > 0:
                     current_candle = self.data_collector.eth_data.iloc[self.data_collector.current_index - 1]
                     current_price = float(current_candle['close'])
                 else:
                     continue
                 
-                # 4. 보상 계산 및 포지션 업데이트
+                # 6. 보상 계산 및 포지션 업데이트
                 reward = 0.0
                 trade_done = False
                 current_pnl = 0.0
@@ -363,9 +368,9 @@ class PPOTrainer:
                         # 롱 진입
                         self.current_position = 'LONG'
                         self.entry_price = current_price
-                        self.entry_time = datetime.now()
+                        self.entry_index = self.data_collector.current_index  # [수정] 인덱스 저장
                         self.prev_pnl = 0.0  # 새 포지션 진입 시 초기화
-                        logger.debug(f"📈 롱 진입: ${current_price:.2f}")
+                        logger.debug(f"📈 롱 진입: ${current_price:.2f} (인덱스: {self.entry_index})")
                 
                 elif action == 2:  # SHORT
                     if self.current_position != 'SHORT':
@@ -381,9 +386,9 @@ class PPOTrainer:
                         # 숏 진입
                         self.current_position = 'SHORT'
                         self.entry_price = current_price
-                        self.entry_time = datetime.now()
+                        self.entry_index = self.data_collector.current_index  # [수정] 인덱스 저장
                         self.prev_pnl = 0.0  # 새 포지션 진입 시 초기화
-                        logger.debug(f"📉 숏 진입: ${current_price:.2f}")
+                        logger.debug(f"📉 숏 진입: ${current_price:.2f} (인덱스: {self.entry_index})")
                 
                 else:  # HOLD
                     # 보유 중인 포지션의 수익률 계산
@@ -396,13 +401,14 @@ class PPOTrainer:
                         # 이전 스텝 대비 수익률의 변화량 계산
                         pnl_change = current_pnl - self.prev_pnl
                         
-                        holding_time = (datetime.now() - self.entry_time).total_seconds() / 60 if self.entry_time else 0
+                        # [수정] 캔들 인덱스 차이로 보유 시간 계산 (과거 데이터 학습용)
+                        holding_time = (self.data_collector.current_index - self.entry_index) if self.entry_index is not None else 0
                         reward = self.env.calculate_reward(current_pnl, False, holding_time, pnl_change)
                         
                         # 다음 스텝을 위해 현재 pnl 저장
                         self.prev_pnl = current_pnl
                 
-                # 5. 트랜지션 저장
+                # 7. 트랜지션 저장
                 is_terminal = (step == actual_steps - 1)  # 에피소드 마지막 스텝 여부
                 self.agent.store_transition(state, action, log_prob, reward, is_terminal)
                 
@@ -410,18 +416,25 @@ class PPOTrainer:
                 steps += 1
                 self.total_steps += 1
                 
-                # 6. 주기적 업데이트 (256개 트랜지션마다 - 버퍼 업데이트 방식)
-                if len(self.agent.memory) >= 256:
+                # 8. 주기적 업데이트 (256개 트랜지션마다 - 버퍼 업데이트 방식)
+                if len(self.agent.memory) >= 1024:
                     # 다음 스텝에서 사용할 상태를 미리 관측하여 Bootstrap 값으로 사용
                     # (인덱스가 이미 증가했으므로 다음 관측이 곧 다음 상태)
                     next_obs = None
                     if not is_terminal:
                         # 다음 인덱스로 이동하여 다음 상태 관측
                         if self.data_collector.current_index < len(self.data_collector.eth_data):
+                            # 다음 스텝의 포지션 정보 예측 (현재 상태 기반)
+                            next_pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
+                            # [수정] 캔들 인덱스 차이로 보유 시간 계산
+                            next_hold_val = (self.data_collector.current_index + 1 - self.entry_index) / max_steps if self.entry_index is not None else 0.0
+                            next_pnl_val = self.prev_pnl * 10
+                            next_pos_info = [next_pos_val, next_pnl_val, next_hold_val]
+                            
                             # 임시로 인덱스 증가 (다음 상태 관측용)
                             temp_index = self.data_collector.current_index
                             self.data_collector.current_index += 1
-                            next_obs = self.env.get_observation()
+                            next_obs = self.env.get_observation(position_info=next_pos_info)
                             # 인덱스 복원 (실제 증가는 다음 루프에서)
                             self.data_collector.current_index = temp_index
                     
