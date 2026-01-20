@@ -141,9 +141,11 @@ class PPOAgent:
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages_normalized
             
             # [핵심] 엔트로피 스케줄러 적용
-            # 초기 0.05에서 시작하여 서서히 0.01로 수렴 (인내심 강화)
+            # 초기 0.3에서 시작하여 서서히 0.1로 수렴 (탐험 유도 강화)
             # 에피소드가 진행될수록 탐험을 줄이고 수렴을 강화
-            entropy_coef = max(0.01, 0.05 * (0.998 ** episode))
+            # 엔트로피 감소율을 0.9995로 늦추고 최소값 0.1로 상향 조정 (초반 탐험 강화)
+            # 0.05가 너무 낮아 에이전트가 너무 빨리 "포기"하는 것을 막기 위해 하한선을 0.1로 높임
+            entropy_coef = max(0.1, 0.3 * (0.9995 ** episode))
             entropy_bonus = entropy_coef * entropy
             
             # Loss Function 계산

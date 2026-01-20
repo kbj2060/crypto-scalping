@@ -200,9 +200,9 @@ class PPOTrainer:
             self.visualizer = None
     
     def _fit_global_scaler(self):
-        """7개 핵심 시계열 피처 기반 전역 스케일러 학습 (한 번만 실행)"""
+        """8개 핵심 시계열 피처 기반 전역 스케일러 학습 (한 번만 실행)"""
         try:
-            logger.info("7개 핵심 피처 기반 전역 스케일러 학습 시작...")
+            logger.info("8개 핵심 피처 기반 전역 스케일러 학습 시작...")
             
             # 전체 데이터 수집
             if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
@@ -221,7 +221,7 @@ class PPOTrainer:
             
             logger.info(f"스케일러 학습용 데이터: {len(indices)}개 샘플 (전체: {total_candles}개)")
             
-            # 7개 핵심 시계열 피처 수집
+            # 8개 핵심 시계열 피처 수집
             window_size = 20
             all_seq_features = []
             
@@ -236,22 +236,31 @@ class PPOTrainer:
                         continue
                     
                     close = window['close'].values.astype(np.float32)
-                    
-                    # 7개 시계열 피처 생성
-                    # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
+                    high = window['high'].values.astype(np.float32)
+                    low = window['low'].values.astype(np.float32)
                     volume_raw = window['volume'].values.astype(np.float32)
                     trades_raw = window['trades'].values.astype(np.float32)
                     
+                    # [추가] VWAP 계산 (Training 환경과 동일한 로직)
+                    tp = (high + low + close) / 3
+                    vp = tp * volume_raw
+                    cumulative_vp = np.cumsum(vp)
+                    cumulative_vol = np.cumsum(volume_raw)
+                    vwap = cumulative_vp / (cumulative_vol + 1e-8)
+                    
+                    # 8개 시계열 피처 생성
+                    # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
                     f1 = (window['open'].values - close) / (close + 1e-8)  # Open (close 대비)
-                    f2 = (window['high'].values - close) / (close + 1e-8)   # High (close 대비)
-                    f3 = (window['low'].values - close) / (close + 1e-8)    # Low (close 대비)
+                    f2 = (high - close) / (close + 1e-8)   # High (close 대비)
+                    f3 = (low - close) / (close + 1e-8)    # Low (close 대비)
                     f4 = np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8))  # Log_Return
                     f5 = np.log1p(volume_raw)  # Volume (로그 변환)
                     f6 = np.log1p(trades_raw)  # Trades (로그 변환)
                     f7 = window['taker_buy_base'].values / (volume_raw + 1e-8)  # Taker_Ratio
+                    f8 = (close - vwap) / (vwap + 1e-8)  # [NEW] VWAP 이격도
                     
-                    # 7개 피처 결합: (20, 7)
-                    seq_features = np.column_stack([f1, f2, f3, f4, f5, f6, f7])
+                    # 8개 피처 결합: (20, 8)
+                    seq_features = np.column_stack([f1, f2, f3, f4, f5, f6, f7, f8])
                     all_seq_features.append(seq_features)
                     
                 except Exception as e:
@@ -262,14 +271,17 @@ class PPOTrainer:
                 logger.warning("피처 수집 실패, 스케일러 학습 건너뜀")
                 return
             
-            # 전체 피처 결합: (N*20, 7)
+            # 전체 피처 결합: (N*20, 8)
             all_features_array = np.vstack(all_seq_features)
             
-            # 스케일러 학습 (7개 차원)
+            # 스케일러 학습 (8개 차원)
             self.env.preprocessor.fit(all_features_array)
             self.env.scaler_fitted = True
             
-            logger.info(f"✅ 7개 피처 스케일러 학습 완료: {len(all_features_array)}개 샘플 (ValueError 해결)")
+            # [추가] 학습 완료된 스케일러를 파일로 저장
+            self.env.preprocessor.save_scaler()
+            
+            logger.info(f"✅ 8개 피처 스케일러 학습 및 저장 완료: {len(all_features_array)}개 샘플 (VWAP 이격도 포함)")
             
         except Exception as e:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
@@ -282,6 +294,10 @@ class PPOTrainer:
             episode_num: 현재 에피소드 번호 (엔트로피 스케줄러용)
             max_steps: 최대 스텝 수
         """
+        # [설정] 보유 시간 정규화 기준 (8시간 = 480분/3분)
+        # 이 시간이 지나면 1.0으로 고정됨
+        MAX_HOLDING_STEPS = 160.0
+        
         episode_reward = 0.0
         steps = 0
         
@@ -323,9 +339,15 @@ class PPOTrainer:
                 
                 # 2. 포지션 정보 수집 (Late Fusion용)
                 pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
-                # [수정] 캔들 인덱스 차이로 보유 시간 계산 (과거 데이터 학습용)
-                # 에피소드 최대 길이(1000)로 나누어 0~1 사이로 정규화
-                hold_val = (self.data_collector.current_index - self.entry_index) / max_steps if self.entry_index is not None else 0.0
+                
+                # [수정] 절대 시간 기준 정규화 (에피소드 길이 의존성 제거)
+                if self.entry_index is not None:
+                    elapsed_steps = self.data_collector.current_index - self.entry_index
+                    # 480분을 넘으면 1.0으로 고정 (min 사용)
+                    hold_val = min(1.0, elapsed_steps / MAX_HOLDING_STEPS)
+                else:
+                    hold_val = 0.0
+                    
                 pnl_val = self.prev_pnl * 10  # PnL 스케일 조정
                 pos_info = [pos_val, pnl_val, hold_val]
                 
@@ -417,7 +439,7 @@ class PPOTrainer:
                 self.total_steps += 1
                 
                 # 8. 주기적 업데이트 (256개 트랜지션마다 - 버퍼 업데이트 방식)
-                if len(self.agent.memory) >= 1024:
+                if len(self.agent.memory) >= 256:
                     # 다음 스텝에서 사용할 상태를 미리 관측하여 Bootstrap 값으로 사용
                     # (인덱스가 이미 증가했으므로 다음 관측이 곧 다음 상태)
                     next_obs = None
@@ -426,8 +448,15 @@ class PPOTrainer:
                         if self.data_collector.current_index < len(self.data_collector.eth_data):
                             # 다음 스텝의 포지션 정보 예측 (현재 상태 기반)
                             next_pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
-                            # [수정] 캔들 인덱스 차이로 보유 시간 계산
-                            next_hold_val = (self.data_collector.current_index + 1 - self.entry_index) / max_steps if self.entry_index is not None else 0.0
+                            
+                            # [수정] 다음 상태의 보유 시간 예측도 동일한 로직 적용
+                            if self.entry_index is not None:
+                                # 다음 스텝이므로 +1
+                                next_elapsed = self.data_collector.current_index + 1 - self.entry_index
+                                next_hold_val = min(1.0, next_elapsed / MAX_HOLDING_STEPS)
+                            else:
+                                next_hold_val = 0.0
+                                
                             next_pnl_val = self.prev_pnl * 10
                             next_pos_info = [next_pos_val, next_pnl_val, next_hold_val]
                             

@@ -106,19 +106,6 @@ class BinanceClient:
             logger.error(f"캔들 데이터 조회 실패 ({symbol}): {e}")
             return None
     
-    def get_funding_rate(self, symbol):
-        """펀딩비 조회 (선물 거래에서만 사용 가능)"""
-        try:
-            if not self.use_futures:
-                # 스팟 거래에서는 펀딩비가 없음
-                return None
-            funding_info = self.client.futures_funding_rate(symbol=symbol, limit=1)
-            if funding_info:
-                return float(funding_info[0]['fundingRate'])
-            return None
-        except Exception as e:
-            logger.error(f"펀딩비 조회 실패: {e}")
-            return None
     
     def get_ticker(self, symbol):
         """현재 가격 조회"""

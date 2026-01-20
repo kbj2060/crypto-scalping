@@ -117,17 +117,28 @@ class TradingBot:
             try:
                 # 트레이딩 환경 생성
                 self.env = TradingEnvironment(self.data_collector, self.strategies)
-                state_dim = self.env.get_state_dim()
+                
+                # [추가] 저장된 스케일러 로드 및 상태 업데이트
+                if self.env.preprocessor.load_scaler():
+                    self.env.scaler_fitted = True  # 경고 메시지 방지
+                else:
+                    logger.error("❌ 스케일러 파일(scaler.pkl)이 없습니다. 학습을 먼저 진행하세요.")
+                    self.use_ai = False
+                    return
+                
+                state_dim = self.env.get_state_dim()  # 7차원
                 action_dim = 3  # 0: Hold, 1: Long, 2: Short
                 
-                # PPO 에이전트 생성 (추론 모드)
+                # PPO 에이전트 생성 (VRAM 효율을 위해 추론 모드 hidden_dim=128, info_dim=13 지정)
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device)
+                self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device, info_dim=13)
                 
                 # 학습된 모델 로드 (필수)
                 if os.path.exists(config.AI_MODEL_PATH):
                     try:
                         self.agent.load_model(config.AI_MODEL_PATH)
+                        # [중요] 실전 매매를 위한 평가 모드 및 그라디언트 계산 비활성화
+                        self.agent.model.eval()
                         logger.info(f"✅ AI 모델 로드 완료: {config.AI_MODEL_PATH}")
                         logger.info("📊 추론 모드: 학습은 train_ppo.py에서 별도로 수행하세요")
                     except Exception as e:
@@ -272,111 +283,65 @@ class TradingBot:
         return None
     
     def _run_ai_mode(self):
-        """AI 강화학습 기반 결정"""
+        """AI 강화학습 기반 실시간 결정 및 실행"""
         try:
-            # 1. 현재 상태 관측
-            state = self.env.get_observation()
-            if state is None:
-                logger.warning("⚠️ 상태 관측 실패: 다음 캔들 대기")
-                return
-            
-            # 2. AI 행동 결정 (0: Hold, 1: Long, 2: Short)
-            action, log_prob = self.agent.select_action(state)
-            action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
-            action_name = action_names[action]
-            
-            logger.info("")
-            logger.info("=" * 60)
-            logger.info(f"🤖 AI 결정: {action_name}")
-            logger.info("=" * 60)
-            
-            # 3. 현재 가격 확인
+            # 1. 현재 가격 및 실시간 포지션 정보 계산
             eth_data = self.data_collector.get_candles('ETH', count=1)
             if eth_data is None or len(eth_data) == 0:
-                logger.warning("⚠️ 가격 데이터 없음")
                 return
-            
             current_price = float(eth_data.iloc[-1]['close'])
+
+            # 2. 13차원 info 벡터 구성을 위한 실시간 포지션 상태 데이터 생성
+            pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
             
-            # 4. 행동에 따른 처리
-            reward = 0.0
-            trade_done = False
+            pnl_val = 0.0
+            hold_val = 0.0
+            if self.current_position and self.entry_price:
+                # 수익률 계산 (PnL)
+                if self.current_position == 'LONG':
+                    pnl_val = (current_price - self.entry_price) / self.entry_price
+                else:
+                    pnl_val = (self.entry_price - current_price) / self.entry_price
+                # 보유 시간 계산 (분 단위, 최대 1000분 기준 정규화)
+                hold_val = (datetime.now() - self.entry_time).total_seconds() / 60 / 1000 if self.entry_time else 0.0
             
-            if action == 1:  # LONG
+            # 3. 모델 입력을 위한 관측 생성 (7차원 시계열 + 13차원 정보)
+            # Late Fusion: 10개 전략 점수 + [pos_val, pnl_val*10, hold_val]
+            state = self.env.get_observation(position_info=[pos_val, pnl_val * 10, hold_val])
+            
+            if state is None:
+                return
+
+            # 4. 모델 결정 (확률 분포에서 가장 높은 값 선택 - Argmax)
+            obs_seq, obs_info = state
+            with torch.no_grad():
+                probs, _ = self.agent.model(obs_seq.to(self.agent.device), info=obs_info.to(self.agent.device))
+                action = torch.argmax(probs).item()
+            
+            action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
+            logger.info(f"🤖 AI Decision: {action_names[action]} (확률: {probs.max():.2%})")
+
+            # 5. 결정에 따른 거래 실행 로직
+            if action == 1:  # LONG 결정
                 if self.current_position != 'LONG':
-                    # 기존 포지션 청산
-                    if self.current_position == 'SHORT' and self.entry_price:
-                        pnl = (self.entry_price - current_price) / self.entry_price
-                        reward = self.env.calculate_reward(pnl, True)
-                        trade_done = True
-                        logger.info(f"💰 숏 포지션 청산: 수익률 {pnl:.2%}")
-                    
-                    # 롱 진입
-                    if config.ENABLE_TRADING:
-                        signal = {
-                            'signal': 'LONG',
-                            'entry_price': current_price,
-                            'stop_loss': None,
-                            'confidence': 0.0,
-                            'strategy': 'AI Decision'
-                        }
-                        if self.execute_trade(signal):
-                            self.current_position = 'LONG'
-                            self.entry_price = current_price
-                            self.entry_time = datetime.now()
-                            logger.info(f"📈 롱 포지션 진입: ${current_price:.2f}")
-                    else:
-                        logger.info(f"📊 분석 모드: 롱 진입 신호 (가격: ${current_price:.2f})")
+                    signal = {'signal': 'LONG', 'entry_price': current_price, 'strategy': 'AI Hybrid xLSTM'}
+                    if self.execute_trade(signal):
                         self.current_position = 'LONG'
                         self.entry_price = current_price
                         self.entry_time = datetime.now()
-            
-            elif action == 2:  # SHORT
+
+            elif action == 2:  # SHORT 결정
                 if self.current_position != 'SHORT':
-                    # 기존 포지션 청산
-                    if self.current_position == 'LONG' and self.entry_price:
-                        pnl = (current_price - self.entry_price) / self.entry_price
-                        reward = self.env.calculate_reward(pnl, True)
-                        trade_done = True
-                        logger.info(f"💰 롱 포지션 청산: 수익률 {pnl:.2%}")
-                    
-                    # 숏 진입
-                    if config.ENABLE_TRADING:
-                        signal = {
-                            'signal': 'SHORT',
-                            'entry_price': current_price,
-                            'stop_loss': None,
-                            'confidence': 0.0,
-                            'strategy': 'AI Decision'
-                        }
-                        if self.execute_trade(signal):
-                            self.current_position = 'SHORT'
-                            self.entry_price = current_price
-                            self.entry_time = datetime.now()
-                            logger.info(f"📉 숏 포지션 진입: ${current_price:.2f}")
-                    else:
-                        logger.info(f"📊 분석 모드: 숏 진입 신호 (가격: ${current_price:.2f})")
+                    signal = {'signal': 'SHORT', 'entry_price': current_price, 'strategy': 'AI Hybrid xLSTM'}
+                    if self.execute_trade(signal):
                         self.current_position = 'SHORT'
                         self.entry_price = current_price
                         self.entry_time = datetime.now()
             
-            else:  # HOLD
-                # 보유 중인 포지션의 수익률 계산 (보상용)
-                if self.current_position and self.entry_price:
-                    if self.current_position == 'LONG':
-                        pnl = (current_price - self.entry_price) / self.entry_price
-                    else:  # SHORT
-                        pnl = (self.entry_price - current_price) / self.entry_price
-                    
-                    holding_time = (datetime.now() - self.entry_time).total_seconds() / 60 if self.entry_time else 0
-                    reward = self.env.calculate_reward(pnl, False, holding_time)
-                    logger.debug(f"💼 포지션 보유 중: {self.current_position}, 수익률 {pnl:.2%}")
-            
-            # 5. 추론 모드: 학습 없이 행동만 결정
-            # (학습은 train_ppo.py에서 별도로 수행)
-                
+            # HOLD(0)인 경우 현재 포지션 유지
+
         except Exception as e:
-            logger.error(f"AI 모드 실행 실패: {e}", exc_info=True)
+            logger.error(f"AI 추론 루프 오류: {e}", exc_info=True)
     
     def _combine_trend_signals(self, signals):
         """추세장 진입 규칙: 핵심 돌파 전략 3중주 2개 이상 필수 + 환경 필터"""

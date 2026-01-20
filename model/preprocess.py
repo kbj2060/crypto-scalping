@@ -4,6 +4,8 @@
 """
 import numpy as np
 import logging
+import pickle
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +73,39 @@ class DataPreprocessor:
         log_prices = np.log(data + 1e-8)  # 0 방지
         log_returns = np.diff(log_prices, prepend=log_prices[0])
         return log_returns
+    
+    def save_scaler(self, path='model/scaler.pkl'):
+        """스케일러 저장
+        
+        Args:
+            path: 저장 경로 (기본값: model/scaler.pkl)
+        """
+        if self.mean is None or self.std is None:
+            logger.warning("스케일러가 학습되지 않았습니다. 저장할 수 없습니다.")
+            return
+        
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            pickle.dump({'mean': self.mean, 'std': self.std}, f)
+        logger.info(f"💾 스케일러 저장 완료: {path}")
+    
+    def load_scaler(self, path='model/scaler.pkl'):
+        """스케일러 로드
+        
+        Args:
+            path: 로드 경로 (기본값: model/scaler.pkl)
+        Returns:
+            bool: 로드 성공 여부
+        """
+        if os.path.exists(path):
+            try:
+                with open(path, 'rb') as f:
+                    data = pickle.load(f)
+                    self.mean = data['mean']
+                    self.std = data['std']
+                logger.info(f"✅ 스케일러 로드 완료: {path}")
+                return True
+            except Exception as e:
+                logger.error(f"스케일러 로드 실패: {e}")
+                return False
+        return False
