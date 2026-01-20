@@ -287,12 +287,14 @@ class PPOTrainer:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
             logger.warning("스케일러 학습 실패, 첫 관측 시 학습합니다.")
         
-    def train_episode(self, episode_num, max_steps=1000):
+    def train_episode(self, episode_num, max_steps=1000, overfitting_test=False, fixed_start_index=1000):
         """한 에피소드 학습
         
         Args:
             episode_num: 현재 에피소드 번호 (엔트로피 스케줄러용)
             max_steps: 최대 스텝 수
+            overfitting_test: 과적합 테스트 모드 (True면 고정 인덱스 사용)
+            fixed_start_index: 과적합 테스트 시 고정 시작 인덱스
         """
         # [설정] 보유 시간 정규화 기준 (8시간 = 480분/3분)
         # 이 시간이 지나면 1.0으로 고정됨
@@ -301,8 +303,16 @@ class PPOTrainer:
         episode_reward = 0.0
         steps = 0
         
-        # 저장된 데이터에서 인덱스 리셋 (새 에피소드 시작 - 무작위 시작 인덱스)
-        self.data_collector.reset_index(max_steps=max_steps, random_start=True)
+        # 저장된 데이터에서 인덱스 리셋
+        if overfitting_test:
+            # 과적합 테스트: 고정 시작 인덱스 사용 (같은 데이터 반복 학습)
+            self.data_collector.current_index = fixed_start_index
+            logger.info(f"🧪 [과적합 테스트] 고정 시작 인덱스: {fixed_start_index}, 최대 스텝: {max_steps}")
+        else:
+            # [실전 학습] 랜덤 스타트 활성화
+            # 매번 다른 구간을 학습하게 하여 다양한 시장 상황을 경험하도록 함
+            self.data_collector.reset_index(max_steps=max_steps, random_start=True)
+            logger.debug(f"🎲 [실전 학습] 무작위 시작 인덱스: {self.data_collector.current_index}")
         
         # 에피소드 시작 시 이전 수익률 초기화
         self.prev_pnl = 0.0
@@ -357,6 +367,35 @@ class PPOTrainer:
                 if state is None:
                     logger.warning("상태 관측 실패, 다음 캔들로 진행")
                     continue
+                
+                # [디버깅] 첫 번째 에피소드의 첫 스텝에서만 값 확인
+                if episode_num == 1 and steps < 5:
+                    obs_seq, obs_info = state
+                    logger.info(f"\n🔍 [Step {steps}] 입력 데이터 점검:")
+                    logger.info(f"   - 시계열 Shape: {obs_seq.shape}")
+                    logger.info(f"   - 시계열(Min/Max/Mean): {obs_seq.min().item():.4f} ~ {obs_seq.max().item():.4f} / {obs_seq.mean().item():.4f}")
+                    logger.info(f"   - 정보 Shape: {obs_info.shape}")
+                    logger.info(f"   - 정보(Min/Max/Mean): {obs_info.min().item():.4f} ~ {obs_info.max().item():.4f} / {obs_info.mean().item():.4f}")
+                    
+                    # 만약 여기서 10.0을 넘는 숫자가 보이면 정규화가 깨진 것입니다.
+                    if abs(obs_seq.max().item()) > 10.0 or abs(obs_seq.min().item()) > 10.0:
+                        logger.warning("🚨 경고: 시계열 입력값이 너무 큽니다! 스케일러가 작동하지 않습니다.")
+                        logger.warning(f"   값 범위: {obs_seq.min().item():.4f} ~ {obs_seq.max().item():.4f}")
+                    
+                    if abs(obs_info.max().item()) > 10.0 or abs(obs_info.min().item()) > 10.0:
+                        logger.warning("🚨 경고: 정보 입력값이 너무 큽니다!")
+                        logger.warning(f"   값 범위: {obs_info.min().item():.4f} ~ {obs_info.max().item():.4f}")
+                    
+                    # NaN/Inf 체크
+                    if torch.isnan(obs_seq).any() or torch.isinf(obs_seq).any():
+                        nan_count = torch.isnan(obs_seq).sum().item()
+                        inf_count = torch.isinf(obs_seq).sum().item()
+                        logger.error(f"🚨 시계열 데이터에 NaN({nan_count}) 또는 Inf({inf_count}) 발생!")
+                    
+                    if torch.isnan(obs_info).any() or torch.isinf(obs_info).any():
+                        nan_count = torch.isnan(obs_info).sum().item()
+                        inf_count = torch.isinf(obs_info).sum().item()
+                        logger.error(f"🚨 정보 데이터에 NaN({nan_count}) 또는 Inf({inf_count}) 발생!")
                 
                 # 4. 행동 선택
                 action, log_prob = self.agent.select_action(state)
@@ -438,38 +477,9 @@ class PPOTrainer:
                 steps += 1
                 self.total_steps += 1
                 
-                # 8. 주기적 업데이트 (256개 트랜지션마다 - 버퍼 업데이트 방식)
-                if len(self.agent.memory) >= 256:
-                    # 다음 스텝에서 사용할 상태를 미리 관측하여 Bootstrap 값으로 사용
-                    # (인덱스가 이미 증가했으므로 다음 관측이 곧 다음 상태)
-                    next_obs = None
-                    if not is_terminal:
-                        # 다음 인덱스로 이동하여 다음 상태 관측
-                        if self.data_collector.current_index < len(self.data_collector.eth_data):
-                            # 다음 스텝의 포지션 정보 예측 (현재 상태 기반)
-                            next_pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
-                            
-                            # [수정] 다음 상태의 보유 시간 예측도 동일한 로직 적용
-                            if self.entry_index is not None:
-                                # 다음 스텝이므로 +1
-                                next_elapsed = self.data_collector.current_index + 1 - self.entry_index
-                                next_hold_val = min(1.0, next_elapsed / MAX_HOLDING_STEPS)
-                            else:
-                                next_hold_val = 0.0
-                                
-                            next_pnl_val = self.prev_pnl * 10
-                            next_pos_info = [next_pos_val, next_pnl_val, next_hold_val]
-                            
-                            # 임시로 인덱스 증가 (다음 상태 관측용)
-                            temp_index = self.data_collector.current_index
-                            self.data_collector.current_index += 1
-                            next_obs = self.env.get_observation(position_info=next_pos_info)
-                            # 인덱스 복원 (실제 증가는 다음 루프에서)
-                            self.data_collector.current_index = temp_index
-                    
-                    # Bootstrap 업데이트 수행 (에피소드 번호 전달)
-                    self.agent.update(next_state=next_obs if next_obs is not None else None, episode=episode_num)
-                    logger.info(f"🚀 업데이트 완료 (에피소드: {episode_num}, Step: {step}, Memory: {len(self.agent.memory)}, Next Value: {'Yes' if next_obs is not None else 'No'})")
+                # 8. [과적합 테스트] 주기적 업데이트 제거
+                # 배치 사이즈를 에피소드 전체로 변경하여 안정성 확보
+                # 에피소드 종료 후 한 번에 업데이트하도록 변경됨
                 
                 # 저장된 데이터는 자동으로 다음 캔들로 진행됨 (대기 불필요)
                 
@@ -481,12 +491,32 @@ class PPOTrainer:
                 time.sleep(5)
                 continue
         
+        # [과적합 테스트] 에피소드가 끝나면 한 번에 업데이트
+        # 이렇게 하면 1000개의 데이터를 통째로 보고 판단하므로 훨씬 안정적입니다.
+        if len(self.agent.memory) > 0:
+            # next_state는 에피소드 끝났으므로 None
+            self.agent.update(next_state=None, episode=episode_num)
+            logger.info(f"🚀 에피소드 종료 후 전체 업데이트 (데이터: {len(self.agent.memory)}개)")
+        
         return episode_reward, steps
     
-    def train(self, num_episodes=100, max_steps_per_episode=100, save_interval=10):
-        """모델 학습"""
+    def train(self, num_episodes=100, max_steps_per_episode=100, save_interval=10, overfitting_test=False, fixed_start_index=1000):
+        """모델 학습
+        
+        Args:
+            num_episodes: 총 에피소드 수
+            max_steps_per_episode: 에피소드당 최대 스텝 수
+            save_interval: 모델 저장 간격
+            overfitting_test: 과적합 테스트 모드 (True면 고정 인덱스 사용)
+            fixed_start_index: 과적합 테스트 시 고정 시작 인덱스
+        """
         logger.info("=" * 60)
-        logger.info("🚀 PPO 모델 학습 시작")
+        if overfitting_test:
+            logger.info("🧪 [과적합 테스트 모드] PPO 모델 학습 시작")
+            logger.info(f"⚠️  고정 시작 인덱스: {fixed_start_index}, 최대 스텝: {max_steps_per_episode}")
+            logger.info("⚠️  같은 데이터를 반복 학습하여 보상이 폭발적으로 상승하는지 확인합니다.")
+        else:
+            logger.info("🚀 PPO 모델 학습 시작")
         logger.info("=" * 60)
         logger.info(f"에피소드 수: {num_episodes}")
         logger.info(f"에피소드당 최대 스텝: {max_steps_per_episode}")
@@ -502,7 +532,12 @@ class PPOTrainer:
                 logger.info(f"{'=' * 60}")
                 
                 # 에피소드 실행 (에피소드 번호 전달)
-                result = self.train_episode(episode_num=episode, max_steps=max_steps_per_episode)
+                result = self.train_episode(
+                    episode_num=episode, 
+                    max_steps=max_steps_per_episode,
+                    overfitting_test=overfitting_test,
+                    fixed_start_index=fixed_start_index
+                )
                 if result is None:
                     logger.warning("에피소드 실패, 다음 에피소드로 진행")
                     continue
@@ -560,6 +595,8 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=1000, help='에피소드당 최대 스텝 수 (기본값: 1000, 큰 추세 학습용)')
     parser.add_argument('--save-interval', type=int, default=10, help='모델 저장 간격 (에피소드)')
     parser.add_argument('--no-visualize', action='store_true', help='시각화 비활성화')
+    parser.add_argument('--overfitting-test', action='store_true', help='과적합 테스트 모드: 고정 인덱스로 같은 데이터 반복 학습')
+    parser.add_argument('--fixed-start-index', type=int, default=1000, help='과적합 테스트 시 고정 시작 인덱스 (기본값: 1000)')
     
     args = parser.parse_args()
     
@@ -568,7 +605,9 @@ if __name__ == '__main__':
         trainer.train(
             num_episodes=args.episodes,
             max_steps_per_episode=args.steps,
-            save_interval=args.save_interval
+            save_interval=args.save_interval,
+            overfitting_test=args.overfitting_test,
+            fixed_start_index=args.fixed_start_index
         )
     except KeyboardInterrupt:
         logger.info("학습 중단")

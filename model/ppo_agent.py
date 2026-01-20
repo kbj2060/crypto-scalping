@@ -14,13 +14,19 @@ class PPOAgent:
     """PPO 알고리즘 기반 강화학습 에이전트"""
     def __init__(self, state_dim, action_dim, hidden_dim=128, device='cpu', info_dim=13):
         self.device = device
-        self.gamma = 0.999  # 할인율 (인내심 강화: 미래 보상에 더 높은 가치 부여)
+        self.gamma = 0.99  # 할인율 (유지)
         self.lmbda = 0.95  # GAE 파라미터
-        self.eps_clip = 0.2  # PPO 클리핑 범위
-        self.k_epochs = 10  # 업데이트 반복 횟수
+        # [수정 1] PPO 클리핑 범위 복구 (0.1 -> 0.2)
+        # 한 번 업데이트할 때 더 많이 변화하도록 허용
+        self.eps_clip = 0.2
+        # [과적합 테스트] Epoch 증가 (10 -> 20)
+        # 같은 데이터를 더 여러 번 반복해서 외우게 시킵니다.
+        self.k_epochs = 20
         
         # 신경망 모델 (Late Fusion 구조)
         self.model = xLSTMActorCritic(state_dim, action_dim, info_dim=info_dim, hidden_dim=hidden_dim).to(device)
+        # [수정 2] 학습률 대폭 상향 (0.00005 -> 0.0003)
+        # 정규화가 완벽하므로 표준 학습률로 복귀해도 안전합니다.
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.0003)
         
         # [추가] 학습률 스케줄러: 200번의 업데이트마다 학습률을 절반으로 감소
@@ -140,12 +146,10 @@ class PPOAgent:
             surr1 = ratio * advantages_normalized
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages_normalized
             
-            # [핵심] 엔트로피 스케줄러 적용
-            # 초기 0.3에서 시작하여 서서히 0.1로 수렴 (탐험 유도 강화)
-            # 에피소드가 진행될수록 탐험을 줄이고 수렴을 강화
-            # 엔트로피 감소율을 0.9995로 늦추고 최소값 0.1로 상향 조정 (초반 탐험 강화)
-            # 0.05가 너무 낮아 에이전트가 너무 빨리 "포기"하는 것을 막기 위해 하한선을 0.1로 높임
-            entropy_coef = max(0.1, 0.3 * (0.9995 ** episode))
+            # [실전 학습] 엔트로피(탐험) 복구
+            # 초반엔 높게(0.05), 갈수록 낮게(0.01) - 다양한 시장 상황을 탐험하도록 유도
+            # 0.05 ~ 0.01 사이에서 시작하는 것이 일반적입니다.
+            entropy_coef = max(0.01, 0.05 * (0.995 ** episode))
             entropy_bonus = entropy_coef * entropy
             
             # Loss Function 계산

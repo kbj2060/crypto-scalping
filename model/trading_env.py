@@ -67,12 +67,20 @@ class TradingEnvironment:
             # np.cumsum을 사용하여 윈도우 내에서의 누적 VWAP 흐름을 생성
             cumulative_vp = np.cumsum(vp)
             cumulative_vol = np.cumsum(volume)
+            # 거래량이 0인 구간이 길어지면 문제가 될 수 있으므로 안전 장치 추가
             vwap = cumulative_vp / (cumulative_vol + 1e-8)
+            
+            # VWAP NaN 체크 (거래량이 모두 0인 경우 대비)
+            if np.isnan(vwap).any() or np.isinf(vwap).any():
+                logger.warning("VWAP 계산 중 NaN/Inf 발생, close 값으로 대체")
+                vwap = np.where(np.isnan(vwap) | np.isinf(vwap), close, vwap)
             
             # 2. 8개 시계열 피처 생성 (차원: 20x8)
             # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
-            volume_log = np.log1p(volume)  # log1p = log(1+x)
-            trades_log = np.log1p(candles['trades'].values.astype(np.float32))
+            # log1p는 음수 입력을 방지하기 위해 사용 (log(1+x))
+            volume_log = np.log1p(np.maximum(volume, 0))  # 음수 방지
+            trades_raw = candles['trades'].values.astype(np.float32) if 'trades' in candles.columns else np.zeros(20, dtype=np.float32)
+            trades_log = np.log1p(np.maximum(trades_raw, 0))  # 음수 방지
             
             seq_features = np.column_stack([
                 (candles['open'].values - close) / (close + 1e-8),  # f1: Open (close 대비)
@@ -116,6 +124,23 @@ class TradingEnvironment:
             obs_info = np.concatenate([strategy_scores, position_info], dtype=np.float32)
             obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)  # (1, 13)
             
+            # [긴급 점검] NaN/Inf 체크
+            if torch.isnan(obs_seq).any() or torch.isinf(obs_seq).any():
+                nan_count = torch.isnan(obs_seq).sum().item()
+                inf_count = torch.isinf(obs_seq).sum().item()
+                logger.error("🚨 시계열 데이터에 NaN 또는 Inf 발생!")
+                logger.error(f"   NaN 개수: {nan_count}, Inf 개수: {inf_count}")
+                logger.error(f"   시계열 데이터 샘플: {obs_seq[0, :5, :] if obs_seq.shape[0] > 0 else 'N/A'}")
+                return None  # 학습 방지
+            
+            if torch.isnan(obs_info_tensor).any() or torch.isinf(obs_info_tensor).any():
+                nan_count = torch.isnan(obs_info_tensor).sum().item()
+                inf_count = torch.isinf(obs_info_tensor).sum().item()
+                logger.error("🚨 정보 데이터에 NaN 또는 Inf 발생!")
+                logger.error(f"   NaN 개수: {nan_count}, Inf 개수: {inf_count}")
+                logger.error(f"   정보 데이터: {obs_info_tensor}")
+                return None  # 학습 방지
+            
             return (obs_seq, obs_info_tensor)
             
         except Exception as e:
@@ -134,16 +159,19 @@ class TradingEnvironment:
         Returns:
             reward: 보상값 (클리핑: -10 ~ +10)
         """
+        # 보상 스케일링 팩터 (100~300 추천)
+        # 코인 시장의 높은 변동성을 고려하여 적절한 수준으로 조정
+        scaling_factor = 300  # 기존 1000에서 하향 조정
+        
         # 1. 기본 보상 (수익률 변화량)
-        # 스케일링을 키워서(x100 -> x1000) 작은 변동에도 민감하게 반응하도록 유도
-        # 변동성 페널티는 초기 학습 방해 요소이므로 제거
-        reward = pnl_change * 1000
+        # 배율을 낮춰서 신경망이 '미세한 차이'를 학습하게 유도
+        reward = pnl_change * scaling_factor
         
         # 2. 거래 완료 시 보상 (Trade Done)
         if trade_done:
             # [핵심 변경] 비선형(제곱) 제거 -> 선형(Linear) 보상으로 변경
             # 손실 페널티를 수익 보상과 1:1 대칭으로 맞춤 (Risk:Reward = 1:1)
-            step_reward = pnl * 1000
+            step_reward = pnl * scaling_factor
             
             # 수수료 페널티 완화 (-0.05 -> -0.01)
             # 너무 높으면 진입 자체를 꺼리게 됨
@@ -163,8 +191,9 @@ class TradingEnvironment:
         #    reward -= 0.005 
 
         # 5. 보상 클리핑 (Reward Clipping)
-        # PPO 안정성을 위해 보상이 너무 크거나 작지 않게 제한 (-10 ~ +10)
-        reward = np.clip(reward, -10, 10)
+        # [수정] 보상 클리핑 범위 확장 (-10, 10 -> -100, 100)
+        # 이제 대박 수익을 내면 확실하게 큰 보상을 줍니다.
+        reward = np.clip(reward, -100, 100)
 
         return reward
 
