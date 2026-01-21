@@ -18,6 +18,7 @@ from core.indicators import Indicators
 from model.dqn_agent import DDQNAgent
 from model.trading_env import TradingEnvironment
 from model.feature_selection import FeatureSelector
+from model.mtf_processor import MTFProcessor
 import config
 
 # 전략 파일들 임포트
@@ -422,6 +423,21 @@ class DDQNTrainer:
         self.data_collector = DataCollector(use_saved_data=True)
         if not self.data_collector.load_saved_data():
             raise ValueError("데이터 로드 실패: collect_training_data.py를 먼저 실행하세요.")
+        
+        # 1.5. MTF 프로세서 적용 (15분봉, 1시간봉 지표 추가)
+        # 인덱스가 DatetimeIndex인지 확인하고 필요시 변환
+        if not isinstance(self.data_collector.eth_data.index, pd.DatetimeIndex):
+            # 인덱스가 문자열이거나 다른 형태일 경우 변환 시도
+            try:
+                self.data_collector.eth_data.index = pd.to_datetime(self.data_collector.eth_data.index)
+            except:
+                logger.warning("인덱스를 DatetimeIndex로 변환할 수 없습니다. MTF 프로세서를 건너뜁니다.")
+        else:
+            try:
+                mtf_processor = MTFProcessor(self.data_collector.eth_data)
+                self.data_collector.eth_data = mtf_processor.add_mtf_features()
+            except Exception as e:
+                logger.warning(f"MTF 프로세서 적용 실패: {e}. 계속 진행합니다.")
             
         # 2. 기술적 지표 피처 계산 (15개)
         logger.info("1. 기술적 지표 계산 중...")
@@ -456,6 +472,13 @@ class DDQNTrainer:
         # 피처 컬럼 초기화 (config에 정의된 순서대로)
         initial_features = list(config.FEATURE_COLUMNS)
         
+        # [추가] MTF 피처 자동 감지 및 추가 (rsi_15m, trend_15m, rsi_1h, trend_1h)
+        mtf_features = ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h']
+        for mtf_feat in mtf_features:
+            if mtf_feat in self.data_collector.eth_data.columns and mtf_feat not in initial_features:
+                initial_features.append(mtf_feat)
+                logger.info(f"✅ MTF 피처 자동 추가: {mtf_feat}")
+        
         # 누락된 컬럼 0으로 채우기 (XGBoost 에러 방지)
         for col in initial_features:
             if col not in self.data_collector.eth_data.columns:
@@ -463,8 +486,19 @@ class DDQNTrainer:
                 self.data_collector.eth_data[col] = 0.0
         
         # [수정 후 코드: XGBoost 적용] -----------------------------------------
+        # MTF 피처 확인 로깅
+        mtf_features_in_data = [f for f in ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'] 
+                                if f in self.data_collector.eth_data.columns]
+        if mtf_features_in_data:
+            logger.info(f"📊 MTF 피처 확인: {mtf_features_in_data} (총 {len(mtf_features_in_data)}개)")
+            logger.info(f"📊 MTF 피처 샘플 값: {self.data_collector.eth_data[mtf_features_in_data[0]].head(5).tolist()}")
+        else:
+            logger.warning("⚠️ MTF 피처가 데이터에 없습니다!")
+        
         if config.USE_XGBOOST_SELECTION:
             logger.info("🤖 XGBoost 피처 선택 프로세스 가동...")
+            logger.info(f"📋 후보 피처 개수: {len(initial_features)}개 (MTF 포함 여부 확인)")
+            
             selector = FeatureSelector(top_k=config.TOP_K_FEATURES)
             
             # 미래 20봉(1시간) 뒤의 변동성을 가장 잘 설명하는 피처 선정
@@ -473,6 +507,13 @@ class DDQNTrainer:
                 initial_features, 
                 target_horizon=10 
             )
+            
+            # MTF 피처 선택 여부 확인
+            selected_mtf = [f for f in selected_features if f in mtf_features_in_data]
+            if selected_mtf:
+                logger.info(f"✅ XGBoost가 선택한 MTF 피처: {selected_mtf}")
+            else:
+                logger.info(f"ℹ️ XGBoost가 MTF 피처를 선택하지 않았습니다. (선택된 피처: {selected_features})")
             
             # [안전장치] 만약 선택된 피처가 너무 적으면 기본값 사용
             if len(selected_features) < 3:
@@ -486,6 +527,11 @@ class DDQNTrainer:
         # [핵심] 방향성 필수 지표 강제 포함 (Whitelist)
         # RSI(과매수/과매도), MACD(추세), BB Position(현재 위치), ADX(추세 강도), Choppiness(횡보/추세 판별)
         must_include = ['rsi', 'macd_hist', 'bb_position', 'adx', 'chop']
+        
+        # MTF 피처도 강제 포함 (상위 프레임 정보는 중요)
+        mtf_must_include = [f for f in ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'] 
+                           if f in self.data_collector.eth_data.columns]
+        must_include.extend(mtf_must_include)
         
         # 필수 지표가 데이터에 있는지 확인 후 추가
         for f in must_include:
@@ -527,7 +573,8 @@ class DDQNTrainer:
             buffer_size=ddqn_config['buffer_size'],
             batch_size=ddqn_config['batch_size'],
             target_update=ddqn_config['target_update'],
-            device=device
+            device=device,
+            use_per=config.USE_PER  # PER 사용 여부
         )
         
         self.episode_rewards = []
@@ -545,8 +592,15 @@ class DDQNTrainer:
         try:
             logger.info("전역 스케일러 학습 시작 (전략 점수 제외)...")
             
-            # 기술적 지표 컬럼만 필터링
+            # 기술적 지표 컬럼만 필터링 (MTF 피처 포함)
             tech_cols = [f for f in self.feature_columns if not f.startswith('strat_')]
+            
+            # MTF 피처 확인
+            mtf_in_scaler = [f for f in tech_cols if '_15m' in f or '_1h' in f]
+            if mtf_in_scaler:
+                logger.info(f"✅ 스케일러에 포함된 MTF 피처: {mtf_in_scaler}")
+            else:
+                logger.warning(f"⚠️ 스케일러에 MTF 피처가 없습니다. (기술적 지표: {tech_cols})")
             
             if not tech_cols:
                 logger.warning("기술적 지표가 없어 스케일러 학습을 건너뜁니다.")

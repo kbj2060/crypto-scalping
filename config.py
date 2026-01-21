@@ -84,6 +84,9 @@ LOOKBACK_WINDOW = 60  # 3분봉 * 60 = 180분 (3시간)
 USE_XGBOOST_SELECTION = True  # 활성화 여부
 TOP_K_FEATURES = 8            # 선택할 피처 개수 (DDQN 입력 차원)
 
+# [신규] Prioritized Experience Replay (PER) 설정
+USE_PER = True  # PER 사용 여부 (True: 우선순위 기반 샘플링, False: 일반 랜덤 샘플링)
+
 # 3. DDQN 하이퍼파라미터
 DDQN_CONFIG = {
     'input_dim': len(FEATURE_COLUMNS),  # 17 + 10 = 27개 (자동 계산)
