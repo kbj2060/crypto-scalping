@@ -17,6 +17,7 @@ from core.data_collector import DataCollector
 from core.indicators import Indicators
 from model.dqn_agent import DDQNAgent
 from model.trading_env import TradingEnvironment
+from model.feature_selection import FeatureSelector
 import config
 
 # 전략 파일들 임포트
@@ -452,8 +453,35 @@ class DDQNTrainer:
         for col in strat_df.columns:
             self.data_collector.eth_data[col] = strat_df[col]
         
-        # 피처 컬럼 확정 (config에 정의된 순서대로)
-        self.feature_columns = list(config.FEATURE_COLUMNS)
+        # 피처 컬럼 초기화 (config에 정의된 순서대로)
+        initial_features = list(config.FEATURE_COLUMNS)
+        
+        # 누락된 컬럼 0으로 채우기 (XGBoost 에러 방지)
+        for col in initial_features:
+            if col not in self.data_collector.eth_data.columns:
+                logger.warning(f"누락된 피처 {col}를 0으로 채웁니다.")
+                self.data_collector.eth_data[col] = 0.0
+        
+        # [수정 후 코드: XGBoost 적용] -----------------------------------------
+        if config.USE_XGBOOST_SELECTION:
+            logger.info("🤖 XGBoost 피처 선택 프로세스 가동...")
+            selector = FeatureSelector(top_k=config.TOP_K_FEATURES)
+            
+            # 미래 20봉(1시간) 뒤의 변동성을 가장 잘 설명하는 피처 선정
+            selected_features = selector.select_features(
+                self.data_collector.eth_data, 
+                initial_features, 
+                target_horizon=10 
+            )
+            
+            # [안전장치] 만약 선택된 피처가 너무 적으면 기본값 사용
+            if len(selected_features) < 3:
+                logger.warning("XGBoost가 선택한 피처가 너무 적습니다. 기본 설정으로 복귀합니다.")
+                self.feature_columns = initial_features
+            else:
+                self.feature_columns = selected_features
+        else:
+            self.feature_columns = initial_features
         
         # [핵심] 방향성 필수 지표 강제 포함 (Whitelist)
         # RSI(과매수/과매도), MACD(추세), BB Position(현재 위치), ADX(추세 강도), Choppiness(횡보/추세 판별)
@@ -464,12 +492,7 @@ class DDQNTrainer:
             if f in self.data_collector.eth_data.columns and f not in self.feature_columns:
                 self.feature_columns.append(f)
                 logger.info(f"✅ 필수 지표 강제 포함: {f}")
-        
-        # 누락된 컬럼 0으로 채우기 (혹시 모를 에러 방지)
-        for col in self.feature_columns:
-            if col not in self.data_collector.eth_data.columns:
-                logger.warning(f"누락된 피처 {col}를 0으로 채웁니다.")
-                self.data_collector.eth_data[col] = 0.0
+        # ---------------------------------------------------------------------
                 
         logger.info(f"✅ 최종 입력 피처 ({len(self.feature_columns)}개): {self.feature_columns}")
         
