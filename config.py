@@ -48,7 +48,7 @@ AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로 (PPO)
 DDQN_MODEL_PATH = 'model/ddqn_model.pth'  # DDQN 모델 저장 경로
 SELECTED_FEATURES_PATH = 'model/selected_features.json'  # 호환성 유지용
 
-# 1. 기술적 지표 피처 (15개)
+# 1. 기술적 지표 피처 (17개)
 TECHNICAL_FEATURES = [
     'log_return', 'log_volume',         # PPO 기본 (2)
     'high_ratio', 'low_ratio',          # 캔들 모양/꼬리 (2)
@@ -56,7 +56,8 @@ TECHNICAL_FEATURES = [
     'rsi', 'macd_hist',                 # 모멘텀 (2)
     'bb_width', 'bb_position',          # 변동성/위치 (2)
     'stoch_rsi', 'mfi', 'cmf',          # 오실레이터/자금 (3)
-    'hma_ratio', 'vwap_dist', 'atr_ratio' # 이격도 (3)
+    'hma_ratio', 'vwap_dist', 'atr_ratio', # 이격도 (3)
+    'adx', 'chop'                       # 추세/횡보 판별 (2) - 신규 추가
 ]
 
 # 2. 전략 기반 피처 (10개) - 새로 추가됨
@@ -81,7 +82,7 @@ LOOKBACK_WINDOW = 60  # 3분봉 * 60 = 180분 (3시간)
 
 # 3. DDQN 하이퍼파라미터
 DDQN_CONFIG = {
-    'input_dim': len(FEATURE_COLUMNS),  # 15 + 10 = 25개 (자동 계산)
+    'input_dim': len(FEATURE_COLUMNS),  # 17 + 10 = 27개 (자동 계산)
     'hidden_dim': 128,  # GRU 및 FC 레이어 노드 수 (입력 증가에 따라 64 -> 128)
     'num_layers': 2,  # GRU 레이어 수
     'action_dim': 3,  # 행동 개수 (0: Hold, 1: Long, 2: Short)

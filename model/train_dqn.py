@@ -252,6 +252,51 @@ def calculate_technical_features(data):
             df['atr_ratio'] = atr_val / (close + 1e-8)
         else:
             df['atr_ratio'] = np.zeros_like(close)
+        
+        # 16. ADX (추세 강도 지표) - 시장의 성격을 규정하는 핵심 지표
+        try:
+            # TR (True Range) 계산
+            tr1 = np.abs(high - low)
+            tr2 = np.abs(high - np.roll(close, 1))
+            tr3 = np.abs(low - np.roll(close, 1))
+            tr = np.maximum(tr1, np.maximum(tr2, tr3))
+            
+            # DM (Directional Movement) 계산
+            up_move = high - np.roll(high, 1)
+            down_move = np.roll(low, 1) - low
+            
+            plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+            minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+            
+            # Smoothing (14 period)
+            alpha = 1/14
+            
+            # Pandas Series로 변환하여 ewm 사용 (구현 편의성)
+            tr_s = pd.Series(tr).ewm(alpha=alpha, adjust=False).mean()
+            plus_dm_s = pd.Series(plus_dm).ewm(alpha=alpha, adjust=False).mean()
+            minus_dm_s = pd.Series(minus_dm).ewm(alpha=alpha, adjust=False).mean()
+            
+            plus_di = 100 * (plus_dm_s / (tr_s + 1e-8))
+            minus_di = 100 * (minus_dm_s / (tr_s + 1e-8))
+            
+            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-8)
+            adx = dx.ewm(alpha=alpha, adjust=False).mean().values
+            
+            # 데이터프레임에 추가
+            df['adx'] = np.nan_to_num(adx, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # [중요] Choppiness Index (횡보장 판별기)도 추가
+            # 0에 가까우면 추세, 100에 가까우면 횡보
+            high_14 = pd.Series(high).rolling(14).max()
+            low_14 = pd.Series(low).rolling(14).min()
+            atr_14 = pd.Series(tr).rolling(14).sum()
+            chop = 100 * np.log10(atr_14 / (high_14 - low_14 + 1e-8)) / np.log10(14)
+            df['chop'] = np.nan_to_num(chop.values, nan=50.0, posinf=50.0, neginf=50.0)  # NaN은 중간값으로 대체
+            
+        except Exception as e:
+            logger.error(f"ADX/Chop 계산 실패: {e}")
+            df['adx'] = np.zeros_like(close)
+            df['chop'] = np.full_like(close, 50.0)
 
         # NaN/Inf 처리 (0으로 채움)
         df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
@@ -408,7 +453,17 @@ class DDQNTrainer:
             self.data_collector.eth_data[col] = strat_df[col]
         
         # 피처 컬럼 확정 (config에 정의된 순서대로)
-        self.feature_columns = config.FEATURE_COLUMNS
+        self.feature_columns = list(config.FEATURE_COLUMNS)
+        
+        # [핵심] 방향성 필수 지표 강제 포함 (Whitelist)
+        # RSI(과매수/과매도), MACD(추세), BB Position(현재 위치), ADX(추세 강도), Choppiness(횡보/추세 판별)
+        must_include = ['rsi', 'macd_hist', 'bb_position', 'adx', 'chop']
+        
+        # 필수 지표가 데이터에 있는지 확인 후 추가
+        for f in must_include:
+            if f in self.data_collector.eth_data.columns and f not in self.feature_columns:
+                self.feature_columns.append(f)
+                logger.info(f"✅ 필수 지표 강제 포함: {f}")
         
         # 누락된 컬럼 0으로 채우기 (혹시 모를 에러 방지)
         for col in self.feature_columns:

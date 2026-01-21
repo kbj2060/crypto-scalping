@@ -1,53 +1,76 @@
 """
-Dueling GRU Network 모델
-Double DQN을 위한 신경망 구조
+Dueling GRU Network + Attention Pooling
+시계열의 중요 시점에 가중치를 부여하여 긴 Lookback(60)을 효율적으로 학습
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class DuelingGRU(nn.Module):
-    """Dueling GRU Network: 상태 가치와 행동 우위를 분리하여 계산"""
-    
-    def __init__(self, input_dim, hidden_dim=64, num_layers=2, action_dim=3):
+class AttentionPooling(nn.Module):
+    """시계열의 중요 시점에 집중하는 어텐션 풀링 레이어"""
+    def __init__(self, hidden_dim):
+        super(AttentionPooling, self).__init__()
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, x):
         """
         Args:
-            input_dim: 입력 피처 개수 (XGBoost로 선택된 피처 수)
+            x: (batch, seq_len, hidden_dim) 입력 시퀀스
+        Returns:
+            context: (batch, hidden_dim) 가중 평균된 컨텍스트 벡터
+        """
+        # 어텐션 가중치 계산
+        weights = self.attention(x)  # (batch, seq_len, 1)
+        # 가중 평균 (Context Vector)
+        context = torch.sum(x * weights, dim=1)  # (batch, hidden_dim)
+        return context
+
+
+class DuelingGRU(nn.Module):
+    """Dueling GRU Network with Attention Pooling"""
+    
+    def __init__(self, input_dim, hidden_dim=128, num_layers=2, action_dim=3):
+        """
+        Args:
+            input_dim: 입력 피처 개수
             hidden_dim: GRU hidden dimension
             num_layers: GRU 레이어 수
             action_dim: 행동 개수 (3: Long/Short/Hold)
         """
         super(DuelingGRU, self).__init__()
         
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.action_dim = action_dim
-        
-        # 핵심 레이어: 2-Layer GRU
-        # LSTM 대신 GRU를 사용하여 연산 속도를 높이고 파라미터를 줄입니다
+        # 1. Feature Extractor (GRU)
         self.gru = nn.GRU(
             input_size=input_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
-            dropout=0.1 if num_layers > 1 else 0
+            dropout=0.2 if num_layers > 1 else 0
         )
         
-        # Dueling Head: GRU의 마지막 시점 출력을 받아 두 갈래로 나뉨
-        # Value Stream (V): 현재 시장 상황 자체가 유리한지 불리한지 판단
+        # 2. [신규] Temporal Attention Layer
+        # 60개 시점 중 중요한 순간을 찾아냄
+        self.attention = AttentionPooling(hidden_dim)
+        
+        # 3. Dueling Heads
+        # Value Stream
         self.value_stream = nn.Sequential(
-            nn.Linear(hidden_dim, 32),
+            nn.Linear(hidden_dim, 64),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(64, 1)
         )
         
-        # Advantage Stream (A): 각 행동 간의 상대적 우위를 판단
+        # Advantage Stream
         self.advantage_stream = nn.Sequential(
-            nn.Linear(hidden_dim, 32),
+            nn.Linear(hidden_dim, 64),
             nn.ReLU(),
-            nn.Linear(32, action_dim)
+            nn.Linear(64, action_dim)
         )
     
     def forward(self, x):
@@ -57,19 +80,18 @@ class DuelingGRU(nn.Module):
         Returns:
             q_values: (batch_size, action_dim) Q-값
         """
-        # GRU 처리
-        gru_out, _ = self.gru(x)  # (batch_size, seq_len, hidden_dim)
+        # GRU 통과
+        gru_out, _ = self.gru(x)  # (batch, seq_len, hidden_dim)
         
-        # 마지막 시점의 hidden state 사용
-        last_hidden = gru_out[:, -1, :]  # (batch_size, hidden_dim)
+        # [변경] 단순 마지막 값 사용 -> 어텐션 풀링 사용
+        # last_hidden = gru_out[:, -1, :] 
+        context_vector = self.attention(gru_out)  # (batch, hidden_dim)
         
-        # Value Stream: V(s)
-        value = self.value_stream(last_hidden)  # (batch_size, 1)
+        # Dueling Logic
+        value = self.value_stream(context_vector)  # (batch, 1)
+        advantage = self.advantage_stream(context_vector)  # (batch, action_dim)
         
-        # Advantage Stream: A(s, a)
-        advantage = self.advantage_stream(last_hidden)  # (batch_size, action_dim)
-        
-        # 최종 Q-Value 결합 공식
+        # Q-Value 결합 공식
         # Q(s, a) = V(s) + (A(s, a) - mean(A(s, ·)))
         q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
         
