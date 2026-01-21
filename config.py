@@ -76,6 +76,9 @@ STRATEGY_FEATURES = [
 # 최종 사용할 모든 피처 합치기
 FEATURE_COLUMNS = TECHNICAL_FEATURES + STRATEGY_FEATURES
 
+# 환경 설정
+LOOKBACK_WINDOW = 60  # 3분봉 * 60 = 180분 (3시간)
+
 # 3. DDQN 하이퍼파라미터
 DDQN_CONFIG = {
     'input_dim': len(FEATURE_COLUMNS),  # 15 + 10 = 25개 (자동 계산)

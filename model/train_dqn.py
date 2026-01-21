@@ -422,6 +422,7 @@ class DDQNTrainer:
         self.env = TradingEnvironment(
             self.data_collector, 
             strategies=[], 
+            lookback=config.LOOKBACK_WINDOW,  # [수정] 20 -> 60 (3시간의 흐름을 보게 함)
             selected_features=self.feature_columns
         )
         

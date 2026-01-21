@@ -52,7 +52,8 @@ class TradingEnvironment:
             # 선택된 피처가 있으면 XGBoost 선택 피처 사용
             if self.selected_features and len(self.selected_features) > 0:
                 # [핵심] 선택된 피처만 슬라이싱
-                seq_len = 20
+                # [수정] 하드코딩된 20을 self.lookback으로 변경
+                seq_len = self.lookback
                 start_idx = current_idx - seq_len
                 
                 if start_idx < 0 or current_idx > len(self.collector.eth_data):
@@ -113,7 +114,7 @@ class TradingEnvironment:
                 obs_data = np.hstack(final_seq)
                 
                 # 4. 텐서 변환
-                obs_seq = torch.FloatTensor(obs_data).unsqueeze(0)  # (1, 20, num_features)
+                obs_seq = torch.FloatTensor(obs_data).unsqueeze(0)  # (1, lookback, num_features)
                 
             else:
                 # 기존 8개 피처 사용 (호환성)
@@ -145,10 +146,10 @@ class TradingEnvironment:
     def _get_observation_fallback(self, position_info=None):
         """기존 8개 피처 방식 (호환성 유지)"""
         try:
-            # 1. 원본 데이터 수집 (마지막 20봉)
-            candles = self.collector.get_candles('ETH', count=20)
-            if candles is None or len(candles) < 20:
-                logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: 20개)")
+            # 1. 원본 데이터 수집 (마지막 lookback봉)
+            candles = self.collector.get_candles('ETH', count=self.lookback)
+            if candles is None or len(candles) < self.lookback:
+                logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: {self.lookback}개)")
                 return None
             
             close = candles['close'].values.astype(np.float32)
@@ -170,7 +171,7 @@ class TradingEnvironment:
             
             # 2. 8개 시계열 피처 생성
             volume_log = np.log1p(np.maximum(volume, 0))
-            trades_raw = candles['trades'].values.astype(np.float32) if 'trades' in candles.columns else np.zeros(20, dtype=np.float32)
+            trades_raw = candles['trades'].values.astype(np.float32) if 'trades' in candles.columns else np.zeros(self.lookback, dtype=np.float32)
             trades_log = np.log1p(np.maximum(trades_raw, 0))
             
             seq_features = np.column_stack([
@@ -180,7 +181,7 @@ class TradingEnvironment:
                 np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8)),
                 volume_log,
                 trades_log,
-                candles['taker_buy_base'].values / (volume + 1e-8) if 'taker_buy_base' in candles.columns else np.zeros(20, dtype=np.float32),
+                candles['taker_buy_base'].values / (volume + 1e-8) if 'taker_buy_base' in candles.columns else np.zeros(self.lookback, dtype=np.float32),
                 (close - vwap) / (vwap + 1e-8)
             ])
             
@@ -189,7 +190,7 @@ class TradingEnvironment:
                 logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
             
             normalized_seq = self.preprocessor.transform(seq_features)
-            obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)  # (1, 20, 8)
+            obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)  # (1, lookback, 8)
             
             # 4. Info 데이터
             if position_info is None:
@@ -204,7 +205,7 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        보상 계산 (현실화된 보상 체계 + 비선형 보상)
+        보상 계산 (현실화된 보상 체계 + 비선형 보상 + 대칭적 페널티)
         
         Args:
             pnl: 손익 (수익률)
@@ -216,25 +217,28 @@ class TradingEnvironment:
         """
         reward = 0.0
         
-        # 1. 미실현 손익의 '변화량'만 보상 (계속 들고 있다고 보상을 퍼주지 않음)
-        # pnl_change가 0이면 보상도 0 (변화가 없으면 보상 없음)
+        # 1. 평가 수익 변화량 보상 (변동성을 즉각 반영하기 위해 유지)
         reward = pnl_change * 300
         
-        # 2. 거래가 완료되었을 때만 '실현 수익'에 비선형 보상 부여
         if trade_done:
+            # [수정] 익절/손절 보상 체계 균형 맞추기
             if pnl > 0:
-                # 수익이 클수록 보상을 제곱으로 부여하여 큰 수익을 유도
-                # 예: 0.5% 수익 → (0.005 * 100)^2 / 10 = 0.25
-                #     2% 수익 → (0.02 * 100)^2 / 10 = 4.0 (16배 차이!)
-                reward += (pnl * 100) ** 2 / 10
+                # 수익: 제곱 보상 (유지)
+                # 예: 1% 수익 -> (1)^2 / 5 = 0.2 + 2.0(보너스) = 2.2점
+                reward += (pnl * 100) ** 2 / 5.0
+                
+                # 승리 보너스 (유지)
+                if pnl > 0.002:  # 0.2% 이상 익절 시
+                    reward += 2.0
             else:
-                # 손실은 그대로 페널티 (비선형 적용 안 함)
-                reward += pnl * 20
+                # [핵심 수정] 손실: 페널티를 대폭 강화 (기존 * 20 -> * 200)
+                # 예: 1% 손실 -> -0.01 * 200 = -2.0점 (수익 점수와 비슷해짐)
+                reward += pnl * 200
             
-            reward -= 0.0005  # 수수료 페널티 (0.05% - 현실적인 스캘핑 수수료)
+            # 수수료 페널티 (유지)
+            reward -= 0.0005
         
-        # 3. 시간 페널티 완화 (기존 -0.0005 -> -0.0001)
-        # 큰 추세를 끝까지 타도록 유도
+        # 시간 페널티 (유지)
         reward -= 0.0001
         
         # 보상 클리핑 (과도한 보상 방지)
