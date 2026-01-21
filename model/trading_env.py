@@ -1,31 +1,30 @@
 """
-강화학습 트레이딩 환경
-기존 전략 Score와 시장 데이터를 결합하는 환경 인터페이스
-원시 데이터 보존 + Z-Score 정규화
-변동성 기반 보상 시스템 (Risk-Adjusted Reward)
+트레이딩 환경: 상태 관측 및 변동성 기반 보상 계산
 """
 import numpy as np
 import torch
 import logging
 from collections import deque
-from .preprocess import DataPreprocessor
+from model.preprocess import DataPreprocessor
 
 logger = logging.getLogger(__name__)
 
 
 class TradingEnvironment:
     """트레이딩 환경: 상태 관측 및 변동성 기반 보상 계산"""
-    def __init__(self, data_collector, strategies, lookback=40):
+    def __init__(self, data_collector, strategies, lookback=40, selected_features=None):
         """
         Args:
             data_collector: DataCollector 인스턴스
             strategies: 전략 리스트
             lookback: 충분한 샘플 수 (기본 40)
+            selected_features: XGBoost로 선택된 피처 리스트 (None이면 기존 8개 사용)
         """
         self.collector = data_collector
         self.strategies = strategies
         self.num_strategies = len(strategies)
         self.lookback = lookback
+        self.selected_features = selected_features  # XGBoost 선택 피처 저장
         
         # 전처리 파이프라인 (Z-Score 정규화)
         self.preprocessor = DataPreprocessor()
@@ -36,18 +35,115 @@ class TradingEnvironment:
 
     def get_observation(self, position_info=None):
         """
-        현재 상태 관측 (8개 핵심 시계열 피처 + Z-Score 정규화 + 포지션 정보)
+        현재 상태 관측 (XGBoost 선택 피처 또는 기존 8개 피처 + Z-Score 정규화 + 포지션 정보)
         
         Args:
             position_info: [포지션(1/0/-1), 미실현PnL, 보유시간(정규화)] 리스트
-                          - 보유시간: (current_index - entry_index) / max_steps (0~1 사이)
                           None이면 [0.0, 0.0, 0.0]으로 처리
         
         Returns:
             (obs_seq, obs_info): 튜플
-                - obs_seq: (1, 20, 8) 텐서 - 8개 시계열 피처 (VWAP 이격도 포함)
-                - obs_info: (1, 13) 텐서 - 전략 점수(10) + 포지션 정보(3)
+                - obs_seq: (1, 20, num_features) 텐서 - 선택된 피처 또는 8개 시계열 피처
+                - obs_info: (1, 3) 텐서 - 포지션 정보만 (DDQN에서는 전략 점수 제외)
         """
+        try:
+            current_idx = self.collector.current_index
+            
+            # 선택된 피처가 있으면 XGBoost 선택 피처 사용
+            if self.selected_features and len(self.selected_features) > 0:
+                # [핵심] 선택된 피처만 슬라이싱
+                seq_len = 20
+                start_idx = current_idx - seq_len
+                
+                if start_idx < 0 or current_idx > len(self.collector.eth_data):
+                    logger.warning(f"인덱스 범위 초과: start={start_idx}, current={current_idx}, total={len(self.collector.eth_data)}")
+                    return None
+                
+                # 데이터프레임에서 선택된 컬럼만 추출
+                # collector.eth_data에는 이미 모든 피처가 계산되어 있다고 가정
+                feature_data = self.collector.eth_data.iloc[start_idx:current_idx]
+                
+                # [핵심 수정] 피처를 성격에 따라 분리
+                # strat_로 시작하는 컬럼(전략)과 그 외(기술지표)로 구분
+                strat_cols = [f for f in self.selected_features if f.startswith('strat_') and f in feature_data.columns]
+                tech_cols = [f for f in self.selected_features if not f.startswith('strat_') and f in feature_data.columns]
+                
+                if len(tech_cols) == 0 and len(strat_cols) == 0:
+                    logger.warning("선택된 피처가 데이터에 없습니다. 기존 방식으로 전환합니다.")
+                    return self._get_observation_fallback(position_info)
+                
+                # 1. 기술적 지표 처리 (정규화 O)
+                if tech_cols:
+                    tech_data = feature_data[tech_cols].values.astype(np.float32)
+                    # NaN 체크 및 처리
+                    if np.isnan(tech_data).any() or np.isinf(tech_data).any():
+                        tech_data = np.nan_to_num(tech_data, nan=0.0, posinf=0.0, neginf=0.0)
+                    
+                    if not self.scaler_fitted:
+                        logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
+                    
+                    # 기술 지표만 정규화
+                    tech_data = self.preprocessor.transform(tech_data)
+                else:
+                    tech_data = np.empty((seq_len, 0), dtype=np.float32)
+                
+                # 2. 전략 점수 처리 (정규화 X - 원본 유지)
+                if strat_cols:
+                    strat_data = feature_data[strat_cols].values.astype(np.float32)
+                    # 전략 점수는 NaN을 0으로만 채움 (정규화 안 함)
+                    strat_data = np.nan_to_num(strat_data, nan=0.0, posinf=0.0, neginf=0.0)
+                else:
+                    strat_data = np.empty((seq_len, 0), dtype=np.float32)
+                
+                # 3. 다시 결합 (순서 중요: selected_features 순서대로 재배열)
+                # selected_features 순서대로 하나씩 조립
+                final_seq = []
+                for f in self.selected_features:
+                    if f in tech_cols:
+                        col_idx = tech_cols.index(f)
+                        final_seq.append(tech_data[:, col_idx:col_idx+1])
+                    elif f in strat_cols:
+                        col_idx = strat_cols.index(f)
+                        final_seq.append(strat_data[:, col_idx:col_idx+1])
+                
+                if len(final_seq) == 0:
+                    logger.warning("최종 피처가 없습니다.")
+                    return None
+                
+                obs_data = np.hstack(final_seq)
+                
+                # 4. 텐서 변환
+                obs_seq = torch.FloatTensor(obs_data).unsqueeze(0)  # (1, 20, num_features)
+                
+            else:
+                # 기존 8개 피처 사용 (호환성)
+                return self._get_observation_fallback(position_info)
+            
+            # 5. Info 데이터 (포지션 정보만 사용, 전략 점수는 DDQN에서 제외)
+            if position_info is None:
+                position_info = [0.0, 0.0, 0.0]
+            obs_info_tensor = torch.FloatTensor(position_info).unsqueeze(0)  # (1, 3)
+            
+            # [긴급 점검] NaN/Inf 체크
+            if torch.isnan(obs_seq).any() or torch.isinf(obs_seq).any():
+                nan_count = torch.isnan(obs_seq).sum().item()
+                inf_count = torch.isinf(obs_seq).sum().item()
+                logger.error("🚨 시계열 데이터에 NaN 또는 Inf 발생!")
+                logger.error(f"   NaN 개수: {nan_count}, Inf 개수: {inf_count}")
+                return None
+            
+            if torch.isnan(obs_info_tensor).any() or torch.isinf(obs_info_tensor).any():
+                logger.error("🚨 정보 데이터에 NaN 또는 Inf 발생!")
+                return None
+            
+            return (obs_seq, obs_info_tensor)
+            
+        except Exception as e:
+            logger.error(f"관측 생성 실패: {e}", exc_info=True)
+            return None
+    
+    def _get_observation_fallback(self, position_info=None):
+        """기존 8개 피처 방식 (호환성 유지)"""
         try:
             # 1. 원본 데이터 수집 (마지막 20봉)
             candles = self.collector.get_candles('ETH', count=20)
@@ -61,142 +157,94 @@ class TradingEnvironment:
             volume = candles['volume'].values.astype(np.float32)
             
             # [추가] VWAP 계산 (현재 윈도우 20개 기준 Rolling VWAP)
-            # 공식: Sum(Price * Volume) / Sum(Volume)
             tp = (high + low + close) / 3  # Typical Price
             vp = tp * volume
-            # np.cumsum을 사용하여 윈도우 내에서의 누적 VWAP 흐름을 생성
             cumulative_vp = np.cumsum(vp)
             cumulative_vol = np.cumsum(volume)
-            # 거래량이 0인 구간이 길어지면 문제가 될 수 있으므로 안전 장치 추가
             vwap = cumulative_vp / (cumulative_vol + 1e-8)
             
-            # VWAP NaN 체크 (거래량이 모두 0인 경우 대비)
+            # VWAP NaN 체크
             if np.isnan(vwap).any() or np.isinf(vwap).any():
                 logger.warning("VWAP 계산 중 NaN/Inf 발생, close 값으로 대체")
                 vwap = np.where(np.isnan(vwap) | np.isinf(vwap), close, vwap)
             
-            # 2. 8개 시계열 피처 생성 (차원: 20x8)
-            # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
-            # log1p는 음수 입력을 방지하기 위해 사용 (log(1+x))
-            volume_log = np.log1p(np.maximum(volume, 0))  # 음수 방지
+            # 2. 8개 시계열 피처 생성
+            volume_log = np.log1p(np.maximum(volume, 0))
             trades_raw = candles['trades'].values.astype(np.float32) if 'trades' in candles.columns else np.zeros(20, dtype=np.float32)
-            trades_log = np.log1p(np.maximum(trades_raw, 0))  # 음수 방지
+            trades_log = np.log1p(np.maximum(trades_raw, 0))
             
             seq_features = np.column_stack([
-                (candles['open'].values - close) / (close + 1e-8),  # f1: Open (close 대비)
-                (high - close) / (close + 1e-8),                    # f2: High (close 대비)
-                (low - close) / (close + 1e-8),                     # f3: Low (close 대비)
-                np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8)),  # f4: Log_Return
-                volume_log,                                         # f5: Volume (로그 변환 후 Z-Score)
-                trades_log,                                         # f6: Trades (로그 변환 후 Z-Score)
-                candles['taker_buy_base'].values / (volume + 1e-8), # f7: Taker_Ratio
-                (close - vwap) / (vwap + 1e-8)                      # [NEW] f8: VWAP Deviation (이격도)
+                (candles['open'].values - close) / (close + 1e-8),
+                (high - close) / (close + 1e-8),
+                (low - close) / (close + 1e-8),
+                np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8)),
+                volume_log,
+                trades_log,
+                candles['taker_buy_base'].values / (volume + 1e-8) if 'taker_buy_base' in candles.columns else np.zeros(20, dtype=np.float32),
+                (close - vwap) / (vwap + 1e-8)
             ])
             
-            # 3. 전처리 (8개 차원과 정확히 일치해야 함)
+            # 3. 전처리
             if not self.scaler_fitted:
                 logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
             
             normalized_seq = self.preprocessor.transform(seq_features)
             obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)  # (1, 20, 8)
             
-            # 4. 기술적 전략 Score 수집 (LONG/SHORT 부호 인코딩 반영)
-            strategy_scores = []
-            for strategy in self.strategies:
-                try:
-                    result = strategy.analyze(self.collector)
-                    if result and 'confidence' in result:
-                        score = float(result['confidence'])
-                        # SHORT 신호는 음수로 인코딩
-                        if result.get('signal') == 'SHORT':
-                            score = -score
-                        strategy_scores.append(score)
-                    else:
-                        strategy_scores.append(0.0)
-                except Exception as e:
-                    logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
-                    strategy_scores.append(0.0)
-            
-            # 5. [해결] 10개 전략 점수 + 3개 포지션 정보 = 13차원
+            # 4. Info 데이터
             if position_info is None:
                 position_info = [0.0, 0.0, 0.0]
-            
-            obs_info = np.concatenate([strategy_scores, position_info], dtype=np.float32)
-            obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)  # (1, 13)
-            
-            # [긴급 점검] NaN/Inf 체크
-            if torch.isnan(obs_seq).any() or torch.isinf(obs_seq).any():
-                nan_count = torch.isnan(obs_seq).sum().item()
-                inf_count = torch.isinf(obs_seq).sum().item()
-                logger.error("🚨 시계열 데이터에 NaN 또는 Inf 발생!")
-                logger.error(f"   NaN 개수: {nan_count}, Inf 개수: {inf_count}")
-                logger.error(f"   시계열 데이터 샘플: {obs_seq[0, :5, :] if obs_seq.shape[0] > 0 else 'N/A'}")
-                return None  # 학습 방지
-            
-            if torch.isnan(obs_info_tensor).any() or torch.isinf(obs_info_tensor).any():
-                nan_count = torch.isnan(obs_info_tensor).sum().item()
-                inf_count = torch.isinf(obs_info_tensor).sum().item()
-                logger.error("🚨 정보 데이터에 NaN 또는 Inf 발생!")
-                logger.error(f"   NaN 개수: {nan_count}, Inf 개수: {inf_count}")
-                logger.error(f"   정보 데이터: {obs_info_tensor}")
-                return None  # 학습 방지
+            obs_info_tensor = torch.FloatTensor(position_info).unsqueeze(0)  # (1, 3)
             
             return (obs_seq, obs_info_tensor)
             
         except Exception as e:
-            logger.error(f"관측 생성 실패: {e}", exc_info=True)
+            logger.error(f"관측 생성 실패 (폴백): {e}", exc_info=True)
             return None
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        보상 함수 개선: 초기 학습 유도를 위한 선형적이고 대칭적인 보상 구조
+        보상 계산 (현실화된 보상 체계 + 비선형 보상)
         
         Args:
             pnl: 손익 (수익률)
             trade_done: 거래 완료 여부
             holding_time: 보유 시간 (분)
-            pnl_change: 이전 스텝 대비 수익률의 변화
+            pnl_change: 이전 스텝 대비 수익률의 변화 (새로 추가)
         Returns:
-            reward: 보상값 (클리핑: -10 ~ +10)
+            reward: 보상값
         """
-        # 보상 스케일링 팩터 (100~300 추천)
-        # 코인 시장의 높은 변동성을 고려하여 적절한 수준으로 조정
-        scaling_factor = 300  # 기존 1000에서 하향 조정
+        reward = 0.0
         
-        # 1. 기본 보상 (수익률 변화량)
-        # 배율을 낮춰서 신경망이 '미세한 차이'를 학습하게 유도
-        reward = pnl_change * scaling_factor
+        # 1. 미실현 손익의 '변화량'만 보상 (계속 들고 있다고 보상을 퍼주지 않음)
+        # pnl_change가 0이면 보상도 0 (변화가 없으면 보상 없음)
+        reward = pnl_change * 300
         
-        # 2. 거래 완료 시 보상 (Trade Done)
+        # 2. 거래가 완료되었을 때만 '실현 수익'에 비선형 보상 부여
         if trade_done:
-            # [핵심 변경] 비선형(제곱) 제거 -> 선형(Linear) 보상으로 변경
-            # 손실 페널티를 수익 보상과 1:1 대칭으로 맞춤 (Risk:Reward = 1:1)
-            step_reward = pnl * scaling_factor
+            if pnl > 0:
+                # 수익이 클수록 보상을 제곱으로 부여하여 큰 수익을 유도
+                # 예: 0.5% 수익 → (0.005 * 100)^2 / 10 = 0.25
+                #     2% 수익 → (0.02 * 100)^2 / 10 = 4.0 (16배 차이!)
+                reward += (pnl * 100) ** 2 / 10
+            else:
+                # 손실은 그대로 페널티 (비선형 적용 안 함)
+                reward += pnl * 20
             
-            # 수수료 페널티 완화 (-0.05 -> -0.01)
-            # 너무 높으면 진입 자체를 꺼리게 됨
-            reward += step_reward - 0.01
-            
-            # [추가] 큰 수익에 대한 추가 인센티브 (잭팟 보상)
-            if pnl > 0.01:  # 1% 이상 수익 시
-                reward += 1.0
+            reward -= 0.0005  # 수수료 페널티 (0.05% - 현실적인 스캘핑 수수료)
         
-        # 3. 시간 페널티 (유지)
-        # 너무 오래 들고 있는 것을 방지하기 위해 아주 작게 유지
-        reward -= 0.001
+        # 3. 시간 페널티 완화 (기존 -0.0005 -> -0.0001)
+        # 큰 추세를 끝까지 타도록 유도
+        reward -= 0.0001
         
-        # 4. [중요] 무포지션 기회비용 페널티 제거
-        # 초기에는 "관망"도 훌륭한 전략임을 인정해야 함. 억지로 진입시키면 손실만 커짐.
-        # if not trade_done and holding_time == 0:
-        #    reward -= 0.005 
-
-        # 5. 보상 클리핑 (Reward Clipping)
-        # [수정] 보상 클리핑 범위 확장 (-10, 10 -> -100, 100)
-        # 이제 대박 수익을 내면 확실하게 큰 보상을 줍니다.
+        # 보상 클리핑 (과도한 보상 방지)
         reward = np.clip(reward, -100, 100)
-
+        
         return reward
 
     def get_state_dim(self):
-        """상태 차원 반환 (8개 시계열 피처)"""
-        return 8  # 8개 핵심 시계열 피처 (VWAP 이격도 포함)
+        """상태 차원 반환"""
+        if self.selected_features and len(self.selected_features) > 0:
+            return len(self.selected_features), 3  # (seq_dim, info_dim)
+        else:
+            return 8, 3  # 기본 8개 피처

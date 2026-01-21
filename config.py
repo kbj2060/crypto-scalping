@@ -44,4 +44,50 @@ ENABLE_TRADING = False  # True: 거래 실행, False: 분석만 수행 (거래 �
 
 # AI 강화학습 설정
 ENABLE_AI = True  # True: AI 기반 결정, False: 기존 전략 조합 방식
-AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로
+AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로 (PPO)
+DDQN_MODEL_PATH = 'model/ddqn_model.pth'  # DDQN 모델 저장 경로
+SELECTED_FEATURES_PATH = 'model/selected_features.json'  # 호환성 유지용
+
+# 1. 기술적 지표 피처 (15개)
+TECHNICAL_FEATURES = [
+    'log_return', 'log_volume',         # PPO 기본 (2)
+    'high_ratio', 'low_ratio',          # 캔들 모양/꼬리 (2)
+    'taker_ratio',                      # 수급 (1)
+    'rsi', 'macd_hist',                 # 모멘텀 (2)
+    'bb_width', 'bb_position',          # 변동성/위치 (2)
+    'stoch_rsi', 'mfi', 'cmf',          # 오실레이터/자금 (3)
+    'hma_ratio', 'vwap_dist', 'atr_ratio' # 이격도 (3)
+]
+
+# 2. 전략 기반 피처 (10개) - 새로 추가됨
+STRATEGY_FEATURES = [
+    'strat_btc_eth_corr',    # BTC 연동
+    'strat_vol_squeeze',     # 변동성 스퀴즈
+    'strat_ob_fvg',          # 오더블록+FVG
+    'strat_hma',             # HMA 모멘텀
+    'strat_mfi',             # MFI 모멘텀
+    'strat_bb_reversion',    # 볼린저 역추세
+    'strat_vwap',            # VWAP 이격
+    'strat_range',           # 박스권 반전
+    'strat_stoch',           # StochRSI
+    'strat_cmf'              # CMF 다이버전스
+]
+
+# 최종 사용할 모든 피처 합치기
+FEATURE_COLUMNS = TECHNICAL_FEATURES + STRATEGY_FEATURES
+
+# 3. DDQN 하이퍼파라미터
+DDQN_CONFIG = {
+    'input_dim': len(FEATURE_COLUMNS),  # 15 + 10 = 25개 (자동 계산)
+    'hidden_dim': 128,  # GRU 및 FC 레이어 노드 수 (입력 증가에 따라 64 -> 128)
+    'num_layers': 2,  # GRU 레이어 수
+    'action_dim': 3,  # 행동 개수 (0: Hold, 1: Long, 2: Short)
+    'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
+    'learning_rate': 0.0001,  # 학습률 (1e-4)
+    'gamma': 0.99,  # 미래 보상 할인율
+    'buffer_size': 50000,  # 리플레이 버퍼 크기
+    'epsilon_start': 1.0,  # 초기 탐험 확률
+    'epsilon_end': 0.01,  # 최소 탐험 확률
+    'epsilon_decay': 0.999999,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
+    'target_update': 1000,  # 타겟 네트워크 동기화 주기 (스텝)
+}

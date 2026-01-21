@@ -1,0 +1,712 @@
+"""
+DDQN 학습 스크립트 (Final Optimized)
+전략 지표 10개 + PPO 기본 데이터 5개 = 총 15개 피처 사용
+메모리 안전 연산(.values) 적용 완료
+"""
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import torch
+import numpy as np
+import pandas as pd
+import logging
+import time
+
+from core.data_collector import DataCollector
+from core.indicators import Indicators
+from model.dqn_agent import DDQNAgent
+from model.trading_env import TradingEnvironment
+import config
+
+# 전략 파일들 임포트
+from strategies import (
+    BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
+    HMAMomentumStrategy, MFIMomentumStrategy, BollingerMeanReversionStrategy,
+    VWAPDeviationStrategy, RangeTopBottomStrategy, StochRSIMeanReversionStrategy,
+    CMFDivergenceStrategy
+)
+
+# 진행률 표시용 (선택적)
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    def tqdm(iterable, desc=""):
+        return iterable
+
+# 로깅 설정
+os.makedirs('logs', exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/train_dqn.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 시각화 (선택적)
+try:
+    import matplotlib.pyplot as plt
+    from collections import deque
+    VISUALIZATION_AVAILABLE = True
+except ImportError:
+    VISUALIZATION_AVAILABLE = False
+    logger.warning("matplotlib이 설치되지 않아 시각화 기능을 사용할 수 없습니다.")
+
+
+class LiveVisualizer:
+    """학습 리워드를 실시간으로 그래프화하는 클래스"""
+    def __init__(self, window_size=10, enable=True):
+        if not enable or not VISUALIZATION_AVAILABLE:
+            self.enabled = False
+            return
+        
+        self.enabled = True
+        plt.ion()  # 대화형 모드 활성화
+        self.fig, self.ax = plt.subplots(figsize=(12, 6))
+        self.rewards = []
+        self.moving_avg = []
+        self.window_size = window_size
+        self.ax.set_title("DDQN Training Performance", fontsize=14, fontweight='bold')
+        self.ax.set_xlabel("Episode", fontsize=12)
+        self.ax.set_ylabel("Total Reward", fontsize=12)
+        self.line1, = self.ax.plot([], [], label='Episode Reward', alpha=0.3, color='blue', linewidth=1)
+        self.line2, = self.ax.plot([], [], label=f'Moving Avg ({window_size})', color='red', linewidth=2)
+        self.ax.legend(loc='upper left')
+        self.ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+    
+    def update(self, reward):
+        """보상 업데이트 및 그래프 갱신"""
+        if not self.enabled:
+            return
+        
+        try:
+            self.rewards.append(reward)
+            
+            # 이동 평균 계산
+            if len(self.rewards) >= self.window_size:
+                avg = np.mean(self.rewards[-self.window_size:])
+            else:
+                avg = np.mean(self.rewards) if self.rewards else 0
+            self.moving_avg.append(avg)
+            
+            # 데이터 업데이트
+            x = np.arange(len(self.rewards))
+            self.line1.set_data(x, self.rewards)
+            self.line2.set_data(x, self.moving_avg)
+            
+            # 화면 범위 자동 조절
+            self.ax.relim()
+            self.ax.autoscale_view()
+            
+            # Y축 범위를 적절하게 설정 (이상치 제외)
+            if len(self.rewards) > 0:
+                y_min = min(min(self.rewards), min(self.moving_avg))
+                y_max = max(max(self.rewards), max(self.moving_avg))
+                margin = (y_max - y_min) * 0.1
+                self.ax.set_ylim(y_min - margin, y_max + margin)
+            
+            plt.draw()
+            plt.pause(0.01)  # 짧은 휴식으로 그래프 갱신 보장
+            
+        except Exception as e:
+            logger.debug(f"시각화 업데이트 실패: {e}")
+    
+    def close(self):
+        """그래프 창 닫기"""
+        if self.enabled:
+            plt.close(self.fig)
+
+
+def calculate_technical_features(data):
+    """
+    기술적 지표 15개 계산 (기존 함수)
+    안전한 Numpy 연산으로 메모리 오류 방지
+    """
+    try:
+        # 1. 데이터 추출 (Numpy Array)
+        close = data['close'].values
+        high = data['high'].values
+        low = data['low'].values
+        open_val = data['open'].values
+        volume = data['volume'].values
+        
+        # DataFrame 준비
+        df = pd.DataFrame(index=data.index)
+        
+        # --- Group A: PPO 모델 기본 데이터 (5개) ---
+        
+        # 1. Log Return (로그 수익률)
+        df['log_return'] = np.concatenate([[0], np.diff(np.log(close + 1e-8))])
+        
+        # 2. Log Volume (거래량 로그)
+        df['log_volume'] = np.log1p(volume)
+        
+        # 3. High-Close Ratio (윗꼬리)
+        df['high_ratio'] = (high - close) / (close + 1e-8)
+        
+        # 4. Low-Close Ratio (아랫꼬리)
+        df['low_ratio'] = (low - close) / (close + 1e-8)
+        
+        # 5. Taker Buy Ratio (없으면 Trades로 대체)
+        if 'taker_buy_base' in data.columns:
+            df['taker_ratio'] = data['taker_buy_base'].values / (volume + 1e-8)
+        elif 'taker_buy_base_volume' in data.columns:
+            df['taker_ratio'] = data['taker_buy_base_volume'].values / (volume + 1e-8)
+        else:
+            df['taker_ratio'] = np.log1p(data['trades'].values) if 'trades' in data.columns else np.zeros_like(close)
+
+        # --- Group B: 전략 파일 기반 핵심 지표 (10개) ---
+        
+        # 6. RSI (14)
+        rsi = Indicators.calculate_rsi(data, period=14)
+        if rsi is not None:
+            if isinstance(rsi, pd.DataFrame):
+                df['rsi'] = rsi.iloc[:, 0].values
+            else:
+                df['rsi'] = rsi.values
+        else:
+            df['rsi'] = np.zeros_like(close)
+
+        # 7. MACD Histogram
+        macd = Indicators.calculate_macd(data)
+        if macd is not None and 'histogram' in macd:
+            df['macd_hist'] = macd['histogram'].values
+        else:
+            df['macd_hist'] = np.zeros_like(close)
+
+        # 8, 9. Bollinger Bands (Width, Position)
+        bb = Indicators.calculate_bollinger_bands(data, period=20)
+        if bb is not None:
+            u = bb['upper'].values if isinstance(bb['upper'], pd.Series) else bb['upper']
+            l = bb['lower'].values if isinstance(bb['lower'], pd.Series) else bb['lower']
+            m = bb['middle'].values if isinstance(bb['middle'], pd.Series) else bb['middle']
+            df['bb_width'] = (u - l) / (m + 1e-8)
+            df['bb_position'] = (close - l) / (u - l + 1e-8)
+        else:
+            df['bb_width'] = np.zeros_like(close)
+            df['bb_position'] = np.zeros_like(close)
+        
+        # 10. Stoch RSI K
+        stoch = Indicators.calculate_stoch_rsi(data)
+        if stoch is not None and 'k' in stoch:
+            df['stoch_rsi'] = stoch['k'].values
+        else:
+            df['stoch_rsi'] = np.zeros_like(close)
+        
+        # 11. MFI (자금 흐름) - Indicators에 없으면 계산
+        try:
+            # MFI는 Typical Price와 Money Flow 기반
+            tp = (high + low + close) / 3
+            money_flow = tp * volume
+            positive_mf = np.where(tp > np.roll(tp, 1), money_flow, 0)
+            negative_mf = np.where(tp < np.roll(tp, 1), money_flow, 0)
+            positive_mf[0] = 0
+            negative_mf[0] = 0
+            
+            # 14기간 롤링 합
+            period = 14
+            pos_sum = pd.Series(positive_mf).rolling(period).sum().values
+            neg_sum = pd.Series(negative_mf).rolling(period).sum().values
+            money_ratio = pos_sum / (neg_sum + 1e-8)
+            df['mfi'] = 100 - (100 / (1 + money_ratio))
+        except:
+            df['mfi'] = np.zeros_like(close)
+        
+        # 12. CMF (매집/분산) - Indicators에 없으면 계산
+        try:
+            # CMF = ((Close - Low) - (High - Close)) / (High - Low) * Volume
+            mf_mult = ((close - low) - (high - close)) / ((high - low) + 1e-8)
+            mf_vol = mf_mult * volume
+            period = 20
+            cmf = pd.Series(mf_vol).rolling(period).sum().values / (pd.Series(volume).rolling(period).sum().values + 1e-8)
+            df['cmf'] = cmf
+        except:
+            df['cmf'] = np.zeros_like(close)
+        
+        # 13. HMA Ratio (괴리율)
+        hma = Indicators.calculate_hma(data, period=14)
+        if hma is not None:
+            hma_val = hma.iloc[:, 0].values if isinstance(hma, pd.DataFrame) else hma.values
+            df['hma_ratio'] = (close - hma_val) / (hma_val + 1e-8)
+        else:
+            df['hma_ratio'] = np.zeros_like(close)
+            
+        # 14. VWAP Deviation (이격도)
+        vwap = Indicators.calculate_vwap(data)
+        if vwap is not None:
+            vwap_val = vwap.iloc[:, 0].values if isinstance(vwap, pd.DataFrame) else vwap.values
+            df['vwap_dist'] = (close - vwap_val) / (vwap_val + 1e-8)
+        else:
+            df['vwap_dist'] = np.zeros_like(close)
+            
+        # 15. ATR Ratio (변동성 비율)
+        atr = Indicators.calculate_atr(data, period=14)
+        if atr is not None:
+            atr_val = atr.iloc[:, 0].values if isinstance(atr, pd.DataFrame) else atr.values
+            df['atr_ratio'] = atr_val / (close + 1e-8)
+        else:
+            df['atr_ratio'] = np.zeros_like(close)
+
+        # NaN/Inf 처리 (0으로 채움)
+        df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
+        
+        # config에 정의된 기술적 피처만 반환
+        final_cols = [c for c in config.TECHNICAL_FEATURES if c in df.columns]
+        if len(final_cols) != len(config.TECHNICAL_FEATURES):
+            missing = set(config.TECHNICAL_FEATURES) - set(final_cols)
+            logger.warning(f"누락된 기술적 피처: {missing}")
+        
+        return df[final_cols] if final_cols else df
+
+    except Exception as e:
+        logger.error(f"기술적 지표 계산 중 오류 발생: {e}", exc_info=True)
+        return None
+
+
+def precalculate_strategy_scores(collector, force_recalculate=False):
+    """
+    모든 전략을 전체 데이터에 대해 미리 실행하여 점수(Score)를 계산
+    Long 신호: +Confidence, Short 신호: -Confidence, None: 0
+    
+    Args:
+        collector: DataCollector 인스턴스
+        force_recalculate: True면 저장된 파일을 무시하고 다시 계산
+    """
+    strategy_scores_path = 'data/strategy_scores.csv'
+    
+    # 저장된 파일이 있고 재계산이 아니면 로드
+    if not force_recalculate and os.path.exists(strategy_scores_path):
+        try:
+            logger.info(f"📂 저장된 전략 점수 로드 중: {strategy_scores_path}")
+            scores_df = pd.read_csv(strategy_scores_path, index_col=0, parse_dates=True)
+            
+            # 데이터 길이 확인
+            if len(scores_df) == len(collector.eth_data):
+                logger.info(f"✅ 저장된 전략 점수 로드 완료: {len(scores_df)}개 캔들")
+                return scores_df
+            else:
+                logger.warning(f"저장된 파일 길이 불일치 ({len(scores_df)} vs {len(collector.eth_data)}), 재계산합니다.")
+        except Exception as e:
+            logger.warning(f"저장된 파일 로드 실패: {e}, 재계산합니다.")
+    
+    # 전략 점수 계산
+    logger.info("🧠 내 전략들의 신호 미리 계산 중 (시간이 조금 걸릴 수 있습니다)...")
+    
+    # 전략 초기화
+    strategies = [
+        (BTCEthCorrelationStrategy(), 'strat_btc_eth_corr'),
+        (VolatilitySqueezeStrategy(), 'strat_vol_squeeze'),
+        (OrderblockFVGStrategy(), 'strat_ob_fvg'),
+        (HMAMomentumStrategy(), 'strat_hma'),
+        (MFIMomentumStrategy(), 'strat_mfi'),
+        (BollingerMeanReversionStrategy(), 'strat_bb_reversion'),
+        (VWAPDeviationStrategy(), 'strat_vwap'),
+        (RangeTopBottomStrategy(), 'strat_range'),
+        (StochRSIMeanReversionStrategy(), 'strat_stoch'),
+        (CMFDivergenceStrategy(), 'strat_cmf')
+    ]
+    
+    # 결과를 담을 DataFrame 생성 (0으로 초기화)
+    total_len = len(collector.eth_data)
+    scores_df = pd.DataFrame(0.0, index=collector.eth_data.index, columns=[s[1] for s in strategies])
+    
+    # 효율성을 위해 인덱스 루프를 돌며 시뮬레이션
+    # 전략의 analyze는 '현재 시점'을 기준으로 과거를 봄.
+    # 따라서 과거부터 미래로 순회하며 collector의 index를 변경해줘야 함.
+    
+    # 기술적 지표 계산 시 필요한 최소 데이터:
+    # - RSI(14): 최소 15개
+    # - MACD(12,26,9): 최소 26+9=35개
+    # - Bollinger(20): 최소 20개
+    # - Stochastic RSI: 최소 14+14+3=31개
+    # - HMA(14): 최소 14*2=28개
+    # - VWAP: 세션 기준이므로 1개부터 가능하지만 안정성을 위해 20개
+    # - ATR(14): 최소 15개
+    # 가장 큰 값인 MACD 기준으로 여유분 포함: 100개
+    start_idx = 100  # 기술적 지표 계산용 여유분 (MACD 등 최대 기간 고려)
+    
+    # 진행률 표시와 함께 루프 실행
+    for i in tqdm(range(start_idx, total_len), desc="전략 신호 계산"):
+        collector.current_index = i
+        
+        for strategy, col_name in strategies:
+            try:
+                # 전략 실행
+                result = strategy.analyze(collector)
+                
+                if result:
+                    # 신호 파싱
+                    signal = result.get('signal')
+                    confidence = float(result.get('confidence', 0.5))
+                    
+                    # 점수 변환 (Long: +, Short: -)
+                    if signal == 'LONG':
+                        scores_df.iloc[i, scores_df.columns.get_loc(col_name)] = confidence
+                    elif signal == 'SHORT':
+                        scores_df.iloc[i, scores_df.columns.get_loc(col_name)] = -confidence
+            except Exception as e:
+                logger.debug(f"전략 {col_name} 실행 실패 (인덱스 {i}): {e}")
+                pass  # 에러 나도 진행
+                
+    logger.info(f"✅ 전략 신호 계산 완료: {len(scores_df)}개 캔들")
+    
+    # 파일로 저장
+    try:
+        scores_df.to_csv(strategy_scores_path)
+        logger.info(f"💾 전략 점수 저장 완료: {strategy_scores_path}")
+    except Exception as e:
+        logger.warning(f"전략 점수 저장 실패: {e}")
+    
+    return scores_df
+
+
+class DDQNTrainer:
+    def __init__(self, force_recalculate_strategies=False):
+        """
+        Args:
+            force_recalculate_strategies: True면 저장된 전략 점수를 무시하고 재계산
+        """
+        # 1. 데이터 로드
+        self.data_collector = DataCollector(use_saved_data=True)
+        if not self.data_collector.load_saved_data():
+            raise ValueError("데이터 로드 실패: collect_training_data.py를 먼저 실행하세요.")
+            
+        # 2. 기술적 지표 피처 계산 (15개)
+        logger.info("1. 기술적 지표 계산 중...")
+        tech_df = calculate_technical_features(self.data_collector.eth_data)
+        
+        if tech_df is None or len(tech_df) == 0:
+            raise ValueError("기술적 지표 계산 실패")
+        
+        # 3. 전략 점수 피처 계산 (10개)
+        logger.info("2. 전략 신호 계산 중...")
+        strat_df = precalculate_strategy_scores(self.data_collector, force_recalculate=force_recalculate_strategies)
+        
+        # 인덱스 일치 확인
+        if len(tech_df) != len(self.data_collector.eth_data):
+            raise ValueError(f"기술적 지표 길이 불일치: 원본={len(self.data_collector.eth_data)}, 기술={len(tech_df)}")
+        if len(strat_df) != len(self.data_collector.eth_data):
+            raise ValueError(f"전략 점수 길이 불일치: 원본={len(self.data_collector.eth_data)}, 전략={len(strat_df)}")
+        
+        if not tech_df.index.equals(self.data_collector.eth_data.index):
+            logger.warning("기술적 지표 인덱스 불일치, 재인덱싱합니다.")
+            tech_df.index = self.data_collector.eth_data.index
+        if not strat_df.index.equals(self.data_collector.eth_data.index):
+            logger.warning("전략 점수 인덱스 불일치, 재인덱싱합니다.")
+            strat_df.index = self.data_collector.eth_data.index
+        
+        # 4. 데이터 병합
+        for col in tech_df.columns:
+            self.data_collector.eth_data[col] = tech_df[col]
+        for col in strat_df.columns:
+            self.data_collector.eth_data[col] = strat_df[col]
+        
+        # 피처 컬럼 확정 (config에 정의된 순서대로)
+        self.feature_columns = config.FEATURE_COLUMNS
+        
+        # 누락된 컬럼 0으로 채우기 (혹시 모를 에러 방지)
+        for col in self.feature_columns:
+            if col not in self.data_collector.eth_data.columns:
+                logger.warning(f"누락된 피처 {col}를 0으로 채웁니다.")
+                self.data_collector.eth_data[col] = 0.0
+                
+        logger.info(f"✅ 최종 입력 피처 ({len(self.feature_columns)}개): {self.feature_columns}")
+        
+        # 3. 환경 설정 (feature_columns 전달)
+        self.env = TradingEnvironment(
+            self.data_collector, 
+            strategies=[], 
+            selected_features=self.feature_columns
+        )
+        
+        # 4. 전역 스케일러 학습
+        self._fit_global_scaler()
+        
+        # 5. 에이전트 설정
+        ddqn_config = config.DDQN_CONFIG.copy()
+        ddqn_config['input_dim'] = len(self.feature_columns)  # 차원 동기화
+        
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logger.info(f"학습 장치: {device}")
+        
+        self.agent = DDQNAgent(
+            input_dim=ddqn_config['input_dim'],
+            hidden_dim=ddqn_config['hidden_dim'],
+            num_layers=ddqn_config['num_layers'],
+            action_dim=ddqn_config['action_dim'],
+            lr=ddqn_config['learning_rate'],
+            gamma=ddqn_config['gamma'],
+            epsilon_start=ddqn_config['epsilon_start'],
+            epsilon_end=ddqn_config['epsilon_end'],
+            epsilon_decay=ddqn_config['epsilon_decay'],
+            buffer_size=ddqn_config['buffer_size'],
+            batch_size=ddqn_config['batch_size'],
+            target_update=ddqn_config['target_update'],
+            device=device
+        )
+        
+        self.episode_rewards = []
+        self.total_steps = 0
+        self.current_position = None
+        self.entry_price = None
+        self.entry_index = None
+        self.prev_pnl = 0.0
+        
+        # 시각화 초기화 (기본적으로 비활성화)
+        self.visualizer = None
+    
+    def _fit_global_scaler(self):
+        """전역 스케일러 학습 (기술적 지표만 학습!)"""
+        try:
+            logger.info("전역 스케일러 학습 시작 (전략 점수 제외)...")
+            
+            # 기술적 지표 컬럼만 필터링
+            tech_cols = [f for f in self.feature_columns if not f.startswith('strat_')]
+            
+            if not tech_cols:
+                logger.warning("기술적 지표가 없어 스케일러 학습을 건너뜁니다.")
+                return
+            
+            # [수정 1] 시작 인덱스를 20 -> 100으로 변경 (초기 NaN/0 데이터 배제)
+            start_idx = 100
+            
+            # 데이터 길이 확인
+            data_len = len(self.data_collector.eth_data)
+            if data_len <= start_idx:
+                logger.warning("데이터가 너무 적어 스케일러를 학습할 수 없습니다.")
+                return
+            
+            # [속도 최적화] for문 없이 pandas 슬라이싱으로 한방에 해결
+            # 1. 기술적 지표 데이터 통째로 가져오기 (100번 이후)
+            tech_df = self.data_collector.eth_data.iloc[start_idx:][tech_cols]
+            
+            # 2. 샘플링 (너무 많으면 5만개만)
+            if len(tech_df) > 50000:
+                tech_df = tech_df.sample(n=50000, random_state=42)
+            
+            # 3. Numpy 변환 및 0/Inf 처리
+            tech_data = tech_df.values.astype(np.float32)
+            tech_data = np.nan_to_num(tech_data, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # 4. 학습
+            self.env.preprocessor.fit(tech_data)
+            self.env.scaler_fitted = True
+            
+            # [추가] 학습 완료된 스케일러를 파일로 저장
+            self.env.preprocessor.save_scaler('model/scaler.pkl')
+            
+            logger.info(f"✅ 스케일러 학습 및 저장 완료: {len(tech_data)}개 샘플 (Index {start_idx}부터 사용), {len(tech_cols)}개 기술적 피처 정규화 (전략 점수 {len(self.feature_columns) - len(tech_cols)}개 제외)")
+            
+        except Exception as e:
+            logger.error(f"스케일러 학습 실패: {e}", exc_info=True)
+
+    def train_episode(self, episode_num, max_steps=1000):
+        """한 에피소드 학습"""
+        episode_reward = 0.0
+        steps = 0
+        
+        # 랜덤 시작 (과적합 방지)
+        self.data_collector.reset_index(max_steps=max_steps, random_start=True)
+        
+        # 상태 초기화
+        self.current_position = None
+        self.entry_price = None
+        self.entry_index = None
+        self.prev_pnl = 0.0
+        
+        available_steps = len(self.data_collector.eth_data) - self.data_collector.current_index
+        actual_steps = min(max_steps, available_steps)
+        
+        if actual_steps <= 50:
+            return None  # 데이터 부족 시 스킵
+        
+        logger.info(f"에피소드 {episode_num} 시작: {actual_steps}개 스텝 (인덱스: {self.data_collector.current_index}부터)")
+        
+        for step in range(actual_steps):
+            try:
+                # 1. 인덱스 증가
+                self.data_collector.current_index += 1
+                if self.data_collector.current_index >= len(self.data_collector.eth_data):
+                    break
+                
+                # 2. 관측 (15개 피처)
+                pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
+                pnl_val = self.prev_pnl * 10
+                hold_val = 0.0
+                if self.entry_index:
+                    hold_val = min(1.0, (self.data_collector.current_index - self.entry_index) / 160.0)
+                
+                pos_info = [pos_val, pnl_val, hold_val]
+                state = self.env.get_observation(position_info=pos_info)
+                if state is None:
+                    continue
+                
+                # 3. 행동 선택
+                action = self.agent.act(state, training=True)
+                
+                # 4. 가격 확인
+                current_price = float(self.data_collector.eth_data.iloc[self.data_collector.current_index - 1]['close'])
+                
+                # 5. 보상 계산 로직
+                reward = 0.0
+                trade_done = False
+                current_pnl = 0.0
+                pnl_change = 0.0
+                
+                # --- 매매 로직 ---
+                if action == 1:  # LONG
+                    if self.current_position == 'SHORT':  # 스위칭
+                        pnl = (self.entry_price - current_price) / self.entry_price
+                        pnl_change = pnl - self.prev_pnl
+                        reward = self.env.calculate_reward(pnl, True, 0, pnl_change)
+                        trade_done = True
+                        self.prev_pnl = 0.0
+                    
+                    if self.current_position != 'LONG':
+                        self.current_position = 'LONG'
+                        self.entry_price = current_price
+                        self.entry_index = self.data_collector.current_index
+                        self.prev_pnl = 0.0
+                
+                elif action == 2:  # SHORT
+                    if self.current_position == 'LONG':  # 스위칭
+                        pnl = (current_price - self.entry_price) / self.entry_price
+                        pnl_change = pnl - self.prev_pnl
+                        reward = self.env.calculate_reward(pnl, True, 0, pnl_change)
+                        trade_done = True
+                        self.prev_pnl = 0.0
+                    
+                    if self.current_position != 'SHORT':
+                        self.current_position = 'SHORT'
+                        self.entry_price = current_price
+                        self.entry_index = self.data_collector.current_index
+                        self.prev_pnl = 0.0
+                        
+                else:  # HOLD
+                    if self.current_position:
+                        if self.current_position == 'LONG':
+                            current_pnl = (current_price - self.entry_price) / self.entry_price
+                        else:
+                            current_pnl = (self.entry_price - current_price) / self.entry_price
+                        pnl_change = current_pnl - self.prev_pnl
+                        holding_time = self.data_collector.current_index - self.entry_index
+                        reward = self.env.calculate_reward(current_pnl, False, holding_time, pnl_change)
+                        self.prev_pnl = current_pnl
+
+                # 6. 다음 상태
+                next_state = None
+                if not trade_done and step < actual_steps - 1:
+                    # 임시 인덱스 증가
+                    self.data_collector.current_index += 1
+                    next_state = self.env.get_observation(position_info=pos_info)
+                    self.data_collector.current_index -= 1  # 복구
+                
+                done = (step == actual_steps - 1)
+                
+                # 7. 저장 및 학습
+                self.agent.remember(state, action, reward, next_state, done)
+                loss = self.agent.train_step()
+                
+                episode_reward += reward
+                steps += 1
+                self.total_steps += 1
+                
+                if done:
+                    break
+                
+            except Exception as e:
+                logger.error(f"Step Error: {e}", exc_info=True)
+                continue
+                
+        return episode_reward, steps
+
+    def train(self, num_episodes=1000, max_steps_per_episode=1000, save_interval=100, enable_visualization=False):
+        """학습 메인 루프"""
+        logger.info("=" * 60)
+        logger.info(f"🚀 DDQN 학습 시작: {num_episodes} 에피소드")
+        logger.info(f"피처: {len(self.feature_columns)}개 ({', '.join(self.feature_columns)})")
+        logger.info(f"시각화: {'활성화' if enable_visualization and VISUALIZATION_AVAILABLE else '비활성화'}")
+        logger.info("=" * 60)
+        
+        # 시각화 초기화
+        if enable_visualization and VISUALIZATION_AVAILABLE:
+            self.visualizer = LiveVisualizer(window_size=10, enable=True)
+        else:
+            self.visualizer = LiveVisualizer(window_size=10, enable=False)
+        
+        best_reward = float('-inf')
+        
+        try:
+            for episode in range(1, num_episodes + 1):
+                result = self.train_episode(episode, max_steps_per_episode)
+                if result:
+                    rw, st = result
+                    self.episode_rewards.append(rw)
+                    avg_rw = np.mean(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else rw
+                    logger.info(f"Ep {episode}: Reward {rw:.2f} | Avg {avg_rw:.2f} | Steps {st} | Eps {self.agent.epsilon:.4f} | Buffer {len(self.agent.memory)}")
+                    
+                    # 시각화 업데이트
+                    if self.visualizer:
+                        self.visualizer.update(rw)
+                    
+                    # 최고 성능 모델 저장
+                    if rw > best_reward:
+                        best_reward = rw
+                        self.agent.save_model(config.DDQN_MODEL_PATH)
+                        logger.info(f"✅ 최고 성능 모델 저장 (보상: {rw:.2f})")
+                    
+                    # 주기적 저장
+                    if episode % save_interval == 0:
+                        self.agent.save_model(config.DDQN_MODEL_PATH)
+                        logger.info(f"💾 모델 저장 완료 (에피소드 {episode})")
+        except KeyboardInterrupt:
+            logger.info("학습 중단 요청")
+        finally:
+            # 시각화 창 닫기
+            if self.visualizer:
+                self.visualizer.close()
+        
+        # 최종 모델 저장
+        self.agent.save_model(config.DDQN_MODEL_PATH)
+        logger.info("=" * 60)
+        logger.info("✅ 학습 완료")
+        logger.info(f"평균 보상: {np.mean(self.episode_rewards) if self.episode_rewards else 0:.4f}")
+        logger.info("=" * 60)
+
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='DDQN 모델 학습')
+    parser.add_argument('--episodes', type=int, default=1000, help='학습 에피소드 수')
+    parser.add_argument('--steps', type=int, default=1000, help='에피소드당 최대 스텝 수')
+    parser.add_argument('--save-interval', type=int, default=100, help='모델 저장 간격 (에피소드)')
+    parser.add_argument('--visualize', action='store_true', help='보상 그래프 시각화 활성화')
+    parser.add_argument('--no-visualize', action='store_true', help='보상 그래프 시각화 비활성화 (기본값)')
+    parser.add_argument('--recalculate-strategies', action='store_true', help='저장된 전략 점수를 무시하고 재계산')
+    
+    args = parser.parse_args()
+    
+    # 시각화 옵션 결정
+    enable_viz = args.visualize and not args.no_visualize
+    
+    try:
+        trainer = DDQNTrainer(force_recalculate_strategies=args.recalculate_strategies)
+        trainer.train(
+            num_episodes=args.episodes,
+            max_steps_per_episode=args.steps,
+            save_interval=args.save_interval,
+            enable_visualization=enable_viz
+        )
+    except KeyboardInterrupt:
+        logger.info("학습 중단")
+    except Exception as e:
+        logger.error(f"치명적 오류: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
