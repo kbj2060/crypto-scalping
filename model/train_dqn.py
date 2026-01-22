@@ -630,7 +630,8 @@ class DDQNTrainer:
             batch_size=ddqn_config['batch_size'],
             target_update=ddqn_config['target_update'],
             device=device,
-            use_per=config.USE_PER  # PER 사용 여부
+            use_per=config.USE_PER,  # PER 사용 여부
+            n_step=config.N_STEP  # N-step Learning 스텝 수
         )
         
         self.episode_rewards = []

@@ -89,6 +89,9 @@ TOP_K_FEATURES = 25            # 선택할 피처 개수 (DDQN 입력 차원)
 # [신규] Prioritized Experience Replay (PER) 설정
 USE_PER = True  # PER 사용 여부 (True: 우선순위 기반 샘플링, False: 일반 랜덤 샘플링)
 
+# [신규] N-step Learning 설정
+N_STEP = 3  # Multi-step Learning의 스텝 수 (기본 3, 1~5 권장)
+
 # 3. DDQN 하이퍼파라미터
 DDQN_CONFIG = {
     'input_dim': len(FEATURE_COLUMNS),  # 17 + 10 = 27개 (자동 계산)
@@ -98,7 +101,7 @@ DDQN_CONFIG = {
     'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
     'learning_rate': 0.00005,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
     'gamma': 0.99,  # 미래 보상 할인율
-    'buffer_size': 50000,  # 리플레이 버퍼 크기
+    'buffer_size': 80000,  # 리플레이 버퍼 크기
     'epsilon_start': 0.0,  # 초기 탐험 확률
     'epsilon_end': 0.00,  # 최소 탐험 확률
     'epsilon_decay': 0.0,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
