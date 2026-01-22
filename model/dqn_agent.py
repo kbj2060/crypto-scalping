@@ -16,6 +16,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# config 모듈 임포트 (선택적)
+try:
+    import sys
+    import os
+    # 상위 디렉토리를 sys.path에 추가 (config.py가 루트에 있음)
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    import config
+except (ImportError, ModuleNotFoundError):
+    config = None
+
 class DDQNAgent:
     """Double DQN 에이전트 + N-step Learning"""
     
