@@ -32,6 +32,9 @@ class TradingEnvironment:
         
         # [추가] 최근 pnl_change 내역을 저장하여 변동성 계산 (최근 100스텝)
         self.pnl_change_history = deque(maxlen=100)
+        
+        # [추가] 포지션 진입 인덱스 추적 (보상 계산용)
+        self.entry_index = None
 
     def get_observation(self, position_info=None):
         """
@@ -205,46 +208,49 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        [수정됨] 스캘핑 최적화 보상 함수
-        - 시간 페널티 강화: 빠른 승부 유도
-        - 손실 페널티 완화: 과도한 공포 방지
-        - 변동성 보상 축소: 노이즈 제거
+        [최종 수정] Reality-Based Reward Function
+        - 평가손익(Change) 보상 제거: 희망고문 방지
+        - 결과 중심 보상: 오직 청산 시점의 PnL로만 평가
+        - 손실에 더 큰 고통 부여 (손실 회피 성향 주입)
         """
         reward = 0.0
-
-        # 1. 평가손익 변화 (변동성 반영 비중 축소)
-        # 매 스텝 가격 등락에 일일이 반응하기보다 추세에 집중하도록 가중치 축소 (300 -> 40)
-        reward += pnl_change * 40.0
-
-        # 2. 거래 종료 시 보상 (Outcome)
-        if trade_done:
-            # 수수료 페널티 (선반영)
+        
+        # 1. 평가손익 변화 보상 삭제 (또는 극소화)
+        # 이 부분이 '착시'의 주범이므로 과감히 0으로 만듭니다.
+        # reward += pnl_change * 0.0 
+        
+        # 대신, 포지션을 잡고 있는 동안의 "불안감(리스크)"을 시간 페널티로 부여
+        # entry_index가 있으면 사용하고, 없으면 holding_time 사용
+        if self.entry_index is not None and self.collector.current_index > self.entry_index:
+            # 포지션 보유 중
+            reward -= 0.0005  # 버티는 것 자체가 비용임
+        elif holding_time > 0:
+            # holding_time 파라미터로 대체 (호환성)
             reward -= 0.0005
 
-            if pnl > 0:
-                # 수익 발생 시
-                # 제곱 보상: 큰 수익에 가중치, 하지만 스케일은 조정 (5.0 -> 10.0)
-                reward += ((pnl * 100) ** 2) / 10.0
+        # 2. 거래 종료(청산) 시 보상 - 여기가 핵심
+        if trade_done:
+            # 수수료 차감 (실전 반영)
+            realized_pnl = pnl - 0.0005 
+            
+            if realized_pnl > 0:
+                # [익절] 선형 보상 (제곱 X)
+                # 수익률 1% = +1.0점
+                reward += realized_pnl * 100.0
                 
-                # 익절 보너스 (작은 수익이라도 칭찬)
-                if pnl > 0.002:  # 0.2% 이상 익절 시
-                    reward += 1.0  # 기존 2.0 -> 1.0 (너무 빈번한 보상 방지)
+                # 보너스: 확실한 익절에 대한 인센티브
+                if realized_pnl > 0.005:  # 0.5% 이상 수익 시
+                    reward += 1.0
             else:
-                # 손실 발생 시
-                # 손절 페널티 완화: -1% 손실 시 약 -0.7점 (기존 -2.0점에서 완화)
-                # 에이전트가 손절을 두려워해 "존버"타는 것을 방지
-                reward += pnl * 70.0  # 기존 200 -> 70
+                # [손실] 페널티 강화 (익절보다 1.5배 더 아프게)
+                # 손실 1% = -1.5점
+                reward += realized_pnl * 150.0 
+                
+                # 추가 벌점: 뇌동매매 방지
+                reward -= 0.5
 
-        # 3. 시간 페널티 (Time Decay) - 스캘핑의 핵심
-        # 포지션을 오래 들고 있을수록 점수 차감 (기존 0.0001 -> 0.0015)
-        # 100스텝(300분) 보유 시 -0.15점 감점 -> 빠른 회전율 강제
-        reward -= 0.0015
-
-        # 4. 보상 클리핑 (안전장치)
-        # 학습 안정성을 위해 최소한의 상한선은 두는 것이 좋음 (범위는 넓게)
-        reward = np.clip(reward, -20, 20)
-
-        return reward
+        # 3. 클리핑 (학습 안정성)
+        return np.clip(reward, -10, 10)
 
     def get_state_dim(self):
         """상태 차원 반환"""

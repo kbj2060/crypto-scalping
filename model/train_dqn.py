@@ -639,6 +639,7 @@ class DDQNTrainer:
         self.current_position = None
         self.entry_price = None
         self.entry_index = None
+        self.env.entry_index = None  # 환경의 entry_index도 초기화
         self.prev_pnl = 0.0
         
         # 시각화 초기화 (기본적으로 비활성화)
@@ -712,6 +713,7 @@ class DDQNTrainer:
         self.current_position = None
         self.entry_price = None
         self.entry_index = None
+        self.env.entry_index = None  # 환경의 entry_index도 초기화
         self.prev_pnl = 0.0
         
         available_steps = len(self.data_collector.eth_data) - self.data_collector.current_index
@@ -761,11 +763,13 @@ class DDQNTrainer:
                         reward = self.env.calculate_reward(pnl, True, 0, pnl_change)
                         trade_done = True
                         self.prev_pnl = 0.0
+                        self.env.entry_index = None  # 거래 종료 시 환경의 entry_index 초기화
                     
                     if self.current_position != 'LONG':
                         self.current_position = 'LONG'
                         self.entry_price = current_price
                         self.entry_index = self.data_collector.current_index
+                        self.env.entry_index = self.entry_index  # 환경에도 설정
                         self.prev_pnl = 0.0
                 
                 elif action == 2:  # SHORT
@@ -775,11 +779,13 @@ class DDQNTrainer:
                         reward = self.env.calculate_reward(pnl, True, 0, pnl_change)
                         trade_done = True
                         self.prev_pnl = 0.0
+                        self.env.entry_index = None  # 거래 종료 시 환경의 entry_index 초기화
                     
                     if self.current_position != 'SHORT':
                         self.current_position = 'SHORT'
                         self.entry_price = current_price
                         self.entry_index = self.data_collector.current_index
+                        self.env.entry_index = self.entry_index  # 환경에도 설정
                         self.prev_pnl = 0.0
                         
                 else:  # HOLD
