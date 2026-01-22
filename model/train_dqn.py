@@ -641,6 +641,10 @@ class DDQNTrainer:
 
     def train_episode(self, episode_num, max_steps=1000):
         """한 에피소드 학습"""
+        # 에피소드 시작 전 NoisyNet 노이즈 리셋!
+        if hasattr(self.agent, 'reset_noise'):
+            self.agent.reset_noise()
+        
         episode_reward = 0.0
         steps = 0
         

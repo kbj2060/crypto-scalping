@@ -97,8 +97,8 @@ DDQN_CONFIG = {
     'learning_rate': 0.00005,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
     'gamma': 0.99,  # 미래 보상 할인율
     'buffer_size': 50000,  # 리플레이 버퍼 크기
-    'epsilon_start': 1.0,  # 초기 탐험 확률
-    'epsilon_end': 0.01,  # 최소 탐험 확률
-    'epsilon_decay': 0.999999,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
+    'epsilon_start': 0.0,  # 초기 탐험 확률
+    'epsilon_end': 0.00,  # 최소 탐험 확률
+    'epsilon_decay': 0.0,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
     'target_update': 1000,  # 타겟 네트워크 동기화 주기 (스텝)
 }

@@ -213,3 +213,13 @@ class DDQNAgent:
         self.epsilon = checkpoint.get('epsilon', self.epsilon_min)
         self.update_counter = checkpoint.get('update_counter', 0)
         logger.info(f"모델 로드 완료: {filepath}")
+    
+    def reset_noise(self):
+        """NoisyNet의 노이즈 파라미터를 재설정 (탐험 다양성 확보)"""
+        # policy_net에 reset_noise 메서드가 있을 때만 실행 (NoisyNet 사용 시)
+        if hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()
+        
+        # target_net도 같이 리셋해주면 학습 안정성에 도움됨
+        if hasattr(self.target_net, 'reset_noise'):
+            self.target_net.reset_noise()
