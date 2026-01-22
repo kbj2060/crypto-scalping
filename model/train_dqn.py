@@ -632,7 +632,7 @@ class DDQNTrainer:
             self.env.scaler_fitted = True
             
             # [추가] 학습 완료된 스케일러를 파일로 저장
-            self.env.preprocessor.save_scaler('model/scaler.pkl')
+            self.env.preprocessor.save_scaler('saved_models/scaler.pkl')
             
             logger.info(f"✅ 스케일러 학습 및 저장 완료: {len(tech_data)}개 샘플 (Index {start_idx}부터 사용), {len(tech_cols)}개 기술적 피처 정규화 (전략 점수 {len(self.feature_columns) - len(tech_cols)}개 제외)")
             
@@ -791,8 +791,11 @@ class DDQNTrainer:
                     # 최고 성능 모델 저장
                     if rw > best_reward:
                         best_reward = rw
-                        self.agent.save_model(config.DDQN_MODEL_PATH)
-                        logger.info(f"✅ 최고 성능 모델 저장 (보상: {rw:.2f})")
+                        # 최고점 모델은 이름을 다르게 저장!
+                        best_model_path = 'saved_models/best_ddqn_model.pth'
+                        os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
+                        self.agent.save_model(best_model_path)
+                        logger.info(f"🏆 최고 기록 갱신! best_ddqn_model.pth 저장 (Reward: {rw:.2f})")
                     
                     # 주기적 저장
                     if episode % save_interval == 0:

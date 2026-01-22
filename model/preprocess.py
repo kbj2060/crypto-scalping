@@ -74,11 +74,11 @@ class DataPreprocessor:
         log_returns = np.diff(log_prices, prepend=log_prices[0])
         return log_returns
     
-    def save_scaler(self, path='model/scaler.pkl'):
+    def save_scaler(self, path='saved_models/scaler.pkl'):
         """스케일러 저장
         
         Args:
-            path: 저장 경로 (기본값: model/scaler.pkl)
+            path: 저장 경로 (기본값: saved_models/scaler.pkl)
         """
         if self.mean is None or self.std is None:
             logger.warning("스케일러가 학습되지 않았습니다. 저장할 수 없습니다.")
@@ -89,11 +89,11 @@ class DataPreprocessor:
             pickle.dump({'mean': self.mean, 'std': self.std}, f)
         logger.info(f"💾 스케일러 저장 완료: {path}")
     
-    def load_scaler(self, path='model/scaler.pkl'):
+    def load_scaler(self, path='saved_models/scaler.pkl'):
         """스케일러 로드
         
         Args:
-            path: 로드 경로 (기본값: model/scaler.pkl)
+            path: 로드 경로 (기본값: saved_models/scaler.pkl)
         Returns:
             bool: 로드 성공 여부
         """

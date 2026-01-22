@@ -119,10 +119,10 @@ class TradingBot:
                 self.env = TradingEnvironment(self.data_collector, self.strategies)
                 
                 # [추가] 저장된 스케일러 로드 및 상태 업데이트
-                if self.env.preprocessor.load_scaler():
+                if self.env.preprocessor.load_scaler('saved_models/scaler.pkl'):
                     self.env.scaler_fitted = True  # 경고 메시지 방지
                 else:
-                    logger.error("❌ 스케일러 파일(scaler.pkl)이 없습니다. 학습을 먼저 진행하세요.")
+                    logger.error("❌ 스케일러 파일(saved_models/scaler.pkl)이 없습니다. 학습을 먼저 진행하세요.")
                     self.use_ai = False
                     return
                 
