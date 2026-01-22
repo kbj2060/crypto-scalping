@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class ModelEvaluator:
-    def __init__(self, model_path='saved_models/best_ddqn_model.pth'):
+    def __init__(self, model_path='saved_models/ddqn_model.pth'):
         self.model_path = model_path
         self.data_collector = DataCollector(use_saved_data=True)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
