@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 class VWAPDeviationStrategy:
     def __init__(self):
         self.name = "VWAP Deviation"
-        self.deviation_long_threshold = -0.12  # -0.12% 이하 (가장 적절한 중기 과매도)
-        self.deviation_short_threshold = 0.12  # +0.12% 이상 (가장 적절한 중기 과매수)
+        self.deviation_long_threshold = -0.05  # -0.05% 이하 (완화: -0.12 -> -0.05)
+        self.deviation_short_threshold = 0.05  # +0.05% 이상 (완화: 0.12 -> 0.05)
         self.atr_period = 14
         self.atr_threshold = 50.0  # ATR < 50.0 (거의 모든 변동성 허용)
         self.cvd_change_period = 5  # CVD 변화량 5봉
@@ -50,12 +50,12 @@ class VWAPDeviationStrategy:
             if latest_atr >= self.atr_threshold:
                 return None
             
-            # 필터: CVD 변화량(5봉) < 200K
-            cvd_data = data_collector.calculate_cvd('ETH', lookback=20, ema_period=21, delta_smoothing=5)
-            if cvd_data is not None and len(cvd_data) >= self.cvd_change_period:
-                cvd_change = abs(float(cvd_data['cvd'].iloc[-1] - cvd_data['cvd'].iloc[-self.cvd_change_period]))
-                if cvd_change >= self.cvd_change_threshold:
-                    return None
+            # CVD 필터 삭제 (거래량 분석은 AI에게 맡김)
+            # cvd_data = data_collector.calculate_cvd('ETH', lookback=20, ema_period=21, delta_smoothing=5)
+            # if cvd_data is not None and len(cvd_data) >= self.cvd_change_period:
+            #     cvd_change = abs(float(cvd_data['cvd'].iloc[-1] - cvd_data['cvd'].iloc[-self.cvd_change_period]))
+            #     if cvd_change >= self.cvd_change_threshold:
+            #         return None
             
             # 거래량 필터 제거 (반전 시점에는 거래량이 늘어날 수 있으므로)
             

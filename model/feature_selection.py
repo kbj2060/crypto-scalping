@@ -19,7 +19,7 @@ except ImportError:
 
 
 class FeatureSelector:
-    def __init__(self, top_k=8):
+    def __init__(self, top_k=20):
         """
         Args:
             top_k (int): 선택할 상위 피처 개수 (기본 8개)

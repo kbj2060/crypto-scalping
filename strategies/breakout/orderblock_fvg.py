@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 class OrderblockFVGStrategy:
     def __init__(self):
         self.name = "Orderblock FVG"
-        self.ob_volume_multiplier = 1.0  # 직전 10봉 평균의 1.0배 이상 (공격적: 1.3 -> 1.0, 거래량 요건 없앰)
+        self.ob_volume_multiplier = 0.0  # 거래량 조건 사실상 제거
         self.ob_touch_min = 0.4  # OB의 40% 구간
         self.ob_touch_max = 0.6  # OB의 60% 구간
-        self.fvg_min_gap = 0.0001  # 최소 갭 크기: 0.01% (공격적: 0.0005 -> 0.0001, 아주 작은 갭도 포착)
-        self.fvg_retest_level = 0.1  # 갭의 10% 레벨 리테스트 (공격적: 기존 50% → 즉시 진입 가능)
-        self.fvg_tolerance_pct = 0.9  # 90% 허용 오차 (공격적: 0.3 -> 0.9, 갭 근처에만 가도 즉시 진입)
+        self.fvg_min_gap = 0.0  # 모든 갭 포착 (0.0001 -> 0.0)
+        self.fvg_retest_level = 0.1  # 갭의 10% 레벨 리테스트
+        self.fvg_tolerance_pct = 0.9  # 90% 허용 오차
         self.min_signal_distance = 5  # 최소 신호 거리: 5봉
     
     def find_order_block(self, data, lookback=10):
@@ -37,8 +37,8 @@ class OrderblockFVGStrategy:
                 body = abs(candle['close'] - candle['open'])
                 body_pct = body / candle['open']
                 
-                # 강한 캔들: 몸통 0.15% 이상 + 볼륨 1.7배 이상 (0.3%에서 완화)
-                if body_pct >= 0.0015 and candle['volume'] >= volume_mean * self.ob_volume_multiplier:
+                # 강한 캔들: 몸통 0.15% 이상 (거래량 필터 제거)
+                if body_pct >= 0.0015:
                     if candle['close'] > candle['open']:
                         # 강한 상승 캔들 → Bearish OB
                         return {
@@ -103,10 +103,8 @@ class OrderblockFVGStrategy:
                 
                 logger.debug(f"🔍 [Orderblock FVG] FVG #{idx+1} - 타입: {fvg['type']}, 상단: {fvg_top:.2f}, 하단: {fvg_bottom:.2f}, 범위: {fvg_range_pct:.4%}")
                 
-                # FVG 최소 갭 크기 필터: 0.05% 이상
-                if fvg_range_pct < self.fvg_min_gap:
-                    logger.debug(f"⚠️ [Orderblock FVG] FVG #{idx+1} 갭 크기 부족: {fvg_range_pct:.4%} < {self.fvg_min_gap:.4%}")
-                    continue
+                # FVG 최소 갭 크기 필터 제거 (모든 갭 허용)
+                # if fvg_range_pct < self.fvg_min_gap: continue
                 
                 # FVG 10% 레벨 리테스트 또는 즉시 진입 (공격적 모드)
                 # 옵션 1: FVG 10% 레벨 리테스트 (30% 허용 오차)
@@ -136,8 +134,8 @@ class OrderblockFVGStrategy:
                             elif fvg['type'] == 'bearish' and order_block['type'] == 'bearish':
                                 ob_match = True
                     
-                    # OB 매칭 또는 FVG만으로도 신호 발생
-                    if ob_match or order_block is None:
+                    # 단독 신호 허용: OB 없이 FVG만 있어도, FVG 없이 OB 리테스트만 있어도 진입
+                    if ob_match or order_block is None or in_fvg_range:
                         if fvg['type'] == 'bullish':
                             signal = 'LONG'
                             stop_loss = fvg_bottom * 0.999
@@ -145,6 +143,17 @@ class OrderblockFVGStrategy:
                         elif fvg['type'] == 'bearish':
                             signal = 'SHORT'
                             stop_loss = fvg_top * 1.001
+                            break
+                    
+                    # OB만 있어도 신호 발생 (FVG 없이)
+                    if order_block and not in_fvg_range:
+                        if order_block['type'] == 'bullish' and ob_match:
+                            signal = 'LONG'
+                            stop_loss = order_block['body_bottom'] * 0.999
+                            break
+                        elif order_block['type'] == 'bearish' and ob_match:
+                            signal = 'SHORT'
+                            stop_loss = order_block['body_top'] * 1.001
                             break
             
             if signal:

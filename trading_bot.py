@@ -211,7 +211,7 @@ class TradingBot:
             except Exception as e:
                 logger.warning(f"MTF 계산 오류: {e}")
 
-            # 3. 전략 점수(Strategy Scores) 실시간 계산
+            # 3. 전략 점수(Strategy Scores) 실시간 계산 (12개)
             strat_map = {
                 'BTCEthCorrelationStrategy': 'strat_btc_eth_corr',
                 'VolatilitySqueezeStrategy': 'strat_vol_squeeze',
@@ -222,7 +222,9 @@ class TradingBot:
                 'VWAPDeviationStrategy': 'strat_vwap',
                 'RangeTopBottomStrategy': 'strat_range',
                 'StochRSIMeanReversionStrategy': 'strat_stoch',
-                'CMFDivergenceStrategy': 'strat_cmf'
+                'CMFDivergenceStrategy': 'strat_cmf',
+                'CCIReversalStrategy': 'strat_cci_reversal',  # [신규] CCI 반전 전략
+                'WilliamsRStrategy': 'strat_williams_r'       # [신규] Williams %R 전략
             }
             
             # 전략 점수 컬럼 초기화 (없으면 생성)

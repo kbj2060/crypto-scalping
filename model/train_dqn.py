@@ -19,6 +19,7 @@ from model.dqn_agent import DDQNAgent
 from model.trading_env import TradingEnvironment
 from model.feature_selection import FeatureSelector
 from model.mtf_processor import MTFProcessor
+from model.feature_engineering import FeatureEngineer
 import config
 
 # 전략 파일들 임포트
@@ -26,7 +27,7 @@ from strategies import (
     BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
     HMAMomentumStrategy, MFIMomentumStrategy, BollingerMeanReversionStrategy,
     VWAPDeviationStrategy, RangeTopBottomStrategy, StochRSIMeanReversionStrategy,
-    CMFDivergenceStrategy
+    CMFDivergenceStrategy, CCIReversalStrategy, WilliamsRStrategy
 )
 
 # 진행률 표시용 (선택적)
@@ -333,19 +334,31 @@ def precalculate_strategy_scores(collector, force_recalculate=False):
             logger.info(f"📂 저장된 전략 점수 로드 중: {strategy_scores_path}")
             scores_df = pd.read_csv(strategy_scores_path, index_col=0, parse_dates=True)
             
+            # 필수 전략 컬럼 정의 (12개)
+            required_strategy_cols = [
+                'strat_btc_eth_corr', 'strat_vol_squeeze', 'strat_ob_fvg',
+                'strat_hma', 'strat_mfi', 'strat_bb_reversion',
+                'strat_vwap', 'strat_range', 'strat_stoch', 'strat_cmf',
+                'strat_cci_reversal', 'strat_williams_r'  # [신규] 2개
+            ]
+            
             # 데이터 길이 확인
-            if len(scores_df) == len(collector.eth_data):
-                logger.info(f"✅ 저장된 전략 점수 로드 완료: {len(scores_df)}개 캔들")
-                return scores_df
-            else:
+            if len(scores_df) != len(collector.eth_data):
                 logger.warning(f"저장된 파일 길이 불일치 ({len(scores_df)} vs {len(collector.eth_data)}), 재계산합니다.")
+            # 필수 컬럼 확인 (새로 추가된 전략 2개 포함)
+            elif not all(col in scores_df.columns for col in required_strategy_cols):
+                missing_cols = [col for col in required_strategy_cols if col not in scores_df.columns]
+                logger.warning(f"저장된 파일에 필수 컬럼 누락: {missing_cols}, 재계산합니다.")
+            else:
+                logger.info(f"✅ 저장된 전략 점수 로드 완료: {len(scores_df)}개 캔들, {len(scores_df.columns)}개 전략")
+                return scores_df
         except Exception as e:
             logger.warning(f"저장된 파일 로드 실패: {e}, 재계산합니다.")
     
     # 전략 점수 계산
     logger.info("🧠 내 전략들의 신호 미리 계산 중 (시간이 조금 걸릴 수 있습니다)...")
     
-    # 전략 초기화
+    # 전략 초기화 (12개)
     strategies = [
         (BTCEthCorrelationStrategy(), 'strat_btc_eth_corr'),
         (VolatilitySqueezeStrategy(), 'strat_vol_squeeze'),
@@ -356,7 +369,9 @@ def precalculate_strategy_scores(collector, force_recalculate=False):
         (VWAPDeviationStrategy(), 'strat_vwap'),
         (RangeTopBottomStrategy(), 'strat_range'),
         (StochRSIMeanReversionStrategy(), 'strat_stoch'),
-        (CMFDivergenceStrategy(), 'strat_cmf')
+        (CMFDivergenceStrategy(), 'strat_cmf'),
+        (CCIReversalStrategy(), 'strat_cci_reversal'),  # [신규] CCI 반전 전략
+        (WilliamsRStrategy(), 'strat_williams_r')      # [신규] Williams %R 전략
     ]
     
     # 결과를 담을 DataFrame 생성 (0으로 초기화)
@@ -424,53 +439,79 @@ class DDQNTrainer:
         if not self.data_collector.load_saved_data():
             raise ValueError("데이터 로드 실패: collect_training_data.py를 먼저 실행하세요.")
         
+        # -----------------------------------------------------
+        # [수정] FeatureEngineer를 사용하여 고급 피처 25개 생성
+        # -----------------------------------------------------
+        logger.info("🛠️ 고급 피처 엔지니어링 수행 중...")
+        
+        # BTC 데이터 확보 (DataCollector에 btc_data가 있다고 가정)
+        btc_df = getattr(self.data_collector, 'btc_data', None)
+        
+        engineer = FeatureEngineer(self.data_collector.eth_data, btc_df)
+        enhanced_df = engineer.generate_features()
+        
+        if enhanced_df is None:
+            raise ValueError("피처 생성 실패")
+            
+        # 생성된 데이터로 교체
+        self.data_collector.eth_data = enhanced_df
+        
         # 1.5. MTF 프로세서 적용 (15분봉, 1시간봉 지표 추가)
-        # 인덱스가 DatetimeIndex인지 확인하고 필요시 변환
+        # [수정됨] 인덱스가 DatetimeIndex인지 확인하고, 아니면 'timestamp' 컬럼으로 변환
         if not isinstance(self.data_collector.eth_data.index, pd.DatetimeIndex):
-            # 인덱스가 문자열이거나 다른 형태일 경우 변환 시도
-            try:
-                self.data_collector.eth_data.index = pd.to_datetime(self.data_collector.eth_data.index)
-            except:
-                logger.warning("인덱스를 DatetimeIndex로 변환할 수 없습니다. MTF 프로세서를 건너뜁니다.")
-        else:
+            if 'timestamp' in self.data_collector.eth_data.columns:
+                # 'timestamp' 컬럼(밀리초)을 사용하여 인덱스 설정 (가장 정확)
+                self.data_collector.eth_data.index = pd.to_datetime(self.data_collector.eth_data['timestamp'], unit='ms')
+            else:
+                try:
+                    # timestamp 컬럼이 없으면 기존 인덱스 변환 시도
+                    self.data_collector.eth_data.index = pd.to_datetime(self.data_collector.eth_data.index)
+                except:
+                    logger.warning("인덱스를 DatetimeIndex로 변환할 수 없습니다. MTF 프로세서를 건너뜁니다.")
+        
+        # 인덱스 변환 후 MTF 적용
+        if isinstance(self.data_collector.eth_data.index, pd.DatetimeIndex):
             try:
                 mtf_processor = MTFProcessor(self.data_collector.eth_data)
                 self.data_collector.eth_data = mtf_processor.add_mtf_features()
+                
+                # [확인] 데이터가 잘 들어갔는지 통계 출력 (head 말고 describe 확인)
+                mtf_check = ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h']
+                existing_mtf = [c for c in mtf_check if c in self.data_collector.eth_data.columns]
+                
+                if existing_mtf:
+                    logger.info(f"📊 MTF 데이터 통계 (0이 아닌지 확인):\n{self.data_collector.eth_data[existing_mtf].describe().loc[['mean', 'max', 'min']]}")
             except Exception as e:
                 logger.warning(f"MTF 프로세서 적용 실패: {e}. 계속 진행합니다.")
-            
-        # 2. 기술적 지표 피처 계산 (15개)
-        logger.info("1. 기술적 지표 계산 중...")
-        tech_df = calculate_technical_features(self.data_collector.eth_data)
-        
-        if tech_df is None or len(tech_df) == 0:
-            raise ValueError("기술적 지표 계산 실패")
         
         # 3. 전략 점수 피처 계산 (10개)
         logger.info("2. 전략 신호 계산 중...")
         strat_df = precalculate_strategy_scores(self.data_collector, force_recalculate=force_recalculate_strategies)
         
-        # 인덱스 일치 확인
-        if len(tech_df) != len(self.data_collector.eth_data):
-            raise ValueError(f"기술적 지표 길이 불일치: 원본={len(self.data_collector.eth_data)}, 기술={len(tech_df)}")
+        # 인덱스 일치 확인 및 병합
         if len(strat_df) != len(self.data_collector.eth_data):
             raise ValueError(f"전략 점수 길이 불일치: 원본={len(self.data_collector.eth_data)}, 전략={len(strat_df)}")
         
-        if not tech_df.index.equals(self.data_collector.eth_data.index):
-            logger.warning("기술적 지표 인덱스 불일치, 재인덱싱합니다.")
-            tech_df.index = self.data_collector.eth_data.index
         if not strat_df.index.equals(self.data_collector.eth_data.index):
             logger.warning("전략 점수 인덱스 불일치, 재인덱싱합니다.")
             strat_df.index = self.data_collector.eth_data.index
         
-        # 4. 데이터 병합
-        for col in tech_df.columns:
-            self.data_collector.eth_data[col] = tech_df[col]
+        # 전략 점수 병합
         for col in strat_df.columns:
             self.data_collector.eth_data[col] = strat_df[col]
         
-        # 피처 컬럼 초기화 (config에 정의된 순서대로)
-        initial_features = list(config.FEATURE_COLUMNS)
+        # 피처 컬럼 정의 (25개 기본 피처)
+        initial_features = [
+            'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos',
+            'rsi', 'macd_hist', 'hma_ratio', 'cci',
+            'rvol', 'taker_ratio', 'cvd_change', 'mfi', 'cmf', 'vwap_dist',
+            'wick_upper', 'wick_lower', 'range_pos', 'swing_break', 'chop',
+            'btc_return', 'btc_rsi', 'btc_corr', 'btc_vol', 'eth_btc_ratio'
+        ]
+        
+        # 전략 점수 피처 추가
+        strat_cols = [c for c in self.data_collector.eth_data.columns if c.startswith('strat_')]
+        initial_features.extend(strat_cols)
         
         # [추가] MTF 피처 자동 감지 및 추가 (rsi_15m, trend_15m, rsi_1h, trend_1h)
         mtf_features = ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h']
@@ -525,8 +566,9 @@ class DDQNTrainer:
             self.feature_columns = initial_features
         
         # [핵심] 방향성 필수 지표 강제 포함 (Whitelist)
-        # RSI(과매수/과매도), MACD(추세), BB Position(현재 위치), ADX(추세 강도), Choppiness(횡보/추세 판별)
-        must_include = ['rsi', 'macd_hist', 'bb_position', 'adx', 'chop']
+        # RSI(과매수/과매도), MACD(추세), BB Position(현재 위치), Choppiness(횡보/추세 판별)
+        # FeatureEngineer가 생성한 피처 이름 사용: bb_pos (bb_position 아님)
+        must_include = ['rsi', 'macd_hist', 'bb_pos', 'chop']
         
         # MTF 피처도 강제 포함 (상위 프레임 정보는 중요)
         mtf_must_include = [f for f in ['rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'] 

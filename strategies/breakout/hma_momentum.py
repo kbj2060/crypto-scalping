@@ -50,13 +50,13 @@ class HMAMomentumStrategy:
             
             signal = None
             
-            # LONG 조건: 기울기 양수 + 가격 돌파
-            if hma_slope > 0 and current_close > current_hma:
+            # LONG 조건: Price > HMA이면 무조건 롱 스코어 부여 (기울기 조건 제거)
+            if current_close > current_hma:
                 logger.debug(f"[HMA Momentum] 롱 신호 발생 - HMA: {current_hma:.2f}, 기울기: {hma_slope:.4f}, 종가: {current_close:.2f}")
                 signal = 'LONG'
             
-            # SHORT 조건: 기울기 음수 + 가격 하향
-            elif hma_slope < 0 and current_close < current_hma:
+            # SHORT 조건: Price < HMA이면 숏 (기울기 조건 제거)
+            elif current_close < current_hma:
                 logger.debug(f"[HMA Momentum] 숏 신호 발생 - HMA: {current_hma:.2f}, 기울기: {hma_slope:.4f}, 종가: {current_close:.2f}")
                 signal = 'SHORT'
             

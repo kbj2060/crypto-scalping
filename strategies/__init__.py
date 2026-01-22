@@ -16,7 +16,9 @@ from .range import (
     VWAPDeviationStrategy,
     RangeTopBottomStrategy,
     StochRSIMeanReversionStrategy,
-    CMFDivergenceStrategy
+    CMFDivergenceStrategy,
+    CCIReversalStrategy,
+    WilliamsRStrategy
 )
 
 __all__ = [
@@ -26,10 +28,12 @@ __all__ = [
     'HMAMomentumStrategy',
     'OrderblockFVGStrategy',
     'MFIMomentumStrategy',
-    # 횡보장 전략 (Top 5 Mean-Reversion)
+    # 횡보장 전략 (Mean-Reversion)
     'BollingerMeanReversionStrategy',
     'VWAPDeviationStrategy',
     'RangeTopBottomStrategy',
     'StochRSIMeanReversionStrategy',
-    'CMFDivergenceStrategy'
+    'CMFDivergenceStrategy',
+    'CCIReversalStrategy',
+    'WilliamsRStrategy'
 ]

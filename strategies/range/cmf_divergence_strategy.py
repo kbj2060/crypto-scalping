@@ -70,21 +70,20 @@ class CMFDivergenceStrategy:
             stop_loss_price = None
             take_profit_price = None
             
-            # 횡보장 하단에서 CMF 반등 시 롱
-            # CMF가 음수에서 반등하고, -range_threshold 이상일 때
-            if curr_cmf > prev_cmf and curr_cmf < 0 and curr_cmf > -self.range_threshold:
+            # 다이버전스 대신 Zero-Cross 전략으로 변경
+            # CMF가 음수에서 양수로 가면 롱 (0선 돌파)
+            if prev_cmf < 0 and curr_cmf > 0:
                 signal = 'LONG'
                 stop_loss_price = entry_price * (1 - 0.0025)  # 0.25% 손절
                 take_profit_price = entry_price * (1 + 0.004)  # 0.4% 익절
-                logger.debug(f"🔍 [CMF Divergence] 롱 신호 발생 - CMF: {curr_cmf:.4f} (이전: {prev_cmf:.4f})")
+                logger.debug(f"🔍 [CMF Zero-Cross] 롱 신호 발생 - CMF: {curr_cmf:.4f} (이전: {prev_cmf:.4f}, 0선 돌파)")
             
-            # 횡보장 상단에서 CMF 꺾일 때 숏
-            # CMF가 양수에서 하락하고, range_threshold 이하일 때
-            elif curr_cmf < prev_cmf and curr_cmf > 0 and curr_cmf < self.range_threshold:
+            # CMF가 양수에서 음수로 가면 숏 (0선 이탈)
+            elif prev_cmf > 0 and curr_cmf < 0:
                 signal = 'SHORT'
                 stop_loss_price = entry_price * (1 + 0.0025)  # 0.25% 손절
                 take_profit_price = entry_price * (1 - 0.004)  # 0.4% 익절
-                logger.debug(f"🔍 [CMF Divergence] 숏 신호 발생 - CMF: {curr_cmf:.4f} (이전: {prev_cmf:.4f})")
+                logger.debug(f"🔍 [CMF Zero-Cross] 숏 신호 발생 - CMF: {curr_cmf:.4f} (이전: {prev_cmf:.4f}, 0선 이탈)")
             
             if signal:
                 return {

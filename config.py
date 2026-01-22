@@ -60,7 +60,7 @@ TECHNICAL_FEATURES = [
     'adx', 'chop'                       # 추세/횡보 판별 (2) - 신규 추가
 ]
 
-# 2. 전략 기반 피처 (10개) - 새로 추가됨
+# 2. 전략 기반 피처 (12개) - CCI Reversal, Williams %R 추가
 STRATEGY_FEATURES = [
     'strat_btc_eth_corr',    # BTC 연동
     'strat_vol_squeeze',     # 변동성 스퀴즈
@@ -71,7 +71,9 @@ STRATEGY_FEATURES = [
     'strat_vwap',            # VWAP 이격
     'strat_range',           # 박스권 반전
     'strat_stoch',           # StochRSI
-    'strat_cmf'              # CMF 다이버전스
+    'strat_cmf',             # CMF 다이버전스
+    'strat_cci_reversal',    # CCI 반전 전략 (신규)
+    'strat_williams_r'       # Williams %R 전략 (신규)
 ]
 
 # 최종 사용할 모든 피처 합치기
@@ -82,7 +84,7 @@ LOOKBACK_WINDOW = 60  # 3분봉 * 60 = 180분 (3시간)
 
 # [신규] 피처 선택 설정
 USE_XGBOOST_SELECTION = True  # 활성화 여부
-TOP_K_FEATURES = 8            # 선택할 피처 개수 (DDQN 입력 차원)
+TOP_K_FEATURES = 25            # 선택할 피처 개수 (DDQN 입력 차원)
 
 # [신규] Prioritized Experience Replay (PER) 설정
 USE_PER = True  # PER 사용 여부 (True: 우선순위 기반 샘플링, False: 일반 랜덤 샘플링)
