@@ -208,49 +208,39 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        [최종 수정] Reality-Based Reward Function
-        - 평가손익(Change) 보상 제거: 희망고문 방지
-        - 결과 중심 보상: 오직 청산 시점의 PnL로만 평가
-        - 손실에 더 큰 고통 부여 (손실 회피 성향 주입)
+        [최종 추천 버전] 완벽 튜닝된 Reward 구조
+        - 포지션 유지 비용 강화 (0.0025)
+        - 손실 페널티 완화 (120.0)
+        - 손실 벌점 완화 (0.3)
+        - Soft normalization (tanh) 적용
         """
         reward = 0.0
-        
-        # 1. 평가손익 변화 보상 삭제 (또는 극소화)
-        # 이 부분이 '착시'의 주범이므로 과감히 0으로 만듭니다.
-        # reward += pnl_change * 0.0 
-        
-        # 대신, 포지션을 잡고 있는 동안의 "불안감(리스크)"을 시간 페널티로 부여
-        # entry_index가 있으면 사용하고, 없으면 holding_time 사용
+
+        # 1. 포지션 유지 비용
         if self.entry_index is not None and self.collector.current_index > self.entry_index:
-            # 포지션 보유 중
-            reward -= 0.0005  # 버티는 것 자체가 비용임
+            reward -= 0.0025  # 0.0005 → 0.0025로 강화
         elif holding_time > 0:
             # holding_time 파라미터로 대체 (호환성)
-            reward -= 0.0005
+            reward -= 0.0025
 
-        # 2. 거래 종료(청산) 시 보상 - 여기가 핵심
+        # 2. 청산 시점 보상
         if trade_done:
-            # 수수료 차감 (실전 반영)
-            realized_pnl = pnl - 0.0005 
-            
-            if realized_pnl > 0:
-                # [익절] 선형 보상 (제곱 X)
-                # 수익률 1% = +1.0점
-                reward += realized_pnl * 100.0
-                
-                # 보너스: 확실한 익절에 대한 인센티브
-                if realized_pnl > 0.005:  # 0.5% 이상 수익 시
-                    reward += 1.0
-            else:
-                # [손실] 페널티 강화 (익절보다 1.5배 더 아프게)
-                # 손실 1% = -1.5점
-                reward += realized_pnl * 150.0 
-                
-                # 추가 벌점: 뇌동매매 방지
-                reward -= 0.5
+            realized_pnl = pnl - 0.0005  # 수수료 차감
 
-        # 3. 클리핑 (학습 안정성)
-        return np.clip(reward, -10, 10)
+            if realized_pnl > 0:
+                reward += realized_pnl * 100.0  # 선형 보상
+
+                if realized_pnl > 0.005:
+                    reward += 1.0               # 고수익 보너스
+
+            else:
+                reward += realized_pnl * 120.0  # 150 → 120로 완화
+                reward -= 0.3                   # 벌점 (0.5 → 0.3)
+
+        # 3. reward clamp 제거 → 대신 soft normalization
+        reward = np.tanh(reward)
+
+        return reward
 
     def get_state_dim(self):
         """상태 차원 반환"""
