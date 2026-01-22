@@ -76,21 +76,23 @@ class MTFProcessor:
         return self.df_3m.resample(interval).agg(logic)
 
     def _calculate_higher_indicators(self, df, suffix):
-        """상위 프레임용 핵심 지표 계산 (필요한 것만!)"""
-        # 1. RSI (추세 강도)
+        """[수정] 초기 NaN을 중립값으로 채움"""
+        # 1. RSI
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / (loss + 1e-8)
         rsi = 100 - (100 / (1 + rs))
         
-        # 2. EMA (추세 방향)
+        # [수정] RSI NaN -> 50 (중립)
+        rsi = rsi.fillna(50.0)
+        
+        # 2. Trend
         ema_long = df['close'].ewm(span=20, adjust=False).mean()
-        
-        # 3. Trend Feature (현재가가 이평선 위에 있는가?)
         trend = np.where(df['close'] > ema_long, 1.0, -1.0)
+        # EMA 계산 전 초기값은 Trend 0으로 가정
+        trend[:20] = 0.0 
         
-        # 결과 DataFrame
         result = pd.DataFrame(index=df.index)
         result[f'rsi{suffix}'] = rsi
         result[f'trend{suffix}'] = trend

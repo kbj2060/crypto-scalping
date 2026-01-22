@@ -125,7 +125,7 @@ DDQN_CONFIG = {
     'num_layers': 2,  # GRU 레이어 수
     'action_dim': 3,  # 행동 개수 (0: Hold, 1: Long, 2: Short)
     'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
-    'learning_rate': 0.00005,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
+    'learning_rate': 0.0001,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
     'gamma': 0.99,  # 미래 보상 할인율
     'buffer_size': 50000,  # 리플레이 버퍼 크기
     'epsilon_start': 0.0,  # 초기 탐험 확률
