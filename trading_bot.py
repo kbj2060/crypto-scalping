@@ -329,8 +329,10 @@ class TradingBot:
             
             # Q-값 확인 (디버깅용)
             with torch.no_grad():
-                obs_seq, _ = state
-                q_values = self.agent.policy_net(obs_seq.to(self.agent.device))
+                obs_seq, obs_info = state
+                obs_seq = obs_seq.to(self.agent.device)
+                obs_info = obs_info.to(self.agent.device)
+                q_values = self.agent.policy_net(obs_seq, info=obs_info)
             
             action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
             logger.info(f"🤖 AI 결정: {action_names[action]} | Q-Values: {q_values.cpu().numpy()[0]}")

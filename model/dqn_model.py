@@ -77,6 +77,7 @@ class DuelingGRU(nn.Module):
         
         self.noisy = noisy
         self.info_dim = info_dim
+        self.hidden_dim = hidden_dim  # [수정] hidden_dim 저장 (forward에서 사용)
         
         # [신규] 0. 입력 투영 레이어 (Residual Connection을 위해 차원 맞추기)
         # input_dim(예:15) -> hidden_dim(예:128)으로 늘려줌
@@ -174,7 +175,8 @@ class DuelingGRU(nn.Module):
         else:
             # Info가 없으면 0으로 채움 (하위 호환성)
             batch_size = context_vector.size(0)
-            info_proj = torch.zeros(batch_size, self.final_dim - hidden_dim, 
+            info_dim_proj = self.hidden_dim // 4  # info_proj의 출력 차원
+            info_proj = torch.zeros(batch_size, info_dim_proj, 
                                    device=context_vector.device, dtype=context_vector.dtype)
             context_vector = torch.cat([context_vector, info_proj], dim=-1)
         
