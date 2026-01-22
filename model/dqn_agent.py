@@ -40,7 +40,7 @@ class DDQNAgent:
         
         # Multi-step Learning 설정
         self.n_step = n_step
-        self.n_step_buffer = deque(maxlen=n_step)  # [추가] N-step 임시 저장소
+        self.n_step_buffer = deque()  # [수정] maxlen 제거 - 수동으로 popleft 관리
         
         # Epsilon-Greedy 파라미터
         self.epsilon = epsilon_start

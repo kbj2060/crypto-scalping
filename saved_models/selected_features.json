@@ -14,14 +14,8 @@
   "rsi_15m",
   "rvol",
   "chop",
-  "vwap_dist",
   "rsi",
-  "cvd_change",
-  "bb_pos",
-  "range_pos",
   "macd_hist",
-  "strat_williams_r",
-  "wick_upper",
-  "trend_15m",
-  "roll_return_6"
+  "bb_pos",
+  "trend_15m"
 ]

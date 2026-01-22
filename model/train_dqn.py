@@ -646,11 +646,18 @@ class DDQNTrainer:
         self.visualizer = None
     
     def _fit_global_scaler(self):
-        """전역 스케일러 학습 (기술적 지표만 학습!)"""
+        """전역 스케일러 학습 (기술적 지표만 학습!)
+        
+        [수정] 차원 불일치 및 데이터 누수 방지:
+        1. selected_features 순서 보장
+        2. 학습 구간만 사용 (전체 데이터 사용 금지)
+        3. 기술적 피처만 선택하여 fit
+        """
         try:
             logger.info("전역 스케일러 학습 시작 (전략 점수 제외)...")
             
-            # 기술적 지표 컬럼만 필터링 (MTF 피처 포함)
+            # [핵심 수정] selected_features 순서대로 기술적 지표만 필터링
+            # self.feature_columns는 이미 확정된 피처 리스트 (순서 보장)
             tech_cols = [f for f in self.feature_columns if not f.startswith('strat_')]
             
             # MTF 피처 확인
@@ -664,35 +671,51 @@ class DDQNTrainer:
                 logger.warning("기술적 지표가 없어 스케일러 학습을 건너뜁니다.")
                 return
             
-            # [수정 1] 시작 인덱스를 20 -> 100으로 변경 (초기 NaN/0 데이터 배제)
-            start_idx = 100
-            
-            # 데이터 길이 확인
+            # [데이터 누수 방지] 학습 구간만 사용 (전체 데이터의 80%만 사용)
+            start_idx = 100  # 초기 NaN/0 데이터 배제
             data_len = len(self.data_collector.eth_data)
+            train_split_idx = int(data_len * 0.8)  # 80%를 학습 구간으로 사용
+            
             if data_len <= start_idx:
                 logger.warning("데이터가 너무 적어 스케일러를 학습할 수 없습니다.")
                 return
             
-            # [속도 최적화] for문 없이 pandas 슬라이싱으로 한방에 해결
-            # 1. 기술적 지표 데이터 통째로 가져오기 (100번 이후)
-            tech_df = self.data_collector.eth_data.iloc[start_idx:][tech_cols]
+            # [수정] 학습 구간만 사용 (데이터 누수 방지)
+            train_data = self.data_collector.eth_data.iloc[start_idx:train_split_idx]
             
-            # 2. 샘플링 (너무 많으면 5만개만)
+            # 기술적 지표 데이터만 선택 (순서 보장)
+            tech_df = train_data[tech_cols].copy()
+            
+            # 누락된 컬럼 확인
+            missing_cols = [col for col in tech_cols if col not in tech_df.columns]
+            if missing_cols:
+                logger.warning(f"누락된 피처를 0으로 채웁니다: {missing_cols}")
+                for col in missing_cols:
+                    tech_df[col] = 0.0
+            
+            # 샘플링 (너무 많으면 5만개만)
             if len(tech_df) > 50000:
                 tech_df = tech_df.sample(n=50000, random_state=42)
             
-            # 3. Numpy 변환 및 0/Inf 처리
+            # Numpy 변환 및 0/Inf 처리
             tech_data = tech_df.values.astype(np.float32)
             tech_data = np.nan_to_num(tech_data, nan=0.0, posinf=0.0, neginf=0.0)
             
-            # 4. 학습
+            # [핵심] 스케일러 학습 (tech_cols 순서대로)
             self.env.preprocessor.fit(tech_data)
             self.env.scaler_fitted = True
             
-            # [추가] 학습 완료된 스케일러를 파일로 저장
+            # 스케일러에 사용된 피처 순서 저장 (trading_env.py에서 동일 순서 사용 보장)
+            self.env.scaler_feature_order = tech_cols
+            
+            # 학습 완료된 스케일러를 파일로 저장
             self.env.preprocessor.save_scaler('saved_models/scaler.pkl')
             
-            logger.info(f"✅ 스케일러 학습 및 저장 완료: {len(tech_data)}개 샘플 (Index {start_idx}부터 사용), {len(tech_cols)}개 기술적 피처 정규화 (전략 점수 {len(self.feature_columns) - len(tech_cols)}개 제외)")
+            logger.info(f"✅ 스케일러 학습 및 저장 완료:")
+            logger.info(f"   - 학습 구간: Index {start_idx} ~ {train_split_idx} (전체 {data_len}개 중 {train_split_idx - start_idx}개 사용)")
+            logger.info(f"   - 샘플 수: {len(tech_data)}개")
+            logger.info(f"   - 피처 수: {len(tech_cols)}개 기술적 피처 (순서 보장)")
+            logger.info(f"   - 전략 점수: {len(self.feature_columns) - len(tech_cols)}개 제외")
             
         except Exception as e:
             logger.error(f"스케일러 학습 실패: {e}", exc_info=True)

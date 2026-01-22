@@ -29,6 +29,7 @@ class TradingEnvironment:
         # 전처리 파이프라인 (Z-Score 정규화)
         self.preprocessor = DataPreprocessor()
         self.scaler_fitted = False  # 스케일러 학습 여부
+        self.scaler_feature_order = None  # 스케일러 학습 시 사용된 피처 순서 (차원 불일치 방지)
         
         # [추가] 최근 pnl_change 내역을 저장하여 변동성 계산 (최근 100스텝)
         self.pnl_change_history = deque(maxlen=100)
@@ -78,7 +79,24 @@ class TradingEnvironment:
                 
                 # 1. 기술적 지표 처리 (정규화 O)
                 if tech_cols:
-                    tech_data = feature_data[tech_cols].values.astype(np.float32)
+                    # [차원 불일치 방지] 스케일러 학습 시 사용한 순서대로 재배열
+                    if self.scaler_fitted and self.scaler_feature_order is not None:
+                        # 스케일러가 학습한 순서대로만 선택 (순서 보장)
+                        ordered_tech_cols = [f for f in self.scaler_feature_order if f in feature_data.columns]
+                        tech_data = feature_data[ordered_tech_cols].values.astype(np.float32)
+                        
+                        # 누락된 피처는 0으로 채움 (스케일러 차원과 일치)
+                        if len(ordered_tech_cols) < len(self.scaler_feature_order):
+                            missing_count = len(self.scaler_feature_order) - len(ordered_tech_cols)
+                            missing_data = np.zeros((tech_data.shape[0], missing_count), dtype=np.float32)
+                            tech_data = np.hstack([tech_data, missing_data])
+                        
+                        # tech_cols를 스케일러 순서로 업데이트 (다음 단계 인덱싱용)
+                        tech_cols = ordered_tech_cols + [f for f in self.scaler_feature_order if f not in ordered_tech_cols]
+                    else:
+                        # 스케일러 순서 정보가 없으면 기존 방식 사용
+                        tech_data = feature_data[tech_cols].values.astype(np.float32)
+                    
                     # NaN 체크 및 처리
                     if np.isnan(tech_data).any() or np.isinf(tech_data).any():
                         tech_data = np.nan_to_num(tech_data, nan=0.0, posinf=0.0, neginf=0.0)
@@ -86,7 +104,7 @@ class TradingEnvironment:
                     if not self.scaler_fitted:
                         logger.warning("스케일러가 fit되지 않았습니다. transform만 수행합니다.")
                     
-                    # 기술 지표만 정규화
+                    # 기술 지표만 정규화 (스케일러 학습 순서와 일치)
                     tech_data = self.preprocessor.transform(tech_data)
                 else:
                     tech_data = np.empty((seq_len, 0), dtype=np.float32)
@@ -237,8 +255,8 @@ class TradingEnvironment:
                 reward += realized_pnl * 120.0  # 150 → 120로 완화
                 reward -= 0.3                   # 벌점 (0.5 → 0.3)
 
-        # 3. reward clamp 제거 → 대신 soft normalization
-        reward = np.tanh(reward)
+        # 3. reward clamp (tanh 대신 넓은 범위로 클리핑하여 큰 수익과 작은 수익 구분)
+        reward = np.clip(reward, -10, 10)
 
         return reward
 

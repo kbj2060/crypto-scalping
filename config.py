@@ -32,7 +32,10 @@ STRATEGIES = {
     'vwap_deviation': True,
     'range_top_bottom': True,
     'stoch_rsi_mean_reversion': True,
-    'cmf_divergence': True
+    'cmf_divergence': True,
+    # 신규 추가 전략
+    'cci_reversal': True,
+    'williams_r': True
 }
 
 # 시간프레임 설정
@@ -48,16 +51,39 @@ AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로 (PPO)
 DDQN_MODEL_PATH = 'saved_models/ddqn_model.pth'  # DDQN 모델 저장 경로
 SELECTED_FEATURES_PATH = 'model/selected_features.json'  # 호환성 유지용
 
-# 1. 기술적 지표 피처 (17개)
+# 1. 기술적 지표 피처 (FeatureEngineer 기반 - 25개 기본 + 4개 MTF)
 TECHNICAL_FEATURES = [
-    'log_return', 'log_volume',         # PPO 기본 (2)
-    'high_ratio', 'low_ratio',          # 캔들 모양/꼬리 (2)
-    'taker_ratio',                      # 수급 (1)
-    'rsi', 'macd_hist',                 # 모멘텀 (2)
-    'bb_width', 'bb_position',          # 변동성/위치 (2)
-    'stoch_rsi', 'mfi', 'cmf',          # 오실레이터/자금 (3)
-    'hma_ratio', 'vwap_dist', 'atr_ratio', # 이격도 (3)
-    'adx', 'chop'                       # 추세/횡보 판별 (2) - 신규 추가
+    # 가격 & 변동성 (9개)
+    'log_return', 'roll_return_6',      # 수익률 (1봉, 6봉)
+    'atr_ratio',                        # 변동성 확장 비율
+    'bb_width', 'bb_pos',               # 볼린저 밴드 (너비, 위치)
+    'rsi', 'macd_hist',                  # 모멘텀 지표
+    'hma_ratio',                        # 추세 괴리율
+    'cci',                              # 고빈도 스캘핑용 CCI
+    
+    # 거래량 & 오더플로우 (6개)
+    'rvol',                             # 상대 거래량 (평소 대비)
+    'taker_ratio',                      # 공격적 매수세
+    'cvd_change',                       # 순매수 거래량 변화 (세력 흔적) 🔥
+    'mfi', 'cmf',                       # 자금 흐름 지표
+    'vwap_dist',                        # VWAP 이격도
+    
+    # 패턴 & 유동성 (5개)
+    'wick_upper', 'wick_lower',         # 캔들 꼬리 (윗꼬리, 아랫꼬리)
+    'range_pos',                        # 박스권 위치 (0=바닥, 1=천장)
+    'swing_break',                      # 구조물 돌파 (1, 0, -1)
+    'chop',                             # 추세 vs 횡보 판별
+    
+    # BTC 커플링 데이터 (5개)
+    'btc_return',                      # 비트코인 수익률
+    'btc_rsi',                          # 비트코인 과열도
+    'btc_corr',                         # BTC-ETH 상관계수 🔥
+    'btc_vol',                          # 비트코인 변동성
+    'eth_btc_ratio',                    # ETH/BTC 비율 (알트장 여부)
+    
+    # 멀티 타임프레임 (MTF) (4개)
+    'trend_1h', 'rsi_1h',               # 1시간봉 추세/RSI
+    'trend_15m', 'rsi_15m'              # 15분봉 추세/RSI
 ]
 
 # 2. 전략 기반 피처 (12개) - CCI Reversal, Williams %R 추가
@@ -84,7 +110,7 @@ LOOKBACK_WINDOW = 60  # 3분봉 * 60 = 180분 (3시간)
 
 # [신규] 피처 선택 설정
 USE_XGBOOST_SELECTION = True  # 활성화 여부
-TOP_K_FEATURES = 25            # 선택할 피처 개수 (DDQN 입력 차원)
+TOP_K_FEATURES = 20            # 선택할 피처 개수 (DDQN 입력 차원)
 
 # [신규] Prioritized Experience Replay (PER) 설정
 USE_PER = True  # PER 사용 여부 (True: 우선순위 기반 샘플링, False: 일반 랜덤 샘플링)
@@ -101,7 +127,7 @@ DDQN_CONFIG = {
     'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
     'learning_rate': 0.00005,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
     'gamma': 0.99,  # 미래 보상 할인율
-    'buffer_size': 100000,  # 리플레이 버퍼 크기
+    'buffer_size': 50000,  # 리플레이 버퍼 크기
     'epsilon_start': 0.0,  # 초기 탐험 확률
     'epsilon_end': 0.00,  # 최소 탐험 확률
     'epsilon_decay': 0.0,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
