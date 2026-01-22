@@ -45,7 +45,7 @@ ENABLE_TRADING = False  # True: 거래 실행, False: 분석만 수행 (거래 �
 # AI 강화학습 설정
 ENABLE_AI = True  # True: AI 기반 결정, False: 기존 전략 조합 방식
 AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로 (PPO)
-DDQN_MODEL_PATH = 'model/ddqn_model.pth'  # DDQN 모델 저장 경로
+DDQN_MODEL_PATH = 'saved_models/ddqn_model.pth'  # DDQN 모델 저장 경로
 SELECTED_FEATURES_PATH = 'model/selected_features.json'  # 호환성 유지용
 
 # 1. 기술적 지표 피처 (17개)
@@ -91,7 +91,7 @@ DDQN_CONFIG = {
     'num_layers': 2,  # GRU 레이어 수
     'action_dim': 3,  # 행동 개수 (0: Hold, 1: Long, 2: Short)
     'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
-    'learning_rate': 0.0001,  # 학습률 (1e-4)
+    'learning_rate': 0.00005,  # 학습률 (5e-5, 안정적인 장기 학습을 위해 절반으로 감소)
     'gamma': 0.99,  # 미래 보상 할인율
     'buffer_size': 50000,  # 리플레이 버퍼 크기
     'epsilon_start': 1.0,  # 초기 탐험 확률
