@@ -100,10 +100,14 @@ class ModelEvaluator:
             selected_features=self.feature_columns
         )
         
-        # 스케일러 로드
+        # 스케일러 로드 (피처 이름 포함)
         scaler_path = 'saved_models/scaler.pkl'
-        if self.env.preprocessor.load_scaler(scaler_path):
+        success, feature_names = self.env.preprocessor.load_scaler(scaler_path)
+        if success:
             self.env.scaler_fitted = True
+            # 피처 이름이 있으면 scaler_feature_order에 저장
+            if feature_names is not None:
+                self.env.scaler_feature_order = feature_names
             logger.info("✅ 스케일러 로드 완료")
         else:
             logger.warning("⚠️ 스케일러 파일이 없습니다. 결과가 부정확할 수 있습니다.")

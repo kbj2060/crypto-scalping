@@ -135,10 +135,14 @@ class TradingBot:
                 selected_features=self.selected_features
             )
             
-            # 3. 학습된 스케일러 로드
+            # 3. 학습된 스케일러 로드 (피처 이름 포함)
             scaler_path = 'saved_models/scaler.pkl'
-            if self.env.preprocessor.load_scaler(scaler_path):
+            success, feature_names = self.env.preprocessor.load_scaler(scaler_path)
+            if success:
                 self.env.scaler_fitted = True
+                # 피처 이름이 있으면 scaler_feature_order에 저장
+                if feature_names is not None:
+                    self.env.scaler_feature_order = feature_names
                 logger.info(f"✅ 스케일러 로드 완료: {scaler_path}")
             else:
                 logger.error(f"❌ 스케일러 파일({scaler_path})이 없습니다.")
@@ -159,7 +163,8 @@ class TradingBot:
                 epsilon_start=0.0,  # 실전에서는 탐험 없음
                 epsilon_end=0.0,
                 use_per=config.USE_PER,
-                n_step=config.N_STEP
+                n_step=config.N_STEP,
+                info_dim=3  # 포지션 정보 차원
             )
             
             # 5. 모델 가중치 로드 (최고 성능 모델 사용)

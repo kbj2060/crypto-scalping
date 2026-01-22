@@ -72,10 +72,11 @@ class AttentionPooling(nn.Module):
         return context
 
 class DuelingGRU(nn.Module):
-    def __init__(self, input_dim, hidden_dim=128, num_layers=2, action_dim=3, noisy=True):
+    def __init__(self, input_dim, hidden_dim=128, num_layers=2, action_dim=3, info_dim=3, noisy=True):
         super(DuelingGRU, self).__init__()
         
         self.noisy = noisy
+        self.info_dim = info_dim
         
         # [신규] 0. 입력 투영 레이어 (Residual Connection을 위해 차원 맞추기)
         # input_dim(예:15) -> hidden_dim(예:128)으로 늘려줌
@@ -100,18 +101,26 @@ class DuelingGRU(nn.Module):
         self.attention = AttentionPooling(hidden_dim)
         self.ln2 = nn.LayerNorm(hidden_dim)
         
+        # [추가] Info 통합 레이어 (포지션 정보 처리)
+        self.info_proj = nn.Sequential(
+            nn.Linear(info_dim, hidden_dim // 4),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim // 4)
+        )
+        self.final_dim = hidden_dim + hidden_dim // 4
+        
         # 3. Dueling Heads (NoisyLinear 사용)
         LinearLayer = NoisyLinear if noisy else nn.Linear
         
         self.value_stream = nn.Sequential(
-            LinearLayer(hidden_dim, 128),
+            LinearLayer(self.final_dim, 128),
             nn.GELU(),
             nn.Dropout(0.1),
             LinearLayer(128, 1)
         )
         
         self.advantage_stream = nn.Sequential(
-            LinearLayer(hidden_dim, 128),
+            LinearLayer(self.final_dim, 128),
             nn.GELU(),
             nn.Dropout(0.1),
             LinearLayer(128, action_dim)
@@ -131,7 +140,14 @@ class DuelingGRU(nn.Module):
                 elif 'bias' in name:
                     nn.init.constant_(param.data, 0)
 
-    def forward(self, x):
+    def forward(self, x, info=None):
+        """
+        Args:
+            x: (batch, seq, input_dim) 시계열 피처
+            info: (batch, info_dim) 포지션 정보 [pos_val, pnl_val, hold_val]
+        Returns:
+            q_values: (batch, action_dim) Q값
+        """
         # 1. 입력 투영 (Residual 용)
         # x: (batch, seq, input) -> x_proj: (batch, seq, hidden)
         x_proj = self.input_proj(x)
@@ -149,6 +165,18 @@ class DuelingGRU(nn.Module):
         # 5. 어텐션 & 헤드
         context_vector = self.attention(gru_out)
         context_vector = self.ln2(context_vector)
+        
+        # [추가] 6. Info 통합 (포지션 정보)
+        if info is not None:
+            # info: (batch, info_dim) -> (batch, hidden_dim // 4)
+            info_proj = self.info_proj(info)
+            context_vector = torch.cat([context_vector, info_proj], dim=-1)
+        else:
+            # Info가 없으면 0으로 채움 (하위 호환성)
+            batch_size = context_vector.size(0)
+            info_proj = torch.zeros(batch_size, self.final_dim - hidden_dim, 
+                                   device=context_vector.device, dtype=context_vector.dtype)
+            context_vector = torch.cat([context_vector, info_proj], dim=-1)
         
         value = self.value_stream(context_vector)
         advantage = self.advantage_stream(context_vector)

@@ -22,7 +22,7 @@ class DDQNAgent:
     def __init__(self, input_dim, hidden_dim=64, num_layers=2, action_dim=3,
                  lr=0.0001, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01,
                  epsilon_decay=0.995, buffer_size=50000, batch_size=64,
-                 target_update=1000, device='cpu', use_per=False, n_step=3):
+                 target_update=1000, device='cpu', use_per=False, n_step=3, info_dim=3):
         
         self.device = device
         self.action_dim = action_dim
@@ -43,14 +43,31 @@ class DDQNAgent:
         self.epsilon_min = epsilon_end
         self.epsilon_decay = epsilon_decay
         
-        # 네트워크 2개 운영
-        self.policy_net = DuelingGRU(input_dim, hidden_dim, num_layers, action_dim).to(device)
-        self.target_net = DuelingGRU(input_dim, hidden_dim, num_layers, action_dim).to(device)
+        # 네트워크 2개 운영 (info_dim 추가)
+        self.policy_net = DuelingGRU(input_dim, hidden_dim, num_layers, action_dim, info_dim=info_dim).to(device)
+        self.target_net = DuelingGRU(input_dim, hidden_dim, num_layers, action_dim, info_dim=info_dim).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         
         # Optimizer
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        
+        # [최적화] Learning Rate Scheduler (Cosine Annealing)
+        # config가 없으면 기본값 사용
+        if config is not None:
+            ddqn_config = getattr(config, 'DDQN_CONFIG', {})
+            self.use_lr_scheduler = ddqn_config.get('use_lr_scheduler', False)
+            self.grad_clip = ddqn_config.get('grad_clip', 1.0)
+        else:
+            self.use_lr_scheduler = False
+            self.grad_clip = 1.0
+        
+        if self.use_lr_scheduler:
+            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=100000, eta_min=lr * 0.01
+            )
+        else:
+            self.scheduler = None
         
         # Experience Replay Buffer
         self.use_per = use_per
@@ -70,7 +87,8 @@ class DDQNAgent:
                 obs_seq, obs_info = state
                 obs_seq = obs_seq.to(self.device)
                 obs_info = obs_info.to(self.device)
-                q_values = self.policy_net(obs_seq)
+                # [수정] obs_info도 모델에 전달
+                q_values = self.policy_net(obs_seq, info=obs_info)
             else:
                 q_values = self.policy_net(state.to(self.device))
             
@@ -79,23 +97,15 @@ class DDQNAgent:
         return action
     
     def remember(self, state, action, reward, next_state, done):
-        """[수정 2] 데이터 유실 없는 N-step 저장 로직 (Flush 적용)"""
+        """[수정] 데이터 유실 없는 N-step 저장 로직 (완전 flush)"""
         self.n_step_buffer.append((state, action, reward, next_state, done))
         
-        # 버퍼가 찰 때까지 대기 (단, done이면 바로 처리 시작)
-        if len(self.n_step_buffer) < self.n_step:
-            if not done:
-                return
-        
-        # 버퍼 비우기 루프 (N-step 처리가 끝날 때까지)
-        while self.n_step_buffer:
-            # 버퍼에 남은 데이터가 1개 이상이면 처리
-            if len(self.n_step_buffer) < self.n_step and not done:
-                break # done이 아니면 N개 찰 때까지 대기
-            
-            # N-step 보상 계산
+        # Flush 로직: N개가 차거나 done이면 처리
+        while len(self.n_step_buffer) >= self.n_step or (done and len(self.n_step_buffer) > 0):
             # 실제 남은 길이만큼만 계산 (마지막엔 1-step, 2-step 등 줄어듦)
             current_n = min(self.n_step, len(self.n_step_buffer))
+            
+            # N-step 보상 계산
             reward_n = 0
             for i in range(current_n):
                 reward_n += self.n_step_buffer[i][2] * (self.gamma ** i)
@@ -113,7 +123,7 @@ class DDQNAgent:
             if not done:
                 break
                 
-        # 에피소드 종료 시 버퍼 완전 초기화 (혹시 남아있을 경우)
+        # 에피소드 종료 시 버퍼 완전 초기화
         if done:
             self.n_step_buffer.clear()
 
@@ -146,13 +156,14 @@ class DDQNAgent:
         next_states_info = next_states_info.to(self.device)
         dones = dones.to(self.device)
         
-        current_q_values = self.policy_net(states_seq)
+        # [수정] obs_info도 모델에 전달
+        current_q_values = self.policy_net(states_seq, info=states_info)
         current_q = current_q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
         
         with torch.no_grad():
-            next_q_values_policy = self.policy_net(next_states_seq)
+            next_q_values_policy = self.policy_net(next_states_seq, info=next_states_info)
             next_actions = next_q_values_policy.argmax(dim=1)
-            next_q_values_target = self.target_net(next_states_seq)
+            next_q_values_target = self.target_net(next_states_seq, info=next_states_info)
             next_q = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
             
             gamma_n = self.gamma ** self.n_step
@@ -166,8 +177,13 @@ class DDQNAgent:
         
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        # [최적화] 그래디언트 클리핑 (1.0 -> 0.5)
+        nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.grad_clip)
         self.optimizer.step()
+        
+        # [최적화] Learning Rate 스케줄링
+        if self.scheduler is not None:
+            self.scheduler.step()
         
         if self.use_per and idxs is not None:
             td_errors = loss_element_wise.detach().cpu().numpy()

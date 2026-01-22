@@ -16,6 +16,7 @@ import time
 from core.data_collector import DataCollector
 from core.indicators import Indicators
 from model.dqn_agent import DDQNAgent
+from model.dqn_model import DuelingGRU
 from model.trading_env import TradingEnvironment
 from model.feature_selection import FeatureSelector
 from model.mtf_processor import MTFProcessor
@@ -631,7 +632,8 @@ class DDQNTrainer:
             target_update=ddqn_config['target_update'],
             device=device,
             use_per=config.USE_PER,  # PER 사용 여부
-            n_step=config.N_STEP  # N-step Learning 스텝 수
+            n_step=config.N_STEP,  # N-step Learning 스텝 수
+            info_dim=3  # 포지션 정보 차원
         )
         
         self.episode_rewards = []
@@ -708,8 +710,8 @@ class DDQNTrainer:
             # 스케일러에 사용된 피처 순서 저장 (trading_env.py에서 동일 순서 사용 보장)
             self.env.scaler_feature_order = tech_cols
             
-            # 학습 완료된 스케일러를 파일로 저장
-            self.env.preprocessor.save_scaler('saved_models/scaler.pkl')
+            # 학습 완료된 스케일러를 파일로 저장 (피처 이름 포함)
+            self.env.preprocessor.save_scaler('saved_models/scaler.pkl', feature_names=tech_cols)
             
             logger.info(f"✅ 스케일러 학습 및 저장 완료:")
             logger.info(f"   - 학습 구간: Index {start_idx} ~ {train_split_idx} (전체 {data_len}개 중 {train_split_idx - start_idx}개 사용)")
@@ -722,8 +724,9 @@ class DDQNTrainer:
 
     def train_episode(self, episode_num, max_steps=1000):
         """한 에피소드 학습"""
-        # [수정] 에피소드 시작 시 노이즈 리셋 제거 (스텝 내부로 이동)
-        # if hasattr(self.agent, 'reset_noise'): self.agent.reset_noise()
+        # [수정] 에피소드 시작 시 한 번만 노이즈 리셋 (성능 최적화)
+        if hasattr(self.agent, 'reset_noise'):
+            self.agent.reset_noise()
         
         episode_reward = 0.0
         steps = 0
@@ -748,9 +751,7 @@ class DDQNTrainer:
         
         for step in range(actual_steps):
             try:
-                # [수정] 매 스텝마다 노이즈 리셋 (NoisyNet의 올바른 사용법)
-                if hasattr(self.agent, 'reset_noise'):
-                    self.agent.reset_noise()
+                # [수정] 매 스텝마다 노이즈 리셋 제거 (에피소드 시작 시만)
                 
                 # 1. 인덱스 증가
                 self.data_collector.current_index += 1

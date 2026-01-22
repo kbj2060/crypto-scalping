@@ -118,18 +118,20 @@ USE_PER = True  # PER 사용 여부 (True: 우선순위 기반 샘플링, False:
 # [신규] N-step Learning 설정
 N_STEP = 3  # Multi-step Learning의 스텝 수 (기본 3, 1~5 권장)
 
-# 3. DDQN 하이퍼파라미터
+# 3. DDQN 하이퍼파라미터 (성능 최적화 적용)
 DDQN_CONFIG = {
     'input_dim': len(FEATURE_COLUMNS),  # 17 + 10 = 27개 (자동 계산)
     'hidden_dim': 128,  # GRU 및 FC 레이어 노드 수 (입력 증가에 따라 64 -> 128)
     'num_layers': 2,  # GRU 레이어 수
     'action_dim': 3,  # 행동 개수 (0: Hold, 1: Long, 2: Short)
-    'batch_size': 64,  # 한 번 학습 시 사용할 샘플 수
-    'learning_rate': 0.0001,  # 학습률 (5e-5) - 안정적인 장기 학습을 위해 절반으로 낮춤
+    'batch_size': 128,  # [최적화] 한 번 학습 시 사용할 샘플 수 (64 -> 128)
+    'learning_rate': 0.0001,  # 학습률 (Cosine Annealing 적용 예정)
     'gamma': 0.99,  # 미래 보상 할인율
     'buffer_size': 50000,  # 리플레이 버퍼 크기
     'epsilon_start': 0.0,  # 초기 탐험 확률
     'epsilon_end': 0.00,  # 최소 탐험 확률
     'epsilon_decay': 0.0,  # 탐험 감소 비율 (매우 천천히 감소하여 탐험 기간 연장)
-    'target_update': 1000,  # 타겟 네트워크 동기화 주기 (스텝)
+    'target_update': 500,  # [최적화] 타겟 네트워크 동기화 주기 (1000 -> 500)
+    'grad_clip': 0.5,  # [최적화] 그래디언트 클리핑 값 (1.0 -> 0.5)
+    'use_lr_scheduler': True,  # [최적화] Learning Rate 스케줄링 사용 여부
 }
