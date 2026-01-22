@@ -539,6 +539,20 @@ class DDQNTrainer:
                 self.feature_columns.append(f)
                 logger.info(f"✅ 필수 지표 강제 포함: {f}")
         # ---------------------------------------------------------------------
+        
+        # ---------------------------------------------------------------------
+        # [추가] 확정된 피처 리스트를 JSON 파일로 저장
+        # ---------------------------------------------------------------------
+        import json
+        save_path = 'saved_models/selected_features.json'
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        try:
+            with open(save_path, 'w') as f:
+                json.dump(self.feature_columns, f, indent=2)
+            logger.info(f"💾 피처 목록 저장 완료: {save_path} (총 {len(self.feature_columns)}개)")
+        except Exception as e:
+            logger.error(f"피처 목록 저장 실패: {e}")
+        # ---------------------------------------------------------------------
                 
         logger.info(f"✅ 최종 입력 피처 ({len(self.feature_columns)}개): {self.feature_columns}")
         
@@ -799,7 +813,14 @@ class DDQNTrainer:
                         best_model_path = 'saved_models/best_ddqn_model.pth'
                         os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
                         self.agent.save_model(best_model_path)
+                        
+                        # [추가] 선택된 피처도 함께 저장
+                        import json
+                        features_path = 'saved_models/selected_features.json'
+                        with open(features_path, 'w') as f:
+                            json.dump(self.feature_columns, f, indent=2)
                         logger.info(f"🏆 최고 기록 갱신! best_ddqn_model.pth 저장 (Reward: {rw:.2f})")
+                        logger.info(f"📋 선택된 피처 저장: {features_path}")
                     
                     # 주기적 저장
                     if episode % save_interval == 0:

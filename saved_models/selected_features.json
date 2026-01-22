@@ -1,0 +1,15 @@
+[
+  "atr_ratio",
+  "cmf",
+  "strat_vwap",
+  "bb_position",
+  "rsi_1h",
+  "rsi_15m",
+  "strat_hma",
+  "rsi",
+  "macd_hist",
+  "adx",
+  "chop",
+  "trend_15m",
+  "trend_1h"
+]
