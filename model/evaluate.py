@@ -47,17 +47,25 @@ def evaluate(episodes=10):
         logger.error(f"트레이너 초기화 실패: {e}", exc_info=True)
         return
 
-    # 2. 학습된 모델 가중치 로드
+    # 2. 학습된 모델 가중치 로드 (Best Model 우선 사용)
+    best_model_path = 'saved_models/best_ddqn_model.pth'
     model_path = config.DDQN_MODEL_PATH
-    if os.path.exists(model_path):
-        try:
-            trainer.agent.load_model(model_path)
-            logger.info(f"💾 모델 로드 완료: {model_path}")
-        except Exception as e:
-            logger.error(f"모델 로드 실패: {e}", exc_info=True)
-            return
+    
+    # Best 모델이 있으면 우선 사용, 없으면 일반 모델 사용
+    if os.path.exists(best_model_path):
+        model_path = best_model_path
+        logger.info(f"🏆 Best 모델 발견: {best_model_path}")
+    elif os.path.exists(model_path):
+        logger.info(f"💾 일반 모델 사용: {model_path}")
     else:
-        logger.error(f"❌ 학습된 모델 파일이 없습니다: {model_path}")
+        logger.error(f"❌ 학습된 모델 파일이 없습니다. (Best: {best_model_path}, 일반: {model_path})")
+        return
+    
+    try:
+        trainer.agent.load_model(model_path)
+        logger.info(f"✅ 모델 로드 완료: {model_path}")
+    except Exception as e:
+        logger.error(f"모델 로드 실패: {e}", exc_info=True)
         return
 
     # 3. [핵심] 탐험(Epsilon)을 강제로 0으로 설정
