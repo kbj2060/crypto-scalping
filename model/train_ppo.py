@@ -527,9 +527,9 @@ if __name__ == '__main__':
     import argparse
     
     parser = argparse.ArgumentParser(description='PPO 모델 학습')
-    parser.add_argument('--episodes', type=int, default=100, help='학습 에피소드 수')
-    parser.add_argument('--steps', type=int, default=1000, help='에피소드당 최대 스텝 수 (기본값: 1000, 큰 추세 학습용)')
-    parser.add_argument('--save-interval', type=int, default=10, help='모델 저장 간격 (에피소드)')
+    parser.add_argument('--episodes', type=int, default=1000, help='학습 에피소드 수')
+    parser.add_argument('--steps', type=int, default=480, help='에피소드당 최대 스텝 수 (기본값: 1000, 큰 추세 학습용)')
+    parser.add_argument('--save-interval', type=int, default=50, help='모델 저장 간격 (에피소드)')
     parser.add_argument('--no-visualize', action='store_true', help='시각화 비활성화')
     
     args = parser.parse_args()
