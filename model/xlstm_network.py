@@ -1,5 +1,6 @@
 """
-xLSTM 기반 신경망 구조
+xLSTM 기반 신경망 구조 (PPO 최적화)
+[Clean Ver] GELU + LayerNorm + Late Fusion (NoisyNet 제거)
 sLSTM(scalar LSTM) 구조를 사용하여 지수 게이팅(Exponential Gating)과 정규화(Normalization) 구현
 Multi-Head Attention과 심층화된 Actor-Critic 적용
 """
@@ -27,14 +28,13 @@ class MultiHeadAttention(nn.Module):
 
 
 class sLSTMCell(nn.Module):
-    """sLSTM Cell: Exponential Gating을 통한 메모리 강화"""
+    """sLSTM Cell (안정화 버전): Exponential Gating을 통한 메모리 강화"""
     def __init__(self, input_dim, hidden_dim):
         super().__init__()
         self.hidden_dim = hidden_dim
         # Gates: i(input), f(forget), o(output), z(cell input)
         self.weight = nn.Linear(input_dim + hidden_dim, 4 * hidden_dim)
         
-    # xlstm_network.py의 sLSTMCell 수정
     def forward(self, x, h, c, n, f_prev=None):
         combined = torch.cat([x, h], dim=-1)
         gates = self.weight(combined)
@@ -67,34 +67,42 @@ class sLSTMCell(nn.Module):
 
 
 class xLSTMActorCritic(nn.Module):
-    """개선된 xLSTM: Attention과 Deep Actor-Critic 적용 + Late Fusion"""
+    """
+    PPO용 xLSTM Actor-Critic
+    NoisyNet 제거 -> 일반 Linear 사용
+    GELU & LayerNorm 유지 -> 학습 안정성 확보
+    """
     def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.info_dim = info_dim
-        self.xlstm_cell = sLSTMCell(input_dim, hidden_dim)
         
-        # [로드맵 1] 시퀀스 전체 정보를 읽는 눈 추가
+        # 1. Feature Extractor
+        self.xlstm_cell = sLSTMCell(input_dim, hidden_dim)
         self.attention = MultiHeadAttention(hidden_dim, heads=4)
         
         # Late Fusion: 시퀀스 정보(hidden_dim) + 포지션 정보(info_dim) 결합
         combined_dim = hidden_dim + info_dim  # 128 + 13 = 141
         
-        # [로드맵 3] 심층화된 Actor: LayerNorm으로 수치 안정성 확보
-        self.actor = nn.Sequential(
+        # 2. Actor Head (정책) - 깔끔한 MLP 구조
+        self.actor_fc = nn.Sequential(
             nn.Linear(combined_dim, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(),
-            nn.Linear(128, action_dim),
+            nn.LayerNorm(128),  # 입력 정규화
+            nn.GELU(),          # 비선형성 강화
+            nn.Linear(128, 64),
+            nn.GELU(),
+            nn.Linear(64, action_dim),
             nn.Softmax(dim=-1)
         )
         
-        # [로드맵 3] 심층화된 Critic: 가치 평가의 정밀도 향상
-        self.critic = nn.Sequential(
+        # 3. Critic Head (가치)
+        self.critic_fc = nn.Sequential(
             nn.Linear(combined_dim, 128),
             nn.LayerNorm(128),
-            nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.GELU(),
+            nn.Linear(128, 64),
+            nn.GELU(),
+            nn.Linear(64, 1)
         )
 
     def forward(self, x, info=None, states=None):
@@ -135,7 +143,7 @@ class xLSTMActorCritic(nn.Module):
         combined = torch.cat([context, info], dim=-1)
         
         # 강화된 Actor/Critic 출력
-        action_probs = self.actor(combined)
-        value = self.critic(combined)
+        action_probs = self.actor_fc(combined)
+        value = self.critic_fc(combined)
         
         return action_probs, value

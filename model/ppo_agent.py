@@ -1,12 +1,14 @@
 """
-PPO (Proximal Policy Optimization) 에이전트
-클리핑과 GAE(Generalized Advantage Estimation) 구현
+PPO 에이전트 (Final Ver)
+ReduceLROnPlateau + 엔트로피 탐험 + 안정적 파라미터
+NoisyNet 제거 -> 엔트로피로 탐험 조절
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from .xlstm_network import xLSTMActorCritic
 
 
@@ -14,18 +16,26 @@ class PPOAgent:
     """PPO 알고리즘 기반 강화학습 에이전트"""
     def __init__(self, state_dim, action_dim, hidden_dim=128, device='cpu', info_dim=13):
         self.device = device
-        self.gamma = 0.999  # 할인율 (인내심 강화: 미래 보상에 더 높은 가치 부여)
-        self.lmbda = 0.95  # GAE 파라미터
-        self.eps_clip = 0.2  # PPO 클리핑 범위
-        self.k_epochs = 10  # 업데이트 반복 횟수
         
-        # 신경망 모델 (Late Fusion 구조)
+        # 하이퍼파라미터
+        self.gamma = 0.99
+        self.lmbda = 0.95
+        self.eps_clip = 0.2
+        self.k_epochs = 10
+        
+        # [중요] NoisyNet 대신 엔트로피로 탐험 조절
+        # 0.05(초반 탐험) -> 학습 진행 시 0.01(수렴)로 자동 감소
+        self.entropy_coef = 0.05
+        
+        # 모델 생성 (Noisy 옵션 제거)
         self.model = xLSTMActorCritic(state_dim, action_dim, info_dim=info_dim, hidden_dim=hidden_dim).to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.0003)
         
-        # [추가] 학습률 스케줄러: 200번의 업데이트마다 학습률을 절반으로 감소
-        self.scheduler = optim.lr_scheduler.StepLR(
-            self.optimizer, step_size=200, gamma=0.5
+        # 학습률 0.0001 (LayerNorm과 궁합이 좋음)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.0001)
+        
+        # 스케줄러: 보상이 정체되면 학습률을 줄여서 미세 조정
+        self.scheduler = ReduceLROnPlateau(
+            self.optimizer, mode='max', factor=0.5, patience=200, verbose=True, min_lr=1e-6
         )
         
         self.memory = []  # (state, action, log_prob, reward, is_terminal)
@@ -93,9 +103,11 @@ class PPOAgent:
         Args:
             next_state: 다음 상태 텐서 (부트스트랩 가치 계산용, None이면 0 사용)
             episode: 현재 에피소드 번호 (엔트로피 스케줄러용)
+        Returns:
+            평균 loss 값
         """
         if len(self.memory) == 0:
-            return
+            return 0.0
         
         # 1. 메모리에서 데이터 추출 (Late Fusion 구조: (obs_seq, obs_info) 튜플)
         states_seq = torch.cat([m[0][0] for m in self.memory], dim=0).to(self.device)
@@ -120,51 +132,56 @@ class PPOAgent:
             _, values = self.model(states_seq, info=states_info)
             values = values.squeeze().cpu().numpy().tolist()
         
-        # 4. GAE 계산 시 추출한 next_value 전달
-        advantages, returns = self.compute_gae(rewards, values, is_terminals, next_value=next_value)
-        advantages = advantages.to(self.device)
-        returns = returns.to(self.device)
+        # 4. GAE 계산
+        advantages = []
+        gae = 0
+        for step in reversed(range(len(rewards))):
+            if is_terminals[step]:
+                delta = rewards[step] - values[step]
+                gae = delta
+            else:
+                nv = values[step + 1] if step + 1 < len(values) else next_value
+                delta = rewards[step] + self.gamma * nv - values[step]
+                gae = delta + self.gamma * self.lmbda * gae
+            advantages.insert(0, gae)
 
+        advantages = torch.tensor(advantages, dtype=torch.float).to(self.device)
+        returns = advantages + torch.tensor(values, dtype=torch.float).to(self.device)
+        
+        # Advantage 정규화
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
         # PPO 업데이트 (k_epochs 반복)
+        total_loss = 0
         for _ in range(self.k_epochs):
-            probs, values = self.model(states_seq, info=states_info)
-            
+            probs, curr_values = self.model(states_seq, info=states_info)
             dist = Categorical(probs)
-            log_probs = dist.log_prob(actions.squeeze()).unsqueeze(1)
+            curr_log_probs = dist.log_prob(actions.squeeze()).unsqueeze(1)
             entropy = dist.entropy().mean()
             
-            # PPO Ratio & Clipped Objective
-            ratio = torch.exp(log_probs - old_log_probs)
-            advantages_normalized = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            ratio = torch.exp(curr_log_probs - old_log_probs)
             
-            surr1 = ratio * advantages_normalized
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages_normalized
+            surr1 = ratio * advantages.unsqueeze(1)
+            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages.unsqueeze(1)
             
-            # [핵심] 엔트로피 스케줄러 적용
-            # 초기 0.05에서 시작하여 서서히 0.01로 수렴 (인내심 강화)
-            # 에피소드가 진행될수록 탐험을 줄이고 수렴을 강화
-            entropy_coef = max(0.01, 0.05 * (0.998 ** episode))
-            entropy_bonus = entropy_coef * entropy
-            
-            # Loss Function 계산
             actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.mse_loss(values, returns)
+            critic_loss = F.mse_loss(curr_values.squeeze(), returns)
             
-            # Softmax의 조기 수렴을 방지하기 위해 가변적인 entropy_bonus 사용
+            # 엔트로피 보너스 (탐험 유도 -> 수렴)
+            current_entropy_coef = max(0.01, self.entropy_coef * (0.995 ** episode))
+            entropy_bonus = current_entropy_coef * entropy
+            
             loss = actor_loss + 0.5 * critic_loss - entropy_bonus
             
-            # 역전파 및 최적화
             self.optimizer.zero_grad()
             loss.backward()
-            # xLSTM 안정화를 위한 그래디언트 클리핑
             nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
             self.optimizer.step()
-        
-        # 학습 중반 이후 세밀한 조정을 위한 스케줄러 업데이트
-        self.scheduler.step()
-        
-        # 메모리 초기화
+            
+            total_loss += loss.item()
+
         self.memory = []
+        return total_loss / self.k_epochs
 
     def save_model(self, filepath):
         """모델 저장"""
@@ -173,8 +190,16 @@ class PPOAgent:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, filepath)
 
+    def step_scheduler(self, metric):
+        """외부에서 호출하여 학습률 조절"""
+        self.scheduler.step(metric)
+
     def load_model(self, filepath):
         """모델 로드"""
         checkpoint = torch.load(filepath, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # reset_noise 메서드는 이제 필요 없으므로 빈 함수로 둠 (호출부 호환성)
+    def reset_noise(self):
+        pass
