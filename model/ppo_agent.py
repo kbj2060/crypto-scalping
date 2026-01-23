@@ -35,7 +35,7 @@ class PPOAgent:
         
         # 스케줄러: 보상이 정체되면 학습률을 줄여서 미세 조정
         self.scheduler = ReduceLROnPlateau(
-            self.optimizer, mode='max', factor=0.5, patience=200, verbose=True, min_lr=1e-6
+            self.optimizer, mode='max', factor=0.5, patience=200, min_lr=1e-6
         )
         
         self.memory = []  # (state, action, log_prob, reward, is_terminal)

@@ -18,8 +18,8 @@ class MFIMomentumStrategy:
     def __init__(self):
         self.name = "MFI Momentum"
         self.period = 14
-        self.upper_threshold = 80  # 과매수 진입 (강한 돌파)
-        self.lower_threshold = 20  # 과매도 진입 (강한 이탈)
+        self.upper_threshold = 65  # 과매수 진입 (완화: 80 -> 65)
+        self.lower_threshold = 35  # 과매도 진입 (완화: 20 -> 35)
     
     def calculate_mfi(self, data, period=14):
         """MFI (Money Flow Index) 계산"""
@@ -78,6 +78,7 @@ class MFIMomentumStrategy:
                 return None
             
             current_mfi = float(mfi.iloc[-1])
+            prev_mfi = float(mfi.iloc[-2]) if len(mfi) >= 2 else 50.0
             
             latest = eth_data.iloc[-1]
             entry_price = float(latest['close'])
@@ -93,6 +94,14 @@ class MFIMomentumStrategy:
             elif current_mfi < self.lower_threshold:
                 signal = 'SHORT'
                 logger.debug(f"🔍 [MFI Momentum] 숏 신호 발생 - MFI: {current_mfi:.2f}")
+            
+            # 중심선(50) 돌파 전략 추가
+            elif current_mfi > 50 and prev_mfi <= 50:
+                signal = 'LONG'
+                logger.debug(f"🔍 [MFI Momentum] 롱 신호 발생 (중심선 돌파) - MFI: {current_mfi:.2f}")
+            elif current_mfi < 50 and prev_mfi >= 50:
+                signal = 'SHORT'
+                logger.debug(f"🔍 [MFI Momentum] 숏 신호 발생 (중심선 이탈) - MFI: {current_mfi:.2f}")
             
             if signal:
                 return {

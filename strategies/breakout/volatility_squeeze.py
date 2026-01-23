@@ -19,9 +19,9 @@ class VolatilitySqueezeStrategy:
         self.bb_std_dev = 2.0
         self.keltner_period = 20
         self.keltner_multiplier = 1.5
-        self.bbw_squeeze = 0.15  # BBW < 0.15 → 스퀴즈 (공격적: 0.08 -> 0.15, 수축 정의 넓힘)
-        self.bbw_explosion = 0.002  # BBW > 0.002 (0.2%) → 폭발 (공격적: 0.007 -> 0.002, 거의 바닥)
-        self.volume_explosion = 1.0  # 거래량 1.0배 이상 (공격적: 1.1 -> 1.0, 평균만큼만 터져도 진입)
+        self.bbw_squeeze = 0.30  # BBW < 0.30 → 스퀴즈 (완화: 0.15 -> 0.30, 약간만 조용해도 스퀴즈)
+        self.bbw_explosion = 0.002  # BBW > 0.002 (0.2%) → 폭발
+        self.volume_explosion = 0.8  # 거래량 0.8배 이상 (완화: 1.0 -> 0.8, 평소보다 조금만 줄어도 폭발 준비)
     
     def analyze(self, data_collector):
         """볼륨 스퀴즈 전략 분석 (최적 세팅)"""

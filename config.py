@@ -44,4 +44,4 @@ ENABLE_TRADING = False  # True: 거래 실행, False: 분석만 수행 (거래 �
 
 # AI 강화학습 설정
 ENABLE_AI = True  # True: AI 기반 결정, False: 기존 전략 조합 방식
-AI_MODEL_PATH = 'model/ppo_model.pth'  # AI 모델 저장 경로
+AI_MODEL_PATH = 'data/ppo_model.pth'  # AI 모델 저장 경로 (data 폴더에 저장)

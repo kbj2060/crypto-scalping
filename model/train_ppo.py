@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from collections import deque
 import numpy as np
+import pandas as pd
 
 # 시각화 모듈 (선택적)
 try:
@@ -200,80 +201,123 @@ class PPOTrainer:
             self.visualizer = None
     
     def _fit_global_scaler(self):
-        """7개 핵심 시계열 피처 기반 전역 스케일러 학습 (한 번만 실행)"""
+        """29개 고급 피처 기반 전역 스케일러 학습 (최적화 버전)"""
         try:
-            logger.info("7개 핵심 피처 기반 전역 스케일러 학습 시작...")
+            logger.info("🚀 29개 고급 피처 기반 전역 스케일러 학습 시작...")
             
-            # 전체 데이터 수집
+            # 1. 데이터 확인
             if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
                 logger.warning("데이터가 없어 스케일러 학습을 건너뜁니다.")
                 return
+
+            # 2. [핵심 수정] 전체 데이터에 대해 피처 엔지니어링 '먼저' 수행 (한 번만!)
+            # 루프 밖으로 꺼내서 로그 폭탄 방지 및 속도 향상
+            logger.info("📊 전체 데이터 피처 엔지니어링 수행 중 (한 번만 실행됩니다)...")
             
-            # 샘플링할 데이터 수 (전체 데이터가 너무 크면 샘플링)
-            total_candles = len(self.data_collector.eth_data)
-            sample_size = min(50000, total_candles)  # 최대 5만개 샘플
+            # ETH 데이터 준비
+            eth_data = self.data_collector.eth_data.copy()
             
-            # 균등 간격 샘플링 (최소 20개는 필요하므로 20부터 시작)
-            if total_candles > sample_size:
-                indices = np.linspace(20, total_candles - 1, sample_size, dtype=int)
-            else:
-                indices = np.arange(20, total_candles)
+            # 인덱스가 DatetimeIndex인지 확인 및 변환
+            if not isinstance(eth_data.index, pd.DatetimeIndex):
+                if 'timestamp' in eth_data.columns:
+                    eth_data.index = pd.to_datetime(eth_data['timestamp'])
+                else:
+                    eth_data.index = pd.date_range(end=pd.Timestamp.now(), periods=len(eth_data), freq='3min')
             
-            logger.info(f"스케일러 학습용 데이터: {len(indices)}개 샘플 (전체: {total_candles}개)")
-            
-            # 7개 핵심 시계열 피처 수집
-            window_size = 20
-            all_seq_features = []
-            
-            for idx in indices:
-                if idx < window_size:
-                    continue
+            # BTC 데이터 준비
+            btc_data = None
+            if self.data_collector.btc_data is not None and len(self.data_collector.btc_data) > 0:
+                btc_data = self.data_collector.btc_data.copy()
+                if not isinstance(btc_data.index, pd.DatetimeIndex):
+                    if 'timestamp' in btc_data.columns:
+                        btc_data.index = pd.to_datetime(btc_data['timestamp'])
+                    else:
+                        btc_data.index = pd.date_range(end=pd.Timestamp.now(), periods=len(btc_data), freq='3min')
                 
-                try:
-                    # 마지막 20봉 데이터 가져오기
-                    window = self.data_collector.eth_data.iloc[idx-window_size+1:idx+1]
-                    if len(window) < window_size:
-                        continue
-                    
-                    close = window['close'].values.astype(np.float32)
-                    
-                    # 7개 시계열 피처 생성
-                    # [최적화] Volume과 Trades에 로그 변환 적용 (거래량 폭발 구간의 극단적 차이 완화)
-                    volume_raw = window['volume'].values.astype(np.float32)
-                    trades_raw = window['trades'].values.astype(np.float32)
-                    
-                    f1 = (window['open'].values - close) / (close + 1e-8)  # Open (close 대비)
-                    f2 = (window['high'].values - close) / (close + 1e-8)   # High (close 대비)
-                    f3 = (window['low'].values - close) / (close + 1e-8)    # Low (close 대비)
-                    f4 = np.diff(np.log(close + 1e-8), prepend=np.log(close[0] + 1e-8))  # Log_Return
-                    f5 = np.log1p(volume_raw)  # Volume (로그 변환)
-                    f6 = np.log1p(trades_raw)  # Trades (로그 변환)
-                    f7 = window['taker_buy_base'].values / (volume_raw + 1e-8)  # Taker_Ratio
-                    
-                    # 7개 피처 결합: (20, 7)
-                    seq_features = np.column_stack([f1, f2, f3, f4, f5, f6, f7])
-                    all_seq_features.append(seq_features)
-                    
-                except Exception as e:
-                    logger.debug(f"인덱스 {idx} 처리 실패: {e}")
+                # 공통 인덱스로 정렬
+                common_index = eth_data.index.intersection(btc_data.index)
+                if len(common_index) > 0:
+                    eth_data = eth_data.loc[common_index]
+                    btc_data = btc_data.loc[common_index]
+            
+            # (1) 기본 기술적 지표 생성 (25개)
+            from model.feature_engineering import FeatureEngineer
+            feature_engineer = FeatureEngineer(eth_data, btc_data)
+            df = feature_engineer.generate_features()
+            
+            if df is None:
+                logger.error("피처 생성 실패")
+                return
+            
+            # (2) 멀티 타임프레임 지표 추가 (4개)
+            from model.mtf_processor import MTFProcessor
+            mtf_processor = MTFProcessor(df)
+            df = mtf_processor.add_mtf_features()
+            
+            logger.info(f"✅ 피처 엔지니어링 완료: {len(df)}개 행, {len(df.columns)}개 컬럼")
+            
+            # 3. 사용할 29개 컬럼 정의 (DQN과 동일)
+            target_cols = [
+                'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos', 
+                'rsi', 'macd_hist', 'hma_ratio', 'cci', 
+                'rvol', 'taker_ratio', 'cvd_change', 'mfi', 'cmf', 'vwap_dist',
+                'wick_upper', 'wick_lower', 'range_pos', 'swing_break', 'chop',
+                'btc_return', 'btc_rsi', 'btc_corr', 'btc_vol', 'eth_btc_ratio',
+                'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
+            ]
+            
+            # 컬럼 존재 여부 확인 (혹시 모를 에러 방지)
+            missing_cols = [c for c in target_cols if c not in df.columns]
+            if missing_cols:
+                logger.warning(f"⚠️ 누락된 컬럼이 있어 0으로 채웁니다: {missing_cols}")
+                for c in missing_cols:
+                    df[c] = 0.0
+
+            # 4. 샘플링 (전체 데이터에서 무작위 또는 균등 추출)
+            total_candles = len(df)
+            min_required = self.env.lookback + 100  # MTF 계산을 위한 여유 공간
+            sample_size = min(50000, total_candles - min_required)  # 최대 5만개 샘플
+            
+            if total_candles > min_required + sample_size:
+                # 최근 데이터 위주로 하되 전체적으로 균등하게 추출
+                indices = np.linspace(min_required, total_candles - 1, sample_size, dtype=int)
+            else:
+                indices = np.arange(min_required, total_candles)
+
+            logger.info(f"데이터 추출 중... ({len(indices)}개 샘플)")
+            
+            # 5. 데이터 수집 (이제 계산 없이 값만 가져오므로 순식간에 끝남)
+            # 각 샘플 인덱스에서 lookback 길이만큼의 시퀀스 추출
+            all_seq_features = []
+            for idx in indices:
+                if idx < self.env.lookback:
                     continue
+                # 마지막 lookback 개수만큼 자르기
+                recent_df = df[target_cols].iloc[idx-self.env.lookback+1:idx+1]
+                if len(recent_df) == self.env.lookback:
+                    seq_features = recent_df.values.astype(np.float32)
+                    all_seq_features.append(seq_features)
             
             if len(all_seq_features) == 0:
                 logger.warning("피처 수집 실패, 스케일러 학습 건너뜀")
                 return
             
-            # 전체 피처 결합: (N*20, 7)
+            # 전체 피처 결합: (N*lookback, 29)
             all_features_array = np.vstack(all_seq_features)
             
-            # 스케일러 학습 (7개 차원)
+            # NaN 처리
+            if np.isnan(all_features_array).any():
+                all_features_array = np.nan_to_num(all_features_array)
+
+            # 6. 스케일러 학습
             self.env.preprocessor.fit(all_features_array)
             self.env.scaler_fitted = True
             
-            logger.info(f"✅ 7개 피처 스케일러 학습 완료: {len(all_features_array)}개 샘플 (ValueError 해결)")
+            logger.info(f"✅ 전역 스케일러 학습 완료: {len(all_features_array)}개 샘플, Feature Dim: {all_features_array.shape[1]}")
             
         except Exception as e:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
-            logger.warning("스케일러 학습 실패, 첫 관측 시 학습합니다.")
+            logger.warning("스케일러 학습 실패, 학습 도중 online-fitting으로 대체합니다.")
         
     def train_episode(self, episode_num, max_steps=1000):
         """한 에피소드 학습
@@ -464,6 +508,11 @@ class PPOTrainer:
         logger.info(f"모델 저장 간격: {save_interval} 에피소드")
         logger.info("=" * 60)
         
+        # 스케일러 저장 경로 설정 (모델 경로와 같은 폴더, 확장자만 .pkl)
+        scaler_path = config.AI_MODEL_PATH.replace('.pth', '_scaler.pkl')
+        if not scaler_path.endswith('.pkl'):
+            scaler_path = config.AI_MODEL_PATH + '_scaler.pkl'
+        
         best_reward = float('-inf')
         
         for episode in range(1, num_episodes + 1):
@@ -497,13 +546,15 @@ class PPOTrainer:
                     best_reward = episode_reward
                     os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
                     self.agent.save_model(config.AI_MODEL_PATH)
-                    logger.info(f"🏆 최고 성능 모델 저장: 보상 {best_reward:.4f}")
+                    self.env.preprocessor.save(scaler_path)  # 스케일러도 함께 저장
+                    logger.info(f"🏆 최고 성능 모델 & 스케일러 저장 완료: 보상 {best_reward:.4f}")
                 
                 # 주기적 저장
                 elif episode % save_interval == 0:
                     os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
                     self.agent.save_model(config.AI_MODEL_PATH)
-                    logger.info(f"💾 모델 저장 (에피소드 {episode})")
+                    self.env.preprocessor.save(scaler_path)  # 스케일러도 함께 저장
+                    logger.info(f"💾 정기 저장 완료 (에피소드 {episode})")
                 
             except KeyboardInterrupt:
                 logger.info("학습 중단")
@@ -515,11 +566,13 @@ class PPOTrainer:
         # 최종 모델 저장
         os.makedirs(os.path.dirname(config.AI_MODEL_PATH), exist_ok=True)
         self.agent.save_model(config.AI_MODEL_PATH)
+        self.env.preprocessor.save(scaler_path)  # 스케일러도 함께 저장
         logger.info("=" * 60)
-        logger.info("✅ 학습 완료")
+        logger.info("✅ 학습 및 스케일러 저장 완료")
         logger.info(f"총 스텝: {self.total_steps}")
         logger.info(f"평균 보상: {sum(self.episode_rewards) / len(self.episode_rewards) if self.episode_rewards else 0:.4f}")
         logger.info(f"모델 저장 위치: {config.AI_MODEL_PATH}")
+        logger.info(f"스케일러 저장 위치: {scaler_path}")
         logger.info("=" * 60)
 
 

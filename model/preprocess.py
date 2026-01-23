@@ -1,9 +1,10 @@
 """
-데이터 전처리 모듈
-원시 신호 보존 + 전역 Z-Score 정규화
+데이터 전처리 모듈 (수정됨)
+원시 신호 보존 + 전역 Z-Score 정규화 + 저장/로드 기능 추가
 """
 import numpy as np
 import logging
+import pickle  # [추가] 객체 저장용 모듈
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +72,41 @@ class DataPreprocessor:
         log_prices = np.log(data + 1e-8)  # 0 방지
         log_returns = np.diff(log_prices, prepend=log_prices[0])
         return log_returns
+
+    # [신규 추가] 스케일러 저장
+    def save(self, filepath):
+        """학습된 통계량을 파일로 저장
+        
+        Args:
+            filepath: 저장할 파일 경로 (.pkl 확장자 권장)
+        """
+        if self.mean is None or self.std is None:
+            logger.warning("스케일러가 학습되지 않아 저장할 수 없습니다.")
+            return
+        
+        try:
+            with open(filepath, 'wb') as f:
+                pickle.dump({'mean': self.mean, 'std': self.std}, f)
+            logger.info(f"💾 스케일러 저장 완료: {filepath}")
+        except Exception as e:
+            logger.error(f"스케일러 저장 실패: {e}")
+
+    # [신규 추가] 스케일러 로드
+    def load(self, filepath):
+        """파일에서 통계량 불러오기
+        
+        Args:
+            filepath: 로드할 파일 경로
+        Returns:
+            bool: 로드 성공 여부
+        """
+        try:
+            with open(filepath, 'rb') as f:
+                data = pickle.load(f)
+                self.mean = data['mean']
+                self.std = data['std']
+            logger.info(f"✅ 스케일러 로드 완료: {filepath}")
+            return True
+        except Exception as e:
+            logger.error(f"스케일러 로드 실패: {e}")
+            return False
