@@ -27,12 +27,14 @@ STRATEGIES = {
     'orderblock_fvg': True,
     'hma_momentum': True,
     'mfi_momentum': True,
+    'cci_reversal': True,
     # 횡보장 전략 (Top 5 Mean-Reversion)
     'bollinger_mean_reversion': True,
     'vwap_deviation': True,
     'range_top_bottom': True,
     'stoch_rsi_mean_reversion': True,
-    'cmf_divergence': True
+    'cmf_divergence': True,
+    'williams_r': True
 }
 
 # 시간프레임 설정

@@ -71,8 +71,8 @@ class SACTrainer:
             self.breakout_strategies.append(HMAMomentumStrategy())
         if config.STRATEGIES.get('mfi_momentum', False):
             self.breakout_strategies.append(MFIMomentumStrategy())
-        
-        self.breakout_strategies.append(CCIReversalStrategy())
+        if config.STRATEGIES.get('cci_reversal', False):
+            self.breakout_strategies.append(CCIReversalStrategy())
         
         # 횡보장 전략
         if config.STRATEGIES.get('bollinger_mean_reversion', False):
@@ -85,8 +85,8 @@ class SACTrainer:
             self.range_strategies.append(StochRSIMeanReversionStrategy())
         if config.STRATEGIES.get('cmf_divergence', False):
             self.range_strategies.append(CMFDivergenceStrategy())
-        
-        self.range_strategies.append(WilliamsRStrategy())
+        if config.STRATEGIES.get('williams_r', False):
+            self.range_strategies.append(WilliamsRStrategy())
         
         self.strategies = self.breakout_strategies + self.range_strategies
         
