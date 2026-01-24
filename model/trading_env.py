@@ -201,22 +201,34 @@ class TradingEnvironment:
             normalized_seq = self.preprocessor.transform(seq_features)
             obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)  # (1, 40, 29)
             
-            # 5. 기술적 전략 Score 수집 (LONG/SHORT 부호 인코딩 반영)
+            # 5. 기술적 전략 Score 수집 (사전 계산된 값 사용)
             strategy_scores = []
-            for strategy in self.strategies:
-                try:
-                    result = strategy.analyze(self.collector)
-                    if result and 'confidence' in result:
-                        score = float(result['confidence'])
-                        # SHORT 신호는 음수로 인코딩
-                        if result.get('signal') == 'SHORT':
-                            score = -score
+            curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
+            
+            if curr_idx is not None and curr_idx < len(df):
+                # 사전 계산된 전략 점수 사용 (속도 향상)
+                for strategy in self.strategies:
+                    col_name = f"strategy_{strategy.name}"
+                    if col_name in df.columns:
+                        score = float(df.iloc[curr_idx][col_name])
                         strategy_scores.append(score)
                     else:
-                        strategy_scores.append(0.0)
-                except Exception as e:
-                    logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
-                    strategy_scores.append(0.0)
+                        # 사전 계산이 안 된 경우에만 실시간 계산 (Fallback)
+                        try:
+                            result = strategy.analyze(self.collector)
+                            if result and 'confidence' in result:
+                                score = float(result['confidence'])
+                                if result.get('signal') == 'SHORT':
+                                    score = -score
+                                strategy_scores.append(score)
+                            else:
+                                strategy_scores.append(0.0)
+                        except Exception as e:
+                            logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
+                            strategy_scores.append(0.0)
+            else:
+                # 인덱스가 없으면 0으로 채움
+                strategy_scores = [0.0] * len(self.strategies)
             
             # 6. 전략 점수 + 포지션 정보 결합 (동적 차원)
             # 전략 점수 개수는 self.strategies의 길이에 따라 결정됨
@@ -238,7 +250,8 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        개선된 보상 함수 (Net PnL 기반 정교화)
+        개선된 보상 함수 (Realized PnL 중심)
+        - [수정] Unrealized PnL 의존 제거: 확정 손익(Realized PnL) 중심으로 변경
         - 큰 수익에 대한 인센티브 유지
         - 하지만 제곱이 아닌 sqrt로 완화
         - 보상 배율: config에서 설정 가능
@@ -246,9 +259,9 @@ class TradingEnvironment:
         """
         reward = 0.0
         
-        # 1. 평가 수익 변화량 (config에서 설정)
-        reward = pnl_change * config.REWARD_MULTIPLIER
-        
+        # [수정] trade_done이 True일 때만 보상 부여 (Realized PnL 중심)
+        # Unrealized PnL(pnl_change)에 대한 보상은 제거하여
+        # AI가 "청산은 안 하고 차트 흔들기만 즐기는 변태"가 되는 것을 방지
         if trade_done:
             # 실질 거래 비용 반영 (config에서 설정)
             net_pnl = pnl - config.TRANSACTION_COST
@@ -261,10 +274,9 @@ class TradingEnvironment:
             else:
                 # 손실 페널티 (config에서 설정)
                 reward += net_pnl * config.LOSS_PENALTY_MULTIPLIER
-            
-            # 별도 수수료 차감은 제거 (위에서 net_pnl로 반영했으므로)
         
         # 시간 비용 (config에서 설정)
+        # 포지션을 오래 보유할수록 약간의 페널티
         reward -= config.TIME_COST
         
         return np.clip(reward, -100, 100)

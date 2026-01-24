@@ -153,6 +153,9 @@ class PPOTrainer:
         # 파일이 있으면 로드하고, 없으면 생성 후 저장합니다.
         self._load_or_create_features()
         
+        # [핵심] 전략 사전 계산 (SAC와 동일하게 적용)
+        self._precalculate_strategies()
+        
         # 4. 환경 생성
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         
@@ -254,6 +257,73 @@ class PPOTrainer:
         # 메모리에 적용
         self.data_collector.eth_data = df
         logger.info(f"💾 피처 계산 및 저장 완료: {feature_file_path}")
+
+    def _precalculate_strategies(self):
+        """
+        [핵심] 전략 점수 사전 계산 (SAC와 동일)
+        학습 속도 향상 및 current_index 꼬임 방지
+        """
+        try:
+            logger.info("🚀 전략 점수 사전 계산 시작...")
+            df = self.data_collector.eth_data
+            
+            if df is None or len(df) == 0:
+                logger.warning("데이터가 없어 전략 사전 계산을 건너뜁니다.")
+                return
+            
+            # 각 전략별로 컬럼명 생성 및 초기화
+            strategy_columns = []
+            for strategy in self.strategies:
+                col_name = f"strategy_{strategy.name}"
+                strategy_columns.append(col_name)
+                if col_name not in df.columns:
+                    df[col_name] = 0.0
+            
+            # 전체 데이터에 대해 전략 점수 계산
+            total_len = len(df)
+            logger.info(f"전략 점수 계산 중: {total_len}개 캔들")
+            
+            # current_index를 임시로 설정하여 전략이 올바른 데이터를 참조하도록 함
+            original_index = getattr(self.data_collector, 'current_index', 0)
+            
+            for idx in range(len(df)):
+                self.data_collector.current_index = idx
+                
+                for i, strategy in enumerate(self.strategies):
+                    try:
+                        result = strategy.analyze(self.data_collector)
+                        if result and 'confidence' in result:
+                            score = float(result['confidence'])
+                            # SHORT 신호는 음수로 인코딩
+                            if result.get('signal') == 'SHORT':
+                                score = -score
+                            df.loc[df.index[idx], strategy_columns[i]] = score
+                        else:
+                            df.loc[df.index[idx], strategy_columns[i]] = 0.0
+                    except Exception as e:
+                        logger.debug(f"전략 {strategy.name} 계산 실패 (인덱스 {idx}): {e}")
+                        df.loc[df.index[idx], strategy_columns[i]] = 0.0
+                
+                # 진행 상황 출력 (10%마다)
+                if (idx + 1) % max(1, total_len // 10) == 0:
+                    logger.info(f"전략 계산 진행: {idx + 1}/{total_len} ({(idx+1)/total_len*100:.1f}%)")
+            
+            # 원래 인덱스 복원
+            self.data_collector.current_index = original_index
+            
+            # 메모리에 적용
+            self.data_collector.eth_data = df
+            
+            # CSV 파일도 업데이트 (선택적)
+            feature_file = 'data/training_features.csv'
+            if os.path.exists(feature_file):
+                df.to_csv(feature_file, index=True)
+                logger.info(f"💾 전략 점수 포함 데이터 저장: {feature_file}")
+            
+            logger.info(f"✅ 전략 점수 사전 계산 완료: {len(strategy_columns)}개 전략")
+            
+        except Exception as e:
+            logger.error(f"전략 사전 계산 실패: {e}", exc_info=True)
 
     def _fit_global_scaler(self):
         """전역 스케일러 학습 (데이터 누수 방지 적용)"""
@@ -375,8 +445,8 @@ class PPOTrainer:
             if state is None:
                 break
             
-            # 3. 행동 선택
-            action, log_prob = self.agent.select_action(state)
+            # 3. 행동 선택 (value도 반환받음)
+            action, log_prob, value = self.agent.select_action(state)
             
             # 4. 가격 데이터 및 보상 계산
             try:

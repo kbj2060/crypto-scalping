@@ -90,7 +90,7 @@ class PPOAgent:
             # [개선 2] 상태 전달 및 업데이트 (return_states=True)
             # 이전 스텝의 self.current_states를 넣어주고,
             # 업데이트된 상태를 다시 self.current_states에 저장
-            probs, _, self.current_states = self.model(
+            probs, value, self.current_states = self.model(
                 obs_seq.to(self.device),
                 info=obs_info.to(self.device),
                 states=self.current_states,
@@ -111,7 +111,7 @@ class PPOAgent:
             dist = Categorical(masked_probs)
             action = dist.sample()
             log_prob = dist.log_prob(action)
-            return action.item(), log_prob.item()
+            return action.item(), log_prob.item(), value.item()
 
     def store_transition(self, state, action, log_prob, reward, is_terminal):
         """트랜지션 저장 (Mask 제외하고 저장)"""
