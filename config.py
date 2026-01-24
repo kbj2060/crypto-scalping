@@ -57,19 +57,6 @@ TRANSACTION_COST = 0.0015  # 거래 비용 (0.15%, 스프레드 + 슬리피지 �
 TIME_COST = 0.0005  # 시간 비용
 STOP_LOSS_THRESHOLD = -0.02  # 강제 손절 임계값 (-2%)
 
-# PPO 알고리즘 하이퍼파라미터
-PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
-PPO_LAMBDA = 0.95  # GAE 람다 파라미터
-PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위
-PPO_K_EPOCHS = 10  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.05  # 엔트로피 계수 (초기값)
-PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다)
-PPO_ENTROPY_MIN = 0.02  # 엔트로피 최소값
-PPO_LEARNING_RATE = 0.00003  # 학습률
-PPO_SCHEDULER_FACTOR = 0.5  # 학습률 스케줄러 감소율
-PPO_SCHEDULER_PATIENCE = 200  # 학습률 스케줄러 인내심
-PPO_SCHEDULER_MIN_LR = 1e-6  # 학습률 최소값
-
 # 네트워크 아키텍처 파라미터
 NETWORK_HIDDEN_DIM = 128  # 은닉층 차원
 NETWORK_NUM_LAYERS = 2  # xLSTM 레이어 개수
@@ -94,3 +81,12 @@ TRAIN_SAVE_INTERVAL = 50  # 모델 저장 간격 (에피소드)
 # 평가 파라미터
 EVAL_INITIAL_CAPITAL = 10000  # 평가 시작 자본금
 EVAL_VERBOSE_INTERVAL = 100  # 진행 상황 출력 간격 (스텝)
+
+# SAC 알고리즘 하이퍼파라미터
+SAC_GAMMA = 0.99  # 할인율 (Discount Factor)
+SAC_TAU = 0.005  # Soft Target Update 계수
+SAC_ALPHA = 0.2  # 초기 엔트로피 계수 (자동 튜닝됨)
+SAC_LEARNING_RATE = 3e-4  # 학습률 (Actor, Critic, Alpha 모두 동일)
+SAC_REPLAY_BUFFER_SIZE = 100000  # Replay Buffer 크기
+SAC_BATCH_SIZE = 256  # 배치 크기
+SAC_UPDATE_FREQUENCY = 1  # 업데이트 빈도 (매 스텝마다)
