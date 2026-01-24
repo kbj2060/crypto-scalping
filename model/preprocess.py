@@ -110,3 +110,13 @@ class DataPreprocessor:
         except Exception as e:
             logger.error(f"스케일러 로드 실패: {e}")
             return False
+    
+    # [호환성] save_scaler는 save의 별칭 (feature_names는 무시)
+    def save_scaler(self, filepath, feature_names=None):
+        """스케일러 저장 (save의 별칭, feature_names는 호환성을 위해 무시)
+        
+        Args:
+            filepath: 저장할 파일 경로
+            feature_names: 피처 이름 리스트 (호환성을 위해 받지만 사용하지 않음)
+        """
+        self.save(filepath)

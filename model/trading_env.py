@@ -7,6 +7,13 @@ import numpy as np
 import torch
 import logging
 import pandas as pd
+import sys
+import os
+
+# 상위 폴더를 경로에 추가 (config 모듈 접근용)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config
+
 from .preprocess import DataPreprocessor
 from .feature_engineering import FeatureEngineer
 from .mtf_processor import MTFProcessor
@@ -16,17 +23,19 @@ logger = logging.getLogger(__name__)
 
 class TradingEnvironment:
     """트레이딩 환경: 상태 관측 및 보상 계산"""
-    def __init__(self, data_collector, strategies, lookback=40):
+    def __init__(self, data_collector, strategies, lookback=None, min_holding_time=None):
         """
         Args:
             data_collector: DataCollector 인스턴스
             strategies: 전략 리스트
-            lookback: 충분한 샘플 수 (기본 40)
+            lookback: 충분한 샘플 수 (None이면 config.LOOKBACK 사용)
+            min_holding_time: 최소 보유 캔들 수 (None이면 config.MIN_HOLDING_TIME 사용)
         """
         self.collector = data_collector
         self.strategies = strategies
         self.num_strategies = len(strategies)
-        self.lookback = lookback
+        self.lookback = lookback if lookback is not None else config.LOOKBACK
+        self.min_holding_time = min_holding_time if min_holding_time is not None else config.MIN_HOLDING_TIME
         
         # 전처리 파이프라인 (Z-Score 정규화)
         self.preprocessor = DataPreprocessor()
@@ -35,7 +44,33 @@ class TradingEnvironment:
         # 피처 엔지니어링 모듈 (인스턴스는 매번 새로 생성)
         # FeatureEngineer와 MTFProcessor는 데이터를 받아서 생성하므로 여기서는 초기화하지 않음
 
-    def get_observation(self, position_info=None):
+    def get_action_mask(self, current_index, entry_index, current_position):
+        """
+        [추가] 유효한 행동 마스크 생성
+        최소 보유 시간을 채우지 못했으면 포지션 청산/스위칭 금지
+        
+        Args:
+            current_index: 현재 인덱스
+            entry_index: 진입 인덱스 (None이면 포지션 없음)
+            current_position: 현재 포지션 ('LONG', 'SHORT', None)
+        
+        Returns:
+            torch.FloatTensor: [HOLD, LONG, SHORT] (1=가능, 0=불가능)
+        """
+        mask = [1.0, 1.0, 1.0]  # 기본적으로 모두 허용
+        
+        # 포지션이 있고 진입 시점이 기록되어 있다면
+        if current_position is not None and entry_index is not None and current_index is not None:
+            holding_time = current_index - entry_index
+            
+            # 최소 보유 시간 미만이면 강제 HOLD (청산/스위칭 불가)
+            if holding_time < self.min_holding_time:
+                # 포지션 변경 금지: LONG(1) 불가, SHORT(2) 불가 -> HOLD(0)만 가능
+                mask = [1.0, 0.0, 0.0]
+
+        return torch.FloatTensor(mask)
+
+    def get_observation(self, position_info=None, current_index=None, entry_index=None, current_position=None):
         """
         현재 상태 관측 (29개 고급 시계열 피처 + Z-Score 정규화 + 포지션 정보)
         
@@ -47,53 +82,96 @@ class TradingEnvironment:
         Returns:
             (obs_seq, obs_info): 튜플
                 - obs_seq: (1, 40, 29) 텐서 - 29개 시계열 피처
-                - obs_info: (1, 13) 텐서 - 전략 점수(10) + 포지션 정보(3)
+                - obs_info: (1, num_strategies + 3) 텐서 - 전략 점수 + 포지션 정보(3)
         """
         try:
-            # 1. 원본 데이터 수집 (lookback보다 넉넉하게 가져옴)
-            # MTF 계산을 위해 최소 200봉 이상 필요할 수 있음
-            candles = self.collector.get_candles('ETH', count=self.lookback + 60)
+            # [수정 1] DataCollector의 get_candles 대신 내부 데이터 직접 접근 시도
+            # 이유: get_candles가 OHLCV만 남기고 나머지 컬럼을 버리는 경우 방지
+            candles = None
+            
+            # collector가 eth_data 속성을 가지고 있고, DataFrame 형태라면 직접 슬라이싱
+            if hasattr(self.collector, 'eth_data') and isinstance(self.collector.eth_data, pd.DataFrame):
+                # 인덱스가 주어지지 않으면 collector 내부 인덱스 사용
+                curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
+                
+                if curr_idx is not None and curr_idx >= self.lookback:
+                    # 미리 계산된 피처가 포함된 원본 데이터에서 직접 슬라이싱
+                    candles = self.collector.eth_data.iloc[curr_idx - self.lookback : curr_idx].copy()
+            
+            # 직접 접근 실패 시 기존 방식 사용 (Fallback)
+            if candles is None or len(candles) < self.lookback:
+                candles = self.collector.get_candles('ETH', count=self.lookback + 60)
+            
             if candles is None or len(candles) < self.lookback:
                 logger.warning(f"데이터 부족: {len(candles) if candles is not None else 0}개 (필요: {self.lookback}개)")
                 return None
             
-            # 2. [핵심 변경] DQN과 동일한 고급 피처 생성 Pipeline 적용
-            # 인덱스가 DatetimeIndex인지 확인 및 변환
-            if not isinstance(candles.index, pd.DatetimeIndex):
-                if 'timestamp' in candles.columns:
-                    candles.index = pd.to_datetime(candles['timestamp'])
-                else:
-                    # 인덱스가 없으면 현재 시간 기준으로 생성
-                    candles.index = pd.date_range(end=pd.Timestamp.now(), periods=len(candles), freq='3min')
+            # [수정 2] 피처 존재 여부 확인 로직 (이미 있으면 계산 생략)
+            # train_ppo.py에서 _precalculate_features를 돌렸다면 여기에 컬럼이 있어야 함
+            required_feature = 'rsi_1h'
             
-            # BTC 데이터도 가져오기 (상관관계 피처용)
-            btc_candles = self.collector.get_candles('BTC', count=len(candles))
-            if btc_candles is not None and len(btc_candles) >= len(candles):
-                # 인덱스 정렬
-                if not isinstance(btc_candles.index, pd.DatetimeIndex):
-                    if 'timestamp' in btc_candles.columns:
-                        btc_candles.index = pd.to_datetime(btc_candles['timestamp'])
-                    else:
-                        btc_candles.index = pd.date_range(end=pd.Timestamp.now(), periods=len(btc_candles), freq='3min')
-                # 공통 인덱스로 정렬
-                common_index = candles.index.intersection(btc_candles.index)
-                if len(common_index) > 0:
-                    candles = candles.loc[common_index]
-                    btc_candles = btc_candles.loc[common_index]
+            if required_feature in candles.columns:
+                # ✅ 이미 피처가 있으므로 그대로 사용 (로그 안 뜸, 속도 빠름)
+                df = candles
             else:
+                # ❌ 피처가 없어서 다시 계산 (여기가 실행되면 로그가 뜸)
+                # 라이브 트레이딩이나 데이터가 없을 때만 실행되어야 함
+                
+                # 인덱스가 DatetimeIndex인지 확인 및 변환
+                if not isinstance(candles.index, pd.DatetimeIndex):
+                    if 'timestamp' in candles.columns:
+                        candles.index = pd.to_datetime(candles['timestamp'])
+                    else:
+                        # 인덱스가 없으면 현재 시간 기준으로 생성
+                        candles.index = pd.date_range(end=pd.Timestamp.now(), periods=len(candles), freq='3min')
+                
+                # BTC 데이터도 가져오기 (상관관계 피처용)
                 btc_candles = None
-            
-            # (1) 기본 기술적 지표 (25개)
-            feature_engineer = FeatureEngineer(candles, btc_candles)
-            df = feature_engineer.generate_features()
-            
-            if df is None:
-                logger.warning("피처 생성 실패")
-                return None
-            
-            # (2) 멀티 타임프레임 지표 (4개)
-            mtf_processor = MTFProcessor(df)
-            df = mtf_processor.add_mtf_features()
+                if hasattr(self.collector, 'btc_data') and isinstance(self.collector.btc_data, pd.DataFrame):
+                    current_idx = getattr(self.collector, 'current_index', None)
+                    if current_idx is not None and current_idx >= len(candles):
+                        btc_candles = self.collector.btc_data.iloc[current_idx - len(candles) : current_idx].copy()
+                
+                if btc_candles is None:
+                    btc_candles = self.collector.get_candles('BTC', count=len(candles))
+                
+                if btc_candles is not None and len(btc_candles) >= len(candles):
+                    # 인덱스 정렬
+                    if not isinstance(btc_candles.index, pd.DatetimeIndex):
+                        if 'timestamp' in btc_candles.columns:
+                            btc_candles.index = pd.to_datetime(btc_candles['timestamp'])
+                        else:
+                            btc_candles.index = pd.date_range(end=pd.Timestamp.now(), periods=len(btc_candles), freq='3min')
+                    # 공통 인덱스로 정렬
+                    common_index = candles.index.intersection(btc_candles.index)
+                    if len(common_index) > 0:
+                        candles = candles.loc[common_index]
+                        btc_candles = btc_candles.loc[common_index]
+                else:
+                    btc_candles = None
+                
+                # 로그 레벨을 잠시 낮춰서 스팸 방지 (선택 사항)
+                logging.getLogger('model.feature_engineering').setLevel(logging.WARNING)
+                logging.getLogger('model.mtf_processor').setLevel(logging.WARNING)
+                
+                # (1) 기본 기술적 지표 (25개)
+                feature_engineer = FeatureEngineer(candles, btc_candles)
+                df = feature_engineer.generate_features()
+                
+                if df is None:
+                    logger.warning("피처 생성 실패")
+                    # 로그 레벨 복구
+                    logging.getLogger('model.feature_engineering').setLevel(logging.INFO)
+                    logging.getLogger('model.mtf_processor').setLevel(logging.INFO)
+                    return None
+                
+                # (2) 멀티 타임프레임 지표 (4개)
+                mtf_processor = MTFProcessor(df)
+                df = mtf_processor.add_mtf_features()
+                
+                # 로그 레벨 복구
+                logging.getLogger('model.feature_engineering').setLevel(logging.INFO)
+                logging.getLogger('model.mtf_processor').setLevel(logging.INFO)
             
             # (3) 학습에 사용할 컬럼만 선택 (DQN에서 검증된 피처들)
             target_cols = [
@@ -140,14 +218,19 @@ class TradingEnvironment:
                     logger.debug(f"전략 {strategy.name} 분석 실패: {e}")
                     strategy_scores.append(0.0)
             
-            # 6. [해결] 10개 전략 점수 + 3개 포지션 정보 = 13차원
+            # 6. 전략 점수 + 포지션 정보 결합 (동적 차원)
+            # 전략 점수 개수는 self.strategies의 길이에 따라 결정됨
             if position_info is None:
                 position_info = [0.0, 0.0, 0.0]
             
             obs_info = np.concatenate([strategy_scores, position_info], dtype=np.float32)
-            obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)  # (1, 13)
+            obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)  # (1, num_strategies + 3)
             
-            return (obs_seq, obs_info_tensor)
+            # [추가] Action Mask 생성
+            curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
+            action_mask = self.get_action_mask(curr_idx, entry_index, current_position)
+            
+            return (obs_seq, obs_info_tensor, action_mask)
             
         except Exception as e:
             logger.error(f"관측 생성 실패: {e}", exc_info=True)
@@ -155,36 +238,34 @@ class TradingEnvironment:
 
     def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
         """
-        개선된 보상 함수 (공격성 균형)
+        개선된 보상 함수 (Net PnL 기반 정교화)
         - 큰 수익에 대한 인센티브 유지
         - 하지만 제곱이 아닌 sqrt로 완화
+        - 보상 배율: config에서 설정 가능
+        - Net PnL 도입: 거래 비용을 반영한 순수익 기반 보상
         """
         reward = 0.0
         
-        reward = pnl_change * 300
+        # 1. 평가 수익 변화량 (config에서 설정)
+        reward = pnl_change * config.REWARD_MULTIPLIER
         
         if trade_done:
-            if pnl > 0:
-                # A. 선형 주보상
-                reward += pnl * 100
-                
-                # B. [수정] 제곱 → sqrt (완화된 비선형)
-                # 큰 수익에 추가 보너스 주되, 폭주는 방지
-                # 1% → sqrt(1) = 1.0 (10% 보너스)
-                # 2% → sqrt(2) = 1.41 (14% 보너스)
-                # 5% → sqrt(5) = 2.24 (22% 보너스)
-                reward += np.sqrt(pnl * 100) * 0.1
-                
-                # C. 연속 승리 보너스
-                reward += np.tanh(pnl * 100) * 0.5
-                
-            else:
-                # 손실 페널티 (약간 더 아프게)
-                reward += pnl * 120  # 수익보다 20% 더 페널티
+            # 실질 거래 비용 반영 (config에서 설정)
+            net_pnl = pnl - config.TRANSACTION_COST
             
-            reward -= 0.2
+            if net_pnl > 0:
+                # 순수익이 났을 때만 칭찬
+                reward += net_pnl * config.REWARD_MULTIPLIER
+                reward += np.sqrt(net_pnl * 100) * 0.5
+                reward += np.tanh(net_pnl * 100) * 0.5
+            else:
+                # 손실 페널티 (config에서 설정)
+                reward += net_pnl * config.LOSS_PENALTY_MULTIPLIER
+            
+            # 별도 수수료 차감은 제거 (위에서 net_pnl로 반영했으므로)
         
-        reward -= 0.0005
+        # 시간 비용 (config에서 설정)
+        reward -= config.TIME_COST
         
         return np.clip(reward, -100, 100)
 

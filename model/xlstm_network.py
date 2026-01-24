@@ -1,30 +1,46 @@
 """
-xLSTM 기반 신경망 구조 (PPO 최적화)
-[Clean Ver] GELU + LayerNorm + Late Fusion (NoisyNet 제거)
-sLSTM(scalar LSTM) 구조를 사용하여 지수 게이팅(Exponential Gating)과 정규화(Normalization) 구현
-Multi-Head Attention과 심층화된 Actor-Critic 적용
+xLSTM 기반 신경망 구조 (Final Upgrade)
+[Features]
+1. Multi-Layer sLSTM + Pre-LN Residual Connection
+2. State Retention (상태 유지 및 반환)
+3. Weighted Attention Pooling
+4. Info Encoder + Shared Trunk Architecture
+5. Dropout & Gradient Checkpointing
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
+import sys
+import os
+
+# 상위 폴더를 경로에 추가 (config 모듈 접근용)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config
 
 
 class MultiHeadAttention(nn.Module):
-    """시퀀스 데이터의 중요 지점을 포착하기 위한 어텐션 레이어"""
-    def __init__(self, hidden_dim, heads=4):
+    """Weighted Pooling이 적용된 어텐션 레이어"""
+    def __init__(self, hidden_dim, heads=None):
         super().__init__()
+        heads = heads if heads is not None else config.NETWORK_ATTENTION_HEADS
         self.attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=heads, batch_first=True)
-        # 어텐션 이후의 정보를 정리할 정규화 층
         self.norm = nn.LayerNorm(hidden_dim)
+        
+        # [개선 4] 학습 가능한 풀링 가중치 (단순 평균 대체)
+        self.pool_weight = nn.Linear(hidden_dim, 1)
         
     def forward(self, x):
         # x: (batch, seq, hidden)
-        # 쿼리, 키, 밸류를 동일하게 설정하여 셀프 어텐션 수행
         attn_output, _ = self.attn(x, x, x)
-        # 잔차 연결(Residual Connection) 및 정규화
         x = self.norm(x + attn_output)
-        # 전체 시퀀스 정보를 요약 (가중 평균)
-        return x.mean(dim=1)
+        
+        # Weighted Pooling
+        # 시퀀스 내의 각 시점이 얼마나 중요한지 계산 (Softmax)
+        weights = torch.softmax(self.pool_weight(x), dim=1)  # (batch, seq, 1)
+        context = (x * weights).sum(dim=1)  # (batch, hidden)
+        
+        return context
 
 
 class sLSTMCell(nn.Module):
@@ -68,82 +84,178 @@ class sLSTMCell(nn.Module):
 
 class xLSTMActorCritic(nn.Module):
     """
-    PPO용 xLSTM Actor-Critic
-    NoisyNet 제거 -> 일반 Linear 사용
-    GELU & LayerNorm 유지 -> 학습 안정성 확보
+    PPO용 xLSTM Actor-Critic (Final Version)
     """
-    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128):
+    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=None, 
+                 num_layers=None, dropout=None, use_checkpointing=None):
         super().__init__()
+        # 파라미터 기본값 설정 (config에서 가져오기)
+        hidden_dim = hidden_dim if hidden_dim is not None else config.NETWORK_HIDDEN_DIM
+        num_layers = num_layers if num_layers is not None else config.NETWORK_NUM_LAYERS
+        dropout = dropout if dropout is not None else config.NETWORK_DROPOUT
+        use_checkpointing = use_checkpointing if use_checkpointing is not None else config.NETWORK_USE_CHECKPOINTING
+        
         self.hidden_dim = hidden_dim
         self.info_dim = info_dim
+        self.num_layers = num_layers
+        self.use_checkpointing = use_checkpointing
         
-        # 1. Feature Extractor
-        self.xlstm_cell = sLSTMCell(input_dim, hidden_dim)
-        self.attention = MultiHeadAttention(hidden_dim, heads=4)
+        # 1. Input Processing
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.input_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)  # [개선 3] Dropout 추가
         
-        # Late Fusion: 시퀀스 정보(hidden_dim) + 포지션 정보(info_dim) 결합
-        combined_dim = hidden_dim + info_dim  # 128 + 13 = 141
+        # 2. xLSTM Stack
+        self.xlstm_layers = nn.ModuleList([
+            sLSTMCell(hidden_dim, hidden_dim) for _ in range(num_layers)
+        ])
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(hidden_dim) for _ in range(num_layers)
+        ])
         
-        # 2. Actor Head (정책) - 깔끔한 MLP 구조
-        self.actor_fc = nn.Sequential(
-            nn.Linear(combined_dim, 128),
-            nn.LayerNorm(128),  # 입력 정규화
-            nn.GELU(),          # 비선형성 강화
-            nn.Linear(128, 64),
+        # 3. Attention
+        self.attention = MultiHeadAttention(hidden_dim)
+        
+        # 4. [개선 5] Info Encoder
+        info_encoder_dim = config.NETWORK_INFO_ENCODER_DIM
+        self.info_encoder = nn.Sequential(
+            nn.Linear(info_dim, info_encoder_dim),
+            nn.LayerNorm(info_encoder_dim),
             nn.GELU(),
-            nn.Linear(64, action_dim),
+            nn.Dropout(dropout),
+            nn.Linear(info_encoder_dim, info_encoder_dim)
+        )
+        
+        # 5. [개선 6] Shared Trunk (Late Fusion 이후 공통 처리)
+        combined_dim = hidden_dim + info_encoder_dim
+        shared_dim1 = config.NETWORK_SHARED_TRUNK_DIM1
+        shared_dim2 = config.NETWORK_SHARED_TRUNK_DIM2
+        self.shared_trunk = nn.Sequential(
+            nn.Linear(combined_dim, shared_dim1),
+            nn.LayerNorm(shared_dim1),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(shared_dim1, shared_dim2),
+            nn.LayerNorm(shared_dim2),
+            nn.GELU(),
+        )
+        
+        # 6. Separate Heads
+        actor_dim = config.NETWORK_ACTOR_HEAD_DIM
+        critic_dim = config.NETWORK_CRITIC_HEAD_DIM
+        self.actor_head = nn.Sequential(
+            nn.Linear(shared_dim2, actor_dim),
+            nn.GELU(),
+            nn.Dropout(dropout / 2),
+            nn.Linear(actor_dim, action_dim),
             nn.Softmax(dim=-1)
         )
         
-        # 3. Critic Head (가치)
-        self.critic_fc = nn.Sequential(
-            nn.Linear(combined_dim, 128),
-            nn.LayerNorm(128),
+        self.critic_head = nn.Sequential(
+            nn.Linear(shared_dim2, critic_dim),
             nn.GELU(),
-            nn.Linear(128, 64),
-            nn.GELU(),
-            nn.Linear(64, 1)
+            nn.Dropout(dropout / 2),
+            nn.Linear(critic_dim, 1)
         )
 
-    def forward(self, x, info=None, states=None):
+    def _process_layer(self, layer_idx, current_input, h_t, c_t, n_t):
+        """[개선 7] Checkpointing을 위한 단일 레이어 처리 함수"""
+        cell = self.xlstm_layers[layer_idx]
+        norm = self.layer_norms[layer_idx]
+        
+        layer_h_list = []
+        seq_len = current_input.size(1)
+        
+        for t in range(seq_len):
+            input_t = current_input[:, t, :]
+            
+            # [개선 2] Pre-LN Residual Pattern
+            # Norm(x) -> Layer -> x + Output
+            x_norm = norm(input_t)
+            h_t, c_t, n_t = cell(x_norm, h_t, c_t, n_t, None)
+            
+            # Residual Connection
+            out_t = input_t + h_t
+            layer_h_list.append(out_t.unsqueeze(1))
+            
+        return torch.cat(layer_h_list, dim=1), h_t, c_t, n_t
+
+    def forward(self, x, info=None, states=None, return_states=False):
         """
         Args:
             x: (batch_size, seq_len, input_dim) 입력 시퀀스
             info: (batch_size, info_dim) 포지션 정보 텐서 (None이면 0으로 채움)
             states: (h, c, n) 튜플 또는 None
+                   - h, c, n: 각각 (num_layers, batch_size, hidden_dim) 형태
+            return_states: True면 새 상태도 반환
         Returns:
             action_probs: (batch_size, action_dim) 행동 확률 분포
             value: (batch_size, 1) 상태 가치
+            new_states (optional): (h, c, n) 튜플 - 새 상태
         """
         batch_size, seq_len, _ = x.size()
+        device = x.device
+        
+        # 상태 초기화
         if states is None:
-            h = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-            c = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-            n = torch.ones(batch_size, self.hidden_dim).to(x.device)
+            h = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
+            c = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
+            n = torch.ones(self.num_layers, batch_size, self.hidden_dim).to(device)
         else:
             h, c, n = states
 
-        # [로드맵 1 적용] 모든 타임스텝의 h를 수집
-        all_h = []
-        for t in range(seq_len):
-            h, c, n = self.xlstm_cell(x[:, t, :], h, c, n, None)
-            all_h.append(h.unsqueeze(1))
+        # Input Projection
+        x_emb = self.input_proj(x)
+        x_emb = self.input_norm(x_emb)
+        current_input = self.dropout(x_emb)
+        
+        next_h, next_c, next_n = [], [], []
+        
+        # xLSTM Layers Forward
+        for layer_idx in range(self.num_layers):
+            h_t, c_t, n_t = h[layer_idx], c[layer_idx], n[layer_idx]
             
-        # (batch, seq_len, hidden_dim) 형태로 결합
-        seq_h = torch.cat(all_h, dim=1)
+            if self.use_checkpointing and self.training:
+                # Gradient Checkpointing (메모리 절약)
+                current_input, h_t, c_t, n_t = checkpoint(
+                    self._process_layer, layer_idx, current_input, h_t, c_t, n_t,
+                    use_reentrant=False
+                )
+            else:
+                current_input, h_t, c_t, n_t = self._process_layer(
+                    layer_idx, current_input, h_t, c_t, n_t
+                )
+            
+            # 레이어 간 Dropout
+            current_input = self.dropout(current_input)
+            
+            next_h.append(h_t)
+            next_c.append(c_t)
+            next_n.append(n_t)
+
+        # Context Aggregation
+        context = self.attention(current_input)  # (batch, hidden)
         
-        # Attention을 통해 20개 캔들의 핵심 정보를 하나의 컨텍스트로 요약
-        context = self.attention(seq_h)  # (batch, hidden_dim)
-        
-        # Late Fusion: 시퀀스 정보와 포지션 정보 결합
+        # Info Encoding
         if info is None:
-            info = torch.zeros(batch_size, self.info_dim).to(x.device)
+            info = torch.zeros(batch_size, self.info_dim).to(device)
+        info_encoded = self.info_encoder(info)  # (batch, 64)
         
-        # 결합된 정보: (batch, hidden_dim + info_dim)
-        combined = torch.cat([context, info], dim=-1)
+        # Late Fusion & Shared Trunk
+        combined = torch.cat([context, info_encoded], dim=-1)
+        shared_features = self.shared_trunk(combined)
         
-        # 강화된 Actor/Critic 출력
-        action_probs = self.actor_fc(combined)
-        value = self.critic_fc(combined)
+        # Heads
+        action_probs = self.actor_head(shared_features)
+        value = self.critic_head(shared_features)
         
-        return action_probs, value
+        # [개선 1] 상태 반환 로직 추가
+        if return_states:
+            new_states = (
+                torch.stack(next_h),
+                torch.stack(next_c),
+                torch.stack(next_n)
+            )
+            return action_probs, value, new_states
+        else:
+            return action_probs, value
