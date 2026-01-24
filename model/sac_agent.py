@@ -111,10 +111,8 @@ class SACAgent:
         self.critic_scheduler = None
         self.alpha_scheduler = None
         
-        # LSTM 상태 저장소
-        self.current_states = None
-        self.actor_states = None
-        self.critic_states = None  # 학습 시 사용
+        # [NEW] 상태 관리를 위한 변수
+        self.actor_state = None
 
         logger.info(f"✅ Continuous SAC Agent Initialized. Action Dim: {action_dim}")
 
@@ -154,9 +152,7 @@ class SACAgent:
 
     def reset_episode_states(self):
         """에피소드 시작 시 상태 초기화"""
-        self.current_states = None
-        self.actor_states = None
-        self.critic_states = None
+        self.actor_state = None
 
     def select_action(self, state, evaluate=False):
         """
@@ -169,21 +165,29 @@ class SACAgent:
         Returns:
             action: (numpy array) Continuous value [-1, 1]
         """
-        obs_seq, obs_info = state
+        # 튜플 입력 처리
+        if isinstance(state, (tuple, list)):
+            if len(state) == 3:
+                obs_seq, obs_info, _ = state
+            else:
+                obs_seq, obs_info = state
+        else:
+            obs_seq, obs_info = state
+
         obs_seq = obs_seq.to(self.device)
         obs_info = obs_info.to(self.device)
         
         with torch.no_grad():
             if evaluate:
-                # 평가 시: Mean 사용 (Deterministic)
-                _, _, action, self.current_states = self.actor.sample(
-                    obs_seq, obs_info, states=self.current_states
-                )
+                # 평가 시에는 상태 갱신 없이 mean action 사용
+                mu, _, next_states = self.actor(obs_seq, obs_info, self.actor_state)
+                action = torch.tanh(mu)
+                # 평가 시에도 상태는 갱신 (연속성 유지)
+                self.actor_state = next_states
             else:
-                # 학습 시: Sampling (Stochastic)
-                action, _, _, self.current_states = self.actor.sample(
-                    obs_seq, obs_info, states=self.current_states
-                )
+                # [FIX] 상태를 입력으로 넣고, 다음 상태를 받아와 저장
+                action, _, _, next_states = self.actor.sample(obs_seq, obs_info, self.actor_state)
+                self.actor_state = next_states  # 상태 갱신 (기억 유지)
         
         return action.cpu().numpy()[0]  # 1D array
 
@@ -214,18 +218,15 @@ class SACAgent:
         # 1. Critic Update
         # ----------------------------
         with torch.no_grad():
-            # Next Action sampling
-            next_action, next_log_prob, _, _ = self.actor.sample(next_obs_seq, next_obs_info)
-            
-            # Target Q
-            q1_next, q2_next, _ = self.critic_target(next_obs_seq, next_action, next_obs_info)
-            min_q_next = torch.min(q1_next, q2_next)
-            
-            # Soft Q Target
-            q_target = reward + (1 - done) * self.gamma * (min_q_next - self.alpha * next_log_prob)
+            # 학습 시에는 랜덤 배치이므로 상태(states)를 None으로 하여 초기화된 상태에서 시작
+            # (Replay Buffer에 Hidden State를 저장하지 않는 방식)
+            next_action, next_log_prob, _, _ = self.actor.sample(next_obs_seq, next_obs_info, states=None)
+            q1_next, q2_next, _ = self.critic_target(next_obs_seq, next_action, next_obs_info, states=None)
+            min_q_next = torch.min(q1_next, q2_next) - self.alpha * next_log_prob
+            q_target = reward + (1 - done) * self.gamma * min_q_next
 
         # Current Q
-        q1, q2, _ = self.critic(obs_seq, action, obs_info)
+        q1, q2, _ = self.critic(obs_seq, action, obs_info, states=None)
         critic_loss = F.mse_loss(q1, q_target) + F.mse_loss(q2, q_target)
 
         self.critic_optimizer.zero_grad()
@@ -237,9 +238,8 @@ class SACAgent:
         # 2. Actor Update
         # ----------------------------
         # Current Action sampling (Reparameterization)
-        action_new, log_prob, _, _ = self.actor.sample(obs_seq, obs_info)
-        
-        q1_new, q2_new, _ = self.critic(obs_seq, action_new, obs_info)
+        action_new, log_prob, _, _ = self.actor.sample(obs_seq, obs_info, states=None)
+        q1_new, q2_new, _ = self.critic(obs_seq, action_new, obs_info, states=None)
         min_q_new = torch.min(q1_new, q2_new)
         
         # Maximize (min_q - alpha * log_prob)

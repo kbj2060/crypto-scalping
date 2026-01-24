@@ -1,6 +1,8 @@
 """
-SAC (Soft Actor-Critic) 모델 학습 스크립트
-연속형 행동 공간을 사용하는 Off-policy 알고리즘
+SAC (Soft Actor-Critic) 모델 학습 스크립트 (Final)
+- Best/Last 모델 및 스케일러 분리 저장
+- 실시간 리워드 그래프 (Live Plotting)
+- 연속형 행동 공간 (Action Dead-zone 적용)
 """
 import logging
 import os
@@ -9,6 +11,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+import matplotlib.pyplot as plt
 from datetime import datetime
 from collections import deque
 
@@ -34,7 +37,7 @@ from model.mtf_processor import MTFProcessor
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s | %(message)s',
     handlers=[
         logging.FileHandler('logs/train_sac.log', encoding='utf-8'),
         logging.StreamHandler()
@@ -50,7 +53,8 @@ logging.getLogger('model.mtf_processor').setLevel(logging.WARNING)
 class SACTrainer:
     """SAC 모델 학습 클래스"""
     
-    def __init__(self):
+    def __init__(self, enable_visualization=True):
+        self.enable_visualization = enable_visualization
         # 1. 데이터 수집기 초기화
         self.data_collector = DataCollector(use_saved_data=True)
         if not self.data_collector.load_saved_data():
@@ -125,24 +129,43 @@ class SACTrainer:
             device=device
         )
         
-        # 기존 모델 로드 (있는 경우)
-        model_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model')
-        if os.path.exists(model_path):
+        # 모델 로드 (Last 모델 우선 로드)
+        base_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model').replace('.pth', '')
+        last_model_path = f"{base_path}_last.pth"
+        
+        if os.path.exists(last_model_path):
             try:
-                self.agent.load_model(model_path)
-                logger.info(f"✅ 기존 모델 로드: {model_path}")
+                self.agent.load_model(last_model_path)
+                logger.info(f"✅ 기존 모델(Last) 로드: {last_model_path}")
             except Exception as e:
                 logger.warning(f"모델 로드 실패 (새 모델로 시작): {e}")
         else:
             logger.info("새 모델로 학습 시작")
         
-        # 학습 상태
+        # 학습 상태 변수
         self.current_position = None
         self.entry_price = None
         self.entry_index = None
         self.prev_pnl = 0.0
         self.episode_rewards = []
+        self.avg_rewards = []
         self.total_steps = 0
+
+        # 실시간 그래프 설정
+        if self.enable_visualization:
+            try:
+                plt.ion()
+                self.fig, self.ax = plt.subplots(figsize=(10, 5))
+                self.ax.set_title('SAC Real-time Training')
+                self.ax.set_xlabel('Episode')
+                self.ax.set_ylabel('Reward')
+                self.ax.grid(True, alpha=0.3)
+                self.line1, = self.ax.plot([], [], label='Reward', alpha=0.3, color='gray')
+                self.line2, = self.ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
+                self.ax.legend()
+            except Exception as e:
+                logger.warning(f"그래프 초기화 실패 (계속 진행): {e}")
+                self.enable_visualization = False
     
     def _load_or_create_features(self):
         """
@@ -216,52 +239,49 @@ class SACTrainer:
     
     def precalculate_strategies(self):
         """
-        [문제 해결 1] 전략 신호를 미리 계산하여 DataFrame에 저장
-        - 학습 루프 내에서 strategy.analyze() 호출 제거 (속도 향상 + 인덱스 꼬임 방지)
-        - CSV에 전략 컬럼이 이미 있으면 건너뛰기
+        전략 신호 사전 계산 (캐싱 기능 추가)
+        - 파일이 있으면 로드 (빠름) ⚡
+        - 없으면 계산 후 저장 (느림) 🐢 -> 💾
         """
+        # 캐시 파일 경로 설정
+        cache_path = 'data/cached_strategies.csv'
+        
+        # 1. 캐시 파일이 존재하는지 확인
+        if os.path.exists(cache_path):
+            logger.info(f"⚡ 캐시된 전략 데이터를 발견했습니다! 로드 중... ({cache_path})")
+            try:
+                # 저장된 파일 불러오기
+                cached_df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+                self.data_collector.eth_data = cached_df
+                logger.info("✅ 전략 데이터 로드 완료 (계산 생략)")
+                return
+            except Exception as e:
+                logger.warning(f"캐시 파일 로드 실패 (새로 계산합니다): {e}")
+
+        # 2. 캐시가 없으면 계산 시작 (기존 로직)
+        logger.info("🧠 전략 신호 사전 계산 중 (Pre-calculation)...")
         df = self.data_collector.eth_data
         
-        # 전략 컬럼이 이미 모두 있는지 확인
-        required_cols = [f'strategy_{i}' for i in range(len(self.strategies))]
-        existing_cols = [col for col in required_cols if col in df.columns]
-        
-        if len(existing_cols) == len(required_cols):
-            logger.info(f"✅ 전략 신호 컬럼이 이미 존재합니다 ({len(existing_cols)}개). 계산을 건너뜁니다.")
-            return
-        
-        logger.info("🧠 전략 신호 사전 계산 중 (Pre-calculation)...")
-        
-        # 전략별 컬럼 초기화 (없는 것만)
+        # 전략별 컬럼 초기화
         for i in range(len(self.strategies)):
-            if f'strategy_{i}' not in df.columns:
-                df[f'strategy_{i}'] = 0.0
+            df[f'strategy_{i}'] = 0.0
             
-        # 전체 데이터 순회하며 계산 (다소 시간 소요되나 학습 시 매우 빠름)
-        # 속도를 위해 최근 N개 데이터만 계산할 수도 있으나, 여기선 전체 계산
-        # 실제로는 Vectorization이 가능한 전략은 Vectorization으로 짜는 게 좋음.
-        # 여기서는 기존 구조 호환을 위해 Loop 사용하되, 한 번만 수행.
-        
         total_len = len(df)
         start_idx = config.LOOKBACK + 50
         
-        # tqdm을 사용한 진행상황 표시
+        # 진행률 표시 (tqdm)
         try:
             from tqdm import tqdm
-            use_tqdm = True
+            iterator = tqdm(range(start_idx, total_len), desc="Strategy Calc")
         except ImportError:
-            use_tqdm = False
             logger.warning("tqdm이 설치되지 않아 진행상황 표시를 건너뜁니다.")
+            iterator = range(start_idx, total_len)
         
-        iterator = tqdm(range(start_idx, total_len), desc="Strategy Calc") if use_tqdm else range(start_idx, total_len)
-        
-        # 1000개 단위로 진행상황 로그
         for i in iterator:
             self.data_collector.current_index = i
             
             for s_idx, strategy in enumerate(self.strategies):
                 try:
-                    # 전략 실행
                     result = strategy.analyze(self.data_collector)
                     score = 0.0
                     if result:
@@ -273,21 +293,16 @@ class SACTrainer:
                         elif signal == 'SHORT': 
                             score = -conf
                     
-                    # 결과 저장 (iloc 사용)
-                    # i번째 행에 저장
                     df.iat[i, df.columns.get_loc(f'strategy_{s_idx}')] = score
                     
-                except Exception as e:
-                    # 개별 전략 오류는 무시하고 계속 진행
+                except Exception:
                     continue
         
-        # 전략 신호 계산 완료 후 CSV에 저장
-        feature_file_path = 'data/training_features.csv'
-        if os.path.exists(feature_file_path):
-            logger.info("💾 전략 신호를 피처 파일에 저장 중...")
-            df.to_csv(feature_file_path)
-                    
-        logger.info("✅ 전략 신호 계산 완료!")
+        # 3. 계산 끝난 후 파일로 저장 (중요!)
+        logger.info(f"💾 계산된 전략 데이터를 저장합니다: {cache_path}")
+        os.makedirs('data', exist_ok=True)
+        df.to_csv(cache_path)
+        logger.info("✅ 전략 신호 계산 및 저장 완료!")
     
     def _fit_global_scaler(self):
         """29개 고급 피처 기반 전역 스케일러 학습 (최적화 버전)"""
@@ -356,6 +371,22 @@ class SACTrainer:
         except Exception as e:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
             logger.warning("스케일러 학습 실패, 학습 도중 online-fitting으로 대체합니다.")
+    
+    def live_plot(self):
+        """실시간 그래프 업데이트"""
+        if not self.enable_visualization:
+            return
+        try:
+            x = range(len(self.episode_rewards))
+            self.line1.set_data(x, self.episode_rewards)
+            self.line2.set_data(x, self.avg_rewards)
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            plt.pause(0.01)
+        except Exception:
+            pass  # 그래프 오류는 무시하고 학습 계속
     
     def interpret_action(self, action_value):
         """
@@ -531,7 +562,7 @@ class SACTrainer:
         warmup_ratio = getattr(config, 'SAC_WARMUP_RATIO', 0.05)
         
         logger.info("=" * 60)
-        logger.info("🚀 SAC 모델 학습 시작 (Fixed Version)")
+        logger.info("🚀 SAC 모델 학습 시작 (Best/Last Save Enabled)")
         logger.info("=" * 60)
         logger.info(f"에피소드 수: {num_episodes}")
         logger.info(f"에피소드당 최대 스텝: {max_steps_per_episode}")
@@ -542,21 +573,24 @@ class SACTrainer:
         # 스케줄러 설정
         self.agent.setup_schedulers(total_steps, warmup_ratio)
         
-        # 스케일러 저장 경로 설정
-        scaler_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model').replace('.pth', '_scaler.pkl')
-        if not scaler_path.endswith('.pkl'):
-            scaler_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model') + '_scaler.pkl'
+        # [NEW] 저장 경로 설정 (Best/Last 분리)
+        base_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model').replace('.pth', '')
         
-        model_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model')
+        best_model_path = f"{base_path}_best.pth"
+        best_scaler_path = f"{base_path}_best_scaler.pkl"
         
+        last_model_path = f"{base_path}_last.pth"
+        last_scaler_path = f"{base_path}_last_scaler.pkl"
+        
+        # 초기 스케일러 저장 (Last에 백업)
+        os.makedirs(os.path.dirname(last_scaler_path), exist_ok=True)
+        self.env.preprocessor.save(last_scaler_path)
+        
+        logger.info(f"🚀 SAC 학습 시작 (Best/Last Save Enabled)")
         best_reward = float('-inf')
         
         for episode in range(1, num_episodes + 1):
             try:
-                logger.info(f"\n{'=' * 60}")
-                logger.info(f"📚 에피소드 {episode}/{num_episodes}")
-                logger.info(f"{'=' * 60}")
-                
                 # 에피소드 실행
                 episode_reward = self.train_episode(episode_num=episode, max_steps=max_steps_per_episode)
                 if episode_reward is None:
@@ -564,30 +598,30 @@ class SACTrainer:
                     continue
                 
                 self.episode_rewards.append(episode_reward)
+                avg_reward = np.mean(self.episode_rewards[-10:])
+                self.avg_rewards.append(avg_reward)
                 
                 # 통계 출력
-                avg_reward = sum(self.episode_rewards[-10:]) / len(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else episode_reward
-                # 로그 출력 시 현재 LR도 함께 출력
                 current_lr = self.agent.actor_scheduler.get_last_lr()[0] if self.agent.actor_scheduler else config.SAC_LEARNING_RATE
-                logger.info(f"✅ 에피소드 {episode} 완료")
-                logger.info(f"   총 보상: {episode_reward:.4f}")
-                logger.info(f"   최근 10개 평균 보상: {avg_reward:.4f}")
-                logger.info(f"   현재 학습률: {current_lr:.6f}")
+                logger.info(f"✅ Ep {episode}: Reward {episode_reward:.4f} | Avg {avg_reward:.4f} | LR {current_lr:.6f}")
                 
-                # 최고 성능 모델 저장
+                # 그래프 갱신
+                self.live_plot()
+                
+                # [NEW] Best 모델 저장 (신기록 갱신 시)
                 if episode_reward > best_reward:
                     best_reward = episode_reward
-                    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-                    self.agent.save_model(model_path)
-                    self.env.preprocessor.save(scaler_path)
-                    logger.info(f"🏆 최고 성능 모델 & 스케일러 저장 완료: 보상 {best_reward:.4f}")
+                    os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
+                    self.agent.save_model(best_model_path)
+                    self.env.preprocessor.save(best_scaler_path)
+                    logger.info(f"🏆 신기록 달성! ({best_reward:.4f}) -> Best 모델 저장")
                 
-                # 주기적 저장
-                elif episode % save_interval == 0:
-                    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-                    self.agent.save_model(model_path)
-                    self.env.preprocessor.save(scaler_path)
-                    logger.info(f"💾 정기 저장 완료 (에피소드 {episode})")
+                # [NEW] Last 모델 저장 (매번 or 주기적으로)
+                if episode % save_interval == 0:
+                    os.makedirs(os.path.dirname(last_model_path), exist_ok=True)
+                    self.agent.save_model(last_model_path)
+                    self.env.preprocessor.save(last_scaler_path)
+                    # logger.info(f"💾 정기 저장 완료 (Ep {episode})")
                 
             except KeyboardInterrupt:
                 logger.info("학습 중단")
@@ -596,16 +630,22 @@ class SACTrainer:
                 logger.error(f"에피소드 {episode} 실패: {e}", exc_info=True)
                 continue
         
-        # 최종 모델 저장
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        self.agent.save_model(model_path)
-        self.env.preprocessor.save(scaler_path)
+        # 최종 모델 저장 (Last)
+        os.makedirs(os.path.dirname(last_model_path), exist_ok=True)
+        self.agent.save_model(last_model_path)
+        self.env.preprocessor.save(last_scaler_path)
+        
+        # 학습 종료 시 그래프 유지
+        if self.enable_visualization:
+            plt.ioff()
+            plt.show()
+        
         logger.info("=" * 60)
         logger.info("✅ 학습 및 스케일러 저장 완료")
         logger.info(f"총 스텝: {self.total_steps}")
         logger.info(f"평균 보상: {sum(self.episode_rewards) / len(self.episode_rewards) if self.episode_rewards else 0:.4f}")
-        logger.info(f"모델 저장 위치: {model_path}")
-        logger.info(f"스케일러 저장 위치: {scaler_path}")
+        logger.info(f"Best 모델: {best_model_path}")
+        logger.info(f"Last 모델: {last_model_path}")
         logger.info("=" * 60)
 
 
@@ -613,14 +653,18 @@ if __name__ == '__main__':
     import argparse
     
     parser = argparse.ArgumentParser(description='SAC 모델 학습')
-    parser.add_argument('--episodes', type=int, default=1000, help='학습 에피소드 수')
-    parser.add_argument('--steps', type=int, default=480, help='에피소드당 최대 스텝 수')
-    parser.add_argument('--save-interval', type=int, default=50, help='모델 저장 간격 (에피소드)')
+    parser.add_argument('--episodes', type=int, default=config.TRAIN_NUM_EPISODES, help='학습 에피소드 수')
+    parser.add_argument('--steps', type=int, default=config.TRAIN_MAX_STEPS_PER_EPISODE, help='에피소드당 최대 스텝 수')
+    parser.add_argument('--save-interval', type=int, default=config.TRAIN_SAVE_INTERVAL, help='모델 저장 간격 (에피소드)')
+    parser.add_argument('--no-plot', action='store_true', help='그래프 비활성화')
     
     args = parser.parse_args()
     
+    # matplotlib 한글 폰트 설정
+    plt.rcParams['axes.unicode_minus'] = False
+    
     try:
-        trainer = SACTrainer()
+        trainer = SACTrainer(enable_visualization=not args.no_plot)
         trainer.train(
             num_episodes=args.episodes,
             max_steps_per_episode=args.steps,

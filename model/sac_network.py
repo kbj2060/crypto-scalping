@@ -1,14 +1,13 @@
 """
-Continuous SAC Network Architecture
-- Multi-Layer xLSTM + Pre-LN Residuals
-- Gaussian Policy (Continuous Action with Tanh Squashing)
-- Critic accepts [State, Continuous Action]
+SAC (Soft Actor-Critic) Network Architecture (Fixed Dimension Mismatch)
+- Input Projection Layer 추가 (29 -> 128 차원 변환)
+- 모든 xLSTM 레이어 차원 통일 (Dimension Mismatch 해결)
+- Multi-Layer, Pre-LN, Residual 구조 유지
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
-from .xlstm_network import sLSTMCell, MultiHeadAttention
 import sys
 import os
 
@@ -18,16 +17,63 @@ import config
 
 logger = __import__('logging').getLogger(__name__)
 
+# ==========================================
+# 1. Core Modules
+# ==========================================
+
+class MultiHeadAttention(nn.Module):
+    """Weighted Pooling이 적용된 어텐션 레이어"""
+    def __init__(self, hidden_dim, heads=4):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=heads, batch_first=True)
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.pool_weight = nn.Linear(hidden_dim, 1)
+        
+    def forward(self, x):
+        attn_output, _ = self.attn(x, x, x)
+        x = self.norm(x + attn_output)
+        weights = torch.softmax(self.pool_weight(x), dim=1)
+        context = (x * weights).sum(dim=1)
+        return context
+
+
+class sLSTMCell(nn.Module):
+    """sLSTM Cell (Stabilized Exponential Gating)"""
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.weight = nn.Linear(input_dim + hidden_dim, 4 * hidden_dim)
+        
+    def forward(self, x, h, c, n):
+        combined = torch.cat([x, h], dim=-1)
+        gates = self.weight(combined)
+        i, f, o, z = gates.chunk(4, dim=-1)
+        
+        i = torch.clamp(i, min=-5, max=5)
+        f = torch.clamp(f, min=-5, max=5)
+        i = torch.exp(i)
+        f = torch.exp(f)
+        
+        c_next = f * c + i * torch.tanh(z)
+        n_next = f * n + i
+        
+        c_next = torch.clamp(c_next, min=-1e6, max=1e6)
+        n_next = torch.clamp(n_next, min=1e-6, max=1e6)
+        
+        h_next = torch.sigmoid(o) * (c_next / n_next)
+        h_next = torch.nan_to_num(h_next, nan=0.0)
+            
+        return h_next, c_next, n_next
+
+
+# ==========================================
+# 2. SAC Actor (Fixed)
+# ==========================================
 
 class SACActor(nn.Module):
-    """
-    Gaussian Policy Actor for Continuous SAC
-    Outputs Mean and LogStd for Normal Distribution
-    """
-    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=None, 
+    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128, 
                  num_layers=None, dropout=None, log_std_min=-20, log_std_max=2):
         super().__init__()
-        
         # Config 연동
         self.hidden_dim = hidden_dim if hidden_dim is not None else config.NETWORK_HIDDEN_DIM
         self.num_layers = num_layers if num_layers is not None else config.NETWORK_NUM_LAYERS
@@ -36,53 +82,55 @@ class SACActor(nn.Module):
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
         
-        # 1. Feature Extractor (Shared xLSTM Structure)
+        # [FIX] 0. Input Projection (차원 불일치 해결 핵심)
+        # Raw Input(29) -> Hidden Dim(128)으로 먼저 변환
         self.input_proj = nn.Linear(input_dim, self.hidden_dim)
         self.input_norm = nn.LayerNorm(self.hidden_dim)
         self.dropout = nn.Dropout(dropout_p)
-        
+
+        # 1. Multi-Layer xLSTM (이제 입력이 무조건 hidden_dim임)
         self.xlstm_layers = nn.ModuleList([
-            sLSTMCell(self.hidden_dim, self.hidden_dim) for _ in range(self.num_layers)
+            sLSTMCell(self.hidden_dim, self.hidden_dim)  # All layers same size
+            for _ in range(self.num_layers)
         ])
+        
         self.layer_norms = nn.ModuleList([
             nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)
         ])
         
         self.attention = MultiHeadAttention(self.hidden_dim, heads=config.NETWORK_ATTENTION_HEADS)
         
-        # 2. Deep Info Encoder
-        info_encoder_dim = config.NETWORK_INFO_ENCODER_DIM
+        # 2. Info Encoder
         self.info_encoder = nn.Sequential(
-            nn.Linear(info_dim, info_encoder_dim),
-            nn.LayerNorm(info_encoder_dim),
+            nn.Linear(info_dim, 64),
+            nn.LayerNorm(64),
             nn.GELU(),
             nn.Dropout(dropout_p),
-            nn.Linear(info_encoder_dim, info_encoder_dim),
-            nn.LayerNorm(info_encoder_dim),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.GELU()
         )
         
-        # 3. Shared Backbone
-        combined_dim = self.hidden_dim + info_encoder_dim
+        # 3. Backbone
+        combined_dim = self.hidden_dim + 64
         self.backbone = nn.Sequential(
-            nn.Linear(combined_dim, config.NETWORK_SHARED_TRUNK_DIM1),
-            nn.LayerNorm(config.NETWORK_SHARED_TRUNK_DIM1),
+            nn.Linear(combined_dim, 256),
+            nn.LayerNorm(256),
             nn.GELU(),
             nn.Dropout(dropout_p),
-            nn.Linear(config.NETWORK_SHARED_TRUNK_DIM1, config.NETWORK_SHARED_TRUNK_DIM2),
-            nn.LayerNorm(config.NETWORK_SHARED_TRUNK_DIM2),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
             nn.GELU()
         )
         
-        # 4. Heads (Mean & LogStd)
-        self.mu_head = nn.Linear(config.NETWORK_SHARED_TRUNK_DIM2, action_dim)
-        self.log_std_head = nn.Linear(config.NETWORK_SHARED_TRUNK_DIM2, action_dim)
+        # 4. Heads
+        self.mu_head = nn.Linear(128, action_dim)
+        self.log_std_head = nn.Linear(128, action_dim)
 
     def forward(self, x, info=None, states=None):
         batch_size, seq_len, _ = x.size()
         device = x.device
         
-        # 상태 초기화
         if states is None:
             h = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
             c = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(device)
@@ -90,49 +138,61 @@ class SACActor(nn.Module):
         else:
             h, c, n = states
 
-        # Feature Extraction
-        current_input = self.dropout(self.input_norm(self.input_proj(x)))
+        # [FIX] Projection First
+        # (Batch, Seq, 29) -> (Batch, Seq, 128)
+        x_emb = self.input_proj(x)
+        current_input = self.input_norm(x_emb)
+        current_input = self.dropout(current_input)
+        
         next_h, next_c, next_n = [], [], []
-
+        
         for layer_idx in range(self.num_layers):
             h_t, c_t, n_t = h[layer_idx], c[layer_idx], n[layer_idx]
-            cell = self.xlstm_layers[layer_idx]
-            norm = self.layer_norms[layer_idx]
+            layer_h_list = []
             
-            layer_outputs = []
+            # Loop over sequence
             for t in range(seq_len):
-                input_t = current_input[:, t, :]
-                x_norm = norm(input_t)
-                h_t, c_t, n_t = cell(x_norm, h_t, c_t, n_t, None)
-                out_t = input_t + h_t  # Residual
-                layer_outputs.append(out_t.unsqueeze(1))
+                input_t = current_input[:, t, :]  # (Batch, 128)
+                
+                # Pre-LN (이제 안전함: 128 -> 128)
+                x_norm = self.layer_norms[layer_idx](input_t)
+                h_t, c_t, n_t = self.xlstm_layers[layer_idx](x_norm, h_t, c_t, n_t)
+                
+                # Residual Connection
+                out_t = h_t + input_t
+                layer_h_list.append(out_t.unsqueeze(1))
             
-            current_input = torch.cat(layer_outputs, dim=1)
-            current_input = self.dropout(current_input)
+            # Update input for next layer
+            current_input = torch.cat(layer_h_list, dim=1)
+            # Optional: lighter dropout between layers
+            if layer_idx < self.num_layers - 1:
+                current_input = self.dropout(current_input)
             
             next_h.append(h_t)
             next_c.append(c_t)
             next_n.append(n_t)
-
+            
         context = self.attention(current_input)
-        if info is None: 
+        
+        if info is None:
             info = torch.zeros(batch_size, 13).to(device)
         info_emb = self.info_encoder(info)
         
         combined = torch.cat([context, info_emb], dim=-1)
-        features = self.backbone(combined)
+        x_emb = self.backbone(combined)
         
-        mu = self.mu_head(features)
-        log_std = self.log_std_head(features)
+        mu = self.mu_head(x_emb)
+        log_std = self.log_std_head(x_emb)
         log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
         
-        return mu, log_std, (torch.stack(next_h), torch.stack(next_c), torch.stack(next_n))
+        new_states = (torch.stack(next_h), torch.stack(next_c), torch.stack(next_n))
+        return mu, log_std, new_states
 
     def sample(self, x, info=None, states=None):
         """
         Reparameterization Trick Sampling
         Returns:
-            action: Tanh applied action [-1, 1]
+            action: Tanh applied action [-1, 1] (Continuous)
             log_prob: Log probability of the action
             mean: Tanh applied mean (for deterministic evaluation)
             next_states: LSTM states
@@ -140,75 +200,66 @@ class SACActor(nn.Module):
         mu, log_std, next_states = self.forward(x, info, states)
         std = log_std.exp()
         dist = Normal(mu, std)
-        
-        # Reparameterization Trick (z ~ N(0, 1))
         z = dist.rsample()
-        action = torch.tanh(z)
+        action = torch.tanh(z)  # Continuous Action [-1, 1]
         
-        # Tanh Squash Correction for Log Prob
-        # log_prob = log_prob(z) - log(1 - tanh(z)^2)
         log_prob = dist.log_prob(z) - torch.log(1 - action.pow(2) + 1e-6)
         log_prob = log_prob.sum(dim=-1, keepdim=True)
-        
         return action, log_prob, torch.tanh(mu), next_states
 
 
+# ==========================================
+# 3. SAC Critic (Fixed)
+# ==========================================
+
 class SACCritic(nn.Module):
-    """
-    Continuous Critic
-    Accepts State + Continuous Action (Scalar/Vector)
-    """
-    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=None, 
+    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128, 
                  num_layers=None, dropout=None):
         super().__init__()
-        
+        # Config 연동
         self.hidden_dim = hidden_dim if hidden_dim is not None else config.NETWORK_HIDDEN_DIM
         self.num_layers = num_layers if num_layers is not None else config.NETWORK_NUM_LAYERS
         dropout_p = dropout if dropout is not None else config.NETWORK_DROPOUT
-
-        # 1. Feature Extractor (xLSTM)
+        
+        # [FIX] Input Projection
         self.input_proj = nn.Linear(input_dim, self.hidden_dim)
         self.input_norm = nn.LayerNorm(self.hidden_dim)
         self.dropout = nn.Dropout(dropout_p)
         
         self.xlstm_layers = nn.ModuleList([
-            sLSTMCell(self.hidden_dim, self.hidden_dim) for _ in range(self.num_layers)
+            sLSTMCell(self.hidden_dim, self.hidden_dim)
+            for _ in range(self.num_layers)
         ])
+        
         self.layer_norms = nn.ModuleList([
             nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)
         ])
         
         self.attention = MultiHeadAttention(self.hidden_dim, heads=config.NETWORK_ATTENTION_HEADS)
         
-        # 2. Deep Info Encoder
-        info_encoder_dim = config.NETWORK_INFO_ENCODER_DIM
         self.info_encoder = nn.Sequential(
-            nn.Linear(info_dim, info_encoder_dim),
-            nn.LayerNorm(info_encoder_dim),
+            nn.Linear(info_dim, 64),
+            nn.LayerNorm(64),
             nn.GELU(),
             nn.Dropout(dropout_p),
-            nn.Linear(info_encoder_dim, info_encoder_dim),
-            nn.LayerNorm(info_encoder_dim),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.GELU()
         )
         
-        # 3. State-Action Encoder
-        # [중요] action_dim(Continuous Scalar/Vector)을 concat
-        combined_dim = self.hidden_dim + info_encoder_dim + action_dim
-        
+        combined_dim = self.hidden_dim + 64 + action_dim
         self.sa_encoder = nn.Sequential(
-            nn.Linear(combined_dim, config.NETWORK_SHARED_TRUNK_DIM1),
-            nn.LayerNorm(config.NETWORK_SHARED_TRUNK_DIM1),
+            nn.Linear(combined_dim, 256),
+            nn.LayerNorm(256),
             nn.GELU(),
             nn.Dropout(dropout_p),
-            nn.Linear(config.NETWORK_SHARED_TRUNK_DIM1, config.NETWORK_SHARED_TRUNK_DIM2),
-            nn.LayerNorm(config.NETWORK_SHARED_TRUNK_DIM2),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
             nn.GELU()
         )
         
-        # 4. Twin Heads
-        self.q1_head = nn.Linear(config.NETWORK_SHARED_TRUNK_DIM2, 1)
-        self.q2_head = nn.Linear(config.NETWORK_SHARED_TRUNK_DIM2, 1)
+        self.q1_head = nn.Linear(128, 1)
+        self.q2_head = nn.Linear(128, 1)
 
     def forward(self, x, action, info=None, states=None):
         batch_size, seq_len, _ = x.size()
@@ -221,37 +272,43 @@ class SACCritic(nn.Module):
         else:
             h, c, n = states
 
-        # Feature Extraction
-        current_input = self.dropout(self.input_norm(self.input_proj(x)))
+        # [FIX] Projection
+        x_emb = self.input_proj(x)
+        current_input = self.input_norm(x_emb)
+        current_input = self.dropout(current_input)
+        
         next_h, next_c, next_n = [], [], []
-
+        
         for layer_idx in range(self.num_layers):
             h_t, c_t, n_t = h[layer_idx], c[layer_idx], n[layer_idx]
-            cell = self.xlstm_layers[layer_idx]
-            norm = self.layer_norms[layer_idx]
+            layer_h_list = []
             
-            layer_outputs = []
             for t in range(seq_len):
                 input_t = current_input[:, t, :]
-                x_norm = norm(input_t)
-                h_t, c_t, n_t = cell(x_norm, h_t, c_t, n_t, None)
-                out_t = input_t + h_t  # Residual
-                layer_outputs.append(out_t.unsqueeze(1))
+                
+                x_norm = self.layer_norms[layer_idx](input_t)
+                h_t, c_t, n_t = self.xlstm_layers[layer_idx](x_norm, h_t, c_t, n_t)
+                
+                out_t = h_t + input_t  # Residual
+                layer_h_list.append(out_t.unsqueeze(1))
             
-            current_input = torch.cat(layer_outputs, dim=1)
-            current_input = self.dropout(current_input)
+            current_input = torch.cat(layer_h_list, dim=1)
+            # Optional: lighter dropout between layers
+            if layer_idx < self.num_layers - 1:
+                current_input = self.dropout(current_input)
             
             next_h.append(h_t)
             next_c.append(c_t)
             next_n.append(n_t)
-
+            
         context = self.attention(current_input)
-        if info is None: 
+        
+        if info is None:
             info = torch.zeros(batch_size, 13).to(device)
         info_emb = self.info_encoder(info)
 
-        # State + Continuous Action Concat
         cat_input = torch.cat([context, info_emb, action], dim=-1)
         features = self.sa_encoder(cat_input)
         
-        return self.q1_head(features), self.q2_head(features), (torch.stack(next_h), torch.stack(next_c), torch.stack(next_n))
+        new_states = (torch.stack(next_h), torch.stack(next_c), torch.stack(next_n))
+        return self.q1_head(features), self.q2_head(features), new_states

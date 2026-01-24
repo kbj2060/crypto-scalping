@@ -77,6 +77,7 @@ TRAIN_BATCH_SIZE = 1024  # 배치 크기 (메모리에서 업데이트할 최소
 TRAIN_SAMPLE_SIZE = 50000  # 스케일러 학습용 샘플 크기
 TRAIN_SPLIT = 0.7  # 학습 데이터 비율 (70%)
 VAL_SPLIT = 0.85  # 검증 데이터 비율 (85%, Train + Val)
+TRAIN_NUM_EPISODES = 2000  # 에피소드 수
 TRAIN_MAX_STEPS_PER_EPISODE = 480  # 에피소드당 최대 스텝 수
 TRAIN_SAVE_INTERVAL = 50  # 모델 저장 간격 (에피소드)
 
