@@ -1,6 +1,7 @@
 """
-SAC (Soft Actor-Critic) Agent
-Replay Buffer와 Alpha(엔트로피 계수) 자동 튜닝 기능 포함
+Continuous SAC Agent
+- Uses Gaussian Policy (Reparameterization Trick)
+- Automatic Entropy Tuning with target_entropy = -action_dim
 """
 import torch
 import torch.nn.functional as F
@@ -11,25 +12,23 @@ import random
 from collections import deque
 import sys
 import os
+import logging
 
-# 상위 폴더를 경로에 추가 (config 모듈 접근용)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-
 from .sac_network import SACActor, SACCritic
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ReplayBuffer:
-    """Experience Replay Buffer for SAC"""
+    """Experience Replay Buffer for Continuous SAC"""
     def __init__(self, capacity, device):
         self.buffer = deque(maxlen=capacity)
         self.device = device
 
     def push(self, state, action, reward, next_state, done):
-        """경험 저장"""
+        """action: Continuous array"""
         self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size):
@@ -38,6 +37,7 @@ class ReplayBuffer:
         
         # State Unpacking (seq, info)
         obs_seq, obs_info = zip(*[b[0] for b in batch])
+        # Action is Continuous FloatTensor
         actions = torch.FloatTensor(np.array([b[1] for b in batch])).to(self.device)
         rewards = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1).to(self.device)
         
@@ -60,13 +60,13 @@ class ReplayBuffer:
         next_obs_info = torch.cat(next_obs_info, dim=0).to(self.device)
 
         return (obs_seq, obs_info), actions, rewards, (next_obs_seq, next_obs_info), dones
-
+        
     def __len__(self):
         return len(self.buffer)
 
 
 class SACAgent:
-    """Soft Actor-Critic Agent"""
+    """Soft Actor-Critic Agent (Continuous)"""
     def __init__(self, state_dim, action_dim, info_dim=13, hidden_dim=None, device='cpu'):
         """
         Args:
@@ -77,27 +77,28 @@ class SACAgent:
             device: 'cuda' or 'cpu'
         """
         self.device = device
+        # Continuous Action Dim (보통 1 또는 3)
+        self.action_dim = action_dim 
+        
         self.gamma = config.SAC_GAMMA
         self.tau = config.SAC_TAU
-        self.alpha = config.SAC_ALPHA  # 초기 엔트로피 계수
+        self.alpha = config.SAC_ALPHA
         
         # Hidden Dim도 Config 사용 (None이면 config에서 가져오기)
         if hidden_dim is None:
             hidden_dim = config.NETWORK_HIDDEN_DIM
         
-        # Networks
+        # Networks (Continuous SACActor 사용)
         self.actor = SACActor(state_dim, action_dim, info_dim, hidden_dim).to(device)
         self.critic = SACCritic(state_dim, action_dim, info_dim, hidden_dim).to(device)
         self.critic_target = SACCritic(state_dim, action_dim, info_dim, hidden_dim).to(device)
-        
-        # Target Network 초기화
         self.critic_target.load_state_dict(self.critic.state_dict())
         
         # Optimizers (config에서 학습률 가져오기)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=config.SAC_LEARNING_RATE)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=config.SAC_LEARNING_RATE)
         
-        # Automatic Entropy Tuning
+        # Auto Entropy Tuning (Continuous: target = -action_dim)
         self.target_entropy = -float(action_dim)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
         self.alpha_optimizer = optim.Adam([self.log_alpha], lr=config.SAC_LEARNING_RATE)
@@ -110,7 +111,12 @@ class SACAgent:
         self.critic_scheduler = None
         self.alpha_scheduler = None
         
-        logger.info(f"✅ SAC Agent 초기화 완료 (State: {state_dim}, Action: {action_dim}, Info: {info_dim})")
+        # LSTM 상태 저장소
+        self.current_states = None
+        self.actor_states = None
+        self.critic_states = None  # 학습 시 사용
+
+        logger.info(f"✅ Continuous SAC Agent Initialized. Action Dim: {action_dim}")
 
     def setup_schedulers(self, total_steps, warmup_ratio=0.05):
         """
@@ -146,15 +152,22 @@ class SACAgent:
         if self.alpha_scheduler:
             self.alpha_scheduler.step()
 
+    def reset_episode_states(self):
+        """에피소드 시작 시 상태 초기화"""
+        self.current_states = None
+        self.actor_states = None
+        self.critic_states = None
+
     def select_action(self, state, evaluate=False):
         """
-        행동 선택
+        Stateful Action Selection
+        LSTM 상태를 유지하며 행동 결정
         
         Args:
             state: (obs_seq, obs_info) 튜플
             evaluate: True면 평균 행동 반환, False면 샘플링
         Returns:
-            action: (action_dim,) numpy array
+            action: (numpy array) Continuous value [-1, 1]
         """
         obs_seq, obs_info = state
         obs_seq = obs_seq.to(self.device)
@@ -162,15 +175,21 @@ class SACAgent:
         
         with torch.no_grad():
             if evaluate:
-                _, _, action = self.actor.sample(obs_seq, obs_info)
+                # 평가 시: Mean 사용 (Deterministic)
+                _, _, action, self.current_states = self.actor.sample(
+                    obs_seq, obs_info, states=self.current_states
+                )
             else:
-                action, _, _ = self.actor.sample(obs_seq, obs_info)
+                # 학습 시: Sampling (Stochastic)
+                action, _, _, self.current_states = self.actor.sample(
+                    obs_seq, obs_info, states=self.current_states
+                )
         
         return action.cpu().numpy()[0]  # 1D array
 
     def update(self, batch_size=None):
         """
-        SAC 업데이트 (Actor, Critic, Alpha)
+        Continuous SAC 업데이트 (Actor, Critic, Alpha)
         
         Args:
             batch_size: 배치 크기 (None이면 config에서 가져옴)
@@ -191,15 +210,22 @@ class SACAgent:
         obs_seq, obs_info = state
         next_obs_seq, next_obs_info = next_state
 
-        # Target Q 계산
+        # ----------------------------
+        # 1. Critic Update
+        # ----------------------------
         with torch.no_grad():
-            next_action, next_log_prob, _ = self.actor.sample(next_obs_seq, next_obs_info)
-            q1_next, q2_next = self.critic_target(next_obs_seq, next_action, next_obs_info)
-            min_q_next = torch.min(q1_next, q2_next) - self.alpha * next_log_prob
-            q_target = reward + (1 - done) * self.gamma * min_q_next
+            # Next Action sampling
+            next_action, next_log_prob, _, _ = self.actor.sample(next_obs_seq, next_obs_info)
+            
+            # Target Q
+            q1_next, q2_next, _ = self.critic_target(next_obs_seq, next_action, next_obs_info)
+            min_q_next = torch.min(q1_next, q2_next)
+            
+            # Soft Q Target
+            q_target = reward + (1 - done) * self.gamma * (min_q_next - self.alpha * next_log_prob)
 
-        # Critic Update
-        q1, q2 = self.critic(obs_seq, action, obs_info)
+        # Current Q
+        q1, q2, _ = self.critic(obs_seq, action, obs_info)
         critic_loss = F.mse_loss(q1, q_target) + F.mse_loss(q2, q_target)
 
         self.critic_optimizer.zero_grad()
@@ -207,11 +233,16 @@ class SACAgent:
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_optimizer.step()
 
-        # Actor Update
-        action_new, log_prob, _ = self.actor.sample(obs_seq, obs_info)
-        q1_new, q2_new = self.critic(obs_seq, action_new, obs_info)
+        # ----------------------------
+        # 2. Actor Update
+        # ----------------------------
+        # Current Action sampling (Reparameterization)
+        action_new, log_prob, _, _ = self.actor.sample(obs_seq, obs_info)
+        
+        q1_new, q2_new, _ = self.critic(obs_seq, action_new, obs_info)
         min_q_new = torch.min(q1_new, q2_new)
         
+        # Maximize (min_q - alpha * log_prob)
         actor_loss = (self.alpha * log_prob - min_q_new).mean()
 
         self.actor_optimizer.zero_grad()
@@ -219,13 +250,15 @@ class SACAgent:
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
 
-        # Alpha Update (Automatic Entropy Tuning)
+        # ----------------------------
+        # 3. Alpha Update
+        # ----------------------------
+        # Target Entropy = -Action Dim
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
 
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()
         self.alpha_optimizer.step()
-
         self.alpha = self.log_alpha.exp().item()
 
         # Soft Update Target Networks

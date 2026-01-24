@@ -1,8 +1,8 @@
 """
-강화학습 트레이딩 환경 (Clean Ver - Fixed)
-- Action Masking 제거 (SAC 최적화)
-- 보상 함수 강화 (Net PnL 기반)
-- get_observation 인자 오류 수정
+강화학습 트레이딩 환경 (Refactored for SAC)
+- 전략 신호 Pre-calculation 지원
+- Action Dead-zone (Exit) 로직 지원
+- 보상 함수: 실현 손익(Realized PnL) 중심
 """
 import numpy as np
 import torch
@@ -11,13 +11,9 @@ import pandas as pd
 import sys
 import os
 
-# 상위 폴더를 경로에 추가 (config 모듈 접근용)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-
 from .preprocess import DataPreprocessor
-from .feature_engineering import FeatureEngineer
-from .mtf_processor import MTFProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -40,34 +36,28 @@ class TradingEnvironment:
     def get_observation(self, position_info=None, current_index=None):
         """
         현재 상태 관측
+        - 전략 신호는 이미 df에 계산되어 있다고 가정 (strategy_0, strategy_1...)
+        - next_state 계산 시 인덱스만 +1 해서 호출하면 됨 (Data Leakage 없음)
+        
         Args:
-            position_info: 포지션 정보 리스트
+            position_info: 포지션 정보 리스트 [pos_val, unrealized_pnl, holding_time]
             current_index: (선택) 특정 시점의 인덱스. 없으면 collector의 현재 인덱스 사용
         Returns:
-            (obs_seq, obs_info): 튜플 (마스크 없음)
+            (obs_seq, obs_info): 튜플
         """
         try:
-            # 1. 데이터 가져오기 (내부 데이터 직접 접근 최적화)
-            candles = None
-            
-            # 인자로 받은 current_index가 있으면 우선 사용, 없으면 collector에서 조회
+            # 1. 인덱스 설정
             curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
+            
+            # 데이터 유효성 검사
+            if curr_idx is None or curr_idx < self.lookback:
+                return None
+            
+            df = self.collector.eth_data
+            if curr_idx >= len(df):  # 끝 도달
+                return None
 
-            if hasattr(self.collector, 'eth_data') and isinstance(self.collector.eth_data, pd.DataFrame):
-                if curr_idx is not None and curr_idx >= self.lookback:
-                    candles = self.collector.eth_data.iloc[curr_idx - self.lookback : curr_idx].copy()
-            
-            if candles is None or len(candles) < self.lookback:
-                return None
-            
-            # 2. 피처 엔지니어링 (이미 되어있다고 가정)
-            required_feature = 'rsi_1h'
-            if required_feature in candles.columns:
-                df = candles
-            else:
-                return None
-            
-            # 3. 데이터 추출
+            # 2. 시계열 데이터 추출 (이미 피처 엔지니어링 완료됨)
             target_cols = [
                 'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos', 
                 'rsi', 'macd_hist', 'hma_ratio', 'cci', 
@@ -77,26 +67,33 @@ class TradingEnvironment:
                 'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
             ]
             
-            recent_df = df[target_cols].iloc[-self.lookback:]
+            # 스케일러가 학습되지 않았으면 경고 (초기화 이슈 방지)
+            if not self.scaler_fitted:
+                # logger.warning("⚠️ 스케일러가 학습되지 않은 상태에서 관측 시도")
+                pass
+
+            # 데이터 슬라이싱
+            recent_df = df[target_cols].iloc[curr_idx - self.lookback : curr_idx]
             seq_features = recent_df.values.astype(np.float32)
+            
+            # 정규화 적용
             normalized_seq = self.preprocessor.transform(seq_features)
             obs_seq = torch.FloatTensor(normalized_seq).unsqueeze(0)
 
-            # 4. 전략 점수
+            # 3. 전략 점수 (Pre-calculated Columns 사용)
+            # train_sac.py에서 미리 'strategy_0', 'strategy_1'... 컬럼을 만들어둠
             strategy_scores = []
-            for strategy in self.strategies:
-                try:
-                    # 전략 분석 시에도 curr_idx를 고려해야 할 수 있으나, 
-                    # 현재 구조상 strategy.analyze는 collector 내부 상태를 봄.
-                    # 학습 루프에서 collector.current_index를 맞춰주고 있으므로 문제 없음.
-                    result = strategy.analyze(self.collector)
-                    score = float(result['confidence']) if result and 'confidence' in result else 0.0
-                    if result and result.get('signal') == 'SHORT': score = -score
-                    strategy_scores.append(score)
-                except:
-                    strategy_scores.append(0.0)
+            for i in range(self.num_strategies):
+                col_name = f'strategy_{i}'
+                if col_name in df.columns:
+                    # 현재 시점(curr_idx-1)의 점수 가져오기
+                    score = df[col_name].iloc[curr_idx - 1] 
+                else:
+                    score = 0.0
+                strategy_scores.append(score)
             
-            if position_info is None: position_info = [0.0, 0.0, 0.0]
+            if position_info is None: 
+                position_info = [0.0, 0.0, 0.0]
             
             obs_info = np.concatenate([strategy_scores, position_info], dtype=np.float32)
             obs_info_tensor = torch.FloatTensor(obs_info).unsqueeze(0)
@@ -107,29 +104,38 @@ class TradingEnvironment:
             logger.error(f"관측 오류: {e}")
             return None
 
-    def calculate_reward(self, pnl, trade_done, holding_time=0, pnl_change=0):
-        """보상 함수: 수수료를 반영한 순수익(Net PnL) 중심 (config 기반)"""
+    def calculate_reward(self, pnl, trade_done, holding_time=0):
+        """
+        [수정된 보상 함수]
+        - Unrealized PnL(평가손익) 보상 제거 (Hold 시 변동성 보상 방지)
+        - Realized PnL(확정손익) 중심
+        """
         reward = 0.0
         
-        # 1. 평가 수익 변화량 (즉각 보상)
-        reward = pnl_change * config.REWARD_MULTIPLIER
-        
+        # 1. 거래 확정 시 (Realized PnL)
         if trade_done:
-            # 실질 거래 비용 (config에서 가져옴)
-            net_pnl = pnl - config.TRANSACTION_COST
+            # 수수료 반영 (진입/청산 합쳐서 0.1% 가정)
+            transaction_cost = 0.001
+            net_pnl = pnl - transaction_cost
             
             if net_pnl > 0:
-                # 순수익 발생 시 큰 보상
-                reward += net_pnl * config.REWARD_MULTIPLIER
-                reward += np.sqrt(net_pnl * 100) * 0.5
+                # 익절: 수익률에 비례한 보상 + 성공 보너스
+                reward += net_pnl * 500  # 배율 강화
+                reward += 1.0  # 성공 자체에 대한 보너스
             else:
-                # 손실 시 (수수료 포함) 더 큰 페널티
-                reward += net_pnl * config.LOSS_PENALTY_MULTIPLIER
+                # 손절: 손실에 비례한 페널티
+                reward += net_pnl * 600  # 손실은 더 아프게
         
-        # 시간 비용 (기회비용, config에서 가져옴)
-        reward -= config.TIME_COST
-        
-        return np.clip(reward, -100, 100)
+        else:
+            # 2. 포지션 유지 중 (Hold)
+            # 시간 경과 페널티 (빨리 수익 내라고 독촉)
+            reward -= 0.001 * holding_time
+            
+            # (옵션) 극단적인 평가 손실 상태라면 약간의 페널티 (손절 유도)
+            if pnl < -0.02:  # -2% 넘어가면 고통 부여
+                reward += pnl * 10
+
+        return np.clip(reward, -20, 20)  # 보상 클리핑
 
     def get_state_dim(self):
         return 29

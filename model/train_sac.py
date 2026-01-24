@@ -95,8 +95,12 @@ class SACTrainer:
         
         logger.info(f"✅ 전략 초기화 완료: 총 {len(self.strategies)}개")
         
-        # 3. 피처 엔지니어링 (전체 데이터에 대해 한 번만 수행)
-        self._precalculate_features()
+        # 3. 피처 엔지니어링 (CSV 파일이 있으면 로드, 없으면 계산)
+        self._load_or_create_features()
+        
+        # [핵심] 전략 신호 미리 계산 (Pre-calculation)
+        # CSV에 전략 컬럼이 이미 있으면 건너뛰기
+        self.precalculate_strategies()
         
         # 4. 환경 생성 (config.LOOKBACK 사용)
         self.env = TradingEnvironment(self.data_collector, self.strategies, lookback=config.LOOKBACK)
@@ -140,11 +144,25 @@ class SACTrainer:
         self.episode_rewards = []
         self.total_steps = 0
     
-    def _precalculate_features(self):
-        """전체 데이터에 대해 피처 엔지니어링 수행 (한 번만)"""
+    def _load_or_create_features(self):
+        """
+        피처 파일이 있으면 로드, 없으면 생성
+        """
+        feature_file_path = 'data/training_features.csv'
+        
+        if os.path.exists(feature_file_path):
+            logger.info("📂 피처 파일 로드 중...")
+            try:
+                df = pd.read_csv(feature_file_path, index_col=0, parse_dates=True)
+                self.data_collector.eth_data = df
+                logger.info(f"✅ 피처 파일 로드 완료: {len(df)}개 행, {len(df.columns)}개 컬럼")
+                return
+            except Exception as e:
+                logger.warning(f"피처 파일 로드 실패, 재생성합니다: {e}")
+        
+        # 파일이 없거나 로드 실패 시 재생성
+        logger.info("📊 피처 엔지니어링 수행 중...")
         try:
-            logger.info("📊 전체 데이터 피처 엔지니어링 수행 중...")
-            
             # ETH 데이터 준비
             eth_data = self.data_collector.eth_data.copy()
             
@@ -187,11 +205,89 @@ class SACTrainer:
             if btc_data is not None:
                 self.data_collector.btc_data = btc_data
             
-            logger.info(f"✅ 피처 엔지니어링 완료: {len(df)}개 행, {len(df.columns)}개 컬럼")
+            # CSV 저장
+            os.makedirs('data', exist_ok=True)
+            df.to_csv(feature_file_path)
+            logger.info(f"✅ 피처 엔지니어링 완료 및 저장: {len(df)}개 행, {len(df.columns)}개 컬럼")
             
         except Exception as e:
             logger.error(f"피처 엔지니어링 실패: {e}", exc_info=True)
             raise
+    
+    def precalculate_strategies(self):
+        """
+        [문제 해결 1] 전략 신호를 미리 계산하여 DataFrame에 저장
+        - 학습 루프 내에서 strategy.analyze() 호출 제거 (속도 향상 + 인덱스 꼬임 방지)
+        - CSV에 전략 컬럼이 이미 있으면 건너뛰기
+        """
+        df = self.data_collector.eth_data
+        
+        # 전략 컬럼이 이미 모두 있는지 확인
+        required_cols = [f'strategy_{i}' for i in range(len(self.strategies))]
+        existing_cols = [col for col in required_cols if col in df.columns]
+        
+        if len(existing_cols) == len(required_cols):
+            logger.info(f"✅ 전략 신호 컬럼이 이미 존재합니다 ({len(existing_cols)}개). 계산을 건너뜁니다.")
+            return
+        
+        logger.info("🧠 전략 신호 사전 계산 중 (Pre-calculation)...")
+        
+        # 전략별 컬럼 초기화 (없는 것만)
+        for i in range(len(self.strategies)):
+            if f'strategy_{i}' not in df.columns:
+                df[f'strategy_{i}'] = 0.0
+            
+        # 전체 데이터 순회하며 계산 (다소 시간 소요되나 학습 시 매우 빠름)
+        # 속도를 위해 최근 N개 데이터만 계산할 수도 있으나, 여기선 전체 계산
+        # 실제로는 Vectorization이 가능한 전략은 Vectorization으로 짜는 게 좋음.
+        # 여기서는 기존 구조 호환을 위해 Loop 사용하되, 한 번만 수행.
+        
+        total_len = len(df)
+        start_idx = config.LOOKBACK + 50
+        
+        # tqdm을 사용한 진행상황 표시
+        try:
+            from tqdm import tqdm
+            use_tqdm = True
+        except ImportError:
+            use_tqdm = False
+            logger.warning("tqdm이 설치되지 않아 진행상황 표시를 건너뜁니다.")
+        
+        iterator = tqdm(range(start_idx, total_len), desc="Strategy Calc") if use_tqdm else range(start_idx, total_len)
+        
+        # 1000개 단위로 진행상황 로그
+        for i in iterator:
+            self.data_collector.current_index = i
+            
+            for s_idx, strategy in enumerate(self.strategies):
+                try:
+                    # 전략 실행
+                    result = strategy.analyze(self.data_collector)
+                    score = 0.0
+                    if result:
+                        conf = float(result.get('confidence', 0.0))
+                        signal = result.get('signal', 'NEUTRAL')
+                        
+                        if signal == 'LONG': 
+                            score = conf
+                        elif signal == 'SHORT': 
+                            score = -conf
+                    
+                    # 결과 저장 (iloc 사용)
+                    # i번째 행에 저장
+                    df.iat[i, df.columns.get_loc(f'strategy_{s_idx}')] = score
+                    
+                except Exception as e:
+                    # 개별 전략 오류는 무시하고 계속 진행
+                    continue
+        
+        # 전략 신호 계산 완료 후 CSV에 저장
+        feature_file_path = 'data/training_features.csv'
+        if os.path.exists(feature_file_path):
+            logger.info("💾 전략 신호를 피처 파일에 저장 중...")
+            df.to_csv(feature_file_path)
+                    
+        logger.info("✅ 전략 신호 계산 완료!")
     
     def _fit_global_scaler(self):
         """29개 고급 피처 기반 전역 스케일러 학습 (최적화 버전)"""
@@ -263,180 +359,164 @@ class SACTrainer:
     
     def interpret_action(self, action_value):
         """
-        연속형 액션(-1 ~ 1)을 트레이딩 명령으로 변환
+        [문제 해결 3 & 4] Continuous Action 해석 개선
+        -0.3 ~ 0.3 구간: Neutral (Exit/Hold) -> 무한 존버 방지
         
         Args:
             action_value: float, -1 ~ 1 사이의 연속값
         Returns:
-            int: 0=HOLD, 1=LONG, 2=SHORT
+            int: 0=NEUTRAL(청산/관망), 1=LONG, 2=SHORT
         """
         threshold = 0.3
         
         if action_value > threshold:
-            return 1  # LONG
+            return 1  # LONG 진입 (강도: action_value)
         elif action_value < -threshold:
-            return 2  # SHORT
+            return 2  # SHORT 진입 (강도: abs(action_value))
         else:
-            return 0  # HOLD
+            return 0  # NEUTRAL (청산 또는 관망)
     
     def train_episode(self, episode_num, max_steps=None):
-        """한 에피소드 학습"""
+        """
+        한 에피소드 학습 (Fixed Architecture)
+        - Action Dead-zone 적용 (Exit Logic 개선)
+        - Next State Indexing 오류 수정
+        """
         if max_steps is None:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
         
-        # 배치 사이즈 Config에서 가져오기 (기본값 256)
-        batch_size = config.SAC_BATCH_SIZE
+        # 학습 데이터 범위 설정
+        train_size = int(len(self.data_collector.eth_data) * 0.8)
+        self.train_end_idx = train_size
         
+        # 무작위 시작 인덱스
+        start_min = config.LOOKBACK + 100
+        start_max = self.train_end_idx - max_steps - 50
+        if start_max <= start_min:
+            logger.warning("학습 데이터가 부족합니다.")
+            return None
+        
+        start_idx = np.random.randint(start_min, start_max)
+        
+        # 초기화
+        self.data_collector.current_index = start_idx
+        self.agent.reset_episode_states()  # [추가] 에피소드 시작 전 뇌 리셋 (중요!)
+        current_position = None  # 'LONG', 'SHORT', None
+        entry_price = 0.0
+        entry_index = 0
         episode_reward = 0.0
-        steps = 0
         
-        # 저장된 데이터에서 인덱스 리셋 (새 에피소드 시작 - 무작위 시작 인덱스)
-        self.data_collector.reset_index(max_steps=max_steps, random_start=True)
+        batch_size = getattr(config, 'SAC_BATCH_SIZE', 256)
         
-        # 에피소드 시작 시 이전 수익률 초기화
-        self.prev_pnl = 0.0
-        self.current_position = None
-        self.entry_price = None
-        self.entry_index = None
-        
-        # 초기 데이터 확인
-        if self.data_collector.eth_data is None or len(self.data_collector.eth_data) == 0:
-            logger.error("저장된 데이터가 없습니다.")
-            return None
-        
-        # 사용 가능한 최대 스텝 수 계산
-        available_steps = len(self.data_collector.eth_data) - self.data_collector.current_index
-        actual_steps = min(max_steps, available_steps)
-        
-        if actual_steps <= 0:
-            logger.warning("사용 가능한 데이터가 부족합니다.")
-            return None
-        
-        logger.info(f"에피소드 시작: 총 {len(self.data_collector.eth_data)}개 캔들 중 {actual_steps}개 사용")
-        
-        for step in range(actual_steps):
-            try:
-                # 1. 인덱스 증가 (다음 캔들로 이동)
-                if self.data_collector.current_index >= len(self.data_collector.eth_data):
-                    break
+        for step in range(max_steps):
+            current_idx = self.data_collector.current_index
+            if current_idx >= self.train_end_idx:
+                break
+            
+            # Position Info 구성
+            pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
+            holding_time = (current_idx - entry_index) if current_position is not None else 0
+            
+            # Unrealized PnL (관측용으로만 사용, 보상엔 안 씀)
+            curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
+            unrealized_pnl = 0.0
+            if current_position == 'LONG':
+                unrealized_pnl = (curr_price - entry_price) / entry_price
+            elif current_position == 'SHORT':
+                unrealized_pnl = (entry_price - curr_price) / entry_price
                 
-                self.data_collector.current_index += 1
+            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
+            
+            # 1. 상태 관측 (State) - [문제 해결 1] 인덱스 명시적 전달
+            state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
+            if state is None:
+                break
+
+            # 2. 행동 선택 (Action)
+            action_continuous = self.agent.select_action(state)  # [-1, 1]
+            action_code = self.interpret_action(action_continuous[0])  # 0, 1, 2
+            
+            # 3. 트레이딩 로직 실행
+            reward = 0.0
+            trade_done = False
+            realized_pnl = 0.0
+            
+            # A. 포지션 청산 조건 (신호 반전 or Neutral 신호 or 손절)
+            if current_position is not None:
+                should_exit = False
                 
-                # 2. 포지션 정보 수집
-                pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
-                hold_val = (self.data_collector.current_index - self.entry_index) / max_steps if self.entry_index is not None else 0.0
-                pnl_val = self.prev_pnl * 10
-                pos_info = [pos_val, pnl_val, hold_val]
+                # Exit 조건 1: 신호 변경 (Long인데 Short/Neutral 신호 뜸)
+                if current_position == 'LONG' and action_code != 1:
+                    should_exit = True
+                if current_position == 'SHORT' and action_code != 2:
+                    should_exit = True
                 
-                # 3. 상태 관측
-                state = self.env.get_observation(position_info=pos_info)
-                if state is None:
-                    continue
+                # Exit 조건 2: 손절 (Stop Loss) -2%
+                if unrealized_pnl < -0.02:
+                    should_exit = True
                 
-                # 4. 행동 선택 (SAC - 연속형)
-                action_continuous = self.agent.select_action(state)  # 예: [0.75]
-                action_discrete = self.interpret_action(action_continuous[0])
+                if should_exit:
+                    realized_pnl = unrealized_pnl  # 확정
+                    trade_done = True
+                    current_position = None  # 포지션 해제
+                    entry_price = 0.0
+                    entry_index = 0
+            
+            # B. 신규 진입 조건 (포지션 없을 때만)
+            if current_position is None and not trade_done:
+                if action_code == 1:  # LONG Entry
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                elif action_code == 2:  # SHORT Entry
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = current_idx
+            
+            # 4. 보상 계산 (Realized PnL 위주)
+            reward = self.env.calculate_reward(realized_pnl, trade_done, holding_time)
+            
+            # 5. 다음 상태 관측 (Next State) - [문제 해결 1] 인덱스 명시적 전달
+            next_idx = current_idx + 1
+            self.data_collector.current_index = next_idx  # Loop 진행을 위해 업데이트
+            
+            # Next Position Info 추정
+            next_pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
+            next_hold_time = (next_idx - entry_index) if current_position is not None else 0
+            
+            # 다음 가격 (있다면)
+            if next_idx < len(self.data_collector.eth_data):
+                next_price = float(self.data_collector.eth_data.iloc[next_idx]['close'])
+                next_un_pnl = 0.0
+                if current_position == 'LONG':
+                    next_un_pnl = (next_price - entry_price) / entry_price
+                elif current_position == 'SHORT':
+                    next_un_pnl = (entry_price - next_price) / entry_price
+            else:
+                next_un_pnl = 0.0
                 
-                # 5. 현재 가격 확인
-                if self.data_collector.current_index > 0:
-                    current_candle = self.data_collector.eth_data.iloc[self.data_collector.current_index - 1]
-                    current_price = float(current_candle['close'])
-                else:
-                    continue
-                
-                # 6. 보상 계산 및 포지션 업데이트
-                reward = 0.0
-                trade_done = False
-                current_pnl = 0.0
-                pnl_change = 0.0
-                
-                if action_discrete == 1:  # LONG
-                    if self.current_position != 'LONG':
-                        # 기존 포지션 청산
-                        if self.current_position == 'SHORT' and self.entry_price:
-                            pnl = (self.entry_price - current_price) / self.entry_price
-                            pnl_change = pnl - self.prev_pnl
-                            reward = self.env.calculate_reward(pnl, True, holding_time=0, pnl_change=pnl_change)
-                            trade_done = True
-                            self.prev_pnl = 0.0
-                        
-                        # 롱 진입
-                        self.current_position = 'LONG'
-                        self.entry_price = current_price
-                        self.entry_index = self.data_collector.current_index
-                        self.prev_pnl = 0.0
-                
-                elif action_discrete == 2:  # SHORT
-                    if self.current_position != 'SHORT':
-                        # 기존 포지션 청산
-                        if self.current_position == 'LONG' and self.entry_price:
-                            pnl = (current_price - self.entry_price) / self.entry_price
-                            pnl_change = pnl - self.prev_pnl
-                            reward = self.env.calculate_reward(pnl, True, holding_time=0, pnl_change=pnl_change)
-                            trade_done = True
-                            self.prev_pnl = 0.0
-                        
-                        # 숏 진입
-                        self.current_position = 'SHORT'
-                        self.entry_price = current_price
-                        self.entry_index = self.data_collector.current_index
-                        self.prev_pnl = 0.0
-                
-                else:  # HOLD
-                    # 보유 중인 포지션의 수익률 계산
-                    if self.current_position and self.entry_price:
-                        if self.current_position == 'LONG':
-                            current_pnl = (current_price - self.entry_price) / self.entry_price
-                        else:
-                            current_pnl = (self.entry_price - current_price) / self.entry_price
-                        
-                        pnl_change = current_pnl - self.prev_pnl
-                        holding_time = (self.data_collector.current_index - self.entry_index) if self.entry_index is not None else 0
-                        reward = self.env.calculate_reward(current_pnl, False, holding_time, pnl_change)
-                        self.prev_pnl = current_pnl
-                
-                # 7. 다음 상태 관측
-                next_pos_val = 1.0 if self.current_position == 'LONG' else (-1.0 if self.current_position == 'SHORT' else 0.0)
-                next_hold_val = (self.data_collector.current_index + 1 - self.entry_index) / max_steps if self.entry_index is not None else 0.0
-                next_pnl_val = self.prev_pnl * 10
-                next_pos_info = [next_pos_val, next_pnl_val, next_hold_val]
-                
-                # 임시로 인덱스 증가하여 다음 상태 관측
-                temp_index = self.data_collector.current_index
-                if temp_index < len(self.data_collector.eth_data):
-                    self.data_collector.current_index += 1
-                    next_state = self.env.get_observation(position_info=next_pos_info)
-                    self.data_collector.current_index = temp_index
-                else:
-                    next_state = None
-                
-                # 8. Replay Buffer 저장 (연속형 액션 저장)
-                is_terminal = (step == actual_steps - 1)
-                self.agent.memory.push(state, action_continuous, reward, next_state, is_terminal)
-                
-                episode_reward += reward
-                steps += 1
-                self.total_steps += 1
-                
-                # 9. 학습 (매 스텝마다 배치를 뽑아서 학습)
-                # 메모리가 배치 사이즈보다 클 때만 업데이트
-                if len(self.agent.memory) > batch_size:
-                    c_loss, a_loss, alpha = self.agent.update(batch_size=batch_size)
-                    # [중요] LR 스케줄러 업데이트
-                    self.agent.step_schedulers()
-                    if step % 100 == 0:
-                        current_lr = self.agent.actor_scheduler.get_last_lr()[0] if self.agent.actor_scheduler else config.SAC_LEARNING_RATE
-                        logger.debug(f"Step {step}: Critic Loss={c_loss:.4f}, Actor Loss={a_loss:.4f}, Alpha={alpha:.4f}, LR={current_lr:.6f}")
-                
-            except KeyboardInterrupt:
-                logger.info("학습 중단 요청")
-                raise
-            except Exception as e:
-                logger.error(f"에피소드 실행 중 오류: {e}", exc_info=True)
-                time.sleep(5)
-                continue
-        
-        return episode_reward, steps
+            next_pos_info = [next_pos_val, next_un_pnl * 10, next_hold_time / max_steps]
+            
+            next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
+            
+            # 종료 여부
+            done = False if step < max_steps - 1 else True
+            if next_state is None:
+                done = True
+            
+            # Fallback for next_state (끝부분 처리)
+            if next_state is None:
+                next_state = state
+
+            # 6. 저장 및 학습
+            self.agent.memory.push(state, action_continuous, reward, next_state, done)
+            episode_reward += reward
+            
+            if len(self.agent.memory) > batch_size:
+                self.agent.update(batch_size=batch_size)
+                self.agent.step_schedulers()
+
+        return episode_reward
     
     def train(self, num_episodes=1000, max_steps_per_episode=None, save_interval=None):
         """모델 학습"""
@@ -451,7 +531,7 @@ class SACTrainer:
         warmup_ratio = getattr(config, 'SAC_WARMUP_RATIO', 0.05)
         
         logger.info("=" * 60)
-        logger.info("🚀 SAC 모델 학습 시작")
+        logger.info("🚀 SAC 모델 학습 시작 (Fixed Version)")
         logger.info("=" * 60)
         logger.info(f"에피소드 수: {num_episodes}")
         logger.info(f"에피소드당 최대 스텝: {max_steps_per_episode}")
@@ -478,12 +558,11 @@ class SACTrainer:
                 logger.info(f"{'=' * 60}")
                 
                 # 에피소드 실행
-                result = self.train_episode(episode_num=episode, max_steps=max_steps_per_episode)
-                if result is None:
+                episode_reward = self.train_episode(episode_num=episode, max_steps=max_steps_per_episode)
+                if episode_reward is None:
                     logger.warning("에피소드 실패, 다음 에피소드로 진행")
                     continue
                 
-                episode_reward, steps = result
                 self.episode_rewards.append(episode_reward)
                 
                 # 통계 출력
@@ -492,7 +571,6 @@ class SACTrainer:
                 current_lr = self.agent.actor_scheduler.get_last_lr()[0] if self.agent.actor_scheduler else config.SAC_LEARNING_RATE
                 logger.info(f"✅ 에피소드 {episode} 완료")
                 logger.info(f"   총 보상: {episode_reward:.4f}")
-                logger.info(f"   스텝 수: {steps}")
                 logger.info(f"   최근 10개 평균 보상: {avg_reward:.4f}")
                 logger.info(f"   현재 학습률: {current_lr:.6f}")
                 
