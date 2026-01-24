@@ -90,3 +90,4 @@ SAC_LEARNING_RATE = 3e-4  # 학습률 (Actor, Critic, Alpha 모두 동일)
 SAC_REPLAY_BUFFER_SIZE = 100000  # Replay Buffer 크기
 SAC_BATCH_SIZE = 256  # 배치 크기
 SAC_UPDATE_FREQUENCY = 1  # 업데이트 빈도 (매 스텝마다)
+SAC_WARMUP_RATIO = 0.05  # 전체 학습 기간의 5% 동안 LR 점진적 증가 (Warmup)

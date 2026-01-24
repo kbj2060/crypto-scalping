@@ -5,6 +5,7 @@ Replay Buffer와 Alpha(엔트로피 계수) 자동 튜닝 기능 포함
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
 import random
 from collections import deque
@@ -104,7 +105,46 @@ class SACAgent:
         # Replay Buffer (config에서 크기 가져오기)
         self.memory = ReplayBuffer(capacity=config.SAC_REPLAY_BUFFER_SIZE, device=device)
         
+        # 스케줄러 초기화 (setup_schedulers에서 설정됨)
+        self.actor_scheduler = None
+        self.critic_scheduler = None
+        self.alpha_scheduler = None
+        
         logger.info(f"✅ SAC Agent 초기화 완료 (State: {state_dim}, Action: {action_dim}, Info: {info_dim})")
+
+    def setup_schedulers(self, total_steps, warmup_ratio=0.05):
+        """
+        Warmup + Linear Decay 스케줄러 설정
+        
+        Args:
+            total_steps: 전체 학습 스텝 수
+            warmup_ratio: Warmup 구간 비율 (기본값 0.05 = 5%)
+        """
+        warmup_steps = int(total_steps * warmup_ratio)
+        
+        def lr_lambda(step):
+            # 1. Warmup 구간: 0 -> 1로 선형 증가
+            if step < warmup_steps:
+                return float(step) / float(max(1, warmup_steps))
+            
+            # 2. Linear Decay 구간: 1 -> 0으로 선형 감소
+            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return max(0.0, 1.0 - progress)
+
+        self.actor_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=lr_lambda)
+        self.critic_scheduler = LambdaLR(self.critic_optimizer, lr_lambda=lr_lambda)
+        self.alpha_scheduler = LambdaLR(self.alpha_optimizer, lr_lambda=lr_lambda)
+        
+        logger.info(f"📈 스케줄러 설정 완료: 총 {total_steps} 스텝, Warmup {warmup_steps} 스텝 ({warmup_ratio*100:.1f}%)")
+    
+    def step_schedulers(self):
+        """매 업데이트마다 호출하여 LR 조절"""
+        if self.actor_scheduler:
+            self.actor_scheduler.step()
+        if self.critic_scheduler:
+            self.critic_scheduler.step()
+        if self.alpha_scheduler:
+            self.alpha_scheduler.step()
 
     def select_action(self, state, evaluate=False):
         """

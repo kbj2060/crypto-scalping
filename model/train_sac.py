@@ -422,8 +422,11 @@ class SACTrainer:
                 # 메모리가 배치 사이즈보다 클 때만 업데이트
                 if len(self.agent.memory) > batch_size:
                     c_loss, a_loss, alpha = self.agent.update(batch_size=batch_size)
+                    # [중요] LR 스케줄러 업데이트
+                    self.agent.step_schedulers()
                     if step % 100 == 0:
-                        logger.debug(f"Step {step}: Critic Loss={c_loss:.4f}, Actor Loss={a_loss:.4f}, Alpha={alpha:.4f}")
+                        current_lr = self.agent.actor_scheduler.get_last_lr()[0] if self.agent.actor_scheduler else config.SAC_LEARNING_RATE
+                        logger.debug(f"Step {step}: Critic Loss={c_loss:.4f}, Actor Loss={a_loss:.4f}, Alpha={alpha:.4f}, LR={current_lr:.6f}")
                 
             except KeyboardInterrupt:
                 logger.info("학습 중단 요청")
@@ -441,14 +444,23 @@ class SACTrainer:
             max_steps_per_episode = config.TRAIN_MAX_STEPS_PER_EPISODE
         if save_interval is None:
             save_interval = config.TRAIN_SAVE_INTERVAL
-        """모델 학습"""
+        
+        # 학습 시작 전 스케줄러 설정
+        # (총 예상 업데이트 횟수 = 에피소드 * 스텝 수)
+        total_steps = num_episodes * max_steps_per_episode
+        warmup_ratio = getattr(config, 'SAC_WARMUP_RATIO', 0.05)
+        
         logger.info("=" * 60)
         logger.info("🚀 SAC 모델 학습 시작")
         logger.info("=" * 60)
         logger.info(f"에피소드 수: {num_episodes}")
         logger.info(f"에피소드당 최대 스텝: {max_steps_per_episode}")
         logger.info(f"모델 저장 간격: {save_interval} 에피소드")
+        logger.info(f"스케줄러 설정: 총 {total_steps} 스텝, Warmup {warmup_ratio*100:.1f}%")
         logger.info("=" * 60)
+        
+        # 스케줄러 설정
+        self.agent.setup_schedulers(total_steps, warmup_ratio)
         
         # 스케일러 저장 경로 설정
         scaler_path = config.AI_MODEL_PATH.replace('ppo_model', 'sac_model').replace('.pth', '_scaler.pkl')
@@ -476,10 +488,13 @@ class SACTrainer:
                 
                 # 통계 출력
                 avg_reward = sum(self.episode_rewards[-10:]) / len(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else episode_reward
+                # 로그 출력 시 현재 LR도 함께 출력
+                current_lr = self.agent.actor_scheduler.get_last_lr()[0] if self.agent.actor_scheduler else config.SAC_LEARNING_RATE
                 logger.info(f"✅ 에피소드 {episode} 완료")
                 logger.info(f"   총 보상: {episode_reward:.4f}")
                 logger.info(f"   스텝 수: {steps}")
                 logger.info(f"   최근 10개 평균 보상: {avg_reward:.4f}")
+                logger.info(f"   현재 학습률: {current_lr:.6f}")
                 
                 # 최고 성능 모델 저장
                 if episode_reward > best_reward:
