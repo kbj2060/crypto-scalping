@@ -50,25 +50,26 @@ AI_MODEL_PATH = 'data/ppo_model.pth'  # AI 모델 저장 경로 (data 폴더에 
 LOOKBACK = 60  # 시계열 피처를 위한 봉 개수
 MIN_HOLDING_TIME = 5  # 최소 보유 캔들 수 (Action Masking용)
 
-# 보상 함수 파라미터
-REWARD_MULTIPLIER = 300  # 수익 보상 배율
-LOSS_PENALTY_MULTIPLIER = 500  # 손실 페널티 배율
+# 보상 함수 파라미터 (코드에 직접 반영되었지만 참조용으로 수정)
+REWARD_MULTIPLIER = 120.0  # 기존 150/300 -> 120 (안정성)
+LOSS_PENALTY_MULTIPLIER = 120.0  # 비대칭 제거 (Symmetric)
 TRANSACTION_COST = 0.0015  # 거래 비용 (0.15%, 스프레드 + 슬리피지 포함)
-TIME_COST = 0.0005  # 시간 비용
+TIME_COST = 0.0001  # 시간 비용
 STOP_LOSS_THRESHOLD = -0.02  # 강제 손절 임계값 (-2%)
 
 # PPO 알고리즘 하이퍼파라미터
 PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
-PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위
-PPO_K_EPOCHS = 10  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.05  # 엔트로피 계수 (초기값)
-PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다)
-PPO_ENTROPY_MIN = 0.02  # 엔트로피 최소값
-PPO_LEARNING_RATE = 0.00003  # 학습률
-PPO_SCHEDULER_FACTOR = 0.5  # 학습률 스케줄러 감소율
-PPO_SCHEDULER_PATIENCE = 200  # 학습률 스케줄러 인내심
-PPO_SCHEDULER_MIN_LR = 1e-6  # 학습률 최소값
+PPO_EPS_CLIP = 0.15  # PPO 클리핑 범위
+PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
+PPO_ENTROPY_COEF = 0.04  # 엔트로피 계수 (초기값)
+PPO_ENTROPY_DECAY = 0.9996  # 엔트로피 감소율 (에피소드마다)
+PPO_ENTROPY_MIN = 0.005  # 엔트로피 최소값
+PPO_LEARNING_RATE = 5e-5  # 학습률
+
+# [수정] 스케줄러 설정 (Linear Decay)
+# PPO_SCHEDULER_FACTOR, PATIENCE 등 제거 (LinearLR 사용)
+PPO_LR_END_FACTOR = 0.01  # 학습 종료 시점의 학습률은 초기값의 1% (거의 0)
 
 # 네트워크 아키텍처 파라미터
 NETWORK_HIDDEN_DIM = 128  # 은닉층 차원
@@ -79,7 +80,7 @@ NETWORK_INFO_ENCODER_DIM = 64  # Info Encoder 출력 차원
 NETWORK_SHARED_TRUNK_DIM1 = 256  # Shared Trunk 첫 번째 레이어 차원
 NETWORK_SHARED_TRUNK_DIM2 = 128  # Shared Trunk 두 번째 레이어 차원
 NETWORK_ACTOR_HEAD_DIM = 64  # Actor Head 은닉층 차원
-NETWORK_CRITIC_HEAD_DIM = 64  # Critic Head 은닉층 차원
+NETWORK_CRITIC_HEAD_DIM = 32  # Critic Head 은닉층 차원
 NETWORK_USE_CHECKPOINTING = False  # Gradient Checkpointing 사용 여부
 
 # 학습 파라미터

@@ -99,10 +99,9 @@ class TradingEnvironment:
 
     def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0):
         """
-        [수정된 보상 함수] 
-        - 고정 승리 보너스 제거 (단타 어뷰징 방지)
-        - 손익 비례 보상 강화
-        - 거래 비용(Fee)에 대한 민감도 증가
+        [SAC 기반 수정된 보상 함수 for PPO]
+        - Unrealized PnL(평가손익) 노이즈 최소화
+        - Realized PnL(확정손익) 중심의 강력한 피드백
         
         Args:
             step_pnl: 이번 스텝에서의 평가금액 변화량 (Unrealized Delta)
@@ -112,32 +111,43 @@ class TradingEnvironment:
         """
         reward = 0.0
         
-        # 1. 과정 보상 (평가금액 변동 반영)
-        # 변동성이 작을 때도 학습되도록 스케일링 (x100)
-        reward += step_pnl * 100.0 
-        
-        # 2. 결과 보상 (청산 시)
+        # 1. 거래 확정 시 (Realized PnL) - 여기가 핵심!
         if trade_done:
-            fee = config.TRANSACTION_COST  # 예: 0.0015 (0.15%)
-            net_pnl = realized_pnl - fee
+            # 수수료 반영 (진입/청산 합쳐서 약 0.1% 가정)
+            # config.TRANSACTION_COST가 있다면 그것을 사용
+            transaction_cost = getattr(config, 'TRANSACTION_COST', 0.001)
+            net_pnl = realized_pnl - transaction_cost
             
-            # [핵심 수정] 고정 보너스(+1.0) 제거 -> 순수 수익률 비례 보상으로 변경
             if net_pnl > 0:
-                # 수익 날 때는 팍팍 밀어줌 (수익률 1% = +2.0점)
-                reward += net_pnl * 200.0  
+                # 익절: 수익률 비례 보상 + 성공 보너스
+                reward += net_pnl * 500.0
+                reward += 1.0  # 성공 샷 보너스
             else:
-                # 손실 날 때는 수익보다 더 아프게 (손실회피 성향)
-                reward += net_pnl * 250.0  
-            
-            # [추가] 잦은 매매 방지용 고정 페널티 (수수료 외에 심리적 비용)
-            reward -= 0.2
-            
+                # 손절: 손실은 더 아프게 (x600)
+                reward += net_pnl * 600.0
+        
         else:
-            # 홀딩 비용 (너무 오래 들고 있지 않도록 미세 조정)
+            # 2. 포지션 유지 중 (Hold)
+            # 시간 경과 페널티 (너무 오래 끄는 것 방지)
             reward -= 0.001 * holding_time
 
-        # 리워드 클리핑 (학습 안정화)
-        return np.clip(reward, -10, 10)
+            # [옵션] PPO를 위한 최소한의 가이드 (Step PnL)
+            # SAC와 달리 PPO는 과정 점수가 없으면 학습이 너무 느릴 수 있음.
+            # 하지만 이전처럼 과도하게 주지 않고, 확정 손익의 1/100 수준으로 미세하게 부여
+            # (이 부분이 싫다면 주석 처리해도 됩니다)
+            reward += step_pnl * 5.0 
+
+            # [추가] 극단적인 평가 손실 상태라면 추가 페널티 (손절 유도)
+            # step_pnl은 '변화량'이므로, 여기서는 누적 수익률을 알 수 없어서
+            # 환경에서 현재 unrealized_pnl을 받아와야 정확하지만, 
+            # 일단 로직 유지를 위해 생략하거나 필요 시 인자 추가 필요.
+            pass
+
+        # [핵심] 보상 스케일링 (신경망 안정성 확보)
+        # 기존 로직: reward * 0.1 -> 클리핑
+        reward = reward * 0.1
+
+        return np.clip(reward, -5, 5)
 
     def get_state_dim(self):
         return 29

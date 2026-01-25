@@ -1,12 +1,13 @@
 """
-PPO Agent (Optimized for xLSTM & Tuple State)
+PPO Agent (Linear LR Scheduler Applied)
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+# [수정] ReduceLROnPlateau 대신 LinearLR 사용
+from torch.optim.lr_scheduler import LinearLR
 import sys
 import os
 
@@ -38,12 +39,13 @@ class PPOAgent:
         
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.PPO_LEARNING_RATE)
         
-        # Scheduler
-        self.scheduler = ReduceLROnPlateau(
-            self.optimizer, mode='max',
-            factor=config.PPO_SCHEDULER_FACTOR,
-            patience=config.PPO_SCHEDULER_PATIENCE,
-            min_lr=config.PPO_SCHEDULER_MIN_LR
+        # [수정] Linear LR Scheduler 적용
+        # 전체 에피소드(TRAIN_NUM_EPISODES) 동안 학습률이 start_factor(1.0)에서 end_factor(0.01)까지 선형 감소
+        self.scheduler = LinearLR(
+            self.optimizer,
+            start_factor=1.0,
+            end_factor=config.PPO_LR_END_FACTOR,
+            total_iters=config.TRAIN_NUM_EPISODES
         )
         
         self.memory = []
@@ -162,7 +164,7 @@ class PPOAgent:
                 self.entropy_coef * (config.PPO_ENTROPY_DECAY ** episode)
             )
             
-            loss = actor_loss + 1.0 * critic_loss - current_entropy_coef * entropy_loss
+            loss = actor_loss + 0.5 * critic_loss - current_entropy_coef * entropy_loss  # (Critic coeff 0.5 or 1.0)
             
             self.optimizer.zero_grad()
             loss.backward()
@@ -188,6 +190,10 @@ class PPOAgent:
         if 'optimizer_state_dict' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-    def step_scheduler(self, metric):
-        """학습률 스케줄러 업데이트"""
-        self.scheduler.step(metric)
+    def step_scheduler(self, metric=None):
+        """
+        학습률 스케줄러 업데이트
+        LinearLR은 metric이 필요 없으므로 인자가 들어와도 무시합니다.
+        (train_ppo.py와의 호환성을 위해 인자는 남겨둠)
+        """
+        self.scheduler.step()

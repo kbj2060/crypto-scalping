@@ -343,6 +343,9 @@ class PPOTrainer:
         # [NEW] 이전 스텝 평가손익 추적용
         prev_unrealized_pnl = 0.0
         
+        # [🔥 추가] 쿨다운 카운터 초기화
+        cooldown_counter = 0  # 쿨다운 카운터 (거래 종료 후 매매 금지 기간)
+        
         # [과잉 거래 방지] 최소 보유 시간 설정 (3~5 캔들)
         min_holding_steps = config.MIN_HOLDING_TIME if hasattr(config, 'MIN_HOLDING_TIME') else 3
         
@@ -359,6 +362,10 @@ class PPOTrainer:
             
             # 현재 가격 확인
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
+            
+            # [NEW] 현재 변동성(ATR Ratio) 가져오기
+            # 피처 엔지니어링에서 만든 'atr_ratio' 컬럼 활용 (없으면 기본값)
+            current_volatility = self.data_collector.eth_data.iloc[current_idx].get('atr_ratio', 0.01)
             
             # 현재 평가손익 계산
             unrealized_pnl = 0.0
@@ -381,12 +388,19 @@ class PPOTrainer:
             if state is None:
                 break
 
-            # 행동 선택
-            action, prob = self.agent.select_action(state)
+            # [🔥 추가] 쿨다운 중이면 강제로 관망(Action 0) 처리
+            if cooldown_counter > 0:
+                cooldown_counter -= 1
+                action = 0  # 강제 관망
+                prob = 1.0  # 확률은 1.0으로 설정 (강제 행동이므로)
+            else:
+                # 쿨다운 아니면 AI가 행동 선택
+                action, prob = self.agent.select_action(state)
             
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
+            extra_penalty = 0.0  # 초기화: 기본적으로 추가 페널티 없음
             
             # [잠금 로직] 최소 보유 시간(3캔들) 미달 시 청산 금지 (Churning 방지)
             # 진입하자마자 수수료만 내고 나가는 것을 막기 위함
@@ -401,9 +415,14 @@ class PPOTrainer:
                 entry_price = 0.0
                 entry_index = 0
                 trade_count += 1
+                
+                # [핵심 수정 2] 강제 청산 시 강력한 추가 페널티 부여
+                # calculate_reward가 계산한 값에 -5.0을 더함
+                extra_penalty = -5.0
             
             # B. AI 판단에 따른 행동 (잠겨있지 않을 때만 실행)
             elif not is_locked and not trade_done:
+                # extra_penalty는 이미 0.0으로 초기화되어 있음
                 # -------------------------------------------------------
                 # Case 1: AI가 LONG을 원함 (1)
                 # -------------------------------------------------------
@@ -463,8 +482,18 @@ class PPOTrainer:
                         # 포지션 없으면 계속 관망 (현금 보유)
                         pass
 
-            # [핵심] 보상 계산 (Step PnL 전달)
-            reward = self.env.calculate_reward(step_pnl, realized_pnl, trade_done, holding_time)
+            # 보상 계산 및 extra_penalty 적용
+            reward = self.env.calculate_reward(
+                step_pnl, realized_pnl, trade_done, holding_time
+            )
+            
+            # 강제 청산 페널티 추가
+            reward += extra_penalty
+            
+            # [🔥 추가] 매매가 종료(trade_done)되었을 때 쿨다운 설정
+            if trade_done:
+                # 거래 끝났으면 15봉(약 45분) 동안 쳐다도 보지 마라
+                cooldown_counter = 15
             
             # 다음 스텝 준비
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0  # 거래 끝나면 리셋
