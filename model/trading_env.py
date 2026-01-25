@@ -97,30 +97,42 @@ class TradingEnvironment:
             logger.debug(f"관측 오류: {e}")
             return None
 
-    def calculate_reward(self, pnl, trade_done, holding_time=0):
+    def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0):
         """
-        PPO 전용 보상 함수
-        - Realized PnL(실현 손익)에 집중
-        - 스텝 보상(Unrealized)은 노이즈를 줄이기 위해 제거하거나 최소화
+        [New] Dense Reward Function
+        - 매 스텝 평가금액 변화(step_pnl)를 보상에 반영하여 학습 유도
+        - 결과 중심(Sparse) -> 과정 중심(Dense) 보상 체계로 전환
+        
+        Args:
+            step_pnl: 이번 스텝에서의 평가금액 변화량 (Unrealized Delta)
+            realized_pnl: 확정 손익 (청산 시에만 값 있음, 아니면 0)
+            trade_done: 거래 종료 여부
+            holding_time: 보유 시간
         """
         reward = 0.0
         
+        # 1. 과정 보상 (Shaping Reward)
+        # 포지션을 들고 있는 동안 가격이 유리하게 가면 보상, 불리하면 벌점
+        reward += step_pnl * 50.0 
+        
+        # 2. 결과 보상 (Terminal Reward)
         if trade_done:
-            # 거래 종료 시 (익절/손절)
-            transaction_cost = config.TRANSACTION_COST
-            net_pnl = pnl - transaction_cost
+            # 수수료 반영
+            fee = config.TRANSACTION_COST  # 0.001
+            net_pnl = realized_pnl - fee
             
+            # 종료 보너스/페널티 (비중 조절)
             if net_pnl > 0:
-                reward = net_pnl * config.REWARD_MULTIPLIER  # 수익 보상
-                reward += np.sqrt(net_pnl * 100) * 0.5  # 제곱근 보너스
-                reward += np.tanh(net_pnl * 100) * 0.5  # 승리 보너스
+                reward += net_pnl * 100.0  # 수익은 크게 칭찬
+                reward += 1.0  # 승리 보너스
             else:
-                reward = net_pnl * config.LOSS_PENALTY_MULTIPLIER  # 손실 페널티 (더 아프게)
+                # 손실은 아프게, 하지만 -60까지 가지 않도록 상한선 둠
+                reward += net_pnl * 80.0 
         else:
-            # 포지션 유지 중
-            reward = -config.TIME_COST * holding_time  # 시간 비용 (빨리 승부)
-            
-        return np.clip(reward, -100, 100)
+            # 홀딩 비용 (미미하게)
+            reward -= 0.0005 * holding_time
+
+        return np.clip(reward, -10, 10)  # 리워드 클리핑으로 안정화
 
     def get_state_dim(self):
         return 29

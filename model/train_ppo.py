@@ -1,9 +1,10 @@
 """
-PPO 학습 스크립트 (과잉 거래 방지 & 로그 최적화)
-- 최소 보유 시간(Min Holding Time) 3캔들 적용 -> 잦은 매매 방지
-- 스텝별 로그 제거 -> 진행바(tqdm)로 깔끔하게 확인
-- Action 0의 의미 변경: 유지 -> 청산(Exit)
-- AI가 포지션을 유지하려면 계속해서 1(Long)이나 2(Short)를 내뱉어야 함
+PPO 학습 스크립트 (AI 판단 청산 + Dense Reward)
+- Action 0: AI 판단 청산 (포지션이 있을 때 0이 나오면 즉시 청산)
+- Action 1: Long (진입 또는 스위칭)
+- Action 2: Short (진입 또는 스위칭)
+- Dense Reward: 매 스텝 평가금액 변화에 보상 부여
+- Best/Last 모델 분리 저장 및 실시간 그래프 유지
 """
 import logging
 import os
@@ -111,11 +112,13 @@ class PPOTrainer:
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
-        # 모델 로드
-        if os.path.exists(config.AI_MODEL_PATH):
+        # 모델 로드 (Last 모델 우선)
+        base_path = config.AI_MODEL_PATH.replace('.pth', '')
+        last_model_path = f"{base_path}_last.pth"
+        if os.path.exists(last_model_path):
             try:
-                self.agent.load_model(config.AI_MODEL_PATH)
-                logger.info(f"✅ 기존 모델 로드 완료")
+                self.agent.load_model(last_model_path)
+                logger.info(f"✅ 기존 모델(Last) 로드 완료")
             except Exception as e:
                 logger.warning(f"모델 로드 실패: {e}")
         
@@ -126,7 +129,7 @@ class PPOTrainer:
         try:
             plt.ion()  # Interactive Mode On
             self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Real-time Training')
+            self.ax.set_title('PPO Training Progress')
             self.ax.set_xlabel('Episode')
             self.ax.set_ylabel('Reward')
             self.ax.grid(True, alpha=0.3)
@@ -337,6 +340,9 @@ class PPOTrainer:
         episode_reward = 0.0
         trade_count = 0  # 거래 횟수 추적
         
+        # [NEW] 이전 스텝 평가손익 추적용
+        prev_unrealized_pnl = 0.0
+        
         # [과잉 거래 방지] 최소 보유 시간 설정 (3~5 캔들)
         min_holding_steps = config.MIN_HOLDING_TIME if hasattr(config, 'MIN_HOLDING_TIME') else 3
         
@@ -351,36 +357,43 @@ class PPOTrainer:
             if current_idx >= self.train_end_idx:
                 break
             
-            # Position Info
-            pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
-            holding_time = (current_idx - entry_index) if current_position is not None else 0
+            # 현재 가격 확인
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
             
+            # 현재 평가손익 계산
             unrealized_pnl = 0.0
             if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
             elif current_position == 'SHORT':
                 unrealized_pnl = (entry_price - curr_price) / entry_price
             
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
+            # [NEW] 스텝별 손익 변화 (Dense Reward용)
+            # 포지션이 없으면 0, 있으면 변동폭
+            step_pnl = unrealized_pnl - prev_unrealized_pnl
+            if current_position is None:
+                step_pnl = 0.0
             
-            # 1. 관측
+            # 상태 관측
+            pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
+            holding_time = (current_idx - entry_index) if current_position is not None else 0
+            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
             state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
             if state is None:
                 break
-            
-            # 2. 행동
+
+            # 행동 선택
             action, prob = self.agent.select_action(state)
             
-            # 3. 트레이딩 로직
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
             
-            # [잠금 로직] 최소 보유 시간 미달 시 강제로 포지션 유지 (행동 무시)
+            # [잠금 로직] 최소 보유 시간(3캔들) 미달 시 청산 금지 (Churning 방지)
+            # 진입하자마자 수수료만 내고 나가는 것을 막기 위함
             is_locked = (current_position is not None) and (holding_time < min_holding_steps)
             
-            # A. 강제 청산 (Stop Loss - 잠금 무시하고 즉시 손절)
+            # A. 강제 안전장치 (하드코딩된 최후의 보루)
+            # AI가 멍청해서 -50% 될 때까지 들고 있으면 안 되니까 최소한의 손절선(-2%)은 유지
             if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
                 realized_pnl = unrealized_pnl
                 trade_done = True
@@ -389,81 +402,81 @@ class PPOTrainer:
                 entry_index = 0
                 trade_count += 1
             
-            # B. 모델 행동 실행 (잠겨있지 않을 때만)
+            # B. AI 판단에 따른 행동 (잠겨있지 않을 때만 실행)
             elif not is_locked and not trade_done:
-                if action == 1:  # LONG 신호
-                    if current_position == 'SHORT':  # 스위칭 (Short -> Long)
+                # -------------------------------------------------------
+                # Case 1: AI가 LONG을 원함 (1)
+                # -------------------------------------------------------
+                if action == 1:
+                    if current_position == 'SHORT':  # 숏 잡고 있었으면 -> 스위칭
                         realized_pnl = unrealized_pnl
                         trade_done = True
                         current_position = 'LONG'
                         entry_price = curr_price
                         entry_index = current_idx
                         trade_count += 1
-                    elif current_position is None:  # 신규 진입 (Open Long)
+                    elif current_position is None:  # 무포지션이면 -> 롱 진입
                         current_position = 'LONG'
                         entry_price = curr_price
                         entry_index = current_idx
                         trade_count += 1
-                        reward = 0  # 진입 시점엔 보상 0
-                    # 이미 LONG이면 유지 (Maintain) - 아무것도 하지 않음
+                    # 이미 LONG이면? -> 유지 (Keep Holding)
                         
-                elif action == 2:  # SHORT 신호
-                    if current_position == 'LONG':  # 스위칭 (Long -> Short)
+                # -------------------------------------------------------
+                # Case 2: AI가 SHORT를 원함 (2)
+                # -------------------------------------------------------
+                elif action == 2:
+                    if current_position == 'LONG':  # 롱 잡고 있었으면 -> 스위칭
                         realized_pnl = unrealized_pnl
                         trade_done = True
                         current_position = 'SHORT'
                         entry_price = curr_price
                         entry_index = current_idx
                         trade_count += 1
-                    elif current_position is None:  # 신규 진입 (Open Short)
+                    elif current_position is None:  # 무포지션이면 -> 숏 진입
                         current_position = 'SHORT'
                         entry_price = curr_price
                         entry_index = current_idx
                         trade_count += 1
-                        reward = 0
-                    # 이미 SHORT면 유지 (Maintain) - 아무것도 하지 않음
+                    # 이미 SHORT면? -> 유지 (Keep Holding)
                 
-                elif action == 0:  # EXIT / NEUTRAL 신호
+                # -------------------------------------------------------
+                # Case 3: AI가 NEUTRAL(관망/청산)을 원함 (0) -> [AI 판단 청산]
+                # -------------------------------------------------------
+                elif action == 0:
                     if current_position is not None:
-                        # [핵심 변경] Action 0이 나오면 포지션 청산!
+                        # [AI 판단 청산] "이제 그만 먹고 나갈래" or "손절할래"
                         realized_pnl = unrealized_pnl
                         trade_done = True
+                        
+                        # (로그 확인용 - 필요시 주석 해제)
+                        # if realized_pnl > 0:
+                        #     logger.info(f"💰 AI 익절: {realized_pnl*100:.2f}%")
+                        # else:
+                        #     logger.info(f"💧 AI 손절: {realized_pnl*100:.2f}%")
+                        
                         current_position = None
                         entry_price = 0.0
                         entry_index = 0
                         trade_count += 1
                     else:
-                        # 포지션 없으면 계속 관망 (Stay)
-                        reward = 0  # 관망에 대한 보상 (필요시 작은 양수 부여 가능)
+                        # 포지션 없으면 계속 관망 (현금 보유)
+                        pass
+
+            # [핵심] 보상 계산 (Step PnL 전달)
+            reward = self.env.calculate_reward(step_pnl, realized_pnl, trade_done, holding_time)
             
-            # 보상 계산 (거래 완료 시)
-            if trade_done:
-                reward = self.env.calculate_reward(realized_pnl, True, holding_time)
-            else:
-                # 포지션 유지 중에도 시간 페널티 적용
-                if current_position is not None:
-                    reward = self.env.calculate_reward(0.0, False, holding_time)
+            # 다음 스텝 준비
+            prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0  # 거래 끝나면 리셋
             
-            # 4. 다음 상태 (안전하게 생성)
+            # 다음 스텝 준비
             next_idx = current_idx + 1
             self.data_collector.current_index = next_idx
             
-            # Next Info 계산
+            # Next Info (근사치)
             next_pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             next_hold_time = (next_idx - entry_index) if current_position is not None else 0
-            
-            next_un_pnl = 0.0
-            if next_idx < len(self.data_collector.eth_data) and current_position is not None:
-                try:
-                    next_price = float(self.data_collector.eth_data.iloc[next_idx]['close'])
-                    if current_position == 'LONG':
-                        next_un_pnl = (next_price - entry_price) / entry_price
-                    elif current_position == 'SHORT':
-                        next_un_pnl = (entry_price - next_price) / entry_price
-                except:
-                    pass
-            
-            next_pos_info = [next_pos_val, next_un_pnl * 10, next_hold_time / max_steps]
+            next_pos_info = [next_pos_val, 0.0, next_hold_time / max_steps]
             next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
             
             done = False if step < max_steps - 1 else True
@@ -476,7 +489,7 @@ class PPOTrainer:
             episode_reward += reward
             
             # 진행바 업데이트 (현재 수익, 거래횟수 표시)
-            pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count, 'P': f'{pos_val:.1f}'})
+            pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count})
             
             if done:
                 break
@@ -484,7 +497,9 @@ class PPOTrainer:
         pbar.close()
         # 에피소드 종료 후 학습
         loss = self.agent.train_net(episode=episode_num)
-        return episode_reward
+        
+        # [수정] 리워드와 함께 거래 횟수도 반환
+        return episode_reward, trade_count
 
     def live_plot(self):
         """[NEW] 윈도우에 실시간으로 그래프 그리기"""
@@ -514,7 +529,7 @@ class PPOTrainer:
 
     def train(self, num_episodes=1000):
         """학습 메인 루프"""
-        logger.info("🚀 PPO 학습 시작 (Best Model Separation + Real-time Plotting)")
+        logger.info("🚀 PPO 학습 시작 (AI 판단 청산 + Dense Reward)")
         
         best_reward = -float('inf')
         
@@ -530,16 +545,19 @@ class PPOTrainer:
         
         for ep in range(1, num_episodes + 1):
             try:
-                reward = self.train_episode(ep)
-                if reward is None:
+                # [수정] 리턴값을 2개로 받음 (reward, count)
+                result = self.train_episode(ep)
+                if result is None:
                     continue
+                
+                reward, trade_count = result
                 
                 self.episode_rewards.append(reward)
                 avg_reward = np.mean(self.episode_rewards[-10:])
                 self.avg_rewards.append(avg_reward)
                 
-                # 로그는 매번 출력 (진행 상황 확인용)
-                logger.info(f"✅ Ep {ep}: Reward {reward:.4f} | Avg {avg_reward:.4f}")
+                # [수정] 로그에 거래 횟수(Trades) 추가
+                logger.info(f"✅ Ep {ep}: Reward {reward:.4f} | Avg {avg_reward:.4f} | Trades: {trade_count}")
                 
                 # [NEW] 실시간 그래프 업데이트
                 self.live_plot()
@@ -558,15 +576,18 @@ class PPOTrainer:
                     self.agent.save_model(last_model_path)
                     self.env.preprocessor.save(last_scaler_path)
                     
+            except KeyboardInterrupt:
+                logger.info("학습 중단 (사용자 요청)")
+                break
             except Exception as e:
-                logger.error(f"Ep {ep} Fail: {e}")
+                logger.error(f"Ep {ep} Error: {e}")
                 continue
         
         # 학습 종료 시 그래프 창 유지
         if self.plotting_enabled:
             try:
-                plt.ioff()  # Interactive Mode Off
-                logger.info("그래프 창을 닫으려면 창을 직접 닫아주세요.")
+                plt.ioff()
+                plt.show()
             except:
                 pass
 
