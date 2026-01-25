@@ -305,7 +305,7 @@ class SACTrainer:
         logger.info("✅ 전략 신호 계산 및 저장 완료!")
     
     def _fit_global_scaler(self):
-        """29개 고급 피처 기반 전역 스케일러 학습 (최적화 버전)"""
+        """29개 고급 피처 기반 전역 스케일러 학습 (Numpy 최적화 버전)"""
         try:
             logger.info("🚀 29개 고급 피처 기반 전역 스케일러 학습 시작...")
             
@@ -323,17 +323,17 @@ class SACTrainer:
                 'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
             ]
             
-            # 컬럼 존재 여부 확인
+            # 컬럼 존재 여부 확인 및 0 채우기
             missing_cols = [c for c in target_cols if c not in self.data_collector.eth_data.columns]
             if missing_cols:
                 logger.warning(f"⚠️ 누락된 컬럼이 있어 0으로 채웁니다: {missing_cols}")
                 for c in missing_cols:
                     self.data_collector.eth_data[c] = 0.0
             
-            # 샘플링
+            # 샘플링 인덱스 생성
             total_candles = len(self.data_collector.eth_data)
             min_required = self.env.lookback + 100
-            sample_size = min(50000, total_candles - min_required)
+            sample_size = min(50000, total_candles - min_required) # 5만 개면 충분
             
             if total_candles > min_required + sample_size:
                 indices = np.linspace(min_required, total_candles - 1, sample_size, dtype=int)
@@ -342,20 +342,30 @@ class SACTrainer:
             
             logger.info(f"데이터 추출 중... ({len(indices)}개 샘플)")
             
-            # 데이터 수집
+            # [핵심 수정] Pandas -> Numpy 변환 (속도 향상 핵심)
+            # 전체 데이터를 미리 Numpy 배열로 변환합니다.
+            data_values = self.data_collector.eth_data[target_cols].values.astype(np.float32)
+            lookback = self.env.lookback
+            
             all_seq_features = []
+            
+            # Numpy Slicing으로 고속 추출
             for idx in indices:
-                if idx < self.env.lookback:
+                # Numpy 배열에서 직접 인덱싱 (Pandas iloc보다 훨씬 빠름)
+                # idx는 현재 시점(포함), idx-lookback+1은 시작 시점
+                if idx < lookback - 1:
                     continue
-                recent_df = self.data_collector.eth_data[target_cols].iloc[idx-self.env.lookback+1:idx+1]
-                if len(recent_df) == self.env.lookback:
-                    seq_features = recent_df.values.astype(np.float32)
+                    
+                seq_features = data_values[idx - lookback + 1 : idx + 1]
+                
+                if len(seq_features) == lookback:
                     all_seq_features.append(seq_features)
             
             if len(all_seq_features) == 0:
                 logger.warning("피처 수집 실패, 스케일러 학습 건너뜀")
                 return
             
+            # Stack
             all_features_array = np.vstack(all_seq_features)
             
             # NaN 처리
@@ -366,7 +376,7 @@ class SACTrainer:
             self.env.preprocessor.fit(all_features_array)
             self.env.scaler_fitted = True
             
-            logger.info(f"✅ 전역 스케일러 학습 완료: {len(all_features_array)}개 샘플, Feature Dim: {all_features_array.shape[1]}")
+            logger.info(f"✅ 전역 스케일러 학습 완료: {len(all_features_array)}개 샘플")
             
         except Exception as e:
             logger.error(f"전역 스케일러 학습 실패: {e}", exc_info=True)
@@ -436,6 +446,7 @@ class SACTrainer:
         entry_price = 0.0
         entry_index = 0
         episode_reward = 0.0
+        prev_unrealized_pnl = 0.0  # [추가] Step PnL 계산용 이전 값
         
         batch_size = getattr(config, 'SAC_BATCH_SIZE', 256)
         
@@ -504,8 +515,25 @@ class SACTrainer:
                     entry_price = curr_price
                     entry_index = current_idx
             
-            # 4. 보상 계산 (Realized PnL 위주)
-            reward = self.env.calculate_reward(realized_pnl, trade_done, holding_time)
+            # [핵심 수정] Step PnL(변동폭) 계산 로직 추가
+            step_pnl = 0.0
+            if current_position is not None:
+                # 이번 스텝 PnL - 저번 스텝 PnL = 순수 변동분
+                step_pnl = unrealized_pnl - prev_unrealized_pnl
+            else:
+                # 포지션 없으면 변동도 없음
+                step_pnl = 0.0
+                
+            # 다음 스텝을 위해 현재 PnL 저장 (청산되었으면 0으로 리셋)
+            if trade_done:
+                prev_unrealized_pnl = 0.0
+            else:
+                prev_unrealized_pnl = unrealized_pnl
+
+            # 4. 보상 계산 (인자 추가됨: step_pnl)
+            # 기존: calculate_reward(realized_pnl, trade_done, holding_time)
+            # 수정: calculate_reward(step_pnl, realized_pnl, trade_done, holding_time)
+            reward = self.env.calculate_reward(step_pnl, realized_pnl, trade_done, holding_time)
             
             # 5. 다음 상태 관측 (Next State) - [문제 해결 1] 인덱스 명시적 전달
             next_idx = current_idx + 1
@@ -543,9 +571,16 @@ class SACTrainer:
             self.agent.memory.push(state, action_continuous, reward, next_state, done)
             episode_reward += reward
             
-            if len(self.agent.memory) > batch_size:
-                self.agent.update(batch_size=batch_size)
-                self.agent.step_schedulers()
+            # [수정] 학습 주기 조절 (Update Interval 적용)
+            # 5 스텝마다 한 번씩만 업데이트 (연산 속도 향상 + 학습 안정성 강화)
+            update_interval = 5
+            
+            # 메모리가 찼고, 현재 step이 interval의 배수일 때만 학습
+            if len(self.agent.memory) > batch_size and step % update_interval == 0:
+                # 학습은 하되, 한 번 할 때 확실하게 (3회 반복)
+                for _ in range(3):
+                    self.agent.update(batch_size=batch_size)
+                    self.agent.step_schedulers()
 
         return episode_reward
     

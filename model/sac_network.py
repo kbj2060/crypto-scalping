@@ -49,8 +49,10 @@ class sLSTMCell(nn.Module):
         gates = self.weight(combined)
         i, f, o, z = gates.chunk(4, dim=-1)
         
-        i = torch.clamp(i, min=-5, max=5)
-        f = torch.clamp(f, min=-5, max=5)
+        # 학습 초기 안정성을 위해 조금 더 보수적인 범위 사용
+        # e^4는 약 54, e^5는 약 148. 4~5 사이 추천
+        i = torch.clamp(i, min=-4, max=4)
+        f = torch.clamp(f, min=-4, max=4)
         i = torch.exp(i)
         f = torch.exp(f)
         

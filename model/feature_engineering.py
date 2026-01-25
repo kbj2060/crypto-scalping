@@ -85,7 +85,8 @@ class FeatureEngineer:
         gain = (delta.where(delta > 0, 0)).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / (loss + 1e-8)
-        self.df['rsi'] = 100 - (100 / (1 + rs))
+        rsi = 100 - (100 / (1 + rs))
+        self.df['rsi'] = rsi.fillna(50.0)  # 데이터가 없으면 '중립(50)'으로 간주
         
         # 7. MACD Hist (추세 반전)
         ema12 = close.ewm(span=12).mean()
@@ -144,7 +145,8 @@ class FeatureEngineer:
         pmf = np.where(tp > tp.shift(1), rmf, 0)
         nmf = np.where(tp < tp.shift(1), rmf, 0)
         mfr = pd.Series(pmf).rolling(14).sum() / (pd.Series(nmf).rolling(14).sum() + 1e-8)
-        self.df['mfi'] = 100 - 100 / (1 + mfr)
+        mfi = 100 - 100 / (1 + mfr)
+        self.df['mfi'] = mfi.fillna(50.0)  # 거래량 데이터 부족 시 '중립' 처리
         
         # 14. CMF (매집/분산)
         mf_mult = ((close - self.df['low']) - (self.df['high'] - close)) / (self.df['high'] - self.df['low'] + 1e-8)
@@ -202,7 +204,8 @@ class FeatureEngineer:
         gain = (delta.where(delta > 0, 0)).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         rs = gain / (loss + 1e-8)
-        self.df['btc_rsi'] = 100 - (100 / (1 + rs))
+        btc_rsi = 100 - (100 / (1 + rs))
+        self.df['btc_rsi'] = btc_rsi.fillna(50.0)  # 데이터가 없으면 '중립(50)'으로 간주
         
         # 23. BTC-ETH Correlation (30봉) 🔥
         self.df['btc_corr'] = eth_close.rolling(30).corr(btc_close).fillna(0)

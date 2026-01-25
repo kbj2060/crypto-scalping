@@ -104,38 +104,42 @@ class TradingEnvironment:
             logger.error(f"관측 오류: {e}")
             return None
 
-    def calculate_reward(self, pnl, trade_done, holding_time=0):
+    def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0):
         """
-        [수정된 보상 함수]
-        - Unrealized PnL(평가손익) 보상 제거 (Hold 시 변동성 보상 방지)
-        - Realized PnL(확정손익) 중심
+        [SAC 최적화 보상 함수]
+        - Reward Scale 대폭 축소 (Q-value 폭발 방지)
+        - Step PnL 반영 비율 축소
+        - Exit 보상/페널티 스케일 조정
         """
         reward = 0.0
         
-        # 1. 거래 확정 시 (Realized PnL)
+        # 1. 포지션 유지 중 PnL 변화 (변동성 반영)
+        # PPO(30~100) -> SAC(5)로 대폭 축소하여 변동성 매매 방지
+        reward += step_pnl * 5.0
+        
+        # 2. 결과 보상 (청산 시)
         if trade_done:
-            # 수수료 반영 (진입/청산 합쳐서 0.1% 가정)
-            transaction_cost = 0.001
-            net_pnl = pnl - transaction_cost
+            fee = config.TRANSACTION_COST
+            net_pnl = realized_pnl - fee
             
             if net_pnl > 0:
-                # 익절: 수익률에 비례한 보상 + 성공 보너스
-                reward += net_pnl * 500  # 배율 강화
-                reward += 1.0  # 성공 자체에 대한 보너스
+                # 익절: PPO(200~250) -> SAC(40)
+                reward += net_pnl * 40.0
             else:
-                # 손절: 손실에 비례한 페널티
-                reward += net_pnl * 600  # 손실은 더 아프게
-        
+                # 손절: PPO(250~300) -> SAC(60)
+                # 손실은 수익보다 조금 더 크게 페널티 부여
+                reward += net_pnl * 60.0
+                # 손절/청산 고정 페널티 (Switching/Exit penalty)
+                reward -= 0.05
         else:
-            # 2. 포지션 유지 중 (Hold)
-            # 시간 경과 페널티 (빨리 수익 내라고 독촉)
-            reward -= 0.001 * holding_time
-            
-            # (옵션) 극단적인 평가 손실 상태라면 약간의 페널티 (손절 유도)
-            if pnl < -0.02:  # -2% 넘어가면 고통 부여
-                reward += pnl * 10
+            # 3. HOLD 보상 (아주 작게)
+            # SAC는 0.00005 수준으로 설정 (Holding Cost 대신 생존/관망 보너스)
+            # 불필요한 진입을 막고 좋은 자리를 기다리게 유도
+            reward += 0.00005
 
-        return np.clip(reward, -20, 20)  # 보상 클리핑
+        # 4. Reward Clipping
+        # SAC Critic 안정성을 위해 좁은 범위 [-2, 2] 적용
+        return np.clip(reward, -2.0, 2.0)
 
     def get_state_dim(self):
         return 29

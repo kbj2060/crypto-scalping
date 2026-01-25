@@ -91,6 +91,6 @@ SAC_TAU = 0.005  # Soft Target Update 계수
 SAC_ALPHA = 0.2  # 초기 엔트로피 계수 (자동 튜닝됨)
 SAC_LEARNING_RATE = 3e-4  # 학습률 (Actor, Critic, Alpha 모두 동일)
 SAC_REPLAY_BUFFER_SIZE = 100000  # Replay Buffer 크기
-SAC_BATCH_SIZE = 256  # 배치 크기
+SAC_BATCH_SIZE = 1024  # 배치 크기 (안정성 강화: 256 → 1024)
 SAC_UPDATE_FREQUENCY = 1  # 업데이트 빈도 (매 스텝마다)
 SAC_WARMUP_RATIO = 0.05  # 전체 학습 기간의 5% 동안 LR 점진적 증가 (Warmup)
