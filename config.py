@@ -60,20 +60,20 @@ STOP_LOSS_THRESHOLD = -0.05  # 강제 손절 임계값 (-5%) - -2%에서 완화�
 # PPO 알고리즘 하이퍼파라미터
 PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
-PPO_EPS_CLIP = 0.15  # PPO 클리핑 범위
+PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.005  # 엔트로피 계수 (초기값) - 0.04 → 0.005 (뇌 충격 요법: 탐험 대폭 감소)
+PPO_ENTROPY_COEF = 0.01  # 엔트로피 계수 (초기값) - 적절한 탐험 유도
 PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다) - 0.9996 → 0.999 (더 천천히 감소)
 PPO_ENTROPY_MIN = 0.001  # 엔트로피 최소값 - 0.01 → 0.001 (최소값도 낮춤)
-PPO_LEARNING_RATE = 3e-4  # 학습률 - 1e-4 → 3e-4 (뇌 충격 요법: 학습 속도 대폭 상향)
+PPO_LEARNING_RATE = 0.0003  # 학습률 - 3e-4 (Golden Rule)
 
 # [수정] 스케줄러 설정 (Linear Decay)
 # PPO_SCHEDULER_FACTOR, PATIENCE 등 제거 (LinearLR 사용)
 PPO_LR_END_FACTOR = 0.1  # 학습 종료 시점의 학습률은 초기값의 10% - 0.01 → 0.1 (더 높은 최종 학습률)
 
-# 네트워크 아키텍처 파라미터
-NETWORK_HIDDEN_DIM = 128  # 은닉층 차원
-NETWORK_NUM_LAYERS = 2  # xLSTM 레이어 개수
+# 네트워크 아키텍처 파라미터 (안전한 파라미터로 최적화)
+NETWORK_HIDDEN_DIM = 128  # 256은 너무 큽니다. 128로 줄여서 학습 속도 향상
+NETWORK_NUM_LAYERS = 1  # 2층은 초기 학습 어렵습니다. 1층으로 시작
 NETWORK_DROPOUT = 0.1  # Dropout 비율
 NETWORK_ATTENTION_HEADS = 4  # Multi-Head Attention 헤드 개수
 NETWORK_INFO_ENCODER_DIM = 64  # Info Encoder 출력 차원
