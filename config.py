@@ -84,7 +84,7 @@ NETWORK_CRITIC_HEAD_DIM = 32  # Critic Head 은닉층 차원
 NETWORK_USE_CHECKPOINTING = False  # Gradient Checkpointing 사용 여부
 
 # 학습 파라미터
-TRAIN_ACTION_DIM = 3  # 행동 차원 (0:Neutral, 1:Long, 2:Short) - 3-Action 구조
+TRAIN_ACTION_DIM = 4  # 행동 차원 (0:HOLD, 1:LONG, 2:SHORT, 3:EXIT) - 4-Action 구조
 TRAIN_BATCH_SIZE = 256  # 배치 크기 (메모리에서 업데이트할 최소 스텝 수)
 TRAIN_SAMPLE_SIZE = 50000  # 스케일러 학습용 샘플 크기
 

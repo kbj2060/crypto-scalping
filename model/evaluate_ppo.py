@@ -84,7 +84,7 @@ class PPOEvaluator:
 
         # 에이전트 설정
         state_dim = self.env.get_state_dim()
-        action_dim = 4
+        action_dim = 4  # 4-Action: 0=HOLD, 1=LONG, 2=SHORT, 3=EXIT
         real_info_dim = len(self.strategies) + 3 
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -214,16 +214,39 @@ class PPOEvaluator:
             trade_occurred = False
             realized_pnl = 0.0
 
-            if action == 3 and current_position is not None: # EXIT
-                realized_pnl = unrealized_pnl - fee_rate
-                balance_history.append(balance_history[-1] * (1 + realized_pnl))
-                trades.append({'net_pnl': realized_pnl})
-                trade_occurred = True
-                current_position = None
-            elif action == 1 and current_position is None: # LONG
-                current_position = 'LONG'; entry_price = curr_price; entry_index = idx
-            elif action == 2 and current_position is None: # SHORT
-                current_position = 'SHORT'; entry_price = curr_price; entry_index = idx
+            # 4-Action Logic
+            # Action 0: HOLD (관망)
+            if action == 0:
+                pass  # 아무것도 하지 않음
+            
+            # Action 1: LONG (롱 진입/유지)
+            elif action == 1:
+                if current_position is None:
+                    # 신규 롱 진입
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = idx
+                # 이미 LONG이면 유지 (Pass)
+            
+            # Action 2: SHORT (숏 진입/유지)
+            elif action == 2:
+                if current_position is None:
+                    # 신규 숏 진입
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = idx
+                # 이미 SHORT면 유지 (Pass)
+            
+            # Action 3: EXIT (청산)
+            elif action == 3:
+                if current_position is not None:
+                    # 포지션 청산
+                    realized_pnl = unrealized_pnl - fee_rate
+                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
+                    trades.append({'net_pnl': realized_pnl})
+                    trade_occurred = True
+                    current_position = None
+                # 포지션이 없으면 아무것도 안 함 (Pass)
             
             # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
             # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
