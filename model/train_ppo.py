@@ -87,11 +87,11 @@ class PPOTrainer:
         self._fit_global_scaler()
 
         state_dim = self.env.get_state_dim()
-        action_dim = 4  
+        action_dim = 3  # 3-Action: 0=Neutral, 1=Long, 2=Short
         info_dim = len(self.strategies) + 3
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action Strict)")
+        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (3-Action Target Position)")
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
@@ -248,33 +248,61 @@ class PPOTrainer:
                 trade_count += 1
                 action = 0 
             
-            # B. 4-Action Strict Logic
+            # B. 3-Action Target Position Logic
             else:
+                # Action 0: 목표가 '무포지션' (청산)
                 if action == 0:
-                    pass 
-                elif action == 1:
-                    if current_position is None:
-                        current_position = 'LONG'
-                        entry_price = curr_price; entry_index = current_idx
-                        trade_count += 1
-                    else:
-                        pass
-                elif action == 2:
-                    if current_position is None:
-                        current_position = 'SHORT'
-                        entry_price = curr_price; entry_index = current_idx
-                        trade_count += 1
-                    else:
-                        pass
-                elif action == 3:
-                    if current_position is not None:
+                    if current_position == 'LONG':
                         realized_pnl = unrealized_pnl
                         trade_done = True
                         current_position = None
-                        entry_price = 0.0; entry_index = 0
+                        entry_price = 0.0
+                        entry_index = 0
                         trade_count += 1
-                    else:
-                        pass
+                    elif current_position == 'SHORT':
+                        realized_pnl = unrealized_pnl
+                        trade_done = True
+                        current_position = None
+                        entry_price = 0.0
+                        entry_index = 0
+                        trade_count += 1
+                    # 이미 None이면 관망 (Pass)
+                
+                # Action 1: 목표가 '롱'
+                elif action == 1:
+                    if current_position == 'SHORT':
+                        # 스위칭: 숏 청산 후 롱 진입
+                        realized_pnl = unrealized_pnl
+                        trade_done = True
+                        current_position = 'LONG'
+                        entry_price = curr_price
+                        entry_index = current_idx
+                        trade_count += 1
+                    elif current_position is None:
+                        # 신규 진입
+                        current_position = 'LONG'
+                        entry_price = curr_price
+                        entry_index = current_idx
+                        trade_count += 1
+                    # 이미 LONG이면 유지 (Pass)
+                
+                # Action 2: 목표가 '숏'
+                elif action == 2:
+                    if current_position == 'LONG':
+                        # 스위칭: 롱 청산 후 숏 진입
+                        realized_pnl = unrealized_pnl
+                        trade_done = True
+                        current_position = 'SHORT'
+                        entry_price = curr_price
+                        entry_index = current_idx
+                        trade_count += 1
+                    elif current_position is None:
+                        # 신규 진입
+                        current_position = 'SHORT'
+                        entry_price = curr_price
+                        entry_index = current_idx
+                        trade_count += 1
+                    # 이미 SHORT면 유지 (Pass)
 
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
@@ -285,9 +313,8 @@ class PPOTrainer:
                 current_position=current_position
             )
             
-            # [핵심 수정] 거래가 끝나면 기억(State)을 리셋하여 새로운 거래 유도
-            if trade_done:
-                self.agent.reset_episode_states()
+            # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
+            # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
             
             reward += extra_penalty
             

@@ -1,9 +1,9 @@
 """
 PPO 전용 트레이딩 환경 (3-Action Version - Aggressive Trading)
-- Action 0: Neutral (HOLD/청산)
-- Action 1: Long (진입/유지)
-- Action 2: Short (진입/유지)
-- 1-Step Switching 지원
+- Action 0: Neutral (목표: 무포지션)
+- Action 1: Long (목표: 롱 포지션)
+- Action 2: Short (목표: 숏 포지션)
+- 1-Step Switching 지원 (Target Position 방식)
 - 진입 비용 완전 삭제 (재진입 유도)
 """
 import numpy as np
@@ -26,6 +26,8 @@ class TradingEnvironment:
         self.lookback = lookback if lookback is not None else config.LOOKBACK
         self.preprocessor = DataPreprocessor()
         self.scaler_fitted = False
+        # [수정] 액션 공간을 3개로 명시 (Target Position 방식)
+        # 실제로는 gym.spaces를 사용하지 않지만, 명시적으로 3-Action임을 표시
 
     def get_observation(self, position_info=None, current_index=None):
         """
@@ -74,49 +76,31 @@ class TradingEnvironment:
 
     def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0, action=0, prev_position=None, current_position=None):
         """
-        [PPO Aggressive Trading Reward]
-        - 진입 비용 완전 삭제 (재진입 유도)
-        - 홀딩/청산 보상 강화
+        [PPO 순수 PnL 기반 Reward]
+        - 보너스 제거: 순수 실력으로만 승부
+        - 작은 스케일: PPO 학습 안정성 확보
         - 3-Action 구조: 0=Neutral, 1=Long, 2=Short
         """
         reward = 0.0
         
-        # 1. HOLD 보상 (수익 추세 강화)
-        if action == 0:
-            if current_position is not None:
-                # 방향 맞으면 200배 보상 (확실한 유인책)
-                reward += step_pnl * 200.0 
-                # 버티기 수고비
-                reward += 0.005 
-            else:
-                # 관망 보너스
-                reward += 0.001
-
-        # 2. [수정] 진입 비용 완전 삭제
-        # if prev_position is None and current_position is not None:
-        #      reward -= 0.5  <-- 삭제됨 (이제 공짜로 진입 가능)
-
-        # 3. 청산 보상 (승리 쾌감 주입)
-        # 3-Action 구조에서는 action=0 (Neutral)이 청산을 의미
+        # 1. 스텝 보상: 평가금액 변동폭 * 10 (변동성을 버티는 힘)
+        # (예: 1% 오르면 0.01 * 10 = 0.1점)
+        if current_position is not None:
+            step_reward = step_pnl * 10.0
+            reward += step_reward
+        # 포지션 없으면 0 (관망은 보상 없음)
+        
+        # 2. 종료 보상: 최종 확정 수익 * 50 (결과에 대한 책임)
+        # (예: 2% 익절하면 0.02 * 50 = 1.0점)
         if trade_done:
             fee = getattr(config, 'TRANSACTION_COST', 0.001)
-            reward -= fee * 1.0 
-            
             net_pnl = realized_pnl - fee
-            
-            if net_pnl > 0:
-                # 익절: x200
-                reward += net_pnl * 200.0
-                # [추가] 이기면 무조건 +1.0점 보너스 (작은 수익도 칭찬)
-                reward += 1.0
-                if net_pnl > 0.01: 
-                    reward += 5.0  # 대박 보너스
-            else:
-                # 손절: x200
-                reward += net_pnl * 200.0 
-                # 손절 페널티 없음 (손실 자체가 고통임)
-
-        return np.clip(reward, -20, 20)
+            terminal_reward = net_pnl * 50.0
+            reward += terminal_reward
+            # 보너스(+1, +5) 모두 삭제 -> 순수 실력으로만 승부
+        
+        # 클리핑은 유지하되 범위를 좁힘 (-10 ~ 10 정도가 PPO에 가장 좋음)
+        return np.clip(reward, -10, 10)
 
     def get_state_dim(self):
         return 29
