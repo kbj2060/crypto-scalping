@@ -214,7 +214,22 @@ class PPOEvaluator:
             trade_occurred = False
             realized_pnl = 0.0
 
-            # 4-Action Logic
+            # [삭제] A. 강제 손절 (Safety Net)
+            # 평가 때도 간섭하지 않고 AI의 판단을 100% 신뢰합니다.
+            # if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
+            #     realized_pnl = unrealized_pnl - fee_rate
+            #     balance_history.append(balance_history[-1] * (1 + realized_pnl))
+            #     trades.append({
+            #         'entry_idx': entry_index, 
+            #         'exit_idx': idx,
+            #         'type': current_position, 
+            #         'net_pnl': realized_pnl,
+            #         'note': 'Stop Loss'  # 손절 기록
+            #     })
+            #     trade_occurred = True
+            #     current_position = None
+            
+            # B. 4-Action Logic
             # Action 0: HOLD (관망)
             if action == 0:
                 pass  # 아무것도 하지 않음
@@ -320,5 +335,5 @@ class PPOEvaluator:
             logger.warning(f"[WARN] Graph plotting failed: {plot_err}")
 
 if __name__ == "__main__":
-    evaluator = PPOEvaluator(mode='all', model_type='best')
+    evaluator = PPOEvaluator(mode='test', model_type='best')
     evaluator.evaluate()
