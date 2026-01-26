@@ -59,9 +59,10 @@ class PPOAgent:
         """트랜지션 저장"""
         self.memory.append(transition)
 
-    def select_action(self, state):
+    def select_action(self, state, action_mask=None):
         """
         state: (obs_seq, obs_info) 튜플
+        action_mask: [1, 1, 1, 1] 형태의 리스트 or 텐서 (1=가능, 0=불가능)
         Returns: (action, log_prob)
         """
         # 튜플 언패킹
@@ -78,6 +79,22 @@ class PPOAgent:
                 states=self.current_states,
                 return_states=True
             )
+        
+        # -----------------------------------------------------------
+        # [핵심] Action Masking 적용
+        # -----------------------------------------------------------
+        if action_mask is not None:
+            mask_tensor = torch.FloatTensor(action_mask).to(self.device)
+            # 불가능한 액션(0)의 확률을 0으로 만듦 (Logits에 -1e10 대입 효과)
+            # 여기서는 Softmax 이후인 probs에 곱하고 다시 정규화
+            probs = probs * mask_tensor
+            
+            # 합이 0이 되는 예외 처리 (혹시 모를 에러 방지)
+            if probs.sum() == 0:
+                probs = torch.ones_like(probs) / len(probs)
+            else:
+                probs = probs / probs.sum()  # 재정규화
+        # -----------------------------------------------------------
         
         dist = Categorical(probs)
         action = dist.sample()
@@ -113,12 +130,13 @@ class PPOAgent:
         done_batch = torch.tensor(done_list, dtype=torch.float).to(self.device)
         prob_a_batch = torch.tensor(prob_list, dtype=torch.float).to(self.device)
 
-        # GAE 계산을 위한 Value 계산
+        # Value 계산 (Old Value 저장해두기 - Clipping용)
         with torch.no_grad():
             _, v_s = self.model(s_seq_batch, s_info_batch, states=None, return_states=False)
             _, v_next = self.model(ns_seq_batch, ns_info_batch, states=None, return_states=False)
+            old_values = v_s.clone()  # [NEW] Old Value 저장
         
-        # TD Target
+        # TD Target & GAE (기존과 동일)
         td_target = r_batch + self.gamma * v_next * done_batch
         delta = td_target - v_s
         
@@ -155,7 +173,22 @@ class PPOAgent:
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
             
             actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.smooth_l1_loss(v_s.squeeze(), returns.detach())
+            
+            # [수정] Critic Loss with Clipping (학습 안정성 핵심)
+            v_pred = v_s.squeeze()
+            v_target = returns.detach()
+            
+            # 1. Unclipped Loss
+            loss_v1 = F.smooth_l1_loss(v_pred, v_target, reduction='none')
+            # 2. Clipped Loss
+            v_pred_clipped = old_values.squeeze() + torch.clamp(
+                v_pred - old_values.squeeze(), -self.eps_clip, self.eps_clip
+            )
+            loss_v2 = F.smooth_l1_loss(v_pred_clipped, v_target, reduction='none')
+            
+            # Max(Loss) -> Mean (보수적 업데이트)
+            critic_loss = torch.max(loss_v1, loss_v2).mean()
+            
             entropy_loss = dist.entropy().mean()
             
             # 엔트로피 감소
@@ -164,7 +197,7 @@ class PPOAgent:
                 self.entropy_coef * (config.PPO_ENTROPY_DECAY ** episode)
             )
             
-            loss = actor_loss + 0.5 * critic_loss - current_entropy_coef * entropy_loss  # (Critic coeff 0.5 or 1.0)
+            loss = actor_loss + 0.5 * critic_loss - current_entropy_coef * entropy_loss
             
             self.optimizer.zero_grad()
             loss.backward()

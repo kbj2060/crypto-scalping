@@ -1,7 +1,9 @@
 """
-PPO 전용 트레이딩 환경 (Independent Version)
-- Discrete Action Space (0:HOLD, 1:LONG, 2:SHORT)
-- xLSTM 입력 최적화 (Sequence + Info Tuple 반환)
+PPO 전용 트레이딩 환경 (4-Action Version)
+- Action 0: HOLD (유지)
+- Action 1: ENTER_LONG (진입)
+- Action 2: ENTER_SHORT (진입)
+- Action 3: EXIT (청산)
 """
 import numpy as np
 import torch
@@ -97,57 +99,51 @@ class TradingEnvironment:
             logger.debug(f"관측 오류: {e}")
             return None
 
-    def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0):
+    def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0, action=0, prev_position=None, current_position=None):
         """
-        [SAC 기반 수정된 보상 함수 for PPO]
-        - Unrealized PnL(평가손익) 노이즈 최소화
-        - Realized PnL(확정손익) 중심의 강력한 피드백
-        
+        [4-Action Optimized Reward - 학습 개선 버전]
+        - 0:HOLD, 1:LONG, 2:SHORT, 3:EXIT
+        - Valid Entry Cost 제거, 보상 스케일 재조정, 클리핑 범위 확대
         Args:
-            step_pnl: 이번 스텝에서의 평가금액 변화량 (Unrealized Delta)
-            realized_pnl: 확정 손익 (청산 시에만 값 있음, 아니면 0)
+            step_pnl: 이번 스텝의 평가금액 변동 (Unrealized Delta)
+            realized_pnl: 확정 손익 (Exit 시에만 존재)
             trade_done: 거래 종료 여부
-            holding_time: 보유 시간
+            holding_time: 보유 시간 (사용하지 않음, 호환성 유지)
+            action: 현재 취한 행동 (0:HOLD, 1:LONG, 2:SHORT, 3:EXIT)
+            prev_position: 이전 스텝의 포지션 (None, 'LONG', 'SHORT')
+            current_position: 현재 스텝의 포지션 (None, 'LONG', 'SHORT')
         """
         reward = 0.0
         
-        # 1. 거래 확정 시 (Realized PnL) - 여기가 핵심!
-        if trade_done:
-            # 수수료 반영 (진입/청산 합쳐서 약 0.1% 가정)
-            # config.TRANSACTION_COST가 있다면 그것을 사용
-            transaction_cost = getattr(config, 'TRANSACTION_COST', 0.001)
-            net_pnl = realized_pnl - transaction_cost
-            
-            if net_pnl > 0:
-                # 익절: 수익률 비례 보상 + 성공 보너스
-                reward += net_pnl * 500.0
-                reward += 1.0  # 성공 샷 보너스
+        # 1. HOLD 보너스 (Trend Riding)
+        if action == 0:
+            if current_position is not None:
+                # 포지션 보유 중 HOLD: 추세가 맞으면(step_pnl > 0) 보상
+                reward += step_pnl * 15.0  # x20.0 → x15.0 (약간 완화)
+                # 미세 보너스 (조급함 방지)
+                reward += 0.001 
             else:
-                # 손절: 손실은 더 아프게 (x600)
-                reward += net_pnl * 600.0
-        
-        else:
-            # 2. 포지션 유지 중 (Hold)
-            # 시간 경과 페널티 (너무 오래 끄는 것 방지)
-            reward -= 0.001 * holding_time
+                # 무포지션 HOLD: 관망 보너스
+                reward += 0.001
 
-            # [옵션] PPO를 위한 최소한의 가이드 (Step PnL)
-            # SAC와 달리 PPO는 과정 점수가 없으면 학습이 너무 느릴 수 있음.
-            # 하지만 이전처럼 과도하게 주지 않고, 확정 손익의 1/100 수준으로 미세하게 부여
-            # (이 부분이 싫다면 주석 처리해도 됩니다)
-            reward += step_pnl * 5.0 
+        # 2. Invalid Action 페널티 제거 (마스킹이 이미 차단하므로 불필요)
 
-            # [추가] 극단적인 평가 손실 상태라면 추가 페널티 (손절 유도)
-            # step_pnl은 '변화량'이므로, 여기서는 누적 수익률을 알 수 없어서
-            # 환경에서 현재 unrealized_pnl을 받아와야 정확하지만, 
-            # 일단 로직 유지를 위해 생략하거나 필요 시 인자 추가 필요.
-            pass
+        # 3. Valid Entry Cost 제거 (진입 장벽 완화)
 
-        # [핵심] 보상 스케일링 (신경망 안정성 확보)
-        # 기존 로직: reward * 0.1 -> 클리핑
-        reward = reward * 0.1
+        # 4. EXIT Rewards (Realized PnL)
+        if trade_done and action == 3:
+            fee = getattr(config, 'TRANSACTION_COST', 0.001)
+            reward -= fee * 10.0 # 수수료
+            
+            net_pnl = realized_pnl - fee
+            if net_pnl > 0:
+                reward += net_pnl * 250.0 # 익절 (x200 → x250, 증가)
+                if net_pnl > 0.01: reward += 2.0 # 1% 이상 대박 보너스
+            else:
+                reward += net_pnl * 250.0 # 손절 (x300 → x250, 대칭화)
+                reward -= 0.2 # 패배 고정 비용 (-0.5 → -0.2, 완화)
 
-        return np.clip(reward, -5, 5)
+        return np.clip(reward, -20, 20)  # 클리핑 범위 확대 (-10, 10 → -20, 20)
 
     def get_state_dim(self):
         return 29

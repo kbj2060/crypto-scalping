@@ -55,21 +55,21 @@ REWARD_MULTIPLIER = 120.0  # 기존 150/300 -> 120 (안정성)
 LOSS_PENALTY_MULTIPLIER = 120.0  # 비대칭 제거 (Symmetric)
 TRANSACTION_COST = 0.0015  # 거래 비용 (0.15%, 스프레드 + 슬리피지 포함)
 TIME_COST = 0.0001  # 시간 비용
-STOP_LOSS_THRESHOLD = -0.02  # 강제 손절 임계값 (-2%)
+STOP_LOSS_THRESHOLD = -0.05  # 강제 손절 임계값 (-5%) - -2%에서 완화하여 노이즈에 털리지 않게
 
 # PPO 알고리즘 하이퍼파라미터
 PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
 PPO_EPS_CLIP = 0.15  # PPO 클리핑 범위
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.04  # 엔트로피 계수 (초기값)
-PPO_ENTROPY_DECAY = 0.9996  # 엔트로피 감소율 (에피소드마다)
-PPO_ENTROPY_MIN = 0.005  # 엔트로피 최소값
-PPO_LEARNING_RATE = 5e-5  # 학습률
+PPO_ENTROPY_COEF = 0.04  # 엔트로피 계수 (초기값) - 0.01 → 0.04 (탐험 강화)
+PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다) - 0.9996 → 0.999 (더 천천히 감소)
+PPO_ENTROPY_MIN = 0.01  # 엔트로피 최소값 - 0.005 → 0.01 (최소값 유지)
+PPO_LEARNING_RATE = 1e-4  # 학습률 - 5e-5 → 1e-4 (학습 속도 개선)
 
 # [수정] 스케줄러 설정 (Linear Decay)
 # PPO_SCHEDULER_FACTOR, PATIENCE 등 제거 (LinearLR 사용)
-PPO_LR_END_FACTOR = 0.01  # 학습 종료 시점의 학습률은 초기값의 1% (거의 0)
+PPO_LR_END_FACTOR = 0.1  # 학습 종료 시점의 학습률은 초기값의 10% - 0.01 → 0.1 (더 높은 최종 학습률)
 
 # 네트워크 아키텍처 파라미터
 NETWORK_HIDDEN_DIM = 128  # 은닉층 차원
@@ -84,7 +84,7 @@ NETWORK_CRITIC_HEAD_DIM = 32  # Critic Head 은닉층 차원
 NETWORK_USE_CHECKPOINTING = False  # Gradient Checkpointing 사용 여부
 
 # 학습 파라미터
-TRAIN_ACTION_DIM = 3  # 행동 차원 (HOLD, LONG, SHORT)
+TRAIN_ACTION_DIM = 4  # 행동 차원 (HOLD, LONG, SHORT, EXIT)
 TRAIN_BATCH_SIZE = 1024  # 배치 크기 (메모리에서 업데이트할 최소 스텝 수)
 TRAIN_SAMPLE_SIZE = 50000  # 스케일러 학습용 샘플 크기
 TRAIN_SPLIT = 0.7  # 학습 데이터 비율 (70%)
