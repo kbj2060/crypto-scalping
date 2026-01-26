@@ -1,5 +1,5 @@
 """
-PPO 학습 스크립트 (4-Action Strict + Memory Reset)
+PPO 학습 스크립트 (3-Action Target Position)
 """
 import logging
 import os
@@ -87,11 +87,11 @@ class PPOTrainer:
         self._fit_global_scaler()
 
         state_dim = self.env.get_state_dim()
-        action_dim = 4  
+        action_dim = config.TRAIN_ACTION_DIM  # 3-Action Target Position: 0=Neutral, 1=Long, 2=Short
         info_dim = len(self.strategies) + 3
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action Strict)")
+        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (3-Action Target Position)")
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
@@ -111,7 +111,7 @@ class PPOTrainer:
         try:
             plt.ion()
             self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Training Progress (4-Action Strict)')
+            self.ax.set_title('PPO Training Progress (3-Action Target Position)')
             self.ax.set_xlabel('Episode')
             self.ax.set_ylabel('Reward')
             self.ax.grid(True, alpha=0.3)
@@ -249,14 +249,38 @@ class PPOTrainer:
             #     trade_count += 1
             #     action = 0 
             
-            # B. 4-Action Logic
-            # Action 0: HOLD (관망)
+            # B. 3-Action Target Position Logic
+            # Action 0: Neutral (목표: 무포지션)
             if action == 0:
-                pass  # 아무것도 하지 않음
+                if current_position == 'LONG':
+                    # 롱 청산
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    current_position = None
+                    entry_price = 0.0
+                    entry_index = 0
+                    trade_count += 1
+                elif current_position == 'SHORT':
+                    # 숏 청산
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    current_position = None
+                    entry_price = 0.0
+                    entry_index = 0
+                    trade_count += 1
+                # 이미 None이면 관망 (Pass)
             
-            # Action 1: LONG (롱 진입/유지)
+            # Action 1: Long (목표: 롱)
             elif action == 1:
-                if current_position is None:
+                if current_position == 'SHORT':
+                    # 스위칭: 숏 청산 후 롱 진입
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                    trade_count += 1
+                elif current_position is None:
                     # 신규 롱 진입
                     current_position = 'LONG'
                     entry_price = curr_price
@@ -264,27 +288,23 @@ class PPOTrainer:
                     trade_count += 1
                 # 이미 LONG이면 유지 (Pass)
             
-            # Action 2: SHORT (숏 진입/유지)
+            # Action 2: Short (목표: 숏)
             elif action == 2:
-                if current_position is None:
+                if current_position == 'LONG':
+                    # 스위칭: 롱 청산 후 숏 진입
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                    trade_count += 1
+                elif current_position is None:
                     # 신규 숏 진입
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = current_idx
                     trade_count += 1
                 # 이미 SHORT면 유지 (Pass)
-            
-            # Action 3: EXIT (청산)
-            elif action == 3:
-                if current_position is not None:
-                    # 포지션 청산
-                    realized_pnl = unrealized_pnl
-                    trade_done = True
-                    current_position = None
-                    entry_price = 0.0
-                    entry_index = 0
-                    trade_count += 1
-                # 포지션이 없으면 아무것도 안 함 (Pass)
 
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
@@ -336,7 +356,7 @@ class PPOTrainer:
         except: pass
 
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (4-Action Strict: HOLD, LONG, SHORT, EXIT)")
+        logger.info("🚀 PPO 학습 시작 (3-Action Target Position: Neutral, Long, Short)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         best_model = f"{base_path}_best.pth"
