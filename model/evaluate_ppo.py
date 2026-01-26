@@ -1,7 +1,8 @@
 """
-PPO 평가 스크립트 (차원 오류 수정됨)
+PPO 평가 스크립트 (3-Action Target Position)
 - obs_info에 대한 중복 unsqueeze 제거
 - Windows 호환성 (이모지 제거, 그래프 저장)
+- 3-Action Target Position: 0=Neutral, 1=Long, 2=Short
 """
 import logging
 import os
@@ -84,7 +85,7 @@ class PPOEvaluator:
 
         # 에이전트 설정
         state_dim = self.env.get_state_dim()
-        action_dim = 4
+        action_dim = config.TRAIN_ACTION_DIM  # 3-Action Target Position: 0=Neutral, 1=Long, 2=Short
         real_info_dim = len(self.strategies) + 3 
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -214,10 +215,23 @@ class PPOEvaluator:
             trade_occurred = False
             realized_pnl = 0.0
 
-            # [수정] Action 해석 로직 (Target Position 방식)
-            # action: 0(Neutral), 1(Long), 2(Short)
+            # [삭제] A. 강제 손절 (Safety Net)
+            # 평가 때도 간섭하지 않고 AI의 판단을 100% 신뢰합니다.
+            # if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
+            #     realized_pnl = unrealized_pnl - fee_rate
+            #     balance_history.append(balance_history[-1] * (1 + realized_pnl))
+            #     trades.append({
+            #         'entry_idx': entry_index, 
+            #         'exit_idx': idx,
+            #         'type': current_position, 
+            #         'net_pnl': realized_pnl,
+            #         'note': 'Stop Loss'  # 손절 기록
+            #     })
+            #     trade_occurred = True
+            #     current_position = None
             
-            # 1. Action 0 (Neutral) - 목표: 무포지션
+            # B. 3-Action Target Position Logic
+            # Action 0: Neutral (목표: 무포지션)
             if action == 0:
                 if current_position == 'LONG':
                     # 롱 청산
@@ -234,8 +248,8 @@ class PPOEvaluator:
                     trade_occurred = True
                     current_position = None
                 # 이미 None이면 관망 (Pass)
-
-            # 2. Action 1 (Long) - 목표: 롱 포지션
+            
+            # Action 1: Long (목표: 롱)
             elif action == 1:
                 if current_position == 'SHORT':
                     # 스위칭: 숏 청산 + 롱 진입
@@ -251,13 +265,13 @@ class PPOEvaluator:
                     entry_index = idx
                     
                 elif current_position is None:
-                    # 신규 진입
+                    # 신규 롱 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = idx
                 # 이미 LONG이면 유지 (Pass)
-
-            # 3. Action 2 (Short) - 목표: 숏 포지션
+            
+            # Action 2: Short (목표: 숏)
             elif action == 2:
                 if current_position == 'LONG':
                     # 스위칭: 롱 청산 + 숏 진입
@@ -273,7 +287,7 @@ class PPOEvaluator:
                     entry_index = idx
                     
                 elif current_position is None:
-                    # 신규 진입
+                    # 신규 숏 진입
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = idx
@@ -351,5 +365,5 @@ class PPOEvaluator:
             logger.warning(f"[WARN] Graph plotting failed: {plot_err}")
 
 if __name__ == "__main__":
-    evaluator = PPOEvaluator(mode='all', model_type='best')
+    evaluator = PPOEvaluator(mode='test', model_type='best')
     evaluator.evaluate()
