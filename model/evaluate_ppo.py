@@ -1,7 +1,6 @@
 """
-PPO 평가 스크립트 (차원 오류 수정됨)
-- obs_info에 대한 중복 unsqueeze 제거
-- Windows 호환성 (이모지 제거, 그래프 저장)
+PPO 평가 스크립트 (4-Action + No Force Close)
+- 평가 종료 시 포지션을 강제로 닫지 않음 (미실현 손익 미반영)
 """
 import logging
 import os
@@ -253,33 +252,8 @@ class PPOEvaluator:
 
             pbar.set_postfix({'Bal': f"${balance_history[-1]:.0f}"})
 
-        # ==========================================================
-        # [수정] 루프 종료 후 강제 청산 (Hidden Loss 방지)
-        # ==========================================================
-        if current_position is not None:
-            # 마지막 가격으로 강제 청산
-            last_price = float(self.data_collector.eth_data.iloc[self.end_idx - 1]['close'])
-            
-            if current_position == 'LONG':
-                final_pnl = (last_price - entry_price) / entry_price
-            elif current_position == 'SHORT':
-                final_pnl = (entry_price - last_price) / entry_price
-            else:
-                final_pnl = 0.0
-                
-            realized_pnl = final_pnl - fee_rate
-            balance_history.append(balance_history[-1] * (1 + realized_pnl))
-            
-            trades.append({
-                'entry_idx': entry_index, 
-                'exit_idx': self.end_idx - 1,
-                'type': current_position, 
-                'net_pnl': realized_pnl,
-                'note': 'Force Closed'  # 강제 청산 표시
-            })
-            
-            logger.warning(f"[WARN] Open position force-closed at end. PnL: {realized_pnl*100:.2f}%")
-        # ==========================================================
+        # [수정] 강제 청산 로직 삭제 (No Force Close)
+        # 마지막 포지션은 미실현 손익으로 처리하지 않고 통계에서 제외
 
         try:
             self._print_report(trades, balance_history)

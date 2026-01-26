@@ -1,5 +1,6 @@
 """
-PPO 학습 스크립트 (4-Action Strict + Memory Reset)
+PPO 학습 스크립트 (4-Action + No Force Close)
+- 에피소드 종료 시 포지션 유지 (강제 청산 안 함)
 """
 import logging
 import os
@@ -87,11 +88,11 @@ class PPOTrainer:
         self._fit_global_scaler()
 
         state_dim = self.env.get_state_dim()
-        action_dim = 4  
+        action_dim = 4  # 4-Action: HOLD, LONG, SHORT, EXIT
         info_dim = len(self.strategies) + 3
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action Strict)")
+        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action: HOLD, LONG, SHORT, EXIT)")
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
@@ -111,7 +112,7 @@ class PPOTrainer:
         try:
             plt.ion()
             self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Training Progress (4-Action Strict)')
+            self.ax.set_title('PPO Training Progress')
             self.ax.set_xlabel('Episode')
             self.ax.set_ylabel('Reward')
             self.ax.grid(True, alpha=0.3)
@@ -239,7 +240,7 @@ class PPOTrainer:
             realized_pnl = 0.0
             extra_penalty = 0.0
             
-            # A. 강제 손절
+            # A. 강제 손절 (Safety Net)
             if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
                 realized_pnl = unrealized_pnl
                 trade_done = True
@@ -286,17 +287,8 @@ class PPOTrainer:
                         trade_count += 1
                     # 포지션이 없으면 아무것도 안 함 (Pass)
 
-            # [추가] 에피소드 종료 직전 강제 청산 (학습 꼼수 방지)
-            if step == max_steps - 1 and current_position is not None:
-                realized_pnl = unrealized_pnl  # 현재의 평가 손익을 확정 손익으로 처리
-                trade_done = True              # 거래 종료 플래그 On
-                # (주의: 여기서 current_position을 None으로 만들면 아래 calculate_reward에 반영됨)
-                
-                # 강제로 종료되었음을 로그나 카운트에 반영
-                trade_count += 1
-                
-                # 다음 상태를 위해 포지션 초기화 (루프가 끝나서 큰 의미는 없지만 로직상 필요)
-                current_position = None
+            # [수정] 마지막에 강제 청산하는 로직 없음 (사용자 요청)
+            # 그냥 루프가 끝나면 포지션 들고 있는 상태로 종료됨
 
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
@@ -307,10 +299,6 @@ class PPOTrainer:
                 current_position=current_position
             )
             
-            # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
-            # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
-            
-            reward += extra_penalty
             
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
             self.data_collector.current_index += 1
@@ -348,7 +336,7 @@ class PPOTrainer:
         except: pass
 
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (4-Action Strict: HOLD, LONG, SHORT, EXIT)")
+        logger.info("🚀 PPO 학습 시작 (4-Action: HOLD, LONG, SHORT, EXIT + No Force Close)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         best_model = f"{base_path}_best.pth"
