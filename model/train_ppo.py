@@ -1,9 +1,9 @@
 """
-PPO 학습 스크립트 (4-Action: HOLD, ENTER_LONG, ENTER_SHORT, EXIT)
-- Action 0: HOLD (현 상태 유지)
-- Action 1: ENTER_LONG (롱 진입 - 무포지션일 때만)
-- Action 2: ENTER_SHORT (숏 진입 - 무포지션일 때만)
-- Action 3: EXIT (청산 - 포지션 있을 때만)
+PPO 학습 스크립트 (최종 버전: 3-Action Target Position)
+- Action 0: NEUTRAL (청산 또는 관망)
+- Action 1: LONG (진입 또는 스위칭 또는 홀딩)
+- Action 2: SHORT (진입 또는 스위칭 또는 홀딩)
+- 개선사항: 1-Step 스위칭 지원, LSTM State Reset 적용, 데이터 누수 방지(Scaler)
 """
 import logging
 import os
@@ -17,50 +17,36 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from core import DataCollector
-from strategies import (
-    BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
-    HMAMomentumStrategy, MFIMomentumStrategy, BollingerMeanReversionStrategy,
-    VWAPDeviationStrategy, RangeTopBottomStrategy, StochRSIMeanReversionStrategy,
-    CMFDivergenceStrategy, CCIReversalStrategy, WilliamsRStrategy
-)
+from strategies import *
 from model.trading_env import TradingEnvironment
 from model.ppo_agent import PPOAgent
-from model.feature_engineering import FeatureEngineer
-from model.mtf_processor import MTFProcessor
 
 # 로깅 설정
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(message)s',
-    handlers=[
-        logging.FileHandler('logs/train_ppo.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler('logs/train_ppo.log', encoding='utf-8'), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# 불필요한 로그 생략
 logging.getLogger('model.feature_engineering').setLevel(logging.WARNING)
 logging.getLogger('model.mtf_processor').setLevel(logging.WARNING)
 
-# 병렬 처리 확인
 try:
-    from joblib import Parallel, delayed, cpu_count
+    from joblib import Parallel, delayed
     JOBLIB_AVAILABLE = True
 except ImportError:
     JOBLIB_AVAILABLE = False
-    logger.info("joblib 미설치: 순차 처리로 진행합니다.")
 
+# 병렬 처리 함수
 def calculate_chunk(start_idx, end_idx, strategies, collector_data):
-    """전략 병렬 계산 함수"""
     from core import DataCollector
     temp_collector = DataCollector(use_saved_data=True)
     temp_collector.eth_data = collector_data
     results = {}
     for s_idx in range(len(strategies)):
         results[f'strategy_{s_idx}'] = np.zeros(end_idx - start_idx)
-
     for i in range(start_idx, end_idx):
         temp_collector.current_index = i
         rel_i = i - start_idx
@@ -70,12 +56,11 @@ def calculate_chunk(start_idx, end_idx, strategies, collector_data):
                 score = 0.0
                 if result:
                     conf = float(result.get('confidence', 0.0))
-                    signal = result.get('signal', 'NEUTRAL')
-                    if signal == 'LONG': score = conf
-                    elif signal == 'SHORT': score = -conf
+                    sig = result.get('signal', 'NEUTRAL')
+                    if sig == 'LONG': score = conf
+                    elif sig == 'SHORT': score = -conf
                 results[f'strategy_{s_idx}'][rel_i] = score
-            except:
-                continue
+            except: continue
     return results
 
 class PPOTrainer:
@@ -88,9 +73,7 @@ class PPOTrainer:
             CMFDivergenceStrategy(), CCIReversalStrategy(), WilliamsRStrategy()
         ]
         
-        logger.info(f"전략 초기화: {len(self.strategies)}개 전략 사용")
-        
-        # 1. 데이터 로드 및 전처리
+        # 1. 데이터 로드 (Forward Fill 적용)
         self._load_features()
         self.precalculate_strategies_parallel()
         
@@ -98,112 +81,137 @@ class PPOTrainer:
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self._fit_global_scaler()
 
-        # 3. 에이전트 설정 (4-Action)
+        # 3. 에이전트 설정 (3-Action Target)
         state_dim = self.env.get_state_dim()
-        # [핵심 수정] Action Dim = 4 (HOLD, LONG, SHORT, EXIT)
-        action_dim = 4  
+        action_dim = 3  # 0:Neutral, 1:Long, 2:Short
         info_dim = len(self.strategies) + 3
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action Strategy)")
+        logger.info(f"Setting: Device={device} | Action Dim={action_dim} (3-Action Target)")
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
-        # 모델 로드 시도
+        # 모델 로드
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         last_model_path = f"{base_path}_last.pth"
         if os.path.exists(last_model_path):
             try:
                 self.agent.load_model(last_model_path)
-                logger.info(f"✅ 기존 모델 로드 완료")
-            except Exception as e:
-                logger.warning(f"⚠️ 모델 구조 불일치(3->4 변경 등)로 로드 실패: {e}")
-                logger.warning("🚀 새로운 구조로 처음부터 학습을 시작합니다.")
+                logger.info("✅ 기존 모델 로드 완료")
+            except:
+                logger.warning("⚠️ 구조 변경 감지 -> 새 모델 학습 시작")
         
         self.episode_rewards = []
         self.avg_rewards = []
         
-        # 그래프 설정
         try:
             plt.ion()
             self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Training Progress (4-Action)')
-            self.ax.set_xlabel('Episode')
-            self.ax.set_ylabel('Reward')
-            self.ax.grid(True, alpha=0.3)
-            self.line1, = self.ax.plot([], [], label='Reward', alpha=0.3, color='gray')
-            self.line2, = self.ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
-            self.ax.legend()
             self.plotting_enabled = True
-        except Exception:
-            self.plotting_enabled = False
+        except: self.plotting_enabled = False
 
     def _load_features(self):
-        """피처 파일 로드"""
+        """
+        피처 파일 로드 또는 생성
+        """
         path = 'data/training_features.csv'
         cached_strategies_path = 'data/cached_strategies.csv'
         
+        # 1. 파일이 있으면 로드
         if os.path.exists(path):
+            logger.info(f"📂 기존 피처 파일 로드: {path}")
             df = pd.read_csv(path, index_col=0, parse_dates=True)
+            
+            # Forward Fill로 결측치 처리 (Data Quality)
+            df = df.ffill().bfill()
+            
             if os.path.exists(cached_strategies_path):
                 try:
                     cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
-                    strategy_cols = [col for col in cached_df.columns if col.startswith('strategy_')]
+                    strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
                     for col in strategy_cols:
-                        if col in cached_df.columns:
-                            df[col] = cached_df[col]
-                except Exception:
-                    pass
+                        if col in cached_df.columns: df[col] = cached_df[col]
+                    logger.info("📂 캐시된 전략 신호 병합 완료")
+                except: pass
+                
             self.data_collector.eth_data = df
+            
+        # 2. 파일이 없으면 -> 원본 데이터로 초기화 (새로 계산 준비)
         else:
-            logger.error("❌ 피처 파일 없음")
-            sys.exit(1)
+            logger.warning("⚠️ 피처 파일이 없습니다. 원본 데이터로 초기화하고 새로 계산합니다.")
+            # 원본 데이터가 data_collector에 이미 로드되어 있다고 가정
+            if self.data_collector.eth_data is None:
+                logger.error("❌ 원본 데이터(ETH)도 로드되지 않았습니다. collect_training_data.py를 먼저 실행하세요.")
+                sys.exit(1)
+            
+            # 피처 엔지니어링 수행 (새로 계산)
+            # (이 부분은 precalculate_strategies_parallel 에서 수행되거나, 
+            #  여기서 명시적으로 feature engineering을 호출해야 할 수 있음)
+            #  일단은 빈 상태로 두고 뒤에서 계산하도록 패스
+            pass
 
     def precalculate_strategies_parallel(self):
-        """전략 신호 계산"""
+        """
+        [Critical Fix] 전략 신호 계산 시 Look-ahead Bias 차단
+        - 전체 데이터가 아닌, 오직 Train Set 구간만 계산합니다.
+        - Test Set 구간은 0.0으로 남겨두어 물리적으로 접근 불가능하게 만듭니다.
+        """
         df = self.data_collector.eth_data
         if 'strategy_0' in df.columns: return
 
-        cached_path = 'data/cached_strategies.csv'
-        if os.path.exists(cached_path):
-            cached_df = pd.read_csv(cached_path, index_col=0, parse_dates=True)
-            if len(cached_df) == len(df):
-                for col in cached_df.columns:
-                    if col.startswith('strategy_'):
-                        df[col] = cached_df[col]
-                self.data_collector.eth_data = df
-                df.to_csv('data/training_features.csv', index=True)
-                return
-
-        logger.info("🧠 전략 신호 계산 중...")
-        start_idx = config.LOOKBACK + 50
-        total_len = len(df)
+        logger.info("🧠 전략 신호 계산 중... (Only Train Set)")
         
-        if JOBLIB_AVAILABLE and total_len > 10000:
+        # [수정] 전체 길이가 아니라, 학습 데이터 구간까지만 계산
+        total_len = len(df)
+        train_end_idx = int(total_len * config.TRAIN_SPLIT)
+        
+        start_idx = config.LOOKBACK + 50
+        
+        # Joblib 병렬 처리
+        if JOBLIB_AVAILABLE and train_end_idx > 10000:
+            from multiprocessing import cpu_count
             n_jobs = max(1, cpu_count() - 1)
-            chunk_size = (total_len - start_idx) // n_jobs
-            chunks = [(start_idx + i*chunk_size, start_idx + (i+1)*chunk_size if i < n_jobs-1 else total_len) for i in range(n_jobs)]
+            # 청크를 나눌 때 train_end_idx를 끝으로 설정
+            chunk_size = (train_end_idx - start_idx) // n_jobs
+            chunks = [(start_idx + i*chunk_size, start_idx + (i+1)*chunk_size if i < n_jobs-1 else train_end_idx) for i in range(n_jobs)]
             
             results_list = Parallel(n_jobs=n_jobs)(delayed(calculate_chunk)(s, e, self.strategies, df) for s, e in chunks)
             
             for s_idx in range(len(self.strategies)):
                 col = f'strategy_{s_idx}'
-                df[col] = 0.0
+                df[col] = 0.0  # 초기화 (Test Set은 0으로 유지됨)
+                
+                # 계산된 Train Set 구간만 채워넣기
                 full_s = np.zeros(total_len)
                 for i, (s, e) in enumerate(chunks):
-                    full_s[s:e] = results_list[i][col]
+                    # 청크 범위만큼만 업데이트
+                    chunk_len = e - s
+                    # results_list[i][col]의 길이가 chunk_len과 일치하는지 확인
+                    if len(results_list[i][col]) == chunk_len:
+                        full_s[s:e] = results_list[i][col]
+                
                 df[col] = full_s
         else:
-            self._precalculate_strategies_sequential(df, start_idx, total_len)
+            # 병렬 처리 불가 시 순차 처리 (범위 제한 적용)
+            self._precalculate_strategies_sequential(df, start_idx, train_end_idx)
             
         df.to_csv('data/training_features.csv', index=True)
+        # 캐싱도 수행
         strategy_cols = [c for c in df.columns if c.startswith('strategy_')]
         if strategy_cols:
             df[strategy_cols].to_csv('data/cached_strategies.csv', index=True)
+            
         self.data_collector.eth_data = df
 
-    def _precalculate_strategies_sequential(self, df, start_idx, total_len):
-        for i in tqdm(range(start_idx, total_len), desc="Calc Strategies"):
+    def _precalculate_strategies_sequential(self, df, start_idx, end_idx):
+        """순차 계산 (Train Set 구간 제한 적용됨)"""
+        # 컬럼 초기화
+        for i in range(len(self.strategies)): 
+            if f'strategy_{i}' not in df.columns:
+                df[f'strategy_{i}'] = 0.0
+            
+        # [핵심] end_idx까지만 루프를 돔 (Train Set 이후는 계산 안 함)
+        for i in tqdm(range(start_idx, end_idx), desc="Calc Strategies (Train Only)"):
             self.data_collector.current_index = i
             for s_idx, strategy in enumerate(self.strategies):
                 try:
@@ -217,19 +225,15 @@ class PPOTrainer:
                 except: continue
 
     def _fit_global_scaler(self):
-        """스케일러 학습"""
+        """[Critical] Look-ahead Bias 방지: 오직 Train Set으로만 Scaler 학습"""
         if not self.env.scaler_fitted:
             df = self.data_collector.eth_data
+            
+            # config.TRAIN_SPLIT 엄격 적용
             train_size = int(len(df) * config.TRAIN_SPLIT)
             self.train_end_idx = train_size
             
-            # Feature extraction logic should ideally be centralized, but here we just fit
-            # We assume get_observation handles column checks. 
-            # Fitting needs columns to be present.
-            # (Simplification: relying on TradingEnvironment's internal column list logic matching this)
-            # For robustness, we just use a sample from get_observation in a dry run or similar, 
-            # but sticking to previous logic:
-            
+            train_df = df.iloc[:train_size].copy()
             target_cols = [
                 'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos', 
                 'rsi', 'macd_hist', 'hma_ratio', 'cci', 
@@ -239,22 +243,20 @@ class PPOTrainer:
                 'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
             ]
             
-            # Ensure columns exist
             for col in target_cols:
-                if col not in df.columns: df[col] = 0.0
+                if col not in train_df.columns: train_df[col] = 0.0
             
-            sample = df.iloc[:train_size].sample(n=min(10000, train_size))[target_cols].values.astype(np.float32)
+            # 랜덤 샘플링도 Train 데이터 내에서만
+            sample = train_df[target_cols].sample(n=min(20000, len(train_df))).values.astype(np.float32)
             self.env.preprocessor.fit(sample)
             self.env.scaler_fitted = True
             
-            # Save scaler
             path = config.AI_MODEL_PATH.replace('.pth', '_scaler.pkl')
             self.env.preprocessor.save(path)
 
     def train_episode(self, episode_num, max_steps=None):
-        """에피소드 학습 (4-Action Logic 적용)"""
-        if max_steps is None:
-            max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
+        """에피소드 학습 (3-Action Target Position + State Reset)"""
+        if max_steps is None: max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
         
         start_min = config.LOOKBACK + 100
         start_max = self.train_end_idx - max_steps - 50
@@ -263,15 +265,16 @@ class PPOTrainer:
         start_idx = np.random.randint(start_min, start_max)
         self.data_collector.current_index = start_idx
         
-        current_position = None  # None, 'LONG', 'SHORT'
+        current_position = None
         entry_price = 0.0
         entry_index = 0
         episode_reward = 0.0
         trade_count = 0
         prev_unrealized_pnl = 0.0
         
+        # [중요] 에피소드 시작 시 State Reset
         self.agent.reset_episode_states()
-        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num}", leave=False, unit="step")
+        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num}", leave=False)
         
         for step in pbar:
             current_idx = self.data_collector.current_index
@@ -279,7 +282,7 @@ class PPOTrainer:
             
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
             
-            # 1. 평가 손익 계산
+            # PnL 계산
             unrealized_pnl = 0.0
             if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
@@ -288,7 +291,7 @@ class PPOTrainer:
             
             step_pnl = unrealized_pnl - prev_unrealized_pnl if current_position else 0.0
             
-            # 2. 상태 관측
+            # 상태 관측
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (current_idx - entry_index) if current_position else 0
             pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
@@ -298,93 +301,57 @@ class PPOTrainer:
 
             prev_pos_str = current_position 
 
-            # -------------------------------------------------------
-            # [핵심] Action Mask 생성 (락업 제거, 스위칭 차단 유지)
-            # -------------------------------------------------------
-            # 기본적으로 모든 액션 허용 [HOLD, LONG, SHORT, EXIT]
-            action_mask = [1.0, 1.0, 1.0, 1.0]
-            
-            # 락업 제거: 5캔들 락업 로직 삭제
-            # 스위칭 차단 유지: 포지션이 있을 때 반대 방향 진입 금지
-            if current_position == 'LONG':
-                # HOLD(0), LONG(1), EXIT(3) 허용 / SHORT(2) 금지 (스위칭 차단)
-                action_mask = [1.0, 1.0, 0.0, 1.0]
-            elif current_position == 'SHORT':
-                # HOLD(0), SHORT(2), EXIT(3) 허용 / LONG(1) 금지 (스위칭 차단)
-                action_mask = [1.0, 0.0, 1.0, 1.0]
-            # 포지션이 없을 때는 EXIT(3) 금지
-            else:
-                # HOLD(0), LONG(1), SHORT(2) 허용 / EXIT(3) 금지
-                action_mask = [1.0, 1.0, 1.0, 0.0]
-            # -------------------------------------------------------
-
-            # 3. 행동 선택 (마스크 전달)
-            action, prob = self.agent.select_action(state, action_mask=action_mask)
+            # 행동 선택 (3-Action)
+            action, prob = self.agent.select_action(state)
             
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
-            extra_penalty = 0.0
             
-            # A. 강제 손절 (Safety Net)
-            if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
-                realized_pnl = unrealized_pnl
-                trade_done = True
-                current_position = None
-                entry_price = 0.0
-                entry_index = 0
-                trade_count += 1
-                # 손절 직후에는 강제로 HOLD 처리하여 연속 진입 방지
-                action = 0 
+            # -----------------------------------------------------------
+            # 3-Action Logic (Target Position)
+            # -----------------------------------------------------------
             
-            # B. 4-Action Strict State Machine
-            else:
-                # ---------------------------------------------------
-                # Action 0: HOLD
-                # ---------------------------------------------------
-                if action == 0:
-                    pass # 현 상태 유지
+            # Action 0: Neutral (청산 또는 관망)
+            if action == 0:
+                if current_position is not None:
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    current_position = None
+                    entry_price = 0.0; entry_index = 0
+                    trade_count += 1
+            
+            # Action 1: Long (진입 또는 스위칭 또는 홀딩)
+            elif action == 1:
+                if current_position == 'SHORT': # [즉시 스위칭]
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    # 스위칭 시 즉시 재진입
+                    current_position = 'LONG'
+                    entry_price = curr_price; entry_index = current_idx
+                    trade_count += 1
+                elif current_position is None: # 진입
+                    current_position = 'LONG'
+                    entry_price = curr_price; entry_index = current_idx
+                    trade_count += 1
+                # 이미 LONG이면 Pass (홀딩)
 
-                # ---------------------------------------------------
-                # Action 1: ENTER_LONG (진입 전용)
-                # ---------------------------------------------------
-                elif action == 1:
-                    if current_position is None:
-                        current_position = 'LONG'
-                        entry_price = curr_price
-                        entry_index = current_idx
-                        trade_count += 1
-                    else:
-                        # 이미 포지션 있으면 무시 (스위칭 불가 -> EXIT 먼저 해야 함)
-                        pass
+            # Action 2: Short (진입 또는 스위칭 또는 홀딩)
+            elif action == 2:
+                if current_position == 'LONG': # [즉시 스위칭]
+                    realized_pnl = unrealized_pnl
+                    trade_done = True
+                    # 스위칭 시 즉시 재진입
+                    current_position = 'SHORT'
+                    entry_price = curr_price; entry_index = current_idx
+                    trade_count += 1
+                elif current_position is None: # 진입
+                    current_position = 'SHORT'
+                    entry_price = curr_price; entry_index = current_idx
+                    trade_count += 1
+                # 이미 SHORT면 Pass (홀딩)
 
-                # ---------------------------------------------------
-                # Action 2: ENTER_SHORT (진입 전용)
-                # ---------------------------------------------------
-                elif action == 2:
-                    if current_position is None:
-                        current_position = 'SHORT'
-                        entry_price = curr_price
-                        entry_index = current_idx
-                        trade_count += 1
-                    else:
-                        pass # 무시
-
-                # ---------------------------------------------------
-                # Action 3: EXIT (청산 전용)
-                # ---------------------------------------------------
-                elif action == 3:
-                    if current_position is not None:
-                        realized_pnl = unrealized_pnl
-                        trade_done = True
-                        current_position = None
-                        entry_price = 0.0
-                        entry_index = 0
-                        trade_count += 1
-                    else:
-                        pass # 무시
-
-            # 리워드 계산 (4-Action 대응)
+            # 리워드 계산
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
                 realized_pnl=realized_pnl, 
@@ -394,9 +361,11 @@ class PPOTrainer:
                 current_position=current_position
             )
             
-            reward += extra_penalty
-            
-            # 다음 스텝 준비
+            # [수정] 거래 종료 시 LSTM 상태 초기화 (독립성 보장)
+            if trade_done:
+                self.agent.reset_episode_states()
+
+            # 다음 스텝
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
             self.data_collector.current_index += 1
             next_idx = self.data_collector.current_index
@@ -407,9 +376,7 @@ class PPOTrainer:
             next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
             
             done = False if step < max_steps - 1 else True
-            if next_state is None:
-                done = True
-                next_state = state
+            if next_state is None: done = True; next_state = state
             
             self.agent.put_data((state, action, reward, next_state, prob, done))
             episode_reward += reward
@@ -427,59 +394,37 @@ class PPOTrainer:
             x = range(len(self.episode_rewards))
             self.line1.set_data(x, self.episode_rewards)
             self.line2.set_data(x, self.avg_rewards)
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+            self.ax.relim(); self.ax.autoscale_view()
+            self.fig.canvas.draw(); self.fig.canvas.flush_events()
             plt.pause(0.01)
         except: pass
 
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (4-Action: HOLD, ENTER_LONG, ENTER_SHORT, EXIT)")
-        
+        logger.info("🚀 PPO 학습 시작 (3-Action Target + State Reset)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         
-        # 파일 경로 설정
-        best_model = f"{base_path}_best.pth"
-        best_scaler = f"{base_path}_best_scaler.pkl"
-        last_model = f"{base_path}_last.pth"
-        last_scaler = f"{base_path}_last_scaler.pkl"
-        
-        self.env.preprocessor.save(last_scaler)
+        self.env.preprocessor.save(f"{base_path}_last_scaler.pkl")
         
         for ep in range(1, num_episodes + 1):
             try:
                 res = self.train_episode(ep)
                 if res is None: continue
-                
-                reward, count = res
-                self.episode_rewards.append(reward)
-                avg_reward = np.mean(self.episode_rewards[-10:])
-                self.avg_rewards.append(avg_reward)
-                
-                logger.info(f"✅ Ep {ep}: Reward {reward:.4f} | Avg {avg_reward:.4f} | Trades: {count}")
+                r, c = res
+                self.episode_rewards.append(r)
+                avg_r = np.mean(self.episode_rewards[-10:])
+                self.avg_rewards.append(avg_r)
+                logger.info(f"✅ Ep {ep}: R {r:.2f} | Avg {avg_r:.2f} | Tr {c}")
                 self.live_plot()
-                
-                if reward > best_reward:
-                    best_reward = reward
-                    logger.info(f"🏆 신기록! ({best_reward:.4f}) -> 저장")
-                    self.agent.save_model(best_model)
-                    self.env.preprocessor.save(best_scaler)
-                
+                if r > best_reward:
+                    best_reward = r
+                    self.agent.save_model(f"{base_path}_best.pth")
+                    self.env.preprocessor.save(f"{base_path}_best_scaler.pkl")
                 if ep % 10 == 0:
-                    self.agent.save_model(last_model)
-                    self.env.preprocessor.save(last_scaler)
-                    
-            except KeyboardInterrupt:
-                logger.info("학습 중단")
-                break
-            except Exception as e:
-                logger.error(f"Ep {ep} Error: {e}")
-                continue
-        
-        if self.plotting_enabled:
-            plt.ioff(); plt.show()
+                    self.agent.save_model(f"{base_path}_last.pth")
+            except KeyboardInterrupt: break
+            except Exception as e: logger.error(f"Err: {e}"); continue
+        if self.plotting_enabled: plt.ioff(); plt.show()
 
 if __name__ == "__main__":
     trainer = PPOTrainer()

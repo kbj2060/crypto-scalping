@@ -62,10 +62,10 @@ PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
 PPO_EPS_CLIP = 0.15  # PPO 클리핑 범위
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.04  # 엔트로피 계수 (초기값) - 0.01 → 0.04 (탐험 강화)
+PPO_ENTROPY_COEF = 0.005  # 엔트로피 계수 (초기값) - 0.04 → 0.005 (뇌 충격 요법: 탐험 대폭 감소)
 PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다) - 0.9996 → 0.999 (더 천천히 감소)
-PPO_ENTROPY_MIN = 0.01  # 엔트로피 최소값 - 0.005 → 0.01 (최소값 유지)
-PPO_LEARNING_RATE = 1e-4  # 학습률 - 5e-5 → 1e-4 (학습 속도 개선)
+PPO_ENTROPY_MIN = 0.001  # 엔트로피 최소값 - 0.01 → 0.001 (최소값도 낮춤)
+PPO_LEARNING_RATE = 3e-4  # 학습률 - 1e-4 → 3e-4 (뇌 충격 요법: 학습 속도 대폭 상향)
 
 # [수정] 스케줄러 설정 (Linear Decay)
 # PPO_SCHEDULER_FACTOR, PATIENCE 등 제거 (LinearLR 사용)
@@ -84,11 +84,16 @@ NETWORK_CRITIC_HEAD_DIM = 32  # Critic Head 은닉층 차원
 NETWORK_USE_CHECKPOINTING = False  # Gradient Checkpointing 사용 여부
 
 # 학습 파라미터
-TRAIN_ACTION_DIM = 4  # 행동 차원 (HOLD, LONG, SHORT, EXIT)
-TRAIN_BATCH_SIZE = 1024  # 배치 크기 (메모리에서 업데이트할 최소 스텝 수)
+TRAIN_ACTION_DIM = 3  # 행동 차원 (0:Neutral, 1:Long, 2:Short) - 3-Action 구조
+TRAIN_BATCH_SIZE = 256  # 배치 크기 (메모리에서 업데이트할 최소 스텝 수)
 TRAIN_SAMPLE_SIZE = 50000  # 스케일러 학습용 샘플 크기
-TRAIN_SPLIT = 0.7  # 학습 데이터 비율 (70%)
-VAL_SPLIT = 0.85  # 검증 데이터 비율 (85%, Train + Val)
+
+# 데이터 분할 비율 (명확화)
+TRAIN_SPLIT = 0.7  # 학습용 (0% ~ 70%)
+VAL_SPLIT = 0.15   # 검증용 (70% ~ 85%)
+TEST_SPLIT = 0.15  # 테스트용 (85% ~ 100%)
+# 합계가 1.0이 되어야 함 (0.7 + 0.15 + 0.15 = 1.0)
+
 TRAIN_NUM_EPISODES = 2000  # 에피소드 수
 TRAIN_MAX_STEPS_PER_EPISODE = 480  # 에피소드당 최대 스텝 수
 TRAIN_SAVE_INTERVAL = 50  # 모델 저장 간격 (에피소드)
