@@ -225,8 +225,8 @@ class PPOEvaluator:
             elif action == 2 and current_position is None: # SHORT
                 current_position = 'SHORT'; entry_price = curr_price; entry_index = idx
             
-            if trade_occurred:
-                self.agent.reset_episode_states()
+            # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
+            # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
 
             pbar.set_postfix({'Bal': f"${balance_history[-1]:.0f}"})
 
