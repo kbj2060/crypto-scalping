@@ -286,10 +286,22 @@ class PPOTrainer:
                         trade_count += 1
                     # 포지션이 없으면 아무것도 안 함 (Pass)
 
+            # [추가] 에피소드 종료 직전 강제 청산 (학습 꼼수 방지)
+            if step == max_steps - 1 and current_position is not None:
+                realized_pnl = unrealized_pnl  # 현재의 평가 손익을 확정 손익으로 처리
+                trade_done = True              # 거래 종료 플래그 On
+                # (주의: 여기서 current_position을 None으로 만들면 아래 calculate_reward에 반영됨)
+                
+                # 강제로 종료되었음을 로그나 카운트에 반영
+                trade_count += 1
+                
+                # 다음 상태를 위해 포지션 초기화 (루프가 끝나서 큰 의미는 없지만 로직상 필요)
+                current_position = None
+
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
                 realized_pnl=realized_pnl, 
-                trade_done=trade_done, 
+                trade_done=trade_done,  # <-- 여기서 True로 넘어가야 종료 보상(수수료 차감 등)이 계산됨
                 action=action,              
                 prev_position=prev_pos_str,
                 current_position=current_position

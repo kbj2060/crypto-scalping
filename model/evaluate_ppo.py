@@ -253,6 +253,34 @@ class PPOEvaluator:
 
             pbar.set_postfix({'Bal': f"${balance_history[-1]:.0f}"})
 
+        # ==========================================================
+        # [수정] 루프 종료 후 강제 청산 (Hidden Loss 방지)
+        # ==========================================================
+        if current_position is not None:
+            # 마지막 가격으로 강제 청산
+            last_price = float(self.data_collector.eth_data.iloc[self.end_idx - 1]['close'])
+            
+            if current_position == 'LONG':
+                final_pnl = (last_price - entry_price) / entry_price
+            elif current_position == 'SHORT':
+                final_pnl = (entry_price - last_price) / entry_price
+            else:
+                final_pnl = 0.0
+                
+            realized_pnl = final_pnl - fee_rate
+            balance_history.append(balance_history[-1] * (1 + realized_pnl))
+            
+            trades.append({
+                'entry_idx': entry_index, 
+                'exit_idx': self.end_idx - 1,
+                'type': current_position, 
+                'net_pnl': realized_pnl,
+                'note': 'Force Closed'  # 강제 청산 표시
+            })
+            
+            logger.warning(f"[WARN] Open position force-closed at end. PnL: {realized_pnl*100:.2f}%")
+        # ==========================================================
+
         try:
             self._print_report(trades, balance_history)
         except Exception as e:
@@ -320,5 +348,5 @@ class PPOEvaluator:
             logger.warning(f"[WARN] Graph plotting failed: {plot_err}")
 
 if __name__ == "__main__":
-    evaluator = PPOEvaluator(mode='all', model_type='best')
+    evaluator = PPOEvaluator(mode='test', model_type='best')
     evaluator.evaluate()
