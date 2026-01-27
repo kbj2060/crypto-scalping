@@ -199,6 +199,9 @@ class PPOTrainer:
         start_idx = np.random.randint(start_min, start_max)
         self.data_collector.current_index = start_idx
         
+        # [추가] ★ 에피소드 시작 시 리워드 상태 리셋 (필수!) ★
+        self.env.reset_reward_states()
+        
         current_position = None
         entry_price = 0.0
         entry_index = 0
@@ -225,112 +228,110 @@ class PPOTrainer:
             
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (current_idx - entry_index) if current_position else 0
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
+            pos_info = [pos_val, unrealized_pnl * 10, holding_time / 1000.0]
             
             state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
             if state is None: break
 
-            prev_pos_str = current_position 
-
-            action, prob = self.agent.select_action(state)
+            # 3. Action Masking (핵심!)
+            # [Neutral, Long, Short]
+            action_mask = [1.0, 1.0, 1.0]
+            if current_position is None:
+                action_mask = [0.1, 1.0, 1.0] # 무포지션일 때 관망(0)은 가능하지만 권장하진 않음 (0.1)
+            elif current_position == 'LONG':
+                action_mask = [1.0, 0.0, 1.0] # 이미 롱이면 롱(1) 불가
+            elif current_position == 'SHORT':
+                action_mask = [1.0, 1.0, 0.0] # 이미 숏이면 숏(2) 불가
+                
+            action, prob = self.agent.select_action(state, action_mask=action_mask)
             
-            reward = 0.0
+            # 4. 액션 처리 & 스위칭 로직
             trade_done = False
             realized_pnl = 0.0
-            extra_penalty = 0.0
+            prev_pos_str = current_position
             
-            # [삭제] A. 강제 손절 (Safety Net)
-            # 이 부분이 있으면 AI는 "버티면 시스템이 알아서 끊어주네?"라고 오해합니다.
-            # if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
-            #     realized_pnl = unrealized_pnl
-            #     trade_done = True
-            #     current_position = None
-            #     entry_price = 0.0; entry_index = 0
-            #     trade_count += 1
-            #     action = 0 
-            
-            # B. 3-Action Target Position Logic
-            # Action 0: Neutral (목표: 무포지션)
+            # Action 0: Neutral (청산 or 관망)
             if action == 0:
-                if current_position == 'LONG':
-                    # 롱 청산
+                if current_position is not None:
                     realized_pnl = unrealized_pnl
                     trade_done = True
                     current_position = None
-                    entry_price = 0.0
-                    entry_index = 0
+                    trade_count += 1
+            
+            # Action 1: Long
+            elif action == 1:
+                if current_position is None:
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = current_idx
                     trade_count += 1
                 elif current_position == 'SHORT':
-                    # 숏 청산
+                    # [Switching] Short Close -> Long Open
                     realized_pnl = unrealized_pnl
-                    trade_done = True
-                    current_position = None
-                    entry_price = 0.0
-                    entry_index = 0
-                    trade_count += 1
-                # 이미 None이면 관망 (Pass)
-            
-            # Action 1: Long (목표: 롱)
-            elif action == 1:
-                if current_position == 'SHORT':
-                    # 스위칭: 숏 청산 후 롱 진입
-                    realized_pnl = unrealized_pnl
-                    trade_done = True
+                    trade_done = True # 리워드 계산용 (Short 종료)
+                    
+                    # 즉시 Long 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = current_idx
-                    trade_count += 1
-                elif current_position is None:
-                    # 신규 롱 진입
-                    current_position = 'LONG'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1
-                # 이미 LONG이면 유지 (Pass)
+                    trade_count += 2 # 거래 2회 인정 (청산1+진입1)
             
-            # Action 2: Short (목표: 숏)
+            # Action 2: Short
             elif action == 2:
-                if current_position == 'LONG':
-                    # 스위칭: 롱 청산 후 숏 진입
+                if current_position is None:
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                    trade_count += 1
+                elif current_position == 'LONG':
+                    # [Switching] Long Close -> Short Open
                     realized_pnl = unrealized_pnl
                     trade_done = True
+                    
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = current_idx
-                    trade_count += 1
-                elif current_position is None:
-                    # 신규 숏 진입
-                    current_position = 'SHORT'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1
-                # 이미 SHORT면 유지 (Pass)
+                    trade_count += 2
 
+            # 5. 리워드 계산
             reward = self.env.calculate_reward(
-                step_pnl=step_pnl, 
-                realized_pnl=realized_pnl, 
-                trade_done=trade_done, 
-                action=action,              
+                step_pnl=step_pnl,
+                realized_pnl=realized_pnl,
+                trade_done=trade_done,
+                holding_time=holding_time,
+                action=action,
                 prev_position=prev_pos_str,
                 current_position=current_position
             )
             
-            # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
-            # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
-            
-            reward += extra_penalty
-            
+            # 다음 스텝 준비
+            # 스위칭/청산 시 prev_unrealized_pnl 리셋
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
+            
             self.data_collector.current_index += 1
             next_idx = self.data_collector.current_index
             
-            next_pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
-            next_hold_time = (next_idx - entry_index) if current_position is not None else 0
-            next_pos_info = [next_pos_val, 0.0, next_hold_time / max_steps]
-            next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
+            # Next State 생성
+            if next_idx < len(self.data_collector.eth_data) and next_idx < self.train_end_idx:
+                next_price = float(self.data_collector.eth_data.iloc[next_idx]['close'])
+                next_unrealized_pnl = 0.0
+                if current_position == 'LONG':
+                    next_unrealized_pnl = (next_price - entry_price) / entry_price
+                elif current_position == 'SHORT':
+                    next_unrealized_pnl = (entry_price - next_price) / entry_price
+                
+                next_pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
+                next_hold_time = (next_idx - entry_index) if current_position is not None else 0
+                next_pos_info = [next_pos_val, next_unrealized_pnl * 10, next_hold_time / 1000.0]
+                next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
+                done = False
+            else:
+                done = True
+                next_state = state # 마지막 상태 유지
             
-            done = False if step < max_steps - 1 else True
-            if next_state is None: done = True; next_state = state
+            if next_state is None:
+                done = True
+                next_state = state
             
             self.agent.put_data((state, action, reward, next_state, prob, done))
             episode_reward += reward

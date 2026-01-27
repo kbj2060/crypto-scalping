@@ -62,9 +62,9 @@ PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
 PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.01  # 엔트로피 계수 (초기값) - 적절한 탐험 유도
-PPO_ENTROPY_DECAY = 0.999  # 엔트로피 감소율 (에피소드마다) - 0.9996 → 0.999 (더 천천히 감소)
-PPO_ENTROPY_MIN = 0.001  # 엔트로피 최소값 - 0.01 → 0.001 (최소값도 낮춤)
+PPO_ENTROPY_COEF = 0.1  # 엔트로피 계수 (초기값) - 탐험 강제 (0.01 -> 0.1)
+PPO_ENTROPY_DECAY = 0.9995  # 엔트로피 감소율 (에피소드마다) - 천천히 줄어들게 (0.999 -> 0.9995)
+PPO_ENTROPY_MIN = 0.02  # 엔트로피 최소값 - 지속적 탐험 유지
 PPO_LEARNING_RATE = 0.0003  # 학습률 - 3e-4 (Golden Rule)
 
 # [수정] 스케줄러 설정 (Linear Decay)

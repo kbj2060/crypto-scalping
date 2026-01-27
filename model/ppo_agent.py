@@ -135,69 +135,62 @@ class PPOAgent:
         return action.item(), dist.log_prob(action).item()
 
     def train_net(self, episode=1):
-        """PPO 네트워크 학습"""
+        """PPO 네트워크 학습 (GAE 완전 구현)"""
         if not self.data: 
             return 0.0
         
-        # 데이터 배치 만들기
+        # 1. 데이터 배치 변환
         s_seq_lst, s_info_lst, a_lst, r_lst, next_s_seq_lst, next_s_info_lst, prob_a_lst, done_lst = [], [], [], [], [], [], [], []
         
         for transition in self.data:
             s, a, r, next_s, prob_a, done = transition
-            
-            # State는 (obs_seq, obs_info) 튜플
-            s_seq_lst.append(s[0])
-            s_info_lst.append(s[1])
-            a_lst.append([a])
-            r_lst.append([r])
-            next_s_seq_lst.append(next_s[0])
-            next_s_info_lst.append(next_s[1])
-            prob_a_lst.append([prob_a])
-            done_lst.append([0 if done else 1])  # done=True면 mask=0
+            s_seq_lst.append(s[0]); s_info_lst.append(s[1])
+            a_lst.append([a]); r_lst.append([r])
+            next_s_seq_lst.append(next_s[0]); next_s_info_lst.append(next_s[1])
+            prob_a_lst.append([prob_a]); done_lst.append([0 if done else 1])
 
-        # Tensor 변환
-        # obs_seq는 이미 배치 차원이 있을 수 있으므로 확인
-        if isinstance(s_seq_lst[0], torch.Tensor):
-            s_seq = torch.cat(s_seq_lst, dim=0).to(self.device)
-            next_s_seq = torch.cat(next_s_seq_lst, dim=0).to(self.device)
-        else:
-            s_seq = torch.tensor(np.concatenate(s_seq_lst), dtype=torch.float).to(self.device)
-            next_s_seq = torch.tensor(np.concatenate(next_s_seq_lst), dtype=torch.float).to(self.device)
-            
-        if isinstance(s_info_lst[0], torch.Tensor):
-            s_info = torch.cat(s_info_lst, dim=0).to(self.device)
-            next_s_info = torch.cat(next_s_info_lst, dim=0).to(self.device)
-        else:
-            s_info = torch.tensor(np.stack(s_info_lst), dtype=torch.float).to(self.device)
-            next_s_info = torch.tensor(np.stack(next_s_info_lst), dtype=torch.float).to(self.device)
-            
+        # Tensor 변환 최적화
+        def to_tensor(data, dtype=torch.float):
+            if isinstance(data[0], torch.Tensor):
+                return torch.cat(data, dim=0).to(self.device)
+            return torch.tensor(np.array(data), dtype=dtype).to(self.device)
+
+        s_seq = to_tensor(s_seq_lst); s_info = to_tensor(s_info_lst)
+        next_s_seq = to_tensor(next_s_seq_lst); next_s_info = to_tensor(next_s_info_lst)
         a = torch.tensor(a_lst, dtype=torch.long).to(self.device)
         r = torch.tensor(r_lst, dtype=torch.float).to(self.device)
         done_mask = torch.tensor(done_lst, dtype=torch.float).to(self.device)
         prob_a = torch.tensor(prob_a_lst, dtype=torch.float).to(self.device)
+        
+        self.data = []
 
-        self.data = []  # 버퍼 비우기
-
-        # Advantage Calculation
+        # 2. GAE (Generalized Advantage Estimation) 계산 - [핵심 개선]
         with torch.no_grad():
-            # LSTM State 처리가 복잡하므로 배치 단위에선 Stateless로 근사
+            # Stateless Forward for Batch
             _, v, _ = self.model(s_seq, s_info, states=None)
             _, next_v, _ = self.model(next_s_seq, next_s_info, states=None)
             
+            # TD Error
             td_target = r + self.gamma * next_v * done_mask
             delta = td_target - v
-        
-        # GAE (Generalized Advantage Estimation) - 간단 버전
-        # 실제 구현에선 Loop를 돌며 GAE를 계산해야 정확함
-        # 여기서는 즉시 보상 기반으로 단순화하여 학습 안정성 확보
-        advantage = delta 
-        
-        # Advantage 정규화
+            
+            # GAE Loop
+            advantage_lst = []
+            gae = 0.0
+            # 역순으로 계산
+            for t in reversed(range(len(delta))):
+                gae = delta[t] + self.gamma * self.lmbda * done_mask[t] * gae
+                advantage_lst.insert(0, gae)
+                
+            advantage = torch.stack(advantage_lst)
+            target_v = advantage + v # Value Target
+
+        # 정규화
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
-        
-        # PPO Update Loop
+
+        # 3. PPO Update
         total_loss = 0.0
-        for i in range(self.k_epochs):
+        for _ in range(self.k_epochs):
             curr_probs, curr_v, _ = self.model(s_seq, s_info, states=None)
             dist = Categorical(curr_probs)
             curr_log_prob = dist.log_prob(a.squeeze()).unsqueeze(1)
@@ -207,23 +200,19 @@ class PPOAgent:
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-self.eps_clip, 1+self.eps_clip) * advantage
             
-            # 엔트로피 감소
-            current_entropy_coef = max(
-                config.PPO_ENTROPY_MIN,
-                self.entropy_coef * (config.PPO_ENTROPY_DECAY ** episode)
-            )
+            # Entropy Decay
+            curr_entropy_coef = max(config.PPO_ENTROPY_MIN, self.entropy_coef * (config.PPO_ENTROPY_DECAY ** episode))
             
             actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = 0.5 * F.mse_loss(curr_v, td_target)
-            entropy_loss = current_entropy_coef * dist.entropy().mean()
+            critic_loss = 0.5 * F.mse_loss(curr_v, target_v) # GAE Target 사용
+            entropy_loss = curr_entropy_coef * dist.entropy().mean()
             
             loss = actor_loss + critic_loss - entropy_loss
             
             self.optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)  # Gradient Clipping
+            nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
             self.optimizer.step()
-            
             total_loss += loss.item()
-            
+
         return total_loss / self.k_epochs
