@@ -1,6 +1,8 @@
 """
-PPO 평가 스크립트 (4-Action + No Force Close)
-- 평가 종료 시 포지션을 강제로 닫지 않음 (미실현 손익 미반영)
+PPO 평가 스크립트 (4-Action + Action Masking + Switching Logic)
+- 학습 환경(train_ppo.py)과 동일한 로직으로 평가 (스위칭 지원)
+- Action Masking 적용으로 불가능한 행동 차단
+- Argmax(탐욕적) 선택으로 성능 평가
 """
 import logging
 import os
@@ -101,9 +103,7 @@ class PPOEvaluator:
             logger.error("[ERROR] Model file not found.")
             sys.exit(1)
 
-        # ---------------------------------------------------------
-        # [Runtime Patch] 네트워크 입력 차원 강제 교정
-        # ---------------------------------------------------------
+        # 네트워크 패치 (필요 시)
         try:
             if isinstance(self.agent.model.info_net, torch.nn.Sequential):
                 current_in_features = self.agent.model.info_net[0].in_features
@@ -136,13 +136,27 @@ class PPOEvaluator:
 
     def _precalculate_strategies_for_eval(self):
         df = self.data_collector.eth_data
-        check_idx = min(self.start_idx + 10, len(df) - 1)
         
-        if df.iloc[check_idx]['strategy_0'] != 0.0:
-            logger.info("[INFO] Strategies seem to be pre-calculated.")
-            return
+        # [수정 1] 전략 컬럼 존재 여부 확인 및 초기화
+        # 파일에 strategy 컬럼이 없으면 먼저 0.0으로 생성해줘야 합니다.
+        strategies_initialized = True
+        for i in range(len(self.strategies)):
+            col_name = f'strategy_{i}'
+            if col_name not in df.columns:
+                df[col_name] = 0.0
+                strategies_initialized = False
+        
+        # [수정 2] 이미 계산되어 있는지 값으로 확인 (컬럼이 원래 있었을 때만)
+        if strategies_initialized:
+            check_idx = min(self.start_idx + 10, len(df) - 1)
+            # strategy_0 값이 0이 아니면 이미 계산된 것으로 간주하고 스킵
+            if df.iloc[check_idx]['strategy_0'] != 0.0:
+                logger.info("[INFO] Strategies seem to be pre-calculated.")
+                return
 
         logger.info("[INFO] Calculating strategies...")
+        
+        # [수정 3] 전략 계산 루프
         for i in tqdm(range(self.start_idx, self.end_idx), desc="Strategies"):
             self.data_collector.current_index = i
             for s_idx, strategy in enumerate(self.strategies):
@@ -153,12 +167,15 @@ class PPOEvaluator:
                         conf = float(res.get('confidence', 0.0))
                         sig = res.get('signal', 'NEUTRAL')
                         score = conf if sig == 'LONG' else (-conf if sig == 'SHORT' else 0.0)
+                    
+                    # 위에서 컬럼을 생성했으므로 get_loc에서 에러가 나지 않음
                     df.iat[i, df.columns.get_loc(f'strategy_{s_idx}')] = score
                 except: continue
+        
         self.data_collector.eth_data = df
 
     def evaluate(self):
-        logger.info("[START] Running Backtest...")
+        logger.info("[START] Running Backtest (with Action Masking & Switching)...")
         
         current_position = None
         entry_price = 0.0
@@ -190,92 +207,114 @@ class PPOEvaluator:
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None: continue
             
+            # ---------------------------------------------------------
+            # [Action Masking] 학습 코드와 동일한 마스킹 적용
+            # ---------------------------------------------------------
+            # Action: 0=HOLD, 1=LONG, 2=SHORT, 3=EXIT
+            action_mask = [1.0, 1.0, 1.0, 1.0]
+            
+            if current_position is None:
+                # 무포지션: EXIT(3) 불가
+                action_mask = [1.0, 1.0, 1.0, 0.0]
+            elif current_position == 'LONG':
+                # LONG 보유: LONG(1) 불가 (SHORT는 스위칭 허용), EXIT 가능
+                action_mask = [1.0, 0.0, 1.0, 1.0]
+            elif current_position == 'SHORT':
+                # SHORT 보유: SHORT(2) 불가 (LONG은 스위칭 허용), EXIT 가능
+                action_mask = [1.0, 1.0, 0.0, 1.0]
+
+            # ---------------------------------------------------------
+            # [Model Inference] Argmax with Masking
+            # ---------------------------------------------------------
             with torch.no_grad():
                 obs_seq, obs_info = state
-                
-                # [수정됨] env가 이미 Tensor를 주므로 다시 Tensor로 만들 필요 없음
-                # 또한 env가 이미 (1, ...) 형태의 배치를 주므로 unsqueeze 중복 제거
                 if not isinstance(obs_seq, torch.Tensor):
                     obs_seq = torch.FloatTensor(obs_seq).to(self.agent.device)
-                else:
-                    obs_seq = obs_seq.to(self.agent.device)
+                else: obs_seq = obs_seq.to(self.agent.device)
                     
                 if not isinstance(obs_info, torch.Tensor):
-                    # 만약 텐서가 아니면 (1, 15)로 만듦
                     obs_info = torch.FloatTensor(obs_info).unsqueeze(0).to(self.agent.device)
-                else:
-                    # [핵심 수정] 이미 텐서면 unsqueeze 하지 않고 바로 device로
-                    obs_info = obs_info.to(self.agent.device)
+                else: obs_info = obs_info.to(self.agent.device)
                 
                 probs, _, self.agent.current_states = self.agent.model(obs_seq, obs_info, self.agent.current_states)
+                
+                # 마스킹 적용
+                mask_tensor = torch.FloatTensor(action_mask).to(self.agent.device)
+                probs = probs * mask_tensor
+                
+                # 결정적 선택 (Argmax)
                 action = torch.argmax(probs).item()
             
             trade_occurred = False
             realized_pnl = 0.0
 
-            # [삭제] A. 강제 손절 (Safety Net)
-            # 평가 때도 간섭하지 않고 AI의 판단을 100% 신뢰합니다.
-            # if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
-            #     realized_pnl = unrealized_pnl - fee_rate
-            #     balance_history.append(balance_history[-1] * (1 + realized_pnl))
-            #     trades.append({
-            #         'entry_idx': entry_index, 
-            #         'exit_idx': idx,
-            #         'type': current_position, 
-            #         'net_pnl': realized_pnl,
-            #         'note': 'Stop Loss'  # 손절 기록
-            #     })
-            #     trade_occurred = True
-            #     current_position = None
+            # ---------------------------------------------------------
+            # [Action Logic] Switching 포함
+            # ---------------------------------------------------------
             
-            # B. 4-Action Logic
-            # Action 0: HOLD (관망)
+            # Action 0: HOLD
             if action == 0:
-                pass  # 아무것도 하지 않음
+                pass 
             
-            # Action 1: LONG (롱 진입/유지)
+            # Action 1: LONG
             elif action == 1:
                 if current_position is None:
                     # 신규 롱 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = idx
-                # 이미 LONG이면 유지 (Pass)
+                elif current_position == 'SHORT':
+                    # [Switching] SHORT 청산 -> LONG 진입
+                    # 1. 청산
+                    realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
+                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
+                    trades.append({'net_pnl': realized_pnl, 'type': 'SWITCH_L'})
+                    trade_occurred = True
+                    
+                    # 2. 진입
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = idx
             
-            # Action 2: SHORT (숏 진입/유지)
+            # Action 2: SHORT
             elif action == 2:
                 if current_position is None:
                     # 신규 숏 진입
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = idx
-                # 이미 SHORT면 유지 (Pass)
-            
-            # Action 3: EXIT (청산)
+                elif current_position == 'LONG':
+                    # [Switching] LONG 청산 -> SHORT 진입
+                    # 1. 청산
+                    realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
+                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
+                    trades.append({'net_pnl': realized_pnl, 'type': 'SWITCH_S'})
+                    trade_occurred = True
+                    
+                    # 2. 진입
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = idx
+
+            # Action 3: EXIT
             elif action == 3:
                 if current_position is not None:
-                    # 포지션 청산
-                    realized_pnl = unrealized_pnl - fee_rate
+                    if current_position == 'LONG':
+                        realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
+                    elif current_position == 'SHORT':
+                        realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
+                        
                     balance_history.append(balance_history[-1] * (1 + realized_pnl))
-                    trades.append({'net_pnl': realized_pnl})
+                    trades.append({'net_pnl': realized_pnl, 'type': 'EXIT'})
                     trade_occurred = True
                     current_position = None
-                # 포지션이 없으면 아무것도 안 함 (Pass)
             
-            # [수정] LSTM State는 거래 중에도 유지 (시장 흐름 연속성)
-            # 거래 발생 시 리셋하지 않음 - 시장의 흐름을 끊지 않음
-
             pbar.set_postfix({'Bal': f"${balance_history[-1]:.0f}"})
-
-        # [수정] 강제 청산 로직 삭제 (No Force Close)
-        # 마지막 포지션은 미실현 손익으로 처리하지 않고 통계에서 제외
 
         try:
             self._print_report(trades, balance_history)
         except Exception as e:
             logger.error(f"[ERROR] Report generation failed: {e}")
-            import traceback
-            traceback.print_exc()
 
     def _print_report(self, trades, balance_history):
         if not trades:

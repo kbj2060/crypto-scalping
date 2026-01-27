@@ -1,5 +1,7 @@
 """
-PPO 학습 스크립트 (4-Action + No Force Close)
+PPO 학습 스크립트 (4-Action + Action Masking + Switching + No Force Close)
+- Action Masking: 불필요한 액션(중복 진입, 무포지션 청산 등)을 차단하여 학습 효율 극대화
+- Switching Logic: LONG <-> SHORT 전환을 한 스텝에 처리 (Target Position 방식 효과)
 - 에피소드 종료 시 포지션 유지 (강제 청산 안 함)
 """
 import logging
@@ -200,6 +202,9 @@ class PPOTrainer:
         start_idx = np.random.randint(start_min, start_max)
         self.data_collector.current_index = start_idx
         
+        # [추가] ★ 에피소드 시작 시 리워드 상태 리셋 (필수!) ★
+        self.env.reset_reward_states()
+        
         current_position = None
         entry_price = 0.0
         entry_index = 0
@@ -216,6 +221,7 @@ class PPOTrainer:
             
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
             
+            # PnL 계산
             unrealized_pnl = 0.0
             if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
@@ -233,72 +239,99 @@ class PPOTrainer:
 
             prev_pos_str = current_position 
 
-            action, prob = self.agent.select_action(state)
+            # ====================================================
+            # [핵심 수정 1] Action Masking 적용
+            # 1=가능, 0=불가능 (Logit을 -inf로 보내서 확률 0 만듦)
+            # ====================================================
+            # Action 0: HOLD, 1: LONG, 2: SHORT, 3: EXIT
+            action_mask = [1.0, 1.0, 1.0, 1.0] 
+            
+            if current_position is None:
+                # 무포지션: EXIT(3) 불가
+                action_mask = [1.0, 1.0, 1.0, 0.0]
+            elif current_position == 'LONG':
+                # LONG 보유 중: LONG(1) 재진입 불가 -> HOLD나 SHORT(스위칭), EXIT 가능
+                action_mask = [1.0, 0.0, 1.0, 1.0]
+            elif current_position == 'SHORT':
+                # SHORT 보유 중: SHORT(2) 재진입 불가 -> HOLD나 LONG(스위칭), EXIT 가능
+                action_mask = [1.0, 1.0, 0.0, 1.0]
+
+            # 마스크를 적용하여 액션 선택
+            action, prob = self.agent.select_action(state, action_mask=action_mask)
             
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
             extra_penalty = 0.0
             
-            # [삭제] A. 강제 손절 (Safety Net)
-            # 이 부분이 있으면 AI는 "버티면 시스템이 알아서 끊어주네?"라고 오해합니다.
-            # if current_position is not None and unrealized_pnl < config.STOP_LOSS_THRESHOLD:
-            #     realized_pnl = unrealized_pnl
-            #     trade_done = True
-            #     current_position = None
-            #     entry_price = 0.0; entry_index = 0
-            #     trade_count += 1
-            #     action = 0 
+            # ====================================================
+            # [핵심 수정 2] Switching Logic (즉시 전환)
+            # ====================================================
             
-            # B. 4-Action Logic
-            # Action 0: HOLD (관망)
+            # Action 0: HOLD
             if action == 0:
-                pass  # 아무것도 하지 않음
+                pass 
             
-            # Action 1: LONG (롱 진입/유지)
+            # Action 1: LONG
             elif action == 1:
                 if current_position is None:
-                    # 신규 롱 진입
+                    # 신규 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = current_idx
                     trade_count += 1
-                # 이미 LONG이면 유지 (Pass)
+                elif current_position == 'SHORT':
+                    # [Switching] SHORT 청산 -> LONG 진입
+                    # 1. 청산 처리
+                    realized_pnl = (entry_price - curr_price) / entry_price
+                    trade_done = True # 종료 보상 트리거
+                    trade_count += 1
+                    
+                    # 2. 신규 진입 (즉시)
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                    trade_count += 1 # 거래 횟수 2회 증가
             
-            # Action 2: SHORT (숏 진입/유지)
+            # Action 2: SHORT
             elif action == 2:
                 if current_position is None:
-                    # 신규 숏 진입
+                    # 신규 진입
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = current_idx
                     trade_count += 1
-                # 이미 SHORT면 유지 (Pass)
-            
-            # Action 3: EXIT (청산)
+                elif current_position == 'LONG':
+                    # [Switching] LONG 청산 -> SHORT 진입
+                    # 1. 청산 처리
+                    realized_pnl = (curr_price - entry_price) / entry_price
+                    trade_done = True
+                    trade_count += 1
+                    
+                    # 2. 신규 진입 (즉시)
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = current_idx
+                    trade_count += 1
+
+            # Action 3: EXIT
             elif action == 3:
                 if current_position is not None:
-                    # 포지션 청산
                     realized_pnl = unrealized_pnl
                     trade_done = True
                     current_position = None
                     entry_price = 0.0
                     entry_index = 0
                     trade_count += 1
-                # 포지션이 없으면 아무것도 안 함 (Pass)
-
-            # [수정] 마지막에 강제 청산하는 로직 없음 (사용자 요청)
-            # 그냥 루프가 끝나면 포지션 들고 있는 상태로 종료됨
 
             reward = self.env.calculate_reward(
                 step_pnl=step_pnl, 
                 realized_pnl=realized_pnl, 
-                trade_done=trade_done,  # <-- 여기서 True로 넘어가야 종료 보상(수수료 차감 등)이 계산됨
+                trade_done=trade_done, 
                 action=action,              
                 prev_position=prev_pos_str,
                 current_position=current_position
             )
-            
             
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
             self.data_collector.current_index += 1
@@ -336,7 +369,7 @@ class PPOTrainer:
         except: pass
 
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (4-Action: HOLD, LONG, SHORT, EXIT + No Force Close)")
+        logger.info("🚀 PPO 학습 시작 (4-Action: HOLD, LONG, SHORT, EXIT + Action Masking + Switching)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         best_model = f"{base_path}_best.pth"
