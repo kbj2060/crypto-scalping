@@ -6,7 +6,7 @@ import torch
 import numpy as np
 import pandas as pd
 from model.train_ppo import PPOTrainer
-import config
+from model import config
 
 def debug_agent():
     print("🚨 [긴급 진단] PPO 에이전트 상태 점검 시작...\n")

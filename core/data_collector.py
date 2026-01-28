@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 from .binance_client import BinanceClient
-import config
+from model import config
 import logging
 from datetime import datetime, timedelta
 import time

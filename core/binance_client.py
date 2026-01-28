@@ -2,7 +2,7 @@
 바이낸스 API 클라이언트
 """
 from binance.client import Client
-import config
+from model import config
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
 """
-PPO 학습 스크립트 (3-Action Target Position)
+PPO 학습 스크립트 (Action 3 / Info Dim 15 / Force Strategy Recalc)
+- 캐시된 전략 파일이 있어도 무조건 재계산하여 0점 문제 해결
 """
 import logging
 import os
@@ -7,11 +8,27 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
+import matplotlib
+# 라이브 그래프용 설정
+GUI_BACKEND_AVAILABLE = True
+try:
+    matplotlib.use('TkAgg')
+except Exception:
+    matplotlib.use('Agg')
+    GUI_BACKEND_AVAILABLE = False
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+try:
+    from . import config
+    from model.trading_env import TradingEnvironment
+    from model.ppo_agent import PPOAgent
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from model import config
+    from model.trading_env import TradingEnvironment
+    from model.ppo_agent import PPOAgent
+
 from core import DataCollector
 from strategies import (
     BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
@@ -19,82 +36,45 @@ from strategies import (
     VWAPDeviationStrategy, RangeTopBottomStrategy, StochRSIMeanReversionStrategy,
     CMFDivergenceStrategy, CCIReversalStrategy, WilliamsRStrategy
 )
-from model.trading_env import TradingEnvironment
-from model.ppo_agent import PPOAgent
 
-# 로깅 설정
 os.makedirs('logs', exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(message)s',
-    handlers=[
-        logging.FileHandler('logs/train_ppo.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', handlers=[logging.FileHandler('logs/train_ppo.log', encoding='utf-8'), logging.StreamHandler()])
 logger = logging.getLogger(__name__)
-
 logging.getLogger('model.feature_engineering').setLevel(logging.WARNING)
 logging.getLogger('model.mtf_processor').setLevel(logging.WARNING)
-
-try:
-    from joblib import Parallel, delayed, cpu_count
-    JOBLIB_AVAILABLE = True
-except ImportError:
-    JOBLIB_AVAILABLE = False
-    logger.info("joblib 미설치: 순차 처리로 진행합니다.")
-
-def calculate_chunk(start_idx, end_idx, strategies, collector_data):
-    from core import DataCollector
-    temp_collector = DataCollector(use_saved_data=True)
-    temp_collector.eth_data = collector_data
-    results = {}
-    for s_idx in range(len(strategies)):
-        results[f'strategy_{s_idx}'] = np.zeros(end_idx - start_idx)
-
-    for i in range(start_idx, end_idx):
-        temp_collector.current_index = i
-        rel_i = i - start_idx
-        for s_idx, strategy in enumerate(strategies):
-            try:
-                result = strategy.analyze(temp_collector)
-                score = 0.0
-                if result:
-                    conf = float(result.get('confidence', 0.0))
-                    signal = result.get('signal', 'NEUTRAL')
-                    if signal == 'LONG': score = conf
-                    elif signal == 'SHORT': score = -conf
-                results[f'strategy_{s_idx}'][rel_i] = score
-            except: continue
-    return results
 
 class PPOTrainer:
     def __init__(self, enable_visualization=True):
         self.data_collector = DataCollector(use_saved_data=True)
+        # 전략 12개
         self.strategies = [
             BTCEthCorrelationStrategy(), VolatilitySqueezeStrategy(), OrderblockFVGStrategy(),
             HMAMomentumStrategy(), MFIMomentumStrategy(), BollingerMeanReversionStrategy(),
             VWAPDeviationStrategy(), RangeTopBottomStrategy(), StochRSIMeanReversionStrategy(),
             CMFDivergenceStrategy(), CCIReversalStrategy(), WilliamsRStrategy()
         ]
-        
+
         logger.info(f"전략 초기화: {len(self.strategies)}개 전략")
-        
         self._load_features()
+
+        # [수정] 무조건 전략 재계산 실행
         self.precalculate_strategies_parallel()
-        
+
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self._fit_global_scaler()
 
         state_dim = self.env.get_state_dim()
-        action_dim = config.TRAIN_ACTION_DIM  # 3-Action Target Position: 0=Neutral, 1=Long, 2=Short
-        info_dim = len(self.strategies) + 3
+        action_dim = config.TRAIN_ACTION_DIM
+
+        # info_dim = 15
+        info_dim = 15
+
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (3-Action Target Position)")
-        
+        logger.info(f"디바이스: {device} | Action Dim: {action_dim} | Info Dim: {info_dim}")
+
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
-        
+
+        # 모델 로드
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         last_model_path = f"{base_path}_last.pth"
         if os.path.exists(last_model_path):
@@ -103,31 +83,67 @@ class PPOTrainer:
                 logger.info(f"✅ 기존 모델 로드 완료")
             except Exception as e:
                 logger.warning(f"⚠️ 모델 로드 실패: {e}")
-                logger.warning("🚀 새로운 구조로 학습을 시작합니다.")
-        
+                logger.warning("🚀 새로운 구조(info_dim=15)로 학습을 처음부터 시작합니다.")
+
         self.episode_rewards = []
         self.avg_rewards = []
-        
+        self.plotting_enabled = True
+
+        # 그래프 초기화
+        self._fig = None
+        self._ax = None
+        self._line1 = None
+        self._line2 = None
+        if self.plotting_enabled and GUI_BACKEND_AVAILABLE:
+            try:
+                plt.ion()
+                self._fig, self._ax = plt.subplots(figsize=(10, 5))
+                self._ax.set_title('PPO Training Progress')
+                self._ax.set_xlabel('Episode')
+                self._ax.set_ylabel('Reward')
+                self._ax.grid(True, alpha=0.3)
+                self._line1, = self._ax.plot([], [], label='Reward', alpha=0.3, color='gray')
+                self._line2, = self._ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
+                self._ax.legend()
+            except Exception as e:
+                logger.warning(f"Live plot init failed: {e}")
+                self._fig = None
+
+    def live_plot(self):
+        if not self.plotting_enabled: return
         try:
-            plt.ion()
-            self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Training Progress (3-Action Target Position)')
-            self.ax.set_xlabel('Episode')
-            self.ax.set_ylabel('Reward')
-            self.ax.grid(True, alpha=0.3)
-            self.line1, = self.ax.plot([], [], label='Reward', alpha=0.3, color='gray')
-            self.line2, = self.ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
-            self.ax.legend()
-            self.plotting_enabled = True
-        except: self.plotting_enabled = False
+            x = range(len(self.episode_rewards))
+            if self._fig is not None and self._line1 is not None:
+                self._line1.set_data(x, self.episode_rewards)
+                self._line2.set_data(x, self.avg_rewards)
+                self._ax.relim()
+                self._ax.autoscale_view()
+                self._fig.canvas.draw()
+                self._fig.canvas.flush_events()
+                plt.pause(0.01)
+
+            # 파일 저장
+            plt.figure(figsize=(10, 5))
+            plt.plot(self.episode_rewards, label='Reward', alpha=0.3, color='gray')
+            plt.plot(self.avg_rewards, label='Avg (10)', color='red', linewidth=2)
+            plt.title('PPO Training Progress')
+            plt.xlabel('Episode')
+            plt.ylabel('Reward')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig('training_progress.png')
+            plt.close()
+        except Exception as e:
+            logger.warning(f"Plotting error: {e}")
 
     def _load_features(self):
         path = 'data/training_features.csv'
         cached_strategies_path = 'data/cached_strategies.csv'
         if os.path.exists(path):
             df = pd.read_csv(path, index_col=0, parse_dates=True)
-            # [수정] 데이터 품질 개선 (Forward Fill)
-            df = df.ffill().bfill()
+            df = df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+
+            # 캐시 파일이 있으면 로드 (0점일 수도 있지만 일단 로드)
             if os.path.exists(cached_strategies_path):
                 try:
                     cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
@@ -135,20 +151,34 @@ class PPOTrainer:
                     for col in strategy_cols:
                         if col in cached_df.columns: df[col] = cached_df[col]
                 except: pass
+
+            if df.isnull().values.any(): df = df.fillna(0)
             self.data_collector.eth_data = df
-        else:
-            logger.warning("⚠️ 피처 파일이 없습니다. 원본 데이터로 초기화하고 새로 계산합니다.")
-            # 파일이 없으면 precalculate 단계에서 생성되도록 둠
-            pass
 
     def precalculate_strategies_parallel(self):
         df = self.data_collector.eth_data
         if df is None: return
-        if 'strategy_0' in df.columns: return
+
+        # [수정] Skip 로직 삭제됨 -> 무조건 재계산
+        logger.info("⚡ 전략 점수 강제 재계산 중... (시간이 조금 걸립니다)")
         self._precalculate_strategies_sequential(df, config.LOOKBACK+50, len(df))
 
+        # 재계산된 값 저장 (덮어쓰기)
+        try:
+            cache_path = 'data/cached_strategies.csv'
+            strategy_cols = [col for col in df.columns if col.startswith('strategy_')]
+            if strategy_cols:
+                df[strategy_cols].to_csv(cache_path)
+                logger.info(f"💾 전략 점수 캐시 업데이트 완료: {cache_path}")
+        except Exception as e:
+            logger.warning(f"캐시 저장 실패: {e}")
+
     def _precalculate_strategies_sequential(self, df, start_idx, total_len):
-        for i in range(len(self.strategies)): df[f'strategy_{i}'] = 0.0
+        # 초기화
+        for i in range(len(self.strategies)):
+            if f'strategy_{i}' not in df.columns:
+                df[f'strategy_{i}'] = 0.0
+
         for i in tqdm(range(start_idx, total_len), desc="Calc Strategies"):
             self.data_collector.current_index = i
             for s_idx, strategy in enumerate(self.strategies):
@@ -166,14 +196,11 @@ class PPOTrainer:
         if not self.env.scaler_fitted:
             df = self.data_collector.eth_data
             if df is None: return
-            
-            # [수정] 오직 Train Set만 사용하여 스케일러 학습 (누수 방지)
             train_size = int(len(df) * config.TRAIN_SPLIT)
             self.train_end_idx = train_size
-            
             target_cols = [
-                'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos', 
-                'rsi', 'macd_hist', 'hma_ratio', 'cci', 
+                'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos',
+                'rsi', 'macd_hist', 'hma_ratio', 'cci',
                 'rvol', 'taker_ratio', 'cvd_change', 'mfi', 'cmf', 'vwap_dist',
                 'wick_upper', 'wick_lower', 'range_pos', 'swing_break', 'chop',
                 'btc_return', 'btc_rsi', 'btc_corr', 'btc_vol', 'eth_btc_ratio',
@@ -181,192 +208,84 @@ class PPOTrainer:
             ]
             for col in target_cols:
                 if col not in df.columns: df[col] = 0.0
-            
             sample = df.iloc[:train_size].sample(n=min(10000, train_size))[target_cols].values.astype(np.float32)
             self.env.preprocessor.fit(sample)
             self.env.scaler_fitted = True
-            
             path = config.AI_MODEL_PATH.replace('.pth', '_scaler.pkl')
             self.env.preprocessor.save(path)
 
     def train_episode(self, episode_num, max_steps=None):
         if max_steps is None: max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
-        
-        start_min = config.LOOKBACK + 100
-        start_max = self.train_end_idx - max_steps - 50
+        start_min, start_max = config.LOOKBACK + 100, self.train_end_idx - max_steps - 50
         if start_max <= start_min: return None
-        
         start_idx = np.random.randint(start_min, start_max)
         self.data_collector.current_index = start_idx
-        
-        # [추가] ★ 에피소드 시작 시 리워드 상태 리셋 (필수!) ★
         self.env.reset_reward_states()
-        
-        current_position = None
-        entry_price = 0.0
-        entry_index = 0
-        episode_reward = 0.0
-        trade_count = 0
-        prev_unrealized_pnl = 0.0
-        
+        current_position, entry_price, entry_index = None, 0.0, 0
+        episode_reward, trade_count, prev_unrealized_pnl = 0.0, 0, 0.0
         self.agent.reset_episode_states()
+
         pbar = tqdm(range(max_steps), desc=f"Ep {episode_num}", leave=False)
-        
         for step in pbar:
             current_idx = self.data_collector.current_index
             if current_idx >= self.train_end_idx: break
-            
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
-            
-            unrealized_pnl = 0.0
-            if current_position == 'LONG':
-                unrealized_pnl = (curr_price - entry_price) / entry_price
-            elif current_position == 'SHORT':
-                unrealized_pnl = (entry_price - curr_price) / entry_price
-            
+
+            unrealized_pnl = (curr_price - entry_price)/entry_price if current_position == 'LONG' else ((entry_price - curr_price)/entry_price if current_position == 'SHORT' else 0.0)
             step_pnl = unrealized_pnl - prev_unrealized_pnl if current_position else 0.0
-            
+
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (current_idx - entry_index) if current_position else 0
             pos_info = [pos_val, unrealized_pnl * 10, holding_time / 1000.0]
-            
+
             state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
             if state is None: break
 
-            # 3. Action Masking (핵심!)
-            # [Neutral, Long, Short]
-            action_mask = [1.0, 1.0, 1.0]
-            if current_position is None:
-                action_mask = [0.1, 1.0, 1.0] # 무포지션일 때 관망(0)은 가능하지만 권장하진 않음 (0.1)
-            elif current_position == 'LONG':
-                action_mask = [1.0, 0.0, 1.0] # 이미 롱이면 롱(1) 불가
-            elif current_position == 'SHORT':
-                action_mask = [1.0, 1.0, 0.0] # 이미 숏이면 숏(2) 불가
-                
-            action, prob = self.agent.select_action(state, action_mask=action_mask)
-            
-            # 4. 액션 처리 & 스위칭 로직
-            trade_done = False
-            realized_pnl = 0.0
-            prev_pos_str = current_position
-            
-            # Action 0: Neutral (청산 or 관망)
-            if action == 0:
-                if current_position is not None:
-                    realized_pnl = unrealized_pnl
-                    trade_done = True
-                    current_position = None
-                    trade_count += 1
-            
-            # Action 1: Long
-            elif action == 1:
-                if current_position is None:
-                    current_position = 'LONG'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1
-                elif current_position == 'SHORT':
-                    # [Switching] Short Close -> Long Open
-                    realized_pnl = unrealized_pnl
-                    trade_done = True # 리워드 계산용 (Short 종료)
-                    
-                    # 즉시 Long 진입
-                    current_position = 'LONG'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 2 # 거래 2회 인정 (청산1+진입1)
-            
-            # Action 2: Short
-            elif action == 2:
-                if current_position is None:
-                    current_position = 'SHORT'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1
-                elif current_position == 'LONG':
-                    # [Switching] Long Close -> Short Open
-                    realized_pnl = unrealized_pnl
-                    trade_done = True
-                    
-                    current_position = 'SHORT'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 2
+            action, prob, val = self.agent.select_action(state, action_mask=[1.0, 1.0, 1.0])
+            trade_done, realized_pnl, prev_pos_str = False, 0.0, current_position
 
-            # 5. 리워드 계산
-            reward = self.env.calculate_reward(
-                step_pnl=step_pnl,
-                realized_pnl=realized_pnl,
-                trade_done=trade_done,
-                holding_time=holding_time,
-                action=action,
-                prev_position=prev_pos_str,
-                current_position=current_position
-            )
-            
-            # 다음 스텝 준비
-            # 스위칭/청산 시 prev_unrealized_pnl 리셋
+            if action == 0:
+                if current_position is not None: realized_pnl, trade_done, current_position, trade_count = unrealized_pnl, True, None, trade_count + 1
+            elif action == 1:
+                if current_position is None: current_position, entry_price, entry_index, trade_count = 'LONG', curr_price, current_idx, trade_count + 1
+                elif current_position == 'SHORT': realized_pnl, trade_done, current_position, entry_price, entry_index, trade_count = unrealized_pnl, True, 'LONG', curr_price, current_idx, trade_count + 2
+            elif action == 2:
+                if current_position is None: current_position, entry_price, entry_index, trade_count = 'SHORT', curr_price, current_idx, trade_count + 1
+                elif current_position == 'LONG': realized_pnl, trade_done, current_position, entry_price, entry_index, trade_count = unrealized_pnl, True, 'SHORT', curr_price, current_idx, trade_count + 2
+
+            reward = self.env.calculate_reward(step_pnl, realized_pnl, trade_done, holding_time, action, prev_pos_str, current_position)
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
-            
             self.data_collector.current_index += 1
+
             next_idx = self.data_collector.current_index
-            
-            # Next State 생성
             if next_idx < len(self.data_collector.eth_data) and next_idx < self.train_end_idx:
                 next_price = float(self.data_collector.eth_data.iloc[next_idx]['close'])
-                next_unrealized_pnl = 0.0
-                if current_position == 'LONG':
-                    next_unrealized_pnl = (next_price - entry_price) / entry_price
-                elif current_position == 'SHORT':
-                    next_unrealized_pnl = (entry_price - next_price) / entry_price
-                
+                next_pnl = (next_price - entry_price)/entry_price if current_position == 'LONG' else ((entry_price - next_price)/entry_price if current_position == 'SHORT' else 0.0)
                 next_pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
-                next_hold_time = (next_idx - entry_index) if current_position is not None else 0
-                next_pos_info = [next_pos_val, next_unrealized_pnl * 10, next_hold_time / 1000.0]
-                next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
+                next_hold = (next_idx - entry_index) if current_position else 0
+                next_state = self.env.get_observation(position_info=[next_pos_val, next_pnl * 10, next_hold / 1000.0], current_index=next_idx)
                 done = False
-            else:
-                done = True
-                next_state = state # 마지막 상태 유지
-            
-            if next_state is None:
-                done = True
-                next_state = state
-            
-            self.agent.put_data((state, action, reward, next_state, prob, done))
+            else: done, next_state = True, state
+
+            if next_state is None: done, next_state = True, state
+
+            self.agent.put_data((state, action, reward, next_state, prob, done, val))
             episode_reward += reward
             pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count})
-            
             if done: break
-        
+
         pbar.close()
         loss = self.agent.train_net(episode=episode_num)
         return episode_reward, trade_count
 
-    def live_plot(self):
-        if not self.plotting_enabled: return
-        try:
-            x = range(len(self.episode_rewards))
-            self.line1.set_data(x, self.episode_rewards)
-            self.line2.set_data(x, self.avg_rewards)
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
-            plt.pause(0.01)
-        except: pass
-
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (3-Action Target Position: Neutral, Long, Short)")
+        logger.info("🚀 PPO 학습 시작 (Action 3 Target Position)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
-        best_model = f"{base_path}_best.pth"
-        best_scaler = f"{base_path}_best_scaler.pkl"
-        last_model = f"{base_path}_last.pth"
-        last_scaler = f"{base_path}_last_scaler.pkl"
-        
+        best_model, best_scaler = f"{base_path}_best.pth", f"{base_path}_best_scaler.pkl"
+        last_model, last_scaler = f"{base_path}_last.pth", f"{base_path}_last_scaler.pkl"
         self.env.preprocessor.save(last_scaler)
-        
+
         for ep in range(1, num_episodes + 1):
             try:
                 res = self.train_episode(ep)
@@ -375,23 +294,24 @@ class PPOTrainer:
                 self.episode_rewards.append(r)
                 avg_r = np.mean(self.episode_rewards[-10:])
                 self.avg_rewards.append(avg_r)
-                
                 logger.info(f"✅ Ep {ep}: Reward {r:.4f} | Avg {avg_r:.4f} | Trades: {c}")
+
                 self.live_plot()
-                
+
                 if r > best_reward:
                     best_reward = r
                     logger.info(f"🏆 신기록! ({best_reward:.4f}) -> 저장")
                     self.agent.save_model(best_model)
                     self.env.preprocessor.save(best_scaler)
-                
                 if ep % 10 == 0:
                     self.agent.save_model(last_model)
                     self.env.preprocessor.save(last_scaler)
             except KeyboardInterrupt: break
             except Exception as e: logger.error(f"Ep {ep} Error: {e}"); continue
-        
-        if self.plotting_enabled: plt.ioff(); plt.show()
+
+        if self.plotting_enabled and self._fig is not None:
+            plt.ioff()
+            plt.show()
 
 if __name__ == "__main__":
     trainer = PPOTrainer()

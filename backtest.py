@@ -8,7 +8,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import sys
 import os
-import config
+from model import config
 from core import DataCollector, RiskManager
 from core.indicators import Indicators
 from trading_bot import TradingBot
