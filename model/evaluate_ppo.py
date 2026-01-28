@@ -1,8 +1,7 @@
 """
-PPO 평가 스크립트 (4-Action + Action Masking + Switching Logic)
-- 학습 환경(train_ppo.py)과 동일한 로직으로 평가 (스위칭 지원)
-- Action Masking 적용으로 불가능한 행동 차단
-- Argmax(탐욕적) 선택으로 성능 평가
+PPO 평가 스크립트 (Fixed: Strategy Calculation Added)
+- 전략 점수가 0으로 나오는 문제 해결
+- cached_strategies.csv 로드 및 필요 시 재계산 로직 추가
 """
 import logging
 import os
@@ -16,14 +15,20 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from datetime import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+# config import
+try:
+    from . import config
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from model import config
+
 from core import DataCollector
 from strategies import (
     BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
     HMAMomentumStrategy, MFIMomentumStrategy, BollingerMeanReversionStrategy,
     VWAPDeviationStrategy, RangeTopBottomStrategy, StochRSIMeanReversionStrategy,
-    CMFDivergenceStrategy, CCIReversalStrategy, WilliamsRStrategy
+    CMFDivergenceStrategy,
+    CCIReversalStrategy, WilliamsRStrategy  # [수정] 12개 전략 모두 포함
 )
 from model.trading_env import TradingEnvironment
 from model.ppo_agent import PPOAgent
@@ -41,7 +46,10 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 class PPOEvaluator:
     def __init__(self, mode='test', model_type='best'):
+        self.mode = mode
         self.data_collector = DataCollector(use_saved_data=True)
+        # [수정] 전략 12개로 통일 (Info Dim 15를 맞추기 위함)
+        # 전략 12개 (학습과 동일하게 설정)
         self.strategies = [
             BTCEthCorrelationStrategy(), VolatilitySqueezeStrategy(), OrderblockFVGStrategy(),
             HMAMomentumStrategy(), MFIMomentumStrategy(), BollingerMeanReversionStrategy(),
@@ -49,9 +57,13 @@ class PPOEvaluator:
             CMFDivergenceStrategy(), CCIReversalStrategy(), WilliamsRStrategy()
         ]
         
+        # 1. 데이터 로드 (전략 캐시 포함)
         self._load_data()
         
-        # 데이터 구간 설정
+        # 2. 전략 점수 확인 및 재계산 (0점 방지)
+        self._ensure_strategies_calculated()
+        
+        # 평가 범위 설정
         total_len = len(self.data_collector.eth_data)
         train_end = int(total_len * config.TRAIN_SPLIT)
         val_end = int(total_len * (config.TRAIN_SPLIT + config.VAL_SPLIT))
@@ -59,15 +71,15 @@ class PPOEvaluator:
         if mode == 'val':
             self.start_idx = train_end
             self.end_idx = val_end
-            logger.info(f"[INFO] Evaluation Mode: VALIDATION Set ({self.start_idx} ~ {self.end_idx})")
+            logger.info(f"[INFO] Mode: VALIDATION ({self.start_idx} ~ {self.end_idx})")
         elif mode == 'test':
             self.start_idx = val_end
             self.end_idx = total_len
-            logger.info(f"[INFO] Evaluation Mode: TEST Set ({self.start_idx} ~ {self.end_idx})")
+            logger.info(f"[INFO] Mode: TEST ({self.start_idx} ~ {self.end_idx})")
         else: 
             self.start_idx = config.LOOKBACK + 100
             self.end_idx = total_len
-            logger.info(f"[INFO] Evaluation Mode: FULL DATA ({self.start_idx} ~ {self.end_idx})")
+            logger.info(f"[INFO] Mode: FULL DATA ({self.start_idx} ~ {self.end_idx})")
 
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         
@@ -80,84 +92,85 @@ class PPOEvaluator:
             self.env.scaler_fitted = True
             logger.info(f"[OK] Scaler Loaded: {scaler_path}")
         else:
-            logger.error("[ERROR] Scaler file not found. Train first!")
+            logger.error(f"[ERROR] Scaler not found: {scaler_path}")
             sys.exit(1)
 
         # 에이전트 설정
         state_dim = self.env.get_state_dim()
-        action_dim = 4  # 4-Action: 0=HOLD, 1=LONG, 2=SHORT, 3=EXIT
-        real_info_dim = len(self.strategies) + 3 
+        action_dim = 4
+        # [수정] info_dim = 15 설정
+        real_info_dim = 15
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        try:
-            self.agent = PPOAgent(state_dim, action_dim, info_dim=real_info_dim, device=device)
-        except TypeError:
-            self.agent = PPOAgent(state_dim, action_dim, device=device)
+        # 모델 초기화
+        self.agent = PPOAgent(state_dim, action_dim, info_dim=real_info_dim, device=device)
 
-        model_path = f"{base_path}_{model_type}.pth"
-        if os.path.exists(model_path):
-            self.agent.load_model(model_path)
-            logger.info(f"[OK] Model Loaded: {model_path}")
+        # [수정 2] 모델 파일 체크 로직 개선 (계층형 모델 지원)
+        model_base_path = f"{base_path}_{model_type}.pth"
+        entry_model_path = f"{base_path}_{model_type}_entry.pth"
+        
+        if os.path.exists(entry_model_path):
+            self.agent.load_model(model_base_path)
+            logger.info(f"[OK] Hierarchical Model Loaded: {entry_model_path}")
+        elif os.path.exists(model_base_path):
+            try:
+                self.agent.load_model(model_base_path)
+                logger.info(f"[OK] Standard Model Loaded: {model_base_path}")
+            except Exception:
+                logger.error("[ERROR] Failed to load model structure.")
+                sys.exit(1)
         else:
-            logger.error("[ERROR] Model file not found.")
+            logger.error(f"[ERROR] Model file not found. Checked: {entry_model_path}")
             sys.exit(1)
-
-        # 네트워크 패치 (필요 시)
-        try:
-            if isinstance(self.agent.model.info_net, torch.nn.Sequential):
-                current_in_features = self.agent.model.info_net[0].in_features
-            else:
-                current_in_features = self.agent.model.info_net.in_features
-            
-            if current_in_features != real_info_dim:
-                logger.warning(f"[WARN] Network expects {current_in_features}, data has {real_info_dim}. Patching...")
-                new_layer = torch.nn.Linear(real_info_dim, 64).to(device)
-                torch.nn.init.orthogonal_(new_layer.weight, gain=np.sqrt(2))
-                torch.nn.init.constant_(new_layer.bias, 0.0)
-                
-                if isinstance(self.agent.model.info_net, torch.nn.Sequential):
-                    self.agent.model.info_net[0] = new_layer
-                else:
-                    self.agent.model.info_net = new_layer
-                logger.info("[OK] Network patched successfully.")
-        except Exception as e:
-            logger.warning(f"[WARN] Patching failed: {e}")
 
     def _load_data(self):
         path = 'data/training_features.csv'
-        if os.path.exists(path):
-            df = pd.read_csv(path, index_col=0, parse_dates=True)
-            df = df.ffill().bfill() 
-            self.data_collector.eth_data = df
-        else:
+        if not os.path.exists(path):
             logger.error("[ERROR] Feature file not found.")
             sys.exit(1)
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        df = df.ffill().bfill()
+        cache_path = 'data/cached_strategies.csv'
+        if os.path.exists(cache_path):
+            try:
+                logger.info(f"Loading cached strategies from {cache_path}...")
+                cached_df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+                strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
+                for col in strategy_cols:
+                    df[col] = cached_df[col].reindex(df.index).ffill().bfill().fillna(0)
+            except Exception as e:
+                logger.warning(f"Failed to load cache: {e}")
+        if df.isnull().values.any():
+            df = df.fillna(0)
+        self.data_collector.eth_data = df
 
-    def _precalculate_strategies_for_eval(self):
+    def _ensure_strategies_calculated(self):
+        """전략 컬럼이 없거나 전부 0이면 재계산"""
         df = self.data_collector.eth_data
-        
-        # [수정 1] 전략 컬럼 존재 여부 확인 및 초기화
-        # 파일에 strategy 컬럼이 없으면 먼저 0.0으로 생성해줘야 합니다.
-        strategies_initialized = True
+        if df is None:
+            return
+        needs_calc = False
         for i in range(len(self.strategies)):
-            col_name = f'strategy_{i}'
-            if col_name not in df.columns:
-                df[col_name] = 0.0
-                strategies_initialized = False
-        
-        # [수정 2] 이미 계산되어 있는지 값으로 확인 (컬럼이 원래 있었을 때만)
-        if strategies_initialized:
-            check_idx = min(self.start_idx + 10, len(df) - 1)
-            # strategy_0 값이 0이 아니면 이미 계산된 것으로 간주하고 스킵
-            if df.iloc[check_idx]['strategy_0'] != 0.0:
-                logger.info("[INFO] Strategies seem to be pre-calculated.")
-                return
+            col = f'strategy_{i}'
+            if col not in df.columns:
+                needs_calc = True
+                break
+            if df[col].iloc[config.LOOKBACK:].abs().sum() == 0:
+                logger.warning(f"⚠️ {col} seems to be all zeros. Recalculating...")
+                needs_calc = True
+                break
+        if needs_calc:
+            logger.info("⚡ Calculating strategies for evaluation...")
+            self._precalculate_strategies_sequential(df, config.LOOKBACK + 50, len(df))
+        else:
+            logger.info("✅ Strategies are ready.")
 
-        logger.info("[INFO] Calculating strategies...")
-        
-        # [수정 3] 전략 계산 루프
-        for i in tqdm(range(self.start_idx, self.end_idx), desc="Strategies"):
+    def _precalculate_strategies_sequential(self, df, start_idx, total_len):
+        for i in range(len(self.strategies)):
+            if f'strategy_{i}' not in df.columns:
+                df[f'strategy_{i}'] = 0.0
+        for i in tqdm(range(start_idx, total_len), desc="Calc Strategies (Eval)"):
             self.data_collector.current_index = i
             for s_idx, strategy in enumerate(self.strategies):
                 try:
@@ -167,15 +180,13 @@ class PPOEvaluator:
                         conf = float(res.get('confidence', 0.0))
                         sig = res.get('signal', 'NEUTRAL')
                         score = conf if sig == 'LONG' else (-conf if sig == 'SHORT' else 0.0)
-                    
-                    # 위에서 컬럼을 생성했으므로 get_loc에서 에러가 나지 않음
-                    df.iat[i, df.columns.get_loc(f'strategy_{s_idx}')] = score
-                except: continue
-        
-        self.data_collector.eth_data = df
+                    col_name = f'strategy_{s_idx}'
+                    df.loc[df.index[i], col_name] = score
+                except Exception:
+                    continue
 
     def evaluate(self):
-        logger.info("[START] Running Backtest (with Action Masking & Switching)...")
+        logger.info("[START] Backtest (Hierarchical Logic)...")
         
         current_position = None
         entry_price = 0.0
@@ -183,9 +194,8 @@ class PPOEvaluator:
         
         trades = []
         balance_history = [10000.0]
-        fee_rate = getattr(config, 'TRANSACTION_COST', 0.001)
+        fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
         
-        self._precalculate_strategies_for_eval()
         self.agent.reset_episode_states()
         
         pbar = tqdm(range(self.start_idx, self.end_idx - 1), desc="Backtest")
@@ -207,114 +217,51 @@ class PPOEvaluator:
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None: continue
             
-            # ---------------------------------------------------------
-            # [Action Masking] 학습 코드와 동일한 마스킹 적용
-            # ---------------------------------------------------------
-            # Action: 0=HOLD, 1=LONG, 2=SHORT, 3=EXIT
-            action_mask = [1.0, 1.0, 1.0, 1.0]
-            
-            if current_position is None:
-                # 무포지션: EXIT(3) 불가
-                action_mask = [1.0, 1.0, 1.0, 0.0]
-            elif current_position == 'LONG':
-                # LONG 보유: LONG(1) 불가 (SHORT는 스위칭 허용), EXIT 가능
-                action_mask = [1.0, 0.0, 1.0, 1.0]
-            elif current_position == 'SHORT':
-                # SHORT 보유: SHORT(2) 불가 (LONG은 스위칭 허용), EXIT 가능
-                action_mask = [1.0, 1.0, 0.0, 1.0]
-
-            # ---------------------------------------------------------
-            # [Model Inference] Argmax with Masking
-            # ---------------------------------------------------------
             with torch.no_grad():
-                obs_seq, obs_info = state
-                if not isinstance(obs_seq, torch.Tensor):
-                    obs_seq = torch.FloatTensor(obs_seq).to(self.agent.device)
-                else: obs_seq = obs_seq.to(self.agent.device)
-                    
-                if not isinstance(obs_info, torch.Tensor):
-                    obs_info = torch.FloatTensor(obs_info).unsqueeze(0).to(self.agent.device)
-                else: obs_info = obs_info.to(self.agent.device)
-                
-                probs, _, self.agent.current_states = self.agent.model(obs_seq, obs_info, self.agent.current_states)
-                
-                # 마스킹 적용
-                mask_tensor = torch.FloatTensor(action_mask).to(self.agent.device)
-                probs = probs * mask_tensor
-                
-                # 결정적 선택 (Argmax)
-                action = torch.argmax(probs).item()
+                action, _, _ = self.agent.select_action(state, action_mask=None)
             
-            trade_occurred = False
             realized_pnl = 0.0
+            trade_occurred = False
+            trade_type = ""
 
-            # ---------------------------------------------------------
-            # [Action Logic] Switching 포함
-            # ---------------------------------------------------------
-            
-            # Action 0: HOLD
+            # Action 0: WAIT/HOLD
             if action == 0:
-                pass 
+                pass
             
-            # Action 1: LONG
+            # Action 1: LONG (Entry)
             elif action == 1:
                 if current_position is None:
-                    # 신규 롱 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = idx
-                elif current_position == 'SHORT':
-                    # [Switching] SHORT 청산 -> LONG 진입
-                    # 1. 청산
-                    realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
-                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
-                    trades.append({'net_pnl': realized_pnl, 'type': 'SWITCH_L'})
-                    trade_occurred = True
-                    
-                    # 2. 진입
-                    current_position = 'LONG'
-                    entry_price = curr_price
-                    entry_index = idx
-            
-            # Action 2: SHORT
+
+            # Action 2: SHORT (Entry)
             elif action == 2:
                 if current_position is None:
-                    # 신규 숏 진입
-                    current_position = 'SHORT'
-                    entry_price = curr_price
-                    entry_index = idx
-                elif current_position == 'LONG':
-                    # [Switching] LONG 청산 -> SHORT 진입
-                    # 1. 청산
-                    realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
-                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
-                    trades.append({'net_pnl': realized_pnl, 'type': 'SWITCH_S'})
-                    trade_occurred = True
-                    
-                    # 2. 진입
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = idx
 
-            # Action 3: EXIT
+            # Action 3: EXIT (Exit)
             elif action == 3:
                 if current_position is not None:
                     if current_position == 'LONG':
                         realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
                     elif current_position == 'SHORT':
                         realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
-                        
-                    balance_history.append(balance_history[-1] * (1 + realized_pnl))
-                    trades.append({'net_pnl': realized_pnl, 'type': 'EXIT'})
+                    
                     trade_occurred = True
+                    trade_type = "EXIT"
                     current_position = None
+
+            # 거래 기록
+            if trade_occurred:
+                balance_history.append(balance_history[-1] * (1 + realized_pnl))
+                trades.append({'net_pnl': realized_pnl, 'type': trade_type})
             
             pbar.set_postfix({'Bal': f"${balance_history[-1]:.0f}"})
 
-        try:
-            self._print_report(trades, balance_history)
-        except Exception as e:
-            logger.error(f"[ERROR] Report generation failed: {e}")
+        self._print_report(trades, balance_history)
 
     def _print_report(self, trades, balance_history):
         if not trades:
@@ -346,12 +293,10 @@ class PPOEvaluator:
             print(f" Profit Factor:   {pf:.2f}")
         else:
             print(f" Profit Factor:   Inf (No Loss)")
-            
         print("="*60)
         
         try:
             plt.figure(figsize=(12, 8))
-            
             plt.subplot(2, 1, 1)
             plt.plot(balance_history, label='Equity', color='blue')
             plt.title('Backtest Equity Curve')
@@ -363,7 +308,6 @@ class PPOEvaluator:
             plt.title('PnL Distribution (%)')
             plt.xlabel('PnL %')
             plt.grid(True, alpha=0.3)
-            
             plt.tight_layout()
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -371,10 +315,8 @@ class PPOEvaluator:
             plt.savefig(save_path)
             print(f"[OK] Graph saved to: {save_path}")
             plt.close()
-            
-        except Exception as plot_err:
-            logger.warning(f"[WARN] Graph plotting failed: {plot_err}")
+        except: pass
 
 if __name__ == "__main__":
-    evaluator = PPOEvaluator(mode='test', model_type='best')
+    evaluator = PPOEvaluator(mode='test', model_type='last')
     evaluator.evaluate()

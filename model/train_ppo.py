@@ -1,8 +1,8 @@
 """
-PPO 학습 스크립트 (4-Action + Action Masking + Switching + No Force Close)
-- Action Masking: 불필요한 액션(중복 진입, 무포지션 청산 등)을 차단하여 학습 효율 극대화
-- Switching Logic: LONG <-> SHORT 전환을 한 스텝에 처리 (Target Position 방식 효과)
-- 에피소드 종료 시 포지션 유지 (강제 청산 안 함)
+PPO 학습 스크립트 (Hierarchical RL Optimized)
+- High-Level(Entry) & Low-Level(Exit) 구조에 맞춘 학습 로직
+- 불필요한 Action Masking 및 Switching 로직 제거 (Agent가 알아서 판단)
+- 에피소드 종료 시 강제 청산(Force Close) 추가하여 리워드 정합성 확보
 """
 import logging
 import os
@@ -13,8 +13,12 @@ import torch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+# config import
+try:
+    from . import config
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from model import config
 from core import DataCollector
 from strategies import (
     BTCEthCorrelationStrategy, VolatilitySqueezeStrategy, OrderblockFVGStrategy,
@@ -40,39 +44,8 @@ logger = logging.getLogger(__name__)
 logging.getLogger('model.feature_engineering').setLevel(logging.WARNING)
 logging.getLogger('model.mtf_processor').setLevel(logging.WARNING)
 
-try:
-    from joblib import Parallel, delayed, cpu_count
-    JOBLIB_AVAILABLE = True
-except ImportError:
-    JOBLIB_AVAILABLE = False
-    logger.info("joblib 미설치: 순차 처리로 진행합니다.")
-
-def calculate_chunk(start_idx, end_idx, strategies, collector_data):
-    from core import DataCollector
-    temp_collector = DataCollector(use_saved_data=True)
-    temp_collector.eth_data = collector_data
-    results = {}
-    for s_idx in range(len(strategies)):
-        results[f'strategy_{s_idx}'] = np.zeros(end_idx - start_idx)
-
-    for i in range(start_idx, end_idx):
-        temp_collector.current_index = i
-        rel_i = i - start_idx
-        for s_idx, strategy in enumerate(strategies):
-            try:
-                result = strategy.analyze(temp_collector)
-                score = 0.0
-                if result:
-                    conf = float(result.get('confidence', 0.0))
-                    signal = result.get('signal', 'NEUTRAL')
-                    if signal == 'LONG': score = conf
-                    elif signal == 'SHORT': score = -conf
-                results[f'strategy_{s_idx}'][rel_i] = score
-            except: continue
-    return results
-
 class PPOTrainer:
-    def __init__(self, enable_visualization=True):
+    def __init__(self, enable_visualization=False):
         self.data_collector = DataCollector(use_saved_data=True)
         self.strategies = [
             BTCEthCorrelationStrategy(), VolatilitySqueezeStrategy(), OrderblockFVGStrategy(),
@@ -84,29 +57,31 @@ class PPOTrainer:
         logger.info(f"전략 초기화: {len(self.strategies)}개 전략")
         
         self._load_features()
-        self.precalculate_strategies_parallel()
         
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self._fit_global_scaler()
 
         state_dim = self.env.get_state_dim()
-        action_dim = 4  # 4-Action: HOLD, LONG, SHORT, EXIT
-        info_dim = len(self.strategies) + 3
+        # Global Action Dim = 4 (0:Wait/Hold, 1:Long, 2:Short, 3:Exit)
+        action_dim = 4  
+        # [수정] info_dim = 15 (전략 12개 + 포지션 3개)
+        info_dim = 15
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        logger.info(f"디바이스: {device} | Action Dim: {action_dim} (4-Action: HOLD, LONG, SHORT, EXIT)")
+        logger.info(f"디바이스: {device} | Hierarchical PPO Agent Initialized (Info Dim: {info_dim})")
         
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
-        last_model_path = f"{base_path}_last.pth"
-        if os.path.exists(last_model_path):
-            try:
-                self.agent.load_model(last_model_path)
-                logger.info(f"✅ 기존 모델 로드 완료")
-            except Exception as e:
-                logger.warning(f"⚠️ 모델 로드 실패: {e}")
-                logger.warning("🚀 새로운 구조로 학습을 시작합니다.")
+        # 계층형 모델은 _entry.pth와 _exit.pth로 나뉘어 저장되지만, 
+        # load_model 내부에서 알아서 처리함
+        last_model_path = f"{base_path}_last.pth" 
+        
+        # 파일 존재 여부는 load_model 내부에서 체크하므로 호출만 함
+        try:
+            self.agent.load_model(last_model_path)
+        except Exception as e:
+            logger.warning(f"초기 모델 로드 중 메시지: {e}")
         
         self.episode_rewards = []
         self.avg_rewards = []
@@ -114,7 +89,7 @@ class PPOTrainer:
         try:
             plt.ion()
             self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('PPO Training Progress')
+            self.ax.set_title('Hierarchical PPO Training')
             self.ax.set_xlabel('Episode')
             self.ax.set_ylabel('Reward')
             self.ax.grid(True, alpha=0.3)
@@ -122,55 +97,34 @@ class PPOTrainer:
             self.line2, = self.ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
             self.ax.legend()
             self.plotting_enabled = True
-        except: self.plotting_enabled = False
+        except:
+            self.plotting_enabled = False
 
     def _load_features(self):
         path = 'data/training_features.csv'
         cached_strategies_path = 'data/cached_strategies.csv'
         if os.path.exists(path):
             df = pd.read_csv(path, index_col=0, parse_dates=True)
-            # [수정] 데이터 품질 개선 (Forward Fill)
             df = df.ffill().bfill()
             if os.path.exists(cached_strategies_path):
                 try:
                     cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
                     strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
                     for col in strategy_cols:
-                        if col in cached_df.columns: df[col] = cached_df[col]
-                except: pass
+                        if col in cached_df.columns:
+                            df[col] = cached_df[col]
+                except:
+                    pass
             self.data_collector.eth_data = df
         else:
-            logger.warning("⚠️ 피처 파일이 없습니다. 원본 데이터로 초기화하고 새로 계산합니다.")
-            # 파일이 없으면 precalculate 단계에서 생성되도록 둠
-            pass
-
-    def precalculate_strategies_parallel(self):
-        df = self.data_collector.eth_data
-        if df is None: return
-        if 'strategy_0' in df.columns: return
-        self._precalculate_strategies_sequential(df, config.LOOKBACK+50, len(df))
-
-    def _precalculate_strategies_sequential(self, df, start_idx, total_len):
-        for i in range(len(self.strategies)): df[f'strategy_{i}'] = 0.0
-        for i in tqdm(range(start_idx, total_len), desc="Calc Strategies"):
-            self.data_collector.current_index = i
-            for s_idx, strategy in enumerate(self.strategies):
-                try:
-                    res = strategy.analyze(self.data_collector)
-                    score = 0.0
-                    if res:
-                        conf = float(res.get('confidence', 0.0))
-                        sig = res.get('signal', 'NEUTRAL')
-                        score = conf if sig == 'LONG' else (-conf if sig == 'SHORT' else 0.0)
-                    df.iat[i, df.columns.get_loc(f'strategy_{s_idx}')] = score
-                except: continue
+            logger.warning("⚠️ 피처 파일이 없습니다.")
 
     def _fit_global_scaler(self):
         if not self.env.scaler_fitted:
             df = self.data_collector.eth_data
-            if df is None: return
+            if df is None:
+                return
             
-            # [수정] 오직 Train Set만 사용하여 스케일러 학습 (누수 방지)
             train_size = int(len(df) * config.TRAIN_SPLIT)
             self.train_end_idx = train_size
             
@@ -183,7 +137,8 @@ class PPOTrainer:
                 'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
             ]
             for col in target_cols:
-                if col not in df.columns: df[col] = 0.0
+                if col not in df.columns:
+                    df[col] = 0.0
             
             sample = df.iloc[:train_size].sample(n=min(10000, train_size))[target_cols].values.astype(np.float32)
             self.env.preprocessor.fit(sample)
@@ -193,16 +148,17 @@ class PPOTrainer:
             self.env.preprocessor.save(path)
 
     def train_episode(self, episode_num, max_steps=None):
-        if max_steps is None: max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
+        if max_steps is None:
+            max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
         
         start_min = config.LOOKBACK + 100
         start_max = self.train_end_idx - max_steps - 50
-        if start_max <= start_min: return None
+        if start_max <= start_min:
+            return None
         
         start_idx = np.random.randint(start_min, start_max)
         self.data_collector.current_index = start_idx
         
-        # [추가] ★ 에피소드 시작 시 리워드 상태 리셋 (필수!) ★
         self.env.reset_reward_states()
         
         current_position = None
@@ -217,11 +173,11 @@ class PPOTrainer:
         
         for step in pbar:
             current_idx = self.data_collector.current_index
-            if current_idx >= self.train_end_idx: break
+            if current_idx >= self.train_end_idx:
+                break
             
             curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
             
-            # PnL 계산
             unrealized_pnl = 0.0
             if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
@@ -235,100 +191,56 @@ class PPOTrainer:
             pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
             
             state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
-            if state is None: break
+            if state is None:
+                break
 
             prev_pos_str = current_position 
-
-            # ====================================================
-            # [핵심 수정 1] Action Masking 적용
-            # 1=가능, 0=불가능 (Logit을 -inf로 보내서 확률 0 만듦)
-            # ====================================================
-            # Action 0: HOLD, 1: LONG, 2: SHORT, 3: EXIT
-            action_mask = [1.0, 1.0, 1.0, 1.0] 
             
-            if current_position is None:
-                # 무포지션: EXIT(3) 불가
-                action_mask = [1.0, 1.0, 1.0, 0.0]
-            elif current_position == 'LONG':
-                # LONG 보유 중: LONG(1) 재진입 불가 -> HOLD나 SHORT(스위칭), EXIT 가능
-                action_mask = [1.0, 0.0, 1.0, 1.0]
-            elif current_position == 'SHORT':
-                # SHORT 보유 중: SHORT(2) 재진입 불가 -> HOLD나 LONG(스위칭), EXIT 가능
-                action_mask = [1.0, 1.0, 0.0, 1.0]
-
-            # 마스크를 적용하여 액션 선택
-            action, prob = self.agent.select_action(state, action_mask=action_mask)
+            # [수정] Masking 제거: Agent가 포지션 유무에 따라 알아서 판단함
+            action, prob, val = self.agent.select_action(state, action_mask=None)
             
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
-            extra_penalty = 0.0
-            
-            # ====================================================
-            # [핵심 수정 2] Switching Logic (즉시 전환)
-            # ====================================================
-            
-            # Action 0: HOLD
+            holding_time_norm = 0.0  # 청산 시에만 의미 있음
+
+            # Action 0: WAIT / HOLD
             if action == 0:
-                pass 
-            
-            # Action 1: LONG
+                pass
+
+            # Action 1: LONG (Entry Agent Only)
             elif action == 1:
                 if current_position is None:
-                    # 신규 진입
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = current_idx
                     trade_count += 1
-                elif current_position == 'SHORT':
-                    # [Switching] SHORT 청산 -> LONG 진입
-                    # 1. 청산 처리
-                    realized_pnl = (entry_price - curr_price) / entry_price
-                    trade_done = True # 종료 보상 트리거
-                    trade_count += 1
-                    
-                    # 2. 신규 진입 (즉시)
-                    current_position = 'LONG'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1 # 거래 횟수 2회 증가
-            
-            # Action 2: SHORT
+
+            # Action 2: SHORT (Entry Agent Only)
             elif action == 2:
                 if current_position is None:
-                    # 신규 진입
-                    current_position = 'SHORT'
-                    entry_price = curr_price
-                    entry_index = current_idx
-                    trade_count += 1
-                elif current_position == 'LONG':
-                    # [Switching] LONG 청산 -> SHORT 진입
-                    # 1. 청산 처리
-                    realized_pnl = (curr_price - entry_price) / entry_price
-                    trade_done = True
-                    trade_count += 1
-                    
-                    # 2. 신규 진입 (즉시)
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = current_idx
                     trade_count += 1
 
-            # Action 3: EXIT
+            # Action 3: EXIT (Exit Agent Only) — 청산 직전에 보유 시간 저장
             elif action == 3:
                 if current_position is not None:
                     realized_pnl = unrealized_pnl
                     trade_done = True
+                    holding_time_norm = (current_idx - entry_index) / max_steps
                     current_position = None
                     entry_price = 0.0
                     entry_index = 0
                     trade_count += 1
 
             reward = self.env.calculate_reward(
-                step_pnl=step_pnl, 
-                realized_pnl=realized_pnl, 
-                trade_done=trade_done, 
-                action=action,              
+                step_pnl=step_pnl,
+                realized_pnl=realized_pnl,
+                trade_done=trade_done,
+                holding_time=holding_time_norm,
+                action=action,
                 prev_position=prev_pos_str,
                 current_position=current_position
             )
@@ -343,20 +255,42 @@ class PPOTrainer:
             next_state = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
             
             done = False if step < max_steps - 1 else True
-            if next_state is None: done = True; next_state = state
+            if next_state is None:
+                done = True
+                next_state = state
             
-            self.agent.put_data((state, action, reward, next_state, prob, done))
+            self.agent.put_data((state, action, reward, next_state, prob, done, val))
             episode_reward += reward
             pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count})
             
-            if done: break
+            if done:
+                break
         
+        # [추가] 강제 청산 로직 (Episode End Force Close)
+        if current_position is not None:
+            if current_position == 'LONG':
+                realized_pnl = (curr_price - entry_price) / entry_price
+            elif current_position == 'SHORT':
+                realized_pnl = (entry_price - curr_price) / entry_price
+            # 강제 청산 시 보유 시간 = (현재 인덱스 - 진입 인덱스) / max_steps
+            force_hold_norm = (current_idx - entry_index) / max_steps if current_idx >= entry_index else 0.0
+            final_reward = self.env.calculate_reward(
+                step_pnl=0.0, realized_pnl=realized_pnl, trade_done=True,
+                holding_time=force_hold_norm, action=3,
+                prev_position=current_position, current_position=None
+            )
+            # 마지막 가상 트랜지션 추가 (학습 데이터로 활용)
+            self.agent.put_data((state, 3, final_reward, state, 1.0, True, 0.0))
+            episode_reward += final_reward
+            trade_count += 1
+            
         pbar.close()
         loss = self.agent.train_net(episode=episode_num)
         return episode_reward, trade_count
 
     def live_plot(self):
-        if not self.plotting_enabled: return
+        if not self.plotting_enabled:
+            return
         try:
             x = range(len(self.episode_rewards))
             self.line1.set_data(x, self.episode_rewards)
@@ -366,10 +300,11 @@ class PPOTrainer:
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
             plt.pause(0.01)
-        except: pass
+        except:
+            pass
 
     def train(self, num_episodes=1000):
-        logger.info("🚀 PPO 학습 시작 (4-Action: HOLD, LONG, SHORT, EXIT + Action Masking + Switching)")
+        logger.info("🚀 Hierarchical PPO 학습 시작 (Entry/Exit Agents)")
         best_reward = -float('inf')
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
         best_model = f"{base_path}_best.pth"
@@ -382,7 +317,8 @@ class PPOTrainer:
         for ep in range(1, num_episodes + 1):
             try:
                 res = self.train_episode(ep)
-                if res is None: continue
+                if res is None:
+                    continue
                 r, c = res
                 self.episode_rewards.append(r)
                 avg_r = np.mean(self.episode_rewards[-10:])
@@ -400,10 +336,15 @@ class PPOTrainer:
                 if ep % 10 == 0:
                     self.agent.save_model(last_model)
                     self.env.preprocessor.save(last_scaler)
-            except KeyboardInterrupt: break
-            except Exception as e: logger.error(f"Ep {ep} Error: {e}"); continue
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.error(f"Ep {ep} Error: {e}")
+                continue
         
-        if self.plotting_enabled: plt.ioff(); plt.show()
+        if self.plotting_enabled:
+            plt.ioff()
+            plt.show()
 
 if __name__ == "__main__":
     trainer = PPOTrainer()

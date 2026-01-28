@@ -12,7 +12,7 @@ from collections import defaultdict
 # 상위 폴더를 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import config
+from model import config
 from core import DataCollector, BinanceClient
 from strategies import (
     BTCEthCorrelationStrategy,

@@ -6,7 +6,7 @@ import time
 import sys
 import os
 from datetime import datetime, timedelta
-import config
+from model import config
 from core import DataCollector, RiskManager, BinanceClient
 from core.indicators import Indicators
 from strategies import (
