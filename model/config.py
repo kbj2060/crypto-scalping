@@ -63,7 +63,7 @@ STOP_LOSS_THRESHOLD = -0.05  # 강제 손절 임계값 (-5%) - -2%에서 완화�
 # PPO 알고리즘 하이퍼파라미터 (Action 3 최적화)
 PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
-PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
+PPO_EPS_CLIP = 0.3  # PPO 클리핑 완화 (정책 고착 시 더 큰 업데이트 허용)
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
 PPO_ENTROPY_COEF = 0.01  # 엔트로피 계수 (초기값) - 적당한 호기심으로 새로운 시도 장려
 PPO_ENTROPY_DECAY = 0.9999  # 엔트로피 감소율 (에피소드마다) - 천천히 식도록 (0.999 -> 0.9995)
