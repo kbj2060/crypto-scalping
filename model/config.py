@@ -60,14 +60,14 @@ TIME_COST = 0.0001  # 시간 비용
 STOP_LOSS_THRESHOLD = -0.02    # -5%는 너무 널널함, -2%로 타이트하게
 
 # PPO 알고리즘 하이퍼파라미터
-PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
+PPO_GAMMA = 0.95  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
 PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.01        # 0.005 -> 0.01 (초반 탐험 약간 강화)
+PPO_ENTROPY_COEF = 0.003        # 0.005 -> 0.01 (초반 탐험 약간 강화)
 PPO_ENTROPY_DECAY = 0.9999
 PPO_ENTROPY_MIN = 0.005
-PPO_LEARNING_RATE = 0.0001     # 현재 값 유지 (적절함)
+PPO_LEARNING_RATE = 1e-4     # 현재 값 유지 (적절함)
 
 # [추가] 고급 PPO 설정
 PPO_USE_VALUE_CLIP = True     # Value Function Clipping 사용 여부
@@ -75,7 +75,7 @@ PPO_VALUE_CLIP_EPS = 0.2      # Value Clipping 범위
 PPO_KL_TARGET = 0.02          # KL Divergence 조기 종료 임계값 (0.015 ~ 0.03)
 
 # 네트워크 아키텍처 파라미터 (안전한 파라미터로 최적화)
-NETWORK_HIDDEN_DIM = 128  # 256은 너무 큽니다. 128로 줄여서 학습 속도 향상
+NETWORK_HIDDEN_DIM = 64  # 256은 너무 큽니다. 128로 줄여서 학습 속도 향상
 NETWORK_NUM_LAYERS = 1  # 2층은 초기 학습 어렵습니다. 1층으로 시작
 NETWORK_DROPOUT = 0.1  # Dropout 비율
 NETWORK_ATTENTION_HEADS = 4  # Multi-Head Attention 헤드 개수

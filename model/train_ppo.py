@@ -8,6 +8,7 @@ PPO 학습 스크립트 (Hierarchical RL Optimized + TensorBoard)
 import logging
 import os
 import sys
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import torch
@@ -86,11 +87,13 @@ class PPOTrainer:
         self.episode_rewards = []
         self.avg_rewards = []
 
-        # [추가] TensorBoard Writer 초기화
-        tb_log_dir = os.path.join('logs', 'tensorboard')
+        # [추가] TensorBoard Writer 초기화 (실행마다 별도 run으로 표시되도록 타임스탬프 폴더 사용)
+        tb_base = os.path.join('logs', 'tensorboard')
+        run_name = datetime.now().strftime('%Y%m%d_%H%M%S')
+        tb_log_dir = os.path.join(tb_base, run_name)
         os.makedirs(tb_log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir=tb_log_dir)
-        logger.info(f"TensorBoard Logging Started: {tb_log_dir}")
+        logger.info(f"TensorBoard Logging Started: {tb_log_dir} (run: {run_name})")
 
     def _load_features(self):
         path = 'data/training_features.csv'
