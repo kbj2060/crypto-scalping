@@ -32,7 +32,9 @@ STRATEGIES = {
     'vwap_deviation': True,
     'range_top_bottom': True,
     'stoch_rsi_mean_reversion': True,
-    'cmf_divergence': True
+    'cmf_divergence': True,
+    'cci_reversal': True,
+    'williams_r': True,
 }
 
 # 시간프레임 설정
@@ -50,22 +52,22 @@ AI_MODEL_PATH = 'data/ppo_model.pth'  # AI 모델 저장 경로 (data 폴더에 
 LOOKBACK = 60  # 시계열 피처를 위한 봉 개수
 MIN_HOLDING_TIME = 5  # 최소 보유 캔들 수 (Action Masking용)
 
-# 보상 함수 파라미터 (코드에 직접 반영되었지만 참조용으로 수정)
-REWARD_MULTIPLIER = 120.0  # 기존 150/300 -> 120 (안정성)
-LOSS_PENALTY_MULTIPLIER = 120.0  # 비대칭 제거 (Symmetric)
+# 보상 함수 파라미터 (수정됨)
+REWARD_MULTIPLIER = 50.0       # 기존 120.0 -> 50.0 (변동폭 축소로 안정화)
+LOSS_PENALTY_MULTIPLIER = 50.0 # 기존 120.0 -> 50.0
 TRANSACTION_COST = 0.0005  # 거래 비용 (0.05%, 바이낸스 평균 수준)
 TIME_COST = 0.0001  # 시간 비용
-STOP_LOSS_THRESHOLD = -0.05  # 강제 손절 임계값 (-5%) - -2%에서 완화하여 노이즈에 털리지 않게
+STOP_LOSS_THRESHOLD = -0.02    # -5%는 너무 널널함, -2%로 타이트하게
 
 # PPO 알고리즘 하이퍼파라미터
 PPO_GAMMA = 0.99  # 할인율 (Discount Factor)
 PPO_LAMBDA = 0.95  # GAE 람다 파라미터
 PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
 PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.005      # 확신이 있을 때만 움직임 (0.02 -> 0.005)
+PPO_ENTROPY_COEF = 0.01        # 0.005 -> 0.01 (초반 탐험 약간 강화)
 PPO_ENTROPY_DECAY = 0.9999
 PPO_ENTROPY_MIN = 0.005
-PPO_LEARNING_RATE = 0.0001    # 표준 학습률 복귀
+PPO_LEARNING_RATE = 0.0001     # 현재 값 유지 (적절함)
 
 # [추가] 고급 PPO 설정
 PPO_USE_VALUE_CLIP = True     # Value Function Clipping 사용 여부

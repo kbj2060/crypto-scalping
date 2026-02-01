@@ -1,8 +1,9 @@
 """
-PPO 학습 스크립트 (Hierarchical RL Optimized)
+PPO 학습 스크립트 (Hierarchical RL Optimized + TensorBoard)
 - High-Level(Entry) & Low-Level(Exit) 구조에 맞춘 학습 로직
 - 불필요한 Action Masking 및 Switching 로직 제거 (Agent가 알아서 판단)
 - 에피소드 종료 시 강제 청산(Force Close) 추가하여 리워드 정합성 확보
+- [추가] TensorBoard 실시간 학습 로그 기록
 """
 import logging
 import os
@@ -10,8 +11,10 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
-import matplotlib.pyplot as plt
 from tqdm import tqdm
+
+# [추가] TensorBoard 라이브러리 임포트
+from torch.utils.tensorboard import SummaryWriter
 
 # config import
 try:
@@ -64,7 +67,7 @@ class PPOTrainer:
         state_dim = self.env.get_state_dim()
         # Global Action Dim = 4 (0:Wait/Hold, 1:Long, 2:Short, 3:Exit)
         action_dim = 4  
-        # [수정] info_dim = 15 (전략 12개 + 포지션 3개)
+        # info_dim = 15 (전략 12개 + 포지션 3개)
         info_dim = 15
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
@@ -73,11 +76,8 @@ class PPOTrainer:
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         
         base_path = config.AI_MODEL_PATH.replace('.pth', '')
-        # 계층형 모델은 _entry.pth와 _exit.pth로 나뉘어 저장되지만, 
-        # load_model 내부에서 알아서 처리함
         last_model_path = f"{base_path}_last.pth" 
         
-        # 파일 존재 여부는 load_model 내부에서 체크하므로 호출만 함
         try:
             self.agent.load_model(last_model_path)
         except Exception as e:
@@ -85,20 +85,12 @@ class PPOTrainer:
         
         self.episode_rewards = []
         self.avg_rewards = []
-        
-        try:
-            plt.ion()
-            self.fig, self.ax = plt.subplots(figsize=(10, 5))
-            self.ax.set_title('Hierarchical PPO Training')
-            self.ax.set_xlabel('Episode')
-            self.ax.set_ylabel('Reward')
-            self.ax.grid(True, alpha=0.3)
-            self.line1, = self.ax.plot([], [], label='Reward', alpha=0.3, color='gray')
-            self.line2, = self.ax.plot([], [], label='Avg (10)', color='red', linewidth=2)
-            self.ax.legend()
-            self.plotting_enabled = True
-        except:
-            self.plotting_enabled = False
+
+        # [추가] TensorBoard Writer 초기화
+        tb_log_dir = os.path.join('logs', 'tensorboard')
+        os.makedirs(tb_log_dir, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=tb_log_dir)
+        logger.info(f"TensorBoard Logging Started: {tb_log_dir}")
 
     def _load_features(self):
         path = 'data/training_features.csv'
@@ -165,6 +157,7 @@ class PPOTrainer:
         entry_price = 0.0
         entry_index = 0
         episode_reward = 0.0
+        episode_pnl = 0.0  # 에피소드 실현 손익 합계 (로그용)
         trade_count = 0
         prev_unrealized_pnl = 0.0
         
@@ -196,13 +189,13 @@ class PPOTrainer:
 
             prev_pos_str = current_position 
             
-            # [수정] Masking 제거: Agent가 포지션 유무에 따라 알아서 판단함
+            # Masking 제거: Agent가 포지션 유무에 따라 알아서 판단함
             action, prob, val = self.agent.select_action(state, action_mask=None)
             
             reward = 0.0
             trade_done = False
             realized_pnl = 0.0
-            holding_time_norm = 0.0  # 청산 시에만 의미 있음
+            holding_time_norm = 0.0
 
             # Action 0: WAIT / HOLD
             if action == 0:
@@ -224,11 +217,12 @@ class PPOTrainer:
                     entry_index = current_idx
                     trade_count += 1
 
-            # Action 3: EXIT (Exit Agent Only) — 청산 직전에 보유 시간 저장
+            # Action 3: EXIT (Exit Agent Only)
             elif action == 3:
                 if current_position is not None:
                     realized_pnl = unrealized_pnl
                     trade_done = True
+                    episode_pnl += realized_pnl
                     holding_time_norm = (current_idx - entry_index) / max_steps
                     current_position = None
                     entry_price = 0.0
@@ -266,42 +260,36 @@ class PPOTrainer:
             if done:
                 break
         
-        # [추가] 강제 청산 로직 (Episode End Force Close)
+        # 강제 청산 로직 (Episode End Force Close)
         if current_position is not None:
             if current_position == 'LONG':
                 realized_pnl = (curr_price - entry_price) / entry_price
             elif current_position == 'SHORT':
                 realized_pnl = (entry_price - curr_price) / entry_price
-            # 강제 청산 시 보유 시간 = (현재 인덱스 - 진입 인덱스) / max_steps
+            episode_pnl += realized_pnl
             force_hold_norm = (current_idx - entry_index) / max_steps if current_idx >= entry_index else 0.0
             final_reward = self.env.calculate_reward(
                 step_pnl=0.0, realized_pnl=realized_pnl, trade_done=True,
                 holding_time=force_hold_norm, action=3,
                 prev_position=current_position, current_position=None
             )
-            # 마지막 가상 트랜지션 추가 (학습 데이터로 활용)
             self.agent.put_data((state, 3, final_reward, state, 1.0, True, 0.0))
             episode_reward += final_reward
             trade_count += 1
             
         pbar.close()
+        
+        # PPO 학습 (Loss 반환)
         loss = self.agent.train_net(episode=episode_num)
-        return episode_reward, trade_count
 
-    def live_plot(self):
-        if not self.plotting_enabled:
-            return
-        try:
-            x = range(len(self.episode_rewards))
-            self.line1.set_data(x, self.episode_rewards)
-            self.line2.set_data(x, self.avg_rewards)
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
-            plt.pause(0.01)
-        except:
-            pass
+        # [추가] TensorBoard에 로그 기록
+        if self.writer:
+            self.writer.add_scalar('Reward/Total', episode_reward, episode_num)
+            self.writer.add_scalar('Metrics/PnL', episode_pnl, episode_num)
+            self.writer.add_scalar('Metrics/Trades', trade_count, episode_num)
+            self.writer.add_scalar('Loss/Total', loss, episode_num)
+        
+        return episode_reward, trade_count, episode_pnl
 
     def train(self, num_episodes=1000):
         logger.info("🚀 Hierarchical PPO 학습 시작 (Entry/Exit Agents)")
@@ -319,13 +307,12 @@ class PPOTrainer:
                 res = self.train_episode(ep)
                 if res is None:
                     continue
-                r, c = res
+                r, c, pnl = res
                 self.episode_rewards.append(r)
                 avg_r = np.mean(self.episode_rewards[-10:])
                 self.avg_rewards.append(avg_r)
                 
-                logger.info(f"✅ Ep {ep}: Reward {r:.4f} | Avg {avg_r:.4f} | Trades: {c}")
-                self.live_plot()
+                logger.info(f"✅ Ep {ep}: Reward {r:.4f} | Avg {avg_r:.4f} | Trades: {c} | PnL: {pnl:.4f}")
                 
                 if r > best_reward:
                     best_reward = r
@@ -341,10 +328,10 @@ class PPOTrainer:
             except Exception as e:
                 logger.error(f"Ep {ep} Error: {e}")
                 continue
-        
-        if self.plotting_enabled:
-            plt.ioff()
-            plt.show()
+
+        # [추가] TensorBoard Writer 종료
+        if self.writer:
+            self.writer.close()
 
 if __name__ == "__main__":
     trainer = PPOTrainer()

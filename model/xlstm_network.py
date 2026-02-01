@@ -1,23 +1,21 @@
-"""
-XLSTMNetwork (Official Paper Implementation - Clean Ver.)
-- Core: Stabilized sLSTM (Log-Space)
-- Safety Nets Removed: No Logit Clamping, No Input Check (Handled by Math)
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+# ==============================================================================
+# 1. Stabilized sLSTM Cell (Core Engine)
+# ==============================================================================
 class StabilizedSLSTMCell(nn.Module):
     """
-    [Official] Stabilized sLSTM Cell
-    Internal stabilization using m_t state prevents overflow.
+    xLSTM의 핵심 셀 (Scalar LSTM with Exponential Gating)
     """
     def __init__(self, input_size, hidden_size):
         super(StabilizedSLSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         
+        # 4배 크기 (z, i, f, o 게이트)
         self.weight_ih = nn.Linear(input_size, 4 * hidden_size)
         self.weight_hh = nn.Linear(hidden_size, 4 * hidden_size)
         
@@ -27,156 +25,159 @@ class StabilizedSLSTMCell(nn.Module):
         gates = self.weight_ih(x) + self.weight_hh(h_prev)
         z_pre, i_pre, f_pre, o_pre = gates.chunk(4, 1)
         
-        # --- xLSTM Official Stabilization Logic ---
+        # Activations
         z_t = torch.tanh(z_pre)
-        i_log = i_pre
-        f_log = f_pre
         o_t = torch.sigmoid(o_pre)
         
-        # Stabilizer Update: m_t = max(f_log + m_{t-1}, i_log)
-        m_t = torch.max(f_log + m_prev, i_log)
-        
-        # Stabilized Gates (No overflow possible)
-        i_prime = torch.exp(i_log - m_t)
-        f_prime = torch.exp(f_log + m_prev - m_t)
+        # Log-Space Stabilization (Exponential Explosion 방지)
+        m_t = torch.max(f_pre + m_prev, i_pre)
+        i_prime = torch.exp(i_pre - m_t)
+        f_prime = torch.exp(f_pre + m_prev - m_t)
         
         # State Updates
         c_t = f_prime * c_prev + i_prime * z_t
         n_t = f_prime * n_prev + i_prime
         
-        # Normalization
+        # Output Calculation
         h_t = o_t * (c_t / (n_t + 1e-6))
         
         return h_t, (h_t, c_t, n_t, m_t)
 
-class XLSTMNetwork(nn.Module):
-    def __init__(self, input_dim, action_dim, info_dim=13, hidden_dim=128, num_layers=2, dropout=0.1):
-        super(XLSTMNetwork, self).__init__()
+# ==============================================================================
+# 2. xLSTM Backbone (Feature Extractor)
+# ==============================================================================
+class SLSTMBackbone(nn.Module):
+    """
+    시계열 데이터를 받아 압축된 특징 벡터(Last Hidden)를 반환하는 모듈
+    Actor와 Critic이 각각 이 클래스의 인스턴스를 하나씩 가짐 (파라미터 분리)
+    """
+    def __init__(self, input_dim, hidden_dim, num_layers=1, dropout=0.1):
+        super(SLSTMBackbone, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
-        # [1] Input Projection
+        # Input Projection
         self.input_proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.Dropout(dropout)
-        )
-        
-        # [2] sLSTM Blocks
-        self.lstm_layers = nn.ModuleList()
-        self.lstm_norms = nn.ModuleList()
-        
-        for _ in range(num_layers):
-            self.lstm_layers.append(StabilizedSLSTMCell(hidden_dim, hidden_dim))
-            self.lstm_norms.append(nn.LayerNorm(hidden_dim))
-            
-        # [3] Attention
-        self.attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=4, batch_first=True)
-        self.attn_norm = nn.LayerNorm(hidden_dim)
-        self.pooling_weight = nn.Linear(hidden_dim, 1)
-        
-        # [4] Info Encoder
-        self.info_encoder = nn.Sequential(
-            nn.Linear(info_dim, 64),
-            nn.LayerNorm(64),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(64, 64),
-            nn.GELU()
-        )
-        
-        # [5] Shared Trunk
-        fusion_dim = hidden_dim + 64 
-        self.trunk = nn.Sequential(
-            nn.Linear(fusion_dim, 256),
-            nn.LayerNorm(256),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
+            nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout)
         )
         
-        # [6] Heads
-        self.actor_head = nn.Sequential(
-            nn.Linear(128, 64),
-            nn.GELU(),
-            nn.Linear(64, action_dim)
-        )
-        
-        self.critic_head = nn.Sequential(
-            nn.Linear(128, 64),
-            nn.LayerNorm(64),
-            nn.GELU(),
-            nn.Linear(64, 1)
-        )
-        
-        self._init_weights()
+        # Stacked sLSTM Cells
+        self.lstm_layers = nn.ModuleList([
+            StabilizedSLSTMCell(hidden_dim, hidden_dim) for _ in range(num_layers)
+        ])
+        self.lstm_norms = nn.ModuleList([
+            nn.LayerNorm(hidden_dim) for _ in range(num_layers)
+        ])
 
-    def _init_weights(self):
-        for name, param in self.named_parameters():
-            if 'weight' in name:
-                if len(param.shape) >= 2:
-                    nn.init.orthogonal_(param, gain=np.sqrt(2))
-                else:
-                    nn.init.uniform_(param, -0.1, 0.1)
-            elif 'bias' in name:
-                nn.init.constant_(param, 0.0)
-
-    def forward(self, x, info, states=None, temperature=1.0):
-        # [Removed] NaN Check & Logit Clamping (No longer needed)
-        
+    def forward(self, x, states=None):
         batch_size, seq_len, _ = x.size()
         x = self.input_proj(x)
         
+        # 초기 상태 생성 (필요 시)
         if states is None:
             states = []
             for _ in range(self.num_layers):
-                # Init all states to 0 (including m)
-                h = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-                c = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-                n = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-                m = torch.zeros(batch_size, self.hidden_dim).to(x.device)
-                states.append((h, c, n, m))
+                zeros = torch.zeros(batch_size, self.hidden_dim).to(x.device)
+                states.append((zeros, zeros, zeros, zeros)) # h, c, n, m
         
         next_states = []
         current_input = x
         
+        # LSTM Layer Loop
         for i, layer in enumerate(self.lstm_layers):
             h, c, n, m = states[i]
             ln = self.lstm_norms[i]
             output_seq = []
             
+            # Time Step Loop
             for t in range(seq_len):
                 inp = current_input[:, t, :]
-                inp_norm = ln(inp)
-                h_next, (h_next, c_next, n_next, m_next) = layer(inp_norm, (h, c, n, m))
-                out = inp + h_next
+                h_next, (h_next, c_next, n_next, m_next) = layer(inp, (h, c, n, m))
+                
+                # Residual + Norm
+                out = ln(inp + h_next)
                 output_seq.append(out)
+                
                 h, c, n, m = h_next, c_next, n_next, m_next
             
             current_input = torch.stack(output_seq, dim=1)
             next_states.append((h, c, n, m))
             
-        lstm_output = current_input
+        # Attention 대신 Last Hidden State 사용 (단순화 & 안정화)
+        last_hidden = current_input[:, -1, :]
         
-        attn_out, _ = self.attention(lstm_output, lstm_output, lstm_output)
-        attn_out = self.attn_norm(attn_out + lstm_output) 
+        return last_hidden, next_states
+
+# ==============================================================================
+# 3. Decoupled Network (Main Wrapper)
+# ==============================================================================
+class XLSTMNetwork(nn.Module):
+    def __init__(self, input_dim, action_dim, info_dim=15, hidden_dim=128, num_layers=1, dropout=0.1):
+        super(XLSTMNetwork, self).__init__()
         
-        pool_scores = self.pooling_weight(attn_out) 
-        pool_weights = F.softmax(pool_scores, dim=1)
-        context_feature = torch.sum(pool_weights * attn_out, dim=1)
+        # -----------------------------------------------------------
+        # [Actor Trunk]: 매매 행동 결정 (Policy)
+        # -----------------------------------------------------------
+        self.actor_backbone = SLSTMBackbone(input_dim, hidden_dim, num_layers, dropout)
+        self.actor_info_enc = nn.Linear(info_dim, 64)
         
+        self.actor_head = nn.Sequential(
+            nn.Linear(hidden_dim + 64, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, action_dim)
+        )
+        
+        # -----------------------------------------------------------
+        # [Critic Trunk]: 가치 평가 (Value) - Actor와 완전히 분리됨!
+        # -----------------------------------------------------------
+        self.critic_backbone = SLSTMBackbone(input_dim, hidden_dim, num_layers, dropout)
+        self.critic_info_enc = nn.Linear(info_dim, 64)
+        
+        self.critic_head = nn.Sequential(
+            nn.Linear(hidden_dim + 64, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1)
+        )
+        
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x, info, states=None, temperature=1.0):
+        # info 차원 정리
         if info.dim() == 3: info = info.squeeze(1)
-        info_encoded = self.info_encoder(info) 
         
-        combined = torch.cat([context_feature, info_encoded], dim=1)
-        trunk_out = self.trunk(combined) 
+        # -----------------------------------------------------------
+        # 1. Actor Forward Path
+        # -----------------------------------------------------------
+        # Actor용 상태가 있으면 분리해서 사용 (구조상 states는 (actor_states, critic_states) 튜플로 관리 권장)
+        # 여기서는 편의상 states=None으로 stateless 학습을 가정하거나, 외부에서 관리
+        # PPO는 보통 Rollout 시 stateless로 사용하거나 매 step reset하므로 None 처리
         
-        logits = self.actor_head(trunk_out)
+        actor_feat, _ = self.actor_backbone(x, states=None)
+        actor_info = F.gelu(self.actor_info_enc(info))
+        actor_input = torch.cat([actor_feat, actor_info], dim=1)
         
-        # Clean Softmax (Temperature only)
-        action_probs = F.softmax(logits / temperature, dim=-1)
-        state_value = self.critic_head(trunk_out)
+        logits = self.actor_head(actor_input)
+        logits = logits / temperature
+        probs = F.softmax(logits, dim=-1)
         
-        return action_probs, state_value, next_states
+        # -----------------------------------------------------------
+        # 2. Critic Forward Path
+        # -----------------------------------------------------------
+        critic_feat, _ = self.critic_backbone(x, states=None)
+        critic_info = F.gelu(self.critic_info_enc(info))
+        critic_input = torch.cat([critic_feat, critic_info], dim=1)
+        
+        value = self.critic_head(critic_input)
+        
+        return probs, value, None
