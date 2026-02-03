@@ -281,7 +281,7 @@ class TradingBot:
                 return
             
             # 2. AI 행동 결정 (0: Hold, 1: Long, 2: Short)
-            action, log_prob = self.agent.select_action(state)
+            action, log_prob, *_ = self.agent.select_action(state)
             action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
             action_name = action_names[action]
             

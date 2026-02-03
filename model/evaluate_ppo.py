@@ -82,22 +82,12 @@ class PPOEvaluator:
             logger.info(f"[INFO] Mode: FULL DATA ({self.start_idx} ~ {self.end_idx})")
 
         self.env = TradingEnvironment(self.data_collector, self.strategies)
-        
-        # Scaler 로드
-        base_path = config.AI_MODEL_PATH.replace('.pth', '')
-        scaler_path = f"{base_path}_{model_type}_scaler.pkl"
-        
-        if os.path.exists(scaler_path):
-            self.env.preprocessor.load(scaler_path)
-            self.env.scaler_fitted = True
-            logger.info(f"[OK] Scaler Loaded: {scaler_path}")
-        else:
-            logger.error(f"[ERROR] Scaler not found: {scaler_path}")
-            sys.exit(1)
+        # Rolling Normalization (train_ppo와 동일, scaler 파일 불필요)
+        self.env.precompute_data()
 
-        # 에이전트 설정
+        # 에이전트 설정 (3-Action: Hold, Buy, Sell)
         state_dim = self.env.get_state_dim()
-        action_dim = 4
+        action_dim = config.TRAIN_ACTION_DIM
         # [수정] info_dim = 15 설정
         real_info_dim = 15
         
@@ -106,23 +96,28 @@ class PPOEvaluator:
         # 모델 초기화
         self.agent = PPOAgent(state_dim, action_dim, info_dim=real_info_dim, device=device)
 
-        # [수정 2] 모델 파일 체크 로직 개선 (계층형 모델 지원)
-        model_base_path = f"{base_path}_{model_type}.pth"
-        entry_model_path = f"{base_path}_{model_type}_entry.pth"
-        
-        if os.path.exists(entry_model_path):
-            self.agent.load_model(model_base_path)
-            logger.info(f"[OK] Hierarchical Model Loaded: {entry_model_path}")
-        elif os.path.exists(model_base_path):
-            try:
-                self.agent.load_model(model_base_path)
-                logger.info(f"[OK] Standard Model Loaded: {model_base_path}")
-            except Exception:
-                logger.error("[ERROR] Failed to load model structure.")
-                sys.exit(1)
+        # 단일 에이전트: 한 개 파일만 로드
+        base_path = config.AI_MODEL_PATH.replace('.pth', '')
+        model_path = f"{base_path}_{model_type}.pth"
+        if os.path.exists(model_path):
+            self.agent.load_model(model_path)
+            logger.info(f"[OK] Model Loaded: {model_path}")
         else:
-            logger.error(f"[ERROR] Model file not found. Checked: {entry_model_path}")
+            logger.error(f"[ERROR] Model file not found: {model_path}")
             sys.exit(1)
+
+    def get_action_mask(self, current_position, market_volatility):
+        """3-Action 마스킹: [Hold, Buy, Sell] (train_ppo와 동일 로직)."""
+        mask = np.ones(3, dtype=np.float32)
+        if current_position == 'LONG':
+            mask[1] = 0.0
+        elif current_position == 'SHORT':
+            mask[2] = 0.0
+        else:
+            if market_volatility < 0.0001:
+                mask[1] = 0.0
+                mask[2] = 0.0
+        return mask
 
     def _load_data(self):
         path = 'data/training_features.csv'
@@ -193,66 +188,72 @@ class PPOEvaluator:
         entry_index = 0
         
         trades = []
-        balance_history = [10000.0]
+        initial_capital = getattr(config, 'EVAL_INITIAL_CAPITAL', 10000.0)
+        balance_history = [float(initial_capital)]
         fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
-        
+        max_steps = max(1, self.end_idx - self.start_idx)
+
         self.agent.reset_episode_states()
-        
+
         pbar = tqdm(range(self.start_idx, self.end_idx - 1), desc="Backtest")
-        
+
         for idx in pbar:
             self.data_collector.current_index = idx
             curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
-            
+
             unrealized_pnl = 0.0
             if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
             elif current_position == 'SHORT':
                 unrealized_pnl = (entry_price - curr_price) / entry_price
-            
+
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (idx - entry_index) if current_position else 0
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time / 1000]
-            
+            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
+
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
-            if state is None: continue
-            
+            if state is None:
+                continue
+
+            market_vol = 0.0
+            if 'atr_ratio' in self.data_collector.eth_data.columns:
+                market_vol = float(self.data_collector.eth_data.iloc[idx]['atr_ratio'])
+            action_mask = self.get_action_mask(current_position, market_vol)
+
             with torch.no_grad():
-                action, _, _ = self.agent.select_action(state, action_mask=None)
+                action, _, _ = self.agent.select_action(state, action_mask=action_mask)
             
             realized_pnl = 0.0
             trade_occurred = False
             trade_type = ""
 
-            # Action 0: WAIT/HOLD
+            # 3-Action: 0=Hold, 1=Buy (Flat->Long / Short->Exit), 2=Sell (Flat->Short / Long->Exit)
             if action == 0:
                 pass
-            
-            # Action 1: LONG (Entry)
-            elif action == 1:
+            elif action == 1:  # Buy
                 if current_position is None:
                     current_position = 'LONG'
                     entry_price = curr_price
                     entry_index = idx
-
-            # Action 2: SHORT (Entry)
-            elif action == 2:
+                elif current_position == 'SHORT':
+                    realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
+                    trade_occurred = True
+                    trade_type = "EXIT"
+                    current_position = None
+                    entry_price = 0.0
+                    entry_index = 0
+            elif action == 2:  # Sell
                 if current_position is None:
                     current_position = 'SHORT'
                     entry_price = curr_price
                     entry_index = idx
-
-            # Action 3: EXIT (Exit)
-            elif action == 3:
-                if current_position is not None:
-                    if current_position == 'LONG':
-                        realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
-                    elif current_position == 'SHORT':
-                        realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
-                    
+                elif current_position == 'LONG':
+                    realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
                     trade_occurred = True
                     trade_type = "EXIT"
                     current_position = None
+                    entry_price = 0.0
+                    entry_index = 0
 
             # 거래 기록
             if trade_occurred:
@@ -269,8 +270,9 @@ class PPOEvaluator:
             return
 
         df = pd.DataFrame(trades)
+        initial_capital = balance_history[0]
         final_balance = balance_history[-1]
-        roi = (final_balance - 10000.0) / 10000.0 * 100
+        roi = (final_balance - initial_capital) / initial_capital * 100
         
         num_trades = len(df)
         win_trades = df[df['net_pnl'] > 0]
@@ -278,9 +280,10 @@ class PPOEvaluator:
         win_rate = (len(win_trades) / num_trades * 100) if num_trades > 0 else 0.0
         
         print("\n" + "="*60)
-        print(f" BACKTEST REPORT")
+        print(" BACKTEST REPORT")
         print("="*60)
-        print(f" Final Balance:   ${final_balance:,.2f}")
+        print(f" Initial:        ${initial_capital:,.2f}")
+        print(f" Final Balance:  ${final_balance:,.2f}")
         print(f" Net ROI:         {roi:+.2f}%")
         print(f" Total Trades:    {num_trades}")
         print(f" Win Rate:        {win_rate:.2f}% ({len(win_trades)}W / {len(loss_trades)}L)")

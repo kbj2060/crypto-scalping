@@ -1,122 +1,66 @@
 """
 데이터 전처리 모듈 (수정됨)
-원시 신호 보존 + 전역 Z-Score 정규화 + 저장/로드 기능 추가
+Global Z-Score -> Rolling (Instance) Normalization 변경
 """
 import numpy as np
 import logging
-import pickle  # [추가] 객체 저장용 모듈
+import pickle
 
 logger = logging.getLogger(__name__)
 
-
 class DataPreprocessor:
-    """개선된 데이터 전처리: 원시 신호 보존 + 전역 Z-Score 정규화"""
+    """
+    Rolling Normalization (Instance Normalization)
+    입력된 윈도우(Lookback) 내에서 즉석으로 정규화를 수행하여 
+    시계열의 비정상성(Non-stationarity)을 극복하고 로컬 패턴에 집중함.
+    """
     def __init__(self):
-        self.mean = None
-        self.std = None
-        # xLSTM은 정규분포 형태의 입력을 받을 때 기울기 소실/폭발이 가장 적음
-        logger.info("Z-Score 정규화 모드 활성화 (Wavelet 제거됨)")
+        self.epsilon = 1e-8
+        logger.info("Rolling (Instance) Normalization 모드 활성화")
 
     def fit(self, data):
-        """전체 학습 데이터셋의 통계량 계산 (한 번만 실행)
-        
-        Args:
-            data: (seq_len, feature_dim) 형태의 배열
-        """
-        data = np.array(data, dtype=np.float32)
-        if data.size == 0:
-            logger.warning("빈 데이터로 fit 시도")
-            return
-        
-        self.mean = np.mean(data, axis=0)
-        self.std = np.std(data, axis=0)
-        # 0으로 나누기 방지
-        self.std[self.std == 0] = 1.0
-        logger.info(f"스케일러 학습 완료: Mean shape {self.mean.shape}, Std shape {self.std.shape}")
+        """Rolling 방식에서는 전역 학습이 불필요하지만 호환성을 위해 남겨둠"""
+        pass
 
     def transform(self, data):
-        """학습된 통계량으로 변환 (맥락 보존)
-        
+        """
+        입력 데이터(윈도우) 자체의 통계량을 사용하여 정규화
         Args:
             data: (seq_len, feature_dim) 형태의 배열
         Returns:
-            정규화된 데이터 (Z-Score)
+            자체 정규화된 데이터
         """
         data = np.array(data, dtype=np.float32)
         if data.size == 0:
             return data
         
-        if self.mean is None or self.std is None:
-            # fit이 안 되었다면 현재 데이터로 임시 변환
-            logger.warning("스케일러가 fit되지 않았습니다. 현재 데이터로 임시 변환합니다.")
-            mean = np.mean(data, axis=0)
-            std = np.std(data, axis=0)
-            std[std == 0] = 1.0
-            return (data - mean) / std
+        # [핵심] 현재 윈도우의 평균과 표준편차 계산
+        mean = np.mean(data, axis=0)
+        std = np.std(data, axis=0)
         
-        return (data - self.mean) / self.std
+        # 표준편차가 0인 경우 1로 대체하여 나눗셈 오류 방지
+        std[std < self.epsilon] = 1.0
+        
+        # 정규화 (Z-Score)
+        normalized_data = (data - mean) / std
+        
+        return normalized_data
 
     def log_return(self, data):
-        """가격 데이터를 로그 수익률로 변환 (정상성 확보를 위해 추천)
-        
-        Args:
-            data: 1D 배열 (가격 시계열)
-        Returns:
-            로그 수익률 배열
-        """
         data = np.array(data, dtype=np.float32)
         if len(data) < 2:
             return np.zeros_like(data)
-        
-        # 로그 수익률: log(price_t / price_{t-1}) = log(price_t) - log(price_{t-1})
-        log_prices = np.log(data + 1e-8)  # 0 방지
+        log_prices = np.log(data + 1e-8)
         log_returns = np.diff(log_prices, prepend=log_prices[0])
         return log_returns
 
-    # [신규 추가] 스케일러 저장
     def save(self, filepath):
-        """학습된 통계량을 파일로 저장
-        
-        Args:
-            filepath: 저장할 파일 경로 (.pkl 확장자 권장)
-        """
-        if self.mean is None or self.std is None:
-            logger.warning("스케일러가 학습되지 않아 저장할 수 없습니다.")
-            return
-        
-        try:
-            with open(filepath, 'wb') as f:
-                pickle.dump({'mean': self.mean, 'std': self.std}, f)
-            logger.info(f"💾 스케일러 저장 완료: {filepath}")
-        except Exception as e:
-            logger.error(f"스케일러 저장 실패: {e}")
+        """Rolling 방식은 저장할 상태가 없으나 호환성 유지"""
+        pass
 
-    # [신규 추가] 스케일러 로드
     def load(self, filepath):
-        """파일에서 통계량 불러오기
-        
-        Args:
-            filepath: 로드할 파일 경로
-        Returns:
-            bool: 로드 성공 여부
-        """
-        try:
-            with open(filepath, 'rb') as f:
-                data = pickle.load(f)
-                self.mean = data['mean']
-                self.std = data['std']
-            logger.info(f"✅ 스케일러 로드 완료: {filepath}")
-            return True
-        except Exception as e:
-            logger.error(f"스케일러 로드 실패: {e}")
-            return False
+        """Rolling 방식은 로드할 상태가 없으나 호환성 유지"""
+        return True
     
-    # [호환성] save_scaler는 save의 별칭 (feature_names는 무시)
     def save_scaler(self, filepath, feature_names=None):
-        """스케일러 저장 (save의 별칭, feature_names는 호환성을 위해 무시)
-        
-        Args:
-            filepath: 저장할 파일 경로
-            feature_names: 피처 이름 리스트 (호환성을 위해 받지만 사용하지 않음)
-        """
-        self.save(filepath)
+        pass

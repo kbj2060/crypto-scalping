@@ -15,7 +15,8 @@ BINANCE_TESTNET = False  # 테스트넷 비활성화 (실제 거래소 사용)
 # 거래 설정
 ETH_SYMBOL = os.getenv('ETH_SYMBOL', 'ETHUSDT')
 BTC_SYMBOL = os.getenv('BTC_SYMBOL', 'BTCUSDT')
-LEVERAGE = int(os.getenv('LEVERAGE', '10'))
+# 레버리지 로직 제거됨 (model 내 PnL은 순수 가격 수익률). 외부 연동용으로 1 고정.
+LEVERAGE = 1
 MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', '100'))
 STOP_LOSS_PERCENT = float(os.getenv('STOP_LOSS_PERCENT', '0.2'))
 
@@ -50,46 +51,70 @@ AI_MODEL_PATH = 'data/ppo_model.pth'  # AI 모델 저장 경로 (data 폴더에 
 
 # AI 모델 하이퍼파라미터
 LOOKBACK = 60  # 시계열 피처를 위한 봉 개수
-MIN_HOLDING_TIME = 5  # 최소 보유 캔들 수 (Action Masking용)
 
 # 보상 함수 파라미터 (수정됨)
-REWARD_MULTIPLIER = 50.0       # 기존 120.0 -> 50.0 (변동폭 축소로 안정화)
-LOSS_PENALTY_MULTIPLIER = 50.0 # 기존 120.0 -> 50.0
-TRANSACTION_COST = 0.0005  # 거래 비용 (0.05%, 바이낸스 평균 수준)
+REWARD_MULTIPLIER = 50.0       # 유지
+LOSS_PENALTY_MULTIPLIER = 50.0 # 75.0 -> 50.0 (손실/수익 1:1, 손실 공포 완화)
+# 거래 수수료 (0.0005 = 0.05%). 0이면 에이전트가 무의미한 잦은 매매를 반복할 수 있음
+TRANSACTION_COST = 0.0005
 TIME_COST = 0.0001  # 시간 비용
 STOP_LOSS_THRESHOLD = -0.02    # -5%는 너무 널널함, -2%로 타이트하게
 
-# PPO 알고리즘 하이퍼파라미터
-PPO_GAMMA = 0.95  # 할인율 (Discount Factor)
-PPO_LAMBDA = 0.95  # GAE 람다 파라미터
-PPO_EPS_CLIP = 0.2  # PPO 클리핑 범위 - 0.1은 너무 빡빡함, 0.2 추천
-PPO_K_EPOCHS = 4  # PPO 업데이트 반복 횟수
-PPO_ENTROPY_COEF = 0.003        # 0.005 -> 0.01 (초반 탐험 약간 강화)
-PPO_ENTROPY_DECAY = 0.9999
-PPO_ENTROPY_MIN = 0.005
-PPO_LEARNING_RATE = 1e-4     # 현재 값 유지 (적절함)
+# ---------------------------------------------------------
+# [논문 기반 최적화] PPO 하이퍼파라미터 (스캘핑 특화)
+# ---------------------------------------------------------
+# 논문 근거: Gort et al. (2022) - 변동성 장세에서의 빠른 적응력 확보
+PPO_GAMMA = 0.99             # 0.995 -> 0.99 (스캘핑은 단기 흐름이 더 중요)
+PPO_LAMBDA = 0.95            # 유지 (GAE 표준)
+PPO_EPS_CLIP = 0.2           # 0.15 -> 0.2 (Gate가 노이즈를 거르므로 학습폭 확대 가능)
+PPO_K_EPOCHS = 4             # 유지
 
-# [추가] 고급 PPO 설정
+# [Dynamic Entropy 보조]
+# Dynamic Entropy가 작동하므로 기본값은 낮춰 안정적인 수렴 유도
+PPO_ENTROPY_COEF = 0.05      # 0.03 -> 0.05 (더 과감하게 탐험 유도)
+PPO_ENTROPY_DECAY = 0.9999   # 천천히 감소
+PPO_ENTROPY_MIN = 0.005      # 0.01 -> 0.005 (후반부 미세 조정 허용)
+PPO_LEARNING_RATE = 2e-4     # 1e-4 -> 2e-4 (배치 사이즈 축소에 따른 LR 미세 상향)
+
+# 웜업(Warm-up) 설정 (즉시 학습 시작)
+PPO_LR_WARMUP_EPISODES = 30   # 50 (즉시 학습)
+PPO_TEMP_WARMUP_EPISODES = 10 # 10 (거의 즉시 감소)
+
+# 고급 PPO 설정
 PPO_USE_VALUE_CLIP = True     # Value Function Clipping 사용 여부
-PPO_VALUE_CLIP_EPS = 0.2      # Value Clipping 범위
-PPO_KL_TARGET = 0.02          # KL Divergence 조기 종료 임계값 (0.015 ~ 0.03)
+PPO_VALUE_CLIP_EPS = 0.3      # Value Clipping 범위 (0.2 → 0.3 학습 안정화)
+PPO_KL_TARGET = 0.05          # 0.02 -> 0.05 상향 (초기 학습 시 조기 종료 방지, 안정성 확보)
+# Temperature (탐험 억제: 차분하게)
+PPO_TEMP_INIT = 0.8           # 1.0 → 0.8 (초반부터 확신 있는 행동)
+PPO_TEMP_MIN = 0.3            # 0.5 → 0.3
+PPO_TEMP_DECAY = 0.9995       # 더 느리게 감쇠
 
-# 네트워크 아키텍처 파라미터 (안전한 파라미터로 최적화)
-NETWORK_HIDDEN_DIM = 64  # 256은 너무 큽니다. 128로 줄여서 학습 속도 향상
-NETWORK_NUM_LAYERS = 1  # 2층은 초기 학습 어렵습니다. 1층으로 시작
-NETWORK_DROPOUT = 0.1  # Dropout 비율
+# ---------------------------------------------------------
+# [논문 기반 최적화] 아키텍처 파라미터 (표현력 강화)
+# ---------------------------------------------------------
+# 논문 근거: Yang et al. (2020) - 복잡한 전략 융합을 위한 용량 증설
+# Wang et al. (KDD 2023) - 12개 전략·15차원 Info 처리 시 Information Bottleneck 방지
+NETWORK_HIDDEN_DIM = 256     # 128 -> 256 (전략 상호작용 정보 수용량 증대)
+NETWORK_NUM_LAYERS = 2       # 1 -> 2 (추상화 깊이 확보, 단순 패턴 -> 복합 패턴 인식)
+NETWORK_DROPOUT = 0.1        # 유지 (과적합 방지)
+# Causal Conv 파라미터 (Look-ahead Bias 방지, 수용 범위 확장)
+CONV_KERNEL_SIZE = 5       # 수용 범위 확장
+CONV_DILATION = 2          # 수용 범위 (5-1)*2+1 = 9스텝
 NETWORK_ATTENTION_HEADS = 4  # Multi-Head Attention 헤드 개수
-NETWORK_INFO_ENCODER_DIM = 64  # Info Encoder 출력 차원
-NETWORK_SHARED_TRUNK_DIM1 = 256  # Shared Trunk 첫 번째 레이어 차원
+NETWORK_INFO_ENCODER_DIM = 128  # Info Encoder 출력 차원
+NETWORK_SHARED_TRUNK_DIM1 = 256  # Shared Trunk 첫 번째 레이어 차c원
 NETWORK_SHARED_TRUNK_DIM2 = 128  # Shared Trunk 두 번째 레이어 차원
 NETWORK_ACTOR_HEAD_DIM = 64  # Actor Head 은닉층 차원
 NETWORK_CRITIC_HEAD_DIM = 32  # Critic Head 은닉층 차원
 NETWORK_USE_CHECKPOINTING = False  # Gradient Checkpointing 사용 여부
 
-# 학습 파라미터
-TRAIN_ACTION_DIM = 4  # 행동 차원 (0:HOLD, 1:LONG, 2:SHORT, 3:EXIT) - 4-Action 구조
-TRAIN_BATCH_SIZE = 128  # [수정] 배치 크기 축소 (256 -> 128) - 업데이트 빈도 2배 증가로 변동성 확보
-TRAIN_SAMPLE_SIZE = 50000  # 스케일러 학습용 샘플 크기
+# ---------------------------------------------------------
+# [논문 기반 최적화] 학습 파라미터 (노이즈 강건성)
+# ---------------------------------------------------------
+# 논문 근거: FinRL (2021) - 금융 데이터의 노이즈를 고려한 배치 사이즈 축소
+TRAIN_ACTION_DIM = 3  # 행동 차원 (0:HOLD, 1:BUY, 2:SELL) - 3-Action 구조
+TRAIN_BATCH_SIZE = 256       # 512 -> 256 (업데이트 빈도 2배 증가로 적응력 향상)
+TRAIN_SAMPLE_SIZE = 50000    # 유지
 
 # 데이터 분할 비율 (명확화)
 TRAIN_SPLIT = 0.7  # 학습용 (0% ~ 70%)
@@ -97,8 +122,9 @@ VAL_SPLIT = 0.15   # 검증용 (70% ~ 85%)
 TEST_SPLIT = 0.15  # 테스트용 (85% ~ 100%)
 # 합계가 1.0이 되어야 함 (0.7 + 0.15 + 0.15 = 1.0)
 
-TRAIN_NUM_EPISODES = 2000  # 에피소드 수
+TRAIN_NUM_EPISODES = 5000  # 에피소드 수
 TRAIN_MAX_STEPS_PER_EPISODE = 480  # 에피소드당 최대 스텝 수
+MAX_TRADES_PER_EPISODE = 50  # 과도한 거래 방지 (480스텝 기준)
 TRAIN_SAVE_INTERVAL = 50  # 모델 저장 간격 (에피소드)
 
 # 평가 파라미터

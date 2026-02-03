@@ -1,0 +1,13 @@
+---
+description: 터미널 명령 실행 시 venv-win 가상환경 사용
+globs: 
+alwaysApply: true
+---
+
+# venv-win 가상환경 활성화
+
+이 프로젝트에서 **터미널 명령을 실행할 때**는 반드시 **venv-win** 가상환경을 먼저 활성화한 뒤 명령을 실행한다.
+
+- **PowerShell**: 프로젝트 루트에서 `.\venv-win\Scripts\Activate.ps1` 실행 후 본 명령 실행.
+- 한 줄로 실행할 때: `.\venv-win\Scripts\Activate.ps1; <실제 명령>`
+- 예: `.\venv-win\Scripts\Activate.ps1; python -m pytest test/ -v`

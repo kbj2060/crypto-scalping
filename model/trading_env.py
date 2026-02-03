@@ -1,8 +1,3 @@
-"""
-PPO 전용 트레이딩 환경 (Info Dim = 15 Version)
-- 입력 정보 확장: 전략 점수(12) + 포지션 정보(3) = 15개
-- AI가 보조지표와 자신의 상태를 모두 고려하여 판단
-"""
 import numpy as np
 import torch
 import logging
@@ -23,98 +18,148 @@ class TradingEnvironment:
         self.lookback = lookback if lookback is not None else config.LOOKBACK
         self.preprocessor = DataPreprocessor()
         self.scaler_fitted = False
-        
-        self.trade_count = 0
-        self.step_pnl_ema = 0.0
+
+        # [최적화] 데이터 캐싱 변수 (Pandas iloc 제거용)
+        self.cached_features = None   # (T, Feature_Dim)
+        self.cached_strategies = None  # (T, Strategy_Count)
+
+        self.reset_reward_states()
 
     def reset_reward_states(self):
+        """에피소드 시작 시 리워드 관련 상태 초기화"""
         self.trade_count = 0
         self.step_pnl_ema = 0.0
+        self.consecutive_losses = 0
+        self.position_changes = []
+        self.strategy_confidence = []
+        self.volatility_prediction_error = []
+        self.current_volatility = 0.0
+        self.training_step = 0
+        self.episode_step_count = 0
+        self.equity_curve = [1.0]
+        self.peak_equity = 1.0
+        self.return_buffer = []
+        self.trade_history = {'count': 0, 'wins': [], 'losses': []}
+
+    def precompute_data(self):
+        """
+        [Fix] Rolling Normalization 적용
+        전체 통계가 아닌 '과거 Lookback 기간'의 통계로 정규화하여 미래 참조 제거.
+        """
+        if self.collector.eth_data is None:
+            return
+
+        logger.info("⚡ 데이터 전처리 중... (Rolling Z-Score 적용)")
+        df = self.collector.eth_data.copy()
+
+        target_cols = [
+            'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos',
+            'rsi', 'macd_hist', 'hma_ratio', 'cci',
+            'rvol', 'taker_ratio', 'cvd_change', 'mfi', 'cmf', 'vwap_dist',
+            'wick_upper', 'wick_lower', 'range_pos', 'swing_break', 'chop',
+            'btc_return', 'btc_rsi', 'btc_corr', 'btc_vol', 'eth_btc_ratio',
+            'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
+        ]
+        for col in target_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+
+        data = df[target_cols]
+        rolling = data.rolling(window=self.lookback, min_periods=1)
+        roll_mean = rolling.mean()
+        roll_std = rolling.std().replace(0, 1e-8)
+        normalized_df = (data - roll_mean) / roll_std
+        normalized_df = normalized_df.fillna(0).replace([np.inf, -np.inf], 0)
+
+        self.cached_features = torch.FloatTensor(normalized_df.values.astype(np.float32))
+        self.scaler_fitted = True
+
+        strat_scores = []
+        for i in range(len(self.strategies)):
+            col = f'strategy_{i}'
+            if col in df.columns:
+                strat_scores.append(torch.tensor(df[col].values.astype(np.float32)))
+            else:
+                strat_scores.append(torch.zeros(len(df), dtype=torch.float32))
+        self.cached_strategies = torch.stack(strat_scores, dim=1)
+
+        logger.info(f"✅ 데이터 전처리 완료 (Rolling Norm): {self.cached_features.shape}")
+
+    def update_trading_metrics(self, prev_position, current_position,
+                               strategy_scores=None, volatility_pred=None,
+                               actual_volatility=None):
+        self.position_changes.append(1.0 if prev_position != current_position else 0.0)
+        if len(self.position_changes) > 100:
+            self.position_changes = self.position_changes[-100:]
+        self.training_step += 1
 
     def get_observation(self, position_info=None, current_index=None):
+        """캐시된 Tensor 슬라이싱으로 관측 생성 (iloc 제거)."""
         try:
+            if self.cached_features is None:
+                self.precompute_data()
             curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
             if curr_idx is None or curr_idx < self.lookback:
                 return None
-            df = self.collector.eth_data
-            if df is None or curr_idx >= len(df):
+            if curr_idx >= len(self.cached_features):
                 return None
 
-            target_cols = [
-                'log_return', 'roll_return_6', 'atr_ratio', 'bb_width', 'bb_pos', 
-                'rsi', 'macd_hist', 'hma_ratio', 'cci', 
-                'rvol', 'taker_ratio', 'cvd_change', 'mfi', 'cmf', 'vwap_dist',
-                'wick_upper', 'wick_lower', 'range_pos', 'swing_break', 'chop',
-                'btc_return', 'btc_rsi', 'btc_corr', 'btc_vol', 'eth_btc_ratio',
-                'rsi_15m', 'trend_15m', 'rsi_1h', 'trend_1h'
-            ]
-            
-            if not self.scaler_fitted:
-                return None
-            for col in target_cols:
-                if col not in df.columns:
-                    df[col] = 0.0
+            obs_seq = self.cached_features[curr_idx - self.lookback : curr_idx].unsqueeze(0)
+            scores = self.cached_strategies[curr_idx]
 
-            recent_df = df[target_cols].iloc[curr_idx - self.lookback : curr_idx]
-            if len(recent_df) < self.lookback:
-                return None
-            
-            seq = self.preprocessor.transform(recent_df.values.astype(np.float32))
-            obs_seq = torch.FloatTensor(seq).unsqueeze(0)
-
-            # [핵심 수정] 1. 전략 점수 수집 (12개)
-            scores = []
-            for i in range(len(self.strategies)):
-                col = f'strategy_{i}'
-                scores.append(float(df[col].iloc[curr_idx]) if col in df.columns else 0.0)
-
-            # [핵심 수정] 2. 포지션 정보 (3개)
             if position_info is None:
                 position_info = [0.0, 0.0, 0.0]
-            
-            # [핵심 수정] 3. 결합 (12 + 3 = 15)
-            obs_info_np = np.concatenate([np.array(scores, dtype=np.float32), np.array(position_info, dtype=np.float32)])
-            obs_info = torch.FloatTensor(obs_info_np).unsqueeze(0)
-            
+            if not isinstance(position_info, torch.Tensor):
+                pos_tensor = torch.tensor(position_info, dtype=torch.float32)
+            else:
+                pos_tensor = position_info
+
+            obs_info = torch.cat([pos_tensor[0:1], scores, pos_tensor[1:]]).unsqueeze(0)
             return (obs_seq, obs_info)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Obs Error: {e}")
             return None
 
-    def calculate_reward(self, step_pnl, realized_pnl, trade_done, holding_time=0, action=0, prev_position=None, current_position=None):
+    def calculate_reward(self, step_pnl, realized_pnl, trade_done,
+                         holding_time=0, action=0, prev_position=None,
+                         current_position=None):
+        """
+        [수정] 보상 스케일 1000배 증폭 (0.1% 수익 = 1.0 보상)
+        """
         reward = 0.0
 
-        # 1. No-Position Penalty (-0.001)
-        if current_position is None and not trade_done:
-            reward -= 0.001
-
-        # 2. Step Reward (EMA)
-        alpha = 0.33
+        # 1. 스텝별 밀집 보상 (1000배 증폭)
         if current_position is not None:
-            self.step_pnl_ema = alpha * step_pnl + (1 - alpha) * self.step_pnl_ema
-        else:
-            self.step_pnl_ema = (1 - alpha) * self.step_pnl_ema
+            step_reward = step_pnl * 1000.0
+            step_reward = max(min(step_reward, 2.0), -2.0)
+            reward += step_reward
 
-        reward += self.step_pnl_ema * 50.0
+        # 2. 청산 시 실현 손익 보상
+        if trade_done and realized_pnl != 0.0:
+            exit_reward = realized_pnl * 1000.0
+            exit_reward = max(min(exit_reward, 5.0), -5.0)
+            reward += exit_reward
+            reward -= 0.01
 
-        # 3. Directional Bonus
-        if current_position is not None and step_pnl > 0:
-            reward += 0.02
+        # 3. 과도한 거래 방지
+        if action in [1, 2]:
+            reward -= 0.01
 
-        # 4. Terminal Reward
-        if trade_done:
-            fee = 0.0005
-            net_pnl = realized_pnl - fee
+        # 4. 리스크 관리 페널티 (큰 손실 방지)
+        if current_position is not None and step_pnl < -0.005:
+            reward -= 0.5
 
-            reward += net_pnl * 150.0
-            reward -= 0.02  # 진입 비용 강화 (Over-trading 방지)
+        # 5. 최종 클리핑
+        reward = max(min(reward, 5.0), -5.0)
 
-            if holding_time < 0.005: reward -= 0.05
-            if net_pnl < -0.02: reward -= 2.0
-
-            self.trade_count += 1
-            self.step_pnl_ema = 0.0
-
-        return reward
+        return float(reward)
 
     def get_state_dim(self):
+        """실제 캐시된 피처 차원 반환 (네트워크 에러 방지)."""
+        if self.cached_features is not None:
+            return self.cached_features.shape[1]
         return 29
+
+    def get_current_equity(self):
+        """현재 자산 가치 (1.0 = 100% 시작)."""
+        return self.equity_curve[-1] if self.equity_curve else 1.0
