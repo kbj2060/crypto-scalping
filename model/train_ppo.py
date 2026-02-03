@@ -277,6 +277,16 @@ class PPOTrainer:
             action_mask = self.get_action_mask(current_position, market_vol, step)
             action, prob, val = self.agent.select_action(state, action_mask=action_mask)
 
+            # Stop Loss / Take Profit / Time Stop 강제 청산
+            should_exit, exit_reason = self.env.check_exit_conditions(unrealized_pnl, holding_time)
+            if should_exit and current_position is not None:
+                if current_position == 'LONG':
+                    action = 2
+                elif current_position == 'SHORT':
+                    action = 1
+                if exit_reason:
+                    pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count, 'Exit': exit_reason[:4]})
+
             if action == 0: hold_count += 1
             elif action == 1: buy_count += 1
             else: sell_count += 1
@@ -355,7 +365,7 @@ class PPOTrainer:
             
             if done: break
         
-        # 강제 청산
+        # 강제 청산 (에피소드 종료 시): last_state 안전하게 조회
         if current_position is not None:
             if current_position == 'LONG':
                 realized_pnl = (curr_price - entry_price) / entry_price
@@ -369,9 +379,13 @@ class PPOTrainer:
                 holding_time=0.0, action=exit_action,
                 prev_position=current_position, current_position=None,
             )
-            # [✅ 중요] 종료 시에도 마스크 저장 (모두 허용 [1,1,1]로 설정)
+            safe_idx = min(self.data_collector.current_index, self.train_end_idx - 1)
+            last_pos_info = [0.0, 0.0, 0.0]
+            last_state = self.env.get_observation(position_info=last_pos_info, current_index=safe_idx)
+            if last_state is None:
+                last_state = state
             terminal_mask = np.ones(3, dtype=np.float32)
-            self.agent.put_data((state, exit_action, final_reward, state, 1.0, True, 0.0, 0.0, terminal_mask))
+            self.agent.put_data((state, exit_action, final_reward, last_state, 1.0, True, 0.0, 0.0, terminal_mask))
             episode_reward += final_reward
             trade_count += 1
             

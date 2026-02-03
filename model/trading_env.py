@@ -23,7 +23,22 @@ class TradingEnvironment:
         self.cached_features = None   # (T, Feature_Dim)
         self.cached_strategies = None  # (T, Strategy_Count)
 
+        self.initial_balance = getattr(config, 'EVAL_INITIAL_CAPITAL', 10000.0)
         self.reset_reward_states()
+
+    def check_exit_conditions(self, unrealized_pnl, holding_time_steps):
+        """강제 청산 조건: Stop Loss / Take Profit / Time Stop."""
+        # Stop Loss (config 활용)
+        sl_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', -0.02)
+        if unrealized_pnl <= sl_threshold:
+            return True, "STOP_LOSS"
+        # Take Profit
+        if unrealized_pnl >= 0.05:
+            return True, "TAKE_PROFIT"
+        # Time Stop: 보유 스텝이 길고 수익이 미미할 때
+        if holding_time_steps > 100 and abs(unrealized_pnl) < 0.005:
+            return True, "TIME_STOP"
+        return False, None
 
     def reset_reward_states(self):
         """에피소드 시작 시 리워드 관련 상태 초기화"""
@@ -123,35 +138,42 @@ class TradingEnvironment:
     def calculate_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
                          current_position=None):
-        """
-        [수정] 보상 스케일 1000배 증폭 (0.1% 수익 = 1.0 보상)
-        """
+        """보상: 스텝 보상, 실현 손익, Sharpe 보너스, MDD 페널티."""
         reward = 0.0
 
-        # 1. 스텝별 밀집 보상 (1000배 증폭)
+        # A. 스텝 보상 (포지션 보유 시)
         if current_position is not None:
-            step_reward = step_pnl * 1000.0
+            step_reward = step_pnl * 100.0
             step_reward = max(min(step_reward, 2.0), -2.0)
             reward += step_reward
 
-        # 2. 청산 시 실현 손익 보상
+        # B. 매매 실현 손익 (청산 시)
         if trade_done and realized_pnl != 0.0:
-            exit_reward = realized_pnl * 1000.0
-            exit_reward = max(min(exit_reward, 5.0), -5.0)
-            reward += exit_reward
-            reward -= 0.01
+            trade_reward = realized_pnl * 100.0
+            if realized_pnl > 0:
+                trade_reward *= 1.2
+            trade_reward = max(min(trade_reward, 5.0), -5.0)
+            reward += trade_reward
+            if action in [1, 2]:
+                reward -= 0.01
 
-        # 3. 과도한 거래 방지
-        if action in [1, 2]:
-            reward -= 0.01
+        # C. Sharpe 기반 보너스 (안정성)
+        self.return_buffer.append(step_pnl)
+        if len(self.return_buffer) > 50:
+            self.return_buffer.pop(0)
+        if len(self.return_buffer) >= 10:
+            returns = np.array(self.return_buffer)
+            std_returns = np.std(returns)
+            if std_returns > 1e-8:
+                sharpe = np.mean(returns) / std_returns
+                reward += sharpe * 0.1
 
-        # 4. 리스크 관리 페널티 (큰 손실 방지)
-        if current_position is not None and step_pnl < -0.005:
-            reward -= 0.5
+        # D. MDD 페널티 (순간 급락)
+        if step_pnl < -0.05:
+            reward -= 1.0
 
-        # 5. 최종 클리핑
+        # E. 최종 클리핑
         reward = max(min(reward, 5.0), -5.0)
-
         return float(reward)
 
     def get_state_dim(self):
