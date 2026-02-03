@@ -138,26 +138,34 @@ class TradingEnvironment:
     def calculate_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
                          current_position=None):
-        """보상: 스텝 보상, 실현 손익, Sharpe 보너스, MDD 페널티."""
+        """보상: 스텝 보상, 실현 손익(수익200배/손실100배), Sharpe, MDD."""
         reward = 0.0
 
-        # A. 스텝 보상 (포지션 보유 시)
+        # A. 스텝 보상 (포지션 보유 중 평가 손익) - 유지
         if current_position is not None:
             step_reward = step_pnl * 100.0
             step_reward = max(min(step_reward, 2.0), -2.0)
             reward += step_reward
 
-        # B. 매매 실현 손익 (청산 시)
+        # B. [핵심 수정] 매매 실현 손익 (Trade Done)
+        # 수익은 200배, 손실은 100배로 명확하게 설정
         if trade_done and realized_pnl != 0.0:
-            trade_reward = realized_pnl * 100.0
             if realized_pnl > 0:
-                trade_reward *= 1.2
-            trade_reward = max(min(trade_reward, 5.0), -5.0)
+                trade_reward = realized_pnl * 200.0  # 수익: 200배 (예: 1% 수익 -> +2.0점)
+            else:
+                trade_reward = realized_pnl * 100.0  # 손실: 100배 (예: 1% 손실 -> -1.0점)
+            
+            # 보상이 너무 커서 학습이 튀는 것을 방지하기 위한 안전장치 (클리핑)
+            # 상한선을 20.0(10% 수익), 하한선을 -10.0(10% 손실) 정도로 넉넉하게 설정
+            trade_reward = max(min(trade_reward, 20.0), -10.0)
+            
             reward += trade_reward
+            
+            # [수정] 잦은 매매 방지 페널티 강화: 기존 -0.01 -> -0.1 (거래 한 번에 0.1점 비용)
             if action in [1, 2]:
-                reward -= 0.01
+                reward -= 0.1
 
-        # C. Sharpe 기반 보너스 (안정성)
+        # C. Sharpe 기반 보너스 (안정성) - 유지
         self.return_buffer.append(step_pnl)
         if len(self.return_buffer) > 50:
             self.return_buffer.pop(0)
@@ -168,12 +176,12 @@ class TradingEnvironment:
                 sharpe = np.mean(returns) / std_returns
                 reward += sharpe * 0.1
 
-        # D. MDD 페널티 (순간 급락)
+        # D. MDD 페널티 (순간 급락) - 유지
         if step_pnl < -0.05:
             reward -= 1.0
 
-        # E. 최종 클리핑
-        reward = max(min(reward, 5.0), -5.0)
+        # E. 최종 클리핑 (전체 범위 확장)
+        reward = max(min(reward, 20.0), -20.0)
         return float(reward)
 
     def get_state_dim(self):

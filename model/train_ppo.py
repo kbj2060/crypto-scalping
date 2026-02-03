@@ -128,24 +128,53 @@ class PPOTrainer:
             self.env.scaler_fitted = True
 
     def _prepare_curriculum_indices(self):
+        """
+        [MacroHFT] 데이터를 3가지 시장 국면(Trend, Volatility, Sideways)으로 분류하여 인덱싱
+        """
         df = self.data_collector.eth_data.iloc[:self.train_end_idx]
-        valid_start = config.LOOKBACK + 100
-        valid_end = self.train_end_idx - 500
-        
-        if valid_start >= valid_end:
+        valid_indices = list(range(config.LOOKBACK + 100, self.train_end_idx - 500))
+
+        if len(valid_indices) < 100:
             logger.warning("데이터가 너무 적어 커리큘럼 인덱스를 생성할 수 없습니다.")
-            self.all_indices = list(range(valid_start, len(df)-10))
-            self.trend_indices = self.all_indices
+            self.all_indices = valid_indices
+            self.trend_indices = self.indices_trend = self.indices_vol = self.indices_chop = self.indices_all = valid_indices
+            self.idx_trend = self.idx_vol = self.idx_side = valid_indices
+            self.idx_map = [valid_indices, valid_indices, valid_indices]
+            self.idx_all = valid_indices
             return
 
-        self.all_indices = list(range(valid_start, valid_end))
-        
-        if 'chop' in df.columns:
-            trend_mask = df['chop'].iloc[self.all_indices] < 50.0
-            self.trend_indices = [idx for idx, is_trend in zip(self.all_indices, trend_mask) if is_trend]
+        self.all_indices = valid_indices
+        self.indices_all = valid_indices
+
+        if 'chop' in df.columns and 'atr_ratio' in df.columns:
+            chop = df['chop'].values
+            atr = df['atr_ratio'].values
+            self.indices_trend = [i for i in valid_indices if i < len(chop) and chop[i] < 45.0]
+            atr_vals = [atr[i] for i in valid_indices if i < len(atr)]
+            atr_threshold = np.quantile(atr_vals, 0.75) if atr_vals else 0.0
+            self.indices_vol = [i for i in valid_indices if i < len(atr) and atr[i] > atr_threshold]
+            atr_mean = np.mean(atr_vals) if atr_vals else 0.0
+            self.indices_chop = [
+                i for i in valid_indices
+                if i < len(chop) and i < len(atr) and chop[i] > 50.0 and atr[i] < atr_mean
+            ]
+            self.trend_indices = self.indices_trend
+            self.idx_trend = self.indices_trend
+            self.idx_vol = self.indices_vol
+            self.idx_side = self.indices_chop
+            self.idx_map = [self.idx_trend, self.idx_vol, self.idx_side]
+            self.idx_all = self.indices_all
+            logger.info("📊 [MacroHFT Data Split]")
+            logger.info(f"  - Trend: {len(self.indices_trend)} | Volatility: {len(self.indices_vol)} | Sideways: {len(self.indices_chop)}")
         else:
+            self.indices_trend = self.all_indices
+            self.indices_vol = self.all_indices
+            self.indices_chop = self.all_indices
             self.trend_indices = self.all_indices
-        logger.info(f"📚 커리큘럼: 전체 {len(self.all_indices)}개, 추세장 {len(self.trend_indices)}개")
+            self.idx_trend = self.idx_vol = self.idx_side = self.all_indices
+            self.idx_map = [self.all_indices, self.all_indices, self.all_indices]
+            self.idx_all = self.all_indices
+            logger.info(f"📚 커리큘럼: chop/atr 없음 → 전체 {len(self.all_indices)}개 사용")
 
     def validate_on_test_set(self, max_steps=480):
         if not hasattr(self, 'test_start_idx') or self.test_start_idx >= self.test_end_idx - 1:
@@ -214,13 +243,23 @@ class PPOTrainer:
         if max_steps is None:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
-        if episode_num < 500 and len(self.trend_indices) > 0:
-            start_idx = np.random.choice(self.trend_indices)
-            mode = "EASY (Trend)"
+        phase_1_epochs = 1000
+        if episode_num <= phase_1_epochs:
+            mode = "expert"
+            expert_idx = episode_num % 3
+            target_indices = getattr(self, "idx_map", [self.all_indices] * 3)[expert_idx]
+            if len(target_indices) < 50:
+                target_indices = getattr(self, "idx_all", self.all_indices)
+            mode_name = f"Pretrain: {self.agent.expert_names[expert_idx].upper()}"
         else:
-            start_idx = np.random.choice(self.all_indices)
-            mode = "HARD (Random)"
-            
+            mode = "router"
+            expert_idx = 0
+            target_indices = getattr(self, "idx_all", self.all_indices)
+            mode_name = "Training: ROUTER"
+
+        if not target_indices:
+            target_indices = self.all_indices
+        start_idx = np.random.choice(target_indices)
         self.data_collector.current_index = start_idx
         self.env.reset_reward_states()
         self.agent.reset_episode_states()
@@ -234,7 +273,7 @@ class PPOTrainer:
         prev_unrealized_pnl = 0.0
         hold_count, buy_count, sell_count = 0, 0, 0
         
-        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode}]", leave=False)
+        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode_name}]", leave=False)
         
         for step in pbar:
             current_idx = self.data_collector.current_index
@@ -275,7 +314,9 @@ class PPOTrainer:
                 market_vol = float(self.data_collector.eth_data.iloc[current_idx]['atr_ratio'])
             
             action_mask = self.get_action_mask(current_position, market_vol, step)
-            action, prob, val = self.agent.select_action(state, action_mask=action_mask)
+            action, prob, val = self.agent.select_action(
+                state, action_mask=action_mask, mode=mode, expert_idx=expert_idx
+            )
 
             # Stop Loss / Take Profit / Time Stop 강제 청산
             should_exit, exit_reason = self.env.check_exit_conditions(unrealized_pnl, holding_time)
@@ -390,10 +431,11 @@ class PPOTrainer:
             trade_count += 1
             
         pbar.close()
-        
-        # 학습 수행 (Dictionary 반환)
-        metrics = self.agent.train_net(episode=episode_num)
+
+        metrics = self.agent.train_net(episode=episode_num, mode=mode, expert_idx=expert_idx)
         total_steps = hold_count + buy_count + sell_count
+        if episode_num % 10 == 0:
+            logger.info(f"Ep {episode_num} [{mode_name}] Reward: {episode_reward:.1f} | Trades: {trade_count}")
 
         if self.writer:
             self.writer.add_scalar('Reward/Total', episode_reward, episode_num)

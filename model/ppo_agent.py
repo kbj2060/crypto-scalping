@@ -1,280 +1,242 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
 import os
-
 from . import config
 from .xlstm_network import XLSTMNetwork
 
+class Router(nn.Module):
+    """
+    시장 상황(State)을 보고 3명의 전문가 중 누구의 의견을 들을지 결정하는 관리자
+    """
+    def __init__(self, input_dim, num_experts=3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_experts),
+            nn.Softmax(dim=-1) # [w1, w2, w3] 합은 1
+        )
+        
+    def forward(self, x):
+        # x: [Batch, Seq, Feature] -> 마지막 시점의 Feature만 사용하여 판단
+        # 입력이 (Batch, 1, Feature) 등으로 들어올 경우 처리
+        if x.dim() == 3: 
+            x = x[:, -1, :] 
+        return self.net(x)
+
 class PPOAgent:
+    """
+    MacroHFT 구조를 지원하는 통합 PPO 에이전트
+    - Experts: 3개의 XLSTMNetwork (Trend, Volatility, Sideways)
+    - Router: 1개의 MLP (가중치 분배)
+    """
     def __init__(self, state_dim, action_dim=3, info_dim=15, hidden_dim=None, device='cpu'):
         self.device = device
         self.action_dim = action_dim 
-
+        
         hidden_dim = hidden_dim if hidden_dim is not None else config.NETWORK_HIDDEN_DIM
         dropout = getattr(config, 'NETWORK_DROPOUT', 0.1)
 
-        self.model = XLSTMNetwork(
-            input_dim=state_dim,
-            action_dim=action_dim,
-            info_dim=info_dim,
-            hidden_dim=hidden_dim,
-            num_layers=config.NETWORK_NUM_LAYERS,
-            dropout=dropout,
-        ).to(device)
+        # 1. 전문가(Sub-Agents) 3명 생성 (Trend, Volatility, Sideways)
+        self.experts = nn.ModuleList([
+            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
+            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
+            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout)
+        ]).to(device)
+        # [에러 해결 핵심] expert_names 속성 정의
+        self.expert_names = ['trend', 'volatility', 'sideways']
 
+        # 2. 관리자(Router) 생성
+        self.router = Router(state_dim, num_experts=3).to(device)
+
+        # 3. 옵티마이저 분리
         self.lr = config.PPO_LEARNING_RATE
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, eps=1e-5)
         
-        self.lr_warmup_episodes = getattr(config, 'PPO_LR_WARMUP_EPISODES', 0)
-        self.temp_warmup_episodes = getattr(config, 'PPO_TEMP_WARMUP_EPISODES', 0)
-        self.temperature = getattr(config, 'PPO_TEMP_INIT', 1.0)
-        self.min_temp = getattr(config, 'PPO_TEMP_MIN', 0.5)
-        self.temp_decay = getattr(config, 'PPO_TEMP_DECAY', 0.999)
+        # 전문가용 옵티마이저 3개
+        self.opt_experts = [
+            optim.Adam(exp.parameters(), lr=self.lr, eps=1e-5) 
+            for exp in self.experts
+        ]
+        # 라우터용 옵티마이저 1개
+        self.opt_router = optim.Adam(self.router.parameters(), lr=self.lr, eps=1e-5)
+        
+        # PPO 파라미터
         self.gamma = config.PPO_GAMMA
         self.lmbda = config.PPO_LAMBDA
         self.eps_clip = config.PPO_EPS_CLIP
         self.k_epochs = config.PPO_K_EPOCHS
         self.entropy_coef = config.PPO_ENTROPY_COEF
+        
         self.data = []
-        self.current_states = None
+        self.current_states = [None] * 3 # 전문가별 LSTM 은닉 상태 관리
 
     def reset_episode_states(self):
-        self.current_states = None
+        """에피소드 시작 시 LSTM 상태 초기화"""
+        self.current_states = [None] * 3
+
+    def save_model(self, path):
+        """전문가 3명 + 라우터 1명 모두 저장"""
+        torch.save({
+            'experts': [exp.state_dict() for exp in self.experts],
+            'router': self.router.state_dict(),
+            'opt_experts': [opt.state_dict() for opt in self.opt_experts],
+            'opt_router': self.opt_router.state_dict(),
+            'hidden_dim': getattr(config, 'NETWORK_HIDDEN_DIM', None),
+        }, path)
 
     def load_model(self, path):
         if not os.path.exists(path):
             print(f"⚠️ 모델 파일 없음: {path}")
             return
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint.get('model_state_dict', checkpoint), strict=False)
-        print(f"✅ 모델 로드 성공: {path}")
+        
+        try:
+            checkpoint = torch.load(path, map_location=self.device)
+            
+            # MacroHFT 구조인지 확인
+            if 'experts' in checkpoint:
+                for i, state in enumerate(checkpoint['experts']):
+                    self.experts[i].load_state_dict(state, strict=False)
+                if 'router' in checkpoint:
+                    self.router.load_state_dict(checkpoint['router'], strict=False)
+                print(f"✅ MacroHFT 로드 완료: {path}")
+            
+            # 구버전 호환 (Trend 전문가에게만 로드)
+            elif 'model_state_dict' in checkpoint:
+                print(f"⚠️ 구버전(단일) 모델 감지. Trend Expert에만 로드합니다.")
+                self.experts[0].load_state_dict(checkpoint['model_state_dict'], strict=False)
+            else:
+                print(f"❌ 알 수 없는 모델 형식: {path}")
+        except Exception as e:
+            print(f"❌ 모델 로드 중 에러 발생: {e}")
 
-    def save_model(self, path):
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'hidden_dim': getattr(config, 'NETWORK_HIDDEN_DIM', None),
-            'num_layers': getattr(config, 'NETWORK_NUM_LAYERS', None),
-        }, path)
-
-    def select_action(self, state, action_mask=None):
+    def select_action(self, state, action_mask=None, mode='router', expert_idx=0):
         obs_seq, obs_info = state
         
+        # 텐서 변환 및 Device 이동
         if not isinstance(obs_seq, torch.Tensor):
             obs_seq = torch.FloatTensor(obs_seq).to(self.device)
-        else:
-            obs_seq = obs_seq.to(self.device)
-
-        if not isinstance(obs_info, torch.Tensor):
             obs_info = torch.FloatTensor(obs_info).unsqueeze(0).to(self.device)
         else:
+            obs_seq = obs_seq.to(self.device)
             obs_info = obs_info.to(self.device)
 
         with torch.no_grad():
-            # [Fix] Unpack 6 values (ignore gate_mean here)
-            logits, value, cvar, _, self.current_states, _ = self.model(
-                obs_seq, obs_info, states=self.current_states, temperature=None
-            )
+            if mode == 'expert':
+                # [Phase 1] 특정 전문가 독단적 수행
+                net = self.experts[expert_idx]
+                # forward returns: logits, val_mean, val_cvar, aux_val, next_states, gate_mean
+                logits, value, _, _, next_state, _ = net(
+                    obs_seq, obs_info, states=self.current_states[expert_idx]
+                )
+                self.current_states[expert_idx] = next_state
+                weights = None
+                
+            else: # mode == 'router'
+                # [Phase 2] 라우터 기반 앙상블
+                logits_list = []
+                for i, net in enumerate(self.experts):
+                    l, _, _, _, ns, _ = net(obs_seq, obs_info, states=self.current_states[i])
+                    logits_list.append(l)
+                    self.current_states[i] = ns
+                
+                # 라우터 비중 결정
+                weights = self.router(obs_seq) # [1, 3]
+                
+                # 가중 합
+                stacked_logits = torch.stack(logits_list, dim=1) # [1, 3, Action]
+                weighted_logits = torch.sum(weights.unsqueeze(-1) * stacked_logits, dim=1)
+                logits = weighted_logits
+                value = 0.0 # 단순화
 
+            # 액션 마스킹
             if action_mask is not None:
                 mask_tensor = torch.FloatTensor(action_mask).to(self.device)
                 logits = logits + (mask_tensor - 1) * 1e10
 
-            current_temp = max(self.temperature, 1e-8)
-            adjusted_logits = logits / current_temp
-
-            dist = Categorical(logits=adjusted_logits)
+            dist = Categorical(logits=logits)
             action = dist.sample()
             
-            if action_mask is not None and action_mask[action.item()] == 0:
-                allowed_indices = torch.where(mask_tensor == 1)[0]
-                if len(allowed_indices) > 0:
-                    allowed_logits = adjusted_logits[0, allowed_indices]
-                    best_allowed_idx = torch.argmax(allowed_logits)
-                    action = allowed_indices[best_allowed_idx].unsqueeze(0)
+            # (Router 모드일 때만 weights 기록)
+            if weights is None: weights_val = 0.0
+            else: weights_val = weights.cpu().numpy()
 
-        return action.item(), dist.log_prob(action).item(), value.item()
+        return action.item(), dist.log_prob(action).item(), value
 
     def put_data(self, transition):
         self.data.append(transition)
 
-    def quantile_loss(self, preds, targets, quantile=0.05):
-        errors = targets - preds
-        loss = torch.max((quantile - 1) * errors, quantile * errors)
-        return loss.mean()
+    def train_net(self, episode=1, mode='router', expert_idx=0):
+        if not self.data: return {}
 
-    def train_net(self, episode=1):
-        if not self.data:
-            return {}
+        # [에러 해결 핵심] GRU 차원 문제(ValueError) 해결을 위한 squeeze(1) 적용
+        # (Batch, 1, Seq, Feat) -> (Batch, Seq, Feat)
+        s_seq_np = np.array([x[0][0].cpu().numpy() if isinstance(x[0][0], torch.Tensor) else x[0][0] for x in self.data])
+        s_seq = torch.tensor(s_seq_np, dtype=torch.float).squeeze(1).to(self.device)
+        
+        s_info_np = np.array([x[0][1].cpu().numpy() if isinstance(x[0][1], torch.Tensor) else x[0][1] for x in self.data])
+        s_info = torch.tensor(s_info_np, dtype=torch.float).squeeze(1).to(self.device)
 
-        if self.lr_warmup_episodes > 0 and episode <= self.lr_warmup_episodes:
-            warmup_lr = self.lr * (episode / self.lr_warmup_episodes)
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = warmup_lr
+        a = torch.tensor([x[1] for x in self.data], dtype=torch.long).to(self.device)
+        r = torch.tensor([x[2] for x in self.data], dtype=torch.float).to(self.device)
+        prob_a = torch.tensor([x[4] for x in self.data], dtype=torch.float).to(self.device)
+        masks = torch.tensor(np.array([x[8] for x in self.data]), dtype=torch.float).to(self.device)
+        
+        self.data = [] # 버퍼 비우기
 
-        # Data Unpacking
-        s_seq_lst, s_info_lst, a_lst, r_lst, next_s_seq_lst, next_s_info_lst = [], [], [], [], [], []
-        prob_a_lst, done_lst, old_v_lst, aux_target_lst, mask_lst = [], [], [], [], []
-
-        for transition in self.data:
-            if len(transition) == 9:
-                s, a, r, next_s, prob_a, done, val, aux_target, mask = transition
-            elif len(transition) == 8:
-                s, a, r, next_s, prob_a, done, val, aux_target = transition
-                mask = [1.0, 1.0, 1.0]
+        # 모드에 따라 업데이트할 네트워크 선택
+        if mode == 'expert':
+            optimizer = self.opt_experts[expert_idx]
+            network = self.experts[expert_idx]
+        else:
+            optimizer = self.opt_router
+        
+        avg_loss = 0.0
+        
+        # PPO Update Loop
+        for _ in range(self.k_epochs):
+            if mode == 'expert':
+                logits, _, _, _, _, _ = network(s_seq, s_info)
             else:
-                continue
+                # Router 모드
+                l_list = []
+                with torch.no_grad():
+                    for exp in self.experts:
+                        l, _, _, _, _, _ = exp(s_seq, s_info)
+                        l_list.append(l)
+                weights = self.router(s_seq)
+                stacked = torch.stack(l_list, dim=1)
+                logits = torch.sum(weights.unsqueeze(-1) * stacked, dim=1)
 
-            s_seq_lst.append(s[0])
-            s_info_lst.append(s[1])
-            a_lst.append([a])
-            r_lst.append([r])
-            next_s_seq_lst.append(next_s[0])
-            next_s_info_lst.append(next_s[1])
-            prob_a_lst.append([prob_a])
-            done_lst.append([0 if done else 1])
-            old_v_lst.append([val])
-            aux_target_lst.append([aux_target])
-            mask_lst.append(mask)
-
-        def to_tensor(data, dtype=torch.float):
-            if isinstance(data[0], torch.Tensor):
-                return torch.cat(data, dim=0).to(self.device)
-            return torch.tensor(np.array(data), dtype=dtype).to(self.device)
-
-        s_seq = to_tensor(s_seq_lst)
-        s_info = to_tensor(s_info_lst)
-        next_s_seq = to_tensor(next_s_seq_lst)
-        next_s_info = to_tensor(next_s_info_lst)
-        a = torch.tensor(a_lst, dtype=torch.long).to(self.device)
-        r = torch.tensor(r_lst, dtype=torch.float).to(self.device)
-        done_mask = torch.tensor(done_lst, dtype=torch.float).to(self.device)
-        prob_a = torch.tensor(prob_a_lst, dtype=torch.float).to(self.device)
-        old_v = torch.tensor(old_v_lst, dtype=torch.float).to(self.device)
-        masks = torch.tensor(np.array(mask_lst), dtype=torch.float).to(self.device)
-
-        self.data = []
-
-        # GAE Calculation
-        with torch.no_grad():
-            # [Fix] Unpack 6 values
-            _, v, _, _, _, _ = self.model(s_seq, s_info, states=None)
-            _, next_v, _, _, _, _ = self.model(next_s_seq, next_s_info, states=None)
-
-            td_target = r + self.gamma * next_v * done_mask
-            delta = td_target - v
-
-            advantage_lst = []
-            gae = 0.0
-            for t in reversed(range(len(delta))):
-                gae = delta[t] + self.gamma * self.lmbda * done_mask[t] * gae
-                advantage_lst.insert(0, gae)
-
-            advantage = torch.stack(advantage_lst)
-            target_v = advantage + v
-
-        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-5)
-
-        # Log variables
-        n_epochs_run = 0
-        avg_total_loss = 0.0
-        avg_actor_loss = 0.0
-        avg_critic_loss = 0.0
-        avg_risk_loss = 0.0
-        avg_entropy_loss = 0.0
-        avg_ortho_loss = 0.0
-        avg_gate_mean = 0.0
-
-        current_temp = max(self.temperature, 1e-8)
-
-        for epoch in range(self.k_epochs):
-            # [Fix] Unpack 6 values, receive gate_mean
-            curr_logits, curr_v, curr_cvar, curr_aux, _, gate_mean = self.model(s_seq, s_info, states=None)
-
-            # Masking & Temperature
-            curr_logits = curr_logits + (masks - 1) * 1e10
-            curr_logits = curr_logits / current_temp
-
-            dist = Categorical(logits=curr_logits)
-            curr_log_prob = dist.log_prob(a.squeeze()).unsqueeze(1)
-            ratio = torch.exp(curr_log_prob - prob_a)
-
-            with torch.no_grad():
-                log_ratio = curr_log_prob - prob_a
-                approx_kl = (torch.exp(log_ratio) - 1) - log_ratio
-                
-                # [Step 2 Fix] Allow at least 1 epoch to run (epoch > 0 condition)
-                if approx_kl.mean() > config.PPO_KL_TARGET and epoch > 0:
-                    break
+            # Masking
+            logits = logits + (masks - 1) * 1e10
+            
+            dist = Categorical(logits=logits)
+            log_prob = dist.log_prob(a)
+            ratio = torch.exp(log_prob - prob_a)
+            
+            # Advantage (Reward Normalization)
+            advantage = (r - r.mean()) / (r.std() + 1e-8)
 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
             
-            # Dynamic Entropy
-            base_entropy_coef = max(config.PPO_ENTROPY_MIN, self.entropy_coef * (0.999 ** episode))
-            with torch.no_grad():
-                pred_error = torch.sqrt(((curr_v - target_v)**2).mean())
-                dynamic_scale = 1.0 + torch.clamp(pred_error, 0.0, 1.0)
-            
-            curr_entropy_coef = base_entropy_coef * dynamic_scale
-            entropy_loss = curr_entropy_coef * dist.entropy().mean()
-            
-            actor_loss = -torch.min(surr1, surr2).mean()
+            loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * dist.entropy().mean()
 
-            # Critic Loss
-            if config.PPO_USE_VALUE_CLIP:
-                v_clipped = old_v + torch.clamp(curr_v - old_v, -config.PPO_VALUE_CLIP_EPS, config.PPO_VALUE_CLIP_EPS)
-                v_loss_1 = (curr_v - target_v) ** 2
-                v_loss_2 = (v_clipped - target_v) ** 2
-                critic_loss = 0.5 * torch.max(v_loss_1, v_loss_2).mean()
-            else:
-                critic_loss = 0.5 * F.mse_loss(curr_v, target_v)
-
-            # Risk & Ortho Loss
-            risk_loss = self.quantile_loss(curr_cvar, target_v, quantile=0.05) * 0.5
-            
-            strat_layer = self.model.strategy_processor.out_proj[0].weight
-            wwt = torch.mm(strat_layer, strat_layer.t())
-            identity = torch.eye(wwt.size(0)).to(self.device)
-            ortho_loss = torch.norm(wwt - identity) * 0.01
-
-            loss = actor_loss + critic_loss + risk_loss - entropy_loss + ortho_loss
-
-            self.optimizer.zero_grad()
+            optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
-            self.optimizer.step()
-
-            # [Step 2 Fix] Increment run count
-            n_epochs_run += 1
+            nn.utils.clip_grad_norm_(
+                self.router.parameters() if mode == 'router' else network.parameters(), 
+                0.5
+            )
+            optimizer.step()
             
-            # Log Accumulation
-            avg_total_loss += loss.item()
-            avg_actor_loss += actor_loss.item()
-            avg_critic_loss += critic_loss.item()
-            avg_risk_loss += risk_loss.item()
-            avg_entropy_loss += entropy_loss.item()
-            avg_ortho_loss += ortho_loss.item()
-            
-            # [Step 3 Fix] Accumulate gate_mean from return value
-            if gate_mean is not None:
-                avg_gate_mean += gate_mean
+            avg_loss += loss.item()
 
-        if episode > self.temp_warmup_episodes:
-            self.temperature = max(self.temperature * self.temp_decay, self.min_temp)
-
-        # [Step 1 Fix] Remove trailing spaces in keys
-        denom = max(1, n_epochs_run)
-        return {
-            "Loss/Total": avg_total_loss / denom,
-            "Loss/Actor": avg_actor_loss / denom,
-            "Loss/Critic": avg_critic_loss / denom,
-            "Loss/Risk_CVaR": avg_risk_loss / denom,
-            "Loss/Entropy": avg_entropy_loss / denom,
-            "Loss/Ortho": avg_ortho_loss / denom,
-            "Info/Gate_Mean": avg_gate_mean / denom,
-        }
+        return {'Loss/Total': avg_loss / self.k_epochs}

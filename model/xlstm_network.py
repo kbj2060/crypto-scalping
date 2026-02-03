@@ -146,9 +146,9 @@ class XLSTMNetwork(nn.Module):
         
         self.apply(self._init_weights)
         
-        # [수정] Hold Bias 0.5 → 0.1: "가만히 있는 게 좋긴 한데..." 수준의 가벼운 힌트만
-        with torch.no_grad():
-            self.actor[2].bias[0] += 0.1
+        # [비활성화] Hold Bias 제거 — 관망 편향이 빠져나오지 못하게 막는 원인으로 제거
+        # with torch.no_grad():
+        #     self.actor[2].bias[0] += 0.1
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

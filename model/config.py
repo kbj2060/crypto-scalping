@@ -70,10 +70,10 @@ PPO_EPS_CLIP = 0.2           # 0.15 -> 0.2 (Gate가 노이즈를 거르므로 �
 PPO_K_EPOCHS = 4             # 유지
 
 # [Dynamic Entropy 보조]
-# Dynamic Entropy가 작동하므로 기본값은 낮춰 안정적인 수렴 유도
-PPO_ENTROPY_COEF = 0.05      # 0.03 -> 0.05 (더 과감하게 탐험 유도)
-PPO_ENTROPY_DECAY = 0.9999   # 천천히 감소
-PPO_ENTROPY_MIN = 0.005      # 0.01 -> 0.005 (후반부 미세 조정 허용)
+# [수정] 탐험(Entropy) 수치 안정화 — 0.05 (산만함) -> 0.01 (차분함)
+PPO_ENTROPY_COEF = 0.01
+PPO_ENTROPY_DECAY = 0.999    # 감쇠 속도는 유지
+PPO_ENTROPY_MIN = 0.01
 PPO_LEARNING_RATE = 2e-4     # 1e-4 -> 2e-4 (배치 사이즈 축소에 따른 LR 미세 상향)
 
 # 웜업(Warm-up) 설정 (즉시 학습 시작)
