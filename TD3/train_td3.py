@@ -274,7 +274,7 @@ class TD3Trainer:
                 
                 episode_reward += reward
 
-                next_pos_info = [current_pos_size, step_pnl * 10, 1.0 if abs(trade_amount) < 0.1 else 0.0]
+                next_pos_info = [current_pos_size, step_pnl_roe * 10, 1.0 if abs(trade_amount) < 0.1 else 0.0]
                 next_state_raw = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
 
                 done = (step >= max_steps - 1) or (next_state_raw is None)
