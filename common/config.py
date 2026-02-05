@@ -64,7 +64,7 @@ AI_MODEL_PATH = 'data/ppo_model.pth'
 
 # AI 모델 하이퍼파라미터
 # [유지] 시계열 윈도우는 60으로 증가 권장 (현재 train에서 60 사용 중)
-LOOKBACK = 60  # 30 → 60 (3시간 컨텍스트)
+LOOKBACK = 120
 
 # 보상 함수 파라미터
 REWARD_MULTIPLIER = 100.0

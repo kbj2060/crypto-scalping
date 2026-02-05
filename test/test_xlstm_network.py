@@ -1,6 +1,6 @@
 """
 XLSTM 네트워크 아키텍처 유닛 테스트 (현재 모델 기준).
-- TransformerBackbone, XLSTMNetwork
+- TransformerBackbone, FusionTransformer
 - forward: (logits, value, aux_value, next_states, gate_mean) 등 반환
 """
 import numpy as np
@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import pytest
 
-from macroHFT.xlstm_network import TransformerBackbone, StrategyInteractionLayer, XLSTMNetwork
+from macroHFT.fusion_transformer import FusionTransformer
 
 
 class TestTransformerBackbone:
@@ -60,13 +60,13 @@ class TestStrategyInteractionLayer:
         assert not torch.allclose(out_zero, out_high)
 
 
-class TestXLSTMNetwork:
-    """XLSTMNetwork: forward 반환 (logits, val_mean, val_cvar, aux_val, next_states, gate_mean)."""
+class TestFusionTransformer:
+    """FusionTransformer: forward 반환 (logits, val_mean, val_cvar, aux_val, next_states, gate_mean)."""
 
     @pytest.fixture
     def net(self):
         from common.feature_engineering import ULTIMATE_FEATURE_COLS
-        return XLSTMNetwork(
+        return FusionTransformer(
             input_dim=len(ULTIMATE_FEATURE_COLS),
             action_dim=3,
             info_dim=11,

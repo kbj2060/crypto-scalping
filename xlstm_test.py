@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from macroHFT.xlstm_network import TransformerBackbone, XLSTMNetwork
+    from macroHFT.fusion_transformer import FusionTransformer
     print("✅ XLSTM 모듈 임포트 성공")
 except ImportError as e:
     print(f"❌ 모듈 임포트 실패: {e}")
@@ -128,7 +128,7 @@ def test_online_vs_batch_processing():
     seq_len = 20
     batch = 1
     
-    model = XLSTMNetwork(input_dim, action_dim, info_dim, hidden_dim, num_layers=1)
+    model = FusionTransformer(input_dim, action_dim, info_dim, hidden_dim, num_layers=1)
     model.eval()
     
     # 테스트 데이터 생성
@@ -177,7 +177,7 @@ def test_online_vs_batch_processing():
     print(f"마지막 타임스텝 Value 차이: {diff_value_last:.6f}")
     
     # 전체 시퀀스의 Value 출력 비교 (Critic은 각 타임스텝의 가치를 출력)
-    # Note: 현재 XLSTMNetwork는 마지막 컨텍스트만 사용하므로, 각 타임스텝별 출력을 얻으려면 수정 필요
+    # Note: 현재 FusionTransformer 마지막 컨텍스트만 사용하므로, 각 타임스텝별 출력을 얻으려면 수정 필요
     # 대신, 우리는 상태 관리의 일관성만 테스트
     
     if diff_logits_last < 0.01 and diff_value_last < 0.01:
@@ -270,7 +270,7 @@ def test_trading_realism():
     hidden_dim = 64
     num_layers = 2
     
-    model = XLSTMNetwork(input_dim, action_dim, info_dim, hidden_dim, num_layers)
+    model = FusionTransformer(input_dim, action_dim, info_dim, hidden_dim, num_layers)
     model.eval()
     
     # 긴 시퀀스 테스트 (실제 트레이딩에서는 긴 시퀀스를 처리함)

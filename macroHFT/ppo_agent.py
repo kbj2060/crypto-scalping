@@ -5,7 +5,7 @@ import numpy as np
 from torch.distributions import Categorical
 import os
 from common import config
-from .xlstm_network import XLSTMNetwork
+from .macrohft_network import MacroHFTNetwork
 
 class Router(nn.Module):
     def __init__(self, input_dim, num_experts=3):
@@ -36,9 +36,9 @@ class PPOAgent:
 
         # Experts (Trend, Volatility, Sideways)
         self.experts = nn.ModuleList([
-            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
-            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
-            XLSTMNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout)
+            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
+            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
+            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout)
         ]).to(device)
         self.expert_names = ['trend', 'volatility', 'sideways']
 

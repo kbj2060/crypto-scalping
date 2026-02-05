@@ -1,13 +1,13 @@
 """
 AI 강화학습 모델 패키지 (MacroHFT)
 """
-from .xlstm_network import XLSTMNetwork
+from .macrohft_network import MacroHFTNetwork
 from .ppo_agent import PPOAgent
 from common.trading_env import TradingEnvironment
 from common.preprocess import DataPreprocessor
 
 __all__ = [
-    'XLSTMNetwork',
+    'MacroHFTNetwork',
     'PPOAgent',
     'TradingEnvironment',
     'DataPreprocessor'
