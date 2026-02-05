@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 from .binance_client import BinanceClient
-from model import config
+from common import config
 import logging
 from datetime import datetime, timedelta
 import time
@@ -177,31 +177,32 @@ class DataCollector:
             return None
     
     def load_saved_data(self):
-        """저장된 데이터 로드 (학습용) - eth_3m_1year.csv와 btc_3m_1year.csv만 사용"""
+        """저장된 데이터 로드 (학습용) - integrated_eth_3m_data.csv 사용, BTC는 선택"""
         try:
             import os
-            # 고정된 파일명 사용 (중복 파일 제거)
-            eth_file = 'data/eth_3m_1year.csv'
+            eth_file = 'data/integrated_eth_3m_data.csv'
             btc_file = 'data/btc_3m_1year.csv'
-            
-            if not os.path.exists(eth_file) or not os.path.exists(btc_file):
-                logger.warning(f"저장된 데이터 파일을 찾을 수 없습니다: {eth_file}, {btc_file}")
-                logger.warning("collect_training_data.py를 먼저 실행하세요.")
+
+            if not os.path.exists(eth_file):
+                logger.warning(f"ETH 데이터 파일을 찾을 수 없습니다: {eth_file}")
+                logger.warning("utils/future_csv_merger.py로 integrated_eth_3m_data.csv를 생성하거나, data를 확인하세요.")
                 return False
-            
-            # ETH 데이터 로드
+
+            # ETH 데이터 로드 (통합 데이터: OHLCV + 메트릭/펀딩 등 컬럼 포함)
             self.eth_data = pd.read_csv(eth_file, index_col='timestamp', parse_dates=True)
-            logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들")
-            
-            # BTC 데이터 로드
-            self.btc_data = pd.read_csv(btc_file, index_col='timestamp', parse_dates=True)
-            logger.info(f"✅ BTC 데이터 로드: {len(self.btc_data)}개 캔들")
-            
-            # 인덱스 초기화
+            logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들 (integrated_eth_3m_data.csv, {len(self.eth_data.columns)}컬럼)")
+
+            # BTC 데이터 로드 (있으면 로드, 없으면 None)
+            if os.path.exists(btc_file):
+                self.btc_data = pd.read_csv(btc_file, index_col='timestamp', parse_dates=True)
+                logger.info(f"✅ BTC 데이터 로드: {len(self.btc_data)}개 캔들")
+            else:
+                self.btc_data = None
+                logger.info("BTC 파일 없음 → btc_data=None (ETH 단독 사용)")
+
             self.current_index = 0
-            
             return True
-            
+
         except Exception as e:
             logger.error(f"저장된 데이터 로드 실패: {e}")
             return False

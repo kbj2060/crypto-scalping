@@ -6,14 +6,16 @@ import numpy as np
 import torch
 import pytest
 
-from model.ppo_agent import PPOAgent
-from model import config
+from macroHFT.ppo_agent import PPOAgent
+from common import config
 
 
 def _make_dummy_state(device="cpu"):
-    """(obs_seq, obs_info) 튜플. state_dim=29, lookback=60, info_dim=15."""
-    obs_seq = torch.randn(1, 60, 29)
-    obs_info = torch.randn(1, 15)
+    """(obs_seq, obs_info) 튜플. state_dim=20(Ultimate), lookback=60, info_dim=11(Elite 8)."""
+    from common.feature_engineering import ULTIMATE_FEATURE_COLS
+    state_dim = len(ULTIMATE_FEATURE_COLS)
+    obs_seq = torch.randn(1, 60, state_dim)
+    obs_info = torch.randn(1, 11)
     return (obs_seq, obs_info)
 
 
@@ -72,10 +74,11 @@ class TestTrainNetAuxLoss:
 
     @pytest.fixture
     def agent_with_buffer(self):
+        from common.feature_engineering import ULTIMATE_FEATURE_COLS
         agent = PPOAgent(
-            state_dim=29,
+            state_dim=len(ULTIMATE_FEATURE_COLS),
             action_dim=3,
-            info_dim=15,
+            info_dim=11,
             hidden_dim=32,
             device="cpu",
         )
@@ -98,10 +101,11 @@ class TestSelectActionSingleAgent:
 
     @pytest.fixture
     def agent(self):
+        from common.feature_engineering import ULTIMATE_FEATURE_COLS
         return PPOAgent(
-            state_dim=29,
+            state_dim=len(ULTIMATE_FEATURE_COLS),
             action_dim=3,
-            info_dim=15,
+            info_dim=11,
             hidden_dim=32,
             device="cpu",
         )
@@ -125,13 +129,15 @@ class TestPPOAgentSingle:
     """PPOAgent: 단일 에이전트, action_dim=3 (Hold, Buy, Sell)."""
 
     def test_single_model_created(self):
-        agent = PPOAgent(state_dim=29, action_dim=3, info_dim=15, hidden_dim=32, device="cpu")
+        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        agent = PPOAgent(state_dim=len(ULTIMATE_FEATURE_COLS), action_dim=3, info_dim=11, hidden_dim=32, device="cpu")
         assert agent.action_dim == 3
         assert hasattr(agent, "model")
         assert not hasattr(agent, "entry_agent")
         assert not hasattr(agent, "exit_agent")
 
     def test_reset_episode_states(self):
-        agent = PPOAgent(state_dim=29, action_dim=3, info_dim=15, hidden_dim=32, device="cpu")
+        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        agent = PPOAgent(state_dim=len(ULTIMATE_FEATURE_COLS), action_dim=3, info_dim=11, hidden_dim=32, device="cpu")
         agent.reset_episode_states()
         assert agent.current_states is None

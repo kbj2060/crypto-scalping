@@ -1,3 +1,7 @@
+# Data folders (학습 데이터, 원시 데이터)
+data/
+binance_raw_data/
+
 # Python
 __pycache__/
 *.py[cod]

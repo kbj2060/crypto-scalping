@@ -5,13 +5,13 @@
 import numpy as np
 import pytest
 
-from model.trading_env import TradingEnvironment
+from common.trading_env import TradingEnvironment
 
 
 @pytest.fixture
-def env_for_reward(mock_collector, strategies_12):
+def env_for_reward(mock_collector, strategies_8):
     """보상 전용 TradingEnvironment (get_observation 미사용)."""
-    return TradingEnvironment(mock_collector, strategies_12, lookback=60)
+    return TradingEnvironment(mock_collector, strategies_8, lookback=60)
 
 
 class TestCalculateRewardSignature:
@@ -120,7 +120,8 @@ class TestTradeDoneBonus:
 
 
 class TestGetStateDim:
-    """get_state_dim() == 29 (target_cols 개수)."""
+    """get_state_dim() == len(ULTIMATE_FEATURE_COLS)."""
 
-    def test_state_dim_is_29(self, env_for_reward):
-        assert env_for_reward.get_state_dim() == 29
+    def test_state_dim_equals_ultimate_features(self, env_for_reward):
+        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        assert env_for_reward.get_state_dim() == len(ULTIMATE_FEATURE_COLS)

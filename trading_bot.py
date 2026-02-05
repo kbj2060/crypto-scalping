@@ -6,7 +6,7 @@ import time
 import sys
 import os
 from datetime import datetime, timedelta
-from model import config
+from common import config
 from core import DataCollector, RiskManager, BinanceClient
 from core.indicators import Indicators
 from strategies import (
@@ -28,8 +28,8 @@ TORCH_AVAILABLE = False
 if config.ENABLE_AI:
     try:
         import torch
-        from model.trading_env import TradingEnvironment
-        from model.ppo_agent import PPOAgent
+        from common.trading_env import TradingEnvironment
+        from macroHFT.ppo_agent import PPOAgent
         TORCH_AVAILABLE = True
     except ImportError as e:
         TORCH_AVAILABLE = False

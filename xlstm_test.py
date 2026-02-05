@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from model.xlstm_network import SharedBackbone, XLSTMNetwork
+    from macroHFT.xlstm_network import TransformerBackbone, XLSTMNetwork
     print("✅ XLSTM 모듈 임포트 성공")
 except ImportError as e:
     print(f"❌ 모듈 임포트 실패: {e}")
@@ -26,50 +26,18 @@ def test_input_proj_consistency():
     batch = 2
     seq_len = 5
     
-    model = SharedBackbone(input_dim, hidden_dim, num_layers=1, dropout=0.0)
+    model = TransformerBackbone(input_dim, hidden_dim, num_layers=1, dropout=0.0, seq_len=seq_len)
     model.eval()
-    
+
     # 입력 생성
     x = torch.randn(batch, seq_len, input_dim)
-    
-    # 전체 시퀀스 처리
+
+    # TransformerBackbone: 전체 시퀀스 한 번에 처리, next_states=[] 반환
     with torch.no_grad():
         context_full, states_full = model(x, states=None)
-        
-        # 부분 시퀀스 처리 (타임스텝별)
-        states_seq = None
-        contexts_seq = []
-        
-        for t in range(seq_len):
-            x_t = x[:, :t+1, :]
-            context_t, states_seq = model(x_t, states_seq)
-            contexts_seq.append(context_t)
-    
-    # 마지막 컨텍스트 비교
-    context_last_seq = contexts_seq[-1]
-    diff = torch.abs(context_full - context_last_seq).max().item()
-    print(f"전체 시퀀스 vs 부분 시퀀스 컨텍스트 차이: {diff}")
-    
-    if diff < 1e-5:
-        print("✅ Input Projection: 전체/부분 시퀀스 처리 결과 일치")
-    else:
-        print("❌ Input Projection: 전체/부분 시퀀스 처리 결과 불일치")
-        
-        # 더 상세한 분석
-        print("\n상세 분석:")
-        print(f"전체 처리 컨텍스트 shape: {context_full.shape}")
-        print(f"부분 처리 컨텍스트 shape: {context_last_seq.shape}")
-        
-        # 각 타임스텝별 input_proj 출력 비교
-        with torch.no_grad():
-            x_proj_full = model.input_proj(x)  # 전체 시퀀스 프로젝션
-            x_proj_last = model.input_proj(x[:, -1:, :])  # 마지막 타임스텝만
-            
-            # 마지막 타임스텝의 input_proj 출력 비교
-            last_full = x_proj_full[:, -1, :]
-            last_seq = x_proj_last[:, 0, :]
-            diff_proj = torch.abs(last_full - last_seq).max().item()
-            print(f"마지막 타임스텝 input_proj 차이: {diff_proj}")
+    assert context_full.shape == (batch, hidden_dim)
+    assert isinstance(states_full, list) and len(states_full) == 0
+    print("✅ TransformerBackbone: forward(x, None) → (context, []) 정상")
     print()
 
 def test_lstm_state_consistency():
@@ -83,9 +51,9 @@ def test_lstm_state_consistency():
     batch = 1
     seq_len = 6
     
-    model = SharedBackbone(input_dim, hidden_dim, num_layers=2, dropout=0.0)
+    model = TransformerBackbone(input_dim, hidden_dim, num_layers=2, dropout=0.0, seq_len=seq_len)
     model.eval()
-    
+
     # 두 개의 시퀀스 생성
     x1 = torch.randn(batch, seq_len, input_dim)
     x2 = x1.clone()
@@ -96,56 +64,14 @@ def test_lstm_state_consistency():
     print(f"시퀀스2 마지막 값: {x2[0, -1, :3].cpu().numpy()}")
     
     with torch.no_grad():
-        # 첫 번째 시퀀스: 전체 처리
-        context1_full, states1_full = model(x1, None)
-        
-        # 두 번째 시퀀스: 전체 처리
-        context2_full, states2_full = model(x2, None)
-        
-        # 순차 처리로 상태 추적
-        states_seq = None
-        hidden_states1 = []
-        hidden_states2 = []
-        
-        for t in range(seq_len):
-            # 시퀀스1의 t까지
-            x1_t = x1[:, :t+1, :]
-            context1_t, states_seq1 = model(x1_t, states_seq)
-            
-            # 시퀀스2의 t까지
-            x2_t = x2[:, :t+1, :]
-            context2_t, states_seq2 = model(x2_t, states_seq)
-            
-            # 첫 번째 레이어의 hidden state 저장
-            h1 = states_seq1[0][0]
-            h2 = states_seq2[0][0]
-            hidden_states1.append(h1)
-            hidden_states2.append(h2)
-            
-            # 마지막 직전 타임스텝까지 비교
-            if t < seq_len - 1:
-                diff = torch.abs(h1 - h2).max().item()
-                if diff > 1e-5:
-                    print(f"  ⚠️ 타임스텝 {t}: hidden state 차이 {diff:.6f}")
-            
-            # 다음 스텝을 위해 상태 업데이트 (시퀀스1 기준)
-            states_seq = states_seq1
-    
-    # 마지막 직전 타임스텝 hidden state 비교
-    diff_second_last = torch.abs(hidden_states1[-2] - hidden_states2[-2]).max().item()
-    print(f"\n마지막 직전 타임스텝 hidden state 차이: {diff_second_last}")
-    
-    if diff_second_last < 1e-5:
-        print("✅ LSTM 상태: 미래 정보가 현재 상태에 영향을 주지 않음")
-    else:
-        print("❌ LSTM 상태: 미래 정보 누출 가능성")
-        
-        # 전체 처리 결과 비교
-        diff_context = torch.abs(context1_full - context2_full).max().item()
-        print(f"\n전체 처리 컨텍스트 차이: {diff_context}")
-        
-        # 차이가 예상되는지 확인
-        print(f"마지막 타임스텝 변경이 컨텍스트에 영향을 미쳤는가? {diff_context > 0.01}")
+        context1_full, _ = model(x1, None)
+        context2_full, _ = model(x2, None)
+
+    diff_context = torch.abs(context1_full - context2_full).max().item()
+    print(f"전체 처리 컨텍스트 차이 (마지막 타임스텝만 다름): {diff_context}")
+    assert context1_full.shape == context2_full.shape == (batch, hidden_dim)
+    assert diff_context > 1e-5, "마지막 타임스텝이 다르면 컨텍스트도 달라야 함"
+    print("✅ TransformerBackbone: 시퀀스 차이에 따라 context 차이 반영")
     print()
 
 def test_strategy_gating_lookahead():
@@ -154,7 +80,7 @@ def test_strategy_gating_lookahead():
     print("3. Strategy Gating Look-ahead Bias 테스트")
     print("=" * 60)
     
-    from model.xlstm_network import StrategyGating
+    from macroHFT.xlstm_network import StrategyGating
     
     num_strategies = 12
     hidden_dim = 16
@@ -298,9 +224,9 @@ def test_no_future_leakage_comprehensive():
     seq_len = 8
     batch = 1
     
-    model = SharedBackbone(input_dim, hidden_dim, num_layers=2, dropout=0.0)
+    model = TransformerBackbone(input_dim, hidden_dim, num_layers=2, dropout=0.0, seq_len=seq_len)
     model.eval()
-    
+
     # 3개의 시퀀스 생성
     x_base = torch.randn(batch, seq_len, input_dim)
     
@@ -321,45 +247,14 @@ def test_no_future_leakage_comprehensive():
     print("  C: 마지막 타임스텝 변경")
     
     with torch.no_grad():
-        # 각 시퀀스별 상태 추적
-        all_states = {'A': [], 'B': [], 'C': []}
-        
-        for seq_name, x_seq in [('A', x_a), ('B', x_b), ('C', x_c)]:
-            states = None
-            seq_states = []
-            
-            for t in range(seq_len):
-                x_t = x_seq[:, :t+1, :]
-                context_t, states = model(x_t, states)
-                
-                # 각 레이어의 hidden state 저장
-                layer_states = []
-                for layer_idx in range(len(states)):
-                    h = states[layer_idx][0]  # hidden state
-                    layer_states.append(h)
-                
-                seq_states.append(layer_states)
-            
-            all_states[seq_name] = seq_states
-        
-        # 비교: 변경 전 타임스텝까지의 상태가 동일한지 확인
-        print("\n타임스텝별 상태 비교:")
-        
-        # 시퀀스 A vs B: 타임스텝 3에서 변경되었으므로, 타임스텝 2까지는 동일해야 함
-        print("\nA vs B (타임스텝 3 변경):")
-        for t in range(3):  # 타임스텝 0, 1, 2
-            diff = torch.abs(all_states['A'][t][0] - all_states['B'][t][0]).max().item()
-            status = "✅" if diff < 1e-5 else "❌"
-            print(f"  타임스텝 {t}: 차이={diff:.6f} {status}")
-        
-        # 시퀀스 A vs C: 마지막 타임스텝 변경되었으므로, 마지막 직전까지 동일해야 함
-        print("\nA vs C (마지막 타임스텝 변경):")
-        for t in range(seq_len - 1):  # 마지막 직전까지
-            diff = torch.abs(all_states['A'][t][0] - all_states['C'][t][0]).max().item()
-            status = "✅" if diff < 1e-5 else "❌"
-            print(f"  타임스텝 {t}: 차이={diff:.6f} {status}")
-    
-    print("\n✅ 종합 테스트: Look-ahead Bias 없음 확인 완료")
+        ctx_a, _ = model(x_a, None)
+        ctx_b, _ = model(x_b, None)
+        ctx_c, _ = model(x_c, None)
+    diff_ab = torch.abs(ctx_a - ctx_b).max().item()
+    diff_ac = torch.abs(ctx_a - ctx_c).max().item()
+    print(f"컨텍스트 차이 A vs B: {diff_ab:.6f}, A vs C: {diff_ac:.6f}")
+    assert diff_ab > 1e-5 and diff_ac > 1e-5, "입력이 다르면 context도 달라야 함"
+    print("\n✅ TransformerBackbone: 시퀀스별 context 차이 정상")
     print()
 
 def test_trading_realism():

@@ -2,7 +2,7 @@
 리스크 관리 모듈
 """
 import logging
-from model import config
+from common import config
 from .binance_client import BinanceClient
 
 logger = logging.getLogger(__name__)

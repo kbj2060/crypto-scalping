@@ -17,7 +17,7 @@
 
 ```
 [원본 데이터]
-    ├─ data/eth_3m_1year.csv (ETH/USDT 3분봉)
+    ├─ data/integrated_eth_3m_data.csv (ETH 3분봉 + 메트릭/펀딩 통합, 기본 원본)
     └─ data/btc_3m_1year.csv (BTC/USDT 3분봉, 선택적)
     ↓
 [데이터 로딩] (DataCollector)
@@ -67,7 +67,7 @@
 
 ### 2.1 입력 데이터 형식
 
-**ETH/USDT 3분봉 데이터** (`data/eth_3m_1year.csv`)
+**ETH/USDT 3분봉 데이터** (`data/integrated_eth_3m_data.csv` — 통합 원본)
 ```csv
 timestamp,open,high,low,close,volume,taker_buy_volume,cvd
 2024-01-01 00:00:00,2500.0,2505.0,2498.0,2502.0,1000.5,600.3,50000.0

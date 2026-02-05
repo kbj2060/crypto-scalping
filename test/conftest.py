@@ -16,27 +16,22 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture
 def mock_collector():
-    """보상/관측 테스트용 최소 DataCollector 모킹 (eth_data, current_index)."""
+    """보상/관측 테스트용 최소 DataCollector 모킹 (eth_data, current_index). Elite 8 + Ultimate Feature Set."""
+    from common.feature_engineering import ULTIMATE_FEATURE_COLS
     n = 200
-    cols = [
-        "log_return", "roll_return_6", "atr_ratio", "bb_width", "bb_pos",
-        "rsi", "macd_hist", "hma_ratio", "cci", "rvol", "taker_ratio",
-        "cvd_change", "mfi", "cmf", "vwap_dist", "wick_upper", "wick_lower",
-        "range_pos", "swing_break", "chop",
-        "btc_return", "btc_rsi", "btc_corr", "btc_vol", "eth_btc_ratio",
-        "rsi_15m", "trend_15m", "rsi_1h", "trend_1h",
-    ]
+    cols = list(ULTIMATE_FEATURE_COLS)
     df = pd.DataFrame(np.zeros((n, len(cols))), columns=cols)
     df["close"] = 1000.0
+    df["open"] = 998.0
     df["high"] = 1005.0
     df["low"] = 995.0
-    for i in range(12):
+    for i in range(8):
         df[f"strategy_{i}"] = 0.0
     mock = type("MockCollector", (), {"eth_data": df, "current_index": 60})()
     return mock
 
 
 @pytest.fixture
-def strategies_12():
-    """전략 12개 리스트 (obs_info 12 + 3 = 15 차원)."""
-    return list(range(12))
+def strategies_8():
+    """Elite 8 전략 (obs_info 8 + 3 = 11 차원)."""
+    return list(range(8))

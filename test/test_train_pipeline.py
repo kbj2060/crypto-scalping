@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from model import config
+from common import config
 
 
 class TestAuxTargetFormula:

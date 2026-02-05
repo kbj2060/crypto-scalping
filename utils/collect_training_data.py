@@ -44,7 +44,7 @@ if __name__ == '__main__':
     try:
         success = collect_one_year_data()
         if success:
-            logger.info("이제 model/train_ppo.py를 실행하여 학습할 수 있습니다.")
+            logger.info("이제 macroHFT/train_ppo.py를 실행하여 학습할 수 있습니다.")
         else:
             logger.error("데이터 수집 실패")
     except KeyboardInterrupt:

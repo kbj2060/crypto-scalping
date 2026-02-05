@@ -9,8 +9,8 @@ import sys
 if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from model import config
-from model.train_ppo import PPOTrainer
+from common import config
+from macroHFT.train_ppo import PPOTrainer
 
 
 def train_specialist(regime_name, num_episodes=2000):

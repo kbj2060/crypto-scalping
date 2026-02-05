@@ -1,7 +1,7 @@
 """
-Look-ahead Bias 검증 테스트 (model/xlstm_network.py)
+Look-ahead Bias 검증 테스트 (macroHFT/xlstm_network.py)
 - CausalConv1d: 미래 시점 참조 시 출력이 바뀌면 안 됨
-- SharedBackbone: Causal Conv + LSTM 조합이 인과성 유지하는지 검증
+- TransformerBackbone: (상태 없음, 전체 시퀀스 입력)
 """
 import sys
 from pathlib import Path
@@ -14,9 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from model.xlstm_network import CausalConv1d, SharedBackbone
+from macroHFT.xlstm_network import TransformerBackbone
 
 
+@pytest.mark.skip(reason="CausalConv1d removed from xlstm_network; backbone is now TransformerBackbone")
 class TestCausalConv1dLookAheadBias:
     """CausalConv1d: 미래 데이터를 참조하면 안 됨 (Look-ahead Bias 방지)."""
 
@@ -79,10 +80,12 @@ class TestCausalConv1dLookAheadBias:
         out = conv(x)
         assert out.shape == (B, 16, L), "출력 시퀀스 길이는 입력과 동일해야 함"
 
-class TestSharedBackboneLookAheadBias:
+class TestTransformerBackboneLookAheadBias:
+    """TransformerBackbone: 전체 시퀀스 입력 시 (context, []) 반환. causal 여부는 마스킹에 따름."""
+
     @pytest.fixture
     def backbone(self):
-        return SharedBackbone(input_dim=16, hidden_dim=32, num_layers=1, dropout=0.0)
+        return TransformerBackbone(input_dim=16, hidden_dim=32, num_layers=1, dropout=0.0, seq_len=50)
 
     def test_causal_property_via_truncated_inputs(self, backbone):
         """

@@ -5,7 +5,7 @@ DataPreprocessor (Rolling Normalization) 유닛 테스트.
 import numpy as np
 import pytest
 
-from model.preprocess import DataPreprocessor
+from common.preprocess import DataPreprocessor
 
 
 class TestDataPreprocessorRollingNorm:
