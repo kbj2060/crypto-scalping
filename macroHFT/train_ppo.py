@@ -62,6 +62,12 @@ class PPOTrainer:
         
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self._fit_global_scaler_dummy()
+        
+        # [Genius Patch] PPO 전용 리워드 함수 주입 (Monkey Patching)
+        from macroHFT.macrohft_reward import calculate_ppo_reward
+        import types
+        self.env.calculate_reward = types.MethodType(calculate_ppo_reward, self.env)
+        logger.info("✅ MacroHFT 전용 리워드 로직(Tactical Reward: Timing) 적용 완료")
 
         state_dim = self.env.get_state_dim()
         action_dim = 3  # [Hold, Buy, Sell]
@@ -72,6 +78,18 @@ class PPOTrainer:
 
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         self.episode_rewards = []
+        
+        # [Speed Patch 1] 데이터프레임을 NumPy 배열로 미리 변환 (초고속 조회)
+        if self.data_collector.eth_data is not None:
+            self.close_prices = self.data_collector.eth_data['close'].values.astype(np.float32)
+            # Volatility 데이터 캐싱
+            if 'volatility_z' in self.data_collector.eth_data.columns:
+                self.volatility_data = self.data_collector.eth_data['volatility_z'].values.astype(np.float32)
+            else:
+                self.volatility_data = np.zeros(len(self.close_prices), dtype=np.float32)
+            logger.info(f"✅ NumPy 배열 캐싱 완료: {len(self.close_prices):,}개 가격 데이터")
+        else:
+            raise RuntimeError("ETH 데이터를 로드할 수 없습니다.")
         
         # TensorBoard
         tb_base = os.path.join('logs', 'tensorboard')
@@ -284,14 +302,17 @@ class PPOTrainer:
         prev_unrealized_pnl = 0.0
         hold_count, buy_count, sell_count = 0, 0, 0
         
-        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode_name}]", leave=False)
+        # [Speed Patch 2] tqdm 업데이트 빈도 조절 (mininterval=1.0)
+        # 매 스텝 출력하지 않고 1초에 한 번만 갱신하여 콘솔 I/O 병목 제거
+        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode_name}]", leave=False, mininterval=1.0)
         
         for step in pbar:
             current_idx = self.data_collector.current_index
             if current_idx >= self.train_end_idx - 1:
                 break
 
-            curr_price = float(self.data_collector.eth_data.iloc[current_idx]['close'])
+            # [Speed Patch 3] iloc 대신 numpy 배열 직접 조회
+            curr_price = float(self.close_prices[current_idx])
 
             # Aux Target (Volatility)
             lookback_vol = min(10, current_idx - config.LOOKBACK)
@@ -320,10 +341,8 @@ class PPOTrainer:
             prev_pos_str = current_position
 
             # Action Masking
-            market_vol = 0.0
-            # [수정] atr_ratio 대신 volatility_z 사용 확인
-            if 'volatility_z' in self.data_collector.eth_data.columns:
-                market_vol = float(self.data_collector.eth_data.iloc[current_idx]['volatility_z'])
+            # [Speed Patch 4] Volatility NumPy 배열 직접 조회
+            market_vol = float(self.volatility_data[current_idx])
             
             action_mask = self.get_action_mask(current_position, market_vol, step)
             action, prob, val = self.agent.select_action(

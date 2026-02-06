@@ -146,15 +146,15 @@ TEST_SPLIT = 0.15
 # [튜닝] Episode 증가 (Early Stopping 신뢰)
 TRAIN_NUM_EPISODES = 3000  # 5000 → 10000
 
-TRAIN_MAX_STEPS_PER_EPISODE = 480
+TRAIN_MAX_STEPS_PER_EPISODE = 240
 MAX_TRADES_PER_EPISODE = 50
-TRAIN_SAVE_INTERVAL = 50
+TRAIN_SAVE_INTERVAL = 200
 
 # [튜닝] Expert Phase 증가
 MACROHFT_EXPERT_PHASE_EPISODES = 5000  # 3000 → 5000 (충분한 전문가 학습)
 
 EVAL_INITIAL_CAPITAL = 10000
-EVAL_VERBOSE_INTERVAL = 100
+EVAL_VERBOSE_INTERVAL = 200
 
 # =============================================================================
 # [TD3 설정] - 긴급 처방 적용 (야수 모드)
@@ -197,7 +197,7 @@ TD3_WARMUP_STEPS = 10000  # 충분히 데이터를 모으고 학습 시작
 USE_AMP = True  # FP16 연산으로 메모리 50% 절감, 속도 2배
 
 # Torch Compile (PyTorch 2.0+)
-USE_TORCH_COMPILE = True  # 그래프 최적화
+USE_TORCH_COMPILE = False  # 그래프 최적화
 
 # cuDNN Benchmark (3070Ti Ampere 최적화)
 USE_CUDNN_BENCHMARK = True  # 입력 크기 고정 시 최적 알고리즘 탐색

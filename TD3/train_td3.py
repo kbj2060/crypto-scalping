@@ -50,6 +50,12 @@ class TD3Trainer:
         
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self.env.precompute_data() # GPU Caching & Signal Gen
+        
+        # [Genius Patch] TD3 전용 리워드 함수 주입 (Monkey Patching)
+        from TD3.td3_reward import calculate_td3_reward
+        import types
+        self.env.calculate_reward = types.MethodType(calculate_td3_reward, self.env)
+        logger.info("✅ TD3 전용 리워드 로직(Strategic Reward: Big Trend) 적용 완료")
 
         state_dim = self.env.get_state_dim() # 44
         action_dim = 1
