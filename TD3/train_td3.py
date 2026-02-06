@@ -310,7 +310,7 @@ class TD3Trainer:
                 self.agent.save(os.path.join(self.save_dir, "best_td3_model"))
                 logger.info("New Best Model! Reward: %.2f", best_reward)
 
-            if ep % 50 == 0:
+            if ep % 10 == 0:
                 self.agent.save(os.path.join(self.save_dir, f"td3_model_{ep}"))
 
 
