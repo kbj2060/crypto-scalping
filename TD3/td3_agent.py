@@ -144,7 +144,7 @@ class TD3Agent:
             adaptive_noise = noise * (1.0 - risk_val)
             action = action + np.random.normal(0, adaptive_noise, size=action.shape)
 
-        return np.clip(action, -1, 1), gate_mean.item(), risk_val
+        return np.clip(action, -1, 1), gate_mean, risk_val
 
     def _estimate_uncertainty(self, obs_seq, obs_info, action_np):
         """분위수(Quantile) 기반 정규화 불확실성 추정"""

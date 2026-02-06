@@ -6,6 +6,7 @@ TD3 네트워크 - Strategic Mode
 import torch
 import torch.nn as nn
 import numpy as np
+from common import config
 from common.fusion_transformer import QuantTransformerBackbone, StrategyInteractionLayer, CrossAttentionFusion
 
 # ==============================================================================
@@ -20,11 +21,15 @@ class StrategicActor(nn.Module):
     def __init__(self, input_dim, action_dim=1, info_dim=12, hidden_dim=256, num_layers=3, dropout=0.1):
         super().__init__()
         
+        # [Fix] Config에서 LOOKBACK 가져오기
+        seq_len = getattr(config, 'LOOKBACK', 60)
+
         # 1. Backbone (Strategic Mode)
         self.backbone = QuantTransformerBackbone(
             state_dim=input_dim, 
             hidden_dim=hidden_dim, 
             n_layers=num_layers, 
+            seq_len=seq_len,  # [Fix] 시퀀스 길이 전달
             dropout=dropout, 
             mode='strategic'
         )
@@ -82,10 +87,15 @@ class StrategicCritic(nn.Module):
     """TD3용 Twin Critic (Q1, Q2)"""
     def __init__(self, input_dim, action_dim=1, info_dim=12, hidden_dim=256, num_layers=3, dropout=0.1):
         super().__init__()
+        
+        # [Fix] Config에서 LOOKBACK 가져오기
+        seq_len = getattr(config, 'LOOKBACK', 60)
+
         self.backbone = QuantTransformerBackbone(
             state_dim=input_dim, 
             hidden_dim=hidden_dim, 
-            n_layers=num_layers, 
+            n_layers=num_layers,
+            seq_len=seq_len,  # [Fix] 시퀀스 길이 전달 
             dropout=dropout, 
             mode='strategic'
         )

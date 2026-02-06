@@ -20,12 +20,17 @@ class DataCollector:
         Args:
             use_saved_data: True면 저장된 데이터를 로드, False면 실시간 데이터 사용
         """
-        self.client = BinanceClient()
+        self.use_saved_data = use_saved_data
+        
+        if not use_saved_data:
+            self.client = BinanceClient()
+        else:
+            self.client = None
+
         self.eth_data = None
         self.btc_data = None
         self.eth_funding_rate = None
         self.btc_funding_rate = None
-        self.use_saved_data = use_saved_data
         self.current_index = 0  # 저장된 데이터 사용 시 현재 인덱스
         
         if use_saved_data:

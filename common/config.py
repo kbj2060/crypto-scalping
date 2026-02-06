@@ -180,10 +180,10 @@ TD3_EXPLORE_NOISE = 0.3  # 0.15 → 0.3 (겁먹은 놈 등떠밀기)
 TD3_POLICY_FREQ = 2
 
 # [유지] Batch Size 증가 (안정성)
-TD3_BATCH_SIZE = 512
+TD3_BATCH_SIZE = 128
 
 # [유지] Buffer Size 증가
-TD3_BUFFER_SIZE = 200000
+TD3_BUFFER_SIZE = 100000
 
 # [긴급 처방 3] Warmup 증가 (충분한 데이터 수집)
 TD3_WARMUP_STEPS = 10000  # 충분히 데이터를 모으고 학습 시작
