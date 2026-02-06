@@ -8,10 +8,10 @@ def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
                          current_position=None, effective_leverage=1.0):
     """
-    [MacroHFT Tactical Reward]
-    - '금융 치료' 로직 적용 (수익만이 살길)
-    - 잦은 매매(Churning) 강력 억제
-    - 짧은 보유 시간 선호 (스캘핑/데이 트레이딩 성향)
+    [MacroHFT Tactical Reward - Soft Penalty Ver.]
+    - 진입 페널티를 대폭 완화하여 '시도'를 장려함
+    - 대신, 손실을 보았을 때의 타격을 유지하여 '신중함'을 가르침
+    - 실현 손익(Realized PnL)에 대한 보상을 더 신뢰
     """
     reward = 0.0
     
@@ -24,25 +24,18 @@ def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
         # 이익은 확실하게 보상, 손실은 확실하게 처벌
         reward += realized_pnl * 100.0 
         
-        # [MacroHFT 특화] 수수료 페널티 (Churning 방지)
-        # 매매 횟수를 줄이고 승률을 높여야 함
-        reward -= 0.5 
+        # [수정] 수수료 페널티 대폭 완화 (0.5 -> 0.05)
+        # 이제 쫄지 말고 진입해라. 단, 뇌동매매는 여전히 손해다.
+        reward -= 0.05 
 
-    # 3. 시간 감가 (Time Decay)
-    # 전술가는 포지션을 오래 끌면 불리함 (자금 회전율 저하)
+    # 3. 시간 비용 (Time Decay)
+    # 오래 들고 있으면 기회비용 발생 (약한 압박)
     if current_position is not None and current_position != 'HOLD':
-        if step_pnl > 0:
-            reward += 0.01  # 수익 중이면 버텨도 됨 (소폭 보너스)
-        else:
-            reward -= 0.05  # 손실 중인데 버티면 페널티 (빠른 손절 유도)
+        if step_pnl <= 0:  # 수익이 안 나는데 버티면
+            reward -= 0.01 
     
-    # 4. 빠른 익절 보너스 (MacroHFT 특화)
-    # 짧은 시간에 수익을 내면 추가 보상
-    if trade_done and realized_pnl > 0 and holding_time < 20:  # 1시간(20틱) 이내 익절
-        reward += 0.3  # "빠르고 정확하게 먹었다"
-    
-    # 5. 방향성 일관성 보너스
-    # 같은 방향으로 계속 수익을 내면 트렌드를 잘 타는 것
-    # (구현 생략, 필요 시 self.recent_trades 등으로 추적 가능)
+    # 4. 빠른 익절 보너스는 제거 (자연스러운 학습 유도)
+    # 기존: 빠른 익절 시 +0.3 보너스 -> 제거
+    # 이유: 보상 설계를 간소화하고 realized_pnl에만 집중
 
     return float(np.clip(reward, -10.0, 10.0))

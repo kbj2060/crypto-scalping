@@ -316,4 +316,4 @@ class TD3Trainer:
 
 if __name__ == "__main__":
     trainer = TD3Trainer()
-    trainer.train(resume=False)
+    trainer.train(resume=True)
