@@ -161,12 +161,16 @@ class TD3Trainer:
                 try:
                     self.agent.load(last_model_path)
                     logger.info("모델 로드 완료 (이어하기): %s", last_model_path)
+                    # [핵심] 이어하기 = 이미 학습됨 = Warmup 스킵
+                    logger.info("⚠️ 이어하기 감지: Warmup을 강제로 스킵합니다.")
+                    total_timesteps = warmup + 1  # Warmup 건너뛰기
                 except Exception as e:
                     logger.warning("모델 로드 실패 (처음부터 진행): %s", e)
             else:
                 logger.info("새로 학습 시작 (이전 모델 미로드)")
         else:
             logger.info("새로 학습 시작 (이전 모델 미로드)")
+
 
         TRANSACTION_COST = 0.0005
 
