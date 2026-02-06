@@ -5,7 +5,7 @@ import numpy as np
 from torch.distributions import Categorical
 import os
 from common import config
-from .macrohft_network import MacroHFTNetwork
+from .macrohft_network import TrendExpert, VolatilityExpert, SidewaysExpert
 
 class Router(nn.Module):
     def __init__(self, input_dim, num_experts=3):
@@ -34,19 +34,29 @@ class PPOAgent:
         hidden_dim = hidden_dim if hidden_dim is not None else config.NETWORK_HIDDEN_DIM
         dropout = getattr(config, 'NETWORK_DROPOUT', 0.1)
 
-        # Experts (Trend, Volatility, Sideways)
+        # [Expert Specialization] 전문가별 특화 네트워크 할당
+        # - TrendExpert: Hidden=512, Layers=4, Dropout=0.2 (깊고 넓은 네트워크)
+        # - VolatilityExpert: Hidden=128, Layers=1, Dropout=0.1 (얕고 빠른 네트워크)
+        # - SidewaysExpert: Hidden=256, Layers=2, Dropout=0.05 (통계적 안정성)
         self.experts = nn.ModuleList([
-            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
-            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout),
-            MacroHFTNetwork(state_dim, action_dim, info_dim, hidden_dim, config.NETWORK_NUM_LAYERS, dropout)
+            TrendExpert(state_dim, action_dim, info_dim),      # Index 0: Trend
+            VolatilityExpert(state_dim, action_dim, info_dim), # Index 1: Volatility
+            SidewaysExpert(state_dim, action_dim, info_dim)   # Index 2: Sideways
         ]).to(device)
         self.expert_names = ['trend', 'volatility', 'sideways']
 
         self.router = Router(state_dim, num_experts=3).to(device)
         
         self.lr = config.PPO_LEARNING_RATE
-        # Optimizer
-        self.opt_experts = [optim.Adam(exp.parameters(), lr=self.lr * 0.5, eps=1e-5) for exp in self.experts]
+        # [Expert Specialization] 전문가별 독립 학습률
+        # - Trend: 0.7x (신중한 학습, 긴 추세 패턴)
+        # - Volatility: 1.2x (빠른 학습, 즉각 반응)
+        # - Sideways: 0.5x (안정적 학습, 통계적 패턴)
+        self.opt_experts = [
+            optim.Adam(self.experts[0].parameters(), lr=self.lr * 0.7, eps=1e-5),  # Trend
+            optim.Adam(self.experts[1].parameters(), lr=self.lr * 1.2, eps=1e-5),  # Volatility
+            optim.Adam(self.experts[2].parameters(), lr=self.lr * 0.5, eps=1e-5)   # Sideways
+        ]
         self.opt_router = optim.Adam(self.router.parameters(), lr=self.lr, eps=1e-5)
         
         self.gamma = config.PPO_GAMMA

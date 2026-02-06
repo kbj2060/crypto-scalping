@@ -557,4 +557,4 @@ class PPOTrainer:
 if __name__ == "__main__":
     # 실행부: resume=False 로 호출하면 이전 모델 없이 새로 학습
     trainer = PPOTrainer()
-    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=True)
+    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=False)

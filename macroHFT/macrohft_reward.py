@@ -39,3 +39,62 @@ def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
     # 이유: 보상 설계를 간소화하고 realized_pnl에만 집중
 
     return float(np.clip(reward, -10.0, 10.0))
+
+
+# ==============================================================================
+# 전문가별 특화 리워드 함수 (Expert Specialization)
+# ==============================================================================
+
+def calculate_specialized_reward(expert_type, step_pnl, realized_pnl, trade_done, 
+                                 holding_time=0, effective_leverage=1.0, current_position=None):
+    """
+    전문가별 특화된 리워드 계산
+    
+    Args:
+        expert_type: 'trend', 'volatility', 'sideways' 중 하나
+        step_pnl: 스텝별 미실현 손익
+        realized_pnl: 실현 손익
+        trade_done: 거래 완료 여부
+        holding_time: 보유 시간 (스텝 수)
+        effective_leverage: 유효 레버리지
+        current_position: 현재 포지션 ('LONG', 'SHORT', 'HOLD' 또는 None)
+    """
+    reward = 0.0
+
+    if expert_type == 'trend':
+        # [Trend Expert] 추세 지속성에 보상 (Long-run Profit)
+        reward += step_pnl * 100.0
+        
+        # 수익 중일 때 보유 시간에 비례한 보너스 (추세 유지 장려)
+        if step_pnl > 0:
+            reward += (holding_time * 0.01)
+        
+        # 실현 손익 강조 (큰 수익 선호)
+        if trade_done:
+            reward += realized_pnl * 150.0
+
+    elif expert_type == 'volatility':
+        # [Volatility Expert] 빠른 익절과 강한 모멘텀 포착 (Hit & Run)
+        reward += step_pnl * 50.0
+        
+        # 실현 손익 극대화 (빠른 수익 실현 장려)
+        if trade_done:
+            reward += realized_pnl * 200.0
+            # Taker 수수료 페널티 반영
+            reward -= 0.05
+
+    elif expert_type == 'sideways':
+        # [Sideways Expert] 박스권 스캘핑 특화 (Market Making Style)
+        
+        # 관망 시 작은 보상 (무의미한 뇌동매매 방지)
+        if not trade_done:
+            reward += 0.005
+        else:
+            # 횡보장에서는 작은 수익도 크게 보상 (리베이트 효과 모사)
+            reward += realized_pnl * 500.0 + 0.02  # 수수료 리베이트 가산
+            
+            # 미세 수익 장려 (박스권 상하단 타겟팅)
+            if 0 < abs(realized_pnl) < 0.001:
+                reward += 0.1
+
+    return float(np.clip(reward, -10.0, 10.0))
