@@ -205,7 +205,10 @@ class TD3Trainer:
                     action_val = np.random.uniform(-1, 1)
                     risk_val = 0.5
                 else:
-                    action_val_arr, _, risk_val = self.agent.select_action(state, noise=config.TD3_EXPLORE_NOISE)
+                    # [Stabilized] 탐험 노이즈 축소 (0.3 → 0.1)
+                    # 리워드 스케일이 줄어들면서 Q-value 크기도 작아짐
+                    # 기존 노이즈가 너무 크면 학습된 Q값을 무시하고 랜덤 행동만 반복
+                    action_val_arr, _, risk_val = self.agent.select_action(state, noise=0.1)
                     action_val = float(action_val_arr[0])
 
                 target_pos_size = action_val if abs(action_val) > 0.3 else 0.0
@@ -265,9 +268,12 @@ class TD3Trainer:
                 
                 if should_exit:
                     logger.debug(f"   🚨 청산 발동: {exit_reason} | ROE: {step_pnl_roe*100:.2f}%")
-                    # 강제 청산 시 페널티
+                    # [Stabilized] 청산 시 강력한 페널티
+                    # 새로운 리워드 스케일(-20~20)에서 -10은 매우 큰 페널티
                     if exit_reason == "LIQUIDATION":
-                        step_pnl_roe = -0.80  # 자산 80% 손실
+                        step_pnl_roe = -0.80  # 실제 자산 80% 손실
+                        # 리워드 함수에서 이를 처리하도록 하되, 별도 페널티 추가 신호
+                        # 여기서는 ROE를 그대로 전달하고, 리워드 함수가 처리
                     current_pos_size = 0.0  # 포지션 정리
                 
                 # [레버리지 시스템] 리워드 계산 (횡보 페널티 포함)

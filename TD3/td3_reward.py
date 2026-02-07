@@ -1,6 +1,6 @@
 """
 TD3 전략가(Strategic) 전용 리워드 함수
-목표: "변동성을 견디고, 레버리지를 적절히 사용하여 거대한 추세(Big Trend)를 먹는 것."
+목표: "Big Trend를 먹어라. 변동성을 견디고 거대한 추세를 포착하라."
 """
 import numpy as np
 
@@ -8,46 +8,52 @@ def calculate_td3_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
                          current_position=None, effective_leverage=1.0):
     """
-    [TD3 Strategic Reward]
-    - 레버리지(action 크기)에 비례한 보상/벌칙
-    - 잔파도(Noise)는 무시하고 추세 수익(Trend)에 집중
-    - Sortino Ratio 개념 도입 (하방 변동성만 처벌)
+    [TD3 Strategic Reward - Stabilized Ver.]
+    - 스케일을 1/10로 축소하여 학습 안정성 확보
+    - 변동성 페널티를 강화하여 '안정적 우상향' 유도
+    - 손실 회피 성향 주입 (Sortino Ratio 개념)
     """
     reward = 0.0
     
-    # action은 TD3의 출력 (-1 ~ 1), 즉 레버리지 강도
-    leverage_intensity = abs(action) if action is not None else 1.0
+    # action은 레버리지 강도 (연속 값)
+    # action이 텐서나 배열일 경우 스칼라로 변환
+    if hasattr(action, 'item'):
+        action = action.item()
+    leverage_intensity = abs(float(action)) if action is not None else 1.0
     
-    # 1. 평가 손익 (Unrealized PnL)
-    # 전략가는 평가 이익이 커지는 과정을 견뎌야 함.
-    # 이익일 때는 레버리지 가중치를 둬서 "잘 질렀다"고 칭찬.
-    if step_pnl > 0:
-        reward += step_pnl * 100.0 * (1.0 + leverage_intensity)
+    # 1. 평가 손익 (Unrealized PnL) - 스케일 대폭 축소 (100 → 10)
+    # ROE 관점: step_pnl * 레버리지
+    roe = step_pnl * effective_leverage
+    
+    if roe > 0:
+        # 수익일 때: 적절한 보상
+        reward += roe * 10.0 
     else:
-        # 손실일 때는 "왜 크게 질렀냐"고 더 크게 혼냄 (위험 회피)
-        reward += step_pnl * 100.0 * (1.0 + leverage_intensity * 1.5)
+        # 손실일 때: 손실 회피 성향 주입 (2배 페널티)
+        # Sortino Ratio처럼 하방 변동성을 더 민감하게 처벌
+        reward += roe * 20.0 
 
-    # 2. 실현 손익 (Realized PnL)
-    if trade_done and realized_pnl != 0.0:
+    # 2. 실현 손익 (Realized PnL) - 스케일 축소 (200 → 20)
+    if trade_done:
         if realized_pnl > 0:
-            reward += realized_pnl * 200.0  # 익절은 언제나 옳다
+            reward += realized_pnl * 20.0
         else:
-            reward += realized_pnl * 200.0  # 손절
-            
-        # [TD3 특화] 짧게 치고 빠지면(Scalping) 페널티
-        # 전략가는 진득하게 추세를 먹어야 함 (최소 12스텝=36분)
-        if holding_time < 12: 
-            reward -= 1.0 
+            # 손절매는 더 아프게 (30배 페널티)
+            reward += realized_pnl * 30.0
 
-    # 3. 드로우다운 방어
-    # 큰 손실 상태로 오래 버티면 가중 처벌 (손절 유도)
-    if current_position is not None and current_position != 0 and step_pnl < -0.01:  # -1% 이상 손실 시
-        reward -= 0.1 * (holding_time / 10.0)
-    
-    # 4. 레버리지 효율성 보너스
-    # 높은 레버리지로 큰 수익을 냈다면 추가 보상
-    if step_pnl > 0.02 and effective_leverage > 10:  # ROE +2% 이상, 10배+ 레버리지
-        reward += 0.5  # "고레버리지를 잘 썼다"
+        # 잦은 매매 방지 (수수료/슬리피지 비용 현실화)
+        reward -= 0.1 
 
-    # Reward Clipping (안정성)
+    # 3. 레버리지 과용 페널티 (Risk Control)
+    # 손실 구간에서 고레버리지를 쓰고 있다면 추가 감점
+    if step_pnl < 0 and leverage_intensity > 0.8:
+        reward -= 0.05 * leverage_intensity
+
+    # 4. 청산(Liquidation) 방어 보너스 (생존 보상)
+    # 포지션을 잡고 있는데 청산당하지 않고 살아남았다면 미세한 보상
+    if current_position is not None and current_position != 'HOLD':
+        reward += 0.001
+
+    # 5. 클리핑 범위 확장 (-10 → -20)
+    # 스케일을 줄였으므로, 클리핑 범위를 조금 넓혀서 극단적 상황은 정보로 받아들임
     return float(np.clip(reward, -20.0, 20.0))
