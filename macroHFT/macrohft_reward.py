@@ -84,17 +84,22 @@ def calculate_specialized_reward(expert_type, step_pnl, realized_pnl, trade_done
             reward -= 0.05
 
     elif expert_type == 'sideways':
-        # [Sideways Expert] 박스권 스캘핑 특화 (Market Making Style)
+        # [Sideways Expert] 박스권 스캘핑 특화
         
-        # 관망 시 작은 보상 (무의미한 뇌동매매 방지)
         if not trade_done:
-            reward += 0.005
+            # 관망 보상 강화 (뇌동매매 억제)
+            reward += 0.01
         else:
-            # 횡보장에서는 작은 수익도 크게 보상 (리베이트 효과 모사)
-            reward += realized_pnl * 500.0 + 0.02  # 수수료 리베이트 가산
+            # [수정 후] 이익이 났을 때만 리베이트 보너스 지급!
+            reward += realized_pnl * 500.0
             
+            if realized_pnl > 0:
+                reward += 0.05  # 수익 시 강력한 보너스 (리베이트+알파)
+            else:
+                reward -= 0.02  # 손실 시에는 수수료 페널티 추가 (확인사살)
+
             # 미세 수익 장려 (박스권 상하단 타겟팅)
-            if 0 < abs(realized_pnl) < 0.001:
+            if 0 < realized_pnl < 0.001:
                 reward += 0.1
 
     return float(np.clip(reward, -10.0, 10.0))

@@ -72,7 +72,11 @@ class QuantTransformerBackbone(nn.Module):
             d_model=hidden_dim, nhead=n_heads, dim_feedforward=hidden_dim * 4,
             dropout=dropout, activation='gelu', batch_first=True, norm_first=True
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, 
+            num_layers=n_layers,
+            enable_nested_tensor=False  # 최적화 기능 비활성화 (경고 제거)
+        )
         self.layer_norm = nn.LayerNorm(hidden_dim)
 
     def _generate_decay_mask(self, batch_size, seq_len, device):

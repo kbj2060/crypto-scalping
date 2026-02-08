@@ -87,7 +87,17 @@ class PPOTrainer:
                 self.volatility_data = self.data_collector.eth_data['volatility_z'].values.astype(np.float32)
             else:
                 self.volatility_data = np.zeros(len(self.close_prices), dtype=np.float32)
-            logger.info(f"✅ NumPy 배열 캐싱 완료: {len(self.close_prices):,}개 가격 데이터")
+            
+            # [Speed Patch 4] 전략 점수 NumPy 캐싱 (핵심 최적화)
+            # 매 스텝 iloc으로 8번 조회하던 것을 미리 행렬로 변환
+            strategy_cols = [f'strategy_{i}' for i in range(len(self.strategies))]
+            valid_strat_cols = [c for c in strategy_cols if c in self.data_collector.eth_data.columns]
+            if valid_strat_cols:
+                self.strategy_matrix = self.data_collector.eth_data[valid_strat_cols].values.astype(np.float32)
+            else:
+                self.strategy_matrix = np.zeros((len(self.close_prices), len(self.strategies)), dtype=np.float32)
+            
+            logger.info(f"✅ NumPy 배열 캐싱 완료: {len(self.close_prices):,}개 데이터 (Close, Vol, Strategies)")
         else:
             raise RuntimeError("ETH 데이터를 로드할 수 없습니다.")
         
@@ -117,11 +127,11 @@ class PPOTrainer:
         path = 'data/training_features.csv'
         cached_strategies_path = 'data/cached_strategies.csv'
         if os.path.exists(path):
-            df = pd.read_csv(path, index_col=0, parse_dates=True)
+            df = pd.read_csv(path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
             df = df.ffill().bfill()
             if os.path.exists(cached_strategies_path):
                 try:
-                    cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
+                    cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
                     strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
                     for col in strategy_cols:
                         if col in cached_df.columns:
@@ -272,7 +282,8 @@ class PPOTrainer:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
         # [Interleaved] 전문가 3회 -> 라우터 1회 무한 반복 (전문가 상시 학습)
-        cycle = episode_num % 4
+        # [수정] -1을 해줘서 0부터 시작하게 만듦 (순서: Trend → Volatility → Sideways → Router)
+        cycle = (episode_num - 1) % 4
         if cycle < 3:
             mode = "expert"
             expert_idx = cycle
@@ -280,11 +291,15 @@ class PPOTrainer:
             if not target_indices:
                 target_indices = getattr(self, "idx_all", self.all_indices)
             mode_name = f"Train: {self.agent.expert_names[expert_idx].upper()}"
+            # [수정] 현재 훈련 주체의 이름 식별
+            current_key = self.agent.expert_names[expert_idx]
         else:
             mode = "router"
             expert_idx = 0
             target_indices = getattr(self, "idx_all", self.all_indices)
             mode_name = "Train: ROUTER"
+            # [수정] 현재 훈련 주체는 라우터
+            current_key = "router"
 
         if not target_indices:
             target_indices = self.all_indices
@@ -304,7 +319,7 @@ class PPOTrainer:
         
         # [Speed Patch 2] tqdm 업데이트 빈도 조절 (mininterval=1.0)
         # 매 스텝 출력하지 않고 1초에 한 번만 갱신하여 콘솔 I/O 병목 제거
-        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode_name}]", leave=False, mininterval=1.0)
+        pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{mode_name}]", leave=False, mininterval=60.0)
         
         for step in pbar:
             current_idx = self.data_collector.current_index
@@ -314,10 +329,11 @@ class PPOTrainer:
             # [Speed Patch 3] iloc 대신 numpy 배열 직접 조회
             curr_price = float(self.close_prices[current_idx])
 
-            # Aux Target (Volatility)
+            # [Speed Patch 5] Aux Target Volatility - NumPy Optimization
             lookback_vol = min(10, current_idx - config.LOOKBACK)
             if lookback_vol > 0:
-                past_prices = self.data_collector.eth_data['close'].iloc[current_idx-lookback_vol:current_idx].values
+                # iloc 제거 -> NumPy Slicing 사용
+                past_prices = self.close_prices[current_idx-lookback_vol:current_idx]
                 returns = np.diff(past_prices) / (past_prices[:-1] + 1e-10)
                 volatility_label = float(np.std(returns) * 100.0)
             else:
@@ -395,12 +411,9 @@ class PPOTrainer:
                     entry_price = 0.0
                     trade_count += 1
 
-            # Metric Update
-            strategy_scores = []
-            for i in range(len(self.strategies)):
-                col = f'strategy_{i}'
-                if col in self.data_collector.eth_data.columns:
-                    strategy_scores.append(float(self.data_collector.eth_data[col].iloc[current_idx]))
+            # [Speed Patch 4] Metric Update - NumPy Optimized
+            # 기존 iloc 루프를 제거하고 미리 캐싱된 NumPy 행렬에서 조회
+            strategy_scores = self.strategy_matrix[current_idx].tolist()
             
             self.env.update_trading_metrics(
                 prev_position=prev_pos_str,
@@ -480,7 +493,8 @@ class PPOTrainer:
                 for k, v in metrics.items():
                     self.writer.add_scalar(k, v, episode_num)
 
-        return episode_reward, trade_count, episode_pnl
+        # [수정] current_key를 함께 반환하여 누가 뛴 에피소드인지 알림
+        return episode_reward, trade_count, episode_pnl, current_key
 
     def train(self, num_episodes=1000, resume=True):
         """
@@ -488,8 +502,16 @@ class PPOTrainer:
             num_episodes: 학습 에피소드 수
             resume: True면 이전 모델 불러와서 이어서 학습, False면 새로 시작
         """
-        logger.info("🚀 PPO 학습 시작 (macroHFT Ver.)")
-        best_reward = -float('inf')
+        logger.info("🚀 PPO 학습 시작 (Multi-Best Tracking Ver.)")
+        
+        # [핵심 수정] 단일 변수가 아닌, 딕셔너리로 각각의 최고점 관리
+        best_rewards = {
+            'trend': -float('inf'),
+            'volatility': -float('inf'),
+            'sideways': -float('inf'),
+            'router': -float('inf')
+        }
+        
         # 가중치 저장 경로: data/모델명/실행시간/ (TD3와 동일 구조)
         run_time = datetime.now().strftime('%Y%m%d_%H%M%S')
         save_dir = os.path.join('data', 'macroHFT', run_time)
@@ -528,19 +550,27 @@ class PPOTrainer:
 
         for ep in range(1, num_episodes + 1):
             try:
+                # [수정] train_episode가 current_key를 반환하도록 받음
                 res = self.train_episode(ep)
                 if res is None: continue
-                r, c, pnl = res
+                r, c, pnl, current_key = res  # <--- key 수신
+                
                 self.episode_rewards.append(r)
                 avg_r = np.mean(self.episode_rewards[-10:])
-                logger.info(f"✅ Ep {ep}: Reward {r:.4f} | Avg {avg_r:.4f} | Trades: {c} | PnL: {pnl*100:.2f}%")
+                logger.info(f"✅ Ep {ep} [{current_key.upper()}]: Reward {r:.4f} | Avg {avg_r:.4f} | Trades: {c} | PnL: {pnl*100:.2f}%")
                 
-                # 매 에피소드마다 best 체크 후 갱신 시에만 저장
-                if r > best_reward:
-                    best_reward = r
-                    self.agent.save_model(f"{base_path}_best.pth")
-                    logger.info("New best model saved (Reward: %.4f)", best_reward)
-                if ep % 50 == 0:
+                # [핵심 수정] 해당 주체의 최고점인지 확인하고 개별 저장
+                if r > best_rewards[current_key]:
+                    best_rewards[current_key] = r
+                    
+                    # 파일명을 구분하여 저장: ex) ppo_model_best_trend.pth, ppo_model_best_router.pth
+                    save_name = f"{base_path}_best_{current_key}.pth"
+                    self.agent.save_model(save_name)
+                    
+                    logger.info(f"🏆 New Best {current_key.upper()} Model! (Reward: {r:.4f})")
+                
+                # 정기 저장 (Last Model)
+                if ep % 10 == 0:
                     self.agent.save_model(f"{base_path}_last.pth")
                     
             except KeyboardInterrupt:

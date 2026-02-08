@@ -67,6 +67,37 @@ class PPOAgent:
         
         self.data = []
         self.current_states = [None] * 3
+        
+        # [Speed Hack 2] AMP용 GradScaler 초기화
+        if device == 'cuda':
+            self.scaler = torch.amp.GradScaler()
+        else:
+            self.scaler = None
+        
+        
+        # [Speed Hack 1] 모델 컴파일 (Windows 호환성 패치)
+        # Windows('nt')가 아니고, 리눅스/맥 환경일 때만 컴파일 수행
+        import os
+        if os.name != 'nt' and hasattr(torch, 'compile') and device == 'cuda':
+            try:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info("⚡ 모델 컴파일 중... (최초 실행 시 1~2분 소요됨)")
+                for i in range(len(self.experts)):
+                    self.experts[i] = torch.compile(self.experts[i])
+                self.router = torch.compile(self.router)
+                logger.info("✅ 컴파일 완료! 학습 속도가 대폭 상승합니다.")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ 모델 컴파일 실패 (무시하고 진행): {e}")
+        else:
+            # Windows 사용자용 안내
+            if os.name == 'nt':
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info("ℹ️ Windows 환경 감지: torch.compile을 건너뜁니다. (AMP 가속은 유지됨)")
+
 
     def reset_episode_states(self):
         self.current_states = [None] * 3
@@ -151,11 +182,10 @@ class PPOAgent:
 
         batch_data = list(zip(*self.data))
         
-        # State Seq
+        # 1. 데이터 텐서 변환 (기존 동일)
         s_seq_np = np.array([x[0].cpu().numpy() if isinstance(x[0], torch.Tensor) else x[0] for x in batch_data[0]])
         s_seq = torch.tensor(s_seq_np, dtype=torch.float32, device=self.device).squeeze(1)
         
-        # State Info
         s_info_np = np.array([x[1].cpu().numpy() if isinstance(x[1], torch.Tensor) else x[1] for x in batch_data[0]])
         s_info = torch.tensor(s_info_np, dtype=torch.float32, device=self.device).squeeze(1)
         
@@ -163,78 +193,140 @@ class PPOAgent:
         r = torch.tensor(batch_data[2], dtype=torch.float32, device=self.device)
         prob_a = torch.tensor(batch_data[4], dtype=torch.float32, device=self.device)
         done_mask = torch.tensor([0.0 if x else 1.0 for x in batch_data[5]], dtype=torch.float32, device=self.device)
+        
+        # [수정] val이 텐서 리스트일 수 있으므로 안전하게 변환
         val = torch.tensor([x.item() if torch.is_tensor(x) else float(x) for x in batch_data[6]], dtype=torch.float32, device=self.device)
         
-        # Volatility Label & Action Masks
         vol_label = torch.tensor([x if isinstance(x, float) else 0.0 for x in batch_data[7]], dtype=torch.float32, device=self.device)
         masks = torch.tensor(np.array(batch_data[8]), dtype=torch.float32, device=self.device)
 
         self.data = []
 
-        # GAE Calculation
+        # 2. GAE Calculation (Boundary Fix)
         with torch.no_grad():
             next_val = torch.roll(val, -1)
-            next_val[-1] = 0.0
+            # [Ace Fix] 마지막 스텝이 done이 아니면, 현재 val을 next_val로 사용하여 급격한 가치 하락 방지
+            if done_mask[-1] == 1.0: # 끝이 아님
+                next_val[-1] = val[-1] 
+            else:
+                next_val[-1] = 0.0
+                
             deltas = r + self.gamma * next_val * done_mask - val
-            deltas[-1] = r[-1] - val[-1]
+            # 마지막 델타 계산 시 보정된 next_val 사용
+            deltas[-1] = r[-1] + self.gamma * next_val[-1] * done_mask[-1] - val[-1]
+            
             advantage = torch.zeros_like(r).to(self.device)
             running_adv = 0.0
             for t in reversed(range(len(r))):
                 running_adv = deltas[t] + self.gamma * self.lmbda * running_adv * done_mask[t]
                 advantage[t] = running_adv
             target_val = advantage + val
+            # 정규화로 학습 안정성 확보
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
+        # 3. Optimizer Selection
         if mode == 'expert':
             optimizer = self.opt_experts[expert_idx]
             network = self.experts[expert_idx]
-            target_params = network.parameters()
+            target_params = list(network.parameters())  # [수정] 리스트로 변환!
         else:
             optimizer = self.opt_router
-            target_params = self.router.parameters()
+            target_params = list(self.router.parameters())  # [수정] 리스트로 변환!
 
         base_entropy = self.entropy_coef
         avg_vol = torch.mean(vol_label).item()
-        dynamic_entropy_coef = base_entropy * (1.0 + 0.5 * avg_vol)
+        # [Ace Tip] 변동성이 클 때 엔트로피를 조금 더 높여 탐험 유도 (계수 조정 가능)
+        dynamic_entropy_coef = base_entropy * (1.0 + 0.2 * avg_vol)
 
         avg_loss = 0.0
         
+        # 4. Training Loop with AMP
         for _ in range(self.k_epochs):
-            optimizer.zero_grad() # 일반 zero_grad 사용
+            optimizer.zero_grad()
 
-            if mode == 'expert':
-                logits, curr_val, _, _, _, _ = network(s_seq, s_info)
+            # [Speed Hack 2] Autocast - 16비트 혼합 정밀도 연산
+            if self.scaler is not None:
+                with torch.cuda.amp.autocast():
+                    if mode == 'expert':
+                        logits, curr_val, _, _, _, _ = network(s_seq, s_info)
+                    else:
+                        # [Ace Fix] 라우터 모드: 전문가들의 Logit과 Value를 모두 합성
+                        l_list = []
+                        v_list = []
+                        
+                        with torch.no_grad():
+                            for exp in self.experts:
+                                l, v, _, _, _, _ = exp(s_seq, s_info)
+                                l_list.append(l)
+                                v_list.append(v)
+                        
+                        weights = self.router(s_seq) # [Batch, Num_Experts]
+                        
+                        # Logit 합성 (Policy)
+                        stacked_logits = torch.stack(l_list, dim=1) # [Batch, Experts, Actions]
+                        logits = torch.sum(weights.unsqueeze(-1) * stacked_logits, dim=1)
+                        
+                        # Value 합성 (Critic) - 라우터도 가치를 평가하게 만듦!
+                        stacked_values = torch.stack(v_list, dim=1) # [Batch, Experts, 1]
+                        curr_val = torch.sum(weights.unsqueeze(-1) * stacked_values, dim=1) # [Batch, 1]
+
+                    # Action Masking
+                    logits = logits + (masks - 1) * 1e9 # 1e10은 너무 커서 NaN 위험, 1e9로 조정
+                    dist = Categorical(logits=logits)
+                    
+                    log_prob = dist.log_prob(a)
+                    ratio = torch.exp(log_prob - prob_a)
+
+                    surr1 = ratio * advantage
+                    surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
+                    actor_loss = -torch.min(surr1, surr2).mean()
+
+                    # [Ace Fix] 라우터 모드에서도 Critic Loss 계산
+                    critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), target_val)
+
+                    entropy_loss = -dynamic_entropy_coef * dist.entropy().mean()
+                    loss = actor_loss + critic_loss + entropy_loss
+
+                # [Speed Hack 2] Scaler로 역전파 (Underflow 방지)
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(optimizer)
+                nn.utils.clip_grad_norm_(target_params, 0.5)
+                self.scaler.step(optimizer)
+                self.scaler.update()
             else:
-                l_list = []
-                # 라우터 모드에서는 전문가들 고정
-                with torch.no_grad():
-                    for exp in self.experts:
-                        l, _, _, _, _, _ = exp(s_seq, s_info)
-                        l_list.append(l)
-                weights = self.router(s_seq)
-                logits = torch.sum(weights.unsqueeze(-1) * torch.stack(l_list, dim=1), dim=1)
-                curr_val = torch.zeros_like(val)
+                # CPU 또는 AMP 미사용 시 기존 방식
+                if mode == 'expert':
+                    logits, curr_val, _, _, _, _ = network(s_seq, s_info)
+                else:
+                    l_list = []
+                    v_list = []
+                    
+                    with torch.no_grad():
+                        for exp in self.experts:
+                            l, v, _, _, _, _ = exp(s_seq, s_info)
+                            l_list.append(l)
+                            v_list.append(v)
+                    
+                    weights = self.router(s_seq)
+                    stacked_logits = torch.stack(l_list, dim=1)
+                    logits = torch.sum(weights.unsqueeze(-1) * stacked_logits, dim=1)
+                    stacked_values = torch.stack(v_list, dim=1)
+                    curr_val = torch.sum(weights.unsqueeze(-1) * stacked_values, dim=1)
 
-            logits = logits + (masks - 1) * 1e10
-            dist = Categorical(logits=logits)
-            log_prob = dist.log_prob(a)
-            ratio = torch.exp(log_prob - prob_a)
-
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
-            actor_loss = -torch.min(surr1, surr2).mean()
-
-            critic_loss = 0.0
-            if mode == 'expert':
+                logits = logits + (masks - 1) * 1e9
+                dist = Categorical(logits=logits)
+                log_prob = dist.log_prob(a)
+                ratio = torch.exp(log_prob - prob_a)
+                surr1 = ratio * advantage
+                surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
+                actor_loss = -torch.min(surr1, surr2).mean()
                 critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), target_val)
+                entropy_loss = -dynamic_entropy_coef * dist.entropy().mean()
+                loss = actor_loss + critic_loss + entropy_loss
 
-            entropy_loss = -dynamic_entropy_coef * dist.entropy().mean()
-            loss = actor_loss + critic_loss + entropy_loss
-
-            # 일반 역전파
-            loss.backward()
-            nn.utils.clip_grad_norm_(target_params, 0.5)
-            optimizer.step()
+                loss.backward()
+                nn.utils.clip_grad_norm_(target_params, 0.5)
+                optimizer.step()
             
             avg_loss += loss.item()
 

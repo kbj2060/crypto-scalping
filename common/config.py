@@ -86,10 +86,10 @@ PPO_EPS_CLIP = 0.2
 # [튜닝] K_EPOCHS 증가 (배치 사이즈 커지면 더 많이 학습)
 PPO_K_EPOCHS = 10  # 4 → 10 (안정성 향상)
 
-# [튜닝] Entropy 강화 (초기 탐험)
-PPO_ENTROPY_COEF = 0.05  # 0.02 → 0.05 (더 다양한 시도)
+# [튜닝] Entropy 감소 (뇌동매매 억제)
+PPO_ENTROPY_COEF = 0.02 # 0.05 → 0.005 (불필요한 랜덤 행동 억제)
 PPO_ENTROPY_DECAY = 0.9995  # 0.999 → 0.9995 (천천히 감소)
-PPO_ENTROPY_MIN = 0.005  # 0.01 → 0.005 (최소값 낮춤)
+PPO_ENTROPY_MIN = 0.001  # 0.005 → 0.001 (최소값 낮춤)
 
 # [튜닝] Learning Rate 증가 (배치 사이즈 증가에 따라)
 PPO_LEARNING_RATE = 1e-4  # 5e-5 → 1e-4
@@ -135,7 +135,7 @@ NETWORK_USE_CHECKPOINTING = False
 TRAIN_ACTION_DIM = 3
 
 # [튜닝] Batch Size 대폭 증가 (AMP 활용)
-TRAIN_BATCH_SIZE = 1024  # 256 → 1024 (3070Ti + AMP로 충분)
+TRAIN_BATCH_SIZE = 256  # 256 → 1024 (3070Ti + AMP로 충분)
 
 TRAIN_SAMPLE_SIZE = 50000
 
@@ -180,7 +180,7 @@ TD3_EXPLORE_NOISE = 0.3  # 0.15 → 0.3 (겁먹은 놈 등떠밀기)
 TD3_POLICY_FREQ = 2
 
 # [유지] Batch Size 증가 (안정성)
-TD3_BATCH_SIZE = 512
+TD3_BATCH_SIZE = 256
 
 # [유지] Buffer Size 증가
 TD3_BUFFER_SIZE = 100000
