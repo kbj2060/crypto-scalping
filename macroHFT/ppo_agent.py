@@ -246,7 +246,7 @@ class PPOAgent:
 
             # [Speed Hack 2] Autocast - 16비트 혼합 정밀도 연산
             if self.scaler is not None:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast(self.device):
                     if mode == 'expert':
                         logits, curr_val, _, _, _, _ = network(s_seq, s_info)
                     else:

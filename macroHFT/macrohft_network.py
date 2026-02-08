@@ -61,7 +61,9 @@ class MacroHFTNetwork(nn.Module):
         
         fused = self.fusion(seq_encodings, query_vec)
         gate = self.gate(fused)
-        self.last_gate_mean = gate.mean().item()
+        # [Ace Fix] .item() 제거 -> .detach() 사용
+        # 값을 꺼내지 않고, 그래디언트만 끊어서 텐서 상태로 유지 (그래프 끊김 방지)
+        self.last_gate_mean = gate.mean().detach()
         final_repr = fused * gate
         
         return self.actor(final_repr), self.critic_mean(final_repr), self.critic_cvar(final_repr), self.aux(final_repr), next_states, self.last_gate_mean
