@@ -58,6 +58,7 @@ PHASE2_END = 1500     # TacticalAgent 단독 학습
 # PHASE3: 1501~ 공동 학습
 
 DECISION_INTERVAL = 5  # MetaController 결정 주기 (5 × 3분 = 15분)
+TD3_UPDATE_FREQ = 10   # TD3 학습 주기 (10 스텝마다 한 번 학습, Off-policy 이점 활용)
 TRANSACTION_COST = getattr(config, 'TRANSACTION_COST', 0.0005)
 
 
@@ -161,11 +162,11 @@ class HierarchicalTrainer:
             except Exception as e:
                 raise RuntimeError(f"피처 생성 실패: {e}")
         
-        df = pd.read_csv(path, index_col=0, parse_dates=True).ffill().bfill()
+        df = pd.read_csv(path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S').ffill().bfill()
         
         if os.path.exists(cached_strategies_path):
             try:
-                cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
+                cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
                 for col in [c for c in cached_df.columns if c.startswith('strategy_')]:
                     df[col] = cached_df[col]
             except:
@@ -388,6 +389,11 @@ class HierarchicalTrainer:
                 abs(action_val), risk_budget
             )
             
+            # [Kelly Decoupling] 학습 초기(Phase 1, 2)에는 최소 레버리지 보장
+            # Kelly가 0배를 출력해도 강제로 탐험하여 데이터를 수집함
+            if not train_meta or not train_tactical:  # Phase 1 or 2
+                effective_leverage = max(effective_leverage, 1.0)  # 최소 1배 보장
+            
             # 포지션 크기 결정
             target_pos_size = np.sign(action_val) * min(abs(action_val), 1.0) if effective_leverage >= 1.0 else 0.0
             
@@ -495,8 +501,10 @@ class HierarchicalTrainer:
                     done
                 )
                 
+                # [Delayed Update] 매 스텝이 아닌 TD3_UPDATE_FREQ마다 학습 (3-5배 속도 향상)
                 if self.total_tactical_steps >= self.tactical_warmup:
-                    t_metrics = self.tactical.train(batch_size=config.TD3_BATCH_SIZE)
+                    if self.total_tactical_steps % TD3_UPDATE_FREQ == 0:
+                        t_metrics = self.tactical.train(batch_size=config.TD3_BATCH_SIZE)
             
             tactical_state = next_tactical_state
             

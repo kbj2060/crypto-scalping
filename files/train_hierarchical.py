@@ -582,4 +582,4 @@ class HierarchicalTrainer:
 
 if __name__ == "__main__":
     trainer = HierarchicalTrainer()
-    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=True)
+    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=False)

@@ -153,6 +153,14 @@ class MetaController:
         self.k_epochs = 5
         self.entropy_coef = 0.03  # 적극적 탐험 (레짐이 다양해야 함)
         
+        # [AMP] Mixed Precision Training
+        if device == 'cuda':
+            self.scaler = torch.amp.GradScaler('cuda')
+            self.use_amp = True
+        else:
+            self.scaler = None
+            self.use_amp = False
+        
         # Experience buffer (한 에피소드 분량)
         self.data = []
         
@@ -316,24 +324,48 @@ class MetaController:
         # PPO Update
         avg_loss = 0.0
         for _ in range(self.k_epochs):
-            logits, curr_val, _ = self.network(s_seq, s_info)
-            dist = Categorical(logits=logits)
-            log_prob = dist.log_prob(a)
-            
-            ratio = torch.exp(log_prob - old_log_prob)
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
-            
-            actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), target_val)
-            entropy_loss = -self.entropy_coef * dist.entropy().mean()
-            
-            loss = actor_loss + critic_loss + entropy_loss
-            
-            self.optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
-            self.optimizer.step()
+            # [AMP] Mixed Precision Training
+            if self.use_amp:
+                with torch.amp.autocast('cuda'):
+                    logits, curr_val, _ = self.network(s_seq, s_info)
+                    dist = Categorical(logits=logits)
+                    log_prob = dist.log_prob(a)
+                    
+                    ratio = torch.exp(log_prob - old_log_prob)
+                    surr1 = ratio * advantage
+                    surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
+                    
+                    actor_loss = -torch.min(surr1, surr2).mean()
+                    critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), target_val)
+                    entropy_loss = -self.entropy_coef * dist.entropy().mean()
+                    
+                    loss = actor_loss + critic_loss + entropy_loss
+                
+                self.optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                logits, curr_val, _ = self.network(s_seq, s_info)
+                dist = Categorical(logits=logits)
+                log_prob = dist.log_prob(a)
+                
+                ratio = torch.exp(log_prob - old_log_prob)
+                surr1 = ratio * advantage
+                surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantage
+                
+                actor_loss = -torch.min(surr1, surr2).mean()
+                critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), target_val)
+                entropy_loss = -self.entropy_coef * dist.entropy().mean()
+                
+                loss = actor_loss + critic_loss + entropy_loss
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
+                self.optimizer.step()
             
             avg_loss += loss.item()
         

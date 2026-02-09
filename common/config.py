@@ -107,7 +107,7 @@ PPO_TEMP_DECAY = 0.9995
 # [네트워크 아키텍처] - 3070Ti 최대 활용
 # =============================================================================
 # [튜닝] Hidden Dim 증가 (모델 표현력 향상)
-NETWORK_HIDDEN_DIM = 512  # 256 → 512 (Elite 8 + 44 features 소화)
+NETWORK_HIDDEN_DIM = 1024  # 256 → 512 (Elite 8 + 44 features 소화)
 
 # [유지] Layers는 유지 (속도 고려)
 NETWORK_NUM_LAYERS = 2  # TD3는 3 (strategic mode에서 자동)
@@ -135,7 +135,7 @@ NETWORK_USE_CHECKPOINTING = False
 TRAIN_ACTION_DIM = 3
 
 # [튜닝] Batch Size 대폭 증가 (AMP 활용)
-TRAIN_BATCH_SIZE = 256  # 256 → 1024 (3070Ti + AMP로 충분)
+TRAIN_BATCH_SIZE = 1024  # 256 → 1024 (3070Ti + AMP로 충분)
 
 TRAIN_SAMPLE_SIZE = 50000
 
@@ -180,7 +180,7 @@ TD3_EXPLORE_NOISE = 0.3  # 0.15 → 0.3 (겁먹은 놈 등떠밀기)
 TD3_POLICY_FREQ = 2
 
 # [유지] Batch Size 증가 (안정성)
-TD3_BATCH_SIZE = 256
+TD3_BATCH_SIZE = 1024
 
 # [유지] Buffer Size 증가
 TD3_BUFFER_SIZE = 100000

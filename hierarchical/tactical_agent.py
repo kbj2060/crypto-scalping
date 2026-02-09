@@ -293,6 +293,14 @@ class GoalConditionedTD3Agent:
         self.policy_freq = config.TD3_POLICY_FREQ
         self.total_it = 0
         
+        # [AMP] Mixed Precision Training
+        if device == 'cuda':
+            self.scaler = torch.amp.GradScaler('cuda')
+            self.use_amp = True
+        else:
+            self.scaler = None
+            self.use_amp = False
+        
         # Networks
         self.actor = GoalConditionedActor(state_dim, action_dim, info_dim).to(device)
         self.actor_target = copy.deepcopy(self.actor)
@@ -382,7 +390,7 @@ class GoalConditionedTD3Agent:
         (s_seq, s_info, goal, action, 
          ns_seq, ns_info, next_goal, reward, not_done) = self.replay_buffer.sample(batch_size)
         
-        # Target Q
+        # Target Q (no autocast needed for inference)
         with torch.no_grad():
             noise = (torch.randn_like(action) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
             next_action, _, _ = self.actor_target(ns_seq, ns_info, next_goal)
@@ -392,31 +400,62 @@ class GoalConditionedTD3Agent:
             target_Q = torch.min(target_Q1, target_Q2)
             target_Q = reward + (not_done * self.gamma * target_Q)
         
-        current_Q1, current_Q2 = self.critic(s_seq, s_info, goal, action)
-        critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+        # [AMP] Critic Update with Mixed Precision
+        if self.use_amp:
+            with torch.amp.autocast('cuda'):
+                current_Q1, current_Q2 = self.critic(s_seq, s_info, goal, action)
+                critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+            
+            self.critic_optimizer.zero_grad()
+            self.scaler.scale(critic_loss).backward()
+            self.scaler.unscale_(self.critic_optimizer)
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
+            self.scaler.step(self.critic_optimizer)
+            self.scaler.update()
+        else:
+            current_Q1, current_Q2 = self.critic(s_seq, s_info, goal, action)
+            critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+            
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
+            self.critic_optimizer.step()
         
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
-        self.critic_optimizer.step()
-        
-        # Actor Update
+        # [AMP] Actor Update with Mixed Precision
         actor_loss_val = 0.0
         if self.total_it % self.policy_freq == 0:
-            pi, _, _ = self.actor(s_seq, s_info, goal)
-            q1, _ = self.critic(s_seq, s_info, goal, pi)
-            
-            # Goal alignment bonus: action 방향이 goal direction과 일치하면 보너스
-            goal_direction = goal[:, 0:1]  # -1, 0, 1
-            alignment = (pi * goal_direction).mean()  # 양수면 aligned
-            
-            actor_loss = -q1.mean() - 0.1 * alignment  # Q 최대화 + goal 정렬
-            actor_loss_val = actor_loss.item()
-            
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
-            self.actor_optimizer.step()
+            if self.use_amp:
+                with torch.amp.autocast('cuda'):
+                    pi, _, _ = self.actor(s_seq, s_info, goal)
+                    q1, _ = self.critic(s_seq, s_info, goal, pi)
+                    
+                    # Goal alignment bonus: action 방향이 goal direction과 일치하면 보너스
+                    goal_direction = goal[:, 0:1]  # -1, 0, 1
+                    alignment = (pi * goal_direction).mean()  # 양수면 aligned
+                    
+                    actor_loss = -q1.mean() - 0.1 * alignment  # Q 최대화 + goal 정렬
+                actor_loss_val = actor_loss.item()
+                
+                self.actor_optimizer.zero_grad()
+                self.scaler.scale(actor_loss).backward()
+                self.scaler.unscale_(self.actor_optimizer)
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
+                self.scaler.step(self.actor_optimizer)
+                self.scaler.update()
+            else:
+                pi, _, _ = self.actor(s_seq, s_info, goal)
+                q1, _ = self.critic(s_seq, s_info, goal, pi)
+                
+                goal_direction = goal[:, 0:1]
+                alignment = (pi * goal_direction).mean()
+                
+                actor_loss = -q1.mean() - 0.1 * alignment
+                actor_loss_val = actor_loss.item()
+                
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
+                self.actor_optimizer.step()
             
             # Soft update
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
