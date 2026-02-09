@@ -310,6 +310,7 @@ class TeacherGuidedTD3Trainer:
 
             episode_reward = 0.0
             episode_trades = 0
+            position_counts = {'long': 0, 'short': 0, 'flat': 0}
 
             for step in range(max_steps):
                 total_timesteps += 1
@@ -324,14 +325,30 @@ class TeacherGuidedTD3Trainer:
                     action_val = float(action_val_arr[0])
 
                 # [Phase 1 Logic] No Leverage, Simplified
-                target_pos_size = action_val if abs(action_val) > 0.1 else 0.0
+                # Deadzone: 0.3으로 증가 (잦은 미세 진입/청산 방지)
+                target_pos_size = action_val if abs(action_val) > config.TD3_DEADZONE else 0.0
                 
                 trade_amount = target_pos_size - current_pos_size
+                
+                # [추가] 최소 변경폭 필터: 0.3 미만 변경은 무시 (잦은 미세조정 방지)
+                if abs(trade_amount) < config.TD3_MIN_TRADE_SIZE:
+                    target_pos_size = current_pos_size
+                    trade_amount = 0.0
+                
                 if abs(trade_amount) > 1e-4:
                     episode_trades += 1
-                
+                    
                 trade_cost = abs(trade_amount) * TRANSACTION_COST
                 current_pos_size = target_pos_size
+                
+                # [FIX] Position Counting Logic (Missing in previous version)
+                # 루프 안에서 매 스텝마다 포지션 상태를 카운팅합니다.
+                if current_pos_size > 0.01:
+                    position_counts['long'] += 1
+                elif current_pos_size < -0.01:
+                    position_counts['short'] += 1
+                else:
+                    position_counts['flat'] += 1
 
                 curr_price = float(self.data_collector.eth_data.iloc[curr_idx]['close'])
                 self.data_collector.current_index += 1
@@ -361,6 +378,14 @@ class TeacherGuidedTD3Trainer:
                 
                 episode_reward += reward
 
+                # 포지션 카운트 추적
+                if current_pos_size > 0.01:
+                    position_counts['long'] += 1
+                elif current_pos_size < -0.01:
+                    position_counts['short'] += 1
+                else:
+                    position_counts['flat'] += 1
+                
                 next_pos_info = [current_pos_size, step_pnl * 100, 1.0 if abs(trade_amount) < 0.1 else 0.0]
                 next_state_raw = self.env.get_observation(position_info=next_pos_info, current_index=next_idx)
 
