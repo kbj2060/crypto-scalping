@@ -383,12 +383,25 @@ class TeacherGuidedTD3Trainer:
 
                 if done: break
 
-            logger.info("Ep %d | Lambda: %.3f | Reward: %.2f | Steps: %d | Trades: %d", 
-                        ep, teacher_lambda, episode_reward, total_timesteps, episode_trades)
+            # [Position Stats] Long/Short/Flat 비율 계산
+            total_positions = sum(position_counts.values())
+            long_ratio = (position_counts['long'] / total_positions * 100) if total_positions > 0 else 0
+            short_ratio = (position_counts['short'] / total_positions * 100) if total_positions > 0 else 0
+            flat_ratio = (position_counts['flat'] / total_positions * 100) if total_positions > 0 else 0
+            
+            logger.info("Ep %d | Lambda: %.3f | Reward: %.2f | Steps: %d | Trades: %d | L/S/F: %.1f%%/%.1f%%/%.1f%%", 
+                        ep, teacher_lambda, episode_reward, total_timesteps, episode_trades,
+                        long_ratio, short_ratio, flat_ratio)
+            
             self.writer.add_scalar('Episode/Reward', episode_reward, ep)
             self.writer.add_scalar('Episode/Trades', episode_trades, ep)
             self.writer.add_scalar('Hyperparameter/TeacherLambda', teacher_lambda, ep)
-
+            
+            # [Position Distribution]
+            self.writer.add_scalar('Position/Long_Ratio', long_ratio, ep)
+            self.writer.add_scalar('Position/Short_Ratio', short_ratio, ep)
+            self.writer.add_scalar('Position/Flat_Ratio', flat_ratio, ep)
+            
             self.agent.save(os.path.join(self.save_dir, "last_td3_teacher_model"))
             # [Smart Save] 상태 저장
             self.save_state(os.path.join(self.save_dir, "last_td3_teacher_model"), ep + 1, total_timesteps, teacher_lambda)
