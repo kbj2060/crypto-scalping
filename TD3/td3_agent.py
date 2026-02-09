@@ -33,8 +33,11 @@ class ReplayBuffer:
         self.next_state_seq = np.zeros((max_size, lookback, state_dim), dtype=np.float32)
         self.next_state_info = np.zeros((max_size, info_dim), dtype=np.float32)
         self.not_done = np.zeros((max_size, 1), dtype=np.float32)
+        
+        # [Teacher-Guided] Oracle Action 저장
+        self.oracle_action = np.zeros((max_size, 1), dtype=np.float32)
 
-    def add(self, state, action, reward, next_state, done):
+    def add(self, state, action, reward, next_state, done, oracle_action=None):
         idx = self.ptr
 
         seq = state[0]
@@ -65,6 +68,10 @@ class ReplayBuffer:
         self.next_state_info[idx] = ninfo_np.flatten()[: self.next_state_info.shape[1]]
 
         self.not_done[idx] = 1.0 - float(done)
+        
+        # [Teacher-Guided] Oracle Action 저장
+        if oracle_action is not None:
+            self.oracle_action[idx] = float(oracle_action)
 
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -79,6 +86,8 @@ class ReplayBuffer:
             torch.FloatTensor(self.next_state_info[ind]).to(self.device),
             torch.FloatTensor(self.reward[ind]).to(self.device),
             torch.FloatTensor(self.not_done[ind]).to(self.device),
+            # [Teacher-Guided] Oracle Action 반환
+            torch.FloatTensor(self.oracle_action[ind]).to(self.device),
         )
 
 
@@ -165,12 +174,12 @@ class TD3Agent:
             normalized = (abs_diff - q10) / (q90 - q10 + 1e-6)
             return torch.clamp(normalized, 0.05, 0.95).item()
 
-    def train(self, batch_size=256):
+    def train(self, batch_size=256, teacher_lambda=0.0):
         if self.replay_buffer.size < batch_size:
             return None
 
         self.total_it += 1
-        s_seq, s_info, action, ns_seq, ns_info, reward, not_done = self.replay_buffer.sample(batch_size)
+        s_seq, s_info, action, ns_seq, ns_info, reward, not_done, oracle_action = self.replay_buffer.sample(batch_size)
 
         # -----------------------------------------------------------------
         # 1. Target Q 계산 (TD3 기존 로직)
@@ -235,14 +244,23 @@ class TD3Agent:
         # -----------------------------------------------------------------
         # 3. Actor Update
         # -----------------------------------------------------------------
+        # [수정] 변수 초기화 (Actor 업데이트 안 할 때를 대비)
         actor_loss_val = 0.0
+        l_rl_val = 0.0
+        l_teacher_val = 0.0
+        
         if self.total_it % self.policy_freq == 0:
             pi, _, _ = self.actor(s_seq, s_info)
             q1, _ = self.critic(s_seq, s_info, pi)
             
-            # [Modified] Simplification: Q-값 최대화에 집중
-            actor_loss = -q1.mean()
-            actor_loss_val = actor_loss.item()
+            # RL Loss: Q-값 최대화
+            l_rl = -q1.mean()
+            
+            # [Teacher-Guided] BC Loss: Oracle Action과 유사하게
+            l_teacher = F.mse_loss(pi, oracle_action)
+            
+            # Total Actor Loss
+            actor_loss = l_rl + (teacher_lambda * l_teacher)
 
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -253,13 +271,20 @@ class TD3Agent:
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+            
+            # [수정] 텐서 값을 스칼라로 변환하여 저장
+            actor_loss_val = actor_loss.item()
+            l_rl_val = l_rl.item()
+            l_teacher_val = l_teacher.item()
 
         with torch.no_grad():
             td_error_abs = (target_Q - current_Q1).abs().mean().item()
         metrics = {
             'critic_loss': critic_loss.item(),
-            'cql_loss': cql_loss.item(),  # [Added] Log CQL loss
+            'cql_loss': cql_loss.item(),
             'actor_loss': actor_loss_val,
+            'l_rl': l_rl_val,           # [Teacher-Guided] 초기화된 값 사용
+            'l_teacher': l_teacher_val,  # [Teacher-Guided] 초기화된 값 사용
             'q1_mean': current_Q1.mean().item(),
             'q2_mean': current_Q2.mean().item(),
             'target_q_mean': target_Q.mean().item(),

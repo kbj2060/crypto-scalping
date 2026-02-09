@@ -180,7 +180,8 @@ TD3_EXPLORE_NOISE = 0.3  # 0.15 → 0.3 (겁먹은 놈 등떠밀기)
 TD3_POLICY_FREQ = 2
 
 # [유지] Batch Size 증가 (안정성)
-TD3_BATCH_SIZE = 1024
+TD3_BATCH_SIZE = 192
+TD3_LAMBDA_ANNEAL_EPISODES = 2000
 
 # [유지] Buffer Size 증가
 TD3_BUFFER_SIZE = 100000
