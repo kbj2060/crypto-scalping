@@ -1,8 +1,8 @@
 """
-Phase 1: Teacher-Guided TD3 Training (Resume Fixed Version)
-- Oracle Label을 활용한 Behavior Cloning + TD3 학습
-- [Fix] Resume 시 에피소드와 람다(Lambda)가 초기화되는 문제 해결
-- [Fix] State(진도율)를 별도 JSON으로 저장/로드
+Phase 1: Teacher-Guided TD3 Training (Final Optimized)
+- [System] Linux/WSL2 자동 감지 및 가속 모드(TF32, Benchmark) 활성화
+- [Fix] Resume 시 에피소드/람다 초기화 문제 해결 (State 저장)
+- [Fix] Oracle Guidance + No Leverage (안정적 학습)
 """
 import logging
 import os
@@ -11,6 +11,7 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
+import platform  # OS 감지용
 import json
 import re
 import glob
@@ -68,6 +69,35 @@ class TeacherGuidedTD3Trainer:
         info_dim = 12
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        # 🚀 [Linux/WSL2 전용 가속 모드] 🚀
+        # 스크립트가 리눅스 환경을 감지하면 자동으로 최적화를 수행합니다.
+        if platform.system() == 'Linux':
+            logger.info("=====================================================")
+            logger.info("🐧 Linux/WSL2 Environment Detected: Engaging Turbo Mode")
+            logger.info("=====================================================")
+            
+            # 1. TensorFloat-32 (TF32) 활성화 (RTX 3000번대 이상 필수)
+            # FP32와 거의 같은 정확도로 FP16에 준하는 속도를 냄
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            try:
+                torch.set_float32_matmul_precision('high')
+                logger.info("   ✅ TF32 Precision Enabled (High Speed Matmul)")
+            except AttributeError:
+                logger.warning("   ⚠️ PyTorch version too old for set_float32_matmul_precision")
+
+            # 2. CuDNN Benchmark 활성화
+            # 입력 크기가 고정된 경우(RL은 대부분 해당) 최적의 알고리즘을 찾아 속도 향상
+            torch.backends.cudnn.benchmark = True
+            logger.info("   ✅ CuDNN Benchmark Enabled")
+            
+            # 3. (옵션) Torch Compile
+            # PyTorch 2.0 이상에서 모델 컴파일 (호환성 문제 시 주석 처리)
+            # config.USE_TORCH_COMPILE = True 
+        else:
+            logger.info(f"🖥️ OS Detected: {platform.system()} (Standard Mode)")
+
         logger.info("Teacher-Guided TD3 Training on %s | State Dim: %d | Info Dim: %d", device, state_dim, info_dim)
 
         run_time = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -86,16 +116,25 @@ class TeacherGuidedTD3Trainer:
             logger.warning("⚠️ Oracle 라벨 파일이 없습니다. 생성을 시작합니다...")
             try:
                 oracle_script = os.path.join('utils', 'generate_oracle_labels.py')
-                result = subprocess.run([sys.executable, oracle_script], timeout=600)
-                if result.returncode != 0:
-                    raise RuntimeError("Oracle 라벨 생성 실패")
-                logger.info("✅ Oracle 라벨 생성 완료")
+                if not os.path.exists(oracle_script):
+                     oracle_script = 'generate_oracle_labels.py'
+                
+                if os.path.exists(oracle_script):
+                    result = subprocess.run([sys.executable, oracle_script], timeout=600)
+                    if result.returncode != 0:
+                        raise RuntimeError("Oracle 라벨 생성 실패")
+                    logger.info("✅ Oracle 라벨 생성 완료")
+                else:
+                    logger.error("❌ Oracle generator script not found.")
             except Exception as e:
                 logger.error(f"❌ Oracle 라벨 생성 실패: {e}")
                 raise
         
-        self.oracle_df = pd.read_csv(oracle_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
-        logger.info(f"✅ Oracle 라벨 로드 완료: {len(self.oracle_df):,}행")
+        if os.path.exists(oracle_path):
+            self.oracle_df = pd.read_csv(oracle_path, index_col=0, parse_dates=True, date_format='%Y-%m-%d %H:%M:%S')
+            logger.info(f"✅ Oracle 라벨 로드 완료: {len(self.oracle_df):,}행")
+        else:
+             logger.error("❌ Oracle data not loaded.")
 
     def _load_features(self):
         path = 'data/training_features.csv'
@@ -105,11 +144,17 @@ class TeacherGuidedTD3Trainer:
             logger.warning("⚠️ 피처 파일이 없습니다. 자동으로 데이터를 생성합니다...")
             try:
                 prepare_script = os.path.join('utils', 'prepare_training_data.py')
-                result = subprocess.run([sys.executable, prepare_script], timeout=600)
-                if result.returncode == 0:
-                    logger.info("✅ 피처 데이터 생성 완료")
+                if not os.path.exists(prepare_script):
+                    prepare_script = 'prepare_training_data.py'
+                
+                if os.path.exists(prepare_script):
+                    result = subprocess.run([sys.executable, prepare_script], timeout=600)
+                    if result.returncode == 0:
+                        logger.info("✅ 피처 데이터 생성 완료")
+                    else:
+                        raise RuntimeError("피처 데이터 생성 실패")
                 else:
-                    raise RuntimeError("피처 데이터 생성 실패")
+                     logger.error("❌ prepare_training_data.py not found.")
             except Exception as e:
                 logger.error(f"❌ 데이터 생성 중 오류: {e}")
                 raise
@@ -155,8 +200,8 @@ class TeacherGuidedTD3Trainer:
         except:
             return 0.0
 
+    # [New] 학습 상태 저장 (Smart Save)
     def save_state(self, path, episode, total_timesteps, teacher_lambda):
-        """학습 상태 저장 (Resume용)"""
         state = {
             'episode': episode,
             'total_timesteps': total_timesteps,
@@ -166,9 +211,8 @@ class TeacherGuidedTD3Trainer:
         with open(path + "_state.json", 'w') as f:
             json.dump(state, f, indent=4)
             
+    # [New] 학습 상태 로드 (Smart Resume)
     def load_state(self, path):
-        """학습 상태 로드 (Smart Resume)"""
-        # 1. JSON 상태 파일 시도
         json_path = path + "_state.json"
         if os.path.exists(json_path):
             try:
@@ -179,7 +223,6 @@ class TeacherGuidedTD3Trainer:
             except Exception as e:
                 logger.warning(f"⚠️ 상태 파일 손상, 체크포인트 검색으로 대체: {e}")
         
-        # 2. JSON 없으면 파일명에서 에피소드 추론
         try:
             model_dir = os.path.dirname(path)
             checkpoints = glob.glob(os.path.join(model_dir, "td3_teacher_model_*_actor.pth"))
@@ -193,12 +236,12 @@ class TeacherGuidedTD3Trainer:
         except Exception as e:
             logger.warning(f"⚠️ 체크포인트 추론 실패: {e}")
 
-        logger.warning("⚠️ 이전 상태를 찾을 수 없습니다. Ep 1부터 시작합니다.")
         return 1, 0
 
     def train(self, resume=True):
-        logger.info("🎓 Teacher-Guided TD3 Training Started (Resume Fixed)...")
+        logger.info("🎓 Teacher-Guided TD3 Training Started (Optimized)...")
         
+        # [튜닝] 람다 감소 기간: 2000 에피소드로 단축 (빠른 독립 유도)
         LAMBDA_ANNEAL_EPISODES = config.TD3_LAMBDA_ANNEAL_EPISODES
         logger.info(f"📚 Lambda Annealing: 1.0 → 0.0 ({LAMBDA_ANNEAL_EPISODES} episodes)")
         
@@ -226,6 +269,7 @@ class TeacherGuidedTD3Trainer:
                     self.agent.load(last_model_path)
                     logger.info("모델 로드 완료 (이어하기): %s", last_model_path)
                     
+                    # [Smart Resume] 상태 복원
                     start_episode, saved_timesteps = self.load_state(last_model_path)
                     if start_episode > 1:
                         total_timesteps = saved_timesteps
@@ -266,9 +310,6 @@ class TeacherGuidedTD3Trainer:
 
             episode_reward = 0.0
             episode_trades = 0
-            
-            # [Position Tracking] Long/Short/Flat 비율 추적
-            position_counts = {'long': 0, 'short': 0, 'flat': 0}
 
             for step in range(max_steps):
                 total_timesteps += 1
@@ -282,7 +323,7 @@ class TeacherGuidedTD3Trainer:
                     action_val_arr, _, risk_val = self.agent.select_action(state, noise=0.1)
                     action_val = float(action_val_arr[0])
 
-                # [Phase 1] 단순화된 환경 (레버리지 제거)
+                # [Phase 1 Logic] No Leverage, Simplified
                 target_pos_size = action_val if abs(action_val) > 0.1 else 0.0
                 
                 trade_amount = target_pos_size - current_pos_size
@@ -291,14 +332,6 @@ class TeacherGuidedTD3Trainer:
                 
                 trade_cost = abs(trade_amount) * TRANSACTION_COST
                 current_pos_size = target_pos_size
-                
-                # [Position Tracking]
-                if current_pos_size > 0.1:
-                    position_counts['long'] += 1
-                elif current_pos_size < -0.1:
-                    position_counts['short'] += 1
-                else:
-                    position_counts['flat'] += 1
 
                 curr_price = float(self.data_collector.eth_data.iloc[curr_idx]['close'])
                 self.data_collector.current_index += 1
@@ -312,7 +345,6 @@ class TeacherGuidedTD3Trainer:
                 next_price = float(self.data_collector.eth_data.iloc[next_idx]['close'])
                 price_return = (next_price - curr_price) / curr_price
                 
-                # PnL: 포지션 × 수익률 - 수수료
                 step_pnl = (current_pos_size * price_return) - trade_cost
                 self.pnl_history.append(step_pnl)
                 
@@ -324,7 +356,7 @@ class TeacherGuidedTD3Trainer:
                     action=action_val,
                     prev_position=0.0,
                     current_position=current_pos_size,
-                    effective_leverage=1.0
+                    effective_leverage=1.0 
                 )
                 
                 episode_reward += reward
@@ -351,26 +383,14 @@ class TeacherGuidedTD3Trainer:
 
                 if done: break
 
-            # [Position Stats] Long/Short/Flat 비율 계산
-            total_positions = sum(position_counts.values())
-            long_ratio = (position_counts['long'] / total_positions * 100) if total_positions > 0 else 0
-            short_ratio = (position_counts['short'] / total_positions * 100) if total_positions > 0 else 0
-            flat_ratio = (position_counts['flat'] / total_positions * 100) if total_positions > 0 else 0
-            
-            logger.info("Ep %d | Lambda: %.3f | Reward: %.2f | Steps: %d | Trades: %d | L/S/F: %.1f%%/%.1f%%/%.1f%%", 
-                        ep, teacher_lambda, episode_reward, total_timesteps, episode_trades,
-                        long_ratio, short_ratio, flat_ratio)
-            
+            logger.info("Ep %d | Lambda: %.3f | Reward: %.2f | Steps: %d | Trades: %d", 
+                        ep, teacher_lambda, episode_reward, total_timesteps, episode_trades)
             self.writer.add_scalar('Episode/Reward', episode_reward, ep)
             self.writer.add_scalar('Episode/Trades', episode_trades, ep)
             self.writer.add_scalar('Hyperparameter/TeacherLambda', teacher_lambda, ep)
-            
-            # [Position Distribution]
-            self.writer.add_scalar('Position/Long_Ratio', long_ratio, ep)
-            self.writer.add_scalar('Position/Short_Ratio', short_ratio, ep)
-            self.writer.add_scalar('Position/Flat_Ratio', flat_ratio, ep)
 
             self.agent.save(os.path.join(self.save_dir, "last_td3_teacher_model"))
+            # [Smart Save] 상태 저장
             self.save_state(os.path.join(self.save_dir, "last_td3_teacher_model"), ep + 1, total_timesteps, teacher_lambda)
 
             if episode_reward > best_reward:
@@ -385,4 +405,5 @@ class TeacherGuidedTD3Trainer:
 
 if __name__ == "__main__":
     trainer = TeacherGuidedTD3Trainer()
+    # 윈도우에서 옮겨온 경우 True로 하면 이어서 학습, False로 하면 새로 시작
     trainer.train(resume=True)
