@@ -39,7 +39,7 @@ class TransformerBlock(nn.Module):
         return x
 
 # [Core] Trading Transformer
-class TradingTransformer(nn.Module):
+class MacroHFTNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, info_dim, d_model=128, n_head=4, n_layers=2):
         super().__init__()
         
@@ -99,17 +99,17 @@ class TradingTransformer(nn.Module):
         return logits, value, None, None, None, None
 
 # [Expert Definition] MoE를 위한 3가지 특화 트랜스포머
-class TrendExpert(TradingTransformer):
+class TrendExpert(MacroHFTNetwork):
     def __init__(self, state_dim, action_dim, info_dim):
         # Trend: 깊은 레이어 (복잡한 패턴 인식)
         super().__init__(state_dim, action_dim, info_dim, d_model=256, n_head=8, n_layers=4)
 
-class VolatilityExpert(TradingTransformer):
+class VolatilityExpert(MacroHFTNetwork):
     def __init__(self, state_dim, action_dim, info_dim):
         # Volatility: 빠른 반응 (얕은 레이어)
         super().__init__(state_dim, action_dim, info_dim, d_model=128, n_head=4, n_layers=2)
 
-class SidewaysExpert(TradingTransformer):
+class SidewaysExpert(MacroHFTNetwork):
     def __init__(self, state_dim, action_dim, info_dim):
         # Sideways: 통계적 판단 (중간 레이어)
         super().__init__(state_dim, action_dim, info_dim, d_model=192, n_head=6, n_layers=3)
