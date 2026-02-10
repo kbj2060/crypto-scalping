@@ -164,15 +164,18 @@ class TD3TeacherEvaluator:
 
     def evaluate(self):
         logger.info("=" * 70)
-        logger.info("[START] TD3 Teacher-Guided Evaluation")
+        logger.info("[START] TD3 Teacher-Guided Evaluation (Fixed)")
         logger.info(f"  Mode: {self.mode}")
         logger.info(f"  Period: idx {self.start_idx} ~ {self.end_idx} ({self.end_idx - self.start_idx:,} steps)")
         logger.info(f"  Deadzone: {DEADZONE} | Min Trade Size: {MIN_TRADE_SIZE}")
         logger.info(f"  Transaction Cost: {TRANSACTION_COST}")
         logger.info("=" * 70)
         
-        # === State Variables (train_td3_teacher.py와 동일) ===
+        # === State Variables ===
         current_pos_size = 0.0
+        prev_pnl = 0.0        # [수정] 이전 PnL 기억용 변수 추가
+        prev_trade_flag = 0.0 # [수정] 이전 거래 여부 기억용 변수 추가
+        
         balance = 10000.0
         initial_balance = balance
         balance_history = [balance]
@@ -184,26 +187,28 @@ class TD3TeacherEvaluator:
         losses = 0
         total_cost = 0.0
         position_counts = {'long': 0, 'short': 0, 'flat': 0}
-        trade_pnls = []  # 개별 거래 PnL 추적
-        current_trade_pnl = 0.0  # 현재 진행 중인 거래의 누적 PnL
+        trade_pnls = [] 
+        current_trade_pnl = 0.0
         max_balance = balance
         max_drawdown = 0.0
         
         for idx in tqdm(range(self.start_idx, self.end_idx - 1), desc="Evaluating"):
             curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
             
-            # === Observation (train_td3_teacher와 동일) ===
-            pos_info = [current_pos_size, 0.0, 0.0]
+            # === Observation (Fix: Memory Retention) ===
+            # [수정] 매번 0.0이 아니라, 이전 스텝의 결과(prev_pnl, prev_trade_flag)를 주입
+            pos_info = [current_pos_size, prev_pnl, prev_trade_flag]
+            
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None:
                 continue
             state = (state[0], self._augment_info(state[1], idx))
 
-            # === Action (Deterministic, No Noise) ===
+            # === Action ===
             action_arr, _, _ = self.agent.select_action(state, noise=0.0)
             action_val = float(action_arr[0])
 
-            # === Position Logic (train_td3_teacher와 완전 동일) ===
+            # === Position Logic ===
             target_pos_size = action_val if abs(action_val) > DEADZONE else 0.0
             
             trade_amount = target_pos_size - current_pos_size
@@ -215,13 +220,10 @@ class TD3TeacherEvaluator:
             
             if abs(trade_amount) > 1e-4:
                 trade_count += 1
-                # 이전 포지션 청산 시 거래 PnL 기록
                 if current_pos_size != 0.0 and (target_pos_size == 0.0 or np.sign(target_pos_size) != np.sign(current_pos_size)):
                     trade_pnls.append(current_trade_pnl)
-                    if current_trade_pnl > 0:
-                        wins += 1
-                    elif current_trade_pnl < 0:
-                        losses += 1
+                    if current_trade_pnl > 0: wins += 1
+                    elif current_trade_pnl < 0: losses += 1
                     current_trade_pnl = 0.0
             
             trade_cost = abs(trade_amount) * TRANSACTION_COST
@@ -229,52 +231,43 @@ class TD3TeacherEvaluator:
             current_pos_size = target_pos_size
             
             # Position counting
-            if current_pos_size > 0.01:
-                position_counts['long'] += 1
-            elif current_pos_size < -0.01:
-                position_counts['short'] += 1
-            else:
-                position_counts['flat'] += 1
+            if current_pos_size > 0.01: position_counts['long'] += 1
+            elif current_pos_size < -0.01: position_counts['short'] += 1
+            else: position_counts['flat'] += 1
 
-            # === PnL Calculation (train_td3_teacher와 동일: No Leverage) ===
+            # === PnL Calculation ===
             next_price = float(self.data_collector.eth_data.iloc[idx + 1]['close'])
             price_return = (next_price - curr_price) / curr_price
             step_pnl = (current_pos_size * price_return) - trade_cost
+            
+            # [수정] 다음 스텝을 위해 PnL과 Trade Flag 업데이트 (Training 코드와 동일 로직)
+            prev_pnl = step_pnl * 100.0  # Reward Scale 맞춤
+            # Trade Flag: 거래량이 적으면(안정적이면) 1.0, 아니면 0.0
+            prev_trade_flag = 1.0 if abs(trade_amount) < 0.1 else 0.0 
             
             current_trade_pnl += step_pnl
             cumulative_pnl += step_pnl
             balance *= (1 + step_pnl)
             balance_history.append(balance)
             
-            # Max Drawdown 추적
-            if balance > max_balance:
-                max_balance = balance
+            if balance > max_balance: max_balance = balance
             drawdown = (max_balance - balance) / max_balance
-            if drawdown > max_drawdown:
-                max_drawdown = drawdown
+            if drawdown > max_drawdown: max_drawdown = drawdown
 
-        # 마지막 열린 포지션 정리
         if current_pos_size != 0.0:
             trade_pnls.append(current_trade_pnl)
-            if current_trade_pnl > 0:
-                wins += 1
-            elif current_trade_pnl < 0:
-                losses += 1
+            if current_trade_pnl > 0: wins += 1
+            elif current_trade_pnl < 0: losses += 1
 
-        # === Results ===
+        # === Results Output (기존과 동일) ===
         final_return = (balance - initial_balance) / initial_balance * 100
         total_steps = position_counts['long'] + position_counts['short'] + position_counts['flat']
         
-        # Sharpe Ratio (3분봉 기준 연환산)
         returns = np.diff(balance_history) / (np.array(balance_history[:-1]) + 1e-10)
-        sharpe = 0.0
-        sortino = 0.0
+        sharpe, sortino = 0.0, 0.0
         if len(returns) > 1:
-            # 3분봉 → 1년 = 365 * 24 * 20 = 175,200 bars
             annualize = np.sqrt(175200)
             sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * annualize
-            
-            # Sortino Ratio
             downside_returns = returns[returns < 0]
             downside_std = np.std(downside_returns) if len(downside_returns) > 0 else 1e-8
             sortino = np.mean(returns) / (downside_std + 1e-8) * annualize
@@ -304,6 +297,7 @@ class TD3TeacherEvaluator:
         logger.info(f"  📏 Sharpe Ratio:     {sharpe:.4f}")
         logger.info(f"  📏 Sortino Ratio:    {sortino:.4f}")
         logger.info("-" * 70)
+        
         long_pct = position_counts['long'] / max(1, total_steps) * 100
         short_pct = position_counts['short'] / max(1, total_steps) * 100
         flat_pct = position_counts['flat'] / max(1, total_steps) * 100
@@ -312,13 +306,11 @@ class TD3TeacherEvaluator:
         logger.info(f"  ⚪ Flat:             {flat_pct:.1f}%")
         logger.info("=" * 70)
         
-        # 날짜 범위 출력
         try:
             start_date = self.data_collector.eth_data.index[self.start_idx]
             end_date = self.data_collector.eth_data.index[self.end_idx - 1]
             logger.info(f"  📅 Period: {start_date} ~ {end_date}")
-        except:
-            pass
+        except: pass
         logger.info("=" * 70)
         
         return {
