@@ -178,11 +178,14 @@ class TD3TeacherEvaluator:
             action_arr, _, _ = self.agent.select_action(state, noise=0.0)
             action_val = float(action_arr[0])
             
-            # Logic
             target_pos_size = action_val if abs(action_val) > deadzone else 0.0
             trade_amount = target_pos_size - current_pos_size
             
-            if abs(trade_amount) < min_strength:
+            # [수정] 방향 전환만 허용, 같은 방향의 크기 변경은 무시
+            # 부호가 다르거나 0으로 전환될 때만 거래
+            is_direction_change = (current_pos_size * target_pos_size <= 0)
+            if not is_direction_change:
+                # 같은 방향이면 무조건 홀딩
                 target_pos_size = current_pos_size
                 trade_amount = 0.0
             
