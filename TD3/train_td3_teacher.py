@@ -328,8 +328,11 @@ class TeacherGuidedTD3Trainer:
                 
                 trade_amount = target_pos_size - current_pos_size
                 
-                # [추가] 최소 변경폭 필터: 0.3 미만 변경은 무시 (잦은 미세조정 방지)
-                if abs(trade_amount) < config.TD3_MIN_TRADE_SIZE:
+                # [수정] 방향 전환만 허용, 같은 방향의 크기 변경은 무시
+                # 부호가 다르거나 0으로 전환될 때만 거래 (Long<->Short, Long<->Flat, Short<->Flat)
+                is_direction_change = (current_pos_size * target_pos_size <= 0)
+                if not is_direction_change:
+                    # 같은 방향이면 무조건 홀딩 (크기 변경 무시)
                     target_pos_size = current_pos_size
                     trade_amount = 0.0
                 

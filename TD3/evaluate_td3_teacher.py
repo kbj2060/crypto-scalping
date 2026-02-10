@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 logger = logging.getLogger(__name__)
 
 # Config에서 설정값 가져오기
-TRANSACTION_COST = getattr(config, 'TRANSACTION_COST', 0.0005)
+TRANSACTION_COST = 0.0005
 TARGET_DEADZONE = getattr(config, 'TD3_DEADZONE', 0.6)
 TARGET_MIN_TRADE = getattr(config, 'TD3_MIN_TRADE_SIZE', 0.6)
 
