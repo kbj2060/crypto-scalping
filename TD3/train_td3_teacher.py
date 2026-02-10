@@ -285,8 +285,6 @@ class TeacherGuidedTD3Trainer:
         else:
             logger.info("새로 학습 시작 (이전 모델 미로드)")
 
-        TRANSACTION_COST = 0.0005
-
         for ep in range(start_episode, max_episodes + 1):
             teacher_lambda = max(0.0, 1.0 - (ep / LAMBDA_ANNEAL_EPISODES))
             
@@ -338,7 +336,7 @@ class TeacherGuidedTD3Trainer:
                 if abs(trade_amount) > 1e-4:
                     episode_trades += 1
                     
-                trade_cost = abs(trade_amount) * TRANSACTION_COST
+                trade_cost = abs(trade_amount) * config.TRANSACTION_COST
                 current_pos_size = target_pos_size
                 
                 # [FIX] Position Counting Logic (Missing in previous version)
