@@ -65,7 +65,7 @@ class TD3TeacherEvaluator:
         state_dim = self.env.get_state_dim()
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.agent = TD3Agent(state_dim, 1, 12, device=device)
-        self._load_model(model_type, run_dir)
+        self._load_model(run_dir)
         
         # [핵심] 모든 스텝의 action을 미리 계산해서 캐싱
         # → 스윕 시 모델 추론 반복 없이 필터만 바꿔가며 시뮬레이션
