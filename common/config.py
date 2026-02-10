@@ -133,7 +133,7 @@ TEST_SPLIT = 0.15
 # [튜닝] Episode 증가 (Early Stopping 신뢰)
 TRAIN_NUM_EPISODES = 3000  # 5000 → 10000
 
-TRAIN_MAX_STEPS_PER_EPISODE = 240
+TRAIN_MAX_STEPS_PER_EPISODE = 480
 MAX_TRADES_PER_EPISODE = 50
 TRAIN_SAVE_INTERVAL = 200
 
@@ -174,7 +174,7 @@ TD3_BUFFER_SIZE = 100000
 TD3_WARMUP_STEPS = 10000  # 충분히 데이터를 모으고 학습 시작
 
 # [긴급 처방 3] Deadzone 증가 (미세 진입 방지)
-TD3_DEADZONE = 0.5  # 0.3 → 0.5
+TD3_DEADZONE = 0.6  # 0.3 → 0.6
 TD3_MIN_TRADE_SIZE = 0.6  # 0.3 → 0.6 (Strength Change)
 # =============================================================================
 # [성능 최적화] - PyTorch Settings
