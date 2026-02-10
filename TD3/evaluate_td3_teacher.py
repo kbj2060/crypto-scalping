@@ -1,7 +1,7 @@
 """
-TD3 Teacher-Guided Evaluator (v2 - Train Logic 100% Aligned)
-- train_td3_teacher.py와 PnL 공식 완전 일치
-- Leverage, 수수료, 포지션 변경 필터 모두 동일
+TD3 Threshold Sweep Evaluator
+- Deadzone / MinTrade 조합을 스윕하여 최적 필터링 찾기
+- 학습 중단 없이 평가만으로 성능 개선 탐색
 """
 import logging
 import os
@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-from datetime import datetime
 
 try:
     from common import config
@@ -41,7 +40,6 @@ TRANSACTION_COST = getattr(config, 'TRANSACTION_COST', 0.0005)
 class TD3TeacherEvaluator:
     def __init__(self, mode='test', model_type='best', run_dir=None):
         self.mode = mode
-        self.model_type = model_type
         self.data_collector = DataCollector(use_saved_data=True)
         self.strategies = [
             WhaleSentimentDivergence(), LiquidationSqueezeHunter(),
@@ -57,7 +55,7 @@ class TD3TeacherEvaluator:
         elif mode == 'val':
             self.start_idx = int(total_len * config.TRAIN_SPLIT)
             self.end_idx = int(total_len * (config.TRAIN_SPLIT + config.VAL_SPLIT))
-        else:  # full
+        else:
             self.start_idx = config.LOOKBACK + 100
             self.end_idx = total_len
 
@@ -65,12 +63,14 @@ class TD3TeacherEvaluator:
         self.env.precompute_data()
 
         state_dim = self.env.get_state_dim()
-        action_dim = 1
-        info_dim = 12
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-        self.agent = TD3Agent(state_dim, action_dim, info_dim, device=device)
-        self._load_model(run_dir)
+        self.agent = TD3Agent(state_dim, 1, 12, device=device)
+        self._load_model(model_type, run_dir)
+        
+        # [핵심] 모든 스텝의 action을 미리 계산해서 캐싱
+        # → 스윕 시 모델 추론 반복 없이 필터만 바꿔가며 시뮬레이션
+        self.cached_actions = None
+        self.cached_prices = None
 
     def _load_data(self):
         path = 'data/training_features.csv'
@@ -151,218 +151,206 @@ class TD3TeacherEvaluator:
             vol = 0.0
         if isinstance(info, torch.Tensor):
             vol_t = torch.tensor([vol], device=info.device, dtype=info.dtype)
-            if info.dim() == 2:
-                vol_t = vol_t.unsqueeze(0)
+            if info.dim() == 2: vol_t = vol_t.unsqueeze(0)
             return torch.cat([info, vol_t], dim=-1)
         return np.append(np.asarray(info).flatten(), vol).astype(np.float32)
 
-    def evaluate(self):
-        logger.info("=" * 70)
-        logger.info("[START] TD3 Teacher-Guided Evaluation (v2 - Train-Aligned)")
-        logger.info(f"  Mode: {self.mode}")
-        logger.info(f"  Period: idx {self.start_idx} ~ {self.end_idx} ({self.end_idx - self.start_idx:,} steps)")
-        logger.info(f"  Max Leverage: {config.LEVERAGE}")
-        logger.info(f"  Transaction Cost: {TRANSACTION_COST}")
-        logger.info("=" * 70)
+    def precompute_actions(self):
+        """모든 스텝의 action + price를 미리 계산 (1회만 실행)"""
+        logger.info("⏳ Action 사전 계산 중...")
         
-        # === State Variables ===
-        current_pos_size = 0.0
-        equity = 1.0  # 정규화된 자산 (1.0 = 100%)
-        equity_history = [equity]
-        trade_count = 0
+        actions = []
+        prices = []
+        valid_indices = []
         
-        # 상세 통계
-        position_counts = {'long': 0, 'short': 0, 'flat': 0}
-        trade_pnls = []
-        current_trade_roe = 0.0
-        max_equity = equity
-        max_drawdown = 0.0
-        total_cost_accumulated = 0.0
-        
-        for idx in tqdm(range(self.start_idx, self.end_idx - 1), desc="Evaluating"):
+        for idx in tqdm(range(self.start_idx, self.end_idx - 1), desc="Precomputing"):
             curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
+            next_price = float(self.data_collector.eth_data.iloc[idx + 1]['close'])
             
-            # === Observation ===
-            pos_info = [current_pos_size, 0.0, 0.0]
+            pos_info = [0.0, 0.0, 0.0]  # 포지션 없는 상태에서 action 관측
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None:
                 continue
             state = (state[0], self._augment_info(state[1], idx))
-
-            # === Action (Deterministic) ===
+            
             action_arr, _, _ = self.agent.select_action(state, noise=0.0)
             action_val = float(action_arr[0])
+            
+            actions.append(action_val)
+            prices.append((curr_price, next_price))
+            valid_indices.append(idx)
+        
+        self.cached_actions = np.array(actions)
+        self.cached_prices = np.array(prices)
+        self.valid_indices = valid_indices
+        
+        logger.info(f"✅ {len(actions):,}개 action 캐싱 완료")
+        
+        # Action 분포 통계
+        abs_actions = np.abs(self.cached_actions)
+        logger.info(f"📊 Action 분포: mean={abs_actions.mean():.3f}, std={abs_actions.std():.3f}")
+        for threshold in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+            pct = (abs_actions > threshold).mean() * 100
+            logger.info(f"   |action| > {threshold}: {pct:.1f}%")
 
-            # ============================================================
-            # [핵심] train_td3_teacher.py 라인 244~263 100% 복사
-            # ============================================================
+    def simulate(self, deadzone, min_strength_change):
+        """특정 Deadzone/MinChange 설정으로 시뮬레이션"""
+        current_pos_size = 0.0
+        equity = 1.0
+        trade_count = 0
+        total_cost = 0.0
+        trade_pnls = []
+        current_trade_roe = 0.0
+        max_equity = 1.0
+        max_drawdown = 0.0
+        pos_counts = {'long': 0, 'short': 0, 'flat': 0}
+        
+        max_leverage = getattr(config, 'LEVERAGE', 20)
+        
+        for i in range(len(self.cached_actions)):
+            action_val = self.cached_actions[i]
+            curr_price, next_price = self.cached_prices[i]
             
-            # 1. Deadzone 적용
-            target_pos_size = action_val if abs(action_val) > 0.3 else 0.0
+            # 1. Deadzone
+            target_pos_size = action_val if abs(action_val) > deadzone else 0.0
             
-            # 2. Leverage 계산 (train과 동일)
-            max_leverage = getattr(config, 'LEVERAGE', 20)
+            # 2. Leverage
             effective_leverage = abs(action_val) * max_leverage
-            
-            # 3. 최소 레버리지 필터
             if effective_leverage < 1.0:
                 target_pos_size = 0.0
             
-            # 4. 포지션 변경 3중 필터 (train과 동일)
+            # 3. 포지션 변경 필터 (strength_change 파라미터화)
             is_opening = (current_pos_size == 0.0) and (target_pos_size != 0.0)
             is_flipping = (current_pos_size * target_pos_size < 0)
-            is_strength_change = abs(target_pos_size - current_pos_size) > 0.4
+            is_strength_change = abs(target_pos_size - current_pos_size) > min_strength_change
             
             if not (is_opening or is_flipping or is_strength_change):
                 target_pos_size = current_pos_size
             
-            # 5. Trade amount 계산
+            # 4. Trade
             trade_amount = target_pos_size - current_pos_size
             if abs(trade_amount) > 1e-4:
                 trade_count += 1
-                
-                # 포지션 청산 시 거래 PnL 기록
                 if current_pos_size != 0.0 and (
-                    target_pos_size == 0.0 or 
-                    np.sign(target_pos_size) != np.sign(current_pos_size)
+                    target_pos_size == 0.0 or np.sign(target_pos_size) != np.sign(current_pos_size)
                 ):
                     trade_pnls.append(current_trade_roe)
                     current_trade_roe = 0.0
             
-            # 6. 수수료 계산 (train과 동일: leverage * TRANSACTION_COST)
             trade_cost = effective_leverage * TRANSACTION_COST if abs(trade_amount) > 1e-4 else 0.0
-            total_cost_accumulated += trade_cost
-            
+            total_cost += trade_cost
             current_pos_size = target_pos_size
             
             # Position counting
-            if current_pos_size > 0.1:
-                position_counts['long'] += 1
-            elif current_pos_size < -0.1:
-                position_counts['short'] += 1
-            else:
-                position_counts['flat'] += 1
-
-            # ============================================================
-            # [핵심] PnL 계산 (train_td3_teacher.py 라인 284~287 100% 복사)
-            # ============================================================
-            next_price = float(self.data_collector.eth_data.iloc[idx + 1]['close'])
-            price_return = (next_price - curr_price) / curr_price
+            if current_pos_size > 0.1: pos_counts['long'] += 1
+            elif current_pos_size < -0.1: pos_counts['short'] += 1
+            else: pos_counts['flat'] += 1
             
+            # 5. PnL (train과 동일)
+            price_return = (next_price - curr_price) / curr_price
             position_direction = np.sign(current_pos_size) if abs(current_pos_size) > 0.01 else 0.0
             raw_return = price_return if position_direction >= 0 else -price_return
+            step_pnl = (raw_return * effective_leverage) - trade_cost if abs(current_pos_size) > 0.01 else 0.0
             
-            # [핵심] 레버리지 적용 ROE (학습과 동일!)
-            step_pnl_roe = (raw_return * effective_leverage) - trade_cost if abs(current_pos_size) > 0.01 else 0.0
+            current_trade_roe += step_pnl
+            equity *= (1 + step_pnl)
             
-            current_trade_roe += step_pnl_roe
+            if equity > max_equity: max_equity = equity
+            dd = (max_equity - equity) / max_equity
+            if dd > max_drawdown: max_drawdown = dd
             
-            # 자산 업데이트 (ROE 기반)
-            equity *= (1 + step_pnl_roe)
-            equity_history.append(equity)
-            
-            # Max Drawdown 추적
-            if equity > max_equity:
-                max_equity = equity
-            drawdown = (max_equity - equity) / max_equity
-            if drawdown > max_drawdown:
-                max_drawdown = drawdown
-            
-            # 청산 체크 (train과 동일)
-            should_exit, exit_reason = self.env.check_exit_conditions(
-                unrealized_pnl_roe=step_pnl_roe,
-                holding_time_steps=0
-            )
-            if should_exit:
-                current_pos_size = 0.0
-                if current_trade_roe != 0.0:
-                    trade_pnls.append(current_trade_roe)
-                    current_trade_roe = 0.0
-
-        # 마지막 열린 포지션 정리
+            # 파산 체크
+            if equity <= 0.001:
+                break
+        
+        # 마지막 포지션 정리
         if current_pos_size != 0.0 and current_trade_roe != 0.0:
             trade_pnls.append(current_trade_roe)
-
-        # === Results ===
-        initial_balance = 10000.0
-        final_balance = initial_balance * equity
-        final_return = (equity - 1.0) * 100
-        total_steps = position_counts['long'] + position_counts['short'] + position_counts['flat']
         
-        # Win/Loss
         wins = len([p for p in trade_pnls if p > 0])
         losses = len([p for p in trade_pnls if p < 0])
         win_rate = wins / max(1, wins + losses) * 100
-        avg_win = np.mean([p for p in trade_pnls if p > 0]) * 100 if wins > 0 else 0
-        avg_loss = np.mean([p for p in trade_pnls if p < 0]) * 100 if losses > 0 else 0
-        profit_factor = abs(sum(p for p in trade_pnls if p > 0) / (sum(p for p in trade_pnls if p < 0) + 1e-10))
-        
-        # Sharpe / Sortino
-        returns = np.diff(equity_history) / (np.array(equity_history[:-1]) + 1e-10)
-        sharpe = sortino = 0.0
-        if len(returns) > 1:
-            annualize = np.sqrt(175200)
-            sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * annualize
-            downside = returns[returns < 0]
-            downside_std = np.std(downside) if len(downside) > 0 else 1e-8
-            sortino = np.mean(returns) / (downside_std + 1e-8) * annualize
-
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("📊 TD3 Teacher Evaluation Results (Train-Aligned v2)")
-        logger.info("=" * 70)
-        logger.info(f"  💰 Initial Balance:  ${initial_balance:,.2f}")
-        logger.info(f"  💰 Final Balance:    ${final_balance:,.2f}")
-        logger.info(f"  📈 Return (ROE):     {final_return:+.2f}%")
-        logger.info(f"  📉 Max Drawdown:     {max_drawdown*100:.2f}%")
-        logger.info(f"  💸 Total Cost (ROE): {total_cost_accumulated*100:.2f}%")
-        logger.info("-" * 70)
-        logger.info(f"  🔄 Total Trades:     {trade_count}")
-        logger.info(f"  ✅ Wins:             {wins} ({win_rate:.1f}%)")
-        logger.info(f"  ❌ Losses:           {losses}")
-        logger.info(f"  📊 Avg Win ROE:      {avg_win:+.4f}%")
-        logger.info(f"  📊 Avg Loss ROE:     {avg_loss:+.4f}%")
-        logger.info(f"  📊 Profit Factor:    {profit_factor:.2f}")
-        logger.info("-" * 70)
-        logger.info(f"  📏 Sharpe Ratio:     {sharpe:.4f}")
-        logger.info(f"  📏 Sortino Ratio:    {sortino:.4f}")
-        logger.info("-" * 70)
-        long_pct = position_counts['long'] / max(1, total_steps) * 100
-        short_pct = position_counts['short'] / max(1, total_steps) * 100
-        flat_pct = position_counts['flat'] / max(1, total_steps) * 100
-        logger.info(f"  🟢 Long:             {long_pct:.1f}%")
-        logger.info(f"  🔴 Short:            {short_pct:.1f}%")
-        logger.info(f"  ⚪ Flat:             {flat_pct:.1f}%")
-        logger.info("=" * 70)
-        
-        # 날짜 범위 출력
-        try:
-            start_date = self.data_collector.eth_data.index[self.start_idx]
-            end_date = self.data_collector.eth_data.index[self.end_idx - 1]
-            logger.info(f"  📅 Period: {start_date} ~ {end_date}")
-        except:
-            pass
-        logger.info("=" * 70)
+        pf = abs(sum(p for p in trade_pnls if p > 0) / (sum(p for p in trade_pnls if p < 0) + 1e-10))
         
         return {
-            'equity': equity,
-            'return_pct': final_return,
-            'sharpe': sharpe,
-            'sortino': sortino,
-            'max_drawdown': max_drawdown,
+            'deadzone': deadzone,
+            'min_strength': min_strength_change,
+            'return_pct': (equity - 1.0) * 100,
+            'max_dd': max_drawdown * 100,
             'trades': trade_count,
+            'wins': wins,
+            'losses': losses,
             'win_rate': win_rate,
-            'profit_factor': profit_factor,
+            'profit_factor': pf,
+            'total_cost_pct': total_cost * 100,
+            'flat_pct': pos_counts['flat'] / max(1, sum(pos_counts.values())) * 100,
         }
+
+    def sweep(self):
+        """다양한 설정을 스윕"""
+        if self.cached_actions is None:
+            self.precompute_actions()
+        
+        # 스윕 그리드
+        deadzones = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        min_strengths = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        
+        results = []
+        
+        logger.info("")
+        logger.info("=" * 100)
+        logger.info("🔍 Threshold Sweep 시작")
+        logger.info("=" * 100)
+        
+        for dz in deadzones:
+            for ms in min_strengths:
+                r = self.simulate(dz, ms)
+                results.append(r)
+        
+        # 결과 정렬 (수익률 기준)
+        results.sort(key=lambda x: x['return_pct'], reverse=True)
+        
+        # 테이블 출력
+        logger.info("")
+        logger.info(f"{'DZ':>4} | {'MinStr':>6} | {'Return%':>9} | {'MaxDD%':>7} | {'Trades':>6} | {'WinR%':>6} | {'PF':>5} | {'Cost%':>8} | {'Flat%':>6}")
+        logger.info("-" * 100)
+        
+        for r in results:
+            ret_str = f"{r['return_pct']:+.1f}%"
+            logger.info(
+                f"{r['deadzone']:>4.1f} | {r['min_strength']:>6.1f} | {ret_str:>9} | "
+                f"{r['max_dd']:>6.1f}% | {r['trades']:>6} | {r['win_rate']:>5.1f}% | "
+                f"{r['profit_factor']:>5.2f} | {r['total_cost_pct']:>7.1f}% | {r['flat_pct']:>5.1f}%"
+            )
+        
+        # Top 5 강조
+        logger.info("")
+        logger.info("🏆 Top 5 설정:")
+        for i, r in enumerate(results[:5]):
+            logger.info(
+                f"  #{i+1}: DZ={r['deadzone']}, MinStr={r['min_strength']} → "
+                f"Return {r['return_pct']:+.1f}% | Trades {r['trades']} | WR {r['win_rate']:.1f}% | PF {r['profit_factor']:.2f}"
+            )
+        
+        # 수익 나는 설정 수
+        profitable = [r for r in results if r['return_pct'] > 0]
+        logger.info(f"\n✅ 수익 설정: {len(profitable)}/{len(results)}개")
+        
+        if not profitable:
+            logger.info("")
+            logger.info("⚠️ 모든 설정에서 손실. 모델 자체의 방향 예측력이 부족할 수 있음.")
+            logger.info("   → 학습을 더 진행하거나, 수수료 공식 수정 필요")
+        
+        return results
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="TD3 Teacher-Guided Evaluator")
+    parser = argparse.ArgumentParser(description="TD3 Threshold Sweep Evaluator")
     parser.add_argument('--mode', type=str, default='test', choices=['test', 'val', 'full'])
     parser.add_argument('--model', type=str, default='best', choices=['best', 'last'])
     parser.add_argument('--run-dir', type=str, default=None)
     args = parser.parse_args()
     
-    evaluator = TD3TeacherEvaluator(mode=args.mode, model_type=args.model, run_dir=args.run_dir)
-    evaluator.evaluate()
+    evaluator = ThresholdSweepEvaluator(mode=args.mode, model_type=args.model, run_dir=args.run_dir)
+    evaluator.sweep()
