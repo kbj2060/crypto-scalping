@@ -1,129 +1,115 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from common.fusion_transformer import QuantTransformerBackbone, StrategyInteractionLayer, CrossAttentionFusion
+import math
 
-# ==============================================================================
-# MacroHFT Network (PPO Specific)
-# - Mode: 'tactical' (Causal Masking, RoPE)
-# - Head: Discrete Action (Logits), Value, CVaR, Aux
-# ==============================================================================
+# [2026 SOTA] SwiGLU Activation (LLaMA, PaLM 등 최신 LLM의 표준)
+class SwiGLU(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.w1 = nn.Linear(dim, dim)
+        self.w2 = nn.Linear(dim, dim)
+        self.w3 = nn.Linear(dim, dim)
 
-class MacroHFTNetwork(nn.Module):
-    """PPO용 네트워크: Tactical Mode (RoPE + Time Decay Mask)"""
-    EXPECTED_INFO_DIM = 11
-    
-    def __init__(self, input_dim, action_dim, info_dim=11, hidden_dim=256, num_layers=2, dropout=0.1):
+    def forward(self, x):
+        return self.w2(nn.functional.silu(self.w1(x)) * self.w3(x))
+
+# [2026 SOTA] Transformer Block with Pre-Norm & SwiGLU
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, n_head, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, n_head, batch_first=True, dropout=dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        
+        # Feed Forward Network (FFN) -> SwiGLU로 업그레이드
+        self.ffn = nn.Sequential(
+            SwiGLU(d_model),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x, mask=None):
+        # Pre-Norm Architecture (학습 안정성 ↑)
+        x_norm = self.norm1(x)
+        attn_out, _ = self.attn(x_norm, x_norm, x_norm, attn_mask=mask)
+        x = x + attn_out
+        
+        x_norm = self.norm2(x)
+        ffn_out = self.ffn(x_norm)
+        x = x + ffn_out
+        return x
+
+# [Core] Trading Transformer
+class TradingTransformer(nn.Module):
+    def __init__(self, state_dim, action_dim, info_dim, d_model=128, n_head=4, n_layers=2):
         super().__init__()
         
-        # 1. Backbone (Tactical Mode)
-        self.backbone = QuantTransformerBackbone(
-            state_dim=input_dim, 
-            hidden_dim=hidden_dim, 
-            n_layers=num_layers, 
-            dropout=dropout, 
-            mode='tactical'
+        # 1. Embedding Layer (State -> Vector)
+        self.embedding = nn.Linear(state_dim, d_model)
+        self.pos_encoder = nn.Parameter(torch.zeros(1, 500, d_model)) # Max Lookback 500
+        
+        # 2. Transformer Encoder Layers
+        self.layers = nn.ModuleList([
+            TransformerBlock(d_model, n_head) for _ in range(n_layers)
+        ])
+        
+        # 3. Context Integration (Info Vector Fusion)
+        self.info_fusion = nn.Linear(d_model + info_dim, d_model)
+        
+        # 4. Heads (Actor & Critic)
+        self.actor_head = nn.Sequential(
+            SwiGLU(d_model),
+            nn.Linear(d_model, action_dim)
+        )
+        self.critic_head = nn.Sequential(
+            SwiGLU(d_model),
+            nn.Linear(d_model, 1)
         )
         
-        # 2. Components
-        self.strategy_processor = StrategyInteractionLayer()
-        self.fusion = CrossAttentionFusion(hidden_dim, query_dim=67) # Strat(64) + Pos(3)
-        self.gate = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.Sigmoid())
-        
-        # 3. Heads (Discrete Action)
-        self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim), nn.GELU(),
-            nn.Linear(hidden_dim, action_dim)
-        )
-        self.critic_mean = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, 1))
-        self.critic_cvar = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.GELU(), nn.Linear(hidden_dim//2, 1))
-        self.aux = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.GELU(), nn.Linear(hidden_dim//2, 1))
-        
-        self.last_gate_mean = 0.5
         self.apply(self._init_weights)
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-            if m.bias is not None: nn.init.constant_(m.bias, 0.0)
-        elif isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
-            nn.init.constant_(m.weight, 1.0)
-            nn.init.constant_(m.bias, 0.0)
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
-    def forward(self, x, info, states=None, temperature=None):
-        context, seq_encodings, next_states = self.backbone(x, states)
-        if info.dim() == 3: info = info.squeeze(1)
+    def forward(self, state_seq, state_info, states=None):
+        # state_seq: [Batch, Seq_Len, Dim]
+        B, T, D = state_seq.shape
         
-        pos_val = info[:, 0:1]; strategies = info[:, 1:9]; pos_meta = info[:, 9:11]
-        pos_info = torch.cat([pos_val, pos_meta], dim=1)
-        strat_features = self.strategy_processor(strategies)
-        query_vec = torch.cat([strat_features, pos_info], dim=1)
+        # 1. Embedding + Positional Encoding
+        x = self.embedding(state_seq) # [B, T, d_model]
+        x = x + self.pos_encoder[:, :T, :]
         
-        fused = self.fusion(seq_encodings, query_vec)
-        gate = self.gate(fused)
-        # [Ace Fix] .item() 제거 -> .detach() 사용
-        # 값을 꺼내지 않고, 그래디언트만 끊어서 텐서 상태로 유지 (그래프 끊김 방지)
-        self.last_gate_mean = gate.mean().detach()
-        final_repr = fused * gate
+        # 2. Transformer Pass
+        for layer in self.layers:
+            x = layer(x)
+            
+        # 3. Last Token Pooling (GPT style: predict next move based on context)
+        context_vector = x[:, -1, :] # [B, d_model]
         
-        return self.actor(final_repr), self.critic_mean(final_repr), self.critic_cvar(final_repr), self.aux(final_repr), next_states, self.last_gate_mean
+        # 4. Fusion with Info (Account status, etc)
+        combined = torch.cat([context_vector, state_info], dim=1)
+        latent = self.info_fusion(combined)
+        
+        # 5. Outputs
+        logits = self.actor_head(latent)
+        value = self.critic_head(latent)
+        
+        return logits, value, None, None, None, None
 
-# ==============================================================================
-# 전문가별 특화 네트워크 (Expert Specialization)
-# ==============================================================================
+# [Expert Definition] MoE를 위한 3가지 특화 트랜스포머
+class TrendExpert(TradingTransformer):
+    def __init__(self, state_dim, action_dim, info_dim):
+        # Trend: 깊은 레이어 (복잡한 패턴 인식)
+        super().__init__(state_dim, action_dim, info_dim, d_model=256, n_head=8, n_layers=4)
 
-class TrendExpert(MacroHFTNetwork):
-    """
-    추세 전문가: 더 깊은 레이어와 넓은 시야로 거시적 관성 파악
-    - Hidden Dim: 512 (높은 표현력)
-    - Layers: 4 (깊은 시간적 패턴 학습)
-    - Dropout: 0.2 (과적합 방지)
-    """
-    def __init__(self, input_dim, action_dim, info_dim=11, dropout=0.2):
-        super().__init__(
-            input_dim=input_dim,
-            action_dim=action_dim,
-            info_dim=info_dim,
-            hidden_dim=512,
-            num_layers=4,
-            dropout=dropout
-        )
+class VolatilityExpert(TradingTransformer):
+    def __init__(self, state_dim, action_dim, info_dim):
+        # Volatility: 빠른 반응 (얕은 레이어)
+        super().__init__(state_dim, action_dim, info_dim, d_model=128, n_head=4, n_layers=2)
 
-
-class VolatilityExpert(MacroHFTNetwork):
-    """
-    변동성 전문가: 얕고 빠른 레이어로 즉각적인 가격 발산에 대응
-    - Hidden Dim: 128 (경량화, 빠른 반응)
-    - Layers: 1 (즉각 반응)
-    - Dropout: 0.1 (노이즈 허용)
-    """
-    def __init__(self, input_dim, action_dim, info_dim=11, dropout=0.1):
-        super().__init__(
-            input_dim=input_dim,
-            action_dim=action_dim,
-            info_dim=info_dim,
-            hidden_dim=128,
-            num_layers=1,
-            dropout=dropout
-        )
-
-
-class SidewaysExpert(MacroHFTNetwork):
-    """
-    횡보 전문가: 박스권 상하단을 타겟팅하는 통계적 특성 강화
-    - Hidden Dim: 256 (중간 표현력)
-    - Layers: 2 (적절한 깊이)
-    - Dropout: 0.05 (노이즈 무시, 안정적 패턴 학습)
-    """
-    def __init__(self, input_dim, action_dim, info_dim=11, dropout=0.05):
-        super().__init__(
-            input_dim=input_dim,
-            action_dim=action_dim,
-            info_dim=info_dim,
-            hidden_dim=256,
-            num_layers=2,
-            dropout=dropout
-        )
-
-# 기존 코드와의 호환성을 위한 Alias
-XLSTMNetwork = MacroHFTNetwork
+class SidewaysExpert(TradingTransformer):
+    def __init__(self, state_dim, action_dim, info_dim):
+        # Sideways: 통계적 판단 (중간 레이어)
+        super().__init__(state_dim, action_dim, info_dim, d_model=192, n_head=6, n_layers=3)
