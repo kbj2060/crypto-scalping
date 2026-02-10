@@ -352,5 +352,5 @@ if __name__ == "__main__":
     parser.add_argument('--run-dir', type=str, default=None)
     args = parser.parse_args()
     
-    evaluator = ThresholdSweepEvaluator(mode=args.mode, model_type=args.model, run_dir=args.run_dir)
+    evaluator = TD3TeacherEvaluator(mode=args.mode, model_type=args.model, run_dir=args.run_dir)
     evaluator.sweep()
