@@ -76,10 +76,29 @@ class TD3TeacherEvaluator:
 
     def _load_data(self):
         path = 'data/training_features.csv'
+        cached_strategies_path = 'data/cached_strategies.csv'  # [추가] 캐시 파일 경로 지정
+        
         if os.path.exists(path):
+            # 1. 기본 피처 데이터 로드
             df = pd.read_csv(path, index_col=0, parse_dates=True).ffill().bfill()
+            
+            # 2. [핵심] 캐시된 전략 데이터가 있으면 병합 (재계산 방지)
+            if os.path.exists(cached_strategies_path):
+                try:
+                    cached_df = pd.read_csv(cached_strategies_path, index_col=0, parse_dates=True)
+                    # 'strategy_'로 시작하는 컬럼만 골라서 병합
+                    strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
+                    if strategy_cols:
+                        # 인덱스 기준으로 병합
+                        df[strategy_cols] = cached_df[strategy_cols]
+                        logger.info(f"✅ 캐시된 전략 데이터 로드 완료: {len(strategy_cols)}개 전략")
+                except Exception as e:
+                    logger.warning(f"⚠️ 캐시 데이터 로드 중 오류 (재계산 진행): {e}")
+
+            # 3. 변동성 피처 추가 (없을 경우)
             if 'volatility_20tick' not in df.columns:
                 df = add_volatility_feature(df)
+                
             self.data_collector.eth_data = df
             logger.info(f"✅ 데이터 로드 완료: {len(df):,}행")
         else:
