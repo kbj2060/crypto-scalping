@@ -70,7 +70,6 @@ LOOKBACK = 120
 REWARD_MULTIPLIER = 100.0
 LOSS_PENALTY_MULTIPLIER = 50.0
 TRANSACTION_COST = 0.0005
-TIME_COST = 0.0001
 
 # [레버리지 시스템] 청산 및 손절 임계값
 LIQUIDATION_THRESHOLD = -0.80  # ROE -80% = 강제 청산 (게임 오버)
@@ -94,11 +93,7 @@ PPO_ENTROPY_MIN = 0.001  # 0.005 → 0.001 (최소값 낮춤)
 # [튜닝] Learning Rate 증가 (배치 사이즈 증가에 따라)
 PPO_LEARNING_RATE = 1e-4  # 5e-5 → 1e-4
 
-PPO_LR_WARMUP_EPISODES = 30
-PPO_TEMP_WARMUP_EPISODES = 10
-PPO_USE_VALUE_CLIP = True
 PPO_VALUE_CLIP_EPS = 0.3
-PPO_KL_TARGET = 0.05
 PPO_TEMP_INIT = 0.8
 PPO_TEMP_MIN = 0.3
 PPO_TEMP_DECAY = 0.9995
@@ -114,8 +109,6 @@ NETWORK_NUM_LAYERS = 2  # TD3는 3 (strategic mode에서 자동)
 TD_NETWORK_NUM_LAYERS = 3
 
 NETWORK_DROPOUT = 0.1
-CONV_KERNEL_SIZE = 5
-CONV_DILATION = 2
 
 # [튜닝] Attention Heads 증가
 NETWORK_ATTENTION_HEADS = 8  # 4 → 8 (Hidden=512에 맞춰)
@@ -127,17 +120,11 @@ NETWORK_SHARED_TRUNK_DIM2 = 256  # 128 → 256
 NETWORK_ACTOR_HEAD_DIM = 128  # 64 → 128
 NETWORK_CRITIC_HEAD_DIM = 64  # 32 → 64
 
-NETWORK_USE_CHECKPOINTING = False
-
 # =============================================================================
 # [학습 파라미터] - 3070Ti 8GB VRAM 최대 활용
 # =============================================================================
-TRAIN_ACTION_DIM = 3
-
 # [튜닝] Batch Size 대폭 증가 (AMP 활용)
 TRAIN_BATCH_SIZE = 1024  # 256 → 1024 (3070Ti + AMP로 충분)
-
-TRAIN_SAMPLE_SIZE = 50000
 
 TRAIN_SPLIT = 0.7
 VAL_SPLIT = 0.15
@@ -149,9 +136,6 @@ TRAIN_NUM_EPISODES = 3000  # 5000 → 10000
 TRAIN_MAX_STEPS_PER_EPISODE = 240
 MAX_TRADES_PER_EPISODE = 50
 TRAIN_SAVE_INTERVAL = 200
-
-# [튜닝] Expert Phase 증가
-MACROHFT_EXPERT_PHASE_EPISODES = 5000  # 3000 → 5000 (충분한 전문가 학습)
 
 EVAL_INITIAL_CAPITAL = 10000
 EVAL_VERBOSE_INTERVAL = 200
