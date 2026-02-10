@@ -1,7 +1,8 @@
 """
-TD3 Threshold Sweep Evaluator (Correct Logic)
-- [Fix] Precompute 제거: PositionAware 모델의 정확한 평가를 위해 매 스텝 추론 수행
-- [Fix] PnL Logic: 학습 코드와 동일한 로직 적용 (prev_pnl, trade_flag 반영)
+TD3 Teacher-Guided Evaluator (Single Run Mode)
+- Config의 설정을 그대로 가져와 1회 정밀 평가 수행
+- [Logic] 학습 코드와 100% 동일한 로직 (Stateful, No Precompute)
+- [Target] Deadzone=0.6, MinTrade=0.6 (Config.py 기준)
 """
 import logging
 import os
@@ -10,7 +11,6 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
-import itertools
 
 try:
     from common import config
@@ -35,7 +35,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 logger = logging.getLogger(__name__)
 
+# Config에서 설정값 가져오기
 TRANSACTION_COST = getattr(config, 'TRANSACTION_COST', 0.0005)
+TARGET_DEADZONE = getattr(config, 'TD3_DEADZONE', 0.6)
+TARGET_MIN_TRADE = getattr(config, 'TD3_MIN_TRADE_SIZE', 0.6)
+
 
 class TD3TeacherEvaluator:
     def __init__(self, mode='test', model_type='best', run_dir=None):
@@ -56,7 +60,7 @@ class TD3TeacherEvaluator:
         elif mode == 'val':
             self.start_idx = int(total_len * config.TRAIN_SPLIT)
             self.end_idx = int(total_len * (config.TRAIN_SPLIT + config.VAL_SPLIT))
-        else:
+        else: # full
             self.start_idx = config.LOOKBACK + 100
             self.end_idx = total_len
 
@@ -137,33 +141,38 @@ class TD3TeacherEvaluator:
             return torch.cat([info, vol_t], dim=-1)
         return np.append(np.asarray(info).flatten(), vol).astype(np.float32)
 
-    def run_simulation(self, deadzone, min_strength):
-        """실제 Inference를 포함한 시뮬레이션 (느리지만 정확함)"""
+    def evaluate_single_run(self):
+        """Config 설정값으로 1회 평가 실행"""
+        deadzone = TARGET_DEADZONE
+        min_strength = TARGET_MIN_TRADE
+        
+        logger.info("=" * 80)
+        logger.info(f"🚀 Single Evaluation Started")
+        logger.info(f"   - Deadzone: {deadzone}")
+        logger.info(f"   - Min Trade Size: {min_strength}")
+        logger.info("=" * 80)
+        
         current_pos_size = 0.0
         prev_pnl = 0.0
         prev_trade_flag = 0.0
         
-        equity = 1.0
-        max_equity = 1.0
+        balance = 10000.0  # 초기 자본금 $10,000
+        initial_balance = balance
+        max_balance = balance
         max_drawdown = 0.0
         
         trade_count = 0
         total_cost = 0.0
         trade_pnls = []
-        current_trade_roe = 0.0
+        current_trade_pnl = 0.0
         
         pos_counts = {'long': 0, 'short': 0, 'flat': 0}
+        max_leverage = 1.0  # Phase 1: No Leverage
         
-        # [중요] Phase 1은 레버리지 1.0 고정
-        max_leverage = 1.0
-        
-        # 진행률 바 없이 조용히 실행 (너무 많으면 로그 지저분)
-        # indices = range(self.start_idx, self.end_idx - 1)
-        
-        for idx in range(self.start_idx, self.end_idx - 1):
+        for idx in tqdm(range(self.start_idx, self.end_idx - 1), desc="Evaluating"):
             curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
             
-            # 1. Observation (Stateful)
+            # 1. Observation
             pos_info = [current_pos_size, prev_pnl, prev_trade_flag]
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None: continue
@@ -186,8 +195,8 @@ class TD3TeacherEvaluator:
             if abs(trade_amount) > 1e-4:
                 trade_count += 1
                 if current_pos_size != 0.0 and (target_pos_size == 0.0 or np.sign(target_pos_size) != np.sign(current_pos_size)):
-                    trade_pnls.append(current_trade_roe)
-                    current_trade_roe = 0.0
+                    trade_pnls.append(current_trade_pnl)
+                    current_trade_pnl = 0.0
             
             trade_cost = abs(trade_amount) * max_leverage * TRANSACTION_COST
             total_cost += trade_cost
@@ -202,68 +211,50 @@ class TD3TeacherEvaluator:
             price_return = (next_price - curr_price) / curr_price
             step_pnl = (current_pos_size * max_leverage * price_return) - trade_cost
             
-            current_trade_roe += step_pnl
-            equity *= (1 + step_pnl)
+            current_trade_pnl += step_pnl
+            balance *= (1 + step_pnl)
             
-            if equity > max_equity: max_equity = equity
-            dd = (max_equity - equity) / max_equity
-            if dd > max_drawdown: max_drawdown = dd
+            if balance > max_balance: max_balance = balance
+            drawdown = (max_balance - balance) / max_balance
+            if drawdown > max_drawdown: max_drawdown = drawdown
             
-            # Update State Vars
+            # State Update
             prev_pnl = step_pnl * 100.0
             prev_trade_flag = 1.0 if abs(trade_amount) < 0.1 else 0.0
             
-            if equity < 0.01: break # 파산
+            if balance < 100: # 파산 보호
+                logger.warning("⚠️ 파산 감지 (Balance < $100)")
+                break
             
         if current_pos_size != 0.0:
-            trade_pnls.append(current_trade_roe)
+            trade_pnls.append(current_trade_pnl)
             
+        # 결과 계산
         wins = len([p for p in trade_pnls if p > 0])
         losses = len([p for p in trade_pnls if p < 0])
         win_rate = wins / max(1, wins + losses) * 100
-        pf = abs(sum(p for p in trade_pnls if p > 0) / (sum(p for p in trade_pnls if p < 0) + 1e-10))
-        
-        return {
-            'deadzone': deadzone,
-            'min_strength': min_strength,
-            'return_pct': (equity - 1.0) * 100,
-            'max_dd': max_drawdown * 100,
-            'trades': trade_count,
-            'win_rate': win_rate,
-            'profit_factor': pf,
-            'total_cost': total_cost
-        }
+        total_pnl = sum(trade_pnls) if trade_pnls else 0.0
+        profit_factor = abs(sum(p for p in trade_pnls if p > 0) / (sum(p for p in trade_pnls if p < 0) + 1e-10))
+        final_return = (balance - initial_balance) / initial_balance * 100
 
-    def sweep(self):
-        # Grid 설정 (너무 많으면 오래 걸림)
-        deadzones = [0.3, 0.4, 0.5, 0.6] 
-        min_strengths = [0.3, 0.4, 0.5]
-        
-        logger.info("=" * 80)
-        logger.info(f"🔍 Correct State Sweep Started ({len(deadzones)*len(min_strengths)} combinations)")
-        logger.info("   Note: Precompute removed for accuracy. This will take time.")
-        logger.info("=" * 80)
-        
-        results = []
-        for dz, ms in itertools.product(deadzones, min_strengths):
-            logger.info(f"Running simulation: DZ={dz}, MS={ms}...")
-            r = self.run_simulation(dz, ms)
-            results.append(r)
-            logger.info(f" -> Return: {r['return_pct']:.2f}% | Trades: {r['trades']}")
-            
-        results.sort(key=lambda x: x['return_pct'], reverse=True)
-        
-        logger.info("\n" + "="*80)
-        logger.info("🏆 Final Sweep Results")
-        logger.info("="*80)
-        logger.info(f"{'DZ':>4} | {'MinStr':>6} | {'Return%':>9} | {'Trades':>6} | {'WinR%':>6} | {'PF':>5}")
-        logger.info("-" * 80)
-        
-        for r in results:
-            logger.info(
-                f"{r['deadzone']:>4.1f} | {r['min_strength']:>6.1f} | {r['return_pct']:>8.2f}% | "
-                f"{r['trades']:>6} | {r['win_rate']:>5.1f}% | {r['profit_factor']:>5.2f}"
-            )
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("📊 Evaluation Results (Config Settings)")
+        logger.info("=" * 60)
+        logger.info(f"  💰 Initial Balance: ${initial_balance:,.2f}")
+        logger.info(f"  💰 Final Balance:   ${balance:,.2f}")
+        logger.info(f"  📈 Return:          {final_return:+.2f}%")
+        logger.info(f"  📉 Max Drawdown:    {max_drawdown*100:.2f}%")
+        logger.info(f"  💸 Total Fees:      ${total_cost*initial_balance:.2f}")
+        logger.info("-" * 60)
+        logger.info(f"  🔄 Trades:          {trade_count}")
+        logger.info(f"  ✅ Win Rate:        {win_rate:.1f}% ({wins}/{wins+losses})")
+        logger.info(f"  ⚖️ Profit Factor:   {profit_factor:.2f}")
+        logger.info("-" * 60)
+        logger.info(f"  🟢 Long:            {pos_counts['long'] / max(1, sum(pos_counts.values())) * 100:.1f}%")
+        logger.info(f"  🔴 Short:           {pos_counts['short'] / max(1, sum(pos_counts.values())) * 100:.1f}%")
+        logger.info(f"  ⚪ Flat:            {pos_counts['flat'] / max(1, sum(pos_counts.values())) * 100:.1f}%")
+        logger.info("=" * 60)
 
 if __name__ == "__main__":
     import argparse
@@ -274,4 +265,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     evaluator = TD3TeacherEvaluator(mode=args.mode, model_type=args.model, run_dir=args.run_dir)
-    evaluator.sweep()
+    evaluator.evaluate_single_run()
