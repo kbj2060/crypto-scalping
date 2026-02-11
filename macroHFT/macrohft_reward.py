@@ -145,26 +145,28 @@ def calculate_v4_reward(tracker, expert_type, step_pnl, realized_pnl, trade_done
             reward += 0.05 * (1 + holding_time)
 
     elif expert_type == 'volatility':
-        # Objective: Differential Sharpe Ratio (DSR)
-        # 변동성 대비 수익 효율성 극대화
+        # [Fix] "묻지마 변동성 보너스" 완전 삭제
+        # 이제는 오직 '실현 손익(Realized PnL)'으로만 평가합니다.
+        
+        # 1. Trading Tax (매매 횟수 억제)
+        # 매수(1)나 매도(2) 행동을 할 때마다 점수를 깎습니다.
+        # "확실한 거 아니면 들어가지 마라"는 신호입니다.
+        if action in [1, 2]:
+            reward -= 2.0 
+
+        # 2. Realized Profit Bonus (익절 시에만 보상)
         if trade_done and realized_pnl > 0:
             vol = tracker.get_volatility()
             if vol > 1e-6:
-                sharpe_bonus = (realized_pnl / vol) * getattr(config, 'REWARD_VOLATILITY_SHARPE_SCALE', 2.0)
-                reward += min(sharpe_bonus, 5.0) # Cap bonus
-        
-        # [Fix] Momentum Capture (수정됨)
-        # 기존: abs(step_pnl) -> 손실나도 변동성만 크면 점수 줌 (Hacking 원인)
-        # 수정: step_pnl > 0  -> "수익 방향으로" 크게 움직일 때만 점수 줌
-        # [수정된 부분] 
-        # 1. 수익이 났을 때만(양수) 보너스 지급 (abs 제거)
-        if step_pnl > 0.001: 
-            reward += step_pnl * 30.0 
-            
-        # 2. 손실이 나면(음수) 강력한 페널티
-        if step_pnl < -0.001:
-            reward += step_pnl * 100.0  # 손실 * 100배 페널티
+                sharpe = realized_pnl / vol
+                reward += min(sharpe, 3.0) * 2.0 # Sharpe Bonus
+            reward += realized_pnl * 50.0 # Profit Bonus
 
+        # 3. Strict Loss Penalty
+        # 평가 손실이 나면 가차없이 때립니다. (Momentum Bonus 삭제됨)
+        if step_pnl < 0:
+            reward += step_pnl * 100.0
+            
     elif expert_type == 'sideways':
         # Objective: Max Drawdown Minimization & Mean Reversion
         # MDD가 커지면 페널티를 강력하게 부여
