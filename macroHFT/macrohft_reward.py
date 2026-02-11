@@ -156,13 +156,14 @@ def calculate_v4_reward(tracker, expert_type, step_pnl, realized_pnl, trade_done
         # [Fix] Momentum Capture (수정됨)
         # 기존: abs(step_pnl) -> 손실나도 변동성만 크면 점수 줌 (Hacking 원인)
         # 수정: step_pnl > 0  -> "수익 방향으로" 크게 움직일 때만 점수 줌
-        if step_pnl > 0.001: # 0.1% 이상 수익 방향으로 급등 시
-            reward += step_pnl * 30.0 # 가중치 50 -> 30으로 하향 조정 (너무 흥분하지 않게)
+        # [수정된 부분] 
+        # 1. 수익이 났을 때만(양수) 보너스 지급 (abs 제거)
+        if step_pnl > 0.001: 
+            reward += step_pnl * 30.0 
             
-        # [New] Volatility Loss Penalty (추가됨)
-        # 변동성 큰 장에서 틀리면 더 크게 혼냄
+        # 2. 손실이 나면(음수) 강력한 페널티
         if step_pnl < -0.001:
-            reward += step_pnl * 50.0 # 손실 가중치 강화 (아프게 때림)
+            reward += step_pnl * 100.0  # 손실 * 100배 페널티
 
     elif expert_type == 'sideways':
         # Objective: Max Drawdown Minimization & Mean Reversion
