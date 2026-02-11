@@ -1,3 +1,4 @@
+# IMPORTS
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +9,29 @@ import os
 import glob
 from common import config
 from .macrohft_network import TrendExpert, VolatilityExpert, SidewaysExpert
+
+# Distributional Loss 계산을 위한 함수 추가
+def quantile_huber_loss(quantiles, target, tau_hat):
+    """
+    quantiles: (B, N) - Predicted
+    target: (B, 1) - TD Target (Reward + Gamma * Next_V)
+    tau_hat: (N,) - Quantile midpoints (e.g. 0.05, 0.15, ..., 0.95)
+    """
+    # Broadcasting: (B, N) vs (B, 1)
+    # pairwise difference: u = target - quantiles
+    u = target - quantiles 
+    
+    # Huber Loss part
+    abs_u = u.abs()
+    huber_loss = torch.where(
+        abs_u <= 1.0, 
+        0.5 * u.pow(2),
+        abs_u - 0.5
+    )
+    
+    # Quantile regression loss part: |tau - I(u<0)| * huber_loss
+    loss = (torch.abs(tau_hat - (u < 0).float()) * huber_loss).mean()
+    return loss
 
 # [Router] DDQN Router
 class DDQNRouter(nn.Module):
@@ -217,9 +241,20 @@ class PPOAgent:
                 selected_expert = expert_idx
 
             net = self.experts[selected_expert]
-            logits, value, _, _, next_state, _ = net(obs_seq, obs_info, states=self.current_states[selected_expert])
-            self.current_states[selected_expert] = next_state
-
+            # [Update v3.5] Mamba/D-PPO Output Handling
+            # out = logits, value_mean, _, _, _, quantiles
+            out = net(obs_seq, obs_info, states=self.current_states[selected_expert])
+            logits, value_mean = out[0], out[1]
+            
+            # Mamba는 state를 내부적으로 관리하지 않거나, 매 step마다 리턴하지 않을 수 있음 (구조에 따라 다름)
+            # 여기서는 MambaFiLMBlock이 recurrent state를 리턴하지 않고 전체 시퀀스를 처리한다고 가정 
+            # (Transformer처럼 동작. Mamba의 causal 모드는 전체 seq 입력 시 자동 적용)
+            # Future improvement: Implement true recurrent state passing for Mamba inference speedup if needed.
+            # Currently it processes window every step like Transformer.
+            
+            # self.current_states[selected_expert] = next_state # Not used in this version for Mamba
+            # (MambaBlock implementation treated it as sequence model)
+            
             if action_mask is not None:
                 mask_tensor = torch.as_tensor(action_mask, device=self.device)
                 logits = logits + (mask_tensor - 1) * 1e9
@@ -227,7 +262,7 @@ class PPOAgent:
             dist = Categorical(logits=logits)
             action = logits.argmax(dim=-1) if deterministic else dist.sample()
             
-            if isinstance(value, torch.Tensor): value = value.item()
+            if isinstance(value_mean, torch.Tensor): value = value_mean.item()
 
         return action.item(), dist.log_prob(action).item(), value, selected_expert
 
@@ -284,8 +319,12 @@ class PPOAgent:
                 self.router_target.load_state_dict(self.router.state_dict())
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
-        # --- Train Experts (PPO) ---
+        # --- Train Experts (PPO with Quantile Regression) ---
         avg_loss = 0.0
+        
+        # Quantile Midpoints (Constant)
+        N_Q = getattr(config, 'NUM_QUANTILES', 32)
+        tau_hat = torch.linspace(0.5/N_Q, 1 - 0.5/N_Q, N_Q, device=self.device) # (N,)
 
         for _ in range(self.k_epochs):
             # [Improvement] Router 모드여도 사용된 Expert들은 학습시킴
@@ -327,26 +366,38 @@ class PPOAgent:
                 
                 if self.scaler:
                     with torch.amp.autocast(self.device):
-                        logits, curr_val, _, _, _, _ = network(b_s_seq, b_s_info)
+                        # Forward 다시 실행
+                        out = network(b_s_seq, b_s_info)
+                        logits, curr_val_mean = out[0], out[1]
+                        quantiles = out[5] # (B, N) - Quantile Output (Last element)
                         logits = logits + (b_masks - 1) * 1e9
                         dist = Categorical(logits=logits)
                         
+                        # 1. Actor Loss (PPO Standard)
                         log_prob = dist.log_prob(b_a)
                         ratio = torch.exp(log_prob - b_prob_a)
                         surr1 = ratio * b_adv
                         surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * b_adv
                         actor_loss = -torch.min(surr1, surr2).mean()
-                        critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), b_target_val)
+                        
+                        # 2. Critic Loss (Quantile Regression)
+                        # Target Value (b_target_val)는 GAE로 계산된 (Returns)
+                        # b_target_val shape: (B,) -> (B, 1)
+                        target_expanded = b_target_val.unsqueeze(1)
+                        critic_loss = quantile_huber_loss(quantiles, target_expanded, tau_hat)
+
                         entropy_loss = -self.entropy_coef * dist.entropy().mean()
                         
-                        total_loss = actor_loss + critic_loss + entropy_loss
+                        total_loss = actor_loss + 0.5 * critic_loss + entropy_loss
                     
                     self.scaler.scale(total_loss).backward()
                     self.scaler.step(optimizer)
                     self.scaler.update()
                 else:
                     # CPU Fallback
-                    logits, curr_val, _, _, _, _ = network(b_s_seq, b_s_info)
+                    out = network(b_s_seq, b_s_info)
+                    logits, curr_val_mean = out[0], out[1]
+                    quantiles = out[5] # Quantile output
                     logits = logits + (b_masks - 1) * 1e9
                     dist = Categorical(logits=logits)
                     log_prob = dist.log_prob(b_a)
@@ -354,9 +405,12 @@ class PPOAgent:
                     surr1 = ratio * b_adv
                     surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * b_adv
                     actor_loss = -torch.min(surr1, surr2).mean()
-                    critic_loss = 0.5 * nn.MSELoss()(curr_val.squeeze(), b_target_val)
+                    
+                    target_expanded = b_target_val.unsqueeze(1)
+                    critic_loss = quantile_huber_loss(quantiles, target_expanded, tau_hat)
+                    
                     entropy_loss = -self.entropy_coef * dist.entropy().mean()
-                    total_loss = actor_loss + critic_loss + entropy_loss
+                    total_loss = actor_loss + 0.5 * critic_loss + entropy_loss
                     total_loss.backward()
                     optimizer.step()
 

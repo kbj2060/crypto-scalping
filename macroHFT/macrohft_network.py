@@ -1,45 +1,30 @@
 """
-MacroHFT Network v3 — Paper-Faithful Implementation
-=====================================================
-논문: MacroHFT (KDD 2024) + FiLM (Perez 2017) + Multi-Scale Attention (MTS 2025)
-
-핵심 업그레이드:
-1. FiLM Conditional Adapter — 매 Transformer 레이어에서 condition(포지션+전략+시장)이
-   hidden state를 scale/shift로 변조. 논문 Eq(1)~(3)의 핵심 혁신.
-2. Condition Encoder — 포지션을 이산 Embedding으로, 전략 점수를 별도 MLP로 인코딩.
-3. Multi-Scale Temporal Attention — 단기(local window) + 장기(full range) 적응적 융합.
-4. Dueling Actor Head — V(s) + A(s,a) - mean(A) 구조로 포지션 의존적 행동 분리.
-
-호환성: forward() 시그니처 유지 → ppo_agent.py 수정 불필요
+MacroHFT Network v3.5 SOTA
+==========================
+1. Backbone: Mamba-FiLM Hybrid (속도/장기기억 O(N))
+2. Critic: Distributional Quantile Regression (리스크 관리)
+3. Adapter: FiLM (Feature-wise Linear Modulation)
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from common import config
 
+# Try importing Mamba (없으면 Transformer로 Fallback)
+try:
+    from mamba_ssm import Mamba
+    HAS_MAMBA = True
+except ImportError:
+    HAS_MAMBA = False
+    print("⚠️ Mamba not found. Falling back to Transformer.")
 
 # ==============================================================================
-# 1. Building Blocks
+# 1. Components (Mamba & FiLM)
 # ==============================================================================
-
-class SwiGLU(nn.Module):
-    """SwiGLU Activation (Shazeer 2020)"""
-    def __init__(self, dim):
-        super().__init__()
-        self.w1 = nn.Linear(dim, dim)
-        self.w2 = nn.Linear(dim, dim)
-        self.w3 = nn.Linear(dim, dim)
-
-    def forward(self, x):
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
-
 
 class FiLMLayer(nn.Module):
-    """
-    Feature-wise Linear Modulation (Perez et al. 2017)
-    h_out = gamma(c) * h + beta(c)
-    Zero-Init: 초기에 identity (gamma=1, beta=0)
-    """
+    """Condition(Market/Pos) -> Scale & Shift Features"""
     def __init__(self, d_model, cond_dim):
         super().__init__()
         self.film_gen = nn.Sequential(
@@ -47,6 +32,7 @@ class FiLMLayer(nn.Module):
             nn.SiLU(),
             nn.Linear(d_model, d_model * 2)
         )
+        # Zero-Init
         nn.init.zeros_(self.film_gen[-1].weight)
         nn.init.zeros_(self.film_gen[-1].bias)
         with torch.no_grad():
@@ -60,229 +46,186 @@ class FiLMLayer(nn.Module):
             beta = beta.unsqueeze(1)
         return gamma * h + beta
 
-
-# ==============================================================================
-# 2. Condition Encoder (논문 Eq.1)
-# ==============================================================================
-
-class ConditionEncoder(nn.Module):
-    """c = psi_3(P_t) + psi_2(s2_lt)"""
-    def __init__(self, info_dim, cond_dim):
+class MambaFiLMBlock(nn.Module):
+    """
+    SOTA: Mamba Block with FiLM Modulation
+    x_t = Mamba(Norm(FiLM(x_{t-1}, cond))) + x_{t-1}
+    """
+    def __init__(self, d_model, cond_dim, d_state=16, d_conv=4, expand=2):
         super().__init__()
-        self.position_embed = nn.Embedding(3, cond_dim)
-        context_input_dim = info_dim - 1
-        self.context_encoder = nn.Sequential(
-            nn.Linear(context_input_dim, cond_dim),
-            nn.LayerNorm(cond_dim),
-            nn.SiLU(),
-            nn.Linear(cond_dim, cond_dim)
+        if not HAS_MAMBA:
+            raise ImportError("Mamba-ssm not installed")
+            
+        self.film = FiLMLayer(d_model, cond_dim)
+        self.norm = nn.LayerNorm(d_model)
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand
         )
 
-    def forward(self, info):
-        pos_val = info[:, 0]
-        context = info[:, 1:]
-        pos_idx = (pos_val + 1).long().clamp(0, 2)
-        pos_emb = self.position_embed(pos_idx)
-        ctx_emb = self.context_encoder(context)
-        return pos_emb + ctx_emb
+    def forward(self, x, cond):
+        # 1. Condition Injection (FiLM)
+        x_mod = self.film(x, cond)
+        
+        # 2. Mamba Sequence Modeling
+        # Mamba는 내부적으로 Norm을 포함하기도 하지만, 안정성을 위해 Pre-Norm 권장
+        out = self.mamba(self.norm(x_mod))
+        
+        # 3. Residual Connection
+        return x + out
 
-
-# ==============================================================================
-# 3. FiLM-Conditioned Transformer Block
-# ==============================================================================
-
-class FiLMTransformerBlock(nn.Module):
-    """Pre-Norm Transformer + FiLM at Attention and FFN"""
+# (Fallback용 Transformer Block - 기존 코드 재사용)
+class TransformerFiLMBlock(nn.Module):
     def __init__(self, d_model, n_head, cond_dim, dropout=0.1):
         super().__init__()
         self.attn = nn.MultiheadAttention(d_model, n_head, batch_first=True, dropout=dropout)
         self.norm1 = nn.LayerNorm(d_model)
-        self.ffn = nn.Sequential(SwiGLU(d_model), nn.Dropout(dropout))
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, d_model*4), nn.GELU(), nn.Linear(d_model*4, d_model), nn.Dropout(dropout)
+        )
         self.norm2 = nn.LayerNorm(d_model)
-        self.film_attn = FiLMLayer(d_model, cond_dim)
-        self.film_ffn = FiLMLayer(d_model, cond_dim)
+        self.film1 = FiLMLayer(d_model, cond_dim)
+        self.film2 = FiLMLayer(d_model, cond_dim)
 
     def forward(self, x, cond, mask=None):
-        x_mod = self.film_attn(x, cond)
-        x_norm = self.norm1(x_mod)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, attn_mask=mask)
-        x = x + attn_out
-        x_mod = self.film_ffn(x, cond)
-        x_norm = self.norm2(x_mod)
-        x = x + self.ffn(x_norm)
+        x_mod = self.film1(x, cond)
+        x = x + self.attn(self.norm1(x_mod), self.norm1(x_mod), self.norm1(x_mod), attn_mask=mask)[0]
+        x_mod2 = self.film2(x, cond)
+        x = x + self.ffn(self.norm2(x_mod2))
         return x
 
-
 # ==============================================================================
-# 4. Multi-Scale Temporal Attention
+# 2. Distributional Critic Head (D-PPO)
 # ==============================================================================
 
-class MultiScaleTemporalAttention(nn.Module):
-    """Short-range + Long-range with adaptive gating"""
-    def __init__(self, d_model, n_head, cond_dim, window_size=10, dropout=0.1):
+class QuantileCriticHead(nn.Module):
+    """
+    Predicts N Quantiles (τ_1, ..., τ_N) of the return distribution
+    Output: (Batch, N_Quantiles)
+    """
+    def __init__(self, d_model, num_quantiles=32):
         super().__init__()
-        self.window_size = window_size
-        self.short_attn = nn.MultiheadAttention(d_model, n_head, batch_first=True, dropout=dropout)
-        self.norm_short = nn.LayerNorm(d_model)
-        self.long_attn = nn.MultiheadAttention(d_model, n_head, batch_first=True, dropout=dropout)
-        self.norm_long = nn.LayerNorm(d_model)
-        self.scale_gate = nn.Sequential(nn.Linear(cond_dim, d_model), nn.Sigmoid())
-
-    def _create_local_mask(self, seq_len, device):
-        mask = torch.full((seq_len, seq_len), float('-inf'), device=device)
-        for i in range(seq_len):
-            start = max(0, i - self.window_size + 1)
-            mask[i, start:i + 1] = 0.0
-        return mask
-
-    def forward(self, x, cond):
-        B, T, D = x.shape
-        local_mask = self._create_local_mask(T, x.device)
-        x_short = self.norm_short(x)
-        h_short, _ = self.short_attn(x_short, x_short, x_short, attn_mask=local_mask)
-        causal_mask = torch.triu(torch.full((T, T), float('-inf'), device=x.device), diagonal=1)
-        x_long = self.norm_long(x)
-        h_long, _ = self.long_attn(x_long, x_long, x_long, attn_mask=causal_mask)
-        gate = self.scale_gate(cond).unsqueeze(1)
-        fused = gate * h_short + (1 - gate) * h_long
-        return x + fused
-
-
-# ==============================================================================
-# 5. FiLM + Multi-Scale Combined Block
-# ==============================================================================
-
-class FiLMMultiScaleBlock(nn.Module):
-    """MultiScaleAttention + FiLM-FFN"""
-    def __init__(self, d_model, n_head, cond_dim, window_size=10, dropout=0.1):
-        super().__init__()
-        self.ms_attn = MultiScaleTemporalAttention(d_model, n_head, cond_dim, window_size, dropout)
-        self.film_ffn = FiLMLayer(d_model, cond_dim)
-        self.norm_ffn = nn.LayerNorm(d_model)
-        self.ffn = nn.Sequential(SwiGLU(d_model), nn.Dropout(dropout))
-
-    def forward(self, x, cond, mask=None):
-        x = self.ms_attn(x, cond)
-        x_mod = self.film_ffn(x, cond)
-        x_norm = self.norm_ffn(x_mod)
-        x = x + self.ffn(x_norm)
-        return x
-
-
-# ==============================================================================
-# 6. Dueling Actor Head
-# ==============================================================================
-
-class DuelingActorHead(nn.Module):
-    """base_preference + (advantage - mean_advantage)"""
-    def __init__(self, d_model, action_dim):
-        super().__init__()
-        self.base_stream = nn.Sequential(
-            nn.Linear(d_model, d_model // 2), nn.GELU(),
-            nn.Linear(d_model // 2, action_dim)
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.SiLU(),
+            nn.Linear(d_model, num_quantiles) # 출력: 32개의 값 (정렬되지 않음)
         )
-        self.advantage_stream = nn.Sequential(
-            nn.Linear(d_model, d_model // 2), nn.GELU(),
-            nn.Linear(d_model // 2, action_dim)
-        )
-
-    def forward(self, latent):
-        base = self.base_stream(latent)
-        advantage = self.advantage_stream(latent)
-        return base + (advantage - advantage.mean(dim=-1, keepdim=True))
-
+        
+    def forward(self, x):
+        return self.net(x)
 
 # ==============================================================================
-# 7. MacroHFTNetwork v3 (메인)
+# 3. MacroHFT Network v3.5 Main
 # ==============================================================================
 
 class MacroHFTNetwork(nn.Module):
-    """
-    MacroHFT v3: FiLM + Multi-Scale + Dueling
-    forward() 6-tuple 반환 유지 → ppo_agent.py 호환
-    """
     EXPECTED_INFO_DIM = 11
 
     def __init__(self, state_dim, action_dim, info_dim=11,
-                 d_model=128, n_head=4, n_layers=2, dropout=0.1, ms_window=10):
+                 d_model=128, n_head=4, n_layers=4, dropout=0.1):
         super().__init__()
         self.d_model = d_model
         cond_dim = d_model
+        
+        # Config Load
+        self.use_mamba = getattr(config, 'USE_MAMBA', True) and HAS_MAMBA
+        self.num_quantiles = getattr(config, 'NUM_QUANTILES', 32)
 
-        # A. Condition Encoder
-        self.condition_encoder = ConditionEncoder(info_dim, cond_dim)
+        # 1. Condition Encoder
+        self.condition_encoder = nn.Sequential(
+            nn.Linear(info_dim, cond_dim),
+            nn.SiLU(),
+            nn.Linear(cond_dim, cond_dim)
+        )
 
-        # B. Input Processing
+        # 2. Input Embedding
         self.embedding = nn.Linear(state_dim, d_model)
         self.pos_encoder = nn.Parameter(torch.randn(1, 500, d_model) * 0.02)
 
-        # C. FiLM-Conditioned Transformer Layers
+        # 3. Backbone Layers (Hybrid: Mamba + Transformer)
         self.layers = nn.ModuleList()
         for i in range(n_layers):
-            if i == 0:
-                self.layers.append(FiLMTransformerBlock(d_model, n_head, cond_dim, dropout))
+            # 절반은 Mamba, 절반은 Transformer (하이브리드 전략)
+            # 또는 전체 Mamba로 구성 가능. 여기서는 속도를 위해 Mamba 위주 구성 추천
+            if self.use_mamba:
+                # MambaBlock 사용
+                self.layers.append(MambaFiLMBlock(
+                    d_model, cond_dim, 
+                    d_state=getattr(config, 'MAMBA_D_STATE', 16),
+                    d_conv=getattr(config, 'MAMBA_D_CONV', 4)
+                ))
             else:
-                self.layers.append(FiLMMultiScaleBlock(d_model, n_head, cond_dim, ms_window, dropout))
+                self.layers.append(TransformerFiLMBlock(d_model, n_head, cond_dim, dropout))
 
-        # D. Output Heads
+        # 4. Heads
         self.final_norm = nn.LayerNorm(d_model)
-        self.actor_head = DuelingActorHead(d_model, action_dim)
-        self.critic_mean = nn.Sequential(
-            nn.Linear(d_model, d_model // 2), nn.GELU(), nn.Linear(d_model // 2, 1)
+        
+        # Actor Head (Standard)
+        self.actor_head = nn.Sequential(
+            nn.Linear(d_model, d_model), nn.Tanh(),
+            nn.Linear(d_model, action_dim)
         )
-        self.last_gate_mean = 0.5
-
+        
+        # Critic Head (Quantile D-PPO)
+        self.critic_head = QuantileCriticHead(d_model, self.num_quantiles)
+        
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None: nn.init.zeros_(module.bias)
         elif isinstance(module, nn.LayerNorm):
             nn.init.ones_(module.weight)
             nn.init.zeros_(module.bias)
 
-    def forward(self, state_seq, state_info, states=None, temperature=None):
+    def forward(self, state_seq, state_info, states=None):
+        # state_seq: (B, T, D)
+        # state_info: (B, Info)
         B, T, _ = state_seq.shape
-        if state_info.dim() == 3:
-            state_info = state_info.squeeze(1)
+        if state_info.dim() == 3: state_info = state_info.squeeze(1)
 
-        cond = self.condition_encoder(state_info)
+        # 1. Conditioning
+        cond = self.condition_encoder(state_info) # (B, d_model)
+
+        # 2. Embedding
         x = self.embedding(state_seq)
         x = x + self.pos_encoder[:, :T, :]
 
+        # 3. Backbone Pass
         for layer in self.layers:
+            # Mamba/Transformer 모두 (x, cond) 인터페이스 통일
             x = layer(x, cond)
 
-        context = self.final_norm(x[:, -1, :])
+        # 4. Heads
+        context = self.final_norm(x[:, -1, :]) # Last token pooling
+        
         logits = self.actor_head(context)
-        value = self.critic_mean(context)
-        self.last_gate_mean = 0.5
+        quantiles = self.critic_head(context) # (B, N_Quantiles)
+        
+        # Compatibility: D-PPO에서는 value를 quantiles의 평균으로 근사하여 리턴
+        # (Advantage 계산용)
+        value_mean = quantiles.mean(dim=-1, keepdim=True) 
+        
+        # D-PPO 학습을 위해 quantiles 원본도 어딘가에 저장해야 하지만,
+        # 기존 인터페이스(logits, value, ...) 유지를 위해 value 자리에 mean을 넣고,
+        # 별도 메서드나 방식으로 처리해야 함. 
+        # 여기서는 ppo_agent.py가 이 value(tensor)를 그대로 받아서 처리하도록 함.
+        # 단, ppo_agent에서 train 시에는 forward를 다시 부르므로 그때 quantiles를 획득.
+        
+        return logits, value_mean, None, None, None, quantiles # 마지막에 quantiles 추가 반환
 
-        return logits, value, None, None, None, self.last_gate_mean
-
-
-# ==============================================================================
-# 8. Expert Specialization
-# ==============================================================================
-
+# Expert Classes (상속)
 class TrendExpert(MacroHFTNetwork):
-    def __init__(self, state_dim, action_dim, info_dim=11, dropout=0.2):
-        super().__init__(state_dim, action_dim, info_dim,
-                        d_model=256, n_head=8, n_layers=4, dropout=dropout, ms_window=20)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, d_model=256, n_layers=4) # 깊고 넓게
 
 class VolatilityExpert(MacroHFTNetwork):
-    def __init__(self, state_dim, action_dim, info_dim=11, dropout=0.1):
-        super().__init__(state_dim, action_dim, info_dim,
-                        d_model=128, n_head=4, n_layers=2, dropout=dropout, ms_window=5)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, d_model=128, n_layers=2) # 빠르고 가볍게
 
 class SidewaysExpert(MacroHFTNetwork):
-    def __init__(self, state_dim, action_dim, info_dim=11, dropout=0.05):
-        super().__init__(state_dim, action_dim, info_dim,
-                        d_model=192, n_head=6, n_layers=3, dropout=dropout, ms_window=10)
-
-# Backward Compatibility
-XLSTMNetwork = MacroHFTNetwork
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, d_model=192, n_layers=3)
