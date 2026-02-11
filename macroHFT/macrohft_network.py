@@ -117,6 +117,26 @@ class QuantileCriticHead(nn.Module):
         return self.net(x)
 
 # ==============================================================================
+# [제안 2] 보상 분포 예측 헤드 (Distributional Reward)
+# ==============================================================================
+class RewardDistributionHead(nn.Module):
+    """
+    입력 상태(context)에 대한 즉각 보상 r의 분위수 예측
+    출력: (Batch, N_Quantiles)  - 각 τ에 대한 보상 값
+    """
+    def __init__(self, d_model, num_quantiles=32):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.SiLU(),
+            nn.Linear(d_model, num_quantiles)
+        )
+        nn.init.xavier_uniform_(self.net[-1].weight, gain=0.01)  # 작게 초기화
+
+    def forward(self, x):
+        return self.net(x)
+
+# ==============================================================================
 # 3. MacroHFT Network v3.5 Main
 # ==============================================================================
 
@@ -132,6 +152,9 @@ class MacroHFTNetwork(nn.Module):
         # Config Load
         self.use_mamba = getattr(config, 'USE_MAMBA', True) and HAS_MAMBA
         self.num_quantiles = getattr(config, 'NUM_QUANTILES', 32)
+        
+        # 추가: 보상 분포 헤드
+        self.reward_head = RewardDistributionHead(d_model, self.num_quantiles)
 
         # 1. Condition Encoder
         self.condition_encoder = nn.Sequential(
@@ -209,13 +232,11 @@ class MacroHFTNetwork(nn.Module):
         # (Advantage 계산용)
         value_mean = quantiles.mean(dim=-1, keepdim=True) 
         
-        # D-PPO 학습을 위해 quantiles 원본도 어딘가에 저장해야 하지만,
-        # 기존 인터페이스(logits, value, ...) 유지를 위해 value 자리에 mean을 넣고,
-        # 별도 메서드나 방식으로 처리해야 함. 
-        # 여기서는 ppo_agent.py가 이 value(tensor)를 그대로 받아서 처리하도록 함.
-        # 단, ppo_agent에서 train 시에는 forward를 다시 부르므로 그때 quantiles를 획득.
+        # [제안 2] 보상 분포 예측
+        reward_quantiles = self.reward_head(context)   # 보상 분포 (32)  ← 추가
         
-        return logits, value_mean, None, None, None, quantiles # 마지막에 quantiles 추가 반환
+        # return에 reward_quantiles 추가 (7번째 요소)
+        return logits, value_mean, None, None, None, quantiles, reward_quantiles
 
 # Expert Classes (상속)
 class TrendExpert(MacroHFTNetwork):

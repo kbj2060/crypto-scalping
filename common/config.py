@@ -23,6 +23,12 @@ TRAIN_SPLIT = 0.7
 VAL_SPLIT = 0.15
 TEST_SPLIT = 0.15
 
+# MacroHFT v8 Settings
+META_LAMBDA_LR = 1e-4
+NUM_QUANTILES = 32
+USE_REWARD_DIST = True
+VOLATILITY_PREDICTOR_LR = 1e-3
+
 # [야수 모드] 레버리지 20배
 LEVERAGE = 20
 MAX_POSITION_SIZE = 1e9
@@ -47,7 +53,7 @@ STRATEGIES = {
 ENABLE_TRADING = False
 ENABLE_AI = True
 AI_MODEL_PATH = 'data/ppo_model.pth'
-LOOKBACK = 120
+LOOKBACK = 360
 
 # =============================================================================
 # [MacroHFT v3.5 SOTA Settings] - 핵심 업그레이드
@@ -86,7 +92,7 @@ REWARD_CLIP_SCALE = 10.0          # 보상 클리핑 (Tanh)
 # =============================================================================
 # [PPO 학습 파라미터]
 # =============================================================================
-PPO_LEARNING_RATE = 1e-4
+PPO_LEARNING_RATE = 5e-5
 PPO_GAMMA = 0.99
 PPO_LAMBDA = 0.95
 PPO_EPS_CLIP = 0.2
