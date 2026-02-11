@@ -1,10 +1,10 @@
 """
-PPO Training Script for MacroHFT v8.2 SOTA
-===========================================
+PPO Training Script for MacroHFT v8.4 - No Reward Normalization
+===============================================================
 - Meta-Lambda: 전문가별 손실 회피 계수 자동 튜닝
-- Volatility Surprise: 내재적 보상으로 탐험 촉진
-- Identity Bonus: PnL 비례 최소화 (고정값 제거)
-- Reward Normalization: EMA + MinStd로 완전 안정화
+- Volatility Surprise: 내재적 보상 (축소 적용)
+- Identity Bonus: 완전 제거
+- Reward: raw reward 그대로 사용 (tanh 클리핑만 적용)
 - Curriculum Learning, Dream Team Resume 지원
 """
 import logging
@@ -154,15 +154,10 @@ class PPOTrainer:
             self.chop_data = np.zeros(len(self.close_prices), dtype=np.float32)
 
         # ------------------------------------------------------------------
-        # [Reward Normalization] EMA 기반 + 최소 표준편차 (완전 안정화)
+        # [Reward Normalization] 완전 제거 - raw reward 직접 사용
         # ------------------------------------------------------------------
-        self.reward_ema_mean = 0.0               # 지수 이동 평균
-        self.reward_ema_var = 1.0                # 지수 이동 분산
-        self.reward_ema_decay = 0.99             # 최근 100 에피소드 영향
-        self.reward_norm_start = 30              # 5 에피소드 이후 정규화 시작
-        self.reward_norm_min_std = 1.0           # 최소 표준편차 (보정된 보상의 스케일 유지)
-        self.reward_clip_limit = 5.0             # 정규화 보상 클리핑 범위
-        self.reward_episode_count = 0            # 에피소드 카운트 (시작 판단용)
+        # 모든 정규화 관련 변수와 코드를 제거함
+        pass
 
     # ------------------------------------------------------------------
     # 액션 마스킹 (기존 유지)
@@ -439,17 +434,17 @@ class PPOTrainer:
             action_mask = self.get_action_mask(current_position, market_vol, step)
 
             # ----------------------------------------------------------
-            # [제안 3] 변동성 놀라움 (내재적 보상)
+            # [제안 3] 변동성 놀라움 (내재적 보상) - 축소 적용
             # ----------------------------------------------------------
             with torch.no_grad():
                 state_tensor = state[0].to(self.agent.device)
                 pred_vol = self.volatility_predictor(state_tensor[:, -1, :]).item()
             actual_vol = float(self.volatility_data[current_idx])
             vol_surprise = abs(actual_vol - pred_vol)
-            intrinsic_reward = min(vol_surprise * 0.005, 0.05)   # 0.02→0.005, max 0.2→0.05
+            intrinsic_reward = min(vol_surprise * 0.005, 0.05)  # 최대 0.05
 
             # ----------------------------------------------------------
-            # [제안 4] 정체성 보상에 필요한 chop_index, volatility_z
+            # [제안 4] 정체성 보상 - 완전 제거 (chop_index, volatility_z는 전달만 함)
             # ----------------------------------------------------------
             chop_val = float(self.chop_data[current_idx])
             vol_z = float(self.volatility_data[current_idx])
@@ -525,7 +520,7 @@ class PPOTrainer:
             ).item()
 
             # ----------------------------------------------------------
-            # 보상 계산 (v8.2 - PnL 중심, 휴리스틱 최소화)
+            # 보상 계산 (v8.4 - PnL 중심, 고정 보너스/패널티 90% 축소)
             # ----------------------------------------------------------
             raw_reward = self.env.calculate_reward(
                 step_pnl=step_pnl,
@@ -545,15 +540,9 @@ class PPOTrainer:
             raw_reward += intrinsic_reward
 
             # ----------------------------------------------------------
-            # [Reward Normalization] EMA + 최소 표준편차 (안정화 버전)
+            # [Reward Normalization] 완전 제거 - raw reward 직접 사용
             # ----------------------------------------------------------
-            if self.reward_episode_count > self.reward_norm_start:
-                # 최소 표준편차 적용 (급격한 스케일 변화 방지)
-                std = max(np.sqrt(self.reward_ema_var), self.reward_norm_min_std)
-                norm_reward = (raw_reward - self.reward_ema_mean) / (std + 1e-8)
-                reward = np.clip(norm_reward, -self.reward_clip_limit, self.reward_clip_limit)
-            else:
-                reward = raw_reward
+            reward = raw_reward
 
             # ----------------------------------------------------------
             # Transition 저장
@@ -601,13 +590,8 @@ class PPOTrainer:
                 lambda_meta=lambda_val
             )
 
-            # 강제 종료 보상도 동일한 정규화 적용
-            if self.reward_episode_count > self.reward_norm_start:
-                std = max(np.sqrt(self.reward_ema_var), self.reward_norm_min_std)
-                final_norm = (final_raw - self.reward_ema_mean) / std
-                final_reward = np.clip(final_norm, -self.reward_clip_limit, self.reward_clip_limit)
-            else:
-                final_reward = final_raw
+            # 강제 종료 보상도 raw reward 직접 사용
+            final_reward = final_raw
 
             episode_reward += final_reward
             trade_count += 1
@@ -648,25 +632,15 @@ class PPOTrainer:
         self.agent.update_meta_lambdas(episode_pnl_list)
 
         # --------------------------------------------------------------
-        # [Reward Normalization] EMA 업데이트 (에피소드 단위)
-        # --------------------------------------------------------------
-        decay = self.reward_ema_decay
-        self.reward_ema_mean = decay * self.reward_ema_mean + (1 - decay) * episode_reward
-        self.reward_ema_var = decay * self.reward_ema_var + (1 - decay) * (episode_reward - self.reward_ema_mean) ** 2
-        self.reward_episode_count += 1
-
-        # --------------------------------------------------------------
         # 신경망 학습 (PPO + D-PPO + Reward Dist)
         # --------------------------------------------------------------
         metrics = self.agent.train_net(episode=episode_num, mode=mode, expert_idx=expert_idx)
 
-        # TensorBoard 로깅
+        # TensorBoard 로깅 (정규화 통계 제거)
         if self.writer:
             self.writer.add_scalar('Reward/Total', episode_reward, episode_num)
             self.writer.add_scalar('Metrics/PnL', episode_pnl, episode_num)
             self.writer.add_scalar('Metrics/Trade_Count', trade_count, episode_num)
-            self.writer.add_scalar('Reward/EMA_Mean', self.reward_ema_mean, episode_num)
-            self.writer.add_scalar('Reward/EMA_Std', np.sqrt(self.reward_ema_var), episode_num)
             if isinstance(metrics, dict):
                 for k, v in metrics.items():
                     self.writer.add_scalar(k, v, episode_num)
