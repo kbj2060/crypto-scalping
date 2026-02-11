@@ -92,12 +92,12 @@ REWARD_CLIP_SCALE = 10.0          # 보상 클리핑 (Tanh)
 # =============================================================================
 # [PPO 학습 파라미터]
 # =============================================================================
-PPO_LEARNING_RATE = 5e-5
-PPO_GAMMA = 0.99
-PPO_LAMBDA = 0.95
+PPO_LEARNING_RATE = 3e-5
+PPO_GAMMA = 0.995
+PPO_LAMBDA = 0.97
 PPO_EPS_CLIP = 0.2
 PPO_K_EPOCHS = 10
-PPO_ENTROPY_COEF = 0.01
+PPO_ENTROPY_COEF = 0.1
 
 # Expert Gamma (시야 차별화)
 EXPERT_GAMMAS = {

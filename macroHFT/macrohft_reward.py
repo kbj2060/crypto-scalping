@@ -116,11 +116,11 @@ def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
     # 삭제: 별도 보너스 제거 (identity bonus로 대체)
 
     # ------------------------------------------------------------------
-    # [Adaptive Risk] 수익권에서만 작동, 임계값 상향
+    # [Adaptive Risk] 임계값 및 감점 계수 하향 (Hotfix)
     # ------------------------------------------------------------------
-    if _tracker.episode_pnl > 0.02:  # 2% 이상 수익 시
-        if _tracker.drawdown > 0.03:
-            reward -= (_tracker.drawdown - 0.03) * 30.0
+    if _tracker.episode_pnl > 0.005:  # 0.5% 이상 수익 시
+        if _tracker.drawdown > 0.02:
+            reward -= (_tracker.drawdown - 0.02) * 20.0
         sharpe = _tracker.get_sharpe_ratio()
         if sharpe > 0.3:
             reward += sharpe * 2.0

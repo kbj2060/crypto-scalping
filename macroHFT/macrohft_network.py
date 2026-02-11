@@ -241,12 +241,12 @@ class MacroHFTNetwork(nn.Module):
 # Expert Classes (상속)
 class TrendExpert(MacroHFTNetwork):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=256, n_layers=4) # 깊고 넓게
+        super().__init__(*args, **kwargs, d_model=256, n_layers=6) # 깊고 넓게
 
 class VolatilityExpert(MacroHFTNetwork):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=128, n_layers=2) # 빠르고 가볍게
+        super().__init__(*args, **kwargs, d_model=128, n_layers=3) # 빠르고 가볍게
 
 class SidewaysExpert(MacroHFTNetwork):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=192, n_layers=3)
+        super().__init__(*args, **kwargs, d_model=192, n_layers=4)

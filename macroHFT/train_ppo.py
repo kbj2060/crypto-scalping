@@ -169,8 +169,8 @@ class PPOTrainer:
             mask[2] = 0.0
         else:
             if step_count > config.TRAIN_MAX_STEPS_PER_EPISODE - 10:
-                mask[1] = 0.0
-                mask[2] = 0.0
+                mask[1] = 0.5   # 완전 차단 -> 확률적 허용
+                mask[2] = 0.5
         return mask
 
     # ------------------------------------------------------------------
