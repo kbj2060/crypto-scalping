@@ -446,7 +446,7 @@ class PPOTrainer:
                 pred_vol = self.volatility_predictor(state_tensor[:, -1, :]).item()
             actual_vol = float(self.volatility_data[current_idx])
             vol_surprise = abs(actual_vol - pred_vol)
-            intrinsic_reward = min(vol_surprise * 0.1, 1.0)
+            intrinsic_reward = min(vol_surprise * 0.02, 0.2)
 
             # ----------------------------------------------------------
             # [제안 4] 정체성 보상에 필요한 chop_index, volatility_z
