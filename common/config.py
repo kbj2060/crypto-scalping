@@ -1,9 +1,5 @@
 """
-설정 파일 - 3070Ti 최적화 + 100억 미션
-- Elite 8 전략 반영
-- Info Dimension 최적화 (11 for PPO, 12 for TD3)
-- 3070Ti VRAM 8GB 최대 활용
-- Aggressive Trading for 100억 목표
+설정 파일 - MacroHFT v3 최적화
 """
 import os
 from dotenv import load_dotenv
@@ -16,123 +12,132 @@ BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', '')
 BINANCE_TESTNET = False
 
 # =============================================================================
-# [거래 설정] - 100억 미션 최적화
+# [기본 환경 설정]
 # =============================================================================
 ETH_SYMBOL = os.getenv('ETH_SYMBOL', 'ETHUSDT')
 BTC_SYMBOL = os.getenv('BTC_SYMBOL', 'BTCUSDT')
+TIMEFRAME = '3m'
+LOOKBACK_PERIOD = 1500
 
-# [야수 모드] 레버리지 20배 (바이낸스 알트코인 Max 수준)
-# TD3 Action이 -1~1 범위이므로, 실제 레버리지는 |action| * LEVERAGE
-# 예: action=0.8 → 0.8 * 20 = 16배 레버리지
-LEVERAGE = 20  # 최대 레버리지 (TD3가 동적 조절)
+# [야수 모드] 레버리지 20배
+LEVERAGE = 20
+MAX_POSITION_SIZE = 1e9
 
-# [수정 불가] 포지션 크기 제한 (레버리지로 대체)
-MAX_POSITION_SIZE = 1e9  # 사실상 무제한
-
-# [레버리지 대응] 손절 기준 강화
-# 레버리지 20배 시: 가격 0.5% 변동 = 자산 10% 변동
-# 자산 기준 -10% 손실 시 칼같이 손절
-STOP_LOSS_PERCENT = 0.10  # 자산 기준 10% 손실 = 손절
-STOP_LOSS_THRESHOLD = -0.20  # ROE 기준 -20% 손실 = 손절
+# [레버리지 대응] 손절 기준
+STOP_LOSS_PERCENT = 0.10
+STOP_LOSS_THRESHOLD = -0.20
 
 # [Elite 8 전략 설정]
-# 이 딕셔너리의 순서가 model input의 순서와 일치해야 함
 STRATEGIES = {
-    # Alpha Strategies (New & Powerful)
     'whale_sentiment': True,
     'liquidation_squeeze': True,
-
-    # Order Flow & Structure
     'orderblock_fvg': True,
     'net_taker_flow': True,
-
-    # Standard Technicals
     'btc_eth_correlation': True,
     'volatility_squeeze': True,
     'vwap_deviation': True,
     'hma_momentum': True
 }
 
-# 시간프레임 설정
-TIMEFRAME = '3m'
-LOOKBACK_PERIOD = 1500
-
-# 거래 실행 설정
+# AI 모델 설정
 ENABLE_TRADING = False
 ENABLE_AI = True
 AI_MODEL_PATH = 'data/ppo_model.pth'
-
-# AI 모델 하이퍼파라미터
-# [유지] 시계열 윈도우는 60으로 증가 권장 (현재 train에서 60 사용 중)
 LOOKBACK = 120
 
 # 보상 함수 파라미터
 REWARD_MULTIPLIER = 100.0
 LOSS_PENALTY_MULTIPLIER = 50.0
-TRANSACTION_COST = 0.001
+TRANSACTION_COST = 0.005
+TIME_COST = 0.0
 
 # [레버리지 시스템] 청산 및 손절 임계값
-LIQUIDATION_THRESHOLD = -0.80  # ROE -80% = 강제 청산 (게임 오버)
-TAKE_PROFIT_THRESHOLD = 0.50   # ROE +50% = 자동 익절
+LIQUIDATION_THRESHOLD = -0.80
+TAKE_PROFIT_THRESHOLD = 0.50
 
 # =============================================================================
-# [PPO 하이퍼파라미터] - Aggressive Exploration
+# [PPO & Expert 설정] - MacroHFT v3 Core
 # =============================================================================
+PPO_LEARNING_RATE = 1e-4
 PPO_GAMMA = 0.99
 PPO_LAMBDA = 0.95
 PPO_EPS_CLIP = 0.2
+PPO_K_EPOCHS = 10
+PPO_ENTROPY_COEF = 0.01  # 안정적인 탐색 (0.05 -> 0.01)
 
-# [튜닝] K_EPOCHS 증가 (배치 사이즈 커지면 더 많이 학습)
-PPO_K_EPOCHS = 10  # 4 → 10 (안정성 향상)
-
-# [튜닝] Entropy 감소 (뇌동매매 억제)
-PPO_ENTROPY_COEF = 0.02 # 0.05 → 0.005 (불필요한 랜덤 행동 억제)
-PPO_ENTROPY_DECAY = 0.9995  # 0.999 → 0.9995 (천천히 감소)
-PPO_ENTROPY_MIN = 0.001  # 0.005 → 0.001 (최소값 낮춤)
-
-# [튜닝] Learning Rate 증가 (배치 사이즈 증가에 따라)
-PPO_LEARNING_RATE = 1e-4  # 5e-5 → 1e-4
-
-PPO_VALUE_CLIP_EPS = 0.3
-PPO_TEMP_INIT = 0.8
-PPO_TEMP_MIN = 0.3
-PPO_TEMP_DECAY = 0.9995
+# [Expert Gamma] - 전문가별 시야 차별화 (학습 시 자동 적용)
+EXPERT_GAMMAS = {
+    0: 0.995,  # Trend: 장기 (Lookahead High)
+    1: 0.99,   # Volatility: 중기
+    2: 0.90    # Sideways: 단기 (Instant Gratification)
+}
 
 # =============================================================================
-# [네트워크 아키텍처] - 3070Ti 최대 활용
+# [리워드 설정] - 보상 가중치 (macrohft_reward.py에서 사용)
 # =============================================================================
-# [튜닝] Hidden Dim 증가 (모델 표현력 향상)
-NETWORK_HIDDEN_DIM = 1024  # 256 → 512 (Elite 8 + 44 features 소화)
+REWARD_STEP_PNL_MULT = 100.0
+REWARD_REALIZED_PNL_MULT = 100.0
 
-# [유지] Layers는 유지 (속도 고려)
-NETWORK_NUM_LAYERS = 2  # TD3는 3 (strategic mode에서 자동)
-TD_NETWORK_NUM_LAYERS = 3
+REWARD_TREND_EXIT_MULT = 150.0
+REWARD_VOLATILITY_EXIT_MULT = 200.0
+REWARD_SIDEWAYS_EXIT_MULT = 200.0
 
+REWARD_HOLDING_BONUS_BASE = 0.1
+REWARD_HOLDING_BONUS_COEF = 0.2
+PENALTY_CHURNING = 5.0             # 단타 방지 (강함)
+PENALTY_LOSS_VOLATILITY = 50.0
+PENALTY_LOSS_SIDEWAYS = 200.0
+
+REWARD_CLIP_MIN = -10.0
+REWARD_CLIP_MAX = 10.0
+
+# =============================================================================
+# [네트워크 설정]
+# =============================================================================
+# 주의: MacroHFT v3는 Expert별로 최적화된 d_model을 내부적으로 사용하므로
+# 아래 NETWORK_HIDDEN_DIM은 Router나 기본 네트워크 초기화 시에만 참조될 수 있음.
+NETWORK_HIDDEN_DIM = 512
+NETWORK_NUM_LAYERS = 2
 NETWORK_DROPOUT = 0.1
-
-# [튜닝] Attention Heads 증가
-NETWORK_ATTENTION_HEADS = 8  # 4 → 8 (Hidden=512에 맞춰)
-
-# [튜닝] Encoder/Trunk Dim 증가
-NETWORK_INFO_ENCODER_DIM = 256  # 128 → 256
-NETWORK_SHARED_TRUNK_DIM1 = 512  # 256 → 512
-NETWORK_SHARED_TRUNK_DIM2 = 256  # 128 → 256
-NETWORK_ACTOR_HEAD_DIM = 128  # 64 → 128
-NETWORK_CRITIC_HEAD_DIM = 64  # 32 → 64
+NETWORK_ATTENTION_HEADS = 8
+NETWORK_INFO_ENCODER_DIM = 256
+NETWORK_SHARED_TRUNK_DIM1 = 512
+NETWORK_SHARED_TRUNK_DIM2 = 256
+NETWORK_ACTOR_HEAD_DIM = 128
+NETWORK_CRITIC_HEAD_DIM = 64
+NETWORK_USE_CHECKPOINTING = False
 
 # =============================================================================
-# [학습 파라미터] - 3070Ti 8GB VRAM 최대 활용
+# [TD3 설정]
 # =============================================================================
-# [튜닝] Batch Size 대폭 증가 (AMP 활용)
-TRAIN_BATCH_SIZE = 1024  # 256 → 1024 (3070Ti + AMP로 충분)
+# PPO/MacroHFT: Info = 11 (pos_val + 8 strategies + pos_meta 2)
+# TD3: 변동성 1차원 추가 시 12 사용 (train_td3 _augment_info)
+TD3_INFO_DIM = 12
+TD3_LEARNING_RATE = 1e-4
+TD3_ACTOR_LR = 1e-4
+TD3_CRITIC_LR = 1e-3
+TD3_GAMMA = 0.99
+TD3_TAU = 0.005
+TD3_POLICY_NOISE = 0.2
+TD3_NOISE_CLIP = 0.5
+TD3_POLICY_DELAY = 2
+TD3_BUFFER_SIZE = 1000000
+TD3_WARMUP_STEPS = 5000
+TD3_BATCH_SIZE = 512
+TD3_DEADZONE = 0.6
+TD3_MIN_TRADE_SIZE = 0.6
 
+# =============================================================================
+# [학습 파라미터]
+# =============================================================================
+TRAIN_ACTION_DIM = 3
+TRAIN_BATCH_SIZE = 1024
+TRAIN_SAMPLE_SIZE = 4096
 TRAIN_SPLIT = 0.7
 VAL_SPLIT = 0.15
 TEST_SPLIT = 0.15
 
-# [튜닝] Episode 증가 (Early Stopping 신뢰)
-TRAIN_NUM_EPISODES = 3000  # 5000 → 10000
-
+TRAIN_NUM_EPISODES = 3000
 TRAIN_MAX_STEPS_PER_EPISODE = 480
 MAX_TRADES_PER_EPISODE = 50
 TRAIN_SAVE_INTERVAL = 200
@@ -141,54 +146,28 @@ EVAL_INITIAL_CAPITAL = 10000
 EVAL_VERBOSE_INTERVAL = 200
 
 # =============================================================================
-# [TD3 설정] - 긴급 처방 적용 (야수 모드)
-# =============================================================================
-# PPO/MacroHFT: Info = 11 (pos_val + 8 strategies + pos_meta 2)
-# TD3: 변동성 1차원 추가 시 12 사용 (train_td3 _augment_info)
-TD3_INFO_DIM = 12
-
-# [긴급 처방 3] Learning Rate 3배 가속
-TD3_LEARNING_RATE = 3e-4  # 1e-4 → 3e-4 (Q값 정체 타파)
-
-TD3_GAMMA = 0.99
-TD3_TAU = 0.005
-
-# [유지] Policy Noise (Target Smoothing)
-TD3_POLICY_NOISE = 0.2
-
-TD3_NOISE_CLIP = 0.5
-
-# [긴급 처방 3] Explore Noise 3배 증폭
-TD3_EXPLORE_NOISE = 0.3  # 0.15 → 0.3 (겁먹은 놈 등떠밀기)
-
-TD3_POLICY_FREQ = 2
-
-# [유지] Batch Size 증가 (안정성)
-TD3_BATCH_SIZE = 192
-TD3_LAMBDA_ANNEAL_EPISODES = 2000
-
-# [유지] Buffer Size 증가
-TD3_BUFFER_SIZE = 100000
-
-# [긴급 처방 3] Warmup 증가 (충분한 데이터 수집)
-TD3_WARMUP_STEPS = 10000  # 충분히 데이터를 모으고 학습 시작
-
-# [긴급 처방 3] Deadzone 증가 (미세 진입 방지)
-TD3_DEADZONE = 0.6  # 0.3 → 0.6
-TD3_MIN_TRADE_SIZE = 0.6  # 0.3 → 0.6 (Strength Change)
-# =============================================================================
 # [성능 최적화] - PyTorch Settings
 # =============================================================================
-# 이 설정들은 train_*.py에서 자동으로 적용됨
+USE_AMP = True
+USE_TORCH_COMPILE = False
+USE_CUDNN_BENCHMARK = True
 
-# AMP (Automatic Mixed Precision)
-USE_AMP = True  # FP16 연산으로 메모리 50% 절감, 속도 2배
+# =============================================================================
+# [MacroHFT Reward v4 Settings] - 2026 SOTA Research-Aligned
+# =============================================================================
+# 1. Kahneman-Tversky Asymmetry (Prospect Theory)
+REWARD_LOSS_AVERSION = 2.25       # 손실 고통 계수 (λ)
+REWARD_BASE_MULT = 50.0           # 기본 PnL 배수 (Base Scale)
 
-# Torch Compile (PyTorch 2.0+)
-USE_TORCH_COMPILE = False  # 그래프 최적화
+# 2. Risk Controls
+REWARD_DOWNSIDE_PENALTY = 0.5     # 하방 변동성 페널티 가중치
+REWARD_MDD_PENALTY_COEF = 20.0    # MDD 발생 시 페널티 강도
 
-# cuDNN Benchmark (3070Ti Ampere 최적화)
-USE_CUDNN_BENCHMARK = True  # 입력 크기 고정 시 최적 알고리즘 탐색
+# 3. Expert Specifics
+REWARD_TREND_LOG_RETURN_SCALE = 100.0   # 추세 전문가: 로그 수익률 스케일
+REWARD_VOLATILITY_SHARPE_SCALE = 2.0    # 변동성 전문가: 샤프 지수 보너스
+REWARD_SIDEWAYS_MDD_THRESHOLD = 0.02    # 횡보 전문가: MDD 허용치 (2%)
+REWARD_SIDEWAYS_DECAY_START = 30        # 횡보 전문가: 시간 감점 시작 틱
 
-# TensorCore Precision
-USE_HIGH_MATMUL_PRECISION = True  # TF32 사용 (Ampere)
+# 4. Soft Clipping
+REWARD_CLIP_SCALE = 10.0          # Soft Clip (tanh) 스케일

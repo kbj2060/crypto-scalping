@@ -1,8 +1,6 @@
 """
 PPO Training Script for Macro-Transformer MoE (Pure RL Version)
-- Architecture: Transformer Backbone + MoE Router
-- Features: Pure RL (No Oracle), Dynamic Expert Selection
-- Goal: Learn alpha purely from market dynamics and reward signals.
+- [Fix] NameError: 'expert_selection_counts' defined and updated correctly.
 """
 import logging
 import os
@@ -28,6 +26,7 @@ from strategies import (
 from common.trading_env import INFO_DIM_ELITE8
 from common.trading_env import TradingEnvironment
 from macroHFT.ppo_agent import PPOAgent
+from macroHFT.macrohft_reward import calculate_ppo_reward, reset_reward_tracker
 
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
@@ -69,7 +68,6 @@ class PPOTrainer:
         self._fit_global_scaler_dummy()
         
         # [Monkey Patch] PPO Reward
-        from macroHFT.macrohft_reward import calculate_ppo_reward
         import types
         self.env.calculate_reward = types.MethodType(calculate_ppo_reward, self.env)
         logger.info("✅ Tactical Reward Logic Applied")
@@ -159,7 +157,6 @@ class PPOTrainer:
             self.env.scaler_fitted = True
 
     def _prepare_curriculum_indices(self):
-        # (기존 커리큘럼 로직 동일)
         df = self.data_collector.eth_data.iloc[:self.train_end_idx]
         valid_indices = list(range(config.LOOKBACK + 100, self.train_end_idx - 100))
 
@@ -202,6 +199,66 @@ class PPOTrainer:
             self.idx_map = [self.all_indices] * 3
             self.idx_all = self.all_indices
 
+    def validate_on_test_set(self, max_steps=480):
+        if not hasattr(self, 'test_start_idx') or self.test_start_idx >= self.test_end_idx - 1:
+            return 0.0, 0.0
+        steps = min(max_steps, self.test_end_idx - self.test_start_idx - 1)
+        
+        self.agent.reset_episode_states()
+        balance = config.EVAL_INITIAL_CAPITAL
+        balance_history = [balance]
+        current_position = None
+        entry_price = 0.0
+        entry_index = 0
+        fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
+
+        for step in range(steps):
+            idx = self.test_start_idx + step
+            curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
+
+            unrealized_pnl = 0.0
+            if current_position == 'LONG':
+                unrealized_pnl = (curr_price - entry_price) / entry_price
+            elif current_position == 'SHORT':
+                unrealized_pnl = (entry_price - curr_price) / entry_price
+
+            pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
+            holding_time = (idx - entry_index) if current_position else 0
+            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max(1, steps)]
+            state = self.env.get_observation(position_info=pos_info, current_index=idx)
+            if state is None: break
+
+            with torch.no_grad():
+                # [Update] MoE Agent returns 4 values
+                action, _, _, _ = self.agent.select_action(state, action_mask=None, deterministic=True)
+
+            realized_pnl = 0.0
+            if action == 1: # Buy
+                if current_position is None:
+                    current_position = 'LONG'
+                    entry_price = curr_price
+                    entry_index = idx
+                elif current_position == 'SHORT':
+                    realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
+                    current_position = None
+            elif action == 2: # Sell
+                if current_position is None:
+                    current_position = 'SHORT'
+                    entry_price = curr_price
+                    entry_index = idx
+                elif current_position == 'LONG':
+                    realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
+                    current_position = None
+
+            if realized_pnl != 0.0:
+                balance = balance * (1 + realized_pnl)
+            balance_history.append(balance)
+
+        test_reward = (balance - config.EVAL_INITIAL_CAPITAL) / config.EVAL_INITIAL_CAPITAL
+        returns = np.diff(balance_history) / (np.array(balance_history[:-1], dtype=float) + 1e-10)
+        sharpe = float(np.mean(returns) / (np.std(returns) + 1e-8))
+        return test_reward, sharpe
+
     def train_episode(self, episode_num, max_steps=None):
         if max_steps is None: max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
@@ -223,7 +280,10 @@ class PPOTrainer:
         if not target_indices: target_indices = self.all_indices
         start_idx = np.random.choice(target_indices)
         self.data_collector.current_index = start_idx
+        
+        # [New] Reward Tracker 초기화 (v4 필수)
         self.env.reset_reward_states()
+        reset_reward_tracker()
         self.agent.reset_episode_states()
 
         current_position = None
@@ -234,6 +294,9 @@ class PPOTrainer:
         trade_count = 0
         prev_unrealized_pnl = 0.0
         hold_count, buy_count, sell_count = 0, 0, 0
+        
+        # [Fix] Initialize expert_selection_counts
+        expert_selection_counts = [0, 0, 0] # Trend, Vol, Side
         
         pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{current_key.upper()}]", leave=False, mininterval=60.0)
         
@@ -275,6 +338,9 @@ class PPOTrainer:
             action, prob, val, selected_expert = self.agent.select_action(
                 state, action_mask=action_mask, mode=mode, expert_idx=expert_idx
             )
+            
+            # [Fix] Update selection counts
+            expert_selection_counts[selected_expert] += 1
 
             # Check Exit Conditions
             should_exit, exit_reason = self.env.check_exit_conditions(unrealized_pnl, holding_time)
@@ -330,6 +396,7 @@ class PPOTrainer:
                 step_pnl=step_pnl, realized_pnl=realized_pnl, trade_done=trade_done,
                 holding_time=holding_time_norm, action=action,
                 prev_position=prev_pos_str, current_position=current_position,
+                expert_idx=selected_expert  # [Modification] Pass selected_expert
             )
 
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
@@ -374,8 +441,9 @@ class PPOTrainer:
             if last_state is None: last_state = state
             terminal_mask = np.ones(3, dtype=np.float32)
             
-            # [Update] Save Terminal Data without Oracle
-            self.agent.put_data((state, exit_action, final_reward, last_state, 1.0, True, 0.0, 0.0, terminal_mask, expert_selection_counts.index(max(expert_selection_counts)))) # dummy selected
+            # [Fix] Save Terminal Data with dummy selected expert (most used one)
+            most_used_expert = expert_selection_counts.index(max(expert_selection_counts)) if sum(expert_selection_counts) > 0 else 0
+            self.agent.put_data((state, exit_action, final_reward, last_state, 1.0, True, 0.0, 0.0, terminal_mask, most_used_expert))
             episode_reward += final_reward
             trade_count += 1
             
@@ -412,8 +480,30 @@ class PPOTrainer:
         base_path = os.path.join(save_dir, os.path.splitext(os.path.basename(config.AI_MODEL_PATH))[0])
 
         if resume:
-            # (Resume Logic 동일)
-            pass 
+            logger.info("♻️ Resuming from Best Individual Models (Dream Team)...")
+            
+            # 1. 가장 최근 학습 폴더 찾기
+            root_dir = 'data/macroHFT'
+            if os.path.exists(root_dir):
+                subdirs = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))], reverse=True)
+                
+                if subdirs:
+                    # 현재 생성한 폴더(run_time) 제외하고 가장 최신 폴더 찾기
+                    target_dir = None
+                    for d in subdirs:
+                        if d != run_time:
+                            target_dir = os.path.join(root_dir, d)
+                            break
+                    
+                    if target_dir:
+                        # 2. Dream Team 합체 로딩
+                        self.agent.load_dream_team(target_dir)
+                    else:
+                        logger.warning("⚠️ No previous training directory found to resume from.")
+                else:
+                    logger.warning("⚠️ No training history found.")
+            else:
+                logger.warning("⚠️ data/macroHFT directory does not exist.")
         else:
             logger.info("Starting Fresh Training.")
 

@@ -1,105 +1,191 @@
 """
-MacroHFT 전술가(Tactical) 전용 리워드 함수
-목표: "타이밍을 뺏어라. 정확한 진입과 청산(Timing)으로 수익을 쌓아라."
+MacroHFT Reward v4 - 2026 SOTA Research-Aligned
+===============================================
+Core Philosophy:
+1. Prospect Theory (Kahneman & Tversky): Loss Aversion (λ=2.25)
+2. Differential Objectives: Trend(LogRet), Vol(Sharpe), Side(MDD)
+3. Risk-Aware Layer: Downside Deviation + MDD Penalty
+4. Soft Clipping: Tanh based gradient preservation
 """
 import numpy as np
+import math
+from common import config
+
+# ==============================================================================
+# Reward Tracker (Global State for Session)
+# ==============================================================================
+# 주의: 멀티 프로세싱 환경에서는 별도 관리가 필요하나, 현재 단일 프로세스 학습 가정
+class RewardTracker:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.returns_history = []
+        self.peak_pnl = 0.0
+        self.current_drawdown = 0.0
+        self.running_mean = 0.0
+        self.running_m2 = 0.0 # For variance
+        self.count = 0
+
+    def update(self, step_pnl, unrealized_pnl):
+        self.returns_history.append(step_pnl)
+        
+        # Welford's Online Algorithm for Variance
+        self.count += 1
+        delta = step_pnl - self.running_mean
+        self.running_mean += delta / self.count
+        delta2 = step_pnl - self.running_mean
+        self.running_m2 += delta * delta2
+        
+        # MDD Tracking
+        if unrealized_pnl > self.peak_pnl:
+            self.peak_pnl = unrealized_pnl
+        drawdown = self.peak_pnl - unrealized_pnl
+        self.current_drawdown = max(0.0, drawdown)
+
+    def get_volatility(self):
+        if self.count < 2: return 0.0
+        return math.sqrt(self.running_m2 / (self.count - 1))
+
+    def get_downside_deviation(self):
+        if self.count < 2: return 0.0
+        neg_returns = [r for r in self.returns_history if r < 0]
+        if not neg_returns: return 0.0
+        return np.std(neg_returns)
+
+# 전역 트래커 인스턴스
+_tracker = RewardTracker()
+
+def reset_reward_tracker():
+    """에피소드 시작 시 호출"""
+    global _tracker
+    _tracker.reset()
+
+# ==============================================================================
+# Main Entry Point
+# ==============================================================================
 
 def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
-                         current_position=None, effective_leverage=1.0):
+                         current_position=None, expert_idx=2):
     """
-    [MacroHFT Tactical Reward - Soft Penalty Ver.]
-    - 진입 페널티를 대폭 완화하여 '시도'를 장려함
-    - 대신, 손실을 보았을 때의 타격을 유지하여 '신중함'을 가르침
-    - 실현 손익(Realized PnL)에 대한 보상을 더 신뢰
+    v4 Entry Point: Updates tracker and delegates to specialized logic.
     """
+    global _tracker
+    
+    # Update Tracker Stats
+    current_pnl = realized_pnl if trade_done else step_pnl
+    # (Unrealized PnL 추정: step_pnl 누적 혹은 외부에서 주입받아야 하나, 여기선 약식으로 처리)
+    # 정확한 MDD 계산을 위해선 누적 PnL이 필요하지만, 여기선 step_pnl 흐름으로 근사
+    _tracker.update(step_pnl, current_pnl) # unrealized is approximated by current flow for local mdd
+
+    # Expert Mapping
+    expert_map = {0: 'trend', 1: 'volatility', 2: 'sideways'}
+    expert_type = expert_map.get(expert_idx, 'sideways')
+
+    # Calculate Raw Reward
+    raw_reward = calculate_v4_reward(
+        tracker=_tracker,
+        expert_type=expert_type,
+        step_pnl=step_pnl,
+        realized_pnl=realized_pnl,
+        trade_done=trade_done,
+        holding_time=holding_time,
+        action=action,
+        current_position=current_position
+    )
+    
+    # [Layer 4] Soft Clipping (Tanh)
+    # Gradient를 죽이지 않으면서 극단값 제어
+    clip_scale = getattr(config, 'REWARD_CLIP_SCALE', 10.0)
+    final_reward = float(np.tanh(raw_reward / clip_scale) * clip_scale)
+    
+    return final_reward
+
+
+# ==============================================================================
+# v4 Core Logic (4-Layer Architecture)
+# ==============================================================================
+
+def calculate_v4_reward(tracker, expert_type, step_pnl, realized_pnl, trade_done, 
+                        holding_time, action, current_position):
+    
     reward = 0.0
     
-    # 1. 평가 손익 (Unrealized PnL)
-    # 전술가는 당장의 평가 이익이 중요함. 정직하게 반영.
-    reward += step_pnl * 50.0 
-
-    # 2. 실현 손익 (Realized PnL) - 핵심
-    if trade_done:
-        # 이익은 확실하게 보상, 손실은 확실하게 처벌
-        reward += realized_pnl * 100.0 
+    # Config Load
+    LOSS_AVERSION = getattr(config, 'REWARD_LOSS_AVERSION', 2.25)
+    BASE_MULT = getattr(config, 'REWARD_BASE_MULT', 50.0)
+    
+    # -------------------------------------------------------------------------
+    # [Layer 1] Kahneman-Tversky Asymmetry (Prospect Theory)
+    # 수익은 기쁘지만, 손실은 2.25배 더 아프다.
+    # -------------------------------------------------------------------------
+    pnl_to_eval = realized_pnl if trade_done else step_pnl
+    
+    if pnl_to_eval >= 0:
+        base_component = pnl_to_eval * BASE_MULT
+    else:
+        base_component = pnl_to_eval * BASE_MULT * LOSS_AVERSION
         
-        # [수정] 수수료 페널티 대폭 완화 (0.5 -> 0.05)
-        # 이제 쫄지 말고 진입해라. 단, 뇌동매매는 여전히 손해다.
-        reward -= 0.05 
+    reward += base_component
 
-    # 3. 시간 비용 (Time Decay)
-    # 오래 들고 있으면 기회비용 발생 (약한 압박)
-    if current_position is not None and current_position != 'HOLD':
-        if step_pnl <= 0:  # 수익이 안 나는데 버티면
-            reward -= 0.01 
+    # -------------------------------------------------------------------------
+    # [Layer 2] Expert-Specific Objectives
+    # -------------------------------------------------------------------------
     
-    # 4. 빠른 익절 보너스는 제거 (자연스러운 학습 유도)
-    # 기존: 빠른 익절 시 +0.3 보너스 -> 제거
-    # 이유: 보상 설계를 간소화하고 realized_pnl에만 집중
-
-    return float(np.clip(reward, -10.0, 10.0))
-
-
-# ==============================================================================
-# 전문가별 특화 리워드 함수 (Expert Specialization)
-# ==============================================================================
-
-def calculate_specialized_reward(expert_type, step_pnl, realized_pnl, trade_done, 
-                                 holding_time=0, effective_leverage=1.0, current_position=None):
-    """
-    전문가별 특화된 리워드 계산
-    
-    Args:
-        expert_type: 'trend', 'volatility', 'sideways' 중 하나
-        step_pnl: 스텝별 미실현 손익
-        realized_pnl: 실현 손익
-        trade_done: 거래 완료 여부
-        holding_time: 보유 시간 (스텝 수)
-        effective_leverage: 유효 레버리지
-        current_position: 현재 포지션 ('LONG', 'SHORT', 'HOLD' 또는 None)
-    """
-    reward = 0.0
-
     if expert_type == 'trend':
-        # [Trend Expert] 추세 지속성에 보상 (Long-run Profit)
-        reward += step_pnl * 100.0
-        
-        # 수익 중일 때 보유 시간에 비례한 보너스 (추세 유지 장려)
-        if step_pnl > 0:
-            reward += (holding_time * 0.01)
-        
-        # 실현 손익 강조 (큰 수익 선호)
-        if trade_done:
-            reward += realized_pnl * 150.0
+        # Objective: Log Returns (Compounding) & Consistency
+        # 추세는 '복리'로 불어나는 것이 목표 -> 로그 수익률 근사 보상
+        if current_position is not None and step_pnl > 0:
+            # ln(1+r) ≈ r - r^2/2 (Taylor Series 2nd order)
+            log_ret = step_pnl - (step_pnl**2)/2
+            reward += log_ret * getattr(config, 'REWARD_TREND_LOG_RETURN_SCALE', 100.0)
+            
+            # Holding Bonus (Time-Weighted)
+            reward += 0.05 * (1 + holding_time)
 
     elif expert_type == 'volatility':
-        # [Volatility Expert] 빠른 익절과 강한 모멘텀 포착 (Hit & Run)
-        reward += step_pnl * 50.0
+        # Objective: Differential Sharpe Ratio (DSR)
+        # 변동성 대비 수익 효율성 극대화
+        if trade_done and realized_pnl > 0:
+            vol = tracker.get_volatility()
+            if vol > 1e-6:
+                sharpe_bonus = (realized_pnl / vol) * getattr(config, 'REWARD_VOLATILITY_SHARPE_SCALE', 2.0)
+                reward += min(sharpe_bonus, 5.0) # Cap bonus
         
-        # 실현 손익 극대화 (빠른 수익 실현 장려)
-        if trade_done:
-            reward += realized_pnl * 200.0
-            # Taker 수수료 페널티 반영
-            reward -= 0.05
+        # [Fix] Momentum Capture (수정됨)
+        # 기존: abs(step_pnl) -> 손실나도 변동성만 크면 점수 줌 (Hacking 원인)
+        # 수정: step_pnl > 0  -> "수익 방향으로" 크게 움직일 때만 점수 줌
+        if step_pnl > 0.001: # 0.1% 이상 수익 방향으로 급등 시
+            reward += step_pnl * 30.0 # 가중치 50 -> 30으로 하향 조정 (너무 흥분하지 않게)
+            
+        # [New] Volatility Loss Penalty (추가됨)
+        # 변동성 큰 장에서 틀리면 더 크게 혼냄
+        if step_pnl < -0.001:
+            reward += step_pnl * 50.0 # 손실 가중치 강화 (아프게 때림)
 
     elif expert_type == 'sideways':
-        # [Sideways Expert] 박스권 스캘핑 특화
-        
-        if not trade_done:
-            # 관망 보상 강화 (뇌동매매 억제)
-            reward += 0.01
-        else:
-            # [수정 후] 이익이 났을 때만 리베이트 보너스 지급!
-            reward += realized_pnl * 500.0
+        # Objective: Max Drawdown Minimization & Mean Reversion
+        # MDD가 커지면 페널티를 강력하게 부여
+        mdd_threshold = getattr(config, 'REWARD_SIDEWAYS_MDD_THRESHOLD', 0.02)
+        if tracker.current_drawdown > mdd_threshold:
+            penalty = (tracker.current_drawdown - mdd_threshold) * getattr(config, 'REWARD_MDD_PENALTY_COEF', 20.0)
+            reward -= penalty
             
-            if realized_pnl > 0:
-                reward += 0.05  # 수익 시 강력한 보너스 (리베이트+알파)
-            else:
-                reward -= 0.02  # 손실 시에는 수수료 페널티 추가 (확인사살)
+        # Time Decay (오래 물려있으면 감점)
+        decay_start = getattr(config, 'REWARD_SIDEWAYS_DECAY_START', 30)
+        # holding_time is normalized (0~1), need steps approximation
+        # Assuming max_steps=480, holding_time*480 = steps
+        steps_held = holding_time * 480
+        if steps_held > decay_start:
+            reward -= 0.01 * ((steps_held - decay_start) / 10.0)
 
-            # 미세 수익 장려 (박스권 상하단 타겟팅)
-            if 0 < realized_pnl < 0.001:
-                reward += 0.1
+    # -------------------------------------------------------------------------
+    # [Layer 3] Risk Penalty (Common)
+    # -------------------------------------------------------------------------
+    # Downside Deviation Penalty (하방 리스크 제어)
+    downside_dev = tracker.get_downside_deviation()
+    if downside_dev > 0.005: # 0.5% 이상의 하방 변동성
+        reward -= downside_dev * getattr(config, 'REWARD_DOWNSIDE_PENALTY', 0.5) * 100.0
 
-    return float(np.clip(reward, -10.0, 10.0))
+    return reward
