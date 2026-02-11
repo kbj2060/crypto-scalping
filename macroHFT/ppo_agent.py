@@ -350,7 +350,7 @@ class PPOAgent:
                 optimizer.zero_grad()
                 
                 if self.scaler:
-                    with torch.amp.autocast(self.device.type): # cuda or cpu
+                    with torch.amp.autocast('cuda'): # cuda or cpu
                         out = network(b_s_seq, b_s_info)
                         logits, curr_val_mean = out[0], out[1]
                         quantiles = out[5]
