@@ -53,7 +53,7 @@ STRATEGIES = {
 ENABLE_TRADING = False
 ENABLE_AI = True
 AI_MODEL_PATH = 'data/ppo_model.pth'
-LOOKBACK = 360
+LOOKBACK = 240
 
 # =============================================================================
 # [MacroHFT v3.5 SOTA Settings] - 핵심 업그레이드
