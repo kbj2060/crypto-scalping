@@ -541,7 +541,7 @@ class PPOTrainer:
             # ----------------------------------------------------------
             # [Reward Normalization] Running 평균/표준편차로 정규화
             # ----------------------------------------------------------
-            if self.reward_rms['count'] > 10:  # 10 에피소드 이후부터 정규화
+            if self.reward_rms['count'] > 5:  # 10 에피소드 이후부터 정규화
                 norm_reward = (raw_reward - self.reward_rms['mean']) / (self.reward_rms['std'] + 1e-8)
                 reward = np.clip(norm_reward, -5.0, 5.0)  # -5~5로 클리핑
             else:
@@ -593,7 +593,7 @@ class PPOTrainer:
                 lambda_meta=lambda_val
             )
             # 정규화 적용
-            if self.reward_rms['count'] > 10:
+            if self.reward_rms['count'] > 5:
                 final_reward = np.clip((final_raw - self.reward_rms['mean']) / (self.reward_rms['std'] + 1e-8), -5.0, 5.0)
             else:
                 final_reward = final_raw
@@ -741,4 +741,4 @@ class PPOTrainer:
 
 if __name__ == "__main__":
     trainer = PPOTrainer()
-    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=False)
+    trainer.train(num_episodes=config.TRAIN_NUM_EPISODES, resume=True)

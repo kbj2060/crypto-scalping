@@ -385,7 +385,7 @@ class PPOAgent:
 
             router_loss_val = router_loss.item()
 
-            if episode % 10 == 0:
+            if episode % 5 == 0:
                 clean_state = self._strip_prefix(self.router.state_dict())
                 self.router_target.load_state_dict(clean_state)
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
