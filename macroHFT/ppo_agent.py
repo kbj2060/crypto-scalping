@@ -1,6 +1,14 @@
-# IMPORTS
+"""
+PPO Agent for MacroHFT v3.5 SOTA
+================================
+1. Distributional RL (D-PPO): Quantile Huber Loss
+2. Robust Loading: _strip_prefix for torch.compile support (Bug Fix)
+3. Dream Team Ensemble: Load best experts from separate files
+4. Atomic Saving: Prevent corruption
+"""
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
@@ -10,26 +18,20 @@ import glob
 from common import config
 from .macrohft_network import TrendExpert, VolatilityExpert, SidewaysExpert
 
-# Distributional Loss 계산을 위한 함수 추가
+# D-PPO Loss Function
 def quantile_huber_loss(quantiles, target, tau_hat):
     """
     quantiles: (B, N) - Predicted
     target: (B, 1) - TD Target (Reward + Gamma * Next_V)
-    tau_hat: (N,) - Quantile midpoints (e.g. 0.05, 0.15, ..., 0.95)
+    tau_hat: (N,) - Quantile midpoints
     """
-    # Broadcasting: (B, N) vs (B, 1)
-    # pairwise difference: u = target - quantiles
     u = target - quantiles 
-    
-    # Huber Loss part
     abs_u = u.abs()
     huber_loss = torch.where(
         abs_u <= 1.0, 
         0.5 * u.pow(2),
         abs_u - 0.5
     )
-    
-    # Quantile regression loss part: |tau - I(u<0)| * huber_loss
     loss = (torch.abs(tau_hat - (u < 0).float()) * huber_loss).mean()
     return loss
 
@@ -55,70 +57,86 @@ class PPOAgent:
     def __init__(self, state_dim, action_dim=3, info_dim=11, hidden_dim=None, device='cpu'):
         self.device = device
         
-        # Experts (Transformer Based)
+        # Initialize Experts
         self.experts = nn.ModuleList([
-            TrendExpert(state_dim, action_dim, info_dim),
-            VolatilityExpert(state_dim, action_dim, info_dim),
-            SidewaysExpert(state_dim, action_dim, info_dim)
-        ]).to(device)
+            TrendExpert(state_dim, action_dim, info_dim).to(device),
+            VolatilityExpert(state_dim, action_dim, info_dim).to(device),
+            SidewaysExpert(state_dim, action_dim, info_dim).to(device)
+        ])
         self.expert_names = ['trend', 'volatility', 'sideways']
 
-        # Router (DDQN)
+        # Initialize Router
         self.router = DDQNRouter(state_dim, num_experts=3).to(device)
         self.router_target = DDQNRouter(state_dim, num_experts=3).to(device)
         self.router_target.load_state_dict(self.router.state_dict())
         
-        
-        self.lr = config.PPO_LEARNING_RATE
-        
-        # [수정] Expert별 Gamma 설정 (Multi-Horizon)
+        # Hyperparams
+        self.lr = getattr(config, 'PPO_LEARNING_RATE', 1e-4)
         default_gammas = {0: 0.995, 1: 0.99, 2: 0.90}
         self.gammas = getattr(config, 'EXPERT_GAMMAS', default_gammas)
         
-        self.gamma = config.PPO_GAMMA  # Router용 기본 Gamma
-        self.eps_clip = config.PPO_EPS_CLIP
-        self.k_epochs = config.PPO_K_EPOCHS
-        self.entropy_coef = config.PPO_ENTROPY_COEF
+        self.eps_clip = getattr(config, 'PPO_EPS_CLIP', 0.2)
+        self.k_epochs = getattr(config, 'PPO_K_EPOCHS', 10)
+        self.entropy_coef = getattr(config, 'PPO_ENTROPY_COEF', 0.01)
         
         # Optimizers
         self.opt_experts = [optim.AdamW(exp.parameters(), lr=self.lr) for exp in self.experts]
         self.opt_router = optim.AdamW(self.router.parameters(), lr=self.lr)
         self.router_loss_fn = nn.MSELoss()
         
+        # Exploration
         self.epsilon = 1.0
         self.epsilon_min = 0.05
         self.epsilon_decay = 0.9995
         
         self.data = []
-        # [Fix] 트랜스포머 상태 저장을 위한 변수 초기화
         self.current_states = [None] * 3
         
-        if device == 'cuda':
+        # AMP Scaler
+        if device == 'cuda' and getattr(config, 'USE_AMP', False):
             self.scaler = torch.amp.GradScaler()
         else:
             self.scaler = None
 
-        # Compiler
-        if os.name != 'nt' and hasattr(torch, 'compile'):
+        # Torch Compile
+        use_compile = getattr(config, 'USE_TORCH_COMPILE', False)
+        if use_compile and os.name != 'nt' and hasattr(torch, 'compile'):
              try:
+                 print("🚀 Applying torch.compile to models...")
                  for i in range(3): self.experts[i] = torch.compile(self.experts[i])
                  self.router = torch.compile(self.router)
-             except: pass
+             except Exception as e:
+                 print(f"⚠️ torch.compile failed: {e}")
 
-    # [Fix] 누락되었던 메서드 추가!
     def reset_episode_states(self):
-        """에피소드 시작 시 Transformer의 Hidden State 초기화"""
         self.current_states = [None] * 3
 
+    # [Fix] Added helper to strip compilation prefixes
+    def _strip_prefix(self, state_dict):
+        """Removes _orig_mod. and module. prefixes from keys."""
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            new_key = k.replace("_orig_mod.", "").replace("module.", "")
+            new_state_dict[new_key] = v
+        return new_state_dict
+
     def save_model(self, path):
-        torch.save({
-            'experts': [exp.state_dict() for exp in self.experts],
-            'router': self.router.state_dict(),
-            'router_target': self.router_target.state_dict(),
-            'opt_experts': [opt.state_dict() for opt in self.opt_experts],
-            'opt_router': self.opt_router.state_dict(),
-            'epsilon': self.epsilon,
-        }, path)
+        tmp_path = path + ".tmp"
+        try:
+            torch.save({
+                'experts': [exp.state_dict() for exp in self.experts],
+                'router': self.router.state_dict(),
+                'router_target': self.router_target.state_dict(),
+                'opt_experts': [opt.state_dict() for opt in self.opt_experts],
+                'opt_router': self.opt_router.state_dict(),
+                'epsilon': self.epsilon,
+            }, tmp_path)
+            
+            if os.path.exists(path): os.remove(path)
+            os.rename(tmp_path, path)
+        except Exception as e:
+            print(f"❌ Save Error: {e}")
+            if os.path.exists(tmp_path): os.remove(tmp_path)
 
     def load_model(self, path):
         if not os.path.exists(path): return
@@ -126,97 +144,74 @@ class PPOAgent:
             checkpoint = torch.load(path, map_location=self.device)
             if 'experts' in checkpoint:
                 for i, state in enumerate(checkpoint['experts']):
-                    self.experts[i].load_state_dict(state, strict=False)
+                    # [Fix] Use _strip_prefix
+                    self.experts[i].load_state_dict(self._strip_prefix(state), strict=False)
+                
                 if 'router' in checkpoint:
-                    self.router.load_state_dict(checkpoint['router'], strict=False)
+                    # [Fix] Use _strip_prefix
+                    self.router.load_state_dict(self._strip_prefix(checkpoint['router']), strict=False)
                 if 'router_target' in checkpoint:
-                    self.router_target.load_state_dict(checkpoint['router_target'], strict=False)
+                    # [Fix] Use _strip_prefix
+                    self.router_target.load_state_dict(self._strip_prefix(checkpoint['router_target']), strict=False)
                 if 'epsilon' in checkpoint:
                     self.epsilon = checkpoint['epsilon']
         except Exception as e:
             print(f"❌ Load Error: {e}")
 
-    # [New] 드림팀 합체 로딩 기능
     def load_dream_team(self, base_dir):
-        """
-        각 분야 최고(Best) 모델 파일들에서 해당 파트만 추출하여 로드합니다.
-        - Router & Epsilon <- best_router.pth
-        - Trend Expert <- best_trend.pth
-        - Volatility Expert <- best_volatility.pth
-        - Sideways Expert <- best_sideways.pth
-        """
         print(f"🧬 Assembling Dream Team from: {base_dir}")
-        
-        # 파일 매핑
         files = {
             'router': 'best_router.pth',
-            0: 'best_trend.pth',       # Trend Expert Index
-            1: 'best_volatility.pth',  # Volatility Expert Index
-            2: 'best_sideways.pth'     # Sideways Expert Index
+            0: 'best_trend.pth',
+            1: 'best_volatility.pth',
+            2: 'best_sideways.pth'
         }
         
-        # 1. Router & Global State 로드
+        # 1. Router Load
         router_path = self._find_file(base_dir, files['router'])
         if router_path:
             try:
                 ckpt = torch.load(router_path, map_location=self.device)
-                
-                # 라우터 네트워크 로드
                 if 'router' in ckpt:
-                    self.router.load_state_dict(ckpt['router'])
-                    self.router_target.load_state_dict(ckpt.get('router_target', ckpt['router']))
-                
-                # 라우터 옵티마이저 로드 (학습 이어하기 위해 필수)
+                    # [Fix] Use _strip_prefix
+                    self.router.load_state_dict(self._strip_prefix(ckpt['router']))
+                    self.router_target.load_state_dict(self._strip_prefix(ckpt.get('router_target', ckpt['router'])))
                 if 'opt_router' in ckpt:
                     self.opt_router.load_state_dict(ckpt['opt_router'])
-                    
-                # 엡실론(탐험율) 로드
                 if 'epsilon' in ckpt:
                     self.epsilon = ckpt['epsilon']
-                    
                 print(f"   ✅ Router System loaded from {os.path.basename(router_path)}")
             except Exception as e:
                 print(f"   ❌ Router Load Failed: {e}")
-        else:
-            print("   ⚠️ Best Router file not found. Keeping initialization.")
 
-        # 2. Experts 로드 (각각의 파일에서 해당 인덱스 Expert만 추출)
+        # 2. Experts Load
         expert_names = ['Trend', 'Volatility', 'Sideways']
-        
         for idx in range(3):
             fname = files[idx]
             fpath = self._find_file(base_dir, fname)
+            fallback = False
             
-            # 파일이 없으면 Router 파일에서라도 가져오기 (Fallback)
             if not fpath and router_path:
                 fpath = router_path
                 fallback = True
-            else:
-                fallback = False
             
             if fpath:
                 try:
                     ckpt = torch.load(fpath, map_location=self.device)
-                    
-                    # Expert 가중치
                     if 'experts' in ckpt and len(ckpt['experts']) > idx:
-                        self.experts[idx].load_state_dict(ckpt['experts'][idx])
-                    
-                    # Expert 옵티마이저 (중요: 모멘텀 유지를 위해)
+                        # [Fix] Use _strip_prefix
+                        self.experts[idx].load_state_dict(self._strip_prefix(ckpt['experts'][idx]))
                     if 'opt_experts' in ckpt and len(ckpt['opt_experts']) > idx:
                         self.opt_experts[idx].load_state_dict(ckpt['opt_experts'][idx])
-                        
-                    source = "Router Fallback" if fallback else os.path.basename(fpath)
-                    print(f"   ✅ {expert_names[idx]} Expert & Optimizer loaded from {source}")
                     
+                    source = "Router Fallback" if fallback else os.path.basename(fpath)
+                    print(f"   ✅ {expert_names[idx]} Expert loaded from {source}")
                 except Exception as e:
                     print(f"   ❌ {expert_names[idx]} Load Failed: {e}")
 
     def _find_file(self, directory, suffix):
-        """파일 찾기 헬퍼 (정확한 이름 -> 패턴 매칭 순)"""
         exact = os.path.join(directory, suffix)
         if os.path.exists(exact): return exact
-        
         candidates = glob.glob(os.path.join(directory, f"*{suffix}"))
         if candidates: return max(candidates, key=os.path.getctime)
         return None
@@ -224,7 +219,7 @@ class PPOAgent:
     def select_action(self, state, action_mask=None, mode='router', expert_idx=0, deterministic=False):
         obs_seq, obs_info = state
         if not isinstance(obs_seq, torch.Tensor):
-            obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)
+            obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device).unsqueeze(0)
             obs_info = torch.as_tensor(obs_info, dtype=torch.float32, device=self.device).unsqueeze(0)
         else:
             obs_seq = obs_seq.to(self.device)
@@ -241,20 +236,13 @@ class PPOAgent:
                 selected_expert = expert_idx
 
             net = self.experts[selected_expert]
-            # [Update v3.5] Mamba/D-PPO Output Handling
-            # out = logits, value_mean, _, _, _, quantiles
+            
+            # v3.5 Output Unpacking: logits, value_mean, _, _, _, quantiles
             out = net(obs_seq, obs_info, states=self.current_states[selected_expert])
             logits, value_mean = out[0], out[1]
             
-            # Mamba는 state를 내부적으로 관리하지 않거나, 매 step마다 리턴하지 않을 수 있음 (구조에 따라 다름)
-            # 여기서는 MambaFiLMBlock이 recurrent state를 리턴하지 않고 전체 시퀀스를 처리한다고 가정 
-            # (Transformer처럼 동작. Mamba의 causal 모드는 전체 seq 입력 시 자동 적용)
-            # Future improvement: Implement true recurrent state passing for Mamba inference speedup if needed.
-            # Currently it processes window every step like Transformer.
-            
-            # self.current_states[selected_expert] = next_state # Not used in this version for Mamba
-            # (MambaBlock implementation treated it as sequence model)
-            
+            # self.current_states[selected_expert] = next_state # Mamba/Transformer unused
+
             if action_mask is not None:
                 mask_tensor = torch.as_tensor(action_mask, device=self.device)
                 logits = logits + (mask_tensor - 1) * 1e9
@@ -282,8 +270,6 @@ class PPOAgent:
         done_mask = torch.tensor([0.0 if x else 1.0 for x in batch_data[5]], dtype=torch.float32, device=self.device)
         val = torch.tensor([x.item() if torch.is_tensor(x) else float(x) for x in batch_data[6]], dtype=torch.float32, device=self.device)
         masks = torch.tensor(np.array(batch_data[8]), dtype=torch.float32, device=self.device)
-        
-        # Selected Expert Index
         router_choices = torch.tensor(batch_data[9], dtype=torch.long, device=self.device)
 
         self.data = []
@@ -292,11 +278,11 @@ class PPOAgent:
         router_loss_val = 0.0
         if mode == 'router':
             with torch.no_grad():
-                # [Fix] 1-step Reward가 아닌 Discounted Return 사용 (장기적 관점)
                 returns = torch.zeros_like(r)
                 running_return = 0.0
+                router_gamma = 0.99
                 for t in reversed(range(len(r))):
-                    running_return = r[t] + self.gamma * running_return * done_mask[t]
+                    running_return = r[t] + router_gamma * running_return * done_mask[t]
                     returns[t] = running_return
                 expected_q = returns
             
@@ -316,42 +302,41 @@ class PPOAgent:
             router_loss_val = router_loss.item()
             
             if episode % 10 == 0:
-                self.router_target.load_state_dict(self.router.state_dict())
+                # [Fix] Sanitize before loading
+                clean_state = self._strip_prefix(self.router.state_dict())
+                self.router_target.load_state_dict(clean_state)
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
-        # --- Train Experts (PPO with Quantile Regression) ---
+        # --- Train Experts (D-PPO) ---
         avg_loss = 0.0
         
-        # Quantile Midpoints (Constant)
         N_Q = getattr(config, 'NUM_QUANTILES', 32)
-        tau_hat = torch.linspace(0.5/N_Q, 1 - 0.5/N_Q, N_Q, device=self.device) # (N,)
-
+        tau_hat = torch.linspace(0.5/N_Q, 1 - 0.5/N_Q, N_Q, device=self.device)
+        
         for _ in range(self.k_epochs):
-            # [Improvement] Router 모드여도 사용된 Expert들은 학습시킴
-            # 현재 배치에서 Expert 0, 1, 2가 각각 어디서 쓰였는지 마스킹
-            target_experts = [expert_idx] if mode == 'expert' else [0, 1, 2]
+            if mode == 'expert':
+                target_experts = [expert_idx]
+            else:
+                target_experts = [0, 1, 2]
             
             for k in target_experts:
                 mask = (router_choices == k)
-                if mask.sum() == 0: continue
+                if mask.sum() == 0: continue 
                 
-                # [수정] Expert별 Gamma 사용
                 expert_gamma = self.gammas[k]
                 
-                # Advantage 계산 (해당 Expert의 Gamma 사용)
                 with torch.no_grad():
-                    next_val = torch.roll(val, -1)
-                    next_val[-1] = 0.0 # Last state has no next value
+                    next_val = torch.roll(val, -1); next_val[-1] = 0.0
                     deltas = r + expert_gamma * next_val * done_mask - val
                     advantage = torch.zeros_like(r).to(self.device)
                     running_adv = 0.0
                     for t in reversed(range(len(r))):
                         running_adv = deltas[t] + expert_gamma * config.PPO_LAMBDA * running_adv * done_mask[t]
                         advantage[t] = running_adv
+                    
                     target_val = advantage + val
                     advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
                 
-                # Expert별 Sub-batch
                 b_s_seq = s_seq[mask]
                 b_s_info = s_info[mask]
                 b_a = a[mask]
@@ -365,39 +350,34 @@ class PPOAgent:
                 optimizer.zero_grad()
                 
                 if self.scaler:
-                    with torch.amp.autocast(self.device):
-                        # Forward 다시 실행
+                    with torch.amp.autocast(self.device.type): # cuda or cpu
                         out = network(b_s_seq, b_s_info)
                         logits, curr_val_mean = out[0], out[1]
-                        quantiles = out[5] # (B, N) - Quantile Output (Last element)
+                        quantiles = out[5]
+
                         logits = logits + (b_masks - 1) * 1e9
                         dist = Categorical(logits=logits)
                         
-                        # 1. Actor Loss (PPO Standard)
                         log_prob = dist.log_prob(b_a)
                         ratio = torch.exp(log_prob - b_prob_a)
                         surr1 = ratio * b_adv
                         surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * b_adv
                         actor_loss = -torch.min(surr1, surr2).mean()
                         
-                        # 2. Critic Loss (Quantile Regression)
-                        # Target Value (b_target_val)는 GAE로 계산된 (Returns)
-                        # b_target_val shape: (B,) -> (B, 1)
                         target_expanded = b_target_val.unsqueeze(1)
                         critic_loss = quantile_huber_loss(quantiles, target_expanded, tau_hat)
-
-                        entropy_loss = -self.entropy_coef * dist.entropy().mean()
                         
+                        entropy_loss = -self.entropy_coef * dist.entropy().mean()
                         total_loss = actor_loss + 0.5 * critic_loss + entropy_loss
                     
                     self.scaler.scale(total_loss).backward()
                     self.scaler.step(optimizer)
                     self.scaler.update()
                 else:
-                    # CPU Fallback
                     out = network(b_s_seq, b_s_info)
                     logits, curr_val_mean = out[0], out[1]
-                    quantiles = out[5] # Quantile output
+                    quantiles = out[5]
+                    
                     logits = logits + (b_masks - 1) * 1e9
                     dist = Categorical(logits=logits)
                     log_prob = dist.log_prob(b_a)
