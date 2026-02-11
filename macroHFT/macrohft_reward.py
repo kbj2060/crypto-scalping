@@ -1,4 +1,4 @@
-"""MacroHFT Reward v8.4 - Trade Bonus/Penalty 90% 축소, Intrinsic 분리"""
+"""MacroHFT Reward v8.3 - PnL Absolute, Minimal Heuristics"""
 
 import numpy as np
 import torch
@@ -13,7 +13,24 @@ class LambdaMetaLearner(nn.Module):
         return torch.exp(self.log_lambdas[expert_idx])
 
 class AdaptiveTracker:
-    # ... (동일) ...
+    def __init__(self):
+        self.reset()
+    def reset(self):
+        self.episode_pnl = 0.0
+        self.peak_pnl = 0.0
+        self.drawdown = 0.0
+        self.returns = []
+    def update(self, step_pnl):
+        self.episode_pnl += step_pnl
+        self.returns.append(step_pnl)
+        if self.episode_pnl > self.peak_pnl:
+            self.peak_pnl = self.episode_pnl
+        self.drawdown = max(0.0, self.peak_pnl - self.episode_pnl)
+    def get_sharpe_ratio(self):
+        if len(self.returns) < 5: return 0.0
+        std = np.std(self.returns)
+        if std < 1e-9: return 0.0
+        return np.mean(self.returns) / std
 
 _tracker = AdaptiveTracker()
 def reset_reward_tracker(): _tracker.reset()
