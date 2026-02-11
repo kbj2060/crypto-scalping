@@ -159,7 +159,7 @@ class PPOTrainer:
         self.reward_ema_mean = 0.0               # 지수 이동 평균
         self.reward_ema_var = 1.0                # 지수 이동 분산
         self.reward_ema_decay = 0.99             # 최근 100 에피소드 영향
-        self.reward_norm_start = 30              # 30 에피소드 이후 정규화 시작
+        self.reward_norm_start = 5              # 5 에피소드 이후 정규화 시작
         self.reward_norm_min_std = 1.0           # 최소 표준편차 (보정된 보상의 스케일 유지)
         self.reward_clip_limit = 5.0             # 정규화 보상 클리핑 범위
         self.reward_episode_count = 0            # 에피소드 카운트 (시작 판단용)
