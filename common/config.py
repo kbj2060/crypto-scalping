@@ -93,11 +93,17 @@ REWARD_CLIP_SCALE = 10.0          # 보상 클리핑 (Tanh)
 # [PPO 학습 파라미터]
 # =============================================================================
 PPO_LEARNING_RATE = 3e-5
-PPO_GAMMA = 0.995
-PPO_LAMBDA = 0.97
-PPO_EPS_CLIP = 0.2
+PPO_GAMMA = 0.99
+PPO_LAMBDA = 0.95
+PPO_EPS_CLIP = 0.15
 PPO_K_EPOCHS = 5
 PPO_ENTROPY_COEF = 0.05
+
+# Router PPO 설정
+ROUTER_LR = 3e-5
+ROUTER_ENTROPY_COEF = 0.05
+ROUTER_EPS_CLIP = 0.2
+ROUTER_GAMMA = 0.99
 
 # Expert Gamma (시야 차별화)
 EXPERT_GAMMAS = {
@@ -112,7 +118,6 @@ EXPERT_GAMMAS = {
 TRAIN_BATCH_SIZE = 1024
 TRAIN_NUM_EPISODES = 3000
 TRAIN_MAX_STEPS_PER_EPISODE = 480
-MAX_TRADES_PER_EPISODE = 50
 TRAIN_SAVE_INTERVAL = 200
 
 EVAL_INITIAL_CAPITAL = 10000
@@ -129,7 +134,7 @@ USE_TORCH_COMPILE = True
 USE_CUDNN_BENCHMARK = True
 USE_HIGH_MATMUL_PRECISION = True
 
-USE_SAM = True
+USE_SAM = False
 TRAIN_ACTION_DIM = 3
 
 # =============================================================================

@@ -1,90 +1,105 @@
-"""MacroHFT Reward v8.3 - PnL Absolute, Minimal Heuristics"""
-
+"""
+MacroHFT 전술가(Tactical) 전용 리워드 함수
+목표: "타이밍을 뺏어라. 정확한 진입과 청산(Timing)으로 수익을 쌓아라."
+"""
 import numpy as np
-import torch
-import torch.nn as nn
-from common import config
-
-class LambdaMetaLearner(nn.Module):
-    def __init__(self, num_experts=3, init_lambda=2.25):
-        super().__init__()
-        self.log_lambdas = nn.Parameter(torch.full((num_experts,), np.log(init_lambda)))
-    def forward(self, expert_idx):
-        return torch.exp(self.log_lambdas[expert_idx])
-
-class AdaptiveTracker:
-    def __init__(self):
-        self.reset()
-    def reset(self):
-        self.episode_pnl = 0.0
-        self.peak_pnl = 0.0
-        self.drawdown = 0.0
-        self.returns = []
-    def update(self, step_pnl):
-        self.episode_pnl += step_pnl
-        self.returns.append(step_pnl)
-        if self.episode_pnl > self.peak_pnl:
-            self.peak_pnl = self.episode_pnl
-        self.drawdown = max(0.0, self.peak_pnl - self.episode_pnl)
-    def get_sharpe_ratio(self):
-        if len(self.returns) < 5: return 0.0
-        std = np.std(self.returns)
-        if std < 1e-9: return 0.0
-        return np.mean(self.returns) / std
-
-_tracker = AdaptiveTracker()
-def reset_reward_tracker(): _tracker.reset()
 
 def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
                          holding_time=0, action=0, prev_position=None,
-                         current_position=None, expert_idx=2,
-                         chop_index=50.0, volatility_z=0.0, lambda_meta=None):
+                         current_position=None, effective_leverage=1.0):
+    """
+    [MacroHFT Tactical Reward - Soft Penalty Ver.]
+    - 진입 페널티를 대폭 완화하여 '시도'를 장려함
+    - 대신, 손실을 보았을 때의 타격을 유지하여 '신중함'을 가르침
+    - 실현 손익(Realized PnL)에 대한 보상을 더 신뢰
+    """
+    reward = 0.0
     
-    global _tracker
-    _tracker.update(step_pnl)
+    # 1. 평가 손익 (Unrealized PnL)
+    # 전술가는 당장의 평가 이익이 중요함. 정직하게 반영.
+    reward += step_pnl * 50.0 
 
-    expert_map = {0: 'trend', 1: 'volatility', 2: 'sideways'}
-    expert_type = expert_map.get(expert_idx, 'sideways')
-    LOSS_AVERSION = lambda_meta if lambda_meta is not None else 2.25
+    # 2. 실현 손익 (Realized PnL) - 핵심
+    if trade_done:
+        # 이익은 확실하게 보상, 손실은 확실하게 처벌
+        reward += realized_pnl * 100.0 
+        
+        # [수정] 수수료 페널티 대폭 완화 (0.5 -> 0.05)
+        # 이제 쫄지 말고 진입해라. 단, 뇌동매매는 여전히 손해다.
+        reward -= 0.05 
 
+    # 3. 시간 비용 (Time Decay)
+    # 오래 들고 있으면 기회비용 발생 (약한 압박)
+    if current_position is not None and current_position != 'HOLD':
+        if step_pnl <= 0:  # 수익이 안 나는데 버티면
+            reward -= 0.01 
+    
+    # 4. 빠른 익절 보너스는 제거 (자연스러운 학습 유도)
+    # 기존: 빠른 익절 시 +0.3 보너스 -> 제거
+    # 이유: 보상 설계를 간소화하고 realized_pnl에만 집중
+
+    return float(np.clip(reward, -10.0, 10.0))
+
+
+# ==============================================================================
+# 전문가별 특화 리워드 함수 (Expert Specialization)
+# ==============================================================================
+
+def calculate_specialized_reward(expert_type, step_pnl, realized_pnl, trade_done, 
+                                 holding_time=0, effective_leverage=1.0, current_position=None):
+    """
+    전문가별 특화된 리워드 계산
+    
+    Args:
+        expert_type: 'trend', 'volatility', 'sideways' 중 하나
+        step_pnl: 스텝별 미실현 손익
+        realized_pnl: 실현 손익
+        trade_done: 거래 완료 여부
+        holding_time: 보유 시간 (스텝 수)
+        effective_leverage: 유효 레버리지
+        current_position: 현재 포지션 ('LONG', 'SHORT', 'HOLD' 또는 None)
+    """
     reward = 0.0
 
-    # --------------------------------------------------------------
-    # [1] STEP PnL - 미실현 손익 변화 (10x)
-    # --------------------------------------------------------------
-    if step_pnl >= 0:
-        reward += step_pnl * 10.0
-    else:
-        reward += step_pnl * 10.0 * LOSS_AVERSION
+    if expert_type == 'trend':
+        # [Trend Expert] 추세 지속성에 보상 (Long-run Profit)
+        reward += step_pnl * 100.0
+        
+        # 수익 중일 때 보유 시간에 비례한 보너스 (추세 유지 장려)
+        if step_pnl > 0:
+            reward += (holding_time * 0.01)
+        
+        # 실현 손익 강조 (큰 수익 선호)
+        if trade_done:
+            reward += realized_pnl * 150.0
 
-    # --------------------------------------------------------------
-    # [2] REALIZED PnL - 청산 손익 (200x, 고정 보너스 90% ↓)
-    # --------------------------------------------------------------
-    if trade_done:
-        if realized_pnl >= 0:
-            reward += realized_pnl * 200.0          # 300 → 200
-            reward += 0.1                          # 1.0 → 0.1
+    elif expert_type == 'volatility':
+        # [Volatility Expert] 빠른 익절과 강한 모멘텀 포착 (Hit & Run)
+        reward += step_pnl * 50.0
+        
+        # 실현 손익 극대화 (빠른 수익 실현 장려)
+        if trade_done:
+            reward += realized_pnl * 200.0
+            # Taker 수수료 페널티 반영
+            reward -= 0.05
+
+    elif expert_type == 'sideways':
+        # [Sideways Expert] 박스권 스캘핑 특화
+        
+        if not trade_done:
+            # 관망 보상 강화 (뇌동매매 억제)
+            reward += 0.01
         else:
-            reward += realized_pnl * 200.0 * LOSS_AVERSION
-            reward -= 0.05                        # 0.5 → 0.05
+            # [수정 후] 이익이 났을 때만 리베이트 보너스 지급!
+            reward += realized_pnl * 500.0
+            
+            if realized_pnl > 0:
+                reward += 0.05  # 수익 시 강력한 보너스 (리베이트+알파)
+            else:
+                reward -= 0.02  # 손실 시에는 수수료 페널티 추가 (확인사살)
 
-    # --------------------------------------------------------------
-    # [3] SIDEWAYS TIME DECAY - 유지 (미미)
-    # --------------------------------------------------------------
-    if expert_type == 'sideways' and holding_time > 0.15:
-        reward -= 0.1
+            # 미세 수익 장려 (박스권 상하단 타겟팅)
+            if 0 < realized_pnl < 0.001:
+                reward += 0.1
 
-    # --------------------------------------------------------------
-    # [4] ADAPTIVE RISK - 수익권에서만
-    # --------------------------------------------------------------
-    if _tracker.episode_pnl > 0.01:
-        if _tracker.drawdown > 0.02:
-            reward -= (_tracker.drawdown - 0.02) * 20.0
-        sharpe = _tracker.get_sharpe_ratio()
-        if sharpe > 0.2:
-            reward += sharpe * 2.0
-
-    # --------------------------------------------------------------
-    # [5] SOFT CLIP - 그대로
-    # --------------------------------------------------------------
-    return reward 
+    return float(np.clip(reward, -10.0, 10.0))

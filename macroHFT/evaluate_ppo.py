@@ -1,11 +1,18 @@
 """
-MacroHFT Evaluator - Dream Team Ensemble Loading
-================================================
+MacroHFT Evaluator - Dream Team Ensemble Loading (최신 로직 반영)
+================================================================
 각 전문가의 Best Checkpoint에서 해당 전문가의 가중치만 추출하여 로드합니다.
 - Router: best_router.pth 에서 로드
 - Trend Expert: best_trend.pth 에서 로드
 - Volatility Expert: best_volatility.pth 에서 로드
 - Sideways Expert: best_sideways.pth 에서 로드
+
+[변경사항]
+- select_action 6개 반환값 처리
+- pos_info: unrealized_pnl * 10 제거
+- action_mask: 마지막 스텝 규칙 제거
+- _strip_prefix 추가 (컴파일 모델 호환)
+- holding_time 정규화 추가
 """
 import torch
 import numpy as np
@@ -43,7 +50,7 @@ class PPOEvaluator:
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self.env.scaler_fitted = True 
 
-        # 평가 구간
+        # 평가 구간 (테스트셋: TRAIN_SPLIT + VAL_SPLIT 이후)
         total_len = len(self.data_collector.eth_data)
         self.start_idx = int(total_len * (config.TRAIN_SPLIT + config.VAL_SPLIT))
         self.end_idx = total_len
@@ -51,7 +58,7 @@ class PPOEvaluator:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.agent = PPOAgent(self.env.get_state_dim(), 3, INFO_DIM_ELITE8, device=self.device)
         
-        # [핵심] 앙상블 로드 실행
+        # [핵심] 앙상블 로드 실행 (컴파일 호환)
         self._load_ensemble_model(model_dir)
 
     def _load_data(self):
@@ -69,6 +76,14 @@ class PPOEvaluator:
             print(f"✅ Data Loaded: {len(df)} rows")
         else:
             raise FileNotFoundError("Data missing")
+
+    def _strip_prefix(self, state_dict):
+        """torch.compile 접두사(_orig_mod.) 제거 (ppo_agent와 동일)"""
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            new_key = k.replace("_orig_mod.", "").replace("module.", "")
+            new_state_dict[new_key] = v
+        return new_state_dict
 
     def _load_ensemble_model(self, base_dir):
         """
@@ -91,7 +106,8 @@ class PPOEvaluator:
         if router_path:
             ckpt = torch.load(router_path, map_location=self.device)
             if 'router' in ckpt:
-                self.agent.router.load_state_dict(ckpt['router'])
+                # _strip_prefix 적용
+                self.agent.router.load_state_dict(self._strip_prefix(ckpt['router']))
                 print(f"   ✅ Router loaded from {os.path.basename(router_path)}")
         else:
             print("   ⚠️ Router checkpoint not found! Using random weights.")
@@ -109,32 +125,37 @@ class PPOEvaluator:
             if fpath:
                 ckpt = torch.load(fpath, map_location=self.device)
                 if 'experts' in ckpt and len(ckpt['experts']) > idx:
-                    # 해당 Expert의 가중치만 쏙 빼서 로드
-                    self.agent.experts[idx].load_state_dict(ckpt['experts'][idx])
+                    # _strip_prefix 적용
+                    self.agent.experts[idx].load_state_dict(
+                        self._strip_prefix(ckpt['experts'][idx])
+                    )
                     print(f"   ✅ {expert_names[idx]} Expert loaded from {os.path.basename(fpath)}")
             else:
                 # 파일이 없으면 router 파일에 있는 expert라도 씀 (fallback)
                 if router_path:
                     ckpt = torch.load(router_path, map_location=self.device)
                     if 'experts' in ckpt and len(ckpt['experts']) > idx:
-                        self.agent.experts[idx].load_state_dict(ckpt['experts'][idx])
+                        self.agent.experts[idx].load_state_dict(
+                            self._strip_prefix(ckpt['experts'][idx])
+                        )
                         print(f"   ⚠️ {expert_names[idx]} Expert loaded from Router checkpoint (Fallback)")
 
     def _find_file(self, directory, suffix):
-        # 정확한 이름 매칭 or 접미사 매칭
+        """정확한 이름 매칭 or 접미사 매칭"""
         if os.path.exists(os.path.join(directory, suffix)):
             return os.path.join(directory, suffix)
-        
-        # 'ppo_model_best_trend.pth' 같은 패턴 찾기
         candidates = glob.glob(os.path.join(directory, f"*{suffix}"))
         if candidates:
-            return max(candidates, key=os.path.getctime) # 가장 최신
+            return max(candidates, key=os.path.getctime)  # 가장 최신
         return None
 
     def get_action_mask(self, current_position):
+        """액션 마스킹 (마지막 스텝 규칙 제거, train_ppo와 통일)"""
         mask = np.ones(3, dtype=np.float32)
-        if current_position == 'LONG': mask[1] = 0.0
-        elif current_position == 'SHORT': mask[2] = 0.0
+        if current_position == 'LONG':
+            mask[1] = 0.0  # Buy 금지
+        elif current_position == 'SHORT':
+            mask[2] = 0.0  # Sell 금지
         return mask
 
     def evaluate(self):
@@ -144,6 +165,7 @@ class PPOEvaluator:
         initial_balance = balance
         current_position = None
         entry_price = 0.0
+        entry_index = self.start_idx
         trade_count = 0
         expert_counts = {0:0, 1:0, 2:0}
         
@@ -152,52 +174,75 @@ class PPOEvaluator:
         for idx in tqdm(range(self.start_idx, self.end_idx - 1)):
             curr_price = float(self.data_collector.eth_data.iloc[idx]['close'])
             
-            # State 구성
+            # --- 포지션 정보 구성 (train_ppo와 동일) ---
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             unrealized_pnl = 0.0
-            if current_position == 'LONG': 
+            if current_position == 'LONG':
                 unrealized_pnl = (curr_price - entry_price) / entry_price
-            elif current_position == 'SHORT': 
+            elif current_position == 'SHORT':
                 unrealized_pnl = (entry_price - curr_price) / entry_price
             
-            holding_time_norm = 0.0
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time_norm]
-            state = self.env.get_observation(position_info=pos_info, current_index=idx)
+            holding_time = (idx - entry_index) if current_position else 0
+            # holding_time 정규화 (에피소드 최대 스텝은 config에서, 여기서는 120 가정)
+            max_steps = getattr(config, 'TRAIN_MAX_STEPS_PER_EPISODE', 120)
+            holding_time_norm = holding_time / max_steps
             
-            if state is None: break
+            pos_info = [pos_val, unrealized_pnl, holding_time_norm]  # ✨ unrealized_pnl * 10 제거
+            
+            state = self.env.get_observation(position_info=pos_info, current_index=idx)
+            if state is None:
+                break
             
             mask = self.get_action_mask(current_position)
             
-            # Action Selection
+            # --- Action Selection (6개 반환값 수신) ---
             with torch.no_grad():
-                action, _, _, selected_expert = self.agent.select_action(
+                action, _, _, selected_expert, _, _ = self.agent.select_action(
                     state, action_mask=mask, mode='router', deterministic=True
                 )
             
             expert_counts[selected_expert] += 1
             
-            # Trade Execution
-            fee = config.TRANSACTION_COST
-            if action == 1: # Buy
+            # --- Trade Execution (슬리피지/수수료) ---
+            fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
+            slippage = 0.0003  # 평가 시에는 고정 슬리피지 사용 (선택)
+            
+            if action == 1:  # Buy
                 if current_position is None:
                     current_position = 'LONG'
-                    entry_price = curr_price
+                    entry_price = curr_price * (1 + slippage)
+                    entry_index = idx
                     trade_count += 1
                 elif current_position == 'SHORT':
-                    balance *= (1 + (entry_price - curr_price)/entry_price - fee)
+                    realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
+                    balance *= (1 + realized_pnl)
                     current_position = None
-            elif action == 2: # Sell
+            elif action == 2:  # Sell
                 if current_position is None:
                     current_position = 'SHORT'
-                    entry_price = curr_price
+                    entry_price = curr_price * (1 - slippage)
+                    entry_index = idx
                     trade_count += 1
                 elif current_position == 'LONG':
-                    balance *= (1 + (curr_price - entry_price)/entry_price - fee)
+                    realized_pnl = (curr_price - entry_price) / entry_price - fee_rate
+                    balance *= (1 + realized_pnl)
                     current_position = None
         
-        final_return = (balance/initial_balance - 1) * 100
+        # --- 에피소드 종료 시 미청산 포지션 강제 청산 ---
+        if current_position is not None:
+            last_price = float(self.data_collector.eth_data.iloc[self.end_idx - 1]['close'])
+            fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
+            if current_position == 'LONG':
+                realized_pnl = (last_price - entry_price) / entry_price - fee_rate
+            else:
+                realized_pnl = (entry_price - last_price) / entry_price - fee_rate
+            balance *= (1 + realized_pnl)
+            trade_count += 1
+        
+        final_return = (balance / initial_balance - 1) * 100
         print("\n" + "="*50)
-        print(f"📊 Dream Team Evaluation Result")
+        print(f"📊 Dream Team Ensemble Evaluation Result")
+        print(f"   Test Period: {self.start_idx} ~ {self.end_idx}")
         print(f"   Return: {final_return:.2f}%")
         print(f"   Final Balance: ${balance:.2f}")
         print(f"   Trades: {trade_count}")
@@ -205,15 +250,17 @@ class PPOEvaluator:
         print("🧠 Expert Usage:")
         total_steps = sum(expert_counts.values())
         if total_steps > 0:
-            print(f"   Trend: {expert_counts[0]/total_steps*100:.1f}% ({expert_counts[0]} steps)")
-            print(f"   Volatility: {expert_counts[1]/total_steps*100:.1f}% ({expert_counts[1]} steps)")
-            print(f"   Sideways: {expert_counts[2]/total_steps*100:.1f}% ({expert_counts[2]} steps)")
+            print(f"   Trend:      {expert_counts[0]/total_steps*100:5.1f}% ({expert_counts[0]} steps)")
+            print(f"   Volatility: {expert_counts[1]/total_steps*100:5.1f}% ({expert_counts[1]} steps)")
+            print(f"   Sideways:   {expert_counts[2]/total_steps*100:5.1f}% ({expert_counts[2]} steps)")
         print("="*50)
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', type=str, default=None, help='Directory containing best_*.pth files')
+    parser.add_argument('--dir', type=str, default=None, 
+                        help='Directory containing best_*.pth files')
     args = parser.parse_args()
     
     evaluator = PPOEvaluator(model_dir=args.dir)

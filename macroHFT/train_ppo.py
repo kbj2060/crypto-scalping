@@ -1,11 +1,10 @@
 """
-PPO Training Script for MacroHFT v8.4 - No Reward Normalization
-===============================================================
-- Meta-Lambda: 전문가별 손실 회피 계수 자동 튜닝
-- Volatility Surprise: 내재적 보상 (축소 적용)
-- Identity Bonus: 완전 제거
-- Reward: raw reward 그대로 사용 (tanh 클리핑만 적용)
-- Curriculum Learning, Dream Team Resume 지원
+PPO Training Script for MacroHFT - Tactical Reward (최종)
+============================================================
+- Tactical Reward (step_pnl*50, realized_pnl*100, clip -10~10)
+- 거래 횟수 제한 로직 완전 제거 (MAX_TRADES_PER_EPISODE 삭제)
+- Adaptive Entropy 완화, LR 상향 반영
+- Dream Team Resume 지원
 """
 import logging
 import os
@@ -31,7 +30,7 @@ from strategies import (
 from common.trading_env import INFO_DIM_ELITE8
 from common.trading_env import TradingEnvironment
 from macroHFT.ppo_agent import PPOAgent
-from macroHFT.macrohft_reward import calculate_ppo_reward, reset_reward_tracker
+from macroHFT.macrohft_reward import calculate_ppo_reward
 
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
@@ -47,7 +46,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger('common.feature_engineering').setLevel(logging.WARNING)
 logging.getLogger('common.mtf_processor').setLevel(logging.WARNING)
 
-# PyTorch 최적화 (컴파일은 비활성화 권장)
+# PyTorch 최적화
 if hasattr(config, 'USE_CUDNN_BENCHMARK') and config.USE_CUDNN_BENCHMARK:
     torch.backends.cudnn.benchmark = True
     logger.info("✅ cuDNN Benchmark Activated")
@@ -55,16 +54,6 @@ if hasattr(config, 'USE_CUDNN_BENCHMARK') and config.USE_CUDNN_BENCHMARK:
 if hasattr(config, 'USE_HIGH_MATMUL_PRECISION') and config.USE_HIGH_MATMUL_PRECISION:
     torch.set_float32_matmul_precision('high')
     logger.info("✅ TensorCore Precision Optimized (TF32)")
-
-# ----------------------------------------------------------------------
-# [권장] PPO 하이퍼파라미터 (config.py에서 재정의 가능)
-# ----------------------------------------------------------------------
-# PPO_LEARNING_RATE = 3e-5      # 1e-4보다 안정적
-# PPO_K_EPOCHS = 5             # 10은 과적합 위험
-# PPO_ENTROPY_COEF = 0.05      # 탐험 장려
-# PPO_LAMBDA = 0.95            # GAE lambda
-# PPO_GAMMA = 0.99            # 할인율
-# ----------------------------------------------------------------------
 
 class PPOTrainer:
     def __init__(self, enable_visualization=False):
@@ -78,7 +67,6 @@ class PPOTrainer:
 
         # 1. Load Data
         self._load_features()
-
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self._fit_global_scaler_dummy()
 
@@ -88,23 +76,23 @@ class PPOTrainer:
         self.env.entry_index = 0
         self.env.reset_reward_states = lambda: None
 
-        # [Monkey Patch] PPO Reward
+        # [Monkey Patch] PPO Reward (Tactical Reward)
         import types
         self.env.calculate_reward = types.MethodType(calculate_ppo_reward, self.env)
         logger.info("✅ Tactical Reward Logic Applied")
 
         state_dim = self.env.get_state_dim()
-        action_dim = 3  # [Hold, Buy, Sell]
+        action_dim = 3
         info_dim = INFO_DIM_ELITE8
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logger.info(f"Device: {device} | State Dim: {state_dim} | Info Dim: {info_dim}")
 
-        # 2. Agent 초기화
+        # 2. Agent 초기화 (Meta-Lambda 제거)
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=device)
         self.episode_rewards = []
 
-        # 3. NumPy 캐싱 (속도 최적화)
+        # 3. NumPy 캐싱
         if self.data_collector.eth_data is not None:
             self.close_prices = self.data_collector.eth_data['close'].values.astype(np.float32)
             if 'volatility_z' in self.data_collector.eth_data.columns:
@@ -125,39 +113,19 @@ class PPOTrainer:
 
         # 4. TensorBoard
         tb_base = os.path.join('logs', 'tensorboard')
-        run_name = datetime.now().strftime('%Y%m%d_%H%M%S_PureRL_MoE')
+        run_name = datetime.now().strftime('%Y%m%d_%H%M%S_Tactical_NoLimit')
         tb_log_dir = os.path.join(tb_base, run_name)
         os.makedirs(tb_log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir=tb_log_dir)
 
-        # 5. 커리큘럼 인덱스
+        # 5. 커리큘럼 인덱스 (80% Router / 20% Expert)
         self._prepare_curriculum_indices()
 
-        # ------------------------------------------------------------------
-        # [제안 3] 변동성 예측기 (Volatility Predictor)
-        # ------------------------------------------------------------------
-        self.volatility_predictor = torch.nn.Sequential(
-            torch.nn.Linear(state_dim, 64),
-            torch.nn.ReLU(),
-            torch.nn.Linear(64, 1)
-        ).to(device)
-        self.vol_optimizer = torch.optim.Adam(
-            self.volatility_predictor.parameters(),
-            lr=getattr(config, 'VOLATILITY_PREDICTOR_LR', 1e-3)
-        )
-        self.vol_loss_fn = torch.nn.MSELoss()
-
-        # chop_index 캐싱
+        # chop_index 캐싱 (리워드에서 사용 안 함)
         if 'chop_index' in self.data_collector.eth_data.columns:
             self.chop_data = self.data_collector.eth_data['chop_index'].values.astype(np.float32)
         else:
             self.chop_data = np.zeros(len(self.close_prices), dtype=np.float32)
-
-        # ------------------------------------------------------------------
-        # [Reward Normalization] 완전 제거 - raw reward 직접 사용
-        # ------------------------------------------------------------------
-        # 모든 정규화 관련 변수와 코드를 제거함
-        pass
 
     # ------------------------------------------------------------------
     # 액션 마스킹 (기존 유지)
@@ -168,14 +136,10 @@ class PPOTrainer:
             mask[1] = 0.0
         elif current_position == 'SHORT':
             mask[2] = 0.0
-        else:
-            if step_count > config.TRAIN_MAX_STEPS_PER_EPISODE - 10:
-                mask[1] = 0.5   # 완전 차단 → 확률적 허용
-                mask[2] = 0.5
         return mask
 
     # ------------------------------------------------------------------
-    # 피처 로딩 (Oracle 제거, 순수 RL)
+    # 피처 로딩 (변경 없음)
     # ------------------------------------------------------------------
     def _load_features(self):
         path = 'data/training_features.csv'
@@ -210,7 +174,7 @@ class PPOTrainer:
             self.env.scaler_fitted = True
 
     # ------------------------------------------------------------------
-    # 커리큘럼 인덱스 분할
+    # 커리큘럼 인덱스 분할 (80/20 유지)
     # ------------------------------------------------------------------
     def _prepare_curriculum_indices(self):
         df = self.data_collector.eth_data.iloc[:self.train_end_idx]
@@ -287,16 +251,16 @@ class PPOTrainer:
 
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (idx - entry_index) if current_position else 0
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max(1, steps)]
+            pos_info = [pos_val, unrealized_pnl, holding_time / max(1, steps)]
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None:
                 break
 
             with torch.no_grad():
-                action, _, _, _, _ = self.agent.select_action(state, action_mask=None, deterministic=True)
+                action, _, _, _, _, _ = self.agent.select_action(state, action_mask=None, deterministic=True)
 
             realized_pnl = 0.0
-            if action == 1:  # Buy
+            if action == 1:
                 if current_position is None:
                     current_position = 'LONG'
                     entry_price = curr_price
@@ -304,7 +268,7 @@ class PPOTrainer:
                 elif current_position == 'SHORT':
                     realized_pnl = (entry_price - curr_price) / entry_price - fee_rate
                     current_position = None
-            elif action == 2:  # Sell
+            elif action == 2:
                 if current_position is None:
                     current_position = 'SHORT'
                     entry_price = curr_price
@@ -322,61 +286,32 @@ class PPOTrainer:
         sharpe = float(np.mean(returns) / (np.std(returns) + 1e-8))
         return test_reward, sharpe
 
-    # ------------------------------------------------------------------
-    # [제안 3] 변동성 예측기 학습 (미니배치)
-    # ------------------------------------------------------------------
-    def _train_volatility_predictor(self):
-        if len(self.data_collector.eth_data) < 1000:
-            return
-        indices = np.random.choice(
-            range(config.LOOKBACK, len(self.close_prices) - 1),
-            size=32, replace=False
-        )
-        losses = []
-        for idx in indices:
-            state = self.env.get_observation(position_info=[0, 0, 0], current_index=idx)
-            if state is None:
-                continue
-            state_tensor = state[0].to(self.agent.device)
-            target_vol = torch.as_tensor([self.volatility_data[idx + 1]], dtype=torch.float32, device=self.agent.device)
-            pred = self.volatility_predictor(state_tensor[:, -1, :])
-            loss = self.vol_loss_fn(pred.squeeze(), target_vol.squeeze())
-            losses.append(loss)
-        if losses:
-            loss = torch.stack(losses).mean()
-            self.vol_optimizer.zero_grad()
-            loss.backward()
-            self.vol_optimizer.step()
-
-    # ------------------------------------------------------------------
-    # 에피소드 학습 (핵심)
+    # 에피소드 학습 (거래 횟수 제한 로직 완전 제거)
     # ------------------------------------------------------------------
     def train_episode(self, episode_num, max_steps=None):
         if max_steps is None:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
-        # train_episode() 시작 부분 수정
+        # 80% Router, 20% Expert
         cycle = (episode_num - 1) % 5
-        if cycle < 4:   # 80% 확률
+        if cycle < 4:
             mode = "router"
             current_key = "router"
             target_indices = self.idx_all
-            expert_idx = 0  # dummy
-        else:           # 20% 확률
-            # 순환: 0,1,2 중 하나 선택
-            expert_idx = (episode_num // 5) % 3   # 5에피소드마다 순환
+            expert_idx = 0
+        else:
+            expert_idx = (episode_num // 5) % 3
             mode = "expert"
             current_key = self.agent.expert_names[expert_idx]
-            target_indices = self.idx_map[expert_idx]  # 해당 전문가 전용 데이터
+            target_indices = self.idx_map[expert_idx]
             if not target_indices:
                 target_indices = self.all_indices
-                
+
         start_idx = np.random.choice(target_indices)
         self.data_collector.current_index = start_idx
 
         # 초기화
         self.env.reset_reward_states()
-        reset_reward_tracker()
         self.agent.reset_episode_states()
 
         current_position = None
@@ -386,13 +321,7 @@ class PPOTrainer:
         episode_pnl = 0.0
         trade_count = 0
         prev_unrealized_pnl = 0.0
-        hold_count, buy_count, sell_count = 0, 0, 0
-
-        expert_selection_counts = [0, 0, 0]  # Trend, Vol, Side
-
-        # 메타 λ 학습을 위한 전문가별 수익 기록
-        expert_pnl = {0: 0.0, 1: 0.0, 2: 0.0}
-        expert_count = {0: 0, 1: 0, 2: 0}
+        expert_selection_counts = [0, 0, 0]
 
         pbar = tqdm(range(max_steps), desc=f"Ep {episode_num} [{current_key.upper()}]",
                     leave=False, mininterval=60.0)
@@ -403,15 +332,6 @@ class PPOTrainer:
                 break
 
             curr_price = float(self.close_prices[current_idx])
-
-            # 변동성 라벨 (디버깅용)
-            lookback_vol = min(10, current_idx - config.LOOKBACK)
-            if lookback_vol > 0:
-                past_prices = self.close_prices[current_idx - lookback_vol:current_idx]
-                returns = np.diff(past_prices) / (past_prices[:-1] + 1e-10)
-                volatility_label = float(np.std(returns) * 100.0)
-            else:
-                volatility_label = 0.0
 
             # 미실현 손익
             unrealized_pnl = 0.0
@@ -424,7 +344,7 @@ class PPOTrainer:
 
             pos_val = 1.0 if current_position == 'LONG' else (-1.0 if current_position == 'SHORT' else 0.0)
             holding_time = (current_idx - entry_index) if current_position else 0
-            pos_info = [pos_val, unrealized_pnl * 10, holding_time / max_steps]
+            pos_info = [pos_val, unrealized_pnl, holding_time / max_steps]
 
             state = self.env.get_observation(position_info=pos_info, current_index=current_idx)
             if state is None:
@@ -434,24 +354,8 @@ class PPOTrainer:
             market_vol = float(self.volatility_data[current_idx])
             action_mask = self.get_action_mask(current_position, market_vol, step)
 
-            # ----------------------------------------------------------
-            # [제안 3] 변동성 놀라움 (내재적 보상) - 축소 적용
-            # ----------------------------------------------------------
-            with torch.no_grad():
-                state_tensor = state[0].to(self.agent.device)
-                pred_vol = self.volatility_predictor(state_tensor[:, -1, :]).item()
-            actual_vol = float(self.volatility_data[current_idx])
-            vol_surprise = abs(actual_vol - pred_vol)
-            intrinsic_reward = min(vol_surprise * 0.005, 0.05)  # 최대 0.05
-
-            # ----------------------------------------------------------
-            # [제안 4] 정체성 보상 - 완전 제거 (chop_index, volatility_z는 전달만 함)
-            # ----------------------------------------------------------
-            chop_val = float(self.chop_data[current_idx])
-            vol_z = float(self.volatility_data[current_idx])
-
             # 행동 선택
-            action, prob, val, selected_expert, router_log_prob = self.agent.select_action(
+            action, prob, val, selected_expert, router_log_prob, router_value = self.agent.select_action(
                 state, action_mask=action_mask, mode=mode, expert_idx=expert_idx
             )
 
@@ -467,20 +371,13 @@ class PPOTrainer:
                 if exit_reason:
                     pbar.set_postfix({'R': f'{episode_reward:.1f}', 'Tr': trade_count, 'Exit': exit_reason[:4]})
 
-            if action == 0:
-                hold_count += 1
-            elif action == 1:
-                buy_count += 1
-            else:
-                sell_count += 1
-
             # 슬리피지
             slippage = np.random.uniform(0.0001, 0.0005)
             trade_done = False
             realized_pnl = 0.0
             holding_time_norm = holding_time / max_steps
 
-            if action == 1:  # Buy
+            if action == 1:
                 if current_position is None:
                     current_position = 'LONG'
                     entry_price = curr_price * (1 + slippage)
@@ -491,7 +388,7 @@ class PPOTrainer:
                     trade_done = True
                     episode_pnl += realized_pnl
                     current_position = None
-            elif action == 2:  # Sell
+            elif action == 2:
                 if current_position is None:
                     current_position = 'SHORT'
                     entry_price = curr_price * (1 - slippage)
@@ -513,16 +410,8 @@ class PPOTrainer:
                 actual_volatility=market_vol,
             )
 
-            # ----------------------------------------------------------
-            # [제안 1] 메타 λ 가져오기
-            # ----------------------------------------------------------
-            lambda_val = self.agent.lambda_learner(
-                torch.as_tensor([selected_expert], device=self.agent.device)
-            ).item()
-
-            # ----------------------------------------------------------
-            # 보상 계산 (v8.4 - PnL 중심, 고정 보너스/패널티 90% 축소)
-            # ----------------------------------------------------------
+            # ========== 보상 계산 (Tactical Reward) ==========
+            effective_leverage = getattr(config, 'EFFECTIVE_LEVERAGE', 1.0)
             raw_reward = self.env.calculate_reward(
                 step_pnl=step_pnl,
                 realized_pnl=realized_pnl,
@@ -531,23 +420,13 @@ class PPOTrainer:
                 action=action,
                 prev_position=prev_pos_str,
                 current_position=current_position,
-                expert_idx=selected_expert,
-                chop_index=chop_val,
-                volatility_z=vol_z,
-                lambda_meta=lambda_val
+                effective_leverage=effective_leverage
             )
+            reward = raw_reward   # 이미 -10~10 클리핑됨
 
-            # 내재적 보상 추가
-            raw_reward += intrinsic_reward
-
-            # ----------------------------------------------------------
-            # [Reward Normalization] 완전 제거 - raw reward 직접 사용
-            # ----------------------------------------------------------
-            reward = raw_reward
-
-            # ----------------------------------------------------------
+            # --------------------------------------------------
             # Transition 저장
-            # ----------------------------------------------------------
+            # --------------------------------------------------
             prev_unrealized_pnl = unrealized_pnl if not trade_done else 0.0
             self.data_collector.current_index += 1
             next_idx = self.data_collector.current_index
@@ -564,7 +443,11 @@ class PPOTrainer:
 
             self.agent.put_data((
                 state, action, reward, next_state, prob, done, val,
-                volatility_label, action_mask, selected_expert, router_log_prob
+                0.0,           # volatility_label (dummy)
+                action_mask,
+                selected_expert,
+                router_log_prob,
+                router_value
             ))
 
             episode_reward += reward
@@ -573,7 +456,7 @@ class PPOTrainer:
             if done:
                 break
 
-        # ---------- 에피소드 강제 종료 처리 ----------
+        # ---------- 에피소드 강제 종료 처리 (포지션 청산) ----------
         if current_position is not None:
             if current_position == 'LONG':
                 realized_pnl = (curr_price - entry_price) / entry_price
@@ -584,16 +467,16 @@ class PPOTrainer:
             episode_pnl += realized_pnl
 
             final_raw = self.env.calculate_reward(
-                step_pnl=0.0, realized_pnl=realized_pnl, trade_done=True,
-                holding_time=0.0, action=exit_action,
-                prev_position=current_position, current_position=None,
-                chop_index=chop_val, volatility_z=vol_z,
-                lambda_meta=lambda_val
+                step_pnl=0.0,
+                realized_pnl=realized_pnl,
+                trade_done=True,
+                holding_time=0.0,
+                action=exit_action,
+                prev_position=current_position,
+                current_position=None,
+                effective_leverage=1.0
             )
-
-            # 강제 종료 보상도 raw reward 직접 사용
             final_reward = final_raw
-
             episode_reward += final_reward
             trade_count += 1
 
@@ -603,41 +486,20 @@ class PPOTrainer:
             if last_state is None:
                 last_state = state
             terminal_mask = np.ones(3, dtype=np.float32)
-
             most_used_expert = (expert_selection_counts.index(max(expert_selection_counts))
                                 if sum(expert_selection_counts) > 0 else 0)
-            self.agent.put_data((
-                state, exit_action, final_reward, last_state, 1.0, True, 0.0, 0.0,
-                terminal_mask, most_used_expert
-            ))
 
-            # 전문가별 수익 집계
-            expert_pnl[selected_expert] += realized_pnl
-            expert_count[selected_expert] += 1
+            self.agent.put_data((
+                state, exit_action, final_reward, last_state, 1.0, True, 0.0,
+                0.0, terminal_mask, most_used_expert, None, None
+            ))
 
         pbar.close()
 
-        # --------------------------------------------------------------
-        # 변동성 예측기 학습
-        # --------------------------------------------------------------
-        self._train_volatility_predictor()
-
-        # --------------------------------------------------------------
-        # [제안 1] 메타 λ 업데이트
-        # --------------------------------------------------------------
-        episode_pnl_list = []
-        for idx in range(3):
-            if expert_count[idx] > 0:
-                avg_pnl = expert_pnl[idx] / expert_count[idx]
-                episode_pnl_list.append((idx, avg_pnl))
-        self.agent.update_meta_lambdas(episode_pnl_list)
-
-        # --------------------------------------------------------------
-        # 신경망 학습 (PPO + D-PPO + Reward Dist)
-        # --------------------------------------------------------------
+        # 신경망 학습
         metrics = self.agent.train_net(episode=episode_num, mode=mode, expert_idx=expert_idx)
 
-        # TensorBoard 로깅 (정규화 통계 제거)
+        # TensorBoard 로깅
         if self.writer:
             self.writer.add_scalar('Reward/Total', episode_reward, episode_num)
             self.writer.add_scalar('Metrics/PnL', episode_pnl, episode_num)
@@ -649,10 +511,10 @@ class PPOTrainer:
         return episode_reward, trade_count, episode_pnl, current_key
 
     # ------------------------------------------------------------------
-    # 메인 학습 루프
+    # 메인 학습 루프 (변경 없음)
     # ------------------------------------------------------------------
     def train(self, num_episodes=1000, resume=True):
-        logger.info("🚀 PPO Learning Started (Pure RL - No Oracle)")
+        logger.info("🚀 PPO Learning Started (Tactical Reward, No Trade Limit)")
 
         best_rewards = {
             'trend': -float('inf'),
@@ -718,6 +580,8 @@ class PPOTrainer:
                 break
             except Exception as e:
                 logger.error(f"Ep {ep} Error: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
 
         self.writer.close()
