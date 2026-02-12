@@ -293,7 +293,7 @@ class PPOTrainer:
                 break
 
             with torch.no_grad():
-                action, _, _, _ = self.agent.select_action(state, action_mask=None, deterministic=True)
+                action, _, _, _, _ = self.agent.select_action(state, action_mask=None, deterministic=True)
 
             realized_pnl = 0.0
             if action == 1:  # Buy
@@ -355,21 +355,22 @@ class PPOTrainer:
         if max_steps is None:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
-        # 커리큘럼: 3에피소드 전문가, 1에피소드 라우터
-        cycle = (episode_num - 1) % 4
-        if cycle < 3:
-            mode = "expert"
-            expert_idx = cycle
-            current_key = self.agent.expert_names[expert_idx]
-            target_indices = self.idx_map[expert_idx]
-        else:
+        # train_episode() 시작 부분 수정
+        cycle = (episode_num - 1) % 5
+        if cycle < 4:   # 80% 확률
             mode = "router"
-            expert_idx = 0
             current_key = "router"
             target_indices = self.idx_all
-
-        if not target_indices:
-            target_indices = self.all_indices
+            expert_idx = 0  # dummy
+        else:           # 20% 확률
+            # 순환: 0,1,2 중 하나 선택
+            expert_idx = (episode_num // 5) % 3   # 5에피소드마다 순환
+            mode = "expert"
+            current_key = self.agent.expert_names[expert_idx]
+            target_indices = self.idx_map[expert_idx]  # 해당 전문가 전용 데이터
+            if not target_indices:
+                target_indices = self.all_indices
+                
         start_idx = np.random.choice(target_indices)
         self.data_collector.current_index = start_idx
 
@@ -450,7 +451,7 @@ class PPOTrainer:
             vol_z = float(self.volatility_data[current_idx])
 
             # 행동 선택
-            action, prob, val, selected_expert = self.agent.select_action(
+            action, prob, val, selected_expert, router_log_prob = self.agent.select_action(
                 state, action_mask=action_mask, mode=mode, expert_idx=expert_idx
             )
 
@@ -563,7 +564,7 @@ class PPOTrainer:
 
             self.agent.put_data((
                 state, action, reward, next_state, prob, done, val,
-                volatility_label, action_mask, selected_expert
+                volatility_label, action_mask, selected_expert, router_log_prob
             ))
 
             episode_reward += reward

@@ -87,4 +87,4 @@ def calculate_ppo_reward(self, step_pnl, realized_pnl, trade_done,
     # --------------------------------------------------------------
     # [5] SOFT CLIP - 그대로
     # --------------------------------------------------------------
-    return float(np.tanh(reward / 5.0) * 5.0)
+    return reward 

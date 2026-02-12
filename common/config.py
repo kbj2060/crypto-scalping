@@ -53,13 +53,13 @@ STRATEGIES = {
 ENABLE_TRADING = False
 ENABLE_AI = True
 AI_MODEL_PATH = 'data/ppo_model.pth'
-LOOKBACK = 240
+LOOKBACK = 120
 
 # =============================================================================
 # [MacroHFT v3.5 SOTA Settings] - 핵심 업그레이드
 # =============================================================================
 # 1. Mamba Architecture (속도 & 장기 기억)
-USE_MAMBA = True               # True: Mamba, False: Transformer
+USE_MAMBA = False               # True: Mamba, False: Transformer
 MAMBA_D_STATE = 16             # SSM State Dimension
 MAMBA_D_CONV = 4               # Local Conv Kernel Size
 MAMBA_EXPAND = 2               # Block Expansion Factor
@@ -96,8 +96,8 @@ PPO_LEARNING_RATE = 3e-5
 PPO_GAMMA = 0.995
 PPO_LAMBDA = 0.97
 PPO_EPS_CLIP = 0.2
-PPO_K_EPOCHS = 10
-PPO_ENTROPY_COEF = 0.1
+PPO_K_EPOCHS = 5
+PPO_ENTROPY_COEF = 0.05
 
 # Expert Gamma (시야 차별화)
 EXPERT_GAMMAS = {
@@ -125,10 +125,11 @@ TRANSACTION_COST = 0.0005 # 0.05%
 # [성능 최적화]
 # =============================================================================
 USE_AMP = True
-USE_TORCH_COMPILE = False
+USE_TORCH_COMPILE = True
 USE_CUDNN_BENCHMARK = True
 USE_HIGH_MATMUL_PRECISION = True
 
+USE_SAM = True
 TRAIN_ACTION_DIM = 3
 
 # =============================================================================
