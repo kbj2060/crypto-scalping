@@ -1,23 +1,22 @@
 """
-MacroHFT Network v3.5 - SIMPLIFIED (Transformer only, no projection)
-=====================================================================
-- Backbone: Transformer + FiLM (Mamba 비활성화)
-- Critic: Quantile Regression (단조 분위수 보장)
-- Reward Head: 제거 (보조 Loss 미사용)
-- Projection Layer 제거 → raw_context 반환
+MacroHFT Network v5.0 - DISCRETE LEVERAGE
+===========================================
+- d_model=256, n_layers=6, n_head=8
+- Projection Layer 유지
+- Actor 출력: 행동 logits 15개 (방향 3 × 레버리지 5)
+- Critic: Quantile Regression (단조 분위수)
+- FiLM Conditioning 유지
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from common import config
+from common import config  # config import 필요
 
-# Mamba 강제 비활성화 (안정성 우선)
 HAS_MAMBA = False
-print("ℹ️ Mamba disabled. Using Transformer backbone.")
 
-# ==============================================================================
-# 1. FiLM Layer (변경 없음)
-# ==============================================================================
+# ----------------------------------------------------------------------
+# FiLM Layer (변경 없음)
+# ----------------------------------------------------------------------
 class FiLMLayer(nn.Module):
     def __init__(self, d_model, cond_dim):
         super().__init__()
@@ -42,16 +41,19 @@ class FiLMLayer(nn.Module):
             beta = beta.unsqueeze(1)
         return gamma * h + beta
 
-# ==============================================================================
-# 2. Transformer Block with FiLM (Fallback 겸용)
-# ==============================================================================
+# ----------------------------------------------------------------------
+# Transformer Block with FiLM
+# ----------------------------------------------------------------------
 class TransformerFiLMBlock(nn.Module):
     def __init__(self, d_model, n_head, cond_dim, dropout=0.1):
         super().__init__()
         self.attn = nn.MultiheadAttention(d_model, n_head, batch_first=True, dropout=dropout)
         self.norm1 = nn.LayerNorm(d_model)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_model*4), nn.GELU(), nn.Linear(d_model*4, d_model), nn.Dropout(dropout)
+            nn.Linear(d_model, d_model*4),
+            nn.GELU(),
+            nn.Linear(d_model*4, d_model),
+            nn.Dropout(dropout)
         )
         self.norm2 = nn.LayerNorm(d_model)
         self.film1 = FiLMLayer(d_model, cond_dim)
@@ -64,9 +66,9 @@ class TransformerFiLMBlock(nn.Module):
         x = x + self.ffn(self.norm2(x_mod2))
         return x
 
-# ==============================================================================
-# 3. Quantile Critic Head (단조 분위수)
-# ==============================================================================
+# ----------------------------------------------------------------------
+# Quantile Critic Head (단조 분위수)
+# ----------------------------------------------------------------------
 class QuantileCriticHead(nn.Module):
     def __init__(self, d_model, num_quantiles=32):
         super().__init__()
@@ -85,58 +87,60 @@ class QuantileCriticHead(nn.Module):
         deltas = torch.clamp(deltas, max=1e4)
         return torch.cat([first_q, first_q + torch.cumsum(deltas, dim=-1)], dim=-1)
 
-# ==============================================================================
-# 4. Reward Head 제거 (보조 Loss 사용 안 함)
-# ==============================================================================
-
-# ==============================================================================
-# 5. MacroHFT Network Main (Projection Layer 제거)
-# ==============================================================================
+# ----------------------------------------------------------------------
+# MacroHFT Network Main (Discrete Action)
+# ----------------------------------------------------------------------
 class MacroHFTNetwork(nn.Module):
     EXPECTED_INFO_DIM = 11
 
     def __init__(self, state_dim, action_dim, info_dim=11,
-                 d_model=128, n_head=4, n_layers=4, dropout=0.1):
+                 d_model=256, n_head=8, n_layers=6, proj_dim=256, dropout=0.1,
+                 num_quantiles=32):
         super().__init__()
         self.d_model = d_model
-        cond_dim = d_model
-        
-        self.use_mamba = False  # 강제 Transformer 사용
-        self.num_quantiles = getattr(config, 'NUM_QUANTILES', 32)
+        self.proj_dim = proj_dim
+        self.num_quantiles = num_quantiles
 
-        # 1. Condition Encoder
+        # Condition Encoder
         self.condition_encoder = nn.Sequential(
-            nn.Linear(info_dim, cond_dim),
+            nn.Linear(info_dim, d_model),
             nn.SiLU(),
-            nn.Linear(cond_dim, cond_dim)
+            nn.Linear(d_model, d_model)
         )
 
-        # 2. Input Embedding
+        # Input Embedding
         self.embedding = nn.Linear(state_dim, d_model)
         self.pos_encoder = nn.Parameter(torch.randn(1, 500, d_model) * 0.02)
 
-        # 3. Backbone Layers (Transformer only)
+        # Backbone (Transformer)
         self.layers = nn.ModuleList()
         for _ in range(n_layers):
-            self.layers.append(TransformerFiLMBlock(d_model, n_head, cond_dim, dropout))
+            self.layers.append(TransformerFiLMBlock(d_model, n_head, d_model, dropout))
 
-        # 4. Heads
-        self.final_norm = nn.LayerNorm(d_model)
-        self.actor_head = nn.Sequential(
-            nn.Linear(d_model, d_model), nn.Tanh(),
-            nn.Linear(d_model, action_dim)
+        # Projection Layer (복원)
+        self.projection = nn.Sequential(
+            nn.Linear(d_model, proj_dim),
+            nn.LayerNorm(proj_dim),
+            nn.SiLU()
         )
-        self.critic_head = QuantileCriticHead(d_model, self.num_quantiles)
-        
-        # [제거] Projection Layer - 더 이상 사용하지 않음
-        # self.projection = nn.Linear(d_model, proj_dim) ...
-        
+
+        # Heads
+        self.final_norm = nn.LayerNorm(d_model)
+        # 🔥 Actor: 이산 행동 logits (15)
+        self.actor_head = nn.Sequential(
+            nn.Linear(proj_dim, proj_dim),
+            nn.Tanh(),
+            nn.Linear(proj_dim, action_dim)   # action_dim = 15
+        )
+        self.critic_head = QuantileCriticHead(proj_dim, num_quantiles)
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None: nn.init.zeros_(module.bias)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
         elif isinstance(module, nn.LayerNorm):
             nn.init.ones_(module.weight)
             nn.init.zeros_(module.bias)
@@ -153,27 +157,29 @@ class MacroHFTNetwork(nn.Module):
         for layer in self.layers:
             x = layer(x, cond)
 
-        # Raw context (d_model 차원) - Projection 제거
         context = self.final_norm(x[:, -1, :])
-        
-        logits = self.actor_head(context)
-        quantiles = self.critic_head(context)
-        value_mean = quantiles.mean(dim=-1, keepdim=True)
-        
-        # Reward Head 제거 → None 반환
-        return logits, value_mean, None, None, None, quantiles, None, context
+        proj_context = self.projection(context)          # [B, proj_dim]
 
-# ==============================================================================
-# 6. Expert Classes (동일 차원으로 통일 - 모두 d_model=128)
-# ==============================================================================
+        # 🔥 행동 logits (15)
+        action_logits = self.actor_head(proj_context)    # [B, 15]
+
+        quantiles = self.critic_head(proj_context)
+        value_mean = quantiles.mean(dim=-1, keepdim=True)
+
+        # 🔥 반환값: action_logits, value_mean, quantiles, proj_context
+        return action_logits, value_mean, quantiles, proj_context
+
+# ----------------------------------------------------------------------
+# Expert Classes (동일 아키텍처, 레이어 수만 차등)
+# ----------------------------------------------------------------------
 class TrendExpert(MacroHFTNetwork):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=128, n_layers=4)
+    def __init__(self, state_dim, action_dim, info_dim=11, **kwargs):
+        super().__init__(state_dim, action_dim, info_dim, n_layers=6, **kwargs)
 
 class VolatilityExpert(MacroHFTNetwork):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=128, n_layers=2)
+    def __init__(self, state_dim, action_dim, info_dim=11, **kwargs):
+        super().__init__(state_dim, action_dim, info_dim, n_layers=4, **kwargs)
 
 class SidewaysExpert(MacroHFTNetwork):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, d_model=128, n_layers=3)
+    def __init__(self, state_dim, action_dim, info_dim=11, **kwargs):
+        super().__init__(state_dim, action_dim, info_dim, n_layers=5, **kwargs)

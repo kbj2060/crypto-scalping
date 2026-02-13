@@ -2,6 +2,8 @@
 공통 거래 환경 (TD3 / MacroHFT 공용) - Optimized for Elite 8
 - DataCollector + strategies 기반 관측(obs_seq, obs_info) 생성
 - [Optimization] Full GPU Caching & Auto-Signal Generation
+- execute_trade: 진입/청산 수수료 일관성 개선 (레버리지 비례)
+- _load_features: 제거 (PPOTrainer에서 이미 처리, 환경은 데이터만 사용)
 """
 import numpy as np
 import torch
@@ -22,60 +24,42 @@ INFO_DIM_ELITE8 = 11
 class TradingEnvironment:
     def __init__(self, data_collector, strategies, lookback=None):
         self.collector = data_collector
-        self.strategies = strategies  # List of initialized strategy objects
+        self.strategies = strategies
         self.lookback = lookback if lookback is not None else config.LOOKBACK
         self.scaler_fitted = False
 
-        # [최적화 1] 디바이스 설정 (GPU 사용 강제)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # [최적화 2] 데이터 캐싱 변수 (GPU Tensor)
-        self.cached_features = None   # (T, Feature_Dim) on GPU
-        self.cached_strategies = None  # (T, Strategy_Count) on GPU
+        self.cached_features = None
+        self.cached_strategies = None
 
         self.initial_balance = getattr(config, 'EVAL_INITIAL_CAPITAL', 10000.0)
         self.reset_reward_states()
 
+    # ------------------------------------------------------------------
+    # 청산 조건 검사 (변경 없음)
+    # ------------------------------------------------------------------
     def check_exit_conditions(self, unrealized_pnl_roe, holding_time_steps=0):
-        """
-        [레버리지 시스템] 청산 로직
-        
-        Args:
-            unrealized_pnl_roe: 레버리지가 적용된 ROE (Return On Equity)
-                              = (가격 변동률) * (레버리지)
-                              예: 가격 +1%, 레버리지 10배 → ROE = +10%
-            holding_time_steps: 홀딩 시간 (스텝 수)
-        
-        Returns:
-            (should_exit: bool, reason: str)
-        """
-        # 1. 강제 청산 (Liquidation) - 바이낸스 마진콜 시뮬레이션
-        # 자산의 80%가 날아가면 강제 종료 (AI에게 죽음의 공포를 가르침)
         liquidation_threshold = getattr(config, 'LIQUIDATION_THRESHOLD', -0.80)
         if unrealized_pnl_roe <= liquidation_threshold:
-            return True, "LIQUIDATION"  # 게임 오버
-        
-        # 2. 익절 (Take Profit) - 레버리지 20배면 50% 수익은 금방
-        # 가격 2.5% 상승 * 레버리지 20배 = ROE +50%
+            return True, "LIQUIDATION"
+
         take_profit_threshold = getattr(config, 'TAKE_PROFIT_THRESHOLD', 0.50)
         if unrealized_pnl_roe >= take_profit_threshold:
             return True, "TAKE_PROFIT"
-        
-        # 3. 손절 (Stop Loss) - 자산 기준 -20% 손실
-        # 가격 1% 하락 * 레버리지 20배 = ROE -20%
+
         stop_loss_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', -0.20)
         if unrealized_pnl_roe <= stop_loss_threshold:
             return True, "STOP_LOSS"
-        
-        # 4. 시간 손절 (Time Stop) - 횡보 시 수수료만 빠져나감
-        # 100 스텝 동안 홀딩했는데 수익이 미미하면 정리
-        if holding_time_steps > 100 and abs(unrealized_pnl_roe) < 0.01:  # ROE 1% 미만
+
+        if holding_time_steps > 100 and abs(unrealized_pnl_roe) < 0.01:
             return True, "TIME_STOP"
-        
+
         return False, None
 
+    # ------------------------------------------------------------------
+    # 에피소드 상태 초기화 (변경 없음)
+    # ------------------------------------------------------------------
     def reset_reward_states(self):
-        """에피소드 초기화"""
         self.trade_count = 0
         self.step_pnl_ema = 0.0
         self.consecutive_losses = 0
@@ -85,126 +69,188 @@ class TradingEnvironment:
         self.equity_curve = [1.0]
         self.trade_history = {'count': 0, 'wins': [], 'losses': []}
 
-    def execute_trade(self, action, current_price, current_idx=None):
+    def calculate_position_size(self, action_scale, current_price, balance, volatility=None):
         """
-        [레버리지 시스템] TD3 Action (-1~1)을 레버리지 포지션으로 변환
+        동적 포지션 사이징: Actor의 scale(0~1)을 실제 레버리지/포지션 금액/계약 수로 변환
         
         Args:
-            action: TD3 출력값 (-1 ~ 1)
-                   - 부호: 방향 (양수=Long, 음수=Short)
-                   - 절댓값: 레버리지 강도 (0~1)
+            action_scale: Actor 출력 (0~1) – 위험 예산 사용 비율
             current_price: 현재 가격
-            current_idx: 현재 인덱스 (선택)
+            balance: 현재 자본금 (USDT)
+            volatility: 최근 변동성 (표준편차, 틱 단위)
         
         Returns:
-            (entry_price, effective_leverage, trade_executed)
+            target_leverage: 실제 적용할 레버리지 배수
+            position_value: 포지션 금액 (USDT)
+            contracts: 계약 수 (선물)
         """
-        # 1. 레버리지 계산
-        # action의 절댓값이 '비중'이자 '레버리지 강도'
-        # 예: action 0.8 * LEVERAGE 20 = 16배 레버리지
-        max_leverage = getattr(config, 'LEVERAGE', 20)
-        target_leverage = abs(action) * max_leverage
+        max_leverage = getattr(config, 'RISK_MAX_LEVERAGE', 20)
+        risk_target_vol = getattr(config, 'RISK_TARGET_VOL', 0.15)
         
-        # 2. 최소 레버리지 필터링 (너무 작으면 거래 안 함 → 수수료 방어)
-        if target_leverage < 1.0:
-            return 0.0, 0.0, False  # 관망
+        # 1. 기본 레버리지 = Actor 출력 * 최대 레버리지
+        base_leverage = action_scale * max_leverage
+        base_leverage = max(1.0, base_leverage)  # 최소 1배
         
-        # 3. 진입가 및 수수료 계산
-        entry_price = current_price
+        # 2. 변동성 기반 레버리지 조절 (목표 변동성 / 현재 변동성)
+        if volatility is not None and volatility > 0:
+            # 틱 단위 변동성을 연간 변동성으로 환산 (3분봉 기준)
+            # 연간 틱 수 = 365일 * 24시간 * 60분 / 3분 = 175,200
+            vol_annual = volatility * np.sqrt(365 * 24 * 60 / 3)
+            vol_adjustment = risk_target_vol / max(vol_annual, 0.01)
+            vol_adjustment = np.clip(
+                vol_adjustment,
+                getattr(config, 'RISK_VOL_ADJUSTMENT_MIN', 0.5),
+                getattr(config, 'RISK_VOL_ADJUSTMENT_MAX', 2.0)
+            )
+        else:
+            vol_adjustment = 1.0
         
-        # 수수료는 레버리지 쓴 전체 금액에 대해 부과됨 (치명적!)
-        # fee = (자산 * 레버리지) * 수수료율
+        target_leverage = base_leverage * vol_adjustment
+        target_leverage = np.clip(target_leverage, 1.0, max_leverage)
+        
+        # 3. 자본금 기반 포지션 금액
+        position_value = balance * target_leverage
+        
+        # 4. 계약 수 (USDT 무기한 선물 가정)
+        contracts = position_value / current_price
+        
+        return target_leverage, position_value, contracts
+        
+    # ------------------------------------------------------------------
+    # [개선] 거래 실행 – 진입/청산 수수료 일관성 및 방향 처리
+    # ------------------------------------------------------------------
+    def execute_trade(self, action, current_price, direction=None, balance=None,
+                  volatility=None, is_exit=False, leverage=None):
+        """
+        통합 거래 실행 함수 (동적 사이징 적용)
+        
+        Args:
+            action: 레버리지 비율 (0~1) – 진입 시에만 사용
+            current_price: 현재 가격
+            direction: 진입 방향 (1=LONG, -1=SHORT) – 진입 시 필수, 청산 시 무시
+            balance: 현재 자본금 (USDT) – 진입 시 필수, 청산 시 무시
+            volatility: 현재 변동성 (선택, 없으면 1.0)
+            is_exit: 청산 여부
+            leverage: 청산 시 현재 포지션의 레버리지 (is_exit=True일 때 필수)
+        
+        Returns:
+            entry_price: 진입가 (청산 시 None)
+            target_leverage: 적용 레버리지 (청산 시 0.0)
+            executed: 실행 여부
+            cost: 발생한 수수료 (레버리지 * fee_rate)
+            position_value: 포지션 금액 (USDT, 진입 시)
+            contracts: 계약 수 (진입 시)
+        """
+        max_leverage = getattr(config, 'MAX_LEVERAGE', 20)
         fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
-        transaction_cost = target_leverage * fee_rate
-        
-        # 4. 즉시 자산 차감 (진입 수수료)
-        if len(self.equity_curve) > 0:
-            self.equity_curve[-1] *= (1 - transaction_cost)
-        
-        return entry_price, target_leverage, True
 
+        # ---------- 청산 ----------
+        if is_exit:
+            if leverage is None:
+                raise ValueError("청산 시 현재 레버리지(leverage)를 반드시 전달해야 합니다.")
+            cost = leverage * fee_rate
+            return None, 0.0, True, cost, 0.0, 0
+
+        # ---------- 진입 ----------
+        if direction is None:
+            raise ValueError("진입 시 방향(direction)을 반드시 전달해야 합니다.")
+        if balance is None:
+            raise ValueError("진입 시 자본금(balance)을 반드시 전달해야 합니다.")
+        if action <= 0:
+            return 0.0, 0.0, False, 0.0, 0.0, 0
+
+        # 동적 포지션 사이징
+        target_leverage, position_value, contracts = self.calculate_position_size(
+            action, current_price, balance, volatility
+        )
+
+        # 슬리피지
+        slippage = np.random.uniform(0.0001, 0.0005)
+        if direction == 1:
+            entry_price = current_price * (1 + slippage)
+        else:
+            entry_price = current_price * (1 - slippage)
+
+        # 진입 수수료
+        cost = target_leverage * fee_rate
+
+        return entry_price, target_leverage, True, cost, position_value, contracts
+
+    # ------------------------------------------------------------------
+    # GPU 캐싱 (cached_strategies.csv 우선 로드)
+    # ------------------------------------------------------------------
     def precompute_data(self):
-        """
-        [근본 해결] Full GPU Caching + Strategy Signal Generation
-        """
+        """GPU 캐싱 + 전략 신호 로드 (CSV 우선, 없으면 계산)"""
         if self.collector.eth_data is None:
             return
 
         logger.info(f"⚡ 데이터 전처리 및 캐싱 시작 (Device: {self.device})...")
         df = self.collector.eth_data.copy()
 
-        # 1. Feature Handling
+        # ---------- Feature 정규화 ----------
         target_cols = list(ULTIMATE_FEATURE_COLS)
-
-        # Missing columns fill
         missing_cols = [c for c in target_cols if c not in df.columns]
         if missing_cols:
             for c in missing_cols:
                 df[c] = 0.0
 
         data = df[target_cols]
-
-        # 2. Rolling Normalization (CPU)
-        # FeatureEngineer에서 Z-score가 된 것도 있고 안 된 것도 있어서,
-        # 학습 안정성을 위해 전체적으로 한 번 더 정규화합니다.
         rolling = data.rolling(window=self.lookback, min_periods=1)
         roll_mean = rolling.mean()
         roll_std = rolling.std().replace(0, 1e-8)
-
         normalized_df = (data - roll_mean) / roll_std
         normalized_df = normalized_df.fillna(0).replace([np.inf, -np.inf], 0)
 
-        # To GPU
         self.cached_features = torch.tensor(
             normalized_df.values, dtype=torch.float32, device=self.device
         )
         self.scaler_fitted = True
 
-        # 3. Strategy Signal Generation (Elite 8)
-        # 데이터프레임에 strategy_0 등 컬럼이 없으면 직접 계산
-        logger.info("   👉 전략 신호 생성 중 (Elite 8 Strategies)...")
+        # ---------- 전략 신호 (Elite 8) ----------
+        logger.info("   👉 전략 신호 로드 중...")
+        strategy_cols_exist = all(f'strategy_{i}' in df.columns for i in range(len(self.strategies)))
 
-        strat_signals = []
-
-        # 전략별로 컬럼이 이미 있는지 확인
-        cols_exist = all(f'strategy_{i}' in df.columns for i in range(len(self.strategies)))
-
-        if cols_exist:
-            logger.info("   ✅ 기존 전략 신호 사용")
-            for i in range(len(self.strategies)):
-                strat_signals.append(df[f'strategy_{i}'].values)
+        if strategy_cols_exist:
+            logger.info("   ✅ 기존 전략 컬럼 사용 (CSV에서 로드됨)")
+            strat_array = df[[f'strategy_{i}' for i in range(len(self.strategies))]].values
         else:
-            logger.info("   ⚠️ 전략 신호 신규 계산 (시간이 조금 소요될 수 있음)")
-            temp_signals = np.zeros((len(df), len(self.strategies)))
-
+            logger.info("   ⚠️ 전략 컬럼 없음 → 신규 계산 (시간 소요)")
+            strat_array = np.zeros((len(df), len(self.strategies)), dtype=np.float32)
             for i, strategy in enumerate(self.strategies):
                 sigs = []
                 for idx, row in df.iterrows():
                     sig = strategy.generate_signal(row, df)
                     sigs.append(sig)
-                temp_signals[:, i] = sigs
+                strat_array[:, i] = sigs
 
-            strat_signals = [temp_signals[:, j] for j in range(len(self.strategies))]
+            strat_df = pd.DataFrame(
+                strat_array,
+                columns=[f'strategy_{i}' for i in range(len(self.strategies))],
+                index=df.index
+            )
+            strat_df.to_csv('data/cached_strategies.csv')
+            logger.info(f"   💾 전략 신호 저장 완료: data/cached_strategies.csv")
 
-        strat_array = np.stack(strat_signals, axis=1)  # (T, 8)
         self.cached_strategies = torch.tensor(
             strat_array, dtype=torch.float32, device=self.device
         )
-
         logger.info(f"✅ GPU 캐싱 완료: Features {self.cached_features.shape}, Strat {self.cached_strategies.shape}")
 
+    # ------------------------------------------------------------------
+    # 거래 메트릭 업데이트 (변경 없음)
+    # ------------------------------------------------------------------
     def update_trading_metrics(self, prev_position, current_position,
-                                strategy_scores=None, volatility_pred=None,
-                                actual_volatility=None):
+                               strategy_scores=None, volatility_pred=None,
+                               actual_volatility=None):
         self.position_changes.append(1.0 if prev_position != current_position else 0.0)
         if len(self.position_changes) > 100:
             self.position_changes = self.position_changes[-100:]
         self.training_step += 1
 
+    # ------------------------------------------------------------------
+    # 관측 생성 (GPU 텐서)
+    # ------------------------------------------------------------------
     def get_observation(self, position_info=None, current_index=None):
-        """
-        [최적화] GPU 텐서 슬라이싱
-        """
         if self.cached_features is None:
             self.precompute_data()
 
@@ -213,13 +259,9 @@ class TradingEnvironment:
         if curr_idx is None or curr_idx < self.lookback or curr_idx >= len(self.cached_features):
             return None
 
-        # 1. Features
-        obs_seq = self.cached_features[curr_idx - self.lookback : curr_idx].unsqueeze(0)
-
-        # 2. Strategies
+        obs_seq = self.cached_features[curr_idx - self.lookback: curr_idx].unsqueeze(0)
         scores = self.cached_strategies[curr_idx]  # (8,)
 
-        # 3. Position Info
         if position_info is None:
             pos_tensor = torch.zeros(3, device=self.device)
         elif isinstance(position_info, torch.Tensor):
@@ -227,59 +269,19 @@ class TradingEnvironment:
         else:
             pos_tensor = torch.tensor(position_info, dtype=torch.float32, device=self.device)
 
-        # 4. Combine: pos[0](Val) + scores(8) + pos[1:](Meta) = 11
         obs_info = torch.cat([pos_tensor[0:1], scores, pos_tensor[1:]]).unsqueeze(0)
-
         return (obs_seq, obs_info)
 
-    def calculate_reward(self, step_pnl, realized_pnl, trade_done,
-                         holding_time=0, action=0, prev_position=None,
-                         current_position=None, effective_leverage=1.0):
-        """
-        [긴급 처방 2 + 레버리지] TD3 Rescue Reward - 레버리지 인식 보상
-        
-        Args:
-            step_pnl: Step PnL (레버리지 적용된 ROE)
-            effective_leverage: 실제 적용된 레버리지
-        """
-        reward = 0.0
-        
-        # 1. 평가 손익(Unrealized PnL) 반영 - 긍정 강화
-        if step_pnl > 0:
-            reward += step_pnl * 100.0  # 수익 = 강력한 칭찬!
-        else:
-            reward += step_pnl * 50.0   # 손실 = 적당한 실망
-        
-        # 2. 실현 손익(Realized PnL) 보너스 - 거래 완료 시
-        if trade_done:
-            if realized_pnl > 0:
-                reward += 5.0  # 익절 성공 = 간식 투척! 🍖
-            elif realized_pnl < 0:
-                reward -= 2.0  # 손절 = 살짝만 아프게
-        
-        # 3. 포지션 유지 보너스 (Trend Following 유도)
-        if current_position is not None and current_position != 0:
-            if step_pnl > 0:
-                reward += 0.1  # 수익 중에 홀딩 = 인내심 보너스
-        
-        # 4. [레버리지 시스템] 횡보 페널티
-        # 레버리지를 썼는데 횡보하면 수수료만 날아감
-        # 고레버리지(5배 이상) + 미미한 수익(0.5% 이하) = 페널티
-        if effective_leverage > 5 and abs(step_pnl) < 0.005:
-            reward -= 0.5  # "변동성도 없는데 고레버리지 쓰지 마라"
-        
-        # 5. 큰 손실 경고
-        if step_pnl < -0.02:  # ROE -2% 이상
-            reward -= 1.0
-        
-        # 6. 클리핑 제거! 대박이 나면 대박 점수를 그대로
-        return float(reward)
-
-
+    # ------------------------------------------------------------------
+    # 상태 차원 반환
+    # ------------------------------------------------------------------
     def get_state_dim(self):
         if self.cached_features is not None:
             return self.cached_features.shape[1]
         return len(ULTIMATE_FEATURE_COLS)
 
+    # ------------------------------------------------------------------
+    # 현재 자본 조회 (더미, train_ppoe에서 balance 직접 관리)
+    # ------------------------------------------------------------------
     def get_current_equity(self):
         return self.equity_curve[-1] if self.equity_curve else 1.0
