@@ -104,8 +104,8 @@ class PPOAgent:
         self.cvar_alpha = getattr(config, 'CVAR_ALPHA', 0.05)
 
         # 6. Optimizers
-        self.opt_experts = [optim.AdamW(exp.parameters(), lr=self.lr) for exp in self.experts]
-        self.opt_router = optim.AdamW(self.router.parameters(), lr=self.router_lr)
+        self.opt_experts = [optim.AdamW(exp.parameters(), lr=self.lr, weight_decay=1e-5) for exp in self.experts]
+        self.opt_router = optim.AdamW(self.router.parameters(), lr=self.router_lr, weight_decay=1e-5)
 
         # 7. Mixed Precision
         self.use_amp = getattr(config, 'USE_AMP', False) and device == 'cuda'

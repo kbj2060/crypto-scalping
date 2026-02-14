@@ -73,12 +73,12 @@ REWARD_CLIP_SCALE = 10.0           # tanh 스케일
 # =============================================================================
 # [PPO 하이퍼파라미터] - 전문가/라우터 통합
 # =============================================================================
-PPO_LEARNING_RATE = 1e-4
+PPO_LEARNING_RATE = 3e-4
 PPO_GAMMA = 0.99
 PPO_LAMBDA = 0.95
 PPO_EPS_CLIP = 0.15
 PPO_K_EPOCHS = 5
-PPO_ENTROPY_COEF = 0.1
+PPO_ENTROPY_COEF = 0.01
 
 # 전문가별 감마 (시야 차별화)
 EXPERT_GAMMAS = {
@@ -90,8 +90,8 @@ EXPERT_GAMMAS = {
 # =============================================================================
 # [라우터 PPO] - Neural EXP3.P 기반 (Regret Matching 대체)
 # =============================================================================
-ROUTER_LR = 3e-5
-ROUTER_ENTROPY_COEF = 0.05
+ROUTER_LR = 3e-4
+ROUTER_ENTROPY_COEF = 0.02
 ROUTER_EPS_CLIP = 0.2
 ROUTER_GAMMA = 0.99
 ROUTER_EXP3_ETA = 0.1       # EXP3.P 학습률
@@ -101,7 +101,7 @@ ROUTER_EXP3_ETA = 0.1       # EXP3.P 학습률
 # =============================================================================
 SHARPE_COEF = 0.001          # 샤프 비율 손실 계수
 ORTHO_COEF = 0.01           # 직교 정규화 계수 (0.0005 → 0.01)
-ENTROPY_DECAY = 0.999       # 엔트로피 감쇠율
+ENTROPY_DECAY = 0.95       # 엔트로피 감쇠율
 
 # =============================================================================
 # [학습 환경]
@@ -136,12 +136,12 @@ RISK_VOL_ADJUSTMENT_MAX = 2.0   # 변동성 조정 상한 (200%)
 # [MacroHFT Reward v5] – PnL 비례 리워드 + 경량 패널티
 # =============================================================================
 REWARD_PNL_SCALE = 100.0          # 🔥 100 → 10 (1% = 1점)
-REWARD_LEVERAGE_PENALTY = -0.02
-REWARD_TRADE_PENALTY = -0.05
+REWARD_LEVERAGE_PENALTY = -0.0002
+REWARD_TRADE_PENALTY = -0.001
 REWARD_LOSS_AVERSION = 1.0        # 🔥 손실 회피 제거 (1.0 = 없음)
-REWARD_CLIP_SCALE = 100.0         # 🔥 tanh 클리핑 거의 제거 (실질적 -100~100)
+REWARD_CLIP_SCALE = 50.0         # 🔥 tanh 클리핑 거의 제거 (실질적 -100~100)
 
-# 전문가 보너스 (PnL 대비 10% 미만)
+# 전문가 보너스 (PnL 대비 10% 미만)F
 REWARD_TREND_HOLDING_BONUS = 0.001
 REWARD_VOLATILITY_BONUS = 0.01
 REWARD_SIDEWAYS_WIN_BONUS = 0.02
@@ -157,6 +157,6 @@ CVAR_ALPHA = 0.05
 # =============================================================================
 # [레버리지 이산화] – 학습 안정성 향상
 # =============================================================================
-LEVERAGE_CANDIDATES = [1, 5, 10, 15, 20]          # 사용할 레버리지 배수
+LEVERAGE_CANDIDATES = [1, 5, 10]          # 사용할 레버리지 배수
 LEVERAGE_DISCRETE = len(LEVERAGE_CANDIDATES)     # 5
 ACTION_DIM = 3 * LEVERAGE_DISCRETE               # 3방향 × 5레버리지 = 15
