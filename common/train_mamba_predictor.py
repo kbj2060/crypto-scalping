@@ -9,7 +9,7 @@ from macroHFT.mamba_predictor import MambaForPrediction
 from common.feature_engineering import ULTIMATE_FEATURE_COLS
 
 # 데이터 준비 (base features만 사용)
-base_features = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('samba_')]
+base_features = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('mamba_')]
 df = pd.read_csv('data/training_features.csv', index_col=0)
 data = df[base_features].values.astype(np.float32)
 
