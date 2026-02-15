@@ -8,7 +8,7 @@ class MambaForPrediction(nn.Module):
         super().__init__()
         self.input_proj = nn.Linear(enc_in, d_model)
         self.mamba_layers = nn.ModuleList([
-            Mamba(d_model=d_model, d_state=16, d_conv=4, expand_factor=2)
+            Mamba(d_model=d_model, d_state=16, d_conv=4, expand=2)
             for _ in range(n_layers)
         ])
         self.norm = nn.LayerNorm(d_model)
