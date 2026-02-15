@@ -15,44 +15,40 @@ CHECKPOINT_PATH = 'data/checkpoints/mamba_predictor.pth'
 INPUT_CSV = 'data/training_features.csv'
 OUTPUT_CSV = 'data/training_features_with_mamba.csv'
 SEQ_LEN = 60
-ENC_IN = 21                # 원하는 입력 feature 개수 (가능한 최대)
+ENC_IN = 21
 HIDDEN_DIM = 256
 BATCH_SIZE = 1024
 
-# 1. 데이터 로드 (날짜 형식 명시)
+# 1. 데이터 로드
 logger.info("Loading data...")
 df = pd.read_csv(
     INPUT_CSV,
     index_col=0,
     parse_dates=True,
-    date_format='%Y-%m-%d %H:%M:%S'  # 데이터 형식에 맞게 조정
+    date_format='%Y-%m-%d %H:%M:%S'
 )
 
-# 2. 숫자형 컬럼만 자동 선택
-all_cols = df.columns.tolist()
-# SAMBA/Mamba 관련 컬럼 제외
-base_candidates = [c for c in all_cols if not c.startswith(('samba_', 'mamba_'))]
-# 숫자형 컬럼만 필터링
+# 2. 숫자형 컬럼 선택
+base_candidates = [c for c in df.columns if not c.startswith(('samba_', 'mamba_'))]
 numeric_cols = df[base_candidates].select_dtypes(include=[np.number]).columns.tolist()
-logger.info(f"Found {len(numeric_cols)} numeric columns among base features.")
+logger.info(f"Found {len(numeric_cols)} numeric columns.")
 
 if len(numeric_cols) < ENC_IN:
-    logger.warning(f"Requested ENC_IN={ENC_IN} but only {len(numeric_cols)} numeric columns available. Using all {len(numeric_cols)}.")
+    logger.warning(f"ENC_IN={ENC_IN} > available {len(numeric_cols)}. Using all.")
     ENC_IN = len(numeric_cols)
 else:
-    numeric_cols = numeric_cols[:ENC_IN]   # ENC_IN만큼 앞에서 선택 (또는 원하는 대로)
+    numeric_cols = numeric_cols[:ENC_IN]
 
 base_features = numeric_cols
 logger.info(f"Using {len(base_features)} features: {base_features[:5]}...")
 
-# 3. 데이터 추출 (float32 변환)
-data = df[base_features].values.astype(np.float32)  # (T, ENC_IN)
+# 3. 데이터 추출
+data = df[base_features].values.astype(np.float32)
 
-# 4. 슬라이딩 윈도우 생성 (읽기 전용 뷰 반환 주의)
+# 4. 슬라이딩 윈도우 생성
 T = len(data)
-# sliding_window_view는 view이므로 나중에 copy 필요
 X_view = np.lib.stride_tricks.sliding_window_view(data, window_shape=(SEQ_LEN, ENC_IN))
-X = X_view.reshape(-1, SEQ_LEN, ENC_IN)  # (num_windows, SEQ_LEN, ENC_IN)
+X = X_view.reshape(-1, SEQ_LEN, ENC_IN)
 num_windows = X.shape[0]
 logger.info(f"Generated {num_windows} windows.")
 
@@ -70,39 +66,52 @@ all_hiddens = []
 
 with torch.no_grad():
     for i in tqdm(range(0, num_windows, BATCH_SIZE), desc="Batches"):
-        batch = X[i:i+BATCH_SIZE].copy()  # 🔥 copy()로 쓰기 가능한 배열 생성
+        batch = X[i:i+BATCH_SIZE].copy()
         batch_tensor = torch.from_numpy(batch).to(device)
-        pred, hidden = model(batch_tensor)  # (batch, pred_len), (batch, hidden_dim)
+        pred, hidden = model(batch_tensor)
         all_preds.append(pred.cpu().numpy())
         all_hiddens.append(hidden.cpu().numpy())
 
-preds = np.concatenate(all_preds, axis=0).squeeze()        # (num_windows,)
-hiddens = np.concatenate(all_hiddens, axis=0)              # (num_windows, hidden_dim)
+# 결과 합치기 및 차원 확인
+preds = np.concatenate(all_preds, axis=0)
+hiddens = np.concatenate(all_hiddens, axis=0)
 
-# 길이 확인
-assert len(preds) == num_windows, f"Prediction length mismatch: {len(preds)} vs {num_windows}"
-assert hiddens.shape[0] == num_windows, f"Hidden length mismatch: {hiddens.shape[0]} vs {num_windows}"
+logger.info(f"Preds shape before squeeze: {preds.shape}")
+logger.info(f"Hiddens shape: {hiddens.shape}")
 
-# 7. 원본 데이터프레임에 결과 매핑 (단편화 방지를 위해 pd.concat 사용)
-# 새 컬럼 데이터 준비
+# preds가 (num_windows, 1)이면 squeeze, 이미 1D면 그대로
+if preds.ndim == 2 and preds.shape[1] == 1:
+    preds = preds.squeeze(axis=1)
+elif preds.ndim != 1:
+    # 예상치 못한 차원이면 에러 처리
+    raise ValueError(f"Unexpected preds shape: {preds.shape}")
+
+logger.info(f"Preds shape after squeeze: {preds.shape}")
+assert len(preds) == num_windows, f"Preds length mismatch: {len(preds)} vs {num_windows}"
+assert hiddens.shape[0] == num_windows, f"Hiddens length mismatch: {hiddens.shape[0]} vs {num_windows}"
+
+# 7. 새 컬럼 데이터 준비 (pd.concat 사용)
 emb_cols = [f'mamba_emb_{i}' for i in range(HIDDEN_DIM)]
 new_cols = ['mamba_pred'] + emb_cols
 
-# 새 컬럼 값을 담을 DataFrame 생성 (인덱스 동일, 모든 값 NaN)
+# 새 DataFrame 생성 (모든 값 NaN)
 new_data = pd.DataFrame(index=df.index, columns=new_cols, dtype=np.float32)
 
-# 결과 삽입 (iloc로 위치 기반 할당)
+# 인덱스 레이블로 안전하게 할당 (.loc 사용)
 start_idx = SEQ_LEN
-# mamba_pred
-new_data.iloc[start_idx:start_idx+num_windows, new_data.columns.get_loc('mamba_pred')] = preds
-# mamba_emb_*
-for j in range(HIDDEN_DIM):
-    new_data.iloc[start_idx:start_idx+num_windows, new_data.columns.get_loc(f'mamba_emb_{j}')] = hiddens[:, j]
+target_indices = df.index[start_idx:start_idx+num_windows]
 
-# 기존 df와 새 데이터 병합 (컬럼 순서는 뒤에 붙음)
+# mamba_pred 할당
+new_data.loc[target_indices, 'mamba_pred'] = preds
+
+# mamba_emb 할당
+for j in range(HIDDEN_DIM):
+    new_data.loc[target_indices, f'mamba_emb_{j}'] = hiddens[:, j]
+
+# 기존 df와 병합
 df_out = pd.concat([df, new_data], axis=1)
 
-# 8. 저장 (원자적 쓰기)
+# 8. 저장
 logger.info(f"Saving to {OUTPUT_CSV}...")
 temp_file = OUTPUT_CSV + '.tmp'
 df_out.to_csv(temp_file)
