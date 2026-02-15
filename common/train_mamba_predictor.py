@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from macroHFT.mamba_predictor import MambaForPrediction
 from common.feature_engineering import ULTIMATE_FEATURE_COLS
+import torch.nn as nn
 
 # 데이터 준비 (base features만 사용)
 base_features = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('mamba_')]
@@ -31,7 +32,7 @@ val_data = TensorDataset(torch.from_numpy(X[split:]), torch.from_numpy(y[split:]
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MambaForPrediction(enc_in=len(base_features)).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-criterion = np.MSELoss()
+criterion = nn.MSELoss()
 
 for epoch in range(20):
     model.train()
