@@ -96,10 +96,10 @@ class PPOTrainer:
 
         # ========== [ICM] 탐색 모듈 초기화 ==========
         self.use_icm = True
-        self.icm_coef = 0.001            # 🔥 0.1 → 0.01 → 0.05
-        icm_state_dim = state_dim + info_dim
+        self.icm_coef = 0.005            # CHANGED: 0.1 → 0.01 → 0.05 → 0.3 (현재 0.03)
+        proj_dim = self.agent.experts[0].proj_dim   # 모든 전문가의 proj_dim은 동일
         self.icm = ICM(
-            state_dim=icm_state_dim,
+            state_dim=proj_dim,          # CHANGED: 이전: state_dim + info_dim
             action_dim=2,
             hidden_dim=256,
             device=self.device
@@ -180,7 +180,7 @@ class PPOTrainer:
         - 인덱스 3~5: LONG + 레버리지 1,5,10
         - 인덱스 6~8: SHORT + 레버리지 1,5,10
         """
-        mask = np.ones(9, dtype=np.float32)  # 🔥 15 → 9
+        mask = np.ones(config.ACTION_DIM, dtype=np.float32)  # 🔥 15 → 9
         if current_position == 'LONG':
             # LONG 관련 행동 금지 (인덱스 3~5)
             mask[3:6] = 0.0
@@ -206,40 +206,76 @@ class PPOTrainer:
         return float(reward_bonus)
 
     # ------------------------------------------------------------------
-    # 리워드 함수 v5.1 (중복 제거, 스케일 10)
+    # 리워드 함수 v5.1 (5계층 통합) - CHANGED: volatility, selected_expert 등 추가
     # ------------------------------------------------------------------
-    def compute_reward(self, expert_type, step_pnl_roe, realized_pnl_roe, trade_done,
-                   holding_time, current_position, effective_leverage):
-        if not trade_done:
-            return 0.0
+    def compute_reward(self, step_pnl_roe, realized_pnl_roe, trade_done,
+                   holding_time, current_position, effective_leverage,
+                   volatility=0.0, quantiles=None, all_expert_values=None, 
+                   selected_expert=None):
+        """
+        5계층 리워드 통합 (더블카운팅 제거)
+        """
+        total = 0.0
         
-        # 🔥 로그 수익률: 과도한 양수 리워드 억제, 손실은 더 깊게 반영
-        log_return = np.log1p(realized_pnl_roe)  # log(1 + total_trade_return)
-        reward = log_return * config.REWARD_PNL_SCALE
+        # 계층 1: 기반 리워드
+        if trade_done:
+            # 청산 시: step_pnl_roe 무시, realized_pnl_roe만 사용
+            log_return = np.sign(realized_pnl_roe) * np.log1p(abs(realized_pnl_roe))
+            trade_reward = log_return * 100.0
+            fee_adjust = -0.5 * abs(realized_pnl_roe)
+            base_reward = trade_reward + fee_adjust
+        else:
+            # 비청산 시: step_pnl_roe만 사용
+            base_reward = step_pnl_roe * 100.0
         
-        # 🔥 레버리지 패널티 (유지)
-        if effective_leverage > 0:
-            reward += config.REWARD_LEVERAGE_PENALTY * effective_leverage
+        total += base_reward
         
-        # 🔥 거래 패널티
-        reward += config.REWARD_TRADE_PENALTY
+        # 계층 2: 전문가 특화 보너스 (청산 시, selected_expert가 있을 때)
+        if trade_done and selected_expert is not None:
+            expert_type = self.agent.expert_names[selected_expert]
+            bonus = 0.0
+            
+            if expert_type == 'trend':
+                if realized_pnl_roe > 0:
+                    bonus = min(2.0, holding_time * 0.5) * (1.0 + realized_pnl_roe * 5.0)
+                else:
+                    bonus = -1.0
+            elif expert_type == 'volatility':
+                vol_bonus = min(3.0, volatility * 10.0)
+                if realized_pnl_roe > 0:
+                    bonus = vol_bonus * (1.0 + realized_pnl_roe * 3.0)
+                else:
+                    bonus = -vol_bonus * 0.5
+            elif expert_type == 'sideways':
+                if abs(realized_pnl_roe) < 0.005:
+                    bonus = 1.5 if realized_pnl_roe > 0 else -0.5
+                else:
+                    bonus = -1.0
+            
+            total += bonus
         
-        # 🔥 전문가 보너스 (미미한 수준)
-        if expert_type == 'trend' and realized_pnl_roe > 0:
-            reward += holding_time * config.REWARD_TREND_HOLDING_BONUS
-        elif expert_type == 'volatility':
-            reward += config.REWARD_VOLATILITY_BONUS
-        elif expert_type == 'sideways':
-            if realized_pnl_roe > 0:
-                reward += config.REWARD_SIDEWAYS_WIN_BONUS
-                if realized_pnl_roe < 0.001:
-                    reward += config.REWARD_SIDEWAYS_SMALL_BONUS
-            else:
-                reward += config.REWARD_SIDEWAYS_LOSS_PENALTY
+        # 계층 3: 리스크 조정 (청산 시, quantiles가 있을 때)
+        if trade_done and quantiles is not None:
+            cvar = quantiles[:, :int(0.05 * quantiles.shape[1])].mean()
+            risk_penalty = np.clip(cvar + 0.02, -np.inf, 0.0) * 50.0
+            total += risk_penalty.item()
         
-        # 🔥 소프트 클리핑
-        reward = config.REWARD_CLIP_SCALE * np.tanh(reward / config.REWARD_CLIP_SCALE)
-        return float(reward)
+        # 계층 4: 라우터 보상 (all_expert_values와 selected_expert가 있을 때)
+        if all_expert_values is not None and selected_expert is not None:
+            other_values = [v for i, v in enumerate(all_expert_values) if i != selected_expert]
+            counterfactual = (base_reward + (bonus if trade_done else 0)) - np.mean(other_values)
+            counterfactual = np.clip(counterfactual, -2.0, 2.0)
+            if hasattr(self, 'last_expert') and selected_expert == self.last_expert:
+                counterfactual -= 0.3
+            self.last_expert = selected_expert
+            total += counterfactual
+        
+        # 계층 5: 탐색 보상은 ICM에서 별도 처리
+        
+        # 최종 클리핑 (±5.0)
+        total = 5.0 * np.tanh(total / 5.0)
+        return float(total)
+
 
     def validate_oot(self, episode):
         """완전히 분리된 테스트 환경에서 에이전트 평가 (3일치 데이터, 여러 윈도우)"""
@@ -247,156 +283,157 @@ class PPOTrainer:
             logger.warning("OOT test environment not available.")
             return 0.0, 0.0, 0.0
 
+        # 평가 모드로 전환 (각 네트워크에 직접 적용)
+        for expert in self.agent.experts:
+            expert.eval()
+        self.agent.router.eval()
+
         test_env = self.test_env
         test_env.reset_reward_states()
-        
+
         # 테스트 데이터 전체 길이
         total_steps = len(test_env.cached_features)
         # 시작 인덱스 (LOOKBACK 이후)
         start_idx = config.LOOKBACK + 50
-        
+
         # 3일치 데이터로 제한 (1440 스텝 = 3일 * 24시간 * 60분 / 3분)
         max_test_steps = 1440
         end_idx = min(total_steps, start_idx + max_test_steps)
         if end_idx - start_idx < config.TRAIN_MAX_STEPS_PER_EPISODE:
             logger.warning("Not enough test data for a full window.")
             return 0.0, 0.0, 0.0
-        
+
         # 윈도우 크기 (기존 에피소드 길이와 동일)
         window_size = config.TRAIN_MAX_STEPS_PER_EPISODE  # 480
         # 윈도우 개수 계산 (3일치 데이터 내에서)
         max_windows = (end_idx - start_idx) // window_size
-        
+
         # 각 윈도우의 결과 저장
         window_returns = []
         window_mdds = []
-        
-        for w in range(max_windows):
-            # 윈도우 시작 인덱스
-            win_start = start_idx + w * window_size
-            test_env.current_index = win_start
-            test_env.reset_reward_states()
-            
-            # 에피소드 초기화
-            position = None
-            entry_price = 0.0
-            effective_leverage = 0.0
-            balance = config.EVAL_INITIAL_CAPITAL
-            initial_balance = balance
-            equity_curve = [balance]
-            entry_balance = 0.0
-            entry_cost = 0.0
-            
-            for step in range(window_size):
-                idx = test_env.current_index
-                if idx >= end_idx - 1:
-                    break
-                curr_price = test_env.collector.eth_data.iloc[idx]['close']
-                
-                # 미실현 손익
-                if position == 'LONG':
-                    unrealized_return = (curr_price - entry_price) / entry_price
-                elif position == 'SHORT':
-                    unrealized_return = (entry_price - curr_price) / entry_price
-                else:
-                    unrealized_return = 0.0
-                
-                pos_val = 1.0 if position == 'LONG' else (-1.0 if position == 'SHORT' else 0.0)
-                pos_info = [pos_val, unrealized_return, 0.0]
-                state = test_env.get_observation(position_info=pos_info, current_index=idx)
-                if state is None:
-                    break
-                
-                action, _, _, _, _, _ = self.agent.select_action(state, deterministic=True)
-                direction, scale = action
-                
-                if direction != 0 and scale >= config.MIN_LEVERAGE / config.MAX_LEVERAGE:
-                    if position is None:
-                        exec_price, eff_lev, executed, cost, _, _ = test_env.execute_trade(
-                            action=scale,
-                            current_price=curr_price,
-                            direction=1 if direction == 1 else -1,
-                            balance=balance,
-                            volatility=self.volatility_data[idx] if hasattr(self, 'volatility_data') else None,
-                            is_exit=False
-                        )
-                        if executed:
-                            position = 'LONG' if direction == 1 else 'SHORT'
-                            entry_price = exec_price
-                            effective_leverage = eff_lev
-                            entry_cost = cost
-                            entry_balance = balance
-                            balance *= (1 - entry_cost)
-                    
-                    elif (direction == 1 and position == 'SHORT') or (direction == 2 and position == 'LONG'):
-                        _, _, _, exit_cost, _, _ = test_env.execute_trade(
-                            action=scale,
-                            current_price=curr_price,
-                            is_exit=True,
-                            leverage=effective_leverage
-                        )
-                        realized_return = unrealized_return
-                        total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
-                        total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
-                        balance = entry_balance * (1 + total_trade_return)
-                        equity_curve.append(balance)
-                        position = None
-                        effective_leverage = 0.0
-                        entry_cost = 0.0
-                        entry_balance = 0.0
-                
-                test_env.current_index += 1
-            
-            # 에피소드 종료 시 미청산 포지션 처리
-            if position is not None:
-                final_price = test_env.collector.eth_data.iloc[min(test_env.current_index, end_idx-1)]['close']
-                if position == 'LONG':
-                    realized_return = (final_price - entry_price) / entry_price
-                else:
-                    realized_return = (entry_price - final_price) / entry_price
-                _, _, _, exit_cost, _, _ = test_env.execute_trade(
-                    action=0.0,
-                    current_price=final_price,
-                    is_exit=True,
-                    leverage=effective_leverage
-                )
-                total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
-                total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
-                balance = entry_balance * (1 + total_trade_return)
-                equity_curve.append(balance)
-            
-            # 윈도우 수익률
-            window_return = (balance / initial_balance) - 1.0
-            window_returns.append(window_return)
-            
-            # MDD 계산
-            peak = np.maximum.accumulate(equity_curve)
-            drawdown = (peak - equity_curve) / peak
-            window_mdd = np.max(drawdown) if len(drawdown) > 0 else 0.0
-            window_mdds.append(window_mdd)
-        
+
+        with torch.no_grad():
+            for w in range(max_windows):
+                # 윈도우 시작 인덱스
+                win_start = start_idx + w * window_size
+                test_env.current_index = win_start
+                test_env.reset_reward_states()
+
+                # 에피소드 초기화
+                position = None
+                entry_price = 0.0
+                effective_leverage = 0.0
+                balance = config.EVAL_INITIAL_CAPITAL
+                initial_balance = balance
+                equity_curve = [balance]
+                entry_balance = 0.0
+                entry_cost = 0.0
+
+                for step in range(window_size):
+                    idx = test_env.current_index
+                    if idx >= end_idx - 1:
+                        break
+                    curr_price = test_env.collector.eth_data.iloc[idx]['close']
+
+                    # 미실현 손익
+                    if position == 'LONG':
+                        unrealized_return = (curr_price - entry_price) / entry_price
+                    elif position == 'SHORT':
+                        unrealized_return = (entry_price - curr_price) / entry_price
+                    else:
+                        unrealized_return = 0.0
+
+                    pos_val = 1.0 if position == 'LONG' else (-1.0 if position == 'SHORT' else 0.0)
+                    pos_info = [pos_val, unrealized_return, 0.0]
+                    state = test_env.get_observation(position_info=pos_info, current_index=idx)
+                    if state is None:
+                        break
+
+                    action, *_ = self.agent.select_action(state, deterministic=True)
+                    direction, scale = action
+
+                    if direction != 0 and scale >= config.MIN_LEVERAGE / config.MAX_LEVERAGE:
+                        if position is None:
+                            exec_price, eff_lev, executed, cost, _, _ = test_env.execute_trade(
+                                action=scale,
+                                current_price=curr_price,
+                                direction=1 if direction == 1 else -1,
+                                balance=balance,
+                                volatility=self.volatility_data[idx] if hasattr(self, 'volatility_data') else None,
+                                is_exit=False
+                            )
+                            if executed:
+                                position = 'LONG' if direction == 1 else 'SHORT'
+                                entry_price = exec_price
+                                effective_leverage = eff_lev
+                                entry_cost = cost
+                                entry_balance = balance
+                                balance *= (1 - entry_cost)
+
+                        elif (direction == 1 and position == 'SHORT') or (direction == 2 and position == 'LONG'):
+                            _, _, _, exit_cost, _, _ = test_env.execute_trade(
+                                action=scale,
+                                current_price=curr_price,
+                                is_exit=True,
+                                leverage=effective_leverage
+                            )
+                            realized_return = unrealized_return
+                            total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
+                            total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
+                            balance = entry_balance * (1 + total_trade_return)
+                            equity_curve.append(balance)
+                            position = None
+                            effective_leverage = 0.0
+                            entry_cost = 0.0
+                            entry_balance = 0.0
+
+                    test_env.current_index += 1
+
+                # 에피소드 종료 시 미청산 포지션 강제 청산
+                if position is not None:
+                    final_price = test_env.collector.eth_data.iloc[min(test_env.current_index, end_idx-1)]['close']
+                    if position == 'LONG':
+                        realized_return = (final_price - entry_price) / entry_price
+                    else:
+                        realized_return = (entry_price - final_price) / entry_price
+
+                    _, _, _, exit_cost, _, _ = test_env.execute_trade(
+                        action=0.0,
+                        current_price=final_price,
+                        is_exit=True,
+                        leverage=effective_leverage
+                    )
+                    total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
+                    total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
+                    balance = entry_balance * (1 + total_trade_return)
+                    equity_curve.append(balance)
+
+                # 윈도우 수익률
+                window_return = (balance / initial_balance) - 1.0
+                window_returns.append(window_return)
+
+                # MDD 계산
+                peak = np.maximum.accumulate(equity_curve)
+                drawdown = (peak - equity_curve) / peak
+                window_mdd = np.max(drawdown) if len(drawdown) > 0 else 0.0
+                window_mdds.append(window_mdd)
+
         # 전체 통계
         avg_return = np.mean(window_returns)
-        std_return = np.std(window_returns)
         avg_mdd = np.mean(window_mdds)
-        
-        # 연간화 Sharpe 비율 (윈도우 개수에 따라 조정)
-        # 각 윈도우 길이는 window_size 스텝 = 1일 (480스텝 = 24시간)
-        days_per_window = 1.0  # 480스텝 = 1일
-        num_years = max_windows * days_per_window / 365.0
-        
-        if num_years > 0 and std_return > 1e-8:
-            sharpe = (avg_return / std_return) * np.sqrt(365 / days_per_window)  # 연간화
-        else:
-            sharpe = 0.0
-        
+
         # 로깅
-        self.writer.add_scalar('OOT/Return_avg', avg_return, episode)
-        self.writer.add_scalar('OOT/Sharpe', sharpe, episode)
-        self.writer.add_scalar('OOT/MDD_avg', avg_mdd, episode)
-        
-        logger.info(f"OOT (3일치) | Avg Return: {avg_return:.2%} | Sharpe: {sharpe:.2f} | Avg MDD: {avg_mdd:.2%} (windows: {max_windows})")
-        return avg_return, sharpe, avg_mdd
+        self.writer.add_scalar('OOT/Return', avg_return, episode)
+        self.writer.add_scalar('OOT/MDD', avg_mdd, episode)
+
+        logger.info(f"OOT (3일치) | Avg Return: {avg_return:.2%} | Avg MDD: {avg_mdd:.2%} (windows: {max_windows})")
+
+        # 학습 모드로 복원
+        for expert in self.agent.experts:
+            expert.train()
+        self.agent.router.train()
+
+        return avg_return, 0.0, avg_mdd
         
 
     # ------------------------------------------------------------------
@@ -407,14 +444,14 @@ class PPOTrainer:
             max_steps = config.TRAIN_MAX_STEPS_PER_EPISODE
 
         # ---------- 모드 결정 ----------
-        cycle = (episode_num - 1) % 2
+        cycle = (episode_num - 1) % 4
         if cycle == 0:
             mode = 'router'
             current_key = 'router'
             target_indices = self.all_indices
             expert_idx = 0
         else:
-            expert_idx = ((episode_num - 1) // 2) % 3
+            expert_idx = cycle - 1  # 1→0(trend), 2→1(volatility), 3→2(sideways)
             mode = 'expert'
             current_key = self.agent.expert_names[expert_idx]
             target_indices = self.idx_map[expert_idx]
@@ -422,9 +459,6 @@ class PPOTrainer:
         start_idx = np.random.choice(target_indices)
         self.data_collector.current_index = start_idx
         self.env.reset_reward_states()
-
-        # ---------- 거래 제한 제거 ----------
-        # self.last_trade_step = -100
 
         # ---------- 자본금 및 포지션 초기화 ----------
         initial_balance = config.EVAL_INITIAL_CAPITAL
@@ -446,8 +480,8 @@ class PPOTrainer:
         self._prev_unrealized_roe = 0.0
         last_action_scale = 0.0
 
-        # ---------- ICM 상태 저장 ----------
-        prev_state_vec = None
+        # ---------- ICM 상태 저장 변수 ----------
+        prev_proj_context = None   # 이전 스텝의 fused representation
         prev_direction = None
         prev_scale = None
 
@@ -469,16 +503,12 @@ class PPOTrainer:
                 unrealized_return = 0.0
             unrealized_pnl_roe = unrealized_return * effective_leverage if position else 0.0
 
-            # ---------- 스텝 PnL (미사용) ----------
+            # 스텝 PnL (변화분)
             if position is None:
                 step_pnl_roe = 0.0
                 self._prev_unrealized_roe = 0.0
             else:
-                if step == 0:
-                    step_pnl_roe = 0.0
-                else:
-                    prev_unrealized = getattr(self, '_prev_unrealized_roe', 0.0)
-                    step_pnl_roe = unrealized_pnl_roe - prev_unrealized
+                step_pnl_roe = unrealized_pnl_roe - self._prev_unrealized_roe
                 self._prev_unrealized_roe = unrealized_pnl_roe
 
             # ---------- 포지션 정보 텐서 ----------
@@ -491,28 +521,30 @@ class PPOTrainer:
             # ---------- 액션 마스크 ----------
             action_mask = self.get_action_mask(current_position=position)
 
-            # ---------- 행동 선택 ----------
-            action, log_prob, value, selected_expert, router_log_prob, router_value = self.agent.select_action(
+            # ---------- 행동 선택 (수정: 반환값 7개) ----------
+            action, log_prob, value, selected_expert, router_log_prob, router_value, proj_context = self.agent.select_action(
                 state, action_mask=action_mask, mode=mode, expert_idx=expert_idx
             )
             direction, scale = action
             last_action_scale = scale
             expert_selection_counts[selected_expert] += 1
 
-            # ---------- ICM 탐색 보상 ----------
+            # ---------- ICM 탐색 보상 (prev_proj_context가 있을 때) ----------
             intrinsic_reward = 0.0
-            if self.use_icm and prev_state_vec is not None:
-                obs_seq, obs_info = state
-                s2_vec = torch.cat([
-                    obs_seq[0, -1, :].detach(),
-                    obs_info[0, :].detach()
-                ], dim=-1).to(self.device)
+            if self.use_icm and prev_proj_context is not None:
+                # 현재 상태 벡터 = proj_context
+                s2_vec = proj_context.squeeze(0).detach()  # (proj_dim,)
 
+                # 방향과 스케일을 분리하여 텐서로 생성 (배치 크기 1)
+                dir_tensor = torch.tensor([direction], device=self.device)      # (1,)
+                scale_tensor = torch.tensor([scale], device=self.device)        # (1,)
+
+                # ICM forward 호출: s1, s2, dir_action, scale_action
                 forward_loss, inverse_loss, intrinsic = self.icm(
-                    prev_state_vec.unsqueeze(0),
-                    s2_vec.unsqueeze(0),
-                    torch.tensor([prev_direction], device=self.device),
-                    torch.tensor([prev_scale], device=self.device)
+                    prev_proj_context.unsqueeze(0),   # (1, proj_dim)
+                    s2_vec.unsqueeze(0),               # (1, proj_dim)
+                    dir_tensor,                         # (1,)
+                    scale_tensor                         # (1,)
                 )
 
                 icm_loss = forward_loss + inverse_loss
@@ -552,6 +584,8 @@ class PPOTrainer:
                         holding_steps = 0
                         trade_count += 1
                         self.balance *= (1 - entry_cost)
+                        # FIX: 진입 시 _prev_unrealized_roe 초기화 (중요!)
+                        self._prev_unrealized_roe = 0.0
 
                 # ----- 청산 (반대 방향) -----
                 elif (direction == 1 and position == 'SHORT') or (direction == 2 and position == 'LONG'):
@@ -563,8 +597,6 @@ class PPOTrainer:
                     )
                     realized_return = unrealized_return
                     total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
-
-                    # 🔥 total_trade_return 클리핑 (과도한 변동 억제)
                     total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
 
                     self.balance = entry_balance * (1 + total_trade_return)
@@ -579,7 +611,7 @@ class PPOTrainer:
                     self.position_value = 0.0
                     self.contracts = 0.0
                     holding_steps = 0
-                    self._prev_unrealized_roe = 0.0
+                    self._prev_unrealized_roe = 0.0  # FIX: 청산 시 초기화
 
             # ---------- 보유 중 ----------
             if position is not None:
@@ -597,8 +629,6 @@ class PPOTrainer:
                     )
                     realized_return = unrealized_return
                     total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
-
-                    # 🔥 total_trade_return 클리핑
                     total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
 
                     self.balance = entry_balance * (1 + total_trade_return)
@@ -613,23 +643,26 @@ class PPOTrainer:
                     self.position_value = 0.0
                     self.contracts = 0.0
                     holding_steps = 0
-                    self._prev_unrealized_roe = 0.0
+                    self._prev_unrealized_roe = 0.0  # FIX: 강제 청산 시 초기화
                     pbar.set_postfix({'Exit': reason[:4]})
 
-            # ---------- 외부 보상 계산 ----------
+            # ---------- 외부 보상 계산 (수정된 compute_reward 사용) ----------
             if mode == 'router':
                 expert_type = 'trend'
             else:
                 expert_type = self.agent.expert_names[expert_idx]
 
             extrinsic_reward = self.compute_reward(
-                expert_type=expert_type,
                 step_pnl_roe=step_pnl_roe,
                 realized_pnl_roe=realized_pnl_roe,
                 trade_done=trade_done,
                 holding_time=holding_steps / max_steps,
                 current_position=position,
-                effective_leverage=effective_leverage
+                effective_leverage=effective_leverage,
+                volatility=self.volatility_data[current_idx] if hasattr(self, 'volatility_data') else 0.0,
+                selected_expert=selected_expert,   # CHANGED: 선택된 전문가 인덱스 전달
+                quantiles=None,                    # 필요시 저장 후 전달
+                all_expert_values=None              # 필요시 계산 후 전달
             )
 
             total_reward = extrinsic_reward + intrinsic_reward
@@ -655,12 +688,8 @@ class PPOTrainer:
             episode_reward += total_reward
             pbar.set_postfix({'R': f'{episode_reward:.2f}', 'Tr': trade_count, 'Bal': f'{self.balance:.0f}'})
 
-            # ---------- ICM 상태 업데이트 ----------
-            obs_seq, obs_info = state
-            prev_state_vec = torch.cat([
-                obs_seq[0, -1, :].detach(),
-                obs_info[0, :].detach()
-            ], dim=-1).to(self.device)
+            # ---------- ICM 상태 업데이트 (현재 proj_context 저장) ----------
+            prev_proj_context = proj_context.squeeze(0).detach()  # (proj_dim,)
             prev_direction = direction
             prev_scale = scale
 
@@ -682,23 +711,25 @@ class PPOTrainer:
                 leverage=effective_leverage
             )
             total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
-
-            # 🔥 total_trade_return 클리핑
             total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
 
             self.balance = entry_balance * (1 + total_trade_return)
             self.equity_curve.append(self.balance)
 
             realized_pnl_roe = total_trade_return
+            most_used = np.argmax(expert_selection_counts) if sum(expert_selection_counts) > 0 else 0  # FIX: most_used 먼저 계산
 
             final_reward = self.compute_reward(
-                expert_type=expert_type if mode != 'router' else 'trend',
                 step_pnl_roe=0.0,
                 realized_pnl_roe=realized_pnl_roe,
                 trade_done=True,
                 holding_time=0.0,
                 current_position=None,
-                effective_leverage=effective_leverage
+                effective_leverage=effective_leverage,
+                volatility=self.volatility_data[min(self.data_collector.current_index, len(self.close_prices)-1)] if hasattr(self, 'volatility_data') else 0.0,
+                selected_expert=most_used,   # CHANGED: 가장 많이 선택된 전문가
+                quantiles=None,
+                all_expert_values=None
             )
             episode_reward += final_reward
             trade_count += 1
@@ -713,7 +744,8 @@ class PPOTrainer:
             if terminal_state is None:
                 terminal_state = state
             terminal_mask = np.ones(config.ACTION_DIM, dtype=np.float32)
-            most_used = np.argmax(expert_selection_counts) if sum(expert_selection_counts) > 0 else 0
+            # FIX: most_used 재정의 제거 (이미 위에서 정의됨) – 필요 없으면 삭제 가능
+            most_used = np.argmax(expert_selection_counts) if sum(expert_selection_counts) > 0 else 0  # 중복이지만 유지해도 무방
 
             self.agent.put_data((
                 state, terminal_action, final_reward, terminal_state,
@@ -743,6 +775,7 @@ class PPOTrainer:
         self.writer.add_scalar('Loss/Router', metrics.get('Router_Loss', 0.0), episode_num)
 
         return episode_reward, trade_count, episode_pnl, current_key
+
 
     def _find_file(self, directory, suffix):
         """Dream Team Resume용 파일 찾기 (정확한 이름 또는 와일드카드)"""

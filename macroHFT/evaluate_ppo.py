@@ -1,11 +1,12 @@
 """
 MacroHFT v5.0 Evaluator – Discrete Leverage + Dream Team Ensemble
 ====================================================================
-- 이산 레버리지(15개 행동) 완벽 대응
+- 이산 레버리지(9개 행동) 완벽 대응
 - train_ppo.py의 train_episode 로직과 동일한 거래 실행 (execute_trade 사용)
 - Dream Team 로딩: 각 전문가의 best checkpoint에서 해당 네트워크만 로드
 - Out-of-time 테스트셋 자동 평가
 - 전문가 사용 비율, 수익률, 샤프 비율, MDD 출력
+- 🔥 평가 시 eval() 모드 적용 (Dropout 비활성화)
 """
 import torch
 import numpy as np
@@ -48,7 +49,7 @@ class PPOEvaluator:
 
         # ---------- 에이전트 초기화 ----------
         state_dim = self.env.get_state_dim()
-        action_dim = config.ACTION_DIM          # 15
+        action_dim = config.ACTION_DIM          # 9
         info_dim = INFO_DIM_ELITE8
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -154,7 +155,7 @@ class PPOEvaluator:
                         print(f"   ⚠️ {expert_names[idx]} Expert loaded from Router checkpoint (Fallback)")
 
     # ------------------------------------------------------------------
-    # 액션 마스킹 (15차원, train_ppo와 완전 동일)
+    # 액션 마스킹 (9차원, train_ppo와 완전 동일)
     # ------------------------------------------------------------------
     def get_action_mask(self, current_position):
         """
@@ -163,21 +164,21 @@ class PPOEvaluator:
         - 인덱스 3~5: LONG + 레버리지 1,5,10
         - 인덱스 6~8: SHORT + 레버리지 1,5,10
         """
-        mask = np.ones(9, dtype=np.float32)  # 🔥 15 → 9
+        mask = np.ones(config.ACTION_DIM, dtype=np.float32)
         if current_position == 'LONG':
-            # LONG 관련 행동 금지 (인덱스 3~5)
             mask[3:6] = 0.0
         elif current_position == 'SHORT':
-            # SHORT 관련 행동 금지 (인덱스 6~8)
             mask[6:9] = 0.0
-        # HOLD는 항상 허용 (0~2)
         return mask
-        
+
     # ------------------------------------------------------------------
     # 평가 실행 (train_episode의 거래 로직과 동일, 리워드/학습 없음)
     # ------------------------------------------------------------------
     def evaluate(self):
-        self.agent.reset_episode_states()
+        # 🔥 평가 모드 전환 (Dropout 비활성화) - agent.eval() 제거
+        for expert in self.agent.experts:
+            expert.eval()
+        self.agent.router.eval()
 
         balance = config.EVAL_INITIAL_CAPITAL
         initial_balance = balance
@@ -220,7 +221,7 @@ class PPOEvaluator:
 
             # ---------- 행동 선택 (deterministic) ----------
             with torch.no_grad():
-                action, _, _, selected_expert, _, _ = self.agent.select_action(
+                action, _, _, selected_expert, _, _, _ = self.agent.select_action(
                     state, action_mask=action_mask, mode='router', deterministic=True
                 )
 
@@ -352,7 +353,6 @@ class PPOEvaluator:
         print("="*60)
 
         return total_return, sharpe, mdd, trade_count, expert_counts
-
 
 if __name__ == "__main__":
     import argparse

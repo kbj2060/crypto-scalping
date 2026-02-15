@@ -105,6 +105,12 @@ class QuantTransformerBackbone(nn.Module):
         if self.mode == 'tactical':
             src_mask = self._generate_decay_mask(B, T, x.device)
 
+        if self.mode == 'ppo':
+            # causal mask 생성 (상삼각 행렬 -inf)
+            src_mask = torch.triu(torch.ones(T+1, T+1) * float('-inf'), diagonal=1).to(x.device)
+        else:
+            src_mask = None
+
         x = self.transformer(x, mask=src_mask)
         x = self.layer_norm(x)
         return x[:, 0, :], x, None

@@ -93,14 +93,20 @@ class TradingEnvironment:
         
         # 2. 변동성 기반 레버리지 조절 (목표 변동성 / 현재 변동성)
         if volatility is not None and volatility > 0:
-            # 틱 단위 변동성을 연간 변동성으로 환산 (3분봉 기준)
-            # 연간 틱 수 = 365일 * 24시간 * 60분 / 3분 = 175,200
-            vol_annual = volatility * np.sqrt(365 * 24 * 60 / 3)
+            # 🔥 volatility가 이미 연율화되었는지 확인
+            if not getattr(config, 'VOLATILITY_ALREADY_ANNUALIZED', False):
+                # 3분봉 데이터 기반 연율화 스케일링
+                periods_per_year = (365 * 24 * 60) / 3
+                vol_annual = volatility * np.sqrt(periods_per_year)
+            else:
+                vol_annual = volatility
+            
+            risk_target_vol = config.RISK_TARGET_VOL
             vol_adjustment = risk_target_vol / max(vol_annual, 0.01)
             vol_adjustment = np.clip(
                 vol_adjustment,
-                getattr(config, 'RISK_VOL_ADJUSTMENT_MIN', 0.5),
-                getattr(config, 'RISK_VOL_ADJUSTMENT_MAX', 2.0)
+                config.RISK_VOL_ADJUSTMENT_MIN,
+                config.RISK_VOL_ADJUSTMENT_MAX
             )
         else:
             vol_adjustment = 1.0

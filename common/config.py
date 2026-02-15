@@ -41,7 +41,6 @@ USE_MAMBA = False           # Transformer 고정
 # =============================================================================
 # [행동 공간] - 연속 레버리지
 # =============================================================================
-ACTION_DIM = 2               # (방향, 레버리지 비율)
 MAX_LEVERAGE = 20           # 최대 레버리지 20배
 MIN_LEVERAGE = 1.0         # 최소 실행 레버리지
 TRANSACTION_COST = 0.0005  # 0.05% (테이커 기준)
@@ -68,17 +67,17 @@ REWARD_DOWNSIDE_PENALTY = 0.5      # 하방 변동성 페널티 계수
 REWARD_MDD_PENALTY_COEF = 20.0     # 최대낙폭(MDD) 페널티 계수
 
 # 4. 소프트 클리핑
-REWARD_CLIP_SCALE = 10.0           # tanh 스케일
+REWARD_STEP_SCALE = 100.0
 
 # =============================================================================
 # [PPO 하이퍼파라미터] - 전문가/라우터 통합
 # =============================================================================
-PPO_LEARNING_RATE = 3e-4
+PPO_LEARNING_RATE = 3e-5
 PPO_GAMMA = 0.99
 PPO_LAMBDA = 0.95
 PPO_EPS_CLIP = 0.15
 PPO_K_EPOCHS = 5
-PPO_ENTROPY_COEF = 0.01
+PPO_ENTROPY_COEF = 0.05
 
 # 전문가별 감마 (시야 차별화)
 EXPERT_GAMMAS = {
@@ -90,11 +89,11 @@ EXPERT_GAMMAS = {
 # =============================================================================
 # [라우터 PPO] - Neural EXP3.P 기반 (Regret Matching 대체)
 # =============================================================================
-ROUTER_LR = 3e-4
-ROUTER_ENTROPY_COEF = 0.02
+ROUTER_LR = 3e-5
+ROUTER_ENTROPY_COEF = 0.05
 ROUTER_EPS_CLIP = 0.2
 ROUTER_GAMMA = 0.99
-ROUTER_EXP3_ETA = 0.1       # EXP3.P 학습률
+ROUTER_EXP3_ETA = 0.05       # EXP3.P 학습률
 
 # =============================================================================
 # [정규화 및 손실 계수]
@@ -131,11 +130,12 @@ RISK_MAX_LEVERAGE = 20          # 최대 허용 레버리지 (브로커 제한)
 RISK_MAX_POSITION_RATIO = 0.5   # 자본금 대비 최대 포지션 비율 (안전장치)
 RISK_VOL_ADJUSTMENT_MIN = 0.5   # 변동성 조정 하한 (50%)
 RISK_VOL_ADJUSTMENT_MAX = 2.0   # 변동성 조정 상한 (200%)
+VOLATILITY_ALREADY_ANNUALIZED = False
 
 # =============================================================================
 # [MacroHFT Reward v5] – PnL 비례 리워드 + 경량 패널티
 # =============================================================================
-REWARD_PNL_SCALE = 100.0          # 🔥 100 → 10 (1% = 1점)
+REWARD_PNL_SCALE = 100.0          # 🔥 1% = 100점
 REWARD_LEVERAGE_PENALTY = -0.0002
 REWARD_TRADE_PENALTY = -0.001
 REWARD_LOSS_AVERSION = 1.0        # 🔥 손실 회피 제거 (1.0 = 없음)
@@ -144,9 +144,9 @@ REWARD_CLIP_SCALE = 50.0         # 🔥 tanh 클리핑 거의 제거 (실질적 
 # 전문가 보너스 (PnL 대비 10% 미만)F
 REWARD_TREND_HOLDING_BONUS = 0.001
 REWARD_VOLATILITY_BONUS = 0.01
-REWARD_SIDEWAYS_WIN_BONUS = 0.02
-REWARD_SIDEWAYS_LOSS_PENALTY = -0.01
-REWARD_SIDEWAYS_SMALL_BONUS = 0.03
+REWARD_SIDEWAYS_WIN_BONUS = 0.05
+REWARD_SIDEWAYS_LOSS_PENALTY = -0.005
+REWARD_SIDEWAYS_SMALL_BONUS = 0.05
 
 # =============================================================================
 # [CVaR Risk] – 하위 분위수 집중 학습
@@ -157,6 +157,6 @@ CVAR_ALPHA = 0.05
 # =============================================================================
 # [레버리지 이산화] – 학습 안정성 향상
 # =============================================================================
-LEVERAGE_CANDIDATES = [1, 5, 10]          # 사용할 레버리지 배수
+LEVERAGE_CANDIDATES = [1,5,10]          # 사용할 레버리지 배수
 LEVERAGE_DISCRETE = len(LEVERAGE_CANDIDATES)     # 5
 ACTION_DIM = 3 * LEVERAGE_DISCRETE               # 3방향 × 5레버리지 = 15
