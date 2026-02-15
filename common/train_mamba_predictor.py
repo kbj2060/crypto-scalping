@@ -1,51 +1,131 @@
-# scripts/train_mamba.py
-import sys
-import os
-sys.path.append('.')
+# scripts/precompute_mamba_features.py
 import pandas as pd
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+import os
+from tqdm import tqdm
+import logging
 from mamba_predictor import MambaForPrediction
-from feature_engineering import ULTIMATE_FEATURE_COLS
-import torch.nn as nn
 
-# 데이터 준비 (base features만 사용)
-base_features = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('mamba_')]
-df = pd.read_csv('data/training_features.csv', index_col=0)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# 설정
+CHECKPOINT_PATH = 'data/checkpoints/mamba_predictor.pth'
+INPUT_CSV = 'data/training_features.csv'
+OUTPUT_CSV = 'data/training_features_with_mamba.csv'
+SEQ_LEN = 60
+ENC_IN = 21
+HIDDEN_DIM = 256
+BATCH_SIZE = 1024
+
+# 1. 데이터 로드
+logger.info("Loading data...")
+df = pd.read_csv(
+    INPUT_CSV,
+    index_col=0,
+    parse_dates=True,
+    date_format='%Y-%m-%d %H:%M:%S'
+)
+
+# 2. 숫자형 컬럼만 선택 (samba/mamba 제외)
+base_candidates = [c for c in df.columns if not c.startswith(('samba_', 'mamba_'))]
+numeric_cols = df[base_candidates].select_dtypes(include=[np.number]).columns.tolist()
+logger.info(f"Found {len(numeric_cols)} numeric columns.")
+
+if len(numeric_cols) < ENC_IN:
+    logger.warning(f"ENC_IN={ENC_IN} > available {len(numeric_cols)}. Using all.")
+    ENC_IN = len(numeric_cols)
+else:
+    numeric_cols = numeric_cols[:ENC_IN]
+
+base_features = numeric_cols
+logger.info(f"Using {len(base_features)} features: {base_features[:5]}...")
+
+# 3. 데이터 추출
 data = df[base_features].values.astype(np.float32)
 
-# 시퀀스 생성
-seq_len = 60
-pred_len = 1
-X, y = [], []
-for i in range(len(data) - seq_len - pred_len + 1):
-    X.append(data[i:i+seq_len])
-    y.append(data[i+seq_len:i+seq_len+pred_len, 0])  # log_return 예측
-X = np.array(X); y = np.array(y)
+# 4. 슬라이딩 윈도우 생성 (올바른 개수 계산)
+T = len(data)
+num_windows = T - SEQ_LEN + 1  # 🔥 중요
+logger.info(f"T={T}, SEQ_LEN={SEQ_LEN} → num_windows={num_windows}")
 
-# 학습/검증 분할
-split = int(0.7 * len(X))
-train_data = TensorDataset(torch.from_numpy(X[:split]), torch.from_numpy(y[:split]))
-val_data = TensorDataset(torch.from_numpy(X[split:]), torch.from_numpy(y[split:]))
+X_view = np.lib.stride_tricks.sliding_window_view(data, window_shape=(SEQ_LEN, ENC_IN))
+X = X_view.reshape(-1, SEQ_LEN, ENC_IN)
+assert X.shape[0] == num_windows, f"X shape mismatch: {X.shape[0]} vs {num_windows}"
 
-# 모델 학습
+# 5. 모델 로드
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = MambaForPrediction(enc_in=len(base_features)).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-criterion = nn.MSELoss()
+logger.info(f"Using device: {device}")
+model = MambaForPrediction(enc_in=ENC_IN, d_model=HIDDEN_DIM, n_layers=4)
+model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+model.to(device)
+model.eval()
 
-for epoch in range(20):
-    model.train()
-    for xb, yb in DataLoader(train_data, batch_size=32, shuffle=True):
-        xb, yb = xb.to(device), yb.to(device)
-        pred, _ = model(xb)
-        loss = criterion(pred, yb)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    print(f"Epoch {epoch+1} 완료")
+# 6. 배치 추론
+logger.info("Extracting features in batches...")
+all_preds = []
+all_hiddens = []
 
-save_path = 'data/checkpoints/mamba_predictor.pth'
-os.makedirs(os.path.dirname(save_path), exist_ok=True)
-torch.save(model.state_dict(), save_path)
+with torch.no_grad():
+    for i in tqdm(range(0, num_windows, BATCH_SIZE), desc="Batches"):
+        batch = X[i:i+BATCH_SIZE].copy()
+        batch_tensor = torch.from_numpy(batch).to(device)
+        pred, hidden = model(batch_tensor)
+        all_preds.append(pred.cpu().numpy())
+        all_hiddens.append(hidden.cpu().numpy())
+
+preds = np.concatenate(all_preds, axis=0)
+hiddens = np.concatenate(all_hiddens, axis=0)
+
+# preds 차원 정리
+logger.info(f"Preds shape before squeeze: {preds.shape}")
+if preds.ndim == 2 and preds.shape[1] == 1:
+    preds = preds.squeeze(axis=1)
+elif preds.ndim != 1:
+    raise ValueError(f"Unexpected preds shape: {preds.shape}")
+logger.info(f"Preds shape after squeeze: {preds.shape}")
+
+logger.info(f"Hiddens shape: {hiddens.shape}")
+
+assert len(preds) == num_windows, f"Preds length mismatch: {len(preds)} vs {num_windows}"
+assert hiddens.shape[0] == num_windows, f"Hiddens length mismatch: {hiddens.shape[0]} vs {num_windows}"
+
+# 7. 타깃 인덱스 (각 윈도우의 마지막 시점)
+start_idx = SEQ_LEN - 1  # 59
+target_indices = df.index[start_idx:start_idx + num_windows]
+logger.info(f"target_indices length: {len(target_indices)}")
+
+# 8. 원본 DataFrame 복사 후 새 컬럼 추가 및 할당
+logger.info("Creating output DataFrame...")
+df_out = df.copy()
+
+emb_cols = [f'mamba_emb_{i}' for i in range(HIDDEN_DIM)]
+new_cols = ['mamba_pred'] + emb_cols
+
+# 새 컬럼을 NaN으로 초기화
+for col in new_cols:
+    df_out[col] = np.nan
+
+# 값 할당 (.loc 사용)
+logger.info("Assigning mamba_pred...")
+df_out.loc[target_indices, 'mamba_pred'] = preds
+
+logger.info("Assigning mamba_emb columns...")
+for j in tqdm(range(HIDDEN_DIM), desc="Assigning emb"):
+    df_out.loc[target_indices, f'mamba_emb_{j}'] = hiddens[:, j]
+
+# 할당 결과 확인
+nan_count_pred = df_out['mamba_pred'].isna().sum()
+logger.info(f"mamba_pred NaN count after assignment: {nan_count_pred} / {len(df_out)}")
+if nan_count_pred == len(df_out):
+    logger.error("❌ All mamba_pred are still NaN! Check target_indices or data.")
+else:
+    logger.info(f"✅ Successfully assigned {len(df_out) - nan_count_pred} values.")
+
+# 9. 저장 (원자적 쓰기)
+logger.info(f"Saving to {OUTPUT_CSV}...")
+temp_file = OUTPUT_CSV + '.tmp'
+df_out.to_csv(temp_file)
+os.replace(temp_file, OUTPUT_CSV)
+logger.info("✅ Done!")
