@@ -6,8 +6,8 @@ import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from macroHFT.mamba_predictor import MambaForPrediction
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from mamba_predictor import MambaForPrediction
+from feature_engineering import ULTIMATE_FEATURE_COLS
 import torch.nn as nn
 
 # 데이터 준비 (base features만 사용)
