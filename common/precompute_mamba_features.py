@@ -1,98 +1,76 @@
 # scripts/precompute_mamba_features.py
 import pandas as pd
-import torch
 import numpy as np
+import torch
 import os
-import tempfile
 from tqdm import tqdm
 import logging
-from common.mamba_extractor import MambaFeatureExtractor
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from mamba_predictor import MambaForPrediction  # 모델 직접 import
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 설정
-CHECKPOINT_PATH = 'data/checkpoints/mamba_predictor.pth'
+CHECKPOINT_PATH = 'checkpoints/mamba_predictor.pth'
 INPUT_CSV = 'data/training_features.csv'
 OUTPUT_CSV = 'data/training_features_with_mamba.csv'
-TEMP_DIR = tempfile.gettempdir()
-ENC_IN = 21  # base_features 개수 (SAMBA 관련 컬럼 제외)
 SEQ_LEN = 60
-SAVE_INTERVAL = 1000  # 중간 저장 간격
+ENC_IN = 21          # base_features 개수
+HIDDEN_DIM = 256
+BATCH_SIZE = 1024    # GPU 메모리에 따라 조절
 
-# 1. 체크포인트 로드
-logger.info("Loading Mamba feature extractor...")
-extractor = MambaFeatureExtractor(
-    checkpoint_path=CHECKPOINT_PATH,
-    enc_in=ENC_IN,
-    device='cuda' if torch.cuda.is_available() else 'cpu'
-)
-
-# 2. 데이터 로드
-logger.info(f"Loading data from {INPUT_CSV}...")
+# 1. 데이터 로드 (numpy로 바로 변환)
+logger.info("Loading data...")
 df = pd.read_csv(INPUT_CSV, index_col=0, parse_dates=True)
+base_features = [col for col in df.columns if not col.startswith(('samba_', 'mamba_'))][:ENC_IN]
+data = df[base_features].values.astype(np.float32)  # (T, enc_in)
 
-# 3. Mamba 특성 컬럼 준비 (단편화 방지를 위해 한 번에 추가)
-emb_cols = [f'mamba_emb_{i}' for i in range(256)]
+# 2. 슬라이딩 윈도우 생성 (벡터화)
+T = len(data)
+X = np.lib.stride_tricks.sliding_window_view(data, window_shape=(SEQ_LEN, ENC_IN))
+X = X.reshape(-1, SEQ_LEN, ENC_IN)  # (T - SEQ_LEN, SEQ_LEN, ENC_IN)
+
+# 3. 모델 로드
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = MambaForPrediction(enc_in=ENC_IN, d_model=HIDDEN_DIM, n_layers=4)
+model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+model.to(device)
+model.eval()
+
+# 4. 배치 추론
+logger.info("Extracting features in batches...")
+all_preds = []
+all_hiddens = []
+
+with torch.no_grad():
+    for i in tqdm(range(0, len(X), BATCH_SIZE), desc="Batches"):
+        batch = X[i:i+BATCH_SIZE]
+        batch_tensor = torch.from_numpy(batch).to(device)
+        pred, hidden = model(batch_tensor)  # (batch, pred_len), (batch, hidden_dim)
+        all_preds.append(pred.cpu().numpy())
+        all_hiddens.append(hidden.cpu().numpy())
+
+# 5. 결과 합치기
+preds = np.concatenate(all_preds, axis=0).squeeze()        # (num_windows,)
+hiddens = np.concatenate(all_hiddens, axis=0)              # (num_windows, hidden_dim)
+
+# 6. 원본 데이터프레임에 결과 매핑
+df_out = df.copy()
+# 새 컬럼들 초기화 (이미 있으면 덮어씀)
+emb_cols = [f'mamba_emb_{i}' for i in range(HIDDEN_DIM)]
 new_cols = ['mamba_pred'] + emb_cols
+for col in new_cols:
+    df_out[col] = np.nan
 
-# 이미 존재하는 컬럼이 있으면 덮어쓰기 위해 제거 (선택사항)
-existing_new = [c for c in new_cols if c in df.columns]
-if existing_new:
-    logger.warning(f"Overwriting existing columns: {existing_new[:5]}...")
-    df.drop(columns=existing_new, inplace=True)
-
-# 새 컬럼들을 한 번에 추가 (단편화 방지)
-new_data = pd.DataFrame(index=df.index, columns=new_cols, dtype=np.float32)
-df = pd.concat([df, new_data], axis=1)
-
-# 4. 각 시점에 대해 특성 추출
-logger.info("Extracting Mamba features...")
+# 슬라이딩 윈도우의 마지막 인덱스에 해당하는 위치에 값 채우기
 start_idx = SEQ_LEN
-end_idx = len(df)
+df_out.iloc[start_idx:start_idx+len(preds), df_out.columns.get_loc('mamba_pred')] = preds
+for j in range(HIDDEN_DIM):
+    df_out.iloc[start_idx:start_idx+len(hiddens), df_out.columns.get_loc(f'mamba_emb_{j}')] = hiddens[:, j]
 
-# 임시 파일로 중간 저장 준비
-temp_file = os.path.join(TEMP_DIR, 'mamba_features_temp.csv')
-if os.path.exists(temp_file):
-    logger.info(f"Resuming from temporary file {temp_file}")
-    df_temp = pd.read_csv(temp_file, index_col=0, parse_dates=True)
-    # 이미 계산된 인덱스는 건너뛰기
-    computed_indices = df_temp.index[df_temp['mamba_pred'].notna()]
-    start_idx = max(start_idx, len(computed_indices) + 1) if len(computed_indices) > 0 else start_idx
-    # 임시 파일의 데이터를 현재 df에 병합 (단, 이미 존재하는 컬럼은 덮어쓰지 않음)
-    for col in new_cols:
-        df[col] = df_temp[col].combine_first(df[col])
-
-for i in tqdm(range(start_idx, end_idx), desc="Processing"):
-    try:
-        # 현재까지의 데이터로 extractor 실행 (extractor 내부에서 마지막 SEQ_LEN 사용)
-        df_slice = df.iloc[:i+1]  # 전체 데이터 전달 (extractor가 알아서 마지막 60 사용)
-        pred, emb = extractor.extract(df_slice)
-        
-        # 결과 저장
-        df.loc[df.index[i], 'mamba_pred'] = pred
-        for j, val in enumerate(emb):
-            df.loc[df.index[i], f'mamba_emb_{j}'] = val
-        
-        # 일정 간격마다 임시 저장
-        if (i - start_idx + 1) % SAVE_INTERVAL == 0:
-            df.to_csv(temp_file)
-            logger.info(f"Intermediate save at index {i}")
-            
-    except Exception as e:
-        logger.error(f"Error at index {i}: {e}")
-        # 해당 인덱스는 NaN으로 남겨둠
-        continue
-
-# 5. 최종 저장 (원자적 쓰기)
-logger.info(f"Saving final result to {OUTPUT_CSV}")
-final_temp = os.path.join(TEMP_DIR, 'mamba_features_final.csv')
-df.to_csv(final_temp)
-os.replace(final_temp, OUTPUT_CSV)  # 원자적 이동 (Windows에서는 os.replace 사용)
-
-# 임시 파일 정리
-if os.path.exists(temp_file):
-    os.remove(temp_file)
-
+# 7. 저장 (원자적 쓰기)
+logger.info(f"Saving to {OUTPUT_CSV}...")
+temp_file = OUTPUT_CSV + '.tmp'
+df_out.to_csv(temp_file)
+os.replace(temp_file, OUTPUT_CSV)
 logger.info("Done.")

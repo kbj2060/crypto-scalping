@@ -1,8 +1,8 @@
 # macroHFT/mamba_extractor.py
 import torch
 import pandas as pd
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
-from .mamba_predictor import MambaForPrediction
+from feature_engineering import ULTIMATE_FEATURE_COLS
+from mamba_predictor import MambaForPrediction
 
 class MambaFeatureExtractor:
     def __init__(self, checkpoint_path, enc_in, device='cuda'):
