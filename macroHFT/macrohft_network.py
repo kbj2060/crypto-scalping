@@ -45,7 +45,7 @@ class MacroHFTNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, info_dim=11,
                  d_model=256,          # 표현력 확보
                  n_head=4,
-                 n_layers=2,
+                 n_layers=4,
                  proj_dim=128,
                  dropout=0.2,
                  num_quantiles=32):
@@ -55,13 +55,20 @@ class MacroHFTNetwork(nn.Module):
         self.num_quantiles = num_quantiles
 
         # ---------- 1. 시계열 백본 (CNN + RoPE + Transformer) ----------
-        self.backbone = QuantTransformerBackbone(
+        # self.backbone = QuantTransformerBackbone(
+        #     state_dim=state_dim,
+        #     hidden_dim=d_model,
+        #     n_layers=n_layers,
+        #     n_heads=n_head,
+        #     dropout=dropout,
+        #     mode='ppo'          # RoPE 사용, causal mask 없음
+        # )
+        self.backbone = MambaBackbone(
             state_dim=state_dim,
             hidden_dim=d_model,
-            n_layers=n_layers,
-            n_heads=n_head,
-            dropout=dropout,
-            mode='ppo'          # RoPE 사용, causal mask 없음
+            n_layers=n_layers,      # Transformer 층 수 대신 Mamba 층 수
+            seq_len=config.LOOKBACK,
+            dropout=dropout
         )
 
         # ---------- 2. 정보(계좌 상태, 전략 점수) 인코더 ----------

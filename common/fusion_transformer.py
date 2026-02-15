@@ -2,11 +2,47 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from mamba_ssm import Mamba
 
 # ==============================================================================
 # Shared Components Library
 # (MultiScaleCNN, RoPE, QuantTransformerBackbone, StrategyInteraction, CrossAttn)
 # ==============================================================================
+
+class MambaBackbone(nn.Module):
+    def __init__(self, state_dim, hidden_dim=256, n_layers=4, seq_len=60, dropout=0.1):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_proj = nn.Linear(state_dim, hidden_dim)
+        
+        self.mamba_layers = nn.ModuleList([
+            Mamba(
+                d_model=hidden_dim,
+                d_state=16,           # 논문 기본값
+                d_conv=4,
+                expand_factor=2,
+                bimamba_type="v2",     # 양방향 or 단방향 (PPO는 causal)
+                use_fast_path=True
+            ) for _ in range(n_layers)
+        ])
+        
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x: (B, T, state_dim)
+        B, T, _ = x.shape
+        x = self.input_proj(x)                     # (B, T, hidden_dim)
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)      # (B, T+1, hidden_dim)
+        x = self.dropout(x)
+        
+        for layer in self.mamba_layers:
+            x = layer(x)                            # Mamba는 내부적으로 residual 연결
+        
+        x = self.norm(x)
+        return x[:, 0, :], x, None                   # [CLS] 토큰 반환
 
 class MultiScaleCNN(nn.Module):
     """[Shared] 시계열의 다양한 주기 포착 (Kernel 3, 5, 7)"""
