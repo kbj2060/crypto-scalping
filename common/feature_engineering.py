@@ -11,8 +11,10 @@ ULTIMATE_FEATURE_COLS = [
     # Group C: Technical
     'log_return', 'volatility_z', 'rsi', 'macd_hist', 'bb_width', 'bb_width_z', 'vwap_dist', 'hma_slope', 'wick_ratio',
     # Group D: Market Structure
-    'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index'
-] + [f'mamba_emb_{i}' for i in range(256)] + ['mamba_pred']
+    'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index',
+    # Group E: LSTM
+    'lstm_pred_return'
+]
 
 class FeatureEngineer:
     def __init__(self):
@@ -158,31 +160,5 @@ class FeatureEngineer:
         
         # 4. Chop Index
         df['chop_index'] = ta.chop(df['high'], df['low'], df['close'], length=14)
-        
-        return df
-
-    # feature_engineering.py 에 추가
-    def add_samba_features(df, samba_model, lookback=60):
-        """
-        df: OHLCV + 기본 피처가 포함된 DataFrame
-        samba_model: 학습된 SAMBA 모델 (inference mode)
-        returns: df에 samba_pred, samba_emb_{i} 컬럼 추가
-        """
-        # 입력 시퀀스 준비 (예: log_return, volatility_z 등 주요 특성 선택)
-        input_cols = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('samba_')]
-        seq = df[input_cols].values[-lookback:]   # (T, D)
-
-        # SAMBA forward (배치 처리로 구현)
-        with torch.no_grad():
-            # 모델 구조에 맞게 텐서 변환
-            pred_returns, hidden_states = samba_model(seq)  # (1,) , (hidden_dim,)
-        
-        df['samba_pred'] = np.nan
-        df.loc[df.index[-1], 'samba_pred'] = pred_returns.item()
-        
-        emb_dim = hidden_states.shape[0]
-        for i in range(emb_dim):
-            df[f'samba_emb_{i}'] = np.nan
-            df.loc[df.index[-1], f'samba_emb_{i}'] = hidden_states[i].item()
         
         return df

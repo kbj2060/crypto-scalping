@@ -111,9 +111,17 @@ class PPOTrainer:
     # ------------------------------------------------------------------
     def _load_features(self):
         path = 'data/training_features.csv'
+
         if not os.path.exists(path):
             logger.error("Feature file missing. Run feature engineering first.")
             sys.exit(1)
+
+        lstm_path = 'data/lstm_features.csv'
+        if os.path.exists(lstm_path):
+            lstm_df = pd.read_csv(lstm_path, index_col=0, parse_dates=True)
+            df = df.merge(lstm_df[['lstm_pred_return']], left_index=True, right_index=True, how='left')
+            df['lstm_pred_return'] = df['lstm_pred_return'].ffill().bfill().fillna(0.0)
+            logger.info("✅ Tiny LSTM predicted return feature added! (state_dim +1)")
 
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         df = df.ffill().bfill()
