@@ -11,7 +11,7 @@ class SAMBAFeatureExtractor:
         
         # 모델 파라미터 (사전 학습 시 사용한 값과 동일해야 함)
         model_args = {
-            'enc_in': 9,        # 입력 feature 차원 (ULTIMATE_FEATURE_COLS 길이)
+            'enc_in': len([col for col in ULTIMATE_FEATURE_COLS if not col.startswith('samba_')]),        # 입력 feature 차원 (ULTIMATE_FEATURE_COLS 길이)
             'd_model': 256,
             'n_layers': 4,
             'seq_len': 60,

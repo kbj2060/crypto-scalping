@@ -169,10 +169,7 @@ class FeatureEngineer:
         returns: df에 samba_pred, samba_emb_{i} 컬럼 추가
         """
         # 입력 시퀀스 준비 (예: log_return, volatility_z 등 주요 특성 선택)
-        input_cols = [
-            'log_return', 'volatility_z', 'rsi', 'macd_hist', 'bb_width_z', 'vwap_dist',
-            'net_taker_ratio', 'whale_conviction', 'chop_index'
-        ]
+        input_cols = [col for col in ULTIMATE_FEATURE_COLS if not col.startswith('samba_')]
         seq = df[input_cols].values[-lookback:]   # (T, D)
 
         # SAMBA forward (배치 처리로 구현)
