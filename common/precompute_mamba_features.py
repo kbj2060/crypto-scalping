@@ -7,7 +7,7 @@ from tqdm import tqdm
 import logging
 from mamba_predictor import MambaForPrediction
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # 설정
@@ -28,7 +28,7 @@ df = pd.read_csv(
     date_format='%Y-%m-%d %H:%M:%S'
 )
 
-# 2. 숫자형 컬럼 선택 (samba/mamba 제외)
+# 2. 숫자형 컬럼만 선택 (samba/mamba 제외)
 base_candidates = [c for c in df.columns if not c.startswith(('samba_', 'mamba_'))]
 numeric_cols = df[base_candidates].select_dtypes(include=[np.number]).columns.tolist()
 logger.info(f"Found {len(numeric_cols)} numeric columns.")
@@ -47,8 +47,8 @@ data = df[base_features].values.astype(np.float32)
 
 # 4. 슬라이딩 윈도우 생성 (올바른 개수 계산)
 T = len(data)
-num_windows = T - SEQ_LEN + 1  # 🔥 중요: +1 필요
-logger.info(f"T={T}, SEQ_LEN={SEQ_LEN}, num_windows={num_windows}")
+num_windows = T - SEQ_LEN + 1  # 🔥 중요
+logger.info(f"T={T}, SEQ_LEN={SEQ_LEN} → num_windows={num_windows}")
 
 X_view = np.lib.stride_tricks.sliding_window_view(data, window_shape=(SEQ_LEN, ENC_IN))
 X = X_view.reshape(-1, SEQ_LEN, ENC_IN)
@@ -56,6 +56,7 @@ assert X.shape[0] == num_windows, f"X shape mismatch: {X.shape[0]} vs {num_windo
 
 # 5. 모델 로드
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger.info(f"Using device: {device}")
 model = MambaForPrediction(enc_in=ENC_IN, d_model=HIDDEN_DIM, n_layers=4)
 model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
 model.to(device)
@@ -85,6 +86,8 @@ elif preds.ndim != 1:
     raise ValueError(f"Unexpected preds shape: {preds.shape}")
 logger.info(f"Preds shape after squeeze: {preds.shape}")
 
+logger.info(f"Hiddens shape: {hiddens.shape}")
+
 assert len(preds) == num_windows, f"Preds length mismatch: {len(preds)} vs {num_windows}"
 assert hiddens.shape[0] == num_windows, f"Hiddens length mismatch: {hiddens.shape[0]} vs {num_windows}"
 
@@ -96,16 +99,32 @@ new_cols = ['mamba_pred'] + emb_cols
 new_data = pd.DataFrame(index=df.index, columns=new_cols, dtype=np.float32)
 
 # 타깃 인덱스 (각 윈도우의 마지막 시점)
-start_idx = SEQ_LEN - 1
+start_idx = SEQ_LEN - 1  # 59
 target_indices = df.index[start_idx:start_idx + num_windows]
 logger.info(f"target_indices length: {len(target_indices)}")
 
+# 길이 확인
+if len(target_indices) != num_windows:
+    raise ValueError(f"target_indices length {len(target_indices)} != num_windows {num_windows}")
+
 # 값 할당 (.loc 사용)
+logger.info("Assigning mamba_pred...")
 new_data.loc[target_indices, 'mamba_pred'] = preds
-for j in range(HIDDEN_DIM):
+
+logger.info("Assigning mamba_emb columns...")
+for j in tqdm(range(HIDDEN_DIM), desc="Assigning emb"):
     new_data.loc[target_indices, f'mamba_emb_{j}'] = hiddens[:, j]
 
+# 할당 결과 확인 (NaN 개수)
+nan_count_pred = new_data['mamba_pred'].isna().sum()
+logger.info(f"mamba_pred NaN count: {nan_count_pred} / {len(new_data)}")
+if nan_count_pred == len(new_data):
+    logger.error("❌ All mamba_pred are NaN! Check assignment.")
+else:
+    logger.info(f"✅ mamba_pred has {len(new_data) - nan_count_pred} non-NaN values.")
+
 # 8. 기존 df와 병합
+logger.info("Merging with original DataFrame...")
 df_out = pd.concat([df, new_data], axis=1)
 
 # 9. 저장 (원자적 쓰기)
@@ -113,4 +132,4 @@ logger.info(f"Saving to {OUTPUT_CSV}...")
 temp_file = OUTPUT_CSV + '.tmp'
 df_out.to_csv(temp_file)
 os.replace(temp_file, OUTPUT_CSV)
-logger.info("Done.")
+logger.info("✅ Done!")
