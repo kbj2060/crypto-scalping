@@ -31,7 +31,7 @@ val_data = TensorDataset(torch.from_numpy(X[split:]), torch.from_numpy(y[split:]
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MambaForPrediction(enc_in=len(base_features)).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-criterion = nn.MSELoss()
+criterion = np.MSELoss()
 
 for epoch in range(20):
     model.train()
