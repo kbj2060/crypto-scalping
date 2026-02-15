@@ -12,7 +12,7 @@ ULTIMATE_FEATURE_COLS = [
     'log_return', 'volatility_z', 'rsi', 'macd_hist', 'bb_width', 'bb_width_z', 'vwap_dist', 'hma_slope', 'wick_ratio',
     # Group D: Market Structure
     'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index'
-] + [f'samba_emb_{i}' for i in range(64)] + ['samba_pred']
+] + [f'mamba_emb_{i}' for i in range(256)] + ['mamba_pred']
 
 class FeatureEngineer:
     def __init__(self):
