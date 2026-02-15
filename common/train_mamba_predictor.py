@@ -1,5 +1,6 @@
 # scripts/train_mamba.py
 import sys
+import os
 sys.path.append('.')
 import pandas as pd
 import numpy as np
@@ -34,7 +35,7 @@ model = MambaForPrediction(enc_in=len(base_features)).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 criterion = nn.MSELoss()
 
-for epoch in range(20):
+for epoch in range(1):
     model.train()
     for xb, yb in DataLoader(train_data, batch_size=32, shuffle=True):
         xb, yb = xb.to(device), yb.to(device)
@@ -45,4 +46,6 @@ for epoch in range(20):
         optimizer.step()
     print(f"Epoch {epoch+1} 완료")
 
-torch.save(model.state_dict(), 'checkpoints/mamba_predictor.pth')
+save_path = 'data/checkpoints/mamba_predictor.pth'
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
+torch.save(model.state_dict(), save_path)
