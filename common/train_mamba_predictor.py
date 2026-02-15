@@ -35,7 +35,7 @@ model = MambaForPrediction(enc_in=len(base_features)).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 criterion = nn.MSELoss()
 
-for epoch in range(1):
+for epoch in range(20):
     model.train()
     for xb, yb in DataLoader(train_data, batch_size=32, shuffle=True):
         xb, yb = xb.to(device), yb.to(device)
