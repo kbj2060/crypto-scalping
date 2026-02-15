@@ -21,7 +21,12 @@ BATCH_SIZE = 1024    # GPU 메모리에 따라 조절
 
 # 1. 데이터 로드 (numpy로 바로 변환)
 logger.info("Loading data...")
-df = pd.read_csv(INPUT_CSV, index_col=0, parse_dates=True)
+df = pd.read_csv(
+    INPUT_CSV,
+    index_col=0,
+    parse_dates=True,
+    date_format='%Y-%m-%d %H:%M:%S'  # 데이터에 맞게 조정 (예: '%Y-%m-%d %H:%M:%S')
+)
 base_features = [col for col in df.columns if not col.startswith(('samba_', 'mamba_'))][:ENC_IN]
 data = df[base_features].values.astype(np.float32)  # (T, enc_in)
 
