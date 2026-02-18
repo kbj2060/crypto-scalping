@@ -4,7 +4,7 @@
 """
 import pytest
 
-from common import config
+from core import config
 
 
 class TestRewardConfig:

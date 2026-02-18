@@ -7,7 +7,7 @@ import os
 sys.path.append(os.getcwd())
 
 try:
-    from common.feature_engineering import FeatureEngineer
+    from core.feature_engineering import FeatureEngineer
 except ImportError:
     print("❌ common/feature_engineering.py를 찾을 수 없습니다.")
     sys.exit(1)

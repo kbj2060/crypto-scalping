@@ -13,7 +13,7 @@ from torch.distributions import Categorical
 from collections import deque
 import logging
 
-from common import config
+from core import config
 from common.fusion_transformer import QuantTransformerBackbone, StrategyInteractionLayer, CrossAttentionFusion
 
 logger = logging.getLogger(__name__)

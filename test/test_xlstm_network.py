@@ -16,11 +16,11 @@ class TestTransformerBackbone:
 
     @pytest.fixture
     def backbone(self):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         return TransformerBackbone(input_dim=len(ULTIMATE_FEATURE_COLS), hidden_dim=64, num_layers=1, dropout=0.0, seq_len=60)
 
     def test_forward_shape(self, backbone):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         B, L, D = 4, 60, len(ULTIMATE_FEATURE_COLS)
         x = torch.randn(B, L, D)
         hidden, next_states = backbone(x, states=None)
@@ -29,7 +29,7 @@ class TestTransformerBackbone:
         assert len(next_states) == 0
 
     def test_forward_returns_next_states(self, backbone):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         x = torch.randn(2, 60, len(ULTIMATE_FEATURE_COLS))
         context, next_states = backbone(x, None)
         assert context.shape == (2, 64)
@@ -65,7 +65,7 @@ class TestFusionTransformer:
 
     @pytest.fixture
     def net(self):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         return FusionTransformer(
             input_dim=len(ULTIMATE_FEATURE_COLS),
             action_dim=3,
@@ -76,7 +76,7 @@ class TestFusionTransformer:
         )
 
     def test_forward_returns_six_values(self, net):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         B, L, D = 2, 60, len(ULTIMATE_FEATURE_COLS)
         x = torch.randn(B, L, D)
         info = torch.randn(B, 11)
@@ -90,7 +90,7 @@ class TestFusionTransformer:
         assert isinstance(gate_mean, (int, float))
 
     def test_logits_to_probs_sum_to_one(self, net):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         x = torch.randn(2, 60, len(ULTIMATE_FEATURE_COLS))
         info = torch.randn(2, 11)
         logits, *_ = net(x, info, states=None)
@@ -98,7 +98,7 @@ class TestFusionTransformer:
         assert torch.allclose(probs.sum(dim=1), torch.ones(2))
 
     def test_info_3d_squeezed(self, net):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         x = torch.randn(2, 60, len(ULTIMATE_FEATURE_COLS))
         info = torch.randn(2, 1, 11)
         logits, val_mean, val_cvar, aux_val, *_ = net(x, info, states=None)

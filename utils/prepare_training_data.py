@@ -16,7 +16,7 @@ from tqdm import tqdm
 # 상위 폴더를 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.feature_engineering import FeatureEngineer, ULTIMATE_FEATURE_COLS
+from core.feature_engineering import FeatureEngineer, ULTIMATE_FEATURE_COLS
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
     OrderblockFVGStrategy, NetTakerFlowStrategy,

@@ -11,8 +11,8 @@ MacroHFT Network v6.0 - Ultimate Fusion (CNN + RoPE + Transformer + Quantile)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from common import config
-from common.fusion_transformer import QuantTransformerBackbone, MambaBackbone
+from core import config
+from common.fusion_transformer import QuantTransformerBackbone  # MambaBackbone 제거
 
 # ----------------------------------------------------------------------
 # Quantile Critic Head (first_q를 softplus로 양수 보장)
@@ -27,13 +27,30 @@ class QuantileCriticHead(nn.Module):
         )
 
     def forward(self, x):
+        # 🔥 1단계: 입력 클리핑 (원천 차단)
+        x = torch.clamp(x, min=-10.0, max=10.0)
+        
         raw_out = self.net(x)
-        # if torch.isnan(raw_out).any() or torch.isinf(raw_out).any():
-        #     return torch.zeros_like(raw_out)
-        first_q = F.softplus(raw_out[..., 0:1])  # 양수 보장
-        deltas = F.softplus(raw_out[..., 1:]) + 1e-6
-        deltas = torch.clamp(deltas, max=100.0)
-        return torch.cat([first_q, first_q + torch.cumsum(deltas, dim=-1)], dim=-1)
+        
+        # 🔥 2단계: NaN 감지 시 안전 복구 (0이 아닌 입력 기반 복구)
+        if torch.isnan(raw_out).any() or torch.isinf(raw_out).any():
+            logger.warning("⚠️ Quantile head NaN detected - using input fallback")
+            # 입력 x의 평균으로 복구 (그레디언트 흐름 유지)
+            fallback = torch.zeros_like(x[:, :self.num_quantiles]) + x.mean(dim=-1, keepdim=True).clamp(-5, 5)
+            raw_out = fallback.detach() + (x * 0).requires_grad_()  # 그레디언트 경로 유지
+        
+        # 🔥 3단계: 출력 안정화 (소프트 클리핑)
+        first_q = F.softplus(raw_out[..., 0:1].clamp(-20, 20))  # softplus overflow 방지
+        deltas = F.softplus(raw_out[..., 1:].clamp(-20, 20)) + 1e-6
+        deltas = torch.clamp(deltas, min=1e-6, max=50.0)  # 상한 강화
+        
+        quantiles = torch.cat([first_q, first_q + torch.cumsum(deltas, dim=-1)], dim=-1)
+        
+        # 추가: 출력 검증 (디버깅용)
+        if torch.isnan(quantiles).any():
+            logger.error("❌ Quantile output still NaN after recovery!")
+        
+        return quantiles
 
 
 # ----------------------------------------------------------------------
@@ -45,7 +62,7 @@ class MacroHFTNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, info_dim=11,
                  d_model=256,          # 표현력 확보
                  n_head=4,
-                 n_layers=4,
+                 n_layers=2,
                  proj_dim=128,
                  dropout=0.2,
                  num_quantiles=32):
@@ -55,20 +72,13 @@ class MacroHFTNetwork(nn.Module):
         self.num_quantiles = num_quantiles
 
         # ---------- 1. 시계열 백본 (CNN + RoPE + Transformer) ----------
-        # self.backbone = QuantTransformerBackbone(
-        #     state_dim=state_dim,
-        #     hidden_dim=d_model,
-        #     n_layers=n_layers,
-        #     n_heads=n_head,
-        #     dropout=dropout,
-        #     mode='ppo'          # RoPE 사용, causal mask 없음
-        # )
-        self.backbone = MambaBackbone(
+        self.backbone = QuantTransformerBackbone(
             state_dim=state_dim,
             hidden_dim=d_model,
-            n_layers=n_layers,      # Transformer 층 수 대신 Mamba 층 수
-            seq_len=config.LOOKBACK,
-            dropout=dropout
+            n_layers=n_layers,
+            n_heads=n_head,
+            dropout=dropout,
+            mode='ppo'          # RoPE 사용, causal mask 없음
         )
 
         # ---------- 2. 정보(계좌 상태, 전략 점수) 인코더 ----------

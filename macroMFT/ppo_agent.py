@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch.distributions import Categorical, Normal
 import numpy as np
 import os
-from common import config
+from core import config
 from .macrohft_network import TrendExpert, VolatilityExpert, SidewaysExpert
 
 # ----------------------------------------------------------------------
@@ -91,7 +91,7 @@ class PPOAgent:
         self.lr = getattr(config, 'PPO_LEARNING_RATE', 3e-5)
         self.gammas = getattr(config, 'EXPERT_GAMMAS', {0:0.995, 1:0.99, 2:0.90})
         self.eps_clip = getattr(config, 'PPO_EPS_CLIP', 0.15)
-        self.k_epochs = getattr(config, 'PPO_K_EPOCHS', 5)
+        self.k_epochs = getattr(config, 'PPO_K_EPOCHS', 7)
         self.entropy_coef = getattr(config, 'PPO_ENTROPY_COEF', 0.1)
         self.lr_decay = getattr(config, 'LR_DECAY', 0.995)  # 🔥 추가
 
@@ -104,8 +104,8 @@ class PPOAgent:
         self.cvar_alpha = getattr(config, 'CVAR_ALPHA', 0.05)
 
         # 6. Optimizers
-        self.opt_experts = [optim.AdamW(exp.parameters(), lr=self.lr, weight_decay=5e-4) for exp in self.experts]
-        self.opt_router = optim.AdamW(self.router.parameters(), lr=self.router_lr, weight_decay=5e-4)
+        self.opt_experts = [optim.AdamW(exp.parameters(), lr=self.lr, weight_decay=1e-3) for exp in self.experts]
+        self.opt_router = optim.AdamW(self.router.parameters(), lr=self.router_lr, weight_decay=1e-3)
 
         # 7. Mixed Precision
         self.use_amp = getattr(config, 'USE_AMP', False) and device == 'cuda'
@@ -176,6 +176,7 @@ class PPOAgent:
                 action_idx = action_logits.argmax(dim=-1).item()
             else:
                 action_idx = action_dist.sample().item()
+
             log_prob = action_dist.log_prob(torch.tensor(action_idx, device=self.device)).item()
             value = value_mean.item()
 
@@ -194,17 +195,29 @@ class PPOAgent:
     # ------------------------------------------------------------------
     def put_data(self, transition):
         self.data.append(transition)
-        if transition[10] is not None:
-            obs_seq, obs_info = transition[0]
-            self.router_data.append((
-                obs_seq,                # 0: (1, T, D)
-                obs_info,              # 1: (1, info_dim)
-                transition[9],          # 2: selected_expert
-                transition[10],         # 3: router_log_prob
-                transition[2],         # 4: reward
-                transition[5],         # 5: done
-                transition[11],        # 6: router_value
-            ))
+        # 라우터 모드 여부 무관하게 항상 라우터 출력 계산
+        obs_seq, obs_info = transition[0]
+        with torch.no_grad():
+            router_logits, router_value = self.router(obs_seq)
+            probs = F.softmax(router_logits, dim=-1)
+            selected_expert = transition[9]  # 실제 선택된 전문가 인덱스
+            router_log_prob = torch.log(probs[0, selected_expert] + 1e-10).item()
+        
+        self.router_data.append((
+            obs_seq, obs_info, selected_expert, 
+            router_log_prob, transition[2], transition[5], router_value
+        ))
+        # if transition[10] is not None:
+        #     obs_seq, obs_info = transition[0]
+        #     self.router_data.append((
+        #         obs_seq,                # 0: (1, T, D)
+        #         obs_info,              # 1: (1, info_dim)
+        #         transition[9],          # 2: selected_expert
+        #         transition[10],         # 3: router_log_prob
+        #         transition[2],         # 4: reward
+        #         transition[5],         # 5: done
+        #         transition[11],        # 6: router_value
+        #     ))
 
     # ------------------------------------------------------------------
     # 전문가 학습 (배치 처리, GAE 정확)

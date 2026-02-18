@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 from .binance_client import BinanceClient
-from common import config
+from core import config
 import logging
 from datetime import datetime, timedelta
 import time
@@ -185,17 +185,17 @@ class DataCollector:
         """저장된 데이터 로드 (학습용) - integrated_eth_3m_data.csv 사용, BTC는 선택"""
         try:
             import os
-            eth_file = 'data/integrated_eth_3m_data.csv'
-            btc_file = 'data/btc_3m_1year.csv'
+            eth_file = 'data/integrated_eth_5m_data.csv'
+            btc_file = 'data/btc_5m_1year.csv'
 
             if not os.path.exists(eth_file):
                 logger.warning(f"ETH 데이터 파일을 찾을 수 없습니다: {eth_file}")
-                logger.warning("utils/future_csv_merger.py로 integrated_eth_3m_data.csv를 생성하거나, data를 확인하세요.")
+                logger.warning("utils/future_csv_merger.py로 integrated_eth_5m_data.csv를 생성하거나, data를 확인하세요.")
                 return False
 
             # ETH 데이터 로드 (통합 데이터: OHLCV + 메트릭/펀딩 등 컬럼 포함)
             self.eth_data = pd.read_csv(eth_file, index_col='timestamp', parse_dates=True)
-            logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들 (integrated_eth_3m_data.csv, {len(self.eth_data.columns)}컬럼)")
+            logger.info(f"✅ ETH 데이터 로드: {len(self.eth_data)}개 캔들 (integrated_eth_5m_data.csv, {len(self.eth_data.columns)}컬럼)")
 
             # BTC 데이터 로드 (있으면 로드, 없으면 None)
             if os.path.exists(btc_file):

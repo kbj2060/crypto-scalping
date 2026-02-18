@@ -20,7 +20,7 @@ from optuna.samplers import TPESampler
 if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common import config
+from core import config
 from macroHFT.train_ppo import PPOTrainer
 
 os.makedirs("logs", exist_ok=True)
@@ -34,7 +34,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logging.getLogger("common.feature_engineering").setLevel(logging.WARNING)
-logging.getLogger("common.mtf_processor").setLevel(logging.WARNING)
 
 
 # 트라이얼당 에피소드 수 (적을수록 빠르고 노이즈 많음)

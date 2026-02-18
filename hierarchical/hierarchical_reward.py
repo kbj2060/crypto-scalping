@@ -7,7 +7,7 @@
 import numpy as np
 from collections import deque
 import logging
-from common import config
+from core import config
 
 logger = logging.getLogger(__name__)
 

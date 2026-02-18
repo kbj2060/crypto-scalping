@@ -6,7 +6,7 @@ TD3 네트워크 - Strategic Mode
 import torch
 import torch.nn as nn
 import numpy as np
-from common import config
+from core import config
 from common.fusion_transformer import QuantTransformerBackbone, StrategyInteractionLayer, CrossAttentionFusion
 
 # ==============================================================================

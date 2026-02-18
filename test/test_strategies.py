@@ -15,7 +15,7 @@ if _ROOT not in sys.path:
 
 # 모듈 Import (프로젝트 루트 기준 common, strategies)
 try:
-    from common.feature_engineering import FeatureEngineer
+    from core.feature_engineering import FeatureEngineer
     from strategies.elite_alpha import WhaleSentimentDivergence, LiquidationSqueezeHunter
     from strategies.elite_structure_flow import OrderblockFVGStrategy, NetTakerFlowStrategy
     from strategies.elite_standard import BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum

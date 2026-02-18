@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import copy
 import logging
 
-from common import config
+from core import config
 from .td3_network import PositionAwareActor, TD3Critic
 
 logger = logging.getLogger(__name__)

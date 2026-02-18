@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import copy
 import logging
 
-from common import config
+from core import config
 from common.fusion_transformer import QuantTransformerBackbone, StrategyInteractionLayer, CrossAttentionFusion
 from .meta_controller import MetaNetwork
 

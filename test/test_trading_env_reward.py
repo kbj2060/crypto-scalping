@@ -123,5 +123,5 @@ class TestGetStateDim:
     """get_state_dim() == len(ULTIMATE_FEATURE_COLS)."""
 
     def test_state_dim_equals_ultimate_features(self, env_for_reward):
-        from common.feature_engineering import ULTIMATE_FEATURE_COLS
+        from core.feature_engineering import ULTIMATE_FEATURE_COLS
         assert env_for_reward.get_state_dim() == len(ULTIMATE_FEATURE_COLS)

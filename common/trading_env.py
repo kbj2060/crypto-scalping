@@ -12,8 +12,8 @@ import pandas as pd
 import sys
 import os
 
-from common import config
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from core import config
+from core.feature_engineering import ULTIMATE_FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 

@@ -7,6 +7,7 @@ MacroHFT v5.0 Evaluator – Discrete Leverage + Dream Team Ensemble
 - Out-of-time 테스트셋 자동 평가
 - 전문가 사용 비율, 수익률, 샤프 비율, MDD 출력
 - 🔥 평가 시 eval() 모드 적용 (Dropout 비활성화)
+- ✅ 컴파일 비활성화 (torch.compile 끔) → 체크포인트 키 불일치 방지
 """
 import torch
 import numpy as np
@@ -15,9 +16,10 @@ from tqdm import tqdm
 import os
 import sys
 import glob
+import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import config
+from core import config
 from core import DataCollector
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
@@ -25,7 +27,11 @@ from strategies import (
     BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
 )
 from common.trading_env import TradingEnvironment, INFO_DIM_ELITE8
-from macroHFT.ppo_agent import PPOAgent
+from macroMFT.ppo_agent import PPOAgent
+
+# 로깅 설정 (간단히 콘솔 출력)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
+logger = logging.getLogger(__name__)
 
 class PPOEvaluator:
     def __init__(self, model_dir=None):
@@ -36,7 +42,7 @@ class PPOEvaluator:
             BTCEthCorrelation(), VolatilitySqueeze(), VWAPDeviation(), HMAMomentum(),
         ]
 
-        # ---------- 데이터 로드 및 캐싱 ----------
+        # ---------- 데이터 로드 및 캐싱 (LSTM 특성 포함) ----------
         self._load_features()
         self.env = TradingEnvironment(self.data_collector, self.strategies)
         self.env.precompute_data()
@@ -46,6 +52,7 @@ class PPOEvaluator:
         total_len = len(self.data_collector.eth_data)
         self.start_idx = int(total_len * (config.TRAIN_SPLIT + config.VAL_SPLIT))
         self.end_idx = total_len
+        logger.info(f"Test set indices: {self.start_idx} ~ {self.end_idx} (total steps: {self.end_idx - self.start_idx})")
 
         # ---------- 에이전트 초기화 ----------
         state_dim = self.env.get_state_dim()
@@ -53,7 +60,14 @@ class PPOEvaluator:
         info_dim = INFO_DIM_ELITE8
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # 🔥 평가 시에는 컴파일 비활성화 (체크포인트 키 불일치 방지)
+        original_compile = config.USE_TORCH_COMPILE
+        config.USE_TORCH_COMPILE = False
+
         self.agent = PPOAgent(state_dim, action_dim, info_dim=info_dim, device=self.device)
+
+        # 원래 설정으로 복원 (다른 곳에 영향 없도록)
+        config.USE_TORCH_COMPILE = original_compile
 
         # ---------- Dream Team 앙상블 로드 ----------
         self._load_ensemble_model(model_dir)
@@ -63,7 +77,7 @@ class PPOEvaluator:
         self.volatility_data = self.data_collector.eth_data.get('volatility_z', np.zeros(total_len)).values.astype(np.float32)
 
     # ------------------------------------------------------------------
-    # 데이터 로드 (cached_strategies.csv 우선)
+    # 데이터 로드 (LSTM 특성 + cached_strategies.csv 우선)
     # ------------------------------------------------------------------
     def _load_features(self):
         path = 'data/training_features.csv'
@@ -79,11 +93,12 @@ class PPOEvaluator:
                 strategy_cols = [c for c in cached_df.columns if c.startswith('strategy_')]
                 for col in strategy_cols:
                     df[col] = cached_df[col]
+                logger.info(f"✅ Cached strategies loaded from {cached_strategies_path}")
             except Exception as e:
-                print(f"⚠️ Failed to load cached strategies: {e}")
+                logger.warning(f"⚠️ Failed to load cached strategies: {e}")
 
         self.data_collector.eth_data = df
-        print(f"✅ Data loaded: {df.shape}")
+        logger.info(f"✅ Data loaded: {df.shape}")
 
     # ------------------------------------------------------------------
     # Dream Team Ensemble Loader (train_ppo의 load_dream_team과 동일 로직)
@@ -113,13 +128,13 @@ class PPOEvaluator:
                 subs = sorted([d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))], reverse=True)
                 if subs:
                     base_dir = os.path.join(root, subs[0])
-                    print(f"📂 Auto-detected latest directory: {base_dir}")
+                    logger.info(f"📂 Auto-detected latest directory: {base_dir}")
                 else:
                     base_dir = '.'
             else:
                 base_dir = '.'
 
-        print(f"📂 Loading Dream Team Ensemble from: {base_dir}")
+        logger.info(f"📂 Loading Dream Team Ensemble from: {base_dir}")
 
         # 1. Router 로드 (best_router.pth)
         router_path = self._find_file(base_dir, 'best_router.pth')
@@ -127,9 +142,9 @@ class PPOEvaluator:
             ckpt = torch.load(router_path, map_location=self.device)
             if 'router' in ckpt:
                 self.agent.router.load_state_dict(self._strip_prefix(ckpt['router']))
-                print(f"   ✅ Router loaded from {os.path.basename(router_path)}")
+                logger.info(f"   ✅ Router loaded from {os.path.basename(router_path)}")
         else:
-            print("   ⚠️ Router checkpoint not found! Using random weights.")
+            logger.warning("   ⚠️ Router checkpoint not found! Using random weights.")
 
         # 2. Experts 로드 (각각 best 파일에서)
         expert_files = {0: 'best_trend.pth', 1: 'best_volatility.pth', 2: 'best_sideways.pth'}
@@ -143,7 +158,7 @@ class PPOEvaluator:
                     self.agent.experts[idx].load_state_dict(
                         self._strip_prefix(ckpt['experts'][idx]), strict=False
                     )
-                    print(f"   ✅ {expert_names[idx]} Expert loaded from {os.path.basename(fpath)}")
+                    logger.info(f"   ✅ {expert_names[idx]} Expert loaded from {os.path.basename(fpath)}")
             else:
                 # Fallback: router checkpoint에 포함된 experts 사용
                 if router_path:
@@ -152,7 +167,7 @@ class PPOEvaluator:
                         self.agent.experts[idx].load_state_dict(
                             self._strip_prefix(ckpt['experts'][idx]), strict=False
                         )
-                        print(f"   ⚠️ {expert_names[idx]} Expert loaded from Router checkpoint (Fallback)")
+                        logger.info(f"   ⚠️ {expert_names[idx]} Expert loaded from Router checkpoint (Fallback)")
 
     # ------------------------------------------------------------------
     # 액션 마스킹 (9차원, train_ppo와 완전 동일)
@@ -175,7 +190,7 @@ class PPOEvaluator:
     # 평가 실행 (train_episode의 거래 로직과 동일, 리워드/학습 없음)
     # ------------------------------------------------------------------
     def evaluate(self):
-        # 🔥 평가 모드 전환 (Dropout 비활성화) - agent.eval() 제거
+        # 🔥 평가 모드 전환 (Dropout 비활성화)
         for expert in self.agent.experts:
             expert.eval()
         self.agent.router.eval()
@@ -214,6 +229,7 @@ class PPOEvaluator:
             pos_info = [pos_val, unrealized_return, holding_steps / config.TRAIN_MAX_STEPS_PER_EPISODE]
             state = self.env.get_observation(position_info=pos_info, current_index=idx)
             if state is None:
+                logger.warning(f"State is None at index {idx}. Stopping evaluation.")
                 break
 
             # ---------- 액션 마스크 ----------
@@ -229,9 +245,6 @@ class PPOEvaluator:
             direction, scale = action
 
             # ---------- 거래 실행 (execute_trade 사용) ----------
-            trade_done = False
-            realized_pnl_roe = 0.0
-
             if direction != 0 and scale >= config.MIN_LEVERAGE / config.MAX_LEVERAGE:
                 # ----- 진입 -----
                 if position is None:
@@ -263,9 +276,10 @@ class PPOEvaluator:
                     )
                     realized_return = unrealized_return
                     total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
+                    # 안전 클리핑 (train_ppo와 동일)
+                    total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
                     balance = entry_balance * (1 + total_trade_return)
                     equity_curve.append(balance)
-                    trade_done = True
 
                     # 포지션 초기화
                     position = None
@@ -291,9 +305,9 @@ class PPOEvaluator:
                     )
                     realized_return = unrealized_return
                     total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
+                    total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
                     balance = entry_balance * (1 + total_trade_return)
                     equity_curve.append(balance)
-                    trade_done = True
 
                     position = None
                     effective_leverage = 0.0
@@ -320,6 +334,7 @@ class PPOEvaluator:
                 leverage=effective_leverage
             )
             total_trade_return = (1 - entry_cost) * (1 + realized_return * effective_leverage - exit_cost) - 1
+            total_trade_return = np.clip(total_trade_return, -0.95, 5.0)
             balance = entry_balance * (1 + total_trade_return)
             equity_curve.append(balance)
             trade_count += 1
@@ -329,8 +344,13 @@ class PPOEvaluator:
         # ---------- 성과 지표 계산 ----------
         total_return = (balance / initial_balance) - 1.0
         returns = np.diff(equity_curve) / (np.array(equity_curve[:-1]) + 1e-10)
-        sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * np.sqrt(365 * 24 * 60 / 3)
-        mdd = np.max(np.maximum.accumulate(equity_curve) - equity_curve) / np.maximum.accumulate(equity_curve).max()
+        if len(returns) > 1:
+            sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * np.sqrt(365 * 24 * 60 / 3)
+        else:
+            sharpe = 0.0
+        peak = np.maximum.accumulate(equity_curve)
+        drawdown = (peak - equity_curve) / peak
+        mdd = np.max(drawdown) if len(drawdown) > 0 else 0.0
 
         # ---------- 결과 출력 ----------
         print("\n" + "="*60)

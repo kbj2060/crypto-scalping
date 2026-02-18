@@ -6,7 +6,7 @@ from tqdm import tqdm
 import sys
 import os
 sys.path.append('.')
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from core.feature_engineering import ULTIMATE_FEATURE_COLS
 
 # ================== 설정 ==================
 DATA_PATH = 'data/training_features.csv'

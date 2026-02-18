@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common import config
+from core import config
 from common.preprocess import add_volatility_feature
 from core import DataCollector
 from strategies import (

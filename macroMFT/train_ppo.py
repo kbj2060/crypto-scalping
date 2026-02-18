@@ -20,7 +20,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import glob
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import config
+from core import config
 from core import DataCollector
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
@@ -28,8 +28,10 @@ from strategies import (
     BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
 )
 from common.trading_env import INFO_DIM_ELITE8, TradingEnvironment
-from macroHFT.ppo_agent import PPOAgent
-from macroHFT.icm import ICM
+from macroMFT.ppo_agent import PPOAgent
+from macroMFT.icm import ICM
+from collections import deque
+
 
 # 로깅 설정
 os.makedirs('logs', exist_ok=True)
@@ -96,7 +98,7 @@ class PPOTrainer:
 
         # ========== [ICM] 탐색 모듈 초기화 ==========
         self.use_icm = True
-        self.icm_coef = 0.005            # CHANGED: 0.1 → 0.01 → 0.05 → 0.3 (현재 0.03)
+        self.icm_coef = 0.0001            # CHANGED: 0.1 → 0.01 → 0.05 → 0.3 (현재 0.03)
         proj_dim = self.agent.experts[0].proj_dim   # 모든 전문가의 proj_dim은 동일
         self.icm = ICM(
             state_dim=proj_dim,          # CHANGED: 이전: state_dim + info_dim
@@ -105,6 +107,8 @@ class PPOTrainer:
             device=self.device
         )
         self.icm_optimizer = torch.optim.AdamW(self.icm.parameters(), lr=1e-4)
+
+        self.recent_pnls = deque(maxlen=50)  # ← 이 한 줄 추가 (Sortino 계산용 최근 pnl deque)
 
     # ------------------------------------------------------------------
     # 데이터 로드 (cached_strategies.csv 우선)
@@ -115,16 +119,10 @@ class PPOTrainer:
         if not os.path.exists(path):
             logger.error("Feature file missing. Run feature engineering first.")
             sys.exit(1)
-
-        lstm_path = 'data/lstm_features.csv'
-        if os.path.exists(lstm_path):
-            lstm_df = pd.read_csv(lstm_path, index_col=0, parse_dates=True)
-            df = df.merge(lstm_df[['lstm_pred_return']], left_index=True, right_index=True, how='left')
-            df['lstm_pred_return'] = df['lstm_pred_return'].ffill().bfill().fillna(0.0)
-            logger.info("✅ Tiny LSTM predicted return feature added! (state_dim +1)")
-
+            
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         df = df.ffill().bfill()
+
 
         cached_strategies_path = 'data/cached_strategies.csv'
         if os.path.exists(cached_strategies_path):
@@ -216,74 +214,52 @@ class PPOTrainer:
     # ------------------------------------------------------------------
     # 리워드 함수 v5.1 (5계층 통합) - CHANGED: volatility, selected_expert 등 추가
     # ------------------------------------------------------------------
-    def compute_reward(self, step_pnl_roe, realized_pnl_roe, trade_done,
-                   holding_time, current_position, effective_leverage,
-                   volatility=0.0, quantiles=None, all_expert_values=None, 
-                   selected_expert=None):
+    def compute_reward(
+        self,
+        realized_pnl_roe: float,
+        trade_done: bool,
+        quantiles: torch.Tensor = None,  # Critic 학습용 (리워드 계산 미사용)
+        market_regime: str = 'unknown',
+        **kwargs
+    ) -> float:
         """
-        5계층 리워드 통합 (더블카운팅 제거)
+        CRITICAL FIX: 리워드-수익률 부호 100% 정렬 보장
+        - CVaR 페널티 제거 (Critic에서 이미 처리, 리워드 왜곡 유발)
+        - 횡보장 로직 부호 보존 수정
+        - 수수료 반영 여부 검증 권장
         """
-        total = 0.0
+        if not trade_done:
+            return 0.0
         
-        # 계층 1: 기반 리워드
-        if trade_done:
-            # 청산 시: step_pnl_roe 무시, realized_pnl_roe만 사용
-            log_return = np.sign(realized_pnl_roe) * np.log1p(abs(realized_pnl_roe))
-            trade_reward = log_return * 100.0
-            fee_adjust = -0.5 * abs(realized_pnl_roe)
-            base_reward = trade_reward + fee_adjust
-        else:
-            # 비청산 시: step_pnl_roe만 사용
-            base_reward = step_pnl_roe * 100.0
+        # 1. 기반 보상: 순수익률 × 100 (부호 보존)
+        # ⚠️ realized_pnl_roe가 수수료 포함 순수익률인지 반드시 확인!
+        base_reward = realized_pnl_roe * 100.0  # 1% = 1.0 리워드
         
-        total += base_reward
+        # 2. 시장 상태 조정 (부호 뒤집기 방지)
+        if market_regime == 'trend':
+            base_reward *= 1.2  # 추세장: 보상 증폭 (이익/손실 모두)
+        elif market_regime == 'volatility':
+            base_reward *= 0.8  # 변동성장: 보상 감소
+        elif market_regime == 'sideways':
+            # 🔥 CRITICAL FIX: 부호 기반 조건 분기
+            if realized_pnl_roe > 0 and abs(realized_pnl_roe) < 0.005:
+                base_reward += 0.5  # 작은 수익 보너스
+            elif realized_pnl_roe < 0 and abs(realized_pnl_roe) < 0.005:
+                base_reward -= 0.5  # 작은 손실 추가 페널티 (횡보장 불필요 거래 억제)
+            else:
+                base_reward *= 0.5  # 큰 변동 = 예측 실패 페널티
         
-        # 계층 2: 전문가 특화 보너스 (청산 시, selected_expert가 있을 때)
-        if trade_done and selected_expert is not None:
-            expert_type = self.agent.expert_names[selected_expert]
-            bonus = 0.0
-            
-            if expert_type == 'trend':
-                if realized_pnl_roe > 0:
-                    bonus = min(2.0, holding_time * 0.5) * (1.0 + realized_pnl_roe * 5.0)
-                else:
-                    bonus = -1.0
-            elif expert_type == 'volatility':
-                vol_bonus = min(3.0, volatility * 10.0)
-                if realized_pnl_roe > 0:
-                    bonus = vol_bonus * (1.0 + realized_pnl_roe * 3.0)
-                else:
-                    bonus = -vol_bonus * 0.5
-            elif expert_type == 'sideways':
-                if abs(realized_pnl_roe) < 0.005:
-                    bonus = 1.5 if realized_pnl_roe > 0 else -0.5
-                else:
-                    bonus = -1.0
-            
-            total += bonus
+        # 3. 안전 클리핑 (부호 보존)
+        base_reward = np.clip(base_reward, -15.0, 15.0)
         
-        # 계층 3: 리스크 조정 (청산 시, quantiles가 있을 때)
-        if trade_done and quantiles is not None:
-            cvar = quantiles[:, :int(0.05 * quantiles.shape[1])].mean()
-            risk_penalty = np.clip(cvar + 0.02, -np.inf, 0.0) * 50.0
-            total += risk_penalty.item()
+        # 🔥 CRITICAL: 부호 강제 정렬 (방어적 프로그래밍)
+        if realized_pnl_roe > 0 and base_reward < 0:
+            base_reward = abs(base_reward) * 0.1  # 수익인데 음수면 최소 양수 보상
+        elif realized_pnl_roe < 0 and base_reward > 0:
+            base_reward = -abs(base_reward) * 0.1  # 손실인데 양수면 최소 음수 페널티
         
-        # 계층 4: 라우터 보상 (all_expert_values와 selected_expert가 있을 때)
-        if all_expert_values is not None and selected_expert is not None:
-            other_values = [v for i, v in enumerate(all_expert_values) if i != selected_expert]
-            counterfactual = (base_reward + (bonus if trade_done else 0)) - np.mean(other_values)
-            counterfactual = np.clip(counterfactual, -2.0, 2.0)
-            if hasattr(self, 'last_expert') and selected_expert == self.last_expert:
-                counterfactual -= 0.3
-            self.last_expert = selected_expert
-            total += counterfactual
-        
-        # 계층 5: 탐색 보상은 ICM에서 별도 처리
-        
-        # 최종 클리핑 (±5.0)
-        total = 5.0 * np.tanh(total / 5.0)
-        return float(total)
-
+        return float(base_reward)
+    
 
     def validate_oot(self, episode):
         """완전히 분리된 테스트 환경에서 에이전트 평가 (3일치 데이터, 여러 윈도우)"""
@@ -667,8 +643,7 @@ class PPOTrainer:
                 holding_time=holding_steps / max_steps,
                 current_position=position,
                 effective_leverage=effective_leverage,
-                volatility=self.volatility_data[current_idx] if hasattr(self, 'volatility_data') else 0.0,
-                selected_expert=selected_expert,   # CHANGED: 선택된 전문가 인덱스 전달
+                market_regime=expert_type,
                 quantiles=None,                    # 필요시 저장 후 전달
                 all_expert_values=None              # 필요시 계산 후 전달
             )
@@ -734,8 +709,7 @@ class PPOTrainer:
                 holding_time=0.0,
                 current_position=None,
                 effective_leverage=effective_leverage,
-                volatility=self.volatility_data[min(self.data_collector.current_index, len(self.close_prices)-1)] if hasattr(self, 'volatility_data') else 0.0,
-                selected_expert=most_used,   # CHANGED: 가장 많이 선택된 전문가
+                market_regime=expert_type,
                 quantiles=None,
                 all_expert_values=None
             )

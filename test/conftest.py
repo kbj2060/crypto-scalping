@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 @pytest.fixture
 def mock_collector():
     """보상/관측 테스트용 최소 DataCollector 모킹 (eth_data, current_index). Elite 8 + Ultimate Feature Set."""
-    from common.feature_engineering import ULTIMATE_FEATURE_COLS
+    from core.feature_engineering import ULTIMATE_FEATURE_COLS
     n = 200
     cols = list(ULTIMATE_FEATURE_COLS)
     df = pd.DataFrame(np.zeros((n, len(cols))), columns=cols)

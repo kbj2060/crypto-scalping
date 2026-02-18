@@ -11,12 +11,12 @@ from tqdm import tqdm
 from datetime import datetime
 
 try:
-    from common import config
+    from core import config
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from common import config
+    from core import config
 
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from core.feature_engineering import ULTIMATE_FEATURE_COLS
 from common.preprocess import add_volatility_feature
 from core import DataCollector
 from strategies import (

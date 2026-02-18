@@ -21,7 +21,7 @@ BINANCE_TESTNET = False
 # =============================================================================
 ETH_SYMBOL = 'ETHUSDT'
 BTC_SYMBOL = 'BTCUSDT'
-TIMEFRAME = '3m'
+TIMEFRAME = '5m'
 LOOKBACK = 120                # Transformer 시퀀스 길이
 LOOKBACK_PERIOD = 1500        # 데이터 준비용
 
@@ -72,12 +72,12 @@ REWARD_STEP_SCALE = 100.0
 # =============================================================================
 # [PPO 하이퍼파라미터] - 전문가/라우터 통합
 # =============================================================================
-PPO_LEARNING_RATE = 3e-5
+PPO_LEARNING_RATE = 5e-5
 PPO_GAMMA = 0.99
 PPO_LAMBDA = 0.95
 PPO_EPS_CLIP = 0.15
-PPO_K_EPOCHS = 5
-PPO_ENTROPY_COEF = 0.05
+PPO_K_EPOCHS = 7
+PPO_ENTROPY_COEF = 0.2
 
 # 전문가별 감마 (시야 차별화)
 EXPERT_GAMMAS = {
@@ -89,7 +89,7 @@ EXPERT_GAMMAS = {
 # =============================================================================
 # [라우터 PPO] - Neural EXP3.P 기반 (Regret Matching 대체)
 # =============================================================================
-ROUTER_LR = 3e-5
+ROUTER_LR = 1e-5
 ROUTER_ENTROPY_COEF = 0.05
 ROUTER_EPS_CLIP = 0.2
 ROUTER_GAMMA = 0.99
@@ -100,7 +100,7 @@ ROUTER_EXP3_ETA = 0.05       # EXP3.P 학습률
 # =============================================================================
 SHARPE_COEF = 0.001          # 샤프 비율 손실 계수
 ORTHO_COEF = 0.01           # 직교 정규화 계수 (0.0005 → 0.01)
-ENTROPY_DECAY = 0.95       # 엔트로피 감쇠율
+ENTROPY_DECAY = 0.998
 
 # =============================================================================
 # [학습 환경]

@@ -10,7 +10,7 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import config
+from core import config
 
 def calculate_oracle_labels(df, fee=0.0005, leverage=1.0, 
                           risk_penalty=0.0002):

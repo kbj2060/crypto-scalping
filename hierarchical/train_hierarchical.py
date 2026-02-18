@@ -22,9 +22,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common import config
+from core import config
 from common.preprocess import add_volatility_feature
-from common.feature_engineering import ULTIMATE_FEATURE_COLS
+from core.feature_engineering import ULTIMATE_FEATURE_COLS
 from core import DataCollector
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
