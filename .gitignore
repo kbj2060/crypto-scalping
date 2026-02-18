@@ -17,6 +17,9 @@ ENV/
 # Environment variables
 .env
 
+.runs/
+.models/
+
 # Logs
 logs/
 *.log
