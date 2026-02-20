@@ -12,7 +12,7 @@ ULTIMATE_FEATURE_COLS = [
 
     # Group B: Order Flow
     'net_taker_ratio', 'taker_acceleration', 'trade_intensity',
-    'big_trade_ratio',  # volume_imbalance 제거 (net_taker_ratio와 중복)
+    'big_trade_ratio',
 
     # Group C: Technical
     'volatility_z', 'rsi', 'macd_hist',
@@ -22,14 +22,54 @@ ULTIMATE_FEATURE_COLS = [
     # Group D: Market Structure
     'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index',
 
-    # Group E: Temporal (NEW)
+    # Group E: Temporal
     'hour_sin', 'hour_cos', 'minute_sin', 'minute_cos',
     'session_asia', 'session_europe', 'session_us',
     'is_hour_open',
 
-    # Group F: Strategy Meta (TFT 전용 — 개별 시그널은 RL Agent에서 사용)
+    # [IDEA 4] Regime Break Indicator
+    'regime_break',
+
+    # Group F: Strategy Meta
     'strategy_consensus', 'strategy_conviction', 'strategy_conflict',
-    'momentum_regime', 'reversion_regime',
+
+    # Group G: Quant Signals
+    'turtle_signal',
+    'dual_momentum',
+    'mean_reversion_z',
+    'breakout_strength',
+    'volume_profile_signal',
+    'fibonacci_level',
+    
+    # Group H: Funding Rate Momentum (NEW) ⭐
+    'funding_roc_12', 'funding_roc_48', 'funding_roc_288',
+    'funding_z_score', 'funding_abs',
+    'long_squeeze_risk', 'short_squeeze_risk',
+    'funding_price_divergence',
+    
+    # Group I: Hurst Exponent & Regime (NEW) ⭐
+    'hurst_12', 'hurst_48', 'hurst_288',
+    'regime_trending', 'regime_mean_reverting',
+    'hurst_change',
+    
+    # Group J: Advanced Order Flow (NEW) ⭐
+    'ofi_acceleration',
+]
+
+QUANT_SIGNAL_COLS = [
+    'turtle_signal',
+    'dual_momentum',
+    'mean_reversion_z',
+    'breakout_strength',
+    'volume_profile_signal',
+    'fibonacci_level',
+    'funding_roc_12', 'funding_roc_48', 'funding_roc_288',
+    'funding_z_score', 'funding_abs',
+    'long_squeeze_risk', 'short_squeeze_risk',
+    'funding_price_divergence',
+    'hurst_12', 'hurst_48', 'hurst_288',
+    'regime_trending', 'regime_mean_reverting',
+    'hurst_change', 'ofi_acceleration',
 ]
 
 
@@ -38,30 +78,24 @@ class FeatureEngineer:
     5분봉 ETH 데이 트레이딩용 피처 엔지니어링 파이프라인.
 
     변경 이력:
-    - v2: FVG 실제 구현, VWAP 정확한 계산, temporal 피처 추가,
-          변동성 레짐 피처 추가, 결측치 처리 개선
+    - v4: 펀딩비 모멘텀, 허스트 지수, OFI 가속도 추가
     """
 
     def __init__(self, candle_minutes: int = 5):
         self.candle_minutes = candle_minutes
         self.windows = {
-            'short': 5,       # 25 min
-            'medium': 20,     # 100 min (~1.7h)
-            'long': 288,      # 288 × 5min = 24h (수정: 480은 3min봉 기준이었음)
+            'short': 5,
+            'medium': 20,
+            'long': 288,
             'volatility': 20,
-            'corr': 60,       # 60 × 5min = 5h
+            'corr': 60,
         }
 
     # ================================================================
     # PUBLIC
     # ================================================================
     def process(self, eth_df: pd.DataFrame, btc_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        메인 파이프라인: 데이터 병합 및 피처 생성
-
-        Returns:
-            피처가 추가된 DataFrame (결측치 처리 완료)
-        """
+        """메인 파이프라인"""
         eth = eth_df.copy()
         btc = btc_df.copy()
 
@@ -71,34 +105,50 @@ class FeatureEngineer:
         df = self._create_order_flow(df)            # Group B
         df = self._create_technical(df)             # Group C
         df = self._create_market_structure(df)      # Group D
-        df = self._create_temporal_features(df)     # Group E (NEW)
-        df = self._create_strategy_meta(df)         # Group F (NEW)
+        df = self._create_temporal_features(df)     # Group E
+        df = self._create_strategy_meta(df)         # Group F
+
+        # ★ 퀀트 신호 추가
+        quant = QuantSignalFeatures(df)
+        df = quant.add_all_signals()
         
-        df['target_cumret_6'] = (df['close'].shift(-6) / df['close'] - 1)
+        # ★★ 펀딩비 모멘텀 추가 (NEW)
+        funding_features = FundingRateMomentum(df)
+        df = funding_features.add_all_features()
+        
+        # ★★ 허스트 지수 추가 (NEW)
+        hurst_features = HurstExponentFeatures(df)
+        df = hurst_features.add_all_features()
+        
+        # ★★ OFI 가속도 추가 (NEW) - 1줄로 끝
+        df['ofi_acceleration'] = df['net_taker_ratio'].diff().diff()
+
+        # [IDEA 4] Regime Break
+        df = self._add_regime_break(df)
+
+        # [IDEA 7] 다중 타겟 생성
+        df['target_ret_3'] = (df['close'].shift(-3) / df['close'] - 1)
+        df['target_ret_6'] = (df['close'].shift(-6) / df['close'] - 1)
+        df['target_ret_12'] = (df['close'].shift(-12) / df['close'] - 1)
 
         df = self._handle_missing(df)
 
         return df
 
     # ================================================================
-    # DATA MERGE
+    # DATA MERGE (기존 코드 유지)
     # ================================================================
     def _merge_data(self, eth: pd.DataFrame, btc: pd.DataFrame) -> pd.DataFrame:
         eth['timestamp'] = pd.to_datetime(eth['timestamp'])
         btc['timestamp'] = pd.to_datetime(btc['timestamp'])
 
-        # BTC 컬럼명 정규화: 이미 rename된 경우와 아닌 경우 모두 처리
         btc_cols_needed = {'close': 'close_btc', 'volume': 'volume_btc', 'quote_volume': 'quote_volume_btc'}
-        
-        # 이미 rename된 컬럼이 있는지 확인
         already_renamed = 'close_btc' in btc.columns and 'close' not in btc.columns
         
         if already_renamed:
             btc_renamed = btc[['timestamp', 'close_btc', 'volume_btc', 'quote_volume_btc']].copy()
         else:
-            btc_renamed = btc[['timestamp', 'close', 'volume', 'quote_volume']].rename(
-                columns=btc_cols_needed
-            )
+            btc_renamed = btc[['timestamp', 'close', 'volume', 'quote_volume']].rename(columns=btc_cols_needed)
 
         merged = pd.merge_asof(
             eth.sort_values('timestamp'),
@@ -107,7 +157,6 @@ class FeatureEngineer:
             direction='nearest',
         )
         return merged
-
     
     # ================================================================
     # GROUP A: Smart Money & Sentiment
@@ -523,34 +572,345 @@ class FeatureEngineer:
         return signals
 
     # ================================================================
-    # MISSING VALUE HANDLING (IMPROVED)
+    # [IDEA 4] Regime Break Detection
+    # ================================================================
+    def _add_regime_break(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        변동성(volatility_z)의 급변을 감지하여 regime_break 플래그 생성.
+        최근 window 내 표준편차가 95th percentile 이상인 경우 1.
+        """
+        if 'volatility_z' not in df.columns:
+            df['regime_break'] = 0
+            return df
+
+        vol = df['volatility_z']
+        window = 20
+        vol_std = vol.rolling(window).std()
+        threshold = vol_std.quantile(0.95)
+        df['regime_break'] = (vol_std > threshold).astype(np.float32)
+        return df
+
+    # ================================================================
+    # MISSING VALUE HANDLING (수정)
     # ================================================================
     def _handle_missing(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        결측치 처리 전략 (개선):
-        - inf → NaN 변환
-        - diff 기반 피처 (첫 행이 NaN): fillna(0) 사용
-        - 롤링 윈도우 피처: forward fill 후 backward fill
-        - 그래도 남는 NaN → dropna (최소한의 행만 제거)
-        """
+        """결측치 처리"""
         df = df.replace([np.inf, -np.inf], np.nan)
 
-        # diff 기반 피처는 0으로 채우기 (첫 행의 변화량은 0으로 간주)
-        diff_features = ['whale_conviction', 'smart_money_flow', 'log_return', 
-                        'hma_slope', 'eth_btc_ratio_change', 'oi_change_rate',
-                        'strategy_consensus', 'strategy_conviction', 'strategy_conflict',
-                        'momentum_regime', 'reversion_regime']
+        # diff 기반 피처
+        diff_features = [
+            'whale_conviction', 'smart_money_flow', 'log_return',
+            'hma_slope', 'eth_btc_ratio_change', 'oi_change_rate',
+            'strategy_consensus', 'strategy_conviction', 'strategy_conflict',
+            'momentum_regime', 'reversion_regime',
+            'turtle_signal', 'dual_momentum', 'mean_reversion_z',
+            'breakout_strength', 'volume_profile_signal', 'fibonacci_level',
+            'funding_roc_12', 'funding_roc_48', 'funding_roc_288',  # ← 추가
+            'hurst_change', 'ofi_acceleration',  # ← 추가
+        ]
         for col in diff_features:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
 
-        # 나머지 피처는 forward/backward fill
+        # regime_break는 0으로 채움
+        if 'regime_break' in df.columns:
+            df['regime_break'] = df['regime_break'].fillna(0)
+
+        # 나머지 forward/backward fill
         feature_cols = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
-        other_features = [c for c in feature_cols if c not in diff_features]
+        other_features = [c for c in feature_cols if c not in diff_features and c != 'regime_break']
         if other_features:
             df[other_features] = df[other_features].ffill().bfill()
 
-        # 그래도 NaN이 남으면 해당 행만 제거
+        # 그래도 NaN 남으면 제거
         df = df.dropna(subset=feature_cols)
 
         return df
+
+    # ================================================================
+    # DATA AUGMENTATION (기존 코드 유지)
+    # ================================================================
+    def augment_training_data(self, df: pd.DataFrame, noise_level: float = 0.01) -> pd.DataFrame:
+        """학습 데이터 증강"""
+        augmented = df.copy()
+
+        exclude_cols = ['session_asia', 'session_europe', 'session_us',
+                        'is_hour_open', 'regime_break']
+        feature_cols = [c for c in ULTIMATE_FEATURE_COLS
+                        if c in df.columns and c not in exclude_cols]
+
+        for col in feature_cols:
+            std = df[col].std()
+            if std == 0: continue
+            noise = np.random.normal(0, std * noise_level, len(df))
+            augmented[col] = df[col] + noise
+
+        return augmented
+
+# ════════════════════════════════════════════════════════════════
+# 7. QUANT SIGNAL FEATURES (NEW)
+# ════════════════════════════════════════════════════════════════
+class QuantSignalFeatures:
+    """유명 퀀트 알고리즘의 신호를 피처로 변환"""
+    
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.close = df['close']
+        self.high = df['high']
+        self.low = df['low']
+        self.volume = df['volume']
+    
+    def add_all_signals(self) -> pd.DataFrame:
+        """모든 퀀트 신호 추가"""
+        self.df['turtle_signal'] = self._turtle_trading()
+        self.df['dual_momentum'] = self._dual_momentum()
+        self.df['mean_reversion_z'] = self._mean_reversion()
+        self.df['breakout_strength'] = self._breakout()
+        self.df['volume_profile_signal'] = self._volume_profile()
+        self.df['fibonacci_level'] = self._fibonacci()
+        return self.df
+    
+    # ── 1. Turtle Trading (Richard Dennis) ──
+    def _turtle_trading(self) -> pd.Series:
+        """20일 고점 돌파 시 매수, 10일 저점 하회 시 매도 (5분봉 환산)"""
+        entry_high = self.close.rolling(288).max()
+        exit_low = self.close.rolling(144).min()
+        
+        signal = np.where(
+            self.close > entry_high.shift(1), 1.0,
+            np.where(self.close < exit_low.shift(1), -1.0, 0.0)
+        )
+        # 연속성 부여 (급격한 0 방지)
+        return pd.Series(signal, index=self.df.index).fillna(0).ewm(span=5).mean()
+    
+    # ── 2. Dual Momentum ──
+    def _dual_momentum(self) -> pd.Series:
+        """절대 모멘텀 > 0 AND 상대 모멘텀(vs BTC) > 0"""
+        abs_momentum = (self.close / self.close.shift(2016) - 1).fillna(0) # 1주일
+        
+        if 'close_btc' in self.df.columns:
+            btc_momentum = (self.df['close_btc'] / self.df['close_btc'].shift(2016) - 1).fillna(0)
+            rel_momentum = abs_momentum - btc_momentum
+        else:
+            rel_momentum = 0
+        
+        signal = np.where(
+            (abs_momentum > 0) & (rel_momentum > 0), 1.0,
+            np.where((abs_momentum < 0) & (rel_momentum < 0), -1.0, 0.0)
+        )
+        return pd.Series(signal, index=self.df.index).fillna(0)
+    
+    # ── 3. Mean Reversion Z-Score ──
+    def _mean_reversion(self) -> pd.Series:
+        """평균에서 2σ 이탈 시 반대 방향 진입"""
+        window = 288
+        ma = self.close.rolling(window).mean()
+        std = self.close.rolling(window).std()
+        z_score = (self.close - ma) / (std + 1e-8)
+        
+        signal = -np.tanh(z_score / 2)  # -1 ~ +1
+        return pd.Series(signal, index=self.df.index).fillna(0)
+    
+    # ── 4. Breakout Strength ──
+    def _breakout(self) -> pd.Series:
+        """박스권 돌파 강도"""
+        window = 144
+        box_high = self.high.rolling(window).max()
+        box_low = self.low.rolling(window).min()
+        box_range = box_high - box_low
+        
+        box_center = (box_high + box_low) / 2
+        strength = (self.close - box_center) / (box_range + 1e-8)
+        return pd.Series(np.clip(strength, -1, 1), index=self.df.index).fillna(0)
+    
+    # ── 5. Volume Profile Signal ──
+    def _volume_profile(self) -> pd.Series:
+        """VWAP 괴리율 + 거래량 급증"""
+        window = 288
+        vwap = (self.close * self.volume).rolling(window).sum() / (self.volume.rolling(window).sum() + 1e-8)
+        deviation = (self.close - vwap) / (vwap + 1e-8)
+        volume_surge = self.volume / (self.volume.rolling(window).mean() + 1e-8)
+        
+        signal = -np.tanh(deviation * volume_surge)
+        return pd.Series(signal, index=self.df.index).fillna(0)
+    
+    # ── 6. Fibonacci Retracement ──
+    def _fibonacci(self) -> pd.Series:
+        """피보나치 레벨 근접 시 반전 신호"""
+        window = 288
+        swing_high = self.high.rolling(window).max()
+        swing_low = self.low.rolling(window).min()
+        swing_range = swing_high - swing_low
+        
+        levels = np.zeros((len(self.df), 5))
+        levels[:, 0] = swing_low
+        levels[:, 1] = swing_low + 0.382 * swing_range
+        levels[:, 2] = swing_low + 0.5 * swing_range
+        levels[:, 3] = swing_low + 0.618 * swing_range
+        levels[:, 4] = swing_high
+        
+        # 브로드캐스팅을 위해 reshape
+        close_vals = self.close.values[:, None]
+        distances = np.abs(levels - close_vals)
+        closest_level_idx = np.argmin(distances, axis=1)
+        
+        # 0(바닥) -> 롱, 4(천장) -> 숏
+        signal = np.where(
+            closest_level_idx == 0, 1.0,
+            np.where(closest_level_idx == 4, -1.0, 0.0)
+        )
+        return pd.Series(signal, index=self.df.index).fillna(0)
+
+class FundingRateMomentum:
+    """펀딩비 기반 모멘텀 - 롱/숏 스퀴즈 포착"""
+    
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        if 'last_funding_rate' not in df.columns:
+            # 펀딩비 데이터 없으면 모두 0으로
+            self.funding_rate = pd.Series(0, index=df.index)
+        else:
+            self.funding_rate = df['last_funding_rate']
+    
+    def add_all_features(self):
+        """펀딩비 모멘텀 피처 추가"""
+        
+        # 1. 펀딩비 ROC
+        self.df['funding_roc_12'] = self._calculate_roc(12)    # 1시간
+        self.df['funding_roc_48'] = self._calculate_roc(48)    # 4시간
+        self.df['funding_roc_288'] = self._calculate_roc(288)  # 24시간
+        
+        # 2. 펀딩비 Z-Score
+        self.df['funding_z_score'] = self._calculate_zscore(288)
+        
+        # 3. 펀딩비 절대값
+        self.df['funding_abs'] = np.abs(self.funding_rate)
+        
+        # 4. 롱 스퀴즈 위험 점수
+        self.df['long_squeeze_risk'] = self._long_squeeze_score()
+        
+        # 5. 숏 스퀴즈 위험 점수
+        self.df['short_squeeze_risk'] = self._short_squeeze_score()
+        
+        # 6. 펀딩비-가격 발산
+        self.df['funding_price_divergence'] = self._divergence()
+        
+        return self.df
+    
+    def _calculate_roc(self, window):
+        """Rate of Change"""
+        shifted = self.funding_rate.shift(window)
+        roc = (self.funding_rate - shifted) / (shifted.abs() + 1e-8)
+        return roc.fillna(0)
+    
+    def _calculate_zscore(self, window):
+        """Z-Score"""
+        mean = self.funding_rate.rolling(window, min_periods=1).mean()
+        std = self.funding_rate.rolling(window, min_periods=1).std()
+        z = (self.funding_rate - mean) / (std + 1e-8)
+        return z.fillna(0)
+    
+    def _long_squeeze_score(self):
+        """롱 스퀴즈 위험도 (0~1)"""
+        funding_extreme = np.clip(self.funding_rate / 0.0002, 0, 1)
+        funding_surge = np.clip(self.df.get('funding_roc_12', 0) / 3, 0, 1)
+        
+        if 'oi_change_rate' in self.df.columns:
+            oi_buildup = np.clip(self.df['oi_change_rate'] * 10, 0, 1)
+        else:
+            oi_buildup = 0
+        
+        score = 0.5 * funding_extreme + 0.3 * funding_surge + 0.2 * oi_buildup
+        return score
+    
+    def _short_squeeze_score(self):
+        """숏 스퀴즈 위험도 (0~1)"""
+        funding_extreme = np.clip(-self.funding_rate / 0.0001, 0, 1)
+        funding_plunge = np.clip(-self.df.get('funding_roc_12', 0) / 3, 0, 1)
+        
+        if 'oi_change_rate' in self.df.columns:
+            oi_buildup = np.clip(self.df['oi_change_rate'] * 10, 0, 1)
+        else:
+            oi_buildup = 0
+        
+        score = 0.5 * funding_extreme + 0.3 * funding_plunge + 0.2 * oi_buildup
+        return score
+    
+    def _divergence(self):
+        """펀딩비-가격 발산 감지"""
+        price_change = self.df['close'].pct_change(12)
+        funding_change = self.funding_rate.diff(12)
+        
+        # 반대 방향이면 발산
+        divergence = -np.sign(price_change) * np.sign(funding_change)
+        divergence = np.where(divergence < 0, 0, divergence)
+        
+        return pd.Series(divergence, index=self.df.index).fillna(0)
+
+
+# ════════════════════════════════════════════════════════════════
+# ★★ NEW: Hurst Exponent Features
+# ════════════════════════════════════════════════════════════════
+class HurstExponentFeatures:
+    """허스트 지수 - 추세/횡보 레짐 감지"""
+    
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.close = df['close'].values
+    
+    def add_all_features(self):
+        """허스트 지수 피처 추가"""
+        
+        # 1. 단기 허스트 (12봉 = 1시간)
+        self.df['hurst_12'] = self._rolling_hurst(12)
+        
+        # 2. 중기 허스트 (48봉 = 4시간)
+        self.df['hurst_48'] = self._rolling_hurst(48)
+        
+        # 3. 장기 허스트 (288봉 = 1일)
+        self.df['hurst_288'] = self._rolling_hurst(288)
+        
+        # 4. 레짐 분류
+        self.df['regime_trending'] = (self.df['hurst_48'] > 0.5).astype(float)
+        self.df['regime_mean_reverting'] = (self.df['hurst_48'] < 0.5).astype(float)
+        
+        # 5. 허스트 변화율 (레짐 전환 감지)
+        self.df['hurst_change'] = self.df['hurst_48'].diff(12)
+        
+        return self.df
+    
+    def _rolling_hurst(self, window):
+        """롤링 윈도우로 허스트 지수 계산"""
+        hurst_values = []
+        
+        for i in range(len(self.close)):
+            if i < window:
+                hurst_values.append(0.5)  # 기본값
+                continue
+            
+            segment = self.close[i-window:i]
+            
+            try:
+                hurst = self._calculate_hurst(segment)
+            except:
+                hurst = 0.5
+            
+            hurst_values.append(hurst)
+        
+        return pd.Series(hurst_values, index=self.df.index)
+    
+    def _calculate_hurst(self, ts):
+        """단일 시계열에 대한 허스트 지수 계산"""
+        lags = range(2, min(20, len(ts)//2))
+        
+        tau = []
+        for lag in lags:
+            std = np.std(np.subtract(ts[lag:], ts[:-lag]))
+            tau.append(std)
+        
+        try:
+            poly = np.polyfit(np.log(lags), np.log(tau), 1)
+            hurst = poly[0]
+            return np.clip(hurst, 0, 1)
+        except:
+            return 0.5

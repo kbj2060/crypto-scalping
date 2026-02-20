@@ -1,30 +1,8 @@
 """
 자동 피처 선택 모듈 — TFT 학습 전 사전 필터링
 
-3단계 파이프라인:
-    Stage 1: 통계 기반 사전 필터링 (학습 전 1회)
-        - 분산 필터: 정규화 후 거의 상수인 피처 제거
-        - Lagged MI: 시간차를 고려한 Mutual Information (선행 지표 포착)
-        - Correlation Dedup: 서로 중복인 피처 제거 (r > 0.85)
-    Stage 2: 도메인 지식 기반 필수 포함 (must_include)
-    Stage 3: TFT의 VSN이 나머지에서 동적 선택 (학습 중 자동)
-
-핵심 설계:
-    - MI는 동시적 상관만 측정 → 온체인/고래 지표 같은 선행 신호를 과소평가
-    - Lagged MI: 피처를 1~6봉 시프트하여 MI 계산 → max(MI_lag0, MI_lag1, ..., MI_lag6)
-    - must_include: 도메인 지식으로 반드시 포함할 피처 지정 (MI 순위와 무관)
-
-사용법:
-    from core.feature_selector import auto_select_features
-
-    selected = auto_select_features(
-        train_df, feature_cols,
-        target_col='target_cumret_6',
-        max_features=15,
-        must_include=['whale_conviction', 'funding_pressure', 'net_taker_ratio'],
-    )
+[IDEA 3] Granger Causality 결합: MI × Granger 점수 사용
 """
-
 import numpy as np
 import pandas as pd
 import logging
@@ -34,19 +12,18 @@ from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
-# 피처에서 항상 제외할 컬럼 (타겟과 직접 관련)
-ALWAYS_EXCLUDE = {'log_return'}
-
+from statsmodels.tsa.stattools import grangercausalitytests
+_HAS_STATSMODELS = False
 
 class FeatureSelector:
     """
     TFT 학습 전 자동 피처 선택.
 
-    4단계 필터:
-        1. 분산 필터: 정규화 후 변동이 거의 없는 피처 제거
-        2. Lagged MI 스코어링: 시간차 고려한 비선형 상관 측정
-        3. 상관관계 중복 제거: 피처 간 r > threshold면 MI 낮은 쪽 제거
-        4. must_include 보장: 도메인 지식 기반 필수 피처 포함
+    4단계 필터 + Granger 결합:
+        1. 분산 필터
+        2. Lagged MI + Granger 결합 스코어링
+        3. 상관관계 중복 제거
+        4. must_include 보장
     """
 
     def __init__(self, target_col: str = 'target_cumret_6',
@@ -54,57 +31,42 @@ class FeatureSelector:
         self.target_col = target_col
         self.static_cols = static_cols or ['session_asia', 'session_europe', 'session_us']
         self.mi_scores_ = None
+        self.granger_scores_ = None
+        self.combined_scores_ = None
         self.selected_features_ = None
         self.report_ = {}
-
+  
     def fit_select(self, df: pd.DataFrame, feature_cols: List[str],
-                   max_features: int = 15,
+                   max_features: int = 30,
                    mi_threshold: float = 0.0,
                    corr_threshold: float = 0.85,
                    variance_threshold: float = 0.01,
                    must_include: List[str] = None,
-                   mi_lags: List[int] = None) -> List[str]:
+                   mi_lags: List[int] = None,
+                   use_granger: bool = True) -> List[str]:
         """
-        피처 선택 수행.
-
-        Args:
-            df: 학습 데이터
-            feature_cols: 후보 피처 목록
-            max_features: 최종 선택할 최대 피처 수 (static, must_include 제외)
-            mi_threshold: MI 점수 최소 기준 (0이면 자동)
-            corr_threshold: 피처 간 상관관계 제거 기준
-            variance_threshold: 정규화 후 분산 최소 기준
-            must_include: 반드시 포함할 피처 리스트 (MI 순위 무관)
-            mi_lags: MI 계산 시 시프트할 lag 리스트 (기본: [0,1,2,3,6])
-
-        Returns:
-            선택된 피처 리스트 (static + must_include 포함)
+        피처 선택 수행 (Granger 옵션 추가).
         """
         must_include = must_include or []
         mi_lags = mi_lags or [0, 1, 2, 3, 6]
 
-        # static, 타겟, 항상 제외 컬럼 필터링
-        exclude = set(self.static_cols) | {self.target_col} | ALWAYS_EXCLUDE
+        exclude = set(self.static_cols) | {self.target_col}
         temporal_cols = [c for c in feature_cols if c not in exclude]
 
         logger.info(f"\n{'='*60}")
         logger.info(f"🔍 자동 피처 선택 시작: {len(temporal_cols)}개 후보")
-        if ALWAYS_EXCLUDE & set(feature_cols):
-            logger.info(f"   자동 제외: {ALWAYS_EXCLUDE & set(feature_cols)}")
         if must_include:
             logger.info(f"   필수 포함: {must_include}")
         logger.info(f"{'='*60}")
 
-        # 타겟 존재 확인
         if self.target_col not in df.columns:
             logger.warning(f"타겟 '{self.target_col}' 없음 — 필터링 스킵")
-            return [c for c in feature_cols if c not in ALWAYS_EXCLUDE]
+            return [c for c in feature_cols]
 
-        # NaN 제거 (MI 계산용)
         valid_df = df[temporal_cols + [self.target_col]].dropna()
         if len(valid_df) < 1000:
             logger.warning(f"유효 데이터 {len(valid_df)}행 — 필터링 스킵")
-            return [c for c in feature_cols if c not in ALWAYS_EXCLUDE]
+            return [c for c in feature_cols]
 
         # ── Stage 1: 분산 필터 ──
         survivors = self._variance_filter(valid_df, temporal_cols, variance_threshold)
@@ -112,26 +74,32 @@ class FeatureSelector:
         # ── Stage 2: Lagged MI 스코어링 ──
         survivors, mi_scores = self._lagged_mi_scoring(valid_df, survivors, mi_threshold, mi_lags)
 
-        # ── Stage 3: 상관관계 중복 제거 ──
-        survivors = self._correlation_dedup(valid_df, survivors, mi_scores, corr_threshold)
+        # [IDEA 3] Granger 스코어 계산 및 결합
+        if use_granger and _HAS_STATSMODELS:
+            granger_scores = self._granger_scoring(valid_df, survivors, self.target_col, max_lag=6)
+            combined_scores = {c: mi_scores.get(c, 0) * granger_scores.get(c, 0) for c in survivors}
+            self.granger_scores_ = granger_scores
+            self.combined_scores_ = combined_scores
+            logger.info("\n  [Granger 결합] MI × Granger 점수 사용")
+        else:
+            combined_scores = mi_scores
+            if use_granger and not _HAS_STATSMODELS:
+                logger.warning("Granger 요청되었으나 statsmodels 없음 — MI만 사용")
+
+        # ── Stage 3: 상관관계 중복 제거 (combined_scores 사용) ──
+        survivors = self._correlation_dedup(valid_df, survivors, combined_scores, corr_threshold)
 
         # ── Stage 4: must_include 보장 + Top N 선택 ──
-        # must_include에서 유효한 것만
         valid_must = [c for c in must_include
-                      if c in temporal_cols and c not in ALWAYS_EXCLUDE]
-
-        # must_include를 survivors에서 빼고, 나머지에서 top N 채움
+                      if c in temporal_cols]
         remaining = [c for c in survivors if c not in valid_must]
         n_auto = max_features - len(valid_must)
 
         if len(remaining) > n_auto:
-            sorted_by_mi = sorted(remaining, key=lambda c: mi_scores.get(c, 0), reverse=True)
-            remaining = sorted_by_mi[:n_auto]
+            sorted_by_score = sorted(remaining, key=lambda c: combined_scores.get(c, 0), reverse=True)
+            remaining = sorted_by_score[:n_auto]
 
-        # 합치기: must_include 먼저 + MI top
         final_temporal = list(dict.fromkeys(valid_must + remaining))
-
-        # static 추가
         available_static = [c for c in self.static_cols if c in feature_cols]
         selected = final_temporal + available_static
 
@@ -141,9 +109,6 @@ class FeatureSelector:
         self.report_['auto_selected'] = remaining
 
         logger.info(f"\n✅ 최종 선택: {len(final_temporal)}개 temporal + {len(available_static)}개 static = {len(selected)}개")
-        logger.info(f"   필수 포함 ({len(valid_must)}개): {valid_must}")
-        logger.info(f"   자동 선택 ({len(remaining)}개): {remaining}")
-
         return selected
 
     def _variance_filter(self, df: pd.DataFrame, cols: List[str],
@@ -265,9 +230,80 @@ class FeatureSelector:
         self.report_['best_lags'] = best_lag
         return survivors, mi_scores
 
+    # [IDEA 3] Granger causality scoring
+    def _granger_scoring(self, df: pd.DataFrame, cols: List[str],
+                        target_col: str, max_lag: int = 6) -> dict:
+        """
+        안정화된 Granger Causality 스코어링
+        - 키 접근 오류 방지 (다중 테스트 대체)
+        - 샘플 수/다중공선성 예외 처리
+        - 로깅으로 디버깅 지원
+        """
+        scores = {}
+        failed_features = []
+        
+        for col in cols:
+            try:
+                # 1. 데이터 준비 (최소 200 샘플 요구)
+                test_data = df[[target_col, col]].dropna()
+                if len(test_data) < 200:
+                    scores[col] = 0.0
+                    continue
+                
+                # 2. Granger 테스트 실행 (상세 로그 비활성화)
+                result = grangercausalitytests(test_data, maxlag=max_lag, verbose=False)
+                
+                # 3. p-value 추출 (다중 테스트 대체 전략)
+                p_vals = []
+                for lag in range(1, max_lag + 1):
+                    if lag not in result:
+                        continue
+                    
+                    # statsmodels 버전에 따른 키 접근
+                    test_dict = result[lag][0]  # 첫 번째 요소는 테스트 딕셔너리
+                    
+                    # 우선순위: ssr_ftest > ssr_chi2test > lrtest
+                    if 'ssr_ftest' in test_dict:
+                        p_val = test_dict['ssr_ftest'][1]
+                    elif 'ssr_chi2test' in test_dict:
+                        p_val = test_dict['ssr_chi2test'][1]
+                    elif 'lrtest' in test_dict:
+                        p_val = test_dict['lrtest'][1]
+                    elif 'params_ftest' in test_dict:
+                        p_val = test_dict['params_ftest'][1]
+                    else:
+                        continue  # 사용 가능한 테스트 없음
+                    
+                    p_vals.append(p_val)
+                
+                # 4. 스코어 계산 (낮은 p-value = 높은 스코어)
+                if p_vals:
+                    avg_p = np.mean(p_vals)
+                    # p-value 0.05 이하만 유의미한 인과관계로 간주
+                    if avg_p < 0.05:
+                        scores[col] = 1.0 - avg_p  # 0.95~1.0
+                    else:
+                        scores[col] = 0.0  # 유의미하지 않음
+                else:
+                    scores[col] = 0.0
+                    
+            except Exception as e:
+                failed_features.append((col, str(e)[:50]))
+                scores[col] = 0.0
+        
+        # 5. 실패 피처 로깅 (디버깅용)
+        if failed_features:
+            logger.warning(f"⚠️ Granger test failed for {len(failed_features)}/{len(cols)} features:")
+            for col, err in failed_features[:5]:  # 상위 5개만 표시
+                logger.warning(f"   - {col}: {err}")
+            if len(failed_features) > 5:
+                logger.warning(f"   ... and {len(failed_features)-5} more")
+        
+        return scores
+
     def _correlation_dedup(self, df: pd.DataFrame, cols: List[str],
-                          mi_scores: dict, threshold: float) -> List[str]:
-        """상관관계가 높은 피처 쌍에서 MI 낮은 쪽 제거."""
+                           mi_scores: dict, threshold: float) -> List[str]:
+        """상관관계가 높은 피처 쌍에서 MI(또는 Combined) 낮은 쪽 제거."""
         if len(cols) <= 1:
             return cols
 
@@ -283,10 +319,10 @@ class FeatureSelector:
                 if cols[j] in to_remove:
                     continue
                 if corr_matrix.iloc[i, j] > threshold:
-                    # MI 낮은 쪽 제거
-                    mi_i = mi_scores.get(cols[i], 0)
-                    mi_j = mi_scores.get(cols[j], 0)
-                    if mi_i >= mi_j:
+                    # Score(MI or Combined) 낮은 쪽 제거
+                    score_i = mi_scores.get(cols[i], 0)
+                    score_j = mi_scores.get(cols[j], 0)
+                    if score_i >= score_j:
                         victim = cols[j]
                         keeper = cols[i]
                     else:
@@ -295,7 +331,7 @@ class FeatureSelector:
                     to_remove.add(victim)
                     logger.info(
                         f"    ✗ {victim} (r={corr_matrix.iloc[i,j]:.3f} with {keeper}, "
-                        f"MI {mi_scores.get(victim,0):.4f} < {mi_scores.get(keeper,0):.4f})")
+                        f"Score {mi_scores.get(victim,0):.4f} < {mi_scores.get(keeper,0):.4f})")
 
         survivors = [c for c in cols if c not in to_remove]
         logger.info(f"\n  상관관계 필터: {len(to_remove)}개 제거, {len(survivors)}개 생존")
@@ -319,10 +355,11 @@ class FeatureSelector:
 def auto_select_features(train_df: pd.DataFrame,
                          feature_cols: List[str],
                          target_col: str = 'target_cumret_6',
-                         max_features: int = 15,
+                         max_features: int = 30,
                          corr_threshold: float = 0.85,
                          variance_threshold: float = 0.01,
-                         must_include: List[str] = None) -> List[str]:
+                         must_include: List[str] = None,
+                         use_granger: bool = True) -> List[str]:
     """
     원라인 피처 선택.
 
@@ -334,6 +371,7 @@ def auto_select_features(train_df: pd.DataFrame,
             - 'net_taker_ratio': 테이커 매수/매도 비율
             - 'oi_change_rate': OI 변화율 (포지션 빌드업)
             - 'smart_money_flow': 스마트머니 흐름
+        use_granger: Granger Causality 점수 결합 여부 (statsmodels 필요)
 
     사용법:
         selected = auto_select_features(
@@ -351,4 +389,5 @@ def auto_select_features(train_df: pd.DataFrame,
         corr_threshold=corr_threshold,
         variance_threshold=variance_threshold,
         must_include=must_include,
+        use_granger=use_granger,
     )

@@ -1,13 +1,8 @@
 """
 TFT Signal Model 학습 스크립트
 
-하이퍼파라미터는 TFT_model.py의 TFTConfig 클래스에서 수정하세요.
-
-사용법:
-    python TFT/train_TFT.py
-    python TFT/train_TFT.py --resume models/tft/tft_epoch_50_full.pt
+[IDEA 7] 앙상블 학습 지원 (--ensemble 플래그)
 """
-
 import sys
 import os
 import argparse
@@ -15,23 +10,38 @@ import logging
 import pandas as pd
 import numpy as np
 import json
+import torch
 from datetime import datetime
-from TFT_model import TFTSignalModel, TFTConfig
+from TFT_model import TFTSignalModel, TFTConfig, TFTEnsemble
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.feature_selector import auto_select_features
 from core.feature_engineering import ULTIMATE_FEATURE_COLS
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def load_data(path: str = 'data/training_features_5m.csv'):
     logger.info(f"데이터 로드: {path}")
     df = pd.read_csv(path, parse_dates=['timestamp'])
+
+    # [Fix] 타겟 컬럼 부재 시 자동 생성
+    required_targets = ['target_ret_12', 'target_ret_6', 'target_cumret_6']
+    if not all(col in df.columns for col in required_targets):
+        logger.info("타겟 컬럼 일부 부재 -> 자동 생성 중...")
+        # shift(-N)은 미래 N시점을 의미
+        df['target_ret_6'] = (df['close'].shift(-6) / df['close'] - 1)
+        df['target_ret_12'] = (df['close'].shift(-12) / df['close'] - 1)  # 1시간
+
+        if 'target_cumret_6' not in df.columns:
+             # 보통 cumret과 ret_6는 거의 동일 (여기서는 ret_6 사용)
+             df['target_cumret_6'] = df['target_ret_6']
+    
+    # [Fix] regime_break 부재 시 0으로 채움
+    if 'regime_break' not in df.columns:
+        logger.warning("'regime_break' 컬럼 부재 -> 0으로 채움 (주의)")
+        df['regime_break'] = 0.0
 
     all_features = ULTIMATE_FEATURE_COLS.copy()
 
@@ -44,8 +54,8 @@ def load_data(path: str = 'data/training_features_5m.csv'):
     logger.info(f"  ✓ 기간: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
     return df, all_features
 
-
-def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15):
+def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15, 
+               use_augmentation=False):  # ← 파라미터 추가
     n = len(df)
     train_end = int(n * train_ratio)
     val_end = int(n * (train_ratio + val_ratio))
@@ -53,16 +63,43 @@ def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15):
     train_df = df.iloc[:train_end].copy()
     val_df = df.iloc[train_end:val_end].copy()
     test_df = df.iloc[val_end:].copy()
-
-    logger.info(f"  Train: {len(train_df):,}행")
+    
+    # ★ 학습 데이터 증강 (선택적)
+    if use_augmentation:
+        try:
+            from core.feature_engineering import FeatureEngineer
+            fe = FeatureEngineer()
+            if hasattr(fe, 'augment_training_data'):
+                train_df = fe.augment_training_data(train_df, noise_level=0.02)
+                logger.info(f"  Train: {len(train_df):,}행 (증강 적용)")
+            else:
+                logger.warning("augment_training_data 메서드 없음 - 증강 스킵")
+                logger.info(f"  Train: {len(train_df):,}행")
+        except Exception as e:
+            logger.warning(f"Data augmentation 실패: {e}")
+            logger.info(f"  Train: {len(train_df):,}행")
+    else:
+        logger.info(f"  Train: {len(train_df):,}행")
+    
     logger.info(f"  Val:   {len(val_df):,}행")
     logger.info(f"  Test:  {len(test_df):,}행")
     return train_df, val_df, test_df
 
+def train_single_model(config, train_df, val_df, feature_cols, resume):
+    """단일 TFT 모델 학습 및 반환"""
+    model = TFTSignalModel(config)
+    history = model.fit(config, train_df, val_df, feature_cols, resume)
+    return model, history
 
 def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     logger.info("\n테스트셋 평가 중...")
     cfg = model.config
+    
+    # 타겟 컬럼이 테스트 데이터에 있는지 확인
+    if cfg.target_col not in test_df.columns:
+        logger.warning(f"테스트셋에 타겟 컬럼 '{cfg.target_col}' 부재로 평가 스킵")
+        return {}
+
     result = model.predict(test_df)
     median_pred = result['median_pred']
     actual = test_df[cfg.target_col].values
@@ -76,7 +113,8 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     valid_mask = ~np.isnan(actual_1step) & ~np.isnan(pred_1step)
     if valid_mask.sum() == 0:
         logger.warning("⚠️ 유효한 평가 샘플이 없습니다.")
-        return { ... }  # 기본값 반환
+        return {}
+    
     actual_1step = actual_1step[valid_mask]
     pred_1step = pred_1step[valid_mask]
     
@@ -92,6 +130,10 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     large_dir_acc = np.mean(pred_dir[large_mask] == actual_dir[large_mask]) if large_mask.sum() > 0 else 0.0
 
     confidence = result['confidence'][:, 0]
+    # confidence valid_mask 적용
+    if len(confidence) == len(valid_mask):
+        confidence = confidence[valid_mask]
+        
     high_conf_mask = confidence > np.median(confidence)
     high_conf_dir_acc = np.mean(pred_dir[high_conf_mask] == actual_dir[high_conf_mask]) if high_conf_mask.sum() > 0 else 0.0
 
@@ -122,109 +164,179 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     logger.info("=" * 60)
 
     # 변수 중요도
-    vi = result['var_importance'].mean(axis=(0, 1))
-    static_cols = ['session_asia', 'session_europe', 'session_us']
-    temporal_cols = [c for c in model.feature_cols if c not in static_cols]
+    if 'variable_importance' in result:
+        vi = result['variable_importance'].mean(axis=(0))
+        static_cols = ['session_asia', 'session_europe', 'session_us']
+        temporal_cols = [c for c in model.feature_cols if c not in static_cols]
 
-    if len(vi) == len(temporal_cols):
-        imp_df = pd.DataFrame({'feature': temporal_cols, 'importance': vi})
-        imp_df = imp_df.sort_values('importance', ascending=False)
-        logger.info("\n📊 Top 10 중요 피처:")
-        for _, row in imp_df.head(20).iterrows():
-            bar = '█' * int(row['importance'] * 100)
-            logger.info(f"  {row['feature']:30s} {row['importance']:.4f} {bar}")
+        if len(vi) == len(temporal_cols):
+            imp_df = pd.DataFrame({'feature': temporal_cols, 'importance': vi})
+            imp_df = imp_df.sort_values('importance', ascending=False)
+            logger.info("\n📊 Top 10 중요 피처:")
+            for _, row in imp_df.head(10).iterrows():
+                bar = '█' * int(row['importance'] * 100)
+                logger.info(f"  {row['feature']:30s} {row['importance']:.4f} {bar}")
 
     return metrics
 
 
 def main():
-    # Resume 경로만 argument로 받음
-    parser = argparse.ArgumentParser(
-        description='TFT Signal Model 학습 (하이퍼파라미터는 TFTConfig 클래스에서 수정)')
-    parser.add_argument('--resume', type=str, default=None,
-                        help='이어서 학습할 체크포인트 경로')
-    parser.add_argument('--data', type=str, default='data/training_features_5m.csv',
-                        help='학습 데이터 경로')
+    parser = argparse.ArgumentParser(description='TFT Signal Model 학습')
+    parser.add_argument('--resume', type=str, default=None, help='이어서 학습할 체크포인트 경로')
+    parser.add_argument('--data', type=str, default='data/training_features_5m.csv', help='학습 데이터 경로')
+    parser.add_argument('--ensemble', action='store_true', help='앙상블용 3개 모델 학습')
+    parser.add_argument('--horizon', type=int, default=6, choices=[1,3,6], help='예측 horizon (앙상블 아닐 때)')
     args = parser.parse_args()
 
     print("\n" + "=" * 80)
-    print("🚀 TFT Signal Model 학습 시작")
+    print("🚀 TFT Signal Model 학습 시작" + (" (Ensemble Mode)" if args.ensemble else ""))
     print("=" * 80)
     start_time = datetime.now()
 
     df, feature_cols = load_data(args.data)
     train_df, val_df, test_df = split_data(df)
 
-    # ★ 자동 피처 선택 (train_df 기준으로 MI 계산)
-    feature_cols = auto_select_features(
-        train_df, 
+    # 피처 선택 (공통)
+    target_for_selection = 'target_ret_12'
+    if target_for_selection not in df.columns:
+         # 만약 target_cumret_6가 없다면 target_ret_6 시도
+         if 'target_ret_12' in df.columns:
+             target_for_selection = 'target_ret_12'
+         else:
+             logger.warning("타겟 컬럼(target_ret_12) 없음. 첫번째 타겟 사용.")
+             # 임시로 첫번째 타겟 사용
+             target_for_selection = [c for c in df.columns if 'target' in c][0]
+
+    selected_features = auto_select_features(
+        train_df,
         feature_cols,
-        target_col='target_cumret_6',  # TFTConfig.target_col과 일치시킬 것
-        max_features=20,               # temporal 피처 최대 20개
-        corr_threshold=0.85,           # 상관계수 0.85 이상이면 중복 제거
+        target_col=target_for_selection,
+        max_features=25,
+        corr_threshold=0.9,
         must_include=[
-          'whale_retail_ratio', 'whale_conviction', 'funding_pressure', 'squeeze_power', 'oi_change_rate', 'momentum_regime', 'reversion_regime',
-        ],
+          # 스마트 머니 (3)
+          'whale_conviction', 'smart_money_flow', 'big_trade_ratio', 
+          
+          # 펀딩 신호 (3)
+          'long_squeeze_risk', 'short_squeeze_risk', 'funding_z_score', 'funding_price_divergence',
+          
+          # 오더 플로우 (3)
+          'net_taker_ratio', 'oi_change_rate', 'ofi_acceleration', 'trade_intensity',
+          
+          # 레짐 감지 (3)
+          'regime_trending', 'regime_mean_reverting', 'hurst_48', 'regime_break', 'fvg_dist',
+          
+          # 변동성 (2)
+          'volatility_z', 'garman_klass_vol', 'vwap_dist', 'log_return',
+          
+          # 전략 메타 (1)
+          'strategy_consensus'
+      ]
     )
-    logger.info(f"선택된 피처 ({len(feature_cols)}개): {feature_cols}")
+    logger.info(f"선택된 피처 ({len(selected_features)}개): {selected_features}")
 
-    config = TFTConfig(num_features=len(feature_cols))
+    if args.ensemble:
+        # [IDEA 7] 3개 horizon에 대한 모델 학습
+        configs = {
+            3: TFTConfig(target_col='target_ret_3'),
+            6: TFTConfig(target_col='target_ret_6'),
+            12: TFTConfig(target_col='target_ret_12')
+          }
+        
+        # 타겟 컬럼 존재 확인
+        for h, cfg in configs.items():
+            if cfg.target_col not in df.columns:
+                logger.error(f"Target column {cfg.target_col} not found in dataframe!")
+                return
 
-    logger.info("\n" + "=" * 60)
-    logger.info("📋 TFT Config")
-    logger.info("=" * 60)
-    logger.info(f"  Input Window:        {config.input_window}")
-    logger.info(f"  Forecast Horizon:    {config.forecast_horizon}")
-    logger.info(f"  Hidden Size:         {config.hidden_size}")
-    logger.info(f"  Attention Heads:     {config.attention_heads}")
-    logger.info(f"  LSTM Layers:         {config.lstm_layers}")
-    logger.info(f"  Learning Rate:       {config.learning_rate}")
-    logger.info(f"  Batch Size:          {config.batch_size}")
-    logger.info(f"  Max Epochs:          {config.max_epochs}")
-    logger.info(f"  Patience:            {config.patience}")
-    logger.info(f"  LR Scheduler:        {config.lr_scheduler}")
-    logger.info(f"  Warmup Epochs:       {config.warmup_epochs}")
-    logger.info(f"  Direction Weight:    {config.direction_loss_weight}")
-    logger.info(f"  Large Move Weight:   {config.large_move_weight}")
-    logger.info(f"  Use EMA:             {config.use_ema}")
-    logger.info(f"  Use AMP:             {config.use_amp}")
-    logger.info(f"  Device:              {config.device}")
-    logger.info("=" * 60)
+        model_paths = []
+        for h, cfg in configs.items():
+            logger.info(f"\n" + "="*40)
+            logger.info(f"🔄 Training Horizon-{h} Model (Target: {cfg.target_col})")
+            logger.info("="*40)
+            
+            cfg.num_features = len(selected_features)   # 피처 수 동기화
+            
+            # 모델 디렉토리 생성
+            os.makedirs(cfg.model_dir, exist_ok=True)
+            
+            model, _ = train_single_model(cfg, train_df, val_df, selected_features, args.resume)
+            
+            # 저장
+            path = os.path.join(cfg.model_dir, f'tft_horizon{h}_final.pt')
+            
+            # 수동 저장 (TFT_model.py에 save 메서드가 없으므로 직접 state dict 저장)
+            state = {
+                'model_state_dict': model.model.state_dict(),
+                'feature_cols': selected_features,
+                'scaler_params': {k: v.tolist() if isinstance(v, np.ndarray) else v 
+                                 for k, v in model.scaler_params.items()},
+                'config': cfg.__dict__
+            }
+            if model.ema:
+                state['ema_state_dict'] = model.ema.state_dict()
+                
+            torch.save(state, path)
+            
+            # 메타데이터 별도 저장
+            meta_path = os.path.join(cfg.model_dir, f'tft_horizon{h}_final_meta.json')
+            meta = {
+                'feature_cols': selected_features,
+                'scaler_params': state['scaler_params'],
+                'config': {k: v for k, v in cfg.__dict__.items() if not k.startswith('_')}
+            }
+            with open(meta_path, 'w') as f:
+                json.dump(meta, f, indent=2)
 
-    model = TFTSignalModel(config)
-    history = model.fit(train_df, val_df, feature_cols)
-    # 테스트셋 평가
-    metrics = evaluate_model(model, test_df)
+            logger.info(f"모델 저장 완료: {path}")
+            model_paths.append(path)
+            
+            # 개별 평가
+            evaluate_model(model, test_df)
 
-    # 모델 저장
-    model.save()
-    logger.info(f"\n모델 저장 완료: {config.model_dir}/tft_final.pt")
+        logger.info(f"\n✅ 앙상블 학습 완료. 모델 경로: {model_paths}")
+        
+    else:
+        # 단일 모델 학습 (기존 로직)
+        # target_ret_X가 있으면 사용, 없으면 target_cumret_6 (기존 default)
+        target = f'target_ret_{args.horizon}'
+        if target not in df.columns:
+            logger.warning(f"{target} 없음. target_cumret_6 사용.")
+            target = 'target_cumret_6'
+            
+        cfg = TFTConfig(forecast_horizon=args.horizon, target_col=target)
+        cfg.num_features = len(selected_features)
+        
+        logger.info(f"\n=== Training Single Model (Horizon={args.horizon}, Target={target}) ===")
+        model, history = train_single_model(cfg, train_df, val_df, selected_features, args.resume)
+        
+        model._save_checkpoint('final')
+        metrics = evaluate_model(model, test_df)
 
-    # 결과 저장
-    results = {
-        'config': {k: v for k, v in config.__dict__.items() if not k.startswith('_')},
-        'history': history,
-        'test_metrics': metrics,
-        'timestamp': datetime.now().isoformat(),
-        'elapsed': str(datetime.now() - start_time),
-    }
-    results_path = os.path.join(config.model_dir, 'training_results.json')
-    os.makedirs(config.model_dir, exist_ok=True)
+        # 결과 저장
+        results = {
+            'config': {k: v for k, v in cfg.__dict__.items() if not k.startswith('_')},
+            'history': history,
+            'test_metrics': metrics,
+            'timestamp': datetime.now().isoformat(),
+            'elapsed': str(datetime.now() - start_time),
+        }
+        results_path = os.path.join(cfg.model_dir, 'training_results.json')
+        os.makedirs(cfg.model_dir, exist_ok=True)
+        
+        def convert(obj):
+            if isinstance(obj, (np.integer, int)): return int(obj)
+            if isinstance(obj, (np.floating, float)): return float(obj)
+            if isinstance(obj, np.ndarray): return obj.tolist()
+            return obj
 
-    def convert(obj):
-        if isinstance(obj, (np.integer,)): return int(obj)
-        if isinstance(obj, (np.floating,)): return float(obj)
-        if isinstance(obj, np.ndarray): return obj.tolist()
-        return obj
-
-    with open(results_path, 'w') as f:
-        json.dump(results, f, indent=2, default=convert)
-    logger.info(f"결과 저장: {results_path}")
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2, default=convert)
+        logger.info(f"결과 저장: {results_path}")
 
     print("\n" + "=" * 80)
     print(f"🎉 완료! 소요 시간: {datetime.now() - start_time}")
     print("=" * 80)
-
 
 if __name__ == '__main__':
     main()
