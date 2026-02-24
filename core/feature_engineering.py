@@ -125,12 +125,6 @@ class FeatureEngineer:
 
         # [IDEA 4] Regime Break
         df = self._add_regime_break(df)
-
-        # [IDEA 7] 다중 타겟 생성
-        df['target_ret_3'] = (df['close'].shift(-3) / df['close'] - 1)
-        df['target_ret_6'] = (df['close'].shift(-6) / df['close'] - 1)
-        df['target_ret_12'] = (df['close'].shift(-12) / df['close'] - 1)
-
         df = self._handle_missing(df)
 
         return df
@@ -392,9 +386,12 @@ class FeatureEngineer:
         """
         시간 기반 피처.
         - 순환 인코딩 (sin/cos)으로 23시→0시 연속성 보장
-        - 거래 세션 구분 (아시아/유럽/미국)
+        - 거래 세션 구분 (아시아/유럽/미국): KST(UTC+9) → UTC 변환 후 적용
         - 정각 효과 (기관 알고리즘 활동 집중 시간)
+        - NYSE 오픈 효과 (DST 자동 처리): 09:30 ET ±30분
         """
+        import pytz
+
         ts = df['timestamp']
         hour = ts.dt.hour
         minute = ts.dt.minute
@@ -407,11 +404,24 @@ class FeatureEngineer:
         df['minute_sin'] = np.sin(2 * np.pi * minute / 60)
         df['minute_cos'] = np.cos(2 * np.pi * minute / 60)
 
-        # 3. 거래 세션 (UTC 기준)
-        #    아시아: 00:00–08:00 / 유럽: 08:00–16:00 / 미국: 16:00–24:00
-        df['session_asia'] = ((hour >= 0) & (hour < 8)).astype(np.float32)
-        df['session_europe'] = ((hour >= 8) & (hour < 16)).astype(np.float32)
-        df['session_us'] = ((hour >= 16) & (hour < 24)).astype(np.float32)
+        # 3. 거래 세션
+        #    아시아/유럽: KST → UTC 변환 후 적용 (hour_utc = (hour - 9) % 24)
+        #    미국(session_us): NYSE 정규 세션 09:30–16:00 ET, DST 자동 처리
+        #      겨울(EST): 14:30–21:00 UTC  /  여름(EDT): 13:30–20:00 UTC
+        hour_utc = (hour - 9) % 24
+        df['session_asia']   = ((hour_utc >= 0) & (hour_utc < 8)).astype(np.float32)
+        df['session_europe'] = ((hour_utc >= 8) & (hour_utc < 16)).astype(np.float32)
+        try:
+            ts_utc = ts.dt.tz_localize('Asia/Seoul').dt.tz_convert('UTC')
+            ts_et  = ts_utc.dt.tz_convert('America/New_York')
+            et_minutes = ts_et.dt.hour * 60 + ts_et.dt.minute
+            df['session_us'] = (
+                (et_minutes >= 9 * 60 + 30) &   # NYSE 오픈: 09:30 ET
+                (et_minutes <  16 * 60)           # NYSE 클로즈: 16:00 ET
+            ).astype(np.float32)
+        except Exception:
+            # fallback: 고정 UTC 기준 (16:00–21:00 UTC)
+            df['session_us'] = ((hour_utc >= 16) & (hour_utc < 21)).astype(np.float32)
 
         # 4. 정각 효과 (매 시 정각 ±5분)
         df['is_hour_open'] = (minute < 5).astype(np.float32)

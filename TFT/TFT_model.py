@@ -1,12 +1,13 @@
 """
-Signal Module: Enhanced Temporal Fusion Transformer for 5-min ETH Day Trading
+Signal Module: Temporal Fusion Transformer for 5-min ETH Day Trading
 
-[IDEA 1] Regime-Conditioned Dual-Path TFT
-[IDEA 2] Payoff-Weighted Loss
-[IDEA 4] Attention Mask for Non-Stationary Regimes
-[IDEA 7] Multi-Horizon Ensemble (별도 클래스 추가)
+복원 버전 - 52% / 53.1% 고확신 달성했던 설정 기반
++ Dual GRU (momentum/reversion) with Hurst gating 유지
+- BCE direction loss 제거 (로짓 오용 문제)
+- Mixup 제거 (시계열 파괴)
+- Volatility targeting 제거 (불필요한 복잡도)
+- Quantiles 11개 → 5개 복원
 """
-
 import os
 import copy
 import json
@@ -24,62 +25,58 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
-from torch.optim.swa_utils import AveragedModel, SWALR   # [SWA] 추가
+from torch.optim.swa_utils import AveragedModel, SWALR
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 
 # ════════════════════════════════════════════════════════════════
-# 1. CONFIG (수정)
+# 1. CONFIG
 # ════════════════════════════════════════════════════════════════
 @dataclass
 class TFTConfig:
-    """TFT 하이퍼파라미터 — 논문 최적값 기반 + 5분봉 튜닝."""
-
+    """TFT 하이퍼파라미터 — 52%/53.1% 달성 설정 복원."""
     # ── 입력/출력 ──
     input_window: int = 48           # 48 × 5min = 4시간 룩백
-    forecast_horizon: int = 6        # 6 × 5min = 30분 예측
-    num_features: int = 57           # ULTIMATE_FEATURE_COLS(30) + meta(5)
-    target_col: str = 'target_ret_12'   # [IDEA 7] 여러 타겟 중 선택
+    forecast_horizon: int = 3        # 6 × 5min = 30분 예측
+    target_col: str = 'target_ret_3'
 
     # ── 모델 구조 ──
-    hidden_size: int = 128
+    hidden_size: int = 32
     lstm_layers: int = 2
-    attention_heads: int = 4
-    dropout: float =  0.2
-
-    # ── 새로 추가: Label Smoothing ──
-    label_smoothing: float = 0.05      # 예측 과신 방지
+    attention_heads: int = 8
+    dropout: float = 0.35            # ★ 0.3 → 0.2 복원
 
     # ── Variable Selection Network ──
-    num_static_features: int = 3     # session_asia/europe/us (현재 세션)
-    num_temporal_features: int = 54  # 나머지 시계열 피처
+    num_features: int = 15
+    num_static_features: int = 3
+    num_temporal_features: int = field(init=False)
 
-    # ── Quantile 예측 (트레이딩 최적화) ──
-    quantiles: List[float] = field(default_factory=lambda: [0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 0.99])
+    # ── Quantile 예측 (5개로 복원) ──
+    quantiles: List[float] = field(default_factory=lambda: 
+        [0.1, 0.3, 0.5, 0.7, 0.9])  # ★ 11개 → 5개 복원
 
     # ── 학습 기본 ──
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     batch_size: int = 256
     max_epochs: int = 500
-    patience: int = 100
-    weight_decay: float = 1e-4
-    grad_clip: float = 1.0 
+    patience: int = 50               # ★ 20 → 50 복원
+    weight_decay: float = 1e-3
+    grad_clip: float = 1.0
 
-    # [IDEA 2] Payoff-Weighted Loss 파라미터 (기존 direction_loss_weight 등 제거)
-    loss_delta: float = 0.05
-    loss_power: float = 3
-    loss_wrong_penalty: float = 5.0
-    loss_direction_boost: float = 5.0      # ← 추가 (3.0부터 시작, 5.0까지 올려봐)
+    # ── Loss 파라미터 ──
+    direction_loss_weight: float = 1.0   # direction penalty 비중
+    large_move_weight: float = 2.0       # 큰 움직임 가중치
 
     # ── LR 스케줄러 ──
     warmup_epochs: int = 20
-    lr_scheduler: str = 'onecycle'
+    lr_scheduler: str = 'cosine'     # ★ onecycle → cosine 복원
     min_lr: float = 1e-7
 
     # ── EMA ──
     use_ema: bool = True
-    ema_decay: float = 0.9999
+    ema_decay: float = 0.999         # ★ 0.9999 → 0.999 복원
 
     # ── Mixed Precision ──
     use_amp: bool = True
@@ -95,9 +92,9 @@ class TFTConfig:
     log_every_n_steps: int = 50
     save_every_n_epochs: int = 10
 
-    # ── SWA (Stochastic Weight Averaging) ──
+    # ── SWA ──
     use_swa: bool = True
-    swa_start_epoch: int = 300   # 150 에포크부터 SWA 시작 (max_epochs=200 기준)
+    swa_start_epoch: int = 300
     swa_lr: float = 5e-5
 
     # ── 기타 ──
@@ -105,6 +102,8 @@ class TFTConfig:
     model_dir: str = 'data/tft'
 
     def __post_init__(self):
+        # num_temporal_features는 항상 num_features - num_static_features
+        self.num_temporal_features = self.num_features - self.num_static_features
         if self.device == 'auto':
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if self.device == 'cpu':
@@ -112,14 +111,9 @@ class TFTConfig:
 
 
 # ════════════════════════════════════════════════════════════════
-# 1.5. EMA MODEL (동일)
+# 1.5. EMA MODEL
 # ════════════════════════════════════════════════════════════════
 class EMAModel:
-    """
-    Exponential Moving Average of model parameters.
-    학습 중 파라미터의 이동 평균을 유지하여 일반화 성능 향상.
-    """
-
     def __init__(self, model: nn.Module, decay: float = 0.999):
         self.decay = decay
         self.shadow = {}
@@ -136,11 +130,9 @@ class EMAModel:
         for name, param in model.named_parameters():
             if param.requires_grad and name in self.shadow:
                 self.shadow[name].mul_(self.decay).add_(
-                    param.data, alpha=1.0 - self.decay
-                )
+                    param.data, alpha=1.0 - self.decay)
 
     def apply_shadow(self, model: nn.Module):
-        """EMA 파라미터를 모델에 적용 (추론/검증 시)."""
         self.backup = {}
         for name, param in model.named_parameters():
             if name in self.shadow:
@@ -148,7 +140,6 @@ class EMAModel:
                 param.data.copy_(self.shadow[name])
 
     def restore(self, model: nn.Module):
-        """원래 파라미터 복원 (학습 재개 시)."""
         for name, param in model.named_parameters():
             if name in self.backup:
                 param.data.copy_(self.backup[name])
@@ -163,12 +154,11 @@ class EMAModel:
 
 
 # ════════════════════════════════════════════════════════════════
-# 2. DATASET (수정: regime_break 포함)
+# 2. DATASET (단순화: volatility 필드 제거)
 # ════════════════════════════════════════════════════════════════
 class TFTDataset(Dataset):
-    """슬라이딩 윈도우 데이터셋. regime_break를 temporal에 포함."""
-
-    def __init__(self, config: TFTConfig, df: pd.DataFrame,  feature_cols: List[str]):
+    """슬라이딩 윈도우 데이터셋."""
+    def __init__(self, config: TFTConfig, df: pd.DataFrame, feature_cols: List[str]):
         self.config = config
         self.target_col = config.target_col
         self.static_cols = ['session_asia', 'session_europe', 'session_us']
@@ -197,21 +187,19 @@ class TFTDataset(Dataset):
 
 
 # ════════════════════════════════════════════════════════════════
-# 3. MODEL COMPONENTS (InterpretableMultiHeadAttention 수정: 마스킹 개선)
+# 3. MODEL COMPONENTS
 # ════════════════════════════════════════════════════════════════
 class GatedLinearUnit(nn.Module):
-    """GLU: σ(Wx + b) ⊙ (Vx + c)"""
     def __init__(self, input_size: int, output_size: int):
         super().__init__()
         self.fc1 = nn.Linear(input_size, output_size)
         self.fc2 = nn.Linear(input_size, output_size)
-
+    
     def forward(self, x):
         return torch.sigmoid(self.fc1(x)) * self.fc2(x)
 
 
 class GatedResidualNetwork(nn.Module):
-    """GRN — 스킵 커넥션 + GLU + LayerNorm."""
     def __init__(self, input_size: int, hidden_size: int, output_size: int,
                  dropout: float = 0.1, context_size: int = None):
         super().__init__()
@@ -223,7 +211,7 @@ class GatedResidualNetwork(nn.Module):
         self.layer_norm = nn.LayerNorm(output_size)
         self.context_fc = nn.Linear(context_size, hidden_size, bias=False) if context_size else None
         self.skip_proj = nn.Linear(input_size, output_size) if input_size != output_size else None
-
+    
     def forward(self, x, context=None):
         residual = self.skip_proj(x) if self.skip_proj else x
         hidden = self.fc1(x)
@@ -237,7 +225,6 @@ class GatedResidualNetwork(nn.Module):
 
 
 class VariableSelectionNetwork(nn.Module):
-    """VSN — 변수 중요도 자동 학습."""
     def __init__(self, num_vars: int, hidden_size: int, dropout: float = 0.1,
                  context_size: int = None):
         super().__init__()
@@ -252,7 +239,7 @@ class VariableSelectionNetwork(nn.Module):
             context_size=context_size
         )
         self.softmax = nn.Softmax(dim=-1)
-
+    
     def forward(self, x, context=None):
         has_time = x.dim() == 3
         var_outputs = []
@@ -280,8 +267,6 @@ class VariableSelectionNetwork(nn.Module):
 
 
 class InterpretableMultiHeadAttention(nn.Module):
-    """TFT 해석 가능 MHA — Values를 헤드 간 공유. [IDEA 4] 마스킹 개선."""
-
     def __init__(self, hidden_size: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
         self.num_heads = num_heads
@@ -292,51 +277,32 @@ class InterpretableMultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(self.d_k, hidden_size)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, query, key, value, mask=None, token_mask=None):
-        """
-        mask: causal mask (lower triangular)
-        token_mask: [B, T] where 1 means token is allowed to attend
-        """
+    def forward(self, query, key, value, mask=None):
         B, T, _ = query.shape
         Q = self.W_q(query).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
         K = self.W_k(key).view(B, T, self.num_heads, self.d_k).transpose(1, 2)
         V = self.W_v(value)
 
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.d_k ** 0.5)  # [B, H, T, T]
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.d_k ** 0.5)
 
-        # causal mask
         if mask is not None:
             fill_value = -torch.finfo(scores.dtype).max
             scores = scores.masked_fill(mask == 0, fill_value)
 
-        # [IDEA 4] token mask: for each query, mask out keys not in same regime
-        if token_mask is not None:
-            # token_mask: [B, T] -> [B, 1, 1, T] for broadcasting over heads and queries
-            token_mask_exp = token_mask[:, None, None, :]  # [B, 1, 1, T]
-            fill_value = -torch.finfo(scores.dtype).max
-            scores = scores.masked_fill(token_mask_exp == 0, fill_value)
-
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
 
-        V_exp = V.unsqueeze(1).expand(-1, self.num_heads, -1, -1)  # [B, H, T, d_k]
-        context = torch.matmul(attn_weights, V_exp).mean(dim=1)    # [B, T, d_k]
+        V_exp = V.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
+        context = torch.matmul(attn_weights, V_exp).mean(dim=1)
         output = self.W_o(context)
         avg_attn = attn_weights.mean(dim=1)
         return output, avg_attn
 
 
 # ════════════════════════════════════════════════════════════════
-# 4. TFT CORE MODEL (Regime-Conditioned Dual-Path)
+# 4. TFT CORE MODEL (Dual GRU + Hurst gating 유지)
 # ════════════════════════════════════════════════════════════════
 class TemporalFusionTransformer(nn.Module):
-    """
-    Enhanced TFT with:
-        - Dual GRU paths (momentum / reversion) [IDEA 1]
-        - Regime gating via static features
-        - Attention masking with regime_break [IDEA 4]
-    """
-
     def __init__(self, config: TFTConfig):
         super().__init__()
         self.config = config
@@ -349,7 +315,7 @@ class TemporalFusionTransformer(nn.Module):
         self.static_context_enrichment = GatedResidualNetwork(H, H, H, config.dropout)
         self.static_context_state_h = GatedResidualNetwork(H, H, H, config.dropout)
 
-        # [IDEA 1] Dual GRU encoders
+        # ★ Dual GRU 유지 (momentum + reversion)
         self.gru_momentum = nn.GRU(
             input_size=H, hidden_size=H, num_layers=config.lstm_layers,
             batch_first=True, dropout=config.dropout if config.lstm_layers > 1 else 0)
@@ -357,12 +323,7 @@ class TemporalFusionTransformer(nn.Module):
             input_size=H, hidden_size=H, num_layers=config.lstm_layers,
             batch_first=True, dropout=config.dropout if config.lstm_layers > 1 else 0)
 
-        # [IDEA 1 수정] Regime classifier 제거 (허스트로 대체)
-        # self.regime_classifier = nn.Sequential(...)  # ← 제거
-        
-        # ★ 새로운 방식: 허스트 기반 게이팅
-        # feature_cols를 나중에 설정 (TFTSignalModel에서)
-        self.feature_cols = None  # 나중에 설정됨
+        self.feature_cols = None
         self.hurst_idx = None
         self.regime_trending_idx = None
 
@@ -382,111 +343,57 @@ class TemporalFusionTransformer(nn.Module):
         self.quantile_heads = nn.ModuleList([nn.Linear(H, 1) for _ in config.quantiles])
 
     def set_feature_indices(self, feature_cols: List[str]):
-        """
-        피처 컬럼 순서를 설정하고 허스트 인덱스 찾기
-        
-        Args:
-            feature_cols: temporal 피처 리스트 (static 제외)
-        """
+        """Dual GRU gating에 사용할 피처 인덱스 설정."""
         self.feature_cols = feature_cols
         
-        # hurst_48 인덱스 찾기 (우선순위 1)
         if 'hurst_48' in feature_cols:
             self.hurst_idx = feature_cols.index('hurst_48')
-            logger.info(f"✅ Hurst-based gating enabled: hurst_48 at index {self.hurst_idx}")
-        
-        # regime_trending 인덱스 찾기 (우선순위 2)
+            logger.info(f"✅ Hurst-based gating: hurst_48 at index {self.hurst_idx}")
         elif 'regime_trending' in feature_cols:
             self.regime_trending_idx = feature_cols.index('regime_trending')
-            logger.info(f"✅ Regime-based gating enabled: regime_trending at index {self.regime_trending_idx}")
-        
+            logger.info(f"✅ Regime-based gating: regime_trending at index {self.regime_trending_idx}")
         else:
-            logger.warning("⚠️ No hurst_48 or regime_trending found - using uniform gating")
+            logger.warning("⚠️ No hurst/regime feature → uniform 50/50 gating")
 
     def forward(self, temporal: torch.Tensor, static: torch.Tensor):
-        """
-        temporal: [B, T, F]  (T = input_window)
-        static:   [B, S]
-        
-        수정사항:
-        - regime_classifier 제거
-        - 허스트 지수 또는 regime_trending을 temporal에서 직접 추출
-        - 연속/이진 게이팅 모두 지원
-        """
-        B = temporal.shape[0]
-        T = temporal.shape[1]
+        B, T, _ = temporal.shape
         H = self.config.hidden_size
 
         static_emb = self.static_encoder(static)
         cs_e = self.static_context_enrichment(static_emb)
         cs_h = self.static_context_state_h(static_emb)
 
-        # Variable selection
         selected, var_weights = self.temporal_vsn(temporal, cs_e)
 
-        # Initial hidden state for GRUs (from static context)
         h0 = cs_h.unsqueeze(0).expand(self.config.lstm_layers, -1, -1).contiguous()
 
-        # [IDEA 1] Dual GRU forward
-        out_m, _ = self.gru_momentum(selected, h0)   # [B, T, H]
+        out_m, _ = self.gru_momentum(selected, h0)
         out_r, _ = self.gru_reversion(selected, h0)
 
-        # ════════════════════════════════════════════════════════════════
-        # [IDEA 1 수정] Hurst-based Regime Gating
-        # ════════════════════════════════════════════════════════════════
-        
-        # 방법 1: hurst_48 사용 (연속 값, 더 정확)
+        # ★ Hurst-based Regime Gating
         if self.hurst_idx is not None:
-            # 마지막 타임스텝의 허스트 지수
-            hurst = temporal[:, -1, self.hurst_idx]  # [B]
-            
-            # Soft gating: sigmoid로 부드럽게 전환
-            # H=0.5 기준, 5배 스케일링 (sharp transition)
-            # H=0.6 → momentum_gate=0.88
-            # H=0.5 → momentum_gate=0.50
-            # H=0.4 → momentum_gate=0.12
-            momentum_gate = torch.sigmoid(5.0 * (hurst - 0.5))  # [B]
-            reversion_gate = 1.0 - momentum_gate
-            
-            # [B, 1, 1] 형태로 unsqueeze하여 [B, T, H]와 브로드캐스팅
-            gate0 = momentum_gate.unsqueeze(-1).unsqueeze(-1)   # [B, 1, 1]
-            gate1 = reversion_gate.unsqueeze(-1).unsqueeze(-1)  # [B, 1, 1]
-        
-        # 방법 2: regime_trending 사용 (이진 값, 빠름)
+            hurst = temporal[:, -1, self.hurst_idx]
+            momentum_gate = torch.sigmoid(5.0 * (hurst - 0.5))
+            gate0 = momentum_gate.unsqueeze(-1).unsqueeze(-1)
+            gate1 = (1.0 - momentum_gate).unsqueeze(-1).unsqueeze(-1)
         elif self.regime_trending_idx is not None:
-            # 마지막 타임스텝의 regime_trending (0 or 1)
-            regime_trending = temporal[:, -1, self.regime_trending_idx]  # [B]
-            
-            # Hard gating: 0 또는 1
-            gate0 = regime_trending.unsqueeze(-1).unsqueeze(-1)   # [B, 1, 1]
-            gate1 = (1.0 - regime_trending).unsqueeze(-1).unsqueeze(-1)  # [B, 1, 1]
-        
-        # 방법 3: 허스트 없으면 균등 게이팅 (fallback)
+            regime = temporal[:, -1, self.regime_trending_idx]
+            gate0 = regime.unsqueeze(-1).unsqueeze(-1)
+            gate1 = (1.0 - regime).unsqueeze(-1).unsqueeze(-1)
         else:
-            # 50:50 블렌딩
             gate0 = torch.ones(B, 1, 1, device=temporal.device) * 0.5
             gate1 = torch.ones(B, 1, 1, device=temporal.device) * 0.5
-        
-        # Blend GRU outputs
-        gru_out = gate0 * out_m + gate1 * out_r  # [B, T, H]
-        
-        # ════════════════════════════════════════════════════════════════
+
+        gru_out = gate0 * out_m + gate1 * out_r
 
         gated = self.post_lstm_gate(gru_out)
         temporal_feat = self.post_lstm_norm(gated + selected)
 
-        # Static enrichment
-        cs_exp = cs_e.unsqueeze(1).expand(-1, temporal_feat.shape[1], -1)
+        cs_exp = cs_e.unsqueeze(1).expand(-1, T, -1)
         enriched = self.static_enrichment(temporal_feat, cs_exp)
 
-        # [IDEA 4] Prepare token mask from regime_break feature
-        # (Optional - 현재는 스킵, 나중에 추가 가능)
-        token_mask = None
-
-        # Attention with causal mask
-        causal_mask = torch.tril(torch.ones(T, T, device=temporal.device)).unsqueeze(0)  # [1, T, T]
-        attn_out, attn_w = self.multihead_attn(enriched, enriched, enriched,
-                                                mask=causal_mask, token_mask=token_mask)
+        causal_mask = torch.tril(torch.ones(T, T, device=temporal.device)).unsqueeze(0)
+        attn_out, attn_w = self.multihead_attn(enriched, enriched, enriched, mask=causal_mask)
         attn_out = self.post_attn_norm(self.post_attn_gate(attn_out) + enriched)
 
         ff_out = self.pos_ff(attn_out)
@@ -500,79 +407,90 @@ class TemporalFusionTransformer(nn.Module):
 
 
 # ════════════════════════════════════════════════════════════════
-# 5. CUSTOM LOSS (Payoff-Weighted Loss) [IDEA 2]
+# 5. LOSS: Directional Quantile Loss v3 (52%/53.1% 달성 버전 복원)
 # ════════════════════════════════════════════════════════════════
-class PayoffWeightedLoss(nn.Module):
+class DirectionalQuantileLoss(nn.Module):
     """
-    트레이딩 최적화 손실 함수:
-        - Huber loss base
-        - 중요도 가중치: |target|^power (큰 움직임 강조)
-        - 방향 틀렸을 때 페널티 배수
+    표준 Quantile Loss + Differentiable Direction Loss.
+    
+    BCE 제거 이유: pred_median(~0.001)을 로짓으로 쓰면 sigmoid(0.001)≈0.5
+    → 모든 예측이 50%로 해석되어 방향 학습 불가능.
+    
+    대신 tanh 기반 differentiable direction loss 사용:
+    - torch.tanh(x * 20)은 sign(x)와 거의 같지만 gradient가 존재
+    - 예측을 올바른 방향으로 "밀어주는" 학습 가능
     """
-    def __init__(self, quantiles: List[float], delta=0.01, power=1.5, wrong_penalty=3.0, label_smoothing=0.0, direction_boost=5.0):
+    def __init__(self, quantiles: List[float],
+                 direction_weight: float = 1.0,
+                 large_move_weight: float = 2.0):
         super().__init__()
         self.quantiles = quantiles
-        self.delta = delta
-        self.power = power
-        self.wrong_penalty = wrong_penalty
-        self.label_smoothing = label_smoothing
-        self.direction_boost = direction_boost  # ← 추가
-        self.median_idx = quantiles.index(0.5) if 0.5 in quantiles else len(quantiles)//2
+        self.direction_weight = direction_weight
+        self.large_move_weight = large_move_weight
+        self.median_idx = quantiles.index(0.5) if 0.5 in quantiles else len(quantiles) // 2
 
     def forward(self, predictions: torch.Tensor, targets: torch.Tensor):
         """
-        predictions: [B, horizon, num_quantiles]
-        targets:     [B, horizon]
+        Args:
+            predictions: [B, H, Q] quantile predictions
+            targets: [B, H] actual values
         """
+        B, H, Q = predictions.shape
+        
+        # ── 1. 표준 Quantile Loss ──
+        targets_exp = targets.unsqueeze(-1).expand_as(predictions)  # [B, H, Q]
+        errors = targets_exp - predictions
+        
+        quantile_tensor = torch.tensor(
+            self.quantiles, device=predictions.device, dtype=predictions.dtype
+        ).unsqueeze(0).unsqueeze(0)  # [1, 1, Q]
+        
+        quantile_loss = torch.max(
+            quantile_tensor * errors,
+            (quantile_tensor - 1) * errors
+        )
+        
+        # 큰 움직임 가중치 (타겟 크기 비례)
+        move_size = torch.abs(targets).unsqueeze(-1)  # [B, H, 1]
+        threshold = move_size.median()
+        large_mask = (move_size > threshold).float()
+        weights = 1.0 + (self.large_move_weight - 1.0) * large_mask
+        
+        weighted_ql = (quantile_loss * weights).mean()
+        
+        # ── 2. Differentiable Direction Loss ──
         pred_median = predictions[:, :, self.median_idx]  # [B, H]
-
-        # Label smoothing 적용 (타겟을 살짝 노이즈 추가)
-        if self.label_smoothing > 0 and self.training:
-            noise = torch.randn_like(targets) * targets.std() * self.label_smoothing
-            target_smooth = targets + noise
-
-            # 방향 보존
-            original_sign = torch.sign(targets)
-            flipped_mask = (original_sign != torch.sign(target_smooth))
-            target_smooth = torch.where(
-                flipped_mask,
-                original_sign * torch.abs(target_smooth),
-                target_smooth
-            )
-        else:
-            target_smooth = targets
-
-        # Huber loss
-        base_loss = F.huber_loss(pred_median, target_smooth, reduction='none', delta=self.delta)
-
-        # Importance weight: large moves matter more
-        importance = torch.abs(targets) ** self.power
-
-        # Direction penalty
-        wrong_dir = (torch.sign(pred_median) != torch.sign(target_smooth)).float()
-
-        # ★★ 새 공식: 방향 틀렸을 때 exponential penalty
-        # wrong_dir=1일 때: exp(direction_boost) = e^5 = 148배 페널티
-        # wrong_dir=0일 때: exp(0) = 1배 (정상)
-        direction_factor = torch.exp(self.direction_boost * wrong_dir)
-
-        loss = (base_loss * importance * direction_factor).mean()
-
+        scaler = 2000.0  # 타겟이 0.001이라도 tanh(2.0) ≈ 0.96이 되어 완벽한 부호(Sign) 함수 역할을 함
+        
+        # tanh(x*20) ≈ sign(x) but differentiable
+        soft_pred_sign = torch.tanh(pred_median * scaler)
+        soft_actual_sign = torch.tanh(targets * scaler)
+        
+        # direction loss: 부호가 다르면 양수, 같으면 음수 → 최소화하면 부호 일치
+        direction_loss = (1 - soft_pred_sign * soft_actual_sign).mean()
+        
+        # ── 3. Profit-aligned Loss ──
+        # 예측 방향으로 포지션 잡았을 때의 수익 극대화
+        profit_loss = -(torch.tanh(pred_median * scaler) * targets).mean()
+        
+        # ── Total ──
+        total = weighted_ql + self.direction_weight * direction_loss + 0.1 * profit_loss
+        
         with torch.no_grad():
-            dir_acc = (torch.sign(pred_median) == torch.sign(target_smooth)).float().mean().item()
-
-        return loss, {
-            'payoff_loss': loss.item(),
+            dir_acc = (torch.sign(pred_median) == torch.sign(targets)).float().mean().item()
+        
+        return total, {
+            'quantile_loss': weighted_ql.item(),
+            'direction_loss': direction_loss.item(),
+            'profit_loss': profit_loss.item(),
             'direction_accuracy': dir_acc,
         }
 
 
 # ════════════════════════════════════════════════════════════════
-# 6. HIGH-LEVEL WRAPPER (TFTSignalModel 수정)
+# 6. HIGH-LEVEL WRAPPER
 # ════════════════════════════════════════════════════════════════
 class TFTSignalModel:
-    """TFT 모델의 학습/예측/저장/로드 래퍼."""
-
     def __init__(self, config: TFTConfig = None):
         self.config = config
         self.model = TemporalFusionTransformer(config)
@@ -582,8 +500,7 @@ class TFTSignalModel:
         self.target_col = config.target_col
         self.scaler_params = {}
         self.target_scaler = None
-        
-    # ── SEED ──
+
     @staticmethod
     def _set_seed(seed: int):
         random.seed(seed)
@@ -593,7 +510,6 @@ class TFTSignalModel:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    # ── LR SCHEDULER ──
     def _create_scheduler(self, optimizer, steps_per_epoch: int):
         cfg = self.config
         total_steps = steps_per_epoch * cfg.max_epochs
@@ -614,25 +530,21 @@ class TFTSignalModel:
                 pct_start=cfg.warmup_epochs / cfg.max_epochs, anneal_strategy='cos',
                 final_div_factor=cfg.learning_rate / max(cfg.min_lr, 1e-8))
 
-        else:  # 'plateau'
+        else:
             return torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, mode='min', factor=0.5, patience=7, min_lr=cfg.min_lr)
-    
-    # ── CHECKPOINT ──
+
     def _save_checkpoint(self, tag: str):
-        if not os.path.exists(self.config.model_dir):
-            os.makedirs(self.config.model_dir, exist_ok=True)
+        os.makedirs(self.config.model_dir, exist_ok=True)
         path = os.path.join(self.config.model_dir, f'tft_{tag}.pt')
-        
-        # 모델 state_dict만 저장 (가볍게)
         torch.save(self.model.state_dict(), path)
         
-        # 메타데이터 별도 저장
         meta_path = os.path.join(self.config.model_dir, f'tft_{tag}_meta.json')
         meta = {
             'feature_cols': self.feature_cols,
             'scaler_params': {k: v.tolist() if isinstance(v, np.ndarray) else v 
                              for k, v in self.scaler_params.items()},
+            'target_scaler': self.target_scaler,
             'config': {k: v for k, v in self.config.__dict__.items() if not k.startswith('_')}
         }
         with open(meta_path, 'w') as f:
@@ -641,9 +553,7 @@ class TFTSignalModel:
 
     def _save_full_checkpoint(self, tag: str, epoch, optimizer, scheduler, scaler,
                               best_val_loss, patience_counter, global_step):
-        """학습 재개를 위한 전체 상태 저장."""
-        if not os.path.exists(self.config.model_dir):
-            os.makedirs(self.config.model_dir, exist_ok=True)
+        os.makedirs(self.config.model_dir, exist_ok=True)
         path = os.path.join(self.config.model_dir, f'tft_{tag}.pt')
         
         state = {
@@ -658,6 +568,7 @@ class TFTSignalModel:
             'global_step': global_step,
             'feature_cols': self.feature_cols,
             'scaler_params': self.scaler_params,
+            'target_scaler': self.target_scaler,
             'config': self.config.__dict__
         }
         torch.save(state, path)
@@ -667,11 +578,9 @@ class TFTSignalModel:
         path = os.path.join(self.config.model_dir, f'tft_{tag}.pt')
         if not os.path.exists(path):
             raise FileNotFoundError(f"체크포인트 없음: {path}")
-            
         self.model.load_state_dict(torch.load(path, map_location=self.config.device))
         logger.info(f"모델 로드 완료: {path}")
         
-        # 메타데이터 로드
         meta_path = os.path.join(self.config.model_dir, f'tft_{tag}_meta.json')
         if os.path.exists(meta_path):
             with open(meta_path, 'r') as f:
@@ -679,11 +588,11 @@ class TFTSignalModel:
             self.feature_cols = meta['feature_cols']
             self.scaler_params = {k: np.array(v) if isinstance(v, list) else v 
                                  for k, v in meta['scaler_params'].items()}
+            self.target_scaler = meta.get('target_scaler', None)
 
     def _load_full_checkpoint(self, path: str, optimizer, scheduler, scaler):
         if not os.path.exists(path):
             raise FileNotFoundError(f"체크포인트 없음: {path}")
-            
         checkpoint = torch.load(path, map_location=self.config.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -692,56 +601,36 @@ class TFTSignalModel:
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
         if self.ema and checkpoint.get('ema_state_dict'):
             self.ema.load_state_dict(checkpoint['ema_state_dict'])
-            
+        
         self.feature_cols = checkpoint['feature_cols']
         self.scaler_params = checkpoint['scaler_params']
+        self.target_scaler = checkpoint.get('target_scaler', None)
         
         return checkpoint
 
     def _normalize(self, train_df, val_df, cols):
-        """Z-score 정규화 (train 기준). target_col도 정규화."""
+        """피처만 정규화. 타겟은 원본 유지."""
         train_df = train_df.copy()
         if val_df is not None:
             val_df = val_df.copy()
 
-        # temporal 피처 정규화
         mean = train_df[cols].mean()
-        std = train_df[cols].std().replace(0, 1.0)   # ← Series.replace 는 정상 동작
+        std = train_df[cols].std().replace(0, 1.0)
         train_df[cols] = (train_df[cols] - mean) / std
         if val_df is not None:
             val_df[cols] = (val_df[cols] - mean) / std
         self.scaler_params = {'mean': mean.values, 'std': std.values}
-
-        # 타겟 정규화 (target_col은 cols에 포함되지 않을 수 있음)
-        target = self.target_col
-        t_mean = train_df[target].mean()
-        t_std = train_df[target].std()
-        if t_std == 0:
-            t_std = 1.0
-        train_df[target] = (train_df[target] - t_mean) / t_std
-        if val_df is not None:
-            val_df[target] = (val_df[target] - t_mean) / t_std
-        self.target_scaler = (t_mean, t_std)
-
+        self.target_scaler = None  # 타겟 정규화 안 함
         return train_df, val_df
 
-    def fit(self, cfg: TFTConfig, train_df: pd.DataFrame, val_df: pd.DataFrame, feature_cols: List[str], resume_from=None):
-        """
-        학습 수행.
-        
-        Args:
-            train_df, val_df: 학습/검증 데이터
-            feature_cols: 피처 컬럼 리스트 (static 포함)
-            target_col: 타겟 컬럼명
-        """
+    def fit(self, cfg: TFTConfig, train_df: pd.DataFrame, val_df: pd.DataFrame, 
+            feature_cols: List[str], resume_from=None):
         static_cols = ['session_asia', 'session_europe', 'session_us']
         temporal_cols = [c for c in feature_cols if c not in static_cols]
 
-        cfg.num_static_features = len(static_cols)      # 3
-        cfg.num_temporal_features = len(temporal_cols)  # 27 (실제 개수!)
+        cfg.num_static_features = len(static_cols)
+        cfg.num_temporal_features = len(temporal_cols)
         cfg.num_features = len(feature_cols)
-
-        # ★ 허스트 인덱스 설정 (중요!)
 
         self.config = cfg
         self.feature_cols = feature_cols
@@ -749,12 +638,10 @@ class TFTSignalModel:
 
         self.model = TemporalFusionTransformer(cfg)
         self.model.to(cfg.device)
-        self.model.set_feature_indices(temporal_cols)  # ← 추가!
+        self.model.set_feature_indices(temporal_cols)
         
-        # 정규화
         train_norm, val_norm = self._normalize(train_df, val_df, temporal_cols)
 
-        # Dataset/Loader
         train_dataset = TFTDataset(cfg, train_norm, feature_cols)
         val_dataset = TFTDataset(cfg, val_norm, feature_cols)
         train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size,
@@ -769,40 +656,33 @@ class TFTSignalModel:
         scheduler = self._create_scheduler(optimizer, steps_per_epoch)
         is_step_scheduler = cfg.lr_scheduler in ('cosine', 'onecycle')
 
-        # [IDEA 2] 새로운 손실 함수 사용
-        criterion = PayoffWeightedLoss(
+        # ★ 복원된 Loss 함수
+        criterion = DirectionalQuantileLoss(
             cfg.quantiles,
-            delta=cfg.loss_delta,
-            power=cfg.loss_power,
-            wrong_penalty=cfg.loss_wrong_penalty,
-            label_smoothing=cfg.label_smoothing,
-            direction_boost=cfg.loss_direction_boost
+            direction_weight=cfg.direction_loss_weight,
+            large_move_weight=cfg.large_move_weight,
         )
 
         if cfg.use_ema:
             self.ema = EMAModel(self.model, decay=cfg.ema_decay)
 
-        # [SWA] 초기화
         swa_model = None
         swa_scheduler = None
         if cfg.use_swa:
             swa_model = AveragedModel(self.model)
             swa_scheduler = SWALR(optimizer, swa_lr=cfg.swa_lr)
-            logger.info(f"SWA 활성화: 시작 에포크 {cfg.swa_start_epoch}, LR {cfg.swa_lr}")
+            logger.info(f"SWA 활성화: epoch {cfg.swa_start_epoch}부터, LR {cfg.swa_lr}")
 
         scaler = GradScaler(enabled=cfg.use_amp)
 
-        # TensorBoard
         run_name = datetime.now().strftime('%Y%m%d_%H%M%S')
         tb_dir = os.path.join(cfg.log_dir, run_name)
         writer = SummaryWriter(log_dir=tb_dir)
         config_text = json.dumps(
             {k: v for k, v in cfg.__dict__.items() if not k.startswith('_')},
             indent=2, default=str)
-        writer.add_text('config', f'```\\n{config_text}\\n```', 0)
-        logger.info(f"TensorBoard: tensorboard --logdir {cfg.log_dir}")
+        writer.add_text('config', f'```\n{config_text}\n```', 0)
 
-        # Resume
         start_epoch = 0
         best_val_loss = float('inf')
         patience_counter = 0
@@ -814,36 +694,32 @@ class TFTSignalModel:
             best_val_loss = ckpt['best_val_loss']
             patience_counter = ckpt['patience_counter']
             global_step = ckpt['global_step']
-            logger.info(f"학습 이어하기: epoch {start_epoch}부터 재개")
+            logger.info(f"학습 이어하기: epoch {start_epoch}부터")
 
         history = {'train_loss': [], 'val_loss': [], 'val_direction_acc': [], 'learning_rate': []}
 
         param_count = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         logger.info(f"학습 시작: {len(train_dataset)} samples, device={cfg.device}, "
                     f"AMP={cfg.use_amp}, EMA={cfg.use_ema}, params={param_count:,}")
-        writer.add_scalar('info/param_count', param_count, 0)
 
+        mid = cfg.quantiles.index(0.5) if 0.5 in cfg.quantiles else len(cfg.quantiles) // 2
+
+        # ---------- Train Loop ----------
         for epoch in range(start_epoch, cfg.max_epochs):
-            # ── Train ──
             self.model.train()
             epoch_loss = 0.0
             epoch_dir_correct = 0
             epoch_dir_total = 0
             optimizer.zero_grad()
 
+            in_swa = cfg.use_swa and epoch >= cfg.swa_start_epoch
 
             for step, batch in enumerate(train_loader):
                 temporal = batch['temporal'].to(cfg.device)
                 static = batch['static'].to(cfg.device)
                 target = batch['target'].to(cfg.device)
 
-                # [IDEA] Mixup Augmentation (에포크 50 이후부터만 50% 확률)
-                if epoch >= 50 and np.random.rand() < 0.5:  # ← epoch 조건 추가
-                    lam = np.random.beta(0.2, 0.2)
-                    index = torch.randperm(temporal.size(0)).to(temporal.device)
-                    temporal = lam * temporal + (1 - lam) * temporal[index]
-                    static = lam * static + (1 - lam) * static[index]
-                    target = lam * target + (1 - lam) * target[index]
+                # ★ Mixup 제거됨 (시계열에서 의미 없음)
 
                 with autocast(enabled=cfg.use_amp, device_type='cuda'):
                     preds, _, _ = self.model(temporal, static)
@@ -862,12 +738,8 @@ class TFTSignalModel:
                     if self.ema:
                         self.ema.update(self.model)
                     
-                    # [SWA] 스케줄러 분기
-                    if cfg.use_swa and epoch >= cfg.swa_start_epoch:
-                        # SWA는 에포크 단위로 스텝하지만, 여기서는 batch step에서 아무것도 안함
-                        # 실제 step()은 에포크 끝에서 호출
-                        pass
-                    elif is_step_scheduler:
+                    # ★ SWA 구간에서는 기본 scheduler skip
+                    if not in_swa and is_step_scheduler:
                         scheduler.step()
 
                     global_step += 1
@@ -875,39 +747,34 @@ class TFTSignalModel:
                     if global_step % cfg.log_every_n_steps == 0:
                         lr_now = optimizer.param_groups[0]['lr']
                         writer.add_scalar('step/train_loss', loss.item() * cfg.accumulation_steps, global_step)
-                        writer.add_scalar('step/payoff_loss', loss_dict['payoff_loss'], global_step)
+                        writer.add_scalar('step/quantile_loss', loss_dict['quantile_loss'], global_step)
+                        writer.add_scalar('step/direction_loss', loss_dict['direction_loss'], global_step)
+                        writer.add_scalar('step/direction_acc', loss_dict['direction_accuracy'], global_step)
                         writer.add_scalar('step/lr', lr_now, global_step)
-                        gn = grad_norm.item() if torch.is_tensor(grad_norm) else grad_norm
-                        writer.add_scalar('step/grad_norm', gn, global_step)
-                        if cfg.use_amp:
-                            writer.add_scalar('step/amp_scale', scaler.get_scale(), global_step)
 
                 epoch_loss += loss.item() * cfg.accumulation_steps
 
                 with torch.no_grad():
-                    mid = cfg.quantiles.index(0.5)
                     pd_dir = torch.sign(preds[:, 0, mid])
                     ad_dir = torch.sign(target[:, 0])
                     epoch_dir_correct += (pd_dir == ad_dir).sum().item()
                     epoch_dir_total += target.shape[0]
 
-            # ── SWA Update (Epoch End) ──
-            if cfg.use_swa and epoch >= cfg.swa_start_epoch:
+            # SWA update
+            if in_swa:
                 swa_model.update_parameters(self.model)
                 swa_scheduler.step()
-                logger.info(f"Epoch {epoch+1}/{cfg.max_epochs} - [SWA Update] LR: {swa_scheduler.get_last_lr()[0]:.6f}")
 
             avg_train_loss = epoch_loss / max(len(train_loader), 1)
             train_dir_acc = epoch_dir_correct / max(epoch_dir_total, 1)
 
-            # ── Validate (EMA) ──
             if self.ema:
                 self.ema.apply_shadow(self.model)
             val_loss, val_dir_acc, val_ld = self._validate(val_loader, criterion)
             if self.ema:
                 self.ema.restore(self.model)
 
-            if not is_step_scheduler:
+            if not is_step_scheduler and not in_swa:
                 scheduler.step(val_loss)
 
             current_lr = optimizer.param_groups[0]['lr']
@@ -917,18 +784,9 @@ class TFTSignalModel:
             history['val_direction_acc'].append(val_dir_acc)
             history['learning_rate'].append(current_lr)
 
-            # TensorBoard epoch
             writer.add_scalars('epoch/loss', {'train': avg_train_loss, 'val': val_loss}, epoch)
             writer.add_scalars('epoch/dir_acc', {'train': train_dir_acc, 'val': val_dir_acc}, epoch)
-            writer.add_scalar('epoch/val_payoff_loss', val_ld['payoff_loss'], epoch)
             writer.add_scalar('epoch/lr', current_lr, epoch)
-
-            if (epoch + 1) % 5 == 0:
-                for name, param in self.model.named_parameters():
-                    if param.requires_grad:
-                        writer.add_histogram(f'params/{name}', param.data, epoch)
-                        if param.grad is not None:
-                            writer.add_histogram(f'grads/{name}', param.grad, epoch)
 
             is_best = val_loss < best_val_loss
             logger.info(
@@ -952,22 +810,16 @@ class TFTSignalModel:
 
             if (epoch + 1) % cfg.save_every_n_epochs == 0:
                 self._save_full_checkpoint(f'epoch_{epoch+1}_full', epoch, optimizer,
-                                          scheduler, scaler, best_val_loss,
-                                          patience_counter, global_step)
+                                           scheduler, scaler, best_val_loss,
+                                           patience_counter, global_step)
 
         writer.close()
         
-        # [SWA] 학습 종료 후 저장
         if cfg.use_swa and swa_model is not None:
-             # BN update (LayerNorm이라 필수 아닐 수 있으나 권장)
-             # torch.optim.swa_utils.update_bn(train_loader, swa_model, device=cfg.device)
-             
-             if not os.path.exists(cfg.model_dir):
-                os.makedirs(cfg.model_dir, exist_ok=True)
-                
-             swa_path = os.path.join(cfg.model_dir, 'tft_swa.pt')
-             torch.save(swa_model.state_dict(), swa_path)
-             logger.info(f"SWA 모델 저장 완료: {swa_path}")
+            os.makedirs(cfg.model_dir, exist_ok=True)
+            swa_path = os.path.join(cfg.model_dir, 'tft_swa.pt')
+            torch.save(swa_model.state_dict(), swa_path)
+            logger.info(f"SWA 모델 저장 완료: {swa_path}")
 
         self._load_checkpoint('best')
         if self.ema:
@@ -983,8 +835,13 @@ class TFTSignalModel:
         total_loss = 0.0
         correct = 0
         total = 0
-        agg_ld = {'payoff_loss': 0.0, 'direction_accuracy': 0.0}
-        mid = self.config.quantiles.index(0.5)
+        agg_ld = {
+            'quantile_loss': 0.0,
+            'direction_loss': 0.0,
+            'profit_loss': 0.0,
+            'direction_accuracy': 0.0,
+        }
+        mid = self.config.quantiles.index(0.5) if 0.5 in self.config.quantiles else len(self.config.quantiles) // 2
 
         for batch in val_loader:
             temporal = batch['temporal'].to(self.config.device)
@@ -996,10 +853,9 @@ class TFTSignalModel:
                 loss, ld = criterion(preds, target)
 
             total_loss += loss.item()
-            for k, v in ld.items():
-                agg_ld[k] += v
-            # ld['direction_accuracy'] is batch mean, but we want exact count for total accuracy
-            # so we recalculate:
+            for k in agg_ld.keys():
+                agg_ld[k] += ld.get(k, 0.0)
+            
             correct += (torch.sign(preds[:, 0, mid]) == torch.sign(target[:, 0])).sum().item()
             total += target.shape[0]
 
@@ -1008,7 +864,6 @@ class TFTSignalModel:
 
     @torch.no_grad()
     def predict(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
-        """예측 수행 및 결과 반환."""
         assert self.model is not None, "모델이 학습되지 않았습니다."
         assert self.feature_cols is not None, "feature_cols가 설정되지 않았습니다."
         
@@ -1018,16 +873,18 @@ class TFTSignalModel:
         
         df_norm = df.copy()
         
-        # Temporal 피처 정규화
         static_cols = ['session_asia', 'session_europe', 'session_us']
         temporal_cols = [c for c in self.feature_cols if c not in static_cols]
         
-        # scaler_params 적용
         mean = self.scaler_params['mean']
         std = self.scaler_params['std']
+        
+        # ★ Shape 검증
+        assert len(mean) == len(temporal_cols), \
+            f"Scaler shape mismatch: {len(mean)} vs {len(temporal_cols)} features"
+        
         df_norm[temporal_cols] = (df_norm[temporal_cols] - mean) / std
 
-        # 더미 타겟 (예측 시엔 사용 안 함)
         if self.target_col not in df.columns:
             df_norm[self.target_col] = 0.0
         
@@ -1039,13 +896,13 @@ class TFTSignalModel:
         all_vars = []
 
         cfg = self.config
-        mid_idx = cfg.quantiles.index(0.5) if 0.5 in cfg.quantiles else len(cfg.quantiles)//2
+        mid_idx = cfg.quantiles.index(0.5) if 0.5 in cfg.quantiles else len(cfg.quantiles) // 2
 
         for batch in loader:
             temporal = batch['temporal'].to(cfg.device)
             static = batch['static'].to(cfg.device)
 
-            with torch.no_grad(), autocast(enabled=cfg.use_amp, device_type='cuda'):
+            with autocast(enabled=cfg.use_amp, device_type='cuda'):
                 preds, attn, var_w = self.model(temporal, static)
                 
             all_preds.append(preds.cpu().numpy())
@@ -1058,49 +915,31 @@ class TFTSignalModel:
         if not all_preds:
             return {}
 
-        preds_arr = np.concatenate(all_preds, axis=0)  # (N, H, Q)
+        preds_arr = np.concatenate(all_preds, axis=0)
         attn_arr = np.concatenate(all_attn, axis=0)
         vars_arr = np.concatenate(all_vars, axis=0)
 
-        # ★★★ Confidence 계산 수정 (Overflow 방지) ★★★
         q10_idx = cfg.quantiles.index(0.1)
         q90_idx = cfg.quantiles.index(0.9)
         
-        # ★ Spread 계산 (역정규화 BEFORE)
-        # 현재: 역정규화 후 spread 계산 → 스케일 왜곡
-        # 수정: 역정규화 전에 spread 계산
-        
-        # 정규화된 상태에서 spread 계산
-        spread_normalized = np.clip(
+        spread = np.clip(
             preds_arr[:, :, q90_idx] - preds_arr[:, :, q10_idx],
-            1e-6, 10.0  # ← 범위 확대
+            1e-6, 10.0
         )
-        
-        # Confidence: spread가 작을수록 확신
-        # 분산 기반: spread의 표준편차로 정규화
-        spread_std = spread_normalized.std() + 1e-6
-        spread_norm = spread_normalized / spread_std
-        confidence = 1.0 / (1.0 + spread_norm)  # 0.5 ~ 1.0 범위
-        
-        # 예측값 역정규화 (target_scaler 사용)
-        if hasattr(self, 'target_scaler') and self.target_scaler is not None:
-            t_mean, t_std = self.target_scaler
-            preds_arr = preds_arr * t_std + t_mean
-        
-        return {
-            'quantiles': preds_arr,                    # 전체 quantile 예측
-            'median_pred': preds_arr[:, :, mid_idx],   # 중앙값 (0.5 quantile)
-            'attention': attn_arr,                     # Attention weights
-            'variable_importance': vars_arr,           # 변수 중요도
-            'confidence': confidence,                  # ★ 수정됨
-            'direction_prob': (preds_arr > 0).mean(axis=-1),  # 상승 확률
-        }
+        spread_std = spread.std() + 1e-6
+        confidence = 1.0 / (1.0 + spread / spread_std)
 
+        return {
+            'quantiles': preds_arr,
+            'median_pred': preds_arr[:, :, mid_idx],
+            'attention': attn_arr,
+            'variable_importance': vars_arr,
+            'confidence': confidence,
+            'direction_prob': (preds_arr > 0).mean(axis=-1),
+        }
 
     @classmethod
     def load(cls, path: str):
-        """저장된 모델 로드."""
-        # Config 로드
         model_dir = os.path.dirname(path)
         tag = os.path.basename(path).replace('tft_', '').replace('.pt', '')
         meta_path = os.path.join(model_dir, f'tft_{tag}_meta.json')
@@ -1111,7 +950,6 @@ class TFTSignalModel:
         if os.path.exists(meta_path):
             with open(meta_path, 'r') as f:
                 meta = json.load(f)
-            # dict to config
             for k, v in meta['config'].items():
                 if hasattr(config, k):
                     setattr(config, k, v)
@@ -1121,7 +959,6 @@ class TFTSignalModel:
         instance.model = TemporalFusionTransformer(config)
         instance.model.to(config.device)
         
-        # Weights 로드
         checkpoint = torch.load(path, map_location=config.device)
         if 'model_state_dict' in checkpoint:
             instance.model.load_state_dict(checkpoint['model_state_dict'])
@@ -1132,52 +969,35 @@ class TFTSignalModel:
             instance.feature_cols = feature_cols
             
         if os.path.exists(meta_path):
-             with open(meta_path, 'r') as f:
+            with open(meta_path, 'r') as f:
                 meta = json.load(f)
-             instance.scaler_params = {k: np.array(v) if isinstance(v, list) else v 
-                                  for k, v in meta['scaler_params'].items()}
+            instance.scaler_params = {k: np.array(v) if isinstance(v, list) else v 
+                                 for k, v in meta['scaler_params'].items()}
+            instance.target_scaler = meta.get('target_scaler', None)
 
         if instance.config.use_ema:
-             instance.ema = EMAModel(instance.model, decay=instance.config.ema_decay)
+            instance.ema = EMAModel(instance.model, decay=instance.config.ema_decay)
         
         return instance
 
 
 # ════════════════════════════════════════════════════════════════
-# [IDEA 7] Multi-Horizon Ensemble
+# Multi-Horizon Ensemble
 # ════════════════════════════════════════════════════════════════
 class TFTEnsemble:
-    """
-    여러 horizon에 특화된 TFT 모델들을 앙상블.
-    """
     def __init__(self, model_paths: List[str], weights: List[float] = None):
-        """
-        model_paths: 각 모델의 체크포인트 경로 리스트
-        weights: 앙상블 가중치 (기본: [0.5, 0.3, 0.2])
-        """
         self.models = [TFTSignalModel.load(p) for p in model_paths]
-        self.weights = weights if weights is not None else [0.5, 0.3, 0.2]
-        if len(self.models) != len(self.weights):
-             # 가중치 개수 안맞으면 균등하게
-             self.weights = [1.0/len(self.models)] * len(self.models)
-             logger.warning("가중치 개수 불일치 -> 균등 가중치 적용")
-
+        self.weights = weights if weights is not None else [1.0/len(model_paths)] * len(model_paths)
+    
     def predict(self, df: pd.DataFrame) -> np.ndarray:
-        """
-        앙상블 예측 (median prediction의 첫 스텝).
-        Returns:
-            앙상블된 예측값 배열 (길이는 가장 짧은 horizon에 맞춰짐)
-        """
         preds = []
         for m in self.models:
             result = m.predict(df)
             if not result: continue
-            # 첫 번째 horizon의 median 예측 사용
             preds.append(result['median_pred'][:, 0])
 
         if not preds: return np.array([])
         
-        # 길이 맞추기 (가장 짧은 예측 수)
         min_len = min(len(p) for p in preds)
         aligned = [p[-min_len:] for p in preds]
 
@@ -1185,38 +1005,3 @@ class TFTEnsemble:
         for w, p in zip(self.weights, aligned):
             ensemble += w * p
         return ensemble
-
-    def predict_with_confidence(self, df: pd.DataFrame) -> Dict:
-        """
-        각 모델의 confidence도 함께 반환 (단순 평균).
-        """
-        preds = []
-        confs = []
-        for m in self.models:
-            result = m.predict(df)
-            if not result: continue
-            preds.append(result['median_pred'][:, 0])
-            confs.append(result['confidence'][:, 0])
-
-        if not preds: return {}
-
-        min_len = min(len(p) for p in preds)
-        aligned_preds = [p[-min_len:] for p in preds]
-        aligned_confs = [c[-min_len:] for c in confs]
-
-        ensemble_pred = np.zeros(min_len)
-        for w, p in zip(self.weights, aligned_preds):
-            ensemble_pred += w * p
-
-        # Confidence 앙상블 (가중 평균 or 단순 평균)
-        ensemble_conf = np.zeros(min_len)
-        norm_weights = np.array(self.weights) / sum(self.weights)
-        for w, c in zip(norm_weights, aligned_confs):
-            ensemble_conf += w * c
-
-        return {
-            'ensemble_pred': ensemble_pred,
-            'ensemble_confidence': ensemble_conf,
-            'individual_preds': aligned_preds,
-            'individual_confs': aligned_confs,
-        }

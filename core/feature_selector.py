@@ -26,7 +26,7 @@ class FeatureSelector:
         4. must_include 보장
     """
 
-    def __init__(self, target_col: str = 'target_cumret_6',
+    def __init__(self, target_col: str = 'target_ret_3',
                  static_cols: List[str] = None):
         self.target_col = target_col
         self.static_cols = static_cols or ['session_asia', 'session_europe', 'session_us']
@@ -354,7 +354,7 @@ class FeatureSelector:
 
 def auto_select_features(train_df: pd.DataFrame,
                          feature_cols: List[str],
-                         target_col: str = 'target_cumret_6',
+                         target_col: str = 'target_ret_3',
                          max_features: int = 30,
                          corr_threshold: float = 0.85,
                          variance_threshold: float = 0.01,
@@ -376,7 +376,7 @@ def auto_select_features(train_df: pd.DataFrame,
     사용법:
         selected = auto_select_features(
             train_df, ULTIMATE_FEATURE_COLS,
-            target_col='target_cumret_6',
+            target_col='target_ret_3',
             max_features=15,
             must_include=['whale_conviction', 'funding_pressure',
                           'net_taker_ratio', 'oi_change_rate'],
