@@ -23,30 +23,50 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+# [train_TFT.py 의 load_data 함수 전체 교체]
+
 def load_data(path: str = 'data/training_features_5m.csv'):
     logger.info(f"데이터 로드: {path}")
     df = pd.read_csv(path, parse_dates=['timestamp'])
 
-    # 타겟 컬럼 자동 생성
-    if 'target_ret_3' not in df.columns:
-        logger.info("타겟 컬럼 부재 → 자동 생성")
-        df['target_ret_3'] = (df['close'].shift(-3) / df['close'] - 1)
+    # 🚨 1. 무한대 값 등 에러 유발 인자 사전 차단
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-    # regime_break 부재 시 0s
+    # 🚨 2. MTF 피처 생성
+    df['ema_1h'] = df['close'].ewm(span=12).mean()
+    df['ema_4h'] = df['close'].ewm(span=48).mean()
+    df['mtf_trend_1h'] = (df['close'] / df['ema_1h']) - 1
+    df['mtf_trend_4h'] = (df['close'] / df['ema_4h']) - 1
+
+    # 🚨 3. 미래 3봉 VWAP 타겟 (안전한 계산)
+    logger.info("타겟 컬럼 생성: 미래 3봉 VWAP")
+    tp = (df['high'] + df['low'] + df['close']) / 3.0
+    tp_vol = tp * df['volume']
+    
+    future_tp_vol_sum = tp_vol.rolling(window=3).sum().shift(-3)
+    future_vol_sum = df['volume'].rolling(window=3).sum().shift(-3)
+    future_tp_avg = tp.rolling(window=3).mean().shift(-3)
+    
+    # 거래량이 0인 구간은 일반 평균(tp_avg)으로 대체하여 NaN/Inf 원천 봉쇄
+    future_vwap = np.where(future_vol_sum == 0, future_tp_avg, future_tp_vol_sum / future_vol_sum.replace(0, np.nan))
+    
+    df['target_ret_3'] = (future_vwap / df['close']) - 1
+
     if 'regime_break' not in df.columns:
         df['regime_break'] = 0.0
 
-    all_features = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
+    # 🚨 4. 결측치(NaN) 완벽 제거 (이 한 줄이 없어서 Train이 NaN이 되었습니다!)
+    df.dropna(inplace=True)
 
-    missing = [c for c in ULTIMATE_FEATURE_COLS if c not in df.columns]
-    if missing:
-        logger.warning(f"누락 피처 ({len(missing)}개): {missing[:10]}...")
+    all_features = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
+    
+    for c in ['mtf_trend_1h', 'mtf_trend_4h']:
+        if c not in all_features:
+            all_features.append(c)
 
     logger.info(f"  ✓ {len(df):,}행, {len(all_features)}개 피처")
-    logger.info(f"  ✓ 기간: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
     return df, all_features
-
-
+    
 def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15):
     n = len(df)
     train_end = int(n * train_ratio)
@@ -186,7 +206,7 @@ def main():
         must_include=[
             'whale_conviction', 'net_taker_ratio', 'oi_change_rate',
             'funding_z_score', 'hurst_48', 'regime_trending',
-            'volatility_z', 'garman_klass_vol'
+            'volatility_z', 'garman_klass_vol', 'mtf_trend_1h', 'mtf_trend_4h'
         ]
     )
     logger.info(f"선택된 피처 ({len(selected_features)}개): {selected_features}")

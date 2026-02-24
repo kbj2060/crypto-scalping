@@ -359,6 +359,7 @@ class TemporalFusionTransformer(nn.Module):
         B, T, _ = temporal.shape
         H = self.config.hidden_size
 
+        
         static_emb = self.static_encoder(static)
         cs_e = self.static_context_enrichment(static_emb)
         cs_h = self.static_context_state_h(static_emb)
@@ -409,83 +410,87 @@ class TemporalFusionTransformer(nn.Module):
 # ════════════════════════════════════════════════════════════════
 # 5. LOSS: Directional Quantile Loss v3 (52%/53.1% 달성 버전 복원)
 # ════════════════════════════════════════════════════════════════
+# [TFT_model.py 의 5. LOSS 부분 전체 교체]
+
+# [TFT_model.py 의 DirectionalQuantileLoss 클래스 전체 교체]
+
 class DirectionalQuantileLoss(nn.Module):
     """
-    표준 Quantile Loss + Differentiable Direction Loss.
-    
-    BCE 제거 이유: pred_median(~0.001)을 로짓으로 쓰면 sigmoid(0.001)≈0.5
-    → 모든 예측이 50%로 해석되어 방향 학습 불가능.
-    
-    대신 tanh 기반 differentiable direction loss 사용:
-    - torch.tanh(x * 20)은 sign(x)와 거의 같지만 gradient가 존재
-    - 예측을 올바른 방향으로 "밀어주는" 학습 가능
+    기울기 소실(Vanishing Gradient)을 완벽히 제거한 최적화된 손실 함수.
+    큰 움직임(Large Moves)에 대한 패널티를 선형적으로 증폭시킴.
     """
     def __init__(self, quantiles: List[float],
-                 direction_weight: float = 1.0,
-                 large_move_weight: float = 2.0):
+                 direction_weight: float = 5.0,     # 🚨 방향성 틀림에 대한 가중치 대폭 상향
+                 large_move_weight: float = 5.0,    # 🚨 큰 움직임 가중치 상향
+                 sharpe_weight: float = 0.5):
         super().__init__()
         self.quantiles = quantiles
         self.direction_weight = direction_weight
         self.large_move_weight = large_move_weight
+        self.sharpe_weight = sharpe_weight
         self.median_idx = quantiles.index(0.5) if 0.5 in quantiles else len(quantiles) // 2
 
     def forward(self, predictions: torch.Tensor, targets: torch.Tensor):
-        """
-        Args:
-            predictions: [B, H, Q] quantile predictions
-            targets: [B, H] actual values
-        """
         B, H, Q = predictions.shape
         
-        # ── 1. 표준 Quantile Loss ──
-        targets_exp = targets.unsqueeze(-1).expand_as(predictions)  # [B, H, Q]
+        # ── 1. Quantile Loss (기본 체급) ──
+        targets_exp = targets.unsqueeze(-1).expand_as(predictions)
         errors = targets_exp - predictions
         
         quantile_tensor = torch.tensor(
             self.quantiles, device=predictions.device, dtype=predictions.dtype
-        ).unsqueeze(0).unsqueeze(0)  # [1, 1, Q]
+        ).unsqueeze(0).unsqueeze(0)
         
         quantile_loss = torch.max(
             quantile_tensor * errors,
             (quantile_tensor - 1) * errors
         )
         
-        # 큰 움직임 가중치 (타겟 크기 비례)
-        move_size = torch.abs(targets).unsqueeze(-1)  # [B, H, 1]
-        threshold = move_size.median()
-        large_mask = (move_size > threshold).float()
-        weights = 1.0 + (self.large_move_weight - 1.0) * large_mask
+        move_size = torch.abs(targets)
+        move_size_exp = move_size.unsqueeze(-1)
         
+        # 상위 움직임에 가중치 부여
+        threshold = move_size.median() 
+        large_mask = (move_size_exp > threshold).float()
+        
+        weights = 1.0 + (self.large_move_weight - 1.0) * large_mask
         weighted_ql = (quantile_loss * weights).mean()
         
-        # ── 2. Differentiable Direction Loss ──
-        pred_median = predictions[:, :, self.median_idx]  # [B, H]
-        scaler = 2000.0  # 타겟이 0.001이라도 tanh(2.0) ≈ 0.96이 되어 완벽한 부호(Sign) 함수 역할을 함
+        # ── 2. Non-Saturating Directional Penalty (핵심: 기울기 소실 해결) ──
+        pred_median = predictions[:, :, self.median_idx]
+        actual_sign = torch.sign(targets)
         
-        # tanh(x*20) ≈ sign(x) but differentiable
-        soft_pred_sign = torch.tanh(pred_median * scaler)
-        soft_actual_sign = torch.tanh(targets * scaler)
+        # 🚨 예측값과 정답 부호가 다를 경우(곱이 음수)에만 양수 패널티 반환 (ReLU)
+        # 거기에 실제 변동폭(move_size)을 곱해서 큰 움직임을 틀릴수록 막대한 그래디언트 발생!
+        # (예: 3% 파동을 틀리면 0.1% 파동 틀린 것보다 30배 더 강한 전기충격 부여)
+        wrong_dir_penalty = torch.relu(-pred_median * actual_sign) * move_size
         
-        # direction loss: 부호가 다르면 양수, 같으면 음수 → 최소화하면 부호 일치
-        direction_loss = (1 - soft_pred_sign * soft_actual_sign).mean()
+        # 스케일 보정 (수익률 단위가 0.001 단위이므로 100배 곱해서 Loss 실효성 확보)
+        direction_loss = wrong_dir_penalty.mean() * 100.0
         
-        # ── 3. Profit-aligned Loss ──
-        # 예측 방향으로 포지션 잡았을 때의 수익 극대화
-        profit_loss = -(torch.tanh(pred_median * scaler) * targets).mean()
+        # ── 3. Sharpe Ratio Loss (부드러운 포지션 사이징) ──
+        # Tanh 스케일러를 2000 -> 50으로 확 줄여서 그래디언트 생존 (2% 예측일때 0.76 도달)
+        soft_position = torch.tanh(pred_median * 50.0)
+        simulated_returns = soft_position * targets
         
-        # ── Total ──
-        total = weighted_ql + self.direction_weight * direction_loss + 0.1 * profit_loss
+        expected_return = simulated_returns.mean()
+        var = simulated_returns.var(unbiased=False)
+        volatility = torch.sqrt(torch.clamp(var, min=1e-8))
+        
+        sharpe_ratio = expected_return / volatility
+        sharpe_loss = -sharpe_ratio * self.sharpe_weight
+        
+        total = weighted_ql + (self.direction_weight * direction_loss) + sharpe_loss
         
         with torch.no_grad():
-            dir_acc = (torch.sign(pred_median) == torch.sign(targets)).float().mean().item()
+            dir_acc = (torch.sign(pred_median) == actual_sign).float().mean().item()
         
         return total, {
             'quantile_loss': weighted_ql.item(),
             'direction_loss': direction_loss.item(),
-            'profit_loss': profit_loss.item(),
+            'sharpe_loss': sharpe_loss.item(),
             'direction_accuracy': dir_acc,
         }
-
 
 # ════════════════════════════════════════════════════════════════
 # 6. HIGH-LEVEL WRAPPER
