@@ -174,7 +174,9 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
 
 def main():
     parser = argparse.ArgumentParser(description='TFT Signal Model 학습')
-    parser.add_argument('--resume', type=str, default=None, help='체크포인트 경로')
+    parser.add_argument('--resume', type=str, default=None, help='일반 체크포인트 이어서 학습 (Full Resume)')
+    # ★ 추가: Optuna 모델 가중치를 로드하여 처음부터 추가 학습
+    parser.add_argument('--resume-best-optuna', type=str, default=None, help='Optuna 최고 점수 모델 가중치 경로 (Warm Start)')
     parser.add_argument('--data', type=str, default='data/training_features_5m.csv')
     args = parser.parse_args()
 
@@ -186,7 +188,7 @@ def main():
     print("=" * 80)
     start_time = datetime.now()
 
-    df, feature_cols = load_data(args.data, _default_cfg.forecast_horizon)
+    df, feature_cols = load_data(args.data)
     train_df, val_df, test_df = split_data(df)
 
     # ★ 타겟 선택 — TFTConfig.target_col 사용
@@ -225,7 +227,13 @@ def main():
 
     # 학습
     model = TFTSignalModel(cfg)
-    history = model.fit(cfg, train_df, val_df, selected_features, args.resume)
+    
+    # ★ 변경: args.resume_best_optuna 값을 warm_start_path로 전달
+    history = model.fit(
+        cfg, train_df, val_df, selected_features, 
+        resume_from=args.resume,
+        warm_start_path=args.resume_best_optuna
+    )
     
     model._save_checkpoint('final')
     metrics = evaluate_model(model, test_df)
