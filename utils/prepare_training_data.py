@@ -19,8 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.feature_engineering import FeatureEngineer, ULTIMATE_FEATURE_COLS
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
-    OrderblockFVGStrategy, NetTakerFlowStrategy,
-    BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
+    OrderblockFVGStrategy, NetTakerFlowStrategy
 )
 
 # 로깅 설정
@@ -110,10 +109,6 @@ def prepare_training_data():
         LiquidationSqueezeHunter(),     # strategy_1
         OrderblockFVGStrategy(),        # strategy_2
         NetTakerFlowStrategy(),         # strategy_3
-        BTCEthCorrelation(),            # strategy_4
-        VolatilitySqueeze(),            # strategy_5
-        VWAPDeviation(),                # strategy_6
-        HMAMomentum(),                  # strategy_7
     ]
     
     logger.info(f"🧠 전략 초기화: {len(strategies)}개")

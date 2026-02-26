@@ -15,8 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
-    OrderblockFVGStrategy, NetTakerFlowStrategy,
-    BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
+    OrderblockFVGStrategy, NetTakerFlowStrategy
 )
 
 # 로깅 설정
@@ -65,10 +64,6 @@ def generate_strategy_signals(input_file='data/integrated_eth_3m_data.csv',
         LiquidationSqueezeHunter(),     # strategy_1
         OrderblockFVGStrategy(),        # strategy_2
         NetTakerFlowStrategy(),         # strategy_3
-        BTCEthCorrelation(),            # strategy_4
-        VolatilitySqueeze(),            # strategy_5
-        VWAPDeviation(),                # strategy_6
-        HMAMomentum(),                  # strategy_7
     ]
     
     logger.info(f"🧠 전략 초기화 완료: {len(strategies)}개 (Elite 8)")

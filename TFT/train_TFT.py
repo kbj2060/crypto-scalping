@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # [train_TFT.py 의 load_data 함수 전체 교체]
 
-def load_data(path: str = 'data/training_features_5m.csv'):
+def load_data(path: str = 'data/training_features_5m.csv', h: int = 6):
     logger.info(f"데이터 로드: {path}")
     df = pd.read_csv(path, parse_dates=['timestamp'])
 
@@ -43,14 +43,14 @@ def load_data(path: str = 'data/training_features_5m.csv'):
     tp = (df['high'] + df['low'] + df['close']) / 3.0
     tp_vol = tp * df['volume']
     
-    future_tp_vol_sum = tp_vol.rolling(window=3).sum().shift(-3)
-    future_vol_sum = df['volume'].rolling(window=3).sum().shift(-3)
-    future_tp_avg = tp.rolling(window=3).mean().shift(-3)
+    future_tp_vol_sum = tp_vol.rolling(window=3).sum().shift(-h)
+    future_vol_sum = df['volume'].rolling(window=3).sum().shift(-h)
+    future_tp_avg = tp.rolling(window=3).mean().shift(-h)
     
     # 거래량이 0인 구간은 일반 평균(tp_avg)으로 대체하여 NaN/Inf 원천 봉쇄
     future_vwap = np.where(future_vol_sum == 0, future_tp_avg, future_tp_vol_sum / future_vol_sum.replace(0, np.nan))
     
-    df['target_ret_3'] = (future_vwap / df['close']) - 1
+    df[f'target_ret_{h}'] = (future_vwap / df['close']) - 1
 
     if 'regime_break' not in df.columns:
         df['regime_break'] = 0.0
@@ -186,7 +186,7 @@ def main():
     print("=" * 80)
     start_time = datetime.now()
 
-    df, feature_cols = load_data(args.data)
+    df, feature_cols = load_data(args.data, _default_cfg.forecast_horizon)
     train_df, val_df, test_df = split_data(df)
 
     # ★ 타겟 선택 — TFTConfig.target_col 사용

@@ -20,7 +20,6 @@ from core import DataCollector
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
     OrderblockFVGStrategy, NetTakerFlowStrategy,
-    BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
 )
 from common.trading_env import TradingEnvironment
 
@@ -42,8 +41,7 @@ class TD3Trainer:
         # Elite 8 Strategies
         self.strategies = [
             WhaleSentimentDivergence(), LiquidationSqueezeHunter(),
-            OrderblockFVGStrategy(), NetTakerFlowStrategy(),
-            BTCEthCorrelation(), VolatilitySqueeze(), VWAPDeviation(), HMAMomentum(),
+            OrderblockFVGStrategy(), NetTakerFlowStrategy()
         ]
         logger.info("전략 초기화: Elite 8 (%d개)", len(self.strategies))
         self._load_features()

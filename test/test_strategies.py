@@ -18,7 +18,6 @@ try:
     from core.feature_engineering import FeatureEngineer
     from strategies.elite_alpha import WhaleSentimentDivergence, LiquidationSqueezeHunter
     from strategies.elite_structure_flow import OrderblockFVGStrategy, NetTakerFlowStrategy
-    from strategies.elite_standard import BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum
 except ImportError as e:
     print(f"⚠️ 모듈 Import 실패: {e}")
     print("프로젝트 루트에서 실행하거나, strategies 폴더에서 python strategies_test.py 로 실행해주세요.")
@@ -74,11 +73,7 @@ def run_test():
         WhaleSentimentDivergence(),
         LiquidationSqueezeHunter(),
         OrderblockFVGStrategy(),
-        NetTakerFlowStrategy(),
-        BTCEthCorrelation(),
-        VolatilitySqueeze(),
-        VWAPDeviation(),
-        HMAMomentum()
+        NetTakerFlowStrategy()
     ]
     
     # 4. Run Strategy Backtest (Signal Check)

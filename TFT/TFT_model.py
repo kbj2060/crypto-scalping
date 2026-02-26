@@ -36,20 +36,21 @@ logger = logging.getLogger(__name__)
 # ════════════════════════════════════════════════════════════════
 @dataclass
 class TFTConfig:
+    training: bool = True
     """TFT 하이퍼파라미터 — 52%/53.1% 달성 설정 복원."""
     # ── 입력/출력 ──
-    input_window: int = 48           # 48 × 5min = 4시간 룩백
-    forecast_horizon: int = 3        # 6 × 5min = 30분 예측
-    target_col: str = 'target_ret_3'
+    input_window: int = 64           # 48 × 5min = 4시간 룩백
+    forecast_horizon: int = 6        # 6 × 5min = 30분 예측
+    target_col: str = 'target_ret_6'
 
     # ── 모델 구조 ──
     hidden_size: int = 32
     lstm_layers: int = 2
-    attention_heads: int = 8
-    dropout: float = 0.35            # ★ 0.3 → 0.2 복원
+    attention_heads: int = 4
+    dropout: float = 0.2            # ★ 0.3 → 0.2 복원
 
     # ── Variable Selection Network ──
-    num_features: int = 15
+    num_features: int = 35
     num_static_features: int = 3
     num_temporal_features: int = field(init=False)
 
@@ -61,13 +62,13 @@ class TFTConfig:
     learning_rate: float = 1e-4
     batch_size: int = 256
     max_epochs: int = 500
-    patience: int = 50               # ★ 20 → 50 복원
+    patience: int = 100               # ★ 20 → 50 복원
     weight_decay: float = 1e-3
     grad_clip: float = 1.0
 
     # ── Loss 파라미터 ──
-    direction_loss_weight: float = 1.0   # direction penalty 비중
-    large_move_weight: float = 2.0       # 큰 움직임 가중치
+    direction_loss_weight: float = 8.0   # direction penalty 비중
+    large_move_weight: float = 6.0       # 큰 움직임 가중치
 
     # ── LR 스케줄러 ──
     warmup_epochs: int = 20
@@ -306,6 +307,7 @@ class TemporalFusionTransformer(nn.Module):
     def __init__(self, config: TFTConfig):
         super().__init__()
         self.config = config
+        self.training = config.training
         H = config.hidden_size
 
         self.temporal_vsn = VariableSelectionNetwork(
@@ -358,7 +360,23 @@ class TemporalFusionTransformer(nn.Module):
     def forward(self, temporal: torch.Tensor, static: torch.Tensor):
         B, T, _ = temporal.shape
         H = self.config.hidden_size
+        
+        # SOTA 퀀트 증강 기법 (학습(Training) 중에만 작동)
+        if self.training:
+            # [기법 1] Volatility-Adaptive Noise (변동성 비례 노이즈)
+            # 과거 48봉의 '실제 변동성(std)'을 계산하여, 그 변동성의 5%만큼만 노이즈를 주입
+            local_std = temporal.std(dim=1, keepdim=True) + 1e-6
+            noise_scale = 0.05  # 실제 변동성의 5% 수준
+            temporal = temporal + torch.randn_like(temporal) * local_std * noise_scale
 
+            # [기법 2] Time-Step Masking (시간축 블라인드)
+            # 전체 캔들 중 5% 확률로 캔들의 정보 전체를 가려버림 (과적합 원천 차단)
+            mask_prob = 0.05 
+            # 피처(F)는 유지하고 시간(T)을 통째로 끄기 위해 (B, T, 1) 형태의 마스크 생성
+            time_mask = (torch.rand(B, T, 1, device=temporal.device) > mask_prob).float()
+            
+            # 마스킹된 부분의 스케일 붕괴를 막기 위한 보정 (Dropout의 표준 원리)
+            temporal = (temporal * time_mask) / (1.0 - mask_prob)
         
         static_emb = self.static_encoder(static)
         cs_e = self.static_context_enrichment(static_emb)
