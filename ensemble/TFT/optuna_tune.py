@@ -127,8 +127,8 @@ def objective(trial: optuna.Trial, priority: int,
         forecast_horizon = trial.suggest_categorical('forecast_horizon', [1, 3, 6, 12])
         max_features = trial.suggest_int('max_features', 10, 40, step=5)
         hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
-        attention_heads = trial.suggest_categorical('attention_heads', [2, 4, 8])
         lstm_layers = trial.suggest_categorical('lstm_layers', [1, 2])
+        attention_heads = trial.suggest_categorical('attention_heads', [2, 4, 8])
         direction_loss_weight = trial.suggest_float('direction_loss_weight', 3.0, 10.0, step=1.0)
         large_move_weight = trial.suggest_float('large_move_weight', 3.0, 10.0, step=1.0)
         
@@ -230,7 +230,7 @@ def objective(trial: optuna.Trial, priority: int,
         log_dir=f'logs/optuna/trial_{trial.number}',
         log_every_n_steps=500,       # 로그 너무 자주 찍히는 것 방지
         save_every_n_epochs=999,
-        model_dir=f'models/optuna/trial_{trial.number}',
+        model_dir=f'data/tft/optuna/trial_{trial.number}',
         seed=42 + trial.number,
     )
 

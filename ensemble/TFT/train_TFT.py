@@ -1,7 +1,5 @@
 """
-TFT Signal Model 학습 스크립트 (복원 버전)
-
-52% / 53.1% 고확신 달성했던 설정 기반.
+TFT Signal Model 학습 스크립트 (Look-ahead Bias 제거 & 결정론적 순서 유지)
 """
 import sys
 import os
@@ -12,9 +10,9 @@ import numpy as np
 import json
 import torch
 from datetime import datetime
-from TFT_model import TFTSignalModel, TFTConfig, TFTEnsemble
+from TFT_model import TFTSignalModel, TFTConfig
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.feature_selector import auto_select_features
 from core.feature_engineering import ULTIMATE_FEATURE_COLS
@@ -22,48 +20,32 @@ from core.feature_engineering import ULTIMATE_FEATURE_COLS
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-# [train_TFT.py 의 load_data 함수 전체 교체]
-
 def load_data(path: str = 'data/training_features_5m.csv', h: int = 6):
     logger.info(f"데이터 로드: {path}")
     df = pd.read_csv(path, parse_dates=['timestamp'])
-
-    # 🚨 1. 무한대 값 등 에러 유발 인자 사전 차단
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-    # 🚨 2. MTF 피처 생성
     df['ema_1h'] = df['close'].ewm(span=12).mean()
     df['ema_4h'] = df['close'].ewm(span=48).mean()
     df['mtf_trend_1h'] = (df['close'] / df['ema_1h']) - 1
     df['mtf_trend_4h'] = (df['close'] / df['ema_4h']) - 1
 
-    # 🚨 3. 미래 3봉 VWAP 타겟 (안전한 계산)
-    logger.info("타겟 컬럼 생성: 미래 3봉 VWAP")
     tp = (df['high'] + df['low'] + df['close']) / 3.0
-    tp_vol = tp * df['volume']
-    
-    future_tp_vol_sum = tp_vol.rolling(window=3).sum().shift(-h)
-    future_vol_sum = df['volume'].rolling(window=3).sum().shift(-h)
-    future_tp_avg = tp.rolling(window=3).mean().shift(-h)
-    
-    # 거래량이 0인 구간은 일반 평균(tp_avg)으로 대체하여 NaN/Inf 원천 봉쇄
-    future_vwap = np.where(future_vol_sum == 0, future_tp_avg, future_tp_vol_sum / future_vol_sum.replace(0, np.nan))
-    
-    df[f'target_ret_{h}'] = (future_vwap / df['close']) - 1
+    future_tp_vol_sum = (tp * df['volume']).rolling(window=h).sum().shift(-h)
+    future_vol_sum = df['volume'].rolling(window=h).sum().shift(-h)
+    future_tp_avg = tp.rolling(window=h).mean().shift(-h)
+    df[f'target_ret_{h}'] = (np.where(future_vol_sum == 0, future_tp_avg, future_tp_vol_sum / future_vol_sum.replace(0, np.nan)) / df['close']) - 1
 
-    if 'regime_break' not in df.columns:
-        df['regime_break'] = 0.0
+    if 'cvp_poc_dist' not in df.columns:
+        logger.info("📊 Clusters Volume Profile 피처 생성 중...")
+        df = add_cvp_features(df, lookback=200, n_clusters=4, drop_strategy=False)
 
-    # 🚨 4. 결측치(NaN) 완벽 제거 (이 한 줄이 없어서 Train이 NaN이 되었습니다!)
     df.dropna(inplace=True)
 
-    all_features = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
+    # 🔴 [Fix] Set 자료형의 비결정론적 순서를 방지하기 위한 안전한 중복 제거
+    combined_features = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns] + ['mtf_trend_1h', 'mtf_trend_4h']
+    all_features = list(dict.fromkeys(combined_features))
     
-    for c in ['mtf_trend_1h', 'mtf_trend_4h']:
-        if c not in all_features:
-            all_features.append(c)
-
     logger.info(f"  ✓ {len(df):,}행, {len(all_features)}개 피처")
     return df, all_features
     
@@ -71,7 +53,7 @@ def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15):
     n = len(df)
     train_end = int(n * train_ratio)
     val_end = int(n * (train_ratio + val_ratio))
-
+    
     train_df = df.iloc[:train_end].copy()
     val_df = df.iloc[train_end:val_end].copy()
     test_df = df.iloc[val_end:].copy()
@@ -80,7 +62,6 @@ def split_data(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15):
     logger.info(f"  Val:   {len(val_df):,}행")
     logger.info(f"  Test:  {len(test_df):,}행")
     return train_df, val_df, test_df
-
 
 def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     logger.info("\n테스트셋 평가 중...")
@@ -103,7 +84,6 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     pred_1step = median_pred[:, 0]
     actual_1step = np.array([actual[i + cfg.input_window] for i in range(n_samples)])
 
-    # NaN 제거
     valid_mask = ~np.isnan(actual_1step) & ~np.isnan(pred_1step)
     if valid_mask.sum() == 0:
         logger.warning("유효한 평가 샘플 없음")
@@ -129,17 +109,11 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     high_conf_mask = confidence > np.median(confidence)
     high_conf_dir_acc = np.mean(pred_dir[high_conf_mask] == actual_dir[high_conf_mask]) if high_conf_mask.sum() > 0 else 0.0
 
-    returns = pred_dir * actual_1step
-    cumulative_return = np.cumsum(returns)
-    sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * np.sqrt(288 * 365)
-
     metrics = {
         'mae': float(mae), 'rmse': float(rmse),
         'direction_accuracy': float(direction_acc),
         'large_move_direction_acc': float(large_dir_acc),
         'high_confidence_direction_acc': float(high_conf_dir_acc),
-        'simulated_sharpe_ratio': float(sharpe),
-        'simulated_total_return': float(cumulative_return[-1]) if len(cumulative_return) > 0 else 0,
         'test_samples': int(valid_mask.sum()),
     }
 
@@ -151,19 +125,15 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
     logger.info(f"  방향 정확도:              {direction_acc:.1%}")
     logger.info(f"  큰 움직임 방향 정확도:    {large_dir_acc:.1%}")
     logger.info(f"  고확신 방향 정확도:       {high_conf_dir_acc:.1%}")
-    logger.info(f"  시뮬레이션 Sharpe Ratio: {sharpe:.2f}")
-    logger.info(f"  시뮬레이션 누적 수익률:   {cumulative_return[-1]:.4f}")
     logger.info("=" * 60)
 
-    # 변수 중요도
     if 'variable_importance' in result:
         vi = result['variable_importance'].mean(axis=0)
         static_cols = ['session_asia', 'session_europe', 'session_us']
         temporal_cols = [c for c in model.feature_cols if c not in static_cols]
 
         if len(vi) == len(temporal_cols):
-            imp_df = pd.DataFrame({'feature': temporal_cols, 'importance': vi})
-            imp_df = imp_df.sort_values('importance', ascending=False)
+            imp_df = pd.DataFrame({'feature': temporal_cols, 'importance': vi}).sort_values('importance', ascending=False)
             logger.info("\n📊 Top 10 중요 피처:")
             for _, row in imp_df.head(10).iterrows():
                 bar = '█' * int(row['importance'] * 100)
@@ -174,48 +144,34 @@ def evaluate_model(model: TFTSignalModel, test_df: pd.DataFrame):
 
 def main():
     parser = argparse.ArgumentParser(description='TFT Signal Model 학습')
-    parser.add_argument('--resume', type=str, default=None, help='일반 체크포인트 이어서 학습 (Full Resume)')
-    # ★ 추가: Optuna 모델 가중치를 로드하여 처음부터 추가 학습
-    parser.add_argument('--resume-best-optuna', type=str, default=None, help='Optuna 최고 점수 모델 가중치 경로 (Warm Start)')
+    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--resume-best-optuna', type=str, default=None)
     parser.add_argument('--data', type=str, default='data/training_features_5m.csv')
     args = parser.parse_args()
 
-    # horizon / target / max_features → TFTConfig 기본값 사용
     _default_cfg = TFTConfig()
-
+    
     print("\n" + "=" * 80)
-    print("🚀 TFT Signal Model 학습 시작 (복원 버전)")
+    print("🚀 TFT Signal Model 학습 시작")
     print("=" * 80)
     start_time = datetime.now()
 
     df, feature_cols = load_data(args.data)
     train_df, val_df, test_df = split_data(df)
 
-    # ★ 타겟 선택 — TFTConfig.target_col 사용
-    target_col = _default_cfg.target_col
-    if target_col not in df.columns:
-        logger.warning(f"{target_col} 없음 → 자동 생성")
-        horizon = _default_cfg.forecast_horizon
-        df[target_col] = (df['close'].shift(-horizon) / df['close'] - 1)
+    if _default_cfg.target_col not in df.columns:
+        df[_default_cfg.target_col] = (df['close'].shift(-_default_cfg.forecast_horizon) / df['close'] - 1)
 
-    # ★ 피처 선택 — TFTConfig.num_features 를 max_features 상한으로 사용
     selected_features = auto_select_features(
-        train_df,
-        feature_cols,
-        target_col=target_col,
+        train_df, feature_cols,
+        target_col=_default_cfg.target_col,
         max_features=_default_cfg.num_features,
         corr_threshold=0.85,
-        must_include=[
-            'whale_conviction', 'net_taker_ratio', 'oi_change_rate',
-            'funding_z_score', 'hurst_48', 'regime_trending',
-            'volatility_z', 'garman_klass_vol', 'mtf_trend_1h', 'mtf_trend_4h'
-        ]
     )
-    logger.info(f"선택된 피처 ({len(selected_features)}개): {selected_features}")
 
-    # ★ 모델 설정 — TFTConfig 기본값 사용, num_features만 실제 선택 수로 덮어쓰기
+    
     cfg = TFTConfig(num_features=len(selected_features))
-
+    
     logger.info(f"\n=== Config ===")
     logger.info(f"  Target:    {cfg.target_col}")
     logger.info(f"  Horizon:   {cfg.forecast_horizon}")
@@ -225,20 +181,12 @@ def main():
     logger.info(f"  LR:        {cfg.learning_rate}")
     logger.info(f"  Scheduler: {cfg.lr_scheduler}")
 
-    # 학습
     model = TFTSignalModel(cfg)
-    
-    # ★ 변경: args.resume_best_optuna 값을 warm_start_path로 전달
-    history = model.fit(
-        cfg, train_df, val_df, selected_features, 
-        resume_from=args.resume,
-        warm_start_path=args.resume_best_optuna
-    )
-    
+    history = model.fit(cfg, train_df, val_df, selected_features, resume_from=args.resume, warm_start_path=args.resume_best_optuna)
     model._save_checkpoint('final')
+    
     metrics = evaluate_model(model, test_df)
 
-    # 결과 저장
     results = {
         'config': {k: v for k, v in cfg.__dict__.items() if not k.startswith('_')},
         'selected_features': selected_features,
@@ -265,6 +213,4 @@ def main():
     print(f"🎉 완료! 소요 시간: {datetime.now() - start_time}")
     print("=" * 80)
 
-
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()

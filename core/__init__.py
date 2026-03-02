@@ -5,9 +5,10 @@
 from .binance_client import BinanceClient
 from .data_collector import DataCollector
 from .feature_engineering import FeatureEngineer
-
+from .cvp import add_cvp_features
 __all__ = [
     'BinanceClient',
     'DataCollector',
-    'FeatureEngineer'
+    'FeatureEngineer',
+    'add_cvp_features'
 ]

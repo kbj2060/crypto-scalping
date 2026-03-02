@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
+from .cvp import add_cvp_features
 
 # ──────────────────────────────────────────────────────────────
 # 외부에서 참조할 피처 목록 상수 정의
@@ -30,9 +30,6 @@ ULTIMATE_FEATURE_COLS = [
     # [IDEA 4] Regime Break Indicator
     'regime_break',
 
-    # Group F: Strategy Meta
-    'strategy_consensus', 'strategy_conviction', 'strategy_conflict',
-
     # Group G: Quant Signals
     'turtle_signal',
     'dual_momentum',
@@ -52,25 +49,42 @@ ULTIMATE_FEATURE_COLS = [
     'regime_trending', 'regime_mean_reverting',
     'hurst_change',
     
+    # Group F: Clusters Volume Profile (거래량 구조 분석)
+    'cvp_poc_dist', 'cvp_vah_val_width', 'cvp_cluster_position',
+    'cvp_volume_imbalance', 'cvp_regime',
+
     # Group J: Advanced Order Flow (NEW) ⭐
     'ofi_acceleration',
 ]
 
-QUANT_SIGNAL_COLS = [
-    'turtle_signal',
-    'dual_momentum',
-    'mean_reversion_z',
-    'breakout_strength',
-    'volume_profile_signal',
-    'fibonacci_level',
-    'funding_roc_12', 'funding_roc_48', 'funding_roc_288',
-    'funding_z_score', 'funding_abs',
-    'long_squeeze_risk', 'short_squeeze_risk',
-    'funding_price_divergence',
-    'hurst_12', 'hurst_48', 'hurst_288',
-    'regime_trending', 'regime_mean_reverting',
-    'hurst_change', 'ofi_acceleration',
+# ──────────────────────────────────────────────────────────────
+# 피처 선택 시 사전 제외 목록 (모든 학습 스크립트 공통 적용)
+# ──────────────────────────────────────────────────────────────
+EXCLUDE_FEATURE_COLS: list = [
+    # 1순위: 메타/더미 — 딥러닝 인식 불가 포맷
+    'timestamp', 'close_time', 'ignore',
+    # 2순위: 정규화되지 않은 절대 가격 — 가격대 변화 시 과적합 주범
+    'open', 'high', 'low', 'close', 'close_btc',
+    # 2순위: 정규화되지 않은 절대 거래량 — 거래량 스케일 변화 시 과적합 주범
+    'volume', 'quote_volume', 'trades',
 ]
+
+# ──────────────────────────────────────────────────────────────
+# S-Tier 핵심 피처 (도메인 지식 기반 무조건 포함)
+# ──────────────────────────────────────────────────────────────
+MUST_INCLUDE_FEATURES: list = [
+    'session_asia', 'session_europe', 'session_us',
+    'hour_sin', 'hour_cos', 'minute_sin', 'minute_cos',
+    # 고래/온체인: 스마트머니의 방향성
+    'whale_conviction', 'net_taker_ratio', 'smart_money_flow',
+    # 펀딩비/청산: 포지션 쏠림 & 강제 청산 위험
+    'funding_pressure', 'squeeze_power', 'oi_change_rate',
+    # 시장 체제: 추세 vs 횡보 레짐 판별
+    'hurst_48', 'regime_trending', 'garman_klass_vol','regime_mean_reverting','regime_break',
+    # 멀티타임프레임 추세: 1시간·4시간 추세 확인
+    'mtf_trend_1h', 'mtf_trend_4h',
+]
+
 
 
 class FeatureEngineer:
@@ -106,7 +120,7 @@ class FeatureEngineer:
         df = self._create_technical(df)             # Group C
         df = self._create_market_structure(df)      # Group D
         df = self._create_temporal_features(df)     # Group E
-        df = self._create_strategy_meta(df)         # Group F
+        df = add_cvp_features(df, lookback=200, n_clusters=4)
 
         # ★ 퀀트 신호 추가
         quant = QuantSignalFeatures(df)
@@ -124,7 +138,6 @@ class FeatureEngineer:
         df['ofi_acceleration'] = df['net_taker_ratio'].diff().diff()
 
         # [IDEA 4] Regime Break
-        df = self._add_regime_break(df)
         df = self._handle_missing(df)
 
         return df
@@ -216,6 +229,7 @@ class FeatureEngineer:
     # GROUP C: Technical
     # ================================================================
     def _create_technical(self, df: pd.DataFrame) -> pd.DataFrame:
+        import pandas_ta as ta
         close = df['close']
         high = df['high']
         low = df['low']
@@ -313,6 +327,7 @@ class FeatureEngineer:
     # GROUP D: Market Structure
     # ================================================================
     def _create_market_structure(self, df: pd.DataFrame) -> pd.DataFrame:
+        import pandas_ta as ta
         close = df['close']
         close_btc = df['close_btc']
 
@@ -428,73 +443,6 @@ class FeatureEngineer:
 
         return df
 
-    # ================================================================
-    # GROUP F: Strategy Meta Features (NEW)
-    # ================================================================
-    def _create_strategy_meta(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        8개 전략 시그널의 메타 피처 5개 생성 (TFT 입력용).
-
-        개별 시그널(0/1/-1)은 원본 피처와 중복되므로 TFT에 직접 넣지 않고,
-        전략 간 합의/충돌/레짐 정보만 추출하여 TFT가 학습하기 어려운
-        비선형 메타 정보를 제공한다.
-
-        생성 피처:
-            - strategy_consensus:  전체 합의 방향 (-1~+1)
-            - strategy_conviction: 합의 강도 (0~1)
-            - strategy_conflict:   롱/숏 동시 발생 정도 (0~1, 혼조장 감지)
-            - momentum_regime:     추세추종 전략 최근 적중률 (추세장 감지)
-            - reversion_regime:    평균회귀 전략 최근 적중률 (횡보장 감지)
-
-        개별 시그널 8개는 RL Agent의 State로 별도 전달.
-        """
-        # ── 8개 전략 시그널 생성 ──
-        signals = self._generate_all_signals(df)
-
-        num_strategies = signals.shape[1]
-
-        # 1. Consensus: 전체 합의 방향 (-1 ~ +1)
-        df['strategy_consensus'] = signals.sum(axis=1) / num_strategies
-
-        # 2. Conviction: 시그널 발생 비율 (0 ~ 1)
-        df['strategy_conviction'] = signals.abs().sum(axis=1) / num_strategies
-
-        # 3. Conflict: 롱/숏 동시 발생 → 혼조장 (0 ~ 1)
-        long_count = (signals > 0).sum(axis=1)
-        short_count = (signals < 0).sum(axis=1)
-        df['strategy_conflict'] = (2 * long_count * short_count) / (num_strategies ** 2)
-
-        # 4~5. 레짐 감지: 전략 적중률 기반
-        actual_dir = np.sign(df['close'].shift(-1) - df['close'])
-
-        # 추세추종 전략 적중률 → momentum_regime
-        momentum_strats = ['HMAMomentum', 'NetTakerFlow', 'BTCEthCorr']
-        momentum_cols = [c for c in momentum_strats if c in signals.columns]
-        if momentum_cols:
-            momentum_hits = signals[momentum_cols].eq(actual_dir, axis=0).astype(float)
-            df['momentum_regime'] = momentum_hits.mean(axis=1).rolling(
-                window=50, min_periods=1
-            ).mean()
-        else:
-            df['momentum_regime'] = 0.5
-
-        # 평균회귀 전략 적중률 → reversion_regime
-        reversion_strats = ['VWAPDeviation', 'VolSqueeze', 'OrderblockFVG']
-        reversion_cols = [c for c in reversion_strats if c in signals.columns]
-        if reversion_cols:
-            reversion_hits = signals[reversion_cols].eq(actual_dir, axis=0).astype(float)
-            df['reversion_regime'] = reversion_hits.mean(axis=1).rolling(
-                window=50, min_periods=1
-            ).mean()
-        else:
-            df['reversion_regime'] = 0.5
-
-        # 마지막 행은 shift(-1) 때문에 NaN → 직전 값으로 채움
-        df['momentum_regime'] = df['momentum_regime'].ffill()
-        df['reversion_regime'] = df['reversion_regime'].ffill()
-
-        return df
-
     def _generate_all_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         8개 Elite 전략의 시그널을 일괄 생성.
@@ -580,25 +528,6 @@ class FeatureEngineer:
         )
 
         return signals
-
-    # ================================================================
-    # [IDEA 4] Regime Break Detection
-    # ================================================================
-    def _add_regime_break(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        변동성(volatility_z)의 급변을 감지하여 regime_break 플래그 생성.
-        최근 window 내 표준편차가 95th percentile 이상인 경우 1.
-        """
-        if 'volatility_z' not in df.columns:
-            df['regime_break'] = 0
-            return df
-
-        vol = df['volatility_z']
-        window = 20
-        vol_std = vol.rolling(window).std()
-        threshold = vol_std.quantile(0.95)
-        df['regime_break'] = (vol_std > threshold).astype(np.float32)
-        return df
 
     # ================================================================
     # MISSING VALUE HANDLING (수정)
