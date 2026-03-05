@@ -8,6 +8,7 @@
     4. 상관관계 중복 제거  (다중공선성 방지)
     5. 도메인 필수 피쳐(must_include) 강제 보장
 """
+
 import numpy as np
 import pandas as pd
 import logging
@@ -19,7 +20,7 @@ from core.feature_engineering import EXCLUDE_FEATURE_COLS, MUST_INCLUDE_FEATURES
 logger = logging.getLogger(__name__)
 
 class FeatureSelector:
-    def __init__(self, target_col: str = 'target_ret_6'):
+    def __init__(self, target_col: str = 'target_ret_1'):
         self.target_col = target_col
         self.mi_scores_ = None
         self.selected_features_ = None
@@ -36,12 +37,11 @@ class FeatureSelector:
         must_include = must_include or []
         mi_lags = mi_lags or [0, 1, 2, 3, 6]
 
-        # Stage 0: 사전 제외 (target + EXCLUDE_FEATURE_COLS)
-        _exclude = {self.target_col} | set(EXCLUDE_FEATURE_COLS)
+        _exclude = {self.target_col} | set(EXCLUDE_FEATURE_COLS) | set(must_include)
         candidates = [c for c in feature_cols if c not in _exclude]
 
         logger.info(f"\n{'='*60}")
-        logger.info(f"🔍 자동 피처 선택: {len(candidates)}개 후보 (exclude {len(_exclude)}개 사전 제외)")
+        logger.info(f"🔍 자동 피처 선택: {len(candidates)}개 후보 (VIP 및 메타 {len(_exclude)}개 필터링 패스)")
         if must_include:
             logger.info(f"   필수 포함: {must_include}")
         logger.info(f"{'='*60}")
@@ -55,17 +55,16 @@ class FeatureSelector:
             logger.warning(f"유효 데이터 부족 ({len(valid_df)}행) — 필터링 스킵")
             return candidates
 
-        # Stage 1: 분산 필터 (정규화 기반)
         survivors = self._variance_filter(valid_df, candidates, variance_threshold)
-
-        # Stage 2: Lagged MI 스코어링
         survivors, mi_scores = self._lagged_mi_scoring(valid_df, survivors, mi_threshold, mi_lags)
-
-        # Stage 3: 상관관계 중복 제거
         survivors = self._correlation_dedup(valid_df, survivors, mi_scores, corr_threshold)
 
-        # Stage 4: must_include 보장 + Top N 선택
-        valid_must = [c for c in must_include if c in candidates]
+        # [수정사항 3] must_include 리스트 무결성 검증 알럿
+        missing_must = [c for c in must_include if c not in feature_cols]
+        if missing_must:
+            logger.warning(f"⚠️ must_include 중 데이터에 없는 피처 (무시됨): {missing_must}")
+
+        valid_must = [c for c in must_include if c in feature_cols]
         remaining = [c for c in survivors if c not in valid_must]
         n_auto = max_features - len(valid_must)
 
@@ -84,7 +83,6 @@ class FeatureSelector:
         logger.info(f"\n✅ 최종 선택 완료: {len(selected)}개")
         return selected
 
-
     def _variance_filter(self, df: pd.DataFrame, cols: List[str], threshold: float) -> List[str]:
         scaler = StandardScaler()
         normalized = pd.DataFrame(scaler.fit_transform(df[cols]), columns=cols, index=df.index)
@@ -102,10 +100,10 @@ class FeatureSelector:
         y = df[self.target_col].values
         scaler = StandardScaler()
 
-        # 속도 최적화를 위해 최대 20000개 샘플링
+        # [수정사항 1, 2] 랜덤 시드 고정 및 불필요한 데드코드(y_sample) 제거/정리
+        rng = np.random.RandomState(42)
         sample_size = min(len(df), 20000)
-        idx = np.sort(np.random.choice(len(df), sample_size, replace=False)) if sample_size < len(df) else np.arange(len(df))
-        y_sample = y[idx]
+        idx = np.sort(rng.choice(len(df), sample_size, replace=False)) if sample_size < len(df) else np.arange(len(df))
 
         best_mi = {}
         for lag in lags:
@@ -116,6 +114,7 @@ class FeatureSelector:
             if len(valid_idx) < 1000: continue
 
             X_valid = scaler.fit_transform(X[valid_idx])
+            # y_sample 없이 정확하게 y[valid_idx]와 스코어링
             mi = mutual_info_regression(X_valid, y[valid_idx], n_neighbors=5, random_state=42)
 
             for j, col in enumerate(cols):
@@ -137,13 +136,14 @@ class FeatureSelector:
             for j in range(i + 1, len(cols)):
                 if cols[j] in to_remove: continue
                 
-                # 상관계수가 임계치보다 높으면, MI 스코어가 낮은 피처를 쳐냄
                 if corr_matrix.iloc[i, j] > threshold:
                     victim = cols[j] if mi_scores.get(cols[i], 0) >= mi_scores.get(cols[j], 0) else cols[i]
                     to_remove.add(victim)
 
         survivors = [c for c in cols if c not in to_remove]
-        logger.info(f"\n  [다중공선성 필터] {len(to_remove)}개 제거 (상관계수 > {threshold})")
+        if to_remove:
+            logger.info(f"\n  제거된 피처: {to_remove}")
+            logger.info(f"\n  [다중공선성 필터] {len(to_remove)}개 제거 (상관계수 > {threshold})")
         return survivors
 
 
@@ -152,8 +152,8 @@ class FeatureSelector:
 # ════════════════════════════════════════════════════════════════
 def auto_select_features(train_df: pd.DataFrame,
                          feature_cols: List[str],
-                         target_col: str = 'target_ret_6',
-                         max_features: int = 30,
+                         target_col: str = 'target_ret_1',
+                         max_features: int = 35,
                          corr_threshold: float = 0.85,
                          variance_threshold: float = 0.01,
                          must_include: List[str] = None) -> List[str]:

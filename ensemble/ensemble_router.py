@@ -170,24 +170,29 @@ class MacroHFTForecaster(BaseForecaster):
     def predict(self, df: pd.DataFrame, horizon: int = 6) -> ForecastOutput:
         if not self.available: return self._empty_output(horizon)
         try:
-            from train_macroHFT import MacroHFTDataset  # macroHFT/ 폴더가 sys.path에 있음
+            from train_macroHFT import MacroHFTDataset
             from torch.utils.data import DataLoader
             cfg = self.config
+            
+            # 🌟 수정: static_cols 강제 분리 로직 완전 제거
             temporal_cols = self.feature_cols
             df_norm = df.copy()
             df_norm[temporal_cols] = (df_norm[temporal_cols] - self.scaler_params['mean']) / self.scaler_params['std']
             
+            # DataLoader에서 static_cols 인자 제거
             loader = DataLoader(MacroHFTDataset(cfg, df_norm, temporal_cols), batch_size=cfg.batch_size, shuffle=False)
             all_preds = []
             with torch.no_grad():
-                for seq, info, _ in loader:
-                    all_preds.append(self.model(seq.to(cfg.device), info.to(cfg.device)).cpu().numpy())
+                # 🌟 수정: 언패킹 2개(seq, tgt)로 변경 및 info 파라미터 제외
+                for seq, _ in loader:
+                    all_preds.append(self.model(seq.to(cfg.device)).cpu().numpy())
             if not all_preds: raise ValueError("MacroHFT Empty Result")
             
             preds_arr = np.concatenate(all_preds, axis=0)
             mid_idx = cfg.quantiles.index(0.5) if 0.5 in cfg.quantiles else len(cfg.quantiles) // 2
             return ForecastOutput(preds_arr, preds_arr[..., mid_idx], self._compute_confidence(preds_arr), self.name)
-        except Exception:
+        except Exception as e:
+            logger.error(f"MacroHFT Predict Error: {e}")
             return self._empty_output(horizon)
 
 # ════════════════════════════════════════════════════════════════
@@ -417,7 +422,7 @@ class MetaRouterEnsembleForecaster:
         self.scaler_params = tft_forecaster.scaler_params if tft_forecaster else {}
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        state_dim = len([c for c in self.feature_cols if c not in ['session_asia', 'session_europe', 'session_us']])
+        state_dim = len(self.feature_cols)
         if state_dim > 0:
             self.router = MetaRouter(input_dim=state_dim, num_models=self.num_models).to(self.device)
             if router_path and os.path.exists(router_path):
@@ -432,7 +437,7 @@ class MetaRouterEnsembleForecaster:
     def _get_router_weights(self, df: pd.DataFrame) -> np.ndarray:
         if not self.router or not self.feature_cols:
             return np.ones(self.num_models) / self.num_models
-        temporal_cols = [c for c in self.feature_cols if c not in ['session_asia', 'session_europe', 'session_us']]
+        temporal_cols = self.feature_cols
         for col in temporal_cols:
             if col not in df.columns: df[col] = 0.0
         
