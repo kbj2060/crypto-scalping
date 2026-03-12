@@ -35,14 +35,14 @@ def set_seed(seed: int = 42):
 # ════════════════════════════════════════════════════════════════
 @dataclass
 class TFTConfig:
-    input_window: int = 64           
-    forecast_horizon: int = 6        
-    target_col: str = 'target_ret_1' # [개선 3] 1스텝 수익률을 시퀀스로 묶어 사용
-    hidden_size: int = 64            
+    input_window: int = 64
+    forecast_horizon: int = 6
+    target_col: str = 'target_ret_1'
+    hidden_size: int = 64
     lstm_layers: int = 2
     attention_heads: int = 4
     dropout: float = 0.3
-    num_features: int = 40  
+    num_features: int = 30
     quantiles: List[float] = field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95]) 
     learning_rate: float = 3e-5
     batch_size: int = 256

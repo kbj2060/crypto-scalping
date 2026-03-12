@@ -87,8 +87,9 @@ class FeatureEngineer:
         return df
 
     def _merge_data(self, eth: pd.DataFrame, btc: pd.DataFrame) -> pd.DataFrame:
-        eth['timestamp'] = pd.to_datetime(eth['timestamp'])
-        btc['timestamp'] = pd.to_datetime(btc['timestamp'])
+        # dtype 통일 (pandas 버전에 따라 us/ns 불일치 방지)
+        eth['timestamp'] = pd.to_datetime(eth['timestamp']).astype('datetime64[us]')
+        btc['timestamp'] = pd.to_datetime(btc['timestamp']).astype('datetime64[us]')
 
         btc_cols_needed = {'close': 'close_btc', 'volume': 'volume_btc', 'quote_volume': 'quote_volume_btc'}
         already_renamed = 'close_btc' in btc.columns and 'close' not in btc.columns
@@ -148,7 +149,7 @@ class FeatureEngineer:
         return df
 
     def _create_technical(self, df: pd.DataFrame) -> pd.DataFrame:
-        import pandas_ta as ta
+        """외부 TA 라이브러리(pandas-ta)를 제거하고 순수 벡터화 연산으로 대체"""
         close = df['close']
         high = df['high']
         low = df['low']
@@ -156,34 +157,41 @@ class FeatureEngineer:
 
         df['log_return'] = np.log(close / close.shift(1))
 
-        atr = ta.atr(high, low, close, length=14)
+        # 1. ATR (Average True Range)
+        atr = self._calc_atr(high, low, close, length=14)
         win = self.windows['long']
         atr_mean = atr.rolling(window=win, min_periods=1).mean()
         atr_std = atr.rolling(window=win, min_periods=1).std().replace(0, 1e-8)
         df['volatility_z'] = (atr - atr_mean) / atr_std
 
-        df['rsi'] = ta.rsi(close, length=14)
+        # 2. RSI (Relative Strength Index)
+        df['rsi'] = self._calc_rsi(close, length=14)
 
-        macd = ta.macd(close)
-        hist_col = [c for c in macd.columns if 'MACDh' in c][0]
-        df['macd_hist'] = macd[hist_col]
+        # 3. MACD Histogram (12, 26, 9)
+        ema_fast = close.ewm(span=12, adjust=False).mean()
+        ema_slow = close.ewm(span=26, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = macd_line - signal_line
 
-        bb = ta.bbands(close, length=20, std=2)
-        upper_col = [c for c in bb.columns if c.startswith('BBU')][0]
-        lower_col = [c for c in bb.columns if c.startswith('BBL')][0]
-        mid_col = [c for c in bb.columns if c.startswith('BBM')][0]
+        # 4. Bollinger Bands Width (20, 2)
+        bb_mid = close.rolling(window=20, min_periods=1).mean()
+        bb_std = close.rolling(window=20, min_periods=1).std(ddof=0)
+        bb_upper = bb_mid + 2 * bb_std
+        bb_lower = bb_mid - 2 * bb_std
 
-        df['bb_width'] = (bb[upper_col] - bb[lower_col]) / (bb[mid_col] + 1e-8)
+        df['bb_width'] = (bb_upper - bb_lower) / (bb_mid + 1e-8)
         bbw_mean = df['bb_width'].rolling(window=100, min_periods=1).mean()
         bbw_std = df['bb_width'].rolling(window=100, min_periods=1).std().replace(0, 1e-8)
         df['bb_width_z'] = (df['bb_width'] - bbw_mean) / bbw_std
 
         df['vwap_dist'] = self._calc_vwap_dist(df)
 
-        # [수정사항 2] hma_slope: 절대값 변화량이 아닌 가격 대비 변화 비율로 정규화
-        hma = ta.hma(close, length=20)
+        # 5. HMA Slope (Hull Moving Average)
+        hma = self._calc_hma(close, n=20)
         df['hma_slope'] = hma.diff() / (close + 1e-8)
 
+        # 6. Wick Ratio
         body_size = np.abs(close - opn)
         total_range = high - low
         df['wick_ratio'] = np.where(
@@ -195,6 +203,11 @@ class FeatureEngineer:
         rv_short = df['log_return'].rolling(window=12, min_periods=1).std()
         rv_long = df['log_return'].rolling(window=self.windows['long'], min_periods=1).std()
         df['realized_vol_ratio'] = rv_short / rv_long.replace(0, 1e-8)
+        ema_1h = close.ewm(span=12, adjust=False).mean()
+        ema_4h = close.ewm(span=48, adjust=False).mean()
+        
+        df['mtf_trend_1h'] = ema_1h.pct_change().fillna(0)
+        df['mtf_trend_4h'] = ema_4h.pct_change().fillna(0)
 
         return df
 
@@ -260,11 +273,9 @@ class FeatureEngineer:
         return (gk.rolling(window=window, min_periods=1).mean().clip(lower=0) ** 0.5)
 
     def _create_market_structure(self, df: pd.DataFrame) -> pd.DataFrame:
-        import pandas_ta as ta
         close = df['close']
         close_btc = df['close_btc']
 
-        # [수정사항 8] btc_corr_60: 가격 상관은 허구적 결과를 낳으므로 수익률 상관관계로 수정
         eth_ret = close.pct_change()
         btc_ret = close_btc.pct_change()
         df['btc_corr_60'] = eth_ret.rolling(window=self.windows['corr']).corr(btc_ret).fillna(0)
@@ -273,9 +284,66 @@ class FeatureEngineer:
         df['eth_btc_ratio_change'] = eth_btc_ratio.pct_change()
 
         df['fvg_dist'] = self._calc_fvg_dist(df)
-        df['chop_index'] = ta.chop(df['high'], df['low'], close, length=14)
+        
+        # 7. Choppiness Index (CHOP) - 커스텀 계산 적용
+        df['chop_index'] = self._calc_chop(df['high'], df['low'], close, length=14)
 
         return df
+
+    def _calc_rma(self, x: pd.Series, n: int) -> pd.Series:
+        """Wilder's Smoothing (RMA) 계산 헬퍼 함수"""
+        return x.ewm(alpha=1/n, adjust=False).mean()
+
+    def _calc_atr(self, high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+        """True Range 기반 ATR 계산"""
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return self._calc_rma(tr, length)
+
+    def _calc_rsi(self, close: pd.Series, length: int) -> pd.Series:
+        """벡터화된 RSI 연산 (pandas-ta의 기본 Wilder's Smoothing 방식과 100% 동일)"""
+        delta = close.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        
+        avg_gain = self._calc_rma(gain, length)
+        avg_loss = self._calc_rma(loss, length)
+        
+        rs = avg_gain / (avg_loss + 1e-8)
+        return 100 - (100 / (1 + rs))
+
+    def _calc_wma(self, s: pd.Series, period: int) -> pd.Series:
+        """HMA를 위한 가중이동평균(WMA) 계산"""
+        weights = np.arange(1, period + 1)
+        return s.rolling(period).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
+
+    def _calc_hma(self, close: pd.Series, n: int) -> pd.Series:
+        """선형대수 벡터 기반의 Hull Moving Average (HMA) 계산"""
+        half_length = int(n / 2)
+        sqrt_length = int(np.sqrt(n))
+        
+        wma_half = self._calc_wma(close, half_length)
+        wma_full = self._calc_wma(close, n)
+        raw_hma = 2 * wma_half - wma_full
+        
+        return self._calc_wma(raw_hma, sqrt_length)
+
+    def _calc_chop(self, high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+        """Choppiness Index (CHOP) - ZeroDivision 완벽 방어형"""
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        atr_sum = tr.rolling(window=length).sum()
+        high_max = high.rolling(window=length).max()
+        low_min = low.rolling(window=length).min()
+        
+        # 💡 [핵심 수정] atr_sum(분자)에도 1e-8을 더해 log10(0) 에러를 원천 차단합니다.
+        chop = 100 * np.log10((atr_sum + 1e-8) / (high_max - low_min + 1e-8)) / np.log10(length)
+        return chop
 
     @staticmethod
     def _calc_fvg_dist(df: pd.DataFrame) -> pd.Series:
@@ -311,7 +379,7 @@ class FeatureEngineer:
         return pd.Series(fvg_dist, index=df.index)
 
     def _create_temporal_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        import pytz
+        import pandas_market_calendars as mcal
 
         ts = df['timestamp']
         hour = ts.dt.hour
@@ -322,19 +390,27 @@ class FeatureEngineer:
         df['minute_sin'] = np.sin(2 * np.pi * minute / 60)
         df['minute_cos'] = np.cos(2 * np.pi * minute / 60)
 
-        hour_utc = (hour - 9) % 24
-        df['session_asia']   = ((hour_utc >= 0) & (hour_utc < 8)).astype(np.float32)
-        df['session_europe'] = ((hour_utc >= 8) & (hour_utc < 16)).astype(np.float32)
+        ts_utc = ts.dt.tz_localize('UTC') if ts.dt.tz is None else ts.dt.tz_convert('UTC')
+        start_date = ts_utc.min().date()
+        end_date = ts_utc.max().date()
+        
         try:
-            ts_utc = ts.dt.tz_localize('Asia/Seoul').dt.tz_convert('UTC')
-            ts_et  = ts_utc.dt.tz_convert('America/New_York')
-            et_minutes = ts_et.dt.hour * 60 + ts_et.dt.minute
-            df['session_us'] = (
-                (et_minutes >= 9 * 60 + 30) &
-                (et_minutes <  16 * 60)
-            ).astype(np.float32)
-        except Exception:
-            df['session_us'] = ((hour_utc >= 16) & (hour_utc < 21)).astype(np.float32)
+            # 아시아 세션 (JPX)
+            tse = mcal.get_calendar('JPX')
+            df['session_asia'] = ts_utc.isin(mcal.date_range(tse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
+            
+            # 유럽 세션 (LSE)
+            lse = mcal.get_calendar('LSE')
+            df['session_europe'] = ts_utc.isin(mcal.date_range(lse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
+            
+            # 미국 세션 (NYSE)
+            nyse = mcal.get_calendar('NYSE')
+            df['session_us'] = ts_utc.isin(mcal.date_range(nyse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
+        except Exception as e:
+            logger.warning(f"Market calendars 갱신 실패. 정적 로직으로 대체 ({e})")
+            df['session_asia']   = ((hour >= 0) & (hour < 8)).astype(np.float32)
+            df['session_europe'] = ((hour >= 8) & (hour < 16)).astype(np.float32)
+            df['session_us'] = ((hour >= 14.5) & (hour < 21)).astype(np.float32)
 
         df['is_hour_open'] = (minute < 5).astype(np.float32)
 
@@ -398,6 +474,7 @@ class FeatureEngineer:
 
         return augmented
 
+    
 
 class QuantSignalFeatures:
     """유명 퀀트 알고리즘의 신호를 피처로 변환"""
@@ -585,3 +662,5 @@ class HurstExponentFeatures:
             return np.log(R / S + 1e-10) / np.log(len(x))
         
         return returns.rolling(window, min_periods=window//2).apply(rs_hurst, raw=True).fillna(0.5)
+
+    

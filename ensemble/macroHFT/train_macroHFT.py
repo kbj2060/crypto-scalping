@@ -1,8 +1,9 @@
 """
-MacroHFT Signal Model 학습 스크립트 v2.5
+MacroHFT Signal Model 학습 스크립트 v2.5 (Save & Load Bug Fixed)
 ================================================================================
-모델 아키텍처(macroHFT_model v2.5)와 호환.
-학습 루프 자체는 v2.4와 동일.
+- [수정] Warm-up 종료 시점 최초 Best 모델 저장 로직 추가
+- [수정] EMA 섀도우가 적용된 상태에서 최고 가중치가 안전하게 저장되도록 타이밍 변경
+- [수정] 학습 종료 후 자동으로 Best 가중치로 롤백하는 로직 추가
 """
 
 import sys, os, argparse, logging, json, math
@@ -11,6 +12,8 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import random  # 💡 [추가] random 모듈 임포트
+
 from torch.utils.data import Dataset, DataLoader
 from torch.amp import GradScaler, autocast
 from typing import List
@@ -23,18 +26,22 @@ from core.feature_engineering import ULTIMATE_FEATURE_COLS, MUST_INCLUDE_FEATURE
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ✅ 수정 — super().__init__ 전에 base_optimizer를 먼저 만들고,
-#           state property 충돌을 피하기 위해 상속 대신 위임(delegation) 방식으로 변경
+# 💡 [추가] 글로벌 시드 고정 함수
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
 class SAM:
-    """
-    SAM: e_w를 별도 dict에 저장해서 base_optimizer.state와 완전히 분리.
-    base_optimizer는 한 번도 건드리지 않아서 AdamW 내부 state 초기화를 방해하지 않음.
-    """
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
         self.rho            = rho
         self.base_optimizer = base_optimizer(params, **kwargs)
         self.param_groups   = self.base_optimizer.param_groups
-        self._e_w           = {}   # e_w를 base_optimizer.state와 완전히 분리 저장
+        self._e_w           = {}
 
     def first_step(self, zero_grad=False):
         grad_norm = self._grad_norm()
@@ -51,8 +58,8 @@ class SAM:
         for group in self.param_groups:
             for p in group['params']:
                 if p not in self._e_w: continue
-                p.data.sub_(self._e_w[p])   # w 복원
-        self.base_optimizer.step()           # 순수 AdamW step — state 간섭 없음
+                p.data.sub_(self._e_w[p])
+        self.base_optimizer.step()
         self._e_w.clear()
         if zero_grad: self.zero_grad()
 
@@ -113,8 +120,6 @@ class MacroHFTDataset(Dataset):
     def __getitem__(self, idx):
         i = self.indices[idx]
         t = i + self.window_size
-        # [수정] 피처의 마지막 관측치는 t-1입니다. 따라서 타겟도 t-1 인덱스부터 가져와야 
-        # 직후의 H 봉을 정확히 예측하게 됩니다. (1-step gap 제거)
         return (torch.tensor(self.temporal_data[i:t]),
                 torch.tensor(self.target_data[t-1:t-1 + self.horizon]))
 
@@ -157,7 +162,6 @@ class MacroHFTSignalModel:
                 return max(min_ratio, 0.5 * (1 + math.cos(math.pi * p)))
             return fn
 
-        # plateau는 그대로 반환 (SAM과 별도로 epoch 단위 처리)
         return None
 
     def _save_checkpoint(self, tag):
@@ -165,7 +169,7 @@ class MacroHFTSignalModel:
         torch.save(self.model.state_dict(), os.path.join(self.config.model_dir, f'macrohft_{tag}.pt'))
         meta = {
             'feature_cols':  self.feature_cols,
-            'scaler_params': {k: v.tolist() for k, v in self.scaler_params.items()},
+            'scaler_params': {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in self.scaler_params.items()},
             'target_scaler': {k: float(v) for k, v in self.target_scaler.items()},
             'config':        self.config.__dict__,
         }
@@ -176,19 +180,14 @@ class MacroHFTSignalModel:
         path = os.path.join(self.config.model_dir, f'macrohft_{tag}.pt')
         if os.path.exists(path):
             self.model.load_state_dict(torch.load(path, map_location=self.config.device, weights_only=True))
-            logger.info(f"💾 [Load] '{tag}' 모델 가중치를 성공적으로 불러왔습니다.")
+            logger.info(f"💾 [Load] '{tag}' 모델 가중치(EMA 적용 상태)를 성공적으로 불러왔습니다.")
         else:
             logger.warning(f"⚠️ [Load] {path} 파일이 존재하지 않습니다.")
-
-    def _sharpe_weight(self, epoch, max_w=0.3):
-        w, r = self.config.sharpe_warmup_epochs, 100
-        if epoch < w: return 0.0
-        return max_w * min(1.0, (epoch - w) / r)
 
     def _diagnose(self, train_acc, val_acc, gap):
         if train_acc < 0.54:
             return f"  🔵 [언더피팅] Train Dir {train_acc:.1%} < 54%"
-        if train_acc - val_acc > 0.05:  # gap 대신 accuracy gap 기준
+        if train_acc - val_acc > 0.05:  
             return f"  🔴 [과적합] Train-Val Acc Gap={train_acc - val_acc:+.1%}"
         return f"  ✅ [정상] Train {train_acc:.1%} / Val {val_acc:.1%}"
 
@@ -202,7 +201,6 @@ class MacroHFTSignalModel:
         fs = train_df[feature_cols].std().replace(0, 1.0)
         self.scaler_params = {'mean': fm.values, 'std': fs.values}
 
-        # target은 이미 로컬 변동성으로 정규화됨 — global scaler 불필요
         tm = 0.0
         ts = 1.0
         self.target_scaler = {'mean': tm, 'std': ts}
@@ -229,7 +227,7 @@ class MacroHFTSignalModel:
 
         lr_fn   = self._create_scheduler(optimizer, max(len(train_loader) // cfg.accumulation_steps, 1))
         lr_step = [0]
-        lr_scale = [1.0]  # Emergency Decay 배수 추적
+        lr_scale = [1.0] 
 
         criterion = DirectionalLoss(
             large_move_weight=cfg.large_move_weight,
@@ -273,7 +271,10 @@ class MacroHFTSignalModel:
 
             self.model.eval()
             vl = vdc = vt = 0
+            
+            # [Fix] Validation 평가를 위해 EMA 섀도우를 씌움
             if self.ema: self.ema.apply_shadow(self.model)
+            
             with torch.no_grad():
                 for seq, tgt in val_loader:
                     seq, tgt = seq.to(cfg.device), tgt.to(cfg.device)
@@ -281,7 +282,6 @@ class MacroHFTSignalModel:
                     vl  += vl_.item() * tgt.size(0)
                     vdc += vd_['direction_accuracy'] * tgt.size(0)
                     vt  += tgt.size(0)
-            if self.ema: self.ema.restore(self.model)
 
             atl = tl / max(len(train_loader), 1)
             ta  = tdc / max(tt, 1)
@@ -302,56 +302,53 @@ class MacroHFTSignalModel:
             if (epoch + 1) % 5 == 0:
                 logger.info(self._diagnose(ta, va, gap))
 
-            # Warmup 중에는 early stopping 스킵
+            # Warm-up 처리 로직
             if in_warmup:
                 if epoch == cfg.warmup_epochs - 1:
                     best_val_acc = va
                     prev_val     = avl
                     val_rise_cnt = 0
-                    logger.info(
-                        f"  ✅ [Warmup 완료] Val Dir 기준점 = {va:.1%} "
-                        f"— 이제부터 Early Stopping 카운트 시작"
-                    )
+                    # 💡 [Fix 1] 웜업 종료 시 초기 베스트 가중치 무조건 저장
+                    self._save_checkpoint('best')
+                    logger.info(f"  ✅ [Warmup 완료] 최초 Best 모델 저장 완료 (Val Dir: {va:.1%})")
+                
+                if self.ema: self.ema.restore(self.model)
                 continue
 
-            # Emergency LR Decay — val loss 연속 상승 시
+            # Emergency LR Decay
             val_rise_cnt = val_rise_cnt + 1 if avl > prev_val else 0
             prev_val = avl
             if val_rise_cnt >= 7:
-                lr_scale[0] *= 0.5  # cosine 기저에 곱하기
+                lr_scale[0] *= 0.5
                 lr_scale[0] = max(lr_scale[0], cfg.min_lr / cfg.learning_rate)
-                logger.warning(
-                    f"  🚨 [Emergency LR Decay] scale={lr_scale[0]:.3f}"
-                )
+                logger.warning(f"  🚨 [Emergency LR Decay] scale={lr_scale[0]:.3f}")
                 val_rise_cnt = 0
 
-            # Early Stopping — val direction accuracy 기준
+            # Early Stopping Check
             if va > best_val_acc:
                 best_val_acc = va
                 patience_cnt = 0
+                # 💡 [Fix 2] EMA 섀도우가 씌워진 똑똑한 상태 그대로를 저장
                 self._save_checkpoint('best')
                 logger.info(f"  🌟 [New Best] Val Dir: {va:.1%}")
             else:
                 patience_cnt += 1
                 logger.info(f"  ⚠️ Patience: {patience_cnt}/{cfg.patience}")
-                if patience_cnt >= cfg.patience:
-                    logger.info("🛑 Early Stopping.")
-                    break
+                
+            # 💡 [Fix 2] 저장이 끝난 후 다음 에포크 진행을 위해 Raw 가중치로 복구
+            if self.ema: self.ema.restore(self.model)
 
+            if patience_cnt >= cfg.patience:
+                logger.info("🛑 Early Stopping.")
+                break
+                
+        # 💡 [Fix 3] 평가 직전 저장된 Best(EMA) 모델을 불러오기만 함
         logger.info("✅ 학습 종료. 최고 성능(Best) 모델로 롤백합니다.")
         self._load_checkpoint('best')
-        if self.ema: 
-            self.ema.apply_shadow(self.model) # EMA 가중치까지 완벽하게 복원
-            
+
         return history
 
-        
 def walk_forward_split(df, n_splits=5, train_ratio=0.6, val_ratio=0.15, purge_bars=64):
-    """
-    시간순 Walk-Forward CV.
-    각 fold마다 train→purge→val→purge→test 구조.
-    다양한 regime을 골고루 평가.
-    """
     n = len(df)
     fold_size = n // n_splits
     splits = []
@@ -389,17 +386,10 @@ def load_data(path='data/training_features_5m.csv', h=1):
     df['mtf_trend_1h'] = df['close'] / df['ema_1h'] - 1
     df['mtf_trend_4h'] = df['close'] / df['ema_4h'] - 1
 
-    # [혁신 수정] 미래 참조가 없는 '순수 다음 1봉(h) 내의 VWAP'과 현재 종가 비교
-    # 롤링을 일절 배제하여 시간적 엇나감(Temporal Mismatch) 완벽 해소
     next_typical_price = (df['high'].shift(-h) + df['low'].shift(-h) + df['close'].shift(-h)) / 3
-    # next_vwap은 미래의 다중 캔들 평균이 아니라, 오직 다음 1개 캔들의 체결 중심가입니다.
-    next_vwap = next_typical_price  # (단일 캔들이므로 typical price 자체가 그 캔들의 중심가)
-    
-    # 목표는 다음 1봉의 중심가(VWAP)가 현재 종가 대비 오르는가 내리는가 입니다.
-    # 이는 마지막 틱의 Bid-Ask Bounce를 회피하면서도 h=1 제약을 완벽히 준수합니다.
+    next_vwap = next_typical_price 
     df['raw_ret'] = (next_vwap / df['close'] - 1) * 100
     
-    # 과거 데이터 기반의 변동성으로 정규화 (Target Leakage 없음)
     past_returns = df['close'].pct_change() * 100
     rolling_std = past_returns.rolling(200, min_periods=50).std()
     df[f'target_ret_{h}'] = df['raw_ret'] / rolling_std.clip(lower=0.01)
@@ -413,18 +403,12 @@ def load_data(path='data/training_features_5m.csv', h=1):
     return df, feats
 
 def split_data(df, train_ratio=0.7, val_ratio=0.15, purge_bars=64):
-    """
-    [FIX] Train/Val/Test 사이에 purge gap을 두어
-    슬라이딩 윈도우의 정보 누수를 차단.
-    """
     n = len(df)
     t = int(n * train_ratio)
     v = int(n * (train_ratio + val_ratio))
     
     train = df.iloc[:t].copy()
-    # train 끝 ~ val 시작 사이에 input_window만큼 gap
     val   = df.iloc[t + purge_bars : v].copy()
-    # val 끝 ~ test 시작 사이에도 gap
     test  = df.iloc[v + purge_bars :].copy()
     
     logger.info(f"[Split] Train: {len(train)}, Val: {len(val)}, Test: {len(test)}, Purge: {purge_bars} bars")
@@ -448,7 +432,7 @@ def evaluate_model(mw, test_df):
     with torch.no_grad():
         for seq, tgt in loader:
             out = mw.model(seq.to(cfg.device)).cpu()
-            all_logits.append(out[:, 0, 0])  # 단일 로짓 직접 사용
+            all_logits.append(out[:, 0, 0])  
             all_targets.append(tgt[:, 0])
     if not all_logits: return {}
 
@@ -460,12 +444,10 @@ def evaluate_model(mw, test_df):
     actual_up = actuals > 0
     da = np.mean(pred_up == actual_up)
 
-    # 큰 움직임
     thr = np.percentile(np.abs(actuals), 80)
     lm = np.abs(actuals) > thr
     lda = np.mean(pred_up[lm] == actual_up[lm]) if lm.sum() > 0 else 0.0
 
-    # 확신도별 정확도 (핵심 진단)
     confidence = np.abs(logits)
     for pct in [50, 70, 90]:
         thr_c = np.percentile(confidence, pct)
@@ -474,8 +456,7 @@ def evaluate_model(mw, test_df):
             acc_c = np.mean(pred_up[mask] == actual_up[mask])
             logger.info(f"  [확신도 상위 {100-pct}%] 정확도: {acc_c:.1%} ({mask.sum()}건)")
 
-    logger.info(f"\n  [진단] pred pos_ratio={np.mean(pred_up):.1%}, "
-                f"actual pos_ratio={np.mean(actual_up):.1%}")
+    logger.info(f"\n  [진단] pred pos_ratio={np.mean(pred_up):.1%}, actual pos_ratio={np.mean(actual_up):.1%}")
     logger.info(f"  [진단] logit mean={logits.mean():.4f}, std={logits.std():.4f}")
 
     logger.info("\n" + "=" * 60)
@@ -484,16 +465,17 @@ def evaluate_model(mw, test_df):
     logger.info(f"  방향 정확도:           {da:.1%}")
     logger.info(f"  큰 움직임 방향 정확도: {lda:.1%}")
     logger.info("=" * 60)
-    return {'direction_accuracy': float(da),
-            'large_move_direction_acc': float(lda), 'test_samples': len(logits)}
+    return {'direction_accuracy': float(da), 'large_move_direction_acc': float(lda), 'test_samples': len(logits)}
 
-# main()을 단순 split으로 교체
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', default='data/training_features_5m.csv')
     args = parser.parse_args()
     cfg  = MacroHFTConfig()
 
+    # 💡 [추가] 재현성을 위해 시드 고정
+    set_seed(42)
+    
     start = datetime.now()
     df, feats = load_data(args.data, cfg.forecast_horizon)
     train_df, val_df, test_df = split_data(df)
@@ -517,10 +499,10 @@ def main():
     val_acc = accuracy_score(y_val, gb.predict(X_val))
     logger.info(f"[Baseline GBM] Train: {train_acc:.1%}, Val: {val_acc:.1%}")
 
-    # 피처 중요도 상위 10개
     importances = sorted(zip(selected, gb.feature_importances_), key=lambda x: -x[1])
     for name, imp in importances[:10]:
         logger.info(f"  {name:30s}: {imp:.4f}")
+        
     history = model.fit(cfg, train_df, val_df, selected)
     metrics = evaluate_model(model, test_df)
     print(f"\n🎉 완료! 소요 시간: {datetime.now() - start}")
