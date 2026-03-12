@@ -1,6 +1,10 @@
 # Data folders (학습 데이터, 원시 데이터)
 data/
 binance_raw_data/
+binance_data/
+
+# PyTorch Lightning
+lightning_logs/
 
 # Python
 __pycache__/
