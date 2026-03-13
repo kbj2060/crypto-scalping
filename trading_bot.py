@@ -1,1052 +1,685 @@
-"""
-메인 트레이딩 봇
-"""
-import logging
-import time
-import sys
 import os
+import sys
+import asyncio
+import time
+import logging
+import gc
+import numpy as np
+import pandas as pd
+import torch
+import ccxt.async_support as ccxt
 from datetime import datetime, timedelta
-import config
-from core import DataCollector, RiskManager, BinanceClient
-from core.indicators import Indicators
-from strategies import (
-    BTCEthCorrelationStrategy,
-    VolatilitySqueezeStrategy,
-    OrderblockFVGStrategy,
-    HMAMomentumStrategy,
-    MFIMomentumStrategy,
-    # 횡보장 Top 5 Mean-Reversion 전략
-    BollingerMeanReversionStrategy,
-    VWAPDeviationStrategy,
-    RangeTopBottomStrategy,
-    StochRSIMeanReversionStrategy,
-    CMFDivergenceStrategy
+
+# 💡 [1. 경로 설정]
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+TARGET_PATHS = [
+    _THIS_DIR,
+    os.path.join(_THIS_DIR, "models"),
+    os.path.join(_THIS_DIR, "timesfm"),
+    os.path.join(_THIS_DIR, "uni2ts", "src"),
+    os.path.join(_THIS_DIR, "strategies"),
+    os.path.join(_THIS_DIR, "ensemble"), 
+]
+for p in TARGET_PATHS:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+from core.feature_engineering import FeatureEngineer
+from ensemble.ensemble_router import (
+    TFTForecaster, MacroHFTForecaster, ChronosForecaster, 
+    KronosForecaster, TimesFMForecaster, MoiraiForecaster
 )
 
-# AI 강화학습 모듈 (선택적)
-TORCH_AVAILABLE = False
-if config.ENABLE_AI:
-    try:
-        import torch
-        from model.trading_env import TradingEnvironment
-        from model.ppo_agent import PPOAgent
-        TORCH_AVAILABLE = True
-    except ImportError as e:
-        TORCH_AVAILABLE = False
-        # logger는 아직 정의되지 않았으므로 print 사용
-        print(f"⚠️ AI 모듈 로드 실패 (torch 미설치 가능): {e}")
+# [NEW] 12-Agent MoE 모듈 및 전략 Import
+from ensemble.train_rl_agent import (
+    MoEIQNTrader, RobustIQN, STATE_DIM,
+    MODEL_PRED, MODEL_CONF, ELITE_COLS, ALPHA_7_COLS, REGIME_COLS
+)
+# [NEW] LS 2-Agent (롱돌이/숏돌이) Import
+from ensemble.train_ls_agent import DualAgentTrader
+from strategies.elite_builder import EliteSignals, row_to_market_row
 
-# 로깅 설정
-# logs 디렉토리가 없으면 생성
-os.makedirs('logs', exist_ok=True)
+class Colors:
+    GREEN, RED, YELLOW, CYAN, RESET, BOLD = '\033[92m', '\033[91m', '\033[93m', '\033[96m', '\033[0m', '\033[1m'
 
-# Windows에서 UTF-8 인코딩 설정 (이모지 출력을 위해)
 if sys.platform == 'win32':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
+    try: sys.stdout.reconfigure(encoding='utf-8')
     except AttributeError:
-        # Python 3.6 이하에서는 reconfigure가 없음
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/trading_bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger("LiveBot")
 
-logger = logging.getLogger(__name__)
+# ════════════════════════════════════════════════════════════════
+# 1. 데이터 수집기 (비동기 BinanceLiveFetcher - 원본 유지)
+# ════════════════════════════════════════════════════════════════
+class BinanceLiveFetcher:
+    def __init__(self, symbol='ETHUSDT', timeframe='5m', limit=2500):
+        self.symbol = symbol.replace('/', '') 
+        self.timeframe = timeframe
+        self.limit = limit
+        self.exchange = ccxt.binance({'options': {'defaultType': 'future'}})
 
+    def load_local_data(self):
+        try:
+            eth_df = pd.read_csv('data/test/eth_test_data.csv')
+            btc_df = pd.read_csv('data/test/btc_test_data.csv')
+            for df in [eth_df, btc_df]:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                cols = df.columns.drop('timestamp')
+                df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+            logger.info(f"{Colors.GREEN}📂 로컬 데이터 로드 성공{Colors.RESET}")
+            return eth_df, btc_df
+        except Exception as e:
+            logger.error(f"로컬 로드 실패: {e}")
+            return None, None
 
-class TradingBot:
-    def __init__(self):
-        self.data_collector = DataCollector()
-        self.risk_manager = RiskManager()
-        self.client = BinanceClient()
-        
-        # 전략 초기화 (폭발장/횡보장 분리)
-        self.breakout_strategies = []
-        self.range_strategies = []
-        
-        # 폭발장 전략
-        if config.STRATEGIES['btc_eth_correlation']:
-            self.breakout_strategies.append(BTCEthCorrelationStrategy())
-        if config.STRATEGIES.get('volatility_squeeze', False):
-            self.breakout_strategies.append(VolatilitySqueezeStrategy())
-        if config.STRATEGIES.get('orderblock_fvg', False):
-            self.breakout_strategies.append(OrderblockFVGStrategy())
-        if config.STRATEGIES.get('hma_momentum', False):
-            self.breakout_strategies.append(HMAMomentumStrategy())
-            logger.info("✓ HMA 모멘텀 전략 활성화")
-        if config.STRATEGIES.get('mfi_momentum', False):
-            self.breakout_strategies.append(MFIMomentumStrategy())
-            logger.info("✓ MFI 모멘텀 전략 활성화")
-        
-        # 횡보장 전략 (Mean-Reversion)
-        if config.STRATEGIES.get('bollinger_mean_reversion', False):
-            self.range_strategies.append(BollingerMeanReversionStrategy())
-            logger.info("✓ 볼린저 밴드 평균 회귀 전략 활성화")
-        if config.STRATEGIES.get('vwap_deviation', False):
-            self.range_strategies.append(VWAPDeviationStrategy())
-            logger.info("✓ VWAP 편차 평균 회귀 전략 활성화")
-        if config.STRATEGIES.get('range_top_bottom', False):
-            self.range_strategies.append(RangeTopBottomStrategy())
-            logger.info("✓ Range Top/Bottom 반전 전략 활성화")
-        if config.STRATEGIES.get('stoch_rsi_mean_reversion', False):
-            self.range_strategies.append(StochRSIMeanReversionStrategy())
-            logger.info("✓ Stoch RSI 평균 회귀 전략 활성화")
-        if config.STRATEGIES.get('cmf_divergence', False):
-            self.range_strategies.append(CMFDivergenceStrategy())
-            logger.info("✓ CMF 다이버전스 전략 활성화")
-        
-        # 전체 전략 리스트 (하위 호환성)
-        self.strategies = self.breakout_strategies + self.range_strategies
-        
-        # AI 강화학습 초기화 (추론 모드만)
-        self.use_ai = config.ENABLE_AI and TORCH_AVAILABLE
-        self.env = None
-        self.agent = None
-        self.current_position = None  # 현재 포지션 상태 (None, 'LONG', 'SHORT')
-        self.entry_price = None  # 진입 가격
-        self.entry_time = None  # 진입 시간
-        
-        if self.use_ai:
-            try:
-                # 트레이딩 환경 생성
-                self.env = TradingEnvironment(self.data_collector, self.strategies)
-                state_dim = self.env.get_state_dim()
-                action_dim = 3  # 0: Hold, 1: Long, 2: Short
-                
-                # PPO 에이전트 생성 (추론 모드)
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                self.agent = PPOAgent(state_dim, action_dim, hidden_dim=128, device=device)
-                
-                # 학습된 모델 로드 (필수)
-                if os.path.exists(config.AI_MODEL_PATH):
+    async def fetch_klines_raw(self, symbol, target_limit):
+        all_klines = []
+        last_end_time = None
+        while len(all_klines) < target_limit:
+            params = {'symbol': symbol, 'interval': self.timeframe, 'limit': 1000}
+            if last_end_time: params['endTime'] = last_end_time - 1
+            klines = await self.exchange.fapiPublicGetKlines(params)
+            if not klines: break
+            all_klines = klines + all_klines
+            last_end_time = klines[0][0]
+            if len(klines) < 1000: break
+        return all_klines[-target_limit:]
+
+    async def fetch_ancillary_data(self, limit=500):
+        tasks = [
+            self.exchange.fapiDataGetOpenInterestHist({'symbol': self.symbol, 'period': self.timeframe, 'limit': limit}),
+            self.exchange.fapiDataGetTopLongShortAccountRatio({'symbol': self.symbol, 'period': self.timeframe, 'limit': limit}),
+            self.exchange.fapiDataGetTopLongShortPositionRatio({'symbol': self.symbol, 'period': self.timeframe, 'limit': limit}),
+            self.exchange.fapiDataGetGlobalLongShortAccountRatio({'symbol': self.symbol, 'period': self.timeframe, 'limit': limit}),
+            self.exchange.fapiDataGetTakerlongshortRatio({'symbol': self.symbol, 'period': self.timeframe, 'limit': limit}),
+            self.exchange.fapiPublicGetFundingRate({'symbol': self.symbol, 'limit': limit})
+        ]
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _process_to_df(self, eth_klines, btc_klines, ancillary_results):
+        eth_df = pd.DataFrame(eth_klines).iloc[:, :11]
+        eth_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote']
+        eth_df['timestamp'] = pd.to_datetime(eth_df['timestamp'], unit='ms')
+        eth_df[eth_df.columns.drop('timestamp')] = eth_df[eth_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='coerce')
+
+        btc_df = pd.DataFrame(btc_klines).iloc[:, [0, 4, 5, 7]]
+        btc_df.columns = ['timestamp', 'close_btc', 'volume_btc', 'quote_volume_btc']
+        btc_df['timestamp'] = pd.to_datetime(btc_df['timestamp'], unit='ms')
+        btc_df[btc_df.columns.drop('timestamp')] = btc_df[btc_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='coerce')
+
+        if ancillary_results:
+            mappings = [(0, 'sumOpenInterestValue', 'sum_open_interest_value'), (1, 'longShortRatio', 'sum_toptrader_long_short_ratio'), (3, 'longShortRatio', 'count_long_short_ratio'), (5, 'fundingRate', 'last_funding_rate')]
+            for idx, key, new_name in mappings:
+                res = ancillary_results[idx]
+                if isinstance(res, list) and len(res) > 0:
                     try:
-                        self.agent.load_model(config.AI_MODEL_PATH)
-                        logger.info(f"✅ AI 모델 로드 완료: {config.AI_MODEL_PATH}")
-                        logger.info("📊 추론 모드: 학습은 train_ppo.py에서 별도로 수행하세요")
-                    except Exception as e:
-                        logger.error(f"❌ AI 모델 로드 실패: {e}")
-                        logger.error("먼저 train_ppo.py를 실행하여 모델을 학습하세요")
-                        self.use_ai = False
-                else:
-                    logger.error(f"❌ AI 모델 파일을 찾을 수 없습니다: {config.AI_MODEL_PATH}")
-                    logger.error("먼저 train_ppo.py를 실행하여 모델을 학습하세요")
-                    self.use_ai = False
-                
-                if self.use_ai:
-                    logger.info(f"🤖 AI 추론 모드 활성화 - 상태 차원: {state_dim}, 행동 차원: {action_dim}")
-            except Exception as e:
-                logger.error(f"AI 초기화 실패: {e}")
-                self.use_ai = False
+                        temp_df = pd.DataFrame(res)
+                        t_col = next((c for c in ['timestamp', 'fundingTime', 'time'] if c in temp_df.columns), None)
+                        if t_col and key in temp_df.columns:
+                            subset = temp_df[[t_col, key]].rename(columns={t_col: 'timestamp', key: new_name})
+                            subset['timestamp'] = pd.to_datetime(subset['timestamp'], unit='ms')
+                            subset[new_name] = pd.to_numeric(subset[new_name], errors='coerce')
+                            eth_df = pd.merge_asof(eth_df.sort_values('timestamp'), subset.sort_values('timestamp'), on='timestamp', direction='nearest')
+                    except Exception: pass
+        return eth_df.ffill().bfill(), btc_df
+
+    async def fetch_initial_data(self):
+        eth_klines = await self.fetch_klines_raw(self.symbol, self.limit)
+        btc_klines = await self.fetch_klines_raw('BTCUSDT', self.limit)
+        ancillary = await self.fetch_ancillary_data(500)
+        return self._process_to_df(eth_klines, btc_klines, ancillary)
+
+    async def fetch_latest_patch(self):
+        eth_klines = await self.exchange.fapiPublicGetKlines({'symbol': self.symbol, 'interval': self.timeframe, 'limit': 5})
+        btc_klines = await self.exchange.fapiPublicGetKlines({'symbol': 'BTCUSDT', 'interval': self.timeframe, 'limit': 5})
+        ancillary = await self.fetch_ancillary_data(5)
+        return self._process_to_df(eth_klines, btc_klines, ancillary)
+
+# ════════════════════════════════════════════════════════════════
+# 2. 앙상블 인퍼런스 & 레짐 계산
+# ════════════════════════════════════════════════════════════════
+class EnsemblePredictor:
+    def __init__(self):
+        self.models = {
+            'TFT': TFTForecaster(),
+            'MacroHFT': MacroHFTForecaster(),
+            'Chronos': ChronosForecaster(),
+            'Kronos': KronosForecaster(),
+            'TimesFM': TimesFMForecaster(),
+            'Moirai': MoiraiForecaster()
+        }
+        self.model_order = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
+
+    async def predict_all_async(self, df: pd.DataFrame):
+        preds, confs = [], []
+        loop = asyncio.get_event_loop()
         
-        logger.info(f"트레이딩 봇 초기화 완료 - 활성 전략: {len(self.strategies)}개 (돌파장: {len(self.breakout_strategies)}개, 횡보장: {len(self.range_strategies)}개)")
-        if self.use_ai:
-            logger.info("🤖 AI 기반 결정 모드 활성화")
+        def _run_inference(m):
+            if not getattr(m, 'available', False): return None
+            try: return m.predict(df, horizon=6) 
+            except Exception: return None
+
+        tasks = [loop.run_in_executor(None, _run_inference, self.models[name]) for name in self.model_order]
+        results = await asyncio.gather(*tasks)
+        
+        for i, res in enumerate(results):
+            p_val, c_val = 0.0, 0.5
+            if res is not None and getattr(res, 'median', None) is not None:
+                trajectory = np.array(res.median[-1], dtype=np.float32) 
+                if len(trajectory) > 1:
+                    slope = float(np.polyfit(np.arange(len(trajectory)), trajectory, 1)[0])
+                    delta = trajectory[-1] - trajectory[0]
+                    if slope > 0 and delta > 0: p_val = 1.0  
+                    elif slope < 0 and delta < 0: p_val = -1.0 
+                else: p_val = float(trajectory.mean())
+                c_val = float(res.confidence[-1].mean())
+            preds.append(p_val)
+            confs.append(c_val)
+            
+        gc.collect()
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
+        return np.array(preds), np.array(confs)
+
+def _compute_regime(df, window=24):
+    close = df['close']
+    net_change  = close - close.shift(window)
+    diff_abs    = close.diff().abs().rolling(window).sum()
+    er          = net_change.abs() / (diff_abs + 1e-8)
+    raw_vol     = close.pct_change().rolling(window).std()
+    vol_z       = (raw_vol - raw_vol.rolling(window * 4).mean()) / (raw_vol.rolling(window * 4).std() + 1e-8)
+    ema12       = close.ewm(span=12).mean()
+    ema26       = close.ewm(span=26).mean()
+    mtf         = (ema12 - ema26) / (ema26 + 1e-8) * 100
+
+    er_v    = float(er.iloc[-1])    if er.notna().iloc[-1]       else 0.0
+    volz_v  = float(vol_z.iloc[-1]) if vol_z.notna().iloc[-1]    else 0.0
+    nc_v    = float(net_change.iloc[-1]) if net_change.notna().iloc[-1] else 0.0
+    mtf_v   = float(mtf.iloc[-1])   if mtf.notna().iloc[-1]      else 0.0
+
+    bull  = er_v >= 0.20 and nc_v > 0 and mtf_v > 0
+    bear  = er_v >= 0.20 and nc_v < 0 and mtf_v < 0
+    chop  = (not bull) and (not bear) and volz_v < -0.5
+    whip  = (not bull) and (not bear) and volz_v >  0.5
+    norm  = not (bull or bear or chop or whip)
+    return {
+        'regime_bull': 1.0 if bull else 0.0, 'regime_bear': 1.0 if bear else 0.0,
+        'regime_chop': 1.0 if chop else 0.0, 'regime_whipsaw': 1.0 if whip else 0.0,
+        'regime_normal': 1.0 if norm else 0.0,
+    }
+
+# 💡 [우회 패치] 훈련 중인 파일을 건드리지 않고, 상속을 통해 속마음(Edge)만 빼옵니다.
+class LiveMoEIQNTrader(MoEIQNTrader):
+    def decide(self, current_idx, features, pos):
+        cur_pos = pos.get('type')
+        state   = self._state_tensor(features, pos)
+
+        with torch.no_grad():
+            q_bull         = self.model_bull(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            q_bear         = self.model_bear(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            q_sup          = self.model_sup(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            q_res          = self.model_res(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            q_normal_long  = self.model_normal_long(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            q_normal_short = self.model_normal_short(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+
+            if cur_pos is not None and self._active_pair is not None:
+                exit_model = {
+                    'bull':         self.model_bull_exit,  'bear':         self.model_bear_exit,
+                    'sup':          self.model_sup_exit,   'res':          self.model_res_exit,
+                    'normal_long':  self.model_normal_long_exit, 'normal_short': self.model_normal_short_exit,
+                }[self._active_pair]
+                q_exit = exit_model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            else:
+                q_exit = None
+
+        adv_bull         = q_bull[1]         - q_bull[0]
+        adv_bear         = q_bear[1]         - q_bear[0]
+        adv_sup          = q_sup[1]          - q_sup[0]
+        adv_res          = q_res[1]          - q_res[0]
+        adv_normal_long  = q_normal_long[1]  - q_normal_long[0]
+        adv_normal_short = q_normal_short[1] - q_normal_short[0]
+
+        kelly_bull         = max(0., adv_bull         / (q_bull.std()         + 0.05))
+        kelly_bear         = max(0., adv_bear         / (q_bear.std()         + 0.05))
+        kelly_sup          = max(0., adv_sup          / (q_sup.std()          + 0.05))
+        kelly_res          = max(0., adv_res          / (q_res.std()          + 0.05))
+        kelly_normal_long  = max(0., adv_normal_long  / (q_normal_long.std()  + 0.05))
+        kelly_normal_short = max(0., adv_normal_short / (q_normal_short.std() + 0.05))
+
+        # 💡 [추가] 0으로 자르지 않은 순수 엣지(Edge) 값 계산
+        edge_bull         = adv_bull         / (q_bull.std()         + 0.05)
+        edge_bear         = adv_bear         / (q_bear.std()         + 0.05)
+        edge_sup          = adv_sup          / (q_sup.std()          + 0.05)
+        edge_res          = adv_res          / (q_res.std()          + 0.05)
+        edge_normal_long  = adv_normal_long  / (q_normal_long.std()  + 0.05)
+        edge_normal_short = adv_normal_short / (q_normal_short.std() + 0.05)
+
+        CLOSE_KELLY_THRESHOLD = 0.3
+
+        is_chop = features.get('regime_chop', 0.) == 1. or features.get('regime_whipsaw', 0.) == 1.
+        is_bull = features.get('regime_bull', 0.) == 1.
+        is_bear = features.get('regime_bear', 0.) == 1.
+
+        # 💡 [추가] 현재 국면의 순수 엣지 추출
+        curr_long_edge, curr_short_edge = 0.0, 0.0
+        if is_chop:
+            curr_long_edge, curr_short_edge = edge_sup, edge_res
+        elif is_bull or is_bear:
+            curr_long_edge, curr_short_edge = edge_bull, edge_bear
         else:
-            logger.info("📊 기존 전략 조합 모드 활성화")
-    
-    def update_data(self):
-        """데이터 업데이트"""
-        return self.data_collector.update_data()
-    
-    def analyze_strategies(self):
-        """모든 전략 분석 (돌파장 + 횡보장)"""
-        logger.info("=" * 60)
-        logger.info("📊 전략 분석 시작 (3분봉 데이터 기준)")
-        logger.info("=" * 60)
-        
-        # 데이터 상태 확인
-        eth_data_len = len(self.data_collector.eth_data) if self.data_collector.eth_data is not None else 0
-        btc_data_len = len(self.data_collector.btc_data) if self.data_collector.btc_data is not None else 0
-        logger.info(f"📦 데이터 상태 - ETH: {eth_data_len}개 캔들, BTC: {btc_data_len}개 캔들")
-        
-        all_signals = []
-        
-        # 모든 전략 실행 (돌파장 + 횡보장)
-        logger.info("")
-        logger.info("🔥 돌파장 전략 분석")
-        logger.info("-" * 60)
-        
-        for strategy in self.breakout_strategies:
-            try:
-                signal = strategy.analyze(self.data_collector)
-                if signal:
-                    score = signal['confidence']
-                    signal_type = signal['signal']
-                    entry_price = signal.get('entry_price', 0)
-                    
-                    if self.risk_manager.validate_signal(signal):
-                        all_signals.append(signal)
-                        logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
-                    else:
-                        logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
-                else:
-                    logger.info(f"⚪ {strategy.name:25s} | 신호 없음 | Score: 0.00%")
-            except Exception as e:
-                logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
-        
-        logger.info("")
-        logger.info("📊 횡보장 전략 분석")
-        logger.info("-" * 60)
-        
-        for strategy in self.range_strategies:
-            try:
-                signal = strategy.analyze(self.data_collector)
-                if signal:
-                    score = signal['confidence']
-                    signal_type = signal['signal']
-                    entry_price = signal.get('entry_price', 0)
-                    
-                    if self.risk_manager.validate_signal(signal):
-                        all_signals.append(signal)
-                        logger.info(f"✅ {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 진입가: ${entry_price:.2f}")
-                    else:
-                        logger.info(f"⚠️  {strategy.name:25s} | {signal_type:5s} | Score: {score:.2%} | 검증 실패")
-                else:
-                    logger.info(f"⚪ {strategy.name:25s} | 신호 없음 | Score: 0.00%")
-            except Exception as e:
-                logger.error(f"❌ {strategy.name:25s} | 분석 오류: {e}", exc_info=True)
-        
-        # 전체 요약
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info(f"📈 신호 요약: {len(all_signals)}개 신호 발견")
-        logger.info("=" * 60)
-        
-        return all_signals
-    def combine_signals(self, signals):
-        """모든 전략 신호 조합 (단일 로직)"""
-        if not signals:
-            return None
-        
-        # 롱/숏 신호 분리
-        long_signals = [s for s in signals if s.get('signal') == 'LONG']
-        short_signals = [s for s in signals if s.get('signal') == 'SHORT']
-        
-        long_score = len(long_signals)
-        short_score = len(short_signals)
-        total_strategies = len(self.strategies)
-        
-        # 최소 2개 이상 전략이 같은 방향을 가리킬 때 진입
-        if long_score >= 2:
-            avg_confidence = sum(s['confidence'] for s in long_signals) / len(long_signals)
-            avg_entry = sum(s['entry_price'] for s in long_signals) / len(long_signals)
-            stop_loss = max([s.get('stop_loss', 0) for s in long_signals if s.get('stop_loss')], default=None)
-            
-            logger.info(f"🎯 롱 진입: {long_score}/{total_strategies}개 전략 신호")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals])}")
-            return {
-                'signal': 'LONG',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Multi-Strategy Confluence',
-                'strategies': [s['strategy'] for s in long_signals]
-            }
-        
-        if short_score >= 2:
-            avg_confidence = sum(s['confidence'] for s in short_signals) / len(short_signals)
-            avg_entry = sum(s['entry_price'] for s in short_signals) / len(short_signals)
-            stop_loss = min([s.get('stop_loss', float('inf')) for s in short_signals if s.get('stop_loss')], default=None)
-            if stop_loss == float('inf'):
-                stop_loss = None
-            
-            logger.info(f"🎯 숏 진입: {short_score}/{total_strategies}개 전략 신호")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals])}")
-            return {
-                'signal': 'SHORT',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Multi-Strategy Confluence',
-                'strategies': [s['strategy'] for s in short_signals]
-            }
-        
-        logger.info(f"⚠️  진입 조건 미충족: LONG {long_score}개, SHORT {short_score}개 (최소 2개 필요)")
-        return None
-    
-    def _run_ai_mode(self):
-        """AI 강화학습 기반 결정"""
-        try:
-            # 1. 현재 상태 관측
-            state = self.env.get_observation()
-            if state is None:
-                logger.warning("⚠️ 상태 관측 실패: 다음 캔들 대기")
-                return
-            
-            # 2. AI 행동 결정 (0: Hold, 1: Long, 2: Short)
-            action, log_prob = self.agent.select_action(state)
-            action_names = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
-            action_name = action_names[action]
-            
-            logger.info("")
-            logger.info("=" * 60)
-            logger.info(f"🤖 AI 결정: {action_name}")
-            logger.info("=" * 60)
-            
-            # 3. 현재 가격 확인
-            eth_data = self.data_collector.get_candles('ETH', count=1)
-            if eth_data is None or len(eth_data) == 0:
-                logger.warning("⚠️ 가격 데이터 없음")
-                return
-            
-            current_price = float(eth_data.iloc[-1]['close'])
-            
-            # 4. 행동에 따른 처리
-            reward = 0.0
-            trade_done = False
-            
-            if action == 1:  # LONG
-                if self.current_position != 'LONG':
-                    # 기존 포지션 청산
-                    if self.current_position == 'SHORT' and self.entry_price:
-                        pnl = (self.entry_price - current_price) / self.entry_price
-                        reward = self.env.calculate_reward(pnl, True)
-                        trade_done = True
-                        logger.info(f"💰 숏 포지션 청산: 수익률 {pnl:.2%}")
-                    
-                    # 롱 진입
-                    if config.ENABLE_TRADING:
-                        signal = {
-                            'signal': 'LONG',
-                            'entry_price': current_price,
-                            'stop_loss': None,
-                            'confidence': 0.0,
-                            'strategy': 'AI Decision'
-                        }
-                        if self.execute_trade(signal):
-                            self.current_position = 'LONG'
-                            self.entry_price = current_price
-                            self.entry_time = datetime.now()
-                            logger.info(f"📈 롱 포지션 진입: ${current_price:.2f}")
-                    else:
-                        logger.info(f"📊 분석 모드: 롱 진입 신호 (가격: ${current_price:.2f})")
-                        self.current_position = 'LONG'
-                        self.entry_price = current_price
-                        self.entry_time = datetime.now()
-            
-            elif action == 2:  # SHORT
-                if self.current_position != 'SHORT':
-                    # 기존 포지션 청산
-                    if self.current_position == 'LONG' and self.entry_price:
-                        pnl = (current_price - self.entry_price) / self.entry_price
-                        reward = self.env.calculate_reward(pnl, True)
-                        trade_done = True
-                        logger.info(f"💰 롱 포지션 청산: 수익률 {pnl:.2%}")
-                    
-                    # 숏 진입
-                    if config.ENABLE_TRADING:
-                        signal = {
-                            'signal': 'SHORT',
-                            'entry_price': current_price,
-                            'stop_loss': None,
-                            'confidence': 0.0,
-                            'strategy': 'AI Decision'
-                        }
-                        if self.execute_trade(signal):
-                            self.current_position = 'SHORT'
-                            self.entry_price = current_price
-                            self.entry_time = datetime.now()
-                            logger.info(f"📉 숏 포지션 진입: ${current_price:.2f}")
-                    else:
-                        logger.info(f"📊 분석 모드: 숏 진입 신호 (가격: ${current_price:.2f})")
-                        self.current_position = 'SHORT'
-                        self.entry_price = current_price
-                        self.entry_time = datetime.now()
-            
-            else:  # HOLD
-                # 보유 중인 포지션의 수익률 계산 (보상용)
-                if self.current_position and self.entry_price:
-                    if self.current_position == 'LONG':
-                        pnl = (current_price - self.entry_price) / self.entry_price
-                    else:  # SHORT
-                        pnl = (self.entry_price - current_price) / self.entry_price
-                    
-                    holding_time = (datetime.now() - self.entry_time).total_seconds() / 60 if self.entry_time else 0
-                    reward = self.env.calculate_reward(pnl, False, holding_time)
-                    logger.debug(f"💼 포지션 보유 중: {self.current_position}, 수익률 {pnl:.2%}")
-            
-            # 5. 추론 모드: 학습 없이 행동만 결정
-            # (학습은 train_ppo.py에서 별도로 수행)
-                
-        except Exception as e:
-            logger.error(f"AI 모드 실행 실패: {e}", exc_info=True)
-    
-    def _combine_trend_signals(self, signals):
-        """추세장 진입 규칙: 핵심 돌파 전략 3중주 2개 이상 필수 + 환경 필터"""
-        if not signals:
-            return None
-        
-        # 전략별 신호 추출
-        btc_signal = self._get_signal_by_strategy(signals, 'BTC/ETH Correlation')
-        cvd_signal = self._get_signal_by_strategy(signals, 'CVD Delta')
-        squeeze_signal = self._get_signal_by_strategy(signals, 'Volatility Squeeze')
-        fvg_signal = self._get_signal_by_strategy(signals, 'Orderblock FVG')
-        
-        # LONG 진입 조합 체크
-        # 핵심 3중주 (2개 이상 필수): Volatility Squeeze + Orderblock FVG + CVD Delta
-        # 환경 확인 (보조): BTC/ETH Correlation
-        squeeze_long = bool(squeeze_signal and squeeze_signal.get('signal') == 'LONG')
-        fvg_long = bool(fvg_signal and fvg_signal.get('signal') == 'LONG')
-        cvd_long = bool(cvd_signal and cvd_signal.get('signal') == 'LONG')
-        btc_long = bool(btc_signal and btc_signal.get('signal') == 'LONG')
-        
-        # 핵심 돌파 전략 3중주 중 2개 이상 필요
-        core_signals_count = sum([squeeze_long, fvg_long, cvd_long])
-        if core_signals_count >= 2:
-            # 활성 핵심 전략 수집
-            active_strategies = []
-            confidence_sum = 0
-            confidence_count = 0
-            entry_prices = []
-            
-            if squeeze_long:
-                active_strategies.append('Volatility Squeeze')
-                confidence_sum += squeeze_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(squeeze_signal.get('entry_price', 0))
-            
-            if fvg_long:
-                active_strategies.append('Orderblock FVG')
-                confidence_sum += fvg_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(fvg_signal.get('entry_price', 0))
-            
-            if cvd_long:
-                active_strategies.append('CVD Delta')
-                confidence_sum += cvd_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(cvd_signal.get('entry_price', 0))
-            
-            # 환경 확인 (보조): BTC/ETH Correlation
-            if btc_long:
-                active_strategies.append('BTC/ETH Correlation (보조)')
-                confidence_sum += btc_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(btc_signal.get('entry_price', 0))
-                logger.info("✅ 환경 확인 통과: BTC도 같은 방향(우상향)")
+            curr_long_edge, curr_short_edge = edge_normal_long, edge_normal_short
+
+        if cur_pos is not None and self._active_pair is not None:
+            exit_signal = (q_exit is not None) and (q_exit[1] > q_exit[0])
+            if cur_pos == 'LONG':
+                opp_signal = (adv_bear > 0 and kelly_bear > CLOSE_KELLY_THRESHOLD) or \
+                             (adv_res  > 0 and kelly_res  > CLOSE_KELLY_THRESHOLD) or \
+                             (self._active_pair == 'normal_long' and adv_normal_short > 0 and kelly_normal_short > CLOSE_KELLY_THRESHOLD)
+            else:  
+                opp_signal = (adv_bull > 0 and kelly_bull > CLOSE_KELLY_THRESHOLD) or \
+                             (adv_sup  > 0 and kelly_sup  > CLOSE_KELLY_THRESHOLD) or \
+                             (self._active_pair == 'normal_short' and adv_normal_long > 0 and kelly_normal_long > CLOSE_KELLY_THRESHOLD)
+
+            if exit_signal or opp_signal:
+                active = self._active_pair
+                self._active_pair = None
+                return 0, 0.0, {'agent': f'{active}_exit+opp' if opp_signal else f'{active}_exit', 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
             else:
-                logger.info("⚠️  환경 확인 미통과: BTC 방향 불일치 (보조 필터)")
-            
-            # 평균 신뢰도 계산
-            avg_confidence = confidence_sum / confidence_count if confidence_count > 0 else 0
-            
-            # 진입가 계산
-            avg_entry = sum(entry_prices) / len(entry_prices) if entry_prices else 0
-            
-            # 손절가 계산
-            stop_loss_signals = []
-            if squeeze_long and squeeze_signal.get('stop_loss'):
-                stop_loss_signals.append(squeeze_signal.get('stop_loss'))
-            if fvg_long and fvg_signal.get('stop_loss'):
-                stop_loss_signals.append(fvg_signal.get('stop_loss'))
-            if cvd_long and cvd_signal.get('stop_loss'):
-                stop_loss_signals.append(cvd_signal.get('stop_loss'))
-            stop_loss = max(stop_loss_signals) if stop_loss_signals else None
-            
-            logger.info(f"🎯 추세장 롱 진입: 핵심 3중주 {core_signals_count}/3개 충족 (2개 이상 필수)")
-            logger.info(f"   활성 전략: {', '.join(active_strategies)}")
-            logger.info(f"   신뢰도: {avg_confidence:.2%}")
-            return {
-                'signal': 'LONG',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Trend Mode - Breakout Confluence',
-                'strategies': active_strategies
-            }
+                return (1 if cur_pos == 'LONG' else 2), 0.0, {'agent': 'HOLD', 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
+
+        final_action, selected_kelly = 0, 0.0
+        if is_chop:
+            active_agent = "SUP/RES (대기중)"
+            if adv_sup > 0 and adv_sup >= adv_res: final_action, active_agent, selected_kelly, self._active_pair = 1, "SUP_BUY 🚀", kelly_sup, 'sup'
+            elif adv_res > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "RES_SELL 🚀", kelly_res, 'res'
+        elif is_bull:
+            active_agent = "BULL_SNIPE (대기중)"
+            if adv_bull > 0: final_action, active_agent, selected_kelly, self._active_pair = 1, "BULL_SNIPE 🚀", kelly_bull, 'bull'
+        elif is_bear:
+            active_agent = "BEAR_SNIPE (대기중)"
+            if adv_bear > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "BEAR_SNIPE 🚀", kelly_bear, 'bear'
+        else:  
+            active_agent = "NORMAL (대기중)"
+            if adv_normal_long > 0 and adv_normal_long >= adv_normal_short: final_action, active_agent, selected_kelly, self._active_pair = 1, "NORMAL_LONG 🚀", kelly_normal_long, 'normal_long'
+            elif adv_normal_short > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "NORMAL_SHORT 🚀", kelly_normal_short, 'normal_short'
+
+        if final_action == 0: self._active_pair = None
+        leverage_rate = np.clip(selected_kelly * 0.5, 0.1, 1.0) if final_action != 0 else 0.0
         
-        # SHORT 진입 조합 체크
-        # 핵심 3중주 (2개 이상 필수): Volatility Squeeze + Orderblock FVG + CVD Delta
-        # 환경 확인 (보조): BTC/ETH Correlation
-        squeeze_short = bool(squeeze_signal and squeeze_signal.get('signal') == 'SHORT')
-        fvg_short = bool(fvg_signal and fvg_signal.get('signal') == 'SHORT')
-        cvd_short = bool(cvd_signal and cvd_signal.get('signal') == 'SHORT')
-        btc_short = bool(btc_signal and btc_signal.get('signal') == 'SHORT')
-        
-        # 핵심 돌파 전략 3중주 중 2개 이상 필요
-        core_signals_count = sum([squeeze_short, fvg_short, cvd_short])
-        if core_signals_count >= 2:
-            # 활성 핵심 전략 수집
-            active_strategies = []
-            confidence_sum = 0
-            confidence_count = 0
-            entry_prices = []
-            
-            if squeeze_short:
-                active_strategies.append('Volatility Squeeze')
-                confidence_sum += squeeze_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(squeeze_signal.get('entry_price', 0))
-            
-            if fvg_short:
-                active_strategies.append('Orderblock FVG')
-                confidence_sum += fvg_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(fvg_signal.get('entry_price', 0))
-            
-            if cvd_short:
-                active_strategies.append('CVD Delta')
-                confidence_sum += cvd_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(cvd_signal.get('entry_price', 0))
-            
-            # 환경 확인 (보조): BTC/ETH Correlation
-            if btc_short:
-                active_strategies.append('BTC/ETH Correlation (보조)')
-                confidence_sum += btc_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(btc_signal.get('entry_price', 0))
-                logger.info("✅ 환경 확인 통과: BTC도 같은 방향(우하향)")
-            else:
-                logger.info("⚠️  환경 확인 미통과: BTC 방향 불일치 (보조 필터)")
-            
-            # 평균 신뢰도 계산
-            avg_confidence = confidence_sum / confidence_count if confidence_count > 0 else 0
-            
-            # 진입가 계산
-            avg_entry = sum(entry_prices) / len(entry_prices) if entry_prices else 0
-            
-            # 손절가 계산
-            stop_loss_signals = []
-            if squeeze_short and squeeze_signal.get('stop_loss'):
-                stop_loss_signals.append(squeeze_signal.get('stop_loss'))
-            if fvg_short and fvg_signal.get('stop_loss'):
-                stop_loss_signals.append(fvg_signal.get('stop_loss'))
-            if cvd_short and cvd_signal.get('stop_loss'):
-                stop_loss_signals.append(cvd_signal.get('stop_loss'))
-            stop_loss = max(stop_loss_signals) if stop_loss_signals else None
-            
-            logger.info(f"🎯 추세장 숏 진입: 핵심 3중주 {core_signals_count}/3개 충족 (2개 이상 필수)")
-            logger.info(f"   활성 전략: {', '.join(active_strategies)}")
-            logger.info(f"   신뢰도: {avg_confidence:.2%}")
-            return {
-                'signal': 'SHORT',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Trend Mode - Breakout Confluence',
-                'strategies': active_strategies
-            }
-        
-        # 진입 조건 미충족 시 상세 로그
-        long_count = sum([squeeze_long, fvg_long, cvd_long])
-        short_count = sum([squeeze_short, fvg_short, cvd_short])
-        
-        if long_count < 2 and short_count < 2:
-            missing_strategies = []
-            if not squeeze_long and not squeeze_short:
-                missing_strategies.append('Volatility Squeeze')
-            if not fvg_long and not fvg_short:
-                missing_strategies.append('Orderblock FVG')
-            if not cvd_long and not cvd_short:
-                missing_strategies.append('CVD Delta')
-            
-            logger.info(f"⚠️  추세장 진입 조건 미충족: 핵심 3중주 2개 이상 필요 (현재: LONG {long_count}/3, SHORT {short_count}/3)")
-            if missing_strategies:
-                logger.info(f"   부족한 전략: {', '.join(missing_strategies)}")
-        
-        return None
-    
-    def _combine_range_signals(self, signals):
-        """횡보장 진입 규칙: 박스권 경계 확인 필수 + 반전 신호 강화 택 1"""
-        if not signals:
-            return None
-        
-        # 전략별 신호 추출
-        stoch_signal = self._get_signal_by_strategy(signals, 'Stoch RSI Mean Reversion')
-        bollinger_signal = self._get_signal_by_strategy(signals, 'Bollinger Mean Reversion')
-        cvd_fake_signal = self._get_signal_by_strategy(signals, 'CVD Fake Pressure')
-        range_signal = self._get_signal_by_strategy(signals, 'Range Top/Bottom')
-        vwap_signal = self._get_signal_by_strategy(signals, 'VWAP Deviation')
-        
-        # LONG 진입 조합 체크
-        # 박스권 하단 확인 (필수): Bollinger + Range Top/Bottom
-        # 반전 신호 강화 (택 1): Stoch RSI, CVD Fake Pressure, VWAP Deviation
-        bollinger_long = bool(bollinger_signal and bollinger_signal.get('signal') == 'LONG')
-        range_long = bool(range_signal and range_signal.get('signal') == 'LONG')
-        stoch_long = bool(stoch_signal and stoch_signal.get('signal') == 'LONG')
-        cvd_fake_long = bool(cvd_fake_signal and cvd_fake_signal.get('signal') == 'LONG')
-        vwap_long = bool(vwap_signal and vwap_signal.get('signal') == 'LONG')
-        
-        # 박스권 하단 확인 (필수)
-        box_bottom_confirmed = bollinger_long and range_long
-        
-        # 반전 신호 강화 (택 1)
-        reversal_signal = stoch_long or cvd_fake_long or vwap_long
-        
-        # 진입 조건: 박스권 하단 확인 (필수) + 반전 신호 강화 (택 1)
-        if box_bottom_confirmed and reversal_signal:
-            # 활성 전략 수집
-            active_strategies = ['Bollinger Mean Reversion', 'Range Top/Bottom']
-            confidence_sum = bollinger_signal.get('confidence', 0) + range_signal.get('confidence', 0)
-            confidence_count = 2
-            entry_prices = [bollinger_signal.get('entry_price', 0), range_signal.get('entry_price', 0)]
-            
-            # 반전 신호 강화 (택 1)
-            if stoch_long:
-                active_strategies.append('Stoch RSI Mean Reversion')
-                confidence_sum += stoch_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(stoch_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: Stoch RSI 골든크로스 시도")
-            elif cvd_fake_long:
-                active_strategies.append('CVD Fake Pressure')
-                confidence_sum += cvd_fake_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(cvd_fake_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: CVD 급감으로 매도 물량 흡수")
-            elif vwap_long:
-                active_strategies.append('VWAP Deviation')
-                confidence_sum += vwap_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(vwap_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: VWAP 대비 과도한 하락")
-            
-            avg_confidence = confidence_sum / confidence_count
-            avg_entry = sum(entry_prices) / len(entry_prices)
-            stop_loss = max([s.get('stop_loss', 0) for s in [bollinger_signal, range_signal] 
-                           if s and s.get('stop_loss')], default=None)
-            
-            logger.info("🎯 횡보장 롱 진입: 박스권 하단 확인 (필수) + 반전 신호 강화")
-            logger.info(f"   활성 전략: {', '.join(active_strategies)}")
-            logger.info(f"   신뢰도: {avg_confidence:.2%}")
-            return {
-                'signal': 'LONG',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Range Mode - Long Mean Reversion',
-                'strategies': active_strategies
-            }
-        
-        # SHORT 진입 조합 체크
-        # 박스권 상단 확인 (필수): Bollinger + Range Top/Bottom
-        # 반전 신호 강화 (택 1): Stoch RSI, CVD Fake Pressure, VWAP Deviation
-        bollinger_short = bool(bollinger_signal and bollinger_signal.get('signal') == 'SHORT')
-        range_short = bool(range_signal and range_signal.get('signal') == 'SHORT')
-        stoch_short = bool(stoch_signal and stoch_signal.get('signal') == 'SHORT')
-        cvd_fake_short = bool(cvd_fake_signal and cvd_fake_signal.get('signal') == 'SHORT')
-        vwap_short = bool(vwap_signal and vwap_signal.get('signal') == 'SHORT')
-        
-        # 박스권 상단 확인 (필수)
-        box_top_confirmed = bollinger_short and range_short
-        
-        # 반전 신호 강화 (택 1)
-        reversal_signal_short = stoch_short or cvd_fake_short or vwap_short
-        
-        # 진입 조건: 박스권 상단 확인 (필수) + 반전 신호 강화 (택 1)
-        if box_top_confirmed and reversal_signal_short:
-            # 활성 전략 수집
-            active_strategies = ['Bollinger Mean Reversion', 'Range Top/Bottom']
-            confidence_sum = bollinger_signal.get('confidence', 0) + range_signal.get('confidence', 0)
-            confidence_count = 2
-            entry_prices = [bollinger_signal.get('entry_price', 0), range_signal.get('entry_price', 0)]
-            
-            # 반전 신호 강화 (택 1)
-            if stoch_short:
-                active_strategies.append('Stoch RSI Mean Reversion')
-                confidence_sum += stoch_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(stoch_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: Stoch RSI 데드크로스 시도")
-            elif cvd_fake_short:
-                active_strategies.append('CVD Fake Pressure')
-                confidence_sum += cvd_fake_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(cvd_fake_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: CVD 급증으로 매수 물량 흡수")
-            elif vwap_short:
-                active_strategies.append('VWAP Deviation')
-                confidence_sum += vwap_signal.get('confidence', 0)
-                confidence_count += 1
-                entry_prices.append(vwap_signal.get('entry_price', 0))
-                logger.info("✅ 반전 신호: VWAP 대비 과도한 상승")
-            
-            avg_confidence = confidence_sum / confidence_count
-            avg_entry = sum(entry_prices) / len(entry_prices)
-            stop_loss = max([s.get('stop_loss', 0) for s in [bollinger_signal, range_signal] 
-                           if s and s.get('stop_loss')], default=None)
-            
-            logger.info("🎯 횡보장 숏 진입: 박스권 상단 확인 (필수) + 반전 신호 강화")
-            logger.info(f"   활성 전략: {', '.join(active_strategies)}")
-            logger.info(f"   신뢰도: {avg_confidence:.2%}")
-            return {
-                'signal': 'SHORT',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy': 'Range Mode - Short Mean Reversion',
-                'strategies': active_strategies
-            }
-        
-        # 진입 조건 미충족 시 상세 로그
-        if not box_bottom_confirmed and not box_top_confirmed:
-            missing = []
-            if not bollinger_long and not bollinger_short:
-                missing.append('Bollinger Mean Reversion')
-            if not range_long and not range_short:
-                missing.append('Range Top/Bottom')
-            logger.info(f"⚠️  횡보장 진입 조건 미충족: 박스권 경계 확인 필수 (부족: {', '.join(missing)})")
-        elif box_bottom_confirmed and not reversal_signal:
-            logger.info("⚠️  횡보장 롱 진입 조건 미충족: 반전 신호 강화 필요 (Stoch RSI, CVD Fake Pressure, VWAP Deviation 중 택 1)")
-        elif box_top_confirmed and not reversal_signal_short:
-            logger.info("⚠️  횡보장 숏 진입 조건 미충족: 반전 신호 강화 필요 (Stoch RSI, CVD Fake Pressure, VWAP Deviation 중 택 1)")
-        
-        return None
-        
-        # STEP 2: 필수 조합 체크
-        # CVD 방향성 확인 (양전환/음전환)
-        cvd_bullish = False
-        cvd_bearish = False
-        if cvd_signal:
-            if cvd_signal['signal'] == 'LONG':
-                cvd_bullish = True
-            elif cvd_signal['signal'] == 'SHORT':
-                cvd_bearish = True
-        
-        # 롱 필수 조합 체크
-        long_required_combination = False
-        if long_score >= 2:
-            # (A) 저점 스윕 + CVD 양전환
-            if sweep_signal and sweep_signal['signal'] == 'LONG' and cvd_bullish:
-                long_required_combination = True
-                logger.info("✅ 롱 필수 조합 (A): 저점 스윕 + CVD 양전환")
-            
-            # (B) FVG/OB 리테스트 + CVD 양전환
-            elif fvg_signal and fvg_signal['signal'] == 'LONG' and cvd_bullish:
-                long_required_combination = True
-                logger.info("✅ 롱 필수 조합 (B): FVG/OB 리테스트 + CVD 양전환")
-        
-        # 숏 필수 조합 체크
-        short_required_combination = False
-        if short_score >= 2:
-            # (A) 고점 스윕 + CVD 음전환
-            if sweep_signal and sweep_signal['signal'] == 'SHORT' and cvd_bearish:
-                short_required_combination = True
-                logger.info("✅ 숏 필수 조합 (A): 고점 스윕 + CVD 음전환")
-            
-            # (B) OB 리테스트 + CVD 음전환
-            elif fvg_signal and fvg_signal['signal'] == 'SHORT' and cvd_bearish:
-                short_required_combination = True
-                logger.info("✅ 숏 필수 조합 (B): OB 리테스트 + CVD 음전환")
-        
-        # STEP 3: 조건 충족 시 진입
-        if long_score >= 2 and long_required_combination:
-            avg_confidence = sum(s['confidence'] for s in long_signals) / len(long_signals)
-            avg_entry = sum(s['entry_price'] for s in long_signals) / len(long_signals)
-            stop_loss = max([s.get('stop_loss', 0) for s in long_signals if s.get('stop_loss')], default=None)
-            
-            logger.info(f"🎯 하이브리드 롱 진입: 점수 {long_score}/{total_strategies}점 + 필수 조합 충족")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals])}")
-            return {
-                'signal': 'LONG',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy_count': long_score,
-                'strategies': [s['strategy'] for s in long_signals],
-                'combination_rank': 1  # 하이브리드 시스템
-            }
-        
-        elif short_score >= 2 and short_required_combination:
-            avg_confidence = sum(s['confidence'] for s in short_signals) / len(short_signals)
-            avg_entry = sum(s['entry_price'] for s in short_signals) / len(short_signals)
-            stop_loss = min([s.get('stop_loss', float('inf')) for s in short_signals if s.get('stop_loss')], default=None)
-            if stop_loss == float('inf'):
-                stop_loss = None
-            
-            logger.info(f"🎯 하이브리드 숏 진입: 점수 {short_score}/{total_strategies}점 + 필수 조합 충족")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals])}")
-            return {
-                'signal': 'SHORT',
-                'entry_price': avg_entry,
-                'stop_loss': stop_loss,
-                'confidence': avg_confidence,
-                'strategy_count': short_score,
-                'strategies': [s['strategy'] for s in short_signals],
-                'combination_rank': 1  # 하이브리드 시스템
-            }
-        
-        # 필수 조합 미충족
-        if long_score >= 2:
-            logger.info(f"⚠️  롱 점수 {long_score}/{total_strategies}점 충족했으나 필수 조합 미충족")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in long_signals])}")
-            logger.info(f"   필요한 조합: (A) 저점 스윕 + CVD 양전환, (B) FVG/OB + CVD 양전환, (C) 청산 스파이크 + 저점 스윕")
-        if short_score >= 2:
-            logger.info(f"⚠️  숏 점수 {short_score}/{total_strategies}점 충족했으나 필수 조합 미충족")
-            logger.info(f"   활성 전략: {', '.join([s['strategy'] for s in short_signals])}")
-            logger.info(f"   필요한 조합: (A) 고점 스윕 + CVD 음전환, (B) OB + CVD 음전환, (C) 청산 스파이크 + 고점 스윕")
-        
-        return None
-    
-    def _get_signal_by_strategy(self, signals, strategy_name):
-        """특정 전략의 신호 반환"""
-        for s in signals:
-            if s['strategy'] == strategy_name:
-                return s
-        return None
-    
-    def _get_signal_by_strategy(self, signals, strategy_name):
-        """특정 전략의 신호 반환"""
-        for s in signals:
-            if s['strategy'] == strategy_name:
-                return s
-        return None
-    
-    def execute_trade(self, final_signal):
-        """거래 실행"""
-        try:
-            use_spot = not self.client.use_futures
-            side = 'BUY' if final_signal['signal'] == 'LONG' else 'SELL'
-            
-            # 스팟 거래에서 SHORT는 보유 자산 매도만 가능
-            if use_spot and side == 'SELL':
-                # 스팟 매도: 보유 자산 확인
-                current_position = self.client.get_position(config.ETH_SYMBOL)
-                if current_position is None or current_position['size'] == 0:
-                    logger.warning("매도할 자산이 없습니다 (스팟 거래)")
-                    return False
-                
-                # 보유 자산 전체 매도
-                position_size = current_position['size']
-                logger.info(f"거래 실행: {side} {position_size} {config.ETH_SYMBOL} (보유 자산 매도)")
-                order = self.client.place_order(
-                    symbol=config.ETH_SYMBOL,
-                    side=side,
-                    quantity=position_size,
-                    order_type='MARKET'
-                )
-            else:
-                # 선물 거래 또는 스팟 매수
-                # 현재 포지션 확인
-                current_position = self.client.get_position(config.ETH_SYMBOL)
-                
-                if current_position is not None:
-                    # 기존 포지션이 있으면 청산
-                    logger.info("기존 포지션 청산 중...")
-                    self.client.close_position(config.ETH_SYMBOL)
-                    time.sleep(1)
-                
-                # 포지션 크기 계산
-                entry_price = final_signal['entry_price']
-                stop_loss = final_signal.get('stop_loss')
-                
-                if use_spot and side == 'BUY':
-                    # 스팟 매수: USDT 금액 계산
-                    position_size = self.risk_manager.calculate_position_size(
-                        entry_price, 
-                        stop_loss,
-                        use_spot=True
-                    )
-                    if position_size is None or position_size < 1:  # 최소 1 USDT
-                        logger.warning("포지션 크기가 너무 작음")
-                        return False
-                    
-                    logger.info(f"거래 실행: {side} {position_size} USDT worth of {config.ETH_SYMBOL} @ {entry_price}")
-                    order = self.client.place_order(
-                        symbol=config.ETH_SYMBOL,
-                        side=side,
-                        quantity=position_size,  # USDT 금액
-                        order_type='MARKET',
-                        quote_quantity=position_size
-                    )
-                else:
-                    # 선물 거래: 코인 수량 계산
-                    position_size = self.risk_manager.calculate_position_size(
-                        entry_price, 
-                        stop_loss,
-                        use_spot=False
-                    )
-                    
-                    if position_size is None or position_size < 0.001:
-                        logger.warning("포지션 크기가 너무 작음")
-                        return False
-                    
-                    logger.info(f"거래 실행: {side} {position_size} {config.ETH_SYMBOL} @ {entry_price}")
-                    order = self.client.place_order(
-                        symbol=config.ETH_SYMBOL,
-                        side=side,
-                        quantity=position_size,
-                        order_type='MARKET'
-                    )
-            
-            if order:
-                logger.info(f"주문 성공: {order}")
-                return True
-            else:
-                logger.error("주문 실패")
-                return False
-                
-        except Exception as e:
-            logger.error(f"거래 실행 실패: {e}")
-            return False
-    
-    def _wait_for_next_candle(self):
-        """다음 캔들까지 카운트다운하며 대기 (같은 줄에서 업데이트)"""
-        # 현재 시간
-        now = datetime.now()
-        
-        # 다음 3분 단위 시간 계산 (0분, 3분, 6분, 9분...)
-        current_minute = now.minute
-        next_minute = ((current_minute // 3) + 1) * 3
-        
-        if next_minute >= 60:
-            # 다음 시간으로 넘어감
-            next_candle_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        else:
-            next_candle_time = now.replace(minute=next_minute, second=0, microsecond=0)
-        
-        # 남은 시간 계산
-        remaining = (next_candle_time - now).total_seconds()
-        
-        # 카운트다운 표시 (같은 줄에서 업데이트)
-        while remaining > 0:
-            mins = int(remaining // 60)
-            secs = int(remaining % 60)
-            print(f"\r⏰ 다음 캔들까지: {mins:02d}:{secs:02d} 남음", end='', flush=True)
-            time.sleep(1)
-            remaining -= 1
-        
-        print("\r" + " " * 50 + "\r", end='', flush=True)  # 줄 지우기
-        logger.info("🕐 새 캔들 시작!")
-    
-    def monitor_positions(self):
-        """포지션 모니터링 및 손절/익절"""
-        try:
-            # 스팟 거래에서는 자산 조회 권한이 없을 수 있으므로 예외 처리
-            position = self.client.get_position(config.ETH_SYMBOL)
-            if position is None:
-                return
-            
-            current_price = self.client.get_ticker(config.ETH_SYMBOL)
-            if current_price is None:
-                return
-            
-            entry_price = position['entry_price']
-            size = position['size']
-            
-            # 스팟 거래에서는 size가 양수만 가능 (SHORT 없음)
-            if not self.client.use_futures:
-                if size <= 0:
-                    return
-                side = 'LONG'
-            else:
-                side = 'LONG' if size > 0 else 'SHORT'
-            
-            # 손절 확인 (기본 0.2%)
-            stop_loss_price = entry_price * (1 - config.STOP_LOSS_PERCENT / 100) if side == 'LONG' else entry_price * (1 + config.STOP_LOSS_PERCENT / 100)
-            
-            if self.risk_manager.should_stop_loss(entry_price, current_price, stop_loss_price, side):
-                logger.info(f"손절 실행: {side} 포지션")
-                self.client.close_position(config.ETH_SYMBOL)
-                return
-            
-            # 익절 확인
-            if self.risk_manager.should_take_profit(entry_price, current_price, side):
-                logger.info(f"익절 고려: {side} 포지션, 수익률 계산 중...")
-                # 익절은 더 보수적으로 설정 가능
-            
-        except Exception as e:
-            # 스팟 거래에서 자산 조회 실패는 정상일 수 있음 (권한 없음)
-            if not self.client.use_futures:
-                # 디버그 레벨로만 로깅하여 경고 메시지 감소
-                logger.debug(f"포지션 모니터링 스킵 (스팟 거래, 계정 조회 권한 없음)")
-            else:
-                logger.error(f"포지션 모니터링 실패: {e}")
-    
-    def run(self):
-        """봇 실행"""
-        logger.info("트레이딩 봇 시작")
-        
-        # 초기 데이터 로드
-        if not self.update_data():
-            logger.error("초기 데이터 로드 실패")
-            return
-        
-        iteration = 0
-        
-        while True:
-            try:
-                iteration += 1
-                logger.info(f"=== 반복 {iteration} ===")
-                
-                # 데이터 업데이트
-                logger.info("📥 최신 3분봉 데이터 수집 중...")
-                if not self.update_data():
-                    logger.warning("데이터 업데이트 실패, 재시도 중...")
-                    time.sleep(5)
-                    continue
-                
-                # 현재 가격 확인
-                current_eth_price = self.client.get_ticker(config.ETH_SYMBOL)
-                current_btc_price = self.client.get_ticker(config.BTC_SYMBOL)
-                if current_eth_price and current_btc_price:
-                    logger.info(f"💰 현재 가격 - ETH: ${current_eth_price:.2f} | BTC: ${current_btc_price:.2f}")
-                
-                # 포지션 모니터링
-                logger.info("👀 포지션 모니터링 중...")
-                self.monitor_positions()
-                
-                # AI 모드 또는 전략 조합 모드
-                if self.use_ai:
-                    # AI 강화학습 기반 결정
-                    logger.info("🤖 AI 모드: 강화학습 모델 기반 결정")
-                    self._run_ai_mode()
-                else:
-                    # 전략 분석
-                    signals = self.analyze_strategies()
-                    
-                    if signals:
-                        logger.info("🔍 신호 조합 분석 중...")
-                        # 신호 결합
-                        final_signal = self.combine_signals(signals)
-                        
-                        if final_signal:
-                            rank = final_signal.get('combination_rank', 'N/A')
-                            logger.info("")
-                            logger.info("🎯" + "=" * 58)
-                            logger.info(f"✅ 최종 거래 결정: {final_signal['signal']}")
-                            logger.info(f"   진입가: ${final_signal['entry_price']:.2f}")
-                            logger.info(f"   신뢰도: {final_signal['confidence']:.2%}")
-                            logger.info(f"   조합 순위: {rank}위")
-                            strategies_list = final_signal.get('strategies', [final_signal.get('strategy', 'Unknown')])
-                            logger.info(f"   사용 전략: {', '.join(strategies_list)}")
-                            if final_signal.get('stop_loss'):
-                                logger.info(f"   손절가: ${final_signal['stop_loss']:.2f}")
-                            logger.info("=" * 60)
-                            logger.info("")
-                            
-                            # 거래 실행 (분석 모드에서는 비활성화)
-                            if config.ENABLE_TRADING:
-                                logger.info("💼 거래 실행 중...")
-                                self.execute_trade(final_signal)
-                            else:
-                                logger.info("📊 분석 모드: 거래 실행 비활성화 (ENABLE_TRADING=False)")
-                                logger.info("   신호만 분석하고 실제 거래는 수행하지 않습니다.")
-                        else:
-                            logger.info("⚠️  신호 조합 실패: 조건을 만족하는 조합이 없습니다")
-                    else:
-                        logger.info("⚪ 거래 신호 없음: 다음 캔들 대기 중...")
-                
-                # 다음 캔들까지 카운트다운하며 대기
-                self._wait_for_next_candle()
-                
-            except KeyboardInterrupt:
-                logger.info("봇 종료 요청")
-                # 추론 모드에서는 모델 저장하지 않음 (학습은 train_ppo.py에서 수행)
-                break
-            except Exception as e:
-                logger.error(f"봇 실행 중 오류: {e}")
-                time.sleep(10)
+        return final_action, leverage_rate, {'agent': active_agent, 'kelly': selected_kelly, 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
 
 
-if __name__ == '__main__':
-    bot = TradingBot()
-    bot.run()
+# ════════════════════════════════════════════════════════════════
+# 3-A. LS 2-Agent 라우터 (롱돌이/숏돌이)
+# ════════════════════════════════════════════════════════════════
+class LSLiveRouter:
+    MODEL_ORDER  = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
+    LIVE_TO_TRAIN = {'TimesFM': 'pred_timesfm', 'Chronos': 'pred_chronos'}
+
+    def __init__(self, model_path='data/ensemble/best_ls_agents.pth'):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.elite_extractor = EliteSignals()
+
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"LS 모델을 찾을 수 없습니다: {model_path}")
+
+        ckpt = torch.load(model_path, map_location=self.device)
+        def _load(key):
+            m = RobustIQN(STATE_DIM, 2).to(self.device)
+            m.load_state_dict(ckpt[key])
+            m.eval()
+            return m
+
+        self.trader = DualAgentTrader(
+            _load('model_long_entry'), _load('model_short_entry'),
+            _load('model_long_exit'),  _load('model_short_exit'),
+            self.device
+        )
+        self.pos, self.entry_price, self.hold_count = None, 0.0, 0
+        self.peak_equity, self.current_equity = 1.0, 1.0
+        logger.info(f"✅ {Colors.GREEN}LS 2-Agent 롱돌이/숏돌이 라우터 탑재 완료{Colors.RESET} (epoch={ckpt.get('epoch','?')})")
+
+    def get_signal(self, processed_df, preds, confs):
+        last_row = processed_df.iloc[-1]
+        prev_row = processed_df.iloc[-2]
+        smf_std  = processed_df['smart_money_flow'].std() if 'smart_money_flow' in processed_df.columns else 1.0
+
+        cur_market  = row_to_market_row(last_row)
+        prev_market = row_to_market_row(prev_row)
+        elite_sigs  = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
+
+        rev_map  = {v: k for k, v in self.LIVE_TO_TRAIN.items()}
+        conf_map = {v.replace('pred_', 'conf_'): k for k, v in self.LIVE_TO_TRAIN.items()}
+        live_pred = {n: preds[i] for i, n in enumerate(self.MODEL_ORDER)}
+        live_conf = {n: confs[i] for i, n in enumerate(self.MODEL_ORDER)}
+
+        features = {}
+        for col in MODEL_PRED:
+            src = rev_map.get(col)
+            features[col] = float(live_pred[src]) if src else 0.0
+        for col in MODEL_CONF:
+            src = conf_map.get(col)
+            features[col] = float(live_conf[src]) if src else 0.5
+
+        features.update(elite_sigs)
+        for col in ALPHA_7_COLS: features[col] = float(last_row.get(col, 0.0))
+        features.update(_compute_regime(processed_df))
+        features['close'] = float(last_row['close'])
+
+        unr = 0.0
+        if self.pos is not None:
+            cp  = float(last_row['close'])
+            unr = (cp - self.entry_price) / self.entry_price if self.pos == 'LONG' else (self.entry_price - cp) / self.entry_price
+            self.current_equity = 1.0 + unr
+            if self.current_equity > self.peak_equity: self.peak_equity = self.current_equity
+        else:
+            self.current_equity = self.peak_equity = 1.0
+
+        pos_dict = {
+            'type': self.pos, 'entry_price': self.entry_price,
+            'unrealized': unr, 'mdd': min((self.current_equity / self.peak_equity) - 1.0, 0.0),
+            'hold_norm': min(self.hold_count / 100.0, 1.0)
+        }
+
+        final_action, _, info = self.trader.decide(features, pos_dict)
+
+        if final_action == 1 and self.pos is None:
+            self.pos, self.entry_price, self.hold_count = 'LONG', float(last_row['close']), 0
+        elif final_action == 2 and self.pos is None:
+            self.pos, self.entry_price, self.hold_count = 'SHORT', float(last_row['close']), 0
+        elif final_action == 0 and self.pos is not None:
+            self.pos, self.entry_price, self.hold_count = None, 0.0, 0
+        elif self.pos is not None:
+            self.hold_count += 1
+
+        pnl_pct = (self.current_equity - 1.0) * 100
+        return final_action, info, pnl_pct
+
+# ════════════════════════════════════════════════════════════════
+# 3-B. AI 컴포넌트: 12-Agent MoE 라우터
+# ════════════════════════════════════════════════════════════════
+class MoELiveRouter:
+    MODEL_ORDER = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
+    LIVE_TO_TRAIN = {'TimesFM': 'pred_timesfm', 'Chronos': 'pred_chronos'}
+
+    def __init__(self, model_path='data/ensemble/best_moe_agents.pth'):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.elite_extractor = EliteSignals()
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"학습된 AI 모델을 찾을 수 없습니다: {model_path}")
+
+        ckpt = torch.load(model_path, map_location=self.device)
+        def _load(key):
+            m = RobustIQN(STATE_DIM, 2).to(self.device)
+            m.load_state_dict(ckpt[key])
+            m.eval()
+            return m
+
+        self.trader = LiveMoEIQNTrader(
+            _load('model_bull'), _load('model_bear'), _load('model_sup'), _load('model_res'),
+            _load('model_bull_exit'), _load('model_bear_exit'), _load('model_sup_exit'), _load('model_res_exit'),
+            _load('model_normal_long'), _load('model_normal_short'),
+            _load('model_normal_long_exit'), _load('model_normal_short_exit'),
+            df=pd.DataFrame(), device=self.device
+        )
+        self.pos, self.entry_price, self.hold_count = None, 0.0, 0
+        self.peak_equity, self.current_equity = 1.0, 1.0
+        logger.info(f"✅ {Colors.GREEN}12-Agent Dueling MoE 라우터 탑재 완료{Colors.RESET} (epoch={ckpt.get('epoch','?')})")
+
+    def get_signal(self, processed_df, preds, confs):
+        last_row = processed_df.iloc[-1]
+        prev_row = processed_df.iloc[-2]
+        smf_std = processed_df['smart_money_flow'].std() if 'smart_money_flow' in processed_df.columns else 1.0
+        
+        # Elite 11종 시그널 추출
+        cur_market = row_to_market_row(last_row)
+        prev_market = row_to_market_row(prev_row)
+        elite_sigs = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
+
+        features = {}
+        live_pred = {n: preds[i] for i, n in enumerate(self.MODEL_ORDER)}
+        live_conf = {n: confs[i] for i, n in enumerate(self.MODEL_ORDER)}
+        rev_map  = {v: k for k, v in self.LIVE_TO_TRAIN.items()}
+        conf_map = {v.replace('pred_', 'conf_'): k for k, v in self.LIVE_TO_TRAIN.items()}
+        
+        for col in MODEL_PRED:
+            src = rev_map.get(col)
+            features[col] = float(live_pred[src]) if src else 0.0
+        for col in MODEL_CONF:
+            src = conf_map.get(col)
+            features[col] = float(live_conf[src]) if src else 0.5
+            
+        features.update(elite_sigs)
+        for col in ALPHA_7_COLS: features[col] = float(last_row.get(col, 0.0))
+        regime = _compute_regime(processed_df)
+        features.update(regime)
+        features['close'] = float(last_row['close'])
+
+        unr = 0.0
+        if self.pos is not None:
+            cp = float(last_row['close'])
+            unr = (cp - self.entry_price) / self.entry_price if self.pos == 'LONG' else (self.entry_price - cp) / self.entry_price
+            self.current_equity = 1.0 + unr
+            if self.current_equity > self.peak_equity: self.peak_equity = self.current_equity
+        else: self.current_equity = self.peak_equity = 1.0
+
+        pos_dict = {
+            'type': self.pos, 'entry_price': self.entry_price,
+            'unrealized': unr, 'mdd': min((self.current_equity / self.peak_equity) - 1.0, 0.0),
+            'hold_norm': min(self.hold_count / 100.0, 1.0)
+        }
+
+        # 12-Agent 결단
+        final_action, leverage_rate, info = self.trader.decide(0, features, pos_dict)
+
+        # 내부 포지션 트래킹 업데이트
+        if final_action == 1 and self.pos is None:
+            self.pos, self.entry_price, self.hold_count = 'LONG', float(last_row['close']), 0
+        elif final_action == 2 and self.pos is None:
+            self.pos, self.entry_price, self.hold_count = 'SHORT', float(last_row['close']), 0
+        elif final_action == 0 and self.pos is not None:
+            self.pos, self.entry_price, self.hold_count = None, 0.0, 0
+        elif self.pos is not None:
+            self.hold_count += 1
+
+        return final_action, info, elite_sigs, regime
+
+    def print_dashboard(self, current_price, preds, confs, final_action, info, regime, elite_sigs, timestamp, ls_action=None, ls_info=None, ls_pnl=None, ls_pos=None):
+        pnl_pct = (self.current_equity - 1.0) * 100
+        regime_name = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
+        active_agent = info.get('agent', 'NONE')
+        kelly = info.get('kelly', 0.0)
+        
+        # 💡 [수정] 변수명을 long_kelly -> long_edge로 맞추고, 해석용 함수 추가
+        long_edge = info.get('long_edge', 0.0)
+        short_edge = info.get('short_edge', 0.0)
+
+        def format_edge(edge):
+            if edge > 0.01: return f"{Colors.GREEN}{edge:+.3f} (진입희망){Colors.RESET}"
+            elif edge < -0.01: return f"{Colors.RED}{edge:+.3f} (진입거부){Colors.RESET}"
+            else: return f"{Colors.YELLOW}{edge:+.3f} (완전중립){Colors.RESET}"
+
+        action_str = {0: f'{Colors.YELLOW}🟨 관망 / 청산 (HOLD / CLOSE){Colors.RESET}', 
+                      1: f'{Colors.GREEN}🟩 롱 진입 (LONG){Colors.RESET}', 
+                      2: f'{Colors.RED}🟥 숏 진입 (SHORT){Colors.RESET}'}.get(final_action, '?')
+        
+        pos_str = {'LONG': f'{Colors.GREEN}🟩 LONG 보유{Colors.RESET}', 
+                   'SHORT': f'{Colors.RED}🟥 SHORT 보유{Colors.RESET}', 
+                   None: f'{Colors.YELLOW}🟨 무포지션{Colors.RESET}'}.get(self.pos, '?')
+
+        print("\n" + Colors.BOLD + "╔════════════════════ [ 12-Agent MoE 사령관 대시보드 ] ════════════════════╗" + Colors.RESET)
+        print(f" ⏱️ 타임: {timestamp.strftime('%Y-%m-%d %H:%M')} KST | 💰 ETH: ${current_price:,.2f}")
+        
+        if self.pos is not None:
+            pnl_color = Colors.GREEN if pnl_pct > 0 else Colors.RED
+            print(f" ⏳ 보유 캔들: {self.hold_count:<4} | 📈 미실현 수익: {pnl_color}{pnl_pct:+.2f}%{Colors.RESET}")
+        
+        print("-" * 68)
+        print(f" {Colors.CYAN}[ 🧠 6대 파운데이션 AI 앙상블 예측 ]{Colors.RESET}")
+        for i, model_name in enumerate(self.MODEL_ORDER):
+            pred_dir = f"{Colors.GREEN}상승(L){Colors.RESET}" if preds[i] > 0 else f"{Colors.RED}하락(S){Colors.RESET}" if preds[i] < 0 else f"{Colors.YELLOW}중립(-){Colors.RESET}"
+            print(f"  • {model_name:<10} : {pred_dir:<15} (신뢰도: {confs[i]:.1%})")
+
+        print("-" * 68)
+        print(f" {Colors.YELLOW}[ ⚔️ 13대 엘리트 퀀트 시그널 분석 ]{Colors.RESET}")
+        
+        sig_interpretations = {
+            'whale': ('고래 매수 다이버전스 포착', '고래 매도 다이버전스 포착', '고래 움직임 관망'),
+            'liq_squeeze': ('숏 청산 스퀴즈 위협 (롱 반등)', '롱 청산 스퀴즈 위협 (숏 반등)', '청산 스퀴즈 위험 낮음'),
+            'net_taker': ('시장가 매수 쏠림 강함', '시장가 매도 쏠림 강함', '시장가 매수/매도 균형'),
+            'orderblock': ('지지 매물대(FVG) 강한 반등', '저항 매물대(FVG) 강한 거절', '주요 오더블록 미형성'),
+            'hurst_ofi': ('프랙탈 상승 오더플로우 지속', '프랙탈 하락 오더플로우 지속', '랜덤워크/혼조세 (방향성 없음)'),
+            'funding_cascade': ('펀딩비 극단적 음수 (숏 청산대기)', '펀딩비 극단적 양수 (롱 청산대기)', '펀딩비/미결제약정 안정적'),
+            'multifractal': ('장기 노이즈 캔슬링: 상승', '장기 노이즈 캔슬링: 하락', '추세 노이즈 상쇄됨'),
+            'cluster_fib': ('피보나치+CVP 클러스터 지지', '피보나치+CVP 클러스터 저항', '주요 방어선 부재'),
+            'oi_divergence': ('하락 중 OI 증가 (숏 스퀴즈 잠재)', '상승 중 OI 증가 (롱 스퀴즈 잠재)', 'OI와 가격 동조화'),
+            'top_trader_squeeze': ('탑트레이더 숏 쏠림 (상승폭발 대기)', '탑트레이더 롱 쏠림 (하락폭발 대기)', '탑트레이더 포지션 균형'),
+            'btc_corr_breakout': ('BTC 커플링 이탈 (독자 상승)', 'BTC 커플링 이탈 (독자 하락)', 'BTC 방향성 강력 동조'),
+            'ai_squeeze': ('변동성 응축 후 상방 폭발', '변동성 응축 후 하방 폭발', '변동성 평이함 (응축 없음)'),
+            'vp_gravity': ('POC(매물대) 하단 이탈 후 탄성 반등', 'POC(매물대) 상단 이탈 후 탄성 하락', '최다 매물대(POC) 부근 체류')
+        }
+
+        # 💡 [핵심 추가] 신호 강도(절댓값)를 기준으로 내림차순 정렬 (쎈 놈부터 위로, 0은 맨 아래로)
+        sorted_elite_sigs = sorted(elite_sigs.items(), key=lambda item: abs(item[1]), reverse=True)
+
+        for k, v in sorted_elite_sigs:
+            base_key = k.replace('sig_', '')
+            if base_key in sig_interpretations:
+                msg_long, msg_short, msg_none = sig_interpretations[base_key]
+                if v > 0:
+                    interp = f"{Colors.GREEN}{msg_long:<25}{Colors.RESET}"
+                    icon = f"{Colors.GREEN}▲{Colors.RESET}"
+                elif v < 0:
+                    interp = f"{Colors.RED}{msg_short:<25}{Colors.RESET}"
+                    icon = f"{Colors.RED}▼{Colors.RESET}"
+                else:
+                    interp = f"{Colors.YELLOW}{msg_none:<25}{Colors.RESET}"
+                    icon = f"{Colors.YELLOW}-{Colors.RESET}"
+            else:
+                interp = f"{Colors.GREEN}LONG{Colors.RESET}" if v > 0 else f"{Colors.RED}SHORT{Colors.RESET}" if v < 0 else f"{Colors.YELLOW}NONE{Colors.RESET}"
+                icon = f"{Colors.GREEN}▲{Colors.RESET}" if v > 0 else f"{Colors.RED}▼{Colors.RESET}" if v < 0 else f"{Colors.YELLOW}-{Colors.RESET}"
+
+            print(f"  {icon} {base_key:<20} : {interp} (강도: {v:+.2f})")
+
+        print("-" * 68)
+        print(f" {Colors.CYAN}[ 🤖 LR MoE 12-Agent 독립 판단 ]{Colors.RESET}")
+        print(f" 🌍 시장 레짐: {regime_name:<10} | 📊 현재 포지션: {pos_str}")
+        print(f" ⚖️ [현재 국면 엣지 비교] {Colors.GREEN}롱돌이(L): {long_edge:.3f}{Colors.RESET} vs {Colors.RED}숏돌이(S): {short_edge:.3f}{Colors.RESET}")
+        print(f" 🤖 담당 특수부대: {active_agent:<15} | 🎯 선택된 Kelly: {kelly:.3f}")
+        print(f" 🎯 최종 결단: {action_str}")
+
+        # ── LS 2-Agent 섹션 ────────────────────────────────────────────────
+        if ls_action is not None:
+            print("-" * 68)
+            print(f" {Colors.CYAN}[ 🤖 LS 2-Agent 롱돌이/숏돌이 독립 판단 ]{Colors.RESET}")
+            ls_action_str = {
+                0: f'{Colors.YELLOW}🟨 관망 / 청산{Colors.RESET}',
+                1: f'{Colors.GREEN}🟩 롱 진입 (Long){Colors.RESET}',
+                2: f'{Colors.RED}🟥 숏 진입 (Short){Colors.RESET}'
+            }.get(ls_action, '?')
+            ls_agent_name = (ls_info or {}).get('agent', 'N/A')
+            ls_adv = (ls_info or {}).get('adv', None)
+            ls_pos_str = {'LONG': f'{Colors.GREEN}🟩 LONG{Colors.RESET}', 'SHORT': f'{Colors.RED}🟥 SHORT{Colors.RESET}', None: f'{Colors.YELLOW}무포지션{Colors.RESET}'}.get(ls_pos, f'{Colors.YELLOW}무포지션{Colors.RESET}')
+            adv_str = f" | adv: {ls_adv:+.4f}" if ls_adv is not None else ""
+            pnl_str = ""
+            if ls_pnl is not None:
+                pnl_color = Colors.GREEN if ls_pnl > 0 else (Colors.RED if ls_pnl < 0 else Colors.YELLOW)
+                pnl_str = f" | 미실현: {pnl_color}{ls_pnl:+.2f}%{Colors.RESET}"
+            print(f"  포지션: {ls_pos_str}{pnl_str}")
+            print(f"  에이전트: {ls_agent_name}{adv_str}")
+            print(f"  결단: {ls_action_str}")
+
+        print(Colors.BOLD + "╚════════════════════════════════════════════════════════════════════════╝\n" + Colors.RESET)
+
+# ════════════════════════════════════════════════════════════════
+# 4. 비동기 메인 루프 (즉시 분석 및 실시간 롤링)
+# ════════════════════════════════════════════════════════════════
+async def main(use_local=False):
+    fetcher = BinanceLiveFetcher(limit=2500)
+    fe_engine = FeatureEngineer()
+    ensemble = EnsemblePredictor()
+    
+    try:
+        # PPO 봇 대신 MoE 라우터 탑재!
+        bot = MoELiveRouter('data/ensemble/best_moe_agents.pth')
+    except Exception as e:
+        logger.error(f"❌ MoE 라우터 초기화 실패: {e}")
+        return
+
+    # LS 2-Agent 라우터 (미학습 시 None으로 유지)
+    ls_bot = None
+    try:
+        ls_bot = LSLiveRouter('data/ensemble/best_ls_agents.pth')
+    except Exception as e:
+        logger.warning(f"⚠️ LS 라우터 초기화 실패 (미학습 상태일 수 있음): {e}")
+
+    try:
+        # 💡 [초기화] 실시간 또는 로컬 데이터 로드
+        if use_local:
+            eth_buffer, btc_buffer = fetcher.load_local_data()
+        else:
+            logger.info("초기 캔들 데이터 수집 중...")
+            eth_buffer, btc_buffer = await fetcher.fetch_initial_data()
+        
+        if eth_buffer is None: return
+
+        # 💡 [최초 분석] 대기 없이 즉시 1회 실행
+        processed_df = fe_engine.process(eth_buffer, btc_buffer)
+        preds, confs = await ensemble.predict_all_async(processed_df)
+
+        final_action, info, elite_sigs, regime = bot.get_signal(processed_df, preds, confs)
+        current_time_kst = eth_buffer['timestamp'].iloc[-1] + pd.Timedelta(hours=9)
+        current_price = float(eth_buffer['close'].iloc[-1])
+
+        ls_action, ls_info, ls_pnl = (None, None, None)
+        if ls_bot is not None:
+            ls_action, ls_info, ls_pnl = ls_bot.get_signal(processed_df, preds, confs)
+
+        bot.print_dashboard(current_price, preds, confs, final_action, info, regime, elite_sigs, current_time_kst,
+                            ls_action=ls_action, ls_info=ls_info, ls_pnl=ls_pnl, ls_pos=ls_bot.pos if ls_bot else None)
+
+        # 💡 [실시간 루프] 로컬 모드가 아닐 때만 롤링 시작
+        first_run = True
+        while not use_local:
+            if not first_run:
+                # 5분봉 기준 다음 캔들 오픈 시간까지 대기
+                now = time.time()
+                wait_sec = int(max(0, (now - (now % 300) + 300 + 2) - now))
+                for r in range(wait_sec, 0, -1):
+                    sys.stdout.write(f"\r{Colors.CYAN}⏳ 다음 5분봉까지 대기 중... ({r}초 남음)   {Colors.RESET}")
+                    sys.stdout.flush()
+                    await asyncio.sleep(1)
+                
+                print()
+                logger.info("🔄 최신 캔들 데이터를 갱신합니다.")
+                new_eth, new_btc = await fetcher.fetch_latest_patch()
+                eth_buffer = pd.concat([eth_buffer, new_eth]).drop_duplicates('timestamp').tail(2500)
+                btc_buffer = pd.concat([btc_buffer, new_btc]).drop_duplicates('timestamp').tail(2500)
+            else:
+                logger.info(f"{Colors.GREEN}🚀 봇 실시간 롤링 가동 시작!{Colors.RESET}")
+                first_run = False
+
+            # 새 데이터로 분석
+            processed_df = fe_engine.process(eth_buffer, btc_buffer)
+            preds, confs = await ensemble.predict_all_async(processed_df)
+
+            final_action, info, elite_sigs, regime = bot.get_signal(processed_df, preds, confs)
+            current_time_kst = eth_buffer['timestamp'].iloc[-1] + pd.Timedelta(hours=9)
+            current_price = float(eth_buffer['close'].iloc[-1])
+
+            ls_action, ls_info, ls_pnl = (None, None, None)
+            if ls_bot is not None:
+                ls_action, ls_info, ls_pnl = ls_bot.get_signal(processed_df, preds, confs)
+
+            bot.print_dashboard(current_price, preds, confs, final_action, info, regime, elite_sigs, current_time_kst,
+                                ls_action=ls_action, ls_info=ls_info, ls_pnl=ls_pnl, ls_pos=ls_bot.pos if ls_bot else None)
+
+    finally:
+        await fetcher.exchange.close()
+
+if __name__ == "__main__":
+    # 실시간 롤링 분석을 위해 use_local=False로 실행
+    asyncio.run(main(use_local=False))

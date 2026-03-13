@@ -2,20 +2,23 @@
 리스크 관리 모듈
 """
 import logging
-import config
+from core import config
 from .binance_client import BinanceClient
 
 logger = logging.getLogger(__name__)
 
 
 class RiskManager:
-    def __init__(self, backtest_mode=False):
+    def __init__(self, client: BinanceClient | None = None):
         """리스크 관리자 초기화
         
         Args:
-            backtest_mode: 백테스팅 모드일 경우 True
+            client: 외부에서 주입할 BinanceClient 인스턴스 (옵션).
+                    미지정 시 실거래/테스트넷 설정에 맞는 기본 BinanceClient를 생성한다.
         """
-        self.client = BinanceClient(backtest_mode=backtest_mode)
+        # 현재 라이브 트레이딩 봇에서는 백테스트 전용 클라이언트를 따로 쓰지 않으므로
+        # backtest_mode 인자를 제거하고, 필요시 caller 가 직접 client를 주입하도록 한다.
+        self.client = client or BinanceClient()
         self.max_position_size = config.MAX_POSITION_SIZE
         self.stop_loss_percent = config.STOP_LOSS_PERCENT / 100
     
