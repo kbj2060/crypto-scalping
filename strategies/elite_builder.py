@@ -695,7 +695,11 @@ def row_to_market_row(row: pd.Series) -> MarketRow:
         fibonacci_level=float(row['fibonacci_level']),
 
         # ── 4. [NEW] 직교 알파 3종 전략용 신규 피처 ──
-        top_trader_ls_ratio=float(row['count_toptrader_long_short_ratio']),
+        # 라이브 피처 파이프라인에서는 `count_toptrader_long_short_ratio` 대신
+        # `count_long_short_ratio` 만 존재할 수 있으므로 안전하게 fallback 처리
+        top_trader_ls_ratio=float(
+            row.get('count_toptrader_long_short_ratio', row.get('count_long_short_ratio', 0.0))
+        ),
         btc_corr_60=float(row['btc_corr_60']),
         eth_btc_ratio_change=float(row['eth_btc_ratio_change']),
         session_us=float(row.get('session_us')),
