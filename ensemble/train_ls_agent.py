@@ -265,8 +265,8 @@ def generate_training_csv(input_csv: str, output_csv: str):
         is_new = not os.path.exists(abs_output)
         new_df.to_csv(abs_output, mode='a', header=is_new, index=False)
 
-        del chunk_data, new_df, nf_rows
-        if nf_forecaster is not None: del batch_df, out_df
+        del chunk_data, new_df
+        if nf_forecaster is not None: del nf_rows, batch_df, out_df
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
@@ -327,9 +327,14 @@ class TradingEnv:
     def step(self, action, leverage_rate=1.0):
         current_price = self._close_np[self.current_step]
 
+        # ── 자동 청산 규칙: 하드 SL / 트레일링 스탑 / MAX_HOLD ─────────────
+        force_close = False
         if self.pos is not None:
-            if self.unrealized_pnl <= -0.02:
-                action = 1  # 💡 SL 강제 청산 발동 시 액션을 1(청산)로 덮어씀
+            trail_sl = self.peak_pnl - 0.015          # 고점 대비 -1.5% 트레일링
+            if (self.unrealized_pnl <= -0.015          # 하드 SL -1.5%
+                    or self.unrealized_pnl < trail_sl  # 트레일링 스탑
+                    or self.hold_count >= self.MAX_HOLD[self.phase]):  # MAX_HOLD 타임아웃
+                force_close = True
 
         reward = 0.0
         is_closed = False
@@ -339,18 +344,16 @@ class TradingEnv:
         is_entering_short = False
         is_closing = False
 
-        # 💡 [핵심] 단일 에이전트 체제: 1 = 행동(진입/청산), 0 = 대기(유지)
-        if self.phase == 'train':
-            if action == 1:
-                if self.pos is None:
-                    if 'long' in self.agent_role: is_entering_long = True
-                    elif 'short' in self.agent_role: is_entering_short = True
-                else:
-                    is_closing = True
-        else:  # phase == 'val'
+        if force_close:
+            is_closing = True
+        elif self.phase == 'train':
+            # 진입 에이전트: action=1이고 포지션 없을 때만 진입 (청산은 규칙 담당)
+            if action == 1 and self.pos is None:
+                if 'long' in self.agent_role: is_entering_long = True
+                elif 'short' in self.agent_role: is_entering_short = True
+        else:  # phase == 'val' — 진입만 라우터가 결정, 청산은 force_close 전담
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
-            elif action == 0 and self.pos is not None: is_closing = True
 
         if is_entering_long:
             self.pos = 'LONG'
@@ -385,6 +388,10 @@ class TradingEnv:
 
             self.pos = None
             self.current_leverage = 0.0
+            self.hold_count = 0
+            self.unrealized_pnl = 0.0
+            self.peak_pnl = 0.0
+            self.max_drawdown = 0.0
             is_closed = True
 
         self.current_step += 1
@@ -399,13 +406,7 @@ class TradingEnv:
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            if self.phase == 'train':
-                if self.unrealized_pnl > 0:
-                    reward += self.unrealized_pnl * 0.15
-                else:
-                    reward += self.unrealized_pnl * 0.30
-                if self.hold_count > 100:
-                    reward -= 0.001 * (self.hold_count - 100)
+            # 보유 중 보상 없음 — 진입 품질만 보상 (SL/Trailing/MAX_HOLD가 청산 담당)
 
         reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
@@ -601,7 +602,7 @@ class IQNAgent:
 
         td_error  = target.unsqueeze(1) - q_a.unsqueeze(2)
         huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
-        tau_exp   = tau_online.transpose(1, 2)
+        tau_exp   = tau_online  # (B, NQ, 1) → 온라인 quantile 차원으로 브로드캐스트
         indicator = (td_error.detach() < 0).float()
         loss_per_sample = (torch.abs(tau_exp - indicator) * huber).mean(dim=1).mean(dim=1)
 
@@ -774,7 +775,7 @@ def train_ls():
         }, CHECKPOINT_PATH)
 
     if os.path.exists(CHECKPOINT_PATH):
-        ckpt = torch.load(CHECKPOINT_PATH, map_location=device)
+        ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
         model_long.load_state_dict(ckpt['model_long'])
         model_short.load_state_dict(ckpt['model_short'])
         agent_long.target_model.load_state_dict(model_long.state_dict())
@@ -813,12 +814,12 @@ def train_ls():
                 for i, (env, agent, _) in enumerate(pairs):
                     s = pair_states[i]
                     
-                    # 단일 에이전트 액션
+                    was_in_pos = env.pos is not None
                     a = agent.act(s, eps)
                     ns, r, d, _ = env.step(a)
 
-                    if env.pos is None and a == 0:
-                        # 무한 홀딩 방지 페널티
+                    if not was_in_pos and env.pos is None and a == 0:
+                        # 포지션 없었고 진입도 안 했을 때만 idle penalty
                         idle_counts[i] += 1
                         idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
                         agent.memory.push(s, a, idle_penalty, ns, d)

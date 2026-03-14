@@ -210,106 +210,6 @@ def _compute_regime(df, window=24):
         'regime_normal': 1.0 if norm else 0.0,
     }
 
-# 💡 [우회 패치] 훈련 중인 파일을 건드리지 않고, 상속을 통해 속마음(Edge)만 빼옵니다.
-class LiveMoEIQNTrader(MoEIQNTrader):
-    def decide(self, current_idx, features, pos):
-        cur_pos = pos.get('type')
-        state   = self._state_tensor(features, pos)
-
-        with torch.no_grad():
-            q_bull         = self.model_bull(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_bear         = self.model_bear(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_sup          = self.model_sup(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_res          = self.model_res(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_normal_long  = self.model_normal_long(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_normal_short = self.model_normal_short(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-
-            if cur_pos is not None and self._active_pair is not None:
-                exit_model = {
-                    'bull':         self.model_bull_exit,  'bear':         self.model_bear_exit,
-                    'sup':          self.model_sup_exit,   'res':          self.model_res_exit,
-                    'normal_long':  self.model_normal_long_exit, 'normal_short': self.model_normal_short_exit,
-                }[self._active_pair]
-                q_exit = exit_model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            else:
-                q_exit = None
-
-        adv_bull         = q_bull[1]         - q_bull[0]
-        adv_bear         = q_bear[1]         - q_bear[0]
-        adv_sup          = q_sup[1]          - q_sup[0]
-        adv_res          = q_res[1]          - q_res[0]
-        adv_normal_long  = q_normal_long[1]  - q_normal_long[0]
-        adv_normal_short = q_normal_short[1] - q_normal_short[0]
-
-        kelly_bull         = max(0., adv_bull         / (q_bull.std()         + 0.05))
-        kelly_bear         = max(0., adv_bear         / (q_bear.std()         + 0.05))
-        kelly_sup          = max(0., adv_sup          / (q_sup.std()          + 0.05))
-        kelly_res          = max(0., adv_res          / (q_res.std()          + 0.05))
-        kelly_normal_long  = max(0., adv_normal_long  / (q_normal_long.std()  + 0.05))
-        kelly_normal_short = max(0., adv_normal_short / (q_normal_short.std() + 0.05))
-
-        # 💡 [추가] 0으로 자르지 않은 순수 엣지(Edge) 값 계산
-        edge_bull         = adv_bull         / (q_bull.std()         + 0.05)
-        edge_bear         = adv_bear         / (q_bear.std()         + 0.05)
-        edge_sup          = adv_sup          / (q_sup.std()          + 0.05)
-        edge_res          = adv_res          / (q_res.std()          + 0.05)
-        edge_normal_long  = adv_normal_long  / (q_normal_long.std()  + 0.05)
-        edge_normal_short = adv_normal_short / (q_normal_short.std() + 0.05)
-
-        CLOSE_KELLY_THRESHOLD = 0.3
-
-        is_chop = features.get('regime_chop', 0.) == 1. or features.get('regime_whipsaw', 0.) == 1.
-        is_bull = features.get('regime_bull', 0.) == 1.
-        is_bear = features.get('regime_bear', 0.) == 1.
-
-        # 💡 [추가] 현재 국면의 순수 엣지 추출
-        curr_long_edge, curr_short_edge = 0.0, 0.0
-        if is_chop:
-            curr_long_edge, curr_short_edge = edge_sup, edge_res
-        elif is_bull or is_bear:
-            curr_long_edge, curr_short_edge = edge_bull, edge_bear
-        else:
-            curr_long_edge, curr_short_edge = edge_normal_long, edge_normal_short
-
-        if cur_pos is not None and self._active_pair is not None:
-            exit_signal = (q_exit is not None) and (q_exit[1] > q_exit[0])
-            if cur_pos == 'LONG':
-                opp_signal = (adv_bear > 0 and kelly_bear > CLOSE_KELLY_THRESHOLD) or \
-                             (adv_res  > 0 and kelly_res  > CLOSE_KELLY_THRESHOLD) or \
-                             (self._active_pair == 'normal_long' and adv_normal_short > 0 and kelly_normal_short > CLOSE_KELLY_THRESHOLD)
-            else:  
-                opp_signal = (adv_bull > 0 and kelly_bull > CLOSE_KELLY_THRESHOLD) or \
-                             (adv_sup  > 0 and kelly_sup  > CLOSE_KELLY_THRESHOLD) or \
-                             (self._active_pair == 'normal_short' and adv_normal_long > 0 and kelly_normal_long > CLOSE_KELLY_THRESHOLD)
-
-            if exit_signal or opp_signal:
-                active = self._active_pair
-                self._active_pair = None
-                return 0, 0.0, {'agent': f'{active}_exit+opp' if opp_signal else f'{active}_exit', 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
-            else:
-                return (1 if cur_pos == 'LONG' else 2), 0.0, {'agent': 'HOLD', 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
-
-        final_action, selected_kelly = 0, 0.0
-        if is_chop:
-            active_agent = "SUP/RES (대기중)"
-            if adv_sup > 0 and adv_sup >= adv_res: final_action, active_agent, selected_kelly, self._active_pair = 1, "SUP_BUY 🚀", kelly_sup, 'sup'
-            elif adv_res > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "RES_SELL 🚀", kelly_res, 'res'
-        elif is_bull:
-            active_agent = "BULL_SNIPE (대기중)"
-            if adv_bull > 0: final_action, active_agent, selected_kelly, self._active_pair = 1, "BULL_SNIPE 🚀", kelly_bull, 'bull'
-        elif is_bear:
-            active_agent = "BEAR_SNIPE (대기중)"
-            if adv_bear > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "BEAR_SNIPE 🚀", kelly_bear, 'bear'
-        else:  
-            active_agent = "NORMAL (대기중)"
-            if adv_normal_long > 0 and adv_normal_long >= adv_normal_short: final_action, active_agent, selected_kelly, self._active_pair = 1, "NORMAL_LONG 🚀", kelly_normal_long, 'normal_long'
-            elif adv_normal_short > 0: final_action, active_agent, selected_kelly, self._active_pair = 2, "NORMAL_SHORT 🚀", kelly_normal_short, 'normal_short'
-
-        if final_action == 0: self._active_pair = None
-        leverage_rate = np.clip(selected_kelly * 0.5, 0.1, 1.0) if final_action != 0 else 0.0
-        
-        return final_action, leverage_rate, {'agent': active_agent, 'kelly': selected_kelly, 'long_edge': float(curr_long_edge), 'short_edge': float(curr_short_edge)}
-
 
 # ════════════════════════════════════════════════════════════════
 # 3-A. LS 2-Agent 라우터 (롱돌이/숏돌이)
@@ -333,8 +233,7 @@ class LSLiveRouter:
             return m
 
         self.trader = DualAgentTrader(
-            _load('model_long_entry'), _load('model_short_entry'),
-            _load('model_long_exit'),  _load('model_short_exit'),
+            _load('model_long'), _load('model_short'),
             self.device
         )
         self.pos, self.entry_price, self.hold_count = None, 0.0, 0
@@ -404,10 +303,10 @@ class MoELiveRouter:
     MODEL_ORDER = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
     LIVE_TO_TRAIN = {'TimesFM': 'pred_timesfm', 'Chronos': 'pred_chronos'}
 
-    def __init__(self, model_path='data/ensemble/best_moe_agents.pth'):
+    def __init__(self, model_path='data/ensemble/best_10_agents.pth'):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.elite_extractor = EliteSignals()
-        
+
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"학습된 AI 모델을 찾을 수 없습니다: {model_path}")
 
@@ -418,16 +317,13 @@ class MoELiveRouter:
             m.eval()
             return m
 
-        self.trader = LiveMoEIQNTrader(
-            _load('model_bull'), _load('model_bear'), _load('model_sup'), _load('model_res'),
-            _load('model_bull_exit'), _load('model_bear_exit'), _load('model_sup_exit'), _load('model_res_exit'),
-            _load('model_normal_long'), _load('model_normal_short'),
-            _load('model_normal_long_exit'), _load('model_normal_short_exit'),
-            df=pd.DataFrame(), device=self.device
-        )
+        regime_keys = ['bull', 'bear', 'chop', 'whipsaw', 'normal']
+        agent_names = [f"{r}_long" for r in regime_keys] + [f"{r}_short" for r in regime_keys]
+        models_dict = {name: _load(f'model_{name}') for name in agent_names}
+        self.trader = MoEIQNTrader(models_dict, df=pd.DataFrame(), device=self.device)
         self.pos, self.entry_price, self.hold_count = None, 0.0, 0
         self.peak_equity, self.current_equity = 1.0, 1.0
-        logger.info(f"✅ {Colors.GREEN}12-Agent Dueling MoE 라우터 탑재 완료{Colors.RESET} (epoch={ckpt.get('epoch','?')})")
+        logger.info(f"✅ {Colors.GREEN}10-Agent MoE 라우터 탑재 완료{Colors.RESET} (epoch={ckpt.get('epoch','?')})")
 
     def get_signal(self, processed_df, preds, confs):
         last_row = processed_df.iloc[-1]
@@ -472,8 +368,8 @@ class MoELiveRouter:
             'hold_norm': min(self.hold_count / 100.0, 1.0)
         }
 
-        # 12-Agent 결단
-        final_action, leverage_rate, info = self.trader.decide(0, features, pos_dict)
+        # 10-Agent 결단
+        final_action, leverage_rate, info = self.trader.decide(features, pos_dict)
 
         # 내부 포지션 트래킹 업데이트
         if final_action == 1 and self.pos is None:
@@ -604,7 +500,7 @@ async def main(use_local=False):
     
     try:
         # PPO 봇 대신 MoE 라우터 탑재!
-        bot = MoELiveRouter('data/ensemble/best_moe_agents.pth')
+        bot = MoELiveRouter('data/ensemble/best_10_agents.pth')
     except Exception as e:
         logger.error(f"❌ MoE 라우터 초기화 실패: {e}")
         return

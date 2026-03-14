@@ -274,8 +274,8 @@ def generate_training_csv(input_csv: str, output_csv: str):
         is_new = not os.path.exists(abs_output)
         new_df.to_csv(abs_output, mode='a', header=is_new, index=False)
         
-        del chunk_data, new_df, nf_rows
-        if nf_forecaster is not None: del batch_df, out_df
+        del chunk_data, new_df
+        if nf_forecaster is not None: del nf_rows, batch_df, out_df
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
@@ -337,10 +337,14 @@ class TradingEnv:
     def step(self, action, leverage_rate=1.0):
         current_price = self._close_np[self.current_step]
 
-        # 안전망: SL(-2%)만 강제 청산 유지
+        # ── 자동 청산 규칙: 하드 SL / 트레일링 스탑 / MAX_HOLD ─────────────
+        force_close = False
         if self.pos is not None:
-            if self.unrealized_pnl <= -0.02:
-                action = 1  # 💡 SL 발동 시 에이전트 액션을 '청산(1)'으로 덮어씀
+            trail_sl = self.peak_pnl - 0.015          # 고점 대비 -1.5% 트레일링
+            if (self.unrealized_pnl <= -0.015          # 하드 SL -1.5%
+                    or self.unrealized_pnl < trail_sl  # 트레일링 스탑
+                    or self.hold_count >= self.MAX_HOLD[self.phase]):  # MAX_HOLD 타임아웃
+                force_close = True
 
         reward = 0.0
         is_closed = False
@@ -350,53 +354,54 @@ class TradingEnv:
         is_entering_short = False
         is_closing = False
 
-        # 💡 [핵심] 단일 에이전트 체제: 1이면 행동(진입/청산), 0이면 대기(유지)
-        if self.phase == 'train':
-            if action == 1:
-                if self.pos is None:
-                    if 'long' in self.agent_role: is_entering_long = True
-                    elif 'short' in self.agent_role: is_entering_short = True
-                else:
-                    is_closing = True
-        else: # phase == 'val' (라우터는 1:Long, 2:Short, 0:Hold/Close 로 통신)
+        if force_close:
+            is_closing = True
+        elif self.phase == 'train':
+            # 진입 에이전트: action=1이고 포지션 없을 때만 진입 (청산은 규칙 담당)
+            if action == 1 and self.pos is None:
+                if 'long' in self.agent_role: is_entering_long = True
+                elif 'short' in self.agent_role: is_entering_short = True
+        else:  # phase == 'val' — 진입만 라우터가 결정, 청산은 force_close 전담
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
-            elif action == 0 and self.pos is not None: is_closing = True
 
-        # 실행 및 보상 연산
         if is_entering_long:
             self.pos = 'LONG'
             self.entry_price = current_price * (1 + self.slip)
             self.entry_idx = self.current_step
             self.peak_pnl = 0.0
-            self.current_leverage = self.MAX_LEVERAGE * leverage_rate 
-            reward -= self.fee * self.current_leverage 
+            self.current_leverage = self.MAX_LEVERAGE * leverage_rate
+            reward -= self.fee * self.current_leverage
             self.active_steps += 1
-            
+
         elif is_entering_short:
             self.pos = 'SHORT'
             self.entry_price = current_price * (1 - self.slip)
             self.entry_idx = self.current_step
             self.peak_pnl = 0.0
             self.current_leverage = self.MAX_LEVERAGE * leverage_rate
-            reward -= self.fee * self.current_leverage 
+            reward -= self.fee * self.current_leverage
             self.active_steps += 1
-            
+
         elif is_closing:
             if self.pos == 'LONG': realized_pnl = (current_price * (1 - self.slip) - self.entry_price) / self.entry_price
             else: realized_pnl = (self.entry_price - current_price * (1 + self.slip)) / self.entry_price
-            
-            realized_pnl *= self.current_leverage 
-            realized_pnl -= self.fee * self.current_leverage 
+
+            realized_pnl *= self.current_leverage
+            realized_pnl -= self.fee * self.current_leverage
             self.balance *= (1 + realized_pnl)
-            
+
             self.total_trades += 1
             if realized_pnl > 0: self.win_trades += 1
-            
-            reward += realized_pnl 
-            
+
+            reward += realized_pnl
+
             self.pos = None
             self.current_leverage = 0.0
+            self.hold_count = 0
+            self.unrealized_pnl = 0.0
+            self.peak_pnl = 0.0
+            self.max_drawdown = 0.0
             is_closed = True
 
         self.current_step += 1
@@ -407,18 +412,11 @@ class TradingEnv:
             self.hold_count = self.current_step - self.entry_idx
             if self.pos == 'LONG': self.unrealized_pnl = (next_price - self.entry_price) / self.entry_price * self.current_leverage
             else: self.unrealized_pnl = (self.entry_price - next_price) / self.entry_price * self.current_leverage
-            
+
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            
-            if self.phase == 'train':
-                if self.unrealized_pnl > 0:
-                    reward += self.unrealized_pnl * 0.15 
-                else:
-                    reward += self.unrealized_pnl * 0.30 
-                if self.hold_count > 100:
-                    reward -= 0.001 * (self.hold_count - 100)
+            # 보유 중 보상 없음 — 진입 품질만 보상 (SL/Trailing/MAX_HOLD가 청산 담당)
 
         reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
@@ -676,7 +674,7 @@ class IQNAgent:
 
         td_error  = target.unsqueeze(1) - q_a.unsqueeze(2)
         huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
-        tau_exp   = tau_online.transpose(1, 2)
+        tau_exp   = tau_online  # (B, NQ, 1) → 온라인 quantile 차원으로 브로드캐스트
         indicator = (td_error.detach() < 0).float()
         loss_per_sample = (torch.abs(tau_exp - indicator) * huber).mean(dim=1).mean(dim=1)  # (B,)
 
@@ -734,7 +732,7 @@ class MoEIQNTrader:
         vec = np.concatenate([preds, confs, stats, elite, alpha7, regimes, pos_arr])
         return torch.tensor(vec, dtype=torch.float32).unsqueeze(0).to(self.device)
 
-    def decide(self, current_idx, features, pos):
+    def decide(self, features, pos):
         cur_pos = pos.get('type')
         state   = self._state_tensor(features, pos)
 
@@ -863,7 +861,7 @@ def train():
         torch.save(save_dict, CHECKPOINT_PATH)
 
     if os.path.exists(CHECKPOINT_PATH):
-        ckpt = torch.load(CHECKPOINT_PATH, map_location=device)
+        ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
         for name in agent_names:
             models[name].load_state_dict(ckpt[f'model_{name}'])
             agents[name].target_model.load_state_dict(models[name].state_dict())
@@ -900,12 +898,12 @@ def train():
                     env, agent, s = envs[name], agents[name], env_states[name]
                     current_regimes = {r: float(df_train_reg[env.current_step, ri]) for ri, r in enumerate(REGIME_COLS)}
 
-                    # 순수하게 현재 상태에서 액션 추출 및 환경 진행
+                    was_in_pos = env.pos is not None
                     a = agent.act(s, eps)
                     ns, r, d, _ = env.step(a)
 
-                    if env.pos is None and a == 0:
-                        # 무한 홀딩 방지 페널티
+                    if not was_in_pos and env.pos is None and a == 0:
+                        # 포지션 없었고 진입도 안 했을 때만 idle penalty
                         idle_counts[name] += 1
                         idle_penalty = -0.003 * min(idle_counts[name] / 50.0, 1.0)
                         agent.memory.push(s, a, idle_penalty, ns, d, current_regimes)
@@ -924,7 +922,11 @@ def train():
             for name in agent_names:
                 env = envs[name]
                 pnl = (env.balance / 10000 - 1) * 100
-                logger.info(f"Ep {ep:04d} [{name:12s}] PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}%")
+                logger.info(
+                    f"Ep {ep:04d} [{name}] "
+                    f"PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}% | "
+                    f"buf:{len(agents[name].memory):6d} | eps:{eps:.3f}"
+                )
 
             # ── Val 평가 (10에폭마다) ─────────────────────────────────────
             if ep % 10 == 0:
@@ -939,7 +941,7 @@ def train():
                         'unrealized': val_env.unrealized_pnl, 'mdd': val_env.max_drawdown,
                         'hold_norm': val_env.hold_count / val_env.MAX_HOLD['val']
                     }
-                    action, leverage_rate, info = router.decide(val_env.current_step, feat, pos_info)
+                    action, leverage_rate, info = router.decide(feat, pos_info)
                     obs, _, d, _ = val_env.step(action, leverage_rate=leverage_rate)
 
                 val_pnl_pct = (val_env.balance / 10000 - 1) * 100
