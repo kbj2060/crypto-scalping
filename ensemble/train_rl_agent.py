@@ -1086,7 +1086,7 @@ def train():
                         else:
                             # 홀드 → idle penalty (영원히 홀드 전략 비용화)
                             idle_counts[i] += 1
-                            idle_penalty = -0.0002 * min(idle_counts[i] / 50.0, 1.0)
+                            idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
                             agent_e.memory.push(s, a, idle_penalty, ns, d, current_regimes)
 
                     else:
