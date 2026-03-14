@@ -587,6 +587,8 @@ class IQNAgent:
         d  = torch.FloatTensor(d).unsqueeze(1).to(self.device)
 
         NQ = self.NUM_QUANTILES
+        if hasattr(self.model, 'reset_noise'):
+            self.model.reset_noise()
         q, tau_online = self.model(s, num_quantiles=NQ)
         q_a = q.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
 
@@ -610,7 +612,6 @@ class IQNAgent:
             loss = loss_per_sample.mean()
 
         # 엔트로피 정규화 (policy collapse 방지)
-        self.model.reset_noise()
         q_mean  = q.detach().mean(dim=1)                        # (B, action_dim)
         probs   = F.softmax(q_mean, dim=-1)
         entropy = -(probs * (probs + 1e-8).log()).sum(dim=-1)   # (B,)
