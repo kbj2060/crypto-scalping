@@ -337,11 +337,10 @@ class TradingEnv:
     def step(self, action, leverage_rate=1.0):
         current_price = self._close_np[self.current_step]
 
-        # 안전망: SL(-2%)만 강제 청산 유지 (파산 방지)
-        # TP/MAX_HOLD 제거 → 청산 에이전트가 직접 결정
+        # 안전망: SL(-2%)만 강제 청산 유지
         if self.pos is not None:
             if self.unrealized_pnl <= -0.02:
-                action = 0  # SL 안전망
+                action = 1  # 💡 SL 발동 시 에이전트 액션을 '청산(1)'으로 덮어씀
 
         reward = 0.0
         is_closed = False
@@ -351,19 +350,20 @@ class TradingEnv:
         is_entering_short = False
         is_closing = False
 
-        # 💡 [핵심] 에이전트는 무조건 0(청산/유지)과 1(진입)만 씁니다.
+        # 💡 [핵심] 단일 에이전트 체제: 1이면 행동(진입/청산), 0이면 대기(유지)
         if self.phase == 'train':
-            if action == 1 and self.pos is None:
-                if self.agent_role in ['bull_sniper', 'support_buyer', 'normal_long']: is_entering_long = True
-                elif self.agent_role in ['bear_sniper', 'resistance_seller', 'normal_short']: is_entering_short = True
-            elif action == 0 and self.pos is not None:
-                is_closing = True
+            if action == 1:
+                if self.pos is None:
+                    if 'long' in self.agent_role: is_entering_long = True
+                    elif 'short' in self.agent_role: is_entering_short = True
+                else:
+                    is_closing = True
         else: # phase == 'val' (라우터는 1:Long, 2:Short, 0:Hold/Close 로 통신)
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
             elif action == 0 and self.pos is not None: is_closing = True
 
-        # 실행 및 보상 (순수 보상)
+        # 실행 및 보상 연산
         if is_entering_long:
             self.pos = 'LONG'
             self.entry_price = current_price * (1 + self.slip)
@@ -393,7 +393,7 @@ class TradingEnv:
             self.total_trades += 1
             if realized_pnl > 0: self.win_trades += 1
             
-            reward += realized_pnl # 순수 realized_pnl 반영
+            reward += realized_pnl 
             
             self.pos = None
             self.current_leverage = 0.0
@@ -411,20 +411,19 @@ class TradingEnv:
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            # ✅ 청산 에이전트 shaped reward: 홀딩 중 방향 신호 (진입 에이전트는 이 reward 안 받음)
-            # → 손실 중엔 강하게 청산 유도, 수익 중엔 약하게 홀딩 장려 (비대칭)
+            
             if self.phase == 'train':
                 if self.unrealized_pnl > 0:
-                    reward += self.unrealized_pnl * 0.15  # 수익 중: 홀딩 약하게 장려
+                    reward += self.unrealized_pnl * 0.15 
                 else:
-                    reward += self.unrealized_pnl * 0.30  # 손실 중: 빠른 청산 강하게 학습
-                # 좀비 포지션 방지: 100 스텝 초과 홀딩 시 패널티
+                    reward += self.unrealized_pnl * 0.30 
                 if self.hold_count > 100:
                     reward -= 0.001 * (self.hold_count - 100)
 
-        reward = float(np.clip(reward, -0.15, 0.30))  # 비대칭: 손실 제한, 이익 허용
+        reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
         return self._build_state(self.current_step), reward, done, info
+
 
     @property
     def win_rate(self): return self.win_trades / max(1, self.total_trades)
@@ -709,27 +708,12 @@ class IQNAgent:
 #    청산: Bull_Exit / Bear_Exit / Sup_Exit / Res_Exit
 # ═══════════════════════════════════════════════════════════════════════════
 class MoEIQNTrader:
-    def __init__(self,
-                 model_bull, model_bear, model_sup, model_res,
-                 model_bull_exit, model_bear_exit, model_sup_exit, model_res_exit,
-                 model_normal_long, model_normal_short,
-                 model_normal_long_exit, model_normal_short_exit,
-                 df, device='cuda'):
-        self.model_bull              = model_bull.eval()
-        self.model_bear              = model_bear.eval()
-        self.model_sup               = model_sup.eval()
-        self.model_res               = model_res.eval()
-        self.model_bull_exit         = model_bull_exit.eval()
-        self.model_bear_exit         = model_bear_exit.eval()
-        self.model_sup_exit          = model_sup_exit.eval()
-        self.model_res_exit          = model_res_exit.eval()
-        self.model_normal_long       = model_normal_long.eval()
-        self.model_normal_short      = model_normal_short.eval()
-        self.model_normal_long_exit  = model_normal_long_exit.eval()
-        self.model_normal_short_exit = model_normal_short_exit.eval()
-        self.df                      = df
-        self.device                  = device
-        self._active_pair            = None  # 진입시킨 에이전트 이름 기억
+    def __init__(self, models_dict, df, device='cuda'):
+        # models_dict: {'bull_long': model, 'bull_short': model, ... 총 10개}
+        self.models = {k: v.eval() for k, v in models_dict.items()}
+        self.df = df
+        self.device = device
+        self._active_pair = None  # 진입시킨 에이전트 이름 (예: 'bull_long')
 
     def _state_tensor(self, features, pos):
         preds   = np.array([features.get(c, 0.) for c in MODEL_PRED],   dtype=np.float32)
@@ -754,61 +738,37 @@ class MoEIQNTrader:
         cur_pos = pos.get('type')
         state   = self._state_tensor(features, pos)
 
+        # 현재 레짐 판단
+        current_regime = None
+        for r in ['bull', 'bear', 'chop', 'whipsaw', 'normal']:
+            if features.get(f'regime_{r}', 0.) == 1.0:
+                current_regime = r
+                break
+        if current_regime is None: current_regime = 'normal'
+
+        q_vals = {}
+        advs = {}
+        kellys = {}
+
         with torch.no_grad():
-            # 항상 12개 모델 모두 추론 (진입+청산 판단에 재활용)
-            q_bull         = self.model_bull(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_bear         = self.model_bear(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_sup          = self.model_sup(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_res          = self.model_res(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_normal_long  = self.model_normal_long(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            q_normal_short = self.model_normal_short(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+            for name, model in self.models.items():
+                q = model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
+                q_vals[name] = q
+                advs[name] = q[1] - q[0]
+                kellys[name] = max(0., advs[name] / (q.std() + 0.05))
 
-            if cur_pos is not None and self._active_pair is not None:
-                exit_model = {
-                    'bull':         self.model_bull_exit,
-                    'bear':         self.model_bear_exit,
-                    'sup':          self.model_sup_exit,
-                    'res':          self.model_res_exit,
-                    'normal_long':  self.model_normal_long_exit,
-                    'normal_short': self.model_normal_short_exit,
-                }[self._active_pair]
-                q_exit = exit_model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            else:
-                q_exit = None
+        CLOSE_KELLY_THRESHOLD = 0.3
 
-        adv_bull         = q_bull[1]         - q_bull[0]
-        adv_bear         = q_bear[1]         - q_bear[0]
-        adv_sup          = q_sup[1]          - q_sup[0]
-        adv_res          = q_res[1]          - q_res[0]
-        adv_normal_long  = q_normal_long[1]  - q_normal_long[0]
-        adv_normal_short = q_normal_short[1] - q_normal_short[0]
-
-        kelly_bull         = max(0., adv_bull         / (q_bull.std()         + 0.05))
-        kelly_bear         = max(0., adv_bear         / (q_bear.std()         + 0.05))
-        kelly_sup          = max(0., adv_sup          / (q_sup.std()          + 0.05))
-        kelly_res          = max(0., adv_res          / (q_res.std()          + 0.05))
-        kelly_normal_long  = max(0., adv_normal_long  / (q_normal_long.std()  + 0.05))
-        kelly_normal_short = max(0., adv_normal_short / (q_normal_short.std() + 0.05))
-
-        CLOSE_KELLY_THRESHOLD = 0.3  # 반대 에이전트 강도 임계값
-
-        # ── 포지션 있음: 청산 판단 ────────────────────────────────────
+        # ── 포지션 있음: 진입했던 에이전트의 판단으로 청산 ──────────────────
         if cur_pos is not None and self._active_pair is not None:
+            active_model_q = q_vals[self._active_pair]
+            
+            # 신호 1: 담당 에이전트가 Action 1(청산)을 강하게 평가함
+            exit_signal = (active_model_q[1] > active_model_q[0])
 
-            # 신호 1: Exit 에이전트가 청산 권고
-            exit_signal = (q_exit is not None) and (q_exit[1] > q_exit[0])
-
-            # 신호 2: 반대 진입 에이전트가 강하게 반대 방향 신호
-            if cur_pos == 'LONG':
-                opp_signal = (adv_bear > 0 and kelly_bear > CLOSE_KELLY_THRESHOLD) or \
-                             (adv_res  > 0 and kelly_res  > CLOSE_KELLY_THRESHOLD) or \
-                             (self._active_pair == 'normal_long' and
-                              adv_normal_short > 0 and kelly_normal_short > CLOSE_KELLY_THRESHOLD)
-            else:  # SHORT
-                opp_signal = (adv_bull > 0 and kelly_bull > CLOSE_KELLY_THRESHOLD) or \
-                             (adv_sup  > 0 and kelly_sup  > CLOSE_KELLY_THRESHOLD) or \
-                             (self._active_pair == 'normal_short' and
-                              adv_normal_long > 0 and kelly_normal_long > CLOSE_KELLY_THRESHOLD)
+            # 신호 2: 반대 방향 에이전트(현재 레짐 기준)의 강한 진입 신호
+            opp_name = f"{current_regime}_short" if cur_pos == 'LONG' else f"{current_regime}_long"
+            opp_signal = (advs.get(opp_name, 0) > 0) and (kellys.get(opp_name, 0) > CLOSE_KELLY_THRESHOLD)
 
             if exit_signal or opp_signal:
                 active = self._active_pair
@@ -818,29 +778,19 @@ class MoEIQNTrader:
                 hold_action = 1 if cur_pos == 'LONG' else 2
                 return hold_action, 0.0, {'agent': 'HOLD'}
 
-        # ── 포지션 없음: 레짐별 진입 에이전트 선택 ──────────────────
-        is_chop = features.get('regime_chop', 0.) == 1. or features.get('regime_whipsaw', 0.) == 1.
-        is_bull = features.get('regime_bull', 0.) == 1.
-        is_bear = features.get('regime_bear', 0.) == 1.
+        # ── 포지션 없음: 현재 레짐의 롱/숏 에이전트 중 우위 판단 ─────────────
+        long_agent = f"{current_regime}_long"
+        short_agent = f"{current_regime}_short"
+
+        adv_l, adv_s = advs[long_agent], advs[short_agent]
+        kel_l, kel_s = kellys[long_agent], kellys[short_agent]
 
         final_action, active_agent, selected_kelly = 0, "NONE", 0.0
 
-        if is_chop:
-            if adv_sup > 0 and adv_sup >= adv_res:
-                final_action, active_agent, selected_kelly, self._active_pair = 1, "SUP_BUY",      kelly_sup,          'sup'
-            elif adv_res > 0:
-                final_action, active_agent, selected_kelly, self._active_pair = 2, "RES_SELL",     kelly_res,          'res'
-        elif is_bull:
-            if adv_bull > 0:
-                final_action, active_agent, selected_kelly, self._active_pair = 1, "BULL_SNIPE",   kelly_bull,         'bull'
-        elif is_bear:
-            if adv_bear > 0:
-                final_action, active_agent, selected_kelly, self._active_pair = 2, "BEAR_SNIPE",   kelly_bear,         'bear'
-        else:  # regime_normal: 전담 에이전트 사용
-            if adv_normal_long > 0 and adv_normal_long >= adv_normal_short:
-                final_action, active_agent, selected_kelly, self._active_pair = 1, "NORMAL_LONG",  kelly_normal_long,  'normal_long'
-            elif adv_normal_short > 0:
-                final_action, active_agent, selected_kelly, self._active_pair = 2, "NORMAL_SHORT", kelly_normal_short, 'normal_short'
+        if adv_l > 0 and adv_l >= adv_s:
+            final_action, active_agent, selected_kelly, self._active_pair = 1, long_agent.upper(), kel_l, long_agent
+        elif adv_s > 0:
+            final_action, active_agent, selected_kelly, self._active_pair = 2, short_agent.upper(), kel_s, short_agent
 
         if final_action == 0:
             self._active_pair = None
@@ -848,9 +798,8 @@ class MoEIQNTrader:
         leverage_rate = np.clip(selected_kelly * 0.5, 0.1, 1.0) if final_action != 0 else 0.0
         return final_action, leverage_rate, {'agent': active_agent, 'kelly': selected_kelly}
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 5. 메인 훈련 루프
-# ═══════════════════════════════════════════════════════════════════════════
+
+
 def train():
     CSV_PATH = 'data/ensemble/rl_training_data_full.csv'
     if not os.path.exists(CSV_PATH):
@@ -864,84 +813,28 @@ def train():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     df_train_reg = df_train[REGIME_COLS].values.astype(np.float32)
 
-    # ── 레짐별 시작 인덱스 풀 ────────────────────────────────────────────
     MAX_EP    = 4096
     _safe_end = len(df_train) - MAX_EP - 1
-    regime_starts = {
-        'bull':   [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index('regime_bull')]     == 1.0],
-        'bear':   [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index('regime_bear')]     == 1.0],
-        'chop':   [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index('regime_chop')]     == 1.0
-                                               or df_train_reg[i, REGIME_COLS.index('regime_whipsaw')] == 1.0],
-        'normal': [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index('regime_normal')]   == 1.0],
-        'any':    list(range(_safe_end)),
-    }
-    for k in ['bull', 'bear', 'chop', 'normal']:
-        if len(regime_starts[k]) < 100:
-            logger.warning(f"⚠️ {k} 레짐 시작점 {len(regime_starts[k])}개 부족 → 전체 풀 사용")
-            regime_starts[k] = regime_starts['any']
-    logger.info(f"레짐 시작점 풀: bull={len(regime_starts['bull'])} bear={len(regime_starts['bear'])} chop={len(regime_starts['chop'])} normal={len(regime_starts['normal'])}")
+    
+    # 5대 레짐 매핑
+    regime_keys = ['bull', 'bear', 'chop', 'whipsaw', 'normal']
+    regime_starts = {}
+    for r in regime_keys:
+        idx = [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index(f'regime_{r}')] == 1.0]
+        regime_starts[r] = idx if len(idx) >= 100 else list(range(_safe_end))
 
-    # ── 환경: 페어당 TradingEnv 하나 ────────────────────────────────────
-    # 진입+청산이 같은 환경에서 순서대로 일어남 → PnL이 통합
-    env_bull         = TradingEnv(df_train, phase='train', agent_role='bull_sniper')
-    env_bear         = TradingEnv(df_train, phase='train', agent_role='bear_sniper')
-    env_sup          = TradingEnv(df_train, phase='train', agent_role='support_buyer')
-    env_res          = TradingEnv(df_train, phase='train', agent_role='resistance_seller')
-    env_normal_long  = TradingEnv(df_train, phase='train', agent_role='normal_long')
-    env_normal_short = TradingEnv(df_train, phase='train', agent_role='normal_short')
-
-    # ── 모델: 진입×6 + 청산×6 ────────────────────────────────────────────
-    model_bull              = RobustIQN(STATE_DIM, 2).to(device)  # 진입: 0=홀드, 1=진입
-    model_bear              = RobustIQN(STATE_DIM, 2).to(device)
-    model_sup               = RobustIQN(STATE_DIM, 2).to(device)
-    model_res               = RobustIQN(STATE_DIM, 2).to(device)
-    model_normal_long       = RobustIQN(STATE_DIM, 2).to(device)
-    model_normal_short      = RobustIQN(STATE_DIM, 2).to(device)
-    model_bull_exit         = RobustIQN(STATE_DIM, 2).to(device)  # 청산: 0=홀드, 1=청산
-    model_bear_exit         = RobustIQN(STATE_DIM, 2).to(device)
-    model_sup_exit          = RobustIQN(STATE_DIM, 2).to(device)
-    model_res_exit          = RobustIQN(STATE_DIM, 2).to(device)
-    model_normal_long_exit  = RobustIQN(STATE_DIM, 2).to(device)
-    model_normal_short_exit = RobustIQN(STATE_DIM, 2).to(device)
-
-    # ── 에이전트 ─────────────────────────────────────────────────────────
-    agent_bull              = IQNAgent(model_bull,              device=device)
-    agent_bear              = IQNAgent(model_bear,              device=device)
-    agent_sup               = IQNAgent(model_sup,               device=device)
-    agent_res               = IQNAgent(model_res,               device=device)
-    agent_normal_long       = IQNAgent(model_normal_long,       device=device)
-    agent_normal_short      = IQNAgent(model_normal_short,      device=device)
-    agent_bull_exit         = IQNAgent(model_bull_exit,         device=device)
-    agent_bear_exit         = IQNAgent(model_bear_exit,         device=device)
-    agent_sup_exit          = IQNAgent(model_sup_exit,          device=device)
-    agent_res_exit          = IQNAgent(model_res_exit,          device=device)
-    agent_normal_long_exit  = IQNAgent(model_normal_long_exit,  device=device)
-    agent_normal_short_exit = IQNAgent(model_normal_short_exit, device=device)
-
-    # 진입 에이전트: 우선순위 레짐 필터 버퍼 (PER)
-    agent_bull.memory              = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_bull'])
-    agent_bear.memory              = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_bear'])
-    agent_sup.memory               = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_chop', 'regime_whipsaw'])
-    agent_res.memory               = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_chop', 'regime_whipsaw'])
-    agent_normal_long.memory       = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_normal'])
-    agent_normal_short.memory      = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_normal'])
-    # 청산 에이전트: 우선순위 레짐 필터 버퍼 (PER)
-    agent_bull_exit.memory         = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_bull'])
-    agent_bear_exit.memory         = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_bear'])
-    agent_sup_exit.memory          = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_chop', 'regime_whipsaw'])
-    agent_res_exit.memory          = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_chop', 'regime_whipsaw'])
-    agent_normal_long_exit.memory  = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_normal'])
-    agent_normal_short_exit.memory = PrioritizedRegimeReplayBuffer(300000, target_regimes=['regime_normal'])
-
-    # 페어 묶음: (env, 진입agent, 청산agent, 시작풀)
-    pairs = [
-        (env_bull,         agent_bull,         agent_bull_exit,         'bull'),
-        (env_bear,         agent_bear,         agent_bear_exit,         'bear'),
-        (env_sup,          agent_sup,          agent_sup_exit,          'chop'),
-        (env_res,          agent_res,          agent_res_exit,          'chop'),
-        (env_normal_long,  agent_normal_long,  agent_normal_long_exit,  'normal'),
-        (env_normal_short, agent_normal_short, agent_normal_short_exit, 'normal'),
-    ]
+    # 💡 10개 에이전트 동적 생성 (딕셔너리 기반 리팩토링)
+    agent_names = [f"{r}_long" for r in regime_keys] + [f"{r}_short" for r in regime_keys]
+    
+    envs, models, agents = {}, {}, {}
+    for name in agent_names:
+        envs[name] = TradingEnv(df_train, phase='train', agent_role=name)
+        models[name] = RobustIQN(STATE_DIM, 2).to(device)
+        agents[name] = IQNAgent(models[name], device=device)
+        
+        # 이름 앞부분('bull', 'bear' 등)을 추출하여 타겟 레짐으로 설정
+        target_regime = f"regime_{name.split('_')[0]}"
+        agents[name].memory = PrioritizedRegimeReplayBuffer(300000, target_regimes=[target_regime])
 
     NEP             = 1000
     BATCH           = 512
@@ -950,269 +843,124 @@ def train():
     global_step     = 0
     EPS_START       = 1.0
     EPS_END         = 0.10
-    EPS_DECAY_STEPS = 1500000  # 충분한 탐색 (20000은 너무 짧음)
+    EPS_DECAY_STEPS = 1500000
 
     os.makedirs('data/ensemble', exist_ok=True)
     best_val_pnl   = -float('inf')
     best_val_score = -float('inf')
-    val_pnl_history: list = []  # 최근 val PnL 기록 (Sharpe 추정용)
+    val_pnl_history: list = []
     start_ep       = 1
     CHECKPOINT_PATH = 'data/ensemble/train_checkpoint.pth'
 
-    # ── 체크포인트 저장 헬퍼 ───────────────────────────────────────────────
     def _save_checkpoint(epoch):
-        torch.save({
-            'model_bull':                  model_bull.state_dict(),
-            'model_bear':                  model_bear.state_dict(),
-            'model_sup':                   model_sup.state_dict(),
-            'model_res':                   model_res.state_dict(),
-            'model_normal_long':           model_normal_long.state_dict(),
-            'model_normal_short':          model_normal_short.state_dict(),
-            'model_bull_exit':             model_bull_exit.state_dict(),
-            'model_bear_exit':             model_bear_exit.state_dict(),
-            'model_sup_exit':              model_sup_exit.state_dict(),
-            'model_res_exit':              model_res_exit.state_dict(),
-            'model_normal_long_exit':      model_normal_long_exit.state_dict(),
-            'model_normal_short_exit':     model_normal_short_exit.state_dict(),
-            'opt_bull':                    agent_bull.optimizer.state_dict(),
-            'opt_bear':                    agent_bear.optimizer.state_dict(),
-            'opt_sup':                     agent_sup.optimizer.state_dict(),
-            'opt_res':                     agent_res.optimizer.state_dict(),
-            'opt_normal_long':             agent_normal_long.optimizer.state_dict(),
-            'opt_normal_short':            agent_normal_short.optimizer.state_dict(),
-            'opt_bull_exit':               agent_bull_exit.optimizer.state_dict(),
-            'opt_bear_exit':               agent_bear_exit.optimizer.state_dict(),
-            'opt_sup_exit':                agent_sup_exit.optimizer.state_dict(),
-            'opt_res_exit':                agent_res_exit.optimizer.state_dict(),
-            'opt_normal_long_exit':        agent_normal_long_exit.optimizer.state_dict(),
-            'opt_normal_short_exit':       agent_normal_short_exit.optimizer.state_dict(),
-            'global_step':                 global_step,
-            'best_val_pnl':               best_val_pnl,
-            'best_val_score':             best_val_score,
-            'val_pnl_history':            val_pnl_history,
-            'epoch':                       epoch,
-        }, CHECKPOINT_PATH)
+        save_dict = {
+            'global_step': global_step, 'best_val_pnl': best_val_pnl,
+            'best_val_score': best_val_score, 'val_pnl_history': val_pnl_history, 'epoch': epoch
+        }
+        for name in agent_names:
+            save_dict[f'model_{name}'] = models[name].state_dict()
+            save_dict[f'opt_{name}'] = agents[name].optimizer.state_dict()
+        torch.save(save_dict, CHECKPOINT_PATH)
 
-    # ── 이전 체크포인트 자동 복원 ─────────────────────────────────────────
     if os.path.exists(CHECKPOINT_PATH):
         ckpt = torch.load(CHECKPOINT_PATH, map_location=device)
-        model_bull.load_state_dict(ckpt['model_bull'])
-        model_bear.load_state_dict(ckpt['model_bear'])
-        model_sup.load_state_dict(ckpt['model_sup'])
-        model_res.load_state_dict(ckpt['model_res'])
-        model_normal_long.load_state_dict(ckpt['model_normal_long'])
-        model_normal_short.load_state_dict(ckpt['model_normal_short'])
-        model_bull_exit.load_state_dict(ckpt['model_bull_exit'])
-        model_bear_exit.load_state_dict(ckpt['model_bear_exit'])
-        model_sup_exit.load_state_dict(ckpt['model_sup_exit'])
-        model_res_exit.load_state_dict(ckpt['model_res_exit'])
-        model_normal_long_exit.load_state_dict(ckpt['model_normal_long_exit'])
-        model_normal_short_exit.load_state_dict(ckpt['model_normal_short_exit'])
-        # target network 동기화
-        for _ag in [agent_bull, agent_bear, agent_sup, agent_res,
-                    agent_normal_long, agent_normal_short,
-                    agent_bull_exit, agent_bear_exit, agent_sup_exit, agent_res_exit,
-                    agent_normal_long_exit, agent_normal_short_exit]:
-            _ag.target_model.load_state_dict(_ag.model.state_dict())
-        # optimizer 복원
-        agent_bull.optimizer.load_state_dict(ckpt['opt_bull'])
-        agent_bear.optimizer.load_state_dict(ckpt['opt_bear'])
-        agent_sup.optimizer.load_state_dict(ckpt['opt_sup'])
-        agent_res.optimizer.load_state_dict(ckpt['opt_res'])
-        agent_normal_long.optimizer.load_state_dict(ckpt['opt_normal_long'])
-        agent_normal_short.optimizer.load_state_dict(ckpt['opt_normal_short'])
-        agent_bull_exit.optimizer.load_state_dict(ckpt['opt_bull_exit'])
-        agent_bear_exit.optimizer.load_state_dict(ckpt['opt_bear_exit'])
-        agent_sup_exit.optimizer.load_state_dict(ckpt['opt_sup_exit'])
-        agent_res_exit.optimizer.load_state_dict(ckpt['opt_res_exit'])
-        agent_normal_long_exit.optimizer.load_state_dict(ckpt['opt_normal_long_exit'])
-        agent_normal_short_exit.optimizer.load_state_dict(ckpt['opt_normal_short_exit'])
-        # 훈련 상태 복원
-        global_step     = ckpt['global_step']
-        best_val_pnl    = ckpt['best_val_pnl']
-        best_val_score  = ckpt['best_val_score']
-        val_pnl_history = ckpt.get('val_pnl_history', [])
-        start_ep        = ckpt['epoch'] + 1
-        logger.info(f"♻️  [체크포인트 복원] ep={ckpt['epoch']} → {start_ep}부터 재시작 | global_step={global_step} | best_pnl={best_val_pnl:.2f}%")
-    else:
-        logger.info("🚀 [훈련 시작] 새 학습 — 체크포인트 없음")
+        for name in agent_names:
+            models[name].load_state_dict(ckpt[f'model_{name}'])
+            agents[name].target_model.load_state_dict(models[name].state_dict())
+            agents[name].optimizer.load_state_dict(ckpt[f'opt_{name}'])
+        global_step, best_val_pnl = ckpt['global_step'], ckpt['best_val_pnl']
+        best_val_score, val_pnl_history = ckpt['best_val_score'], ckpt.get('val_pnl_history', [])
+        start_ep = ckpt['epoch'] + 1
+        logger.info(f"♻️ [복원] ep={ckpt['epoch']} → {start_ep} | best_pnl={best_val_pnl:.2f}%")
 
     try:
         for ep in range(start_ep, NEP + 1):
+            def pick_start(regime):
+                return random.choice(regime_starts[regime]) if random.random() < 0.7 else random.choice(regime_starts['normal'])
 
-            def pick_start(pool):
-                if random.random() < 0.7: return random.choice(pool)
-                return random.choice(regime_starts['any'])
+            env_states = {}
+            idle_counts = {name: 0 for name in agent_names}
+            
+            for name in agent_names:
+                regime = name.split('_')[0]
+                env_states[name] = envs[name].reset(pick_start(regime))
 
-            # 각 페어 리셋 (하나의 env)
-            pair_states = []
-            # Delayed reward 추적: 진입 시점 (state, action, regimes) 저장
-            # 청산 시 realized_pnl을 진입 에이전트에게 나중에 전달
-            pair_entry_cache = [None] * len(pairs)  # (entry_s, entry_a, entry_regimes)
-            idle_counts = [0] * len(pairs)
-            for env, agent_e, agent_x, pool_key in pairs:
-                s = env.reset(pick_start(regime_starts[pool_key]))
-                pair_states.append(s)
-
-            eps  = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
+            eps = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
             done = False
 
             while not done:
                 global_step += 1
                 eps = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
 
-                idx = pairs[0][0].current_step
-                if idx >= pairs[0][0].end_step or idx >= len(df_train) - 1:
+                idx = envs[agent_names[0]].current_step
+                if idx >= envs[agent_names[0]].end_step or idx >= len(df_train) - 1:
                     break
 
-                for i, (env, agent_e, agent_x, _) in enumerate(pairs):
-                    s = pair_states[i]
-                    # [BUG-2 FIX] 각 env의 실제 current_step으로 레짐 계산
-                    env_idx = env.current_step
-                    current_regimes = {r: float(df_train_reg[env_idx, ri]) for ri, r in enumerate(REGIME_COLS)}
+                for name in agent_names:
+                    env, agent, s = envs[name], agents[name], env_states[name]
+                    current_regimes = {r: float(df_train_reg[env.current_step, ri]) for ri, r in enumerate(REGIME_COLS)}
 
-                    if env.pos is None:
-                        # ── 포지션 없음: 진입 에이전트 act ───────────────
-                        a = agent_e.act(s, eps)
-                        ns, r, d, _ = env.step(a)
+                    # 순수하게 현재 상태에서 액션 추출 및 환경 진행
+                    a = agent.act(s, eps)
+                    ns, r, d, _ = env.step(a)
 
-                        if a == 1 and env.pos is not None:
-                            # 진입 성공 → 결과를 모르니 아직 메모리 저장 안 함
-                            # entry_cache에 (state, action, regimes, entry_r) 보관
-                            # [BUG-1 FIX] 진입 수수료 r도 함께 저장
-                            idle_counts[i] = 0
-                            pair_entry_cache[i] = (s, a, current_regimes, r)
-                            # 진입 에이전트는 이 스텝 reward 없음 (청산 시 delayed로 받음)
-                        else:
-                            # 홀드 → idle penalty (영원히 홀드 전략 비용화)
-                            idle_counts[i] += 1
-                            idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
-                            agent_e.memory.push(s, a, idle_penalty, ns, d, current_regimes)
-
+                    if env.pos is None and a == 0:
+                        # 무한 홀딩 방지 페널티
+                        idle_counts[name] += 1
+                        idle_penalty = -0.003 * min(idle_counts[name] / 50.0, 1.0)
+                        agent.memory.push(s, a, idle_penalty, ns, d, current_regimes)
                     else:
-                        # ── 포지션 있음: 청산 에이전트 act ──────────────
-                        # agent_x: 0=홀드(shaped reward), 1=청산(realized_pnl)
-                        # env.step: 0=청산, 1=진입불가(홀딩처리)
-                        a = agent_x.act(s, eps)
-                        # [BUG-2 FIX] SL(-2%) 강제 청산 시 메모리 오염 방지
-                        # exit agent가 a=0(홀드) 선택했더라도 SL이 발동하면
-                        # step() 내부에서 action=0(청산)으로 덮어씀 → 메모리에는 close로 기록해야 함
-                        if env.pos is not None and env.unrealized_pnl <= -0.02:
-                            a_for_mem = 1   # SL 강제 청산 → close(1)로 기록
-                            env_action = 0
-                        else:
-                            a_for_mem = a
-                            env_action = 0 if a == 1 else 1
-                        ns, r, d, _ = env.step(env_action)
-                        agent_x.memory.push(s, a_for_mem, r, ns, d, current_regimes)
+                        idle_counts[name] = 0
+                        agent.memory.push(s, a, r, ns, d, current_regimes)
 
-                        # 청산됐으면 진입 에이전트에게 delayed reward 전달
-                        if env.pos is None and pair_entry_cache[i] is not None:
-                            entry_s, entry_a, entry_reg, entry_r = pair_entry_cache[i]
-                            # [BUG-1 FIX] total_r = 진입 수수료 + 청산 reward (왕복 수수료 완전 반영)
-                            # → 진입 에이전트: "그 타이밍에 진입한 결과가 이거였다"
-                            agent_e.memory.push(entry_s, entry_a, entry_r + r, ns, d, entry_reg)
-                            pair_entry_cache[i] = None
-
-                    pair_states[i] = ns
+                    env_states[name] = ns
                     done = done or d
 
                 if global_step % UPDATE_FREQ == 0:
-                    for _, agent_e, agent_x, _ in pairs:
-                        if len(agent_e.memory) >= MIN_BUFFER: agent_e.update(BATCH)
-                        if len(agent_x.memory) >= MIN_BUFFER: agent_x.update(BATCH)
-
-            # ── 에피소드 종료 시 미청산 포지션 처리 ─────────────────────
-            # 에피소드가 끝났는데 아직 entry_cache에 남아있으면
-            # unrealized_pnl을 delayed reward로 줘서 학습 신호 제공
-            for i, (env, agent_e, agent_x, _) in enumerate(pairs):
-                if pair_entry_cache[i] is not None:
-                    entry_s, entry_a, entry_reg, entry_r = pair_entry_cache[i]
-                    final_reward = entry_r + env.unrealized_pnl  # 진입 수수료 + 미실현 수익
-                    final_ns     = pair_states[i]
-                    agent_e.memory.push(entry_s, entry_a, final_reward, final_ns, True, entry_reg)
-                    pair_entry_cache[i] = None
+                    for name in agent_names:
+                        if len(agents[name].memory) >= MIN_BUFFER: agents[name].update(BATCH)
 
             # ── 에폭 로그 ─────────────────────────────────────────────────
-            names = ['Bull', 'Bear', 'Sup ', 'Res ', 'NorL', 'NorS']
-            for name, (env, agent_e, agent_x, _) in zip(names, pairs):
+            for name in agent_names:
+                env = envs[name]
                 pnl = (env.balance / 10000 - 1) * 100
-                logger.info(
-                    f"Ep {ep:04d} [{name}] "
-                    f"PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}% | "
-                    f"buf_e:{len(agent_e.memory):6d} buf_x:{len(agent_x.memory):6d} | eps:{eps:.3f}"
-                )
+                logger.info(f"Ep {ep:04d} [{name:12s}] PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}%")
 
             # ── Val 평가 (10에폭마다) ─────────────────────────────────────
             if ep % 10 == 0:
-                router = MoEIQNTrader(
-                    model_bull, model_bear, model_sup, model_res,
-                    model_bull_exit, model_bear_exit, model_sup_exit, model_res_exit,
-                    model_normal_long, model_normal_short,
-                    model_normal_long_exit, model_normal_short_exit,
-                    df_val, device
-                )
+                router = MoEIQNTrader(models, df_val, device)
                 val_env = TradingEnv(df_val, phase='val', agent_role='neutral')
-                obs = val_env.reset()
-                d   = False
+                obs, d = val_env.reset(), False
 
                 while not d:
                     feat = df_val.iloc[val_env.current_step].to_dict()
                     pos_info = {
-                        'type':        val_env.pos,
-                        'entry_price': val_env.entry_price,
-                        'unrealized':  val_env.unrealized_pnl,
-                        'mdd':         val_env.max_drawdown,
-                        'hold_norm':   val_env.hold_count / val_env.MAX_HOLD['val']
+                        'type': val_env.pos, 'entry_price': val_env.entry_price,
+                        'unrealized': val_env.unrealized_pnl, 'mdd': val_env.max_drawdown,
+                        'hold_norm': val_env.hold_count / val_env.MAX_HOLD['val']
                     }
                     action, leverage_rate, info = router.decide(val_env.current_step, feat, pos_info)
                     obs, _, d, _ = val_env.step(action, leverage_rate=leverage_rate)
 
                 val_pnl_pct = (val_env.balance / 10000 - 1) * 100
                 val_pnl_history.append(val_pnl_pct)
-                # Sharpe 추정: 최근 10개 val PnL 기록 기반
-                if len(val_pnl_history) >= 3:
-                    _arr   = np.array(val_pnl_history[-10:])
-                    sharpe_est = float(np.mean(_arr) / (np.std(_arr) + 1e-6))
-                else:
-                    sharpe_est = 0.0
-                # 복합 스코어: PnL 40% + 승률 30% + Sharpe 30%
+                sharpe_est = float(np.mean(val_pnl_history[-10:]) / (np.std(val_pnl_history[-10:]) + 1e-6)) if len(val_pnl_history) >= 3 else 0.0
                 val_score = val_pnl_pct * 0.4 + val_env.win_rate * 30 + sharpe_est * 10
-                logger.info(
-                    f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | "
-                    f"WR:{val_env.win_rate*100:.0f}% | Sharpe:{sharpe_est:.2f} | Score:{val_score:.2f} | eps:{eps:.3f}"
-                )
+                
+                logger.info(f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | WR:{val_env.win_rate*100:.0f}% | Score:{val_score:.2f}")
 
                 if val_score > best_val_score:
-                    best_val_score = val_score
-                    best_val_pnl   = val_pnl_pct
-                    torch.save({
-                        'model_bull':              model_bull.state_dict(),
-                        'model_bear':              model_bear.state_dict(),
-                        'model_sup':               model_sup.state_dict(),
-                        'model_res':               model_res.state_dict(),
-                        'model_normal_long':       model_normal_long.state_dict(),
-                        'model_normal_short':      model_normal_short.state_dict(),
-                        'model_bull_exit':         model_bull_exit.state_dict(),
-                        'model_bear_exit':         model_bear_exit.state_dict(),
-                        'model_sup_exit':          model_sup_exit.state_dict(),
-                        'model_res_exit':          model_res_exit.state_dict(),
-                        'model_normal_long_exit':  model_normal_long_exit.state_dict(),
-                        'model_normal_short_exit': model_normal_short_exit.state_dict(),
-                        'best_pnl':                best_val_pnl,
-                        'epoch':                   ep
-                    }, 'data/ensemble/best_moe_agents.pth')
-                    logger.info(f"    🎉 [NEW BEST] 저장 (PnL:{best_val_pnl:.2f}% Score:{best_val_score:.2f})")
+                    best_val_score, best_val_pnl = val_score, val_pnl_pct
+                    save_dict = {'best_pnl': best_val_pnl, 'epoch': ep}
+                    for name in agent_names: save_dict[f'model_{name}'] = models[name].state_dict()
+                    torch.save(save_dict, 'data/ensemble/best_10_agents.pth')
+                    logger.info(f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}%)")
 
-            # 10 에폭마다 체크포인트 저장 (중단 후 재시작 지원)
-            if ep % 10 == 0:
                 _save_checkpoint(ep)
-                logger.info(f"    💾 [체크포인트] ep={ep} 저장 완료")
 
     except KeyboardInterrupt:
-        logger.info("⚠️  학습 중단 감지 — 체크포인트 저장 중...")
+        logger.info("⚠️ 학습 중단. 체크포인트 저장 완료.")
         _save_checkpoint(ep)
-        logger.info(f"✅ 체크포인트 저장 완료 (ep={ep}). 재시작 시 자동 복원됩니다.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

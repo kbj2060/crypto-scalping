@@ -329,7 +329,7 @@ class TradingEnv:
 
         if self.pos is not None:
             if self.unrealized_pnl <= -0.02:
-                action = 0  # SL 안전망
+                action = 1  # 💡 SL 강제 청산 발동 시 액션을 1(청산)로 덮어씀
 
         reward = 0.0
         is_closed = False
@@ -339,14 +339,14 @@ class TradingEnv:
         is_entering_short = False
         is_closing = False
 
+        # 💡 [핵심] 단일 에이전트 체제: 1 = 행동(진입/청산), 0 = 대기(유지)
         if self.phase == 'train':
-            if action == 1 and self.pos is None:
-                if self.agent_role in ['bull_sniper', 'support_buyer', 'normal_long', 'long_agent']:
-                    is_entering_long = True
-                elif self.agent_role in ['bear_sniper', 'resistance_seller', 'normal_short', 'short_agent']:
-                    is_entering_short = True
-            elif action == 0 and self.pos is not None:
-                is_closing = True
+            if action == 1:
+                if self.pos is None:
+                    if 'long' in self.agent_role: is_entering_long = True
+                    elif 'short' in self.agent_role: is_entering_short = True
+                else:
+                    is_closing = True
         else:  # phase == 'val'
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
@@ -407,9 +407,10 @@ class TradingEnv:
                 if self.hold_count > 100:
                     reward -= 0.001 * (self.hold_count - 100)
 
-        reward = float(np.clip(reward, -0.15, 0.30))  # 비대칭: 손실 제한, 이익 허용
+        reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
         return self._build_state(self.current_step), reward, done, info
+
 
     @property
     def win_rate(self): return self.win_trades / max(1, self.total_trades)
@@ -629,12 +630,10 @@ class IQNAgent:
 # 6. DualAgentTrader (val 전용 라우터)
 # ═══════════════════════════════════════════════════════════════════════════
 class DualAgentTrader:
-    """롱/숏 2-pair 전용 라우터. 레짐 없이 Q-value advantage로 진입/청산 결정."""
-    def __init__(self, model_long, model_short, model_long_exit, model_short_exit, device='cuda'):
+    """롱/숏 2-pair 전용 라우터. 단일 에이전트 통합 버전."""
+    def __init__(self, model_long, model_short, device='cuda'):
         self.model_long       = model_long.eval()
         self.model_short      = model_short.eval()
-        self.model_long_exit  = model_long_exit.eval()
-        self.model_short_exit = model_short_exit.eval()
         self.device           = device
         self._active_side     = None  # 'long' or 'short'
 
@@ -665,22 +664,29 @@ class DualAgentTrader:
             q_long  = self.model_long(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
             q_short = self.model_short(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
 
-            if cur_pos is not None and self._active_side is not None:
-                exit_model = self.model_long_exit if self._active_side == 'long' else self.model_short_exit
-                q_exit = exit_model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-            else:
-                q_exit = None
-
         adv_long  = q_long[1]  - q_long[0]
         adv_short = q_short[1] - q_short[0]
+        
+        kelly_long  = max(0., adv_long  / (q_long.std()  + 0.05))
+        kelly_short = max(0., adv_short / (q_short.std() + 0.05))
 
-        # ── 포지션 있음: 청산 판단 ─────────────────────────────────────────
+        CLOSE_KELLY_THRESHOLD = 0.3
+
+        # ── 포지션 있음: 동일 에이전트의 Q값으로 청산 판단 ─────────────────────────
         if cur_pos is not None and self._active_side is not None:
-            exit_signal = (q_exit is not None) and (q_exit[1] > q_exit[0])
-            if exit_signal:
+            active_q = q_long if self._active_side == 'long' else q_short
+            
+            # 신호 1: 담당 에이전트가 1(청산)을 더 높게 평가함
+            exit_signal = (active_q[1] > active_q[0])
+            
+            # 신호 2: 반대 방향 에이전트의 강력한 진입 신호 (스위칭 대비)
+            opp_signal = (adv_short > 0 and kelly_short > CLOSE_KELLY_THRESHOLD) if self._active_side == 'long' else \
+                         (adv_long > 0 and kelly_long > CLOSE_KELLY_THRESHOLD)
+
+            if exit_signal or opp_signal:
                 active = self._active_side
                 self._active_side = None
-                return 0, 0.0, {'agent': f'{active}_exit'}
+                return 0, 0.0, {'agent': f'{active}_self_exit+opp' if opp_signal else f'{active}_self_exit'}
             else:
                 hold_action = 1 if cur_pos == 'LONG' else 2
                 return hold_action, 0.0, {'agent': 'HOLD'}
@@ -688,10 +694,10 @@ class DualAgentTrader:
         # ── 포지션 없음: Long vs Short 비교 진입 ──────────────────────────
         if adv_long > 0 and adv_long >= adv_short:
             self._active_side = 'long'
-            return 1, 1.0, {'agent': 'LONG_ENTRY', 'adv': adv_long}
+            return 1, np.clip(kelly_long * 0.5, 0.1, 1.0), {'agent': 'LONG_ENTRY', 'adv': adv_long}
         elif adv_short > 0:
             self._active_side = 'short'
-            return 2, 1.0, {'agent': 'SHORT_ENTRY', 'adv': adv_short}
+            return 2, np.clip(kelly_short * 0.5, 0.1, 1.0), {'agent': 'SHORT_ENTRY', 'adv': adv_short}
         else:
             self._active_side = None
             return 0, 0.0, {'agent': 'HOLD'}
@@ -711,7 +717,6 @@ def train_ls():
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # ── 시작점 풀: 레짐 구분 없이 any만 ──────────────────────────────────
     MAX_EP    = 4096
     _safe_end = len(df_train) - MAX_EP - 1
     any_starts = list(range(_safe_end))
@@ -721,30 +726,23 @@ def train_ls():
     env_long  = TradingEnv(df_train, phase='train', agent_role='long_agent')
     env_short = TradingEnv(df_train, phase='train', agent_role='short_agent')
 
-    # ── 모델: 진입×2 + 청산×2 ────────────────────────────────────────────
-    model_long_entry  = RobustIQN(STATE_DIM, 2).to(device)
-    model_short_entry = RobustIQN(STATE_DIM, 2).to(device)
-    model_long_exit   = RobustIQN(STATE_DIM, 2).to(device)
-    model_short_exit  = RobustIQN(STATE_DIM, 2).to(device)
+    # ── 모델: 딱 2개로 통합! ───────────────────────────────────────────────
+    model_long  = RobustIQN(STATE_DIM, 2).to(device)
+    model_short = RobustIQN(STATE_DIM, 2).to(device)
 
     # ── 에이전트 ─────────────────────────────────────────────────────────
-    agent_long_entry  = IQNAgent(model_long_entry,  device=device)
-    agent_short_entry = IQNAgent(model_short_entry, device=device)
-    agent_long_exit   = IQNAgent(model_long_exit,   device=device)
-    agent_short_exit  = IQNAgent(model_short_exit,  device=device)
+    agent_long  = IQNAgent(model_long,  device=device)
+    agent_short = IQNAgent(model_short, device=device)
 
     # ── PER 버퍼 할당 ─────────────────────────────────────────────────────
-    agent_long_entry.memory  = PrioritizedReplayBuffer(300000)
-    agent_short_entry.memory = PrioritizedReplayBuffer(300000)
-    agent_long_exit.memory   = PrioritizedReplayBuffer(300000)
-    agent_short_exit.memory  = PrioritizedReplayBuffer(300000)
+    agent_long.memory  = PrioritizedReplayBuffer(300000)
+    agent_short.memory = PrioritizedReplayBuffer(300000)
 
-    # 페어: (env, 진입agent, 청산agent)
+    # 페어: (env, agent, name)
     pairs = [
-        (env_long,  agent_long_entry,  agent_long_exit),
-        (env_short, agent_short_entry, agent_short_exit),
+        (env_long,  agent_long,  'Long '),
+        (env_short, agent_short, 'Short'),
     ]
-    pair_names = ['Long ', 'Short']
 
     NEP             = 1000
     BATCH           = 512
@@ -762,59 +760,45 @@ def train_ls():
     start_ep       = 1
     CHECKPOINT_PATH = 'data/ensemble/ls_checkpoint.pth'
 
-    # ── 체크포인트 저장 헬퍼 ─────────────────────────────────────────────
     def _save_checkpoint(epoch):
         torch.save({
-            'model_long_entry':  model_long_entry.state_dict(),
-            'model_short_entry': model_short_entry.state_dict(),
-            'model_long_exit':   model_long_exit.state_dict(),
-            'model_short_exit':  model_short_exit.state_dict(),
-            'opt_long_entry':    agent_long_entry.optimizer.state_dict(),
-            'opt_short_entry':   agent_short_entry.optimizer.state_dict(),
-            'opt_long_exit':     agent_long_exit.optimizer.state_dict(),
-            'opt_short_exit':    agent_short_exit.optimizer.state_dict(),
-            'global_step':       global_step,
-            'best_val_pnl':      best_val_pnl,
-            'best_val_score':    best_val_score,
-            'val_pnl_history':   val_pnl_history,
-            'epoch':             epoch,
+            'model_long':      model_long.state_dict(),
+            'model_short':     model_short.state_dict(),
+            'opt_long':        agent_long.optimizer.state_dict(),
+            'opt_short':       agent_short.optimizer.state_dict(),
+            'global_step':     global_step,
+            'best_val_pnl':    best_val_pnl,
+            'best_val_score':  best_val_score,
+            'val_pnl_history': val_pnl_history,
+            'epoch':           epoch,
         }, CHECKPOINT_PATH)
 
-    # ── 이전 체크포인트 자동 복원 ────────────────────────────────────────
     if os.path.exists(CHECKPOINT_PATH):
         ckpt = torch.load(CHECKPOINT_PATH, map_location=device)
-        model_long_entry.load_state_dict(ckpt['model_long_entry'])
-        model_short_entry.load_state_dict(ckpt['model_short_entry'])
-        model_long_exit.load_state_dict(ckpt['model_long_exit'])
-        model_short_exit.load_state_dict(ckpt['model_short_exit'])
-        for _ag in [agent_long_entry, agent_short_entry, agent_long_exit, agent_short_exit]:
-            _ag.target_model.load_state_dict(_ag.model.state_dict())
-        agent_long_entry.optimizer.load_state_dict(ckpt['opt_long_entry'])
-        agent_short_entry.optimizer.load_state_dict(ckpt['opt_short_entry'])
-        agent_long_exit.optimizer.load_state_dict(ckpt['opt_long_exit'])
-        agent_short_exit.optimizer.load_state_dict(ckpt['opt_short_exit'])
+        model_long.load_state_dict(ckpt['model_long'])
+        model_short.load_state_dict(ckpt['model_short'])
+        agent_long.target_model.load_state_dict(model_long.state_dict())
+        agent_short.target_model.load_state_dict(model_short.state_dict())
+        agent_long.optimizer.load_state_dict(ckpt['opt_long'])
+        agent_short.optimizer.load_state_dict(ckpt['opt_short'])
         global_step     = ckpt['global_step']
         best_val_pnl    = ckpt['best_val_pnl']
         best_val_score  = ckpt['best_val_score']
         val_pnl_history = ckpt.get('val_pnl_history', [])
         start_ep        = ckpt['epoch'] + 1
-        logger.info(f"♻️  [체크포인트 복원] ep={ckpt['epoch']} → {start_ep}부터 재시작 | global_step={global_step} | best_pnl={best_val_pnl:.2f}%")
+        logger.info(f"♻️  [복원] ep={ckpt['epoch']} → {start_ep}부터 재시작 | best_pnl={best_val_pnl:.2f}%")
     else:
         logger.info("🚀 [훈련 시작] 새 학습 — 체크포인트 없음")
 
     try:
         for ep in range(start_ep, NEP + 1):
 
-            def pick_start():
-                return random.choice(any_starts)
+            def pick_start(): return random.choice(any_starts)
 
             pair_states = []
-            # [BUG-1 FIX] entry_cache: (entry_s, entry_a, entry_regimes, entry_r) 4-tuple
-            pair_entry_cache = [None] * len(pairs)
             idle_counts = [0] * len(pairs)
-            for env, agent_e, agent_x in pairs:
-                s = env.reset(pick_start())
-                pair_states.append(s)
+            for env, agent, _ in pairs:
+                pair_states.append(env.reset(pick_start()))
 
             eps  = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
             done = False
@@ -824,83 +808,43 @@ def train_ls():
                 eps = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
 
                 idx = pairs[0][0].current_step
-                if idx >= pairs[0][0].end_step or idx >= len(df_train) - 1:
-                    break
+                if idx >= pairs[0][0].end_step or idx >= len(df_train) - 1: break
 
-                for i, (env, agent_e, agent_x) in enumerate(pairs):
+                for i, (env, agent, _) in enumerate(pairs):
                     s = pair_states[i]
-                    # [BUG-2 FIX] 각 env의 실제 current_step으로 레짐 계산
-                    # PrioritizedReplayBuffer.push()에서 무시되지만 인터페이스 호환 유지
-                    env_idx = env.current_step
-                    current_regimes = None  # 레짐 필터 없음
+                    
+                    # 단일 에이전트 액션
+                    a = agent.act(s, eps)
+                    ns, r, d, _ = env.step(a)
 
-                    if env.pos is None:
-                        # ── 포지션 없음: 진입 에이전트 act ───────────────
-                        a = agent_e.act(s, eps)
-                        ns, r, d, _ = env.step(a)
-
-                        if a == 1 and env.pos is not None:
-                            # [BUG-1 FIX] 진입 수수료 r도 함께 저장
-                            idle_counts[i] = 0
-                            pair_entry_cache[i] = (s, a, current_regimes, r)
-                        else:
-                            # 홀드 → idle penalty (영원히 홀드 전략 비용화)
-                            idle_counts[i] += 1
-                            idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
-                            agent_e.memory.push(s, a, idle_penalty, ns, d, current_regimes)
-
+                    if env.pos is None and a == 0:
+                        # 무한 홀딩 방지 페널티
+                        idle_counts[i] += 1
+                        idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
+                        agent.memory.push(s, a, idle_penalty, ns, d)
                     else:
-                        # ── 포지션 있음: 청산 에이전트 act ──────────────
-                        a = agent_x.act(s, eps)
-                        if env.pos is not None and env.unrealized_pnl <= -0.02:
-                            a_for_mem = 1   # SL 강제 청산 → close(1)로 기록
-                            env_action = 0
-                        else:
-                            a_for_mem = a
-                            env_action = 0 if a == 1 else 1
-                        ns, r, d, _ = env.step(env_action)
-                        agent_x.memory.push(s, a_for_mem, r, ns, d, current_regimes)
-
-                        # 청산됐으면 진입 에이전트에게 delayed reward 전달
-                        if env.pos is None and pair_entry_cache[i] is not None:
-                            entry_s, entry_a, entry_reg, entry_r = pair_entry_cache[i]
-                            # [BUG-1 FIX] total_r = 진입 수수료 + 청산 reward
-                            agent_e.memory.push(entry_s, entry_a, entry_r + r, ns, d, entry_reg)
-                            pair_entry_cache[i] = None
+                        idle_counts[i] = 0
+                        agent.memory.push(s, a, r, ns, d)
 
                     pair_states[i] = ns
                     done = done or d
 
                 if global_step % UPDATE_FREQ == 0:
-                    for _, agent_e, agent_x in pairs:
-                        if len(agent_e.memory) >= MIN_BUFFER: agent_e.update(BATCH)
-                        if len(agent_x.memory) >= MIN_BUFFER: agent_x.update(BATCH)
-
-            # ── 에피소드 종료 시 미청산 포지션 처리 ─────────────────────
-            for i, (env, agent_e, agent_x) in enumerate(pairs):
-                if pair_entry_cache[i] is not None:
-                    entry_s, entry_a, entry_reg, entry_r = pair_entry_cache[i]
-                    final_reward = entry_r + env.unrealized_pnl
-                    final_ns     = pair_states[i]
-                    agent_e.memory.push(entry_s, entry_a, final_reward, final_ns, True, entry_reg)
-                    pair_entry_cache[i] = None
+                    for _, agent, _ in pairs:
+                        if len(agent.memory) >= MIN_BUFFER: agent.update(BATCH)
 
             # ── 에폭 로그 ─────────────────────────────────────────────────
-            for name, (env, agent_e, agent_x) in zip(pair_names, pairs):
+            for name, (env, agent, _) in zip(['Long ', 'Short'], pairs):
                 pnl = (env.balance / 10000 - 1) * 100
                 logger.info(
                     f"Ep {ep:04d} [{name}] "
                     f"PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}% | "
-                    f"buf_e:{len(agent_e.memory):6d} buf_x:{len(agent_x.memory):6d} | eps:{eps:.3f}"
+                    f"buf:{len(agent.memory):6d} | eps:{eps:.3f}"
                 )
 
             # ── Val 평가 (10에폭마다) ─────────────────────────────────────
             if ep % 10 == 0:
-                router = DualAgentTrader(
-                    model_long_entry, model_short_entry,
-                    model_long_exit, model_short_exit,
-                    device
-                )
+                router = DualAgentTrader(model_long, model_short, device)
                 val_env = TradingEnv(df_val, phase='val', agent_role='long_agent')
                 obs = val_env.reset()
                 d   = False
@@ -934,16 +878,13 @@ def train_ls():
                     best_val_score = val_score
                     best_val_pnl   = val_pnl_pct
                     torch.save({
-                        'model_long_entry':  model_long_entry.state_dict(),
-                        'model_short_entry': model_short_entry.state_dict(),
-                        'model_long_exit':   model_long_exit.state_dict(),
-                        'model_short_exit':  model_short_exit.state_dict(),
-                        'best_pnl':          best_val_pnl,
-                        'epoch':             ep
+                        'model_long':   model_long.state_dict(),
+                        'model_short':  model_short.state_dict(),
+                        'best_pnl':     best_val_pnl,
+                        'epoch':        ep
                     }, 'data/ensemble/best_ls_agents.pth')
                     logger.info(f"    🎉 [NEW BEST] 저장 (PnL:{best_val_pnl:.2f}% Score:{best_val_score:.2f})")
 
-            # 10 에폭마다 체크포인트 저장
             if ep % 10 == 0:
                 _save_checkpoint(ep)
                 logger.info(f"    💾 [체크포인트] ep={ep} 저장 완료")
@@ -951,7 +892,7 @@ def train_ls():
     except KeyboardInterrupt:
         logger.info("⚠️  학습 중단 감지 — 체크포인트 저장 중...")
         _save_checkpoint(ep)
-        logger.info(f"✅ 체크포인트 저장 완료 (ep={ep}). 재시작 시 자동 복원됩니다.")
+        logger.info(f"✅ 체크포인트 저장 완료 (ep={ep}).")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
