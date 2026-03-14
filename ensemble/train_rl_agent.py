@@ -422,6 +422,7 @@ class TradingEnv:
                 if self.hold_count > 100:
                     reward -= 0.001 * (self.hold_count - 100)
 
+        reward = float(np.clip(reward, -0.15, 0.30))  # 비대칭: 손실 제한, 이익 허용
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
         return self._build_state(self.current_step), reward, done, info
 
@@ -515,8 +516,49 @@ class PrioritizedRegimeReplayBuffer(RegimeReplayBuffer):
             self.priorities[idx] = p
             self.max_priority    = max(self.max_priority, p)
 
+class NoisyLinear(nn.Module):
+    """Factorized Gaussian NoisyNet (Fortunato et al. 2017)"""
+    def __init__(self, in_features, out_features, sigma_init=0.5):
+        super().__init__()
+        self.in_features  = in_features
+        self.out_features = out_features
+        self.weight_mu    = nn.Parameter(torch.empty(out_features, in_features))
+        self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias_mu      = nn.Parameter(torch.empty(out_features))
+        self.bias_sigma   = nn.Parameter(torch.empty(out_features))
+        self.register_buffer('weight_epsilon', torch.empty(out_features, in_features))
+        self.register_buffer('bias_epsilon',   torch.empty(out_features))
+        self._sigma_init = sigma_init
+        self.reset_parameters()
+        self.sample_noise()
+
+    def reset_parameters(self):
+        mu_range = 1.0 / self.in_features ** 0.5
+        self.weight_mu.data.uniform_(-mu_range, mu_range)
+        self.weight_sigma.data.fill_(self._sigma_init / self.in_features ** 0.5)
+        self.bias_mu.data.uniform_(-mu_range, mu_range)
+        self.bias_sigma.data.fill_(self._sigma_init / self.in_features ** 0.5)
+
+    def _f(self, x):
+        return x.sign() * x.abs().sqrt()
+
+    def sample_noise(self):
+        eps_i = self._f(torch.randn(self.in_features,  device=self.weight_mu.device))
+        eps_j = self._f(torch.randn(self.out_features, device=self.weight_mu.device))
+        self.weight_epsilon.copy_(eps_j.ger(eps_i))
+        self.bias_epsilon.copy_(eps_j)
+
+    def forward(self, x):
+        if self.training:
+            w = self.weight_mu + self.weight_sigma * self.weight_epsilon
+            b = self.bias_mu   + self.bias_sigma   * self.bias_epsilon
+        else:
+            w, b = self.weight_mu, self.bias_mu
+        return F.linear(x, w, b)
+
+
 class RobustIQN(nn.Module):
-    """Dueling IQN — V(s) + A(s,a) 분리로 학습 안정성 향상"""
+    """Plain IQN + NoisyNet — 2-action 공간에서 Dueling 불필요"""
     def __init__(self, state_dim, action_dim=2, hidden_dim=128):
         super().__init__()
         self.action_dim = action_dim
@@ -524,11 +566,13 @@ class RobustIQN(nn.Module):
             nn.Linear(state_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.SiLU(),
             nn.Linear(hidden_dim, 64),        nn.LayerNorm(64),         nn.SiLU()
         )
-        self.phi        = nn.Linear(64, 64)
-        # Dueling: Value stream (상태 가치)
-        self.value_head = nn.Sequential(nn.SiLU(), nn.Linear(64, 1))
-        # Dueling: Advantage stream (행동 이점)
-        self.adv_head   = nn.Sequential(nn.SiLU(), nn.Linear(64, action_dim))
+        self.phi    = nn.Linear(64, 64)
+        self.q_head = nn.Sequential(nn.SiLU(), NoisyLinear(64, action_dim))
+
+    def reset_noise(self):
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.sample_noise()
 
     def forward(self, state, num_quantiles=8):
         batch_size = state.size(0)
@@ -537,10 +581,7 @@ class RobustIQN(nn.Module):
         cos_tau = torch.cos(tau * torch.arange(1, 65, device=state.device).float() * torch.pi)
         phi_x   = self.phi(cos_tau)
         shared  = feat.unsqueeze(1).expand(-1, num_quantiles, -1) * phi_x  # (B, NQ, 64)
-        # Dueling combination: Q = V + (A - mean(A))
-        v = self.value_head(shared)                          # (B, NQ, 1)
-        a = self.adv_head(shared)                            # (B, NQ, action_dim)
-        q = v + (a - a.mean(dim=2, keepdim=True))            # (B, NQ, action_dim)
+        q = self.q_head(shared)                                             # (B, NQ, action_dim)
         return q, tau
 
 class TransformerIQN(nn.Module):
@@ -591,18 +632,22 @@ class IQNAgent:
             self.state_dim = model.pos_encoder.shape[1]
         self.target_model = type(model)(self.state_dim, model.action_dim).to(device)
         self.target_model.load_state_dict(model.state_dict(), strict=False)
+        self.target_model.eval()  # 타깃 네트워크는 항상 weight_mu만 사용 (노이즈 없음)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
         self.memory = None
         self.gamma = gamma
         self.tau = tau
         self.device = device
 
-    def act(self, state, eps=0.0):
-        if random.random() < eps: return random.randint(0, self.model.action_dim - 1)
+    def act(self, state, eps=0.0):  # eps 하위호환 유지, 실제 미사용
+        if self.model.training and hasattr(self.model, 'reset_noise'):
+            self.model.reset_noise()
         state_ts = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q = self.model(state_ts, num_quantiles=self.NUM_QUANTILES)[0].mean(dim=1).squeeze(0)
         return torch.argmax(q).item()
+
+    ENTROPY_COEFF = 0.02
 
     def update(self, batch_size):
         if len(self.memory) < batch_size: return
@@ -641,6 +686,14 @@ class IQNAgent:
             self.memory.update_priorities(per_indices, td_err_np)
         else:
             loss = loss_per_sample.mean()
+
+        # 엔트로피 정규화 (policy collapse 방지)
+        if hasattr(self.model, 'reset_noise'):
+            self.model.reset_noise()
+        q_mean  = q.detach().mean(dim=1)                        # (B, action_dim)
+        probs   = F.softmax(q_mean, dim=-1)
+        entropy = -(probs * (probs + 1e-8).log()).sum(dim=-1)   # (B,)
+        loss    = loss - self.ENTROPY_COEFF * entropy.mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -996,6 +1049,7 @@ def train():
             # Delayed reward 추적: 진입 시점 (state, action, regimes) 저장
             # 청산 시 realized_pnl을 진입 에이전트에게 나중에 전달
             pair_entry_cache = [None] * len(pairs)  # (entry_s, entry_a, entry_regimes)
+            idle_counts = [0] * len(pairs)
             for env, agent_e, agent_x, pool_key in pairs:
                 s = env.reset(pick_start(regime_starts[pool_key]))
                 pair_states.append(s)
@@ -1026,11 +1080,14 @@ def train():
                             # 진입 성공 → 결과를 모르니 아직 메모리 저장 안 함
                             # entry_cache에 (state, action, regimes, entry_r) 보관
                             # [BUG-1 FIX] 진입 수수료 r도 함께 저장
+                            idle_counts[i] = 0
                             pair_entry_cache[i] = (s, a, current_regimes, r)
                             # 진입 에이전트는 이 스텝 reward 없음 (청산 시 delayed로 받음)
                         else:
-                            # 홀드 → 즉시 저장 (reward=0)
-                            agent_e.memory.push(s, a, r, ns, d, current_regimes)
+                            # 홀드 → idle penalty (영원히 홀드 전략 비용화)
+                            idle_counts[i] += 1
+                            idle_penalty = -0.0002 * min(idle_counts[i] / 50.0, 1.0)
+                            agent_e.memory.push(s, a, idle_penalty, ns, d, current_regimes)
 
                     else:
                         # ── 포지션 있음: 청산 에이전트 act ──────────────
