@@ -490,7 +490,7 @@ class PrioritizedReplayBuffer:
     def __len__(self): return len(self.buffer)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. NoisyLinear + RobustIQN 모델
+# 4. NoisyLinear + RobustIQN 모델 / TransformerIQN 모델
 # ═══════════════════════════════════════════════════════════════════════════
 class NoisyLinear(nn.Module):
     """Factorized Gaussian NoisyNet (Fortunato et al. 2017)"""
@@ -560,6 +560,50 @@ class RobustIQN(nn.Module):
         q = self.q_head(shared)                                         # (B, NQ, action_dim)
         return q, tau
 
+class TransformerIQN(nn.Module):
+    def __init__(self, state_dim, action_dim=2, d_model=64, nhead=4, num_layers=1):
+        super(TransformerIQN, self).__init__()
+        self.action_dim = action_dim
+        self.state_dim = state_dim
+
+        self.feature_embed = nn.Linear(1, d_model)
+        self.pos_encoder = nn.Parameter(torch.randn(1, state_dim, d_model))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))  # [CLS] 토큰
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=d_model*2,
+            activation='gelu', batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        self.phi = nn.Linear(64, d_model)
+        self.fc_q = nn.Sequential(nn.SiLU(), nn.Linear(d_model, action_dim))
+
+    def reset_noise(self):
+        pass  # TransformerIQN은 NoisyLinear 없음 — 호환성 유지용
+
+    def forward(self, state, num_quantiles=32):
+        batch_size = state.size(0)
+
+        x = state.unsqueeze(-1)
+        x = self.feature_embed(x)          # (B, state_dim, d_model)
+        x = x + self.pos_encoder           # positional encoding
+        cls = self.cls_token.expand(batch_size, -1, -1)  # (B, 1, d_model)
+        x = torch.cat([cls, x], dim=1)    # (B, 1+state_dim, d_model)
+        x = self.transformer(x)
+        x = x[:, 0, :]                    # CLS 토큰만 추출 (B, d_model)
+
+        tau = torch.rand(batch_size, num_quantiles, 1).to(state.device)
+        pi_mtx = torch.arange(1, 65).float().to(state.device) * torch.pi
+        cos_tau = torch.cos(tau * pi_mtx)
+        phi_x = self.phi(cos_tau)
+
+        x_tile = x.unsqueeze(1).expand(-1, num_quantiles, -1)
+        q_quantiles = self.fc_q(x_tile * phi_x)  # (B, NQ, action_dim)
+
+        return q_quantiles, tau
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. IQNAgent
 # ═══════════════════════════════════════════════════════════════════════════
@@ -568,7 +612,7 @@ class IQNAgent:
 
     def __init__(self, model, lr=5e-5, gamma=0.99, tau=0.005, device='cuda'):
         self.model = model
-        self.state_dim = model.feat_extractor[0].in_features
+        self.state_dim = model.state_dim
         self.target_model = type(model)(self.state_dim, model.action_dim).to(device)
         self.target_model.load_state_dict(model.state_dict(), strict=False)
         self.target_model.eval()  # 타깃 네트워크는 항상 weight_mu만 사용 (노이즈 없음)
@@ -743,8 +787,8 @@ def train_ls():
     env_short = TradingEnv(df_train, phase='train', agent_role='short_agent')
 
     # ── 모델: 딱 2개로 통합! ───────────────────────────────────────────────
-    model_long  = RobustIQN(STATE_DIM, 2).to(device)
-    model_short = RobustIQN(STATE_DIM, 2).to(device)
+    model_long  = TransformerIQN(STATE_DIM, 2, d_model=64, nhead=4, num_layers=1).to(device)
+    model_short = TransformerIQN(STATE_DIM, 2, d_model=64, nhead=4, num_layers=1).to(device)
 
     # ── 에이전트 ─────────────────────────────────────────────────────────
     agent_long  = IQNAgent(model_long,  device=device)
@@ -791,18 +835,29 @@ def train_ls():
 
     if os.path.exists(CHECKPOINT_PATH):
         ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
-        model_long.load_state_dict(ckpt['model_long'])
-        model_short.load_state_dict(ckpt['model_short'])
-        agent_long.target_model.load_state_dict(model_long.state_dict())
-        agent_short.target_model.load_state_dict(model_short.state_dict())
-        agent_long.optimizer.load_state_dict(ckpt['opt_long'])
-        agent_short.optimizer.load_state_dict(ckpt['opt_short'])
+        arch_ok = True
+        for model_obj, opt_obj, key_m, key_o in [
+            (model_long,  agent_long.optimizer,  'model_long',  'opt_long'),
+            (model_short, agent_short.optimizer, 'model_short', 'opt_short'),
+        ]:
+            try:
+                model_obj.load_state_dict(ckpt[key_m])
+                opt_obj.load_state_dict(ckpt[key_o])
+            except RuntimeError as e:
+                logger.warning(f"⚠️ [{key_m}] 아키텍처 불일치로 가중치 스킵 (처음부터 학습): {e}")
+                arch_ok = False
+        if arch_ok:
+            agent_long.target_model.load_state_dict(model_long.state_dict())
+            agent_short.target_model.load_state_dict(model_short.state_dict())
         global_step     = ckpt['global_step']
         best_val_pnl    = ckpt['best_val_pnl']
         best_val_score  = ckpt['best_val_score']
         val_pnl_history = ckpt.get('val_pnl_history', [])
-        start_ep        = ckpt['epoch'] + 1
-        logger.info(f"♻️  [복원] ep={ckpt['epoch']} → {start_ep}부터 재시작 | best_pnl={best_val_pnl:.2f}%")
+        start_ep        = ckpt['epoch'] + 1 if arch_ok else 1
+        if arch_ok:
+            logger.info(f"♻️  [복원] ep={ckpt['epoch']} → {start_ep}부터 재시작 | best_pnl={best_val_pnl:.2f}%")
+        else:
+            logger.info(f"🆕 [아키텍처 변경] 가중치 초기화 후 ep=1 부터 재학습")
     else:
         logger.info("🚀 [훈련 시작] 새 학습 — 체크포인트 없음")
 
