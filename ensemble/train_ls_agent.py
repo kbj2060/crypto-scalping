@@ -45,20 +45,20 @@ class SuppressOutput:
 # ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의]
 # ═══════════════════════════════════════════════════════════════════════════
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_itransformer', 'pred_nhits', 'pred_tide']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_itransformer', 'conf_nhits', 'conf_tide']
+MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_nhits', 'pred_tide']
+MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_nhits', 'conf_tide']
 
 ELITE_COLS = [
-    'sig_whale', 'sig_liq_squeeze', 'sig_net_taker', 'sig_orderblock',
-    'sig_hurst_ofi', 'sig_funding_cascade', 'sig_multifractal', 'sig_cluster_fib',
-    'sig_oi_divergence', 'sig_top_trader_squeeze', 'sig_btc_corr_breakout',
-    'sig_ai_squeeze', 'sig_vp_gravity'
+    'sig_whale', 'sig_orderblock',
+    'sig_oi_divergence',
+    'sig_ai_squeeze' 
 ]
 
 ALPHA_7_COLS = [
-    'session_us', 'hour_cos', 'cvp_poc_dist',
+    'session_us', 'hour_cos', 'cvp_poc_dist', 
     'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate'
 ]
+
 
 REGIME_COLS = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'regime_normal']
 
@@ -68,6 +68,8 @@ RL_REQUIRED_COLS = ['timestamp', 'close'] + MODEL_PRED + MODEL_CONF + ELITE_COLS
 FEATURE_DIM = len(MODEL_PRED) + len(MODEL_CONF) + 3 + len(ELITE_COLS) + len(ALPHA_7_COLS) + len(REGIME_COLS)
 STATE_DIM = FEATURE_DIM + 5
 EXIT_STATE_DIM = STATE_DIM
+MIN_HOLD_TRAIN = 3  # 진입 후 3스텝 이내 자발적 청산 불가 (micro-churn 방지)
+MIN_HOLD_NORM_VAL = 3 / 144  # val 라우터 동일 절대값 기준
 
 def row_to_market_row(row: pd.Series) -> dict:
     return {k: v for k, v in row.items()}
@@ -351,9 +353,11 @@ class TradingEnv:
             if action == 1 and self.pos is None:
                 if 'long' in self.agent_role: is_entering_long = True
                 elif 'short' in self.agent_role: is_entering_short = True
+            elif action == 1 and self.pos is not None and self.hold_count >= MIN_HOLD_TRAIN: is_closing = True
         else:  # phase == 'val' — 진입만 라우터가 결정, 청산은 force_close 전담
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
+            elif action == 0 and self.pos is not None: is_closing = True
 
         if is_entering_long:
             self.pos = 'LONG'
@@ -406,7 +410,11 @@ class TradingEnv:
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            # 보유 중 보상 없음 — 진입 품질만 보상 (SL/Trailing/MAX_HOLD가 청산 담당)
+            # asymmetric shaping: 손실 2배 페널티 (loss cut 강화)
+            if self.unrealized_pnl >= 0:
+                reward += 0.008 * self.unrealized_pnl
+            else:
+                reward += 0.016 * self.unrealized_pnl
 
         reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
@@ -445,19 +453,25 @@ class TradingEnv:
 # ═══════════════════════════════════════════════════════════════════════════
 class PrioritizedReplayBuffer:
     """TD-error 기반 우선순위 샘플링. 레짐 필터 없이 모든 경험 저장."""
-    def __init__(self, capacity=300000, alpha=0.6, beta=0.4):
-        self.buffer       = deque(maxlen=capacity)
-        self.priorities   = deque(maxlen=capacity)
-        self.alpha        = alpha
-        self.beta         = beta
-        self.max_priority = 1.0
+    def __init__(self, capacity=150000, alpha=0.6, beta=0.4, beta_anneal_steps=2_000_000):
+        self.buffer             = deque(maxlen=capacity)
+        self.priorities         = deque(maxlen=capacity)
+        self.alpha              = alpha
+        self.beta               = beta
+        self._beta_start        = beta
+        self._beta_anneal_steps = beta_anneal_steps
+        self.max_priority       = 1.0
+        self._push_count        = 0
 
     def push(self, state, action, reward, next_state, done, current_regimes_dict=None):
         # current_regimes_dict는 IQNAgent.update 인터페이스 호환성 유지를 위해 받지만 무시
+        self._push_count += 1
         self.buffer.append((state, action, reward, next_state, done))
         self.priorities.append(self.max_priority)
 
     def sample(self, batch_size):
+        # beta 어닐링: 0.4 → 1.0 (중요도 샘플링 보정 강화)
+        self.beta = min(1.0, self._beta_start + (1.0 - self._beta_start) * (self._push_count / self._beta_anneal_steps))
         pri   = np.array(list(self.priorities), dtype=np.float32) ** self.alpha
         probs = pri / (pri.sum() + 1e-8)
         indices = np.random.choice(len(self.buffer), batch_size, p=probs, replace=False)
@@ -671,14 +685,14 @@ class DualAgentTrader:
         kelly_long  = max(0., adv_long  / (q_long.std()  + 0.05))
         kelly_short = max(0., adv_short / (q_short.std() + 0.05))
 
-        CLOSE_KELLY_THRESHOLD = 0.3
+        CLOSE_KELLY_THRESHOLD = 0.5
 
         # ── 포지션 있음: 동일 에이전트의 Q값으로 청산 판단 ─────────────────────────
         if cur_pos is not None and self._active_side is not None:
             active_q = q_long if self._active_side == 'long' else q_short
-            
-            # 신호 1: 담당 에이전트가 1(청산)을 더 높게 평가함
-            exit_signal = (active_q[1] > active_q[0])
+
+            # 신호 1: 담당 에이전트가 1(청산)을 더 높게 평가함 (최소 보유 필터)
+            exit_signal = (active_q[1] > active_q[0]) and (pos.get('hold_norm', 0.0) >= MIN_HOLD_NORM_VAL)
             
             # 신호 2: 반대 방향 에이전트의 강력한 진입 신호 (스위칭 대비)
             opp_signal = (adv_short > 0 and kelly_short > CLOSE_KELLY_THRESHOLD) if self._active_side == 'long' else \
@@ -717,6 +731,7 @@ def train_ls():
     df_val    = df.iloc[split_idx:].reset_index(drop=True)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    df_train_reg = df_train[REGIME_COLS].values.astype(np.float32)  # regime 배열 (chop=0, whipsaw=1, ...)
 
     MAX_EP    = 4096
     _safe_end = len(df_train) - MAX_EP - 1
@@ -736,8 +751,8 @@ def train_ls():
     agent_short = IQNAgent(model_short, device=device)
 
     # ── PER 버퍼 할당 ─────────────────────────────────────────────────────
-    agent_long.memory  = PrioritizedReplayBuffer(300000)
-    agent_short.memory = PrioritizedReplayBuffer(300000)
+    agent_long.memory  = PrioritizedReplayBuffer(150000)
+    agent_short.memory = PrioritizedReplayBuffer(150000)
 
     # 페어: (env, agent, name)
     pairs = [
@@ -751,8 +766,8 @@ def train_ls():
     MIN_BUFFER      = 2048
     global_step     = 0
     EPS_START       = 1.0
-    EPS_END         = 0.10
-    EPS_DECAY_STEPS = 1500000
+    EPS_END         = 0.01
+    EPS_DECAY_STEPS = 200000
 
     os.makedirs('data/ensemble', exist_ok=True)
     best_val_pnl   = -float('inf')
@@ -813,15 +828,18 @@ def train_ls():
 
                 for i, (env, agent, _) in enumerate(pairs):
                     s = pair_states[i]
-                    
+
+                    step_reg = df_train_reg[env.current_step]  # 스텝 전 레짐 (chop=0, whipsaw=1)
                     was_in_pos = env.pos is not None
                     a = agent.act(s, eps)
                     ns, r, d, _ = env.step(a)
 
-                    if not was_in_pos and env.pos is None and a == 0:
-                        # 포지션 없었고 진입도 안 했을 때만 idle penalty
+                    actually_idle = not was_in_pos and env.pos is None
+                    if actually_idle:
+                        # 실제로 포지션 변화가 없는 모든 경우 idle (action 값과 무관)
                         idle_counts[i] += 1
-                        idle_penalty = -0.003 * min(idle_counts[i] / 50.0, 1.0)
+                        is_noisy = step_reg[0] == 1.0 or step_reg[1] == 1.0  # chop or whipsaw
+                        idle_penalty = 0.0 if is_noisy else -0.003 * min(idle_counts[i] / 50.0, 1.0)
                         agent.memory.push(s, a, idle_penalty, ns, d)
                     else:
                         idle_counts[i] = 0

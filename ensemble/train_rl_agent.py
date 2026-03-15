@@ -46,14 +46,13 @@ class SuppressOutput:
 # ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의]
 # ═══════════════════════════════════════════════════════════════════════════
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_itransformer', 'pred_nhits', 'pred_tide']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_itransformer', 'conf_nhits', 'conf_tide']
+MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_nhits', 'pred_tide']
+MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_nhits', 'conf_tide']
 
 ELITE_COLS = [
-    'sig_whale', 'sig_liq_squeeze', 'sig_net_taker', 'sig_orderblock',
-    'sig_hurst_ofi', 'sig_funding_cascade', 'sig_multifractal', 'sig_cluster_fib',
-    'sig_oi_divergence', 'sig_top_trader_squeeze', 'sig_btc_corr_breakout',
-    'sig_ai_squeeze', 'sig_vp_gravity'  
+    'sig_whale', 'sig_orderblock',
+    'sig_oi_divergence',
+    'sig_ai_squeeze' 
 ]
 
 ALPHA_7_COLS = [
@@ -71,6 +70,8 @@ STATE_DIM = FEATURE_DIM + 5
 
 # 청산 에이전트 state: 시장 피처 + 포지션 정보 (진입 에이전트와 동일 구조 사용)
 EXIT_STATE_DIM = STATE_DIM  # 동일한 state 사용 (pos_features에 방향/수익률 포함되어 있음)
+MIN_HOLD_TRAIN = 3  # 진입 후 3스텝 이내 자발적 청산 불가 (micro-churn 방지)
+MIN_HOLD_NORM_VAL = 3 / 144  # val 라우터 동일 절대값 기준
 
 def row_to_market_row(row: pd.Series) -> dict:
     return {k: v for k, v in row.items()}
@@ -361,9 +362,11 @@ class TradingEnv:
             if action == 1 and self.pos is None:
                 if 'long' in self.agent_role: is_entering_long = True
                 elif 'short' in self.agent_role: is_entering_short = True
+            elif action == 1 and self.pos is not None and self.hold_count >= MIN_HOLD_TRAIN: is_closing = True
         else:  # phase == 'val' — 진입만 라우터가 결정, 청산은 force_close 전담
             if action == 1 and self.pos is None: is_entering_long = True
             elif action == 2 and self.pos is None: is_entering_short = True
+            elif action == 0 and self.pos is not None: is_closing = True
 
         if is_entering_long:
             self.pos = 'LONG'
@@ -416,7 +419,11 @@ class TradingEnv:
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            # 보유 중 보상 없음 — 진입 품질만 보상 (SL/Trailing/MAX_HOLD가 청산 담당)
+            # asymmetric shaping: 손실 2배 페널티 (loss cut 강화)
+            if self.unrealized_pnl >= 0:
+                reward += 0.008 * self.unrealized_pnl
+            else:
+                reward += 0.016 * self.unrealized_pnl
 
         reward = float(np.clip(reward, -0.15, 0.30))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
@@ -483,13 +490,15 @@ class RegimeReplayBuffer:
 
 class PrioritizedRegimeReplayBuffer(RegimeReplayBuffer):
     """TD-error 기반 우선순위 샘플링으로 어려운 샘플에 집중"""
-    def __init__(self, capacity=300000, target_regimes=None, warmup_steps=8000,
-                 alpha=0.6, beta=0.4):
+    def __init__(self, capacity=150000, target_regimes=None, warmup_steps=8000,
+                 alpha=0.6, beta=0.4, beta_anneal_steps=2_000_000):
         super().__init__(capacity, target_regimes, warmup_steps)
-        self.priorities   = deque(maxlen=capacity)
-        self.alpha        = alpha
-        self.beta         = beta
-        self.max_priority = 1.0
+        self.priorities         = deque(maxlen=capacity)
+        self.alpha              = alpha
+        self.beta               = beta
+        self._beta_start        = beta
+        self._beta_anneal_steps = beta_anneal_steps
+        self.max_priority       = 1.0
 
     def push(self, state, action, reward, next_state, done, current_regimes_dict):
         prev_len = len(self.buffer)
@@ -498,6 +507,8 @@ class PrioritizedRegimeReplayBuffer(RegimeReplayBuffer):
             self.priorities.append(self.max_priority)
 
     def sample(self, batch_size):
+        # beta 어닐링: 0.4 → 1.0 (중요도 샘플링 보정 강화)
+        self.beta = min(1.0, self._beta_start + (1.0 - self._beta_start) * (self._push_count / self._beta_anneal_steps))
         pri   = np.array(list(self.priorities), dtype=np.float32) ** self.alpha
         probs = pri / (pri.sum() + 1e-8)
         indices = np.random.choice(len(self.buffer), batch_size, p=probs, replace=False)
@@ -585,36 +596,40 @@ class TransformerIQN(nn.Module):
     def __init__(self, state_dim, action_dim=2, d_model=64, nhead=4, num_layers=1):
         super(TransformerIQN, self).__init__()
         self.action_dim = action_dim
-        
+        self.state_dim = state_dim
+
         self.feature_embed = nn.Linear(1, d_model)
         self.pos_encoder = nn.Parameter(torch.randn(1, state_dim, d_model))
-        
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))  # [CLS] 토큰
+
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, dim_feedforward=d_model*2, 
+            d_model=d_model, nhead=nhead, dim_feedforward=d_model*2,
             activation='gelu', batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
+
         self.phi = nn.Linear(64, d_model)
         self.fc_q = nn.Sequential(nn.SiLU(), nn.Linear(d_model, action_dim))
 
     def forward(self, state, num_quantiles=32):
         batch_size = state.size(0)
-        
+
         x = state.unsqueeze(-1)
-        x = self.feature_embed(x) 
-        x = x + self.pos_encoder 
+        x = self.feature_embed(x)          # (B, state_dim, d_model)
+        x = x + self.pos_encoder           # positional encoding
+        cls = self.cls_token.expand(batch_size, -1, -1)  # (B, 1, d_model)
+        x = torch.cat([cls, x], dim=1)    # (B, 1+state_dim, d_model)
         x = self.transformer(x)
-        x = x.mean(dim=1) 
-        
+        x = x[:, 0, :]                    # CLS 토큰만 추출 (B, d_model)
+
         tau = torch.rand(batch_size, num_quantiles, 1).to(state.device)
         pi_mtx = torch.arange(1, 65).float().to(state.device) * torch.pi
         cos_tau = torch.cos(tau * pi_mtx)
         phi_x = self.phi(cos_tau)
-        
+
         x_tile = x.unsqueeze(1).expand(-1, num_quantiles, -1)
-        q_quantiles = self.fc_q(x_tile * phi_x) 
-        
+        q_quantiles = self.fc_q(x_tile * phi_x)  # (B, NQ, action_dim)
+
         return q_quantiles, tau
 
 class IQNAgent:
@@ -755,14 +770,14 @@ class MoEIQNTrader:
                 advs[name] = q[1] - q[0]
                 kellys[name] = max(0., advs[name] / (q.std() + 0.05))
 
-        CLOSE_KELLY_THRESHOLD = 0.3
+        CLOSE_KELLY_THRESHOLD = 0.5
 
         # ── 포지션 있음: 진입했던 에이전트의 판단으로 청산 ──────────────────
         if cur_pos is not None and self._active_pair is not None:
             active_model_q = q_vals[self._active_pair]
-            
-            # 신호 1: 담당 에이전트가 Action 1(청산)을 강하게 평가함
-            exit_signal = (active_model_q[1] > active_model_q[0])
+
+            # 신호 1: 담당 에이전트가 Action 1(청산)을 강하게 평가함 (최소 보유 필터)
+            exit_signal = (active_model_q[1] > active_model_q[0]) and (pos.get('hold_norm', 0.0) >= MIN_HOLD_NORM_VAL)
 
             # 신호 2: 반대 방향 에이전트(현재 레짐 기준)의 강한 진입 신호
             opp_name = f"{current_regime}_short" if cur_pos == 'LONG' else f"{current_regime}_long"
@@ -827,12 +842,12 @@ def train():
     envs, models, agents = {}, {}, {}
     for name in agent_names:
         envs[name] = TradingEnv(df_train, phase='train', agent_role=name)
-        models[name] = RobustIQN(STATE_DIM, 2).to(device)
+        models[name] = TransformerIQN(STATE_DIM, 2, d_model=64, nhead=4, num_layers=1).to(device)
         agents[name] = IQNAgent(models[name], device=device)
         
         # 이름 앞부분('bull', 'bear' 등)을 추출하여 타겟 레짐으로 설정
         target_regime = f"regime_{name.split('_')[0]}"
-        agents[name].memory = PrioritizedRegimeReplayBuffer(300000, target_regimes=[target_regime])
+        agents[name].memory = PrioritizedRegimeReplayBuffer(150000, target_regimes=[target_regime])
 
     NEP             = 1000
     BATCH           = 512
@@ -840,8 +855,8 @@ def train():
     MIN_BUFFER      = 2048
     global_step     = 0
     EPS_START       = 1.0
-    EPS_END         = 0.10
-    EPS_DECAY_STEPS = 1500000
+    EPS_END         = 0.01
+    EPS_DECAY_STEPS = 200000
 
     os.makedirs('data/ensemble', exist_ok=True)
     best_val_pnl   = -float('inf')
@@ -862,14 +877,22 @@ def train():
 
     if os.path.exists(CHECKPOINT_PATH):
         ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
+        arch_ok = True
         for name in agent_names:
-            models[name].load_state_dict(ckpt[f'model_{name}'])
-            agents[name].target_model.load_state_dict(models[name].state_dict())
-            agents[name].optimizer.load_state_dict(ckpt[f'opt_{name}'])
+            try:
+                models[name].load_state_dict(ckpt[f'model_{name}'])
+                agents[name].target_model.load_state_dict(models[name].state_dict())
+                agents[name].optimizer.load_state_dict(ckpt[f'opt_{name}'])
+            except RuntimeError as e:
+                logger.warning(f"⚠️ [{name}] 아키텍처 불일치로 가중치 스킵 (처음부터 학습): {e}")
+                arch_ok = False
         global_step, best_val_pnl = ckpt['global_step'], ckpt['best_val_pnl']
         best_val_score, val_pnl_history = ckpt['best_val_score'], ckpt.get('val_pnl_history', [])
-        start_ep = ckpt['epoch'] + 1
-        logger.info(f"♻️ [복원] ep={ckpt['epoch']} → {start_ep} | best_pnl={best_val_pnl:.2f}%")
+        start_ep = ckpt['epoch'] + 1 if arch_ok else 1
+        if arch_ok:
+            logger.info(f"♻️ [복원] ep={ckpt['epoch']} → {start_ep} | best_pnl={best_val_pnl:.2f}%")
+        else:
+            logger.info(f"🆕 [아키텍처 변경] 가중치 초기화 후 ep=1 부터 재학습")
 
     try:
         for ep in range(start_ep, NEP + 1):
@@ -902,10 +925,13 @@ def train():
                     a = agent.act(s, eps)
                     ns, r, d, _ = env.step(a)
 
-                    if not was_in_pos and env.pos is None and a == 0:
-                        # 포지션 없었고 진입도 안 했을 때만 idle penalty
+                    actually_idle = not was_in_pos and env.pos is None
+                    if actually_idle:
+                        # 실제로 포지션 변화가 없는 모든 경우 idle (action 값과 무관)
                         idle_counts[name] += 1
-                        idle_penalty = -0.003 * min(idle_counts[name] / 50.0, 1.0)
+                        is_noisy = (current_regimes.get('regime_chop', 0.) == 1.0
+                                    or current_regimes.get('regime_whipsaw', 0.) == 1.0)
+                        idle_penalty = 0.0 if is_noisy else -0.003 * min(idle_counts[name] / 50.0, 1.0)
                         agent.memory.push(s, a, idle_penalty, ns, d, current_regimes)
                     else:
                         idle_counts[name] = 0
