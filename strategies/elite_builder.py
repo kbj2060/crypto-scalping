@@ -29,13 +29,18 @@ import logging
 
 # [FIX-1] 원본 Elite 전략 클래스들 Import — 누락된 elite_structure_flow 포함
 from .elite_strategies import (
-    WhaleSentimentDivergence, LiquidationSqueezeHunter, 
+    WhaleSentimentDivergence, LiquidationSqueezeHunter,
     NetTakerFlowStrategy, OrderblockFVGStrategy,
-    HurstOFIRegimeSwitching, FundingDivergenceCascadeHunter, 
-    MultiFractalNoiseCancellation, ClusterFibonacciConfluence, 
+    HurstOFIRegimeSwitching, FundingDivergenceCascadeHunter,
+    MultiFractalNoiseCancellation, ClusterFibonacciConfluence,
     # ── [NEW] 직교 알파 신규 3종 ──
     AISqueezeBreakoutHunter, VolumeProfileGravityOscillator,
-    OITrendDivergence, TopTraderPositionalSqueeze, BtcCorrelationBreakout
+    OITrendDivergence, TopTraderPositionalSqueeze, BtcCorrelationBreakout,
+    # ── Batch Engines ──
+    SyntheticAlphaEngine, RegimeEngine, VolatilityModelEngine,
+    # ── 변동성 모델 전략 ──
+    GARCHVolatilityRegime, OUMeanReversionHunter,
+    JumpReboundHunter, EVTTailRiskSentinel,
 )
 logger = logging.getLogger(__name__)
 
@@ -127,7 +132,15 @@ class MarketRow:
     cvp_volume_imbalance: float = 0.0
     fvg_dist: float = 0.0
     breakout_strength: float = 0.0
-    # (참고: cvp_poc_dist, amihud_illiquidity_z 등 삭제된 3종 전략에만 쓰이던 변수들은 메모리 최적화를 위해 제거했습니다)
+
+    # ── 변동성 모델 피처 (GARCH / OU / Jump / EVT) ──
+    garch_vol_z: float = 0.0
+    ou_funding_z: float = 0.0
+    ou_halflife: float = 0.5
+    jump_flag: float = 0.0
+    jump_z: float = 0.0
+    evt_tail_flag: float = 0.0
+    evt_excess_z: float = 0.0
 
     def get(self, key: str, default=None):
         return getattr(self, key, default)
@@ -425,6 +438,12 @@ class EliteSignals:
         self.ai_squeeze = AISqueezeBreakoutHunter()
         self.vp_gravity = VolumeProfileGravityOscillator()
 
+        # 4. [NEW] 변동성 모델 4종
+        self.garch_regime  = GARCHVolatilityRegime()
+        self.ou_mean_rev   = OUMeanReversionHunter()
+        self.jump_rebound  = JumpReboundHunter()
+        self.evt_sentinel  = EVTTailRiskSentinel()
+
 
     def compute_all(self, current: MarketRow,
                     prev: Optional[MarketRow] = None,
@@ -449,6 +468,11 @@ class EliteSignals:
             'sig_btc_corr_breakout': float(self.btc_corr_breakout.generate_signal(row_series, df_mock, smf_std=smf_std)),
             'sig_ai_squeeze': float(self.ai_squeeze.generate_signal(row_series, df_mock, smf_std=smf_std)),
             'sig_vp_gravity': float(self.vp_gravity.generate_signal(row_series, df_mock, smf_std=smf_std)),
+            # [NEW] 변동성 모델 신호
+            'sig_garch_regime': float(self.garch_regime.generate_signal(row_series, df_mock, smf_std=smf_std)),
+            'sig_ou_mean_rev':  float(self.ou_mean_rev.generate_signal(row_series, df_mock, smf_std=smf_std)),
+            'sig_jump_rebound': float(self.jump_rebound.generate_signal(row_series, df_mock, smf_std=smf_std)),
+            'sig_evt_tail':     float(self.evt_sentinel.generate_signal(row_series, df_mock, smf_std=smf_std)),
         }
         
     @staticmethod
@@ -712,6 +736,14 @@ def row_to_market_row(row: pd.Series) -> MarketRow:
         garman_klass_vol=float(row.get('garman_klass_vol')),
         funding_z_score=float(row.get('funding_z_score')),
         volatility_z=float(row.get('volatility_z')),
+        # ── 변동성 모델 피처 ──
+        garch_vol_z=float(row.get('garch_vol_z', 0.0)),
+        ou_funding_z=float(row.get('ou_funding_z', 0.0)),
+        ou_halflife=float(row.get('ou_halflife', 0.5)),
+        jump_flag=float(row.get('jump_flag', 0.0)),
+        jump_z=float(row.get('jump_z', 0.0)),
+        evt_tail_flag=float(row.get('evt_tail_flag', 0.0)),
+        evt_excess_z=float(row.get('evt_excess_z', 0.0)),
 
         # ❌ 삭제됨: CVP_FVG (cvp_poc_dist, fvg_dist, mean_reversion_z)
         # ❌ 삭제됨: AmihudGK (amihud_illiquidity_z, garman_klass_vol, realized_vol_ratio, bb_width_z)
@@ -726,3 +758,20 @@ def df_to_candles(df: pd.DataFrame, n: int = 100) -> List[CandleData]:
         CandleData(r['open'], r['high'], r['low'], r['close'], r['volume'])
         for _, r in df.tail(n).iterrows()
     ]
+
+
+# ── Batch Engine 헬퍼 ───────────────────────────────────────────────────────
+
+def compute_synthetic_alphas(df: pd.DataFrame) -> pd.DataFrame:
+    """합성 알파 14종 + MDJD 피처를 df에 벡터화로 계산하여 반환."""
+    return SyntheticAlphaEngine().compute(df)
+
+
+def compute_regime(df: pd.DataFrame) -> pd.DataFrame:
+    """레짐 라벨(bull/bear/chop/whipsaw/normal)을 df에 벡터화로 계산하여 반환."""
+    return RegimeEngine().compute(df)
+
+
+def compute_volatility_models(df: pd.DataFrame) -> pd.DataFrame:
+    """GARCH(1,1) + OU 과정 + 점프 감지 + EVT 변동성 모델 피처를 df에 벡터화로 계산하여 반환."""
+    return VolatilityModelEngine().compute(df)

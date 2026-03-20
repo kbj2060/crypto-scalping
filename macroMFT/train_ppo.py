@@ -27,7 +27,7 @@ from strategies import (
     OrderblockFVGStrategy, NetTakerFlowStrategy,
     BTCEthCorrelation, VolatilitySqueeze, VWAPDeviation, HMAMomentum,
 )
-from common.trading_env import INFO_DIM_ELITE8, TradingEnvironment
+from macroMFT.trading_env import INFO_DIM_ELITE8, TradingEnvironment
 from macroMFT.ppo_agent import PPOAgent
 from macroMFT.icm import ICM
 from collections import deque

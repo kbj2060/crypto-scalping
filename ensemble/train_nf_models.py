@@ -2,7 +2,7 @@
 train_nf_models.py
 NeuralForecast 4대 파운데이션 모델 통합 사전 학습 스크립트
 - 단변량(Univariate): PatchTST, iTransformer (가격 패턴 집중)
-- 다변량(Multivariate): NHITS, TiDE (7대 위대한 알파 융합)
+- 다변량(Multivariate): NHITS, TiDE (7대 위대한 알파 + 신규 합성 알파 4종 융합)
 """
 import os
 import pandas as pd
@@ -11,10 +11,13 @@ from neuralforecast import NeuralForecast
 from neuralforecast.models import PatchTST, iTransformer, NHITS, TiDE
 from neuralforecast.losses.pytorch import HuberLoss
 
-# 10만 표본이 증명한 7대 절대 알파 (외부 변수)
+# 10만 표본이 증명한 7대 절대 알파 + 신규 합성 알파 4종 (외부 변수)
 EXOG_COLS = [
-    'session_us', 'hour_cos', 'cvp_poc_dist', 
-    'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate'
+    # 기존 ALPHA_7_COLS
+    'session_us', 'hour_cos', 'cvp_poc_dist',
+    'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate',
+    # 신규 SYNTHETIC_ALPHA_COLS
+    'ofti', 'kel', 'mta_funding', 'svps',
 ]
 
 def train_neuralforecast():

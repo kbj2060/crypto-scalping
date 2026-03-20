@@ -439,9 +439,20 @@ def merge_and_save(new_df: pd.DataFrame):
         existing = pd.read_csv(FEATURES_CSV, parse_dates=['timestamp'])
         existing['timestamp'] = existing['timestamp'].astype('datetime64[us]')
 
-        # 공통 컬럼만
-        common_cols = [c for c in new_df.columns if c in existing.columns]
-        result = pd.concat([new_df[common_cols], existing[common_cols]], ignore_index=True)
+        # 신규 컬럼이 추가된 경우 기존 CSV에 없는 컬럼은 0으로 채움
+        new_only_cols = [c for c in new_df.columns if c not in existing.columns]
+        if new_only_cols:
+            print(f"  ℹ️  신규 컬럼 {len(new_only_cols)}개 감지: {new_only_cols}")
+            for c in new_only_cols:
+                existing[c] = 0.0
+
+        # 기존 CSV에만 있는 컬럼도 new_df에 추가 (역방향 호환)
+        old_only_cols = [c for c in existing.columns if c not in new_df.columns]
+        for c in old_only_cols:
+            new_df[c] = 0.0
+
+        all_cols = list(new_df.columns)
+        result = pd.concat([new_df[all_cols], existing[all_cols]], ignore_index=True)
     else:
         result = new_df
 

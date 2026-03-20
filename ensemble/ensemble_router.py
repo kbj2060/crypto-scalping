@@ -24,9 +24,17 @@ PredictionOutput = namedtuple('PredictionOutput', ['median', 'confidence'])
 
 # 💡 [NEW] PyTorch Lightning의 눈치 없는 반복 로그 및 불필요한 경고 완벽 차단!
 import pytorch_lightning as pl
-logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
-logging.getLogger("pytorch_lightning.utilities.rank_zero").setLevel(logging.ERROR)
+for _log_name in [
+    "pytorch_lightning",
+    "pytorch_lightning.utilities.rank_zero",
+    "lightning",
+    "lightning.pytorch",
+    "lightning.fabric",
+    "lightning_fabric",
+]:
+    logging.getLogger(_log_name).setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="pytorch_lightning")
+warnings.filterwarnings("ignore", category=UserWarning, module="lightning")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import os
@@ -663,10 +671,11 @@ class UnifiedNFForecaster:
 
     def __init__(self, model_type):
         self.model_type = model_type
-        # 단변량/다변량 상관없이 7대 알파를 모두 선언
+        # NF 학습 시 사용된 11개 외부 변수 (ALPHA_7 + synthetic 4종)
         self.exog_cols = [
-            'session_us', 'hour_cos', 'cvp_poc_dist', 
-            'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate'
+            'session_us', 'hour_cos', 'cvp_poc_dist',
+            'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate',
+            'ofti', 'kel', 'mta_funding', 'svps',
         ]
         
         # 최초 1회만 모델을 로드하여 _nf_model에 공유
@@ -675,7 +684,12 @@ class UnifiedNFForecaster:
                 from neuralforecast import NeuralForecast
                 model_dir = os.path.join(os.getcwd(), 'data', 'nf')
                 if os.path.exists(model_dir):
-                    UnifiedNFForecaster._nf_model = NeuralForecast.load(path=model_dir)
+                    logging.disable(logging.INFO)
+                    try:
+                        with SuppressOutput():
+                            UnifiedNFForecaster._nf_model = NeuralForecast.load(path=model_dir)
+                    finally:
+                        logging.disable(logging.NOTSET)
                     UnifiedNFForecaster._available = True
                     logger.info("✅ NeuralForecast 4종 통합 팩 로드 완료")
                 else:
@@ -691,10 +705,44 @@ class UnifiedNFForecaster:
             return PredictionOutput(median=np.zeros((1, horizon)), confidence=np.ones((1, horizon))*0.5)
         
         try:
-            # 💡 [핵심 버그 수정] 어떤 모델이 호출하든 무조건 7대 알파를 모두 넣어서 파이프라인 충돌을 막습니다!
-            # (PatchTST 같은 단변량 모델은 알파 피처가 들어와도 알아서 무시하고 가격만 봅니다.)
-            # 💡 [핵심 버그 수정] 어떤 모델이 호출하든 무조건 7대 알파를 모두 넣어서 파이프라인 충돌을 막습니다!
-            df_nf = df[['close'] + self.exog_cols].tail(256).copy() 
+            # ── Synthetic alpha 4종 인라인 계산 ──
+            df = df.copy()
+
+            # OFTI
+            smf = df.get('smart_money_flow', pd.Series(0.0, index=df.index))
+            wc  = df.get('whale_conviction', pd.Series(0.0, index=df.index))
+            aiz = df.get('amihud_illiquidity_z', pd.Series(0.0, index=df.index))
+            df['ofti'] = np.tanh(smf * wc * (aiz.abs() + 1.0) * 3.0)
+
+            # KEL  (window=288)
+            oic = df.get('oi_change_rate', pd.Series(0.0, index=df.index))
+            gkv = df.get('garman_klass_vol', pd.Series(1e-6, index=df.index))
+            fp  = df.get('funding_pressure', pd.Series(0.0, index=df.index))
+            kel_raw = oic / (gkv + 1e-6) * np.sign(fp)
+            rm = kel_raw.rolling(288, min_periods=1).mean()
+            rs = kel_raw.rolling(288, min_periods=1).std().fillna(1e-8) + 1e-8
+            df['kel'] = np.tanh((kel_raw - rm) / rs * 0.5)
+
+            # MTA_FUNDING
+            fr12  = df.get('funding_roc_12',  pd.Series(0.0, index=df.index))
+            fr48  = df.get('funding_roc_48',  pd.Series(0.0, index=df.index))
+            fr288 = df.get('funding_roc_288', pd.Series(0.0, index=df.index))
+            fabs  = df.get('funding_abs', pd.Series(1e-8, index=df.index)).clip(lower=1e-8)
+            sqp   = df.get('squeeze_power', pd.Series(0.0, index=df.index))
+            sq_mean = sqp.rolling(288, min_periods=1).mean()
+            sq_std  = sqp.rolling(288, min_periods=1).std().fillna(1e-8) + 1e-8
+            sq_z    = (sqp - sq_mean) / sq_std
+            w_roc   = 0.5 * fr12 + 0.3 * fr48 + 0.2 * fr288
+            df['mta_funding'] = ((w_roc / fabs) * np.tanh(sq_z)).clip(-3.0, 3.0) / 3.0
+
+            # SVPS
+            cpd = df.get('cvp_poc_dist', pd.Series(0.0, index=df.index))
+            cvi = df.get('cvp_volume_imbalance', pd.Series(0.0, index=df.index))
+            cvw = df.get('cvp_vah_val_width', pd.Series(0.0, index=df.index))
+            df['svps'] = np.tanh(2.0 * cpd * cvi * np.exp(-cvw.clip(0.0, 5.0)))
+
+            # NF 입력 구성 (close + 11개 exog)
+            df_nf = df[['close'] + self.exog_cols].tail(256).copy()
             
             # 💡 [Pandas 버전 호환성 패치] fillna(method) 대신 ffill() 전용 메서드 사용
             df_nf.ffill(inplace=True)

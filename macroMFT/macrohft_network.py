@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from core import config
-from common.fusion_transformer import QuantTransformerBackbone  # MambaBackbone 제거
+from macroMFT.fusion_transformer import QuantTransformerBackbone  # MambaBackbone 제거
 
 # ----------------------------------------------------------------------
 # Quantile Critic Head (first_q를 softplus로 양수 보장)

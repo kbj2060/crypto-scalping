@@ -1,13 +1,71 @@
 """
-Trading Router — 4-Agent MoE Transformer IQN + Kelly Router (Ultimate Fixed Version)
+Trading Router — 6-Agent Single-Directional MoE (Restructured)
 ================================================================================
-1. 7대 파운데이션 AI 모델 인퍼런스 & 5대 마켓 레짐 계산
-2. 4-Agent 체제 복구 (Bull, Bear, Sup, Res) + TransformerIQN
-3. Action Space 완벽 통일: 에이전트는 0(Hold/Close), 1(Enter)만 출력
-4. 글로벌 스텝 기반 EPS Decay (600,000 스텝) + 순수 실현수익(Realized PnL) 보상
-5. Kelly Betting 라우터: 초기 학습을 고려한 허들 완화 (0.2)
+1. 6개 에이전트: bull(롱), bear(숏), chop_long(롱), chop_short(숏), normal_long(롱), normal_short(숏)
+2. 모든 에이전트는 2-Action (0=대기/청산, 1=진입) 으로 통일하여 학습 병목 원천 차단
+3. 7-Way GatingNet: [flat, bull, bear, chop_L, chop_S, norm_L, norm_S] 메타 라우팅
+4. [신규 적용] 상태 보상(State) 제거 및 델타 보상(Step Delta) 적용 -> 리워드 파밍 완벽 박멸
+
+[융합 모듈 v2]
+5. OnlineHMMDetector: 온라인 EM 기반 4-state HMM → GatingNet 입력 보강 (레짐 전환 확률 실시간 제공)
+   - 4개 은닉 상태: Bull-Trend / Bear-Trend / High-Vol-Chop / Low-Vol-Range
+   - 관측 피처: log_return + garch_vol_z + oi_change_rate (3차원, 정규화)
+   - 온라인 EM: 에피소드마다 최근 window(기본 512봉)로 전이행렬·방출분포 갱신
+   - 출력: hmm_state_probs (4차원) → STATE_DIM에 통합 → GatingNet이 레짐 전환을 즉시 인식
+
+6. KellyCriterionSizer: CVaR 분위 기반 fractional Kelly 포지션 사이징
+   - IQN의 분위 분포에서 win_rate·payoff_ratio를 직접 추정 → f* = (p*b - q) / b
+   - Half-Kelly 적용(과적합 방지) + uncertainty penalty (분위 분산 클수록 축소)
+   - GatingNet 가중치(확신도)와 곱하여 최종 leverage_rate 결정
+   - MAX_LEVERAGE=1.0 하드캡 유지, 최소 0.1 보장
+
+[융합 모듈 v3]
+7. MultiTimeframeFeatures: 상위 타임프레임 추세 피처 (CSV 추가 컬럼 불필요)
+   - 1h봉 close 컬럼에서 런타임 롤링 계산: 4h(×4봉) / 일봉(×24봉)
+   - 피처: [1h_ret, 1h_vol, 1h_trend, 4h_ret, 4h_vol, 4h_trend, htf_alignment]
+     * ret   = 해당 윈도우 수익률 (tanh 정규화)
+     * vol   = 해당 윈도우 변동성 (표준편차, 정규화)
+     * trend = 선형회귀 기울기 (추세 강도, 정규화)
+     * alignment = 4h·일봉 방향 일치 여부 (−1/0/+1)
+   - 출력: MTF_DIM=7 → STATE_DIM에 추가
+
+8. MarketAttentionEncoder: 피처 그룹 간 Cross-Attention 인코더
+   - RobustIQN.feat_extractor 앞단에 삽입 (기존 Linear 레이어는 그대로 유지)
+   - 피처 그룹 6개를 토큰(token)으로 취급:
+     [pred(7), conf(7), elite(9), alpha(9), regime(5), synth(14)] → 패딩 후 d_model=16 투영
+   - 2-head Self-Attention × 2 layer → 그룹 간 상호작용 학습
+   - 출력: 6개 토큰 flatten → Linear → 기존 feat_extractor 입력과 동일 차원으로 압축
+   - 경량 설계: 파라미터 ~8K 추가, 추론 오버헤드 최소화
+
+[융합 모듈 v4]
+9. MAMLAdapter (Reptile-style First-Order MAML): 레짐 전환 시 빠른 적응
+   - 풀 MAML 대신 Reptile(first-order) 적용: 2차 미분 불필요, NoisyNet과 호환
+   - 트리거: HMM dominant state 전환 감지 (이전과 다른 최빈 상태로 변경 시)
+   - Inner loop: 전환된 레짐의 최근 K 스텝 배치로 N_INNER번 gradient step → θ'
+   - Meta update: θ ← θ + β_meta * (θ' - θ)  (Reptile 공식)
+   - 레짐별 버퍼: 각 HMM 상태(0~3)의 최근 INNER_BUFFER_SIZE 경험을 별도 deque에 저장
+   - 적응 주기: HMM 상태 전환마다 1회 실행 (과도한 적응 방지 쿨다운 포함)
+
+[융합 모듈 v5]
+10. BootstrapEnsembleHeads + EpistemicUncertaintyGate: 앙상블 epistemic 불확실성 추정
+    아키텍처:
+    - RobustIQN 내부의 v_head·a_head 쌍을 N_HEADS=5개로 복제
+    - 피처 추출기(attn_encoder + feat_extractor + context_gate)는 완전 공유
+    - 각 헤드: 독립 초기화 + 독립 NoisyLinear → 예측 다양성 확보
+    - 추론: N개 헤드의 분위 예측 평균 → CVaR 계산 (aleatoric 불확실성)
+             N개 헤드 Q값의 표준편차 → epistemic 불확실성 지표
+    학습:
+    - 각 헤드를 서로 다른 부트스트랩 마스크(0.8 샘플링)로 독립 학습
+    - 헤드별 quantile loss 합산 → 역전파 1회
+    의사결정 통합 (EpistemicUncertaintyGate):
+    - epistemic_std < LOW_THRESH  → 정상 Kelly 사이징
+    - LOW_THRESH ≤ std < HIGH_THRESH → Kelly × (1 - penalty) 축소
+    - epistemic_std ≥ HIGH_THRESH → 진입 거부 (flat 강제)
+    부가 효과:
+    - 앙상블 평균 Q가 단일 헤드보다 분산 낮음 → CVaR 품질 향상
+    - 처음 보는 레짐(분포 외)에서 std 급등 → 자동 리스크 회피
 """
-import os, sys, logging, random, argparse, gc
+import os, sys, logging, random, argparse, gc, copy
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -35,277 +93,1004 @@ class SuppressOutput:
     def __enter__(self):
         self._original_stdout = sys.stdout
         self._original_stderr = sys.stderr
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+        self._devnull_out = open(os.devnull, 'w')
+        self._devnull_err = open(os.devnull, 'w')
+        sys.stdout = self._devnull_out
+        sys.stderr = self._devnull_err
+        return self
     def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout.close()
-        sys.stderr.close()
-        sys.stdout = self._original_stdout
-        sys.stderr = self._original_stderr
+        try:
+            sys.stdout = self._original_stdout
+            sys.stderr = self._original_stderr
+        finally:
+            self._devnull_out.close()
+            self._devnull_err.close()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ①] OnlineHMMDetector — 온라인 EM 기반 4-state HMM 레짐 감지기
+# ═══════════════════════════════════════════════════════════════════════════
+class OnlineHMMDetector:
+    """온라인 EM(Baum-Welch)으로 학습하는 4-state HMM 레짐 감지기.
+
+    은닉 상태 4개:
+        0: Bull-Trend     (상승 추세, 낮은 변동성)
+        1: Bear-Trend     (하락 추세, 낮은 변동성)
+        2: High-Vol-Chop  (급등락 혼조, 높은 변동성)
+        3: Low-Vol-Range  (저변동 횡보, 좁은 레인지)
+
+    관측 벡터 (3차원, 표준화 후 입력):
+        [log_return_z, garch_vol_z, oi_change_rate_z]
+
+    출력 피처 (HMM_DIM = 5차원):
+        hmm_probs[0..3]  : 현재 스텝의 각 은닉 상태 사후확률 (합=1)
+        hmm_entropy      : 상태 분포 엔트로피 (불확실성, 0~log4)
+
+    사용 방법:
+        hmm = OnlineHMMDetector()
+        hmm.fit(df_train)                    # 초기 학습 (전체 훈련 데이터)
+        feat = hmm.get_features(row_dict)    # 5-dim ndarray, 매 스텝 호출
+        hmm.update_online(row_dict)          # 온라인 업데이트 (선택, 에피소드 후 호출)
+    """
+
+    N_STATES  = 4
+    OBS_DIM   = 3
+    MIN_STD   = 1e-3
+    WINDOW    = 512       # 온라인 업데이트에 사용할 최근 관측 수
+
+    def __init__(self):
+        # 전이 행렬: 자기 상태 유지 확률 높게 초기화
+        self.A = np.full((self.N_STATES, self.N_STATES), 0.05 / (self.N_STATES - 1))
+        np.fill_diagonal(self.A, 0.85)
+        self.A /= self.A.sum(axis=1, keepdims=True)
+
+        # 초기 상태 분포
+        self.pi = np.ones(self.N_STATES) / self.N_STATES
+
+        # 가우시안 방출: 각 상태별 mu(3차원), sigma(3차원)
+        # Bull: 양수 return, 낮은 vol / Bear: 음수 return, 낮은 vol
+        # HVChop: 0 return, 높은 vol / LVRange: 0 return, 낮은 vol
+        self.mu = np.array([
+            [ 0.8, -0.5, 0.3],   # 0: Bull-Trend
+            [-0.8, -0.5, -0.3],  # 1: Bear-Trend
+            [ 0.0,  1.5,  0.0],  # 2: High-Vol-Chop
+            [ 0.0, -1.0,  0.0],  # 3: Low-Vol-Range
+        ], dtype=np.float64)
+        self.sigma = np.array([
+            [0.5, 0.4, 0.5],
+            [0.5, 0.4, 0.5],
+            [1.0, 0.6, 0.8],
+            [0.3, 0.3, 0.3],
+        ], dtype=np.float64)
+
+        # 온라인 업데이트용 관측 링버퍼
+        self._obs_buffer: deque = deque(maxlen=self.WINDOW)
+
+        # 직전 스텝 알파(forward variable) — Viterbi 대신 forward 알고리즘으로 실시간 추론
+        self._alpha: np.ndarray = self.pi.copy()
+
+        # 관측 정규화 통계 (fit()에서 계산)
+        self._obs_mean = np.zeros(self.OBS_DIM)
+        self._obs_std  = np.ones(self.OBS_DIM)
+
+        self._fitted = False
+
+    # ── 내부 유틸 ──────────────────────────────────────────────────────────
+    def _extract_obs(self, row: dict) -> np.ndarray:
+        """dict 또는 Series에서 3차원 관측 벡터 추출 후 표준화."""
+        raw = np.array([
+            float(row.get('log_return',      0.0)),
+            float(row.get('garch_vol_z',     0.0)),
+            float(row.get('oi_change_rate',  0.0)),
+        ], dtype=np.float64)
+        return (raw - self._obs_mean) / (self._obs_std + 1e-8)
+
+    def _emission_log_prob(self, obs: np.ndarray) -> np.ndarray:
+        """각 은닉 상태에서 obs의 가우시안 로그 확률 (N_STATES,)."""
+        diff  = obs[None, :] - self.mu                          # (S, D)
+        var   = np.maximum(self.sigma ** 2, self.MIN_STD ** 2)  # (S, D)
+        lp    = -0.5 * np.sum((diff ** 2) / var + np.log(2 * np.pi * var), axis=1)
+        return lp
+
+    def _forward_step(self, obs: np.ndarray) -> np.ndarray:
+        """직전 alpha를 한 스텝 전진시켜 사후확률 반환 (S,)."""
+        log_emit  = self._emission_log_prob(obs)
+        predicted = self._alpha @ self.A                        # (S,)
+        log_joint = np.log(predicted + 1e-300) + log_emit
+        log_joint -= log_joint.max()                            # 수치 안정
+        alpha_new  = np.exp(log_joint)
+        alpha_new /= alpha_new.sum() + 1e-300
+        self._alpha = alpha_new
+        return alpha_new
+
+    # ── 공개 API ───────────────────────────────────────────────────────────
+    def fit(self, df: pd.DataFrame, n_iter: int = 30) -> None:
+        """훈련 데이터 전체로 Baum-Welch EM 초기 학습.
+
+        Args:
+            df: 훈련 DataFrame (log_return, garch_vol_z, oi_change_rate 필수)
+            n_iter: EM 반복 횟수
+        """
+        # 관측 정규화 통계 계산
+        needed = ['log_return', 'garch_vol_z', 'oi_change_rate']
+        avail  = [c for c in needed if c in df.columns]
+        raw_mat = np.zeros((len(df), 3), dtype=np.float64)
+        for i, col in enumerate(needed):
+            if col in df.columns:
+                raw_mat[:, i] = df[col].fillna(0).values
+        self._obs_mean = raw_mat.mean(axis=0)
+        self._obs_std  = raw_mat.std(axis=0).clip(min=1e-6)
+
+        obs_seq = (raw_mat - self._obs_mean) / (self._obs_std + 1e-8)
+        T = len(obs_seq)
+
+        for _ in range(n_iter):
+            # ── E-step: Forward-Backward ──
+            log_emit = np.stack([self._emission_log_prob(obs_seq[t]) for t in range(T)])  # (T, S)
+
+            # Forward
+            log_alpha = np.zeros((T, self.N_STATES))
+            log_alpha[0] = np.log(self.pi + 1e-300) + log_emit[0]
+            for t in range(1, T):
+                for j in range(self.N_STATES):
+                    log_alpha[t, j] = np.logaddexp.reduce(
+                        log_alpha[t-1] + np.log(self.A[:, j] + 1e-300)
+                    ) + log_emit[t, j]
+
+            # Backward
+            log_beta = np.zeros((T, self.N_STATES))
+            for t in range(T - 2, -1, -1):
+                for i in range(self.N_STATES):
+                    log_beta[t, i] = np.logaddexp.reduce(
+                        np.log(self.A[i, :] + 1e-300) + log_emit[t+1] + log_beta[t+1]
+                    )
+
+            # gamma: (T, S)
+            log_gamma = log_alpha + log_beta
+            log_gamma -= np.logaddexp.reduce(log_gamma, axis=1, keepdims=True)
+            gamma = np.exp(log_gamma)
+
+            # xi: (T-1, S, S)
+            log_xi = np.zeros((T - 1, self.N_STATES, self.N_STATES))
+            for t in range(T - 1):
+                for i in range(self.N_STATES):
+                    for j in range(self.N_STATES):
+                        log_xi[t, i, j] = (log_alpha[t, i]
+                                           + np.log(self.A[i, j] + 1e-300)
+                                           + log_emit[t+1, j]
+                                           + log_beta[t+1, j])
+                log_xi[t] -= np.logaddexp.reduce(log_xi[t].reshape(-1))
+
+            xi = np.exp(log_xi)  # (T-1, S, S)
+
+            # ── M-step ──
+            self.pi = gamma[0] / (gamma[0].sum() + 1e-300)
+            self.A  = xi.sum(axis=0) / (gamma[:-1].sum(axis=0, keepdims=True).T + 1e-300)
+            self.A /= self.A.sum(axis=1, keepdims=True) + 1e-300
+
+            for s in range(self.N_STATES):
+                w = gamma[:, s] + 1e-300
+                self.mu[s]    = (w[:, None] * obs_seq).sum(axis=0) / w.sum()
+                diff          = obs_seq - self.mu[s]
+                self.sigma[s] = np.sqrt((w[:, None] * diff ** 2).sum(axis=0) / w.sum()).clip(self.MIN_STD)
+
+        # alpha 초기화: 훈련 데이터 마지막 상태로 워밍업
+        self._alpha = gamma[-1]
+        self._obs_buffer.extend(obs_seq[-self.WINDOW:].tolist())
+        self._fitted = True
+        logger.info(f"[HMM] fit 완료 | mu=\n{self.mu.round(3)}")
+
+    def get_features(self, row: dict) -> np.ndarray:
+        """현재 스텝의 HMM 피처 벡터 반환 (HMM_DIM = 5차원).
+
+        Returns:
+            np.ndarray shape (5,): [p0, p1, p2, p3, entropy]
+        """
+        obs   = self._extract_obs(row)
+        probs = self._forward_step(obs)
+        ent   = float(-np.sum(probs * np.log(probs + 1e-300)))  # 0 ~ log(4) ≈ 1.386
+        ent_n = ent / np.log(self.N_STATES + 1e-8)              # 0~1 정규화
+        self._obs_buffer.append(obs.tolist())
+        return np.concatenate([probs, [ent_n]]).astype(np.float32)
+
+    def update_online(self, n_iter: int = 5) -> None:
+        """링버퍼의 최근 관측으로 파라미터 온라인 업데이트 (에피소드 종료 후 호출).
+
+        전체 Baum-Welch 대신 단축 EM (n_iter=5) 으로 빠르게 적응.
+        전이 행렬은 20% 이내로만 변경 (급격한 망각 방지).
+        """
+        if len(self._obs_buffer) < 64:
+            return
+        obs_seq = np.array(self._obs_buffer, dtype=np.float64)
+        T = len(obs_seq)
+
+        A_old = self.A.copy()
+        for _ in range(n_iter):
+            log_emit = np.stack([self._emission_log_prob(obs_seq[t]) for t in range(T)])
+            log_alpha = np.zeros((T, self.N_STATES))
+            log_alpha[0] = np.log(self.pi + 1e-300) + log_emit[0]
+            for t in range(1, T):
+                for j in range(self.N_STATES):
+                    log_alpha[t, j] = np.logaddexp.reduce(
+                        log_alpha[t-1] + np.log(self.A[:, j] + 1e-300)
+                    ) + log_emit[t, j]
+
+            log_beta = np.zeros((T, self.N_STATES))
+            for t in range(T - 2, -1, -1):
+                for i in range(self.N_STATES):
+                    log_beta[t, i] = np.logaddexp.reduce(
+                        np.log(self.A[i, :] + 1e-300) + log_emit[t+1] + log_beta[t+1]
+                    )
+
+            log_gamma = log_alpha + log_beta
+            log_gamma -= np.logaddexp.reduce(log_gamma, axis=1, keepdims=True)
+            gamma = np.exp(log_gamma)
+
+            log_xi = np.zeros((T - 1, self.N_STATES, self.N_STATES))
+            for t in range(T - 1):
+                for i in range(self.N_STATES):
+                    for j in range(self.N_STATES):
+                        log_xi[t, i, j] = (log_alpha[t, i]
+                                           + np.log(self.A[i, j] + 1e-300)
+                                           + log_emit[t+1, j]
+                                           + log_beta[t+1, j])
+                log_xi[t] -= np.logaddexp.reduce(log_xi[t].reshape(-1))
+            xi = np.exp(log_xi)
+
+            A_new = xi.sum(axis=0) / (gamma[:-1].sum(axis=0, keepdims=True).T + 1e-300)
+            A_new /= A_new.sum(axis=1, keepdims=True) + 1e-300
+            # 급격한 망각 방지: 이전 값의 80% + 새 값의 20%
+            self.A = 0.8 * A_old + 0.2 * A_new
+
+            for s in range(self.N_STATES):
+                w = gamma[:, s] + 1e-300
+                new_mu    = (w[:, None] * obs_seq).sum(axis=0) / w.sum()
+                diff      = obs_seq - new_mu
+                new_sigma = np.sqrt((w[:, None] * diff ** 2).sum(axis=0) / w.sum()).clip(self.MIN_STD)
+                # mu, sigma도 점진적 업데이트
+                self.mu[s]    = 0.85 * self.mu[s]    + 0.15 * new_mu
+                self.sigma[s] = 0.85 * self.sigma[s] + 0.15 * new_sigma
+
+        self._alpha = gamma[-1]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ②] KellyCriterionSizer — CVaR IQN 분위 기반 동적 포지션 사이징
+# ═══════════════════════════════════════════════════════════════════════════
+class KellyCriterionSizer:
+    """IQN의 분위 분포에서 Kelly 비율을 직접 추정하여 leverage_rate를 동적으로 결정.
+
+    수식:
+        f* = (p * b - q) / b     (전통 Kelly)
+        f_half = f* * 0.5        (Half-Kelly, 과적합/드로다운 방지)
+        f_final = f_half * confidence * (1 - uncertainty_penalty)
+
+    추정 방법 (IQN 분위 활용):
+        - win_rate p  : Q(action=1) > Q(action=0) 인 분위 비율
+        - payoff_ratio b : 양수 분위 평균 / |음수 분위 평균|  (손익비)
+        - uncertainty : 분위 분산 / 전체 분산 (크면 배팅 축소)
+
+    파라미터:
+        half_kelly      (float): Half-Kelly 계수 (기본 0.5)
+        min_lev         (float): 최소 leverage_rate (기본 0.1)
+        max_lev         (float): 최대 leverage_rate (기본 1.0, MAX_LEVERAGE와 동일)
+        uncertainty_cap (float): uncertainty_penalty 최대값 (기본 0.5)
+    """
+
+    def __init__(self, half_kelly: float = 0.5,
+                 min_lev: float = 0.1, max_lev: float = 1.0,
+                 uncertainty_cap: float = 0.5):
+        self.half_kelly      = half_kelly
+        self.min_lev         = min_lev
+        self.max_lev         = max_lev
+        self.uncertainty_cap = uncertainty_cap
+
+    def compute(self,
+                q_quantiles: torch.Tensor,
+                gating_confidence: float = 1.0) -> float:
+        """Kelly leverage_rate 계산.
+
+        Args:
+            q_quantiles: shape (N_quantiles, n_actions) — IQN forward()에서 얻은 분위 행렬.
+                         행: 분위(정렬된 순서), 열: 액션.
+                         액션 0 = 대기/청산, 액션 1 = 진입.
+            gating_confidence: GatingNet 해당 에이전트 가중치 (0~1).
+
+        Returns:
+            leverage_rate (float): [min_lev, max_lev] 범위의 포지션 배율.
+        """
+        with torch.no_grad():
+            q = q_quantiles.float().cpu()   # (NQ, n_actions)
+            if q.shape[1] < 2:
+                return self.min_lev
+
+            q0 = q[:, 0]  # 대기 분위
+            q1 = q[:, 1]  # 진입 분위
+
+            # ── 승률 추정: 진입이 대기보다 유리한 분위 비율 ──
+            win_rate = float((q1 > q0).float().mean())
+
+            # ── 손익비 추정: 양수 advantage / |음수 advantage| ──
+            adv = q1 - q0
+            pos_mask = adv > 0
+            neg_mask = adv < 0
+
+            pos_mean = float(adv[pos_mask].mean()) if pos_mask.any() else 0.0
+            neg_mean = float(adv[neg_mask].abs().mean()) if neg_mask.any() else 1e-6
+            payoff   = pos_mean / (neg_mean + 1e-8)
+
+            # ── Kelly 공식 ──
+            p, q_val = win_rate, 1.0 - win_rate
+            b        = max(payoff, 0.1)   # 손익비 최소 0.1 보장
+            f_star   = (p * b - q_val) / b
+            f_half   = max(f_star * self.half_kelly, 0.0)
+
+            # ── 불확실성 패널티: IQN 분위 분산이 클수록 배팅 축소 ──
+            total_var = float(q1.var() + 1e-8)
+            adv_var   = float(adv.var() + 1e-8)
+            uncertainty = min(adv_var / total_var, self.uncertainty_cap)
+            f_penalized = f_half * (1.0 - uncertainty)
+
+            # ── GatingNet 확신도 반영 ──
+            f_final = f_penalized * float(np.clip(gating_confidence, 0.0, 1.0))
+
+            lev = float(np.clip(f_final, self.min_lev, self.max_lev))
+            return lev
+
+    def log_stats(self, q_quantiles: torch.Tensor) -> dict:
+        """디버깅용 Kelly 통계 반환."""
+        with torch.no_grad():
+            q = q_quantiles.float().cpu()
+            q0, q1 = q[:, 0], q[:, 1]
+            adv      = q1 - q0
+            win_rate = float((adv > 0).float().mean())
+            adv_pos  = float(adv[adv > 0].mean()) if (adv > 0).any() else 0.0
+            adv_neg  = float(adv[adv < 0].abs().mean()) if (adv < 0).any() else 0.0
+            payoff   = adv_pos / (adv_neg + 1e-8)
+            f_star   = (win_rate * payoff - (1 - win_rate)) / (payoff + 1e-8)
+        return {'win_rate': round(win_rate, 3), 'payoff': round(payoff, 3),
+                'f_star': round(f_star, 3), 'f_half': round(max(f_star * self.half_kelly, 0), 3)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ③] MultiTimeframeFeatures — 런타임 멀티타임프레임 피처 계산기
+# ═══════════════════════════════════════════════════════════════════════════
+class MultiTimeframeFeatures:
+    """1h봉 close 시계열에서 1h / 4h 추세 피처를 런타임으로 계산.
+
+    CSV에 추가 컬럼 불필요. TradingEnv 초기화 시 close 배열을 받아
+    전체 구간의 MTF 피처를 한 번에 선계산(precompute)하고 numpy 배열로 캐싱.
+
+    출력 (MTF_DIM = 7차원):
+        [0] 1h_ret       : 직전 1봉 대비 수익률 (tanh 스케일) — 즉각 모멘텀
+        [1] 1h_vol       : 최근 4봉 변동성 (로그수익률 std)   — 단기 노이즈 레벨
+        [2] 1h_trend     : 최근 4봉 선형회귀 기울기            — 단기 방향성
+        [3] 4h_ret       : 4봉 누적 수익률 (tanh 스케일)       — 중기 모멘텀
+        [4] 4h_vol       : 4봉 변동성                          — 중기 노이즈 레벨
+        [5] 4h_trend     : 4봉 선형회귀 기울기                  — 중기 방향성
+        [6] htf_alignment: 1h·4h 방향 일치 부호 (−1 / 0 / +1)
+
+    모든 출력은 [-1, 1] 범위로 clamp.
+
+    설계 근거 (1h/4h 선택):
+        - 1h: 현재 봉 자체가 1h → 즉각적 모멘텀·노이즈 레벨 포착
+        - 4h: 단타 관점의 중기 추세. 일봉(24봉)은 코인 단타에 너무 느려
+              학습 신호보다 노이즈가 많고 레짐 전환 감지가 지연됨
+        - alignment: 1h·4h 방향 일치 시에만 진입 고려 → 역추세 필터 역할
+    """
+
+    _RET_SCALE       = 50.0   # tanh(ret * 50): 2% 수익 ≈ 0.76
+    _VOL_SCALE       = 10.0   # 변동성 정규화 기준
+    _VOL_1H_WINDOW   = 4      # 1h 변동성 계산용 내부 윈도우
+
+    def __init__(self, close_arr: np.ndarray,
+                 w1h: int = 1, w4h: int = 4):
+        self.w1h  = w1h
+        self.w4h  = w4h
+        self._cache = self._precompute(close_arr.astype(np.float64))
+
+    @staticmethod
+    def _linreg_slope(y: np.ndarray) -> float:
+        """가격 배열의 정규화된 선형회귀 기울기 (−1~1).
+        price_range 최솟값을 평균의 0.1%로 보장 → 극소변동 구간 포화 버그 수정."""
+        n = len(y)
+        if n < 3:
+            return 0.0
+        x  = np.arange(n, dtype=np.float64)
+        xm, ym = x.mean(), y.mean()
+        denom = ((x - xm) ** 2).sum()
+        if denom < 1e-12:
+            return 0.0
+        slope = ((x - xm) * (y - ym)).sum() / denom
+        price_range = max(y.max() - y.min(), abs(ym) * 0.001, 1e-8)
+        return float(np.clip(slope * n / price_range, -1.0, 1.0))
+
+    @staticmethod
+    def _logret_slope(logret: np.ndarray) -> float:
+        """로그수익률 평균으로 단기 추세 방향 추정 (1h용).
+        노이즈 필터: 0.1%(1e-3) 미만 평균 수익률은 0 반환.
+        기존 1e-5는 너무 낮아 align 중립 비율이 1%대로 낮아지는 원인."""
+        if len(logret) < 2:
+            return 0.0
+        mean_ret = logret.mean()
+        if abs(mean_ret) < 1e-3:
+            return 0.0
+        return float(np.clip(mean_ret * 100.0, -1.0, 1.0))
+
+    def _precompute(self, close: np.ndarray) -> np.ndarray:
+        """전체 길이 T에 대한 MTF 피처 행렬 (T, MTF_DIM) 선계산."""
+        T      = len(close)
+        out    = np.zeros((T, MTF_DIM), dtype=np.float32)
+        logret = np.zeros(T, dtype=np.float64)
+        logret[1:] = np.log(close[1:] / np.maximum(close[:-1], 1e-8))
+
+        for i in range(T):
+            # ── 1h 피처 (로그수익률 기반 단기 추세) ──
+            ret1   = float(np.tanh(logret[i] * self._RET_SCALE))
+            sv     = max(0, i - self._VOL_1H_WINDOW + 1)
+            lr1w   = logret[sv:i+1]
+            vol1   = float(np.clip(lr1w.std() * self._VOL_SCALE, 0.0, 1.0)) if len(lr1w) > 1 else 0.0
+            # 1h 추세: 로그수익률 평균 (가격 회귀와 다른 방식 → 다양성 확보)
+            trend1 = self._logret_slope(lr1w) if len(lr1w) >= 2 else 0.0
+
+            # ── 4h 피처 (가격 선형회귀 기반 중기 추세) ──
+            s4     = max(0, i - self.w4h + 1)
+            c4     = close[s4:i+1]
+            lr4    = logret[s4:i+1]
+            ret4   = float(np.tanh((c4[-1] / c4[0] - 1) * self._RET_SCALE)) if len(c4) > 1 else 0.0
+            vol4   = float(np.clip(lr4.std() * self._VOL_SCALE, 0.0, 1.0))   if len(lr4) > 1 else 0.0
+            # 4h 추세: 가격 선형회귀 (최소 3봉 필요)
+            trend4 = self._linreg_slope(c4) if len(c4) >= 3 else 0.0
+
+            # ── 1h·4h 방향 일치 ──
+            align  = float(np.sign(trend1) * np.sign(trend4)) if (trend1 != 0 and trend4 != 0) else 0.0
+
+            out[i] = [ret1, vol1, trend1, ret4, vol4, trend4, align]
+
+        align_pos = (out[:,6] > 0).mean() * 100
+        align_neg = (out[:,6] < 0).mean() * 100
+        align_neu = (out[:,6] == 0).mean() * 100
+        logger.info(
+            f"[MTF] 선계산 완료 | shape={out.shape} | "
+            f"1h_ret μ={out[:,0].mean():.3f} σ={out[:,0].std():.3f} | "
+            f"4h_ret μ={out[:,3].mean():.3f} σ={out[:,3].std():.3f} | "
+            f"align: +{align_pos:.1f}% / 0:{align_neu:.1f}% / -{align_neg:.1f}%"
+        )
+        return out
+
+    def get(self, idx: int) -> np.ndarray:
+        """인덱스 idx의 MTF 피처 벡터 반환 (MTF_DIM,)."""
+        if idx < 0 or idx >= len(self._cache):
+            return np.zeros(MTF_DIM, dtype=np.float32)
+        return self._cache[idx]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ④] MarketAttentionEncoder — 피처 그룹 간 Self-Attention 인코더
+# ═══════════════════════════════════════════════════════════════════════════
+class MarketAttentionEncoder(nn.Module):
+    """피처 그룹 6개를 토큰으로 취급해 Self-Attention으로 그룹 간 상호작용 학습.
+
+    입력 구조 (raw 1-frame 피처, pos/HMM/MTF 제외):
+        pred  (7) / conf  (7) / elite (9) / alpha (9) / regime (5) / synth (14)
+        총 51차원 → 각 그룹을 d_model=16으로 선형 투영 → 6개 토큰
+
+    아키텍처:
+        GroupProjection  : 각 그룹 → Linear(group_dim, d_model) + LayerNorm
+        SelfAttention ×2 : 2-head, d_model=16 → 그룹 간 의존성 학습
+        OutputProjection : 6×d_model=96 flatten → Linear(96, out_dim)
+
+    출력 out_dim은 RobustIQN의 feat_extractor 입력 차원과 동일하게 맞춤.
+    pos / HMM / MTF 피처는 attention 통과 후 concat → feat_extractor 입력.
+
+    파라미터 수: ~8K (경량)
+    """
+
+    # 그룹 정의: (이름, 시작 오프셋, 길이)
+    # STATE_DIM 내 순서: preds(7) confs(7) stats(3) elite(9) alpha(9) regime(5) synth(14) pos(5) hmm(5) mtf(7)
+    # stats(3)는 pred/conf에서 파생된 요약 통계 → pred 그룹에 합산
+    _GROUPS = [
+        ('pred',   0,  7),
+        ('conf',   7,  7),
+        ('elite', 17,  9),   # stats(3) 건너뜀 → 14부터지만 stats 포함 시 17
+        ('alpha', 26,  9),
+        ('regime',35,  5),
+        ('synth', 40, 14),
+    ]
+    # stats(3)는 pred 그룹 뒤에 위치: pred(7) + conf(7) = 14, stats는 14~16
+    # 실제 오프셋: pred=0~6, conf=7~13, stats=14~16, elite=17~25, alpha=26~34, regime=35~39, synth=40~53
+
+    D_MODEL  = 16
+    N_HEADS  = 2
+    N_LAYERS = 2
+
+    def __init__(self, out_dim: int, raw_state_dim: int = None):
+        """
+        Args:
+            out_dim     : 출력 차원 (RobustIQN feat_extractor 첫 Linear 입력 차원과 동일)
+            raw_state_dim: 1프레임 STATE_DIM (스택 제외)
+        """
+        super().__init__()
+        self.out_dim = out_dim
+
+        # 각 그룹 → d_model 투영
+        self.proj = nn.ModuleList([
+            nn.Sequential(nn.Linear(g_dim, self.D_MODEL), nn.LayerNorm(self.D_MODEL))
+            for _, _, g_dim in self._GROUPS
+        ])
+
+        # Self-Attention 레이어 (n_layers개)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.D_MODEL, nhead=self.N_HEADS,
+            dim_feedforward=self.D_MODEL * 2,
+            dropout=0.0, batch_first=True, norm_first=True
+        )
+        self.attn = nn.TransformerEncoder(encoder_layer, num_layers=self.N_LAYERS)
+
+        # flatten → out_dim 압축
+        n_groups = len(self._GROUPS)
+        self.out_proj = nn.Sequential(
+            nn.Linear(n_groups * self.D_MODEL, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.SiLU()
+        )
+
+    def forward(self, raw_feat: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            raw_feat: (B, raw_state_dim) — 1프레임의 피처 (pos/HMM/MTF 포함 전체)
+                      실제로는 마지막 프레임의 market 피처 부분만 사용
+
+        Returns:
+            (B, out_dim) — attention 인코딩 결과
+        """
+        # 각 그룹 추출 → 투영 → (B, n_groups, D_MODEL) 토큰 시퀀스
+        tokens = []
+        for (_, start, length), proj_layer in zip(self._GROUPS, self.proj):
+            g = raw_feat[:, start:start + length]   # (B, group_dim)
+            tokens.append(proj_layer(g))             # (B, D_MODEL)
+        tokens = torch.stack(tokens, dim=1)          # (B, n_groups, D_MODEL)
+
+        # Self-Attention
+        attended = self.attn(tokens)                 # (B, n_groups, D_MODEL)
+
+        # Flatten + 출력 투영
+        flat = attended.flatten(1)                   # (B, n_groups * D_MODEL)
+        return self.out_proj(flat)                   # (B, out_dim)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ⑤] MAMLAdapter — Reptile-style First-Order MAML 레짐 적응기
+# ═══════════════════════════════════════════════════════════════════════════
+class MAMLAdapter:
+    """HMM 레짐 전환 감지 시 Reptile 메타 업데이트로 IQN을 빠르게 적응.
+
+    Reptile 공식:
+        θ ← θ + β_meta * (θ' - θ)
+        θ' = 현재 레짐 경험으로 N_INNER번 inner-loop gradient step한 파라미터
+
+    풀 MAML 대비 장점:
+        - 2차 미분(Hessian) 불필요 → NoisyLinear·LayerNorm과 완전 호환
+        - create_graph=False → 메모리 사용량 기존과 동일
+        - Inner loop에 기존 IQN loss(분위 회귀)를 그대로 사용 → 별도 loss 설계 불필요
+
+    레짐별 버퍼:
+        HMM 4개 상태(0=bull, 1=bear, 2=hv-chop, 3=lv-range)별로
+        최근 INNER_BUFFER_SIZE 경험을 deque로 관리.
+        전환된 새 레짐의 버퍼에서 INNER_BATCH 크기로 샘플링해 inner loop 실행.
+
+    쿨다운:
+        연속 전환 스팸 방지. 마지막 적응 후 COOLDOWN_STEPS 이상 지나야 재실행.
+
+    사용 방법:
+        # train() 초기화
+        maml = MAMLAdapter(agents, device)
+
+        # 에피소드 루프 내부, hmm_detector._alpha 갱신 후 호출
+        maml.push(state, action, reward, next_state, done, hmm_state)
+        adapted = maml.maybe_adapt(hmm_detector, current_ep=ep)
+        if adapted:
+            logger.info("[MAML] 레짐 전환 적응 완료")
+    """
+
+    N_INNER              = 5       # inner loop gradient step 횟수
+    INNER_BATCH          = 64      # inner loop 배치 크기
+    INNER_BUFFER_SIZE    = 512     # 레짐별 경험 버퍼 크기
+    BETA_META            = 0.3     # Reptile 메타 학습률
+    COOLDOWN_EPISODES    = 10      # 쿨다운: 마지막 적응 후 10 에피소드 이상 지나야 재실행
+    MIN_BUFFER_FOR_ADAPT = 300     # 새 레짐 버퍼에 300개 이상 쌓여야 적응 허용
+    WARMUP_EPISODES      = 50      # ep 50 이전엔 MAML 비활성화 (에이전트가 충분히 학습한 후 시작)
+    GAMMA                = 0.99
+    HMM_STATE_NAMES      = ['bull-trend', 'bear-trend', 'hv-chop', 'lv-range']
+
+    def __init__(self, agents: dict, device: str):
+        """
+        Args:
+            agents : IQNAgent 딕셔너리 {'bull': agent, 'bear': agent, ...}
+            device : torch device string
+        """
+        self.agents  = agents
+        self.device  = device
+
+        self.regime_buf = {
+            s: {name: deque(maxlen=self.INNER_BUFFER_SIZE) for name in agents}
+            for s in range(4)
+        }
+
+        self._prev_hmm_state: int = -1
+        self._last_adapt_ep:  int = -self.COOLDOWN_EPISODES  # 에피소드 단위 쿨다운
+        self._adapt_count:    int = 0
+
+    # ── 경험 수집 ──────────────────────────────────────────────────────────
+    def push(self, state: np.ndarray, action: int, reward: float,
+             next_state: np.ndarray, done: bool,
+             hmm_state: int, agent_name: str) -> None:
+        """현재 스텝의 경험을 해당 레짐 버퍼에 추가."""
+        if 0 <= hmm_state < 4:
+            self.regime_buf[hmm_state][agent_name].append(
+                (state, action, reward, next_state, done)
+            )
+
+    # ── 레짐 전환 감지 + 적응 트리거 ───────────────────────────────────────
+    def maybe_adapt(self, hmm_detector, current_ep: int) -> bool:
+        """HMM dominant state가 바뀌면 Reptile 메타 업데이트 실행.
+
+        Args:
+            hmm_detector : OnlineHMMDetector 인스턴스
+            current_ep   : 현재 에피소드 번호 (1-based)
+
+        Returns:
+            True if adaptation was performed, False otherwise.
+        """
+        cur_hmm_state = int(np.argmax(hmm_detector._alpha))
+
+        # 워밍업 기간 → 상태는 추적하되 적응 스킵
+        if current_ep < self.WARMUP_EPISODES:
+            self._prev_hmm_state = cur_hmm_state
+            return False
+        # 상태 변화 없으면 스킵
+        if cur_hmm_state == self._prev_hmm_state:
+            return False
+        # 에피소드 쿨다운 중이면 상태만 업데이트 후 스킵
+        if current_ep - self._last_adapt_ep < self.COOLDOWN_EPISODES:
+            self._prev_hmm_state = cur_hmm_state
+            return False
+
+        # 새 레짐 버퍼에 데이터가 충분한지 확인
+        new_state = cur_hmm_state
+        any_adapted = False
+
+        for name, agent in self.agents.items():
+            buf = self.regime_buf[new_state][name]
+            if len(buf) < self.MIN_BUFFER_FOR_ADAPT:
+                continue
+
+            adapted = self._reptile_update(agent, buf, name, new_state)
+            any_adapted = any_adapted or adapted
+
+        if any_adapted:
+            self._last_adapt_ep = current_ep
+            self._adapt_count += 1
+            prev_name = self.HMM_STATE_NAMES[self._prev_hmm_state] if self._prev_hmm_state >= 0 else 'init'
+            new_name  = self.HMM_STATE_NAMES[new_state]
+            logger.info(
+                f"[MAML] 레짐 전환 적응 #{self._adapt_count} | "
+                f"{prev_name} → {new_name} | "
+                f"ep={current_ep} β={self.BETA_META} inner_steps={self.N_INNER}"
+            )
+
+        self._prev_hmm_state = cur_hmm_state
+        return any_adapted
+
+    # ── Reptile 내부 구현 ──────────────────────────────────────────────────
+    def _reptile_update(self, agent, buf: deque, agent_name: str, hmm_state: int) -> bool:
+        """단일 에이전트에 대한 Reptile 메타 업데이트.
+
+        1. 현재 파라미터 θ를 복사
+        2. buf에서 샘플링한 배치로 N_INNER번 inner gradient step → θ'
+        3. θ ← θ + β_meta * (θ' - θ)  (Reptile)
+        4. target_model soft update (τ=1.0으로 동기화)
+        """
+        # ── θ 스냅샷 저장 ──
+        theta_orig = {k: v.clone() for k, v in agent.model.state_dict().items()}
+
+        # ── Inner loop optimizer (임시, 높은 lr로 빠른 적응) ──
+        inner_lr   = agent.optimizer.param_groups[0]['lr'] * 10.0
+        inner_opt  = torch.optim.Adam(agent.model.parameters(), lr=inner_lr)
+
+        agent.model.train()
+
+        for _ in range(self.N_INNER):
+            # 버퍼에서 미니배치 샘플링
+            batch_size = min(self.INNER_BATCH, len(buf))
+            batch = random.sample(list(buf), batch_size)
+            s, a, r, ns, d = zip(*batch)
+
+            s  = torch.FloatTensor(np.array(s)).to(self.device)
+            a  = torch.LongTensor(np.array(a)).unsqueeze(1).to(self.device)
+            r  = torch.FloatTensor(np.array(r)).unsqueeze(1).to(self.device)
+            ns = torch.FloatTensor(np.array(ns)).to(self.device)
+            d  = torch.FloatTensor(np.array(d)).unsqueeze(1).to(self.device)
+
+            NQ = 16
+            if hasattr(agent.model, 'reset_noise'):
+                agent.model.reset_noise()
+
+            q_mean, tau_online, _, q_ensemble = agent.model(s, num_quantiles=NQ)
+            # inner loop는 앙상블 평균으로 단순하게
+            q_a = q_mean.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+
+            with torch.no_grad():
+                agent.model.eval()
+                nm, _, _, _ = agent.model(ns, num_quantiles=NQ)
+                next_actions = nm.mean(dim=1).argmax(dim=1, keepdim=True)
+                agent.model.train()
+                tm, _, _, _ = agent.target_model(ns, num_quantiles=NQ)
+                q_target_a  = tm.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+                target = r + self.GAMMA * (1 - d) * q_target_a
+
+            td_error = target.unsqueeze(1) - q_a.unsqueeze(2)
+            huber    = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
+            indicator = (td_error.detach() < 0).float()
+            loss = (torch.abs(tau_online - indicator) * huber).mean()
+
+            inner_opt.zero_grad()
+            loss.backward()   # create_graph=False (default) → 1차 미분만
+            torch.nn.utils.clip_grad_norm_(agent.model.parameters(), 1.0)
+            inner_opt.step()
+
+        # ── θ' 확보 → Reptile: θ ← θ + β * (θ' - θ) ──
+        with torch.no_grad():
+            for name_p, param in agent.model.named_parameters():
+                if name_p in theta_orig:
+                    orig = theta_orig[name_p].to(self.device)
+                    param.data.copy_(orig + self.BETA_META * (param.data - orig))
+
+        # ── target model 동기화 (hard update) ──
+        agent.target_model.load_state_dict(agent.model.state_dict())
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ⑥] BootstrapEnsembleHeads — 공유 피처 추출기 위의 앙상블 헤드
+# ═══════════════════════════════════════════════════════════════════════════
+class BootstrapEnsembleHeads(nn.Module):
+    """N개의 독립 (v_head, a_head) 쌍을 하나의 모듈로 관리.
+
+    공유 피처 추출기 출력(feat: B×64)을 받아 각 헤드가 독립적으로
+    분위 Q값을 예측합니다. 헤드 간 예측 분산이 epistemic uncertainty입니다.
+
+    forward 반환:
+        q_ensemble : (B, N_HEADS, NQ, n_actions) — 각 헤드의 분위 Q
+        q_mean     : (B, NQ, n_actions)           — 헤드 평균 (CVaR에 사용)
+        epistemic  : (B, n_actions)               — 헤드 간 Q 표준편차 (불확실성)
+    """
+
+    def __init__(self, n_heads: int, action_dim: int, feat_dim: int = 64,
+                 phi_dim: int = 64, sigma_init: float = 0.05):
+        super().__init__()
+        self.n_heads    = n_heads
+        self.action_dim = action_dim
+
+        # N개 헤드: 각각 독립 v_head + a_head (NoisyLinear)
+        self.v_heads = nn.ModuleList([
+            nn.Sequential(nn.SiLU(), nn.Linear(feat_dim, 1))
+            for _ in range(n_heads)
+        ])
+        self.a_heads = nn.ModuleList([
+            nn.Sequential(nn.SiLU(), NoisyLinear(feat_dim, action_dim, sigma_init=sigma_init))
+            for _ in range(n_heads)
+        ])
+
+        # 헤드별 독립 초기화 (다양성 확보)
+        for i, (vh, ah) in enumerate(zip(self.v_heads, self.a_heads)):
+            gain = 0.5 + i * 0.15   # 헤드마다 다른 gain으로 초기화 편향 부여
+            for m in list(vh.modules()) + list(ah.modules()):
+                if isinstance(m, nn.Linear):
+                    nn.init.orthogonal_(m.weight, gain=gain)
+                    nn.init.zeros_(m.bias)
+
+    def reset_noise(self):
+        for ah in self.a_heads:
+            for m in ah.modules():
+                if isinstance(m, NoisyLinear):
+                    m.sample_noise()
+
+    def forward(self, feat: torch.Tensor, phi_x: torch.Tensor) -> tuple:
+        """
+        Args:
+            feat  : (B, feat_dim)        — 공유 피처 (context gate 적용 후)
+            phi_x : (B, NQ, phi_dim)     — IQN 코사인 임베딩
+
+        Returns:
+            q_mean     : (B, NQ, n_actions) — 앙상블 평균 분위 Q
+            epistemic  : (B, n_actions)     — 앙상블 표준편차 (epistemic uncertainty)
+            q_ensemble : (B, N_HEADS, NQ, n_actions) — 헤드별 원시 출력 (학습용)
+        """
+        B, NQ, _ = phi_x.shape
+        shared = feat.unsqueeze(1).expand(-1, NQ, -1) * phi_x  # (B, NQ, feat_dim)
+
+        all_q = []
+        for vh, ah in zip(self.v_heads, self.a_heads):
+            v = vh(shared)                              # (B, NQ, 1)
+            a = ah(shared)                              # (B, NQ, n_actions)
+            q = v + a - a.mean(dim=-1, keepdim=True)   # dueling
+            all_q.append(q)
+
+        q_stack    = torch.stack(all_q, dim=1)                  # (B, N_HEADS, NQ, n_actions)
+        q_mean     = q_stack.mean(dim=1)                        # (B, NQ, n_actions)
+        # epistemic: 헤드 간 Q 평균값(NQ 평균)의 표준편차
+        q_per_head = q_stack.mean(dim=2)                        # (B, N_HEADS, n_actions)
+        epistemic  = q_per_head.std(dim=1)                      # (B, n_actions)
+
+        return q_mean, epistemic, q_stack
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [융합 모듈 ⑥-b] EpistemicUncertaintyGate — 불확실성 기반 진입 필터
+# ═══════════════════════════════════════════════════════════════════════════
+class EpistemicUncertaintyGate:
+    """epistemic_std를 기반으로 진입 허용·축소·거부를 결정.
+
+    세 구간:
+        std < LOW_THRESH    → 정상 진입, Kelly 사이징 그대로 사용
+        LOW ≤ std < HIGH    → 진입 허용, Kelly × (1 - penalty) 축소
+        std ≥ HIGH_THRESH   → 진입 거부 (flat 강제)
+
+    penalty 계산:
+        t = (std - LOW) / (HIGH - LOW)   ∈ [0, 1]
+        penalty = MAX_PENALTY * t        (선형)
+        Kelly_adjusted = Kelly * (1 - penalty)
+
+    LOW/HIGH 임계값은 학습 중 running statistics로 자동 보정:
+        running mean + k*sigma 방식 (초기 고정값에서 수렴)
+    """
+
+    LOW_THRESH   = 0.05   # 초기값; 학습 중 자동 조정
+    HIGH_THRESH  = 0.15
+    MAX_PENALTY  = 0.7    # 최대 사이징 축소 비율
+    ADAPT_ALPHA  = 0.001  # running stats EMA 계수
+
+    def __init__(self):
+        self._run_mean = 0.05
+        self._run_var  = 0.01
+        self._n        = 0
+        self._blocked  = 0   # 누적 진입 거부 횟수
+        self._reduced  = 0   # 누적 사이징 축소 횟수
+
+    def update_stats(self, std_val: float) -> None:
+        """running mean/std 업데이트 (Welford 방식)."""
+        self._n += 1
+        if self._n < 50:   # 워밍업: 충분한 샘플 전까지 통계 무시
+            return
+        delta = std_val - self._run_mean
+        self._run_mean += self.ADAPT_ALPHA * delta
+        self._run_var   = (1 - self.ADAPT_ALPHA) * self._run_var + self.ADAPT_ALPHA * delta ** 2
+        run_std = max(self._run_var ** 0.5, 1e-6)
+        # 임계값: mean ± k*sigma 자동 보정
+        self.LOW_THRESH  = float(np.clip(self._run_mean + 0.5 * run_std, 0.02, 0.20))
+        self.HIGH_THRESH = float(np.clip(self._run_mean + 2.0 * run_std, 0.05, 0.50))
+
+    def gate(self, epistemic_std: float, base_lev: float) -> tuple:
+        """
+        Args:
+            epistemic_std : scalar — 앙상블 헤드 간 Q 표준편차
+            base_lev      : float  — Kelly가 계산한 레버리지
+
+        Returns:
+            allow  : bool  — 진입 허용 여부
+            adj_lev: float — 조정된 레버리지
+            info   : dict  — 디버깅 정보
+        """
+        self.update_stats(epistemic_std)
+
+        if epistemic_std >= self.HIGH_THRESH:
+            self._blocked += 1
+            return False, 0.0, {
+                'epist_gate': 'BLOCKED',
+                'epist_std': round(epistemic_std, 4),
+                'epist_thresh_hi': round(self.HIGH_THRESH, 4),
+            }
+
+        if epistemic_std >= self.LOW_THRESH:
+            t       = (epistemic_std - self.LOW_THRESH) / max(self.HIGH_THRESH - self.LOW_THRESH, 1e-6)
+            penalty = self.MAX_PENALTY * float(np.clip(t, 0.0, 1.0))
+            adj_lev = float(np.clip(base_lev * (1.0 - penalty), 0.0, base_lev))
+            self._reduced += 1
+            return True, adj_lev, {
+                'epist_gate': 'REDUCED',
+                'epist_std': round(epistemic_std, 4),
+                'epist_penalty': round(penalty, 3),
+                'adj_lev': round(adj_lev, 3),
+            }
+
+        return True, base_lev, {
+            'epist_gate': 'OK',
+            'epist_std': round(epistemic_std, 4),
+        }
+
+    def stats(self) -> dict:
+        return {
+            'epist_blocked': self._blocked,
+            'epist_reduced': self._reduced,
+            'epist_low':  round(self.LOW_THRESH, 4),
+            'epist_high': round(self.HIGH_THRESH, 4),
+            'epist_run_mean': round(self._run_mean, 4),
+        }
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의]
 # ═══════════════════════════════════════════════════════════════════════════
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_nhits', 'pred_tide']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_nhits', 'conf_tide']
+MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd', 'pred_ridge']
+MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd', 'conf_ridge']
 
-ELITE_COLS = [
-    'sig_whale', 'sig_orderblock',
-    'sig_oi_divergence',
-    'sig_ai_squeeze' 
-]
-
-ALPHA_7_COLS = [
-    'session_us', 'hour_cos', 'cvp_poc_dist', 
-    'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate'
-]
-
+ELITE_COLS = ['sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze']
+ALPHA_7_COLS = ['session_us', 'hour_cos', 'cvp_poc_dist', 'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate']
 REGIME_COLS = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'regime_normal']
 
 TARGET_COL = 'log_return'
-RL_REQUIRED_COLS = ['timestamp', 'close'] + MODEL_PRED + MODEL_CONF + ELITE_COLS + ALPHA_7_COLS + REGIME_COLS + [TARGET_COL]
+SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'cada', 'mshd', 'fvci',
+                        'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz']
 
-FEATURE_DIM = len(MODEL_PRED) + len(MODEL_CONF) + 3 + len(ELITE_COLS) + len(ALPHA_7_COLS) + len(REGIME_COLS)
-STATE_DIM = FEATURE_DIM + 5
+STATE_PRED  = ['pred_tide', 'pred_ridge', 'pred_patchtst', 'pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_mdjd']
+STATE_CONF  = ['conf_tide', 'conf_ridge', 'conf_ttm', 'conf_chronos', 'conf_timesfm', 'conf_mdjd', 'conf_patchtst']
+STATE_ELITE = ['evt_excess_z', 'sig_orderblock', 'sig_ai_squeeze', 'sig_oi_divergence', 'sig_whale', 'sig_garch_regime', 'jump_z', 'jump_flag', 'evt_tail_flag']
+STATE_ALPHA = ['hour_cos', 'garch_vol', 'garch_vol_z', 'breakout_strength', 'fvg_dist', 'cvp_poc_dist', 'session_us', 'oi_change_rate', 'cvp_volume_imbalance']
+STATE_SYNTH = ['ou_funding_z', 'fcsz', 'vebr', 'ofti', 'cada', 'tlad', 'svps', 'mshd', 'fdlv', 'wpad', 'fvci', 'kel', 'mtmb', 'ou_halflife']
 
-# 청산 에이전트 state: 시장 피처 + 포지션 정보 (진입 에이전트와 동일 구조 사용)
-EXIT_STATE_DIM = STATE_DIM  # 동일한 state 사용 (pos_features에 방향/수익률 포함되어 있음)
-MIN_HOLD_TRAIN = 3  # 진입 후 3스텝 이내 자발적 청산 불가 (micro-churn 방지)
-MIN_HOLD_NORM_VAL = 3 / 144  # val 라우터 동일 절대값 기준
+FEATURE_DIM = len(STATE_PRED) + len(STATE_CONF) + 3 + len(STATE_ELITE) + len(STATE_ALPHA) + len(REGIME_COLS) + len(STATE_SYNTH)
+HMM_N_STATES = 4           # Bull-Trend / Bear-Trend / High-Vol-Chop / Low-Vol-Range
+HMM_DIM      = HMM_N_STATES + 1   # 4개 상태확률 + 전환 엔트로피 1개 = 5차원
+MTF_DIM      = 7           # [1h_ret, 1h_vol, 1h_trend, 4h_ret, 4h_vol, 4h_trend, htf_alignment]
+STATE_DIM = FEATURE_DIM + 5 + HMM_DIM + MTF_DIM   # +5: pos, +5: HMM, +7: MTF
+STACK_N           = 4
+STACKED_STATE_DIM = STATE_DIM * STACK_N
 
-def row_to_market_row(row: pd.Series) -> dict:
-    return {k: v for k, v in row.items()}
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 1. 하이브리드 배치 마이닝 엔진
-# ═══════════════════════════════════════════════════════════════════════════
-def generate_training_csv(input_csv: str, output_csv: str):
-    print("[generate_csv] 시작")
-    from strategies.elite_strategies import BaseStrategy # type: ignore
-    from strategies.elite_builder import EliteSignals, row_to_market_row # type: ignore
-    
-    logger.info("🚀 [단계 1] 원본 피처 데이터 로드 및 전처리...")
-    df = pd.read_csv(input_csv).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    
-    if 'close' in df.columns:
-        if 'mtf_trend_1h' not in df.columns:
-            df['mtf_trend_1h'] = df['close'].ewm(span=12, adjust=False).mean().pct_change().fillna(0.0)
-
-    if 'smart_money_flow' in df.columns:
-        df['smf_std'] = df['smart_money_flow'].expanding(min_periods=288).std().bfill().fillna(1.0)
-    else: df['smf_std'] = 1.0
-
-    logger.info("🚀 [단계 1.5] 적응형(Adaptive) 날씨 요정 - 레짐 스캔 중...")
-    diff_abs_sum = df['close'].diff().abs().rolling(24).sum()
-    net_change = df['close'] - df['close'].shift(24)
-    er = (net_change.abs() / diff_abs_sum).fillna(0)
-    
-    raw_vol = df['close'].pct_change().rolling(24).std().fillna(0)
-    vol_mean_24h = raw_vol.rolling(288).mean().bfill()
-    vol_std_24h = raw_vol.rolling(288).std().bfill() + 1e-8
-    vol_z = (raw_vol - vol_mean_24h) / vol_std_24h
-    
-    mtf_1h_trend = df['mtf_trend_1h'].fillna(0.0) 
-
-    for col in REGIME_COLS: df[col] = 0.0
-
-    # 1. ER 허들 대폭 낮춤: 0.35 -> 0.20 (추세가 살짝만 보여도 Bull/Bear 투입)
-    bull_idx = (er >= 0.20) & (net_change > 0) & (mtf_1h_trend > 0)
-    bear_idx = (er >= 0.20) & (net_change < 0) & (mtf_1h_trend < 0)
-
-    # 2. 변동성 Z-score 허들 낮춤: ±1.0 -> ±0.5 (일반적인 횡보/휩소도 Chop/Whipsaw가 담당)
-    # 단, Bull/Bear에 속하지 않은(추세가 없는) 구간 중에서만 찾음
-    chop_idx = ~(bull_idx | bear_idx) & (vol_z < -0.5)
-    whipsaw_idx = ~(bull_idx | bear_idx) & (vol_z > 0.5)
-
-    # 3. 위 4개에 모두 속하지 않는 아주 애매한 구간만 Normal로 처리
-    df.loc[bull_idx, 'regime_bull'] = 1.0
-    df.loc[bear_idx, 'regime_bear'] = 1.0
-    df.loc[chop_idx, 'regime_chop'] = 1.0
-    df.loc[whipsaw_idx, 'regime_whipsaw'] = 1.0
-    df.loc[~(chop_idx | whipsaw_idx | bull_idx | bear_idx), 'regime_normal'] = 1.0
-
-    L = len(df)
-    max_lookback = 256
-    resume_start = max_lookback  
-    abs_output = os.path.abspath(output_csv)
-    
-    if os.path.exists(abs_output):
-        try:
-            existing_df = pd.read_csv(abs_output, usecols=['timestamp'])
-            if not existing_df.empty:
-                last_ts = str(existing_df['timestamp'].iloc[-1])
-                df['timestamp_str'] = df['timestamp'].astype(str)
-                match = df[df['timestamp_str'] == last_ts]
-                if not match.empty:
-                    resume_start = match.index[-1] + 1
-                    logger.info(f"♻️ 이어하기: {last_ts} 이후부터 재개 (인덱스: {resume_start})")
-                df.drop(columns=['timestamp_str'], inplace=True)
-        except Exception: pass
-
-    if resume_start >= L: return logger.info("✅ 마이닝이 이미 완료되었습니다.")
-
-    logger.info("🧠 [단계 2] 앙상블 모델 메모 적재...")
-    from ensemble.ensemble_router import (
-        TimesFMForecaster, ChronosForecaster, TTMForecaster, 
-        PatchTSTForecaster, ITransformerForecaster, NHITSForecaster, TiDEForecaster
-    )
-    
-    elite_extractor = EliteSignals()
-    CHUNK_SIZE = 1024 
-    
-    nf_models_list = [m for m in ['patchtst', 'itransformer', 'nhits', 'tide'] if f'pred_{m}' in MODEL_PRED]
-    nf_forecaster = None
-    if nf_models_list:
-        from neuralforecast import NeuralForecast
-        nf_forecaster = NeuralForecast.load('data/nf')
-        
-    ttm_model = None
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if 'pred_ttm' in MODEL_PRED:
-        try:
-            from tsfm_public import TinyTimeMixerForPrediction
-            ttm_model = TinyTimeMixerForPrediction.frompretrained("ibm-granite/granite-timeseries-ttm-r1").to(device).eval()
-        except Exception as e: logger.warning(f"TTM 로드 실패: {e}")
-
-    fallback_models = {}
-    if 'pred_timesfm' in MODEL_PRED: fallback_models['timesfm'] = TimesFMForecaster()
-    if 'pred_chronos' in MODEL_PRED: fallback_models['chronos'] = ChronosForecaster()
-
-    def get_direction(traj):
-        if len(traj) < 2: return float(np.mean(traj))
-        slope = float(np.polyfit(np.arange(len(traj)), traj, 1)[0])
-        delta = traj[-1] - traj[0]
-        if slope > 0 and delta > 0: return 1.0
-        if slope < 0 and delta < 0: return -1.0
-        return float(np.mean(traj))
-
-    logger.info(f"🚀 [단계 3] 하이브리드 배치 마이닝 시작 (CHUNK: {CHUNK_SIZE})")
-    df_records = df.to_dict('records')
-    np_closes = df['close'].values
-    np_timestamps = df['timestamp'].values
-    alpha_matrix = df[ALPHA_7_COLS].values
-
-    for chunk_start in range(resume_start, L, CHUNK_SIZE):
-        chunk_end = min(chunk_start + CHUNK_SIZE, L)
-        chunk_len = chunk_end - chunk_start
-        logger.info(f"⏳ 청크 처리 중: [{chunk_start} ~ {chunk_end-1}] ({chunk_len}개)")
-        chunk_data = []
-
-        for i in range(chunk_start, chunk_end):
-            current_row = df_records[i]
-            prev_row = df_records[i - 1] if i > 0 else current_row
-            row_res = {
-                'timestamp': current_row['timestamp'], 'close': current_row['close'], 
-                'log_return': current_row['log_return']
-            }
-            for col in ALPHA_7_COLS: row_res[col] = float(current_row.get(col, 0.0))
-            for col in REGIME_COLS: row_res[col] = float(current_row.get(col, 0.0))
-                
-            all_sigs = elite_extractor.compute_all(current=row_to_market_row(current_row), prev=row_to_market_row(prev_row), smf_std=float(current_row.get('smf_std', 1.0)))
-
-            row_res.update({k: float(v) for k, v in all_sigs.items() if k in ELITE_COLS})
-            
-            for m in MODEL_PRED: row_res[m] = 0.0
-            for c in MODEL_CONF: row_res[c] = 0.5
-            chunk_data.append(row_res)
-
-        if ttm_model is not None:
-            ttm_ctx = ttm_model.config.context_length
-            needed_start = chunk_start - ttm_ctx + 1
-            if needed_start < 0:
-                closes_slice = np.pad(np_closes[0:chunk_end], (abs(needed_start), 0), 'edge')
-            else: closes_slice = np_closes[needed_start:chunk_end]
-                
-            windows = np.lib.stride_tricks.sliding_window_view(closes_slice, ttm_ctx)
-            means = windows.mean(axis=1, keepdims=True)
-            stds = windows.std(axis=1, keepdims=True) + 1e-8
-            scaled = (windows - means) / stds
-            
-            inp = torch.tensor(scaled, dtype=torch.float32).unsqueeze(-1).to(device)
-            with torch.inference_mode(), torch.autocast(device_type=device, dtype=torch.float16):
-                out = ttm_model(past_values=inp).prediction_outputs.squeeze(-1).cpu().numpy()
-                
-            out_unscaled = out * stds + means
-            for i, traj in enumerate(out_unscaled):
-                chunk_data[i]['pred_ttm'] = get_direction(traj[:6])
-                chunk_data[i]['conf_ttm'] = 0.6
-
-        if nf_forecaster is not None:
-            nf_rows = []
-            dummy_dates = pd.date_range(end=pd.Timestamp.now(), periods=256, freq='5min')
-            for i, end_idx in enumerate(range(chunk_start, chunk_end)):
-                start_idx = end_idx - 255
-                uid = f'w_{i}'
-                y_vals = np_closes[start_idx : end_idx + 1]
-                a_vals = alpha_matrix[start_idx : end_idx + 1]
-                for step_idx in range(256):
-                    row_dict = {'unique_id': uid, 'ds': dummy_dates[step_idx], 'y': y_vals[step_idx]}
-                    for a_idx, a_name in enumerate(ALPHA_7_COLS):
-                        row_dict[a_name] = a_vals[step_idx][a_idx]
-                    nf_rows.append(row_dict)
-                    
-            batch_df = pd.DataFrame(nf_rows)
-            batch_df.fillna(0.0, inplace=True)
-            with SuppressOutput():
-                out_df = nf_forecaster.predict(df=batch_df)
-                
-            for i in range(chunk_len):
-                uid = f'w_{i}'
-                uid_out = out_df.loc[uid] if uid in out_df.index else out_df[out_df['unique_id'] == uid]
-                for m_alias in nf_models_list:
-                    m_real = {'patchtst':'PatchTST', 'itransformer':'iTransformer', 'nhits':'NHITS', 'tide':'TiDE'}[m_alias]
-                    if m_real in uid_out:
-                        chunk_data[i][f'pred_{m_alias}'] = get_direction(uid_out[m_real].values[:6])
-
-        if fallback_models:
-            for i, end_idx in enumerate(range(chunk_start, chunk_end)):
-                df_slice = df.iloc[end_idx - 255 : end_idx + 1] 
-                for name, model in fallback_models.items():
-                    if getattr(model, 'available', False):
-                        try:
-                            with torch.inference_mode(), torch.autocast(device_type='cuda', dtype=torch.float16):
-                                out = model.predict(df_slice, horizon=6)
-                                if out and out.median is not None:
-                                    chunk_data[i][f'pred_{name}'] = get_direction(out.median[-1])
-                                    chunk_data[i][f'conf_{name}'] = float(out.confidence[-1].mean())
-                        except: pass
-
-        new_df = pd.DataFrame(chunk_data, columns=RL_REQUIRED_COLS)
-        is_new = not os.path.exists(abs_output)
-        new_df.to_csv(abs_output, mode='a', header=is_new, index=False)
-        
-        del chunk_data, new_df
-        if nf_forecaster is not None: del nf_rows, batch_df, out_df
-        gc.collect()
-        if torch.cuda.is_available(): torch.cuda.empty_cache()
-
-    logger.info(f"🎉 하이브리드 마이닝 완료! 파일: {output_csv}")
+# MTF 윈도우 (1h봉 기준)
+MTF_1H_WINDOW = 1    # 1봉 = 1시간 (현재 봉 단독 → 직전 1봉 대비 모멘텀)
+MTF_4H_WINDOW = 4    # 4봉 = 4시간
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. 거래 환경 (TradingEnv) - Action Space 통일 (에이전트 0/1, 라우터 0/1/2)
+# 2. 거래 환경 (TradingEnv)
 # ═══════════════════════════════════════════════════════════════════════════
 class TradingEnv:
     STATE_DIM = STATE_DIM
 
-    def __init__(self, df, initial_balance=10000.0, fee=0.0005, slip=0.0002, phase='train', agent_role='bull_sniper'):
+    def __init__(self, df, initial_balance=10000.0, fee=0.0005, slip=0.0002, phase='train', agent_role='bull_sniper',
+                 hmm_detector=None, mtf_features=None):
         self.df = df.reset_index(drop=True)
         self.initial_balance = initial_balance
         self.fee = fee
         self.slip = slip
         self.phase = phase
         self.agent_role = agent_role
-        
+        self.hmm_detector = hmm_detector   # OnlineHMMDetector 인스턴스 (None이면 영벡터 대체)
+        # MTF: 외부에서 생성된 MultiTimeframeFeatures 인스턴스 또는 None(내부 생성)
+        if mtf_features is not None:
+            self.mtf = mtf_features
+        else:
+            close_arr = self.df['close'].values.astype(np.float32)
+            self.mtf = MultiTimeframeFeatures(close_arr)
+
         self.MAX_EPISODE_STEPS = 4096 if phase == 'train' else len(self.df) - 1
         self.MAX_LEVERAGE = 1.0
         self.MAX_HOLD = {'train': 72, 'val': 144, 'test': 288}
 
-        # ✅ 속도 최적화: pandas loc 제거 → numpy 배열 pre-compute
-        feat_cols = MODEL_PRED + MODEL_CONF + ELITE_COLS + ALPHA_7_COLS + REGIME_COLS
+        feat_cols = STATE_PRED + STATE_CONF + STATE_ELITE + STATE_ALPHA + REGIME_COLS + STATE_SYNTH
         self._feat_np  = self.df[feat_cols].values.astype(np.float32)
         self._close_np = self.df['close'].values.astype(np.float32)
-        self._n_pred, self._n_conf = len(MODEL_PRED), len(MODEL_CONF)
-        self._n_elite, self._n_alpha = len(ELITE_COLS), len(ALPHA_7_COLS)
+        self._n_pred, self._n_conf = len(STATE_PRED), len(STATE_CONF)
+        self._n_elite, self._n_alpha = len(STATE_ELITE), len(STATE_ALPHA)
+        self._n_regime, self._n_synth = len(REGIME_COLS), len(STATE_SYNTH)
+        self._frame_stack = deque(maxlen=STACK_N)
+
+        # HMM 관측 컬럼 미리 추출 (get_features 호출용 row dict)
+        _hmm_cols = ['log_return', 'garch_vol_z', 'oi_change_rate']
+        self._hmm_obs_np = {
+            col: self.df[col].fillna(0).values.astype(np.float32)
+            if col in self.df.columns else np.zeros(len(self.df), dtype=np.float32)
+            for col in _hmm_cols
+        }
 
         self.reset()
 
@@ -329,75 +1114,75 @@ class TradingEnv:
         self.active_steps = 0
         
         self.unrealized_pnl = 0.0
+        self.prev_unrealized_pnl = 0.0
         self.max_drawdown = 0.0
-        self.peak_pnl = 0.0 
+        self.peak_pnl = 0.0
         self.hold_count = 0
-        
-        return self._build_state(self.current_step)
+
+        self._frame_stack.clear()
+        return self._get_stacked_state(self._build_state(self.current_step))
 
     def step(self, action, leverage_rate=1.0):
         current_price = self._close_np[self.current_step]
-
-        # ── 자동 청산 규칙: 하드 SL / 트레일링 스탑 / MAX_HOLD ─────────────
-        force_close = False
+        
+        # ── 1. 이전 스텝의 포트폴리오 가치 (기준점) ──
         if self.pos is not None:
-            trail_sl = self.peak_pnl - 0.015          # 고점 대비 -1.5% 트레일링
-            if (self.unrealized_pnl <= -0.015          # 하드 SL -1.5%
-                    or self.unrealized_pnl < trail_sl  # 트레일링 스탑
-                    or self.hold_count >= self.MAX_HOLD[self.phase]):  # MAX_HOLD 타임아웃
-                force_close = True
+            prev_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
+        else:
+            prev_portfolio_value = self.balance
 
-        reward = 0.0
-        is_closed = False
-        realized_pnl = 0.0
+        # ── 6-Agent 글로벌 액션 매핑 ──
+        global_action = action 
+        if self.agent_role in ['bear', 'chop_short', 'normal_short'] and action == 1:
+            global_action = 2
+
+        force_close = False
+        if self.pos is not None and self.unrealized_pnl <= -0.025:
+            force_close = True
 
         is_entering_long = False
         is_entering_short = False
         is_closing = False
-
+        
         if force_close:
             is_closing = True
-        elif self.phase == 'train':
-            # 진입 에이전트: action=1이고 포지션 없을 때만 진입 (청산은 규칙 담당)
-            if action == 1 and self.pos is None:
-                if 'long' in self.agent_role: is_entering_long = True
-                elif 'short' in self.agent_role: is_entering_short = True
-            elif action == 1 and self.pos is not None and self.hold_count >= MIN_HOLD_TRAIN: is_closing = True
-        else:  # phase == 'val' — 진입만 라우터가 결정, 청산은 force_close 전담
-            if action == 1 and self.pos is None: is_entering_long = True
-            elif action == 2 and self.pos is None: is_entering_short = True
-            elif action == 0 and self.pos is not None: is_closing = True
+        else:
+            if global_action == 0:
+                if self.pos is not None: is_closing = True
+            elif global_action == 1:
+                if self.pos is None: is_entering_long = True
+                elif self.pos == 'SHORT': is_closing = True
+            elif global_action == 2:
+                if self.pos is None: is_entering_short = True
+                elif self.pos == 'LONG': is_closing = True
 
+        # ── 2. 상태 업데이트 및 수수료/슬리피지 반영 ──
         if is_entering_long:
             self.pos = 'LONG'
             self.entry_price = current_price * (1 + self.slip)
             self.entry_idx = self.current_step
-            self.peak_pnl = 0.0
             self.current_leverage = self.MAX_LEVERAGE * leverage_rate
-            reward -= self.fee * self.current_leverage
+            self.balance -= self.balance * self.fee * self.current_leverage 
             self.active_steps += 1
 
         elif is_entering_short:
             self.pos = 'SHORT'
             self.entry_price = current_price * (1 - self.slip)
             self.entry_idx = self.current_step
-            self.peak_pnl = 0.0
             self.current_leverage = self.MAX_LEVERAGE * leverage_rate
-            reward -= self.fee * self.current_leverage
+            self.balance -= self.balance * self.fee * self.current_leverage 
             self.active_steps += 1
 
         elif is_closing:
             if self.pos == 'LONG': realized_pnl = (current_price * (1 - self.slip) - self.entry_price) / self.entry_price
             else: realized_pnl = (self.entry_price - current_price * (1 + self.slip)) / self.entry_price
-
+            
             realized_pnl *= self.current_leverage
-            realized_pnl -= self.fee * self.current_leverage
-            self.balance *= (1 + realized_pnl)
-
+            self.balance += self.balance * realized_pnl 
+            self.balance -= self.balance * self.fee * self.current_leverage 
+            
             self.total_trades += 1
             if realized_pnl > 0: self.win_trades += 1
-
-            reward += realized_pnl
 
             self.pos = None
             self.current_leverage = 0.0
@@ -411,71 +1196,133 @@ class TradingEnv:
         done = self.current_step >= self.end_step
         next_price = self._close_np[self.current_step] if not done else current_price
 
+        # ── 3. 미실현 손익 업데이트 ──
         if self.pos is not None:
             self.hold_count = self.current_step - self.entry_idx
-            if self.pos == 'LONG': self.unrealized_pnl = (next_price - self.entry_price) / self.entry_price * self.current_leverage
-            else: self.unrealized_pnl = (self.entry_price - next_price) / self.entry_price * self.current_leverage
+            
+            if self.pos == 'LONG': 
+                est_exit_price = next_price * (1 - self.slip)
+                raw_pnl = (est_exit_price - self.entry_price) / self.entry_price
+            else: 
+                est_exit_price = next_price * (1 + self.slip)
+                raw_pnl = (self.entry_price - est_exit_price) / self.entry_price
+
+            # [BUG1 FIX] 진입 수수료 이중 차감 제거
+            # 진입 시 balance -= balance * fee * lev 로 이미 차감됨
+            # unrealized_pnl에서 또 빼면 진입 직후부터 -0.05% bias 누적
+            # → 700회 거래 × 에피소드 반복 시 수백%의 허구 손실 신호 생성
+            self.unrealized_pnl = raw_pnl * self.current_leverage
 
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
             self.active_steps += 1
-            # asymmetric shaping: 손실 2배 페널티 (loss cut 강화)
-            if self.unrealized_pnl >= 0:
-                reward += 0.008 * self.unrealized_pnl
+
+        # ── 4. 순수 포트폴리오 가치 증감(Delta) 보상 ──
+        if self.pos is not None:
+            current_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
+        else:
+            current_portfolio_value = self.balance
+
+        step_delta = (current_portfolio_value - prev_portfolio_value) / self.initial_balance * 500.0
+        reward = step_delta
+
+        # [BUG2+3+4 FIX] trend_bonus / scalp_bonus 전부 제거
+        # scalp_bonus: hold_count=0 시 6x 증폭 → reward 클리핑 포화 → 학습 신호 소실
+        # trend_bonus: 큰 step_delta에서 1.0 클리핑으로 신호 손실
+        # 두 보너스 모두 balance와 무관하게 reward를 부풀려 Rew와 PnL이 역방향으로 분리
+        # → chop의 Rew=+100, PnL=-70% 현상의 근본 원인
+        # 수수료+슬리피지가 이미 충분한 자연 억제제이므로 추가 bonus 불필요
+
+        # pred_consensus 보너스만 유지 (스케일이 작아 클리핑 영향 없음)
+        if self.pos is not None:
+            pred_consensus = float(self._feat_np[self.current_step, :self._n_pred].mean())
+            if self.unrealized_pnl >= 0 and ((self.pos == 'LONG' and pred_consensus > 0.0) or (self.pos == 'SHORT' and pred_consensus < 0.0)):
+                reward += 0.01
+
+        if done and self.pos is not None:
+            ep_end_price = self._close_np[min(self.current_step, len(self._close_np) - 1)]
+            if self.pos == 'LONG':
+                ep_realized = (ep_end_price * (1 - self.slip) - self.entry_price) / self.entry_price
             else:
-                reward += 0.016 * self.unrealized_pnl
+                ep_realized = (self.entry_price - ep_end_price * (1 + self.slip)) / self.entry_price
+            ep_realized *= self.current_leverage
+            self.balance += self.balance * ep_realized
+            self.balance -= self.balance * self.fee * self.current_leverage
+            self.total_trades += 1
+            if ep_realized > 0: self.win_trades += 1
+            self.pos = None
+            self.current_leverage = 0.0
+            self.unrealized_pnl = 0.0
+            self.hold_count = 0
+            self.peak_pnl = 0.0
+            self.max_drawdown = 0.0
 
-        reward = float(np.clip(reward, -0.15, 0.30))
+        reward = float(np.clip(reward, -1.0, 1.0))
         info = {'pnl_pct': (self.balance / self.initial_balance - 1) * 100, 'wr': self.win_trades / max(1, self.total_trades)}
-        return self._build_state(self.current_step), reward, done, info
-
+        return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
 
     @property
     def win_rate(self): return self.win_trades / max(1, self.total_trades)
 
+    def _get_stacked_state(self, raw_state):
+        self._frame_stack.append(raw_state)
+        pad = STACK_N - len(self._frame_stack)
+        frames = [np.zeros(STATE_DIM, np.float32)] * pad + list(self._frame_stack)
+        return np.concatenate(frames)
+
     def _build_state(self, idx):
         if idx < 0 or idx >= len(self._feat_np):
-            return np.zeros(self.STATE_DIM, dtype=np.float32)
+            return np.zeros(STATE_DIM, dtype=np.float32)
 
-        # ✅ numpy 직접 접근 (pandas loc 대비 ~10x 빠름)
         row = self._feat_np[idx]
         o = 0
-        preds  = row[o:o+self._n_pred];  o += self._n_pred
-        confs  = row[o:o+self._n_conf];  o += self._n_conf
+        preds  = row[o:o+self._n_pred];   o += self._n_pred
+        confs  = row[o:o+self._n_conf];   o += self._n_conf
         stats  = np.array([preds.mean(), preds.std(), confs.mean()], dtype=np.float32)
-        elite  = row[o:o+self._n_elite]; o += self._n_elite
-        alpha7 = row[o:o+self._n_alpha]; o += self._n_alpha
-        regimes= row[o:]
+        elite  = row[o:o+self._n_elite];  o += self._n_elite
+        alpha7 = row[o:o+self._n_alpha];  o += self._n_alpha
+        regimes= row[o:o+self._n_regime]; o += self._n_regime
+        synth  = row[o:]
 
         close = self._close_np[idx]
         pos_features = np.array([
             1.0 if self.pos == 'LONG' else (-1.0 if self.pos == 'SHORT' else 0.0),
             self.entry_price / close - 1 if self.pos is not None else 0.0,
-            self.unrealized_pnl,
-            self.max_drawdown,
-            self.hold_count / self.MAX_HOLD[self.phase]
+            np.tanh(self.unrealized_pnl / 0.02),
+            np.clip(self.max_drawdown   / 0.05, -1.0, 1.0),
+            self.hold_count / 144
         ], dtype=np.float32)
 
-        return np.nan_to_num(np.concatenate([preds, confs, stats, elite, alpha7, regimes, pos_features]), 0.0)
+        # ── HMM 피처 (5차원: 4개 상태확률 + 엔트로피) ──
+        if self.hmm_detector is not None:
+            row_dict = {col: float(self._hmm_obs_np[col][idx]) for col in self._hmm_obs_np}
+            hmm_feat = self.hmm_detector.get_features(row_dict)
+        else:
+            hmm_feat = np.zeros(HMM_DIM, dtype=np.float32)
+
+        # ── MTF 피처 (7차원: 4h/일봉 수익률·변동성·추세·방향 일치) ──
+        mtf_feat = self.mtf.get(idx)
+
+        return np.nan_to_num(
+            np.concatenate([preds, confs, stats, elite, alpha7, regimes, synth, pos_features, hmm_feat, mtf_feat]),
+            0.0
+        )
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2-2. 청산 전용 환경 (ExitEnv)
+# 2-2. 리플레이 버퍼
 # ═══════════════════════════════════════════════════════════════════════════
-
 class RegimeReplayBuffer:
-    def __init__(self, capacity=300000, target_regimes=None, warmup_steps=8000):
+    def __init__(self, capacity=300000, target_regimes=None, warmup_steps=14000):
         self.buffer = deque(maxlen=capacity)
         self.target_regimes = target_regimes or []
-        self.warmup_steps = warmup_steps  # warmup 동안은 regime 필터 없이 전부 저장
+        self.warmup_steps = warmup_steps
         self._push_count = 0
 
-    def push(self, state, action, reward, next_state, done, current_regimes_dict):
+    def push(self, state, action, reward, next_state, done, current_regimes_dict, in_pos=False):
         self._push_count += 1
-        if self._push_count < self.warmup_steps:
-            # warmup 구간: regime 필터 없이 전부 저장 → buffer 빠르게 채움
+        if self._push_count < self.warmup_steps or in_pos:
             self.buffer.append((state, action, reward, next_state, done))
             return
-        # warmup 이후: 주특기 레짐 100%, 기타 10%
         is_target = any(current_regimes_dict.get(r, 0.0) == 1.0 for r in self.target_regimes)
         if is_target or random.random() < 0.1:
             self.buffer.append((state, action, reward, next_state, done))
@@ -487,45 +1334,80 @@ class RegimeReplayBuffer:
 
     def __len__(self): return len(self.buffer)
 
-
 class PrioritizedRegimeReplayBuffer(RegimeReplayBuffer):
-    """TD-error 기반 우선순위 샘플링으로 어려운 샘플에 집중"""
-    def __init__(self, capacity=150000, target_regimes=None, warmup_steps=8000,
-                 alpha=0.6, beta=0.4, beta_anneal_steps=2_000_000):
-        super().__init__(capacity, target_regimes, warmup_steps)
-        self.priorities         = deque(maxlen=capacity)
+    def __init__(self, capacity=200000, target_regimes=None, warmup_steps=14000,
+                 alpha=0.8, beta=0.2, beta_anneal_steps=600_000):
+        self.target_regimes     = target_regimes or []
+        self.warmup_steps       = warmup_steps
+        self._push_count        = 0
+        self._total_stored      = 0
+        self._cap               = capacity
+        self._ptr               = 0
+        self._size              = 0
+        self._buf_s             = None
+        self._buf_a             = np.empty(capacity, np.int32)
+        self._buf_r             = np.empty(capacity, np.float32)
+        self._buf_ns            = None
+        self._buf_d             = np.empty(capacity, np.bool_)
+        self._priorities        = np.zeros(capacity, np.float32)
         self.alpha              = alpha
         self.beta               = beta
         self._beta_start        = beta
         self._beta_anneal_steps = beta_anneal_steps
         self.max_priority       = 1.0
 
-    def push(self, state, action, reward, next_state, done, current_regimes_dict):
-        prev_len = len(self.buffer)
-        super().push(state, action, reward, next_state, done, current_regimes_dict)
-        if len(self.buffer) > prev_len:  # 실제로 추가된 경우에만 우선순위 추가
-            self.priorities.append(self.max_priority)
+    def push(self, state, action, reward, next_state, done, current_regimes_dict, in_pos=False):
+        self._push_count += 1
+        should_add = False
+        if self._push_count < self.warmup_steps or in_pos:
+            should_add = True
+        else:
+            is_target = any(current_regimes_dict.get(r, 0.0) == 1.0 for r in self.target_regimes)
+            if is_target or random.random() < 0.1:
+                should_add = True
+        if not should_add:
+            return
+        if self._buf_s is None:
+            sdim = len(state)
+            self._buf_s  = np.empty((self._cap, sdim), np.float32)
+            self._buf_ns = np.empty((self._cap, sdim), np.float32)
+        is_target = any(current_regimes_dict.get(r, 0.0) == 1.0 for r in self.target_regimes)
+        init_priority = self.max_priority * (1.5 if (self._push_count < self.warmup_steps and is_target) else 1.0)
+        p = self._ptr
+        self._buf_s[p]      = state
+        self._buf_a[p]      = action
+        self._buf_r[p]      = reward
+        self._buf_ns[p]     = next_state
+        self._buf_d[p]      = done
+        self._priorities[p] = init_priority
+        self._ptr          = (p + 1) % self._cap
+        self._size         = min(self._size + 1, self._cap)
+        self._total_stored += 1
 
     def sample(self, batch_size):
-        # beta 어닐링: 0.4 → 1.0 (중요도 샘플링 보정 강화)
-        self.beta = min(1.0, self._beta_start + (1.0 - self._beta_start) * (self._push_count / self._beta_anneal_steps))
-        pri   = np.array(list(self.priorities), dtype=np.float32) ** self.alpha
+        self.beta = min(1.0, self._beta_start + (1.0 - self._beta_start) * (self._total_stored / self._beta_anneal_steps))
+        pri   = self._priorities[:self._size] ** self.alpha
         probs = pri / (pri.sum() + 1e-8)
-        indices = np.random.choice(len(self.buffer), batch_size, p=probs, replace=False)
-        weights = (1.0 / (len(self.buffer) * probs[indices] + 1e-8)) ** self.beta
+        indices = np.random.choice(self._size, batch_size, p=probs, replace=True)
+        weights = (1.0 / (self._size * probs[indices] + 1e-8)) ** self.beta
         weights = (weights / weights.max()).astype(np.float32)
-        batch   = [self.buffer[i] for i in indices]
-        s, a, r, ns, d = zip(*batch)
-        return np.array(s), np.array(a), np.array(r), np.array(ns), np.array(d), indices, weights
+        return (self._buf_s[indices], self._buf_a[indices],
+                self._buf_r[indices], self._buf_ns[indices],
+                self._buf_d[indices].astype(np.float32), indices, weights)
 
     def update_priorities(self, indices, td_errors):
         for idx, err in zip(indices, td_errors):
             p = float(abs(err) + 1e-6) ** self.alpha
-            self.priorities[idx] = p
-            self.max_priority    = max(self.max_priority, p)
+            self._priorities[idx] = p
+            if p > self.max_priority:
+                self.max_priority = p
 
+    def __len__(self): return self._size
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. 모델 아키텍처 (RobustIQN, Agent)
+# ═══════════════════════════════════════════════════════════════════════════
 class NoisyLinear(nn.Module):
-    """Factorized Gaussian NoisyNet (Fortunato et al. 2017)"""
     def __init__(self, in_features, out_features, sigma_init=0.5):
         super().__init__()
         self.in_features  = in_features
@@ -556,6 +1438,10 @@ class NoisyLinear(nn.Module):
         self.weight_epsilon.copy_(eps_j.ger(eps_i))
         self.bias_epsilon.copy_(eps_j)
 
+    def zero_noise(self):
+        self.weight_epsilon.zero_()
+        self.bias_epsilon.zero_()
+
     def forward(self, x):
         if self.training:
             w = self.weight_mu + self.weight_sigma * self.weight_epsilon
@@ -564,102 +1450,91 @@ class NoisyLinear(nn.Module):
             w, b = self.weight_mu, self.bias_mu
         return F.linear(x, w, b)
 
-
 class RobustIQN(nn.Module):
-    """Plain IQN + NoisyNet — 2-action 공간에서 Dueling 불필요"""
-    def __init__(self, state_dim, action_dim=2, hidden_dim=128):
+    N_ENSEMBLE = 5   # 앙상블 헤드 수
+
+    def __init__(self, state_dim, action_dim=2, hidden_dim=128, raw_state_dim=None):
         super().__init__()
         self.action_dim = action_dim
+        _raw = raw_state_dim if raw_state_dim is not None else state_dim
+
+        # ── [융합 ④] MarketAttentionEncoder ──
+        self.attn_encoder = MarketAttentionEncoder(out_dim=hidden_dim, raw_state_dim=_raw)
         self.feat_extractor = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.SiLU(),
-            nn.Linear(hidden_dim, 64),        nn.LayerNorm(64),         nn.SiLU()
+            nn.Linear(state_dim + hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, 64),                     nn.LayerNorm(64),         nn.SiLU()
         )
-        self.phi    = nn.Linear(64, 64)
-        self.q_head = nn.Sequential(nn.SiLU(), NoisyLinear(64, action_dim))
+        self._market_dim    = _raw - 5
+        self._raw_state_dim = _raw
+        self.context_gate   = nn.Linear(self._market_dim, 64)
+        self.phi            = nn.Linear(64, 64)
+
+        # ── [융합 ⑥] BootstrapEnsembleHeads: 단일 v/a head → N개 앙상블 ──
+        self.ensemble = BootstrapEnsembleHeads(
+            n_heads=self.N_ENSEMBLE, action_dim=action_dim,
+            feat_dim=64, phi_dim=64, sigma_init=0.05
+        )
 
     def reset_noise(self):
-        for m in self.modules():
-            if isinstance(m, NoisyLinear):
-                m.sample_noise()
+        self.ensemble.reset_noise()
 
     def forward(self, state, num_quantiles=8):
+        """
+        Returns:
+            q_mean    : (B, NQ, n_actions) — 앙상블 평균 분위 Q (CVaR에 사용)
+            tau       : (B, NQ, 1)         — 분위 샘플 (기존 IQN loss 호환)
+            epistemic : (B, n_actions)     — 헤드 간 표준편차 (불확실성)
+            q_ensemble: (B, N_HEADS, NQ, n_actions) — 헤드별 원시 출력 (학습용)
+        """
         batch_size = state.size(0)
-        feat    = self.feat_extractor(state)
+
+        last_frame_start = state.shape[1] - self._raw_state_dim
+        market_feat      = state[:, last_frame_start : last_frame_start + FEATURE_DIM]
+        attn_out         = self.attn_encoder(market_feat)
+
+        feat_input = torch.cat([state, attn_out], dim=1)
+        feat       = self.feat_extractor(feat_input)
+
+        market_no_pos = state[:, last_frame_start : last_frame_start + self._market_dim]
+        gate = torch.sigmoid(self.context_gate(market_no_pos))
+        feat = feat * gate                                   # (B, 64)
+
         tau     = torch.rand(batch_size, num_quantiles, 1, device=state.device)
         cos_tau = torch.cos(tau * torch.arange(1, 65, device=state.device).float() * torch.pi)
-        phi_x   = self.phi(cos_tau)
-        shared  = feat.unsqueeze(1).expand(-1, num_quantiles, -1) * phi_x  # (B, NQ, 64)
-        q = self.q_head(shared)                                             # (B, NQ, action_dim)
-        return q, tau
+        phi_x   = self.phi(cos_tau)                          # (B, NQ, 64)
 
-class TransformerIQN(nn.Module):
-    def __init__(self, state_dim, action_dim=2, d_model=64, nhead=4, num_layers=1):
-        super(TransformerIQN, self).__init__()
-        self.action_dim = action_dim
-        self.state_dim = state_dim
-
-        self.feature_embed = nn.Linear(1, d_model)
-        self.pos_encoder = nn.Parameter(torch.randn(1, state_dim, d_model))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))  # [CLS] 토큰
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, dim_feedforward=d_model*2,
-            activation='gelu', batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        self.phi = nn.Linear(64, d_model)
-        self.fc_q = nn.Sequential(nn.SiLU(), nn.Linear(d_model, action_dim))
-
-    def forward(self, state, num_quantiles=32):
-        batch_size = state.size(0)
-
-        x = state.unsqueeze(-1)
-        x = self.feature_embed(x)          # (B, state_dim, d_model)
-        x = x + self.pos_encoder           # positional encoding
-        cls = self.cls_token.expand(batch_size, -1, -1)  # (B, 1, d_model)
-        x = torch.cat([cls, x], dim=1)    # (B, 1+state_dim, d_model)
-        x = self.transformer(x)
-        x = x[:, 0, :]                    # CLS 토큰만 추출 (B, d_model)
-
-        tau = torch.rand(batch_size, num_quantiles, 1).to(state.device)
-        pi_mtx = torch.arange(1, 65).float().to(state.device) * torch.pi
-        cos_tau = torch.cos(tau * pi_mtx)
-        phi_x = self.phi(cos_tau)
-
-        x_tile = x.unsqueeze(1).expand(-1, num_quantiles, -1)
-        q_quantiles = self.fc_q(x_tile * phi_x)  # (B, NQ, action_dim)
-
-        return q_quantiles, tau
+        q_mean, epistemic, q_ensemble = self.ensemble(feat, phi_x)
+        return q_mean, tau, epistemic, q_ensemble
 
 class IQNAgent:
-    NUM_QUANTILES = 8  # ✅ 32 → 8: ~3x 속도 향상, 학습 품질 유지
+    NUM_QUANTILES   = 32
 
-    def __init__(self, model, lr=5e-5, gamma=0.99, tau=0.005, device='cuda'):
+    def __init__(self, model, lr=5e-5, gamma=0.99, tau=0.005, device='cuda', cvar_threshold=0.25):
         self.model = model
-        # RobustIQN / TransformerIQN 모두 호환
-        if hasattr(model, 'feat_extractor'):
-            self.state_dim = model.feat_extractor[0].in_features
-        else:
-            self.state_dim = model.pos_encoder.shape[1]
-        self.target_model = type(model)(self.state_dim, model.action_dim).to(device)
-        self.target_model.load_state_dict(model.state_dict(), strict=False)
-        self.target_model.eval()  # 타깃 네트워크는 항상 weight_mu만 사용 (노이즈 없음)
+        self.state_dim = model.feat_extractor[0].in_features
+        self.target_model = copy.deepcopy(model).to(device)
+        self.target_model.eval()
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
         self.memory = None
         self.gamma = gamma
         self.tau = tau
         self.device = device
+        self.cvar_threshold = cvar_threshold
 
-    def act(self, state, eps=0.0):  # eps 하위호환 유지, 실제 미사용
+    def act(self, state, eps=0.0):
+        if eps > 0.0 and random.random() < eps:
+            return random.randrange(self.model.action_dim)
         if self.model.training and hasattr(self.model, 'reset_noise'):
             self.model.reset_noise()
         state_ts = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q = self.model(state_ts, num_quantiles=self.NUM_QUANTILES)[0].mean(dim=1).squeeze(0)
+            q_mean, tau, epistemic, _ = self.model(state_ts, num_quantiles=self.NUM_QUANTILES)
+            # 앙상블 평균 분위로 CVaR 계산
+            sort_idx = tau[0, :, 0].argsort()
+            q_sorted = q_mean[0][sort_idx]
+            cvar_k   = max(1, int(self.NUM_QUANTILES * self.cvar_threshold))
+            q = q_sorted[:cvar_k].mean(dim=0)
         return torch.argmax(q).item()
-
-    ENTROPY_COEFF = 0.02
 
     def update(self, batch_size):
         if len(self.memory) < batch_size: return
@@ -678,34 +1553,58 @@ class IQNAgent:
         NQ = self.NUM_QUANTILES
         if hasattr(self.model, 'reset_noise'):
             self.model.reset_noise()
-        q, tau_online = self.model(s, num_quantiles=NQ)
-        q_a = q.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+
+        # ── 앙상블 forward ──
+        q_mean, tau_online, _, q_ensemble = self.model(s, num_quantiles=NQ)
+        N_HEADS = q_ensemble.shape[1]
 
         with torch.no_grad():
-            next_actions = self.model(ns, num_quantiles=NQ)[0].mean(dim=1).argmax(dim=1, keepdim=True)
-            q_target, _  = self.target_model(ns, num_quantiles=NQ)
-            q_target_a   = q_target.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
-            target = r + self.gamma * (1 - d) * q_target_a
+            self.model.eval()
+            next_q_mean, _, _, _ = self.model(ns, num_quantiles=NQ)
+            next_actions = next_q_mean.mean(dim=1).argmax(dim=1, keepdim=True)  # (B, 1)
+            self.model.train()
+            tgt_q_mean, _, _, _ = self.target_model(ns, num_quantiles=NQ)
+            q_target_a = tgt_q_mean.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+            target = r + self.gamma * (1 - d) * q_target_a   # (B, NQ)
 
-        td_error  = target.unsqueeze(1) - q_a.unsqueeze(2)
-        huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
-        tau_exp   = tau_online  # (B, NQ, 1) → 온라인 quantile 차원으로 브로드캐스트
-        indicator = (td_error.detach() < 0).float()
-        loss_per_sample = (torch.abs(tau_exp - indicator) * huber).mean(dim=1).mean(dim=1)  # (B,)
-
+        # PER 가중치 준비 (없으면 균일 가중치 1.0)
         if is_per:
-            loss = (loss_per_sample * per_w).mean()
-            # TD-error로 우선순위 업데이트
-            td_err_np = td_error.detach().abs().mean(dim=(1, 2)).cpu().numpy()
-            self.memory.update_priorities(per_indices, td_err_np)
+            w_tensor = per_w   # already FloatTensor on device (set above)
+            # priority 업데이트: 앙상블 평균 TD error 사용
+            with torch.no_grad():
+                q_mean_a = q_mean.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+                td_mean  = (target - q_mean_a).abs().mean(dim=1).cpu().numpy()
+            self.memory.update_priorities(per_indices, td_mean)
         else:
-            loss = loss_per_sample.mean()
+            w_tensor = torch.ones(s.shape[0], device=self.device)
 
-        # 엔트로피 정규화 (policy collapse 방지)
-        q_mean  = q.detach().mean(dim=1)                        # (B, action_dim)
-        probs   = F.softmax(q_mean, dim=-1)
-        entropy = -(probs * (probs + 1e-8).log()).sum(dim=-1)   # (B,)
-        loss    = loss - self.ENTROPY_COEFF * entropy.mean()
+        # ── 헤드별 부트스트랩 마스크 + PER 가중치 적용 quantile loss ──
+        total_loss = torch.tensor(0.0, device=self.device)
+        valid_heads = 0
+        for h in range(N_HEADS):
+            # 부트스트랩: 배치의 80%만 사용 (헤드별 독립)
+            mask = torch.rand(s.shape[0], device=self.device) < 0.8
+            if mask.sum() < 4:
+                continue
+
+            q_h   = q_ensemble[:, h, :, :]                                        # (B, NQ, n_actions)
+            q_h_a = q_h.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)   # (B, NQ)
+
+            q_h_a_m   = q_h_a[mask]      # (Bm, NQ)
+            target_m  = target[mask]      # (Bm, NQ)
+            tau_m     = tau_online[mask]  # (Bm, NQ, 1)
+            w_m       = w_tensor[mask]    # (Bm,)
+
+            td_error  = target_m.unsqueeze(1) - q_h_a_m.unsqueeze(2)   # (Bm, NQ, NQ)
+            huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
+            indicator = (td_error.detach() < 0).float()
+            # 샘플별 loss (Bm,) → PER 가중치 적용 후 평균
+            loss_per_sample = (torch.abs(tau_m - indicator) * huber).mean(dim=1).mean(dim=1)
+            loss_h    = (loss_per_sample * w_m).mean()
+            total_loss = total_loss + loss_h
+            valid_heads += 1
+
+        loss = total_loss / max(valid_heads, 1)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -716,25 +1615,189 @@ class IQNAgent:
             tp.data.copy_(self.tau * p.data + (1 - self.tau) * tp.data)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. 실전 메타 라우터 (MoEIQNTrader) — 8-Agent 페어 구조
-#    진입: Bull / Bear / Sup / Res
-#    청산: Bull_Exit / Bear_Exit / Sup_Exit / Res_Exit
+# 4. REINFORCE 기반 7-Way GatingNet 메타 라우터
 # ═══════════════════════════════════════════════════════════════════════════
-class MoEIQNTrader:
-    def __init__(self, models_dict, df, device='cuda'):
-        # models_dict: {'bull_long': model, 'bull_short': model, ... 총 10개}
-        self.models = {k: v.eval() for k, v in models_dict.items()}
-        self.df = df
-        self.device = device
-        self._active_pair = None  # 진입시킨 에이전트 이름 (예: 'bull_long')
+class GatingNet7(nn.Module):
+    """시장 상태 → [flat, bull, bear, chop_L, chop_S, norm_L, norm_S] (7-way softmax)"""
+    def __init__(self, state_dim, hidden_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.SiLU(),
+            nn.Linear(hidden_dim, 32), nn.SiLU(),
+            nn.Linear(32, 7) 
+        )
+
+    def forward(self, x):
+        logits = self.net(x)
+        return F.softmax(logits / 0.5, dim=-1)
+
+def _cvar_q_rl(model, state_ts, nq=32, cvar_threshold=0.25):
+    with torch.no_grad():
+        q_mean, tau, _, _ = model(state_ts, num_quantiles=nq)
+        sort_idx = tau[0, :, 0].argsort()
+        k = max(4, int(nq * cvar_threshold))
+        return q_mean[0][sort_idx][:k].mean(dim=0)
+
+def _run_gating_trajectory(gating_net, models, df_train, device, n_steps, _ADV_SCALE,
+                            hmm_detector=None, mtf_features=None):
+    """GatingNet 단일 궤적 실행 → (log_probs, alpha_returns, entropies) 반환.
+    궤적을 함수로 분리해 n_trajectories 반복 시 코드 중복 없이 재사용."""
+    start    = random.randint(0, max(0, len(df_train) - n_steps - 10))
+    env      = TradingEnv(df_train, phase='val', agent_role='neutral', fee=0.0005,
+                          hmm_detector=hmm_detector, mtf_features=mtf_features)
+    state_np = env.reset(start_idx=start)
+
+    log_probs:   list = []
+    rewards:     list = []
+    bnh_rewards: list = []
+    entropies:   list = []
+
+    for _ in range(n_steps):
+        state_ts = torch.FloatTensor(state_np).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            q_bull         = _cvar_q_rl(models['bull'],         state_ts, cvar_threshold=0.60)
+            q_bear         = _cvar_q_rl(models['bear'],         state_ts, cvar_threshold=0.40)
+            q_chop_long    = _cvar_q_rl(models['chop_long'],    state_ts, cvar_threshold=0.50)
+            q_chop_short   = _cvar_q_rl(models['chop_short'],   state_ts, cvar_threshold=0.50)
+            q_normal_long  = _cvar_q_rl(models['normal_long'],  state_ts, cvar_threshold=0.50)
+            q_normal_short = _cvar_q_rl(models['normal_short'], state_ts, cvar_threshold=0.50)
+
+        def _adv(q):
+            best = q.argmax().item()
+            if best == 0 or q[best].item() <= 0:
+                return torch.tensor(0., device=device)
+            return torch.clamp(q[best] - q[0], min=0., max=0.1) * _ADV_SCALE
+
+        w = gating_net(state_ts)[0]  # (7,)
+        scores = torch.stack([
+            w[0],
+            w[1] * (1 + _adv(q_bull)),
+            w[2] * (1 + _adv(q_bear)),
+            w[3] * (1 + _adv(q_chop_long)),
+            w[4] * (1 + _adv(q_chop_short)),
+            w[5] * (1 + _adv(q_normal_long)),
+            w[6] * (1 + _adv(q_normal_short)),
+        ])
+
+        probs    = scores / (scores.sum() + 1e-8)
+        probs    = probs * 0.9 + 0.02
+        dist     = torch.distributions.Categorical(probs=probs)
+        gate_act = dist.sample()
+        log_probs.append(dist.log_prob(gate_act))
+        entropies.append(dist.entropy())
+
+        g = gate_act.item()
+        if   g == 0: env_action = 0
+        elif g == 1: env_action = 1 if int(q_bull.argmax().item())         == 1 else 0
+        elif g == 2: env_action = 2 if int(q_bear.argmax().item())         == 1 else 0
+        elif g == 3: env_action = 1 if int(q_chop_long.argmax().item())    == 1 else 0
+        elif g == 4: env_action = 2 if int(q_chop_short.argmax().item())   == 1 else 0
+        elif g == 5: env_action = 1 if int(q_normal_long.argmax().item())  == 1 else 0
+        else:        env_action = 2 if int(q_normal_short.argmax().item()) == 1 else 0
+
+        cur_idx = env.current_step
+        next_state, reward, done, _ = env.step(env_action)
+        nxt_idx  = min(env.current_step, len(env._close_np) - 1)
+        bnh_step = float((env._close_np[nxt_idx] - env._close_np[cur_idx])
+                         / (env._close_np[cur_idx] + 1e-8)) * 500.0
+
+        rewards.append(reward)
+        bnh_rewards.append(bnh_step)
+        state_np = next_state
+        if done:
+            break
+
+    if len(rewards) < 2:
+        return None
+
+    # BnH 알파 기반 누적 리턴 계산
+    G, G_bnh = 0.0, 0.0
+    alpha_returns = []
+    for r, b in zip(reversed(rewards), reversed(bnh_rewards)):
+        G     = r + 0.99 * G
+        G_bnh = b + 0.99 * G_bnh
+        alpha_returns.insert(0, G - G_bnh)
+
+    ret_t = torch.FloatTensor(alpha_returns).to(device)
+    ret_t = (ret_t - ret_t.mean()) / (ret_t.std() + 1e-8)
+
+    return torch.stack(log_probs), ret_t, torch.stack(entropies)
+
+
+def train_gating_step_rl(gating_net, optimizer, models, df_train, device,
+                          n_steps=1500, n_trajectories=3, hmm_detector=None, mtf_features=None):
+    """REINFORCE로 GatingNet7 학습 (6개 에이전트는 frozen).
+
+    n_trajectories: 궤적 반복 횟수.
+    - 단일 궤적(n=1)은 분산이 크고 특정 시장 구간에 과적합될 위험이 있음.
+    - 여러 궤적의 loss를 평균 → gradient 분산 감소, 다양한 시장 구간 커버.
+    - 에폭당 호출 주기가 짧아진 만큼(ep%10) n_steps를 유지하되 궤적 수로 안정화.
+    """
+    for m in models.values(): m.eval()
+    gating_net.train()
+
+    _ADV_SCALE = 10.0
+    total_loss = torch.tensor(0.0, device=device)
+    valid_count = 0
+
+    for _ in range(n_trajectories):
+        result = _run_gating_trajectory(gating_net, models, df_train, device, n_steps, _ADV_SCALE,
+                                        hmm_detector=hmm_detector, mtf_features=mtf_features)
+        if result is None:
+            continue
+        log_probs_t, ret_t, entropies_t = result
+        traj_loss = -(log_probs_t * ret_t.detach()).mean() - 0.01 * entropies_t.mean()
+        total_loss = total_loss + traj_loss
+        valid_count += 1
+
+    if valid_count == 0:
+        return 0.0
+
+    loss = total_loss / valid_count  # 궤적 평균 loss
+    optimizer.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(gating_net.parameters(), 0.5)
+    optimizer.step()
+    return loss.item()
+
+
+class GatingRouter7:
+    """GatingNet7 기반 7-Way 메타 라우터 (HMM + Kelly 통합 버전)
+
+    변경 사항:
+        - __init__: hmm_detector, kelly_sizer 인자 추가
+        - _state_tensor: HMM 피처 5차원 concat (STATE_DIM 확장과 일치)
+        - decide: 포지션 진입 시 KellyCriterionSizer로 leverage_rate 결정
+                  (기존 adv_n 기반 단순 레버리지 → IQN 분위 기반 Kelly 대체)
+        - decide: HMM 상태 정보를 info dict에 추가 (디버깅/모니터링)
+    """
+    _W_IDX = {'flat': 0, 'bull': 1, 'bear': 2, 'chop_long': 3, 'chop_short': 4, 'normal_long': 5, 'normal_short': 6}
+    _CVAR_THRESH = {'bull': 0.60, 'bear': 0.40, 'chop_long': 0.50, 'chop_short': 0.50, 'normal_long': 0.50, 'normal_short': 0.50}
+
+    def __init__(self, models_dict, gating_net, device='cuda',
+                 hmm_detector: OnlineHMMDetector = None,
+                 kelly_sizer:  KellyCriterionSizer = None,
+                 mtf_features: MultiTimeframeFeatures = None):
+        self.models       = {k: v.eval() for k, v in models_dict.items()}
+        self.gating_net   = gating_net.eval()
+        self.device       = device
+        self._active_agent = None
+        self._frame_stack  = deque(maxlen=STACK_N)
+        self.hmm     = hmm_detector
+        self.kelly   = kelly_sizer or KellyCriterionSizer()
+        self.mtf     = mtf_features
+        # ── [융합 ⑥] EpistemicUncertaintyGate (에이전트별 독립 인스턴스) ──
+        self.epist_gate = {name: EpistemicUncertaintyGate() for name in models_dict}
 
     def _state_tensor(self, features, pos):
-        preds   = np.array([features.get(c, 0.) for c in MODEL_PRED],   dtype=np.float32)
-        confs   = np.array([features.get(c, 0.) for c in MODEL_CONF],   dtype=np.float32)
+        preds   = np.array([features.get(c, 0.) for c in STATE_PRED],   dtype=np.float32)
+        confs   = np.array([features.get(c, 0.) for c in STATE_CONF],   dtype=np.float32)
         stats   = np.array([preds.mean(), preds.std(), confs.mean()],    dtype=np.float32)
-        elite   = np.array([features.get(c, 0.) for c in ELITE_COLS],   dtype=np.float32)
-        alpha7  = np.array([features.get(c, 0.) for c in ALPHA_7_COLS], dtype=np.float32)
+        elite   = np.array([features.get(c, 0.) for c in STATE_ELITE],  dtype=np.float32)
+        alpha7  = np.array([features.get(c, 0.) for c in STATE_ALPHA],  dtype=np.float32)
         regimes = np.array([features.get(c, 0.) for c in REGIME_COLS],  dtype=np.float32)
+        synth   = np.array([features.get(c, 0.) for c in STATE_SYNTH],  dtype=np.float32)
         cur_p   = features.get('close', 1.0)
         pt      = pos.get('type')
         pos_arr = np.array([
@@ -744,72 +1807,158 @@ class MoEIQNTrader:
             pos.get('mdd', 0.),
             pos.get('hold_norm', 0.)
         ], dtype=np.float32)
-        vec = np.concatenate([preds, confs, stats, elite, alpha7, regimes, pos_arr])
+
+        # ── HMM 피처 (5차원) ──
+        if self.hmm is not None:
+            hmm_feat = self.hmm.get_features(features)
+        else:
+            hmm_feat = np.zeros(HMM_DIM, dtype=np.float32)
+
+        # ── MTF 피처 (7차원) ──
+        if self.mtf is not None:
+            # features dict에 현재 스텝 인덱스가 없으므로 close 기반으로 근사
+            # val_env에서 직접 호출되는 경우 인덱스를 features에 'step_idx'로 전달
+            _step_idx = int(features.get('_step_idx', -1))
+            mtf_feat = self.mtf.get(_step_idx)
+        else:
+            mtf_feat = np.zeros(MTF_DIM, dtype=np.float32)
+
+        raw = np.concatenate([preds, confs, stats, elite, alpha7, regimes, synth, pos_arr, hmm_feat, mtf_feat])
+        self._frame_stack.append(raw)
+        pad    = STACK_N - len(self._frame_stack)
+        frames = [np.zeros(STATE_DIM, np.float32)] * pad + list(self._frame_stack)
+        vec    = np.concatenate(frames)
         return torch.tensor(vec, dtype=torch.float32).unsqueeze(0).to(self.device)
+
+    def _cvar_q(self, model, state, agent_name='normal_long'):
+        threshold = self._CVAR_THRESH.get(agent_name, 0.50)
+        nq = 32
+        with torch.no_grad():
+            q_mean, tau, epistemic, _ = model(state, num_quantiles=nq)
+            sort_idx = tau[0, :, 0].argsort()
+            k = max(4, int(nq * threshold))
+            return q_mean[0][sort_idx][:k].mean(dim=0).cpu(), epistemic[0].cpu()
+
+    def _full_quantiles(self, model, state, nq=32):
+        """Kelly 계산용 + epistemic 반환 (nq, n_actions), (n_actions,)."""
+        with torch.no_grad():
+            q_mean, tau, epistemic, _ = model(state, num_quantiles=nq)
+            sort_idx = tau[0, :, 0].argsort()
+            return q_mean[0][sort_idx].cpu(), epistemic[0].cpu()
 
     def decide(self, features, pos):
         cur_pos = pos.get('type')
         state   = self._state_tensor(features, pos)
 
-        # 현재 레짐 판단
-        current_regime = None
-        for r in ['bull', 'bear', 'chop', 'whipsaw', 'normal']:
-            if features.get(f'regime_{r}', 0.) == 1.0:
-                current_regime = r
-                break
-        if current_regime is None: current_regime = 'normal'
+        # ── HMM 상태 스냅샷 (info 기록용) ──
+        if self.hmm is not None:
+            hmm_probs = self.hmm._alpha.copy()  # (4,) 사후확률
+            hmm_state = int(np.argmax(hmm_probs))
+            hmm_names = ['bull-trend', 'bear-trend', 'hv-chop', 'lv-range']
+            _hmm_info = {'hmm_state': hmm_names[hmm_state],
+                         'hmm_probs': hmm_probs.round(3).tolist()}
+        else:
+            _hmm_info = {}
 
-        q_vals = {}
-        advs = {}
-        kellys = {}
+        # ── 포지션 유지 / 청산 판단 ──
+        if cur_pos is not None:
+            agent_name = self._active_agent or ('normal_long' if cur_pos == 'LONG' else 'normal_short')
+            q_cvar, _  = self._cvar_q(self.models[agent_name], state, agent_name=agent_name)
+            best       = int(q_cvar.argmax().item())
 
-        with torch.no_grad():
-            for name, model in self.models.items():
-                q = model(state)[0].mean(dim=1).squeeze(0).cpu().numpy()
-                q_vals[name] = q
-                advs[name] = q[1] - q[0]
-                kellys[name] = max(0., advs[name] / (q.std() + 0.05))
+            eval_best = best
+            if agent_name in ['bear', 'chop_short', 'normal_short'] and best == 1:
+                eval_best = 2
 
-        CLOSE_KELLY_THRESHOLD = 0.5
-
-        # ── 포지션 있음: 진입했던 에이전트의 판단으로 청산 ──────────────────
-        if cur_pos is not None and self._active_pair is not None:
-            active_model_q = q_vals[self._active_pair]
-
-            # 신호 1: 담당 에이전트가 Action 1(청산)을 강하게 평가함 (최소 보유 필터)
-            exit_signal = (active_model_q[1] > active_model_q[0]) and (pos.get('hold_norm', 0.0) >= MIN_HOLD_NORM_VAL)
-
-            # 신호 2: 반대 방향 에이전트(현재 레짐 기준)의 강한 진입 신호
-            opp_name = f"{current_regime}_short" if cur_pos == 'LONG' else f"{current_regime}_long"
-            opp_signal = (advs.get(opp_name, 0) > 0) and (kellys.get(opp_name, 0) > CLOSE_KELLY_THRESHOLD)
-
-            if exit_signal or opp_signal:
-                active = self._active_pair
-                self._active_pair = None
-                return 0, 0.0, {'agent': f'{active}_exit+opp' if opp_signal else f'{active}_exit'}
+            wants_reverse = (cur_pos == 'LONG' and eval_best == 2) or \
+                            (cur_pos == 'SHORT' and eval_best == 1)
+            if best == 0 or wants_reverse:
+                self._active_agent = None
+                return 0, 0.0, {'agent': f'{agent_name}_exit', **_hmm_info}
             else:
                 hold_action = 1 if cur_pos == 'LONG' else 2
-                return hold_action, 0.0, {'agent': 'HOLD'}
+                return hold_action, 0.0, {'agent': 'HOLD', **_hmm_info}
 
-        # ── 포지션 없음: 현재 레짐의 롱/숏 에이전트 중 우위 판단 ─────────────
-        long_agent = f"{current_regime}_long"
-        short_agent = f"{current_regime}_short"
+        # ── 신규 진입 판단 ──
+        with torch.no_grad():
+            w = self.gating_net(state)[0].cpu()
 
-        adv_l, adv_s = advs[long_agent], advs[short_agent]
-        kel_l, kel_s = kellys[long_agent], kellys[short_agent]
+        q_map      = {}
+        epist_map  = {}
+        for name in ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']:
+            q_map[name], epist_map[name] = self._cvar_q(self.models[name], state, agent_name=name)
 
-        final_action, active_agent, selected_kelly = 0, "NONE", 0.0
+        def _adv_n(q):
+            best = q.argmax().item()
+            if best == 0 or float(q[best]) <= 0:
+                return 0.0
+            return float(min(max(0., q[best] - q[0]), 0.1) * 10.0)
 
-        if adv_l > 0 and adv_l >= adv_s:
-            final_action, active_agent, selected_kelly, self._active_pair = 1, long_agent.upper(), kel_l, long_agent
-        elif adv_s > 0:
-            final_action, active_agent, selected_kelly, self._active_pair = 2, short_agent.upper(), kel_s, short_agent
+        scores = {
+            'flat':         w[0].item(),
+            'bull':         w[1].item() * (1 + _adv_n(q_map['bull'])),
+            'bear':         w[2].item() * (1 + _adv_n(q_map['bear'])),
+            'chop_long':    w[3].item() * (1 + _adv_n(q_map['chop_long'])),
+            'chop_short':   w[4].item() * (1 + _adv_n(q_map['chop_short'])),
+            'normal_long':  w[5].item() * (1 + _adv_n(q_map['normal_long'])),
+            'normal_short': w[6].item() * (1 + _adv_n(q_map['normal_short'])),
+        }
 
-        if final_action == 0:
-            self._active_pair = None
+        long_edge  = scores['bull'] + scores.get('normal_long', 0.) * 0.5 - scores['flat']
+        short_edge = scores['bear'] + scores.get('normal_short', 0.) * 0.5 - scores['flat']
+        _edge_info = {'long_edge': long_edge, 'short_edge': short_edge}
 
-        leverage_rate = np.clip(selected_kelly * 0.5, 0.1, 1.0) if final_action != 0 else 0.0
-        return final_action, leverage_rate, {'agent': active_agent, 'kelly': selected_kelly}
+        best_name = max(scores, key=scores.get)
+        _w_arr = w.numpy()
+        if best_name == 'flat':
+            return 0, 0.0, {'agent': 'FLAT', **_edge_info, 'kelly': 0.0,
+                             'gating_w': _w_arr, **_hmm_info}
+
+        q_sel        = q_map[best_name]
+        agent_action = int(q_sel.argmax().item())
+        if agent_action == 0:
+            return 0, 0.0, {'agent': f'{best_name}_declined', **_edge_info,
+                             'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+
+        q_vals = q_sel.float()
+        q_std  = q_vals.std().item()
+        q_adv  = float(q_vals[agent_action] - q_vals[0])
+        q_z    = q_adv / (q_std + 1e-6)
+
+        if q_z < 0.5:
+            return 0, 0.0, {'agent': f'{best_name}_low_conviction(z={q_z:.2f})',
+                             **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+
+        # ── Kelly 사이징 ──
+        gating_conf  = float(w[self._W_IDX[best_name]].item())
+        q_full, epist_full = self._full_quantiles(self.models[best_name], state)
+        base_lev     = self.kelly.compute(q_full, gating_confidence=gating_conf)
+        kelly_stats  = self.kelly.log_stats(q_full)
+
+        # ── [융합 ⑥] EpistemicUncertaintyGate 적용 ──
+        epist_std    = float(epist_map[best_name][agent_action].item())
+        allow, lev, epist_info = self.epist_gate[best_name].gate(epist_std, base_lev)
+
+        if not allow:
+            return 0, 0.0, {'agent': f'{best_name}_epist_blocked',
+                             **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr,
+                             **_hmm_info, **epist_info}
+
+        val_action = agent_action
+        if best_name in ['bear', 'chop_short', 'normal_short'] and agent_action == 1:
+            val_action = 2
+
+        self._active_agent = best_name
+        return val_action, lev, {
+            'agent':   best_name,
+            'score':   scores[best_name],
+            'kelly':   lev,
+            **kelly_stats,
+            **_edge_info,
+            'gating_w': _w_arr,
+            **_hmm_info,
+            **epist_info,
+        }
 
 
 
@@ -828,47 +1977,85 @@ def train():
 
     MAX_EP    = 4096
     _safe_end = len(df_train) - MAX_EP - 1
-    
-    # 5대 레짐 매핑
-    regime_keys = ['bull', 'bear', 'chop', 'whipsaw', 'normal']
-    regime_starts = {}
-    for r in regime_keys:
-        idx = [i for i in range(_safe_end) if df_train_reg[i, REGIME_COLS.index(f'regime_{r}')] == 1.0]
-        regime_starts[r] = idx if len(idx) >= 100 else list(range(_safe_end))
 
-    # 💡 10개 에이전트 동적 생성 (딕셔너리 기반 리팩토링)
-    agent_names = [f"{r}_long" for r in regime_keys] + [f"{r}_short" for r in regime_keys]
+    agent_configs = {
+        'bull':         {'action_dim': 2, 'target_regimes': ['regime_bull'],                   'cvar_threshold': 0.60},
+        'bear':         {'action_dim': 2, 'target_regimes': ['regime_bear'],                   'cvar_threshold': 0.40},
+        'chop_long':    {'action_dim': 2, 'target_regimes': ['regime_chop', 'regime_whipsaw'], 'cvar_threshold': 0.50},
+        'chop_short':   {'action_dim': 2, 'target_regimes': ['regime_chop', 'regime_whipsaw'], 'cvar_threshold': 0.50},
+        'normal_long':  {'action_dim': 2, 'target_regimes': ['regime_normal'],                 'cvar_threshold': 0.50},
+        'normal_short': {'action_dim': 2, 'target_regimes': ['regime_normal'],                 'cvar_threshold': 0.50},
+    }
+    agent_names = list(agent_configs.keys())
+
+    ri = {r: REGIME_COLS.index(f'regime_{r}') for r in ['bull', 'bear', 'chop', 'whipsaw', 'normal']}
     
-    envs, models, agents = {}, {}, {}
+    regime_starts = {
+        'bull':         [i for i in range(_safe_end) if df_train_reg[i, ri['bull']] == 1.0],
+        'bear':         [i for i in range(_safe_end) if df_train_reg[i, ri['bear']] == 1.0],
+        'chop_long':    [i for i in range(_safe_end) if df_train_reg[i, ri['chop']] == 1.0 or df_train_reg[i, ri['whipsaw']] == 1.0],
+        'chop_short':   [i for i in range(_safe_end) if df_train_reg[i, ri['chop']] == 1.0 or df_train_reg[i, ri['whipsaw']] == 1.0],
+        'normal_long':  [i for i in range(_safe_end) if df_train_reg[i, ri['normal']] == 1.0],
+        'normal_short': [i for i in range(_safe_end) if df_train_reg[i, ri['normal']] == 1.0],
+    }
     for name in agent_names:
-        envs[name] = TradingEnv(df_train, phase='train', agent_role=name)
-        models[name] = TransformerIQN(STATE_DIM, 2, d_model=64, nhead=4, num_layers=1).to(device)
-        agents[name] = IQNAgent(models[name], device=device)
-        
-        # 이름 앞부분('bull', 'bear' 등)을 추출하여 타겟 레짐으로 설정
-        target_regime = f"regime_{name.split('_')[0]}"
-        agents[name].memory = PrioritizedRegimeReplayBuffer(150000, target_regimes=[target_regime])
+        if len(regime_starts[name]) < 100:
+            regime_starts[name] = list(range(_safe_end))
+
+    envs, models, agents = {}, {}, {}
+
+    # ── [HMM 초기화 및 학습] 환경 생성 전에 훈련 데이터로 fit ──
+    logger.info("[HMM] OnlineHMMDetector 초기 학습 시작...")
+    hmm_detector = OnlineHMMDetector()
+    hmm_detector.fit(df_train, n_iter=30)
+    kelly_sizer  = KellyCriterionSizer(half_kelly=0.5, min_lev=0.1, max_lev=1.0)
+    logger.info("[HMM] 초기 학습 완료. Kelly Sizer 초기화 완료.")
+
+    # ── [MTF 선계산] 훈련/검증 데이터 각각 1회 계산 후 공유 ──
+    logger.info("[MTF] 훈련 데이터 멀티타임프레임 피처 선계산 중...")
+    mtf_train = MultiTimeframeFeatures(df_train['close'].values.astype(np.float32))
+    logger.info("[MTF] 검증 데이터 멀티타임프레임 피처 선계산 중...")
+    mtf_val   = MultiTimeframeFeatures(df_val['close'].values.astype(np.float32))
+    logger.info("[MTF] 선계산 완료.")
+
+    for name, cfg in agent_configs.items():
+        envs[name] = TradingEnv(df_train, phase='train', agent_role=name, fee=0.0005,
+                                hmm_detector=hmm_detector, mtf_features=mtf_train)
+        models[name] = RobustIQN(STACKED_STATE_DIM, cfg['action_dim'], raw_state_dim=STATE_DIM).to(device)
+        agents[name] = IQNAgent(models[name], device=device, cvar_threshold=cfg['cvar_threshold'])
+        agents[name].memory = PrioritizedRegimeReplayBuffer(
+            200000, target_regimes=cfg['target_regimes'])
+
+    # ── [MAML 초기화] 에이전트 생성 후 ──
+    maml_adapter = MAMLAdapter(agents, device)
+    logger.info("[MAML] MAMLAdapter 초기화 완료 (Reptile / first-order)")
 
     NEP             = 1000
     BATCH           = 512
-    UPDATE_FREQ     = 16
+    UPDATE_FREQ     = 64
     MIN_BUFFER      = 2048
     global_step     = 0
     EPS_START       = 1.0
     EPS_END         = 0.01
-    EPS_DECAY_STEPS = 200000
+    EPS_DECAY_STEPS = 400000
 
     os.makedirs('data/ensemble', exist_ok=True)
     best_val_pnl   = -float('inf')
     best_val_score = -float('inf')
     val_pnl_history: list = []
     start_ep       = 1
-    CHECKPOINT_PATH = 'data/ensemble/train_checkpoint.pth'
+    os.makedirs('data/ensemble/ckpt', exist_ok=True)
+    CHECKPOINT_PATH = 'data/ensemble/ckpt/rl_checkpoint.pth'
+
+    gating_net       = GatingNet7(STACKED_STATE_DIM).to(device)
+    gating_optimizer = torch.optim.Adam(gating_net.parameters(), lr=1e-3)
 
     def _save_checkpoint(epoch):
         save_dict = {
             'global_step': global_step, 'best_val_pnl': best_val_pnl,
-            'best_val_score': best_val_score, 'val_pnl_history': val_pnl_history, 'epoch': epoch
+            'best_val_score': best_val_score, 'val_pnl_history': val_pnl_history, 'epoch': epoch,
+            'gating_net': gating_net.state_dict(),
+            'gating_opt': gating_optimizer.state_dict(),
         }
         for name in agent_names:
             save_dict[f'model_{name}'] = models[name].state_dict()
@@ -880,8 +2067,8 @@ def train():
         arch_ok = True
         for name in agent_names:
             try:
-                models[name].load_state_dict(ckpt[f'model_{name}'])
-                agents[name].target_model.load_state_dict(models[name].state_dict())
+                models[name].load_state_dict(ckpt[f'model_{name}'], strict=False)
+                agents[name].target_model.load_state_dict(models[name].state_dict(), strict=False)
                 agents[name].optimizer.load_state_dict(ckpt[f'opt_{name}'])
             except RuntimeError as e:
                 logger.warning(f"⚠️ [{name}] 아키텍처 불일치로 가중치 스킵 (처음부터 학습): {e}")
@@ -889,6 +2076,17 @@ def train():
         global_step, best_val_pnl = ckpt['global_step'], ckpt['best_val_pnl']
         best_val_score, val_pnl_history = ckpt['best_val_score'], ckpt.get('val_pnl_history', [])
         start_ep = ckpt['epoch'] + 1 if arch_ok else 1
+        
+        if 'gating_net' in ckpt:
+            try:
+                gating_net.load_state_dict(ckpt['gating_net'], strict=False)
+                gating_optimizer.load_state_dict(ckpt['gating_opt'])
+                logger.info("✅ GatingNet7 복원 완료")
+            except RuntimeError as e:
+                logger.warning("⚠️ GatingNet 아키텍처 불일치. 새로 초기화합니다.")
+        else:
+            logger.info("⚠️ 체크포인트에 gating_net 없음 → 새로 초기화")
+            
         if arch_ok:
             logger.info(f"♻️ [복원] ep={ckpt['epoch']} → {start_ep} | best_pnl={best_val_pnl:.2f}%")
         else:
@@ -896,15 +2094,19 @@ def train():
 
     try:
         for ep in range(start_ep, NEP + 1):
-            def pick_start(regime):
-                return random.choice(regime_starts[regime]) if random.random() < 0.7 else random.choice(regime_starts['normal'])
+            def _sample_start(agent_name):
+                pool = regime_starts[agent_name]
+                if pool and random.random() < 0.7:
+                    return random.choice(pool)
+                return random.randint(0, _safe_end)
+
+            start_idx = _sample_start(random.choice(agent_names))
 
             env_states = {}
-            idle_counts = {name: 0 for name in agent_names}
-            
+            ep_rewards  = {name: 0.0 for name in agent_names}
+
             for name in agent_names:
-                regime = name.split('_')[0]
-                env_states[name] = envs[name].reset(pick_start(regime))
+                env_states[name] = envs[name].reset(start_idx)
 
             eps = max(EPS_END, EPS_START - (EPS_START - EPS_END) * (global_step / EPS_DECAY_STEPS))
             done = False
@@ -919,70 +2121,179 @@ def train():
 
                 for name in agent_names:
                     env, agent, s = envs[name], agents[name], env_states[name]
-                    current_regimes = {r: float(df_train_reg[env.current_step, ri]) for ri, r in enumerate(REGIME_COLS)}
+                    current_regimes = {r: float(df_train_reg[env.current_step, col_i]) for col_i, r in enumerate(REGIME_COLS)}
 
                     was_in_pos = env.pos is not None
                     a = agent.act(s, eps)
                     ns, r, d, _ = env.step(a)
 
+                    in_pos = was_in_pos or (env.pos is not None)
                     actually_idle = not was_in_pos and env.pos is None
                     if actually_idle:
-                        # 실제로 포지션 변화가 없는 모든 경우 idle (action 값과 무관)
-                        idle_counts[name] += 1
-                        is_noisy = (current_regimes.get('regime_chop', 0.) == 1.0
-                                    or current_regimes.get('regime_whipsaw', 0.) == 1.0)
-                        idle_penalty = 0.0 if is_noisy else -0.003 * min(idle_counts[name] / 50.0, 1.0)
-                        agent.memory.push(s, a, idle_penalty, ns, d, current_regimes)
+                        agent.memory.push(s, a, r, ns, d, current_regimes, in_pos=False)
+                        ep_rewards[name] += r
                     else:
-                        idle_counts[name] = 0
-                        agent.memory.push(s, a, r, ns, d, current_regimes)
+                        agent.memory.push(s, a, r, ns, d, current_regimes, in_pos=in_pos)
+                        ep_rewards[name] += r
+
+                    # ── [MAML] 레짐별 버퍼에도 경험 수집 ──
+                    cur_hmm = int(np.argmax(hmm_detector._alpha))
+                    maml_adapter.push(s, a, r, ns, d, hmm_state=cur_hmm, agent_name=name)
 
                     env_states[name] = ns
                     done = done or d
+
+                # ── [MAML] 레짐 전환 감지 시 Reptile 적응 (첫 번째 에이전트 기준으로 1회만 체크) ──
+                if global_step % 10 == 0:   # 매 스텝 체크하면 오버헤드 → 10스텝마다
+                    maml_adapter.maybe_adapt(hmm_detector, ep)
 
                 if global_step % UPDATE_FREQ == 0:
                     for name in agent_names:
                         if len(agents[name].memory) >= MIN_BUFFER: agents[name].update(BATCH)
 
-            # ── 에폭 로그 ─────────────────────────────────────────────────
+            _SIGMA_FLOOR = 0.05 / (64 ** 0.5)
             for name in agent_names:
                 env = envs[name]
                 pnl = (env.balance / 10000 - 1) * 100
+                noisy_layers = [m for m in models[name].modules() if isinstance(m, NoisyLinear)]
+                current_floor = _SIGMA_FLOOR if pnl > -3.0 else _SIGMA_FLOOR * 5
+                for nl in noisy_layers:
+                    nl.weight_sigma.data.clamp_(min=current_floor)
+                    nl.bias_sigma.data.clamp_(min=current_floor)
+                avg_sigma = sum(m.weight_sigma.abs().mean().item() for m in noisy_layers) / max(1, len(noisy_layers))
                 logger.info(
-                    f"Ep {ep:04d} [{name}] "
-                    f"PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}% | "
-                    f"buf:{len(agents[name].memory):6d} | eps:{eps:.3f}"
+                    f"Ep {ep:04d} [{name:12s}] "
+                    f"PnL:{pnl:6.1f}% Tr:{env.total_trades:4d} WR:{env.win_rate*100:4.0f}% "
+                    f"Rew:{ep_rewards[name]:7.3f} | "
+                    f"buf:{len(agents[name].memory):6d} | eps:{eps:.3f} | σ:{avg_sigma:.4f}"
                 )
 
-            # ── Val 평가 (10에폭마다) ─────────────────────────────────────
+            # GatingNet 학습: ep%10, ep>=50부터
+            # 기존 ep%50(19회/1000ep) → ep%10(95회/1000ep)으로 주기 단축
+            # 에이전트 업데이트 밀도(ep당 64회) 대비 GatingNet(ep당 0.02회)의
+            # 3,200:1 불균형을 32:1 수준으로 완화
+            # ep>=50: 에이전트가 ~3,200회 업데이트된 후 gating 학습 시작 (커리큘럼 유지)
+            if ep % 10 == 0 and ep >= 50:
+                g_loss = train_gating_step_rl(
+                    gating_net, gating_optimizer, models, df_train, device,
+                    n_steps=1500, n_trajectories=3, hmm_detector=hmm_detector,
+                    mtf_features=mtf_train)
+                logger.info(f"    [GATING] ep={ep} loss={g_loss:.4f} (3 trajectories)")
+
             if ep % 10 == 0:
-                router = MoEIQNTrader(models, df_val, device)
-                val_env = TradingEnv(df_val, phase='val', agent_role='neutral')
+                router  = GatingRouter7(models, gating_net, device,
+                                        hmm_detector=hmm_detector,
+                                        kelly_sizer=kelly_sizer,
+                                        mtf_features=mtf_val)
+                val_env = TradingEnv(df_val, phase='val', agent_role='neutral', fee=0.0005,
+                                     hmm_detector=hmm_detector, mtf_features=mtf_val)
                 obs, d = val_env.reset(), False
+                _REGIME_NAMES = ['chop', 'whipsaw', 'bull', 'bear', 'normal']
+                attr_w   = {r: [] for r in _REGIME_NAMES}
+                kelly_log = []   # Kelly 통계 수집
 
                 while not d:
                     feat = df_val.iloc[val_env.current_step].to_dict()
+                    feat['_step_idx'] = val_env.current_step   # MTF 인덱스용
                     pos_info = {
                         'type': val_env.pos, 'entry_price': val_env.entry_price,
                         'unrealized': val_env.unrealized_pnl, 'mdd': val_env.max_drawdown,
-                        'hold_norm': val_env.hold_count / val_env.MAX_HOLD['val']
+                        'hold_norm': val_env.hold_count / 144
                     }
                     action, leverage_rate, info = router.decide(feat, pos_info)
+                    if 'gating_w' in info:
+                        regime_vals = [feat.get(c, 0.) for c in REGIME_COLS]
+                        dom_idx     = int(np.argmax(regime_vals))
+                        dom_regime  = _REGIME_NAMES[dom_idx]
+                        attr_w[dom_regime].append(info['gating_w'])
+                    # Kelly 통계 수집 (진입 시만)
+                    if action in (1, 2) and 'win_rate' in info:
+                        kelly_log.append({
+                            'lev': leverage_rate, 'wr': info.get('win_rate', 0),
+                            'payoff': info.get('payoff', 0), 'f_star': info.get('f_star', 0)
+                        })
                     obs, _, d, _ = val_env.step(action, leverage_rate=leverage_rate)
 
                 val_pnl_pct = (val_env.balance / 10000 - 1) * 100
                 val_pnl_history.append(val_pnl_pct)
-                sharpe_est = float(np.mean(val_pnl_history[-10:]) / (np.std(val_pnl_history[-10:]) + 1e-6)) if len(val_pnl_history) >= 3 else 0.0
-                val_score = val_pnl_pct * 0.4 + val_env.win_rate * 30 + sharpe_est * 10
+                if len(val_pnl_history) >= 3:
+                    _ph = val_pnl_history[-10:]
+                    _std = max(float(np.std(_ph)), 0.1)
+                    sharpe_est = float(np.clip(np.mean(_ph) / _std, -10.0, 10.0))
+                else:
+                    sharpe_est = 0.0
                 
-                logger.info(f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | WR:{val_env.win_rate*100:.0f}% | Score:{val_score:.2f}")
+                if val_pnl_pct > 0:
+                    trade_activity = min(val_env.total_trades / 30.0, 1.0) * 5.0
+                else:
+                    trade_activity = -min(val_env.total_trades / 30.0, 1.0) * 10.0
+                    
+                val_score = (val_pnl_pct * 5.0) + (val_env.win_rate * 20.0) + (sharpe_est * 5.0) + trade_activity
+
+                logger.info(f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | WR:{val_env.win_rate*100:.0f}% | Score:{val_score:.2f} (act:{trade_activity:.1f})")
+
+                # HMM 현재 상태 로그
+                hmm_s = int(np.argmax(hmm_detector._alpha))
+                hmm_names = ['bull-trend', 'bear-trend', 'hv-chop', 'lv-range']
+                logger.info(f"    [HMM]  state={hmm_names[hmm_s]} | probs={hmm_detector._alpha.round(3).tolist()}")
+
+                # MTF 현재 상태 로그 (val 마지막 스텝)
+                _last_mtf = mtf_val.get(len(df_val) - 1)
+                logger.info(
+                    f"    [MTF]  1h_ret:{_last_mtf[0]:.3f} 1h_trend:{_last_mtf[2]:.3f} "
+                    f"4h_ret:{_last_mtf[3]:.3f} 4h_trend:{_last_mtf[5]:.3f} align:{_last_mtf[6]:.0f}"
+                )
+
+                # MAML 적응 통계
+                logger.info(
+                    f"    [MAML] 누적 적응 횟수={maml_adapter._adapt_count} | "
+                    f"현재 HMM={MAMLAdapter.HMM_STATE_NAMES[int(np.argmax(hmm_detector._alpha))]} | "
+                    + " ".join(
+                        f"buf[{MAMLAdapter.HMM_STATE_NAMES[s]}]="
+                        f"{sum(len(maml_adapter.regime_buf[s][n]) for n in agent_names)}"
+                        for s in range(4)
+                    )
+                )
+
+                # Epistemic uncertainty gate 통계
+                for ag_name, gate in router.epist_gate.items():
+                    gs = gate.stats()
+                    logger.info(
+                        f"    [EPIST/{ag_name:12s}] "
+                        f"blocked={gs['epist_blocked']:3d} reduced={gs['epist_reduced']:3d} | "
+                        f"low={gs['epist_low']:.3f} high={gs['epist_high']:.3f} "
+                        f"run_mean={gs['epist_run_mean']:.3f}"
+                    )
+
+                # Kelly 통계 로그
+                if kelly_log:
+                    avg_lev = np.mean([k['lev'] for k in kelly_log])
+                    avg_wr  = np.mean([k['wr']  for k in kelly_log])
+                    avg_po  = np.mean([k['payoff'] for k in kelly_log])
+                    avg_fs  = np.mean([k['f_star'] for k in kelly_log])
+                    logger.info(f"    [KELLY] n={len(kelly_log)} | avg_lev:{avg_lev:.3f} | wr:{avg_wr:.3f} | payoff:{avg_po:.3f} | f*:{avg_fs:.3f}")
+                
+                for reg, ws in attr_w.items():
+                    if ws:
+                        mean_w = np.stack(ws).mean(axis=0)
+                        logger.info(
+                            f"    [ATTR/{reg:7s}] n={len(ws):4d} | "
+                            f"flat:{mean_w[0]:.3f} B:{mean_w[1]:.3f} b:{mean_w[2]:.3f} "
+                            f"cL:{mean_w[3]:.3f} cS:{mean_w[4]:.3f} nL:{mean_w[5]:.3f} nS:{mean_w[6]:.3f}"
+                        )
 
                 if val_score > best_val_score:
                     best_val_score, best_val_pnl = val_score, val_pnl_pct
-                    save_dict = {'best_pnl': best_val_pnl, 'epoch': ep}
+                    save_dict = {'best_pnl': best_val_pnl, 'epoch': ep,
+                                 'gating_net': gating_net.state_dict()}
                     for name in agent_names: save_dict[f'model_{name}'] = models[name].state_dict()
-                    torch.save(save_dict, 'data/ensemble/best_10_agents.pth')
+                    torch.save(save_dict, 'data/ensemble/ckpt/best_rl_agents.pth')
                     logger.info(f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}%)")
+
+                # HMM 온라인 업데이트 — 검증 구간 관측으로 파라미터 점진 갱신
+                if ep % 50 == 0:
+                    hmm_detector.update_online(n_iter=5)
+                    logger.info("    [HMM]  온라인 업데이트 완료")
 
                 _save_checkpoint(ep)
 
@@ -991,14 +2302,4 @@ def train():
         _save_checkpoint(ep)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', type=str, required=True, choices=['generate_csv', 'train'])
-    args = parser.parse_args()
-
-    INPUT_CSV = 'data/training_features_5m.csv'
-    OUTPUT_CSV = 'data/ensemble/rl_training_data_full.csv'
-
-    if args.mode == 'generate_csv':
-        generate_training_csv(INPUT_CSV, OUTPUT_CSV)
-    elif args.mode == 'train':
-        train()
+    train()

@@ -29,6 +29,9 @@ ULTIMATE_FEATURE_COLS = [
     'cvp_poc_dist', 'cvp_vah_val_width', 'cvp_cluster_position',
     'cvp_volume_imbalance', 'cvp_regime',
     'ofi_acceleration',
+    'kalman_velocity', 'return_autocorr', 'realized_skewness',
+    'ofti', 'kel', 'mta_funding', 'svps',
+    'pred_mdjd', 'conf_mdjd',
 ]
 
 EXCLUDE_FEATURE_COLS: list = [
@@ -82,6 +85,10 @@ class FeatureEngineer:
         # [수정사항 9] ofi_acceleration: 극단적 노이즈를 제어하기 위한 EWM 평활화 후 3-lag diff
         ntr_smooth = df['net_taker_ratio'].ewm(span=5).mean()
         df['ofi_acceleration'] = ntr_smooth.diff(3).fillna(0)
+
+        df = self._create_predictive_stats(df)
+        df = self._create_synthetic_alpha(df)
+        df = self.add_mdjd_features(df)
 
         df = self._handle_missing(df)
         return df
@@ -416,6 +423,66 @@ class FeatureEngineer:
 
         return df
 
+    def _create_synthetic_alpha(self, df: pd.DataFrame) -> pd.DataFrame:
+        """합성 알파 피처 4종:
+        OFTI  — 오더플로우 독성 지수
+        KEL   — 유동성 운동 에너지
+        MTA   — 다중-시간 펀딩비 가속도
+        SVPS  — 공간적 볼륨 프로파일 왜곡
+        """
+        ROLL = 288  # 24h (5분봉 기준)
+
+        # ── OFTI: Order Flow Toxicity Index ──────────────────────────────────
+        # smart_money_flow × whale_conviction × amihud_illiquidity 세기
+        # amihud는 abs()로 안정화 (Z-스코어는 음수 가능), +1 로 최소 스케일 보장
+        ofti_raw = (
+            df['smart_money_flow']
+            * df['whale_conviction']
+            * (df['amihud_illiquidity_z'].abs() + 1.0)
+        )
+        df['ofti'] = np.tanh(ofti_raw * 3.0).fillna(0)
+
+        # ── KEL: Kinetic Energy of Liquidity ─────────────────────────────────
+        # oi_change_rate / garman_klass_vol 비율로 "억눌린 에너지" 측정
+        # funding_pressure 부호로 방향 결정 → Z-스코어 후 tanh 바운딩
+        kel_raw = (
+            df['oi_change_rate']
+            / (df['garman_klass_vol'] + 1e-6)
+            * np.sign(df['funding_pressure'])
+        )
+        kel_mean = kel_raw.rolling(ROLL, min_periods=1).mean()
+        kel_std  = kel_raw.rolling(ROLL, min_periods=1).std().replace(0, 1e-8)
+        df['kel'] = np.tanh((kel_raw - kel_mean) / kel_std * 0.5).fillna(0)
+
+        # ── MTA: Multi-Timeframe Funding Acceleration ─────────────────────────
+        # 단기 가중 ROC 합산, funding_abs로 정규화, squeeze_power Z-스코어로 타이밍 필터
+        weighted_roc = (
+            0.5 * df['funding_roc_12']
+            + 0.3 * df['funding_roc_48']
+            + 0.2 * df['funding_roc_288']
+        )
+        # funding_abs는 0.0001 스케일 → max(1e-5, ...) 로 실질 정규화
+        mta_normalized = weighted_roc / df['funding_abs'].clip(lower=1e-5)
+
+        sq_mean = df['squeeze_power'].rolling(ROLL, min_periods=1).mean()
+        sq_std  = df['squeeze_power'].rolling(ROLL, min_periods=1).std().replace(0, 1e-8)
+        squeeze_z = (df['squeeze_power'] - sq_mean) / sq_std
+
+        df['mta_funding'] = (mta_normalized * np.tanh(squeeze_z)).clip(-3, 3) / 3
+        df['mta_funding'] = df['mta_funding'].fillna(0)
+
+        # ── SVPS: Spatial Volume Profile Skew ────────────────────────────────
+        # POC 거리 × 거래량 불균형 × exp(-매물대 두께)
+        # exp 폭주 방지: vah_val_width를 [0, 5] 클리핑
+        df['svps'] = np.tanh(
+            2.0
+            * df['cvp_poc_dist']
+            * df['cvp_volume_imbalance']
+            * np.exp(-df['cvp_vah_val_width'].clip(0, 5))
+        ).fillna(0)
+
+        return df
+
     def _handle_missing(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.replace([np.inf, -np.inf], np.nan)
 
@@ -428,7 +495,8 @@ class FeatureEngineer:
             'hurst_change', 'ofi_acceleration',
             'cvp_poc_dist', 'cvp_vah_val_width', 'cvp_cluster_position',
             'cvp_volume_imbalance', 'cvp_regime',
-            'amihud_illiquidity_z', # [신규 추가] 보간 처리
+            'amihud_illiquidity_z',
+            'kalman_velocity', 'return_autocorr', 'realized_skewness',
         ]
         for col in diff_features:
             if col in df.columns:
@@ -440,11 +508,122 @@ class FeatureEngineer:
         feature_cols = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
         other_features = [c for c in feature_cols if c not in diff_features and c != 'regime_break']
         if other_features:
-            df[other_features] = df[other_features].ffill().bfill()
+            # bfill 제거: 롤링 윈도우 초반 NaN을 미래 데이터로 채우는 룩어헤드 편향 방지
+            # ffill로 과거 전파 후, 여전히 NaN인 초반 구간(워밍업)은 0으로 채움
+            df[other_features] = df[other_features].ffill().fillna(0)
 
         df = df.dropna(subset=feature_cols)
 
         return df
+
+    def _create_predictive_stats(self, df: pd.DataFrame) -> pd.DataFrame:
+        """순수 수학/통계 기반 예측 피처 3종"""
+        close = df['close']
+        df['kalman_velocity']  = self._kalman_trend_velocity(close)
+        df['return_autocorr']  = self._return_autocorrelation(close)
+        df['realized_skewness'] = self._realized_skewness(close)
+        return df
+
+    def _kalman_trend_velocity(self, close: pd.Series,
+                                obs_noise: float = 1e-3,
+                                proc_noise: float = 1e-5) -> pd.Series:
+        """칼만 필터 추세 속도 (Kalman Trend Velocity)
+
+        상태 벡터: [가격 레벨, 가격 속도]
+        측정값: close price
+
+        단순 MA보다 lag이 적고 노이즈에 강한 상태공간 추정.
+        velocity > 0 → 상승 추세 강도, velocity < 0 → 하락 추세 강도.
+        가격 대비 정규화하여 cross-asset 비교 가능.
+        """
+        vals = close.values.astype(np.float64)
+        n    = len(vals)
+
+        # 상태 전이 행렬: level(t+1) = level(t) + velocity(t)
+        F = np.array([[1., 1.], [0., 1.]])
+        H = np.array([[1., 0.]])
+        Q = np.eye(2) * proc_noise   # 프로세스 노이즈
+        R = np.array([[obs_noise]])  # 측정 노이즈
+
+        x = np.array([vals[0], 0.0])
+        P = np.eye(2)
+        velocities = np.empty(n)
+
+        for i in range(n):
+            # Predict
+            x = F @ x
+            P = F @ P @ F.T + Q
+            # Update
+            S   = (H @ P @ H.T + R)[0, 0]
+            K   = (P @ H.T).flatten() / S
+            inn = vals[i] - (H @ x)[0]   # innovation
+            x   = x + K * inn
+            P   = (np.eye(2) - np.outer(K, H)) @ P
+            velocities[i] = x[1]
+
+        # 가격 대비 정규화: 상대 속도 (return/bar 단위)
+        rel_velocity = velocities / (vals + 1e-8)
+        return pd.Series(np.clip(rel_velocity, -0.05, 0.05), index=close.index).fillna(0)
+
+    def _return_autocorrelation(self, close: pd.Series,
+                                 window: int = 48,
+                                 lag: int = 1) -> pd.Series:
+        """롤링 수익률 자기상관계수 (Return Autocorrelation)
+
+        lag=1 피어슨 상관: r(t) ↔ r(t-1)
+        - 양수(+): 모멘텀 구간 → 추세 지속 신호
+        - 음수(-): 평균회귀 구간 → 반전 신호
+        - 0 근방: 랜덤워크 → 비예측 구간
+
+        Hurst 지수 대비 장점: 방향성(모멘텀 vs 회귀) 명시적 제공.
+        """
+        returns = close.pct_change().fillna(0)
+
+        def _autocorr(x):
+            if len(x) < lag + 4:
+                return 0.0
+            r_t  = x[lag:]
+            r_tm = x[:-lag]
+            denom = r_t.std() * r_tm.std()
+            if denom < 1e-10:
+                return 0.0
+            return np.corrcoef(r_t, r_tm)[0, 1]
+
+        return (
+            returns
+            .rolling(window, min_periods=window // 2)
+            .apply(_autocorr, raw=True)
+            .fillna(0)
+        )
+
+    def _realized_skewness(self, close: pd.Series, window: int = 96) -> pd.Series:
+        """실현 비대칭도 (Realized Skewness)
+
+        3차 표준화 모멘트: E[(r - μ)³] / σ³
+        - 음수(왼꼬리): 극단 하락 잦음 → 숏 리스크 프리미엄 존재
+        - 양수(오른꼬리): 극단 상승 잦음 → 롱 기대 수익 프리미엄
+        - 0 근방: 대칭 분포
+
+        기존 Parkinson/GK 변동성이 잡지 못하는 방향성 있는 꼬리 위험 포착.
+        [-3, 3] clip으로 이상치 제어.
+        """
+        returns = close.pct_change().fillna(0)
+
+        def _skew(x):
+            if len(x) < 8:
+                return 0.0
+            mu  = x.mean()
+            sig = x.std()
+            if sig < 1e-10:
+                return 0.0
+            return ((x - mu) ** 3).mean() / (sig ** 3 + 1e-10)
+
+        result = (
+            returns
+            .rolling(window, min_periods=window // 2)
+            .apply(_skew, raw=True)
+        )
+        return result.clip(-3, 3).fillna(0)
 
     def _add_regime_break(self, df: pd.DataFrame) -> pd.DataFrame:
         if 'volatility_z' not in df.columns:
@@ -474,7 +653,50 @@ class FeatureEngineer:
 
         return augmented
 
-    
+    @staticmethod
+    def add_mdjd_features(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Microstructure-Driven Jump-Diffusion (MDJD) Feature Generator
+        """
+        # 1. 안전한 Z-스코어 정규화 (Squeeze Power)
+        sqz_mean = df['squeeze_power'].rolling(window=288, min_periods=1).mean()
+        sqz_std  = df['squeeze_power'].rolling(window=288, min_periods=1).std()
+        squeeze_z = (df['squeeze_power'] - sqz_mean) / (sqz_std + 1e-8)
+
+        # 파라미터 사전 정의 (스케일을 맞춘 휴리스틱 가중치)
+        W1, W2 = 0.005, 0.002
+        BETA    = 0.003
+        GAMMA   = 0.01
+        RHO     = 0.005
+        DELTA   = 0.4
+
+        # 2. 컴포넌트별 계산
+        # D_t: Smart Money Drift
+        D = W1 * df['smart_money_flow'] * (1 + np.tanh(df['whale_conviction'])) + \
+            W2 * df['mtf_trend_4h']
+
+        # I_t: Order-book Imbalance Shock
+        I = BETA * df['net_taker_ratio'] * np.exp(np.tanh(df['taker_acceleration'])) * \
+            (df['amihud_illiquidity_z'].clip(lower=0) + 1.0)
+
+        # J_t: Liquidity Squeeze Jump
+        J = GAMMA * np.tanh(squeeze_z) * np.tanh(df['funding_pressure']) * \
+            (df['breakout_strength'] > DELTA).astype(float)
+
+        # G_t: Volume Profile Gravity
+        # [수정] mtf_trend_4h는 pct_change 스케일(~0.0001)이라 tanh(x) ≈ x → 상수 1.0에 수렴
+        # Z-스코어로 정규화해야 dampener가 실제로 작동함
+        trend_4h_z = df['mtf_trend_4h'] / (df['mtf_trend_4h'].rolling(288, min_periods=1).std() + 1e-8)
+        trend_dampener = 1.0 - np.tanh(trend_4h_z.abs())
+        G = -RHO * df['cvp_poc_dist'] * np.exp(-df['cvp_volume_imbalance'].clip(-5, 5)) * trend_dampener
+
+        # 3. MDJD 앙상블 신호 생성
+        R_hat = D + I + J + G
+
+        df['pred_mdjd'] = np.sign(R_hat).clip(-1, 1)
+        df['conf_mdjd'] = np.tanh(np.abs(R_hat) * 100)
+
+        return df
 
 class QuantSignalFeatures:
     """유명 퀀트 알고리즘의 신호를 피처로 변환"""

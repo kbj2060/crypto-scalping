@@ -5,6 +5,7 @@
 - execute_trade: 진입/청산 수수료 일관성 개선 (레버리지 비례)
 - _load_features: 제거 (PPOTrainer에서 이미 처리, 환경은 데이터만 사용)
 """
+
 import numpy as np
 import torch
 import logging
@@ -32,22 +33,22 @@ class TradingEnvironment:
         self.cached_features = None
         self.cached_strategies = None
 
-        self.initial_balance = getattr(config, 'EVAL_INITIAL_CAPITAL', 10000.0)
+        self.initial_balance = getattr(config, "EVAL_INITIAL_CAPITAL", 10000.0)
         self.reset_reward_states()
 
     # ------------------------------------------------------------------
     # 청산 조건 검사 (변경 없음)
     # ------------------------------------------------------------------
     def check_exit_conditions(self, unrealized_pnl_roe, holding_time_steps=0):
-        liquidation_threshold = getattr(config, 'LIQUIDATION_THRESHOLD', -0.80)
+        liquidation_threshold = getattr(config, "LIQUIDATION_THRESHOLD", -0.80)
         if unrealized_pnl_roe <= liquidation_threshold:
             return True, "LIQUIDATION"
 
-        take_profit_threshold = getattr(config, 'TAKE_PROFIT_THRESHOLD', 0.50)
+        take_profit_threshold = getattr(config, "TAKE_PROFIT_THRESHOLD", 0.50)
         if unrealized_pnl_roe >= take_profit_threshold:
             return True, "TAKE_PROFIT"
 
-        stop_loss_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', -0.20)
+        stop_loss_threshold = getattr(config, "STOP_LOSS_THRESHOLD", -0.20)
         if unrealized_pnl_roe <= stop_loss_threshold:
             return True, "STOP_LOSS"
 
@@ -67,88 +68,67 @@ class TradingEnvironment:
         self.training_step = 0
         self.episode_step_count = 0
         self.equity_curve = [1.0]
-        self.trade_history = {'count': 0, 'wins': [], 'losses': []}
+        self.trade_history = {"count": 0, "wins": [], "losses": []}
 
     def calculate_position_size(self, action_scale, current_price, balance, volatility=None):
         """
         동적 포지션 사이징: Actor의 scale(0~1)을 실제 레버리지/포지션 금액/계약 수로 변환
-        
-        Args:
-            action_scale: Actor 출력 (0~1) – 위험 예산 사용 비율
-            current_price: 현재 가격
-            balance: 현재 자본금 (USDT)
-            volatility: 최근 변동성 (표준편차, 틱 단위)
-        
-        Returns:
-            target_leverage: 실제 적용할 레버리지 배수
-            position_value: 포지션 금액 (USDT)
-            contracts: 계약 수 (선물)
         """
-        max_leverage = getattr(config, 'RISK_MAX_LEVERAGE', 20)
-        risk_target_vol = getattr(config, 'RISK_TARGET_VOL', 0.15)
-        
+        max_leverage = getattr(config, "RISK_MAX_LEVERAGE", 20)
+        risk_target_vol = getattr(config, "RISK_TARGET_VOL", 0.15)
+
         # 1. 기본 레버리지 = Actor 출력 * 최대 레버리지
         base_leverage = action_scale * max_leverage
         base_leverage = max(1.0, base_leverage)  # 최소 1배
-        
+
         # 2. 변동성 기반 레버리지 조절 (목표 변동성 / 현재 변동성)
         if volatility is not None and volatility > 0:
-            # 🔥 volatility가 이미 연율화되었는지 확인
-            if not getattr(config, 'VOLATILITY_ALREADY_ANNUALIZED', False):
+            if not getattr(config, "VOLATILITY_ALREADY_ANNUALIZED", False):
                 # 3분봉 데이터 기반 연율화 스케일링
                 periods_per_year = (365 * 24 * 60) / 3
                 vol_annual = volatility * np.sqrt(periods_per_year)
             else:
                 vol_annual = volatility
-            
+
             risk_target_vol = config.RISK_TARGET_VOL
             vol_adjustment = risk_target_vol / max(vol_annual, 0.01)
             vol_adjustment = np.clip(
                 vol_adjustment,
                 config.RISK_VOL_ADJUSTMENT_MIN,
-                config.RISK_VOL_ADJUSTMENT_MAX
+                config.RISK_VOL_ADJUSTMENT_MAX,
             )
         else:
             vol_adjustment = 1.0
-        
+
         target_leverage = base_leverage * vol_adjustment
         target_leverage = np.clip(target_leverage, 1.0, max_leverage)
-        
+
         # 3. 자본금 기반 포지션 금액
         position_value = balance * target_leverage
-        
+
         # 4. 계약 수 (USDT 무기한 선물 가정)
         contracts = position_value / current_price
-        
+
         return target_leverage, position_value, contracts
-        
+
     # ------------------------------------------------------------------
     # [개선] 거래 실행 – 진입/청산 수수료 일관성 및 방향 처리
     # ------------------------------------------------------------------
-    def execute_trade(self, action, current_price, direction=None, balance=None,
-                  volatility=None, is_exit=False, leverage=None):
+    def execute_trade(
+        self,
+        action,
+        current_price,
+        direction=None,
+        balance=None,
+        volatility=None,
+        is_exit=False,
+        leverage=None,
+    ):
         """
         통합 거래 실행 함수 (동적 사이징 적용)
-        
-        Args:
-            action: 레버리지 비율 (0~1) – 진입 시에만 사용
-            current_price: 현재 가격
-            direction: 진입 방향 (1=LONG, -1=SHORT) – 진입 시 필수, 청산 시 무시
-            balance: 현재 자본금 (USDT) – 진입 시 필수, 청산 시 무시
-            volatility: 현재 변동성 (선택, 없으면 1.0)
-            is_exit: 청산 여부
-            leverage: 청산 시 현재 포지션의 레버리지 (is_exit=True일 때 필수)
-        
-        Returns:
-            entry_price: 진입가 (청산 시 None)
-            target_leverage: 적용 레버리지 (청산 시 0.0)
-            executed: 실행 여부
-            cost: 발생한 수수료 (레버리지 * fee_rate)
-            position_value: 포지션 금액 (USDT, 진입 시)
-            contracts: 계약 수 (진입 시)
         """
-        max_leverage = getattr(config, 'MAX_LEVERAGE', 20)
-        fee_rate = getattr(config, 'TRANSACTION_COST', 0.0005)
+        max_leverage = getattr(config, "MAX_LEVERAGE", 20)
+        fee_rate = getattr(config, "TRANSACTION_COST", 0.0005)
 
         # ---------- 청산 ----------
         if is_exit:
@@ -165,7 +145,6 @@ class TradingEnvironment:
         if action <= 0:
             return 0.0, 0.0, False, 0.0, 0.0, 0
 
-        # 동적 포지션 사이징
         target_leverage, position_value, contracts = self.calculate_position_size(
             action, current_price, balance, volatility
         )
@@ -214,11 +193,11 @@ class TradingEnvironment:
 
         # ---------- 전략 신호 (Elite 8) ----------
         logger.info("   👉 전략 신호 로드 중...")
-        strategy_cols_exist = all(f'strategy_{i}' in df.columns for i in range(len(self.strategies)))
+        strategy_cols_exist = all(f"strategy_{i}" in df.columns for i in range(len(self.strategies)))
 
         if strategy_cols_exist:
             logger.info("   ✅ 기존 전략 컬럼 사용 (CSV에서 로드됨)")
-            strat_array = df[[f'strategy_{i}' for i in range(len(self.strategies))]].values
+            strat_array = df[[f"strategy_{i}" for i in range(len(self.strategies))]].values
         else:
             logger.info("   ⚠️ 전략 컬럼 없음 → 신규 계산 (시간 소요)")
             strat_array = np.zeros((len(df), len(self.strategies)), dtype=np.float32)
@@ -231,23 +210,30 @@ class TradingEnvironment:
 
             strat_df = pd.DataFrame(
                 strat_array,
-                columns=[f'strategy_{i}' for i in range(len(self.strategies))],
-                index=df.index
+                columns=[f"strategy_{i}" for i in range(len(self.strategies))],
+                index=df.index,
             )
-            strat_df.to_csv('data/cached_strategies.csv')
+            strat_df.to_csv("data/cached_strategies.csv")
             logger.info(f"   💾 전략 신호 저장 완료: data/cached_strategies.csv")
 
         self.cached_strategies = torch.tensor(
             strat_array, dtype=torch.float32, device=self.device
         )
-        logger.info(f"✅ GPU 캐싱 완료: Features {self.cached_features.shape}, Strat {self.cached_strategies.shape}")
+        logger.info(
+            f"✅ GPU 캐싱 완료: Features {self.cached_features.shape}, Strat {self.cached_strategies.shape}"
+        )
 
     # ------------------------------------------------------------------
     # 거래 메트릭 업데이트 (변경 없음)
     # ------------------------------------------------------------------
-    def update_trading_metrics(self, prev_position, current_position,
-                               strategy_scores=None, volatility_pred=None,
-                               actual_volatility=None):
+    def update_trading_metrics(
+        self,
+        prev_position,
+        current_position,
+        strategy_scores=None,
+        volatility_pred=None,
+        actual_volatility=None,
+    ):
         self.position_changes.append(1.0 if prev_position != current_position else 0.0)
         if len(self.position_changes) > 100:
             self.position_changes = self.position_changes[-100:]
@@ -260,12 +246,16 @@ class TradingEnvironment:
         if self.cached_features is None:
             self.precompute_data()
 
-        curr_idx = current_index if current_index is not None else getattr(self.collector, 'current_index', None)
+        curr_idx = (
+            current_index
+            if current_index is not None
+            else getattr(self.collector, "current_index", None)
+        )
 
         if curr_idx is None or curr_idx < self.lookback or curr_idx >= len(self.cached_features):
             return None
 
-        obs_seq = self.cached_features[curr_idx - self.lookback: curr_idx].unsqueeze(0)
+        obs_seq = self.cached_features[curr_idx - self.lookback : curr_idx].unsqueeze(0)
         scores = self.cached_strategies[curr_idx]  # (8,)
 
         if position_info is None:
@@ -276,7 +266,7 @@ class TradingEnvironment:
             pos_tensor = torch.tensor(position_info, dtype=torch.float32, device=self.device)
 
         obs_info = torch.cat([pos_tensor[0:1], scores, pos_tensor[1:]]).unsqueeze(0)
-        return (obs_seq, obs_info)
+        return obs_seq, obs_info
 
     # ------------------------------------------------------------------
     # 상태 차원 반환
@@ -291,3 +281,4 @@ class TradingEnvironment:
     # ------------------------------------------------------------------
     def get_current_equity(self):
         return self.equity_curve[-1] if self.equity_curve else 1.0
+

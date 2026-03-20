@@ -5,7 +5,7 @@
 import numpy as np
 import pytest
 
-from common.trading_env import TradingEnvironment
+from macroMFT.trading_env import TradingEnvironment
 
 
 @pytest.fixture
