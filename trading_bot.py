@@ -54,7 +54,6 @@ for p in TARGET_PATHS:
         sys.path.insert(0, p)
 
 from core.feature_engineering import FeatureEngineer
-from ensemble.train_trend import TrendContextBrain  # TrendSignal 타입이 이 모듈에 정의됨
 from ensemble.trend_xgb.trend_xgb_model import XGBTrendBrain
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,

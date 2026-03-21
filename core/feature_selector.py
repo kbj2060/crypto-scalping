@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import logging
 from typing import List, Tuple, Optional
-from sklearn.feature_selection import mutual_info_regression
+from sklearn.feature_selection import mutual_info_classif
 from sklearn.preprocessing import StandardScaler
 from core.feature_engineering import EXCLUDE_FEATURE_COLS, MUST_INCLUDE_FEATURES
 
@@ -114,8 +114,7 @@ class FeatureSelector:
             if len(valid_idx) < 1000: continue
 
             X_valid = scaler.fit_transform(X[valid_idx])
-            # y_sample 없이 정확하게 y[valid_idx]와 스코어링
-            mi = mutual_info_regression(X_valid, y[valid_idx], n_neighbors=5, random_state=42)
+            mi = mutual_info_classif(X_valid, y[valid_idx], n_neighbors=5, random_state=42)
 
             for j, col in enumerate(cols):
                 if col not in best_mi or mi[j] > best_mi[col]:

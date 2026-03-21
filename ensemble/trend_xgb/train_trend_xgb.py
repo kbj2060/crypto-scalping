@@ -34,12 +34,11 @@ for _p in [_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR]:
         sys.path.insert(0, _p)
 
 from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-from sklearn.metrics import balanced_accuracy_score, classification_report
+from sklearn.metrics import balanced_accuracy_score, classification_report, f1_score
 
 from core.feature_selector import auto_select_features
 from core.feature_engineering import ULTIMATE_FEATURE_COLS
-from ensemble.train_trend import compute_atr, make_triple_barrier_label
-from ensemble.trend_xgb.trend_xgb_model import XGBTrendBrain
+from ensemble.trend_xgb.trend_xgb_model import compute_atr, make_triple_barrier_label, XGBTrendBrain
 
 logging.basicConfig(
     level=logging.INFO,
@@ -221,9 +220,11 @@ def load_data(path: str, rl_path: str = RL_DATA_PATH):
 # ────────────────────────────────────────────────────────────────
 # Triple-Barrier 레이블 생성
 # ────────────────────────────────────────────────────────────────
-def _label_one(t, closes, atr):
+def _label_one(t, closes, atr, highs, lows):
     lbl, _, _ = make_triple_barrier_label(
         closes, atr, t,
+        highs    = highs,
+        lows     = lows,
         atr_mult = ATR_MULT,
         max_hold = MAX_HOLD_5M,
     )
@@ -242,7 +243,7 @@ def build_labels(df: pd.DataFrame, n_jobs: int = -1):
 
     logger.info(f"Triple-Barrier 레이블 병렬 계산 중... ({len(valid_idx)}개 샘플, n_jobs={n_jobs})")
     results = Parallel(n_jobs=n_jobs, backend='loky')(
-        delayed(_label_one)(t, closes, atr) for t in valid_idx
+        delayed(_label_one)(t, closes, atr, highs, lows) for t in valid_idx
     )
     for t, lbl in results:
         labels[t] = lbl
@@ -341,7 +342,13 @@ def train(data_path: str = DATA_PATH,
             callbacks = [early_stopping(40, verbose=False), log_evaluation(-1)],
         )
         preds = clf.predict(X_val)
-        return balanced_accuracy_score(y_val, preds)
+        # FLAT을 제외한 UP/DOWN 샘플에 대한 방향성 F1 (macro)
+        # FLAT 과다 예측으로 balanced_acc가 오르는 문제를 방지
+        dir_mask = y_val != 1
+        if dir_mask.sum() == 0:
+            return 0.0
+        return f1_score(y_val[dir_mask], preds[dir_mask],
+                        labels=[0, 2], average='macro', zero_division=0)
 
     logger.info(f"Optuna 튜닝 시작: {n_trials}회 시행...")
     study = optuna.create_study(
@@ -350,22 +357,22 @@ def train(data_path: str = DATA_PATH,
     )
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-    logger.info(f"Best Val balanced_acc: {study.best_value:.4f}")
+    logger.info(f"Best Val dir_f1 (UP/DOWN macro): {study.best_value:.4f}")
     logger.info(f"Best params: {study.best_params}")
 
     # ── 최적 파라미터로 Train+Val 합쳐서 재학습 ──
     # 데이터가 ~15% 증가하므로 n_estimators 1.1배 보정 (과소학습 방지)
     boosted_n = int(study.best_params.get('n_estimators', 500) * 1.1)
-    best_params = dict(
+    best_params = {
         **study.best_params,
-        n_estimators = boosted_n,
-        class_weight = class_weight,
-        objective    = 'multiclass',
-        num_class    = 3,
-        n_jobs       = -1,
-        random_state = 42,
-        verbose      = -1,
-    )
+        'n_estimators': boosted_n,
+        'class_weight': class_weight,
+        'objective': 'multiclass',
+        'num_class': 3,
+        'n_jobs': -1,
+        'random_state': 42,
+        'verbose': -1,
+    }
     X_trainval = np.vstack([X_train, X_val])
     y_trainval = np.hstack([y_train, y_val])
 
@@ -376,7 +383,10 @@ def train(data_path: str = DATA_PATH,
     # ── 테스트셋 평가 ──
     test_preds = final_clf.predict(X_test)
     test_bacc  = balanced_accuracy_score(y_test, test_preds)
-    logger.info(f"\nTest balanced_acc: {test_bacc:.4f}")
+    dir_mask_test = y_test != 1
+    test_dir_f1 = f1_score(y_test[dir_mask_test], test_preds[dir_mask_test],
+                           labels=[0, 2], average='macro', zero_division=0) if dir_mask_test.sum() > 0 else 0.0
+    logger.info(f"\nTest balanced_acc: {test_bacc:.4f}  |  Test dir_f1 (UP/DOWN): {test_dir_f1:.4f}")
     logger.info("\n" + classification_report(y_test, test_preds, target_names=['DOWN','FLAT','UP']))
 
     # ── 저장 ──
@@ -389,8 +399,9 @@ def train(data_path: str = DATA_PATH,
     results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
     with open(results_path, 'w') as f:
         json.dump({
-            'best_val_bacc' : study.best_value,
-            'test_bacc'     : test_bacc,
+            'best_val_dir_f1' : study.best_value,
+            'test_bacc'       : test_bacc,
+            'test_dir_f1'     : test_dir_f1,
             'n_features'    : len(selected_features),
             'best_params'   : {k: v for k, v in best_params.items() if k != 'class_weight'},
             'atr_mult'      : ATR_MULT,
