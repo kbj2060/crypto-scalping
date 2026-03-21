@@ -37,33 +37,8 @@ Trading Router — 6-Agent Single-Directional MoE (Restructured)
    - 출력: 6개 토큰 flatten → Linear → 기존 feat_extractor 입력과 동일 차원으로 압축
    - 경량 설계: 파라미터 ~8K 추가, 추론 오버헤드 최소화
 
-[융합 모듈 v4]
-9. MAMLAdapter (Reptile-style First-Order MAML): 레짐 전환 시 빠른 적응
-   - 풀 MAML 대신 Reptile(first-order) 적용: 2차 미분 불필요, NoisyNet과 호환
-   - 트리거: HMM dominant state 전환 감지 (이전과 다른 최빈 상태로 변경 시)
-   - Inner loop: 전환된 레짐의 최근 K 스텝 배치로 N_INNER번 gradient step → θ'
-   - Meta update: θ ← θ + β_meta * (θ' - θ)  (Reptile 공식)
-   - 레짐별 버퍼: 각 HMM 상태(0~3)의 최근 INNER_BUFFER_SIZE 경험을 별도 deque에 저장
-   - 적응 주기: HMM 상태 전환마다 1회 실행 (과도한 적응 방지 쿨다운 포함)
 
-[융합 모듈 v5]
-10. BootstrapEnsembleHeads + EpistemicUncertaintyGate: 앙상블 epistemic 불확실성 추정
-    아키텍처:
-    - RobustIQN 내부의 v_head·a_head 쌍을 N_HEADS=5개로 복제
-    - 피처 추출기(attn_encoder + feat_extractor + context_gate)는 완전 공유
-    - 각 헤드: 독립 초기화 + 독립 NoisyLinear → 예측 다양성 확보
-    - 추론: N개 헤드의 분위 예측 평균 → CVaR 계산 (aleatoric 불확실성)
-             N개 헤드 Q값의 표준편차 → epistemic 불확실성 지표
-    학습:
-    - 각 헤드를 서로 다른 부트스트랩 마스크(0.8 샘플링)로 독립 학습
-    - 헤드별 quantile loss 합산 → 역전파 1회
-    의사결정 통합 (EpistemicUncertaintyGate):
-    - epistemic_std < LOW_THRESH  → 정상 Kelly 사이징
-    - LOW_THRESH ≤ std < HIGH_THRESH → Kelly × (1 - penalty) 축소
-    - epistemic_std ≥ HIGH_THRESH → 진입 거부 (flat 강제)
-    부가 효과:
-    - 앙상블 평균 Q가 단일 헤드보다 분산 낮음 → CVaR 품질 향상
-    - 처음 보는 레짐(분포 외)에서 std 급등 → 자동 리스크 회피
+
 """
 import os, sys, logging, random, argparse, gc, copy
 from collections import deque
@@ -659,366 +634,6 @@ class MarketAttentionEncoder(nn.Module):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [융합 모듈 ⑤] MAMLAdapter — Reptile-style First-Order MAML 레짐 적응기
-# ═══════════════════════════════════════════════════════════════════════════
-class MAMLAdapter:
-    """HMM 레짐 전환 감지 시 Reptile 메타 업데이트로 IQN을 빠르게 적응.
-
-    Reptile 공식:
-        θ ← θ + β_meta * (θ' - θ)
-        θ' = 현재 레짐 경험으로 N_INNER번 inner-loop gradient step한 파라미터
-
-    풀 MAML 대비 장점:
-        - 2차 미분(Hessian) 불필요 → NoisyLinear·LayerNorm과 완전 호환
-        - create_graph=False → 메모리 사용량 기존과 동일
-        - Inner loop에 기존 IQN loss(분위 회귀)를 그대로 사용 → 별도 loss 설계 불필요
-
-    레짐별 버퍼:
-        HMM 4개 상태(0=bull, 1=bear, 2=hv-chop, 3=lv-range)별로
-        최근 INNER_BUFFER_SIZE 경험을 deque로 관리.
-        전환된 새 레짐의 버퍼에서 INNER_BATCH 크기로 샘플링해 inner loop 실행.
-
-    쿨다운:
-        연속 전환 스팸 방지. 마지막 적응 후 COOLDOWN_STEPS 이상 지나야 재실행.
-
-    사용 방법:
-        # train() 초기화
-        maml = MAMLAdapter(agents, device)
-
-        # 에피소드 루프 내부, hmm_detector._alpha 갱신 후 호출
-        maml.push(state, action, reward, next_state, done, hmm_state)
-        adapted = maml.maybe_adapt(hmm_detector, current_ep=ep)
-        if adapted:
-            logger.info("[MAML] 레짐 전환 적응 완료")
-    """
-
-    N_INNER              = 5       # inner loop gradient step 횟수
-    INNER_BATCH          = 64      # inner loop 배치 크기
-    INNER_BUFFER_SIZE    = 512     # 레짐별 경험 버퍼 크기
-    BETA_META            = 0.3     # Reptile 메타 학습률
-    COOLDOWN_EPISODES    = 10      # 쿨다운: 마지막 적응 후 10 에피소드 이상 지나야 재실행
-    MIN_BUFFER_FOR_ADAPT = 300     # 새 레짐 버퍼에 300개 이상 쌓여야 적응 허용
-    WARMUP_EPISODES      = 50      # ep 50 이전엔 MAML 비활성화 (에이전트가 충분히 학습한 후 시작)
-    GAMMA                = 0.99
-    HMM_STATE_NAMES      = ['bull-trend', 'bear-trend', 'hv-chop', 'lv-range']
-
-    def __init__(self, agents: dict, device: str):
-        """
-        Args:
-            agents : IQNAgent 딕셔너리 {'bull': agent, 'bear': agent, ...}
-            device : torch device string
-        """
-        self.agents  = agents
-        self.device  = device
-
-        self.regime_buf = {
-            s: {name: deque(maxlen=self.INNER_BUFFER_SIZE) for name in agents}
-            for s in range(4)
-        }
-
-        self._prev_hmm_state: int = -1
-        self._last_adapt_ep:  int = -self.COOLDOWN_EPISODES  # 에피소드 단위 쿨다운
-        self._adapt_count:    int = 0
-
-    # ── 경험 수집 ──────────────────────────────────────────────────────────
-    def push(self, state: np.ndarray, action: int, reward: float,
-             next_state: np.ndarray, done: bool,
-             hmm_state: int, agent_name: str) -> None:
-        """현재 스텝의 경험을 해당 레짐 버퍼에 추가."""
-        if 0 <= hmm_state < 4:
-            self.regime_buf[hmm_state][agent_name].append(
-                (state, action, reward, next_state, done)
-            )
-
-    # ── 레짐 전환 감지 + 적응 트리거 ───────────────────────────────────────
-    def maybe_adapt(self, hmm_detector, current_ep: int) -> bool:
-        """HMM dominant state가 바뀌면 Reptile 메타 업데이트 실행.
-
-        Args:
-            hmm_detector : OnlineHMMDetector 인스턴스
-            current_ep   : 현재 에피소드 번호 (1-based)
-
-        Returns:
-            True if adaptation was performed, False otherwise.
-        """
-        cur_hmm_state = int(np.argmax(hmm_detector._alpha))
-
-        # 워밍업 기간 → 상태는 추적하되 적응 스킵
-        if current_ep < self.WARMUP_EPISODES:
-            self._prev_hmm_state = cur_hmm_state
-            return False
-        # 상태 변화 없으면 스킵
-        if cur_hmm_state == self._prev_hmm_state:
-            return False
-        # 에피소드 쿨다운 중이면 상태만 업데이트 후 스킵
-        if current_ep - self._last_adapt_ep < self.COOLDOWN_EPISODES:
-            self._prev_hmm_state = cur_hmm_state
-            return False
-
-        # 새 레짐 버퍼에 데이터가 충분한지 확인
-        new_state = cur_hmm_state
-        any_adapted = False
-
-        for name, agent in self.agents.items():
-            buf = self.regime_buf[new_state][name]
-            if len(buf) < self.MIN_BUFFER_FOR_ADAPT:
-                continue
-
-            adapted = self._reptile_update(agent, buf, name, new_state)
-            any_adapted = any_adapted or adapted
-
-        if any_adapted:
-            self._last_adapt_ep = current_ep
-            self._adapt_count += 1
-            prev_name = self.HMM_STATE_NAMES[self._prev_hmm_state] if self._prev_hmm_state >= 0 else 'init'
-            new_name  = self.HMM_STATE_NAMES[new_state]
-            logger.info(
-                f"[MAML] 레짐 전환 적응 #{self._adapt_count} | "
-                f"{prev_name} → {new_name} | "
-                f"ep={current_ep} β={self.BETA_META} inner_steps={self.N_INNER}"
-            )
-
-        self._prev_hmm_state = cur_hmm_state
-        return any_adapted
-
-    # ── Reptile 내부 구현 ──────────────────────────────────────────────────
-    def _reptile_update(self, agent, buf: deque, agent_name: str, hmm_state: int) -> bool:
-        """단일 에이전트에 대한 Reptile 메타 업데이트.
-
-        1. 현재 파라미터 θ를 복사
-        2. buf에서 샘플링한 배치로 N_INNER번 inner gradient step → θ'
-        3. θ ← θ + β_meta * (θ' - θ)  (Reptile)
-        4. target_model soft update (τ=1.0으로 동기화)
-        """
-        # ── θ 스냅샷 저장 ──
-        theta_orig = {k: v.clone() for k, v in agent.model.state_dict().items()}
-
-        # ── Inner loop optimizer (임시, 높은 lr로 빠른 적응) ──
-        inner_lr   = agent.optimizer.param_groups[0]['lr'] * 10.0
-        inner_opt  = torch.optim.Adam(agent.model.parameters(), lr=inner_lr)
-
-        agent.model.train()
-
-        for _ in range(self.N_INNER):
-            # 버퍼에서 미니배치 샘플링
-            batch_size = min(self.INNER_BATCH, len(buf))
-            batch = random.sample(list(buf), batch_size)
-            s, a, r, ns, d = zip(*batch)
-
-            s  = torch.FloatTensor(np.array(s)).to(self.device)
-            a  = torch.LongTensor(np.array(a)).unsqueeze(1).to(self.device)
-            r  = torch.FloatTensor(np.array(r)).unsqueeze(1).to(self.device)
-            ns = torch.FloatTensor(np.array(ns)).to(self.device)
-            d  = torch.FloatTensor(np.array(d)).unsqueeze(1).to(self.device)
-
-            NQ = 16
-            if hasattr(agent.model, 'reset_noise'):
-                agent.model.reset_noise()
-
-            q_mean, tau_online, _, q_ensemble = agent.model(s, num_quantiles=NQ)
-            # inner loop는 앙상블 평균으로 단순하게
-            q_a = q_mean.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
-
-            with torch.no_grad():
-                agent.model.eval()
-                nm, _, _, _ = agent.model(ns, num_quantiles=NQ)
-                next_actions = nm.mean(dim=1).argmax(dim=1, keepdim=True)
-                agent.model.train()
-                tm, _, _, _ = agent.target_model(ns, num_quantiles=NQ)
-                q_target_a  = tm.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
-                target = r + self.GAMMA * (1 - d) * q_target_a
-
-            td_error = target.unsqueeze(1) - q_a.unsqueeze(2)
-            huber    = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
-            indicator = (td_error.detach() < 0).float()
-            loss = (torch.abs(tau_online - indicator) * huber).mean()
-
-            inner_opt.zero_grad()
-            loss.backward()   # create_graph=False (default) → 1차 미분만
-            torch.nn.utils.clip_grad_norm_(agent.model.parameters(), 1.0)
-            inner_opt.step()
-
-        # ── θ' 확보 → Reptile: θ ← θ + β * (θ' - θ) ──
-        with torch.no_grad():
-            for name_p, param in agent.model.named_parameters():
-                if name_p in theta_orig:
-                    orig = theta_orig[name_p].to(self.device)
-                    param.data.copy_(orig + self.BETA_META * (param.data - orig))
-
-        # ── target model 동기화 (hard update) ──
-        agent.target_model.load_state_dict(agent.model.state_dict())
-        return True
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# [융합 모듈 ⑥] BootstrapEnsembleHeads — 공유 피처 추출기 위의 앙상블 헤드
-# ═══════════════════════════════════════════════════════════════════════════
-class BootstrapEnsembleHeads(nn.Module):
-    """N개의 독립 (v_head, a_head) 쌍을 하나의 모듈로 관리.
-
-    공유 피처 추출기 출력(feat: B×64)을 받아 각 헤드가 독립적으로
-    분위 Q값을 예측합니다. 헤드 간 예측 분산이 epistemic uncertainty입니다.
-
-    forward 반환:
-        q_ensemble : (B, N_HEADS, NQ, n_actions) — 각 헤드의 분위 Q
-        q_mean     : (B, NQ, n_actions)           — 헤드 평균 (CVaR에 사용)
-        epistemic  : (B, n_actions)               — 헤드 간 Q 표준편차 (불확실성)
-    """
-
-    def __init__(self, n_heads: int, action_dim: int, feat_dim: int = 64,
-                 phi_dim: int = 64, sigma_init: float = 0.05):
-        super().__init__()
-        self.n_heads    = n_heads
-        self.action_dim = action_dim
-
-        # N개 헤드: 각각 독립 v_head + a_head (NoisyLinear)
-        self.v_heads = nn.ModuleList([
-            nn.Sequential(nn.SiLU(), nn.Linear(feat_dim, 1))
-            for _ in range(n_heads)
-        ])
-        self.a_heads = nn.ModuleList([
-            nn.Sequential(nn.SiLU(), NoisyLinear(feat_dim, action_dim, sigma_init=sigma_init))
-            for _ in range(n_heads)
-        ])
-
-        # 헤드별 독립 초기화 (다양성 확보)
-        for i, (vh, ah) in enumerate(zip(self.v_heads, self.a_heads)):
-            gain = 0.5 + i * 0.15   # 헤드마다 다른 gain으로 초기화 편향 부여
-            for m in list(vh.modules()) + list(ah.modules()):
-                if isinstance(m, nn.Linear):
-                    nn.init.orthogonal_(m.weight, gain=gain)
-                    nn.init.zeros_(m.bias)
-
-    def reset_noise(self):
-        for ah in self.a_heads:
-            for m in ah.modules():
-                if isinstance(m, NoisyLinear):
-                    m.sample_noise()
-
-    def forward(self, feat: torch.Tensor, phi_x: torch.Tensor) -> tuple:
-        """
-        Args:
-            feat  : (B, feat_dim)        — 공유 피처 (context gate 적용 후)
-            phi_x : (B, NQ, phi_dim)     — IQN 코사인 임베딩
-
-        Returns:
-            q_mean     : (B, NQ, n_actions) — 앙상블 평균 분위 Q
-            epistemic  : (B, n_actions)     — 앙상블 표준편차 (epistemic uncertainty)
-            q_ensemble : (B, N_HEADS, NQ, n_actions) — 헤드별 원시 출력 (학습용)
-        """
-        B, NQ, _ = phi_x.shape
-        shared = feat.unsqueeze(1).expand(-1, NQ, -1) * phi_x  # (B, NQ, feat_dim)
-
-        all_q = []
-        for vh, ah in zip(self.v_heads, self.a_heads):
-            v = vh(shared)                              # (B, NQ, 1)
-            a = ah(shared)                              # (B, NQ, n_actions)
-            q = v + a - a.mean(dim=-1, keepdim=True)   # dueling
-            all_q.append(q)
-
-        q_stack    = torch.stack(all_q, dim=1)                  # (B, N_HEADS, NQ, n_actions)
-        q_mean     = q_stack.mean(dim=1)                        # (B, NQ, n_actions)
-        # epistemic: 헤드 간 Q 평균값(NQ 평균)의 표준편차
-        q_per_head = q_stack.mean(dim=2)                        # (B, N_HEADS, n_actions)
-        epistemic  = q_per_head.std(dim=1)                      # (B, n_actions)
-
-        return q_mean, epistemic, q_stack
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# [융합 모듈 ⑥-b] EpistemicUncertaintyGate — 불확실성 기반 진입 필터
-# ═══════════════════════════════════════════════════════════════════════════
-class EpistemicUncertaintyGate:
-    """epistemic_std를 기반으로 진입 허용·축소·거부를 결정.
-
-    세 구간:
-        std < LOW_THRESH    → 정상 진입, Kelly 사이징 그대로 사용
-        LOW ≤ std < HIGH    → 진입 허용, Kelly × (1 - penalty) 축소
-        std ≥ HIGH_THRESH   → 진입 거부 (flat 강제)
-
-    penalty 계산:
-        t = (std - LOW) / (HIGH - LOW)   ∈ [0, 1]
-        penalty = MAX_PENALTY * t        (선형)
-        Kelly_adjusted = Kelly * (1 - penalty)
-
-    LOW/HIGH 임계값은 학습 중 running statistics로 자동 보정:
-        running mean + k*sigma 방식 (초기 고정값에서 수렴)
-    """
-
-    LOW_THRESH   = 0.05   # 초기값; 학습 중 자동 조정
-    HIGH_THRESH  = 0.15
-    MAX_PENALTY  = 0.7    # 최대 사이징 축소 비율
-    ADAPT_ALPHA  = 0.001  # running stats EMA 계수
-
-    def __init__(self):
-        self._run_mean = 0.05
-        self._run_var  = 0.01
-        self._n        = 0
-        self._blocked  = 0   # 누적 진입 거부 횟수
-        self._reduced  = 0   # 누적 사이징 축소 횟수
-
-    def update_stats(self, std_val: float) -> None:
-        """running mean/std 업데이트 (Welford 방식)."""
-        self._n += 1
-        if self._n < 50:   # 워밍업: 충분한 샘플 전까지 통계 무시
-            return
-        delta = std_val - self._run_mean
-        self._run_mean += self.ADAPT_ALPHA * delta
-        self._run_var   = (1 - self.ADAPT_ALPHA) * self._run_var + self.ADAPT_ALPHA * delta ** 2
-        run_std = max(self._run_var ** 0.5, 1e-6)
-        # 임계값: mean ± k*sigma 자동 보정
-        self.LOW_THRESH  = float(np.clip(self._run_mean + 0.5 * run_std, 0.02, 0.20))
-        self.HIGH_THRESH = float(np.clip(self._run_mean + 2.0 * run_std, 0.05, 0.50))
-
-    def gate(self, epistemic_std: float, base_lev: float) -> tuple:
-        """
-        Args:
-            epistemic_std : scalar — 앙상블 헤드 간 Q 표준편차
-            base_lev      : float  — Kelly가 계산한 레버리지
-
-        Returns:
-            allow  : bool  — 진입 허용 여부
-            adj_lev: float — 조정된 레버리지
-            info   : dict  — 디버깅 정보
-        """
-        self.update_stats(epistemic_std)
-
-        if epistemic_std >= self.HIGH_THRESH:
-            self._blocked += 1
-            return False, 0.0, {
-                'epist_gate': 'BLOCKED',
-                'epist_std': round(epistemic_std, 4),
-                'epist_thresh_hi': round(self.HIGH_THRESH, 4),
-            }
-
-        if epistemic_std >= self.LOW_THRESH:
-            t       = (epistemic_std - self.LOW_THRESH) / max(self.HIGH_THRESH - self.LOW_THRESH, 1e-6)
-            penalty = self.MAX_PENALTY * float(np.clip(t, 0.0, 1.0))
-            adj_lev = float(np.clip(base_lev * (1.0 - penalty), 0.0, base_lev))
-            self._reduced += 1
-            return True, adj_lev, {
-                'epist_gate': 'REDUCED',
-                'epist_std': round(epistemic_std, 4),
-                'epist_penalty': round(penalty, 3),
-                'adj_lev': round(adj_lev, 3),
-            }
-
-        return True, base_lev, {
-            'epist_gate': 'OK',
-            'epist_std': round(epistemic_std, 4),
-        }
-
-    def stats(self) -> dict:
-        return {
-            'epist_blocked': self._blocked,
-            'epist_reduced': self._reduced,
-            'epist_low':  round(self.LOW_THRESH, 4),
-            'epist_high': round(self.HIGH_THRESH, 4),
-            'epist_run_mean': round(self._run_mean, 4),
-        }
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의]
 # ═══════════════════════════════════════════════════════════════════════════
 MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd', 'pred_ridge']
@@ -1451,8 +1066,6 @@ class NoisyLinear(nn.Module):
         return F.linear(x, w, b)
 
 class RobustIQN(nn.Module):
-    N_ENSEMBLE = 5   # 앙상블 헤드 수
-
     def __init__(self, state_dim, action_dim=2, hidden_dim=128, raw_state_dim=None):
         super().__init__()
         self.action_dim = action_dim
@@ -1469,23 +1082,15 @@ class RobustIQN(nn.Module):
         self.context_gate   = nn.Linear(self._market_dim, 64)
         self.phi            = nn.Linear(64, 64)
 
-        # ── [융합 ⑥] BootstrapEnsembleHeads: 단일 v/a head → N개 앙상블 ──
-        self.ensemble = BootstrapEnsembleHeads(
-            n_heads=self.N_ENSEMBLE, action_dim=action_dim,
-            feat_dim=64, phi_dim=64, sigma_init=0.05
-        )
+        self.v_head = nn.Sequential(nn.SiLU(), nn.Linear(64, 1))
+        self.a_head = nn.Sequential(nn.SiLU(), NoisyLinear(64, action_dim, sigma_init=0.05))
 
     def reset_noise(self):
-        self.ensemble.reset_noise()
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.sample_noise()
 
     def forward(self, state, num_quantiles=8):
-        """
-        Returns:
-            q_mean    : (B, NQ, n_actions) — 앙상블 평균 분위 Q (CVaR에 사용)
-            tau       : (B, NQ, 1)         — 분위 샘플 (기존 IQN loss 호환)
-            epistemic : (B, n_actions)     — 헤드 간 표준편차 (불확실성)
-            q_ensemble: (B, N_HEADS, NQ, n_actions) — 헤드별 원시 출력 (학습용)
-        """
         batch_size = state.size(0)
 
         last_frame_start = state.shape[1] - self._raw_state_dim
@@ -1497,14 +1102,18 @@ class RobustIQN(nn.Module):
 
         market_no_pos = state[:, last_frame_start : last_frame_start + self._market_dim]
         gate = torch.sigmoid(self.context_gate(market_no_pos))
-        feat = feat * gate                                   # (B, 64)
+        feat = feat * gate
 
         tau     = torch.rand(batch_size, num_quantiles, 1, device=state.device)
         cos_tau = torch.cos(tau * torch.arange(1, 65, device=state.device).float() * torch.pi)
-        phi_x   = self.phi(cos_tau)                          # (B, NQ, 64)
+        phi_x   = self.phi(cos_tau)
+        shared  = feat.unsqueeze(1).expand(-1, num_quantiles, -1) * phi_x
 
-        q_mean, epistemic, q_ensemble = self.ensemble(feat, phi_x)
-        return q_mean, tau, epistemic, q_ensemble
+        v = self.v_head(shared)
+        a = self.a_head(shared)
+        q = v + a - a.mean(dim=-1, keepdim=True)
+        return q, tau
+
 
 class IQNAgent:
     NUM_QUANTILES   = 32
@@ -1528,10 +1137,9 @@ class IQNAgent:
             self.model.reset_noise()
         state_ts = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q_mean, tau, epistemic, _ = self.model(state_ts, num_quantiles=self.NUM_QUANTILES)
-            # 앙상블 평균 분위로 CVaR 계산
+            q_quantiles, tau = self.model(state_ts, num_quantiles=self.NUM_QUANTILES)
             sort_idx = tau[0, :, 0].argsort()
-            q_sorted = q_mean[0][sort_idx]
+            q_sorted = q_quantiles[0][sort_idx]
             cvar_k   = max(1, int(self.NUM_QUANTILES * self.cvar_threshold))
             q = q_sorted[:cvar_k].mean(dim=0)
         return torch.argmax(q).item()
@@ -1553,58 +1161,29 @@ class IQNAgent:
         NQ = self.NUM_QUANTILES
         if hasattr(self.model, 'reset_noise'):
             self.model.reset_noise()
-
-        # ── 앙상블 forward ──
-        q_mean, tau_online, _, q_ensemble = self.model(s, num_quantiles=NQ)
-        N_HEADS = q_ensemble.shape[1]
+        q, tau_online = self.model(s, num_quantiles=NQ)
+        q_a = q.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
 
         with torch.no_grad():
             self.model.eval()
-            next_q_mean, _, _, _ = self.model(ns, num_quantiles=NQ)
-            next_actions = next_q_mean.mean(dim=1).argmax(dim=1, keepdim=True)  # (B, 1)
+            next_actions = self.model(ns, num_quantiles=NQ)[0].mean(dim=1).argmax(dim=1, keepdim=True)
             self.model.train()
-            tgt_q_mean, _, _, _ = self.target_model(ns, num_quantiles=NQ)
-            q_target_a = tgt_q_mean.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
-            target = r + self.gamma * (1 - d) * q_target_a   # (B, NQ)
+            q_target, _  = self.target_model(ns, num_quantiles=NQ)
+            q_target_a   = q_target.gather(2, next_actions.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
+            target = r + self.gamma * (1 - d) * q_target_a
 
-        # PER 가중치 준비 (없으면 균일 가중치 1.0)
+        td_error  = target.unsqueeze(1) - q_a.unsqueeze(2)
+        huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
+        tau_exp   = tau_online
+        indicator = (td_error.detach() < 0).float()
+        loss_per_sample = (torch.abs(tau_exp - indicator) * huber).mean(dim=1).mean(dim=1)
+
         if is_per:
-            w_tensor = per_w   # already FloatTensor on device (set above)
-            # priority 업데이트: 앙상블 평균 TD error 사용
-            with torch.no_grad():
-                q_mean_a = q_mean.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)
-                td_mean  = (target - q_mean_a).abs().mean(dim=1).cpu().numpy()
-            self.memory.update_priorities(per_indices, td_mean)
+            loss = (loss_per_sample * per_w).mean()
+            td_err_np = td_error.detach().abs().mean(dim=(1, 2)).cpu().numpy()
+            self.memory.update_priorities(per_indices, td_err_np)
         else:
-            w_tensor = torch.ones(s.shape[0], device=self.device)
-
-        # ── 헤드별 부트스트랩 마스크 + PER 가중치 적용 quantile loss ──
-        total_loss = torch.tensor(0.0, device=self.device)
-        valid_heads = 0
-        for h in range(N_HEADS):
-            # 부트스트랩: 배치의 80%만 사용 (헤드별 독립)
-            mask = torch.rand(s.shape[0], device=self.device) < 0.8
-            if mask.sum() < 4:
-                continue
-
-            q_h   = q_ensemble[:, h, :, :]                                        # (B, NQ, n_actions)
-            q_h_a = q_h.gather(2, a.unsqueeze(1).expand(-1, NQ, -1)).squeeze(2)   # (B, NQ)
-
-            q_h_a_m   = q_h_a[mask]      # (Bm, NQ)
-            target_m  = target[mask]      # (Bm, NQ)
-            tau_m     = tau_online[mask]  # (Bm, NQ, 1)
-            w_m       = w_tensor[mask]    # (Bm,)
-
-            td_error  = target_m.unsqueeze(1) - q_h_a_m.unsqueeze(2)   # (Bm, NQ, NQ)
-            huber     = F.huber_loss(td_error, torch.zeros_like(td_error), reduction='none', delta=1.0)
-            indicator = (td_error.detach() < 0).float()
-            # 샘플별 loss (Bm,) → PER 가중치 적용 후 평균
-            loss_per_sample = (torch.abs(tau_m - indicator) * huber).mean(dim=1).mean(dim=1)
-            loss_h    = (loss_per_sample * w_m).mean()
-            total_loss = total_loss + loss_h
-            valid_heads += 1
-
-        loss = total_loss / max(valid_heads, 1)
+            loss = loss_per_sample.mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -1633,10 +1212,10 @@ class GatingNet7(nn.Module):
 
 def _cvar_q_rl(model, state_ts, nq=32, cvar_threshold=0.25):
     with torch.no_grad():
-        q_mean, tau, _, _ = model(state_ts, num_quantiles=nq)
+        q_quants, tau = model(state_ts, num_quantiles=nq)
         sort_idx = tau[0, :, 0].argsort()
         k = max(4, int(nq * cvar_threshold))
-        return q_mean[0][sort_idx][:k].mean(dim=0)
+        return q_quants[0][sort_idx][:k].mean(dim=0)
 
 def _run_gating_trajectory(gating_net, models, df_train, device, n_steps, _ADV_SCALE,
                             hmm_detector=None, mtf_features=None):
@@ -1787,8 +1366,6 @@ class GatingRouter7:
         self.hmm     = hmm_detector
         self.kelly   = kelly_sizer or KellyCriterionSizer()
         self.mtf     = mtf_features
-        # ── [융합 ⑥] EpistemicUncertaintyGate (에이전트별 독립 인스턴스) ──
-        self.epist_gate = {name: EpistemicUncertaintyGate() for name in models_dict}
 
     def _state_tensor(self, features, pos):
         preds   = np.array([features.get(c, 0.) for c in STATE_PRED],   dtype=np.float32)
@@ -1834,17 +1411,17 @@ class GatingRouter7:
         threshold = self._CVAR_THRESH.get(agent_name, 0.50)
         nq = 32
         with torch.no_grad():
-            q_mean, tau, epistemic, _ = model(state, num_quantiles=nq)
+            q_quants, tau = model(state, num_quantiles=nq)
             sort_idx = tau[0, :, 0].argsort()
             k = max(4, int(nq * threshold))
-            return q_mean[0][sort_idx][:k].mean(dim=0).cpu(), epistemic[0].cpu()
+            return q_quants[0][sort_idx][:k].mean(dim=0).cpu()
 
     def _full_quantiles(self, model, state, nq=32):
-        """Kelly 계산용 + epistemic 반환 (nq, n_actions), (n_actions,)."""
+        """Kelly 계산용 — 전체 분위 행렬 반환 (nq, n_actions)."""
         with torch.no_grad():
-            q_mean, tau, epistemic, _ = model(state, num_quantiles=nq)
+            q_quants, tau = model(state, num_quantiles=nq)
             sort_idx = tau[0, :, 0].argsort()
-            return q_mean[0][sort_idx].cpu(), epistemic[0].cpu()
+            return q_quants[0][sort_idx].cpu()
 
     def decide(self, features, pos):
         cur_pos = pos.get('type')
@@ -1863,7 +1440,7 @@ class GatingRouter7:
         # ── 포지션 유지 / 청산 판단 ──
         if cur_pos is not None:
             agent_name = self._active_agent or ('normal_long' if cur_pos == 'LONG' else 'normal_short')
-            q_cvar, _  = self._cvar_q(self.models[agent_name], state, agent_name=agent_name)
+            q_cvar     = self._cvar_q(self.models[agent_name], state, agent_name=agent_name)
             best       = int(q_cvar.argmax().item())
 
             eval_best = best
@@ -1883,10 +1460,9 @@ class GatingRouter7:
         with torch.no_grad():
             w = self.gating_net(state)[0].cpu()
 
-        q_map      = {}
-        epist_map  = {}
+        q_map = {}
         for name in ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']:
-            q_map[name], epist_map[name] = self._cvar_q(self.models[name], state, agent_name=name)
+            q_map[name] = self._cvar_q(self.models[name], state, agent_name=name)
 
         def _adv_n(q):
             best = q.argmax().item()
@@ -1930,19 +1506,10 @@ class GatingRouter7:
                              **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
 
         # ── Kelly 사이징 ──
-        gating_conf  = float(w[self._W_IDX[best_name]].item())
-        q_full, epist_full = self._full_quantiles(self.models[best_name], state)
-        base_lev     = self.kelly.compute(q_full, gating_confidence=gating_conf)
-        kelly_stats  = self.kelly.log_stats(q_full)
-
-        # ── [융합 ⑥] EpistemicUncertaintyGate 적용 ──
-        epist_std    = float(epist_map[best_name][agent_action].item())
-        allow, lev, epist_info = self.epist_gate[best_name].gate(epist_std, base_lev)
-
-        if not allow:
-            return 0, 0.0, {'agent': f'{best_name}_epist_blocked',
-                             **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr,
-                             **_hmm_info, **epist_info}
+        gating_conf = float(w[self._W_IDX[best_name]].item())
+        q_full      = self._full_quantiles(self.models[best_name], state)
+        lev         = self.kelly.compute(q_full, gating_confidence=gating_conf)
+        kelly_stats = self.kelly.log_stats(q_full)
 
         val_action = agent_action
         if best_name in ['bear', 'chop_short', 'normal_short'] and agent_action == 1:
@@ -1950,14 +1517,13 @@ class GatingRouter7:
 
         self._active_agent = best_name
         return val_action, lev, {
-            'agent':   best_name,
-            'score':   scores[best_name],
-            'kelly':   lev,
+            'agent':    best_name,
+            'score':    scores[best_name],
+            'kelly':    lev,
             **kelly_stats,
             **_edge_info,
             'gating_w': _w_arr,
             **_hmm_info,
-            **epist_info,
         }
 
 
@@ -2026,9 +1592,6 @@ def train():
         agents[name].memory = PrioritizedRegimeReplayBuffer(
             200000, target_regimes=cfg['target_regimes'])
 
-    # ── [MAML 초기화] 에이전트 생성 후 ──
-    maml_adapter = MAMLAdapter(agents, device)
-    logger.info("[MAML] MAMLAdapter 초기화 완료 (Reptile / first-order)")
 
     NEP             = 1000
     BATCH           = 512
@@ -2136,16 +1699,10 @@ def train():
                         agent.memory.push(s, a, r, ns, d, current_regimes, in_pos=in_pos)
                         ep_rewards[name] += r
 
-                    # ── [MAML] 레짐별 버퍼에도 경험 수집 ──
-                    cur_hmm = int(np.argmax(hmm_detector._alpha))
-                    maml_adapter.push(s, a, r, ns, d, hmm_state=cur_hmm, agent_name=name)
 
                     env_states[name] = ns
                     done = done or d
 
-                # ── [MAML] 레짐 전환 감지 시 Reptile 적응 (첫 번째 에이전트 기준으로 1회만 체크) ──
-                if global_step % 10 == 0:   # 매 스텝 체크하면 오버헤드 → 10스텝마다
-                    maml_adapter.maybe_adapt(hmm_detector, ep)
 
                 if global_step % UPDATE_FREQ == 0:
                     for name in agent_names:
@@ -2244,26 +1801,7 @@ def train():
                     f"4h_ret:{_last_mtf[3]:.3f} 4h_trend:{_last_mtf[5]:.3f} align:{_last_mtf[6]:.0f}"
                 )
 
-                # MAML 적응 통계
-                logger.info(
-                    f"    [MAML] 누적 적응 횟수={maml_adapter._adapt_count} | "
-                    f"현재 HMM={MAMLAdapter.HMM_STATE_NAMES[int(np.argmax(hmm_detector._alpha))]} | "
-                    + " ".join(
-                        f"buf[{MAMLAdapter.HMM_STATE_NAMES[s]}]="
-                        f"{sum(len(maml_adapter.regime_buf[s][n]) for n in agent_names)}"
-                        for s in range(4)
-                    )
-                )
 
-                # Epistemic uncertainty gate 통계
-                for ag_name, gate in router.epist_gate.items():
-                    gs = gate.stats()
-                    logger.info(
-                        f"    [EPIST/{ag_name:12s}] "
-                        f"blocked={gs['epist_blocked']:3d} reduced={gs['epist_reduced']:3d} | "
-                        f"low={gs['epist_low']:.3f} high={gs['epist_high']:.3f} "
-                        f"run_mean={gs['epist_run_mean']:.3f}"
-                    )
 
                 # Kelly 통계 로그
                 if kelly_log:

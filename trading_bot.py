@@ -54,6 +54,7 @@ for p in TARGET_PATHS:
         sys.path.insert(0, p)
 
 from core.feature_engineering import FeatureEngineer
+from ensemble.train_trend import TrendContextBrain
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,
     KronosForecaster, TimesFMForecaster, MoiraiForecaster,
@@ -889,7 +890,8 @@ class MetaRouter:
     # ── 메인 진입점 ───────────────────────────────────────────────
     def fuse(self, rl_action: int, rl_info: dict,
              ls_action: int, ls_info: dict,
-             regime: dict, current_price: float = 0.0) -> dict:
+             regime: dict, current_price: float = 0.0,
+             trend_signal=None) -> dict:
         """
         Returns dict:
           final_action  : 0/1/2
@@ -897,6 +899,8 @@ class MetaRouter:
           source        : 'CONSENSUS'|'RL_SOLO'|'LS_SOLO'|'RL_WIN'|'LS_WIN'|'FLAT'|'HOLD'
           conflict_type : 'AGREE'|'CONFLICT'|'RL_SOLO'|'LS_SOLO'|'BOTH_FLAT'
           rl_score, ls_score, meta_score, rl_weight, ls_weight
+          trend_signal  : TrendSignal.to_arbiter_dict() 또는 None
+          trend_veto    : 적용된 trend filter 사유 문자열 또는 None
         """
         rl_w, ls_w = self._get_weights()
         rl_score   = _meta_rl_score(rl_action, rl_info, regime) * rl_w
@@ -909,6 +913,14 @@ class MetaRouter:
             final_action, source, rl_info, rl_score, ls_score
         )
 
+        # ── TrendContextBrain 거버넌스 레이어 ─────────────────────
+        # 4h 추세가 5분봉 진입 신호를 거부(VETO)하거나 Kelly를 조정
+        trend_veto = None
+        if trend_signal is not None and final_action != 0:
+            final_action, unified_kelly, trend_veto = self._apply_trend_filter(
+                final_action, unified_kelly, trend_signal
+            )
+
         if source == 'CONSENSUS':
             meta_score = min((rl_score + ls_score) / 2.0 * _META_CONSENSUS_BOOST, 1.0)
         elif source in ('RL_WIN', 'RL_SOLO'):
@@ -917,6 +929,10 @@ class MetaRouter:
             meta_score = ls_score
         else:
             meta_score = 0.0
+
+        # trend veto 로 action=0 됐으면 source 갱신
+        if final_action == 0 and trend_veto is not None:
+            source = trend_veto
 
         self._update_pos(final_action, current_price)
         self._history.append({'rl': rl_action, 'ls': ls_action,
@@ -936,7 +952,52 @@ class MetaRouter:
             'ls_action':     ls_action,
             'rl_weight':     rl_w,
             'ls_weight':     ls_w,
+            'trend_signal':  trend_signal.to_arbiter_dict() if trend_signal is not None else None,
+            'trend_veto':    trend_veto,
         }
+
+    # ── TrendContextBrain 거버넌스 ────────────────────────────────
+    def _apply_trend_filter(self, action: int, kelly: float, trend_signal) -> tuple:
+        """4h 추세 기반 진입 거부 / Kelly 조정.
+
+        VETO_STRENGTH  : 이 이상 강한 역방향 추세 → 진입 거부 (action=0)
+        BOOST_STRENGTH : 이 이상 동방향 추세 → Kelly 부스트 (+25%)
+        CHOP_STRENGTH  : FLAT 추세 강도 → Kelly 축소 (×0.8)
+        REV_VETO_PROB  : 반전 확률 이 이상 → Kelly 축소 (×0.6)
+        """
+        VETO_STRENGTH  = 0.55
+        BOOST_STRENGTH = 0.35
+        CHOP_STRENGTH  = 0.30
+        REV_VETO_PROB  = 0.60
+
+        veto = None
+
+        # ① 강한 역방향 추세 → 진입 거부
+        if trend_signal.strength >= VETO_STRENGTH:
+            if trend_signal.trend_dir == 0 and action == 1:   # 4h 하락 + 롱 진입
+                return 0, 0.0, 'TREND_DOWN_VETO'
+            if trend_signal.trend_dir == 2 and action == 2:   # 4h 상승 + 숏 진입
+                return 0, 0.0, 'TREND_UP_VETO'
+
+        # ② 동방향 추세 → Kelly 부스트
+        if trend_signal.strength >= BOOST_STRENGTH:
+            aligned = (trend_signal.trend_dir == 2 and action == 1) or \
+                      (trend_signal.trend_dir == 0 and action == 2)
+            if aligned:
+                kelly = float(np.clip(kelly * (1.0 + trend_signal.strength * 0.25), 0.0, 1.0))
+                veto  = 'TREND_BOOST'
+
+        # ③ FLAT(횡보) 추세 → Kelly 축소
+        if trend_signal.trend_dir == 1 and trend_signal.strength >= CHOP_STRENGTH:
+            kelly *= 0.80
+            veto   = veto or 'TREND_CHOP_REDUCE'
+
+        # ④ 반전 확률 높음 → Kelly 추가 축소
+        if trend_signal.rev_prob >= REV_VETO_PROB:
+            kelly = float(np.clip(kelly * 0.60, 0.0, 1.0))
+            veto  = veto or 'TREND_REV_REDUCE'
+
+        return action, kelly, veto
 
     # ── 4단계 의사결정 ────────────────────────────────────────────
     def _decide(self, rl_action, ls_action, rl_score, ls_score):
@@ -1038,6 +1099,13 @@ class MetaRouter:
         if self.pos is not None:
             print(f"  포지션: {self.pos}  진입가={self.entry_price:.2f}  "
                   f"미실현={unr_color}{unr:+.2f}%{C.RESET}  보유={self.hold_count}봉")
+        ts = result.get('trend_signal')
+        tv = result.get('trend_veto')
+        if ts is not None:
+            dir_map = {0: f'{C.RED}↓DOWN{C.RESET}', 1: f'{C.YELLOW}→FLAT{C.RESET}', 2: f'{C.GREEN}↑UP{C.RESET}'}
+            dir_str = dir_map.get(ts['trend_dir'], '?')
+            veto_str = f'  [{C.RED}{tv}{C.RESET}]' if tv else ''
+            print(f"  4h추세: {dir_str}  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}{veto_str}")
         print(C.BOLD + "╚══════════════════════════════════════════════════╝" + C.RESET)
 
 
@@ -1435,6 +1503,17 @@ async def main(use_local=False):
     # 직전 포지션 청산 시점 추적용 (PnL 피드백을 위해)
     _prev_meta_pos: str | None = None
 
+    # ── TrendContextBrain 초기화 ───────────────────────────────
+    trend_brain = None
+    try:
+        trend_brain = TrendContextBrain.load(
+            'data/ensemble/ckpt/trend_brain_hybrid.pth',
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+        )
+        logger.info("✅ TrendContextBrain (4h 추세 뇌) 로드 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ TrendContextBrain 미로드 (학습 전이거나 파일 없음): {e}")
+
     # ── Polymarket 크라우드 확률 수집기 ────────────────────────
     poly_fetcher = PolymarketFetcher()
 
@@ -1454,6 +1533,14 @@ async def main(use_local=False):
         if ls_bot is not None:
             ls_action, ls_info, ls_pnl = ls_bot.get_signal(processed_df, preds, confs, nf_preds)
 
+        # ── TrendContextBrain 4h 추세 추론 ───────────────────────
+        trend_signal = None
+        if trend_brain is not None:
+            try:
+                trend_signal = trend_brain.predict_from_df(eth_buffer)
+            except Exception as e:
+                logger.debug(f"TrendBrain 추론 실패: {e}")
+
         # ── MetaRouter 신호 융합 ──────────────────────────────
         meta_result = meta_router.fuse(
             rl_action     = final_action,
@@ -1462,6 +1549,7 @@ async def main(use_local=False):
             ls_info       = ls_info   if ls_info   is not None else {},
             regime        = regime,
             current_price = current_price,
+            trend_signal  = trend_signal,
         )
 
         # 직전 사이클에 포지션이 있었다가 이번에 청산됐으면 PnL 피드백
