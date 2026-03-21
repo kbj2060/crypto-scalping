@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # 설정
 # ────────────────────────────────────────────────────────────────
 DATA_PATH   = 'data/training_features_5m.csv'
-RL_DATA_PATH = 'data/ensemble/rl_training_data_full.csv'
+RL_DATA_PATH = 'data/rl_training_data_full.csv'
 SAVE_PATH   = 'data/trend_xgb/trend_xgb.pkl'
 MAX_FEATURES = 48      # auto_select_features 상한
 N_TRIALS     = 50     # Optuna 시행 수
