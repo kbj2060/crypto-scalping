@@ -324,10 +324,10 @@ class RidgeSignalComputer:
 
 
 # ════════════════════════════════════════════════════════════════
-# 2-C. 신경망 state 구성용 NF/TTM 예측 (RL/LS 공용)
+# 2-C. 신경망 state 구성용 NF/TTM 예측
 # ════════════════════════════════════════════════════════════════
 class NFStatePredictor:
-    """RL_STATE_PRED ∪ LS_STATE_PRED 전체 커버 (싱글 로드, 공유 사용)"""
+    """RL_STATE_PRED 전체 커버 (싱글 로드, 공유 사용)"""
 
     def __init__(self):
         # NF 4종은 UnifiedNFForecaster 싱글톤이므로 중복 로드 없음
@@ -783,28 +783,18 @@ def _print_polymarket_section(poly_data: dict, current_price: float):
 
 
 # ════════════════════════════════════════════════════════════════
-# 3-B. MetaRouter — RL 4-Agent + LS 2-Agent 신호 통합 융합 레이어
+# 3-B. MetaRouter — RL 4-Agent 신호 + TrendFilter 융합 레이어
 # ════════════════════════════════════════════════════════════════
 # [설계 원칙]
-# - MoELiveRouter / LSLiveRouter 코드 변경 없음
-# - _run_cycle() 에서 meta_router.fuse() 한 줄로 두 신호를 통합
+# - MoELiveRouter 코드 변경 없음
+# - _run_cycle() 에서 meta_router.fuse() 한 줄로 신호를 통합
 # - 포지션은 MetaRouter가 단일 소스로 관리
-#
-# [충돌 처리 행렬]
-#   RL\LS  |  관망(0)           |  Long(1)          |  Short(2)
-#   -------+--------------------+-------------------+--------------------
-#   관망(0)|  관망              |  LS score 임계값  |  LS score 임계값
-#   Long(1)|  RL score 임계값  |  Long (합의)      |  score 비교 or 관망
-#  Short(2)|  RL score 임계값  |  score 비교 or 관망| Short (합의)
 
 # ── 튜닝 상수 ────────────────────────────────────────────────────
-_META_CONSENSUS_BOOST  = 1.15   # 합의 시 Kelly 부스트
-_META_SOLO_RL_THRESH   = 0.25   # RL 단독 진입 score 최솟값
-_META_SOLO_LS_THRESH   = 0.20   # LS 단독 진입 score 최솟값
-_META_CONFLICT_MARGIN  = 0.10   # 충돌 시 score 차이가 이 미만이면 관망 강제
+_META_SOLO_RL_THRESH   = 0.25   # RL 진입 score 최솟값
 _META_HISTORY_N        = 30     # 동적 가중치 추적 윈도우
 
-# 레짐별 RL 우선순위 배율 (bull/bear → RL 특화, chop/whip → LS 민감)
+# 레짐별 RL 우선순위 배율
 _REGIME_RL_WEIGHT = {
     'bull': 1.20, 'bear': 1.20, 'normal': 1.00,
     'chop': 0.80, 'whipsaw': 0.75,
@@ -825,33 +815,13 @@ def _meta_rl_score(rl_action: int, rl_info: dict, regime: dict) -> float:
     return float(np.clip(raw, 0.0, 1.0))
 
 
-def _meta_ls_score(ls_action: int, ls_info: dict) -> float:
-    """HCRouter info 구조로 LS 신호 강도 계산 (0~1).
-    HCRouter.decide()가 반환하는 info 키:
-      진입 시: adv(방향 advantage), consensus(가중 합의)
-      관망 시: adv_L, adv_S, ml_cons
-    """
-    if ls_action == 0:
-        return 0.0
-    adv_l     = float(ls_info.get('adv_L', ls_info.get('adv', 0.0)))
-    adv_s     = float(ls_info.get('adv_S', 0.0))
-    consensus = abs(float(ls_info.get('consensus', ls_info.get('ml_cons', 0.0))))
-    if ls_action == 1:
-        adv_gap = adv_l - adv_s if adv_s != 0.0 else abs(adv_l)
-    else:
-        adv_gap = adv_s - adv_l if adv_l != 0.0 else abs(adv_s)
-    raw = float(np.tanh(abs(adv_gap) * 3.0)) * (0.5 + 0.5 * consensus)
-    return float(np.clip(raw, 0.0, 1.0))
-
-
 class MetaRouter:
-    """RL MoE 4-Agent + LS 2-Agent 신호를 받아 단일 최종 액션을 결정."""
+    """RL MoE 4-Agent 신호를 받아 단일 최종 액션을 결정."""
 
     def __init__(self):
         # 동적 가중치 추적 (승률 기반)
         self._rl_score_acc  = 1.0
-        self._ls_score_acc  = 1.0
-        self._history       = []        # {'rl':int,'ls':int,'final':int,'src':str,'outcome':None}
+        self._history       = []        # {'rl':int,'final':int,'src':str,'outcome':None}
 
         # MetaRouter 자체 포지션 상태
         self.pos:          str | None = None
@@ -860,51 +830,39 @@ class MetaRouter:
         self.peak_equity:  float      = 1.0
         self.cur_equity:   float      = 1.0
 
-    # ── 동적 가중치 ───────────────────────────────────────────────
-    def _get_weights(self):
-        total  = self._rl_score_acc + self._ls_score_acc + 1e-8
-        rl_w   = float(np.clip(2.0 * self._rl_score_acc / total, 0.40, 1.60))
-        ls_w   = float(np.clip(2.0 * self._ls_score_acc / total, 0.40, 1.60))
-        return rl_w, ls_w
-
     def record_outcome(self, realized_pnl_pct: float):
         """포지션 청산 후 실현 PnL을 피드백해 동적 가중치를 보정."""
         if not self._history:
             return
         rec  = self._history[-1]
         correct = realized_pnl_pct > 0.0
-        if rec['src'] in ('CONSENSUS', 'RL_WIN', 'RL_SOLO'):
+        if rec['src'] in ('RL_SOLO', 'RL_ACTIVE'):
             self._rl_score_acc += 1.0 if correct else -0.5
             self._rl_score_acc  = max(0.1, self._rl_score_acc)
-        if rec['src'] in ('CONSENSUS', 'LS_WIN', 'LS_SOLO'):
-            self._ls_score_acc += 1.0 if correct else -0.5
-            self._ls_score_acc  = max(0.1, self._ls_score_acc)
 
     # ── 메인 진입점 ───────────────────────────────────────────────
     def fuse(self, rl_action: int, rl_info: dict,
-             ls_action: int, ls_info: dict,
              regime: dict, current_price: float = 0.0,
              trend_signal=None) -> dict:
         """
         Returns dict:
           final_action  : 0/1/2
           unified_kelly : 0~1
-          source        : 'CONSENSUS'|'RL_SOLO'|'LS_SOLO'|'RL_WIN'|'LS_WIN'|'FLAT'|'HOLD'
-          conflict_type : 'AGREE'|'CONFLICT'|'RL_SOLO'|'LS_SOLO'|'BOTH_FLAT'
-          rl_score, ls_score, meta_score, rl_weight, ls_weight
+          source        : 'RL_ACTIVE'|'RL_SOLO'|'FLAT'
+          rl_score, meta_score
           trend_signal  : TrendSignal.to_arbiter_dict() 또는 None
           trend_veto    : 적용된 trend filter 사유 문자열 또는 None
         """
-        rl_w, ls_w = self._get_weights()
-        rl_score   = _meta_rl_score(rl_action, rl_info, regime) * rl_w
-        ls_score   = _meta_ls_score(ls_action, ls_info) * ls_w
+        rl_score = _meta_rl_score(rl_action, rl_info, regime)
 
-        final_action, source, conflict_type = self._decide(
-            rl_action, ls_action, rl_score, ls_score
-        )
-        unified_kelly = self._calc_kelly(
-            final_action, source, rl_info, rl_score, ls_score
-        )
+        if rl_action == 0:
+            final_action, source = 0, 'FLAT'
+        elif rl_score >= _META_SOLO_RL_THRESH:
+            final_action, source = rl_action, 'RL_ACTIVE'
+        else:
+            final_action, source = 0, 'FLAT'
+
+        unified_kelly = self._calc_kelly(final_action, rl_info, rl_score)
 
         # ── TrendContextBrain 거버넌스 레이어 ─────────────────────
         # 4h 추세가 5분봉 진입 신호를 거부(VETO)하거나 Kelly를 조정
@@ -914,22 +872,14 @@ class MetaRouter:
                 final_action, unified_kelly, trend_signal
             )
 
-        if source == 'CONSENSUS':
-            meta_score = min((rl_score + ls_score) / 2.0 * _META_CONSENSUS_BOOST, 1.0)
-        elif source in ('RL_WIN', 'RL_SOLO'):
-            meta_score = rl_score
-        elif source in ('LS_WIN', 'LS_SOLO'):
-            meta_score = ls_score
-        else:
-            meta_score = 0.0
+        meta_score = rl_score if final_action != 0 else 0.0
 
         # trend veto 로 action=0 됐으면 source 갱신
         if final_action == 0 and trend_veto is not None:
             source = trend_veto
 
         self._update_pos(final_action, current_price)
-        self._history.append({'rl': rl_action, 'ls': ls_action,
-                              'final': final_action, 'src': source, 'outcome': None})
+        self._history.append({'rl': rl_action, 'final': final_action, 'src': source, 'outcome': None})
         if len(self._history) > _META_HISTORY_N * 2:
             self._history = self._history[-_META_HISTORY_N:]
 
@@ -937,14 +887,9 @@ class MetaRouter:
             'final_action':  final_action,
             'unified_kelly': unified_kelly,
             'source':        source,
-            'conflict_type': conflict_type,
             'rl_score':      rl_score,
-            'ls_score':      ls_score,
             'meta_score':    meta_score,
             'rl_action':     rl_action,
-            'ls_action':     ls_action,
-            'rl_weight':     rl_w,
-            'ls_weight':     ls_w,
             'trend_signal':  trend_signal.to_arbiter_dict() if trend_signal is not None else None,
             'trend_veto':    trend_veto,
         }
@@ -992,56 +937,11 @@ class MetaRouter:
 
         return action, kelly, veto
 
-    # ── 4단계 의사결정 ────────────────────────────────────────────
-    def _decide(self, rl_action, ls_action, rl_score, ls_score):
-        # ① 양쪽 모두 관망
-        if rl_action == 0 and ls_action == 0:
-            return 0, 'FLAT', 'BOTH_FLAT'
-
-        # ② 합의 (같은 방향 진입)
-        if rl_action != 0 and rl_action == ls_action:
-            return rl_action, 'CONSENSUS', 'AGREE'
-
-        # ③ 보유 중 → 청산·역방향 신호가 하나라도 있으면 청산 우선
-        if self.pos is not None:
-            pos_is_long  = (self.pos == 'LONG')
-            pos_is_short = (self.pos == 'SHORT')
-            rl_close  = (rl_action == 0)
-            ls_close  = (ls_action == 0)
-            rl_rev    = (pos_is_long and rl_action == 2) or (pos_is_short and rl_action == 1)
-            ls_rev    = (pos_is_long and ls_action == 2) or (pos_is_short and ls_action == 1)
-            if rl_close or ls_close or rl_rev or ls_rev:
-                return 0, 'HOLD', 'AGREE'
-
-        # ④ 단독 신호 (한쪽만 진입 의사)
-        if rl_action != 0 and ls_action == 0:
-            if rl_score >= _META_SOLO_RL_THRESH:
-                return rl_action, 'RL_SOLO', 'RL_SOLO'
-            return 0, 'FLAT', 'RL_SOLO'
-
-        if ls_action != 0 and rl_action == 0:
-            if ls_score >= _META_SOLO_LS_THRESH:
-                return ls_action, 'LS_SOLO', 'LS_SOLO'
-            return 0, 'FLAT', 'LS_SOLO'
-
-        # ⑤ 충돌 (방향 반대)
-        diff = rl_score - ls_score
-        if abs(diff) < _META_CONFLICT_MARGIN:
-            return 0, 'FLAT', 'CONFLICT'
-        if diff > 0:
-            return rl_action, 'RL_WIN', 'CONFLICT'
-        return ls_action, 'LS_WIN', 'CONFLICT'
-
-    def _calc_kelly(self, final_action, source, rl_info, rl_score, ls_score):
+    def _calc_kelly(self, final_action, rl_info, rl_score):
         if final_action == 0:
             return 0.0
         rl_kelly = float(rl_info.get('kelly', 0.0))
-        ls_kelly = min(ls_score * 0.8, 1.0)
-        if source == 'CONSENSUS':
-            return float(np.clip((rl_kelly + ls_kelly) / 2.0 * _META_CONSENSUS_BOOST, 0.0, 1.0))
-        if source in ('RL_WIN', 'RL_SOLO'):
-            return float(np.clip(rl_kelly, 0.0, 1.0))
-        return float(np.clip(ls_kelly, 0.0, 1.0))
+        return float(np.clip(rl_kelly, 0.0, 1.0))
 
     def _update_pos(self, final_action, current_price):
         if final_action == 1 and self.pos is None:
@@ -1071,23 +971,17 @@ class MetaRouter:
     def print_meta_dashboard(self, result: dict, current_price: float = 0.0):
         C = Colors
         src    = result['source']
-        ct     = result['conflict_type']
         fa     = result['final_action']
         action_str = {0: f'{C.YELLOW}🟨 관망{C.RESET}',
                       1: f'{C.GREEN}🟩 LONG{C.RESET}',
                       2: f'{C.RED}🟥 SHORT{C.RESET}'}.get(fa, '?')
         rl_a_str = {0:'관망', 1:'LONG', 2:'SHORT'}.get(result['rl_action'], '?')
-        ls_a_str = {0:'관망', 1:'LONG', 2:'SHORT'}.get(result['ls_action'], '?')
 
-        # 충돌유형 색상
-        ct_color = C.GREEN if ct == 'AGREE' else (C.RED if ct == 'CONFLICT' else C.YELLOW)
         unr = self.unrealized_pnl(current_price)
         unr_color = C.GREEN if unr > 0 else (C.RED if unr < 0 else C.YELLOW)
 
         print(C.BOLD + "╔══════════ [ ⚡ MetaRouter 통합 판단 ] ══════════╗" + C.RESET)
-        print(f"  RL 신호: {rl_a_str:<5}  score={result['rl_score']:.3f}  weight={result['rl_weight']:.2f}")
-        print(f"  LS 신호: {ls_a_str:<5}  score={result['ls_score']:.3f}  weight={result['ls_weight']:.2f}")
-        print(f"  충돌유형: {ct_color}{ct}{C.RESET}   source: {C.CYAN}{src}{C.RESET}")
+        print(f"  RL 신호: {rl_a_str:<5}  score={result['rl_score']:.3f}   source: {C.CYAN}{src}{C.RESET}")
         print(f"  ▶ 최종결정: {action_str}   Kelly={result['unified_kelly']:.3f}   meta_score={result['meta_score']:.3f}")
         if self.pos is not None:
             print(f"  포지션: {self.pos}  진입가={self.entry_price:.2f}  "
@@ -1100,130 +994,6 @@ class MetaRouter:
             veto_str = f'  [{C.RED}{tv}{C.RESET}]' if tv else ''
             print(f"  4h추세: {dir_str}  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}{veto_str}")
         print(C.BOLD + "╚══════════════════════════════════════════════════╝" + C.RESET)
-
-
-# ════════════════════════════════════════════════════════════════
-# 3-B. LS 2-Agent 라우터 (롱돌이/숏돌이) — HCRouter 기반
-# ════════════════════════════════════════════════════════════════
-class LSLiveRouter:
-    def __init__(self, model_path='data/ensemble/ckpt/best_ls_agents.pth'):
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.elite_extractor = EliteSignals()
-
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"LS 모델을 찾을 수 없습니다: {model_path}")
-
-        ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
-
-        # train_ls_agent.py 기준:
-        #   RobustIQN(STACKED_STATE_DIM, action_dim=2, raw_state_dim=STATE_DIM)
-        #   STATE_DIM = FEATURE_DIM + 4  (pos_features 4개 — entry_price 없음)
-        #   FEATURE_DIM = 7+7+3+4+7+5+9 = 42  →  STATE_DIM = 46
-        #   STACKED_STATE_DIM = STATE_DIM * STACK_N = 46 * 4 = 184
-        from ensemble.train_ls_agent import (
-            RobustIQN as LSRobustIQN,
-            HCRouter,
-            STACKED_STATE_DIM as _LS_STACKED,
-            STATE_DIM         as _LS_STATE,
-        )
-
-        def _load(key):
-            m = LSRobustIQN(_LS_STACKED, 2, raw_state_dim=_LS_STATE).to(self.device)
-            m.load_state_dict(ckpt[key])
-            m.eval()
-            return m
-
-        model_long  = _load('model_long')
-        model_short = _load('model_short')
-
-        # HCRouter — GatingNet 없음 (Hysteresis-Consensus 방식)
-        self.trader = HCRouter(model_long, model_short, self.device)
-        # 라이브 추론 시 eval() 명시 (학습 루프와 달리 재전환 불필요)
-        model_long.eval()
-        model_short.eval()
-
-        self.pos, self.entry_price, self.hold_count = None, 0.0, 0
-        self.peak_equity, self.current_equity = 1.0, 1.0
-        logger.info(f"✅ {Colors.GREEN}LS 2-Agent HCRouter 탑재 완료{Colors.RESET} "
-                    f"(state_dim={_LS_STATE}, stacked={_LS_STACKED})")
-
-    def get_signal(self, processed_df: pd.DataFrame, preds, confs, nf_preds: dict):
-        last_row = processed_df.iloc[-1]
-        prev_row = processed_df.iloc[-2]
-        smf_std  = processed_df['smart_money_flow'].std() if 'smart_money_flow' in processed_df.columns else 1.0
-
-        cur_market  = row_to_market_row(last_row)
-        prev_market = row_to_market_row(prev_row)
-        elite_sigs  = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
-
-        features = {}
-
-        # LS STATE_PRED/CONF: train_ls_agent.py 와 동일 7+7 컬럼
-        # ['pred_timesfm','pred_chronos','pred_ttm','pred_patchtst','pred_tide','pred_mdjd','pred_ridge']
-        pred_mdjd, conf_mdjd = _compute_mdjd(last_row, processed_df)
-        for col in LS_STATE_PRED:
-            if col == 'pred_mdjd':
-                features[col] = pred_mdjd
-            else:
-                features[col] = float(nf_preds.get(col, 0.0))
-        for col in LS_STATE_CONF:
-            if col == 'conf_mdjd':
-                features[col] = conf_mdjd
-            else:
-                features[col] = float(nf_preds.get(col, 0.5))
-
-        # LS STATE_ELITE: ['sig_orderblock','sig_ai_squeeze','sig_whale','sig_oi_divergence']
-        for col in LS_STATE_ELITE:
-            features[col] = float(elite_sigs.get(col, 0.0))
-
-        # LS STATE_ALPHA: ['hour_cos','breakout_strength','fvg_dist','cvp_poc_dist','session_us','oi_change_rate','cvp_volume_imbalance']
-        for col in LS_STATE_ALPHA:
-            features[col] = float(last_row.get(col, 0.0))
-
-        # Regime
-        features.update(_compute_regime(processed_df))
-
-        # LS STATE_SYNTH: ['fcsz','mta_funding','ofti','vebr','cada','wpad','svps','kel','mtmb']
-        for col in LS_STATE_SYNTH:
-            features[col] = float(last_row.get(col, 0.0))
-
-        features['close'] = float(last_row['close'])
-
-        # 미실현 손익 계산
-        unr = 0.0
-        if self.pos is not None:
-            cp  = float(last_row['close'])
-            unr = (cp - self.entry_price) / self.entry_price if self.pos == 'LONG' else (self.entry_price - cp) / self.entry_price
-            self.current_equity = 1.0 + unr
-            if self.current_equity > self.peak_equity: self.peak_equity = self.current_equity
-        else:
-            self.current_equity = self.peak_equity = 1.0
-
-        # HCRouter._state_tensor / TradingEnv._build_state 와 동일한 정규화
-        # pos_features 4개: [pos_flag, tanh(unr/0.02), clip(mdd/0.05), hold/144]
-        # entry_price 항목 없음 — LS TradingEnv._build_state 참조
-        pos_dict = {
-            'type': self.pos,
-            'unrealized': float(np.tanh(unr / 0.02)),
-            'mdd': float(np.clip(min((self.current_equity / self.peak_equity) - 1.0, 0.0) / 0.05, -1.0, 1.0)),
-            'hold_norm': min(self.hold_count / 144.0, 1.0),
-        }
-
-        final_action, _, info = self.trader.decide(features, pos_dict)
-
-        # 포지션 상태 갱신
-        # HCRouter: action=1 → LONG 진입/유지, action=2 → SHORT 진입/유지, action=0 → 청산/관망
-        if final_action == 1 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = 'LONG', float(last_row['close']), 0
-        elif final_action == 2 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = 'SHORT', float(last_row['close']), 0
-        elif final_action == 0 and self.pos is not None:
-            self.pos, self.entry_price, self.hold_count = None, 0.0, 0
-        elif self.pos is not None:
-            self.hold_count += 1
-
-        pnl_pct = (self.current_equity - 1.0) * 100
-        return final_action, info, pnl_pct
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1351,7 +1121,6 @@ class MoELiveRouter:
         return final_action, info, elite_sigs, regime
 
     def print_dashboard(self, current_price, preds, confs, final_action, info, regime, elite_sigs, timestamp,
-                        ls_action=None, ls_info=None, ls_pnl=None, ls_pos=None,
                         llm_answer: str | None = None, llm_regime_name: str | None = None, llm_time_kst=None):
         pnl_pct = (self.current_equity - 1.0) * 100
         regime_name  = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
@@ -1430,36 +1199,7 @@ class MoELiveRouter:
         print(f" 🤖 담당 특수부대: {active_agent:<15} | 🎯 선택된 Kelly: {kelly:.3f}")
         print(f" 🎯 최종 결단: {action_str}")
 
-        if ls_action is not None:
-            print("-" * 68)
-            print(f" {Colors.CYAN}[ 🤖 LS 2-Agent HCRouter 롱돌이/숏돌이 독립 판단 ]{Colors.RESET}")
-            ls_action_str = {
-                0: f'{Colors.YELLOW}🟨 관망 / 청산{Colors.RESET}',
-                1: f'{Colors.GREEN}🟩 롱 진입 (Long){Colors.RESET}',
-                2: f'{Colors.RED}🟥 숏 진입 (Short){Colors.RESET}'
-            }.get(ls_action, '?')
-            ls_agent_name = (ls_info or {}).get('agent', 'N/A')
-            # HCRouter info 키: adv(진입 시), adv_L/adv_S(관망 시), consensus/ml_cons
-            ls_adv_l   = (ls_info or {}).get('adv_L', (ls_info or {}).get('adv', None))
-            ls_adv_s   = (ls_info or {}).get('adv_S', None)
-            ls_cons    = (ls_info or {}).get('consensus', (ls_info or {}).get('ml_cons', None))
-            ls_pos_str = {'LONG': f'{Colors.GREEN}🟩 LONG{Colors.RESET}', 'SHORT': f'{Colors.RED}🟥 SHORT{Colors.RESET}',
-                          None: f'{Colors.YELLOW}무포지션{Colors.RESET}'}.get(ls_pos, f'{Colors.YELLOW}무포지션{Colors.RESET}')
-            adv_str = ""
-            if ls_adv_l is not None and ls_adv_s is not None:
-                adv_str = f" | L-adv: {ls_adv_l:+.4f} / S-adv: {ls_adv_s:+.4f}"
-            elif ls_adv_l is not None:
-                adv_str = f" | adv: {ls_adv_l:+.4f}"
-            cons_str = f" | consensus: {ls_cons:+.4f}" if ls_cons is not None else ""
-            pnl_str = ""
-            if ls_pnl is not None:
-                pnl_color = Colors.GREEN if ls_pnl > 0 else (Colors.RED if ls_pnl < 0 else Colors.YELLOW)
-                pnl_str = f" | 미실현: {pnl_color}{ls_pnl:+.2f}%{Colors.RESET}"
-            print(f"  포지션: {ls_pos_str}{pnl_str}")
-            print(f"  에이전트: {ls_agent_name}{adv_str}{cons_str}")
-            print(f"  결단: {ls_action_str}")
-
-        # LLM 분석 출력은 LS 블록 아래로 배치 (요청사항)
+        # LLM 분석 출력
         if llm_answer:
             print("-" * 68)
             _rn = llm_regime_name or regime_name
@@ -1484,12 +1224,6 @@ async def main(use_local=False):
     except Exception as e:
         logger.error(f"❌ MoE 라우터 초기화 실패: {e}")
         return
-
-    ls_bot = None
-    try:
-        ls_bot = LSLiveRouter('data/ensemble/ckpt/best_ls_agents.pth')
-    except Exception as e:
-        logger.warning(f"⚠️ LS 라우터 초기화 실패 (미학습 상태일 수 있음): {e}")
 
     # ── MetaRouter 초기화 ──────────────────────────────────────
     meta_router = MetaRouter()
@@ -1521,10 +1255,6 @@ async def main(use_local=False):
         current_price    = float(eth_buffer['close'].iloc[-1])
         regime_name      = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
 
-        ls_action, ls_info, ls_pnl = (None, None, None)
-        if ls_bot is not None:
-            ls_action, ls_info, ls_pnl = ls_bot.get_signal(processed_df, preds, confs, nf_preds)
-
         # ── TrendContextBrain 4h 추세 추론 ───────────────────────
         trend_signal = None
         if trend_brain is not None:
@@ -1537,8 +1267,6 @@ async def main(use_local=False):
         meta_result = meta_router.fuse(
             rl_action     = final_action,
             rl_info       = info,
-            ls_action     = ls_action if ls_action is not None else 0,
-            ls_info       = ls_info   if ls_info   is not None else {},
             regime        = regime,
             current_price = current_price,
             trend_signal  = trend_signal,
@@ -1546,8 +1274,7 @@ async def main(use_local=False):
 
         # 직전 사이클에 포지션이 있었다가 이번에 청산됐으면 PnL 피드백
         if _prev_meta_pos is not None and meta_router.pos is None:
-            realized_approx = float(ls_pnl) if ls_pnl is not None else 0.0
-            meta_router.record_outcome(realized_approx)
+            meta_router.record_outcome(bot.current_equity - 1.0)
         _prev_meta_pos = meta_router.pos
 
         # ── Polymarket 크라우드 확률 조회 (비동기, 5초 타임아웃) ─
@@ -1566,7 +1293,6 @@ async def main(use_local=False):
         # 기존 RL 대시보드 출력 (LLM 블록은 LS 아래로 이동)
         bot.print_dashboard(
             current_price, preds, confs, final_action, info, regime, elite_sigs, current_time_kst,
-            ls_action=ls_action, ls_info=ls_info, ls_pnl=ls_pnl, ls_pos=ls_bot.pos if ls_bot else None,
             llm_answer=prev_answer,
             llm_regime_name=prev_meta.get('regime_name', None),
             llm_time_kst=current_time_kst,
