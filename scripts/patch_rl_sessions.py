@@ -52,5 +52,5 @@ def update_rl_features_only_sessions(features_csv: str, rl_csv: str):
 
 if __name__ == "__main__":
     FEATURES_CSV = "/home/llewyn/crypto-scalping/data/training_features_5m.csv"
-    RL_CSV = "/home/llewyn/crypto-scalping/data/ensemble/rl_training_data_full.csv"
+    RL_CSV = "data/rl_training_data_full.csv"
     update_rl_features_only_sessions(FEATURES_CSV, RL_CSV)

@@ -6,7 +6,7 @@ import os
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_here)
-csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_root, "data", "ensemble", "rl_training_data_full.csv")
+csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_root, "data", "rl_training_data_full.csv")
 regime_cols = ["regime_chop", "regime_whipsaw", "regime_bull", "regime_bear", "regime_normal"]
 
 df = pd.read_csv(csv_path, usecols=regime_cols)

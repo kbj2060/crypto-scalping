@@ -24,7 +24,7 @@ for _p in [_ROOT_DIR, _SCRIPT_DIR]:
 import torch
 
 # ─── 공통 경로 ───────────────────────────────────────────────────────────────
-CSV_PATH   = 'data/ensemble/rl_training_data_full.csv'
+CSV_PATH   = 'data/rl_training_data_full.csv'
 REPORT_DIR = 'data/ensemble/reports'
 
 

@@ -412,7 +412,7 @@ def evaluate_master(csv_path, tp_mult=2.0, sl_mult=-1.0, max_hold=36, top_pct=0.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input',    type=str,   default='data/ensemble/rl_training_data_full.csv')
+    parser.add_argument('--input',    type=str,   default='data/rl_training_data_full.csv')
     
     # [수정] 고정 퍼센트(tp, sl) 대신 동적 ATR 배수(tp_mult, sl_mult)로 파라미터 변경
     parser.add_argument('--tp_mult',  type=float, default=2.0)  

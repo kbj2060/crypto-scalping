@@ -1,7 +1,7 @@
 import pandas as pd
 
 df_raw = pd.read_csv('/home/llewyn/crypto-scalping/data/training_features_5m.csv', usecols=['timestamp', 'session_us', 'hour_cos'])
-df_rl = pd.read_csv('/home/llewyn/crypto-scalping/data/ensemble/rl_training_data_full.csv', usecols=['session_us', 'hour_cos'])
+df_rl = pd.read_csv('data/rl_training_data_full.csv', usecols=['session_us', 'hour_cos'])
 diff_len = len(df_raw) - len(df_rl)
 
 # RL 데이터셋은 원본 데이터에서 앞부분 일부가 잘려나간 형태입니다. 끝부분부터 정렬합니다.

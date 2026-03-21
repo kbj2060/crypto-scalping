@@ -955,7 +955,7 @@ if __name__ == '__main__':
 
     df_merged = merge_and_resample(
         df_5m_path='data/training_features_5m.csv',
-        df_1h_path='data/ensemble/rl_training_data_full.csv',
+        df_1h_path='data/rl_training_data_full.csv',
     )
 
     diagnose_dataset(df_merged)

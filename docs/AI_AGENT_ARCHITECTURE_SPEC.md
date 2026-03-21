@@ -112,7 +112,7 @@ NF 학습은 **가격 + 7대 알파**만 사용하며, RL/앙상블에서 사용
 | 구분 | 내용 |
 |------|------|
 | **입력** | `data/training_features_5m.csv` |
-| **출력** | `data/ensemble/rl_training_data_full.csv` |
+| **출력** | `data/rl_training_data_full.csv` |
 | **필수 컬럼** | `RL_REQUIRED_COLS` = timestamp, close, MODEL_PRED(7), MODEL_CONF(7), ELITE_COLS(13), ALPHA_7_COLS(7), REGIME_COLS(5), log_return |
 
 **레짐 계산 (적응형 5대)**  
@@ -213,7 +213,7 @@ NF 학습은 **가격 + 7대 알파**만 사용하며, RL/앙상블에서 사용
 |------|------------|
 | 피처 CSV (NF/RL 입력) | `data/training_features_5m.csv` |
 | NF 4종 저장 | `data/nf` |
-| RL 학습용 CSV | `data/ensemble/rl_training_data_full.csv` |
+| RL 학습용 CSV | `data/rl_training_data_full.csv` |
 | 4-Agent 가중치 | `data/ensemble/best_moe_agents.pth` |
 | Meta Router 가중치 (선택) | router_path 인자로 전달 (TFT feature_cols 있을 때만 사용) |
 

@@ -2,12 +2,12 @@
 generate_training_data.py
 학습용 앙상블 CSV 생성 스크립트
   input : data/training_features_5m.csv   (update_features.py 출력)
-  output: data/ensemble/rl_training_data_full.csv
+  output: data/rl_training_data_full.csv
 
 사용법:
   python scripts/generate_training_data.py
   python scripts/generate_training_data.py --input data/training_features_5m.csv \
-                                            --output data/ensemble/rl_training_data_full.csv
+                                            --output data/rl_training_data_full.csv
 """
 import os, sys, logging, gc, argparse
 
@@ -400,7 +400,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='학습용 앙상블 CSV 생성')
     parser.add_argument('--input',  default='data/training_features_5m.csv',
                         help='원본 피처 CSV 경로')
-    parser.add_argument('--output', default='data/ensemble/rl_training_data_full.csv',
+    parser.add_argument('--output', default='data/rl_training_data_full.csv',
                         help='출력 앙상블 CSV 경로')
     args = parser.parse_args()
 

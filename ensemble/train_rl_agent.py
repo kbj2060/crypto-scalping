@@ -1529,7 +1529,7 @@ class GatingRouter7:
 
 
 def train():
-    CSV_PATH = 'data/ensemble/rl_training_data_full.csv'
+    CSV_PATH = 'data/rl_training_data_full.csv'
     if not os.path.exists(CSV_PATH):
         return logger.error("데이터가 없습니다. --mode generate_csv 실행 요망")
 
