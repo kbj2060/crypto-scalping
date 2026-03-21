@@ -41,7 +41,7 @@ class TFTConfig:
     hidden_size: int = 64
     lstm_layers: int = 2
     attention_heads: int = 4
-    dropout: float = 0.3
+    dropout: float = 0.45
     num_features: int = 30
     quantiles: List[float] = field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95]) 
     learning_rate: float = 3e-5
@@ -61,7 +61,7 @@ class TFTConfig:
     device: str = 'auto'
     model_dir: str = 'data/tft'
     
-    training_noise_std: float = 0.05 
+    training_noise_std: float = 0.02
     recent_bias_decay: float = 0.05  
 
     def __post_init__(self):
@@ -142,23 +142,23 @@ class TemporalFusionTransformer(nn.Module):
         H = config.hidden_size
 
         self.temporal_vsn = VariableSelectionNetwork(config.num_features, H, config.dropout)
-        self.gru_momentum = nn.GRU(H, H, config.lstm_layers, batch_first=True, dropout=config.dropout if config.lstm_layers > 1 else 0)
-        self.gru_reversion = nn.GRU(H, H, config.lstm_layers, batch_first=True, dropout=config.dropout if config.lstm_layers > 1 else 0)
-
-        self.hurst_idx, self.regime_trending_idx = None, None
-        self.custom_gate = nn.Linear(H, 1)
+        self.gru = nn.GRU(H, H, config.lstm_layers, batch_first=True,
+                          dropout=config.dropout if config.lstm_layers > 1 else 0)
 
         self.post_lstm_gate, self.post_lstm_norm = GatedLinearUnit(H, H), nn.LayerNorm(H)
         self.multihead_attn = InterpretableMultiHeadAttention(H, config.attention_heads, config.dropout)
         self.post_attn_gate, self.post_attn_norm = GatedLinearUnit(H, H), nn.LayerNorm(H)
         self.pos_ff, self.pos_ff_gate, self.pos_ff_norm = GatedResidualNetwork(H, H, H, config.dropout), GatedLinearUnit(H, H), nn.LayerNorm(H)
 
-        self.horizon_fc = nn.Linear(H, config.forecast_horizon * H)
-        self.quantile_heads = nn.ModuleList([nn.Linear(H, 1) for _ in config.quantiles])
+        # Option A: 다중 풀링으로 정보 병목 해소
+        self.attn_pool_w = nn.Linear(H, 1)
+        self.horizon_fc  = nn.Linear(H * 3, config.forecast_horizon * H)
 
-    def set_feature_indices(self, feature_cols: List[str]):
-        if 'hurst_48' in feature_cols: self.hurst_idx = feature_cols.index('hurst_48')
-        elif 'regime_trending' in feature_cols: self.regime_trending_idx = feature_cols.index('regime_trending')
+        # Option B: 단조성 누적 델타 헤드 (분위수 역전 방지)
+        self.base_head   = nn.Linear(H, 1)
+        self.delta_heads = nn.ModuleList([
+            nn.Linear(H, 1) for _ in range(len(config.quantiles) - 1)
+        ])
 
     def forward(self, temporal: torch.Tensor):
         B, T, H = temporal.shape[0], temporal.shape[1], self.config.hidden_size
@@ -166,23 +166,13 @@ class TemporalFusionTransformer(nn.Module):
         if self.training:
             local_std = temporal.std(dim=1, keepdim=True) + 1e-6
             temporal = temporal + torch.randn_like(temporal) * local_std * self.config.training_noise_std
-            time_mask = (torch.rand(B, T, 1, device=temporal.device) > 0.05).float()
-            temporal = (temporal * time_mask) / 0.95
+            time_mask = (torch.rand(B, T, 1, device=temporal.device) > 0.02).float()
+            temporal = (temporal * time_mask) / 0.98
         
         selected, var_weights = self.temporal_vsn(temporal)
-        
+
         h0 = torch.zeros(self.config.lstm_layers, B, H, device=temporal.device)
-        out_m, _ = self.gru_momentum(selected, h0)
-        out_r, _ = self.gru_reversion(selected, h0)
-
-        if self.hurst_idx is not None:
-            gate0 = torch.sigmoid(5.0 * temporal[:, -1, self.hurst_idx]).unsqueeze(-1).unsqueeze(-1)
-        elif self.regime_trending_idx is not None:
-            gate0 = torch.sigmoid(5.0 * temporal[:, -1, self.regime_trending_idx]).unsqueeze(-1).unsqueeze(-1)
-        else:
-            gate0 = torch.sigmoid(self.custom_gate(selected[:, -1, :])).unsqueeze(-1)
-
-        gru_out = gate0 * out_m + (1.0 - gate0) * out_r
+        gru_out, _ = self.gru(selected, h0)
         temporal_feat = self.post_lstm_norm(self.post_lstm_gate(gru_out) + selected)
         
         causal_mask = torch.tril(torch.ones(T, T, device=temporal.device))
@@ -196,8 +186,23 @@ class TemporalFusionTransformer(nn.Module):
         attn_out = self.post_attn_norm(self.post_attn_gate(attn_out) + temporal_feat)
         ff_out = self.pos_ff_norm(self.pos_ff_gate(self.pos_ff(attn_out)) + attn_out)
         
-        horizon_h = self.horizon_fc(ff_out[:, -1, :]).view(B, self.config.forecast_horizon, H)
-        return torch.cat([qh(horizon_h) for qh in self.quantile_heads], dim=-1), attn_w, var_weights
+        # Option A: 다중 풀링 (last + attention-weighted + mean)
+        last_out   = ff_out[:, -1, :]                                    # (B, H)
+        scores     = self.attn_pool_w(ff_out).squeeze(-1)                # (B, T)
+        pool_w     = torch.softmax(scores, dim=-1).unsqueeze(-1)         # (B, T, 1)
+        attn_out_p = (pool_w * ff_out).sum(dim=1)                        # (B, H)
+        mean_out   = ff_out.mean(dim=1)                                  # (B, H)
+        pooled     = torch.cat([last_out, attn_out_p, mean_out], dim=-1) # (B, H*3)
+        horizon_h  = self.horizon_fc(pooled).view(B, self.config.forecast_horizon, H)
+
+        # Option B: 단조성 누적 델타 헤드 (Q0.05 < Q0.25 < ... < Q0.95 수학적 보장)
+        base   = self.base_head(horizon_h)                               # (B, H, 1)
+        deltas = [F.softplus(dh(horizon_h)) for dh in self.delta_heads]
+        preds  = torch.cat(
+            [base] + [base + sum(deltas[:i+1]) for i in range(len(deltas))],
+            dim=-1
+        )                                                                 # (B, H, Q)
+        return preds, attn_w, var_weights
 
 # ════════════════════════════════════════════════════════════════
 # 3. [개선 1] 순수 Quantile Loss (Pinball Loss) 도입
@@ -289,8 +294,6 @@ class TFTSignalModel:
         
         if self.model is None or self.model.config.num_features != cfg.num_features:
             self.model = TemporalFusionTransformer(cfg).to(cfg.device)
-        self.model.set_feature_indices(feature_cols)
-
         target_ckpt_path = resume_from or warm_start_path
         if target_ckpt_path and os.path.exists(target_ckpt_path):
             logger.info(f"사전 가중치 로드 중: {target_ckpt_path}")
@@ -361,7 +364,7 @@ class TFTSignalModel:
                 train_steps += 1
 
             self.model.eval()
-            val_loss, val_mae, total_val = 0.0, 0.0, 0
+            val_loss, val_mae, val_dir_acc, val_picp, total_val = 0.0, 0.0, 0.0, 0.0, 0
             if self.ema: self.ema.apply_shadow(self.model)
             with torch.no_grad():
                 for batch in val_loader:
@@ -370,23 +373,36 @@ class TFTSignalModel:
                         target_dev = batch['target'].to(cfg.device)
                         v_loss = criterion(preds, target_dev)
                     val_loss += v_loss.item()
-                    
+
                     # MAE 기록용 (중간값 0.5 기준)
-                    val_mae += F.l1_loss(preds[:, :, median_idx], target_dev).item()
+                    median_pred = preds[:, :, median_idx]
+                    val_mae += F.l1_loss(median_pred, target_dev).item()
+                    # Direction Accuracy
+                    val_dir_acc += (median_pred.sign() == target_dev.sign()).float().mean().item()
+                    # PICP (90% 구간: Q0.05 ~ Q0.95)
+                    lo, hi = preds[:, :, 0], preds[:, :, -1]
+                    val_picp += ((target_dev >= lo) & (target_dev <= hi)).float().mean().item()
                     total_val += 1
-                    
+
             if self.ema: self.ema.restore(self.model)
 
             avg_train_loss = epoch_loss / max(train_steps, 1)
-            val_loss /= max(total_val, 1)
-            val_mae /= max(total_val, 1)
-            
+            val_loss    /= max(total_val, 1)
+            val_mae     /= max(total_val, 1)
+            val_dir_acc /= max(total_val, 1)
+            val_picp    /= max(total_val, 1)
+
             history['train_loss'].append(avg_train_loss)
             history['val_loss'].append(val_loss)
             history['val_mae'].append(val_mae)
             history['learning_rate'].append(optimizer.param_groups[0]['lr'])
-            
-            logger.info(f"Epoch {epoch+1:03d}/{cfg.max_epochs} | Train Q-Loss: {avg_train_loss:.4f} | Val Q-Loss: {val_loss:.4f} | Val MAE: {val_mae:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}")
+
+            logger.info(
+                f"Epoch {epoch+1:03d}/{cfg.max_epochs} | "
+                f"Train Q-Loss: {avg_train_loss:.4f} | Val Q-Loss: {val_loss:.4f} | "
+                f"Val MAE: {val_mae:.4f} | DirAcc: {val_dir_acc:.1%} | "
+                f"PICP: {val_picp:.1%} | LR: {optimizer.param_groups[0]['lr']:.2e}"
+            )
             
             if val_loss < best_val_loss:
                 best_val_loss, patience_counter = val_loss, 0
@@ -438,20 +454,123 @@ class TFTSignalModel:
 
     @classmethod
     def load(cls, path: str):
-        with open(os.path.join(os.path.dirname(path), f"tft_{os.path.basename(path).replace('tft_', '').replace('.pt', '')}_meta.json"), 'r') as f: 
+        with open(os.path.join(os.path.dirname(path), f"tft_{os.path.basename(path).replace('tft_', '').replace('.pt', '')}_meta.json"), 'r') as f:
             meta = json.load(f)
-            
+
         cfg = TFTConfig()
         for k, v in meta['config'].items(): setattr(cfg, k, v)
-        cfg.__post_init__() 
+        cfg.__post_init__()
         instance = cls(cfg)
-        
+
         ckpt = torch.load(path, map_location=cfg.device, weights_only=True)
         instance.model.load_state_dict(ckpt.get('model_state_dict', ckpt))
-        
+
         instance.feature_cols = meta['feature_cols']
         instance.scaler_params = {k: np.array(v) if isinstance(v, list) else v for k, v in meta['scaler_params'].items()}
         instance.target_scaler = meta.get('target_scaler', {'mean': 0.0, 'std': 1.0})
-        
+
         if cfg.use_ema: instance.ema = EMAModel(instance.model, decay=cfg.ema_decay)
         return instance
+
+    # ── TrendSignal 어댑터 ───────────────────────────────────────
+    def predict_from_df(self, df: pd.DataFrame,
+                        timestamp_col: str = 'timestamp',
+                        min_candles: int = None) -> Optional[object]:
+        """5분봉 DataFrame → TrendSignal (없는 피처 컬럼은 0 채움).
+
+        TrendContextBrain.predict_from_df()와 동일한 인터페이스를 제공하여
+        trading_bot.py가 두 모델을 투명하게 교체할 수 있도록 한다.
+        """
+        if self.model is None or not self.feature_cols or not self.scaler_params:
+            return None
+
+        n_required = min_candles or self.config.input_window
+        df = df.copy()
+        if timestamp_col in df.columns:
+            df[timestamp_col] = pd.to_datetime(df[timestamp_col])
+            df = df.set_index(timestamp_col).sort_index()
+        elif not isinstance(df.index, pd.DatetimeIndex):
+            return None
+
+        if len(df) < n_required:
+            return None
+
+        df_w = df.tail(self.config.input_window)
+
+        # 없는 피처 → 0으로 채워 robust하게 동작
+        for col in self.feature_cols:
+            if col not in df_w.columns:
+                df_w[col] = 0.0
+
+        feat = df_w[self.feature_cols].values.astype(np.float32)
+        feat = np.nan_to_num(feat, nan=0.0)
+
+        mean = np.array(self.scaler_params['mean'], dtype=np.float32)
+        std  = np.array(self.scaler_params['std'],  dtype=np.float32)
+        feat = (feat - mean) / np.maximum(std, 1e-8)
+        feat = np.clip(feat, -5.0, 5.0)
+
+        x = torch.tensor(feat, dtype=torch.float32).unsqueeze(0).to(self.config.device)
+        self.model.eval()
+        with torch.no_grad():
+            preds, _, _ = self.model(x)   # (1, H, Q)
+
+        preds_np = preds.squeeze(0).cpu().numpy()  # (H, Q)
+        if self.target_scaler is not None:
+            preds_np = preds_np * self.target_scaler['std'] + self.target_scaler['mean']
+
+        return self._to_trend_signal(preds_np)
+
+    def _to_trend_signal(self, preds: np.ndarray) -> object:
+        """(H, Q) quantile 예측 (% 단위) → TrendSignal.
+
+        preds[h, q] = h번째 스텝의 q번째 분위수 예측값 (%).
+        단일 horizon(H=1)이면 h=0 행만 사용.
+        """
+        try:
+            import sys, os as _os
+            _root = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            if _root not in sys.path:
+                sys.path.insert(0, _root)
+            from ensemble.train_trend import TrendSignal
+        except ImportError:
+            return None
+
+        n_q    = len(self.config.quantiles)
+        mid_i  = self.config.quantiles.index(0.5) if 0.5 in self.config.quantiles else n_q // 2
+        lo_i   = 0
+        hi_i   = n_q - 1
+
+        # H 스텝 중앙값 평균 (% per bar)
+        median_mean = float(preds[:, mid_i].mean())
+
+        # 방향 임계값: 0.12% per bar ≈ ETH 2000불 기준 $2.4
+        FLAT_THRESH = 0.12
+        if   median_mean >  FLAT_THRESH: trend_dir = 2   # UP
+        elif median_mean < -FLAT_THRESH: trend_dir = 0   # DOWN
+        else:                            trend_dir = 1   # FLAT
+
+        # 강도: |median| / (spread/2), [0,1] 클립
+        spread   = float((preds[:, hi_i] - preds[:, lo_i]).mean())
+        half_sp  = max(spread / 2.0, FLAT_THRESH)
+        strength = float(np.clip(abs(median_mean) / half_sp, 0.0, 1.0))
+
+        # 반전 확률: 예측 방향과 반대편 분위수가 0을 넘는 비율
+        if trend_dir == 2:      # UP → 하위 Q가 음수면 불확실
+            opp = (preds[:, lo_i] < 0).astype(float)
+        elif trend_dir == 0:    # DOWN → 상위 Q가 양수면 불확실
+            opp = (preds[:, hi_i] > 0).astype(float)
+        else:
+            opp = np.ones(len(preds)) * 0.5
+        rev_prob = float(np.clip(opp.mean(), 0.0, 1.0))
+
+        # 3-way 확률 (DOWN, FLAT, UP)
+        t      = FLAT_THRESH * 2
+        up_s   = float(np.clip( median_mean / t, 0.0, 1.0))
+        down_s = float(np.clip(-median_mean / t, 0.0, 1.0))
+        flat_s = max(0.0, 1.0 - up_s - down_s)
+        tot    = up_s + down_s + flat_s + 1e-8
+        probs  = (down_s / tot, flat_s / tot, up_s / tot)
+
+        return TrendSignal(trend_dir=trend_dir, strength=strength,
+                           rev_prob=rev_prob, probs=probs)

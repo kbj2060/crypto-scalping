@@ -54,7 +54,8 @@ for p in TARGET_PATHS:
         sys.path.insert(0, p)
 
 from core.feature_engineering import FeatureEngineer
-from ensemble.train_trend import TrendContextBrain
+from ensemble.train_trend import TrendContextBrain  # TrendSignal 타입이 이 모듈에 정의됨
+from ensemble.trend_xgb.trend_xgb_model import XGBTrendBrain
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,
     KronosForecaster, TimesFMForecaster, MoiraiForecaster,
@@ -72,14 +73,6 @@ from ensemble.train_rl_agent import (
     STATE_ALPHA       as RL_STATE_ALPHA,
     STATE_SYNTH       as RL_STATE_SYNTH,
     REGIME_COLS,
-)
-# LS (2-Agent) 상수 — HCRouter/RobustIQN은 LSLiveRouter.__init__ 내 로컬 import
-from ensemble.train_ls_agent import (
-    STATE_PRED        as LS_STATE_PRED,
-    STATE_CONF        as LS_STATE_CONF,
-    STATE_ELITE       as LS_STATE_ELITE,
-    STATE_ALPHA       as LS_STATE_ALPHA,
-    STATE_SYNTH       as LS_STATE_SYNTH,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
 
@@ -1503,16 +1496,15 @@ async def main(use_local=False):
     # 직전 포지션 청산 시점 추적용 (PnL 피드백을 위해)
     _prev_meta_pos: str | None = None
 
-    # ── TrendContextBrain 초기화 ───────────────────────────────
+    # ── XGBTrendBrain 초기화 (LightGBM 3-class, Brain B) ───────────
+    # 학습: python ensemble/trend_xgb/train_trend_xgb.py
+    # 저장: data/trend_xgb/trend_xgb.pkl
     trend_brain = None
     try:
-        trend_brain = TrendContextBrain.load(
-            'data/ensemble/ckpt/trend_brain_hybrid.pth',
-            device='cuda' if torch.cuda.is_available() else 'cpu',
-        )
-        logger.info("✅ TrendContextBrain (4h 추세 뇌) 로드 완료")
+        trend_brain = XGBTrendBrain.load('data/trend_xgb/trend_xgb.pkl')
+        logger.info("✅ XGBTrendBrain (LightGBM Triple-Barrier) 로드 완료")
     except Exception as e:
-        logger.warning(f"⚠️ TrendContextBrain 미로드 (학습 전이거나 파일 없음): {e}")
+        logger.warning(f"⚠️ XGBTrendBrain 미로드 (학습 전이거나 파일 없음): {e}")
 
     # ── Polymarket 크라우드 확률 수집기 ────────────────────────
     poly_fetcher = PolymarketFetcher()
