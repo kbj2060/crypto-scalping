@@ -21,21 +21,21 @@ Trading Router — 6-Agent Single-Directional MoE (Restructured)
 
 [융합 모듈 v3]
 7. MultiTimeframeFeatures: 상위 타임프레임 추세 피처 (CSV 추가 컬럼 불필요)
-   - 1h봉 close 컬럼에서 런타임 롤링 계산: 4h(×4봉) / 일봉(×24봉)
-   - 피처: [1h_ret, 1h_vol, 1h_trend, 4h_ret, 4h_vol, 4h_trend, htf_alignment]
-     * ret   = 해당 윈도우 수익률 (tanh 정규화)
-     * vol   = 해당 윈도우 변동성 (표준편차, 정규화)
-     * trend = 선형회귀 기울기 (추세 강도, 정규화)
-     * alignment = 4h·일봉 방향 일치 여부 (−1/0/+1)
-   - 출력: MTF_DIM=7 → STATE_DIM에 추가
+   - 1h봉 close 컬럼에서 런타임 롤링 계산: 4h(×4봉)
+   - 피처: [4h_ret, 4h_trend, htf_alignment]  (1h 피처는 현재 봉과 중복 → 제거)
+     * ret       = 4봉 누적 수익률 (tanh 정규화)
+     * trend     = 4봉 선형회귀 기울기 (추세 강도)
+     * alignment = 1h·4h 방향 일치 여부 (−1/0/+1)
+   - 출력: MTF_DIM=3 → STATE_DIM에 추가
 
 8. MarketAttentionEncoder: 피처 그룹 간 Cross-Attention 인코더
    - RobustIQN.feat_extractor 앞단에 삽입 (기존 Linear 레이어는 그대로 유지)
-   - 피처 그룹 6개를 토큰(token)으로 취급:
-     [pred(7), conf(7), elite(9), alpha(9), regime(5), synth(14)] → 패딩 후 d_model=16 투영
+   - 피처 그룹 4개를 토큰(token)으로 취급:
+     Group1: signal(7)=pred×conf,  Group2: elite(3)+alpha(6)=9
+     Group3: regime(1)+hmm(5)=6,   Group4: synth(2)=2
    - 2-head Self-Attention × 2 layer → 그룹 간 상호작용 학습
-   - 출력: 6개 토큰 flatten → Linear → 기존 feat_extractor 입력과 동일 차원으로 압축
-   - 경량 설계: 파라미터 ~8K 추가, 추론 오버헤드 최소화
+   - 출력: 4개 토큰 flatten → Linear → 기존 feat_extractor 입력과 동일 차원으로 압축
+   - 경량 설계: 파라미터 ~3K 추가, 추론 오버헤드 최소화
 
 
 
@@ -430,27 +430,20 @@ class KellyCriterionSizer:
 # [융합 모듈 ③] MultiTimeframeFeatures — 런타임 멀티타임프레임 피처 계산기
 # ═══════════════════════════════════════════════════════════════════════════
 class MultiTimeframeFeatures:
-    """1h봉 close 시계열에서 1h / 4h 추세 피처를 런타임으로 계산.
+    """1h봉 close 시계열에서 4h 추세 피처를 런타임으로 계산.
 
     CSV에 추가 컬럼 불필요. TradingEnv 초기화 시 close 배열을 받아
     전체 구간의 MTF 피처를 한 번에 선계산(precompute)하고 numpy 배열로 캐싱.
 
-    출력 (MTF_DIM = 7차원):
-        [0] 1h_ret       : 직전 1봉 대비 수익률 (tanh 스케일) — 즉각 모멘텀
-        [1] 1h_vol       : 최근 4봉 변동성 (로그수익률 std)   — 단기 노이즈 레벨
-        [2] 1h_trend     : 최근 4봉 선형회귀 기울기            — 단기 방향성
-        [3] 4h_ret       : 4봉 누적 수익률 (tanh 스케일)       — 중기 모멘텀
-        [4] 4h_vol       : 4봉 변동성                          — 중기 노이즈 레벨
-        [5] 4h_trend     : 4봉 선형회귀 기울기                  — 중기 방향성
-        [6] htf_alignment: 1h·4h 방향 일치 부호 (−1 / 0 / +1)
+    출력 (MTF_DIM = 3차원):
+        [0] 4h_ret       : 4봉 누적 수익률 (tanh 스케일)  — 중기 모멘텀
+        [1] 4h_trend     : 4봉 선형회귀 기울기             — 중기 방향성
+        [2] htf_alignment: 1h·4h 방향 일치 부호 (−1/0/+1) — 역추세 필터
 
     모든 출력은 [-1, 1] 범위로 clamp.
 
-    설계 근거 (1h/4h 선택):
-        - 1h: 현재 봉 자체가 1h → 즉각적 모멘텀·노이즈 레벨 포착
-        - 4h: 단타 관점의 중기 추세. 일봉(24봉)은 코인 단타에 너무 느려
-              학습 신호보다 노이즈가 많고 레짐 전환 감지가 지연됨
-        - alignment: 1h·4h 방향 일치 시에만 진입 고려 → 역추세 필터 역할
+    1h 피처(ret/vol/trend)는 현재 봉 자체와 중복되어 제거.
+    4h_vol도 alpha 그룹의 garch_vol_z와 중복되어 제거.
     """
 
     _RET_SCALE       = 50.0   # tanh(ret * 50): 2% 수익 ≈ 0.76
@@ -492,19 +485,18 @@ class MultiTimeframeFeatures:
         return float(np.clip(mean_ret * 100.0, -1.0, 1.0))
 
     def _precompute(self, close: np.ndarray) -> np.ndarray:
-        """전체 길이 T에 대한 MTF 피처 행렬 (T, MTF_DIM) 선계산."""
+        """전체 길이 T에 대한 MTF 피처 행렬 (T, MTF_DIM=3) 선계산.
+        출력: [4h_ret, 4h_trend, htf_alignment]
+        """
         T      = len(close)
         out    = np.zeros((T, MTF_DIM), dtype=np.float32)
         logret = np.zeros(T, dtype=np.float64)
         logret[1:] = np.log(close[1:] / np.maximum(close[:-1], 1e-8))
 
         for i in range(T):
-            # ── 1h 피처 (로그수익률 기반 단기 추세) ──
-            ret1   = float(np.tanh(logret[i] * self._RET_SCALE))
+            # ── 1h 추세 방향 (alignment 계산용, 출력 안 함) ──
             sv     = max(0, i - self._VOL_1H_WINDOW + 1)
             lr1w   = logret[sv:i+1]
-            vol1   = float(np.clip(lr1w.std() * self._VOL_SCALE, 0.0, 1.0)) if len(lr1w) > 1 else 0.0
-            # 1h 추세: 로그수익률 평균 (가격 회귀와 다른 방식 → 다양성 확보)
             trend1 = self._logret_slope(lr1w) if len(lr1w) >= 2 else 0.0
 
             # ── 4h 피처 (가격 선형회귀 기반 중기 추세) ──
@@ -512,22 +504,20 @@ class MultiTimeframeFeatures:
             c4     = close[s4:i+1]
             lr4    = logret[s4:i+1]
             ret4   = float(np.tanh((c4[-1] / c4[0] - 1) * self._RET_SCALE)) if len(c4) > 1 else 0.0
-            vol4   = float(np.clip(lr4.std() * self._VOL_SCALE, 0.0, 1.0))   if len(lr4) > 1 else 0.0
-            # 4h 추세: 가격 선형회귀 (최소 3봉 필요)
             trend4 = self._linreg_slope(c4) if len(c4) >= 3 else 0.0
 
             # ── 1h·4h 방향 일치 ──
             align  = float(np.sign(trend1) * np.sign(trend4)) if (trend1 != 0 and trend4 != 0) else 0.0
 
-            out[i] = [ret1, vol1, trend1, ret4, vol4, trend4, align]
+            out[i] = [ret4, trend4, align]
 
-        align_pos = (out[:,6] > 0).mean() * 100
-        align_neg = (out[:,6] < 0).mean() * 100
-        align_neu = (out[:,6] == 0).mean() * 100
+        align_pos = (out[:,2] > 0).mean() * 100
+        align_neg = (out[:,2] < 0).mean() * 100
+        align_neu = (out[:,2] == 0).mean() * 100
         logger.info(
             f"[MTF] 선계산 완료 | shape={out.shape} | "
-            f"1h_ret μ={out[:,0].mean():.3f} σ={out[:,0].std():.3f} | "
-            f"4h_ret μ={out[:,3].mean():.3f} σ={out[:,3].std():.3f} | "
+            f"4h_ret μ={out[:,0].mean():.3f} σ={out[:,0].std():.3f} | "
+            f"4h_trend μ={out[:,1].mean():.3f} σ={out[:,1].std():.3f} | "
             f"align: +{align_pos:.1f}% / 0:{align_neu:.1f}% / -{align_neg:.1f}%"
         )
         return out
@@ -543,36 +533,33 @@ class MultiTimeframeFeatures:
 # [융합 모듈 ④] MarketAttentionEncoder — 피처 그룹 간 Self-Attention 인코더
 # ═══════════════════════════════════════════════════════════════════════════
 class MarketAttentionEncoder(nn.Module):
-    """피처 그룹 6개를 토큰으로 취급해 Self-Attention으로 그룹 간 상호작용 학습.
+    """피처 그룹 4개를 토큰으로 취급해 Self-Attention으로 그룹 간 상호작용 학습.
 
-    입력 구조 (raw 1-frame 피처, pos/HMM/MTF 제외):
-        pred  (7) / conf  (7) / elite (9) / alpha (9) / regime (5) / synth (14)
-        총 51차원 → 각 그룹을 d_model=16으로 선형 투영 → 6개 토큰
+    입력 구조 (FEATURE_DIM = 24차원):
+        signal(7)=pred×conf / elite(3)+alpha(6)=9 / regime(1)+hmm(5)=6 / synth(2)
+        총 24차원 → 각 그룹을 d_model=16으로 선형 투영 → 4개 토큰
 
     아키텍처:
         GroupProjection  : 각 그룹 → Linear(group_dim, d_model) + LayerNorm
         SelfAttention ×2 : 2-head, d_model=16 → 그룹 간 의존성 학습
-        OutputProjection : 6×d_model=96 flatten → Linear(96, out_dim)
+        OutputProjection : 4×d_model=64 flatten → Linear(64, out_dim)
 
     출력 out_dim은 RobustIQN의 feat_extractor 입력 차원과 동일하게 맞춤.
-    pos / HMM / MTF 피처는 attention 통과 후 concat → feat_extractor 입력.
+    pos(5) / MTF(3) 피처는 attention 통과 후 concat → feat_extractor 입력.
 
-    파라미터 수: ~8K (경량)
+    파라미터 수: ~3K (경량)
     """
 
     # 그룹 정의: (이름, 시작 오프셋, 길이)
-    # STATE_DIM 내 순서: preds(7) confs(7) stats(3) elite(9) alpha(9) regime(5) synth(14) pos(5) hmm(5) mtf(7)
-    # stats(3)는 pred/conf에서 파생된 요약 통계 → pred 그룹에 합산
+    # FEATURE_DIM 내 순서: signal(7) elite(3) alpha(6) regime(1) hmm(5) synth(2)
+    # signal = pred × conf (확신도 가중 방향 신호, 다중공선성 차단)
+    # 총 24차원이 attention 입력, 이후 pos(5)+mtf(3)가 concat
     _GROUPS = [
-        ('pred',   0,  7),
-        ('conf',   7,  7),
-        ('elite', 17,  9),   # stats(3) 건너뜀 → 14부터지만 stats 포함 시 17
-        ('alpha', 26,  9),
-        ('regime',35,  5),
-        ('synth', 40, 14),
+        ('signal',       0,  7),   # signal(7) = pred × conf (확신도 가중 방향)
+        ('elite_alpha',  7,  9),   # elite(3) + alpha(6)
+        ('regime_hmm',  16,  6),   # regime(1) + hmm(5)
+        ('synth',       22,  2),   # synth(2): ofti + kel
     ]
-    # stats(3)는 pred 그룹 뒤에 위치: pred(7) + conf(7) = 14, stats는 14~16
-    # 실제 오프셋: pred=0~6, conf=7~13, stats=14~16, elite=17~25, alpha=26~34, regime=35~39, synth=40~53
 
     D_MODEL  = 16
     N_HEADS  = 2
@@ -647,18 +634,33 @@ TARGET_COL = 'log_return'
 SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'cada', 'mshd', 'fvci',
                         'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz']
 
+# pred/conf 쌍 순서는 반드시 일치해야 signal = pred × conf 가능
 STATE_PRED  = ['pred_tide', 'pred_ridge', 'pred_patchtst', 'pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_mdjd']
-STATE_CONF  = ['conf_tide', 'conf_ridge', 'conf_ttm', 'conf_chronos', 'conf_timesfm', 'conf_mdjd', 'conf_patchtst']
-STATE_ELITE = ['evt_excess_z', 'sig_orderblock', 'sig_ai_squeeze', 'sig_oi_divergence', 'sig_whale', 'sig_garch_regime', 'jump_z', 'jump_flag', 'evt_tail_flag']
-STATE_ALPHA = ['hour_cos', 'garch_vol', 'garch_vol_z', 'breakout_strength', 'fvg_dist', 'cvp_poc_dist', 'session_us', 'oi_change_rate', 'cvp_volume_imbalance']
-STATE_SYNTH = ['ou_funding_z', 'fcsz', 'vebr', 'ofti', 'cada', 'tlad', 'svps', 'mshd', 'fdlv', 'wpad', 'fvci', 'kel', 'mtmb', 'ou_halflife']
+STATE_CONF  = ['conf_tide', 'conf_ridge', 'conf_patchtst', 'conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_mdjd']
+# STATE_SIGNAL: pred × conf 확신도 가중 방향 신호 (7개, state 내부에서 계산)
 
-FEATURE_DIM = len(STATE_PRED) + len(STATE_CONF) + 3 + len(STATE_ELITE) + len(STATE_ALPHA) + len(REGIME_COLS) + len(STATE_SYNTH)
+# 희소(sparse) 신호 제거: evt_excess_z, sig_garch_regime, jump_z, jump_flag, evt_tail_flag 는
+# 97%+ 시간에 0 → gradient 낭비. sig_orderblock도 이진 패턴 빈도 낮아 제거.
+STATE_ELITE = ['sig_ai_squeeze', 'sig_whale', 'sig_oi_divergence']
+
+# garch_vol(raw) 제거 → garch_vol_z(정규화)와 중복
+# cvp_poc_dist, session_us 제거 → alpha(6) 핵심만 유지
+STATE_ALPHA = ['hour_cos', 'garch_vol_z', 'breakout_strength', 'fvg_dist', 'oi_change_rate', 'cvp_volume_imbalance']
+
+# 원재료 재조합 14개 중 고유 비선형 상호작용만 남김:
+# ofti = smart_money_flow × whale_conviction × amihud (오더플로우 독성)
+# kel  = OI/vol × funding_dir (유동성 에너지)
+STATE_SYNTH = ['ofti', 'kel']
+
+# FEATURE_DIM: signal(7) + elite(3) + alpha(6) + regime(1) + hmm(5) + synth(2) = 24
+# HMM을 FEATURE_DIM에 편입 → attention Group3에서 regime과 함께 처리
 HMM_N_STATES = 4           # Bull-Trend / Bear-Trend / High-Vol-Chop / Low-Vol-Range
 HMM_DIM      = HMM_N_STATES + 1   # 4개 상태확률 + 전환 엔트로피 1개 = 5차원
-MTF_DIM      = 7           # [1h_ret, 1h_vol, 1h_trend, 4h_ret, 4h_vol, 4h_trend, htf_alignment]
-STATE_DIM = FEATURE_DIM + 5 + HMM_DIM + MTF_DIM   # +5: pos, +5: HMM, +7: MTF
-STACK_N           = 4
+MTF_DIM      = 3           # [4h_ret, 4h_trend, htf_alignment]
+FEATURE_DIM  = len(STATE_PRED) + len(STATE_ELITE) + len(STATE_ALPHA) + 1 + HMM_DIM + len(STATE_SYNTH)
+# = 7(signal) + 3(elite) + 6(alpha) + 1(regime_idx) + 5(hmm) + 2(synth) = 24
+STATE_DIM = FEATURE_DIM + 5 + MTF_DIM   # +5: pos, +3: MTF  → 32
+STACK_N           = 2
 STACKED_STATE_DIM = STATE_DIM * STACK_N
 
 # MTF 윈도우 (1h봉 기준)
@@ -691,12 +693,16 @@ class TradingEnv:
         self.MAX_LEVERAGE = 1.0
         self.MAX_HOLD = {'train': 72, 'val': 144, 'test': 288}
 
+        # pred/conf 둘 다 로드 (signal = pred × conf 인라인 계산)
         feat_cols = STATE_PRED + STATE_CONF + STATE_ELITE + STATE_ALPHA + REGIME_COLS + STATE_SYNTH
         self._feat_np  = self.df[feat_cols].values.astype(np.float32)
         self._close_np = self.df['close'].values.astype(np.float32)
-        self._n_pred, self._n_conf = len(STATE_PRED), len(STATE_CONF)
-        self._n_elite, self._n_alpha = len(STATE_ELITE), len(STATE_ALPHA)
-        self._n_regime, self._n_synth = len(REGIME_COLS), len(STATE_SYNTH)
+        self._n_pred   = len(STATE_PRED)
+        self._n_conf   = len(STATE_CONF)
+        self._n_elite  = len(STATE_ELITE)
+        self._n_alpha  = len(STATE_ALPHA)
+        self._n_regime = len(REGIME_COLS)
+        self._n_synth  = len(STATE_SYNTH)
         self._frame_stack = deque(maxlen=STACK_N)
 
         # HMM 관측 컬럼 미리 추출 (get_features 호출용 row dict)
@@ -890,13 +896,14 @@ class TradingEnv:
 
         row = self._feat_np[idx]
         o = 0
-        preds  = row[o:o+self._n_pred];   o += self._n_pred
-        confs  = row[o:o+self._n_conf];   o += self._n_conf
-        stats  = np.array([preds.mean(), preds.std(), confs.mean()], dtype=np.float32)
-        elite  = row[o:o+self._n_elite];  o += self._n_elite
-        alpha7 = row[o:o+self._n_alpha];  o += self._n_alpha
-        regimes= row[o:o+self._n_regime]; o += self._n_regime
-        synth  = row[o:]
+        preds      = row[o:o+self._n_pred];   o += self._n_pred
+        confs      = row[o:o+self._n_conf];   o += self._n_conf
+        signal     = preds * confs                                    # 확신도 가중 방향 신호 (7)
+        elite      = row[o:o+self._n_elite];  o += self._n_elite
+        alpha6     = row[o:o+self._n_alpha];  o += self._n_alpha
+        regime_raw = row[o:o+self._n_regime]; o += self._n_regime
+        regime_idx = np.array([float(np.argmax(regime_raw))], dtype=np.float32)  # one-hot → int
+        synth2     = row[o:o+self._n_synth]                          # ofti, kel (2)
 
         close = self._close_np[idx]
         pos_features = np.array([
@@ -907,18 +914,19 @@ class TradingEnv:
             self.hold_count / 144
         ], dtype=np.float32)
 
-        # ── HMM 피처 (5차원: 4개 상태확률 + 엔트로피) ──
+        # ── HMM 피처 (5차원: 4개 상태확률 + 엔트로피) ── FEATURE_DIM에 편입
         if self.hmm_detector is not None:
             row_dict = {col: float(self._hmm_obs_np[col][idx]) for col in self._hmm_obs_np}
             hmm_feat = self.hmm_detector.get_features(row_dict)
         else:
             hmm_feat = np.zeros(HMM_DIM, dtype=np.float32)
 
-        # ── MTF 피처 (7차원: 4h/일봉 수익률·변동성·추세·방향 일치) ──
+        # ── MTF 피처 (3차원: 4h_ret, 4h_trend, htf_alignment) ──
         mtf_feat = self.mtf.get(idx)
 
+        # 순서: signal(7) elite(3) alpha(6) regime(1) hmm(5) synth(2) | pos(5) mtf(3)
         return np.nan_to_num(
-            np.concatenate([preds, confs, stats, elite, alpha7, regimes, synth, pos_features, hmm_feat, mtf_feat]),
+            np.concatenate([signal, elite, alpha6, regime_idx, hmm_feat, synth2, pos_features, mtf_feat]),
             0.0
         )
 
@@ -1367,13 +1375,14 @@ class GatingRouter7:
         self.mtf     = mtf_features
 
     def _state_tensor(self, features, pos):
-        preds   = np.array([features.get(c, 0.) for c in STATE_PRED],   dtype=np.float32)
-        confs   = np.array([features.get(c, 0.) for c in STATE_CONF],   dtype=np.float32)
-        stats   = np.array([preds.mean(), preds.std(), confs.mean()],    dtype=np.float32)
-        elite   = np.array([features.get(c, 0.) for c in STATE_ELITE],  dtype=np.float32)
-        alpha7  = np.array([features.get(c, 0.) for c in STATE_ALPHA],  dtype=np.float32)
-        regimes = np.array([features.get(c, 0.) for c in REGIME_COLS],  dtype=np.float32)
-        synth   = np.array([features.get(c, 0.) for c in STATE_SYNTH],  dtype=np.float32)
+        preds      = np.array([features.get(c, 0.) for c in STATE_PRED],   dtype=np.float32)
+        confs      = np.array([features.get(c, 0.) for c in STATE_CONF],   dtype=np.float32)
+        signal     = preds * confs                                           # 확신도 가중 방향 신호 (7)
+        elite      = np.array([features.get(c, 0.) for c in STATE_ELITE],  dtype=np.float32)
+        alpha6     = np.array([features.get(c, 0.) for c in STATE_ALPHA],  dtype=np.float32)
+        regime_raw = np.array([features.get(c, 0.) for c in REGIME_COLS],  dtype=np.float32)
+        regime_idx = np.array([float(np.argmax(regime_raw))],               dtype=np.float32)
+        synth2     = np.array([features.get(c, 0.) for c in STATE_SYNTH],  dtype=np.float32)
         cur_p   = features.get('close', 1.0)
         pt      = pos.get('type')
         pos_arr = np.array([
@@ -1384,22 +1393,21 @@ class GatingRouter7:
             pos.get('hold_norm', 0.)
         ], dtype=np.float32)
 
-        # ── HMM 피처 (5차원) ──
+        # ── HMM 피처 (5차원) ── FEATURE_DIM에 편입
         if self.hmm is not None:
             hmm_feat = self.hmm.get_features(features)
         else:
             hmm_feat = np.zeros(HMM_DIM, dtype=np.float32)
 
-        # ── MTF 피처 (7차원) ──
+        # ── MTF 피처 (3차원: 4h_ret, 4h_trend, htf_alignment) ──
         if self.mtf is not None:
-            # features dict에 현재 스텝 인덱스가 없으므로 close 기반으로 근사
-            # val_env에서 직접 호출되는 경우 인덱스를 features에 'step_idx'로 전달
             _step_idx = int(features.get('_step_idx', -1))
             mtf_feat = self.mtf.get(_step_idx)
         else:
             mtf_feat = np.zeros(MTF_DIM, dtype=np.float32)
 
-        raw = np.concatenate([preds, confs, stats, elite, alpha7, regimes, synth, pos_arr, hmm_feat, mtf_feat])
+        # 순서: signal(7) elite(3) alpha(6) regime(1) hmm(5) synth(2) | pos(5) mtf(3)
+        raw = np.concatenate([signal, elite, alpha6, regime_idx, hmm_feat, synth2, pos_arr, mtf_feat])
         self._frame_stack.append(raw)
         pad    = STACK_N - len(self._frame_stack)
         frames = [np.zeros(STATE_DIM, np.float32)] * pad + list(self._frame_stack)
