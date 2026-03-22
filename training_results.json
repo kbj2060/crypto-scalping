@@ -1,0 +1,24 @@
+{
+  "best_val_dir_f1": 0.8535048537241366,
+  "test_bacc": 0.5602318011117216,
+  "test_dir_f1": 0.8403873626102759,
+  "n_features": 48,
+  "best_params": {
+    "n_estimators": 894,
+    "max_depth": 7,
+    "learning_rate": 0.06276217792303307,
+    "num_leaves": 40,
+    "subsample": 0.5346597100733573,
+    "colsample_bytree": 0.5167708337200039,
+    "reg_alpha": 7.3404939314685365,
+    "reg_lambda": 0.0005804512509137597,
+    "min_child_samples": 16,
+    "objective": "multiclass",
+    "num_class": 3,
+    "n_jobs": -1,
+    "random_state": 42,
+    "verbose": -1
+  },
+  "atr_mult": 0.5,
+  "max_hold_bars": 12
+}
