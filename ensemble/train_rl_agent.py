@@ -839,20 +839,23 @@ class TradingEnv:
             current_portfolio_value = self.balance
 
         step_delta = (current_portfolio_value - prev_portfolio_value) / self.initial_balance * 500.0
-        reward = step_delta
 
-        # [BUG2+3+4 FIX] trend_bonus / scalp_bonus 전부 제거
-        # scalp_bonus: hold_count=0 시 6x 증폭 → reward 클리핑 포화 → 학습 신호 소실
-        # trend_bonus: 큰 step_delta에서 1.0 클리핑으로 신호 손실
-        # 두 보너스 모두 balance와 무관하게 reward를 부풀려 Rew와 PnL이 역방향으로 분리
-        # → chop의 Rew=+100, PnL=-70% 현상의 근본 원인
-        # 수수료+슬리피지가 이미 충분한 자연 억제제이므로 추가 bonus 불필요
+        # 수익/손실 비대칭 보상: 수익 구간은 1.3배 증폭해 수수료 부담 보정
+        if step_delta > 0:
+            reward = step_delta * 1.3
+        else:
+            reward = step_delta
 
-        # pred_consensus 보너스만 유지 (스케일이 작아 클리핑 영향 없음)
+        # 관망 패널티: 매 스텝 포지션 없을 때 소폭 페널티 (기회비용 부여)
+        # 에이전트가 "무조건 관망=안전" 전략으로 수렴하는 것을 방지
+        if self.pos is None:
+            reward -= 0.002
+
+        # pred_consensus 보너스 (스케일이 작아 클리핑 영향 없음)
         if self.pos is not None:
             pred_consensus = float(self._feat_np[self.current_step, :self._n_pred].mean())
             if self.unrealized_pnl >= 0 and ((self.pos == 'LONG' and pred_consensus > 0.0) or (self.pos == 'SHORT' and pred_consensus < 0.0)):
-                reward += 0.01
+                reward += 0.02
 
         if done and self.pos is not None:
             ep_end_price = self._close_np[min(self.current_step, len(self._close_np) - 1)]

@@ -59,7 +59,7 @@ VAL_RATIO    = 0.15
 
 # Triple-Barrier 파라미터 (5m 봉 기준)
 ATR_WINDOW_5M = 14     # 14봉 ATR (= 70분)
-ATR_MULT      = 1.5    # 장벽 = ATR × 1.5
+ATR_MULT      = 0.8    # 장벽 = ATR × 0.8 (낮출수록 UP/DOWN 레이블 증가)
 MAX_HOLD_5M   = 12     # 최대 보유 12봉 = 1시간  ← target_ret_12와 동일 호라이즌
 
 WINDOW = 1             # XGBoost는 단일 행 피처 (시퀀스 불필요)
@@ -316,67 +316,87 @@ def train(data_path: str = DATA_PATH,
     counts = np.bincount(y_train, minlength=3).astype(np.float64)
     class_weight = {i: counts.sum() / (3.0 * max(counts[i], 1)) for i in range(3)}
 
-    # ── Optuna 튜닝 ──
-    def objective(trial):
-        params = dict(
-            n_estimators      = trial.suggest_int('n_estimators', 300, 1200),
-            max_depth         = trial.suggest_int('max_depth', 3, 8),
-            learning_rate     = trial.suggest_float('learning_rate', 5e-3, 0.15, log=True),
-            num_leaves        = trial.suggest_int('num_leaves', 15, 127),
-            subsample         = trial.suggest_float('subsample', 0.5, 1.0),
-            colsample_bytree  = trial.suggest_float('colsample_bytree', 0.5, 1.0),
-            reg_alpha         = trial.suggest_float('reg_alpha', 1e-4, 10.0, log=True),
-            reg_lambda        = trial.suggest_float('reg_lambda', 1e-4, 10.0, log=True),
-            min_child_samples = trial.suggest_int('min_child_samples', 10, 100),
-            class_weight      = class_weight,
-            objective         = 'multiclass',
-            num_class         = 3,
-            n_jobs            = -1,
-            random_state      = 42,
-            verbose           = -1,
+    # ── Optuna 튜닝 or 저장된 파라미터 재사용 ──
+    results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
+    if os.path.exists(results_path):
+        logger.info(f"기존 training_results.json 발견 → Optuna 건너뜀: {results_path}")
+        with open(results_path) as f:
+            prev = json.load(f)
+        saved_params = prev['best_params']
+        boosted_n = int(saved_params.get('n_estimators', 500) * 1.1)
+        best_params = {
+            **saved_params,
+            'n_estimators': boosted_n,
+            'class_weight': class_weight,
+            'objective':    'multiclass',
+            'num_class':    3,
+            'n_jobs':       -1,
+            'random_state': 42,
+            'verbose':      -1,
+        }
+        logger.info(f"재사용 파라미터: n_estimators={boosted_n} (×1.1), 나머지 고정")
+        best_val_metric = prev.get('best_val_dir_f1', prev.get('best_val_bacc', None))
+    else:
+        def objective(trial):
+            params = dict(
+                n_estimators      = trial.suggest_int('n_estimators', 300, 1200),
+                max_depth         = trial.suggest_int('max_depth', 3, 8),
+                learning_rate     = trial.suggest_float('learning_rate', 5e-3, 0.15, log=True),
+                num_leaves        = trial.suggest_int('num_leaves', 15, 127),
+                subsample         = trial.suggest_float('subsample', 0.5, 1.0),
+                colsample_bytree  = trial.suggest_float('colsample_bytree', 0.5, 1.0),
+                reg_alpha         = trial.suggest_float('reg_alpha', 1e-4, 10.0, log=True),
+                reg_lambda        = trial.suggest_float('reg_lambda', 1e-4, 10.0, log=True),
+                min_child_samples = trial.suggest_int('min_child_samples', 10, 100),
+                class_weight      = class_weight,
+                objective         = 'multiclass',
+                num_class         = 3,
+                n_jobs            = -1,
+                random_state      = 42,
+                verbose           = -1,
+            )
+            clf = LGBMClassifier(**params)
+            clf.fit(
+                X_train, y_train,
+                eval_set  = [(X_val, y_val)],
+                callbacks = [early_stopping(40, verbose=False), log_evaluation(-1)],
+            )
+            preds = clf.predict(X_val)
+            # FLAT을 제외한 UP/DOWN 샘플에 대한 방향성 F1 (macro)
+            # FLAT 과다 예측으로 balanced_acc가 오르는 문제를 방지
+            dir_mask = y_val != 1
+            if dir_mask.sum() == 0:
+                return 0.0
+            return f1_score(y_val[dir_mask], preds[dir_mask],
+                            labels=[0, 2], average='macro', zero_division=0)
+
+        logger.info(f"Optuna 튜닝 시작: {n_trials}회 시행...")
+        study = optuna.create_study(
+            direction = 'maximize',
+            sampler   = optuna.samplers.TPESampler(seed=42),
         )
-        clf = LGBMClassifier(**params)
-        clf.fit(
-            X_train, y_train,
-            eval_set  = [(X_val, y_val)],
-            callbacks = [early_stopping(40, verbose=False), log_evaluation(-1)],
-        )
-        preds = clf.predict(X_val)
-        # FLAT을 제외한 UP/DOWN 샘플에 대한 방향성 F1 (macro)
-        # FLAT 과다 예측으로 balanced_acc가 오르는 문제를 방지
-        dir_mask = y_val != 1
-        if dir_mask.sum() == 0:
-            return 0.0
-        return f1_score(y_val[dir_mask], preds[dir_mask],
-                        labels=[0, 2], average='macro', zero_division=0)
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-    logger.info(f"Optuna 튜닝 시작: {n_trials}회 시행...")
-    study = optuna.create_study(
-        direction = 'maximize',
-        sampler   = optuna.samplers.TPESampler(seed=42),
-    )
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+        logger.info(f"Best Val dir_f1 (UP/DOWN macro): {study.best_value:.4f}")
+        logger.info(f"Best params: {study.best_params}")
 
-    logger.info(f"Best Val dir_f1 (UP/DOWN macro): {study.best_value:.4f}")
-    logger.info(f"Best params: {study.best_params}")
+        boosted_n = int(study.best_params.get('n_estimators', 500) * 1.1)
+        best_params = {
+            **study.best_params,
+            'n_estimators': boosted_n,
+            'class_weight': class_weight,
+            'objective': 'multiclass',
+            'num_class': 3,
+            'n_jobs': -1,
+            'random_state': 42,
+            'verbose': -1,
+        }
+        best_val_metric = study.best_value
 
-    # ── 최적 파라미터로 Train+Val 합쳐서 재학습 ──
-    # 데이터가 ~15% 증가하므로 n_estimators 1.1배 보정 (과소학습 방지)
-    boosted_n = int(study.best_params.get('n_estimators', 500) * 1.1)
-    best_params = {
-        **study.best_params,
-        'n_estimators': boosted_n,
-        'class_weight': class_weight,
-        'objective': 'multiclass',
-        'num_class': 3,
-        'n_jobs': -1,
-        'random_state': 42,
-        'verbose': -1,
-    }
     X_trainval = np.vstack([X_train, X_val])
     y_trainval = np.hstack([y_train, y_val])
 
-    logger.info(f"최종 재학습: n_estimators {study.best_params['n_estimators']} → {boosted_n} (×1.1 보정)")
+    logger.info(f"최종 재학습: n_estimators={boosted_n} (×1.1 보정)")
     final_clf = LGBMClassifier(**best_params)
     final_clf.fit(X_trainval, y_trainval)
 
@@ -399,7 +419,7 @@ def train(data_path: str = DATA_PATH,
     results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
     with open(results_path, 'w') as f:
         json.dump({
-            'best_val_dir_f1' : study.best_value,
+            'best_val_dir_f1' : best_val_metric,
             'test_bacc'       : test_bacc,
             'test_dir_f1'     : test_dir_f1,
             'n_features'    : len(selected_features),

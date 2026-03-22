@@ -790,7 +790,7 @@ def _print_polymarket_section(poly_data: dict, current_price: float):
 # - 포지션은 MetaRouter가 단일 소스로 관리
 
 # ── 튜닝 상수 ────────────────────────────────────────────────────
-_META_SOLO_RL_THRESH   = 0.25   # RL 진입 score 최솟값
+_META_SOLO_RL_THRESH   = 0.05   # RL 진입 score 최솟값 (RL 자체 확신도 필터 신뢰)
 _META_HISTORY_N        = 30     # 동적 가중치 추적 윈도우
 
 # 레짐별 RL 우선순위 배율
@@ -902,10 +902,10 @@ class MetaRouter:
         CHOP_STRENGTH  : FLAT 추세 강도 → Kelly 축소 (×0.8)
         REV_VETO_PROB  : 반전 확률 이 이상 → Kelly 축소 (×0.6)
         """
-        VETO_STRENGTH  = 0.55
+        VETO_STRENGTH  = 0.70   # 완화: 매우 강한 역방향만 거부
         BOOST_STRENGTH = 0.35
         CHOP_STRENGTH  = 0.30
-        REV_VETO_PROB  = 0.60
+        REV_VETO_PROB  = 0.70   # 완화: 반전 확률 매우 높을 때만 축소
 
         veto = None
 
@@ -988,10 +988,19 @@ class MetaRouter:
         ts = result.get('trend_signal')
         tv = result.get('trend_veto')
         if ts is not None:
-            dir_map = {0: f'{C.RED}↓DOWN{C.RESET}', 1: f'{C.YELLOW}→FLAT{C.RESET}', 2: f'{C.GREEN}↑UP{C.RESET}'}
-            dir_str = dir_map.get(ts['trend_dir'], '?')
+            dir_map  = {0: f'{C.RED}↓DOWN{C.RESET}', 1: f'{C.YELLOW}→FLAT{C.RESET}', 2: f'{C.GREEN}↑UP{C.RESET}'}
+            dir_str  = dir_map.get(ts['trend_dir'], '?')
             veto_str = f'  [{C.RED}{tv}{C.RESET}]' if tv else ''
-            print(f"  4h추세: {dir_str}  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}{veto_str}")
+            probs    = ts.get('probs', [])
+            if len(probs) == 3:
+                dn_c = C.RED if probs[0] > 0.4 else C.RESET
+                up_c = C.GREEN if probs[2] > 0.4 else C.RESET
+                probs_str = (f"DN={dn_c}{probs[0]:.0%}{C.RESET} "
+                             f"FL={C.YELLOW}{probs[1]:.0%}{C.RESET} "
+                             f"UP={up_c}{probs[2]:.0%}{C.RESET}")
+            else:
+                probs_str = ''
+            print(f"  📈 XGBTrend: {dir_str}  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}  {probs_str}{veto_str}")
         print(C.BOLD + "╚══════════════════════════════════════════════════╝" + C.RESET)
 
 
@@ -1189,13 +1198,22 @@ class MoELiveRouter:
             print(f"  {icon} {base_key:<20} : {interp} (강도: {v:+.2f})")
 
         print("-" * 68)
-        print(f" {Colors.CYAN}[ 🤖 LR MoE 4-Agent 독립 판단 ]{Colors.RESET}")
+        print(f" {Colors.CYAN}[ 🤖 MoE 6-Agent + GatingNet7 독립 판단 ]{Colors.RESET}")
         if self.pos is not None:
             pnl_color = Colors.GREEN if pnl_pct > 0 else Colors.RED
             print(f" ⏳ 보유 캔들: {self.hold_count:<4} | 📈 미실현 수익: {pnl_color}{pnl_pct:+.2f}%{Colors.RESET}")
         print(f" 🌍 시장 레짐: {regime_name:<10} | 📊 현재 포지션: {pos_str}")
-        print(f" ⚖️ [현재 국면 엣지 비교] {Colors.GREEN}롱돌이(L): {long_edge:.3f}{Colors.RESET} vs {Colors.RED}숏돌이(S): {short_edge:.3f}{Colors.RESET}")
-        print(f" 🤖 담당 특수부대: {active_agent:<15} | 🎯 선택된 Kelly: {kelly:.3f}")
+        print(f" ⚖️ [엣지 비교] {Colors.GREEN}롱(L): {long_edge:+.3f}{Colors.RESET} vs {Colors.RED}숏(S): {short_edge:+.3f}{Colors.RESET}  Kelly={kelly:.3f}")
+        hmm_state = info.get('hmm_state')
+        if hmm_state:
+            hmm_probs = info.get('hmm_probs', [])
+            hmm_color = {
+                'bull-trend': Colors.GREEN, 'bear-trend': Colors.RED,
+                'hv-chop': Colors.YELLOW, 'lv-range': Colors.CYAN,
+            }.get(hmm_state, Colors.RESET)
+            probs_str = ' '.join(f'{p:.2f}' for p in hmm_probs) if hmm_probs else ''
+            print(f" 🔮 HMM 레짐: {hmm_color}{hmm_state}{Colors.RESET}  [{probs_str}]")
+        print(f" 🤖 담당 에이전트: {Colors.CYAN}{active_agent}{Colors.RESET}")
         print(f" 🎯 최종 결단: {action_str}")
 
         # LLM 분석 출력
@@ -1260,7 +1278,7 @@ async def main(use_local=False):
             try:
                 trend_signal = trend_brain.predict_from_df(eth_buffer)
             except Exception as e:
-                logger.debug(f"TrendBrain 추론 실패: {e}")
+                logger.warning(f"TrendBrain 추론 실패: {e}")
 
         # ── MetaRouter 신호 융합 ──────────────────────────────
         meta_result = meta_router.fuse(
