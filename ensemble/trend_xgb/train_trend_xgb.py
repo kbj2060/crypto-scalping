@@ -59,7 +59,7 @@ VAL_RATIO    = 0.15
 
 # Triple-Barrier 파라미터 (5m 봉 기준)
 ATR_WINDOW_5M = 14     # 14봉 ATR (= 70분)
-ATR_MULT      = 0.8    # 장벽 = ATR × 0.8 (낮출수록 UP/DOWN 레이블 증가)
+ATR_MULT      = 0.8    # 장벽 = ATR × 1.0 (수수료 커버 + 의미있는 방향만 레이블)
 MAX_HOLD_5M   = 12     # 최대 보유 12봉 = 1시간  ← target_ret_12와 동일 호라이즌
 
 WINDOW = 1             # XGBoost는 단일 행 피처 (시퀀스 불필요)

@@ -840,16 +840,12 @@ class TradingEnv:
 
         step_delta = (current_portfolio_value - prev_portfolio_value) / self.initial_balance * 500.0
 
-        # 수익/손실 비대칭 보상: 수익 구간은 1.3배 증폭해 수수료 부담 보정
-        if step_delta > 0:
-            reward = step_delta * 1.3
-        else:
-            reward = step_delta
+        reward = step_delta
 
-        # 관망 패널티: 매 스텝 포지션 없을 때 소폭 페널티 (기회비용 부여)
-        # 에이전트가 "무조건 관망=안전" 전략으로 수렴하는 것을 방지
+        # 관망 패널티: 포지션 없을 때 기회비용 부여
+        # -0.005/스텝 → 4096스텝 전부 관망 시 누적 -20.48 (충분한 압력)
         if self.pos is None:
-            reward -= 0.002
+            reward -= 0.005
 
         # pred_consensus 보너스 (스케일이 작아 클리핑 영향 없음)
         if self.pos is not None:
