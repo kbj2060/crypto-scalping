@@ -39,6 +39,13 @@ ELITE_COLS = [
     'sig_garch_regime', 'sig_ou_mean_rev', 'sig_jump_rebound', 'sig_evt_tail',
 ]
 
+# NewEliteSignalEngine이 벡터화 계산하는 신규 시그널 3개
+NEW_ELITE_COLS = [
+    'sig_volume_confirm',   # 방향성 거래량 확인 + 유동성 깊이
+    'sig_liquidity_trap',   # EQH/EQL 스탑 헌팅 반전 감지
+    'sig_trend_health',     # 추세 건강도 종합 점수
+]
+
 ALPHA_7_COLS = [
     'session_us', 'hour_cos', 'cvp_poc_dist',
     'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate',
@@ -63,7 +70,7 @@ VOLATILITY_MODEL_COLS = [
 RL_REQUIRED_COLS = (
     ['timestamp', 'close']
     + MODEL_PRED + MODEL_CONF
-    + ELITE_COLS + ALPHA_7_COLS + REGIME_COLS + SYNTHETIC_ALPHA_COLS
+    + ELITE_COLS + NEW_ELITE_COLS + ALPHA_7_COLS + REGIME_COLS + SYNTHETIC_ALPHA_COLS
     + VOLATILITY_MODEL_COLS
     + [TARGET_COL]
 )
@@ -147,7 +154,7 @@ class SuppressOutput:
 
 # ─── 메인 마이닝 함수 ─────────────────────────────────────────────────────────
 def generate_training_csv(input_csv: str, output_csv: str):
-    from strategies.elite_strategies import BaseStrategy  # type: ignore  # noqa: F401
+    from strategies.elite_strategies import BaseStrategy, NewEliteSignalEngine  # type: ignore  # noqa: F401
     from strategies.elite_builder import (  # type: ignore
         EliteSignals, row_to_market_row,
         compute_synthetic_alphas, compute_regime, compute_volatility_models,
@@ -176,6 +183,10 @@ def generate_training_csv(input_csv: str, output_csv: str):
     logger.info("🚀 [단계 1.6] 변동성 모델 피처 계산 (GARCH / OU / Jump / EVT)...")
     df = compute_volatility_models(df)
     logger.info("✅ 변동성 모델 피처 계산 완료")
+
+    logger.info("🚀 [단계 1.7] 신규 Elite 시그널 벡터 계산 (volume_confirm / liquidity_trap / trend_health)...")
+    NewEliteSignalEngine().compute(df)
+    logger.info(f"✅ 신규 Elite 시그널 완료: {NEW_ELITE_COLS}")
 
     L            = len(df)
     # Ridge WARMUP(1000) 이후부터 의미 있는 예측 가능 → 최소 시작점을 1000으로 설정
@@ -277,6 +288,7 @@ def generate_training_csv(input_csv: str, output_csv: str):
             for col in REGIME_COLS:           row_res[col] = float(current_row.get(col, 0.0))
             for col in SYNTHETIC_ALPHA_COLS:  row_res[col] = float(current_row.get(col, 0.0))
             for col in VOLATILITY_MODEL_COLS: row_res[col] = float(current_row.get(col, 0.0))
+            for col in NEW_ELITE_COLS:        row_res[col] = float(current_row.get(col, 0.0))
 
             all_sigs = elite_extractor.compute_all(
                 current=row_to_market_row(current_row),

@@ -38,6 +38,7 @@ from .elite_strategies import (
     OITrendDivergence, TopTraderPositionalSqueeze, BtcCorrelationBreakout,
     # ── Batch Engines ──
     SyntheticAlphaEngine, RegimeEngine, VolatilityModelEngine,
+    NewEliteSignalEngine,
     # ── 변동성 모델 전략 ──
     GARCHVolatilityRegime, OUMeanReversionHunter,
     JumpReboundHunter, EVTTailRiskSentinel,
@@ -775,3 +776,8 @@ def compute_regime(df: pd.DataFrame) -> pd.DataFrame:
 def compute_volatility_models(df: pd.DataFrame) -> pd.DataFrame:
     """GARCH(1,1) + OU 과정 + 점프 감지 + EVT 변동성 모델 피처를 df에 벡터화로 계산하여 반환."""
     return VolatilityModelEngine().compute(df)
+
+
+def compute_new_elite_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """sig_volume_confirm, sig_liquidity_trap, sig_trend_health를 df에 벡터화로 계산하여 반환."""
+    return NewEliteSignalEngine().compute(df)

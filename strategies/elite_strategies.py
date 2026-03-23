@@ -782,3 +782,158 @@ class VolatilityModelEngine:
 
         df['evt_tail_flag'] = (_r_abs > _thresh).astype(np.float32)
         df['evt_excess_z']  = ((_r_abs - _thresh) / (_thresh + 1e-8)).clip(0, 5).fillna(0).astype(np.float32)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  [NEW] NewEliteSignalEngine — sig_volume_confirm, sig_liquidity_trap, sig_trend_health
+# ═══════════════════════════════════════════════════════════════════════════
+class NewEliteSignalEngine:
+    """3개 신규 Elite 시그널을 DataFrame 전체에 벡터화 배치 계산.
+
+    생성 컬럼:
+      sig_volume_confirm  : 방향성 거래량 확인 + 유동성 깊이 (공백 1+2 해결)
+      sig_liquidity_trap  : EQH/EQL 스탑 헌팅 반전 감지 (SMC 유동성 트랩)
+      sig_trend_health    : 추세 건강도 종합 점수 (볼륨일관성+바디확장+핀정렬)
+    """
+    COLS = ['sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        self._compute_volume_confirm(df)
+        self._compute_liquidity_trap(df)
+        self._compute_trend_health(df)
+        return df
+
+    def _compute_volume_confirm(self, df: pd.DataFrame) -> None:
+        """방향성 거래량 확인: price_dir × RVOL × (1 + illiquidity 보정)
+        - RVOL > 1: 평균 이상 거래량 → 움직임에 볼륨이 실림
+        - illiquidity 높으면 호가 얇음 → 큰 슬리피지 위험 반영
+        """
+        close  = df['close']
+        volume = df['volume'].replace(0, np.nan)
+
+        # 상대 거래량 (RVOL)
+        vol_ma = volume.rolling(20, min_periods=1).mean()
+        rvol   = volume / vol_ma.clip(lower=1e-8)
+
+        # 가격 방향
+        price_dir = np.sign(close.pct_change())
+
+        # Amihud illiquidity z-score
+        ret_abs    = close.pct_change().abs()
+        amihud_raw = ret_abs / volume.clip(lower=1e-8)
+        amihud_mu  = amihud_raw.rolling(288, min_periods=1).mean()
+        amihud_std = amihud_raw.rolling(288, min_periods=1).std().replace(0, 1e-8)
+        illiq_z    = ((amihud_raw - amihud_mu) / amihud_std).clip(0, 3)
+
+        # 종합: 방향 × tanh(RVOL-1) × (1 + illiq 보정)
+        raw = price_dir * np.tanh(rvol - 1.0) * (1 + illiq_z * 0.3)
+        df['sig_volume_confirm'] = np.tanh(raw).fillna(0).astype(np.float32)
+
+    def _compute_liquidity_trap(self, df: pd.DataFrame, window: int = 48,
+                                 eq_tol: float = 0.001, confirm: int = 3) -> None:
+        """EQH/EQL 기반 유동성 트랩 감지 (벡터화).
+        1) 롤링 window 내 swing high/low를 찾음
+        2) 비슷한 가격의 swing이 2회+ 있으면 EQ level
+        3) 현재 봉이 EQ level을 돌파 후 되돌아오면 trap 신호
+        """
+        high  = df['high'].values
+        low   = df['low'].values
+        close = df['close'].values
+        n     = len(df)
+        signal = np.zeros(n, dtype=np.float64)
+
+        for i in range(window, n):
+            seg_h = high[i - window:i]
+            seg_l = low[i - window:i]
+
+            # ── Equal Highs: 로컬 최고점 중 비슷한 가격 2회+ ──
+            eq_high = 0.0
+            for j in range(confirm, len(seg_h) - confirm):
+                local_max = seg_h[max(0, j-confirm):j+confirm+1].max()
+                if seg_h[j] == local_max:
+                    # 이 고점과 비슷한 다른 고점이 있는가?
+                    count = 0
+                    for k in range(confirm, len(seg_h) - confirm):
+                        if k == j:
+                            continue
+                        if seg_h[k] == seg_h[max(0,k-confirm):k+confirm+1].max():
+                            if abs(seg_h[j] - seg_h[k]) / (seg_h[j] + 1e-8) < eq_tol:
+                                count += 1
+                    if count >= 1:
+                        eq_high = seg_h[j]
+                        break
+
+            # ── Equal Lows ──
+            eq_low = 0.0
+            for j in range(confirm, len(seg_l) - confirm):
+                local_min = seg_l[max(0, j-confirm):j+confirm+1].min()
+                if seg_l[j] == local_min:
+                    count = 0
+                    for k in range(confirm, len(seg_l) - confirm):
+                        if k == j:
+                            continue
+                        if seg_l[k] == seg_l[max(0,k-confirm):k+confirm+1].min():
+                            if abs(seg_l[j] - seg_l[k]) / (seg_l[j] + 1e-8) < eq_tol:
+                                count += 1
+                    if count >= 1:
+                        eq_low = seg_l[j]
+                        break
+
+            # ── 트랩 감지: 돌파 후 되돌림 ──
+            if eq_high > 0 and high[i] > eq_high and close[i] < eq_high:
+                penetration = (high[i] - eq_high) / (eq_high * 0.001 + 1e-8)
+                signal[i] = -np.tanh(penetration)  # 위 돌파 후 반전 = 숏 신호
+            elif eq_low > 0 and low[i] < eq_low and close[i] > eq_low:
+                penetration = (eq_low - low[i]) / (eq_low * 0.001 + 1e-8)
+                signal[i] = np.tanh(penetration)   # 아래 돌파 후 반전 = 롱 신호
+
+        df['sig_liquidity_trap'] = pd.Series(signal, index=df.index).fillna(0).astype(np.float32)
+
+    def _compute_trend_health(self, df: pd.DataFrame, window: int = 24) -> None:
+        """추세 건강도: 방향일관성 + 델타일관성 + 바디확장 + 핀정렬 종합.
+        양수 = 건강한 상승 추세, 음수 = 건강한 하락 추세, 0 = 추세 없음/소진.
+        """
+        close  = df['close']
+        high   = df['high']
+        low    = df['low']
+        opn    = df['open']
+        volume = df['volume']
+
+        returns = close.pct_change()
+
+        # Factor 1: 방향 일관성 (연속 양봉/음봉 비율, 0~1)
+        direction   = np.sign(returns)
+        consistency = direction.rolling(window, min_periods=1).mean().abs()
+
+        # Factor 2: 델타 일관성 (가격 방향과 taker 델타 방향 일치 비율)
+        if 'taker_buy_quote' in df.columns and 'quote_volume' in df.columns:
+            taker_buy  = df['taker_buy_quote']
+            taker_sell = df['quote_volume'] - taker_buy
+            delta_dir  = np.sign(taker_buy - taker_sell)
+        else:
+            delta_dir = direction  # fallback: 가격 방향으로 대체
+        delta_align = (delta_dir == direction).astype(float).rolling(window, min_periods=1).mean()
+
+        # Factor 3: 바디 확장 (최근 바디 크기 / 롤링 평균, tanh 정규화)
+        body      = (close - opn).abs()
+        body_ma   = body.rolling(window, min_periods=1).mean().clip(lower=1e-8)
+        body_grow = np.tanh(body / body_ma - 1.0)
+
+        # Factor 4: 역방향 핀 축소 (추세 반대 윅이 줄어드는가?)
+        upper_wick = high - np.maximum(close, opn)
+        lower_wick = np.minimum(close, opn) - low
+        trend_dir  = returns.rolling(window, min_periods=1).mean()
+        # 상승 추세 → upper_wick이 저항, 하락 추세 → lower_wick이 지지
+        anti_wick    = pd.Series(
+            np.where(trend_dir > 0, upper_wick, lower_wick),
+            index=df.index
+        )
+        anti_wick_ma = anti_wick.rolling(window, min_periods=1).mean().clip(lower=1e-8)
+        wick_ratio   = np.tanh(1.0 - anti_wick / anti_wick_ma)  # 양수 = 역방향윅 줄어듦
+
+        # 종합 (0~1 범위 → 방향 부호 적용)
+        health_raw = (consistency * 0.3 + delta_align * 0.3
+                      + body_grow.clip(0, 1) * 0.2 + wick_ratio.clip(0, 1) * 0.2)
+        # 추세 방향 부호: 상승건강 = 양수, 하락건강 = 음수
+        health_signed = health_raw * np.sign(trend_dir)
+        df['sig_trend_health'] = np.tanh(health_signed * 2).fillna(0).astype(np.float32)

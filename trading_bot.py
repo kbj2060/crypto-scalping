@@ -74,6 +74,7 @@ from ensemble.train_rl_agent import (
     REGIME_COLS,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
+from strategies.elite_strategies import NewEliteSignalEngine
 
 
 class Colors:
@@ -332,7 +333,6 @@ class NFStatePredictor:
         # NF 4종은 UnifiedNFForecaster 싱글톤이므로 중복 로드 없음
         self.models = {
             'ttm':      TTMForecaster(),
-            'nhits':    NHITSForecaster(),
             'tide':     TiDEForecaster(),
             'patchtst': PatchTSTForecaster(),
             'timesfm':  TimesFMForecaster(),
@@ -578,12 +578,10 @@ class LLMAnalyzer:
 
 
 def _print_llm_section(answer: str, regime_name: str, current_time_kst):
-    print(Colors.BOLD + "╔══════════════════ [ 🤖 Llama-4 Scout LLM 시장 분석 ] ══════════════════╗" + Colors.RESET)
     print(f" 레짐: {regime_name} | 시간 : {current_time_kst.strftime('%Y-%m-%d %H:%M')} KST ")
     print("─" * 70)
     for line in answer.strip().splitlines():
         print(f" {line}")
-    print(Colors.BOLD + "╚═══════════════════════════════════════════════════════════════════════╝" + Colors.RESET)
 
 
 def _compute_regime(df, window=24):
@@ -979,7 +977,7 @@ class MetaRouter:
         unr = self.unrealized_pnl(current_price)
         unr_color = C.GREEN if unr > 0 else (C.RED if unr < 0 else C.YELLOW)
 
-        print(C.BOLD + "╔══════════ [ ⚡ MetaRouter 통합 판단 ] ══════════╗" + C.RESET)
+        print(C.BOLD + "╔═══════════════════ [ ⚡ MetaRouter 통합 판단 ] ═══════════════════╗" + C.RESET)
         print(f"  RL 신호: {rl_a_str:<5}  score={result['rl_score']:.3f}   source: {C.CYAN}{src}{C.RESET}")
         print(f"  ▶ 최종결정: {action_str}   Kelly={result['unified_kelly']:.3f}   meta_score={result['meta_score']:.3f}")
         if self.pos is not None:
@@ -1001,11 +999,11 @@ class MetaRouter:
             else:
                 probs_str = ''
             print(f"  📈 XGBTrend: {dir_str}  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}  {probs_str}{veto_str}")
-        print(C.BOLD + "╚══════════════════════════════════════════════════╝" + C.RESET)
+        print(C.BOLD + "╚═══════════════════════════════════════════════════════════════════╝" + C.RESET)
 
 
 # ════════════════════════════════════════════════════════════════
-# 3-C. MoE 4-Agent 라우터 — RL_STATE_DIM=45
+# 3-C. MoE 6-Agent 라우터 — RL_STATE_DIM=35, STACKED=70
 # ════════════════════════════════════════════════════════════════
 class MoELiveRouter:
     # 1. 클래스 변수 정의 (MODEL_ORDER 에러 해결 핵심)
@@ -1017,6 +1015,7 @@ class MoELiveRouter:
         # 퀀트 시그널 추출기 초기화
         from strategies.elite_builder import EliteSignals
         self.elite_extractor = EliteSignals()
+        self.new_elite_engine = NewEliteSignalEngine()
 
         # v7 상수 및 모델 로드
         from ensemble.train_rl_agent import (
@@ -1064,9 +1063,21 @@ class MoELiveRouter:
         prev_market = row_to_market_row(prev_row)
         elite_sigs  = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
 
+        # NewEliteSignalEngine: sig_volume_confirm, sig_liquidity_trap, sig_trend_health
+        try:
+            _tail = processed_df.tail(100).copy()
+            self.new_elite_engine.compute(_tail)
+            _last = _tail.iloc[-1]
+            for col in ['sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']:
+                elite_sigs[col] = float(_last.get(col, 0.0))
+        except Exception as _e:
+            logger.warning(f"NewEliteSignalEngine 계산 실패: {_e}")
+            for col in ['sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']:
+                elite_sigs.setdefault(col, 0.0)
+
         features = {}
 
-        # RL_STATE_PRED: ['pred_timesfm','pred_chronos','pred_ttm','pred_patchtst','pred_tide','pred_mdjd','pred_ridge']
+        # RL_STATE_PRED: ['pred_tide','pred_ridge','pred_patchtst','pred_timesfm','pred_chronos','pred_ttm','pred_mdjd']
         pred_mdjd, conf_mdjd = _compute_mdjd(last_row, processed_df)
         for col in RL_STATE_PRED:
             if col == 'pred_mdjd':
@@ -1080,11 +1091,11 @@ class MoELiveRouter:
             else:
                 features[col] = float(nf_preds.get(col, 0.5))
 
-        # RL_STATE_ELITE: ['sig_orderblock','sig_ai_squeeze','sig_whale','sig_oi_divergence']
+        # RL_STATE_ELITE: ['sig_ai_squeeze','sig_whale','sig_oi_divergence','sig_volume_confirm','sig_liquidity_trap','sig_trend_health']
         for col in RL_STATE_ELITE:
             features[col] = float(elite_sigs.get(col, 0.0))
 
-        # RL_STATE_ALPHA: ['hour_cos','breakout_strength','fvg_dist','cvp_poc_dist','session_us','oi_change_rate','cvp_volume_imbalance']
+        # RL_STATE_ALPHA: ['hour_cos','garch_vol_z','breakout_strength','fvg_dist','oi_change_rate','cvp_volume_imbalance']
         for col in RL_STATE_ALPHA:
             features[col] = float(last_row.get(col, 0.0))
 
@@ -1092,7 +1103,7 @@ class MoELiveRouter:
         regime = _compute_regime(processed_df)
         features.update(regime)
 
-        # RL_STATE_SYNTH: ['fcsz','mta_funding','ofti','vebr','cada','wpad','svps','kel','mtmb']
+        # RL_STATE_SYNTH: ['ofti', 'kel']
         for col in RL_STATE_SYNTH:
             features[col] = float(last_row.get(col, 0.0))
 
@@ -1153,14 +1164,14 @@ class MoELiveRouter:
                    'SHORT': f'{Colors.RED}🟥 SHORT 보유{Colors.RESET}',
                    None: f'{Colors.YELLOW}🟨 무포지션{Colors.RESET}'}.get(self.pos, '?')
 
-        print("\n" + Colors.BOLD + "╔════════════════════ [ 12-Agent MoE 사령관 대시보드 ] ════════════════════╗" + Colors.RESET)
+        print("\n" + Colors.BOLD + "╔════════════════════ [ 6-Agent MoE 사령관 대시보드 ] ═════════════════════╗" + Colors.RESET)
         print(f" ⏱️ 타임: {timestamp.strftime('%Y-%m-%d %H:%M')} KST | 💰 ETH: ${current_price:,.2f}")
 
         print("-" * 68)
         print(f" {Colors.CYAN}[ 🧠 6대 파운데이션 AI 앙상블 예측 ]{Colors.RESET}")
         for i, model_name in enumerate(self.MODEL_ORDER):
-            pred_dir = f"{Colors.GREEN}상승(L){Colors.RESET}" if preds[i] > 0 else f"{Colors.RED}하락(S){Colors.RESET}" if preds[i] < 0 else f"{Colors.YELLOW}중립(-){Colors.RESET}"
-            print(f"  • {model_name:<10} : {pred_dir:<15} (신뢰도: {confs[i]:.1%})")
+            pred_dir = f"{Colors.GREEN}▲{Colors.RESET}" if preds[i] > 0 else f"{Colors.RED}▼{Colors.RESET}" if preds[i] < 0 else f"{Colors.YELLOW}-{Colors.RESET}"
+            print(f"  • {model_name:<10} : {pred_dir:<5} {confs[i]:.1%}")
 
         print("-" * 68)
         print(f" {Colors.YELLOW}[ ⚔️ 13대 엘리트 퀀트 시그널 분석 ]{Colors.RESET}")
@@ -1179,11 +1190,17 @@ class MoELiveRouter:
             'btc_corr_breakout': ('BTC 커플링 이탈 (독자 상승)', 'BTC 커플링 이탈 (독자 하락)', 'BTC 방향성 강력 동조'),
             'ai_squeeze':       ('변동성 응축 후 상방 폭발', '변동성 응축 후 하방 폭발', '변동성 평이함 (응축 없음)'),
             'vp_gravity':       ('POC(매물대) 하단 이탈 후 탄성 반등', 'POC(매물대) 상단 이탈 후 탄성 하락', '최다 매물대(POC) 부근 체류'),
+            'volume_confirm':   ('거래량+방향성 확인 (추세 진입)', '거래량+방향성 확인 (추세 하락)', '거래량 방향 불명확'),
+            'liquidity_trap':   ('EQL 스탑헌팅 후 상승 반전', 'EQH 스탑헌팅 후 하락 반전', '스탑헌팅 패턴 없음'),
+            'trend_health':     ('추세 건강도 양호 (방향성 지속)', '추세 건강도 악화 (반전 주의)', '추세 건강도 중립'),
         }
 
-        sorted_elite_sigs = sorted(elite_sigs.items(), key=lambda item: abs(item[1]), reverse=True)
-        for k, v in sorted_elite_sigs:
+        # RL에 실제 입력되는 STATE_ELITE 베이스키 집합
+        _rl_elite_keys = {c.replace('sig_', '') for c in RL_STATE_ELITE}
+
+        def _print_sig_row(k, v, in_rl: bool):
             base_key = k.replace('sig_', '')
+            star = f"{Colors.CYAN}★{Colors.RESET}" if in_rl else " "
             if base_key in sig_interpretations:
                 msg_long, msg_short, msg_none = sig_interpretations[base_key]
                 if v > 0:
@@ -1195,7 +1212,18 @@ class MoELiveRouter:
             else:
                 interp = f"{Colors.GREEN}LONG{Colors.RESET}" if v > 0 else f"{Colors.RED}SHORT{Colors.RESET}" if v < 0 else f"{Colors.YELLOW}NONE{Colors.RESET}"
                 icon   = f"{Colors.GREEN}▲{Colors.RESET}" if v > 0 else f"{Colors.RED}▼{Colors.RESET}" if v < 0 else f"{Colors.YELLOW}-{Colors.RESET}"
-            print(f"  {icon} {base_key:<20} : {interp} (강도: {v:+.2f})")
+            print(f" {star}{icon} {base_key:<20} : {interp} (강도: {v:+.2f})")
+
+        rl_sigs    = sorted([(k, v) for k, v in elite_sigs.items() if k.replace('sig_', '') in _rl_elite_keys],
+                            key=lambda x: abs(x[1]), reverse=True)
+        other_sigs = sorted([(k, v) for k, v in elite_sigs.items() if k.replace('sig_', '') not in _rl_elite_keys],
+                            key=lambda x: abs(x[1]), reverse=True)
+        for k, v in rl_sigs:
+            _print_sig_row(k, v, in_rl=True)
+        if other_sigs:
+            print(f"  {'─'*64}")
+        for k, v in other_sigs:
+            _print_sig_row(k, v, in_rl=False)
 
         print("-" * 68)
         print(f" {Colors.CYAN}[ 🤖 MoE 6-Agent + GatingNet7 독립 판단 ]{Colors.RESET}")
@@ -1223,7 +1251,7 @@ class MoELiveRouter:
             _t  = llm_time_kst or timestamp
             _print_llm_section(llm_answer, _rn, _t)
 
-        print(Colors.BOLD + "╚════════════════════════════════════════════════════════════════════════╝\n" + Colors.RESET)
+        print(Colors.BOLD + "╚════════════════════════════════════════════════════════════════════════╝" + Colors.RESET)
 
 
 # ════════════════════════════════════════════════════════════════
