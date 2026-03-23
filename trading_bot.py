@@ -206,7 +206,13 @@ class BinanceLiveFetcher:
         btc_df[btc_df.columns.drop('timestamp')] = btc_df[btc_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='coerce')
 
         if ancillary_results:
-            mappings = [(0, 'sumOpenInterestValue', 'sum_open_interest_value'), (1, 'longShortRatio', 'sum_toptrader_long_short_ratio'), (3, 'longShortRatio', 'count_long_short_ratio'), (5, 'fundingRate', 'last_funding_rate')]
+            mappings = [
+                (0, 'sumOpenInterestValue', 'sum_open_interest_value'),
+                (1, 'longShortRatio', 'sum_toptrader_long_short_ratio'),
+                (2, 'longShortRatio', 'count_toptrader_long_short_ratio'),
+                (3, 'longShortRatio', 'count_long_short_ratio'),
+                (5, 'fundingRate', 'last_funding_rate'),
+            ]
             for idx, key, new_name in mappings:
                 res = ancillary_results[idx]
                 if isinstance(res, list) and len(res) > 0:

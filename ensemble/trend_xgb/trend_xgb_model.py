@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+MISSING_WARN_RATIO = 0.30
 
 # ── 경로 설정 ──────────────────────────────────────────────────
 _THIS_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -146,7 +147,7 @@ class XGBTrendBrain:
     LightGBM 기반 Brain B.
 
     학습 시 선택된 feature_cols 목록을 pickle 내부에 보존,
-    추론 시 누락 컬럼은 0으로 채워서 robust하게 동작한다.
+    추론 시 누락 컬럼은 NaN으로 채워 LightGBM missing value 처리에 맡긴다.
     """
 
     def __init__(self):
@@ -216,9 +217,17 @@ class XGBTrendBrain:
 
         # 누락 피처 → NaN (LightGBM native missing value 처리)
         # 0 채움은 "RSI=0 극단값"처럼 오해될 수 있으므로 NaN이 안전
-        for col in self.feature_cols:
-            if col not in df_w.columns:
-                df_w[col] = np.nan
+        missing_cols = [col for col in self.feature_cols if col not in df_w.columns]
+        for col in missing_cols:
+            df_w[col] = np.nan
+        if missing_cols:
+            miss_ratio = len(missing_cols) / max(len(self.feature_cols), 1)
+            if miss_ratio >= MISSING_WARN_RATIO:
+                sample = ', '.join(missing_cols[:6])
+                logger.warning(
+                    "XGBTrend 입력 피처 누락률 높음: %d/%d (%.1f%%) | sample=[%s]",
+                    len(missing_cols), len(self.feature_cols), miss_ratio * 100.0, sample
+                )
 
         # 가장 최근 행 1개만 사용
         last_row = df_w[self.feature_cols].iloc[[-1]].astype(np.float32)

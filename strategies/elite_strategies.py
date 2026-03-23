@@ -831,61 +831,64 @@ class NewEliteSignalEngine:
 
     def _compute_liquidity_trap(self, df: pd.DataFrame, window: int = 48,
                                  eq_tol: float = 0.001, confirm: int = 3) -> None:
-        """EQH/EQL 기반 유동성 트랩 감지 (벡터화).
+        """EQH/EQL 기반 유동성 트랩 감지 (NumPy 벡터화).
         1) 롤링 window 내 swing high/low를 찾음
         2) 비슷한 가격의 swing이 2회+ 있으면 EQ level
         3) 현재 봉이 EQ level을 돌파 후 되돌아오면 trap 신호
         """
-        high  = df['high'].values
-        low   = df['low'].values
-        close = df['close'].values
+        high  = df['high'].values.astype(np.float64)
+        low   = df['low'].values.astype(np.float64)
+        close = df['close'].values.astype(np.float64)
         n     = len(df)
         signal = np.zeros(n, dtype=np.float64)
 
-        for i in range(window, n):
-            seg_h = high[i - window:i]
-            seg_l = low[i - window:i]
+        if n <= window:
+            df['sig_liquidity_trap'] = pd.Series(signal, index=df.index).astype(np.float32)
+            return
 
-            # ── Equal Highs: 로컬 최고점 중 비슷한 가격 2회+ ──
+        # 로컬 max/min 마스크를 한 번에 전처리 (rolling max/min과 비교)
+        from scipy.ndimage import maximum_filter1d, minimum_filter1d
+        kernel = 2 * confirm + 1
+        local_max_arr = maximum_filter1d(high, size=kernel, mode='nearest')
+        local_min_arr = minimum_filter1d(low,  size=kernel, mode='nearest')
+        is_swing_high = (high == local_max_arr)
+        is_swing_low  = (low  == local_min_arr)
+
+        for i in range(window, n):
+            s, e = i - window, i
+
+            # ── Equal Highs ──
+            swing_h_idx = np.where(is_swing_high[s:e])[0]
             eq_high = 0.0
-            for j in range(confirm, len(seg_h) - confirm):
-                local_max = seg_h[max(0, j-confirm):j+confirm+1].max()
-                if seg_h[j] == local_max:
-                    # 이 고점과 비슷한 다른 고점이 있는가?
-                    count = 0
-                    for k in range(confirm, len(seg_h) - confirm):
-                        if k == j:
-                            continue
-                        if seg_h[k] == seg_h[max(0,k-confirm):k+confirm+1].max():
-                            if abs(seg_h[j] - seg_h[k]) / (seg_h[j] + 1e-8) < eq_tol:
-                                count += 1
-                    if count >= 1:
-                        eq_high = seg_h[j]
-                        break
+            if len(swing_h_idx) >= 2:
+                swing_h_vals = high[s:e][swing_h_idx]
+                # 쌍별 상대 차이 행렬에서 eq_tol 이내 쌍 탐색
+                rel_diff = np.abs(swing_h_vals[:, None] - swing_h_vals[None, :]) / (swing_h_vals[:, None] + 1e-8)
+                np.fill_diagonal(rel_diff, 1.0)  # 자기자신 제외
+                match_mask = rel_diff < eq_tol
+                has_match = match_mask.any(axis=1)
+                if has_match.any():
+                    eq_high = float(swing_h_vals[np.where(has_match)[0][0]])
 
             # ── Equal Lows ──
+            swing_l_idx = np.where(is_swing_low[s:e])[0]
             eq_low = 0.0
-            for j in range(confirm, len(seg_l) - confirm):
-                local_min = seg_l[max(0, j-confirm):j+confirm+1].min()
-                if seg_l[j] == local_min:
-                    count = 0
-                    for k in range(confirm, len(seg_l) - confirm):
-                        if k == j:
-                            continue
-                        if seg_l[k] == seg_l[max(0,k-confirm):k+confirm+1].min():
-                            if abs(seg_l[j] - seg_l[k]) / (seg_l[j] + 1e-8) < eq_tol:
-                                count += 1
-                    if count >= 1:
-                        eq_low = seg_l[j]
-                        break
+            if len(swing_l_idx) >= 2:
+                swing_l_vals = low[s:e][swing_l_idx]
+                rel_diff = np.abs(swing_l_vals[:, None] - swing_l_vals[None, :]) / (swing_l_vals[:, None] + 1e-8)
+                np.fill_diagonal(rel_diff, 1.0)
+                match_mask = rel_diff < eq_tol
+                has_match = match_mask.any(axis=1)
+                if has_match.any():
+                    eq_low = float(swing_l_vals[np.where(has_match)[0][0]])
 
             # ── 트랩 감지: 돌파 후 되돌림 ──
             if eq_high > 0 and high[i] > eq_high and close[i] < eq_high:
                 penetration = (high[i] - eq_high) / (eq_high * 0.001 + 1e-8)
-                signal[i] = -np.tanh(penetration)  # 위 돌파 후 반전 = 숏 신호
+                signal[i] = -np.tanh(penetration)
             elif eq_low > 0 and low[i] < eq_low and close[i] > eq_low:
                 penetration = (eq_low - low[i]) / (eq_low * 0.001 + 1e-8)
-                signal[i] = np.tanh(penetration)   # 아래 돌파 후 반전 = 롱 신호
+                signal[i] = np.tanh(penetration)
 
         df['sig_liquidity_trap'] = pd.Series(signal, index=df.index).fillna(0).astype(np.float32)
 

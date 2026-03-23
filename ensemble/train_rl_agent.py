@@ -548,12 +548,13 @@ class TradingEnv:
 
     def reset(self, start_idx=None):
         if self.phase == 'train':
-            self.start_step = start_idx if start_idx is not None else random.randint(0, len(self.df) - self.MAX_EPISODE_STEPS - 1)
+            max_start = max(0, len(self.df) - self.MAX_EPISODE_STEPS - 1)
+            self.start_step = start_idx if start_idx is not None else random.randint(0, max_start)
         else:
             self.start_step = 0
 
         self.current_step = self.start_step
-        self.end_step = self.start_step + self.MAX_EPISODE_STEPS
+        self.end_step = min(self.start_step + self.MAX_EPISODE_STEPS, len(self.df) - 1)
 
         self.balance = self.initial_balance
         self.pos = None
@@ -731,7 +732,6 @@ class TradingEnv:
                 r5_idle = -0.0003
             else:                       # normal
                 r5_idle = -0.001
-                r5_idle = -0.005
 
         # 종합 보상 (tanh로 자연 바운딩)
         raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle

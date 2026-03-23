@@ -5,7 +5,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 
 타겟:  Triple-Barrier 레이블 (de Prado 2018) — 5m 봉 기준
 피처:  ULTIMATE_FEATURE_COLS + MTF 피처 → auto_select_features (상위 N개)
-튜닝:  Optuna 100회 시행 (CPU, ~1시간)
+튜닝:  Optuna 50회 시행 (CPU, ~1시간)
 저장:  data/trend_xgb/trend_xgb.pkl
 
 실행:
@@ -19,6 +19,7 @@ import json
 import logging
 import argparse
 
+import hashlib
 import numpy as np
 import pandas as pd
 import optuna
@@ -53,29 +54,20 @@ DATA_PATH   = 'data/training_features_5m.csv'
 RL_DATA_PATH = 'data/rl_training_data_full.csv'
 SAVE_PATH   = 'data/trend_xgb/trend_xgb.pkl'
 MAX_FEATURES = 48      # auto_select_features 상한
-N_TRIALS     = 50     # Optuna 시행 수
+N_TRIALS     = 50      # Optuna 시행 수
 TRAIN_RATIO  = 0.70
 VAL_RATIO    = 0.15
 
 # Triple-Barrier 파라미터 (5m 봉 기준)
 ATR_WINDOW_5M = 14     # 14봉 ATR (= 70분)
-ATR_MULT      = 0.8    # 장벽 = ATR × 1.0 (수수료 커버 + 의미있는 방향만 레이블)
+ATR_MULT      = 0.8    # 장벽 = ATR × 0.8 (수수료 커버 + 의미있는 방향만 레이블)
 MAX_HOLD_5M   = 12     # 최대 보유 12봉 = 1시간  ← target_ret_12와 동일 호라이즌
 
-WINDOW = 1             # XGBoost는 단일 행 피처 (시퀀스 불필요)
-
 # RL CSV에서 오는 컬럼들
-RL_PRED_COLS = [
-    'pred_timesfm', 'pred_chronos', 'pred_ttm',
-    'pred_patchtst', 'pred_tide', 'pred_mdjd', 'pred_ridge',
-]
-RL_CONF_COLS = [
-    'conf_timesfm', 'conf_chronos', 'conf_ttm',
-    'conf_patchtst', 'conf_tide', 'conf_mdjd', 'conf_ridge',
-]
-RL_SIG_COLS = [   # elite strategy signals
+RL_SIG_COLS = [   # elite strategy signals (+ NewEliteSignalEngine 3종)
     'sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze',
     'sig_garch_regime', 'sig_ou_mean_rev', 'sig_jump_rebound', 'sig_evt_tail',
+    'sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health',
 ]
 RL_ALPHA_COLS = [  # 합성 알파 + 모델 파생
     'garch_vol_z', 'ou_funding_z', 'ou_halflife',
@@ -86,24 +78,32 @@ RL_ALPHA_COLS = [  # 합성 알파 + 모델 파생
 ]
 
 MUST_INCLUDE = [
-    # TA / 레짐 핵심
-    'rsi', 'mtf_trend_1h', 'mtf_trend_4h',
+    # 레짐/변동성 축
+    'volatility_z', 'garman_klass_vol', 'bb_width_z',
     'hurst_48', 'regime_trending', 'hurst_change',
-    'garman_klass_vol', 'volatility_z', 'bb_width_z',
-    'smart_money_flow', 'whale_conviction', 'net_taker_ratio',
-    'oi_change_rate', 'funding_z_score', 'btc_corr_60',
-    # 추세 구조 전용 (인라인 생성)
-    'ret_12', 'ret_24', 'ret_48',
-    'hh_count_24', 'hl_count_24', 'trend_accel',
-    # AI 앙상블 결합 신호 (pred×conf → signal_*)
-    'signal_timesfm', 'signal_chronos', 'signal_ttm',
-    'signal_patchtst', 'signal_tide', 'signal_mdjd', 'signal_ridge',
-    # Elite signals (RL CSV)
-    *RL_SIG_COLS,
-    # 핵심 알파 (RL CSV)
-    'garch_vol_z', 'jump_flag', 'ou_funding_z',
-    'cada', 'mshd', 'vsdi', 'vebr',
+    # 추세 구조 축
+    'ret_12', 'trend_accel', 'hh_count_24', 'hl_count_24',
+    # 미시구조 축
+    'net_taker_ratio', 'oi_change_rate', 'smart_money_flow', 'btc_corr_60',
+    # AI 앙상블 결합 축
+    'signal_timesfm', 'signal_chronos', 'signal_mdjd',
+    # New Elite 핵심 축
+    'sig_volume_confirm', 'sig_trend_health',
 ]
+
+
+def _build_config_hash(max_features: int) -> str:
+    cfg = {
+        'atr_mult': ATR_MULT,
+        'max_hold_5m': MAX_HOLD_5M,
+        'max_features': int(max_features),
+        'train_ratio': TRAIN_RATIO,
+        'val_ratio': VAL_RATIO,
+        'must_include': sorted(MUST_INCLUDE),
+        'rl_sig_cols': sorted(RL_SIG_COLS),
+    }
+    payload = json.dumps(cfg, ensure_ascii=True, sort_keys=True).encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()[:16]
 
 
 # ────────────────────────────────────────────────────────────────
@@ -250,6 +250,8 @@ def build_labels(df: pd.DataFrame, n_jobs: int = -1):
 
     cnt   = np.bincount(labels[labels >= 0], minlength=3)
     total = cnt.sum()
+    if total == 0:
+        raise ValueError("Triple-Barrier 유효 레이블이 0개입니다. ATR/HOLD 파라미터와 입력 데이터를 확인하세요.")
     logger.info(
         f"  DOWN={cnt[0]/total*100:.1f}%  "
         f"FLAT={cnt[1]/total*100:.1f}%  "
@@ -267,6 +269,8 @@ def train(data_path: str = DATA_PATH,
           max_features: int = MAX_FEATURES):
 
     df, feature_candidates = load_data(data_path)
+    data_hash = hashlib.sha256(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()[:16]
+    config_hash = _build_config_hash(max_features)
     labels = build_labels(df)
 
     # 유효 행 마스크
@@ -275,8 +279,10 @@ def train(data_path: str = DATA_PATH,
     y_all = labels
 
     # 시간 순서 분할
-    n = valid_mask.sum()
     valid_indices = np.where(valid_mask)[0]
+    n = len(valid_indices)
+    if n < 100:
+        raise ValueError(f"유효 레이블 샘플이 너무 적습니다: {n} (<100).")
     train_end_idx = int(n * TRAIN_RATIO)
     val_end_idx   = int(n * (TRAIN_RATIO + VAL_RATIO))
     embargo       = MAX_HOLD_5M + 2
@@ -284,6 +290,12 @@ def train(data_path: str = DATA_PATH,
     train_idx = valid_indices[:train_end_idx]
     val_idx   = valid_indices[train_end_idx + embargo : val_end_idx]
     test_idx  = valid_indices[val_end_idx + embargo:]
+
+    if len(train_idx) == 0 or len(val_idx) == 0 or len(test_idx) == 0:
+        raise ValueError(
+            f"분할 결과가 비어 있습니다: train={len(train_idx)}, val={len(val_idx)}, test={len(test_idx)}. "
+            f"데이터 길이({n})/비율(TRAIN={TRAIN_RATIO}, VAL={VAL_RATIO})/embargo({embargo})를 조정하세요."
+        )
 
     X_train, y_train = X_all[train_idx], y_all[train_idx]
     X_val,   y_val   = X_all[val_idx],   y_all[val_idx]
@@ -319,9 +331,25 @@ def train(data_path: str = DATA_PATH,
     # ── Optuna 튜닝 or 저장된 파라미터 재사용 ──
     results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
     if os.path.exists(results_path):
-        logger.info(f"기존 training_results.json 발견 → Optuna 건너뜀: {results_path}")
         with open(results_path) as f:
             prev = json.load(f)
+        prev_data_hash = prev.get('data_hash', '')
+        prev_cfg_hash  = prev.get('config_hash', '')
+        if prev_data_hash != data_hash:
+            logger.warning(f"⚠️ 데이터 해시 불일치 (저장: {prev_data_hash}, 현재: {data_hash}) → Optuna 재실행")
+            prev = None
+        elif not prev_cfg_hash:
+            logger.warning("⚠️ config_hash가 없어 재사용 신뢰 불가 → Optuna 재실행")
+            prev = None
+        elif prev_cfg_hash != config_hash:
+            logger.warning(f"⚠️ 설정 해시 불일치 (저장: {prev_cfg_hash}, 현재: {config_hash}) → Optuna 재실행")
+            prev = None
+        else:
+            logger.info(f"기존 training_results.json 발견 (data/config 해시 일치: {data_hash}/{config_hash}) → Optuna 건너뜀")
+    else:
+        prev = None
+
+    if prev is not None:
         saved_params = prev['best_params']
         boosted_n = int(saved_params.get('n_estimators', 500) * 1.1)
         best_params = {
@@ -426,6 +454,8 @@ def train(data_path: str = DATA_PATH,
             'best_params'   : {k: v for k, v in best_params.items() if k != 'class_weight'},
             'atr_mult'      : ATR_MULT,
             'max_hold_bars' : MAX_HOLD_5M,
+            'data_hash'     : data_hash,
+            'config_hash'   : config_hash,
         }, f, indent=2)
 
     logger.info(f"결과 저장: {results_path}")
