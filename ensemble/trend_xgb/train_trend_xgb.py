@@ -266,7 +266,8 @@ def build_labels(df: pd.DataFrame, n_jobs: int = -1):
 def train(data_path: str = DATA_PATH,
           save_path: str = SAVE_PATH,
           n_trials: int  = N_TRIALS,
-          max_features: int = MAX_FEATURES):
+          max_features: int = MAX_FEATURES,
+          force_reuse_results: bool = False):
 
     df, feature_candidates = load_data(data_path)
     data_hash = hashlib.sha256(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()[:16]
@@ -333,19 +334,22 @@ def train(data_path: str = DATA_PATH,
     if os.path.exists(results_path):
         with open(results_path) as f:
             prev = json.load(f)
-        prev_data_hash = prev.get('data_hash', '')
-        prev_cfg_hash  = prev.get('config_hash', '')
-        if prev_data_hash != data_hash:
-            logger.warning(f"⚠️ 데이터 해시 불일치 (저장: {prev_data_hash}, 현재: {data_hash}) → Optuna 재실행")
-            prev = None
-        elif not prev_cfg_hash:
-            logger.warning("⚠️ config_hash가 없어 재사용 신뢰 불가 → Optuna 재실행")
-            prev = None
-        elif prev_cfg_hash != config_hash:
-            logger.warning(f"⚠️ 설정 해시 불일치 (저장: {prev_cfg_hash}, 현재: {config_hash}) → Optuna 재실행")
-            prev = None
+        if force_reuse_results:
+            logger.warning("⚠️ force_reuse_results=True: data/config 해시 검증을 건너뛰고 training_results.json 파라미터를 강제 재사용합니다.")
         else:
-            logger.info(f"기존 training_results.json 발견 (data/config 해시 일치: {data_hash}/{config_hash}) → Optuna 건너뜀")
+            prev_data_hash = prev.get('data_hash', '')
+            prev_cfg_hash  = prev.get('config_hash', '')
+            if prev_data_hash != data_hash:
+                logger.warning(f"⚠️ 데이터 해시 불일치 (저장: {prev_data_hash}, 현재: {data_hash}) → Optuna 재실행")
+                prev = None
+            elif not prev_cfg_hash:
+                logger.warning("⚠️ config_hash가 없어 재사용 신뢰 불가 → Optuna 재실행")
+                prev = None
+            elif prev_cfg_hash != config_hash:
+                logger.warning(f"⚠️ 설정 해시 불일치 (저장: {prev_cfg_hash}, 현재: {config_hash}) → Optuna 재실행")
+                prev = None
+            else:
+                logger.info(f"기존 training_results.json 발견 (data/config 해시 일치: {data_hash}/{config_hash}) → Optuna 건너뜀")
     else:
         prev = None
 
@@ -471,6 +475,8 @@ if __name__ == '__main__':
     parser.add_argument('--save',         type=str, default=SAVE_PATH)
     parser.add_argument('--n-trials',     type=int, default=N_TRIALS)
     parser.add_argument('--max-features', type=int, default=MAX_FEATURES)
+    parser.add_argument('--force-reuse-results', action='store_true',
+                        help='training_results.json의 data/config 해시가 달라도 Optuna 파라미터를 강제 재사용')
     args = parser.parse_args()
 
     print("\n" + "=" * 70)
@@ -484,6 +490,7 @@ if __name__ == '__main__':
         save_path    = args.save,
         n_trials     = args.n_trials,
         max_features = args.max_features,
+        force_reuse_results = args.force_reuse_results,
     )
 
     print("\n" + "=" * 70)
