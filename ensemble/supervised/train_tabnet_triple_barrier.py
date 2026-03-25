@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any, List
@@ -266,8 +266,9 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("TabNet Triple-Barrier test balanced_acc=%.4f", bal_acc)
     logger.info("\n%s", classification_report(y_test, y_pred, digits=4))
 
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    save_prefix = os.path.splitext(args.save_path)[0]
+    meta_path = args.save_path if args.save_path.lower().endswith(".json") else os.path.splitext(args.save_path)[0] + ".json"
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    save_prefix = os.path.splitext(meta_path)[0]
     model.save_model(save_prefix)
 
     metadata = {
@@ -282,8 +283,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "model_zip": f"{save_prefix}.zip",
         },
     }
-    with open(args.save_path, "wb") as f:
-        pickle.dump(metadata, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -295,7 +296,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved model metadata: %s", args.save_path)
+    logger.info("saved model metadata: %s", meta_path)
     logger.info("saved: %s", results_path)
     return metadata
 
@@ -304,7 +305,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train TabNet Triple-Barrier classifier")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/tabnet_triple_barrier.pkl")
+    p.add_argument("--save-path", default="data/ensemble/supervised/tabnet_triple_barrier.json")
     p.add_argument("--atr-mult", type=float, default=0.8)
     p.add_argument("--max-hold", type=int, default=12)
     p.add_argument("--atr-window", type=int, default=14)

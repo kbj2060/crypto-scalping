@@ -83,7 +83,7 @@ _RIDGE_FEATURES = [
     'big_trade_ratio', 'hurst_12', 'hurst_48', 'hurst_288',
     'realized_vol_ratio', 'amihud_illiquidity_z',
 ]
-_RIDGE_SAVE_PATH = 'data/ridge_model.pkl'
+_RIDGE_SAVE_PATH = 'data/ridge_model.joblib'
 
 
 def _ridge_walkforward(df: pd.DataFrame):
@@ -126,11 +126,12 @@ def _ridge_walkforward(df: pd.DataFrame):
 
     # 라이브 트레이딩용 최종 모델 저장
     if final_ridge is not None:
-        import pickle as _pkl
+        from joblib import dump as _joblib_dump
         os.makedirs('data', exist_ok=True)
-        with open(_RIDGE_SAVE_PATH, 'wb') as f:
-            _pkl.dump({'ridge': final_ridge, 'scaler': final_scaler,
-                       'features': feat_cols}, f)
+        _joblib_dump(
+            {'ridge': final_ridge, 'scaler': final_scaler, 'features': feat_cols},
+            _RIDGE_SAVE_PATH,
+        )
         logger.info(f"💾 Ridge 모델 저장: {_RIDGE_SAVE_PATH} ({len(feat_cols)}개 피처)")
 
     # 신뢰도 = tanh(|pred| / rolling-MAD_500)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any, List
@@ -154,11 +154,25 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("GMM cluster_score=%s", cluster_score)
     logger.info("GMM cluster_rank_map(low->high vol)=%s", cluster_rank_map)
 
+    model_path = args.save_path if args.save_path.lower().endswith(".npz") else os.path.splitext(args.save_path)[0] + ".npz"
+    meta_path = os.path.splitext(model_path)[0] + ".json"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    cluster_keys = np.asarray(list(cluster_rank_map.keys()), dtype=np.int64)
+    cluster_vals = np.asarray(list(cluster_rank_map.values()), dtype=np.int64)
+    np.savez_compressed(
+        model_path,
+        weights=model.weights_,
+        means=model.means_,
+        covariances=model.covariances_,
+        precisions_cholesky=model.precisions_cholesky_,
+        mean=mean,
+        std=std,
+        cluster_rank_keys=cluster_keys,
+        cluster_rank_vals=cluster_vals,
+    )
     artifact = {
-        "model": model,
         "feature_cols": feature_cols,
-        "mean": mean,
-        "std": std,
+        "model_path": os.path.basename(model_path),
         "cluster_rank_map": cluster_rank_map,
         "meta": {
             "algorithm": "gmm_volatility_regime",
@@ -166,11 +180,12 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "avg_confidence": float(np.max(probs, axis=1).mean()),
             "best_val_score": best_val_score,
             "best_params": merged,
+            "covariance_type": merged["covariance_type"],
+            "n_components": int(merged["n_components"]),
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -182,7 +197,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved model: %s", model_path)
+    logger.info("saved meta: %s", meta_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -191,7 +207,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train GMM volatility regime model")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/gmm_volatility.pkl")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/gmm_volatility.npz")
     p.add_argument("--n-components", type=int, default=4)
     p.add_argument("--covariance-type", default="full", choices=["full", "diag", "tied", "spherical"])
     p.add_argument("--reg-covar", type=float, default=1e-5)

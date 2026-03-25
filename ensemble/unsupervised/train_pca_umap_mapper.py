@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any
 
 import numpy as np
+from joblib import dump as joblib_dump
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
@@ -182,13 +183,24 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("PCA explained_variance_ratio=%s", np.round(pca.explained_variance_ratio_, 4).tolist())
     logger.info("cluster_stats=%s", cluster_stats)
 
+    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
+    meta_path = os.path.splitext(model_path)[0] + ".json"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    joblib_dump(
+        {
+            "pca": pca,
+            "kmeans": km,
+            "umap": reducer,
+            "feature_cols": feature_cols,
+            "mean": mean,
+            "std": std,
+            "cluster_stats": cluster_stats,
+        },
+        model_path,
+    )
     artifact = {
-        "pca": pca,
-        "kmeans": km,
-        "umap": reducer,
         "feature_cols": feature_cols,
-        "mean": mean,
-        "std": std,
+        "model_path": os.path.basename(model_path),
         "cluster_stats": cluster_stats,
         "meta": {
             "algorithm": "pca_umap_mapper",
@@ -198,9 +210,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -213,7 +224,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved model: %s", model_path)
+    logger.info("saved meta: %s", meta_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -222,7 +234,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train PCA/UMAP regime mapper")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/pca_umap_mapper.pkl")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/pca_umap_mapper.joblib")
     p.add_argument("--min-features", type=int, default=24)
     p.add_argument("--train-ratio", type=float, default=0.8)
     p.add_argument("--pca-components", type=int, default=3)

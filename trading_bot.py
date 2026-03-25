@@ -363,7 +363,7 @@ class EnsemblePredictor:
 # 2-B. Ridge 선형 퀀트 시그널 (라이브 트레이딩용)
 # ════════════════════════════════════════════════════════════════
 class RidgeSignalComputer:
-    """data/ridge_model.pkl 로드 후 매 틱마다 pred_ridge / conf_ridge 반환."""
+    """data/ridge_model.joblib 로드 후 매 틱마다 pred_ridge / conf_ridge 반환."""
 
     _RIDGE_FEATURES = [
         'log_return', 'rsi', 'macd_hist', 'bb_width', 'volatility_z',
@@ -373,7 +373,7 @@ class RidgeSignalComputer:
         'realized_vol_ratio', 'amihud_illiquidity_z',
     ]
 
-    def __init__(self, model_path: str = 'data/ridge_model.pkl'):
+    def __init__(self, model_path: str = 'data/ridge_model.joblib'):
         self._ridge   = None
         self._scaler  = None
         self._feats   = self._RIDGE_FEATURES
@@ -381,9 +381,8 @@ class RidgeSignalComputer:
 
         if os.path.exists(model_path):
             try:
-                import pickle
-                with open(model_path, 'rb') as f:
-                    pkg = pickle.load(f)
+                from joblib import load as joblib_load
+                pkg = joblib_load(model_path)
                 self._ridge  = pkg['ridge']
                 self._scaler = pkg['scaler']
                 self._feats  = pkg.get('features', self._RIDGE_FEATURES)
@@ -1974,10 +1973,10 @@ async def main(use_local=False):
 
     # ── XGBTrendBrain 초기화 (LightGBM 3-class, Brain B) ───────────
     # 학습: python ensemble/supervised/train_trend_xgb.py
-    # 저장: data/trend_xgb/trend_xgb.pkl
+    # 저장: data/trend_xgb/trend_xgb.json (+ trend_xgb.lgb.txt)
     trend_brain = None
     try:
-        trend_brain = XGBTrendBrain.load('data/trend_xgb/trend_xgb.pkl')
+        trend_brain = XGBTrendBrain.load('data/trend_xgb/trend_xgb.json')
         logger.info("✅ XGBTrendBrain (LightGBM Triple-Barrier) 로드 완료")
     except Exception as e:
         logger.warning(f"⚠️ XGBTrendBrain 미로드 (학습 전이거나 파일 없음): {e}")

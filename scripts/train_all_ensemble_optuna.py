@@ -19,6 +19,7 @@ class Job:
     name: str
     script: str
     args: List[str]
+    model_files: List[str]
     results_file: str | None = None
 
 
@@ -49,6 +50,31 @@ def _remove_results(path_str: str | None, dry_run: bool) -> None:
     p.unlink()
 
 
+def _remove_model_files(paths: List[str], dry_run: bool) -> None:
+    for path_str in paths:
+        p = ROOT / path_str
+        if not p.exists():
+            continue
+        print(f"[CLEAN] remove {p}")
+        if dry_run:
+            continue
+        p.unlink()
+
+
+def _exists(path_str: str | None) -> bool:
+    if not path_str:
+        return False
+    return (ROOT / path_str).exists()
+
+
+def _job_completed(job: Job) -> bool:
+    if not _exists(job.results_file):
+        return False
+    if not job.model_files:
+        return False
+    return all(_exists(p) for p in job.model_files)
+
+
 def _build_jobs(args: argparse.Namespace) -> List[Job]:
     jobs: List[Job] = []
 
@@ -59,36 +85,54 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                     name="supervised/train_trend_xgb",
                     script="ensemble/supervised/train_trend_xgb.py",
                     args=["--n-trials", str(args.xgb_trials)],
+                    model_files=[
+                        "data/trend_xgb/trend_xgb.json",
+                        "data/trend_xgb/trend_xgb.lgb.txt",
+                    ],
                     results_file="data/trend_xgb/training_results.json",
                 ),
                 Job(
                     name="supervised/train_catboost_triple_barrier",
                     script="ensemble/supervised/train_catboost_triple_barrier.py",
                     args=["--n-trials", str(args.supervised_trials)],
+                    model_files=[
+                        "data/ensemble/supervised/catboost_triple_barrier.cbm",
+                        "data/ensemble/supervised/catboost_triple_barrier.json",
+                    ],
                     results_file="data/ensemble/supervised/catboost_triple_barrier_training_results.json",
                 ),
                 Job(
                     name="supervised/train_multitarget_lgbm",
                     script="ensemble/supervised/train_multitarget_lgbm.py",
                     args=["--n-trials", str(args.supervised_trials)],
+                    model_files=["data/ensemble/supervised/multi_target_lgbm.json"],
                     results_file="data/ensemble/supervised/multitarget_lgbm_training_results.json",
                 ),
                 Job(
                     name="supervised/train_two_stage_stacking",
                     script="ensemble/supervised/train_two_stage_stacking.py",
                     args=["--n-trials", str(args.supervised_trials)],
+                    model_files=["data/ensemble/supervised/two_stage_stacking.json"],
                     results_file="data/ensemble/supervised/two_stage_stacking_training_results.json",
                 ),
                 Job(
                     name="supervised/train_quantile_forest",
                     script="ensemble/supervised/train_quantile_forest.py",
                     args=["--n-trials", str(args.supervised_trials)],
+                    model_files=[
+                        "data/ensemble/supervised/quantile_forest.joblib",
+                        "data/ensemble/supervised/quantile_forest.json",
+                    ],
                     results_file="data/ensemble/supervised/quantile_forest_training_results.json",
                 ),
                 Job(
                     name="supervised/train_tabnet_triple_barrier",
                     script="ensemble/supervised/train_tabnet_triple_barrier.py",
                     args=["--n-trials", str(args.tabnet_trials)],
+                    model_files=[
+                        "data/ensemble/supervised/tabnet_triple_barrier.json",
+                        "data/ensemble/supervised/tabnet_triple_barrier.zip",
+                    ],
                     results_file="data/ensemble/supervised/tabnet_triple_barrier_training_results.json",
                 ),
             ]
@@ -101,30 +145,47 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                     name="unsupervised/train_gmm_volatility",
                     script="ensemble/unsupervised/train_gmm_volatility.py",
                     args=["--n-trials", str(args.unsupervised_trials)],
+                    model_files=[
+                        "data/ensemble/unsupervised/gmm_volatility.npz",
+                        "data/ensemble/unsupervised/gmm_volatility.json",
+                    ],
                     results_file="data/ensemble/unsupervised/gmm_volatility_training_results.json",
                 ),
                 Job(
                     name="unsupervised/train_hdbscan_regime",
                     script="ensemble/unsupervised/train_hdbscan_regime.py",
                     args=["--n-trials", str(args.unsupervised_trials)],
+                    model_files=[
+                        "data/ensemble/unsupervised/hdbscan_regime.joblib",
+                        "data/ensemble/unsupervised/hdbscan_regime.json",
+                    ],
                     results_file="data/ensemble/unsupervised/hdbscan_regime_training_results.json",
                 ),
                 Job(
                     name="unsupervised/train_isolation_forest",
                     script="ensemble/unsupervised/train_isolation_forest.py",
                     args=["--n-trials", str(args.unsupervised_trials)],
+                    model_files=[
+                        "data/ensemble/unsupervised/isolation_forest.joblib",
+                        "data/ensemble/unsupervised/isolation_forest.json",
+                    ],
                     results_file="data/ensemble/unsupervised/isolation_forest_training_results.json",
                 ),
                 Job(
                     name="unsupervised/train_pca_umap_mapper",
                     script="ensemble/unsupervised/train_pca_umap_mapper.py",
                     args=["--n-trials", str(args.unsupervised_trials)],
+                    model_files=[
+                        "data/ensemble/unsupervised/pca_umap_mapper.joblib",
+                        "data/ensemble/unsupervised/pca_umap_mapper.json",
+                    ],
                     results_file="data/ensemble/unsupervised/pca_umap_mapper_training_results.json",
                 ),
                 Job(
                     name="unsupervised/train_vae_anomaly",
                     script="ensemble/unsupervised/train_vae_anomaly.py",
                     args=["--n-trials", str(args.vae_trials), "--device", args.vae_device],
+                    model_files=["data/ensemble/unsupervised/vae_anomaly.pt"],
                     results_file="data/ensemble/unsupervised/vae_anomaly_training_results.json",
                 ),
             ]
@@ -148,8 +209,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--reuse-existing-results",
         action="store_true",
-        help="Do not delete existing *_training_results.json before running",
+        help="deprecated: no-op (existing files are reused by default)",
     )
+    p.add_argument(
+        "--force-retune",
+        action="store_true",
+        help="Delete existing model/results files and run all selected jobs again",
+    )
+    p.add_argument(
+        "--no-skip-completed",
+        dest="skip_completed",
+        action="store_false",
+        help="Run jobs even when model/results files already exist",
+    )
+    p.set_defaults(skip_completed=True)
     p.add_argument("--continue-on-error", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
@@ -163,16 +236,22 @@ def main() -> int:
         print("No jobs selected.")
         return 1
 
-    if not args.reuse_existing_results:
-        print("[INFO] existing training_results files will be removed (fresh Optuna tuning)")
+    if args.force_retune:
+        print("[INFO] force_retune=True -> existing model/results files will be removed")
         for job in jobs:
+            _remove_model_files(job.model_files, args.dry_run)
             _remove_results(job.results_file, args.dry_run)
     else:
-        print("[INFO] reuse_existing_results=True (hash matched jobs may skip Optuna)")
+        print("[INFO] existing model/results files are kept")
 
     failures: List[str] = []
+    skipped: List[str] = []
     for i, job in enumerate(jobs, start=1):
         print(f"\n[{i}/{len(jobs)}] {job.name}")
+        if args.skip_completed and _job_completed(job):
+            print("[SKIP] model + results files already exist")
+            skipped.append(job.name)
+            continue
         cmd = [args.python, job.script, *job.args]
         try:
             _run(cmd, args.dry_run)
@@ -187,7 +266,16 @@ def main() -> int:
         print("\n[SUMMARY] completed with failures:")
         for msg in failures:
             print(f"- {msg}")
+        if skipped:
+            print("[SUMMARY] skipped jobs:")
+            for name in skipped:
+                print(f"- {name}")
         return 1
+
+    if skipped:
+        print("\n[SUMMARY] skipped jobs:")
+        for name in skipped:
+            print(f"- {name}")
 
     print("\n[SUMMARY] all jobs completed successfully.")
     return 0

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any
@@ -189,10 +189,14 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("CatBoost Triple-Barrier test balanced_acc=%.4f", bal_acc)
     logger.info("\n%s", classification_report(y_test, y_pred, digits=4))
 
+    model_path = args.save_path if args.save_path.lower().endswith(".cbm") else os.path.splitext(args.save_path)[0] + ".cbm"
+    meta_path = os.path.splitext(model_path)[0] + ".json"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    model.save_model(model_path)
     artifact = {
-        "model": model,
         "feature_cols": feature_cols,
         "cat_cols": cat_cols,
+        "model_path": os.path.basename(model_path),
         "meta": {
             "algorithm": "catboost_triple_barrier",
             "balanced_accuracy": float(bal_acc),
@@ -203,9 +207,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -220,7 +223,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved model: %s", model_path)
+    logger.info("saved meta: %s", meta_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -229,7 +233,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train CatBoost Triple-Barrier classifier")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/catboost_triple_barrier.pkl")
+    p.add_argument("--save-path", default="data/ensemble/supervised/catboost_triple_barrier.cbm")
     p.add_argument("--atr-mult", type=float, default=0.8)
     p.add_argument("--max-hold", type=int, default=12)
     p.add_argument("--atr-window", type=int, default=14)

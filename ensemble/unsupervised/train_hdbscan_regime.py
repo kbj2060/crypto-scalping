@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any
 
 import numpy as np
+from joblib import dump as joblib_dump
 from sklearn.metrics import silhouette_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -148,11 +149,21 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     noise_ratio = float(np.mean(labels == -1))
     logger.info("HDBSCAN clusters=%s noise_ratio=%.4f", dict(zip(unique.tolist(), counts.tolist())), noise_ratio)
 
+    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
+    meta_path = os.path.splitext(model_path)[0] + ".json"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    joblib_dump(
+        {
+            "model": model,
+            "mean": mean,
+            "std": std,
+            "feature_cols": feature_cols,
+        },
+        model_path,
+    )
     artifact = {
-        "model": model,
         "feature_cols": feature_cols,
-        "mean": mean,
-        "std": std,
+        "model_path": os.path.basename(model_path),
         "meta": {
             "algorithm": "hdbscan_regime",
             "noise_ratio": noise_ratio,
@@ -161,9 +172,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -176,7 +186,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved model: %s", model_path)
+    logger.info("saved meta: %s", meta_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -185,7 +196,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train HDBSCAN regime clustering")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/hdbscan_regime.pkl")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/hdbscan_regime.joblib")
     p.add_argument("--min-features", type=int, default=20)
     p.add_argument("--min-cluster-size", type=int, default=300)
     p.add_argument("--min-samples", type=int, default=30)

@@ -6,7 +6,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 타겟:  Triple-Barrier 레이블 (de Prado 2018) — 5m 봉 기준
 피처:  ULTIMATE_FEATURE_COLS + MTF 피처 → auto_select_features (상위 N개)
 튜닝:  Optuna 50회 시행 (CPU, ~1시간)
-저장:  data/trend_xgb/trend_xgb.pkl
+저장:  data/trend_xgb/trend_xgb.json (+ trend_xgb.lgb.txt)
 
 실행:
     cd /home/llewyn/crypto-scalping
@@ -18,7 +18,6 @@ import sys
 import json
 import logging
 import argparse
-import pickle
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
@@ -221,7 +220,14 @@ class XGBTrendBrain:
 
         last_row = df_w[self.feature_cols].iloc[[-1]].astype(np.float32)
         last_row = last_row.replace([np.inf, -np.inf], np.nan)
-        probs = self.model.predict_proba(last_row)[0]
+        if hasattr(self.model, 'predict_proba'):
+            probs = self.model.predict_proba(last_row)[0]
+        else:
+            # Booster(native) 로드 케이스
+            probs_arr = np.asarray(self.model.predict(last_row.values), dtype=np.float64)
+            if probs_arr.ndim == 1:
+                probs_arr = probs_arr.reshape(1, -1)
+            probs = probs_arr[0]
         return self._to_trend_signal(probs)
 
     def _to_trend_signal(self, probs: np.ndarray) -> TrendSignal:
@@ -243,19 +249,52 @@ class XGBTrendBrain:
         )
 
     def save(self, path: str):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'wb') as f:
-            pickle.dump({'model': self.model, 'feature_cols': self.feature_cols}, f)
-        logger.info(f"✅ XGBTrendBrain 저장: {path} ({len(self.feature_cols)}개 피처)")
+        meta_path = path if path.lower().endswith('.json') else os.path.splitext(path)[0] + '.json'
+        prefix = os.path.splitext(meta_path)[0]
+        model_path = prefix + '.lgb.txt'
+
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+        if hasattr(self.model, 'booster_'):
+            self.model.booster_.save_model(model_path)
+        else:
+            self.model.save_model(model_path)
+
+        meta = {
+            'format': 'xgbtrend_native_v1',
+            'model_path': os.path.basename(model_path),
+            'feature_cols': self.feature_cols,
+        }
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2, ensure_ascii=True)
+        logger.info(f"✅ XGBTrendBrain 저장: {meta_path} ({len(self.feature_cols)}개 피처)")
 
     @classmethod
     def load(cls, path: str) -> 'XGBTrendBrain':
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
         instance = cls()
-        instance.model = data['model']
+        if path.lower().endswith('.pkl') and os.path.exists(path):
+            import pickle
+            with open(path, 'rb') as f:
+                legacy = pickle.load(f)
+            instance.model = legacy['model']
+            instance.feature_cols = legacy['feature_cols']
+            logger.info(f"✅ XGBTrendBrain 로드(legacy pkl): {path} ({len(instance.feature_cols)}개 피처)")
+            return instance
+
+        meta_path = path
+        if not os.path.exists(meta_path):
+            alt_json = os.path.splitext(path)[0] + '.json'
+            if os.path.exists(alt_json):
+                meta_path = alt_json
+
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        model_ref = data.get('model_path', '')
+        model_path = model_ref if os.path.isabs(model_ref) else os.path.join(os.path.dirname(meta_path), model_ref)
+        from lightgbm import Booster
+        instance.model = Booster(model_file=model_path)
         instance.feature_cols = data['feature_cols']
-        logger.info(f"✅ XGBTrendBrain 로드: {path} ({len(instance.feature_cols)}개 피처)")
+        logger.info(f"✅ XGBTrendBrain 로드: {meta_path} ({len(instance.feature_cols)}개 피처)")
         return instance
 
 # ────────────────────────────────────────────────────────────────
@@ -263,7 +302,7 @@ class XGBTrendBrain:
 # ────────────────────────────────────────────────────────────────
 DATA_PATH   = 'data/training_features_5m.csv'
 RL_DATA_PATH = 'data/rl_training_data_full.csv'
-SAVE_PATH   = 'data/trend_xgb/trend_xgb.pkl'
+SAVE_PATH   = 'data/trend_xgb/trend_xgb.json'
 MAX_FEATURES = 64      # auto_select_features 상한
 N_TRIALS     = 150      # Optuna 시행 수
 TRAIN_RATIO  = 0.70

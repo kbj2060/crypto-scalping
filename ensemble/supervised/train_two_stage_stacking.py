@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any
 
 import numpy as np
+from joblib import dump as joblib_dump
 from sklearn.metrics import classification_report, balanced_accuracy_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -285,11 +286,28 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         trade_bal_acc = 0.0
     logger.info("2-Stage filtered trade_rate=%.4f filtered_bal_acc=%.4f", trade_rate, trade_bal_acc)
 
+    meta_path = args.save_path if args.save_path.lower().endswith(".json") else os.path.splitext(args.save_path)[0] + ".json"
+    prefix = os.path.splitext(meta_path)[0]
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    if backend == "lightgbm":
+        dir_model_path = f"{prefix}.dir.lgb.txt"
+        vol_model_path = f"{prefix}.vol.lgb.txt"
+        dir_model.booster_.save_model(dir_model_path)
+        vol_model.booster_.save_model(vol_model_path)
+    else:
+        dir_model_path = f"{prefix}.dir.joblib"
+        vol_model_path = f"{prefix}.vol.joblib"
+        joblib_dump(dir_model, dir_model_path)
+        joblib_dump(vol_model, vol_model_path)
+
     artifact = {
-        "dir_model": dir_model,
-        "vol_model": vol_model,
         "feature_cols": feature_cols,
         "min_expected_move": min_expected_move,
+        "model_files": {
+            "dir_model": os.path.basename(dir_model_path),
+            "vol_model": os.path.basename(vol_model_path),
+        },
         "meta": {
             "algorithm": "two_stage_stacking",
             "backend": backend,
@@ -300,9 +318,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -318,7 +335,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         },
     )
 
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved meta: %s", meta_path)
+    logger.info("saved models: %s, %s", dir_model_path, vol_model_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -327,7 +345,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train 2-stage direction+volatility stacking")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/two_stage_stacking.pkl")
+    p.add_argument("--save-path", default="data/ensemble/supervised/two_stage_stacking.json")
     p.add_argument("--atr-mult", type=float, default=0.8)
     p.add_argument("--max-hold", type=int, default=12)
     p.add_argument("--atr-window", type=int, default=14)

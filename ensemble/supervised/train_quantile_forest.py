@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any, Tuple
 
 import numpy as np
+from joblib import dump as joblib_dump
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
@@ -180,12 +181,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     mae, dir_acc = _score_predictions(y_test, q50, flat_threshold)
     logger.info("QuantileForest MAE=%.6f dir_acc=%.4f", mae, dir_acc)
 
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
+    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
+    meta_path = os.path.splitext(model_path)[0] + ".json"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    joblib_dump(model, model_path)
     artifact = {
-        "model": model,
         "feature_cols": feature_cols,
         "horizon": args.horizon,
         "flat_threshold": flat_threshold,
+        "model_path": os.path.basename(model_path),
         "meta": {
             "algorithm": "quantile_forest",
             "mae": float(mae),
@@ -197,8 +201,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": {**merged, "flat_threshold": flat_threshold},
         },
     }
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -211,7 +215,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved model: %s", model_path)
+    logger.info("saved meta: %s", meta_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -220,7 +225,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Quantile Regression Forest style regressor")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/quantile_forest.pkl")
+    p.add_argument("--save-path", default="data/ensemble/supervised/quantile_forest.joblib")
     p.add_argument("--horizon", type=int, default=12)
     p.add_argument("--train-ratio", type=float, default=0.70)
     p.add_argument("--val-ratio", type=float, default=0.15)

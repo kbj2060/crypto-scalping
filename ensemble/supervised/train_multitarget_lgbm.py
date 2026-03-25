@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import pickle
+import json
 import argparse
 import logging
 from typing import Dict, Any, Tuple
 
 import numpy as np
+from joblib import dump as joblib_dump
 from sklearn.metrics import balanced_accuracy_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -309,12 +310,33 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         h_mae,
     )
 
+    meta_path = args.save_path if args.save_path.lower().endswith(".json") else os.path.splitext(args.save_path)[0] + ".json"
+    prefix = os.path.splitext(meta_path)[0]
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    if backend == "lightgbm":
+        dir_model_path = f"{prefix}.dir.lgb.txt"
+        quality_model_path = f"{prefix}.quality.lgb.txt"
+        hold_model_path = f"{prefix}.hold.lgb.txt"
+        dir_model.booster_.save_model(dir_model_path)
+        quality_model.booster_.save_model(quality_model_path)
+        hold_model.booster_.save_model(hold_model_path)
+    else:
+        dir_model_path = f"{prefix}.dir.joblib"
+        quality_model_path = f"{prefix}.quality.joblib"
+        hold_model_path = f"{prefix}.hold.joblib"
+        joblib_dump(dir_model, dir_model_path)
+        joblib_dump(quality_model, quality_model_path)
+        joblib_dump(hold_model, hold_model_path)
+
     artifact = {
-        "direction_model": dir_model,
-        "quality_model": quality_model,
-        "hold_model": hold_model,
         "feature_cols": feature_cols,
         "horizon": args.horizon,
+        "model_files": {
+            "direction_model": os.path.basename(dir_model_path),
+            "quality_model": os.path.basename(quality_model_path),
+            "hold_model": os.path.basename(hold_model_path),
+        },
         "meta": {
             "algorithm": "multi_target_lgbm",
             "backend": backend,
@@ -325,9 +347,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    with open(args.save_path, "wb") as f:
-        pickle.dump(artifact, f)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=True)
 
     save_training_results(
         results_path,
@@ -342,7 +363,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved meta: %s", meta_path)
+    logger.info("saved models: %s, %s, %s", dir_model_path, quality_model_path, hold_model_path)
     logger.info("saved: %s", results_path)
     return artifact
 
@@ -351,7 +373,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Multi-Target model (dir+quality+hold)")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/multi_target_lgbm.pkl")
+    p.add_argument("--save-path", default="data/ensemble/supervised/multi_target_lgbm.json")
     p.add_argument("--atr-mult", type=float, default=0.8)
     p.add_argument("--max-hold", type=int, default=12)
     p.add_argument("--atr-window", type=int, default=14)
