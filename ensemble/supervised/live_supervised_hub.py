@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+import numpy as np
+import pandas as pd
+
+from ensemble.supervised.train_trend_xgb import XGBTrendBrain
+
+logger = logging.getLogger(__name__)
+
+
+class MultiTargetLGBMBrain:
+    """multi_target_lgbm.*.lgb.txt 로드 후 Brain B 형식 추세 신호를 생성."""
+
+    MISSING_WARN_RATIO = 0.30
+
+    def __init__(self):
+        self.available = False
+        self.feature_cols: list[str] = []
+        self.direction_model = None
+        self.quality_model = None
+        self.hold_model = None
+
+    @staticmethod
+    def _resolve_model_paths(meta_path: str) -> tuple[str, str, str, list[str]]:
+        feature_cols = []
+        base_dir = os.path.dirname(meta_path)
+        dir_model_path = quality_model_path = hold_model_path = ""
+
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            feature_cols = list(data.get("feature_cols", []))
+            model_files = data.get("model_files", {})
+
+            def _resolve(pth: str) -> str:
+                if os.path.isabs(pth):
+                    return pth
+                return os.path.join(base_dir, pth)
+
+            dir_model_path = _resolve(model_files.get("direction_model", ""))
+            quality_model_path = _resolve(model_files.get("quality_model", ""))
+            hold_model_path = _resolve(model_files.get("hold_model", ""))
+        else:
+            prefix = os.path.splitext(meta_path)[0]
+            dir_model_path = f"{prefix}.dir.lgb.txt"
+            quality_model_path = f"{prefix}.quality.lgb.txt"
+            hold_model_path = f"{prefix}.hold.lgb.txt"
+
+        return dir_model_path, quality_model_path, hold_model_path, feature_cols
+
+    @classmethod
+    def load(cls, meta_path: str = "data/ensemble/supervised/multi_target_lgbm.json") -> "MultiTargetLGBMBrain":
+        instance = cls()
+        try:
+            from lightgbm import Booster
+        except Exception as e:
+            raise ImportError(f"lightgbm import 실패: {e}") from e
+
+        dir_path, quality_path, hold_path, feature_cols = cls._resolve_model_paths(meta_path)
+        missing = [p for p in [dir_path, quality_path, hold_path] if not p or not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError(f"MultiTarget LGBM 모델 파일 누락: {missing}")
+
+        instance.direction_model = Booster(model_file=dir_path)
+        instance.quality_model = Booster(model_file=quality_path)
+        instance.hold_model = Booster(model_file=hold_path)
+        instance.feature_cols = feature_cols or [c for c in instance.direction_model.feature_name() if c]
+        if not instance.feature_cols:
+            raise ValueError("feature_cols 복원 실패 (json 또는 booster feature_name 미확인)")
+
+        instance.available = True
+        logger.info(
+            "✅ MultiTargetLGBMBrain 로드 완료: %s, %s, %s (%d개 피처)",
+            dir_path,
+            quality_path,
+            hold_path,
+            len(instance.feature_cols),
+        )
+        return instance
+
+    def _prepare_features(self, df: pd.DataFrame, timestamp_col: str = "timestamp") -> pd.DataFrame:
+        df_w = df.copy()
+        if timestamp_col in df_w.columns:
+            df_w[timestamp_col] = pd.to_datetime(df_w[timestamp_col])
+            df_w = df_w.set_index(timestamp_col).sort_index()
+
+        pred_conf_map = {
+            "pred_timesfm": "conf_timesfm",
+            "pred_chronos": "conf_chronos",
+            "pred_ttm": "conf_ttm",
+            "pred_patchtst": "conf_patchtst",
+            "pred_tide": "conf_tide",
+            "pred_mdjd": "conf_mdjd",
+            "pred_ridge": "conf_ridge",
+        }
+        for pred_col, conf_col in pred_conf_map.items():
+            sig_col = pred_col.replace("pred_", "signal_")
+            if sig_col not in df_w.columns:
+                if pred_col in df_w.columns and conf_col in df_w.columns:
+                    df_w[sig_col] = df_w[pred_col] * df_w[conf_col]
+                elif pred_col in df_w.columns:
+                    df_w[sig_col] = df_w[pred_col]
+
+        trend_feats = ["ret_12", "ret_24", "ret_48", "hh_count_24", "hl_count_24", "trend_accel"]
+        if any(f in self.feature_cols and f not in df_w.columns for f in trend_feats):
+            c = df_w["close"]
+            h = df_w["high"] if "high" in df_w.columns else c
+            l = df_w["low"] if "low" in df_w.columns else c
+            if "ret_12" not in df_w.columns:
+                df_w["ret_12"] = np.tanh(c.pct_change(12) * 10)
+            if "ret_24" not in df_w.columns:
+                df_w["ret_24"] = np.tanh(c.pct_change(24) * 10)
+            if "ret_48" not in df_w.columns:
+                df_w["ret_48"] = np.tanh(c.pct_change(48) * 10)
+            if "hh_count_24" not in df_w.columns:
+                df_w["hh_count_24"] = (h > h.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+            if "hl_count_24" not in df_w.columns:
+                df_w["hl_count_24"] = (l > l.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+            if "trend_accel" not in df_w.columns:
+                df_w["trend_accel"] = np.tanh((c.pct_change(12) - c.pct_change(48) / 4) * 20)
+
+        missing_cols = [col for col in self.feature_cols if col not in df_w.columns]
+        for col in missing_cols:
+            df_w[col] = np.nan
+
+        if missing_cols:
+            miss_ratio = len(missing_cols) / max(len(self.feature_cols), 1)
+            if miss_ratio >= self.MISSING_WARN_RATIO:
+                sample = ", ".join(missing_cols[:6])
+                logger.warning(
+                    "MultiTarget 입력 피처 누락률 높음: %d/%d (%.1f%%) | sample=[%s]",
+                    len(missing_cols),
+                    len(self.feature_cols),
+                    miss_ratio * 100.0,
+                    sample,
+                )
+
+        return df_w
+
+    def predict_from_df(self, df: pd.DataFrame, timestamp_col: str = "timestamp", min_candles: int = 1) -> dict | None:
+        if not self.available or self.direction_model is None:
+            return None
+        if len(df) < min_candles:
+            return None
+
+        df_w = self._prepare_features(df, timestamp_col=timestamp_col)
+        last_row = df_w[self.feature_cols].iloc[[-1]].astype(np.float32)
+        last_row = last_row.replace([np.inf, -np.inf], np.nan)
+        x_last = last_row.values
+
+        probs_arr = np.asarray(self.direction_model.predict(x_last), dtype=np.float64)
+        probs = probs_arr.reshape(-1)
+        if probs.size > 3:
+            probs = probs[:3]
+        if probs.size < 3:
+            probs = np.pad(probs, (0, 3 - probs.size), constant_values=0.0)
+        probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+        denom = float(probs.sum())
+        if denom <= 1e-12:
+            probs = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+        else:
+            probs = probs / denom
+
+        trend_dir = int(np.argmax(probs))
+        strength = float(np.clip((probs[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
+        if trend_dir == 2:
+            rev_prob = float(probs[0])
+        elif trend_dir == 0:
+            rev_prob = float(probs[2])
+        else:
+            rev_prob = 0.5
+
+        quality_pred = float(np.asarray(self.quality_model.predict(x_last), dtype=np.float64).reshape(-1)[0])
+        hold_pred = float(np.asarray(self.hold_model.predict(x_last), dtype=np.float64).reshape(-1)[0])
+
+        p_down, p_flat, p_up = (float(probs[0]), float(probs[1]), float(probs[2]))
+        return {
+            "trend_dir": trend_dir,
+            "strength": strength,
+            "rev_prob": rev_prob,
+            "probs": [p_down, p_flat, p_up],
+            "p_down": p_down,
+            "p_flat": p_flat,
+            "p_up": p_up,
+            "prob_dn": p_down,
+            "prob_flat": p_flat,
+            "prob_up": p_up,
+            "quality_pred": quality_pred,
+            "hold_pred": hold_pred,
+            "trend_model": "MULTITARGET_LGBM",
+        }
+
+
+def trend_signal_to_dict(signal, default_model: str) -> dict | None:
+    if signal is None:
+        return None
+    if isinstance(signal, dict):
+        out = dict(signal)
+    elif hasattr(signal, "to_arbiter_dict"):
+        out = signal.to_arbiter_dict()
+    else:
+        return None
+
+    probs = out.get("probs", [])
+    if not isinstance(probs, (list, tuple)) or len(probs) < 3:
+        p_dn = float(out.get("p_down", out.get("prob_dn", 0.333)))
+        p_fl = float(out.get("p_flat", out.get("prob_flat", 0.333)))
+        p_up = float(out.get("p_up", out.get("prob_up", 0.333)))
+        probs = [p_dn, p_fl, p_up]
+    probs = np.asarray(probs[:3], dtype=np.float64)
+    probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+    denom = float(probs.sum())
+    if denom <= 1e-12:
+        probs = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+    else:
+        probs = probs / denom
+
+    out["probs"] = [float(probs[0]), float(probs[1]), float(probs[2])]
+    out["p_down"] = float(probs[0])
+    out["p_flat"] = float(probs[1])
+    out["p_up"] = float(probs[2])
+    out["prob_dn"] = float(probs[0])
+    out["prob_flat"] = float(probs[1])
+    out["prob_up"] = float(probs[2])
+    out["trend_dir"] = int(out.get("trend_dir", int(np.argmax(probs))))
+    out["strength"] = float(out.get("strength", np.clip((probs[int(np.argmax(probs))] - 1.0 / 3.0) * 1.5, 0.0, 1.0)))
+    if "rev_prob" not in out:
+        if out["trend_dir"] == 2:
+            out["rev_prob"] = float(probs[0])
+        elif out["trend_dir"] == 0:
+            out["rev_prob"] = float(probs[2])
+        else:
+            out["rev_prob"] = 0.5
+    out.setdefault("trend_model", default_model)
+    return out
+
+
+def blend_trend_signals(sig_a: dict, sig_b: dict, w_a: float = 0.5, w_b: float = 0.5) -> dict:
+    pa = np.asarray(sig_a.get("probs", [1 / 3, 1 / 3, 1 / 3]), dtype=np.float64)
+    pb = np.asarray(sig_b.get("probs", [1 / 3, 1 / 3, 1 / 3]), dtype=np.float64)
+    if pa.size < 3:
+        pa = np.pad(pa, (0, 3 - pa.size), constant_values=0.0)
+    if pb.size < 3:
+        pb = np.pad(pb, (0, 3 - pb.size), constant_values=0.0)
+    pa = np.nan_to_num(pa[:3], nan=0.0, posinf=0.0, neginf=0.0)
+    pb = np.nan_to_num(pb[:3], nan=0.0, posinf=0.0, neginf=0.0)
+    p = (float(w_a) * pa) + (float(w_b) * pb)
+    denom = float(p.sum())
+    if denom <= 1e-12:
+        p = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+    else:
+        p = p / denom
+
+    trend_dir = int(np.argmax(p))
+    strength = float(np.clip((p[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
+    if trend_dir == 2:
+        rev_prob = float(p[0])
+    elif trend_dir == 0:
+        rev_prob = float(p[2])
+    else:
+        rev_prob = 0.5
+
+    q_vals = [sig_a.get("quality_pred"), sig_b.get("quality_pred")]
+    q_vals = [float(v) for v in q_vals if v is not None and np.isfinite(v)]
+    h_vals = [sig_a.get("hold_pred"), sig_b.get("hold_pred")]
+    h_vals = [float(v) for v in h_vals if v is not None and np.isfinite(v)]
+
+    return {
+        "trend_dir": trend_dir,
+        "strength": strength,
+        "rev_prob": rev_prob,
+        "probs": [float(p[0]), float(p[1]), float(p[2])],
+        "p_down": float(p[0]),
+        "p_flat": float(p[1]),
+        "p_up": float(p[2]),
+        "prob_dn": float(p[0]),
+        "prob_flat": float(p[1]),
+        "prob_up": float(p[2]),
+        "quality_pred": float(np.mean(q_vals)) if q_vals else None,
+        "hold_pred": float(np.mean(h_vals)) if h_vals else None,
+        "trend_model": f"{sig_a.get('trend_model', 'A')}+{sig_b.get('trend_model', 'B')}",
+        "sub_signals": {"a": sig_a, "b": sig_b},
+    }
+
+
+class SupervisedTrendHub:
+    """XGB + MultiTarget 추세 모델을 로드하고 단일 Brain B 시그널로 반환."""
+
+    def __init__(
+        self,
+        xgb_meta_path: str = "data/trend_xgb/trend_xgb.json",
+        multitarget_meta_path: str = "data/ensemble/supervised/multi_target_lgbm.json",
+        blend_weights: tuple[float, float] = (0.5, 0.5),
+    ):
+        self.xgb = None
+        self.multitarget = None
+        self.w_xgb = float(blend_weights[0])
+        self.w_mt = float(blend_weights[1])
+
+        try:
+            self.xgb = XGBTrendBrain.load(xgb_meta_path)
+            logger.info("✅ SupervisedTrendHub: XGBTrendBrain 로드 완료")
+        except Exception as e:
+            logger.warning("⚠️ SupervisedTrendHub: XGBTrendBrain 미로드: %s", e)
+
+        try:
+            self.multitarget = MultiTargetLGBMBrain.load(multitarget_meta_path)
+        except Exception as e:
+            logger.warning("⚠️ SupervisedTrendHub: MultiTargetLGBMBrain 미로드: %s", e)
+
+    @property
+    def available(self) -> bool:
+        return (self.xgb is not None) or (self.multitarget is not None)
+
+    def status(self) -> dict:
+        return {
+            "xgb_loaded": self.xgb is not None,
+            "multitarget_loaded": self.multitarget is not None,
+            "available": self.available,
+            "weights": [self.w_xgb, self.w_mt],
+        }
+
+    def predict_from_df(self, df: pd.DataFrame) -> dict | None:
+        xgb_signal_dict = None
+        mt_signal_dict = None
+
+        if self.xgb is not None:
+            xgb_signal = self.xgb.predict_from_df(df)
+            xgb_signal_dict = trend_signal_to_dict(xgb_signal, default_model="XGB_TREND")
+        if self.multitarget is not None:
+            mt_signal = self.multitarget.predict_from_df(df)
+            mt_signal_dict = trend_signal_to_dict(mt_signal, default_model="MULTITARGET_LGBM")
+
+        if xgb_signal_dict is not None and mt_signal_dict is not None:
+            return blend_trend_signals(xgb_signal_dict, mt_signal_dict, w_a=self.w_xgb, w_b=self.w_mt)
+        if xgb_signal_dict is not None:
+            return xgb_signal_dict
+        if mt_signal_dict is not None:
+            return mt_signal_dict
+        return None
