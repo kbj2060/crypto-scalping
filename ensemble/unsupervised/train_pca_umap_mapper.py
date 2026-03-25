@@ -8,7 +8,6 @@ import logging
 from typing import Dict, Any
 
 import numpy as np
-from joblib import dump as joblib_dump
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
@@ -27,6 +26,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     select_numeric_features,
@@ -134,6 +134,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "pca_umap_mapper")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -147,7 +148,13 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         best_params = dict(prev.get("best_params", {}))
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, x_train, x_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, x_train, x_val)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -183,10 +190,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("PCA explained_variance_ratio=%s", np.round(pca.explained_variance_ratio_, 4).tolist())
     logger.info("cluster_stats=%s", cluster_stats)
 
-    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    joblib_dump(
+    save_pickle(
         {
             "pca": pca,
             "kmeans": km,
@@ -234,7 +238,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train PCA/UMAP regime mapper")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/pca_umap_mapper.joblib")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/pca_umap_mapper.pkl")
     p.add_argument("--min-features", type=int, default=24)
     p.add_argument("--train-ratio", type=float, default=0.8)
     p.add_argument("--pca-components", type=int, default=3)

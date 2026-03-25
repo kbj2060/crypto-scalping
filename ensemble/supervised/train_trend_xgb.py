@@ -6,7 +6,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 타겟:  Triple-Barrier 레이블 (de Prado 2018) — 5m 봉 기준
 피처:  ULTIMATE_FEATURE_COLS + MTF 피처 → auto_select_features (상위 N개)
 튜닝:  Optuna 50회 시행 (CPU, ~1시간)
-저장:  data/trend_xgb/trend_xgb.json (+ trend_xgb.lgb.txt)
+저장:  data/trend_xgb/trend_xgb.json (+ trend_xgb.pkl)
 
 실행:
     cd /home/llewyn/crypto-scalping
@@ -16,6 +16,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 import os
 import sys
 import json
+import pickle
 import logging
 import argparse
 from dataclasses import dataclass
@@ -251,16 +252,14 @@ class XGBTrendBrain:
     def save(self, path: str):
         meta_path = path if path.lower().endswith('.json') else os.path.splitext(path)[0] + '.json'
         prefix = os.path.splitext(meta_path)[0]
-        model_path = prefix + '.lgb.txt'
+        model_path = prefix + '.pkl'
 
         os.makedirs(os.path.dirname(meta_path), exist_ok=True)
-        if hasattr(self.model, 'booster_'):
-            self.model.booster_.save_model(model_path)
-        else:
-            self.model.save_model(model_path)
+        with open(model_path, 'wb') as f:
+            pickle.dump({'model': self.model, 'feature_cols': self.feature_cols}, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         meta = {
-            'format': 'xgbtrend_native_v1',
+            'format': 'xgbtrend_pickle_v2',
             'model_path': os.path.basename(model_path),
             'feature_cols': self.feature_cols,
         }
@@ -272,12 +271,11 @@ class XGBTrendBrain:
     def load(cls, path: str) -> 'XGBTrendBrain':
         instance = cls()
         if path.lower().endswith('.pkl') and os.path.exists(path):
-            import pickle
             with open(path, 'rb') as f:
-                legacy = pickle.load(f)
-            instance.model = legacy['model']
-            instance.feature_cols = legacy['feature_cols']
-            logger.info(f"✅ XGBTrendBrain 로드(legacy pkl): {path} ({len(instance.feature_cols)}개 피처)")
+                payload = pickle.load(f)
+            instance.model = payload['model']
+            instance.feature_cols = payload['feature_cols']
+            logger.info(f"✅ XGBTrendBrain 로드(pkl): {path} ({len(instance.feature_cols)}개 피처)")
             return instance
 
         meta_path = path
@@ -291,8 +289,9 @@ class XGBTrendBrain:
 
         model_ref = data.get('model_path', '')
         model_path = model_ref if os.path.isabs(model_ref) else os.path.join(os.path.dirname(meta_path), model_ref)
-        from lightgbm import Booster
-        instance.model = Booster(model_file=model_path)
+        with open(model_path, 'rb') as f:
+            payload = pickle.load(f)
+        instance.model = payload['model']
         instance.feature_cols = data['feature_cols']
         logger.info(f"✅ XGBTrendBrain 로드: {meta_path} ({len(instance.feature_cols)}개 피처)")
         return instance
@@ -629,10 +628,23 @@ def train(data_path: str = DATA_PATH,
 
     # ── Optuna 튜닝 or 저장된 파라미터 재사용 ──
     results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
+    meta_path = save_path if save_path.lower().endswith('.json') else os.path.splitext(save_path)[0] + '.json'
     if os.path.exists(results_path):
         with open(results_path) as f:
             prev = json.load(f)
         logger.info("기존 training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
+    elif os.path.exists(meta_path):
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta_prev = json.load(f)
+        meta_best_params = meta_prev.get('meta', {}).get('best_params')
+        if isinstance(meta_best_params, dict):
+            prev = {
+                'best_params': meta_best_params,
+                'best_val_dir_f1': meta_prev.get('meta', {}).get('best_val_dir_f1', 0.0),
+            }
+            logger.info("기존 meta json 발견 -> Optuna 건너뜀")
+        else:
+            prev = None
     else:
         prev = None
 

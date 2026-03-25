@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+import pickle
 import argparse
 import logging
 from typing import Dict, Any
@@ -26,6 +28,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     select_numeric_features,
@@ -225,6 +228,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "vae_anomaly")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -240,7 +244,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params["epochs"] = int(best_params["epochs"] * 1.1)
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, x.shape[1], device, x_train, x_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            if "epochs" in best_params:
+                best_params["epochs"] = int(best_params["epochs"] * 1.1)
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, x.shape[1], device, x_train, x_val)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -269,7 +281,6 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     val_anomaly_ratio = float(np.mean(val_err > threshold))
     logger.info("vae threshold=%.6f val_anomaly_ratio=%.4f", threshold, val_anomaly_ratio)
 
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     payload = {
         "state_dict": model.state_dict(),
         "feature_cols": feature_cols,
@@ -286,7 +297,20 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "best_params": merged,
         },
     }
-    torch.save(payload, args.save_path)
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    with open(model_path, "wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "feature_cols": feature_cols,
+                "model_path": os.path.basename(model_path),
+                "meta": payload["meta"] | {"threshold": threshold},
+            },
+            f,
+            indent=2,
+            ensure_ascii=True,
+        )
 
     save_training_results(
         results_path,
@@ -299,7 +323,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
-    logger.info("saved: %s", args.save_path)
+    logger.info("saved: %s", model_path)
+    logger.info("saved: %s", meta_path)
     logger.info("saved: %s", results_path)
     return payload
 
@@ -308,7 +333,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train VAE anomaly detector")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/vae_anomaly.pt")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/vae_anomaly.pkl")
     p.add_argument("--min-features", type=int, default=24)
     p.add_argument("--train-ratio", type=float, default=0.85)
     p.add_argument("--latent-dim", type=int, default=12)

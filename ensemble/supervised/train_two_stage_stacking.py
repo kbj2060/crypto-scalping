@@ -8,7 +8,6 @@ import logging
 from typing import Dict, Any
 
 import numpy as np
-from joblib import dump as joblib_dump
 from sklearn.metrics import classification_report, balanced_accuracy_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +24,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.supervised.common import (
     load_feature_frame,
     select_feature_columns,
@@ -232,6 +232,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "two_stage_stacking")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -249,15 +250,25 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params["max_iter"] = int(best_params["max_iter"] * 1.1)
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(
-            args=args,
-            backend=backend,
-            x_train=x_train_np,
-            x_val=x_val_np,
-            y_train_dir=y_train_dir,
-            y_val_dir=y_val_dir,
-            y_train_vol=y_train_vol,
-        )
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            if "n_estimators" in best_params:
+                best_params["n_estimators"] = int(best_params["n_estimators"] * 1.1)
+            if "max_iter" in best_params:
+                best_params["max_iter"] = int(best_params["max_iter"] * 1.1)
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(
+                args=args,
+                backend=backend,
+                x_train=x_train_np,
+                x_val=x_val_np,
+                y_train_dir=y_train_dir,
+                y_val_dir=y_val_dir,
+                y_train_vol=y_train_vol,
+            )
 
     min_expected_move = float(best_params.pop("min_expected_move", args.min_expected_move))
 
@@ -286,28 +297,21 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         trade_bal_acc = 0.0
     logger.info("2-Stage filtered trade_rate=%.4f filtered_bal_acc=%.4f", trade_rate, trade_bal_acc)
 
-    meta_path = args.save_path if args.save_path.lower().endswith(".json") else os.path.splitext(args.save_path)[0] + ".json"
-    prefix = os.path.splitext(meta_path)[0]
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
-
-    if backend == "lightgbm":
-        dir_model_path = f"{prefix}.dir.lgb.txt"
-        vol_model_path = f"{prefix}.vol.lgb.txt"
-        dir_model.booster_.save_model(dir_model_path)
-        vol_model.booster_.save_model(vol_model_path)
-    else:
-        dir_model_path = f"{prefix}.dir.joblib"
-        vol_model_path = f"{prefix}.vol.joblib"
-        joblib_dump(dir_model, dir_model_path)
-        joblib_dump(vol_model, vol_model_path)
+    save_pickle(
+        {
+            "backend": backend,
+            "feature_cols": feature_cols,
+            "dir_model": dir_model,
+            "vol_model": vol_model,
+            "min_expected_move": min_expected_move,
+        },
+        model_path,
+    )
 
     artifact = {
         "feature_cols": feature_cols,
         "min_expected_move": min_expected_move,
-        "model_files": {
-            "dir_model": os.path.basename(dir_model_path),
-            "vol_model": os.path.basename(vol_model_path),
-        },
+        "model_path": os.path.basename(model_path),
         "meta": {
             "algorithm": "two_stage_stacking",
             "backend": backend,
@@ -336,7 +340,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     )
 
     logger.info("saved meta: %s", meta_path)
-    logger.info("saved models: %s, %s", dir_model_path, vol_model_path)
+    logger.info("saved model: %s", model_path)
     logger.info("saved: %s", results_path)
     return artifact
 

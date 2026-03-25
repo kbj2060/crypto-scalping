@@ -8,7 +8,6 @@ import logging
 from typing import Dict, Any
 
 import numpy as np
-from joblib import dump as joblib_dump
 from sklearn.ensemble import IsolationForest
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +24,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     zscore_fit_transform,
@@ -113,6 +113,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "isolation_forest")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -128,7 +129,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params["n_estimators"] = int(best_params["n_estimators"] * 1.1)
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, x_train, x_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            if "n_estimators" in best_params:
+                best_params["n_estimators"] = int(best_params["n_estimators"] * 1.1)
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, x_train, x_val)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -144,10 +153,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     anomaly_ratio = float(np.mean(pred == -1))
     logger.info("IsolationForest anomaly_ratio=%.4f score_mean=%.6f", anomaly_ratio, float(score.mean()))
 
-    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    joblib_dump(
+    save_pickle(
         {
             "model": model,
             "feature_cols": feature_cols,
@@ -193,7 +199,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Isolation Forest anomaly detector")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/isolation_forest.joblib")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/isolation_forest.pkl")
     p.add_argument("--n-estimators", type=int, default=500)
     p.add_argument("--contamination", type=float, default=0.03)
     p.add_argument("--max-samples", type=float, default=1.0)

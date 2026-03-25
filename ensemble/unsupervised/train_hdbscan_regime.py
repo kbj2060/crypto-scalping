@@ -8,7 +8,6 @@ import logging
 from typing import Dict, Any
 
 import numpy as np
-from joblib import dump as joblib_dump
 from sklearn.metrics import silhouette_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +24,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     select_numeric_features,
@@ -119,6 +119,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "hdbscan_regime")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -132,7 +133,13 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         best_params = dict(prev.get("best_params", {}))
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, hdbscan, x)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, hdbscan, x)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -149,10 +156,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     noise_ratio = float(np.mean(labels == -1))
     logger.info("HDBSCAN clusters=%s noise_ratio=%.4f", dict(zip(unique.tolist(), counts.tolist())), noise_ratio)
 
-    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    joblib_dump(
+    save_pickle(
         {
             "model": model,
             "mean": mean,
@@ -196,7 +200,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train HDBSCAN regime clustering")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/hdbscan_regime.joblib")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/hdbscan_regime.pkl")
     p.add_argument("--min-features", type=int, default=20)
     p.add_argument("--min-cluster-size", type=int, default=300)
     p.add_argument("--min-samples", type=int, default=30)

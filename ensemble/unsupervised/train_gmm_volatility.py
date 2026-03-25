@@ -25,6 +25,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     zscore_fit_transform,
@@ -116,6 +117,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "gmm_volatility")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -129,7 +131,13 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         best_params = dict(prev.get("best_params", {}))
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, x_train, x_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, x_train, x_val)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -154,21 +162,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("GMM cluster_score=%s", cluster_score)
     logger.info("GMM cluster_rank_map(low->high vol)=%s", cluster_rank_map)
 
-    model_path = args.save_path if args.save_path.lower().endswith(".npz") else os.path.splitext(args.save_path)[0] + ".npz"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    cluster_keys = np.asarray(list(cluster_rank_map.keys()), dtype=np.int64)
-    cluster_vals = np.asarray(list(cluster_rank_map.values()), dtype=np.int64)
-    np.savez_compressed(
+    save_pickle(
+        {
+            "model": model,
+            "mean": mean,
+            "std": std,
+            "feature_cols": feature_cols,
+            "cluster_rank_map": cluster_rank_map,
+        },
         model_path,
-        weights=model.weights_,
-        means=model.means_,
-        covariances=model.covariances_,
-        precisions_cholesky=model.precisions_cholesky_,
-        mean=mean,
-        std=std,
-        cluster_rank_keys=cluster_keys,
-        cluster_rank_vals=cluster_vals,
     )
     artifact = {
         "feature_cols": feature_cols,
@@ -207,7 +209,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train GMM volatility regime model")
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
-    p.add_argument("--save-path", default="data/ensemble/unsupervised/gmm_volatility.npz")
+    p.add_argument("--save-path", default="data/ensemble/unsupervised/gmm_volatility.pkl")
     p.add_argument("--n-components", type=int, default=4)
     p.add_argument("--covariance-type", default="full", choices=["full", "diag", "tied", "spherical"])
     p.add_argument("--reg-covar", type=float, default=1e-5)

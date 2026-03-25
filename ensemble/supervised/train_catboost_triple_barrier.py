@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import classification_report, balanced_accuracy_score, f1_score
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +26,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.supervised.common import (
     load_feature_frame,
     select_feature_columns,
@@ -61,6 +63,40 @@ def _base_params(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
+def _prepare_catboost_frame(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    cat_candidates: list[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    out = df[feature_cols].copy()
+    cat_cols: list[str] = []
+
+    for col in cat_candidates:
+        if col not in out.columns:
+            continue
+        series = out[col]
+        non_null = series.dropna()
+        if non_null.empty:
+            out[col] = "UNK"
+            cat_cols.append(col)
+            continue
+
+        if pd.api.types.is_numeric_dtype(series):
+            as_num = pd.to_numeric(non_null, errors="coerce")
+            is_integral = np.all(np.isfinite(as_num)) and np.all(np.isclose(as_num, np.round(as_num)))
+            if is_integral:
+                out[col] = series.fillna(-1).round().astype(np.int64).astype(str)
+                cat_cols.append(col)
+            else:
+                logger.info("exclude non-discrete cat hint for CatBoost: %s", col)
+            continue
+
+        out[col] = series.fillna("UNK").astype(str)
+        cat_cols.append(col)
+
+    return out, cat_cols
+
+
 def _tune_params(
     args: argparse.Namespace,
     CatBoostClassifier,
@@ -74,8 +110,8 @@ def _tune_params(
 
     def objective(trial: "optuna.Trial") -> float:
         params = {
-            "iterations": trial.suggest_int("iterations", 400, 2200),
-            "depth": trial.suggest_int("depth", 4, 10),
+            "iterations": trial.suggest_int("iterations", 200, 800),
+            "depth": trial.suggest_int("depth", 4, 8),
             "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.2, log=True),
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-2, 30.0, log=True),
             "bagging_temperature": trial.suggest_float("bagging_temperature", 0.0, 8.0),
@@ -87,6 +123,7 @@ def _tune_params(
             eval_metric="TotalF1",
             random_seed=args.seed,
             verbose=False,
+            allow_writing_files=False,
             **params,
         )
         model.fit(train_pool, eval_set=val_pool, use_best_model=True, verbose=False)
@@ -118,9 +155,9 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     y = y[valid]
 
     feature_cols = select_feature_columns(df)
-    cat_cols = [c for c in CATEGORICAL_HINTS if c in feature_cols]
+    cat_candidates = [c for c in CATEGORICAL_HINTS if c in feature_cols]
 
-    x = df[feature_cols].copy()
+    x, cat_cols = _prepare_catboost_frame(df, feature_cols, cat_candidates)
     tr_idx, va_idx, te_idx = time_split_indices(len(x), args.train_ratio, args.val_ratio)
 
     x_train, y_train = x.iloc[tr_idx], y[tr_idx]
@@ -150,6 +187,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "catboost_triple_barrier")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -165,7 +203,14 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         best_val_dir_f1 = float(prev.get("best_val_dir_f1", prev.get("best_val_bacc", 0.0)))
         logger.info("reuse best_params with iterations boost x1.1 -> %d", best_params["iterations"])
     else:
-        best_params, best_val_dir_f1 = _tune_params(args, CatBoostClassifier, train_pool, val_pool, y_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_dir_f1", "best_val_bacc"])
+        if meta_params is not None:
+            best_params = meta_params
+            best_params["iterations"] = int(best_params.get("iterations", args.iterations) * 1.1)
+            best_val_dir_f1 = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_dir_f1 = _tune_params(args, CatBoostClassifier, train_pool, val_pool, y_val)
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -180,6 +225,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         eval_metric="TotalF1",
         random_seed=args.seed,
         verbose=False,
+        allow_writing_files=False,
         **merged,
     )
     model.fit(trainval_pool, verbose=False)
@@ -189,10 +235,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("CatBoost Triple-Barrier test balanced_acc=%.4f", bal_acc)
     logger.info("\n%s", classification_report(y_test, y_pred, digits=4))
 
-    model_path = args.save_path if args.save_path.lower().endswith(".cbm") else os.path.splitext(args.save_path)[0] + ".cbm"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    model.save_model(model_path)
+    save_pickle(model, model_path)
     artifact = {
         "feature_cols": feature_cols,
         "cat_cols": cat_cols,
@@ -233,7 +276,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train CatBoost Triple-Barrier classifier")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/catboost_triple_barrier.cbm")
+    p.add_argument("--save-path", default="data/ensemble/supervised/catboost_triple_barrier.pkl")
     p.add_argument("--atr-mult", type=float, default=0.8)
     p.add_argument("--max-hold", type=int, default=12)
     p.add_argument("--atr-window", type=int, default=14)
@@ -246,7 +289,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bagging-temperature", type=float, default=1.0)
     p.add_argument("--random-strength", type=float, default=1.0)
     p.add_argument("--border-count", type=int, default=128)
-    p.add_argument("--n-trials", type=int, default=50)
+    p.add_argument("--n-trials", type=int, default=40)
     p.add_argument("--force-reuse-results", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()

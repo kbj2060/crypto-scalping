@@ -8,7 +8,6 @@ import logging
 from typing import Dict, Any, Tuple
 
 import numpy as np
-from joblib import dump as joblib_dump
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
@@ -26,6 +25,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.supervised.common import (
     load_feature_frame,
     select_feature_columns,
@@ -145,6 +145,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "quantile_forest")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -160,7 +161,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params["n_estimators"] = int(best_params["n_estimators"] * 1.1)
         best_val_score = float(prev.get("best_val_score", 0.0))
     else:
-        best_params, best_val_score = _tune_params(args, x_train_np, y_train, x_val_np, y_val)
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_score"])
+        if meta_params is not None:
+            best_params = meta_params
+            if "n_estimators" in best_params:
+                best_params["n_estimators"] = int(best_params["n_estimators"] * 1.1)
+            best_val_score = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_score = _tune_params(args, x_train_np, y_train, x_val_np, y_val)
 
     flat_threshold = float(best_params.pop("flat_threshold", args.flat_threshold))
 
@@ -181,10 +190,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     mae, dir_acc = _score_predictions(y_test, q50, flat_threshold)
     logger.info("QuantileForest MAE=%.6f dir_acc=%.4f", mae, dir_acc)
 
-    model_path = args.save_path if args.save_path.lower().endswith(".joblib") else os.path.splitext(args.save_path)[0] + ".joblib"
-    meta_path = os.path.splitext(model_path)[0] + ".json"
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    joblib_dump(model, model_path)
+    save_pickle(model, model_path)
     artifact = {
         "feature_cols": feature_cols,
         "horizon": args.horizon,
@@ -225,7 +231,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Quantile Regression Forest style regressor")
     p.add_argument("--data-path", default=DEFAULT_DATA_PATH)
     p.add_argument("--rl-path", default=DEFAULT_RL_DATA_PATH)
-    p.add_argument("--save-path", default="data/ensemble/supervised/quantile_forest.joblib")
+    p.add_argument("--save-path", default="data/ensemble/supervised/quantile_forest.pkl")
     p.add_argument("--horizon", type=int, default=12)
     p.add_argument("--train-ratio", type=float, default=0.70)
     p.add_argument("--val-ratio", type=float, default=0.15)

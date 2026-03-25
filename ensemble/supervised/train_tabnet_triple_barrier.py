@@ -26,6 +26,7 @@ from ensemble.optuna_helper import (
     save_training_results,
     training_results_path,
 )
+from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
 from ensemble.supervised.common import (
     load_feature_frame,
     select_feature_columns,
@@ -212,6 +213,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         }
     )
     results_path = training_results_path(args.save_path, "tabnet_triple_barrier")
+    model_path, meta_path = resolve_model_meta_paths(args.save_path)
 
     prev = load_reusable_results(
         results_path=results_path,
@@ -227,16 +229,24 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params["max_epochs"] = int(best_params["max_epochs"] * 1.1)
         best_val_dir_f1 = float(prev.get("best_val_dir_f1", 0.0))
     else:
-        best_params, best_val_dir_f1 = _tune_params(
-            args,
-            TabNetClassifier,
-            x_train,
-            y_train,
-            x_val,
-            y_val,
-            cat_idxs_train,
-            cat_dims_train,
-        )
+        meta_params, meta_score = load_best_params_from_meta(meta_path, score_keys=["best_val_dir_f1"])
+        if meta_params is not None:
+            best_params = meta_params
+            if "max_epochs" in best_params:
+                best_params["max_epochs"] = int(best_params["max_epochs"] * 1.1)
+            best_val_dir_f1 = float(meta_score or 0.0)
+            logger.info("reuse best_params from meta json: %s", meta_path)
+        else:
+            best_params, best_val_dir_f1 = _tune_params(
+                args,
+                TabNetClassifier,
+                x_train,
+                y_train,
+                x_val,
+                y_val,
+                cat_idxs_train,
+                cat_dims_train,
+            )
 
     merged = _base_params(args)
     merged.update(best_params)
@@ -266,10 +276,17 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("TabNet Triple-Barrier test balanced_acc=%.4f", bal_acc)
     logger.info("\n%s", classification_report(y_test, y_pred, digits=4))
 
-    meta_path = args.save_path if args.save_path.lower().endswith(".json") else os.path.splitext(args.save_path)[0] + ".json"
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
-    save_prefix = os.path.splitext(meta_path)[0]
-    model.save_model(save_prefix)
+    save_pickle(
+        {
+            "model": model,
+            "feature_cols": feature_cols,
+            "cat_cols": cat_cols,
+            "cat_maps": cat_maps_final,
+            "cat_idxs": cat_idxs_final.tolist(),
+            "cat_dims": cat_dims_final.tolist(),
+        },
+        model_path,
+    )
 
     metadata = {
         "feature_cols": feature_cols,
@@ -280,7 +297,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "balanced_accuracy": float(bal_acc),
             "best_val_dir_f1": best_val_dir_f1,
             "best_params": merged,
-            "model_zip": f"{save_prefix}.zip",
+            "model_path": os.path.basename(model_path),
         },
     }
     with open(meta_path, "w", encoding="utf-8") as f:
@@ -296,6 +313,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "config_hash": config_hash,
         },
     )
+    logger.info("saved model: %s", model_path)
     logger.info("saved model metadata: %s", meta_path)
     logger.info("saved: %s", results_path)
     return metadata
