@@ -61,7 +61,8 @@ for p in TARGET_PATHS:
         sys.path.insert(0, p)
 
 from core.feature_engineering import FeatureEngineer
-from ensemble.supervised.train_trend_xgb import XGBTrendBrain
+from ensemble.supervised.live_supervised_hub import SupervisedTrendHub
+from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
 from ensemble.arbiter_gatekeeper import BrainAOutput, BrainBOutput, DualBrainArbiter
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,
@@ -1254,9 +1255,11 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     # TREND
     dn_c = C.RED if p_dn > 0.4 else C.RESET
     up_c = C.GREEN if p_up > 0.4 else C.RESET
+    trend_model = str(ts.get("trend_model", "N/A")) if isinstance(ts, dict) else "N/A"
     print(f"  {trend_color}{trend_arrow} TREND{C.RESET}   {trend_color}{trend_word:<6}{C.RESET}"
           f"  str={t_strength:.2f}  rev={t_rev:.2f}"
-          f"  {dn_c}DN={p_dn:.0%}{C.RESET} FL={C.YELLOW}{p_fl:.0%}{C.RESET} {up_c}UP={p_up:.0%}{C.RESET}")
+          f"  {dn_c}DN={p_dn:.0%}{C.RESET} FL={C.YELLOW}{p_fl:.0%}{C.RESET} {up_c}UP={p_up:.0%}{C.RESET}"
+          f"  model={trend_model}")
     # LLM
     llm_word = llm_dir if llm_dir in ('UP', 'DOWN', 'PENDING', 'DISABLED') else 'UNKNOWN'
     print(f"  {llm_dir_color}{llm_arrow} LLM{C.RESET}     {llm_dir_color}{llm_word:<6}{C.RESET}"
@@ -1672,6 +1675,7 @@ class MetaRouter:
             t_arrow = {0: '▼', 1: '─', 2: '▲'}.get(t_dir, '?')
             t_color = {0: C.RED, 1: C.YELLOW, 2: C.GREEN}.get(t_dir, C.RESET)
             t_word  = {0: 'DOWN', 1: 'FLAT', 2: 'UP'}.get(t_dir, '?')
+            t_model = str(ts.get('trend_model', 'N/A')) if isinstance(ts, dict) else 'N/A'
             veto_str = f"  {C.RED}[{tv}]{C.RESET}" if tv else ''
             probs = ts.get('probs', [])
             if len(probs) == 3:
@@ -1683,7 +1687,8 @@ class MetaRouter:
             else:
                 probs_str = ''
             print(f"  {t_color}{t_arrow} Trend{C.RESET}   {t_color}{t_word:<6}{C.RESET}"
-                  f"  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}{probs_str}{veto_str}")
+                  f"  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}"
+                  f"{probs_str}  model={t_model}{veto_str}")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1971,15 +1976,15 @@ async def main(use_local=False):
         bot.current_equity = meta_router.cur_equity
         bot.peak_equity    = meta_router.peak_equity
 
-    # ── XGBTrendBrain 초기화 (LightGBM 3-class, Brain B) ───────────
-    # 학습: python ensemble/supervised/train_trend_xgb.py
-    # 저장: data/trend_xgb/trend_xgb.json (+ trend_xgb.lgb.txt)
-    trend_brain = None
-    try:
-        trend_brain = XGBTrendBrain.load('data/trend_xgb/trend_xgb.json')
-        logger.info("✅ XGBTrendBrain (LightGBM Triple-Barrier) 로드 완료")
-    except Exception as e:
-        logger.warning(f"⚠️ XGBTrendBrain 미로드 (학습 전이거나 파일 없음): {e}")
+    # ── 지도/비지도 허브 초기화 (trading_bot 본문 길이 축소) ──────────
+    trend_hub = SupervisedTrendHub(
+        xgb_meta_path="data/trend_xgb/trend_xgb.json",
+        multitarget_meta_path="data/ensemble/supervised/multi_target_lgbm.json",
+        blend_weights=(0.5, 0.5),
+    )
+    unsup_hub = UnsupervisedRegimeHub()
+    logger.info("🤖 SupervisedTrendHub: %s", trend_hub.status())
+    logger.info("🧩 %s", unsup_hub.summary_line())
 
     # ── Polymarket 크라우드 확률 수집기 ────────────────────────
     poly_fetcher = PolymarketFetcher()
@@ -2038,12 +2043,12 @@ async def main(use_local=False):
 
         # ── TrendContextBrain 4h 추세 추론 ───────────────────────
         trend_signal = None
-        if trend_brain is not None:
+        if trend_hub.available:
             try:
                 # 학습 피처가 포함된 processed_df를 넣어 추세 필터 신뢰도 확보
-                trend_signal = trend_brain.predict_from_df(processed_df)
+                trend_signal = trend_hub.predict_from_df(processed_df)
             except Exception as e:
-                logger.warning(f"TrendBrain 추론 실패: {e}")
+                logger.warning(f"SupervisedTrendHub 추론 실패: {e}")
 
         # ── MetaRouter 신호 융합 ──────────────────────────────
         prev_meta_pos = _prev_meta_pos
