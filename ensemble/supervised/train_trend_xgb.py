@@ -10,7 +10,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 
 실행:
     cd /home/llewyn/crypto-scalping
-    python ensemble/trend_xgb/train_trend_xgb.py
+    python ensemble/supervised/train_trend_xgb.py
 """
 
 import os
@@ -18,18 +18,17 @@ import sys
 import json
 import logging
 import argparse
+import pickle
+from dataclasses import dataclass
+from typing import Optional, List, Tuple
 
-import hashlib
 import numpy as np
 import pandas as pd
-import optuna
 from joblib import Parallel, delayed
 
-optuna.logging.set_verbosity(optuna.logging.WARNING)
-
-_THIS_DIR     = os.path.dirname(os.path.abspath(__file__))
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENSEMBLE_DIR = os.path.dirname(_THIS_DIR)
-_ROOT_DIR     = os.path.dirname(_ENSEMBLE_DIR)
+_ROOT_DIR = os.path.dirname(_ENSEMBLE_DIR)
 for _p in [_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -39,13 +38,225 @@ from sklearn.metrics import balanced_accuracy_score, classification_report, f1_s
 
 from core.feature_selector import auto_select_features
 from core.feature_engineering import ULTIMATE_FEATURE_COLS
-from ensemble.trend_xgb.trend_xgb_model import compute_atr, make_triple_barrier_label, XGBTrendBrain
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger(__name__)
+MISSING_WARN_RATIO = 0.30
+
+
+# ────────────────────────────────────────────────────────────────
+# 공유 데이터클래스 / Triple-Barrier 유틸 / 추론 모델
+# ────────────────────────────────────────────────────────────────
+@dataclass
+class TrendSignal:
+    trend_dir : int
+    strength  : float
+    rev_prob  : float
+    probs     : Tuple[float, float, float]
+
+    @property
+    def is_up(self)   -> bool: return self.trend_dir == 2
+    @property
+    def is_down(self) -> bool: return self.trend_dir == 0
+    @property
+    def is_flat(self) -> bool: return self.trend_dir == 1
+
+    def to_arbiter_dict(self) -> dict:
+        p_down, p_flat, p_up = (float(self.probs[0]), float(self.probs[1]), float(self.probs[2]))
+        return {
+            'trend_dir': self.trend_dir,
+            'strength': self.strength,
+            'rev_prob': self.rev_prob,
+            'probs': [p_down, p_flat, p_up],
+            'p_down': p_down, 'p_flat': p_flat, 'p_up': p_up,
+            'prob_dn': p_down, 'prob_flat': p_flat, 'prob_up': p_up,
+        }
+
+
+def compute_atr(highs: np.ndarray, lows: np.ndarray,
+                closes: np.ndarray, window: int = 14) -> np.ndarray:
+    """Average True Range 계산."""
+    t_total = len(closes)
+    tr = np.zeros(t_total)
+    for i in range(1, t_total):
+        tr[i] = max(
+            highs[i]  - lows[i],
+            abs(highs[i]  - closes[i - 1]),
+            abs(lows[i]   - closes[i - 1]),
+        )
+    atr = pd.Series(tr).rolling(window, min_periods=1).mean().values
+    return atr
+
+
+def make_triple_barrier_label(
+    closes   : np.ndarray,
+    atr      : np.ndarray,
+    t        : int,
+    highs    : np.ndarray = None,
+    lows     : np.ndarray = None,
+    atr_mult : float = 1.5,
+    max_hold : int = 9,
+) -> Tuple[int, float, float]:
+    """Triple-Barrier 레이블링 (de Prado 2018 기반)."""
+    t_total = len(closes)
+    cur_close = float(closes[t - 1])
+    cur_atr = float(atr[t - 1])
+
+    highs_arr = highs if highs is not None else closes
+    lows_arr = lows if lows is not None else closes
+
+    barrier_size = atr_mult * cur_atr
+    upper = cur_close + barrier_size
+    lower = cur_close - barrier_size
+
+    hit_up = max_hold
+    hit_dn = max_hold
+
+    for k in range(1, max_hold + 1):
+        if t + k - 1 >= t_total:
+            break
+        bar_high = float(highs_arr[t + k - 1])
+        bar_low = float(lows_arr[t + k - 1])
+        if bar_high >= upper and hit_up == max_hold:
+            hit_up = k
+        if bar_low <= lower and hit_dn == max_hold:
+            hit_dn = k
+        if hit_up < max_hold and hit_dn < max_hold:
+            break
+
+    if hit_up < hit_dn:
+        label = 2
+    elif hit_dn < hit_up:
+        label = 0
+    elif hit_up == hit_dn == max_hold:
+        label = 1
+    else:
+        return -1, 0.0, 0.0
+
+    if label != 1:
+        hit_time = min(hit_up, hit_dn)
+        str_lbl = float(np.clip(1.0 - (hit_time - 1) / max_hold, 0.0, 1.0))
+    else:
+        last_price = float(closes[min(t + max_hold - 1, t_total - 1)])
+        str_lbl = float(np.tanh(abs(last_price / cur_close - 1) * 20.0))
+
+    past_ret = float(closes[t - 1] / max(float(closes[max(0, t - 6)]), 1e-8) - 1)
+    rev_lbl = 1.0 if (
+        (past_ret > 0 and label == 0) or
+        (past_ret < 0 and label == 2)
+    ) else 0.0
+
+    return label, str_lbl, rev_lbl
+
+
+class XGBTrendBrain:
+    """LightGBM 기반 Brain B."""
+
+    def __init__(self):
+        self.model = None
+        self.feature_cols: List[str] = []
+
+    def predict_from_df(
+        self,
+        df: pd.DataFrame,
+        timestamp_col: str = 'timestamp',
+        min_candles: int = 1,
+    ) -> Optional[TrendSignal]:
+        if self.model is None or not self.feature_cols:
+            return None
+        if len(df) < min_candles:
+            return None
+
+        df_w = df.copy()
+        if timestamp_col in df_w.columns:
+            df_w[timestamp_col] = pd.to_datetime(df_w[timestamp_col])
+            df_w = df_w.set_index(timestamp_col).sort_index()
+
+        pred_conf_map = {
+            'pred_timesfm': 'conf_timesfm', 'pred_chronos': 'conf_chronos',
+            'pred_ttm': 'conf_ttm', 'pred_patchtst': 'conf_patchtst',
+            'pred_tide': 'conf_tide', 'pred_mdjd': 'conf_mdjd',
+            'pred_ridge': 'conf_ridge',
+        }
+        for p_col, c_col in pred_conf_map.items():
+            sig_col = p_col.replace('pred_', 'signal_')
+            if sig_col not in df_w.columns:
+                if p_col in df_w.columns and c_col in df_w.columns:
+                    df_w[sig_col] = df_w[p_col] * df_w[c_col]
+                elif p_col in df_w.columns:
+                    df_w[sig_col] = df_w[p_col]
+
+        trend_feats = ['ret_12', 'ret_24', 'ret_48', 'hh_count_24', 'hl_count_24', 'trend_accel']
+        if any(f in self.feature_cols and f not in df_w.columns for f in trend_feats):
+            c = df_w['close']
+            h = df_w['high'] if 'high' in df_w.columns else c
+            l = df_w['low'] if 'low' in df_w.columns else c
+            if 'ret_12' not in df_w.columns:
+                df_w['ret_12'] = np.tanh(c.pct_change(12) * 10)
+            if 'ret_24' not in df_w.columns:
+                df_w['ret_24'] = np.tanh(c.pct_change(24) * 10)
+            if 'ret_48' not in df_w.columns:
+                df_w['ret_48'] = np.tanh(c.pct_change(48) * 10)
+            if 'hh_count_24' not in df_w.columns:
+                df_w['hh_count_24'] = (h > h.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+            if 'hl_count_24' not in df_w.columns:
+                df_w['hl_count_24'] = (l > l.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+            if 'trend_accel' not in df_w.columns:
+                df_w['trend_accel'] = np.tanh((c.pct_change(12) - c.pct_change(48) / 4) * 20)
+
+        missing_cols = [col for col in self.feature_cols if col not in df_w.columns]
+        for col in missing_cols:
+            df_w[col] = np.nan
+        if missing_cols:
+            miss_ratio = len(missing_cols) / max(len(self.feature_cols), 1)
+            if miss_ratio >= MISSING_WARN_RATIO:
+                sample = ', '.join(missing_cols[:6])
+                logger.warning(
+                    "XGBTrend 입력 피처 누락률 높음: %d/%d (%.1f%%) | sample=[%s]",
+                    len(missing_cols), len(self.feature_cols), miss_ratio * 100.0, sample
+                )
+
+        last_row = df_w[self.feature_cols].iloc[[-1]].astype(np.float32)
+        last_row = last_row.replace([np.inf, -np.inf], np.nan)
+        probs = self.model.predict_proba(last_row)[0]
+        return self._to_trend_signal(probs)
+
+    def _to_trend_signal(self, probs: np.ndarray) -> TrendSignal:
+        trend_dir = int(np.argmax(probs))
+        strength = float(np.clip((probs[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
+
+        if trend_dir == 2:
+            rev_prob = float(probs[0])
+        elif trend_dir == 0:
+            rev_prob = float(probs[2])
+        else:
+            rev_prob = 0.5
+
+        return TrendSignal(
+            trend_dir=trend_dir,
+            strength=strength,
+            rev_prob=rev_prob,
+            probs=tuple(float(p) for p in probs),
+        )
+
+    def save(self, path: str):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            pickle.dump({'model': self.model, 'feature_cols': self.feature_cols}, f)
+        logger.info(f"✅ XGBTrendBrain 저장: {path} ({len(self.feature_cols)}개 피처)")
+
+    @classmethod
+    def load(cls, path: str) -> 'XGBTrendBrain':
+        with open(path, 'rb') as f:
+            data = pickle.load(f)
+        instance = cls()
+        instance.model = data['model']
+        instance.feature_cols = data['feature_cols']
+        logger.info(f"✅ XGBTrendBrain 로드: {path} ({len(instance.feature_cols)}개 피처)")
+        return instance
 
 # ────────────────────────────────────────────────────────────────
 # 설정
@@ -62,6 +273,18 @@ VAL_RATIO    = 0.15
 ATR_WINDOW_5M = 14     # 14봉 ATR (= 70분)
 ATR_MULT      = 0.8    # 장벽 = ATR × 0.8 (수수료 커버 + 의미있는 방향만 레이블)
 MAX_HOLD_5M   = 12     # 최대 보유 12봉 = 1시간  ← target_ret_12와 동일 호라이즌
+
+
+def _default_label_jobs() -> int:
+    cpu = os.cpu_count() or 4
+    # 레이블 생성은 프로세스 병렬(joblib loky)이라 기본값을 보수적으로 제한
+    return max(1, min(8, cpu // 2))
+
+
+def _default_lgbm_jobs() -> int:
+    cpu = os.cpu_count() or 4
+    # LightGBM 내부 스레드는 과점유를 막기 위해 기본 8개 상한
+    return max(1, min(8, cpu))
 
 # RL CSV에서 오는 컬럼들
 RL_SIG_COLS = [   # elite strategy signals (+ NewEliteSignalEngine 3종)
@@ -90,20 +313,6 @@ MUST_INCLUDE = [
     # New Elite 핵심 축
     'sig_volume_confirm', 'sig_trend_health',
 ]
-
-
-def _build_config_hash(max_features: int) -> str:
-    cfg = {
-        'atr_mult': ATR_MULT,
-        'max_hold_5m': MAX_HOLD_5M,
-        'max_features': int(max_features),
-        'train_ratio': TRAIN_RATIO,
-        'val_ratio': VAL_RATIO,
-        'must_include': sorted(MUST_INCLUDE),
-        'rl_sig_cols': sorted(RL_SIG_COLS),
-    }
-    payload = json.dumps(cfg, ensure_ascii=True, sort_keys=True).encode('utf-8')
-    return hashlib.sha256(payload).hexdigest()[:16]
 
 
 # ────────────────────────────────────────────────────────────────
@@ -260,6 +469,49 @@ def build_labels(df: pd.DataFrame, n_jobs: int = -1):
     return labels
 
 
+def _resolve_lgbm_device(requested_device: str, X_probe: np.ndarray, y_probe: np.ndarray) -> str:
+    """요청된 LightGBM device를 확인하고 필요 시 CPU로 폴백."""
+    req = (requested_device or 'cpu').strip().lower()
+    if req == 'cpu':
+        return 'cpu'
+
+    if req == 'auto':
+        candidates = ['cuda', 'gpu', 'cpu']
+    elif req in ('gpu', 'cuda'):
+        candidates = [req, 'cpu']
+    else:
+        logger.warning(f"알 수 없는 lgbm_device='{requested_device}' → cpu 사용")
+        return 'cpu'
+
+    Xs = X_probe[: min(len(X_probe), 2048)]
+    ys = y_probe[: min(len(y_probe), 2048)]
+    if len(np.unique(ys)) < 2:
+        return 'cpu'
+
+    for dev in candidates:
+        try:
+            probe = LGBMClassifier(
+                n_estimators=8,
+                max_depth=3,
+                learning_rate=0.1,
+                num_leaves=15,
+                objective='multiclass',
+                num_class=3,
+                n_jobs=1,
+                random_state=42,
+                verbose=-1,
+                device=dev,
+            )
+            probe.fit(Xs, ys)
+            if dev != 'cpu':
+                logger.info(f"LightGBM device 확인 성공: {dev}")
+            return dev
+        except Exception as e:
+            logger.warning(f"LightGBM device '{dev}' 사용 불가: {e}")
+
+    return 'cpu'
+
+
 # ────────────────────────────────────────────────────────────────
 # 학습 / Optuna
 # ────────────────────────────────────────────────────────────────
@@ -267,12 +519,17 @@ def train(data_path: str = DATA_PATH,
           save_path: str = SAVE_PATH,
           n_trials: int  = N_TRIALS,
           max_features: int = MAX_FEATURES,
-          force_reuse_results: bool = False):
+          n_jobs_label: int = 0,
+          n_jobs_lgbm: int = 0,
+          lgbm_device: str = 'cpu'):
 
     df, feature_candidates = load_data(data_path)
-    data_hash = hashlib.sha256(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()[:16]
-    config_hash = _build_config_hash(max_features)
-    labels = build_labels(df)
+
+    n_jobs_label_eff = int(n_jobs_label) if int(n_jobs_label) > 0 else _default_label_jobs()
+    n_jobs_lgbm_eff  = int(n_jobs_lgbm)  if int(n_jobs_lgbm)  > 0 else _default_lgbm_jobs()
+
+    logger.info(f"병렬 설정: label_n_jobs={n_jobs_label_eff}, lgbm_n_jobs={n_jobs_lgbm_eff}")
+    labels = build_labels(df, n_jobs=n_jobs_label_eff)
 
     # 유효 행 마스크
     valid_mask = labels >= 0
@@ -328,28 +585,15 @@ def train(data_path: str = DATA_PATH,
     # 클래스 가중치 (불균형 보정)
     counts = np.bincount(y_train, minlength=3).astype(np.float64)
     class_weight = {i: counts.sum() / (3.0 * max(counts[i], 1)) for i in range(3)}
+    lgbm_device_eff = _resolve_lgbm_device(lgbm_device, X_train, y_train)
+    logger.info(f"LightGBM device={lgbm_device_eff}")
 
     # ── Optuna 튜닝 or 저장된 파라미터 재사용 ──
     results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
     if os.path.exists(results_path):
         with open(results_path) as f:
             prev = json.load(f)
-        if force_reuse_results:
-            logger.warning("⚠️ force_reuse_results=True: data/config 해시 검증을 건너뛰고 training_results.json 파라미터를 강제 재사용합니다.")
-        else:
-            prev_data_hash = prev.get('data_hash', '')
-            prev_cfg_hash  = prev.get('config_hash', '')
-            if prev_data_hash != data_hash:
-                logger.warning(f"⚠️ 데이터 해시 불일치 (저장: {prev_data_hash}, 현재: {data_hash}) → Optuna 재실행")
-                prev = None
-            elif not prev_cfg_hash:
-                logger.warning("⚠️ config_hash가 없어 재사용 신뢰 불가 → Optuna 재실행")
-                prev = None
-            elif prev_cfg_hash != config_hash:
-                logger.warning(f"⚠️ 설정 해시 불일치 (저장: {prev_cfg_hash}, 현재: {config_hash}) → Optuna 재실행")
-                prev = None
-            else:
-                logger.info(f"기존 training_results.json 발견 (data/config 해시 일치: {data_hash}/{config_hash}) → Optuna 건너뜀")
+        logger.info("기존 training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
     else:
         prev = None
 
@@ -362,13 +606,17 @@ def train(data_path: str = DATA_PATH,
             'class_weight': class_weight,
             'objective':    'multiclass',
             'num_class':    3,
-            'n_jobs':       -1,
+            'n_jobs':       n_jobs_lgbm_eff,
+            'device':       lgbm_device_eff,
             'random_state': 42,
             'verbose':      -1,
         }
         logger.info(f"재사용 파라미터: n_estimators={boosted_n} (×1.1), 나머지 고정")
         best_val_metric = prev.get('best_val_dir_f1', prev.get('best_val_bacc', None))
     else:
+        import optuna
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
         def objective(trial):
             params = dict(
                 n_estimators      = trial.suggest_int('n_estimators', 300, 1200),
@@ -383,7 +631,8 @@ def train(data_path: str = DATA_PATH,
                 class_weight      = class_weight,
                 objective         = 'multiclass',
                 num_class         = 3,
-                n_jobs            = -1,
+                n_jobs            = n_jobs_lgbm_eff,
+                device            = lgbm_device_eff,
                 random_state      = 42,
                 verbose           = -1,
             )
@@ -419,7 +668,8 @@ def train(data_path: str = DATA_PATH,
             'class_weight': class_weight,
             'objective': 'multiclass',
             'num_class': 3,
-            'n_jobs': -1,
+            'n_jobs': n_jobs_lgbm_eff,
+            'device': lgbm_device_eff,
             'random_state': 42,
             'verbose': -1,
         }
@@ -458,8 +708,6 @@ def train(data_path: str = DATA_PATH,
             'best_params'   : {k: v for k, v in best_params.items() if k != 'class_weight'},
             'atr_mult'      : ATR_MULT,
             'max_hold_bars' : MAX_HOLD_5M,
-            'data_hash'     : data_hash,
-            'config_hash'   : config_hash,
         }, f, indent=2)
 
     logger.info(f"결과 저장: {results_path}")
@@ -475,14 +723,19 @@ if __name__ == '__main__':
     parser.add_argument('--save',         type=str, default=SAVE_PATH)
     parser.add_argument('--n-trials',     type=int, default=N_TRIALS)
     parser.add_argument('--max-features', type=int, default=MAX_FEATURES)
-    parser.add_argument('--force-reuse-results', action='store_true',
-                        help='training_results.json의 data/config 해시가 달라도 Optuna 파라미터를 강제 재사용')
+    parser.add_argument('--n-jobs-label', type=int, default=0,
+                        help='Triple-Barrier 레이블 병렬 프로세스 수 (0이면 자동)')
+    parser.add_argument('--n-jobs-lgbm',  type=int, default=0,
+                        help='LightGBM 스레드 수 (0이면 자동)')
+    parser.add_argument('--lgbm-device',  type=str, default='cpu', choices=['cpu', 'gpu', 'cuda', 'auto'],
+                        help='LightGBM 디바이스 선택 (auto는 cuda→gpu→cpu 순 폴백)')
     args = parser.parse_args()
 
     print("\n" + "=" * 70)
     print("🚀 XGBTrendBrain 학습 (LightGBM 3-class, Triple-Barrier)")
     print(f"   data={args.data}  save={args.save}")
     print(f"   n_trials={args.n_trials}  max_features={args.max_features}")
+    print(f"   n_jobs_label={args.n_jobs_label}  n_jobs_lgbm={args.n_jobs_lgbm}  lgbm_device={args.lgbm_device}")
     print("=" * 70 + "\n")
 
     brain = train(
@@ -490,7 +743,9 @@ if __name__ == '__main__':
         save_path    = args.save,
         n_trials     = args.n_trials,
         max_features = args.max_features,
-        force_reuse_results = args.force_reuse_results,
+        n_jobs_label = args.n_jobs_label,
+        n_jobs_lgbm  = args.n_jobs_lgbm,
+        lgbm_device  = args.lgbm_device,
     )
 
     print("\n" + "=" * 70)

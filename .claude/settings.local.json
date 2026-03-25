@@ -10,7 +10,8 @@
       "Bash(conda run:*)",
       "Bash(conda env:*)",
       "Bash(which ollama:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(python3:*)"
     ]
   }
 }

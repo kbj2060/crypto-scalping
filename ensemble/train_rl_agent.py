@@ -24,9 +24,9 @@ Trading Router — 6-Agent Single-Directional MoE (v4 — Restructured + Phase 1
      - REINFORCE 제거 → 레짐별 에이전트 밸리데이션 PnL 기반 소프트 라벨
      - cross-entropy 학습, 에이전트와 동기화된 업데이트 주기
   H. 피쳐 축소 반영 (사용자 수정본 유지):
-     - STATE_DIM: signal(7)+elite(3)+alpha(6)+regime(1)+hmm(5)+synth(2)+pos(5)+mtf(3) = 32
-     - STACK_N=2 → STACKED=64
-     - Attention 4그룹: signal / elite+alpha / regime+hmm / synth
+     - STATE_DIM: signal(7)+elite(6)+alpha(6)+regime(1)+hmm(5)+synth(2)+pos(5)+mtf(3) = 35
+     - STACK_N=2 → STACKED=70
+     - Attention 4그룹: signal(7) / elite+alpha(12) / regime+hmm(6) / synth(2)
 
 [기존 유지]
 1. 6개 에이전트: bull/bear/chop_long/chop_short/normal_long/normal_short (2-Action)
@@ -37,7 +37,7 @@ Trading Router — 6-Agent Single-Directional MoE (v4 — Restructured + Phase 1
 6. MarketAttentionEncoder: 4그룹 Self-Attention (경량 ~3K params)
 """
 import os, sys, logging, random, argparse, gc, copy
-from collections import deque
+from collections import deque, Counter
 import numpy as np
 import pandas as pd
 import torch
@@ -525,6 +525,7 @@ class TradingEnv:
 
         self.MAX_EPISODE_STEPS = 4096 if phase == 'train' else len(self.df) - 1
         self.MAX_LEVERAGE = 1.0
+        self.MIN_HOLD_BARS = 6
 
         feat_cols = STATE_PRED + STATE_CONF + STATE_ELITE + STATE_ALPHA + REGIME_COLS + STATE_SYNTH
         self._feat_np  = self.df[feat_cols].values.astype(np.float32)
@@ -586,6 +587,7 @@ class TradingEnv:
 
     def step(self, action, leverage_rate=1.0):
         current_price = self._close_np[self.current_step]
+        decision_step = self.current_step
 
         if self.pos is not None:
             prev_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
@@ -615,6 +617,12 @@ class TradingEnv:
             elif global_action == 2:
                 if self.pos is None: is_entering_short = True
                 elif self.pos == 'LONG': is_closing = True
+
+        # 과잉 거래 방지: 강제청산이 아닌 일반 청산은 최소 보유 봉 수 이후에만 허용
+        if (not force_close) and is_closing and self.pos is not None:
+            hold_bars_now = max(self.hold_count, self.current_step - self.entry_idx)
+            if hold_bars_now < self.MIN_HOLD_BARS:
+                is_closing = False
 
         # [Phase 2] 청산 추적 초기화
         self._just_closed = False
@@ -721,7 +729,9 @@ class TradingEnv:
         # 수정: 추세장에서도 100스텝 관망 ≈ -0.3 → 한 번의 수익 트레이드로 상쇄 가능
         r5_idle = 0.0
         if self.pos is None:
-            regime_raw = self._feat_np[min(self.current_step, len(self._feat_np)-1)]
+            # 관망 패널티는 "현재 결정 시점" 레짐을 사용 (lookahead 방지)
+            regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
+            regime_raw = self._feat_np[regime_step]
             o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
             regime_vec = regime_raw[o:o+self._n_regime]
             regime_idx = int(np.argmax(regime_vec))
@@ -855,6 +865,8 @@ class PrioritizedRegimeReplayBuffer:
         # [Phase 2-E] 관망 경험 priority 감쇄
         if not in_pos:
             init_priority *= self.IDLE_DECAY
+        if not np.isfinite(init_priority) or init_priority <= 0.0:
+            init_priority = max(float(self.max_priority), 1.0)
 
         p = self._ptr
         self._buf_s[p]      = state
@@ -869,21 +881,49 @@ class PrioritizedRegimeReplayBuffer:
 
     def sample(self, batch_size):
         self.beta = min(1.0, self._beta_start + (1.0 - self._beta_start) * (self._total_stored / self._beta_anneal_steps))
-        pri   = self._priorities[:self._size] ** self.alpha
-        probs = pri / (pri.sum() + 1e-8)
+        raw_pri = np.asarray(self._priorities[:self._size], dtype=np.float64)
+        raw_pri = np.nan_to_num(raw_pri, nan=0.0, posinf=0.0, neginf=0.0)
+        raw_pri = np.clip(raw_pri, 0.0, None)
+        pri = raw_pri ** self.alpha
+
+        pri_sum = float(pri.sum())
+        if (not np.isfinite(pri_sum)) or pri_sum <= 0.0:
+            probs = np.full(self._size, 1.0 / max(self._size, 1), dtype=np.float64)
+        else:
+            probs = pri / pri_sum
+            probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+            probs = np.clip(probs, 0.0, None)
+            p_sum = float(probs.sum())
+            if (not np.isfinite(p_sum)) or p_sum <= 0.0:
+                probs = np.full(self._size, 1.0 / max(self._size, 1), dtype=np.float64)
+            else:
+                probs = probs / p_sum
+
         indices = np.random.choice(self._size, batch_size, p=probs, replace=True)
         weights = (1.0 / (self._size * probs[indices] + 1e-8)) ** self.beta
-        weights = (weights / weights.max()).astype(np.float32)
+        weights = np.nan_to_num(weights, nan=1.0, posinf=1.0, neginf=1.0)
+        w_max = float(np.max(weights)) if len(weights) > 0 else 1.0
+        if (not np.isfinite(w_max)) or w_max <= 0.0:
+            weights = np.ones_like(weights, dtype=np.float32)
+        else:
+            weights = (weights / w_max).astype(np.float32)
         return (self._buf_s[indices], self._buf_a[indices],
                 self._buf_r[indices], self._buf_ns[indices],
                 self._buf_d[indices].astype(np.float32), indices, weights)
 
     def update_priorities(self, indices, td_errors):
         for idx, err in zip(indices, td_errors):
-            p = float(abs(err) + 1e-6) ** self.alpha
+            err_f = float(err)
+            if not np.isfinite(err_f):
+                continue
+            p = float(abs(err_f) + 1e-6) ** self.alpha
+            if (not np.isfinite(p)) or p <= 0.0:
+                continue
             self._priorities[idx] = p
             if p > self.max_priority:
                 self.max_priority = p
+        if (not np.isfinite(self.max_priority)) or self.max_priority <= 0.0:
+            self.max_priority = 1.0
 
     def __len__(self): return self._size
 
@@ -970,14 +1010,14 @@ class RobustIQN(nn.Module):
         feat_input = torch.cat([state, attn_out], dim=1)
         feat       = self.feat_extractor(feat_input)
 
-        # [BUGFIX] pos(5)를 건너뛰고 FEATURE_DIM(24) + MTF(3)를 정확히 추출
-        # STATE 레이아웃: [signal(7) elite(3) alpha(6) regime(1) hmm(5) synth(2)] [pos(5)] [mtf(3)]
-        #                 |<-------------- FEATURE_DIM=24 ------------->|  skip    |<-MTF->|
+        # [BUGFIX] pos(5)를 건너뛰고 FEATURE_DIM(27) + MTF(3)를 정확히 추출
+        # STATE 레이아웃: [signal(7) elite(6) alpha(6) regime(1) hmm(5) synth(2)] [pos(5)] [mtf(3)]
+        #                 |<-------------- FEATURE_DIM=27 ------------->|  skip    |<-MTF->|
         pos_start = last_frame_start + FEATURE_DIM
         mtf_start = pos_start + 5
         market_no_pos = torch.cat([
-            state[:, last_frame_start : pos_start],       # FEATURE_DIM [0:24]
-            state[:, mtf_start : last_frame_start + STATE_DIM]  # MTF [29:32]
+            state[:, last_frame_start : pos_start],       # FEATURE_DIM [0:27]
+            state[:, mtf_start : last_frame_start + STATE_DIM]  # MTF [32:35]
         ], dim=1)
         gate = torch.sigmoid(self.context_gate(market_no_pos))
         feat = feat * gate
@@ -998,7 +1038,6 @@ class IQNAgent:
 
     def __init__(self, model, lr=5e-5, gamma=0.99, tau=0.005, device='cuda', cvar_threshold=0.25):
         self.model = model
-        self.state_dim = model.feat_extractor[0].in_features
         self.target_model = copy.deepcopy(model).to(device)
         self.target_model.eval()
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
@@ -1023,7 +1062,15 @@ class IQNAgent:
         return torch.argmax(q).item()
 
     def update(self, batch_size):
-        if len(self.memory) < batch_size: return
+        stats = {
+            'updated': False,
+            'loss': float('nan'),
+            'loss_nan': 0,
+            'grad_nan': 0,
+            'td_nan': 0,
+        }
+        if len(self.memory) < batch_size:
+            return stats
         is_per = isinstance(self.memory, PrioritizedRegimeReplayBuffer)
         if is_per:
             s, a, r, ns, d, per_indices, per_weights = self.memory.sample(batch_size)
@@ -1059,24 +1106,42 @@ class IQNAgent:
         if is_per:
             loss = (loss_per_sample * per_w).mean()
             td_err_np = td_error.detach().abs().mean(dim=(1, 2)).cpu().numpy()
+            stats['td_nan'] = int(np.size(td_err_np) - np.isfinite(td_err_np).sum())
             self.memory.update_priorities(per_indices, td_err_np)
         else:
             loss = loss_per_sample.mean()
 
+        stats['loss'] = float(loss.detach().cpu().item()) if torch.isfinite(loss) else float('nan')
+        stats['loss_nan'] = int(not bool(torch.isfinite(loss).item()))
+
         self.optimizer.zero_grad()
         loss.backward()
+        grad_nan = 0
+        for p in self.model.parameters():
+            if p.grad is not None and (not torch.isfinite(p.grad).all()):
+                grad_nan += 1
+        stats['grad_nan'] = int(grad_nan)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.optimizer.step()
 
         for tp, p in zip(self.target_model.parameters(), self.model.parameters()):
             tp.data.copy_(self.tau * p.data + (1 - self.tau) * tp.data)
 
+        stats['updated'] = True
+        return stats
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. [Phase 3-G] GatingNet7 — Supervised Learning 전환
 # ═══════════════════════════════════════════════════════════════════════════
 class GatingNet7(nn.Module):
-    """시장 상태 → [flat, bull, bear, chop_L, chop_S, norm_L, norm_S] (7-way)"""
+    """시장 상태 → [flat, bull, bear, chop_L, chop_S, norm_L, norm_S] (7-way)
+    
+    [v5 FIX] forward에서 temperature 하드코딩 제거.
+    기존 T=0.5 하드코딩이 SL의 soft label(T=2.0)과 반대 방향으로 작용하여
+    미세한 라벨 차이를 과도하게 증폭, 잘못된 확신적 라우팅을 유발함.
+    이제 temperature를 인자로 받되, 학습 시에는 T=1.0(중립), 추론 시 조절 가능.
+    """
     def __init__(self, state_dim, hidden_dim=64):
         super().__init__()
         self.net = nn.Sequential(
@@ -1085,9 +1150,9 @@ class GatingNet7(nn.Module):
             nn.Linear(32, 7)
         )
 
-    def forward(self, x):
+    def forward(self, x, temperature: float = 1.0):
         logits = self.net(x)
-        return F.softmax(logits / 0.5, dim=-1)
+        return F.softmax(logits / max(temperature, 1e-4), dim=-1)
 
 
 class GatingPerformanceTracker:
@@ -1129,22 +1194,83 @@ class GatingPerformanceTracker:
 
     def record(self, agent_name: str, dominant_regime: str, pnl_pct: float):
         """에피소드 종료 시 호출: 해당 에이전트의 레짐별 PnL 기록"""
-        if dominant_regime in self._records:
-            self._records[dominant_regime][agent_name].append(pnl_pct)
+        if not np.isfinite(pnl_pct):
+            return
+        if dominant_regime in self._records and agent_name in self._records[dominant_regime]:
+            self._records[dominant_regime][agent_name].append(float(pnl_pct))
 
     def get_soft_labels(self, regime_name: str, temperature: float = 2.0) -> np.ndarray:
-        """특정 레짐에서의 에이전트별 평균 PnL → softmax 소프트 라벨 (7,)
+        """특정 레짐의 상대 성능 기반 soft label (7,).
 
-        flat 에이전트의 PnL은 항상 0으로 가정 (기준선).
-        temperature로 label smoothness 조절 (높을수록 uniform에 가까움).
+        [v5 FIX] 절대 성과 게이트 추가:
+        모든 non-flat 에이전트의 평균 PnL이 음수이면 flat 확률을 대폭 상향.
+        기존 구조는 "패자들 중 상대적 승자"를 선택하여 모든 에이전트가 손실 중일 때도
+        강제 진입을 유도해 validation PnL이 양수로 올라오지 못하는 악순환을 유발.
+
+        절대 PnL(특히 flat=0) 비교는 flat 붕괴를 유발하므로,
+        non-flat 에이전트끼리 상대 점수로 정규화한 뒤 flat에는 작은 prior 패널티를 둔다.
         """
         scores = np.zeros(7, dtype=np.float32)
-        for agent_name, gate_idx in self._AGENT_TO_GATE_IDX.items():
-            records = self._records.get(regime_name, {}).get(agent_name, deque())
-            if len(records) >= 3:
-                scores[gate_idx] = float(np.mean(records))
+
+        nonflat_agents = ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']
+        means: dict[str, float] = {}
+        for a in nonflat_agents:
+            rec = self._records.get(regime_name, {}).get(a, deque())
+            rec_arr = np.asarray(rec, dtype=np.float32)
+            rec_arr = rec_arr[np.isfinite(rec_arr)]
+            if len(rec_arr) >= 3:
+                means[a] = float(np.mean(rec_arr))
+
+        # 데이터가 부족하면 flat 편향 대신 거의 균등 라벨로 시작
+        if len(means) < 2:
+            exp_s = np.exp(scores - scores.max())
+            return exp_s / (exp_s.sum() + 1e-8)
+
+        vals = np.array(list(means.values()), dtype=np.float32)
+
+        # ── [v5 FIX] 절대 성과 게이트 ──────────────────────────────────
+        # 모든 (또는 대부분의) non-flat 에이전트가 음수 PnL이면,
+        # 이 레짐에서는 "아무것도 안 하는 게 나은" 상황 → flat 확률 대폭 상향.
+        # 이 게이트가 없으면 상대 평가에서 "가장 덜 잃는 에이전트"를 확신적으로 선택해
+        # 실제로는 모두 손실인데도 진입을 강제하는 문제 발생.
+        n_positive = sum(1 for v in vals if v > 0)
+        all_negative = (n_positive == 0)
+        mostly_negative = (n_positive <= 1 and float(np.mean(vals)) < -0.5)
+
+        if all_negative or mostly_negative:
+            # flat에 강한 우위를 줌. non-flat은 상대 점수를 유지하되 전체적으로 억제.
+            flat_idx = self._AGENT_TO_GATE_IDX['flat']
+            center = float(np.median(vals))
+            spread = float(np.std(vals)) + 1e-6
+            for a in nonflat_agents:
+                idx = self._AGENT_TO_GATE_IDX[a]
+                if a in means:
+                    z = (means[a] - center) / spread
+                    scores[idx] = float(np.clip(z, -3.0, 3.0))
+                else:
+                    scores[idx] = -0.25
+            # flat을 non-flat 중 최고보다 확실히 위에 배치
+            scores[flat_idx] = float(np.max(scores[1:])) + 0.8
+            scores = scores / (temperature + 1e-8)
+            exp_s = np.exp(scores - scores.max())
+            return exp_s / (exp_s.sum() + 1e-8)
+        # ── 절대 성과 게이트 끝 ────────────────────────────────────────
+
+        center = float(np.median(vals))
+        spread = float(np.std(vals)) + 1e-6
+
+        # non-flat은 레짐 내 상대 점수(표준화)로 매핑
+        for a in nonflat_agents:
+            idx = self._AGENT_TO_GATE_IDX[a]
+            if a in means:
+                z = (means[a] - center) / spread
+                scores[idx] = float(np.clip(z, -3.0, 3.0))
             else:
-                scores[gate_idx] = 0.0  # 데이터 부족 시 flat과 동일
+                scores[idx] = -0.25
+
+        # flat은 "평균 non-flat보다 조금 불리"한 prior를 둬 collapse 방지
+        flat_idx = self._AGENT_TO_GATE_IDX['flat']
+        scores[flat_idx] = float(np.mean([scores[self._AGENT_TO_GATE_IDX[a]] for a in nonflat_agents]) - 0.20)
 
         # softmax with temperature
         scores = scores / (temperature + 1e-8)
@@ -1159,6 +1285,20 @@ class GatingPerformanceTracker:
                 return False
         return True
 
+    @classmethod
+    def heuristic_labels(cls, regime_name: str) -> np.ndarray:
+        """초기 워밍업/붕괴 복구용 레짐 기반 휴리스틱 소프트 라벨."""
+        # 순서: [flat, bull, bear, chop_long, chop_short, normal_long, normal_short]
+        if regime_name == 'bull':
+            v = np.array([0.08, 0.55, 0.03, 0.06, 0.03, 0.22, 0.03], dtype=np.float32)
+        elif regime_name == 'bear':
+            v = np.array([0.08, 0.03, 0.55, 0.03, 0.06, 0.03, 0.22], dtype=np.float32)
+        elif regime_name in ('chop', 'whipsaw'):
+            v = np.array([0.14, 0.02, 0.02, 0.34, 0.34, 0.07, 0.07], dtype=np.float32)
+        else:  # normal
+            v = np.array([0.12, 0.05, 0.05, 0.06, 0.06, 0.33, 0.33], dtype=np.float32)
+        return v / (v.sum() + 1e-8)
+
 
 def train_gating_supervised(gating_net, optimizer, tracker: GatingPerformanceTracker,
                             df_train, device, hmm_detector=None, mtf_features=None,
@@ -1170,22 +1310,28 @@ def train_gating_supervised(gating_net, optimizer, tracker: GatingPerformanceTra
     3. tracker에서 해당 레짐의 소프트 라벨 가져옴
     4. GatingNet 출력과 cross-entropy 계산
     """
-    if not tracker.has_enough_data(min_records=3):
-        return 0.0
+    use_tracker_labels = tracker.has_enough_data(min_records=3)
 
     gating_net.train()
 
+    # [v5 FIX] SL 학습용 env에도 독립 HMM — _build_state가 마스터 HMM 상태를 오염하지 않도록
+    sl_hmm = copy.deepcopy(hmm_detector) if hmm_detector is not None else None
     env = TradingEnv(df_train, phase='val', agent_role='neutral', fee=0.0005,
-                     hmm_detector=hmm_detector, mtf_features=mtf_features)
+                     hmm_detector=sl_hmm, mtf_features=mtf_features)
 
     states = []
     labels = []
+    valid_label_count = 0
     max_idx = len(df_train) - 2
 
     for _ in range(n_samples):
-        idx = random.randint(0, max_idx)
-        state = env._build_state(idx)
-        stacked = np.concatenate([np.zeros(STATE_DIM, np.float32)] * (STACK_N - 1) + [state])
+        idx = random.randint(1, max_idx)
+        # [v5 FIX] 연속 봉으로 frame stack을 현실적으로 생성
+        # 기존: 첫 프레임이 항상 zero → 추론 시 실제 이전 관측값과 분포 불일치
+        # 수정: idx-1, idx 연속 2봉으로 stacked state 생성
+        prev_state = env._build_state(idx - 1)
+        curr_state = env._build_state(idx)
+        stacked = np.concatenate([prev_state, curr_state])
         states.append(stacked)
 
         # 해당 봉의 레짐 확인
@@ -1195,25 +1341,114 @@ def train_gating_supervised(gating_net, optimizer, tracker: GatingPerformanceTra
         regime_idx = int(np.argmax(regime_vec))
         regime_name = GatingPerformanceTracker._REGIME_NAMES[regime_idx]
 
-        soft_label = tracker.get_soft_labels(regime_name, temperature=temperature)
+        if use_tracker_labels:
+            soft_label = tracker.get_soft_labels(regime_name, temperature=temperature)
+        else:
+            soft_label = GatingPerformanceTracker.heuristic_labels(regime_name)
+        soft_label = np.asarray(soft_label, dtype=np.float32)
+        soft_label = np.nan_to_num(soft_label, nan=0.0, posinf=0.0, neginf=0.0)
+        soft_label = np.clip(soft_label, 0.0, None)
+        s = float(soft_label.sum())
+        if (not np.isfinite(s)) or s <= 0.0:
+            soft_label = GatingPerformanceTracker.heuristic_labels(regime_name)
+        else:
+            valid_label_count += 1
+            soft_label = soft_label / s
         labels.append(soft_label)
 
     states_t = torch.FloatTensor(np.array(states)).to(device)
     labels_t = torch.FloatTensor(np.array(labels)).to(device)
+    labels_t = torch.nan_to_num(labels_t, nan=0.0, posinf=0.0, neginf=0.0)
+    labels_t = labels_t / labels_t.sum(dim=-1, keepdim=True).clamp_min(1e-8)
 
     pred = gating_net(states_t)
-    loss = -(labels_t * torch.log(pred + 1e-8)).sum(dim=-1).mean()
+    pred = torch.clamp(pred, 1e-8, 1.0)
+
+    with torch.no_grad():
+        top1 = pred.argmax(dim=-1)
+        flat_top1_ratio = float((top1 == 0).float().mean().item())
+        pred_entropy = float((-(pred * torch.log(pred)).sum(dim=-1)).mean().item())
+        label_entropy = float((-(labels_t * torch.log(labels_t.clamp_min(1e-8))).sum(dim=-1)).mean().item())
+        label_valid_rate = float(valid_label_count / max(1, n_samples))
+
+    loss = -(labels_t * torch.log(pred)).sum(dim=-1).mean()
+    if not torch.isfinite(loss):
+        logger.warning("⚠️ [GATING-SL] loss가 비정상(NaN/Inf)이라 스텝을 건너뜁니다.")
+        optimizer.zero_grad(set_to_none=True)
+        return {
+            'loss': float('nan'),
+            'grad_nan': 0,
+            'flat_top1_ratio': flat_top1_ratio,
+            'pred_entropy': pred_entropy,
+            'label_entropy': label_entropy,
+            'label_valid_rate': label_valid_rate,
+        }
 
     optimizer.zero_grad()
     loss.backward()
+    bad_grad = False
+    for p in gating_net.parameters():
+        if p.grad is not None and (not torch.isfinite(p.grad).all()):
+            bad_grad = True
+            break
+    if bad_grad:
+        logger.warning("⚠️ [GATING-SL] gradient가 비정상(NaN/Inf)이라 optimizer.step()을 건너뜁니다.")
+        optimizer.zero_grad(set_to_none=True)
+        return {
+            'loss': float('nan'),
+            'grad_nan': 1,
+            'flat_top1_ratio': flat_top1_ratio,
+            'pred_entropy': pred_entropy,
+            'label_entropy': label_entropy,
+            'label_valid_rate': label_valid_rate,
+        }
     torch.nn.utils.clip_grad_norm_(gating_net.parameters(), 1.0)
     optimizer.step()
 
-    return loss.item()
+    return {
+        'loss': float(loss.item()),
+        'grad_nan': 0,
+        'flat_top1_ratio': flat_top1_ratio,
+        'pred_entropy': pred_entropy,
+        'label_entropy': label_entropy,
+        'label_valid_rate': label_valid_rate,
+    }
+
+
+def _health_status_train(pnl_med: float, wr_med: float, nan_count: int) -> str:
+    if nan_count > 0 or pnl_med < -20.0:
+        return 'BAD'
+    if pnl_med < -8.0 or wr_med < 43.0:
+        return 'WARN'
+    return 'OK'
+
+
+def _health_status_gate(loss_value: float, flat_top1_ratio: float, pred_entropy: float) -> str:
+    if (not np.isfinite(loss_value)) or flat_top1_ratio >= 0.95:
+        return 'BAD'
+    if flat_top1_ratio >= 0.80 or pred_entropy < 0.35:
+        return 'WARN'
+    return 'OK'
+
+
+def _health_status_val(pnl_pct: float, trades: int, declined_ratio: float) -> str:
+    if pnl_pct < -10.0 or trades == 0:
+        return 'BAD'
+    if pnl_pct < 0.0 or declined_ratio > 0.60:
+        return 'WARN'
+    return 'OK'
+
+
+def _update_bad_streak(streaks: dict, key: str, status: str) -> int:
+    if status == 'BAD':
+        streaks[key] = int(streaks.get(key, 0)) + 1
+    else:
+        streaks[key] = 0
+    return streaks[key]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. GatingRouter7 (추론용 — 변경 없음)
+# 5. GatingRouter7 (추론/밸리데이션 라우터)
 # ═══════════════════════════════════════════════════════════════════════════
 class GatingRouter7:
     _W_IDX = {'flat': 0, 'bull': 1, 'bear': 2, 'chop_long': 3, 'chop_short': 4, 'normal_long': 5, 'normal_short': 6}
@@ -1221,18 +1456,53 @@ class GatingRouter7:
 
     def __init__(self, models_dict, gating_net, device='cuda',
                  hmm_detector=None, kelly_sizer=None, mtf_features=None,
-                 current_ep: int = 0):
-        self.models     = {k: v.eval() for k, v in models_dict.items()}
-        self.gating_net = gating_net.eval()
+                 current_ep: int = 0,
+                 stochastic_eval: bool = True,
+                 noisy_eval_samples: int = 3,
+                 preserve_model_mode: bool = True,
+                 flat_escape_patience: int = 96,
+                 allow_forced_entry: bool = False):
+        # 중요: router에서 .eval()로 원본 모델 모드를 바꾸지 않는다.
+        # (validation 후 train loop가 eval 모드에 고정되는 누수 방지)
+        self.models     = dict(models_dict)
+        self.gating_net = gating_net
         self.device     = device
         self._active_agent = None
         self._frame_stack  = deque(maxlen=STACK_N)
         self.hmm   = hmm_detector
         self.kelly = kelly_sizer or KellyCriterionSizer()
         self.mtf   = mtf_features
-        # [FIX] 학습 초기에는 q_z 임계값을 낮춰서 진입 허용, 점진 상승
-        # ep=0→0.1, ep=200→0.3, ep=500+→0.5 (최종)
-        self._q_z_threshold = float(np.clip(0.1 + current_ep * 0.002, 0.1, 0.5))
+
+        self._stochastic_eval     = bool(stochastic_eval)
+        self._noisy_eval_samples  = max(1, int(noisy_eval_samples))
+        self._preserve_model_mode = bool(preserve_model_mode)
+
+        self._flat_streak          = 0
+        self._flat_escape_patience = max(16, int(flat_escape_patience))
+        self._flat_escape_ratio    = 0.90
+        self._flat_escape_edge     = 0.01
+        self._allow_forced_entry   = bool(allow_forced_entry)
+
+        # 과도한 임계값 상승(최대 0.5)으로 진입이 봉쇄되던 문제 완화
+        # ep=0 -> 0.02, ep=200 -> 0.10, ep>=250 -> 0.12 상한
+        self._q_z_threshold = float(np.clip(0.02 + current_ep * 0.0004, 0.02, 0.12))
+
+        # ── [v6 Anti-Churning] Q값 비대칭 마진 (hysteresis) ──
+        #
+        # 근본 원인: 2-Action에서 Q(exit) ≈ Q(hold) → noise 수준의 차이로 청산 반복
+        # 해결: 청산/진입에 최소 Q값 차이(margin)를 요구
+        #
+        # 시간 기반 제약(MIN_HOLD, COOLDOWN)은 의도적으로 넣지 않음:
+        # → 폭락/폭등 시 즉각 대응이 불가능해지는 치명적 단점
+        # → margin 방식은 시장이 확실한 신호를 주면 즉시 행동 가능
+        #
+        # EXIT_MARGIN: Q(exit)-Q(hold) > margin이어야 청산
+        #   → 진입 직후 시장이 살짝 흔들려도 유지, 확실히 나빠져야 청산
+        #   → 반전 시그널(wants_reverse)은 마진 없이 즉시 청산 허용
+        # ENTRY_MARGIN: Q(enter)-Q(flat) > margin이어야 진입
+        #   → q_z_threshold 위에 추가 필터, 미세한 에지로 섣부른 진입 방지
+        self._EXIT_MARGIN  = 0.003   # 청산: Q(exit)가 Q(hold)보다 이만큼 높아야
+        self._ENTRY_MARGIN = 0.002   # 진입: Q(enter)가 Q(flat)보다 이만큼 높아야
 
     def _state_tensor(self, features, pos):
         preds      = np.array([features.get(c, 0.) for c in STATE_PRED],   dtype=np.float32)
@@ -1268,20 +1538,54 @@ class GatingRouter7:
         vec    = np.concatenate(frames)
         return torch.tensor(vec, dtype=torch.float32).unsqueeze(0).to(self.device)
 
+    def _forward_model(self, model, state, num_quantiles: int = 32):
+        prev_mode = bool(model.training)
+        try:
+            if self._stochastic_eval:
+                model.train()
+                if hasattr(model, 'reset_noise'):
+                    model.reset_noise()
+            else:
+                model.eval()
+            with torch.no_grad():
+                return model(state, num_quantiles=num_quantiles)
+        finally:
+            if self._preserve_model_mode:
+                model.train(prev_mode)
+
+    def _forward_gating(self, state):
+        prev_mode = bool(self.gating_net.training)
+        try:
+            self.gating_net.eval()
+            with torch.no_grad():
+                # [v5 FIX] 추론 시에만 T=0.5로 샤프닝, 학습 시에는 T=1.0 (forward 기본값)
+                return self.gating_net(state, temperature=0.5)[0].cpu()
+        finally:
+            if self._preserve_model_mode:
+                self.gating_net.train(prev_mode)
+
     def _cvar_q(self, model, state, agent_name='normal_long'):
         threshold = self._CVAR_THRESH.get(agent_name, 0.50)
         nq = 32
-        with torch.no_grad():
-            q_quants, tau = model(state, num_quantiles=nq)
+        k = max(4, int(nq * threshold))
+        n_samples = self._noisy_eval_samples if self._stochastic_eval else 1
+        acc = None
+        for _ in range(n_samples):
+            q_quants, tau = self._forward_model(model, state, num_quantiles=nq)
             sort_idx = tau[0, :, 0].argsort()
-            k = max(4, int(nq * threshold))
-            return q_quants[0][sort_idx][:k].mean(dim=0).cpu()
+            q_cvar = q_quants[0][sort_idx][:k].mean(dim=0).cpu()
+            acc = q_cvar if acc is None else (acc + q_cvar)
+        return acc / float(n_samples)
 
     def _full_quantiles(self, model, state, nq=32):
-        with torch.no_grad():
-            q_quants, tau = model(state, num_quantiles=nq)
+        n_samples = self._noisy_eval_samples if self._stochastic_eval else 1
+        acc = None
+        for _ in range(n_samples):
+            q_quants, tau = self._forward_model(model, state, num_quantiles=nq)
             sort_idx = tau[0, :, 0].argsort()
-            return q_quants[0][sort_idx].cpu()
+            q_full = q_quants[0][sort_idx].cpu()
+            acc = q_full if acc is None else (acc + q_full)
+        return acc / float(n_samples)
 
     def decide(self, features, pos):
         cur_pos = pos.get('type')
@@ -1296,6 +1600,7 @@ class GatingRouter7:
             _hmm_info = {}
 
         if cur_pos is not None:
+            self._flat_streak = 0
             agent_name = self._active_agent or ('normal_long' if cur_pos == 'LONG' else 'normal_short')
             q_cvar     = self._cvar_q(self.models[agent_name], state, agent_name=agent_name)
             best       = int(q_cvar.argmax().item())
@@ -1303,15 +1608,29 @@ class GatingRouter7:
             if agent_name in ['bear', 'chop_short', 'normal_short'] and best == 1:
                 eval_best = 2
             wants_reverse = (cur_pos == 'LONG' and eval_best == 2) or (cur_pos == 'SHORT' and eval_best == 1)
-            if best == 0 or wants_reverse:
-                self._active_agent = None
-                return 0, 0.0, {'agent': f'{agent_name}_exit', **_hmm_info}
-            else:
-                hold_action = 1 if cur_pos == 'LONG' else 2
-                return hold_action, 0.0, {'agent': 'HOLD', **_hmm_info}
 
-        with torch.no_grad():
-            w = self.gating_net(state)[0].cpu()
+            # ── [v6] 비대칭 청산 마진 (hysteresis) ──
+            # 반전 시그널 → 즉시 청산 (폭락/폭등 대응)
+            # 일반 청산  → Q(exit)-Q(hold) > EXIT_MARGIN 이어야 허용
+            #              margin 미달이면 유지 (noise 수준의 흔들림 무시)
+            if wants_reverse:
+                self._active_agent = None
+                return 0, 0.0, {'agent': f'{agent_name}_reverse', **_hmm_info}
+
+            q_exit, q_hold = float(q_cvar[0]), float(q_cvar[1])
+            exit_gap = q_exit - q_hold
+
+            if best == 0 and exit_gap > self._EXIT_MARGIN:
+                # 확실한 청산 신호
+                self._active_agent = None
+                return 0, 0.0, {'agent': f'{agent_name}_exit(gap={exit_gap:.4f})', **_hmm_info}
+            else:
+                # 유지 (best==1이거나, best==0이지만 margin 미달)
+                hold_action = 1 if cur_pos == 'LONG' else 2
+                _hold_reason = 'HOLD' if best == 1 else f'HOLD(gap={exit_gap:.4f}<{self._EXIT_MARGIN})'
+                return hold_action, 0.0, {'agent': _hold_reason, **_hmm_info}
+
+        w = self._forward_gating(state)
 
         q_map = {}
         for name in ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']:
@@ -1322,8 +1641,10 @@ class GatingRouter7:
             if best == 0 or float(q[best]) <= 0: return 0.0
             return float(min(max(0., q[best] - q[0]), 0.1) * 10.0)
 
+        # flat 확률에 소폭 패널티를 줘 장기 무거래 고착 완화
+        flat_score = w[0].item() * 0.95
         scores = {
-            'flat':         w[0].item(),
+            'flat':         flat_score,
             'bull':         w[1].item() * (1 + _adv_n(q_map['bull'])),
             'bear':         w[2].item() * (1 + _adv_n(q_map['bear'])),
             'chop_long':    w[3].item() * (1 + _adv_n(q_map['chop_long'])),
@@ -1334,25 +1655,62 @@ class GatingRouter7:
 
         long_edge  = scores['bull'] + scores.get('normal_long', 0.) * 0.5 - scores['flat']
         short_edge = scores['bear'] + scores.get('normal_short', 0.) * 0.5 - scores['flat']
-        _edge_info = {'long_edge': long_edge, 'short_edge': short_edge}
+        _edge_info = {'long_edge': long_edge, 'short_edge': short_edge, 'flat_streak': int(self._flat_streak)}
 
         best_name = max(scores, key=scores.get)
         _w_arr = w.numpy()
+        forced_escape = False
+        if best_name == 'flat':
+            self._flat_streak += 1
+            _edge_info['flat_streak'] = int(self._flat_streak)
+            nonflat_names = ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']
+            best_nonflat = max(nonflat_names, key=lambda n: scores[n])
+            # flat이 근소 우위이고 비-flat edge가 유의하면 비-flat에 기회 부여
+            soft_escape = (
+                scores[best_nonflat] >= scores['flat'] * self._flat_escape_ratio
+                and max(abs(long_edge), abs(short_edge)) >= self._flat_escape_edge
+            )
+            # 장기 flat 고착 시에는 validation에서만 강제 탈출 허용
+            forced_escape = (
+                self._allow_forced_entry
+                and self._flat_streak >= self._flat_escape_patience
+                and scores[best_nonflat] > 0.0
+            )
+            if soft_escape or forced_escape:
+                best_name = best_nonflat
+                _edge_info['flat_escape'] = 'forced' if forced_escape else 'soft'
         if best_name == 'flat':
             return 0, 0.0, {'agent': 'FLAT', **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+        self._flat_streak = 0
 
         q_sel        = q_map[best_name]
         agent_action = int(q_sel.argmax().item())
         if agent_action == 0:
-            return 0, 0.0, {'agent': f'{best_name}_declined', **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+            # forced_escape 시에는 최소한의 방향성 행동을 허용해 Tr=0 붕괴를 끊는다.
+            if forced_escape and self._allow_forced_entry:
+                agent_action = 1
+            else:
+                return 0, 0.0, {'agent': f'{best_name}_declined', **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+
+        # ── [v6] 진입 마진: Q(enter)-Q(flat) > ENTRY_MARGIN 이어야 진입 ──
+        # q_z_threshold와 별개로, Q값 절대 차이 기준 추가 필터
+        # 시장이 확실한 신호를 주면 margin을 쉽게 넘으므로 폭등/폭락 대응에 지장 없음
+        q_enter = float(q_sel[agent_action])
+        q_flat  = float(q_sel[0])
+        entry_gap = q_enter - q_flat
+        if entry_gap < self._ENTRY_MARGIN and not (forced_escape and self._allow_forced_entry):
+            return 0, 0.0, {'agent': f'{best_name}_weak(gap={entry_gap:.4f}<{self._ENTRY_MARGIN})',
+                            **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
 
         q_vals = q_sel.float()
         q_std  = q_vals.std().item()
         q_adv  = float(q_vals[agent_action] - q_vals[0])
         q_z    = q_adv / (q_std + 1e-6)
 
-        if q_z < self._q_z_threshold:
+        if q_z < self._q_z_threshold and not (forced_escape and self._allow_forced_entry):
             return 0, 0.0, {'agent': f'{best_name}_low_conviction(z={q_z:.2f},thr={self._q_z_threshold:.2f})', **_edge_info, 'kelly': 0.0, 'gating_w': _w_arr, **_hmm_info}
+        if q_z < self._q_z_threshold and forced_escape and self._allow_forced_entry:
+            _edge_info['qz_override'] = 1
 
         gating_conf = float(w[self._W_IDX[best_name]].item())
         q_full      = self._full_quantiles(self.models[best_name], state)
@@ -1365,7 +1723,7 @@ class GatingRouter7:
 
         self._active_agent = best_name
         return val_action, lev, {
-            'agent': best_name, 'score': scores[best_name], 'kelly': lev,
+            'agent': f'{best_name}_forced' if forced_escape else best_name, 'score': scores[best_name], 'kelly': lev,
             **kelly_stats, **_edge_info, 'gating_w': _w_arr, **_hmm_info,
         }
 
@@ -1387,7 +1745,7 @@ def train():
     df_train_reg = df_train[REGIME_COLS].values.astype(np.float32)
 
     MAX_EP    = 4096
-    _safe_end = len(df_train) - MAX_EP - 1
+    _safe_end = max(0, len(df_train) - MAX_EP - 1)
 
     agent_configs = {
         'bull':         {'action_dim': 2, 'target_regimes': ['regime_bull'],                   'cvar_threshold': 0.60},
@@ -1422,6 +1780,11 @@ def train():
                                         warmup_lev=0.5, warmup_until_ep=100)
     logger.info("[HMM] 초기 학습 완료. Kelly Sizer 초기화 완료 (워밍업: ep<100 → lev=0.5).")
 
+    # [v5 FIX] 에이전트별 독립 HMM 인스턴스 (BUG-1 수정)
+    # 마스터 hmm_detector는 온라인 업데이트 및 주기적 동기화 전용.
+    # 각 에이전트 env에는 deepcopy를 제공하여 _alpha/_obs_buffer 상호 오염 방지.
+    agent_hmm_instances = {}
+
     logger.info("[MTF] 훈련 데이터 멀티타임프레임 피처 선계산 중...")
     mtf_train = MultiTimeframeFeatures(df_train['close'].values.astype(np.float32))
     logger.info("[MTF] 검증 데이터 멀티타임프레임 피처 선계산 중...")
@@ -1429,8 +1792,9 @@ def train():
     logger.info("[MTF] 선계산 완료.")
 
     for name, cfg in agent_configs.items():
+        agent_hmm_instances[name] = copy.deepcopy(hmm_detector)
         envs[name] = TradingEnv(df_train, phase='train', agent_role=name, fee=0.0005,
-                                hmm_detector=hmm_detector, mtf_features=mtf_train)
+                                hmm_detector=agent_hmm_instances[name], mtf_features=mtf_train)
         models[name] = RobustIQN(STACKED_STATE_DIM, cfg['action_dim'], raw_state_dim=STATE_DIM).to(device)
         agents[name] = IQNAgent(models[name], device=device, cvar_threshold=cfg['cvar_threshold'])
         agents[name].memory = PrioritizedRegimeReplayBuffer(
@@ -1440,6 +1804,7 @@ def train():
     BATCH           = 512
     UPDATE_FREQ     = 64
     MIN_BUFFER      = 2048
+    TRAIN_LEVERAGE  = 0.30
     global_step     = 0
     EPS_START       = 1.0
     EPS_END         = 0.01
@@ -1452,17 +1817,38 @@ def train():
     start_ep       = 1
     os.makedirs('data/ensemble/ckpt', exist_ok=True)
     CHECKPOINT_PATH = 'data/ensemble/ckpt/rl_checkpoint.pth'
+    BEST_PATH = 'data/ensemble/ckpt/best_rl_agents.pth'
 
     gating_net       = GatingNet7(STACKED_STATE_DIM).to(device)
     gating_optimizer = torch.optim.Adam(gating_net.parameters(), lr=1e-3)
 
     # [Phase 3-G] Supervised GatingNet 성능 추적기
     gating_tracker = GatingPerformanceTracker(window=20)
+    flat_collapse_streak = 0
+    last_val_hold_ratio = 0.0
+    health_bad_streaks = {'train': 0, 'gate': 0, 'val': 0}
+    train_pnl_hist = deque(maxlen=20)
+    train_wr_hist = deque(maxlen=20)
+    train_tr_hist = deque(maxlen=20)
+    train_rew_hist = deque(maxlen=20)
+
+    def _reset_gating(reason: str):
+        nonlocal gating_optimizer, gating_tracker, global_step, flat_collapse_streak
+        logger.warning(f"⚠️ [GATING-RESET] {reason}")
+        for m in gating_net.modules():
+            if hasattr(m, 'reset_parameters'):
+                m.reset_parameters()
+        gating_optimizer = torch.optim.Adam(gating_net.parameters(), lr=1e-3)
+        gating_tracker = GatingPerformanceTracker(window=20)
+        # 탐험을 일부 되돌려 붕괴 상태 탈출 시도
+        global_step = min(global_step, int(EPS_DECAY_STEPS * 0.10))
+        flat_collapse_streak = 0
 
     def _save_checkpoint(epoch):
         save_dict = {
             'global_step': global_step, 'best_val_pnl': best_val_pnl,
             'best_val_score': best_val_score, 'val_pnl_history': val_pnl_history, 'epoch': epoch,
+            'last_val_hold_ratio': last_val_hold_ratio,
             'gating_net': gating_net.state_dict(),
             'gating_opt': gating_optimizer.state_dict(),
         }
@@ -1484,7 +1870,14 @@ def train():
                 arch_ok = False
         global_step, best_val_pnl = ckpt['global_step'], ckpt['best_val_pnl']
         best_val_score, val_pnl_history = ckpt['best_val_score'], ckpt.get('val_pnl_history', [])
+        has_hold_ratio = 'last_val_hold_ratio' in ckpt
+        last_val_hold_ratio = float(ckpt.get('last_val_hold_ratio', 0.0))
         start_ep = ckpt['epoch'] + 1 if arch_ok else 1
+
+        if not os.path.exists(BEST_PATH):
+            best_val_score = -float('inf')
+            best_val_pnl = -float('inf')
+            logger.warning("⚠️ best_rl_agents.pth 없음 → best 기준을 초기화합니다 (이어학습 중 새 best 자동 저장).")
 
         if 'gating_net' in ckpt:
             try:
@@ -1501,6 +1894,11 @@ def train():
         else:
             logger.info(f"🆕 [아키텍처 변경] 가중치 초기화 후 ep=1 부터 재학습")
 
+        if last_val_hold_ratio > 0.995:
+            _reset_gating(f"체크포인트가 HOLD 붕괴 상태(last_val_hold_ratio={last_val_hold_ratio:.3f})")
+        elif (not has_hold_ratio) and ckpt.get('epoch', 0) >= 100:
+            _reset_gating("레거시 체크포인트(last_val_hold_ratio 없음)에서 재개 → gating 안전 재초기화")
+
     try:
         for ep in range(start_ep, NEP + 1):
             # [Phase 1-C] Kelly 에폭 업데이트
@@ -1515,6 +1913,10 @@ def train():
 
             env_states = {}
             ep_rewards = {name: 0.0 for name in agent_names}
+            ep_update_calls = 0
+            ep_nan_loss = 0
+            ep_nan_grad = 0
+            ep_nan_td = 0
 
             # [Phase 1-A] 각 에이전트가 독립적으로 시작점 샘플링
             for name in agent_names:
@@ -1542,7 +1944,7 @@ def train():
 
                     was_in_pos = env.pos is not None
                     a = agent.act(s, eps)
-                    ns, r, d, _ = env.step(a)
+                    ns, r, d, _ = env.step(a, leverage_rate=TRAIN_LEVERAGE)
 
                     in_pos = was_in_pos or (env.pos is not None)
                     agent.memory.push(s, a, r, ns, d, current_regimes, in_pos=in_pos)
@@ -1555,16 +1957,26 @@ def train():
                 if global_step % UPDATE_FREQ == 0:
                     for name in agent_names:
                         if len(agents[name].memory) >= MIN_BUFFER:
-                            agents[name].update(BATCH)
+                            up_stats = agents[name].update(BATCH)
+                            if up_stats and up_stats.get('updated', False):
+                                ep_update_calls += 1
+                                ep_nan_loss += int(up_stats.get('loss_nan', 0))
+                                ep_nan_grad += int(up_stats.get('grad_nan', 0))
+                                ep_nan_td += int(up_stats.get('td_nan', 0))
 
             # 에피소드 로깅 + [Phase 3-G] 에이전트 성능 기록
             _SIGMA_FLOOR = 0.05 / (64 ** 0.5)
             _REGIME_NAMES_LIST = ['chop', 'whipsaw', 'bull', 'bear', 'normal']
+            ep_pnls = []
+            ep_wrs = []
+            ep_trades = []
+            ep_rews = []
+            ep_sigmas = []
             for name in agent_names:
                 env = envs[name]
                 pnl = (env.balance / 10000 - 1) * 100
                 noisy_layers = [m for m in models[name].modules() if isinstance(m, NoisyLinear)]
-                current_floor = _SIGMA_FLOOR if pnl > -3.0 else _SIGMA_FLOOR * 5
+                current_floor = _SIGMA_FLOOR
                 for nl in noisy_layers:
                     nl.weight_sigma.data.clamp_(min=current_floor)
                     nl.bias_sigma.data.clamp_(min=current_floor)
@@ -1575,34 +1987,121 @@ def train():
                     f"Rew:{ep_rewards[name]:7.3f} | "
                     f"buf:{len(agents[name].memory):6d} | eps:{eps:.3f} | σ:{avg_sigma:.4f}"
                 )
+                ep_pnls.append(float(pnl))
+                ep_wrs.append(float(env.win_rate * 100.0))
+                ep_trades.append(float(env.total_trades))
+                ep_rews.append(float(ep_rewards[name]))
+                ep_sigmas.append(float(avg_sigma))
 
                 # [Phase 3-G] 에이전트 레짐별 PnL 기록
-                # 시작점의 dominant regime 기준
+                # 에피소드 구간 전체에서 가장 오래 머문 dominant regime 기준
                 start_step = env.start_step
                 if start_step < len(df_train_reg):
-                    dom_idx = int(np.argmax(df_train_reg[start_step]))
+                    end_step = min(max(env.current_step, start_step), len(df_train_reg) - 1)
+                    reg_slice = df_train_reg[start_step:end_step + 1]
+                    if len(reg_slice) == 0:
+                        continue
+                    dom_idx = int(np.argmax(np.mean(reg_slice, axis=0)))
                     dom_regime = _REGIME_NAMES_LIST[dom_idx]
                     gating_tracker.record(name, dom_regime, pnl)
 
+            if ep_pnls:
+                ep_pnl_med = float(np.median(ep_pnls))
+                ep_wr_med = float(np.median(ep_wrs))
+                ep_tr_med = float(np.median(ep_trades))
+                ep_rew_med = float(np.median(ep_rews))
+                ep_sigma_med = float(np.median(ep_sigmas))
+                train_pnl_hist.append(ep_pnl_med)
+                train_wr_hist.append(ep_wr_med)
+                train_tr_hist.append(ep_tr_med)
+                train_rew_hist.append(ep_rew_med)
+
+                pnl20 = float(np.median(np.asarray(train_pnl_hist, dtype=np.float32)))
+                wr20 = float(np.median(np.asarray(train_wr_hist, dtype=np.float32)))
+                tr20 = float(np.median(np.asarray(train_tr_hist, dtype=np.float32)))
+                rew20 = float(np.median(np.asarray(train_rew_hist, dtype=np.float32)))
+                nan_total = int(ep_nan_loss + ep_nan_grad + ep_nan_td)
+                train_status = _health_status_train(pnl20, wr20, nan_total)
+                train_bad_streak = _update_bad_streak(health_bad_streaks, 'train', train_status)
+
+                buf_fill_ratio = []
+                for _name in agent_names:
+                    _mem = agents[_name].memory
+                    _cap = getattr(_mem, '_cap', 0)
+                    if _cap:
+                        buf_fill_ratio.append(len(_mem) / float(_cap))
+                buf_fill_pct = 100.0 * float(np.mean(buf_fill_ratio)) if buf_fill_ratio else 0.0
+
+                logger.info(
+                    f"    [HEALTH-TRAIN] ep={ep:04d} | pnl20:{pnl20:6.2f}% wr20:{wr20:5.1f}% "
+                    f"| tr20:{tr20:6.1f} rew20:{rew20:7.3f} | buf:{buf_fill_pct:5.1f}% "
+                    f"| σ_med:{ep_sigma_med:.4f} | upd:{ep_update_calls:4d} "
+                    f"| nan(l/g/td):{ep_nan_loss}/{ep_nan_grad}/{ep_nan_td} | status:{train_status}"
+                )
+                if train_bad_streak >= 3:
+                    logger.warning(
+                        f"    [ALERT] HEALTH-TRAIN BAD 연속 {train_bad_streak}회 "
+                        f"(pnl20={pnl20:.2f}%, wr20={wr20:.1f}%, nan={nan_total})"
+                    )
+
             # [Phase 3-G] GatingNet Supervised 학습 (ep%5, ep>=30)
             if ep % 5 == 0 and ep >= 30:
-                g_loss = train_gating_supervised(
+                g_metrics = train_gating_supervised(
                     gating_net, gating_optimizer, gating_tracker,
                     df_train, device, hmm_detector=hmm_detector,
                     mtf_features=mtf_train, n_samples=2048, temperature=2.0)
+                if isinstance(g_metrics, dict):
+                    g_loss = float(g_metrics.get('loss', float('nan')))
+                else:
+                    g_loss = float(g_metrics)
+                    g_metrics = {
+                        'flat_top1_ratio': float('nan'),
+                        'pred_entropy': float('nan'),
+                        'label_entropy': float('nan'),
+                        'label_valid_rate': float('nan'),
+                        'grad_nan': 0,
+                    }
                 logger.info(f"    [GATING-SL] ep={ep} loss={g_loss:.4f}")
+                gate_status = _health_status_gate(
+                    g_loss,
+                    float(g_metrics.get('flat_top1_ratio', float('nan'))),
+                    float(g_metrics.get('pred_entropy', float('nan')))
+                )
+                gate_bad_streak = _update_bad_streak(health_bad_streaks, 'gate', gate_status)
+                logger.info(
+                    f"    [HEALTH-GATE] ep={ep:04d} | loss:{g_loss:.4f} "
+                    f"| flat_top1:{float(g_metrics.get('flat_top1_ratio', 0.0))*100:5.1f}% "
+                    f"| ent:{float(g_metrics.get('pred_entropy', 0.0)):.3f} "
+                    f"| lbl_ent:{float(g_metrics.get('label_entropy', 0.0)):.3f} "
+                    f"| lbl_valid:{float(g_metrics.get('label_valid_rate', 0.0))*100:5.1f}% "
+                    f"| grad_nan:{int(g_metrics.get('grad_nan', 0))} | status:{gate_status}"
+                )
+                if gate_bad_streak >= 3:
+                    logger.warning(
+                        f"    [ALERT] HEALTH-GATE BAD 연속 {gate_bad_streak}회 "
+                        f"(loss={g_loss:.4f}, flat_top1={float(g_metrics.get('flat_top1_ratio', 0.0)):.3f})"
+                    )
 
             # 밸리데이션 (ep%10)
             if ep % 10 == 0:
+                # [v5 FIX] validation 전용 HMM — 학습 HMM 상태 오염 방지 (BUG-5)
+                val_hmm = copy.deepcopy(hmm_detector)
                 router  = GatingRouter7(models, gating_net, device,
-                                        hmm_detector=hmm_detector,
+                                        hmm_detector=val_hmm,
                                         kelly_sizer=kelly_sizer,
                                         mtf_features=mtf_val,
-                                        current_ep=ep)
+                                        current_ep=ep,
+                                        stochastic_eval=True,
+                                        noisy_eval_samples=3,
+                                        preserve_model_mode=True,
+                                        flat_escape_patience=96,
+                                        allow_forced_entry=True)
                 val_env = TradingEnv(df_val, phase='val', agent_role='neutral', fee=0.0005,
-                                     hmm_detector=hmm_detector, mtf_features=mtf_val)
+                                     hmm_detector=val_hmm, mtf_features=mtf_val)
                 obs, d = val_env.reset(), False
                 kelly_log = []
+                action_counter = Counter()
+                block_counter = Counter()
 
                 while not d:
                     feat = df_val.iloc[val_env.current_step].to_dict()
@@ -1613,6 +2112,19 @@ def train():
                         'hold_norm': val_env.hold_count / 144
                     }
                     action, leverage_rate, info = router.decide(feat, pos_info)
+                    action_counter[action] += 1
+                    if action == 0:
+                        agent_tag = str(info.get('agent', 'UNKNOWN'))
+                        if agent_tag == 'FLAT':
+                            block_counter['flat'] += 1
+                        elif agent_tag.endswith('_declined'):
+                            block_counter['declined'] += 1
+                        elif '_low_conviction(' in agent_tag:
+                            block_counter['low_conviction'] += 1
+                        elif agent_tag.endswith('_exit'):
+                            block_counter['exit'] += 1
+                        else:
+                            block_counter['other'] += 1
                     if action in (1, 2) and 'win_rate' in info:
                         kelly_log.append({'lev': leverage_rate, 'wr': info.get('win_rate', 0),
                                           'payoff': info.get('payoff', 0), 'f_star': info.get('f_star', 0)})
@@ -1627,7 +2139,9 @@ def train():
                 else:
                     sharpe_est = 0.0
 
-                if val_pnl_pct > 0:
+                if val_env.total_trades == 0:
+                    trade_activity = -5.0
+                elif val_pnl_pct > 0:
                     trade_activity = min(val_env.total_trades / 30.0, 1.0) * 5.0
                 else:
                     trade_activity = -min(val_env.total_trades / 30.0, 1.0) * 10.0
@@ -1635,6 +2149,40 @@ def train():
                 val_score = (val_pnl_pct * 5.0) + (val_env.win_rate * 20.0) + (sharpe_est * 5.0) + trade_activity
 
                 logger.info(f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | WR:{val_env.win_rate*100:.0f}% | Score:{val_score:.2f}")
+                logger.info(
+                    f"    [VAL-ACT] HOLD:{action_counter.get(0, 0)} | LONG:{action_counter.get(1, 0)} | SHORT:{action_counter.get(2, 0)}"
+                )
+                logger.info(
+                    f"    [VAL-BLOCK] FLAT:{block_counter.get('flat', 0)} | declined:{block_counter.get('declined', 0)} | "
+                    f"low_conv:{block_counter.get('low_conviction', 0)} | exit:{block_counter.get('exit', 0)} | other:{block_counter.get('other', 0)}"
+                )
+
+                total_actions = max(sum(action_counter.values()), 1)
+                hold_ratio = action_counter.get(0, 0) / total_actions
+                long_ratio = action_counter.get(1, 0) / total_actions
+                short_ratio = action_counter.get(2, 0) / total_actions
+                declined_ratio = block_counter.get('declined', 0) / total_actions
+                val_status = _health_status_val(val_pnl_pct, val_env.total_trades, declined_ratio)
+                val_bad_streak = _update_bad_streak(health_bad_streaks, 'val', val_status)
+                logger.info(
+                    f"    [HEALTH-VAL] ep={ep:04d} | pnl:{val_pnl_pct:6.2f}% "
+                    f"| tr:{val_env.total_trades:4d} wr:{val_env.win_rate*100:4.0f}% "
+                    f"| hold:{hold_ratio*100:5.1f}% long:{long_ratio*100:5.1f}% short:{short_ratio*100:5.1f}% "
+                    f"| declined:{declined_ratio*100:5.1f}% | status:{val_status}"
+                )
+                if val_bad_streak >= 3:
+                    logger.warning(
+                        f"    [ALERT] HEALTH-VAL BAD 연속 {val_bad_streak}회 "
+                        f"(pnl={val_pnl_pct:.2f}%, tr={val_env.total_trades}, declined={declined_ratio:.3f})"
+                    )
+                last_val_hold_ratio = hold_ratio
+                if hold_ratio >= 0.995 and (action_counter.get(1, 0) + action_counter.get(2, 0) == 0):
+                    flat_collapse_streak += 1
+                else:
+                    flat_collapse_streak = 0
+
+                if flat_collapse_streak >= 2:
+                    _reset_gating(f"VAL 기준 flat 붕괴 연속 감지 (hold_ratio={hold_ratio:.3f}, streak={flat_collapse_streak})")
 
                 hmm_s = int(np.argmax(hmm_detector._alpha))
                 hmm_names = ['bull-trend', 'bear-trend', 'hv-chop', 'lv-range']
@@ -1653,12 +2201,27 @@ def train():
                     save_dict = {'best_pnl': best_val_pnl, 'epoch': ep,
                                  'gating_net': gating_net.state_dict()}
                     for name in agent_names: save_dict[f'model_{name}'] = models[name].state_dict()
-                    torch.save(save_dict, 'data/ensemble/ckpt/best_rl_agents.pth')
+                    torch.save(save_dict, BEST_PATH)
                     logger.info(f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}%)")
 
                 if ep % 50 == 0:
                     hmm_detector.update_online(n_iter=5)
-                    logger.info("    [HMM]  온라인 업데이트 완료")
+                    # [v5 FIX] 마스터 HMM 업데이트 후 에이전트 HMM에 학습 파라미터 동기화
+                    # (alpha/obs_buffer는 각자 유지, 모델 파라미터 A/mu/sigma/pi만 복사)
+                    for _name in agent_names:
+                        _ahmm = agent_hmm_instances[_name]
+                        _ahmm.A = hmm_detector.A.copy()
+                        _ahmm.mu = hmm_detector.mu.copy()
+                        _ahmm.sigma = hmm_detector.sigma.copy()
+                        _ahmm.pi = hmm_detector.pi.copy()
+                        _ahmm._obs_mean = hmm_detector._obs_mean.copy()
+                        _ahmm._obs_std = hmm_detector._obs_std.copy()
+                    logger.info("    [HMM]  온라인 업데이트 완료 + 에이전트 HMM 동기화")
+
+                # 안전장치: validation 이후 학습 모드 강제 복원
+                for n in agent_names:
+                    models[n].train()
+                gating_net.train()
 
                 _save_checkpoint(ep)
 

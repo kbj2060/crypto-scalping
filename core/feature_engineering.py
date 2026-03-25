@@ -32,6 +32,13 @@ ULTIMATE_FEATURE_COLS = [
     'kalman_velocity', 'return_autocorr', 'realized_skewness',
     'ofti', 'kel', 'mta_funding', 'svps',
     'pred_mdjd', 'conf_mdjd',
+    # SyntheticAlphaEngine 확장 출력
+    'cada', 'mshd', 'fvci', 'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
+    # VolatilityModelEngine 출력
+    'garch_vol', 'garch_vol_z', 'ou_funding_z', 'ou_halflife',
+    'jump_flag', 'jump_z', 'evt_tail_flag', 'evt_excess_z',
+    # NewEliteSignalEngine 출력
+    'sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health',
 ]
 
 EXCLUDE_FEATURE_COLS: list = [
@@ -89,6 +96,14 @@ class FeatureEngineer:
         df = self._create_predictive_stats(df)
         df = self._create_synthetic_alpha(df)
         df = self.add_mdjd_features(df)
+
+        # ── 엘리트 퀀트 엔진 (합성 알파 + 변동성 모델 + 신규 Elite 시그널) ──
+        from strategies.elite_strategies import (
+            SyntheticAlphaEngine, VolatilityModelEngine, NewEliteSignalEngine,
+        )
+        SyntheticAlphaEngine().compute(df)    # cada, mshd, fvci, wpad, fdlv, vsdi, vebr, tlad, mtmb, fcsz
+        VolatilityModelEngine().compute(df)   # garch_vol_z, ou_funding_z, jump_flag, jump_z, evt_tail_flag, evt_excess_z
+        NewEliteSignalEngine().compute(df)    # sig_volume_confirm, sig_liquidity_trap, sig_trend_health
 
         df = self._handle_missing(df)
         return df

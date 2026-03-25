@@ -532,7 +532,7 @@ class TFTSignalModel:
             _root = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
             if _root not in sys.path:
                 sys.path.insert(0, _root)
-            from ensemble.trend_xgb.trend_xgb_model import TrendSignal
+            from ensemble.supervised.train_trend_xgb import TrendSignal
         except ImportError:
             return None
 
