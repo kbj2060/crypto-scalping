@@ -539,6 +539,7 @@ class LLMAnalyzer:
         or os.getenv("OPENAI_API_KEY", "")
     )
     API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+    LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     API_TIMEOUT_SEC = float(os.getenv("DEEPSEEK_TIMEOUT_SEC", "25"))
 
     def __init__(self, exchange, symbol: str = 'ETHUSDT'):
@@ -740,7 +741,7 @@ class LLMAnalyzer:
                         {'role': 'system', 'content': '당신은 트레이딩 방향 분류기다. 출력 포맷을 반드시 지켜라.'},
                         {'role': 'user', 'content': prompt},
                     ],
-                    'temperature': 0.2,
+                    'temperature': self.LLM_TEMPERATURE,
                     'max_tokens': 512,
                 }
                 req = urllib.request.Request(

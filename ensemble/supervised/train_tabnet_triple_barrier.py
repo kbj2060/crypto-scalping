@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import pickle
 import argparse
 import logging
@@ -9,6 +10,13 @@ from typing import Dict, Any, List
 import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, balanced_accuracy_score, f1_score
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_ENSEMBLE_DIR = os.path.dirname(_THIS_DIR)
+_ROOT_DIR = os.path.dirname(_ENSEMBLE_DIR)
+for _p in (_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from ensemble.optuna_helper import (
     build_config_hash,

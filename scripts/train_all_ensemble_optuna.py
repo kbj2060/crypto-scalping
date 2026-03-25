@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -29,7 +30,11 @@ def _run(cmd: List[str], dry_run: bool) -> None:
     print(f"[RUN] {_cmd_str(cmd)}")
     if dry_run:
         return
-    subprocess.run(cmd, cwd=str(ROOT), check=True)
+    env = os.environ.copy()
+    prev_pythonpath = env.get("PYTHONPATH", "")
+    root_path = str(ROOT)
+    env["PYTHONPATH"] = f"{root_path}{os.pathsep}{prev_pythonpath}" if prev_pythonpath else root_path
+    subprocess.run(cmd, cwd=str(ROOT), check=True, env=env)
 
 
 def _remove_results(path_str: str | None, dry_run: bool) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import pickle
 import argparse
 import logging
@@ -10,6 +11,13 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_ENSEMBLE_DIR = os.path.dirname(_THIS_DIR)
+_ROOT_DIR = os.path.dirname(_ENSEMBLE_DIR)
+for _p in (_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from ensemble.optuna_helper import (
     build_config_hash,
