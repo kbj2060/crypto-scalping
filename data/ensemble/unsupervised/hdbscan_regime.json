@@ -1,0 +1,38 @@
+{
+  "feature_cols": [
+    "squeeze_power",
+    "rsi",
+    "chop_index",
+    "jump_z",
+    "macd_hist",
+    "funding_price_divergence",
+    "funding_z_score",
+    "bb_width_z",
+    "volatility_z",
+    "ou_funding_z",
+    "garch_vol_z",
+    "big_trade_ratio",
+    "amihud_illiquidity_z",
+    "pred_mdjd",
+    "dual_momentum",
+    "realized_skewness",
+    "funding_roc_288",
+    "hour_cos",
+    "minute_sin",
+    "minute_cos",
+    "hour_sin"
+  ],
+  "model_path": "hdbscan_regime.pkl",
+  "meta": {
+    "algorithm": "hdbscan_regime",
+    "noise_ratio": 1.0,
+    "avg_membership": 0.0,
+    "quality_score": -0.95,
+    "best_val_score": -0.95,
+    "best_params": {
+      "feature_count": 21,
+      "min_cluster_size": 241,
+      "min_samples": 30
+    }
+  }
+}

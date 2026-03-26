@@ -1,0 +1,13 @@
+{
+  "best_val_score": -0.95,
+  "best_params": {
+    "feature_count": 21,
+    "min_cluster_size": 241,
+    "min_samples": 30
+  },
+  "noise_ratio": 1.0,
+  "avg_membership": 0.0,
+  "quality_score": -0.95,
+  "data_hash": "",
+  "config_hash": ""
+}

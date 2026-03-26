@@ -44,17 +44,39 @@ def _run(cmd: List[str], dry_run: bool, label: str = "RUN") -> None:
     subprocess.run(cmd, cwd=str(ROOT), check=True, env=_build_env())
 
 
-def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
-    if proc.poll() is not None:
+def _exists(path_str: str | None) -> bool:
+    if not path_str:
+        return False
+    return (ROOT / path_str).exists()
+
+
+def _remove_results(path_str: str | None, dry_run: bool) -> None:
+    if not path_str:
         return
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
+    path = ROOT / path_str
+    if not path.exists():
         return
-    except subprocess.TimeoutExpired:
-        pass
-    proc.kill()
-    proc.wait(timeout=5)
+    print(f"[CLEAN] remove {path}")
+    if not dry_run:
+        path.unlink()
+
+
+def _remove_model_files(paths: List[str], dry_run: bool) -> None:
+    for path_str in paths:
+        path = ROOT / path_str
+        if not path.exists():
+            continue
+        print(f"[CLEAN] remove {path}")
+        if not dry_run:
+            path.unlink()
+
+
+def _job_completed(job: Job) -> bool:
+    if not _exists(job.results_file):
+        return False
+    if not job.model_files:
+        return False
+    return all(_exists(path) for path in job.model_files)
 
 
 def _startup_check(job: Job, cmd: List[str], dry_run: bool, timeout_sec: float) -> None:
@@ -106,43 +128,6 @@ def _startup_check(job: Job, cmd: List[str], dry_run: bool, timeout_sec: float) 
         _remove_model_files(new_model_files, dry_run=False)
     if job.results_file and not existing_results_file and _exists(job.results_file):
         _remove_results(job.results_file, dry_run=False)
-
-
-def _remove_results(path_str: str | None, dry_run: bool) -> None:
-    if not path_str:
-        return
-    p = ROOT / path_str
-    if not p.exists():
-        return
-    print(f"[CLEAN] remove {p}")
-    if dry_run:
-        return
-    p.unlink()
-
-
-def _remove_model_files(paths: List[str], dry_run: bool) -> None:
-    for path_str in paths:
-        p = ROOT / path_str
-        if not p.exists():
-            continue
-        print(f"[CLEAN] remove {p}")
-        if dry_run:
-            continue
-        p.unlink()
-
-
-def _exists(path_str: str | None) -> bool:
-    if not path_str:
-        return False
-    return (ROOT / path_str).exists()
-
-
-def _job_completed(job: Job) -> bool:
-    if not _exists(job.results_file):
-        return False
-    if not job.model_files:
-        return False
-    return all(_exists(p) for p in job.model_files)
 
 
 def _build_jobs(args: argparse.Namespace) -> List[Job]:
@@ -234,47 +219,40 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Run Optuna tuning + training for all ensemble supervised/unsupervised models"
-    )
-    p.add_argument("--target", choices=["all", "supervised", "unsupervised"], default="all")
-    p.add_argument("--python", default=sys.executable, help="Python executable to use")
-    p.add_argument("--xgb-trials", type=int, default=40)
-    p.add_argument("--supervised-trials", type=int, default=30)
-    p.add_argument("--unsupervised-trials", type=int, default=25)
-    p.add_argument("--vae-trials", type=int, default=20)
-    p.add_argument("--vae-device", default="auto", choices=["auto", "cpu", "cuda"])
-    p.add_argument(
-        "--reuse-existing-results",
-        action="store_true",
-        help="deprecated: no-op (existing files are reused by default)",
-    )
-    p.add_argument(
+    parser = argparse.ArgumentParser(description="Run all remaining ensemble training scripts")
+    parser.add_argument("--target", choices=["all", "supervised", "unsupervised"], default="all")
+    parser.add_argument("--python", default=sys.executable, help="Python executable to use")
+    parser.add_argument("--xgb-trials", type=int, default=40)
+    parser.add_argument("--supervised-trials", type=int, default=30)
+    parser.add_argument("--unsupervised-trials", type=int, default=25)
+    parser.add_argument("--vae-trials", type=int, default=20)
+    parser.add_argument("--vae-device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument(
         "--force-retune",
         action="store_true",
         help="Delete existing model/results files and run all selected jobs again",
     )
-    p.add_argument(
+    parser.add_argument(
         "--no-skip-completed",
         dest="skip_completed",
         action="store_false",
         help="Run jobs even when model/results files already exist",
     )
-    p.set_defaults(skip_completed=True)
-    p.add_argument("--continue-on-error", action="store_true")
-    p.add_argument(
+    parser.set_defaults(skip_completed=True)
+    parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument(
         "--skip-startup-check",
         action="store_true",
         help="Skip per-job startup smoke tests before full training",
     )
-    p.add_argument(
+    parser.add_argument(
         "--startup-check-seconds",
         type=float,
         default=8.0,
         help="Seconds to wait while verifying each job starts without immediate errors",
     )
-    p.add_argument("--dry-run", action="store_true")
-    return p.parse_args()
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args()
 
 
 def main() -> int:
@@ -306,12 +284,12 @@ def main() -> int:
             cmd = [args.python, job.script, "--startup-check-only", *job.args]
             try:
                 _startup_check(job, cmd, args.dry_run, args.startup_check_seconds)
-            except subprocess.CalledProcessError as e:
-                msg = f"{job.name} startup check failed (exit={e.returncode})"
+            except subprocess.CalledProcessError as exc:
+                msg = f"{job.name} startup check failed (exit={exc.returncode})"
                 print(f"[ERROR] {msg}")
                 failures.append(msg)
                 if not args.continue_on_error:
-                    return e.returncode
+                    return exc.returncode
     else:
         print("[INFO] startup smoke check skipped")
 
@@ -324,12 +302,12 @@ def main() -> int:
         cmd = [args.python, job.script, *job.args]
         try:
             _run(cmd, args.dry_run)
-        except subprocess.CalledProcessError as e:
-            msg = f"{job.name} failed (exit={e.returncode})"
+        except subprocess.CalledProcessError as exc:
+            msg = f"{job.name} failed (exit={exc.returncode})"
             print(f"[ERROR] {msg}")
             failures.append(msg)
             if not args.continue_on_error:
-                return e.returncode
+                return exc.returncode
 
     if failures:
         print("\n[SUMMARY] completed with failures:")

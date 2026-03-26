@@ -30,6 +30,7 @@ from ensemble.unsupervised.common import (
     load_unsup_frame,
     zscore_fit_transform,
     VOLATILITY_FEATURE_HINTS,
+    rank_features_by_variance,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,19 +72,23 @@ def _tune_params(args: argparse.Namespace, x_train: np.ndarray, x_val: np.ndarra
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial: "optuna.Trial") -> float:
+        feature_count = trial.suggest_int("feature_count", args.min_features, x_train.shape[1])
         params = {
-            "n_components": trial.suggest_int("n_components", 2, 10),
+            "feature_count": feature_count,
+            "n_components": trial.suggest_int("n_components", 2, 6),
             "covariance_type": trial.suggest_categorical("covariance_type", ["full", "diag", "tied", "spherical"]),
-            "reg_covar": trial.suggest_float("reg_covar", 1e-8, 1e-2, log=True),
+            "reg_covar": trial.suggest_float("reg_covar", 1e-6, 1e-3, log=True),
         }
+        x_train_sel = x_train[:, :feature_count]
+        x_val_sel = x_val[:, :feature_count]
         model = GaussianMixture(
             random_state=args.seed,
-            **params,
+            **{k: v for k, v in params.items() if k != "feature_count"},
         )
-        model.fit(x_train)
-        val_ll = float(model.score(x_val))
-        labels_val = model.predict(x_val)
-        sil = _silhouette_safe(x_val, labels_val)
+        model.fit(x_train_sel)
+        val_ll = float(model.score(x_val_sel))
+        labels_val = model.predict(x_val_sel)
+        sil = _silhouette_safe(x_val_sel, labels_val)
         return float(val_ll + 0.2 * sil)
 
     logger.info("Optuna tuning start: n_trials=%d", args.n_trials)
@@ -97,7 +102,7 @@ def _tune_params(args: argparse.Namespace, x_train: np.ndarray, x_val: np.ndarra
 
 def train(args: argparse.Namespace) -> Dict[str, Any]:
     df = load_unsup_frame(args.data_path, args.rl_path)
-    feature_cols = _pick_vol_features(df)
+    feature_cols = rank_features_by_variance(df, _pick_vol_features(df))
     x = df[feature_cols].replace([np.inf, -np.inf], np.nan).values.astype(np.float32)
     x, mean, std = zscore_fit_transform(x)
 
@@ -141,10 +146,15 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
 
     merged = _base_params(args)
     merged.update(best_params)
+    feature_count = int(merged.get("feature_count", len(feature_cols)))
+    feature_cols = feature_cols[:feature_count]
+    x = x[:, :feature_count]
+    mean = mean[:feature_count]
+    std = std[:feature_count]
 
     model = GaussianMixture(
         random_state=args.seed,
-        **merged,
+        **{k: v for k, v in merged.items() if k != "feature_count"},
     )
     model.fit(x)
     labels = model.predict(x)
@@ -210,11 +220,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
     p.add_argument("--save-path", default="data/ensemble/unsupervised/gmm_volatility.pkl")
+    p.add_argument("--min-features", type=int, default=4)
     p.add_argument("--n-components", type=int, default=4)
     p.add_argument("--covariance-type", default="full", choices=["full", "diag", "tied", "spherical"])
     p.add_argument("--reg-covar", type=float, default=1e-5)
     p.add_argument("--train-ratio", type=float, default=0.8)
-    p.add_argument("--n-trials", type=int, default=40)
+    p.add_argument("--n-trials", type=int, default=25)
+    p.add_argument(
+        "--startup-check-only",
+        action="store_true",
+        help="Validate imports/arguments and exit without training",
+    )
     p.add_argument("--force-reuse-results", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -222,4 +238,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.startup_check_only:
+        logger.info("startup check ok: train_gmm_volatility")
+        raise SystemExit(0)
     train(args)

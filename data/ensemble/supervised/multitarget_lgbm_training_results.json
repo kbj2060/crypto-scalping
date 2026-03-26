@@ -1,0 +1,20 @@
+{
+  "best_val_score": 0.4621136012781793,
+  "test_dir_bal_acc": 0.5160765387574696,
+  "test_quality_mae": 0.0037721296650011123,
+  "test_hold_mae": 3.3914677271172193,
+  "best_params": {
+    "n_estimators": 299,
+    "learning_rate": 0.09453383449261407,
+    "num_leaves": 16,
+    "subsample": 0.8114637425678033,
+    "colsample_bytree": 0.7984165248678857,
+    "min_child_samples": 50,
+    "reg_alpha": 0.07718316244114426,
+    "reg_lambda": 0.0030455975183058394,
+    "feature_count": 22
+  },
+  "backend": "lightgbm",
+  "data_hash": "",
+  "config_hash": ""
+}

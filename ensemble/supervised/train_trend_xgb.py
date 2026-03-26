@@ -6,7 +6,7 @@ LightGBM 3-class 분류기 (DOWN / FLAT / UP)
 타겟:  Triple-Barrier 레이블 (de Prado 2018) — 5m 봉 기준
 피처:  ULTIMATE_FEATURE_COLS + MTF 피처 → auto_select_features (상위 N개)
 튜닝:  Optuna 50회 시행 (CPU, ~1시간)
-저장:  data/trend_xgb/trend_xgb.json (+ trend_xgb.pkl)
+저장:  data/ensemble/supervised/trend_xgb.json (+ trend_xgb.pkl)
 
 실행:
     cd /home/llewyn/crypto-scalping
@@ -301,9 +301,9 @@ class XGBTrendBrain:
 # ────────────────────────────────────────────────────────────────
 DATA_PATH   = 'data/training_features_5m.csv'
 RL_DATA_PATH = 'data/rl_training_data_full.csv'
-SAVE_PATH   = 'data/trend_xgb/trend_xgb.json'
+SAVE_PATH   = 'data/ensemble/supervised/trend_xgb.json'
 MAX_FEATURES = 64      # auto_select_features 상한
-N_TRIALS     = 150      # Optuna 시행 수
+N_TRIALS     = 40      # Optuna 시행 수
 TRAIN_RATIO  = 0.70
 VAL_RATIO    = 0.15
 
@@ -627,12 +627,12 @@ def train(data_path: str = DATA_PATH,
     logger.info(f"LightGBM device={lgbm_device_eff}")
 
     # ── Optuna 튜닝 or 저장된 파라미터 재사용 ──
-    results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
+    results_path = os.path.join(os.path.dirname(save_path), 'trend_xgb_training_results.json')
     meta_path = save_path if save_path.lower().endswith('.json') else os.path.splitext(save_path)[0] + '.json'
     if os.path.exists(results_path):
         with open(results_path) as f:
             prev = json.load(f)
-        logger.info("기존 training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
+        logger.info("기존 trend_xgb_training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
     elif os.path.exists(meta_path):
         with open(meta_path, 'r', encoding='utf-8') as f:
             meta_prev = json.load(f)
@@ -670,15 +670,15 @@ def train(data_path: str = DATA_PATH,
 
         def objective(trial):
             params = dict(
-                n_estimators      = trial.suggest_int('n_estimators', 300, 1200),
-                max_depth         = trial.suggest_int('max_depth', 3, 8),
-                learning_rate     = trial.suggest_float('learning_rate', 5e-3, 0.15, log=True),
-                num_leaves        = trial.suggest_int('num_leaves', 15, 127),
-                subsample         = trial.suggest_float('subsample', 0.5, 1.0),
-                colsample_bytree  = trial.suggest_float('colsample_bytree', 0.5, 1.0),
-                reg_alpha         = trial.suggest_float('reg_alpha', 1e-4, 10.0, log=True),
-                reg_lambda        = trial.suggest_float('reg_lambda', 1e-4, 10.0, log=True),
-                min_child_samples = trial.suggest_int('min_child_samples', 10, 100),
+                n_estimators      = trial.suggest_int('n_estimators', 200, 700),
+                max_depth         = trial.suggest_int('max_depth', 3, 7),
+                learning_rate     = trial.suggest_float('learning_rate', 8e-3, 0.12, log=True),
+                num_leaves        = trial.suggest_int('num_leaves', 15, 96),
+                subsample         = trial.suggest_float('subsample', 0.6, 1.0),
+                colsample_bytree  = trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                reg_alpha         = trial.suggest_float('reg_alpha', 1e-4, 5.0, log=True),
+                reg_lambda        = trial.suggest_float('reg_lambda', 1e-4, 5.0, log=True),
+                min_child_samples = trial.suggest_int('min_child_samples', 12, 64),
                 class_weight      = class_weight,
                 objective         = 'multiclass',
                 num_class         = 3,
@@ -749,7 +749,7 @@ def train(data_path: str = DATA_PATH,
     brain.save(save_path)
 
     # 결과 메타 기록
-    results_path = os.path.join(os.path.dirname(save_path), 'training_results.json')
+    results_path = os.path.join(os.path.dirname(save_path), 'trend_xgb_training_results.json')
     with open(results_path, 'w') as f:
         json.dump({
             'best_val_dir_f1' : best_val_metric,
@@ -780,7 +780,13 @@ if __name__ == '__main__':
                         help='LightGBM 스레드 수 (0이면 자동)')
     parser.add_argument('--lgbm-device',  type=str, default='cpu', choices=['cpu', 'gpu', 'cuda', 'auto'],
                         help='LightGBM 디바이스 선택 (auto는 cuda→gpu→cpu 순 폴백)')
+    parser.add_argument('--startup-check-only', action='store_true',
+                        help='인자/임포트만 점검하고 학습 없이 종료')
     args = parser.parse_args()
+
+    if args.startup_check_only:
+        logger.info("startup check ok: train_trend_xgb")
+        raise SystemExit(0)
 
     print("\n" + "=" * 70)
     print("🚀 XGBTrendBrain 학습 (LightGBM 3-class, Triple-Barrier)")

@@ -9,6 +9,7 @@ from typing import Dict, Any, Tuple
 
 import numpy as np
 from sklearn.metrics import balanced_accuracy_score
+from core.feature_selector import auto_select_features
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENSEMBLE_DIR = os.path.dirname(_THIS_DIR)
@@ -127,6 +128,19 @@ def _build_quality_and_hold_targets(df, y_dir: np.ndarray, horizon: int) -> Tupl
     return y_quality, y_hold
 
 
+def _select_ranked_features(df, feature_cols, tr_idx: np.ndarray, y_train_dir: np.ndarray, max_features: int) -> list[str]:
+    train_df_tmp = df.iloc[tr_idx].copy()
+    train_df_tmp.index = range(len(train_df_tmp))
+    train_df_tmp["_label"] = y_train_dir
+    return auto_select_features(
+        train_df_tmp,
+        feature_cols,
+        target_col="_label",
+        max_features=max_features,
+        corr_threshold=0.85,
+    )
+
+
 def _base_params(args: argparse.Namespace, backend: str) -> Dict[str, Any]:
     if backend == "lightgbm":
         return {
@@ -150,8 +164,9 @@ def _base_params(args: argparse.Namespace, backend: str) -> Dict[str, Any]:
 def _tune_params(
     args: argparse.Namespace,
     backend: str,
-    x_train: np.ndarray,
-    x_val: np.ndarray,
+    x_train,
+    x_val,
+    ranked_features: list[str],
     y_train_dir: np.ndarray,
     y_val_dir: np.ndarray,
     y_train_q: np.ndarray,
@@ -164,34 +179,39 @@ def _tune_params(
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial: "optuna.Trial") -> float:
+        feature_count = trial.suggest_int("feature_count", 16, len(ranked_features))
+        selected = ranked_features[:feature_count]
         if backend == "lightgbm":
             params = {
-                "n_estimators": trial.suggest_int("n_estimators", 300, 1400),
-                "learning_rate": trial.suggest_float("learning_rate", 5e-3, 0.15, log=True),
-                "num_leaves": trial.suggest_int("num_leaves", 15, 255),
+                "n_estimators": trial.suggest_int("n_estimators", 200, 700),
+                "learning_rate": trial.suggest_float("learning_rate", 8e-3, 0.12, log=True),
+                "num_leaves": trial.suggest_int("num_leaves", 15, 127),
                 "subsample": trial.suggest_float("subsample", 0.6, 1.0),
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
-                "min_child_samples": trial.suggest_int("min_child_samples", 10, 120),
-                "reg_alpha": trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True),
-                "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
+                "min_child_samples": trial.suggest_int("min_child_samples", 12, 72),
+                "reg_alpha": trial.suggest_float("reg_alpha", 1e-4, 5.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 5.0, log=True),
             }
         else:
             params = {
-                "n_estimators": trial.suggest_int("n_estimators", 300, 1200),
-                "max_depth": trial.suggest_int("max_depth", 4, 24),
-                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 20),
+                "n_estimators": trial.suggest_int("n_estimators", 200, 700),
+                "max_depth": trial.suggest_int("max_depth", 4, 16),
+                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 16),
                 "max_features": trial.suggest_float("max_features", 0.3, 1.0),
             }
+        params["feature_count"] = feature_count
 
+        x_train_sel = x_train[selected]
+        x_val_sel = x_val[selected]
         dir_model, quality_model, hold_model = _build_models(backend, args.seed, args.n_jobs, params)
-        dir_model.fit(x_train, y_train_dir)
-        quality_model.fit(x_train, y_train_q)
-        hold_model.fit(x_train, y_train_h)
+        dir_model.fit(x_train_sel, y_train_dir)
+        quality_model.fit(x_train_sel, y_train_q)
+        hold_model.fit(x_train_sel, y_train_h)
 
-        dir_pred = dir_model.predict(x_val)
+        dir_pred = dir_model.predict(x_val_sel)
         dir_bal_acc = balanced_accuracy_score(y_val_dir, dir_pred)
-        q_mae = float(np.mean(np.abs(quality_model.predict(x_val) - y_val_q)))
-        h_mae = float(np.mean(np.abs(hold_model.predict(x_val) - y_val_h)))
+        q_mae = float(np.mean(np.abs(quality_model.predict(x_val_sel) - y_val_q)))
+        h_mae = float(np.mean(np.abs(hold_model.predict(x_val_sel) - y_val_h)))
 
         return float(dir_bal_acc - 0.10 * q_mae - 0.02 * h_mae)
 
@@ -219,19 +239,16 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     y_quality = y_quality[valid]
     y_hold = y_hold[valid]
 
-    feature_cols = select_feature_columns(df)
-    x_all = df[feature_cols].replace([np.inf, -np.inf], np.nan)
     tr_idx, va_idx, te_idx = time_split_indices(len(df), args.train_ratio, args.val_ratio)
+    feature_cols = select_feature_columns(df)
+    ranked_features = _select_ranked_features(df, feature_cols, tr_idx, y_dir[tr_idx], args.max_features)
+    x_all = df[ranked_features].replace([np.inf, -np.inf], np.nan)
 
     x_train = x_all.iloc[tr_idx].copy()
     x_val = x_all.iloc[va_idx].copy()
     x_test = x_all.iloc[te_idx].copy()
     x_train, x_val = median_fill_by_train(x_train, x_val)
     x_train, x_test = median_fill_by_train(x_train, x_test)
-
-    x_train_np = x_train.values
-    x_val_np = x_val.values
-    x_test_np = x_test.values
 
     y_train_dir, y_val_dir, y_test_dir = y_dir[tr_idx], y_dir[va_idx], y_dir[te_idx]
     y_train_q, y_val_q, y_test_q = y_quality[tr_idx], y_quality[va_idx], y_quality[te_idx]
@@ -250,7 +267,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "val_ratio": args.val_ratio,
             "seed": args.seed,
             "backend": backend,
-            "feature_count": len(feature_cols),
+            "feature_count": len(ranked_features),
         }
     )
     results_path = training_results_path(args.save_path, "multitarget_lgbm")
@@ -281,8 +298,9 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_params, best_val_score = _tune_params(
                 args,
                 backend,
-                x_train_np,
-                x_val_np,
+                x_train,
+                x_val,
+                ranked_features,
                 y_train_dir,
                 y_val_dir,
                 y_train_q,
@@ -293,21 +311,26 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
 
     merged = _base_params(args, backend)
     merged.update(best_params)
+    feature_count = int(merged.get("feature_count", len(ranked_features)))
+    selected_features = ranked_features[:feature_count]
 
-    x_trainval_np = np.vstack([x_train_np, x_val_np])
+    x_trainval = x_all.iloc[np.concatenate([tr_idx, va_idx])].copy()
+    x_trainval, x_test = median_fill_by_train(x_trainval, x_test)
     y_trainval_dir = np.hstack([y_train_dir, y_val_dir])
     y_trainval_q = np.hstack([y_train_q, y_val_q])
     y_trainval_h = np.hstack([y_train_h, y_val_h])
 
     dir_model, quality_model, hold_model = _build_models(backend, args.seed, args.n_jobs, merged)
-    dir_model.fit(x_trainval_np, y_trainval_dir)
-    quality_model.fit(x_trainval_np, y_trainval_q)
-    hold_model.fit(x_trainval_np, y_trainval_h)
+    x_trainval_sel = x_trainval[selected_features]
+    x_test_sel = x_test[selected_features]
+    dir_model.fit(x_trainval_sel, y_trainval_dir)
+    quality_model.fit(x_trainval_sel, y_trainval_q)
+    hold_model.fit(x_trainval_sel, y_trainval_h)
 
-    dir_pred = dir_model.predict(x_test_np)
+    dir_pred = dir_model.predict(x_test_sel)
     dir_bal_acc = balanced_accuracy_score(y_test_dir, dir_pred)
-    q_pred = quality_model.predict(x_test_np)
-    h_pred = hold_model.predict(x_test_np)
+    q_pred = quality_model.predict(x_test_sel)
+    h_pred = hold_model.predict(x_test_sel)
     q_mae = float(np.mean(np.abs(q_pred - y_test_q)))
     h_mae = float(np.mean(np.abs(h_pred - y_test_h)))
 
@@ -322,7 +345,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     save_pickle(
         {
             "backend": backend,
-            "feature_cols": feature_cols,
+            "feature_cols": selected_features,
             "direction_model": dir_model,
             "quality_model": quality_model,
             "hold_model": hold_model,
@@ -332,7 +355,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     )
 
     artifact = {
-        "feature_cols": feature_cols,
+        "feature_cols": selected_features,
         "horizon": args.horizon,
         "model_path": os.path.basename(model_path),
         "meta": {
@@ -378,8 +401,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--horizon", type=int, default=12)
     p.add_argument("--train-ratio", type=float, default=0.70)
     p.add_argument("--val-ratio", type=float, default=0.15)
-    p.add_argument("--n-trials", type=int, default=50)
+    p.add_argument("--n-trials", type=int, default=30)
+    p.add_argument("--max-features", type=int, default=64)
     p.add_argument("--n-jobs", type=int, default=-1)
+    p.add_argument(
+        "--startup-check-only",
+        action="store_true",
+        help="Validate imports/arguments and exit without training",
+    )
     p.add_argument("--force-reuse-results", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -387,4 +416,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.startup_check_only:
+        logger.info("startup check ok: train_multitarget_lgbm")
+        raise SystemExit(0)
     train(args)

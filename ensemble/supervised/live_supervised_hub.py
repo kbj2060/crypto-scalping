@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class MultiTargetLGBMBrain:
-    """multi_target_lgbm.*.lgb.txt 로드 후 Brain B 형식 추세 신호를 생성."""
+    """multi_target_lgbm.pkl 로드 후 Brain B 형식 추세 신호를 생성."""
 
     MISSING_WARN_RATIO = 0.30
 
@@ -25,59 +26,44 @@ class MultiTargetLGBMBrain:
         self.hold_model = None
 
     @staticmethod
-    def _resolve_model_paths(meta_path: str) -> tuple[str, str, str, list[str]]:
+    def _resolve_model_path(meta_path: str) -> tuple[str, list[str]]:
         feature_cols = []
+        model_path = ""
         base_dir = os.path.dirname(meta_path)
-        dir_model_path = quality_model_path = hold_model_path = ""
 
         if os.path.exists(meta_path):
             with open(meta_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             feature_cols = list(data.get("feature_cols", []))
-            model_files = data.get("model_files", {})
-
-            def _resolve(pth: str) -> str:
-                if os.path.isabs(pth):
-                    return pth
-                return os.path.join(base_dir, pth)
-
-            dir_model_path = _resolve(model_files.get("direction_model", ""))
-            quality_model_path = _resolve(model_files.get("quality_model", ""))
-            hold_model_path = _resolve(model_files.get("hold_model", ""))
+            model_ref = data.get("model_path", "")
+            if model_ref:
+                model_path = model_ref if os.path.isabs(model_ref) else os.path.join(base_dir, model_ref)
         else:
             prefix = os.path.splitext(meta_path)[0]
-            dir_model_path = f"{prefix}.dir.lgb.txt"
-            quality_model_path = f"{prefix}.quality.lgb.txt"
-            hold_model_path = f"{prefix}.hold.lgb.txt"
+            model_path = f"{prefix}.pkl"
 
-        return dir_model_path, quality_model_path, hold_model_path, feature_cols
+        return model_path, feature_cols
 
     @classmethod
     def load(cls, meta_path: str = "data/ensemble/supervised/multi_target_lgbm.json") -> "MultiTargetLGBMBrain":
         instance = cls()
-        try:
-            from lightgbm import Booster
-        except Exception as e:
-            raise ImportError(f"lightgbm import 실패: {e}") from e
+        model_path, feature_cols = cls._resolve_model_path(meta_path)
+        if not model_path or not os.path.exists(model_path):
+            raise FileNotFoundError(f"MultiTarget LGBM 모델 파일 누락: {model_path}")
 
-        dir_path, quality_path, hold_path, feature_cols = cls._resolve_model_paths(meta_path)
-        missing = [p for p in [dir_path, quality_path, hold_path] if not p or not os.path.exists(p)]
-        if missing:
-            raise FileNotFoundError(f"MultiTarget LGBM 모델 파일 누락: {missing}")
-
-        instance.direction_model = Booster(model_file=dir_path)
-        instance.quality_model = Booster(model_file=quality_path)
-        instance.hold_model = Booster(model_file=hold_path)
-        instance.feature_cols = feature_cols or [c for c in instance.direction_model.feature_name() if c]
+        with open(model_path, "rb") as f:
+            payload = pickle.load(f)
+        instance.direction_model = payload["direction_model"]
+        instance.quality_model = payload["quality_model"]
+        instance.hold_model = payload["hold_model"]
+        instance.feature_cols = feature_cols or list(payload.get("feature_cols", []))
         if not instance.feature_cols:
-            raise ValueError("feature_cols 복원 실패 (json 또는 booster feature_name 미확인)")
+            raise ValueError("feature_cols 복원 실패")
 
         instance.available = True
         logger.info(
-            "✅ MultiTargetLGBMBrain 로드 완료: %s, %s, %s (%d개 피처)",
-            dir_path,
-            quality_path,
-            hold_path,
+            "✅ MultiTargetLGBMBrain 로드 완료: %s (%d개 피처)",
+            model_path,
             len(instance.feature_cols),
         )
         return instance
@@ -150,9 +136,8 @@ class MultiTargetLGBMBrain:
         df_w = self._prepare_features(df, timestamp_col=timestamp_col)
         last_row = df_w[self.feature_cols].iloc[[-1]].astype(np.float32)
         last_row = last_row.replace([np.inf, -np.inf], np.nan)
-        x_last = last_row.values
 
-        probs_arr = np.asarray(self.direction_model.predict(x_last), dtype=np.float64)
+        probs_arr = np.asarray(self.direction_model.predict(last_row), dtype=np.float64)
         probs = probs_arr.reshape(-1)
         if probs.size > 3:
             probs = probs[:3]
@@ -174,8 +159,8 @@ class MultiTargetLGBMBrain:
         else:
             rev_prob = 0.5
 
-        quality_pred = float(np.asarray(self.quality_model.predict(x_last), dtype=np.float64).reshape(-1)[0])
-        hold_pred = float(np.asarray(self.hold_model.predict(x_last), dtype=np.float64).reshape(-1)[0])
+        quality_pred = float(np.asarray(self.quality_model.predict(last_row), dtype=np.float64).reshape(-1)[0])
+        hold_pred = float(np.asarray(self.hold_model.predict(last_row), dtype=np.float64).reshape(-1)[0])
 
         p_down, p_flat, p_up = (float(probs[0]), float(probs[1]), float(probs[2]))
         return {
@@ -292,7 +277,7 @@ class SupervisedTrendHub:
 
     def __init__(
         self,
-        xgb_meta_path: str = "data/trend_xgb/trend_xgb.json",
+        xgb_meta_path: str = "data/ensemble/supervised/trend_xgb.json",
         multitarget_meta_path: str = "data/ensemble/supervised/multi_target_lgbm.json",
         blend_weights: tuple[float, float] = (0.5, 0.5),
     ):

@@ -131,6 +131,8 @@ def select_feature_columns(
     signal_cols = [p.replace("pred_", "signal_") for p in PRED_CONF_MAP]
 
     extra_cols = signal_cols + RL_SIG_COLS + RL_ALPHA_COLS + [
+        "mtf_trend_1h",
+        "mtf_trend_4h",
         "ret_12",
         "ret_24",
         "ret_48",

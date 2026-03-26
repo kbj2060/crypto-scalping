@@ -32,6 +32,7 @@ from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_me
 from ensemble.unsupervised.common import (
     load_unsup_frame,
     select_numeric_features,
+    rank_features_by_variance,
     zscore_fit_transform,
 )
 
@@ -138,7 +139,6 @@ def _base_params(args: argparse.Namespace) -> Dict[str, Any]:
 
 def _tune_params(
     args: argparse.Namespace,
-    input_dim: int,
     device: str,
     x_train: np.ndarray,
     x_val: np.ndarray,
@@ -155,21 +155,25 @@ def _tune_params(
     tune_epochs = max(8, int(args.tune_epochs))
 
     def objective(trial: "optuna.Trial") -> float:
+        feature_count = trial.suggest_int("feature_count", args.min_features, x_train.shape[1])
         params = {
-            "latent_dim": trial.suggest_int("latent_dim", 4, 32, step=2),
-            "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 96, 128, 192, 256]),
-            "learning_rate": trial.suggest_float("learning_rate", 1e-4, 6e-3, log=True),
-            "beta": trial.suggest_float("beta", 1e-3, 0.1, log=True),
+            "feature_count": feature_count,
+            "latent_dim": trial.suggest_int("latent_dim", 6, 24, step=2),
+            "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 96, 128, 192]),
+            "learning_rate": trial.suggest_float("learning_rate", 2e-4, 4e-3, log=True),
+            "beta": trial.suggest_float("beta", 2e-3, 0.05, log=True),
             "batch_size": trial.suggest_categorical("batch_size", batch_candidates),
-            "threshold_q": trial.suggest_float("threshold_q", 0.90, 0.995),
+            "threshold_q": trial.suggest_float("threshold_q", 0.92, 0.99),
         }
 
+        x_train_sel = x_train[:, :feature_count]
+        x_val_sel = x_val[:, :feature_count]
         torch.manual_seed(args.seed)
         np.random.seed(args.seed)
-        model = VAE(input_dim=input_dim, latent_dim=int(params["latent_dim"]), hidden_dim=int(params["hidden_dim"])).to(device)
+        model = VAE(input_dim=feature_count, latent_dim=int(params["latent_dim"]), hidden_dim=int(params["hidden_dim"])).to(device)
         _train_model(
             model=model,
-            x_train=x_train,
+            x_train=x_train_sel,
             device=device,
             learning_rate=float(params["learning_rate"]),
             beta=float(params["beta"]),
@@ -177,8 +181,8 @@ def _tune_params(
             epochs=tune_epochs,
         )
 
-        train_err = _reconstruction_error(model, x_train, device)
-        val_err = _reconstruction_error(model, x_val, device)
+        train_err = _reconstruction_error(model, x_train_sel, device)
+        val_err = _reconstruction_error(model, x_val_sel, device)
         threshold = float(np.quantile(train_err, float(params["threshold_q"])))
         val_anom_ratio = float(np.mean(val_err > threshold))
 
@@ -201,7 +205,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     torch.manual_seed(args.seed)
 
     df = load_unsup_frame(args.data_path, args.rl_path)
-    feature_cols = select_numeric_features(df, min_features=args.min_features)
+    feature_cols = rank_features_by_variance(df, select_numeric_features(df, min_features=args.min_features))
     x_raw = df[feature_cols].replace([np.inf, -np.inf], np.nan).values.astype(np.float32)
     x, mean, std = zscore_fit_transform(x_raw)
 
@@ -252,20 +256,28 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             best_val_score = float(meta_score or 0.0)
             logger.info("reuse best_params from meta json: %s", meta_path)
         else:
-            best_params, best_val_score = _tune_params(args, x.shape[1], device, x_train, x_val)
+            best_params, best_val_score = _tune_params(args, device, x_train, x_val)
 
     merged = _base_params(args)
     merged.update(best_params)
+    feature_count = int(merged.get("feature_count", len(feature_cols)))
+    feature_count = max(args.min_features, min(feature_count, len(feature_cols)))
+    feature_cols = feature_cols[:feature_count]
+    x = x[:, :feature_count]
+    mean = mean[:feature_count]
+    std = std[:feature_count]
+    x_train_sel = x_train[:, :feature_count]
+    x_val_sel = x_val[:, :feature_count]
 
     model = VAE(
-        input_dim=x.shape[1],
+        input_dim=feature_count,
         latent_dim=int(merged["latent_dim"]),
         hidden_dim=int(merged["hidden_dim"]),
     ).to(device)
 
     _train_model(
         model=model,
-        x_train=x_train,
+        x_train=x_train_sel,
         device=device,
         learning_rate=float(merged["learning_rate"]),
         beta=float(merged["beta"]),
@@ -274,8 +286,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         log_prefix="final/",
     )
 
-    train_err = _reconstruction_error(model, x_train, device)
-    val_err = _reconstruction_error(model, x_val, device)
+    train_err = _reconstruction_error(model, x_train_sel, device)
+    val_err = _reconstruction_error(model, x_val_sel, device)
 
     threshold = float(np.quantile(train_err, float(merged["threshold_q"])))
     val_anomaly_ratio = float(np.mean(val_err > threshold))
@@ -339,14 +351,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--latent-dim", type=int, default=12)
     p.add_argument("--hidden-dim", type=int, default=128)
     p.add_argument("--epochs", type=int, default=60)
-    p.add_argument("--tune-epochs", type=int, default=24)
+    p.add_argument("--tune-epochs", type=int, default=16)
     p.add_argument("--batch-size", type=int, default=1024)
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--beta", type=float, default=0.02)
     p.add_argument("--threshold-q", type=float, default=0.98)
     p.add_argument("--target-anomaly-ratio", type=float, default=0.08)
-    p.add_argument("--n-trials", type=int, default=25)
+    p.add_argument("--n-trials", type=int, default=20)
     p.add_argument("--device", default="auto")
+    p.add_argument(
+        "--startup-check-only",
+        action="store_true",
+        help="Validate imports/arguments and exit without training",
+    )
     p.add_argument("--force-reuse-results", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -354,4 +371,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.startup_check_only:
+        logger.info("startup check ok: train_vae_anomaly")
+        raise SystemExit(0)
     train(args)

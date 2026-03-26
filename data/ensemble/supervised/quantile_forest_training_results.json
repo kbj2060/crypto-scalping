@@ -1,0 +1,20 @@
+{
+  "best_val_score": 0.2660330052833753,
+  "test_mae": 0.005100529943853252,
+  "test_dir_acc": 0.4824447717231222,
+  "test_interval_width": 0.011285925845098976,
+  "best_params": {
+    "n_estimators": 464,
+    "learning_rate": 0.1173188885941541,
+    "num_leaves": 71,
+    "subsample": 0.9028503248702485,
+    "colsample_bytree": 0.7577676470966224,
+    "min_child_samples": 46,
+    "reg_alpha": 0.0022354486713594625,
+    "reg_lambda": 0.0008355196142609415,
+    "feature_count": 28,
+    "flat_threshold": 0.0001019327147664274
+  },
+  "data_hash": "",
+  "config_hash": ""
+}

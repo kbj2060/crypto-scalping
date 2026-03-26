@@ -29,6 +29,7 @@ from ensemble.unsupervised.common import (
     load_unsup_frame,
     zscore_fit_transform,
     ORDERFLOW_FEATURE_HINTS,
+    rank_features_by_variance,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,21 +59,25 @@ def _tune_params(args: argparse.Namespace, x_train: np.ndarray, x_val: np.ndarra
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial: "optuna.Trial") -> float:
+        feature_count = trial.suggest_int("feature_count", args.min_features, x_train.shape[1])
         params = {
-            "n_estimators": trial.suggest_int("n_estimators", 200, 1400),
-            "contamination": trial.suggest_float("contamination", 0.005, 0.10),
+            "feature_count": feature_count,
+            "n_estimators": trial.suggest_int("n_estimators", 150, 500),
+            "contamination": trial.suggest_float("contamination", 0.01, 0.08),
             "max_samples": trial.suggest_float("max_samples", 0.5, 1.0),
             "max_features": trial.suggest_float("max_features", 0.3, 1.0),
         }
+        x_train_sel = x_train[:, :feature_count]
+        x_val_sel = x_val[:, :feature_count]
 
         model = IsolationForest(
             random_state=args.seed,
             n_jobs=args.n_jobs,
-            **params,
+            **{k: v for k, v in params.items() if k != "feature_count"},
         )
-        model.fit(x_train)
-        pred = model.predict(x_val)
-        score = -model.decision_function(x_val)
+        model.fit(x_train_sel)
+        pred = model.predict(x_val_sel)
+        score = -model.decision_function(x_val_sel)
         return _score_anomaly_quality(score, pred, float(params["contamination"]))
 
     logger.info("Optuna tuning start: n_trials=%d", args.n_trials)
@@ -93,6 +98,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     feature_cols = [c for c in ORDERFLOW_FEATURE_HINTS if c in df.columns]
     if not feature_cols:
         feature_cols = [c for c in df.columns if df[c].dtype.kind in ("f", "i")][:20]
+    feature_cols = rank_features_by_variance(df, feature_cols)
     x = df[feature_cols].replace([np.inf, -np.inf], np.nan).values.astype(np.float32)
     x, mean, std = zscore_fit_transform(x)
 
@@ -141,11 +147,16 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
 
     merged = _base_params(args)
     merged.update(best_params)
+    feature_count = int(merged.get("feature_count", len(feature_cols)))
+    feature_cols = feature_cols[:feature_count]
+    x = x[:, :feature_count]
+    mean = mean[:feature_count]
+    std = std[:feature_count]
 
     model = IsolationForest(
         random_state=args.seed,
         n_jobs=args.n_jobs,
-        **merged,
+        **{k: v for k, v in merged.items() if k != "feature_count"},
     )
     model.fit(x)
     pred = model.predict(x)  # -1 anomaly, 1 normal
@@ -200,13 +211,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-path", default="data/training_features_5m.csv")
     p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
     p.add_argument("--save-path", default="data/ensemble/unsupervised/isolation_forest.pkl")
+    p.add_argument("--min-features", type=int, default=4)
     p.add_argument("--n-estimators", type=int, default=500)
     p.add_argument("--contamination", type=float, default=0.03)
     p.add_argument("--max-samples", type=float, default=1.0)
     p.add_argument("--max-features", type=float, default=1.0)
     p.add_argument("--train-ratio", type=float, default=0.8)
-    p.add_argument("--n-trials", type=int, default=40)
+    p.add_argument("--n-trials", type=int, default=20)
     p.add_argument("--n-jobs", type=int, default=-1)
+    p.add_argument(
+        "--startup-check-only",
+        action="store_true",
+        help="Validate imports/arguments and exit without training",
+    )
     p.add_argument("--force-reuse-results", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -214,4 +231,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.startup_check_only:
+        logger.info("startup check ok: train_isolation_forest")
+        raise SystemExit(0)
     train(args)

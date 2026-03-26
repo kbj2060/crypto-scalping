@@ -1,0 +1,15 @@
+{
+  "best_val_score": 0.06162069449880306,
+  "best_params": {
+    "n_estimators": 380,
+    "contamination": 0.02535275497976102,
+    "max_samples": 0.9232211913374635,
+    "max_features": 0.8894787458654062,
+    "feature_count": 7
+  },
+  "anomaly_ratio": 0.025355547602953065,
+  "score_mean": -0.08088907802594549,
+  "score_std": 0.033495975698687674,
+  "data_hash": "",
+  "config_hash": ""
+}

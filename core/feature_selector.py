@@ -19,6 +19,44 @@ from core.feature_engineering import EXCLUDE_FEATURE_COLS, MUST_INCLUDE_FEATURES
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_required_features(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    must_include: List[str],
+) -> tuple[pd.DataFrame, List[str]]:
+    df = df.copy()
+    feature_cols = list(feature_cols)
+
+    def _register(col: str, values: pd.Series) -> None:
+        if col not in df.columns:
+            df[col] = values.astype(np.float32).fillna(0.0)
+        if col not in feature_cols:
+            feature_cols.append(col)
+
+    def _ensure_mtf(col: str, ema_col: str, span: int) -> None:
+        if col not in must_include:
+            return
+        # If the column already exists in df, still ensure it is selectable.
+        if col in df.columns and df[col].notna().any():
+            if col not in feature_cols:
+                feature_cols.append(col)
+                logger.info("auto-added existing feature to candidate list: %s", col)
+            return
+        if "close" not in df.columns:
+            return
+        if ema_col in df.columns and df[ema_col].notna().any():
+            values = (df["close"] / df[ema_col].replace(0, np.nan)) - 1.0
+        else:
+            values = (df["close"] / df["close"].ewm(span=span, adjust=False).mean().replace(0, np.nan)) - 1.0
+        _register(col, values)
+        logger.info("auto-created missing feature: %s", col)
+
+    _ensure_mtf("mtf_trend_1h", "ema_1h", 12)
+    _ensure_mtf("mtf_trend_4h", "ema_4h", 48)
+
+    return df, feature_cols
+
 class FeatureSelector:
     def __init__(self, target_col: str = 'target_ret_1'):
         self.target_col = target_col
@@ -36,6 +74,7 @@ class FeatureSelector:
 
         must_include = must_include or []
         mi_lags = mi_lags or [0, 1, 2, 3, 6]
+        df, feature_cols = _ensure_required_features(df, feature_cols, must_include)
 
         _exclude = {self.target_col} | set(EXCLUDE_FEATURE_COLS) | set(must_include)
         candidates = [c for c in feature_cols if c not in _exclude]

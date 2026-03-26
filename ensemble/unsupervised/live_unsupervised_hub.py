@@ -11,11 +11,10 @@ class UnsupervisedRegimeHub:
     """비지도 학습 모델 아티팩트를 한 곳에서 관리하는 허브."""
 
     DEFAULT_ARTIFACTS = {
-        "gmm_volatility": "data/ensemble/unsupervised/gmm_volatility.npz",
-        "hdbscan_regime": "data/ensemble/unsupervised/hdbscan_regime.joblib",
-        "isolation_forest": "data/ensemble/unsupervised/isolation_forest.joblib",
-        "pca_umap_mapper": "data/ensemble/unsupervised/pca_umap_mapper.joblib",
-        "vae_anomaly": "data/ensemble/unsupervised/vae_anomaly.pt",
+        "gmm_volatility": "data/ensemble/unsupervised/gmm_volatility.pkl",
+        "hdbscan_regime": "data/ensemble/unsupervised/hdbscan_regime.pkl",
+        "isolation_forest": "data/ensemble/unsupervised/isolation_forest.pkl",
+        "vae_anomaly": "data/ensemble/unsupervised/vae_anomaly.pkl",
     }
 
     def __init__(self, artifact_paths: dict[str, str] | None = None):

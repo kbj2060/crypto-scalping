@@ -1,0 +1,47 @@
+{
+  "feature_cols": [
+    "rsi",
+    "mtf_trend_1h",
+    "bb_width_z",
+    "taker_acceleration",
+    "smart_money_flow",
+    "trade_intensity",
+    "hma_slope",
+    "btc_corr_60",
+    "mtf_trend_4h",
+    "bb_width",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "amihud_illiquidity_z",
+    "garman_klass_vol",
+    "jump_z",
+    "net_taker_ratio",
+    "signal_mdjd",
+    "sig_garch_regime",
+    "eth_btc_ratio_change",
+    "mtmb",
+    "pred_mdjd",
+    "sig_orderblock"
+  ],
+  "horizon": 12,
+  "model_path": "multi_target_lgbm.pkl",
+  "meta": {
+    "algorithm": "multi_target_lgbm",
+    "backend": "lightgbm",
+    "direction_balanced_accuracy": 0.5160765387574696,
+    "quality_mae": 0.0037721296650011123,
+    "hold_mae": 3.3914677271172193,
+    "best_val_score": 0.4621136012781793,
+    "best_params": {
+      "n_estimators": 299,
+      "learning_rate": 0.09453383449261407,
+      "num_leaves": 16,
+      "subsample": 0.8114637425678033,
+      "colsample_bytree": 0.7984165248678857,
+      "min_child_samples": 50,
+      "reg_alpha": 0.07718316244114426,
+      "reg_lambda": 0.0030455975183058394,
+      "feature_count": 22
+    }
+  }
+}
