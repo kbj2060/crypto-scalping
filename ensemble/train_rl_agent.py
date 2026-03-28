@@ -1731,13 +1731,12 @@ class GatingRouter7:
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. 학습 루프 — Phase 1/2/3 전체 통합
 # ═══════════════════════════════════════════════════════════════════════════
-def train():
-    CSV_PATH = 'data/rl_training_data_full.csv'
-    if not os.path.exists(CSV_PATH):
+def train(csv_path: str = 'data/rl_training_data_full.csv', train_ratio: float = 0.8, episodes: int = 1000):
+    if not os.path.exists(csv_path):
         return logger.error("데이터가 없습니다. --mode generate_csv 실행 요망")
 
-    df = pd.read_csv(CSV_PATH)
-    split_idx = int(len(df) * 0.8)
+    df = pd.read_csv(csv_path)
+    split_idx = int(len(df) * float(train_ratio))
     df_train  = df.iloc[:split_idx].reset_index(drop=True)
     df_val    = df.iloc[split_idx:].reset_index(drop=True)
 
@@ -1800,7 +1799,7 @@ def train():
         agents[name].memory = PrioritizedRegimeReplayBuffer(
             200000, target_regimes=cfg['target_regimes'])
 
-    NEP             = 1000
+    NEP             = int(episodes)
     BATCH           = 512
     UPDATE_FREQ     = 64
     MIN_BUFFER      = 2048
@@ -1813,11 +1812,19 @@ def train():
     os.makedirs('data/ensemble', exist_ok=True)
     best_val_pnl   = -float('inf')
     best_val_score = -float('inf')
+    best_rolling_score = -float('inf')
     val_pnl_history: list = []
+    val_score_history: list = []
     start_ep       = 1
     os.makedirs('data/ensemble/ckpt', exist_ok=True)
     CHECKPOINT_PATH = 'data/ensemble/ckpt/rl_checkpoint.pth'
     BEST_PATH = 'data/ensemble/ckpt/best_rl_agents.pth'
+
+    # ── Best 선정 안정화 파라미터 ──
+    BEST_WR_MIN = 0.55
+    BEST_PNL_MIN = 0.0
+    BEST_TR_MIN = 200
+    BEST_WINDOW_K = 5
 
     gating_net       = GatingNet7(STACKED_STATE_DIM).to(device)
     gating_optimizer = torch.optim.Adam(gating_net.parameters(), lr=1e-3)
@@ -1847,7 +1854,8 @@ def train():
     def _save_checkpoint(epoch):
         save_dict = {
             'global_step': global_step, 'best_val_pnl': best_val_pnl,
-            'best_val_score': best_val_score, 'val_pnl_history': val_pnl_history, 'epoch': epoch,
+            'best_val_score': best_val_score, 'best_rolling_score': best_rolling_score,
+            'val_pnl_history': val_pnl_history, 'val_score_history': val_score_history, 'epoch': epoch,
             'last_val_hold_ratio': last_val_hold_ratio,
             'gating_net': gating_net.state_dict(),
             'gating_opt': gating_optimizer.state_dict(),
@@ -1856,6 +1864,26 @@ def train():
             save_dict[f'model_{name}'] = models[name].state_dict()
             save_dict[f'opt_{name}'] = agents[name].optimizer.state_dict()
         torch.save(save_dict, CHECKPOINT_PATH)
+
+    def _save_best_snapshot(epoch: int, recovered_from_checkpoint: bool = False):
+        save_dict = {
+            'best_pnl': best_val_pnl,
+            'best_score': best_val_score,
+            'best_rolling_score': best_rolling_score,
+            'epoch': epoch,
+            'gating_net': gating_net.state_dict(),
+            'meta': {
+                'algo': 'IQN_MOE',
+                'best_window_k': BEST_WINDOW_K,
+                'wr_min': BEST_WR_MIN,
+                'pnl_min': BEST_PNL_MIN,
+                'tr_min': BEST_TR_MIN,
+                'recovered_from_checkpoint': bool(recovered_from_checkpoint),
+            }
+        }
+        for name in agent_names:
+            save_dict[f'model_{name}'] = models[name].state_dict()
+        torch.save(save_dict, BEST_PATH)
 
     if os.path.exists(CHECKPOINT_PATH):
         ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
@@ -1869,15 +1897,13 @@ def train():
                 logger.warning(f"⚠️ [{name}] 아키텍처 불일치로 가중치 스킵: {e}")
                 arch_ok = False
         global_step, best_val_pnl = ckpt['global_step'], ckpt['best_val_pnl']
-        best_val_score, val_pnl_history = ckpt['best_val_score'], ckpt.get('val_pnl_history', [])
+        best_val_score = ckpt['best_val_score']
+        best_rolling_score = ckpt.get('best_rolling_score', -float('inf'))
+        val_pnl_history = ckpt.get('val_pnl_history', [])
+        val_score_history = ckpt.get('val_score_history', [])
         has_hold_ratio = 'last_val_hold_ratio' in ckpt
         last_val_hold_ratio = float(ckpt.get('last_val_hold_ratio', 0.0))
         start_ep = ckpt['epoch'] + 1 if arch_ok else 1
-
-        if not os.path.exists(BEST_PATH):
-            best_val_score = -float('inf')
-            best_val_pnl = -float('inf')
-            logger.warning("⚠️ best_rl_agents.pth 없음 → best 기준을 초기화합니다 (이어학습 중 새 best 자동 저장).")
 
         if 'gating_net' in ckpt:
             try:
@@ -1893,6 +1919,10 @@ def train():
             logger.info(f"♻️ [복원] ep={ckpt['epoch']} → {start_ep} | best_pnl={best_val_pnl:.2f}%")
         else:
             logger.info(f"🆕 [아키텍처 변경] 가중치 초기화 후 ep=1 부터 재학습")
+
+        if arch_ok and not os.path.exists(BEST_PATH):
+            _save_best_snapshot(epoch=start_ep - 1, recovered_from_checkpoint=True)
+            logger.warning("⚠️ best_rl_agents.pth 없음 → 복원 가중치로 best 파일을 즉시 재생성했습니다.")
 
         if last_val_hold_ratio > 0.995:
             _reset_gating(f"체크포인트가 HOLD 붕괴 상태(last_val_hold_ratio={last_val_hold_ratio:.3f})")
@@ -2147,8 +2177,27 @@ def train():
                     trade_activity = -min(val_env.total_trades / 30.0, 1.0) * 10.0
 
                 val_score = (val_pnl_pct * 5.0) + (val_env.win_rate * 20.0) + (sharpe_est * 5.0) + trade_activity
+                val_score_history.append(float(val_score))
+                if len(val_score_history) > 200:
+                    val_score_history = val_score_history[-200:]
+                rolling_ready = len(val_score_history) >= BEST_WINDOW_K
+                rolling_score = float(np.median(val_score_history[-BEST_WINDOW_K:])) if rolling_ready else -float('inf')
+
+                quality_reasons = []
+                if val_env.win_rate < BEST_WR_MIN:
+                    quality_reasons.append(f"wr<{BEST_WR_MIN:.2f}")
+                if val_pnl_pct < BEST_PNL_MIN:
+                    quality_reasons.append(f"pnl<{BEST_PNL_MIN:.1f}")
+                if val_env.total_trades < BEST_TR_MIN:
+                    quality_reasons.append(f"tr<{BEST_TR_MIN}")
+                quality_pass = len(quality_reasons) == 0
 
                 logger.info(f"    [VAL] PnL:{val_pnl_pct:.2f}% | Tr:{val_env.total_trades} | WR:{val_env.win_rate*100:.0f}% | Score:{val_score:.2f}")
+                logger.info(
+                    f"    [VAL-BEST] quality:{'PASS' if quality_pass else 'BLOCK'} "
+                    f"({','.join(quality_reasons) if quality_reasons else 'ok'}) | "
+                    f"roll({BEST_WINDOW_K})={rolling_score:.2f} | best_roll={best_rolling_score:.2f}"
+                )
                 logger.info(
                     f"    [VAL-ACT] HOLD:{action_counter.get(0, 0)} | LONG:{action_counter.get(1, 0)} | SHORT:{action_counter.get(2, 0)}"
                 )
@@ -2196,13 +2245,14 @@ def train():
                     avg_wr  = np.mean([k['wr']  for k in kelly_log])
                     logger.info(f"    [KELLY] n={len(kelly_log)} | avg_lev:{avg_lev:.3f} | wr:{avg_wr:.3f}")
 
-                if val_score > best_val_score:
+                if quality_pass and rolling_ready and rolling_score > best_rolling_score:
+                    best_rolling_score = rolling_score
                     best_val_score, best_val_pnl = val_score, val_pnl_pct
-                    save_dict = {'best_pnl': best_val_pnl, 'epoch': ep,
-                                 'gating_net': gating_net.state_dict()}
-                    for name in agent_names: save_dict[f'model_{name}'] = models[name].state_dict()
-                    torch.save(save_dict, BEST_PATH)
-                    logger.info(f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}%)")
+                    _save_best_snapshot(epoch=ep, recovered_from_checkpoint=False)
+                    logger.info(
+                        f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}% | "
+                        f"score:{best_val_score:.2f} | roll:{best_rolling_score:.2f})"
+                    )
 
                 if ep % 50 == 0:
                     hmm_detector.update_online(n_iter=5)
@@ -2229,5 +2279,22 @@ def train():
         logger.info("⚠️ 학습 중단. 체크포인트 저장 완료.")
         _save_checkpoint(ep)
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description='Train IQN MoE RL agent')
+    p.add_argument('--csv-path', default='data/rl_training_data_full.csv')
+    p.add_argument('--train-ratio', type=float, default=0.8)
+    p.add_argument('--episodes', type=int, default=1000)
+    p.add_argument(
+        '--startup-check-only',
+        action='store_true',
+        help='Validate imports/arguments and exit without training',
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    train()
+    args = parse_args()
+    if args.startup_check_only:
+        logger.info('startup check ok: train_rl_agent')
+        raise SystemExit(0)
+    train(csv_path=args.csv_path, train_ratio=args.train_ratio, episodes=args.episodes)

@@ -5,7 +5,6 @@ import time
 import logging
 import gc
 import json
-import re
 import numpy as np
 import pandas as pd
 import torch
@@ -13,7 +12,6 @@ import ccxt.async_support as ccxt
 import warnings
 from datetime import datetime, timedelta
 from collections import deque
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -61,36 +59,30 @@ for p in TARGET_PATHS:
         sys.path.insert(0, p)
 
 from core.feature_engineering import FeatureEngineer
-from ensemble.supervised.live_supervised_hub import SupervisedTrendHub
+from ensemble.seven_model_ensemble import SevenModelEnsemble
 from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
-from ensemble.arbiter_gatekeeper import BrainAOutput, BrainBOutput, DualBrainArbiter
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,
     KronosForecaster, TimesFMForecaster, MoiraiForecaster,
-    TTMForecaster, NHITSForecaster, TiDEForecaster, PatchTSTForecaster,
 )
-
-# RL (4-Agent + GatingNet7) 상수 및 라우터
 from ensemble.train_rl_agent import (
-    GatingRouter7, GatingNet7, RobustIQN,
-    STATE_DIM         as RL_STATE_DIM,
-    STACKED_STATE_DIM as RL_STACKED_STATE_DIM,
-    STATE_PRED        as RL_STATE_PRED,
-    STATE_CONF        as RL_STATE_CONF,
-    STATE_ELITE       as RL_STATE_ELITE,
-    STATE_ALPHA       as RL_STATE_ALPHA,
-    STATE_SYNTH       as RL_STATE_SYNTH,
-    REGIME_COLS,
+    STATE_PRED as DSAC_STATE_PRED,
+    STATE_CONF as DSAC_STATE_CONF,
+    STATE_ELITE as DSAC_STATE_ELITE,
+    STATE_ALPHA as DSAC_STATE_ALPHA,
+    STATE_SYNTH as DSAC_STATE_SYNTH,
+    OnlineHMMDetector,
+)
+from ensemble.train_rl_dsac_agent import (
+    DSAC_STATE_DIM,
+    GaussianActor as DSACGaussianActor,
+    SACRouter as DSACRouter,
+)
+from ensemble.train_rl_dsac_v2 import (
+    GaussianActorV2 as DSACGaussianActorV2,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
 from strategies.elite_strategies import NewEliteSignalEngine
-
-# SAC 라우터 (선택적 로드 — 체크포인트 없으면 비활성화)
-try:
-    from ensemble.train_rl_sac_agent import GaussianActor, SACRouter as _SACRouter
-    _SAC_AVAILABLE = True
-except ImportError as _sac_err:
-    _SAC_AVAILABLE = False
 
 
 class Colors:
@@ -114,60 +106,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 COMPACT_MODE = _env_flag('COMPACT_MODE', True)
-LLM_ENABLED = _env_flag('LLM_ENABLED', False)
-LLM_DISABLED_SENTINEL = '[LLM_DISABLED]'
-LLM_SIGNAL_MIN_ABS = float(os.getenv("LLM_SIGNAL_MIN_ABS", "0.10"))
-LLM_SIGNAL_TOP_K = int(os.getenv("LLM_SIGNAL_TOP_K", "8"))
+DSAC_ONLY_MODE = True
+ENSEMBLE_PREDICTOR_ENABLED = _env_flag('ENSEMBLE_PREDICTOR_ENABLED', False)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
-
-SIG_INTERPRETATIONS = {
-    'whale': ('고래 매수 다이버전스 포착', '고래 매도 다이버전스 포착', '고래 움직임 관망'),
-    'liq_squeeze': ('숏 청산 스퀴즈 위협 (롱 반등)', '롱 청산 스퀴즈 위협 (숏 반등)', '청산 스퀴즈 위험 낮음'),
-    'net_taker': ('시장가 매수 쏠림 강함', '시장가 매도 쏠림 강함', '시장가 매수/매도 균형'),
-    'orderblock': ('지지 매물대(FVG) 강한 반등', '저항 매물대(FVG) 강한 거절', '주요 오더블록 미형성'),
-    'hurst_ofi': ('프랙탈 상승 오더플로우 지속', '프랙탈 하락 오더플로우 지속', '랜덤워크/혼조세 (방향성 없음)'),
-    'funding_cascade': ('펀딩비 극단적 음수 (숏 청산대기)', '펀딩비 극단적 양수 (롱 청산대기)', '펀딩비/미결제약정 안정적'),
-    'multifractal': ('장기 노이즈 캔슬링: 상승', '장기 노이즈 캔슬링: 하락', '추세 노이즈 상쇄됨'),
-    'cluster_fib': ('피보나치+CVP 클러스터 지지', '피보나치+CVP 클러스터 저항', '주요 방어선 부재'),
-    'oi_divergence': ('하락 중 OI 증가 (숏 스퀴즈 잠재)', '상승 중 OI 증가 (롱 스퀴즈 잠재)', 'OI와 가격 동조화'),
-    'top_trader_squeeze': ('탑트레이더 숏 쏠림 (상승폭발 대기)', '탑트레이더 롱 쏠림 (하락폭발 대기)', '탑트레이더 포지션 균형'),
-    'btc_corr_breakout': ('BTC 커플링 이탈 (독자 상승)', 'BTC 커플링 이탈 (독자 하락)', 'BTC 방향성 강력 동조'),
-    'ai_squeeze': ('변동성 응축 후 상방 폭발', '변동성 응축 후 하방 폭발', '변동성 평이함 (응축 없음)'),
-    'vp_gravity': ('POC(매물대) 하단 이탈 후 탄성 반등', 'POC(매물대) 상단 이탈 후 탄성 하락', '최다 매물대(POC) 부근 체류'),
-    'volume_confirm': ('거래량+방향성 확인 (추세 진입)', '거래량+방향성 확인 (추세 하락)', '거래량 방향 불명확'),
-    'liquidity_trap': ('EQL 스탑헌팅 후 상승 반전', 'EQH 스탑헌팅 후 하락 반전', '스탑헌팅 패턴 없음'),
-    'trend_health': ('추세 건강도 양호 (방향성 지속)', '추세 건강도 악화 (반전 주의)', '추세 건강도 중립'),
-}
-_RL_ELITE_KEYS = {c.replace('sig_', '') for c in RL_STATE_ELITE}
-
-
-def _to_signal_view(sig_key: str, value: float) -> dict:
-    base_key = sig_key.replace('sig_', '')
-    long_msg, short_msg, neutral_msg = SIG_INTERPRETATIONS.get(base_key, ('LONG', 'SHORT', 'NEUTRAL'))
-    if value > 0:
-        direction, meaning = 'LONG', long_msg
-    elif value < 0:
-        direction, meaning = 'SHORT', short_msg
-    else:
-        direction, meaning = 'NEUTRAL', neutral_msg
-    return {
-        'name': base_key,
-        'raw': float(value),
-        'abs': float(abs(value)),
-        'direction': direction,
-        'meaning': meaning,
-        'in_rl_state': base_key in _RL_ELITE_KEYS,
-    }
-
-
-def _active_signal_views(elite_sigs: dict, min_abs: float = LLM_SIGNAL_MIN_ABS, top_k: int = LLM_SIGNAL_TOP_K) -> list[dict]:
-    rows = [_to_signal_view(k, float(v)) for k, v in elite_sigs.items()]
-    rows.sort(key=lambda x: x['abs'], reverse=True)
-    active = [r for r in rows if r['direction'] != 'NEUTRAL' and r['abs'] >= float(min_abs)]
-    return active[:max(1, int(top_k))]
-
-
 # ════════════════════════════════════════════════════════════════
 # 0. 공통 헬퍼
 # ════════════════════════════════════════════════════════════════
@@ -193,35 +135,86 @@ def _traj_conf(traj: np.ndarray) -> float:
     return float(np.tanh(abs(slope) / std))
 
 
-def _compute_mdjd(last_row: pd.Series, df: pd.DataFrame):
-    """processed_df 마지막 행에서 pred_mdjd, conf_mdjd 계산"""
-    def _g(col, default=0.0):
-        return float(last_row.get(col, default))
+def _trend_signal_from_m7(m7_last: dict | None) -> dict | None:
+    """SevenModelEnsemble 출력(dict)을 DSACTrendRouter 입력 포맷으로 변환."""
+    if not isinstance(m7_last, dict) or not m7_last:
+        return None
 
-    sq_vals = df['squeeze_power'].values if 'squeeze_power' in df.columns else np.zeros(len(df))
-    sq_window = sq_vals[-288:] if len(sq_vals) >= 288 else sq_vals
-    sq_mean = float(np.mean(sq_window))
-    sq_std  = float(np.std(sq_window)) + 1e-8
-    sq_z    = (sq_vals[-1] - sq_mean) / sq_std if len(sq_vals) > 0 else 0.0
+    def _f(key: str, default: float = 0.0) -> float:
+        try:
+            return float(m7_last.get(key, default))
+        except Exception:
+            return float(default)
 
-    trend_4h = _g('mtf_trend_4h')
-    trend_std = float(df['mtf_trend_4h'].std() + 1e-8) if 'mtf_trend_4h' in df.columns else 1e-8
-    trend_z   = trend_4h / trend_std
+    agg_dn = float(np.clip(_f("m7_prob_dn", 0.0), 0.0, 1.0))
+    agg_fl = float(np.clip(_f("m7_prob_fl", 0.0), 0.0, 1.0))
+    agg_up = float(np.clip(_f("m7_prob_up", 0.0), 0.0, 1.0))
+    s = agg_dn + agg_fl + agg_up
+    if s <= 1e-12:
+        agg_dn = agg_fl = agg_up = 1.0 / 3.0
+    else:
+        agg_dn, agg_fl, agg_up = agg_dn / s, agg_fl / s, agg_up / s
 
-    D = (0.005 * _g('smart_money_flow') * (1.0 + np.tanh(_g('whale_conviction')))
-         + 0.002 * trend_4h)
-    I = (0.003 * _g('net_taker_ratio')
-         * np.exp(np.tanh(_g('taker_acceleration')))
-         * (max(0.0, _g('amihud_illiquidity_z')) + 1.0))
-    J = (0.01 * np.tanh(float(sq_z))
-         * np.tanh(_g('funding_pressure'))
-         * (1.0 if _g('breakout_strength') > 0.4 else 0.0))
-    G = (-0.005 * _g('cvp_poc_dist')
-         * np.exp(-float(np.clip(_g('cvp_volume_imbalance'), -5.0, 5.0)))
-         * (1.0 - np.tanh(abs(trend_z))))
+    p_dn = float(np.clip(_f("m7_trend_xgb_dn", agg_dn), 0.0, 1.0))
+    p_fl = float(np.clip(_f("m7_trend_xgb_fl", agg_fl), 0.0, 1.0))
+    p_up = float(np.clip(_f("m7_trend_xgb_up", agg_up), 0.0, 1.0))
+    s_xgb = p_dn + p_fl + p_up
+    if s_xgb <= 1e-12:
+        p_dn = p_fl = p_up = 1.0 / 3.0
+    else:
+        p_dn, p_fl, p_up = p_dn / s_xgb, p_fl / s_xgb, p_up / s_xgb
 
-    R_hat = D + I + J + G
-    return float(np.sign(R_hat)), float(np.tanh(abs(R_hat) * 100))
+    t_dir = int(np.argmax([p_dn, p_fl, p_up]))
+    m7_action = int(np.clip(round(_f("m7_action", 0.0)), -1, 1))
+
+    m7_conf = float(np.clip(_f("m7_confidence", 0.0), 0.0, 1.0))
+    m7_gate_block = 1 if _f("m7_gate_block", 0.0) >= 0.5 else 0
+    xgb_top = max(p_dn, p_fl, p_up)
+    xgb_second = sorted([p_dn, p_fl, p_up])[1]
+    strength = float(np.clip((xgb_top - 1.0 / 3.0) * 1.5 + (xgb_top - xgb_second) * 0.6, 0.0, 1.0))
+    rev_prob = float(np.clip((1.0 - strength) * 0.70 + (0.30 if m7_gate_block else 0.0), 0.0, 1.0))
+
+    return {
+        "trend_dir": t_dir,
+        "strength": strength,
+        "rev_prob": rev_prob,
+        "prob_dn": p_dn,
+        "prob_flat": p_fl,
+        "prob_up": p_up,
+        "probs": [p_dn, p_fl, p_up],
+        "trend_model": "TREND_XGB",
+        "m7_confidence": m7_conf,
+        "m7_action": m7_action,
+        "m7_prob_dn": agg_dn,
+        "m7_prob_fl": agg_fl,
+        "m7_prob_up": agg_up,
+        "m7_size": float(np.clip(_f("m7_size", 0.0), 0.0, 1.0)),
+        "m7_gate_block": m7_gate_block,
+        "m7_quality_pred": _f("m7_quality_pred", 0.0),
+        "m7_hold_pred": _f("m7_hold_pred", 0.0),
+        "m7_target_hold": float(max(0.0, _f("m7_target_hold", 0.0))),
+        "m7_q10": _f("m7_q10", 0.0),
+        "m7_q50": _f("m7_q50", 0.0),
+        "m7_q90": _f("m7_q90", 0.0),
+        "m7_qwidth": float(max(0.0, _f("m7_qwidth", 0.0))),
+        "m7_trend_xgb_dn": float(np.clip(_f("m7_trend_xgb_dn", 0.0), 0.0, 1.0)),
+        "m7_trend_xgb_fl": float(np.clip(_f("m7_trend_xgb_fl", 0.0), 0.0, 1.0)),
+        "m7_trend_xgb_up": float(np.clip(_f("m7_trend_xgb_up", 0.0), 0.0, 1.0)),
+        "m7_gmm_cluster": _f("m7_gmm_cluster", -1.0),
+        "m7_gmm_conf": float(np.clip(_f("m7_gmm_conf", 0.0), 0.0, 1.0)),
+        "m7_gmm_vol_rank": float(np.clip(_f("m7_gmm_vol_rank", 0.5), 0.0, 1.0)),
+        "m7_hdb_label": _f("m7_hdb_label", -1.0),
+        "m7_hdb_prob": float(np.clip(_f("m7_hdb_prob", 0.0), 0.0, 1.0)),
+        "m7_iso_pred": _f("m7_iso_pred", 1.0),
+        "m7_iso_score": _f("m7_iso_score", 0.0),
+        "m7_iso_anom": 1.0 if _f("m7_iso_anom", 0.0) >= 0.5 else 0.0,
+        "m7_vae_error": _f("m7_vae_error", 0.0),
+        "m7_vae_threshold": _f("m7_vae_threshold", 0.0),
+        "m7_vae_anom": 1.0 if _f("m7_vae_anom", 0.0) >= 0.5 else 0.0,
+        "m7_expected_ret": _f("m7_expected_ret", 0.0),
+        "m7_tail_risk": _f("m7_tail_risk", 0.0),
+        "m7_composite_score": _f("m7_composite_score", 0.0),
+    }
 
 
 # ════════════════════════════════════════════════════════════════
@@ -336,7 +329,7 @@ class EnsemblePredictor:
 
     async def predict_all_async(self, df: pd.DataFrame):
         preds, confs = [], []
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _run_inference(m):
             if not getattr(m, 'available', False): return None
@@ -358,88 +351,6 @@ class EnsemblePredictor:
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
         return np.array(preds), np.array(confs)
-
-
-# ════════════════════════════════════════════════════════════════
-# 2-B. Ridge 선형 퀀트 시그널 (라이브 트레이딩용)
-# ════════════════════════════════════════════════════════════════
-class RidgeSignalComputer:
-    """data/ridge_model.joblib 로드 후 매 틱마다 pred_ridge / conf_ridge 반환."""
-
-    _RIDGE_FEATURES = [
-        'log_return', 'rsi', 'macd_hist', 'bb_width', 'volatility_z',
-        'garman_klass_vol', 'last_funding_rate', 'oi_change_rate',
-        'net_taker_ratio', 'taker_acceleration', 'trade_intensity',
-        'big_trade_ratio', 'hurst_12', 'hurst_48', 'hurst_288',
-        'realized_vol_ratio', 'amihud_illiquidity_z',
-    ]
-
-    def __init__(self, model_path: str = 'data/ridge_model.joblib'):
-        self._ridge   = None
-        self._scaler  = None
-        self._feats   = self._RIDGE_FEATURES
-        self._abs_buf = deque(maxlen=500)   # rolling MAD 추적용
-
-        if os.path.exists(model_path):
-            try:
-                from joblib import load as joblib_load
-                pkg = joblib_load(model_path)
-                self._ridge  = pkg['ridge']
-                self._scaler = pkg['scaler']
-                self._feats  = pkg.get('features', self._RIDGE_FEATURES)
-                logger.info(f"✅ Ridge 퀀트 모델 로드: {len(self._feats)}개 피처")
-            except Exception as e:
-                logger.warning(f"⚠️ Ridge 모델 로드 실패: {e} — pred_ridge=0 사용")
-        else:
-            logger.warning(f"⚠️ Ridge 모델 없음 ({model_path}) — generate_csv 후 재기동 필요")
-
-    def predict(self, df: pd.DataFrame) -> dict:
-        if self._ridge is None:
-            return {'pred_ridge': 0.0, 'conf_ridge': 0.5}
-        row = df.iloc[-1]
-        x   = np.array([float(row.get(f, 0.0)) for f in self._feats], dtype=np.float32)
-        x   = np.nan_to_num(x, nan=0.0).reshape(1, -1)
-        raw = float(self._ridge.predict(self._scaler.transform(x))[0])
-        self._abs_buf.append(abs(raw))
-        mad = float(np.median(list(self._abs_buf))) if self._abs_buf else 1e-8
-        conf = float(np.tanh(abs(raw) / max(mad, 1e-8)))
-        return {'pred_ridge': raw, 'conf_ridge': conf}
-
-
-# ════════════════════════════════════════════════════════════════
-# 2-C. 신경망 state 구성용 NF/TTM 예측
-# ════════════════════════════════════════════════════════════════
-class NFStatePredictor:
-    """RL_STATE_PRED 전체 커버 (싱글 로드, 공유 사용)"""
-
-    def __init__(self):
-        # NF 4종은 UnifiedNFForecaster 싱글톤이므로 중복 로드 없음
-        self.models = {
-            'ttm':      TTMForecaster(),
-            'tide':     TiDEForecaster(),
-            'patchtst': PatchTSTForecaster(),
-            'timesfm':  TimesFMForecaster(),
-            'chronos':  ChronosForecaster(),
-        }
-        self.ridge = RidgeSignalComputer()
-
-    def predict(self, df: pd.DataFrame) -> dict:
-        """pred_{name}, conf_{name} 키로 구성된 dict 반환 (mdjd 제외)"""
-        result = {}
-        for name, model in self.models.items():
-            try:
-                out = model.predict(df, horizon=6) if getattr(model, 'available', False) else None
-                if out is not None and getattr(out, 'median', None) is not None:
-                    traj = np.array(out.median[-1], dtype=np.float32)
-                    p, c = _traj_direction(traj), _traj_conf(traj)
-                else:
-                    p, c = 0.0, 0.5
-            except Exception:
-                p, c = 0.0, 0.5
-            result[f'pred_{name}'] = p
-            result[f'conf_{name}'] = c
-        result.update(self.ridge.predict(df))
-        return result
 
 
 # ════════════════════════════════════════════════════════════════
@@ -512,328 +423,34 @@ def _tg_trade_msg(ex_code: str, current_price: float,
         'FLIP_SHORT_TO_LONG':   '🔄',
     }.get(ex_code, '🟨')
     action_word = {1: 'LONG', 2: 'SHORT', 0: 'HOLD'}.get(fa, '?')
+    pnl_line = ""
+    trade_pnl = meta_result.get("trade_pnl_pct", None) if isinstance(meta_result, dict) else None
+    if trade_pnl is not None:
+        try:
+            p = float(trade_pnl)
+            p_icon = "🟢" if p > 0 else ("🔴" if p < 0 else "🟨")
+            pnl_line = f"\n{p_icon} Event PnL: {p:+.2f}%"
+        except Exception:
+            pnl_line = ""
+    elif ex_code.startswith("ENTER_"):
+        pnl_line = "\n🟨 Event PnL: +0.00% (entry)"
     return (
         f"{icon} <b>{ex_code}</b>  ({action_word})\n"
         f"💰 ETH ${current_price:,.2f}   🕐 {timestamp_kst.strftime('%m-%d %H:%M')} KST\n"
-        f"🌍 {regime_name}   Kelly: {kelly:.3f}   Gate: {gate}\n"
+        f"🌍 {regime_name}   Kelly: {kelly:.3f}   Gate: {gate}{pnl_line}\n"
         f"📈 Trend: {t_dir}   Arbiter: {arb}"
     )
 
 
-# ════════════════════════════════════════════════════════════════
-# 2-E. LLM 시장 분석기 (DeepSeek API)
-# ════════════════════════════════════════════════════════════════
-class LLMAnalyzer:
-    """오더북 + 체결 흐름 + 선물 지표를 수집해 DeepSeek 모델에 방향성 분석 요청."""
-
-    MODEL   = os.getenv("DEEPSEEK_LLM_MODEL", "deepseek-chat")
-    FALLBACK_MODELS = tuple(
-        m.strip() for m in os.getenv(
-            "DEEPSEEK_LLM_FALLBACKS",
-            "deepseek-chat",
-        ).split(",") if m.strip()
-    )
-    API_KEY = (
-        os.getenv("DEEPSEEK_API_KEY", "")
-        or os.getenv("LLM_API_KEY", "")
-        or os.getenv("OPENAI_API_KEY", "")
-    )
-    API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
-    LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-    API_TIMEOUT_SEC = float(os.getenv("DEEPSEEK_TIMEOUT_SEC", "25"))
-
-    def __init__(self, exchange, symbol: str = 'ETHUSDT'):
-        self.exchange    = exchange
-        self.symbol      = symbol
-        self._fail_count = 0
-        self._resolved_model: str | None = None
-        self._pending_task: asyncio.Task | None = None   # fire-and-forget 태스크
-        self._pending_meta: dict = {}                    # 태스크 생성 당시 regime_name 등
-        if not self.API_KEY:
-            logger.warning("⚠️ DeepSeek API 키가 설정되지 않았습니다. (DEEPSEEK_API_KEY/LLM_API_KEY)")
-
-    @staticmethod
-    def _extract_deepseek_text(resp_json: dict) -> str:
-        if not isinstance(resp_json, dict):
-            return ""
-        choices = resp_json.get('choices', [])
-        if not isinstance(choices, list) or not choices:
-            return ""
-        msg = choices[0].get('message', {}) if isinstance(choices[0], dict) else {}
-        content = msg.get('content', '')
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts = [str(p.get('text', '')) for p in content if isinstance(p, dict)]
-            return "".join(parts).strip()
-        return ""
-
-    @staticmethod
-    def _is_model_not_found(exc: Exception) -> bool:
-        msg = str(exc).lower()
-        return ('404' in msg) or ('model_not_found' in msg) or ('not found' in msg) or ('unknown model' in msg)
-
-    def _model_candidates(self) -> list[str]:
-        candidates: list[str] = []
-        if self._resolved_model:
-            candidates.append(self._resolved_model)
-        candidates.append(self.MODEL)
-        candidates.extend(self.FALLBACK_MODELS)
-        seen = set()
-        uniq: list[str] = []
-        for m in candidates:
-            mm = (m or '').strip()
-            if not mm:
-                continue
-            if mm in seen:
-                continue
-            seen.add(mm)
-            uniq.append(mm)
-        return uniq
-
-    # ── 오더북 ────────────────────────────────────────────────────
-    async def _fetch_orderbook(self) -> dict:
-        try:
-            res   = await self.exchange.fapiPublicGetDepth({'symbol': self.symbol, 'limit': 20})
-            bids  = [[float(p), float(q)] for p, q in res['bids'][:5]]
-            asks  = [[float(p), float(q)] for p, q in res['asks'][:5]]
-            bid_v = sum(q for _, q in bids)
-            ask_v = sum(q for _, q in asks)
-            imbal = (bid_v - ask_v) / (bid_v + ask_v + 1e-8) * 100
-            spread = asks[0][0] - bids[0][0] if bids and asks else 0.0
-            return {'bid_ask_imbalance_pct': round(imbal, 2),
-                    'spread_usdt': round(spread, 3),
-                    'top5_bids': bids, 'top5_asks': asks}
-        except Exception as e:
-            return {'error': str(e)}
-
-    # ── 최근 100건 체결 ───────────────────────────────────────────
-    async def _fetch_agg_trades(self) -> dict:
-        try:
-            trades   = await self.exchange.fapiPublicGetAggTrades({'symbol': self.symbol, 'limit': 100})
-            buy_vol  = sum(float(t['q']) for t in trades if not t['m'])   # m=False: buyer is taker
-            sell_vol = sum(float(t['q']) for t in trades if     t['m'])
-            total    = buy_vol + sell_vol + 1e-8
-            buy_pct  = round(buy_vol / total * 100, 1)
-            dominant = 'BUY' if buy_pct > 55 else 'SELL' if buy_pct < 45 else 'NEUTRAL'
-            return {'buyer_aggressor_pct': buy_pct,
-                    'seller_aggressor_pct': round(100 - buy_pct, 1),
-                    'dominant_side': dominant,
-                    'n_trades': len(trades)}
-        except Exception as e:
-            return {'error': str(e)}
-
-    # ── 이미 계산된 피처 추출 (최근 N개 캔들) ─────────────────────
-    @staticmethod
-    def _extract_features(last_row) -> dict:
-        def g(col, d=0.0):
-            return float(last_row.get(col, d))
-        return {
-            'funding_rate':              g('last_funding_rate'),
-            'oi_change_rate':            g('oi_change_rate'),
-            'top_trader_ls_ratio':       g('sum_toptrader_long_short_ratio'),
-            'global_ls_ratio':           g('count_long_short_ratio'),
-            'net_taker_ratio':           g('net_taker_ratio'),
-            'whale_retail_ratio':        g('whale_retail_ratio'),
-            'smart_money_flow':          g('smart_money_flow'),
-            'funding_pressure':          g('funding_pressure'),
-            'squeeze_power':             g('squeeze_power'),
-            'rsi':                       round(g('rsi', 50), 1),
-            'macd_hist':                 round(g('macd_hist'), 6),
-            'volatility_z':              round(g('volatility_z'), 3),
-            'garch_vol_z':               round(g('garch_vol_z'), 3),
-            'jump_flag':                 int(g('jump_flag')),
-            'evt_tail_flag':             int(g('evt_tail_flag')),
-            'ou_halflife_bars':          round(g('ou_halflife'), 1),
-            'mtf_trend_1h':              g('mtf_trend_1h'),
-            'mtf_trend_4h':              g('mtf_trend_4h'),
-        }
-
-    @staticmethod
-    def _extract_candle_series(df: pd.DataFrame, n: int = 12) -> list[dict]:
-        """최근 n개 캔들의 핵심 지표를 리스트로 반환 (프롬프트 시계열용)."""
-        rows = df.tail(n)
-        result = []
-        for _, row in rows.iterrows():
-            def g(col, d=0.0): return float(row.get(col, d))
-            regime = ('BULL' if g('regime_bull') == 1.0 else
-                      'BEAR' if g('regime_bear') == 1.0 else
-                      'CHOP' if g('regime_chop') == 1.0 else
-                      'WHIP' if g('regime_whipsaw') == 1.0 else 'NORM')
-            ts = row.get('timestamp', '')
-            ts_str = str(ts)[:16] if ts != '' else '?'
-            result.append({
-                'ts':              ts_str,
-                'close':           round(g('close'), 2),
-                'rsi':             round(g('rsi', 50), 1),
-                'macd_h':          round(g('macd_hist'), 5),
-                'vol_z':           round(g('volatility_z'), 2),
-                'net_taker':       round(g('net_taker_ratio'), 3),
-                'fund_pres':       round(g('funding_pressure'), 3),
-                'smart_mf':        round(g('smart_money_flow'), 3),
-                'squeeze':         round(g('squeeze_power'), 3),
-                'regime':          regime,
-            })
-        return result
-
-    # ── 프롬프트 빌드 ────────────────────────────────────────────
-    def _build_prompt(self, price: float, regime: str,
-                      orderbook: dict, trades: dict,
-                      feats: dict, elite_sigs: dict,
-                      candle_series: list[dict]) -> str:
-        elite_active = _active_signal_views(elite_sigs, min_abs=LLM_SIGNAL_MIN_ABS, top_k=6)
-        elite_active_min = [
-            {
-                'name': s['name'],
-                'dir': s['direction'],
-                'meaning': s['meaning'],
-            }
-            for s in elite_active
-        ]
-        last_c = candle_series[-1] if candle_series else {}
-        ctx = {
-            'symbol': f'{self.symbol} Perp',
-            'price': round(float(price), 2),
-            'regime': regime,
-            'orderflow': {
-                'imbalance_pct': float(orderbook.get('bid_ask_imbalance_pct')),
-                'buy_pct': float(trades.get('buyer_aggressor_pct')),
-                'dominant': str(trades.get('dominant_side')),
-            },
-            'market': {
-                'funding': float(feats.get('funding_rate')),
-                'oi_chg': float(feats.get('oi_change_rate')),
-                'trend_1h': float(feats.get('mtf_trend_1h')),
-                'trend_4h': float(feats.get('mtf_trend_4h')),
-            },
-            'tech': {
-                'rsi': float(last_c.get('rsi', feats.get('rsi'))),
-                'macd_h': float(last_c.get('macd_h', feats.get('macd_hist'))),
-                'vol_z': float(last_c.get('vol_z', feats.get('volatility_z'))),
-                'squeeze': float(last_c.get('squeeze', feats.get('squeeze_power'))),
-            },
-            'active_signals': elite_active_min,
-        }
-        return (
-            "ETH/USDT 30분 방향만 판단.\n"
-            "active_signals.meaning(시그널 해석)을 가장 우선 반영.\n"
-            "출력은 반드시 한 줄, 아래 둘 중 하나 형식만:\n"
-            "UP LOW|MEDIUM|HIGH\n"
-            "DOWN LOW|MEDIUM|HIGH\n"
-            f"{json.dumps(ctx, ensure_ascii=False, separators=(',', ':'))}"
-        )
-
-    # ── DeepSeek 동기 호출 (executor에서 실행) ──────────────────────
-    def _call_deepseek_sync(self, prompt: str) -> str:
-        if not self.API_KEY:
-            return '[DeepSeek API 키 없음 — DEEPSEEK_API_KEY/LLM_API_KEY 설정 필요]'
-        try:
-            import urllib.request
-            import urllib.error
-
-            last_err: Exception | None = None
-            tried: list[str] = []
-            for model_name in self._model_candidates():
-                tried.append(model_name)
-                payload = {
-                    'model': model_name,
-                    'messages': [
-                        {'role': 'system', 'content': '당신은 트레이딩 방향 분류기다. 출력 포맷을 반드시 지켜라.'},
-                        {'role': 'user', 'content': prompt},
-                    ],
-                    'temperature': self.LLM_TEMPERATURE,
-                    'max_tokens': 512,
-                }
-                req = urllib.request.Request(
-                    self.API_URL,
-                    data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-                    headers={
-                        'Authorization': f'Bearer {self.API_KEY}',
-                        'Content-Type': 'application/json',
-                    },
-                    method='POST',
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=self.API_TIMEOUT_SEC) as resp:
-                        resp_json = json.loads(resp.read().decode('utf-8'))
-                    self._resolved_model = model_name
-                    self._fail_count = 0
-                    raw = self._extract_deepseek_text(resp_json)
-                    return raw if raw else '[LLM 응답 없음]'
-                except urllib.error.HTTPError as he:
-                    body = he.read().decode('utf-8', errors='ignore')
-                    e_model = RuntimeError(f'HTTP {he.code}: {body[:300]}')
-                    last_err = e_model
-                    if he.code == 404 or self._is_model_not_found(e_model):
-                        continue
-                    raise e_model
-                except Exception as e_model:
-                    last_err = e_model
-                    if self._is_model_not_found(e_model):
-                        continue
-                    raise
-
-            self._fail_count += 1
-            return (
-                f"[DeepSeek 모델 호출 실패 ({self._fail_count}회): "
-                f"tried={','.join(tried)} err={last_err}]"
-            )
-        except Exception as e:
-            self._fail_count += 1
-            return f'[DeepSeek 오류 ({self._fail_count}회): {e}]'
-
-    # ── 메인 진입점 (fire-and-forget) ────────────────────────────
-    # 이번 사이클에 백그라운드 태스크 시작, 결과는 다음 사이클에서 수거
-    # → 봇 사이클이 LLM 응답 대기로 블로킹되지 않음
-    async def _run_analysis(self, processed_df: pd.DataFrame,
-                            price: float, elite_sigs: dict, regime_name: str) -> str:
-        last_row  = processed_df.iloc[-1]
-        orderbook, trades = await asyncio.gather(
-            self._fetch_orderbook(),
-            self._fetch_agg_trades(),
-        )
-        feats         = self._extract_features(last_row)
-        candle_series = self._extract_candle_series(processed_df, n=12)
-        prompt = self._build_prompt(price, regime_name, orderbook, trades,
-                                    feats, elite_sigs, candle_series)
-        loop   = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._call_deepseek_sync, prompt)
-
-    def fire(self, processed_df: pd.DataFrame,
-             price: float, elite_sigs: dict, regime_name: str):
-        """이번 사이클에 분석 태스크를 백그라운드로 시작."""
-        if self._pending_task is not None and not self._pending_task.done():
-            return  # 이전 태스크가 아직 실행 중 — 중복 시작 방지
-        self._pending_task = asyncio.create_task(
-            self._run_analysis(processed_df, price, elite_sigs, regime_name)
-        )
-        self._pending_meta = {'regime_name': regime_name}
-
-    def collect(self) -> str | None:
-        """이전 사이클의 LLM 결과를 수거. 아직 완료 안 됐으면 None 반환."""
-        if self._pending_task is None:
-            return None
-        if not self._pending_task.done():
-            return None
-        try:
-            result = self._pending_task.result()
-        except Exception as e:
-            result = f'[LLM 태스크 예외: {e}]'
-        self._pending_task = None
-        return result
-
-    def collect_meta(self) -> dict:
-        return self._pending_meta
-
-
-def _print_llm_section(answer: str, regime_name: str, current_time_kst):
-    print(f" 레짐: {regime_name} | 시간 : {current_time_kst.strftime('%Y-%m-%d %H:%M')} KST ")
-    print("─" * 70)
-    for line in answer.strip().splitlines():
-        print(f" {line}")
-
-
 def _compute_regime(df, window=24):
+    regime_cols = ['regime_bull', 'regime_bear', 'regime_chop', 'regime_whipsaw', 'regime_normal']
+    if all(col in df.columns for col in regime_cols):
+        last = df.iloc[-1]
+        vals = {col: float(last.get(col, 0.0)) for col in regime_cols}
+        if any(np.isfinite(v) and abs(v) > 1e-8 for v in vals.values()):
+            best_col = max(regime_cols, key=lambda c: vals[c])
+            return {col: (1.0 if col == best_col else 0.0) for col in regime_cols}
+
     close = df['close']
     net_change = close - close.shift(window)
     diff_abs   = close.diff().abs().rolling(window).sum()
@@ -861,212 +478,6 @@ def _compute_regime(df, window=24):
     }
 
 
-# ════════════════════════════════════════════════════════════════
-# 3-A. PolymarketFetcher — ETH/BTC 5분봉 Up/Down 확률 수집
-# ════════════════════════════════════════════════════════════════
-class PolymarketFetcher:
-    """
-    Polymarket Gamma API에서 BTC·ETH 5분봉 Up/Down 시장 확률을 비동기로 조회.
-
-    슬러그 생성 원리:
-      window_ts = int(time.time()) - (int(time.time()) % 300)
-      slug = f"{asset}-updown-5m-{window_ts}"
-      → 예: btc-updown-5m-1773897300
-
-    API 엔드포인트:
-      GET https://gamma-api.polymarket.com/events?slug={slug}
-      응답: [{markets: [{outcomes, outcomePrices, ...}]}]
-
-    outcomePrices: JSON 문자열 "[up_price, down_price]"  (각 0~1, 합 ≈ 1)
-    """
-
-    GAMMA_URL  = "https://gamma-api.polymarket.com/events"
-    CLOB_URL   = "https://clob.polymarket.com/price"   # mid-price fallback
-
-    def __init__(self):
-        self._session = None   # ccxt 내부 세션 재사용 (lazy init)
-
-    async def _get(self, url: str, params: dict) -> list | dict | None:
-        """aiohttp 없이 asyncio + ccxt exchange의 세션을 빌리거나
-        asyncio executor 로 requests 동기 호출."""
-        import urllib.request
-        import urllib.parse
-        query = urllib.parse.urlencode(params)
-        full_url = f"{url}?{query}" if params else url
-        loop = asyncio.get_event_loop()
-
-        def _sync_get():
-            try:
-                req = urllib.request.Request(
-                    full_url,
-                    headers={
-                        'User-Agent': 'Mozilla/5.0',
-                        'Accept':     'application/json',
-                    }
-                )
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    return json.loads(resp.read().decode())
-            except Exception as e:
-                logger.debug(f"Polymarket GET 오류 ({full_url}): {e}")
-                return None
-
-        return await loop.run_in_executor(None, _sync_get)
-
-    def _current_window_ts(self) -> int:
-        """현재 5분봉 윈도우 시작 타임스탬프 (UTC)."""
-        now = int(time.time())
-        return now - (now % 300)
-
-    async def _fetch_market(self, asset: str, window_ts: int) -> dict | None:
-        """
-        단일 asset(btc|eth)의 현재 5분봉 시장 데이터를 반환.
-        현재 윈도우에 시장이 없으면 직전 윈도우(-300s)로 fallback.
-        반환: {'up': float, 'down': float, 'slug': str, 'title': str}
-              또는 None (조회 실패 시)
-        """
-        for ts_offset in [0, -300, -600]:
-            slug = f"{asset}-updown-5m-{window_ts + ts_offset}"
-            data = await self._get(self.GAMMA_URL, {'slug': slug})
-            if not data:
-                continue
-
-            event = data[0] if isinstance(data, list) and data else None
-            if not event:
-                continue
-
-            markets = event.get('markets', [])
-            if not markets:
-                continue
-
-            # outcomePrices: "[\"0.54\", \"0.46\"]"  (Up=index0, Down=index1)
-            for m in markets:
-                raw_prices = m.get('outcomePrices')
-                raw_outcomes = m.get('outcomes')
-                if not raw_prices:
-                    continue
-                try:
-                    prices   = json.loads(raw_prices)   # ["0.54", "0.46"]
-                    outcomes = json.loads(raw_outcomes) if raw_outcomes else ['Up', 'Down']
-                    # outcomes 순서가 Up/Down인지 확인
-                    if len(prices) < 2:
-                        continue
-                    # Polymarket 5분봉 시장: 첫 번째 outcome=Up, 두 번째=Down
-                    up_idx   = next((i for i, o in enumerate(outcomes) if 'up'   in str(o).lower()), 0)
-                    down_idx = next((i for i, o in enumerate(outcomes) if 'down' in str(o).lower()), 1)
-                    up_prob   = float(prices[up_idx])
-                    down_prob = float(prices[down_idx])
-                    return {
-                        'up':    round(up_prob,   4),
-                        'down':  round(down_prob, 4),
-                        'slug':  slug,
-                        'title': event.get('title', slug),
-                    }
-                except (json.JSONDecodeError, ValueError, IndexError):
-                    continue
-
-        return None   # 모든 윈도우 조회 실패
-
-    async def fetch(self) -> dict:
-        """
-        BTC·ETH 5분봉 Up/Down 확률을 동시에 조회.
-        반환:
-            {
-                'btc': {'up': 0.54, 'down': 0.46, 'slug': '...', 'title': '...'},
-                'eth': {'up': 0.48, 'down': 0.52, 'slug': '...', 'title': '...'},
-                'ok':  True | False,   # 하나라도 성공하면 True
-            }
-        """
-        window_ts = self._current_window_ts()
-        btc_task  = asyncio.create_task(self._fetch_market('btc', window_ts))
-        eth_task  = asyncio.create_task(self._fetch_market('eth', window_ts))
-        btc_res, eth_res = await asyncio.gather(btc_task, eth_task, return_exceptions=True)
-
-        btc = btc_res if isinstance(btc_res, dict) else None
-        eth = eth_res if isinstance(eth_res, dict) else None
-
-        return {
-            'btc': btc,
-            'eth': eth,
-            'ok':  btc is not None or eth is not None,
-        }
-
-
-def _print_polymarket_section(poly_data: dict, current_price: float):
-    """MetaRouter 대시보드 바로 아래에 출력할 폴리마켓 확률 패널."""
-    C = Colors
-    btc = poly_data.get('btc')
-    eth = poly_data.get('eth')
-
-    def _prob_bar(prob: float, width: int = 20) -> str:
-        """확률을 █ 바로 시각화."""
-        filled = round(prob * width)
-        return '█' * filled + '░' * (width - filled)
-
-    def _color_prob(prob: float, is_up: bool) -> str:
-        """확률에 따라 색상 부여."""
-        if is_up:
-            return C.GREEN if prob >= 0.55 else (C.RED if prob <= 0.45 else C.YELLOW)
-        else:
-            return C.RED if prob >= 0.55 else (C.GREEN if prob <= 0.45 else C.YELLOW)
-
-    print(C.BOLD + "╔══════════ [ 🎯 Polymarket 5분봉 크라우드 확률 ] ══════════╗" + C.RESET)
-
-    for label, asset_data in [('BTC', btc), ('ETH', eth)]:
-        if asset_data is None:
-            print(f"  {label}  : 데이터 없음 (API 조회 실패 또는 시장 미개설)")
-            continue
-        up   = asset_data['up']
-        down = asset_data['down']
-        up_c   = _color_prob(up,   is_up=True)
-        down_c = _color_prob(down, is_up=False)
-        bar_up   = _prob_bar(up,   16)
-        bar_down = _prob_bar(down, 16)
-        print(f"  {C.BOLD}{label}{C.RESET} 5분봉")
-        print(f"    UP  {up_c}{up*100:5.1f}%{C.RESET}  [{bar_up}]")
-        print(f"    DN  {down_c}{down*100:5.1f}%{C.RESET}  [{bar_down}]")
-
-    print(C.BOLD + "╚═══════════════════════════════════════════════════════════╝" + C.RESET)
-
-
-def _parse_llm_direction(answer: str | None) -> tuple[str, str]:
-    if not answer:
-        return 'PENDING', '-'
-    text = str(answer).strip()
-    if text == LLM_DISABLED_SENTINEL or 'LLM_DISABLED' in text.upper():
-        return 'DISABLED', '-'
-    up = text.upper()
-    m = re.search(r'\b(UP|DOWN|LONG|SHORT|NEUTRAL)\b', up)
-    token = m.group(1) if m else 'UNKNOWN'
-    if token in ('UP', 'LONG'):
-        direction = 'UP'
-    elif token in ('DOWN', 'SHORT'):
-        direction = 'DOWN'
-    elif token == 'NEUTRAL':
-        direction = 'UNKNOWN'
-    else:
-        direction = 'UNKNOWN'
-
-    if re.search(r'(높음|HIGH)', text, flags=re.IGNORECASE):
-        conf = 'HIGH'
-    elif re.search(r'(보통|MEDIUM)', text, flags=re.IGNORECASE):
-        conf = 'MEDIUM'
-    elif re.search(r'(낮음|LOW)', text, flags=re.IGNORECASE):
-        conf = 'LOW'
-    else:
-        m_pct = re.search(r'(\d{1,3}(?:\.\d+)?)\s*%', text)
-        if m_pct:
-            v = float(m_pct.group(1))
-            if v >= 70:
-                conf = 'HIGH'
-            elif v >= 50:
-                conf = 'MEDIUM'
-            else:
-                conf = 'LOW'
-        else:
-            conf = '-'
-    return direction, conf
-
-
 def _pos_transition_label(prev_pos: str | None, cur_pos: str | None) -> str:
     if prev_pos == cur_pos:
         if cur_pos is None:
@@ -1079,12 +490,44 @@ def _pos_transition_label(prev_pos: str | None, cur_pos: str | None) -> str:
     return f'FLIP {prev_pos}->{cur_pos}'
 
 
+def _session_flags_from_timestamp(ts) -> dict[str, float]:
+    ts_kst = pd.Timestamp(ts)
+    if ts_kst.tzinfo is None:
+        ts_kst = ts_kst.tz_localize("Asia/Seoul")
+    else:
+        ts_kst = ts_kst.tz_convert("Asia/Seoul")
+    ts_utc = ts_kst.tz_convert("UTC")
+    try:
+        import pandas_market_calendars as mcal
+
+        day = ts_utc.date()
+        flags = {}
+        for name, cal_name in (
+            ("session_asia", "JPX"),
+            ("session_europe", "LSE"),
+            ("session_us", "NYSE"),
+        ):
+            cal = mcal.get_calendar(cal_name)
+            sched = cal.schedule(start_date=day, end_date=day)
+            active = False
+            if not sched.empty:
+                minutes = mcal.date_range(sched, frequency="1min")
+                active = bool(ts_utc.floor("min") in minutes)
+            flags[name] = 1.0 if active else 0.0
+        return flags
+    except Exception:
+        hour = ts_utc.hour + (ts_utc.minute / 60.0)
+        return {
+            "session_asia": 1.0 if 0.0 <= hour < 8.0 else 0.0,
+            "session_europe": 1.0 if 8.0 <= hour < 16.0 else 0.0,
+            "session_us": 1.0 if 14.5 <= hour < 21.0 else 0.0,
+        }
+
+
 def _print_final_trade_summary(timestamp_kst, current_price: float,
                                regime_name: str, rl_action: int, rl_info: dict,
-                               meta_result: dict, prev_llm_answer: str | None,
-                               prev_pos: str | None, cur_pos: str | None,
-                               poly_data: dict | None = None,
-                               sac_info: dict | None = None):
+                               meta_result: dict,
+                               prev_pos: str | None, cur_pos: str | None):
     C = Colors
     fa = int(meta_result.get('final_action', 0))
 
@@ -1105,11 +548,54 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     def _trend_color(tdir: int) -> str:
         return {0: C.RED, 1: C.YELLOW, 2: C.GREEN}.get(int(tdir), C.RESET)
 
-    def _llm_conf_word(conf: str) -> str:
-        return {'HIGH': 'HIGH', 'MEDIUM': 'MEDIUM', 'LOW': 'LOW'}.get(conf, 'UNKNOWN')
+    def _kelly_text(v: float) -> str:
+        if v >= 0.70:
+            return "강함"
+        if v >= 0.40:
+            return "보통"
+        if v >= 0.15:
+            return "약함"
+        return "매우약함"
 
-    def _llm_conf_color(conf: str) -> str:
-        return {'HIGH': C.GREEN, 'MEDIUM': C.YELLOW, 'LOW': C.RED}.get(conf, C.CYAN)
+    def _strength_text(v: float) -> str:
+        if v >= 0.70:
+            return "강함"
+        if v >= 0.40:
+            return "보통"
+        return "약함"
+
+    def _reversal_text(v: float) -> str:
+        if v >= 0.70:
+            return "반전위험 큼"
+        if v >= 0.40:
+            return "반전주의"
+        return "추세유지 우세"
+
+    def _quality_text(v: float) -> str:
+        if v >= 0.015:
+            return "진입품질 좋음"
+        if v >= 0.0:
+            return "진입품질 보통"
+        if v >= -0.015:
+            return "진입품질 약함"
+        return "진입품질 나쁨"
+
+    def _vol_rank_text(v: float) -> str:
+        if v >= 0.75:
+            return "고변동"
+        if v <= 0.25:
+            return "저변동"
+        return "중간변동"
+
+    def _exit_score_text(v: float) -> str:
+        av = abs(v)
+        if av >= 0.45:
+            return "반대추세 강함"
+        if av >= 0.28:
+            return "반대추세 확인중"
+        if av >= 0.12:
+            return "추세 흔들림"
+        return "추세 양호"
 
     def _exec_code(pp: str | None, cp: str | None) -> tuple[str, str]:
         if pp == cp:
@@ -1130,23 +616,6 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
             return '⇄', 'FLIP_SHORT_TO_LONG'
         return '·', _pos_transition_label(pp, cp)
 
-    def _poly_text(asset_data: dict | None, label: str) -> str:
-        if not isinstance(asset_data, dict):
-            return f"POLYMARKET_{label}: NO_DATA"
-        up = float(asset_data.get('up', 0.5))
-        down = float(asset_data.get('down', 1.0 - up))
-        return f"POLYMARKET_{label}: UP {up*100:5.1f}% | DOWN {down*100:5.1f}%"
-
-    def _poly_color(asset_data: dict | None) -> str:
-        if not isinstance(asset_data, dict):
-            return C.YELLOW
-        up = float(asset_data.get('up', 0.5))
-        if up >= 0.55:
-            return C.GREEN
-        if up <= 0.45:
-            return C.RED
-        return C.YELLOW
-
     long_edge = float(rl_info.get('long_edge', 0.0))
     short_edge = float(rl_info.get('short_edge', 0.0))
     rl_kelly = float(rl_info.get('kelly', 0.0))
@@ -1154,12 +623,26 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     source = str(meta_result.get('source', 'N/A'))
     arb_mode = str(meta_result.get('arbiter_mode', 'N/A'))
     gate_passed = bool(meta_result.get('gate_passed', True))
+    fdiag = meta_result.get("fusion_diag", {}) if isinstance(meta_result, dict) else {}
 
     ts = meta_result.get('trend_signal') or {}
     t_dir = 1
     t_strength = 0.0
     t_rev = 0.0
     p_dn = p_fl = p_up = 0.0
+    m7_size = 0.0
+    m7_quality = 0.0
+    m7_target_hold = 0
+    m7_vol_rank = 0.5
+    m7_qwidth = 0.0
+    m7_iso_anom = 0
+    m7_vae_anom = 0
+    cb_active = int(float(fdiag.get("cb_active", 0.0))) if isinstance(fdiag, dict) else 0
+    is_lowvol_range = int(float(fdiag.get("is_lowvol_range", 0.0))) if isinstance(fdiag, dict) else 0
+    is_highvol_trend = int(float(fdiag.get("is_highvol_trend", 0.0))) if isinstance(fdiag, dict) else 0
+    uncertainty_scale = float(fdiag.get("uncertainty_scale", 1.0)) if isinstance(fdiag, dict) else 1.0
+    trend_exit_score = float(meta_result.get("trend_exit_score", 0.0)) if isinstance(meta_result, dict) else 0.0
+    trend_mismatch_streak = int(meta_result.get("trend_mismatch_streak", 0) or 0) if isinstance(meta_result, dict) else 0
     if isinstance(ts, dict) and ts:
         t_dir = int(ts.get('trend_dir', 1))
         t_strength = float(ts.get('strength', 0.0))
@@ -1172,15 +655,15 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
         p_dn = float(ts.get('prob_dn', ts.get('p_down', p_dn)))
         p_fl = float(ts.get('prob_flat', ts.get('p_flat', p_fl)))
         p_up = float(ts.get('prob_up', ts.get('p_up', p_up)))
+        m7_size = float(np.clip(ts.get("m7_size", 0.0), 0.0, 1.0))
+        m7_quality = float(ts.get("m7_quality_pred", 0.0))
+        m7_target_hold = int(max(0, round(float(ts.get("m7_target_hold", 0.0)))))
+        m7_vol_rank = float(np.clip(ts.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0))
+        m7_qwidth = float(max(0.0, ts.get("m7_qwidth", fdiag.get("m7_qwidth", 0.0))))
+        m7_iso_anom = 1 if float(ts.get("m7_iso_anom", 0.0)) >= 0.5 else 0
+        m7_vae_anom = 1 if float(ts.get("m7_vae_anom", 0.0)) >= 0.5 else 0
 
-    llm_dir, llm_conf = _parse_llm_direction(prev_llm_answer)
     ex_icon, ex_code = _exec_code(prev_pos, cur_pos)
-    sac_info = sac_info or {}
-    sac_available = bool(sac_info.get('available', False))
-    sac_action = int(sac_info.get('action', 0))
-    sac_raw = float(sac_info.get('raw_action', 0.0))
-    sac_size = float(sac_info.get('leverage', sac_info.get('kelly', 0.0)))
-    sac_score = float(sac_info.get('score', abs(sac_raw)))
 
     edge_gap = abs(long_edge - short_edge)
     if long_edge > short_edge:
@@ -1199,13 +682,8 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     final_color = _action_color(fa)
     trend_word = _trend_word(t_dir)
     trend_color = _trend_color(t_dir)
-    llm_dir_color = {'UP': C.GREEN, 'DOWN': C.RED, 'PENDING': C.CYAN, 'DISABLED': C.YELLOW}.get(llm_dir, C.RESET)
-    llm_conf_color = _llm_conf_color(llm_conf)
     gate_word = 'PASS' if gate_passed else 'BLOCK'
     gate_color = C.GREEN if gate_passed else C.RED
-    poly_data = poly_data or {}
-    poly_btc = poly_data.get('btc') if isinstance(poly_data, dict) else None
-    poly_eth = poly_data.get('eth') if isinstance(poly_data, dict) else None
 
     W = 62
     _SEP  = "─" * W
@@ -1217,13 +695,9 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     def _trend_arrow(tdir: int) -> str:
         return {0: '▼', 1: '─', 2: '▲'}.get(int(tdir), '?')
 
-    def _llm_arrow(d: str) -> str:
-        return {'UP': '▲', 'DOWN': '▼', 'PENDING': '?', 'DISABLED': '·'}.get(d, '─')
-
     fa_arrow = _action_arrow(fa)
     rl_arrow = _action_arrow(rl_action)
     trend_arrow = _trend_arrow(t_dir)
-    llm_arrow = _llm_arrow(llm_dir)
     gate_icon = '✓' if gate_passed else '✗'
     gate_log = meta_result.get('gate_log') or {}
 
@@ -1233,37 +707,49 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     header_left = f"{final_color}{C.BOLD}{fa_arrow}{fa_arrow}  {final_word}  →  {ex_code}{C.RESET}"
     header_right = f"{C.CYAN}{ts_str}{C.RESET}"
     print(f" {header_left}  {header_right}")
-    print(f"     {C.CYAN}${current_price:,.2f}  |  레짐: {regime_name}{C.RESET}")
+    print(f"     {C.CYAN}${current_price:,.2f}  |  시장상태: {regime_name}{C.RESET}")
+    session_flags = _session_flags_from_timestamp(timestamp_kst)
+    session_parts = []
+    for label, key in (("ASIA", "session_asia"), ("EUROPE", "session_europe"), ("US", "session_us")):
+        active = float(session_flags.get(key, 0.0)) >= 0.5
+        scol = C.GREEN if active else C.YELLOW
+        sword = "ON" if active else "OFF"
+        session_parts.append(f"{label}={scol}{sword}{C.RESET}")
+    print(f"     {C.CYAN}세션:{C.RESET} " + "  ".join(session_parts))
     print(_SEP)
 
     # ── 서브 시그널 각 1행 ──────────────────────────────────────────
-    # RL
-    print(f"  {rl_color}{rl_arrow} RL{C.RESET}      {rl_color}{rl_word:<6}{C.RESET}"
+    print(f"  {rl_color}{rl_arrow} 신호{C.RESET}  {rl_color}{rl_word:<6}{C.RESET}"
           f"  엣지 {edge_side_color}{edge_side_word} {edge_gap:+.3f}{C.RESET}"
-          f"  Kelly: {_bar(meta_kelly, 8)} {meta_kelly:.3f}")
-    # SAC (참고용)
-    if sac_available:
-        sac_word = _action_word(sac_action)
-        sac_color = _action_color(sac_action)
-        sac_arrow = _action_arrow(sac_action)
-        print(f"  {sac_color}{sac_arrow} SAC{C.RESET}     {sac_color}{sac_word:<6}{C.RESET}"
-              f"  raw={sac_raw:+.3f}  size={_bar(sac_size, 8)} {sac_size:.3f}"
-              f"  score={sac_score:.2f}")
-    else:
-        print(f"  {C.YELLOW}· SAC{C.RESET}     {C.YELLOW}DISABLED{C.RESET}"
-              f"  ckpt/data unavailable")
+          f"  Kelly: {_bar(meta_kelly, 8)} {meta_kelly:.3f} ({_kelly_text(meta_kelly)})")
     # TREND
     dn_c = C.RED if p_dn > 0.4 else C.RESET
     up_c = C.GREEN if p_up > 0.4 else C.RESET
     trend_model = str(ts.get("trend_model", "N/A")) if isinstance(ts, dict) else "N/A"
-    print(f"  {trend_color}{trend_arrow} TREND{C.RESET}   {trend_color}{trend_word:<6}{C.RESET}"
+    print(f"  {trend_color}{trend_arrow} 중기추세{C.RESET} {trend_color}{trend_word:<6}{C.RESET}"
           f"  str={t_strength:.2f}  rev={t_rev:.2f}"
           f"  {dn_c}DN={p_dn:.0%}{C.RESET} FL={C.YELLOW}{p_fl:.0%}{C.RESET} {up_c}UP={p_up:.0%}{C.RESET}"
           f"  model={trend_model}")
-    # LLM
-    llm_word = llm_dir if llm_dir in ('UP', 'DOWN', 'PENDING', 'DISABLED') else 'UNKNOWN'
-    print(f"  {llm_dir_color}{llm_arrow} LLM{C.RESET}     {llm_dir_color}{llm_word:<6}{C.RESET}"
-          f"  신뢰도: {_llm_conf_color(llm_conf)}{_llm_conf_word(llm_conf)}{C.RESET}")
+    print(f"  {C.CYAN}• 해석{C.RESET}    추세강도={_strength_text(t_strength)}  반전판정={_reversal_text(t_rev)}")
+    print(f"  {C.CYAN}• M7{C.RESET}      포지션크기={m7_size:.2f}  품질={m7_quality:+.3f} ({_quality_text(m7_quality)})"
+          f"  목표보유={m7_target_hold:>2d}봉")
+    print(f"  {C.CYAN}• 장기추세{C.RESET} 점수={trend_exit_score:+.2f} ({_exit_score_text(trend_exit_score)})"
+          f"  불일치누적={trend_mismatch_streak}봉")
+    print(f"  {C.CYAN}• 변동성{C.RESET}  변동성상태={_vol_rank_text(m7_vol_rank)} ({m7_vol_rank:.2f})"
+          f"  불확실성폭={m7_qwidth:.4f}  스케일={uncertainty_scale:.2f}")
+    print(f"  {C.CYAN}• 이상감지{C.RESET} 회로차단={cb_active}  저변동횡보={is_lowvol_range}  고변동추세={is_highvol_trend}"
+          f"  이상치=iso:{m7_iso_anom} vae:{m7_vae_anom}")
+    if prev_pos != cur_pos:
+        trade_pnl = meta_result.get("trade_pnl_pct", None)
+        if trade_pnl is None and prev_pos is None and cur_pos is not None:
+            trade_pnl = 0.0
+        if trade_pnl is not None:
+            try:
+                p = float(trade_pnl)
+                p_col = C.GREEN if p > 0 else (C.RED if p < 0 else C.YELLOW)
+                print(f"  {C.CYAN}• TRADE{C.RESET}   event_pnl={p_col}{p:+.2f}%{C.RESET}")
+            except Exception:
+                pass
     # GATE
     if not gate_passed and isinstance(gate_log, dict):
         blocked_gate = gate_log.get('blocked_gate', 'N/A')
@@ -1273,41 +759,12 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     else:
         print(f"  {gate_color}{gate_icon} GATE{C.RESET}    {gate_color}{gate_word:<6}{C.RESET}"
               f"  mode: {arb_mode}  source: {source}")
-    # POLY
-    if poly_btc is not None or poly_eth is not None:
-        def _poly_pick(asset_data):
-            if not isinstance(asset_data, dict):
-                return C.YELLOW, '─', None
-            up = float(asset_data.get('up', 0.5))
-            dn = float(asset_data.get('down', 1.0 - up))
-            if up > dn:
-                return C.GREEN, '▲', up
-            if dn > up:
-                return C.RED, '▼', dn
-            return C.YELLOW, '─', up
-
-        btc_c, btc_arrow, btc_prob = _poly_pick(poly_btc)
-        eth_c, eth_arrow, eth_prob = _poly_pick(poly_eth)
-        btc_txt = f"{btc_c}{btc_arrow} {btc_prob*100:.1f}%{C.RESET}" if btc_prob is not None else f"{C.YELLOW}N/A{C.RESET}"
-        eth_txt = f"{eth_c}{eth_arrow} {eth_prob*100:.1f}%{C.RESET}" if eth_prob is not None else f"{C.YELLOW}N/A{C.RESET}"
-        print(f"  {C.CYAN}• POLY{C.RESET}    BTC {btc_txt}  |  ETH {eth_txt}")
-
     # ── 의사결정 체인 ────────────────────────────────────────────────
     print(_SEP)
-    llm_conf_word = _llm_conf_word(llm_conf)
-    llm_conf_col = _llm_conf_color(llm_conf)
     gate_chain_col = C.GREEN if gate_passed else C.RED
-    if sac_available:
-        sac_word = _action_word(sac_action)
-        sac_color = _action_color(sac_action)
-        sac_chain = f"SAC={sac_color}{sac_word}{C.RESET}({C.CYAN}{sac_raw:+.2f}{C.RESET}) → "
-    else:
-        sac_chain = ""
     decision_chain = (
-        f"RL={rl_color}{rl_word}{C.RESET} → "
-        f"{sac_chain}"
-        f"TREND={trend_color}{trend_word}{C.RESET} → "
-        f"LLM={llm_dir_color}{llm_word}{C.RESET}({llm_conf_col}{llm_conf_word}{C.RESET}) → "
+        f"SIGNAL={rl_color}{rl_word}{C.RESET} → "
+        f"중기추세={trend_color}{trend_word}{C.RESET} → "
         f"FINAL={final_color}{final_word}{C.RESET}({gate_chain_col}{gate_word}{C.RESET}) → "
         f"EXEC={ex_icon} {ex_code}"
     )
@@ -1315,630 +772,1269 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
         blocked_gate = gate_log.get('blocked_gate', 'N/A')
         decision_chain += f"  [{C.RED}차단={blocked_gate}{C.RESET}]"
     print(f"  {decision_chain}")
+    print(f"  {C.CYAN}• 최종해석{C.RESET} 신호={rl_word} / 중기추세={trend_word} / 시장상태={regime_name} / 실행={ex_code}")
     print(_SEP2)
 
 
 # ════════════════════════════════════════════════════════════════
-# 3-A-2. SACLiveRouter — SAC Actor 라이브 추론 (선택적)
+# 3-A. DSACSignalRouter — DSAC Actor 추론 입력 생성 + 추론
 # ════════════════════════════════════════════════════════════════
-class SACLiveRouter:
-    """학습된 SAC Actor로 참고용 연속 action 추론.
+class DSACSignalRouter:
+    DEFAULT_BEST_MODEL_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_v2_agents.pth"
 
-    체크포인트가 없거나 임포트 실패 시 조용히 비활성화.
-    IQN MoELiveRouter와 동일한 features/pos_dict 인터페이스 사용.
-    """
+    @staticmethod
+    def _build_actor_from_ckpt(ckpt: dict, device: str):
+        actor_state = ckpt.get("actor")
+        if not isinstance(actor_state, dict):
+            raise KeyError("DSAC 체크포인트 actor 키 없음")
 
-    _SAC_PATH = 'data/ensemble/ckpt/best_sac_agents.pth'
-    _NULL_INFO = {
-        'agent': 'SAC', 'raw_action': 0.0, 'kelly': 0.0,
-        'long_edge': 0.0, 'short_edge': 0.0, 'score': 0.0,
-    }
+        state_dim = int(ckpt.get("state_dim", DSAC_STATE_DIM) or DSAC_STATE_DIM)
+        is_v2 = any(k.startswith("feat.input_proj.") for k in actor_state.keys())
+        actor_cls = DSACGaussianActorV2 if is_v2 else DSACGaussianActor
+        actor = actor_cls(state_dim=state_dim).to(device)
+        actor.load_state_dict(actor_state)
+        actor.eval()
+        return actor, ("V2" if is_v2 else "V1")
 
-    def __init__(self):
-        self.available = False
-        self._router = None
-        if not _SAC_AVAILABLE:
-            logger.warning("⚠️ SAC 모듈 없음 (train_rl_sac_agent 임포트 실패) — 참고 패널 비활성화")
-            return
-        if not os.path.exists(self._SAC_PATH):
-            logger.warning(f"⚠️ SAC 체크포인트 없음: {self._SAC_PATH} — 참고 패널 비활성화")
-            return
+    @staticmethod
+    def _resolve_model_path(model_path: str | None) -> str:
+        resolved = model_path or DSACSignalRouter.DEFAULT_BEST_MODEL_PATH
+        if resolved and os.path.exists(resolved):
+            return resolved
+        raise FileNotFoundError(f"DSAC best 체크포인트 파일이 없습니다: {resolved}")
+
+    def __init__(self, model_path: str | None = None, hmm_detector: OnlineHMMDetector | None = None):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.pos: str | None = None
+        self.entry_price: float = 0.0
+        self.hold_count: int = 0
+        self.current_leverage: float = 0.0
+        self.hmm = hmm_detector
+        self.trade_fee = float(os.getenv("LIVE_FEE_RATE", "0.0005"))
+        self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
+        self.peak_equity: float = 1.0
+        self.current_equity: float = 1.0
+        self.elite_extractor = EliteSignals()
+        self.new_elite_engine = NewEliteSignalEngine()
+
+        ckpt_path = self._resolve_model_path(model_path)
+        ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+        actor, actor_ver = self._build_actor_from_ckpt(ckpt, self.device)
+        self.router = DSACRouter(actor, device=self.device)
+        logger.info("✅ DSACSignalRouter 로드 완료 (%s): %s", actor_ver, ckpt_path)
+
+    def decide(self, processed_df: pd.DataFrame, nf_preds: dict, m7_signal: dict | None = None):
+        last_row = processed_df.iloc[-1]
+        prev_row = processed_df.iloc[-2]
+        smf_std = processed_df["smart_money_flow"].std() if "smart_money_flow" in processed_df.columns else 1.0
+
+        cur_market = row_to_market_row(last_row)
+        prev_market = row_to_market_row(prev_row)
+        elite_sigs = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
         try:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            ckpt = torch.load(self._SAC_PATH, map_location=device, weights_only=False)
-            actor = GaussianActor(state_dim=RL_STACKED_STATE_DIM).to(device)
-            actor.load_state_dict(ckpt['actor'])
-            actor.eval()
-            self._router = _SACRouter(actor, device=device)
-            self.available = True
-            logger.info(f"✅ SACLiveRouter 로드 완료: {self._SAC_PATH}")
-        except Exception as e:
-            logger.warning(f"⚠️ SAC 로드 실패: {e}")
+            tail_df = processed_df.tail(100).copy()
+            self.new_elite_engine.compute(tail_df)
+            tail_last = tail_df.iloc[-1]
+            for col in ["sig_volume_confirm", "sig_liquidity_trap", "sig_trend_health"]:
+                elite_sigs[col] = float(tail_last.get(col, 0.0))
+        except Exception:
+            for col in ["sig_volume_confirm", "sig_liquidity_trap", "sig_trend_health"]:
+                elite_sigs.setdefault(col, 0.0)
 
-    def decide(self, features: dict, pos_dict: dict) -> tuple[int, float, dict]:
-        if not self.available or self._router is None:
-            return 0, 0.0, dict(self._NULL_INFO)
-        try:
-            return self._router.decide(features, pos_dict)
-        except Exception as e:
-            logger.debug(f"SAC 추론 실패: {e}")
-            return 0, 0.0, dict(self._NULL_INFO)
+        features: dict[str, float] = {}
+        for col in DSAC_STATE_PRED:
+            features[col] = float(nf_preds.get(col, 0.0))
+        for col in DSAC_STATE_CONF:
+            features[col] = float(nf_preds.get(col, 0.5))
+        for col in DSAC_STATE_ELITE:
+            features[col] = float(elite_sigs.get(col, 0.0))
+        for col in DSAC_STATE_ALPHA:
+            features[col] = float(last_row.get(col, 0.0))
 
-
-# ════════════════════════════════════════════════════════════════
-# 3-B. MetaRouter — RL + XGB 듀얼 브레인 (Arbiter + Gatekeeper) 통합 레이어
-# ════════════════════════════════════════════════════════════════
-# [설계 원칙]
-# - MoELiveRouter 코드 변경 없음
-# - _run_cycle() 에서 meta_router.fuse() 한 줄로 RL/XGB/게이트 통합
-# - 포지션은 MetaRouter가 단일 소스로 관리
-
-# ── 튜닝 상수 ────────────────────────────────────────────────────
-_META_SOLO_RL_THRESH   = 0.02   # RL 진입 score 최솟값 (0.05 -> 0.02 완화)
-_META_HISTORY_N        = 30     # 동적 가중치 추적 윈도우
-
-# 레짐별 RL 우선순위 배율
-_REGIME_RL_WEIGHT = {
-    'bull': 1.20, 'bear': 1.20, 'normal': 1.00,
-    'chop': 0.80, 'whipsaw': 0.75,
-}
-
-
-def _meta_rl_score(rl_action: int, rl_info: dict, regime: dict) -> float:
-    """GatingRouter7 info 구조로 RL 신호 강도 계산 (0~1)."""
-    if rl_action == 0:
-        return 0.0
-    kelly      = float(max(0.0, rl_info.get('kelly', 0.0)))
-    long_edge  = float(rl_info.get('long_edge',  0.0))
-    short_edge = float(rl_info.get('short_edge', 0.0))
-    agent_score = float(max(0.0, rl_info.get('score', 0.0)))
-
-    # 실제 RL 액션 방향과 정렬된 edge를 우선 반영
-    action_edge = long_edge if rl_action == 1 else short_edge if rl_action == 2 else 0.0
-    edge_gap    = abs(long_edge - short_edge)
-    edge_strength = max(abs(action_edge), edge_gap * 0.5)
-
-    active     = next((k.replace('regime_', '') for k, v in regime.items() if v == 1.0), 'normal')
-    regime_w   = _REGIME_RL_WEIGHT.get(active, 1.0)
-    # kelly만 곱하면 진입이 과도하게 억제되므로 완만한 바닥 가중치를 둔다.
-    signal_strength = float(np.tanh(max(edge_strength, agent_score) * 3.0))
-    kelly_term      = 0.25 + 0.75 * kelly
-    raw             = signal_strength * kelly_term * regime_w
-    return float(np.clip(raw, 0.0, 1.0))
-
-
-class MetaRouter:
-    """RL MoE 4-Agent 신호를 받아 단일 최종 액션을 결정."""
-
-    def __init__(self):
-        # 동적 가중치 추적 (승률 기반)
-        self._rl_score_acc  = 1.0
-        self._history       = []        # {'rl':int,'final':int,'src':str,'outcome':None}
-        self._arbiter       = DualBrainArbiter(boost_factor=1.2, veto_threshold=0.35, hmm_conf_threshold=0.5)
-
-        # MetaRouter 자체 포지션 상태
-        self.pos:          str | None = None
-        self.entry_price:  float      = 0.0
-        self.hold_count:   int        = 0
-        self.peak_equity:  float      = 1.0
-        self.cur_equity:   float      = 1.0
-
-    def record_outcome(self, realized_pnl_pct: float):
-        """포지션 청산 후 실현 PnL을 피드백해 동적 가중치를 보정."""
-        if not self._history:
-            return
-        rec  = self._history[-1]
-        correct = realized_pnl_pct > 0.0
-        if rec['src'] in ('RL_SOLO', 'RL_ACTIVE') or str(rec.get('src', '')).startswith('ARB_'):
-            self._rl_score_acc += 1.0 if correct else -0.5
-            self._rl_score_acc  = max(0.1, self._rl_score_acc)
-
-    # ── 메인 진입점 ───────────────────────────────────────────────
-    def fuse(self, rl_action: int, rl_info: dict,
-             regime: dict, current_price: float = 0.0,
-             trend_signal=None, garch_vol_z: float = 0.0) -> dict:
-        """
-        Returns dict:
-          final_action  : 0/1/2
-          unified_kelly : 0~1
-          source        : 'ARB_*'|'RL_ACTIVE'|'FLAT'
-          rl_score, meta_score
-          trend_signal  : TrendSignal.to_arbiter_dict() 또는 None
-          trend_veto    : 적용된 trend filter 사유 문자열 또는 None
-        """
-        rl_score = _meta_rl_score(rl_action, rl_info, regime)
-        trend_veto = None
-        arbiter_mode = 'N/A'
-        gate_passed = (rl_action != 0)
-        gate_log = {}
-
-        if trend_signal is not None:
+        regime = None
+        if self.hmm is not None:
             try:
-                brain_a = BrainAOutput.from_router_output(
-                    action=rl_action,
-                    leverage=float(np.clip(float(rl_info.get('kelly', 0.0)), 0.0, 1.0)),
-                    info=rl_info,
-                )
-                if isinstance(trend_signal, dict):
-                    brain_b = BrainBOutput.from_dict(trend_signal)
-                    trend_signal_dict = dict(trend_signal)
-                else:
-                    brain_b = BrainBOutput.from_signal(trend_signal)
-                    trend_signal_dict = trend_signal.to_arbiter_dict() if hasattr(trend_signal, 'to_arbiter_dict') else None
+                hmm_row = {
+                    "log_return": float(last_row.get("log_return", 0.0)),
+                    "garch_vol_z": float(last_row.get("garch_vol_z", 0.0)),
+                    "oi_change_rate": float(last_row.get("oi_change_rate", 0.0)),
+                }
+                hmm_feat = self.hmm.get_features(hmm_row)
+                hmm_probs = np.asarray(hmm_feat[:4], dtype=np.float32)
+                hmm_idx = int(np.argmax(hmm_probs))
+                regime = {
+                    "regime_bull": 1.0 if hmm_idx == 0 else 0.0,
+                    "regime_bear": 1.0 if hmm_idx == 1 else 0.0,
+                    "regime_chop": 0.0,
+                    "regime_whipsaw": 1.0 if hmm_idx == 2 else 0.0,
+                    "regime_normal": 1.0 if hmm_idx == 3 else 0.0,
+                }
+            except Exception:
+                regime = None
+        if regime is None:
+            regime = _compute_regime(processed_df)
+        features.update(regime)
+        for col in DSAC_STATE_SYNTH:
+            features[col] = float(last_row.get(col, 0.0))
+        features["close"] = float(last_row.get("close", 0.0))
 
-                portfolio_mdd = 0.0
-                if self.pos is not None and self.peak_equity > 0:
-                    portfolio_mdd = min((self.cur_equity / self.peak_equity) - 1.0, 0.0)
+        # 학습 시 사용한 m7_*를 라이브 추론 입력에도 주입해 train/infer 스키마 불일치 최소화
+        if isinstance(m7_signal, dict):
+            features["m7_prob_dn"] = float(m7_signal.get("m7_prob_dn", m7_signal.get("prob_dn", 0.0)))
+            features["m7_prob_fl"] = float(m7_signal.get("m7_prob_fl", m7_signal.get("prob_flat", 0.0)))
+            features["m7_prob_up"] = float(m7_signal.get("m7_prob_up", m7_signal.get("prob_up", 0.0)))
+            for k in [
+                "m7_quality_pred",
+                "m7_hold_pred",
+                "m7_q10",
+                "m7_q50",
+                "m7_q90",
+                "m7_qwidth",
+                "m7_gmm_cluster",
+                "m7_gmm_conf",
+                "m7_gmm_vol_rank",
+                "m7_iso_score",
+                "m7_iso_anom",
+                "m7_vae_error",
+                "m7_vae_threshold",
+                "m7_vae_anom",
+                "m7_hdb_label",
+                "m7_hdb_prob",
+            ]:
+                if k in m7_signal:
+                    features[k] = float(m7_signal.get(k, 0.0))
 
-                hmm_state = str(rl_info.get('hmm_state', 'lv-range'))
-                hmm_probs = rl_info.get('hmm_probs', [0.25, 0.25, 0.25, 0.25])
-                if not isinstance(hmm_probs, (list, tuple)) or len(hmm_probs) == 0:
-                    hmm_probs = [0.25, 0.25, 0.25, 0.25]
-
-                decision = self._arbiter.decide(
-                    brain_a=brain_a,
-                    brain_b=brain_b,
-                    garch_vol_z=float(garch_vol_z),
-                    portfolio_mdd=float(portfolio_mdd),
-                    hmm_state=hmm_state,
-                    hmm_probs=list(hmm_probs),
-                )
-                final_action = int(decision.final_action)
-                unified_kelly = float(np.clip(decision.final_lev, 0.0, 1.0))
-                arbiter_mode = decision.arbiter_mode
-                gate_passed = bool(decision.gate_passed)
-                gate_log = decision.gate_log or {}
-
-                if final_action == 0:
-                    if arbiter_mode == 'VETO':
-                        source = 'ARB_VETO'
-                        trend_veto = 'ARB_VETO'
-                    elif not gate_passed:
-                        source = 'ARB_GATE_BLOCK'
-                        trend_veto = 'ARB_GATE_BLOCK'
-                    else:
-                        source = f'ARB_{arbiter_mode}'
-                else:
-                    source = f'ARB_{arbiter_mode}'
-            except Exception as e:
-                logger.warning(f"Arbiter 적용 실패 → legacy fallback: {e}")
-                trend_signal_dict = trend_signal.to_arbiter_dict() if hasattr(trend_signal, 'to_arbiter_dict') else (trend_signal if isinstance(trend_signal, dict) else None)
-                if rl_action == 0:
-                    final_action, source = 0, 'FLAT'
-                elif rl_score >= _META_SOLO_RL_THRESH:
-                    final_action, source = rl_action, 'RL_ACTIVE'
-                else:
-                    final_action, source = 0, 'FLAT'
-                unified_kelly = self._calc_kelly(final_action, rl_info, rl_score)
-                if final_action != 0 and trend_signal is not None and not isinstance(trend_signal, dict):
-                    final_action, unified_kelly, trend_veto = self._apply_trend_filter(
-                        final_action, unified_kelly, trend_signal
-                    )
-        else:
-            trend_signal_dict = None
-            if rl_action == 0:
-                final_action, source = 0, 'FLAT'
-            elif rl_score >= _META_SOLO_RL_THRESH:
-                final_action, source = rl_action, 'RL_ACTIVE'
+        unr = 0.0
+        if self.pos is not None and self.entry_price > 0:
+            cp = float(last_row["close"])
+            lev = float(np.clip(self.current_leverage, 0.0, 1.0))
+            if self.pos == "LONG":
+                entry_exec = self.entry_price * (1.0 + self.trade_slip)
+                exit_exec = cp * (1.0 - self.trade_slip)
+                gross = (exit_exec - entry_exec) / max(entry_exec, 1e-8)
             else:
-                final_action, source = 0, 'FLAT'
-            unified_kelly = self._calc_kelly(final_action, rl_info, rl_score)
+                entry_exec = self.entry_price * (1.0 - self.trade_slip)
+                exit_exec = cp * (1.0 + self.trade_slip)
+                gross = (entry_exec - exit_exec) / max(abs(entry_exec), 1e-8)
+            total_fee = 2.0 * self.trade_fee * lev
+            unr = float(gross * lev - total_fee)
+            self.current_equity = 1.0 + unr
+            if self.current_equity > self.peak_equity:
+                self.peak_equity = self.current_equity
+        else:
+            self.current_equity = 1.0
+            self.peak_equity = 1.0
 
-        meta_score = rl_score if final_action != 0 else 0.0
-
-        # trend veto 로 action=0 됐으면 source 갱신
-        if final_action == 0 and trend_veto is not None:
-            source = trend_veto
-
-        self._update_pos(final_action, current_price)
-        self._history.append({'rl': rl_action, 'final': final_action, 'src': source, 'outcome': None, 'arb_mode': arbiter_mode})
-        if len(self._history) > _META_HISTORY_N * 2:
-            self._history = self._history[-_META_HISTORY_N:]
-
-        return {
-            'final_action':  final_action,
-            'unified_kelly': unified_kelly,
-            'source':        source,
-            'rl_score':      rl_score,
-            'meta_score':    meta_score,
-            'rl_action':     rl_action,
-            'trend_signal':  trend_signal_dict,
-            'trend_veto':    trend_veto,
-            'arbiter_mode':  arbiter_mode,
-            'gate_passed':   gate_passed,
-            'gate_log':      gate_log,
+        raw_drawdown = float(min((self.current_equity / max(self.peak_equity, 1e-8)) - 1.0, 0.0))
+        effective_hold_count = int(self.hold_count + 1) if self.pos is not None else 0
+        pos_dict = {
+            "type": self.pos,
+            "entry_price": self.entry_price,
+            "unrealized": float(unr),
+            "mdd": raw_drawdown,
+            "hold_count": float(effective_hold_count),
+            "hold_norm": min(effective_hold_count / 96.0, 1.0),
+            "margin_usage": float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0)),
         }
 
-    # ── TrendContextBrain 거버넌스 ────────────────────────────────
-    def _apply_trend_filter(self, action: int, kelly: float, trend_signal) -> tuple:
-        """4h 추세 기반 진입 거부 / Kelly 조정.
+        action, leverage, info = self.router.decide(features, pos_dict)
+        return int(action), float(leverage), dict(info or {}), elite_sigs, regime
 
-        VETO_STRENGTH  : 이 이상 강한 역방향 추세 → 진입 거부 (action=0)
-        BOOST_STRENGTH : 이 이상 동방향 추세 → Kelly 부스트 (+25%)
-        CHOP_STRENGTH  : FLAT 추세 강도 → Kelly 축소 (×0.8)
-        REV_VETO_PROB  : 반전 확률 이 이상 → Kelly 축소 (×0.6)
-        """
-        VETO_STRENGTH  = 0.70   # 완화: 매우 강한 역방향만 거부
-        BOOST_STRENGTH = 0.35
-        CHOP_STRENGTH  = 0.30
-        REV_VETO_PROB  = 0.70   # 완화: 반전 확률 매우 높을 때만 축소
 
-        veto = None
+# ════════════════════════════════════════════════════════════════
+# 3-B. DSACTrendRouter — DSAC + SevenModel(M7) 다요소 융합
+# ════════════════════════════════════════════════════════════════
+class DSACTrendRouter:
+    def __init__(self):
+        self.pos: str | None = None
+        self.entry_price: float = 0.0
+        self.hold_count: int = 0
+        self.current_leverage: float = 0.0
+        self.peak_equity: float = 1.0
+        self.cur_equity: float = 1.0
+        self.last_realized_pnl: float | None = None
+        self.last_closed_hold_count: int = 0
+        self._open_trade_diag: dict | None = None
+        self.trade_history: deque[dict] = deque(maxlen=2000)
+        self.recent_realized: deque[float] = deque(maxlen=20)
+        self.loss_streak: int = 0
+        self.cooldown_bars_left: int = 0
+        self.trend_mismatch_streak: int = 0
+        self.last_summary_ts: datetime | None = None
+        self._last_state_save_ts: datetime | None = None
 
-        # ① 강한 역방향 추세 → 진입 거부
-        if trend_signal.strength >= VETO_STRENGTH:
-            if trend_signal.trend_dir == 0 and action == 1:   # 4h 하락 + 롱 진입
-                return 0, 0.0, 'TREND_DOWN_VETO'
-            if trend_signal.trend_dir == 2 and action == 2:   # 4h 상승 + 숏 진입
-                return 0, 0.0, 'TREND_UP_VETO'
+        # Legacy trend knobs (backward-compatible)
+        self.veto_strength = float(os.getenv("TREND_VETO_STRENGTH", "0.70"))
+        self.boost_strength = float(os.getenv("TREND_BOOST_STRENGTH", "0.35"))
+        self.chop_strength = float(os.getenv("TREND_CHOP_STRENGTH", "0.30"))
+        self.rev_reduce_prob = float(os.getenv("TREND_REV_REDUCE_PROB", "0.70"))
 
-        # ② 동방향 추세 → Kelly 부스트
-        if trend_signal.strength >= BOOST_STRENGTH:
-            aligned = (trend_signal.trend_dir == 2 and action == 1) or \
-                      (trend_signal.trend_dir == 0 and action == 2)
-            if aligned:
-                kelly = float(np.clip(kelly * (1.0 + trend_signal.strength * 0.25), 0.0, 1.0))
-                veto  = 'TREND_BOOST'
+        # Multi-model fusion knobs
+        self.dsac_weight = float(os.getenv("FUSE_DSAC_WEIGHT", "0.55"))
+        self.m7_weight = float(os.getenv("FUSE_M7_WEIGHT", "0.45"))
+        self.min_enter_score = float(os.getenv("FUSE_MIN_ENTER_SCORE", "0.12"))
+        self.flip_min_margin = float(os.getenv("FUSE_FLIP_MIN_MARGIN", "0.08"))
+        self.min_live_kelly = float(os.getenv("FUSE_MIN_LIVE_KELLY", "0.04"))
+        self.hold_exit_margin = float(os.getenv("FUSE_HOLD_EXIT_MARGIN", "0.02"))
+        self.exit_score_buffer = float(os.getenv("FUSE_EXIT_SCORE_BUFFER", "0.07"))
+        self.exit_kelly_ratio = float(os.getenv("FUSE_EXIT_KELLY_RATIO", "0.55"))
+        self.reverse_exit_margin = float(os.getenv("FUSE_REVERSE_EXIT_MARGIN", "0.10"))
+        self.dsac_soft_exit = _env_flag("FUSE_DSAC_SOFT_EXIT", True)
+        self.force_hold_exit = _env_flag("FUSE_FORCE_HOLD_EXIT", False)
+        self.anomaly_force_exit = _env_flag("FUSE_ANOMALY_FORCE_EXIT", False)
+        self.dsac_only_hard_stop = float(os.getenv("DSAC_ONLY_HARD_STOP", "0.025"))
+        self.dsac_only_max_hold = int(os.getenv("DSAC_ONLY_MAX_HOLD", "96"))
+        self.dsac_only_reverse_min = float(os.getenv("DSAC_ONLY_REVERSE_MIN", "0.45"))
+        self.dsac_only_trail_arm = float(os.getenv("DSAC_ONLY_TRAIL_ARM", "0.012"))
+        self.dsac_only_trail_gap = float(os.getenv("DSAC_ONLY_TRAIL_GAP", "0.008"))
+        self.dsac_only_vol_scale_enable = _env_flag("DSAC_ONLY_VOL_SCALE_ENABLE", True)
+        self.dsac_only_cooldown_loss = float(os.getenv("DSAC_ONLY_COOLDOWN_LOSS", "0.05"))
+        self.dsac_only_cooldown_streak = int(os.getenv("DSAC_ONLY_COOLDOWN_STREAK", "4"))
+        self.dsac_only_cooldown_bars = int(os.getenv("DSAC_ONLY_COOLDOWN_BARS", "10"))
+        self.dsac_only_trend_exit_enable = _env_flag("DSAC_ONLY_TREND_EXIT_ENABLE", True)
+        self.dsac_only_trend_exit_hold_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_HOLD_BARS", "48"))
+        self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "3"))
+        self.dsac_only_trend_exit_score = float(os.getenv("DSAC_ONLY_TREND_EXIT_SCORE", "0.30"))
+        self.dsac_only_trend_exit_quality = float(os.getenv("DSAC_ONLY_TREND_EXIT_QUALITY", "-0.010"))
+        self.dsac_only_vae_block_ratio = float(os.getenv("DSAC_ONLY_VAE_BLOCK_RATIO", "1.35"))
+        self.trade_fee = float(os.getenv("LIVE_FEE_RATE", "0.0005"))
+        self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
+        self.live_state_path = os.getenv("DSAC_LIVE_STATE_PATH", "data/ensemble/dsac_live_state.json")
 
-        # ③ FLAT(횡보) 추세 → Kelly 축소
-        if trend_signal.trend_dir == 1 and trend_signal.strength >= CHOP_STRENGTH:
-            kelly *= 0.80
-            veto   = veto or 'TREND_CHOP_REDUCE'
+        # Layer-1 alpha gate (direction + quality)
+        self.dir_prob_th = float(os.getenv("FUSE_DIR_PROB_TH", "0.60"))
+        self.quality_fee_floor = float(os.getenv("FUSE_QUALITY_FEE_FLOOR", "0.0015"))
+        self.quality_lowvol_bonus = float(os.getenv("FUSE_QUALITY_LOWVOL_BONUS", "0.0007"))
 
-        # ④ 반전 확률 높음 → Kelly 추가 축소
-        if trend_signal.rev_prob >= REV_VETO_PROB:
-            kelly = float(np.clip(kelly * 0.60, 0.0, 1.0))
-            veto  = veto or 'TREND_REV_REDUCE'
+        # Layer-2 uncertainty sizing + dynamic quantile stop
+        self.qwidth_full_th = float(os.getenv("FUSE_QWIDTH_FULL_TH", "0.008"))
+        self.qwidth_half_th = float(os.getenv("FUSE_QWIDTH_HALF_TH", "0.018"))
+        self.stop_wide_mult = float(os.getenv("FUSE_STOP_WIDE_MULT", "1.35"))
+        self.stop_tight_mult = float(os.getenv("FUSE_STOP_TIGHT_MULT", "0.90"))
 
-        return action, kelly, veto
+        # Layer-3 regime switch
+        self.range_cluster_id = int(os.getenv("FUSE_RANGE_CLUSTER_ID", "0"))
+        self.range_vol_rank_max = float(os.getenv("FUSE_RANGE_VOL_RANK_MAX", "0.35"))
+        self.range_score_boost = float(os.getenv("FUSE_RANGE_SCORE_BOOST", "0.04"))
+        self.range_prob_boost = float(os.getenv("FUSE_RANGE_PROB_BOOST", "0.03"))
+        self.trend_vol_rank_min = float(os.getenv("FUSE_TREND_VOL_RANK_MIN", "0.70"))
+        self.trend_strength_min = float(os.getenv("FUSE_TREND_STRENGTH_MIN", "0.55"))
+        self.trend_prob_relax = float(os.getenv("FUSE_TREND_PROB_RELAX", "0.04"))
 
-    def _calc_kelly(self, final_action, rl_info, rl_score):
-        if final_action == 0:
-            return 0.0
-        rl_kelly = float(rl_info.get('kelly', 0.0))
-        return float(np.clip(rl_kelly, 0.0, 1.0))
+        # Layer-3 circuit breaker
+        self.cb_enable = _env_flag("FUSE_CIRCUIT_BREAKER", True)
+        self.cb_iso_score_th = float(os.getenv("FUSE_CB_ISO_SCORE_TH", "0.060"))
+        self.cb_vae_ratio_th = float(os.getenv("FUSE_CB_VAE_RATIO_TH", "1.15"))
+        self.cb_hdb_noise = _env_flag("FUSE_CB_HDB_NOISE", True)
+        self.cb_hdb_prob_max = float(os.getenv("FUSE_CB_HDB_PROB_MAX", "0.10"))
+        self.cb_hdb_min_samples = int(os.getenv("FUSE_CB_HDB_MIN_SAMPLES", "200"))
+        self.cb_hdb_disable_noise_ratio = float(os.getenv("FUSE_CB_HDB_DISABLE_NOISE_RATIO", "0.85"))
+        self.cb_hdb_disable_zero_prob_ratio = float(os.getenv("FUSE_CB_HDB_DISABLE_ZERO_PROB_RATIO", "0.98"))
+        self._hdb_seen = 0
+        self._hdb_noise_hits = 0
+        self._hdb_zero_prob_hits = 0
 
-    def _update_pos(self, final_action, current_price):
+        self.use_tuned_json = _env_flag("FUSE_USE_TUNED_JSON", True)
+        self.tuned_json_path = os.getenv("FUSE_TUNED_JSON_PATH", "data/ensemble/fuse_walkforward_best.json")
+        self._apply_tuned_defaults()
+
+        # ── 수익 보호 스텝 스탑 (브레이크이븐 포함) ─────────────────────────
+        # peak_equity 기준 (레버리지 적용 수익률 단위)
+        # (최대수익 달성 임계값, 최소 허용 수익률) 쌍의 리스트 (내림차순)
+        self.step_stop_enable = _env_flag("DSAC_STEP_STOP_ENABLE", True)
+        self.step_stop_levels: list[tuple[float, float]] = [
+            (0.020, 0.012),   # 2.0% 달성 후 → 1.2% 수익 잠금
+            (0.015, 0.007),   # 1.5% 달성 후 → 0.7% 수익 잠금
+            (0.010, 0.003),   # 1.0% 달성 후 → 0.3% 수익 잠금
+            (0.006, 0.000),   # 0.6% 달성 후 → 브레이크이븐
+        ]
+
+        # ── 자금 조달 비율(Funding Rate) 게이트 ──────────────────────────────
+        # 크라우딩 방향 포지션 진입 시 kelly 축소
+        self.funding_gate_enable  = _env_flag("FUSE_FUNDING_GATE",        True)
+        self.funding_long_th      = float(os.getenv("FUSE_FUNDING_LONG_TH",    "0.0010"))  # >0.1%/8h: 롱 크라우딩
+        self.funding_short_th     = float(os.getenv("FUSE_FUNDING_SHORT_TH",   "-0.0010")) # <-0.1%/8h: 숏 크라우딩
+        self.funding_reduce       = float(os.getenv("FUSE_FUNDING_REDUCE",     "0.75"))    # 크라우딩 시 kelly 배수
+        self.funding_extreme_th   = float(os.getenv("FUSE_FUNDING_EXTREME_TH", "0.0030"))  # 극단 크라우딩 임계값
+
+        # ── BTC-ETH 상관 필터 ─────────────────────────────────────────────────
+        # BTC 3봉 방향이 DSAC 방향과 불일치 시 kelly 축소, 일치 시 소폭 부스트
+        self.btc_corr_enable      = _env_flag("FUSE_BTC_CORR",            True)
+        self.btc_corr_misalign    = float(os.getenv("FUSE_BTC_CORR_MISALIGN",    "0.85"))  # 반대방향 kelly 배수
+        self.btc_corr_align_boost = float(os.getenv("FUSE_BTC_CORR_ALIGN_BOOST", "1.08"))  # 같은방향 kelly 부스트
+        self.btc_corr_move_th     = float(os.getenv("FUSE_BTC_CORR_MOVE_TH",     "0.004")) # BTC 3봉 유의미 변화 임계값
+
+        # ── 안티 찹(횡보) 필터 ────────────────────────────────────────────────
+        # 최근 N봉에서 방향 전환이 잦으면 지그재그 장세로 판단해 kelly 축소
+        self.chop_filter_enable   = _env_flag("FUSE_CHOP_FILTER",         True)
+        self.chop_window          = int(os.getenv("FUSE_CHOP_WINDOW",         "12"))   # 관찰 봉수
+        self.chop_turns_max       = int(os.getenv("FUSE_CHOP_TURNS_MAX",      "7"))   # 이 횟수 이상 전환 시 찹 판정
+        self.chop_kelly_scale     = float(os.getenv("FUSE_CHOP_KELLY_SCALE",  "0.65"))
+
+        # ── 거래량 확인 필터 ──────────────────────────────────────────────────
+        # 저거래량 구간 진입 시 kelly 축소 (스캘핑 노이즈 방지)
+        self.volume_confirm_enable = _env_flag("FUSE_VOLUME_CONFIRM",      True)
+        self.volume_min_ratio      = float(os.getenv("FUSE_VOLUME_MIN_RATIO",  "0.50"))  # 20봉 평균 대비 최소 비율
+        self.volume_low_kelly      = float(os.getenv("FUSE_VOLUME_LOW_KELLY",  "0.80"))  # 저거래량 시 kelly 배수
+
+        # Online adaptation knobs
+        self.online_adapt = False
+        self.adapt_alpha = float(os.getenv("FUSE_ADAPT_ALPHA", "0.08"))
+        self.adapt_lr = float(os.getenv("FUSE_ADAPT_LR", "0.06"))
+        self.adapt_weight_step = float(os.getenv("FUSE_ADAPT_WEIGHT_STEP", "0.01"))
+        self.adapt_state_path = os.getenv("FUSE_ADAPT_STATE_PATH", "data/ensemble/fuse_online_state.json")
+
+        self.trade_count: int = 0
+        self.win_rate_ema: float = 0.5
+        self.pnl_ema: float = 0.0
+        self.dsac_perf_ema: float = 0.0
+        self.m7_perf_ema: float = 0.0
+
+        self._normalize_weights()
+        self._load_live_state()
+
+    def _apply_tuned_defaults(self) -> None:
+        if not self.use_tuned_json:
+            return
+        path = self.tuned_json_path
+        if not path or not os.path.exists(path):
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception as e:
+            logger.warning("⚠️ FUSE 튜닝 JSON 로드 실패: %s", e)
+            return
+
+        env_export = payload.get("env_export", {}) if isinstance(payload, dict) else {}
+        best_params = payload.get("best_params", {}) if isinstance(payload, dict) else {}
+        if not isinstance(env_export, dict):
+            env_export = {}
+        if not isinstance(best_params, dict):
+            best_params = {}
+
+        def _choose(env_key: str, best_key: str):
+            if os.getenv(env_key) is not None:
+                return None
+            if env_key in env_export:
+                return env_export.get(env_key)
+            return best_params.get(best_key)
+
+        def _to_float(v, cur):
+            try:
+                return float(v)
+            except Exception:
+                return cur
+
+        def _to_bool(v, cur):
+            if isinstance(v, bool):
+                return v
+            s = str(v).strip().lower()
+            if s in {"1", "true", "yes", "y", "on"}:
+                return True
+            if s in {"0", "false", "no", "n", "off"}:
+                return False
+            try:
+                return float(v) >= 0.5
+            except Exception:
+                return cur
+
+        self.dsac_weight = _to_float(_choose("FUSE_DSAC_WEIGHT", "dsac_weight"), self.dsac_weight)
+        self.m7_weight = _to_float(_choose("FUSE_M7_WEIGHT", "m7_weight"), self.m7_weight)
+        self.min_enter_score = _to_float(_choose("FUSE_MIN_ENTER_SCORE", "min_enter_score"), self.min_enter_score)
+        self.flip_min_margin = _to_float(_choose("FUSE_FLIP_MIN_MARGIN", "flip_min_margin"), self.flip_min_margin)
+        self.min_live_kelly = _to_float(_choose("FUSE_MIN_LIVE_KELLY", "min_live_kelly"), self.min_live_kelly)
+        self.hold_exit_margin = _to_float(_choose("FUSE_HOLD_EXIT_MARGIN", "hold_exit_margin"), self.hold_exit_margin)
+        self.veto_strength = _to_float(_choose("TREND_VETO_STRENGTH", "veto_strength"), self.veto_strength)
+        self.chop_strength = _to_float(_choose("TREND_CHOP_STRENGTH", "chop_strength"), self.chop_strength)
+        self.rev_reduce_prob = _to_float(_choose("TREND_REV_REDUCE_PROB", "rev_reduce_prob"), self.rev_reduce_prob)
+        anom_val = _choose("FUSE_ANOMALY_FORCE_EXIT", "anomaly_force_exit")
+        if anom_val is not None:
+            self.anomaly_force_exit = _to_bool(anom_val, self.anomaly_force_exit)
+
+        logger.info(
+            "🧪 FUSE 튜닝값 반영: w_dsac=%.3f w_m7=%.3f enter=%.3f flip=%.3f min_k=%.3f",
+            self.dsac_weight, self.m7_weight, self.min_enter_score, self.flip_min_margin, self.min_live_kelly,
+        )
+
+    def record_outcome(self, realized_pnl_pct: float):
+        pnl = float(realized_pnl_pct)
+        self.last_realized_pnl = None
+        self.trade_count += 1
+        self.recent_realized.append(pnl)
+        self.loss_streak = 0 if pnl > 0 else (self.loss_streak + 1)
+        if (
+            len(self.recent_realized) >= 5
+            and sum(list(self.recent_realized)[-5:]) <= -abs(self.dsac_only_cooldown_loss)
+        ) or self.loss_streak >= max(1, self.dsac_only_cooldown_streak):
+            self.cooldown_bars_left = max(self.cooldown_bars_left, max(1, self.dsac_only_cooldown_bars))
+        a = float(np.clip(self.adapt_alpha, 0.001, 0.5))
+        reward = float(np.tanh(pnl / 0.01))
+        self.pnl_ema = (1.0 - a) * self.pnl_ema + a * pnl
+        self.win_rate_ema = (1.0 - a) * self.win_rate_ema + a * (1.0 if pnl > 0 else 0.0)
+
+        self.dsac_perf_ema = (1.0 - a) * self.dsac_perf_ema + a * reward
+        self.m7_perf_ema = (1.0 - a) * self.m7_perf_ema + a * reward
+        self._save_live_state()
+        self._open_trade_diag = None
+
+    def _update_pos(self, final_action: int, current_price: float, leverage: float | None = None):
         if final_action == 1 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = 'LONG', current_price, 0
+            self.pos, self.entry_price, self.hold_count = "LONG", current_price, 0
+            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
             self.peak_equity = self.cur_equity = 1.0
+            self.last_realized_pnl = None
+            self.trend_mismatch_streak = 0
+            self._save_live_state()
         elif final_action == 2 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = 'SHORT', current_price, 0
+            self.pos, self.entry_price, self.hold_count = "SHORT", current_price, 0
+            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
             self.peak_equity = self.cur_equity = 1.0
+            self.last_realized_pnl = None
+            self.trend_mismatch_streak = 0
+            self._save_live_state()
         elif final_action == 0 and self.pos is not None:
+            if self.entry_price > 0 and current_price > 0:
+                self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
+            self.last_realized_pnl = float(self.cur_equity - 1.0)
+            self.last_closed_hold_count = int(self.hold_count)
             self.pos, self.entry_price, self.hold_count = None, 0.0, 0
-        elif self.pos is not None:
+            self.current_leverage = 0.0
+            self.peak_equity = 1.0
+            self.cur_equity = 1.0
+            self.trend_mismatch_streak = 0
+            self._save_live_state()
+        elif self.pos is not None and self.entry_price > 0 and current_price > 0:
             self.hold_count += 1
-            if current_price > 0 and self.entry_price > 0:
-                if self.pos == 'LONG':
-                    self.cur_equity = 1.0 + (current_price - self.entry_price) / self.entry_price
-                else:
-                    self.cur_equity = 1.0 + (self.entry_price - current_price) / self.entry_price
-                self.peak_equity = max(self.peak_equity, self.cur_equity)
+            if leverage is not None:
+                self.current_leverage = float(np.clip(leverage, 0.0, 1.0))
+            self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
+            self.peak_equity = max(self.peak_equity, self.cur_equity)
+            self.last_realized_pnl = None
+            self._save_live_state()
+
+    def _normalize_weights(self) -> None:
+        self.dsac_weight = float(max(0.0, self.dsac_weight))
+        self.m7_weight = float(max(0.0, self.m7_weight))
+        s = self.dsac_weight + self.m7_weight
+        if s <= 1e-12:
+            self.dsac_weight, self.m7_weight = 0.5, 0.5
+            return
+        self.dsac_weight /= s
+        self.m7_weight /= s
+
+    def _load_adapt_state(self) -> None:
+        path = self.adapt_state_path
+        if not path or not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.dsac_weight = float(data.get("dsac_weight", self.dsac_weight))
+            self.m7_weight = float(data.get("m7_weight", self.m7_weight))
+            loaded_enter = float(data.get("min_enter_score", self.min_enter_score))
+            loaded_kelly = float(data.get("min_live_kelly", self.min_live_kelly))
+            # 과거 적응상태가 임계값을 더 높여 저장된 경우, 현재 완화값보다 높아지지 않게 캡
+            self.min_enter_score = min(loaded_enter, self.min_enter_score)
+            self.min_live_kelly = min(loaded_kelly, self.min_live_kelly)
+            self.trade_count = int(data.get("trade_count", self.trade_count))
+            self.win_rate_ema = float(data.get("win_rate_ema", self.win_rate_ema))
+            self.pnl_ema = float(data.get("pnl_ema", self.pnl_ema))
+            self.dsac_perf_ema = float(data.get("dsac_perf_ema", self.dsac_perf_ema))
+            self.m7_perf_ema = float(data.get("m7_perf_ema", self.m7_perf_ema))
+            self._normalize_weights()
+            logger.info(
+                "♻️ FUSE 적응상태 로드: w_dsac=%.3f w_m7=%.3f enter=%.3f min_k=%.3f trades=%d",
+                self.dsac_weight, self.m7_weight, self.min_enter_score, self.min_live_kelly, self.trade_count,
+            )
+        except Exception as e:
+            logger.warning("⚠️ FUSE 적응상태 로드 실패: %s", e)
+
+    def _save_adapt_state(self) -> None:
+        path = self.adapt_state_path
+        if not path:
+            return
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            payload = {
+                "dsac_weight": self.dsac_weight,
+                "m7_weight": self.m7_weight,
+                "min_enter_score": self.min_enter_score,
+                "min_live_kelly": self.min_live_kelly,
+                "trade_count": self.trade_count,
+                "win_rate_ema": self.win_rate_ema,
+                "pnl_ema": self.pnl_ema,
+                "dsac_perf_ema": self.dsac_perf_ema,
+                "m7_perf_ema": self.m7_perf_ema,
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=True)
+        except Exception as e:
+            logger.warning("⚠️ FUSE 적응상태 저장 실패: %s", e)
+
+    def _load_live_state(self) -> None:
+        path = self.live_state_path
+        if not path or not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.pos = data.get("pos")
+            self.entry_price = float(data.get("entry_price", 0.0))
+            self.hold_count = int(data.get("hold_count", 0))
+            self.current_leverage = float(np.clip(data.get("current_leverage", 0.0), 0.0, 1.0))
+            self.peak_equity = float(max(data.get("peak_equity", 1.0), 1e-8))
+            self.cur_equity = float(max(data.get("cur_equity", 1.0), 1e-8))
+            self.last_realized_pnl = data.get("last_realized_pnl", None)
+            self.last_closed_hold_count = int(data.get("last_closed_hold_count", 0))
+            self.loss_streak = int(data.get("loss_streak", 0))
+            self.cooldown_bars_left = int(data.get("cooldown_bars_left", 0))
+            self.trend_mismatch_streak = int(data.get("trend_mismatch_streak", 0))
+            self.recent_realized = deque(
+                [float(x) for x in data.get("recent_realized", [])],
+                maxlen=20,
+            )
+            self.trade_history = deque(data.get("trade_history", []), maxlen=2000)
+            saved_at = data.get("saved_at")
+            if saved_at:
+                try:
+                    saved_ts = pd.Timestamp(saved_at).tz_localize(None) if pd.Timestamp(saved_at).tzinfo is not None else pd.Timestamp(saved_at)
+                    elapsed_bars = max(0, int((pd.Timestamp.utcnow().tz_localize(None) - saved_ts) / pd.Timedelta(minutes=5)))
+                    self.cooldown_bars_left = max(0, self.cooldown_bars_left - elapsed_bars)
+                except Exception:
+                    pass
+            logger.info(
+                "♻️ DSAC 라이브 상태 로드: pos=%s entry=%.2f hold=%d lev=%.3f cooldown=%d",
+                self.pos, self.entry_price, self.hold_count, self.current_leverage, self.cooldown_bars_left,
+            )
+        except Exception as e:
+            logger.warning("⚠️ DSAC 라이브 상태 로드 실패: %s", e)
+
+    def _save_live_state(self) -> None:
+        path = self.live_state_path
+        if not path:
+            return
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            payload = {
+                "pos": self.pos,
+                "entry_price": self.entry_price,
+                "hold_count": self.hold_count,
+                "current_leverage": self.current_leverage,
+                "peak_equity": self.peak_equity,
+                "cur_equity": self.cur_equity,
+                "last_realized_pnl": self.last_realized_pnl,
+                "last_closed_hold_count": self.last_closed_hold_count,
+                "loss_streak": self.loss_streak,
+                "cooldown_bars_left": self.cooldown_bars_left,
+                "trend_mismatch_streak": self.trend_mismatch_streak,
+                "recent_realized": list(self.recent_realized),
+                "trade_history": list(self.trade_history),
+                "saved_at": pd.Timestamp.utcnow().tz_localize(None).isoformat(),
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=True)
+        except Exception as e:
+            logger.warning("⚠️ DSAC 라이브 상태 저장 실패: %s", e)
+
+    def _net_pnl_frac(self, current_price: float) -> float:
+        if self.pos is None or self.entry_price <= 0.0 or current_price <= 0.0:
+            return 0.0
+        lev = float(np.clip(self.current_leverage, 0.0, 1.0))
+        if self.pos == "LONG":
+            entry_exec = self.entry_price * (1.0 + self.trade_slip)
+            exit_exec = current_price * (1.0 - self.trade_slip)
+            gross = (exit_exec - entry_exec) / max(entry_exec, 1e-8)
+        else:
+            entry_exec = self.entry_price * (1.0 - self.trade_slip)
+            exit_exec = current_price * (1.0 + self.trade_slip)
+            gross = (entry_exec - exit_exec) / max(abs(entry_exec), 1e-8)
+        total_fee = 2.0 * self.trade_fee * lev
+        return float(gross * lev - total_fee)
 
     def unrealized_pnl(self, current_price: float) -> float:
         if self.pos is None or self.entry_price == 0.0:
             return 0.0
-        if self.pos == 'LONG':
-            return (current_price - self.entry_price) / self.entry_price * 100.0
-        return (self.entry_price - current_price) / self.entry_price * 100.0
+        return self._net_pnl_frac(current_price) * 100.0
+
+    def decrement_cooldown(self) -> None:
+        if self.cooldown_bars_left > 0:
+            self.cooldown_bars_left -= 1
+
+    def vol_scale(self, garch_vol_z: float = 0.0, micro_vol: float = 0.0) -> float:
+        if not self.dsac_only_vol_scale_enable:
+            return 1.0
+        gv = abs(float(garch_vol_z))
+        if gv >= 2.0:
+            return 0.4
+        if gv >= 1.2:
+            return 0.7
+        if gv <= 0.3:
+            return 1.0
+        return 0.85
+
+    def should_trailing_stop(self) -> bool:
+        peak_gain = float(self.peak_equity - 1.0)
+        draw_from_peak = float(self.peak_equity - self.cur_equity)
+        return peak_gain >= self.dsac_only_trail_arm and draw_from_peak >= self.dsac_only_trail_gap
+
+    def long_trend_score(self, processed_df: pd.DataFrame, trend_signal: dict | None) -> float:
+        last_row = processed_df.iloc[-1]
+
+        def _sf(v, d: float = 0.0) -> float:
+            try:
+                return float(v)
+            except Exception:
+                return float(d)
+
+        ts = trend_signal if isinstance(trend_signal, dict) else {}
+        p_dn = float(np.clip(_sf(ts.get("prob_dn", ts.get("m7_prob_dn", 1.0 / 3.0))), 0.0, 1.0))
+        p_fl = float(np.clip(_sf(ts.get("prob_flat", ts.get("m7_prob_fl", 1.0 / 3.0))), 0.0, 1.0))
+        p_up = float(np.clip(_sf(ts.get("prob_up", ts.get("m7_prob_up", 1.0 / 3.0))), 0.0, 1.0))
+        ps = p_dn + p_fl + p_up
+        if ps <= 1e-12:
+            p_dn = p_fl = p_up = 1.0 / 3.0
+        else:
+            p_dn, p_fl, p_up = p_dn / ps, p_fl / ps, p_up / ps
+
+        m7_q50 = _sf(ts.get("m7_q50", 0.0))
+        m7_quality = _sf(ts.get("m7_quality_pred", 0.0))
+        trend_1h = _sf(last_row.get("mtf_trend_1h", 0.0))
+        trend_4h = _sf(last_row.get("mtf_trend_4h", 0.0))
+        closes = processed_df["close"].tail(12).astype(float).values if "close" in processed_df.columns else np.array([], dtype=float)
+        ret_12 = ((closes[-1] / closes[0]) - 1.0) if len(closes) >= 2 and abs(closes[0]) > 1e-8 else 0.0
+
+        model_edge = (
+            0.55 * (p_up - p_dn)
+            + 0.20 * float(np.tanh(m7_q50 * 220.0))
+            + 0.10 * float(np.tanh(m7_quality * 12.0))
+        )
+        mtf_edge = float(np.tanh((trend_1h + trend_4h + ret_12 * 80.0) / 2.4))
+        return float(np.clip(0.75 * model_edge + 0.25 * mtf_edge, -1.0, 1.0))
+
+    def update_trend_mismatch(self, processed_df: pd.DataFrame, trend_signal: dict | None) -> tuple[bool, float, str]:
+        if not self.dsac_only_trend_exit_enable or self.pos is None:
+            self.trend_mismatch_streak = 0
+            return False, 0.0, ""
+
+        score = self.long_trend_score(processed_df, trend_signal)
+        quality = 0.0
+        if isinstance(trend_signal, dict):
+            try:
+                quality = float(trend_signal.get("m7_quality_pred", 0.0))
+            except Exception:
+                quality = 0.0
+
+        mismatch = False
+        reason = ""
+        if self.hold_count >= max(1, self.dsac_only_trend_exit_hold_bars):
+            if self.pos == "LONG" and score <= -abs(self.dsac_only_trend_exit_score) and quality <= self.dsac_only_trend_exit_quality:
+                mismatch = True
+                reason = "DSAC_ONLY_M7_LONG_MISMATCH"
+            elif self.pos == "SHORT" and score >= abs(self.dsac_only_trend_exit_score) and quality >= -self.dsac_only_trend_exit_quality:
+                mismatch = True
+                reason = "DSAC_ONLY_M7_SHORT_MISMATCH"
+
+        self.trend_mismatch_streak = (self.trend_mismatch_streak + 1) if mismatch else 0
+        should_exit = self.trend_mismatch_streak >= max(1, self.dsac_only_trend_exit_confirm_bars)
+        return should_exit, score, reason
+
+    def step_stop_floor(self) -> float:
+        """peak_equity 기준으로 단계적 수익 보호 스탑 하한선을 반환한다 (레버리지 적용 수익률 단위).
+
+        - peak_equity에서 설정된 최대수익 임계값을 초과하면 해당 수익률 이하로 떨어질 시 청산.
+        - 미달 시 기본 하드스탑(-dsac_only_hard_stop)으로 폴백.
+        """
+        if not self.step_stop_enable:
+            return -abs(self.dsac_only_hard_stop)
+        peak_gain = float(self.peak_equity - 1.0)
+        for gain_th, stop_fl in self.step_stop_levels:
+            if peak_gain >= gain_th:
+                return float(stop_fl)
+        return -abs(self.dsac_only_hard_stop)
+
+    def funding_kelly_factor(self, funding_rate: float, intended_side: int) -> float:
+        """펀딩 비율에 따른 Kelly 조정 계수를 반환한다.
+
+        크라우딩 방향(펀딩 비율이 높은 방향)으로 진입할 때 kelly를 축소하여
+        청산 리스크(funding squeeze) 노출을 줄인다.
+        """
+        if not self.funding_gate_enable or intended_side == 0:
+            return 1.0
+        fr = float(funding_rate)
+        if intended_side > 0:   # LONG 방향
+            if fr >= self.funding_extreme_th:
+                return float(self.funding_reduce * 0.80)   # 극단 롱 크라우딩 → 강한 축소
+            if fr >= self.funding_long_th:
+                return float(self.funding_reduce)
+        else:                   # SHORT 방향
+            if fr <= -self.funding_extreme_th:
+                return float(self.funding_reduce * 0.80)   # 극단 숏 크라우딩 → 강한 축소
+            if fr <= self.funding_short_th:
+                return float(self.funding_reduce)
+        return 1.0
+
+    def reconcile_external_position(self, pos_type: str | None, entry_price: float, leverage: float = 0.0) -> None:
+        ext_pos = pos_type if pos_type in {"LONG", "SHORT"} else None
+        ext_entry = float(entry_price) if entry_price and entry_price > 0 else 0.0
+        ext_lev = self.current_leverage if self.current_leverage > 0.0 else 1.0
+        if ext_pos is None:
+            if self.pos is not None:
+                logger.warning("⚠️ 외부 포지션 없음으로 복원 상태 초기화")
+                self.pos, self.entry_price, self.hold_count = None, 0.0, 0
+                self.current_leverage = 0.0
+                self.peak_equity = 1.0
+                self.cur_equity = 1.0
+                self._save_live_state()
+            return
+        if self.pos != ext_pos or abs(self.entry_price - ext_entry) > 1e-6:
+            logger.info("♻️ 외부 포지션 기준 상태 보정: %s %.2f lev=%.3f", ext_pos, ext_entry, ext_lev)
+            self.pos = ext_pos
+            self.entry_price = ext_entry
+            self.current_leverage = ext_lev
+            self.hold_count = 0
+            self.peak_equity = 1.0
+            self.cur_equity = 1.0
+            self._save_live_state()
+
+    def append_trade_history(self, timestamp_kst, pnl_frac: float) -> None:
+        ts_str = timestamp_kst.isoformat() if hasattr(timestamp_kst, "isoformat") else str(timestamp_kst)
+        self.trade_history.append({
+            "ts": ts_str,
+            "pnl_frac": float(pnl_frac),
+            "hold_bars": int(self.last_closed_hold_count),
+        })
+        self._save_live_state()
+
+    def performance_summary(self, now_kst) -> str:
+        if not self.trade_history:
+            return "perf 24h pnl:+0.00% wr:0% | 7d pnl:+0.00% wr:0% | all pnl:+0.00%"
+        now_ts = pd.Timestamp(now_kst)
+        pnl_all = float(sum(float(x.get("pnl_frac", 0.0)) for x in self.trade_history)) * 100.0
+        def _window(hours: int):
+            rows = []
+            for row in self.trade_history:
+                try:
+                    ts = pd.Timestamp(row.get("ts"))
+                except Exception:
+                    continue
+                if ts >= now_ts - pd.Timedelta(hours=hours):
+                    rows.append(row)
+            if not rows:
+                return 0.0, 0.0
+            pnl = float(sum(float(x.get("pnl_frac", 0.0)) for x in rows)) * 100.0
+            wr = 100.0 * sum(1 for x in rows if float(x.get("pnl_frac", 0.0)) > 0) / len(rows)
+            return pnl, wr
+        pnl_24h, wr_24h = _window(24)
+        pnl_7d, wr_7d = _window(24 * 7)
+        return (
+            f"perf 24h pnl:{pnl_24h:+.2f}% wr:{wr_24h:.0f}%"
+            f" | 7d pnl:{pnl_7d:+.2f}% wr:{wr_7d:.0f}%"
+            f" | all pnl:{pnl_all:+.2f}% cd:{self.cooldown_bars_left}"
+        )
+
+    @staticmethod
+    def _side_from_action(action_int: int) -> int:
+        a = int(action_int)
+        if a == 1:
+            return 1
+        if a == 2:
+            return -1
+        return 0
+
+    @staticmethod
+    def _action_from_side(side: int) -> int:
+        if side > 0:
+            return 1
+        if side < 0:
+            return 2
+        return 0
+
+    def fuse(self, dsac_action: int, dsac_info: dict, regime: dict, current_price: float = 0.0,
+             trend_signal=None, garch_vol_z: float = 0.0,
+             funding_rate: float = 0.0, btc_3bar_ret: float = 0.0,
+             aux_chop_factor: float = 1.0, aux_volume_factor: float = 1.0) -> dict:
+        ts = dict(trend_signal) if isinstance(trend_signal, dict) else (
+            trend_signal.to_arbiter_dict() if trend_signal is not None and hasattr(trend_signal, "to_arbiter_dict") else None
+        )
+
+        dsac_action = int(dsac_action)
+        dsac_side = self._side_from_action(dsac_action)
+        cur_side = 1 if self.pos == "LONG" else (-1 if self.pos == "SHORT" else 0)
+        raw_action = float(dsac_info.get("raw_action", 0.0))
+        base_kelly = float(dsac_info.get("kelly", dsac_info.get("score", 0.0)))
+        base_kelly = float(np.clip(base_kelly, 0.0, 1.0))
+        dsac_score = float(np.clip(max(abs(raw_action), abs(float(dsac_info.get("score", 0.0))), base_kelly), 0.0, 1.0))
+
+        # M7 defaults (missing model 시 중립값)
+        t_dir = int(ts.get("trend_dir", 1)) if isinstance(ts, dict) else 1
+        t_str = float(np.clip(ts.get("strength", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        t_rev = float(np.clip(ts.get("rev_prob", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        p_dn = float(np.clip(ts.get("prob_dn", ts.get("m7_prob_dn", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        p_fl = float(np.clip(ts.get("prob_flat", ts.get("m7_prob_fl", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        p_up = float(np.clip(ts.get("prob_up", ts.get("m7_prob_up", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        _p_sum = p_dn + p_fl + p_up
+        if _p_sum > 1e-12:
+            p_dn, p_fl, p_up = p_dn / _p_sum, p_fl / _p_sum, p_up / _p_sum
+        else:
+            p_dn = p_fl = p_up = 1.0 / 3.0
+
+        m7_conf = float(np.clip(ts.get("m7_confidence", t_str), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        m7_size = float(np.clip(ts.get("m7_size", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        m7_quality = float(ts.get("m7_quality_pred", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_target_hold = int(max(0, round(float(ts.get("m7_target_hold", 0.0))))) if isinstance(ts, dict) else 0
+        m7_vol_rank = float(np.clip(ts.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0)) if isinstance(ts, dict) else 0.5
+        m7_gmm_cluster = int(round(float(ts.get("m7_gmm_cluster", -1.0)))) if isinstance(ts, dict) else -1
+        m7_hdb_label = int(round(float(ts.get("m7_hdb_label", -1.0)))) if isinstance(ts, dict) else -1
+        m7_hdb_prob = float(np.clip(ts.get("m7_hdb_prob", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
+        m7_iso_anom = bool(float(ts.get("m7_iso_anom", 0.0)) >= 0.5) if isinstance(ts, dict) else False
+        m7_vae_anom = bool(float(ts.get("m7_vae_anom", 0.0)) >= 0.5) if isinstance(ts, dict) else False
+        m7_gate_block = bool(float(ts.get("m7_gate_block", 0.0)) >= 0.5) if isinstance(ts, dict) else False
+        m7_iso_score = float(ts.get("m7_iso_score", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_vae_error = float(ts.get("m7_vae_error", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_vae_threshold = float(ts.get("m7_vae_threshold", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_q10 = float(ts.get("m7_q10", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_q50 = float(ts.get("m7_q50", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_q90 = float(ts.get("m7_q90", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_qwidth = float(max(0.0, ts.get("m7_qwidth", 0.0))) if isinstance(ts, dict) else 0.0
+        xgb_dn = float(np.clip(ts.get("m7_trend_xgb_dn", p_dn), 0.0, 1.0)) if isinstance(ts, dict) else p_dn
+        xgb_up = float(np.clip(ts.get("m7_trend_xgb_up", p_up), 0.0, 1.0)) if isinstance(ts, dict) else p_up
+        m7_expected_ret = float(ts.get("m7_expected_ret", 0.0)) if isinstance(ts, dict) else 0.0
+        m7_tail_risk = abs(float(ts.get("m7_tail_risk", 0.0))) if isinstance(ts, dict) else 0.0
+        m7_composite = float(np.clip(ts.get("m7_composite_score", 0.0), -1.0, 1.0)) if isinstance(ts, dict) else 0.0
+
+        # HDBSCAN이 상시 noise만 내는 경우 회로 차단기에서 제외 (모델 붕괴 방지)
+        self._hdb_seen += 1
+        if m7_hdb_label == -1:
+            self._hdb_noise_hits += 1
+        if m7_hdb_prob <= 1e-8:
+            self._hdb_zero_prob_hits += 1
+        hdb_noise_ratio = float(self._hdb_noise_hits / max(1, self._hdb_seen))
+        hdb_zero_prob_ratio = float(self._hdb_zero_prob_hits / max(1, self._hdb_seen))
+        hdb_reliable = not (
+            self._hdb_seen >= max(20, self.cb_hdb_min_samples)
+            and hdb_noise_ratio >= self.cb_hdb_disable_noise_ratio
+            and hdb_zero_prob_ratio >= self.cb_hdb_disable_zero_prob_ratio
+        )
+
+        vae_ratio = float(m7_vae_error / max(m7_vae_threshold, 1e-8)) if m7_vae_threshold > 1e-8 else (1.0 if m7_vae_anom else 0.0)
+        cb_iso = bool(m7_iso_anom and m7_iso_score >= self.cb_iso_score_th)
+        cb_vae = bool(m7_vae_anom and vae_ratio >= self.cb_vae_ratio_th)
+        cb_hdb = bool(
+            self.cb_hdb_noise
+            and hdb_reliable
+            and (m7_hdb_label == -1)
+            and (m7_hdb_prob > 1e-8)
+            and (m7_hdb_prob <= self.cb_hdb_prob_max)
+        )
+        circuit_breaker = bool(self.cb_enable and (cb_iso or cb_vae or cb_hdb))
+        cb_tags = []
+        if cb_iso:
+            cb_tags.append("CB_ISO")
+        if cb_vae:
+            cb_tags.append("CB_VAE")
+        if cb_hdb:
+            cb_tags.append("CB_HDB")
+
+        # 강한 이상 징후면 신규 진입 차단, 옵션으로 보유 포지션 강제 청산
+        # (완화형) iso/vae 동시 탐지라도 점수 강도가 약하면 soft_anomaly로 분류
+        hard_anomaly = bool(
+            m7_gate_block
+            or (
+                m7_iso_anom
+                and m7_vae_anom
+                and (
+                    m7_iso_score >= (self.cb_iso_score_th * 1.4)
+                    or vae_ratio >= (self.cb_vae_ratio_th * 1.15)
+                )
+            )
+        )
+        soft_anomaly = (m7_iso_anom ^ m7_vae_anom) and not hard_anomaly
+
+        # M7 리스크 신뢰도(사이즈/신뢰 결합) — 방향 결정에는 사용하지 않음
+        m7_score = float(np.clip(m7_conf * (0.60 + 0.40 * m7_size), 0.0, 1.0))
+        if t_dir == 1:
+            m7_score *= 0.65
+
+        # 방향은 DSAC 단독
+        dsac_signed = float(dsac_side * dsac_score)
+        fused_signed = dsac_signed
+        fused_abs = abs(fused_signed)
+        fused_side = 1 if fused_signed > self.flip_min_margin else (-1 if fused_signed < -self.flip_min_margin else 0)
+
+        # Layer-3 Regime switch: 저변동 횡보 vs 고변동 추세
+        is_lowvol_range = bool(m7_gmm_cluster == self.range_cluster_id and m7_vol_rank <= self.range_vol_rank_max)
+        is_highvol_trend = bool(m7_vol_rank >= self.trend_vol_rank_min and t_dir != 1 and t_str >= self.trend_strength_min)
+        enter_score_thr = float(np.clip(
+            self.min_enter_score + (self.range_score_boost if is_lowvol_range else 0.0) - (0.02 if is_highvol_trend else 0.0),
+            0.08,
+            0.45,
+        ))
+        dir_prob_thr = float(np.clip(
+            self.dir_prob_th + (self.range_prob_boost if is_lowvol_range else 0.0) - (self.trend_prob_relax if is_highvol_trend else 0.0),
+            0.45,
+            0.80,
+        ))
+        quality_thr = float(self.quality_fee_floor + (self.quality_lowvol_bonus if is_lowvol_range else 0.0))
+
+        # 환경/품질 기반 Kelly 조정계수
+        quality_factor = float(np.clip(1.0 + np.tanh(m7_quality * 12.0) * 0.20, 0.70, 1.25))
+        ret_factor = float(np.clip(0.90 + np.tanh(abs(m7_expected_ret) * 250.0) * 0.20, 0.85, 1.15))
+        tail_factor = float(np.clip(1.0 - min(m7_tail_risk * 180.0, 0.45), 0.55, 1.00))
+        vol_factor = 1.0
+        if m7_vol_rank >= 0.85:
+            vol_factor *= 0.70  # 0.55 → 0.70: 극고변동 페널티 완화
+        elif m7_vol_rank >= 0.70:
+            vol_factor *= 0.85  # 0.75 → 0.85: 고변동 페널티 완화
+        elif m7_vol_rank <= 0.20:
+            vol_factor *= 1.08
+        # hdb_label==-1 페널티 제거: circuit breaker에서 이미 처리됨
+        if m7_hdb_prob < 0.20:
+            vol_factor *= 0.93  # 0.90 → 0.93: 완화
+        if float(garch_vol_z) >= 2.0:
+            vol_factor *= 0.80  # 0.75 → 0.80: 완화
+        elif float(garch_vol_z) >= 1.2:
+            vol_factor *= 0.92  # 0.88 → 0.92: 완화
+
+        regime_chop = float(regime.get("regime_chop", 0.0)) if isinstance(regime, dict) else 0.0
+        regime_whipsaw = float(regime.get("regime_whipsaw", 0.0)) if isinstance(regime, dict) else 0.0
+        regime_bull = float(regime.get("regime_bull", 0.0)) if isinstance(regime, dict) else 0.0
+        regime_bear = float(regime.get("regime_bear", 0.0)) if isinstance(regime, dict) else 0.0
+        dir_ref = dsac_side if dsac_side != 0 else cur_side
+        regime_factor = float(np.clip(
+            1.0 - 0.25 * regime_chop - 0.20 * regime_whipsaw
+            + (0.10 if dir_ref > 0 else 0.0) * regime_bull
+            + (0.10 if dir_ref < 0 else 0.0) * regime_bear,
+            0.60,
+            1.15,
+        ))
+
+        rev_factor = 0.60 if t_rev >= self.rev_reduce_prob else 1.0
+        chop_factor = 0.80 if (t_dir == 1 and t_str >= self.chop_strength) else 1.0
+        anom_factor = 0.0 if hard_anomaly else (0.50 if soft_anomaly else 1.0)
+
+        agree_factor = 1.0
+
+        # ── 보조 필터 계수 ─────────────────────────────────────────────────
+        # 방향 기준 (진입 또는 현재 보유 방향)
+        _intended_side_fuse = dsac_side if dsac_side != 0 else cur_side
+
+        # 1) 자금 조달 비율: 크라우딩 방향 진입 kelly 축소
+        fund_factor = self.funding_kelly_factor(float(funding_rate), _intended_side_fuse)
+
+        # 2) BTC 상관 필터: ETH-BTC 3봉 방향 불일치 시 축소, 일치 시 소폭 부스트
+        btc_factor = 1.0
+        if self.btc_corr_enable and abs(float(btc_3bar_ret)) >= self.btc_corr_move_th and _intended_side_fuse != 0:
+            _btc_up = float(btc_3bar_ret) > 0
+            _aligned = (_btc_up and _intended_side_fuse > 0) or (not _btc_up and _intended_side_fuse < 0)
+            btc_factor = self.btc_corr_align_boost if _aligned else self.btc_corr_misalign
+
+        # 3) 안티 찹, 4) 저거래량 — _run_cycle에서 계산된 값을 그대로 사용
+        chop_fac = float(np.clip(aux_chop_factor,   0.10, 1.20))
+        vol_fac  = float(np.clip(aux_volume_factor, 0.10, 1.00))
+
+        # 기본 Kelly (DSAC 비중 확대: DSAC 75% + M7 size 25%)
+        kelly_pre = float(np.clip(0.75 * base_kelly + 0.25 * m7_size, 0.0, 1.0))
+        q_full = float(max(1e-6, self.qwidth_full_th))
+        q_half = float(max(q_full + 1e-6, self.qwidth_half_th))
+        if m7_qwidth <= q_full:
+            uncertainty_scale = 1.0
+        elif m7_qwidth >= q_half:
+            uncertainty_scale = 0.5
+        else:
+            rr = (m7_qwidth - q_full) / (q_half - q_full)
+            uncertainty_scale = float(np.clip(1.0 - 0.5 * rr, 0.5, 1.0))
+
+        # 캐스케이드 인수를 별도 계산해 하한선 적용 (hard anomaly 제외)
+        _size_scale = (
+            quality_factor * ret_factor * tail_factor
+            * vol_factor * regime_factor * rev_factor * chop_factor
+            * uncertainty_scale
+        )
+        if anom_factor > 0.0:
+            _size_scale = max(_size_scale, 0.30)  # 과도한 축소 방지
+        unified_kelly = float(np.clip(
+            kelly_pre * _size_scale * anom_factor * agree_factor
+            * fund_factor * btc_factor * chop_fac * vol_fac,
+            0.0,
+            1.0,
+        ))
+
+        # Hysteresis: 진입 기준보다 완화된 "유지 기준"으로 1봉 왕복을 줄임
+        exit_score_thr = float(np.clip(self.min_enter_score - max(0.0, self.exit_score_buffer), 0.02, 0.40))
+        exit_kelly_thr = float(np.clip(self.min_live_kelly * max(0.0, self.exit_kelly_ratio), 0.0, 1.0))
+        live_pnl_frac = 0.0
+        quant_stop_frac = 0.0
+
+        final_side = dsac_side
+        source = "DSAC_BASE"
+        gate_reasons: list[str] = []
+        cb_soft_hold = False
+
+        # 0) Circuit breaker (생존 최우선)
+        if circuit_breaker:
+            # (완화형) 무포지션 + hard anomaly 아님 + DSAC 고신뢰면 제한적 진입 허용
+            can_soft_bypass = (
+                cur_side == 0
+                and (not hard_anomaly)
+                and dsac_side != 0
+                and dsac_score >= (enter_score_thr + 0.08)
+                and unified_kelly >= max(self.min_live_kelly, 0.03)
+            )
+            # (완화형) 보유중 + hard anomaly 아님 + DSAC 중립/동일방향이면 즉시청산 대신 유지
+            can_soft_hold = (
+                cur_side != 0
+                and (not hard_anomaly)
+                and (dsac_side == 0 or dsac_side == cur_side)
+                and dsac_score >= max(exit_score_thr, 0.12)
+                and unified_kelly >= max(exit_kelly_thr, 0.02)
+            )
+            if can_soft_bypass:
+                final_side = dsac_side
+                source = "CB_SOFT_BYPASS_DSAC_ENTER"
+                gate_reasons.append("CB_SOFT_BYPASS")
+            elif can_soft_hold:
+                final_side = cur_side
+                source = "CB_SOFT_HOLD_IN_POS"
+                gate_reasons.append("CB_SOFT_HOLD")
+                cb_soft_hold = True
+            else:
+                final_side = 0
+                source = "CIRCUIT_BREAKER_EXIT" if cur_side != 0 else "CIRCUIT_BREAKER_BLOCK"
+                gate_reasons.extend(cb_tags or ["CIRCUIT_BREAKER"])
+
+        # 1) 무포지션: DSAC 단독 방향 + M7 리스크 게이트
+        elif cur_side == 0:
+            candidate_side = 0
+            candidate_source = "DSAC_HOLD_LOW_SCORE"
+
+            if hard_anomaly:
+                gate_reasons.append("M7_HARD_ANOMALY_BLOCK")
+                candidate_source = "RISK_BLOCK_ANOMALY"
+            elif dsac_side != 0 and dsac_score >= enter_score_thr:
+                candidate_side = dsac_side
+                candidate_source = "DSAC_ENTER"
+            else:
+                gate_reasons.append("LOW_DSAC_SCORE")
+
+            final_side = candidate_side
+            source = candidate_source
+
+            if final_side != 0:
+                if unified_kelly < self.min_live_kelly:
+                    final_side = 0
+                    source = "RISK_HOLD_LOW_KELLY"
+                    gate_reasons.append("LOW_KELLY")
+
+        # 2) 보유중: DSAC + Safety + Hold + Quantile stop
+        else:
+            final_side = cur_side
+            source = "IN_POS_HOLD"
+
+            # DSAC 자체 청산 신호는 우선(단, 리스크 양호하면 soft-hold)
+            if dsac_side == 0:
+                keep_by_fuse = (not hard_anomaly) and (unified_kelly >= exit_kelly_thr)
+                if self.dsac_soft_exit and keep_by_fuse:
+                    final_side = cur_side
+                    source = "RISK_HYST_HOLD"
+                    gate_reasons.append("DSAC_NEUTRAL_HOLD")
+                else:
+                    final_side = 0
+                    source = "DSAC_EXIT"
+            elif dsac_side != cur_side:
+                reverse_strength = abs(raw_action)
+                reverse_exit_thr = float(np.clip(enter_score_thr + self.reverse_exit_margin, 0.20, 0.70))
+                weak_reverse_hold = (
+                    reverse_strength < reverse_exit_thr
+                    and (not hard_anomaly)
+                    and unified_kelly >= max(exit_kelly_thr * 0.7, 0.015)
+                )
+                if weak_reverse_hold:
+                    final_side = cur_side
+                    source = "DSAC_REVERSE_WEAK_HOLD"
+                    gate_reasons.append("DSAC_REVERSE_WEAK_HOLD")
+                else:
+                    final_side = 0
+                    source = "DSAC_REVERSE_EXIT"
+                    gate_reasons.append("DSAC_REVERSE")
+
+            # 이상치 게이트: 옵션 또는 강한 리스크면 청산
+            if final_side != 0 and hard_anomaly and (self.anomaly_force_exit or m7_conf >= 0.75):
+                final_side = 0
+                source = "M7_ANOMALY_EXIT"
+                gate_reasons.append("M7_HARD_ANOMALY_EXIT")
+
+            # Hold 모델 기반 시간 청산
+            if final_side != 0 and m7_target_hold > 0 and self.hold_count >= m7_target_hold:
+                if self.force_hold_exit:
+                    final_side = 0
+                    source = "MTL_HOLD_TIMEOUT"
+                    gate_reasons.append("HOLD_TIMEOUT")
+                elif m7_composite <= self.hold_exit_margin:
+                    final_side = 0
+                    source = "M7_TARGET_HOLD_EXIT"
+                    gate_reasons.append("TARGET_HOLD_EXCEEDED")
+
+            # Quantile 기반 Dynamic SL (q10/q90)
+            if final_side != 0 and self.entry_price > 0 and current_price > 0:
+                if cur_side > 0:
+                    live_pnl_frac = float((current_price - self.entry_price) / self.entry_price)
+                    stop_base = float(min(m7_q10, -1e-6))
+                else:
+                    live_pnl_frac = float((self.entry_price - current_price) / self.entry_price)
+                    stop_base = float(-max(m7_q90, 1e-6))
+
+                stop_mult = float(max(0.10, self.stop_wide_mult if is_highvol_trend else self.stop_tight_mult))
+                quant_stop_frac = float(stop_base * stop_mult)
+                if live_pnl_frac <= quant_stop_frac:
+                    final_side = 0
+                    source = "QTL_DYNAMIC_STOP"
+                    gate_reasons.append("QTL_STOP")
+
+            # 단계적 수익 보호 스탑 (브레이크이븐 포함) — quantile stop과 독립적으로 작동
+            if final_side != 0 and self.entry_price > 0 and current_price > 0:
+                _step_fl = self.step_stop_floor()
+                _cur_lev_gain = live_pnl_frac * max(self.current_leverage, 0.01)
+                if _cur_lev_gain <= _step_fl:
+                    final_side = 0
+                    source = "FUSE_STEP_STOP" if self.peak_equity >= 1.006 else "FUSE_HARD_STOP"
+                    gate_reasons.append("STEP_STOP")
+
+            # 반전 확률 매우 높으면 리스크 축소
+            if final_side != 0 and t_rev >= max(self.rev_reduce_prob, 0.85) and m7_conf >= 0.65:
+                unified_kelly = float(np.clip(unified_kelly * 0.55, 0.0, 1.0))
+                source = "M7_REV_REDUCE"
+
+        final_action = self._action_from_side(final_side)
+        if final_action == 0:
+            unified_kelly = 0.0
+
+        # DSAC가 진입/유지하려 했는데 차단되었는지 표시
+        gate_passed = not (dsac_side != 0 and final_action == 0)
+        trend_veto = gate_reasons[0] if gate_reasons else None
+        gate_log = {}
+        if not gate_passed:
+            gate_log = {
+                "blocked_gate": "risk_guard",
+                "risk_guard": ",".join(gate_reasons[:3]) if gate_reasons else "BLOCK",
+            }
+
+        if cur_side == 0 and final_side != 0:
+            self._open_trade_diag = {
+                "source": source,
+                "dsac_score": dsac_score,
+                "m7_score": m7_score,
+                "entry_side": float(final_side),
+                "entry_kelly": unified_kelly,
+                "m7_quality": m7_quality,
+                "m7_qwidth": m7_qwidth,
+            }
+        elif final_side == 0:
+            # 청산 확정 사이클에서는 outcome 기록 시 재사용하기 위해 유지, 다음 진입 시 갱신됨
+            pass
+
+        self._update_pos(final_action, current_price, unified_kelly)
+        return {
+            "final_action": final_action,
+            "unified_kelly": unified_kelly,
+            "source": source,
+            "rl_score": float(dsac_info.get("score", 0.0)),
+            "meta_score": unified_kelly if final_action != 0 else 0.0,
+            "rl_action": int(dsac_action),
+            "trend_signal": ts,
+            "trend_veto": trend_veto,
+            "arbiter_mode": "DSAC_RISK_GUARD",
+            "gate_passed": gate_passed,
+            "gate_log": gate_log,
+            "fusion_diag": {
+                "direction_source": 1.0,  # 1.0 = DSAC_ONLY
+                "dsac_score": dsac_score,
+                "m7_score": m7_score,
+                "fused_signed": fused_signed,
+                "fused_abs": fused_abs,
+                "m7_size": m7_size,
+                "m7_quality": m7_quality,
+                "m7_q10": m7_q10,
+                "m7_q50": m7_q50,
+                "m7_q90": m7_q90,
+                "m7_qwidth": m7_qwidth,
+                "m7_vol_rank": m7_vol_rank,
+                "m7_gmm_cluster": float(m7_gmm_cluster),
+                "m7_hdb_label": float(m7_hdb_label),
+                "m7_hdb_prob": m7_hdb_prob,
+                "hard_anomaly": 1.0 if hard_anomaly else 0.0,
+                "soft_anomaly": 1.0 if soft_anomaly else 0.0,
+                "cb_iso": 1.0 if cb_iso else 0.0,
+                "cb_vae": 1.0 if cb_vae else 0.0,
+                "cb_hdb": 1.0 if cb_hdb else 0.0,
+                "cb_active": 1.0 if circuit_breaker else 0.0,
+                "cb_soft_hold": 1.0 if cb_soft_hold else 0.0,
+                "hdb_reliable": 1.0 if hdb_reliable else 0.0,
+                "is_lowvol_range": 1.0 if is_lowvol_range else 0.0,
+                "is_highvol_trend": 1.0 if is_highvol_trend else 0.0,
+                "uncertainty_scale": float(uncertainty_scale),
+                "target_hold": float(m7_target_hold),
+                "hold_count": float(self.hold_count),
+                "enter_score_thr": float(enter_score_thr),
+                "dir_prob_thr": float(dir_prob_thr),
+                "quality_thr": float(quality_thr),
+                "exit_score_thr": float(exit_score_thr),
+                "exit_kelly_thr": float(exit_kelly_thr),
+                "reverse_exit_thr": float(np.clip(enter_score_thr + self.reverse_exit_margin, 0.20, 0.70)),
+                "reverse_strength": float(abs(raw_action)),
+                "quant_stop_frac": float(quant_stop_frac),
+                "live_pnl_frac": float(live_pnl_frac),
+                "step_stop_floor": float(self.step_stop_floor()),
+                "p_up": float(p_up),
+                "p_dn": float(p_dn),
+                "p_fl": float(p_fl),
+                "xgb_up": float(xgb_up),
+                "xgb_dn": float(xgb_dn),
+                "fund_factor": float(fund_factor),
+                "btc_factor": float(btc_factor),
+                "chop_fac": float(chop_fac),
+                "vol_fac": float(vol_fac),
+                "btc_3bar_ret": float(btc_3bar_ret),
+                "funding_rate": float(funding_rate),
+            },
+        }
 
     def print_meta_dashboard(self, result: dict, current_price: float = 0.0):
         C = Colors
-        src    = result['source']
-        fa     = result['final_action']
-        arb_mode = result.get('arbiter_mode', 'N/A')
-        gate_passed = bool(result.get('gate_passed', True))
-        gate_log = result.get('gate_log', {}) or {}
-        action_str = {0: f'{C.YELLOW}🟨 관망{C.RESET}',
-                      1: f'{C.GREEN}🟩 LONG{C.RESET}',
-                      2: f'{C.RED}🟥 SHORT{C.RESET}'}.get(fa, '?')
-        rl_a_str = {0:'관망', 1:'LONG', 2:'SHORT'}.get(result['rl_action'], '?')
-
-        unr = self.unrealized_pnl(current_price)
-        unr_color = C.GREEN if unr > 0 else (C.RED if unr < 0 else C.YELLOW)
-
-        fa_arrow = {0: '─', 1: '▲', 2: '▼'}.get(fa, '?')
-        fa_color = {0: C.YELLOW, 1: C.GREEN, 2: C.RED}.get(fa, C.RESET)
-        fa_word  = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}.get(fa, '?')
-        rl_arrow = {0: '─', 1: '▲', 2: '▼'}.get(result['rl_action'], '?')
-        rl_color = {0: C.YELLOW, 1: C.GREEN, 2: C.RED}.get(result['rl_action'], C.RESET)
-        gate_icon = '✓' if gate_passed else '✗'
+        fa = int(result.get("final_action", 0))
+        src = str(result.get("source", "N/A"))
+        gate_passed = bool(result.get("gate_passed", True))
+        gate_icon = "✓" if gate_passed else "✗"
         gate_color = C.GREEN if gate_passed else C.RED
+        fa_arrow = {0: "─", 1: "▲", 2: "▼"}.get(fa, "?")
+        fa_color = {0: C.YELLOW, 1: C.GREEN, 2: C.RED}.get(fa, C.RESET)
+        fa_word = {0: "HOLD", 1: "LONG", 2: "SHORT"}.get(fa, "?")
 
-        # 헤더: 최종 결정 화살표
         print(f" {fa_color}{C.BOLD}{fa_arrow}{fa_arrow}  {fa_word}{C.RESET}"
-              f"  score={result['meta_score']:.3f}  Kelly={result['unified_kelly']:.3f}"
+              f"  score={float(result.get('meta_score', 0.0)):.3f}"
+              f"  Kelly={float(result.get('unified_kelly', 0.0)):.3f}"
               f"  source: {C.CYAN}{src}{C.RESET}")
-        # RL 서브시그널
-        print(f"  {rl_color}{rl_arrow} RL{C.RESET}      {rl_color}{rl_a_str:<6}{C.RESET}"
-              f"  rl_score={result['rl_score']:.3f}")
-        # Gate + Arbiter
-        gate_line = f"  {gate_color}{gate_icon} Gate{C.RESET}    {gate_color}{'PASS' if gate_passed else 'BLOCK'}{C.RESET}  mode={C.CYAN}{arb_mode}{C.RESET}"
-        if not gate_passed:
-            blk_gate = next((g for g in ['gate1', 'gate2', 'gate3', 'gate4', 'gate5', 'gate6']
-                             if str(gate_log.get(g, '')).startswith('BLOCK')), None)
-            if blk_gate is not None:
-                gate_line += f"  {C.RED}차단={blk_gate}{C.RESET}"
-        print(gate_line)
-        # 포지션
+        print(f"  {gate_color}{gate_icon} Gate{C.RESET}    {gate_color}{'PASS' if gate_passed else 'BLOCK'}{C.RESET}"
+              f"  mode={C.CYAN}{result.get('arbiter_mode', 'DSAC_RISK_GUARD')}{C.RESET}")
+        print(
+            f"  {C.CYAN}• RISK{C.RESET}    step_stop={'ON' if self.step_stop_enable else 'OFF'}"
+            f"  trail={self.dsac_only_trail_arm:.3f}/{self.dsac_only_trail_gap:.3f}"
+            f"  max_hold={self.dsac_only_max_hold}"
+            f"  vol_scale={'ON' if self.dsac_only_vol_scale_enable else 'OFF'}"
+            f"  cooldown={self.cooldown_bars_left}"
+        )
+
         if self.pos is not None:
-            pos_color = C.GREEN if self.pos == 'LONG' else C.RED
+            unr = self.unrealized_pnl(current_price)
+            pos_color = C.GREEN if self.pos == "LONG" else C.RED
+            unr_color = C.GREEN if unr > 0 else (C.RED if unr < 0 else C.YELLOW)
             print(f"  {pos_color}● 포지션{C.RESET}  {pos_color}{self.pos}{C.RESET}"
-                  f"  진입가={self.entry_price:.2f}"
-                  f"  미실현={unr_color}{unr:+.2f}%{C.RESET}  보유={self.hold_count}봉")
-        # XGBTrend
-        ts = result.get('trend_signal')
-        tv = result.get('trend_veto')
-        if ts is not None:
-            t_dir = ts['trend_dir']
-            t_arrow = {0: '▼', 1: '─', 2: '▲'}.get(t_dir, '?')
-            t_color = {0: C.RED, 1: C.YELLOW, 2: C.GREEN}.get(t_dir, C.RESET)
-            t_word  = {0: 'DOWN', 1: 'FLAT', 2: 'UP'}.get(t_dir, '?')
-            t_model = str(ts.get('trend_model', 'N/A')) if isinstance(ts, dict) else 'N/A'
-            veto_str = f"  {C.RED}[{tv}]{C.RESET}" if tv else ''
-            probs = ts.get('probs', [])
-            if len(probs) == 3:
-                dn_c = C.RED if probs[0] > 0.4 else C.RESET
-                up_c = C.GREEN if probs[2] > 0.4 else C.RESET
-                probs_str = (f"  {dn_c}DN={probs[0]:.0%}{C.RESET}"
-                             f" FL={C.YELLOW}{probs[1]:.0%}{C.RESET}"
-                             f" {up_c}UP={probs[2]:.0%}{C.RESET}")
-            else:
-                probs_str = ''
-            print(f"  {t_color}{t_arrow} Trend{C.RESET}   {t_color}{t_word:<6}{C.RESET}"
-                  f"  str={ts['strength']:.2f}  rev={ts['rev_prob']:.2f}"
-                  f"{probs_str}  model={t_model}{veto_str}")
-
-
-# ════════════════════════════════════════════════════════════════
-# 3-C. MoE 6-Agent 라우터 — RL_STATE_DIM=35, STACKED=70
-# ════════════════════════════════════════════════════════════════
-class MoELiveRouter:
-    # 1. 클래스 변수 정의 (MODEL_ORDER 에러 해결 핵심)
-    MODEL_ORDER = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
-
-    @staticmethod
-    def _resolve_model_path(model_path: str | None) -> str:
-        candidates = []
-        if model_path:
-            candidates.append(model_path)
-        candidates.extend([
-            'data/ensemble/ckpt/best_rl_agents.pth',
-            'data/ensemble/ckpt/rl_checkpoint.pth',
-        ])
-
-        tried = []
-        seen = set()
-        for p in candidates:
-            if p in seen:
-                continue
-            seen.add(p)
-            tried.append(p)
-            if os.path.exists(p):
-                return p
-
-        tried_msg = ', '.join(tried)
-        raise FileNotFoundError(
-            f"RL 체크포인트 파일이 없습니다. 확인 경로: {tried_msg}. "
-            "먼저 `venv/bin/python ensemble/train_rl_agent.py`로 학습하여 "
-            "`best_rl_agents.pth` 또는 `rl_checkpoint.pth`를 생성하세요."
-        )
-
-    def __init__(self, model_path: str | None = None):
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
-        # 퀀트 시그널 추출기 초기화
-        from strategies.elite_builder import EliteSignals
-        self.elite_extractor = EliteSignals()
-        self.new_elite_engine = NewEliteSignalEngine()
-
-        # v7 상수 및 모델 로드
-        from ensemble.train_rl_agent import (
-            RobustIQN as RL_RobustIQN,
-            GatingRouter7, GatingNet7,
-            STATE_DIM as RL_STATE_DIM,
-            STACKED_STATE_DIM as RL_STACKED_STATE_DIM
-        )
-
-        resolved_model_path = self._resolve_model_path(model_path)
-        logger.info(f"✅ RL 체크포인트 로드 경로: {resolved_model_path}")
-
-        ckpt = torch.load(resolved_model_path, map_location=self.device, weights_only=False)
-        agent_names = ['bull', 'bear', 'chop_long', 'chop_short', 'normal_long', 'normal_short']
-        required_keys = [f'model_{n}' for n in agent_names] + ['gating_net']
-        missing = [k for k in required_keys if k not in ckpt]
-        if missing:
-            raise KeyError(
-                f"체크포인트 키 누락: {missing}. "
-                f"파일이 RL 학습 체크포인트 형식이 아닙니다: {resolved_model_path}"
-            )
-
-        def _load(key):
-            # 훈련 체크포인트 규격(2-Action)에 맞춤
-            m = RL_RobustIQN(RL_STACKED_STATE_DIM, 2, raw_state_dim=RL_STATE_DIM).to(self.device)
-            m.load_state_dict(ckpt[key])
-            m.eval()
-            return m
-
-        # 6-Agent + 1-Flat(GatingNet7) 매핑
-        models_dict = {name: _load(f'model_{name}') for name in agent_names}
-        
-        gating_net = GatingNet7(RL_STACKED_STATE_DIM).to(self.device)
-        gating_net.load_state_dict(ckpt['gating_net'], strict=False)
-        gating_net.eval()
-
-        self.trader = GatingRouter7(models_dict, gating_net, self.device)
-        
-        # 상태 변수
-        self.pos, self.entry_price, self.hold_count = None, 0.0, 0
-        self.peak_equity, self.current_equity = 1.0, 1.0
-        logger.info(f"✅ MoE 사령관 대시보드 인터페이스 연결 완료.")
-
-    def get_signal(self, processed_df: pd.DataFrame, preds, confs, nf_preds: dict):
-        last_row = processed_df.iloc[-1]
-        prev_row = processed_df.iloc[-2]
-        smf_std  = processed_df['smart_money_flow'].std() if 'smart_money_flow' in processed_df.columns else 1.0
-
-        cur_market  = row_to_market_row(last_row)
-        prev_market = row_to_market_row(prev_row)
-        elite_sigs  = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
-
-        # NewEliteSignalEngine: sig_volume_confirm, sig_liquidity_trap, sig_trend_health
-        try:
-            _tail = processed_df.tail(100).copy()
-            self.new_elite_engine.compute(_tail)
-            _last = _tail.iloc[-1]
-            for col in ['sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']:
-                elite_sigs[col] = float(_last.get(col, 0.0))
-        except Exception as _e:
-            logger.warning(f"NewEliteSignalEngine 계산 실패: {_e}")
-            for col in ['sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']:
-                elite_sigs.setdefault(col, 0.0)
-
-        features = {}
-
-        # RL_STATE_PRED: ['pred_tide','pred_ridge','pred_patchtst','pred_timesfm','pred_chronos','pred_ttm','pred_mdjd']
-        pred_mdjd, conf_mdjd = _compute_mdjd(last_row, processed_df)
-        for col in RL_STATE_PRED:
-            if col == 'pred_mdjd':
-                features[col] = pred_mdjd
-            else:
-                features[col] = float(nf_preds.get(col, 0.0))
-        # RL_STATE_CONF: ['conf_timesfm','conf_chronos','conf_ttm','conf_patchtst','conf_tide','conf_mdjd','conf_ridge']
-        for col in RL_STATE_CONF:
-            if col == 'conf_mdjd':
-                features[col] = conf_mdjd
-            else:
-                features[col] = float(nf_preds.get(col, 0.5))
-
-        # RL_STATE_ELITE: ['sig_ai_squeeze','sig_whale','sig_oi_divergence','sig_volume_confirm','sig_liquidity_trap','sig_trend_health']
-        for col in RL_STATE_ELITE:
-            features[col] = float(elite_sigs.get(col, 0.0))
-
-        # RL_STATE_ALPHA: ['hour_cos','garch_vol_z','breakout_strength','fvg_dist','oi_change_rate','cvp_volume_imbalance']
-        for col in RL_STATE_ALPHA:
-            features[col] = float(last_row.get(col, 0.0))
-
-        # Regime
-        regime = _compute_regime(processed_df)
-        features.update(regime)
-
-        # RL_STATE_SYNTH: ['ofti', 'kel']
-        for col in RL_STATE_SYNTH:
-            features[col] = float(last_row.get(col, 0.0))
-
-        features['close'] = float(last_row['close'])
-
-        unr = 0.0
-        if self.pos is not None:
-            cp = float(last_row['close'])
-            unr = (cp - self.entry_price) / self.entry_price if self.pos == 'LONG' else (self.entry_price - cp) / self.entry_price
-            self.current_equity = 1.0 + unr
-            if self.current_equity > self.peak_equity: self.peak_equity = self.current_equity
-        else:
-            self.current_equity = self.peak_equity = 1.0
-
-        pos_dict = {
-            'type': self.pos, 'entry_price': self.entry_price,
-            # GatingRouter7._state_tensor과 동일한 정규화 — _build_state 기준
-            'unrealized': float(np.tanh(unr / 0.02)),
-            'mdd': float(np.clip(min((self.current_equity / self.peak_equity) - 1.0, 0.0) / 0.05, -1.0, 1.0)),
-            'hold_norm': min(self.hold_count / 144.0, 1.0)  # TradingEnv._build_state 기준 /144
-        }
-
-        final_action, leverage_rate, info = self.trader.decide(features, pos_dict)
-
-        return final_action, info, elite_sigs, regime, features, pos_dict
-
-    def print_dashboard(self, current_price, preds, confs, final_action, info, regime, elite_sigs, timestamp,
-                        llm_answer: str | None = None, llm_regime_name: str | None = None, llm_time_kst=None):
-        pnl_pct = (self.current_equity - 1.0) * 100
-        regime_name  = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
-        active_agent = info.get('agent', 'NONE')
-        kelly        = info.get('kelly', 0.0)
-        long_edge    = info.get('long_edge', 0.0)
-        short_edge   = info.get('short_edge', 0.0)
-
-        def format_edge(edge):
-            if edge > 0.01:  return f"{Colors.GREEN}{edge:+.3f} (진입희망){Colors.RESET}"
-            elif edge < -0.01: return f"{Colors.RED}{edge:+.3f} (진입거부){Colors.RESET}"
-            else:              return f"{Colors.YELLOW}{edge:+.3f} (완전중립){Colors.RESET}"
-
-        _is_holding = (self.pos is not None)
-        action_str = {
-            0: f'{Colors.YELLOW}🟨 관망 / 청산 (HOLD / CLOSE){Colors.RESET}',
-            1: f'{Colors.GREEN}🟩 {"롱 유지 (HOLDING)" if _is_holding else "롱 진입 (LONG)"}{Colors.RESET}',
-            2: f'{Colors.RED}🟥 {"숏 유지 (HOLDING)" if _is_holding else "숏 진입 (SHORT)"}{Colors.RESET}',
-        }.get(final_action, '?')
-
-        pos_str = {'LONG': f'{Colors.GREEN}🟩 LONG 보유{Colors.RESET}',
-                   'SHORT': f'{Colors.RED}🟥 SHORT 보유{Colors.RESET}',
-                   None: f'{Colors.YELLOW}🟨 무포지션{Colors.RESET}'}.get(self.pos, '?')
-
-        print("\n" + Colors.BOLD + "╔════════════════════ [ 6-Agent MoE 사령관 대시보드 ] ═════════════════════╗" + Colors.RESET)
-        print(f" ⏱️ 타임: {timestamp.strftime('%Y-%m-%d %H:%M')} KST | 💰 ETH: ${current_price:,.2f}")
-
-        print("-" * 68)
-        print(f" {Colors.CYAN}[ 🧠 6대 파운데이션 AI 앙상블 예측 ]{Colors.RESET}")
-        for i, model_name in enumerate(self.MODEL_ORDER):
-            pred_dir = f"{Colors.GREEN}▲{Colors.RESET}" if preds[i] > 0 else f"{Colors.RED}▼{Colors.RESET}" if preds[i] < 0 else f"{Colors.YELLOW}-{Colors.RESET}"
-            print(f"  • {model_name:<10} : {pred_dir:<5} {confs[i]:.1%}")
-
-        print("-" * 68)
-        print(f" {Colors.YELLOW}[ ⚔️ 13대 엘리트 퀀트 시그널 분석 ]{Colors.RESET}")
-
-        def _print_sig_row(k, v, in_rl: bool):
-            base_key = k.replace('sig_', '')
-            star = f"{Colors.CYAN}★{Colors.RESET}" if in_rl else " "
-            interp_tuple = SIG_INTERPRETATIONS.get(base_key, ('LONG', 'SHORT', 'NONE'))
-            if v > 0:
-                icon = f"{Colors.GREEN}▲{Colors.RESET}"; mc = Colors.GREEN; msg = interp_tuple[0]
-            elif v < 0:
-                icon = f"{Colors.RED}▼{Colors.RESET}";  mc = Colors.RED;   msg = interp_tuple[1]
-            else:
-                icon = f"{Colors.YELLOW}─{Colors.RESET}"; mc = Colors.YELLOW; msg = interp_tuple[2]
-            print(f" {star}{icon}  {base_key:<18}  (강도: {v:+.2f})")
-            print(f"      {mc}{msg}{Colors.RESET}")
-
-        rl_sigs    = sorted([(k, v) for k, v in elite_sigs.items() if k.replace('sig_', '') in _RL_ELITE_KEYS],
-                            key=lambda x: abs(x[1]), reverse=True)
-        other_sigs = sorted([(k, v) for k, v in elite_sigs.items() if k.replace('sig_', '') not in _RL_ELITE_KEYS],
-                            key=lambda x: abs(x[1]), reverse=True)
-        for k, v in rl_sigs:
-            _print_sig_row(k, v, in_rl=True)
-        if other_sigs:
-            print(f"  {'─'*64}")
-        for k, v in other_sigs:
-            _print_sig_row(k, v, in_rl=False)
-
-        print("-" * 68)
-        print(f" {Colors.CYAN}[ 🤖 MoE 6-Agent + GatingNet7 독립 판단 ]{Colors.RESET}")
-        if self.pos is not None:
-            pnl_color = Colors.GREEN if pnl_pct > 0 else Colors.RED
-            print(f" ⏳ 보유 캔들: {self.hold_count:<4} | 📈 미실현 수익: {pnl_color}{pnl_pct:+.2f}%{Colors.RESET}")
-        print(f" 🌍 시장 레짐: {regime_name:<10} | 📊 현재 포지션: {pos_str}")
-        print(f" ⚖️ [엣지 비교] {Colors.GREEN}롱(L): {long_edge:+.3f}{Colors.RESET} vs {Colors.RED}숏(S): {short_edge:+.3f}{Colors.RESET}  Kelly={kelly:.3f}")
-        hmm_state = info.get('hmm_state')
-        if hmm_state:
-            hmm_probs = info.get('hmm_probs', [])
-            hmm_color = {
-                'bull-trend': Colors.GREEN, 'bear-trend': Colors.RED,
-                'hv-chop': Colors.YELLOW, 'lv-range': Colors.CYAN,
-            }.get(hmm_state, Colors.RESET)
-            probs_str = ' '.join(f'{p:.2f}' for p in hmm_probs) if hmm_probs else ''
-            print(f" 🔮 HMM 레짐: {hmm_color}{hmm_state}{Colors.RESET}  [{probs_str}]")
-        print(f" 🤖 담당 에이전트: {Colors.CYAN}{active_agent}{Colors.RESET}")
-        print(f" 🎯 최종 결단: {action_str}")
-
-        # LLM 분석 출력
-        if llm_answer:
-            print("-" * 68)
-            _rn = llm_regime_name or regime_name
-            _t  = llm_time_kst or timestamp
-            _print_llm_section(llm_answer, _rn, _t)
-
-        print(Colors.BOLD + "╚════════════════════════════════════════════════════════════════════════╝" + Colors.RESET)
+                  f"  진입가={self.entry_price:.2f}  미실현={unr_color}{unr:+.2f}%{C.RESET}  보유={self.hold_count}봉")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1947,126 +2043,298 @@ class MoELiveRouter:
 async def main(use_local=False):
     fetcher      = BinanceLiveFetcher(limit=2500)
     fe_engine    = FeatureEngineer()
-    ensemble     = EnsemblePredictor()
-    nf_predictor = NFStatePredictor()
-    llm_analyzer = LLMAnalyzer(fetcher.exchange, symbol='ETHUSDT') if LLM_ENABLED else None
-    if LLM_ENABLED:
-        logger.info("🤖 LLM 모드: ON")
-    else:
-        logger.info("🤖 LLM 모드: OFF (LLM_ENABLED=0 또는 DISABLE_LLM=1)")
+    ensemble     = EnsemblePredictor() if ENSEMBLE_PREDICTOR_ENABLED else None
+    live_hmm: OnlineHMMDetector | None = None
+    live_hmm_steps = 0
+    logger.info("🧱 부가 기능: ensemble=%s", "ON" if ENSEMBLE_PREDICTOR_ENABLED else "OFF")
 
-    try:
-        bot = MoELiveRouter()
-    except Exception as e:
-        logger.error(f"❌ MoE 라우터 초기화 실패: {e}")
-        return
-    sac_router = SACLiveRouter()
-    logger.info(f"🤖 SAC 참고 신호: {'ON' if sac_router.available else 'OFF'}")
-
-    # ── MetaRouter 초기화 ──────────────────────────────────────
-    meta_router = MetaRouter()
-    # 직전 포지션 청산 시점 추적용 (PnL 피드백을 위해)
+    # ── DSAC + SevenModel(M7) 융합 라우터 초기화 ─────────────────────
+    meta_router = DSACTrendRouter()
+    meta_router.online_adapt = False
+    logger.info("🧭 실행 모드: DSAC_ONLY (최소 리스크 레이어만 유지)")
     _prev_meta_pos: str | None = None
 
-    def _sync_bot_with_meta():
-        """RL 입력용 포지션 상태를 MetaRouter 단일 소스로 동기화."""
-        bot.pos         = meta_router.pos
-        bot.entry_price = meta_router.entry_price
-        bot.hold_count  = meta_router.hold_count
-        bot.current_equity = meta_router.cur_equity
-        bot.peak_equity    = meta_router.peak_equity
+    def _sync_dsac_with_meta():
+        dsac_router.pos = meta_router.pos
+        dsac_router.entry_price = meta_router.entry_price
+        dsac_router.hold_count = meta_router.hold_count
+        dsac_router.current_leverage = meta_router.current_leverage
+        dsac_router.current_equity = meta_router.cur_equity
+        dsac_router.peak_equity = meta_router.peak_equity
 
-    # ── 지도/비지도 허브 초기화 (trading_bot 본문 길이 축소) ──────────
-    trend_hub = SupervisedTrendHub(
-        xgb_meta_path="data/trend_xgb/trend_xgb.json",
-        multitarget_meta_path="data/ensemble/supervised/multi_target_lgbm.json",
-        blend_weights=(0.5, 0.5),
-    )
+    async def _fetch_exchange_position():
+        try:
+            if hasattr(fetcher.exchange, "fetch_positions"):
+                positions = await fetcher.exchange.fetch_positions([fetcher.symbol])
+                for p in positions or []:
+                    contracts = float(p.get("contracts", p.get("positionAmt", 0.0)) or 0.0)
+                    if abs(contracts) <= 1e-12:
+                        continue
+                    side = str(p.get("side", "")).upper()
+                    if side not in {"LONG", "SHORT"}:
+                        side = "LONG" if contracts > 0 else "SHORT"
+                    entry = float(p.get("entryPrice", p.get("entry_price", 0.0)) or 0.0)
+                    lev = float(p.get("leverage", 0.0) or 0.0)
+                    return {"type": side, "entry_price": entry, "leverage": lev}
+        except Exception as e:
+            logger.debug("exchange.fetch_positions 복원 실패: %s", e)
+        try:
+            raw = await fetcher.exchange.fapiPrivateV2GetPositionRisk()
+            for row in raw or []:
+                if str(row.get("symbol", "")).upper() != fetcher.symbol.upper():
+                    continue
+                amt = float(row.get("positionAmt", 0.0) or 0.0)
+                if abs(amt) <= 1e-12:
+                    continue
+                side = "LONG" if amt > 0 else "SHORT"
+                entry = float(row.get("entryPrice", 0.0) or 0.0)
+                lev = float(row.get("leverage", 0.0) or 0.0)
+                return {"type": side, "entry_price": entry, "leverage": lev}
+        except Exception as e:
+            logger.debug("positionRisk 복원 실패: %s", e)
+        return None
+
+    def _bars_stale(eth_df: pd.DataFrame) -> bool:
+        if eth_df is None or len(eth_df) == 0:
+            return True
+        last_ts = pd.Timestamp(eth_df['timestamp'].iloc[-1])
+        if last_ts.tzinfo is not None:
+            last_ts = last_ts.tz_localize(None)
+        now_utc = pd.Timestamp.utcnow().tz_localize(None)
+        age = now_utc - last_ts
+        if age > pd.Timedelta(minutes=15):
+            logger.warning("⚠️ 최신 봉 지연 감지: last=%s age=%s", last_ts, age)
+            return True
+        return False
+
+    # ── 7-모델 통합 추세 추론기 초기화 ───────────────────────────────
+    trend_hub = SevenModelEnsemble()
     unsup_hub = UnsupervisedRegimeHub()
-    logger.info("🤖 SupervisedTrendHub: %s", trend_hub.status())
+    _m7_avail = sum([
+        int(trend_hub.trend_xgb.available),
+        int(trend_hub.multi_target.available),
+        int(trend_hub.quantile.available),
+        int(trend_hub.gmm.available),
+        int(trend_hub.hdbscan.available),
+        int(trend_hub.isolation.available),
+        int(trend_hub.vae.available),
+    ])
+    logger.info("🤖 SevenModelEnsemble 로드: %d/7 모델 사용 가능", _m7_avail)
     logger.info("🧩 %s", unsup_hub.summary_line())
 
-    # ── Polymarket 크라우드 확률 수집기 ────────────────────────
-    poly_fetcher = PolymarketFetcher()
     # ── 텔레그램 알림 ──────────────────────────────────────────
     tg_notifier = TelegramNotifier()
     logger.info("📨 텔레그램 알림 조건: 포지션 변화(ENTER/EXIT/FLIP) 발생 시에만 전송")
     logger.info(
         f"📺 출력 모드: {'COMPACT (요약패널 전용)' if COMPACT_MODE else 'STANDARD (대시보드 + 요약패널)'}"
-        f" | LLM: {'ON' if LLM_ENABLED else 'OFF'}"
+        f" | EXEC: DSAC_ONLY"
     )
 
     async def _run_cycle(processed_df, eth_buffer):
-        """한 사이클: 에이전트 판단 + MetaRouter 통합 + Polymarket + LLM fire-and-forget."""
+        """한 사이클: DSAC_ONLY 판단 + 집행."""
         nonlocal _prev_meta_pos
+        nonlocal live_hmm_steps
 
-        preds, confs = await ensemble.predict_all_async(processed_df)
-        nf_preds     = nf_predictor.predict(processed_df)
-
-        # RL 라우터 입력 포지션은 MetaRouter 상태를 단일 소스로 사용
-        _sync_bot_with_meta()
-        signal_out = bot.get_signal(processed_df, preds, confs, nf_preds)
-        if isinstance(signal_out, (tuple, list)) and len(signal_out) >= 6:
-            rl_action, info, elite_sigs, regime, rl_features, rl_pos_dict = signal_out[:6]
-        else:
-            rl_action, info, elite_sigs, regime = signal_out  # backward-compat
-            rl_features, rl_pos_dict = None, None
-
-        sac_info = {
-            'available': bool(getattr(sac_router, 'available', False)),
-            'action': 0,
-            'raw_action': 0.0,
-            'leverage': 0.0,
-            'score': 0.0,
-        }
-        if rl_features is not None and rl_pos_dict is not None:
-            sac_action, sac_lev, sac_pred_info = sac_router.decide(rl_features, rl_pos_dict)
-            if isinstance(sac_pred_info, dict):
-                sac_info.update(sac_pred_info)
-            sac_info['action'] = int(sac_action)
-            sac_info['leverage'] = float(sac_lev)
-            sac_info['available'] = bool(getattr(sac_router, 'available', False))
+        meta_router.decrement_cooldown()
+        if ENSEMBLE_PREDICTOR_ENABLED and ensemble is not None:
+            await ensemble.predict_all_async(processed_df)
+        nf_preds = {}
 
         current_time_kst = eth_buffer['timestamp'].iloc[-1] + pd.Timedelta(hours=9)
         current_price    = float(eth_buffer['close'].iloc[-1])
-        regime_name      = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
+        regime_name      = 'UNKNOWN'
 
-        # ── XGBTrendBrain 피처 보강: NF pred/conf 주입 ───────────
-        # SyntheticAlpha/VolatilityModel/NewElite는 FeatureEngineer에서 이미 계산됨
-        # 외부 모델 예측값(pred_*/conf_*)만 여기서 추가 주입
-        _last_idx = processed_df.index[-1]
-        for _col, _val in nf_preds.items():   # pred_timesfm, conf_chronos 등 12개
-            processed_df.loc[_last_idx, _col] = float(_val)
-        _pm, _cm = _compute_mdjd(processed_df.iloc[-1], processed_df)
-        processed_df.loc[_last_idx, 'pred_mdjd'] = _pm
-        processed_df.loc[_last_idx, 'conf_mdjd'] = _cm
-
-        # ── TrendContextBrain 4h 추세 추론 ───────────────────────
+        # ── SevenModelEnsemble(M7) 메타 신호 추론 ────────────────────
+        m7_last = None
         trend_signal = None
-        if trend_hub.available:
-            try:
-                # 학습 피처가 포함된 processed_df를 넣어 추세 필터 신뢰도 확보
-                trend_signal = trend_hub.predict_from_df(processed_df)
-            except Exception as e:
-                logger.warning(f"SupervisedTrendHub 추론 실패: {e}")
+        try:
+            m7_last = trend_hub.predict_last(processed_df)
+            trend_signal = _trend_signal_from_m7(m7_last)
+        except Exception as e:
+            logger.warning(f"SevenModelEnsemble 추론 실패: {e}")
 
-        # ── MetaRouter 신호 융합 ──────────────────────────────
-        prev_meta_pos = _prev_meta_pos
-        meta_result = meta_router.fuse(
-            rl_action     = rl_action,
-            rl_info       = info,
-            regime        = regime,
-            current_price = current_price,
-            trend_signal  = trend_signal,
-            garch_vol_z   = float(processed_df.iloc[-1].get('garch_vol_z', 0.0)),
+        # DSAC 입력 생성/추론 (m7_* 주입 버전)
+        _sync_dsac_with_meta()
+        dsac_action, dsac_lev, info, elite_sigs, regime = dsac_router.decide(
+            processed_df,
+            nf_preds,
+            m7_signal=trend_signal,
         )
+        if live_hmm is not None:
+            live_hmm_steps += 1
+            if live_hmm_steps % 24 == 0:
+                try:
+                    live_hmm.update_online(n_iter=3)
+                    logger.info("🧠 Live HMM 온라인 업데이트 완료")
+                except Exception as e:
+                    logger.debug("Live HMM 온라인 업데이트 실패: %s", e)
+        info.setdefault("agent", "DSAC")
+        info.setdefault("kelly", float(dsac_lev))
+        info.setdefault("score", float(abs(info.get("raw_action", 0.0))))
+        regime_name = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
+
+        # ── 보조 필터 계수 계산 ─────────────────────────────────────────
+
+        # BTC 3봉 수익률 (ETH-BTC 상관 필터용)
+        _btc_3bar_ret = 0.0
+        if 'close_btc' in processed_df.columns and len(processed_df) >= 4:
+            _btc_arr = processed_df['close_btc'].values
+            _btc_base = float(_btc_arr[-4]) if abs(float(_btc_arr[-4])) > 1e-8 else 1.0
+            _btc_3bar_ret = float((_btc_arr[-1] - _btc_base) / _btc_base)
+
+        # 안티 찹: 최근 N봉 방향 전환 횟수
+        _aux_chop_factor = 1.0
+        if meta_router.chop_filter_enable and len(processed_df) >= meta_router.chop_window + 2:
+            _cls = processed_df['close'].values[-(meta_router.chop_window + 2):]
+            _dirs = np.sign(np.diff(_cls.astype(np.float64)))
+            _nonzero = _dirs[_dirs != 0]
+            if len(_nonzero) >= 2:
+                _turns = int(np.sum(np.diff(_nonzero) != 0))
+                if _turns >= meta_router.chop_turns_max:
+                    _aux_chop_factor = float(meta_router.chop_kelly_scale)
+
+        # 거래량 확인
+        _aux_volume_factor = 1.0
+        if meta_router.volume_confirm_enable and 'volume' in processed_df.columns:
+            _vols = processed_df['volume'].values
+            if len(_vols) >= 21:
+                _vol_mean = float(np.mean(_vols[-21:-1]))
+                _vol_cur  = float(_vols[-1])
+                if _vol_mean > 1e-8 and (_vol_cur / _vol_mean) < meta_router.volume_min_ratio:
+                    _aux_volume_factor = float(meta_router.volume_low_kelly)
+        _iso_anom = bool(float((trend_signal or {}).get("m7_iso_anom", 0.0)) >= 0.5)
+        _vae_anom = bool(float((trend_signal or {}).get("m7_vae_anom", 0.0)) >= 0.5)
+        _vae_err = float((trend_signal or {}).get("m7_vae_error", 0.0) or 0.0)
+        _vae_th = float((trend_signal or {}).get("m7_vae_threshold", 0.0) or 0.0)
+        _vae_ratio = (_vae_err / max(_vae_th, 1e-8)) if _vae_th > 1e-8 else (1.0 if _vae_anom else 0.0)
+
+        # ── DSAC + M7 다요소 융합 (방향/사이즈/레짐/이상치/보유시간) ──
+        prev_meta_pos = _prev_meta_pos
+        if DSAC_ONLY_MODE:
+            _garch_vol_z = float(processed_df.iloc[-1].get('garch_vol_z', 0.0))
+            _kelly = float(np.clip(dsac_lev * meta_router.vol_scale(_garch_vol_z, 0.0), 0.0, 1.0))
+            _fa = int(dsac_action)
+            _dsac_only_source = "DSAC_ONLY"
+            _raw_action = float(info.get("raw_action", 0.0))
+            _trend_exit_score = 0.0
+            _live_unr = 0.0
+            if meta_router.pos is not None and meta_router.entry_price > 0:
+                _live_unr = float(meta_router._net_pnl_frac(current_price))
+                _reverse_action = 2 if (_raw_action <= -meta_router.dsac_only_reverse_min) else (1 if (_raw_action >= meta_router.dsac_only_reverse_min) else 0)
+                _opp_reverse = (
+                    (meta_router.pos == "LONG" and _reverse_action == 2)
+                    or (meta_router.pos == "SHORT" and _reverse_action == 1)
+                )
+                _trend_exit, _trend_exit_score, _trend_exit_reason = meta_router.update_trend_mismatch(processed_df, trend_signal)
+                # 단계별 수익 보호 스탑 (브레이크이븐 포함) — 기존 하드스탑 대체
+                _step_floor   = meta_router.step_stop_floor()
+                _cur_lev_gain = _live_unr
+                if _cur_lev_gain <= _step_floor:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = ("DSAC_STEP_STOP" if meta_router.peak_equity >= 1.006
+                                         else "DSAC_ONLY_HARD_STOP")
+                elif meta_router.should_trailing_stop():
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_TRAILING_STOP"
+                elif meta_router.hold_count >= max(1, meta_router.dsac_only_max_hold):
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_MAX_HOLD"
+                elif _opp_reverse:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_REVERSE_EXIT"
+                elif _trend_exit:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = _trend_exit_reason
+            else:
+                meta_router.trend_mismatch_streak = 0
+            if meta_router.cooldown_bars_left > 0 and meta_router.pos is None and _fa != 0:
+                _fa = 0
+                _kelly = 0.0
+                _dsac_only_source = "DSAC_ONLY_COOLDOWN"
+            # 신규 진입 시에는 SIGNAL과 중기추세 정렬을 요구
+            if _fa != 0 and meta_router.pos is None:
+                _signal_side = 1 if _fa == 1 else -1
+                _trend_dir = int((trend_signal or {}).get("trend_dir", 1))
+                _trend_side = 1 if _trend_dir == 2 else (-1 if _trend_dir == 0 else 0)
+                if _trend_side == 0:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_TREND_FLAT_BLOCK"
+                elif _signal_side != _trend_side:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_TREND_MISMATCH_BLOCK"
+            # 신규 진입 시 보조 필터(VAE/BTC/안티찹/거래량)만 적용
+            if _fa != 0 and meta_router.pos is None:
+                if _iso_anom and _vae_anom and _vae_ratio >= meta_router.dsac_only_vae_block_ratio:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_ONLY_ISO_VAE_BLOCK"
+                _btc_fac  = 1.0
+                if meta_router.btc_corr_enable and abs(_btc_3bar_ret) >= meta_router.btc_corr_move_th:
+                    _intended_side_dsac = 1 if _fa == 1 else -1
+                    _btc_up  = _btc_3bar_ret > 0
+                    _aligned = (_btc_up and _intended_side_dsac > 0) or (not _btc_up and _intended_side_dsac < 0)
+                    _btc_fac = meta_router.btc_corr_align_boost if _aligned else meta_router.btc_corr_misalign
+                if _fa != 0:
+                    _kelly = float(np.clip(
+                        _kelly * _btc_fac * _aux_chop_factor * _aux_volume_factor,
+                        0.0, 1.0,
+                    ))
+            if _fa == 0:
+                _kelly = 0.0
+            meta_router._update_pos(_fa, current_price, _kelly)
+            _score = float(np.clip(max(abs(float(info.get("raw_action", 0.0))), abs(float(info.get("score", 0.0))), _kelly), 0.0, 1.0))
+            _side = 1 if _fa == 1 else (-1 if _fa == 2 else 0)
+            meta_result = {
+                "final_action": _fa,
+                "unified_kelly": _kelly,
+                "source": _dsac_only_source,
+                "rl_score": float(info.get("score", 0.0)),
+                "meta_score": _kelly if _fa != 0 else 0.0,
+                "rl_action": _fa,
+                "trend_signal": trend_signal,
+                "trend_exit_score": float(_trend_exit_score),
+                "trend_mismatch_streak": int(meta_router.trend_mismatch_streak),
+                "trend_veto": None,
+                "arbiter_mode": "DSAC_ONLY",
+                "gate_passed": True,
+                "gate_log": {},
+                "fusion_diag": {
+                    "direction_source": 1.0,
+                    "dsac_score": _score,
+                    "m7_score": 0.0,
+                    "fused_signed": float(_side * _score),
+                    "fused_abs": _score,
+                    "cb_active": 0.0,
+                    "is_lowvol_range": 0.0,
+                    "is_highvol_trend": 0.0,
+                    "uncertainty_scale": 1.0,
+                },
+            }
+        rl_action = int(dsac_action)
+        trade_pnl_pct: float | None = None
 
         # 직전 사이클에 포지션이 있었다가 이번에 청산됐으면 PnL 피드백
         if _prev_meta_pos is not None and meta_router.pos is None:
-            meta_router.record_outcome(meta_router.cur_equity - 1.0)
+            realized = meta_router.last_realized_pnl
+            if realized is None:
+                realized = float(meta_router.cur_equity - 1.0)
+            trade_pnl_pct = float(realized) * 100.0
+            meta_router.record_outcome(float(realized))
+            meta_router.append_trade_history(current_time_kst, float(realized))
 
         # ── 텔레그램 알림: 포지션이 바뀐 경우만 (ENTER / EXIT / FLIP) ──
         _new_pos = meta_router.pos
+        if _prev_meta_pos is None and _new_pos is not None and trade_pnl_pct is None:
+            trade_pnl_pct = 0.0
+        if trade_pnl_pct is not None:
+            meta_result["trade_pnl_pct"] = float(trade_pnl_pct)
         if prev_meta_pos != _new_pos:
             if prev_meta_pos is None and _new_pos:
                 _tg_code = f"ENTER_{_new_pos}"
@@ -2084,21 +2352,6 @@ async def main(use_local=False):
 
         _prev_meta_pos = _new_pos
 
-        # 출력 직전에도 동기화해 대시보드 포지션 표기를 일치시킴
-        _sync_bot_with_meta()
-
-        # ── Polymarket 크라우드 확률 조회 (비동기, 5초 타임아웃) ─
-        try:
-            poly_data = await asyncio.wait_for(poly_fetcher.fetch(), timeout=5.0)
-        except asyncio.TimeoutError:
-            poly_data = {'btc': None, 'eth': None, 'ok': False}
-        except Exception as e:
-            logger.debug(f"Polymarket 조회 예외: {e}")
-            poly_data = {'btc': None, 'eth': None, 'ok': False}
-
-        # 이전 사이클 LLM 결과 수거 (요약 패널 전용)
-        prev_answer = llm_analyzer.collect() if llm_analyzer is not None else LLM_DISABLED_SENTINEL
-
         # 요약 결과 먼저 출력 (핵심 의사결정 선노출)
         _print_final_trade_summary(
             timestamp_kst=current_time_kst,
@@ -2107,24 +2360,14 @@ async def main(use_local=False):
             rl_action=rl_action,
             rl_info=info,
             meta_result=meta_result,
-            prev_llm_answer=prev_answer,
             prev_pos=prev_meta_pos,
             cur_pos=meta_router.pos,
-            poly_data=poly_data,
-            sac_info=sac_info,
         )
 
         # 출력: COMPACT_MODE면 요약 패널만, 아니면 설명(상세) 로그를 아래에 출력
         if not COMPACT_MODE:
-            bot.print_dashboard(
-                current_price, preds, confs, rl_action, info, regime, elite_sigs, current_time_kst,
-                llm_answer=None,
-            )
             meta_router.print_meta_dashboard(meta_result, current_price)
-
-        # 이번 사이클 LLM 분석 시작 (백그라운드, 블로킹 없음)
-        if llm_analyzer is not None:
-            llm_analyzer.fire(processed_df, current_price, elite_sigs, regime_name)
+        logger.info("📊 %s", meta_router.performance_summary(current_time_kst))
 
     try:
         if use_local:
@@ -2134,9 +2377,28 @@ async def main(use_local=False):
             eth_buffer, btc_buffer = await fetcher.fetch_initial_data()
 
         if eth_buffer is None: return
+        try:
+            processed_boot = fe_engine.process(eth_buffer, btc_buffer)
+            live_hmm = OnlineHMMDetector()
+            live_hmm.fit(processed_boot, n_iter=15)
+            logger.info("🧠 Live HMM 초기화 완료")
+        except Exception as e:
+            live_hmm = None
+            logger.warning("⚠️ Live HMM 초기화 실패, fallback regime 사용: %s", e)
+        try:
+            dsac_router = DSACSignalRouter(hmm_detector=live_hmm)
+        except Exception as e:
+            logger.error(f"❌ DSAC 라우터 초기화 실패: {e}")
+            return
+        if not use_local:
+            restored = await _fetch_exchange_position()
+            if restored:
+                meta_router.reconcile_external_position(restored.get("type"), float(restored.get("entry_price", 0.0)), float(restored.get("leverage", 0.0)))
+        if _bars_stale(eth_buffer):
+            logger.warning("⚠️ stale candle 상태로 첫 사이클 스킵")
+            return
 
-        processed_df = fe_engine.process(eth_buffer, btc_buffer)
-        await _run_cycle(processed_df, eth_buffer)
+        await _run_cycle(processed_boot, eth_buffer)
 
         first_run = True
         while not use_local:
@@ -2153,6 +2415,9 @@ async def main(use_local=False):
                 new_eth, new_btc = await fetcher.fetch_latest_patch()
                 eth_buffer = pd.concat([eth_buffer, new_eth]).drop_duplicates('timestamp').tail(2500)
                 btc_buffer = pd.concat([btc_buffer, new_btc]).drop_duplicates('timestamp').tail(2500)
+                if _bars_stale(eth_buffer):
+                    logger.warning("⚠️ 데이터 지연으로 이번 사이클 판단 스킵")
+                    continue
             else:
                 logger.info(f"{Colors.GREEN}🚀 봇 실시간 롤링 가동 시작!{Colors.RESET}")
                 first_run = False

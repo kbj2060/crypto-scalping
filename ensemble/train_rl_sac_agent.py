@@ -25,7 +25,7 @@ action 의미:
         GatingRouter7 → SACRouter (라이브 추론용)
 """
 
-import os, sys, logging, random, copy, gc
+import os, sys, logging, random, copy, gc, argparse
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -320,7 +320,9 @@ class SACTradingEnv:
         # 에피소드 종료 시 강제 청산 — reward에 청산 PnL 반영
         if done and self.pos is not None:
             base_balance = self.balance
-            ep_end_price = self._close_np[min(self.current_step, len(self._close_np) - 1)]
+            # 일반 청산과 동일하게 다음봉 open 기준 체결 (close 사용 시 look-ahead 불일치)
+            ep_fill_step = min(self.current_step, len(self._open_np) - 1)
+            ep_end_price = float(self._open_np[ep_fill_step])
             if self.pos == 'LONG':
                 ep_realized = (ep_end_price * (1 - self.slip) - self.entry_price) / self.entry_price
             else:
@@ -751,13 +753,12 @@ class SACRouter:
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. 학습 루프
 # ═══════════════════════════════════════════════════════════════════════════
-def train():
-    CSV_PATH = 'data/rl_training_data_full.csv'
-    if not os.path.exists(CSV_PATH):
+def train(csv_path: str = 'data/rl_training_data_full.csv', train_ratio: float = 0.8, episodes: int = 1000):
+    if not os.path.exists(csv_path):
         return logger.error("데이터가 없습니다. --mode generate_csv 실행 요망")
 
-    df = pd.read_csv(CSV_PATH)
-    split_idx = int(len(df) * 0.8)
+    df = pd.read_csv(csv_path)
+    split_idx = int(len(df) * float(train_ratio))
     df_train = df.iloc[:split_idx].reset_index(drop=True)
     df_val   = df.iloc[split_idx:].reset_index(drop=True)
 
@@ -781,18 +782,44 @@ def train():
     agent = SACAgent(STACKED_STATE_DIM, hidden_dim=256, device=device)
 
     # ── 학습 파라미터 ──
-    NEP = 1000
+    NEP = int(episodes)
     BATCH = 256
     UPDATE_FREQ = 4        # 4스텝마다 업데이트
     MIN_BUFFER = 4096      # 최소 버퍼 사이즈
     WARMUP_STEPS = 10000   # 초기 랜덤 탐험 스텝
     global_step = 0
 
+    # ── Best 선정 안정화 파라미터 ──
+    BEST_WR_MIN = 0.55
+    BEST_PNL_MIN = 0.0
+    BEST_TR_MIN = 200
+    BEST_WINDOW_K = 5
+
     best_val_score = -float('inf')
     best_val_pnl = -float('inf')
+    best_rolling_score = -float('inf')
+    val_score_history = []
     os.makedirs('data/ensemble/ckpt', exist_ok=True)
     CKPT_PATH = 'data/ensemble/ckpt/sac_checkpoint.pth'
     BEST_PATH = 'data/ensemble/ckpt/best_sac_agents.pth'
+
+    def _save_best_snapshot(epoch: int, recovered_from_checkpoint: bool = False):
+        torch.save({
+            'actor': agent.actor.state_dict(),
+            'critic': agent.critic.state_dict(),
+            'best_pnl': best_val_pnl,
+            'best_score': best_val_score,
+            'best_rolling_score': best_rolling_score,
+            'epoch': epoch,
+            'meta': {
+                'algo': 'SAC',
+                'best_window_k': BEST_WINDOW_K,
+                'wr_min': BEST_WR_MIN,
+                'pnl_min': BEST_PNL_MIN,
+                'tr_min': BEST_TR_MIN,
+                'recovered_from_checkpoint': bool(recovered_from_checkpoint),
+            },
+        }, BEST_PATH)
 
     # ── 체크포인트 복원 ──
     start_ep = 1
@@ -809,6 +836,8 @@ def train():
             global_step = ckpt.get('global_step', 0)
             best_val_pnl = ckpt.get('best_val_pnl', -float('inf'))
             best_val_score = ckpt.get('best_val_score', -float('inf'))
+            best_rolling_score = ckpt.get('best_rolling_score', -float('inf'))
+            val_score_history = ckpt.get('val_score_history', [])
             start_ep = ckpt.get('epoch', 0) + 1
             logger.info(f"♻️ [복원] ep={start_ep-1} | global_step={global_step} | best_pnl={best_val_pnl:.2f}%")
             # [Bug 3 Fix] 리플레이 버퍼는 복원되지 않으므로,
@@ -828,6 +857,10 @@ def train():
                     if _wd:
                         _ws = _warmup_env.reset()
                 logger.info(f"    [WARMUP 완료] 버퍼: {len(agent.memory)}")
+
+            if not os.path.exists(BEST_PATH):
+                _save_best_snapshot(epoch=start_ep - 1, recovered_from_checkpoint=True)
+                logger.warning("⚠️ best_sac_agents.pth 없음 → 복원 가중치로 best 파일을 즉시 재생성했습니다.")
         except Exception as e:
             logger.warning(f"⚠️ 체크포인트 복원 실패: {e}")
 
@@ -843,6 +876,8 @@ def train():
             'global_step': global_step,
             'best_val_pnl': best_val_pnl,
             'best_val_score': best_val_score,
+            'best_rolling_score': best_rolling_score,
+            'val_score_history': val_score_history,
             'epoch': ep,
         }, CKPT_PATH)
 
@@ -905,20 +940,39 @@ def train():
                 else:
                     val_trade_score = -min(val_env.total_trades / 30.0, 1.0) * 10.0
                 val_score = val_pnl * 5.0 + val_wr * 20.0 + val_trade_score
+                val_score_history.append(float(val_score))
+                if len(val_score_history) > 200:
+                    val_score_history = val_score_history[-200:]
+                rolling_ready = len(val_score_history) >= BEST_WINDOW_K
+                rolling_score = float(np.median(val_score_history[-BEST_WINDOW_K:])) if rolling_ready else -float('inf')
+
+                quality_reasons = []
+                if val_wr < BEST_WR_MIN:
+                    quality_reasons.append(f"wr<{BEST_WR_MIN:.2f}")
+                if val_pnl < BEST_PNL_MIN:
+                    quality_reasons.append(f"pnl<{BEST_PNL_MIN:.1f}")
+                if val_env.total_trades < BEST_TR_MIN:
+                    quality_reasons.append(f"tr<{BEST_TR_MIN}")
+                quality_pass = len(quality_reasons) == 0
 
                 logger.info(
                     f"    [VAL] PnL:{val_pnl:6.2f}% | Tr:{val_env.total_trades:4d} | "
                     f"WR:{val_wr*100:.0f}% | Score:{val_score:.2f}"
                 )
+                logger.info(
+                    f"    [VAL-BEST] quality:{'PASS' if quality_pass else 'BLOCK'} "
+                    f"({','.join(quality_reasons) if quality_reasons else 'ok'}) | "
+                    f"roll({BEST_WINDOW_K})={rolling_score:.2f} | best_roll={best_rolling_score:.2f}"
+                )
 
-                if val_score > best_val_score:
+                if quality_pass and rolling_ready and rolling_score > best_rolling_score:
+                    best_rolling_score = rolling_score
                     best_val_score, best_val_pnl = val_score, val_pnl
-                    torch.save({
-                        'actor': agent.actor.state_dict(),
-                        'best_pnl': best_val_pnl,
-                        'epoch': ep,
-                    }, BEST_PATH)
-                    logger.info(f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}%)")
+                    _save_best_snapshot(epoch=ep, recovered_from_checkpoint=False)
+                    logger.info(
+                        f"    🎉 [NEW BEST] 저장 완료 (PnL:{best_val_pnl:.2f}% | "
+                        f"score:{best_val_score:.2f} | roll:{best_rolling_score:.2f})"
+                    )
 
                 # HMM 온라인 업데이트
                 if ep % 50 == 0:
@@ -938,5 +992,22 @@ def train():
         _save_checkpoint(ep)
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description='Train SAC agent')
+    p.add_argument('--csv-path', default='data/rl_training_data_full.csv')
+    p.add_argument('--train-ratio', type=float, default=0.8)
+    p.add_argument('--episodes', type=int, default=1000)
+    p.add_argument(
+        '--startup-check-only',
+        action='store_true',
+        help='Validate imports/arguments and exit without training',
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    train()
+    args = parse_args()
+    if args.startup_check_only:
+        logger.info('startup check ok: train_rl_sac_agent')
+        raise SystemExit(0)
+    train(csv_path=args.csv_path, train_ratio=args.train_ratio, episodes=args.episodes)

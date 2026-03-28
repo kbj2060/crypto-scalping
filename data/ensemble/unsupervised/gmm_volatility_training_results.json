@@ -1,12 +1,12 @@
 {
-  "best_val_score": -0.2907014310359955,
+  "best_val_score": -0.3882170557975769,
   "best_params": {
     "n_components": 6,
     "covariance_type": "full",
-    "reg_covar": 1.0647919513445797e-06,
+    "reg_covar": 2.648524186735737e-06,
     "feature_count": 6
   },
-  "avg_confidence": 0.838812530040741,
+  "avg_confidence": 0.827559232711792,
   "data_hash": "",
   "config_hash": ""
 }

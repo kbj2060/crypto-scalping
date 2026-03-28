@@ -554,6 +554,7 @@ def _resolve_lgbm_device(requested_device: str, X_probe: np.ndarray, y_probe: np
 # 학습 / Optuna
 # ────────────────────────────────────────────────────────────────
 def train(data_path: str = DATA_PATH,
+          rl_path: str = RL_DATA_PATH,
           save_path: str = SAVE_PATH,
           n_trials: int  = N_TRIALS,
           max_features: int = MAX_FEATURES,
@@ -561,7 +562,7 @@ def train(data_path: str = DATA_PATH,
           n_jobs_lgbm: int = 0,
           lgbm_device: str = 'cpu'):
 
-    df, feature_candidates = load_data(data_path)
+    df, feature_candidates = load_data(data_path, rl_path=rl_path)
 
     n_jobs_label_eff = int(n_jobs_label) if int(n_jobs_label) > 0 else _default_label_jobs()
     n_jobs_lgbm_eff  = int(n_jobs_lgbm)  if int(n_jobs_lgbm)  > 0 else _default_lgbm_jobs()
@@ -770,8 +771,9 @@ def train(data_path: str = DATA_PATH,
 # ────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='XGBTrendBrain 학습')
-    parser.add_argument('--data',         type=str, default=DATA_PATH)
-    parser.add_argument('--save',         type=str, default=SAVE_PATH)
+    parser.add_argument('--data', '--data-path', dest='data', type=str, default=DATA_PATH)
+    parser.add_argument('--rl-path',      type=str, default=RL_DATA_PATH)
+    parser.add_argument('--save', '--save-path', dest='save', type=str, default=SAVE_PATH)
     parser.add_argument('--n-trials',     type=int, default=N_TRIALS)
     parser.add_argument('--max-features', type=int, default=MAX_FEATURES)
     parser.add_argument('--n-jobs-label', type=int, default=0,
@@ -790,13 +792,14 @@ if __name__ == '__main__':
 
     print("\n" + "=" * 70)
     print("🚀 XGBTrendBrain 학습 (LightGBM 3-class, Triple-Barrier)")
-    print(f"   data={args.data}  save={args.save}")
+    print(f"   data={args.data}  rl={args.rl_path}  save={args.save}")
     print(f"   n_trials={args.n_trials}  max_features={args.max_features}")
     print(f"   n_jobs_label={args.n_jobs_label}  n_jobs_lgbm={args.n_jobs_lgbm}  lgbm_device={args.lgbm_device}")
     print("=" * 70 + "\n")
 
     brain = train(
         data_path    = args.data,
+        rl_path      = args.rl_path,
         save_path    = args.save,
         n_trials     = args.n_trials,
         max_features = args.max_features,

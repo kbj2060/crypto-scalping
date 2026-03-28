@@ -5,6 +5,7 @@ import sys
 import json
 import argparse
 import logging
+import time
 from typing import Dict, Any
 
 import numpy as np
@@ -246,8 +247,12 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         "q50": _build_quantile_model(LGBMRegressor, args.seed, args.n_jobs, merged, alpha=0.50),
         "q90": _build_quantile_model(LGBMRegressor, args.seed, args.n_jobs, merged, alpha=0.90),
     }
-    for model in models.values():
-        model.fit(x_trainval[selected_features], y_trainval)
+    x_trainval_sel = x_trainval[selected_features]
+    for name, model in models.items():
+        t0 = time.perf_counter()
+        logger.info("fit start: %s (rows=%d, features=%d)", name, len(x_trainval_sel), x_trainval_sel.shape[1])
+        model.fit(x_trainval_sel, y_trainval)
+        logger.info("fit done : %s (elapsed=%.1fs)", name, time.perf_counter() - t0)
 
     q10, q50, q90 = _predict_quantiles(models, x_test[selected_features])
     mae, dir_acc, interval_width = _score_predictions(y_test, q10, q50, q90, flat_threshold)

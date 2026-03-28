@@ -139,7 +139,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="supervised/train_multitarget_lgbm",
                     script="ensemble/supervised/train_multitarget_lgbm.py",
-                    args=["--n-trials", str(args.supervised_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.supervised_trials),
+                    ],
                     model_files=[
                         "data/ensemble/supervised/multi_target_lgbm.pkl",
                         "data/ensemble/supervised/multi_target_lgbm.json",
@@ -149,7 +153,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="supervised/train_trend_xgb",
                     script="ensemble/supervised/train_trend_xgb.py",
-                    args=["--n-trials", str(args.xgb_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.xgb_trials),
+                    ],
                     model_files=[
                         "data/ensemble/supervised/trend_xgb.json",
                         "data/ensemble/supervised/trend_xgb.pkl",
@@ -159,7 +167,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="supervised/train_quantile_forest",
                     script="ensemble/supervised/train_quantile_forest.py",
-                    args=["--n-trials", str(args.supervised_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.supervised_trials),
+                    ],
                     model_files=[
                         "data/ensemble/supervised/quantile_forest.pkl",
                         "data/ensemble/supervised/quantile_forest.json",
@@ -175,7 +187,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="unsupervised/train_gmm_volatility",
                     script="ensemble/unsupervised/train_gmm_volatility.py",
-                    args=["--n-trials", str(args.unsupervised_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.unsupervised_trials),
+                    ],
                     model_files=[
                         "data/ensemble/unsupervised/gmm_volatility.pkl",
                         "data/ensemble/unsupervised/gmm_volatility.json",
@@ -185,7 +201,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="unsupervised/train_hdbscan_regime",
                     script="ensemble/unsupervised/train_hdbscan_regime.py",
-                    args=["--n-trials", str(args.unsupervised_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.unsupervised_trials),
+                    ],
                     model_files=[
                         "data/ensemble/unsupervised/hdbscan_regime.pkl",
                         "data/ensemble/unsupervised/hdbscan_regime.json",
@@ -195,7 +215,11 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="unsupervised/train_isolation_forest",
                     script="ensemble/unsupervised/train_isolation_forest.py",
-                    args=["--n-trials", str(args.unsupervised_trials)],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.unsupervised_trials),
+                    ],
                     model_files=[
                         "data/ensemble/unsupervised/isolation_forest.pkl",
                         "data/ensemble/unsupervised/isolation_forest.json",
@@ -205,7 +229,12 @@ def _build_jobs(args: argparse.Namespace) -> List[Job]:
                 Job(
                     name="unsupervised/train_vae_anomaly",
                     script="ensemble/unsupervised/train_vae_anomaly.py",
-                    args=["--n-trials", str(args.vae_trials), "--device", args.vae_device],
+                    args=[
+                        "--data-path", args.data_path,
+                        "--rl-path", args.rl_path,
+                        "--n-trials", str(args.vae_trials),
+                        "--device", args.vae_device,
+                    ],
                     model_files=[
                         "data/ensemble/unsupervised/vae_anomaly.pkl",
                         "data/ensemble/unsupervised/vae_anomaly.json",
@@ -222,6 +251,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run all remaining ensemble training scripts")
     parser.add_argument("--target", choices=["all", "supervised", "unsupervised"], default="all")
     parser.add_argument("--python", default=sys.executable, help="Python executable to use")
+    parser.add_argument("--data-path", default="data/training_features_5m.csv")
+    parser.add_argument("--rl-path", default="data/rl_training_data_full.csv")
     parser.add_argument("--xgb-trials", type=int, default=40)
     parser.add_argument("--supervised-trials", type=int, default=30)
     parser.add_argument("--unsupervised-trials", type=int, default=25)

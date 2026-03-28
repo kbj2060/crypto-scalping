@@ -1,0 +1,40 @@
+{
+  "config": {
+    "csv_path": "data/rl_training_data_full.csv",
+    "split": [
+      "2026-01-01",
+      "2026-02-28"
+    ],
+    "rows": 16897,
+    "dsac_ckpt": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth",
+    "fee_rate": 0.0005,
+    "note": "B는 trading_bot 현재 게이트 로직의 근사(_fuse_decision) 백테스트"
+  },
+  "A_dsac_only": {
+    "pnl_pct": -10.597054488662316,
+    "mdd_pct": -18.34159438204832,
+    "sharpe": -2.631460744565425,
+    "trades": 29,
+    "wr_pct": 86.20689655172413,
+    "avg_hold_bars": 580.6896551724138,
+    "median_hold_bars": 44.0
+  },
+  "B_dsac_plus_gate": {
+    "pnl_pct": -36.2423789973747,
+    "mdd_pct": -36.28420150632044,
+    "sharpe": -35.22821541765812,
+    "trades": 3175,
+    "wr_pct": 36.53543307086614,
+    "avg_hold_bars": 2.5937007874015747,
+    "median_hold_bars": 1.0
+  },
+  "delta_B_minus_A": {
+    "pnl_pct": -25.645324508712385,
+    "mdd_pct": -17.942607124272122,
+    "sharpe": -32.5967546730927,
+    "trades": 3146.0,
+    "wr_pct": -49.67146348085799,
+    "avg_hold_bars": -578.0959543850123,
+    "median_hold_bars": -43.0
+  }
+}

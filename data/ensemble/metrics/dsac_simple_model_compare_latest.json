@@ -1,0 +1,36 @@
+{
+  "config": {
+    "rl_csv": "data/rl_training_data_full.csv",
+    "feature_csv": "data/training_features_5m.csv",
+    "dsac_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+    "sttp_ckpt": "data/ensemble/ckpt/best_dsac_sttp_agents.pth",
+    "test_start": "2026-01-01",
+    "test_end": "2026-02-28 23:59:59",
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "device": "cpu",
+    "train_rows": 209444,
+    "test_rows": 16897,
+    "note": "Simple fast-only eval engine based on compare_dsac_split_ab.py. STTP model uses DSACSTTPCompactTradingEnv with default STTPConfig."
+  },
+  "results": {
+    "dsac_fast": {
+      "label": "dsac",
+      "pnl_pct": 327.5413513183594,
+      "trades": 1105,
+      "wr_pct": 36.92307692307693,
+      "avg_hold_bars": 14.220814479638008,
+      "median_hold_bars": 11.0,
+      "elapsed_sec": 6.420741558074951
+    },
+    "sttp_fast": {
+      "label": "dsac_sttp",
+      "pnl_pct": -53.6519660949707,
+      "trades": 2531,
+      "wr_pct": 40.616357171078626,
+      "avg_hold_bars": 5.449624654286843,
+      "median_hold_bars": 3.0,
+      "elapsed_sec": 6.576513767242432
+    }
+  }
+}
