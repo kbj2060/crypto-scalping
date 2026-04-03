@@ -36,8 +36,8 @@ for _p in [_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR]:
 from lightgbm import LGBMClassifier, early_stopping, log_evaluation
 from sklearn.metrics import balanced_accuracy_score, classification_report, f1_score
 
-from core.feature_selector import auto_select_features
-from core.feature_engineering import ULTIMATE_FEATURE_COLS
+from features.selection import auto_select_features
+from features.engineering import ULTIMATE_FEATURE_COLS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -179,7 +179,6 @@ class XGBTrendBrain:
             'pred_timesfm': 'conf_timesfm', 'pred_chronos': 'conf_chronos',
             'pred_ttm': 'conf_ttm', 'pred_patchtst': 'conf_patchtst',
             'pred_tide': 'conf_tide', 'pred_mdjd': 'conf_mdjd',
-            'pred_ridge': 'conf_ridge',
         }
         for p_col, c_col in pred_conf_map.items():
             sig_col = p_col.replace('pred_', 'signal_')
@@ -333,7 +332,7 @@ RL_SIG_COLS = [   # elite strategy signals (+ NewEliteSignalEngine 3종)
 RL_ALPHA_COLS = [  # 합성 알파 + 모델 파생
     'garch_vol_z', 'ou_funding_z', 'ou_halflife',
     'jump_flag', 'jump_z', 'evt_tail_flag', 'evt_excess_z',
-    'cada', 'mshd', 'fvci', 'wpad', 'fdlv',
+    'mshd', 'fvci', 'wpad', 'fdlv',
     'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
     'regime_bull', 'regime_bear', 'regime_chop', 'regime_whipsaw', 'regime_normal',
 ]
@@ -399,7 +398,6 @@ def _combine_pred_conf(df: pd.DataFrame) -> pd.DataFrame:
         'pred_timesfm': 'conf_timesfm', 'pred_chronos': 'conf_chronos',
         'pred_ttm':     'conf_ttm',     'pred_patchtst': 'conf_patchtst',
         'pred_tide':    'conf_tide',    'pred_mdjd':    'conf_mdjd',
-        'pred_ridge':   'conf_ridge',
     }
     created = []
     for p_col, c_col in PRED_TO_CONF.items():

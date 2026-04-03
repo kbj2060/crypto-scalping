@@ -4,7 +4,6 @@
 """
 from .binance_client import BinanceClient
 from .data_collector import DataCollector
-from .feature_engineering import FeatureEngineer
 from .cvp import add_cvp_features
 
 # RiskManager는 공용 모듈(common)에 위치하지만,
@@ -18,3 +17,11 @@ __all__ = [
     'add_cvp_features',
     'RiskManager',
 ]
+
+
+def __getattr__(name):
+    if name == "FeatureEngineer":
+        from .feature_engineering import FeatureEngineer
+
+        return FeatureEngineer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

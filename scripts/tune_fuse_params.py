@@ -237,16 +237,16 @@ def _compute_dsac_stream(df: pd.DataFrame, ckpt_path: str, device: str) -> pd.Da
 
 
 def _trend_signal_from_row(row: dict[str, float]) -> dict[str, float]:
-    p_dn = float(np.clip(row.get("m7_prob_dn", 0.0), 0.0, 1.0))
-    p_fl = float(np.clip(row.get("m7_prob_fl", 0.0), 0.0, 1.0))
-    p_up = float(np.clip(row.get("m7_prob_up", 0.0), 0.0, 1.0))
+    p_dn = float(np.clip(row.get("m7_trend_xgb_dn", 0.0), 0.0, 1.0))
+    p_fl = float(np.clip(row.get("m7_trend_xgb_fl", 0.0), 0.0, 1.0))
+    p_up = float(np.clip(row.get("m7_trend_xgb_up", 0.0), 0.0, 1.0))
     s = p_dn + p_fl + p_up
     if s <= 1e-12:
         p_dn = p_fl = p_up = 1.0 / 3.0
     else:
         p_dn, p_fl, p_up = p_dn / s, p_fl / s, p_up / s
 
-    t_dir = int(np.clip(round(row.get("m7_direction", 1.0)), 0, 2))
+    t_dir = int(np.argmax([p_dn, p_fl, p_up]))
     m7_action = int(np.clip(round(row.get("m7_action", 0.0)), -1, 1))
     if m7_action > 0:
         t_dir = 2
@@ -272,8 +272,6 @@ def _trend_signal_from_row(row: dict[str, float]) -> dict[str, float]:
         "m7_quality_pred": float(row.get("m7_quality_pred", 0.0)),
         "m7_target_hold": float(max(0.0, row.get("m7_target_hold", 0.0))),
         "m7_gmm_vol_rank": float(np.clip(row.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0)),
-        "m7_hdb_label": float(row.get("m7_hdb_label", -1.0)),
-        "m7_hdb_prob": float(np.clip(row.get("m7_hdb_prob", 0.0), 0.0, 1.0)),
         "m7_iso_anom": 1.0 if row.get("m7_iso_anom", 0.0) >= 0.5 else 0.0,
         "m7_vae_anom": 1.0 if row.get("m7_vae_anom", 0.0) >= 0.5 else 0.0,
         "m7_expected_ret": float(row.get("m7_expected_ret", 0.0)),
@@ -313,8 +311,6 @@ def _fuse_decision(
     m7_quality = float(trend.get("m7_quality_pred", 0.0))
     m7_target_hold = int(max(0, round(float(trend.get("m7_target_hold", 0.0)))))
     m7_vol_rank = float(np.clip(trend.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0))
-    m7_hdb_label = int(round(float(trend.get("m7_hdb_label", -1.0))))
-    m7_hdb_prob = float(np.clip(trend.get("m7_hdb_prob", 0.0), 0.0, 1.0))
     m7_iso_anom = bool(float(trend.get("m7_iso_anom", 0.0)) >= 0.5)
     m7_vae_anom = bool(float(trend.get("m7_vae_anom", 0.0)) >= 0.5)
     m7_gate_block = bool(float(trend.get("m7_gate_block", 0.0)) >= 0.5)
@@ -346,10 +342,6 @@ def _fuse_decision(
         vol_factor *= 0.75
     elif m7_vol_rank <= 0.20:
         vol_factor *= 1.08
-    if m7_hdb_label == -1:
-        vol_factor *= 0.85
-    if m7_hdb_prob < 0.20:
-        vol_factor *= 0.90
     if garch_vol_z >= 2.0:
         vol_factor *= 0.75
     elif garch_vol_z >= 1.2:
@@ -664,10 +656,9 @@ def _to_arrays(df: pd.DataFrame) -> dict[str, np.ndarray]:
         "dsac_kelly",
         "dsac_score",
         "dsac_raw_action",
-        "m7_prob_dn",
-        "m7_prob_fl",
-        "m7_prob_up",
-        "m7_direction",
+        "m7_trend_xgb_dn",
+        "m7_trend_xgb_fl",
+        "m7_trend_xgb_up",
         "m7_confidence",
         "m7_action",
         "m7_size",
@@ -675,8 +666,6 @@ def _to_arrays(df: pd.DataFrame) -> dict[str, np.ndarray]:
         "m7_quality_pred",
         "m7_target_hold",
         "m7_gmm_vol_rank",
-        "m7_hdb_label",
-        "m7_hdb_prob",
         "m7_iso_anom",
         "m7_vae_anom",
         "m7_expected_ret",

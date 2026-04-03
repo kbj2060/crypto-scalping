@@ -44,6 +44,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+from features.schema import STATE_PRED, STATE_CONF, STATE_ELITE, STATE_ALPHA, STATE_SYNTH
 
 import pytorch_lightning as pl
 import warnings
@@ -475,31 +476,25 @@ class MarketAttentionEncoder(nn.Module):
 # ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의] — 사용자 피쳐 축소 반영
 # ═══════════════════════════════════════════════════════════════════════════
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd', 'pred_ridge']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd', 'conf_ridge']
+MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd']
+MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd']
 
 ELITE_COLS = ['sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze']
 ALPHA_7_COLS = ['session_us', 'hour_cos', 'cvp_poc_dist', 'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate']
 REGIME_COLS = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'regime_normal']
 
 TARGET_COL = 'log_return'
-SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'cada', 'mshd', 'fvci',
+SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'mshd', 'fvci',
                         'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz']
-
-STATE_PRED  = ['pred_tide', 'pred_ridge', 'pred_patchtst', 'pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_mdjd']
-STATE_CONF  = ['conf_tide', 'conf_ridge', 'conf_patchtst', 'conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_mdjd']
-STATE_ELITE = ['sig_ai_squeeze', 'sig_whale', 'sig_oi_divergence', 'sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health']
-STATE_ALPHA = ['hour_cos', 'garch_vol_z', 'breakout_strength', 'fvg_dist', 'oi_change_rate', 'cvp_volume_imbalance']
-STATE_SYNTH = ['ofti', 'kel']
 
 HMM_N_STATES = 4
 HMM_DIM      = HMM_N_STATES + 1   # 5
 MTF_DIM      = 3
 FEATURE_DIM  = len(STATE_PRED) + len(STATE_ELITE) + len(STATE_ALPHA) + 1 + HMM_DIM + len(STATE_SYNTH)
-# = 7(signal) + 6(elite) + 6(alpha) + 1(regime_idx) + 5(hmm) + 2(synth) = 27
-STATE_DIM    = FEATURE_DIM + 5 + MTF_DIM   # 35
+# = 3(signal) + 6(elite) + 6(alpha) + 1(regime_idx) + 5(hmm) + 2(synth) = 23
+STATE_DIM    = FEATURE_DIM + 5 + MTF_DIM   # 31
 STACK_N      = 2
-STACKED_STATE_DIM = STATE_DIM * STACK_N  # 70
+STACKED_STATE_DIM = STATE_DIM * STACK_N  # 62
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -528,7 +523,13 @@ class TradingEnv:
         self.MIN_HOLD_BARS = 6
 
         feat_cols = STATE_PRED + STATE_CONF + STATE_ELITE + STATE_ALPHA + REGIME_COLS + STATE_SYNTH
-        self._feat_np  = self.df[feat_cols].values.astype(np.float32)
+        feat_df = (
+            self.df.reindex(columns=feat_cols, fill_value=0.0)
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+        )
+        self._feat_np  = feat_df.to_numpy(dtype=np.float32)
         self._close_np = self.df['close'].values.astype(np.float32)
         self._n_pred   = len(STATE_PRED)
         self._n_conf   = len(STATE_CONF)

@@ -21,12 +21,12 @@ from sklearn.feature_selection import mutual_info_regression
 from sklearn.ensemble import RandomForestRegressor
 
 # ─── 피처 그룹 정의 (train_rl_agent.py와 동기화) ────────────────────────────
-MODEL_PRED          = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd', 'pred_ridge']
-MODEL_CONF          = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd', 'conf_ridge']
+MODEL_PRED          = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd']
+MODEL_CONF          = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd']
 ELITE_COLS          = ['sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze']
 ALPHA_7_COLS        = ['session_us', 'hour_cos', 'cvp_poc_dist', 'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate']
 REGIME_COLS         = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'regime_normal']
-SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'cada', 'mshd', 'fvci',
+SYNTHETIC_ALPHA_COLS = ['ofti', 'kel', 'mta_funding', 'svps', 'mshd', 'fvci',
                         'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz']
 
 # pred 칼럼과 대응하는 conf 칼럼 매핑

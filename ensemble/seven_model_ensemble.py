@@ -18,6 +18,7 @@ for _p in (_ROOT_DIR, _THIS_DIR):
         sys.path.insert(0, _p)
 
 from ensemble.supervised.train_trend_xgb import XGBTrendBrain
+from ensemble.supervised.train_entry_price_model import EntryPriceBrain
 
 try:
     import torch
@@ -143,6 +144,7 @@ class SevenModelEnsemble:
 
     DEFAULT_META_PATHS = {
         "trend_xgb": "data/ensemble/supervised/trend_xgb.json",
+        "entry_price_model": "data/ensemble/supervised/entry_price_model.json",
         "multi_target_lgbm": "data/ensemble/supervised/multi_target_lgbm.json",
         "quantile_forest": "data/ensemble/supervised/quantile_forest.json",
         "gmm_volatility": "data/ensemble/unsupervised/gmm_volatility.json",
@@ -167,6 +169,7 @@ class SevenModelEnsemble:
         self.weight_quantile = float(weight_quantile)
 
         self.trend_xgb = _ModelState(False)
+        self.entry_price = _ModelState(False)
         self.multi_target = _ModelState(False)
         self.quantile = _ModelState(False)
         self.gmm = _ModelState(False)
@@ -201,11 +204,19 @@ class SevenModelEnsemble:
                 payload = pickle.load(f)
             return payload, meta
         except Exception as e:
+            if key == "vae_anomaly" and _TORCH_AVAILABLE:
+                try:
+                    payload = torch.load(model_path, map_location=torch.device("cpu"), weights_only=False)
+                    return payload, meta
+                except Exception as e2:
+                    logger.warning("[%s] model load failed: %s / torch_fallback=%s", key, e, e2)
+                    return None, meta
             logger.warning("[%s] model load failed: %s", key, e)
             return None, meta
 
     def _load_all(self) -> None:
         self._load_trend_xgb()
+        self._load_entry_price()
         self._load_multitarget()
         self._load_quantile()
         self._load_gmm()
@@ -222,6 +233,16 @@ class SevenModelEnsemble:
         except Exception as e:
             self.trend_xgb = _ModelState(False, reason=str(e))
             logger.warning("⚠️ trend_xgb unavailable: %s", e)
+
+    def _load_entry_price(self) -> None:
+        path = self.meta_paths["entry_price_model"]
+        try:
+            brain = EntryPriceBrain.load(path)
+            self.entry_price = _ModelState(True, model=brain, feature_cols=list(brain.feature_cols), extra={})
+            logger.info("✅ entry_price_model loaded (%d features)", len(brain.feature_cols))
+        except Exception as e:
+            self.entry_price = _ModelState(False, reason=str(e))
+            logger.warning("⚠️ entry_price_model unavailable: %s", e)
 
     def _load_multitarget(self) -> None:
         payload, meta = self._load_pickle_from_meta("multi_target_lgbm")
@@ -372,6 +393,34 @@ class SevenModelEnsemble:
             hold = np.asarray(h_model.predict(x), dtype=np.float64).reshape(-1)
         return {"probs": probs, "quality": quality, "hold": hold}
 
+    def _predict_entry_price(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
+        n = len(df)
+        long_offset = np.zeros(n, dtype=np.float64)
+        short_offset = np.zeros(n, dtype=np.float64)
+        long_price = pd.to_numeric(df["close"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        short_price = long_price.copy()
+        if not self.entry_price.available or self.entry_price.model is None:
+            return {
+                "entry_long_offset": long_offset,
+                "entry_short_offset": short_offset,
+                "entry_long_price": long_price,
+                "entry_short_price": short_price,
+            }
+        pred = self.entry_price.model.predict_batch_from_df(df)
+        if pred.empty:
+            return {
+                "entry_long_offset": long_offset,
+                "entry_short_offset": short_offset,
+                "entry_long_price": long_price,
+                "entry_short_price": short_price,
+            }
+        return {
+            "entry_long_offset": np.asarray(pred["entry_long_offset"], dtype=np.float64),
+            "entry_short_offset": np.asarray(pred["entry_short_offset"], dtype=np.float64),
+            "entry_long_price": np.asarray(pred["entry_long_price"], dtype=np.float64),
+            "entry_short_price": np.asarray(pred["entry_short_price"], dtype=np.float64),
+        }
+
     def _predict_quantile(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
         n = len(df)
         q10 = np.full(n, np.nan, dtype=np.float64)
@@ -505,6 +554,7 @@ class SevenModelEnsemble:
         p_mtl = mtl["probs"]
         q = self._predict_quantile(df)
         p_q = q["probs"]
+        entry_px = self._predict_entry_price(df)
 
         gmm = self._predict_gmm(df)
         hdb = self._predict_hdbscan(df)
@@ -519,6 +569,13 @@ class SevenModelEnsemble:
         denom = self.weight_trend_xgb + self.weight_multitarget + self.weight_quantile
         probs = probs / max(denom, 1e-12)
         probs = _safe_prob3(probs)
+        # Batch-level prior rebalance: 클래스 사전확률이 한쪽으로 과도하게 쏠릴 때 완만히 보정
+        # target prior는 DOWN/FLAT/UP = 0.42/0.16/0.42 로 설정
+        prior = np.clip(np.mean(probs, axis=0), 1e-6, 1.0)
+        target_prior = np.array([0.42, 0.16, 0.42], dtype=np.float64)
+        prior_scale = np.clip(target_prior / prior, 0.75, 1.35)
+        probs = probs * prior_scale[None, :]
+        probs = _safe_prob3(probs)
 
         sort_p = np.sort(probs, axis=1)
         p_top = sort_p[:, 2]
@@ -530,15 +587,14 @@ class SevenModelEnsemble:
         q50 = np.nan_to_num(q["q50"], nan=0.0)
         q90 = np.nan_to_num(q["q90"], nan=0.0)
         q_width = np.maximum(q90 - q10, 1e-6)
+        close = pd.to_numeric(df["close"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
 
-        long_edge = np.maximum(q50, 0.0)
-        short_edge = np.maximum(-q50, 0.0)
-        long_risk = np.maximum(np.abs(np.minimum(q10, 0.0)), 1e-6)
-        short_risk = np.maximum(np.maximum(q90, 0.0), 1e-6)
-        rr_long = long_edge / long_risk
-        rr_short = short_edge / short_risk
-        rr = np.where(direction == 2, rr_long, np.where(direction == 0, rr_short, 0.0))
-        base_size = np.tanh(rr * 0.7) * confidence
+        # 롱/숏 완전 대칭 사이징: edge=|q50|, risk=qwidth
+        rr_sym = np.abs(q50) / np.maximum(q_width, 1e-6)
+        dir_gap = np.abs(probs[:, 2] - probs[:, 0])  # 방향 우위
+        conf_mix = np.clip(0.65 * confidence + 0.35 * dir_gap, 0.0, 1.0)
+        rr = np.where(direction == 1, 0.0, rr_sym)
+        base_size = np.tanh(rr * 1.1) * conf_mix
 
         quality = np.nan_to_num(mtl["quality"], nan=0.0)
         quality_scale = np.clip(0.8 + quality * 80.0, 0.25, 1.25)
@@ -553,11 +609,35 @@ class SevenModelEnsemble:
         route_scale = np.where(hdb["label"] == -1, route_scale * 0.80, route_scale)
         size = np.clip(size * route_scale, 0.0, 1.0)
 
+        # VAE unavailable/degenerate fallback: iso score + vol rank 기반 대체 anomaly 신호 생성
+        vae_err_cur = np.nan_to_num(np.asarray(vae.get("error", np.full(n, np.nan)), dtype=np.float64), nan=0.0)
+        if (not self.vae.available) or float(np.std(vae_err_cur)) < 1e-12:
+            iso_score_pos = np.maximum(np.nan_to_num(iso["score"], nan=0.0), 0.0)
+            vae_err_proxy = iso_score_pos + 0.25 * vol_rank
+            if len(vae_err_proxy) >= 200:
+                th = float(np.quantile(vae_err_proxy, 0.97))
+            else:
+                th = float(np.mean(vae_err_proxy) + 2.5 * np.std(vae_err_proxy))
+            vae = {
+                "error": vae_err_proxy.astype(np.float64),
+                "is_anomaly": (vae_err_proxy >= th).astype(np.int64),
+                "threshold": float(th),
+            }
+
         iso_anom = (iso["pred"] == -1).astype(np.int64)
         vae_anom = np.asarray(vae["is_anomaly"], dtype=np.int64)
         gate_block = ((iso_anom == 1) & (vae_anom == 1)).astype(np.int64)
         size = np.where(gate_block == 1, 0.0, size)
         size = np.where((gate_block == 0) & ((iso_anom == 1) | (vae_anom == 1)), size * 0.5, size)
+
+        # 방향별 평균 사이징 균형화(한쪽으로만 size가 죽는 현상 방지)
+        m_long = (direction == 2) & (gate_block == 0)
+        m_short = (direction == 0) & (gate_block == 0)
+        long_mean = float(np.mean(size[m_long])) if np.any(m_long) else 0.0
+        short_mean = float(np.mean(size[m_short])) if np.any(m_short) else 0.0
+        if long_mean > 1e-6 and short_mean > 1e-6:
+            bal_scale = float(np.clip(long_mean / short_mean, 0.70, 1.40))
+            size = np.where(m_short, np.clip(size * bal_scale, 0.0, 1.0), size)
 
         min_conf = np.where(vol_rank >= 0.8, 0.60, 0.45)
         action = np.zeros(n, dtype=np.int64)  # -1 short, 0 hold, +1 long
@@ -576,6 +656,26 @@ class SevenModelEnsemble:
         expected_ret = np.where(action == 1, q50, np.where(action == -1, -q50, 0.0))
         tail_risk = np.where(action == 1, np.minimum(q10, 0.0), np.where(action == -1, -np.maximum(q90, 0.0), 0.0))
         composite = np.clip(expected_ret * (0.5 + confidence) * (1.0 - 0.5 * gate_block), -1.0, 1.0)
+        entry_long_offset = np.asarray(entry_px["entry_long_offset"], dtype=np.float64)
+        entry_short_offset = np.asarray(entry_px["entry_short_offset"], dtype=np.float64)
+        entry_long_price = np.asarray(entry_px["entry_long_price"], dtype=np.float64)
+        entry_short_price = np.asarray(entry_px["entry_short_price"], dtype=np.float64)
+
+        tp_floor = 8e-4
+        sl_floor = 6e-4
+        ref_side = np.where(action != 0, action, np.where(direction == 2, 1, np.where(direction == 0, -1, 0)))
+        tp_offset = np.where(
+            ref_side > 0,
+            np.maximum(q90, tp_floor),
+            np.where(ref_side < 0, np.minimum(q10, -tp_floor), 0.0),
+        )
+        sl_offset = np.where(
+            ref_side > 0,
+            np.minimum(q10, -sl_floor),
+            np.where(ref_side < 0, np.maximum(q90, sl_floor), 0.0),
+        )
+        tp_price = close * (1.0 + tp_offset)
+        sl_price = close * (1.0 + sl_offset)
 
         out = pd.DataFrame(index=df.index)
         out["m7_trend_xgb_dn"] = p_xgb[:, 0]
@@ -603,6 +703,14 @@ class SevenModelEnsemble:
         out["m7_quality_pred"] = quality
         out["m7_hold_pred"] = np.nan_to_num(mtl["hold"], nan=0.0)
         out["m7_target_hold"] = target_hold.astype(np.float32)
+        out["m7_entry_long_offset"] = entry_long_offset.astype(np.float32)
+        out["m7_entry_short_offset"] = entry_short_offset.astype(np.float32)
+        out["m7_entry_long_price"] = entry_long_price.astype(np.float32)
+        out["m7_entry_short_price"] = entry_short_price.astype(np.float32)
+        out["m7_tp_offset"] = tp_offset.astype(np.float32)
+        out["m7_sl_offset"] = sl_offset.astype(np.float32)
+        out["m7_tp_price"] = tp_price.astype(np.float32)
+        out["m7_sl_price"] = sl_price.astype(np.float32)
 
         out["m7_gmm_cluster"] = np.asarray(gmm["cluster"], dtype=np.float32)
         out["m7_gmm_conf"] = np.asarray(gmm["confidence"], dtype=np.float64)

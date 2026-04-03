@@ -58,31 +58,39 @@ for p in TARGET_PATHS:
     if os.path.exists(p) and p not in sys.path:
         sys.path.insert(0, p)
 
-from core.feature_engineering import FeatureEngineer
+from features.engineering import FeatureEngineer
+from features.elite import NewEliteSignalEngine
+from features.m7 import trend_signal_from_m7
+from features.schema import (
+    STATE_PRED as DSAC_STATE_PRED,
+    STATE_CONF as DSAC_STATE_CONF,
+    STATE_ELITE as DSAC_STATE_ELITE,
+    STATE_ALPHA as DSAC_STATE_ALPHA,
+    STATE_SYNTH as DSAC_STATE_SYNTH,
+)
 from ensemble.seven_model_ensemble import SevenModelEnsemble
 from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
 from ensemble.ensemble_router import (
     TFTForecaster, MacroHFTForecaster, ChronosForecaster,
     KronosForecaster, TimesFMForecaster, MoiraiForecaster,
 )
-from ensemble.train_rl_agent import (
-    STATE_PRED as DSAC_STATE_PRED,
-    STATE_CONF as DSAC_STATE_CONF,
-    STATE_ELITE as DSAC_STATE_ELITE,
-    STATE_ALPHA as DSAC_STATE_ALPHA,
-    STATE_SYNTH as DSAC_STATE_SYNTH,
-    OnlineHMMDetector,
+from ensemble.train_rl_agent import OnlineHMMDetector
+from ensemble.train_rl_dsac_long_agent import (
+    STATE_DIM as LONG_STATE_DIM,
+    SigmoidActor as LongSigmoidActor,
+    DSACLongRouter,
+)
+from ensemble.train_rl_dsac_short_agent import (
+    STATE_DIM as SHORT_STATE_DIM,
+    SigmoidActor as ShortSigmoidActor,
+    DSACShortRouter,
 )
 from ensemble.train_rl_dsac_agent import (
-    DSAC_STATE_DIM,
-    GaussianActor as DSACGaussianActor,
-    SACRouter as DSACRouter,
-)
-from ensemble.train_rl_dsac_v2 import (
-    GaussianActorV2 as DSACGaussianActorV2,
+    DSAC_STATE_DIM as BASE_DSAC_STATE_DIM,
+    GaussianActor as BaseDSACGaussianActor,
+    DSACRouter as BaseDSACRouter,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
-from strategies.elite_strategies import NewEliteSignalEngine
 
 
 class Colors:
@@ -136,85 +144,36 @@ def _traj_conf(traj: np.ndarray) -> float:
 
 
 def _trend_signal_from_m7(m7_last: dict | None) -> dict | None:
-    """SevenModelEnsemble 출력(dict)을 DSACTrendRouter 입력 포맷으로 변환."""
-    if not isinstance(m7_last, dict) or not m7_last:
-        return None
+    return trend_signal_from_m7(m7_last)
 
-    def _f(key: str, default: float = 0.0) -> float:
-        try:
-            return float(m7_last.get(key, default))
-        except Exception:
-            return float(default)
 
-    agg_dn = float(np.clip(_f("m7_prob_dn", 0.0), 0.0, 1.0))
-    agg_fl = float(np.clip(_f("m7_prob_fl", 0.0), 0.0, 1.0))
-    agg_up = float(np.clip(_f("m7_prob_up", 0.0), 0.0, 1.0))
-    s = agg_dn + agg_fl + agg_up
-    if s <= 1e-12:
-        agg_dn = agg_fl = agg_up = 1.0 / 3.0
-    else:
-        agg_dn, agg_fl, agg_up = agg_dn / s, agg_fl / s, agg_up / s
+def _confidence_from_std(std: float) -> float:
+    s = max(float(std), 1e-6)
+    return float(1.0 / (1.0 + s))
 
-    p_dn = float(np.clip(_f("m7_trend_xgb_dn", agg_dn), 0.0, 1.0))
-    p_fl = float(np.clip(_f("m7_trend_xgb_fl", agg_fl), 0.0, 1.0))
-    p_up = float(np.clip(_f("m7_trend_xgb_up", agg_up), 0.0, 1.0))
-    s_xgb = p_dn + p_fl + p_up
-    if s_xgb <= 1e-12:
-        p_dn = p_fl = p_up = 1.0 / 3.0
-    else:
-        p_dn, p_fl, p_up = p_dn / s_xgb, p_fl / s_xgb, p_up / s_xgb
 
-    t_dir = int(np.argmax([p_dn, p_fl, p_up]))
-    m7_action = int(np.clip(round(_f("m7_action", 0.0)), -1, 1))
+def _norm_tanh(x: float, scale: float) -> float:
+    s = max(float(scale), 1e-8)
+    return float(np.tanh(float(x) / s))
 
-    m7_conf = float(np.clip(_f("m7_confidence", 0.0), 0.0, 1.0))
-    m7_gate_block = 1 if _f("m7_gate_block", 0.0) >= 0.5 else 0
-    xgb_top = max(p_dn, p_fl, p_up)
-    xgb_second = sorted([p_dn, p_fl, p_up])[1]
-    strength = float(np.clip((xgb_top - 1.0 / 3.0) * 1.5 + (xgb_top - xgb_second) * 0.6, 0.0, 1.0))
-    rev_prob = float(np.clip((1.0 - strength) * 0.70 + (0.30 if m7_gate_block else 0.0), 0.0, 1.0))
 
-    return {
-        "trend_dir": t_dir,
-        "strength": strength,
-        "rev_prob": rev_prob,
-        "prob_dn": p_dn,
-        "prob_flat": p_fl,
-        "prob_up": p_up,
-        "probs": [p_dn, p_fl, p_up],
-        "trend_model": "TREND_XGB",
-        "m7_confidence": m7_conf,
-        "m7_action": m7_action,
-        "m7_prob_dn": agg_dn,
-        "m7_prob_fl": agg_fl,
-        "m7_prob_up": agg_up,
-        "m7_size": float(np.clip(_f("m7_size", 0.0), 0.0, 1.0)),
-        "m7_gate_block": m7_gate_block,
-        "m7_quality_pred": _f("m7_quality_pred", 0.0),
-        "m7_hold_pred": _f("m7_hold_pred", 0.0),
-        "m7_target_hold": float(max(0.0, _f("m7_target_hold", 0.0))),
-        "m7_q10": _f("m7_q10", 0.0),
-        "m7_q50": _f("m7_q50", 0.0),
-        "m7_q90": _f("m7_q90", 0.0),
-        "m7_qwidth": float(max(0.0, _f("m7_qwidth", 0.0))),
-        "m7_trend_xgb_dn": float(np.clip(_f("m7_trend_xgb_dn", 0.0), 0.0, 1.0)),
-        "m7_trend_xgb_fl": float(np.clip(_f("m7_trend_xgb_fl", 0.0), 0.0, 1.0)),
-        "m7_trend_xgb_up": float(np.clip(_f("m7_trend_xgb_up", 0.0), 0.0, 1.0)),
-        "m7_gmm_cluster": _f("m7_gmm_cluster", -1.0),
-        "m7_gmm_conf": float(np.clip(_f("m7_gmm_conf", 0.0), 0.0, 1.0)),
-        "m7_gmm_vol_rank": float(np.clip(_f("m7_gmm_vol_rank", 0.5), 0.0, 1.0)),
-        "m7_hdb_label": _f("m7_hdb_label", -1.0),
-        "m7_hdb_prob": float(np.clip(_f("m7_hdb_prob", 0.0), 0.0, 1.0)),
-        "m7_iso_pred": _f("m7_iso_pred", 1.0),
-        "m7_iso_score": _f("m7_iso_score", 0.0),
-        "m7_iso_anom": 1.0 if _f("m7_iso_anom", 0.0) >= 0.5 else 0.0,
-        "m7_vae_error": _f("m7_vae_error", 0.0),
-        "m7_vae_threshold": _f("m7_vae_threshold", 0.0),
-        "m7_vae_anom": 1.0 if _f("m7_vae_anom", 0.0) >= 0.5 else 0.0,
-        "m7_expected_ret": _f("m7_expected_ret", 0.0),
-        "m7_tail_risk": _f("m7_tail_risk", 0.0),
-        "m7_composite_score": _f("m7_composite_score", 0.0),
-    }
+def _regime_signed(regime: dict[str, float] | None) -> float:
+    if not isinstance(regime, dict):
+        return 0.0
+    if float(regime.get("regime_bull", 0.0)) >= 0.5:
+        return 1.0
+    if float(regime.get("regime_bear", 0.0)) >= 0.5:
+        return -1.0
+    return 0.0
+
+
+def _trend_from_row(row: pd.Series | dict) -> tuple[float, float]:
+    get = row.get if hasattr(row, "get") else lambda k, d=0.0: d
+    mtf_1h = float(get("mtf_trend_1h", 0.0) or 0.0)
+    mtf_4h = float(get("mtf_trend_4h", 0.0) or 0.0)
+    trend_strength = float(np.clip(0.5 * (abs(mtf_1h) + abs(mtf_4h)), 0.0, 1.0))
+    signed = float(np.sign(mtf_1h + 0.75 * mtf_4h))
+    return signed, trend_strength
 
 
 # ════════════════════════════════════════════════════════════════
@@ -410,8 +369,6 @@ def _tg_trade_msg(ex_code: str, current_price: float,
     """텔레그램 전송용 포지션 변화 메시지 포맷."""
     fa    = int(meta_result.get('final_action', 0))
     kelly = float(meta_result.get('unified_kelly', 0.0))
-    arb   = str(meta_result.get('arbiter_mode', 'N/A'))
-    gate  = '✓' if meta_result.get('gate_passed', True) else '✗'
     ts_   = meta_result.get('trend_signal') or {}
     t_dir = {0: '▼ DOWN', 1: '─ FLAT', 2: '▲ UP'}.get(int(ts_.get('trend_dir', 1)), '?')
     icon  = {
@@ -437,8 +394,8 @@ def _tg_trade_msg(ex_code: str, current_price: float,
     return (
         f"{icon} <b>{ex_code}</b>  ({action_word})\n"
         f"💰 ETH ${current_price:,.2f}   🕐 {timestamp_kst.strftime('%m-%d %H:%M')} KST\n"
-        f"🌍 {regime_name}   Kelly: {kelly:.3f}   Gate: {gate}{pnl_line}\n"
-        f"📈 Trend: {t_dir}   Arbiter: {arb}"
+        f"🌍 {regime_name}   Kelly: {kelly:.3f}{pnl_line}\n"
+        f"📈 Trend: {t_dir}   Source: {meta_result.get('source', 'DSAC_ONLY')}"
     )
 
 
@@ -511,8 +468,19 @@ def _session_flags_from_timestamp(ts) -> dict[str, float]:
             sched = cal.schedule(start_date=day, end_date=day)
             active = False
             if not sched.empty:
-                minutes = mcal.date_range(sched, frequency="1min")
-                active = bool(ts_utc.floor("min") in minutes)
+                row = sched.iloc[0]
+                ts_min = ts_utc.floor("min")
+                market_open = pd.Timestamp(row.get("market_open"))
+                market_close = pd.Timestamp(row.get("market_close"))
+                break_start = row.get("break_start", pd.NaT)
+                break_end = row.get("break_end", pd.NaT)
+                in_main = bool(market_open <= ts_min <= market_close)
+                in_break = False
+                if pd.notna(break_start) and pd.notna(break_end):
+                    break_start = pd.Timestamp(break_start)
+                    break_end = pd.Timestamp(break_end)
+                    in_break = bool(break_start <= ts_min < break_end)
+                active = bool(in_main and not in_break)
             flags[name] = 1.0 if active else 0.0
         return flags
     except Exception:
@@ -587,6 +555,73 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
             return "저변동"
         return "중간변동"
 
+    def _ambiguity_text(v: float) -> str:
+        if v >= 2.0:
+            return "양방향 충돌 큼"
+        if v >= 1.0:
+            return "양방향 경합"
+        if v >= 0.0:
+            return "약한 경합"
+        return "방향 분리 양호"
+
+    def _confidence_text(v: float) -> str:
+        if v >= 0.65:
+            return "안정적"
+        if v >= 0.50:
+            return "보통"
+        if v >= 0.35:
+            return "불안정"
+        return "매우 불안정"
+
+    def _conviction_text(v: float) -> str:
+        if v >= 1.0:
+            return "진입 강함"
+        if v >= 0.60:
+            return "진입 가능"
+        if v >= 0.30:
+            return "진입 약함"
+        return "진입 부족"
+
+    def _agreement_text(v: float) -> str:
+        if v >= 1.5:
+            return "방향 우위 뚜렷"
+        if v >= 0.8:
+            return "방향 우위 있음"
+        if v >= 0.4:
+            return "방향 우위 약함"
+        return "방향 혼재"
+
+    def _hibernation_text(v: float) -> str:
+        if v >= 0.85:
+            return "시장 과열/이상"
+        if v >= 0.60:
+            return "이상치 주의"
+        if v >= 0.30:
+            return "약한 이상 신호"
+        return "정상 범위"
+
+    def _amihud_text(v: float) -> str:
+        if v >= 1.5:
+            return "유동성 매우 나쁨"
+        if v >= 0.8:
+            return "유동성 나쁨"
+        if v >= 0.2:
+            return "유동성 보통"
+        return "유동성 양호"
+
+    def _gate(ok: bool, label: str, detail: str = "") -> str:
+        """VALUE/TH[✓] 형식 컬러 게이트 토큰."""
+        icon = "✓" if ok else "✗"
+        col = C.GREEN if ok else C.RED
+        text = label + (f"/{detail}" if detail else "")
+        return f"{col}{text}[{icon}]{C.RESET}"
+
+    def _status_badge(ok: bool, ok_label: str = "PASS", fail_label: str = "FAIL") -> str:
+        icon = "✓" if ok else "✗"
+        col = C.GREEN if ok else C.RED
+        label = ok_label if ok else fail_label
+        return f"{col}[{label} {icon}]{C.RESET}"
+
     def _exit_score_text(v: float) -> str:
         av = abs(v)
         if av >= 0.45:
@@ -619,12 +654,19 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     long_edge = float(rl_info.get('long_edge', 0.0))
     short_edge = float(rl_info.get('short_edge', 0.0))
     rl_kelly = float(rl_info.get('kelly', 0.0))
-    meta_kelly = float(meta_result.get('unified_kelly', 0.0))
+    long_raw = float(rl_info.get('_long_raw', long_edge))
+    short_raw = float(rl_info.get('_short_raw', short_edge))
+    long_action = int(rl_info.get('_long_action', 1 if long_raw > 0.0 else 0))
+    short_action = int(rl_info.get('_short_action', 2 if short_raw > 0.0 else 0))
+    long_kelly = float(rl_info.get('_long_kelly', long_raw))
+    short_kelly = float(rl_info.get('_short_kelly', short_raw))
+    conviction = float(rl_info.get('conviction', abs(long_edge - short_edge)))
+    agreement = float(rl_info.get('agreement', abs(long_edge - short_edge)))
+    ambiguity = float(rl_info.get('ambiguity', min(long_edge, short_edge)))
+    confidence = float(rl_info.get('confidence', 0.0))
+    selected_side = str(rl_info.get('_selected_side', 'HOLD'))
+    final_kelly = float(meta_result.get('unified_kelly', 0.0))
     source = str(meta_result.get('source', 'N/A'))
-    arb_mode = str(meta_result.get('arbiter_mode', 'N/A'))
-    gate_passed = bool(meta_result.get('gate_passed', True))
-    fdiag = meta_result.get("fusion_diag", {}) if isinstance(meta_result, dict) else {}
-
     ts = meta_result.get('trend_signal') or {}
     t_dir = 1
     t_strength = 0.0
@@ -637,12 +679,54 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     m7_qwidth = 0.0
     m7_iso_anom = 0
     m7_vae_anom = 0
-    cb_active = int(float(fdiag.get("cb_active", 0.0))) if isinstance(fdiag, dict) else 0
-    is_lowvol_range = int(float(fdiag.get("is_lowvol_range", 0.0))) if isinstance(fdiag, dict) else 0
-    is_highvol_trend = int(float(fdiag.get("is_highvol_trend", 0.0))) if isinstance(fdiag, dict) else 0
-    uncertainty_scale = float(fdiag.get("uncertainty_scale", 1.0)) if isinstance(fdiag, dict) else 1.0
+    entry_price_reco = 0.0
+    tp_price_reco = 0.0
+    sl_price_reco = 0.0
+    entry_offset_reco = 0.0
+    tp_offset_reco = 0.0
+    sl_offset_reco = 0.0
+    cb_active = int(meta_result.get("cb_active", 0) or 0) if isinstance(meta_result, dict) else 0
+    is_lowvol_range = int(meta_result.get("is_lowvol_range", 0) or 0) if isinstance(meta_result, dict) else 0
+    is_highvol_trend = int(meta_result.get("is_highvol_trend", 0) or 0) if isinstance(meta_result, dict) else 0
+    uncertainty_scale = float(meta_result.get("uncertainty_scale", 1.0)) if isinstance(meta_result, dict) else 1.0
     trend_exit_score = float(meta_result.get("trend_exit_score", 0.0)) if isinstance(meta_result, dict) else 0.0
     trend_mismatch_streak = int(meta_result.get("trend_mismatch_streak", 0) or 0) if isinstance(meta_result, dict) else 0
+    hibernation_score = float(meta_result.get("hibernation_score", 0.0)) if isinstance(meta_result, dict) else 0.0
+    integral_gap_ma = float(meta_result.get("integral_gap_ma", 0.0)) if isinstance(meta_result, dict) else 0.0
+    illiq_amihud = float(meta_result.get("illiq_amihud", 0.0)) if isinstance(meta_result, dict) else 0.0
+    illiq_rsvol = float(meta_result.get("illiq_rsvol", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_bayes_mult = float(meta_result.get("sizing_bayes_mult", 1.0)) if isinstance(meta_result, dict) else 1.0
+    sizing_qwidth_mult = float(meta_result.get("sizing_qwidth_mult", 1.0)) if isinstance(meta_result, dict) else 1.0
+    sizing_mtf_mult = float(meta_result.get("sizing_mtf_mult", 1.0)) if isinstance(meta_result, dict) else 1.0
+    sizing_smart_mult = float(meta_result.get("sizing_smart_mult", 1.0)) if isinstance(meta_result, dict) else 1.0
+    sizing_mdd_mult = float(meta_result.get("sizing_mdd_mult", 1.0)) if isinstance(meta_result, dict) else 1.0
+    sizing_bayes_z = float(meta_result.get("sizing_bayes_z", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_qwidth = float(meta_result.get("sizing_qwidth", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_mtf_align = int(meta_result.get("sizing_mtf_align", 0) or 0) if isinstance(meta_result, dict) else 0
+    sizing_smart_flow = float(meta_result.get("sizing_smart_flow", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_taker_accel = float(meta_result.get("sizing_taker_accel", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_recent_pnl_sum = float(meta_result.get("sizing_recent_pnl_sum", 0.0)) if isinstance(meta_result, dict) else 0.0
+    sizing_loss_streak = int(meta_result.get("sizing_loss_streak", 0) or 0) if isinstance(meta_result, dict) else 0
+    position_signal = str(meta_result.get("position_signal", "")) if isinstance(meta_result, dict) else ""
+    position_reason = str(meta_result.get("position_reason", "")) if isinstance(meta_result, dict) else ""
+    position_own_support = float(meta_result.get("position_own_support", 0.0)) if isinstance(meta_result, dict) else 0.0
+    position_opp_pressure = float(meta_result.get("position_opp_pressure", 0.0)) if isinstance(meta_result, dict) else 0.0
+    position_net_edge = float(meta_result.get("position_net_edge", 0.0)) if isinstance(meta_result, dict) else 0.0
+    hold_reason = str(meta_result.get("hold_reason", "")) if isinstance(meta_result, dict) else ""
+    block_reason = str(meta_result.get("block_reason", "")) if isinstance(meta_result, dict) else ""
+    router_enter_threshold = float(meta_result.get("router_enter_threshold", 0.0)) if isinstance(meta_result, dict) else 0.0
+    router_min_agreement_threshold = float(meta_result.get("router_min_agreement_threshold", 0.0)) if isinstance(meta_result, dict) else 0.0
+    router_max_confidence_std = float(meta_result.get("router_max_confidence_std", 1.50)) if isinstance(meta_result, dict) else 1.50
+    adaptive_enter_offset = float(meta_result.get("adaptive_enter_offset", 0.0)) if isinstance(meta_result, dict) else 0.0
+    adaptive_agreement_offset = float(meta_result.get("adaptive_agreement_offset", 0.0)) if isinstance(meta_result, dict) else 0.0
+    router_std_gate_ok = bool(meta_result.get("router_std_gate_ok", True)) if isinstance(meta_result, dict) else True
+    router_dual_high_hold = bool(meta_result.get("router_dual_high_hold", False)) if isinstance(meta_result, dict) else False
+    long_logit = float(rl_info.get("long_logit", 0.0))
+    short_logit = float(rl_info.get("short_logit", 0.0))
+    long_std = float(rl_info.get("long_std", 1.0))
+    short_std = float(rl_info.get("short_std", 1.0))
+    selected_std = float(rl_info.get("selected_std", long_std if long_raw >= short_raw else short_std))
+    router_max_confidence_std = float(rl_info.get("max_confidence_std", 1.50))
     if isinstance(ts, dict) and ts:
         t_dir = int(ts.get('trend_dir', 1))
         t_strength = float(ts.get('strength', 0.0))
@@ -659,9 +743,19 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
         m7_quality = float(ts.get("m7_quality_pred", 0.0))
         m7_target_hold = int(max(0, round(float(ts.get("m7_target_hold", 0.0)))))
         m7_vol_rank = float(np.clip(ts.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0))
-        m7_qwidth = float(max(0.0, ts.get("m7_qwidth", fdiag.get("m7_qwidth", 0.0))))
+        m7_qwidth = float(max(0.0, ts.get("m7_qwidth", meta_result.get("m7_qwidth", 0.0) if isinstance(meta_result, dict) else 0.0)))
         m7_iso_anom = 1 if float(ts.get("m7_iso_anom", 0.0)) >= 0.5 else 0
         m7_vae_anom = 1 if float(ts.get("m7_vae_anom", 0.0)) >= 0.5 else 0
+        if t_dir == 2:
+            entry_price_reco = float(ts.get("m7_entry_long_price", 0.0))
+            entry_offset_reco = float(ts.get("m7_entry_long_offset", 0.0))
+        elif t_dir == 0:
+            entry_price_reco = float(ts.get("m7_entry_short_price", 0.0))
+            entry_offset_reco = float(ts.get("m7_entry_short_offset", 0.0))
+        tp_price_reco = float(ts.get("m7_tp_price", 0.0))
+        sl_price_reco = float(ts.get("m7_sl_price", 0.0))
+        tp_offset_reco = float(ts.get("m7_tp_offset", 0.0))
+        sl_offset_reco = float(ts.get("m7_sl_offset", 0.0))
 
     ex_icon, ex_code = _exec_code(prev_pos, cur_pos)
 
@@ -675,6 +769,8 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     else:
         edge_side_word = 'NEUTRAL_BIAS'
         edge_side_color = C.YELLOW
+    long_agent_arrow = {0: '─', 1: '▲', 2: '▼'}.get(int(long_action), '?')
+    short_agent_arrow = {0: '─', 1: '▲', 2: '▼'}.get(int(short_action), '?')
 
     rl_word = _action_word(rl_action)
     rl_color = _action_color(rl_action)
@@ -682,9 +778,6 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     final_color = _action_color(fa)
     trend_word = _trend_word(t_dir)
     trend_color = _trend_color(t_dir)
-    gate_word = 'PASS' if gate_passed else 'BLOCK'
-    gate_color = C.GREEN if gate_passed else C.RED
-
     W = 62
     _SEP  = "─" * W
     _SEP2 = "═" * W
@@ -698,16 +791,9 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
     fa_arrow = _action_arrow(fa)
     rl_arrow = _action_arrow(rl_action)
     trend_arrow = _trend_arrow(t_dir)
-    gate_icon = '✓' if gate_passed else '✗'
-    gate_log = meta_result.get('gate_log') or {}
-
-    # ── 헤더: 최종 결과 화살표 ──────────────────────────────────────
+    # ── 헤더 ────────────────────────────────────────────────────────
     print(_SEP2)
     ts_str = timestamp_kst.strftime('%Y-%m-%d %H:%M')
-    header_left = f"{final_color}{C.BOLD}{fa_arrow}{fa_arrow}  {final_word}  →  {ex_code}{C.RESET}"
-    header_right = f"{C.CYAN}{ts_str}{C.RESET}"
-    print(f" {header_left}  {header_right}")
-    print(f"     {C.CYAN}${current_price:,.2f}  |  시장상태: {regime_name}{C.RESET}")
     session_flags = _session_flags_from_timestamp(timestamp_kst)
     session_parts = []
     for label, key in (("ASIA", "session_asia"), ("EUROPE", "session_europe"), ("US", "session_us")):
@@ -715,30 +801,111 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
         scol = C.GREEN if active else C.YELLOW
         sword = "ON" if active else "OFF"
         session_parts.append(f"{label}={scol}{sword}{C.RESET}")
-    print(f"     {C.CYAN}세션:{C.RESET} " + "  ".join(session_parts))
+    header_left = f"{final_color}{C.BOLD}{fa_arrow}{fa_arrow}  {final_word}  →  {ex_code}{C.RESET}"
+    print(f" {header_left}  {C.CYAN}{ts_str}  ${current_price:,.2f}{C.RESET}")
+    print(f"     {C.CYAN}{regime_name}{C.RESET}  {'  '.join(session_parts)}")
     print(_SEP)
 
-    # ── 서브 시그널 각 1행 ──────────────────────────────────────────
+    # ── 신호 / DSAC 엔진 ─────────────────────────────────────────────
     print(f"  {rl_color}{rl_arrow} 신호{C.RESET}  {rl_color}{rl_word:<6}{C.RESET}"
-          f"  엣지 {edge_side_color}{edge_side_word} {edge_gap:+.3f}{C.RESET}"
-          f"  Kelly: {_bar(meta_kelly, 8)} {meta_kelly:.3f} ({_kelly_text(meta_kelly)})")
-    # TREND
+          f" {edge_side_color}{edge_side_word} {edge_gap:+.3f}{C.RESET}"
+          f"  Kelly: {_bar(final_kelly, 8)} {final_kelly:.3f} ({_kelly_text(final_kelly)})")
+    print(
+        f"  {C.CYAN}• DSAC{C.RESET}  "
+        f"L:{long_agent_arrow}{_action_word(long_action):<5} r={C.GREEN}{long_raw:.3f}{C.RESET} k={long_kelly:.3f}"
+        f"  S:{short_agent_arrow}{_action_word(short_action):<5} r={C.RED}{short_raw:.3f}{C.RESET} k={short_kelly:.3f}"
+    )
+    print(
+        f"          → 결정 = {selected_side:<6}"
+        f"  conv={conviction:.3f} ({_conviction_text(conviction)})"
+        f"  agr={agreement:.3f} ({_agreement_text(agreement)})"
+    )
+    print(
+        f"  {C.CYAN}• 점수{C.RESET}  "
+        f"L={C.GREEN}{long_logit:+.2f}{C.RESET}(±{long_std:.2f})"
+        f"  S={C.RED}{short_logit:+.2f}{C.RESET}(±{short_std:.2f})"
+        f"  amb={ambiguity:+.2f} ({_ambiguity_text(ambiguity)})"
+        f"  conf={confidence:.3f}"
+    )
+
+    # ── 추세 / M7 ────────────────────────────────────────────────────
     dn_c = C.RED if p_dn > 0.4 else C.RESET
     up_c = C.GREEN if p_up > 0.4 else C.RESET
     trend_model = str(ts.get("trend_model", "N/A")) if isinstance(ts, dict) else "N/A"
-    print(f"  {trend_color}{trend_arrow} 중기추세{C.RESET} {trend_color}{trend_word:<6}{C.RESET}"
+    print(f"  {trend_color}{trend_arrow} 추세{C.RESET}    {trend_color}{trend_word:<6}{C.RESET}"
           f"  str={t_strength:.2f}  rev={t_rev:.2f}"
           f"  {dn_c}DN={p_dn:.0%}{C.RESET} FL={C.YELLOW}{p_fl:.0%}{C.RESET} {up_c}UP={p_up:.0%}{C.RESET}"
-          f"  model={trend_model}")
-    print(f"  {C.CYAN}• 해석{C.RESET}    추세강도={_strength_text(t_strength)}  반전판정={_reversal_text(t_rev)}")
-    print(f"  {C.CYAN}• M7{C.RESET}      포지션크기={m7_size:.2f}  품질={m7_quality:+.3f} ({_quality_text(m7_quality)})"
-          f"  목표보유={m7_target_hold:>2d}봉")
-    print(f"  {C.CYAN}• 장기추세{C.RESET} 점수={trend_exit_score:+.2f} ({_exit_score_text(trend_exit_score)})"
-          f"  불일치누적={trend_mismatch_streak}봉")
-    print(f"  {C.CYAN}• 변동성{C.RESET}  변동성상태={_vol_rank_text(m7_vol_rank)} ({m7_vol_rank:.2f})"
-          f"  불확실성폭={m7_qwidth:.4f}  스케일={uncertainty_scale:.2f}")
-    print(f"  {C.CYAN}• 이상감지{C.RESET} 회로차단={cb_active}  저변동횡보={is_lowvol_range}  고변동추세={is_highvol_trend}"
-          f"  이상치=iso:{m7_iso_anom} vae:{m7_vae_anom}")
+          f"  [{trend_model}]")
+    if entry_price_reco > 0.0 or tp_price_reco > 0.0 or sl_price_reco > 0.0:
+        print(
+            f"  {C.CYAN}• 가격{C.RESET}    진입={entry_price_reco:,.2f}({entry_offset_reco:+.3%})"
+            f"  TP={tp_price_reco:,.2f}({tp_offset_reco:+.3%})"
+            f"  SL={sl_price_reco:,.2f}({sl_offset_reco:+.3%})"
+        )
+
+    # ── 보호 / HOLD ──────────────────────────────────────────────────
+    print(
+        f"  {C.CYAN}• 보호{C.RESET}    hib={hibernation_score:.2f} ({_hibernation_text(hibernation_score)})"
+        f"  cb={cb_active}  amihud={illiq_amihud:.2f} ({_amihud_text(illiq_amihud)})"
+    )
+    if hold_reason or block_reason:
+        print(
+            f"  {C.CYAN}• HOLD{C.RESET}    {C.YELLOW}{hold_reason or '-'}{C.RESET}"
+            f"  block={C.RED}{block_reason or '-'}{C.RESET}"
+        )
+
+    # ── 진입/청산 장벽 ───────────────────────────────────────────────
+    _br = block_reason or ""
+    _conv_ok = conviction >= router_enter_threshold
+    _agr_ok  = agreement  >= router_min_agreement_threshold
+    _std_ok  = router_std_gate_ok
+    _dual_ok = not router_dual_high_hold
+    hibernation_score_th = float(meta_result.get("hibernation_score_th", 0.85)) if isinstance(meta_result, dict) else 0.85
+    _hib_ok  = hibernation_score < hibernation_score_th
+    _cb_ok   = cb_active == 0
+    _trend_ok = "trend" not in _br
+    _intg_ok  = "integral" not in _br
+    _cool_ok  = "cooldown" not in _br
+
+    if cur_pos is None:
+        # 라우터 게이트 (행 1)
+        g_conv = _gate(_conv_ok, f"CONV={conviction:.3f}", f"{router_enter_threshold:.3f}")
+        g_agr  = _gate(_agr_ok,  f"AGR={agreement:.3f}",  f"{router_min_agreement_threshold:.3f}")
+        g_std  = _gate(_std_ok,  f"STD={selected_std:.2f}", f"{router_max_confidence_std:.2f}")
+        g_dual = _gate(_dual_ok, f"DUAL={ambiguity:.2f}")
+        entry_result = _status_badge(final_word != "HOLD", "PASS", "FAIL")
+        print(f"  {C.CYAN}• 진입장벽{C.RESET}  {entry_result}  {g_conv}  {g_agr}  {g_std}  {g_dual}")
+        # 보호 게이트 (행 2)
+        g_hib  = _gate(_hib_ok,  f"HIB={hibernation_score:.2f}", f"{hibernation_score_th:.2f}")
+        g_cb   = _gate(_cb_ok,   "CB")
+        g_trend = _gate(_trend_ok, "TREND")
+        row2 = [g_hib, g_cb, g_trend]
+        if not _intg_ok:
+            row2.append(_gate(False, "INTG"))
+        if not _cool_ok:
+            row2.append(_gate(False, "COOL"))
+        if adaptive_enter_offset != 0.0 or adaptive_agreement_offset != 0.0:
+            row2.append(f"{C.CYAN}적응={adaptive_enter_offset:+.3f}/{adaptive_agreement_offset:+.3f}{C.RESET}")
+        print(f"             {'  '.join(row2)}")
+    else:
+        _own_ok = position_own_support >= 1.10
+        _opp_ok = position_opp_pressure < 0.90
+        _net_ok = position_net_edge > -0.10
+        g_own = _gate(_own_ok, f"OWN={position_own_support:.2f}", "1.10")
+        g_opp = _gate(_opp_ok, f"OPP={position_opp_pressure:.2f}", "0.90")
+        g_net = _gate(_net_ok, f"NET={position_net_edge:+.2f}", "−0.10")
+        if position_signal == "EXIT":
+            manage_result = _status_badge(False, "유지", "청산")
+            g_action = _gate(True, f"EXIT:{position_reason or '-'}")
+        elif position_signal == "REDUCE":
+            manage_result = f"{C.YELLOW}[축소!]{C.RESET}"
+            g_action = _gate(True, f"REDUCE:{position_reason or '-'}")
+        else:
+            manage_result = _status_badge(True, "유지", "청산")
+            g_action = _gate(True, f"HOLD:{position_reason or 'ok'}")
+        print(f"  {C.CYAN}• 청산장벽{C.RESET}  {manage_result}  {g_own}  {g_opp}  {g_net}  {g_action}")
+
+    # ── 체결 이벤트 ──────────────────────────────────────────────────
     if prev_pos != cur_pos:
         trade_pnl = meta_result.get("trade_pnl_pct", None)
         if trade_pnl is None and prev_pos is None and cur_pos is not None:
@@ -747,32 +914,20 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
             try:
                 p = float(trade_pnl)
                 p_col = C.GREEN if p > 0 else (C.RED if p < 0 else C.YELLOW)
-                print(f"  {C.CYAN}• TRADE{C.RESET}   event_pnl={p_col}{p:+.2f}%{C.RESET}")
+                print(f"  {C.CYAN}• TRADE{C.RESET}   pnl={p_col}{p:+.2f}%{C.RESET}")
             except Exception:
                 pass
-    # GATE
-    if not gate_passed and isinstance(gate_log, dict):
-        blocked_gate = gate_log.get('blocked_gate', 'N/A')
-        blocked_val  = gate_log.get(blocked_gate, '')
-        print(f"  {gate_color}{gate_icon} GATE{C.RESET}    {gate_color}{gate_word:<6}{C.RESET}"
-              f"  mode: {arb_mode}  차단: {C.RED}{blocked_gate}={blocked_val}{C.RESET}")
-    else:
-        print(f"  {gate_color}{gate_icon} GATE{C.RESET}    {gate_color}{gate_word:<6}{C.RESET}"
-              f"  mode: {arb_mode}  source: {source}")
+
     # ── 의사결정 체인 ────────────────────────────────────────────────
+    print(f"  {C.CYAN}• 소스{C.RESET}    {source}")
     print(_SEP)
-    gate_chain_col = C.GREEN if gate_passed else C.RED
     decision_chain = (
         f"SIGNAL={rl_color}{rl_word}{C.RESET} → "
-        f"중기추세={trend_color}{trend_word}{C.RESET} → "
-        f"FINAL={final_color}{final_word}{C.RESET}({gate_chain_col}{gate_word}{C.RESET}) → "
+        f"추세={trend_color}{trend_word}{C.RESET} → "
+        f"FINAL={final_color}{final_word}{C.RESET} → "
         f"EXEC={ex_icon} {ex_code}"
     )
-    if not gate_passed and isinstance(gate_log, dict):
-        blocked_gate = gate_log.get('blocked_gate', 'N/A')
-        decision_chain += f"  [{C.RED}차단={blocked_gate}{C.RESET}]"
     print(f"  {decision_chain}")
-    print(f"  {C.CYAN}• 최종해석{C.RESET} 신호={rl_word} / 중기추세={trend_word} / 시장상태={regime_name} / 실행={ex_code}")
     print(_SEP2)
 
 
@@ -780,30 +935,325 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
 # 3-A. DSACSignalRouter — DSAC Actor 추론 입력 생성 + 추론
 # ════════════════════════════════════════════════════════════════
 class DSACSignalRouter:
-    DEFAULT_BEST_MODEL_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_v2_agents.pth"
+    DEFAULT_SINGLE_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth"
+    DEFAULT_LONG_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_long_agents.pth"
+    DEFAULT_SHORT_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_short_agents.pth"
+    LEGACY_SINGLE_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agent.pth"
+    LEGACY_LONG_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_long.pth"
+    LEGACY_SHORT_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_short.pth"
 
     @staticmethod
-    def _build_actor_from_ckpt(ckpt: dict, device: str):
+    def _build_primary_actor_from_ckpt(ckpt: dict, device: str):
+        actor_state = ckpt.get("actor")
+        if not isinstance(actor_state, dict):
+            raise KeyError("DSAC primary 체크포인트 actor 키 없음")
+        state_dim = int(ckpt.get("state_dim", BASE_DSAC_STATE_DIM) or BASE_DSAC_STATE_DIM)
+        actor = BaseDSACGaussianActor(state_dim=state_dim).to(device)
+        actor.load_state_dict(actor_state)
+        actor.eval()
+        return actor, "DSAC_PRIMARY"
+
+    @staticmethod
+    def _build_actor_from_ckpt(ckpt: dict, device: str, side: str):
         actor_state = ckpt.get("actor")
         if not isinstance(actor_state, dict):
             raise KeyError("DSAC 체크포인트 actor 키 없음")
 
-        state_dim = int(ckpt.get("state_dim", DSAC_STATE_DIM) or DSAC_STATE_DIM)
-        is_v2 = any(k.startswith("feat.input_proj.") for k in actor_state.keys())
-        actor_cls = DSACGaussianActorV2 if is_v2 else DSACGaussianActor
-        actor = actor_cls(state_dim=state_dim).to(device)
+        if side == "long":
+            state_dim = int(ckpt.get("state_dim", LONG_STATE_DIM) or LONG_STATE_DIM)
+            actor = LongSigmoidActor(state_dim=state_dim).to(device)
+        elif side == "short":
+            state_dim = int(ckpt.get("state_dim", SHORT_STATE_DIM) or SHORT_STATE_DIM)
+            actor = ShortSigmoidActor(state_dim=state_dim).to(device)
+        else:
+            raise ValueError(f"지원하지 않는 DSAC specialist side: {side}")
         actor.load_state_dict(actor_state)
         actor.eval()
-        return actor, ("V2" if is_v2 else "V1")
+        return actor, f"DSAC_{side.upper()}"
 
     @staticmethod
-    def _resolve_model_path(model_path: str | None) -> str:
-        resolved = model_path or DSACSignalRouter.DEFAULT_BEST_MODEL_PATH
-        if resolved and os.path.exists(resolved):
-            return resolved
-        raise FileNotFoundError(f"DSAC best 체크포인트 파일이 없습니다: {resolved}")
+    def _resolve_model_path(primary: str | None, *fallbacks: str) -> str:
+        for candidate in (primary, *fallbacks):
+            if candidate and os.path.exists(candidate):
+                return candidate
+        searched = [c for c in (primary, *fallbacks) if c]
+        raise FileNotFoundError(f"DSAC specialist 체크포인트 파일이 없습니다: {searched}")
 
-    def __init__(self, model_path: str | None = None, hmm_detector: OnlineHMMDetector | None = None):
+    @staticmethod
+    def _regime_name(regime: dict[str, float] | None) -> str:
+        if not isinstance(regime, dict):
+            return "normal"
+        return next((k.replace("regime_", "") for k, v in regime.items() if float(v) == 1.0), "normal")
+
+    @staticmethod
+    def _is_cuda_runtime_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return "cuda" in msg or "acceleratorerror" in exc.__class__.__name__.lower()
+
+    def _entry_threshold(self, regime: dict[str, float] | None, trend_signal: dict | None, ambiguity: float) -> float:
+        regime_name = self._regime_name(regime)
+        trend_dir = int((trend_signal or {}).get("trend_dir", 1))
+        enter_th = self.base_enter_th
+        if regime_name == "bull" and trend_dir == 2:
+            enter_th = self.trend_align_enter_th
+        elif regime_name == "bear" and trend_dir == 0:
+            enter_th = self.trend_align_enter_th
+        elif regime_name in ("chop", "whipsaw"):
+            enter_th = self.chop_enter_th
+        if float(ambiguity) > self.ambiguity_penalty_start:
+            enter_th += self.ambiguity_penalty_add
+        enter_th += float(getattr(self, "adaptive_enter_offset", 0.0))
+        return float(np.clip(enter_th, 0.05, 0.90))
+
+    def _effective_min_agreement(self) -> float:
+        base = float(self.min_agreement_th)
+        offset = float(getattr(self, "adaptive_agreement_offset", 0.0))
+        return float(np.clip(base + offset, 0.05, 0.95))
+
+    @staticmethod
+    def _support(logit: float, std: float) -> float:
+        return float(logit * _confidence_from_std(std))
+
+    def _base_signal_info(
+        self,
+        primary_action: int,
+        primary_lev: float,
+        primary_raw: float,
+        long_action: int,
+        long_lev: float,
+        long_raw: float,
+        long_logit: float,
+        long_std: float,
+        short_action: int,
+        short_lev: float,
+        short_raw: float,
+        short_logit: float,
+        short_std: float,
+    ) -> dict[str, float | str | int]:
+        direction_score = float(long_logit - short_logit)
+        agreement = float(abs(direction_score))
+        ambiguity = float(min(long_logit, short_logit))
+        selected_std = float(long_std if direction_score >= 0.0 else short_std)
+        confidence = float(1.0 / (1.0 + selected_std))
+        conviction = float(agreement * confidence)
+        return {
+            "agent": "DSAC_DUAL",
+            "long_edge": float(long_raw),
+            "short_edge": float(short_raw),
+            "raw_action": direction_score,
+            "direction_score": direction_score,
+            "agreement": agreement,
+            "ambiguity": ambiguity,
+            "conviction": conviction,
+            "confidence": confidence,
+            "selected_std": selected_std,
+            "primary_action": int(primary_action),
+            "primary_kelly": float(primary_lev),
+            "primary_raw": float(primary_raw),
+            "long_logit": float(long_logit),
+            "short_logit": float(short_logit),
+            "long_std": float(long_std),
+            "short_std": float(short_std),
+            "_long_raw": float(long_raw),
+            "_short_raw": float(short_raw),
+            "_long_action": int(long_action),
+            "_short_action": int(short_action),
+            "_long_kelly": float(long_lev),
+            "_short_kelly": float(short_lev),
+            "_selected_side": "HOLD",
+        }
+
+    def _entry_rule(
+        self,
+        regime: dict[str, float] | None,
+        trend_signal: dict | None,
+        long_action: int,
+        long_lev: float,
+        long_info: dict,
+        short_action: int,
+        short_lev: float,
+        short_info: dict,
+        base_info: dict[str, float | str | int],
+    ) -> tuple[int, float, dict[str, float | str | int]]:
+        primary_action = int(base_info.get("primary_action", 0))
+        ambiguity = float(base_info["ambiguity"])
+        long_raw = float(base_info["long_edge"])
+        short_raw = float(base_info["short_edge"])
+        enter_th = self._entry_threshold(regime, trend_signal, ambiguity)
+        effective_agreement_th = 0.0
+        if primary_action == 1:
+            selected_side = "LONG"
+            selected_action = int(long_action)
+            selected_lev = float(long_lev)
+            selected_info = dict(long_info or {})
+            selected_logit = float(base_info["long_logit"])
+            selected_std = float(base_info["long_std"])
+        elif primary_action == 2:
+            selected_side = "SHORT"
+            selected_action = int(short_action)
+            selected_lev = float(short_lev)
+            selected_info = dict(short_info or {})
+            selected_logit = float(base_info["short_logit"])
+            selected_std = float(base_info["short_std"])
+        else:
+            selected_side = "HOLD"
+            selected_action = 0
+            selected_lev = 0.0
+            selected_info = {}
+            selected_logit = 0.0
+            selected_std = 1.0
+
+        confidence = _confidence_from_std(selected_std)
+        conviction = float(self._support(selected_logit, selected_std))
+        agreement = float(abs(selected_logit))
+        std_gate_ok = bool(selected_std <= self.max_confidence_std)
+        specialist_match = bool(
+            (primary_action == 1 and selected_action == 1) or
+            (primary_action == 2 and selected_action == 2)
+        )
+
+        if primary_action in (1, 2) and specialist_match and std_gate_ok and conviction >= enter_th:
+            adj_kelly = float(np.clip(selected_lev * conviction, 0.0, 1.0))
+            out = dict(base_info)
+            out.update(selected_info)
+            out.update({
+                "agent": "DSAC_PRIMARY_SPECIALIST",
+                "long_edge": long_raw,
+                "short_edge": short_raw,
+                "_selected_side": selected_side,
+                "agreement": agreement,
+                "confidence": confidence,
+                "selected_std": selected_std,
+                "conviction": conviction,
+                "kelly": adj_kelly,
+                "score": conviction,
+                "primary_action": primary_action,
+            })
+            return (1 if primary_action == 1 else 2), adj_kelly, out
+
+        hold_reasons: list[str] = []
+        dual_high_hold = False
+        if primary_action == 0:
+            hold_reasons.append("primary_hold")
+        if not specialist_match and primary_action in (1, 2):
+            hold_reasons.append("specialist_mismatch")
+        if not std_gate_ok:
+            hold_reasons.append("std_gate")
+        if conviction < enter_th:
+            hold_reasons.append("enter_th")
+
+        out = dict(base_info)
+        out.update({
+            "agent": "DSAC_PRIMARY_HOLD",
+            "score": conviction,
+            "agreement": agreement,
+            "confidence": confidence,
+            "selected_std": selected_std,
+            "enter_threshold": float(enter_th),
+            "min_agreement_threshold": float(effective_agreement_th),
+            "base_min_agreement_threshold": float(self.min_agreement_th),
+            "adaptive_enter_offset": float(self.adaptive_enter_offset),
+            "adaptive_agreement_offset": float(self.adaptive_agreement_offset),
+            "std_gate_ok": std_gate_ok,
+            "dual_high_hold": dual_high_hold,
+            "max_confidence_std": float(self.max_confidence_std),
+            "_selected_side": selected_side,
+            "hold_reason": ",".join(hold_reasons) if hold_reasons else "router_hold",
+        })
+        return 0, 0.0, out
+
+    def _position_rule_from_logits(
+        self,
+        side: str,
+        own_lev: float,
+        own_logit: float,
+        own_std: float,
+        opp_logit: float,
+        opp_std: float,
+        base_info: dict[str, float | str | int],
+        side_info: dict,
+    ) -> tuple[int, float, dict[str, float | str | int]]:
+        pos_action, pos_kelly, pos_diag = self._position_rule(
+            side=side,
+            own_lev=own_lev,
+            own_logit=own_logit,
+            own_std=own_std,
+            opp_logit=opp_logit,
+            opp_std=opp_std,
+        )
+        score = float(max(self._support(own_logit, own_std), float(base_info["conviction"])))
+        out = dict(base_info)
+        out.update(dict(side_info or {}))
+        out.update({
+            "agent": f"DSAC_DUAL_{side}",
+            "_selected_side": side,
+            "kelly": float(pos_kelly),
+            "score": score,
+        })
+        out.update(pos_diag)
+        return int(pos_action), float(pos_kelly), out
+
+    def _position_rule(
+        self,
+        side: str,
+        own_lev: float,
+        own_logit: float,
+        own_std: float,
+        opp_logit: float,
+        opp_std: float,
+    ) -> tuple[int, float, dict[str, float | str]]:
+        own_support = self._support(own_logit, own_std)
+        opp_pressure = self._support(opp_logit, opp_std)
+        net_edge = float(own_support - opp_pressure)
+        ambiguity = float(min(own_logit, opp_logit))
+        reduce_flag = bool(
+            ambiguity >= self.pos_ambiguity_high
+            and abs(own_logit - opp_logit) < self.pos_ambiguity_gap
+        )
+        if net_edge <= self.pos_exit_net_edge or opp_pressure >= self.pos_opp_pressure_exit:
+            return 0, 0.0, {
+                "position_signal": "EXIT",
+                "position_reason": "OPP_PRESSURE",
+                "own_support": own_support,
+                "opp_pressure": opp_pressure,
+                "net_edge": net_edge,
+            }
+        hold_kelly = float(np.clip(
+            float(own_lev) * np.clip(0.55 + 0.45 * np.tanh(net_edge / max(self.pos_kelly_scale, 1e-6)), 0.20, 1.00),
+            0.0, 1.0,
+        ))
+        if own_support <= self.pos_reduce_support or reduce_flag:
+            return (1 if side == "LONG" else 2), float(np.clip(hold_kelly * self.pos_reduce_mult, 0.0, 1.0)), {
+                "position_signal": "REDUCE",
+                "position_reason": "AMBIGUITY" if reduce_flag else "WEAK_SUPPORT",
+                "own_support": own_support,
+                "opp_pressure": opp_pressure,
+                "net_edge": net_edge,
+            }
+        if own_support >= self.pos_hold_support and net_edge >= self.pos_hold_net_edge:
+            return (1 if side == "LONG" else 2), hold_kelly, {
+                "position_signal": "HOLD",
+                "position_reason": "SUPPORTED",
+                "own_support": own_support,
+                "opp_pressure": opp_pressure,
+                "net_edge": net_edge,
+            }
+        return (1 if side == "LONG" else 2), float(np.clip(hold_kelly * 0.85, 0.0, 1.0)), {
+            "position_signal": "HOLD",
+            "position_reason": "NEUTRAL",
+            "own_support": own_support,
+            "opp_pressure": opp_pressure,
+            "net_edge": net_edge,
+        }
+
+    def __init__(
+        self,
+        model_path: str | None = None,
+        long_path: str | None = None,
+        short_path: str | None = None,
+        single_path: str | None = None,
+        hmm_detector: OnlineHMMDetector | None = None,
+    ):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.pos: str | None = None
         self.entry_price: float = 0.0
@@ -814,14 +1264,51 @@ class DSACSignalRouter:
         self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
         self.peak_equity: float = 1.0
         self.current_equity: float = 1.0
+        self.base_enter_th = float(os.getenv("DSAC_DUAL_BASE_ENTER_TH", "0.32"))
+        self.trend_align_enter_th = float(os.getenv("DSAC_DUAL_TREND_ALIGN_ENTER_TH", "0.22"))
+        self.chop_enter_th = float(os.getenv("DSAC_DUAL_CHOP_ENTER_TH", "0.46"))
+        self.min_agreement_th = float(os.getenv("DSAC_DUAL_MIN_AGREEMENT_TH", "0.38"))
+        self.ambiguity_penalty_start = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_START", "2.50"))
+        self.ambiguity_penalty_add = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_ADD", "0.08"))
+        self.max_confidence_std = float(os.getenv("DSAC_DUAL_MAX_CONFIDENCE_STD", "1.50"))
+        self.dual_high_logit_hold = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_HOLD", "2.80"))
+        self.dual_high_logit_gap = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_GAP", "0.85"))
+        self.adaptive_enter_offset = 0.0
+        self.adaptive_agreement_offset = 0.0
+        self.pos_hold_support = float(os.getenv("DSAC_DUAL_POS_HOLD_SUPPORT", "1.10"))
+        self.pos_hold_net_edge = float(os.getenv("DSAC_DUAL_POS_HOLD_NET_EDGE", "0.05"))
+        self.pos_reduce_support = float(os.getenv("DSAC_DUAL_POS_REDUCE_SUPPORT", "0.70"))
+        self.pos_reduce_mult = float(os.getenv("DSAC_DUAL_POS_REDUCE_MULT", "0.35"))
+        self.pos_exit_net_edge = float(os.getenv("DSAC_DUAL_POS_EXIT_NET_EDGE", "-0.10"))
+        self.pos_opp_pressure_exit = float(os.getenv("DSAC_DUAL_POS_OPP_PRESSURE_EXIT", "0.90"))
+        self.pos_ambiguity_high = float(os.getenv("DSAC_DUAL_POS_AMBIG_HIGH", "1.90"))
+        self.pos_ambiguity_gap = float(os.getenv("DSAC_DUAL_POS_AMBIG_GAP", "1.00"))
+        self.pos_kelly_scale = float(os.getenv("DSAC_DUAL_POS_KELLY_SCALE", "0.80"))
         self.elite_extractor = EliteSignals()
         self.new_elite_engine = NewEliteSignalEngine()
 
-        ckpt_path = self._resolve_model_path(model_path)
-        ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
-        actor, actor_ver = self._build_actor_from_ckpt(ckpt, self.device)
-        self.router = DSACRouter(actor, device=self.device)
-        logger.info("✅ DSACSignalRouter 로드 완료 (%s): %s", actor_ver, ckpt_path)
+        if model_path and not long_path and not short_path:
+            long_path = model_path
+            short_path = model_path
+        self.single_ckpt_path = self._resolve_model_path(single_path, self.DEFAULT_SINGLE_PATH, self.LEGACY_SINGLE_PATH)
+        self.long_ckpt_path = self._resolve_model_path(long_path, self.DEFAULT_LONG_PATH, self.LEGACY_LONG_PATH)
+        self.short_ckpt_path = self._resolve_model_path(short_path, self.DEFAULT_SHORT_PATH, self.LEGACY_SHORT_PATH)
+        self._load_specialists(self.device)
+
+    def _load_specialists(self, device: str) -> None:
+        single_ckpt = torch.load(self.single_ckpt_path, map_location=device, weights_only=False)
+        long_ckpt = torch.load(self.long_ckpt_path, map_location=device, weights_only=False)
+        short_ckpt = torch.load(self.short_ckpt_path, map_location=device, weights_only=False)
+        single_actor, single_ver = self._build_primary_actor_from_ckpt(single_ckpt, device)
+        long_actor, long_ver = self._build_actor_from_ckpt(long_ckpt, device, "long")
+        short_actor, short_ver = self._build_actor_from_ckpt(short_ckpt, device, "short")
+        self.device = device
+        self.primary_router = BaseDSACRouter(single_actor, device=device, hmm_detector=self.hmm)
+        self.long_router = DSACLongRouter(long_actor, device=device)
+        self.short_router = DSACShortRouter(short_actor, device=device)
+        logger.info("✅ DSAC primary 로드 완료 (%s, %s): %s", single_ver, device, self.single_ckpt_path)
+        logger.info("✅ DSACSignalRouter 로드 완료 (%s, %s): %s", long_ver, device, self.long_ckpt_path)
+        logger.info("✅ DSACSignalRouter 로드 완료 (%s, %s): %s", short_ver, device, self.short_ckpt_path)
 
     def decide(self, processed_df: pd.DataFrame, nf_preds: dict, m7_signal: dict | None = None):
         last_row = processed_df.iloc[-1]
@@ -937,8 +1424,89 @@ class DSACSignalRouter:
             "margin_usage": float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0)),
         }
 
-        action, leverage, info = self.router.decide(features, pos_dict)
-        return int(action), float(leverage), dict(info or {}), elite_sigs, regime
+        try:
+            primary_action, primary_lev, primary_info = self.primary_router.decide(features, pos_dict)
+            long_action, long_lev, long_info = self.long_router.decide(features, pos_dict)
+            short_action, short_lev, short_info = self.short_router.decide(features, pos_dict)
+        except Exception as e:
+            if self.device == "cuda" and self._is_cuda_runtime_error(e):
+                logger.warning("⚠️ DSAC dual CUDA 추론 실패, CPU로 폴백합니다: %s", e)
+                self._load_specialists("cpu")
+                primary_action, primary_lev, primary_info = self.primary_router.decide(features, pos_dict)
+                long_action, long_lev, long_info = self.long_router.decide(features, pos_dict)
+                short_action, short_lev, short_info = self.short_router.decide(features, pos_dict)
+            else:
+                raise
+
+        primary_raw = float((primary_info or {}).get("raw_action", 0.0))
+        long_raw = float((long_info or {}).get("raw_action", 0.0))
+        short_raw = float((short_info or {}).get("raw_action", 0.0))
+        long_logit = float((long_info or {}).get("logit", 0.0))
+        short_logit = float((short_info or {}).get("logit", 0.0))
+        long_std = float(max((long_info or {}).get("std", 1.0), 1e-6))
+        short_std = float(max((short_info or {}).get("std", 1.0), 1e-6))
+        info = self._base_signal_info(
+            primary_action=int(primary_action),
+            primary_lev=float(primary_lev),
+            primary_raw=primary_raw,
+            long_action=int(long_action),
+            long_lev=float(long_lev),
+            long_raw=long_raw,
+            long_logit=long_logit,
+            long_std=long_std,
+            short_action=int(short_action),
+            short_lev=float(short_lev),
+            short_raw=short_raw,
+            short_logit=short_logit,
+            short_std=short_std,
+        )
+        direction_score = float(info["direction_score"])
+        conviction = float(info["conviction"])
+
+        if self.pos == "LONG":
+            return (
+                *self._position_rule_from_logits(
+                side="LONG",
+                own_lev=float(long_lev),
+                own_logit=long_logit,
+                own_std=long_std,
+                opp_logit=short_logit,
+                opp_std=short_std,
+                base_info=info,
+                side_info=long_info,
+                ),
+                elite_sigs,
+                regime,
+            )
+
+        if self.pos == "SHORT":
+            return (
+                *self._position_rule_from_logits(
+                side="SHORT",
+                own_lev=float(short_lev),
+                own_logit=short_logit,
+                own_std=short_std,
+                opp_logit=long_logit,
+                opp_std=long_std,
+                base_info=info,
+                side_info=short_info,
+                ),
+                elite_sigs,
+                regime,
+            )
+
+        entry_action, entry_kelly, entry_info = self._entry_rule(
+            regime=regime,
+            trend_signal=m7_signal,
+            long_action=int(long_action),
+            long_lev=float(long_lev),
+            long_info=dict(long_info or {}),
+            short_action=int(short_action),
+            short_lev=float(short_lev),
+            short_info=dict(short_info or {}),
+            base_info=info,
+        )
+        return int(entry_action), float(entry_kelly), entry_info, elite_sigs, regime
 
 
 # ════════════════════════════════════════════════════════════════
@@ -962,81 +1530,87 @@ class DSACTrendRouter:
         self.trend_mismatch_streak: int = 0
         self.last_summary_ts: datetime | None = None
         self._last_state_save_ts: datetime | None = None
+        self.adaptive_enter_offset: float = 0.0
+        self.adaptive_agreement_offset: float = 0.0
 
-        # Legacy trend knobs (backward-compatible)
-        self.veto_strength = float(os.getenv("TREND_VETO_STRENGTH", "0.70"))
-        self.boost_strength = float(os.getenv("TREND_BOOST_STRENGTH", "0.35"))
-        self.chop_strength = float(os.getenv("TREND_CHOP_STRENGTH", "0.30"))
-        self.rev_reduce_prob = float(os.getenv("TREND_REV_REDUCE_PROB", "0.70"))
-
-        # Multi-model fusion knobs
-        self.dsac_weight = float(os.getenv("FUSE_DSAC_WEIGHT", "0.55"))
-        self.m7_weight = float(os.getenv("FUSE_M7_WEIGHT", "0.45"))
-        self.min_enter_score = float(os.getenv("FUSE_MIN_ENTER_SCORE", "0.12"))
-        self.flip_min_margin = float(os.getenv("FUSE_FLIP_MIN_MARGIN", "0.08"))
+        # 포지션/청산 관리
         self.min_live_kelly = float(os.getenv("FUSE_MIN_LIVE_KELLY", "0.04"))
-        self.hold_exit_margin = float(os.getenv("FUSE_HOLD_EXIT_MARGIN", "0.02"))
-        self.exit_score_buffer = float(os.getenv("FUSE_EXIT_SCORE_BUFFER", "0.07"))
-        self.exit_kelly_ratio = float(os.getenv("FUSE_EXIT_KELLY_RATIO", "0.55"))
-        self.reverse_exit_margin = float(os.getenv("FUSE_REVERSE_EXIT_MARGIN", "0.10"))
-        self.dsac_soft_exit = _env_flag("FUSE_DSAC_SOFT_EXIT", True)
-        self.force_hold_exit = _env_flag("FUSE_FORCE_HOLD_EXIT", False)
-        self.anomaly_force_exit = _env_flag("FUSE_ANOMALY_FORCE_EXIT", False)
         self.dsac_only_hard_stop = float(os.getenv("DSAC_ONLY_HARD_STOP", "0.025"))
-        self.dsac_only_max_hold = int(os.getenv("DSAC_ONLY_MAX_HOLD", "96"))
+        self.dsac_only_max_hold = int(os.getenv("DSAC_ONLY_MAX_HOLD", "36"))
         self.dsac_only_reverse_min = float(os.getenv("DSAC_ONLY_REVERSE_MIN", "0.45"))
         self.dsac_only_trail_arm = float(os.getenv("DSAC_ONLY_TRAIL_ARM", "0.012"))
         self.dsac_only_trail_gap = float(os.getenv("DSAC_ONLY_TRAIL_GAP", "0.008"))
         self.dsac_only_vol_scale_enable = _env_flag("DSAC_ONLY_VOL_SCALE_ENABLE", True)
+        self.dsac_only_cooldown_enable = _env_flag("DSAC_ONLY_COOLDOWN_ENABLE", False)
         self.dsac_only_cooldown_loss = float(os.getenv("DSAC_ONLY_COOLDOWN_LOSS", "0.05"))
         self.dsac_only_cooldown_streak = int(os.getenv("DSAC_ONLY_COOLDOWN_STREAK", "4"))
-        self.dsac_only_cooldown_bars = int(os.getenv("DSAC_ONLY_COOLDOWN_BARS", "10"))
+        self.dsac_only_cooldown_bars = int(os.getenv("DSAC_ONLY_COOLDOWN_BARS", "0"))
         self.dsac_only_trend_exit_enable = _env_flag("DSAC_ONLY_TREND_EXIT_ENABLE", True)
-        self.dsac_only_trend_exit_hold_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_HOLD_BARS", "48"))
-        self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "3"))
-        self.dsac_only_trend_exit_score = float(os.getenv("DSAC_ONLY_TREND_EXIT_SCORE", "0.30"))
-        self.dsac_only_trend_exit_quality = float(os.getenv("DSAC_ONLY_TREND_EXIT_QUALITY", "-0.010"))
+        self.dsac_only_trend_exit_hold_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_HOLD_BARS", "24"))
+        self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "2"))
+        self.dsac_only_trend_exit_score = float(os.getenv("DSAC_ONLY_TREND_EXIT_SCORE", "0.20"))
+        self.dsac_only_trend_exit_quality = float(os.getenv("DSAC_ONLY_TREND_EXIT_QUALITY", "0.000"))
         self.dsac_only_vae_block_ratio = float(os.getenv("DSAC_ONLY_VAE_BLOCK_RATIO", "1.35"))
+
+        # 신규 진입 차단
+        self.integral_enable = _env_flag("DSAC_SIGNAL_INTEGRAL_ENABLE", False)
+        self.integral_window = int(os.getenv("DSAC_SIGNAL_INTEGRAL_WINDOW", "3"))
+        self.integral_min_gap = float(os.getenv("DSAC_SIGNAL_INTEGRAL_MIN_GAP", "0.65"))
+        self.integral_require_sign = _env_flag("DSAC_SIGNAL_INTEGRAL_REQUIRE_SIGN", True)
+        self.hibernation_enable = _env_flag("DSAC_HIBERNATION_ENABLE", True)
+        self.hibernation_score_th = float(os.getenv("DSAC_HIBERNATION_SCORE_TH", "0.85"))
+        self.hibernation_bars = int(os.getenv("DSAC_HIBERNATION_BARS", "6"))
+        self.illiquidity_veto_enable = _env_flag("DSAC_ILLIQUIDITY_VETO_ENABLE", True)
+        self.illiquidity_amihud_th = float(os.getenv("DSAC_ILLIQUIDITY_AMIHUD_TH", "1.40"))
+        self.illiquidity_rsvol_th = float(os.getenv("DSAC_ILLIQUIDITY_RSVOL_TH", "0.015"))
+        self.illiquidity_vol_rank_th = float(os.getenv("DSAC_ILLIQUIDITY_VOLRANK_TH", "0.78"))
+
+        # 신규 진입 사이징
+        self.sizing_bayes_enable = _env_flag("DSAC_SIZING_BAYES_ENABLE", True)
+        self.sizing_bayes_z_scale = float(os.getenv("DSAC_SIZING_BAYES_Z_SCALE", "1.5"))
+        self.sizing_bayes_min_mult = float(os.getenv("DSAC_SIZING_BAYES_MIN_MULT", "0.35"))
+        self.sizing_bayes_max_mult = float(os.getenv("DSAC_SIZING_BAYES_MAX_MULT", "1.80"))
+        self.sizing_qwidth_enable = _env_flag("DSAC_SIZING_QWIDTH_ENABLE", True)
+        self.sizing_qwidth_ref = float(os.getenv("DSAC_SIZING_QWIDTH_REF", "0.008"))
+        self.sizing_qwidth_min_mult = float(os.getenv("DSAC_SIZING_QWIDTH_MIN_MULT", "0.50"))
+        self.sizing_qwidth_max_mult = float(os.getenv("DSAC_SIZING_QWIDTH_MAX_MULT", "1.20"))
+        self.sizing_mtf_enable = _env_flag("DSAC_SIZING_MTF_ENABLE", True)
+        self.sizing_mtf_partial_mult = float(os.getenv("DSAC_SIZING_MTF_PARTIAL_MULT", "1.15"))
+        self.sizing_mtf_full_mult = float(os.getenv("DSAC_SIZING_MTF_FULL_MULT", "1.35"))
+        self.sizing_smart_enable = _env_flag("DSAC_SIZING_SMART_ENABLE", True)
+        self.sizing_smart_same_sign_mult = float(os.getenv("DSAC_SIZING_SMART_SAME_SIGN_MULT", "1.20"))
+        self.sizing_smart_opp_sign_mult = float(os.getenv("DSAC_SIZING_SMART_OPP_SIGN_MULT", "0.60"))
+        self.sizing_taker_boost_th = float(os.getenv("DSAC_SIZING_TAKER_BOOST_TH", "0.20"))
+        self.sizing_taker_boost_mult = float(os.getenv("DSAC_SIZING_TAKER_BOOST_MULT", "1.10"))
+        self.sizing_mdd_enable = _env_flag("DSAC_SIZING_MDD_ENABLE", True)
+        self.sizing_mdd_loss_streak_th = int(os.getenv("DSAC_SIZING_MDD_LOSS_STREAK_TH", "3"))
+        self.sizing_mdd_reduce_mult = float(os.getenv("DSAC_SIZING_MDD_REDUCE_MULT", "0.35"))
+        self.sizing_recent_pnl_window = int(os.getenv("DSAC_SIZING_RECENT_PNL_WINDOW", "10"))
+        self.sizing_recent_pnl_cut = float(os.getenv("DSAC_SIZING_RECENT_PNL_CUT", "-0.01"))
+
+        # 진입가 추천
+        self.entry_reco_enable = _env_flag("DSAC_ENTRY_RECO_ENABLE", True)
+        self.entry_reco_min_strength = float(os.getenv("DSAC_ENTRY_RECO_MIN_STRENGTH", "0.55"))
+        self.entry_reco_min_quality = float(os.getenv("DSAC_ENTRY_RECO_MIN_QUALITY", "-0.002"))
+        self.entry_reco_max_offset = float(os.getenv("DSAC_ENTRY_RECO_MAX_OFFSET", "0.0045"))
+        self.entry_reco_price_buffer = float(os.getenv("DSAC_ENTRY_RECO_PRICE_BUFFER", "0.0002"))
         self.trade_fee = float(os.getenv("LIVE_FEE_RATE", "0.0005"))
         self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
         self.live_state_path = os.getenv("DSAC_LIVE_STATE_PATH", "data/ensemble/dsac_live_state.json")
-
-        # Layer-1 alpha gate (direction + quality)
-        self.dir_prob_th = float(os.getenv("FUSE_DIR_PROB_TH", "0.60"))
-        self.quality_fee_floor = float(os.getenv("FUSE_QUALITY_FEE_FLOOR", "0.0015"))
-        self.quality_lowvol_bonus = float(os.getenv("FUSE_QUALITY_LOWVOL_BONUS", "0.0007"))
-
-        # Layer-2 uncertainty sizing + dynamic quantile stop
-        self.qwidth_full_th = float(os.getenv("FUSE_QWIDTH_FULL_TH", "0.008"))
-        self.qwidth_half_th = float(os.getenv("FUSE_QWIDTH_HALF_TH", "0.018"))
-        self.stop_wide_mult = float(os.getenv("FUSE_STOP_WIDE_MULT", "1.35"))
-        self.stop_tight_mult = float(os.getenv("FUSE_STOP_TIGHT_MULT", "0.90"))
-
-        # Layer-3 regime switch
-        self.range_cluster_id = int(os.getenv("FUSE_RANGE_CLUSTER_ID", "0"))
-        self.range_vol_rank_max = float(os.getenv("FUSE_RANGE_VOL_RANK_MAX", "0.35"))
-        self.range_score_boost = float(os.getenv("FUSE_RANGE_SCORE_BOOST", "0.04"))
-        self.range_prob_boost = float(os.getenv("FUSE_RANGE_PROB_BOOST", "0.03"))
-        self.trend_vol_rank_min = float(os.getenv("FUSE_TREND_VOL_RANK_MIN", "0.70"))
-        self.trend_strength_min = float(os.getenv("FUSE_TREND_STRENGTH_MIN", "0.55"))
-        self.trend_prob_relax = float(os.getenv("FUSE_TREND_PROB_RELAX", "0.04"))
-
-        # Layer-3 circuit breaker
-        self.cb_enable = _env_flag("FUSE_CIRCUIT_BREAKER", True)
-        self.cb_iso_score_th = float(os.getenv("FUSE_CB_ISO_SCORE_TH", "0.060"))
-        self.cb_vae_ratio_th = float(os.getenv("FUSE_CB_VAE_RATIO_TH", "1.15"))
-        self.cb_hdb_noise = _env_flag("FUSE_CB_HDB_NOISE", True)
-        self.cb_hdb_prob_max = float(os.getenv("FUSE_CB_HDB_PROB_MAX", "0.10"))
-        self.cb_hdb_min_samples = int(os.getenv("FUSE_CB_HDB_MIN_SAMPLES", "200"))
-        self.cb_hdb_disable_noise_ratio = float(os.getenv("FUSE_CB_HDB_DISABLE_NOISE_RATIO", "0.85"))
-        self.cb_hdb_disable_zero_prob_ratio = float(os.getenv("FUSE_CB_HDB_DISABLE_ZERO_PROB_RATIO", "0.98"))
-        self._hdb_seen = 0
-        self._hdb_noise_hits = 0
-        self._hdb_zero_prob_hits = 0
-
-        self.use_tuned_json = _env_flag("FUSE_USE_TUNED_JSON", True)
-        self.tuned_json_path = os.getenv("FUSE_TUNED_JSON_PATH", "data/ensemble/fuse_walkforward_best.json")
-        self._apply_tuned_defaults()
+        self.adaptive_gate_enable = _env_flag("DSAC_ADAPTIVE_GATE_ENABLE", True)
+        self.adaptive_gate_pnl_window = int(os.getenv("DSAC_ADAPTIVE_GATE_PNL_WINDOW", "8"))
+        self.adaptive_gate_enter_step = float(os.getenv("DSAC_ADAPTIVE_GATE_ENTER_STEP", "0.01"))
+        self.adaptive_gate_agreement_step = float(os.getenv("DSAC_ADAPTIVE_GATE_AGREEMENT_STEP", "0.01"))
+        self.adaptive_gate_loosen_step = float(os.getenv("DSAC_ADAPTIVE_GATE_LOOSEN_STEP", "0.02"))
+        self.adaptive_gate_enter_min = float(os.getenv("DSAC_ADAPTIVE_GATE_ENTER_MIN", "-0.18"))
+        self.adaptive_gate_enter_max = float(os.getenv("DSAC_ADAPTIVE_GATE_ENTER_MAX", "0.08"))
+        self.adaptive_gate_agreement_min = float(os.getenv("DSAC_ADAPTIVE_GATE_AGREEMENT_MIN", "-0.14"))
+        self.adaptive_gate_agreement_max = float(os.getenv("DSAC_ADAPTIVE_GATE_AGREEMENT_MAX", "0.08"))
+        self.adaptive_gate_flat_bars = int(os.getenv("DSAC_ADAPTIVE_GATE_FLAT_BARS", "10"))
+        self.adaptive_gate_loss_streak_th = int(os.getenv("DSAC_ADAPTIVE_GATE_LOSS_STREAK_TH", "4"))
+        self.adaptive_gate_bad_pnl_cut = float(os.getenv("DSAC_ADAPTIVE_GATE_BAD_PNL_CUT", "-0.015"))
+        self.adaptive_gate_good_pnl_cut = float(os.getenv("DSAC_ADAPTIVE_GATE_GOOD_PNL_CUT", "0.006"))
+        self.adaptive_flat_cycles: int = 0
 
         # ── 수익 보호 스텝 스탑 (브레이크이븐 포함) ─────────────────────────
         # peak_equity 기준 (레버리지 적용 수익률 단위)
@@ -1077,118 +1651,103 @@ class DSACTrendRouter:
         self.volume_min_ratio      = float(os.getenv("FUSE_VOLUME_MIN_RATIO",  "0.50"))  # 20봉 평균 대비 최소 비율
         self.volume_low_kelly      = float(os.getenv("FUSE_VOLUME_LOW_KELLY",  "0.80"))  # 저거래량 시 kelly 배수
 
-        # Online adaptation knobs
-        self.online_adapt = False
-        self.adapt_alpha = float(os.getenv("FUSE_ADAPT_ALPHA", "0.08"))
-        self.adapt_lr = float(os.getenv("FUSE_ADAPT_LR", "0.06"))
-        self.adapt_weight_step = float(os.getenv("FUSE_ADAPT_WEIGHT_STEP", "0.01"))
-        self.adapt_state_path = os.getenv("FUSE_ADAPT_STATE_PATH", "data/ensemble/fuse_online_state.json")
-
-        self.trade_count: int = 0
-        self.win_rate_ema: float = 0.5
-        self.pnl_ema: float = 0.0
-        self.dsac_perf_ema: float = 0.0
-        self.m7_perf_ema: float = 0.0
-
-        self._normalize_weights()
         self._load_live_state()
-
-    def _apply_tuned_defaults(self) -> None:
-        if not self.use_tuned_json:
-            return
-        path = self.tuned_json_path
-        if not path or not os.path.exists(path):
-            return
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception as e:
-            logger.warning("⚠️ FUSE 튜닝 JSON 로드 실패: %s", e)
-            return
-
-        env_export = payload.get("env_export", {}) if isinstance(payload, dict) else {}
-        best_params = payload.get("best_params", {}) if isinstance(payload, dict) else {}
-        if not isinstance(env_export, dict):
-            env_export = {}
-        if not isinstance(best_params, dict):
-            best_params = {}
-
-        def _choose(env_key: str, best_key: str):
-            if os.getenv(env_key) is not None:
-                return None
-            if env_key in env_export:
-                return env_export.get(env_key)
-            return best_params.get(best_key)
-
-        def _to_float(v, cur):
-            try:
-                return float(v)
-            except Exception:
-                return cur
-
-        def _to_bool(v, cur):
-            if isinstance(v, bool):
-                return v
-            s = str(v).strip().lower()
-            if s in {"1", "true", "yes", "y", "on"}:
-                return True
-            if s in {"0", "false", "no", "n", "off"}:
-                return False
-            try:
-                return float(v) >= 0.5
-            except Exception:
-                return cur
-
-        self.dsac_weight = _to_float(_choose("FUSE_DSAC_WEIGHT", "dsac_weight"), self.dsac_weight)
-        self.m7_weight = _to_float(_choose("FUSE_M7_WEIGHT", "m7_weight"), self.m7_weight)
-        self.min_enter_score = _to_float(_choose("FUSE_MIN_ENTER_SCORE", "min_enter_score"), self.min_enter_score)
-        self.flip_min_margin = _to_float(_choose("FUSE_FLIP_MIN_MARGIN", "flip_min_margin"), self.flip_min_margin)
-        self.min_live_kelly = _to_float(_choose("FUSE_MIN_LIVE_KELLY", "min_live_kelly"), self.min_live_kelly)
-        self.hold_exit_margin = _to_float(_choose("FUSE_HOLD_EXIT_MARGIN", "hold_exit_margin"), self.hold_exit_margin)
-        self.veto_strength = _to_float(_choose("TREND_VETO_STRENGTH", "veto_strength"), self.veto_strength)
-        self.chop_strength = _to_float(_choose("TREND_CHOP_STRENGTH", "chop_strength"), self.chop_strength)
-        self.rev_reduce_prob = _to_float(_choose("TREND_REV_REDUCE_PROB", "rev_reduce_prob"), self.rev_reduce_prob)
-        anom_val = _choose("FUSE_ANOMALY_FORCE_EXIT", "anomaly_force_exit")
-        if anom_val is not None:
-            self.anomaly_force_exit = _to_bool(anom_val, self.anomaly_force_exit)
-
-        logger.info(
-            "🧪 FUSE 튜닝값 반영: w_dsac=%.3f w_m7=%.3f enter=%.3f flip=%.3f min_k=%.3f",
-            self.dsac_weight, self.m7_weight, self.min_enter_score, self.flip_min_margin, self.min_live_kelly,
-        )
 
     def record_outcome(self, realized_pnl_pct: float):
         pnl = float(realized_pnl_pct)
         self.last_realized_pnl = None
-        self.trade_count += 1
         self.recent_realized.append(pnl)
         self.loss_streak = 0 if pnl > 0 else (self.loss_streak + 1)
-        if (
-            len(self.recent_realized) >= 5
-            and sum(list(self.recent_realized)[-5:]) <= -abs(self.dsac_only_cooldown_loss)
-        ) or self.loss_streak >= max(1, self.dsac_only_cooldown_streak):
-            self.cooldown_bars_left = max(self.cooldown_bars_left, max(1, self.dsac_only_cooldown_bars))
-        a = float(np.clip(self.adapt_alpha, 0.001, 0.5))
-        reward = float(np.tanh(pnl / 0.01))
-        self.pnl_ema = (1.0 - a) * self.pnl_ema + a * pnl
-        self.win_rate_ema = (1.0 - a) * self.win_rate_ema + a * (1.0 if pnl > 0 else 0.0)
-
-        self.dsac_perf_ema = (1.0 - a) * self.dsac_perf_ema + a * reward
-        self.m7_perf_ema = (1.0 - a) * self.m7_perf_ema + a * reward
+        if self.dsac_only_cooldown_enable:
+            if (
+                len(self.recent_realized) >= 5
+                and sum(list(self.recent_realized)[-5:]) <= -abs(self.dsac_only_cooldown_loss)
+            ) or self.loss_streak >= max(1, self.dsac_only_cooldown_streak):
+                self.cooldown_bars_left = max(self.cooldown_bars_left, max(1, self.dsac_only_cooldown_bars))
+        else:
+            self.cooldown_bars_left = 0
         self._save_live_state()
         self._open_trade_diag = None
 
-    def _update_pos(self, final_action: int, current_price: float, leverage: float | None = None):
+    def update_adaptive_gate(self, final_action: int, in_position: bool) -> tuple[float, float]:
+        if not self.adaptive_gate_enable:
+            self.adaptive_enter_offset = 0.0
+            self.adaptive_agreement_offset = 0.0
+            return 0.0, 0.0
+
+        if in_position:
+            self.adaptive_flat_cycles = 0
+        elif int(final_action) == 0:
+            self.adaptive_flat_cycles += 1
+        else:
+            self.adaptive_flat_cycles = 0
+
+        window = max(1, int(self.adaptive_gate_pnl_window))
+        recent_vals = list(self.recent_realized)[-window:]
+        recent_pnl_sum = float(sum(recent_vals)) if recent_vals else 0.0
+
+        enter_offset = 0.0
+        agreement_offset = 0.0
+        if self.loss_streak >= max(1, self.adaptive_gate_loss_streak_th) or recent_pnl_sum <= self.adaptive_gate_bad_pnl_cut:
+            enter_offset += float(self.adaptive_gate_enter_step)
+            agreement_offset += float(self.adaptive_gate_agreement_step)
+        elif self.cooldown_bars_left == 0 and self.loss_streak == 0 and recent_pnl_sum >= self.adaptive_gate_good_pnl_cut:
+            enter_offset -= float(self.adaptive_gate_loosen_step)
+            agreement_offset -= float(self.adaptive_gate_loosen_step)
+
+        if self.pos is None and self.adaptive_flat_cycles >= max(1, self.adaptive_gate_flat_bars):
+            enter_offset -= float(self.adaptive_gate_loosen_step)
+            agreement_offset -= float(self.adaptive_gate_loosen_step * 0.5)
+
+        self.adaptive_enter_offset = float(np.clip(
+            enter_offset,
+            self.adaptive_gate_enter_min,
+            self.adaptive_gate_enter_max,
+        ))
+        self.adaptive_agreement_offset = float(np.clip(
+            agreement_offset,
+            self.adaptive_gate_agreement_min,
+            self.adaptive_gate_agreement_max,
+        ))
+        return self.adaptive_enter_offset, self.adaptive_agreement_offset
+
+    def _choose_entry_price(self, final_action: int, current_price: float, trend_signal: dict | None = None) -> float:
+        px = max(float(current_price), 0.0)
+        if not self.entry_reco_enable or px <= 0.0 or not isinstance(trend_signal, dict):
+            return px
+        strength = float(trend_signal.get("strength", 0.0) or 0.0)
+        quality = float(trend_signal.get("m7_quality_pred", 0.0) or 0.0)
+        if strength < self.entry_reco_min_strength or quality < self.entry_reco_min_quality:
+            return px
+        if final_action == 1:
+            reco_px = float(trend_signal.get("m7_entry_long_price", 0.0) or 0.0)
+            reco_off = abs(float(trend_signal.get("m7_entry_long_offset", 0.0) or 0.0))
+            if reco_px > 0.0 and reco_px <= px * (1.0 + self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
+                return reco_px
+        elif final_action == 2:
+            reco_px = float(trend_signal.get("m7_entry_short_price", 0.0) or 0.0)
+            reco_off = abs(float(trend_signal.get("m7_entry_short_offset", 0.0) or 0.0))
+            if reco_px > 0.0 and reco_px >= px * (1.0 - self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
+                return reco_px
+        return px
+
+    def _update_pos(
+        self,
+        final_action: int,
+        current_price: float,
+        leverage: float | None = None,
+        trend_signal: dict | None = None,
+    ):
+        entry_px = self._choose_entry_price(final_action, current_price, trend_signal)
         if final_action == 1 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = "LONG", current_price, 0
+            self.pos, self.entry_price, self.hold_count = "LONG", entry_px, 0
             self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
             self.peak_equity = self.cur_equity = 1.0
             self.last_realized_pnl = None
             self.trend_mismatch_streak = 0
             self._save_live_state()
         elif final_action == 2 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = "SHORT", current_price, 0
+            self.pos, self.entry_price, self.hold_count = "SHORT", entry_px, 0
             self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
             self.peak_equity = self.cur_equity = 1.0
             self.last_realized_pnl = None
@@ -1214,67 +1773,6 @@ class DSACTrendRouter:
             self.last_realized_pnl = None
             self._save_live_state()
 
-    def _normalize_weights(self) -> None:
-        self.dsac_weight = float(max(0.0, self.dsac_weight))
-        self.m7_weight = float(max(0.0, self.m7_weight))
-        s = self.dsac_weight + self.m7_weight
-        if s <= 1e-12:
-            self.dsac_weight, self.m7_weight = 0.5, 0.5
-            return
-        self.dsac_weight /= s
-        self.m7_weight /= s
-
-    def _load_adapt_state(self) -> None:
-        path = self.adapt_state_path
-        if not path or not os.path.exists(path):
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.dsac_weight = float(data.get("dsac_weight", self.dsac_weight))
-            self.m7_weight = float(data.get("m7_weight", self.m7_weight))
-            loaded_enter = float(data.get("min_enter_score", self.min_enter_score))
-            loaded_kelly = float(data.get("min_live_kelly", self.min_live_kelly))
-            # 과거 적응상태가 임계값을 더 높여 저장된 경우, 현재 완화값보다 높아지지 않게 캡
-            self.min_enter_score = min(loaded_enter, self.min_enter_score)
-            self.min_live_kelly = min(loaded_kelly, self.min_live_kelly)
-            self.trade_count = int(data.get("trade_count", self.trade_count))
-            self.win_rate_ema = float(data.get("win_rate_ema", self.win_rate_ema))
-            self.pnl_ema = float(data.get("pnl_ema", self.pnl_ema))
-            self.dsac_perf_ema = float(data.get("dsac_perf_ema", self.dsac_perf_ema))
-            self.m7_perf_ema = float(data.get("m7_perf_ema", self.m7_perf_ema))
-            self._normalize_weights()
-            logger.info(
-                "♻️ FUSE 적응상태 로드: w_dsac=%.3f w_m7=%.3f enter=%.3f min_k=%.3f trades=%d",
-                self.dsac_weight, self.m7_weight, self.min_enter_score, self.min_live_kelly, self.trade_count,
-            )
-        except Exception as e:
-            logger.warning("⚠️ FUSE 적응상태 로드 실패: %s", e)
-
-    def _save_adapt_state(self) -> None:
-        path = self.adapt_state_path
-        if not path:
-            return
-        try:
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            payload = {
-                "dsac_weight": self.dsac_weight,
-                "m7_weight": self.m7_weight,
-                "min_enter_score": self.min_enter_score,
-                "min_live_kelly": self.min_live_kelly,
-                "trade_count": self.trade_count,
-                "win_rate_ema": self.win_rate_ema,
-                "pnl_ema": self.pnl_ema,
-                "dsac_perf_ema": self.dsac_perf_ema,
-                "m7_perf_ema": self.m7_perf_ema,
-            }
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=True)
-        except Exception as e:
-            logger.warning("⚠️ FUSE 적응상태 저장 실패: %s", e)
-
     def _load_live_state(self) -> None:
         path = self.live_state_path
         if not path or not os.path.exists(path):
@@ -1293,6 +1791,7 @@ class DSACTrendRouter:
             self.loss_streak = int(data.get("loss_streak", 0))
             self.cooldown_bars_left = int(data.get("cooldown_bars_left", 0))
             self.trend_mismatch_streak = int(data.get("trend_mismatch_streak", 0))
+            self.adaptive_flat_cycles = int(data.get("adaptive_flat_cycles", 0))
             self.recent_realized = deque(
                 [float(x) for x in data.get("recent_realized", [])],
                 maxlen=20,
@@ -1333,6 +1832,7 @@ class DSACTrendRouter:
                 "loss_streak": self.loss_streak,
                 "cooldown_bars_left": self.cooldown_bars_left,
                 "trend_mismatch_streak": self.trend_mismatch_streak,
+                "adaptive_flat_cycles": self.adaptive_flat_cycles,
                 "recent_realized": list(self.recent_realized),
                 "trade_history": list(self.trade_history),
                 "saved_at": pd.Timestamp.utcnow().tz_localize(None).isoformat(),
@@ -1555,472 +2055,18 @@ class DSACTrendRouter:
             return 2
         return 0
 
-    def fuse(self, dsac_action: int, dsac_info: dict, regime: dict, current_price: float = 0.0,
-             trend_signal=None, garch_vol_z: float = 0.0,
-             funding_rate: float = 0.0, btc_3bar_ret: float = 0.0,
-             aux_chop_factor: float = 1.0, aux_volume_factor: float = 1.0) -> dict:
-        ts = dict(trend_signal) if isinstance(trend_signal, dict) else (
-            trend_signal.to_arbiter_dict() if trend_signal is not None and hasattr(trend_signal, "to_arbiter_dict") else None
-        )
-
-        dsac_action = int(dsac_action)
-        dsac_side = self._side_from_action(dsac_action)
-        cur_side = 1 if self.pos == "LONG" else (-1 if self.pos == "SHORT" else 0)
-        raw_action = float(dsac_info.get("raw_action", 0.0))
-        base_kelly = float(dsac_info.get("kelly", dsac_info.get("score", 0.0)))
-        base_kelly = float(np.clip(base_kelly, 0.0, 1.0))
-        dsac_score = float(np.clip(max(abs(raw_action), abs(float(dsac_info.get("score", 0.0))), base_kelly), 0.0, 1.0))
-
-        # M7 defaults (missing model 시 중립값)
-        t_dir = int(ts.get("trend_dir", 1)) if isinstance(ts, dict) else 1
-        t_str = float(np.clip(ts.get("strength", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        t_rev = float(np.clip(ts.get("rev_prob", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        p_dn = float(np.clip(ts.get("prob_dn", ts.get("m7_prob_dn", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        p_fl = float(np.clip(ts.get("prob_flat", ts.get("m7_prob_fl", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        p_up = float(np.clip(ts.get("prob_up", ts.get("m7_prob_up", 0.0)), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        _p_sum = p_dn + p_fl + p_up
-        if _p_sum > 1e-12:
-            p_dn, p_fl, p_up = p_dn / _p_sum, p_fl / _p_sum, p_up / _p_sum
-        else:
-            p_dn = p_fl = p_up = 1.0 / 3.0
-
-        m7_conf = float(np.clip(ts.get("m7_confidence", t_str), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        m7_size = float(np.clip(ts.get("m7_size", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        m7_quality = float(ts.get("m7_quality_pred", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_target_hold = int(max(0, round(float(ts.get("m7_target_hold", 0.0))))) if isinstance(ts, dict) else 0
-        m7_vol_rank = float(np.clip(ts.get("m7_gmm_vol_rank", 0.5), 0.0, 1.0)) if isinstance(ts, dict) else 0.5
-        m7_gmm_cluster = int(round(float(ts.get("m7_gmm_cluster", -1.0)))) if isinstance(ts, dict) else -1
-        m7_hdb_label = int(round(float(ts.get("m7_hdb_label", -1.0)))) if isinstance(ts, dict) else -1
-        m7_hdb_prob = float(np.clip(ts.get("m7_hdb_prob", 0.0), 0.0, 1.0)) if isinstance(ts, dict) else 0.0
-        m7_iso_anom = bool(float(ts.get("m7_iso_anom", 0.0)) >= 0.5) if isinstance(ts, dict) else False
-        m7_vae_anom = bool(float(ts.get("m7_vae_anom", 0.0)) >= 0.5) if isinstance(ts, dict) else False
-        m7_gate_block = bool(float(ts.get("m7_gate_block", 0.0)) >= 0.5) if isinstance(ts, dict) else False
-        m7_iso_score = float(ts.get("m7_iso_score", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_vae_error = float(ts.get("m7_vae_error", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_vae_threshold = float(ts.get("m7_vae_threshold", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_q10 = float(ts.get("m7_q10", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_q50 = float(ts.get("m7_q50", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_q90 = float(ts.get("m7_q90", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_qwidth = float(max(0.0, ts.get("m7_qwidth", 0.0))) if isinstance(ts, dict) else 0.0
-        xgb_dn = float(np.clip(ts.get("m7_trend_xgb_dn", p_dn), 0.0, 1.0)) if isinstance(ts, dict) else p_dn
-        xgb_up = float(np.clip(ts.get("m7_trend_xgb_up", p_up), 0.0, 1.0)) if isinstance(ts, dict) else p_up
-        m7_expected_ret = float(ts.get("m7_expected_ret", 0.0)) if isinstance(ts, dict) else 0.0
-        m7_tail_risk = abs(float(ts.get("m7_tail_risk", 0.0))) if isinstance(ts, dict) else 0.0
-        m7_composite = float(np.clip(ts.get("m7_composite_score", 0.0), -1.0, 1.0)) if isinstance(ts, dict) else 0.0
-
-        # HDBSCAN이 상시 noise만 내는 경우 회로 차단기에서 제외 (모델 붕괴 방지)
-        self._hdb_seen += 1
-        if m7_hdb_label == -1:
-            self._hdb_noise_hits += 1
-        if m7_hdb_prob <= 1e-8:
-            self._hdb_zero_prob_hits += 1
-        hdb_noise_ratio = float(self._hdb_noise_hits / max(1, self._hdb_seen))
-        hdb_zero_prob_ratio = float(self._hdb_zero_prob_hits / max(1, self._hdb_seen))
-        hdb_reliable = not (
-            self._hdb_seen >= max(20, self.cb_hdb_min_samples)
-            and hdb_noise_ratio >= self.cb_hdb_disable_noise_ratio
-            and hdb_zero_prob_ratio >= self.cb_hdb_disable_zero_prob_ratio
-        )
-
-        vae_ratio = float(m7_vae_error / max(m7_vae_threshold, 1e-8)) if m7_vae_threshold > 1e-8 else (1.0 if m7_vae_anom else 0.0)
-        cb_iso = bool(m7_iso_anom and m7_iso_score >= self.cb_iso_score_th)
-        cb_vae = bool(m7_vae_anom and vae_ratio >= self.cb_vae_ratio_th)
-        cb_hdb = bool(
-            self.cb_hdb_noise
-            and hdb_reliable
-            and (m7_hdb_label == -1)
-            and (m7_hdb_prob > 1e-8)
-            and (m7_hdb_prob <= self.cb_hdb_prob_max)
-        )
-        circuit_breaker = bool(self.cb_enable and (cb_iso or cb_vae or cb_hdb))
-        cb_tags = []
-        if cb_iso:
-            cb_tags.append("CB_ISO")
-        if cb_vae:
-            cb_tags.append("CB_VAE")
-        if cb_hdb:
-            cb_tags.append("CB_HDB")
-
-        # 강한 이상 징후면 신규 진입 차단, 옵션으로 보유 포지션 강제 청산
-        # (완화형) iso/vae 동시 탐지라도 점수 강도가 약하면 soft_anomaly로 분류
-        hard_anomaly = bool(
-            m7_gate_block
-            or (
-                m7_iso_anom
-                and m7_vae_anom
-                and (
-                    m7_iso_score >= (self.cb_iso_score_th * 1.4)
-                    or vae_ratio >= (self.cb_vae_ratio_th * 1.15)
-                )
-            )
-        )
-        soft_anomaly = (m7_iso_anom ^ m7_vae_anom) and not hard_anomaly
-
-        # M7 리스크 신뢰도(사이즈/신뢰 결합) — 방향 결정에는 사용하지 않음
-        m7_score = float(np.clip(m7_conf * (0.60 + 0.40 * m7_size), 0.0, 1.0))
-        if t_dir == 1:
-            m7_score *= 0.65
-
-        # 방향은 DSAC 단독
-        dsac_signed = float(dsac_side * dsac_score)
-        fused_signed = dsac_signed
-        fused_abs = abs(fused_signed)
-        fused_side = 1 if fused_signed > self.flip_min_margin else (-1 if fused_signed < -self.flip_min_margin else 0)
-
-        # Layer-3 Regime switch: 저변동 횡보 vs 고변동 추세
-        is_lowvol_range = bool(m7_gmm_cluster == self.range_cluster_id and m7_vol_rank <= self.range_vol_rank_max)
-        is_highvol_trend = bool(m7_vol_rank >= self.trend_vol_rank_min and t_dir != 1 and t_str >= self.trend_strength_min)
-        enter_score_thr = float(np.clip(
-            self.min_enter_score + (self.range_score_boost if is_lowvol_range else 0.0) - (0.02 if is_highvol_trend else 0.0),
-            0.08,
-            0.45,
-        ))
-        dir_prob_thr = float(np.clip(
-            self.dir_prob_th + (self.range_prob_boost if is_lowvol_range else 0.0) - (self.trend_prob_relax if is_highvol_trend else 0.0),
-            0.45,
-            0.80,
-        ))
-        quality_thr = float(self.quality_fee_floor + (self.quality_lowvol_bonus if is_lowvol_range else 0.0))
-
-        # 환경/품질 기반 Kelly 조정계수
-        quality_factor = float(np.clip(1.0 + np.tanh(m7_quality * 12.0) * 0.20, 0.70, 1.25))
-        ret_factor = float(np.clip(0.90 + np.tanh(abs(m7_expected_ret) * 250.0) * 0.20, 0.85, 1.15))
-        tail_factor = float(np.clip(1.0 - min(m7_tail_risk * 180.0, 0.45), 0.55, 1.00))
-        vol_factor = 1.0
-        if m7_vol_rank >= 0.85:
-            vol_factor *= 0.70  # 0.55 → 0.70: 극고변동 페널티 완화
-        elif m7_vol_rank >= 0.70:
-            vol_factor *= 0.85  # 0.75 → 0.85: 고변동 페널티 완화
-        elif m7_vol_rank <= 0.20:
-            vol_factor *= 1.08
-        # hdb_label==-1 페널티 제거: circuit breaker에서 이미 처리됨
-        if m7_hdb_prob < 0.20:
-            vol_factor *= 0.93  # 0.90 → 0.93: 완화
-        if float(garch_vol_z) >= 2.0:
-            vol_factor *= 0.80  # 0.75 → 0.80: 완화
-        elif float(garch_vol_z) >= 1.2:
-            vol_factor *= 0.92  # 0.88 → 0.92: 완화
-
-        regime_chop = float(regime.get("regime_chop", 0.0)) if isinstance(regime, dict) else 0.0
-        regime_whipsaw = float(regime.get("regime_whipsaw", 0.0)) if isinstance(regime, dict) else 0.0
-        regime_bull = float(regime.get("regime_bull", 0.0)) if isinstance(regime, dict) else 0.0
-        regime_bear = float(regime.get("regime_bear", 0.0)) if isinstance(regime, dict) else 0.0
-        dir_ref = dsac_side if dsac_side != 0 else cur_side
-        regime_factor = float(np.clip(
-            1.0 - 0.25 * regime_chop - 0.20 * regime_whipsaw
-            + (0.10 if dir_ref > 0 else 0.0) * regime_bull
-            + (0.10 if dir_ref < 0 else 0.0) * regime_bear,
-            0.60,
-            1.15,
-        ))
-
-        rev_factor = 0.60 if t_rev >= self.rev_reduce_prob else 1.0
-        chop_factor = 0.80 if (t_dir == 1 and t_str >= self.chop_strength) else 1.0
-        anom_factor = 0.0 if hard_anomaly else (0.50 if soft_anomaly else 1.0)
-
-        agree_factor = 1.0
-
-        # ── 보조 필터 계수 ─────────────────────────────────────────────────
-        # 방향 기준 (진입 또는 현재 보유 방향)
-        _intended_side_fuse = dsac_side if dsac_side != 0 else cur_side
-
-        # 1) 자금 조달 비율: 크라우딩 방향 진입 kelly 축소
-        fund_factor = self.funding_kelly_factor(float(funding_rate), _intended_side_fuse)
-
-        # 2) BTC 상관 필터: ETH-BTC 3봉 방향 불일치 시 축소, 일치 시 소폭 부스트
-        btc_factor = 1.0
-        if self.btc_corr_enable and abs(float(btc_3bar_ret)) >= self.btc_corr_move_th and _intended_side_fuse != 0:
-            _btc_up = float(btc_3bar_ret) > 0
-            _aligned = (_btc_up and _intended_side_fuse > 0) or (not _btc_up and _intended_side_fuse < 0)
-            btc_factor = self.btc_corr_align_boost if _aligned else self.btc_corr_misalign
-
-        # 3) 안티 찹, 4) 저거래량 — _run_cycle에서 계산된 값을 그대로 사용
-        chop_fac = float(np.clip(aux_chop_factor,   0.10, 1.20))
-        vol_fac  = float(np.clip(aux_volume_factor, 0.10, 1.00))
-
-        # 기본 Kelly (DSAC 비중 확대: DSAC 75% + M7 size 25%)
-        kelly_pre = float(np.clip(0.75 * base_kelly + 0.25 * m7_size, 0.0, 1.0))
-        q_full = float(max(1e-6, self.qwidth_full_th))
-        q_half = float(max(q_full + 1e-6, self.qwidth_half_th))
-        if m7_qwidth <= q_full:
-            uncertainty_scale = 1.0
-        elif m7_qwidth >= q_half:
-            uncertainty_scale = 0.5
-        else:
-            rr = (m7_qwidth - q_full) / (q_half - q_full)
-            uncertainty_scale = float(np.clip(1.0 - 0.5 * rr, 0.5, 1.0))
-
-        # 캐스케이드 인수를 별도 계산해 하한선 적용 (hard anomaly 제외)
-        _size_scale = (
-            quality_factor * ret_factor * tail_factor
-            * vol_factor * regime_factor * rev_factor * chop_factor
-            * uncertainty_scale
-        )
-        if anom_factor > 0.0:
-            _size_scale = max(_size_scale, 0.30)  # 과도한 축소 방지
-        unified_kelly = float(np.clip(
-            kelly_pre * _size_scale * anom_factor * agree_factor
-            * fund_factor * btc_factor * chop_fac * vol_fac,
-            0.0,
-            1.0,
-        ))
-
-        # Hysteresis: 진입 기준보다 완화된 "유지 기준"으로 1봉 왕복을 줄임
-        exit_score_thr = float(np.clip(self.min_enter_score - max(0.0, self.exit_score_buffer), 0.02, 0.40))
-        exit_kelly_thr = float(np.clip(self.min_live_kelly * max(0.0, self.exit_kelly_ratio), 0.0, 1.0))
-        live_pnl_frac = 0.0
-        quant_stop_frac = 0.0
-
-        final_side = dsac_side
-        source = "DSAC_BASE"
-        gate_reasons: list[str] = []
-        cb_soft_hold = False
-
-        # 0) Circuit breaker (생존 최우선)
-        if circuit_breaker:
-            # (완화형) 무포지션 + hard anomaly 아님 + DSAC 고신뢰면 제한적 진입 허용
-            can_soft_bypass = (
-                cur_side == 0
-                and (not hard_anomaly)
-                and dsac_side != 0
-                and dsac_score >= (enter_score_thr + 0.08)
-                and unified_kelly >= max(self.min_live_kelly, 0.03)
-            )
-            # (완화형) 보유중 + hard anomaly 아님 + DSAC 중립/동일방향이면 즉시청산 대신 유지
-            can_soft_hold = (
-                cur_side != 0
-                and (not hard_anomaly)
-                and (dsac_side == 0 or dsac_side == cur_side)
-                and dsac_score >= max(exit_score_thr, 0.12)
-                and unified_kelly >= max(exit_kelly_thr, 0.02)
-            )
-            if can_soft_bypass:
-                final_side = dsac_side
-                source = "CB_SOFT_BYPASS_DSAC_ENTER"
-                gate_reasons.append("CB_SOFT_BYPASS")
-            elif can_soft_hold:
-                final_side = cur_side
-                source = "CB_SOFT_HOLD_IN_POS"
-                gate_reasons.append("CB_SOFT_HOLD")
-                cb_soft_hold = True
-            else:
-                final_side = 0
-                source = "CIRCUIT_BREAKER_EXIT" if cur_side != 0 else "CIRCUIT_BREAKER_BLOCK"
-                gate_reasons.extend(cb_tags or ["CIRCUIT_BREAKER"])
-
-        # 1) 무포지션: DSAC 단독 방향 + M7 리스크 게이트
-        elif cur_side == 0:
-            candidate_side = 0
-            candidate_source = "DSAC_HOLD_LOW_SCORE"
-
-            if hard_anomaly:
-                gate_reasons.append("M7_HARD_ANOMALY_BLOCK")
-                candidate_source = "RISK_BLOCK_ANOMALY"
-            elif dsac_side != 0 and dsac_score >= enter_score_thr:
-                candidate_side = dsac_side
-                candidate_source = "DSAC_ENTER"
-            else:
-                gate_reasons.append("LOW_DSAC_SCORE")
-
-            final_side = candidate_side
-            source = candidate_source
-
-            if final_side != 0:
-                if unified_kelly < self.min_live_kelly:
-                    final_side = 0
-                    source = "RISK_HOLD_LOW_KELLY"
-                    gate_reasons.append("LOW_KELLY")
-
-        # 2) 보유중: DSAC + Safety + Hold + Quantile stop
-        else:
-            final_side = cur_side
-            source = "IN_POS_HOLD"
-
-            # DSAC 자체 청산 신호는 우선(단, 리스크 양호하면 soft-hold)
-            if dsac_side == 0:
-                keep_by_fuse = (not hard_anomaly) and (unified_kelly >= exit_kelly_thr)
-                if self.dsac_soft_exit and keep_by_fuse:
-                    final_side = cur_side
-                    source = "RISK_HYST_HOLD"
-                    gate_reasons.append("DSAC_NEUTRAL_HOLD")
-                else:
-                    final_side = 0
-                    source = "DSAC_EXIT"
-            elif dsac_side != cur_side:
-                reverse_strength = abs(raw_action)
-                reverse_exit_thr = float(np.clip(enter_score_thr + self.reverse_exit_margin, 0.20, 0.70))
-                weak_reverse_hold = (
-                    reverse_strength < reverse_exit_thr
-                    and (not hard_anomaly)
-                    and unified_kelly >= max(exit_kelly_thr * 0.7, 0.015)
-                )
-                if weak_reverse_hold:
-                    final_side = cur_side
-                    source = "DSAC_REVERSE_WEAK_HOLD"
-                    gate_reasons.append("DSAC_REVERSE_WEAK_HOLD")
-                else:
-                    final_side = 0
-                    source = "DSAC_REVERSE_EXIT"
-                    gate_reasons.append("DSAC_REVERSE")
-
-            # 이상치 게이트: 옵션 또는 강한 리스크면 청산
-            if final_side != 0 and hard_anomaly and (self.anomaly_force_exit or m7_conf >= 0.75):
-                final_side = 0
-                source = "M7_ANOMALY_EXIT"
-                gate_reasons.append("M7_HARD_ANOMALY_EXIT")
-
-            # Hold 모델 기반 시간 청산
-            if final_side != 0 and m7_target_hold > 0 and self.hold_count >= m7_target_hold:
-                if self.force_hold_exit:
-                    final_side = 0
-                    source = "MTL_HOLD_TIMEOUT"
-                    gate_reasons.append("HOLD_TIMEOUT")
-                elif m7_composite <= self.hold_exit_margin:
-                    final_side = 0
-                    source = "M7_TARGET_HOLD_EXIT"
-                    gate_reasons.append("TARGET_HOLD_EXCEEDED")
-
-            # Quantile 기반 Dynamic SL (q10/q90)
-            if final_side != 0 and self.entry_price > 0 and current_price > 0:
-                if cur_side > 0:
-                    live_pnl_frac = float((current_price - self.entry_price) / self.entry_price)
-                    stop_base = float(min(m7_q10, -1e-6))
-                else:
-                    live_pnl_frac = float((self.entry_price - current_price) / self.entry_price)
-                    stop_base = float(-max(m7_q90, 1e-6))
-
-                stop_mult = float(max(0.10, self.stop_wide_mult if is_highvol_trend else self.stop_tight_mult))
-                quant_stop_frac = float(stop_base * stop_mult)
-                if live_pnl_frac <= quant_stop_frac:
-                    final_side = 0
-                    source = "QTL_DYNAMIC_STOP"
-                    gate_reasons.append("QTL_STOP")
-
-            # 단계적 수익 보호 스탑 (브레이크이븐 포함) — quantile stop과 독립적으로 작동
-            if final_side != 0 and self.entry_price > 0 and current_price > 0:
-                _step_fl = self.step_stop_floor()
-                _cur_lev_gain = live_pnl_frac * max(self.current_leverage, 0.01)
-                if _cur_lev_gain <= _step_fl:
-                    final_side = 0
-                    source = "FUSE_STEP_STOP" if self.peak_equity >= 1.006 else "FUSE_HARD_STOP"
-                    gate_reasons.append("STEP_STOP")
-
-            # 반전 확률 매우 높으면 리스크 축소
-            if final_side != 0 and t_rev >= max(self.rev_reduce_prob, 0.85) and m7_conf >= 0.65:
-                unified_kelly = float(np.clip(unified_kelly * 0.55, 0.0, 1.0))
-                source = "M7_REV_REDUCE"
-
-        final_action = self._action_from_side(final_side)
-        if final_action == 0:
-            unified_kelly = 0.0
-
-        # DSAC가 진입/유지하려 했는데 차단되었는지 표시
-        gate_passed = not (dsac_side != 0 and final_action == 0)
-        trend_veto = gate_reasons[0] if gate_reasons else None
-        gate_log = {}
-        if not gate_passed:
-            gate_log = {
-                "blocked_gate": "risk_guard",
-                "risk_guard": ",".join(gate_reasons[:3]) if gate_reasons else "BLOCK",
-            }
-
-        if cur_side == 0 and final_side != 0:
-            self._open_trade_diag = {
-                "source": source,
-                "dsac_score": dsac_score,
-                "m7_score": m7_score,
-                "entry_side": float(final_side),
-                "entry_kelly": unified_kelly,
-                "m7_quality": m7_quality,
-                "m7_qwidth": m7_qwidth,
-            }
-        elif final_side == 0:
-            # 청산 확정 사이클에서는 outcome 기록 시 재사용하기 위해 유지, 다음 진입 시 갱신됨
-            pass
-
-        self._update_pos(final_action, current_price, unified_kelly)
-        return {
-            "final_action": final_action,
-            "unified_kelly": unified_kelly,
-            "source": source,
-            "rl_score": float(dsac_info.get("score", 0.0)),
-            "meta_score": unified_kelly if final_action != 0 else 0.0,
-            "rl_action": int(dsac_action),
-            "trend_signal": ts,
-            "trend_veto": trend_veto,
-            "arbiter_mode": "DSAC_RISK_GUARD",
-            "gate_passed": gate_passed,
-            "gate_log": gate_log,
-            "fusion_diag": {
-                "direction_source": 1.0,  # 1.0 = DSAC_ONLY
-                "dsac_score": dsac_score,
-                "m7_score": m7_score,
-                "fused_signed": fused_signed,
-                "fused_abs": fused_abs,
-                "m7_size": m7_size,
-                "m7_quality": m7_quality,
-                "m7_q10": m7_q10,
-                "m7_q50": m7_q50,
-                "m7_q90": m7_q90,
-                "m7_qwidth": m7_qwidth,
-                "m7_vol_rank": m7_vol_rank,
-                "m7_gmm_cluster": float(m7_gmm_cluster),
-                "m7_hdb_label": float(m7_hdb_label),
-                "m7_hdb_prob": m7_hdb_prob,
-                "hard_anomaly": 1.0 if hard_anomaly else 0.0,
-                "soft_anomaly": 1.0 if soft_anomaly else 0.0,
-                "cb_iso": 1.0 if cb_iso else 0.0,
-                "cb_vae": 1.0 if cb_vae else 0.0,
-                "cb_hdb": 1.0 if cb_hdb else 0.0,
-                "cb_active": 1.0 if circuit_breaker else 0.0,
-                "cb_soft_hold": 1.0 if cb_soft_hold else 0.0,
-                "hdb_reliable": 1.0 if hdb_reliable else 0.0,
-                "is_lowvol_range": 1.0 if is_lowvol_range else 0.0,
-                "is_highvol_trend": 1.0 if is_highvol_trend else 0.0,
-                "uncertainty_scale": float(uncertainty_scale),
-                "target_hold": float(m7_target_hold),
-                "hold_count": float(self.hold_count),
-                "enter_score_thr": float(enter_score_thr),
-                "dir_prob_thr": float(dir_prob_thr),
-                "quality_thr": float(quality_thr),
-                "exit_score_thr": float(exit_score_thr),
-                "exit_kelly_thr": float(exit_kelly_thr),
-                "reverse_exit_thr": float(np.clip(enter_score_thr + self.reverse_exit_margin, 0.20, 0.70)),
-                "reverse_strength": float(abs(raw_action)),
-                "quant_stop_frac": float(quant_stop_frac),
-                "live_pnl_frac": float(live_pnl_frac),
-                "step_stop_floor": float(self.step_stop_floor()),
-                "p_up": float(p_up),
-                "p_dn": float(p_dn),
-                "p_fl": float(p_fl),
-                "xgb_up": float(xgb_up),
-                "xgb_dn": float(xgb_dn),
-                "fund_factor": float(fund_factor),
-                "btc_factor": float(btc_factor),
-                "chop_fac": float(chop_fac),
-                "vol_fac": float(vol_fac),
-                "btc_3bar_ret": float(btc_3bar_ret),
-                "funding_rate": float(funding_rate),
-            },
-        }
-
     def print_meta_dashboard(self, result: dict, current_price: float = 0.0):
         C = Colors
         fa = int(result.get("final_action", 0))
         src = str(result.get("source", "N/A"))
-        gate_passed = bool(result.get("gate_passed", True))
-        gate_icon = "✓" if gate_passed else "✗"
-        gate_color = C.GREEN if gate_passed else C.RED
         fa_arrow = {0: "─", 1: "▲", 2: "▼"}.get(fa, "?")
         fa_color = {0: C.YELLOW, 1: C.GREEN, 2: C.RED}.get(fa, C.RESET)
         fa_word = {0: "HOLD", 1: "LONG", 2: "SHORT"}.get(fa, "?")
 
         print(f" {fa_color}{C.BOLD}{fa_arrow}{fa_arrow}  {fa_word}{C.RESET}"
-              f"  score={float(result.get('meta_score', 0.0)):.3f}"
+              f"  score={float(result.get('rl_score', 0.0)):.3f}"
               f"  Kelly={float(result.get('unified_kelly', 0.0)):.3f}"
               f"  source: {C.CYAN}{src}{C.RESET}")
-        print(f"  {gate_color}{gate_icon} Gate{C.RESET}    {gate_color}{'PASS' if gate_passed else 'BLOCK'}{C.RESET}"
-              f"  mode={C.CYAN}{result.get('arbiter_mode', 'DSAC_RISK_GUARD')}{C.RESET}")
         print(
             f"  {C.CYAN}• RISK{C.RESET}    step_stop={'ON' if self.step_stop_enable else 'OFF'}"
             f"  trail={self.dsac_only_trail_arm:.3f}/{self.dsac_only_trail_gap:.3f}"
@@ -2050,7 +2096,6 @@ async def main(use_local=False):
 
     # ── DSAC + SevenModel(M7) 융합 라우터 초기화 ─────────────────────
     meta_router = DSACTrendRouter()
-    meta_router.online_adapt = False
     logger.info("🧭 실행 모드: DSAC_ONLY (최소 리스크 레이어만 유지)")
     _prev_meta_pos: str | None = None
 
@@ -2061,6 +2106,8 @@ async def main(use_local=False):
         dsac_router.current_leverage = meta_router.current_leverage
         dsac_router.current_equity = meta_router.cur_equity
         dsac_router.peak_equity = meta_router.peak_equity
+        dsac_router.adaptive_enter_offset = meta_router.adaptive_enter_offset
+        dsac_router.adaptive_agreement_offset = meta_router.adaptive_agreement_offset
 
     async def _fetch_exchange_position():
         try:
@@ -2121,6 +2168,7 @@ async def main(use_local=False):
     ])
     logger.info("🤖 SevenModelEnsemble 로드: %d/7 모델 사용 가능", _m7_avail)
     logger.info("🧩 %s", unsup_hub.summary_line())
+    signal_gap_hist: deque[float] = deque(maxlen=3)
 
     # ── 텔레그램 알림 ──────────────────────────────────────────
     tg_notifier = TelegramNotifier()
@@ -2143,6 +2191,8 @@ async def main(use_local=False):
         current_time_kst = eth_buffer['timestamp'].iloc[-1] + pd.Timedelta(hours=9)
         current_price    = float(eth_buffer['close'].iloc[-1])
         regime_name      = 'UNKNOWN'
+        now_utc = pd.Timestamp.utcnow().tz_localize(None)
+        meta_router.update_adaptive_gate(final_action=0, in_position=(meta_router.pos is not None))
 
         # ── SevenModelEnsemble(M7) 메타 신호 추론 ────────────────────
         m7_last = None
@@ -2168,10 +2218,16 @@ async def main(use_local=False):
                     logger.info("🧠 Live HMM 온라인 업데이트 완료")
                 except Exception as e:
                     logger.debug("Live HMM 온라인 업데이트 실패: %s", e)
-        info.setdefault("agent", "DSAC")
+        info.setdefault("agent", "DSAC_DUAL")
         info.setdefault("kelly", float(dsac_lev))
-        info.setdefault("score", float(abs(info.get("raw_action", 0.0))))
+        info.setdefault("long_edge", float(info.get("_long_raw", 0.0)))
+        info.setdefault("short_edge", float(info.get("_short_raw", 0.0)))
+        info.setdefault("conviction", float(abs(info.get("raw_action", 0.0))))
+        info.setdefault("agreement", float(abs(info.get("raw_action", 0.0))))
+        info.setdefault("ambiguity", 0.0)
+        info.setdefault("score", float(max(abs(info.get("raw_action", 0.0)), float(info.get("conviction", 0.0)))))
         regime_name = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
+        signal_gap_hist.append(float(info.get("raw_action", 0.0)))
 
         # ── 보조 필터 계수 계산 ─────────────────────────────────────────
 
@@ -2207,6 +2263,15 @@ async def main(use_local=False):
         _vae_err = float((trend_signal or {}).get("m7_vae_error", 0.0) or 0.0)
         _vae_th = float((trend_signal or {}).get("m7_vae_threshold", 0.0) or 0.0)
         _vae_ratio = (_vae_err / max(_vae_th, 1e-8)) if _vae_th > 1e-8 else (1.0 if _vae_anom else 0.0)
+        _jump_z = float(processed_df.iloc[-1].get("jump_z", 0.0) or 0.0)
+        _evt_z = float(processed_df.iloc[-1].get("evt_excess_z", 0.0) or 0.0)
+        _iso_score = float((trend_signal or {}).get("m7_iso_score", 0.0) or 0.0)
+        _hib_score = float(np.clip(max(
+            1.0 if _iso_anom else 0.0,
+            min(_vae_ratio / 1.35, 1.5),
+            min(abs(_jump_z) / 3.0, 1.5),
+            min(abs(_evt_z) / 3.0, 1.5),
+        ) / 1.5, 0.0, 1.0))
 
         # ── DSAC + M7 다요소 융합 (방향/사이즈/레짐/이상치/보유시간) ──
         prev_meta_pos = _prev_meta_pos
@@ -2215,16 +2280,19 @@ async def main(use_local=False):
             _kelly = float(np.clip(dsac_lev * meta_router.vol_scale(_garch_vol_z, 0.0), 0.0, 1.0))
             _fa = int(dsac_action)
             _dsac_only_source = "DSAC_ONLY"
-            _raw_action = float(info.get("raw_action", 0.0))
+            _hold_reason = str(info.get("hold_reason", ""))
+            _block_reason = ""
+            _long_raw = float(info.get("_long_raw", info.get("long_edge", 0.0)))
+            _short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
             _trend_exit_score = 0.0
             _live_unr = 0.0
             if meta_router.pos is not None and meta_router.entry_price > 0:
                 _live_unr = float(meta_router._net_pnl_frac(current_price))
-                _reverse_action = 2 if (_raw_action <= -meta_router.dsac_only_reverse_min) else (1 if (_raw_action >= meta_router.dsac_only_reverse_min) else 0)
-                _opp_reverse = (
-                    (meta_router.pos == "LONG" and _reverse_action == 2)
-                    or (meta_router.pos == "SHORT" and _reverse_action == 1)
-                )
+                _position_signal = str(info.get("position_signal", "HOLD"))
+                _position_reason = str(info.get("position_reason", ""))
+                _own_support = float(info.get("own_support", 0.0))
+                _opp_pressure = float(info.get("opp_pressure", 0.0))
+                _net_edge = float(info.get("net_edge", 0.0))
                 _trend_exit, _trend_exit_score, _trend_exit_reason = meta_router.update_trend_mismatch(processed_df, trend_signal)
                 # 단계별 수익 보호 스탑 (브레이크이븐 포함) — 기존 하드스탑 대체
                 _step_floor   = meta_router.step_stop_floor()
@@ -2242,39 +2310,90 @@ async def main(use_local=False):
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = "DSAC_ONLY_MAX_HOLD"
-                elif _opp_reverse:
+                elif _position_signal == "EXIT":
                     _fa = 0
                     _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_REVERSE_EXIT"
+                    _dsac_only_source = f"DSAC_LOGIT_EXIT:{_position_reason or 'RULE'}"
+                elif _position_signal == "REDUCE":
+                    _fa = 1 if meta_router.pos == "LONG" else 2
+                    _kelly = float(np.clip(_kelly, 0.0, 1.0))
+                    _dsac_only_source = f"DSAC_LOGIT_REDUCE:{_position_reason or 'RULE'}"
                 elif _trend_exit:
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = _trend_exit_reason
+                info["position_signal"] = _position_signal
+                info["position_reason"] = _position_reason
+                info["own_support"] = float(_own_support)
+                info["opp_pressure"] = float(_opp_pressure)
+                info["net_edge"] = float(_net_edge)
             else:
                 meta_router.trend_mismatch_streak = 0
-            if meta_router.cooldown_bars_left > 0 and meta_router.pos is None and _fa != 0:
+            if meta_router.hibernation_enable and _hib_score >= meta_router.hibernation_score_th:
+                meta_router.cooldown_bars_left = max(meta_router.cooldown_bars_left, meta_router.hibernation_bars)
+                if meta_router.pos is not None:
+                    _fa = 0
+                    _kelly = 0.0
+                    _dsac_only_source = "DSAC_HIBERNATION_EXIT"
+                else:
+                    _dsac_only_source = "DSAC_HIBERNATION_ARMED"
+                _block_reason = "hibernation"
+            if meta_router.dsac_only_cooldown_enable and meta_router.cooldown_bars_left > 0 and meta_router.pos is None and _fa != 0:
                 _fa = 0
                 _kelly = 0.0
                 _dsac_only_source = "DSAC_ONLY_COOLDOWN"
+                _block_reason = "cooldown"
             # 신규 진입 시에는 SIGNAL과 중기추세 정렬을 요구
             if _fa != 0 and meta_router.pos is None:
                 _signal_side = 1 if _fa == 1 else -1
                 _trend_dir = int((trend_signal or {}).get("trend_dir", 1))
                 _trend_side = 1 if _trend_dir == 2 else (-1 if _trend_dir == 0 else 0)
-                if _trend_side == 0:
+                if _fa != 0 and _trend_side == 0:
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = "DSAC_ONLY_TREND_FLAT_BLOCK"
-                elif _signal_side != _trend_side:
+                    _block_reason = "trend_flat"
+                elif _fa != 0 and _signal_side != _trend_side:
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = "DSAC_ONLY_TREND_MISMATCH_BLOCK"
+                    _block_reason = "trend_mismatch"
+                elif _fa != 0 and meta_router.integral_enable:
+                    _gap_ma = float(np.mean(np.abs(np.asarray(signal_gap_hist, dtype=np.float64)))) if signal_gap_hist else 0.0
+                    _same_sign = len(signal_gap_hist) >= max(2, meta_router.integral_window) and len({int(np.sign(x)) for x in signal_gap_hist if abs(x) > 1e-8}) <= 1
+                    if len(signal_gap_hist) < meta_router.integral_window or _gap_ma < meta_router.integral_min_gap or (meta_router.integral_require_sign and not _same_sign):
+                        _fa = 0
+                        _kelly = 0.0
+                        _dsac_only_source = "DSAC_INTEGRAL_BLOCK"
+                        _block_reason = "integral"
             # 신규 진입 시 보조 필터(VAE/BTC/안티찹/거래량)만 적용
+            _sizing_diag = {
+                "bayes_mult": 1.0,
+                "qwidth_mult": 1.0,
+                "mtf_mult": 1.0,
+                "smart_mult": 1.0,
+                "mdd_mult": 1.0,
+                "bayes_z": 0.0,
+                "qwidth": 0.0,
+                "mtf_align": 0.0,
+                "smart_flow": 0.0,
+                "taker_accel": 0.0,
+                "recent_pnl_sum": 0.0,
+                "loss_streak": int(meta_router.loss_streak),
+            }
             if _fa != 0 and meta_router.pos is None:
                 if _iso_anom and _vae_anom and _vae_ratio >= meta_router.dsac_only_vae_block_ratio:
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = "DSAC_ONLY_ISO_VAE_BLOCK"
+                _amihud = float(processed_df.iloc[-1].get("amihud_illiquidity_z", 0.0) or 0.0)
+                _rs_vol = float(processed_df.iloc[-1].get("rogers_satchell_vol", 0.0) or 0.0)
+                if _fa != 0 and meta_router.illiquidity_veto_enable:
+                    if _amihud >= meta_router.illiquidity_amihud_th or (_rs_vol >= meta_router.illiquidity_rsvol_th and float(processed_df.iloc[-1].get("m7_gmm_vol_rank", 0.0) or 0.0) >= meta_router.illiquidity_vol_rank_th):
+                        _fa = 0
+                        _kelly = 0.0
+                        _dsac_only_source = "DSAC_ILLIQUID_VETO"
+                        _block_reason = "illiquidity"
                 _btc_fac  = 1.0
                 if meta_router.btc_corr_enable and abs(_btc_3bar_ret) >= meta_router.btc_corr_move_th:
                     _intended_side_dsac = 1 if _fa == 1 else -1
@@ -2282,40 +2401,125 @@ async def main(use_local=False):
                     _aligned = (_btc_up and _intended_side_dsac > 0) or (not _btc_up and _intended_side_dsac < 0)
                     _btc_fac = meta_router.btc_corr_align_boost if _aligned else meta_router.btc_corr_misalign
                 if _fa != 0:
+                    _last_row = processed_df.iloc[-1]
+                    _sel_logit = float(info.get("long_logit", 0.0)) if _fa == 1 else float(info.get("short_logit", 0.0))
+                    _sel_std = float(max(info.get("long_std", 1.0), 1e-6)) if _fa == 1 else float(max(info.get("short_std", 1.0), 1e-6))
+                    _bayes_z = float(_sel_logit / max(_sel_std, 1e-6))
+                    _bayes_mult = 1.0
+                    if meta_router.sizing_bayes_enable:
+                        _bayes_score = 0.5 + 0.5 * np.tanh(_bayes_z / max(meta_router.sizing_bayes_z_scale, 1e-6))
+                        _bayes_mult = float(np.clip(
+                            meta_router.sizing_bayes_min_mult
+                            + (meta_router.sizing_bayes_max_mult - meta_router.sizing_bayes_min_mult) * _bayes_score,
+                            meta_router.sizing_bayes_min_mult,
+                            meta_router.sizing_bayes_max_mult,
+                        ))
+                    _qwidth = float(max(0.0, (trend_signal or {}).get("m7_qwidth", 0.0) or 0.0))
+                    _qwidth_mult = 1.0
+                    if meta_router.sizing_qwidth_enable and _qwidth > 1e-8:
+                        _qwidth_mult = float(np.clip(
+                            meta_router.sizing_qwidth_ref / max(_qwidth, 1e-8),
+                            meta_router.sizing_qwidth_min_mult,
+                            meta_router.sizing_qwidth_max_mult,
+                        ))
+                    _mtf1 = float(_last_row.get("mtf_trend_1h", 0.0) or 0.0)
+                    _mtf4 = float(_last_row.get("mtf_trend_4h", 0.0) or 0.0)
+                    _side_sign = 1.0 if _fa == 1 else -1.0
+                    _mtf_align = int((_side_sign * _mtf1) > 0.0) + int((_side_sign * _mtf4) > 0.0)
+                    _mtf_mult = 1.0
+                    if meta_router.sizing_mtf_enable:
+                        if _mtf_align >= 2:
+                            _mtf_mult = float(meta_router.sizing_mtf_full_mult)
+                        elif _mtf_align == 1:
+                            _mtf_mult = float(meta_router.sizing_mtf_partial_mult)
+                    _smart_flow = float(_last_row.get("smart_money_flow", 0.0) or 0.0)
+                    _taker_accel = float(_last_row.get("taker_acceleration", 0.0) or 0.0)
+                    _smart_mult = 1.0
+                    if meta_router.sizing_smart_enable:
+                        _smart_sign = np.sign(_smart_flow)
+                        if _smart_sign != 0.0:
+                            _smart_mult = float(
+                                meta_router.sizing_smart_same_sign_mult
+                                if _smart_sign == _side_sign
+                                else meta_router.sizing_smart_opp_sign_mult
+                            )
+                        if np.sign(_taker_accel) == _side_sign and abs(_taker_accel) >= meta_router.sizing_taker_boost_th:
+                            _smart_mult = float(_smart_mult * meta_router.sizing_taker_boost_mult)
+                    _recent_window = max(1, int(meta_router.sizing_recent_pnl_window))
+                    _recent_vals = list(meta_router.recent_realized)[-_recent_window:]
+                    _recent_pnl_sum = float(sum(_recent_vals)) if _recent_vals else 0.0
+                    _mdd_mult = 1.0
+                    if meta_router.sizing_mdd_enable:
+                        if meta_router.loss_streak >= max(1, meta_router.sizing_mdd_loss_streak_th) or _recent_pnl_sum <= meta_router.sizing_recent_pnl_cut:
+                            _mdd_mult = float(meta_router.sizing_mdd_reduce_mult)
                     _kelly = float(np.clip(
-                        _kelly * _btc_fac * _aux_chop_factor * _aux_volume_factor,
+                        _kelly * _btc_fac * _aux_chop_factor * _aux_volume_factor
+                        * _bayes_mult * _qwidth_mult * _mtf_mult * _smart_mult * _mdd_mult,
                         0.0, 1.0,
                     ))
+                    _sizing_diag.update({
+                        "bayes_mult": float(_bayes_mult),
+                        "qwidth_mult": float(_qwidth_mult),
+                        "mtf_mult": float(_mtf_mult),
+                        "smart_mult": float(_smart_mult),
+                        "mdd_mult": float(_mdd_mult),
+                        "bayes_z": float(_bayes_z),
+                        "qwidth": float(_qwidth),
+                        "mtf_align": float(_mtf_align),
+                        "smart_flow": float(_smart_flow),
+                        "taker_accel": float(_taker_accel),
+                        "recent_pnl_sum": float(_recent_pnl_sum),
+                        "loss_streak": int(meta_router.loss_streak),
+                    })
             if _fa == 0:
                 _kelly = 0.0
-            meta_router._update_pos(_fa, current_price, _kelly)
-            _score = float(np.clip(max(abs(float(info.get("raw_action", 0.0))), abs(float(info.get("score", 0.0))), _kelly), 0.0, 1.0))
-            _side = 1 if _fa == 1 else (-1 if _fa == 2 else 0)
+            meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
             meta_result = {
                 "final_action": _fa,
                 "unified_kelly": _kelly,
                 "source": _dsac_only_source,
                 "rl_score": float(info.get("score", 0.0)),
-                "meta_score": _kelly if _fa != 0 else 0.0,
                 "rl_action": _fa,
                 "trend_signal": trend_signal,
                 "trend_exit_score": float(_trend_exit_score),
                 "trend_mismatch_streak": int(meta_router.trend_mismatch_streak),
-                "trend_veto": None,
-                "arbiter_mode": "DSAC_ONLY",
-                "gate_passed": True,
-                "gate_log": {},
-                "fusion_diag": {
-                    "direction_source": 1.0,
-                    "dsac_score": _score,
-                    "m7_score": 0.0,
-                    "fused_signed": float(_side * _score),
-                    "fused_abs": _score,
-                    "cb_active": 0.0,
-                    "is_lowvol_range": 0.0,
-                    "is_highvol_trend": 0.0,
-                    "uncertainty_scale": 1.0,
-                },
+                "hibernation_score": float(_hib_score),
+                "hibernation_score_th": float(meta_router.hibernation_score_th),
+                "integral_gap_ma": float(np.mean(np.abs(np.asarray(signal_gap_hist, dtype=np.float64)))) if signal_gap_hist else 0.0,
+                "illiq_amihud": float(processed_df.iloc[-1].get("amihud_illiquidity_z", 0.0) or 0.0),
+                "illiq_rsvol": float(processed_df.iloc[-1].get("rogers_satchell_vol", 0.0) or 0.0),
+                "cb_active": 0,
+                "is_lowvol_range": 0,
+                "is_highvol_trend": 0,
+                "uncertainty_scale": 1.0,
+                "m7_qwidth": float((trend_signal or {}).get("m7_qwidth", 0.0) or 0.0),
+                "position_signal": str(info.get("position_signal", "")),
+                "position_reason": str(info.get("position_reason", "")),
+                "position_own_support": float(info.get("own_support", 0.0)),
+                "position_opp_pressure": float(info.get("opp_pressure", 0.0)),
+                "position_net_edge": float(info.get("net_edge", 0.0)),
+                "hold_reason": str(_hold_reason),
+                "block_reason": str(_block_reason),
+                "router_enter_threshold": float(info.get("enter_threshold", 0.0)),
+                "router_min_agreement_threshold": float(info.get("min_agreement_threshold", 0.0)),
+                "router_max_confidence_std": float(info.get("max_confidence_std", dsac_router.max_confidence_std)),
+                "router_base_min_agreement_threshold": float(info.get("base_min_agreement_threshold", 0.0)),
+                "adaptive_enter_offset": float(info.get("adaptive_enter_offset", meta_router.adaptive_enter_offset)),
+                "adaptive_agreement_offset": float(info.get("adaptive_agreement_offset", meta_router.adaptive_agreement_offset)),
+                "router_std_gate_ok": bool(info.get("std_gate_ok", True)),
+                "router_dual_high_hold": bool(info.get("dual_high_hold", False)),
+                "sizing_bayes_mult": float(_sizing_diag.get("bayes_mult", 1.0)),
+                "sizing_qwidth_mult": float(_sizing_diag.get("qwidth_mult", 1.0)),
+                "sizing_mtf_mult": float(_sizing_diag.get("mtf_mult", 1.0)),
+                "sizing_smart_mult": float(_sizing_diag.get("smart_mult", 1.0)),
+                "sizing_mdd_mult": float(_sizing_diag.get("mdd_mult", 1.0)),
+                "sizing_bayes_z": float(_sizing_diag.get("bayes_z", 0.0)),
+                "sizing_qwidth": float(_sizing_diag.get("qwidth", 0.0)),
+                "sizing_mtf_align": float(_sizing_diag.get("mtf_align", 0.0)),
+                "sizing_smart_flow": float(_sizing_diag.get("smart_flow", 0.0)),
+                "sizing_taker_accel": float(_sizing_diag.get("taker_accel", 0.0)),
+                "sizing_recent_pnl_sum": float(_sizing_diag.get("recent_pnl_sum", 0.0)),
+                "sizing_loss_streak": int(_sizing_diag.get("loss_streak", 0)),
             }
         rl_action = int(dsac_action)
         trade_pnl_pct: float | None = None

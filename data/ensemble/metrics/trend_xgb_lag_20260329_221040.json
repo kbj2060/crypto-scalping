@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-03-29T22:10:40",
+  "data_path": "data/splits/year_oos/training_features_2025.csv",
+  "model_path": "data/ensemble/supervised/trend_xgb.json",
+  "results": [
+    {
+      "lag_bars": -3,
+      "corr_signal_ret1": -0.01385898195119541,
+      "dir_hit": 0.4936179933562407,
+      "up_hit": 0.4945127116627483,
+      "down_hit": 0.49397016971092983
+    },
+    {
+      "lag_bars": -2,
+      "corr_signal_ret1": 0.004787844026767019,
+      "dir_hit": 0.4981058803373246,
+      "up_hit": 0.49898155374921477,
+      "down_hit": 0.49847708971845195
+    },
+    {
+      "lag_bars": -1,
+      "corr_signal_ret1": -0.07219368517138894,
+      "dir_hit": 0.463969237505116,
+      "up_hit": 0.4648449025822602,
+      "down_hit": 0.4643404433530358
+    },
+    {
+      "lag_bars": 0,
+      "corr_signal_ret1": -0.0003920852560069482,
+      "dir_hit": 0.5070433259727404,
+      "up_hit": 0.5078999466991548,
+      "down_hit": 0.5074335643036625
+    },
+    {
+      "lag_bars": 1,
+      "corr_signal_ret1": 0.0032419731356391757,
+      "dir_hit": 0.5025746456887772,
+      "up_hit": 0.5034693469632506,
+      "down_hit": 0.5029172972407032
+    },
+    {
+      "lag_bars": 2,
+      "corr_signal_ret1": -0.0030555240692711626,
+      "dir_hit": 0.5009994098722659,
+      "up_hit": 0.501903637851935,
+      "down_hit": 0.5013325464963545
+    },
+    {
+      "lag_bars": 3,
+      "corr_signal_ret1": -0.001603965046010482,
+      "dir_hit": 0.4997668021435166,
+      "up_hit": 0.5006234473305984,
+      "down_hit": 0.5001475333377752
+    }
+  ],
+  "best_abs_corr_lag": {
+    "lag_bars": -1,
+    "corr_signal_ret1": -0.07219368517138894,
+    "dir_hit": 0.463969237505116,
+    "up_hit": 0.4648449025822602,
+    "down_hit": 0.4643404433530358
+  },
+  "best_dir_hit_lag": {
+    "lag_bars": 0,
+    "corr_signal_ret1": -0.0003920852560069482,
+    "dir_hit": 0.5070433259727404,
+    "up_hit": 0.5078999466991548,
+    "down_hit": 0.5074335643036625
+  }
+}

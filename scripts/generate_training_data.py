@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 # ─── 상수 ─────────────────────────────────────────────────────────────────────
 MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst',
-              'pred_tide', 'pred_mdjd', 'pred_ridge']
+              'pred_tide', 'pred_mdjd']
 MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst',
-              'conf_tide', 'conf_mdjd', 'conf_ridge']
+              'conf_tide', 'conf_mdjd']
 
 ELITE_COLS = [
     'sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze',
@@ -56,7 +56,7 @@ REGIME_COLS = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'r
 TARGET_COL = 'log_return'
 
 SYNTHETIC_ALPHA_COLS = [
-    'ofti', 'kel', 'mta_funding', 'svps', 'cada', 'mshd', 'fvci',
+    'ofti', 'kel', 'mta_funding', 'svps', 'mshd', 'fvci',
     'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
 ]
 
@@ -75,76 +75,6 @@ RL_REQUIRED_COLS = (
     + [TARGET_COL]
 )
 
-# ─── Ridge 선형 퀀트 워크포워드 ───────────────────────────────────────────────
-_RIDGE_FEATURES = [
-    'log_return', 'rsi', 'macd_hist', 'bb_width', 'volatility_z',
-    'garman_klass_vol', 'last_funding_rate', 'oi_change_rate',
-    'net_taker_ratio', 'taker_acceleration', 'trade_intensity',
-    'big_trade_ratio', 'hurst_12', 'hurst_48', 'hurst_288',
-    'realized_vol_ratio', 'amihud_illiquidity_z',
-]
-_RIDGE_SAVE_PATH = 'data/ridge_model.pkl'
-
-
-def _ridge_walkforward(df: pd.DataFrame):
-    """워크포워드 Ridge 회귀 — 룩어헤드 없는 선형 퀀트 시그널.
-
-    walk-forward 규칙:
-      - train_end 시점에서 관측된 행 0..train_end-1 로 피팅
-      - rows train_end..train_end+RETRAIN-1 를 예측
-      → pred[t] = r_{t+1} 추정값; 예측 시 y[t]=r_{t+1} 미사용
-
-    Returns:
-        pred  (np.ndarray float32, shape N) — 수익률 방향 강도 (raw)
-        conf  (np.ndarray float32, shape N) — 시그널 신뢰도 [0, 1]
-    """
-    from sklearn.linear_model import Ridge
-    from sklearn.preprocessing import StandardScaler
-
-    feat_cols = [f for f in _RIDGE_FEATURES if f in df.columns]
-    N = len(df)
-    if not feat_cols or N < 1000:
-        logger.warning("⚠️ Ridge: 피처 부족 또는 데이터 부족 — pred_ridge=0 대체")
-        return np.zeros(N, np.float32), np.full(N, 0.5, np.float32)
-
-    X = df[feat_cols].fillna(0).values.astype(np.float32)
-    # y[t] = log_return[t+1] (다음 봉 수익률) — shift(-1), 마지막 행은 0
-    y = df['log_return'].shift(-1).fillna(0).values.astype(np.float32)
-
-    pred    = np.zeros(N, dtype=np.float32)
-    WARMUP  = 1000   # 최소 워밍업 행 수 (~3.5일) — Ridge는 선형 모델이므로 1000봉으로 충분
-    RETRAIN = 500    # 확장 윈도우 재학습 주기 (~1.7일) — 더 잦은 재학습으로 최신성 유지
-
-    final_ridge = final_scaler = None
-    for train_end in range(WARMUP, N, RETRAIN):
-        scaler = StandardScaler()
-        ridge  = Ridge(alpha=0.01)
-        ridge.fit(scaler.fit_transform(X[:train_end]), y[:train_end])
-        pred_end = min(train_end + RETRAIN, N - 1)
-        pred[train_end:pred_end] = ridge.predict(scaler.transform(X[train_end:pred_end]))
-        final_ridge, final_scaler = ridge, scaler
-
-    # 라이브 트레이딩용 최종 모델 저장
-    if final_ridge is not None:
-        import pickle
-        os.makedirs('data', exist_ok=True)
-        with open(_RIDGE_SAVE_PATH, "wb") as f:
-            pickle.dump(
-                {'ridge': final_ridge, 'scaler': final_scaler, 'features': feat_cols},
-                f,
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
-        logger.info(f"💾 Ridge 모델 저장: {_RIDGE_SAVE_PATH} ({len(feat_cols)}개 피처)")
-
-    # 신뢰도 = tanh(|pred| / rolling-MAD_500)
-    pred_s = pd.Series(pred)
-    mad500 = pred_s.abs().rolling(500, min_periods=10).median().replace(0, 1e-8)
-    conf   = np.tanh(pred_s.abs() / mad500).fillna(0.5).clip(0, 1).values.astype(np.float32)
-
-    logger.info(f"✅ Ridge 워크포워드 완료 | range=[{pred.min():.5f}, {pred.max():.5f}]")
-    return pred, conf
-
-
 # ─── 출력 억제 (NF 모델 verbose 제거) ────────────────────────────────────────
 class SuppressOutput:
     def __enter__(self):
@@ -157,7 +87,7 @@ class SuppressOutput:
 
 # ─── 메인 마이닝 함수 ─────────────────────────────────────────────────────────
 def generate_training_csv(input_csv: str, output_csv: str):
-    from strategies.elite_strategies import BaseStrategy, NewEliteSignalEngine  # type: ignore  # noqa: F401
+    from features.elite import BaseStrategy, NewEliteSignalEngine  # type: ignore  # noqa: F401
     from strategies.elite_builder import (  # type: ignore
         EliteSignals, row_to_market_row,
         compute_synthetic_alphas, compute_regime, compute_volatility_models,
@@ -192,8 +122,7 @@ def generate_training_csv(input_csv: str, output_csv: str):
     logger.info(f"✅ 신규 Elite 시그널 완료: {NEW_ELITE_COLS}")
 
     L            = len(df)
-    # Ridge WARMUP(1000) 이후부터 의미 있는 예측 가능 → 최소 시작점을 1000으로 설정
-    # NF 모델도 256봉 컨텍스트가 필요하므로 max(1000, 256) = 1000
+    # 워밍업 구간은 보수적으로 1000봉 유지
     resume_start = 1000
     abs_output   = os.path.abspath(output_csv)
     os.makedirs(os.path.dirname(abs_output), exist_ok=True)
@@ -215,12 +144,7 @@ def generate_training_csv(input_csv: str, output_csv: str):
     if resume_start >= L:
         return logger.info("✅ 마이닝이 이미 완료되었습니다.")
 
-    logger.info("📐 [단계 2] Ridge 선형 퀀트 시그널 워크포워드 계산 중...")
-    _ridge_pred, _ridge_conf = _ridge_walkforward(df)
-    df['pred_ridge'] = _ridge_pred
-    df['conf_ridge']  = _ridge_conf
-
-    logger.info("🧠 [단계 3] 앙상블 모델 적재...")
+    logger.info("🧠 [단계 2] 앙상블 모델 적재...")
     from ensemble.ensemble_router import (  # type: ignore
         TimesFMForecaster, ChronosForecaster, TTMForecaster,
         PatchTSTForecaster, ITransformerForecaster, NHITSForecaster, TiDEForecaster,
@@ -265,13 +189,13 @@ def generate_training_csv(input_csv: str, output_csv: str):
         std   = float(np.std(traj)) + 1e-8
         return float(np.tanh(abs(slope) / std))
 
-    logger.info(f"🚀 [단계 4] 하이브리드 배치 마이닝 시작 (CHUNK: {CHUNK_SIZE})")
+    logger.info(f"🚀 [단계 3] 하이브리드 배치 마이닝 시작 (CHUNK: {CHUNK_SIZE})")
     df_records   = df.to_dict('records')
     np_closes    = df['close'].values
     alpha_matrix = df[ALPHA_7_COLS + SYNTHETIC_ALPHA_COLS].values
 
-    _precomputed_pred = {'pred_mdjd', 'pred_ridge'}
-    _precomputed_conf = {'conf_mdjd', 'conf_ridge'}
+    _precomputed_pred = {'pred_mdjd'}
+    _precomputed_conf = {'conf_mdjd'}
 
     for chunk_start in range(resume_start, L, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE, L)

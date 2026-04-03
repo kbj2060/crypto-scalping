@@ -1,0 +1,194 @@
+{
+  "generated_at": "2026-03-29T13:11:46",
+  "csv_path": "data/splits/year_oos/rl_training_2025_m7.csv",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "rows": 105064,
+  "state_dim": 30,
+  "thresholds": {
+    "open": 0.15,
+    "close": 0.05
+  },
+  "final_balance": 221344671.93271226,
+  "total_return_pct": 2213346.7193271224,
+  "total_trades": 6943,
+  "win_rate": 0.4712660233328532,
+  "flat_decisions": {
+    "flat_to_long": 6733,
+    "flat_to_short": 210,
+    "flat_hold": 1011,
+    "flat_to_long_ratio": 0.8464923309026905,
+    "flat_to_short_ratio": 0.026401810409856674,
+    "long_short_entry_ratio": 32.06190476190476
+  },
+  "position_time_ratio": {
+    "LONG": 0.913290121165396,
+    "SHORT": 0.011002922056290035,
+    "FLAT": 0.07570695677831396
+  },
+  "raw_action_stats": {
+    "mean": 0.40940067022239285,
+    "median": 0.4126169681549072,
+    "p10": 0.06725574284791946,
+    "p90": 0.8561418175697326
+  },
+  "by_side": {
+    "LONG": {
+      "entries": 6733,
+      "closed_trades": 6733,
+      "mean_pnl_pct": 0.23578867681968252,
+      "median_pnl_pct": -0.013543298220434279,
+      "win_rate": 0.4676964206148819,
+      "avg_hold_bars": 14.251151047081539,
+      "gross_pnl_pct_sum": 1587.5651610269224
+    },
+    "SHORT": {
+      "entries": 210,
+      "closed_trades": 210,
+      "mean_pnl_pct": 0.32235041890602967,
+      "median_pnl_pct": 0.04370270348735795,
+      "win_rate": 0.5857142857142857,
+      "avg_hold_bars": 5.504761904761905,
+      "gross_pnl_pct_sum": 67.69358797026624
+    }
+  },
+  "monthly_flat_decisions": {
+    "2025-01": {
+      "flat_to_long": 585.0,
+      "flat_hold": 57.0,
+      "flat_to_short": 9.0,
+      "flat_to_long_ratio": 0.8986175115207373,
+      "flat_hold_ratio": 0.08755760368663594,
+      "flat_to_short_ratio": 0.013824884792626729
+    },
+    "2025-02": {
+      "flat_to_long": 590.0,
+      "flat_hold": 145.0,
+      "flat_to_short": 52.0,
+      "flat_to_long_ratio": 0.7496823379923762,
+      "flat_hold_ratio": 0.18424396442185514,
+      "flat_to_short_ratio": 0.06607369758576874
+    },
+    "2025-03": {
+      "flat_to_long": 594.0,
+      "flat_hold": 111.0,
+      "flat_to_short": 24.0,
+      "flat_to_long_ratio": 0.8148148148148148,
+      "flat_hold_ratio": 0.1522633744855967,
+      "flat_to_short_ratio": 0.03292181069958848
+    },
+    "2025-04": {
+      "flat_to_long": 585.0,
+      "flat_hold": 132.0,
+      "flat_to_short": 30.0,
+      "flat_to_long_ratio": 0.7831325301204819,
+      "flat_hold_ratio": 0.17670682730923695,
+      "flat_to_short_ratio": 0.040160642570281124
+    },
+    "2025-05": {
+      "flat_to_long": 593.0,
+      "flat_hold": 115.0,
+      "flat_to_short": 22.0,
+      "flat_to_long_ratio": 0.8123287671232877,
+      "flat_hold_ratio": 0.15753424657534246,
+      "flat_to_short_ratio": 0.030136986301369864
+    },
+    "2025-06": {
+      "flat_to_long": 516.0,
+      "flat_hold": 66.0,
+      "flat_to_short": 10.0,
+      "flat_to_long_ratio": 0.8716216216216216,
+      "flat_hold_ratio": 0.11148648648648649,
+      "flat_to_short_ratio": 0.016891891891891893
+    },
+    "2025-07": {
+      "flat_to_long": 564.0,
+      "flat_to_short": 4.0,
+      "flat_hold": 31.0,
+      "flat_to_long_ratio": 0.9415692821368948,
+      "flat_to_short_ratio": 0.00667779632721202,
+      "flat_hold_ratio": 0.05175292153589316
+    },
+    "2025-08": {
+      "flat_hold": 69.0,
+      "flat_to_long": 600.0,
+      "flat_to_short": 13.0,
+      "flat_hold_ratio": 0.10117302052785923,
+      "flat_to_long_ratio": 0.8797653958944281,
+      "flat_to_short_ratio": 0.01906158357771261
+    },
+    "2025-09": {
+      "flat_hold": 25.0,
+      "flat_to_long": 434.0,
+      "flat_to_short": 5.0,
+      "flat_hold_ratio": 0.05387931034482758,
+      "flat_to_long_ratio": 0.9353448275862069,
+      "flat_to_short_ratio": 0.010775862068965518
+    },
+    "2025-10": {
+      "flat_to_long": 576.0,
+      "flat_hold": 80.0,
+      "flat_to_short": 11.0,
+      "flat_to_long_ratio": 0.863568215892054,
+      "flat_hold_ratio": 0.1199400299850075,
+      "flat_to_short_ratio": 0.01649175412293853
+    },
+    "2025-11": {
+      "flat_to_long": 616.0,
+      "flat_hold": 145.0,
+      "flat_to_short": 22.0,
+      "flat_to_long_ratio": 0.7867177522349936,
+      "flat_hold_ratio": 0.18518518518518517,
+      "flat_to_short_ratio": 0.0280970625798212
+    },
+    "2025-12": {
+      "flat_to_long": 480.0,
+      "flat_to_short": 8.0,
+      "flat_hold": 35.0,
+      "flat_to_long_ratio": 0.9177820267686424,
+      "flat_to_short_ratio": 0.015296367112810707,
+      "flat_hold_ratio": 0.06692160611854685
+    }
+  },
+  "regime_flat_decisions": {
+    "NORMAL": {
+      "flat_to_long": 1323.0,
+      "flat_hold": 155.0,
+      "flat_to_short": 20.0,
+      "flat_to_long_ratio": 0.883177570093458,
+      "flat_hold_ratio": 0.10347129506008011,
+      "flat_to_short_ratio": 0.01335113484646195
+    },
+    "CHOP": {
+      "flat_to_long": 1299.0,
+      "flat_hold": 60.0,
+      "flat_to_short": 3.0,
+      "flat_to_long_ratio": 0.9537444933920705,
+      "flat_hold_ratio": 0.04405286343612335,
+      "flat_to_short_ratio": 0.0022026431718061676
+    },
+    "BEAR": {
+      "flat_to_long": 1511.0,
+      "flat_to_short": 84.0,
+      "flat_hold": 246.0,
+      "flat_to_long_ratio": 0.8207495926127105,
+      "flat_to_short_ratio": 0.045627376425855515,
+      "flat_hold_ratio": 0.133623030961434
+    },
+    "BULL": {
+      "flat_to_long": 1461.0,
+      "flat_hold": 364.0,
+      "flat_to_short": 51.0,
+      "flat_to_long_ratio": 0.7787846481876333,
+      "flat_hold_ratio": 0.19402985074626866,
+      "flat_to_short_ratio": 0.027185501066098083
+    },
+    "WHIPSAW": {
+      "flat_to_long": 1139.0,
+      "flat_hold": 186.0,
+      "flat_to_short": 52.0,
+      "flat_to_long_ratio": 0.8271604938271605,
+      "flat_hold_ratio": 0.13507625272331156,
+      "flat_to_short_ratio": 0.03776325344952796
+    }
+  }
+}

@@ -27,7 +27,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, _ROOT_DIR)
 
-from core.feature_engineering import FeatureEngineer
+from features.engineering import FeatureEngineer
 
 DATA_DIR         = os.path.join(_ROOT_DIR, 'data')
 BINANCE_DIR      = os.path.join(_ROOT_DIR, 'binance_data')

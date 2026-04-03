@@ -20,6 +20,16 @@ from ensemble.seven_model_ensemble import SevenModelEnsemble
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+DROP_M7_COLUMNS = {
+    "m7_prob_dn",
+    "m7_prob_fl",
+    "m7_prob_up",
+    "m7_direction",
+    "m7_hdb_label",
+    "m7_hdb_prob",
+    "m7_vae_threshold",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -79,6 +89,10 @@ def main() -> int:
     logger.info("Rows=%d | RL cols=%d | Work cols=%d", len(work_df), len(rl_df.columns), len(work_df.columns))
     ensemble = SevenModelEnsemble()
     m7 = ensemble.predict_batch(work_df)
+    drop_cols = [c for c in DROP_M7_COLUMNS if c in m7.columns]
+    if drop_cols:
+        m7 = m7.drop(columns=drop_cols)
+        logger.info("Dropped deprecated model7 columns: %d", len(drop_cols))
     logger.info("Generated model7 columns: %d", len(m7.columns))
 
     overlap = [c for c in m7.columns if c in rl_df.columns]

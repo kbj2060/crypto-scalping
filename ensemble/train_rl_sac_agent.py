@@ -70,6 +70,13 @@ from ensemble.train_rl_agent import (
 _POS_THRESH = 0.15    # |action| > 이 값이면 포지션 진입/유지
 _CLOSE_THRESH = 0.05  # |action| < 이 값이면 청산 (포지션 보유 중)
 
+
+def _signed_log_return(entry_price: float, mark_price: float, side: str) -> float:
+    entry = max(float(entry_price), 1e-8)
+    mark = max(float(mark_price), 1e-8)
+    log_change = float(np.log(mark / entry))
+    return log_change if side == 'LONG' else -log_change
+
 class SACTradingEnv:
     """SAC용 연속 action 트레이딩 환경.
     
@@ -80,14 +87,30 @@ class SACTradingEnv:
       그 사이 → 데드존 (현재 상태 유지)
     """
 
-    def __init__(self, df, initial_balance=10000.0, fee=0.0005, slip=0.0002,
-                 phase='train', hmm_detector=None, mtf_features=None):
+    def __init__(
+        self,
+        df,
+        initial_balance=10000.0,
+        fee=0.0005,
+        slip=0.0002,
+        phase='train',
+        hmm_detector=None,
+        mtf_features=None,
+        side_mode='both',
+        reward_beta=None,
+        specialist_pos_thresh=None,
+        specialist_close_thresh=None,
+        specialist_min_opportunity_move=None,
+        specialist_min_breakout=None,
+        specialist_idle_penalty=None,
+    ):
         self.df = df.reset_index(drop=True)
         self.initial_balance = initial_balance
         self.fee = fee
         self.slip = slip
         self.phase = phase
         self.hmm_detector = hmm_detector
+        self.side_mode = "both"
 
         if mtf_features is not None:
             self.mtf = mtf_features
@@ -97,11 +120,37 @@ class SACTradingEnv:
         self.MAX_EPISODE_STEPS = 4096 if phase == 'train' else len(self.df) - 1
 
         feat_cols = STATE_PRED + STATE_CONF + STATE_ELITE + STATE_ALPHA + REGIME_COLS + STATE_SYNTH
-        self._feat_np  = self.df[feat_cols].values.astype(np.float32)
+        feat_df = (
+            self.df.reindex(columns=feat_cols, fill_value=0.0)
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+        )
+        self._feat_np  = feat_df.to_numpy(dtype=np.float32)
         self._close_np = self.df['close'].values.astype(np.float32)
+        self._high_np = (
+            self.df['high'].values.astype(np.float32)
+            if 'high' in self.df.columns else self._close_np.copy()
+        )
+        self._low_np = (
+            self.df['low'].values.astype(np.float32)
+            if 'low' in self.df.columns else self._close_np.copy()
+        )
         self._open_np  = (
             self.df['open'].values.astype(np.float32)
             if 'open' in self.df.columns else self._close_np.copy()
+        )
+        self._m7_tp_price_np = (
+            pd.to_numeric(self.df.get('m7_tp_price', 0.0), errors='coerce')
+            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
+        )
+        self._m7_sl_price_np = (
+            pd.to_numeric(self.df.get('m7_sl_price', 0.0), errors='coerce')
+            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
+        )
+        self._m7_target_hold_np = (
+            pd.to_numeric(self.df.get('m7_target_hold', 0.0), errors='coerce')
+            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
         )
         self._n_pred   = len(STATE_PRED)
         self._n_conf   = len(STATE_CONF)
@@ -117,7 +166,26 @@ class SACTradingEnv:
             if col in self.df.columns else np.zeros(len(self.df), dtype=np.float32)
             for col in _hmm_cols
         }
+        self._train_start_by_regime = self._build_train_start_buckets()
         self.reset()
+
+    def _build_train_start_buckets(self):
+        buckets = {k: [] for k in ['bull', 'bear', 'chop', 'whipsaw', 'normal']}
+        if self.phase != 'train':
+            return buckets
+        max_start = max(0, len(self.df) - self.MAX_EPISODE_STEPS - 1)
+        if max_start <= 0 or not all(c in self.df.columns for c in REGIME_COLS):
+            return buckets
+        regime_mat = self.df.loc[:max_start, REGIME_COLS].to_numpy(dtype=np.float32)
+        for idx, row in enumerate(regime_mat):
+            reg_i = int(np.argmax(row))
+            reg_name = REGIME_COLS[reg_i].replace('regime_', '')
+            if reg_name in buckets:
+                buckets[reg_name].append(idx)
+        return buckets
+
+    def _sample_train_start(self, max_start: int) -> int:
+        return random.randint(0, max_start)
 
     def reset(self, start_idx=None):
         if self.phase == 'train':
@@ -144,6 +212,8 @@ class SACTradingEnv:
         self._just_closed = False
         self._last_realized_pnl = 0.0
         self._was_force_closed = False
+        self._last_closed_side = ""
+        self._last_closed_hold_count = 0
 
         if self.hmm_detector is not None:
             self.hmm_detector.reset_episode()
@@ -185,41 +255,36 @@ class SACTradingEnv:
         if force_close:
             is_closing = True
         elif self.pos is None:
-            # 무포지션: 임계값 넘으면 진입
             if action > _POS_THRESH:
                 is_entering_long = True
             elif action < -_POS_THRESH:
                 is_entering_short = True
-            # else: 관망 유지
         else:
-            # 포지션 보유 중
             if abs_action < _CLOSE_THRESH:
-                # action ≈ 0 → 청산
                 is_closing = True
             elif (self.pos == 'LONG' and action < -_POS_THRESH):
-                # 롱 보유 중 숏 신호 → 청산 (반전)
                 is_closing = True
             elif (self.pos == 'SHORT' and action > _POS_THRESH):
-                # 숏 보유 중 롱 신호 → 청산 (반전)
                 is_closing = True
             else:
-                # 같은 방향 유지 → 레버리지 동적 조정
                 is_adjusting = True
 
         # ── 거래 실행 ──
         self._just_closed = False
         self._last_realized_pnl = 0.0
         self._was_force_closed = force_close
+        self._last_closed_side = ""
+        self._last_closed_hold_count = 0
 
         if is_entering_long:
             self.pos = 'LONG'
-            self.entry_price = fill_price * (1 + self.slip)
+            self.entry_price = fill_price
             self.entry_idx = fill_step
             self.current_leverage = leverage_rate
             self.balance -= self.balance * self.fee * self.current_leverage
         elif is_entering_short:
             self.pos = 'SHORT'
-            self.entry_price = fill_price * (1 - self.slip)
+            self.entry_price = fill_price
             self.entry_idx = fill_step
             self.current_leverage = leverage_rate
             self.balance -= self.balance * self.fee * self.current_leverage
@@ -233,12 +298,13 @@ class SACTradingEnv:
                 self.balance -= self.balance * self.fee * lev_delta
                 self.current_leverage = new_lev
         elif is_closing and self.pos is not None:
+            closed_side = str(self.pos)
+            closed_hold_count = int(self.hold_count)
             base_balance = self.balance
-            if self.pos == 'LONG':
-                realized_pnl = (fill_price * (1 - self.slip) - self.entry_price) / self.entry_price
-            else:
-                realized_pnl = (self.entry_price - fill_price * (1 + self.slip)) / self.entry_price
-            realized_pnl *= self.current_leverage
+            realized_pnl = (
+                _signed_log_return(self.entry_price, fill_price, self.pos)
+                - 2.0 * self.slip
+            ) * self.current_leverage
             self.balance = base_balance * (1.0 + realized_pnl)
             self.balance -= base_balance * self.fee * self.current_leverage
             self.total_trades += 1
@@ -246,6 +312,8 @@ class SACTradingEnv:
                 self.win_trades += 1
             self._just_closed = True
             self._last_realized_pnl = realized_pnl
+            self._last_closed_side = closed_side
+            self._last_closed_hold_count = closed_hold_count
             self.pos = None
             self.current_leverage = 0.0
             self.hold_count = 0
@@ -260,10 +328,10 @@ class SACTradingEnv:
 
         if self.pos is not None:
             self.hold_count = self.current_step - self.entry_idx
-            if self.pos == 'LONG':
-                raw_pnl = (next_price * (1 - self.slip) - self.entry_price) / self.entry_price
-            else:
-                raw_pnl = (self.entry_price - next_price * (1 + self.slip)) / self.entry_price
+            raw_pnl = (
+                _signed_log_return(self.entry_price, next_price, self.pos)
+                - 2.0 * self.slip
+            )
             self.unrealized_pnl = raw_pnl * self.current_leverage
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
@@ -287,27 +355,15 @@ class SACTradingEnv:
             if self._was_force_closed:
                 r3_quality = -0.30
             elif self._last_realized_pnl > 0:
-                r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
+                r3_quality = 0.10 * min(self._last_realized_pnl / 0.01, 1.0)
             else:
-                r3_quality = -0.05
+                r3_quality = -0.10
 
         r4_time_decay = 0.0
         if self.pos is not None and self.hold_count > 12:
             r4_time_decay = -0.003 * (self.hold_count - 12) / 72.0
 
         r5_idle = 0.0
-        if self.pos is None:
-            regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
-            regime_raw = self._feat_np[regime_step]
-            o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
-            regime_vec = regime_raw[o:o + self._n_regime]
-            regime_idx = int(np.argmax(regime_vec))
-            if regime_idx in (2, 3):
-                r5_idle = -0.003
-            elif regime_idx in (0, 1):
-                r5_idle = -0.0003
-            else:
-                r5_idle = -0.001
 
         # R6 (SAC 신규): 명시적 거래 비용 패널티 — 진입 시 수수료를 직접 페널티로 부과
         r6_trade_cost = 0.0
@@ -323,11 +379,10 @@ class SACTradingEnv:
             # 일반 청산과 동일하게 다음봉 open 기준 체결 (close 사용 시 look-ahead 불일치)
             ep_fill_step = min(self.current_step, len(self._open_np) - 1)
             ep_end_price = float(self._open_np[ep_fill_step])
-            if self.pos == 'LONG':
-                ep_realized = (ep_end_price * (1 - self.slip) - self.entry_price) / self.entry_price
-            else:
-                ep_realized = (self.entry_price - ep_end_price * (1 + self.slip)) / self.entry_price
-            ep_realized *= self.current_leverage
+            ep_realized = (
+                _signed_log_return(self.entry_price, ep_end_price, self.pos)
+                - 2.0 * self.slip
+            ) * self.current_leverage
             self.balance = base_balance * (1.0 + ep_realized)
             self.balance -= base_balance * self.fee * self.current_leverage
             self.total_trades += 1
@@ -336,15 +391,18 @@ class SACTradingEnv:
             # [Bug 4 Fix] 종료 청산 PnL을 terminal reward에 추가
             terminal_r = float(np.tanh(ep_realized * 50.0))
             if ep_realized > 0:
-                terminal_r += 0.15 * min(ep_realized / 0.01, 1.0)
+                terminal_r += 0.10 * min(ep_realized / 0.01, 1.0)
             else:
-                terminal_r -= 0.05
+                terminal_r -= 0.10
             reward = float(np.tanh(raw_reward + terminal_r))
             self.pos = None
 
         info = {
             'pnl_pct': (self.balance / self.initial_balance - 1) * 100,
             'wr': self.win_trades / max(1, self.total_trades),
+            'force_closed': bool(self._just_closed and self._was_force_closed),
+            'closed_side': self._last_closed_side,
+            'closed_hold_count': int(self._last_closed_hold_count),
         }
         return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
 

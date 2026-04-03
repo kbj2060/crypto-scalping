@@ -14,7 +14,7 @@ import sys
 import os
 
 from core import config
-from core.feature_engineering import ULTIMATE_FEATURE_COLS
+from features.engineering import ULTIMATE_FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 
@@ -281,4 +281,3 @@ class TradingEnvironment:
     # ------------------------------------------------------------------
     def get_current_equity(self):
         return self.equity_curve[-1] if self.equity_curve else 1.0
-

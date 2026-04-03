@@ -15,7 +15,7 @@ for _p in (_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from core.feature_engineering import ULTIMATE_FEATURE_COLS
+from features.engineering import ULTIMATE_FEATURE_COLS
 from ensemble.supervised.train_trend_xgb import compute_atr, make_triple_barrier_label
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,6 @@ PRED_CONF_MAP = {
     "pred_patchtst": "conf_patchtst",
     "pred_tide": "conf_tide",
     "pred_mdjd": "conf_mdjd",
-    "pred_ridge": "conf_ridge",
 }
 
 RL_SIG_COLS = [
@@ -56,7 +55,6 @@ RL_ALPHA_COLS = [
     "jump_z",
     "evt_tail_flag",
     "evt_excess_z",
-    "cada",
     "mshd",
     "fvci",
     "wpad",

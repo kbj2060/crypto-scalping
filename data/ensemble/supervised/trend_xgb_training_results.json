@@ -1,10 +1,10 @@
 {
   "best_val_dir_f1": 0.777203517519498,
-  "test_bacc": 0.5386292746248432,
-  "test_dir_f1": 0.7747084888163969,
-  "n_features": 64,
+  "test_bacc": 0.5309072729422232,
+  "test_dir_f1": 0.7963087617314556,
+  "n_features": 55,
   "best_params": {
-    "n_estimators": 379,
+    "n_estimators": 416,
     "max_depth": 7,
     "learning_rate": 0.051396588258133924,
     "num_leaves": 77,

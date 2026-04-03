@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ensemble.supervised.train_trend_xgb import XGBTrendBrain
+from ensemble.supervised.train_entry_price_model import EntryPriceBrain
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,6 @@ class MultiTargetLGBMBrain:
             "pred_patchtst": "conf_patchtst",
             "pred_tide": "conf_tide",
             "pred_mdjd": "conf_mdjd",
-            "pred_ridge": "conf_ridge",
         }
         for pred_col, conf_col in pred_conf_map.items():
             sig_col = pred_col.replace("pred_", "signal_")
@@ -327,3 +327,29 @@ class SupervisedTrendHub:
         if mt_signal_dict is not None:
             return mt_signal_dict
         return None
+
+
+class EntryPriceHub:
+    """Entry price recommendation model loader."""
+
+    def __init__(self, meta_path: str = "data/ensemble/supervised/entry_price_model.json"):
+        self.brain = None
+        try:
+            self.brain = EntryPriceBrain.load(meta_path)
+        except Exception as e:
+            logger.warning("⚠️ EntryPriceHub: EntryPriceBrain 미로드: %s", e)
+
+    @property
+    def available(self) -> bool:
+        return self.brain is not None
+
+    def status(self) -> dict:
+        return {
+            "entry_price_loaded": self.available,
+            "feature_count": len(self.brain.feature_cols) if self.brain is not None else 0,
+        }
+
+    def predict_from_df(self, df: pd.DataFrame) -> dict | None:
+        if self.brain is None:
+            return None
+        return self.brain.predict_from_df(df)

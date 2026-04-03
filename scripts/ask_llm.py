@@ -32,7 +32,6 @@ SUMMARY_COLS = [
     # 전략 신호 (있을 경우)
     "sig_whale_sentiment", "sig_liq_squeeze", "sig_net_taker", "sig_ob_fvg",
     "sig_garch_regime", "sig_ou_mean_rev", "sig_jump_rebound", "sig_evt_tail",
-    "pred_ridge",
     "garch_vol_z", "ou_halflife", "jump_flag", "evt_tail_flag",
     "regime_bull", "regime_bear", "regime_chop",
 ]
@@ -93,8 +92,6 @@ Feature legend:
 - evt_tail_flag: 1 if extreme tail event
 - regime_bull/bear/chop: current market regime flags
 - sig_*: strategy signals (-1/0/1)
-- pred_ridge: ridge regression return prediction
-
 Task:
 1. Summarize the current market state in 2-3 sentences.
 2. Identify the dominant signal pattern.

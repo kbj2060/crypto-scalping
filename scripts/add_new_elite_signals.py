@@ -26,7 +26,7 @@ for _p in [_ROOT_DIR, os.path.join(_ROOT_DIR, 'strategies')]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from strategies.elite_strategies import NewEliteSignalEngine  # type: ignore
+from features.elite import NewEliteSignalEngine  # type: ignore
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

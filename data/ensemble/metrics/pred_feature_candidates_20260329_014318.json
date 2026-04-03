@@ -1,0 +1,44 @@
+{
+  "source_inspection_json": "data/ensemble/metrics/pred_feature_inspection_20260329_014152.json",
+  "top_k": 3,
+  "drop_near_constant": true,
+  "near_constant_removed": [
+    "pred_ridge"
+  ],
+  "candidates": {
+    "full": {
+      "pred_cols": [
+        "pred_timesfm",
+        "pred_chronos",
+        "pred_ttm",
+        "pred_patchtst",
+        "pred_tide",
+        "pred_mdjd"
+      ],
+      "conf_cols": [
+        "conf_timesfm",
+        "conf_chronos",
+        "conf_ttm",
+        "conf_patchtst",
+        "conf_tide",
+        "conf_mdjd"
+      ]
+    },
+    "slim": {
+      "pred_cols": [
+        "pred_patchtst",
+        "pred_ttm",
+        "pred_timesfm"
+      ],
+      "conf_cols": [
+        "conf_patchtst",
+        "conf_ttm",
+        "conf_timesfm"
+      ]
+    },
+    "none": {
+      "pred_cols": [],
+      "conf_cols": []
+    }
+  }
+}
