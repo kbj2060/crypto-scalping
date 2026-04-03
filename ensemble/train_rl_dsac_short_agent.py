@@ -86,6 +86,7 @@ from ensemble.rl_continuous_common import (  # noqa: E402
     ReplayBuffer,
     SACTradingEnv as _BaseSACTradingEnv,
 )
+from ensemble.train_rl_dsac_agent import RegimeBalancedReplay  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -697,13 +698,32 @@ class DSACShortAgent:
     def __init__(
         self, state_dim=STATE_DIM, hidden_dim=256,
         lr_actor=3e-4, lr_critic=3e-4, lr_alpha=3e-4,
-        gamma=0.99, tau=0.005, n_quantiles=32, cvar_frac=0.25, device="cuda",
+        gamma=0.99, tau=0.005, n_quantiles=32, cvar_frac=0.40, device="cuda",
+        pessimism_min_weight=0.65,
+        dynamic_entropy=True,
+        entropy_min=-0.80, entropy_max=-0.45,
+        entropy_std_low=0.18, entropy_std_high=0.35, entropy_step=0.05,
+        alpha_min=5e-3, alpha_init=0.03,
+        anti_flat_lambda=0.08, anti_flat_min_abs=0.18, anti_flat_anneal_updates=120000,
     ):
         self.device = device
         self.gamma = float(gamma)
         self.tau = float(tau)
         self.n_quantiles = int(n_quantiles)
         self.cvar_frac = float(cvar_frac)
+        self.pessimism_min_weight = float(np.clip(pessimism_min_weight, 0.5, 1.0))
+        self.dynamic_entropy = bool(dynamic_entropy)
+        self.entropy_min = float(entropy_min)
+        self.entropy_max = float(entropy_max)
+        self.entropy_std_low = float(entropy_std_low)
+        self.entropy_std_high = float(entropy_std_high)
+        self.entropy_step = float(max(entropy_step, 1e-4))
+        self.alpha_min = float(max(alpha_min, 1e-8))
+        self.alpha_init = float(max(alpha_init, self.alpha_min))
+        self.anti_flat_lambda = float(max(anti_flat_lambda, 0.0))
+        self.anti_flat_min_abs = float(np.clip(anti_flat_min_abs, 0.0, 1.0))
+        self.anti_flat_anneal_updates = int(max(0, anti_flat_anneal_updates))
+        self._updates = 0
 
         self.actor = SigmoidActor(state_dim, hidden_dim).to(device)
         self.critic = DistributionalTwinCritic(state_dim, hidden_dim, self.n_quantiles).to(device)
@@ -714,18 +734,18 @@ class DSACShortAgent:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
 
         self.target_entropy = -0.5
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
+        self.log_alpha = torch.tensor([np.log(self.alpha_init)], dtype=torch.float32, device=device, requires_grad=True)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=lr_alpha)
 
         self.taus = torch.linspace(
             0.5 / self.n_quantiles, 1.0 - 0.5 / self.n_quantiles,
             self.n_quantiles, device=device, dtype=torch.float32,
         )
-        self.memory = ReplayBuffer(capacity=500000)
+        self.memory = RegimeBalancedReplay(capacity=500000, recent_mix_ratio=0.30, recent_window=100000)
 
     @property
     def alpha(self) -> float:
-        return float(self.log_alpha.exp().item())
+        return float(torch.clamp(self.log_alpha.exp(), min=self.alpha_min).item())
 
     def act(self, state: np.ndarray, deterministic: bool = False) -> float:
         state_ts = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -736,14 +756,17 @@ class DSACShortAgent:
                 action, _ = self.actor.sample(state_ts)
         return float(action.cpu().item())
 
+    def _pessimism_weight(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+        return torch.full((q1.shape[0], 1), self.pessimism_min_weight, device=q1.device, dtype=q1.dtype)
+
     def _target_quantiles(self, ns, r, d):
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(ns)
             tq1, tq2 = self.critic_target(ns, next_action)
-            tq1_m = tq1.mean(dim=1, keepdim=True)
-            tq2_m = tq2.mean(dim=1, keepdim=True)
-            chosen_tq = torch.where(tq1_m <= tq2_m, tq1, tq2)
-            entropy_term = self.log_alpha.exp().detach() * next_log_prob
+            w = self._pessimism_weight(tq1, tq2)
+            chosen_tq = w * torch.minimum(tq1, tq2) + (1.0 - w) * torch.maximum(tq1, tq2)
+            alpha = torch.clamp(self.log_alpha.exp().detach(), min=self.alpha_min)
+            entropy_term = alpha * next_log_prob
             return r + self.gamma * (1.0 - d) * (chosen_tq - entropy_term)
 
     def _cvar_min(self, q1, q2):
@@ -752,7 +775,8 @@ class DSACShortAgent:
         q2_s, _ = torch.sort(q2, dim=1)
         c1 = q1_s[:, :k].mean(dim=1, keepdim=True)
         c2 = q2_s[:, :k].mean(dim=1, keepdim=True)
-        return torch.min(c1, c2)
+        w = self._pessimism_weight(q1, q2)
+        return w * torch.minimum(c1, c2) + (1.0 - w) * torch.maximum(c1, c2)
 
     def update(self, batch_size=256) -> dict:
         if len(self.memory) < batch_size:
@@ -777,18 +801,40 @@ class DSACShortAgent:
         new_action, log_prob = self.actor.sample(s)
         q1_new, q2_new = self.critic(s, new_action)
         q_cvar = self._cvar_min(q1_new, q2_new)
-        alpha = self.log_alpha.exp().detach()
-        actor_loss = (alpha * log_prob - q_cvar).mean()
+        alpha = torch.clamp(self.log_alpha.exp().detach(), min=self.alpha_min)
+
+        anti_flat_lambda_eff = self.anti_flat_lambda
+        if self.anti_flat_anneal_updates > 0:
+            anti_flat_lambda_eff *= max(0.0, 1.0 - float(self._updates) / float(self.anti_flat_anneal_updates))
+        det_action_batch = self.actor.deterministic(s)
+        det_action_abs_mean = det_action_batch.abs().mean()
+        anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
+
+        actor_loss = (alpha * log_prob - q_cvar).mean() + anti_flat_lambda_eff * anti_flat_pen
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
 
-        alpha_loss = -(self.log_alpha.exp() * (log_prob + self.target_entropy).detach()).mean()
+        alpha_for_loss = torch.clamp(self.log_alpha.exp(), min=self.alpha_min)
+        alpha_loss = -(alpha_for_loss * (log_prob + self.target_entropy).detach()).mean()
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()
         self.alpha_optimizer.step()
+        with torch.no_grad():
+            self.log_alpha.data.clamp_(min=float(np.log(self.alpha_min)))
+
+        self._updates += 1
+
+        if self.dynamic_entropy:
+            action_std = float(new_action.detach().std().item())
+            det_np = det_action_batch.detach().squeeze(-1).cpu().numpy()
+            no_trade_rate = float(np.mean(det_np < _CLOSE_THRESH))
+            if no_trade_rate > 0.80 or action_std < self.entropy_std_low:
+                self.target_entropy = min(self.entropy_max, self.target_entropy + 2.0 * self.entropy_step)
+            elif action_std > self.entropy_std_high and no_trade_rate < 0.40:
+                self.target_entropy = max(self.entropy_min, self.target_entropy - self.entropy_step)
 
         for tp, p in zip(self.critic_target.parameters(), self.critic.parameters()):
             tp.data.copy_(self.tau * p.data + (1.0 - self.tau) * tp.data)
@@ -796,9 +842,12 @@ class DSACShortAgent:
         return {
             "critic_loss": float(critic_loss.item()),
             "actor_loss": float(actor_loss.item()),
-            "alpha": float(self.log_alpha.exp().item()),
+            "alpha": self.alpha,
             "mean_q": float(torch.min(q1_new.mean(dim=1), q2_new.mean(dim=1)).mean().item()),
             "cvar_q": float(q_cvar.mean().item()),
+            "Htgt": self.target_entropy,
+            "AFp": float(anti_flat_pen.item()),
+            "Aabs": float(det_action_abs_mean.item()),
         }
 
 
@@ -1024,11 +1073,16 @@ def train(
     fresh_start: bool = False,
     use_lr_scheduler: bool = True,
     lr_factor: float = 0.5,
-    lr_patience: int = 3,
-    lr_min: float = 1e-5,
+    lr_patience: int = 5,
+    lr_min: float = 3e-5,
     early_stop_patience: int = 12,
     val_interval: int = 10,
-    cvar_frac: float = 0.25,
+    cvar_frac: float = 0.40,
+    pess_w: float = 0.65,
+    dyn_ent: bool = True,
+    anti_flat: float = 0.08,
+    alpha_min: float = 5e-3,
+    alpha_init: float = 0.03,
     device: str = "auto",
 ):
     if not os.path.exists(csv_path):
@@ -1061,7 +1115,11 @@ def train(
 
     train_hmm = copy.deepcopy(hmm_detector)
     env = ShortSpecialistEnv(df_train, phase="train", hmm_detector=train_hmm, mtf_features=mtf_train)
-    agent = DSACShortAgent(STATE_DIM, hidden_dim=256, n_quantiles=32, cvar_frac=float(cvar_frac), device=device)
+    agent = DSACShortAgent(
+        STATE_DIM, hidden_dim=256, n_quantiles=32, cvar_frac=float(cvar_frac), device=device,
+        pessimism_min_weight=float(pess_w), dynamic_entropy=bool(dyn_ent),
+        anti_flat_lambda=float(anti_flat), alpha_min=float(alpha_min), alpha_init=float(alpha_init),
+    )
 
     nep = int(episodes)
     batch = 256
@@ -1084,14 +1142,16 @@ def train(
             patience=max(1, int(lr_patience)), min_lr=float(lr_min), threshold=1e-3, threshold_mode="rel",
         )
     logger.info(
-        "[SHORT][TRAIN CFG] val_interval=%d | lr_sched=%s (factor=%.3f patience=%d min_lr=%.1e) | early_stop_patience=%d | cvar_frac=%.2f | fallback_gain=%.2f",
+        "[SHORT][TRAIN CFG] val_interval=%d | lr_sched=%s (factor=%.3f patience=%d min_lr=%.1e)"
+        " | early_stop_patience=%d | cvar_frac=%.2f | pess_w=%.2f | dyn_ent=%s"
+        " | anti_flat=%.3f | alpha(min=%.1e init=%.3f) | replay=balanced+recent | fallback_gain=%.2f",
         int(val_interval),
         "ON" if use_lr_scheduler else "OFF",
-        float(lr_factor),
-        int(lr_patience),
-        float(lr_min),
+        float(lr_factor), int(lr_patience), float(lr_min),
         int(early_stop_patience),
-        float(cvar_frac),
+        float(cvar_frac), float(pess_w),
+        "ON" if dyn_ent else "OFF",
+        float(anti_flat), float(alpha_min), float(alpha_init),
         float(_FALLBACK_SIGNAL_GAIN),
     )
 
@@ -1337,11 +1397,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--val-interval", type=int, default=10)
     p.add_argument("--no-lr-scheduler", action="store_true")
     p.add_argument("--lr-factor", type=float, default=0.5)
-    p.add_argument("--lr-patience", type=int, default=3)
-    p.add_argument("--lr-min", type=float, default=1e-5)
+    p.add_argument("--lr-patience", type=int, default=5)
+    p.add_argument("--lr-min", type=float, default=3e-5)
     p.add_argument("--early-stop-patience", type=int, default=12)
     p.add_argument("--startup-check-only", action="store_true")
-    p.add_argument("--cvar-frac", type=float, default=0.25)
+    p.add_argument("--cvar-frac", type=float, default=0.40)
+    p.add_argument("--pess-w", type=float, default=0.65)
+    p.add_argument("--no-dyn-ent", action="store_true")
+    p.add_argument("--anti-flat", type=float, default=0.08)
+    p.add_argument("--alpha-min", type=float, default=5e-3)
+    p.add_argument("--alpha-init", type=float, default=0.03)
     p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return p.parse_args()
 
@@ -1356,5 +1421,7 @@ if __name__ == "__main__":
         fresh_start=args.fresh_start, use_lr_scheduler=not args.no_lr_scheduler,
         lr_factor=args.lr_factor, lr_patience=args.lr_patience, lr_min=args.lr_min,
         early_stop_patience=args.early_stop_patience, val_interval=args.val_interval,
-        cvar_frac=args.cvar_frac, device=args.device,
+        cvar_frac=args.cvar_frac, pess_w=args.pess_w, dyn_ent=not args.no_dyn_ent,
+        anti_flat=args.anti_flat, alpha_min=args.alpha_min, alpha_init=args.alpha_init,
+        device=args.device,
     )
