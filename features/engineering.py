@@ -1,37 +1,39 @@
 import pandas as pd
 import numpy as np
+import logging
 from core.cvp import add_cvp_features
+from features.schema import prune_to_active_feature_keep
+
+logger = logging.getLogger(__name__)
 
 # [수정사항 3] regime_mean_reverting 중복 제거에 따른 컬럼 리스트 수정
 # [신규 추가] rogers_satchell_vol, parkinson_vol, amihud_illiquidity_z 추가
 ULTIMATE_FEATURE_COLS = [
     'whale_retail_ratio', 'whale_conviction', 'smart_money_flow',
-    'funding_pressure', 'squeeze_power', 'oi_change_rate',
+    'squeeze_power', 'oi_change_rate',
     'net_taker_ratio', 'taker_acceleration', 'trade_intensity',
     'big_trade_ratio',
     'volatility_z', 'rsi', 'macd_hist',
-    'bb_width', 'bb_width_z', 'vwap_dist', 'hma_slope', 'wick_ratio',
+    'bb_width', 'bb_width_z', 'hma_slope', 'wick_ratio',
     'garman_klass_vol', 'realized_vol_ratio',
     'rogers_satchell_vol', 'parkinson_vol', 'amihud_illiquidity_z', 
     'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index',
     'hour_sin', 'hour_cos', 'minute_sin', 'minute_cos',
-    'session_asia', 'session_europe', 'session_us',
+    'session_europe', 'session_us',
     'is_hour_open',
-    'regime_break',
     'turtle_signal', 'dual_momentum', 'mean_reversion_z',
     'breakout_strength', 'volume_profile_signal', 'fibonacci_level',
     'funding_roc_12', 'funding_roc_48', 'funding_roc_288',
-    'funding_z_score', 'funding_abs',
+    'funding_z_score',
     'long_squeeze_risk', 'short_squeeze_risk',
     'funding_price_divergence',
-    'hurst_12', 'hurst_48', 'hurst_288',
-    'regime_trending', 'hurst_change', 
-    'cvp_poc_dist', 'cvp_vah_val_width', 'cvp_cluster_position',
+    'hurst_48', 'hurst_288',
+    'regime_trending',
+    'cvp_poc_dist', 'cvp_cluster_position',
     'cvp_volume_imbalance', 'cvp_regime',
     'ofi_acceleration',
-    'kalman_velocity', 'return_autocorr', 'realized_skewness',
+    'kalman_velocity', 'realized_skewness',
     'ofti', 'kel', 'mta_funding', 'svps',
-    'pred_mdjd', 'conf_mdjd',
     # SyntheticAlphaEngine 확장 출력
     'cada', 'mshd', 'fvci', 'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
     # VolatilityModelEngine 출력
@@ -55,8 +57,16 @@ MUST_INCLUDE_FEATURES = [
 
 
 class FeatureEngineer:
-    def __init__(self, candle_minutes: int = 5):
+    def __init__(
+        self,
+        candle_minutes: int = 5,
+        *,
+        keep_only_active: bool = True,
+        include_entry_price: bool = False,
+    ):
         self.candle_minutes = candle_minutes
+        self.keep_only_active = bool(keep_only_active)
+        self.include_entry_price = bool(include_entry_price)
         self.windows = {
             'short': 5,
             'medium': 20,
@@ -77,8 +87,17 @@ class FeatureEngineer:
         df = self._create_advanced_volatility(df) # [신규 추가] 고급 변동성 지표 통합
         df = self._create_market_structure(df)
         df = self._create_temporal_features(df)
-        df = self._add_regime_break(df)
-        df = add_cvp_features(df, lookback=200, n_clusters=4)
+        df = add_cvp_features(
+            df,
+            lookback=200,
+            n_clusters=4,
+            output_cols=[
+                "cvp_poc_dist",
+                "cvp_cluster_position",
+                "cvp_volume_imbalance",
+                "cvp_regime",
+            ],
+        )
 
         quant = QuantSignalFeatures(df)
         df = quant.add_all_signals()
@@ -95,8 +114,6 @@ class FeatureEngineer:
 
         df = self._create_predictive_stats(df)
         df = self._create_synthetic_alpha(df)
-        df = self.add_mdjd_features(df)
-
         # ── 엘리트 퀀트 엔진 (합성 알파 + 변동성 모델 + 신규 Elite 시그널) ──
         from features.elite import (
             SyntheticAlphaEngine, VolatilityModelEngine, NewEliteSignalEngine,
@@ -106,6 +123,17 @@ class FeatureEngineer:
         NewEliteSignalEngine().compute(df)    # sig_volume_confirm, sig_liquidity_trap, sig_trend_health
 
         df = self._handle_missing(df)
+        if self.keep_only_active:
+            before_cols = len(df.columns)
+            df = prune_to_active_feature_keep(
+                df,
+                include_entry_price=self.include_entry_price,
+                include_m7_artifacts=True,
+                extra_keep=["timestamp"],
+            )
+            after_cols = len(df.columns)
+            if after_cols < before_cols:
+                print(f"🧹 FeatureEngineer active prune: {before_cols} -> {after_cols} cols (drop={before_cols-after_cols})")
         return df
 
     def _merge_data(self, eth: pd.DataFrame, btc: pd.DataFrame) -> pd.DataFrame:
@@ -139,11 +167,6 @@ class FeatureEngineer:
         # [수정사항 1] smart_money_flow: 비정상성 해소를 위해 절대값 diff 대신 pct_change 사용
         df['smart_money_flow'] = df['sum_open_interest_value'].pct_change().clip(-1, 1).fillna(0)
 
-        df['funding_pressure'] = (
-            df['last_funding_rate']
-            .rolling(window=self.windows['long'], min_periods=1)
-            .sum()
-        )
         df['squeeze_power'] = df['sum_open_interest_value'] * df['last_funding_rate']
         df['oi_change_rate'] = df['sum_open_interest_value'].pct_change().clip(-1, 1).fillna(0)
 
@@ -206,8 +229,6 @@ class FeatureEngineer:
         bbw_mean = df['bb_width'].rolling(window=100, min_periods=1).mean()
         bbw_std = df['bb_width'].rolling(window=100, min_periods=1).std().replace(0, 1e-8)
         df['bb_width_z'] = (df['bb_width'] - bbw_mean) / bbw_std
-
-        df['vwap_dist'] = self._calc_vwap_dist(df)
 
         # 5. HMA Slope (Hull Moving Average)
         hma = self._calc_hma(close, n=20)
@@ -417,10 +438,6 @@ class FeatureEngineer:
         end_date = ts_utc.max().date()
         
         try:
-            # 아시아 세션 (JPX)
-            tse = mcal.get_calendar('JPX')
-            df['session_asia'] = ts_utc.isin(mcal.date_range(tse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
-            
             # 유럽 세션 (LSE)
             lse = mcal.get_calendar('LSE')
             df['session_europe'] = ts_utc.isin(mcal.date_range(lse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
@@ -430,7 +447,6 @@ class FeatureEngineer:
             df['session_us'] = ts_utc.isin(mcal.date_range(nyse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
         except Exception as e:
             logger.warning(f"Market calendars 갱신 실패. 정적 로직으로 대체 ({e})")
-            df['session_asia']   = ((hour >= 0) & (hour < 8)).astype(np.float32)
             df['session_europe'] = ((hour >= 8) & (hour < 16)).astype(np.float32)
             df['session_us'] = ((hour >= 14.5) & (hour < 21)).astype(np.float32)
 
@@ -460,10 +476,15 @@ class FeatureEngineer:
         # ── KEL: Kinetic Energy of Liquidity ─────────────────────────────────
         # oi_change_rate / garman_klass_vol 비율로 "억눌린 에너지" 측정
         # funding_pressure 부호로 방향 결정 → Z-스코어 후 tanh 바운딩
+        funding_pressure = (
+            df['last_funding_rate']
+            .rolling(window=ROLL, min_periods=1)
+            .sum()
+        )
         kel_raw = (
             df['oi_change_rate']
             / (df['garman_klass_vol'] + 1e-6)
-            * np.sign(df['funding_pressure'])
+            * np.sign(funding_pressure)
         )
         kel_mean = kel_raw.rolling(ROLL, min_periods=1).mean()
         kel_std  = kel_raw.rolling(ROLL, min_periods=1).std().replace(0, 1e-8)
@@ -477,7 +498,8 @@ class FeatureEngineer:
             + 0.2 * df['funding_roc_288']
         )
         # funding_abs는 0.0001 스케일 → max(1e-5, ...) 로 실질 정규화
-        mta_normalized = weighted_roc / df['funding_abs'].clip(lower=1e-5)
+        funding_abs = np.abs(df['last_funding_rate'])
+        mta_normalized = weighted_roc / funding_abs.clip(lower=1e-5)
 
         sq_mean = df['squeeze_power'].rolling(ROLL, min_periods=1).mean()
         sq_std  = df['squeeze_power'].rolling(ROLL, min_periods=1).std().replace(0, 1e-8)
@@ -487,13 +509,13 @@ class FeatureEngineer:
         df['mta_funding'] = df['mta_funding'].fillna(0)
 
         # ── SVPS: Spatial Volume Profile Skew ────────────────────────────────
-        # POC 거리 × 거래량 불균형 × exp(-매물대 두께)
-        # exp 폭주 방지: vah_val_width를 [0, 5] 클리핑
+        # POC 거리 × 거래량 불균형 × exp(-레짐 강도)
+        # cvp_vah_val_width(미사용 컬럼) 대신 cvp_regime 절대값을 감쇠항으로 사용
         df['svps'] = np.tanh(
             2.0
             * df['cvp_poc_dist']
             * df['cvp_volume_imbalance']
-            * np.exp(-df['cvp_vah_val_width'].clip(0, 5))
+            * np.exp(-np.abs(df['cvp_regime']).clip(0, 5))
         ).fillna(0)
 
         return df
@@ -507,21 +529,18 @@ class FeatureEngineer:
             'turtle_signal', 'dual_momentum', 'mean_reversion_z',
             'breakout_strength', 'volume_profile_signal', 'fibonacci_level',
             'funding_roc_12', 'funding_roc_48', 'funding_roc_288',
-            'hurst_change', 'ofi_acceleration',
-            'cvp_poc_dist', 'cvp_vah_val_width', 'cvp_cluster_position',
+            'ofi_acceleration',
+            'cvp_poc_dist', 'cvp_cluster_position',
             'cvp_volume_imbalance', 'cvp_regime',
             'amihud_illiquidity_z',
-            'kalman_velocity', 'return_autocorr', 'realized_skewness',
+            'kalman_velocity', 'realized_skewness',
         ]
         for col in diff_features:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
 
-        if 'regime_break' in df.columns:
-            df['regime_break'] = df['regime_break'].fillna(0)
-
         feature_cols = [c for c in ULTIMATE_FEATURE_COLS if c in df.columns]
-        other_features = [c for c in feature_cols if c not in diff_features and c != 'regime_break']
+        other_features = [c for c in feature_cols if c not in diff_features]
         if other_features:
             # bfill 제거: 롤링 윈도우 초반 NaN을 미래 데이터로 채우는 룩어헤드 편향 방지
             # ffill로 과거 전파 후, 여전히 NaN인 초반 구간(워밍업)은 0으로 채움
@@ -535,7 +554,6 @@ class FeatureEngineer:
         """순수 수학/통계 기반 예측 피처 3종"""
         close = df['close']
         df['kalman_velocity']  = self._kalman_trend_velocity(close)
-        df['return_autocorr']  = self._return_autocorrelation(close)
         df['realized_skewness'] = self._realized_skewness(close)
         return df
 
@@ -640,23 +658,10 @@ class FeatureEngineer:
         )
         return result.clip(-3, 3).fillna(0)
 
-    def _add_regime_break(self, df: pd.DataFrame) -> pd.DataFrame:
-        if 'volatility_z' not in df.columns:
-            df['regime_break'] = 0
-            return df
-
-        vol = df['volatility_z']
-        window = 20
-        vol_std = vol.rolling(window).std()
-        threshold = vol_std.quantile(0.95)
-        df['regime_break'] = (vol_std > threshold).astype(np.float32)
-        return df
-
     def augment_training_data(self, df: pd.DataFrame, noise_level: float = 0.01) -> pd.DataFrame:
         augmented = df.copy()
 
-        exclude_cols = ['session_asia', 'session_europe', 'session_us',
-                        'is_hour_open', 'regime_break']
+        exclude_cols = ['session_europe', 'session_us', 'is_hour_open']
         feature_cols = [c for c in ULTIMATE_FEATURE_COLS
                         if c in df.columns and c not in exclude_cols]
 
@@ -667,51 +672,6 @@ class FeatureEngineer:
             augmented[col] = df[col] + noise
 
         return augmented
-
-    @staticmethod
-    def add_mdjd_features(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Microstructure-Driven Jump-Diffusion (MDJD) Feature Generator
-        """
-        # 1. 안전한 Z-스코어 정규화 (Squeeze Power)
-        sqz_mean = df['squeeze_power'].rolling(window=288, min_periods=1).mean()
-        sqz_std  = df['squeeze_power'].rolling(window=288, min_periods=1).std()
-        squeeze_z = (df['squeeze_power'] - sqz_mean) / (sqz_std + 1e-8)
-
-        # 파라미터 사전 정의 (스케일을 맞춘 휴리스틱 가중치)
-        W1, W2 = 0.005, 0.002
-        BETA    = 0.003
-        GAMMA   = 0.01
-        RHO     = 0.005
-        DELTA   = 0.4
-
-        # 2. 컴포넌트별 계산
-        # D_t: Smart Money Drift
-        D = W1 * df['smart_money_flow'] * (1 + np.tanh(df['whale_conviction'])) + \
-            W2 * df['mtf_trend_4h']
-
-        # I_t: Order-book Imbalance Shock
-        I = BETA * df['net_taker_ratio'] * np.exp(np.tanh(df['taker_acceleration'])) * \
-            (df['amihud_illiquidity_z'].clip(lower=0) + 1.0)
-
-        # J_t: Liquidity Squeeze Jump
-        J = GAMMA * np.tanh(squeeze_z) * np.tanh(df['funding_pressure']) * \
-            (df['breakout_strength'] > DELTA).astype(float)
-
-        # G_t: Volume Profile Gravity
-        # [수정] mtf_trend_4h는 pct_change 스케일(~0.0001)이라 tanh(x) ≈ x → 상수 1.0에 수렴
-        # Z-스코어로 정규화해야 dampener가 실제로 작동함
-        trend_4h_z = df['mtf_trend_4h'] / (df['mtf_trend_4h'].rolling(288, min_periods=1).std() + 1e-8)
-        trend_dampener = 1.0 - np.tanh(trend_4h_z.abs())
-        G = -RHO * df['cvp_poc_dist'] * np.exp(-df['cvp_volume_imbalance'].clip(-5, 5)) * trend_dampener
-
-        # 3. MDJD 앙상블 신호 생성
-        R_hat = D + I + J + G
-
-        df['pred_mdjd'] = np.sign(R_hat).clip(-1, 1)
-        df['conf_mdjd'] = np.tanh(np.abs(R_hat) * 100)
-
-        return df
 
 class QuantSignalFeatures:
     """유명 퀀트 알고리즘의 신호를 피처로 변환"""
@@ -812,7 +772,6 @@ class FundingRateMomentum:
         self.df['funding_roc_48'] = self._calculate_roc(48)
         self.df['funding_roc_288'] = self._calculate_roc(288)
         self.df['funding_z_score'] = self._calculate_zscore(288)
-        self.df['funding_abs'] = np.abs(self.funding_rate)
         self.df['long_squeeze_risk'] = self._long_squeeze_score()
         self.df['short_squeeze_risk'] = self._short_squeeze_score()
         self.df['funding_price_divergence'] = self._divergence()
@@ -873,14 +832,11 @@ class HurstExponentFeatures:
         self.close = df['close'].values
     
     def add_all_features(self):
-        self.df['hurst_12'] = self._rolling_hurst_fast(12)
         self.df['hurst_48'] = self._rolling_hurst_fast(48)
         self.df['hurst_288'] = self._rolling_hurst_fast(288)
         
         self.df['regime_trending'] = (self.df['hurst_48'] > 0.5).astype(float)
-        
-        self.df['hurst_change'] = self.df['hurst_48'].diff(12).fillna(0)
-        
+
         return self.df
 
     def _rolling_hurst_fast(self, window):

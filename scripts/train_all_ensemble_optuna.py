@@ -10,7 +10,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -145,121 +145,151 @@ def _job_completed(job: Job) -> bool:
     return all(_exists(p) for p in job.model_files)
 
 
-def _build_jobs(args: argparse.Namespace) -> List[Job]:
+def _build_jobs(args: argparse.Namespace) -> Tuple[List[Job], List[str]]:
     jobs: List[Job] = []
+    missing_trainers: List[str] = []
+
+    def _maybe_add(job: Job) -> None:
+        script_path = ROOT / job.script
+        if not script_path.exists():
+            missing_trainers.append(job.script)
+            print(f"[WARN] skip missing trainer: {job.script}")
+            return
+        jobs.append(job)
 
     if args.target in ("all", "supervised"):
-        jobs.extend(
-            [
-                Job(
-                    name="supervised/train_multitarget_lgbm",
-                    script="ensemble/supervised/train_multitarget_lgbm.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.supervised_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/supervised/multi_target_lgbm.pkl",
-                        "data/ensemble/supervised/multi_target_lgbm.json",
-                    ],
-                    results_file="data/ensemble/supervised/multitarget_lgbm_training_results.json",
-                ),
-                Job(
-                    name="supervised/train_trend_xgb",
-                    script="ensemble/supervised/train_trend_xgb.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.xgb_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/supervised/trend_xgb.json",
-                        "data/ensemble/supervised/trend_xgb.pkl",
-                    ],
-                    results_file="data/ensemble/supervised/trend_xgb_training_results.json",
-                ),
-                Job(
-                    name="supervised/train_quantile_forest",
-                    script="ensemble/supervised/train_quantile_forest.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.supervised_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/supervised/quantile_forest.pkl",
-                        "data/ensemble/supervised/quantile_forest.json",
-                    ],
-                    results_file="data/ensemble/supervised/quantile_forest_training_results.json",
-                ),
-            ]
+        _maybe_add(
+            Job(
+                name="supervised/train_entry_price_model",
+                script="ensemble/supervised/train_entry_price_model.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                ],
+                model_files=[
+                    "data/ensemble/supervised/entry_price_model.json",
+                    "data/ensemble/supervised/entry_price_model.pkl",
+                ],
+                results_file="data/ensemble/supervised/entry_price_model.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="supervised/train_trend_xgb",
+                script="ensemble/supervised/train_trend_xgb.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.xgb_trials),
+                ],
+                model_files=[
+                    "data/ensemble/supervised/trend_xgb.json",
+                    "data/ensemble/supervised/trend_xgb.pkl",
+                ],
+                results_file="data/ensemble/supervised/trend_xgb_training_results.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="supervised/train_multitarget_lgbm",
+                script="ensemble/supervised/train_multitarget_lgbm.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.supervised_trials),
+                ],
+                model_files=[
+                    "data/ensemble/supervised/multi_target_lgbm.json",
+                    "data/ensemble/supervised/multi_target_lgbm.pkl",
+                ],
+                results_file="data/ensemble/supervised/multitarget_lgbm_training_results.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="supervised/train_quantile_forest",
+                script="ensemble/supervised/train_quantile_forest.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.supervised_trials),
+                ],
+                model_files=[
+                    "data/ensemble/supervised/quantile_forest.json",
+                    "data/ensemble/supervised/quantile_forest.pkl",
+                ],
+                results_file="data/ensemble/supervised/quantile_forest_training_results.json",
+            )
         )
 
     if args.target in ("all", "unsupervised"):
-        jobs.extend(
-            [
-                Job(
-                    name="unsupervised/train_gmm_volatility",
-                    script="ensemble/unsupervised/train_gmm_volatility.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.unsupervised_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/unsupervised/gmm_volatility.pkl",
-                        "data/ensemble/unsupervised/gmm_volatility.json",
-                    ],
-                    results_file="data/ensemble/unsupervised/gmm_volatility_training_results.json",
-                ),
-                Job(
-                    name="unsupervised/train_hdbscan_regime",
-                    script="ensemble/unsupervised/train_hdbscan_regime.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.unsupervised_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/unsupervised/hdbscan_regime.pkl",
-                        "data/ensemble/unsupervised/hdbscan_regime.json",
-                    ],
-                    results_file="data/ensemble/unsupervised/hdbscan_regime_training_results.json",
-                ),
-                Job(
-                    name="unsupervised/train_isolation_forest",
-                    script="ensemble/unsupervised/train_isolation_forest.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.unsupervised_trials),
-                    ],
-                    model_files=[
-                        "data/ensemble/unsupervised/isolation_forest.pkl",
-                        "data/ensemble/unsupervised/isolation_forest.json",
-                    ],
-                    results_file="data/ensemble/unsupervised/isolation_forest_training_results.json",
-                ),
-                Job(
-                    name="unsupervised/train_vae_anomaly",
-                    script="ensemble/unsupervised/train_vae_anomaly.py",
-                    args=[
-                        "--data-path", args.data_path,
-                        "--rl-path", args.rl_path,
-                        "--n-trials", str(args.vae_trials),
-                        "--device", args.vae_device,
-                    ],
-                    model_files=[
-                        "data/ensemble/unsupervised/vae_anomaly.pkl",
-                        "data/ensemble/unsupervised/vae_anomaly.json",
-                    ],
-                    results_file="data/ensemble/unsupervised/vae_anomaly_training_results.json",
-                ),
-            ]
+        _maybe_add(
+            Job(
+                name="unsupervised/train_gmm_volatility",
+                script="ensemble/unsupervised/train_gmm_volatility.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.unsupervised_trials),
+                ],
+                model_files=[
+                    "data/ensemble/unsupervised/gmm_volatility.pkl",
+                    "data/ensemble/unsupervised/gmm_volatility.json",
+                ],
+                results_file="data/ensemble/unsupervised/gmm_volatility_training_results.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="unsupervised/train_hdbscan_regime",
+                script="ensemble/unsupervised/train_hdbscan_regime.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.unsupervised_trials),
+                ],
+                model_files=[
+                    "data/ensemble/unsupervised/hdbscan_regime.pkl",
+                    "data/ensemble/unsupervised/hdbscan_regime.json",
+                ],
+                results_file="data/ensemble/unsupervised/hdbscan_regime_training_results.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="unsupervised/train_isolation_forest",
+                script="ensemble/unsupervised/train_isolation_forest.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.unsupervised_trials),
+                ],
+                model_files=[
+                    "data/ensemble/unsupervised/isolation_forest.pkl",
+                    "data/ensemble/unsupervised/isolation_forest.json",
+                ],
+                results_file="data/ensemble/unsupervised/isolation_forest_training_results.json",
+            )
+        )
+        _maybe_add(
+            Job(
+                name="unsupervised/train_vae_anomaly",
+                script="ensemble/unsupervised/train_vae_anomaly.py",
+                args=[
+                    "--data-path", args.data_path,
+                    "--rl-path", args.rl_path,
+                    "--n-trials", str(args.vae_trials),
+                    "--device", args.vae_device,
+                ],
+                model_files=[
+                    "data/ensemble/unsupervised/vae_anomaly.pkl",
+                    "data/ensemble/unsupervised/vae_anomaly.json",
+                ],
+                results_file="data/ensemble/unsupervised/vae_anomaly_training_results.json",
+            )
         )
 
-    return jobs
+    return jobs, missing_trainers
 
 
 def parse_args() -> argparse.Namespace:
@@ -268,8 +298,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--target", choices=["all", "supervised", "unsupervised"], default="all")
     p.add_argument("--python", default=sys.executable, help="Python executable to use")
-    p.add_argument("--data-path", default="data/training_features_5m.csv")
-    p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
+    p.add_argument("--data-path", default="data/splits/year_oos/training_features_2025.csv")
+    p.add_argument("--rl-path", default="data/splits/year_oos/rl_base_2025.csv")
     p.add_argument("--xgb-trials", type=int, default=40)
     p.add_argument("--supervised-trials", type=int, default=30)
     p.add_argument("--unsupervised-trials", type=int, default=25)
@@ -310,10 +340,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    jobs = _build_jobs(args)
+    jobs, missing_trainers = _build_jobs(args)
+
+    if missing_trainers:
+        print("[WARN] missing trainers:")
+        for path in missing_trainers:
+            print(f"- {path}")
 
     if not jobs:
-        print("No jobs selected.")
+        print("[ERROR] No runnable jobs selected (all selected trainers are missing).")
         return 1
 
     if args.force_retune:
@@ -376,6 +411,11 @@ def main() -> int:
         print("\n[SUMMARY] skipped jobs:")
         for name in skipped:
             print(f"- {name}")
+
+    if skipped and len(skipped) == len(jobs):
+        print("\n[SUMMARY] all selected jobs were skipped as already completed.")
+        print("[HINT] use --no-skip-completed or --force-retune to run again.")
+        return 0
 
     print("\n[SUMMARY] all jobs completed successfully.")
     return 0

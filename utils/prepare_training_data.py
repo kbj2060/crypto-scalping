@@ -16,7 +16,8 @@ from tqdm import tqdm
 # 상위 폴더를 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from features.engineering import FeatureEngineer, ULTIMATE_FEATURE_COLS
+from features.engineering import FeatureEngineer
+from features.schema import build_active_feature_keep, prune_to_active_feature_keep
 from strategies import (
     WhaleSentimentDivergence, LiquidationSqueezeHunter,
     OrderblockFVGStrategy, NetTakerFlowStrategy
@@ -63,8 +64,9 @@ def prepare_training_data():
     logger.info("🔧 Step 2: 피처 엔지니어링 확인")
     logger.info("-" * 80)
     
-    # 필수 피처가 있는지 확인
-    missing_features = [col for col in ULTIMATE_FEATURE_COLS if col not in df.columns]
+    active_keep = build_active_feature_keep(include_entry_price=False, include_m7_artifacts=True)
+    # 필수 피처가 있는지 확인 (실사용 스키마 기준)
+    missing_features = [col for col in active_keep if col not in df.columns and col != "timestamp"]
     
     if missing_features:
         logger.info(f"⚠️  누락된 피처 발견: {len(missing_features)}개")
@@ -81,7 +83,7 @@ def prepare_training_data():
             logger.info(f"✅ BTC 데이터 로드: {len(btc_df):,}개 캔들")
         
         # 피처 엔지니어링 실행
-        engineer = FeatureEngineer()
+        engineer = FeatureEngineer(keep_only_active=True, include_entry_price=False)
         
         # ETH 데이터에 timestamp 컬럼 추가 (process 메서드가 필요로 함)
         df_for_fe = df.reset_index()
@@ -97,7 +99,14 @@ def prepare_training_data():
         else:
             logger.warning("BTC 데이터 없이 진행 (일부 피처 누락 가능)")
     else:
-        logger.info(f"✅ 모든 필수 피처 존재: {len(ULTIMATE_FEATURE_COLS)}개")
+        logger.info(f"✅ 모든 필수 피처 존재(실사용 스키마): {len(active_keep)}개")
+
+    df = prune_to_active_feature_keep(
+        df if isinstance(df, pd.DataFrame) else pd.DataFrame(df),
+        include_entry_price=False,
+        include_m7_artifacts=True,
+        extra_keep=["timestamp"],
+    )
     
     # 3. 전략 신호 계산
     logger.info("")

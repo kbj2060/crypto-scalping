@@ -7,19 +7,13 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+from features.registry import get_m7_columns
 
 
-DEFAULT_DROP_COLS = [
+DEFAULT_DROP_COLS = sorted(set(get_m7_columns("deprecated", include_entry_price=True)) | {
     "pred_ridge",
-    "m7_hdb_label",
-    "m7_hdb_prob",
-    "m7_vae_threshold",
     "cada",
-    "m7_prob_dn",
-    "m7_prob_fl",
-    "m7_prob_up",
-    "m7_direction",
-]
+})
 
 
 def parse_args() -> argparse.Namespace:

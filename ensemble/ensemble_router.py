@@ -176,6 +176,10 @@ class TFTForecaster(BaseForecaster):
             df_tail = df.tail(cfg.input_window).copy()
             if len(df_tail) < cfg.input_window:
                 return self._empty_output(horizon)
+            missing = [c for c in self.feature_cols if c not in df_tail.columns]
+            if missing:
+                logger.warning("[TFT] 스킵: 입력 피처 누락(%d): %s", len(missing), ", ".join(missing[:8]))
+                return self._empty_output(horizon)
                 
             # 💡 [핵심 수정 2] 수동 정규화 후 Tensor로 직접 변환 (Shape: [1, 64, 40])
             df_tail[self.feature_cols] = (df_tail[self.feature_cols] - self.scaler_params['mean']) / self.scaler_params['std']
@@ -200,7 +204,7 @@ class TFTForecaster(BaseForecaster):
             
             return ForecastOutput(preds_arr, median_pred, confidence, self.name)
         except Exception as e:
-            logger.error(f"TFT Predict Error: {e}")
+            logger.warning(f"TFT Predict Error: {e}")
             return self._empty_output(horizon)
 
 class MacroHFTForecaster(BaseForecaster):
@@ -214,6 +218,8 @@ class MacroHFTForecaster(BaseForecaster):
             cfg = MacroHFTConfig()
             for k, v in meta['config'].items():
                 if hasattr(cfg, k): setattr(cfg, k, v)
+            if (not torch.cuda.is_available()) and str(getattr(cfg, "device", "cpu")).startswith("cuda"):
+                cfg.device = "cpu"
             self.config = cfg
             self.feature_cols = meta['feature_cols']
             self.scaler_params = {k: np.array(v) if isinstance(v, list) else v for k, v in meta['scaler_params'].items()}
@@ -236,6 +242,10 @@ class MacroHFTForecaster(BaseForecaster):
             df_tail = df.tail(cfg.input_window).copy()
             if len(df_tail) < cfg.input_window:
                 return self._empty_output(horizon)
+            missing = [c for c in self.feature_cols if c not in df_tail.columns]
+            if missing:
+                logger.warning("[MacroHFT] 스킵: 입력 피처 누락(%d): %s", len(missing), ", ".join(missing[:8]))
+                return self._empty_output(horizon)
                 
             # 💡 [핵심 수정 2] 수동 정규화 및 Tensor 변환
             df_tail[self.feature_cols] = (df_tail[self.feature_cols] - self.scaler_params['mean']) / self.scaler_params['std']
@@ -255,7 +265,7 @@ class MacroHFTForecaster(BaseForecaster):
             
             return ForecastOutput(q_arr, median_pred, confidence, self.name)
         except Exception as e:
-            logger.error(f"MacroHFT Predict Error: {e}")
+            logger.warning(f"MacroHFT Predict Error: {e}")
             return self._empty_output(horizon)
 
 # ════════════════════════════════════════════════════════════════
@@ -709,26 +719,26 @@ class UnifiedNFForecaster:
             df = df.copy()
 
             # OFTI
-            smf = df.get('smart_money_flow', pd.Series(0.0, index=df.index))
-            wc  = df.get('whale_conviction', pd.Series(0.0, index=df.index))
-            aiz = df.get('amihud_illiquidity_z', pd.Series(0.0, index=df.index))
+            smf = df['smart_money_flow']
+            wc  = df['whale_conviction']
+            aiz = df['amihud_illiquidity_z']
             df['ofti'] = np.tanh(smf * wc * (aiz.abs() + 1.0) * 3.0)
 
             # KEL  (window=288)
-            oic = df.get('oi_change_rate', pd.Series(0.0, index=df.index))
-            gkv = df.get('garman_klass_vol', pd.Series(1e-6, index=df.index))
-            fp  = df.get('funding_pressure', pd.Series(0.0, index=df.index))
+            oic = df['oi_change_rate']
+            gkv = df['garman_klass_vol']
+            fp  = df['funding_pressure']
             kel_raw = oic / (gkv + 1e-6) * np.sign(fp)
             rm = kel_raw.rolling(288, min_periods=1).mean()
             rs = kel_raw.rolling(288, min_periods=1).std().fillna(1e-8) + 1e-8
             df['kel'] = np.tanh((kel_raw - rm) / rs * 0.5)
 
             # MTA_FUNDING
-            fr12  = df.get('funding_roc_12',  pd.Series(0.0, index=df.index))
-            fr48  = df.get('funding_roc_48',  pd.Series(0.0, index=df.index))
-            fr288 = df.get('funding_roc_288', pd.Series(0.0, index=df.index))
-            fabs  = df.get('funding_abs', pd.Series(1e-8, index=df.index)).clip(lower=1e-8)
-            sqp   = df.get('squeeze_power', pd.Series(0.0, index=df.index))
+            fr12  = df['funding_roc_12']
+            fr48  = df['funding_roc_48']
+            fr288 = df['funding_roc_288']
+            fabs  = df['funding_abs'].clip(lower=1e-8)
+            sqp   = df['squeeze_power']
             sq_mean = sqp.rolling(288, min_periods=1).mean()
             sq_std  = sqp.rolling(288, min_periods=1).std().fillna(1e-8) + 1e-8
             sq_z    = (sqp - sq_mean) / sq_std
@@ -736,9 +746,9 @@ class UnifiedNFForecaster:
             df['mta_funding'] = ((w_roc / fabs) * np.tanh(sq_z)).clip(-3.0, 3.0) / 3.0
 
             # SVPS
-            cpd = df.get('cvp_poc_dist', pd.Series(0.0, index=df.index))
-            cvi = df.get('cvp_volume_imbalance', pd.Series(0.0, index=df.index))
-            cvw = df.get('cvp_vah_val_width', pd.Series(0.0, index=df.index))
+            cpd = df['cvp_poc_dist']
+            cvi = df['cvp_volume_imbalance']
+            cvw = df['cvp_vah_val_width']
             df['svps'] = np.tanh(2.0 * cpd * cvi * np.exp(-cvw.clip(0.0, 5.0)))
 
             # NF 입력 구성 (close + 11개 exog)

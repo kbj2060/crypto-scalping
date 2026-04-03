@@ -25,12 +25,9 @@ DEFAULT_DATA_PATH = "data/training_features_5m.csv"
 DEFAULT_RL_DATA_PATH = "data/rl_training_data_full.csv"
 
 PRED_CONF_MAP = {
-    "pred_timesfm": "conf_timesfm",
     "pred_chronos": "conf_chronos",
-    "pred_ttm": "conf_ttm",
     "pred_patchtst": "conf_patchtst",
     "pred_tide": "conf_tide",
-    "pred_mdjd": "conf_mdjd",
 }
 
 RL_SIG_COLS = [

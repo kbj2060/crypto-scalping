@@ -685,39 +685,46 @@ def row_to_market_row(row: pd.Series) -> MarketRow:
     """pandas DataFrame row → MarketRow 변환 (삭제된 피처 완전 제외, 신규 3종 추가).
     [주의] row['key'] 직접 접근을 사용합니다. 피처 누락 시 KeyError가 발생합니다.
     """
+    def _f(key: str, default: float = 0.0) -> float:
+        try:
+            v = row.get(key, default) if hasattr(row, "get") else default
+            return float(v) if v is not None else float(default)
+        except Exception:
+            return float(default)
+
     return MarketRow(
         # ── 1. 기본 캔들 및 가격 데이터 ──
-        close=float(row['close']),
-        open=float(row['open']),
-        high=float(row['high']),
-        low=float(row['low']),
-        volume=float(row['volume']),
+        close=_f('close'),
+        open=_f('open'),
+        high=_f('high'),
+        low=_f('low'),
+        volume=_f('volume'),
         
         # ── 2. 온체인 / 파생상품 / 오더플로우 (Core 전략용) ──
-        whale_retail_ratio=float(row['whale_retail_ratio']),
-        whale_conviction=float(row['whale_conviction']),
-        smart_money_flow=float(row['smart_money_flow']),
-        last_funding_rate=float(row['last_funding_rate']),
-        net_taker_ratio=float(row['net_taker_ratio']),
-        taker_acceleration=float(row['taker_acceleration']),
-        rsi=float(row['rsi']),
-        wick_ratio=float(row['wick_ratio']),
-        log_return=float(row['log_return']),
+        whale_retail_ratio=_f('whale_retail_ratio'),
+        whale_conviction=_f('whale_conviction'),
+        smart_money_flow=_f('smart_money_flow'),
+        last_funding_rate=_f('last_funding_rate'),
+        net_taker_ratio=_f('net_taker_ratio'),
+        taker_acceleration=_f('taker_acceleration'),
+        rsi=_f('rsi'),
+        wick_ratio=_f('wick_ratio'),
+        log_return=_f('log_return'),
         
         # ── 3. 살아남은 Advanced 전략용 피처 ──
-        hurst_48=float(row['hurst_48']),
-        hurst_288=float(row['hurst_288']),
-        ofi_acceleration=float(row['ofi_acceleration']),
-        trade_intensity=float(row['trade_intensity']),  # 신규 OI 전략에서도 사용됨
-        funding_price_divergence=float(row['funding_price_divergence']),
-        short_squeeze_risk=float(row['short_squeeze_risk']),
-        long_squeeze_risk=float(row['long_squeeze_risk']),
-        oi_change_rate=float(row['oi_change_rate']),
-        big_trade_ratio=float(row['big_trade_ratio']),
-        funding_roc_12=float(row['funding_roc_12']),
-        funding_roc_288=float(row['funding_roc_288']),
-        cvp_cluster_position=float(row['cvp_cluster_position']),
-        fibonacci_level=float(row['fibonacci_level']),
+        hurst_48=_f('hurst_48'),
+        hurst_288=_f('hurst_288'),
+        ofi_acceleration=_f('ofi_acceleration'),
+        trade_intensity=_f('trade_intensity', 1.0),  # 신규 OI 전략에서도 사용됨
+        funding_price_divergence=_f('funding_price_divergence'),
+        short_squeeze_risk=_f('short_squeeze_risk'),
+        long_squeeze_risk=_f('long_squeeze_risk'),
+        oi_change_rate=_f('oi_change_rate'),
+        big_trade_ratio=_f('big_trade_ratio'),
+        funding_roc_12=_f('funding_roc_12'),
+        funding_roc_288=_f('funding_roc_288'),
+        cvp_cluster_position=_f('cvp_cluster_position'),
+        fibonacci_level=_f('fibonacci_level'),
 
         # ── 4. [NEW] 직교 알파 3종 전략용 신규 피처 ──
         # 라이브 피처 파이프라인에서는 `count_toptrader_long_short_ratio` 대신
@@ -725,26 +732,26 @@ def row_to_market_row(row: pd.Series) -> MarketRow:
         top_trader_ls_ratio=float(
             row.get('count_toptrader_long_short_ratio', row.get('count_long_short_ratio', 0.0))
         ),
-        btc_corr_60=float(row['btc_corr_60']),
-        eth_btc_ratio_change=float(row['eth_btc_ratio_change']),
-        session_us=float(row.get('session_us')),
-        hour_cos=float(row.get('hour_cos')),
-        cvp_poc_dist=float(row.get('cvp_poc_dist')),
-        cvp_volume_imbalance=float(row.get('cvp_volume_imbalance')),
-        fvg_dist=float(row.get('fvg_dist')),
-        breakout_strength=float(row.get('breakout_strength')),
-        squeeze_power=float(row.get('squeeze_power')),
-        garman_klass_vol=float(row.get('garman_klass_vol')),
-        funding_z_score=float(row.get('funding_z_score')),
-        volatility_z=float(row.get('volatility_z')),
+        btc_corr_60=_f('btc_corr_60'),
+        eth_btc_ratio_change=_f('eth_btc_ratio_change'),
+        session_us=_f('session_us'),
+        hour_cos=_f('hour_cos'),
+        cvp_poc_dist=_f('cvp_poc_dist'),
+        cvp_volume_imbalance=_f('cvp_volume_imbalance'),
+        fvg_dist=_f('fvg_dist'),
+        breakout_strength=_f('breakout_strength'),
+        squeeze_power=_f('squeeze_power'),
+        garman_klass_vol=_f('garman_klass_vol'),
+        funding_z_score=_f('funding_z_score'),
+        volatility_z=_f('volatility_z'),
         # ── 변동성 모델 피처 ──
-        garch_vol_z=float(row.get('garch_vol_z', 0.0)),
-        ou_funding_z=float(row.get('ou_funding_z', 0.0)),
-        ou_halflife=float(row.get('ou_halflife', 0.5)),
-        jump_flag=float(row.get('jump_flag', 0.0)),
-        jump_z=float(row.get('jump_z', 0.0)),
-        evt_tail_flag=float(row.get('evt_tail_flag', 0.0)),
-        evt_excess_z=float(row.get('evt_excess_z', 0.0)),
+        garch_vol_z=_f('garch_vol_z', 0.0),
+        ou_funding_z=_f('ou_funding_z', 0.0),
+        ou_halflife=_f('ou_halflife', 0.5),
+        jump_flag=_f('jump_flag', 0.0),
+        jump_z=_f('jump_z', 0.0),
+        evt_tail_flag=_f('evt_tail_flag', 0.0),
+        evt_excess_z=_f('evt_excess_z', 0.0),
 
         # ❌ 삭제됨: CVP_FVG (cvp_poc_dist, fvg_dist, mean_reversion_z)
         # ❌ 삭제됨: AmihudGK (amihud_illiquidity_z, garman_klass_vol, realized_vol_ratio, bb_width_z)

@@ -28,6 +28,7 @@ _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, _ROOT_DIR)
 
 from features.engineering import FeatureEngineer
+from features.schema import prune_to_active_feature_keep
 
 DATA_DIR         = os.path.join(_ROOT_DIR, 'data')
 BINANCE_DIR      = os.path.join(_ROOT_DIR, 'binance_data')
@@ -417,7 +418,7 @@ def build_features(eth_df: pd.DataFrame, btc_df: pd.DataFrame,
     print(f"  ✓ 병합 완료: {len(eth_merged):,}행")
 
     # 피처 생성
-    engineer = FeatureEngineer(candle_minutes=5)
+    engineer = FeatureEngineer(candle_minutes=5, keep_only_active=True, include_entry_price=False)
     result = engineer.process(eth_merged, btc_df)
     print(f"  ✓ 피처 생성: {len(result):,}행, {len(result.columns)}컬럼")
 
@@ -435,23 +436,27 @@ def build_features(eth_df: pd.DataFrame, btc_df: pd.DataFrame,
 # ══════════════════════════════════════════════════════════════════
 def merge_and_save(new_df: pd.DataFrame):
     """기존 training_features_5m.csv와 concat → 중복 제거 → 저장."""
+    new_df = prune_to_active_feature_keep(
+        new_df,
+        include_entry_price=False,
+        include_m7_artifacts=True,
+        extra_keep=["timestamp"],
+    )
     if os.path.exists(FEATURES_CSV):
         existing = pd.read_csv(FEATURES_CSV, parse_dates=['timestamp'])
         existing['timestamp'] = existing['timestamp'].astype('datetime64[us]')
-
-        # 신규 컬럼이 추가된 경우 기존 CSV에 없는 컬럼은 0으로 채움
-        new_only_cols = [c for c in new_df.columns if c not in existing.columns]
-        if new_only_cols:
-            print(f"  ℹ️  신규 컬럼 {len(new_only_cols)}개 감지: {new_only_cols}")
-            for c in new_only_cols:
-                existing[c] = 0.0
-
-        # 기존 CSV에만 있는 컬럼도 new_df에 추가 (역방향 호환)
-        old_only_cols = [c for c in existing.columns if c not in new_df.columns]
-        for c in old_only_cols:
-            new_df[c] = 0.0
-
-        all_cols = list(new_df.columns)
+        existing = prune_to_active_feature_keep(
+            existing,
+            include_entry_price=False,
+            include_m7_artifacts=True,
+            extra_keep=["timestamp"],
+        )
+        all_cols = sorted(set(new_df.columns).union(set(existing.columns)))
+        if "timestamp" in all_cols:
+            all_cols.remove("timestamp")
+        all_cols = ["timestamp"] + all_cols
+        existing = existing.reindex(columns=all_cols)
+        new_df = new_df.reindex(columns=all_cols)
         result = pd.concat([new_df[all_cols], existing[all_cols]], ignore_index=True)
     else:
         result = new_df

@@ -176,9 +176,9 @@ class XGBTrendBrain:
             df_w = df_w.set_index(timestamp_col).sort_index()
 
         pred_conf_map = {
-            'pred_timesfm': 'conf_timesfm', 'pred_chronos': 'conf_chronos',
-            'pred_ttm': 'conf_ttm', 'pred_patchtst': 'conf_patchtst',
-            'pred_tide': 'conf_tide', 'pred_mdjd': 'conf_mdjd',
+            'pred_chronos': 'conf_chronos',
+            'pred_patchtst': 'conf_patchtst',
+            'pred_tide': 'conf_tide',
         }
         for p_col, c_col in pred_conf_map.items():
             sig_col = p_col.replace('pred_', 'signal_')
@@ -395,9 +395,9 @@ def _combine_pred_conf(df: pd.DataFrame) -> pd.DataFrame:
     다중공선성(pred↔conf)을 차단한다.
     """
     PRED_TO_CONF = {
-        'pred_timesfm': 'conf_timesfm', 'pred_chronos': 'conf_chronos',
-        'pred_ttm':     'conf_ttm',     'pred_patchtst': 'conf_patchtst',
-        'pred_tide':    'conf_tide',    'pred_mdjd':    'conf_mdjd',
+        'pred_chronos': 'conf_chronos',
+        'pred_patchtst': 'conf_patchtst',
+        'pred_tide': 'conf_tide',
     }
     created = []
     for p_col, c_col in PRED_TO_CONF.items():

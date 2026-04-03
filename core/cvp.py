@@ -250,6 +250,7 @@ def add_cvp_features(
     lookback: int = 200,
     n_clusters: int = 4,
     n_bins: int = 50,
+    output_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     DataFrame에 Clusters Volume Profile 피처 5개를 추가합니다.
@@ -275,8 +276,12 @@ def add_cvp_features(
     volume = df['volume'].values
     hlc3 = (high + low + close) / 3.0
 
+    target_cols = CVP_FEATURE_COLS if output_cols is None else [c for c in output_cols if c in CVP_FEATURE_COLS]
+    if not target_cols:
+        return df
+
     # 결과 저장
-    results = {col: np.zeros(n) for col in CVP_FEATURE_COLS}
+    results = {col: np.zeros(n) for col in target_cols}
 
     for i in range(n):
         start = max(0, i - lookback + 1)
@@ -293,11 +298,11 @@ def add_cvp_features(
             n_clusters=n_clusters, n_bins=n_bins,
         )
 
-        for col in CVP_FEATURE_COLS:
+        for col in target_cols:
             results[col][i] = feats[col]
 
     # DataFrame에 추가
-    for col in CVP_FEATURE_COLS:
+    for col in target_cols:
         df[col] = results[col]
 
     return df

@@ -459,6 +459,8 @@ class TFTSignalModel:
 
         cfg = TFTConfig()
         for k, v in meta['config'].items(): setattr(cfg, k, v)
+        if (not torch.cuda.is_available()) and str(getattr(cfg, "device", "cpu")).startswith("cuda"):
+            cfg.device = "cpu"
         cfg.__post_init__()
         instance = cls(cfg)
 

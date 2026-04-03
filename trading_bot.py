@@ -67,12 +67,13 @@ from features.schema import (
     STATE_ELITE as DSAC_STATE_ELITE,
     STATE_ALPHA as DSAC_STATE_ALPHA,
     STATE_SYNTH as DSAC_STATE_SYNTH,
+    build_active_feature_keep,
 )
+from features.registry import M7_LIVE_STRICT_COLS
 from ensemble.seven_model_ensemble import SevenModelEnsemble
 from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
 from ensemble.ensemble_router import (
-    TFTForecaster, MacroHFTForecaster, ChronosForecaster,
-    KronosForecaster, TimesFMForecaster, MoiraiForecaster,
+    ChronosForecaster, PatchTSTForecaster, TiDEForecaster,
 )
 from ensemble.train_rl_agent import OnlineHMMDetector
 from ensemble.train_rl_dsac_long_agent import (
@@ -116,6 +117,8 @@ def _env_flag(name: str, default: bool = False) -> bool:
 COMPACT_MODE = _env_flag('COMPACT_MODE', True)
 DSAC_ONLY_MODE = True
 ENSEMBLE_PREDICTOR_ENABLED = _env_flag('ENSEMBLE_PREDICTOR_ENABLED', False)
+M7_ENTRY_PRICE_ENABLE = _env_flag('M7_ENTRY_PRICE_ENABLE', False)
+LIVE_STRICT_FEATURE_GUARD = _env_flag("LIVE_STRICT_FEATURE_GUARD", False)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 # ════════════════════════════════════════════════════════════════
@@ -254,7 +257,7 @@ class BinanceLiveFetcher:
                             subset['timestamp'] = pd.to_datetime(subset['timestamp'], unit='ms')
                             subset[new_name] = pd.to_numeric(subset[new_name], errors='coerce')
                             eth_df = pd.merge_asof(eth_df.sort_values('timestamp'), subset.sort_values('timestamp'), on='timestamp', direction='nearest')
-                    except Exception: pass
+                    except Exception: raise
         return eth_df.ffill().bfill(), btc_df
 
     async def fetch_initial_data(self):
@@ -274,38 +277,103 @@ class BinanceLiveFetcher:
 # 2-A. 대시보드용 6대 파운데이션 앙상블 (표시 전용)
 # ════════════════════════════════════════════════════════════════
 class EnsemblePredictor:
-    MODEL_ORDER = ['TFT', 'MacroHFT', 'Chronos', 'Kronos', 'TimesFM', 'Moirai']
+    MODEL_ORDER = ['PatchTST', 'Chronos', 'TiDE']
 
     def __init__(self):
         self.models = {
-            'TFT':      TFTForecaster(),
-            'MacroHFT': MacroHFTForecaster(),
-            'Chronos':  ChronosForecaster(),
-            'Kronos':   KronosForecaster(),
-            'TimesFM':  TimesFMForecaster(),
-            'Moirai':   MoiraiForecaster(),
+            'PatchTST': PatchTSTForecaster(),
+            'Chronos': ChronosForecaster(),
+            'TiDE': TiDEForecaster(),
         }
+        self.last_trace: list[dict[str, object]] = []
 
     async def predict_all_async(self, df: pd.DataFrame):
         preds, confs = [], []
-        loop = asyncio.get_running_loop()
+        # NOTE:
+        # PatchTST/TiDE는 UnifiedNFForecaster의 동일 NF 인스턴스를 공유하므로
+        # 병렬 추론 시 간헐적 race condition으로 한 모델 출력이 누락될 수 있다.
+        # DSAC strict guard 안정성을 위해 순차 추론으로 고정한다.
+        results = []
+        for name in self.MODEL_ORDER:
+            m = self.models[name]
+            if not getattr(m, 'available', False):
+                results.append(None)
+                continue
+            try:
+                results.append(m.predict(df, horizon=6))
+            except Exception as e:
+                logger.warning("⚠️ %s 추론 실패: %s", name, e)
+                results.append(None)
 
-        def _run_inference(m):
-            if not getattr(m, 'available', False): return None
-            try: return m.predict(df, horizon=6)
-            except Exception: return None
+        def _extract_last_conf(res) -> float:
+            try:
+                c = getattr(res, "confidence", None)
+                if c is None:
+                    return float("nan")
+                arr = np.asarray(c, dtype=np.float32)
+                if arr.ndim == 0:
+                    v = float(arr)
+                elif arr.ndim == 1:
+                    v = float(arr[-1])
+                else:
+                    v = float(arr[-1][-1])
+                return v if np.isfinite(v) else float("nan")
+            except Exception:
+                return float("nan")
 
-        tasks = [loop.run_in_executor(None, _run_inference, self.models[name]) for name in self.MODEL_ORDER]
-        results = await asyncio.gather(*tasks)
-
-        for res in results:
-            p_val, c_val = 0.0, 0.5
+        traces: list[dict[str, object]] = []
+        for name, res in zip(self.MODEL_ORDER, results):
+            p_val, c_val = float("nan"), float("nan")
+            conf_src = "none"
+            traj_last = float("nan")
+            traj_std = float("nan")
+            traj_zero_like = False
             if res is not None and getattr(res, 'median', None) is not None:
                 traj = np.array(res.median[-1], dtype=np.float32)
-                p_val = _traj_direction(traj)
-                c_val = _traj_conf(traj)
+                if np.all(np.isfinite(traj)):
+                    traj_last = float(traj[-1]) if traj.size > 0 else float("nan")
+                    traj_std = float(np.std(traj)) if traj.size > 0 else float("nan")
+                    traj_zero_like = bool(np.allclose(traj, 0.0, atol=1e-9))
+                    p_val = _traj_direction(traj)
+                    # 1) 모델 confidence 우선 사용
+                    c_val = _extract_last_conf(res)
+                    conf_src = "model"
+                    # 2) confidence 비정상일 때만 궤적 기반 보정
+                    if not np.isfinite(c_val):
+                        c_val = _traj_conf(traj)
+                        conf_src = "traj_fallback"
+                    c_val = float(np.clip(c_val, 0.0, 1.0))
+            traces.append({
+                "model": name,
+                "pred": float(p_val) if np.isfinite(p_val) else float("nan"),
+                "conf": float(c_val) if np.isfinite(c_val) else float("nan"),
+                "traj_last": traj_last,
+                "traj_std": traj_std,
+                "traj_zero_like": traj_zero_like,
+                "conf_src": conf_src,
+                "ok": bool(np.isfinite(p_val) and np.isfinite(c_val)),
+                "is_zero": bool(np.isfinite(p_val) and np.isfinite(c_val) and abs(float(p_val)) < 1e-12 and abs(float(c_val)) < 1e-12),
+            })
             preds.append(p_val)
             confs.append(c_val)
+        self.last_trace = traces
+
+        # 모델별 pred/conf 추적 로그 (NaN/0 주입 여부 추적용)
+        try:
+            _parts = []
+            for t in traces:
+                _p = t["pred"]
+                _c = t["conf"]
+                _p_s = "nan" if not np.isfinite(_p) else f"{float(_p):+.4f}"
+                _c_s = "nan" if not np.isfinite(_c) else f"{float(_c):.4f}"
+                _ts = t.get("traj_std", float("nan"))
+                _ts_s = "nan" if not np.isfinite(_ts) else f"{float(_ts):.6f}"
+                _z = "Z0" if bool(t.get("traj_zero_like", False)) else "Z-"
+                _flag = "OK" if t["ok"] else "MISS"
+                _parts.append(f"{t['model']}:{_flag}(pred={_p_s},conf={_c_s},src={t['conf_src']},std={_ts_s},{_z})")
+            logger.info("🔎 DSAC pred/conf 추적: %s", " | ".join(_parts))
+        except Exception:
+            pass
 
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
@@ -653,6 +721,12 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
 
     long_edge = float(rl_info.get('long_edge', 0.0))
     short_edge = float(rl_info.get('short_edge', 0.0))
+    primary_action = int(rl_info.get("primary_action", 0))
+    primary_raw = float(rl_info.get("primary_raw", 0.0))
+    primary_kelly = float(rl_info.get("primary_kelly", 0.0))
+    target_action = int(rl_info.get("target_action", 0))
+    net_score = float(rl_info.get("net_score", 0.0))
+    agreement_count = int(rl_info.get("agreement_count", 0))
     rl_kelly = float(rl_info.get('kelly', 0.0))
     long_raw = float(rl_info.get('_long_raw', long_edge))
     short_raw = float(rl_info.get('_short_raw', short_edge))
@@ -814,6 +888,13 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
         f"  {C.CYAN}• DSAC{C.RESET}  "
         f"L:{long_agent_arrow}{_action_word(long_action):<5} r={C.GREEN}{long_raw:.3f}{C.RESET} k={long_kelly:.3f}"
         f"  S:{short_agent_arrow}{_action_word(short_action):<5} r={C.RED}{short_raw:.3f}{C.RESET} k={short_kelly:.3f}"
+    )
+    print(
+        f"  {C.CYAN}• Primary{C.RESET} "
+        f"{_action_arrow(primary_action)}{_action_word(primary_action):<5}"
+        f" raw={primary_raw:+.3f} k={primary_kelly:.3f}"
+        f"  → target={_action_word(target_action):<5}"
+        f" net={net_score:+.3f} votes={agreement_count}"
     )
     print(
         f"          → 결정 = {selected_side:<6}"
@@ -998,8 +1079,10 @@ class DSACSignalRouter:
             enter_th = self.trend_align_enter_th
         elif regime_name == "bear" and trend_dir == 0:
             enter_th = self.trend_align_enter_th
-        elif regime_name in ("chop", "whipsaw"):
+        elif regime_name == "chop":
             enter_th = self.chop_enter_th
+        elif regime_name == "whipsaw":
+            enter_th = self.whipsaw_enter_th
         if float(ambiguity) > self.ambiguity_penalty_start:
             enter_th += self.ambiguity_penalty_add
         enter_th += float(getattr(self, "adaptive_enter_offset", 0.0))
@@ -1076,25 +1159,64 @@ class DSACSignalRouter:
         base_info: dict[str, float | str | int],
     ) -> tuple[int, float, dict[str, float | str | int]]:
         primary_action = int(base_info.get("primary_action", 0))
+        primary_lev = float(base_info.get("primary_kelly", 0.0))
+        primary_raw = float(base_info.get("primary_raw", 0.0))
+        regime_name = self._regime_name(regime)
         ambiguity = float(base_info["ambiguity"])
         long_raw = float(base_info["long_edge"])
         short_raw = float(base_info["short_edge"])
         enter_th = self._entry_threshold(regime, trend_signal, ambiguity)
-        effective_agreement_th = 0.0
-        if primary_action == 1:
+        effective_agreement_th = self._effective_min_agreement()
+
+        if regime_name == "bull":
+            w_p, w_l, w_s = 0.35, 0.50, 0.15
+        elif regime_name == "bear":
+            w_p, w_l, w_s = 0.35, 0.15, 0.50
+        elif regime_name == "normal":
+            w_p, w_l, w_s = 0.50, 0.25, 0.25
+        else:  # chop / whipsaw
+            w_p, w_l, w_s = 0.30, 0.35, 0.35
+
+        long_logit = float(base_info["long_logit"])
+        short_logit = float(base_info["short_logit"])
+        long_std = float(base_info["long_std"])
+        short_std = float(base_info["short_std"])
+        long_support = float(np.clip(self._support(long_logit, long_std), 0.0, 1.5))
+        short_support = float(np.clip(self._support(short_logit, short_std), 0.0, 1.5))
+
+        p_long = max(primary_raw, 0.0)
+        p_short = max(-primary_raw, 0.0)
+        p_mag = max(abs(primary_raw), primary_lev)
+        if primary_action == 1 and p_long < 1e-8:
+            p_long = p_mag
+        elif primary_action == 2 and p_short < 1e-8:
+            p_short = p_mag
+
+        long_score = float(w_p * p_long + w_l * long_support)
+        short_score = float(w_p * p_short + w_s * short_support)
+        net_score = float(long_score - short_score)
+        agreement = float(abs(net_score))
+        required_score = float(max(enter_th, effective_agreement_th))
+        target_action = 1 if net_score > 0 else (2 if net_score < 0 else 0)
+
+        if target_action == 1:
             selected_side = "LONG"
             selected_action = int(long_action)
             selected_lev = float(long_lev)
             selected_info = dict(long_info or {})
-            selected_logit = float(base_info["long_logit"])
-            selected_std = float(base_info["long_std"])
-        elif primary_action == 2:
+            selected_logit = long_logit
+            selected_std = long_std
+            opp_logit = short_logit
+            opp_std = short_std
+        elif target_action == 2:
             selected_side = "SHORT"
             selected_action = int(short_action)
             selected_lev = float(short_lev)
             selected_info = dict(short_info or {})
-            selected_logit = float(base_info["short_logit"])
-            selected_std = float(base_info["short_std"])
+            selected_logit = short_logit
+            selected_std = short_std
+            opp_logit = long_logit
+            opp_std = long_std
         else:
             selected_side = "HOLD"
             selected_action = 0
@@ -1102,18 +1224,58 @@ class DSACSignalRouter:
             selected_info = {}
             selected_logit = 0.0
             selected_std = 1.0
+            opp_logit = 0.0
+            opp_std = 1.0
 
         confidence = _confidence_from_std(selected_std)
-        conviction = float(self._support(selected_logit, selected_std))
-        agreement = float(abs(selected_logit))
+        conviction = float(agreement * confidence)
         std_gate_ok = bool(selected_std <= self.max_confidence_std)
-        specialist_match = bool(
-            (primary_action == 1 and selected_action == 1) or
-            (primary_action == 2 and selected_action == 2)
+        opp_confidence = float(_confidence_from_std(opp_std))
+        opp_support = float(self._support(opp_logit, opp_std))
+        opp_veto = bool(
+            target_action in (1, 2)
+            and opp_support >= self.opp_veto_support_th
+            and opp_std <= self.opp_veto_std_max
         )
 
-        if primary_action in (1, 2) and specialist_match and std_gate_ok and conviction >= enter_th:
-            adj_kelly = float(np.clip(selected_lev * conviction, 0.0, 1.0))
+        primary_vote = 0
+        if p_long >= self.ens_vote_min_strength:
+            primary_vote = 1
+        elif p_short >= self.ens_vote_min_strength:
+            primary_vote = -1
+        long_vote = 1 if int(long_action) == 1 else 0
+        short_vote = -1 if int(short_action) == 2 else 0
+        target_sign = 1 if target_action == 1 else (-1 if target_action == 2 else 0)
+        agreement_count = int(sum(1 for v in (primary_vote, long_vote, short_vote) if v == target_sign)) if target_sign != 0 else 0
+        if agreement_count >= 3:
+            agreement_mult = float(self.ens_agree_mult_3)
+        elif agreement_count == 2:
+            agreement_mult = float(self.ens_agree_mult_2)
+        elif agreement_count == 1:
+            agreement_mult = float(self.ens_agree_mult_1)
+        else:
+            agreement_mult = 0.0
+
+        hold_reasons: list[str] = []
+        can_enter = bool(
+            target_action in (1, 2)
+            and std_gate_ok
+            and (not opp_veto)
+            and agreement >= required_score
+            and agreement_count >= self.ens_min_votes
+        )
+        if regime_name in ("chop", "whipsaw"):
+            if long_std > 1.2 and short_std > 1.2:
+                can_enter = False
+                hold_reasons.append("chop_both_uncertain")
+        if can_enter:
+            base_kelly = float(np.clip(
+                self.ens_primary_mix * primary_lev + (1.0 - self.ens_primary_mix) * selected_lev,
+                0.0, 1.0
+            ))
+            adj_kelly = float(np.clip(base_kelly * agreement_mult, 0.0, 1.0))
+            if regime_name in ("chop", "whipsaw"):
+                adj_kelly = float(np.clip(adj_kelly * 0.50, 0.0, 1.0))
             out = dict(base_info)
             out.update(selected_info)
             out.update({
@@ -1125,22 +1287,36 @@ class DSACSignalRouter:
                 "confidence": confidence,
                 "selected_std": selected_std,
                 "conviction": conviction,
+                "target_action": int(target_action),
+                "required_score": float(required_score),
+                "long_score": float(long_score),
+                "short_score": float(short_score),
+                "net_score": float(net_score),
+                "agreement_count": int(agreement_count),
+                "agreement_mult": float(agreement_mult),
+                "chop_size_mult": float(0.50 if regime_name in ("chop", "whipsaw") else 1.0),
+                "opp_confidence": opp_confidence,
+                "opp_support": opp_support,
+                "opp_veto": int(opp_veto),
                 "kelly": adj_kelly,
                 "score": conviction,
-                "primary_action": primary_action,
+                "primary_action": int(primary_action),
             })
-            return (1 if primary_action == 1 else 2), adj_kelly, out
+            return int(target_action), adj_kelly, out
 
-        hold_reasons: list[str] = []
         dual_high_hold = False
+        if target_action == 0:
+            hold_reasons.append("target_hold")
         if primary_action == 0:
             hold_reasons.append("primary_hold")
-        if not specialist_match and primary_action in (1, 2):
-            hold_reasons.append("specialist_mismatch")
         if not std_gate_ok:
             hold_reasons.append("std_gate")
-        if conviction < enter_th:
+        if opp_veto:
+            hold_reasons.append("opp_conf_veto")
+        if agreement < required_score:
             hold_reasons.append("enter_th")
+        if agreement_count < self.ens_min_votes:
+            hold_reasons.append("low_votes")
 
         out = dict(base_info)
         out.update({
@@ -1149,6 +1325,16 @@ class DSACSignalRouter:
             "agreement": agreement,
             "confidence": confidence,
             "selected_std": selected_std,
+            "target_action": int(target_action),
+            "required_score": float(required_score),
+            "long_score": float(long_score),
+            "short_score": float(short_score),
+            "net_score": float(net_score),
+            "agreement_count": int(agreement_count),
+            "agreement_mult": float(agreement_mult),
+            "opp_confidence": opp_confidence,
+            "opp_support": opp_support,
+            "opp_veto": int(opp_veto),
             "enter_threshold": float(enter_th),
             "min_agreement_threshold": float(effective_agreement_th),
             "base_min_agreement_threshold": float(self.min_agreement_th),
@@ -1170,15 +1356,21 @@ class DSACSignalRouter:
         own_std: float,
         opp_logit: float,
         opp_std: float,
+        primary_raw: float,
         base_info: dict[str, float | str | int],
         side_info: dict,
     ) -> tuple[int, float, dict[str, float | str | int]]:
+        opp_logit_eff = float(opp_logit)
+        if side == "LONG" and primary_raw <= -self.pos_primary_reverse_th:
+            opp_logit_eff += float(abs(primary_raw) * self.pos_primary_reverse_weight)
+        elif side == "SHORT" and primary_raw >= self.pos_primary_reverse_th:
+            opp_logit_eff += float(abs(primary_raw) * self.pos_primary_reverse_weight)
         pos_action, pos_kelly, pos_diag = self._position_rule(
             side=side,
             own_lev=own_lev,
             own_logit=own_logit,
             own_std=own_std,
-            opp_logit=opp_logit,
+            opp_logit=opp_logit_eff,
             opp_std=opp_std,
         )
         score = float(max(self._support(own_logit, own_std), float(base_info["conviction"])))
@@ -1187,6 +1379,8 @@ class DSACSignalRouter:
         out.update({
             "agent": f"DSAC_DUAL_{side}",
             "_selected_side": side,
+            "primary_raw": float(primary_raw),
+            "opp_logit_eff": float(opp_logit_eff),
             "kelly": float(pos_kelly),
             "score": score,
         })
@@ -1266,13 +1460,24 @@ class DSACSignalRouter:
         self.current_equity: float = 1.0
         self.base_enter_th = float(os.getenv("DSAC_DUAL_BASE_ENTER_TH", "0.32"))
         self.trend_align_enter_th = float(os.getenv("DSAC_DUAL_TREND_ALIGN_ENTER_TH", "0.22"))
-        self.chop_enter_th = float(os.getenv("DSAC_DUAL_CHOP_ENTER_TH", "0.46"))
+        self.chop_enter_th = float(os.getenv("DSAC_DUAL_CHOP_ENTER_TH", "0.52"))
+        self.whipsaw_enter_th = float(os.getenv("DSAC_DUAL_WHIPSAW_ENTER_TH", "0.50"))
         self.min_agreement_th = float(os.getenv("DSAC_DUAL_MIN_AGREEMENT_TH", "0.38"))
         self.ambiguity_penalty_start = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_START", "2.50"))
         self.ambiguity_penalty_add = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_ADD", "0.08"))
         self.max_confidence_std = float(os.getenv("DSAC_DUAL_MAX_CONFIDENCE_STD", "1.50"))
         self.dual_high_logit_hold = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_HOLD", "2.80"))
         self.dual_high_logit_gap = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_GAP", "0.85"))
+        self.opp_veto_support_th = float(os.getenv("DSAC_DUAL_OPP_VETO_SUPPORT_TH", "0.30"))
+        self.opp_veto_std_max = float(os.getenv("DSAC_DUAL_OPP_VETO_STD_MAX", "1.20"))
+        self.ens_vote_min_strength = float(os.getenv("DSAC_DUAL_ENS_VOTE_MIN_STRENGTH", "0.10"))
+        self.ens_min_votes = int(os.getenv("DSAC_DUAL_ENS_MIN_VOTES", "1"))
+        self.ens_agree_mult_3 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_3", "1.00"))
+        self.ens_agree_mult_2 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_2", "0.70"))
+        self.ens_agree_mult_1 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_1", "0.40"))
+        self.ens_primary_mix = float(os.getenv("DSAC_DUAL_ENS_PRIMARY_MIX", "0.50"))
+        self.pos_primary_reverse_th = float(os.getenv("DSAC_DUAL_POS_PRIMARY_REVERSE_TH", "0.10"))
+        self.pos_primary_reverse_weight = float(os.getenv("DSAC_DUAL_POS_PRIMARY_REVERSE_WEIGHT", "0.30"))
         self.adaptive_enter_offset = 0.0
         self.adaptive_agreement_offset = 0.0
         self.pos_hold_support = float(os.getenv("DSAC_DUAL_POS_HOLD_SUPPORT", "1.10"))
@@ -1310,6 +1515,18 @@ class DSACSignalRouter:
         logger.info("✅ DSACSignalRouter 로드 완료 (%s, %s): %s", long_ver, device, self.long_ckpt_path)
         logger.info("✅ DSACSignalRouter 로드 완료 (%s, %s): %s", short_ver, device, self.short_ckpt_path)
 
+    @staticmethod
+    def _require_finite(mapping, key: str, context: str) -> float:
+        if key not in mapping:
+            raise ValueError(f"[FEATURE_MISSING] {context}.{key} missing")
+        try:
+            val = float(mapping[key])
+        except Exception as e:
+            raise ValueError(f"[FEATURE_INVALID] {context}.{key} cast failed: {e}") from e
+        if not np.isfinite(val):
+            raise ValueError(f"[FEATURE_INVALID] {context}.{key} is not finite: {mapping[key]}")
+        return val
+
     def decide(self, processed_df: pd.DataFrame, nf_preds: dict, m7_signal: dict | None = None):
         last_row = processed_df.iloc[-1]
         prev_row = processed_df.iloc[-2]
@@ -1330,21 +1547,41 @@ class DSACSignalRouter:
 
         features: dict[str, float] = {}
         for col in DSAC_STATE_PRED:
-            features[col] = float(nf_preds.get(col, 0.0))
+            features[col] = self._require_finite(nf_preds, col, "nf_preds")
         for col in DSAC_STATE_CONF:
-            features[col] = float(nf_preds.get(col, 0.5))
+            features[col] = self._require_finite(nf_preds, col, "nf_preds")
         for col in DSAC_STATE_ELITE:
-            features[col] = float(elite_sigs.get(col, 0.0))
+            features[col] = (
+                self._require_finite(elite_sigs, col, "elite_sigs")
+                if LIVE_STRICT_FEATURE_GUARD
+                else float(elite_sigs.get(col, 0.0))
+            )
         for col in DSAC_STATE_ALPHA:
-            features[col] = float(last_row.get(col, 0.0))
+            features[col] = (
+                self._require_finite(last_row, col, "last_row")
+                if LIVE_STRICT_FEATURE_GUARD
+                else float(last_row.get(col, 0.0))
+            )
 
         regime = None
         if self.hmm is not None:
             try:
                 hmm_row = {
-                    "log_return": float(last_row.get("log_return", 0.0)),
-                    "garch_vol_z": float(last_row.get("garch_vol_z", 0.0)),
-                    "oi_change_rate": float(last_row.get("oi_change_rate", 0.0)),
+                    "log_return": (
+                        self._require_finite(last_row, "log_return", "last_row")
+                        if LIVE_STRICT_FEATURE_GUARD
+                        else float(last_row.get("log_return", 0.0))
+                    ),
+                    "garch_vol_z": (
+                        self._require_finite(last_row, "garch_vol_z", "last_row")
+                        if LIVE_STRICT_FEATURE_GUARD
+                        else float(last_row.get("garch_vol_z", 0.0))
+                    ),
+                    "oi_change_rate": (
+                        self._require_finite(last_row, "oi_change_rate", "last_row")
+                        if LIVE_STRICT_FEATURE_GUARD
+                        else float(last_row.get("oi_change_rate", 0.0))
+                    ),
                 }
                 hmm_feat = self.hmm.get_features(hmm_row)
                 hmm_probs = np.asarray(hmm_feat[:4], dtype=np.float32)
@@ -1362,32 +1599,36 @@ class DSACSignalRouter:
             regime = _compute_regime(processed_df)
         features.update(regime)
         for col in DSAC_STATE_SYNTH:
-            features[col] = float(last_row.get(col, 0.0))
-        features["close"] = float(last_row.get("close", 0.0))
+            features[col] = (
+                self._require_finite(last_row, col, "last_row")
+                if LIVE_STRICT_FEATURE_GUARD
+                else float(last_row.get(col, 0.0))
+            )
+        features["close"] = (
+            self._require_finite(last_row, "close", "last_row")
+            if LIVE_STRICT_FEATURE_GUARD
+            else float(last_row.get("close", 0.0))
+        )
 
         # 학습 시 사용한 m7_*를 라이브 추론 입력에도 주입해 train/infer 스키마 불일치 최소화
-        if isinstance(m7_signal, dict):
+        if LIVE_STRICT_FEATURE_GUARD:
+            if not isinstance(m7_signal, dict):
+                raise ValueError("[FEATURE_MISSING] m7_signal unavailable")
+            if "m7_prob_dn" in m7_signal:
+                features["m7_prob_dn"] = self._require_finite(m7_signal, "m7_prob_dn", "m7_signal")
+                features["m7_prob_fl"] = self._require_finite(m7_signal, "m7_prob_fl", "m7_signal")
+                features["m7_prob_up"] = self._require_finite(m7_signal, "m7_prob_up", "m7_signal")
+            else:
+                features["m7_prob_dn"] = self._require_finite(m7_signal, "prob_dn", "m7_signal")
+                features["m7_prob_fl"] = self._require_finite(m7_signal, "prob_flat", "m7_signal")
+                features["m7_prob_up"] = self._require_finite(m7_signal, "prob_up", "m7_signal")
+            for k in M7_LIVE_STRICT_COLS:
+                features[k] = self._require_finite(m7_signal, k, "m7_signal")
+        elif isinstance(m7_signal, dict):
             features["m7_prob_dn"] = float(m7_signal.get("m7_prob_dn", m7_signal.get("prob_dn", 0.0)))
             features["m7_prob_fl"] = float(m7_signal.get("m7_prob_fl", m7_signal.get("prob_flat", 0.0)))
             features["m7_prob_up"] = float(m7_signal.get("m7_prob_up", m7_signal.get("prob_up", 0.0)))
-            for k in [
-                "m7_quality_pred",
-                "m7_hold_pred",
-                "m7_q10",
-                "m7_q50",
-                "m7_q90",
-                "m7_qwidth",
-                "m7_gmm_cluster",
-                "m7_gmm_conf",
-                "m7_gmm_vol_rank",
-                "m7_iso_score",
-                "m7_iso_anom",
-                "m7_vae_error",
-                "m7_vae_threshold",
-                "m7_vae_anom",
-                "m7_hdb_label",
-                "m7_hdb_prob",
-            ]:
+            for k in M7_LIVE_STRICT_COLS:
                 if k in m7_signal:
                     features[k] = float(m7_signal.get(k, 0.0))
 
@@ -1472,6 +1713,7 @@ class DSACSignalRouter:
                 own_std=long_std,
                 opp_logit=short_logit,
                 opp_std=short_std,
+                primary_raw=primary_raw,
                 base_info=info,
                 side_info=long_info,
                 ),
@@ -1488,6 +1730,7 @@ class DSACSignalRouter:
                 own_std=short_std,
                 opp_logit=long_logit,
                 opp_std=long_std,
+                primary_raw=primary_raw,
                 base_info=info,
                 side_info=short_info,
                 ),
@@ -1545,6 +1788,8 @@ class DSACTrendRouter:
         self.dsac_only_cooldown_loss = float(os.getenv("DSAC_ONLY_COOLDOWN_LOSS", "0.05"))
         self.dsac_only_cooldown_streak = int(os.getenv("DSAC_ONLY_COOLDOWN_STREAK", "4"))
         self.dsac_only_cooldown_bars = int(os.getenv("DSAC_ONLY_COOLDOWN_BARS", "0"))
+        self.dsac_only_chop_entry_kelly_mult = float(os.getenv("DSAC_ONLY_CHOP_ENTRY_KELLY_MULT", "0.80"))
+        self.dsac_only_whipsaw_entry_kelly_mult = float(os.getenv("DSAC_ONLY_WHIPSAW_ENTRY_KELLY_MULT", "0.72"))
         self.dsac_only_trend_exit_enable = _env_flag("DSAC_ONLY_TREND_EXIT_ENABLE", True)
         self.dsac_only_trend_exit_hold_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_HOLD_BARS", "24"))
         self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "2"))
@@ -2090,9 +2335,19 @@ async def main(use_local=False):
     fetcher      = BinanceLiveFetcher(limit=2500)
     fe_engine    = FeatureEngineer()
     ensemble     = EnsemblePredictor() if ENSEMBLE_PREDICTOR_ENABLED else None
+    dsac_nf_predictor = EnsemblePredictor()
     live_hmm: OnlineHMMDetector | None = None
     live_hmm_steps = 0
     logger.info("🧱 부가 기능: ensemble=%s", "ON" if ENSEMBLE_PREDICTOR_ENABLED else "OFF")
+    try:
+        _nf_status = {
+            "PatchTST": bool(getattr(dsac_nf_predictor.models.get("PatchTST"), "available", False)),
+            "Chronos": bool(getattr(dsac_nf_predictor.models.get("Chronos"), "available", False)),
+            "TiDE": bool(getattr(dsac_nf_predictor.models.get("TiDE"), "available", False)),
+        }
+        logger.info("🧠 DSAC pred/conf 공급모델 상태: %s", _nf_status)
+    except Exception:
+        pass
 
     # ── DSAC + SevenModel(M7) 융합 라우터 초기화 ─────────────────────
     meta_router = DSACTrendRouter()
@@ -2156,6 +2411,11 @@ async def main(use_local=False):
 
     # ── 7-모델 통합 추세 추론기 초기화 ───────────────────────────────
     trend_hub = SevenModelEnsemble()
+    if not M7_ENTRY_PRICE_ENABLE and getattr(trend_hub, "entry_price", None) is not None:
+        trend_hub.entry_price.available = False
+        trend_hub.entry_price.model = None
+        trend_hub.entry_price.feature_cols = []
+        logger.info("🧩 M7 EntryPrice 모델 비활성화: 현재 라이브 피처 스키마 기준 (M7_ENTRY_PRICE_ENABLE=OFF)")
     unsup_hub = UnsupervisedRegimeHub()
     _m7_avail = sum([
         int(trend_hub.trend_xgb.available),
@@ -2170,6 +2430,22 @@ async def main(use_local=False):
     logger.info("🧩 %s", unsup_hub.summary_line())
     signal_gap_hist: deque[float] = deque(maxlen=3)
 
+    runtime_feature_keep: set[str] = build_active_feature_keep(
+        include_entry_price=bool(M7_ENTRY_PRICE_ENABLE),
+        include_m7_artifacts=True,
+    )
+
+    def _prune_runtime_features(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return df
+        keep_cols = [c for c in df.columns if c in runtime_feature_keep]
+        if not keep_cols:
+            return df
+        dropped = len(df.columns) - len(keep_cols)
+        if dropped > 0:
+            logger.info("🧹 런타임 피처 프루닝: %d -> %d 컬럼 (drop=%d)", len(df.columns), len(keep_cols), dropped)
+        return df[keep_cols].copy()
+
     # ── 텔레그램 알림 ──────────────────────────────────────────
     tg_notifier = TelegramNotifier()
     logger.info("📨 텔레그램 알림 조건: 포지션 변화(ENTER/EXIT/FLIP) 발생 시에만 전송")
@@ -2182,10 +2458,15 @@ async def main(use_local=False):
         """한 사이클: DSAC_ONLY 판단 + 집행."""
         nonlocal _prev_meta_pos
         nonlocal live_hmm_steps
+        processed_df = _prune_runtime_features(processed_df)
 
         meta_router.decrement_cooldown()
-        if ENSEMBLE_PREDICTOR_ENABLED and ensemble is not None:
-            await ensemble.predict_all_async(processed_df)
+        ens_preds = None
+        ens_confs = None
+        try:
+            ens_preds, ens_confs = await dsac_nf_predictor.predict_all_async(processed_df)
+        except Exception as e:
+            logger.warning("⚠️ DSAC pred/conf 공급용 앙상블 예측 실패: %s", e)
         nf_preds = {}
 
         current_time_kst = eth_buffer['timestamp'].iloc[-1] + pd.Timedelta(hours=9)
@@ -2193,6 +2474,23 @@ async def main(use_local=False):
         regime_name      = 'UNKNOWN'
         now_utc = pd.Timestamp.utcnow().tz_localize(None)
         meta_router.update_adaptive_gate(final_action=0, in_position=(meta_router.pos is not None))
+
+        # ── M7 추론 전: elite signals를 processed_df에 사전 주입 ───────
+        # (HDBSCAN 등 모델이 sig_* 피처를 사용하므로, M7 추론 전에 계산해야 함)
+        try:
+            _pre_last = processed_df.iloc[-1]
+            _pre_prev = processed_df.iloc[-2] if len(processed_df) >= 2 else _pre_last
+            _pre_smf_std = processed_df["smart_money_flow"].std() if "smart_money_flow" in processed_df.columns else 1.0
+            _pre_cur = row_to_market_row(_pre_last)
+            _pre_prev_mkt = row_to_market_row(_pre_prev)
+            _pre_elite = dsac_router.elite_extractor.compute_all(
+                current=_pre_cur, prev=_pre_prev_mkt, smf_std=_pre_smf_std
+            )
+            for _sig_col in ["sig_garch_regime", "sig_ou_mean_rev", "sig_jump_rebound", "sig_evt_tail", "sig_orderblock"]:
+                if _sig_col in _pre_elite:
+                    processed_df[_sig_col] = float(_pre_elite[_sig_col])
+        except Exception as _pre_e:
+            logger.debug("M7용 elite signals 사전 계산 실패: %s", _pre_e)
 
         # ── SevenModelEnsemble(M7) 메타 신호 추론 ────────────────────
         m7_last = None
@@ -2202,14 +2500,87 @@ async def main(use_local=False):
             trend_signal = _trend_signal_from_m7(m7_last)
         except Exception as e:
             logger.warning(f"SevenModelEnsemble 추론 실패: {e}")
+            if LIVE_STRICT_FEATURE_GUARD:
+                logger.warning("⚠️ LIVE strict guard: M7 피처 생성 실패로 이번 사이클 스킵")
+                return
+
+        # DSAC 입력용 NF pred/conf 채우기:
+        # 1) processed_df 마지막 행 우선 (pred/conf 쌍이 모두 유효할 때만 채움)
+        # 2) 부족분은 3-앙상블(사용 가능 모델만)으로 보완
+        _last = processed_df.iloc[-1]
+        _need_cols = list(DSAC_STATE_PRED) + list(DSAC_STATE_CONF)
+        for _pcol, _ccol in zip(DSAC_STATE_PRED, DSAC_STATE_CONF):
+            if _pcol not in _last.index or _ccol not in _last.index:
+                continue
+            try:
+                _pv = float(_last[_pcol])
+                _cv = float(_last[_ccol])
+            except Exception:
+                continue
+            if np.isfinite(_pv) and np.isfinite(_cv):
+                nf_preds[_pcol] = _pv
+                nf_preds[_ccol] = _cv
+
+        # 보완 매핑: DSAC pred/conf 3개 모델 직접 공급
+        _ens_map = {
+            "pred_patchtst": "PatchTST",
+            "conf_patchtst": "PatchTST",
+            "pred_chronos": "Chronos",
+            "conf_chronos": "Chronos",
+            "pred_tide": "TiDE",
+            "conf_tide": "TiDE",
+        }
+        if ens_preds is not None and ens_confs is not None and dsac_nf_predictor is not None:
+            _name_to_idx = {n: i for i, n in enumerate(getattr(dsac_nf_predictor, "MODEL_ORDER", []))}
+            for _key, _mname in _ens_map.items():
+                if _key in nf_preds:
+                    continue
+                _idx = _name_to_idx.get(_mname)
+                _model = getattr(dsac_nf_predictor, "models", {}).get(_mname) if hasattr(dsac_nf_predictor, "models") else None
+                if _idx is None or _model is None or not getattr(_model, "available", False):
+                    continue
+                try:
+                    _val = float(ens_preds[_idx]) if _key.startswith("pred_") else float(ens_confs[_idx])
+                except Exception:
+                    continue
+                if np.isfinite(_val):
+                    nf_preds[_key] = _val
+
+        _missing = []
+        _invalid = []
+        for _col in _need_cols:
+            if _col not in nf_preds:
+                _missing.append(_col)
+                continue
+            try:
+                _v = float(nf_preds[_col])
+            except Exception:
+                _invalid.append(_col)
+                continue
+            if not np.isfinite(_v):
+                _invalid.append(_col)
+                continue
+        if _missing or _invalid:
+            msg_parts = []
+            if _missing:
+                msg_parts.append(f"missing={','.join(_missing)}")
+            if _invalid:
+                msg_parts.append(f"invalid={','.join(_invalid)}")
+            raise RuntimeError(f"[DSAC_PREDCONF_REQUIRED] {' | '.join(msg_parts)}")
 
         # DSAC 입력 생성/추론 (m7_* 주입 버전)
         _sync_dsac_with_meta()
-        dsac_action, dsac_lev, info, elite_sigs, regime = dsac_router.decide(
-            processed_df,
-            nf_preds,
-            m7_signal=trend_signal,
-        )
+        try:
+            dsac_action, dsac_lev, info, elite_sigs, regime = dsac_router.decide(
+                processed_df,
+                nf_preds,
+                m7_signal=trend_signal,
+            )
+        except Exception as e:
+            if LIVE_STRICT_FEATURE_GUARD:
+                logger.warning("⚠️ LIVE strict guard: DSAC 입력 피처 검증 실패로 사이클 스킵: %s", e)
+                return
+            raise
         if live_hmm is not None:
             live_hmm_steps += 1
             if live_hmm_steps % 24 == 0:
@@ -2366,6 +2737,18 @@ async def main(use_local=False):
                         _kelly = 0.0
                         _dsac_only_source = "DSAC_INTEGRAL_BLOCK"
                         _block_reason = "integral"
+                if _fa != 0:
+                    _regime_key = str((trend_signal or {}).get("regime_name", "")).strip().lower()
+                    if not _regime_key:
+                        _regime_key = str(regime_name).strip().lower()
+                    if _regime_key == "chop":
+                        _kelly = float(np.clip(_kelly * meta_router.dsac_only_chop_entry_kelly_mult, 0.0, 1.0))
+                        if _dsac_only_source == "DSAC_ONLY":
+                            _dsac_only_source = "DSAC_ONLY_CHOP_SIZE"
+                    elif _regime_key == "whipsaw":
+                        _kelly = float(np.clip(_kelly * meta_router.dsac_only_whipsaw_entry_kelly_mult, 0.0, 1.0))
+                        if _dsac_only_source == "DSAC_ONLY":
+                            _dsac_only_source = "DSAC_ONLY_WHIPSAW_SIZE"
             # 신규 진입 시 보조 필터(VAE/BTC/안티찹/거래량)만 적용
             _sizing_diag = {
                 "bayes_mult": 1.0,
@@ -2583,6 +2966,7 @@ async def main(use_local=False):
         if eth_buffer is None: return
         try:
             processed_boot = fe_engine.process(eth_buffer, btc_buffer)
+            processed_boot = _prune_runtime_features(processed_boot)
             live_hmm = OnlineHMMDetector()
             live_hmm.fit(processed_boot, n_iter=15)
             logger.info("🧠 Live HMM 초기화 완료")
@@ -2627,6 +3011,7 @@ async def main(use_local=False):
                 first_run = False
 
             processed_df = fe_engine.process(eth_buffer, btc_buffer)
+            processed_df = _prune_runtime_features(processed_df)
             await _run_cycle(processed_df, eth_buffer)
 
     finally:

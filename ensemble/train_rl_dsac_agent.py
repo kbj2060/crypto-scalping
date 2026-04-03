@@ -38,8 +38,39 @@ for _p in [_ROOT_DIR, _SCRIPT_DIR, os.path.join(_ROOT_DIR, "ensemble"), os.path.
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from features.schema import prune_to_feature_keep
+from features.registry import find_missing_columns, get_m7_columns, M7_PROB_ALIASES
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _resolve_runtime_device(requested: str) -> str:
+    req = (requested or "auto").strip().lower()
+    if req == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if req == "cpu":
+        return "cpu"
+    if req == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA requested but torch.cuda.is_available() is False. "
+                "Check NVIDIA driver/runtime visibility."
+            )
+        return "cuda"
+    raise ValueError(f"invalid device: {requested} (expected: auto/cpu/cuda)")
+
+
+def _validate_m7_training_columns(df: pd.DataFrame, tag: str = "DSAC") -> None:
+    required = get_m7_columns("rl_core", include_entry_price=False)
+    missing = find_missing_columns(df.columns, required, aliases=M7_PROB_ALIASES)
+    if not missing:
+        return
+    missing_txt = ", ".join(sorted(missing))
+    raise ValueError(
+        f"[{tag}] missing required M7 columns: {missing_txt}. "
+        "Run scripts/augment_rl_training_with_model7.py before RL training."
+    )
 
 from ensemble.train_rl_agent import (  # noqa: E402
     MultiTimeframeFeatures,
@@ -1470,12 +1501,18 @@ def train(
     config_json_path: str = "data/ensemble/ckpt/dsac_train_config_latest.json",
     hmm_cache_path: str = "data/ensemble/ckpt/hmm_init_cache_dsac.npz",
     hmm_force_refit: bool = False,
+    device: str = "auto",
 ):
     if not os.path.exists(csv_path):
         logger.error("데이터가 없습니다. --mode generate_csv 실행 요망")
         return
 
     df = pd.read_csv(csv_path)
+    before_cols = len(df.columns)
+    df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp"])
+    if len(df.columns) != before_cols:
+        logger.info("[DATA] feature prune: %d -> %d cols (active M7+RL only)", before_cols, len(df.columns))
+    _validate_m7_training_columns(df, tag="DSAC")
     logger.info("[DATA] csv_path=%s | rows=%d", csv_path, len(df))
     if "timestamp" in df.columns:
         ts = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -1486,7 +1523,7 @@ def train(
     df_train = df.iloc[:split_idx].reset_index(drop=True)
     df_val = df.iloc[split_idx:].reset_index(drop=True)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = _resolve_runtime_device(device)
     logger.info("Device: %s", device)
     logger.info("DSAC compact state dim: %d", DSAC_STATE_DIM)
 
@@ -2248,6 +2285,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hmm-cache-path", default="data/ensemble/ckpt/hmm_init_cache_dsac.npz")
     p.add_argument("--hmm-force-refit", action="store_true", default=False)
     p.add_argument("--config-json-path", default="data/ensemble/ckpt/dsac_train_config_latest.json")
+    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return p.parse_args()
 
 
@@ -2308,4 +2346,5 @@ if __name__ == "__main__":
         hmm_force_refit=args.hmm_force_refit,
         val_side_bias_penalty=args.val_side_bias_penalty,
         config_json_path=args.config_json_path,
+        device=args.device,
     )

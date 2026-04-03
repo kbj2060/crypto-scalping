@@ -8,11 +8,8 @@ def trend_signal_from_m7(m7_last: dict | None) -> dict | None:
     if not isinstance(m7_last, dict) or not m7_last:
         return None
 
-    def _f(key: str, default: float = 0.0) -> float:
-        try:
-            return float(m7_last.get(key, default))
-        except Exception:
-            return float(default)
+    def _f(key: str, default: float = 0.0) -> float:  # noqa: ARG001
+        return float(m7_last[key])
 
     agg_dn = float(np.clip(_f("m7_prob_dn", 0.0), 0.0, 1.0))
     agg_fl = float(np.clip(_f("m7_prob_fl", 0.0), 0.0, 1.0))

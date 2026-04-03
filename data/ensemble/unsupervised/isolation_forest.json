@@ -1,25 +1,26 @@
 {
   "feature_cols": [
-    "sig_volume_confirm",
     "sig_whale",
     "whale_retail_ratio",
+    "sig_volume_confirm",
     "net_taker_ratio",
     "sig_oi_divergence",
-    "smart_money_flow"
+    "smart_money_flow",
+    "oi_change_rate"
   ],
   "model_path": "isolation_forest.pkl",
   "meta": {
     "algorithm": "isolation_forest",
-    "anomaly_ratio": 0.010682123012071278,
-    "score_mean": -0.13772326679770247,
-    "score_std": 0.03709077856332422,
-    "best_val_score": 0.08770638193601446,
+    "anomaly_ratio": 0.03031485570699764,
+    "score_mean": -0.07087138966549991,
+    "score_std": 0.031054941519123223,
+    "best_val_score": 0.0661759537859434,
     "best_params": {
-      "n_estimators": 462,
-      "contamination": 0.010681304520244933,
-      "max_samples": 0.5392311924833902,
-      "max_features": 0.7437593636946133,
-      "feature_count": 6
+      "n_estimators": 474,
+      "contamination": 0.030308585567961302,
+      "max_samples": 0.5026982744093208,
+      "max_features": 0.7728080367165733,
+      "feature_count": 7
     }
   }
 }

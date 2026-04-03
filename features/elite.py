@@ -359,7 +359,6 @@ class SyntheticAlphaEngine:
     """
     COLS = [
         'ofti', 'kel', 'mta_funding', 'svps',
-        'pred_mdjd', 'conf_mdjd',
         'cada', 'mshd', 'fvci', 'wpad', 'fdlv',
         'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
     ]
@@ -370,17 +369,17 @@ class SyntheticAlphaEngine:
 
         # OFTI
         _ofti_raw = (
-            df.get('smart_money_flow', pd.Series(0., index=df.index))
-            * df.get('whale_conviction', pd.Series(0., index=df.index))
-            * (df.get('amihud_illiquidity_z', pd.Series(0., index=df.index)).abs() + 1.0)
+            df['smart_money_flow']
+            * df['whale_conviction']
+            * (df['amihud_illiquidity_z'].abs() + 1.0)
         )
         df['ofti'] = np.tanh(_ofti_raw * 3.0).fillna(0)
 
         # KEL
         _kel_raw = (
-            df.get('oi_change_rate', pd.Series(0., index=df.index))
-            / (df.get('garman_klass_vol', pd.Series(1e-6, index=df.index)) + 1e-6)
-            * np.sign(df.get('funding_pressure', pd.Series(0., index=df.index)))
+            df['oi_change_rate']
+            / (df['garman_klass_vol'] + 1e-6)
+            * np.sign(df['funding_pressure'])
         )
         _kel_mean = _kel_raw.rolling(_ROLL, min_periods=1).mean()
         _kel_std  = _kel_raw.rolling(_ROLL, min_periods=1).std().replace(0, 1e-8)
@@ -388,12 +387,12 @@ class SyntheticAlphaEngine:
 
         # MTA
         _weighted_roc = (
-            0.5 * df.get('funding_roc_12',  pd.Series(0., index=df.index))
-            + 0.3 * df.get('funding_roc_48',  pd.Series(0., index=df.index))
-            + 0.2 * df.get('funding_roc_288', pd.Series(0., index=df.index))
+            0.5 * df['funding_roc_12']
+            + 0.3 * df['funding_roc_48']
+            + 0.2 * df['funding_roc_288']
         )
-        _funding_abs = df.get('funding_abs', pd.Series(1e-5, index=df.index)).clip(lower=1e-5)
-        _sq          = df.get('squeeze_power', pd.Series(0., index=df.index))
+        _funding_abs = df['funding_abs'].clip(lower=1e-5)
+        _sq          = df['squeeze_power']
         _sq_z        = (_sq - _sq.rolling(_ROLL, min_periods=1).mean()) \
                        / (_sq.rolling(_ROLL, min_periods=1).std().replace(0, 1e-8))
         df['mta_funding'] = ((_weighted_roc / _funding_abs) * np.tanh(_sq_z)).clip(-3, 3) / 3
@@ -402,116 +401,93 @@ class SyntheticAlphaEngine:
         # SVPS
         df['svps'] = np.tanh(
             2.0
-            * df.get('cvp_poc_dist',         pd.Series(0., index=df.index))
-            * df.get('cvp_volume_imbalance',  pd.Series(0., index=df.index))
-            * np.exp(-df.get('cvp_vah_val_width', pd.Series(0., index=df.index)).clip(0, 5))
+            * df['cvp_poc_dist']
+            * df['cvp_volume_imbalance']
+            * np.exp(-df['cvp_vah_val_width'].clip(0, 5))
         ).fillna(0)
-
-        # MDJD
-        _sqz_mean  = df.get('squeeze_power', pd.Series(0., index=df.index)).rolling(288, min_periods=1).mean()
-        _sqz_std   = df.get('squeeze_power', pd.Series(0., index=df.index)).rolling(288, min_periods=1).std().replace(0, 1e-8)
-        _squeeze_z = (df.get('squeeze_power', pd.Series(0., index=df.index)) - _sqz_mean) / _sqz_std
-        _trend_4h  = df.get('mtf_trend_4h', pd.Series(0., index=df.index))
-        _trend_4h_z = _trend_4h / (_trend_4h.rolling(288, min_periods=1).std() + 1e-8)
-        _D = (0.005 * df.get('smart_money_flow', pd.Series(0., index=df.index))
-              * (1 + np.tanh(df.get('whale_conviction', pd.Series(0., index=df.index))))
-              + 0.002 * _trend_4h)
-        _I = (0.003 * df.get('net_taker_ratio', pd.Series(0., index=df.index))
-              * np.exp(np.tanh(df.get('taker_acceleration', pd.Series(0., index=df.index))))
-              * (df.get('amihud_illiquidity_z', pd.Series(0., index=df.index)).clip(lower=0) + 1.0))
-        _J = (0.01 * np.tanh(_squeeze_z)
-              * np.tanh(df.get('funding_pressure', pd.Series(0., index=df.index)))
-              * (df.get('breakout_strength', pd.Series(0., index=df.index)) > 0.4).astype(float))
-        _trend_dampener = 1.0 - np.tanh(_trend_4h_z.abs())
-        _G = (-0.005 * df.get('cvp_poc_dist', pd.Series(0., index=df.index))
-              * np.exp(-df.get('cvp_volume_imbalance', pd.Series(0., index=df.index)).clip(-5, 5))
-              * _trend_dampener)
-        _R_hat = _D + _I + _J + _G
-        df['pred_mdjd'] = np.sign(_R_hat).clip(-1, 1).fillna(0)
-        df['conf_mdjd'] = np.tanh(_R_hat.abs() * 100).fillna(0)
 
         # CADA
         df['cada'] = np.tanh(
-            df.get('eth_btc_ratio_change', pd.Series(0., index=df.index))
-            * np.exp(-df.get('btc_corr_60', pd.Series(0., index=df.index)).clip(-1, 1))
-            * df.get('smart_money_flow', pd.Series(0., index=df.index))
+            df['eth_btc_ratio_change']
+            * np.exp(-df['btc_corr_60'].clip(-1, 1))
+            * df['smart_money_flow']
         ).fillna(0)
 
         # MSHD
         df['mshd'] = (
-            -np.sign(df.get('log_return', pd.Series(0., index=df.index)))
-            * df.get('wick_ratio', pd.Series(0., index=df.index)).clip(0, 5)
-            * np.tanh(df.get('big_trade_ratio', pd.Series(0., index=df.index)))
-            * np.exp(-df.get('trade_intensity', pd.Series(0., index=df.index)).clip(0, 5))
+            -np.sign(df['log_return'])
+            * df['wick_ratio'].clip(0, 5)
+            * np.tanh(df['big_trade_ratio'])
+            * np.exp(-df['trade_intensity'].clip(0, 5))
         ).fillna(0)
 
         # FVCI
         df['fvci'] = (
-            (1.0 - df.get('chop_index', pd.Series(50., index=df.index)).clip(0, 100) / 100.0)
-            * np.tanh(df.get('volatility_z', pd.Series(0., index=df.index)))
-            * np.sign(df.get('hurst_change', pd.Series(0., index=df.index)))
+            (1.0 - df['chop_index'].clip(0, 100) / 100.0)
+            * np.tanh(df['volatility_z'])
+            * np.sign(df['hurst_change'])
         ).fillna(0)
 
         # WPAD
         df['wpad'] = np.tanh(
             3.0
-            * df.get('whale_retail_ratio', pd.Series(0., index=df.index))
-            * (df.get('smart_money_flow', pd.Series(0., index=df.index))
-               - df.get('net_taker_ratio', pd.Series(0., index=df.index)))
+            * df['whale_retail_ratio']
+            * (df['smart_money_flow']
+               - df['net_taker_ratio'])
         ).fillna(0)
 
         # FDLV
         df['fdlv'] = (
-            np.sign(df.get('fvg_dist', pd.Series(0., index=df.index)))
+            np.sign(df['fvg_dist'])
             * np.tanh(
                 200.0
-                * df.get('fvg_dist', pd.Series(0., index=df.index)).abs()
-                * df.get('taker_acceleration', pd.Series(0., index=df.index))
-                * np.exp(-df.get('cvp_vah_val_width', pd.Series(0., index=df.index)).clip(0, 5))
+                * df['fvg_dist'].abs()
+                * df['taker_acceleration']
+                * np.exp(-df['cvp_vah_val_width'].clip(0, 5))
             )
         ).fillna(0)
 
         # VSDI
         df['vsdi'] = (
             np.tanh(
-                (df.get('garman_klass_vol', pd.Series(0., index=df.index))
-                 - df.get('parkinson_vol', pd.Series(0., index=df.index)))
-                / (df.get('rogers_satchell_vol', pd.Series(1e-8, index=df.index)) + 1e-8)
+                (df['garman_klass_vol']
+                 - df['parkinson_vol'])
+                / (df['rogers_satchell_vol'] + 1e-8)
             )
-            * df.get('regime_break', pd.Series(0., index=df.index))
+            * df['regime_break']
         ).fillna(0)
 
         # VEBR
         df['vebr'] = -np.tanh(
             100.0
-            * df.get('vwap_dist', pd.Series(0., index=df.index))
-            / (df.get('bb_width_z', pd.Series(0., index=df.index)) + 3.0)
-            * df.get('mean_reversion_z', pd.Series(0., index=df.index))
+            * df['vwap_dist']
+            / (df['bb_width_z'] + 3.0)
+            * df['mean_reversion_z']
         ).fillna(0)
 
         # TLAD
         df['tlad'] = (
-            np.sign(df.get('log_return', pd.Series(0., index=df.index)))
-            * (1.0 - np.exp(-df.get('amihud_illiquidity_z', pd.Series(0., index=df.index)).clip(lower=0)))
-            * df.get('is_hour_open', pd.Series(0., index=df.index))
+            np.sign(df['log_return'])
+            * (1.0 - np.exp(-df['amihud_illiquidity_z'].clip(lower=0)))
+            * df['is_hour_open']
         ).fillna(0)
 
         # MTMB
         df['mtmb'] = np.tanh(
             1000.0
-            * (df.get('mtf_trend_1h', pd.Series(0., index=df.index))
-               - df.get('mtf_trend_4h', pd.Series(0., index=df.index)))
-            * df.get('trade_intensity', pd.Series(0., index=df.index))
+            * (df['mtf_trend_1h']
+               - df['mtf_trend_4h'])
+            * df['trade_intensity']
         ).fillna(0)
 
         # FCSZ
-        _sqz    = df.get('squeeze_power', pd.Series(0., index=df.index))
+        _sqz    = df['squeeze_power']
         _sqz_z  = (_sqz - _sqz.rolling(_ROLL, min_periods=1).mean()) \
                    / (_sqz.rolling(_ROLL, min_periods=1).std().replace(0, 1e-8))
-        _vol_z  = df.get('volatility_z', pd.Series(0., index=df.index))
+        _vol_z  = df['volatility_z']
         _foc_arg = (
-            (df.get('funding_roc_12', pd.Series(0., index=df.index))
-             + 0.5 * df.get('funding_roc_48', pd.Series(0., index=df.index)))
+            (df['funding_roc_12']
+             + 0.5 * df['funding_roc_48'])
             / (_vol_z.abs() + 1e-8)
         )
         df['fcsz'] = (
@@ -691,7 +667,7 @@ class VolatilityModelEngine:
         """GARCH(1,1): σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}
         파라미터: α=0.10, β=0.85 (크립토 표준값, α+β=0.95 < 1)
         """
-        _rets = df.get('log_return', pd.Series(0., index=df.index)).values.astype(np.float64)
+        _rets = df['log_return'].values.astype(np.float64)
         N = len(_rets)
         _eps2 = _rets ** 2
         _init_var = float(np.nanmean(_eps2[:min(288, N)])) or 1e-8
@@ -718,13 +694,13 @@ class VolatilityModelEngine:
           OLS-based beta≈0 → theta≈0 → halflife 항상 1.0 상수 문제 해결
           funding_roc_12는 연속 신호로 의미 있는 AR(1) 추정 가능
         """
-        _f        = df.get('last_funding_rate', pd.Series(0., index=df.index))
+        _f        = df['last_funding_rate']
         _mu_ou    = _f.rolling(288, min_periods=1).mean().fillna(0)
         _sigma_ou = _f.rolling(288, min_periods=1).std().replace(0, 1e-8)
         df['ou_funding_z'] = ((_f - _mu_ou) / _sigma_ou).clip(-3, 3).fillna(0).astype(np.float32)
 
         # 반감기: funding_roc_12의 AR(1) 자기상관 기반 추정 (5일 창)
-        _roc     = df.get('funding_roc_12', _f)
+        _roc     = df['funding_roc_12']
         _roc_lag = _roc.shift(1)
         _ROLL_AR = 1440  # 5일
 
@@ -749,7 +725,7 @@ class VolatilityModelEngine:
           5분봉 ETH에서 사실상 항상 0. MAD 기반 4σ 기준은 ~1-2% 빈도로
           의미 있는 청산 캐스케이드/플래시 크래시를 포착함
         """
-        _r      = df.get('log_return', pd.Series(0., index=df.index))
+        _r      = df['log_return']
         _r_abs  = _r.abs()
         _ROLL_J = 288  # 1일 창 (5분봉 기준)
 
@@ -769,7 +745,7 @@ class VolatilityModelEngine:
         [수정 이유] 99th percentile + 1440봉 창은 너무 희소하여 사실상 0.
           97th percentile + 576봉 창으로 완화 → 실질적인 신호 밀도 확보
         """
-        _r_abs  = df.get('log_return', pd.Series(0., index=df.index)).abs()
+        _r_abs  = df['log_return'].abs()
         _ROLL_E = 576  # 2일 창
 
         _thresh = (

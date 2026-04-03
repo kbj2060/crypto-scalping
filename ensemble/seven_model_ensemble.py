@@ -75,19 +75,226 @@ def _resolve_model_path(meta_path: str, model_ref: str | None) -> str:
     return os.path.join(os.path.dirname(meta_path), model_ref)
 
 
+def _enrich_m7_features(df: pd.DataFrame) -> pd.DataFrame:
+    """M7 모델이 요구하는 피처 중 processed_df에 누락된 것들을 추론 직전에 보완한다.
+
+    이미 컬럼이 존재하면 덮어쓰지 않는다(if 조건 guard).
+    계산에 필요한 원시 컬럼이 없으면 해당 파생 컬럼은 생성하지 않는다.
+    (필수 컬럼 검증은 _to_numeric_frame에서 fail-fast 처리)
+    """
+    df = df.copy()
+
+    # ── 1. signal_* = pred_* × conf_* 합성 ─────────────────────────
+    _pred_conf_pairs = [
+        ("pred_patchtst", "conf_patchtst"),
+        ("pred_chronos",  "conf_chronos"),
+        ("pred_tide",     "conf_tide"),
+    ]
+    for pred_col, conf_col in _pred_conf_pairs:
+        sig_col = pred_col.replace("pred_", "signal_")
+        if sig_col in df.columns:
+            continue
+        if pred_col in df.columns and conf_col in df.columns:
+            df[sig_col] = pd.to_numeric(df[pred_col], errors="coerce") * pd.to_numeric(df[conf_col], errors="coerce")
+        elif pred_col in df.columns:
+            df[sig_col] = pd.to_numeric(df[pred_col], errors="coerce")
+
+    # ── 2. 시간 파생 피처 ─────────────────────────────────────────
+    if "timestamp" in df.columns and any(
+        c not in df.columns for c in ["hour_sin", "minute_sin", "minute_cos", "session_europe", "is_hour_open"]
+    ):
+        try:
+            ts = pd.to_datetime(df["timestamp"], errors="coerce")
+            hour = ts.dt.hour.fillna(0).astype(float)
+            minute = ts.dt.minute.fillna(0).astype(float)
+            if "hour_sin" not in df.columns:
+                df["hour_sin"] = np.sin(2 * np.pi * hour / 24).astype(np.float32)
+            if "minute_sin" not in df.columns:
+                df["minute_sin"] = np.sin(2 * np.pi * minute / 60).astype(np.float32)
+            if "minute_cos" not in df.columns:
+                df["minute_cos"] = np.cos(2 * np.pi * minute / 60).astype(np.float32)
+            if "session_europe" not in df.columns:
+                df["session_europe"] = ((hour >= 8) & (hour < 16)).astype(np.float32)
+            if "is_hour_open" not in df.columns:
+                df["is_hour_open"] = (minute < 5).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive time features for M7 inference: {e}") from e
+
+    # ── 3. chop_index ────────────────────────────────────────────
+    if "chop_index" not in df.columns and all(c in df.columns for c in ["high", "low", "close"]):
+        try:
+            _length = 14
+            _h = pd.to_numeric(df["high"], errors="coerce")
+            _l = pd.to_numeric(df["low"], errors="coerce")
+            _c = pd.to_numeric(df["close"], errors="coerce")
+            _tr1 = _h - _l
+            _tr2 = (_h - _c.shift(1)).abs()
+            _tr3 = (_l - _c.shift(1)).abs()
+            _tr = pd.concat([_tr1, _tr2, _tr3], axis=1).max(axis=1)
+            _atr_sum = _tr.rolling(_length).sum()
+            _hmax = _h.rolling(_length).max()
+            _lmin = _l.rolling(_length).min()
+            df["chop_index"] = (
+                100 * np.log10((_atr_sum + 1e-8) / (_hmax - _lmin + 1e-8)) / np.log10(_length)
+            ).fillna(50.0).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive chop_index for M7 inference: {e}") from e
+
+    # ── 4. realized_skewness ─────────────────────────────────────
+    if "realized_skewness" not in df.columns and "close" in df.columns:
+        try:
+            _window = 96
+            _rets = pd.to_numeric(df["close"], errors="coerce").pct_change().fillna(0)
+            def _skew_fn(x: np.ndarray) -> float:
+                if len(x) < 8:
+                    return 0.0
+                mu = x.mean()
+                sig = x.std()
+                if sig < 1e-10:
+                    return 0.0
+                return float(((x - mu) ** 3).mean() / (sig ** 3 + 1e-10))
+            df["realized_skewness"] = (
+                _rets.rolling(_window, min_periods=_window // 2)
+                .apply(_skew_fn, raw=True)
+                .clip(-3, 3)
+                .fillna(0)
+                .astype(np.float32)
+            )
+        except Exception as e:
+            raise RuntimeError(f"failed to derive realized_skewness for M7 inference: {e}") from e
+
+    # ── 5. regime_trending (hurst_48 > 0.5) ─────────────────────
+    if "regime_trending" not in df.columns:
+        if "hurst_48" in df.columns:
+            df["regime_trending"] = (
+                pd.to_numeric(df["hurst_48"], errors="coerce").fillna(0.5) > 0.5
+            ).astype(np.float32)
+
+    # ── 6. funding_roc_48 ────────────────────────────────────────
+    if "funding_roc_48" not in df.columns and "last_funding_rate" in df.columns:
+        try:
+            _fr = pd.to_numeric(df["last_funding_rate"], errors="coerce").fillna(0)
+            _shifted = _fr.shift(48)
+            df["funding_roc_48"] = (
+                (_fr - _shifted) / (_shifted.abs().clip(lower=1e-4) + 1e-8)
+            ).clip(-10, 10).fillna(0).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive funding_roc_48 for M7 inference: {e}") from e
+
+    # ── 7. mta_funding ───────────────────────────────────────────
+    if "mta_funding" not in df.columns and all(
+        c in df.columns for c in ["funding_roc_12", "squeeze_power", "last_funding_rate"]
+    ):
+        try:
+            _roc12 = pd.to_numeric(df["funding_roc_12"], errors="coerce").fillna(0)
+            _roc48 = pd.to_numeric(df.get("funding_roc_48", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0)
+            _roc288 = pd.to_numeric(df["funding_roc_288"], errors="coerce").fillna(0) if "funding_roc_288" in df.columns else 0.0
+            _fr = pd.to_numeric(df["last_funding_rate"], errors="coerce").abs().clip(lower=1e-5)
+            _sq = pd.to_numeric(df["squeeze_power"], errors="coerce").fillna(0)
+            _roll = 288
+            _sq_mean = _sq.rolling(_roll, min_periods=1).mean()
+            _sq_std = _sq.rolling(_roll, min_periods=1).std().replace(0, 1e-8).fillna(1e-8)
+            _sq_z = (_sq - _sq_mean) / _sq_std
+            _weighted_roc = 0.5 * _roc12 + 0.3 * _roc48 + 0.2 * _roc288
+            df["mta_funding"] = (
+                (_weighted_roc / _fr) * np.tanh(_sq_z)
+            ).clip(-3, 3).fillna(0).div(3).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive mta_funding for M7 inference: {e}") from e
+
+    # ── 9. svps ──────────────────────────────────────────────────
+    if "svps" not in df.columns and all(
+        c in df.columns for c in ["cvp_poc_dist", "cvp_volume_imbalance"]
+    ):
+        try:
+            _poc = pd.to_numeric(df["cvp_poc_dist"], errors="coerce").fillna(0)
+            _vim = pd.to_numeric(df["cvp_volume_imbalance"], errors="coerce").fillna(0)
+            _reg = pd.to_numeric(df["cvp_regime"], errors="coerce").fillna(0)
+            df["svps"] = (
+                np.tanh(2.0 * _poc * _vim * np.exp(-np.abs(_reg).clip(0, 5)))
+            ).fillna(0).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive svps for M7 inference: {e}") from e
+
+    # ── 10. kalman_velocity ──────────────────────────────────────
+    if "kalman_velocity" not in df.columns and "close" in df.columns:
+        try:
+            _vals = pd.to_numeric(df["close"], errors="coerce").ffill().fillna(0).to_numpy(dtype=np.float64)
+            _n = len(_vals)
+            _F = np.array([[1.0, 1.0], [0.0, 1.0]])
+            _H = np.array([[1.0, 0.0]])
+            _Q = np.eye(2) * 1e-5
+            _R = np.array([[1e-3]])
+            _x = np.array([_vals[0], 0.0])
+            _P = np.eye(2)
+            _vels = np.empty(_n, dtype=np.float64)
+            for _i in range(_n):
+                _x = _F @ _x
+                _P = _F @ _P @ _F.T + _Q
+                _S = float((_H @ _P @ _H.T + _R)[0, 0])
+                _K = (_P @ _H.T).flatten() / _S
+                _inn = _vals[_i] - float((_H @ _x)[0])
+                _x = _x + _K * _inn
+                _P = (np.eye(2) - np.outer(_K, _H)) @ _P
+                _vels[_i] = _x[1]
+            df["kalman_velocity"] = np.clip(_vels / (_vals + 1e-8), -0.05, 0.05).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"failed to derive kalman_velocity for M7 inference: {e}") from e
+
+    return df
+
+
+def _add_trend_structure_features(df: pd.DataFrame) -> pd.DataFrame:
+    """trend_xgb 학습 시 사용된 OHLC 파생 피처를 추론 전에 보장한다."""
+    df = df.copy()
+    c = pd.to_numeric(df["close"], errors="coerce")
+    h = pd.to_numeric(df["high"], errors="coerce") if "high" in df.columns else c
+    lo = pd.to_numeric(df["low"], errors="coerce") if "low" in df.columns else c
+    if "ret_12" not in df.columns:
+        df["ret_12"] = np.tanh(c.pct_change(12) * 10)
+    if "ret_24" not in df.columns:
+        df["ret_24"] = np.tanh(c.pct_change(24) * 10)
+    if "ret_48" not in df.columns:
+        df["ret_48"] = np.tanh(c.pct_change(48) * 10)
+    if "hh_count_24" not in df.columns:
+        df["hh_count_24"] = (h > h.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+    if "hl_count_24" not in df.columns:
+        df["hl_count_24"] = (lo > lo.shift(1)).astype(float).rolling(24, min_periods=1).sum() / 24.0
+    if "trend_accel" not in df.columns:
+        df["trend_accel"] = np.tanh((c.pct_change(12) - c.pct_change(48) / 4) * 20)
+    return df
+
+
 def _to_numeric_frame(df: pd.DataFrame, cols: list[str], fill_mode: str = "median") -> pd.DataFrame:
+    missing_cols = [c for c in cols if c not in df.columns]
+    if missing_cols:
+        preview = ", ".join(missing_cols[:10])
+        suffix = " ..." if len(missing_cols) > 10 else ""
+        raise KeyError(f"M7 required feature(s) missing: {preview}{suffix}")
+
     out = pd.DataFrame(index=df.index)
     for c in cols:
-        if c in df.columns:
-            out[c] = pd.to_numeric(df[c], errors="coerce")
-        else:
-            out[c] = np.nan
+        out[c] = pd.to_numeric(df[c], errors="coerce")
     out = out.replace([np.inf, -np.inf], np.nan)
+
+    all_nan_cols = [c for c in cols if out[c].isna().all()]
+    if all_nan_cols:
+        preview = ", ".join(all_nan_cols[:10])
+        suffix = " ..." if len(all_nan_cols) > 10 else ""
+        raise ValueError(f"M7 required feature(s) are all-NaN: {preview}{suffix}")
+
     if fill_mode == "median":
         med = out.median(numeric_only=True)
-        out = out.fillna(med).fillna(0.0)
+        out = out.fillna(med)
     elif fill_mode == "zero":
-        out = out.fillna(0.0)
+        pass
+
+    if out.isna().any().any():
+        bad_cols = [c for c in cols if out[c].isna().any()]
+        preview = ", ".join(bad_cols[:10])
+        suffix = " ..." if len(bad_cols) > 10 else ""
+        raise ValueError(f"M7 required feature(s) contain NaN after preprocessing: {preview}{suffix}")
+
     return out.astype(np.float32)
 
 
@@ -159,6 +366,7 @@ class SevenModelEnsemble:
         weight_trend_xgb: float = 0.45,
         weight_multitarget: float = 0.35,
         weight_quantile: float = 0.20,
+        strict: bool = True,
     ):
         self.meta_paths = dict(self.DEFAULT_META_PATHS)
         if meta_paths:
@@ -167,6 +375,7 @@ class SevenModelEnsemble:
         self.weight_trend_xgb = float(weight_trend_xgb)
         self.weight_multitarget = float(weight_multitarget)
         self.weight_quantile = float(weight_quantile)
+        self.strict = bool(strict)
 
         self.trend_xgb = _ModelState(False)
         self.entry_price = _ModelState(False)
@@ -178,6 +387,32 @@ class SevenModelEnsemble:
         self.vae = _ModelState(False)
 
         self._load_all()
+        self._assert_ready()
+
+    def _missing_models(self) -> list[str]:
+        checks = [
+            ("trend_xgb", self.trend_xgb),
+            ("entry_price_model", self.entry_price),
+            ("multi_target_lgbm", self.multi_target),
+            ("quantile_forest", self.quantile),
+            ("gmm_volatility", self.gmm),
+            ("hdbscan_regime", self.hdbscan),
+            ("isolation_forest", self.isolation),
+            ("vae_anomaly", self.vae),
+        ]
+        missing: list[str] = []
+        for name, state in checks:
+            if not state.available:
+                reason = state.reason or "unavailable"
+                missing.append(f"{name}({reason})")
+        return missing
+
+    def _assert_ready(self) -> None:
+        if not self.strict:
+            return
+        missing = self._missing_models()
+        if missing:
+            raise RuntimeError("SevenModelEnsemble strict mode: missing required model(s): " + ", ".join(missing))
 
     def _load_meta(self, key: str) -> dict[str, Any] | None:
         path = self.meta_paths[key]
@@ -362,6 +597,7 @@ class SevenModelEnsemble:
         n = len(df)
         if not self.trend_xgb.available or self.trend_xgb.model is None:
             return np.full((n, 3), 1.0 / 3.0, dtype=np.float64)
+        df = _add_trend_structure_features(df)
         x = _to_numeric_frame(df, self.trend_xgb.feature_cols or [], fill_mode="median")
         model = self.trend_xgb.model
         if hasattr(model, "predict_proba"):
@@ -545,9 +781,12 @@ class SevenModelEnsemble:
         return {"error": err, "is_anomaly": is_anom, "threshold": threshold}
 
     def predict_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        self._assert_ready()
         n = len(df)
         if n == 0:
             return pd.DataFrame(index=df.index)
+
+        df = _enrich_m7_features(df)
 
         p_xgb = self._predict_trend_xgb(df)
         mtl = self._predict_multitarget(df)

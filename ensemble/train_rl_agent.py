@@ -476,8 +476,8 @@ class MarketAttentionEncoder(nn.Module):
 # ═══════════════════════════════════════════════════════════════════════════
 # [상수 및 차원 정의] — 사용자 피쳐 축소 반영
 # ═══════════════════════════════════════════════════════════════════════════
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst', 'pred_tide', 'pred_mdjd']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst', 'conf_tide', 'conf_mdjd']
+MODEL_PRED = ['pred_patchtst', 'pred_chronos', 'pred_tide']
+MODEL_CONF = ['conf_patchtst', 'conf_chronos', 'conf_tide']
 
 ELITE_COLS = ['sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze']
 ALPHA_7_COLS = ['session_us', 'hour_cos', 'cvp_poc_dist', 'cvp_volume_imbalance', 'fvg_dist', 'breakout_strength', 'oi_change_rate']

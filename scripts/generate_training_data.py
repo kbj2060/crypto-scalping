@@ -27,11 +27,11 @@ for _p in [_ROOT_DIR,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+from features.schema import STATE_PRED, STATE_CONF
+
 # ─── 상수 ─────────────────────────────────────────────────────────────────────
-MODEL_PRED = ['pred_timesfm', 'pred_chronos', 'pred_ttm', 'pred_patchtst',
-              'pred_tide', 'pred_mdjd']
-MODEL_CONF = ['conf_timesfm', 'conf_chronos', 'conf_ttm', 'conf_patchtst',
-              'conf_tide', 'conf_mdjd']
+MODEL_PRED = list(STATE_PRED)
+MODEL_CONF = list(STATE_CONF)
 
 ELITE_COLS = [
     'sig_whale', 'sig_orderblock', 'sig_oi_divergence', 'sig_ai_squeeze',
@@ -55,10 +55,9 @@ REGIME_COLS = ['regime_chop', 'regime_whipsaw', 'regime_bull', 'regime_bear', 'r
 
 TARGET_COL = 'log_return'
 
-SYNTHETIC_ALPHA_COLS = [
-    'ofti', 'kel', 'mta_funding', 'svps', 'mshd', 'fvci',
-    'wpad', 'fdlv', 'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
-]
+SYNTHETIC_ALPHA_COLS = ['ofti', 'kel']
+NF_EXTRA_EXOG_COLS = ['mta_funding', 'svps']
+NF_EXOG_COLS = ALPHA_7_COLS + SYNTHETIC_ALPHA_COLS + NF_EXTRA_EXOG_COLS
 
 VOLATILITY_MODEL_COLS = [
     'garch_vol', 'garch_vol_z',
@@ -139,21 +138,21 @@ def generate_training_csv(input_csv: str, output_csv: str):
                     logger.info(f"♻️ 이어하기: {last_ts} 이후부터 재개 (인덱스: {resume_start})")
                 df.drop(columns=['timestamp_str'], inplace=True)
         except Exception:
-            pass
+            raise
 
     if resume_start >= L:
         return logger.info("✅ 마이닝이 이미 완료되었습니다.")
 
     logger.info("🧠 [단계 2] 앙상블 모델 적재...")
     from ensemble.ensemble_router import (  # type: ignore
-        TimesFMForecaster, ChronosForecaster, TTMForecaster,
-        PatchTSTForecaster, ITransformerForecaster, NHITSForecaster, TiDEForecaster,
+        TimesFMForecaster, TTMForecaster,
+        PatchTSTForecaster,
     )
 
     elite_extractor = EliteSignals()
     CHUNK_SIZE      = 1024
 
-    nf_models_list = [m for m in ['patchtst', 'itransformer', 'nhits', 'tide']
+    nf_models_list = [m for m in ['patchtst']
                       if f'pred_{m}' in MODEL_PRED]
     nf_forecaster = None
     if nf_models_list:
@@ -166,14 +165,15 @@ def generate_training_csv(input_csv: str, output_csv: str):
         try:
             from tsfm_public import TinyTimeMixerForPrediction  # type: ignore
             ttm_model = TinyTimeMixerForPrediction.from_pretrained(
-                "ibm-granite/granite-timeseries-ttm-r1"
+                "ibm-granite/granite-timeseries-ttm-r1",
+                local_files_only=True,
             ).to(device).eval()
         except Exception as e:
             logger.warning(f"TTM 로드 실패: {e}")
 
     fallback_models = {}
-    if 'pred_timesfm' in MODEL_PRED: fallback_models['timesfm'] = TimesFMForecaster()
-    if 'pred_chronos' in MODEL_PRED: fallback_models['chronos']  = ChronosForecaster()
+    if 'pred_timesfm' in MODEL_PRED:
+        fallback_models['timesfm'] = TimesFMForecaster()
 
     def get_direction(traj):
         if len(traj) < 2: return float(np.sign(np.mean(traj)))
@@ -192,10 +192,10 @@ def generate_training_csv(input_csv: str, output_csv: str):
     logger.info(f"🚀 [단계 3] 하이브리드 배치 마이닝 시작 (CHUNK: {CHUNK_SIZE})")
     df_records   = df.to_dict('records')
     np_closes    = df['close'].values
-    alpha_matrix = df[ALPHA_7_COLS + SYNTHETIC_ALPHA_COLS].values
+    alpha_matrix = df[NF_EXOG_COLS].values
 
-    _precomputed_pred = {'pred_mdjd'}
-    _precomputed_conf = {'conf_mdjd'}
+    _precomputed_pred: set[str] = set()
+    _precomputed_conf: set[str] = set()
 
     for chunk_start in range(resume_start, L, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE, L)
@@ -217,12 +217,19 @@ def generate_training_csv(input_csv: str, output_csv: str):
             for col in VOLATILITY_MODEL_COLS: row_res[col] = float(current_row.get(col, 0.0))
             for col in NEW_ELITE_COLS:        row_res[col] = float(current_row.get(col, 0.0))
 
-            all_sigs = elite_extractor.compute_all(
-                current=row_to_market_row(current_row),
-                prev=row_to_market_row(prev_row),
-                smf_std=float(current_row.get('smf_std', 1.0)),
-            )
-            row_res.update({k: float(v) for k, v in all_sigs.items() if k in ELITE_COLS})
+            # 실사용 스키마 프루닝 이후에는 원시 입력이 부족할 수 있으므로
+            # 저장된 sig_* 컬럼을 우선 사용하고, 가능할 때만 재계산으로 덮어쓴다.
+            for _k in ELITE_COLS:
+                row_res[_k] = float(current_row.get(_k, 0.0))
+            try:
+                all_sigs = elite_extractor.compute_all(
+                    current=row_to_market_row(current_row),
+                    prev=row_to_market_row(prev_row),
+                    smf_std=float(current_row.get('smf_std', 1.0)),
+                )
+                row_res.update({k: float(v) for k, v in all_sigs.items() if k in ELITE_COLS})
+            except Exception:
+                raise
 
             for m in MODEL_PRED:
                 row_res[m] = float(current_row.get(m, 0.0)) if m in _precomputed_pred else 0.0
@@ -258,7 +265,7 @@ def generate_training_csv(input_csv: str, output_csv: str):
         if nf_forecaster is not None:
             nf_rows      = []
             dummy_dates  = pd.date_range(end=pd.Timestamp.now(), periods=256, freq='5min')
-            nf_exog_cols = ALPHA_7_COLS + SYNTHETIC_ALPHA_COLS
+            nf_exog_cols = NF_EXOG_COLS
 
             for i, end_idx in enumerate(range(chunk_start, chunk_end)):
                 start_idx = end_idx - 255
@@ -298,14 +305,13 @@ def generate_training_csv(input_csv: str, output_csv: str):
                 uid_out = (out_df.loc[uid] if uid in out_df.index
                            else out_df[out_df['unique_id'] == uid])
                 for m_alias in nf_models_list:
-                    m_real = {'patchtst': 'PatchTST', 'itransformer': 'iTransformer',
-                              'nhits': 'NHITS', 'tide': 'TiDE'}[m_alias]
+                    m_real = {'patchtst': 'PatchTST'}[m_alias]
                     if m_real in uid_out:
                         traj6 = uid_out[m_real].values[:6]
                         chunk_data[i][f'pred_{m_alias}'] = get_direction(traj6)
                         chunk_data[i][f'conf_{m_alias}'] = get_conf(traj6)
 
-        # ── TimesFM / Chronos (fallback) ──────────────────────────────────────
+        # ── TimesFM fallback ───────────────────────────────────────────────────
         if fallback_models:
             for i, end_idx in enumerate(range(chunk_start, chunk_end)):
                 df_slice = df.iloc[end_idx - 255 : end_idx + 1]
@@ -319,7 +325,7 @@ def generate_training_csv(input_csv: str, output_csv: str):
                                     chunk_data[i][f'pred_{name}'] = get_direction(out.median[-1])
                                     chunk_data[i][f'conf_{name}'] = float(out.confidence[-1].mean())
                         except Exception:
-                            pass
+                            raise
 
         new_df = pd.DataFrame(chunk_data, columns=RL_REQUIRED_COLS)
         is_new = not os.path.exists(abs_output)
