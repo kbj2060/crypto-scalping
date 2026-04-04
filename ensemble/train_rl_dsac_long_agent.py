@@ -75,18 +75,34 @@ def _validate_m7_training_columns(df: pd.DataFrame, tag: str = "LONG") -> None:
         "Run scripts/augment_rl_training_with_model7.py before RL training."
     )
 
-from ensemble.train_rl_agent import (  # noqa: E402
-    MultiTimeframeFeatures,
-    OnlineHMMDetector,
-    REGIME_COLS,
-    STATE_CONF,
-    STATE_PRED,
-)
+try:
+    from ensemble.train_rl_agent import (  # noqa: E402
+        MultiTimeframeFeatures,
+        OnlineHMMDetector,
+        REGIME_COLS,
+        STATE_CONF,
+        STATE_PRED,
+    )
+except Exception:
+    from ensemble.rl_runtime_primitives import (  # noqa: E402
+        MultiTimeframeFeatures,
+        OnlineHMMDetector,
+        REGIME_COLS,
+        STATE_CONF,
+        STATE_PRED,
+    )
 from ensemble.rl_continuous_common import (  # noqa: E402
     ReplayBuffer,
     SACTradingEnv as _BaseSACTradingEnv,
 )
-from ensemble.train_rl_dsac_agent import RegimeBalancedReplay  # noqa: E402
+try:
+    from ensemble.train_rl_dsac_agent import RegimeBalancedReplay  # noqa: E402
+except Exception:
+    class RegimeBalancedReplay(ReplayBuffer):
+        def __init__(self, capacity=500000, recent_mix_ratio=0.30, recent_window=100000, **kwargs):
+            super().__init__(capacity=int(capacity))
+            self.recent_mix_ratio = float(recent_mix_ratio)
+            self.recent_window = int(recent_window)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -700,7 +716,7 @@ class DSACLongAgent:
     def __init__(
         self, state_dim=STATE_DIM, hidden_dim=256,
         lr_actor=3e-4, lr_critic=3e-4, lr_alpha=3e-4,
-        gamma=0.99, tau=0.005, n_quantiles=32, cvar_frac=0.40, device="cuda",
+        gamma=0.99, tau=0.005, n_quantiles=32, cvar_frac=0.40, device="cpu",
         pessimism_min_weight=0.65,
         dynamic_entropy=True,
         entropy_min=-0.80, entropy_max=-0.45,
@@ -864,7 +880,7 @@ class DSACLongRouter:
       action_int: 0=관망, 1=LONG
     """
 
-    def __init__(self, actor, device="cuda", hmm_detector=None, mtf_features=None):
+    def __init__(self, actor, device="cpu", hmm_detector=None, mtf_features=None):
         self.actor = actor
         self.device = device
         self.hmm = hmm_detector
@@ -1086,7 +1102,7 @@ def train(
     anti_flat: float = 0.08,
     alpha_min: float = 5e-3,
     alpha_init: float = 0.03,
-    device: str = "auto",
+    device: str = "cpu",
 ):
     if not os.path.exists(csv_path):
         logger.error("데이터가 없습니다. --mode generate_csv 실행 요망")
@@ -1410,7 +1426,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--anti-flat", type=float, default=0.08)
     p.add_argument("--alpha-min", type=float, default=5e-3)
     p.add_argument("--alpha-init", type=float, default=0.03)
-    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="cpu")
     return p.parse_args()
 
 

@@ -8,18 +8,32 @@ from collections import deque
 import numpy as np
 import pandas as pd
 
-from ensemble.train_rl_agent import (
-    HMM_DIM,
-    REGIME_COLS,
-    STACK_N,
-    STATE_ALPHA,
-    STATE_CONF,
-    STATE_DIM,
-    STATE_ELITE,
-    STATE_PRED,
-    STATE_SYNTH,
-    MultiTimeframeFeatures,
-)
+try:
+    from ensemble.train_rl_agent import (
+        HMM_DIM,
+        REGIME_COLS,
+        STACK_N,
+        STATE_ALPHA,
+        STATE_CONF,
+        STATE_DIM,
+        STATE_ELITE,
+        STATE_PRED,
+        STATE_SYNTH,
+        MultiTimeframeFeatures,
+    )
+except Exception:
+    from ensemble.rl_runtime_primitives import (
+        HMM_DIM,
+        REGIME_COLS,
+        STACK_N,
+        STATE_ALPHA,
+        STATE_CONF,
+        STATE_DIM,
+        STATE_ELITE,
+        STATE_PRED,
+        STATE_SYNTH,
+        MultiTimeframeFeatures,
+    )
 
 _POS_THRESH = 0.15
 _CLOSE_THRESH = 0.05
