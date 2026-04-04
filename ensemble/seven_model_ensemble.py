@@ -170,6 +170,29 @@ def _enrich_m7_features(df: pd.DataFrame) -> pd.DataFrame:
                 pd.to_numeric(df["hurst_48"], errors="coerce").fillna(0.5) > 0.5
             ).astype(np.float32)
 
+    # ── 5.1 regime one-hot (cvp_regime 기반) ───────────────────
+    regime_cols = ["regime_chop", "regime_whipsaw", "regime_bull", "regime_bear", "regime_normal"]
+    if any(c not in df.columns for c in regime_cols):
+        if "cvp_regime" not in df.columns:
+            raise KeyError("cvp_regime is required to derive regime one-hot features for M7 inference")
+        _reg = pd.to_numeric(df["cvp_regime"], errors="coerce").fillna(0.0)
+        _abs = _reg.abs()
+        _bull = (_reg >= 0.35)
+        _bear = (_reg <= -0.35)
+        _chop = (_abs < 0.15)
+        _whipsaw = (_abs >= 0.15) & (_abs < 0.35)
+        _normal = ~(_bull | _bear | _chop | _whipsaw)
+        if "regime_bull" not in df.columns:
+            df["regime_bull"] = _bull.astype(np.float32)
+        if "regime_bear" not in df.columns:
+            df["regime_bear"] = _bear.astype(np.float32)
+        if "regime_chop" not in df.columns:
+            df["regime_chop"] = _chop.astype(np.float32)
+        if "regime_whipsaw" not in df.columns:
+            df["regime_whipsaw"] = _whipsaw.astype(np.float32)
+        if "regime_normal" not in df.columns:
+            df["regime_normal"] = _normal.astype(np.float32)
+
     # ── 6. funding_roc_48 ────────────────────────────────────────
     if "funding_roc_48" not in df.columns and "last_funding_rate" in df.columns:
         try:
@@ -971,7 +994,8 @@ class SevenModelEnsemble:
         return out.astype(np.float32)
 
     def predict_last(self, df: pd.DataFrame) -> dict[str, float]:
-        pred = self.predict_batch(df.tail(1))
+        # Keep sufficient history so rolling/lag features for the final row are computable.
+        pred = self.predict_batch(df.tail(512)).tail(1)
         if pred.empty:
             return {}
         row = pred.iloc[-1]

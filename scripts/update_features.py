@@ -406,12 +406,12 @@ def build_features(eth_df: pd.DataFrame, btc_df: pd.DataFrame,
         if pct > 0.1:
             print(f"  ⚠️ {col} NaN 비율: {pct:.1%} (tolerance 범위 밖 데이터 많음)")
 
-    # ETH ← Funding (forward, tolerance=8h)
+    # ETH ← Funding (backward, tolerance=8h) to avoid look-ahead leakage
     eth_merged = pd.merge_asof(
         eth_merged.sort_values('timestamp'),
         funding_df.sort_values('timestamp'),
         on='timestamp',
-        direction='forward',
+        direction='backward',
         tolerance=pd.Timedelta('8h'),
     )
 
