@@ -188,6 +188,29 @@ class BinanceLiveFetcher:
         self.timeframe = timeframe
         self.limit = limit
         self.exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        self.api_retries = int(os.getenv("BINANCE_API_RETRIES", "4"))
+        self.api_retry_delay_sec = float(os.getenv("BINANCE_API_RETRY_DELAY_SEC", "1.5"))
+
+    async def _call_with_retry(self, label: str, fn):
+        last_error = None
+        for attempt in range(1, self.api_retries + 1):
+            try:
+                return await fn()
+            except Exception as e:
+                last_error = e
+                if attempt >= self.api_retries:
+                    break
+                sleep_sec = self.api_retry_delay_sec * attempt
+                logger.warning(
+                    "⚠️ %s 실패(%d/%d): %s | %.1fs 후 재시도",
+                    label,
+                    attempt,
+                    self.api_retries,
+                    e,
+                    sleep_sec,
+                )
+                await asyncio.sleep(sleep_sec)
+        raise RuntimeError(f"{label} failed after {self.api_retries} attempts") from last_error
 
     def load_local_data(self):
         try:
@@ -209,7 +232,10 @@ class BinanceLiveFetcher:
         while len(all_klines) < target_limit:
             params = {'symbol': symbol, 'interval': self.timeframe, 'limit': 1000}
             if last_end_time: params['endTime'] = last_end_time - 1
-            klines = await self.exchange.fapiPublicGetKlines(params)
+            klines = await self._call_with_retry(
+                f"fetch_klines_raw[{symbol}]",
+                lambda: self.exchange.fapiPublicGetKlines(params),
+            )
             if not klines: break
             all_klines = klines + all_klines
             last_end_time = klines[0][0]
@@ -256,7 +282,13 @@ class BinanceLiveFetcher:
                             subset = temp_df[[t_col, key]].rename(columns={t_col: 'timestamp', key: new_name})
                             subset['timestamp'] = pd.to_datetime(subset['timestamp'], unit='ms')
                             subset[new_name] = pd.to_numeric(subset[new_name], errors='coerce')
-                            eth_df = pd.merge_asof(eth_df.sort_values('timestamp'), subset.sort_values('timestamp'), on='timestamp', direction='nearest')
+                            # Prevent look-ahead in live merge: use only latest known ancillary value.
+                            eth_df = pd.merge_asof(
+                                eth_df.sort_values('timestamp'),
+                                subset.sort_values('timestamp'),
+                                on='timestamp',
+                                direction='backward',
+                            )
                     except Exception: raise
         return eth_df.ffill().bfill(), btc_df
 
@@ -267,8 +299,14 @@ class BinanceLiveFetcher:
         return self._process_to_df(eth_klines, btc_klines, ancillary)
 
     async def fetch_latest_patch(self):
-        eth_klines = await self.exchange.fapiPublicGetKlines({'symbol': self.symbol, 'interval': self.timeframe, 'limit': 5})
-        btc_klines = await self.exchange.fapiPublicGetKlines({'symbol': 'BTCUSDT', 'interval': self.timeframe, 'limit': 5})
+        eth_klines = await self._call_with_retry(
+            f"fetch_latest_patch[{self.symbol}]",
+            lambda: self.exchange.fapiPublicGetKlines({'symbol': self.symbol, 'interval': self.timeframe, 'limit': 5}),
+        )
+        btc_klines = await self._call_with_retry(
+            "fetch_latest_patch[BTCUSDT]",
+            lambda: self.exchange.fapiPublicGetKlines({'symbol': 'BTCUSDT', 'interval': self.timeframe, 'limit': 5}),
+        )
         ancillary = await self.fetch_ancillary_data(5)
         return self._process_to_df(eth_klines, btc_klines, ancillary)
 
@@ -2475,6 +2513,30 @@ async def main(use_local=False):
         now_utc = pd.Timestamp.utcnow().tz_localize(None)
         meta_router.update_adaptive_gate(final_action=0, in_position=(meta_router.pos is not None))
 
+        # ── M7 선행 요구(pred/conf -> signal_*)를 위해 마지막 봉 pred/conf 주입 ──
+        if ens_preds is not None and ens_confs is not None and dsac_nf_predictor is not None and len(processed_df) > 0:
+            _last_idx = processed_df.index[-1]
+            _name_to_idx = {n: i for i, n in enumerate(getattr(dsac_nf_predictor, "MODEL_ORDER", []))}
+            _inject_map = {
+                "PatchTST": ("pred_patchtst", "conf_patchtst"),
+                "Chronos": ("pred_chronos", "conf_chronos"),
+                "TiDE": ("pred_tide", "conf_tide"),
+            }
+            for _mname, (_pcol, _ccol) in _inject_map.items():
+                _idx = _name_to_idx.get(_mname)
+                _model = getattr(dsac_nf_predictor, "models", {}).get(_mname) if hasattr(dsac_nf_predictor, "models") else None
+                if _idx is None or _model is None or not getattr(_model, "available", False):
+                    continue
+                try:
+                    _pv = float(ens_preds[_idx])
+                    _cv = float(ens_confs[_idx])
+                except Exception:
+                    continue
+                if np.isfinite(_pv):
+                    processed_df.at[_last_idx, _pcol] = _pv
+                if np.isfinite(_cv):
+                    processed_df.at[_last_idx, _ccol] = _cv
+
         # ── M7 추론 전: elite signals를 processed_df에 사전 주입 ───────
         # (HDBSCAN 등 모델이 sig_* 피처를 사용하므로, M7 추론 전에 계산해야 함)
         try:
@@ -2486,9 +2548,9 @@ async def main(use_local=False):
             _pre_elite = dsac_router.elite_extractor.compute_all(
                 current=_pre_cur, prev=_pre_prev_mkt, smf_std=_pre_smf_std
             )
-            for _sig_col in ["sig_garch_regime", "sig_ou_mean_rev", "sig_jump_rebound", "sig_evt_tail", "sig_orderblock"]:
-                if _sig_col in _pre_elite:
-                    processed_df[_sig_col] = float(_pre_elite[_sig_col])
+            for _sig_col, _sig_val in _pre_elite.items():
+                if isinstance(_sig_col, str) and _sig_col.startswith("sig_"):
+                    processed_df[_sig_col] = float(_sig_val)
         except Exception as _pre_e:
             logger.debug("M7용 elite signals 사전 계산 실패: %s", _pre_e)
 
@@ -2961,12 +3023,20 @@ async def main(use_local=False):
             eth_buffer, btc_buffer = fetcher.load_local_data()
         else:
             logger.info("초기 캔들 데이터 수집 중...")
-            eth_buffer, btc_buffer = await fetcher.fetch_initial_data()
+            try:
+                eth_buffer, btc_buffer = await fetcher.fetch_initial_data()
+            except Exception as e:
+                logger.error("❌ 초기 캔들 수집 실패: %s", e)
+                return
 
         if eth_buffer is None: return
         try:
             processed_boot = fe_engine.process(eth_buffer, btc_buffer)
             processed_boot = _prune_runtime_features(processed_boot)
+        except Exception as e:
+            logger.error("❌ 초기 피처 처리 실패: %s", e)
+            return
+        try:
             live_hmm = OnlineHMMDetector()
             live_hmm.fit(processed_boot, n_iter=15)
             logger.info("🧠 Live HMM 초기화 완료")
@@ -3000,7 +3070,11 @@ async def main(use_local=False):
 
                 print()
                 logger.info("🔄 최신 캔들 데이터를 갱신합니다.")
-                new_eth, new_btc = await fetcher.fetch_latest_patch()
+                try:
+                    new_eth, new_btc = await fetcher.fetch_latest_patch()
+                except Exception as e:
+                    logger.warning("⚠️ 최신 캔들 갱신 실패(이번 사이클 스킵): %s", e)
+                    continue
                 eth_buffer = pd.concat([eth_buffer, new_eth]).drop_duplicates('timestamp').tail(2500)
                 btc_buffer = pd.concat([btc_buffer, new_btc]).drop_duplicates('timestamp').tail(2500)
                 if _bars_stale(eth_buffer):

@@ -1,13 +1,13 @@
 {
-  "best_val_score": 0.004865522426883581,
+  "best_val_score": 0.11828684168125389,
   "best_params": {
-    "feature_count": 40,
-    "min_cluster_size": 116,
+    "feature_count": 30,
+    "min_cluster_size": 194,
     "min_samples": 3
   },
-  "noise_ratio": 0.8124000609152516,
-  "avg_membership": 0.1858641356229782,
-  "quality_score": 0.03870254527982501,
+  "noise_ratio": 0.06744163977984437,
+  "avg_membership": 0.8743221163749695,
+  "quality_score": 0.22768628424977927,
   "data_hash": "",
   "config_hash": ""
 }

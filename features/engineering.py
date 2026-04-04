@@ -93,6 +93,7 @@ class FeatureEngineer:
             n_clusters=4,
             output_cols=[
                 "cvp_poc_dist",
+                "cvp_vah_val_width",
                 "cvp_cluster_position",
                 "cvp_volume_imbalance",
                 "cvp_regime",
@@ -101,6 +102,11 @@ class FeatureEngineer:
 
         quant = QuantSignalFeatures(df)
         df = quant.add_all_signals()
+        df["vwap_dist"] = self._calc_vwap_dist(df)
+        if "breakout_strength" not in df.columns:
+            raise KeyError("breakout_strength is required to build regime_break")
+        breakout_strength = pd.to_numeric(df["breakout_strength"], errors="coerce")
+        df["regime_break"] = (breakout_strength.abs() >= 0.6).astype(float)
         
         funding_features = FundingRateMomentum(df)
         df = funding_features.add_all_features()
@@ -114,6 +120,11 @@ class FeatureEngineer:
 
         df = self._create_predictive_stats(df)
         df = self._create_synthetic_alpha(df)
+        if "last_funding_rate" not in df.columns:
+            raise KeyError("last_funding_rate is required to build funding_pressure/funding_abs")
+        _funding = pd.to_numeric(df["last_funding_rate"], errors="coerce")
+        df["funding_abs"] = _funding.abs()
+        df["funding_pressure"] = _funding.rolling(window=288, min_periods=1).sum()
         # ── 엘리트 퀀트 엔진 (합성 알파 + 변동성 모델 + 신규 Elite 시그널) ──
         from features.elite import (
             SyntheticAlphaEngine, VolatilityModelEngine, NewEliteSignalEngine,
@@ -153,7 +164,8 @@ class FeatureEngineer:
             eth.sort_values('timestamp'),
             btc_renamed.sort_values('timestamp'),
             on='timestamp',
-            direction='nearest',
+            # Prevent look-ahead: only join past BTC rows at/behind ETH timestamp.
+            direction='backward',
         )
         return merged
 
@@ -834,6 +846,7 @@ class HurstExponentFeatures:
     def add_all_features(self):
         self.df['hurst_48'] = self._rolling_hurst_fast(48)
         self.df['hurst_288'] = self._rolling_hurst_fast(288)
+        self.df['hurst_change'] = self.df['hurst_48'].diff().fillna(0.0)
         
         self.df['regime_trending'] = (self.df['hurst_48'] > 0.5).astype(float)
 

@@ -10,6 +10,7 @@ import hashlib
 from datetime import datetime, timezone
 
 import pandas as pd
+import numpy as np
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -28,10 +29,109 @@ from strategies.elite_builder import (
     EliteSignals,
     row_to_market_row,
 )
+from core.cvp import add_cvp_features
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _require_columns(df: pd.DataFrame, cols: list[str], context: str) -> None:
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"{context} required column(s) missing: {', '.join(missing)}")
+
+
+def _derive_prereq_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    # Base alpha inputs
+    if "whale_retail_ratio" not in out.columns:
+        _require_columns(out, ["sum_toptrader_long_short_ratio", "count_long_short_ratio"], "whale_retail_ratio")
+        denom = pd.to_numeric(out["count_long_short_ratio"], errors="coerce").replace(0, pd.NA)
+        num = pd.to_numeric(out["sum_toptrader_long_short_ratio"], errors="coerce")
+        out["whale_retail_ratio"] = (num / denom).fillna(0.0)
+
+    if "whale_conviction" not in out.columns:
+        _require_columns(out, ["sum_toptrader_long_short_ratio"], "whale_conviction")
+        out["whale_conviction"] = pd.to_numeric(out["sum_toptrader_long_short_ratio"], errors="coerce").diff().fillna(0.0)
+
+    if "smart_money_flow" not in out.columns:
+        _require_columns(out, ["sum_open_interest_value"], "smart_money_flow")
+        out["smart_money_flow"] = (
+            pd.to_numeric(out["sum_open_interest_value"], errors="coerce")
+            .pct_change()
+            .clip(-1, 1)
+            .fillna(0.0)
+        )
+
+    if "funding_abs" not in out.columns or "funding_pressure" not in out.columns:
+        _require_columns(out, ["last_funding_rate"], "funding_abs/funding_pressure")
+        _funding = pd.to_numeric(out["last_funding_rate"], errors="coerce")
+        if "funding_abs" not in out.columns:
+            out["funding_abs"] = _funding.abs()
+        if "funding_pressure" not in out.columns:
+            out["funding_pressure"] = _funding.rolling(window=288, min_periods=1).sum()
+
+    if "hurst_48" not in out.columns:
+        _require_columns(out, ["close"], "hurst_48")
+        _ret = pd.to_numeric(out["close"], errors="coerce").pct_change().fillna(0.0)
+
+        def _rs_hurst(x):
+            if len(x) < 10:
+                return 0.5
+            mean_r = x.mean()
+            deviate = (x - mean_r).cumsum()
+            r = float(deviate.max() - deviate.min())
+            s = float(x.std())
+            if s < 1e-10:
+                return 0.5
+            return float(np.log(r / s + 1e-10) / np.log(len(x)))
+
+        out["hurst_48"] = (
+            _ret.rolling(window=48, min_periods=24).apply(_rs_hurst, raw=True).fillna(0.5)
+        )
+
+    if "hurst_change" not in out.columns:
+        out["hurst_change"] = pd.to_numeric(out["hurst_48"], errors="coerce").diff().fillna(0.0)
+
+    if "regime_break" not in out.columns:
+        _require_columns(out, ["breakout_strength"], "regime_break")
+        _bs = pd.to_numeric(out["breakout_strength"], errors="coerce")
+        out["regime_break"] = (_bs.abs() >= 0.6).astype(float)
+
+    if "vwap_dist" not in out.columns:
+        _require_columns(out, ["high", "low", "close", "volume"], "vwap_dist")
+        typical_price = (
+            pd.to_numeric(out["high"], errors="coerce")
+            + pd.to_numeric(out["low"], errors="coerce")
+            + pd.to_numeric(out["close"], errors="coerce")
+        ) / 3.0
+        volume = pd.to_numeric(out["volume"], errors="coerce")
+        tp_vol = typical_price * volume
+        roll = 288
+        cum_tp_vol = tp_vol.rolling(window=roll, min_periods=1).sum()
+        cum_vol = volume.rolling(window=roll, min_periods=1).sum()
+        vwap = cum_tp_vol / cum_vol.replace(0, pd.NA)
+        out["vwap_dist"] = ((pd.to_numeric(out["close"], errors="coerce") - vwap) / (vwap + 1e-8)).fillna(0.0)
+
+    # CVP extended feature for SyntheticAlphaEngine (FDLV/SVPS)
+    if "cvp_vah_val_width" not in out.columns:
+        _require_columns(out, ["close", "volume"], "cvp_vah_val_width")
+        out = add_cvp_features(
+            out,
+            lookback=200,
+            n_clusters=4,
+            output_cols=[
+                "cvp_poc_dist",
+                "cvp_vah_val_width",
+                "cvp_cluster_position",
+                "cvp_volume_imbalance",
+                "cvp_regime",
+            ],
+        )
+
+    return out
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -132,6 +232,9 @@ def main() -> int:
         logger.info("limit mode: first %d rows", len(rl_df))
 
     logger.info("Rows=%d | RL cols=%d | Work cols=%d", len(work_df), len(rl_df.columns), len(work_df.columns))
+
+    logger.info("🔧 합성 알파/레짐 선행 피처 검증 및 파생 계산 중...")
+    work_df = _derive_prereq_features(work_df)
 
     # M7 모델이 요구하는 파생 피처 사전 계산
     # (training_features CSV에 포함되지 않은 volatility / regime / synthetic alpha 보완)
