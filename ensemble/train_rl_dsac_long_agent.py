@@ -214,10 +214,6 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
         if self._n_rows > 1:
             self._logret_np[1:] = np.diff(log_close).astype(np.float32)
 
-        self._ret3_np = np.zeros(self._n_rows, dtype=np.float32)
-        if self._n_rows > 3:
-            self._ret3_np[3:] = (log_close[3:] - log_close[:-3]).astype(np.float32)
-
         lr_s = pd.Series(self._logret_np, dtype="float64")
         self._micro_vol5_np = lr_s.rolling(5, min_periods=1).std(ddof=0).fillna(0.0).to_numpy(dtype=np.float32)
         self._micro_vol10_np = lr_s.rolling(10, min_periods=1).std(ddof=0).fillna(0.0).to_numpy(dtype=np.float32)
@@ -825,8 +821,7 @@ class DSACLongAgent:
         # 포지션 보유 중인 샘플 비율만큼 anti_flat_pen 비활성화 (in_position = state[:, 23])
         in_pos_frac = float(s[:, 23].mean().item())
         anti_flat_lambda_eff *= max(0.0, 1.0 - in_pos_frac)
-        det_action_batch = self.actor.deterministic(s)
-        det_action_abs_mean = det_action_batch.abs().mean()
+        det_action_abs_mean = new_action.abs().mean()
         anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
 
         actor_loss = (alpha * log_prob - q_cvar).mean() + anti_flat_lambda_eff * anti_flat_pen
@@ -848,7 +843,7 @@ class DSACLongAgent:
 
         if self.dynamic_entropy:
             action_std = float(new_action.detach().std().item())
-            det_np = det_action_batch.detach().squeeze(-1).cpu().numpy()
+            det_np = new_action.detach().squeeze(-1).cpu().numpy()
             no_trade_rate = float(np.mean(det_np < _CLOSE_THRESH))
             if no_trade_rate > 0.80 or action_std < self.entropy_std_low:
                 self.target_entropy = min(self.entropy_max, self.target_entropy + 2.0 * self.entropy_step)

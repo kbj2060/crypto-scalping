@@ -190,7 +190,7 @@ class MultiScaleVolRegimeDetector:
 
         def _rv(window):
             r = returns[-window:]
-            return float(np.sqrt(np.sum(r ** 2)) * np.sqrt(288 / window))
+            return float(np.sqrt(np.mean(r ** 2) * 288.0))
 
         state.micro_vol = _rv(self.micro_window)
         state.meso_vol = _rv(self.meso_window)

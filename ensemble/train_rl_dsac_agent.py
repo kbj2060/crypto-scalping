@@ -255,10 +255,6 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         if self._n_rows > 1:
             self._logret_np[1:] = np.diff(log_close).astype(np.float32)
 
-        self._ret3_np = np.zeros(self._n_rows, dtype=np.float32)
-        if self._n_rows > 3:
-            self._ret3_np[3:] = (log_close[3:] - log_close[:-3]).astype(np.float32)
-
         lr_s = pd.Series(self._logret_np, dtype="float64")
         self._micro_vol5_np = lr_s.rolling(5, min_periods=1).std(ddof=0).fillna(0.0).to_numpy(dtype=np.float32)
         self._micro_vol10_np = lr_s.rolling(10, min_periods=1).std(ddof=0).fillna(0.0).to_numpy(dtype=np.float32)
@@ -489,7 +485,6 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(self._mtf_trend_1h_np[idx]), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(self._mtf_trend_4h_np[idx]), 0.0200)
-        garch_vol_z_norm = float(np.tanh(_safe_float(self._garch_vol_z_np[idx]) / 2.0))
 
         # ── Block B: Immediate Tick Context ───────────────────────────────
         spread = max(0.0, _safe_float(self._spread_np[idx]))
@@ -502,7 +497,6 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         amihud_norm = float(np.tanh(_safe_float(self._amihud_illiquidity_z_np[idx]) / 3.0))
         smart_flow_norm = _norm_tanh(_safe_float(self._smart_money_flow_np[idx]), 0.0500)
         taker_accel_norm = _norm_tanh(_safe_float(self._taker_acceleration_np[idx]), 0.0500)
-        ret3_norm = _norm_tanh(_safe_float(self._ret3_np[idx]), 0.0060)
 
         # ── Block C: Agent Private State ──────────────────────────────────
         pos_sign = 1.0 if self.pos == "LONG" else (-1.0 if self.pos == "SHORT" else 0.0)
@@ -663,7 +657,7 @@ class RegimeBalancedReplay:
                 "bull": int(left * 0.15),
                 "bear": 0,
             }
-            rq["bear"] = left - sum(rq.values())
+            rq["bear"] = max(0, left - sum(rq.values()))
             for r in ("normal", "chop", "whipsaw", "bull", "bear"):
                 q = rq[r]
                 rb = self._by_regime[r]
@@ -979,12 +973,8 @@ class DSACAgent:
 
             alpha = torch.clamp(self.log_alpha.exp().detach(), min=self.alpha_min)
             entropy_term = alpha * next_log_prob  # [B,1]
-            # DSAC-T style expected-value substitution:
-            # mean 경로와 centered quantile 경로를 분리해 target 분산을 안정화.
-            tq_mean = chosen_tq.mean(dim=1, keepdim=True)
-            tq_centered = chosen_tq - tq_mean
-            target_mean = r + self.gamma * (1.0 - d) * (tq_mean - entropy_term)
-            target_q = target_mean + self.gamma * (1.0 - d) * tq_centered
+            # Apply entropy to full distribution target to keep CVaR tail consistently penalized.
+            target_q = r + self.gamma * (1.0 - d) * (chosen_tq - entropy_term)
             return target_q
 
     def _cvar_min(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
@@ -1046,9 +1036,8 @@ class DSACAgent:
         anti_flat_lambda_eff = self.anti_flat_lambda
         if self.anti_flat_anneal_updates > 0:
             anti_flat_lambda_eff *= max(0.0, 1.0 - float(self._updates) / float(self.anti_flat_anneal_updates))
-        det_action_batch = self.actor.deterministic(s)
         action_abs_mean = new_action.abs().mean()
-        det_action_abs_mean = det_action_batch.abs().mean()
+        det_action_abs_mean = action_abs_mean
         anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
         side_balance_pen = torch.tanh(4.0 * new_action).mean().abs()
         actor_loss = (
@@ -1146,8 +1135,7 @@ class DSACAgent:
             if isinstance(head, nn.Linear):
                 nn.init.xavier_uniform_(head.weight)
                 nn.init.zeros_(head.bias)
-        # target critic 즉시 동기화
-        self.critic_target.load_state_dict(self.critic.state_dict())
+        # NOTE: keep target critic untouched here; let soft-update follow gradually.
 
     def _redo_rejuvenate_mlp(self, feat: CompactFeatureExtractor) -> int:
         net = getattr(feat, "net", None)
@@ -1300,7 +1288,6 @@ class DSACRouter:
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_1h", 0.0), 0.0), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_4h", 0.0), 0.0), 0.0200)
-        garch_vol_z_norm = float(np.tanh(_safe_float(features.get("garch_vol_z", 0.0)) / 2.0))
 
         close = max(_safe_float(features.get("close", 0.0), 0.0), 0.0)
         logret = _safe_float(features.get("log_return", np.nan), np.nan)
@@ -1326,7 +1313,6 @@ class DSACRouter:
         sp_arr = np.asarray(self._spread_hist, dtype=np.float64)
 
         micro5 = float(np.std(ret_arr[-5:])) if ret_arr.size > 0 else 0.0
-        ret3 = float(np.sum(ret_arr[-3:])) if ret_arr.size > 0 else 0.0
 
         spread_norm = _norm_tanh(spread, 0.0015)
         micro5_norm = _norm_tanh(micro5, 0.0030)
@@ -1334,7 +1320,6 @@ class DSACRouter:
         amihud_norm = float(np.tanh(_safe_float(features.get("amihud_illiquidity_z", 0.0), 0.0) / 3.0))
         smart_flow_norm = _norm_tanh(_safe_float(features.get("smart_money_flow", 0.0), 0.0), 0.0500)
         taker_accel_norm = _norm_tanh(_safe_float(features.get("taker_acceleration", 0.0), 0.0), 0.0500)
-        ret3_norm = _norm_tanh(ret3, 0.0060)
 
         pos_type = pos.get("type") if isinstance(pos, dict) else None
         pos_sign = 1.0 if pos_type == "LONG" else (-1.0 if pos_type == "SHORT" else 0.0)

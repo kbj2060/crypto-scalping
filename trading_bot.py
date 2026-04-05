@@ -124,6 +124,7 @@ ENSEMBLE_PREDICTOR_ENABLED = _env_flag('ENSEMBLE_PREDICTOR_ENABLED', False)
 M7_ENTRY_PRICE_ENABLE = _env_flag('M7_ENTRY_PRICE_ENABLE', False)
 # LIVE_STRICT_FEATURE_GUARD removed — strict validation is always enforced
 DSAC_PURE_RL_MODE = _env_flag("DSAC_PURE_RL_MODE", True)
+ENH_RUNTIME_ENABLE = _env_flag("ENH_RUNTIME_ENABLE", False)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 # ════════════════════════════════════════════════════════════════
@@ -275,6 +276,7 @@ class BinanceLiveFetcher:
                 (1, 'longShortRatio', 'sum_toptrader_long_short_ratio'),
                 (2, 'longShortRatio', 'count_toptrader_long_short_ratio'),
                 (3, 'longShortRatio', 'count_long_short_ratio'),
+                (4, 'buySellRatio', 'taker_long_short_ratio'),
                 (5, 'fundingRate', 'last_funding_rate'),
             ]
             for idx, key, new_name in mappings:
@@ -1736,11 +1738,12 @@ class DSACSignalRouter:
             hmm_feat = self.hmm.get_features(hmm_row)
             hmm_probs = np.asarray(hmm_feat[:4], dtype=np.float32)
             hmm_idx = int(np.argmax(hmm_probs))
+            # HMM 4-state: [bull-trend, bear-trend, hv-chop, lv-range]
             regime = {
                 "regime_bull": 1.0 if hmm_idx == 0 else 0.0,
                 "regime_bear": 1.0 if hmm_idx == 1 else 0.0,
-                "regime_chop": 0.0,
-                "regime_whipsaw": 1.0 if hmm_idx == 2 else 0.0,
+                "regime_chop": 1.0 if hmm_idx == 2 else 0.0,
+                "regime_whipsaw": 0.0,
                 "regime_normal": 1.0 if hmm_idx == 3 else 0.0,
             }
         if regime is None:
@@ -2703,11 +2706,10 @@ async def main(use_local=False):
         current_price    = float(eth_buffer['close'].iloc[-1])
         regime_name      = 'UNKNOWN'
         now_utc = pd.Timestamp.utcnow().tz_localize(None)
-        meta_router.update_adaptive_gate(final_action=0, in_position=(meta_router.pos is not None))
+        _last_idx = processed_df.index[-1]
 
         # ── M7 선행 요구(pred/conf -> signal_*)를 위해 마지막 봉 pred/conf 주입 ──
         if ens_preds is not None and ens_confs is not None and dsac_nf_predictor is not None and len(processed_df) > 0:
-            _last_idx = processed_df.index[-1]
             _name_to_idx = {n: i for i, n in enumerate(getattr(dsac_nf_predictor, "MODEL_ORDER", []))}
             _inject_map = {
                 "PatchTST": ("pred_patchtst", "conf_patchtst"),
@@ -2881,8 +2883,8 @@ async def main(use_local=False):
                 # Match training env execution: use primary continuous action and the same thresholds.
                 _a = float(info.get("primary_raw", info.get("raw_action", 0.0)))
                 _abs = abs(_a)
-                _pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.06"))
-                _close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.06"))
+                _pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.12"))
+                _close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.03"))
                 _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "1.0"))
                 _force_close = str(os.getenv("DSAC_PURE_RL_FORCE_CLOSE", "false")).strip().lower() in {"1", "true", "yes", "on"}
                 _fa = 0
@@ -2929,7 +2931,36 @@ async def main(use_local=False):
                     _kelly = float(np.clip(_kelly, 0.0, 1.0))
                     _dsac_only_source = f"DSAC_LOGIT_REDUCE:{_position_reason or 'RULE'}"
 
+            # 보유 포지션의 M7 추세 불일치 청산(옵션): update_trend_mismatch가 실제 실행되도록 연결.
+            _trend_exit, _trend_exit_score, _trend_exit_reason = meta_router.update_trend_mismatch(
+                processed_df, trend_signal
+            )
+            if _trend_exit and meta_router.pos is not None:
+                _fa = 0
+                _kelly = 0.0
+                _dsac_only_source = _trend_exit_reason or "DSAC_ONLY_TREND_EXIT"
+
+            # Enhanced runtime (옵션): pure-rl 기본 동작은 유지하고, 명시적 활성화 시에만 후처리 적용.
+            if ENH_RUNTIME_ENABLE:
+                _session_flags = _session_flags_from_timestamp(current_time_kst)
+                _enhanced = enhanced_engine.process(
+                    dsac_action=int(_fa),
+                    dsac_kelly=float(_kelly),
+                    dsac_info=info,
+                    processed_df=processed_df,
+                    eth_buffer=eth_buffer,
+                    btc_buffer=btc_buffer,
+                    meta_router=meta_router,
+                    regime=regime,
+                    trend_signal=trend_signal,
+                    session_flags=_session_flags,
+                )
+                _fa = int(_enhanced.get("action", _fa))
+                _kelly = float(np.clip(_enhanced.get("kelly", _kelly), 0.0, 1.0))
+                _dsac_only_source = str(_enhanced.get("source", _dsac_only_source))
+
             meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
+            meta_router.update_adaptive_gate(final_action=int(_fa), in_position=(meta_router.pos is not None))
 
             _sizing_diag = {
                 "bayes_mult": 1.0,
@@ -2997,8 +3028,10 @@ async def main(use_local=False):
         rl_action = int(dsac_action)
         trade_pnl_pct: float | None = None
 
-        # 직전 사이클에 포지션이 있었다가 이번에 청산됐으면 PnL 피드백
-        if _prev_meta_pos is not None and meta_router.pos is None:
+        # 직전 사이클 포지션이 종료(청산/플립)됐으면 PnL 피드백
+        _new_pos = meta_router.pos
+        _position_closed = (_prev_meta_pos is not None and _new_pos != _prev_meta_pos)
+        if _position_closed:
             realized = meta_router.last_realized_pnl
             if realized is None:
                 realized = float(meta_router.cur_equity - 1.0)
@@ -3008,8 +3041,7 @@ async def main(use_local=False):
             meta_router.append_trade_history(current_time_kst, float(realized))
 
         # ── 텔레그램 알림: 포지션이 바뀐 경우만 (ENTER / EXIT / FLIP) ──
-        _new_pos = meta_router.pos
-        if _prev_meta_pos is None and _new_pos is not None:
+        if _new_pos is not None and _new_pos != _prev_meta_pos:
             enhanced_engine.on_position_open()
         if _prev_meta_pos is None and _new_pos is not None and trade_pnl_pct is None:
             trade_pnl_pct = 0.0

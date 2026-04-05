@@ -76,7 +76,7 @@ class SACTradingEnv:
         self.slip = slip
         self.phase = phase
         self.hmm_detector = hmm_detector
-        self.side_mode = "both"
+        self.side_mode = str(side_mode or "both")
         self.terminal_reward_scale = float(terminal_reward_scale)
         self.terminal_quality_win = float(terminal_quality_win)
         self.terminal_quality_loss = float(terminal_quality_loss)
