@@ -202,7 +202,7 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
             phase=phase,
             hmm_detector=hmm_detector,
             mtf_features=mtf_features,
-            side_mode="both",
+            side_mode="short",
         )
         self._n_rows = len(self.df)
 

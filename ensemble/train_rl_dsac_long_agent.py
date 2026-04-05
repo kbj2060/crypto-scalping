@@ -194,7 +194,7 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
     ):
         self._compact_ready = False
         self._n_rows = len(df)
-        # side_mode='both'로 부모 초기화 (부모가 하드코딩하므로)
+        # Use specialist side_mode so close-quality shaping matches long-only behavior.
         super().__init__(
             df=df,
             initial_balance=initial_balance,
@@ -203,7 +203,7 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
             phase=phase,
             hmm_detector=hmm_detector,
             mtf_features=mtf_features,
-            side_mode="both",
+            side_mode="long",
         )
         self._n_rows = len(self.df)
 
