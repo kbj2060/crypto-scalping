@@ -547,13 +547,17 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
             elif self._last_realized_pnl > 0:
                 r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
             else:
-                r3_quality = -0.05
+                r3_quality = -0.08
 
-        r4_time_decay = 0.0  # 제거: 시간 자체에 페널티를 주면 수익 중 포지션도 조기 청산됨
+        r4_time_decay = 0.0
+        if self.pos is not None and self.hold_count > 24:
+            # 장시간 보유 시, 손익이 정체(작은 절대수익) 구간에만 약한 시간감쇠를 부여
+            if abs(float(self.unrealized_pnl)) < 0.003:
+                r4_time_decay = -0.003 * float(np.clip((self.hold_count - 24) / 96.0, 0.0, 1.0))
 
         r7_adverse_hold = 0.0
-        if self.pos is not None and self.unrealized_pnl < -0.005 and self.hold_count > 36:
-            r7_adverse_hold = -0.005 * float(np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0))
+        if self.pos is not None and self.unrealized_pnl < -0.004 and self.hold_count > 24:
+            r7_adverse_hold = -0.010 * float(np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0))
 
         # r5_idle: 롱 specialist는 관망 페널티를 크게 줄임 (불필요한 진입 방지)
         r5_idle = 0.0

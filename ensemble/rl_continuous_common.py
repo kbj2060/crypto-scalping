@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
+import os
 
 import numpy as np
 import pandas as pd
@@ -82,6 +83,13 @@ class SACTradingEnv:
         self.specialist_idle_penalty = (
             float(specialist_idle_penalty) if specialist_idle_penalty is not None else None
         )
+        # Long-hold shaping (mainly for DSAC both-side): penalize stagnant/adverse long holds.
+        self.hold_plateau_start = int(os.getenv("RL_HOLD_PLATEAU_START", "24"))
+        self.hold_plateau_pnl_abs = float(os.getenv("RL_HOLD_PLATEAU_PNL_ABS", "0.003"))
+        self.hold_plateau_penalty = float(os.getenv("RL_HOLD_PLATEAU_PENALTY", "0.003"))
+        self.adverse_hold_start = int(os.getenv("RL_ADVERSE_HOLD_START", "24"))
+        self.adverse_hold_pnl_th = float(os.getenv("RL_ADVERSE_HOLD_PNL_TH", "0.004"))
+        self.adverse_hold_penalty = float(os.getenv("RL_ADVERSE_HOLD_PENALTY", "0.010"))
 
         if mtf_features is not None:
             self.mtf = mtf_features
@@ -313,11 +321,24 @@ class SACTradingEnv:
             elif self._last_realized_pnl > 0:
                 r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
             else:
-                r3_quality = -0.05
+                r3_quality = -0.08 if self.side_mode == "both" else -0.05
 
         r4_time_decay = 0.0
-        if self.pos is not None and self.hold_count > 12:
-            r4_time_decay = -0.003 * (self.hold_count - 12) / 72.0
+        if self.pos is not None and self.hold_count > self.hold_plateau_start:
+            if abs(float(self.unrealized_pnl)) < self.hold_plateau_pnl_abs:
+                r4_time_decay = -self.hold_plateau_penalty * float(
+                    np.clip((self.hold_count - self.hold_plateau_start) / 96.0, 0.0, 1.0)
+                )
+
+        r7_adverse_hold = 0.0
+        if (
+            self.pos is not None
+            and self.unrealized_pnl < -abs(self.adverse_hold_pnl_th)
+            and self.hold_count > self.adverse_hold_start
+        ):
+            r7_adverse_hold = -self.adverse_hold_penalty * float(
+                np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0)
+            )
 
         r5_idle = 0.0
         if self.pos is None:
@@ -341,7 +362,7 @@ class SACTradingEnv:
         # 추가 진입 고정 페널티는 이중 비용이 되어 진입 억제를 과도하게 키울 수 있어 제거.
         r6_trade_cost = 0.0
 
-        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost
+        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold
         # Keep reward linear around 0 and avoid double tanh saturation.
         reward = float(np.clip(raw_reward, -2.0, 2.0))
 

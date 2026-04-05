@@ -112,7 +112,19 @@ def _load_frame(csv_path: str, start: str | None, end: str | None) -> pd.DataFra
         "funding_z_score": 0.0,
         "volatility_z": 0.0,
         "hma_slope": 0.0,
+        "jump_z": 0.0,
+        "evt_excess_z": 0.0,
+        "jump_flag": 0.0,
+        "evt_tail_flag": 0.0,
+        "funding_pressure": 0.0,
+        "garch_vol_z": 0.0,
     }
+    try:
+        from features.schema import STATE_ALPHA as _STATE_ALPHA, STATE_SYNTH as _STATE_SYNTH
+        for _c in list(_STATE_ALPHA) + list(_STATE_SYNTH):
+            base_defaults.setdefault(str(_c), 0.0)
+    except Exception:
+        pass
     for col, default in base_defaults.items():
         if col not in df.columns:
             if default is None:
@@ -124,7 +136,12 @@ def _load_frame(csv_path: str, start: str | None, end: str | None) -> pd.DataFra
     return df
 
 
-def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | None) -> tuple[SimMetrics, dict]:
+def _simulate_dual(
+    df: pd.DataFrame,
+    long_ckpt: str | None,
+    short_ckpt: str | None,
+    mode: str = "classic",
+) -> tuple[SimMetrics, dict]:
     with tempfile.TemporaryDirectory(prefix="dual_dsac_bt_") as tmpdir:
         os.environ["DSAC_LIVE_STATE_PATH"] = os.path.join(tmpdir, "live_state.json")
         os.environ["FUSE_ADAPT_STATE_PATH"] = os.path.join(tmpdir, "adapt_state.json")
@@ -239,13 +256,88 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
             vae_th = float((trend_signal or {}).get("m7_vae_threshold", 0.0))
             vae_ratio = (vae_err / max(vae_th, 1e-8)) if vae_th > 1e-8 else (1.0 if vae_anom else 0.0)
 
-            kelly = float(np.clip(dsac_lev * meta_router.vol_scale(garch_vol_z, 0.0), 0.0, 1.0))
-            fa = int(dsac_action)
-            source = "DSAC_ONLY"
+            if mode == "pure_rl":
+                la = int(info.get("_long_action", 0))
+                sa = int(info.get("_short_action", 0))
+                pa = int(info.get("primary_action", 0))
+                lk = float(np.clip(info.get("_long_kelly", 0.0), 0.0, 1.0))
+                sk = float(np.clip(info.get("_short_kelly", 0.0), 0.0, 1.0))
+                pk = float(np.clip(info.get("primary_kelly", 0.0), 0.0, 1.0))
+                ll = float(info.get("long_logit", 0.0))
+                sl = float(info.get("short_logit", 0.0))
+                direction_score = float(info.get("direction_score", ll - sl))
+                ls = float(info.get("long_std", 1.0))
+                ss = float(info.get("short_std", 1.0))
+                lsup = float(ll * (1.0 / (1.0 + max(ls, 1e-6))))
+                ssup = float(sl * (1.0 / (1.0 + max(ss, 1e-6))))
+                max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "0.40"))
+
+                fa = 0
+                kelly = 0.0
+                source = "DSAC_PURE_RL"
+                if meta_router.pos is None:
+                    if la == 1 and sa != 2:
+                        fa, kelly = 1, min(lk, max_kelly)
+                    elif sa == 2 and la != 1:
+                        fa, kelly = 2, min(sk, max_kelly)
+                    elif la == 1 and sa == 2:
+                        if lsup >= ssup and lsup > 0.0:
+                            fa, kelly = 1, min(lk, max_kelly)
+                        elif ssup > 0.0:
+                            fa, kelly = 2, min(sk, max_kelly)
+                    elif pa in (1, 2):
+                        fa, kelly = pa, min(pk, max_kelly)
+                elif meta_router.pos == "LONG":
+                    live_unr = float(meta_router._net_pnl_frac(current_price))
+                    if live_unr <= -0.025:
+                        fa, kelly = 0, 0.0
+                        source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif pa == 2 and sa != 2:
+                        fa, kelly = 0, 0.0
+                    elif la == 0:
+                        fa, kelly = 0, 0.0
+                    elif direction_score <= 0.0:
+                        if sa == 2:
+                            fa, kelly = 2, min(sk, max_kelly)
+                        else:
+                            fa, kelly = 0, 0.0
+                    elif lsup <= ssup:
+                        if sa == 2:
+                            fa, kelly = 2, min(sk, max_kelly)
+                        else:
+                            fa, kelly = 0, 0.0
+                    else:
+                        fa, kelly = 1, min((lk if la == 1 else float(meta_router.current_leverage)), max_kelly)
+                else:
+                    live_unr = float(meta_router._net_pnl_frac(current_price))
+                    if live_unr <= -0.025:
+                        fa, kelly = 0, 0.0
+                        source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif pa == 1 and la != 1:
+                        fa, kelly = 0, 0.0
+                    elif sa == 0:
+                        fa, kelly = 0, 0.0
+                    elif direction_score >= 0.0:
+                        if la == 1:
+                            fa, kelly = 1, min(lk, max_kelly)
+                        else:
+                            fa, kelly = 0, 0.0
+                    elif ssup <= lsup:
+                        if la == 1:
+                            fa, kelly = 1, min(lk, max_kelly)
+                        else:
+                            fa, kelly = 0, 0.0
+                    else:
+                        fa, kelly = 2, min((sk if sa == 2 else float(meta_router.current_leverage)), max_kelly)
+                kelly = float(np.clip(kelly, 0.0, 1.0))
+            else:
+                kelly = float(np.clip(dsac_lev * meta_router.vol_scale(garch_vol_z, 0.0), 0.0, 1.0))
+                fa = int(dsac_action)
+                source = "DSAC_ONLY"
             long_raw = float(info.get("_long_raw", info.get("long_edge", 0.0)))
             short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
 
-            if meta_router.pos is not None:
+            if mode != "pure_rl" and meta_router.pos is not None:
                 live_unr = float(meta_router._net_pnl_frac(current_price))
                 position_signal = str(info.get("position_signal", "HOLD"))
                 position_reason = str(info.get("position_reason", ""))
@@ -281,16 +373,16 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                     kelly = 0.0
                     source = trend_exit_reason
                     trend_exit += 1
-            else:
+            elif mode != "pure_rl":
                 meta_router.trend_mismatch_streak = 0
 
-            if meta_router.cooldown_bars_left > 0 and meta_router.pos is None and fa != 0:
+            if mode != "pure_rl" and meta_router.cooldown_bars_left > 0 and meta_router.pos is None and fa != 0:
                 fa = 0
                 kelly = 0.0
                 source = "DSAC_ONLY_COOLDOWN"
                 cooldown_block += 1
 
-            if fa != 0 and meta_router.pos is None:
+            if mode != "pure_rl" and fa != 0 and meta_router.pos is None:
                 signal_side = 1 if fa == 1 else -1
                 trend_dir = int((trend_signal or {}).get("trend_dir", 1))
                 trend_side = 1 if trend_dir == 2 else (-1 if trend_dir == 0 else 0)
@@ -310,7 +402,7 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                     source = "DSAC_ONLY_TREND_MISMATCH_BLOCK"
                     trend_mismatch_block += 1
 
-            if fa != 0 and meta_router.pos is None:
+            if mode != "pure_rl" and fa != 0 and meta_router.pos is None:
                 if iso_anom and vae_anom and vae_ratio >= meta_router.dsac_only_vae_block_ratio:
                     fa = 0
                     kelly = 0.0
@@ -335,6 +427,35 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
             elif prev_pos is None and meta_router.pos == "SHORT":
                 short_entries += 1
                 lev_short.append(meta_router.current_leverage)
+            elif prev_pos is not None and meta_router.pos is not None and prev_pos != meta_router.pos:
+                # Flip: count close leg and new entry.
+                realized = float(meta_router.last_realized_pnl or 0.0)
+                balance *= (1.0 + realized)
+                trades += 1
+                wins += int(realized > 0.0)
+                if prev_pos == "LONG":
+                    hold_long.append(prev_hold)
+                else:
+                    hold_short.append(prev_hold)
+                trade_rows.append(
+                    {
+                        "ts": str(df.iloc[i + 1]["timestamp"]),
+                        "side": prev_pos,
+                        "entry_price": prev_entry,
+                        "exit_price": next_price,
+                        "lev": prev_lev,
+                        "hold_bars": prev_hold,
+                        "pnl_frac": realized,
+                        "exit_source": source + "|FLIP",
+                    }
+                )
+                if meta_router.pos == "LONG":
+                    long_entries += 1
+                    lev_long.append(meta_router.current_leverage)
+                else:
+                    short_entries += 1
+                    lev_short.append(meta_router.current_leverage)
+                meta_router.record_outcome(realized)
 
             if prev_pos is not None and meta_router.pos is None:
                 realized = float(meta_router.last_realized_pnl or 0.0)
@@ -364,7 +485,36 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                 else:
                     lev_short.append(meta_router.current_leverage)
 
-            meta_router.decrement_cooldown()
+            if mode != "pure_rl":
+                meta_router.decrement_cooldown()
+
+        # Terminal close for fair realized-PnL accounting.
+        if meta_router.pos is not None:
+            terminal_price = float(df.iloc[-1]["close"])
+            realized = float(meta_router._net_pnl_frac(terminal_price))
+            prev_pos = str(meta_router.pos)
+            prev_hold = int(meta_router.hold_count)
+            prev_entry = float(meta_router.entry_price)
+            prev_lev = float(meta_router.current_leverage)
+            balance *= (1.0 + realized)
+            trades += 1
+            wins += int(realized > 0.0)
+            if prev_pos == "LONG":
+                hold_long.append(prev_hold)
+            else:
+                hold_short.append(prev_hold)
+            trade_rows.append(
+                {
+                    "ts": str(df.iloc[-1]["timestamp"]),
+                    "side": prev_pos,
+                    "entry_price": prev_entry,
+                    "exit_price": terminal_price,
+                    "lev": prev_lev,
+                    "hold_bars": prev_hold,
+                    "pnl_frac": realized,
+                    "exit_source": "TERMINAL_CLOSE",
+                }
+            )
 
         eq = np.asarray(eq_curve, dtype=np.float64)
         peak = np.maximum.accumulate(np.maximum(eq, 1e-12))
@@ -406,11 +556,12 @@ def main() -> None:
     ap.add_argument("--end")
     ap.add_argument("--long-ckpt", default="data/ensemble/ckpt/best_dsac_long_agents.pth")
     ap.add_argument("--short-ckpt", default="data/ensemble/ckpt/best_dsac_short_agents.pth")
+    ap.add_argument("--mode", choices=["classic", "pure_rl"], default="pure_rl")
     ap.add_argument("--out-json", default="")
     args = ap.parse_args()
 
     df = _load_frame(args.csv_path, args.start, args.end)
-    metrics, extra = _simulate_dual(df, args.long_ckpt, args.short_ckpt)
+    metrics, extra = _simulate_dual(df, args.long_ckpt, args.short_ckpt, mode=args.mode)
 
     payload = {
         "csv_path": args.csv_path,
@@ -419,6 +570,7 @@ def main() -> None:
         "rows": int(len(df)),
         "long_ckpt": args.long_ckpt,
         "short_ckpt": args.short_ckpt,
+        "mode": args.mode,
         "metrics": asdict(metrics),
         "extra": extra,
     }

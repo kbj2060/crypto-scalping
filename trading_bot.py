@@ -73,6 +73,7 @@ from features.schema import (
 )
 from features.registry import M7_LIVE_STRICT_COLS
 from ensemble.seven_model_ensemble import SevenModelEnsemble
+from ensemble.llm_advisor import LLMAdvisor, LLMDecision
 from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
 from ensemble.ensemble_router import (
     ChronosForecaster, PatchTSTForecaster, TiDEForecaster,
@@ -2148,6 +2149,31 @@ class DSACTrendRouter:
         trend_signal: dict | None = None,
     ):
         entry_px = self._choose_entry_price(final_action, current_price, trend_signal)
+        # Flip support: close opposite position first, then open new side.
+        if final_action == 1 and self.pos == "SHORT":
+            if self.entry_price > 0 and current_price > 0:
+                self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
+            self.last_realized_pnl = float(self.cur_equity - 1.0)
+            self.last_closed_hold_count = int(self.hold_count)
+            self.pos, self.entry_price, self.hold_count = "LONG", entry_px, 0
+            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
+            self.peak_equity = self.cur_equity = 1.0
+            self.trend_mismatch_streak = 0
+            self.position_exit_streak = 0
+            self._save_live_state()
+            return
+        if final_action == 2 and self.pos == "LONG":
+            if self.entry_price > 0 and current_price > 0:
+                self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
+            self.last_realized_pnl = float(self.cur_equity - 1.0)
+            self.last_closed_hold_count = int(self.hold_count)
+            self.pos, self.entry_price, self.hold_count = "SHORT", entry_px, 0
+            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
+            self.peak_equity = self.cur_equity = 1.0
+            self.trend_mismatch_streak = 0
+            self.position_exit_streak = 0
+            self._save_live_state()
+            return
         if final_action == 1 and self.pos is None:
             self.pos, self.entry_price, self.hold_count = "LONG", entry_px, 0
             self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
@@ -2508,6 +2534,7 @@ class DSACTrendRouter:
 async def main(use_local=False):
     fetcher      = BinanceLiveFetcher(limit=2500)
     fe_engine    = FeatureEngineer()
+    llm_advisor  = LLMAdvisor()
     ensemble     = EnsemblePredictor() if ENSEMBLE_PREDICTOR_ENABLED else None
     dsac_nf_predictor = EnsemblePredictor()
     live_hmm: OnlineHMMDetector | None = None
@@ -2859,8 +2886,12 @@ async def main(use_local=False):
                 _pk = float(np.clip(info.get("primary_kelly", 0.0), 0.0, 1.0))
                 _ll = float(info.get("long_logit", 0.0))
                 _sl = float(info.get("short_logit", 0.0))
-                _flip_min = float(os.getenv("DSAC_PURE_RL_FLIP_MIN", "0.70"))
+                _dir = float(info.get("direction_score", _ll - _sl))
                 _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "0.40"))
+                _ls = float(info.get("long_std", 1.0))
+                _ss = float(info.get("short_std", 1.0))
+                _lsup = float(_ll * (1.0 / (1.0 + max(_ls, 1e-6))))
+                _ssup = float(_sl * (1.0 / (1.0 + max(_ss, 1e-6))))
 
                 _fa = 0
                 _kelly = 0.0
@@ -2870,9 +2901,9 @@ async def main(use_local=False):
                     elif _sa == 2 and _la != 1:
                         _fa, _kelly = 2, min(_sk, _max_kelly)
                     elif _la == 1 and _sa == 2:
-                        if abs(_ll) >= abs(_sl):
+                        if _lsup >= _ssup and _lsup > 0.0:
                             _fa, _kelly = 1, min(_lk, _max_kelly)
-                        else:
+                        elif _ssup > 0.0:
                             _fa, _kelly = 2, min(_sk, _max_kelly)
                     elif _pa in (1, 2):
                         _fa, _kelly = _pa, min(_pk, _max_kelly)
@@ -2881,10 +2912,20 @@ async def main(use_local=False):
                     if _live_unr <= -0.025:
                         _fa, _kelly = 0, 0.0
                         _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif _pa == 2 and _sa != 2:
+                        _fa, _kelly = 0, 0.0
                     elif _la == 0:
                         _fa, _kelly = 0, 0.0
-                    elif _sa == 2 and _sk >= _flip_min:
-                        _fa, _kelly = 2, min(_sk, _max_kelly)
+                    elif _dir <= 0.0:
+                        if _sa == 2:
+                            _fa, _kelly = 2, min(_sk, _max_kelly)
+                        else:
+                            _fa, _kelly = 0, 0.0
+                    elif _lsup <= _ssup:
+                        if _sa == 2:
+                            _fa, _kelly = 2, min(_sk, _max_kelly)
+                        else:
+                            _fa, _kelly = 0, 0.0
                     else:
                         _fa, _kelly = 1, min((_lk if _la == 1 else float(meta_router.current_leverage)), _max_kelly)
                 else:  # SHORT
@@ -2892,10 +2933,20 @@ async def main(use_local=False):
                     if _live_unr <= -0.025:
                         _fa, _kelly = 0, 0.0
                         _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif _pa == 1 and _la != 1:
+                        _fa, _kelly = 0, 0.0
                     elif _sa == 0:
                         _fa, _kelly = 0, 0.0
-                    elif _la == 1 and _lk >= _flip_min:
-                        _fa, _kelly = 1, min(_lk, _max_kelly)
+                    elif _dir >= 0.0:
+                        if _la == 1:
+                            _fa, _kelly = 1, min(_lk, _max_kelly)
+                        else:
+                            _fa, _kelly = 0, 0.0
+                    elif _ssup <= _lsup:
+                        if _la == 1:
+                            _fa, _kelly = 1, min(_lk, _max_kelly)
+                        else:
+                            _fa, _kelly = 0, 0.0
                     else:
                         _fa, _kelly = 2, min((_sk if _sa == 2 else float(meta_router.current_leverage)), _max_kelly)
                 _kelly = float(np.clip(_kelly, 0.0, 1.0))
@@ -3039,6 +3090,59 @@ async def main(use_local=False):
                     "diagnostics": info.get("enhanced_diag", {}),
                 })
         logger.info("📊 %s", meta_router.performance_summary(current_time_kst))
+
+        # ── LLM 어드바이저 ─────────────────────────────────────────────
+        _llm_ctx = {
+            # 시장
+            "close":              float(processed_df.iloc[-1].get("close", 0)),
+            "log_return":         float(processed_df.iloc[-1].get("log_return", 0)),
+            "regime":             regime_name,
+            "garch_vol_z":        float(processed_df.iloc[-1].get("garch_vol_z", 0)),
+            "jump_z":             float(processed_df.iloc[-1].get("jump_z", 0)),
+            "evt_excess_z":       float(processed_df.iloc[-1].get("evt_excess_z", 0)),
+            "last_funding_rate":  float(processed_df.iloc[-1].get("last_funding_rate", 0)),
+            "funding_pressure":   float(processed_df.iloc[-1].get("funding_pressure", 0)),
+            # 에이전트
+            "primary_action":     int(info.get("primary_action", 0)),
+            "primary_lev":        float(info.get("primary_kelly", 0)),
+            "primary_std":        float(info.get("primary_std", 0)),
+            "long_action":        int(info.get("_long_action", 0)),
+            "long_lev":           float(info.get("_long_kelly", 0)),
+            "long_logit":         float(info.get("long_logit", 0)),
+            "long_std":           float(info.get("long_std", 0)),
+            "short_action":       int(info.get("_short_action", 0)),
+            "short_lev":          float(info.get("_short_kelly", 0)),
+            "short_logit":        float(info.get("short_logit", 0)),
+            "short_std":          float(info.get("short_std", 0)),
+            # M7
+            "m7_prob_dn":         float((trend_signal or {}).get("m7_prob_dn", 0)),
+            "m7_prob_fl":         float((trend_signal or {}).get("m7_prob_fl", 0)),
+            "m7_prob_up":         float((trend_signal or {}).get("m7_prob_up", 0)),
+            "m7_confidence":      float((trend_signal or {}).get("m7_confidence", 0)),
+            "m7_gate_block":      int((trend_signal or {}).get("m7_gate_block", 0)),
+            "m7_q10":             float((trend_signal or {}).get("m7_q10", 0)),
+            "m7_q50":             float((trend_signal or {}).get("m7_q50", 0)),
+            "m7_q90":             float((trend_signal or {}).get("m7_q90", 0)),
+            "m7_tp_offset":       float((trend_signal or {}).get("m7_tp_offset", 0)),
+            "m7_sl_offset":       float((trend_signal or {}).get("m7_sl_offset", 0)),
+            # 엘리트 시그널
+            "sig_whale":          float((elite_sigs or {}).get("sig_whale", 0)),
+            "sig_oi_divergence":  float((elite_sigs or {}).get("sig_oi_divergence", 0)),
+            "sig_volume_confirm": float((elite_sigs or {}).get("sig_volume_confirm", 0)),
+            "sig_trend_health":   float((elite_sigs or {}).get("sig_trend_health", 0)),
+            # 포지션
+            "position_type":      meta_router.pos,
+            "entry_price":        float(meta_router.entry_price),
+            "unrealized_pnl":     float(meta_router.cur_equity - 1.0),
+            "hold_count":         int(meta_router.hold_count),
+            # 컨센서스
+            "agreement_count":    int(info.get("agreement_count", 0)),
+            "net_score":          float(info.get("net_score", 0)),
+            "kelly":              float(_kelly),
+        }
+        llm_result: LLMDecision | None = await llm_advisor.advise(_llm_ctx)
+        if llm_result is not None:
+            logger.info("🤖 %s", llm_result)
 
     try:
         if use_local:
