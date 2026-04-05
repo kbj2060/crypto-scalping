@@ -291,7 +291,12 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         for c in spread_cols:
             if c in self.df.columns:
                 return np.clip(self._require_col(c), 0.0, 0.05)
-        raise KeyError(f"No spread column found in training data. Required one of: {spread_cols}")
+        # HL proxy: (high - low) / close — 실제 OHLC 데이터 기반 bid-ask spread 근사
+        high  = self._require_col("high")
+        low   = self._require_col("low")
+        close = self._require_col("close")
+        proxy = (high - low) / np.maximum(close, 1e-8)
+        return np.clip(proxy, 0.0, 0.05).astype(np.float32)
 
     def _arr_at(self, arr: np.ndarray, idx: int) -> float:
         if arr is None:
@@ -327,7 +332,9 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
     # ── 28D Compact State (숏 전용) ──
     def _build_state(self, idx):
         if not getattr(self, "_compact_ready", False):
-            raise RuntimeError("_build_state called before training env is ready (_compact_ready=False)")
+            # Base env __init__ triggers reset() before specialist arrays are prepared.
+            # Return a neutral bootstrap state for that one-time initialization path.
+            return np.zeros(STATE_DIM, dtype=np.float32)
         if idx < 0 or idx >= self._n_rows:
             raise IndexError(f"_build_state idx={idx} out of range [0, {self._n_rows})")
 

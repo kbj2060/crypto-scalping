@@ -296,10 +296,10 @@ class BinanceLiveFetcher:
                                 direction='backward',
                             )
                     except Exception: raise
-        eth_df = eth_df.ffill()
+        eth_df = eth_df.ffill().bfill()
         nan_cols = [c for c in eth_df.columns if eth_df[c].isna().any()]
         if nan_cols:
-            raise RuntimeError(f"NaN values remain after ffill in columns: {', '.join(nan_cols)}")
+            raise RuntimeError(f"NaN values remain after ffill+bfill in columns: {', '.join(nan_cols)}")
         required = [
             'sum_open_interest_value',
             'sum_toptrader_long_short_ratio',
@@ -1748,6 +1748,14 @@ class DSACSignalRouter:
         for col in DSAC_STATE_SYNTH:
             features[col] = self._require_finite(last_row, col, "last_row")
         features["close"] = self._require_finite(last_row, "close", "last_row")
+        # 변동성 모델 피처 — specialist _build_compact_state에서 직접 조회
+        for col in ("jump_z", "evt_excess_z", "garch_vol_z", "jump_flag", "evt_tail_flag", "log_return"):
+            features[col] = self._require_finite(last_row, col, "last_row")
+        # HL spread proxy — 실제 OHLC 기반 bid-ask spread 근사값 (spread 컬럼 미존재 시)
+        _h = self._require_finite(last_row, "high", "last_row")
+        _l = self._require_finite(last_row, "low", "last_row")
+        _c = features["close"]
+        features["current_spread"] = float(np.clip((_h - _l) / max(_c, 1e-8), 0.0, 0.05))
 
         # 학습 시 사용한 m7_*를 라이브 추론 입력에도 주입해 train/infer 스키마 불일치 최소화
         if not isinstance(m7_signal, dict):
@@ -1761,6 +1769,9 @@ class DSACSignalRouter:
             features["m7_prob_fl"] = self._require_finite(m7_signal, "prob_flat", "m7_signal")
             features["m7_prob_up"] = self._require_finite(m7_signal, "prob_up", "m7_signal")
         for k in M7_LIVE_STRICT_COLS:
+            features[k] = self._require_finite(m7_signal, k, "m7_signal")
+        # specialist _build_compact_state에서 직접 조회하는 m7 오프셋 컬럼
+        for k in ("m7_tp_offset", "m7_sl_offset"):
             features[k] = self._require_finite(m7_signal, k, "m7_signal")
 
         unr = 0.0
