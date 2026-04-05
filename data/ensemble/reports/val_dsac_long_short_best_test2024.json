@@ -1,0 +1,27 @@
+{
+  "csv_path": "data/splits/year_oos/rl_base_2024.csv",
+  "range_start": "2024-01-01 00:00:00",
+  "range_end": "2024-12-31 23:55:00",
+  "rows": 105380,
+  "device": "cpu",
+  "long": {
+    "kind": "long",
+    "ckpt_path": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+    "pnl_pct": 619.5082767124608,
+    "trades": 1142,
+    "wr_pct": 62.08406304728547,
+    "avg_hold_bars": 91.27583187390543,
+    "median_hold_bars": 69.0,
+    "elapsed_sec": 40.886943101882935
+  },
+  "short": {
+    "kind": "short",
+    "ckpt_path": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+    "pnl_pct": 1906.3542088687773,
+    "trades": 902,
+    "wr_pct": 61.30820399113082,
+    "avg_hold_bars": 115.74168514412416,
+    "median_hold_bars": 61.0,
+    "elapsed_sec": 40.12678599357605
+  }
+}

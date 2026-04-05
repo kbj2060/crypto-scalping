@@ -67,6 +67,8 @@ from features.schema import (
     STATE_ELITE as DSAC_STATE_ELITE,
     STATE_ALPHA as DSAC_STATE_ALPHA,
     STATE_SYNTH as DSAC_STATE_SYNTH,
+    ELITE_BUILDER_REQUIRED_COLS,
+    NF_RUNTIME_REQUIRED_COLS,
     build_active_feature_keep,
 )
 from features.registry import M7_LIVE_STRICT_COLS
@@ -75,6 +77,7 @@ from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
 from ensemble.ensemble_router import (
     ChronosForecaster, PatchTSTForecaster, TiDEForecaster,
 )
+from enhanced_trading_engine import EnhancedTradingEngine
 from ensemble.train_rl_agent import OnlineHMMDetector
 from ensemble.train_rl_dsac_long_agent import (
     STATE_DIM as LONG_STATE_DIM,
@@ -118,7 +121,8 @@ COMPACT_MODE = _env_flag('COMPACT_MODE', True)
 DSAC_ONLY_MODE = True
 ENSEMBLE_PREDICTOR_ENABLED = _env_flag('ENSEMBLE_PREDICTOR_ENABLED', False)
 M7_ENTRY_PRICE_ENABLE = _env_flag('M7_ENTRY_PRICE_ENABLE', False)
-LIVE_STRICT_FEATURE_GUARD = _env_flag("LIVE_STRICT_FEATURE_GUARD", False)
+# LIVE_STRICT_FEATURE_GUARD removed — strict validation is always enforced
+DSAC_PURE_RL_MODE = _env_flag("DSAC_PURE_RL_MODE", True)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 # ════════════════════════════════════════════════════════════════
@@ -219,7 +223,7 @@ class BinanceLiveFetcher:
             for df in [eth_df, btc_df]:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 cols = df.columns.drop('timestamp')
-                df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+                df[cols] = df[cols].apply(pd.to_numeric, errors='raise')
             logger.info(f"{Colors.GREEN}📂 로컬 데이터 로드 성공{Colors.RESET}")
             return eth_df, btc_df
         except Exception as e:
@@ -257,12 +261,12 @@ class BinanceLiveFetcher:
         eth_df = pd.DataFrame(eth_klines).iloc[:, :11]
         eth_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote']
         eth_df['timestamp'] = pd.to_datetime(eth_df['timestamp'], unit='ms')
-        eth_df[eth_df.columns.drop('timestamp')] = eth_df[eth_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='coerce')
+        eth_df[eth_df.columns.drop('timestamp')] = eth_df[eth_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='raise')
 
         btc_df = pd.DataFrame(btc_klines).iloc[:, [0, 4, 5, 7]]
         btc_df.columns = ['timestamp', 'close_btc', 'volume_btc', 'quote_volume_btc']
         btc_df['timestamp'] = pd.to_datetime(btc_df['timestamp'], unit='ms')
-        btc_df[btc_df.columns.drop('timestamp')] = btc_df[btc_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='coerce')
+        btc_df[btc_df.columns.drop('timestamp')] = btc_df[btc_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='raise')
 
         if ancillary_results:
             mappings = [
@@ -274,6 +278,8 @@ class BinanceLiveFetcher:
             ]
             for idx, key, new_name in mappings:
                 res = ancillary_results[idx]
+                if isinstance(res, Exception):
+                    raise RuntimeError(f"ancillary[{idx}] fetch failed for {new_name}: {res}") from res
                 if isinstance(res, list) and len(res) > 0:
                     try:
                         temp_df = pd.DataFrame(res)
@@ -281,7 +287,7 @@ class BinanceLiveFetcher:
                         if t_col and key in temp_df.columns:
                             subset = temp_df[[t_col, key]].rename(columns={t_col: 'timestamp', key: new_name})
                             subset['timestamp'] = pd.to_datetime(subset['timestamp'], unit='ms')
-                            subset[new_name] = pd.to_numeric(subset[new_name], errors='coerce')
+                            subset[new_name] = pd.to_numeric(subset[new_name], errors='raise')
                             # Prevent look-ahead in live merge: use only latest known ancillary value.
                             eth_df = pd.merge_asof(
                                 eth_df.sort_values('timestamp'),
@@ -290,7 +296,20 @@ class BinanceLiveFetcher:
                                 direction='backward',
                             )
                     except Exception: raise
-        return eth_df.ffill().bfill(), btc_df
+        eth_df = eth_df.ffill()
+        nan_cols = [c for c in eth_df.columns if eth_df[c].isna().any()]
+        if nan_cols:
+            raise RuntimeError(f"NaN values remain after ffill in columns: {', '.join(nan_cols)}")
+        required = [
+            'sum_open_interest_value',
+            'sum_toptrader_long_short_ratio',
+            'count_long_short_ratio',
+            'last_funding_rate',
+        ]
+        missing = [c for c in required if c not in eth_df.columns]
+        if missing:
+            raise RuntimeError(f"ancillary columns missing after merge: {','.join(missing)}")
+        return eth_df, btc_df
 
     async def fetch_initial_data(self):
         eth_klines = await self.fetch_klines_raw(self.symbol, self.limit)
@@ -1294,24 +1313,82 @@ class DSACSignalRouter:
         else:
             agreement_mult = 0.0
 
+        # agreement_count별 차등 진입 임계값:
+        # 전원 합의(3)면 낮은 문턱, 2개 합의면 높은 문턱 요구
+        if agreement_count >= 3:
+            required_score = max(0.12, effective_agreement_th)
+        elif agreement_count == 2:
+            required_score = max(0.08, min(required_score, 0.12))
+        elif agreement_count == 1:
+            required_score = max(0.06, min(required_score, 0.10))
+        relax_mult = 1.0
+        if target_action in (1, 2) and self.no_entry_streak >= self.streak_relax_start:
+            relax_steps = self.no_entry_streak - self.streak_relax_start + 1
+            relax_mult = max(self.streak_relax_floor, 1.0 - self.streak_relax_step * float(relax_steps))
+            required_score = max(0.06, required_score * relax_mult)
+
         hold_reasons: list[str] = []
+        direction_conf = float(abs(base_info.get("direction_score", 0.0)))
+        direction_override = bool(
+            target_action in (1, 2)
+            and direction_conf >= max(0.12, required_score * 1.4)
+            and std_gate_ok
+            and (not opp_veto)
+            and selected_action in (1, 2)
+        )
         can_enter = bool(
             target_action in (1, 2)
             and std_gate_ok
             and (not opp_veto)
-            and agreement >= required_score
+            and (agreement >= required_score or direction_override)
             and agreement_count >= self.ens_min_votes
         )
+        starvation_override = False
+        if (
+            not can_enter
+            and target_action in (1, 2)
+            and std_gate_ok
+            and (not opp_veto)
+            and self.no_entry_streak >= (self.streak_relax_start + 6)
+            and agreement_count >= 1
+            and max(long_support, short_support) >= 0.05
+            and abs(net_score) >= 0.003
+        ):
+            starvation_override = True
+            can_enter = True
         if regime_name in ("chop", "whipsaw"):
             if long_std > 1.2 and short_std > 1.2:
                 can_enter = False
                 hold_reasons.append("chop_both_uncertain")
+        # Primary가 HOLD일 때: specialist 2개 합의만으로 부족, 추가 조건 요구
+        if can_enter and primary_action == 0:
+            if agreement_count < 2 and selected_std > 1.25:
+                can_enter = False
+                hold_reasons.append("primary_hold_guard")
+        conviction_override = False
+        if (
+            not can_enter
+            and target_action in (1, 2)
+            and std_gate_ok
+            and (not opp_veto)
+            and selected_action in (1, 2)
+            and conviction >= max(0.16, enter_th * 1.15)
+            and abs(float(base_info.get("direction_score", 0.0))) >= 0.05
+        ):
+            conviction_override = True
+            can_enter = True
         if can_enter:
             base_kelly = float(np.clip(
                 self.ens_primary_mix * primary_lev + (1.0 - self.ens_primary_mix) * selected_lev,
                 0.0, 1.0
             ))
             adj_kelly = float(np.clip(base_kelly * agreement_mult, 0.0, 1.0))
+            if starvation_override:
+                adj_kelly = float(np.clip(adj_kelly, 0.04, 0.12))
+            if conviction_override:
+                adj_kelly = float(np.clip(adj_kelly, 0.08, 0.20))
+            if direction_override:
+                adj_kelly = float(np.clip(adj_kelly, 0.10, 0.25))
             if regime_name in ("chop", "whipsaw"):
                 adj_kelly = float(np.clip(adj_kelly * 0.50, 0.0, 1.0))
             out = dict(base_info)
@@ -1332,10 +1409,15 @@ class DSACSignalRouter:
                 "net_score": float(net_score),
                 "agreement_count": int(agreement_count),
                 "agreement_mult": float(agreement_mult),
+                "entry_relax_mult": float(relax_mult),
+                "no_entry_streak": int(self.no_entry_streak),
                 "chop_size_mult": float(0.50 if regime_name in ("chop", "whipsaw") else 1.0),
                 "opp_confidence": opp_confidence,
                 "opp_support": opp_support,
                 "opp_veto": int(opp_veto),
+                "starvation_override": int(starvation_override),
+                "conviction_override": int(conviction_override),
+                "direction_override": int(direction_override),
                 "kelly": adj_kelly,
                 "score": conviction,
                 "primary_action": int(primary_action),
@@ -1378,6 +1460,8 @@ class DSACSignalRouter:
             "base_min_agreement_threshold": float(self.min_agreement_th),
             "adaptive_enter_offset": float(self.adaptive_enter_offset),
             "adaptive_agreement_offset": float(self.adaptive_agreement_offset),
+            "entry_relax_mult": float(relax_mult),
+            "no_entry_streak": int(self.no_entry_streak),
             "std_gate_ok": std_gate_ok,
             "dual_high_hold": dual_high_hold,
             "max_confidence_std": float(self.max_confidence_std),
@@ -1397,6 +1481,7 @@ class DSACSignalRouter:
         primary_raw: float,
         base_info: dict[str, float | str | int],
         side_info: dict,
+        unrealized_pnl: float = 0.0,
     ) -> tuple[int, float, dict[str, float | str | int]]:
         opp_logit_eff = float(opp_logit)
         if side == "LONG" and primary_raw <= -self.pos_primary_reverse_th:
@@ -1410,7 +1495,19 @@ class DSACSignalRouter:
             own_std=own_std,
             opp_logit=opp_logit_eff,
             opp_std=opp_std,
+            unrealized_pnl=unrealized_pnl,
         )
+        # When primary and specialist strongly agree on held direction, allow controlled size boost.
+        if int(pos_action) in (1, 2):
+            _same_dir = (side == "LONG" and primary_raw > 0.0) or (side == "SHORT" and primary_raw < 0.0)
+            if _same_dir and abs(float(primary_raw)) >= self.pos_primary_same_dir_boost_th:
+                pos_kelly = float(np.clip(
+                    float(pos_kelly) * self.pos_primary_same_dir_boost_mult,
+                    0.0,
+                    1.0,
+                ))
+                pos_diag = dict(pos_diag)
+                pos_diag["primary_same_dir_boost"] = float(self.pos_primary_same_dir_boost_mult)
         score = float(max(self._support(own_logit, own_std), float(base_info["conviction"])))
         out = dict(base_info)
         out.update(dict(side_info or {}))
@@ -1433,9 +1530,17 @@ class DSACSignalRouter:
         own_std: float,
         opp_logit: float,
         opp_std: float,
+        unrealized_pnl: float = 0.0,
     ) -> tuple[int, float, dict[str, float | str]]:
-        own_support = self._support(own_logit, own_std)
-        opp_pressure = self._support(opp_logit, opp_std)
+        own_support_raw = self._support(own_logit, own_std)
+        opp_pressure_raw = self._support(opp_logit, opp_std)
+        alpha = float(np.clip(self.pos_support_ema_alpha, 0.05, 0.95))
+        prev_own = self._pos_support_ema.get(side)
+        prev_opp = self._pos_opp_support_ema.get(side)
+        own_support = float(own_support_raw if prev_own is None else (alpha * own_support_raw + (1.0 - alpha) * prev_own))
+        opp_pressure = float(opp_pressure_raw if prev_opp is None else (alpha * opp_pressure_raw + (1.0 - alpha) * prev_opp))
+        self._pos_support_ema[side] = own_support
+        self._pos_opp_support_ema[side] = opp_pressure
         net_edge = float(own_support - opp_pressure)
         ambiguity = float(min(own_logit, opp_logit))
         reduce_flag = bool(
@@ -1449,6 +1554,8 @@ class DSACSignalRouter:
                 "own_support": own_support,
                 "opp_pressure": opp_pressure,
                 "net_edge": net_edge,
+                "own_support_raw": own_support_raw,
+                "opp_pressure_raw": opp_pressure_raw,
             }
         hold_kelly = float(np.clip(
             float(own_lev) * np.clip(0.55 + 0.45 * np.tanh(net_edge / max(self.pos_kelly_scale, 1e-6)), 0.20, 1.00),
@@ -1461,14 +1568,26 @@ class DSACSignalRouter:
                 "own_support": own_support,
                 "opp_pressure": opp_pressure,
                 "net_edge": net_edge,
+                "own_support_raw": own_support_raw,
+                "opp_pressure_raw": opp_pressure_raw,
             }
         if own_support >= self.pos_hold_support and net_edge >= self.pos_hold_net_edge:
-            return (1 if side == "LONG" else 2), hold_kelly, {
+            hold_boost = 1.0
+            if float(unrealized_pnl) >= 0.0:
+                if net_edge >= self.pos_hold_boost_edge_hi:
+                    hold_boost = self.pos_hold_boost_mult_hi
+                elif net_edge >= self.pos_hold_boost_edge_lo:
+                    hold_boost = self.pos_hold_boost_mult_lo
+            boosted_kelly = float(np.clip(hold_kelly * hold_boost, 0.0, 1.0))
+            return (1 if side == "LONG" else 2), boosted_kelly, {
                 "position_signal": "HOLD",
                 "position_reason": "SUPPORTED",
                 "own_support": own_support,
                 "opp_pressure": opp_pressure,
                 "net_edge": net_edge,
+                "hold_boost": float(hold_boost),
+                "own_support_raw": own_support_raw,
+                "opp_pressure_raw": opp_pressure_raw,
             }
         return (1 if side == "LONG" else 2), float(np.clip(hold_kelly * 0.85, 0.0, 1.0)), {
             "position_signal": "HOLD",
@@ -1476,6 +1595,8 @@ class DSACSignalRouter:
             "own_support": own_support,
             "opp_pressure": opp_pressure,
             "net_edge": net_edge,
+            "own_support_raw": own_support_raw,
+            "opp_pressure_raw": opp_pressure_raw,
         }
 
     def __init__(
@@ -1496,37 +1617,50 @@ class DSACSignalRouter:
         self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
         self.peak_equity: float = 1.0
         self.current_equity: float = 1.0
-        self.base_enter_th = float(os.getenv("DSAC_DUAL_BASE_ENTER_TH", "0.32"))
-        self.trend_align_enter_th = float(os.getenv("DSAC_DUAL_TREND_ALIGN_ENTER_TH", "0.22"))
-        self.chop_enter_th = float(os.getenv("DSAC_DUAL_CHOP_ENTER_TH", "0.52"))
-        self.whipsaw_enter_th = float(os.getenv("DSAC_DUAL_WHIPSAW_ENTER_TH", "0.50"))
-        self.min_agreement_th = float(os.getenv("DSAC_DUAL_MIN_AGREEMENT_TH", "0.38"))
+        self.base_enter_th = float(os.getenv("DSAC_DUAL_BASE_ENTER_TH", "0.08"))
+        self.trend_align_enter_th = float(os.getenv("DSAC_DUAL_TREND_ALIGN_ENTER_TH", "0.07"))
+        self.chop_enter_th = float(os.getenv("DSAC_DUAL_CHOP_ENTER_TH", "0.15"))
+        self.whipsaw_enter_th = float(os.getenv("DSAC_DUAL_WHIPSAW_ENTER_TH", "0.15"))
+        self.min_agreement_th = float(os.getenv("DSAC_DUAL_MIN_AGREEMENT_TH", "0.08"))
         self.ambiguity_penalty_start = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_START", "2.50"))
         self.ambiguity_penalty_add = float(os.getenv("DSAC_DUAL_AMBIG_PENALTY_ADD", "0.08"))
-        self.max_confidence_std = float(os.getenv("DSAC_DUAL_MAX_CONFIDENCE_STD", "1.50"))
+        self.max_confidence_std = float(os.getenv("DSAC_DUAL_MAX_CONFIDENCE_STD", "2.00"))
         self.dual_high_logit_hold = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_HOLD", "2.80"))
         self.dual_high_logit_gap = float(os.getenv("DSAC_DUAL_HIGH_LOGIT_GAP", "0.85"))
         self.opp_veto_support_th = float(os.getenv("DSAC_DUAL_OPP_VETO_SUPPORT_TH", "0.30"))
         self.opp_veto_std_max = float(os.getenv("DSAC_DUAL_OPP_VETO_STD_MAX", "1.20"))
-        self.ens_vote_min_strength = float(os.getenv("DSAC_DUAL_ENS_VOTE_MIN_STRENGTH", "0.10"))
+        self.ens_vote_min_strength = float(os.getenv("DSAC_DUAL_ENS_VOTE_MIN_STRENGTH", "0.03"))
         self.ens_min_votes = int(os.getenv("DSAC_DUAL_ENS_MIN_VOTES", "1"))
         self.ens_agree_mult_3 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_3", "1.00"))
-        self.ens_agree_mult_2 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_2", "0.70"))
-        self.ens_agree_mult_1 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_1", "0.40"))
-        self.ens_primary_mix = float(os.getenv("DSAC_DUAL_ENS_PRIMARY_MIX", "0.50"))
+        self.ens_agree_mult_2 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_2", "0.80"))
+        self.ens_agree_mult_1 = float(os.getenv("DSAC_DUAL_ENS_AGREE_MULT_1", "0.45"))
+        self.ens_primary_mix = float(os.getenv("DSAC_DUAL_ENS_PRIMARY_MIX", "0.40"))
         self.pos_primary_reverse_th = float(os.getenv("DSAC_DUAL_POS_PRIMARY_REVERSE_TH", "0.10"))
         self.pos_primary_reverse_weight = float(os.getenv("DSAC_DUAL_POS_PRIMARY_REVERSE_WEIGHT", "0.30"))
         self.adaptive_enter_offset = 0.0
         self.adaptive_agreement_offset = 0.0
+        self.no_entry_streak = 0
+        self.streak_relax_start = int(os.getenv("DSAC_DUAL_RELAX_START_BARS", "6"))
+        self.streak_relax_step = float(os.getenv("DSAC_DUAL_RELAX_STEP", "0.08"))
+        self.streak_relax_floor = float(os.getenv("DSAC_DUAL_RELAX_FLOOR", "0.45"))
         self.pos_hold_support = float(os.getenv("DSAC_DUAL_POS_HOLD_SUPPORT", "1.10"))
         self.pos_hold_net_edge = float(os.getenv("DSAC_DUAL_POS_HOLD_NET_EDGE", "0.05"))
-        self.pos_reduce_support = float(os.getenv("DSAC_DUAL_POS_REDUCE_SUPPORT", "0.70"))
+        self.pos_reduce_support = float(os.getenv("DSAC_DUAL_POS_REDUCE_SUPPORT", "0.55"))
         self.pos_reduce_mult = float(os.getenv("DSAC_DUAL_POS_REDUCE_MULT", "0.35"))
-        self.pos_exit_net_edge = float(os.getenv("DSAC_DUAL_POS_EXIT_NET_EDGE", "-0.10"))
-        self.pos_opp_pressure_exit = float(os.getenv("DSAC_DUAL_POS_OPP_PRESSURE_EXIT", "0.90"))
+        self.pos_exit_net_edge = float(os.getenv("DSAC_DUAL_POS_EXIT_NET_EDGE", "-0.25"))
+        self.pos_opp_pressure_exit = float(os.getenv("DSAC_DUAL_POS_OPP_PRESSURE_EXIT", "1.15"))
         self.pos_ambiguity_high = float(os.getenv("DSAC_DUAL_POS_AMBIG_HIGH", "1.90"))
         self.pos_ambiguity_gap = float(os.getenv("DSAC_DUAL_POS_AMBIG_GAP", "1.00"))
         self.pos_kelly_scale = float(os.getenv("DSAC_DUAL_POS_KELLY_SCALE", "0.80"))
+        self.pos_hold_boost_edge_lo = float(os.getenv("DSAC_DUAL_POS_HOLD_BOOST_EDGE_LO", "0.15"))
+        self.pos_hold_boost_edge_hi = float(os.getenv("DSAC_DUAL_POS_HOLD_BOOST_EDGE_HI", "0.30"))
+        self.pos_hold_boost_mult_lo = float(os.getenv("DSAC_DUAL_POS_HOLD_BOOST_MULT_LO", "1.10"))
+        self.pos_hold_boost_mult_hi = float(os.getenv("DSAC_DUAL_POS_HOLD_BOOST_MULT_HI", "1.20"))
+        self.pos_primary_same_dir_boost_th = float(os.getenv("DSAC_DUAL_POS_PRIMARY_SAME_DIR_BOOST_TH", "0.30"))
+        self.pos_primary_same_dir_boost_mult = float(os.getenv("DSAC_DUAL_POS_PRIMARY_SAME_DIR_BOOST_MULT", "1.15"))
+        self.pos_support_ema_alpha = float(os.getenv("DSAC_DUAL_POS_SUPPORT_EMA_ALPHA", "0.65"))
+        self._pos_support_ema: dict[str, float] = {}
+        self._pos_opp_support_ema: dict[str, float] = {}
         self.elite_extractor = EliteSignals()
         self.new_elite_engine = NewEliteSignalEngine()
 
@@ -1568,20 +1702,18 @@ class DSACSignalRouter:
     def decide(self, processed_df: pd.DataFrame, nf_preds: dict, m7_signal: dict | None = None):
         last_row = processed_df.iloc[-1]
         prev_row = processed_df.iloc[-2]
-        smf_std = processed_df["smart_money_flow"].std() if "smart_money_flow" in processed_df.columns else 1.0
+        if "smart_money_flow" not in processed_df.columns:
+            raise KeyError("processed_df missing required column: smart_money_flow")
+        smf_std = processed_df["smart_money_flow"].std()
 
         cur_market = row_to_market_row(last_row)
         prev_market = row_to_market_row(prev_row)
         elite_sigs = self.elite_extractor.compute_all(current=cur_market, prev=prev_market, smf_std=smf_std)
-        try:
-            tail_df = processed_df.tail(100).copy()
-            self.new_elite_engine.compute(tail_df)
-            tail_last = tail_df.iloc[-1]
-            for col in ["sig_volume_confirm", "sig_liquidity_trap", "sig_trend_health"]:
-                elite_sigs[col] = float(tail_last.get(col, 0.0))
-        except Exception:
-            for col in ["sig_volume_confirm", "sig_liquidity_trap", "sig_trend_health"]:
-                elite_sigs.setdefault(col, 0.0)
+        tail_df = processed_df.tail(100).copy()
+        self.new_elite_engine.compute(tail_df)
+        tail_last = tail_df.iloc[-1]
+        for col in ["sig_volume_confirm", "sig_liquidity_trap", "sig_trend_health"]:
+            elite_sigs[col] = self._require_finite(tail_last, col, "tail_last")
 
         features: dict[str, float] = {}
         for col in DSAC_STATE_PRED:
@@ -1589,86 +1721,47 @@ class DSACSignalRouter:
         for col in DSAC_STATE_CONF:
             features[col] = self._require_finite(nf_preds, col, "nf_preds")
         for col in DSAC_STATE_ELITE:
-            features[col] = (
-                self._require_finite(elite_sigs, col, "elite_sigs")
-                if LIVE_STRICT_FEATURE_GUARD
-                else float(elite_sigs.get(col, 0.0))
-            )
+            features[col] = self._require_finite(elite_sigs, col, "elite_sigs")
         for col in DSAC_STATE_ALPHA:
-            features[col] = (
-                self._require_finite(last_row, col, "last_row")
-                if LIVE_STRICT_FEATURE_GUARD
-                else float(last_row.get(col, 0.0))
-            )
+            features[col] = self._require_finite(last_row, col, "last_row")
 
         regime = None
         if self.hmm is not None:
-            try:
-                hmm_row = {
-                    "log_return": (
-                        self._require_finite(last_row, "log_return", "last_row")
-                        if LIVE_STRICT_FEATURE_GUARD
-                        else float(last_row.get("log_return", 0.0))
-                    ),
-                    "garch_vol_z": (
-                        self._require_finite(last_row, "garch_vol_z", "last_row")
-                        if LIVE_STRICT_FEATURE_GUARD
-                        else float(last_row.get("garch_vol_z", 0.0))
-                    ),
-                    "oi_change_rate": (
-                        self._require_finite(last_row, "oi_change_rate", "last_row")
-                        if LIVE_STRICT_FEATURE_GUARD
-                        else float(last_row.get("oi_change_rate", 0.0))
-                    ),
-                }
-                hmm_feat = self.hmm.get_features(hmm_row)
-                hmm_probs = np.asarray(hmm_feat[:4], dtype=np.float32)
-                hmm_idx = int(np.argmax(hmm_probs))
-                regime = {
-                    "regime_bull": 1.0 if hmm_idx == 0 else 0.0,
-                    "regime_bear": 1.0 if hmm_idx == 1 else 0.0,
-                    "regime_chop": 0.0,
-                    "regime_whipsaw": 1.0 if hmm_idx == 2 else 0.0,
-                    "regime_normal": 1.0 if hmm_idx == 3 else 0.0,
-                }
-            except Exception:
-                regime = None
+            hmm_row = {
+                "log_return": self._require_finite(last_row, "log_return", "last_row"),
+                "garch_vol_z": self._require_finite(last_row, "garch_vol_z", "last_row"),
+                "oi_change_rate": self._require_finite(last_row, "oi_change_rate", "last_row"),
+            }
+            hmm_feat = self.hmm.get_features(hmm_row)
+            hmm_probs = np.asarray(hmm_feat[:4], dtype=np.float32)
+            hmm_idx = int(np.argmax(hmm_probs))
+            regime = {
+                "regime_bull": 1.0 if hmm_idx == 0 else 0.0,
+                "regime_bear": 1.0 if hmm_idx == 1 else 0.0,
+                "regime_chop": 0.0,
+                "regime_whipsaw": 1.0 if hmm_idx == 2 else 0.0,
+                "regime_normal": 1.0 if hmm_idx == 3 else 0.0,
+            }
         if regime is None:
             regime = _compute_regime(processed_df)
         features.update(regime)
         for col in DSAC_STATE_SYNTH:
-            features[col] = (
-                self._require_finite(last_row, col, "last_row")
-                if LIVE_STRICT_FEATURE_GUARD
-                else float(last_row.get(col, 0.0))
-            )
-        features["close"] = (
-            self._require_finite(last_row, "close", "last_row")
-            if LIVE_STRICT_FEATURE_GUARD
-            else float(last_row.get("close", 0.0))
-        )
+            features[col] = self._require_finite(last_row, col, "last_row")
+        features["close"] = self._require_finite(last_row, "close", "last_row")
 
         # 학습 시 사용한 m7_*를 라이브 추론 입력에도 주입해 train/infer 스키마 불일치 최소화
-        if LIVE_STRICT_FEATURE_GUARD:
-            if not isinstance(m7_signal, dict):
-                raise ValueError("[FEATURE_MISSING] m7_signal unavailable")
-            if "m7_prob_dn" in m7_signal:
-                features["m7_prob_dn"] = self._require_finite(m7_signal, "m7_prob_dn", "m7_signal")
-                features["m7_prob_fl"] = self._require_finite(m7_signal, "m7_prob_fl", "m7_signal")
-                features["m7_prob_up"] = self._require_finite(m7_signal, "m7_prob_up", "m7_signal")
-            else:
-                features["m7_prob_dn"] = self._require_finite(m7_signal, "prob_dn", "m7_signal")
-                features["m7_prob_fl"] = self._require_finite(m7_signal, "prob_flat", "m7_signal")
-                features["m7_prob_up"] = self._require_finite(m7_signal, "prob_up", "m7_signal")
-            for k in M7_LIVE_STRICT_COLS:
-                features[k] = self._require_finite(m7_signal, k, "m7_signal")
-        elif isinstance(m7_signal, dict):
-            features["m7_prob_dn"] = float(m7_signal.get("m7_prob_dn", m7_signal.get("prob_dn", 0.0)))
-            features["m7_prob_fl"] = float(m7_signal.get("m7_prob_fl", m7_signal.get("prob_flat", 0.0)))
-            features["m7_prob_up"] = float(m7_signal.get("m7_prob_up", m7_signal.get("prob_up", 0.0)))
-            for k in M7_LIVE_STRICT_COLS:
-                if k in m7_signal:
-                    features[k] = float(m7_signal.get(k, 0.0))
+        if not isinstance(m7_signal, dict):
+            raise ValueError("[FEATURE_MISSING] m7_signal unavailable")
+        if "m7_prob_dn" in m7_signal:
+            features["m7_prob_dn"] = self._require_finite(m7_signal, "m7_prob_dn", "m7_signal")
+            features["m7_prob_fl"] = self._require_finite(m7_signal, "m7_prob_fl", "m7_signal")
+            features["m7_prob_up"] = self._require_finite(m7_signal, "m7_prob_up", "m7_signal")
+        else:
+            features["m7_prob_dn"] = self._require_finite(m7_signal, "prob_dn", "m7_signal")
+            features["m7_prob_fl"] = self._require_finite(m7_signal, "prob_flat", "m7_signal")
+            features["m7_prob_up"] = self._require_finite(m7_signal, "prob_up", "m7_signal")
+        for k in M7_LIVE_STRICT_COLS:
+            features[k] = self._require_finite(m7_signal, k, "m7_signal")
 
         unr = 0.0
         if self.pos is not None and self.entry_price > 0:
@@ -1741,6 +1834,9 @@ class DSACSignalRouter:
         )
         direction_score = float(info["direction_score"])
         conviction = float(info["conviction"])
+        if self.pos not in ("LONG", "SHORT"):
+            self._pos_support_ema.clear()
+            self._pos_opp_support_ema.clear()
 
         if self.pos == "LONG":
             return (
@@ -1751,6 +1847,7 @@ class DSACSignalRouter:
                 own_std=long_std,
                 opp_logit=short_logit,
                 opp_std=short_std,
+                unrealized_pnl=float(unr),
                 primary_raw=primary_raw,
                 base_info=info,
                 side_info=long_info,
@@ -1768,6 +1865,7 @@ class DSACSignalRouter:
                 own_std=short_std,
                 opp_logit=long_logit,
                 opp_std=long_std,
+                unrealized_pnl=float(unr),
                 primary_raw=primary_raw,
                 base_info=info,
                 side_info=short_info,
@@ -1787,6 +1885,12 @@ class DSACSignalRouter:
             short_info=dict(short_info or {}),
             base_info=info,
         )
+        if entry_action in (1, 2):
+            self.no_entry_streak = 0
+        else:
+            self.no_entry_streak = min(self.no_entry_streak + 1, 10000)
+            entry_info = dict(entry_info)
+            entry_info["no_entry_streak"] = int(self.no_entry_streak)
         return int(entry_action), float(entry_kelly), entry_info, elite_sigs, regime
 
 
@@ -1809,6 +1913,7 @@ class DSACTrendRouter:
         self.loss_streak: int = 0
         self.cooldown_bars_left: int = 0
         self.trend_mismatch_streak: int = 0
+        self.position_exit_streak: int = 0
         self.last_summary_ts: datetime | None = None
         self._last_state_save_ts: datetime | None = None
         self.adaptive_enter_offset: float = 0.0
@@ -1826,27 +1931,37 @@ class DSACTrendRouter:
         self.dsac_only_cooldown_loss = float(os.getenv("DSAC_ONLY_COOLDOWN_LOSS", "0.05"))
         self.dsac_only_cooldown_streak = int(os.getenv("DSAC_ONLY_COOLDOWN_STREAK", "4"))
         self.dsac_only_cooldown_bars = int(os.getenv("DSAC_ONLY_COOLDOWN_BARS", "0"))
-        self.dsac_only_chop_entry_kelly_mult = float(os.getenv("DSAC_ONLY_CHOP_ENTRY_KELLY_MULT", "0.80"))
-        self.dsac_only_whipsaw_entry_kelly_mult = float(os.getenv("DSAC_ONLY_WHIPSAW_ENTRY_KELLY_MULT", "0.72"))
+        self.dsac_only_chop_entry_kelly_mult = float(os.getenv("DSAC_ONLY_CHOP_ENTRY_KELLY_MULT", "0.50"))
+        self.dsac_only_whipsaw_entry_kelly_mult = float(os.getenv("DSAC_ONLY_WHIPSAW_ENTRY_KELLY_MULT", "0.55"))
         self.dsac_only_trend_exit_enable = _env_flag("DSAC_ONLY_TREND_EXIT_ENABLE", True)
         self.dsac_only_trend_exit_hold_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_HOLD_BARS", "24"))
         self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "2"))
+        self.position_exit_confirm_bars = int(os.getenv("DSAC_POSITION_EXIT_CONFIRM_BARS", "2"))
         self.dsac_only_trend_exit_score = float(os.getenv("DSAC_ONLY_TREND_EXIT_SCORE", "0.20"))
         self.dsac_only_trend_exit_quality = float(os.getenv("DSAC_ONLY_TREND_EXIT_QUALITY", "0.000"))
         self.dsac_only_vae_block_ratio = float(os.getenv("DSAC_ONLY_VAE_BLOCK_RATIO", "1.35"))
 
         # 신규 진입 차단
         self.integral_enable = _env_flag("DSAC_SIGNAL_INTEGRAL_ENABLE", False)
-        self.integral_window = int(os.getenv("DSAC_SIGNAL_INTEGRAL_WINDOW", "3"))
+        self.integral_window = int(os.getenv("DSAC_SIGNAL_INTEGRAL_WINDOW", "2"))
         self.integral_min_gap = float(os.getenv("DSAC_SIGNAL_INTEGRAL_MIN_GAP", "0.65"))
         self.integral_require_sign = _env_flag("DSAC_SIGNAL_INTEGRAL_REQUIRE_SIGN", True)
         self.hibernation_enable = _env_flag("DSAC_HIBERNATION_ENABLE", True)
         self.hibernation_score_th = float(os.getenv("DSAC_HIBERNATION_SCORE_TH", "0.85"))
         self.hibernation_bars = int(os.getenv("DSAC_HIBERNATION_BARS", "6"))
-        self.illiquidity_veto_enable = _env_flag("DSAC_ILLIQUIDITY_VETO_ENABLE", True)
+        self.hibernation_kelly_mult = float(os.getenv("DSAC_HIBERNATION_KELLY_MULT", "0.35"))
+        self.illiquidity_veto_enable = _env_flag("DSAC_ILLIQUIDITY_VETO_ENABLE", False)
         self.illiquidity_amihud_th = float(os.getenv("DSAC_ILLIQUIDITY_AMIHUD_TH", "1.40"))
         self.illiquidity_rsvol_th = float(os.getenv("DSAC_ILLIQUIDITY_RSVOL_TH", "0.015"))
         self.illiquidity_vol_rank_th = float(os.getenv("DSAC_ILLIQUIDITY_VOLRANK_TH", "0.78"))
+        self.illiquidity_scale_mult = float(os.getenv("DSAC_ILLIQUIDITY_SCALE_MULT", "0.50"))
+        self.trend_align_kelly_mult = float(os.getenv("DSAC_TREND_ALIGN_KELLY_MULT", "1.20"))
+        self.trend_flat_kelly_mult = float(os.getenv("DSAC_TREND_FLAT_KELLY_MULT", "0.70"))
+        self.trend_mismatch_kelly_mult = float(os.getenv("DSAC_TREND_MISMATCH_KELLY_MULT", "0.45"))
+        self.min_entry_kelly = float(os.getenv("DSAC_MIN_ENTRY_KELLY", "0.06"))
+        self.churn_cooldown_bars = int(os.getenv("DSAC_CHURN_COOLDOWN_BARS", "1"))
+        self.churn_hold_bars = int(os.getenv("DSAC_CHURN_HOLD_BARS", "2"))
+        self.churn_pnl_abs = float(os.getenv("DSAC_CHURN_PNL_ABS", "0.0015"))
 
         # 신규 진입 사이징
         self.sizing_bayes_enable = _env_flag("DSAC_SIZING_BAYES_ENABLE", True)
@@ -1917,8 +2032,8 @@ class DSACTrendRouter:
         # ── BTC-ETH 상관 필터 ─────────────────────────────────────────────────
         # BTC 3봉 방향이 DSAC 방향과 불일치 시 kelly 축소, 일치 시 소폭 부스트
         self.btc_corr_enable      = _env_flag("FUSE_BTC_CORR",            True)
-        self.btc_corr_misalign    = float(os.getenv("FUSE_BTC_CORR_MISALIGN",    "0.85"))  # 반대방향 kelly 배수
-        self.btc_corr_align_boost = float(os.getenv("FUSE_BTC_CORR_ALIGN_BOOST", "1.08"))  # 같은방향 kelly 부스트
+        self.btc_corr_misalign    = float(os.getenv("FUSE_BTC_CORR_MISALIGN",    "0.80"))  # 반대방향 kelly 배수
+        self.btc_corr_align_boost = float(os.getenv("FUSE_BTC_CORR_ALIGN_BOOST", "1.12"))  # 같은방향 kelly 부스트
         self.btc_corr_move_th     = float(os.getenv("FUSE_BTC_CORR_MOVE_TH",     "0.004")) # BTC 3봉 유의미 변화 임계값
 
         # ── 안티 찹(횡보) 필터 ────────────────────────────────────────────────
@@ -1926,13 +2041,13 @@ class DSACTrendRouter:
         self.chop_filter_enable   = _env_flag("FUSE_CHOP_FILTER",         True)
         self.chop_window          = int(os.getenv("FUSE_CHOP_WINDOW",         "12"))   # 관찰 봉수
         self.chop_turns_max       = int(os.getenv("FUSE_CHOP_TURNS_MAX",      "7"))   # 이 횟수 이상 전환 시 찹 판정
-        self.chop_kelly_scale     = float(os.getenv("FUSE_CHOP_KELLY_SCALE",  "0.65"))
+        self.chop_kelly_scale     = float(os.getenv("FUSE_CHOP_KELLY_SCALE",  "0.50"))
 
         # ── 거래량 확인 필터 ──────────────────────────────────────────────────
         # 저거래량 구간 진입 시 kelly 축소 (스캘핑 노이즈 방지)
         self.volume_confirm_enable = _env_flag("FUSE_VOLUME_CONFIRM",      True)
         self.volume_min_ratio      = float(os.getenv("FUSE_VOLUME_MIN_RATIO",  "0.50"))  # 20봉 평균 대비 최소 비율
-        self.volume_low_kelly      = float(os.getenv("FUSE_VOLUME_LOW_KELLY",  "0.80"))  # 저거래량 시 kelly 배수
+        self.volume_low_kelly      = float(os.getenv("FUSE_VOLUME_LOW_KELLY",  "0.75"))  # 저거래량 시 kelly 배수
 
         self._load_live_state()
 
@@ -2028,6 +2143,7 @@ class DSACTrendRouter:
             self.peak_equity = self.cur_equity = 1.0
             self.last_realized_pnl = None
             self.trend_mismatch_streak = 0
+            self.position_exit_streak = 0
             self._save_live_state()
         elif final_action == 2 and self.pos is None:
             self.pos, self.entry_price, self.hold_count = "SHORT", entry_px, 0
@@ -2035,17 +2151,24 @@ class DSACTrendRouter:
             self.peak_equity = self.cur_equity = 1.0
             self.last_realized_pnl = None
             self.trend_mismatch_streak = 0
+            self.position_exit_streak = 0
             self._save_live_state()
         elif final_action == 0 and self.pos is not None:
             if self.entry_price > 0 and current_price > 0:
                 self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.last_realized_pnl = float(self.cur_equity - 1.0)
             self.last_closed_hold_count = int(self.hold_count)
+            if (
+                self.last_closed_hold_count <= self.churn_hold_bars
+                and abs(self.last_realized_pnl) <= self.churn_pnl_abs
+            ):
+                self.cooldown_bars_left = max(self.cooldown_bars_left, self.churn_cooldown_bars)
             self.pos, self.entry_price, self.hold_count = None, 0.0, 0
             self.current_leverage = 0.0
             self.peak_equity = 1.0
             self.cur_equity = 1.0
             self.trend_mismatch_streak = 0
+            self.position_exit_streak = 0
             self._save_live_state()
         elif self.pos is not None and self.entry_price > 0 and current_price > 0:
             self.hold_count += 1
@@ -2074,6 +2197,7 @@ class DSACTrendRouter:
             self.loss_streak = int(data.get("loss_streak", 0))
             self.cooldown_bars_left = int(data.get("cooldown_bars_left", 0))
             self.trend_mismatch_streak = int(data.get("trend_mismatch_streak", 0))
+            self.position_exit_streak = int(data.get("position_exit_streak", 0))
             self.adaptive_flat_cycles = int(data.get("adaptive_flat_cycles", 0))
             self.recent_realized = deque(
                 [float(x) for x in data.get("recent_realized", [])],
@@ -2115,6 +2239,7 @@ class DSACTrendRouter:
                 "loss_streak": self.loss_streak,
                 "cooldown_bars_left": self.cooldown_bars_left,
                 "trend_mismatch_streak": self.trend_mismatch_streak,
+                "position_exit_streak": self.position_exit_streak,
                 "adaptive_flat_cycles": self.adaptive_flat_cycles,
                 "recent_realized": list(self.recent_realized),
                 "trade_history": list(self.trade_history),
@@ -2389,6 +2514,7 @@ async def main(use_local=False):
 
     # ── DSAC + SevenModel(M7) 융합 라우터 초기화 ─────────────────────
     meta_router = DSACTrendRouter()
+    enhanced_engine = EnhancedTradingEngine()
     logger.info("🧭 실행 모드: DSAC_ONLY (최소 리스크 레이어만 유지)")
     _prev_meta_pos: str | None = None
 
@@ -2448,12 +2574,24 @@ async def main(use_local=False):
         return False
 
     # ── 7-모델 통합 추세 추론기 초기화 ───────────────────────────────
-    trend_hub = SevenModelEnsemble()
+    trend_hub = SevenModelEnsemble(strict=bool(M7_ENTRY_PRICE_ENABLE))
     if not M7_ENTRY_PRICE_ENABLE and getattr(trend_hub, "entry_price", None) is not None:
         trend_hub.entry_price.available = False
         trend_hub.entry_price.model = None
         trend_hub.entry_price.feature_cols = []
         logger.info("🧩 M7 EntryPrice 모델 비활성화: 현재 라이브 피처 스키마 기준 (M7_ENTRY_PRICE_ENABLE=OFF)")
+        required_states = [
+            ("trend_xgb", trend_hub.trend_xgb),
+            ("multi_target_lgbm", trend_hub.multi_target),
+            ("quantile_forest", trend_hub.quantile),
+            ("gmm_volatility", trend_hub.gmm),
+            ("hdbscan_regime", trend_hub.hdbscan),
+            ("isolation_forest", trend_hub.isolation),
+            ("vae_anomaly", trend_hub.vae),
+        ]
+        missing = [name for name, state in required_states if not state.available]
+        if missing:
+            raise RuntimeError("M7 startup failed (entry model disabled): missing required model(s): " + ", ".join(missing))
     unsup_hub = UnsupervisedRegimeHub()
     _m7_avail = sum([
         int(trend_hub.trend_xgb.available),
@@ -2496,9 +2634,25 @@ async def main(use_local=False):
         """한 사이클: DSAC_ONLY 판단 + 집행."""
         nonlocal _prev_meta_pos
         nonlocal live_hmm_steps
-        processed_df = _prune_runtime_features(processed_df)
 
         meta_router.decrement_cooldown()
+        _required_last_cols = set(ELITE_BUILDER_REQUIRED_COLS) | set(NF_RUNTIME_REQUIRED_COLS) | {"close"}
+        _missing_last = [c for c in sorted(_required_last_cols) if c not in processed_df.columns]
+        if _missing_last:
+            raise RuntimeError(f"[LIVE_REQUIRED_FEATURE_MISSING] {','.join(_missing_last)}")
+        _last_row = processed_df.iloc[-1]
+        _invalid_last = []
+        for _col in sorted(_required_last_cols):
+            try:
+                _v = float(_last_row[_col])
+            except Exception:
+                _invalid_last.append(_col)
+                continue
+            if not np.isfinite(_v):
+                _invalid_last.append(_col)
+        if _invalid_last:
+            raise RuntimeError(f"[LIVE_REQUIRED_FEATURE_INVALID] {','.join(_invalid_last)}")
+
         ens_preds = None
         ens_confs = None
         try:
@@ -2550,7 +2704,7 @@ async def main(use_local=False):
             )
             for _sig_col, _sig_val in _pre_elite.items():
                 if isinstance(_sig_col, str) and _sig_col.startswith("sig_"):
-                    processed_df[_sig_col] = float(_sig_val)
+                    processed_df.at[_last_idx, _sig_col] = float(_sig_val)
         except Exception as _pre_e:
             logger.debug("M7용 elite signals 사전 계산 실패: %s", _pre_e)
 
@@ -2562,9 +2716,8 @@ async def main(use_local=False):
             trend_signal = _trend_signal_from_m7(m7_last)
         except Exception as e:
             logger.warning(f"SevenModelEnsemble 추론 실패: {e}")
-            if LIVE_STRICT_FEATURE_GUARD:
-                logger.warning("⚠️ LIVE strict guard: M7 피처 생성 실패로 이번 사이클 스킵")
-                return
+            logger.warning("M7 피처 생성 실패로 이번 사이클 스킵")
+            return
 
         # DSAC 입력용 NF pred/conf 채우기:
         # 1) processed_df 마지막 행 우선 (pred/conf 쌍이 모두 유효할 때만 채움)
@@ -2639,10 +2792,8 @@ async def main(use_local=False):
                 m7_signal=trend_signal,
             )
         except Exception as e:
-            if LIVE_STRICT_FEATURE_GUARD:
-                logger.warning("⚠️ LIVE strict guard: DSAC 입력 피처 검증 실패로 사이클 스킵: %s", e)
-                return
-            raise
+            logger.warning("DSAC 입력 피처 검증 실패로 사이클 스킵: %s", e)
+            return
         if live_hmm is not None:
             live_hmm_steps += 1
             if live_hmm_steps % 24 == 0:
@@ -2662,35 +2813,7 @@ async def main(use_local=False):
         regime_name = next((k.replace('regime_', '').upper() for k, v in regime.items() if v == 1.0), 'UNKNOWN')
         signal_gap_hist.append(float(info.get("raw_action", 0.0)))
 
-        # ── 보조 필터 계수 계산 ─────────────────────────────────────────
-
-        # BTC 3봉 수익률 (ETH-BTC 상관 필터용)
-        _btc_3bar_ret = 0.0
-        if 'close_btc' in processed_df.columns and len(processed_df) >= 4:
-            _btc_arr = processed_df['close_btc'].values
-            _btc_base = float(_btc_arr[-4]) if abs(float(_btc_arr[-4])) > 1e-8 else 1.0
-            _btc_3bar_ret = float((_btc_arr[-1] - _btc_base) / _btc_base)
-
-        # 안티 찹: 최근 N봉 방향 전환 횟수
-        _aux_chop_factor = 1.0
-        if meta_router.chop_filter_enable and len(processed_df) >= meta_router.chop_window + 2:
-            _cls = processed_df['close'].values[-(meta_router.chop_window + 2):]
-            _dirs = np.sign(np.diff(_cls.astype(np.float64)))
-            _nonzero = _dirs[_dirs != 0]
-            if len(_nonzero) >= 2:
-                _turns = int(np.sum(np.diff(_nonzero) != 0))
-                if _turns >= meta_router.chop_turns_max:
-                    _aux_chop_factor = float(meta_router.chop_kelly_scale)
-
-        # 거래량 확인
-        _aux_volume_factor = 1.0
-        if meta_router.volume_confirm_enable and 'volume' in processed_df.columns:
-            _vols = processed_df['volume'].values
-            if len(_vols) >= 21:
-                _vol_mean = float(np.mean(_vols[-21:-1]))
-                _vol_cur  = float(_vols[-1])
-                if _vol_mean > 1e-8 and (_vol_cur / _vol_mean) < meta_router.volume_min_ratio:
-                    _aux_volume_factor = float(meta_router.volume_low_kelly)
+        # ── 이상치 감지 (hibernation EXIT 전용) ─────────────────────────
         _iso_anom = bool(float((trend_signal or {}).get("m7_iso_anom", 0.0)) >= 0.5)
         _vae_anom = bool(float((trend_signal or {}).get("m7_vae_anom", 0.0)) >= 0.5)
         _vae_err = float((trend_signal or {}).get("m7_vae_error", 0.0) or 0.0)
@@ -2709,41 +2832,68 @@ async def main(use_local=False):
         # ── DSAC + M7 다요소 융합 (방향/사이즈/레짐/이상치/보유시간) ──
         prev_meta_pos = _prev_meta_pos
         if DSAC_ONLY_MODE:
-            _garch_vol_z = float(processed_df.iloc[-1].get('garch_vol_z', 0.0))
-            _kelly = float(np.clip(dsac_lev * meta_router.vol_scale(_garch_vol_z, 0.0), 0.0, 1.0))
-            _fa = int(dsac_action)
-            _dsac_only_source = "DSAC_ONLY"
+            _dsac_only_source = "DSAC_PURE_RL" if DSAC_PURE_RL_MODE else "DSAC_ONLY"
             _hold_reason = str(info.get("hold_reason", ""))
             _block_reason = ""
-            _long_raw = float(info.get("_long_raw", info.get("long_edge", 0.0)))
-            _short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
             _trend_exit_score = 0.0
-            _live_unr = 0.0
-            if meta_router.pos is not None and meta_router.entry_price > 0:
-                _live_unr = float(meta_router._net_pnl_frac(current_price))
+
+            # 순수 RL 모드: 학습 추론 결과(action/kelly)를 그대로 집행한다.
+            # (게이트/스케일링/보호 레이어를 거치지 않음)
+            if DSAC_PURE_RL_MODE:
+                _la = int(info.get("_long_action", 0))
+                _sa = int(info.get("_short_action", 0))
+                _pa = int(info.get("primary_action", 0))
+                _lk = float(np.clip(info.get("_long_kelly", 0.0), 0.0, 1.0))
+                _sk = float(np.clip(info.get("_short_kelly", 0.0), 0.0, 1.0))
+                _pk = float(np.clip(info.get("primary_kelly", 0.0), 0.0, 1.0))
+                _ll = float(info.get("long_logit", 0.0))
+                _sl = float(info.get("short_logit", 0.0))
+                _flip_min = float(os.getenv("DSAC_PURE_RL_FLIP_MIN", "0.70"))
+                _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "0.40"))
+
+                _fa = 0
+                _kelly = 0.0
+                if meta_router.pos is None:
+                    if _la == 1 and _sa != 2:
+                        _fa, _kelly = 1, min(_lk, _max_kelly)
+                    elif _sa == 2 and _la != 1:
+                        _fa, _kelly = 2, min(_sk, _max_kelly)
+                    elif _la == 1 and _sa == 2:
+                        if abs(_ll) >= abs(_sl):
+                            _fa, _kelly = 1, min(_lk, _max_kelly)
+                        else:
+                            _fa, _kelly = 2, min(_sk, _max_kelly)
+                    elif _pa in (1, 2):
+                        _fa, _kelly = _pa, min(_pk, _max_kelly)
+                elif meta_router.pos == "LONG":
+                    _live_unr = float(meta_router._net_pnl_frac(current_price))
+                    if _live_unr <= -0.025:
+                        _fa, _kelly = 0, 0.0
+                        _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif _la == 0:
+                        _fa, _kelly = 0, 0.0
+                    elif _sa == 2 and _sk >= _flip_min:
+                        _fa, _kelly = 2, min(_sk, _max_kelly)
+                    else:
+                        _fa, _kelly = 1, min((_lk if _la == 1 else float(meta_router.current_leverage)), _max_kelly)
+                else:  # SHORT
+                    _live_unr = float(meta_router._net_pnl_frac(current_price))
+                    if _live_unr <= -0.025:
+                        _fa, _kelly = 0, 0.0
+                        _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
+                    elif _sa == 0:
+                        _fa, _kelly = 0, 0.0
+                    elif _la == 1 and _lk >= _flip_min:
+                        _fa, _kelly = 1, min(_lk, _max_kelly)
+                    else:
+                        _fa, _kelly = 2, min((_sk if _sa == 2 else float(meta_router.current_leverage)), _max_kelly)
+                _kelly = float(np.clip(_kelly, 0.0, 1.0))
+            else:
+                _kelly = float(np.clip(dsac_lev, 0.0, 1.0))
+                _fa = int(dsac_action)
                 _position_signal = str(info.get("position_signal", "HOLD"))
                 _position_reason = str(info.get("position_reason", ""))
-                _own_support = float(info.get("own_support", 0.0))
-                _opp_pressure = float(info.get("opp_pressure", 0.0))
-                _net_edge = float(info.get("net_edge", 0.0))
-                _trend_exit, _trend_exit_score, _trend_exit_reason = meta_router.update_trend_mismatch(processed_df, trend_signal)
-                # 단계별 수익 보호 스탑 (브레이크이븐 포함) — 기존 하드스탑 대체
-                _step_floor   = meta_router.step_stop_floor()
-                _cur_lev_gain = _live_unr
-                if _cur_lev_gain <= _step_floor:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = ("DSAC_STEP_STOP" if meta_router.peak_equity >= 1.006
-                                         else "DSAC_ONLY_HARD_STOP")
-                elif meta_router.should_trailing_stop():
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_TRAILING_STOP"
-                elif meta_router.hold_count >= max(1, meta_router.dsac_only_max_hold):
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_MAX_HOLD"
-                elif _position_signal == "EXIT":
+                if _position_signal == "EXIT":
                     _fa = 0
                     _kelly = 0.0
                     _dsac_only_source = f"DSAC_LOGIT_EXIT:{_position_reason or 'RULE'}"
@@ -2751,73 +2901,16 @@ async def main(use_local=False):
                     _fa = 1 if meta_router.pos == "LONG" else 2
                     _kelly = float(np.clip(_kelly, 0.0, 1.0))
                     _dsac_only_source = f"DSAC_LOGIT_REDUCE:{_position_reason or 'RULE'}"
-                elif _trend_exit:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = _trend_exit_reason
-                info["position_signal"] = _position_signal
-                info["position_reason"] = _position_reason
-                info["own_support"] = float(_own_support)
-                info["opp_pressure"] = float(_opp_pressure)
-                info["net_edge"] = float(_net_edge)
-            else:
-                meta_router.trend_mismatch_streak = 0
-            if meta_router.hibernation_enable and _hib_score >= meta_router.hibernation_score_th:
-                meta_router.cooldown_bars_left = max(meta_router.cooldown_bars_left, meta_router.hibernation_bars)
-                if meta_router.pos is not None:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_HIBERNATION_EXIT"
-                else:
-                    _dsac_only_source = "DSAC_HIBERNATION_ARMED"
-                _block_reason = "hibernation"
-            if meta_router.dsac_only_cooldown_enable and meta_router.cooldown_bars_left > 0 and meta_router.pos is None and _fa != 0:
-                _fa = 0
-                _kelly = 0.0
-                _dsac_only_source = "DSAC_ONLY_COOLDOWN"
-                _block_reason = "cooldown"
-            # 신규 진입 시에는 SIGNAL과 중기추세 정렬을 요구
-            if _fa != 0 and meta_router.pos is None:
-                _signal_side = 1 if _fa == 1 else -1
-                _trend_dir = int((trend_signal or {}).get("trend_dir", 1))
-                _trend_side = 1 if _trend_dir == 2 else (-1 if _trend_dir == 0 else 0)
-                if _fa != 0 and _trend_side == 0:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_TREND_FLAT_BLOCK"
-                    _block_reason = "trend_flat"
-                elif _fa != 0 and _signal_side != _trend_side:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_TREND_MISMATCH_BLOCK"
-                    _block_reason = "trend_mismatch"
-                elif _fa != 0 and meta_router.integral_enable:
-                    _gap_ma = float(np.mean(np.abs(np.asarray(signal_gap_hist, dtype=np.float64)))) if signal_gap_hist else 0.0
-                    _same_sign = len(signal_gap_hist) >= max(2, meta_router.integral_window) and len({int(np.sign(x)) for x in signal_gap_hist if abs(x) > 1e-8}) <= 1
-                    if len(signal_gap_hist) < meta_router.integral_window or _gap_ma < meta_router.integral_min_gap or (meta_router.integral_require_sign and not _same_sign):
-                        _fa = 0
-                        _kelly = 0.0
-                        _dsac_only_source = "DSAC_INTEGRAL_BLOCK"
-                        _block_reason = "integral"
-                if _fa != 0:
-                    _regime_key = str((trend_signal or {}).get("regime_name", "")).strip().lower()
-                    if not _regime_key:
-                        _regime_key = str(regime_name).strip().lower()
-                    if _regime_key == "chop":
-                        _kelly = float(np.clip(_kelly * meta_router.dsac_only_chop_entry_kelly_mult, 0.0, 1.0))
-                        if _dsac_only_source == "DSAC_ONLY":
-                            _dsac_only_source = "DSAC_ONLY_CHOP_SIZE"
-                    elif _regime_key == "whipsaw":
-                        _kelly = float(np.clip(_kelly * meta_router.dsac_only_whipsaw_entry_kelly_mult, 0.0, 1.0))
-                        if _dsac_only_source == "DSAC_ONLY":
-                            _dsac_only_source = "DSAC_ONLY_WHIPSAW_SIZE"
-            # 신규 진입 시 보조 필터(VAE/BTC/안티찹/거래량)만 적용
+
+            meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
+
             _sizing_diag = {
                 "bayes_mult": 1.0,
                 "qwidth_mult": 1.0,
                 "mtf_mult": 1.0,
                 "smart_mult": 1.0,
                 "mdd_mult": 1.0,
+                "illiquidity_mult": 1.0,
                 "bayes_z": 0.0,
                 "qwidth": 0.0,
                 "mtf_align": 0.0,
@@ -2826,103 +2919,11 @@ async def main(use_local=False):
                 "recent_pnl_sum": 0.0,
                 "loss_streak": int(meta_router.loss_streak),
             }
-            if _fa != 0 and meta_router.pos is None:
-                if _iso_anom and _vae_anom and _vae_ratio >= meta_router.dsac_only_vae_block_ratio:
-                    _fa = 0
-                    _kelly = 0.0
-                    _dsac_only_source = "DSAC_ONLY_ISO_VAE_BLOCK"
-                _amihud = float(processed_df.iloc[-1].get("amihud_illiquidity_z", 0.0) or 0.0)
-                _rs_vol = float(processed_df.iloc[-1].get("rogers_satchell_vol", 0.0) or 0.0)
-                if _fa != 0 and meta_router.illiquidity_veto_enable:
-                    if _amihud >= meta_router.illiquidity_amihud_th or (_rs_vol >= meta_router.illiquidity_rsvol_th and float(processed_df.iloc[-1].get("m7_gmm_vol_rank", 0.0) or 0.0) >= meta_router.illiquidity_vol_rank_th):
-                        _fa = 0
-                        _kelly = 0.0
-                        _dsac_only_source = "DSAC_ILLIQUID_VETO"
-                        _block_reason = "illiquidity"
-                _btc_fac  = 1.0
-                if meta_router.btc_corr_enable and abs(_btc_3bar_ret) >= meta_router.btc_corr_move_th:
-                    _intended_side_dsac = 1 if _fa == 1 else -1
-                    _btc_up  = _btc_3bar_ret > 0
-                    _aligned = (_btc_up and _intended_side_dsac > 0) or (not _btc_up and _intended_side_dsac < 0)
-                    _btc_fac = meta_router.btc_corr_align_boost if _aligned else meta_router.btc_corr_misalign
-                if _fa != 0:
-                    _last_row = processed_df.iloc[-1]
-                    _sel_logit = float(info.get("long_logit", 0.0)) if _fa == 1 else float(info.get("short_logit", 0.0))
-                    _sel_std = float(max(info.get("long_std", 1.0), 1e-6)) if _fa == 1 else float(max(info.get("short_std", 1.0), 1e-6))
-                    _bayes_z = float(_sel_logit / max(_sel_std, 1e-6))
-                    _bayes_mult = 1.0
-                    if meta_router.sizing_bayes_enable:
-                        _bayes_score = 0.5 + 0.5 * np.tanh(_bayes_z / max(meta_router.sizing_bayes_z_scale, 1e-6))
-                        _bayes_mult = float(np.clip(
-                            meta_router.sizing_bayes_min_mult
-                            + (meta_router.sizing_bayes_max_mult - meta_router.sizing_bayes_min_mult) * _bayes_score,
-                            meta_router.sizing_bayes_min_mult,
-                            meta_router.sizing_bayes_max_mult,
-                        ))
-                    _qwidth = float(max(0.0, (trend_signal or {}).get("m7_qwidth", 0.0) or 0.0))
-                    _qwidth_mult = 1.0
-                    if meta_router.sizing_qwidth_enable and _qwidth > 1e-8:
-                        _qwidth_mult = float(np.clip(
-                            meta_router.sizing_qwidth_ref / max(_qwidth, 1e-8),
-                            meta_router.sizing_qwidth_min_mult,
-                            meta_router.sizing_qwidth_max_mult,
-                        ))
-                    _mtf1 = float(_last_row.get("mtf_trend_1h", 0.0) or 0.0)
-                    _mtf4 = float(_last_row.get("mtf_trend_4h", 0.0) or 0.0)
-                    _side_sign = 1.0 if _fa == 1 else -1.0
-                    _mtf_align = int((_side_sign * _mtf1) > 0.0) + int((_side_sign * _mtf4) > 0.0)
-                    _mtf_mult = 1.0
-                    if meta_router.sizing_mtf_enable:
-                        if _mtf_align >= 2:
-                            _mtf_mult = float(meta_router.sizing_mtf_full_mult)
-                        elif _mtf_align == 1:
-                            _mtf_mult = float(meta_router.sizing_mtf_partial_mult)
-                    _smart_flow = float(_last_row.get("smart_money_flow", 0.0) or 0.0)
-                    _taker_accel = float(_last_row.get("taker_acceleration", 0.0) or 0.0)
-                    _smart_mult = 1.0
-                    if meta_router.sizing_smart_enable:
-                        _smart_sign = np.sign(_smart_flow)
-                        if _smart_sign != 0.0:
-                            _smart_mult = float(
-                                meta_router.sizing_smart_same_sign_mult
-                                if _smart_sign == _side_sign
-                                else meta_router.sizing_smart_opp_sign_mult
-                            )
-                        if np.sign(_taker_accel) == _side_sign and abs(_taker_accel) >= meta_router.sizing_taker_boost_th:
-                            _smart_mult = float(_smart_mult * meta_router.sizing_taker_boost_mult)
-                    _recent_window = max(1, int(meta_router.sizing_recent_pnl_window))
-                    _recent_vals = list(meta_router.recent_realized)[-_recent_window:]
-                    _recent_pnl_sum = float(sum(_recent_vals)) if _recent_vals else 0.0
-                    _mdd_mult = 1.0
-                    if meta_router.sizing_mdd_enable:
-                        if meta_router.loss_streak >= max(1, meta_router.sizing_mdd_loss_streak_th) or _recent_pnl_sum <= meta_router.sizing_recent_pnl_cut:
-                            _mdd_mult = float(meta_router.sizing_mdd_reduce_mult)
-                    _kelly = float(np.clip(
-                        _kelly * _btc_fac * _aux_chop_factor * _aux_volume_factor
-                        * _bayes_mult * _qwidth_mult * _mtf_mult * _smart_mult * _mdd_mult,
-                        0.0, 1.0,
-                    ))
-                    _sizing_diag.update({
-                        "bayes_mult": float(_bayes_mult),
-                        "qwidth_mult": float(_qwidth_mult),
-                        "mtf_mult": float(_mtf_mult),
-                        "smart_mult": float(_smart_mult),
-                        "mdd_mult": float(_mdd_mult),
-                        "bayes_z": float(_bayes_z),
-                        "qwidth": float(_qwidth),
-                        "mtf_align": float(_mtf_align),
-                        "smart_flow": float(_smart_flow),
-                        "taker_accel": float(_taker_accel),
-                        "recent_pnl_sum": float(_recent_pnl_sum),
-                        "loss_streak": int(meta_router.loss_streak),
-                    })
-            if _fa == 0:
-                _kelly = 0.0
-            meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
             meta_result = {
                 "final_action": _fa,
                 "unified_kelly": _kelly,
                 "source": _dsac_only_source,
+                "enhanced_source": _dsac_only_source,
                 "rl_score": float(info.get("score", 0.0)),
                 "rl_action": _fa,
                 "trend_signal": trend_signal,
@@ -2975,11 +2976,14 @@ async def main(use_local=False):
             if realized is None:
                 realized = float(meta_router.cur_equity - 1.0)
             trade_pnl_pct = float(realized) * 100.0
+            enhanced_engine.on_trade_close(float(realized))
             meta_router.record_outcome(float(realized))
             meta_router.append_trade_history(current_time_kst, float(realized))
 
         # ── 텔레그램 알림: 포지션이 바뀐 경우만 (ENTER / EXIT / FLIP) ──
         _new_pos = meta_router.pos
+        if _prev_meta_pos is None and _new_pos is not None:
+            enhanced_engine.on_position_open()
         if _prev_meta_pos is None and _new_pos is not None and trade_pnl_pct is None:
             trade_pnl_pct = 0.0
         if trade_pnl_pct is not None:
@@ -3016,6 +3020,13 @@ async def main(use_local=False):
         # 출력: COMPACT_MODE면 요약 패널만, 아니면 설명(상세) 로그를 아래에 출력
         if not COMPACT_MODE:
             meta_router.print_meta_dashboard(meta_result, current_price)
+            if "enhanced_diag" in info:
+                enhanced_engine.print_enhanced_dashboard({
+                    "action": _fa,
+                    "kelly": _kelly,
+                    "source": _dsac_only_source,
+                    "diagnostics": info.get("enhanced_diag", {}),
+                })
         logger.info("📊 %s", meta_router.performance_summary(current_time_kst))
 
     try:
@@ -3032,7 +3043,6 @@ async def main(use_local=False):
         if eth_buffer is None: return
         try:
             processed_boot = fe_engine.process(eth_buffer, btc_buffer)
-            processed_boot = _prune_runtime_features(processed_boot)
         except Exception as e:
             logger.error("❌ 초기 피처 처리 실패: %s", e)
             return
@@ -3085,7 +3095,6 @@ async def main(use_local=False):
                 first_run = False
 
             processed_df = fe_engine.process(eth_buffer, btc_buffer)
-            processed_df = _prune_runtime_features(processed_df)
             await _run_cycle(processed_df, eth_buffer)
 
     finally:

@@ -1,0 +1,41 @@
+{
+  "config": {
+    "csv_path": "data/splits/year_oos/rl_training_2025_m7.csv",
+    "ckpt_path": "data/ensemble/ckpt/best_dsac_agents.pth",
+    "test_start": "2025-10-01 00:00:00",
+    "test_end": "2025-12-31 23:55:00",
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "hmm_fit_iter": 30,
+    "device": "cpu",
+    "train_rows": 78568,
+    "test_rows": 26496
+  },
+  "fast": {
+    "mode": "fast",
+    "pnl_pct": 606.7814893930357,
+    "trades": 1632,
+    "wr_pct": 49.26470588235294,
+    "avg_hold_bars": 13.939338235294118,
+    "median_hold_bars": 9.0,
+    "elapsed_sec": 16.064155101776123
+  },
+  "slow": {
+    "mode": "slow",
+    "pnl_pct": 606.7814893930357,
+    "trades": 1632,
+    "wr_pct": 49.26470588235294,
+    "avg_hold_bars": 13.939338235294118,
+    "median_hold_bars": 9.0,
+    "elapsed_sec": 140.52569818496704
+  },
+  "delta": {
+    "pnl_pct": 0.0,
+    "trades": 0,
+    "wr_pct": 0.0,
+    "avg_hold_bars": 0.0,
+    "median_hold_bars": 0.0,
+    "elapsed_sec": 124.46154308319092,
+    "runtime_ratio_slow_over_fast": 8.747780215931176
+  }
+}

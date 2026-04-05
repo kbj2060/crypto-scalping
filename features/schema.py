@@ -28,6 +28,15 @@ STATE_ALPHA = [
 ]
 STATE_SYNTH = ["ofti", "kel"]
 
+# NF 추론(PatchTST/TiDE)에서 close 외 exog 계산 시 필요한 선행 컬럼들.
+# 런타임/학습 프루닝에서 빠지면 funding_pressure KeyError가 발생할 수 있다.
+NF_RUNTIME_REQUIRED_COLS = [
+    "whale_conviction",
+    "funding_abs",
+    "funding_pressure",
+    "cvp_vah_val_width",
+]
+
 # RL/라이브 공통으로 반드시 유지할 베이스 마켓 컬럼
 MARKET_BASE_COLS = [
     "timestamp",
@@ -83,7 +92,6 @@ ELITE_BUILDER_REQUIRED_COLS = [
     "funding_roc_288",
     "cvp_cluster_position",
     "fibonacci_level",
-    "count_toptrader_long_short_ratio",
     "count_long_short_ratio",
     "btc_corr_60",
     "eth_btc_ratio_change",
@@ -119,6 +127,7 @@ def build_rl_feature_keep(include_entry_price: bool = False) -> set[str]:
     cols.update(STATE_ALPHA)
     cols.update(STATE_REGIME)
     cols.update(STATE_SYNTH)
+    cols.update(NF_RUNTIME_REQUIRED_COLS)
     cols.update(get_m7_columns("rl_keep", include_entry_price=include_entry_price))
     return cols
 

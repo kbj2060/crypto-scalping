@@ -711,8 +711,10 @@ class UnifiedNFForecaster:
         self.available = UnifiedNFForecaster._available
 
     def predict(self, df, horizon=6):
-        if not self.available or len(df) < 256:
-            return PredictionOutput(median=np.zeros((1, horizon)), confidence=np.ones((1, horizon))*0.5)
+        if not self.available:
+            raise RuntimeError(f"{self.model_type} unavailable: NeuralForecast model pack is not loaded")
+        if len(df) < 256:
+            raise RuntimeError(f"{self.model_type} requires at least 256 rows, got {len(df)}")
         
         try:
             # ── Synthetic alpha 4종 인라인 계산 ──
@@ -754,9 +756,11 @@ class UnifiedNFForecaster:
             # NF 입력 구성 (close + 11개 exog)
             df_nf = df[['close'] + self.exog_cols].tail(256).copy()
             
-            # 💡 [Pandas 버전 호환성 패치] fillna(method) 대신 ffill() 전용 메서드 사용
+            # Live strict: forward-fill only; any residual NaN is treated as schema/data failure.
             df_nf.ffill(inplace=True)
-            df_nf.fillna(0.0, inplace=True)
+            nan_cols = [c for c in df_nf.columns if bool(df_nf[c].isna().any())]
+            if nan_cols:
+                raise ValueError(f"{self.model_type} NaN remains after ffill: {','.join(nan_cols)}")
             
             df_nf['ds'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df_nf), freq='5min')
             df_nf['unique_id'] = 'ETH'
@@ -771,9 +775,8 @@ class UnifiedNFForecaster:
             return PredictionOutput(median=np.array([pred]), confidence=np.ones((1, horizon)) * 0.5)
             
         except Exception as e:
-            # 숨겨져 있던 에러를 보이도록 ERROR 레벨로 출력
             logger.error(f"🔥 {self.model_type} 추론 실패 상세 에러: {e}")
-            return PredictionOutput(median=np.zeros((1, horizon)), confidence=np.ones((1, horizon))*0.5)
+            raise
 
 # ── 각 모델별 클래스 매핑 ──
 class PatchTSTForecaster(UnifiedNFForecaster):

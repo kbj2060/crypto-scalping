@@ -14,7 +14,8 @@
       "Bash(python3:*)",
       "Bash(head -30 grep -rn \"hh_count_24\\\\|hl_count_24\\\\|ret_12\\\\|regime_bull\\\\|regime_bear\\\\|regime_chop\\\\|svps\\\\|fcsz\\\\|fvci\\\\|vebr\\\\|dual_momentum\\\\|mean_reversion_z\" /home/llewyn/crypto-scalping/features/ --include=\"*.py\")",
       "Bash(/tmp/m7_gap_analysis.md:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(codex exec:*)"
     ]
   }
 }

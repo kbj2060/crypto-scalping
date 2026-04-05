@@ -1,0 +1,56 @@
+{
+  "csv_path": "data/splits/year_oos/training_features_2025_union.csv",
+  "start": "2025-12-30 23:55:00",
+  "end": "2025-12-31 23:55:00",
+  "rows": 289,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "metrics": {
+    "pnl_pct": -0.15913236141986697,
+    "mdd_pct": -0.17550741337138964,
+    "trades": 2,
+    "wr_pct": 0.0,
+    "long_entries": 0,
+    "short_entries": 2,
+    "avg_hold_long": 0.0,
+    "avg_hold_short": 7.0,
+    "avg_lev_long": 0.0,
+    "avg_lev_short": 0.15945403482089035,
+    "cross_exit": 2,
+    "ambiguity_exit": 0,
+    "reduce_hits": 14,
+    "max_hold_exit": 0,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 0,
+    "trend_mismatch_block": 0,
+    "iso_vae_block": 0
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-12-31 13:55:00",
+        "side": "SHORT",
+        "entry_price": 2989.99,
+        "exit_price": 2995.59,
+        "lev": 0.11658065451595183,
+        "hold_bars": 14,
+        "pnl_frac": -0.00038165536923073784,
+        "exit_source": "DSAC_LOGIT_EXIT:OPP_PRESSURE"
+      },
+      {
+        "ts": "2025-12-31 16:50:00",
+        "side": "SHORT",
+        "entry_price": 2968.62,
+        "exit_price": 2973.99,
+        "lev": 0.37701986312866215,
+        "hold_bars": 0,
+        "pnl_frac": -0.001210130097617168,
+        "exit_source": "DSAC_LOGIT_EXIT:OPP_PRESSURE"
+      }
+    ],
+    "final_balance": 0.9984086763858013
+  }
+}

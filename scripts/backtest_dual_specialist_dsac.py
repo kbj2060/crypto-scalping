@@ -130,11 +130,16 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
         os.environ["FUSE_ADAPT_STATE_PATH"] = os.path.join(tmpdir, "adapt_state.json")
 
         from features.m7 import trend_signal_from_m7
+        from features.schema import STATE_PRED as DSAC_STATE_PRED, STATE_CONF as DSAC_STATE_CONF
         from trading_bot import DSACSignalRouter, DSACTrendRouter
 
         dsac_router = DSACSignalRouter(long_path=long_ckpt, short_path=short_ckpt)
         meta_router = DSACTrendRouter()
         meta_router.online_adapt = False
+        # Backtest loop performance: disable per-step live-state fsync.
+        meta_router._save_live_state = lambda *args, **kwargs: None
+        flat_override_min_votes = int(os.getenv("DSAC_FLAT_OVERRIDE_MIN_VOTES", "3"))
+        flat_override_kelly_mult = float(os.getenv("DSAC_FLAT_OVERRIDE_KELLY_MULT", "0.60"))
 
         def _sync_dsac_with_meta() -> None:
             dsac_router.pos = meta_router.pos
@@ -167,7 +172,62 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
             _sync_dsac_with_meta()
 
             row_dict = last_row.to_dict()
+            if "m7_prob_dn" not in row_dict:
+                row_dict["m7_prob_dn"] = _safe_float(row_dict.get("prob_dn", row_dict.get("m7_trend_xgb_dn", 0.0)))
+            if "m7_prob_fl" not in row_dict:
+                row_dict["m7_prob_fl"] = _safe_float(row_dict.get("prob_flat", row_dict.get("m7_trend_xgb_fl", 0.0)))
+            if "m7_prob_up" not in row_dict:
+                row_dict["m7_prob_up"] = _safe_float(row_dict.get("prob_up", row_dict.get("m7_trend_xgb_up", 0.0)))
+            m7_defaults = {
+                "m7_trend_xgb_dn": 1.0 / 3.0,
+                "m7_trend_xgb_fl": 1.0 / 3.0,
+                "m7_trend_xgb_up": 1.0 / 3.0,
+                "m7_confidence": 0.0,
+                "m7_action": 0.0,
+                "m7_size": 0.0,
+                "m7_gate_block": 0.0,
+                "m7_hdb_label": -1.0,
+                "m7_hdb_prob": 0.0,
+                "m7_iso_score": 0.0,
+                "m7_iso_pred": 1.0,
+                "m7_iso_anom": 0.0,
+                "m7_vae_error": 0.0,
+                "m7_vae_threshold": 0.0,
+                "m7_vae_anom": 0.0,
+                "m7_q10": 0.0,
+                "m7_q50": 0.0,
+                "m7_q90": 0.0,
+                "m7_qwidth": 0.0,
+                "m7_quality_pred": 0.0,
+                "m7_hold_pred": 0.0,
+                "m7_target_hold": 0.0,
+                "m7_entry_long_offset": 0.0,
+                "m7_entry_short_offset": 0.0,
+                "m7_entry_long_price": 0.0,
+                "m7_entry_short_price": 0.0,
+                "m7_tp_offset": 0.0,
+                "m7_sl_offset": 0.0,
+                "m7_tp_price": 0.0,
+                "m7_sl_price": 0.0,
+                "m7_gmm_cluster": -1.0,
+                "m7_gmm_conf": 0.0,
+                "m7_gmm_vol_rank": 0.5,
+                "m7_expected_ret": 0.0,
+                "m7_tail_risk": 0.0,
+                "m7_composite_score": 0.0,
+            }
+            for k, v in m7_defaults.items():
+                if k not in row_dict:
+                    row_dict[k] = v
             nf_preds = dict(row_dict)
+            pred_fallback = _safe_float(nf_preds.get("pred_patchtst", 0.0))
+            conf_fallback = float(np.clip(_safe_float(nf_preds.get("conf_patchtst", 0.5), 0.5), 0.0, 1.0))
+            for c in DSAC_STATE_PRED:
+                if c not in nf_preds:
+                    nf_preds[c] = pred_fallback
+            for c in DSAC_STATE_CONF:
+                if c not in nf_preds:
+                    nf_preds[c] = conf_fallback
             trend_signal = trend_signal_from_m7(row_dict)
             dsac_action, dsac_lev, info, _, _ = dsac_router.decide(processed_df, nf_preds, m7_signal=trend_signal)
 
@@ -186,21 +246,9 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
             short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
 
             if meta_router.pos is not None:
-                own_raw = long_raw if meta_router.pos == "LONG" else short_raw
-                opp_raw = short_raw if meta_router.pos == "LONG" else long_raw
                 live_unr = float(meta_router._net_pnl_frac(current_price))
-                cross_exit_flag = bool(opp_raw >= 0.50 and own_raw < 0.30)
-                ambiguity_reduce = bool(
-                    long_raw >= meta_router.dsac_dual_reduce_min
-                    and short_raw >= meta_router.dsac_dual_reduce_min
-                )
-                if ambiguity_reduce:
-                    meta_router.dsac_dual_ambiguity_streak += 1
-                else:
-                    meta_router.dsac_dual_ambiguity_streak = 0
-                ambiguity_exit_flag = bool(
-                    meta_router.dsac_dual_ambiguity_streak >= max(1, meta_router.dsac_dual_ambig_exit_streak)
-                )
+                position_signal = str(info.get("position_signal", "HOLD"))
+                position_reason = str(info.get("position_reason", ""))
                 trend_exit_flag, _, trend_exit_reason = meta_router.update_trend_mismatch(processed_df, trend_signal)
                 step_floor = meta_router.step_stop_floor()
                 if live_unr <= step_floor:
@@ -218,20 +266,15 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                     kelly = 0.0
                     source = "DSAC_ONLY_MAX_HOLD"
                     max_hold_exit += 1
-                elif cross_exit_flag:
+                elif position_signal == "EXIT":
                     fa = 0
                     kelly = 0.0
-                    source = "DSAC_ONLY_CROSS_EXIT"
+                    source = f"DSAC_LOGIT_EXIT:{position_reason or 'RULE'}"
                     cross_exit += 1
-                elif ambiguity_exit_flag:
-                    fa = 0
-                    kelly = 0.0
-                    source = "DSAC_ONLY_AMBIGUITY_EXIT"
-                    ambiguity_exit += 1
-                elif ambiguity_reduce:
+                elif position_signal == "REDUCE":
                     fa = 1 if meta_router.pos == "LONG" else 2
-                    kelly = float(np.clip(kelly * 0.5, 0.0, 1.0))
-                    source = "DSAC_ONLY_REDUCE"
+                    kelly = float(np.clip(kelly, 0.0, 1.0))
+                    source = f"DSAC_LOGIT_REDUCE:{position_reason or 'RULE'}"
                     reduce_hits += 1
                 elif trend_exit_flag:
                     fa = 0
@@ -240,7 +283,6 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                     trend_exit += 1
             else:
                 meta_router.trend_mismatch_streak = 0
-                meta_router.dsac_dual_ambiguity_streak = 0
 
             if meta_router.cooldown_bars_left > 0 and meta_router.pos is None and fa != 0:
                 fa = 0
@@ -252,11 +294,16 @@ def _simulate_dual(df: pd.DataFrame, long_ckpt: str | None, short_ckpt: str | No
                 signal_side = 1 if fa == 1 else -1
                 trend_dir = int((trend_signal or {}).get("trend_dir", 1))
                 trend_side = 1 if trend_dir == 2 else (-1 if trend_dir == 0 else 0)
+                agreement_count = int(info.get("agreement_count", 0))
                 if trend_side == 0:
-                    fa = 0
-                    kelly = 0.0
-                    source = "DSAC_ONLY_TREND_FLAT_BLOCK"
-                    trend_flat_block += 1
+                    if agreement_count >= max(1, flat_override_min_votes):
+                        kelly = float(np.clip(kelly * flat_override_kelly_mult, 0.0, 1.0))
+                        source = "DSAC_TREND_FLAT_OVERRIDE"
+                    else:
+                        fa = 0
+                        kelly = 0.0
+                        source = "DSAC_ONLY_TREND_FLAT_BLOCK"
+                        trend_flat_block += 1
                 elif signal_side != trend_side:
                     fa = 0
                     kelly = 0.0

@@ -122,13 +122,14 @@ _FALLBACK_SIGNAL_GAIN = float(os.getenv("DSAC_FALLBACK_SIGNAL_GAIN", "8.0"))
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility functions (원본과 동일)
 # ─────────────────────────────────────────────────────────────────────────────
-def _safe_float(v: Any, default: float = 0.0) -> float:
+def _strict_float(v: Any, key: str = "?") -> float:
+    """누락·비유한 값은 즉시 ValueError 발생 — 0/nan으로 대체하지 않음."""
     try:
         x = float(v)
-    except Exception:
-        return float(default)
+    except Exception as e:
+        raise ValueError(f"Feature '{key}' cannot be cast to float: {v!r}") from e
     if not np.isfinite(x):
-        return float(default)
+        raise ValueError(f"Feature '{key}' is non-finite: {x}")
     return x
 
 
@@ -141,11 +142,12 @@ def _norm_tanh(x: float, scale: float) -> float:
     return float(np.tanh(float(x) / s))
 
 
-def _pick_first(features: dict[str, Any], keys: list[str], default: float = 0.0) -> float:
+def _require_first(features: dict[str, Any], keys: list[str]) -> float:
+    """후보 키 목록에서 처음 발견된 값을 반환. 하나도 없으면 KeyError 발생."""
     for k in keys:
         if k in features:
-            return _safe_float(features.get(k), default)
-    return float(default)
+            return _strict_float(features[k], k)
+    raise KeyError(f"None of required feature keys found: {keys}")
 
 
 def _normalize_prob3(dn: float, fl: float, up: float) -> tuple[float, float, float]:
@@ -230,38 +232,38 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         self._spread_mean_np = sp_mean.fillna(global_mean).to_numpy(dtype=np.float32)
         self._spread_std_np = sp_std.fillna(global_std).replace(0.0, global_std).to_numpy(dtype=np.float32)
 
-        self._garch_vol_z_np = self._col_or_default("garch_vol_z", 0.0)
-        self._mtf_trend_1h_np = self._col_or_default("mtf_trend_1h", 0.0)
-        self._mtf_trend_4h_np = self._col_or_default("mtf_trend_4h", 0.0)
-        self._smart_money_flow_np = self._col_or_default("smart_money_flow", 0.0)
-        self._taker_acceleration_np = self._col_or_default("taker_acceleration", 0.0)
-        self._rogers_satchell_vol_np = self._col_or_default("rogers_satchell_vol", 0.0)
-        self._amihud_illiquidity_z_np = self._col_or_default("amihud_illiquidity_z", 0.0)
-        self._jump_z_np = self._col_or_default("jump_z", 0.0)
-        self._evt_excess_z_np = self._col_or_default("evt_excess_z", 0.0)
-        self._jump_flag_np = self._col_or_default("jump_flag", 0.0)
-        self._evt_tail_flag_np = self._col_or_default("evt_tail_flag", 0.0)
+        self._garch_vol_z_np = self._require_col("garch_vol_z")
+        self._mtf_trend_1h_np = self._require_col("mtf_trend_1h")
+        self._mtf_trend_4h_np = self._require_col("mtf_trend_4h")
+        self._smart_money_flow_np = self._require_col("smart_money_flow")
+        self._taker_acceleration_np = self._require_col("taker_acceleration")
+        self._rogers_satchell_vol_np = self._require_col("rogers_satchell_vol")
+        self._amihud_illiquidity_z_np = self._require_col("amihud_illiquidity_z")
+        self._jump_z_np = self._require_col("jump_z")
+        self._evt_excess_z_np = self._require_col("evt_excess_z")
+        self._jump_flag_np = self._require_col("jump_flag")
+        self._evt_tail_flag_np = self._require_col("evt_tail_flag")
 
-        # M7 columns
-        self._m7_prob_up_np = self._col_or_none("m7_trend_xgb_up")
-        self._m7_prob_dn_np = self._col_or_none("m7_trend_xgb_dn")
-        self._m7_prob_fl_np = self._col_or_none("m7_trend_xgb_fl")
-        self._m7_quality_np = self._col_or_none("m7_quality_pred")
-        self._m7_hold_np = self._col_or_none("m7_hold_pred")
-        self._m7_q10_np = self._col_or_none("m7_q10")
-        self._m7_q50_np = self._col_or_none("m7_q50")
-        self._m7_q90_np = self._col_or_none("m7_q90")
-        self._m7_qwidth_np = self._col_or_none("m7_qwidth")
-        self._m7_gmm_cluster_np = self._col_or_none("m7_gmm_cluster")
-        self._m7_gmm_conf_np = self._col_or_none("m7_gmm_conf")
-        self._m7_gmm_vol_rank_np = self._col_or_none("m7_gmm_vol_rank")
-        self._m7_iso_score_np = self._col_or_none("m7_iso_score")
-        self._m7_iso_anom_np = self._col_or_none("m7_iso_anom")
-        self._m7_vae_error_np = self._col_or_none("m7_vae_error")
-        self._m7_vae_anom_np = self._col_or_none("m7_vae_anom")
-        self._m7_entry_short_offset_np = self._col_or_none("m7_entry_short_offset")
-        self._m7_tp_offset_np = self._col_or_none("m7_tp_offset")
-        self._m7_sl_offset_np = self._col_or_none("m7_sl_offset")
+        # M7 columns (augmentation 필수 실행 후 학습)
+        self._m7_prob_up_np = self._require_col("m7_trend_xgb_up")
+        self._m7_prob_dn_np = self._require_col("m7_trend_xgb_dn")
+        self._m7_prob_fl_np = self._require_col("m7_trend_xgb_fl")
+        self._m7_quality_np = self._require_col("m7_quality_pred")
+        self._m7_hold_np = self._require_col("m7_hold_pred")
+        self._m7_q10_np = self._require_col("m7_q10")
+        self._m7_q50_np = self._require_col("m7_q50")
+        self._m7_q90_np = self._require_col("m7_q90")
+        self._m7_qwidth_np = self._require_col("m7_qwidth")
+        self._m7_gmm_cluster_np = self._require_col("m7_gmm_cluster")
+        self._m7_gmm_conf_np = self._require_col("m7_gmm_conf")
+        self._m7_gmm_vol_rank_np = self._require_col("m7_gmm_vol_rank")
+        self._m7_iso_score_np = self._require_col("m7_iso_score")
+        self._m7_iso_anom_np = self._require_col("m7_iso_anom")
+        self._m7_vae_error_np = self._require_col("m7_vae_error")
+        self._m7_vae_anom_np = self._require_col("m7_vae_anom")
+        self._m7_entry_short_offset_np = self._require_col("m7_entry_short_offset")
+        self._m7_tp_offset_np = self._require_col("m7_tp_offset")
+        self._m7_sl_offset_np = self._require_col("m7_sl_offset")
 
         self._pred_slice = slice(0, self._n_pred)
         self._conf_slice = slice(self._n_pred, self._n_pred + self._n_conf)
@@ -273,39 +275,30 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         self.reset()
 
     # ── 헬퍼 ──
-    def _col_or_none(self, col: str) -> np.ndarray | None:
+    def _require_col(self, col: str) -> np.ndarray:
         if col not in self.df.columns:
-            return None
-        arr = pd.to_numeric(self.df[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            raise KeyError(f"Required training column missing: '{col}'")
+        arr = pd.to_numeric(self.df[col], errors="raise")
+        arr = arr.replace([np.inf, -np.inf], np.nan)
+        if arr.isna().any():
+            raise ValueError(f"Training column '{col}' contains NaN/inf values")
         return arr.to_numpy(dtype=np.float32)
 
-    def _col_or_default(self, col: str, default: float = 0.0) -> np.ndarray:
-        arr = self._col_or_none(col)
-        if arr is None:
-            return np.full(self._n_rows, float(default), dtype=np.float32)
-        return arr
+    # _col_or_none / _col_or_default removed — use _require_col for fail-fast
 
     def _build_spread_proxy(self) -> np.ndarray:
         spread_cols = ["current_spread", "bid_ask_spread", "spread", "orderbook_spread", "rel_spread", "ask_bid_spread"]
         for c in spread_cols:
             if c in self.df.columns:
-                s = pd.to_numeric(self.df[c], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0).abs()
-                return np.clip(s.to_numpy(dtype=np.float32), 0.0, 0.05)
-        if "high" in self.df.columns and "low" in self.df.columns:
-            close_s = pd.Series(self._close_np, index=self.df.index)
-            high = pd.to_numeric(self.df["high"], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(close_s)
-            low = pd.to_numeric(self.df["low"], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(close_s)
-            c = np.maximum(self._close_np.astype(np.float64), 1e-8)
-            return np.clip(np.abs((high.to_numpy(np.float64) - low.to_numpy(np.float64)) / c), 0.0, 0.05).astype(np.float32)
-        proxy = np.abs(self._logret_np.astype(np.float64)) * 0.25 + 2e-4
-        return np.clip(proxy, 0.0, 0.02).astype(np.float32)
+                return np.clip(self._require_col(c), 0.0, 0.05)
+        raise KeyError(f"No spread column found in training data. Required one of: {spread_cols}")
 
-    def _arr_at(self, arr: np.ndarray | None, idx: int, default: float = 0.0) -> float:
+    def _arr_at(self, arr: np.ndarray, idx: int) -> float:
         if arr is None:
-            return float(default)
+            raise ValueError(f"_arr_at called with None array at idx={idx}")
         if idx < 0 or idx >= len(arr):
-            return float(default)
-        return _safe_float(arr[idx], default)
+            raise IndexError(f"_arr_at index {idx} out of range [0, {len(arr)})")
+        return _strict_float(arr[idx], f"arr[{idx}]")
 
     def _fallback_signal_score(self, idx: int) -> float:
         row = self._feat_np[idx]
@@ -334,79 +327,53 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
     # ── 28D Compact State (숏 전용) ──
     def _build_state(self, idx):
         if not getattr(self, "_compact_ready", False):
-            return np.zeros(STATE_DIM, dtype=np.float32)
+            raise RuntimeError("_build_state called before training env is ready (_compact_ready=False)")
         if idx < 0 or idx >= self._n_rows:
-            return np.zeros(STATE_DIM, dtype=np.float32)
+            raise IndexError(f"_build_state idx={idx} out of range [0, {self._n_rows})")
 
-        # Block A: Market Prediction Meta (17) — MTF 추세 추가
-        signal_score = self._fallback_signal_score(idx)
-        z = float(np.clip(signal_score * _FALLBACK_SIGNAL_GAIN, -12.0, 12.0))
-
-        dn = self._arr_at(self._m7_prob_dn_np, idx, np.nan)
-        fl = self._arr_at(self._m7_prob_fl_np, idx, np.nan)
-        up = self._arr_at(self._m7_prob_up_np, idx, np.nan)
-        if not np.isfinite(dn) or not np.isfinite(fl) or not np.isfinite(up):
-            up = _sigmoid(z)
-            dn = _sigmoid(-z)
-            fl = float(np.exp(-abs(z) * 0.75))
+        # Block A: Market Prediction Meta (17)
+        dn = self._arr_at(self._m7_prob_dn_np, idx)
+        fl = self._arr_at(self._m7_prob_fl_np, idx)
+        up = self._arr_at(self._m7_prob_up_np, idx)
         dn, fl, up = _normalize_prob3(dn, fl, up)
         trend_entropy = _prob_entropy_norm(dn, fl, up)
 
-        quality_raw = self._arr_at(self._m7_quality_np, idx, np.nan)
-        if not np.isfinite(quality_raw):
-            quality_raw = self._arr_at(self._m7_q50_np, idx, signal_score * 0.0015)
+        quality_raw = self._arr_at(self._m7_quality_np, idx)
         quality_norm = _norm_tanh(quality_raw, 0.003)
 
-        hold_raw = self._arr_at(self._m7_hold_np, idx, np.nan)
-        if not np.isfinite(hold_raw):
-            hold_raw = 12.0
+        hold_raw = self._arr_at(self._m7_hold_np, idx)
         hold_norm = float(np.clip(hold_raw / 48.0, 0.0, 1.0))
 
-        q10 = self._arr_at(self._m7_q10_np, idx, np.nan)
-        q50 = self._arr_at(self._m7_q50_np, idx, np.nan)
-        q90 = self._arr_at(self._m7_q90_np, idx, np.nan)
-        qwidth = self._arr_at(self._m7_qwidth_np, idx, np.nan) if hasattr(self, '_m7_qwidth_np') and self._m7_qwidth_np is not None else np.nan
-        if not np.isfinite(q50):
-            q50 = quality_raw if np.isfinite(quality_raw) else signal_score * 0.0015
-        if not np.isfinite(qwidth):
-            if np.isfinite(q10) and np.isfinite(q90):
-                qwidth = max(float(q90 - q10), 1e-6)
-            else:
-                qwidth = max(abs(float(self._garch_vol_z_np[idx])) * 0.002, 5e-4)
-        if not np.isfinite(q10):
-            q10 = q50 - 0.5 * qwidth
-        if not np.isfinite(q90):
-            q90 = q50 + 0.5 * qwidth
+        q10 = self._arr_at(self._m7_q10_np, idx)
+        q50 = self._arr_at(self._m7_q50_np, idx)
+        q90 = self._arr_at(self._m7_q90_np, idx)
+        qwidth = self._arr_at(self._m7_qwidth_np, idx)
         qwidth = max(float(qwidth), 1e-6)
         q_mid_norm = _norm_tanh(q50, 0.003)
         q_uncertainty_norm = _norm_tanh(qwidth, 0.010)
         q_skew = float(np.clip(((q90 - q50) - (q50 - q10)) / max(abs(q90 - q10), 1e-6), -1.0, 1.0))
 
-        reg_idx, reg_conf = self._fallback_regime_info(idx)
-        gmm_cluster = self._arr_at(self._m7_gmm_cluster_np, idx, reg_idx)
-        gmm_conf = self._arr_at(self._m7_gmm_conf_np, idx, reg_conf)
-        vol_rank = self._arr_at(
-            self._m7_gmm_vol_rank_np, idx,
-            np.clip((abs(_safe_float(self._garch_vol_z_np[idx])) - 0.2) / 2.5, 0.0, 1.0),
-        )
+        gmm_cluster = self._arr_at(self._m7_gmm_cluster_np, idx)
+        gmm_conf = self._arr_at(self._m7_gmm_conf_np, idx)
+        vol_rank = self._arr_at(self._m7_gmm_vol_rank_np, idx)
         gmm_cluster_norm = float(np.clip(gmm_cluster / 4.0, -1.0, 1.0))
         gmm_conf = float(np.clip(gmm_conf, 0.0, 1.0))
         vol_rank = float(np.clip(vol_rank, 0.0, 1.0))
 
-        rs_vol = max(0.0, _safe_float(self._rogers_satchell_vol_np[idx]))
+        rs_vol = max(0.0, _strict_float(self._rogers_satchell_vol_np[idx], "rogers_satchell_vol"))
         rs_vol_norm = _norm_tanh(rs_vol, 0.0100)
-        amihud_norm = float(np.tanh(_safe_float(self._amihud_illiquidity_z_np[idx]) / 3.0))
+        amihud_norm = float(np.tanh(_strict_float(self._amihud_illiquidity_z_np[idx], "amihud_illiquidity_z") / 3.0))
 
-        iso_score = self._arr_at(self._m7_iso_score_np, idx, 0.0)
-        iso_anom = self._arr_at(self._m7_iso_anom_np, idx, 0.0) >= 0.5
-        vae_anom = self._arr_at(self._m7_vae_anom_np, idx, 0.0) >= 0.5
+        iso_score = self._arr_at(self._m7_iso_score_np, idx)
+        iso_anom = self._arr_at(self._m7_iso_anom_np, idx) >= 0.5
+        vae_anom = self._arr_at(self._m7_vae_anom_np, idx) >= 0.5
         vae_ratio = 1.25 if vae_anom else 0.0
         shock = (
-            abs(_safe_float(self._jump_z_np[idx]))
-            + 0.6 * abs(_safe_float(self._evt_excess_z_np[idx]))
-            + 0.4 * abs(_safe_float(self._garch_vol_z_np[idx]))
-            + 0.8 * (_safe_float(self._jump_flag_np[idx]) > 0.5)
-            + 0.8 * (_safe_float(self._evt_tail_flag_np[idx]) > 0.5)
+            abs(_strict_float(self._jump_z_np[idx], "jump_z"))
+            + 0.6 * abs(_strict_float(self._evt_excess_z_np[idx], "evt_excess_z"))
+            + 0.4 * abs(_strict_float(self._garch_vol_z_np[idx], "garch_vol_z"))
+            + 0.8 * (_strict_float(self._jump_flag_np[idx], "jump_flag") > 0.5)
+            + 0.8 * (_strict_float(self._evt_tail_flag_np[idx], "evt_tail_flag") > 0.5)
         )
         anomaly_raw = (
             0.55 * max(iso_score, 0.0)
@@ -419,34 +386,32 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
             anomaly_raw += 0.60
         anomaly_score = float(np.clip(np.tanh(anomaly_raw), 0.0, 1.0))
 
-        tp_offset = self._arr_at(self._m7_tp_offset_np, idx, max(q90, 0.0))
-        sl_offset = self._arr_at(self._m7_sl_offset_np, idx, max(-q10, 0.0))
+        tp_offset = self._arr_at(self._m7_tp_offset_np, idx)
+        sl_offset = self._arr_at(self._m7_sl_offset_np, idx)
         tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
-        mtf_1h_norm = _norm_tanh(_safe_float(self._mtf_trend_1h_np[idx]), 0.0100)
-        mtf_4h_norm = _norm_tanh(_safe_float(self._mtf_trend_4h_np[idx]), 0.0200)
+        mtf_1h_norm = _norm_tanh(_strict_float(self._mtf_trend_1h_np[idx], "mtf_trend_1h"), 0.0100)
+        mtf_4h_norm = _norm_tanh(_strict_float(self._mtf_trend_4h_np[idx], "mtf_trend_4h"), 0.0200)
 
         # Block B: Immediate Tick Context (6)
-        spread = max(0.0, _safe_float(self._spread_np[idx]))
-        spread_mean = max(1e-8, _safe_float(self._spread_mean_np[idx], spread))
-        spread_std = max(1e-6, _safe_float(self._spread_std_np[idx], 1e-6))
-        spread_z = (spread - spread_mean) / spread_std
+        spread = max(0.0, _strict_float(self._spread_np[idx], "spread"))
+        spread_mean = max(1e-8, _strict_float(self._spread_mean_np[idx], "spread_mean"))
+        spread_std = max(1e-6, _strict_float(self._spread_std_np[idx], "spread_std"))
         spread_norm = _norm_tanh(spread, 0.0015)
-        micro5 = max(0.0, _safe_float(self._micro_vol5_np[idx]))
+        micro5 = max(0.0, _strict_float(self._micro_vol5_np[idx], "micro_vol5"))
         micro5_norm = _norm_tanh(micro5, 0.0030)
-        smart_flow_norm = _norm_tanh(_safe_float(self._smart_money_flow_np[idx]), 0.0500)
-        taker_accel_norm = _norm_tanh(_safe_float(self._taker_acceleration_np[idx]), 0.0500)
+        smart_flow_norm = _norm_tanh(_strict_float(self._smart_money_flow_np[idx], "smart_money_flow"), 0.0500)
+        taker_accel_norm = _norm_tanh(_strict_float(self._taker_acceleration_np[idx], "taker_acceleration"), 0.0500)
 
-        # Block C: Agent Private State (5) — 포지션은 항상 None 또는 SHORT
+        # Block C: Agent Private State (5)
         in_position = 1.0 if self.pos == "SHORT" else 0.0
         margin_usage = float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0))
         unrealized_norm = _norm_tanh(self.unrealized_pnl, 0.02)
-        time_in_trade_norm = float(np.clip(self.hold_count / 96.0, 0.0, 1.0))
+        time_in_trade_norm = float(np.clip(np.log1p(self.hold_count) / np.log1p(288.0), 0.0, 1.0))
         drawdown_norm = float(np.clip(self.max_drawdown / 0.05, -1.0, 1.0))
 
         state = np.array(
             [
-                # Block A (17)
                 up, dn, fl, trend_entropy,
                 quality_norm, hold_norm,
                 q_mid_norm, q_uncertainty_norm, q_skew,
@@ -454,18 +419,19 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
                 anomaly_score,
                 tp_offset_norm, sl_offset_norm,
                 mtf_1h_norm, mtf_4h_norm,
-                # Block B (6)
                 spread_norm, rs_vol_norm,
                 micro5_norm, amihud_norm,
                 smart_flow_norm, taker_accel_norm,
-                # Block C (5)
                 in_position, margin_usage,
                 unrealized_norm, time_in_trade_norm,
                 drawdown_norm,
             ],
             dtype=np.float32,
         )
-        return np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
+        if not np.all(np.isfinite(state)):
+            bad_idx = np.where(~np.isfinite(state))[0].tolist()
+            raise ValueError(f"Training state vector has non-finite values at indices {bad_idx} (data_idx={idx})")
+        return state
 
     # ── step() 오버라이드: action [0,1] → 숏만 ──
     def step(self, action: float):
@@ -579,7 +545,11 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
 
         r4_time_decay = 0.0
         if self.pos is not None and self.hold_count > 12:
-            r4_time_decay = -0.003 * (self.hold_count - 12) / 72.0
+            r4_time_decay = -0.012 * float(np.log1p((self.hold_count - 12) / 12.0) / np.log1p(8.0))
+
+        r7_adverse_hold = 0.0
+        if self.pos is not None and self.unrealized_pnl < -0.005 and self.hold_count > 24:
+            r7_adverse_hold = -0.015 * float(np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0))
 
         # r5_idle: 숏 specialist는 관망 페널티를 크게 줄임
         r5_idle = 0.0
@@ -599,7 +569,7 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         if is_entering:
             r6_trade_cost = -0.01 * leverage_rate
 
-        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost
+        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold
         reward = float(np.tanh(raw_reward))
 
         # 에피소드 종료 시 강제 청산
@@ -822,6 +792,9 @@ class DSACShortAgent:
         anti_flat_lambda_eff = self.anti_flat_lambda
         if self.anti_flat_anneal_updates > 0:
             anti_flat_lambda_eff *= max(0.0, 1.0 - float(self._updates) / float(self.anti_flat_anneal_updates))
+        # 포지션 보유 중인 샘플 비율만큼 anti_flat_pen 비활성화 (in_position = state[:, 23])
+        in_pos_frac = float(s[:, 23].mean().item())
+        anti_flat_lambda_eff *= max(0.0, 1.0 - in_pos_frac)
         det_action_batch = self.actor.deterministic(s)
         det_action_abs_mean = det_action_batch.abs().mean()
         anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
@@ -886,145 +859,95 @@ class DSACShortRouter:
         self._ret_hist: deque[float] = deque(maxlen=64)
         self._spread_hist: deque[float] = deque(maxlen=64)
 
-    def _fallback_signal_score(self, features: dict[str, Any]) -> float:
-        sig = []
-        for p, c in zip(STATE_PRED, STATE_CONF):
-            sig.append(_safe_float(features.get(p, 0.0), 0.0) * _safe_float(features.get(c, 0.5), 0.5))
-        if not sig:
-            return 0.0
-        arr = np.asarray(sig, dtype=np.float32)
-        w = np.linspace(1.0, 1.3, arr.size, dtype=np.float32)
-        return float(np.dot(arr, w) / max(float(np.sum(w)), 1e-8))
-
-    def _fallback_regime(self, features: dict[str, Any]) -> tuple[float, float]:
-        reg = np.asarray([_safe_float(features.get(c, 0.0), 0.0) for c in REGIME_COLS], dtype=np.float32)
-        reg = np.maximum(reg, 0.0)
-        s = float(reg.sum())
-        if s <= 1e-12:
-            return 0.0, 0.5
-        reg = reg / s
-        return float(np.argmax(reg)), float(np.max(reg))
-
     def _build_compact_state(self, features: dict[str, Any], pos: dict[str, Any]) -> np.ndarray:
-        """28D 숏 전용 state 구성 (라이브)."""
-        signal_score = self._fallback_signal_score(features)
-        z = float(np.clip(signal_score * _FALLBACK_SIGNAL_GAIN, -12.0, 12.0))
-
-        dn = _pick_first(features, ["m7_trend_xgb_dn", "trend_dn_prob"], np.nan)
-        fl = _pick_first(features, ["m7_trend_xgb_fl"], np.nan)
-        up = _pick_first(features, ["m7_trend_xgb_up", "trend_up_prob"], np.nan)
-        if not np.isfinite(dn) or not np.isfinite(fl) or not np.isfinite(up):
-            up = _sigmoid(z); dn = _sigmoid(-z); fl = float(np.exp(-abs(z) * 0.75))
+        """28D 숏 전용 state 구성 (라이브). 누락·비유한 피처는 즉시 예외 발생."""
+        dn = _require_first(features, ["m7_trend_xgb_dn", "m7_prob_dn", "trend_dn_prob"])
+        fl = _require_first(features, ["m7_trend_xgb_fl", "m7_prob_fl"])
+        up = _require_first(features, ["m7_trend_xgb_up", "m7_prob_up", "trend_up_prob"])
         dn, fl, up = _normalize_prob3(dn, fl, up)
         trend_entropy = _prob_entropy_norm(dn, fl, up)
 
-        quality_raw = _pick_first(features, ["m7_quality_pred", "expected_quality"], np.nan)
-        if not np.isfinite(quality_raw):
-            quality_raw = _pick_first(features, ["m7_q50"], signal_score * 0.0015)
+        quality_raw = _require_first(features, ["m7_quality_pred", "expected_quality"])
         quality_norm = _norm_tanh(quality_raw, 0.003)
 
-        hold_raw = _pick_first(features, ["m7_hold_pred", "expected_hold_time"], np.nan)
-        if not np.isfinite(hold_raw):
-            hold_raw = 12.0
+        hold_raw = _require_first(features, ["m7_hold_pred", "expected_hold_time"])
         hold_norm = float(np.clip(hold_raw / 48.0, 0.0, 1.0))
 
-        q10 = _pick_first(features, ["m7_q10"], np.nan)
-        q50 = _pick_first(features, ["m7_q50"], np.nan)
-        q90 = _pick_first(features, ["m7_q90"], np.nan)
-        qwidth = _pick_first(features, ["m7_qwidth", "quantile_uncertainty"], np.nan)
-        if not np.isfinite(q50):
-            q50 = quality_raw if np.isfinite(quality_raw) else signal_score * 0.0015
-        if not np.isfinite(qwidth):
-            if np.isfinite(q10) and np.isfinite(q90):
-                qwidth = max(float(q90 - q10), 1e-6)
-            else:
-                qwidth = max(abs(_safe_float(features.get("garch_vol_z", 0.0))) * 0.002, 5e-4)
-        if not np.isfinite(q10):
-            q10 = q50 - 0.5 * qwidth
-        if not np.isfinite(q90):
-            q90 = q50 + 0.5 * qwidth
+        q10 = _require_first(features, ["m7_q10"])
+        q50 = _require_first(features, ["m7_q50"])
+        q90 = _require_first(features, ["m7_q90"])
+        qwidth = _require_first(features, ["m7_qwidth", "quantile_uncertainty"])
         qwidth = max(float(qwidth), 1e-6)
         q_mid_norm = _norm_tanh(q50, 0.003)
         q_uncertainty_norm = _norm_tanh(qwidth, 0.010)
         q_skew = float(np.clip(((q90 - q50) - (q50 - q10)) / max(abs(q90 - q10), 1e-6), -1.0, 1.0))
 
-        reg_idx, reg_conf = self._fallback_regime(features)
-        gmm_cluster = _pick_first(features, ["m7_gmm_cluster", "gmm_cluster_id"], reg_idx)
-        gmm_conf = _pick_first(features, ["m7_gmm_conf"], reg_conf)
-        vol_rank = _pick_first(features, ["m7_gmm_vol_rank"],
-                               np.clip((abs(_safe_float(features.get("garch_vol_z", 0.0))) - 0.2) / 2.5, 0.0, 1.0))
+        gmm_cluster = _require_first(features, ["m7_gmm_cluster", "gmm_cluster_id"])
+        gmm_conf = _require_first(features, ["m7_gmm_conf"])
+        vol_rank = _require_first(features, ["m7_gmm_vol_rank"])
         gmm_cluster_norm = float(np.clip(gmm_cluster / 4.0, -1.0, 1.0))
         gmm_conf = float(np.clip(gmm_conf, 0.0, 1.0))
         vol_rank = float(np.clip(vol_rank, 0.0, 1.0))
 
-        iso_score = _pick_first(features, ["m7_iso_score"], 0.0)
-        iso_anom = _pick_first(features, ["m7_iso_anom"], 0.0) >= 0.5
-        vae_anom = _pick_first(features, ["m7_vae_anom"], 0.0) >= 0.5
+        iso_score = _require_first(features, ["m7_iso_score"])
+        iso_anom = _require_first(features, ["m7_iso_anom"]) >= 0.5
+        vae_anom = _require_first(features, ["m7_vae_anom"]) >= 0.5
         vae_ratio = 1.25 if vae_anom else 0.0
-        shock = (abs(_safe_float(features.get("jump_z", 0.0)))
-                 + 0.6 * abs(_safe_float(features.get("evt_excess_z", 0.0)))
-                 + 0.4 * abs(_safe_float(features.get("garch_vol_z", 0.0)))
-                 + 0.8 * (_safe_float(features.get("jump_flag", 0.0)) > 0.5)
-                 + 0.8 * (_safe_float(features.get("evt_tail_flag", 0.0)) > 0.5))
+        shock = (abs(_strict_float(features["jump_z"], "jump_z"))
+                 + 0.6 * abs(_strict_float(features["evt_excess_z"], "evt_excess_z"))
+                 + 0.4 * abs(_strict_float(features["garch_vol_z"], "garch_vol_z"))
+                 + 0.8 * (_strict_float(features["jump_flag"], "jump_flag") > 0.5)
+                 + 0.8 * (_strict_float(features["evt_tail_flag"], "evt_tail_flag") > 0.5))
         anomaly_raw = 0.55 * max(iso_score, 0.0) + 0.40 * max(vae_ratio - 1.0, 0.0) + 0.20 * shock
         if iso_anom or vae_anom:
             anomaly_raw += 0.60
         anomaly_score = float(np.clip(np.tanh(anomaly_raw), 0.0, 1.0))
 
-        tp_offset = _safe_float(features.get("m7_tp_offset", max(q90, 0.0)), max(q90, 0.0))
-        sl_offset = _safe_float(features.get("m7_sl_offset", max(-q10, 0.0)), max(-q10, 0.0))
-        tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
-        sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
-        mtf_1h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_1h", 0.0), 0.0), 0.0100)
-        mtf_4h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_4h", 0.0), 0.0), 0.0200)
-        rs_vol_norm = _norm_tanh(max(0.0, _safe_float(features.get("rogers_satchell_vol", 0.0), 0.0)), 0.0100)
-        amihud_norm = float(np.tanh(_safe_float(features.get("amihud_illiquidity_z", 0.0), 0.0) / 3.0))
-        smart_flow_norm = _norm_tanh(_safe_float(features.get("smart_money_flow", 0.0), 0.0), 0.0500)
-        taker_accel_norm = _norm_tanh(_safe_float(features.get("taker_acceleration", 0.0), 0.0), 0.0500)
+        tp_offset_norm = _norm_tanh(_strict_float(features["m7_tp_offset"], "m7_tp_offset"), 0.0100)
+        sl_offset_norm = _norm_tanh(_strict_float(features["m7_sl_offset"], "m7_sl_offset"), 0.0100)
+        mtf_1h_norm = _norm_tanh(_strict_float(features["mtf_trend_1h"], "mtf_trend_1h"), 0.0100)
+        mtf_4h_norm = _norm_tanh(_strict_float(features["mtf_trend_4h"], "mtf_trend_4h"), 0.0200)
+        rs_vol_norm = _norm_tanh(max(0.0, _strict_float(features["rogers_satchell_vol"], "rogers_satchell_vol")), 0.0100)
+        amihud_norm = float(np.tanh(_strict_float(features["amihud_illiquidity_z"], "amihud_illiquidity_z") / 3.0))
+        smart_flow_norm = _norm_tanh(_strict_float(features["smart_money_flow"], "smart_money_flow"), 0.0500)
+        taker_accel_norm = _norm_tanh(_strict_float(features["taker_acceleration"], "taker_acceleration"), 0.0500)
 
-        close = max(_safe_float(features.get("close", 0.0), 0.0), 0.0)
-        logret = _safe_float(features.get("log_return", np.nan), np.nan)
-        if not np.isfinite(logret):
-            if self._prev_close is not None and self._prev_close > 0.0 and close > 0.0:
-                logret = float(np.log(close / self._prev_close))
-            else:
-                logret = 0.0
-        self._prev_close = close if close > 0.0 else self._prev_close
-        self._ret_hist.append(float(logret))
+        close = _strict_float(features["close"], "close")
+        if close <= 0.0:
+            raise ValueError(f"Feature 'close' must be positive, got {close}")
+        logret = _strict_float(features["log_return"], "log_return")
+        self._prev_close = close
+        self._ret_hist.append(logret)
 
-        spread = _pick_first(features, ["current_spread", "bid_ask_spread", "spread", "orderbook_spread", "rel_spread", "ask_bid_spread"], np.nan)
-        if not np.isfinite(spread):
-            spread = abs(float(logret)) * 0.25 + 2e-4
+        spread = _require_first(features, ["current_spread", "bid_ask_spread", "spread",
+                                           "orderbook_spread", "rel_spread", "ask_bid_spread"])
         spread = float(np.clip(abs(spread), 0.0, 0.05))
         self._spread_hist.append(spread)
 
         ret_arr = np.asarray(self._ret_hist, dtype=np.float64)
         sp_arr = np.asarray(self._spread_hist, dtype=np.float64)
-        micro5 = float(np.std(ret_arr[-5:])) if ret_arr.size > 0 else 0.0
-        micro10 = float(np.std(ret_arr[-10:])) if ret_arr.size > 0 else 0.0
+        micro5 = float(np.std(ret_arr[-5:])) if ret_arr.size >= 5 else float(np.std(ret_arr)) if ret_arr.size > 1 else 0.0
         sp_mean = float(np.mean(sp_arr[-32:])) if sp_arr.size > 0 else spread
         sp_std = max(float(np.std(sp_arr[-32:])) if sp_arr.size > 1 else 1e-6, 1e-6)
-        spread_z = (spread - sp_mean) / sp_std
-
         spread_norm = _norm_tanh(spread, 0.0015)
         micro5_norm = _norm_tanh(micro5, 0.0030)
 
         pos_type = pos.get("type") if isinstance(pos, dict) else None
         in_position = 1.0 if pos_type == "SHORT" else 0.0
-        margin_usage = _safe_float(pos.get("margin_usage", np.nan), np.nan) if isinstance(pos, dict) else np.nan
-        if not np.isfinite(margin_usage):
-            margin_usage = 1.0 if in_position > 0.5 else 0.0
-        margin_usage = float(np.clip(margin_usage, 0.0, 1.0))
-        unr = _safe_float(pos.get("unrealized", 0.0), 0.0) if isinstance(pos, dict) else 0.0
+        if in_position > 0.5:
+            if not isinstance(pos, dict):
+                raise TypeError("pos must be a dict when in_position=1")
+            margin_usage = float(np.clip(_strict_float(pos["margin_usage"], "pos.margin_usage"), 0.0, 1.0))
+            unr = _strict_float(pos["unrealized"], "pos.unrealized")
+            hold_count_proxy = max(0.0, _strict_float(pos["hold_count"], "pos.hold_count"))
+            mdd = _strict_float(pos["mdd"], "pos.mdd")
+        else:
+            margin_usage = 0.0
+            unr = 0.0
+            hold_count_proxy = 0.0
+            mdd = 0.0
         unrealized_norm = _norm_tanh(unr, 0.02)
-
-        hold_count_proxy = 0.0
-        if isinstance(pos, dict):
-            hold_count_proxy = max(0.0, _safe_float(pos.get("hold_count", np.nan), np.nan))
-            if not np.isfinite(hold_count_proxy):
-                hold_count_proxy = float(np.clip(_safe_float(pos.get("hold_norm", 0.0), 0.0), 0.0, 1.0)) * 96.0
-        time_in_trade_norm = float(np.clip(hold_count_proxy / 96.0, 0.0, 1.0))
-        mdd = _safe_float(pos.get("mdd", 0.0), 0.0) if isinstance(pos, dict) else 0.0
+        time_in_trade_norm = float(np.clip(np.log1p(hold_count_proxy) / np.log1p(288.0), 0.0, 1.0))
         drawdown_norm = float(np.clip(mdd / 0.05, -1.0, 1.0))
 
         state = np.array([
@@ -1035,10 +958,15 @@ class DSACShortRouter:
             spread_norm, rs_vol_norm, micro5_norm, amihud_norm, smart_flow_norm, taker_accel_norm,
             in_position, margin_usage, unrealized_norm, time_in_trade_norm, drawdown_norm,
         ], dtype=np.float32)
-        return np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
+        if not np.all(np.isfinite(state)):
+            bad_idx = np.where(~np.isfinite(state))[0].tolist()
+            raise ValueError(f"State vector has non-finite values at indices {bad_idx}")
+        return state
 
     def decide(self, features, pos):
-        state = self._build_compact_state(features or {}, pos or {})
+        if not features:
+            raise ValueError("decide() called with empty/None features")
+        state = self._build_compact_state(features, pos if isinstance(pos, dict) else {})
         state_ts = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         self.actor.eval()
         with torch.no_grad():
