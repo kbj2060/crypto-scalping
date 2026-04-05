@@ -40,6 +40,13 @@ _POS_THRESH = 0.15
 _CLOSE_THRESH = 0.05
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class SACTradingEnv:
     """Continuous-action trading environment shared by SAC/DSAC variants."""
 
@@ -90,6 +97,14 @@ class SACTradingEnv:
         self.adverse_hold_start = int(os.getenv("RL_ADVERSE_HOLD_START", "24"))
         self.adverse_hold_pnl_th = float(os.getenv("RL_ADVERSE_HOLD_PNL_TH", "0.004"))
         self.adverse_hold_penalty = float(os.getenv("RL_ADVERSE_HOLD_PENALTY", "0.010"))
+        # Phase-2 reward shaping knobs.
+        self.dd_soft_start = float(os.getenv("RL_DD_SOFT_START", "0.01"))
+        self.dd_hard_scale = float(os.getenv("RL_DD_HARD_SCALE", "0.025"))
+        self.dd_penalty_coeff = float(os.getenv("RL_DD_PENALTY_COEFF", "0.10"))
+        self.kelly_align_bonus = float(os.getenv("RL_KELLY_ALIGN_BONUS", "0.20"))
+        self.kelly_chop_loss_penalty = float(os.getenv("RL_KELLY_CHOP_LOSS_PENALTY", "2.00"))
+        self.force_close_enable = _env_flag("RL_FORCE_CLOSE_ENABLE", True)
+        self.force_close_th = float(os.getenv("RL_FORCE_CLOSE_TH", "-0.025"))
 
         if mtf_features is not None:
             self.mtf = mtf_features
@@ -166,6 +181,26 @@ class SACTradingEnv:
     def _sample_train_start(self, max_start: int) -> int:
         return random.randint(0, max_start)
 
+    def regime_bucket(self, idx: int | None = None) -> str:
+        if idx is None:
+            idx = int(self.current_step)
+        idx = min(max(int(idx), 0), len(self._feat_np) - 1)
+        row = self._feat_np[idx]
+        o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
+        regime_vec = np.nan_to_num(row[o : o + self._n_regime], nan=0.0)
+        if regime_vec.size == 0:
+            return "normal"
+        reg_idx = int(np.argmax(regime_vec))
+        if reg_idx == 0:
+            return "chop"
+        if reg_idx == 1:
+            return "whipsaw"
+        if reg_idx == 2:
+            return "bull"
+        if reg_idx == 3:
+            return "bear"
+        return "normal"
+
     def reset(self, start_idx=None):
         if self.phase == "train":
             max_start = max(0, len(self.df) - self.MAX_EPISODE_STEPS - 1)
@@ -213,7 +248,11 @@ class SACTradingEnv:
 
         abs_action = abs(action)
         leverage_rate = abs_action
-        force_close = bool(self.pos is not None and self.unrealized_pnl <= -0.025)
+        force_close = bool(
+            self.force_close_enable
+            and self.pos is not None
+            and self.unrealized_pnl <= self.force_close_th
+        )
 
         is_entering_long = False
         is_entering_short = False
@@ -309,10 +348,18 @@ class SACTradingEnv:
         step_delta = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8) * 50.0
         r1_pnl = float(np.tanh(step_delta))
 
+        regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
+        regime_raw = self._feat_np[regime_step]
+        o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
+        regime_vec = regime_raw[o : o + self._n_regime]
+        regime_idx = int(np.argmax(regime_vec))
+
         r2_drawdown = 0.0
-        if self.pos is not None and self.unrealized_pnl < -0.01:
-            dd_ratio = abs(self.unrealized_pnl) / 0.025
-            r2_drawdown = -0.1 * (dd_ratio ** 2)
+        if self.pos is not None and self.unrealized_pnl < -abs(self.dd_soft_start):
+            dd_excess = abs(self.unrealized_pnl) - abs(self.dd_soft_start)
+            dd_den = max(abs(self.dd_hard_scale) - abs(self.dd_soft_start), 1e-6)
+            dd_ratio = np.clip(dd_excess / dd_den, 0.0, 3.0)
+            r2_drawdown = -self.dd_penalty_coeff * float(dd_ratio ** 2)
 
         r3_quality = 0.0
         if self._just_closed:
@@ -342,11 +389,6 @@ class SACTradingEnv:
 
         r5_idle = 0.0
         if self.pos is None:
-            regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
-            regime_raw = self._feat_np[regime_step]
-            o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
-            regime_vec = regime_raw[o : o + self._n_regime]
-            regime_idx = int(np.argmax(regime_vec))
             if self.specialist_idle_penalty is not None:
                 r5_idle = float(self.specialist_idle_penalty)
             else:
@@ -362,7 +404,21 @@ class SACTradingEnv:
         # 추가 진입 고정 페널티는 이중 비용이 되어 진입 억제를 과도하게 키울 수 있어 제거.
         r6_trade_cost = 0.0
 
-        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold
+        r8_kelly_regime = 0.0
+        if self.pos is not None:
+            step_ret = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8)
+            lev = float(np.clip(self.current_leverage, 0.0, 1.5))
+            is_aligned = (self.pos == "LONG" and regime_idx == 2) or (self.pos == "SHORT" and regime_idx == 3)
+            if step_ret > 0.0 and is_aligned:
+                r8_kelly_regime += self.kelly_align_bonus * lev * float(np.clip(step_ret / 0.002, 0.0, 1.0))
+            if step_ret < 0.0 and regime_idx in (0, 1):
+                # chop/whipsaw에서 고레버리지 손실을 더 강하게 벌점
+                extra = max(self.kelly_chop_loss_penalty - 1.0, 0.0)
+                r8_kelly_regime -= extra * abs(r1_pnl) * lev
+
+        raw_reward = (
+            r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold + r8_kelly_regime
+        )
         # Keep reward linear around 0 and avoid double tanh saturation.
         reward = float(np.clip(raw_reward, -2.0, 2.0))
 
@@ -394,6 +450,7 @@ class SACTradingEnv:
             "force_closed": bool(self._just_closed and self._was_force_closed),
             "closed_side": self._last_closed_side,
             "closed_hold_count": int(self._last_closed_hold_count),
+            "regime_bucket": self.regime_bucket(decision_step),
         }
         return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
 

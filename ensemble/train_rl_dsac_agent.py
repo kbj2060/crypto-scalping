@@ -1978,6 +1978,11 @@ def train(
         }
 
     ep = start_ep
+    cer_enable = str(os.getenv("RL_CER_ENABLE", "true")).strip().lower() in {"1", "true", "yes", "on"}
+    cer_gate_delta = float(os.getenv("RL_CER_GATE_DELTA", "0.20"))
+    cer_gate_penalty = float(os.getenv("RL_CER_GATE_PENALTY", "0.08"))
+    cer_force_penalty = float(os.getenv("RL_CER_FORCE_PENALTY", "0.20"))
+
     try:
         for ep in range(start_ep, nep + 1):
             state = env.reset()
@@ -1994,10 +1999,19 @@ def train(
                     action = agent.act(state, deterministic=False)
 
                 regime_bucket = env.regime_bucket()
-                action = _apply_normal_soft_gate(action, state, regime_bucket, gate_scale=_soft_gate_scale(ep))
+                raw_action = float(action)
+                action = _apply_normal_soft_gate(raw_action, state, regime_bucket, gate_scale=_soft_gate_scale(ep))
                 prog = float(env.current_step / max(1, env.end_step))
-                next_state, reward, done, _ = env.step(action)
+                next_state, reward, done, info = env.step(action)
                 agent.memory.push(state, action, reward, next_state, done, regime=regime_bucket, progress=prog)
+                if cer_enable and bool(info.get("force_closed", False)):
+                    cer_r = float(min(reward, -abs(cer_force_penalty)))
+                    agent.memory.push(state, raw_action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
+                elif cer_enable:
+                    blocked = (abs(raw_action) - abs(action) >= cer_gate_delta) and (abs(raw_action) >= env.pos_thresh)
+                    if blocked:
+                        cer_r = -abs(cer_gate_penalty) * float(np.clip(abs(raw_action), 0.0, 1.0))
+                        agent.memory.push(state, raw_action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
                 ep_reward += reward
                 state = next_state
 

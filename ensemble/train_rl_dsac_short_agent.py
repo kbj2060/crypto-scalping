@@ -456,9 +456,11 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
             prev_portfolio_value = self.balance
 
         leverage_rate = action
-        force_close = False
-        if self.pos is not None and self.unrealized_pnl <= -0.025:
-            force_close = True
+        force_close = bool(
+            self.force_close_enable
+            and self.pos is not None
+            and self.unrealized_pnl <= self.force_close_th
+        )
 
         is_entering = False
         is_closing = False
@@ -534,10 +536,18 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         step_delta = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8) * 50.0
         r1_pnl = float(np.tanh(step_delta))
 
+        regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
+        regime_raw = self._feat_np[regime_step]
+        o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
+        regime_vec = regime_raw[o : o + self._n_regime]
+        regime_idx = int(np.argmax(regime_vec))
+
         r2_drawdown = 0.0
-        if self.pos is not None and self.unrealized_pnl < -0.01:
-            dd_ratio = abs(self.unrealized_pnl) / 0.025
-            r2_drawdown = -0.1 * (dd_ratio ** 2)
+        if self.pos is not None and self.unrealized_pnl < -abs(self.dd_soft_start):
+            dd_excess = abs(self.unrealized_pnl) - abs(self.dd_soft_start)
+            dd_den = max(abs(self.dd_hard_scale) - abs(self.dd_soft_start), 1e-6)
+            dd_ratio = np.clip(dd_excess / dd_den, 0.0, 3.0)
+            r2_drawdown = -self.dd_penalty_coeff * float(dd_ratio ** 2)
 
         r3_quality = 0.0
         if self._just_closed:
@@ -561,11 +571,6 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         # r5_idle: 숏 specialist는 관망 페널티를 크게 줄임
         r5_idle = 0.0
         if self.pos is None:
-            regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
-            regime_raw = self._feat_np[regime_step]
-            o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
-            regime_vec = regime_raw[o : o + self._n_regime]
-            regime_idx = int(np.argmax(regime_vec))
             # bull(0)/chop(2)/whipsaw(3) 일 때 관망은 페널티 없음
             if regime_idx == 1:  # bear
                 r5_idle = -0.0005  # bear에서만 아주 약한 관망 페널티
@@ -576,7 +581,18 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         if is_entering:
             r6_trade_cost = -0.01 * leverage_rate
 
-        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold
+        r8_kelly_regime = 0.0
+        if self.pos is not None:
+            step_ret = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8)
+            lev = float(np.clip(self.current_leverage, 0.0, 1.5))
+            is_aligned = regime_idx == 3  # bear
+            if step_ret > 0.0 and is_aligned:
+                r8_kelly_regime += self.kelly_align_bonus * lev * float(np.clip(step_ret / 0.002, 0.0, 1.0))
+            if step_ret < 0.0 and regime_idx in (0, 1):
+                extra = max(self.kelly_chop_loss_penalty - 1.0, 0.0)
+                r8_kelly_regime -= extra * abs(r1_pnl) * lev
+
+        raw_reward = r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold + r8_kelly_regime
         reward = float(np.tanh(raw_reward))
 
         # 에피소드 종료 시 강제 청산
@@ -602,6 +618,10 @@ class ShortSpecialistEnv(_BaseSACTradingEnv):
         info = {
             "pnl_pct": (self.balance / self.initial_balance - 1) * 100,
             "wr": self.win_trades / max(1, self.total_trades),
+            "force_closed": bool(self._just_closed and self._was_force_closed),
+            "closed_side": self._last_closed_side,
+            "closed_hold_count": int(self._last_closed_hold_count),
+            "regime_bucket": self.regime_bucket(decision_step),
         }
         return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
 
@@ -1149,8 +1169,10 @@ def train(
                 ws = warmup_env.reset()
                 for _ in range(refill_steps):
                     wa = random.random()  # [0, 1]
+                    w_regime = warmup_env.regime_bucket()
+                    w_prog = float(warmup_env.current_step / max(1, warmup_env.end_step))
                     wns, wr, wd, _ = warmup_env.step(wa)
-                    agent.memory.push(ws, wa, wr, wns, wd)
+                    _memory_push(agent.memory, ws, wa, wr, wns, wd, regime=w_regime, progress=w_prog)
                     ws = wns
                     if wd:
                         ws = warmup_env.reset()
@@ -1189,6 +1211,17 @@ def train(
         }, ckpt_path)
 
     ep = start_ep
+    cer_enable = str(os.getenv("RL_CER_ENABLE", "true")).strip().lower() in {"1", "true", "yes", "on"}
+    cer_force_penalty = float(os.getenv("RL_CER_FORCE_PENALTY", "0.20"))
+    cer_adverse_reward_th = float(os.getenv("RL_CER_ADVERSE_REWARD_TH", "-0.03"))
+    cer_adverse_mult = float(os.getenv("RL_CER_ADVERSE_MULT", "1.50"))
+
+    def _memory_push(mem, s, a, r, ns, d, regime: str, progress: float) -> None:
+        try:
+            mem.push(s, a, r, ns, d, regime=regime, progress=progress)
+        except TypeError:
+            mem.push(s, a, r, ns, d)
+
     try:
         for ep in range(start_ep, nep + 1):
             state = env.reset()
@@ -1202,8 +1235,16 @@ def train(
                     action = random.random()  # [0, 1]
                 else:
                     action = agent.act(state, deterministic=False)
-                next_state, reward, done, _ = env.step(action)
-                agent.memory.push(state, action, reward, next_state, done)
+                regime_bucket = env.regime_bucket()
+                prog = float(env.current_step / max(1, env.end_step))
+                next_state, reward, done, info = env.step(action)
+                _memory_push(agent.memory, state, action, reward, next_state, done, regime=regime_bucket, progress=prog)
+                if cer_enable and bool(info.get("force_closed", False)):
+                    cer_r = float(min(reward, -abs(cer_force_penalty)))
+                    _memory_push(agent.memory, state, action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
+                elif cer_enable and float(reward) <= float(cer_adverse_reward_th):
+                    cer_r = float(reward) * float(max(cer_adverse_mult, 1.0))
+                    _memory_push(agent.memory, state, action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
                 ep_reward += reward
                 state = next_state
                 if global_step % update_freq == 0 and len(agent.memory) >= min_buffer:

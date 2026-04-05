@@ -257,78 +257,42 @@ def _simulate_dual(
             vae_ratio = (vae_err / max(vae_th, 1e-8)) if vae_th > 1e-8 else (1.0 if vae_anom else 0.0)
 
             if mode == "pure_rl":
-                la = int(info.get("_long_action", 0))
-                sa = int(info.get("_short_action", 0))
-                pa = int(info.get("primary_action", 0))
-                lk = float(np.clip(info.get("_long_kelly", 0.0), 0.0, 1.0))
-                sk = float(np.clip(info.get("_short_kelly", 0.0), 0.0, 1.0))
-                pk = float(np.clip(info.get("primary_kelly", 0.0), 0.0, 1.0))
-                ll = float(info.get("long_logit", 0.0))
-                sl = float(info.get("short_logit", 0.0))
-                direction_score = float(info.get("direction_score", ll - sl))
-                ls = float(info.get("long_std", 1.0))
-                ss = float(info.get("short_std", 1.0))
-                lsup = float(ll * (1.0 / (1.0 + max(ls, 1e-6))))
-                ssup = float(sl * (1.0 / (1.0 + max(ss, 1e-6))))
-                max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "0.40"))
-
+                action_val = float(info.get("primary_raw", info.get("raw_action", 0.0)))
+                abs_action = abs(action_val)
+                pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.06"))
+                close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.06"))
+                max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "1.0"))
+                force_close = str(os.getenv("DSAC_PURE_RL_FORCE_CLOSE", "false")).strip().lower() in {"1", "true", "yes", "on"}
                 fa = 0
                 kelly = 0.0
                 source = "DSAC_PURE_RL"
                 if meta_router.pos is None:
-                    if la == 1 and sa != 2:
-                        fa, kelly = 1, min(lk, max_kelly)
-                    elif sa == 2 and la != 1:
-                        fa, kelly = 2, min(sk, max_kelly)
-                    elif la == 1 and sa == 2:
-                        if lsup >= ssup and lsup > 0.0:
-                            fa, kelly = 1, min(lk, max_kelly)
-                        elif ssup > 0.0:
-                            fa, kelly = 2, min(sk, max_kelly)
-                    elif pa in (1, 2):
-                        fa, kelly = pa, min(pk, max_kelly)
+                    if action_val > pos_th:
+                        fa, kelly = 1, min(abs_action, max_kelly)
+                    elif action_val < -pos_th:
+                        fa, kelly = 2, min(abs_action, max_kelly)
                 elif meta_router.pos == "LONG":
                     live_unr = float(meta_router._net_pnl_frac(current_price))
-                    if live_unr <= -0.025:
+                    if force_close and live_unr <= -0.025:
                         fa, kelly = 0, 0.0
                         source = "DSAC_PURE_RL_FORCE_CLOSE"
-                    elif pa == 2 and sa != 2:
+                    elif abs_action < close_th:
                         fa, kelly = 0, 0.0
-                    elif la == 0:
-                        fa, kelly = 0, 0.0
-                    elif direction_score <= 0.0:
-                        if sa == 2:
-                            fa, kelly = 2, min(sk, max_kelly)
-                        else:
-                            fa, kelly = 0, 0.0
-                    elif lsup <= ssup:
-                        if sa == 2:
-                            fa, kelly = 2, min(sk, max_kelly)
-                        else:
-                            fa, kelly = 0, 0.0
+                    elif action_val < -pos_th:
+                        fa, kelly = 2, min(abs_action, max_kelly)
                     else:
-                        fa, kelly = 1, min((lk if la == 1 else float(meta_router.current_leverage)), max_kelly)
+                        fa, kelly = 1, min(abs_action, max_kelly)
                 else:
                     live_unr = float(meta_router._net_pnl_frac(current_price))
-                    if live_unr <= -0.025:
+                    if force_close and live_unr <= -0.025:
                         fa, kelly = 0, 0.0
                         source = "DSAC_PURE_RL_FORCE_CLOSE"
-                    elif pa == 1 and la != 1:
+                    elif abs_action < close_th:
                         fa, kelly = 0, 0.0
-                    elif sa == 0:
-                        fa, kelly = 0, 0.0
-                    elif direction_score >= 0.0:
-                        if la == 1:
-                            fa, kelly = 1, min(lk, max_kelly)
-                        else:
-                            fa, kelly = 0, 0.0
-                    elif ssup <= lsup:
-                        if la == 1:
-                            fa, kelly = 1, min(lk, max_kelly)
-                        else:
-                            fa, kelly = 0, 0.0
+                    elif action_val > pos_th:
+                        fa, kelly = 1, min(abs_action, max_kelly)
                     else:
-                        fa, kelly = 2, min((sk if sa == 2 else float(meta_router.current_leverage)), max_kelly)
+                        fa, kelly = 2, min(abs_action, max_kelly)
                 kelly = float(np.clip(kelly, 0.0, 1.0))
             else:
                 kelly = float(np.clip(dsac_lev * meta_router.vol_scale(garch_vol_z, 0.0), 0.0, 1.0))

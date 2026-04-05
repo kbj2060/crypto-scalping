@@ -2878,77 +2878,42 @@ async def main(use_local=False):
             # 순수 RL 모드: 학습 추론 결과(action/kelly)를 그대로 집행한다.
             # (게이트/스케일링/보호 레이어를 거치지 않음)
             if DSAC_PURE_RL_MODE:
-                _la = int(info.get("_long_action", 0))
-                _sa = int(info.get("_short_action", 0))
-                _pa = int(info.get("primary_action", 0))
-                _lk = float(np.clip(info.get("_long_kelly", 0.0), 0.0, 1.0))
-                _sk = float(np.clip(info.get("_short_kelly", 0.0), 0.0, 1.0))
-                _pk = float(np.clip(info.get("primary_kelly", 0.0), 0.0, 1.0))
-                _ll = float(info.get("long_logit", 0.0))
-                _sl = float(info.get("short_logit", 0.0))
-                _dir = float(info.get("direction_score", _ll - _sl))
-                _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "0.40"))
-                _ls = float(info.get("long_std", 1.0))
-                _ss = float(info.get("short_std", 1.0))
-                _lsup = float(_ll * (1.0 / (1.0 + max(_ls, 1e-6))))
-                _ssup = float(_sl * (1.0 / (1.0 + max(_ss, 1e-6))))
-
+                # Match training env execution: use primary continuous action and the same thresholds.
+                _a = float(info.get("primary_raw", info.get("raw_action", 0.0)))
+                _abs = abs(_a)
+                _pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.06"))
+                _close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.06"))
+                _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "1.0"))
+                _force_close = str(os.getenv("DSAC_PURE_RL_FORCE_CLOSE", "false")).strip().lower() in {"1", "true", "yes", "on"}
                 _fa = 0
                 _kelly = 0.0
                 if meta_router.pos is None:
-                    if _la == 1 and _sa != 2:
-                        _fa, _kelly = 1, min(_lk, _max_kelly)
-                    elif _sa == 2 and _la != 1:
-                        _fa, _kelly = 2, min(_sk, _max_kelly)
-                    elif _la == 1 and _sa == 2:
-                        if _lsup >= _ssup and _lsup > 0.0:
-                            _fa, _kelly = 1, min(_lk, _max_kelly)
-                        elif _ssup > 0.0:
-                            _fa, _kelly = 2, min(_sk, _max_kelly)
-                    elif _pa in (1, 2):
-                        _fa, _kelly = _pa, min(_pk, _max_kelly)
+                    if _a > _pos_th:
+                        _fa, _kelly = 1, min(_abs, _max_kelly)
+                    elif _a < -_pos_th:
+                        _fa, _kelly = 2, min(_abs, _max_kelly)
                 elif meta_router.pos == "LONG":
                     _live_unr = float(meta_router._net_pnl_frac(current_price))
-                    if _live_unr <= -0.025:
+                    if _force_close and _live_unr <= -0.025:
                         _fa, _kelly = 0, 0.0
                         _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
-                    elif _pa == 2 and _sa != 2:
+                    elif _abs < _close_th:
                         _fa, _kelly = 0, 0.0
-                    elif _la == 0:
-                        _fa, _kelly = 0, 0.0
-                    elif _dir <= 0.0:
-                        if _sa == 2:
-                            _fa, _kelly = 2, min(_sk, _max_kelly)
-                        else:
-                            _fa, _kelly = 0, 0.0
-                    elif _lsup <= _ssup:
-                        if _sa == 2:
-                            _fa, _kelly = 2, min(_sk, _max_kelly)
-                        else:
-                            _fa, _kelly = 0, 0.0
+                    elif _a < -_pos_th:
+                        _fa, _kelly = 2, min(_abs, _max_kelly)
                     else:
-                        _fa, _kelly = 1, min((_lk if _la == 1 else float(meta_router.current_leverage)), _max_kelly)
+                        _fa, _kelly = 1, min(_abs, _max_kelly)
                 else:  # SHORT
                     _live_unr = float(meta_router._net_pnl_frac(current_price))
-                    if _live_unr <= -0.025:
+                    if _force_close and _live_unr <= -0.025:
                         _fa, _kelly = 0, 0.0
                         _dsac_only_source = "DSAC_PURE_RL_FORCE_CLOSE"
-                    elif _pa == 1 and _la != 1:
+                    elif _abs < _close_th:
                         _fa, _kelly = 0, 0.0
-                    elif _sa == 0:
-                        _fa, _kelly = 0, 0.0
-                    elif _dir >= 0.0:
-                        if _la == 1:
-                            _fa, _kelly = 1, min(_lk, _max_kelly)
-                        else:
-                            _fa, _kelly = 0, 0.0
-                    elif _ssup <= _lsup:
-                        if _la == 1:
-                            _fa, _kelly = 1, min(_lk, _max_kelly)
-                        else:
-                            _fa, _kelly = 0, 0.0
+                    elif _a > _pos_th:
+                        _fa, _kelly = 1, min(_abs, _max_kelly)
                     else:
-                        _fa, _kelly = 2, min((_sk if _sa == 2 else float(meta_router.current_leverage)), _max_kelly)
+                        _fa, _kelly = 2, min(_abs, _max_kelly)
                 _kelly = float(np.clip(_kelly, 0.0, 1.0))
             else:
                 _kelly = float(np.clip(dsac_lev, 0.0, 1.0))
