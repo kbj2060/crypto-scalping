@@ -973,8 +973,12 @@ class DSACAgent:
 
             alpha = torch.clamp(self.log_alpha.exp().detach(), min=self.alpha_min)
             entropy_term = alpha * next_log_prob  # [B,1]
-            # Apply entropy to full distribution target to keep CVaR tail consistently penalized.
-            target_q = r + self.gamma * (1.0 - d) * (chosen_tq - entropy_term)
+            # DSAC-T style expected-value substitution:
+            # mean path and centered quantile path are separated for variance stability.
+            tq_mean = chosen_tq.mean(dim=1, keepdim=True)
+            tq_centered = chosen_tq - tq_mean
+            target_mean = r + self.gamma * (1.0 - d) * (tq_mean - entropy_term)
+            target_q = target_mean + self.gamma * (1.0 - d) * tq_centered
             return target_q
 
     def _cvar_min(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
@@ -1036,8 +1040,9 @@ class DSACAgent:
         anti_flat_lambda_eff = self.anti_flat_lambda
         if self.anti_flat_anneal_updates > 0:
             anti_flat_lambda_eff *= max(0.0, 1.0 - float(self._updates) / float(self.anti_flat_anneal_updates))
+        det_action_batch = self.actor.deterministic(s)
         action_abs_mean = new_action.abs().mean()
-        det_action_abs_mean = action_abs_mean
+        det_action_abs_mean = det_action_batch.abs().mean()
         anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
         side_balance_pen = torch.tanh(4.0 * new_action).mean().abs()
         actor_loss = (
