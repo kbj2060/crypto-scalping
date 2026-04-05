@@ -545,19 +545,15 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
             if self._was_force_closed:
                 r3_quality = -0.30
             elif self._last_realized_pnl > 0:
-                # 대칭화: 승리 보상을 +0.10으로 낮춤
-                r3_quality = 0.10 * min(self._last_realized_pnl / 0.01, 1.0)
+                r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
             else:
-                # 대칭화: 패배 페널티를 -0.10으로 높임
-                r3_quality = -0.10
+                r3_quality = -0.05
 
-        r4_time_decay = 0.0
-        if self.pos is not None and self.hold_count > 12:
-            r4_time_decay = -0.012 * float(np.log1p((self.hold_count - 12) / 12.0) / np.log1p(8.0))
+        r4_time_decay = 0.0  # 제거: 시간 자체에 페널티를 주면 수익 중 포지션도 조기 청산됨
 
         r7_adverse_hold = 0.0
-        if self.pos is not None and self.unrealized_pnl < -0.005 and self.hold_count > 24:
-            r7_adverse_hold = -0.015 * float(np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0))
+        if self.pos is not None and self.unrealized_pnl < -0.005 and self.hold_count > 36:
+            r7_adverse_hold = -0.005 * float(np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0))
 
         # r5_idle: 롱 specialist는 관망 페널티를 크게 줄임 (불필요한 진입 방지)
         r5_idle = 0.0
@@ -594,9 +590,9 @@ class LongSpecialistEnv(_BaseSACTradingEnv):
                 self.win_trades += 1
             terminal_r = float(np.tanh(ep_realized * 50.0))
             if ep_realized > 0:
-                terminal_r += 0.10 * min(ep_realized / 0.01, 1.0)
+                terminal_r += 0.15 * min(ep_realized / 0.01, 1.0)
             else:
-                terminal_r -= 0.10
+                terminal_r -= 0.05
             reward = float(np.tanh(raw_reward + terminal_r))
             self.pos = None
 
