@@ -1,0 +1,95 @@
+{
+  "csv_path": "data/splits/year_oos/rl_base_2025.csv",
+  "start": "2025-01-01 00:00:00",
+  "end": "2025-01-09 16:15:00",
+  "rows": 2500,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "mode": "proposed",
+  "metrics": {
+    "pnl_pct": -1.6065369095566773,
+    "mdd_pct": -3.1835253206750957,
+    "trades": 2,
+    "wr_pct": 50.0,
+    "long_entries": 0,
+    "short_entries": 2,
+    "avg_hold_long": 0.0,
+    "avg_hold_short": 1217.0,
+    "avg_lev_long": 0.0,
+    "avg_lev_short": 0.17709525558040354,
+    "cross_exit": 0,
+    "ambiguity_exit": 0,
+    "reduce_hits": 0,
+    "max_hold_exit": 0,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 0,
+    "trend_mismatch_block": 0,
+    "iso_vae_block": 0
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-01-03 18:35:00",
+        "side": "SHORT",
+        "entry_price": 3344.0,
+        "exit_price": 3607.83,
+        "lev": 0.315,
+        "hold_bars": 737,
+        "pnl_frac": -0.025303375453200605,
+        "exit_source": "PROPOSED_HARD_STOP"
+      },
+      {
+        "ts": "2025-01-09 16:15:00",
+        "side": "SHORT",
+        "entry_price": 3606.39,
+        "exit_price": 3309.71,
+        "lev": 0.11715785782913014,
+        "hold_bars": 1697,
+        "pnl_frac": 0.009477827382370631,
+        "exit_source": "TERMINAL_CLOSE"
+      }
+    ],
+    "final_balance": 0.9839346309044332,
+    "proposed_diag": {
+      "no_go_counts": {
+        "jump_z": 294,
+        "chop_high_std": 88
+      },
+      "entry_counts": {
+        "short": 2
+      },
+      "exit_counts": {
+        "hard_stop": 1
+      },
+      "params": {
+        "jump_z_th": 3.0,
+        "chop_std_th": 1.2,
+        "th_bull_long": 0.15,
+        "th_bull_short": 0.35,
+        "th_bear_long": 0.35,
+        "th_bear_short": 0.15,
+        "th_normal": 0.22,
+        "th_chop": 0.4,
+        "kelly_cap": 0.35,
+        "kelly_min": 0.05,
+        "quality_mult": 0.2,
+        "agree_yes_mult": 0.9,
+        "agree_no_base": 0.3,
+        "agree_no_excess": 0.2,
+        "hard_stop": 0.025,
+        "m7_opp_exit": 1.1,
+        "opp_pressure_exit": 9.0,
+        "trail_arm": 9.0,
+        "trail_gap": 9.0,
+        "reduce_net_edge": -9.0,
+        "reduce_mult": 1.0,
+        "min_tp_offset": 0.0,
+        "min_sl_offset": 0.0,
+        "enable_tpsl": false
+      }
+    }
+  }
+}

@@ -1,0 +1,1184 @@
+{
+  "csv_path": "data/splits/year_oos/rl_base_2025.csv",
+  "start": "2025-01-01 00:00:00",
+  "end": "2025-01-11 09:55:00",
+  "rows": 3000,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "mode": "proposed",
+  "metrics": {
+    "pnl_pct": 0.028065409310218392,
+    "mdd_pct": -0.43927812308003356,
+    "trades": 111,
+    "wr_pct": 76.57657657657657,
+    "long_entries": 0,
+    "short_entries": 111,
+    "avg_hold_long": 0.0,
+    "avg_hold_short": 14.792792792792794,
+    "avg_lev_long": 0.0,
+    "avg_lev_short": 0.06767279491332684,
+    "cross_exit": 0,
+    "ambiguity_exit": 0,
+    "reduce_hits": 0,
+    "max_hold_exit": 0,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 0,
+    "trend_mismatch_block": 0,
+    "iso_vae_block": 0
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-01-01 08:25:00",
+        "side": "SHORT",
+        "entry_price": 3344.0,
+        "exit_price": 3336.48,
+        "lev": 0.05,
+        "hold_bars": 39,
+        "pnl_frac": 4.248117566096887e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-01 13:00:00",
+        "side": "SHORT",
+        "entry_price": 3325.87,
+        "exit_price": 3352.02,
+        "lev": 0.041318,
+        "hold_bars": 41,
+        "pnl_frac": -0.00038284556633949585,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-01 14:30:00",
+        "side": "SHORT",
+        "entry_price": 3336.83,
+        "exit_price": 3330.56,
+        "lev": 0.056736559128346846,
+        "hold_bars": 14,
+        "pnl_frac": 2.721656398585459e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-01 17:05:00",
+        "side": "SHORT",
+        "entry_price": 3338.14,
+        "exit_price": 3332.0,
+        "lev": 0.05,
+        "hold_bars": 29,
+        "pnl_frac": 2.2000176545633465e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-01 19:45:00",
+        "side": "SHORT",
+        "entry_price": 3330.28,
+        "exit_price": 3358.99,
+        "lev": 0.041318,
+        "hold_bars": 30,
+        "pnl_frac": -0.0004141892254492241,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 00:20:00",
+        "side": "SHORT",
+        "entry_price": 3354.23,
+        "exit_price": 3381.63,
+        "lev": 0.041318,
+        "hold_bars": 47,
+        "pnl_frac": -0.0003955015996180977,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 04:35:00",
+        "side": "SHORT",
+        "entry_price": 3388.62,
+        "exit_price": 3415.01,
+        "lev": 0.041318,
+        "hold_bars": 10,
+        "pnl_frac": -0.00037975484557162265,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 08:55:00",
+        "side": "SHORT",
+        "entry_price": 3406.34,
+        "exit_price": 3437.99,
+        "lev": 0.041318,
+        "hold_bars": 24,
+        "pnl_frac": -0.000441908197887142,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 13:50:00",
+        "side": "SHORT",
+        "entry_price": 3469.01,
+        "exit_price": 3461.82,
+        "lev": 0.0558352,
+        "hold_bars": 1,
+        "pnl_frac": 3.759867789843163e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 14:00:00",
+        "side": "SHORT",
+        "entry_price": 3465.31,
+        "exit_price": 3442.68,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.0007557628419794238,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 17:25:00",
+        "side": "SHORT",
+        "entry_price": 3473.9,
+        "exit_price": 3462.34,
+        "lev": 0.041318,
+        "hold_bars": 4,
+        "pnl_frac": 7.969925654327525e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 22:15:00",
+        "side": "SHORT",
+        "entry_price": 3451.19,
+        "exit_price": 3441.99,
+        "lev": 0.05,
+        "hold_bars": 43,
+        "pnl_frac": 6.333668366154122e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-02 23:55:00",
+        "side": "SHORT",
+        "entry_price": 3427.49,
+        "exit_price": 3454.83,
+        "lev": 0.041318,
+        "hold_bars": 18,
+        "pnl_frac": -0.000387560938241549,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 06:55:00",
+        "side": "SHORT",
+        "entry_price": 3449.98,
+        "exit_price": 3441.88,
+        "lev": 0.05,
+        "hold_bars": 80,
+        "pnl_frac": 4.743495026815481e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 08:05:00",
+        "side": "SHORT",
+        "entry_price": 3437.3,
+        "exit_price": 3430.64,
+        "lev": 0.147236864048,
+        "hold_bars": 12,
+        "pnl_frac": 7.925207408110424e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 08:30:00",
+        "side": "SHORT",
+        "entry_price": 3433.95,
+        "exit_price": 3425.42,
+        "lev": 0.12167065497470526,
+        "hold_bars": 3,
+        "pnl_frac": 0.0001320045879471543,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 11:35:00",
+        "side": "SHORT",
+        "entry_price": 3430.0,
+        "exit_price": 3459.0,
+        "lev": 0.041318,
+        "hold_bars": 35,
+        "pnl_frac": -0.0004073241284560103,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 14:05:00",
+        "side": "SHORT",
+        "entry_price": 3464.5,
+        "exit_price": 3494.51,
+        "lev": 0.041318,
+        "hold_bars": 12,
+        "pnl_frac": -0.00041589418671550415,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-03 20:55:00",
+        "side": "SHORT",
+        "entry_price": 3608.46,
+        "exit_price": 3600.15,
+        "lev": 0.041318,
+        "hold_bars": 8,
+        "pnl_frac": 3.7341671566215595e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 01:05:00",
+        "side": "SHORT",
+        "entry_price": 3600.99,
+        "exit_price": 3589.2,
+        "lev": 0.05,
+        "hold_bars": 48,
+        "pnl_frac": 9.376647542147509e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 10:05:00",
+        "side": "SHORT",
+        "entry_price": 3585.58,
+        "exit_price": 3578.62,
+        "lev": 0.05,
+        "hold_bars": 106,
+        "pnl_frac": 2.70902567105491e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 12:00:00",
+        "side": "SHORT",
+        "entry_price": 3576.06,
+        "exit_price": 3603.99,
+        "lev": 0.041318,
+        "hold_bars": 20,
+        "pnl_frac": -0.00038068241745492504,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 15:30:00",
+        "side": "SHORT",
+        "entry_price": 3636.4,
+        "exit_price": 3617.75,
+        "lev": 0.041318,
+        "hold_bars": 6,
+        "pnl_frac": 0.00015414384730849662,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 18:00:00",
+        "side": "SHORT",
+        "entry_price": 3607.54,
+        "exit_price": 3638.88,
+        "lev": 0.041318,
+        "hold_bars": 25,
+        "pnl_frac": -0.0004169364679980081,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 18:45:00",
+        "side": "SHORT",
+        "entry_price": 3634.61,
+        "exit_price": 3622.97,
+        "lev": 0.05,
+        "hold_bars": 3,
+        "pnl_frac": 9.018728425358447e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-04 19:45:00",
+        "side": "SHORT",
+        "entry_price": 3634.22,
+        "exit_price": 3627.72,
+        "lev": 0.041318,
+        "hold_bars": 2,
+        "pnl_frac": 1.6080548356001145e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 01:00:00",
+        "side": "SHORT",
+        "entry_price": 3654.0,
+        "exit_price": 3646.93,
+        "lev": 0.05,
+        "hold_bars": 20,
+        "pnl_frac": 2.677799927797153e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 01:35:00",
+        "side": "SHORT",
+        "entry_price": 3644.35,
+        "exit_price": 3633.45,
+        "lev": 0.147236864048,
+        "hold_bars": 5,
+        "pnl_frac": 0.00023440812006958467,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 08:00:00",
+        "side": "SHORT",
+        "entry_price": 3632.74,
+        "exit_price": 3623.5,
+        "lev": 0.05,
+        "hold_bars": 74,
+        "pnl_frac": 5.722361168181145e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 09:30:00",
+        "side": "SHORT",
+        "entry_price": 3616.92,
+        "exit_price": 3610.15,
+        "lev": 0.10054376244489743,
+        "hold_bars": 15,
+        "pnl_frac": 4.7499600997369384e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 09:50:00",
+        "side": "SHORT",
+        "entry_price": 3615.17,
+        "exit_price": 3606.48,
+        "lev": 0.147236864048,
+        "hold_bars": 2,
+        "pnl_frac": 0.00014792024816356886,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 12:05:00",
+        "side": "SHORT",
+        "entry_price": 3611.33,
+        "exit_price": 3604.59,
+        "lev": 0.05,
+        "hold_bars": 24,
+        "pnl_frac": 2.335075408654852e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 14:15:00",
+        "side": "SHORT",
+        "entry_price": 3612.42,
+        "exit_price": 3595.36,
+        "lev": 0.05,
+        "hold_bars": 20,
+        "pnl_frac": 0.0001662202666585788,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-05 17:30:00",
+        "side": "SHORT",
+        "entry_price": 3610.77,
+        "exit_price": 3646.86,
+        "lev": 0.041318,
+        "hold_bars": 34,
+        "pnl_frac": -0.00047099118923121797,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 00:50:00",
+        "side": "SHORT",
+        "entry_price": 3631.76,
+        "exit_price": 3622.68,
+        "lev": 0.05,
+        "hold_bars": 59,
+        "pnl_frac": 5.5054272964483175e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 01:10:00",
+        "side": "SHORT",
+        "entry_price": 3622.41,
+        "exit_price": 3613.46,
+        "lev": 0.147236864048,
+        "hold_bars": 1,
+        "pnl_frac": 0.0001577848078357924,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 01:50:00",
+        "side": "SHORT",
+        "entry_price": 3612.52,
+        "exit_price": 3650.08,
+        "lev": 0.06865840448272768,
+        "hold_bars": 6,
+        "pnl_frac": -0.000810266255149017,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 05:30:00",
+        "side": "SHORT",
+        "entry_price": 3661.34,
+        "exit_price": 3693.04,
+        "lev": 0.041318,
+        "hold_bars": 10,
+        "pnl_frac": -0.00041572420653968045,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 07:00:00",
+        "side": "SHORT",
+        "entry_price": 3668.12,
+        "exit_price": 3657.38,
+        "lev": 0.06865840448272768,
+        "hold_bars": 5,
+        "pnl_frac": 0.00010498019544891157,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 07:15:00",
+        "side": "SHORT",
+        "entry_price": 3657.91,
+        "exit_price": 3647.35,
+        "lev": 0.05715165666745331,
+        "hold_bars": 0,
+        "pnl_frac": 8.503991636921171e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 08:40:00",
+        "side": "SHORT",
+        "entry_price": 3648.94,
+        "exit_price": 3638.07,
+        "lev": 0.08308534353396545,
+        "hold_bars": 14,
+        "pnl_frac": 0.0001312797541253019,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 10:05:00",
+        "side": "SHORT",
+        "entry_price": 3643.97,
+        "exit_price": 3633.58,
+        "lev": 0.056736559128346846,
+        "hold_bars": 14,
+        "pnl_frac": 8.240114587221292e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 13:10:00",
+        "side": "SHORT",
+        "entry_price": 3639.54,
+        "exit_price": 3632.02,
+        "lev": 0.05,
+        "hold_bars": 34,
+        "pnl_frac": 3.334709029534366e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 14:15:00",
+        "side": "SHORT",
+        "entry_price": 3637.99,
+        "exit_price": 3622.01,
+        "lev": 0.056736559128346846,
+        "hold_bars": 7,
+        "pnl_frac": 0.0001698813308987912,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 14:45:00",
+        "side": "SHORT",
+        "entry_price": 3633.35,
+        "exit_price": 3671.56,
+        "lev": 0.10054376244489743,
+        "hold_bars": 3,
+        "pnl_frac": -0.0011985573542266925,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 20:10:00",
+        "side": "SHORT",
+        "entry_price": 3668.34,
+        "exit_price": 3696.72,
+        "lev": 0.05,
+        "hold_bars": 25,
+        "pnl_frac": -0.0004569822289749448,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 20:45:00",
+        "side": "SHORT",
+        "entry_price": 3686.22,
+        "exit_price": 3673.2,
+        "lev": 0.147236864048,
+        "hold_bars": 1,
+        "pnl_frac": 0.0003141160978494817,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 21:20:00",
+        "side": "SHORT",
+        "entry_price": 3678.8,
+        "exit_price": 3669.09,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.00018263608393298547,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-06 21:55:00",
+        "side": "SHORT",
+        "entry_price": 3673.58,
+        "exit_price": 3666.31,
+        "lev": 0.12167065497470526,
+        "hold_bars": 4,
+        "pnl_frac": 7.053341634644106e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 09:40:00",
+        "side": "SHORT",
+        "entry_price": 3667.32,
+        "exit_price": 3657.57,
+        "lev": 0.05,
+        "hold_bars": 139,
+        "pnl_frac": 6.298004177263117e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 11:30:00",
+        "side": "SHORT",
+        "entry_price": 3657.26,
+        "exit_price": 3644.44,
+        "lev": 0.056736559128346846,
+        "hold_bars": 13,
+        "pnl_frac": 0.00011952571061946138,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 11:45:00",
+        "side": "SHORT",
+        "entry_price": 3636.67,
+        "exit_price": 3628.36,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.00013043591192740678,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 12:15:00",
+        "side": "SHORT",
+        "entry_price": 3639.59,
+        "exit_price": 3630.0,
+        "lev": 0.05,
+        "hold_bars": 2,
+        "pnl_frac": 6.179431669384172e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 14:30:00",
+        "side": "SHORT",
+        "entry_price": 3627.81,
+        "exit_price": 3619.69,
+        "lev": 0.05,
+        "hold_bars": 25,
+        "pnl_frac": 4.1954021391399365e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 16:55:00",
+        "side": "SHORT",
+        "entry_price": 3470.63,
+        "exit_price": 3456.8,
+        "lev": 0.04234399914932251,
+        "hold_bars": 1,
+        "pnl_frac": 0.00010951773817513555,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 17:20:00",
+        "side": "SHORT",
+        "entry_price": 3463.94,
+        "exit_price": 3457.68,
+        "lev": 0.041318,
+        "hold_bars": 2,
+        "pnl_frac": 1.6850871188189842e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 17:45:00",
+        "side": "SHORT",
+        "entry_price": 3453.33,
+        "exit_price": 3436.87,
+        "lev": 0.147236864048,
+        "hold_bars": 3,
+        "pnl_frac": 0.0004959292124748771,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 18:20:00",
+        "side": "SHORT",
+        "entry_price": 3441.09,
+        "exit_price": 3433.45,
+        "lev": 0.12167065497470526,
+        "hold_bars": 4,
+        "pnl_frac": 9.98958641176273e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 18:35:00",
+        "side": "SHORT",
+        "entry_price": 3431.48,
+        "exit_price": 3418.0,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.0003724836117637853,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 19:35:00",
+        "side": "SHORT",
+        "entry_price": 3415.41,
+        "exit_price": 3404.66,
+        "lev": 0.08308534353396545,
+        "hold_bars": 9,
+        "pnl_frac": 0.00014528954264036997,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 20:20:00",
+        "side": "SHORT",
+        "entry_price": 3389.02,
+        "exit_price": 3379.2,
+        "lev": 0.147236864048,
+        "hold_bars": 6,
+        "pnl_frac": 0.00022065977544305504,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-07 20:40:00",
+        "side": "SHORT",
+        "entry_price": 3379.25,
+        "exit_price": 3369.63,
+        "lev": 0.10054376244489743,
+        "hold_bars": 2,
+        "pnl_frac": 0.00014557172897400328,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 00:15:00",
+        "side": "SHORT",
+        "entry_price": 3379.35,
+        "exit_price": 3406.3,
+        "lev": 0.0468848230013007,
+        "hold_bars": 11,
+        "pnl_frac": -0.0004396941702954349,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 01:00:00",
+        "side": "SHORT",
+        "entry_price": 3410.2,
+        "exit_price": 3399.19,
+        "lev": 0.0558352,
+        "hold_bars": 0,
+        "pnl_frac": 0.00010216508854932194,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 03:00:00",
+        "side": "SHORT",
+        "entry_price": 3379.99,
+        "exit_price": 3366.96,
+        "lev": 0.05,
+        "hold_bars": 14,
+        "pnl_frac": 0.00012282516500516927,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 03:45:00",
+        "side": "SHORT",
+        "entry_price": 3368.19,
+        "exit_price": 3359.42,
+        "lev": 0.05,
+        "hold_bars": 6,
+        "pnl_frac": 6.023670268962e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 04:50:00",
+        "side": "SHORT",
+        "entry_price": 3352.61,
+        "exit_price": 3345.5,
+        "lev": 0.0558352,
+        "hold_bars": 5,
+        "pnl_frac": 4.028533314803795e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 06:15:00",
+        "side": "SHORT",
+        "entry_price": 3347.26,
+        "exit_price": 3337.07,
+        "lev": 0.05,
+        "hold_bars": 15,
+        "pnl_frac": 8.227094669965851e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 06:55:00",
+        "side": "SHORT",
+        "entry_price": 3315.96,
+        "exit_price": 3307.6,
+        "lev": 0.0558352,
+        "hold_bars": 3,
+        "pnl_frac": 6.265093722590542e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 07:45:00",
+        "side": "SHORT",
+        "entry_price": 3321.2,
+        "exit_price": 3347.25,
+        "lev": 0.041318,
+        "hold_bars": 8,
+        "pnl_frac": -0.00038205798450785533,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 11:30:00",
+        "side": "SHORT",
+        "entry_price": 3350.81,
+        "exit_price": 3325.87,
+        "lev": 0.12167065497470526,
+        "hold_bars": 1,
+        "pnl_frac": 0.0007356054792215794,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 14:30:00",
+        "side": "SHORT",
+        "entry_price": 3340.32,
+        "exit_price": 3377.62,
+        "lev": 0.041318,
+        "hold_bars": 33,
+        "pnl_frac": -0.000519414460224632,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 16:40:00",
+        "side": "SHORT",
+        "entry_price": 3337.69,
+        "exit_price": 3328.92,
+        "lev": 0.0558352,
+        "hold_bars": 0,
+        "pnl_frac": 6.859560866079306e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 17:00:00",
+        "side": "SHORT",
+        "entry_price": 3318.04,
+        "exit_price": 3288.26,
+        "lev": 0.147236864048,
+        "hold_bars": 2,
+        "pnl_frac": 0.0011158623858478212,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 17:20:00",
+        "side": "SHORT",
+        "entry_price": 3257.19,
+        "exit_price": 3231.95,
+        "lev": 0.147236864048,
+        "hold_bars": 1,
+        "pnl_frac": 0.0009352531039543699,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 17:55:00",
+        "side": "SHORT",
+        "entry_price": 3226.9,
+        "exit_price": 3262.11,
+        "lev": 0.147236864048,
+        "hold_bars": 4,
+        "pnl_frac": -0.0018133466144821808,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-08 22:20:00",
+        "side": "SHORT",
+        "entry_price": 3287.84,
+        "exit_price": 3320.19,
+        "lev": 0.041318,
+        "hold_bars": 11,
+        "pnl_frac": -0.0004645507975364893,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 04:10:00",
+        "side": "SHORT",
+        "entry_price": 3324.53,
+        "exit_price": 3313.21,
+        "lev": 0.05,
+        "hold_bars": 11,
+        "pnl_frac": 0.00010031374194507947,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 07:15:00",
+        "side": "SHORT",
+        "entry_price": 3317.96,
+        "exit_price": 3308.7,
+        "lev": 0.05,
+        "hold_bars": 34,
+        "pnl_frac": 6.959540276341158e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 07:25:00",
+        "side": "SHORT",
+        "entry_price": 3305.5,
+        "exit_price": 3294.31,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.000292492117341947,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 07:50:00",
+        "side": "SHORT",
+        "entry_price": 3297.76,
+        "exit_price": 3287.51,
+        "lev": 0.147236864048,
+        "hold_bars": 2,
+        "pnl_frac": 0.00025167696235595116,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 08:10:00",
+        "side": "SHORT",
+        "entry_price": 3288.18,
+        "exit_price": 3276.0,
+        "lev": 0.147236864048,
+        "hold_bars": 2,
+        "pnl_frac": 0.00033946618198354983,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 08:35:00",
+        "side": "SHORT",
+        "entry_price": 3284.46,
+        "exit_price": 3322.32,
+        "lev": 0.10054376244489743,
+        "hold_bars": 3,
+        "pnl_frac": -0.001300201848015159,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 10:15:00",
+        "side": "SHORT",
+        "entry_price": 3316.69,
+        "exit_price": 3307.49,
+        "lev": 0.041318,
+        "hold_bars": 3,
+        "pnl_frac": 5.6807274407599806e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 10:30:00",
+        "side": "SHORT",
+        "entry_price": 3301.07,
+        "exit_price": 3284.71,
+        "lev": 0.0558352,
+        "hold_bars": 0,
+        "pnl_frac": 0.0001986544718195482,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 11:35:00",
+        "side": "SHORT",
+        "entry_price": 3313.22,
+        "exit_price": 3300.27,
+        "lev": 0.041318,
+        "hold_bars": 5,
+        "pnl_frac": 0.0001037109949442172,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 12:40:00",
+        "side": "SHORT",
+        "entry_price": 3298.3,
+        "exit_price": 3286.92,
+        "lev": 0.05,
+        "hold_bars": 10,
+        "pnl_frac": 0.00010257813106440139,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 13:00:00",
+        "side": "SHORT",
+        "entry_price": 3294.9,
+        "exit_price": 3288.01,
+        "lev": 0.0558352,
+        "hold_bars": 0,
+        "pnl_frac": 3.863053788144555e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 13:10:00",
+        "side": "SHORT",
+        "entry_price": 3288.84,
+        "exit_price": 3279.7,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.00020320560230624451,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 13:30:00",
+        "side": "SHORT",
+        "entry_price": 3283.1,
+        "exit_price": 3269.27,
+        "lev": 0.12167065497470526,
+        "hold_bars": 1,
+        "pnl_frac": 0.0003423918594540609,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 13:55:00",
+        "side": "SHORT",
+        "entry_price": 3243.15,
+        "exit_price": 3219.7,
+        "lev": 0.147236864048,
+        "hold_bars": 1,
+        "pnl_frac": 0.00085889702343378,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 15:10:00",
+        "side": "SHORT",
+        "entry_price": 3227.32,
+        "exit_price": 3254.59,
+        "lev": 0.041318,
+        "hold_bars": 12,
+        "pnl_frac": -0.0004071143511061859,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 17:45:00",
+        "side": "SHORT",
+        "entry_price": 3275.01,
+        "exit_price": 3249.97,
+        "lev": 0.147236864048,
+        "hold_bars": 4,
+        "pnl_frac": 0.0009200473978177026,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 18:15:00",
+        "side": "SHORT",
+        "entry_price": 3258.48,
+        "exit_price": 3249.33,
+        "lev": 0.046139975872,
+        "hold_bars": 1,
+        "pnl_frac": 6.5015894284981e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 19:00:00",
+        "side": "SHORT",
+        "entry_price": 3263.74,
+        "exit_price": 3251.34,
+        "lev": 0.05,
+        "hold_bars": 5,
+        "pnl_frac": 0.00012003811334193593,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 19:20:00",
+        "side": "SHORT",
+        "entry_price": 3262.2,
+        "exit_price": 3244.64,
+        "lev": 0.10054376244489743,
+        "hold_bars": 2,
+        "pnl_frac": 0.0004006612647438068,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 19:35:00",
+        "side": "SHORT",
+        "entry_price": 3248.89,
+        "exit_price": 3240.44,
+        "lev": 0.0558352,
+        "hold_bars": 0,
+        "pnl_frac": 6.710547095534203e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 19:45:00",
+        "side": "SHORT",
+        "entry_price": 3228.17,
+        "exit_price": 3219.84,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.0001739399902895844,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 19:55:00",
+        "side": "SHORT",
+        "entry_price": 3219.01,
+        "exit_price": 3193.65,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.0009542819391072932,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 20:10:00",
+        "side": "SHORT",
+        "entry_price": 3193.03,
+        "exit_price": 3178.2,
+        "lev": 0.147236864048,
+        "hold_bars": 0,
+        "pnl_frac": 0.0004779705314228444,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 21:05:00",
+        "side": "SHORT",
+        "entry_price": 3178.3,
+        "exit_price": 3209.0,
+        "lev": 0.06865840448272768,
+        "hold_bars": 7,
+        "pnl_frac": -0.0007595814058121153,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-09 22:35:00",
+        "side": "SHORT",
+        "entry_price": 3199.69,
+        "exit_price": 3232.64,
+        "lev": 0.10054376244489743,
+        "hold_bars": 3,
+        "pnl_frac": -0.0011765704071498018,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-10 02:00:00",
+        "side": "SHORT",
+        "entry_price": 3212.18,
+        "exit_price": 3242.27,
+        "lev": 0.041318,
+        "hold_bars": 30,
+        "pnl_frac": -0.0004450484833530277,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-10 20:30:00",
+        "side": "SHORT",
+        "entry_price": 3272.82,
+        "exit_price": 3266.57,
+        "lev": 0.147236864048,
+        "hold_bars": 1,
+        "pnl_frac": 7.514264556274242e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 01:15:00",
+        "side": "SHORT",
+        "entry_price": 3261.47,
+        "exit_price": 3252.65,
+        "lev": 0.05,
+        "hold_bars": 55,
+        "pnl_frac": 6.526519845273526e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 01:40:00",
+        "side": "SHORT",
+        "entry_price": 3249.23,
+        "exit_price": 3242.92,
+        "lev": 0.147236864048,
+        "hold_bars": 3,
+        "pnl_frac": 7.990478423436365e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 03:20:00",
+        "side": "SHORT",
+        "entry_price": 3240.4,
+        "exit_price": 3233.89,
+        "lev": 0.08308534353396545,
+        "hold_bars": 18,
+        "pnl_frac": 5.06600404794888e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 04:30:00",
+        "side": "SHORT",
+        "entry_price": 3235.36,
+        "exit_price": 3228.67,
+        "lev": 0.06865840448272768,
+        "hold_bars": 12,
+        "pnl_frac": 4.5899745489741406e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 07:40:00",
+        "side": "SHORT",
+        "entry_price": 3233.83,
+        "exit_price": 3228.0,
+        "lev": 0.05,
+        "hold_bars": 36,
+        "pnl_frac": 2.0172855535793843e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 08:50:00",
+        "side": "SHORT",
+        "entry_price": 3230.68,
+        "exit_price": 3222.0,
+        "lev": 0.05,
+        "hold_bars": 12,
+        "pnl_frac": 6.438678836095946e-05,
+        "exit_source": "PROPOSED_M7_TPSL_EXIT"
+      },
+      {
+        "ts": "2025-01-11 09:55:00",
+        "side": "SHORT",
+        "entry_price": 3223.35,
+        "exit_price": 3243.01,
+        "lev": 0.041318,
+        "hold_bars": 12,
+        "pnl_frac": -0.00030995791704013727,
+        "exit_source": "TERMINAL_CLOSE"
+      }
+    ],
+    "final_balance": 1.0002806540931022,
+    "proposed_diag": {
+      "no_go_counts": {
+        "jump_z": 427,
+        "chop_high_std": 13
+      },
+      "entry_counts": {
+        "short": 111
+      },
+      "exit_counts": {
+        "tpsl": 110
+      },
+      "params": {
+        "jump_z_th": 2.68209,
+        "chop_std_th": 1.303178,
+        "th_bull_long": 0.336768,
+        "th_bull_short": 0.411385,
+        "th_bear_long": 0.62931,
+        "th_bear_short": 0.220102,
+        "th_normal": 0.383823,
+        "th_chop": 0.928659,
+        "kelly_cap": 0.279176,
+        "kelly_min": 0.037788,
+        "quality_mult": 0.179602,
+        "agree_yes_mult": 0.527398,
+        "agree_no_base": 0.124177,
+        "agree_no_excess": 0.193742,
+        "hard_stop": 0.031584,
+        "m7_opp_exit": 0.671815,
+        "opp_pressure_exit": 1.248785,
+        "trail_arm": 0.0068,
+        "trail_gap": 0.010426,
+        "reduce_net_edge": 0.060342,
+        "reduce_mult": 0.82636,
+        "min_tp_offset": 0.001787,
+        "min_sl_offset": 0.007725
+      }
+    }
+  }
+}

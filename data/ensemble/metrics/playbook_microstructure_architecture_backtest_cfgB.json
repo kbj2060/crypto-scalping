@@ -1,0 +1,41 @@
+{
+  "pnl_pct": -10.350093757166444,
+  "sharpe_1m": -0.043835121619159804,
+  "mdd_pct": 13.727633980357535,
+  "win_rate_pct": 40.0,
+  "trades": 95,
+  "maker_ratio_pct": 11.578947368421053,
+  "avg_hold_min": 16.673684210526314,
+  "avg_kelly": 0.43349436392914653,
+  "final_equity": 0.8964990624283355,
+  "symbol": "ETHUSDT",
+  "leverage": 7.0,
+  "fee_taker_bps": 3.0,
+  "fee_maker_bps": -1.0,
+  "slip_taker_bps": 1.0,
+  "slip_maker_bps": 0.3,
+  "rows": 3105,
+  "by_playbook": {
+    "PB16_MICRO_TREND_SURFING": {
+      "trades": 71,
+      "win_rate_pct": 39.436619718309856,
+      "pnl_pct_sum": -30.469857079661427
+    },
+    "PB10_CVD_DIVERGENCE": {
+      "trades": 6,
+      "win_rate_pct": 50.0,
+      "pnl_pct_sum": -3.2841982186274925
+    },
+    "PB8_HOLY_TRINITY_TRAP": {
+      "trades": 5,
+      "win_rate_pct": 60.0,
+      "pnl_pct_sum": -1.005047776387429
+    },
+    "PB7_HOLY_TRINITY_TREND": {
+      "trades": 13,
+      "win_rate_pct": 30.76923076923077,
+      "pnl_pct_sum": -21.27410461823527
+    }
+  },
+  "output_path": "data/ensemble/metrics/playbook_microstructure_architecture_backtest_cfgB.json"
+}

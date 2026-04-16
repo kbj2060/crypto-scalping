@@ -1,0 +1,3 @@
+# Monday 09:30 Asia/Seoul (KST)
+# crontab -e
+# 30 9 * * 1 cd /home/llewyn/crypto-scalping && /bin/bash scripts/run_weekly_ensemble_update.sh >> data/ensemble/metrics/weekly_param_update_cron.log 2>&1

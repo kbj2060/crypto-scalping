@@ -1,0 +1,76 @@
+{
+  "csv_path": "data/splits/year_oos/rl_training_2025_m7.csv",
+  "start": "2025-11-01 00:00:00",
+  "end": "2025-12-31 23:55:00",
+  "rows": 17568,
+  "primary_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "comparison": {
+    "results": {
+      "ultimate_ensemble_3m": {
+        "pnl_pct": -21.69366927220916,
+        "mdd_pct": -23.121967178836478,
+        "trades": 6,
+        "wr_pct": 83.33333333333333,
+        "avg_pnl_per_trade_pct": -3.546202381767376,
+        "profit_factor": 0.0797835614056544,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    "trade_samples": {
+      "ultimate_ensemble_3m": [
+        {
+          "ts": "2025-11-02 14:55:00",
+          "side": "LONG",
+          "entry_price": 3834.0027,
+          "exit_price": 3851.4,
+          "lev": 1.0,
+          "hold_bars": 4,
+          "pnl_frac": 0.003135899030637157
+        },
+        {
+          "ts": "2025-11-02 16:05:00",
+          "side": "SHORT",
+          "entry_price": 3862.965,
+          "exit_price": 3850.76,
+          "lev": 1.0,
+          "hold_bars": 13,
+          "pnl_frac": 0.001760674217233582
+        },
+        {
+          "ts": "2025-11-02 23:10:00",
+          "side": "LONG",
+          "entry_price": 3850.76,
+          "exit_price": 3879.62,
+          "lev": 1.0,
+          "hold_bars": 84,
+          "pnl_frac": 0.006091707171451466
+        },
+        {
+          "ts": "2025-11-03 01:10:00",
+          "side": "SHORT",
+          "entry_price": 3879.7068,
+          "exit_price": 3857.22,
+          "lev": 1.0,
+          "hold_bars": 23,
+          "pnl_frac": 0.004398243846847505
+        },
+        {
+          "ts": "2025-12-31 23:55:00",
+          "side": "LONG",
+          "entry_price": 3857.22,
+          "exit_price": 2970.4,
+          "lev": 1.0,
+          "hold_bars": 16977,
+          "pnl_frac": -0.2312196717883648,
+          "terminal": true
+        }
+      ]
+    }
+  },
+  "ranking": [
+    "ultimate_ensemble_3m"
+  ]
+}

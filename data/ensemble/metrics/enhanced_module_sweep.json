@@ -1,0 +1,182 @@
+[
+  {
+    "split": "2025H2",
+    "case": "baseline",
+    "pnl_pct": -1.8839310878404958,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.4860501582362526,
+    "sharpe": -14.118333415867163
+  },
+  {
+    "split": "2025H2",
+    "case": "micro",
+    "pnl_pct": -2.0824638086701763,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.7316573518528897,
+    "sharpe": -14.225827818236477
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum",
+    "pnl_pct": -1.686906764438767,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.134802972970695,
+    "sharpe": -15.101159032955499
+  },
+  {
+    "split": "2025H2",
+    "case": "partial",
+    "pnl_pct": -1.8839310878404958,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.4860501582362526,
+    "sharpe": -14.118333415867163
+  },
+  {
+    "split": "2025H2",
+    "case": "cross_asset",
+    "pnl_pct": -1.9287971861016384,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.4506088439123497,
+    "sharpe": -15.45622790723616
+  },
+  {
+    "split": "2025H2",
+    "case": "bayes",
+    "pnl_pct": -0.04093112837569857,
+    "trades": 1,
+    "win_rate": 0.0,
+    "mdd_pct": -0.04093112837569857,
+    "sharpe": -9.566415636906079
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c2_w12_f5",
+    "pnl_pct": -1.686906764438767,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.134802972970695,
+    "sharpe": -15.101159032955499
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c2_w12_f7",
+    "pnl_pct": -1.7431645037700005,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.230013944955489,
+    "sharpe": -14.84827424157604
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c2_w18_f5",
+    "pnl_pct": -1.2511687960477968,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.018220578647434,
+    "sharpe": -10.342763762162818
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c2_w18_f7",
+    "pnl_pct": -1.67256096032955,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.1487581505877484,
+    "sharpe": -14.462597000433663
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c3_w12_f5",
+    "pnl_pct": -1.686906764438767,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.134802972970695,
+    "sharpe": -15.101159032955499
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c3_w12_f7",
+    "pnl_pct": -1.7431645037700005,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.230013944955489,
+    "sharpe": -14.84827424157604
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c3_w18_f5",
+    "pnl_pct": -1.2113694628032134,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.0182205786473895,
+    "sharpe": -9.820613869090925
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_relaxed_c3_w18_f7",
+    "pnl_pct": -1.67256096032955,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.1487581505877484,
+    "sharpe": -14.462597000433663
+  },
+  {
+    "split": "2025H2",
+    "case": "kelly_diag",
+    "pnl_pct": -2.1438834733182643,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.7976305257486955,
+    "sharpe": -14.629759790855283
+  },
+  {
+    "split": "2025H2",
+    "case": "bayes_lenient_soft",
+    "pnl_pct": -0.04093112837569857,
+    "trades": 1,
+    "win_rate": 0.0,
+    "mdd_pct": -0.04093112837569857,
+    "sharpe": -9.566415636906079
+  },
+  {
+    "split": "2025H2",
+    "case": "bayes_lenient_agg",
+    "pnl_pct": 0.0,
+    "trades": 0,
+    "win_rate": 0.0,
+    "mdd_pct": 0.0,
+    "sharpe": 0.0
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_partial_modest",
+    "pnl_pct": -1.686906764438767,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.134802972970695,
+    "sharpe": -15.101159032955499
+  },
+  {
+    "split": "2025H2",
+    "case": "momentum_partial_aggressive",
+    "pnl_pct": -1.686906764438767,
+    "trades": 51,
+    "win_rate": 21.568627450980394,
+    "mdd_pct": -2.134802972970695,
+    "sharpe": -15.101159032955499
+  },
+  {
+    "split": "2025H2",
+    "case": "all",
+    "pnl_pct": -0.04093112837569857,
+    "trades": 1,
+    "win_rate": 0.0,
+    "mdd_pct": -0.04093112837569857,
+    "sharpe": -9.566415636906079
+  }
+]

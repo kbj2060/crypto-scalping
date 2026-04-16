@@ -10,6 +10,7 @@ import tempfile
 import warnings
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -150,7 +151,8 @@ def _simulate_dual(
         from features.schema import STATE_PRED as DSAC_STATE_PRED, STATE_CONF as DSAC_STATE_CONF
         from trading_bot import DSACSignalRouter, DSACTrendRouter
 
-        dsac_router = DSACSignalRouter(long_path=long_ckpt, short_path=short_ckpt)
+        # trading_bot.DSACSignalRouter now uses a single checkpoint path.
+        dsac_router = DSACSignalRouter(model_path=(long_ckpt or short_ckpt))
         meta_router = DSACTrendRouter()
         meta_router.online_adapt = False
         # Backtest loop performance: disable per-step live-state fsync.
@@ -178,6 +180,36 @@ def _simulate_dual(
         hold_long: list[int] = []
         hold_short: list[int] = []
         trade_rows: list[dict] = []
+
+        # Proposed-mode tunables (env-driven for sweep without code edits)
+        p_jump_z_th = float(os.getenv("P_JUMP_Z_TH", "3.0"))
+        p_chop_std_th = float(os.getenv("P_CHOP_STD_TH", "1.2"))
+        p_th_bull_long = float(os.getenv("P_TH_BULL_LONG", "0.15"))
+        p_th_bull_short = float(os.getenv("P_TH_BULL_SHORT", "0.35"))
+        p_th_bear_long = float(os.getenv("P_TH_BEAR_LONG", "0.35"))
+        p_th_bear_short = float(os.getenv("P_TH_BEAR_SHORT", "0.15"))
+        p_th_normal = float(os.getenv("P_TH_NORMAL", "0.22"))
+        p_th_chop = float(os.getenv("P_TH_CHOP", "0.40"))
+        p_kelly_cap = float(os.getenv("P_KELLY_CAP", "0.35"))
+        p_kelly_min = float(os.getenv("P_KELLY_MIN", "0.05"))
+        p_quality_mult = float(os.getenv("P_QUALITY_MULT", "0.40"))
+        p_agree_yes_mult = float(os.getenv("P_AGREE_YES_MULT", "0.90"))
+        p_agree_no_base = float(os.getenv("P_AGREE_NO_BASE", "0.30"))
+        p_agree_no_excess = float(os.getenv("P_AGREE_NO_EXCESS", "0.20"))
+        p_hard_stop = float(os.getenv("P_HARD_STOP", "0.025"))
+        p_m7_opp_exit = float(os.getenv("P_M7_OPP_EXIT", "0.60"))
+        p_opp_pressure_exit = float(os.getenv("P_OPP_PRESSURE_EXIT", "1.15"))
+        p_trail_arm = float(os.getenv("P_TRAIL_ARM", "0.012"))
+        p_trail_gap = float(os.getenv("P_TRAIL_GAP", "0.008"))
+        p_reduce_net_edge = float(os.getenv("P_REDUCE_NET_EDGE", "0.05"))
+        p_reduce_mult = float(os.getenv("P_REDUCE_MULT", "0.65"))
+        p_min_tp_offset = float(os.getenv("P_MIN_TP_OFFSET", "0.0"))
+        p_min_sl_offset = float(os.getenv("P_MIN_SL_OFFSET", "0.0"))
+        p_enable_tpsl = str(os.getenv("P_ENABLE_TPSL", "true")).strip().lower() in {"1", "true", "yes", "on"}
+
+        proposed_no_go_counter: Counter[str] = Counter()
+        proposed_exit_counter: Counter[str] = Counter()
+        proposed_entry_counter: Counter[str] = Counter()
 
         for i in range(60, len(df) - 1):
             start_i = max(0, i - 300)
@@ -247,6 +279,18 @@ def _simulate_dual(
                     nf_preds[c] = conf_fallback
             trend_signal = trend_signal_from_m7(row_dict)
             dsac_action, dsac_lev, info, _, _ = dsac_router.decide(processed_df, nf_preds, m7_signal=trend_signal)
+            long_raw = float(info.get("_long_raw", info.get("long_edge", 0.0)))
+            short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
+            if _safe_float(last_row.get("regime_bull", 0.0)) >= 0.5:
+                regime_name = "bull"
+            elif _safe_float(last_row.get("regime_bear", 0.0)) >= 0.5:
+                regime_name = "bear"
+            elif _safe_float(last_row.get("regime_chop", 0.0)) >= 0.5:
+                regime_name = "chop"
+            elif _safe_float(last_row.get("regime_whipsaw", 0.0)) >= 0.5:
+                regime_name = "whipsaw"
+            else:
+                regime_name = "normal"
 
             garch_vol_z = float(last_row.get("garch_vol_z", 0.0))
             btc_3bar_ret = float(last_row.get("btc_3bar_ret", 0.0))
@@ -256,11 +300,179 @@ def _simulate_dual(
             vae_th = float((trend_signal or {}).get("m7_vae_threshold", 0.0))
             vae_ratio = (vae_err / max(vae_th, 1e-8)) if vae_th > 1e-8 else (1.0 if vae_anom else 0.0)
 
-            if mode == "pure_rl":
-                action_val = float(info.get("primary_raw", info.get("raw_action", 0.0)))
+            if mode == "proposed":
+                # With specialists_only=True, primary_raw/primary_lev are zeroed in the router.
+                # Use the preserved primary_model_raw/primary_model_kelly for accurate signals.
+                primary_raw = float(info.get("primary_model_raw", info.get("primary_raw", info.get("raw_action", 0.0))))
+                primary_kelly = float(np.clip(
+                    info.get("primary_model_kelly", info.get("primary_kelly", dsac_lev)), 0.0, 1.0
+                ))
+                long_logit = float(info.get("long_logit", long_raw))
+                short_logit = float(info.get("short_logit", short_raw))
+                long_std = max(1e-6, float(info.get("long_std", 1.0)))
+                short_std = max(1e-6, float(info.get("short_std", 1.0)))
+                avg_std = max(1e-6, 0.5 * (long_std + short_std))
+                m7_up = float((trend_signal or {}).get("m7_prob_up", (trend_signal or {}).get("prob_up", 0.0)))
+                m7_dn = float((trend_signal or {}).get("m7_prob_dn", (trend_signal or {}).get("prob_dn", 0.0)))
+                m7_conf = float((trend_signal or {}).get("m7_confidence", 0.0))
+                m7_quality = float((trend_signal or {}).get("m7_quality_pred", 0.0))
+                agreement_count = int(info.get("agreement_count", 0))
+                regime_bias = 1.0 if regime_name == "bull" else (-1.0 if regime_name == "bear" else 0.0)
+                direction = (
+                    0.35 * primary_raw
+                    + 0.25 * ((long_logit - short_logit) / avg_std)
+                    + 0.25 * ((m7_up - m7_dn) * m7_conf)
+                    + 0.15 * regime_bias
+                )
+
+                if regime_name == "bull":
+                    th_long, th_short = p_th_bull_long, p_th_bull_short
+                elif regime_name == "bear":
+                    th_long, th_short = p_th_bear_long, p_th_bear_short
+                elif regime_name in ("chop", "whipsaw"):
+                    th_long, th_short = p_th_chop, p_th_chop
+                else:
+                    th_long, th_short = p_th_normal, p_th_normal
+
+                hard_no_go = False
+                if int((trend_signal or {}).get("m7_gate_block", 0)) == 1:
+                    hard_no_go = True
+                    proposed_no_go_counter["m7_gate_block"] += 1
+                elif bool(float((trend_signal or {}).get("m7_iso_anom", 0.0)) >= 0.5) and bool(float((trend_signal or {}).get("m7_vae_anom", 0.0)) >= 0.5):
+                    hard_no_go = True
+                    proposed_no_go_counter["iso_vae"] += 1
+                elif abs(float(last_row.get("jump_z", 0.0))) > p_jump_z_th:
+                    hard_no_go = True
+                    proposed_no_go_counter["jump_z"] += 1
+                elif int(float(last_row.get("evt_tail_flag", 0.0)) >= 0.5) == 1:
+                    hard_no_go = True
+                    proposed_no_go_counter["evt_tail"] += 1
+                elif regime_name == "chop" and long_std > p_chop_std_th and short_std > p_chop_std_th:
+                    hard_no_go = True
+                    proposed_no_go_counter["chop_high_std"] += 1
+
+                fa = 0
+                kelly = 0.0
+                source = "PROPOSED"
+                if meta_router.pos is None:
+                    if not hard_no_go:
+                        target = 0
+                        if direction >= th_long:
+                            target = 1
+                        elif direction <= -th_short:
+                            target = 2
+                        if target != 0:
+                            is_specialists_only = getattr(dsac_router, "specialists_only", True)
+                            if is_specialists_only:
+                                # Primary kelly is zeroed by specialists_only; use specialist's kelly
+                                if target == 1:
+                                    kelly = float(np.clip(info.get("_long_kelly", info.get("primary_model_kelly", 0.15)), p_kelly_min, p_kelly_cap))
+                                else:
+                                    kelly = float(np.clip(info.get("_short_kelly", info.get("primary_model_kelly", 0.15)), p_kelly_min, p_kelly_cap))
+                            else:
+                                kelly = primary_kelly
+                            kelly *= float(np.clip(1.0 + p_quality_mult * m7_quality, 0.6, 1.4))
+                            # specialists_only=True: vote_pool=(long,short) → max agreement_count=1
+                            # (short_vote never equals +1, long_vote never equals -1)
+                            # So tiers 2 and 3 are unreachable; re-map accordingly:
+                            #   ≥1 = specialist confirmed   → full kelly
+                            #    0 = direction signal only  → reduced kelly (not zero)
+                            if is_specialists_only:
+                                if agreement_count >= 1:
+                                    kelly *= p_agree_yes_mult  # specialist explicitly confirmed direction
+                                else:
+                                    # Specialist uncertain; direction score crossed threshold.
+                                    # Scale by how strongly direction exceeded the bar.
+                                    dir_excess = float(np.clip(abs(direction) / max(th_long, th_short, 1e-6) - 1.0, 0.0, 1.0))
+                                    kelly *= float(np.clip(p_agree_no_base + p_agree_no_excess * dir_excess, 0.20, 0.60))
+                            else:
+                                if agreement_count >= 3:
+                                    kelly *= 1.0
+                                elif agreement_count == 2:
+                                    kelly *= 0.75
+                                elif agreement_count == 1:
+                                    kelly *= 0.45
+                                else:
+                                    kelly = 0.0
+                            kelly = float(np.clip(kelly, 0.0, p_kelly_cap))
+                            if kelly > 0.0:
+                                fa = target
+                                if target == 1:
+                                    proposed_entry_counter["long"] += 1
+                                elif target == 2:
+                                    proposed_entry_counter["short"] += 1
+                else:
+                    side = 1 if meta_router.pos == "LONG" else 2
+                    fa = side
+                    kelly = float(np.clip(max(meta_router.current_leverage, 0.05), 0.0, 0.35))
+                    live_unr = float(meta_router._net_pnl_frac(current_price))
+                    own_support = float(info.get("own_support", 0.0))
+                    opp_pressure = float(info.get("opp_pressure", 0.0))
+                    net_edge = float(info.get("net_edge", 0.0))
+                    # Exit/Reduce priority: hard risk, opposite M7, opp pressure, trailing, TP/SL
+                    force_exit = False
+                    if live_unr <= -p_hard_stop:
+                        force_exit = True
+                        source = "PROPOSED_HARD_STOP"
+                        proposed_exit_counter["hard_stop"] += 1
+                    else:
+                        opposite_prob = m7_dn if meta_router.pos == "LONG" else m7_up
+                        if opposite_prob > p_m7_opp_exit:
+                            force_exit = True
+                            source = "PROPOSED_M7_REVERSE_EXIT"
+                            proposed_exit_counter["m7_reverse"] += 1
+                        elif opp_pressure > p_opp_pressure_exit:
+                            force_exit = True
+                            source = "PROPOSED_OPP_PRESSURE_EXIT"
+                            proposed_exit_counter["opp_pressure"] += 1
+                        else:
+                            peak_gain = float(meta_router.peak_equity - 1.0)
+                            draw_from_peak = float(meta_router.peak_equity - meta_router.cur_equity)
+                            if peak_gain >= p_trail_arm and draw_from_peak >= p_trail_gap:
+                                force_exit = True
+                                source = "PROPOSED_TRAIL_EXIT"
+                                proposed_exit_counter["trail"] += 1
+                    tp_offset = max(float((trend_signal or {}).get("m7_tp_offset", 0.0)), p_min_tp_offset)
+                    sl_offset = max(float((trend_signal or {}).get("m7_sl_offset", 0.0)), p_min_sl_offset)
+                    if p_enable_tpsl and meta_router.entry_price > 0.0:
+                        if meta_router.pos == "LONG":
+                            tp_px = meta_router.entry_price * (1.0 + max(tp_offset, 0.0))
+                            sl_px = max(
+                                meta_router.entry_price * (1.0 - max(sl_offset, 0.0)),
+                                meta_router.entry_price * (1.0 - 0.025),
+                            )
+                            if next_price >= tp_px or next_price <= sl_px:
+                                force_exit = True
+                                source = "PROPOSED_M7_TPSL_EXIT"
+                                proposed_exit_counter["tpsl"] += 1
+                        else:
+                            tp_px = meta_router.entry_price * (1.0 - max(tp_offset, 0.0))
+                            sl_px = min(
+                                meta_router.entry_price * (1.0 + max(sl_offset, 0.0)),
+                                meta_router.entry_price * (1.0 + 0.025),
+                            )
+                            if next_price <= tp_px or next_price >= sl_px:
+                                force_exit = True
+                                source = "PROPOSED_M7_TPSL_EXIT"
+                                proposed_exit_counter["tpsl"] += 1
+                    if force_exit:
+                        fa = 0
+                        kelly = 0.0
+                    else:
+                        # keep EMA-based hold condition; reduce when condition weakens
+                        if not (own_support > 0.0 and net_edge >= p_reduce_net_edge):
+                            kelly = float(np.clip(kelly * p_reduce_mult, 0.0, p_kelly_cap))
+
+            elif mode == "pure_rl":
+                if getattr(dsac_router, "specialists_only", False):
+                    action_val = float(info.get("raw_action", info.get("primary_raw", 0.0)))
+                else:
+                    action_val = float(info.get("primary_raw", info.get("raw_action", 0.0)))
                 abs_action = abs(action_val)
-                pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.06"))
-                close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.06"))
+                pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.12"))
+                close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.03"))
+                flip_th = float(os.getenv("DSAC_PURE_RL_FLIP_TH", str(max(pos_th * 1.5, pos_th))))
+                flip_kelly_mult = float(os.getenv("DSAC_PURE_RL_FLIP_KELLY_MULT", "0.85"))
                 max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "1.0"))
                 force_close = str(os.getenv("DSAC_PURE_RL_FORCE_CLOSE", "false")).strip().lower() in {"1", "true", "yes", "on"}
                 fa = 0
@@ -278,8 +490,8 @@ def _simulate_dual(
                         source = "DSAC_PURE_RL_FORCE_CLOSE"
                     elif abs_action < close_th:
                         fa, kelly = 0, 0.0
-                    elif action_val < -pos_th:
-                        fa, kelly = 2, min(abs_action, max_kelly)
+                    elif action_val < -flip_th:
+                        fa, kelly = 2, min(abs_action, max_kelly) * flip_kelly_mult
                     else:
                         fa, kelly = 1, min(abs_action, max_kelly)
                 else:
@@ -289,35 +501,35 @@ def _simulate_dual(
                         source = "DSAC_PURE_RL_FORCE_CLOSE"
                     elif abs_action < close_th:
                         fa, kelly = 0, 0.0
-                    elif action_val > pos_th:
-                        fa, kelly = 1, min(abs_action, max_kelly)
+                    elif action_val > flip_th:
+                        fa, kelly = 1, min(abs_action, max_kelly) * flip_kelly_mult
                     else:
                         fa, kelly = 2, min(abs_action, max_kelly)
                 kelly = float(np.clip(kelly, 0.0, 1.0))
             else:
-                kelly = float(np.clip(dsac_lev * meta_router.vol_scale(garch_vol_z, 0.0), 0.0, 1.0))
+                # vol_scale removed from runtime router; keep neutral scaling in backtest.
+                kelly = float(np.clip(dsac_lev, 0.0, 1.0))
                 fa = int(dsac_action)
                 source = "DSAC_ONLY"
-            long_raw = float(info.get("_long_raw", info.get("long_edge", 0.0)))
-            short_raw = float(info.get("_short_raw", info.get("short_edge", 0.0)))
-
-            if mode != "pure_rl" and meta_router.pos is not None:
+            if mode not in ("pure_rl", "proposed") and meta_router.pos is not None:
                 live_unr = float(meta_router._net_pnl_frac(current_price))
                 position_signal = str(info.get("position_signal", "HOLD"))
                 position_reason = str(info.get("position_reason", ""))
                 trend_exit_flag, _, trend_exit_reason = meta_router.update_trend_mismatch(processed_df, trend_signal)
-                step_floor = meta_router.step_stop_floor()
+                step_floor = float(meta_router.step_stop_floor()) if hasattr(meta_router, "step_stop_floor") else -0.025
+                trailing_stop_hit = bool(meta_router.should_trailing_stop()) if hasattr(meta_router, "should_trailing_stop") else False
+                dsac_only_max_hold = int(getattr(meta_router, "dsac_only_max_hold", 96))
                 if live_unr <= step_floor:
                     fa = 0
                     kelly = 0.0
                     source = "DSAC_STEP_STOP" if meta_router.peak_equity >= 1.006 else "DSAC_ONLY_HARD_STOP"
                     step_stop_exit += 1
-                elif meta_router.should_trailing_stop():
+                elif trailing_stop_hit:
                     fa = 0
                     kelly = 0.0
                     source = "DSAC_ONLY_TRAILING_STOP"
                     trail_exit += 1
-                elif meta_router.hold_count >= max(1, meta_router.dsac_only_max_hold):
+                elif meta_router.hold_count >= max(1, dsac_only_max_hold):
                     fa = 0
                     kelly = 0.0
                     source = "DSAC_ONLY_MAX_HOLD"
@@ -337,16 +549,16 @@ def _simulate_dual(
                     kelly = 0.0
                     source = trend_exit_reason
                     trend_exit += 1
-            elif mode != "pure_rl":
+            elif mode not in ("pure_rl", "proposed"):
                 meta_router.trend_mismatch_streak = 0
 
-            if mode != "pure_rl" and meta_router.cooldown_bars_left > 0 and meta_router.pos is None and fa != 0:
+            if mode not in ("pure_rl", "proposed") and meta_router.cooldown_bars_left > 0 and meta_router.pos is None and fa != 0:
                 fa = 0
                 kelly = 0.0
                 source = "DSAC_ONLY_COOLDOWN"
                 cooldown_block += 1
 
-            if mode != "pure_rl" and fa != 0 and meta_router.pos is None:
+            if mode not in ("pure_rl", "proposed") and fa != 0 and meta_router.pos is None:
                 signal_side = 1 if fa == 1 else -1
                 trend_dir = int((trend_signal or {}).get("trend_dir", 1))
                 trend_side = 1 if trend_dir == 2 else (-1 if trend_dir == 0 else 0)
@@ -366,7 +578,7 @@ def _simulate_dual(
                     source = "DSAC_ONLY_TREND_MISMATCH_BLOCK"
                     trend_mismatch_block += 1
 
-            if mode != "pure_rl" and fa != 0 and meta_router.pos is None:
+            if mode not in ("pure_rl", "proposed") and fa != 0 and meta_router.pos is None:
                 if iso_anom and vae_anom and vae_ratio >= meta_router.dsac_only_vae_block_ratio:
                     fa = 0
                     kelly = 0.0
@@ -449,7 +661,7 @@ def _simulate_dual(
                 else:
                     lev_short.append(meta_router.current_leverage)
 
-            if mode != "pure_rl":
+            if mode not in ("pure_rl", "proposed"):
                 meta_router.decrement_cooldown()
 
         # Terminal close for fair realized-PnL accounting.
@@ -510,7 +722,40 @@ def _simulate_dual(
             trend_mismatch_block=trend_mismatch_block,
             iso_vae_block=iso_vae_block,
         )
-        return metrics, {"trades": trade_rows, "final_balance": balance}
+        extra = {"trades": trade_rows, "final_balance": balance}
+        if mode == "proposed":
+            extra["proposed_diag"] = {
+                "no_go_counts": dict(proposed_no_go_counter),
+                "entry_counts": dict(proposed_entry_counter),
+                "exit_counts": dict(proposed_exit_counter),
+                "params": {
+                    "jump_z_th": p_jump_z_th,
+                    "chop_std_th": p_chop_std_th,
+                    "th_bull_long": p_th_bull_long,
+                    "th_bull_short": p_th_bull_short,
+                    "th_bear_long": p_th_bear_long,
+                    "th_bear_short": p_th_bear_short,
+                    "th_normal": p_th_normal,
+                    "th_chop": p_th_chop,
+                    "kelly_cap": p_kelly_cap,
+                    "kelly_min": p_kelly_min,
+                    "quality_mult": p_quality_mult,
+                    "agree_yes_mult": p_agree_yes_mult,
+                    "agree_no_base": p_agree_no_base,
+                    "agree_no_excess": p_agree_no_excess,
+                    "hard_stop": p_hard_stop,
+                    "m7_opp_exit": p_m7_opp_exit,
+                    "opp_pressure_exit": p_opp_pressure_exit,
+                    "trail_arm": p_trail_arm,
+                    "trail_gap": p_trail_gap,
+                    "reduce_net_edge": p_reduce_net_edge,
+                    "reduce_mult": p_reduce_mult,
+                    "min_tp_offset": p_min_tp_offset,
+                    "min_sl_offset": p_min_sl_offset,
+                    "enable_tpsl": p_enable_tpsl,
+                },
+            }
+        return metrics, extra
 
 
 def main() -> None:
@@ -518,13 +763,16 @@ def main() -> None:
     ap.add_argument("--csv-path", required=True)
     ap.add_argument("--start")
     ap.add_argument("--end")
+    ap.add_argument("--max-rows", type=int, default=0)
     ap.add_argument("--long-ckpt", default="data/ensemble/ckpt/best_dsac_long_agents.pth")
     ap.add_argument("--short-ckpt", default="data/ensemble/ckpt/best_dsac_short_agents.pth")
-    ap.add_argument("--mode", choices=["classic", "pure_rl"], default="pure_rl")
+    ap.add_argument("--mode", choices=["classic", "pure_rl", "proposed"], default="pure_rl")
     ap.add_argument("--out-json", default="")
     args = ap.parse_args()
 
     df = _load_frame(args.csv_path, args.start, args.end)
+    if args.max_rows and args.max_rows > 0:
+        df = df.head(int(args.max_rows)).reset_index(drop=True)
     metrics, extra = _simulate_dual(df, args.long_ckpt, args.short_ckpt, mode=args.mode)
 
     payload = {

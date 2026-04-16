@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+
+import duckdb
+import numpy as np
+import pandas as pd
+import requests
+import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ensemble.train_rl_dsac_agent import DSACAgent
+
+
+MICRO_DB = ROOT / "data/live/microstructure.duckdb"
+TAIL_DB = ROOT / "data/live/tail_risk.duckdb"
+BASE_CKPT = ROOT / "data/ensemble/ckpt/best_dsac_agents.pth"
+OUT_CKPT = ROOT / "data/ensemble/ckpt/fine_tuned_dsac_agents_30m.pth"
+OUT_REPORT = ROOT / "data/ensemble/metrics/fine_tuned_dsac_30m_report.json"
+
+
+@dataclass
+class Cfg:
+    symbol: str = "ETHUSDT"
+    days: int = 7
+    horizon_min: int = 30
+    fee: float = 0.0005
+    slip: float = 0.0002
+    lr: float = 1e-5
+    epochs: int = 8
+    updates_per_epoch: int = 500
+    batch_size: int = 256
+    hold_band: float = 0.0007
+    action_scale: float = 0.010
+    val_ratio: float = 0.2
+    test_ratio: float = 0.2
+    reward_mode: str = "dynamic"  # dynamic | simple
+
+
+def _fetch_klines_1m(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+    url = "https://fapi.binance.com/fapi/v1/klines"
+    rows_all: list[list] = []
+    cur = int(start_ms)
+    while cur <= end_ms:
+        params = {
+            "symbol": symbol.upper(),
+            "interval": "1m",
+            "startTime": cur,
+            "endTime": int(end_ms),
+            "limit": 1500,
+        }
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            break
+        rows_all.extend(rows)
+        nxt = int(rows[-1][0]) + 60_000
+        if nxt <= cur:
+            break
+        cur = nxt
+        time.sleep(0.02)
+    if not rows_all:
+        raise RuntimeError("No 1m klines fetched")
+    df = pd.DataFrame(rows_all, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "quote_volume", "trades", "taker_buy_base",
+        "taker_buy_quote", "ignore",
+    ])
+    df["ts"] = pd.to_datetime(df["open_time"], unit="ms", utc=True).dt.tz_convert("Asia/Seoul")
+    for c in ("high", "low", "close"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df[["ts", "high", "low", "close"]].dropna().drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
+    return df
+
+
+def _load_duck(cfg: Cfg) -> pd.DataFrame:
+    con_m = duckdb.connect(str(MICRO_DB), read_only=True)
+    con_t = duckdb.connect(str(TAIL_DB), read_only=True)
+    q_m = f"""
+    SELECT
+      ts,
+      obi, taker_buy_ratio, spoofing_score,
+      nif_whale, nif_retail, eai, oi_delta_pct, funding_rate,
+      signal_bias, shadow_toxicity_score, shadow_queue_collapse, shadow_absorption_score,
+      shadow_queue_bias, shadow_regime_conf
+    FROM microstructure_1m
+    WHERE ts >= now() - INTERVAL '{int(cfg.days)} days'
+    ORDER BY ts
+    """
+    q_t = f"""
+    SELECT
+      ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, mu_short, sigma_short, shadow_aftershock_prob
+    FROM tail_risk_1m
+    WHERE ts >= now() - INTERVAL '{int(cfg.days)} days'
+    ORDER BY ts
+    """
+    m = con_m.execute(q_m).df()
+    t = con_t.execute(q_t).df()
+    if m.empty:
+        raise RuntimeError("No microstructure rows in selected period")
+    m["ts"] = pd.to_datetime(m["ts"], utc=True).dt.tz_convert("Asia/Seoul").dt.floor("min")
+    if not t.empty:
+        t["ts"] = pd.to_datetime(t["ts"], utc=True).dt.tz_convert("Asia/Seoul").dt.floor("min")
+        merged = pd.merge_asof(
+            m.sort_values("ts"),
+            t.sort_values("ts"),
+            on="ts",
+            direction="nearest",
+            tolerance=pd.Timedelta(minutes=2),
+        )
+    else:
+        merged = m.copy()
+    return merged.sort_values("ts").reset_index(drop=True)
+
+
+def _build_df(cfg: Cfg) -> pd.DataFrame:
+    base = _load_duck(cfg)
+    ts0 = base["ts"].min() - pd.Timedelta(minutes=90)
+    ts1 = base["ts"].max() + pd.Timedelta(minutes=cfg.horizon_min + 5)
+    px = _fetch_klines_1m(
+        symbol=cfg.symbol,
+        start_ms=int(ts0.tz_convert("UTC").timestamp() * 1000),
+        end_ms=int(ts1.tz_convert("UTC").timestamp() * 1000),
+    )
+    px["ts"] = px["ts"].dt.floor("min")
+    df = base.merge(px, on="ts", how="left")
+    df = df.dropna(subset=["close"]).copy()
+    h = int(cfg.horizon_min)
+    df["ret_fwd_30m"] = df["close"].shift(-h) / df["close"] - 1.0
+
+    # 동적 보상용 라벨: 30분 창의 MFE/MAE (롱 기준)
+    future_high = df["high"].rolling(window=h, min_periods=h).max().shift(-h + 1)
+    future_low = df["low"].rolling(window=h, min_periods=h).min().shift(-h + 1)
+    df["max_high_30m"] = (future_high / df["close"]) - 1.0
+    df["max_low_30m"] = (future_low / df["close"]) - 1.0
+
+    # 숏 기준 유리/불리 움직임
+    df["max_drop_30m"] = (df["close"] / future_low) - 1.0        # 숏 유리(하락폭)
+    df["max_rally_30m"] = (future_high / df["close"]) - 1.0      # 숏 불리(상승폭)
+
+    # 방향별 동적 점수
+    # long_score: 상승 잠재력 보상 + 하락 잠재력 페널티
+    # short_score: 하락 잠재력 보상 + 상승 잠재력 페널티
+    df["long_score_30m"] = (0.7 * df["max_high_30m"]) + (0.3 * df["max_low_30m"])
+    df["short_score_30m"] = (0.7 * df["max_drop_30m"]) - (0.3 * df["max_rally_30m"])
+    df = df.dropna(subset=["ret_fwd_30m", "long_score_30m", "short_score_30m"]).reset_index(drop=True)
+    return df
+
+
+def _feature_columns(df: pd.DataFrame) -> list[str]:
+    df["liq_imbalance"] = (df["long_usd_1m"].fillna(0.0) - df["short_usd_1m"].fillna(0.0)) / (
+        df["long_usd_1m"].fillna(0.0) + df["short_usd_1m"].fillna(0.0) + 1e-8
+    )
+    df["nif_x_obi"] = df["nif_whale"].fillna(0.0) * df["obi"].fillna(0.0)
+    df["tox_x_collapse"] = df["shadow_toxicity_score"].fillna(0.0) * df["shadow_queue_collapse"].fillna(0.0)
+    df["flow_abs"] = np.abs(df["nif_whale"].fillna(0.0))
+    df["oi_abs"] = np.abs(df["oi_delta_pct"].fillna(0.0))
+    df["eai_funding"] = df["eai"].fillna(0.0) * df["funding_rate"].fillna(0.0)
+    minute = df["ts"].dt.hour * 60 + df["ts"].dt.minute
+    rad = (2.0 * np.pi * minute) / (24.0 * 60.0)
+    df["sin_tod"] = np.sin(rad)
+    df["cos_tod"] = np.cos(rad)
+
+    cols = [
+        "obi", "taker_buy_ratio", "spoofing_score",
+        "nif_whale", "nif_retail", "eai", "oi_delta_pct", "funding_rate",
+        "signal_bias", "shadow_toxicity_score", "shadow_queue_collapse", "shadow_absorption_score",
+        "shadow_queue_bias", "shadow_regime_conf", "long_usd_1m", "short_usd_1m",
+        "mu_long", "sigma_long", "mu_short", "sigma_short", "shadow_aftershock_prob",
+        "liq_imbalance", "nif_x_obi", "tox_x_collapse", "flow_abs", "oi_abs", "eai_funding",
+        "sin_tod", "cos_tod",
+    ]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = 0.0
+    return cols
+
+
+def _robust_fit_transform(x_train: np.ndarray, x_all: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    med = np.nanmedian(x_train, axis=0)
+    q1 = np.nanpercentile(x_train, 25, axis=0)
+    q3 = np.nanpercentile(x_train, 75, axis=0)
+    iqr = np.maximum(q3 - q1, 1e-6)
+    z = (x_all - med) / iqr
+    z = np.clip(np.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0), -5.0, 5.0)
+    return z.astype(np.float32), med.astype(np.float32), iqr.astype(np.float32)
+
+
+def _policy_eval(agent: DSACAgent, states: np.ndarray, rets: np.ndarray, fee: float, slip: float) -> dict[str, float]:
+    acts = np.array([agent.act(s, deterministic=True) for s in states], dtype=np.float32)
+    disc = np.where(acts > 0.10, 1.0, np.where(acts < -0.10, -1.0, 0.0))
+    pnl = disc * rets - (fee + slip) * np.abs(disc)
+    eq = np.cumprod(1.0 + pnl)
+    return {
+        "trades": int(np.sum(disc != 0.0)),
+        "pnl_sum": float(np.sum(pnl)),
+        "pnl_mean": float(np.mean(pnl)) if len(pnl) else 0.0,
+        "win_rate": float(np.mean(pnl > 0.0)) if len(pnl) else 0.0,
+        "final_equity": float(eq[-1]) if len(eq) else 1.0,
+        "avg_abs_action": float(np.mean(np.abs(acts))) if len(acts) else 0.0,
+    }
+
+
+def _populate_replay(agent: DSACAgent, s: np.ndarray, r30: np.ndarray, long_score: np.ndarray, short_score: np.ndarray, cfg: Cfg) -> int:
+    n = len(s)
+    pushed = 0
+    for i in range(n - 1):
+        ret = float(r30[i])
+        lsc = float(long_score[i])
+        ssc = float(short_score[i])
+
+        if cfg.reward_mode == "dynamic":
+            edge = lsc - ssc
+            if abs(edge) < cfg.hold_band:
+                a = 0.0
+            else:
+                a = float(np.clip(edge / max(cfg.action_scale, 1e-6), -1.0, 1.0))
+            # 행동 일치형 보상: 롱이면 long_score, 숏이면 short_score, 관망은 소량 패널티
+            if a > 0:
+                base_rew = lsc
+            elif a < 0:
+                base_rew = ssc
+            else:
+                base_rew = -0.00005
+            rew = float(base_rew - (cfg.fee + cfg.slip) * abs(a))
+        else:
+            if abs(ret) < cfg.hold_band:
+                a = 0.0
+            else:
+                a = float(np.clip(ret / max(cfg.action_scale, 1e-6), -1.0, 1.0))
+            rew = float(a * ret - (cfg.fee + cfg.slip) * abs(a))
+
+        d = 1.0 if i >= (n - 2) else 0.0
+        agent.memory.push(s[i], a, rew, s[i + 1], d, regime="normal", progress=float(i / max(1, n - 1)))
+        pushed += 1
+    return pushed
+
+
+def run(cfg: Cfg) -> dict:
+    ck = torch.load(str(BASE_CKPT), map_location="cpu", weights_only=False)
+    state_dim = int(ck.get("state_dim", 29))
+    if state_dim != 29:
+        raise RuntimeError(f"Unsupported state_dim for this script: {state_dim}")
+
+    df = _build_df(cfg)
+    feat_cols = _feature_columns(df)
+    x = df[feat_cols].to_numpy(dtype=np.float32)
+    y = df["ret_fwd_30m"].to_numpy(dtype=np.float32)
+    y_long = df["long_score_30m"].to_numpy(dtype=np.float32)
+    y_short = df["short_score_30m"].to_numpy(dtype=np.float32)
+
+    n = len(df)
+    n_test = max(200, int(n * cfg.test_ratio))
+    n_val = max(200, int(n * cfg.val_ratio))
+    n_train = n - n_val - n_test
+    if n_train < 800:
+        raise RuntimeError(f"Not enough rows for split: total={n}, train={n_train}")
+
+    x_scaled, med, iqr = _robust_fit_transform(x[:n_train], x)
+    s_train, y_train = x_scaled[:n_train], y[:n_train]
+    s_val, y_val = x_scaled[n_train:n_train + n_val], y[n_train:n_train + n_val]
+    s_test, y_test = x_scaled[n_train + n_val:], y[n_train + n_val:]
+    y_long_train = y_long[:n_train]
+    y_short_train = y_short[:n_train]
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    agent = DSACAgent(state_dim=state_dim, device=device)
+    agent.actor.load_state_dict(ck["actor"], strict=True)
+    agent.critic.load_state_dict(ck["critic"], strict=True)
+    agent.critic_target.load_state_dict(agent.critic.state_dict())
+    for g in agent.actor_optimizer.param_groups:
+        g["lr"] = cfg.lr
+    for g in agent.critic_optimizer.param_groups:
+        g["lr"] = cfg.lr
+    for g in agent.alpha_optimizer.param_groups:
+        g["lr"] = cfg.lr
+
+    before_val = _policy_eval(agent, s_val, y_val, cfg.fee, cfg.slip)
+    before_test = _policy_eval(agent, s_test, y_test, cfg.fee, cfg.slip)
+
+    pushed = _populate_replay(agent, s_train, y_train, y_long_train, y_short_train, cfg)
+    logs: list[dict] = []
+    for ep in range(1, cfg.epochs + 1):
+        acc = {"critic_loss": 0.0, "actor_loss": 0.0, "alpha": 0.0, "count": 0}
+        for _ in range(cfg.updates_per_epoch):
+            out = agent.update(batch_size=cfg.batch_size)
+            if out:
+                acc["critic_loss"] += float(out.get("critic_loss", 0.0))
+                acc["actor_loss"] += float(out.get("actor_loss", 0.0))
+                acc["alpha"] += float(out.get("alpha", 0.0))
+                acc["count"] += 1
+        c = max(1, int(acc["count"]))
+        logs.append({
+            "epoch": ep,
+            "critic_loss": acc["critic_loss"] / c,
+            "actor_loss": acc["actor_loss"] / c,
+            "alpha": acc["alpha"] / c,
+        })
+
+    after_val = _policy_eval(agent, s_val, y_val, cfg.fee, cfg.slip)
+    after_test = _policy_eval(agent, s_test, y_test, cfg.fee, cfg.slip)
+
+    OUT_CKPT.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "actor": agent.actor.state_dict(),
+        "critic": agent.critic.state_dict(),
+        "state_dim": state_dim,
+        "meta": {
+            "base_ckpt": str(BASE_CKPT),
+            "horizon_min": cfg.horizon_min,
+            "feature_cols": feat_cols,
+            "scaler_median": med.tolist(),
+            "scaler_iqr": iqr.tolist(),
+            "trained_at": pd.Timestamp.now(tz="Asia/Seoul").isoformat(),
+            "cfg": vars(cfg),
+        },
+    }
+    torch.save(payload, str(OUT_CKPT))
+
+    report = {
+        "rows_total": int(n),
+        "rows_train": int(n_train),
+        "rows_val": int(n_val),
+        "rows_test": int(n_test),
+        "replay_pushed": int(pushed),
+        "before_val": before_val,
+        "after_val": after_val,
+        "before_test": before_test,
+        "after_test": after_test,
+        "train_log_tail": logs[-3:],
+        "out_ckpt": str(OUT_CKPT),
+    }
+    OUT_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    OUT_REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Fine-tune best DSAC checkpoint on DuckDB with 30m-return objective")
+    p.add_argument("--symbol", default="ETHUSDT")
+    p.add_argument("--days", type=int, default=7)
+    p.add_argument("--horizon-min", type=int, default=30)
+    p.add_argument("--epochs", type=int, default=8)
+    p.add_argument("--updates-per-epoch", type=int, default=500)
+    p.add_argument("--batch-size", type=int, default=256)
+    p.add_argument("--lr", type=float, default=1e-5)
+    p.add_argument("--fee", type=float, default=0.0005)
+    p.add_argument("--slip", type=float, default=0.0002)
+    p.add_argument("--hold-band", type=float, default=0.0007)
+    p.add_argument("--action-scale", type=float, default=0.010)
+    p.add_argument("--reward-mode", default="dynamic", choices=["dynamic", "simple"])
+    args = p.parse_args()
+    cfg = Cfg(
+        symbol=args.symbol,
+        days=args.days,
+        horizon_min=args.horizon_min,
+        epochs=args.epochs,
+        updates_per_epoch=args.updates_per_epoch,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        fee=args.fee,
+        slip=args.slip,
+        hold_band=args.hold_band,
+        action_scale=args.action_scale,
+        reward_mode=args.reward_mode,
+    )
+    out = run(cfg)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

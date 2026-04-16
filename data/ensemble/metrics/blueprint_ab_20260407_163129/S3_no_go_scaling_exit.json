@@ -1,0 +1,83 @@
+{
+  "csv_path": "data/splits/year_oos/rl_base_2025.csv",
+  "start": "2025-01-01 00:00:00",
+  "end": "2025-01-09 16:15:00",
+  "rows": 2500,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "mode": "proposed",
+  "metrics": {
+    "pnl_pct": 0.028789179516519603,
+    "mdd_pct": -0.42445323657066547,
+    "trades": 1,
+    "wr_pct": 100.0,
+    "long_entries": 0,
+    "short_entries": 1,
+    "avg_hold_long": 0.0,
+    "avg_hold_short": 2438.0,
+    "avg_lev_long": 0.0,
+    "avg_lev_short": 0.03639180934745285,
+    "cross_exit": 0,
+    "ambiguity_exit": 0,
+    "reduce_hits": 0,
+    "max_hold_exit": 0,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 0,
+    "trend_mismatch_block": 0,
+    "iso_vae_block": 0
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-01-09 16:15:00",
+        "side": "SHORT",
+        "entry_price": 3344.0,
+        "exit_price": 3309.71,
+        "lev": 0.0325,
+        "hold_bars": 2438,
+        "pnl_frac": 0.0002878917951652562,
+        "exit_source": "TERMINAL_CLOSE"
+      }
+    ],
+    "final_balance": 1.0002878917951652,
+    "proposed_diag": {
+      "no_go_counts": {
+        "chop_high_std": 125,
+        "jump_z": 294
+      },
+      "entry_counts": {
+        "short": 1
+      },
+      "exit_counts": {},
+      "params": {
+        "jump_z_th": 3.0,
+        "chop_std_th": 1.2,
+        "th_bull_long": 0.15,
+        "th_bull_short": 0.35,
+        "th_bear_long": 0.35,
+        "th_bear_short": 0.15,
+        "th_normal": 0.22,
+        "th_chop": 0.4,
+        "kelly_cap": 0.35,
+        "kelly_min": 0.05,
+        "quality_mult": 0.2,
+        "agree_yes_mult": 0.9,
+        "agree_no_base": 0.3,
+        "agree_no_excess": 0.2,
+        "hard_stop": 0.025,
+        "m7_opp_exit": 0.6,
+        "opp_pressure_exit": 1.15,
+        "trail_arm": 0.012,
+        "trail_gap": 0.008,
+        "reduce_net_edge": 0.05,
+        "reduce_mult": 0.65,
+        "min_tp_offset": 0.0,
+        "min_sl_offset": 0.0,
+        "enable_tpsl": false
+      }
+    }
+  }
+}

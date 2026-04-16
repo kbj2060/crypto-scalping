@@ -1,0 +1,76 @@
+{
+  "csv_path": "data/rl_training_data_latest.csv",
+  "start": "2026-03-04 11:25:00",
+  "end": "2026-04-01 09:45:00",
+  "rows": 8045,
+  "primary_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "comparison": {
+    "results": {
+      "ultimate_ensemble_3m": {
+        "pnl_pct": 25.93638960904714,
+        "mdd_pct": -0.8968892542911777,
+        "trades": 67,
+        "wr_pct": 91.04477611940298,
+        "avg_pnl_per_trade_pct": 0.3455274990133669,
+        "profit_factor": 14.494049934038607,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    "trade_samples": {
+      "ultimate_ensemble_3m": [
+        {
+          "ts": "2026-03-31 07:15:00",
+          "side": "SHORT",
+          "entry_price": 2060.58,
+          "exit_price": 2043.89,
+          "lev": 1.0,
+          "hold_bars": 69,
+          "pnl_frac": 0.006702821757025301
+        },
+        {
+          "ts": "2026-03-31 07:30:00",
+          "side": "LONG",
+          "entry_price": 2043.89,
+          "exit_price": 2049.58,
+          "lev": 1.0,
+          "hold_bars": 2,
+          "pnl_frac": 0.001382873801238249
+        },
+        {
+          "ts": "2026-03-31 08:50:00",
+          "side": "SHORT",
+          "entry_price": 2049.58,
+          "exit_price": 2041.29,
+          "lev": 1.0,
+          "hold_bars": 15,
+          "pnl_frac": 0.0026462693157294215
+        },
+        {
+          "ts": "2026-03-31 12:30:00",
+          "side": "LONG",
+          "entry_price": 2041.29,
+          "exit_price": 2050.74,
+          "lev": 1.0,
+          "hold_bars": 43,
+          "pnl_frac": 0.003227654094418053
+        },
+        {
+          "ts": "2026-04-01 09:45:00",
+          "side": "SHORT",
+          "entry_price": 2050.74,
+          "exit_price": 2134.19,
+          "lev": 0.21299235375390796,
+          "hold_bars": 255,
+          "pnl_frac": -0.008968892542911718,
+          "terminal": true
+        }
+      ]
+    }
+  },
+  "ranking": [
+    "ultimate_ensemble_3m"
+  ]
+}

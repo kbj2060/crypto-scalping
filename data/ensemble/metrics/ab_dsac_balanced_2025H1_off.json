@@ -1,0 +1,17 @@
+{
+  "split": "2025H1",
+  "overlay": "off",
+  "metrics": {
+    "pnl_pct": 0.0,
+    "trades": 0,
+    "win_rate": 0.0,
+    "avg_hold": 0.0,
+    "mdd_pct": 0.0,
+    "trend_reversal_exits": 0,
+    "risk_reduces": 0,
+    "sharpe": 0.0,
+    "overlay_mode": "off",
+    "overlay_reduce_counts": {},
+    "overlay_exit_counts": {}
+  }
+}

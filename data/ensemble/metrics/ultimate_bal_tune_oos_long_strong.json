@@ -1,0 +1,40 @@
+{
+  "csv_path": "data/rl_training_data_latest.csv",
+  "start": "2026-04-01 09:45:00",
+  "end": "2026-04-13 09:00:00",
+  "rows": 3448,
+  "primary_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "comparison": {
+    "results": {
+      "ultimate_ensemble_3m": {
+        "pnl_pct": 2.874106609478888,
+        "mdd_pct": 0.0,
+        "trades": 1,
+        "wr_pct": 100.0,
+        "avg_pnl_per_trade_pct": 2.874106609478878,
+        "profit_factor": 9999.0,
+        "long_entries": 1,
+        "short_entries": 0
+      }
+    },
+    "trade_samples": {
+      "ultimate_ensemble_3m": [
+        {
+          "ts": "2026-04-13 09:00:00",
+          "side": "LONG",
+          "entry_price": 2127.48,
+          "exit_price": 2191.63,
+          "lev": 1.0,
+          "hold_bars": 3386,
+          "pnl_frac": 0.028741066094788777,
+          "terminal": true
+        }
+      ]
+    }
+  },
+  "ranking": [
+    "ultimate_ensemble_3m"
+  ]
+}

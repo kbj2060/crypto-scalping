@@ -1,0 +1,129 @@
+{
+  "csv_path": "data/splits/year_oos/training_features_2024.csv",
+  "rows": 289,
+  "start": "2024-10-01 00:00:00",
+  "end": "2024-10-02 00:00:00",
+  "mode": "pure_rl",
+  "diag_1_state_gap": {
+    "primary": {
+      "count": 32,
+      "mae_mean": 0.005347413993776768,
+      "mae_p95": 0.017149607779393936,
+      "max_abs_mean": 0.1550749579910189,
+      "max_abs_p95": 0.49733857885003085,
+      "cosine_mean": 0.9888337020195882,
+      "cosine_p05": 0.9468437672349941
+    },
+    "long_specialist": {
+      "count": 32,
+      "mae_mean": 0.007082506239774894,
+      "mae_p95": 0.018537465862131543,
+      "max_abs_mean": 0.16692583324038424,
+      "max_abs_p95": 0.49733857885003085,
+      "cosine_mean": 0.9919302072499063,
+      "cosine_p05": 0.9621116349880715
+    },
+    "short_specialist": {
+      "count": 32,
+      "mae_mean": 0.007082506239774894,
+      "mae_p95": 0.018537465862131543,
+      "max_abs_mean": 0.16692583324038424,
+      "max_abs_p95": 0.49733857885003085,
+      "cosine_mean": 0.9919302072499063,
+      "cosine_p05": 0.9621116349880715
+    }
+  },
+  "diag_2_deterministic_replay": {
+    "metrics": {
+      "pnl_pct": 0.0,
+      "mdd_pct": 0.0,
+      "trades": 0,
+      "wr_pct": 0.0,
+      "long_entries": 0,
+      "short_entries": 0,
+      "avg_hold_long": 0.0,
+      "avg_hold_short": 0.0,
+      "avg_lev_long": 0.0,
+      "avg_lev_short": 0.0,
+      "cross_exit": 0,
+      "ambiguity_exit": 0,
+      "reduce_hits": 0,
+      "max_hold_exit": 0,
+      "trail_exit": 0,
+      "step_stop_exit": 0,
+      "trend_exit": 0,
+      "cooldown_block": 0,
+      "trend_flat_block": 0,
+      "trend_mismatch_block": 0,
+      "iso_vae_block": 0
+    },
+    "final_balance": 1.0,
+    "trade_count_logged": 0
+  },
+  "diag_3_action_distribution": {
+    "samples": 228,
+    "final_action_counts": {
+      "0": 133,
+      "2": 94,
+      "1": 1
+    },
+    "primary_action_counts": {
+      "0": 228
+    },
+    "long_action_counts": {
+      "1": 228
+    },
+    "short_action_counts": {
+      "2": 228
+    },
+    "top_action_tuples": [
+      {
+        "tuple": [
+          0,
+          1,
+          2
+        ],
+        "count": 228
+      }
+    ],
+    "top_hold_reasons": [
+      {
+        "reason": "target_hold,primary_hold,enter_th,low_votes",
+        "count": 128
+      },
+      {
+        "reason": "chop_both_uncertain,primary_hold,enter_th",
+        "count": 3
+      },
+      {
+        "reason": "chop_both_uncertain,primary_hold",
+        "count": 1
+      },
+      {
+        "reason": "primary_hold,std_gate",
+        "count": 1
+      }
+    ],
+    "direction_score": {
+      "mean": -1.0940233830101134,
+      "std": 0.4184470935691011,
+      "p05": -1.7073986127972602,
+      "p50": -1.1029619574546814,
+      "p95": -0.320274598151446
+    },
+    "agreement": {
+      "mean": 0.05773252180424586,
+      "std": 0.09787095470203051,
+      "p05": 0.0,
+      "p50": 0.0,
+      "p95": 0.2788539307596921
+    },
+    "conviction": {
+      "mean": 0.2542347582870118,
+      "std": 0.20500716486315576,
+      "p05": 0.009116465513180697,
+      "p50": 0.2395525007241508,
+      "p95": 0.5515693982675047
+    }
+  }
+}

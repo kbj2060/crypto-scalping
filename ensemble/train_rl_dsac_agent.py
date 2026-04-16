@@ -221,6 +221,10 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         specialist_min_opportunity_move=None,
         specialist_min_breakout=None,
         specialist_idle_penalty=None,
+        dd_penalty_coeff=None,
+        kelly_align_bonus=None,
+        kelly_chop_loss_penalty=None,
+        adverse_hold_enable=None,
         terminal_reward_scale: float = 0.0,
         terminal_quality_win: float = 0.0,
         terminal_quality_loss: float = 0.0,
@@ -243,6 +247,10 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
             specialist_min_opportunity_move=specialist_min_opportunity_move,
             specialist_min_breakout=specialist_min_breakout,
             specialist_idle_penalty=specialist_idle_penalty,
+            dd_penalty_coeff=dd_penalty_coeff,
+            kelly_align_bonus=kelly_align_bonus,
+            kelly_chop_loss_penalty=kelly_chop_loss_penalty,
+            adverse_hold_enable=adverse_hold_enable,
             terminal_reward_scale=terminal_reward_scale,
             terminal_quality_win=terminal_quality_win,
             terminal_quality_loss=terminal_quality_loss,
@@ -1534,6 +1542,24 @@ def train(
     mtf_val = MultiTimeframeFeatures(df_val["close"].values.astype(np.float32))
     logger.info("[MTF] 선계산 완료.")
 
+    # Standalone DSAC only: decouple reward from specialist defaults.
+    dsac_dd_penalty_coeff = float(os.getenv("DSAC_DD_PENALTY_COEFF", "0.03"))
+    dsac_kelly_align_bonus = float(os.getenv("DSAC_KELLY_ALIGN_BONUS", "0.0"))
+    dsac_kelly_chop_loss_penalty = float(os.getenv("DSAC_KELLY_CHOP_LOSS_PENALTY", "1.30"))
+    dsac_adverse_hold_enable = str(os.getenv("DSAC_ADVERSE_HOLD_ENABLE", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    logger.info(
+        "[REWARD-DSAC] dd_coeff=%.3f kelly_align=%.3f chop_loss=%.3f adverse_hold=%s",
+        dsac_dd_penalty_coeff,
+        dsac_kelly_align_bonus,
+        dsac_kelly_chop_loss_penalty,
+        "ON" if dsac_adverse_hold_enable else "OFF",
+    )
+
     train_hmm = copy.deepcopy(hmm_detector)
     env = DSACCompactTradingEnv(
         df_train,
@@ -1542,6 +1568,10 @@ def train(
         mtf_features=mtf_train,
         specialist_pos_thresh=float(_POS_THRESH),
         specialist_close_thresh=float(_CLOSE_THRESH),
+        dd_penalty_coeff=dsac_dd_penalty_coeff,
+        kelly_align_bonus=dsac_kelly_align_bonus,
+        kelly_chop_loss_penalty=dsac_kelly_chop_loss_penalty,
+        adverse_hold_enable=dsac_adverse_hold_enable,
         terminal_reward_scale=0.0,
         terminal_quality_win=0.0,
         terminal_quality_loss=0.0,
@@ -1780,6 +1810,10 @@ def train(
                     mtf_features=mtf_train,
                     specialist_pos_thresh=float(_POS_THRESH),
                     specialist_close_thresh=float(_CLOSE_THRESH),
+                    dd_penalty_coeff=dsac_dd_penalty_coeff,
+                    kelly_align_bonus=dsac_kelly_align_bonus,
+                    kelly_chop_loss_penalty=dsac_kelly_chop_loss_penalty,
+                    adverse_hold_enable=dsac_adverse_hold_enable,
                     terminal_reward_scale=0.0,
                     terminal_quality_win=0.0,
                     terminal_quality_loss=0.0,
@@ -1892,6 +1926,10 @@ def train(
             mtf_features=eval_mtf,
             specialist_pos_thresh=float(_POS_THRESH),
             specialist_close_thresh=float(_CLOSE_THRESH),
+            dd_penalty_coeff=dsac_dd_penalty_coeff,
+            kelly_align_bonus=dsac_kelly_align_bonus,
+            kelly_chop_loss_penalty=dsac_kelly_chop_loss_penalty,
+            adverse_hold_enable=dsac_adverse_hold_enable,
             terminal_reward_scale=0.0,
             terminal_quality_win=0.0,
             terminal_quality_loss=0.0,
@@ -1968,11 +2006,6 @@ def train(
         }
 
     ep = start_ep
-    cer_enable = str(os.getenv("RL_CER_ENABLE", "true")).strip().lower() in {"1", "true", "yes", "on"}
-    cer_gate_delta = float(os.getenv("RL_CER_GATE_DELTA", "0.20"))
-    cer_gate_penalty = float(os.getenv("RL_CER_GATE_PENALTY", "0.08"))
-    cer_force_penalty = float(os.getenv("RL_CER_FORCE_PENALTY", "0.20"))
-
     try:
         for ep in range(start_ep, nep + 1):
             state = env.reset()
@@ -1989,19 +2022,10 @@ def train(
                     action = agent.act(state, deterministic=False)
 
                 regime_bucket = env.regime_bucket()
-                raw_action = float(action)
-                action = _apply_normal_soft_gate(raw_action, state, regime_bucket, gate_scale=_soft_gate_scale(ep))
+                action = _apply_normal_soft_gate(action, state, regime_bucket, gate_scale=_soft_gate_scale(ep))
                 prog = float(env.current_step / max(1, env.end_step))
-                next_state, reward, done, info = env.step(action)
+                next_state, reward, done, _ = env.step(action)
                 agent.memory.push(state, action, reward, next_state, done, regime=regime_bucket, progress=prog)
-                if cer_enable and bool(info.get("force_closed", False)):
-                    cer_r = float(min(reward, -abs(cer_force_penalty)))
-                    agent.memory.push(state, raw_action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
-                elif cer_enable:
-                    blocked = (abs(raw_action) - abs(action) >= cer_gate_delta) and (abs(raw_action) >= env.pos_thresh)
-                    if blocked:
-                        cer_r = -abs(cer_gate_penalty) * float(np.clip(abs(raw_action), 0.0, 1.0))
-                        agent.memory.push(state, raw_action, cer_r, next_state, done, regime=regime_bucket, progress=prog)
                 ep_reward += reward
                 state = next_state
 
@@ -2024,13 +2048,15 @@ def train(
             _afa = float(last_stats.get("action_abs_mean", 0.0))
             _dafa = float(last_stats.get("det_action_abs_mean", 0.0))
             _sbal = float(last_stats.get("side_balance_pen", 0.0))
+            ep_steps = max(int(env.current_step - env.start_step), 1)
+            avg_reward = float(ep_reward / ep_steps)
             logger.info(
-                "Ep %04d | PnL:%6.1f%% Tr:%4d WR:%4.0f%% Rew:%7.3f | buf:%6d | α:%.4f | Htgt:%+.3f | CVaR_Q:%+.4f | Tstd:%.3f Vw:%.3f Imb:%.3f Ent:%.3f NTR:%.3f Breg:%.4f Sbal:%.4f AFp:%.4f Aabs:%.3f Dabs:%.3f CQL:%.4f Qdis:%.4f Rst:%d Redo:%d",
+                "Ep %04d | PnL:%6.1f%% Tr:%4d WR:%4.0f%% AvgRew:%+.4f | buf:%6d | α:%.4f | Htgt:%+.3f | CVaR_Q:%+.4f | Tstd:%.3f Vw:%.3f Imb:%.3f Ent:%.3f NTR:%.3f Breg:%.4f Sbal:%.4f AFp:%.4f Aabs:%.3f Dabs:%.3f CQL:%.4f Qdis:%.4f Rst:%d Redo:%d",
                 ep,
                 pnl,
                 env.total_trades,
                 env.win_rate * 100,
-                ep_reward,
+                avg_reward,
                 len(agent.memory),
                 agent.alpha,
                 float(agent.target_entropy),

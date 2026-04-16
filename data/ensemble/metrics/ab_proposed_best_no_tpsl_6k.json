@@ -1,0 +1,82 @@
+{
+  "csv_path": "data/splits/year_oos/rl_base_2025.csv",
+  "start": "2025-01-01 00:00:00",
+  "end": "2025-01-21 19:55:00",
+  "rows": 6000,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "mode": "proposed",
+  "metrics": {
+    "pnl_pct": 0.00818771887873826,
+    "mdd_pct": -0.7678549566857984,
+    "trades": 1,
+    "wr_pct": 100.0,
+    "long_entries": 0,
+    "short_entries": 1,
+    "avg_hold_long": 0.0,
+    "avg_hold_short": 5938.0,
+    "avg_lev_long": 0.0,
+    "avg_lev_short": 0.04269185842008919,
+    "cross_exit": 0,
+    "ambiguity_exit": 0,
+    "reduce_hits": 0,
+    "max_hold_exit": 0,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 0,
+    "trend_mismatch_block": 0,
+    "iso_vae_block": 0
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-01-21 19:55:00",
+        "side": "SHORT",
+        "entry_price": 3344.0,
+        "exit_price": 3331.74,
+        "lev": 0.03610655,
+        "hold_bars": 5938,
+        "pnl_frac": 8.187718878741661e-05,
+        "exit_source": "TERMINAL_CLOSE"
+      }
+    ],
+    "final_balance": 1.0000818771887874,
+    "proposed_diag": {
+      "no_go_counts": {
+        "jump_z": 844
+      },
+      "entry_counts": {
+        "short": 1
+      },
+      "exit_counts": {},
+      "params": {
+        "jump_z_th": 2.849684,
+        "chop_std_th": 1.385313,
+        "th_bull_long": 0.23913,
+        "th_bull_short": 0.623165,
+        "th_bear_long": 0.435438,
+        "th_bear_short": 0.223129,
+        "th_normal": 0.237978,
+        "th_chop": 0.723224,
+        "kelly_cap": 0.293979,
+        "kelly_min": 0.029333,
+        "quality_mult": 0.164832,
+        "agree_yes_mult": 0.728361,
+        "agree_no_base": 0.098905,
+        "agree_no_excess": 0.139274,
+        "hard_stop": 0.024234,
+        "m7_opp_exit": 0.691885,
+        "opp_pressure_exit": 1.396445,
+        "trail_arm": 0.010294,
+        "trail_gap": 0.011355,
+        "reduce_net_edge": 0.040749,
+        "reduce_mult": 0.722131,
+        "min_tp_offset": 0.004722,
+        "min_sl_offset": 0.009507,
+        "enable_tpsl": false
+      }
+    }
+  }
+}

@@ -84,6 +84,39 @@ class SuppressOutput:
         sys.stdout, sys.stderr = self._orig_stdout, self._orig_stderr
 
 
+def _safe_apply_with_missing_fill(
+    df: pd.DataFrame,
+    fn,
+    step_name: str,
+    *,
+    max_fill_cols: int = 64,
+) -> pd.DataFrame:
+    """
+    일부 피처 컬럼이 스키마 프루닝으로 제거된 경우 KeyError를 순차 복구한다.
+    - 누락 컬럼을 0.0으로 추가
+    - 같은 단계 함수를 재시도
+    """
+    filled: set[str] = set()
+    fail_fast = str(os.getenv("RL_FAIL_FAST", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    while True:
+        try:
+            return fn(df)
+        except KeyError as e:
+            col = str(e).strip("'\" ")
+            if fail_fast:
+                raise KeyError(
+                    f"[FAIL-FAST] {step_name}: missing required column '{col}'. "
+                    "No default fill is allowed."
+                ) from e
+            if not col or col in filled or len(filled) >= max_fill_cols:
+                raise
+            df[col] = 0.0
+            filled.add(col)
+            logger.warning(
+                f"{step_name}: missing column '{col}' detected, filled with 0.0 and retrying"
+            )
+
+
 # ─── 메인 마이닝 함수 ─────────────────────────────────────────────────────────
 def generate_training_csv(input_csv: str, output_csv: str):
     from features.elite import BaseStrategy, NewEliteSignalEngine  # type: ignore  # noqa: F401
@@ -93,7 +126,37 @@ def generate_training_csv(input_csv: str, output_csv: str):
     )
 
     logger.info("🚀 [단계 1] 원본 피처 데이터 로드 및 전처리...")
-    df = pd.read_csv(input_csv).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    fail_fast = str(os.getenv("RL_FAIL_FAST", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    df = pd.read_csv(input_csv).replace([np.inf, -np.inf], np.nan)
+    if fail_fast:
+        na_cols = [c for c in df.columns if df[c].isna().any()]
+        if na_cols:
+            sample = ", ".join(na_cols[:12])
+            more = "" if len(na_cols) <= 12 else f" ... (+{len(na_cols)-12})"
+            raise ValueError(
+                f"[FAIL-FAST] input contains NaN columns: {sample}{more}. "
+                "Do not replace with defaults in fail-fast mode."
+            )
+    else:
+        df = df.fillna(0.0)
+
+    if fail_fast:
+        required_input = set(
+            ["timestamp", "close", TARGET_COL]
+            + ELITE_COLS
+            + NEW_ELITE_COLS
+            + ALPHA_7_COLS
+            + REGIME_COLS
+            + SYNTHETIC_ALPHA_COLS
+            + VOLATILITY_MODEL_COLS
+        )
+        missing_in = sorted([c for c in required_input if c not in df.columns])
+        if missing_in:
+            sample = ", ".join(missing_in[:16])
+            more = "" if len(missing_in) <= 16 else f" ... (+{len(missing_in)-16})"
+            raise KeyError(
+                f"[FAIL-FAST] input missing required columns: {sample}{more}"
+            )
 
     if 'close' in df.columns:
         if 'mtf_trend_1h' not in df.columns:
@@ -106,14 +169,14 @@ def generate_training_csv(input_csv: str, output_csv: str):
         df['smf_std'] = 1.0
 
     logger.info("🚀 [단계 1.2] 합성 알파 피처 계산 (OFTI / KEL / MTA / SVPS 등)...")
-    df = compute_synthetic_alphas(df)
+    df = _safe_apply_with_missing_fill(df, compute_synthetic_alphas, "compute_synthetic_alphas")
     logger.info("✅ 합성 알파 피처 계산 완료")
 
     logger.info("🚀 [단계 1.5] 적응형(Adaptive) 레짐 스캔 중...")
-    df = compute_regime(df)
+    df = _safe_apply_with_missing_fill(df, compute_regime, "compute_regime")
 
     logger.info("🚀 [단계 1.6] 변동성 모델 피처 계산 (GARCH / OU / Jump / EVT)...")
-    df = compute_volatility_models(df)
+    df = _safe_apply_with_missing_fill(df, compute_volatility_models, "compute_volatility_models")
     logger.info("✅ 변동성 모델 피처 계산 완료")
 
     logger.info("🚀 [단계 1.7] 신규 Elite 시그널 벡터 계산 (volume_confirm / liquidity_trap / trend_health)...")
@@ -175,6 +238,28 @@ def generate_training_csv(input_csv: str, output_csv: str):
     if 'pred_timesfm' in MODEL_PRED:
         fallback_models['timesfm'] = TimesFMForecaster()
 
+    active_model_pred = list(MODEL_PRED)
+    active_model_conf = list(MODEL_CONF)
+    if fail_fast:
+        supported_pred = set()
+        supported_pred.update([m for m in MODEL_PRED if m in df.columns])
+        for m_alias in nf_models_list:
+            supported_pred.add(f"pred_{m_alias}")
+        for name in fallback_models.keys():
+            supported_pred.add(f"pred_{name}")
+
+        active_model_pred = [m for m in MODEL_PRED if m in supported_pred]
+        active_model_conf = [
+            c for c in MODEL_CONF
+            if c.startswith("conf_") and f"pred_{c.split('conf_', 1)[1]}" in supported_pred
+        ]
+        dropped = [m for m in MODEL_PRED if m not in active_model_pred]
+        if dropped:
+            logger.warning(
+                "[FAIL-FAST] unsupported model prediction columns excluded: %s",
+                ", ".join(dropped),
+            )
+
     def get_direction(traj):
         if len(traj) < 2: return float(np.sign(np.mean(traj)))
         slope = float(np.polyfit(np.arange(len(traj)), traj, 1)[0])
@@ -206,21 +291,27 @@ def generate_training_csv(input_csv: str, output_csv: str):
         for i in range(chunk_start, chunk_end):
             current_row = df_records[i]
             prev_row    = df_records[i - 1] if i > 0 else current_row
+
+            def _ff_get(row: dict, key: str, default: float = 0.0) -> float:
+                if fail_fast and key not in row:
+                    raise KeyError(f"[FAIL-FAST] missing key in row: '{key}'")
+                return float(row.get(key, default))
+
             row_res = {
                 'timestamp':  current_row['timestamp'],
-                'close':      current_row['close'],
-                'log_return': current_row['log_return'],
+                'close':      _ff_get(current_row, 'close'),
+                'log_return': _ff_get(current_row, 'log_return'),
             }
-            for col in ALPHA_7_COLS:          row_res[col] = float(current_row.get(col, 0.0))
-            for col in REGIME_COLS:           row_res[col] = float(current_row.get(col, 0.0))
-            for col in SYNTHETIC_ALPHA_COLS:  row_res[col] = float(current_row.get(col, 0.0))
-            for col in VOLATILITY_MODEL_COLS: row_res[col] = float(current_row.get(col, 0.0))
-            for col in NEW_ELITE_COLS:        row_res[col] = float(current_row.get(col, 0.0))
+            for col in ALPHA_7_COLS:          row_res[col] = _ff_get(current_row, col)
+            for col in REGIME_COLS:           row_res[col] = _ff_get(current_row, col)
+            for col in SYNTHETIC_ALPHA_COLS:  row_res[col] = _ff_get(current_row, col)
+            for col in VOLATILITY_MODEL_COLS: row_res[col] = _ff_get(current_row, col)
+            for col in NEW_ELITE_COLS:        row_res[col] = _ff_get(current_row, col)
 
             # 실사용 스키마 프루닝 이후에는 원시 입력이 부족할 수 있으므로
             # 저장된 sig_* 컬럼을 우선 사용하고, 가능할 때만 재계산으로 덮어쓴다.
             for _k in ELITE_COLS:
-                row_res[_k] = float(current_row.get(_k, 0.0))
+                row_res[_k] = _ff_get(current_row, _k)
             try:
                 all_sigs = elite_extractor.compute_all(
                     current=row_to_market_row(current_row),
@@ -231,10 +322,16 @@ def generate_training_csv(input_csv: str, output_csv: str):
             except Exception:
                 raise
 
-            for m in MODEL_PRED:
-                row_res[m] = float(current_row.get(m, 0.0)) if m in _precomputed_pred else 0.0
-            for c in MODEL_CONF:
-                row_res[c] = float(current_row.get(c, 0.0)) if c in _precomputed_conf else 0.5
+            for m in active_model_pred:
+                if m in _precomputed_pred:
+                    row_res[m] = _ff_get(current_row, m)
+                else:
+                    row_res[m] = np.nan if fail_fast else 0.0
+            for c in active_model_conf:
+                if c in _precomputed_conf:
+                    row_res[c] = _ff_get(current_row, c)
+                else:
+                    row_res[c] = np.nan if fail_fast else 0.5
             chunk_data.append(row_res)
 
         # ── TTM ──────────────────────────────────────────────────────────────
@@ -327,7 +424,17 @@ def generate_training_csv(input_csv: str, output_csv: str):
                         except Exception:
                             raise
 
-        new_df = pd.DataFrame(chunk_data, columns=RL_REQUIRED_COLS)
+        base_required = [c for c in RL_REQUIRED_COLS if c not in MODEL_PRED and c not in MODEL_CONF]
+        out_cols = base_required + active_model_pred + active_model_conf
+        new_df = pd.DataFrame(chunk_data, columns=out_cols)
+        if fail_fast:
+            if new_df.isna().any().any():
+                bad = [c for c in new_df.columns if new_df[c].isna().any()]
+                sample = ", ".join(bad[:12])
+                more = "" if len(bad) <= 12 else f" ... (+{len(bad)-12})"
+                raise ValueError(
+                    f"[FAIL-FAST] mined chunk still contains NaN columns: {sample}{more}"
+                )
         is_new = not os.path.exists(abs_output)
         new_df.to_csv(abs_output, mode='a', header=is_new, index=False)
 

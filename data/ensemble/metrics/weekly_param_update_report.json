@@ -1,0 +1,70 @@
+{
+  "status": "kept_incumbent",
+  "dry_run": false,
+  "time": "2026-04-14T23:45:49.528268+09:00",
+  "balanced": {
+    "pass": false,
+    "reason": "mdd>12.0",
+    "train": {
+      "pnl_pct": 26.09007716679519,
+      "mdd_pct": -2.6346279136922,
+      "trades": 13,
+      "win_rate": 61.53846153846154,
+      "sharpe": 13.047607272407523,
+      "equity": 1.260900771667952
+    },
+    "oos": {
+      "pnl_pct": -15.918421420475292,
+      "mdd_pct": -15.918421420475292,
+      "trades": 10,
+      "win_rate": 30.0,
+      "sharpe": -56.93650716962694,
+      "equity": 0.8408157857952471
+    },
+    "incumbent_oos": {
+      "pnl_pct": -4.5044873885437875,
+      "mdd_pct": -4.885345741421155,
+      "trades": 6,
+      "win_rate": 50.0,
+      "sharpe": -29.125329052257662,
+      "equity": 0.9549551261145621
+    }
+  },
+  "lowfreq": {
+    "pass": false,
+    "reason": "trades<5",
+    "best": {
+      "k": 10,
+      "votes": 7,
+      "train": {
+        "pnl_pct": 7.33324897325518,
+        "mdd_pct": -0.36002104059127404,
+        "trades": 4,
+        "win_rate": 100.0,
+        "sharpe": 13.631042136220252,
+        "equity": 1.0733324897325518
+      },
+      "oos": {
+        "pnl_pct": -2.231807985982548,
+        "mdd_pct": -2.4344771388406627,
+        "trades": 2,
+        "win_rate": 50.0,
+        "sharpe": -24.663639491598357,
+        "equity": 0.9776819201401745
+      }
+    },
+    "incumbent_oos": {
+      "pnl_pct": -9.901773387243429,
+      "mdd_pct": -9.901773387243429,
+      "trades": 4,
+      "win_rate": 0.0,
+      "sharpe": -43.7848147250848,
+      "equity": 0.9009822661275657
+    }
+  },
+  "paths": {
+    "balanced": "data/ensemble/metrics/param_ensemble_result.json",
+    "lowfreq_params": "data/ensemble/metrics/param_ensemble_lowfreq_highpnl.json",
+    "lowfreq_grid": "data/ensemble/metrics/param_ensemble_lowfreq_grid.json"
+  }
+}

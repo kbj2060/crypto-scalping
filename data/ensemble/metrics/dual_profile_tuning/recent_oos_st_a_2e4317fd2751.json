@@ -1,0 +1,135 @@
+{
+  "csv_path": "data/rl_training_data_latest.csv",
+  "start": "2026-03-25 00:00:00",
+  "end": "2026-03-26 17:35:00",
+  "rows": 500,
+  "primary_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "comparison": {
+    "results": {
+      "ultimate_ensemble_3m": {
+        "pnl_pct": -3.8149132698963917,
+        "mdd_pct": -5.007841054086503,
+        "trades": 6,
+        "wr_pct": 66.66666666666667,
+        "avg_pnl_per_trade_pct": -0.6261082748771326,
+        "profit_factor": 0.2570650917040448,
+        "long_entries": 0,
+        "short_entries": 1
+      },
+      "ultimate_ensemble_regime_weighted": {
+        "pnl_pct": 1.5694562765909081,
+        "mdd_pct": -1.2743129199463854,
+        "trades": 11,
+        "wr_pct": 63.63636363636363,
+        "avg_pnl_per_trade_pct": 0.14413637762492582,
+        "profit_factor": 1.8206881671900028,
+        "long_entries": 1,
+        "short_entries": 0
+      }
+    },
+    "trade_samples": {
+      "ultimate_ensemble_3m": [
+        {
+          "ts": "2026-03-25 07:40:00",
+          "side": "LONG",
+          "entry_price": 2167.0,
+          "exit_price": 2168.98,
+          "lev": 1.0,
+          "hold_bars": 16,
+          "pnl_frac": -0.0004865798413919986
+        },
+        {
+          "ts": "2026-03-25 15:20:00",
+          "side": "SHORT",
+          "entry_price": 2168.98,
+          "exit_price": 2162.56,
+          "lev": 1.0,
+          "hold_bars": 91,
+          "pnl_frac": 0.0015610208303407092
+        },
+        {
+          "ts": "2026-03-25 16:35:00",
+          "side": "LONG",
+          "entry_price": 2162.56,
+          "exit_price": 2181.19,
+          "lev": 1.0,
+          "hold_bars": 14,
+          "pnl_frac": 0.0072114246357597445
+        },
+        {
+          "ts": "2026-03-25 17:00:00",
+          "side": "SHORT",
+          "entry_price": 2181.19,
+          "exit_price": 2172.37,
+          "lev": 0.9959026771733638,
+          "hold_bars": 4,
+          "pnl_frac": 0.0026343637649957063
+        },
+        {
+          "ts": "2026-03-26 17:35:00",
+          "side": "LONG",
+          "entry_price": 2172.37,
+          "exit_price": 2066.58,
+          "lev": 1.0,
+          "hold_bars": 295,
+          "pnl_frac": -0.050078410540864995,
+          "terminal": true
+        }
+      ],
+      "ultimate_ensemble_regime_weighted": [
+        {
+          "ts": "2026-03-26 05:50:00",
+          "side": "LONG",
+          "entry_price": 2139.64,
+          "exit_price": 2116.85,
+          "lev": 0.10144841964107688,
+          "hold_bars": 7,
+          "pnl_frac": -0.0012221475754875533
+        },
+        {
+          "ts": "2026-03-26 11:35:00",
+          "side": "SHORT",
+          "entry_price": 2116.85,
+          "exit_price": 2071.73,
+          "lev": 1.0,
+          "hold_bars": 68,
+          "pnl_frac": 0.01992313684410596
+        },
+        {
+          "ts": "2026-03-26 13:10:00",
+          "side": "LONG",
+          "entry_price": 2071.73,
+          "exit_price": 2077.65,
+          "lev": 1.0,
+          "hold_bars": 18,
+          "pnl_frac": 0.0014564524232234533
+        },
+        {
+          "ts": "2026-03-26 13:40:00",
+          "side": "SHORT",
+          "entry_price": 2077.65,
+          "exit_price": 2082.5,
+          "lev": 1.0,
+          "hold_bars": 5,
+          "pnl_frac": -0.0037353821063828008
+        },
+        {
+          "ts": "2026-03-26 17:35:00",
+          "side": "LONG",
+          "entry_price": 2082.5,
+          "exit_price": 2066.58,
+          "lev": 1.0,
+          "hold_bars": 47,
+          "pnl_frac": -0.009041520627447144,
+          "terminal": true
+        }
+      ]
+    }
+  },
+  "ranking": [
+    "ultimate_ensemble_regime_weighted",
+    "ultimate_ensemble_3m"
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "created_at": "20260407_163450",
+  "window": {
+    "start": "2025-01-01",
+    "end": "2025-01-31"
+  },
+  "csv_path": "data/splits/year_oos/rl_base_2025.csv",
+  "max_rows": 800,
+  "cases": [
+    {
+      "name": "S0_baseline_pure_rl",
+      "mode": "pure_rl",
+      "metrics": {
+        "pnl_pct": 5.747768779936857,
+        "mdd_pct": -1.5931544549964927,
+        "trades": 10,
+        "wr_pct": 60.0,
+        "long_entries": 6,
+        "short_entries": 4,
+        "avg_hold_long": 120.66666666666667,
+        "avg_hold_short": 0.0,
+        "avg_lev_long": 0.4946085266253603,
+        "avg_lev_short": 0.6211131364107132,
+        "cross_exit": 0,
+        "ambiguity_exit": 0,
+        "reduce_hits": 0,
+        "max_hold_exit": 0,
+        "trail_exit": 0,
+        "step_stop_exit": 0,
+        "trend_exit": 0,
+        "cooldown_block": 0,
+        "trend_flat_block": 0,
+        "trend_mismatch_block": 0,
+        "iso_vae_block": 0
+      },
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/blueprint_ab_20260407_163450/S0_baseline_pure_rl.json"
+    },
+    {
+      "name": "S1_no_go_core",
+      "mode": "proposed",
+      "metrics": {
+        "pnl_pct": -2.443150123003457,
+        "mdd_pct": -2.8226127286546276,
+        "trades": 2,
+        "wr_pct": 50.0,
+        "long_entries": 1,
+        "short_entries": 1,
+        "avg_hold_long": 29.0,
+        "avg_hold_short": 707.0,
+        "avg_lev_long": 0.1540156602859497,
+        "avg_lev_short": 0.35000000000000003,
+        "cross_exit": 0,
+        "ambiguity_exit": 0,
+        "reduce_hits": 0,
+        "max_hold_exit": 0,
+        "trail_exit": 0,
+        "step_stop_exit": 0,
+        "trend_exit": 0,
+        "cooldown_block": 0,
+        "trend_flat_block": 0,
+        "trend_mismatch_block": 0,
+        "iso_vae_block": 0
+      },
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/blueprint_ab_20260407_163450/S1_no_go_core.json",
+      "delta_vs_baseline": {
+        "pnl_pct": -8.190918902940314,
+        "mdd_pct": -1.229458273658135,
+        "trades": -8,
+        "wr_pct": -10.0
+      }
+    },
+    {
+      "name": "S2_no_go_plus_scaling",
+      "mode": "proposed",
+      "metrics": {
+        "pnl_pct": -2.5303375453200605,
+        "mdd_pct": -2.730106173613367,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "long_entries": 0,
+        "short_entries": 1,
+        "avg_hold_long": 0.0,
+        "avg_hold_short": 737.0,
+        "avg_lev_long": 0.0,
+        "avg_lev_short": 0.31499999999999995,
+        "cross_exit": 0,
+        "ambiguity_exit": 0,
+        "reduce_hits": 0,
+        "max_hold_exit": 0,
+        "trail_exit": 0,
+        "step_stop_exit": 0,
+        "trend_exit": 0,
+        "cooldown_block": 0,
+        "trend_flat_block": 0,
+        "trend_mismatch_block": 0,
+        "iso_vae_block": 0
+      },
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/blueprint_ab_20260407_163450/S2_no_go_plus_scaling.json",
+      "delta_vs_baseline": {
+        "pnl_pct": -8.278106325256918,
+        "mdd_pct": -1.1369517186168743,
+        "trades": -9,
+        "wr_pct": -60.0
+      }
+    },
+    {
+      "name": "S3_no_go_scaling_exit",
+      "mode": "proposed",
+      "metrics": {
+        "pnl_pct": -0.26106657213619266,
+        "mdd_pct": -0.2944955029235863,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "long_entries": 0,
+        "short_entries": 1,
+        "avg_hold_long": 0.0,
+        "avg_hold_short": 738.0,
+        "avg_lev_long": 0.0,
+        "avg_lev_short": 0.03698528145932002,
+        "cross_exit": 0,
+        "ambiguity_exit": 0,
+        "reduce_hits": 0,
+        "max_hold_exit": 0,
+        "trail_exit": 0,
+        "step_stop_exit": 0,
+        "trend_exit": 0,
+        "cooldown_block": 0,
+        "trend_flat_block": 0,
+        "trend_mismatch_block": 0,
+        "iso_vae_block": 0
+      },
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/blueprint_ab_20260407_163450/S3_no_go_scaling_exit.json",
+      "delta_vs_baseline": {
+        "pnl_pct": -6.008835352073049,
+        "mdd_pct": 1.2986589520729064,
+        "trades": -9,
+        "wr_pct": -60.0
+      }
+    }
+  ]
+}

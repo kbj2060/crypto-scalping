@@ -1,0 +1,42 @@
+{
+  "seed": 20260415,
+  "search_iters": 20000,
+  "pool_size": 4887,
+  "baseline_balanced": {
+    "cfg": {
+      "top_k": 8,
+      "min_votes": 4
+    },
+    "result": {
+      "pnl_pct": 11.235329704692166,
+      "mdd_pct": -3.1687802029851886,
+      "trades": 14,
+      "win_rate": 57.14285714285714,
+      "sharpe": 9.641499381120749,
+      "equity": 1.1123532970469217
+    }
+  },
+  "improved_balanced": {
+    "objective": 18.868014497860734,
+    "cfg": {
+      "top_k": 10,
+      "enter_votes": 6,
+      "keep_votes": 6,
+      "score_margin": 0.04
+    },
+    "result": {
+      "pnl_pct": 20.71079569960752,
+      "mdd_pct": -1.6467907674837412,
+      "trades": 12,
+      "win_rate": 75.0,
+      "sharpe": 15.683836876960214,
+      "equity": 1.2071079569960752
+    }
+  },
+  "delta": {
+    "pnl_pct": 9.475465994915353,
+    "mdd_pct": 1.5219894355014474,
+    "trades": -2,
+    "sharpe": 6.042337495839465
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "config": {
+    "input": "data/training_features_5m.csv",
+    "days": 7,
+    "entry": 0.75,
+    "exit": 0.5,
+    "maker_fee": 0.0002,
+    "taker_fee": 0.0005,
+    "slip": 0.0002,
+    "impact_k": 0.015,
+    "funding_scale": 1.0,
+    "tp_pct": 0.03,
+    "sl_pct": 0.006,
+    "cooldown_bars": 48,
+    "trailing_stop_pct": 0.004,
+    "enable_trailing": true,
+    "entry_maker": true,
+    "atr14_min_pct": 0.001,
+    "vol1h_min_ratio": 0.6,
+    "trail_tox_alpha": 0.8,
+    "trail_collapse_beta": 0.8,
+    "trail_max_mult": 2.5,
+    "maker_chase_enable": true,
+    "taker_fallback_on_squeeze": true,
+    "onchain_note": "true exchange_netflow not found; used OI/funding/SMF proxy"
+  },
+  "stats": {
+    "start": "2026-04-06 09:00:00",
+    "end": "2026-04-13 09:00:00",
+    "rows": 2017,
+    "trades": 9,
+    "win_rate_pct": 44.44444444444444,
+    "pnl_pct": -0.3232775321494574,
+    "mdd_pct": -1.2615826174715572,
+    "sharpe": -1.4582819728088543,
+    "final_equity": 0.9967672246785054
+  }
+}

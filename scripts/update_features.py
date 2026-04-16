@@ -345,25 +345,24 @@ def load_all_sources(gap_start: datetime, gap_end: datetime):
     funding_df['timestamp'] = funding_df['timestamp'].astype('datetime64[us]')
 
     # ── 교집합 구간(Common timeframe)으로 필터링 ──
+    # NOTE:
+    # metrics/funding 파일은 공개 지연이 자주 발생한다.
+    # 최신 캔들 구간을 보존하기 위해 공통 구간 계산은 ETH/BTC 캔들만 기준으로 한다.
+    # metrics/funding은 build_features()에서 backward merge_asof로 보수적으로 붙인다.
     start_time = max(
         eth_df['timestamp'].min(),
         btc_df['timestamp'].min(),
-        metrics_df['timestamp'].min(),
-        funding_df['timestamp'].min()
     )
     end_time = min(
         eth_df['timestamp'].max(),
         btc_df['timestamp'].max(),
-        metrics_df['timestamp'].max(),
-        funding_df['timestamp'].max()
     )
 
     print(f"\n  [공통 구간 필터링] {start_time} ~ {end_time}")
     
     eth_df = eth_df[(eth_df['timestamp'] >= start_time) & (eth_df['timestamp'] <= end_time)].copy()
     btc_df = btc_df[(btc_df['timestamp'] >= start_time) & (btc_df['timestamp'] <= end_time)].copy()
-    metrics_df = metrics_df[(metrics_df['timestamp'] >= start_time) & (metrics_df['timestamp'] <= end_time)].copy()
-    funding_df = funding_df[(funding_df['timestamp'] >= start_time) & (funding_df['timestamp'] <= end_time)].copy()
+    # metrics/funding은 전체 히스토리를 유지한다 (backward asof에서 최신 과거값 사용).
 
     print(f"  ✓ 최종 교집합 데이터 건수:")
     print(f"    - ETH klines : {len(eth_df):,}봉")
@@ -406,13 +405,13 @@ def build_features(eth_df: pd.DataFrame, btc_df: pd.DataFrame,
         if pct > 0.1:
             print(f"  ⚠️ {col} NaN 비율: {pct:.1%} (tolerance 범위 밖 데이터 많음)")
 
-    # ETH ← Funding (backward, tolerance=8h) to avoid look-ahead leakage
+    # ETH ← Funding (backward) to avoid look-ahead leakage.
+    # 최신 월 파일 미공개 구간에서도 마지막 관측 funding을 사용할 수 있도록 tolerance를 두지 않는다.
     eth_merged = pd.merge_asof(
         eth_merged.sort_values('timestamp'),
         funding_df.sort_values('timestamp'),
         on='timestamp',
         direction='backward',
-        tolerance=pd.Timedelta('8h'),
     )
 
     print(f"  ✓ 병합 완료: {len(eth_merged):,}행")
@@ -516,8 +515,8 @@ def verify_data(eth_df: pd.DataFrame, metrics_df: pd.DataFrame, funding_df: pd.D
         match = abs(raw_oi_val - saved_oi_val) < 1e-3 if pd.notna(raw_oi_val) and pd.notna(saved_oi_val) else pd.isna(raw_oi_val) == pd.isna(saved_oi_val)
         print(f"    - [Metrics (OI Value)] 원본: {raw_oi_val:.2f} / 저장됨: {saved_oi_val:.2f} -> {'✅ 일치' if match else '❔ 오차 / 불일치'}")
 
-    # 3. Funding Rate (forward 병합이므로 ts와 같거나 가장 가까운 미래 값)
-    fun_raw = funding_df[funding_df['timestamp'] >= ts].sort_values('timestamp').head(1)
+    # 3. Funding Rate (backward 병합이므로 ts와 같거나 가장 가까운 과거 값)
+    fun_raw = funding_df[funding_df['timestamp'] <= ts].sort_values('timestamp').tail(1)
     if not fun_raw.empty:
         raw_fund = fun_raw['last_funding_rate'].values[0]
         saved_fund = sample['last_funding_rate']

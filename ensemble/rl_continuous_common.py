@@ -66,6 +66,10 @@ class SACTradingEnv:
         specialist_min_opportunity_move=None,
         specialist_min_breakout=None,
         specialist_idle_penalty=None,
+        dd_penalty_coeff=None,
+        kelly_align_bonus=None,
+        kelly_chop_loss_penalty=None,
+        adverse_hold_enable=None,
         terminal_reward_scale: float = 1.0,
         terminal_quality_win: float = 0.15,
         terminal_quality_loss: float = 0.05,
@@ -100,9 +104,26 @@ class SACTradingEnv:
         # Phase-2 reward shaping knobs.
         self.dd_soft_start = float(os.getenv("RL_DD_SOFT_START", "0.01"))
         self.dd_hard_scale = float(os.getenv("RL_DD_HARD_SCALE", "0.025"))
-        self.dd_penalty_coeff = float(os.getenv("RL_DD_PENALTY_COEFF", "0.10"))
-        self.kelly_align_bonus = float(os.getenv("RL_KELLY_ALIGN_BONUS", "0.20"))
-        self.kelly_chop_loss_penalty = float(os.getenv("RL_KELLY_CHOP_LOSS_PENALTY", "2.00"))
+        self.dd_penalty_coeff = (
+            float(dd_penalty_coeff)
+            if dd_penalty_coeff is not None
+            else float(os.getenv("RL_DD_PENALTY_COEFF", "0.10"))
+        )
+        self.kelly_align_bonus = (
+            float(kelly_align_bonus)
+            if kelly_align_bonus is not None
+            else float(os.getenv("RL_KELLY_ALIGN_BONUS", "0.20"))
+        )
+        self.kelly_chop_loss_penalty = (
+            float(kelly_chop_loss_penalty)
+            if kelly_chop_loss_penalty is not None
+            else float(os.getenv("RL_KELLY_CHOP_LOSS_PENALTY", "2.00"))
+        )
+        self.adverse_hold_enable = (
+            bool(adverse_hold_enable)
+            if adverse_hold_enable is not None
+            else _env_flag("RL_ADVERSE_HOLD_ENABLE", True)
+        )
         self.force_close_enable = _env_flag("RL_FORCE_CLOSE_ENABLE", True)
         self.force_close_th = float(os.getenv("RL_FORCE_CLOSE_TH", "-0.025"))
 
@@ -379,6 +400,8 @@ class SACTradingEnv:
 
         r7_adverse_hold = 0.0
         if (
+            self.adverse_hold_enable
+            and
             self.pos is not None
             and self.unrealized_pnl < -abs(self.adverse_hold_pnl_th)
             and self.hold_count > self.adverse_hold_start

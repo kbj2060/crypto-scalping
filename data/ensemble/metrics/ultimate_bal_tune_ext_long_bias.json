@@ -1,0 +1,76 @@
+{
+  "csv_path": "data/splits/year_oos/rl_training_2025_m7.csv",
+  "start": "2025-11-01 00:00:00",
+  "end": "2025-12-31 23:55:00",
+  "rows": 17568,
+  "primary_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_long_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "comparison": {
+    "results": {
+      "ultimate_ensemble_3m": {
+        "pnl_pct": 23.301108631767107,
+        "mdd_pct": -4.487167307785233,
+        "trades": 84,
+        "wr_pct": 69.04761904761905,
+        "avg_pnl_per_trade_pct": 0.25178230624961884,
+        "profit_factor": 4.263582161401684,
+        "long_entries": 7,
+        "short_entries": 0
+      }
+    },
+    "trade_samples": {
+      "ultimate_ensemble_3m": [
+        {
+          "ts": "2025-12-30 22:15:00",
+          "side": "SHORT",
+          "entry_price": 2967.7,
+          "exit_price": 2968.57,
+          "lev": 0.02308170743065682,
+          "hold_bars": 31,
+          "pnl_frac": -3.908549279485474e-05
+        },
+        {
+          "ts": "2025-12-31 01:20:00",
+          "side": "LONG",
+          "entry_price": 2965.3267,
+          "exit_price": 2978.77,
+          "lev": 1.0,
+          "hold_bars": 32,
+          "pnl_frac": 0.0031317640494550325
+        },
+        {
+          "ts": "2025-12-31 16:25:00",
+          "side": "SHORT",
+          "entry_price": 2985.2454,
+          "exit_price": 2986.18,
+          "lev": 0.0054946286914497626,
+          "hold_bars": 180,
+          "pnl_frac": -9.413828431559246e-06
+        },
+        {
+          "ts": "2025-12-31 18:10:00",
+          "side": "LONG",
+          "entry_price": 2966.392,
+          "exit_price": 2981.3,
+          "lev": 1.0,
+          "hold_bars": 12,
+          "pnl_frac": 0.0036237039664039905
+        },
+        {
+          "ts": "2025-12-31 23:55:00",
+          "side": "SHORT",
+          "entry_price": 2986.5679,
+          "exit_price": 2970.4,
+          "lev": 0.3608272095179218,
+          "hold_bars": 69,
+          "pnl_frac": 0.0014489464849828195,
+          "terminal": true
+        }
+      ]
+    }
+  },
+  "ranking": [
+    "ultimate_ensemble_3m"
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "source_csv": "data/splits/year_oos/rl_training_2025_m7.csv",
+    "rows": 105064,
+    "start": "2025-01-01 00:00:00",
+    "end": "2025-12-31 23:55:00",
+    "core5": [
+      "smart_money_flow",
+      "net_taker_ratio",
+      "oi_change_rate",
+      "last_funding_rate",
+      "volatility_z"
+    ]
+  },
+  "walkforward": [
+    {
+      "best_label": "y_l2",
+      "entry": 0.3,
+      "exit": 0.04,
+      "min_hold": 8,
+      "val": {
+        "pnl_pct": -45.36168100637911,
+        "mdd_pct": -54.74693473332437,
+        "sharpe": -3.883308601389133,
+        "trades": 466,
+        "win_rate": 41.847993827160494,
+        "equity_final": 0.5463831899362089
+      },
+      "test": {
+        "pnl_pct": -62.84855847552543,
+        "mdd_pct": -67.55217979617554,
+        "sharpe": -5.3003758832792345,
+        "trades": 514,
+        "win_rate": 40.652006172839506,
+        "equity_final": 0.3715144152447457
+      },
+      "weights": {
+        "smart_money_flow": 0.2611405341523432,
+        "net_taker_ratio": 0.1133452272301849,
+        "oi_change_rate": 0.2611405341523432,
+        "last_funding_rate": -0.80351889734957,
+        "volatility_z": -0.45290339357475207
+      },
+      "fold": 1,
+      "range": {
+        "train": [
+          "2025-01-01 00:00:00",
+          "2025-06-30 01:00:00"
+        ],
+        "val": [
+          "2025-06-30 01:05:00",
+          "2025-09-28 04:35:00"
+        ],
+        "test": [
+          "2025-09-28 04:40:00",
+          "2025-12-27 04:35:00"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "folds": 1,
+    "mean_test_pnl_pct": -62.84855847552543,
+    "median_test_pnl_pct": -62.84855847552543,
+    "mean_test_mdd_pct": -67.55217979617554,
+    "mean_test_sharpe": -5.3003758832792345,
+    "mean_test_trades": 514.0,
+    "all_folds_positive_pnl": false
+  },
+  "cost_scenarios": [
+    {
+      "fee_bps": 2.0,
+      "slip_bps": 1.0,
+      "folds": 1,
+      "mean_test_pnl_pct": -51.85660883090757,
+      "median_test_pnl_pct": -51.85660883090757,
+      "mean_test_mdd_pct": -59.54459210541345,
+      "mean_test_sharpe": -3.87052045710376,
+      "mean_test_trades": 555.0,
+      "all_folds_positive_pnl": false
+    },
+    {
+      "fee_bps": 4.0,
+      "slip_bps": 2.0,
+      "folds": 1,
+      "mean_test_pnl_pct": -62.84855847552543,
+      "median_test_pnl_pct": -62.84855847552543,
+      "mean_test_mdd_pct": -67.55217979617554,
+      "mean_test_sharpe": -5.3003758832792345,
+      "mean_test_trades": 514.0,
+      "all_folds_positive_pnl": false
+    },
+    {
+      "fee_bps": 5.0,
+      "slip_bps": 3.0,
+      "folds": 1,
+      "mean_test_pnl_pct": -69.7523700770568,
+      "median_test_pnl_pct": -69.7523700770568,
+      "mean_test_mdd_pct": -72.82580714381523,
+      "mean_test_sharpe": -6.464372015359348,
+      "mean_test_trades": 514.0,
+      "all_folds_positive_pnl": false
+    },
+    {
+      "fee_bps": 6.0,
+      "slip_bps": 4.0,
+      "folds": 1,
+      "mean_test_pnl_pct": -75.37445952204638,
+      "median_test_pnl_pct": -75.37445952204638,
+      "mean_test_mdd_pct": -77.25209210499091,
+      "mean_test_sharpe": -7.622227407374406,
+      "mean_test_trades": 514.0,
+      "all_folds_positive_pnl": false
+    }
+  ],
+  "checklist": {
+    "oos_sharpe_gt_0p6_fee6bps": false,
+    "all_folds_positive": false,
+    "mdd_lt_8pct": false,
+    "stable_under_cost": false
+  }
+}

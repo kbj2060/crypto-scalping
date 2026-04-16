@@ -1,0 +1,35 @@
+{
+  "hard_test": {
+    "pnl_pct": -3.6296893537477892,
+    "mdd_pct": -4.767633735521781,
+    "trades": 8,
+    "win_rate": 62.5,
+    "sharpe": -16.831551802767557,
+    "equity": 0.9637031064625221
+  },
+  "soft_test_default": {
+    "pnl_pct": -20.001857999161853,
+    "mdd_pct": -20.001857999161853,
+    "trades": 8,
+    "win_rate": 12.5,
+    "sharpe": -47.470120370959584,
+    "equity": 0.7999814200083815
+  },
+  "soft_test_best": {
+    "cfg": {
+      "soft_entry": 0.64,
+      "soft_exit": 0.48,
+      "soft_margin": 0.06
+    },
+    "result": {
+      "pnl_pct": -12.495118867923837,
+      "mdd_pct": -12.495118867923837,
+      "trades": 8,
+      "win_rate": 25.0,
+      "sharpe": -50.74227692359847,
+      "equity": 0.8750488113207616
+    }
+  },
+  "params_k": 10,
+  "pool_size": 3803
+}

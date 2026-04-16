@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "rows_total": 1026,
+    "rows_train": 718,
+    "rows_test": 308,
+    "start": "2026-04-09 19:40:00+09:00",
+    "end": "2026-04-13 09:05:00+09:00",
+    "core_features": [
+      "overheat(onchain-proxy)",
+      "nif_whale",
+      "obi",
+      "flow_sign",
+      "shadow_toxicity_score"
+    ]
+  },
+  "train": {
+    "pnl_pct": 0.1664690565861715,
+    "mdd_pct": -46.08863268097618,
+    "sharpe": 3.5767634634499603,
+    "trades": 4,
+    "win_rate": 2.6499302649930265,
+    "equity": 1.0016646905658617,
+    "params": {
+      "w_nif": 1.0792396949745713,
+      "w_obi": 0.34845672660278315,
+      "w_flow": 0.9430137620693017,
+      "w_tox": 0.4278148258231286,
+      "overheat_long_max": 0.7018234723352721,
+      "overheat_short_min": 1.3630508956850225,
+      "short_boost": 1.578745094701829,
+      "tox_pen": 1.0693618268785237,
+      "entry": 0.32755284566371645,
+      "exit": 0.1096171128029136,
+      "min_hold": 7,
+      "atr_min": 0.003432838005229603,
+      "volr_min": 1.108337650393902,
+      "lev": 0.5364301956828833,
+      "exit_on_hold": true,
+      "fee_bps": 2.0,
+      "slip_bps": 1.0
+    }
+  },
+  "test": {
+    "pnl_pct": 0.0,
+    "mdd_pct": 0.0,
+    "sharpe": 0.0,
+    "trades": 0,
+    "win_rate": 0.0,
+    "equity": 1.0,
+    "params": {
+      "w_nif": 1.0792396949745713,
+      "w_obi": 0.34845672660278315,
+      "w_flow": 0.9430137620693017,
+      "w_tox": 0.4278148258231286,
+      "overheat_long_max": 0.7018234723352721,
+      "overheat_short_min": 1.3630508956850225,
+      "short_boost": 1.578745094701829,
+      "tox_pen": 1.0693618268785237,
+      "entry": 0.32755284566371645,
+      "exit": 0.1096171128029136,
+      "min_hold": 7,
+      "atr_min": 0.003432838005229603,
+      "volr_min": 1.108337650393902,
+      "lev": 0.5364301956828833,
+      "exit_on_hold": true,
+      "fee_bps": 2.0,
+      "slip_bps": 1.0
+    }
+  },
+  "overfit_gap_pnl_pct": 0.1664690565861715,
+  "overfit_ratio": 0.0
+}

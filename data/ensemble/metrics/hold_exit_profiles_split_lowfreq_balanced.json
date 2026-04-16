@@ -1,0 +1,35 @@
+{
+  "seed": 20260415,
+  "search_iters": 20000,
+  "pool_size": 4900,
+  "dataset": {
+    "rows": 1125,
+    "start": "2026-04-09 19:40:00+09:00",
+    "end": "2026-04-13 17:20:00+09:00"
+  },
+  "lowfreq_profile": {
+    "top_k": 10,
+    "min_votes": 6,
+    "result": {
+      "pnl_pct": 20.71079569960752,
+      "mdd_pct": -1.6467907674837412,
+      "trades": 12,
+      "win_rate": 75.0,
+      "sharpe": 15.683836876960214,
+      "equity": 1.2071079569960752
+    }
+  },
+  "balanced_profile": {
+    "top_k": 8,
+    "min_votes": 4,
+    "result": {
+      "pnl_pct": 11.235329704692166,
+      "mdd_pct": -3.1687802029851886,
+      "trades": 14,
+      "win_rate": 57.14285714285714,
+      "sharpe": 9.641499381120749,
+      "equity": 1.1123532970469217
+    }
+  },
+  "max_trades_in_grid": 25
+}

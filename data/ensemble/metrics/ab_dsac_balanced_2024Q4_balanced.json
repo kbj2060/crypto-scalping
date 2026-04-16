@@ -1,0 +1,19 @@
+{
+  "split": "2024Q4",
+  "overlay": "balanced",
+  "metrics": {
+    "pnl_pct": 10.486034087167418,
+    "trades": 51,
+    "win_rate": 62.745098039215684,
+    "avg_hold": 513.9019607843137,
+    "mdd_pct": -26.281876511601286,
+    "trend_reversal_exits": 0,
+    "risk_reduces": 26150,
+    "sharpe": 0.8957026344961356,
+    "overlay_mode": "balanced",
+    "overlay_reduce_counts": {
+      "low_support": 26150
+    },
+    "overlay_exit_counts": {}
+  }
+}
