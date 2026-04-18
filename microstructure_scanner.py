@@ -603,6 +603,7 @@ class MicrostructureScanner:
             "spoofing_bias": int(spoof_bias), "nif_whale": float(nif_whale), "nif_retail": float(nif_retail),
             "nif_bias": int(nif_bias), "eai": float(eai), "eai_bias": int(eai_bias),
             "oi_delta_pct": float(oi_delta_pct), "funding_rate": float(self._fund_rate),
+            "mark_price": float(self._price_obs[-1][1]) if self._price_obs else 0.0,
             "oi_delta_cum_5m": float(self._cached.get("oi_delta_cum_5m", 0.0)),
             "oi_delta_cum_5m_bucket_start_ts": int(self._cached.get("oi_delta_cum_5m_bucket_start_ts", 0)),
             "whale_flow_10s_ratio": float(whale_flow_10s_ratio),

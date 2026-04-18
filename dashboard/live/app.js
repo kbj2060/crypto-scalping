@@ -209,6 +209,12 @@ function actionLabel(a) {
   return { text: "HOLD", icon: "⏸", cls: "hold" };
 }
 
+function positionOpenedAtText(track) {
+  const pos = String((track || {}).pos || "NONE").toUpperCase();
+  if (pos !== "LONG" && pos !== "SHORT") return "-";
+  return fmtTs((track || {}).opened_at || (track || {}).updated_at || "");
+}
+
 function initPlaybookModal() {
   const modal = el("pbModal");
   if (!modal) return;
@@ -1267,8 +1273,8 @@ function render(state) {
   if (topSession) topSession.innerHTML = sessionHtml;
   const nowEl = el("opsNow");
   if (nowEl) nowEl.textContent = fmtNowClock();
-  const topNowEl = el("topNow");
-  if (topNowEl) topNowEl.textContent = fmtNowClock();
+  const topClockEl = el("topClock");
+  if (topClockEl) topClockEl.textContent = fmtNowClock();
   const agents = state.agents || {};
   const agLong = agents.long || {};
   const agShort = agents.short || {};
@@ -1284,7 +1290,6 @@ function render(state) {
   el("ensBalDecision").className = agDecisionLong.text === "LONG" ? "good" : agDecisionLong.text === "SHORT" ? "bad" : "muted";
   el("ensBalPos").textContent = agPosLong;
   el("ensBalPos").className = agPosLong === "LONG" ? "good" : agPosLong === "SHORT" ? "bad" : "muted";
-  el("ensBalKelly").textContent = fmtNum(agLong.kelly_weight ?? 0, 3);
   el("ensBalVotes").textContent = fmtNum(agLongTrack.entry_kelly ?? 0, 3);
   if (hasOwn(agLongTrack, "unrealized_pnl_pct")) {
     el("ensBalWinRate").textContent = fmtPct(agLongTrack.unrealized_pnl_pct ?? 0);
@@ -1297,18 +1302,17 @@ function render(state) {
   el("ensBalLastPnl").className = riskClass(agLongTrack.last_pnl_pct || 0);
   el("ensBalMdd").textContent = `-${fmtNum(agLongTrack.mdd_pct ?? 0, 2)}%`;
   el("ensBalMdd").className = Number(agLongTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ensBalDecisionAt").textContent = fmtTs(agLong.decision_at || agLongTrack.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  el("ensBalDecisionAt").textContent = positionOpenedAtText(agLongTrack);
   el("ensBalDecisionAt").className = "muted";
   el("ensBalTotal").textContent = `누적: ${fmtPct(agLongTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agLongTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agLongTrack.trades ?? 0, 0)}회`;
   el("ensBalTotal").className = riskClass(agLongTrack.total_return_pct || 0);
   el("ensBalParamMeta").textContent = "";
-  el("ensBalStamp").textContent = fmtTs(agLongTrack.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  el("ensBalStamp").textContent = `최종 갱신시각: ${fmtTs(state.updated_at || state.cycle_timestamp_kst)}`;
 
   el("ensLowDecision").textContent = agDecisionShort.text;
   el("ensLowDecision").className = agDecisionShort.text === "LONG" ? "good" : agDecisionShort.text === "SHORT" ? "bad" : "muted";
   el("ensLowPos").textContent = agPosShort;
   el("ensLowPos").className = agPosShort === "LONG" ? "good" : agPosShort === "SHORT" ? "bad" : "muted";
-  el("ensLowKelly").textContent = fmtNum(agShort.kelly_weight ?? 0, 3);
   el("ensLowVotes").textContent = fmtNum(agShortTrack.entry_kelly ?? 0, 3);
   if (hasOwn(agShortTrack, "unrealized_pnl_pct")) {
     el("ensLowWinRate").textContent = fmtPct(agShortTrack.unrealized_pnl_pct ?? 0);
@@ -1321,71 +1325,105 @@ function render(state) {
   el("ensLowLastPnl").className = riskClass(agShortTrack.last_pnl_pct || 0);
   el("ensLowMdd").textContent = `-${fmtNum(agShortTrack.mdd_pct ?? 0, 2)}%`;
   el("ensLowMdd").className = Number(agShortTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ensLowDecisionAt").textContent = fmtTs(agShort.decision_at || agShortTrack.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  el("ensLowDecisionAt").textContent = positionOpenedAtText(agShortTrack);
   el("ensLowDecisionAt").className = "muted";
   el("ensLowTotal").textContent = `누적: ${fmtPct(agShortTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agShortTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agShortTrack.trades ?? 0, 0)}회`;
   el("ensLowTotal").className = riskClass(agShortTrack.total_return_pct || 0);
   el("ensLowParamMeta").textContent = "";
-  el("ensLowStamp").textContent = fmtTs(agShortTrack.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  el("ensLowStamp").textContent = `최종 갱신시각: ${fmtTs(state.updated_at || state.cycle_timestamp_kst)}`;
 
-  const ens = state.ensembles || {};
-  const ensBal = ens.balanced || {};
-  const ensLow = ens.lowfreq || {};
-  const ensTrk = ens.tracker || {};
-  const ensBalTrk = ensTrk.balanced || {};
-  const ensLowTrk = ensTrk.lowfreq || {};
-  const profitDecision = actionLabel(Number((ensLow.live || {}).action ?? 0));
-  const stableDecision = actionLabel(Number((ensBal.live || {}).action ?? 0));
-  const profitPos = String(ensLowTrk.pos || "NONE").toUpperCase();
-  const stablePos = String(ensBalTrk.pos || "NONE").toUpperCase();
+  const quant = state.quant_formula || {};
+  const qHorizon = Number(quant.horizon_minutes ?? 30);
+  const qDirection = String(quant.direction || "").toUpperCase();
+  const quantSignal = qDirection || String(quant.signal || "HOLD").toUpperCase();
+  const qAccModel = Number(quant.accuracy_model ?? (1 - Number(quant.rmse_model ?? 1)));
+  const qAccBaseline = Number(quant.accuracy_baseline ?? (1 - Number(quant.rmse_naive ?? 1)));
+  const qWinModel = Number(quant.win_rate_model ?? (qAccModel * 100));
+  const qWinBaseline = Number(quant.win_rate_baseline ?? (qAccBaseline * 100));
+  const qConfPct = Number(quant.confidence ?? 0) * 100;
+  const qProbUp = Number(quant.prob_up ?? (quantSignal === "LONG" || quantSignal === "UP" ? 0.5 + Number(quant.confidence ?? 0) * 0.5 : quantSignal === "SHORT" || quantSignal === "DOWN" ? 0.5 - Number(quant.confidence ?? 0) * 0.5 : 0.5));
+  const qProbDown = Number(quant.prob_down ?? (1 - qProbUp));
+  const qAccImprove = (qAccModel - qAccBaseline) * 100;
 
-  el("ultProfitDecision").textContent = profitDecision.text;
-  el("ultProfitDecision").className = profitDecision.text === "LONG" ? "good" : profitDecision.text === "SHORT" ? "bad" : "muted";
-  el("ultProfitPos").textContent = profitPos;
-  el("ultProfitPos").className = profitPos === "LONG" ? "good" : profitPos === "SHORT" ? "bad" : "muted";
-  el("ultProfitKelly").textContent = fmtNum((ensLow.live || {}).kelly_weight ?? 0, 3);
-  el("ultProfitEntryKelly").textContent = fmtNum(ensLowTrk.entry_kelly ?? 0, 3);
-  if (hasOwn(ensLowTrk, "unrealized_pnl_pct")) {
-    el("ultProfitUnreal").textContent = fmtPct(ensLowTrk.unrealized_pnl_pct ?? 0);
-    el("ultProfitUnreal").className = riskClass(ensLowTrk.unrealized_pnl_pct || 0);
-  } else {
-    el("ultProfitUnreal").textContent = "-";
-    el("ultProfitUnreal").className = "muted";
-  }
-  el("ultProfitLastPnl").textContent = fmtPct(ensLowTrk.last_pnl_pct ?? 0);
-  el("ultProfitLastPnl").className = riskClass(ensLowTrk.last_pnl_pct || 0);
-  el("ultProfitMdd").textContent = `-${fmtNum(ensLowTrk.mdd_pct ?? 0, 2)}%`;
-  el("ultProfitMdd").className = Number(ensLowTrk.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ultProfitDecisionAt").textContent = fmtTs((ensLow.live || {}).updated_at || ensLowTrk.updated_at || ens.updated_at || state.updated_at || state.cycle_timestamp_kst);
-  el("ultProfitDecisionAt").className = "muted";
-  el("ultProfitTotal").textContent = `누적: ${fmtPct(ensLowTrk.total_return_pct ?? 0)} | 승률: ${fmtNum(ensLowTrk.win_rate ?? 0, 1)}% | 거래: ${fmtNum(ensLowTrk.trades ?? 0, 0)}회`;
-  el("ultProfitTotal").className = riskClass(ensLowTrk.total_return_pct || 0);
-  el("ultProfitMeta").textContent = "";
-  el("ultProfitStamp").textContent = fmtTs(ensLowTrk.updated_at || ens.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  const qHorizonLabelEl = el("quantHorizonLabel");
+  if (qHorizonLabelEl) qHorizonLabelEl.textContent = `${fmtNum(qHorizon, 0)}분 방향`;
+  const qSignalLabel = quantSignal === "LONG" ? "UP" : quantSignal === "SHORT" ? "DOWN" : quantSignal;
+  el("quantSignal").textContent = qSignalLabel;
+  el("quantSignal").className = (qSignalLabel === "UP") ? "good" : (qSignalLabel === "DOWN" ? "bad" : "muted");
+  el("quantPredPrice").textContent = `${fmtNum(qProbUp * 100, 1)}% / ${fmtNum(qProbDown * 100, 1)}%`;
+  el("quantRet").textContent = fmtPct(quant.expected_return_pct ?? 0, 3);
+  el("quantRet").className = riskClass(quant.expected_return_pct ?? 0);
+  el("quantConf").textContent = `${fmtNum(qConfPct, 1)}%`;
+  el("quantConf").className = qConfPct >= 60 ? "good" : qConfPct >= 35 ? "warn" : "muted";
+  el("quantWinRate").textContent = `${fmtNum(qWinModel, 2)}% / ${fmtNum(qWinBaseline, 2)}%`;
+  el("quantRmse").textContent = `${fmtNum(qAccModel * 100, 2)}% / ${fmtNum(qAccBaseline * 100, 2)}% (${qAccImprove >= 0 ? "+" : ""}${fmtNum(qAccImprove, 2)}%p)`;
+  const targetAlias = String(quant.target_alias || `zeta_px_${fmtNum(qHorizon, 0)}m`);
+  el("quantMeta").textContent = `설정: ${fmtNum(quant.bar_minutes ?? 1, 0)}m bar | lookback ${fmtNum(quant.lookback_minutes ?? 15, 0)}m | horizon ${fmtNum(qHorizon, 0)}m | target=${targetAlias}`;
+  el("quantStamp").textContent = fmtTs(quant.updated_at || state.updated_at || state.cycle_timestamp_kst);
 
-  el("ultStableDecision").textContent = stableDecision.text;
-  el("ultStableDecision").className = stableDecision.text === "LONG" ? "good" : stableDecision.text === "SHORT" ? "bad" : "muted";
-  el("ultStablePos").textContent = stablePos;
-  el("ultStablePos").className = stablePos === "LONG" ? "good" : stablePos === "SHORT" ? "bad" : "muted";
-  el("ultStableKelly").textContent = fmtNum((ensBal.live || {}).kelly_weight ?? 0, 3);
-  el("ultStableEntryKelly").textContent = fmtNum(ensBalTrk.entry_kelly ?? 0, 3);
-  if (hasOwn(ensBalTrk, "unrealized_pnl_pct")) {
-    el("ultStableUnreal").textContent = fmtPct(ensBalTrk.unrealized_pnl_pct ?? 0);
-    el("ultStableUnreal").className = riskClass(ensBalTrk.unrealized_pnl_pct || 0);
-  } else {
-    el("ultStableUnreal").textContent = "-";
-    el("ultStableUnreal").className = "muted";
-  }
-  el("ultStableLastPnl").textContent = fmtPct(ensBalTrk.last_pnl_pct ?? 0);
-  el("ultStableLastPnl").className = riskClass(ensBalTrk.last_pnl_pct || 0);
-  el("ultStableMdd").textContent = `-${fmtNum(ensBalTrk.mdd_pct ?? 0, 2)}%`;
-  el("ultStableMdd").className = Number(ensBalTrk.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ultStableDecisionAt").textContent = fmtTs((ensBal.live || {}).updated_at || ensBalTrk.updated_at || ens.updated_at || state.updated_at || state.cycle_timestamp_kst);
-  el("ultStableDecisionAt").className = "muted";
-  el("ultStableTotal").textContent = `누적: ${fmtPct(ensBalTrk.total_return_pct ?? 0)} | 승률: ${fmtNum(ensBalTrk.win_rate ?? 0, 1)}% | 거래: ${fmtNum(ensBalTrk.trades ?? 0, 0)}회`;
-  el("ultStableTotal").className = riskClass(ensBalTrk.total_return_pct || 0);
-  el("ultStableMeta").textContent = "";
-  el("ultStableStamp").textContent = fmtTs(ensBalTrk.updated_at || ens.updated_at || state.updated_at || state.cycle_timestamp_kst);
+  const poly = state.polymarket || {};
+  const polyModeLabelRaw = String(poly.mode_label || "-");
+  const polyModeLabel = polyModeLabelRaw.length > 38 ? `${polyModeLabelRaw.slice(0, 38)}...` : polyModeLabelRaw;
+  const polyModeProb = Number(poly.mode_prob || 0) * 100;
+  const polyTailUp = Number(poly.tail_up_prob || 0) * 100;
+  const polyTailDn = Number(poly.tail_down_prob || 0) * 100;
+  const polyMom = Number(poly.prob_momentum_1m || 0) * 100;
+  const polyImb = Number(poly.book_imbalance || 0) * 100;
+  const polyVol = Number(poly.event_volatility || 0) * 100;
+  const polySignal = String(poly.signal || "HOLD").toUpperCase();
+  const polyRisk = String(poly.risk_state || "NORMAL").toUpperCase();
+  const polyStatus = String(poly.status || "IDLE").toUpperCase();
+  const polyError = String(poly.error || "");
+  const polySlug = String(poly.slug || "-");
+  const polyTarget = Number(poly.weighted_target || state.price || 0);
+  const srcText = String(sig.source || "");
+  const shockD1 = Number(hasOwn(poly, "shock_delta_1m") ? poly.shock_delta_1m : poly.prob_momentum_1m || 0) * 100;
+  const shockZ = Number(poly.shock_z_1m || 0);
+  const shockD3 = Number(poly.shock_delta_3m || 0) * 100;
+  const shockDynTh = Number(poly.shock_dyn_th_1m || 0) * 100;
+  const gateTrigger = Boolean(poly.shock_trigger);
+  const gatePeak = Boolean(poly.shock_is_peak);
+  const gatePeakAbs = Number(poly.shock_peak_abs_1m || 0) * 100;
+  const gateReason = String(poly.shock_trigger_reason || "");
+  const gateThD1 = Number((state.config && state.config.polymarket_shock_1m_th) ?? 0.04) * 100;
+  const gateThZ = Number((state.config && state.config.polymarket_shock_z_th) ?? 4.0);
+  const gateThD3 = Number((state.config && state.config.polymarket_shock_cum3_th) ?? 0.025) * 100;
+  let gateDecision = "NONE";
+  if (srcText.includes("POLYMARKET_EMERGENCY_EXIT")) gateDecision = "EXIT";
+  else if (srcText.includes("POLYMARKET_EMERGENCY_HOLD")) gateDecision = "HOLD";
+  else if (srcText.includes("POLYMARKET_SHOCK_COOLDOWN")) gateDecision = "COOLDOWN";
+
+  el("polyEvent").textContent = polySlug;
+  el("polyEvent").className = polyStatus === "LIVE" ? "good" : polyStatus === "ERROR" ? "bad" : "muted";
+  el("polyMode").textContent = `${polyModeLabel} / ${fmtNum(polyModeProb, 1)}%`;
+  el("polyMode").className = polyModeProb >= 65 ? "good" : polyModeProb >= 50 ? "warn" : "muted";
+  el("polyTarget").textContent = fmtNum(polyTarget, 2);
+  el("polyTarget").className = riskClass(((polyTarget - Number(state.price || 0)) / Math.max(Math.abs(Number(state.price || 0)), 1e-8)) * 100);
+  el("polyTail").textContent = `${fmtNum(polyTailUp, 1)}% / ${fmtNum(polyTailDn, 1)}%`;
+  el("polyTail").className = (polyTailUp + polyTailDn) >= 35 ? "warn" : "muted";
+  el("polyMomentum").textContent = `${polyMom >= 0 ? "+" : ""}${fmtNum(polyMom, 2)}%p`;
+  el("polyMomentum").className = riskClass(polyMom);
+  el("polyImbalance").textContent = `${polyImb >= 0 ? "+" : ""}${fmtNum(polyImb, 1)}%`;
+  el("polyImbalance").className = riskClass(polyImb);
+  el("polyVol").textContent = `${fmtNum(polyVol, 2)}%`;
+  el("polyVol").className = polyVol >= 12 ? "bad" : polyVol >= 7 ? "warn" : "good";
+  el("polySignal").textContent = `${polySignal} / ${polyRisk}`;
+  el("polySignal").className = polySignal === "LONG" ? "good" : polySignal === "SHORT" ? "bad" : "muted";
+  el("polyGateStatus").textContent = gateTrigger ? "TRIGGERED" : "IDLE";
+  el("polyGateStatus").className = gateTrigger ? "bad" : "muted";
+  el("polyGateDecision").textContent = gateDecision;
+  el("polyGateDecision").className = gateDecision === "EXIT" ? "bad" : gateDecision === "HOLD" ? "good" : gateDecision === "COOLDOWN" ? "warn" : "muted";
+  el("polyShock").textContent = `${shockD1 >= 0 ? "+" : ""}${fmtNum(shockD1, 2)}%p / ${shockZ >= 0 ? "+" : ""}${fmtNum(shockZ, 2)} / ${shockD3 >= 0 ? "+" : ""}${fmtNum(shockD3, 2)}%p`;
+  el("polyShock").className = gateTrigger ? "bad" : riskClass(shockD1);
+  el("polyThreshold").textContent = `${fmtNum(gateThD1, 2)}%p / ${fmtNum(gateThZ, 2)} / ${fmtNum(gateThD3, 2)}%p`;
+  el("polyThreshold").className = "muted";
+  el("polyPeak").textContent = `${gatePeak ? "PEAK" : "NON-PEAK"} / dyn ${fmtNum(shockDynTh, 2)}%p / win-max ${fmtNum(gatePeakAbs, 2)}%p`;
+  el("polyPeak").className = gatePeak ? "warn" : "muted";
+  const errTxt = polyError ? ` | err=${polyError}` : "";
+  el("polyMeta").textContent = `status=${polyStatus} | 상관(${fmtNum(Number(poly.prob_price_corr || 0), 2)}) | book bid/ask=${fmtNum(Number(poly.book_bid_notional || 0), 1)}/${fmtNum(Number(poly.book_ask_notional || 0), 1)} | kelly×${fmtNum(Number(poly.recommended_kelly_mult ?? 1), 2)} | markets=${fmtNum(Number(poly.priced_count || 0), 0)}${errTxt}`;
+  el("polyGateReason").textContent = `게이트 사유: ${gateReason || "-"}`;
+  el("polyGateReason").className = gateTrigger ? "bad" : "muted";
+  el("polyStamp").textContent = fmtTs(poly.updated_at || state.shadow_updated_at || state.updated_at || state.cycle_timestamp_kst);
 
   const obiNow = obiLabel(micro.obi);
   const whaleNow = whaleLabel(micro);
@@ -1498,8 +1536,8 @@ function render(state) {
 function tickOpsClock() {
   const nowEl = el("opsNow");
   if (nowEl) nowEl.textContent = fmtNowClock();
-  const topNowEl = el("topNow");
-  if (topNowEl) topNowEl.textContent = fmtNowClock();
+  const topClockEl = el("topClock");
+  if (topClockEl) topClockEl.textContent = fmtNowClock();
 }
 
 async function tick() {

@@ -1,0 +1,97 @@
+[...] Building multi-scale + AR features...
+[...] Raw features: 106 dims, 12357 samples, up=49.5%
+[...] Computing Mutual Information for feature selection...
+[...] Selected top-25 features (MI range: 0.007493 ~ 0.001898)
+[...] Training Logistic (L-BFGS-B)...
+[...] Training Kernel Logistic (RFF + L-BFGS-B)...
+[...] Running k-NN classifier...
+[...] Optimizing ensemble...
+
+======================================================================
+  Direction Classification Pipeline v3 (Pattern-Based)
+======================================================================
+[OK] samples=12357  raw_features=106  selected=25
+[OK] horizon=1min  up=49.5%  down=50.5%
+[OK] logistic l2=0.0001
+[OK] kernel_log g=0.01 l2=1.0 rff=100
+[OK] knn k=100 a=0.1
+[OK] ensemble: baseline=0.00  logistic=0.60  kernel_log=0.10  knn=0.30
+
+-- Top-25 Features (by MI) --
+  # 1  col_000  MI=0.007493
+  # 2  col_045  MI=0.005902
+  # 3  col_098  MI=0.004092
+  # 4  col_032  MI=0.003727
+  # 5  col_031  MI=0.003727
+  # 6  col_072  MI=0.003719
+  # 7  col_029  MI=0.002705
+  # 8  col_030  MI=0.002705
+  # 9  col_100  MI=0.002494
+  #10  col_041  MI=0.002482
+
+-- Test Set Metrics --
+  [baseline    ]  Acc=0.4973  F1=0.0000  AUC=0.4906  Prec=0.0000  Rec=0.0000
+  [logistic    ]  Acc=0.5583  F1=0.5185  AUC=0.5867  Prec=0.5735  Rec=0.4732
+  [kernel_log  ]  Acc=0.5707  F1=0.5187  AUC=0.5836  Prec=0.5942  Rec=0.4603
+  [knn         ]  Acc=0.5340  F1=0.4906  AUC=0.5609  Prec=0.5445  Rec=0.4464
+  [ensemble    ]  Acc=0.5609  F1=0.5234  AUC=0.5852  Prec=0.5760  Rec=0.4796
+
+-- Ensemble Split --
+  [train]  Acc=0.5806  F1=0.5591  AUC=0.6135
+  [valid]  Acc=0.5620  F1=0.5360  AUC=0.5726
+  [test]  Acc=0.5609  F1=0.5234  AUC=0.5852
+
+======================================================================
+  ★ 최신 방향 예측 (Latest Direction Predictions) ★
+======================================================================
+  2026-04-17 08:31:00  now=2342.25  → ▲ 상승  prob=0.5456  conf=9.1%  실제=▲ ✓
+    logistic=0.5348  kernel=0.4912  knn=0.5855
+  2026-04-17 08:32:00  now=2342.49  → ▼ 하락  prob=0.4485  conf=10.3%  실제=▲ ✗
+    logistic=0.4493  kernel=0.4485  knn=0.4468
+  2026-04-17 08:33:00  now=2346.74  → ▼ 하락  prob=0.3776  conf=24.5%  실제=▲ ✗
+    logistic=0.3233  kernel=0.4068  knn=0.4765
+  2026-04-17 08:34:00  now=2350.47  → ▼ 하락  prob=0.4042  conf=19.2%  실제=▲ ✗
+    logistic=0.3592  kernel=0.4501  knn=0.4788
+  2026-04-17 08:35:00  now=2350.55  → ▼ 하락  prob=0.4896  conf=2.1%  실제=▼ ✓
+    logistic=0.4746  kernel=0.4818  knn=0.5223
+  2026-04-17 08:36:00  now=2349.22  → ▼ 하락  prob=0.3835  conf=23.3%  실제=▲ ✗
+    logistic=0.3826  kernel=0.4411  knn=0.3661
+  2026-04-17 08:37:00  now=2349.92  → ▼ 하락  prob=0.4541  conf=9.2%  실제=▼ ✓
+    logistic=0.4395  kernel=0.4680  knn=0.4787
+  2026-04-17 08:38:00  now=2348.50  → ▼ 하락  prob=0.4152  conf=17.0%  실제=▲ ✗
+    logistic=0.4079  kernel=0.4562  knn=0.4163
+  2026-04-17 08:39:00  now=2348.83  → ▲ 상승  prob=0.5890  conf=17.8%  실제=▼ ✗
+    logistic=0.6022  kernel=0.5424  knn=0.5781
+  2026-04-17 08:40:00  now=2348.08  → ▲ 상승  prob=0.5515  conf=10.3%  실제=▲ ✓
+    logistic=0.5588  kernel=0.5205  knn=0.5473
+
+  ★★★ 최종 예측: 2026-04-17 08:40:00 기준 1분 후 → ▲ 상승 (확률=0.5515, 확신도=10.3%) ★★★
+
+[Micro map]
+  obi -> mvec_001
+  taker_buy_ratio -> mvec_002
+  spoofing_score -> mvec_003
+  nif_whale -> mvec_004
+  nif_retail -> mvec_005
+  eai -> mvec_006
+  oi_delta_pct -> mvec_007
+  funding_rate -> mvec_008
+  kelly_mult -> mvec_009
+  signal_bias -> mvec_010
+  shadow_toxicity_score -> mvec_011
+  shadow_toxicity_regime -> mvec_012
+  shadow_queue_collapse -> mvec_013
+  shadow_absorption_score -> mvec_014
+  shadow_queue_bias -> mvec_015
+  shadow_regime_tag -> mvec_016
+  shadow_regime_conf -> mvec_017
+[Tail map]
+  long_usd_1m -> trsk_001
+  short_usd_1m -> trsk_002
+  mu_long -> trsk_003
+  sigma_long -> trsk_004
+  mu_short -> trsk_005
+  sigma_short -> trsk_006
+  shadow_aftershock_prob -> trsk_007
+  shadow_decay_half_life -> trsk_008
+  shadow_risk_bucket -> trsk_009

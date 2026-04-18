@@ -31,16 +31,13 @@ body {
 .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--card-gap); }
 .topbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 12px;
   position: relative;
 }
-.top-spacer {
-  min-height: 1px;
-}
-.top-now {
-  justify-self: center;
+.top-clock {
+  justify-self: start;
   font-family: "LAB디지털", "Orbitron", "Rajdhani", "JetBrains Mono", "Roboto Mono", monospace;
   font-size: clamp(28px, 4.3vw, 38px);
   font-weight: 700;
@@ -52,6 +49,16 @@ body {
   background: transparent;
   box-shadow: none;
   text-shadow: 0 0 4px rgba(47, 208, 119, 0.28);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.top-now {
+  justify-self: center;
+  color: #000000;
+  font-size: clamp(30px, 4.6vw, 42px);
+  font-weight: 700;
+  line-height: 1;
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
@@ -519,6 +526,12 @@ h1 { margin: 0; font-size: 24px; }
   margin-bottom: var(--card-gap);
   align-items: stretch;
 }
+.quant-panels {
+  grid-template-columns: 1fr;
+}
+.polymarket-panels {
+  grid-template-columns: 1fr;
+}
 .ensemble-panels { margin-bottom: var(--card-gap); }
 .ensemble-panel { position: relative; }
 .ensemble-panel .ens-param-meta {
@@ -856,9 +869,7 @@ svg {
     gap: 8px;
     justify-items: center;
   }
-  .top-spacer {
-    display: none;
-  }
+  .top-clock { justify-self: center; }
   .top-session {
     justify-self: center;
   }

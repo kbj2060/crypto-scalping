@@ -11,8 +11,7 @@
 <body>
   <main class="app">
     <header class="top topbar">
-      <div class="top-spacer"></div>
-      <div id="topNow" class="top-now">-</div>
+      <div id="topClock" class="top-clock">-</div>
       <div id="topSession" class="ops-session top-session">-</div>
     </header>
 
@@ -39,7 +38,6 @@
         <div class="playbook-grid">
           <div><span>실시간 결정</span><strong id="ensBalDecision">-</strong></div>
           <div><span>현재 포지션</span><strong id="ensBalPos">-</strong></div>
-          <div><span>Live Kelly</span><strong id="ensBalKelly">-</strong></div>
           <div><span>진입 Kelly</span><strong id="ensBalVotes">-</strong></div>
           <div><span>미실현 손익</span><strong id="ensBalWinRate">-</strong></div>
           <div><span>직전 실현손익</span><strong id="ensBalLastPnl">-</strong></div>
@@ -55,7 +53,6 @@
         <div class="playbook-grid">
           <div><span>실시간 결정</span><strong id="ensLowDecision">-</strong></div>
           <div><span>현재 포지션</span><strong id="ensLowPos">-</strong></div>
-          <div><span>Live Kelly</span><strong id="ensLowKelly">-</strong></div>
           <div><span>진입 Kelly</span><strong id="ensLowVotes">-</strong></div>
           <div><span>미실현 손익</span><strong id="ensLowWinRate">-</strong></div>
           <div><span>직전 실현손익</span><strong id="ensLowLastPnl">-</strong></div>
@@ -68,38 +65,43 @@
       </section>
     </section>
 
-    <section class="duo-panels ensemble-panels">
+    <section class="duo-panels ensemble-panels quant-panels">
       <section class="panel ensemble-panel">
-        <h3>🚀 수익형 앙상블</h3>
+        <h3>📐 퀀트 공식 로직</h3>
         <div class="playbook-grid">
-          <div><span>실시간 결정</span><strong id="ultProfitDecision">-</strong></div>
-          <div><span>현재 포지션</span><strong id="ultProfitPos">-</strong></div>
-          <div><span>Live Kelly</span><strong id="ultProfitKelly">-</strong></div>
-          <div><span>진입 Kelly</span><strong id="ultProfitEntryKelly">-</strong></div>
-          <div><span>미실현 손익</span><strong id="ultProfitUnreal">-</strong></div>
-          <div><span>직전 실현손익</span><strong id="ultProfitLastPnl">-</strong></div>
-          <div><span>MDD</span><strong id="ultProfitMdd">-</strong></div>
-          <div><span>매매결정 시각</span><strong id="ultProfitDecisionAt">-</strong></div>
+          <div><span id="quantHorizonLabel">30분 방향</span><strong id="quantSignal">-</strong></div>
+          <div><span>방향 확률(상승/하락)</span><strong id="quantPredPrice">-</strong></div>
+          <div><span>예상 변동률</span><strong id="quantRet">-</strong></div>
+          <div><span>확신도</span><strong id="quantConf">-</strong></div>
+          <div><span>Win Rate (모델/기준)</span><strong id="quantWinRate">-</strong></div>
+          <div><span>정확도 (모델/기준)</span><strong id="quantRmse">-</strong></div>
         </div>
-        <p id="ultProfitTotal">누적: -</p>
-        <small id="ultProfitMeta" class="card-updated ens-param-meta">프로파일: -</small>
-        <small id="ultProfitStamp" class="panel-stamp">-</small>
+        <p id="quantMeta">설정/모델: -</p>
+        <small id="quantStamp" class="panel-stamp">-</small>
       </section>
+    </section>
+
+    <section class="duo-panels ensemble-panels polymarket-panels">
       <section class="panel ensemble-panel">
-        <h3>🛡️ 안정형 앙상블</h3>
+        <h3>🎯 Polymarket 확률 보드</h3>
         <div class="playbook-grid">
-          <div><span>실시간 결정</span><strong id="ultStableDecision">-</strong></div>
-          <div><span>현재 포지션</span><strong id="ultStablePos">-</strong></div>
-          <div><span>Live Kelly</span><strong id="ultStableKelly">-</strong></div>
-          <div><span>진입 Kelly</span><strong id="ultStableEntryKelly">-</strong></div>
-          <div><span>미실현 손익</span><strong id="ultStableUnreal">-</strong></div>
-          <div><span>직전 실현손익</span><strong id="ultStableLastPnl">-</strong></div>
-          <div><span>MDD</span><strong id="ultStableMdd">-</strong></div>
-          <div><span>매매결정 시각</span><strong id="ultStableDecisionAt">-</strong></div>
+          <div><span>이벤트</span><strong id="polyEvent">-</strong></div>
+          <div><span>모드 목표/확률</span><strong id="polyMode">-</strong></div>
+          <div><span>가중 기대가</span><strong id="polyTarget">-</strong></div>
+          <div><span>꼬리위험(상/하)</span><strong id="polyTail">-</strong></div>
+          <div><span>리딩 모멘텀(1m)</span><strong id="polyMomentum">-</strong></div>
+          <div><span>북 임밸런스</span><strong id="polyImbalance">-</strong></div>
+          <div><span>이벤트 변동성</span><strong id="polyVol">-</strong></div>
+          <div><span>신호/리스크</span><strong id="polySignal">-</strong></div>
+          <div><span>센티멘탈 게이트</span><strong id="polyGateStatus">-</strong></div>
+          <div><span>실행 결론</span><strong id="polyGateDecision">-</strong></div>
+          <div><span>충격값(d1m / z / d3m)</span><strong id="polyShock">-</strong></div>
+          <div><span>임계값(1m / z / 3m)</span><strong id="polyThreshold">-</strong></div>
+          <div><span>피크/동적TH</span><strong id="polyPeak">-</strong></div>
         </div>
-        <p id="ultStableTotal">누적: -</p>
-        <small id="ultStableMeta" class="card-updated ens-param-meta">프로파일: -</small>
-        <small id="ultStableStamp" class="panel-stamp">-</small>
+        <p id="polyMeta">시장 데이터 대기중</p>
+        <p id="polyGateReason" class="muted">게이트 사유: -</p>
+        <small id="polyStamp" class="panel-stamp">-</small>
       </section>
     </section>
 
@@ -237,7 +239,7 @@
       </article>
     </div>
   </main>
-  <script src="./app.js?v=20260415-01"></script>
+  <script src="./app.js?v=20260419-02"></script>
 </body>
 
 </html>
