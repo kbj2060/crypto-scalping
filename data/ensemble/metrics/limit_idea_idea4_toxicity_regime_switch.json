@@ -1,0 +1,167 @@
+{
+  "csv_path": "data/ensemble/backup/rl_training_2025_m7_pre_prune_20260329.csv",
+  "start": "2025-01-01 00:00:00",
+  "end": "2025-02-11 16:40:00",
+  "rows": 12000,
+  "long_ckpt": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "short_ckpt": "data/ensemble/ckpt/best_dsac_short_agents.pth",
+  "mode": "classic",
+  "metrics": {
+    "pnl_pct": -0.04856167967417502,
+    "mdd_pct": -1.3688844823367519,
+    "trades": 13,
+    "wr_pct": 30.76923076923077,
+    "long_entries": 2,
+    "short_entries": 11,
+    "avg_hold_long": 5.0,
+    "avg_hold_short": 34.81818181818182,
+    "avg_lev_long": 0.2101120442772905,
+    "avg_lev_short": 0.2988424844586003,
+    "cross_exit": 3,
+    "ambiguity_exit": 0,
+    "reduce_hits": 0,
+    "max_hold_exit": 10,
+    "trail_exit": 0,
+    "step_stop_exit": 0,
+    "trend_exit": 0,
+    "cooldown_block": 0,
+    "trend_flat_block": 45,
+    "trend_mismatch_block": 899,
+    "iso_vae_block": 5
+  },
+  "extra": {
+    "trades": [
+      {
+        "ts": "2025-01-04 04:55:00",
+        "side": "SHORT",
+        "entry_price": 3593.3874480000004,
+        "exit_price": 3590.91,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": -0.0002486252276776568,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-06 03:25:00",
+        "side": "LONG",
+        "entry_price": 3677.883507820438,
+        "exit_price": 3668.69,
+        "lev": 0.13931551575660706,
+        "hold_bars": 8,
+        "pnl_frac": -0.0005431346079056709,
+        "exit_source": "DSAC_LOGIT_EXIT:RULE"
+      },
+      {
+        "ts": "2025-01-06 05:50:00",
+        "side": "LONG",
+        "entry_price": 3692.7445568000003,
+        "exit_price": 3682.42,
+        "lev": 0.052740585058927536,
+        "hold_bars": 2,
+        "pnl_frac": -0.00022123120678940733,
+        "exit_source": "DSAC_LOGIT_EXIT:RULE"
+      },
+      {
+        "ts": "2025-01-09 20:20:00",
+        "side": "SHORT",
+        "entry_price": 3249.615157426577,
+        "exit_price": 3167.18,
+        "lev": 0.35,
+        "hold_bars": 23,
+        "pnl_frac": 0.008392207869014179,
+        "exit_source": "DSAC_LOGIT_EXIT:RULE"
+      },
+      {
+        "ts": "2025-01-11 13:55:00",
+        "side": "SHORT",
+        "entry_price": 3250.860048,
+        "exit_price": 3266.4,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": -0.002163787917792148,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-15 03:50:00",
+        "side": "SHORT",
+        "entry_price": 3222.0277416000004,
+        "exit_price": 3231.04,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": -0.0014693964845958751,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-16 04:10:00",
+        "side": "SHORT",
+        "entry_price": 3406.904265694275,
+        "exit_price": 3370.03,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": 0.003299675319170303,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-22 20:25:00",
+        "side": "SHORT",
+        "entry_price": 3282.2825616000005,
+        "exit_price": 3271.0,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": 0.0007135479694890812,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-25 05:35:00",
+        "side": "SHORT",
+        "entry_price": 3297.3137640000004,
+        "exit_price": 3300.16,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": -0.0007922683212273629,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-26 03:30:00",
+        "side": "SHORT",
+        "entry_price": 3314.8251648,
+        "exit_price": 3329.61,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": -0.002051728051189694,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-30 03:40:00",
+        "side": "SHORT",
+        "entry_price": 3097.1177496,
+        "exit_price": 3173.03,
+        "lev": 0.15814989805221558,
+        "hold_bars": 36,
+        "pnl_frac": -0.0040993240961716415,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-01-31 12:05:00",
+        "side": "SHORT",
+        "entry_price": 3235.459564922534,
+        "exit_price": 3329.01,
+        "lev": 0.11896854639053345,
+        "hold_bars": 36,
+        "pnl_frac": -0.0036078113927460187,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      },
+      {
+        "ts": "2025-02-11 16:10:00",
+        "side": "SHORT",
+        "entry_price": 2689.7051592,
+        "exit_price": 2667.73,
+        "lev": 0.35,
+        "hold_bars": 36,
+        "pnl_frac": 0.0023706509172902734,
+        "exit_source": "DSAC_ONLY_MAX_HOLD"
+      }
+    ],
+    "final_balance": 0.9995143832032582
+  }
+}

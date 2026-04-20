@@ -1,0 +1,61 @@
+{
+  "rows_total": 16700,
+  "rows_train": 10020,
+  "rows_val": 3340,
+  "rows_test": 3340,
+  "replay_pushed": 10019,
+  "before_val": {
+    "trades": 2895,
+    "pnl_sum": -0.773633832913732,
+    "pnl_mean": -0.0002316268960819557,
+    "win_rate": 0.38652694610778443,
+    "final_equity": 0.4499290009984298,
+    "avg_abs_action": 0.41525813937187195
+  },
+  "after_val": {
+    "trades": 2311,
+    "pnl_sum": -1.8166533082632987,
+    "pnl_mean": -0.0005439081761267362,
+    "win_rate": 0.274251497005988,
+    "final_equity": 0.15896748774350733,
+    "avg_abs_action": 0.23609833419322968
+  },
+  "before_test": {
+    "trades": 2943,
+    "pnl_sum": -3.3974534438460404,
+    "pnl_mean": -0.001017201629894024,
+    "win_rate": 0.3029940119760479,
+    "final_equity": 0.032968667633633784,
+    "avg_abs_action": 0.41483959555625916
+  },
+  "after_test": {
+    "trades": 2261,
+    "pnl_sum": -2.1082233318166574,
+    "pnl_mean": -0.0006312045903642687,
+    "win_rate": 0.24311377245508983,
+    "final_equity": 0.12016242870974854,
+    "avg_abs_action": 0.21969303488731384
+  },
+  "train_log_tail": [
+    {
+      "epoch": 6,
+      "critic_loss": 0.002854485040734289,
+      "actor_loss": 0.2510352851357311,
+      "alpha": 0.02955618255655281
+    },
+    {
+      "epoch": 7,
+      "critic_loss": 0.002337470463317004,
+      "actor_loss": 0.22255250322632492,
+      "alpha": 0.029477234720252453
+    },
+    {
+      "epoch": 8,
+      "critic_loss": 0.001937005635772948,
+      "actor_loss": 0.19431033539585768,
+      "alpha": 0.029398607544135303
+    }
+  ],
+  "out_ckpt": "data/ensemble/ckpt/fine_tuned_dsac_agents_polymarket_maxdata_v2.pth",
+  "out_report": "data/ensemble/metrics/fine_tuned_dsac_polymarket_maxdata_v2_report.json"
+}

@@ -589,13 +589,31 @@ def _simulate_dual(
             prev_hold = meta_router.hold_count
             prev_entry = meta_router.entry_price
             prev_lev = meta_router.current_leverage
+            _nif = float(last_row.get("nif_whale", last_row.get("sig_whale", 0.0)) or 0.0)
+            _signal_bias = 1.0 if _nif > 0.0 else (-1.0 if _nif < 0.0 else 0.0)
+            _tox = float(last_row.get("shadow_toxicity_score", 0.0) or 0.0)
+            _entry_ctx = {
+                "signal_bias": _signal_bias,
+                "nif_whale": _nif,
+                "sig_whale": float(last_row.get("sig_whale", 0.0) or 0.0),
+                "smart_money_flow": float(last_row.get("smart_money_flow", 0.0) or 0.0),
+                "toxicity": _tox,
+                "jump_z": float(last_row.get("jump_z", 0.0) or 0.0),
+                "garch_vol_z": float(last_row.get("garch_vol_z", 0.0) or 0.0),
+                "evt_excess_z": float(last_row.get("evt_excess_z", 0.0) or 0.0),
+                "regime_chop": float(last_row.get("regime_chop", 0.0) or 0.0),
+                "obi": float(last_row.get("cvp_volume_imbalance", 0.0) or 0.0),
+                "vwap_gap": float(last_row.get("wpad", 0.0) or 0.0),
+                "liq_prox": float(last_row.get("oi_change_rate", 0.0) or 0.0),
+                "playbook_action": int(fa if meta_router.pos is None else 0),
+            }
 
             if prev_pos is not None:
                 eq_curve.append(balance * (1.0 + meta_router._net_pnl_frac(current_price)))
             else:
                 eq_curve.append(balance)
 
-            meta_router._update_pos(fa, next_price, kelly, trend_signal)
+            meta_router._update_pos(fa, next_price, kelly, trend_signal, _entry_ctx)
 
             if prev_pos is None and meta_router.pos == "LONG":
                 long_entries += 1

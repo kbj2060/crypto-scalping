@@ -215,6 +215,19 @@ function positionOpenedAtText(track) {
   return fmtTs((track || {}).opened_at || (track || {}).updated_at || "");
 }
 
+function dsacDecisionAtText(state) {
+  const pos = String(((state || {}).position || {}).current || "NONE").toUpperCase();
+  if (pos !== "LONG" && pos !== "SHORT") return "-";
+  const openedAt = (state || {}).position?.opened_at;
+  if (openedAt) return fmtTs(openedAt);
+  const cyc = (state || {}).cycle_timestamp_kst;
+  const holdBars = Number(((state || {}).position || {}).hold_bars || 0);
+  const dt = new Date(cyc);
+  if (Number.isNaN(dt.getTime())) return "-";
+  dt.setMinutes(dt.getMinutes() - Math.max(0, holdBars) * 5);
+  return fmtTs(dt.toISOString());
+}
+
 function initPlaybookModal() {
   const modal = el("pbModal");
   if (!modal) return;
@@ -1246,20 +1259,20 @@ function render(state) {
   });
 
   const final = actionLabel(Number(sig.final_action || 0));
-  const rl = actionLabel(Number(sig.rl_action || 0));
   const posNow = String(pos.current || "NONE").toUpperCase();
   const reg = String(state.regime || "-").toUpperCase();
   el("dsacDecision").textContent = final.text;
   el("dsacDecision").className = final.text === "LONG" ? "good" : final.text === "SHORT" ? "bad" : "warn";
-  el("dsacRl").textContent = rl.text;
-  el("dsacRl").className = rl.text === "LONG" ? "good" : rl.text === "SHORT" ? "bad" : "warn";
-  el("dsacPricePos").textContent = `${fmtNum(state.price, 2)} / ${posNow}`;
-  el("dsacPricePos").className = posNow === "LONG" ? "good" : posNow === "SHORT" ? "bad" : "muted";
+  el("dsacRl").textContent = `${posNow} / ${fmtNum(sig.unified_kelly || 0, 3)}`;
+  el("dsacRl").className = posNow === "LONG" ? "good" : posNow === "SHORT" ? "bad" : "muted";
+  el("dsacEntry").textContent = Number(pos.entry_price || 0) > 0 ? fmtNum(pos.entry_price, 2) : "-";
+  el("dsacEntry").className = "muted";
   el("dsacRegime").textContent = reg;
   el("dsacRegime").className = reg.includes("BULL") ? "good" : reg.includes("BEAR") ? "bad" : "warn";
-  el("dsacKelly").textContent = `×${fmtNum(sig.unified_kelly || 0, 3)}`;
   el("dsacUnreal").textContent = fmtPct(pos.unrealized_pnl_pct || 0);
   el("dsacUnreal").className = riskClass(pos.unrealized_pnl_pct || 0);
+  el("dsacDecisionAt").textContent = dsacDecisionAtText(state);
+  el("dsacDecisionAt").className = "muted";
   el("dsacPnlMdd").textContent = `${fmtPct(perf.pnl_24h || 0)} / -${fmtNum(maxDrawdown, 2)}%`;
   el("dsacPnlMdd").className = riskClass(perf.pnl_24h || 0);
   el("dsacSource").textContent = String(sig.source || "-");
@@ -1275,6 +1288,12 @@ function render(state) {
   if (nowEl) nowEl.textContent = fmtNowClock();
   const topClockEl = el("topClock");
   if (topClockEl) topClockEl.textContent = fmtNowClock();
+  const topPriceEl = el("topPrice");
+  if (topPriceEl) {
+    topPriceEl.textContent = fmtNum(state.price, 2);
+    const pnlBasis = Number(pos.unrealized_pnl_pct ?? perf.pnl_24h ?? 0);
+    topPriceEl.className = `top-clock top-price ${pnlBasis > 0 ? "good" : pnlBasis < 0 ? "bad" : "muted"}`;
+  }
   const agents = state.agents || {};
   const agLong = agents.long || {};
   const agShort = agents.short || {};
@@ -1288,9 +1307,8 @@ function render(state) {
 
   el("ensBalDecision").textContent = agDecisionLong.text;
   el("ensBalDecision").className = agDecisionLong.text === "LONG" ? "good" : agDecisionLong.text === "SHORT" ? "bad" : "muted";
-  el("ensBalPos").textContent = agPosLong;
+  el("ensBalPos").textContent = `${agPosLong} / ${fmtNum(agLongTrack.entry_kelly ?? 0, 3)}`;
   el("ensBalPos").className = agPosLong === "LONG" ? "good" : agPosLong === "SHORT" ? "bad" : "muted";
-  el("ensBalVotes").textContent = fmtNum(agLongTrack.entry_kelly ?? 0, 3);
   if (hasOwn(agLongTrack, "unrealized_pnl_pct")) {
     el("ensBalWinRate").textContent = fmtPct(agLongTrack.unrealized_pnl_pct ?? 0);
     el("ensBalWinRate").className = riskClass(agLongTrack.unrealized_pnl_pct || 0);
@@ -1298,10 +1316,10 @@ function render(state) {
     el("ensBalWinRate").textContent = "-";
     el("ensBalWinRate").className = "muted";
   }
-  el("ensBalLastPnl").textContent = fmtPct(agLongTrack.last_pnl_pct ?? 0);
-  el("ensBalLastPnl").className = riskClass(agLongTrack.last_pnl_pct || 0);
   el("ensBalMdd").textContent = `-${fmtNum(agLongTrack.mdd_pct ?? 0, 2)}%`;
   el("ensBalMdd").className = Number(agLongTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
+  el("ensBalEntry").textContent = Number(agLongTrack.entry_price || 0) > 0 ? fmtNum(agLongTrack.entry_price, 2) : "-";
+  el("ensBalEntry").className = "muted";
   el("ensBalDecisionAt").textContent = positionOpenedAtText(agLongTrack);
   el("ensBalDecisionAt").className = "muted";
   el("ensBalTotal").textContent = `누적: ${fmtPct(agLongTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agLongTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agLongTrack.trades ?? 0, 0)}회`;
@@ -1311,9 +1329,8 @@ function render(state) {
 
   el("ensLowDecision").textContent = agDecisionShort.text;
   el("ensLowDecision").className = agDecisionShort.text === "LONG" ? "good" : agDecisionShort.text === "SHORT" ? "bad" : "muted";
-  el("ensLowPos").textContent = agPosShort;
+  el("ensLowPos").textContent = `${agPosShort} / ${fmtNum(agShortTrack.entry_kelly ?? 0, 3)}`;
   el("ensLowPos").className = agPosShort === "LONG" ? "good" : agPosShort === "SHORT" ? "bad" : "muted";
-  el("ensLowVotes").textContent = fmtNum(agShortTrack.entry_kelly ?? 0, 3);
   if (hasOwn(agShortTrack, "unrealized_pnl_pct")) {
     el("ensLowWinRate").textContent = fmtPct(agShortTrack.unrealized_pnl_pct ?? 0);
     el("ensLowWinRate").className = riskClass(agShortTrack.unrealized_pnl_pct || 0);
@@ -1321,10 +1338,10 @@ function render(state) {
     el("ensLowWinRate").textContent = "-";
     el("ensLowWinRate").className = "muted";
   }
-  el("ensLowLastPnl").textContent = fmtPct(agShortTrack.last_pnl_pct ?? 0);
-  el("ensLowLastPnl").className = riskClass(agShortTrack.last_pnl_pct || 0);
   el("ensLowMdd").textContent = `-${fmtNum(agShortTrack.mdd_pct ?? 0, 2)}%`;
   el("ensLowMdd").className = Number(agShortTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
+  el("ensLowEntry").textContent = Number(agShortTrack.entry_price || 0) > 0 ? fmtNum(agShortTrack.entry_price, 2) : "-";
+  el("ensLowEntry").className = "muted";
   el("ensLowDecisionAt").textContent = positionOpenedAtText(agShortTrack);
   el("ensLowDecisionAt").className = "muted";
   el("ensLowTotal").textContent = `누적: ${fmtPct(agShortTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agShortTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agShortTrack.trades ?? 0, 0)}회`;
@@ -1362,29 +1379,20 @@ function render(state) {
   el("quantStamp").textContent = fmtTs(quant.updated_at || state.updated_at || state.cycle_timestamp_kst);
 
   const poly = state.polymarket || {};
-  const polyModeLabelRaw = String(poly.mode_label || "-");
-  const polyModeLabel = polyModeLabelRaw.length > 38 ? `${polyModeLabelRaw.slice(0, 38)}...` : polyModeLabelRaw;
-  const polyModeProb = Number(poly.mode_prob || 0) * 100;
   const polyTailUp = Number(poly.tail_up_prob || 0) * 100;
   const polyTailDn = Number(poly.tail_down_prob || 0) * 100;
-  const polyMom = Number(poly.prob_momentum_1m || 0) * 100;
   const polyImb = Number(poly.book_imbalance || 0) * 100;
   const polyVol = Number(poly.event_volatility || 0) * 100;
   const polySignal = String(poly.signal || "HOLD").toUpperCase();
   const polyRisk = String(poly.risk_state || "NORMAL").toUpperCase();
   const polyStatus = String(poly.status || "IDLE").toUpperCase();
-  const polyError = String(poly.error || "");
   const polySlug = String(poly.slug || "-");
   const polyTarget = Number(poly.weighted_target || state.price || 0);
   const srcText = String(sig.source || "");
   const shockD1 = Number(hasOwn(poly, "shock_delta_1m") ? poly.shock_delta_1m : poly.prob_momentum_1m || 0) * 100;
   const shockZ = Number(poly.shock_z_1m || 0);
   const shockD3 = Number(poly.shock_delta_3m || 0) * 100;
-  const shockDynTh = Number(poly.shock_dyn_th_1m || 0) * 100;
   const gateTrigger = Boolean(poly.shock_trigger);
-  const gatePeak = Boolean(poly.shock_is_peak);
-  const gatePeakAbs = Number(poly.shock_peak_abs_1m || 0) * 100;
-  const gateReason = String(poly.shock_trigger_reason || "");
   const gateThD1 = Number((state.config && state.config.polymarket_shock_1m_th) ?? 0.04) * 100;
   const gateThZ = Number((state.config && state.config.polymarket_shock_z_th) ?? 4.0);
   const gateThD3 = Number((state.config && state.config.polymarket_shock_cum3_th) ?? 0.025) * 100;
@@ -1395,34 +1403,23 @@ function render(state) {
 
   el("polyEvent").textContent = polySlug;
   el("polyEvent").className = polyStatus === "LIVE" ? "good" : polyStatus === "ERROR" ? "bad" : "muted";
-  el("polyMode").textContent = `${polyModeLabel} / ${fmtNum(polyModeProb, 1)}%`;
-  el("polyMode").className = polyModeProb >= 65 ? "good" : polyModeProb >= 50 ? "warn" : "muted";
   el("polyTarget").textContent = fmtNum(polyTarget, 2);
   el("polyTarget").className = riskClass(((polyTarget - Number(state.price || 0)) / Math.max(Math.abs(Number(state.price || 0)), 1e-8)) * 100);
   el("polyTail").textContent = `${fmtNum(polyTailUp, 1)}% / ${fmtNum(polyTailDn, 1)}%`;
   el("polyTail").className = (polyTailUp + polyTailDn) >= 35 ? "warn" : "muted";
-  el("polyMomentum").textContent = `${polyMom >= 0 ? "+" : ""}${fmtNum(polyMom, 2)}%p`;
-  el("polyMomentum").className = riskClass(polyMom);
   el("polyImbalance").textContent = `${polyImb >= 0 ? "+" : ""}${fmtNum(polyImb, 1)}%`;
   el("polyImbalance").className = riskClass(polyImb);
   el("polyVol").textContent = `${fmtNum(polyVol, 2)}%`;
   el("polyVol").className = polyVol >= 12 ? "bad" : polyVol >= 7 ? "warn" : "good";
   el("polySignal").textContent = `${polySignal} / ${polyRisk}`;
   el("polySignal").className = polySignal === "LONG" ? "good" : polySignal === "SHORT" ? "bad" : "muted";
-  el("polyGateStatus").textContent = gateTrigger ? "TRIGGERED" : "IDLE";
-  el("polyGateStatus").className = gateTrigger ? "bad" : "muted";
   el("polyGateDecision").textContent = gateDecision;
   el("polyGateDecision").className = gateDecision === "EXIT" ? "bad" : gateDecision === "HOLD" ? "good" : gateDecision === "COOLDOWN" ? "warn" : "muted";
   el("polyShock").textContent = `${shockD1 >= 0 ? "+" : ""}${fmtNum(shockD1, 2)}%p / ${shockZ >= 0 ? "+" : ""}${fmtNum(shockZ, 2)} / ${shockD3 >= 0 ? "+" : ""}${fmtNum(shockD3, 2)}%p`;
   el("polyShock").className = gateTrigger ? "bad" : riskClass(shockD1);
   el("polyThreshold").textContent = `${fmtNum(gateThD1, 2)}%p / ${fmtNum(gateThZ, 2)} / ${fmtNum(gateThD3, 2)}%p`;
   el("polyThreshold").className = "muted";
-  el("polyPeak").textContent = `${gatePeak ? "PEAK" : "NON-PEAK"} / dyn ${fmtNum(shockDynTh, 2)}%p / win-max ${fmtNum(gatePeakAbs, 2)}%p`;
-  el("polyPeak").className = gatePeak ? "warn" : "muted";
-  const errTxt = polyError ? ` | err=${polyError}` : "";
-  el("polyMeta").textContent = `status=${polyStatus} | 상관(${fmtNum(Number(poly.prob_price_corr || 0), 2)}) | book bid/ask=${fmtNum(Number(poly.book_bid_notional || 0), 1)}/${fmtNum(Number(poly.book_ask_notional || 0), 1)} | kelly×${fmtNum(Number(poly.recommended_kelly_mult ?? 1), 2)} | markets=${fmtNum(Number(poly.priced_count || 0), 0)}${errTxt}`;
-  el("polyGateReason").textContent = `게이트 사유: ${gateReason || "-"}`;
-  el("polyGateReason").className = gateTrigger ? "bad" : "muted";
+  el("polyMeta").textContent = "LIVE";
   el("polyStamp").textContent = fmtTs(poly.updated_at || state.shadow_updated_at || state.updated_at || state.cycle_timestamp_kst);
 
   const obiNow = obiLabel(micro.obi);

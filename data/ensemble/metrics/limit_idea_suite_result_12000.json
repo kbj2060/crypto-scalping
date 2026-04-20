@@ -1,0 +1,115 @@
+{
+  "csv_path": "data/ensemble/backup/rl_training_2025_m7_pre_prune_20260329.csv",
+  "max_rows": 12000,
+  "ranking_metric": "score = pnl_pct - 0.5*abs(mdd_pct)",
+  "rows": [
+    {
+      "name": "baseline_market_like",
+      "pnl_pct": 14.831490914149503,
+      "mdd_pct": -3.2298389828739005,
+      "trades": 242,
+      "wr_pct": 40.082644628099175,
+      "score": 13.216571422712553,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_baseline_market_like.json"
+    },
+    {
+      "name": "idea7_vwap_pegged_proxy",
+      "pnl_pct": 0.02126603064607213,
+      "mdd_pct": -1.3645120381567732,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.6609899884323145,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea7_vwap_pegged_proxy.json"
+    },
+    {
+      "name": "idea9_combo_safe",
+      "pnl_pct": 0.018691993372210725,
+      "mdd_pct": -1.36425365233801,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.6634348327967943,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea9_combo_safe.json"
+    },
+    {
+      "name": "idea10_full_stack",
+      "pnl_pct": 0.015618899449165724,
+      "mdd_pct": -1.3659577444618431,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.6673599727817559,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea10_full_stack.json"
+    },
+    {
+      "name": "idea3_hawkes_tail_proxy",
+      "pnl_pct": -0.02701559180159352,
+      "mdd_pct": -1.3640599541687282,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.7090455688859576,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea3_hawkes_tail_proxy.json"
+    },
+    {
+      "name": "idea2_queue_collapse_replace",
+      "pnl_pct": -0.02702494345068196,
+      "mdd_pct": -1.3640597119691011,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.7090547994352325,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea2_queue_collapse_replace.json"
+    },
+    {
+      "name": "idea6_vol_adaptive_ttl",
+      "pnl_pct": -0.02702494345068196,
+      "mdd_pct": -1.3640597119691011,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.7090547994352325,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea6_vol_adaptive_ttl.json"
+    },
+    {
+      "name": "idea5_spoof_wall_proxy",
+      "pnl_pct": -0.02872141889783686,
+      "mdd_pct": -1.3639547476997138,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.7106987927476938,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea5_spoof_wall_proxy.json"
+    },
+    {
+      "name": "idea8_liq_magnet_proxy",
+      "pnl_pct": -0.029805126877358035,
+      "mdd_pct": -1.3639547476996916,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.7117825007272038,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea8_liq_magnet_proxy.json"
+    },
+    {
+      "name": "idea4_toxicity_regime_switch",
+      "pnl_pct": -0.04856167967417502,
+      "mdd_pct": -1.3688844823367519,
+      "trades": 13,
+      "wr_pct": 30.76923076923077,
+      "score": -0.733003920842551,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea4_toxicity_regime_switch.json"
+    },
+    {
+      "name": "idea1_asym_obi",
+      "pnl_pct": -0.8812905430671036,
+      "mdd_pct": -2.65269488078278,
+      "trades": 78,
+      "wr_pct": 19.23076923076923,
+      "score": -2.2076379834584934,
+      "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_idea1_asym_obi.json"
+    }
+  ],
+  "best": {
+    "name": "baseline_market_like",
+    "pnl_pct": 14.831490914149503,
+    "mdd_pct": -3.2298389828739005,
+    "trades": 242,
+    "wr_pct": 40.082644628099175,
+    "score": 13.216571422712553,
+    "out_json": "/home/llewyn/crypto-scalping/data/ensemble/metrics/limit_idea_baseline_market_like.json"
+  }
+}

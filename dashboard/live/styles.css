@@ -31,7 +31,7 @@ body {
 .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--card-gap); }
 .topbar {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
   position: relative;
@@ -64,6 +64,19 @@ body {
 }
 .top-session {
   justify-self: end;
+}
+.top-price {
+  justify-self: center;
+  text-align: center;
+}
+.top-price.good {
+  text-shadow: 0 0 4px rgba(47, 208, 119, 0.28);
+}
+.top-price.bad {
+  text-shadow: 0 0 4px rgba(218, 79, 79, 0.28);
+}
+.top-price.muted {
+  text-shadow: none;
 }
 h1 { margin: 0; font-size: 24px; }
 #stamp { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
@@ -865,13 +878,12 @@ svg {
 
 @media (max-width: 960px) {
   .topbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr auto 1fr;
     gap: 8px;
-    justify-items: center;
   }
-  .top-clock { justify-self: center; }
+  .top-clock { justify-self: start; }
   .top-session {
-    justify-self: center;
+    justify-self: end;
   }
   .top-now {
     padding: 10px 16px 11px;

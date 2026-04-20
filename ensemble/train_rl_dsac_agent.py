@@ -1497,6 +1497,8 @@ def train(
     min_val_trades_for_best: int = 80,
     val_side_bias_penalty: float = 80.0,
     config_json_path: str = "data/ensemble/ckpt/dsac_train_config_latest.json",
+    checkpoint_path: str = "data/ensemble/ckpt/dsac_checkpoint.pth",
+    best_path: str = "data/ensemble/ckpt/best_dsac_agents.pth",
     hmm_cache_path: str = "data/ensemble/ckpt/hmm_init_cache_dsac.npz",
     hmm_force_refit: bool = False,
     device: str = "auto",
@@ -1701,8 +1703,8 @@ def train(
     )
 
     os.makedirs("data/ensemble/ckpt", exist_ok=True)
-    ckpt_path = "data/ensemble/ckpt/dsac_checkpoint.pth"
-    best_path = "data/ensemble/ckpt/best_dsac_agents.pth"
+    ckpt_path = str(checkpoint_path)
+    best_path = str(best_path)
 
     run_cfg = {
         "saved_at": datetime.now().isoformat(),
@@ -2315,6 +2317,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hmm-cache-path", default="data/ensemble/ckpt/hmm_init_cache_dsac.npz")
     p.add_argument("--hmm-force-refit", action="store_true", default=False)
     p.add_argument("--config-json-path", default="data/ensemble/ckpt/dsac_train_config_latest.json")
+    p.add_argument("--checkpoint-path", default="data/ensemble/ckpt/dsac_checkpoint.pth")
+    p.add_argument("--best-path", default="data/ensemble/ckpt/best_dsac_agents.pth")
     p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return p.parse_args()
 
@@ -2376,5 +2380,7 @@ if __name__ == "__main__":
         hmm_force_refit=args.hmm_force_refit,
         val_side_bias_penalty=args.val_side_bias_penalty,
         config_json_path=args.config_json_path,
+        checkpoint_path=args.checkpoint_path,
+        best_path=args.best_path,
         device=args.device,
     )

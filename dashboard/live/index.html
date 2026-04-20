@@ -12,6 +12,7 @@
   <main class="app">
     <header class="top topbar">
       <div id="topClock" class="top-clock">-</div>
+      <div id="topPrice" class="top-clock top-price">-</div>
       <div id="topSession" class="ops-session top-session">-</div>
     </header>
 
@@ -20,11 +21,11 @@
         <h3>🧠 DSAC</h3>
         <div class="playbook-grid dsac-grid">
           <div><span>결정</span><strong id="dsacDecision">-</strong></div>
-          <div><span>RL</span><strong id="dsacRl">-</strong></div>
-          <div><span>가격 / 포지션</span><strong id="dsacPricePos">-</strong></div>
+          <div><span>현재 포지션/Kelly</span><strong id="dsacRl">-</strong></div>
+          <div><span>진입가</span><strong id="dsacEntry">-</strong></div>
           <div><span>레짐</span><strong id="dsacRegime">-</strong></div>
-          <div><span>Kelly</span><strong id="dsacKelly">-</strong></div>
-          <div><span>Unrealized</span><strong id="dsacUnreal">-</strong></div>
+          <div><span>미실현손익</span><strong id="dsacUnreal">-</strong></div>
+          <div><span>매매결정 시각</span><strong id="dsacDecisionAt">-</strong></div>
           <div><span>24h / MDD</span><strong id="dsacPnlMdd">-</strong></div>
           <div><span>소스</span><strong id="dsacSource">-</strong></div>
         </div>
@@ -37,11 +38,10 @@
         <h3>🟢 롱 에이전트</h3>
         <div class="playbook-grid">
           <div><span>실시간 결정</span><strong id="ensBalDecision">-</strong></div>
-          <div><span>현재 포지션</span><strong id="ensBalPos">-</strong></div>
-          <div><span>진입 Kelly</span><strong id="ensBalVotes">-</strong></div>
+          <div><span>현재 포지션/Kelly</span><strong id="ensBalPos">-</strong></div>
           <div><span>미실현 손익</span><strong id="ensBalWinRate">-</strong></div>
-          <div><span>직전 실현손익</span><strong id="ensBalLastPnl">-</strong></div>
           <div><span>MDD</span><strong id="ensBalMdd">-</strong></div>
+          <div><span>진입가</span><strong id="ensBalEntry">-</strong></div>
           <div><span>매매결정 시각</span><strong id="ensBalDecisionAt">-</strong></div>
         </div>
         <p id="ensBalTotal">누적: -</p>
@@ -52,11 +52,10 @@
         <h3>🔴 숏 에이전트</h3>
         <div class="playbook-grid">
           <div><span>실시간 결정</span><strong id="ensLowDecision">-</strong></div>
-          <div><span>현재 포지션</span><strong id="ensLowPos">-</strong></div>
-          <div><span>진입 Kelly</span><strong id="ensLowVotes">-</strong></div>
+          <div><span>현재 포지션/Kelly</span><strong id="ensLowPos">-</strong></div>
           <div><span>미실현 손익</span><strong id="ensLowWinRate">-</strong></div>
-          <div><span>직전 실현손익</span><strong id="ensLowLastPnl">-</strong></div>
           <div><span>MDD</span><strong id="ensLowMdd">-</strong></div>
+          <div><span>진입가</span><strong id="ensLowEntry">-</strong></div>
           <div><span>매매결정 시각</span><strong id="ensLowDecisionAt">-</strong></div>
         </div>
         <p id="ensLowTotal">누적: -</p>
@@ -86,21 +85,16 @@
         <h3>🎯 Polymarket 확률 보드</h3>
         <div class="playbook-grid">
           <div><span>이벤트</span><strong id="polyEvent">-</strong></div>
-          <div><span>모드 목표/확률</span><strong id="polyMode">-</strong></div>
           <div><span>가중 기대가</span><strong id="polyTarget">-</strong></div>
           <div><span>꼬리위험(상/하)</span><strong id="polyTail">-</strong></div>
-          <div><span>리딩 모멘텀(1m)</span><strong id="polyMomentum">-</strong></div>
           <div><span>북 임밸런스</span><strong id="polyImbalance">-</strong></div>
           <div><span>이벤트 변동성</span><strong id="polyVol">-</strong></div>
           <div><span>신호/리스크</span><strong id="polySignal">-</strong></div>
-          <div><span>센티멘탈 게이트</span><strong id="polyGateStatus">-</strong></div>
           <div><span>실행 결론</span><strong id="polyGateDecision">-</strong></div>
           <div><span>충격값(d1m / z / d3m)</span><strong id="polyShock">-</strong></div>
           <div><span>임계값(1m / z / 3m)</span><strong id="polyThreshold">-</strong></div>
-          <div><span>피크/동적TH</span><strong id="polyPeak">-</strong></div>
         </div>
-        <p id="polyMeta">시장 데이터 대기중</p>
-        <p id="polyGateReason" class="muted">게이트 사유: -</p>
+        <p id="polyMeta">LIVE</p>
         <small id="polyStamp" class="panel-stamp">-</small>
       </section>
     </section>

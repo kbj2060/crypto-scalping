@@ -71,9 +71,9 @@ def _fetch_polymarket_features(slug: str, tz: str, fidelity: int = 1) -> pd.Data
         event = {}
     markets = list((event or {}).get("markets", []) or [])
     if not markets:
-        return pd.DataFrame(columns=["ts", "mode_prob", "weighted_target", "delta_1m"])
+        return pd.DataFrame(columns=["ts", "mode_prob", "mode_label", "weighted_target", "delta_1m"])
 
-    series_by_market: list[tuple[float, pd.Series]] = []
+    series_by_market: list[tuple[float, str, pd.Series]] = []
     for m in markets:
         mm = dict(m or {})
         question = str(mm.get("question", mm.get("title", mm.get("name", ""))) or "")
@@ -116,18 +116,20 @@ def _fetch_polymarket_features(slug: str, tz: str, fidelity: int = 1) -> pd.Data
         if not vals:
             continue
         s = pd.Series({t: p for t, p in vals}, dtype=float).sort_index()
-        series_by_market.append((float(strike), s))
+        series_by_market.append((float(strike), question, s))
 
     if not series_by_market:
-        return pd.DataFrame(columns=["ts", "mode_prob", "weighted_target", "delta_1m"])
+        return pd.DataFrame(columns=["ts", "mode_prob", "mode_label", "weighted_target", "delta_1m"])
 
-    idx = pd.Index(sorted(set().union(*[set(s.index) for _, s in series_by_market])))
+    idx = pd.Index(sorted(set().union(*[set(s.index) for _, _, s in series_by_market])))
     probs = pd.DataFrame(index=idx)
     strikes = []
-    for i, (strike, s) in enumerate(series_by_market):
+    labels = []
+    for i, (strike, label, s) in enumerate(series_by_market):
         cname = f"m{i}"
         probs[cname] = s.reindex(idx).ffill()
         strikes.append(float(strike))
+        labels.append(label)
     pvals = probs.to_numpy(dtype=float)
     strike_arr = np.array(strikes, dtype=float)
     row_sum = np.nansum(pvals, axis=1)
@@ -135,14 +137,16 @@ def _fetch_polymarket_features(slug: str, tz: str, fidelity: int = 1) -> pd.Data
     w = pvals / norm[:, None]
     weighted_target = np.nansum(w * strike_arr[None, :], axis=1)
     mode_prob = np.nanmax(pvals, axis=1)
-    out = pd.DataFrame({"ts": idx, "mode_prob": mode_prob, "weighted_target": weighted_target})
+    mode_idx = np.nanargmax(pvals, axis=1)
+    mode_label = [labels[int(i)] for i in mode_idx]
+    out = pd.DataFrame({"ts": idx, "mode_prob": mode_prob, "mode_label": mode_label, "weighted_target": weighted_target})
     out = out.dropna(subset=["mode_prob", "weighted_target"]).sort_values("ts").reset_index(drop=True)
     # 1분 변화량(%p): mode_prob(t) - mode_prob(t-1m)
     out = out.set_index("ts")
     out["mode_prob_1m_prev"] = out["mode_prob"].shift(1)
     out["delta_1m"] = out["mode_prob"] - out["mode_prob_1m_prev"]
     out = out.dropna(subset=["delta_1m"]).reset_index()
-    return out[["ts", "mode_prob", "weighted_target", "delta_1m"]]
+    return out[["ts", "mode_prob", "mode_label", "weighted_target", "delta_1m"]]
 
 
 def _fetch_binance_1m(start_utc: pd.Timestamp, end_utc: pd.Timestamp) -> pd.DataFrame:
@@ -285,6 +289,8 @@ def main():
     ap.add_argument("--shock-th", type=float, default=0.03, help="absolute 1m mode_prob change threshold, e.g. 0.03=3%%p")
     ap.add_argument("--fee", type=float, default=0.0005)
     ap.add_argument("--slip", type=float, default=0.0002)
+    ap.add_argument("--start-date", default="", help="optional start date in YYYY-MM-DD (local tz)")
+    ap.add_argument("--end-date", default="", help="optional end date in YYYY-MM-DD (local tz)")
     ap.add_argument("--print-events", action="store_true", help="Print all triggered shock events and decisions.")
     args = ap.parse_args()
 
@@ -298,12 +304,20 @@ def main():
         return
 
     now_local = pd.Timestamp.now(tz=args.tz)
-    d0 = (now_local - pd.Timedelta(days=1)).date()
-    d1 = now_local.date()
-    trades = [t for t in trades if t.close_ts.tz_convert(args.tz).date() in {d0, d1}]
-    if len(trades) == 0:
-        print("No trades in yesterday/today window.")
-        return
+    if args.start_date and args.end_date:
+        d0 = pd.Timestamp(args.start_date, tz=args.tz).date()
+        d1 = pd.Timestamp(args.end_date, tz=args.tz).date()
+        trades = [t for t in trades if d0 <= t.close_ts.tz_convert(args.tz).date() <= d1]
+        if len(trades) == 0:
+            print(f"No trades in {d0}~{d1} window.")
+            return
+    else:
+        d0 = (now_local - pd.Timedelta(days=1)).date()
+        d1 = now_local.date()
+        trades = [t for t in trades if t.close_ts.tz_convert(args.tz).date() in {d0, d1}]
+        if len(trades) == 0:
+            print("No trades in yesterday/today window.")
+            return
 
     tmin = min(t.open_ts for t in trades) - pd.Timedelta(minutes=5)
     tmax = max(t.close_ts for t in trades) + pd.Timedelta(minutes=5)
@@ -338,10 +352,12 @@ def main():
                             "ts": row["ts"],
                             "side": tr.side,
                             "entry_price": tr.open_price,
+                            "mode_label": str(row.get("mode_label", "")),
                             "target": tgt,
                             "delta_1m_pctp": float(row["delta_1m"]) * 100.0,
                             "trade_open_ts": tr.open_ts,
                             "trade_close_ts": tr.close_ts,
+                            "reason": "favorable_target_vs_entry",
                         }
                     )
                     continue
@@ -357,12 +373,14 @@ def main():
                             "ts": exit_ts,
                             "side": tr.side,
                             "entry_price": tr.open_price,
+                            "mode_label": str(row.get("mode_label", "")),
                             "target": tgt,
                             "delta_1m_pctp": float(row["delta_1m"]) * 100.0,
                             "exit_price": exit_px,
                             "trade_open_ts": tr.open_ts,
                             "trade_close_ts": tr.close_ts,
                             "new_trade_pnl_pct": float(new_pct),
+                            "reason": "unfavorable_target_vs_entry",
                         }
                     )
                 break
@@ -389,8 +407,9 @@ def main():
                 close_kst = pd.Timestamp(ev["trade_close_ts"]).tz_convert(args.tz).strftime("%Y-%m-%d %H:%M:%S")
                 msg = (
                     f"{ts_kst} | {ev['decision']:<4} | side={ev['side']:<5} "
+                    f"| market={ev.get('mode_label','-')} "
                     f"| d1m={ev['delta_1m_pctp']:+.2f}%p | entry={ev['entry_price']:.2f} | target={ev['target']:.2f} "
-                    f"| trade=[{open_kst} -> {close_kst}]"
+                    f"| reason={ev.get('reason','')} | trade=[{open_kst} -> {close_kst}]"
                 )
                 if ev["decision"] == "EXIT":
                     msg += f" | exit_px={ev['exit_price']:.2f} | new_pnl={ev['new_trade_pnl_pct']:+.3f}%"

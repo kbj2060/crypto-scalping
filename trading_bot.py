@@ -16,8 +16,6 @@ import warnings
 from datetime import datetime, timedelta
 from collections import deque
 from dotenv import load_dotenv
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 load_dotenv()
 
@@ -90,12 +88,26 @@ from ensemble.train_rl_agent import OnlineHMMDetector
 from microstructure_scanner import MicrostructureScanner
 from tail_risk_interceptor import TailRiskInterceptor
 from playbook_router import PlaybookRouter
+from polymarket_engine import (
+    append_polymarket_snapshot_to_duckdb,
+    get_polymarket_snapshot_cached,
+    polymarket_exit_guard,
+    polymarket_public_view,
+)
 
 # Long/Short specialist 임포트 제거 — Primary DSAC 단독 운용
 from ensemble.train_rl_dsac_agent import (
     DSAC_STATE_DIM as BASE_DSAC_STATE_DIM,
     GaussianActor as BaseDSACGaussianActor,
     DSACRouter as BaseDSACRouter,
+)
+from ensemble.train_rl_dsac_long_agent import (
+    SigmoidActor as LongDSACSigmoidActor,
+    DSACLongRouter as LiveDSACLongRouter,
+)
+from ensemble.train_rl_dsac_short_agent import (
+    SigmoidActor as ShortDSACSigmoidActor,
+    DSACShortRouter as LiveDSACShortRouter,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
 
@@ -175,35 +187,23 @@ QUANT_HORIZON_MINUTES = 30
 QUANT_TOP_K_FEATURES = int(float(os.getenv("QUANT_TOP_K_FEATURES", "25")))
 QUANT_MAX_HISTORY_ROWS = int(float(os.getenv("QUANT_MAX_HISTORY_ROWS", "3000")))
 QUANT_LOGIC_PATH = os.getenv("QUANT_LOGIC_PATH", "quant/live_30m_direction_quant.py")
-POLYMARKET_ENABLE = _env_flag("POLYMARKET_ENABLE", True)
-POLYMARKET_EVENT_SLUG = os.getenv("POLYMARKET_EVENT_SLUG", "ethereum-price-on-april-19").strip()
-POLYMARKET_SLUG_AUTO = _env_flag("POLYMARKET_SLUG_AUTO", True)
-POLYMARKET_SLUG_TZ = os.getenv("POLYMARKET_SLUG_TZ", "Asia/Seoul").strip() or "Asia/Seoul"
-POLYMARKET_GAMMA_URL = os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com/events")
-POLYMARKET_CLOB_PRICE_URL = os.getenv("POLYMARKET_CLOB_PRICE_URL", "https://clob.polymarket.com/price")
-POLYMARKET_CLOB_BOOK_URL = os.getenv("POLYMARKET_CLOB_BOOK_URL", "https://clob.polymarket.com/book")
-POLYMARKET_TIMEOUT_SEC = float(os.getenv("POLYMARKET_TIMEOUT_SEC", "2.5"))
-POLYMARKET_MAX_MARKETS = int(float(os.getenv("POLYMARKET_MAX_MARKETS", "20")))
-POLYMARKET_EXIT_ENABLE = _env_flag("POLYMARKET_EXIT_ENABLE", True)
-POLYMARKET_SHOCK_1M_TH = float(os.getenv("POLYMARKET_SHOCK_1M_TH", "0.04"))  # 4.0%p
-POLYMARKET_SHOCK_Z_TH = float(os.getenv("POLYMARKET_SHOCK_Z_TH", "4.0"))
-POLYMARKET_SHOCK_CUM3_TH = float(os.getenv("POLYMARKET_SHOCK_CUM3_TH", "0.025"))  # 2.5%p
-POLYMARKET_SHOCK_Z_WIN = int(float(os.getenv("POLYMARKET_SHOCK_Z_WIN", "120")))
-POLYMARKET_SHOCK_DYN_ENABLE = _env_flag("POLYMARKET_SHOCK_DYN_ENABLE", False)
-POLYMARKET_SHOCK_DYN_Q = float(os.getenv("POLYMARKET_SHOCK_DYN_Q", "0.997"))
-POLYMARKET_SHOCK_DYN_MIN_OBS = int(float(os.getenv("POLYMARKET_SHOCK_DYN_MIN_OBS", "120")))
-POLYMARKET_SHOCK_COOLDOWN_SEC = float(os.getenv("POLYMARKET_SHOCK_COOLDOWN_SEC", "1200"))
-POLYMARKET_SHOCK_PEAK_ONLY = _env_flag("POLYMARKET_SHOCK_PEAK_ONLY", True)
-POLYMARKET_SHOCK_PEAK_WINDOW_SEC = float(os.getenv("POLYMARKET_SHOCK_PEAK_WINDOW_SEC", "600"))
+POLYMARKET_DUCKDB_PATH = os.getenv("POLYMARKET_DUCKDB_PATH", "data/live/polymarket.duckdb")
+AGENT_SPECIALIST_DISPLAY_ENABLE = _env_flag("AGENT_SPECIALIST_DISPLAY_ENABLE", True)
+AGENT_SPECIALIST_DECISION_SEC = int(float(os.getenv("AGENT_SPECIALIST_DECISION_SEC", "300")))
+AGENT_SPECIALIST_LONG_CKPT_PATH = os.getenv(
+    "AGENT_SPECIALIST_LONG_CKPT_PATH",
+    "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_long_agents.pth",
+)
+AGENT_SPECIALIST_SHORT_CKPT_PATH = os.getenv(
+    "AGENT_SPECIALIST_SHORT_CKPT_PATH",
+    "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_short_agents.pth",
+)
 
 _ENSEMBLE_OI_DELTA_WIN: deque[float] = deque(maxlen=max(30, ENSEMBLE_OVERHEAT_Z_WIN))
 _ENSEMBLE_FUNDING_WIN: deque[float] = deque(maxlen=max(30, ENSEMBLE_OVERHEAT_Z_WIN))
 _ENSEMBLE_LAST_OVERHEAT_OBS: tuple[float, float] | None = None
 _QUANT_CARD_CACHE: dict[str, object] = {"minute_key": "", "payload": {}}
 _QUANT_SNAPSHOT_MTIME: float | None = None
-_POLYMARKET_CACHE: dict[str, object] = {"updated_at": 0.0, "payload": {}}
-_POLYMARKET_HISTORY: deque[dict] = deque(maxlen=720)
-_POLYMARKET_LAST_EMERGENCY_TS: float = 0.0
 
 
 def _resolve_quant_logic_path() -> str:
@@ -239,560 +239,6 @@ def _load_quant_snapshot_fn():
 
 
 _QUANT_SNAPSHOT_FN = _load_quant_snapshot_fn()
-
-
-def _poly_http_json(url: str, timeout: float = 2.5):
-    req = Request(
-        url=url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            "Accept": "application/json,text/plain,*/*",
-            "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
-            "Connection": "close",
-        },
-    )
-    with urlopen(req, timeout=max(0.2, float(timeout))) as resp:
-        raw = resp.read().decode("utf-8")
-    return json.loads(raw)
-
-
-def _poly_clamp01(x: float) -> float:
-    return float(max(0.0, min(1.0, x)))
-
-
-def _poly_extract_token_ids(market: dict) -> list[str]:
-    cand = market.get("clobTokenIds", [])
-    out: list[str] = []
-    if isinstance(cand, list):
-        for x in cand:
-            s = str(x).strip()
-            if s:
-                out.append(s)
-        return out
-    if isinstance(cand, str):
-        txt = cand.strip()
-        if not txt:
-            return out
-        if txt.startswith("["):
-            try:
-                arr = json.loads(txt)
-                if isinstance(arr, list):
-                    for x in arr:
-                        s = str(x).strip()
-                        if s:
-                            out.append(s)
-            except Exception:
-                pass
-        else:
-            for x in txt.split(","):
-                s = str(x).strip().strip("\"").strip("'")
-                if s:
-                    out.append(s)
-    return out
-
-
-def _poly_parse_strike_from_text(text: str) -> float | None:
-    if not text:
-        return None
-    t = str(text)
-    m = re.search(r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)", t)
-    if m:
-        try:
-            return float(m.group(1).replace(",", ""))
-        except Exception:
-            return None
-    m2 = re.search(r"\$?\s*([0-9]+(?:\.[0-9]+)?)\s*([kK])\b", t)
-    if m2:
-        try:
-            return float(m2.group(1)) * 1000.0
-        except Exception:
-            return None
-    return None
-
-
-def _poly_market_label(market: dict) -> str:
-    for k in ("question", "title", "name", "description"):
-        v = market.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return "unknown_market"
-
-
-def _poly_price_from_resp(payload) -> float | None:
-    if isinstance(payload, (int, float)):
-        x = float(payload)
-        return _poly_clamp01(x) if np.isfinite(x) else None
-    if isinstance(payload, str):
-        try:
-            return _poly_clamp01(float(payload))
-        except Exception:
-            return None
-    if isinstance(payload, dict):
-        for k in ("price", "mid", "value"):
-            if k in payload:
-                try:
-                    return _poly_clamp01(float(payload.get(k)))
-                except Exception:
-                    pass
-    return None
-
-
-def _poly_book_imbalance(token_id: str) -> dict:
-    try:
-        q = urlencode({"token_id": token_id})
-        url = f"{POLYMARKET_CLOB_BOOK_URL}?{q}"
-        data = _poly_http_json(url, timeout=POLYMARKET_TIMEOUT_SEC)
-        bids = list((data or {}).get("bids", []) or [])
-        asks = list((data or {}).get("asks", []) or [])
-        b_notional = 0.0
-        a_notional = 0.0
-        for row in bids[:20]:
-            p = float(row.get("price", 0.0) or 0.0)
-            s = float(row.get("size", 0.0) or 0.0)
-            if p > 0.0 and s > 0.0:
-                b_notional += (p * s)
-        for row in asks[:20]:
-            p = float(row.get("price", 0.0) or 0.0)
-            s = float(row.get("size", 0.0) or 0.0)
-            if p > 0.0 and s > 0.0:
-                a_notional += (p * s)
-        den = b_notional + a_notional
-        imb = ((b_notional - a_notional) / den) if den > 1e-12 else 0.0
-        return {
-            "bid_notional": float(b_notional),
-            "ask_notional": float(a_notional),
-            "imbalance": float(np.clip(imb, -1.0, 1.0)),
-        }
-    except Exception:
-        return {"bid_notional": 0.0, "ask_notional": 0.0, "imbalance": 0.0}
-
-
-def _resolve_polymarket_slug() -> tuple[str, str]:
-    base = str(POLYMARKET_EVENT_SLUG or "").strip()
-    if not POLYMARKET_SLUG_AUTO:
-        return base, "manual"
-    m = re.match(r"^(.*?-price)-on-[a-z]+-\d{1,2}$", base)
-    if m is None:
-        return base, "manual_pattern_mismatch"
-    prefix = str(m.group(1)).strip()
-    if not prefix:
-        return base, "manual_prefix_empty"
-    try:
-        now_local = pd.Timestamp.now(tz=POLYMARKET_SLUG_TZ)
-        target = now_local
-        month = target.strftime("%B").lower()
-        day = str(int(target.day))
-        return f"{prefix}-on-{month}-{day}", "auto_today"
-    except Exception:
-        return base, "manual_time_fallback"
-
-
-def _fetch_polymarket_rows_by_slug(slug: str) -> list[dict]:
-    query = urlencode({"slug": slug})
-    url = f"{POLYMARKET_GAMMA_URL}?{query}"
-    rows: list[dict] = []
-    ev_raw = _poly_http_json(url, timeout=POLYMARKET_TIMEOUT_SEC)
-    if isinstance(ev_raw, list):
-        ev = dict(ev_raw[0] or {}) if ev_raw else {}
-    elif isinstance(ev_raw, dict):
-        items = ev_raw.get("events", ev_raw.get("data", []))
-        if isinstance(items, list):
-            ev = dict(items[0] or {}) if items else dict(ev_raw)
-        else:
-            ev = dict(ev_raw)
-    else:
-        ev = {}
-    mkts = list((ev or {}).get("markets", []) or [])
-    for m in mkts[:max(1, POLYMARKET_MAX_MARKETS)]:
-        md = dict(m or {})
-        token_ids = _poly_extract_token_ids(md)
-        if not token_ids:
-            continue
-        token_id = token_ids[0]
-        purl = f"{POLYMARKET_CLOB_PRICE_URL}?{urlencode({'token_id': token_id, 'side': 'BUY'})}"
-        try:
-            price_payload = _poly_http_json(purl, timeout=POLYMARKET_TIMEOUT_SEC)
-            prob = _poly_price_from_resp(price_payload)
-        except Exception:
-            prob = None
-        if prob is None:
-            continue
-        label = _poly_market_label(md)
-        strike = _poly_parse_strike_from_text(label)
-        rows.append({
-            "label": label,
-            "token_id": token_id,
-            "prob": float(prob),
-            "strike": float(strike) if strike is not None else np.nan,
-        })
-    return rows
-
-
-def _poly_hist_delta(hist: list[dict], sec: float) -> float:
-    if not hist:
-        return 0.0
-    try:
-        now_ts = float(hist[-1].get("ts", 0.0) or 0.0)
-        now_mode = float(hist[-1].get("mode_prob", 0.0) or 0.0)
-    except Exception:
-        return 0.0
-    target = now_ts - float(max(1.0, sec))
-    prev_mode = None
-    for row in reversed(hist):
-        rts = float(row.get("ts", 0.0) or 0.0)
-        if rts <= target:
-            try:
-                prev_mode = float(row.get("mode_prob", 0.0) or 0.0)
-            except Exception:
-                prev_mode = None
-            break
-    if prev_mode is None:
-        return 0.0
-    return float(now_mode - prev_mode)
-
-
-def _poly_hist_delta_series(hist: list[dict], sec: float, cap: int = 240) -> list[float]:
-    n = len(hist)
-    if n < 2:
-        return []
-    use_n = min(max(2, int(cap)), n)
-    sub = hist[-use_n:]
-    ts = np.array([float(x.get("ts", 0.0) or 0.0) for x in sub], dtype=float)
-    mode = np.array([float(x.get("mode_prob", 0.0) or 0.0) for x in sub], dtype=float)
-    out: list[float] = []
-    j = 0
-    for i in range(use_n):
-        target = ts[i] - float(max(1.0, sec))
-        while j + 1 < i and ts[j + 1] <= target:
-            j += 1
-        if ts[j] <= target:
-            out.append(float(mode[i] - mode[j]))
-    return out
-
-
-def _poly_hist_delta_pairs(hist: list[dict], sec: float, cap: int = 240) -> list[tuple[float, float]]:
-    n = len(hist)
-    if n < 2:
-        return []
-    use_n = min(max(2, int(cap)), n)
-    sub = hist[-use_n:]
-    ts = np.array([float(x.get("ts", 0.0) or 0.0) for x in sub], dtype=float)
-    mode = np.array([float(x.get("mode_prob", 0.0) or 0.0) for x in sub], dtype=float)
-    out: list[tuple[float, float]] = []
-    j = 0
-    for i in range(use_n):
-        target = ts[i] - float(max(1.0, sec))
-        while j + 1 < i and ts[j + 1] <= target:
-            j += 1
-        if ts[j] <= target:
-            out.append((float(ts[i]), float(mode[i] - mode[j])))
-    return out
-
-
-def _build_polymarket_snapshot(current_price: float) -> dict:
-    now_iso = pd.Timestamp.utcnow().isoformat()
-    resolved_slug, slug_mode = _resolve_polymarket_slug()
-    used_slug = resolved_slug or POLYMARKET_EVENT_SLUG
-    if not POLYMARKET_ENABLE:
-        return {
-            "updated_at": now_iso,
-            "status": "DISABLED",
-            "slug": used_slug,
-            "slug_mode": slug_mode,
-            "error": "disabled",
-            "markets_count": 0,
-            "priced_count": 0,
-            "mode_label": "-",
-            "mode_prob": 0.0,
-            "weighted_target": float(current_price or 0.0),
-            "tail_up_prob": 0.0,
-            "tail_down_prob": 0.0,
-            "prob_momentum_1m": 0.0,
-            "prob_price_corr": 0.0,
-            "book_imbalance": 0.0,
-            "book_bid_notional": 0.0,
-            "book_ask_notional": 0.0,
-            "event_volatility": 0.0,
-            "signal": "HOLD",
-            "risk_state": "NORMAL",
-            "shock_delta_1m": 0.0,
-            "shock_delta_3m": 0.0,
-            "shock_z_1m": 0.0,
-            "shock_dyn_th_1m": 0.0,
-            "shock_trigger": False,
-            "shock_trigger_reason": "",
-            "snapshot_ts_epoch": float(time.time()),
-        }
-
-    rows: list[dict] = []
-    try:
-        rows = _fetch_polymarket_rows_by_slug(used_slug)
-        if not rows and used_slug != POLYMARKET_EVENT_SLUG:
-            rows = _fetch_polymarket_rows_by_slug(POLYMARKET_EVENT_SLUG)
-            if rows:
-                used_slug = POLYMARKET_EVENT_SLUG
-                slug_mode = "fallback_manual_slug"
-    except Exception as e:
-        return {
-            "updated_at": now_iso,
-            "status": "ERROR",
-            "slug": used_slug,
-            "slug_mode": slug_mode,
-            "error": str(e),
-            "markets_count": 0,
-            "priced_count": 0,
-            "mode_label": "-",
-            "mode_prob": 0.0,
-            "weighted_target": float(current_price or 0.0),
-            "tail_up_prob": 0.0,
-            "tail_down_prob": 0.0,
-            "prob_momentum_1m": 0.0,
-            "prob_price_corr": 0.0,
-            "book_imbalance": 0.0,
-            "book_bid_notional": 0.0,
-            "book_ask_notional": 0.0,
-            "event_volatility": 0.0,
-            "signal": "HOLD",
-            "risk_state": "NORMAL",
-            "shock_delta_1m": 0.0,
-            "shock_delta_3m": 0.0,
-            "shock_z_1m": 0.0,
-            "shock_dyn_th_1m": 0.0,
-            "shock_trigger": False,
-            "shock_trigger_reason": "",
-            "snapshot_ts_epoch": float(time.time()),
-        }
-
-    if not rows:
-        return {
-            "updated_at": now_iso,
-            "status": "EMPTY",
-            "slug": used_slug,
-            "slug_mode": slug_mode,
-            "error": "no_priced_markets",
-            "markets_count": 0,
-            "priced_count": 0,
-            "mode_label": "-",
-            "mode_prob": 0.0,
-            "weighted_target": float(current_price or 0.0),
-            "tail_up_prob": 0.0,
-            "tail_down_prob": 0.0,
-            "prob_momentum_1m": 0.0,
-            "prob_price_corr": 0.0,
-            "book_imbalance": 0.0,
-            "book_bid_notional": 0.0,
-            "book_ask_notional": 0.0,
-            "event_volatility": 0.0,
-            "signal": "HOLD",
-            "risk_state": "NORMAL",
-            "shock_delta_1m": 0.0,
-            "shock_delta_3m": 0.0,
-            "shock_z_1m": 0.0,
-            "shock_dyn_th_1m": 0.0,
-            "shock_trigger": False,
-            "shock_trigger_reason": "",
-            "snapshot_ts_epoch": float(time.time()),
-        }
-
-    rows_sorted = sorted(rows, key=lambda x: float(x.get("prob", 0.0)), reverse=True)
-    mode = rows_sorted[0]
-    probs = np.array([float(x.get("prob", 0.0)) for x in rows_sorted], dtype=float)
-    probs = np.clip(probs, 0.0, 1.0)
-    prob_sum = float(np.sum(probs))
-    w = (probs / prob_sum) if prob_sum > 1e-12 else np.full_like(probs, 1.0 / max(1, len(probs)))
-    strikes = np.array([float(x.get("strike", np.nan)) for x in rows_sorted], dtype=float)
-    strike_ok = np.isfinite(strikes)
-    if np.any(strike_ok):
-        weighted_target = float(np.sum(strikes[strike_ok] * w[strike_ok]) / max(np.sum(w[strike_ok]), 1e-12))
-    else:
-        weighted_target = float(current_price or 0.0)
-
-    cur_px = float(current_price or 0.0)
-    if cur_px > 0.0 and np.any(strike_ok):
-        up_mask = strike_ok & (strikes >= cur_px * 1.03)
-        dn_mask = strike_ok & (strikes <= cur_px * 0.97)
-        tail_up_prob = float(np.sum(w[up_mask])) if np.any(up_mask) else 0.0
-        tail_down_prob = float(np.sum(w[dn_mask])) if np.any(dn_mask) else 0.0
-    else:
-        tail_up_prob = 0.0
-        tail_down_prob = 0.0
-
-    event_volatility = float(np.std(probs))
-    _POLYMARKET_HISTORY.append({
-        "ts": float(time.time()),
-        "mode_prob": float(mode.get("prob", 0.0)),
-        "weighted_target": float(weighted_target),
-        "current_price": float(cur_px),
-    })
-    hist = list(_POLYMARKET_HISTORY)
-    prob_momentum_1m = _poly_hist_delta(hist, sec=60.0)
-    shock_delta_3m = _poly_hist_delta(hist, sec=180.0)
-    d1m_series = _poly_hist_delta_series(hist, sec=60.0, cap=max(180, POLYMARKET_SHOCK_Z_WIN * 3))
-    d1m_pairs = _poly_hist_delta_pairs(hist, sec=60.0, cap=max(180, POLYMARKET_SHOCK_Z_WIN * 3))
-    shock_z_1m = 0.0
-    shock_dyn_th_1m = 0.0
-    shock_peak_abs_1m = 0.0
-    shock_is_peak = False
-    if d1m_series:
-        abs_arr = np.abs(np.array(d1m_series, dtype=float))
-        if len(abs_arr) >= int(max(20, POLYMARKET_SHOCK_DYN_MIN_OBS)):
-            q = float(np.clip(POLYMARKET_SHOCK_DYN_Q, 0.50, 0.9999))
-            shock_dyn_th_1m = float(np.quantile(abs_arr, q))
-        win = np.array(d1m_series[-max(20, POLYMARKET_SHOCK_Z_WIN):], dtype=float)
-        if len(win) >= 10:
-            mu = float(np.mean(win))
-            sd = float(np.std(win))
-            if sd > 1e-12 and np.isfinite(sd):
-                shock_z_1m = float((d1m_series[-1] - mu) / sd)
-    if d1m_pairs:
-        now_ts = float(hist[-1].get("ts", time.time()) if hist else time.time())
-        lo_ts = now_ts - float(max(30.0, POLYMARKET_SHOCK_PEAK_WINDOW_SEC))
-        recent_abs = [abs(float(v)) for (t, v) in d1m_pairs if float(t) >= lo_ts]
-        if recent_abs:
-            shock_peak_abs_1m = float(max(recent_abs))
-            shock_is_peak = bool(abs(prob_momentum_1m) >= (shock_peak_abs_1m - 1e-12))
-    eff_th = float(max(0.0, POLYMARKET_SHOCK_1M_TH))
-    if POLYMARKET_SHOCK_DYN_ENABLE and shock_dyn_th_1m > 0.0:
-        eff_th = max(eff_th, float(shock_dyn_th_1m))
-    cond_abs = abs(prob_momentum_1m) >= eff_th
-    cond_z = abs(shock_z_1m) >= float(max(0.0, POLYMARKET_SHOCK_Z_TH))
-    cond_c3 = abs(shock_delta_3m) >= float(max(0.0, POLYMARKET_SHOCK_CUM3_TH))
-    cond_peak = (not POLYMARKET_SHOCK_PEAK_ONLY) or bool(shock_is_peak)
-    shock_trigger = bool(cond_abs and cond_z and cond_c3 and cond_peak)
-    if shock_trigger:
-        shock_trigger_reason = (
-            f"|d1m|={abs(prob_momentum_1m)*100:.2f}%p>=th{eff_th*100:.2f}%p "
-            f"& |z|={abs(shock_z_1m):.2f}>={POLYMARKET_SHOCK_Z_TH:.2f} "
-            f"& |d3m|={abs(shock_delta_3m)*100:.2f}%p>={POLYMARKET_SHOCK_CUM3_TH*100:.2f}%p"
-            f"& peak={int(bool(shock_is_peak))}"
-        )
-    else:
-        shock_trigger_reason = ""
-    corr = 0.0
-    if len(hist) >= 20:
-        px = np.array([float(x.get("current_price", 0.0)) for x in hist], dtype=float)
-        pp = np.array([float(x.get("mode_prob", 0.0)) for x in hist], dtype=float)
-        px_ret = np.diff(px) / np.maximum(np.abs(px[:-1]), 1e-8)
-        pp_ret = np.diff(pp)
-        if len(px_ret) >= 5 and np.std(px_ret) > 1e-12 and np.std(pp_ret) > 1e-12:
-            corr = float(np.corrcoef(px_ret, pp_ret)[0, 1])
-            if not np.isfinite(corr):
-                corr = 0.0
-
-    book = _poly_book_imbalance(str(mode.get("token_id", "")))
-    imb = float(book.get("imbalance", 0.0))
-    lead_edge = prob_momentum_1m + (0.2 * imb)
-    if lead_edge > 0.03:
-        signal = "LONG"
-    elif lead_edge < -0.03:
-        signal = "SHORT"
-    else:
-        signal = "HOLD"
-    risk_state = "HIGH_VOL" if event_volatility >= 0.12 else ("WATCH" if event_volatility >= 0.07 else "NORMAL")
-    leverage_mult = 0.7 if risk_state == "HIGH_VOL" else (0.85 if risk_state == "WATCH" else 1.0)
-
-    return {
-        "updated_at": now_iso,
-        "status": "LIVE",
-        "slug": used_slug,
-        "slug_mode": slug_mode,
-        "error": "",
-        "markets_count": int(len(rows)),
-        "priced_count": int(len(rows)),
-        "mode_label": str(mode.get("label", "-")),
-        "mode_prob": float(mode.get("prob", 0.0)),
-        "weighted_target": float(weighted_target),
-        "tail_up_prob": float(tail_up_prob),
-        "tail_down_prob": float(tail_down_prob),
-        "prob_momentum_1m": float(prob_momentum_1m),
-        "shock_delta_1m": float(prob_momentum_1m),
-        "shock_delta_3m": float(shock_delta_3m),
-        "shock_z_1m": float(shock_z_1m),
-        "shock_dyn_th_1m": float(shock_dyn_th_1m),
-        "shock_peak_abs_1m": float(shock_peak_abs_1m),
-        "shock_is_peak": bool(shock_is_peak),
-        "shock_trigger": bool(shock_trigger),
-        "shock_trigger_reason": str(shock_trigger_reason),
-        "snapshot_ts_epoch": float(hist[-1].get("ts", time.time()) if hist else time.time()),
-        "prob_price_corr": float(corr),
-        "book_imbalance": float(imb),
-        "book_bid_notional": float(book.get("bid_notional", 0.0)),
-        "book_ask_notional": float(book.get("ask_notional", 0.0)),
-        "event_volatility": float(event_volatility),
-        "signal": str(signal),
-        "risk_state": str(risk_state),
-        "recommended_kelly_mult": float(leverage_mult),
-    }
-
-
-def _get_polymarket_snapshot_cached(current_price: float) -> dict:
-    now = time.time()
-    cached = dict(_POLYMARKET_CACHE.get("payload", {}) or {})
-    updated_at = float(_POLYMARKET_CACHE.get("updated_at", 0.0) or 0.0)
-    if cached and (now - updated_at) < 8.0:
-        return cached
-    fresh = _build_polymarket_snapshot(current_price=float(current_price or 0.0))
-    _POLYMARKET_CACHE["payload"] = dict(fresh)
-    _POLYMARKET_CACHE["updated_at"] = float(now)
-    return dict(fresh)
-
-
-def _polymarket_exit_guard(pos: str | None, entry_price: float, poly: dict) -> tuple[bool, str]:
-    """
-    Return (force_exit, reason).
-    Rule:
-      - only when 1m polymarket shock magnitude >= threshold
-      - HOLD if prediction is favorable from entry price
-      - otherwise EXIT
-    """
-    global _POLYMARKET_LAST_EMERGENCY_TS
-    if not POLYMARKET_EXIT_ENABLE:
-        return False, ""
-    side = str(pos or "").upper()
-    if side not in ("LONG", "SHORT"):
-        return False, ""
-    if entry_price <= 0.0:
-        return False, ""
-    status = str((poly or {}).get("status", "")).upper()
-    if status != "LIVE":
-        return False, ""
-    mom = float((poly or {}).get("shock_delta_1m", (poly or {}).get("prob_momentum_1m", 0.0)) or 0.0)
-    d3 = float((poly or {}).get("shock_delta_3m", 0.0) or 0.0)
-    z1 = float((poly or {}).get("shock_z_1m", 0.0) or 0.0)
-    is_peak = bool((poly or {}).get("shock_is_peak", False))
-    dyn = float((poly or {}).get("shock_dyn_th_1m", 0.0) or 0.0)
-    eff_th = float(max(0.0, POLYMARKET_SHOCK_1M_TH))
-    if POLYMARKET_SHOCK_DYN_ENABLE and dyn > 0.0:
-        eff_th = max(eff_th, dyn)
-    cond_abs = abs(mom) >= eff_th
-    cond_z = abs(z1) >= float(max(0.0, POLYMARKET_SHOCK_Z_TH))
-    cond_c3 = abs(d3) >= float(max(0.0, POLYMARKET_SHOCK_CUM3_TH))
-    cond_peak = (not POLYMARKET_SHOCK_PEAK_ONLY) or is_peak
-    trigger = bool((poly or {}).get("shock_trigger", False))
-    if not (trigger or (cond_abs and cond_z and cond_c3 and cond_peak)):
-        return False, ""
-    now_ts = float((poly or {}).get("snapshot_ts_epoch", time.time()) or time.time())
-    cooldown = float(max(0.0, POLYMARKET_SHOCK_COOLDOWN_SEC))
-    if cooldown > 0.0 and _POLYMARKET_LAST_EMERGENCY_TS > 0.0:
-        if (now_ts - _POLYMARKET_LAST_EMERGENCY_TS) < cooldown:
-            remain = int(max(0.0, cooldown - (now_ts - _POLYMARKET_LAST_EMERGENCY_TS)))
-            return False, f"POLYMARKET_SHOCK_COOLDOWN({remain}s)"
-    _POLYMARKET_LAST_EMERGENCY_TS = now_ts
-    tgt = float((poly or {}).get("weighted_target", 0.0) or 0.0)
-    if tgt <= 0.0:
-        return False, ""
-    favorable = (tgt > entry_price) if side == "LONG" else (tgt < entry_price)
-    if favorable:
-        return False, (
-            "POLYMARKET_EMERGENCY_HOLD("
-            f"|d1m|={abs(mom)*100:.2f}%p>=th{eff_th*100:.2f}%p,"
-            f"|z|={abs(z1):.2f},|d3m|={abs(d3)*100:.2f}%p,peak={int(is_peak)},target={tgt:.2f},entry={entry_price:.2f})"
-        )
-    return True, (
-        "POLYMARKET_EMERGENCY_EXIT("
-        f"|d1m|={abs(mom)*100:.2f}%p>=th{eff_th*100:.2f}%p,"
-        f"|z|={abs(z1):.2f},|d3m|={abs(d3)*100:.2f}%p,peak={int(is_peak)},target={tgt:.2f},entry={entry_price:.2f})"
-    )
 
 
 def _build_quant_formula_card(eth_df: pd.DataFrame, current_price: float, current_time_kst) -> dict:
@@ -2504,6 +1950,28 @@ class DSACSignalRouter:
         return actor, "DSAC_PRIMARY"
 
     @staticmethod
+    def _build_long_actor_from_ckpt(ckpt: dict, device: str):
+        actor_state = ckpt.get("actor")
+        if not isinstance(actor_state, dict):
+            raise KeyError("DSAC long 체크포인트 actor 키 없음")
+        state_dim = int(ckpt.get("state_dim", 28) or 28)
+        actor = LongDSACSigmoidActor(state_dim=state_dim).to(device)
+        actor.load_state_dict(actor_state)
+        actor.eval()
+        return actor
+
+    @staticmethod
+    def _build_short_actor_from_ckpt(ckpt: dict, device: str):
+        actor_state = ckpt.get("actor")
+        if not isinstance(actor_state, dict):
+            raise KeyError("DSAC short 체크포인트 actor 키 없음")
+        state_dim = int(ckpt.get("state_dim", 28) or 28)
+        actor = ShortDSACSigmoidActor(state_dim=state_dim).to(device)
+        actor.load_state_dict(actor_state)
+        actor.eval()
+        return actor
+
+    @staticmethod
     def _resolve_model_path(primary: str | None, *fallbacks: str) -> str:
         for candidate in (primary, *fallbacks):
             if candidate and os.path.exists(candidate): return candidate
@@ -2539,9 +2007,21 @@ class DSACSignalRouter:
 
         self.elite_extractor = EliteSignals()
         self.new_elite_engine = NewEliteSignalEngine()
+        self._last_runtime_features: dict[str, float] = {}
+        self._last_runtime_pos_dict: dict[str, float | str | None] = {}
+        self._specialist_cache: dict[str, object] = {
+            "bucket": "",
+            "actions": {
+                "long": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": ""},
+                "short": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": ""},
+            },
+        }
+        self.long_router = None
+        self.short_router = None
 
         self.single_ckpt_path = self._resolve_model_path(single_path or model_path, self.DEFAULT_SINGLE_PATH, self.LEGACY_SINGLE_PATH)
         self._load_primary(self.device)
+        self._load_specialists(self.device)
 
     def _load_primary(self, device: str) -> None:
         ckpt = torch.load(self.single_ckpt_path, map_location=device, weights_only=False)
@@ -2549,6 +2029,110 @@ class DSACSignalRouter:
         self.device = device
         self.primary_router = BaseDSACRouter(actor, device=device, hmm_detector=self.hmm)
         logger.info("✅ DSAC Primary 로드 완료 (%s, %s): %s", ver, device, self.single_ckpt_path)
+
+    def _load_specialists(self, device: str) -> None:
+        if not AGENT_SPECIALIST_DISPLAY_ENABLE:
+            self.long_router = None
+            self.short_router = None
+            return
+        try:
+            long_ckpt = torch.load(AGENT_SPECIALIST_LONG_CKPT_PATH, map_location=device, weights_only=False)
+            long_actor = self._build_long_actor_from_ckpt(long_ckpt, device)
+            self.long_router = LiveDSACLongRouter(long_actor, device=device, hmm_detector=self.hmm)
+            logger.info("✅ DSAC Long specialist 로드 완료 (%s): %s", device, AGENT_SPECIALIST_LONG_CKPT_PATH)
+        except Exception as e:
+            self.long_router = None
+            logger.warning("⚠️ DSAC Long specialist 로드 실패: %s", e)
+        try:
+            short_ckpt = torch.load(AGENT_SPECIALIST_SHORT_CKPT_PATH, map_location=device, weights_only=False)
+            short_actor = self._build_short_actor_from_ckpt(short_ckpt, device)
+            self.short_router = LiveDSACShortRouter(short_actor, device=device, hmm_detector=self.hmm)
+            logger.info("✅ DSAC Short specialist 로드 완료 (%s): %s", device, AGENT_SPECIALIST_SHORT_CKPT_PATH)
+        except Exception as e:
+            self.short_router = None
+            logger.warning("⚠️ DSAC Short specialist 로드 실패: %s", e)
+
+    @staticmethod
+    def _specialist_pos_dict(side: str, tracker_node: dict | None) -> dict:
+        node = dict(tracker_node or {})
+        pos = str(node.get("pos", "NONE") or "NONE").upper()
+        if side == "long" and pos != "LONG":
+            return {"type": None}
+        if side == "short" and pos != "SHORT":
+            return {"type": None}
+        opened_at = pd.Timestamp(node.get("opened_at")) if str(node.get("opened_at", "")).strip() else None
+        hold_count = 0.0
+        if opened_at is not None and not pd.isna(opened_at):
+            try:
+                if opened_at.tzinfo is None:
+                    opened_at = opened_at.tz_localize("Asia/Seoul")
+                hold_count = max(0.0, (pd.Timestamp.now(tz="Asia/Seoul") - opened_at.tz_convert("Asia/Seoul")).total_seconds() / 300.0)
+            except Exception:
+                hold_count = 0.0
+        return {
+            "type": pos,
+            "margin_usage": float(np.clip(float(node.get("entry_kelly", 0.0) or 0.0), 0.0, 1.0)),
+            "unrealized": float(node.get("unrealized_pnl_pct", 0.0) or 0.0) / 100.0,
+            "hold_count": float(hold_count),
+            "mdd": -abs(float(node.get("mdd_pct", 0.0) or 0.0)) / 100.0,
+        }
+
+    def specialist_display_actions(self, tracker_state: dict, current_time_kst) -> dict:
+        base = {
+            "long": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": str(current_time_kst)},
+            "short": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": str(current_time_kst)},
+        }
+        if not AGENT_SPECIALIST_DISPLAY_ENABLE:
+            return base
+        if self.long_router is None and self.short_router is None:
+            return base
+        if not isinstance(self._last_runtime_features, dict) or not self._last_runtime_features:
+            return base
+
+        bucket_sec = int(max(60, AGENT_SPECIALIST_DECISION_SEC))
+        ts_now = pd.Timestamp(current_time_kst)
+        if ts_now.tzinfo is None:
+            ts_now = ts_now.tz_localize("Asia/Seoul")
+        bucket = str(int(ts_now.timestamp()) // bucket_sec)
+        cache_bucket = str(self._specialist_cache.get("bucket", ""))
+        if cache_bucket == bucket:
+            cached = dict(self._specialist_cache.get("actions", {}) or {})
+            if cached:
+                return cached
+
+        features = dict(self._last_runtime_features or {})
+        tracker = dict(tracker_state or {})
+        out = dict(base)
+        try:
+            if self.long_router is not None:
+                long_pos = self._specialist_pos_dict("long", tracker.get("long"))
+                la, lk, li = self.long_router.decide(features, long_pos)
+                out["long"] = {
+                    "action": int(la),
+                    "kelly_weight": float(np.clip(lk, 0.0, 1.0)),
+                    "logit": float(li.get("logit", li.get("mu", li.get("raw_action", 0.0)))),
+                    "std": float(li.get("std", 0.0)),
+                    "decision_at": str(current_time_kst),
+                }
+        except Exception as e:
+            logger.warning("롱 specialist 추론 실패: %s", e)
+        try:
+            if self.short_router is not None:
+                short_pos = self._specialist_pos_dict("short", tracker.get("short"))
+                sa, sk, si = self.short_router.decide(features, short_pos)
+                out["short"] = {
+                    "action": int(sa),
+                    "kelly_weight": float(np.clip(sk, 0.0, 1.0)),
+                    "logit": float(si.get("logit", si.get("mu", si.get("raw_action", 0.0)))),
+                    "std": float(si.get("std", 0.0)),
+                    "decision_at": str(current_time_kst),
+                }
+        except Exception as e:
+            logger.warning("숏 specialist 추론 실패: %s", e)
+
+        self._specialist_cache["bucket"] = bucket
+        self._specialist_cache["actions"] = dict(out)
+        return out
 
     @staticmethod
     def _require_finite(mapping, key: str, context: str) -> float:
@@ -2651,6 +2235,8 @@ class DSACSignalRouter:
             "hold_norm": min(effective_hold_count / 96.0, 1.0),
             "margin_usage": float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0)),
         }
+        self._last_runtime_features = dict(features)
+        self._last_runtime_pos_dict = dict(pos_dict)
 
         try:
             primary_action, primary_lev, primary_info = self.primary_router.decide(features, pos_dict)
@@ -2747,6 +2333,7 @@ class DSACTrendRouter:
         self.dsac_only_trend_exit_confirm_bars = int(os.getenv("DSAC_ONLY_TREND_EXIT_CONFIRM_BARS", "2"))
         self.dsac_only_trend_exit_score = float(os.getenv("DSAC_ONLY_TREND_EXIT_SCORE", "0.20"))
         self.dsac_only_trend_exit_quality = float(os.getenv("DSAC_ONLY_TREND_EXIT_QUALITY", "0.000"))
+        self.dsac_only_vae_block_ratio = float(os.getenv("DSAC_ONLY_VAE_BLOCK_RATIO", "1.35"))
 
         self.hibernation_enable = _env_flag("DSAC_HIBERNATION_ENABLE", True)
         self.hibernation_score_th = float(os.getenv("DSAC_HIBERNATION_SCORE_TH", "0.85"))
@@ -2823,64 +2410,68 @@ class DSACTrendRouter:
         self.adaptive_agreement_offset = float(np.clip(agreement_offset, self.adaptive_gate_agreement_min, self.adaptive_gate_agreement_max))
         return self.adaptive_enter_offset, self.adaptive_agreement_offset
 
-    def _choose_entry_price(self, final_action: int, current_price: float, trend_signal: dict | None = None) -> float:
-        px = max(float(current_price), 0.0)
-        if not self.entry_reco_enable or px <= 0.0 or not isinstance(trend_signal, dict): return px
-        strength = float(trend_signal.get("strength", 0.0) or 0.0)
-        quality = float(trend_signal.get("m7_quality_pred", 0.0) or 0.0)
-        if strength < self.entry_reco_min_strength or quality < self.entry_reco_min_quality: return px
-        
-        if final_action == 1:
-            reco_px = float(trend_signal.get("m7_entry_long_price", 0.0) or 0.0)
-            reco_off = abs(float(trend_signal.get("m7_entry_long_offset", 0.0) or 0.0))
-            if reco_px > 0.0 and reco_px <= px * (1.0 + self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
-                return reco_px
-        elif final_action == 2:
-            reco_px = float(trend_signal.get("m7_entry_short_price", 0.0) or 0.0)
-            reco_off = abs(float(trend_signal.get("m7_entry_short_offset", 0.0) or 0.0))
-            if reco_px > 0.0 and reco_px >= px * (1.0 - self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
-                return reco_px
-        return px
+    def _open_position(self, side: str, entry_px: float, leverage: float | None = None) -> None:
+        self.pos = side
+        self.entry_price = float(max(entry_px, 0.0))
+        self.hold_count = 0
+        self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
+        self.peak_equity = self.cur_equity = 1.0
+        self.last_realized_pnl = None
+        self.trend_mismatch_streak = 0
+        self.position_exit_streak = 0
 
-    def _update_pos(self, final_action: int, current_price: float, leverage: float | None = None, trend_signal: dict | None = None):
+    def _choose_entry_price(
+        self,
+        final_action: int,
+        current_price: float,
+        trend_signal: dict | None = None,
+    ) -> float:
+        px = max(float(current_price), 0.0)
+        out = px
+        ts = trend_signal if isinstance(trend_signal, dict) else {}
+        if self.entry_reco_enable and px > 0.0 and ts:
+            strength = float(ts.get("strength", 0.0) or 0.0)
+            quality = float(ts.get("m7_quality_pred", 0.0) or 0.0)
+            if strength >= self.entry_reco_min_strength and quality >= self.entry_reco_min_quality:
+                if final_action == 1:
+                    reco_px = float(ts.get("m7_entry_long_price", 0.0) or 0.0)
+                    reco_off = abs(float(ts.get("m7_entry_long_offset", 0.0) or 0.0))
+                    if reco_px > 0.0 and reco_px <= px * (1.0 + self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
+                        out = min(out, reco_px)
+                elif final_action == 2:
+                    reco_px = float(ts.get("m7_entry_short_price", 0.0) or 0.0)
+                    reco_off = abs(float(ts.get("m7_entry_short_offset", 0.0) or 0.0))
+                    if reco_px > 0.0 and reco_px >= px * (1.0 - self.entry_reco_price_buffer) and reco_off <= self.entry_reco_max_offset:
+                        out = max(out, reco_px)
+        return out
+
+    def _update_pos(
+        self,
+        final_action: int,
+        current_price: float,
+        leverage: float | None = None,
+        trend_signal: dict | None = None,
+    ):
         entry_px = self._choose_entry_price(final_action, current_price, trend_signal)
         if final_action == 1 and self.pos == "SHORT":
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.last_realized_pnl = float(self.cur_equity - 1.0)
             self.last_closed_hold_count = int(self.hold_count)
-            self.pos, self.entry_price, self.hold_count = "LONG", entry_px, 0
-            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
-            self.peak_equity = self.cur_equity = 1.0
-            self.trend_mismatch_streak = 0
-            self.position_exit_streak = 0
+            self._open_position("LONG", entry_px, leverage)
             self._save_live_state()
             return
         if final_action == 2 and self.pos == "LONG":
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.last_realized_pnl = float(self.cur_equity - 1.0)
             self.last_closed_hold_count = int(self.hold_count)
-            self.pos, self.entry_price, self.hold_count = "SHORT", entry_px, 0
-            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
-            self.peak_equity = self.cur_equity = 1.0
-            self.trend_mismatch_streak = 0
-            self.position_exit_streak = 0
+            self._open_position("SHORT", entry_px, leverage)
             self._save_live_state()
             return
         if final_action == 1 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = "LONG", entry_px, 0
-            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
-            self.peak_equity = self.cur_equity = 1.0
-            self.last_realized_pnl = None
-            self.trend_mismatch_streak = 0
-            self.position_exit_streak = 0
+            self._open_position("LONG", entry_px, leverage)
             self._save_live_state()
         elif final_action == 2 and self.pos is None:
-            self.pos, self.entry_price, self.hold_count = "SHORT", entry_px, 0
-            self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
-            self.peak_equity = self.cur_equity = 1.0
-            self.last_realized_pnl = None
-            self.trend_mismatch_streak = 0
-            self.position_exit_streak = 0
+            self._open_position("SHORT", entry_px, leverage)
             self._save_live_state()
         elif final_action == 0 and self.pos is not None:
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
@@ -2899,6 +2490,8 @@ class DSACTrendRouter:
             self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.peak_equity = max(self.peak_equity, self.cur_equity)
             self.last_realized_pnl = None
+            self._save_live_state()
+        elif self.pos is None and final_action == 0:
             self._save_live_state()
 
     def _load_live_state(self) -> None:
@@ -2949,7 +2542,7 @@ class DSACTrendRouter:
         self.trade_history.append({
             "ts": datetime.utcnow().isoformat(timespec="seconds"), "side": self.pos,
             "entry": self.entry_price, "exit": price, "hold": self.hold_count,
-            "pnl": round(pnl, 6), "reason": reason or "FORCE_CLOSE", "liq_forced": True,
+            "pnl_frac": float(pnl), "pnl": round(pnl, 6), "reason": reason or "FORCE_CLOSE", "liq_forced": True,
         })
         self.recent_realized.append(pnl)
         self.loss_streak = 0 if pnl > 0 else (self.loss_streak + 1)
@@ -3311,7 +2904,17 @@ async def main(use_local=False):
                 _loop = asyncio.get_running_loop()
                 _poly = await _loop.run_in_executor(
                     None,
-                    lambda: _get_polymarket_snapshot_cached(_cur_price),
+                    lambda: get_polymarket_snapshot_cached(_cur_price),
+                )
+                await _loop.run_in_executor(
+                    None,
+                    lambda: append_polymarket_snapshot_to_duckdb(
+                        db_path=POLYMARKET_DUCKDB_PATH,
+                        snapshot=dict(_poly or {}),
+                        current_price=float(_cur_price or 0.0),
+                        raw_payload=dict((_poly or {}).get("raw_payload", {}) or {}),
+                        logger=logger,
+                    ),
                 )
                 _trk = await _loop.run_in_executor(
                     None,
@@ -3323,7 +2926,7 @@ async def main(use_local=False):
                 )
                 _ens["tracker"] = _ensemble_tracker_summary(_trk)
                 state["ensembles"] = _ens
-                state["polymarket"] = dict(_poly or {})
+                state["polymarket"] = polymarket_public_view(dict(_poly or {}))
 
                 now_kst = pd.Timestamp.now(tz="Asia/Seoul")
                 quant_minute_key = now_kst.strftime("%Y-%m-%d %H:%M")
@@ -3595,10 +3198,10 @@ async def main(use_local=False):
 
         # ── 🎯 Polymarket 1분 급변 시 강제 청산 가드 ────────────────
         try:
-            _poly_live = _get_polymarket_snapshot_cached(float(current_price))
+            _poly_live = get_polymarket_snapshot_cached(float(current_price))
         except Exception:
             _poly_live = {}
-        _poly_force_exit, _poly_reason = _polymarket_exit_guard(
+        _poly_force_exit, _poly_reason = polymarket_exit_guard(
             pos=meta_router.pos,
             entry_price=float(meta_router.entry_price or 0.0),
             poly=dict(_poly_live or {}),
@@ -3630,7 +3233,6 @@ async def main(use_local=False):
         _pb_exec_hft = dict(_pb_exec_eval.get("winner_hft", {}) or {})
         _pb_exec_mft = dict(_pb_exec_eval.get("winner_mft", {}) or {})
         _pb_exec_list = list(_pb_exec_eval.get("evaluations", []) or [])
-
         # ── 최종 포지션 업데이트 및 대시보드 저장 ──
         meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
         meta_router.update_adaptive_gate(final_action=int(_fa), in_position=(meta_router.pos is not None))
@@ -3677,16 +3279,11 @@ async def main(use_local=False):
             trade_pnl_pct = 0.0
         if trade_pnl_pct is not None: meta_result["trade_pnl_pct"] = float(trade_pnl_pct)
 
-        _agent_actions = {
-            "long": {
-                "action": int(info.get("_long_action", 0)),
-                "kelly_weight": float(max(0.0, _safe_float(info.get("_long_kelly", info.get("_long_raw", 0.0)), 0.0))),
-            },
-            "short": {
-                "action": int(info.get("_short_action", 0)),
-                "kelly_weight": float(max(0.0, _safe_float(info.get("_short_kelly", info.get("_short_raw", 0.0)), 0.0))),
-            },
-        }
+        _agent_tracker_seed = _load_agent_tracker_state()
+        _agent_actions = dsac_router.specialist_display_actions(
+            tracker_state=_agent_tracker_seed,
+            current_time_kst=current_time_kst,
+        )
         _agent_tracker_state = _update_agent_tracker(
             agent_actions=_agent_actions,
             current_price=current_price,
@@ -3815,9 +3412,7 @@ async def main(use_local=False):
                 })
 
             _sess_flags_live = _session_flags_from_timestamp(current_time_kst)
-            _poly_snapshot = dict(_POLYMARKET_CACHE.get("payload", {}) or {})
-            if not _poly_snapshot:
-                _poly_snapshot = _get_polymarket_snapshot_cached(float(current_price))
+            _poly_snapshot = get_polymarket_snapshot_cached(float(current_price))
             _quant_formula = dict(_QUANT_CARD_CACHE.get("payload", {}) or {})
             if not _quant_formula:
                 _quant_formula = _build_quant_formula_card(
@@ -3858,18 +3453,18 @@ async def main(use_local=False):
                         "std": float(info.get("primary_model_std", info.get("primary_std", 0.0))),
                     },
                     "long": {
-                        "action": int(info.get("_long_action", 0)),
-                        "logit": float(info.get("_long_raw", 0.0)),
+                        "action": int(_agent_actions.get("long", {}).get("action", 0)),
+                        "logit": float(_agent_actions.get("long", {}).get("logit", 0.0)),
                         "kelly_weight": float(_agent_actions.get("long", {}).get("kelly_weight", 0.0)),
-                        "std": float(info.get("long_std", 0.0)),
-                        "decision_at": str(current_time_kst),
+                        "std": float(_agent_actions.get("long", {}).get("std", 0.0)),
+                        "decision_at": str(_agent_actions.get("long", {}).get("decision_at", current_time_kst)),
                     },
                     "short": {
-                        "action": int(info.get("_short_action", 0)),
-                        "logit": float(info.get("_short_raw", 0.0)),
+                        "action": int(_agent_actions.get("short", {}).get("action", 0)),
+                        "logit": float(_agent_actions.get("short", {}).get("logit", 0.0)),
                         "kelly_weight": float(_agent_actions.get("short", {}).get("kelly_weight", 0.0)),
-                        "std": float(info.get("short_std", 0.0)),
-                        "decision_at": str(current_time_kst),
+                        "std": float(_agent_actions.get("short", {}).get("std", 0.0)),
+                        "decision_at": str(_agent_actions.get("short", {}).get("decision_at", current_time_kst)),
                     },
                     "agreement_count": int(info.get("agreement_count", 0)),
                     "net_score": float(info.get("net_score", 0.0)),
@@ -3997,7 +3592,7 @@ async def main(use_local=False):
                 },
                 "llm": dict(_llm_advice or {}),
                 "trades_tail": _trades_tail,
-                "polymarket": dict(_poly_snapshot or {}),
+                "polymarket": polymarket_public_view(dict(_poly_snapshot or {})),
                 "quant_formula": dict(_quant_formula or {}),
                 "ensembles": (lambda _e: {**_e, "tracker": _ensemble_tracker_summary(_load_ensemble_tracker_state())})(
                     _build_ensemble_runtime(
