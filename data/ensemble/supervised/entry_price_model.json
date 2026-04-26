@@ -1,7 +1,13 @@
 {
   "model_path": "entry_price_model.pkl",
   "feature_cols": [
+    "regime_persistence",
+    "cross_scale_curvature",
+    "liquidity_vacuum",
+    "crowding_pressure",
+    "execution_quality",
     "whale_retail_ratio",
+    "whale_conviction",
     "smart_money_flow",
     "squeeze_power",
     "oi_change_rate",
@@ -37,12 +43,10 @@
     "mean_reversion_z",
     "breakout_strength",
     "volume_profile_signal",
-    "funding_roc_12",
-    "funding_roc_48",
     "funding_roc_288",
-    "funding_z_score",
     "long_squeeze_risk",
     "funding_price_divergence",
+    "hurst_48",
     "regime_trending",
     "cvp_poc_dist",
     "cvp_cluster_position",
@@ -55,7 +59,24 @@
     "kel",
     "mta_funding",
     "svps",
-    "signal_patchtst",
+    "garch_vol_z",
+    "ou_funding_z",
+    "ou_halflife",
+    "jump_flag",
+    "jump_z",
+    "evt_tail_flag",
+    "evt_excess_z",
+    "sig_volume_confirm",
+    "sig_liquidity_trap",
+    "sig_trend_health",
+    "sig_whale",
+    "sig_oi_divergence",
+    "sig_ai_squeeze",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal",
     "mtf_trend_1h",
     "mtf_trend_4h",
     "ret_12",
@@ -69,7 +90,15 @@
   "long_clip": 0.02,
   "short_clip": 0.02,
   "metrics": {
-    "long_mae": 0.0018230031640334263,
-    "short_mae": 0.0016614283476268231
-  }
+    "long_mae": 0.0018198700856069225,
+    "short_mae": 0.001662191373839391
+  },
+  "val_metrics": {
+    "long_mae": 0.001248133466180421,
+    "short_mae": 0.0012085018269829028
+  },
+  "objective": "quantile",
+  "alpha": 0.5,
+  "emphasis_scale": 0.0,
+  "emphasis_power": 2.0
 }

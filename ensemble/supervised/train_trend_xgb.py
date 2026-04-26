@@ -348,7 +348,6 @@ MUST_INCLUDE = [
     # 미시구조 축
     'net_taker_ratio', 'oi_change_rate', 'smart_money_flow', 'btc_corr_60',
     # PatchTST 결합 축
-    'signal_patchtst',
     # New Elite 핵심 축
     'sig_volume_confirm', 'sig_trend_health',
 ]
@@ -396,11 +395,7 @@ def _combine_pred_conf(df: pd.DataFrame) -> pd.DataFrame:
     raw pred/conf 컬럼을 제거하고 signal_* 컬럼만 남겨 feature 수를 절반으로 줄이고
     다중공선성(pred↔conf)을 차단한다.
     """
-    PRED_TO_CONF = {
-        'pred_chronos': 'conf_chronos',
-        'pred_patchtst': 'conf_patchtst',
-        'pred_tide': 'conf_tide',
-    }
+    PRED_TO_CONF = {}
     created = []
     for p_col, c_col in PRED_TO_CONF.items():
         sig_col = p_col.replace('pred_', 'signal_')

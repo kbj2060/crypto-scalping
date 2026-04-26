@@ -1,16 +1,16 @@
 {
   "pos": "LONG",
   "entry_price": 2305.167724609375,
-  "hold_count": 224,
+  "hold_count": 232,
   "open_trade_id": "trade-20260425T162005.598791Z",
   "opened_at": "2026-04-26T01:20:05.598834+09:00",
   "decision_at": "2026-04-26 01:20:00",
-  "current_exposure": 0.5639,
-  "current_leverage": 0.5639,
-  "position_fraction": 0.5639,
+  "current_exposure": 0.6971,
+  "current_leverage": 0.6971,
+  "position_fraction": 0.6971,
   "execution_leverage": 1.0,
   "peak_equity": 1.0038575041366609,
-  "cur_equity": 1.0015023543519823,
+  "cur_equity": 1.0019448917215623,
   "last_realized_pnl": null,
   "last_closed_hold_count": 402,
   "loss_streak": 0,
@@ -1123,5 +1123,5 @@
       "reason": "DSAC_PURE_RL|ALPHA_FOCUS_STRICT(tag=bad,lev=1.000)"
     }
   ],
-  "saved_at": "2026-04-26T02:55:02.628211"
+  "saved_at": "2026-04-26T03:15:05.132995"
 }

@@ -26,11 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DATA_PATH = "data/training_features_5m.csv"
 DEFAULT_RL_DATA_PATH = "data/rl_training_data_full.csv"
 
-PRED_CONF_MAP = {
-    "pred_chronos": "conf_chronos",
-    "pred_patchtst": "conf_patchtst",
-    "pred_tide": "conf_tide",
-}
+PRED_CONF_MAP = {}
 
 RL_SIG_COLS = [
     "sig_whale",

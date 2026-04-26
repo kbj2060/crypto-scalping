@@ -107,11 +107,7 @@ def _enrich_m7_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # ── 1. signal_* = pred_* × conf_* 합성 ─────────────────────────
-    _pred_conf_pairs = [
-        ("pred_patchtst", "conf_patchtst"),
-        ("pred_chronos",  "conf_chronos"),
-        ("pred_tide",     "conf_tide"),
-    ]
+    _pred_conf_pairs = []
     for pred_col, conf_col in _pred_conf_pairs:
         sig_col = pred_col.replace("pred_", "signal_")
         if sig_col in df.columns:

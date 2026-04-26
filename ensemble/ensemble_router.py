@@ -88,7 +88,7 @@ class PatchTSTForecaster:
         try:
             from neuralforecast import NeuralForecast
 
-            model_dir = os.path.join(os.getcwd(), "data", "nf")
+            model_dir = os.path.join(os.getcwd(), "data", "nf_patchtst")
             if not os.path.exists(model_dir):
                 logger.warning("PatchTST model folder not found: %s", model_dir)
                 cls._available = False
@@ -178,3 +178,179 @@ class PatchTSTForecaster:
         except Exception as e:
             logger.warning("PatchTST predict failed: %s", e)
             raise
+
+    def get_refined_features(self, df: pd.DataFrame, horizon: int = 6) -> dict:
+        """PatchTST specialized: Cosine Similarity between consecutive prediction vectors."""
+        pred_out = self.predict(df, horizon)
+        curr_pred = pred_out.median.flatten()
+        
+        if not hasattr(self, "_last_pred") or self._last_pred is None:
+            self._last_pred = curr_pred
+            similarity = 1.0
+        else:
+            # Cosine Similarity
+            dot = np.dot(curr_pred, self._last_pred)
+            norm = np.linalg.norm(curr_pred) * np.linalg.norm(self._last_pred)
+            similarity = dot / (norm + 1e-8)
+            self._last_pred = curr_pred
+            
+        return {
+            "patchtst_median": curr_pred[0],
+            "patchtst_regime_sim": float(similarity)
+        }
+
+class TiDEVolatilityForecaster(PatchTSTForecaster):
+    _nf_model = None
+    _available = False
+    name = "TiDE"
+    
+    def __init__(self):
+        super().__init__()
+        self.model_type = "TiDE"
+        if TiDEVolatilityForecaster._nf_model is None:
+            self._load_model_pack()
+        self.nf = TiDEVolatilityForecaster._nf_model
+        self.available = TiDEVolatilityForecaster._available
+
+    @classmethod
+    def _load_model_pack(cls) -> None:
+        try:
+            from neuralforecast import NeuralForecast
+            model_dir = os.path.join(os.getcwd(), "data", "nf_tide")
+            if not os.path.exists(model_dir):
+                cls._available = False
+                return
+            logging.disable(logging.INFO)
+            try:
+                with SuppressOutput():
+                    cls._nf_model = NeuralForecast.load(path=model_dir)
+            finally:
+                logging.disable(logging.NOTSET)
+            cls._available = True
+        except Exception:
+            cls._available = False
+            cls._nf_model = None
+
+    def get_refined_features(self, df: pd.DataFrame, horizon: int = 10) -> dict:
+        """TiDE specialized: Rolling Z-Score for Volatility Outliers."""
+        pred_out = self.predict(df, horizon)
+        curr_vol = float(pred_out.median.flatten()[0])
+        
+        if not hasattr(self, "_history"):
+            self._history = []
+        
+        self._history.append(curr_vol)
+        if len(self._history) > 200:
+            self._history.pop(0)
+            
+        if len(self._history) < 20:
+            z_score = 0.0
+        else:
+            mu = np.mean(self._history)
+            std = np.std(self._history) + 1e-8
+            z_score = (curr_vol - mu) / std
+            
+        return {
+            "tide_vol_raw": curr_vol,
+            "tide_vol_zscore": float(z_score)
+        }
+
+class TimesNetCycleForecaster(PatchTSTForecaster):
+    _nf_model = None
+    _available = False
+    name = "TimesNet"
+    
+    def __init__(self):
+        super().__init__()
+        self.model_type = "TimesNet"
+        if TimesNetCycleForecaster._nf_model is None:
+            self._load_model_pack()
+        self.nf = TimesNetCycleForecaster._nf_model
+        self.available = TimesNetCycleForecaster._available
+
+    @classmethod
+    def _load_model_pack(cls) -> None:
+        try:
+            from neuralforecast import NeuralForecast
+            model_dir = os.path.join(os.getcwd(), "data", "nf_timesnet")
+            if not os.path.exists(model_dir):
+                cls._available = False
+                return
+            with SuppressOutput():
+                cls._nf_model = NeuralForecast.load(path=model_dir)
+            cls._available = True
+        except Exception:
+            cls._available = False
+            cls._nf_model = None
+
+    def get_refined_features(self, df: pd.DataFrame, horizon: int = 10) -> dict:
+        """TimesNet specialized: Cyclical Encoding and Delta."""
+        pred_out = self.predict(df, horizon)
+        t = float(pred_out.median.flatten()[0])
+        t = max(t, 1.0) # Avoid division by zero
+        
+        # Cyclical encoding
+        sin_t = np.sin(2 * np.pi / t)
+        cos_t = np.cos(2 * np.pi / t)
+        
+        # Delta
+        if not hasattr(self, "_last_t") or self._last_t is None:
+            delta_t = 0.0
+        else:
+            delta_t = t - self._last_t
+        self._last_t = t
+        
+        return {
+            "timesnet_cycle_sin": float(sin_t),
+            "timesnet_cycle_cos": float(cos_t),
+            "timesnet_cycle_delta": float(delta_t)
+        }
+
+class DLinearOFIForecaster(PatchTSTForecaster):
+    _nf_model = None
+    _available = False
+    name = "DLinear"
+    
+    def __init__(self):
+        super().__init__()
+        self.model_type = "DLinear"
+        if DLinearOFIForecaster._nf_model is None:
+            self._load_model_pack()
+        self.nf = DLinearOFIForecaster._nf_model
+        self.available = DLinearOFIForecaster._available
+
+    @classmethod
+    def _load_model_pack(cls) -> None:
+        try:
+            from neuralforecast import NeuralForecast
+            model_dir = os.path.join(os.getcwd(), "data", "nf_dlinear")
+            if not os.path.exists(model_dir):
+                cls._available = False
+                return
+            with SuppressOutput():
+                cls._nf_model = NeuralForecast.load(path=model_dir)
+            cls._available = True
+        except Exception:
+            cls._available = False
+            cls._nf_model = None
+
+    def get_refined_features(self, df: pd.DataFrame, horizon: int = 10) -> dict:
+        """DLinear specialized: EMA Smoothing and Slope (Acceleration)."""
+        pred_out = self.predict(df, horizon)
+        curr_val = float(pred_out.median.flatten()[0])
+        
+        # EMA Smoothing (alpha=0.1)
+        if not hasattr(self, "_ema_val") or self._ema_val is None:
+            self._ema_val = curr_val
+            slope = 0.0
+        else:
+            alpha = 0.1
+            prev_ema = self._ema_val
+            self._ema_val = alpha * curr_val + (1 - alpha) * prev_ema
+            slope = self._ema_val - prev_ema
+            
+        return {
+            "dlinear_smf_ema": float(self._ema_val),
+            "dlinear_smf_slope": float(slope)
+        }
+
