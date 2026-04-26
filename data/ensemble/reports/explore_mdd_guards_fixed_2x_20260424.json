@@ -1,0 +1,82 @@
+{
+  "csv_path": "/home/kbj20/crypto-scalping/data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "ckpt_path": "/home/kbj20/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth",
+  "rows": 16897,
+  "results": [
+    {
+      "profile": "plain_2x",
+      "metrics": {
+        "pnl_pct": 262.08042261719294,
+        "mdd_pct": -27.055787360958384,
+        "trades": 1352,
+        "wr_pct": 39.571005917159766,
+        "long_entries": 568,
+        "short_entries": 784,
+        "avg_hold_bars": 9.934171597633137,
+        "avg_fraction": 0.2598607322485207,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.5197214644970414
+      }
+    },
+    {
+      "profile": "stop_loss_guard",
+      "metrics": {
+        "pnl_pct": 262.08042261719294,
+        "mdd_pct": -27.055787360958384,
+        "trades": 1352,
+        "wr_pct": 39.571005917159766,
+        "long_entries": 568,
+        "short_entries": 784,
+        "avg_hold_bars": 9.934171597633137,
+        "avg_fraction": 0.2598607322485207,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.5197214644970414
+      }
+    },
+    {
+      "profile": "toxicity_exit",
+      "metrics": {
+        "pnl_pct": 262.08042261719294,
+        "mdd_pct": -27.055787360958384,
+        "trades": 1352,
+        "wr_pct": 39.571005917159766,
+        "long_entries": 568,
+        "short_entries": 784,
+        "avg_hold_bars": 9.934171597633137,
+        "avg_fraction": 0.2598607322485207,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.5197214644970414
+      }
+    },
+    {
+      "profile": "whipsaw_filter",
+      "metrics": {
+        "pnl_pct": 285.0067840944576,
+        "mdd_pct": -24.09938386412078,
+        "trades": 1352,
+        "wr_pct": 41.71597633136095,
+        "long_entries": 584,
+        "short_entries": 768,
+        "avg_hold_bars": 7.849852071005917,
+        "avg_fraction": 0.26480144600591715,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.5296028920118343
+      }
+    },
+    {
+      "profile": "trend_confirm",
+      "metrics": {
+        "pnl_pct": 256.3826098088583,
+        "mdd_pct": -22.97211430597169,
+        "trades": 948,
+        "wr_pct": 41.561181434599156,
+        "long_entries": 422,
+        "short_entries": 526,
+        "avg_hold_bars": 8.50632911392405,
+        "avg_fraction": 0.29639280063291135,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.5927856012658227
+      }
+    }
+  ]
+}

@@ -16,6 +16,8 @@ for _p in (_ROOT_DIR, _ENSEMBLE_DIR, _THIS_DIR):
         sys.path.insert(0, _p)
 
 from features.engineering import ULTIMATE_FEATURE_COLS
+from features.high_order_state import HIGH_ORDER_STATE_COLS
+from features.high_order_state import add_high_order_state_features
 from ensemble.supervised.train_trend_xgb import compute_atr, make_triple_barrier_label
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,9 @@ def load_feature_frame(
             df = df.merge(df_rl[[timestamp_col] + extra_cols], on=timestamp_col, how="inner")
 
     df = _combine_pred_conf(df)
+    if any(c not in df.columns for c in HIGH_ORDER_STATE_COLS):
+        logger.info("auto-building missing high-order state features: %s", [c for c in HIGH_ORDER_STATE_COLS if c not in df.columns])
+        df = add_high_order_state_features(df)
     df.sort_values(timestamp_col, inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
@@ -122,7 +127,10 @@ def select_feature_columns(
     df: pd.DataFrame,
     must_include: List[str] | None = None,
 ) -> List[str]:
-    must_include = must_include or []
+    base_must_include = list(must_include or [])
+    for c in HIGH_ORDER_STATE_COLS:
+        if c in df.columns and c not in base_must_include:
+            base_must_include.append(c)
     signal_cols = [p.replace("pred_", "signal_") for p in PRED_CONF_MAP]
 
     extra_cols = signal_cols + RL_SIG_COLS + RL_ALPHA_COLS + [
@@ -140,10 +148,12 @@ def select_feature_columns(
     for c in ULTIMATE_FEATURE_COLS:
         if c in df.columns and c not in cols:
             cols.append(c)
-    for c in extra_cols + must_include:
+    for c in extra_cols + base_must_include:
         if c in df.columns and c not in cols:
             cols.append(c)
-    return cols
+    ordered = [c for c in base_must_include if c in cols]
+    ordered.extend([c for c in cols if c not in ordered])
+    return ordered
 
 
 def make_triple_barrier_targets(

@@ -96,17 +96,28 @@ def _future_extrema_offsets(df: pd.DataFrame, horizon: int, clip_pct: float) -> 
     return long_offset, short_offset
 
 
+def _target_weights(y: np.ndarray, clip_pct: float, emphasis_scale: float, emphasis_power: float) -> np.ndarray:
+    y = np.asarray(y, dtype=np.float64)
+    base = np.ones_like(y, dtype=np.float64)
+    if emphasis_scale <= 0.0:
+        return base
+    mag = np.clip(np.abs(y) / max(float(clip_pct), 1e-8), 0.0, 1.0)
+    return base + float(emphasis_scale) * np.power(mag, max(float(emphasis_power), 1.0))
+
+
 class EntryPriceBrain:
     def __init__(self):
         self.long_model = None
         self.short_model = None
         self.feature_cols: list[str] = []
+        self.long_feature_cols: list[str] = []
+        self.short_feature_cols: list[str] = []
         self.horizon = 3
         self.long_clip = 0.02
         self.short_clip = 0.02
         self._last_missing_ratio = 0.0
 
-    def _prepare_features(self, df: pd.DataFrame, timestamp_col: str = "timestamp") -> pd.DataFrame:
+    def _prepare_features(self, df: pd.DataFrame, feature_cols: list[str], timestamp_col: str = "timestamp") -> pd.DataFrame:
         df_w = df.copy()
         if timestamp_col in df_w.columns:
             df_w[timestamp_col] = pd.to_datetime(df_w[timestamp_col], errors="coerce")
@@ -114,18 +125,18 @@ class EntryPriceBrain:
         df_w = _combine_pred_conf(df_w)
         df_w = _add_trend_structure_features(df_w)
 
-        missing_cols = [c for c in self.feature_cols if c not in df_w.columns]
+        missing_cols = [c for c in feature_cols if c not in df_w.columns]
         for col in missing_cols:
             df_w[col] = np.nan
-        self._last_missing_ratio = len(missing_cols) / max(len(self.feature_cols), 1)
+        self._last_missing_ratio = len(missing_cols) / max(len(feature_cols), 1)
         if missing_cols:
             if self._last_missing_ratio >= MISSING_WARN_RATIO:
                 logger.warning(
                     "EntryPrice 입력 피처 누락률 높음: %d/%d (%.1f%%)",
-                    len(missing_cols), len(self.feature_cols), self._last_missing_ratio * 100.0,
+                    len(missing_cols), len(feature_cols), self._last_missing_ratio * 100.0,
                 )
 
-        x = df_w[self.feature_cols].replace([np.inf, -np.inf], np.nan)
+        x = df_w[feature_cols].replace([np.inf, -np.inf], np.nan)
         return x.astype(np.float32)
 
     def predict_batch_from_df(self, df: pd.DataFrame, timestamp_col: str = "timestamp") -> pd.DataFrame:
@@ -136,19 +147,25 @@ class EntryPriceBrain:
         out = pd.DataFrame(index=df.index)
         close = pd.to_numeric(df["close"], errors="coerce").replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0).to_numpy(dtype=np.float64)
 
-        if self.long_model is None or self.short_model is None or not self.feature_cols:
+        long_feature_cols = self.long_feature_cols or self.feature_cols
+        short_feature_cols = self.short_feature_cols or self.feature_cols
+        if self.long_model is None or self.short_model is None or not long_feature_cols or not short_feature_cols:
             long_offset = np.zeros(n, dtype=np.float64)
             short_offset = np.zeros(n, dtype=np.float64)
         else:
-            x = self._prepare_features(df, timestamp_col=timestamp_col)
-            if self._last_missing_ratio >= 0.35:
+            x_long = self._prepare_features(df, long_feature_cols, timestamp_col=timestamp_col)
+            long_missing_ratio = self._last_missing_ratio
+            x_short = self._prepare_features(df, short_feature_cols, timestamp_col=timestamp_col)
+            short_missing_ratio = self._last_missing_ratio
+            if max(long_missing_ratio, short_missing_ratio) >= 0.35:
                 # 학습-추론 피처 스키마 불일치가 크면 안전하게 오프셋 비활성화
                 long_offset = np.zeros(n, dtype=np.float64)
                 short_offset = np.zeros(n, dtype=np.float64)
             else:
-                x = x.fillna(x.median(numeric_only=True)).fillna(0.0)
-                long_offset = np.asarray(self.long_model.predict(x), dtype=np.float64).reshape(-1)
-                short_offset = np.asarray(self.short_model.predict(x), dtype=np.float64).reshape(-1)
+                x_long = x_long.fillna(x_long.median(numeric_only=True)).fillna(0.0)
+                x_short = x_short.fillna(x_short.median(numeric_only=True)).fillna(0.0)
+                long_offset = np.asarray(self.long_model.predict(x_long), dtype=np.float64).reshape(-1)
+                short_offset = np.asarray(self.short_model.predict(x_short), dtype=np.float64).reshape(-1)
                 long_offset = np.clip(long_offset, -self.long_clip, 0.0)
                 short_offset = np.clip(short_offset, 0.0, self.short_clip)
 
@@ -182,10 +199,12 @@ class EntryPriceBrain:
         inst.long_model = payload.get("long_model")
         inst.short_model = payload.get("short_model")
         inst.feature_cols = list(payload.get("feature_cols", meta.get("feature_cols", [])))
+        inst.long_feature_cols = list(payload.get("long_feature_cols", meta.get("long_feature_cols", inst.feature_cols)))
+        inst.short_feature_cols = list(payload.get("short_feature_cols", meta.get("short_feature_cols", inst.feature_cols)))
         inst.horizon = int(payload.get("horizon", meta.get("horizon", 3)))
         inst.long_clip = float(payload.get("long_clip", meta.get("long_clip", 0.02)))
         inst.short_clip = float(payload.get("short_clip", meta.get("short_clip", 0.02)))
-        if not inst.feature_cols or inst.long_model is None or inst.short_model is None:
+        if (not inst.feature_cols and (not inst.long_feature_cols or not inst.short_feature_cols)) or inst.long_model is None or inst.short_model is None:
             raise ValueError("entry price model payload incomplete")
         logger.info("✅ EntryPriceBrain 로드 완료: %s (%d개 피처)", model_path, len(inst.feature_cols))
         return inst
@@ -213,10 +232,14 @@ def train(args: argparse.Namespace) -> dict:
     x_test = x_all.iloc[te_idx].copy()
     x_train, x_val = median_fill_by_train(x_train, x_val)
     x_train, x_test = median_fill_by_train(x_train, x_test)
+    x_val, x_test = median_fill_by_train(x_val, x_test)
+
+    w_long = _target_weights(y_long[tr_idx], args.clip_pct, args.emphasis_scale, args.emphasis_power)
+    w_short = _target_weights(y_short[tr_idx], args.clip_pct, args.emphasis_scale, args.emphasis_power)
 
     params = dict(
-        objective="quantile",
-        alpha=0.5,
+        objective=args.objective,
+        alpha=args.alpha,
         n_estimators=args.n_estimators,
         learning_rate=args.learning_rate,
         num_leaves=args.num_leaves,
@@ -232,13 +255,17 @@ def train(args: argparse.Namespace) -> dict:
 
     long_model = LGBMRegressor(**params)
     short_model = LGBMRegressor(**params)
-    long_model.fit(x_train, y_long[tr_idx])
-    short_model.fit(x_train, y_short[tr_idx])
+    long_model.fit(x_train, y_long[tr_idx], sample_weight=w_long)
+    short_model.fit(x_train, y_short[tr_idx], sample_weight=w_short)
 
     long_pred = np.asarray(long_model.predict(x_test), dtype=np.float64)
     short_pred = np.asarray(short_model.predict(x_test), dtype=np.float64)
     long_mae = float(np.mean(np.abs(long_pred - y_long[te_idx])))
     short_mae = float(np.mean(np.abs(short_pred - y_short[te_idx])))
+    val_long_pred = np.asarray(long_model.predict(x_val), dtype=np.float64)
+    val_short_pred = np.asarray(short_model.predict(x_val), dtype=np.float64)
+    val_long_mae = float(np.mean(np.abs(val_long_pred - y_long[va_idx])))
+    val_short_mae = float(np.mean(np.abs(val_short_pred - y_short[va_idx])))
 
     save_path = args.save_path or SAVE_PATH
     model_path = os.path.splitext(save_path)[0] + ".pkl"
@@ -251,6 +278,7 @@ def train(args: argparse.Namespace) -> dict:
         "long_clip": float(args.clip_pct),
         "short_clip": float(args.clip_pct),
         "metrics": {"long_mae": long_mae, "short_mae": short_mae},
+        "val_metrics": {"long_mae": val_long_mae, "short_mae": val_short_mae},
     }
     with open(model_path, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -262,12 +290,23 @@ def train(args: argparse.Namespace) -> dict:
         "long_clip": float(args.clip_pct),
         "short_clip": float(args.clip_pct),
         "metrics": {"long_mae": long_mae, "short_mae": short_mae},
+        "val_metrics": {"long_mae": val_long_mae, "short_mae": val_short_mae},
+        "objective": args.objective,
+        "alpha": float(args.alpha),
+        "emphasis_scale": float(args.emphasis_scale),
+        "emphasis_power": float(args.emphasis_power),
     }
     with open(save_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
     logger.info("✅ Entry price model saved: %s", save_path)
-    logger.info("test_long_mae=%.6f | test_short_mae=%.6f", long_mae, short_mae)
+    logger.info(
+        "val_long_mae=%.6f | val_short_mae=%.6f | test_long_mae=%.6f | test_short_mae=%.6f",
+        val_long_mae,
+        val_short_mae,
+        long_mae,
+        short_mae,
+    )
     return meta
 
 
@@ -284,11 +323,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-estimators", type=int, default=400)
     p.add_argument("--learning-rate", type=float, default=0.03)
     p.add_argument("--num-leaves", type=int, default=63)
+    p.add_argument("--objective", default="quantile")
+    p.add_argument("--alpha", type=float, default=0.5)
     p.add_argument("--subsample", type=float, default=0.8)
     p.add_argument("--colsample-bytree", type=float, default=0.8)
     p.add_argument("--min-child-samples", type=int, default=40)
     p.add_argument("--reg-alpha", type=float, default=0.1)
     p.add_argument("--reg-lambda", type=float, default=1.0)
+    p.add_argument("--emphasis-scale", type=float, default=0.0)
+    p.add_argument("--emphasis-power", type=float, default=2.0)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-jobs", type=int, default=-1)
     p.add_argument("--startup-check-only", action="store_true")

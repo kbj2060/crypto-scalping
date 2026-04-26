@@ -38,7 +38,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from ensemble.train_rl_dsac_agent import DSAC_STATE_DIM, GaussianActor, DSACCompactTradingEnv
-from ensemble.train_rl_agent import OnlineHMMDetector, MultiTimeframeFeatures
+from ensemble.rl_runtime_primitives import OnlineHMMDetector, MultiTimeframeFeatures
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger("primary_fill")

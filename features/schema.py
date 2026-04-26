@@ -7,8 +7,8 @@ from typing import Iterable
 import pandas as pd
 from .registry import get_m7_columns
 
-STATE_PRED = ["pred_patchtst", "pred_chronos", "pred_tide"]
-STATE_CONF = ["conf_patchtst", "conf_chronos", "conf_tide"]
+STATE_PRED = ["pred_patchtst"]
+STATE_CONF = ["conf_patchtst"]
 STATE_REGIME = ["regime_chop", "regime_whipsaw", "regime_bull", "regime_bear", "regime_normal"]
 STATE_ELITE = [
     "sig_ai_squeeze",
@@ -26,14 +26,25 @@ STATE_ALPHA = [
     "rogers_satchell_vol",
     "amihud_illiquidity_z",
 ]
+STATE_HIGH_ORDER = [
+    "regime_persistence",
+    "cross_scale_curvature",
+    "liquidity_vacuum",
+    "crowding_pressure",
+    "execution_quality",
+]
 STATE_SYNTH = ["ofti", "kel"]
 
-# NF 추론(PatchTST/TiDE)에서 close 외 exog 계산 시 필요한 선행 컬럼들.
+# PatchTST 추론에서 close 외 exog 계산 시 필요한 선행 컬럼들.
 # 런타임/학습 프루닝에서 빠지면 funding_pressure KeyError가 발생할 수 있다.
 NF_RUNTIME_REQUIRED_COLS = [
     "whale_conviction",
+    "funding_roc_12",
+    "funding_roc_48",
+    "funding_roc_288",
     "funding_abs",
     "funding_pressure",
+    "squeeze_power",
     "cvp_vah_val_width",
 ]
 
@@ -125,6 +136,7 @@ def build_rl_feature_keep(include_entry_price: bool = False) -> set[str]:
     cols.update(STATE_CONF)
     cols.update(STATE_ELITE)
     cols.update(STATE_ALPHA)
+    cols.update(STATE_HIGH_ORDER)
     cols.update(STATE_REGIME)
     cols.update(STATE_SYNTH)
     cols.update(NF_RUNTIME_REQUIRED_COLS)

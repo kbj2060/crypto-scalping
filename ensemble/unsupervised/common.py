@@ -49,12 +49,22 @@ def select_numeric_features(df: pd.DataFrame, min_features: int = 16) -> List[st
     return numeric
 
 
-def rank_features_by_variance(df: pd.DataFrame, feature_cols: List[str]) -> List[str]:
-    valid_cols = [c for c in feature_cols if c in df.columns]
+def rank_features_by_variance(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    must_include: List[str] | None = None,
+) -> List[str]:
+    required = list(must_include or [])
+    valid_cols: List[str] = []
+    for c in required + feature_cols:
+        if c in df.columns and c not in valid_cols:
+            valid_cols.append(c)
     if not valid_cols:
         return []
     variances = df[valid_cols].replace([np.inf, -np.inf], np.nan).var(axis=0, numeric_only=True).fillna(0.0)
-    return variances.sort_values(ascending=False).index.tolist()
+    required_present = [c for c in required if c in variances.index]
+    ranked_rest = [c for c in variances.sort_values(ascending=False).index.tolist() if c not in required_present]
+    return required_present + ranked_rest
 
 
 def zscore_fit_transform(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

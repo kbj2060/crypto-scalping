@@ -1,9 +1,22 @@
 const STATE_URL = "../../data/live/dashboard_state.json";
+const TRADE_JOURNAL_URL = "../../data/live/trade_journal.jsonl";
 const POLL_MS = 2500;
 const MICRO_HISTORY_MAX = 6; // current + past 5
 
 const el = (id) => document.getElementById(id);
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+function removeLegacyAgentPanels() {
+  const wrappers = new Set();
+  ["ensBalDecision", "ensLowDecision"].forEach((id) => {
+    const panel = el(id)?.closest(".panel");
+    const wrapper = panel?.closest(".duo-panels");
+    if (wrapper) wrappers.add(wrapper);
+    if (panel) panel.remove();
+  });
+  wrappers.forEach((wrapper) => {
+    if (!wrapper.querySelector(".panel")) wrapper.remove();
+  });
+}
 const microHistory = {
   obi: [],
   whale: [],
@@ -13,6 +26,7 @@ const microHistory = {
 };
 let latestState = null;
 let latestEvalMap = {};
+let latestTradeJournal = [];
 
 const PB_INFO = {
   PB_VETO_SHIELD: {
@@ -218,6 +232,8 @@ function positionOpenedAtText(track) {
 function dsacDecisionAtText(state) {
   const pos = String(((state || {}).position || {}).current || "NONE").toUpperCase();
   if (pos !== "LONG" && pos !== "SHORT") return "-";
+  const decisionAt = (state || {}).position?.decision_at;
+  if (decisionAt) return fmtTs(decisionAt);
   const openedAt = (state || {}).position?.opened_at;
   if (openedAt) return fmtTs(openedAt);
   const cyc = (state || {}).cycle_timestamp_kst;
@@ -1237,7 +1253,92 @@ function renderBarSvg(svg, points) {
   svg.appendChild(xLabel);
 }
 
+function parseTradeJournal(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch (_e) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function tradeSideClass(side) {
+  const s = String(side || "").toUpperCase();
+  if (s === "LONG") return "long";
+  if (s === "SHORT") return "short";
+  return "";
+}
+
+function cleanDisplaySource(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  return raw
+    .split("|")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .map((part) => {
+      const parenIdx = part.indexOf("(");
+      if (parenIdx >= 0) return part.slice(0, parenIdx).trim();
+      const detailIdx = part.search(/,?\s*\|d1m\|=|,?\s*target=|,?\s*entry=/i);
+      if (detailIdx >= 0) return part.slice(0, detailIdx).trim();
+      return part.trim();
+    })
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function renderTradeJournal() {
+  const listEl = el("tradeJournalList");
+  const summaryEl = el("tradeJournalSummary");
+  const stampEl = el("tradeJournalStamp");
+  if (!listEl || !summaryEl || !stampEl) return;
+
+  const closes = latestTradeJournal.filter((row) => String(row?.kind || "").toUpperCase() === "CLOSE");
+  const recent = closes.slice(-8).reverse();
+  if (!recent.length) {
+    summaryEl.textContent = "최근 체결 없음";
+    stampEl.textContent = "-";
+    listEl.innerHTML = `<div class="trade-journal-empty">거래 저널 데이터가 아직 없습니다.</div>`;
+    return;
+  }
+
+  const totalPnl = recent.reduce((acc, row) => acc + Number(row?.pnl_pct || 0), 0);
+  const wins = recent.filter((row) => Number(row?.pnl_pct || 0) > 0).length;
+  const lastTs = recent[0]?.ts || recent[0]?.closed_at || "";
+  summaryEl.textContent = `최근 ${recent.length}건 합계 ${fmtPct(totalPnl)} · 승률 ${fmtNum((wins / Math.max(recent.length, 1)) * 100, 1)}%`;
+  stampEl.textContent = fmtTs(lastTs);
+  listEl.innerHTML = recent.map((row) => {
+    const side = String(row?.side || "-").toUpperCase();
+    const sideCls = tradeSideClass(side);
+    const entry = Number(row?.entry_exec_price ?? row?.entry_price ?? 0);
+    const exit = Number(row?.exit_exec_price ?? row?.exit_price ?? 0);
+    const pnlPct = Number(row?.pnl_pct || 0);
+    const holdBars = Number(row?.hold_bars || 0);
+    const exposure = Number(row?.total_exposure || 0);
+    const reason = String(row?.reason || row?.event || "-");
+    return `
+      <div class="trade-journal-row">
+        <div class="trade-journal-ts">${fmtTs(row?.closed_at || row?.ts || "")}</div>
+        <div class="trade-journal-side ${sideCls}">${side}</div>
+        <div class="trade-journal-meta">
+          <div class="trade-journal-main">진입 ${fmtNum(entry, 2)} → 청산 ${fmtNum(exit, 2)} · 노출 ${fmtNum(exposure, 3)}x</div>
+          <div class="trade-journal-sub">보유 ${fmtNum(holdBars, 0)}봉 · ${reason}</div>
+        </div>
+        <div class="trade-journal-pnl ${riskClass(pnlPct)}">${fmtPct(pnlPct)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 function render(state) {
+  removeLegacyAgentPanels();
+  renderTradeJournal();
   const sig = state.signal || {};
   const pos = state.position || {};
   const perf = state.performance || {};
@@ -1275,7 +1376,7 @@ function render(state) {
   el("dsacDecisionAt").className = "muted";
   el("dsacPnlMdd").textContent = `${fmtPct(perf.pnl_24h || 0)} / -${fmtNum(maxDrawdown, 2)}%`;
   el("dsacPnlMdd").className = riskClass(perf.pnl_24h || 0);
-  el("dsacSource").textContent = String(sig.source || "-");
+  el("dsacSource").textContent = cleanDisplaySource(sig.source);
   el("dsacSource").className = "muted";
   el("dsacStamp").textContent = globalStamp;
 
@@ -1294,61 +1395,6 @@ function render(state) {
     const pnlBasis = Number(pos.unrealized_pnl_pct ?? perf.pnl_24h ?? 0);
     topPriceEl.className = `top-clock top-price ${pnlBasis > 0 ? "good" : pnlBasis < 0 ? "bad" : "muted"}`;
   }
-  const agents = state.agents || {};
-  const agLong = agents.long || {};
-  const agShort = agents.short || {};
-  const agTracker = agents.tracker || {};
-  const agLongTrack = agTracker.long || {};
-  const agShortTrack = agTracker.short || {};
-  const agDecisionLong = actionLabel(Number(agLong.action ?? 0));
-  const agDecisionShort = actionLabel(Number(agShort.action ?? 0));
-  const agPosLong = String(agLongTrack.pos || "NONE").toUpperCase();
-  const agPosShort = String(agShortTrack.pos || "NONE").toUpperCase();
-
-  el("ensBalDecision").textContent = agDecisionLong.text;
-  el("ensBalDecision").className = agDecisionLong.text === "LONG" ? "good" : agDecisionLong.text === "SHORT" ? "bad" : "muted";
-  el("ensBalPos").textContent = `${agPosLong} / ${fmtNum(agLongTrack.entry_kelly ?? 0, 3)}`;
-  el("ensBalPos").className = agPosLong === "LONG" ? "good" : agPosLong === "SHORT" ? "bad" : "muted";
-  if (hasOwn(agLongTrack, "unrealized_pnl_pct")) {
-    el("ensBalWinRate").textContent = fmtPct(agLongTrack.unrealized_pnl_pct ?? 0);
-    el("ensBalWinRate").className = riskClass(agLongTrack.unrealized_pnl_pct || 0);
-  } else {
-    el("ensBalWinRate").textContent = "-";
-    el("ensBalWinRate").className = "muted";
-  }
-  el("ensBalMdd").textContent = `-${fmtNum(agLongTrack.mdd_pct ?? 0, 2)}%`;
-  el("ensBalMdd").className = Number(agLongTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ensBalEntry").textContent = Number(agLongTrack.entry_price || 0) > 0 ? fmtNum(agLongTrack.entry_price, 2) : "-";
-  el("ensBalEntry").className = "muted";
-  el("ensBalDecisionAt").textContent = positionOpenedAtText(agLongTrack);
-  el("ensBalDecisionAt").className = "muted";
-  el("ensBalTotal").textContent = `누적: ${fmtPct(agLongTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agLongTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agLongTrack.trades ?? 0, 0)}회`;
-  el("ensBalTotal").className = riskClass(agLongTrack.total_return_pct || 0);
-  el("ensBalParamMeta").textContent = "";
-  el("ensBalStamp").textContent = `최종 갱신시각: ${fmtTs(state.updated_at || state.cycle_timestamp_kst)}`;
-
-  el("ensLowDecision").textContent = agDecisionShort.text;
-  el("ensLowDecision").className = agDecisionShort.text === "LONG" ? "good" : agDecisionShort.text === "SHORT" ? "bad" : "muted";
-  el("ensLowPos").textContent = `${agPosShort} / ${fmtNum(agShortTrack.entry_kelly ?? 0, 3)}`;
-  el("ensLowPos").className = agPosShort === "LONG" ? "good" : agPosShort === "SHORT" ? "bad" : "muted";
-  if (hasOwn(agShortTrack, "unrealized_pnl_pct")) {
-    el("ensLowWinRate").textContent = fmtPct(agShortTrack.unrealized_pnl_pct ?? 0);
-    el("ensLowWinRate").className = riskClass(agShortTrack.unrealized_pnl_pct || 0);
-  } else {
-    el("ensLowWinRate").textContent = "-";
-    el("ensLowWinRate").className = "muted";
-  }
-  el("ensLowMdd").textContent = `-${fmtNum(agShortTrack.mdd_pct ?? 0, 2)}%`;
-  el("ensLowMdd").className = Number(agShortTrack.mdd_pct ?? 0) > 0 ? "bad" : "muted";
-  el("ensLowEntry").textContent = Number(agShortTrack.entry_price || 0) > 0 ? fmtNum(agShortTrack.entry_price, 2) : "-";
-  el("ensLowEntry").className = "muted";
-  el("ensLowDecisionAt").textContent = positionOpenedAtText(agShortTrack);
-  el("ensLowDecisionAt").className = "muted";
-  el("ensLowTotal").textContent = `누적: ${fmtPct(agShortTrack.total_return_pct ?? 0)} | 승률: ${fmtNum(agShortTrack.win_rate ?? 0, 1)}% | 거래: ${fmtNum(agShortTrack.trades ?? 0, 0)}회`;
-  el("ensLowTotal").className = riskClass(agShortTrack.total_return_pct || 0);
-  el("ensLowParamMeta").textContent = "";
-  el("ensLowStamp").textContent = `최종 갱신시각: ${fmtTs(state.updated_at || state.cycle_timestamp_kst)}`;
-
   const quant = state.quant_formula || {};
   const qHorizon = Number(quant.horizon_minutes ?? 30);
   const qDirection = String(quant.direction || "").toUpperCase();
@@ -1539,9 +1585,16 @@ function tickOpsClock() {
 
 async function tick() {
   try {
-    const res = await fetch(`${STATE_URL}?t=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const state = await res.json();
+    const nonce = Date.now();
+    const [stateRes, journalRes] = await Promise.all([
+      fetch(`${STATE_URL}?t=${nonce}`, { cache: "no-store" }),
+      fetch(`${TRADE_JOURNAL_URL}?t=${nonce}`, { cache: "no-store" }).catch(() => null),
+    ]);
+    if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
+    const state = await stateRes.json();
+    if (journalRes && journalRes.ok) {
+      latestTradeJournal = parseTradeJournal(await journalRes.text());
+    }
     render(state);
   } catch (_e) {}
 }

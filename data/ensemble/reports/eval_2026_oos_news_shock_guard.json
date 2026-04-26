@@ -1,0 +1,322 @@
+{
+  "checkpoint": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "checkpoint_best_val_pnl": -18.34693573441416,
+  "checkpoint_epoch": 10,
+  "rl_csv": "data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "feat_csv": "data/splits/year_oos/training_features_2026_rebuilt.csv",
+  "data_period": "2026-01-01 ~ 2026-02-28",
+  "data_rows": 16897,
+  "note": "Official 2026 OOS harness with active news shock guard only. No passive hold caps.",
+  "baseline": {
+    "pnl_pct": -27.3403,
+    "wr_pct": 46.72,
+    "trades": 854,
+    "sharpe": -4.178,
+    "mdd_pct": -27.9596,
+    "meta": {
+      "trigger_count": 0,
+      "severe_count": 0,
+      "reduce_count": 0,
+      "flat_count": 0,
+      "cooldown_blocks": 0
+    }
+  },
+  "top3": [
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.88,
+        "aftershock_trigger_th": 0.8,
+        "toxicity_trigger_th": 0.74,
+        "queue_trigger_th": 0.78,
+        "poly_momentum_trigger": 0.008,
+        "poly_gap_trigger": 0.015,
+        "reduce_mult": 0.5,
+        "severe_reduce_mult": 0.0,
+        "cooldown_bars": 4,
+        "severe_cooldown_bars": 8
+      },
+      "name": "st0.88_at0.80_tx0.74_rm0.50",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    },
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.84,
+        "aftershock_trigger_th": 0.76,
+        "toxicity_trigger_th": 0.7,
+        "queue_trigger_th": 0.74,
+        "poly_momentum_trigger": 0.007,
+        "poly_gap_trigger": 0.013,
+        "reduce_mult": 0.35,
+        "severe_reduce_mult": 0.0,
+        "cooldown_bars": 5,
+        "severe_cooldown_bars": 9
+      },
+      "name": "st0.84_at0.76_tx0.70_rm0.35",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    },
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.8,
+        "aftershock_trigger_th": 0.72,
+        "toxicity_trigger_th": 0.66,
+        "queue_trigger_th": 0.7,
+        "poly_momentum_trigger": 0.006,
+        "poly_gap_trigger": 0.011,
+        "reduce_mult": 0.5,
+        "severe_reduce_mult": 0.2,
+        "cooldown_bars": 4,
+        "severe_cooldown_bars": 8
+      },
+      "name": "st0.80_at0.72_tx0.66_rm0.50",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    }
+  ],
+  "all_results": [
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.88,
+        "aftershock_trigger_th": 0.8,
+        "toxicity_trigger_th": 0.74,
+        "queue_trigger_th": 0.78,
+        "poly_momentum_trigger": 0.008,
+        "poly_gap_trigger": 0.015,
+        "reduce_mult": 0.5,
+        "severe_reduce_mult": 0.0,
+        "cooldown_bars": 4,
+        "severe_cooldown_bars": 8
+      },
+      "name": "st0.88_at0.80_tx0.74_rm0.50",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    },
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.84,
+        "aftershock_trigger_th": 0.76,
+        "toxicity_trigger_th": 0.7,
+        "queue_trigger_th": 0.74,
+        "poly_momentum_trigger": 0.007,
+        "poly_gap_trigger": 0.013,
+        "reduce_mult": 0.35,
+        "severe_reduce_mult": 0.0,
+        "cooldown_bars": 5,
+        "severe_cooldown_bars": 9
+      },
+      "name": "st0.84_at0.76_tx0.70_rm0.35",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    },
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.8,
+        "aftershock_trigger_th": 0.72,
+        "toxicity_trigger_th": 0.66,
+        "queue_trigger_th": 0.7,
+        "poly_momentum_trigger": 0.006,
+        "poly_gap_trigger": 0.011,
+        "reduce_mult": 0.5,
+        "severe_reduce_mult": 0.2,
+        "cooldown_bars": 4,
+        "severe_cooldown_bars": 8
+      },
+      "name": "st0.80_at0.72_tx0.66_rm0.50",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    },
+    {
+      "pnl_pct": -27.3403,
+      "wr_pct": 46.72,
+      "trades": 854,
+      "sharpe": -4.178,
+      "mdd_pct": -27.9596,
+      "meta": {
+        "trigger_count": 0,
+        "severe_count": 0,
+        "reduce_count": 0,
+        "flat_count": 0,
+        "cooldown_blocks": 0
+      },
+      "config": {
+        "shock_trigger_th": 0.92,
+        "aftershock_trigger_th": 0.84,
+        "toxicity_trigger_th": 0.78,
+        "queue_trigger_th": 0.82,
+        "poly_momentum_trigger": 0.01,
+        "poly_gap_trigger": 0.018,
+        "reduce_mult": 0.35,
+        "severe_reduce_mult": 0.0,
+        "cooldown_bars": 6,
+        "severe_cooldown_bars": 10
+      },
+      "name": "st0.92_at0.84_tx0.78_rm0.35",
+      "baseline": {
+        "pnl_pct": -27.3403,
+        "wr_pct": 46.72,
+        "trades": 854,
+        "sharpe": -4.178,
+        "mdd_pct": -27.9596,
+        "meta": {
+          "trigger_count": 0,
+          "severe_count": 0,
+          "reduce_count": 0,
+          "flat_count": 0,
+          "cooldown_blocks": 0
+        }
+      },
+      "delta_pct": 0.0
+    }
+  ]
+}

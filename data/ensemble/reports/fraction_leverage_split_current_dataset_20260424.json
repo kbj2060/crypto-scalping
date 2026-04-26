@@ -1,0 +1,130 @@
+{
+  "csv_path": "data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "start": "2026-01-01 00:00:00",
+  "end": "2026-02-28 00:00:00",
+  "rows": 16705,
+  "fixed_trade_timing_count": 678,
+  "results": [
+    {
+      "config": "baseline_coupled",
+      "metrics": {
+        "pnl_pct": -25.110864466537986,
+        "mdd_pct": -26.023043394476076,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.29062873156342184,
+        "avg_fraction": 0.29062873156342184,
+        "avg_leverage": 1.0,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_conservative",
+      "metrics": {
+        "pnl_pct": -15.849233543604836,
+        "mdd_pct": -16.199062867395632,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.16181502567215886,
+        "avg_fraction": 0.1580725432759292,
+        "avg_leverage": 1.023088551614984,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_cons_tight",
+      "metrics": {
+        "pnl_pct": -13.38549391708186,
+        "mdd_pct": -13.723952386698413,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.13332328889945233,
+        "avg_fraction": 0.13295996261623896,
+        "avg_leverage": 1.0026336032383736,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_cons_lowcap",
+      "metrics": {
+        "pnl_pct": -14.603004823828869,
+        "mdd_pct": -14.954493575775762,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.1469089327622822,
+        "avg_fraction": 0.14552289172189528,
+        "avg_leverage": 1.0092774398872235,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_cons_midcap",
+      "metrics": {
+        "pnl_pct": -17.05282051824215,
+        "mdd_pct": -17.410118472626003,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.17593021344724177,
+        "avg_fraction": 0.1706191178225885,
+        "avg_leverage": 1.0304278876748825,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_cons_conftrend",
+      "metrics": {
+        "pnl_pct": -15.092655077467887,
+        "mdd_pct": -15.44448453210413,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.15397201178425968,
+        "avg_fraction": 0.15007035158538348,
+        "avg_leverage": 1.0254175110491621,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_balanced",
+      "metrics": {
+        "pnl_pct": -20.912215263114142,
+        "mdd_pct": -21.145828367400256,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.22296739745875482,
+        "avg_fraction": 0.1991465836634956,
+        "avg_leverage": 1.117583104060973,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    },
+    {
+      "config": "split_aggressive",
+      "metrics": {
+        "pnl_pct": -27.379772715731054,
+        "mdd_pct": -27.39007288112869,
+        "trades": 678,
+        "wr_pct": 25.663716814159294,
+        "avg_exposure": 0.3004126248409933,
+        "avg_fraction": 0.24013841532244834,
+        "avg_leverage": 1.2482360827732424,
+        "long_entries": 339,
+        "short_entries": 339
+      },
+      "trade_count": 678
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "shared_base_features": {
+    "price_returns": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "log_return"
+    ],
+    "volume_execution": [
+      "volume",
+      "quote_volume",
+      "trades",
+      "taker_buy_base",
+      "taker_buy_quote",
+      "trade_intensity",
+      "big_trade_ratio",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "ofi_acceleration"
+    ],
+    "oi_funding_raw": [
+      "sum_open_interest_value",
+      "last_funding_rate",
+      "funding_price_divergence"
+    ],
+    "btc_relative": [
+      "close_btc",
+      "btc_corr_60",
+      "eth_btc_ratio_change"
+    ],
+    "volatility_raw": [
+      "garman_klass_vol",
+      "rogers_satchell_vol",
+      "parkinson_vol",
+      "bb_width_z",
+      "realized_skewness",
+      "amihud_illiquidity_z"
+    ],
+    "trend_structure": [
+      "rsi",
+      "macd_hist",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "turtle_signal",
+      "squeeze_power",
+      "chop_index",
+      "wick_ratio",
+      "fvg_dist"
+    ],
+    "cvp_profile": [
+      "cvp_poc_dist",
+      "cvp_cluster_position",
+      "cvp_volume_imbalance",
+      "cvp_regime",
+      "volume_profile_signal"
+    ],
+    "flow_whale": [
+      "smart_money_flow",
+      "whale_retail_ratio",
+      "whale_conviction",
+      "long_squeeze_risk"
+    ],
+    "state_compression": [
+      "regime_persistence",
+      "cross_scale_curvature",
+      "liquidity_vacuum",
+      "crowding_pressure",
+      "execution_quality"
+    ]
+  },
+  "m7_supervised_inputs": {
+    "trend_xgb": [
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "rsi",
+      "macd_hist",
+      "turtle_signal",
+      "btc_corr_60",
+      "bb_width_z",
+      "realized_skewness",
+      "squeeze_power",
+      "funding_price_divergence",
+      "smart_money_flow",
+      "net_taker_ratio",
+      "cvp_cluster_position",
+      "regime_persistence",
+      "cross_scale_curvature",
+      "sig_volume_confirm",
+      "sig_trend_health"
+    ],
+    "multi_target_lgbm": [
+      "btc_corr_60",
+      "whale_retail_ratio",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "bb_width_z",
+      "realized_vol_ratio",
+      "squeeze_power",
+      "turtle_signal",
+      "funding_price_divergence",
+      "smart_money_flow",
+      "crowding_pressure",
+      "execution_quality",
+      "trade_intensity",
+      "long_squeeze_risk"
+    ],
+    "quantile_forest": [
+      "rsi",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "bb_width_z",
+      "garman_klass_vol",
+      "rogers_satchell_vol",
+      "amihud_illiquidity_z",
+      "btc_corr_60",
+      "smart_money_flow",
+      "taker_acceleration",
+      "liquidity_vacuum",
+      "cvp_regime",
+      "cvp_poc_dist",
+      "whale_retail_ratio",
+      "fvg_dist"
+    ],
+    "entry_price_model": [
+      "cvp_poc_dist",
+      "cvp_cluster_position",
+      "cvp_volume_imbalance",
+      "bb_width_z",
+      "amihud_illiquidity_z",
+      "execution_quality",
+      "smart_money_flow",
+      "net_taker_ratio",
+      "trade_intensity",
+      "fvg_dist",
+      "wick_ratio",
+      "mtf_trend_1h"
+    ]
+  },
+  "m7_unsupervised_inputs": {
+    "gmm_volatility": [
+      "parkinson_vol",
+      "garman_klass_vol",
+      "rogers_satchell_vol",
+      "bb_width_z",
+      "realized_vol_ratio"
+    ],
+    "isolation_forest": [
+      "smart_money_flow",
+      "net_taker_ratio",
+      "whale_retail_ratio",
+      "crowding_pressure",
+      "oi_change_rate",
+      "trade_intensity",
+      "cvp_volume_imbalance"
+    ],
+    "vae_anomaly": [
+      "cvp_volume_imbalance",
+      "mean_reversion_z",
+      "trade_intensity",
+      "rsi",
+      "volatility_z",
+      "liquidity_vacuum",
+      "smart_money_flow"
+    ],
+    "hdbscan_regime": []
+  },
+  "m7_outputs": {
+    "action_sizing": [
+      "m7_action",
+      "m7_confidence",
+      "m7_size"
+    ],
+    "quantiles_uncertainty": [
+      "m7_q10",
+      "m7_q50",
+      "m7_q90",
+      "m7_qwidth",
+      "m7_expected_ret",
+      "m7_tail_risk",
+      "m7_composite_score"
+    ],
+    "execution": [
+      "m7_entry_long_offset",
+      "m7_entry_short_offset",
+      "m7_tp_offset",
+      "m7_sl_offset",
+      "m7_target_hold"
+    ],
+    "unsupervised_summaries": [
+      "m7_gmm_cluster",
+      "m7_gmm_conf",
+      "m7_gmm_vol_rank",
+      "m7_iso_score",
+      "m7_vae_error",
+      "m7_iso_anom",
+      "m7_vae_anom",
+      "m7_gate_block"
+    ]
+  },
+  "dsac_compact_state": {
+    "position_state": [
+      "current_position",
+      "unrealized_pnl_norm",
+      "time_in_trade_norm",
+      "drawdown_norm",
+      "margin_usage"
+    ],
+    "core_market_state": [
+      "mtf_trend_1h_norm",
+      "mtf_trend_4h_norm",
+      "rogers_satchell_vol_norm",
+      "micro_vol5_norm",
+      "spread_norm",
+      "amihud_norm",
+      "smart_money_flow_norm"
+    ],
+    "m7_summaries": [
+      "m7_anomaly_score",
+      "m7_gmm_conf",
+      "m7_gmm_vol_rank",
+      "m7_prob_up_scaled",
+      "m7_prob_dn_scaled",
+      "m7_prob_fl_scaled",
+      "m7_q_mid_norm",
+      "m7_q_uncertainty_norm",
+      "m7_q_skew",
+      "m7_quality_norm",
+      "m7_hold_norm",
+      "m7_tp_offset_norm",
+      "m7_sl_offset_norm",
+      "m7_trend_entropy_scaled"
+    ]
+  },
+  "cleanup_priorities": {
+    "high": [
+      "pred_ttm",
+      "pred_timesfm",
+      "conf_ttm",
+      "conf_timesfm",
+      "meta_primary_std",
+      "hdbscan_regime",
+      "funding_roc_48",
+      "funding_roc_12",
+      "funding_z_score"
+    ],
+    "medium": [
+      "session_us",
+      "session_europe",
+      "is_hour_open",
+      "regime_trending",
+      "mta_funding",
+      "dual_momentum"
+    ],
+    "validate": [
+      "garch_vol_z"
+    ]
+  }
+}

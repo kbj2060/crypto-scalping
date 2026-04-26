@@ -1,0 +1,25 @@
+{
+  "trade_count": 14,
+  "results": [
+    {
+      "profile": "controller_convex_live",
+      "pnl_pct": -1.899055489646433,
+      "mdd_pct": -1.9800266841278003,
+      "trades": 14,
+      "wr_pct": 28.571428571428573,
+      "avg_leverage": 1.1442725840372374,
+      "boosted": 13,
+      "reverted": 12
+    },
+    {
+      "profile": "controller_convex_duckdb",
+      "pnl_pct": -0.7440199478488319,
+      "mdd_pct": -0.89012253073949,
+      "trades": 14,
+      "wr_pct": 28.571428571428573,
+      "avg_leverage": 0.9925634155188022,
+      "boosted": 7,
+      "reverted": 12
+    }
+  ]
+}

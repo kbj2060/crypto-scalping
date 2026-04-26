@@ -1,0 +1,147 @@
+{
+  "csv_path": "data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "start": "2026-01-01 00:00:00",
+  "end": "2026-02-28 00:00:00",
+  "rows": 16705,
+  "configs": [
+    "current_coupled",
+    "current_drawdown_guard",
+    "current_quality_tilt",
+    "current_adaptive_mild",
+    "current_alpha_focus",
+    "current_alpha_focus_strict",
+    "current_selective_boost",
+    "current_quality_guarded"
+  ],
+  "results": [
+    {
+      "config": "current_coupled",
+      "metrics": {
+        "pnl_pct": 112.93829081012925,
+        "mdd_pct": -15.273987899772711,
+        "trades": 1876,
+        "wr_pct": 40.191897654584224,
+        "long_entries": 836,
+        "short_entries": 1040,
+        "avg_hold_bars": 6.296908315565032,
+        "avg_fraction": 0.24441039445629,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.24441039445629
+      },
+      "trade_count": 1876
+    },
+    {
+      "config": "current_drawdown_guard",
+      "metrics": {
+        "pnl_pct": 150.42103375223928,
+        "mdd_pct": -5.5668474618473685,
+        "trades": 2046,
+        "wr_pct": 40.76246334310851,
+        "long_entries": 940,
+        "short_entries": 1106,
+        "avg_hold_bars": 5.596774193548387,
+        "avg_fraction": 0.2347410116813294,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.2347410116813294
+      },
+      "trade_count": 2046
+    },
+    {
+      "config": "current_quality_tilt",
+      "metrics": {
+        "pnl_pct": 118.42220845730455,
+        "mdd_pct": -5.526538612637532,
+        "trades": 2039,
+        "wr_pct": 40.7552721922511,
+        "long_entries": 939,
+        "short_entries": 1100,
+        "avg_hold_bars": 5.623344776851398,
+        "avg_fraction": 0.2262026141981363,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.2262026141981363
+      },
+      "trade_count": 2039
+    },
+    {
+      "config": "current_adaptive_mild",
+      "metrics": {
+        "pnl_pct": 113.85668521929983,
+        "mdd_pct": -5.522354041794975,
+        "trades": 2019,
+        "wr_pct": 40.812283308568595,
+        "long_entries": 935,
+        "short_entries": 1084,
+        "avg_hold_bars": 5.684001981178802,
+        "avg_fraction": 0.21531155067855373,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.21531155067855373
+      },
+      "trade_count": 2019
+    },
+    {
+      "config": "current_alpha_focus",
+      "metrics": {
+        "pnl_pct": 122.93032750392281,
+        "mdd_pct": -15.954106732035333,
+        "trades": 1843,
+        "wr_pct": 39.39229517091699,
+        "long_entries": 822,
+        "short_entries": 1021,
+        "avg_hold_bars": 6.455778621812263,
+        "avg_fraction": 0.24071417374670373,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.24071417374670373
+      },
+      "trade_count": 1843
+    },
+    {
+      "config": "current_alpha_focus_strict",
+      "metrics": {
+        "pnl_pct": 122.1651701126309,
+        "mdd_pct": -15.677174756181756,
+        "trades": 1816,
+        "wr_pct": 39.592511013215855,
+        "long_entries": 805,
+        "short_entries": 1011,
+        "avg_hold_bars": 6.580947136563877,
+        "avg_fraction": 0.24288092658259913,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.24288092658259913
+      },
+      "trade_count": 1816
+    },
+    {
+      "config": "current_selective_boost",
+      "metrics": {
+        "pnl_pct": 141.54912224948802,
+        "mdd_pct": -7.364549474747017,
+        "trades": 2058,
+        "wr_pct": 40.67055393586006,
+        "long_entries": 949,
+        "short_entries": 1109,
+        "avg_hold_bars": 5.544703595724004,
+        "avg_fraction": 0.23786396127308065,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.23786396127308065
+      },
+      "trade_count": 2058
+    },
+    {
+      "config": "current_quality_guarded",
+      "metrics": {
+        "pnl_pct": 140.52980863557408,
+        "mdd_pct": -5.94089096002145,
+        "trades": 2044,
+        "wr_pct": 40.90019569471624,
+        "long_entries": 943,
+        "short_entries": 1101,
+        "avg_hold_bars": 5.607632093933463,
+        "avg_fraction": 0.22845984957925636,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.22845984957925636
+      },
+      "trade_count": 2044
+    }
+  ]
+}

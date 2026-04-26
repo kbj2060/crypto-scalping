@@ -27,7 +27,7 @@ POLYMARKET_CLOB_PRICE_URL = os.getenv("POLYMARKET_CLOB_PRICE_URL", "https://clob
 POLYMARKET_CLOB_BOOK_URL = os.getenv("POLYMARKET_CLOB_BOOK_URL", "https://clob.polymarket.com/book")
 POLYMARKET_TIMEOUT_SEC = float(os.getenv("POLYMARKET_TIMEOUT_SEC", "2.5"))
 POLYMARKET_MAX_MARKETS = int(float(os.getenv("POLYMARKET_MAX_MARKETS", "20")))
-POLYMARKET_EXIT_ENABLE = _env_flag("POLYMARKET_EXIT_ENABLE", True)
+POLYMARKET_EXIT_ENABLE = _env_flag("POLYMARKET_EXIT_ENABLE", False)
 POLYMARKET_SHOCK_1M_TH = float(os.getenv("POLYMARKET_SHOCK_1M_TH", "0.02"))
 POLYMARKET_SHOCK_Z_TH = float(os.getenv("POLYMARKET_SHOCK_Z_TH", "1.5"))
 POLYMARKET_SHOCK_CUM3_TH = float(os.getenv("POLYMARKET_SHOCK_CUM3_TH", "0.005"))
@@ -608,7 +608,6 @@ def _build_polymarket_snapshot(current_price: float) -> dict:
     signal = "LONG" if lead_edge > 0.03 else ("SHORT" if lead_edge < -0.03 else "HOLD")
     risk_state = "HIGH_VOL" if event_volatility >= 0.12 else ("WATCH" if event_volatility >= 0.07 else "NORMAL")
     leverage_mult = 0.7 if risk_state == "HIGH_VOL" else (0.85 if risk_state == "WATCH" else 1.0)
-
     return {
         "updated_at": now_iso,
         "status": "LIVE",
@@ -734,51 +733,4 @@ def append_polymarket_snapshot_to_duckdb(
 
 
 def polymarket_exit_guard(pos: str | None, entry_price: float, poly: dict) -> tuple[bool, str]:
-    global _POLYMARKET_LAST_EMERGENCY_TS
-    if not POLYMARKET_EXIT_ENABLE:
-        return False, ""
-    side = str(pos or "").upper()
-    if side not in ("LONG", "SHORT"):
-        return False, ""
-    if entry_price <= 0.0:
-        return False, ""
-    status = str((poly or {}).get("status", "")).upper()
-    if status != "LIVE":
-        return False, ""
-    mom = float((poly or {}).get("shock_delta_1m", (poly or {}).get("prob_momentum_1m", 0.0)) or 0.0)
-    d3 = float((poly or {}).get("shock_delta_3m", 0.0) or 0.0)
-    z1 = float((poly or {}).get("shock_z_1m", 0.0) or 0.0)
-    is_peak = bool((poly or {}).get("shock_is_peak", False))
-    dyn = float((poly or {}).get("shock_dyn_th_1m", 0.0) or 0.0)
-    eff_th = float(max(0.0, POLYMARKET_SHOCK_1M_TH))
-    if POLYMARKET_SHOCK_DYN_ENABLE and dyn > 0.0:
-        eff_th = max(eff_th, dyn)
-    cond_abs = abs(mom) >= eff_th
-    cond_z = abs(z1) >= float(max(0.0, POLYMARKET_SHOCK_Z_TH))
-    cond_c3 = abs(d3) >= float(max(0.0, POLYMARKET_SHOCK_CUM3_TH))
-    cond_peak = (not POLYMARKET_SHOCK_PEAK_ONLY) or is_peak
-    trigger = bool((poly or {}).get("shock_trigger", False))
-    if not (trigger or (cond_abs and cond_z and cond_c3 and cond_peak)):
-        return False, ""
-    now_ts = float((poly or {}).get("snapshot_ts_epoch", time.time()) or time.time())
-    cooldown = float(max(0.0, POLYMARKET_SHOCK_COOLDOWN_SEC))
-    if cooldown > 0.0 and _POLYMARKET_LAST_EMERGENCY_TS > 0.0:
-        if (now_ts - _POLYMARKET_LAST_EMERGENCY_TS) < cooldown:
-            remain = int(max(0.0, cooldown - (now_ts - _POLYMARKET_LAST_EMERGENCY_TS)))
-            return False, f"POLYMARKET_SHOCK_COOLDOWN({remain}s)"
-    _POLYMARKET_LAST_EMERGENCY_TS = now_ts
-    tgt = float((poly or {}).get("weighted_target", 0.0) or 0.0)
-    if tgt <= 0.0:
-        return False, ""
-    favorable = (tgt > entry_price) if side == "LONG" else (tgt < entry_price)
-    if favorable:
-        return False, (
-            "POLYMARKET_EMERGENCY_HOLD("
-            f"|d1m|={abs(mom)*100:.2f}%p>=th{eff_th*100:.2f}%p,"
-            f"|z|={abs(z1):.2f},|d3m|={abs(d3)*100:.2f}%p,peak={int(is_peak)},target={tgt:.2f},entry={entry_price:.2f})"
-        )
-    return True, (
-        "POLYMARKET_EMERGENCY_EXIT("
-        f"|d1m|={abs(mom)*100:.2f}%p>=th{eff_th*100:.2f}%p,"
-        f"|z|={abs(z1):.2f},|d3m|={abs(d3)*100:.2f}%p,peak={int(is_peak)},target={tgt:.2f},entry={entry_price:.2f})"
-    )
+    return False, ""

@@ -28,7 +28,7 @@ _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
-from ensemble.train_rl_agent import MultiTimeframeFeatures, OnlineHMMDetector
+from ensemble.rl_runtime_primitives import MultiTimeframeFeatures, OnlineHMMDetector
 from ensemble.train_rl_dsac_agent import DSAC_STATE_DIM, DSACCompactTradingEnv, GaussianActor
 
 

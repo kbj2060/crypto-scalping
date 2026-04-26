@@ -17,7 +17,7 @@ for _p in (_ROOT_DIR, _SCRIPT_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from ensemble.train_rl_agent import MultiTimeframeFeatures  # noqa: E402
+from ensemble.rl_runtime_primitives import MultiTimeframeFeatures  # noqa: E402
 from ensemble.train_rl_dsac_agent import (  # noqa: E402
     _POS_THRESH,
     DSAC_STATE_DIM,

@@ -1,0 +1,505 @@
+{
+  "checkpoint": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "checkpoint_best_val_pnl": 370.5871365030684,
+  "checkpoint_epoch": 70,
+  "rl_csv": "data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "feat_csv": "data/splits/year_oos/training_features_2026_rebuilt.csv",
+  "data_period": "2026-01-01 ~ 2026-02-28",
+  "data_rows": 16897,
+  "note": "Official 2026 OOS harness. Method2 baseline matches eval_2026_oos closed-loop rules; controller uses proxy playbook features built from 2026 OOS columns.",
+  "results": [
+    {
+      "method": "training_env",
+      "skipped": true,
+      "reason": "No pre-2025 rows available for HMM fit in current RL csv."
+    },
+    {
+      "method": "closed_loop",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      }
+    }
+  ],
+  "coarse_top3": [
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.04_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.04,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.84,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.93,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "official_1",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.10_ck0.95_pk1.05_sb0.05_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.1,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.05,
+        "size_floor": 0.9,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 300,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.82,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.93,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "official_2",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.90_hk1.05_ck0.95_pk1.00_sb0.04_ds2.0_xa0.90",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.9,
+        "hazard_k": 1.05,
+        "continuation_k": 0.95,
+        "pullback_k": 1.0,
+        "size_boost": 0.04,
+        "size_floor": 0.88,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.06,
+        "exit_aggr": 0.9,
+        "skip_hazard_th": 0.94,
+        "sparse_event_th": 0.84,
+        "sparse_hazard_th": 0.82,
+        "severe_exit_th": 0.94,
+        "mild_reduce_th": 0.88
+      },
+      "delta_pct": 0.0,
+      "name": "official_3",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    }
+  ],
+  "refine_top5": [
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.0,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.82,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.91,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "ref_h1.00_se0.82_sx0.91",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.0,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.82,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.93,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "ref_h1.00_se0.82_sx0.93",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.0,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.82,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.9500000000000001,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "ref_h1.00_se0.82_sx0.95",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.0,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.84,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.91,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "ref_h1.00_se0.84_sx0.91",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    },
+    {
+      "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      },
+      "config": {
+        "event_k": 0.95,
+        "hazard_k": 1.0,
+        "continuation_k": 0.95,
+        "pullback_k": 1.05,
+        "size_boost": 0.04,
+        "size_floor": 0.93,
+        "size_cap": 1.2,
+        "delay_scale": 2.0,
+        "hold_base_bars": 360,
+        "hold_scale": 0.07,
+        "exit_aggr": 0.95,
+        "skip_hazard_th": 0.93,
+        "sparse_event_th": 0.84,
+        "sparse_hazard_th": 0.8,
+        "severe_exit_th": 0.93,
+        "mild_reduce_th": 0.87
+      },
+      "delta_pct": 0.0,
+      "name": "ref_h1.00_se0.84_sx0.93",
+      "baseline": {
+        "method": "closed_loop",
+        "pnl_pct": 213.1193,
+        "wr_pct": 58.95,
+        "trades": 760,
+        "sharpe": 15.7576,
+        "mdd_pct": -4.036,
+        "meta": {
+          "skipped": 0,
+          "delayed": 0,
+          "reduced": 0,
+          "boosted": 0,
+          "hold_capped": 0,
+          "meta_exits": 0
+        }
+      }
+    }
+  ],
+  "best_overall": {
+    "method": "closed_loop_playbook::ek0.95_hk1.00_ck0.95_pk1.05_sb0.04_ds2.0_xa0.95",
+    "pnl_pct": 213.1193,
+    "wr_pct": 58.95,
+    "trades": 760,
+    "sharpe": 15.7576,
+    "mdd_pct": -4.036,
+    "meta": {
+      "skipped": 0,
+      "delayed": 0,
+      "reduced": 0,
+      "boosted": 0,
+      "hold_capped": 0,
+      "meta_exits": 0
+    },
+    "config": {
+      "event_k": 0.95,
+      "hazard_k": 1.0,
+      "continuation_k": 0.95,
+      "pullback_k": 1.05,
+      "size_boost": 0.04,
+      "size_floor": 0.93,
+      "size_cap": 1.2,
+      "delay_scale": 2.0,
+      "hold_base_bars": 360,
+      "hold_scale": 0.07,
+      "exit_aggr": 0.95,
+      "skip_hazard_th": 0.93,
+      "sparse_event_th": 0.82,
+      "sparse_hazard_th": 0.8,
+      "severe_exit_th": 0.91,
+      "mild_reduce_th": 0.87
+    },
+    "delta_pct": 0.0,
+    "name": "ref_h1.00_se0.82_sx0.91",
+    "baseline": {
+      "method": "closed_loop",
+      "pnl_pct": 213.1193,
+      "wr_pct": 58.95,
+      "trades": 760,
+      "sharpe": 15.7576,
+      "mdd_pct": -4.036,
+      "meta": {
+        "skipped": 0,
+        "delayed": 0,
+        "reduced": 0,
+        "boosted": 0,
+        "hold_capped": 0,
+        "meta_exits": 0
+      }
+    }
+  }
+}

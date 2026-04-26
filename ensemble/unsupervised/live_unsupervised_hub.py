@@ -12,7 +12,6 @@ class UnsupervisedRegimeHub:
 
     DEFAULT_ARTIFACTS = {
         "gmm_volatility": "data/ensemble/unsupervised/gmm_volatility.pkl",
-        "hdbscan_regime": "data/ensemble/unsupervised/hdbscan_regime.pkl",
         "isolation_forest": "data/ensemble/unsupervised/isolation_forest.pkl",
         "vae_anomaly": "data/ensemble/unsupervised/vae_anomaly.pkl",
     }

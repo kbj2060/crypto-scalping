@@ -1,0 +1,248 @@
+{
+  "modes": [
+    {
+      "bucket_mode": "mid",
+      "tilted_alpha": 0.75,
+      "window": {
+        "duckdb_start_kst": "2026-04-21 13:01:37.110616+09:00",
+        "duckdb_end_kst": "2026-04-24 13:02:40.393663+09:00"
+      },
+      "trade_count": 14,
+      "baseline_sum_pct": 1.189827251474425,
+      "hard_result": {
+        "config": {
+          "entry_gap_th": 0.003,
+          "exit_gap_th": 0.0035,
+          "shock_th": 0.18,
+          "tail_th": 0.52,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "neutral_gap_th": 0.0015,
+          "entropy_cap": 0.78
+        },
+        "name": "g0.0030_x0.0035_s0.18_t0.52_a0.45_z0.80",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 0.5206931231886927,
+        "delta_pct": -0.6691341282857324,
+        "baseline_wr": 50.0,
+        "overlay_wr": 42.857142857142854,
+        "skip_count": 0,
+        "exit_count": 1,
+        "improved_trades": 0,
+        "worsened_trades": 1,
+        "overlay_mdd_pct": -0.8087605076576798,
+        "overlay_sharpe": 0.600521995207509
+      },
+      "soft_result": {
+        "config": {
+          "veto_gap_th": 0.003,
+          "veto_tail_th": 0.55,
+          "veto_entropy_cap": 0.8,
+          "size_gap_th": 0.003,
+          "size_tail_th": 0.52,
+          "shock_th": 0.18,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "adverse_mult": 0.8,
+          "neutral_mult": 0.75
+        },
+        "name": "vg0.0030_sg0.0030_sh0.18_am0.80_nm0.75",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 1.0971974323975924,
+        "delta_pct": -0.09262981907683265,
+        "baseline_wr": 50.0,
+        "overlay_wr": 50.0,
+        "vetoes": 0,
+        "downsized": 1,
+        "improved_trades": 0,
+        "worsened_trades": 1,
+        "overlay_mdd_pct": -0.56415022667472,
+        "overlay_sharpe": 1.2423012874645114
+      }
+    },
+    {
+      "bucket_mode": "tilted_upper",
+      "tilted_alpha": 0.75,
+      "window": {
+        "duckdb_start_kst": "2026-04-21 13:01:37.110616+09:00",
+        "duckdb_end_kst": "2026-04-24 13:02:50.587268+09:00"
+      },
+      "trade_count": 14,
+      "baseline_sum_pct": 1.189827251474425,
+      "hard_result": {
+        "config": {
+          "entry_gap_th": 0.003,
+          "exit_gap_th": 0.0035,
+          "shock_th": 0.18,
+          "tail_th": 0.52,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "neutral_gap_th": 0.0015,
+          "entropy_cap": 0.78
+        },
+        "name": "g0.0030_x0.0035_s0.18_t0.52_a0.45_z0.80",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 0.626199221640483,
+        "delta_pct": -0.563628029833942,
+        "baseline_wr": 50.0,
+        "overlay_wr": 28.571428571428573,
+        "skip_count": 4,
+        "exit_count": 1,
+        "improved_trades": 2,
+        "worsened_trades": 3,
+        "overlay_mdd_pct": -0.6298472925475695,
+        "overlay_sharpe": 0.7503433602882968
+      },
+      "soft_result": {
+        "config": {
+          "veto_gap_th": 0.003,
+          "veto_tail_th": 0.55,
+          "veto_entropy_cap": 0.8,
+          "size_gap_th": 0.003,
+          "size_tail_th": 0.52,
+          "shock_th": 0.18,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "adverse_mult": 0.8,
+          "neutral_mult": 0.75
+        },
+        "name": "vg0.0030_sg0.0030_sh0.18_am0.80_nm0.75",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 1.0853026764180975,
+        "delta_pct": -0.1045245750563275,
+        "baseline_wr": 50.0,
+        "overlay_wr": 50.0,
+        "vetoes": 0,
+        "downsized": 5,
+        "improved_trades": 2,
+        "worsened_trades": 3,
+        "overlay_mdd_pct": -0.561161834022117,
+        "overlay_sharpe": 1.2290574188642371
+      }
+    },
+    {
+      "bucket_mode": "upper",
+      "tilted_alpha": 0.75,
+      "window": {
+        "duckdb_start_kst": "2026-04-21 13:01:37.110616+09:00",
+        "duckdb_end_kst": "2026-04-24 13:03:00.349671+09:00"
+      },
+      "trade_count": 14,
+      "baseline_sum_pct": 1.189827251474425,
+      "hard_result": {
+        "config": {
+          "entry_gap_th": 0.003,
+          "exit_gap_th": 0.0035,
+          "shock_th": 0.18,
+          "tail_th": 0.52,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "neutral_gap_th": 0.0015,
+          "entropy_cap": 0.78
+        },
+        "name": "g0.0030_x0.0035_s0.18_t0.52_a0.45_z0.80",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 0.677551700308554,
+        "delta_pct": -0.512275551165871,
+        "baseline_wr": 50.0,
+        "overlay_wr": 28.571428571428573,
+        "skip_count": 6,
+        "exit_count": 0,
+        "improved_trades": 3,
+        "worsened_trades": 3,
+        "overlay_mdd_pct": -0.589083692673853,
+        "overlay_sharpe": 0.8157335046108583
+      },
+      "soft_result": {
+        "config": {
+          "veto_gap_th": 0.003,
+          "veto_tail_th": 0.55,
+          "veto_entropy_cap": 0.8,
+          "size_gap_th": 0.003,
+          "size_tail_th": 0.52,
+          "shock_th": 0.18,
+          "aftershock_cap": 0.45,
+          "toxicity_cap": 0.8,
+          "adverse_mult": 0.8,
+          "neutral_mult": 0.75
+        },
+        "name": "vg0.0030_sg0.0030_sh0.18_am0.80_nm0.75",
+        "trades": 14,
+        "baseline_sum_pct": 1.189827251474425,
+        "overlay_sum_pct": 1.087372141241251,
+        "delta_pct": -0.10245511023317411,
+        "baseline_wr": 50.0,
+        "overlay_wr": 50.0,
+        "vetoes": 0,
+        "downsized": 6,
+        "improved_trades": 3,
+        "worsened_trades": 3,
+        "overlay_mdd_pct": -0.5611618340220947,
+        "overlay_sharpe": 1.2316851223937968
+      }
+    }
+  ],
+  "best_soft_mode": {
+    "bucket_mode": "mid",
+    "result": {
+      "config": {
+        "veto_gap_th": 0.003,
+        "veto_tail_th": 0.55,
+        "veto_entropy_cap": 0.8,
+        "size_gap_th": 0.003,
+        "size_tail_th": 0.52,
+        "shock_th": 0.18,
+        "aftershock_cap": 0.45,
+        "toxicity_cap": 0.8,
+        "adverse_mult": 0.8,
+        "neutral_mult": 0.75
+      },
+      "name": "vg0.0030_sg0.0030_sh0.18_am0.80_nm0.75",
+      "trades": 14,
+      "baseline_sum_pct": 1.189827251474425,
+      "overlay_sum_pct": 1.0971974323975924,
+      "delta_pct": -0.09262981907683265,
+      "baseline_wr": 50.0,
+      "overlay_wr": 50.0,
+      "vetoes": 0,
+      "downsized": 1,
+      "improved_trades": 0,
+      "worsened_trades": 1,
+      "overlay_mdd_pct": -0.56415022667472,
+      "overlay_sharpe": 1.2423012874645114
+    }
+  },
+  "best_hard_mode": {
+    "bucket_mode": "upper",
+    "result": {
+      "config": {
+        "entry_gap_th": 0.003,
+        "exit_gap_th": 0.0035,
+        "shock_th": 0.18,
+        "tail_th": 0.52,
+        "aftershock_cap": 0.45,
+        "toxicity_cap": 0.8,
+        "neutral_gap_th": 0.0015,
+        "entropy_cap": 0.78
+      },
+      "name": "g0.0030_x0.0035_s0.18_t0.52_a0.45_z0.80",
+      "trades": 14,
+      "baseline_sum_pct": 1.189827251474425,
+      "overlay_sum_pct": 0.677551700308554,
+      "delta_pct": -0.512275551165871,
+      "baseline_wr": 50.0,
+      "overlay_wr": 28.571428571428573,
+      "skip_count": 6,
+      "exit_count": 0,
+      "improved_trades": 3,
+      "worsened_trades": 3,
+      "overlay_mdd_pct": -0.589083692673853,
+      "overlay_sharpe": 0.8157335046108583
+    }
+  }
+}

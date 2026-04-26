@@ -1,0 +1,41 @@
+{
+  "csv_path": "/home/kbj20/crypto-scalping/data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "ckpt_path": "/home/kbj20/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth",
+  "start": "2026-01-01 00:00:00",
+  "end": "2026-02-28 16:00:00",
+  "rows": 16897,
+  "results": [
+    {
+      "base_mult": 1.0,
+      "metrics": {
+        "pnl_pct": 154.37681767664762,
+        "mdd_pct": -5.5668474618473685,
+        "trades": 2067,
+        "wr_pct": 40.83212385099178,
+        "long_entries": 954,
+        "short_entries": 1113,
+        "avg_hold_bars": 5.613449443638123,
+        "avg_fraction": 0.23523678050314464,
+        "avg_leverage": 1.0,
+        "avg_exposure": 0.23523678050314464
+      },
+      "trade_count": 2067
+    },
+    {
+      "base_mult": 2.0,
+      "metrics": {
+        "pnl_pct": 310.0748451125421,
+        "mdd_pct": -26.13102864260649,
+        "trades": 1456,
+        "wr_pct": 39.217032967032964,
+        "long_entries": 622,
+        "short_entries": 834,
+        "avg_hold_bars": 9.015796703296703,
+        "avg_fraction": 0.2433316109100275,
+        "avg_leverage": 2.0,
+        "avg_exposure": 0.486663221820055
+      },
+      "trade_count": 1456
+    }
+  ]
+}

@@ -60,9 +60,9 @@ def main() -> int:
     action = pd.to_numeric(rl_df.get("m7_action", 0.0), errors="coerce").fillna(0.0).round().clip(-1, 1).to_numpy(dtype=np.int64)
     direction = _trend_dir_from_rl(rl_df)
 
-    entry_long_offset = np.clip(np.asarray(preds["entry_long_offset"], dtype=np.float64), 0.0, 0.02)
+    entry_long_offset = np.clip(np.asarray(preds["entry_long_offset"], dtype=np.float64), -0.02, 0.0)
     entry_short_offset = np.clip(np.asarray(preds["entry_short_offset"], dtype=np.float64), 0.0, 0.02)
-    entry_long_price = close * (1.0 - entry_long_offset)
+    entry_long_price = close * (1.0 + entry_long_offset)
     entry_short_price = close * (1.0 + entry_short_offset)
 
     tp_floor = 8e-4

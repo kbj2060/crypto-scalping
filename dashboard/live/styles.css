@@ -78,6 +78,79 @@ body {
 .top-price.muted {
   text-shadow: none;
 }
+.trade-journal-panel {
+  padding-bottom: 20px;
+  grid-column: 1 / -1;
+}
+.trade-journal-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.trade-journal-summary strong {
+  font-size: 14px;
+  color: var(--text);
+}
+.trade-journal-list {
+  display: grid;
+  gap: 10px;
+}
+.trade-journal-row {
+  display: grid;
+  grid-template-columns: 112px 92px minmax(0, 1fr) 92px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.trade-journal-ts {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "Roboto Mono", monospace;
+}
+.trade-journal-side {
+  font-size: 12px;
+  font-weight: 700;
+}
+.trade-journal-side.long {
+  color: var(--good);
+}
+.trade-journal-side.short {
+  color: var(--bad);
+}
+.trade-journal-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.trade-journal-main {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-journal-sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-journal-pnl {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+}
+.trade-journal-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 2px;
+}
 h1 { margin: 0; font-size: 24px; }
 #stamp { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 #sessionInfo { margin: 2px 0 0; color: #b1b1b6; font-size: 12px; }
@@ -852,6 +925,7 @@ h1 { margin: 0; font-size: 24px; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--card-gap);
+  margin-bottom: var(--card-gap);
 }
 svg {
   width: 100%;
@@ -903,4 +977,6 @@ svg {
   .logic-wrap { grid-template-columns: 1fr; }
   .logic-grid { grid-template-columns: 1fr; }
   .charts { grid-template-columns: 1fr; }
+  .trade-journal-row { grid-template-columns: 1fr; gap: 6px; }
+  .trade-journal-pnl { text-align: left; }
 }

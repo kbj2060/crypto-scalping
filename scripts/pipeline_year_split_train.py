@@ -80,7 +80,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-ensemble-train", action="store_true")
     p.add_argument("--skip-augment", action="store_true")
 
-    p.add_argument("--rl-trainer", choices=["none", "iqn", "sac", "dsac"], default="none")
+    p.add_argument("--rl-trainer", choices=["none", "dsac"], default="none")
     p.add_argument("--rl-train-ratio", type=float, default=0.8)
     p.add_argument("--rl-episodes", type=int, default=1000)
     p.add_argument("--rl-startup-check-only", action="store_true")
@@ -158,7 +158,7 @@ def main() -> int:
     if not args.skip_augment:
         cmd = [
             args.python,
-            "scripts/augment_rl_training_with_model7.py",
+            "pipeline/augment_m7_dataset.py",
             "--rl-path", str(rl_base_path.relative_to(ROOT)),
             "--feature-path", str(feat_rl_path.relative_to(ROOT)),
             "--output-path", str(out_rl_path.relative_to(ROOT)),
@@ -166,11 +166,7 @@ def main() -> int:
         _run(cmd, args.dry_run, label="AUGMENT-RL")
 
     if args.rl_trainer != "none":
-        rl_script = {
-            "iqn": "ensemble/train_rl_agent.py",
-            "sac": "ensemble/train_rl_sac_agent.py",
-            "dsac": "ensemble/train_rl_dsac_agent.py",
-        }[args.rl_trainer]
+        rl_script = "ensemble/train_rl_dsac_agent.py"
         cmd = [
             args.python,
             rl_script,

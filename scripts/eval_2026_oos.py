@@ -7,10 +7,11 @@
 방법 2: Closed-loop 시뮬레이션 (DSACRouter, 실제 bar-by-bar 체결)
 """
 from __future__ import annotations
-import copy, json, math, os, sys
+import argparse, copy, json, math, os, sys
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -18,7 +19,7 @@ for _p in [_ROOT_DIR, os.path.join(_ROOT_DIR, "ensemble")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from ensemble.train_rl_agent import OnlineHMMDetector, MultiTimeframeFeatures
+from ensemble.rl_runtime_primitives import OnlineHMMDetector, MultiTimeframeFeatures
 from ensemble.train_rl_dsac_agent import (
     DSAC_STATE_DIM, GaussianActor, DSACCompactTradingEnv, DSACRouter,
 )
@@ -31,25 +32,38 @@ OUT_JSON = "data/ensemble/reports/eval_2026_true_oos.json"
 FEE, SLIP = 0.0005, 0.0002
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Evaluate DSAC on 2026 OOS with configurable RL/feature csv")
+    p.add_argument("--rl-csv", default=RL_CSV)
+    p.add_argument("--feat-csv", default=FEAT_CSV)
+    p.add_argument("--ckpt", default=CKPT)
+    p.add_argument("--out-json", default=OUT_JSON)
+    return p.parse_args()
+
+
 # ─── 유틸 ─────────────────────────────────────────────────────────────────────
-def _load_2026_df() -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_2026_df(rl_csv: str = RL_CSV, feat_csv: str = FEAT_CSV) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(df26_env, df26_ohlc) 반환.
     df26_env  : RL CSV 그대로 (high/low 없음) — Method1 환경용
     df26_ohlc : open/high/low merge 추가      — Method2 closed-loop용
     """
-    rl = pd.read_csv(RL_CSV)
+    rl = pd.read_csv(rl_csv)
     rl["timestamp"] = pd.to_datetime(rl["timestamp"], errors="coerce")
-
-    feat = pd.read_csv(FEAT_CSV, usecols=["timestamp", "open", "high", "low"])
-    feat["timestamp"] = pd.to_datetime(feat["timestamp"], errors="coerce")
 
     mask_rl = rl["timestamp"].dt.year == 2026
     df26_env = rl.loc[mask_rl].copy().reset_index(drop=True)
 
-    df_merged = rl.merge(feat, on="timestamp", how="inner")
-    df_merged = df_merged.sort_values("timestamp").reset_index(drop=True)
-    mask_m = df_merged["timestamp"].dt.year == 2026
-    df26_ohlc = df_merged.loc[mask_m].copy().reset_index(drop=True)
+    df26_ohlc = df26_env.copy()
+    need_ohlc = [c for c in ("open", "high", "low") if c not in df26_ohlc.columns]
+    if need_ohlc:
+        feat = pd.read_csv(feat_csv, usecols=["timestamp", "open", "high", "low"])
+        feat["timestamp"] = pd.to_datetime(feat["timestamp"], errors="coerce")
+        df_merged = df26_ohlc.merge(feat, on="timestamp", how="left", suffixes=("", "_feat"))
+        for c in ("open", "high", "low"):
+            feat_c = f"{c}_feat"
+            if c not in df_merged.columns and feat_c in df_merged.columns:
+                df_merged[c] = df_merged[feat_c]
+        df26_ohlc = df_merged
     for c in ("close", "open", "high", "low"):
         if c in df26_ohlc.columns:
             df26_ohlc[c] = pd.to_numeric(df26_ohlc[c], errors="coerce")
@@ -104,6 +118,7 @@ def method1_training_env(df26: pd.DataFrame, actor: GaussianActor, device: str) 
     eq_curve = [env.initial_balance]
     actor.eval()
     with torch.no_grad():
+        pbar = tqdm(desc="eval-training-env", unit="step")
         while not done:
             action = float(torch.tanh(actor.forward(
                 torch.FloatTensor(state).unsqueeze(0).to(device)
@@ -111,6 +126,8 @@ def method1_training_env(df26: pd.DataFrame, actor: GaussianActor, device: str) 
             state, _, done, info = env.step(action)
             bal = env.balance * (1.0 + (env.unrealized_pnl if env.pos is not None else 0.0))
             eq_curve.append(max(bal, 1e-8))
+            pbar.update(1)
+        pbar.close()
 
     pnl = (env.balance / env.initial_balance - 1.0) * 100.0
     wr  = env.win_rate * 100.0
@@ -157,7 +174,7 @@ def method2_closed_loop(df26: pd.DataFrame, actor: GaussianActor, device: str) -
         raw = (xp*(1-SLIP)-ep)/ep if p=="LONG" else (ep-xp*(1+SLIP))/ep
         return raw * lv
 
-    for i in range(n - 1):
+    for i in tqdm(range(n - 1), desc="eval-closed-loop", unit="bar"):
         cp         = float(close_np[i])
         next_open  = float(open_np[i + 1])
         next_close = float(close_np[i + 1])
@@ -232,11 +249,12 @@ def method2_closed_loop(df26: pd.DataFrame, actor: GaussianActor, device: str) -
 
 # ─── main ─────────────────────────────────────────────────────────────────────
 def main():
+    args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[DEVICE] {device}")
-    print(f"[CKPT]   {CKPT}")
+    print(f"[CKPT]   {args.ckpt}")
 
-    ckpt = torch.load(CKPT, map_location=device, weights_only=False)
+    ckpt = torch.load(args.ckpt, map_location=device, weights_only=False)
     print(f"[CKPT]   best_val_pnl={ckpt.get('best_pnl', '?'):.2f}%  "
           f"epoch={ckpt.get('epoch', '?')}")
 
@@ -244,15 +262,17 @@ def main():
     actor.load_state_dict(ckpt["actor"])
     actor.eval()
 
-    df26_env, df26_ohlc = _load_2026_df()
+    df26_env, df26_ohlc = _load_2026_df(args.rl_csv, args.feat_csv)
 
     r1 = method1_training_env(df26_env, actor, device)
     r2 = method2_closed_loop(df26_ohlc, actor, device)
 
     report = {
-        "checkpoint": CKPT,
+        "checkpoint": args.ckpt,
         "checkpoint_best_val_pnl": float(ckpt.get("best_pnl", 0.0)),
         "checkpoint_epoch": int(ckpt.get("epoch", 0)),
+        "rl_csv": args.rl_csv,
+        "feat_csv": args.feat_csv,
         "data_period": "2026-01-01 ~ 2026-02-28",
         "data_rows": len(df26_env),
         "note": "진짜 OOS: 학습/검증 어디에도 사용되지 않은 데이터",
@@ -275,10 +295,10 @@ def main():
             return [_to_serializable(v) for v in obj]
         return obj
 
-    os.makedirs(os.path.dirname(OUT_JSON), exist_ok=True)
-    with open(OUT_JSON, "w") as f:
+    os.makedirs(os.path.dirname(args.out_json), exist_ok=True)
+    with open(args.out_json, "w") as f:
         json.dump(_to_serializable(report), f, indent=2, ensure_ascii=False)
-    print(f"\n[SAVED] {OUT_JSON}")
+    print(f"\n[SAVED] {args.out_json}")
 
 
 if __name__ == "__main__":

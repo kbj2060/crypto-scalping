@@ -6,8 +6,10 @@ import logging
 import gc
 import json
 import math
+import html
 import importlib.util
 import re
+import tempfile
 import numpy as np
 import pandas as pd
 import torch
@@ -52,7 +54,6 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGET_PATHS = [
     _THIS_DIR,
     os.path.join(_THIS_DIR, "models"),
-    os.path.join(_THIS_DIR, "timesfm"),
     os.path.join(_THIS_DIR, "uni2ts", "src"),
     os.path.join(_THIS_DIR, "strategies"),
     os.path.join(_THIS_DIR, "ensemble"),
@@ -60,6 +61,8 @@ TARGET_PATHS = [
 for p in TARGET_PATHS:
     if os.path.exists(p) and p not in sys.path:
         sys.path.insert(0, p)
+
+_CKPT_DIR = os.path.join(_THIS_DIR, "data", "ensemble", "ckpt")
 
 from features.engineering import FeatureEngineer
 from features.elite import NewEliteSignalEngine
@@ -76,38 +79,26 @@ from features.schema import (
 )
 from features.registry import M7_LIVE_STRICT_COLS
 from ensemble.seven_model_ensemble import SevenModelEnsemble
-from ensemble.llm_advisor import LLMAdvisor, LLMDecision
 from ensemble.unsupervised.live_unsupervised_hub import UnsupervisedRegimeHub
-from ensemble.ensemble_router import (
-    ChronosForecaster, PatchTSTForecaster, TiDEForecaster,
-)
+from ensemble.ensemble_router import PatchTSTForecaster
 from enhanced_trading_engine import EnhancedTradingEngine
-from ensemble.train_rl_agent import OnlineHMMDetector
+from ensemble.rl_runtime_primitives import OnlineHMMDetector
 
 # ── HFT 마이크로스트럭처 및 꼬리 위험 요격기 ──
 from microstructure_scanner import MicrostructureScanner
 from tail_risk_interceptor import TailRiskInterceptor
+from features.dsac_pure_rl_kernel import decide_pure_rl_action
 from playbook_router import PlaybookRouter
 from polymarket_engine import (
     append_polymarket_snapshot_to_duckdb,
     get_polymarket_snapshot_cached,
-    polymarket_exit_guard,
     polymarket_public_view,
 )
 
-# Long/Short specialist 임포트 제거 — Primary DSAC 단독 운용
 from ensemble.train_rl_dsac_agent import (
     DSAC_STATE_DIM as BASE_DSAC_STATE_DIM,
     GaussianActor as BaseDSACGaussianActor,
     DSACRouter as BaseDSACRouter,
-)
-from ensemble.train_rl_dsac_long_agent import (
-    SigmoidActor as LongDSACSigmoidActor,
-    DSACLongRouter as LiveDSACLongRouter,
-)
-from ensemble.train_rl_dsac_short_agent import (
-    SigmoidActor as ShortDSACSigmoidActor,
-    DSACShortRouter as LiveDSACShortRouter,
 )
 from strategies.elite_builder import EliteSignals, row_to_market_row
 
@@ -132,14 +123,79 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return str(v).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 
+def _alpha_focus_strict_sizing(
+    action: int,
+    kelly: float,
+    last_row,
+    regime_name: str,
+    *,
+    exposure_cap: float = 3.0,
+) -> dict:
+    target_exposure = float(np.clip(float(kelly), 0.0, max(float(exposure_cap), 1.0)))
+    if int(action) not in (1, 2) or target_exposure <= 0.0:
+        return {
+            "target_fraction": float(np.clip(target_exposure, 0.0, 1.0)),
+            "target_exposure": target_exposure,
+            "leverage_mult": 1.0,
+            "flow_score": 0.0,
+            "tag": "neutral",
+        }
+    conf = float(np.clip(float(last_row.get("m7_confidence", 0.0) or 0.0), 0.0, 1.0))
+    qwidth = abs(float(last_row.get("m7_qwidth", 0.0) or 0.0))
+    vol_z = abs(float(last_row.get("volatility_z", 0.0) or 0.0))
+    smf = float(last_row.get("smart_money_flow", 0.0) or 0.0)
+    whale = float(last_row.get("whale_conviction", 0.0) or 0.0)
+    funding_div = float(last_row.get("funding_price_divergence", 0.0) or 0.0)
+    side_sign = 1.0 if int(action) == 1 else -1.0
+    aligned = (int(action) == 1 and regime_name == "bull") or (int(action) == 2 and regime_name == "bear")
+    bad = regime_name in {"chop", "whipsaw"} or qwidth > 0.010 or vol_z > 1.6 or conf < 0.40
+    very_bad = regime_name == "whipsaw" or qwidth > 0.014 or vol_z > 2.4
+    flow_score = side_sign * (0.55 * smf + 0.35 * whale + 0.10 * funding_div)
+
+    mult = 1.0
+    tag = "base"
+    if very_bad:
+        mult *= 0.992
+        tag = "very_bad"
+    elif bad:
+        mult *= 0.998
+        tag = "bad"
+
+    if flow_score > 0.07 and conf > 0.66 and target_exposure > 0.88 and qwidth < 0.010:
+        mult *= 1.12
+        tag = f"{tag}_boost12"
+    elif flow_score > 0.04 and aligned and target_exposure > 0.78:
+        mult *= 1.05
+        tag = f"{tag}_boost05"
+
+    target_exposure = float(np.clip(target_exposure * mult, 0.05, 1.0))
+    return {
+        "target_fraction": float(np.clip(target_exposure, 0.0, 1.0)),
+        "target_exposure": target_exposure,
+        "leverage_mult": 1.0,
+        "flow_score": float(flow_score),
+        "tag": str(tag),
+    }
+
+
 COMPACT_MODE = _env_flag('COMPACT_MODE', True)
 DSAC_ONLY_MODE = True
 ENSEMBLE_PREDICTOR_ENABLED = _env_flag('ENSEMBLE_PREDICTOR_ENABLED', False)
 M7_ENTRY_PRICE_ENABLE = _env_flag('M7_ENTRY_PRICE_ENABLE', False)
-DSAC_PURE_RL_MODE = _env_flag("DSAC_PURE_RL_MODE", True)
-ENH_RUNTIME_ENABLE = _env_flag("ENH_RUNTIME_ENABLE", False)
+DSAC_PURE_RL_MODE = True
+DSAC_OOS_PARITY_MODE = False
+DSAC_PURE_RL_OOS_MODE = False
+DSAC_PURE_RL_REPLAY_EXEC_MODE = True
+ENH_RUNTIME_ENABLE = False
+HYBRID_EXECUTION_ENABLE = _env_flag("HYBRID_EXECUTION_ENABLE", False)
+DSAC_ALPHA_FOCUS_STRICT_ENABLE = False
 DASHBOARD_STATE_PATH = os.getenv("DASHBOARD_STATE_PATH", "data/live/dashboard_state.json")
 DASHBOARD_EVENTS_PATH = os.getenv("DASHBOARD_EVENTS_PATH", "data/live/dashboard_events.jsonl")
+TRADE_JOURNAL_PATH = os.getenv("TRADE_JOURNAL_PATH", "data/live/trade_journal.jsonl")
+DAILY_TRADE_REPORT_STATE_PATH = os.getenv(
+    "DAILY_TRADE_REPORT_STATE_PATH",
+    "data/live/daily_trade_report_state.json",
+)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 ENSEMBLE_BALANCED_METRICS_PATH = os.getenv(
@@ -166,14 +222,6 @@ ENSEMBLE_TRACKER_RECORDS_PATH = os.getenv(
     "ENSEMBLE_TRACKER_RECORDS_PATH",
     "data/live/ensemble_trade_records.jsonl",
 )
-AGENT_TRACKER_STATE_PATH = os.getenv(
-    "AGENT_TRACKER_STATE_PATH",
-    "data/live/agent_tracker_state.json",
-)
-AGENT_TRACKER_RECORDS_PATH = os.getenv(
-    "AGENT_TRACKER_RECORDS_PATH",
-    "data/live/agent_trade_records.jsonl",
-)
 ENSEMBLE_TRACKER_FEE_RATE = float(os.getenv("ENSEMBLE_TRACKER_FEE_RATE", "0.0005"))
 ENSEMBLE_TRACKER_SLIP_RATE = float(os.getenv("ENSEMBLE_TRACKER_SLIP_RATE", "0.0002"))
 ENSEMBLE_TRACKER_EXIT_ON_HOLD = _env_flag("ENSEMBLE_TRACKER_EXIT_ON_HOLD", False)
@@ -188,16 +236,6 @@ QUANT_TOP_K_FEATURES = int(float(os.getenv("QUANT_TOP_K_FEATURES", "25")))
 QUANT_MAX_HISTORY_ROWS = int(float(os.getenv("QUANT_MAX_HISTORY_ROWS", "3000")))
 QUANT_LOGIC_PATH = os.getenv("QUANT_LOGIC_PATH", "quant/live_30m_direction_quant.py")
 POLYMARKET_DUCKDB_PATH = os.getenv("POLYMARKET_DUCKDB_PATH", "data/live/polymarket.duckdb")
-AGENT_SPECIALIST_DISPLAY_ENABLE = _env_flag("AGENT_SPECIALIST_DISPLAY_ENABLE", True)
-AGENT_SPECIALIST_DECISION_SEC = int(float(os.getenv("AGENT_SPECIALIST_DECISION_SEC", "300")))
-AGENT_SPECIALIST_LONG_CKPT_PATH = os.getenv(
-    "AGENT_SPECIALIST_LONG_CKPT_PATH",
-    "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_long_agents.pth",
-)
-AGENT_SPECIALIST_SHORT_CKPT_PATH = os.getenv(
-    "AGENT_SPECIALIST_SHORT_CKPT_PATH",
-    "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_short_agents.pth",
-)
 
 _ENSEMBLE_OI_DELTA_WIN: deque[float] = deque(maxlen=max(30, ENSEMBLE_OVERHEAT_Z_WIN))
 _ENSEMBLE_FUNDING_WIN: deque[float] = deque(maxlen=max(30, ENSEMBLE_OVERHEAT_Z_WIN))
@@ -339,12 +377,24 @@ def _traj_direction(traj: np.ndarray) -> float:
 
 def _atomic_write_json(path: str, payload: dict) -> None:
     parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
+    target_dir = parent or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f"{os.path.basename(path)}.",
+        suffix=".tmp",
+        dir=target_dir,
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _append_jsonl(path: str, payload: dict) -> None:
@@ -353,6 +403,18 @@ def _append_jsonl(path: str, payload: dict) -> None:
         os.makedirs(parent, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _append_jsonl_many(path: str, payloads: list[dict]) -> None:
+    rows = [dict(x) for x in (payloads or []) if isinstance(x, dict)]
+    if not rows:
+        return
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _now_kst_iso() -> str:
@@ -452,6 +514,169 @@ def _safe_float(v, d: float = 0.0) -> float:
         return x if np.isfinite(x) else float(d)
     except Exception:
         return float(d)
+
+
+def _hybrid_execution_overlay(
+    final_action: int,
+    current_price: float,
+    processed_df: pd.DataFrame,
+    trend_signal: dict | None,
+    ms_signal: dict | None,
+    current_time_kst=None,
+) -> dict:
+    out = {
+        "action": int(final_action),
+        "entry_price": float(max(current_price, 0.0)),
+        "mode": "market",
+        "reason": "disabled_or_flat",
+        "continuation": 0.0,
+        "pullback": 0.0,
+    }
+    if not HYBRID_EXECUTION_ENABLE or final_action not in (1, 2) or current_price <= 0.0 or len(processed_df) == 0:
+        return out
+
+    row = processed_df.iloc[-1]
+    ts = dict(trend_signal or {})
+    ms = dict(ms_signal or {})
+    side = "LONG" if int(final_action) == 1 else "SHORT"
+    sign = 1.0 if side == "LONG" else -1.0
+
+    def _sgn_tanh(v: float, scale: float) -> float:
+        return float(np.tanh(float(v) / max(float(scale), 1e-8)))
+
+    p_up = _safe_float(ts.get("m7_prob_up", ts.get("prob_up", 1.0 / 3.0)), 1.0 / 3.0)
+    p_dn = _safe_float(ts.get("m7_prob_dn", ts.get("prob_dn", 1.0 / 3.0)), 1.0 / 3.0)
+    conf = float(np.clip(_safe_float(ts.get("m7_confidence", 0.5), 0.5), 0.0, 1.0))
+    quality = float(np.clip(_safe_float(ts.get("m7_quality_pred", 0.0), 0.0), -0.05, 0.05))
+    qwidth = max(_safe_float(ts.get("m7_qwidth", 0.01), 0.01), 1e-4)
+    tail_risk = float(np.clip(_safe_float(ts.get("m7_tail_risk", 0.0), 0.0), 0.0, 1.0))
+    trend_edge = sign * (p_up - p_dn)
+    trend_xgb_edge = sign * (
+        _safe_float(ts.get("m7_trend_xgb_up", 0.0), 0.0)
+        - _safe_float(ts.get("m7_trend_xgb_dn", 0.0), 0.0)
+    )
+    quant_edge = sign * (
+        _safe_float(ts.get("m7_quant_up", 0.0), 0.0)
+        - _safe_float(ts.get("m7_quant_dn", 0.0), 0.0)
+    )
+    flow = sign * (
+        0.35 * _safe_float(row.get("smart_money_flow", 0.0), 0.0)
+        + 0.25 * _safe_float(row.get("ofi_acceleration", 0.0), 0.0)
+        + 0.20 * _safe_float(row.get("cvp_volume_imbalance", 0.0), 0.0)
+        + 0.20 * _safe_float(row.get("sig_whale", 0.0), 0.0)
+    )
+    crowd = sign * (
+        0.55 * _safe_float(row.get("whale_conviction", 0.0), 0.0)
+        + 0.45 * _safe_float(row.get("funding_price_divergence", 0.0), 0.0)
+    )
+    micro = sign * (
+        0.45 * (_safe_float(ms.get("taker_buy_ratio", 0.5), 0.5) - 0.5) * 2.0
+        + 0.30 * _safe_float(ms.get("obi", 0.0), 0.0)
+        + 0.25 * _safe_float(ms.get("nif_whale", 0.0), 0.0)
+    )
+    regime_push = sign * (
+        _safe_float(row.get("regime_bull", 0.0), 0.0)
+        - _safe_float(row.get("regime_bear", 0.0), 0.0)
+    )
+    ret1 = sign * _safe_float(row.get("log_return", 0.0), 0.0)
+    vwap_gap = sign * _safe_float(ms.get("vwap_gap_15m", 0.0), 0.0)
+    continuation = (
+        0.22 * _sgn_tanh(trend_edge, 0.30)
+        + 0.16 * _sgn_tanh(trend_xgb_edge, 0.25)
+        + 0.10 * _sgn_tanh(quant_edge, 0.25)
+        + 0.14 * _sgn_tanh(flow, 0.20)
+        + 0.10 * _sgn_tanh(crowd, 0.15)
+        + 0.10 * _sgn_tanh(micro, 0.20)
+        + 0.05 * _sgn_tanh(ret1, 0.0020)
+        + 0.05 * _sgn_tanh(vwap_gap, 0.0020)
+        + 0.04 * regime_push
+        + 0.04 * conf
+        + 0.03 * _sgn_tanh(quality, 0.006)
+        - 0.06 * _sgn_tanh(qwidth, 0.012)
+        - 0.08 * tail_risk
+    )
+    toxicity = max(_safe_float(ms.get("shadow_toxicity_score", 0.0), 0.0), 0.0)
+    queue_collapse = max(_safe_float(ms.get("shadow_queue_collapse", 0.0), 0.0), 0.0)
+    spoof_bias = int(_safe_float(ms.get("spoofing_bias", 0.0), 0.0))
+    spoof_support = 1.0 if ((side == "LONG" and spoof_bias > 0) or (side == "SHORT" and spoof_bias < 0)) else 0.0
+    pullback = (
+        0.26 * _sgn_tanh(-ret1, 0.0020)
+        + 0.18 * _sgn_tanh(-flow, 0.20)
+        + 0.12 * _sgn_tanh(-micro, 0.20)
+        + 0.10 * _sgn_tanh(qwidth, 0.012)
+        + 0.10 * _sgn_tanh(queue_collapse, 0.50)
+        + 0.10 * _sgn_tanh(toxicity, 0.50)
+        - 0.10 * conf
+        - 0.08 * _sgn_tanh(quality, 0.006)
+        - 0.06 * regime_push
+        - 0.04 * spoof_support
+    )
+
+    trend_take_th = 0.15
+    pullback_wait_th = 0.20
+    release_th = 0.03
+
+    if continuation >= trend_take_th:
+        out.update({
+            "mode": "trend_taker",
+            "reason": f"continuation={continuation:.3f}",
+            "continuation": float(continuation),
+            "pullback": float(pullback),
+        })
+        return out
+
+    if pullback >= pullback_wait_th:
+        out.update({
+            "action": 0,
+            "mode": "wait_pullback",
+            "reason": f"pullback={pullback:.3f}",
+            "continuation": float(continuation),
+            "pullback": float(pullback),
+        })
+        return out
+
+    base_offset = max(
+        abs(_safe_float(ts.get("m7_entry_long_offset" if side == "LONG" else "m7_entry_short_offset", 0.0), 0.0)) * 0.65,
+        min(0.0060, abs(_safe_float(ms.get("price_volatility_30m", 0.0), 0.0)) * 0.35),
+        min(0.0060, qwidth * 0.35),
+    )
+    funding = _safe_float(ms.get("funding_rate", row.get("last_funding_rate", 0.0)), 0.0)
+    funding_shadow = 1.0 if (current_time_kst is not None and getattr(current_time_kst, "hour", -1) in {0, 8, 16}) else 0.0
+    funding_adj = min(0.0010, abs(funding) * 8.0 + 0.0006 * funding_shadow)
+    poc_dist = _safe_float(row.get("cvp_poc_dist", 0.0), 0.0)
+    reco_px = _safe_float(ts.get("m7_entry_long_price" if side == "LONG" else "m7_entry_short_price", 0.0), 0.0)
+
+    if side == "LONG":
+        shallow = current_price * (1.0 - base_offset)
+        deep = current_price * (1.0 - base_offset - funding_adj)
+        poc_anchor = current_price * (1.0 + min(poc_dist, 0.0) * 0.35)
+        target = min(shallow, poc_anchor)
+        if reco_px > 0.0:
+            target = min(target, 0.65 * reco_px + 0.35 * target)
+        if spoof_support > 0.0 and toxicity < 0.35:
+            target = max(target, current_price * (1.0 - base_offset * 0.55))
+        if continuation < release_th:
+            target = min(target, deep)
+    else:
+        shallow = current_price * (1.0 + base_offset)
+        deep = current_price * (1.0 + base_offset + funding_adj)
+        poc_anchor = current_price * (1.0 + max(poc_dist, 0.0) * 0.35)
+        target = max(shallow, poc_anchor)
+        if reco_px > 0.0:
+            target = max(target, 0.65 * reco_px + 0.35 * target)
+        if spoof_support > 0.0 and toxicity < 0.35:
+            target = min(target, current_price * (1.0 + base_offset * 0.55))
+        if continuation < release_th:
+            target = max(target, deep)
+
+    out.update({
+        "entry_price": float(max(target, 0.0)),
+        "mode": "limit_anchor",
+        "reason": f"continuation={continuation:.3f}|pullback={pullback:.3f}",
+        "continuation": float(continuation),
+        "pullback": float(pullback),
+    })
+    return out
 
 
 def _zscore_last(win: deque[float], x: float) -> float:
@@ -953,249 +1178,6 @@ def _ensemble_tracker_summary(tracker_state: dict) -> dict:
     return out
 
 
-def _default_agent_tracker_state() -> dict:
-    now = _now_kst_iso()
-    return {
-        "long": {
-            "pos": "NONE",
-            "entry_price": 0.0,
-            "entry_kelly": 0.0,
-            "opened_at": "",
-            "unrealized_pnl_pct": 0.0,
-            "equity": 1.0,
-            "peak_equity": 1.0,
-            "mdd_pct": 0.0,
-            "trades": 0,
-            "wins": 0,
-            "last_pnl_pct": 0.0,
-            "updated_at": now,
-        },
-        "short": {
-            "pos": "NONE",
-            "entry_price": 0.0,
-            "entry_kelly": 0.0,
-            "opened_at": "",
-            "unrealized_pnl_pct": 0.0,
-            "equity": 1.0,
-            "peak_equity": 1.0,
-            "mdd_pct": 0.0,
-            "trades": 0,
-            "wins": 0,
-            "last_pnl_pct": 0.0,
-            "updated_at": now,
-        },
-    }
-
-
-def _load_agent_tracker_state() -> dict:
-    st = _default_agent_tracker_state()
-    try:
-        if not os.path.exists(AGENT_TRACKER_RECORDS_PATH):
-            return st
-        if os.path.getsize(AGENT_TRACKER_RECORDS_PATH) <= 0:
-            return st
-        with open(AGENT_TRACKER_RECORDS_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    continue
-                k = str(row.get("agent", "")).lower()
-                if k not in ("long", "short"):
-                    continue
-                n = st[k]
-                ev = str(row.get("event", "")).upper()
-                ts = str(row.get("ts", n.get("updated_at", _now_kst_iso())))
-                if ev == "OPEN":
-                    n["pos"] = str(row.get("side", "NONE")).upper()
-                    n["entry_price"] = _safe_float(row.get("entry_price", 0.0), 0.0)
-                    n["entry_kelly"] = _safe_float(row.get("entry_kelly", n.get("entry_kelly", 0.0)), 0.0)
-                    n["unrealized_pnl_pct"] = 0.0
-                    n["opened_at"] = ts
-                    n["updated_at"] = ts
-                elif ev == "CLOSE":
-                    pnl_pct = _safe_float(row.get("pnl_pct", 0.0), 0.0)
-                    eq_row = row.get("equity", None)
-                    if eq_row is not None:
-                        n["equity"] = _safe_float(eq_row, n.get("equity", 1.0))
-                    else:
-                        n["equity"] = float(n.get("equity", 1.0)) * (1.0 + pnl_pct / 100.0)
-                    peak_eq = float(n.get("peak_equity", 1.0) or 1.0)
-                    cur_eq = float(n.get("equity", 1.0) or 1.0)
-                    peak_eq = max(peak_eq, cur_eq, 1e-12)
-                    dd_pct = float((1.0 - (cur_eq / peak_eq)) * 100.0)
-                    n["peak_equity"] = float(peak_eq)
-                    n["mdd_pct"] = float(max(_safe_float(n.get("mdd_pct", 0.0), 0.0), dd_pct))
-                    n["trades"] = int(n.get("trades", 0) or 0) + 1
-                    if pnl_pct > 0.0:
-                        n["wins"] = int(n.get("wins", 0) or 0) + 1
-                    n["last_pnl_pct"] = float(pnl_pct)
-                    n["pos"] = "NONE"
-                    n["entry_price"] = 0.0
-                    n["entry_kelly"] = 0.0
-                    n["opened_at"] = ""
-                    n["unrealized_pnl_pct"] = 0.0
-                    n["updated_at"] = ts
-    except Exception:
-        raw = _read_json_safe(AGENT_TRACKER_STATE_PATH)
-        if raw:
-            for k in ("long", "short"):
-                node = dict(raw.get(k, {}) or {})
-                if node:
-                    st[k].update(node)
-    return st
-
-
-def _save_agent_tracker_state(state: dict) -> None:
-    _atomic_write_json(AGENT_TRACKER_STATE_PATH, state)
-
-
-def _close_agent_trade(node: dict, name: str, now_iso: str, price: float) -> None:
-    pos = str(node.get("pos", "NONE"))
-    if pos not in ("LONG", "SHORT"):
-        return
-    entry = float(node.get("entry_price", 0.0) or 0.0)
-    if entry <= 0.0 or price <= 0.0:
-        node["pos"] = "NONE"
-        node["entry_price"] = 0.0
-        return
-
-    slip = float(ENSEMBLE_TRACKER_SLIP_RATE)
-    fee = float(ENSEMBLE_TRACKER_FEE_RATE)
-    exit_px = price * (1.0 - slip if pos == "LONG" else 1.0 + slip)
-    rr = (exit_px - entry) / max(entry, 1e-12)
-    if pos == "SHORT":
-        rr = -rr
-    pnl_frac = float(rr - (2.0 * fee))
-
-    eq = float(node.get("equity", 1.0) or 1.0)
-    eq *= (1.0 + pnl_frac)
-    node["equity"] = float(eq)
-    peak_eq = float(node.get("peak_equity", 1.0) or 1.0)
-    peak_eq = max(peak_eq, eq, 1e-12)
-    dd_pct = float((1.0 - (eq / peak_eq)) * 100.0)
-    node["peak_equity"] = float(peak_eq)
-    node["mdd_pct"] = float(max(_safe_float(node.get("mdd_pct", 0.0), 0.0), dd_pct))
-    node["trades"] = int(node.get("trades", 0) or 0) + 1
-    if pnl_frac > 0:
-        node["wins"] = int(node.get("wins", 0) or 0) + 1
-    node["last_pnl_pct"] = float(pnl_frac * 100.0)
-    node["updated_at"] = now_iso
-
-    _append_jsonl(AGENT_TRACKER_RECORDS_PATH, {
-        "ts": now_iso,
-        "agent": name,
-        "event": "CLOSE",
-        "side": pos,
-        "entry_price": entry,
-        "exit_price": float(exit_px),
-        "pnl_pct": float(pnl_frac * 100.0),
-        "equity": float(eq),
-    })
-    node["pos"] = "NONE"
-    node["entry_price"] = 0.0
-    node["entry_kelly"] = 0.0
-    node["opened_at"] = ""
-    node["unrealized_pnl_pct"] = 0.0
-
-
-def _open_agent_trade(node: dict, name: str, now_iso: str, price: float, action: int, kelly: float = 0.0) -> None:
-    if price <= 0.0 or int(action) not in (1, 2):
-        return
-    side = "LONG" if int(action) == 1 else "SHORT"
-    slip = float(ENSEMBLE_TRACKER_SLIP_RATE)
-    entry = price * (1.0 + slip if side == "LONG" else 1.0 - slip)
-    node["pos"] = side
-    node["entry_price"] = float(entry)
-    node["entry_kelly"] = float(max(0.0, kelly))
-    node["unrealized_pnl_pct"] = 0.0
-    node["opened_at"] = str(now_iso)
-    node["updated_at"] = now_iso
-    _append_jsonl(AGENT_TRACKER_RECORDS_PATH, {
-        "ts": now_iso,
-        "agent": name,
-        "event": "OPEN",
-        "side": side,
-        "entry_price": float(entry),
-        "entry_kelly": float(max(0.0, kelly)),
-    })
-
-
-def _update_agent_tracker(agent_actions: dict, current_price: float, now_iso: str) -> dict:
-    st = _load_agent_tracker_state()
-    price = float(current_price or 0.0)
-    specs = (
-        ("long", 1, "LONG"),
-        ("short", 2, "SHORT"),
-    )
-
-    for key, expect_action, expect_side in specs:
-        node = dict(st.get(key, {}) or {})
-        live = dict(agent_actions.get(key, {}) or {})
-        action = int(live.get("action", 0) or 0)
-        live_kelly = _safe_float(live.get("kelly_weight", 0.0), 0.0)
-        cur_pos = str(node.get("pos", "NONE"))
-
-        if cur_pos in ("LONG", "SHORT") and _safe_float(node.get("entry_kelly", 0.0), 0.0) <= 0.0 and live_kelly > 0.0:
-            node["entry_kelly"] = float(live_kelly)
-            node["updated_at"] = now_iso
-
-        if cur_pos == expect_side:
-            entry = float(node.get("entry_price", 0.0) or 0.0)
-            if price > 0.0 and entry > 0.0:
-                mark_px = price * (1.0 - ENSEMBLE_TRACKER_SLIP_RATE if cur_pos == "LONG" else 1.0 + ENSEMBLE_TRACKER_SLIP_RATE)
-                rr = (mark_px - entry) / max(entry, 1e-12)
-                if cur_pos == "SHORT":
-                    rr = -rr
-                node["unrealized_pnl_pct"] = float((rr - (2.0 * ENSEMBLE_TRACKER_FEE_RATE)) * 100.0)
-            else:
-                node["unrealized_pnl_pct"] = 0.0
-            if action != expect_action:
-                _close_agent_trade(node=node, name=key, now_iso=now_iso, price=price)
-        elif cur_pos in ("LONG", "SHORT"):
-            node["unrealized_pnl_pct"] = 0.0
-            _close_agent_trade(node=node, name=key, now_iso=now_iso, price=price)
-            if action == expect_action:
-                _open_agent_trade(node=node, name=key, now_iso=now_iso, price=price, action=expect_action, kelly=live_kelly)
-        elif action == expect_action:
-            node["unrealized_pnl_pct"] = 0.0
-            _open_agent_trade(node=node, name=key, now_iso=now_iso, price=price, action=expect_action, kelly=live_kelly)
-        else:
-            node["unrealized_pnl_pct"] = 0.0
-
-        st[key] = node
-
-    _save_agent_tracker_state(st)
-    return st
-
-
-def _agent_tracker_summary(tracker_state: dict) -> dict:
-    out = {}
-    for key in ("long", "short"):
-        n = dict((tracker_state or {}).get(key, {}) or {})
-        eq = float(n.get("equity", 1.0) or 1.0)
-        tr = int(n.get("trades", 0) or 0)
-        wins = int(n.get("wins", 0) or 0)
-        wr = (100.0 * wins / tr) if tr > 0 else 0.0
-        out[key] = {
-            "total_return_pct": float((eq - 1.0) * 100.0),
-            "trades": tr,
-            "win_rate": float(wr),
-            "pos": str(n.get("pos", "NONE")),
-            "entry_price": float(n.get("entry_price", 0.0) or 0.0),
-            "entry_kelly": float(n.get("entry_kelly", 0.0) or 0.0),
-            "opened_at": str(n.get("opened_at", "")),
-            "unrealized_pnl_pct": float(n.get("unrealized_pnl_pct", 0.0) or 0.0),
-            "last_pnl_pct": float(n.get("last_pnl_pct", 0.0) or 0.0),
-            "mdd_pct": float(n.get("mdd_pct", 0.0) or 0.0),
-            "updated_at": str(n.get("updated_at", _now_kst_iso())),
-        }
-    return out
-
-
 def _traj_conf(traj: np.ndarray) -> float:
     """tanh(|기울기|/표준편차) — get_conf 동일 로직"""
     if len(traj) < 2:
@@ -1291,14 +1273,15 @@ class BinanceLiveFetcher:
         last_end_time = None
         while len(all_klines) < target_limit:
             params = {'symbol': symbol, 'interval': self.timeframe, 'limit': 1000}
-            if last_end_time: params['endTime'] = last_end_time - 1
+            if last_end_time is not None:
+                params['endTime'] = int(last_end_time) - 1
             klines = await self._call_with_retry(
                 f"fetch_klines_raw[{symbol}]",
                 lambda: self.exchange.fapiPublicGetKlines(params),
             )
             if not klines: break
             all_klines = klines + all_klines
-            last_end_time = klines[0][0]
+            last_end_time = int(klines[0][0])
             if len(klines) < 1000: break
         return all_klines[-target_limit:]
 
@@ -1316,11 +1299,13 @@ class BinanceLiveFetcher:
     def _process_to_df(self, eth_klines, btc_klines, ancillary_results):
         eth_df = pd.DataFrame(eth_klines).iloc[:, :11]
         eth_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_volume', 'trades', 'taker_buy_base', 'taker_buy_quote']
+        eth_df['timestamp'] = pd.to_numeric(eth_df['timestamp'], errors='coerce')
         eth_df['timestamp'] = pd.to_datetime(eth_df['timestamp'], unit='ms')
         eth_df[eth_df.columns.drop('timestamp')] = eth_df[eth_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='raise')
 
         btc_df = pd.DataFrame(btc_klines).iloc[:, [0, 4, 5, 7]]
         btc_df.columns = ['timestamp', 'close_btc', 'volume_btc', 'quote_volume_btc']
+        btc_df['timestamp'] = pd.to_numeric(btc_df['timestamp'], errors='coerce')
         btc_df['timestamp'] = pd.to_datetime(btc_df['timestamp'], unit='ms')
         btc_df[btc_df.columns.drop('timestamp')] = btc_df[btc_df.columns.drop('timestamp')].apply(pd.to_numeric, errors='raise')
 
@@ -1343,6 +1328,7 @@ class BinanceLiveFetcher:
                         t_col = next((c for c in ['timestamp', 'fundingTime', 'time'] if c in temp_df.columns), None)
                         if t_col and key in temp_df.columns:
                             subset = temp_df[[t_col, key]].rename(columns={t_col: 'timestamp', key: new_name})
+                            subset['timestamp'] = pd.to_numeric(subset['timestamp'], errors='coerce')
                             subset['timestamp'] = pd.to_datetime(subset['timestamp'], unit='ms')
                             subset[new_name] = pd.to_numeric(subset[new_name], errors='raise')
                             eth_df = pd.merge_asof(
@@ -1387,16 +1373,14 @@ class BinanceLiveFetcher:
 
 
 # ════════════════════════════════════════════════════════════════
-# 2-A. 대시보드용 6대 파운데이션 앙상블 (표시 전용)
+# 2-A. PatchTST 예측기 (DSAC/M7 보조 신호)
 # ════════════════════════════════════════════════════════════════
 class EnsemblePredictor:
-    MODEL_ORDER = ['PatchTST', 'Chronos', 'TiDE']
+    MODEL_ORDER = ['PatchTST']
 
     def __init__(self):
         self.models = {
             'PatchTST': PatchTSTForecaster(),
-            'Chronos': ChronosForecaster(),
-            'TiDE': TiDEForecaster(),
         }
         self.last_trace: list[dict[str, object]] = []
 
@@ -1536,7 +1520,14 @@ def _tg_trade_msg(ex_code: str, current_price: float,
         'FLIP_LONG_TO_SHORT':   '🔄',
         'FLIP_SHORT_TO_LONG':   '🔄',
     }.get(ex_code, '🟨')
-    action_word = {1: 'LONG', 2: 'SHORT', 0: 'HOLD'}.get(fa, '?')
+    action_word = {
+        'ENTER_LONG': 'LONG',
+        'ENTER_SHORT': 'SHORT',
+        'EXIT_LONG': 'FLAT',
+        'EXIT_SHORT': 'FLAT',
+        'FLIP_LONG_TO_SHORT': 'SHORT',
+        'FLIP_SHORT_TO_LONG': 'LONG',
+    }.get(ex_code, {1: 'LONG', 2: 'SHORT', 0: 'HOLD'}.get(fa, '?'))
     pnl_line = ""
     trade_pnl = meta_result.get("trade_pnl_pct", None) if isinstance(meta_result, dict) else None
     if trade_pnl is not None:
@@ -1554,6 +1545,135 @@ def _tg_trade_msg(ex_code: str, current_price: float,
         f"🌍 {regime_name}   Kelly: {kelly:.3f}{pnl_line}\n"
         f"📈 Trend: {t_dir}   Source: {meta_result.get('source', 'DSAC_ONLY')}"
     )
+
+def _load_trade_journal_rows(path: str) -> list[dict]:
+    rows: list[dict] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except Exception:
+        return []
+    return rows
+
+
+def _trade_rows_for_kst_day(rows: list[dict], day_kst: pd.Timestamp) -> list[dict]:
+    base = pd.Timestamp(day_kst)
+    if base.tzinfo is None:
+        base = base.tz_localize("Asia/Seoul")
+    else:
+        base = base.tz_convert("Asia/Seoul")
+    start = base.normalize()
+    end = start + pd.Timedelta(days=1)
+    out: list[dict] = []
+    for row in rows:
+        ts_raw = row.get("ts") or row.get("closed_at") or row.get("opened_at")
+        try:
+            ts = pd.Timestamp(ts_raw)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("Asia/Seoul")
+            else:
+                ts = ts.tz_convert("Asia/Seoul")
+        except Exception:
+            continue
+        if start <= ts < end:
+            out.append(dict(row))
+    return out
+
+
+def _fmt_trade_journal_line(row: dict) -> str:
+    event = str(row.get("event", "") or row.get("kind", "") or "TRADE")
+    side = str(row.get("side", "") or "NONE")
+    pnl_pct = row.get("pnl_pct", None)
+    hold_bars = int(float(row.get("hold_bars", 0) or 0))
+    entry_price = float(row.get("entry_price", 0.0) or 0.0)
+    exit_price = float(row.get("exit_price", 0.0) or 0.0)
+    exposure = float(row.get("total_exposure", 0.0) or 0.0)
+    regime = str(row.get("regime", "") or "-")
+    reason = str(row.get("reason", "") or row.get("source", "") or "-")
+    reason = html.escape(reason[:120] + ("..." if len(reason) > 120 else ""))
+    ts_raw = row.get("closed_at") or row.get("opened_at") or row.get("ts")
+    try:
+        ts = pd.Timestamp(ts_raw)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("Asia/Seoul")
+        else:
+            ts = ts.tz_convert("Asia/Seoul")
+        ts_txt = ts.strftime("%H:%M")
+    except Exception:
+        ts_txt = "--:--"
+    pnl_txt = "-"
+    if pnl_pct is not None:
+        try:
+            pnl_txt = f"{float(pnl_pct):+.2f}%"
+        except Exception:
+            pass
+    px_txt = ""
+    if entry_price > 0.0:
+        px_txt = f" @{entry_price:,.2f}"
+        if exit_price > 0.0:
+            px_txt += f" -> {exit_price:,.2f}"
+    return (
+        f"• <b>{html.escape(ts_txt)} {html.escape(event)}</b> [{html.escape(side)}] {pnl_txt}\n"
+        f"  exp={exposure:.3f} hold={hold_bars}b regime={html.escape(regime)}{px_txt}\n"
+        f"  reason={reason}"
+    )
+
+
+def _build_daily_trade_journal_message(report_day_kst: pd.Timestamp, rows: list[dict]) -> str:
+    close_rows = [r for r in rows if str(r.get("kind", "")).upper() == "CLOSE"]
+    open_rows = [r for r in rows if str(r.get("kind", "")).upper() == "OPEN"]
+    pnl_list: list[float] = []
+    for row in close_rows:
+        try:
+            pnl_list.append(float(row.get("pnl_pct", 0.0) or 0.0))
+        except Exception:
+            pnl_list.append(0.0)
+    total = float(sum(pnl_list))
+    wins = int(sum(1 for x in pnl_list if x > 0.0))
+    losses = int(sum(1 for x in pnl_list if x < 0.0))
+    win_rate = (100.0 * wins / len(close_rows)) if close_rows else 0.0
+    avg = (total / len(close_rows)) if close_rows else 0.0
+    best = max(pnl_list) if pnl_list else 0.0
+    worst = min(pnl_list) if pnl_list else 0.0
+    avg_hold = (
+        sum(int(float(r.get("hold_bars", 0) or 0)) for r in close_rows) / len(close_rows)
+        if close_rows else 0.0
+    )
+    day_txt = pd.Timestamp(report_day_kst).strftime("%Y-%m-%d")
+    lines = [
+        f"<b>Daily Trade Journal</b>  {html.escape(day_txt)} KST",
+        f"• closes={len(close_rows)} opens={len(open_rows)}",
+        f"• pnl={total:+.2f}% avg={avg:+.2f}% winrate={win_rate:.1f}%",
+        f"• wins={wins} losses={losses} best={best:+.2f}% worst={worst:+.2f}%",
+        f"• avg_hold={avg_hold:.1f} bars",
+    ]
+    if not close_rows:
+        lines.append("• no closed trades")
+        return "\n".join(lines)
+    detail_rows = sorted(close_rows, key=lambda r: str(r.get("closed_at") or r.get("ts") or ""))[-12:]
+    lines.extend(["", "<b>Closed Trades</b>"])
+    lines.extend(_fmt_trade_journal_line(r) for r in detail_rows)
+    return "\n".join(lines)
+
+
+def _last_daily_report_date(path: str) -> str:
+    return str(_read_json_safe(path).get("last_report_date", "") or "")
+
+
+def _save_daily_report_date(path: str, report_day_kst: pd.Timestamp) -> None:
+    _atomic_write_json(path, {
+        "last_report_date": pd.Timestamp(report_day_kst).strftime("%Y-%m-%d"),
+        "updated_at": _now_kst_iso(),
+    })
 
 
 def _compute_regime(df, window=24):
@@ -1936,8 +2056,8 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
 # 3-A. DSACSignalRouter
 # ════════════════════════════════════════════════════════════════
 class DSACSignalRouter:
-    DEFAULT_SINGLE_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth"
-    LEGACY_SINGLE_PATH = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agent.pth"
+    DEFAULT_SINGLE_PATH = os.path.join(_CKPT_DIR, "best_dsac_agents.pth")
+    LEGACY_SINGLE_PATH = os.path.join(_CKPT_DIR, "best_dsac_agent.pth")
 
     @staticmethod
     def _build_primary_actor_from_ckpt(ckpt: dict, device: str):
@@ -1950,33 +2070,11 @@ class DSACSignalRouter:
         return actor, "DSAC_PRIMARY"
 
     @staticmethod
-    def _build_long_actor_from_ckpt(ckpt: dict, device: str):
-        actor_state = ckpt.get("actor")
-        if not isinstance(actor_state, dict):
-            raise KeyError("DSAC long 체크포인트 actor 키 없음")
-        state_dim = int(ckpt.get("state_dim", 28) or 28)
-        actor = LongDSACSigmoidActor(state_dim=state_dim).to(device)
-        actor.load_state_dict(actor_state)
-        actor.eval()
-        return actor
-
-    @staticmethod
-    def _build_short_actor_from_ckpt(ckpt: dict, device: str):
-        actor_state = ckpt.get("actor")
-        if not isinstance(actor_state, dict):
-            raise KeyError("DSAC short 체크포인트 actor 키 없음")
-        state_dim = int(ckpt.get("state_dim", 28) or 28)
-        actor = ShortDSACSigmoidActor(state_dim=state_dim).to(device)
-        actor.load_state_dict(actor_state)
-        actor.eval()
-        return actor
-
-    @staticmethod
     def _resolve_model_path(primary: str | None, *fallbacks: str) -> str:
         for candidate in (primary, *fallbacks):
             if candidate and os.path.exists(candidate): return candidate
         searched = [c for c in (primary, *fallbacks) if c]
-        raise FileNotFoundError(f"DSAC specialist 체크포인트 파일이 없습니다: {searched}")
+        raise FileNotFoundError(f"DSAC 체크포인트 파일이 없습니다: {searched}")
 
     @staticmethod
     def _regime_name(regime: dict[str, float] | None) -> str:
@@ -1993,7 +2091,10 @@ class DSACSignalRouter:
         self.pos: str | None = None
         self.entry_price: float = 0.0
         self.hold_count: int = 0
+        self.position_fraction: float = 0.0
+        self.execution_leverage: float = 1.0
         self.current_leverage: float = 0.0
+        self.exposure_cap: float = float(os.getenv("DSAC_EXPOSURE_CAP", "3.0"))
         self.hmm = hmm_detector
         self.trade_fee = float(os.getenv("LIVE_FEE_RATE", "0.0005"))
         self.trade_slip = float(os.getenv("LIVE_SLIP_RATE", "0.0002"))
@@ -2003,25 +2104,28 @@ class DSACSignalRouter:
         self.enter_th   = float(os.getenv("DSAC_ENTER_TH",   "0.12"))
         self.exit_th    = float(os.getenv("DSAC_EXIT_TH",    "0.12"))
         self.close_th   = float(os.getenv("DSAC_CLOSE_TH",   "0.03"))
-        self.max_kelly  = float(os.getenv("DSAC_MAX_KELLY",   "0.35"))
+        self.max_kelly  = float(os.getenv("DSAC_MAX_KELLY", "0.35"))
 
         self.elite_extractor = EliteSignals()
         self.new_elite_engine = NewEliteSignalEngine()
         self._last_runtime_features: dict[str, float] = {}
         self._last_runtime_pos_dict: dict[str, float | str | None] = {}
-        self._specialist_cache: dict[str, object] = {
-            "bucket": "",
-            "actions": {
-                "long": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": ""},
-                "short": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": ""},
-            },
-        }
-        self.long_router = None
-        self.short_router = None
 
         self.single_ckpt_path = self._resolve_model_path(single_path or model_path, self.DEFAULT_SINGLE_PATH, self.LEGACY_SINGLE_PATH)
         self._load_primary(self.device)
-        self._load_specialists(self.device)
+
+    def _set_runtime_sizing(self, exposure: float | None = None, fraction: float | None = None, leverage_mult: float | None = None) -> None:
+        if exposure is not None:
+            exp = float(np.clip(float(exposure), 0.0, self.exposure_cap))
+            frac = float(np.clip(min(exp, 1.0), 0.0, 1.0))
+            lev_mult = float(np.clip(exp / max(frac, 1e-8), 1.0, self.exposure_cap)) if frac > 0.0 else 1.0
+        else:
+            frac = float(np.clip(float(fraction if fraction is not None else self.position_fraction), 0.0, 1.0))
+            lev_mult = float(np.clip(float(leverage_mult if leverage_mult is not None else self.execution_leverage), 1.0, self.exposure_cap))
+            exp = float(np.clip(frac * lev_mult, 0.0, self.exposure_cap))
+        self.position_fraction = frac
+        self.execution_leverage = lev_mult
+        self.current_leverage = exp
 
     def _load_primary(self, device: str) -> None:
         ckpt = torch.load(self.single_ckpt_path, map_location=device, weights_only=False)
@@ -2029,110 +2133,6 @@ class DSACSignalRouter:
         self.device = device
         self.primary_router = BaseDSACRouter(actor, device=device, hmm_detector=self.hmm)
         logger.info("✅ DSAC Primary 로드 완료 (%s, %s): %s", ver, device, self.single_ckpt_path)
-
-    def _load_specialists(self, device: str) -> None:
-        if not AGENT_SPECIALIST_DISPLAY_ENABLE:
-            self.long_router = None
-            self.short_router = None
-            return
-        try:
-            long_ckpt = torch.load(AGENT_SPECIALIST_LONG_CKPT_PATH, map_location=device, weights_only=False)
-            long_actor = self._build_long_actor_from_ckpt(long_ckpt, device)
-            self.long_router = LiveDSACLongRouter(long_actor, device=device, hmm_detector=self.hmm)
-            logger.info("✅ DSAC Long specialist 로드 완료 (%s): %s", device, AGENT_SPECIALIST_LONG_CKPT_PATH)
-        except Exception as e:
-            self.long_router = None
-            logger.warning("⚠️ DSAC Long specialist 로드 실패: %s", e)
-        try:
-            short_ckpt = torch.load(AGENT_SPECIALIST_SHORT_CKPT_PATH, map_location=device, weights_only=False)
-            short_actor = self._build_short_actor_from_ckpt(short_ckpt, device)
-            self.short_router = LiveDSACShortRouter(short_actor, device=device, hmm_detector=self.hmm)
-            logger.info("✅ DSAC Short specialist 로드 완료 (%s): %s", device, AGENT_SPECIALIST_SHORT_CKPT_PATH)
-        except Exception as e:
-            self.short_router = None
-            logger.warning("⚠️ DSAC Short specialist 로드 실패: %s", e)
-
-    @staticmethod
-    def _specialist_pos_dict(side: str, tracker_node: dict | None) -> dict:
-        node = dict(tracker_node or {})
-        pos = str(node.get("pos", "NONE") or "NONE").upper()
-        if side == "long" and pos != "LONG":
-            return {"type": None}
-        if side == "short" and pos != "SHORT":
-            return {"type": None}
-        opened_at = pd.Timestamp(node.get("opened_at")) if str(node.get("opened_at", "")).strip() else None
-        hold_count = 0.0
-        if opened_at is not None and not pd.isna(opened_at):
-            try:
-                if opened_at.tzinfo is None:
-                    opened_at = opened_at.tz_localize("Asia/Seoul")
-                hold_count = max(0.0, (pd.Timestamp.now(tz="Asia/Seoul") - opened_at.tz_convert("Asia/Seoul")).total_seconds() / 300.0)
-            except Exception:
-                hold_count = 0.0
-        return {
-            "type": pos,
-            "margin_usage": float(np.clip(float(node.get("entry_kelly", 0.0) or 0.0), 0.0, 1.0)),
-            "unrealized": float(node.get("unrealized_pnl_pct", 0.0) or 0.0) / 100.0,
-            "hold_count": float(hold_count),
-            "mdd": -abs(float(node.get("mdd_pct", 0.0) or 0.0)) / 100.0,
-        }
-
-    def specialist_display_actions(self, tracker_state: dict, current_time_kst) -> dict:
-        base = {
-            "long": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": str(current_time_kst)},
-            "short": {"action": 0, "kelly_weight": 0.0, "logit": 0.0, "std": 0.0, "decision_at": str(current_time_kst)},
-        }
-        if not AGENT_SPECIALIST_DISPLAY_ENABLE:
-            return base
-        if self.long_router is None and self.short_router is None:
-            return base
-        if not isinstance(self._last_runtime_features, dict) or not self._last_runtime_features:
-            return base
-
-        bucket_sec = int(max(60, AGENT_SPECIALIST_DECISION_SEC))
-        ts_now = pd.Timestamp(current_time_kst)
-        if ts_now.tzinfo is None:
-            ts_now = ts_now.tz_localize("Asia/Seoul")
-        bucket = str(int(ts_now.timestamp()) // bucket_sec)
-        cache_bucket = str(self._specialist_cache.get("bucket", ""))
-        if cache_bucket == bucket:
-            cached = dict(self._specialist_cache.get("actions", {}) or {})
-            if cached:
-                return cached
-
-        features = dict(self._last_runtime_features or {})
-        tracker = dict(tracker_state or {})
-        out = dict(base)
-        try:
-            if self.long_router is not None:
-                long_pos = self._specialist_pos_dict("long", tracker.get("long"))
-                la, lk, li = self.long_router.decide(features, long_pos)
-                out["long"] = {
-                    "action": int(la),
-                    "kelly_weight": float(np.clip(lk, 0.0, 1.0)),
-                    "logit": float(li.get("logit", li.get("mu", li.get("raw_action", 0.0)))),
-                    "std": float(li.get("std", 0.0)),
-                    "decision_at": str(current_time_kst),
-                }
-        except Exception as e:
-            logger.warning("롱 specialist 추론 실패: %s", e)
-        try:
-            if self.short_router is not None:
-                short_pos = self._specialist_pos_dict("short", tracker.get("short"))
-                sa, sk, si = self.short_router.decide(features, short_pos)
-                out["short"] = {
-                    "action": int(sa),
-                    "kelly_weight": float(np.clip(sk, 0.0, 1.0)),
-                    "logit": float(si.get("logit", si.get("mu", si.get("raw_action", 0.0)))),
-                    "std": float(si.get("std", 0.0)),
-                    "decision_at": str(current_time_kst),
-                }
-        except Exception as e:
-            logger.warning("숏 specialist 추론 실패: %s", e)
-
-        self._specialist_cache["bucket"] = bucket
-        self._specialist_cache["actions"] = dict(out)
-        return out
 
     @staticmethod
     def _require_finite(mapping, key: str, context: str) -> float:
@@ -2206,7 +2206,7 @@ class DSACSignalRouter:
         unr = 0.0
         if self.pos is not None and self.entry_price > 0:
             cp = float(last_row["close"])
-            lev = float(np.clip(self.current_leverage, 0.0, 1.0))
+            lev = float(np.clip(self.current_leverage, 0.0, self.exposure_cap))
             if self.pos == "LONG":
                 entry_exec = self.entry_price * (1.0 + self.trade_slip)
                 exit_exec = cp * (1.0 - self.trade_slip)
@@ -2233,7 +2233,7 @@ class DSACSignalRouter:
             "mdd": raw_drawdown,
             "hold_count": float(effective_hold_count),
             "hold_norm": min(effective_hold_count / 96.0, 1.0),
-            "margin_usage": float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0)),
+            "margin_usage": float(np.clip(self.position_fraction if self.pos is not None else 0.0, 0.0, 1.0)),
         }
         self._last_runtime_features = dict(features)
         self._last_runtime_pos_dict = dict(pos_dict)
@@ -2306,12 +2306,18 @@ class DSACTrendRouter:
         self.pos: str | None = None
         self.entry_price: float = 0.0
         self.hold_count: int = 0
+        self.position_fraction: float = 0.0
+        self.execution_leverage: float = 1.0
         self.current_leverage: float = 0.0
+        self.exposure_cap: float = float(os.getenv("DSAC_EXPOSURE_CAP", "3.0"))
         self.peak_equity: float = 1.0
         self.cur_equity: float = 1.0
         self.last_realized_pnl: float | None = None
         self.last_closed_hold_count: int = 0
         self._open_trade_diag: dict | None = None
+        self.open_trade_id: str = ""
+        self.opened_at: str = ""
+        self.decision_at: str = ""
         self.trade_history: deque[dict] = deque(maxlen=2000)
         self.recent_realized: deque[float] = deque(maxlen=20)
         self.loss_streak: int = 0
@@ -2368,6 +2374,157 @@ class DSACTrendRouter:
 
         self._load_live_state()
 
+    def _set_position_sizing(
+        self,
+        exposure: float | None = None,
+        fraction: float | None = None,
+        leverage_mult: float | None = None,
+    ) -> None:
+        if exposure is not None:
+            exp = float(np.clip(float(exposure), 0.0, self.exposure_cap))
+            frac = float(np.clip(min(exp, 1.0), 0.0, 1.0))
+            lev_mult = float(np.clip(exp / max(frac, 1e-8), 1.0, self.exposure_cap)) if frac > 0.0 else 1.0
+        else:
+            frac = float(np.clip(float(fraction if fraction is not None else self.position_fraction), 0.0, 1.0))
+            lev_mult = float(np.clip(float(leverage_mult if leverage_mult is not None else self.execution_leverage), 1.0, self.exposure_cap))
+            exp = float(np.clip(frac * lev_mult, 0.0, self.exposure_cap))
+        self.position_fraction = frac
+        self.execution_leverage = lev_mult
+        self.current_leverage = exp
+
+    @staticmethod
+    def _new_trade_id(ts_like=None) -> str:
+        if ts_like is None:
+            ts = pd.Timestamp.utcnow()
+        else:
+            ts = pd.Timestamp(ts_like)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("UTC")
+        else:
+            ts = ts.tz_localize("UTC")
+        return ts.strftime("trade-%Y%m%dT%H%M%S.%fZ")
+
+    def position_snapshot(self) -> dict:
+        pos = self.pos if self.pos in {"LONG", "SHORT"} else None
+        return {
+            "pos": pos,
+            "entry_price": float(self.entry_price or 0.0),
+            "hold_bars": int(self.hold_count or 0),
+            "position_fraction": float(self.position_fraction or 0.0),
+            "execution_leverage": float(self.execution_leverage or 1.0),
+            "total_exposure": float(self.current_leverage or 0.0),
+            "trade_id": str(self.open_trade_id or ""),
+            "opened_at": str(self.opened_at or ""),
+            "decision_at": str(self.decision_at or ""),
+        }
+
+    def _trade_math(self, side: str, entry_price: float, exit_price: float, exposure: float) -> dict:
+        side_u = str(side or "").upper()
+        entry = float(entry_price or 0.0)
+        exit_raw = float(exit_price or 0.0)
+        lev = float(np.clip(float(exposure or 0.0), 0.0, self.exposure_cap))
+        if side_u not in {"LONG", "SHORT"} or entry <= 0.0 or exit_raw <= 0.0:
+            return {
+                "entry_exec_price": 0.0,
+                "exit_exec_price": 0.0,
+                "gross_return_frac": 0.0,
+                "pnl_frac": 0.0,
+                "pnl_pct": 0.0,
+            }
+        if side_u == "LONG":
+            entry_exec = entry * (1.0 + self.trade_slip)
+            exit_exec = exit_raw * (1.0 - self.trade_slip)
+            gross = (exit_exec - entry_exec) / max(entry_exec, 1e-8)
+        else:
+            entry_exec = entry * (1.0 - self.trade_slip)
+            exit_exec = exit_raw * (1.0 + self.trade_slip)
+            gross = (entry_exec - exit_exec) / max(abs(entry_exec), 1e-8)
+        pnl_frac = float(gross * lev - (2.0 * self.trade_fee * lev))
+        return {
+            "entry_exec_price": float(entry_exec),
+            "exit_exec_price": float(exit_exec),
+            "gross_return_frac": float(gross),
+            "pnl_frac": pnl_frac,
+            "pnl_pct": float(pnl_frac * 100.0),
+        }
+
+    def build_open_trade_payload(
+        self,
+        snapshot: dict,
+        timestamp_kst,
+        event: str,
+        regime_name: str,
+        source: str = "",
+        reason: str = "",
+    ) -> dict:
+        snap = dict(snapshot or {})
+        side = str(snap.get("pos") or "").upper()
+        entry_price = float(snap.get("entry_price", 0.0) or 0.0)
+        exposure = float(snap.get("total_exposure", 0.0) or 0.0)
+        math = self._trade_math(side, entry_price, entry_price, exposure)
+        return {
+            "schema_version": "trade_journal.v1",
+            "ts": str(timestamp_kst),
+            "kind": "OPEN",
+            "event": str(event),
+            "side": side,
+            "trade_id": str(snap.get("trade_id", "") or ""),
+            "decision_at": str(snap.get("decision_at", "") or str(timestamp_kst)),
+            "opened_at": str(snap.get("opened_at", "") or str(timestamp_kst)),
+            "entry_price": float(entry_price),
+            "entry_exec_price": float(math.get("entry_exec_price", 0.0)),
+            "hold_bars": int(snap.get("hold_bars", 0) or 0),
+            "position_fraction": float(snap.get("position_fraction", 0.0) or 0.0),
+            "execution_leverage": float(snap.get("execution_leverage", 1.0) or 1.0),
+            "total_exposure": float(exposure),
+            "regime": str(regime_name),
+            "source": str(source),
+            "reason": str(reason),
+        }
+
+    def build_close_trade_payload(
+        self,
+        snapshot: dict,
+        current_price: float,
+        timestamp_kst,
+        event: str,
+        regime_name: str,
+        source: str = "",
+        reason: str = "",
+        next_side: str | None = None,
+    ) -> dict:
+        snap = dict(snapshot or {})
+        side = str(snap.get("pos") or "").upper()
+        entry_price = float(snap.get("entry_price", 0.0) or 0.0)
+        exposure = float(snap.get("total_exposure", 0.0) or 0.0)
+        math = self._trade_math(side, entry_price, float(current_price or 0.0), exposure)
+        return {
+            "schema_version": "trade_journal.v1",
+            "ts": str(timestamp_kst),
+            "kind": "CLOSE",
+            "event": str(event),
+            "side": side,
+            "trade_id": str(snap.get("trade_id", "") or ""),
+            "decision_at": str(snap.get("decision_at", "") or ""),
+            "opened_at": str(snap.get("opened_at", "") or ""),
+            "closed_at": str(timestamp_kst),
+            "next_side": (str(next_side).upper() if next_side else None),
+            "entry_price": float(entry_price),
+            "entry_exec_price": float(math.get("entry_exec_price", 0.0)),
+            "exit_price": float(current_price or 0.0),
+            "exit_exec_price": float(math.get("exit_exec_price", 0.0)),
+            "gross_return_frac": float(math.get("gross_return_frac", 0.0)),
+            "pnl_frac": float(math.get("pnl_frac", 0.0)),
+            "pnl_pct": float(math.get("pnl_pct", 0.0)),
+            "hold_bars": int(snap.get("hold_bars", 0) or 0),
+            "position_fraction": float(snap.get("position_fraction", 0.0) or 0.0),
+            "execution_leverage": float(snap.get("execution_leverage", 1.0) or 1.0),
+            "total_exposure": float(exposure),
+            "regime": str(regime_name),
+            "source": str(source),
+            "reason": str(reason),
+        }
+
     def record_outcome(self, realized_pnl_pct: float):
         pnl = float(realized_pnl_pct)
         self.last_realized_pnl = None
@@ -2410,15 +2567,29 @@ class DSACTrendRouter:
         self.adaptive_agreement_offset = float(np.clip(agreement_offset, self.adaptive_gate_agreement_min, self.adaptive_gate_agreement_max))
         return self.adaptive_enter_offset, self.adaptive_agreement_offset
 
-    def _open_position(self, side: str, entry_px: float, leverage: float | None = None) -> None:
+    def _open_position(
+        self,
+        side: str,
+        entry_px: float,
+        decision_at=None,
+        leverage: float | None = None,
+        fraction: float | None = None,
+        leverage_mult: float | None = None,
+    ) -> None:
         self.pos = side
         self.entry_price = float(max(entry_px, 0.0))
         self.hold_count = 0
-        self.current_leverage = float(np.clip(leverage if leverage is not None else self.current_leverage, 0.0, 1.0))
+        if fraction is not None or leverage_mult is not None:
+            self._set_position_sizing(fraction=fraction, leverage_mult=leverage_mult)
+        else:
+            self._set_position_sizing(exposure=(leverage if leverage is not None else self.current_leverage))
         self.peak_equity = self.cur_equity = 1.0
         self.last_realized_pnl = None
         self.trend_mismatch_streak = 0
         self.position_exit_streak = 0
+        self.open_trade_id = self._new_trade_id()
+        self.opened_at = pd.Timestamp.now(tz="Asia/Seoul").isoformat()
+        self.decision_at = str(decision_at or self.opened_at)
 
     def _choose_entry_price(
         self,
@@ -2449,36 +2620,46 @@ class DSACTrendRouter:
         self,
         final_action: int,
         current_price: float,
+        timestamp_kst=None,
         leverage: float | None = None,
+        fraction: float | None = None,
+        leverage_mult: float | None = None,
         trend_signal: dict | None = None,
     ):
         entry_px = self._choose_entry_price(final_action, current_price, trend_signal)
         if final_action == 1 and self.pos == "SHORT":
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
-            self.last_realized_pnl = float(self.cur_equity - 1.0)
-            self.last_closed_hold_count = int(self.hold_count)
-            self._open_position("LONG", entry_px, leverage)
+            realized = float(self.cur_equity - 1.0)
+            closed_hold = int(self.hold_count)
+            self._open_position("LONG", entry_px, timestamp_kst, leverage, fraction=fraction, leverage_mult=leverage_mult)
+            self.last_realized_pnl = realized
+            self.last_closed_hold_count = closed_hold
             self._save_live_state()
             return
         if final_action == 2 and self.pos == "LONG":
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
-            self.last_realized_pnl = float(self.cur_equity - 1.0)
-            self.last_closed_hold_count = int(self.hold_count)
-            self._open_position("SHORT", entry_px, leverage)
+            realized = float(self.cur_equity - 1.0)
+            closed_hold = int(self.hold_count)
+            self._open_position("SHORT", entry_px, timestamp_kst, leverage, fraction=fraction, leverage_mult=leverage_mult)
+            self.last_realized_pnl = realized
+            self.last_closed_hold_count = closed_hold
             self._save_live_state()
             return
         if final_action == 1 and self.pos is None:
-            self._open_position("LONG", entry_px, leverage)
+            self._open_position("LONG", entry_px, timestamp_kst, leverage, fraction=fraction, leverage_mult=leverage_mult)
             self._save_live_state()
         elif final_action == 2 and self.pos is None:
-            self._open_position("SHORT", entry_px, leverage)
+            self._open_position("SHORT", entry_px, timestamp_kst, leverage, fraction=fraction, leverage_mult=leverage_mult)
             self._save_live_state()
         elif final_action == 0 and self.pos is not None:
             if self.entry_price > 0 and current_price > 0: self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.last_realized_pnl = float(self.cur_equity - 1.0)
             self.last_closed_hold_count = int(self.hold_count)
             self.pos, self.entry_price, self.hold_count = None, 0.0, 0
-            self.current_leverage = 0.0
+            self.open_trade_id = ""
+            self.opened_at = ""
+            self.decision_at = ""
+            self._set_position_sizing(exposure=0.0)
             self.peak_equity = 1.0
             self.cur_equity = 1.0
             self.trend_mismatch_streak = 0
@@ -2486,7 +2667,10 @@ class DSACTrendRouter:
             self._save_live_state()
         elif self.pos is not None and self.entry_price > 0 and current_price > 0:
             self.hold_count += 1
-            if leverage is not None: self.current_leverage = float(np.clip(leverage, 0.0, 1.0))
+            if fraction is not None or leverage_mult is not None:
+                self._set_position_sizing(fraction=fraction, leverage_mult=leverage_mult)
+            elif leverage is not None:
+                self._set_position_sizing(exposure=leverage)
             self.cur_equity = 1.0 + self._net_pnl_frac(current_price)
             self.peak_equity = max(self.peak_equity, self.cur_equity)
             self.last_realized_pnl = None
@@ -2502,7 +2686,19 @@ class DSACTrendRouter:
             self.pos = data.get("pos")
             self.entry_price = float(data.get("entry_price", 0.0))
             self.hold_count = int(data.get("hold_count", 0))
-            self.current_leverage = float(np.clip(data.get("current_leverage", 0.0), 0.0, 1.0))
+            self.open_trade_id = str(data.get("open_trade_id", "") or "")
+            self.opened_at = str(data.get("opened_at", "") or "")
+            self.decision_at = str(data.get("decision_at", "") or "")
+            saved_fraction = data.get("position_fraction", None)
+            saved_exec_lev = data.get("execution_leverage", None)
+            saved_exposure = data.get("current_exposure", data.get("current_leverage", 0.0))
+            if saved_fraction is not None or saved_exec_lev is not None:
+                self._set_position_sizing(
+                    fraction=float(saved_fraction if saved_fraction is not None else 0.0),
+                    leverage_mult=float(saved_exec_lev if saved_exec_lev is not None else 1.0),
+                )
+            else:
+                self._set_position_sizing(exposure=float(saved_exposure or 0.0))
             self.peak_equity = float(max(data.get("peak_equity", 1.0), 1e-8))
             self.cur_equity = float(max(data.get("cur_equity", 1.0), 1e-8))
             self.last_realized_pnl = data.get("last_realized_pnl", None)
@@ -2524,7 +2720,10 @@ class DSACTrendRouter:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             payload = {
                 "pos": self.pos, "entry_price": self.entry_price, "hold_count": self.hold_count,
-                "current_leverage": self.current_leverage, "peak_equity": self.peak_equity,
+                "open_trade_id": self.open_trade_id, "opened_at": self.opened_at, "decision_at": self.decision_at,
+                "current_exposure": self.current_leverage, "current_leverage": self.current_leverage,
+                "position_fraction": self.position_fraction, "execution_leverage": self.execution_leverage,
+                "peak_equity": self.peak_equity,
                 "cur_equity": self.cur_equity, "last_realized_pnl": self.last_realized_pnl,
                 "last_closed_hold_count": self.last_closed_hold_count, "loss_streak": self.loss_streak,
                 "cooldown_bars_left": self.cooldown_bars_left, "trend_mismatch_streak": self.trend_mismatch_streak,
@@ -2539,20 +2738,36 @@ class DSACTrendRouter:
     def _force_close_record(self, price: float, reason: str = "") -> None:
         if self.pos is None: return
         pnl = self._net_pnl_frac(price) if price > 0 else 0.0
+        trade_math = self._trade_math(self.pos, self.entry_price, price, self.current_leverage)
         self.trade_history.append({
             "ts": datetime.utcnow().isoformat(timespec="seconds"), "side": self.pos,
             "entry": self.entry_price, "exit": price, "hold": self.hold_count,
+            "trade_id": self.open_trade_id,
+            "decision_at": self.decision_at,
+            "opened_at": self.opened_at,
+            "entry_price": self.entry_price,
+            "entry_exec_price": float(trade_math.get("entry_exec_price", 0.0)),
+            "exit_price": float(price),
+            "exit_exec_price": float(trade_math.get("exit_exec_price", 0.0)),
+            "position_fraction": float(self.position_fraction),
+            "execution_leverage": float(self.execution_leverage),
+            "total_exposure": float(self.current_leverage),
             "pnl_frac": float(pnl), "pnl": round(pnl, 6), "reason": reason or "FORCE_CLOSE", "liq_forced": True,
         })
         self.recent_realized.append(pnl)
         self.loss_streak = 0 if pnl > 0 else (self.loss_streak + 1)
         logger.warning("🚨 FORCE_CLOSE 기록 | pos=%s entry=%.4f exit=%.4f pnl=%.4f%% 사유=%s",
                        self.pos, self.entry_price, price, pnl * 100, reason)
-        self.pos, self.entry_price, self.hold_count, self.current_leverage, self._open_trade_diag = None, 0.0, 0, 0.0, None
+        self.pos, self.entry_price, self.hold_count, self._open_trade_diag = None, 0.0, 0, None
+        self.open_trade_id = ""
+        self.opened_at = ""
+        self.decision_at = ""
+        self._set_position_sizing(exposure=0.0)
 
     def _net_pnl_frac(self, current_price: float) -> float:
         if self.pos is None or self.entry_price <= 0.0 or current_price <= 0.0: return 0.0
-        lev = float(np.clip(self.current_leverage, 0.0, 1.0))
+        # `current_leverage` is the total account exposure used by the strategy.
+        lev = float(np.clip(self.current_leverage, 0.0, self.exposure_cap))
         if self.pos == "LONG":
             entry_exec = self.entry_price * (1.0 + self.trade_slip)
             exit_exec = current_price * (1.0 - self.trade_slip)
@@ -2614,19 +2829,46 @@ class DSACTrendRouter:
     def reconcile_external_position(self, pos_type: str | None, entry_price: float, leverage: float = 0.0) -> None:
         ext_pos = pos_type if pos_type in {"LONG", "SHORT"} else None
         ext_entry = float(entry_price) if entry_price and entry_price > 0 else 0.0
-        ext_lev = self.current_leverage if self.current_leverage > 0.0 else 1.0
+        # Preserve internal exposure semantics. Accept direct exposure snapshots in 0..cap,
+        # but ignore exchange-style high x-leverage values unless the internal model already stores them.
+        if 0.0 < float(leverage or 0.0) <= self.exposure_cap:
+            ext_lev = float(leverage)
+        elif self.current_leverage > 0.0:
+            ext_lev = float(self.current_leverage)
+        else:
+            ext_lev = 0.0
         if ext_pos is None:
             if self.pos is not None:
-                self.pos, self.entry_price, self.hold_count, self.current_leverage, self.peak_equity, self.cur_equity = None, 0.0, 0, 0.0, 1.0, 1.0
+                self.pos, self.entry_price, self.hold_count, self.peak_equity, self.cur_equity = None, 0.0, 0, 1.0, 1.0
+                self.open_trade_id = ""
+                self.opened_at = ""
+                self.decision_at = ""
+                self._set_position_sizing(exposure=0.0)
                 self._save_live_state()
             return
         if self.pos != ext_pos or abs(self.entry_price - ext_entry) > 1e-6:
-            self.pos, self.entry_price, self.current_leverage, self.hold_count, self.peak_equity, self.cur_equity = ext_pos, ext_entry, ext_lev, 0, 1.0, 1.0
+            self.pos, self.entry_price, self.hold_count, self.peak_equity, self.cur_equity = ext_pos, ext_entry, 0, 1.0, 1.0
+            self.open_trade_id = self._new_trade_id()
+            self.opened_at = pd.Timestamp.now(tz="Asia/Seoul").isoformat()
+            self.decision_at = self.opened_at
+            self._set_position_sizing(exposure=ext_lev)
+            self._save_live_state()
+        elif 0.0 < ext_lev <= self.exposure_cap and abs(self.current_leverage - ext_lev) > 1e-9:
+            self._set_position_sizing(exposure=ext_lev)
             self._save_live_state()
 
-    def append_trade_history(self, timestamp_kst, pnl_frac: float) -> None:
+    def append_trade_history(self, timestamp_kst, pnl_frac: float, payload: dict | None = None) -> None:
         ts_str = timestamp_kst.isoformat() if hasattr(timestamp_kst, "isoformat") else str(timestamp_kst)
-        self.trade_history.append({"ts": ts_str, "pnl_frac": float(pnl_frac), "hold_bars": int(self.last_closed_hold_count)})
+        row = {
+            "ts": ts_str,
+            "pnl_frac": float(pnl_frac),
+            "hold_bars": int(self.last_closed_hold_count),
+        }
+        extra = dict(payload or {})
+        for key, val in extra.items():
+            if key not in row:
+                row[key] = val
+        self.trade_history.append(row)
         self._save_live_state()
 
     def performance_metrics(self, now_kst) -> dict:
@@ -2671,11 +2913,6 @@ class DSACTrendRouter:
 async def main(use_local=False):
     fetcher      = BinanceLiveFetcher(limit=2500)
     fe_engine    = FeatureEngineer()
-    llm_advisor  = LLMAdvisor()
-    try:
-        llm_advisor.enabled = False
-    except Exception:
-        pass
     ensemble     = EnsemblePredictor() if ENSEMBLE_PREDICTOR_ENABLED else None
     dsac_nf_predictor = EnsemblePredictor()
     live_hmm: OnlineHMMDetector | None = None
@@ -2698,8 +2935,10 @@ async def main(use_local=False):
     tr_interceptor.start()
     playbook_router = PlaybookRouter()
     _dashboard_shadow_task: asyncio.Task | None = None
+    _daily_trade_report_task: asyncio.Task | None = None
     _shadow_prev_price: float | None = None
     _shadow_quant_minute_key: str = ""
+    _last_exchange_reconcile_ts: float = 0.0
 
     async def _fetch_quant_close_1m(limit: int = 1000) -> pd.DataFrame:
         klines = await fetcher._call_with_retry(
@@ -2719,11 +2958,23 @@ async def main(use_local=False):
 
     async def _dashboard_shadow_loop():
         """10초마다 micro/tail/playbook 필드만 dashboard_state.json 갱신."""
-        nonlocal _shadow_prev_price, _shadow_quant_minute_key
+        nonlocal _shadow_prev_price, _shadow_quant_minute_key, _last_exchange_reconcile_ts
         while True:
             try:
                 now = time.time()
                 await asyncio.sleep((10.0 - (now % 10.0)) + 0.05)
+
+                if not use_local:
+                    reconcile_now = time.time()
+                    if (reconcile_now - _last_exchange_reconcile_ts) >= 15.0:
+                        restored = await _fetch_exchange_position()
+                        _last_exchange_reconcile_ts = reconcile_now
+                        if restored:
+                            meta_router.reconcile_external_position(
+                                restored.get("type"),
+                                float(restored.get("entry_price", 0.0)),
+                                float(restored.get("leverage", 0.0)),
+                            )
 
                 ms = dict(ms_scanner.get_signal() or {})
                 tr_shadow = dict(getattr(tr_interceptor, "_shadow_state", {}) or {})
@@ -2783,13 +3034,21 @@ async def main(use_local=False):
                 state["shadow_updated_at"] = pd.Timestamp.utcnow().isoformat()
                 if _cur_price > 0.0:
                     state["price"] = float(_cur_price)
-                _pos = dict(state.get("position", {}) or {})
-                _pos_side = str(_pos.get("current", "NONE") or "NONE")
-                if _pos_side in {"LONG", "SHORT"} and _cur_price > 0.0:
-                    _pos["unrealized_pnl_pct"] = float(meta_router.unrealized_pnl(_cur_price))
-                else:
-                    _pos["unrealized_pnl_pct"] = 0.0
-                state["position"] = _pos
+                # Keep the fast shadow refresh aligned with the live router state.
+                # Updating only `unrealized_pnl_pct` against a stale dashboard snapshot
+                # can mix an old side/entry with the new router position and flip the sign.
+                state["position"] = {
+                    "current": meta_router.pos or "NONE",
+                    "entry_price": float(meta_router.entry_price or 0.0),
+                    "decision_at": str(meta_router.decision_at or ""),
+                    "opened_at": str(meta_router.opened_at or ""),
+                    "hold_bars": int(meta_router.hold_count or 0),
+                    "position_fraction": float(meta_router.position_fraction or 0.0),
+                    "execution_leverage": float(meta_router.execution_leverage or 1.0),
+                    "total_exposure": float(meta_router.current_leverage or 0.0),
+                    "unrealized_pnl_pct": float(meta_router.unrealized_pnl(_cur_price) if meta_router.pos and _cur_price > 0.0 else 0.0),
+                    "trade_pnl_pct": (state.get("position", {}) or {}).get("trade_pnl_pct"),
+                }
                 state["session"] = {
                     "session_asia": float(_sess_flags.get("session_asia", 0.0)),
                     "session_europe": float(_sess_flags.get("session_europe", 0.0)),
@@ -2950,11 +3209,38 @@ async def main(use_local=False):
             except Exception as e:
                 logger.debug("dashboard shadow loop skip: %s", e)
 
+    async def _daily_trade_report_loop():
+        while True:
+            try:
+                now_kst = pd.Timestamp.now(tz="Asia/Seoul")
+                next_midnight = now_kst.normalize() + pd.Timedelta(days=1)
+                wait_sec = max(5.0, float((next_midnight - now_kst).total_seconds()) + 5.0)
+                await asyncio.sleep(wait_sec)
+                report_day = (pd.Timestamp.now(tz="Asia/Seoul") - pd.Timedelta(days=1)).normalize()
+                report_day_txt = report_day.strftime("%Y-%m-%d")
+                if _last_daily_report_date(DAILY_TRADE_REPORT_STATE_PATH) == report_day_txt:
+                    continue
+                rows = _load_trade_journal_rows(TRADE_JOURNAL_PATH)
+                day_rows = _trade_rows_for_kst_day(rows, report_day)
+                message = _build_daily_trade_journal_message(report_day, day_rows)
+                await tg_notifier.notify(message)
+                _loop = asyncio.get_running_loop()
+                await _loop.run_in_executor(None, _save_daily_report_date, DAILY_TRADE_REPORT_STATE_PATH, report_day)
+                logger.info("?벂 daily trade journal sent for %s", report_day_txt)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("?좑툘 daily trade journal skip: %s", e)
+                await asyncio.sleep(30.0)
+
     def _sync_dsac_with_meta():
         dsac_router.pos = meta_router.pos
         dsac_router.entry_price = meta_router.entry_price
         dsac_router.hold_count = meta_router.hold_count
-        dsac_router.current_leverage = meta_router.current_leverage
+        dsac_router._set_runtime_sizing(
+            fraction=meta_router.position_fraction,
+            leverage_mult=meta_router.execution_leverage,
+        )
         dsac_router.current_equity = meta_router.cur_equity
         dsac_router.peak_equity = meta_router.peak_equity
         dsac_router.adaptive_enter_offset = meta_router.adaptive_enter_offset
@@ -3021,8 +3307,6 @@ async def main(use_local=False):
             _name_to_idx = {n: i for i, n in enumerate(getattr(dsac_nf_predictor, "MODEL_ORDER", []))}
             _inject_map = {
                 "PatchTST": ("pred_patchtst", "conf_patchtst"),
-                "Chronos": ("pred_chronos", "conf_chronos"),
-                "TiDE": ("pred_tide", "conf_tide"),
             }
             for _mname, (_pcol, _ccol) in _inject_map.items():
                 _idx = _name_to_idx.get(_mname)
@@ -3103,79 +3387,54 @@ async def main(use_local=False):
         ) / 1.5, 0.0, 1.0))
 
         prev_meta_pos = _prev_meta_pos
-        _dsac_only_source = "DSAC_PURE_RL" if DSAC_PURE_RL_MODE else "DSAC_ONLY"
+        _dsac_only_source = "DSAC_PURE_RL"
         _hold_reason = str(info.get("hold_reason", ""))
         _block_reason = ""
         _trend_exit_score = 0.0
+        _target_fraction = 0.0
+        _target_exec_leverage = 1.0
+        _exposure_cap = float(getattr(meta_router, "exposure_cap", 3.0))
 
-        if DSAC_PURE_RL_MODE:
-            _a = float(info.get("primary_raw", info.get("raw_action", 0.0)))
-            _abs = abs(_a)
-            _pos_th = float(os.getenv("DSAC_PURE_RL_POS_TH", "0.15"))
-            _close_th = float(os.getenv("DSAC_PURE_RL_CLOSE_TH", "0.00"))
-            _max_kelly = float(os.getenv("DSAC_PURE_RL_MAX_KELLY", "1.0"))
-            _force_close = str(os.getenv("DSAC_PURE_RL_FORCE_CLOSE", "false")).strip().lower() in {"1", "true", "yes", "on"}
-            _fa, _kelly = 0, 0.0
-            
-            if meta_router.pos is None:
-                if _a > _pos_th: _fa, _kelly = 1, min(_abs, _max_kelly)
-                elif _a < -_pos_th: _fa, _kelly = 2, min(_abs, _max_kelly)
-            elif meta_router.pos == "LONG":
-                _live_unr = float(meta_router._net_pnl_frac(current_price))
-                if _force_close and _live_unr <= -0.025: _fa, _kelly, _dsac_only_source = 0, 0.0, "DSAC_PURE_RL_FORCE_CLOSE"
-                elif _abs < _close_th: _fa, _kelly = 0, 0.0
-                elif _a < -_pos_th: _fa, _kelly = 2, min(_abs, _max_kelly)
-                else: _fa, _kelly = 1, min(_abs, _max_kelly)
-            else:  # SHORT
-                _live_unr = float(meta_router._net_pnl_frac(current_price))
-                if _force_close and _live_unr <= -0.025: _fa, _kelly, _dsac_only_source = 0, 0.0, "DSAC_PURE_RL_FORCE_CLOSE"
-                elif _abs < _close_th: _fa, _kelly = 0, 0.0
-                elif _a > _pos_th: _fa, _kelly = 1, min(_abs, _max_kelly)
-                else: _fa, _kelly = 2, min(_abs, _max_kelly)
-            _kelly = float(np.clip(_kelly, 0.0, 1.0))
-        else:
-            _kelly = float(np.clip(dsac_lev, 0.0, 1.0))
-            _fa = int(dsac_action)
-            _position_signal = str(info.get("position_signal", "HOLD"))
-            _position_reason = str(info.get("position_reason", ""))
-            if _position_signal == "EXIT": _fa, _kelly, _dsac_only_source = 0, 0.0, f"DSAC_LOGIT_EXIT:{_position_reason or 'RULE'}"
-            elif _position_signal == "REDUCE": _fa, _dsac_only_source = (1 if meta_router.pos == "LONG" else 2), f"DSAC_LOGIT_REDUCE:{_position_reason or 'RULE'}"
-
-        _trend_exit, _trend_exit_score, _trend_exit_reason = meta_router.update_trend_mismatch(
-            processed_df, trend_signal
+        _a = float(info.get("primary_raw", info.get("raw_action", 0.0)))
+        _regime_name = next((k.replace("regime_", "") for k, v in (regime or {}).items() if float(v) == 1.0), "normal") if isinstance(regime, dict) else "normal"
+        _pure_rl = decide_pure_rl_action(
+            action_val=_a,
+            current_pos=meta_router.pos,
+            live_unrealized_pnl=float(meta_router._net_pnl_frac(current_price)) if meta_router.pos in {"LONG", "SHORT"} else 0.0,
+            alpha_focus_enabled=DSAC_ALPHA_FOCUS_STRICT_ENABLE,
+            alpha_focus_row=_last_row,
+            alpha_focus_regime=_regime_name,
+            alpha_focus_sizing_fn=_alpha_focus_strict_sizing,
+            alpha_focus_exposure_cap=_exposure_cap,
+            oos_parity_mode=False,
+            source_pure="DSAC_PURE_RL",
         )
-        if _trend_exit and meta_router.pos is not None:
-            _fa, _kelly, _dsac_only_source = 0, 0.0, _trend_exit_reason or "DSAC_ONLY_TREND_EXIT"
+        _fa = int(_pure_rl.final_action)
+        _kelly = float(_pure_rl.kelly)
+        _dsac_only_source = str(_pure_rl.source)
+        _target_fraction = float(np.clip(_kelly, 0.0, 1.0))
+        _target_exec_leverage = 1.0
 
-        if ENH_RUNTIME_ENABLE:
-            _session_flags = _session_flags_from_timestamp(current_time_kst)
-            _enhanced = enhanced_engine.process(
-                dsac_action=int(_fa), dsac_kelly=float(_kelly), dsac_info=info,
-                processed_df=processed_df, eth_buffer=eth_buffer, btc_buffer=btc_buffer,
-                meta_router=meta_router, regime=regime, trend_signal=trend_signal,
-                session_flags=_session_flags,
-            )
-            _fa = int(_enhanced.get("action", _fa))
-            _kelly = float(np.clip(_enhanced.get("kelly", _kelly), 0.0, 1.0))
-            _dsac_only_source = str(_enhanced.get("source", _dsac_only_source))
+        _trend_exit = False
+        _trend_exit_reason = ""
 
         # ── 📡 선행 레이더 (MicrostructureScanner) 개입 ────────────────
         ms_signal = ms_scanner.get_signal()
         ms_kelly_mult = ms_scanner.get_kelly_multiplier()
         
         # 스캐너 배수가 1.0이 아닐 경우 레버리지(Kelly) 비중 조정
-        if ms_kelly_mult != 1.0:
+        if not DSAC_OOS_PARITY_MODE and not DSAC_PURE_RL_OOS_MODE and not DSAC_PURE_RL_REPLAY_EXEC_MODE and ms_kelly_mult != 1.0:
             old_kelly = _kelly
-            _kelly = float(np.clip(_kelly * ms_kelly_mult, 0.0, 1.0))
+            _kelly = float(np.clip(_kelly * ms_kelly_mult, 0.0, _exposure_cap))
             _dsac_only_source = f"{_dsac_only_source} | MS_BOOST(x{ms_kelly_mult:.2f})"
             logger.info(f"📡 [레이더 개입] 미시구조 탐지! Kelly 비중 조정: {old_kelly:.3f} -> {_kelly:.3f}")
             
         # NIF 스마트머니 매매 편향에 따른 진입 제한
         ms_bias = ms_signal.get("signal_bias", 0)
-        if _fa == 1 and ms_bias == -1:
+        if not DSAC_OOS_PARITY_MODE and not DSAC_PURE_RL_OOS_MODE and not DSAC_PURE_RL_REPLAY_EXEC_MODE and _fa == 1 and ms_bias == -1:
             _kelly *= 0.5  # 롱 보는데 고래는 파는 중
             _dsac_only_source += " [NIF_WARN:WHALE_SELL]"
-        elif _fa == 2 and ms_bias == 1:
+        elif not DSAC_OOS_PARITY_MODE and not DSAC_PURE_RL_OOS_MODE and not DSAC_PURE_RL_REPLAY_EXEC_MODE and _fa == 2 and ms_bias == 1:
             _kelly *= 0.5  # 숏 보는데 고래는 사는 중
             _dsac_only_source += " [NIF_WARN:WHALE_BUY]"
 
@@ -3184,34 +3443,28 @@ async def main(use_local=False):
         # LAI(청산 흡수 지수) 계산을 위해 이전 1분봉 종가 획득
         prev_price = float(eth_buffer['close'].iloc[-2]) if len(eth_buffer) >= 2 else current_price
 
-        _fa, _kelly, _tr_reason = tr_interceptor.intercept(
-            action=_fa, 
-            pos=meta_router.pos, 
-            kelly=_kelly, 
-            current_price=current_price, 
-            prev_price=prev_price
-        )
-        
-        if _tr_reason:
-            logger.warning("🛡️ TAIL RISK INTERCEPT: %s", _tr_reason)
-            _dsac_only_source = f"TR_INTERCEPT({_tr_reason})"
+        _tr_reason = ""
+        if not DSAC_OOS_PARITY_MODE and not DSAC_PURE_RL_OOS_MODE and not DSAC_PURE_RL_REPLAY_EXEC_MODE:
+            _fa, _kelly, _tr_reason = tr_interceptor.intercept(
+                action=_fa,
+                pos=meta_router.pos,
+                kelly=_kelly,
+                current_price=current_price,
+                prev_price=prev_price
+            )
 
-        # ── 🎯 Polymarket 1분 급변 시 강제 청산 가드 ────────────────
-        try:
-            _poly_live = get_polymarket_snapshot_cached(float(current_price))
-        except Exception:
-            _poly_live = {}
-        _poly_force_exit, _poly_reason = polymarket_exit_guard(
-            pos=meta_router.pos,
-            entry_price=float(meta_router.entry_price or 0.0),
-            poly=dict(_poly_live or {}),
-        )
-        if _poly_force_exit:
-            _fa, _kelly = 0, 0.0
-            _dsac_only_source = str(_poly_reason)
-            logger.warning("🎯 POLYMARKET EXIT: %s", _poly_reason)
-        elif _poly_reason:
-            logger.info("🎯 POLYMARKET HOLD: %s", _poly_reason)
+            if _tr_reason:
+                logger.warning("🛡️ TAIL RISK INTERCEPT: %s", _tr_reason)
+                _dsac_only_source = f"TR_INTERCEPT({_tr_reason})"
+
+        _target_exposure = float(np.clip(_kelly, 0.0, _exposure_cap))
+        if _fa == 0 or _target_exposure <= 0.0:
+            _target_fraction = 0.0
+            _target_exec_leverage = 1.0
+            _target_exposure = 0.0
+        else:
+            _target_fraction = float(np.clip(min(_target_exposure, 1.0), 0.0, 1.0))
+            _target_exec_leverage = float(np.clip(_target_exposure / max(_target_fraction, 1e-8), 1.0, _exposure_cap)) if _target_fraction > 0.0 else 1.0
 
         # ── Playbook Router: 분석/대시보드 전용 (실제 매매결정에는 미개입) ──
         _ms_exec = dict(ms_signal or {})
@@ -3233,13 +3486,24 @@ async def main(use_local=False):
         _pb_exec_hft = dict(_pb_exec_eval.get("winner_hft", {}) or {})
         _pb_exec_mft = dict(_pb_exec_eval.get("winner_mft", {}) or {})
         _pb_exec_list = list(_pb_exec_eval.get("evaluations", []) or [])
+        _prev_trade_snapshot = meta_router.position_snapshot()
         # ── 최종 포지션 업데이트 및 대시보드 저장 ──
-        meta_router._update_pos(_fa, current_price, _kelly, trend_signal)
+        meta_router._update_pos(
+            _fa,
+            current_price,
+            current_time_kst,
+            _target_exposure,
+            fraction=_target_fraction,
+            leverage_mult=_target_exec_leverage,
+            trend_signal=trend_signal,
+        )
         meta_router.update_adaptive_gate(final_action=int(_fa), in_position=(meta_router.pos is not None))
 
         meta_result = {
             "final_action": _fa,
-            "unified_kelly": _kelly,
+            "unified_kelly": _target_exposure,
+            "position_fraction": _target_fraction,
+            "execution_leverage": _target_exec_leverage,
             "source": _dsac_only_source,
             "enhanced_source": _dsac_only_source,
             "rl_score": float(info.get("score", 0.0)),
@@ -3264,33 +3528,47 @@ async def main(use_local=False):
         trade_pnl_pct: float | None = None
 
         _new_pos = meta_router.pos
+        _new_trade_snapshot = meta_router.position_snapshot()
+        _transition_label = _pos_transition_label(prev_meta_pos, _new_pos)
+        _trade_journal_rows: list[dict] = []
+        _close_trade_payload: dict | None = None
+        _open_trade_payload: dict | None = None
         _position_closed = (_prev_meta_pos is not None and _new_pos != _prev_meta_pos)
         if _position_closed:
-            realized = meta_router.last_realized_pnl
-            if realized is None: realized = float(meta_router.cur_equity - 1.0)
-            trade_pnl_pct = float(realized) * 100.0
-            enhanced_engine.on_trade_close(float(realized))
-            meta_router.record_outcome(float(realized))
-            meta_router.append_trade_history(current_time_kst, float(realized))
+            _close_reason = str(_block_reason or _hold_reason or info.get("position_reason", "") or _dsac_only_source)
+            _close_trade_payload = meta_router.build_close_trade_payload(
+                snapshot=_prev_trade_snapshot,
+                current_price=current_price,
+                timestamp_kst=current_time_kst,
+                event=_transition_label,
+                regime_name=regime_name,
+                source=_dsac_only_source,
+                reason=_close_reason,
+                next_side=_new_pos,
+            )
+            realized = float(_close_trade_payload.get("pnl_frac", 0.0))
+            trade_pnl_pct = float(_close_trade_payload.get("pnl_pct", 0.0))
+            enhanced_engine.on_trade_close(realized)
+            meta_router.record_outcome(realized)
+            meta_router.append_trade_history(current_time_kst, realized, payload=_close_trade_payload)
+            _trade_journal_rows.append(dict(_close_trade_payload))
 
         if _new_pos is not None and _new_pos != _prev_meta_pos:
             enhanced_engine.on_position_open()
+            _open_reason = str(info.get("position_reason", "") or _hold_reason or _dsac_only_source)
+            _open_trade_payload = meta_router.build_open_trade_payload(
+                snapshot=_new_trade_snapshot,
+                timestamp_kst=current_time_kst,
+                event=_transition_label,
+                regime_name=regime_name,
+                source=_dsac_only_source,
+                reason=_open_reason,
+            )
+            _trade_journal_rows.append(dict(_open_trade_payload))
         if _prev_meta_pos is None and _new_pos is not None and trade_pnl_pct is None:
             trade_pnl_pct = 0.0
         if trade_pnl_pct is not None: meta_result["trade_pnl_pct"] = float(trade_pnl_pct)
 
-        _agent_tracker_seed = _load_agent_tracker_state()
-        _agent_actions = dsac_router.specialist_display_actions(
-            tracker_state=_agent_tracker_seed,
-            current_time_kst=current_time_kst,
-        )
-        _agent_tracker_state = _update_agent_tracker(
-            agent_actions=_agent_actions,
-            current_price=current_price,
-            now_iso=str(current_time_kst),
-        )
-        _agent_tracker = _agent_tracker_summary(_agent_tracker_state)
-        
         if prev_meta_pos != _new_pos:
             if prev_meta_pos is None and _new_pos: _tg_code = f"ENTER_{_new_pos}"
             elif prev_meta_pos and _new_pos is None: _tg_code = f"EXIT_{prev_meta_pos}"
@@ -3434,7 +3712,12 @@ async def main(use_local=False):
                 "position": {
                     "current": meta_router.pos or "NONE",
                     "entry_price": float(meta_router.entry_price or 0.0),
+                    "decision_at": str(meta_router.decision_at or ""),
+                    "opened_at": str(meta_router.opened_at or ""),
                     "hold_bars": int(meta_router.hold_count or 0),
+                    "position_fraction": float(meta_router.position_fraction or 0.0),
+                    "execution_leverage": float(meta_router.execution_leverage or 1.0),
+                    "total_exposure": float(meta_router.current_leverage or 0.0),
                     "unrealized_pnl_pct": float(meta_router.unrealized_pnl(current_price) if meta_router.pos else 0.0),
                     "trade_pnl_pct": float(trade_pnl_pct) if trade_pnl_pct is not None else None,
                 },
@@ -3442,7 +3725,9 @@ async def main(use_local=False):
                     "rl_action": int(rl_action),
                     "final_action": int(_fa),
                     "source": str(_dsac_only_source),
-                    "unified_kelly": float(_kelly),
+                    "unified_kelly": float(_target_exposure),
+                    "position_fraction": float(_target_fraction),
+                    "execution_leverage": float(_target_exec_leverage),
                     "hold_reason": str(_hold_reason),
                     "block_reason": str(_block_reason),
                 },
@@ -3452,24 +3737,9 @@ async def main(use_local=False):
                         "raw": float(info.get("primary_model_raw", info.get("primary_raw", 0.0))),
                         "std": float(info.get("primary_model_std", info.get("primary_std", 0.0))),
                     },
-                    "long": {
-                        "action": int(_agent_actions.get("long", {}).get("action", 0)),
-                        "logit": float(_agent_actions.get("long", {}).get("logit", 0.0)),
-                        "kelly_weight": float(_agent_actions.get("long", {}).get("kelly_weight", 0.0)),
-                        "std": float(_agent_actions.get("long", {}).get("std", 0.0)),
-                        "decision_at": str(_agent_actions.get("long", {}).get("decision_at", current_time_kst)),
-                    },
-                    "short": {
-                        "action": int(_agent_actions.get("short", {}).get("action", 0)),
-                        "logit": float(_agent_actions.get("short", {}).get("logit", 0.0)),
-                        "kelly_weight": float(_agent_actions.get("short", {}).get("kelly_weight", 0.0)),
-                        "std": float(_agent_actions.get("short", {}).get("std", 0.0)),
-                        "decision_at": str(_agent_actions.get("short", {}).get("decision_at", current_time_kst)),
-                    },
                     "agreement_count": int(info.get("agreement_count", 0)),
                     "net_score": float(info.get("net_score", 0.0)),
                     "conviction": float(info.get("conviction", 0.0)),
-                    "tracker": _agent_tracker,
                 },
                 "trend": {
                     "prob_up": float((trend_signal or {}).get("prob_up", (trend_signal or {}).get("m7_prob_up", 0.0) or 0.0)),
@@ -3606,23 +3876,26 @@ async def main(use_local=False):
             }
             _loop = asyncio.get_running_loop()
             await _loop.run_in_executor(None, _atomic_write_json, DASHBOARD_STATE_PATH, _dashboard_state)
+            if _trade_journal_rows:
+                await _loop.run_in_executor(None, _append_jsonl_many, TRADE_JOURNAL_PATH, _trade_journal_rows)
             if _position_closed or (_prev_meta_pos is None and _new_pos is not None):
                 await _loop.run_in_executor(None, _append_jsonl, DASHBOARD_EVENTS_PATH, {
                     "ts": str(current_time_kst),
-                    "event": _pos_transition_label(prev_meta_pos, _new_pos),
+                    "event": _transition_label,
                     "from": prev_meta_pos,
                     "to": _new_pos,
                     "price": float(current_price),
-                    "kelly": float(_kelly),
+                    "kelly": float(_target_exposure),
                     "pnl_pct": (float(trade_pnl_pct) if trade_pnl_pct is not None else 0.0),
                     "regime": str(regime_name),
+                    "close_trade": _close_trade_payload,
+                    "open_trade": _open_trade_payload,
                 })
         except Exception as _dash_e:
             logger.debug("dashboard state write skip: %s", _dash_e)
         logger.info("📊 %s", meta_router.performance_summary(current_time_kst))
 
     try:
-        _dashboard_shadow_task = asyncio.create_task(_dashboard_shadow_loop())
         if use_local:
             eth_buffer, btc_buffer = fetcher.load_local_data()
         else:
@@ -3647,7 +3920,13 @@ async def main(use_local=False):
             
         if not use_local:
             restored = await _fetch_exchange_position()
-            if restored: meta_router.reconcile_external_position(restored.get("type"), float(restored.get("entry_price", 0.0)), float(restored.get("leverage", 0.0)))
+            _last_exchange_reconcile_ts = time.time()
+            if restored:
+                meta_router.reconcile_external_position(
+                    restored.get("type"),
+                    float(restored.get("entry_price", 0.0)),
+                    float(restored.get("leverage", 0.0)),
+                )
         # 재시작 직후 기존 포지션을 "현재 기준점"으로 고정한다.
         # (None으로 두면 첫 사이클에서 기존 포지션도 신규 진입처럼 기록될 수 있음)
         _prev_meta_pos = meta_router.pos
@@ -3656,6 +3935,8 @@ async def main(use_local=False):
             return
 
         await _run_cycle(processed_boot, eth_buffer)
+        _dashboard_shadow_task = asyncio.create_task(_dashboard_shadow_loop())
+        _daily_trade_report_task = asyncio.create_task(_daily_trade_report_loop())
 
         first_run = True
         while not use_local:
@@ -3689,6 +3970,8 @@ async def main(use_local=False):
         # 종료 시 두 모니터 모두 정상 종료 처리
         if _dashboard_shadow_task and not _dashboard_shadow_task.done():
             _dashboard_shadow_task.cancel()
+        if _daily_trade_report_task and not _daily_trade_report_task.done():
+            _daily_trade_report_task.cancel()
         ms_scanner.stop()
         tr_interceptor.stop()
         await fetcher.exchange.close()

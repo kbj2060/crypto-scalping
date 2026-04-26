@@ -25,7 +25,7 @@ if str(_ROOT) not in sys.path:
 from ensemble.train_rl_dsac_agent import (
     DSAC_STATE_DIM, GaussianActor, DSACRouter,
 )
-from ensemble.train_rl_agent import OnlineHMMDetector, MultiTimeframeFeatures
+from ensemble.rl_runtime_primitives import OnlineHMMDetector, MultiTimeframeFeatures
 
 _CSV   = str(_ROOT / "data/splits/year_oos/rl_meta_2026.csv")
 _CKPT  = str(_ROOT / "data/ensemble/ckpt/best_dsac_agents.pth")

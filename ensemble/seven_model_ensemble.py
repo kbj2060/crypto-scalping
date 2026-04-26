@@ -17,6 +17,19 @@ for _p in (_ROOT_DIR, _THIS_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Some persisted artifacts were created with NumPy 2.x, which pickles objects
+# under the private ``numpy._core`` package path. NumPy 1.26 still exposes the
+# equivalent implementation under ``numpy.core`` only, so we alias the legacy
+# module path before loading any pickled models.
+try:
+    import numpy.core as _np_core
+    import numpy.core.numeric as _np_core_numeric
+
+    sys.modules.setdefault("numpy._core", _np_core)
+    sys.modules.setdefault("numpy._core.numeric", _np_core_numeric)
+except Exception:
+    pass
+
 from ensemble.supervised.train_trend_xgb import XGBTrendBrain
 from ensemble.supervised.train_entry_price_model import EntryPriceBrain
 
@@ -65,6 +78,15 @@ def _safe_prob3(arr: np.ndarray) -> np.ndarray:
         return p
     n = len(p) if p.ndim > 0 else 1
     return np.full((n, 3), 1.0 / 3.0, dtype=np.float64)
+
+
+def _robust_z_series(s: pd.Series, window: int = 288, min_periods: int = 48) -> np.ndarray:
+    x = pd.to_numeric(s, errors="coerce").fillna(0.0)
+    med = x.rolling(window=window, min_periods=min_periods).median()
+    abs_dev = (x - med).abs()
+    mad = abs_dev.rolling(window=window, min_periods=min_periods).median()
+    z = (x - med) / (1.4826 * mad.replace(0.0, np.nan) + 1e-6)
+    return z.replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-8.0, 8.0).to_numpy(dtype=np.float64)
 
 
 def _resolve_model_path(meta_path: str, model_ref: str | None) -> str:
@@ -374,11 +396,11 @@ class SevenModelEnsemble:
 
     DEFAULT_META_PATHS = {
         "trend_xgb": "data/ensemble/supervised/trend_xgb.json",
+        "manifold_hgb": "data/ensemble/supervised/manifold_hgb.json",
         "entry_price_model": "data/ensemble/supervised/entry_price_model.json",
         "multi_target_lgbm": "data/ensemble/supervised/multi_target_lgbm.json",
         "quantile_forest": "data/ensemble/supervised/quantile_forest.json",
         "gmm_volatility": "data/ensemble/unsupervised/gmm_volatility.json",
-        "hdbscan_regime": "data/ensemble/unsupervised/hdbscan_regime.json",
         "isolation_forest": "data/ensemble/unsupervised/isolation_forest.json",
         "vae_anomaly": "data/ensemble/unsupervised/vae_anomaly.json",
     }
@@ -401,11 +423,11 @@ class SevenModelEnsemble:
         self.strict = bool(strict)
 
         self.trend_xgb = _ModelState(False)
+        self.manifold = _ModelState(False)
         self.entry_price = _ModelState(False)
         self.multi_target = _ModelState(False)
         self.quantile = _ModelState(False)
         self.gmm = _ModelState(False)
-        self.hdbscan = _ModelState(False)
         self.isolation = _ModelState(False)
         self.vae = _ModelState(False)
 
@@ -415,11 +437,11 @@ class SevenModelEnsemble:
     def _missing_models(self) -> list[str]:
         checks = [
             ("trend_xgb", self.trend_xgb),
+            ("manifold_hgb", self.manifold),
             ("entry_price_model", self.entry_price),
             ("multi_target_lgbm", self.multi_target),
             ("quantile_forest", self.quantile),
             ("gmm_volatility", self.gmm),
-            ("hdbscan_regime", self.hdbscan),
             ("isolation_forest", self.isolation),
             ("vae_anomaly", self.vae),
         ]
@@ -474,11 +496,11 @@ class SevenModelEnsemble:
 
     def _load_all(self) -> None:
         self._load_trend_xgb()
+        self._load_manifold_hgb()
         self._load_entry_price()
         self._load_multitarget()
         self._load_quantile()
         self._load_gmm()
-        self._load_hdbscan()
         self._load_isolation()
         self._load_vae()
 
@@ -491,6 +513,16 @@ class SevenModelEnsemble:
         except Exception as e:
             self.trend_xgb = _ModelState(False, reason=str(e))
             logger.warning("⚠️ trend_xgb unavailable: %s", e)
+
+    def _load_manifold_hgb(self) -> None:
+        payload, meta = self._load_pickle_from_meta("manifold_hgb")
+        if payload is None:
+            self.manifold = _ModelState(False, reason="missing_payload")
+            logger.warning("⚠️ manifold_hgb unavailable")
+            return
+        fcols = list(meta.get("feature_cols", payload.get("feature_cols", []))) if meta else list(payload.get("feature_cols", []))
+        self.manifold = _ModelState(True, model=payload.get("model"), feature_cols=fcols, extra={})
+        logger.info("✅ manifold_hgb loaded (%d features)", len(fcols))
 
     def _load_entry_price(self) -> None:
         path = self.meta_paths["entry_price_model"]
@@ -629,6 +661,18 @@ class SevenModelEnsemble:
             out = np.asarray(model.predict(x.values), dtype=np.float64)
         return _safe_prob3(out)
 
+    def _predict_manifold_hgb(self, df: pd.DataFrame) -> np.ndarray:
+        n = len(df)
+        if not self.manifold.available or self.manifold.model is None:
+            return np.full((n, 3), 1.0 / 3.0, dtype=np.float64)
+        x = _to_numeric_frame(df, self.manifold.feature_cols or [], fill_mode="median")
+        model = self.manifold.model
+        if hasattr(model, "predict_proba"):
+            out = np.asarray(model.predict_proba(x), dtype=np.float64)
+        else:
+            out = np.asarray(model.predict(x.values), dtype=np.float64)
+        return _safe_prob3(out)
+
     def _predict_multitarget(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
         n = len(df)
         probs = np.full((n, 3), 1.0 / 3.0, dtype=np.float64)
@@ -732,27 +776,8 @@ class SevenModelEnsemble:
 
     def _predict_hdbscan(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
         n = len(df)
-        labels = np.full(n, -1, dtype=np.int64)
+        labels = np.zeros(n, dtype=np.int64)
         probs = np.zeros(n, dtype=np.float64)
-        if not self.hdbscan.available or self.hdbscan.model is None:
-            return {"label": labels, "prob": probs}
-        cols = self.hdbscan.feature_cols or []
-        x_raw = _to_numeric_frame(df, cols, fill_mode="median").values.astype(np.float32)
-        mean = (self.hdbscan.extra or {}).get("mean")
-        std = (self.hdbscan.extra or {}).get("std")
-        std = np.where(np.asarray(std) < 1e-8, 1.0, std)
-        x = (x_raw - mean) / std
-        model = self.hdbscan.model
-        try:
-            import hdbscan  # type: ignore
-
-            labels, probs = hdbscan.approximate_predict(model, x)
-            labels = np.asarray(labels, dtype=np.int64)
-            probs = np.asarray(probs, dtype=np.float64)
-        except Exception:
-            if hasattr(model, "labels_") and len(getattr(model, "labels_", [])) == n:
-                labels = np.asarray(model.labels_, dtype=np.int64)
-                probs = np.asarray(getattr(model, "probabilities_", np.zeros(n)), dtype=np.float64)
         return {"label": labels, "prob": probs}
 
     def _predict_isolation(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
@@ -803,6 +828,129 @@ class SevenModelEnsemble:
         is_anom = (err > threshold).astype(np.int64)
         return {"error": err, "is_anomaly": is_anom, "threshold": threshold}
 
+    def _blend_supervised_manifold(
+        self,
+        df: pd.DataFrame,
+        p_xgb: np.ndarray,
+        p_meta: np.ndarray,
+        p_q: np.ndarray,
+        q50: np.ndarray,
+        q_width: np.ndarray,
+        quality: np.ndarray,
+    ) -> np.ndarray:
+        # Convex supervised fusion: reward agreement, downweight high-entropy disagreement,
+        # and use quantile edge as a directional geometric bias.
+        probs_stack = np.stack([_safe_prob3(p_xgb), _safe_prob3(p_meta), _safe_prob3(p_q)], axis=1)
+        weights = np.array(
+            [self.weight_trend_xgb, self.weight_multitarget, self.weight_quantile],
+            dtype=np.float64,
+        )
+        weights = weights / max(float(np.sum(weights)), 1e-12)
+
+        base = np.sum(probs_stack * weights[None, :, None], axis=1)
+        pair_gap = (
+            np.abs(probs_stack[:, 0, :] - probs_stack[:, 1, :]).sum(axis=1)
+            + np.abs(probs_stack[:, 0, :] - probs_stack[:, 2, :]).sum(axis=1)
+            + np.abs(probs_stack[:, 1, :] - probs_stack[:, 2, :]).sum(axis=1)
+        ) / 3.0
+        agreement = np.clip(1.0 - 0.9 * pair_gap, 0.25, 1.15)
+
+        rr = np.abs(np.nan_to_num(q50, nan=0.0)) / np.maximum(np.nan_to_num(q_width, nan=1e-6), 1e-6)
+        edge = np.clip(np.tanh(rr * 0.9), 0.0, 1.0)
+        quality_norm = np.clip(np.nan_to_num(quality, nan=0.0) * 80.0, -1.0, 1.0)
+
+        mtf1 = pd.to_numeric(df["mtf_trend_1h"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64) if "mtf_trend_1h" in df.columns else np.zeros(len(df), dtype=np.float64)
+        mtf4 = pd.to_numeric(df["mtf_trend_4h"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64) if "mtf_trend_4h" in df.columns else np.zeros(len(df), dtype=np.float64)
+        trend_bias = np.clip(0.55 * mtf1 + 0.45 * mtf4, -2.0, 2.0)
+        directional_bias = 0.55 * np.sign(np.nan_to_num(q50, nan=0.0)) * edge + 0.25 * np.tanh(trend_bias) + 0.20 * quality_norm
+        logits_bias = np.column_stack([
+            -directional_bias,
+            -0.35 * edge,
+            directional_bias,
+        ])
+
+        entropy = -np.sum(base * np.log(np.clip(base, 1e-8, 1.0)), axis=1) / np.log(3.0)
+        confidence_boost = np.clip(1.0 - entropy, 0.0, 1.0)
+        logits = np.log(np.clip(base, 1e-8, 1.0)) * agreement[:, None] + (0.20 + 0.35 * confidence_boost)[:, None] * logits_bias
+
+        probs = _softmax3(logits)
+        prior = np.clip(np.mean(probs, axis=0), 1e-6, 1.0)
+        target_prior = np.array([0.42, 0.16, 0.42], dtype=np.float64)
+        prior_scale = np.clip(target_prior / prior, 0.75, 1.35)
+        probs = probs * prior_scale[None, :]
+        return _safe_prob3(probs)
+
+    def _experimental_unsup_redesign(
+        self,
+        df: pd.DataFrame,
+        probs: np.ndarray,
+        confidence: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        side = np.where(np.argmax(probs, axis=1) == 2, 1.0, np.where(np.argmax(probs, axis=1) == 0, -1.0, 0.0))
+
+        rs = _robust_z_series(df.get("rogers_satchell_vol", pd.Series(0.0, index=df.index)))
+        gk = _robust_z_series(df.get("garman_klass_vol", pd.Series(0.0, index=df.index)))
+        amihud = _robust_z_series(df.get("amihud_illiquidity_z", pd.Series(0.0, index=df.index)))
+        lv = _robust_z_series(df.get("liquidity_vacuum", pd.Series(0.0, index=df.index)))
+        curvature = _robust_z_series(pd.to_numeric(df.get("cross_scale_curvature", 0.0), errors="coerce").abs())
+        execq = pd.to_numeric(df.get("execution_quality", 0.0), errors="coerce").fillna(0.0).clip(-1.5, 1.5).to_numpy(dtype=np.float64)
+        crowd = pd.to_numeric(df.get("crowding_pressure", 0.0), errors="coerce").fillna(0.0).clip(-3.0, 3.0).to_numpy(dtype=np.float64)
+        whale = _robust_z_series(pd.to_numeric(df.get("whale_conviction", 0.0), errors="coerce").abs())
+        funding_div = _robust_z_series(pd.to_numeric(df.get("funding_price_divergence", 0.0), errors="coerce").abs())
+        smf = _robust_z_series(pd.to_numeric(df.get("smart_money_flow", 0.0), errors="coerce").abs())
+        cvp_imb = _robust_z_series(pd.to_numeric(df.get("cvp_volume_imbalance", 0.0), errors="coerce").abs())
+        poc = _robust_z_series(pd.to_numeric(df.get("cvp_poc_dist", 0.0), errors="coerce").abs())
+        taker = _robust_z_series(pd.to_numeric(df.get("taker_acceleration", 0.0), errors="coerce").abs())
+        nti = _robust_z_series(pd.to_numeric(df.get("net_taker_ratio", 0.0), errors="coerce").abs())
+        regime_persist = pd.to_numeric(df.get("regime_persistence", 0.0), errors="coerce").fillna(0.0).clip(0.0, 1.5).to_numpy(dtype=np.float64)
+        trade_int = _robust_z_series(pd.to_numeric(df.get("trade_intensity", 0.0), errors="coerce").abs())
+
+        vol_surface = 0.26 * rs + 0.22 * gk + 0.18 * amihud + 0.20 * lv + 0.14 * curvature
+        vol_rank = _sigmoid(1.1 * vol_surface)
+        gmm_conf = np.clip(1.0 - 0.55 * vol_rank + 0.18 * np.clip(execq, -1.0, 1.0), 0.0, 1.0)
+        gmm_cluster = np.digitize(vol_rank, bins=[0.22, 0.45, 0.68]).astype(np.int64)
+
+        flow_dislocation = 0.24 * cvp_imb + 0.20 * poc + 0.18 * nti + 0.18 * taker + 0.20 * lv
+        crowd_pressure = 0.85 * (0.38 * np.abs(crowd) + 0.22 * whale + 0.20 * funding_div + 0.20 * smf)
+        persistence_stress = 1.15 * (0.55 * _robust_z_series(pd.Series(1.0 - regime_persist)) + 0.45 * curvature)
+        execution_fragility = 0.45 * _robust_z_series(pd.Series(-execq)) + 0.20 * lv + 0.15 * trade_int + 0.20 * cvp_imb
+
+        iso_score = np.maximum(0.0, 0.42 * crowd_pressure + 0.33 * flow_dislocation + 0.25 * execution_fragility)
+        vae_error = np.maximum(0.0, 0.36 * execution_fragility + 0.34 * persistence_stress + 0.30 * vol_surface)
+
+        gate_energy = iso_score + 0.7 * vae_error
+        soft_th = float(np.quantile(gate_energy, 0.90))
+        hard_th = float(np.quantile(gate_energy, 0.972))
+        iso_anom = (gate_energy >= soft_th).astype(np.int64)
+        vae_anom = (gate_energy >= hard_th).astype(np.int64)
+        gate_block = (gate_energy >= hard_th).astype(np.int64)
+
+        # directional over-crowding: penalize only when current side aligns with crowding pressure
+        directional_crowd = np.maximum(side * crowd, 0.0)
+        route_scale = np.clip(
+            1.0
+            - 0.34 * vol_rank
+            - 0.48 * np.clip((gate_energy - soft_th) / max(hard_th - soft_th, 1e-6), 0.0, 1.0)
+            + 0.06 * np.clip(execq, -1.0, 1.0)
+            - 0.06 * np.clip(directional_crowd, 0.0, 2.0),
+            0.15,
+            1.25,
+        )
+        min_conf = np.clip(0.42 + 0.08 * vol_rank + 0.10 * (gate_energy >= soft_th), 0.42, 0.78)
+
+        return {
+            "gmm_cluster": gmm_cluster,
+            "gmm_conf": gmm_conf,
+            "vol_rank": vol_rank,
+            "iso_score": iso_score,
+            "vae_error": vae_error,
+            "iso_anom": iso_anom,
+            "vae_anom": vae_anom,
+            "gate_block": gate_block,
+            "route_scale": route_scale,
+            "min_conf": min_conf,
+        }
+
     def predict_batch(self, df: pd.DataFrame) -> pd.DataFrame:
         self._assert_ready()
         n = len(df)
@@ -812,6 +960,7 @@ class SevenModelEnsemble:
         df = _enrich_m7_features(df)
 
         p_xgb = self._predict_trend_xgb(df)
+        p_meta = self._predict_manifold_hgb(df)
         mtl = self._predict_multitarget(df)
         p_mtl = mtl["probs"]
         q = self._predict_quantile(df)
@@ -823,33 +972,20 @@ class SevenModelEnsemble:
         iso = self._predict_isolation(df)
         vae = self._predict_vae(df)
 
-        probs = (
-            self.weight_trend_xgb * p_xgb
-            + self.weight_multitarget * p_mtl
-            + self.weight_quantile * p_q
-        )
-        denom = self.weight_trend_xgb + self.weight_multitarget + self.weight_quantile
-        probs = probs / max(denom, 1e-12)
-        probs = _safe_prob3(probs)
-        # Batch-level prior rebalance: 클래스 사전확률이 한쪽으로 과도하게 쏠릴 때 완만히 보정
-        # target prior는 DOWN/FLAT/UP = 0.42/0.16/0.42 로 설정
-        prior = np.clip(np.mean(probs, axis=0), 1e-6, 1.0)
-        target_prior = np.array([0.42, 0.16, 0.42], dtype=np.float64)
-        prior_scale = np.clip(target_prior / prior, 0.75, 1.35)
-        probs = probs * prior_scale[None, :]
-        probs = _safe_prob3(probs)
+        q10 = np.nan_to_num(q["q10"], nan=0.0)
+        q50 = np.nan_to_num(q["q50"], nan=0.0)
+        q90 = np.nan_to_num(q["q90"], nan=0.0)
+        q_width = np.maximum(q90 - q10, 1e-6)
+        close = pd.to_numeric(df["close"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        quality = np.nan_to_num(mtl["quality"], nan=0.0)
+
+        probs = self._blend_supervised_manifold(df, p_xgb, p_meta, p_q, q50, q_width, quality)
 
         sort_p = np.sort(probs, axis=1)
         p_top = sort_p[:, 2]
         p_second = sort_p[:, 1]
         confidence = np.clip((p_top - 1.0 / 3.0) * 1.5 + (p_top - p_second) * 0.6, 0.0, 1.0)
         direction = np.argmax(probs, axis=1).astype(np.int64)  # 0=DOWN,1=FLAT,2=UP
-
-        q10 = np.nan_to_num(q["q10"], nan=0.0)
-        q50 = np.nan_to_num(q["q50"], nan=0.0)
-        q90 = np.nan_to_num(q["q90"], nan=0.0)
-        q_width = np.maximum(q90 - q10, 1e-6)
-        close = pd.to_numeric(df["close"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
 
         # 롱/숏 완전 대칭 사이징: edge=|q50|, risk=qwidth
         rr_sym = np.abs(q50) / np.maximum(q_width, 1e-6)
@@ -858,37 +994,17 @@ class SevenModelEnsemble:
         rr = np.where(direction == 1, 0.0, rr_sym)
         base_size = np.tanh(rr * 1.1) * conf_mix
 
-        quality = np.nan_to_num(mtl["quality"], nan=0.0)
         quality_scale = np.clip(0.8 + quality * 80.0, 0.25, 1.25)
         size = np.clip(base_size * quality_scale, 0.0, 1.0)
 
-        vol_rank = np.clip(np.nan_to_num(gmm["vol_rank"], nan=0.5), 0.0, 1.0)
-        route_scale = np.where(
-            vol_rank >= 0.8,
-            0.55,
-            np.where(vol_rank >= 0.6, 0.75, np.where(vol_rank <= 0.2, 1.10, 1.0)),
-        )
-        route_scale = np.where(hdb["label"] == -1, route_scale * 0.80, route_scale)
+        uns = self._experimental_unsup_redesign(df, probs, confidence)
+        vol_rank = np.clip(np.nan_to_num(uns["vol_rank"], nan=0.5), 0.0, 1.0)
+        route_scale = np.asarray(uns["route_scale"], dtype=np.float64)
         size = np.clip(size * route_scale, 0.0, 1.0)
 
-        # VAE unavailable/degenerate fallback: iso score + vol rank 기반 대체 anomaly 신호 생성
-        vae_err_cur = np.nan_to_num(np.asarray(vae.get("error", np.full(n, np.nan)), dtype=np.float64), nan=0.0)
-        if (not self.vae.available) or float(np.std(vae_err_cur)) < 1e-12:
-            iso_score_pos = np.maximum(np.nan_to_num(iso["score"], nan=0.0), 0.0)
-            vae_err_proxy = iso_score_pos + 0.25 * vol_rank
-            if len(vae_err_proxy) >= 200:
-                th = float(np.quantile(vae_err_proxy, 0.97))
-            else:
-                th = float(np.mean(vae_err_proxy) + 2.5 * np.std(vae_err_proxy))
-            vae = {
-                "error": vae_err_proxy.astype(np.float64),
-                "is_anomaly": (vae_err_proxy >= th).astype(np.int64),
-                "threshold": float(th),
-            }
-
-        iso_anom = (iso["pred"] == -1).astype(np.int64)
-        vae_anom = np.asarray(vae["is_anomaly"], dtype=np.int64)
-        gate_block = ((iso_anom == 1) & (vae_anom == 1)).astype(np.int64)
+        iso_anom = np.asarray(uns["iso_anom"], dtype=np.int64)
+        vae_anom = np.asarray(uns["vae_anom"], dtype=np.int64)
+        gate_block = np.asarray(uns["gate_block"], dtype=np.int64)
         size = np.where(gate_block == 1, 0.0, size)
         size = np.where((gate_block == 0) & ((iso_anom == 1) | (vae_anom == 1)), size * 0.5, size)
 
@@ -901,7 +1017,7 @@ class SevenModelEnsemble:
             bal_scale = float(np.clip(long_mean / short_mean, 0.70, 1.40))
             size = np.where(m_short, np.clip(size * bal_scale, 0.0, 1.0), size)
 
-        min_conf = np.where(vol_rank >= 0.8, 0.60, 0.45)
+        min_conf = np.asarray(uns["min_conf"], dtype=np.float64)
         action = np.zeros(n, dtype=np.int64)  # -1 short, 0 hold, +1 long
         long_cond = (direction == 2) & (confidence >= min_conf) & (gate_block == 0)
         short_cond = (direction == 0) & (confidence >= min_conf) & (gate_block == 0)
@@ -913,7 +1029,8 @@ class SevenModelEnsemble:
         target_hold = np.clip(np.round(hold_raw), 1, 48).astype(np.int64)
         target_hold = np.where(action == 0, 0, target_hold)
         target_hold = np.where(quality < 0.0, np.minimum(target_hold, 6), target_hold)
-        target_hold = np.where((iso_anom == 1) | (vae_anom == 1), np.minimum(target_hold, 4), target_hold)
+        target_hold = np.where((iso_anom == 1) | (vae_anom == 1), np.minimum(target_hold, 6), target_hold)
+        target_hold = np.where(gate_block == 1, np.minimum(target_hold, 3), target_hold)
 
         expected_ret = np.where(action == 1, q50, np.where(action == -1, -q50, 0.0))
         tail_risk = np.where(action == 1, np.minimum(q10, 0.0), np.where(action == -1, -np.maximum(q90, 0.0), 0.0))
@@ -974,16 +1091,16 @@ class SevenModelEnsemble:
         out["m7_tp_price"] = tp_price.astype(np.float32)
         out["m7_sl_price"] = sl_price.astype(np.float32)
 
-        out["m7_gmm_cluster"] = np.asarray(gmm["cluster"], dtype=np.float32)
-        out["m7_gmm_conf"] = np.asarray(gmm["confidence"], dtype=np.float64)
+        out["m7_gmm_cluster"] = np.asarray(uns["gmm_cluster"], dtype=np.float32)
+        out["m7_gmm_conf"] = np.asarray(uns["gmm_conf"], dtype=np.float64)
         out["m7_gmm_vol_rank"] = vol_rank
         out["m7_hdb_label"] = np.asarray(hdb["label"], dtype=np.float32)
         out["m7_hdb_prob"] = np.asarray(hdb["prob"], dtype=np.float64)
 
-        out["m7_iso_pred"] = np.asarray(iso["pred"], dtype=np.float32)
-        out["m7_iso_score"] = np.asarray(iso["score"], dtype=np.float64)
-        out["m7_vae_error"] = np.nan_to_num(vae["error"], nan=0.0)
-        out["m7_vae_threshold"] = float(vae.get("threshold", np.nan)) if np.isfinite(float(vae.get("threshold", np.nan))) else 0.0
+        out["m7_iso_pred"] = np.where(iso_anom == 1, -1.0, 1.0).astype(np.float32)
+        out["m7_iso_score"] = np.asarray(uns["iso_score"], dtype=np.float64)
+        out["m7_vae_error"] = np.asarray(uns["vae_error"], dtype=np.float64)
+        out["m7_vae_threshold"] = float(np.quantile(np.asarray(uns["vae_error"], dtype=np.float64), 0.972)) if n > 0 else 0.0
         out["m7_iso_anom"] = iso_anom.astype(np.float32)
         out["m7_vae_anom"] = vae_anom.astype(np.float32)
         out["m7_gate_block"] = gate_block.astype(np.float32)

@@ -71,10 +71,10 @@ def main() -> int:
     work_df = align_work_frame(feat_df, rl_df)
 
     brain = EntryPriceBrain.load(args.model_path)
-    preds = brain.predict_from_df(work_df)
+    preds = brain.predict_batch_from_df(work_df)
     out = work_df.copy()
-    out["pred_entry_long_offset"] = preds["entry_long_offset"]
-    out["pred_entry_short_offset"] = preds["entry_short_offset"]
+    out["pred_entry_long_offset"] = np.asarray(preds["entry_long_offset"], dtype=np.float64)
+    out["pred_entry_short_offset"] = np.asarray(preds["entry_short_offset"], dtype=np.float64)
 
     close = pd.to_numeric(out["close"], errors="coerce").to_numpy(dtype=np.float64)
     low_fut = (
@@ -94,9 +94,9 @@ def main() -> int:
         .to_numpy(dtype=np.float64)
     )
 
-    pred_long_offset = np.clip(np.nan_to_num(out["pred_entry_long_offset"].to_numpy(dtype=np.float64), nan=0.0), 0.0, 0.02)
+    pred_long_offset = np.clip(np.nan_to_num(out["pred_entry_long_offset"].to_numpy(dtype=np.float64), nan=0.0), -0.02, 0.0)
     pred_short_offset = np.clip(np.nan_to_num(out["pred_entry_short_offset"].to_numpy(dtype=np.float64), nan=0.0), 0.0, 0.02)
-    reco_long = close * (1.0 - pred_long_offset)
+    reco_long = close * (1.0 + pred_long_offset)
     reco_short = close * (1.0 + pred_short_offset)
 
     valid = np.isfinite(close) & np.isfinite(low_fut) & np.isfinite(high_fut) & (close > 0.0)
@@ -112,7 +112,7 @@ def main() -> int:
     long_fill = low_fut <= reco_long
     short_fill = high_fut >= reco_short
 
-    long_mae_bps = _bps(np.abs((close - low_fut) / close - pred_long_offset))
+    long_mae_bps = _bps(np.abs((low_fut / close - 1.0) - pred_long_offset))
     short_mae_bps = _bps(np.abs((high_fut - close) / close - pred_short_offset))
 
     opp_th = float(args.opportunity_bps)

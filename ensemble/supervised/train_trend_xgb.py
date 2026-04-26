@@ -38,6 +38,8 @@ from sklearn.metrics import balanced_accuracy_score, classification_report, f1_s
 
 from features.selection import auto_select_features
 from features.engineering import ULTIMATE_FEATURE_COLS
+from features.high_order_state import HIGH_ORDER_STATE_COLS
+from features.high_order_state import add_high_order_state_features
 
 logging.basicConfig(
     level=logging.INFO,
@@ -345,8 +347,8 @@ MUST_INCLUDE = [
     'ret_12', 'trend_accel', 'hh_count_24', 'hl_count_24',
     # 미시구조 축
     'net_taker_ratio', 'oi_change_rate', 'smart_money_flow', 'btc_corr_60',
-    # AI 앙상블 결합 축
-    'signal_timesfm', 'signal_chronos', 'signal_mdjd',
+    # PatchTST 결합 축
+    'signal_patchtst',
     # New Elite 핵심 축
     'sig_volume_confirm', 'sig_trend_health',
 ]
@@ -444,6 +446,9 @@ def load_data(path: str, rl_path: str = RL_DATA_PATH):
     if 'regime_break' not in df.columns:
         df['regime_break'] = 0.0
     df = _add_trend_structure_features(df)
+    if any(c not in df.columns for c in HIGH_ORDER_STATE_COLS):
+        logger.info(f"auto-building missing high-order state features: {[c for c in HIGH_ORDER_STATE_COLS if c not in df.columns]}")
+        df = add_high_order_state_features(df)
 
     df.dropna(inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -600,6 +605,9 @@ def train(data_path: str = DATA_PATH,
 
     # ── 피처 선택 (훈련 셋만 사용) ──
     must = [c for c in MUST_INCLUDE if c in feature_candidates]
+    for c in HIGH_ORDER_STATE_COLS:
+        if c in feature_candidates and c not in must:
+            must.append(c)
     train_df_tmp = df.iloc[train_idx].copy()
     train_df_tmp.index = range(len(train_df_tmp))
     train_df_tmp['_label'] = y_train

@@ -236,7 +236,7 @@ def _stage_augment_rl(cfg: dict, *, dry_run: bool) -> None:
 
     _run(
         [
-            sys.executable, "scripts/augment_rl_training_with_model7.py",
+            sys.executable, "pipeline/augment_m7_dataset.py",
             "--rl-path",      sc["rl_path"],
             "--feature-path", sc["feature_path"],
             "--output-path",  output,

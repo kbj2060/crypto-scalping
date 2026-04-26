@@ -1,0 +1,52 @@
+{
+  "csv_path": "/home/kbj20/crypto-scalping/data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+  "ckpt_path": "/home/kbj20/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth",
+  "rows": 16897,
+  "results": [
+    {
+      "profile": "controller_conservative",
+      "metrics": {
+        "pnl_pct": 161.978286033472,
+        "mdd_pct": -19.592957964625192,
+        "trades": 1853,
+        "wr_pct": 40.25903939557474,
+        "long_entries": 831,
+        "short_entries": 1022,
+        "avg_hold_bars": 6.51753912574204,
+        "avg_fraction": 0.24653523205612518,
+        "avg_leverage": 1.0765964653973221,
+        "avg_exposure": 0.26584957080015414
+      }
+    },
+    {
+      "profile": "controller_balanced",
+      "metrics": {
+        "pnl_pct": 207.32141560258793,
+        "mdd_pct": -20.97086129548238,
+        "trades": 1838,
+        "wr_pct": 40.315560391730145,
+        "long_entries": 821,
+        "short_entries": 1017,
+        "avg_hold_bars": 6.572905331882481,
+        "avg_fraction": 0.2477700598476605,
+        "avg_leverage": 1.1098077775426096,
+        "avg_exposure": 0.2760513385053009
+      }
+    },
+    {
+      "profile": "controller_convex",
+      "metrics": {
+        "pnl_pct": 223.1755554259224,
+        "mdd_pct": -21.785259508315857,
+        "trades": 1836,
+        "wr_pct": 40.468409586056644,
+        "long_entries": 828,
+        "short_entries": 1008,
+        "avg_hold_bars": 6.5931372549019605,
+        "avg_fraction": 0.24640533496732026,
+        "avg_leverage": 1.1213535691913066,
+        "avg_exposure": 0.27761875732867625
+      }
+    }
+  ]
+}

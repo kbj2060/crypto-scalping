@@ -26,6 +26,7 @@ from ensemble.optuna_helper import (
     training_results_path,
 )
 from ensemble.artifact_utils import load_best_params_from_meta, resolve_model_meta_paths, save_pickle
+from features.high_order_state import HIGH_ORDER_STATE_COLS
 from ensemble.supervised.common import (
     load_feature_frame,
     select_feature_columns,
@@ -128,7 +129,14 @@ def _build_quality_and_hold_targets(df, y_dir: np.ndarray, horizon: int) -> Tupl
     return y_quality, y_hold
 
 
-def _select_ranked_features(df, feature_cols, tr_idx: np.ndarray, y_train_dir: np.ndarray, max_features: int) -> list[str]:
+def _select_ranked_features(
+    df,
+    feature_cols,
+    tr_idx: np.ndarray,
+    y_train_dir: np.ndarray,
+    max_features: int,
+    must_include: list[str] | None = None,
+) -> list[str]:
     train_df_tmp = df.iloc[tr_idx].copy()
     train_df_tmp.index = range(len(train_df_tmp))
     train_df_tmp["_label"] = y_train_dir
@@ -138,6 +146,7 @@ def _select_ranked_features(df, feature_cols, tr_idx: np.ndarray, y_train_dir: n
         target_col="_label",
         max_features=max_features,
         corr_threshold=0.85,
+        must_include=must_include or [],
     )
 
 
@@ -240,8 +249,16 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     y_hold = y_hold[valid]
 
     tr_idx, va_idx, te_idx = time_split_indices(len(df), args.train_ratio, args.val_ratio)
-    feature_cols = select_feature_columns(df)
-    ranked_features = _select_ranked_features(df, feature_cols, tr_idx, y_dir[tr_idx], args.max_features)
+    must_include = [c for c in HIGH_ORDER_STATE_COLS if c in df.columns]
+    feature_cols = select_feature_columns(df, must_include=must_include)
+    ranked_features = _select_ranked_features(
+        df,
+        feature_cols,
+        tr_idx,
+        y_dir[tr_idx],
+        args.max_features,
+        must_include=must_include,
+    )
     x_all = df[ranked_features].replace([np.inf, -np.inf], np.nan)
 
     x_train = x_all.iloc[tr_idx].copy()

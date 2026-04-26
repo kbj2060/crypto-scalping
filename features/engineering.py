@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 from core.cvp import add_cvp_features
+from features.high_order_state import add_high_order_state_features
 from features.schema import prune_to_active_feature_keep
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ ULTIMATE_FEATURE_COLS = [
     'jump_flag', 'jump_z', 'evt_tail_flag', 'evt_excess_z',
     # NewEliteSignalEngine 출력
     'sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health',
+    'regime_persistence', 'cross_scale_curvature', 'liquidity_vacuum',
+    'crowding_pressure', 'execution_quality',
 ]
 
 EXCLUDE_FEATURE_COLS: list = [
@@ -132,6 +135,7 @@ class FeatureEngineer:
         SyntheticAlphaEngine().compute(df)    # cada, mshd, fvci, wpad, fdlv, vsdi, vebr, tlad, mtmb, fcsz
         VolatilityModelEngine().compute(df)   # garch_vol_z, ou_funding_z, jump_flag, jump_z, evt_tail_flag, evt_excess_z
         NewEliteSignalEngine().compute(df)    # sig_volume_confirm, sig_liquidity_trap, sig_trend_health
+        df = add_high_order_state_features(df)
 
         df = self._handle_missing(df)
         if self.keep_only_active:

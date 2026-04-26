@@ -2250,9 +2250,9 @@ def train(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train DSAC agent")
-    p.add_argument("--csv-path", default="data/rl_training_data_full.csv")
+    p.add_argument("--csv-path", default="data/splits/year_oos/rl_training_2025_m7.csv")
     p.add_argument("--train-ratio", type=float, default=0.8)
-    p.add_argument("--episodes", type=int, default=1000)
+    p.add_argument("--episodes", type=int, default=500)
     p.add_argument("--fresh-start", action="store_true", help="Ignore checkpoint and start from scratch")
     p.add_argument("--val-interval", type=int, default=10, help="Run validation every N episodes")
     p.add_argument("--no-lr-scheduler", action="store_true", help="Disable ReduceLROnPlateau schedulers")

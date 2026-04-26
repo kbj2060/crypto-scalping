@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ensemble.seven_model_ensemble import SevenModelEnsemble
-from ensemble.train_rl_agent import (
+from ensemble.rl_runtime_primitives import (
     REGIME_COLS,
     STATE_ALPHA,
     STATE_CONF,
