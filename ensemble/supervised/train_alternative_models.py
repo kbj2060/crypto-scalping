@@ -112,7 +112,7 @@ def train_nf_model(df: pd.DataFrame, target_col: str, model_class, model_name: s
         "max_steps": max_steps,
         "scaler_type": "standard",
     }
-    if model_name not in ["PatchTST", "TimesNet"]:
+    if model_name == "TiDE":
         kwargs["hist_exog_list"] = exog_cols
         
     model = model_class(**kwargs)
