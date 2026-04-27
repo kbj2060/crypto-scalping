@@ -162,8 +162,35 @@ class PatchTSTForecaster:
                 pred_df = self.nf.predict(df=prep_nf)
             pred = pred_df[self.model_type].values[:horizon]
             return PredictionOutput(np.array([pred], dtype=np.float32), np.full((1, horizon), 0.5, dtype=np.float32))
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "❌ %s predict failed (len=%d, lookback=%d, horizon=%d): %s",
+                self.name,
+                len(prep_nf),
+                self.lookback,
+                horizon,
+                e,
+            )
             return PredictionOutput(np.full((1, horizon), np.nan), np.full((1, horizon), np.nan))
+
+    def get_refined_features(self, df: pd.DataFrame) -> dict[str, float]:
+        out: dict[str, float] = {}
+        pred = self.predict(df, horizon=1)
+        if pred.median.size == 0 or np.isnan(pred.median).all():
+            # Keep schema stable even when model output is unavailable.
+            nan_df = pd.DataFrame(index=[0])
+            tmp = self._apply_refined_batch_logic(nan_df, np.array([np.nan], dtype=np.float32))
+            for c in tmp.columns:
+                out[c] = 0.0
+            return out
+
+        val = float(pred.median[0, 0])
+        one = pd.DataFrame(index=[0])
+        tmp = self._apply_refined_batch_logic(one, np.array([val], dtype=np.float32))
+        for c in tmp.columns:
+            v = tmp.iloc[-1][c]
+            out[c] = float(v) if np.isfinite(v) else 0.0
+        return out
 
     def predict_batch(self, df: pd.DataFrame, chunk_size: int = 500) -> pd.DataFrame:
         """Monkeypatched Trainer를 사용하여 안정적인 대용량 배치 추론 수행."""
@@ -228,12 +255,32 @@ class PatchTSTForecaster:
             except Exception as e:
                 logger.warning("❌ %s 청크 추론 실패 (%d~%d): %s", self.name, i, end_idx, e)
 
+        # Warmup 구간(lookback 이전) 처리:
+        # - bfill을 쓰면 미래 시점 정보가 과거 행으로 전파되어 look-ahead가 생길 수 있음
+        # - 따라서 과거->미래 방향 ffill만 허용
+        # - warmup 구간은 NaN 유지 후 최종적으로 0.0으로만 치환 (보수적)
+        pred_s = pd.Series(all_preds, index=df.index, dtype="float64")
+        if pred_s.notna().any():
+            pred_s = pred_s.ffill()
+        else:
+            pred_s = pred_s.fillna(0.0)
+        pred_s = pred_s.fillna(0.0)
+
         res_df = pd.DataFrame(index=df.index)
-        return self._apply_refined_batch_logic(res_df, all_preds)
+        return self._apply_refined_batch_logic(res_df, pred_s.to_numpy(dtype=np.float32))
 
     def _apply_refined_batch_logic(self, res_df: pd.DataFrame, preds: np.ndarray) -> pd.DataFrame:
-        res_df[f"{self.name.lower()}_median"] = preds
-        res_df[f"{self.name.lower()}_regime_sim"] = 1.0
+        s = pd.Series(preds, dtype="float64")
+        res_df[f"{self.name.lower()}_median"] = s.values
+
+        # Dynamic similarity proxy (not constant):
+        # high when current prediction is close to its local trend, lower on abrupt deviations.
+        ema = s.ewm(alpha=0.1, adjust=False).mean()
+        dev = (s - ema).abs()
+        denom = dev.rolling(128, min_periods=8).std(ddof=0).fillna(dev.std(ddof=0))
+        denom = denom.replace(0.0, np.nan).fillna(1e-6)
+        sim = 1.0 - np.tanh(dev / (3.0 * denom))
+        res_df[f"{self.name.lower()}_regime_sim"] = np.clip(sim.fillna(0.0), 0.0, 1.0).values
         return res_df
 
 class TiDEVolatilityForecaster(PatchTSTForecaster):
@@ -322,5 +369,6 @@ class EnsembleRouter:
                         for col, val in feat_dict.items():
                             if col not in res_df.columns: res_df[col] = np.nan
                             res_df.loc[df.index[-1], col] = val
-                    except Exception: pass
+                    except Exception as e:
+                        logger.warning("⚠️ %s live refined feature generation failed: %s", name, e)
         return res_df

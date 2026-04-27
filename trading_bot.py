@@ -3339,7 +3339,7 @@ async def main(use_local=False):
             m7_last = trend_hub.predict_last(processed_df)
             trend_signal = _trend_signal_from_m7(m7_last)
         except Exception as e:
-            logger.warning("M7 피처 생성 실패로 이번 사이클 스킵")
+            logger.exception("M7 피처 생성 실패로 이번 사이클 스킵: %s", e)
             return
 
         _last = processed_df.iloc[-1]

@@ -1553,11 +1553,20 @@ def train(
 
     df = pd.read_csv(csv_path)
     before_cols = len(df.columns)
-    df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp"] + AI_FEATS)
+    df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp", "ai_ready"] + AI_FEATS)
     if len(df.columns) != before_cols:
         logger.info("[DATA] feature prune: %d -> %d cols (active M7+RL only)", before_cols, len(df.columns))
     _validate_m7_training_columns(df, tag="DSAC")
     logger.info("[DATA] csv_path=%s | rows=%d", csv_path, len(df))
+    if "ai_ready" in df.columns:
+        ready = pd.to_numeric(df["ai_ready"], errors="coerce").fillna(0.0)
+        keep = ready >= 0.5
+        dropped = int((~keep).sum())
+        if dropped > 0:
+            df = df.loc[keep].reset_index(drop=True)
+            logger.info("[DATA] dropped warmup rows by ai_ready: %d", dropped)
+        if len(df) < 200:
+            raise RuntimeError(f"too few rows after ai_ready filter: {len(df)}")
     if "timestamp" in df.columns:
         ts = pd.to_datetime(df["timestamp"], errors="coerce")
         if ts.notna().any():
@@ -2294,7 +2303,7 @@ def train(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train DSAC agent")
-    p.add_argument("--csv-path", default="data/splits/year_oos/rl_training_2025_m7.csv")
+    p.add_argument("--csv-path", default="data/rl_training_2025_unified.csv")
     p.add_argument("--train-ratio", type=float, default=0.8)
     p.add_argument("--episodes", type=int, default=500)
     p.add_argument("--fresh-start", action="store_true", help="Ignore checkpoint and start from scratch")
@@ -2358,7 +2367,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--soft-gate-warmup-epochs", type=int, default=20)
     p.add_argument("--soft-gate-ramp-epochs", type=int, default=80)
     p.add_argument("--min-val-trades-for-best", type=int, default=80)
-    p.add_argument("--csv-path", default="data/rl_training_2025_unified.csv")
     p.add_argument("--hmm-cache-path", default="data/ensemble/ckpt/hmm_init_cache_dsac_unified.npz")
     p.add_argument("--hmm-force-refit", action="store_true", default=False)
     p.add_argument("--config-json-path", default="data/ensemble/ckpt/dsac_unified_train_config.json")

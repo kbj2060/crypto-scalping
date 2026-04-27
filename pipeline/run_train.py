@@ -52,7 +52,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-ensemble-train", action="store_true")
     p.add_argument("--skip-augment", action="store_true")
 
-    p.add_argument("--rl-trainer", choices=["dsac"], default="dsac")
+    p.add_argument("--rl-trainer", choices=["dsac", "dsac-unified"], default="dsac-unified")
+    p.add_argument("--skip-ai-train", action="store_true", help="Skip AI 4-model training before dsac-unified.")
     p.add_argument("--rl-train-ratio", type=float, default=0.8)
     p.add_argument("--rl-episodes", type=int, default=1000)
     p.add_argument("--rl-startup-check-only", action="store_true")
@@ -115,25 +116,74 @@ def main() -> int:
     _run(build_cmd, dry_run=args.dry_run, label="BUILD-RL-DATASET")
 
     out_rl_path = args.output_rl_path or f"{args.split_dir}/rl_training_{args.rl_year}_m7.csv"
-    rl_script = "ensemble/train_rl_dsac_agent.py"
-    rl_cmd = [
-        args.python,
-        rl_script,
-        "--csv-path",
-        out_rl_path,
-        "--train-ratio",
-        str(args.rl_train_ratio),
-        "--episodes",
-        str(args.rl_episodes),
-    ]
-    if args.rl_startup_check_only:
-        rl_cmd.append("--startup-check-only")
+    final_dataset_path = out_rl_path
+    if args.rl_trainer == "dsac":
+        rl_script = "ensemble/train_rl_dsac_agent.py"
+        rl_cmd = [
+            args.python,
+            rl_script,
+            "--csv-path",
+            out_rl_path,
+            "--train-ratio",
+            str(args.rl_train_ratio),
+            "--episodes",
+            str(args.rl_episodes),
+        ]
+        if args.rl_startup_check_only:
+            rl_cmd.append("--startup-check-only")
+        _run(rl_cmd, dry_run=args.dry_run, label="RL-TRAIN")
+    else:
+        unified_csv = "data/rl_training_2025_unified.csv"
+        final_dataset_path = unified_csv
+        if not args.skip_ai_train:
+            ai_train_cmd = [
+                args.python,
+                "ensemble/supervised/train_alternative_models.py",
+                "--data-path",
+                f"{args.split_dir}/training_features_{args.sup_year}.csv",
+                "--out-dir",
+                "data",
+                "--expected-year",
+                str(args.sup_year),
+                "--timesnet-target",
+                "vwap",
+                "--force-retrain",
+            ]
+            if args.rl_startup_check_only:
+                ai_train_cmd.append("--startup-check-only")
+            _run(ai_train_cmd, dry_run=args.dry_run, label="TRAIN-AI-4MODELS")
 
-    _run(rl_cmd, dry_run=args.dry_run, label="RL-TRAIN")
+        build_unified_cmd = [
+            args.python,
+            "pipeline/build_unified_rl_dataset.py",
+            "--features-path",
+            f"{args.split_dir}/training_features_{args.rl_year}.csv",
+            "--rl-path",
+            f"{args.split_dir}/rl_base_{args.rl_year}.csv",
+            "--output-path",
+            unified_csv,
+        ]
+        if args.rl_startup_check_only:
+            build_unified_cmd.append("--startup-check-only")
+        _run(build_unified_cmd, dry_run=args.dry_run, label="BUILD-UNIFIED-RL-DATASET")
+
+        rl_cmd = [
+            args.python,
+            "ensemble/train_rl_dsac_unified_2025.py",
+            "--csv-path",
+            unified_csv,
+            "--train-ratio",
+            str(args.rl_train_ratio),
+            "--episodes",
+            str(args.rl_episodes),
+        ]
+        if args.rl_startup_check_only:
+            rl_cmd.append("--startup-check-only")
+        _run(rl_cmd, dry_run=args.dry_run, label="RL-TRAIN-UNIFIED")
 
     print("[DONE] Unified training pipeline completed.")
     print(f"       trainer={args.rl_trainer}")
-    print(f"       dataset={out_rl_path}")
+    print(f"       dataset={final_dataset_path}")
     return 0
 
 
