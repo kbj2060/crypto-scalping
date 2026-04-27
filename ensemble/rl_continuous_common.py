@@ -141,18 +141,18 @@ class SACTradingEnv:
             self.df["open"].values.astype(np.float32)
             if "open" in self.df.columns else self._close_np.copy()
         )
-        self._m7_tp_price_np = (
-            pd.to_numeric(self.df.get("m7_tp_price", 0.0), errors="coerce")
-            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
-        )
-        self._m7_sl_price_np = (
-            pd.to_numeric(self.df.get("m7_sl_price", 0.0), errors="coerce")
-            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
-        )
-        self._m7_target_hold_np = (
-            pd.to_numeric(self.df.get("m7_target_hold", 0.0), errors="coerce")
-            .replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
-        )
+
+        def _num_col_or_default(col: str, default: float = 0.0) -> np.ndarray:
+            if col in self.df.columns:
+                s = self.df[col]
+            else:
+                s = pd.Series(default, index=self.df.index, dtype="float64")
+            s = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(default)
+            return s.to_numpy(dtype=np.float32)
+
+        self._m7_tp_price_np = _num_col_or_default("m7_tp_price", 0.0)
+        self._m7_sl_price_np = _num_col_or_default("m7_sl_price", 0.0)
+        self._m7_target_hold_np = _num_col_or_default("m7_target_hold", 0.0)
         self._n_pred = len(STATE_PRED)
         self._n_conf = len(STATE_CONF)
         self._n_elite = len(STATE_ELITE)

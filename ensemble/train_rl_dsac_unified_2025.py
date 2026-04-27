@@ -88,7 +88,7 @@ from ensemble.rl_continuous_common import (  # noqa: E402
 # ─────────────────────────────────────────────────────────────────────────────
 # DSAC Unified State Spec (29 + 9 = 38)
 # ─────────────────────────────────────────────────────────────────────────────
-DSAC_STATE_DIM = 38
+DSAC_STATE_DIM = 40
 
 AI_FEATS = [
     "patchtst_median", "patchtst_regime_sim",
@@ -321,8 +321,17 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
 
         # AI 모델 피처 로드 (9개)
         self._ai_feats_dict = {}
+        missing_ai = []
         for col in AI_FEATS:
-            self._ai_feats_dict[col] = self._col_or_default(col, 0.0)
+            if col not in self.df.columns:
+                missing_ai.append(col)
+                continue
+            arr = pd.to_numeric(self.df[col], errors="coerce")
+            if arr.isna().mean() > 0.5:
+                raise ValueError(f"AI feature {col} has >50% NaN values. Data is corrupted.")
+            self._ai_feats_dict[col] = arr.replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32)
+        if missing_ai:
+            raise ValueError(f"Missing required AI features: {missing_ai}")
 
         self._pred_slice = slice(0, self._n_pred)
         self._conf_slice = slice(self._n_pred, self._n_pred + self._n_conf)
@@ -502,6 +511,10 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         tp_offset = self._arr_at(self._m7_tp_offset_np, idx, max(q90, 0.0))
         sl_offset = self._arr_at(self._m7_sl_offset_np, idx, max(-q10, 0.0))
         tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
+        long_offset = self._arr_at(self._m7_entry_long_offset_np, idx, max(q10, 0.0))
+        short_offset = self._arr_at(self._m7_entry_short_offset_np, idx, max(q10, 0.0))
+        entry_long_offset_norm = _norm_tanh(long_offset, 0.0050)
+        entry_short_offset_norm = _norm_tanh(short_offset, 0.0050)
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(self._mtf_trend_1h_np[idx]), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(self._mtf_trend_4h_np[idx]), 0.0200)
@@ -530,7 +543,11 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         drawdown_norm = float(np.clip(self.max_drawdown / 0.05, -1.0, 1.0))
 
         # ── Block D: AI Model Insights (9) ────────────────────────────────
-        ai_p_med = _norm_tanh(self._arr_at(self._ai_feats_dict["patchtst_median"], idx, 0.0), 0.0030)
+        pt_med_raw = self._arr_at(self._ai_feats_dict.get("patchtst_median"), idx, 0.0)
+        close_price = max(1e-8, _safe_float(self._close_np[idx]))
+        if abs(pt_med_raw) > 0.5:
+            pt_med_raw = (pt_med_raw - close_price) / close_price
+        ai_p_med = _norm_tanh(pt_med_raw, 0.0030)
         ai_p_reg = float(np.clip(self._arr_at(self._ai_feats_dict["patchtst_regime_sim"], idx, 1.0), 0.0, 1.0))
         ai_t_vol = _norm_tanh(self._arr_at(self._ai_feats_dict["tide_vol_raw"], idx, 0.0), 0.0100)
         ai_t_zsc = float(np.tanh(self._arr_at(self._ai_feats_dict["tide_vol_zscore"], idx, 0.0) / 2.0))
@@ -558,6 +575,8 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
                 anomaly_score,
                 tp_offset_norm,
                 sl_offset_norm,
+                entry_long_offset_norm,
+                entry_short_offset_norm,
                 mtf_1h_norm,
                 mtf_4h_norm,
                 # Block B (6)
@@ -869,9 +888,9 @@ class DSACAgent:
         self,
         state_dim=DSAC_STATE_DIM,
         hidden_dim=256,
-        lr_actor=3e-4,
-        lr_critic=3e-4,
-        lr_alpha=3e-4,
+        lr_actor=1e-4,
+        lr_critic=1e-4,
+        lr_alpha=1e-4,
         gamma=0.99,
         tau=0.005,
         n_quantiles=32,
@@ -1326,6 +1345,10 @@ class DSACRouter:
         tp_offset = _safe_float(features.get("m7_tp_offset", max(q90, 0.0)), max(q90, 0.0))
         sl_offset = _safe_float(features.get("m7_sl_offset", max(-q10, 0.0)), max(-q10, 0.0))
         tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
+        long_offset = _safe_float(features.get("m7_entry_long_offset", max(q10, 0.0)))
+        short_offset = _safe_float(features.get("m7_entry_short_offset", max(q10, 0.0)))
+        entry_long_offset_norm = _norm_tanh(long_offset, 0.0050)
+        entry_short_offset_norm = _norm_tanh(short_offset, 0.0050)
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_1h", 0.0), 0.0), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_4h", 0.0), 0.0), 0.0200)
@@ -1388,7 +1411,11 @@ class DSACRouter:
         current_position = float(pos_sign * margin_usage)
 
         # ── Block D: AI Model Insights (9) ────────────────────────────────
-        ai_p_med = _norm_tanh(_safe_float(features.get("patchtst_median", 0.0)), 0.0030)
+        pt_med_raw = _safe_float(features.get("patchtst_median", 0.0))
+        close_price = max(1e-8, _safe_float(features.get("close", 0.0)))
+        if abs(pt_med_raw) > 0.5 and close_price > 0.0:
+            pt_med_raw = (pt_med_raw - close_price) / close_price
+        ai_p_med = _norm_tanh(pt_med_raw, 0.0030)
         ai_p_reg = float(np.clip(_safe_float(features.get("patchtst_regime_sim", 1.0)), 0.0, 1.0))
         ai_t_vol = _norm_tanh(_safe_float(features.get("tide_vol_raw", 0.0)), 0.0100)
         ai_t_zsc = float(np.tanh(_safe_float(features.get("tide_vol_zscore", 0.0)) / 2.0))
@@ -1416,6 +1443,8 @@ class DSACRouter:
                 anomaly_score,
                 tp_offset_norm,
                 sl_offset_norm,
+                entry_long_offset_norm,
+                entry_short_offset_norm,
                 mtf_1h_norm,
                 mtf_4h_norm,
                 # Block B (6)
@@ -1552,6 +1581,10 @@ def train(
         return
 
     df = pd.read_csv(csv_path)
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df.sort_values("timestamp", inplace=True)
+        df.reset_index(drop=True, inplace=True)
     before_cols = len(df.columns)
     df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp", "ai_ready"] + AI_FEATS)
     if len(df.columns) != before_cols:
@@ -2379,7 +2412,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     if args.startup_check_only:
-        logger.info("startup check ok: train_rl_dsac_agent")
+        logger.info("startup check ok: train_rl_dsac_unified_2025")
         raise SystemExit(0)
     train(
         csv_path=args.csv_path,
