@@ -551,9 +551,9 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         ai_p_reg = float(np.clip(self._arr_at(self._ai_feats_dict["patchtst_regime_sim"], idx, 1.0), 0.0, 1.0))
         ai_t_vol = _norm_tanh(self._arr_at(self._ai_feats_dict["tide_vol_raw"], idx, 0.0), 0.0100)
         ai_t_zsc = float(np.tanh(self._arr_at(self._ai_feats_dict["tide_vol_zscore"], idx, 0.0) / 2.0))
-        ai_tn_sin = _safe_float(self._ai_feats_dict["timesnet_cycle_sin"][idx])
-        ai_tn_cos = _safe_float(self._ai_feats_dict["timesnet_cycle_cos"][idx])
-        ai_tn_del = _norm_tanh(self._arr_at(self._ai_feats_dict["timesnet_cycle_delta"], idx, 0.0), 1.0)
+        ai_tn_sin = float(np.clip(_safe_float(self._ai_feats_dict["timesnet_cycle_sin"][idx]), -1.0, 1.0))
+        ai_tn_cos = float(np.clip(_safe_float(self._ai_feats_dict["timesnet_cycle_cos"][idx]), -1.0, 1.0))
+        ai_tn_del = _norm_tanh(self._arr_at(self._ai_feats_dict["timesnet_cycle_delta"], idx, 0.0), 0.20)
         ai_dl_ema = _norm_tanh(self._arr_at(self._ai_feats_dict["dlinear_smf_ema"], idx, 0.0), 0.0500)
         ai_dl_slp = _norm_tanh(self._arr_at(self._ai_feats_dict["dlinear_smf_slope"], idx, 0.0), 0.0100)
 
@@ -888,9 +888,9 @@ class DSACAgent:
         self,
         state_dim=DSAC_STATE_DIM,
         hidden_dim=256,
-        lr_actor=1e-4,
-        lr_critic=1e-4,
-        lr_alpha=1e-4,
+        lr_actor=3e-4,
+        lr_critic=3e-4,
+        lr_alpha=3e-4,
         gamma=0.99,
         tau=0.005,
         n_quantiles=32,
@@ -1523,7 +1523,7 @@ SACRouter = DSACRouter
 def train(
     csv_path: str = "data/rl_training_2025_unified.csv",
     train_ratio: float = 0.8,
-    episodes: int = 1000,
+    episodes: int = 1500,
     fresh_start: bool = False,
     use_lr_scheduler: bool = True,
     lr_factor: float = 0.5,
@@ -1539,8 +1539,8 @@ def train(
     pessimism_weight_min: float = 0.55,
     pessimism_weight_max: float = 0.75,
     dynamic_entropy: bool = True,
-    entropy_min: float = -0.80,
-    entropy_max: float = -0.45,
+    entropy_min: float = -1.20,
+    entropy_max: float = -0.65,
     entropy_std_low: float = 0.18,
     entropy_std_high: float = 0.35,
     entropy_step: float = 0.05,
@@ -1561,7 +1561,7 @@ def train(
     redo_tau: float = 5e-3,
     redo_ratio: float = 0.10,
     alpha_min: float = 5e-3,
-    alpha_init: float = 0.03,
+    alpha_init: float = 0.05,
     anti_flat_lambda: float = 0.08,
     anti_flat_min_abs: float = 0.18,
     anti_flat_anneal_updates: int = 120000,
@@ -1666,7 +1666,7 @@ def train(
     )
     agent = DSACAgent(
         DSAC_STATE_DIM,
-        hidden_dim=256,
+        hidden_dim=512,
         gamma=float(gamma),
         n_quantiles=32,
         cvar_frac=float(cvar_frac),

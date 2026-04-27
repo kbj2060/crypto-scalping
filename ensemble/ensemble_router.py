@@ -163,13 +163,22 @@ class PatchTSTForecaster:
             pred = pred_df[self.model_type].values[:horizon]
             return PredictionOutput(np.array([pred], dtype=np.float32), np.full((1, horizon), 0.5, dtype=np.float32))
         except Exception as e:
+            err_msg = str(e)
+            if "CUDA" in err_msg or "cuda" in err_msg or "NVRTC" in err_msg:
+                logger.warning("🚨 CUDA error in %s. Switching to CPU and retrying...", self.name)
+                try:
+                    self.device = "cpu"
+                    for m in self.nf.models: m.to("cpu")
+                    with SuppressOutput():
+                        pred_df = self.nf.predict(df=prep_nf)
+                    pred = pred_df[self.model_type].values[:horizon]
+                    return PredictionOutput(np.array([pred], dtype=np.float32), np.full((1, horizon), 0.5, dtype=np.float32))
+                except Exception as e2:
+                    logger.error("❌ %s CPU fallback also failed: %s", self.name, e2)
+            
             logger.warning(
                 "❌ %s predict failed (len=%d, lookback=%d, horizon=%d): %s",
-                self.name,
-                len(prep_nf),
-                self.lookback,
-                horizon,
-                e,
+                self.name, len(prep_nf), self.lookback, horizon, e
             )
             return PredictionOutput(np.full((1, horizon), np.nan), np.full((1, horizon), np.nan))
 
@@ -220,8 +229,18 @@ class PatchTSTForecaster:
             
             try:
                 with SuppressOutput():
-                    # Monkeypatch 덕분에 이제 에러 없이 작동함
                     chunk_pred_df = self.nf.predict(df=long_df)
+            except Exception as e:
+                err_msg = str(e)
+                if ("CUDA" in err_msg or "cuda" in err_msg or "NVRTC" in err_msg) and self.device != "cpu":
+                    logger.warning("🚨 Batch CUDA error in %s. Switching to CPU...", self.name)
+                    self.device = "cpu"
+                    for m in self.nf.models: m.to("cpu")
+                    with SuppressOutput():
+                        chunk_pred_df = self.nf.predict(df=long_df)
+                else:
+                    logger.error("❌ %s predict_batch chunk failed: %s", self.name, e)
+                    continue
                 
                 # 결과값 매핑 (최신 NF는 unique_id가 컬럼인 경우가 많음)
                 if "unique_id" in chunk_pred_df.columns:

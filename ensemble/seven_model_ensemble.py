@@ -256,16 +256,18 @@ class SevenModelEnsemble:
     def _predict_isolation(self, df):
         if not self.isolation.available: return {"score": np.zeros(len(df))}
         x = _to_numeric_frame(df, self.isolation.feature_cols).values
-        return {"score": -self.isolation.model.decision_function(x)}
+        score = -self.isolation.model.decision_function(x)
+        return {"score": np.nan_to_num(score, nan=0.0)}
 
     def _predict_vae(self, df):
         if not self.vae.available or not _TORCH_AVAILABLE: return {"error": np.zeros(len(df))}
-        x = torch.from_numpy(_to_numeric_frame(df, self.vae.feature_cols).values)
+        x_vals = _to_numeric_frame(df, self.vae.feature_cols).values
+        x = torch.from_numpy(x_vals).to(torch.float32)
         self.vae.model.eval()
         with torch.no_grad():
             recon, _, _ = self.vae.model(x)
             err = torch.mean((recon - x)**2, dim=1).cpu().numpy()
-        return {"error": err}
+        return {"error": np.nan_to_num(err, nan=0.0)}
 
     def _predict_entry_price(self, df: pd.DataFrame) -> dict[str, np.ndarray]:
         n = len(df)
@@ -311,33 +313,54 @@ class SevenModelEnsemble:
         close = pd.to_numeric(df["close"], errors="coerce").fillna(0.0).to_numpy()
         
         out = pd.DataFrame(index=df.index)
-        # Core Outputs
+        # Individual Model Outputs 복구
+        out["m7_trend_xgb_dn"], out["m7_trend_xgb_fl"], out["m7_trend_xgb_up"] = p_xgb[:, 0], p_xgb[:, 1], p_xgb[:, 2]
+        out["m7_mtl_dn"], out["m7_mtl_fl"], out["m7_mtl_up"] = mtl["probs"][:, 0], mtl["probs"][:, 1], mtl["probs"][:, 2]
+        out["m7_quant_dn"], out["m7_quant_fl"], out["m7_quant_up"] = q["probs"][:, 0], q["probs"][:, 1], q["probs"][:, 2]
+        
+        # Core Blended Outputs
         out["m7_prob_dn"], out["m7_prob_fl"], out["m7_prob_up"] = probs[:, 0], probs[:, 1], probs[:, 2]
+        out["m7_target_quality"], out["m7_target_hold"] = mtl["quality"], mtl["hold"]
         out["m7_direction"], out["m7_confidence"] = unsup["direction"], conf
         out["m7_action"] = np.where(out["m7_direction"]==2, 1, np.where(out["m7_direction"]==0, -1, 0))
         out["m7_size"] = unsup["size"]
         
         # Supervised Details
         out["m7_q10"], out["m7_q50"], out["m7_q90"] = q["q10"], q["q50"], q["q90"]
+        out["m7_qwidth"] = np.abs(q["q90"] - q["q10"])
         out["m7_quality_pred"], out["m7_hold_pred"] = mtl["quality"], mtl["hold"]
         
         # Entry/Exit Targets
         ep = self._predict_entry_price(df)
         out["m7_entry_long_price"], out["m7_entry_short_price"] = ep["entry_long_price"], ep["entry_short_price"]
-        tp_offset = np.maximum(np.abs(q["q90"]), 0.0008)
-        out["m7_tp_price"] = close * (1.0 + np.where(out["m7_action"]==1, tp_offset, -tp_offset))
-        out["m7_sl_price"] = close * (1.0 + np.where(out["m7_action"]==1, -0.0006, 0.0006))
+        out["m7_entry_long_offset"], out["m7_entry_short_offset"] = ep.get("entry_long_offset", 0.0), ep.get("entry_short_offset", 0.0)
         
-        # Unsupervised & Gates
+        tp_offset = np.maximum(np.abs(q["q90"]), 0.0008)
+        sl_offset = 0.0006
+        out["m7_tp_offset"], out["m7_sl_offset"] = tp_offset, sl_offset
+        out["m7_tp_price"] = close * (1.0 + np.where(out["m7_action"]==1, tp_offset, -tp_offset))
+        out["m7_sl_price"] = close * (1.0 + np.where(out["m7_action"]==1, -sl_offset, sl_offset))
+        
+        # Unsupervised & Anomalies
         out["m7_gmm_cluster"], out["m7_gmm_conf"] = gmm["cluster"], gmm["conf"]
-        out["m7_iso_score"], out["m7_vae_error"] = iso["score"], vae["error"]
+        out["m7_gmm_vol_rank"] = gmm.get("vol_rank", 0.5)
+        out["m7_hdb_label"], out["m7_hdb_prob"] = unsup.get("hdb_label", -1.0), unsup.get("hdb_prob", 0.0)
+        
+        out["m7_iso_pred"], out["m7_iso_score"] = iso.get("pred", 1.0), iso["score"]
+        out["m7_iso_anom"] = np.where(iso["score"] > 0.6, 1.0, 0.0)
+        
+        out["m7_vae_error"] = vae["error"]
+        out["m7_vae_threshold"] = vae.get("threshold", 0.1)
+        out["m7_vae_anom"] = np.where(vae["error"] > out["m7_vae_threshold"], 1.0, 0.0)
+        
         out["m7_gate_block"] = unsup["gate_block"]
         
         # Additional metrics for compatibility
         out["m7_expected_ret"] = q["q50"]
+        out["m7_tail_risk"] = np.maximum(0.0, np.abs(q["q10"]) - 0.01)
         out["m7_composite_score"] = out["m7_action"] * conf
         
-        return out.astype(np.float32)
+        return out.fillna(0.0).astype(np.float32)
 
     def predict_last(self, df: pd.DataFrame) -> dict:
         res = self.predict_batch(df.tail(200)).tail(1)
