@@ -1,17 +1,17 @@
 {
-  "best_val_score": -0.003201938433415927,
+  "best_val_score": -0.0420215517515633,
   "best_params": {
-    "latent_dim": 24,
-    "hidden_dim": 128,
-    "learning_rate": 0.0015126073884831634,
-    "beta": 0.0033717795964399596,
-    "batch_size": 256,
+    "latent_dim": 16,
+    "hidden_dim": 192,
+    "learning_rate": 0.0032656353995580358,
+    "beta": 0.014520383215284902,
+    "batch_size": 512,
     "epochs": 60,
-    "threshold_q": 0.9595688369166214,
-    "feature_count": 26
+    "threshold_q": 0.9495925927513632,
+    "feature_count": 25
   },
-  "threshold": 0.004173841793090105,
-  "val_anomaly_ratio": 0.08470930600366926,
+  "threshold": 0.030381707361847286,
+  "val_anomaly_ratio": 0.2849370532042766,
   "data_hash": "",
   "config_hash": ""
 }

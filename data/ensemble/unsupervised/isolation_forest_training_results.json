@@ -1,15 +1,15 @@
 {
-  "best_val_score": 0.0770250480199838,
+  "best_val_score": 0.08421283492600384,
   "best_params": {
-    "n_estimators": 239,
-    "contamination": 0.0100183478613299,
-    "max_samples": 0.8288532787998742,
-    "max_features": 0.8604137544787149,
-    "feature_count": 4
+    "n_estimators": 462,
+    "contamination": 0.010681304520244933,
+    "max_samples": 0.5392311924833902,
+    "max_features": 0.7437593636946133,
+    "feature_count": 6
   },
-  "anomaly_ratio": 0.010020876826722338,
-  "score_mean": -0.12644524438775828,
-  "score_std": 0.03210122399839248,
+  "anomaly_ratio": 0.010685139495160373,
+  "score_mean": -0.1388044629971904,
+  "score_std": 0.037038242739988514,
   "data_hash": "",
   "config_hash": ""
 }

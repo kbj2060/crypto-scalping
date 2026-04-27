@@ -1,6 +1,7 @@
 {
   "feature_cols": [
     "bb_width_z",
+    "garch_vol_z",
     "realized_vol_ratio",
     "rogers_satchell_vol",
     "garman_klass_vol",
@@ -8,30 +9,30 @@
   ],
   "model_path": "gmm_volatility.pkl",
   "cluster_rank_map": {
-    "0": 0,
-    "5": 1,
-    "2": 2,
-    "1": 3,
+    "3": 0,
+    "1": 1,
+    "0": 2,
+    "5": 3,
     "4": 4,
-    "3": 5
+    "2": 5
   },
   "meta": {
     "algorithm": "gmm_volatility_regime",
     "weights": [
-      0.3866397738456726,
-      0.06311331689357758,
-      0.21199630200862885,
-      0.007665630895644426,
-      0.11709371209144592,
-      0.213491290807724
+      0.2272992879152298,
+      0.1985415518283844,
+      0.008189989253878593,
+      0.37775227427482605,
+      0.12480709701776505,
+      0.06340983510017395
     ],
-    "avg_confidence": 0.8184956908226013,
-    "best_val_score": 0.12460794150829316,
+    "avg_confidence": 0.8269758820533752,
+    "best_val_score": -0.3580221742391586,
     "best_params": {
       "n_components": 6,
       "covariance_type": "full",
-      "reg_covar": 1.0092482159107166e-06,
-      "feature_count": 5
+      "reg_covar": 3.6660413365411543e-06,
+      "feature_count": 6
     },
     "covariance_type": "full",
     "n_components": 6
