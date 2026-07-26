@@ -17,7 +17,11 @@
       "Bash(codex exec:*)",
       "Bash(jobs -l)",
       "Bash(python3 -c ' *)",
-      "Bash(echo \"=== exit $? ===\")"
+      "Bash(echo \"=== exit $? ===\")",
+      "Bash(curl -sS -m 5 -o /dev/null -w \"%{http_code}\\\\n\" https://api.binance.com/api/v3/ping)",
+      "Read(//home/user/**)",
+      "Bash(find / -maxdepth 3 -iname \"*data*\" -type d)",
+      "Bash(env)"
     ]
   }
 }
