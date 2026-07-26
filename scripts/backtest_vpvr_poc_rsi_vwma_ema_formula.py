@@ -273,29 +273,55 @@ def run_formula_sim(
 
 
 # ════════════════════════════════════════════════════════════════
-# 파라미터 탐색 (목표: 총 PnL(pnl_pct) 최대화)
+# 목적함수 (기본: 총 PnL(pnl_pct) 최대화. sharpe / pnl_mdd 로 과최적화 억제 가능)
 # ════════════════════════════════════════════════════════════════
+def compute_objective(r: SimResult, objective: str, mdd_penalty: float) -> float:
+    if objective == "sharpe":
+        return r.sharpe
+    if objective == "pnl_mdd":
+        # mdd_pct는 항상 <= 0 이므로 그대로 더하면 낙폭이 클수록 목적함수가 깎인다.
+        return r.pnl_pct + mdd_penalty * r.mdd_pct
+    return r.pnl_pct
+
+
 def tune_random_search(
-    df: pd.DataFrame, trials: int, fee_bps: float, slip_bps: float, leverage: float, seed: int
+    df: pd.DataFrame,
+    trials: int,
+    fee_bps: float,
+    slip_bps: float,
+    leverage: float,
+    seed: int,
+    objective: str = "pnl",
+    mdd_penalty: float = 1.0,
 ) -> SimResult:
     rng = np.random.default_rng(seed)
     best = run_formula_sim(df, _default_params(), fee_bps, slip_bps, leverage)
+    best_score = compute_objective(best, objective, mdd_penalty)
     for _ in range(max(1, trials)):
         p = _sample_params(rng)
         r = run_formula_sim(df, p, fee_bps, slip_bps, leverage)
-        if r.pnl_pct > best.pnl_pct:
+        score = compute_objective(r, objective, mdd_penalty)
+        if score > best_score:
             best = r
+            best_score = score
     return best
 
 
 def tune_optuna(
-    df: pd.DataFrame, trials: int, fee_bps: float, slip_bps: float, leverage: float, seed: int
+    df: pd.DataFrame,
+    trials: int,
+    fee_bps: float,
+    slip_bps: float,
+    leverage: float,
+    seed: int,
+    objective: str = "pnl",
+    mdd_penalty: float = 1.0,
 ) -> SimResult:
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    def objective(trial: "optuna.Trial") -> float:
+    def _objective_fn(trial: "optuna.Trial") -> float:
         theta_entry = trial.suggest_float("theta_entry", 0.15, 0.65)
         theta_exit = trial.suggest_float("theta_exit_ratio", 0.05, 0.85) * theta_entry
         theta_full = theta_entry + trial.suggest_float("theta_full_extra", 0.05, 0.9)
@@ -329,14 +355,102 @@ def tune_optuna(
         trial.set_user_attr("sharpe", r.sharpe)
         trial.set_user_attr("trades", r.trades)
         trial.set_user_attr("win_rate_pct", r.win_rate_pct)
-        # 목표 함수: 총 PnL(pnl_pct) 최대화 (사용자 선택 그대로, MDD/Sharpe로 패널티 주지 않음)
-        return r.pnl_pct
+        return compute_objective(r, objective, mdd_penalty)
 
     study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(objective, n_trials=max(1, trials), show_progress_bar=False)
+    study.optimize(_objective_fn, n_trials=max(1, trials), show_progress_bar=False)
 
     best_params = dict(study.best_trial.user_attrs["params"])
     return run_formula_sim(df, best_params, fee_bps, slip_bps, leverage)
+
+
+def tune(
+    train_df: pd.DataFrame,
+    optimizer: str,
+    trials: int,
+    fee_bps: float,
+    slip_bps: float,
+    leverage: float,
+    seed: int,
+    objective: str,
+    mdd_penalty: float,
+) -> tuple[SimResult, str]:
+    """optimizer in {"auto","optuna","random"} 에 따라 튜닝 실행, (결과, 실제 사용된 optimizer) 반환."""
+    if optimizer in ("auto", "optuna"):
+        try:
+            r = tune_optuna(
+                train_df, trials, fee_bps, slip_bps, leverage, seed, objective, mdd_penalty
+            )
+            return r, "optuna"
+        except ImportError:
+            if optimizer == "optuna":
+                raise
+    r = tune_random_search(
+        train_df, trials, fee_bps, slip_bps, leverage, seed, objective, mdd_penalty
+    )
+    return r, "random"
+
+
+# ════════════════════════════════════════════════════════════════
+# Walk-forward 검증 (expanding window): 데이터를 n_folds+1개 연속 블록으로 나눠
+# fold k는 블록[0..k]를 train, 블록[k+1]을 test로 사용. 매 fold마다 test는
+# train 이후 시점만 포함하므로(시간 순서 유지) 단일 70/30 split보다 강건한
+# generalization 신호를 준다.
+# ════════════════════════════════════════════════════════════════
+def run_walk_forward(
+    df: pd.DataFrame,
+    n_folds: int,
+    optimizer: str,
+    trials: int,
+    fee_bps: float,
+    slip_bps: float,
+    leverage: float,
+    seed: int,
+    objective: str,
+    mdd_penalty: float,
+) -> dict:
+    n_blocks = n_folds + 1
+    n = len(df)
+    block_size = n // n_blocks
+    if block_size < 200:
+        raise RuntimeError(
+            f"fold당 블록 크기가 너무 작습니다({block_size}행). n_folds를 줄이세요."
+        )
+    bounds = [i * block_size for i in range(n_blocks)] + [n]
+
+    folds = []
+    for k in range(1, n_blocks):
+        train_df = df.iloc[bounds[0]:bounds[k]].reset_index(drop=True)
+        test_df = df.iloc[bounds[k]:bounds[k + 1]].reset_index(drop=True)
+        tuned_train, optimizer_used = tune(
+            train_df, optimizer, trials, fee_bps, slip_bps, leverage, seed, objective, mdd_penalty
+        )
+        tuned_test = run_formula_sim(test_df, tuned_train.params, fee_bps, slip_bps, leverage)
+        folds.append({
+            "fold": k,
+            "rows_train": len(train_df),
+            "rows_test": len(test_df),
+            "optimizer": optimizer_used,
+            "train": asdict(tuned_train),
+            "test": asdict(tuned_test),
+        })
+
+    test_pnls = [f["test"]["pnl_pct"] for f in folds]
+    test_mdds = [f["test"]["mdd_pct"] for f in folds]
+    test_sharpes = [f["test"]["sharpe"] for f in folds]
+    n_positive = sum(1 for p in test_pnls if p > 0)
+
+    summary = {
+        "n_folds": n_folds,
+        "test_pnl_pct_mean": float(np.mean(test_pnls)),
+        "test_pnl_pct_median": float(np.median(test_pnls)),
+        "test_mdd_pct_mean": float(np.mean(test_mdds)),
+        "test_sharpe_mean": float(np.mean(test_sharpes)),
+        "folds_with_positive_test_pnl": int(n_positive),
+        "folds_total": len(folds),
+    }
+
+    return {"folds": folds, "summary": summary}
 
 
 # ════════════════════════════════════════════════════════════════
@@ -356,6 +470,19 @@ def main() -> None:
     ap.add_argument("--leverage", type=float, default=10.0, help="README 기본 LEVERAGE=10")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument(
+        "--objective", choices=["pnl", "sharpe", "pnl_mdd"], default="pnl",
+        help="탐색 목적함수: pnl=총PnL(기본), sharpe=Sharpe, pnl_mdd=PnL+mdd_penalty*MDD",
+    )
+    ap.add_argument(
+        "--mdd-penalty", type=float, default=1.0,
+        help="--objective pnl_mdd 일 때 낙폭 패널티 가중치",
+    )
+    ap.add_argument(
+        "--mode", choices=["single", "walk-forward"], default="single",
+        help="single=70/30 1회 분할(기본), walk-forward=expanding-window 다중 fold 검증",
+    )
+    ap.add_argument("--n-folds", type=int, default=5, help="--mode walk-forward 일 때 fold 수")
+    ap.add_argument(
         "--out", default="data/ensemble/metrics/vpvr_poc_rsi_vwma_ema_formula_result.json"
     )
     args = ap.parse_args()
@@ -364,29 +491,45 @@ def main() -> None:
     if len(df) < 300:
         raise RuntimeError(f"데이터 행 수 부족: {len(df)}행 (최소 300행 필요)")
 
+    if args.mode == "walk-forward":
+        wf = run_walk_forward(
+            df, args.n_folds, args.optimizer, args.trials,
+            args.fee_bps, args.slip_bps, args.leverage, args.seed,
+            args.objective, args.mdd_penalty,
+        )
+        result = {
+            "meta": {
+                "mode": "walk-forward",
+                "data": args.data,
+                "rows_total": len(df),
+                "n_folds": int(args.n_folds),
+                "fee_bps": float(args.fee_bps),
+                "slip_bps": float(args.slip_bps),
+                "leverage": float(args.leverage),
+                "trials": int(args.trials),
+                "objective": args.objective,
+                "mdd_penalty": float(args.mdd_penalty),
+                "seed": int(args.seed),
+            },
+            **wf,
+        }
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(f"\nSaved: {out_path}")
+        return
+
     train_df, test_df = split_train_test(df, float(args.train_ratio))
 
     default_p = _default_params()
     default_train = run_formula_sim(train_df, default_p, args.fee_bps, args.slip_bps, args.leverage)
     default_test = run_formula_sim(test_df, default_p, args.fee_bps, args.slip_bps, args.leverage)
 
-    optimizer_used = args.optimizer
-    tuned_train: SimResult | None = None
-    if args.optimizer in ("auto", "optuna"):
-        try:
-            tuned_train = tune_optuna(
-                train_df, args.trials, args.fee_bps, args.slip_bps, args.leverage, args.seed
-            )
-            optimizer_used = "optuna"
-        except ImportError:
-            if args.optimizer == "optuna":
-                raise
-            tuned_train = None
-    if tuned_train is None:
-        tuned_train = tune_random_search(
-            train_df, args.trials, args.fee_bps, args.slip_bps, args.leverage, args.seed
-        )
-        optimizer_used = "random"
+    tuned_train, optimizer_used = tune(
+        train_df, args.optimizer, args.trials, args.fee_bps, args.slip_bps, args.leverage,
+        args.seed, args.objective, args.mdd_penalty,
+    )
 
     tuned_test = run_formula_sim(
         test_df, tuned_train.params, args.fee_bps, args.slip_bps, args.leverage
@@ -394,6 +537,7 @@ def main() -> None:
 
     result = {
         "meta": {
+            "mode": "single",
             "data": args.data,
             "rows_total": len(df),
             "rows_train": len(train_df),
@@ -404,7 +548,8 @@ def main() -> None:
             "leverage": float(args.leverage),
             "trials": int(args.trials),
             "optimizer": optimizer_used,
-            "objective": "total_pnl_pct (train split)",
+            "objective": f"{args.objective} (train split)",
+            "mdd_penalty": float(args.mdd_penalty),
             "seed": int(args.seed),
         },
         "default": {
@@ -423,7 +568,7 @@ def main() -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     print(f"\nSaved: {out_path}")
     print(
-        "\n[참고] tuned.test 는 목표함수(총 PnL)에 포함되지 않은 홀드아웃 구간 결과입니다. "
+        "\n[참고] tuned.test 는 목표함수 탐색에 포함되지 않은 홀드아웃 구간 결과입니다. "
         "과최적화 여부를 가늠하는 참고 지표일 뿐, 탐색 제약으로 쓰이지 않았습니다."
     )
 
