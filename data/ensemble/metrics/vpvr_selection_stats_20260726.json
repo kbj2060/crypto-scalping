@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "data": "data/training_features_5m.csv",
+    "rows_total": 268082,
+    "rows_train": 187657,
+    "rows_test": 80425,
+    "trials": 200,
+    "search": "independent random (DSR assumes independent draws)",
+    "fee_bps": 5.0,
+    "slip_bps": 2.0,
+    "leverage": 10.0,
+    "seed": 42,
+    "return_period": "daily (288 x 5m bars)",
+    "days_per_trial": 651
+  },
+  "trial_distribution": {
+    "sharpe_mean": -0.2737334593363434,
+    "sharpe_std": 0.13008695496960657,
+    "sharpe_max": 0.030884390882992756,
+    "pnl_pct_max": 29.04238949752509,
+    "pnl_pct_median": -100.0,
+    "frac_trials_profitable": 0.015
+  },
+  "noise_floor": {
+    "expected_max_sharpe_daily": 0.35975858364943475,
+    "note": "Daily Sharpe a no-edge strategy is expected to reach as the best of this many independent trials. A winner below this is noise."
+  },
+  "winner_by_train_pnl": {
+    "train_pnl_pct": 29.04238949752509,
+    "deflated_sharpe": {
+      "observed_sharpe": 0.030884390882992756,
+      "n_obs": 651,
+      "n_trials": 200,
+      "trial_sharpe_std": 0.13008695496960657,
+      "noise_floor_sharpe": 0.35975858364943475,
+      "deflated_sharpe_ratio": 7.98912143449404e-25,
+      "passes_95": false
+    },
+    "holdout_pnl_pct": -4.404435748419178,
+    "holdout_trades": 4
+  },
+  "winner_by_train_sharpe": {
+    "train_pnl_pct": 29.04238949752509,
+    "deflated_sharpe": {
+      "observed_sharpe": 0.030884390882992756,
+      "n_obs": 651,
+      "n_trials": 200,
+      "trial_sharpe_std": 0.13008695496960657,
+      "noise_floor_sharpe": 0.35975858364943475,
+      "deflated_sharpe_ratio": 7.98912143449404e-25,
+      "passes_95": false
+    },
+    "holdout_pnl_pct": -4.404435748419178,
+    "holdout_trades": 4
+  },
+  "pbo_cscv": {
+    "pbo": 0.11507936507936507,
+    "n_combinations": 252,
+    "median_logit": 3.321948010008016
+  }
+}

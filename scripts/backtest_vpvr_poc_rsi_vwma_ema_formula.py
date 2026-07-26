@@ -161,7 +161,10 @@ def run_formula_sim(
     fee_bps: float,
     slip_bps: float,
     leverage: float,
-) -> SimResult:
+    return_curve: bool = False,
+) -> SimResult | tuple[SimResult, np.ndarray]:
+    """return_curve=True면 (SimResult, per-bar equity curve)를 반환한다.
+    SimResult는 asdict()로 JSON 직렬화되므로 곡선은 dataclass에 넣지 않는다."""
     cfg = _cfg_from_params(p)
     m = FormulaEngine(cfg).compute(df.copy())
 
@@ -261,7 +264,7 @@ def run_formula_sim(
     sharpe = calc_sharpe(eq_arr)
     win_rate = float(wins / trades * 100.0) if trades > 0 else 0.0
 
-    return SimResult(
+    result = SimResult(
         pnl_pct=pnl_pct,
         mdd_pct=mdd_pct,
         sharpe=sharpe,
@@ -270,6 +273,7 @@ def run_formula_sim(
         equity_final=float(eq_arr[-1]),
         params=dict(p),
     )
+    return (result, eq_arr) if return_curve else result
 
 
 # ════════════════════════════════════════════════════════════════
