@@ -1,0 +1,160 @@
+{
+  "selected_at": "2026-07-26T16:35:50.413025+09:00",
+  "rule": "TRADING USDT-M perpetuals, onboardDate<=2024-01-01, ranked by 24h quote volume, top 25",
+  "n_candidates_meeting_onboard_cutoff": 175,
+  "n_selected": 25,
+  "universe": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "1000SHIBUSDT",
+    "DOGEUSDT",
+    "ZECUSDT",
+    "1000PEPEUSDT",
+    "XRPUSDT",
+    "AVAXUSDT",
+    "WLDUSDT",
+    "RIFUSDT",
+    "BNBUSDT",
+    "ADAUSDT",
+    "SUIUSDT",
+    "LINKUSDT",
+    "NEARUSDT",
+    "ACEUSDT",
+    "AAVEUSDT",
+    "INJUSDT",
+    "UNIUSDT",
+    "1000BONKUSDT",
+    "LTCUSDT",
+    "TRXUSDT",
+    "DOTUSDT",
+    "FILUSDT"
+  ],
+  "detail": [
+    {
+      "symbol": "BTCUSDT",
+      "quote_volume_24h": 2782518711.08,
+      "onboard_date": "2019-09-08"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "quote_volume_24h": 2291949970.67,
+      "onboard_date": "2019-11-27"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "quote_volume_24h": 571164357.4712,
+      "onboard_date": "2020-09-14"
+    },
+    {
+      "symbol": "1000SHIBUSDT",
+      "quote_volume_24h": 561051456.819824,
+      "onboard_date": "2021-05-10"
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "quote_volume_24h": 426768440.12565,
+      "onboard_date": "2020-07-10"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "quote_volume_24h": 259153552.88,
+      "onboard_date": "2020-02-05"
+    },
+    {
+      "symbol": "1000PEPEUSDT",
+      "quote_volume_24h": 228722716.6291567,
+      "onboard_date": "2023-05-05"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "quote_volume_24h": 210616150.6867,
+      "onboard_date": "2020-01-06"
+    },
+    {
+      "symbol": "AVAXUSDT",
+      "quote_volume_24h": 126676480.582,
+      "onboard_date": "2020-09-23"
+    },
+    {
+      "symbol": "WLDUSDT",
+      "quote_volume_24h": 106700825.4983,
+      "onboard_date": "2023-07-24"
+    },
+    {
+      "symbol": "RIFUSDT",
+      "quote_volume_24h": 105358989.99205,
+      "onboard_date": "2023-10-21"
+    },
+    {
+      "symbol": "BNBUSDT",
+      "quote_volume_24h": 97850804.812,
+      "onboard_date": "2020-02-10"
+    },
+    {
+      "symbol": "ADAUSDT",
+      "quote_volume_24h": 65482968.4038,
+      "onboard_date": "2020-01-31"
+    },
+    {
+      "symbol": "SUIUSDT",
+      "quote_volume_24h": 58106398.26056,
+      "onboard_date": "2023-05-03"
+    },
+    {
+      "symbol": "LINKUSDT",
+      "quote_volume_24h": 41343570.809,
+      "onboard_date": "2020-01-17"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "quote_volume_24h": 41304451.378,
+      "onboard_date": "2020-10-15"
+    },
+    {
+      "symbol": "ACEUSDT",
+      "quote_volume_24h": 38017333.526076,
+      "onboard_date": "2023-12-18"
+    },
+    {
+      "symbol": "AAVEUSDT",
+      "quote_volume_24h": 37484633.769,
+      "onboard_date": "2020-10-16"
+    },
+    {
+      "symbol": "INJUSDT",
+      "quote_volume_24h": 32444897.5111,
+      "onboard_date": "2022-08-16"
+    },
+    {
+      "symbol": "UNIUSDT",
+      "quote_volume_24h": 31233575.779,
+      "onboard_date": "2020-09-18"
+    },
+    {
+      "symbol": "1000BONKUSDT",
+      "quote_volume_24h": 30176419.565028,
+      "onboard_date": "2023-11-22"
+    },
+    {
+      "symbol": "LTCUSDT",
+      "quote_volume_24h": 29265782.71,
+      "onboard_date": "2020-01-09"
+    },
+    {
+      "symbol": "TRXUSDT",
+      "quote_volume_24h": 29023215.82231,
+      "onboard_date": "2020-01-15"
+    },
+    {
+      "symbol": "DOTUSDT",
+      "quote_volume_24h": 28091927.36787,
+      "onboard_date": "2020-08-22"
+    },
+    {
+      "symbol": "FILUSDT",
+      "quote_volume_24h": 27692406.106386,
+      "onboard_date": "2020-10-16"
+    }
+  ]
+}

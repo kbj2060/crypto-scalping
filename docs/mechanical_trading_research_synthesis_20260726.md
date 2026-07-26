@@ -186,6 +186,47 @@ k=30 → 8.17 bps/일; 원본 보고 "1.5~8.2, k에 비례"와 일치).
 분산으로 크로스섹션 잡음이 줄어 검정력이 올라간다. (b) 축을 영구 종결한다.
 **중간은 없다** — 3자산에서 t를 올리려 파라미터를 더 만지는 것은 정의상 노이즈 채굴이다.
 
+### 5.1.2 유니버스 확장 재설계 — 25종 사전등록 (2026-07-26)
+
+**유니버스 선정 절차 (성과와 무관하게, 실행 전 확정)**: 모멘텀 결과를 본 뒤 종목을 고르면
+그 자체가 낚시질이므로, 유동성 스냅샷만으로 기계적으로 결정한다.
+
+1. Binance USDT-M perpetual 중 `status=TRADING` 전체 (공개 API, 계정 정보 불필요)
+2. `onboardDate ≤ 2024-01-01` — 전 종목이 2년 이상 거래이력을 갖도록 강제, 25종 전체가
+   "늦게 합류" 로직 없이 하나의 고정 시작일을 공유할 수 있게 함
+3. 위 조건을 만족하는 종목을 조회 시점(2026-07-26) 24시간 거래대금 순으로 정렬해 **상위 25개
+   그대로** 채택 (성과 지표 아님, 순수 유동성 지표)
+
+스크립트 [`scripts/select_f3b_universe_25_20260726.py`](../scripts/select_f3b_universe_25_20260726.py) /
+결과 [`data/ensemble/metrics/f3b_universe25_selection_20260726.json`](../data/ensemble/metrics/f3b_universe25_selection_20260726.json)
+
+**확정 유니버스 (25종, onboard 전부 2024-01-01 이전)**:
+`BTCUSDT, ETHUSDT, SOLUSDT, 1000SHIBUSDT, DOGEUSDT, ZECUSDT, 1000PEPEUSDT, XRPUSDT, AVAXUSDT,
+WLDUSDT, RIFUSDT, BNBUSDT, ADAUSDT, SUIUSDT, LINKUSDT, NEARUSDT, ACEUSDT, AAVEUSDT, INJUSDT,
+UNIUSDT, 1000BONKUSDT, LTCUSDT, TRXUSDT, DOTUSDT, FILUSDT`
+
+가장 늦은 onboard는 ACEUSDT(2023-12-18)로, 60일 lookback 워밍업을 두어도 2024-01-01부터
+25종 전체가 참여 가능하다.
+
+**격자/판정 (F3-B-LF와 동일 관례, 저빈도 리밸런싱 교훈 이미 반영)**:
+
+| 항목 | 값 |
+|---|---|
+| 포지션 구성 | k일 모멘텀 순위 상위 20%(5종) 롱 / 하위 20%(5종) 숏, 각 레그 동일가중, 달러중립(gross 50%/50%) |
+| 격자 | k ∈ {14, 30, 60}일 × 리밸런스 ∈ {3, 7, 14}일 = 9개 (F3-B-LF와 동일 격자) |
+| 데이터 | 일봉 종가, Binance futures 공개 REST (`fapi.binance.com/fapi/v1/klines`, interval=1d) |
+| 비용 | cost1 FLAT(왕복 10bps, 매 리밸런스 gross 100% 전액 과금) 주 판정, TURNOVER(실제 바뀐 종목만) 참고, cost3 강건성 |
+| 탐색구간 | 2024-01-01~2025-08-31 |
+| kill 기준 | 탐색구간 net_cost1_flat > 0 **그리고** day-block bootstrap t > 3 |
+| 검정력 진단 | F3-B-LF에서 배운 대로, 변형별 `days_needed_for_t3`를 **결과 해석 전에** 반드시 같이 본다 |
+| 노이즈 바닥 | 9개 격자에 대해 `expected_max_sharpe(9, trial_sr_std)`을 실행 후 결과 해석 전에 기록 |
+| val / OOS | 2025-09~12 / 2026-01~03 (fresh-forward 규칙 준수) |
+| 승격 기준 | OOS DSR ≥ 0.95 **그리고** PBO ≤ 0.25 |
+
+원 F3-B/F3-B-LF와의 유일한 차이는 유니버스 크기(3→25)와 레그 구성(1종 대 1종 → 5종 바스켓
+대 5종 바스켓)이다. 나머지(비용모델, kill 기준, 창구, 승격 기준)는 전부 동일하게 유지해
+결과가 "유니버스 확장 자체의 효과"인지 다른 것에서 온 것인지 헷갈리지 않게 한다.
+
 ### 5.2 그 외 미검증 축 (우선순위 순)
 
 1. **변동성 타게팅 사이징** — 신호가 아니라 **사이징 규칙**. 실현변동성에 반비례해 포지션을
