@@ -1,0 +1,103 @@
+{
+  "preregistration": "docs/mechanical_trading_research_synthesis_20260726.md S5.2.1",
+  "bounds": {
+    "lo": 0.4,
+    "hi": 2.0
+  },
+  "oos_reuse_caveat": "2026-03-02..06-30 has been reused by Sigma6 itself, Sigma8-11, and F4-B before this. Inherited degraded evidential value, not a fresh test.",
+  "tape_contamination_warning": "tmp/causal_regen_20260516/sigma3_1h_hgb_20260705/tape_ensemble.parquet was regenerated 2026-07-20 (report file mtime) and no longer reproduces the frozen contract's OOS numbers -- see frozen_oos_reproduction_check per config below vs. the contract's sigma6_lev4 +45.9%/sigma6_lev3 +16.6%. This matches previously-documented sigma3-1h ensemble retrain fragility (2026-07-20 fresh-window session). All VAL/OOS absolute levels in this report are computed on the CURRENT (drifted) tape; only the paired baseline-vs-vol-targeted comparison on the same tape is treated as informative here.",
+  "configs": {
+    "sigma6_lev4": {
+      "target_atr_calibrated_on_VAL": 0.009523212139680515,
+      "atr_vs_return_diagnosis_VAL": {
+        "n_trades": 32,
+        "corr_entry_atr_vs_return": 0.1878169058093785,
+        "mean_return_by_atr_tercile": {
+          "low": -4.8515495546915926e-05,
+          "mid": 0.01831076016216827,
+          "high": 0.02689349282589523
+        }
+      },
+      "frozen_oos_reproduction_check": {
+        "pnl": -22.00052991316862,
+        "mdd": -37.3580391405697,
+        "trades": 33,
+        "wr": 0.30303030303030304,
+        "notional_mean": 1.2,
+        "notional_min": 1.2,
+        "notional_max": 1.2
+      },
+      "val_baseline_fixed_notional": {
+        "pnl": 71.05067246801697,
+        "mdd": -15.905125038745583,
+        "trades": 37,
+        "wr": 0.43243243243243246,
+        "notional_mean": 1.2000000000000004,
+        "notional_min": 1.2,
+        "notional_max": 1.2
+      },
+      "val_baseline_sharpe_like": 5.342224919568991,
+      "val_vol_targeted": {
+        "pnl": 42.11437577061092,
+        "mdd": -18.086512559933087,
+        "trades": 37,
+        "wr": 0.43243243243243246,
+        "notional_mean": 1.2183111537884173,
+        "notional_min": 0.48,
+        "notional_max": 2.4
+      },
+      "val_vol_targeted_sharpe_like": 3.870952545893794,
+      "gate": {
+        "mdd_improved": "False",
+        "sharpe_not_worse_5pct_tol": false,
+        "pass": false
+      }
+    },
+    "sigma6_lev3": {
+      "target_atr_calibrated_on_VAL": 0.009523212139680515,
+      "atr_vs_return_diagnosis_VAL": {
+        "n_trades": 34,
+        "corr_entry_atr_vs_return": 0.3594187997134577,
+        "mean_return_by_atr_tercile": {
+          "low": -0.0071424142285020226,
+          "mid": 0.016480497659684987,
+          "high": 0.02930189328366661
+        }
+      },
+      "frozen_oos_reproduction_check": {
+        "pnl": -9.692876326747568,
+        "mdd": -23.2264943226824,
+        "trades": 27,
+        "wr": 0.37037037037037035,
+        "notional_mean": 0.8999999999999998,
+        "notional_min": 0.8999999999999999,
+        "notional_max": 0.8999999999999999
+      },
+      "val_baseline_fixed_notional": {
+        "pnl": 34.25657070528556,
+        "mdd": -14.22525625268084,
+        "trades": 32,
+        "wr": 0.375,
+        "notional_mean": 0.8999999999999999,
+        "notional_min": 0.8999999999999999,
+        "notional_max": 0.8999999999999999
+      },
+      "val_baseline_sharpe_like": 3.9059221313075674,
+      "val_vol_targeted": {
+        "pnl": 15.914536330070273,
+        "mdd": -18.417222887071073,
+        "trades": 32,
+        "wr": 0.375,
+        "notional_mean": 0.9596912058183977,
+        "notional_min": 0.40302043352281425,
+        "notional_max": 1.7999999999999998
+      },
+      "val_vol_targeted_sharpe_like": 2.1560002399268856,
+      "gate": {
+        "mdd_improved": "False",
+        "sharpe_not_worse_5pct_tol": false,
+        "pass": false
+      }
+    }
+  }
+}
