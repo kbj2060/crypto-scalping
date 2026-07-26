@@ -1,0 +1,305 @@
+{
+  "stage": "F3-B-LF",
+  "generated_at": "2026-07-26T14:02:56.127121+09:00",
+  "preregistration": "docs/mechanical_trading_research_synthesis_20260726.md S5.1 (commit 4af3626)",
+  "grid": {
+    "k_days": [
+      14,
+      30,
+      60
+    ],
+    "rebalance_days": [
+      3,
+      7,
+      14
+    ]
+  },
+  "primary_cost_model": "FLAT (both legs pay a full round trip every rebalance)",
+  "gate": "exploration net_cost1_flat > 0 AND bootstrap t > 3.0",
+  "data_coverage": {
+    "n_days": 780,
+    "min_date": "2024-06-01",
+    "max_date": "2026-07-20",
+    "note": "SOLUSDT starts 2024-06-01, so the common index begins there rather than the 2024-01 written in the pre-registration. Same constraint the original F3-B ran under; forced by data availability, not by choice."
+  },
+  "exploration_grid": [
+    {
+      "k": 14,
+      "rebalance_days": 3,
+      "exploration": {
+        "n_days": 443,
+        "n_rebalances": 148,
+        "daily_sd_net_cost1_flat": 0.014430856351882368,
+        "days_needed_for_t3": null,
+        "years_needed_for_t3": null,
+        "gross_mean_daily": 0.0006122778248558377,
+        "cost_flat_mean_daily": 0.0006681715575620769,
+        "cost_turn_mean_daily": 0.00022121896162528217,
+        "net_cost1_flat_mean_daily": -5.5893732706239474e-05,
+        "net_cost1_turn_mean_daily": 0.0003910588632305553,
+        "net_cost3_flat_mean_daily": -0.0013922368478303923,
+        "annualized_net_cost1_flat_pct": -2.0401212437777407,
+        "daily_sharpe_net_cost1_flat": -0.0038732096934045545,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": -5.5893732706239474e-05,
+          "boot_se": 0.0006910610481219881,
+          "t_stat": -0.08088103483496142
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.0003910588632305553,
+          "boot_se": 0.00069219487637105,
+          "t_stat": 0.5649548654285745
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 14,
+      "rebalance_days": 7,
+      "exploration": {
+        "n_days": 443,
+        "n_rebalances": 64,
+        "daily_sd_net_cost1_flat": 0.014674688271336212,
+        "days_needed_for_t3": null,
+        "years_needed_for_t3": null,
+        "gross_mean_daily": -6.426595338682749e-05,
+        "cost_flat_mean_daily": 0.0002889390519187359,
+        "cost_turn_mean_daily": 0.00014446952595936795,
+        "net_cost1_flat_mean_daily": -0.00035320500530556365,
+        "net_cost1_turn_mean_daily": -0.00020873547934619556,
+        "net_cost3_flat_mean_daily": -0.0009310831091430352,
+        "annualized_net_cost1_flat_pct": -12.891982693653073,
+        "daily_sharpe_net_cost1_flat": -0.024068995454947565,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": -0.00035320500530556365,
+          "boot_se": 0.0007010123022492144,
+          "t_stat": -0.5038499383995075
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": -0.00020873547934619556,
+          "boot_se": 0.000700573236502616,
+          "t_stat": -0.29794954827027015
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 14,
+      "rebalance_days": 14,
+      "exploration": {
+        "n_days": 443,
+        "n_rebalances": 32,
+        "daily_sd_net_cost1_flat": 0.014459787523566525,
+        "days_needed_for_t3": 2305.620607920365,
+        "years_needed_for_t3": 6.316768788822917,
+        "gross_mean_daily": 0.001047888574589325,
+        "cost_flat_mean_daily": 0.00014446952595936795,
+        "cost_turn_mean_daily": 9.255079006772008e-05,
+        "net_cost1_flat_mean_daily": 0.000903419048629957,
+        "net_cost1_turn_mean_daily": 0.0009553377845216049,
+        "net_cost3_flat_mean_daily": 0.0006144799967112212,
+        "annualized_net_cost1_flat_pct": 32.974795274993426,
+        "daily_sharpe_net_cost1_flat": 0.06247803068735048,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": 0.000903419048629957,
+          "boot_se": 0.0006904594127201562,
+          "t_stat": 1.3084317948115418
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.0009553377845216049,
+          "boot_se": 0.0006897929902899946,
+          "t_stat": 1.384963022195939
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 30,
+      "rebalance_days": 3,
+      "exploration": {
+        "n_days": 427,
+        "n_rebalances": 143,
+        "daily_sd_net_cost1_flat": 0.01527608343030615,
+        "days_needed_for_t3": 4839.765597708069,
+        "years_needed_for_t3": 13.259631774542656,
+        "gross_mean_daily": 0.0013285399613535572,
+        "cost_flat_mean_daily": 0.0006697892271662764,
+        "cost_turn_mean_daily": 0.00012177985948477753,
+        "net_cost1_flat_mean_daily": 0.0006587507341872802,
+        "net_cost1_turn_mean_daily": 0.0012067601018687796,
+        "net_cost3_flat_mean_daily": -0.0006808277201452716,
+        "annualized_net_cost1_flat_pct": 24.04440179783573,
+        "daily_sharpe_net_cost1_flat": 0.043123012334456604,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": 0.0006587507341872802,
+          "boot_se": 0.0007375435077838163,
+          "t_stat": 0.893168643252933
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.0012067601018687796,
+          "boot_se": 0.0007395719927613249,
+          "t_stat": 1.6317006507549372
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 30,
+      "rebalance_days": 7,
+      "exploration": {
+        "n_days": 427,
+        "n_rebalances": 61,
+        "daily_sd_net_cost1_flat": 0.014632734225070778,
+        "days_needed_for_t3": 3352.9056910302647,
+        "years_needed_for_t3": 9.186042989124013,
+        "gross_mean_daily": 0.0010438309975761763,
+        "cost_flat_mean_daily": 0.0002857142857142857,
+        "cost_turn_mean_daily": 9.133489461358314e-05,
+        "net_cost1_flat_mean_daily": 0.0007581167118618904,
+        "net_cost1_turn_mean_daily": 0.0009524961029625931,
+        "net_cost3_flat_mean_daily": 0.00018668814043331923,
+        "annualized_net_cost1_flat_pct": 27.671259982959,
+        "daily_sharpe_net_cost1_flat": 0.051809641328890016,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": 0.0007581167118618904,
+          "boot_se": 0.0006917274501694037,
+          "t_stat": 1.0959760403844434
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.0009524961029625931,
+          "boot_se": 0.0006917044578890559,
+          "t_stat": 1.3770275615534144
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 30,
+      "rebalance_days": 14,
+      "exploration": {
+        "n_days": 427,
+        "n_rebalances": 31,
+        "daily_sd_net_cost1_flat": 0.014912433519794816,
+        "days_needed_for_t3": 11504.835004216045,
+        "years_needed_for_t3": 31.520095901961767,
+        "gross_mean_daily": 0.0005622888716310749,
+        "cost_flat_mean_daily": 0.0001451990632318501,
+        "cost_turn_mean_daily": 5.620608899297424e-05,
+        "net_cost1_flat_mean_daily": 0.00041708980839922467,
+        "net_cost1_turn_mean_daily": 0.0005060827826381006,
+        "net_cost3_flat_mean_daily": 0.0001266916819355246,
+        "annualized_net_cost1_flat_pct": 15.2237780065717,
+        "daily_sharpe_net_cost1_flat": 0.027969265233979298,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": 0.00041708980839922467,
+          "boot_se": 0.0007096345575099681,
+          "t_stat": 0.5877529553559909
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.0005060827826381006,
+          "boot_se": 0.0007092928587975538,
+          "t_stat": 0.7135032819815075
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 60,
+      "rebalance_days": 3,
+      "exploration": {
+        "n_days": 397,
+        "n_rebalances": 133,
+        "daily_sd_net_cost1_flat": 0.014632789816859039,
+        "days_needed_for_t3": null,
+        "years_needed_for_t3": null,
+        "gross_mean_daily": 0.00012949653422021578,
+        "cost_flat_mean_daily": 0.0006700251889168766,
+        "cost_turn_mean_daily": 8.816120906801008e-05,
+        "net_cost1_flat_mean_daily": -0.0005405286546966613,
+        "net_cost1_turn_mean_daily": 4.133532515220563e-05,
+        "net_cost3_flat_mean_daily": -0.0018805790325304135,
+        "annualized_net_cost1_flat_pct": -19.72929589642814,
+        "daily_sharpe_net_cost1_flat": -0.03693954888041213,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": -0.0005405286546966613,
+          "boot_se": 0.000724842104077728,
+          "t_stat": -0.7457191733976564
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 4.133532515220563e-05,
+          "boot_se": 0.0007251406028982547,
+          "t_stat": 0.05700318667441304
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 60,
+      "rebalance_days": 7,
+      "exploration": {
+        "n_days": 397,
+        "n_rebalances": 57,
+        "daily_sd_net_cost1_flat": 0.014667437679311947,
+        "days_needed_for_t3": null,
+        "years_needed_for_t3": null,
+        "gross_mean_daily": 0.0001824493804207218,
+        "cost_flat_mean_daily": 0.00028715365239294707,
+        "cost_turn_mean_daily": 5.289672544080604e-05,
+        "net_cost1_flat_mean_daily": -0.00010470427197222556,
+        "net_cost1_turn_mean_daily": 0.00012955265497991572,
+        "net_cost3_flat_mean_daily": -0.0006790115767581194,
+        "annualized_net_cost1_flat_pct": -3.8217059269862332,
+        "daily_sharpe_net_cost1_flat": -0.007138552367596442,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": -0.00010470427197222556,
+          "boot_se": 0.0007312572757343691,
+          "t_stat": -0.14318390455271127
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": 0.00012955265497991572,
+          "boot_se": 0.0007316517808936721,
+          "t_stat": 0.1770687345579537
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "k": 60,
+      "rebalance_days": 14,
+      "exploration": {
+        "n_days": 397,
+        "n_rebalances": 29,
+        "daily_sd_net_cost1_flat": 0.014790120778530941,
+        "days_needed_for_t3": null,
+        "years_needed_for_t3": null,
+        "gross_mean_daily": -5.019441094463675e-06,
+        "cost_flat_mean_daily": 0.00014609571788413097,
+        "cost_turn_mean_daily": 4.2821158690176324e-05,
+        "net_cost1_flat_mean_daily": -0.00015111515897859478,
+        "net_cost1_turn_mean_daily": -4.7840599784640034e-05,
+        "net_cost3_flat_mean_daily": -0.0004433065947468567,
+        "annualized_net_cost1_flat_pct": -5.515703302718709,
+        "daily_sharpe_net_cost1_flat": -0.01021730391802822,
+        "bootstrap_net_cost1_flat": {
+          "observed_mean": -0.00015111515897859478,
+          "boot_se": 0.0007357923030093615,
+          "t_stat": -0.2053774663862883
+        },
+        "bootstrap_net_cost1_turn": {
+          "observed_mean": -4.7840599784640034e-05,
+          "boot_se": 0.000734752268012358,
+          "t_stat": -0.06511119715772744
+        }
+      },
+      "gate_pass": false
+    }
+  ],
+  "noise_floor": {
+    "n_variants": 9,
+    "trial_sharpe_std": 0.035640181016878804,
+    "expected_max_daily_sharpe": 0.054200810003169266,
+    "best_observed_daily_sharpe": 0.06247803068735048
+  },
+  "n_variants_passing_exploration": 0,
+  "verdict": "KILLED at exploration -- 0/9 variants clear net_cost1_flat > 0 with t > 3.0. Per the pre-registration, val/OOS are not run."
+}
