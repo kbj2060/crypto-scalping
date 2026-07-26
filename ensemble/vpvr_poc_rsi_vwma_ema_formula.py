@@ -6,11 +6,20 @@ VPVR/POC + RSI + VWMA100 + EMA 룰기반 매매 공식
   1. EMA(20/50/200)            — 추세 방향 + 매크로 필터
   2. VWMA(100)                 — 거래량가중 이동평균 대비 이격(동적 지지/저항)
   3. VPVR/POC (cvp_* 재사용)   — POC 대비 거리 + 거래량 불균형 기반 평균회귀
-  4. RSI(14, 기존 'rsi' 컬럼)  — 모멘텀 확인 + 과열/과매도 게이트
+  4. RSI(14, 기존 'rsi' 컬럼)  — 추세/횡보(cvp_regime)에 따라 모멘텀 ↔ 평균회귀로
+                                  해석을 바꾸는 레짐 적응형 컴포넌트
 
 M7/DSAC 앙상블과 독립적으로 동작하며, 기존 `core/cvp.py`(VPVR/POC)와
 `features/engineering.py`(RSI)가 생성한 컬럼을 그대로 재사용한다.
 EMA/VWMA는 이 모듈에서 원시 OHLCV로부터 새로 계산한다.
+
+RSI 레짐 적응 로직은 실전매매 참고자료의 다음 원칙을 반영한다:
+"강한 원웨이 추세에서는 RSI 과매도(과매수)라고 큰 배팅을 하면 위험하다" /
+"박스권(횡보)에서는 RSI 과매도·과매수 시 숏·롱으로 쉽게 수익을 낼 수 있다" /
+"VPVR 매물대와 RSI 고점이 겹칠 때 숏을 잡는 것은 유의미한 근거" — 즉 강추세에서는
+RSI를 모멘텀(추세 지속) 신호로, 횡보에서는 평균회귀(과열 반전) 신호로 해석을 뒤집는다.
+cvp_regime(추세강도)을 두 컴포넌트(POC/RSI)가 공유하는 레짐 게이지로 사용해
+"여러 근거를 겹친다"는 원칙을 구현한다.
 
 사용:
     from ensemble.vpvr_poc_rsi_vwma_ema_formula import FormulaConfig, FormulaEngine
@@ -35,7 +44,7 @@ REQUIRED_INPUT_COLS = [
 # 이 공식이 새로 계산해서 df에 추가하는 컬럼들.
 FORMULA_OUTPUT_COLS = [
     "ema_20", "ema_50", "ema_200", "vwma_100",
-    "ema_comp", "vwma_comp", "poc_comp", "rsi_comp",
+    "ema_comp", "vwma_comp", "poc_comp", "rsi_comp", "rsi_trend_weight",
     "composite_score", "macro_filter",
     "rsi_long_ok", "rsi_short_ok", "position_signal",
 ]
@@ -61,15 +70,18 @@ class FormulaConfig:
     k_poc1: float = 2.0   # POC 거리 가중치
     k_poc2: float = 2.0   # 거래량 불균형 가중치
     w_regime_gate: float = 0.4  # cvp_regime(추세강도)로 POC 평균회귀 신호를 얼마나 감쇠시킬지
+    rsi_regime_power: float = 1.0  # |cvp_regime|를 추세가중치로 변환할 때의 지수(크면 강추세에서만 모멘텀 해석)
 
     # ── 진입/청산 임계값 ──
     theta_entry: float = 0.35
     theta_exit: float = 0.12
     theta_full: float = 0.75  # 이 값 이상이면 최대 사이즈
 
-    # ── RSI 과열/과매도 게이트 ──
-    rsi_hot: float = 75.0
-    rsi_cold: float = 25.0
+    # ── RSI 극단값 안전판 (일반적인 과매수/과매도 게이트가 아니라, 방향 불문
+    #    신규 진입을 막는 '극단 폭주' 세이프가드 — 강추세 중 단순 과매수만으로
+    #    진입을 막지 않는다는 실전 조언 반영) ──
+    rsi_hot: float = 85.0
+    rsi_cold: float = 15.0
 
     # ── 포지션 사이징 ──
     base_size: float = 1.0
@@ -137,9 +149,17 @@ class FormulaEngine:
         regime_scale = (1.0 - cfg.w_regime_gate * regime.abs()).clip(lower=0.0)
         df["poc_comp"] = (np.tanh(poc_raw) * regime_scale).fillna(0.0)
 
-        # ── 4. RSI(14, 기존 'rsi' 컬럼) ──
+        # ── 4. RSI(14, 기존 'rsi' 컬럼) — 레짐 적응형 해석 ──
+        # 강추세(|cvp_regime| 큼): 모멘텀으로 해석 — 과매수가 추세 지속(강세) 신호.
+        # 횡보(|cvp_regime| 작음): 평균회귀로 해석 — 과매수는 매도, 과매도는 매수 신호.
+        # trend_weight=1 -> rsi_comp=+rsi_z(모멘텀), trend_weight=0 -> rsi_comp=-rsi_z(역추세)
         rsi = pd.to_numeric(df["rsi"], errors="coerce").fillna(50.0)
-        df["rsi_comp"] = (rsi - 50.0) / 50.0
+        rsi_z = (rsi - 50.0) / 50.0
+        trend_weight = regime.abs().clip(0.0, 1.0) ** max(cfg.rsi_regime_power, 1e-6)
+        df["rsi_trend_weight"] = trend_weight
+        df["rsi_comp"] = (rsi_z * (2.0 * trend_weight - 1.0)).fillna(0.0)
+
+        # 극단값 안전판: 방향 불문, 지나친 폭주 구간에서는 신규 진입 자제.
         df["rsi_long_ok"] = rsi < cfg.rsi_hot
         df["rsi_short_ok"] = rsi > cfg.rsi_cold
 
