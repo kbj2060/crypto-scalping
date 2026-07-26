@@ -15,7 +15,9 @@
       "Bash(/tmp/m7_gap_analysis.md:*)",
       "Read(//tmp/**)",
       "Bash(codex exec:*)",
-      "Bash(jobs -l)"
+      "Bash(jobs -l)",
+      "Bash(python3 -c ' *)",
+      "Bash(echo \"=== exit $? ===\")"
     ]
   }
 }
