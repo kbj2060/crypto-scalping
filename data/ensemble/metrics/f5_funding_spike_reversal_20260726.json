@@ -1,0 +1,236 @@
+{
+  "stage": "F5",
+  "generated_at": "2026-07-26T21:21:45.959900+09:00",
+  "preregistration": "docs/mechanical_trading_research_synthesis_20260726.md S7 (commit 54e5450)",
+  "grid": {
+    "theta_percentile": [
+      90,
+      95
+    ],
+    "holding_hours": [
+      1,
+      4,
+      8
+    ]
+  },
+  "gate": "exploration net_cost1_mean > 0 AND event-blocked bootstrap t > 3.0",
+  "data_coverage": {
+    "ETHUSDT": {
+      "n_prints_eligible": 2646
+    },
+    "BTCUSDT": {
+      "n_prints_eligible": 2646
+    },
+    "SOLUSDT": {
+      "n_prints_eligible": 2190
+    }
+  },
+  "exploration_grid": [
+    {
+      "theta_pct": 90,
+      "holding_h": 1,
+      "exploration": {
+        "n_events": 402,
+        "n_events_per_asset": {
+          "ETHUSDT": 106,
+          "BTCUSDT": 111,
+          "SOLUSDT": 185
+        },
+        "gross_mean": -0.0004449136945996744,
+        "net_cost1_mean": -0.0014449136945996741,
+        "net_cost1_sd": 0.008150123956554544,
+        "net_cost3_mean": -0.003444913694599674,
+        "annualized_net_cost1_pct": -1265.7443964693146,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.17728732744458892,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.0014449136945996741,
+          "boot_se": 0.0004908584322194789,
+          "t_stat": -2.943646476778066
+        },
+        "positive_funding_tail": {
+          "n": 364,
+          "net_cost1_mean": -0.0015192005516644596
+        },
+        "negative_funding_tail": {
+          "n": 38,
+          "net_cost1_mean": -0.0007333238006106776
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "theta_pct": 90,
+      "holding_h": 4,
+      "exploration": {
+        "n_events": 402,
+        "n_events_per_asset": {
+          "ETHUSDT": 106,
+          "BTCUSDT": 111,
+          "SOLUSDT": 185
+        },
+        "gross_mean": -0.0010879874719131673,
+        "net_cost1_mean": -0.002087987471913168,
+        "net_cost1_sd": 0.015211777615360102,
+        "net_cost3_mean": -0.004087987471913168,
+        "annualized_net_cost1_pct": -457.2692563489838,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.1372612409088088,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.002087987471913168,
+          "boot_se": 0.000937373869704149,
+          "t_stat": -2.2274863204498887
+        },
+        "positive_funding_tail": {
+          "n": 364,
+          "net_cost1_mean": -0.002007736704109162
+        },
+        "negative_funding_tail": {
+          "n": 38,
+          "net_cost1_mean": -0.0028567053529831147
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "theta_pct": 90,
+      "holding_h": 8,
+      "exploration": {
+        "n_events": 402,
+        "n_events_per_asset": {
+          "ETHUSDT": 106,
+          "BTCUSDT": 111,
+          "SOLUSDT": 185
+        },
+        "gross_mean": -0.0007613841242568658,
+        "net_cost1_mean": -0.0017613841242568663,
+        "net_cost1_sd": 0.019568470278011764,
+        "net_cost3_mean": -0.003761384124256865,
+        "annualized_net_cost1_pct": -192.87156160612687,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.09001133452092352,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.0017613841242568663,
+          "boot_se": 0.0011471491023728833,
+          "t_stat": -1.5354448001689014
+        },
+        "positive_funding_tail": {
+          "n": 364,
+          "net_cost1_mean": -0.0022101464332092515
+        },
+        "negative_funding_tail": {
+          "n": 38,
+          "net_cost1_mean": 0.0025372864141291387
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "theta_pct": 95,
+      "holding_h": 1,
+      "exploration": {
+        "n_events": 165,
+        "n_events_per_asset": {
+          "ETHUSDT": 30,
+          "BTCUSDT": 33,
+          "SOLUSDT": 102
+        },
+        "gross_mean": -0.0006230916425998224,
+        "net_cost1_mean": -0.0016230916425998226,
+        "net_cost1_sd": 0.009195235808232975,
+        "net_cost3_mean": -0.0036230916425998216,
+        "annualized_net_cost1_pct": -1421.8282789174448,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.17651441207702187,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.0016230916425998226,
+          "boot_se": 0.0008044692229244573,
+          "t_stat": -2.0175932109614556
+        },
+        "positive_funding_tail": {
+          "n": 155,
+          "net_cost1_mean": -0.0011436276477747643
+        },
+        "negative_funding_tail": {
+          "n": 10,
+          "net_cost1_mean": -0.00905478356238822
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "theta_pct": 95,
+      "holding_h": 4,
+      "exploration": {
+        "n_events": 165,
+        "n_events_per_asset": {
+          "ETHUSDT": 30,
+          "BTCUSDT": 33,
+          "SOLUSDT": 102
+        },
+        "gross_mean": -0.0011050504534215022,
+        "net_cost1_mean": -0.0021050504534215033,
+        "net_cost1_sd": 0.01842490693412061,
+        "net_cost3_mean": -0.0041050504534215024,
+        "annualized_net_cost1_pct": -461.0060492993092,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.11425026248155505,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.0021050504534215033,
+          "boot_se": 0.001737912385270905,
+          "t_stat": -1.2112523457811535
+        },
+        "positive_funding_tail": {
+          "n": 155,
+          "net_cost1_mean": -0.0015581574141410146
+        },
+        "negative_funding_tail": {
+          "n": 10,
+          "net_cost1_mean": -0.010581892562269058
+        }
+      },
+      "gate_pass": false
+    },
+    {
+      "theta_pct": 95,
+      "holding_h": 8,
+      "exploration": {
+        "n_events": 165,
+        "n_events_per_asset": {
+          "ETHUSDT": 30,
+          "BTCUSDT": 33,
+          "SOLUSDT": 102
+        },
+        "gross_mean": 4.9028775056853094e-05,
+        "net_cost1_mean": -0.0009509712249431474,
+        "net_cost1_sd": 0.020919108373381384,
+        "net_cost3_mean": -0.0029509712249431467,
+        "annualized_net_cost1_pct": -104.13134913127465,
+        "events_needed_for_t3": null,
+        "sharpe_like": -0.0454594530497875,
+        "bootstrap_net_cost1": {
+          "observed_mean": -0.0009509712249431474,
+          "boot_se": 0.001876515264215354,
+          "t_stat": -0.506775107603927
+        },
+        "positive_funding_tail": {
+          "n": 155,
+          "net_cost1_mean": -0.0008537725138698066
+        },
+        "negative_funding_tail": {
+          "n": 10,
+          "net_cost1_mean": -0.0024575512465799336
+        }
+      },
+      "gate_pass": false
+    }
+  ],
+  "noise_floor": {
+    "n_variants": 6,
+    "trial_sharpe_std": 0.05136213349748338,
+    "expected_max_sharpe": 0.06677800471084809,
+    "best_observed_sharpe": -0.0454594530497875
+  },
+  "n_variants_passing_exploration": 0,
+  "verdict": "KILLED at exploration -- 0/6 variants clear net_cost1_mean > 0 with t > 3.0. Per the pre-registration, val/OOS are not run."
+}
