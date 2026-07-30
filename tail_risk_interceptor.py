@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 _ROOT = Path(__file__).resolve().parent
 
 # ── WebSocket URL ────────────────────────────────────────────────────────────
-_FORCE_ORDER_WS_URL = "wss://fstream.binance.com/ws/{symbol}@forceOrder"
+_FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/{symbol}@forceOrder"
 
-_DB_PATH = str(_ROOT / "data/live/tail_risk.duckdb")
+_DB_PATH = str(os.getenv("QUANT_TAIL_DB_PATH", str(_ROOT / "data/live/tail_risk.duckdb")))
 _TABLE   = "tail_risk_1m"
 
 
@@ -122,6 +122,18 @@ class TailRiskInterceptor:
                 shadow_risk_bucket VARCHAR
             )
         """)
+        existing_cols = {str(r[1]) for r in con.execute(f"PRAGMA table_info('{_TABLE}')").fetchall()}
+        extra_cols = [
+            ("ws_connected", "BOOLEAN"),
+            ("ws_stale", "BOOLEAN"),
+            ("ws_age_sec", "DOUBLE"),
+            ("liq_event_count_1m", "INTEGER"),
+            ("valid_liq_stream", "BOOLEAN"),
+            ("schema_version", "INTEGER"),
+        ]
+        for col_name, col_type in extra_cols:
+            if col_name not in existing_cols:
+                con.execute(f"ALTER TABLE {_TABLE} ADD COLUMN {col_name} {col_type}")
         # 콜드 스타트 방지용 데이터드
         try:
             rows = con.execute(f"""
@@ -142,16 +154,22 @@ class TailRiskInterceptor:
             logger.debug("TR bootstrap skip: %s", e)
         con.close()
 
-    def _db_insert(self, bucket_ts: datetime, long_1m: float, short_1m: float) -> None:
+    def _db_insert(self, bucket_ts: datetime, long_1m: float, short_1m: float, liq_event_count_1m: int = 0) -> None:
         import duckdb
         try:
+            now_ts = time.time()
+            ws_age_sec = (now_ts - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None
+            # forceOrder는 이벤트가 없으면 조용한 스트림이다. 최근 이벤트 부재를 stale로 보지 않고
+            # 연결 여부만 저장해 0 청산과 스트림 장애를 분리한다.
+            ws_stale = bool(not self._ws_connected)
             con = duckdb.connect(_DB_PATH)
             con.execute(
                 f"""
                 INSERT INTO {_TABLE} (
                     ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, mu_short, sigma_short,
-                    shadow_aftershock_prob, shadow_decay_half_life, shadow_risk_bucket
-                ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                    shadow_aftershock_prob, shadow_decay_half_life, shadow_risk_bucket,
+                    ws_connected, ws_stale, ws_age_sec, liq_event_count_1m, valid_liq_stream, schema_version
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 [
                     bucket_ts,
@@ -164,6 +182,12 @@ class TailRiskInterceptor:
                     float(self._shadow_state.get("shadow_aftershock_prob", 0.0)),
                     float(self._shadow_state.get("shadow_decay_half_life", 0.0)),
                     str(self._shadow_state.get("shadow_risk_bucket", "normal")),
+                    bool(self._ws_connected),
+                    ws_stale,
+                    float(ws_age_sec) if ws_age_sec is not None else None,
+                    int(liq_event_count_1m),
+                    bool(self._ws_connected),
+                    3,
                 ]
             )
             con.close()
@@ -199,6 +223,17 @@ class TailRiskInterceptor:
                 short_usd += usd # 숏 포지션 청산 = 시장에 BUY
                 
         return long_usd, short_usd
+
+    def _count_liq_events_1m(self) -> int:
+        now_ms = int(time.time() * 1000)
+        cutoff = now_ms - 60_000
+        cnt = 0
+        for ts, _side, usd, _price in reversed(self._liq_events):
+            if ts < cutoff:
+                break
+            if usd > 0:
+                cnt += 1
+        return int(cnt)
 
     def _compute_liq_cluster(self, current_price: float) -> dict[str, float | int]:
         """최근 청산 분포 기반 자석 방향 추정."""
@@ -366,6 +401,7 @@ class TailRiskInterceptor:
 
                 async with self._lock:
                     long_1m, short_1m = self._aggregate_1m()
+                    liq_event_count_1m = self._count_liq_events_1m()
 
                 self._update_hawkes_state(long_1m, short_1m)
                 # 2. 매 10초마다 섀도우 상태 갱신 및 터미널 로그 출력
@@ -387,7 +423,7 @@ class TailRiskInterceptor:
                     bucket_ts = (dt_now - timedelta(minutes=1)).replace(second=0, microsecond=0)
 
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self._db_insert, bucket_ts, long_1m, short_1m)
+                    await loop.run_in_executor(None, self._db_insert, bucket_ts, long_1m, short_1m, liq_event_count_1m)
 
             except Exception as e:
                 logger.error("🚨 사후 요격기(_agg_loop) 치명적 에러 발생: %s", e, exc_info=True)
@@ -471,8 +507,12 @@ class TailRiskInterceptor:
             hawkes_status = f"여진 진행중 ({self._crisis_type})"
         else:
             hawkes_status = "안전 구간"
-        ws_stale = (time.time() - self._ws_last_msg_ts) > 30.0 if self._ws_last_msg_ts > 0 else True
-        ws_status = "WS STALE" if ws_stale else "WS LIVE"
+        ws_age_sec = (time.time() - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None
+        ws_status = (
+            f"WS CONNECTED / last_liq={ws_age_sec:.0f}s"
+            if self._ws_connected and ws_age_sec is not None
+            else ("WS CONNECTED / no_liq_event" if self._ws_connected else "WS DISCONNECTED")
+        )
 
         shadow_prob = float(self._shadow_state.get("shadow_aftershock_prob", 0.0))
         shadow_hl = float(self._shadow_state.get("shadow_decay_half_life", 0.0))
@@ -520,6 +560,10 @@ class TailRiskInterceptor:
             "lai": float(lai),
             "long_usd_1m": float(long_1m),
             "short_usd_1m": float(short_1m),
+            "liq_event_count_1m": int(self._count_liq_events_1m()),
+            "ws_connected": bool(self._ws_connected),
+            "ws_age_sec": float(time.time() - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None,
+            "valid_liq_stream": bool(self._ws_connected),
             "hawkes_active": bool(self._hawkes_active),
             "hawkes_decay_level": float(self._hawkes_decay_level),
             "crisis_type": str(self._crisis_type or ""),
