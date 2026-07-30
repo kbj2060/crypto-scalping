@@ -97,8 +97,14 @@ class TailRiskInterceptor:
         self.liq_cluster_bucket_pct = float(os.getenv("TR_LIQ_CLUSTER_BUCKET_PCT", "0.001"))
         self.dsac_intercept_enabled = os.getenv("TR_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
         self._ws_connected = False
+        self._ws_connected_since = 0.0
         self._ws_last_msg_ts = 0.0
-        
+        # 2026-07-30: 실제 청산 이벤트 없이도 핸드셰이크만 유지되며 ws_connected=True를 77일간 잘못
+        # 보고한 사고 이후 도입. 정상 구간(2026-07-19~) 실측 gap 분포: median=2분, p95=16분, p99=29분,
+        # 240분 초과 gap은 3675건 중 1건뿐 -- 4시간 무이벤트는 정상적인 "조용한 시장"으로 설명되지
+        # 않는 수준이라 스테일 임계값으로 채택.
+        self.liq_stale_threshold_sec = float(os.getenv("TR_LIQ_STALE_THRESHOLD_SEC", "14400"))
+
         self.enabled = os.getenv("TR_ENABLE", "true").strip().lower() in ("1", "true", "yes", "on")
 
     # ── DuckDB (Bootstrap & Insert) ──────────────────────────────────────────
@@ -154,14 +160,33 @@ class TailRiskInterceptor:
             logger.debug("TR bootstrap skip: %s", e)
         con.close()
 
+    def _stream_health(self) -> tuple[bool, float | None, bool]:
+        """실제 메시지 흐름 기준 스트림 상태 판정.
+
+        forceOrder는 이벤트가 없으면 조용한 스트림이라 "이벤트 부재 = 장애"로 볼 수 없지만,
+        핸드셰이크(ws_connected)만 보는 것도 2026-07-30에 77일간 실데이터 없이 True를 반환한
+        사고의 원인이었다. 마지막 실메시지 이후 경과 시간(또는 메시지를 한 번도 못 받았다면
+        연결 이후 경과 시간)이 liq_stale_threshold_sec를 넘으면 stale로 판정한다. 임계값은
+        정상 구간(2026-07-19~) 실측 gap 분포(p99=29분, 240분 초과 gap 3675건 중 1건)에서
+        나온 값이라, 이 정도 무이벤트는 "조용한 시장"으로 설명되지 않는다.
+
+        Returns (ws_stale, ws_age_sec, valid_liq_stream).
+        """
+        now_ts = time.time()
+        if self._ws_last_msg_ts > 0:
+            ws_age_sec = now_ts - self._ws_last_msg_ts
+        elif self._ws_connected_since > 0:
+            ws_age_sec = now_ts - self._ws_connected_since
+        else:
+            ws_age_sec = None
+        ws_stale = (not self._ws_connected) or (ws_age_sec is None) or (ws_age_sec > self.liq_stale_threshold_sec)
+        valid_liq_stream = bool(self._ws_connected) and not ws_stale
+        return ws_stale, ws_age_sec, valid_liq_stream
+
     def _db_insert(self, bucket_ts: datetime, long_1m: float, short_1m: float, liq_event_count_1m: int = 0) -> None:
         import duckdb
         try:
-            now_ts = time.time()
-            ws_age_sec = (now_ts - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None
-            # forceOrder는 이벤트가 없으면 조용한 스트림이다. 최근 이벤트 부재를 stale로 보지 않고
-            # 연결 여부만 저장해 0 청산과 스트림 장애를 분리한다.
-            ws_stale = bool(not self._ws_connected)
+            ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
             con = duckdb.connect(_DB_PATH)
             con.execute(
                 f"""
@@ -183,10 +208,10 @@ class TailRiskInterceptor:
                     float(self._shadow_state.get("shadow_decay_half_life", 0.0)),
                     str(self._shadow_state.get("shadow_risk_bucket", "normal")),
                     bool(self._ws_connected),
-                    ws_stale,
+                    bool(ws_stale),
                     float(ws_age_sec) if ws_age_sec is not None else None,
                     int(liq_event_count_1m),
-                    bool(self._ws_connected),
+                    bool(valid_liq_stream),
                     3,
                 ]
             )
@@ -362,6 +387,7 @@ class TailRiskInterceptor:
                     logger.info("🛡️ TR ForceOrder WS 연결: %s", url)
                     delay = 3.0
                     self._ws_connected = True
+                    self._ws_connected_since = time.time()
                     async for raw in ws:
                         if not self._running:
                             break
@@ -507,12 +533,16 @@ class TailRiskInterceptor:
             hawkes_status = f"여진 진행중 ({self._crisis_type})"
         else:
             hawkes_status = "안전 구간"
-        ws_age_sec = (time.time() - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None
-        ws_status = (
-            f"WS CONNECTED / last_liq={ws_age_sec:.0f}s"
-            if self._ws_connected and ws_age_sec is not None
-            else ("WS CONNECTED / no_liq_event" if self._ws_connected else "WS DISCONNECTED")
-        )
+        ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
+        if not self._ws_connected:
+            ws_status = "WS DISCONNECTED"
+        elif ws_stale:
+            ws_status = (
+                f"WS CONNECTED / STALE (no liq {ws_age_sec:.0f}s, threshold={self.liq_stale_threshold_sec:.0f}s)"
+                if ws_age_sec is not None else "WS CONNECTED / STALE (no message ever received)"
+            )
+        else:
+            ws_status = f"WS CONNECTED / last_liq={ws_age_sec:.0f}s"
 
         shadow_prob = float(self._shadow_state.get("shadow_aftershock_prob", 0.0))
         shadow_hl = float(self._shadow_state.get("shadow_decay_half_life", 0.0))
@@ -554,6 +584,7 @@ class TailRiskInterceptor:
         z_short = (short_1m - self.mu_short) / max(self.sigma_short, 1.0)
         dominant_liq = long_1m if z_long >= z_short else short_1m
         lai = dominant_liq / max(abs(float(price_change_pct)), 0.0001)
+        ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
         out = {
             "z_long": float(z_long),
             "z_short": float(z_short),
@@ -562,8 +593,9 @@ class TailRiskInterceptor:
             "short_usd_1m": float(short_1m),
             "liq_event_count_1m": int(self._count_liq_events_1m()),
             "ws_connected": bool(self._ws_connected),
-            "ws_age_sec": float(time.time() - self._ws_last_msg_ts) if self._ws_last_msg_ts > 0 else None,
-            "valid_liq_stream": bool(self._ws_connected),
+            "ws_stale": bool(ws_stale),
+            "ws_age_sec": float(ws_age_sec) if ws_age_sec is not None else None,
+            "valid_liq_stream": bool(valid_liq_stream),
             "hawkes_active": bool(self._hawkes_active),
             "hawkes_decay_level": float(self._hawkes_decay_level),
             "crisis_type": str(self._crisis_type or ""),
