@@ -1,0 +1,105 @@
+{
+  "schema_version": "research_line_registry_v1",
+  "purpose": "Structured memory of modelling lines previously judged unsuccessful under their stated scope. Entries do not ban retesting the same model or logic. A retest must record why the prior result may be non-generalizable or unreliable and must use an independent verification design.",
+  "prior_lines": [
+    {
+      "id": "global_technical_indicator_search",
+      "scope": "Existing technical-indicator feature universe",
+      "reason": "Repeated exploration exhausted without robust VAL/OOS improvement.",
+      "retest_guidance": "A genuinely new causal raw source changes the information set."
+    },
+    {
+      "id": "global_cross_sectional_momentum",
+      "scope": "3-coin and 25-coin cross-sectional momentum",
+      "reason": "Already tested without promotion-quality result.",
+      "retest_guidance": "A different causal market-structure target, not another momentum threshold."
+    },
+    {
+      "id": "global_vol_targeting",
+      "scope": "Volatility-target sizing overlays",
+      "reason": "Closed in the pipeline redesign.",
+      "retest_guidance": "A new independently validated risk signal and full sizing-chain parity."
+    },
+    {
+      "id": "global_funding_carry_contrarian",
+      "scope": "Funding spike contrarian and basis-carry/funding-floor strategies",
+      "reason": "Existing funding-only variants were exhausted.",
+      "retest_guidance": "A new raw source with known availability lag; record why funding-only retuning is now informative."
+    },
+    {
+      "id": "global_macro_tradfi_overlay",
+      "scope": "Macro, TradFi, and paid intraday equity/futures overlays",
+      "reason": "Free calendar signal failed validation; paid-data increment is unproven.",
+      "retest_guidance": "Independent evidence of incremental causal information before purchase or integration."
+    },
+    {
+      "id": "global_1m_scalping",
+      "scope": "Existing 1-minute scalping strategy family",
+      "reason": "Four rounds closed; no robust result.",
+      "retest_guidance": "New forward-collected microstructure or fill data is the strongest differentiation; otherwise document the retest cause."
+    },
+    {
+      "id": "global_exit_constant_tuning",
+      "scope": "Exit logic, TP/SL width, quality threshold, time exit, and second-slot tuning on an unchanged signal",
+      "reason": "21+ exit rounds and related sweeps did not survive validation/OOS.",
+      "retest_guidance": "A new entry signal or an independently reproduced execution discrepancy makes a full-stack retest informative."
+    },
+    {
+      "id": "btc_5m_quality_classifier_stack",
+      "scope": "BTC causalfix/unified 5m triple-barrier quality-direction classifier family",
+      "reason": "Event geometry, model family, feature unions, TP-first labels, and barrier/horizon calibration all failed VAL/OOS gates.",
+      "retest_guidance": "Different causal raw information and a different decision objective are strong reasons; otherwise reproduce the prior result first."
+    },
+    {
+      "id": "btc_rho1_panel_direction",
+      "scope": "BTC direction/PnL from the Rho1 cross-asset panel and ranking head",
+      "reason": "Panel calibration improved, but rank score was near constant and all Fresh-Forward PnL settings were negative.",
+      "retest_guidance": "A non-directional use with a separately pre-registered execution hypothesis is a meaningful differentiation."
+    },
+    {
+      "id": "btc_dvol_feature_overlay",
+      "scope": "DVOL level/change feature overlay on the BTC quality classifier",
+      "reason": "0/9 configurations; features were used by the model but worsened OOS in most comparison cells.",
+      "retest_guidance": "Option skew or term-structure data with independently verified availability is a strong differentiation."
+    },
+    {
+      "id": "btc_jepa_deep_feature_encoder",
+      "scope": "JEPA/temporal-contrastive embedding on the current unified raw panel",
+      "reason": "0/9; learned embeddings ranked below their raw inputs.",
+      "retest_guidance": "Different raw modality or downstream task is a strong differentiation; document why a capacity-only retest is informative if used."
+    },
+    {
+      "id": "btc_tpfirst_three_way_label",
+      "scope": "BTC TP/SL/timeout 3-class TP-first label",
+      "reason": "0/24; P(TP)-P(SL) showed no monotonic realized-quality ranking.",
+      "retest_guidance": "Different causal information and decision target are strong differentiators; otherwise document the independent reproduction plan."
+    },
+    {
+      "id": "btc_barrier_horizon_calibration",
+      "scope": "BTC triple-barrier horizon and fixed TP/SL multiplier sweep",
+      "reason": "0/148 configurations passed both VAL and OOS.",
+      "retest_guidance": "A validated new signal is a strong reason; otherwise state the corrected assumption behind recalibration."
+    },
+    {
+      "id": "btc_advanced_rl_direction",
+      "scope": "BTC advanced RL direction-policy family (REDQ/TQC/CQL/DSAC-T)",
+      "reason": "Three seeds were OOS-negative and model-family changes did not alter the result.",
+      "retest_guidance": "A new validated supervised signal or different action space should include seed-diversity and fresh-forward evidence."
+    },
+    {
+      "id": "btc_sigma3_1h_5m_exit_precision",
+      "scope": "Frozen Sigma3 1h entry with mechanical 5m barrier-resolution exit",
+      "reason": "Observed OOS improved but a genuinely fresh window reversed sharply negative.",
+      "retest_guidance": "A different entry signal or a diagnosed execution-parity error should be verified on untouched data."
+    }
+  ],
+  "source_documents": [
+    "docs/pipeline_integrity_and_research_redesign_20260730.md",
+    "docs/btc_new_architecture_session_summary_20260804.md",
+    "docs/btc_panel_crossasset_architecture_design_20260804.md",
+    "docs/btc_deepfeat_jepa_unified_panel_closed_20260804.md",
+    "docs/btc_3way_tpfirst_label_closed_20260804.md",
+    "docs/btc_barrier_horizon_calibration_sweep_closed_20260805.md",
+    "docs/btc_sigma3_5m_exit_precision_closed_20260805.md"
+  ]
+}
