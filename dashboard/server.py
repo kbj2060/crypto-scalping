@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import hashlib
 import json
 import os
@@ -17,6 +18,11 @@ from aiohttp import ClientSession, ClientTimeout, web
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
+# Shadow-only, no order submission -- standalone loop separate from trading_bot.py's
+# single-slot BTC shadow (see scripts/run_btc_multislot_shadow_loop_20260807.py).
+BTC_MULTISLOT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_state_20260807.json"
+BTC_MULTISLOT_SHADOW_LEDGER_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_ledger_20260807.csv"
+BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT"}
 EVENT_POLL_SECONDS = 2.5
 MARKET_HISTORY_CACHE_SECONDS = 300
@@ -411,6 +417,53 @@ def scalp_shadow_payload(
     }
 
 
+def btc_multislot_shadow_payload() -> dict[str, Any]:
+    state = load_json(BTC_MULTISLOT_SHADOW_STATE_PATH) or {}
+    slots = state.get("slots") if isinstance(state.get("slots"), list) else []
+    last_bar = state.get("last_bar")
+    age_minutes = utc_age_minutes(last_bar)
+    total_trades = 0
+    cumulative_return_pct: float | None = None
+    recent_trades: list[dict[str, Any]] = []
+    if BTC_MULTISLOT_SHADOW_LEDGER_PATH.exists():
+        with BTC_MULTISLOT_SHADOW_LEDGER_PATH.open("r", encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        total_trades = len(rows)
+        equity = 1.0
+        for row in rows:
+            try:
+                equity *= 1.0 + float(row.get("trade_return_net") or 0.0)
+            except (TypeError, ValueError):
+                continue
+        cumulative_return_pct = (equity - 1.0) * 100.0
+        for row in rows[-5:]:
+            try:
+                return_pct = float(row["trade_return_net"]) * 100.0
+            except (KeyError, TypeError, ValueError):
+                return_pct = None
+            recent_trades.append(
+                {
+                    "slot": row.get("slot"),
+                    "side": row.get("side"),
+                    "exit_timestamp": row.get("exit_timestamp"),
+                    "trade_return_pct": return_pct,
+                    "reason": row.get("reason"),
+                }
+            )
+        recent_trades.reverse()
+    return {
+        "last_bar": last_bar,
+        "age_minutes": age_minutes,
+        "stale": age_minutes is None or age_minutes >= (BTC_MULTISLOT_SHADOW_BAR_SECONDS / 60.0) * 3,
+        "slot_count": len(slots),
+        "open_slots": sum(1 for s in slots if s),
+        "slots": slots,
+        "total_trades": total_trades,
+        "cumulative_return_pct": cumulative_return_pct,
+        "recent_trades": recent_trades,
+    }
+
+
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -762,6 +815,16 @@ def make_app() -> web.Application:
             )
         return json_response(request, payload, etag)
 
+    async def api_btc_multislot_shadow(request: web.Request) -> web.Response:
+        etag = make_etag(
+            "btc-multislot-shadow",
+            file_signature(BTC_MULTISLOT_SHADOW_STATE_PATH),
+            file_signature(BTC_MULTISLOT_SHADOW_LEDGER_PATH),
+        )
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, btc_multislot_shadow_payload(), etag)
+
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -772,6 +835,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
+    app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     app.on_startup.append(start_dashboard_events)

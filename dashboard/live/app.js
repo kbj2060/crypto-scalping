@@ -2,6 +2,7 @@ const TRADE_JOURNAL_URL = "../../data/live/trade_journal.jsonl";
 const API_EVENTS_URL = "/api/events";
 const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
+const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 const JOURNAL_POLL_MS = 10000;
@@ -85,6 +86,8 @@ let candleHistoryByAsset = {};
 let lastCandleHistoryFetchAtByAsset = {};
 let opsStatusEtag = "";
 let opsLastFetchAt = 0;
+let btcMultislotEtag = "";
+let btcMultislotLastFetchAt = 0;
 let lastChartRenderAt = 0;
 let isScrolling = false;
 let scrollIdleTimer = 0;
@@ -1536,7 +1539,7 @@ function opsTone(status) {
 }
 
 function opsLabel(value) {
-  return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
+  return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소", btc_multislot_shadow_process: "BTC 멀티슬롯 shadow" })[value] || String(value || "알 수 없음");
 }
 
 function escapeHtml(value) {
@@ -1608,13 +1611,51 @@ async function refreshOpsStatus() {
   }
 }
 
+function renderBtcMultislotShadow(payload) {
+  const badge = el("btcMultislotBadge");
+  const stale = Boolean(payload?.stale);
+  if (badge) {
+    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
+    badge.textContent = stale ? "STALE" : "LIVE";
+  }
+  const age = Number(payload?.age_minutes);
+  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
+  setT("btcMultislotSub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
+  setT("btcMultislotSlots", `${payload?.open_slots ?? "-"} / ${payload?.slot_count ?? "-"}`);
+  setT("btcMultislotTrades", `${payload?.total_trades ?? 0}건`);
+  const pnl = Number(payload?.cumulative_return_pct);
+  const pnlEl = el("btcMultislotPnl");
+  setT("btcMultislotPnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
+  if (pnlEl) {
+    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
+    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
+  }
+}
+
+async function refreshBtcMultislotShadow() {
+  const now = Date.now();
+  if (now - btcMultislotLastFetchAt < OPS_POLL_MS) return;
+  btcMultislotLastFetchAt = now;
+  try {
+    const res = await fetch(API_BTC_MULTISLOT_SHADOW_URL, { cache: "no-store", headers: btcMultislotEtag ? { "If-None-Match": btcMultislotEtag } : {} });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`btc multislot shadow ${res.status}`);
+    btcMultislotEtag = res.headers.get("ETag") || btcMultislotEtag;
+    renderBtcMultislotShadow(await res.json());
+  } catch (error) {
+    console.error("BTC multislot shadow fetch error:", error);
+    const badge = el("btcMultislotBadge");
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
+  }
+}
+
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
     const ops = button.dataset.pageTab === "ops";
     el("liveTabPanel")?.classList.toggle("hidden", ops);
     el("opsTabPanel")?.classList.toggle("hidden", !ops);
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); }
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); }
   }));
 }
 
@@ -2182,6 +2223,7 @@ async function tick() {
       tradePanelsRendered = true;
     }
     refreshOpsStatus();
+    refreshBtcMultislotShadow();
   } catch (e) {
     console.error("Tick Error:", e);
   } finally {
