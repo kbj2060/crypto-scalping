@@ -1,0 +1,599 @@
+{
+  "model_id": "certified_teacher_regime_moe_v1",
+  "design": "AI/M7/clean_regime teacher-fusion encoder + clean-regime conditioned MoE + adverse-risk critic + cost-stressed selection.",
+  "data": {
+    "state_2024": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+    "base_2025": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+    "ai_2025": "/home/llewyn/crypto-scalping/data/tmp/unified_build_ckpt/03_after_ai.csv",
+    "m7_2025": "/home/llewyn/crypto-scalping/data/splits/year_oos/rl_training_2025_m7.csv",
+    "base_2026": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2026_rebuilt.csv",
+    "ai_2026": "/home/llewyn/crypto-scalping/data/tmp/unified_build_ckpt_2026/03_after_ai.csv",
+    "m7_2026": "/home/llewyn/crypto-scalping/data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+    "fit_range": [
+      "2025-01-01 00:00:00",
+      "2025-08-31 23:55:00"
+    ],
+    "selection_range": [
+      "2025-09-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "holdout_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 20:50:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ]
+  },
+  "data_audit": {
+    "ai_contracts": {
+      "status": "pass",
+      "blocking": [],
+      "evidence": {
+        "data/nf_patchtst": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_tide": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_dlinear": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_timesnet": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        }
+      }
+    },
+    "feature_contract": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 112,
+      "forbidden_feature_cols": []
+    },
+    "fit_rows": 69928,
+    "selection_rows": 17568,
+    "holdout_rows": 17531,
+    "eval_rows": 16897,
+    "train_eval_overlap": 0,
+    "m7_provenance_status": "uncertified_existing_artifacts_used_as_teacher_inputs"
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/certified_teacher_regime_moe_v1/model.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_audit.json",
+    "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/certified_teacher_regime_moe_v1_contract.md",
+    "selection_grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary_selection_grid.csv",
+    "feature_analysis": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary_feature_analysis.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary_cost1_ledger.csv",
+      "cost2": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary_cost2_ledger.csv",
+      "cost3": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_regime_moe_v1_summary_cost3_ledger.csv"
+    }
+  },
+  "feature_contract": {
+    "candidate_feature_count": 146,
+    "selected_features": [
+      "clean_regime_2024_unsup_v4_bear_prob",
+      "clean_regime_2024_unsup_v4_bull_prob",
+      "clean_regime_2024_unsup_v4_chop_prob",
+      "clean_regime_2024_unsup_v4_cluster",
+      "clean_regime_2024_unsup_v4_cluster_confidence",
+      "clean_regime_2024_unsup_v4_cluster_prob_0",
+      "clean_regime_2024_unsup_v4_cluster_prob_1",
+      "clean_regime_2024_unsup_v4_cluster_prob_2",
+      "clean_regime_2024_unsup_v4_cluster_prob_3",
+      "clean_regime_2024_unsup_v4_cluster_prob_4",
+      "clean_regime_2024_unsup_v4_confidence",
+      "clean_regime_2024_unsup_v4_entropy",
+      "clean_regime_2024_unsup_v4_factor_crowding",
+      "clean_regime_2024_unsup_v4_factor_flow",
+      "clean_regime_2024_unsup_v4_factor_liquidity",
+      "clean_regime_2024_unsup_v4_factor_trend",
+      "clean_regime_2024_unsup_v4_factor_vol",
+      "clean_regime_2024_unsup_v4_normal_prob",
+      "clean_regime_2024_unsup_v4_risk_off_prob",
+      "clean_regime_2024_unsup_v4_state_code",
+      "clean_regime_2024_unsup_v4_transition_risk",
+      "clean_regime_2024_unsup_v4_trend_bias",
+      "clean_regime_2024_unsup_v4_whipsaw_prob",
+      "funding_roc_288",
+      "last_funding_rate",
+      "squeeze_power",
+      "sum_open_interest_value",
+      "long_squeeze_risk",
+      "rogers_satchell_vol",
+      "m7_entry_short_offset",
+      "parkinson_vol",
+      "garman_klass_vol",
+      "m7_entry_long_offset",
+      "close_btc",
+      "count_long_short_ratio",
+      "sum_toptrader_long_short_ratio",
+      "trades",
+      "m7_quality_pred",
+      "bb_width",
+      "whale_retail_ratio",
+      "quote_volume_btc",
+      "quote_volume",
+      "volume",
+      "volume_btc",
+      "tide_vol_raw",
+      "ai_adverse_risk",
+      "volatility_z",
+      "mtf_trend_4h",
+      "hma_slope",
+      "log_return",
+      "taker_buy_base",
+      "taker_buy_quote",
+      "volume_profile_signal",
+      "eth_btc_ratio_change",
+      "m7_qwidth",
+      "m7_q10",
+      "fvg_dist",
+      "ai_anchor_overheat",
+      "m7_iso_pred",
+      "mtf_trend_1h",
+      "kalman_velocity",
+      "session_us",
+      "macd_hist",
+      "btc_corr_60",
+      "hour_sin",
+      "ai_flow_pressure",
+      "ofti",
+      "m7_q90",
+      "dlinear_smf_ema",
+      "timesnet_cycle_delta",
+      "timesnet_cycle_sin",
+      "mean_reversion_z",
+      "m7_sl_offset",
+      "svps",
+      "ai_anchor_trend_escape_prob",
+      "ai_anchor_revert_prob",
+      "cvp_volume_imbalance",
+      "smart_money_flow",
+      "oi_change_rate",
+      "patchtst_median",
+      "ai_dir_p_up",
+      "m7_tp_offset",
+      "m7_mtl_fl",
+      "ai_dir_p_down",
+      "session_europe",
+      "breakout_strength",
+      "m7_gmm_cluster",
+      "trade_intensity",
+      "dual_momentum",
+      "ai_dir_edge",
+      "m7_q50",
+      "ai_flow_flip_prob",
+      "ai_vol_regime_pct",
+      "m7_gmm_conf",
+      "tide_vol_zscore",
+      "ai_dir_p_flat",
+      "ai_dir_entropy",
+      "hour_cos",
+      "patchtst_regime_sim",
+      "m7_gmm_vol_rank",
+      "m7_vae_error",
+      "rsi",
+      "m7_hold_pred",
+      "amihud_illiquidity_z",
+      "turtle_signal",
+      "m7_trend_xgb_up",
+      "bb_width_z",
+      "cvp_cluster_position",
+      "m7_vae_anom",
+      "mta_funding",
+      "m7_gate_block",
+      "kel"
+    ],
+    "top_feature_analysis": [
+      {
+        "feature": "funding_roc_288",
+        "mutual_info": 0.23076026709910002,
+        "family": "market"
+      },
+      {
+        "feature": "last_funding_rate",
+        "mutual_info": 0.16879972924500986,
+        "family": "market"
+      },
+      {
+        "feature": "squeeze_power",
+        "mutual_info": 0.15892669440115625,
+        "family": "market"
+      },
+      {
+        "feature": "sum_open_interest_value",
+        "mutual_info": 0.05522010384934939,
+        "family": "market"
+      },
+      {
+        "feature": "long_squeeze_risk",
+        "mutual_info": 0.04126778758278293,
+        "family": "market"
+      },
+      {
+        "feature": "rogers_satchell_vol",
+        "mutual_info": 0.041118096411859595,
+        "family": "market"
+      },
+      {
+        "feature": "m7_entry_short_offset",
+        "mutual_info": 0.039637646162121065,
+        "family": "m7"
+      },
+      {
+        "feature": "parkinson_vol",
+        "mutual_info": 0.038886794644659606,
+        "family": "market"
+      },
+      {
+        "feature": "garman_klass_vol",
+        "mutual_info": 0.03531720977553943,
+        "family": "market"
+      },
+      {
+        "feature": "m7_entry_long_offset",
+        "mutual_info": 0.035261137902205864,
+        "family": "m7"
+      },
+      {
+        "feature": "close_btc",
+        "mutual_info": 0.034272914547956335,
+        "family": "market"
+      },
+      {
+        "feature": "count_long_short_ratio",
+        "mutual_info": 0.030164843394867358,
+        "family": "market"
+      },
+      {
+        "feature": "sum_toptrader_long_short_ratio",
+        "mutual_info": 0.028545180225110434,
+        "family": "market"
+      },
+      {
+        "feature": "trades",
+        "mutual_info": 0.027224761440515888,
+        "family": "market"
+      },
+      {
+        "feature": "m7_quality_pred",
+        "mutual_info": 0.026024581159967974,
+        "family": "m7"
+      },
+      {
+        "feature": "bb_width",
+        "mutual_info": 0.024584768535278467,
+        "family": "market"
+      },
+      {
+        "feature": "whale_retail_ratio",
+        "mutual_info": 0.020381360014075645,
+        "family": "market"
+      },
+      {
+        "feature": "quote_volume_btc",
+        "mutual_info": 0.018954941679161452,
+        "family": "market"
+      },
+      {
+        "feature": "quote_volume",
+        "mutual_info": 0.018863308409698076,
+        "family": "market"
+      },
+      {
+        "feature": "volume",
+        "mutual_info": 0.018541923248315495,
+        "family": "market"
+      },
+      {
+        "feature": "volume_btc",
+        "mutual_info": 0.017075524129621877,
+        "family": "market"
+      },
+      {
+        "feature": "tide_vol_raw",
+        "mutual_info": 0.016159224509419756,
+        "family": "ai"
+      },
+      {
+        "feature": "ai_adverse_risk",
+        "mutual_info": 0.015883880794755223,
+        "family": "ai"
+      },
+      {
+        "feature": "volatility_z",
+        "mutual_info": 0.013853126528099002,
+        "family": "market"
+      },
+      {
+        "feature": "mtf_trend_4h",
+        "mutual_info": 0.013341163825888014,
+        "family": "market"
+      },
+      {
+        "feature": "hma_slope",
+        "mutual_info": 0.012846247529163968,
+        "family": "market"
+      },
+      {
+        "feature": "log_return",
+        "mutual_info": 0.012819974426849567,
+        "family": "market"
+      },
+      {
+        "feature": "taker_buy_base",
+        "mutual_info": 0.012357042964062925,
+        "family": "market"
+      },
+      {
+        "feature": "taker_buy_quote",
+        "mutual_info": 0.012264607447165066,
+        "family": "market"
+      },
+      {
+        "feature": "volume_profile_signal",
+        "mutual_info": 0.011945850371696265,
+        "family": "market"
+      },
+      {
+        "feature": "eth_btc_ratio_change",
+        "mutual_info": 0.011835675187052086,
+        "family": "market"
+      },
+      {
+        "feature": "m7_qwidth",
+        "mutual_info": 0.011711813310864683,
+        "family": "m7"
+      },
+      {
+        "feature": "m7_q10",
+        "mutual_info": 0.011545043234298502,
+        "family": "m7"
+      },
+      {
+        "feature": "fvg_dist",
+        "mutual_info": 0.011422268173835626,
+        "family": "market"
+      },
+      {
+        "feature": "ai_anchor_overheat",
+        "mutual_info": 0.009917977752265328,
+        "family": "ai"
+      },
+      {
+        "feature": "m7_iso_pred",
+        "mutual_info": 0.009636788138144947,
+        "family": "m7"
+      },
+      {
+        "feature": "clean_regime_2024_unsup_v4_cluster_prob_0",
+        "mutual_info": 0.009266541101944137,
+        "family": "clean_regime"
+      },
+      {
+        "feature": "mtf_trend_1h",
+        "mutual_info": 0.00926454398152421,
+        "family": "market"
+      },
+      {
+        "feature": "kalman_velocity",
+        "mutual_info": 0.009263203974433587,
+        "family": "market"
+      },
+      {
+        "feature": "session_us",
+        "mutual_info": 0.009120335478848274,
+        "family": "market"
+      },
+      {
+        "feature": "macd_hist",
+        "mutual_info": 0.008853663504797105,
+        "family": "market"
+      },
+      {
+        "feature": "btc_corr_60",
+        "mutual_info": 0.008117625323341926,
+        "family": "market"
+      },
+      {
+        "feature": "hour_sin",
+        "mutual_info": 0.007860782831987656,
+        "family": "market"
+      },
+      {
+        "feature": "ai_flow_pressure",
+        "mutual_info": 0.007669560672753706,
+        "family": "ai"
+      },
+      {
+        "feature": "clean_regime_2024_unsup_v4_factor_crowding",
+        "mutual_info": 0.00733691798401459,
+        "family": "clean_regime"
+      },
+      {
+        "feature": "ofti",
+        "mutual_info": 0.0072155999105936175,
+        "family": "market"
+      },
+      {
+        "feature": "m7_q90",
+        "mutual_info": 0.0071068674040628554,
+        "family": "m7"
+      },
+      {
+        "feature": "dlinear_smf_ema",
+        "mutual_info": 0.00670834895811212,
+        "family": "ai"
+      },
+      {
+        "feature": "timesnet_cycle_delta",
+        "mutual_info": 0.006569551082715508,
+        "family": "ai"
+      },
+      {
+        "feature": "timesnet_cycle_sin",
+        "mutual_info": 0.006361200463637973,
+        "family": "ai"
+      }
+    ]
+  },
+  "selected_config": {
+    "threshold": 0.42,
+    "gap": 0.04,
+    "max_notional": 1.0,
+    "min_notional": 0.25,
+    "leverage": 5.0,
+    "max_hold_bars": 36,
+    "stop_loss": 0.012,
+    "take_profit": 0.034,
+    "trailing_stop": 0.01,
+    "cooldown_bars": 2,
+    "adverse_cap": 0.01,
+    "clean_conf_floor": 0.22,
+    "transition_risk_cap": 0.94,
+    "candidate_stride": 6
+  },
+  "selection_score": -219.28398953414347,
+  "selection_result": {
+    "pnl": -8.35790168615108,
+    "mdd": -13.41790845473847,
+    "trades": 371,
+    "trades_per_day": 6.0823134285876925,
+    "wr": 0.42857142857142855,
+    "avg_notional": 0.3685746010215284,
+    "max_margin_fraction": 0.09898079056313522,
+    "final_equity": 0.9164209831384892,
+    "coverage_start": "2025-09-01 00:00:00",
+    "coverage_end": "2025-10-31 23:55:00",
+    "block_reason_counts": {
+      "adverse_cap": 348,
+      "gap_below_threshold": 98,
+      "probability_below_threshold": 19,
+      "direction_state_conflict": 1
+    }
+  },
+  "holdout_result": {
+    "pnl": -23.067494917653274,
+    "mdd": -25.389574200803555,
+    "trades": 360,
+    "trades_per_day": 5.914432401597262,
+    "wr": 0.37222222222222223,
+    "avg_notional": 0.3575112594878454,
+    "max_margin_fraction": 0.0965523866978544,
+    "final_equity": 0.7693250508234672,
+    "coverage_start": "2025-11-01 00:00:00",
+    "coverage_end": "2025-12-31 20:50:00",
+    "block_reason_counts": {
+      "probability_below_threshold": 11,
+      "gap_below_threshold": 101,
+      "adverse_cap": 534,
+      "direction_state_conflict": 1
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -11.5201964920859,
+      "mdd": -13.486809273462551,
+      "trades": 219,
+      "trades_per_day": 3.7329545454545454,
+      "wr": 0.3972602739726027,
+      "avg_notional": 0.3739566017104154,
+      "max_margin_fraction": 0.10140672784718496,
+      "final_equity": 0.884798035079141,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "adverse_cap": 1228,
+        "gap_below_threshold": 146,
+        "probability_below_threshold": 9
+      }
+    },
+    "cost2": {
+      "pnl": -21.108758128956495,
+      "mdd": -22.452564488289127,
+      "trades": 219,
+      "trades_per_day": 3.7329545454545454,
+      "wr": 0.2785388127853881,
+      "avg_notional": 0.3739566017104154,
+      "max_margin_fraction": 0.10140672784718496,
+      "final_equity": 0.788912418710435,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "adverse_cap": 1228,
+        "gap_below_threshold": 146,
+        "probability_below_threshold": 9
+      }
+    },
+    "cost3": {
+      "pnl": -29.660361653516187,
+      "mdd": -30.49690816790669,
+      "trades": 219,
+      "trades_per_day": 3.7329545454545454,
+      "wr": 0.2191780821917808,
+      "avg_notional": 0.3739566017104154,
+      "max_margin_fraction": 0.10140672784718496,
+      "final_equity": 0.7033963834648381,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "adverse_cap": 1228,
+        "gap_below_threshold": 146,
+        "probability_below_threshold": 9
+      }
+    }
+  },
+  "audit": {
+    "model_id": "certified_teacher_regime_moe_v1",
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "m7_existing_artifacts_have_no_embedded_training_provenance; treat as teacher-input caveat until M7 is force-retrained with provenance writer"
+    ],
+    "invariants": {
+      "2025_declared_as_training_year": true,
+      "2026_fixed_oos_no_selection": true,
+      "ai_contracts_2024_certified": true,
+      "legacy_regime_v2_quarantined": true,
+      "next_bar_open_execution": true,
+      "entry_and_exit_cost_charged": true,
+      "cost_1x_2x_3x_reported": true
+    }
+  }
+}

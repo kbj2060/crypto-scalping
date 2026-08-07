@@ -1,0 +1,51 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "execution_component_is_ohlcv_proxy_not_live_l2_orderbook"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "parent_frozen": true,
+  "v27_entry_frozen": true,
+  "v31_exit_frozen": true,
+  "v21_2_model_frozen": true,
+  "selected_config": {
+    "name": "cvar_deep_r0.15_h0.35_s0.50_0.00",
+    "scope": "deep",
+    "risk_th": 0.15,
+    "high_risk_th": 0.35,
+    "scale": 0.5,
+    "high_scale": 0.0,
+    "min_notional": 0.0,
+    "parent_cap": 99.0,
+    "add_cap_mult": 1.35,
+    "flow_th": 0.1,
+    "fee_mult": 0.6,
+    "slip_mult": 0.35
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  }
+}

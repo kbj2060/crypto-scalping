@@ -1,0 +1,22 @@
+[
+  {
+    "model":"state12",
+    "counts":{
+      "bull":2874,
+      "bear":3508,
+      "chop":10515
+    },
+    "flip_rate":0.0417258523,
+    "mean_duration_bars":23.933427762
+  },
+  {
+    "model":"wide24",
+    "counts":{
+      "bull":3066,
+      "bear":2849,
+      "chop":10982
+    },
+    "flip_rate":0.0519649621,
+    "mean_duration_bars":19.2229806598
+  }
+]

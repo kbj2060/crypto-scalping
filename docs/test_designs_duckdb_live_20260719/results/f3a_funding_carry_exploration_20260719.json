@@ -1,0 +1,503 @@
+{
+  "stage": "F3-A",
+  "generated_at": "2026-07-19T12:16:32.837757+09:00",
+  "data_coverage": {
+    "ETHUSDT": {
+      "n_funding_prints": 2736,
+      "min_ts": "2024-01-01 00:00:00+00:00",
+      "max_ts": "2026-06-30 16:00:00.005000+00:00"
+    },
+    "BTCUSDT": {
+      "n_funding_prints": 2736,
+      "min_ts": "2024-01-01 00:00:00+00:00",
+      "max_ts": "2026-06-30 16:00:00.005000+00:00"
+    },
+    "SOLUSDT": {
+      "n_funding_prints": 2280,
+      "min_ts": "2024-06-01 00:00:00+00:00",
+      "max_ts": "2026-06-30 16:00:00.005000+00:00"
+    }
+  },
+  "thetas_per_asset_exploration": {
+    "ETHUSDT": {
+      "theta_0": 0.0,
+      "theta_q50": 9.082e-05,
+      "theta_q75": 0.0001,
+      "theta_q90": 0.00015933300000000003
+    },
+    "BTCUSDT": {
+      "theta_0": 0.0,
+      "theta_q50": 8.5145e-05,
+      "theta_q75": 0.0001,
+      "theta_q90": 0.000125577
+    },
+    "SOLUSDT": {
+      "theta_0": 0.0,
+      "theta_q50": 7.227e-05,
+      "theta_q75": 0.0001,
+      "theta_q90": 0.00010543099999999999
+    }
+  },
+  "exploration_grid": [
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 8,
+      "n_trades": 1823,
+      "n_days": 608,
+      "gross_mean_return": -0.0005056511218759467,
+      "funding_component_mean": -8.921877125617116e-05,
+      "price_component_mean": -0.00041643235061977583,
+      "net_mean_return_cost1": -0.0015056511218759466,
+      "net_mean_return_cost3": -0.0035056511218759467,
+      "annualized_net_cost1_pct": -164.86879784541614,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0015056511218759475,
+        "boot_se": 0.0005224707441100141,
+        "t_stat": -2.881790298977793
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 24,
+      "n_trades": 607,
+      "n_days": 607,
+      "gross_mean_return": -0.0017775267121059811,
+      "funding_component_mean": -0.0002615653542009884,
+      "price_component_mean": -0.0015159613579049929,
+      "net_mean_return_cost1": -0.002777526712105981,
+      "net_mean_return_cost3": -0.004777526712105981,
+      "annualized_net_cost1_pct": -101.37972499186831,
+      "bootstrap_cost1": {
+        "observed_mean": -0.002777526712105982,
+        "boot_se": 0.0014984459121854465,
+        "t_stat": -1.8536049179479743
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 9.082e-05,
+      "holding_h": 8,
+      "n_trades": 912,
+      "n_days": 375,
+      "gross_mean_return": -0.0006672214972800948,
+      "funding_component_mean": -0.0001407420942982456,
+      "price_component_mean": -0.0005264794029818493,
+      "net_mean_return_cost1": -0.0016672214972800947,
+      "net_mean_return_cost3": -0.0036672214972800947,
+      "annualized_net_cost1_pct": -182.5607539521704,
+      "bootstrap_cost1": {
+        "observed_mean": -0.001667221497280095,
+        "boot_se": 0.0006293446023442143,
+        "t_stat": -2.6491392649908247
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 9.082e-05,
+      "holding_h": 24,
+      "n_trades": 359,
+      "n_days": 359,
+      "gross_mean_return": -0.001467235259097412,
+      "funding_component_mean": -0.00038427863509749304,
+      "price_component_mean": -0.0010829566239999202,
+      "net_mean_return_cost1": -0.002467235259097412,
+      "net_mean_return_cost3": -0.004467235259097412,
+      "annualized_net_cost1_pct": -90.05408695705553,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0024672352590974127,
+        "boot_se": 0.0019019567084639295,
+        "t_stat": -1.297208947037505
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 8,
+      "n_trades": 862,
+      "n_days": 352,
+      "gross_mean_return": -0.00047385733731213466,
+      "funding_component_mean": -0.00014499350348027844,
+      "price_component_mean": -0.00032886383383185625,
+      "net_mean_return_cost1": -0.0014738573373121347,
+      "net_mean_return_cost3": -0.0034738573373121347,
+      "annualized_net_cost1_pct": -161.38737843567873,
+      "bootstrap_cost1": {
+        "observed_mean": -0.001473857337312135,
+        "boot_se": 0.0006645154063587096,
+        "t_stat": -2.2179430652907053
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 24,
+      "n_trades": 338,
+      "n_days": 338,
+      "gross_mean_return": -0.0009598265656046137,
+      "funding_component_mean": -0.000397297100591716,
+      "price_component_mean": -0.0005625294650128975,
+      "net_mean_return_cost1": -0.001959826565604614,
+      "net_mean_return_cost3": -0.003959826565604614,
+      "annualized_net_cost1_pct": -71.5336696445684,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0019598265656046144,
+        "boot_se": 0.001885874582287146,
+        "t_stat": -1.0392136274660329
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.00015933300000000003,
+      "holding_h": 8,
+      "n_trades": 183,
+      "n_days": 79,
+      "gross_mean_return": -0.000664920265335173,
+      "funding_component_mean": -0.0003084150819672131,
+      "price_component_mean": -0.00035650518336796,
+      "net_mean_return_cost1": -0.001664920265335173,
+      "net_mean_return_cost3": -0.003664920265335173,
+      "annualized_net_cost1_pct": -182.30876905420143,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0016649202653351736,
+        "boot_se": 0.001482426763585196,
+        "t_stat": -1.1231045649153175
+      }
+    },
+    {
+      "asset": "ETHUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.00015933300000000003,
+      "holding_h": 24,
+      "n_trades": 73,
+      "n_days": 73,
+      "gross_mean_return": -0.0018960830989219629,
+      "funding_component_mean": -0.0008450949315068494,
+      "price_component_mean": -0.0010509881674151131,
+      "net_mean_return_cost1": -0.002896083098921963,
+      "net_mean_return_cost3": -0.004896083098921963,
+      "annualized_net_cost1_pct": -105.70703311065164,
+      "bootstrap_cost1": {
+        "observed_mean": -0.002896083098921963,
+        "boot_se": 0.003998273797231181,
+        "t_stat": -0.7243333612939441
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 8,
+      "n_trades": 1823,
+      "n_days": 608,
+      "gross_mean_return": -0.000386975836736256,
+      "funding_component_mean": -8.355569939659901e-05,
+      "price_component_mean": -0.00030342013733965705,
+      "net_mean_return_cost1": -0.001386975836736256,
+      "net_mean_return_cost3": -0.003386975836736256,
+      "annualized_net_cost1_pct": -151.87385412262003,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0013869758367362564,
+        "boot_se": 0.0003476513353762291,
+        "t_stat": -3.9895599285855403
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 24,
+      "n_trades": 607,
+      "n_days": 607,
+      "gross_mean_return": -0.0010416275128999062,
+      "funding_component_mean": -0.00024856864909390445,
+      "price_component_mean": -0.000793058863806002,
+      "net_mean_return_cost1": -0.0020416275128999064,
+      "net_mean_return_cost3": -0.0040416275128999065,
+      "annualized_net_cost1_pct": -74.51940422084658,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0020416275128999064,
+        "boot_se": 0.0010680368122919042,
+        "t_stat": -1.9115703591889968
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 8.5145e-05,
+      "holding_h": 8,
+      "n_trades": 912,
+      "n_days": 370,
+      "gross_mean_return": -0.0002183300986426282,
+      "funding_component_mean": -0.00013467622807017545,
+      "price_component_mean": -8.365387057245281e-05,
+      "net_mean_return_cost1": -0.0012183300986426282,
+      "net_mean_return_cost3": -0.003218330098642628,
+      "annualized_net_cost1_pct": -133.4071458013678,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0012183300986426282,
+        "boot_se": 0.0005015047955874187,
+        "t_stat": -2.4293488504244176
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 8.5145e-05,
+      "holding_h": 24,
+      "n_trades": 357,
+      "n_days": 357,
+      "gross_mean_return": -0.0013628627784565842,
+      "funding_component_mean": -0.0003692805322128852,
+      "price_component_mean": -0.0009935822462436988,
+      "net_mean_return_cost1": -0.002362862778456584,
+      "net_mean_return_cost3": -0.004362862778456584,
+      "annualized_net_cost1_pct": -86.24449141366533,
+      "bootstrap_cost1": {
+        "observed_mean": -0.002362862778456585,
+        "boot_se": 0.001290055186821714,
+        "t_stat": -1.831598215792557
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 8,
+      "n_trades": 827,
+      "n_days": 330,
+      "gross_mean_return": -0.00039084833406005567,
+      "funding_component_mean": -0.0001420086215235792,
+      "price_component_mean": -0.0002488397125364764,
+      "net_mean_return_cost1": -0.0013908483340600557,
+      "net_mean_return_cost3": -0.003390848334060056,
+      "annualized_net_cost1_pct": -152.29789257957611,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0013908483340600557,
+        "boot_se": 0.0005408297040846153,
+        "t_stat": -2.5716936839002673
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 24,
+      "n_trades": 315,
+      "n_days": 315,
+      "gross_mean_return": -0.0012476400472508753,
+      "funding_component_mean": -0.00039522952380952384,
+      "price_component_mean": -0.0008524105234413512,
+      "net_mean_return_cost1": -0.0022476400472508755,
+      "net_mean_return_cost3": -0.0042476400472508755,
+      "annualized_net_cost1_pct": -82.03886172465695,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0022476400472508755,
+        "boot_se": 0.0014129448071605434,
+        "t_stat": -1.5907486519361909
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.000125577,
+      "holding_h": 8,
+      "n_trades": 183,
+      "n_days": 79,
+      "gross_mean_return": -0.0020729761919843245,
+      "funding_component_mean": -0.0002901998360655738,
+      "price_component_mean": -0.0017827763559187509,
+      "net_mean_return_cost1": -0.0030729761919843245,
+      "net_mean_return_cost3": -0.005072976191984324,
+      "annualized_net_cost1_pct": -336.49089302228356,
+      "bootstrap_cost1": {
+        "observed_mean": -0.003072976191984324,
+        "boot_se": 0.001327582933191078,
+        "t_stat": -2.314715047291161
+      }
+    },
+    {
+      "asset": "BTCUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.000125577,
+      "holding_h": 24,
+      "n_trades": 73,
+      "n_days": 73,
+      "gross_mean_return": -0.0043140274503953085,
+      "funding_component_mean": -0.0007920984931506849,
+      "price_component_mean": -0.0035219289572446222,
+      "net_mean_return_cost1": -0.0053140274503953085,
+      "net_mean_return_cost3": -0.007314027450395309,
+      "annualized_net_cost1_pct": -193.96200193942877,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0053140274503953085,
+        "boot_se": 0.003389439132091212,
+        "t_stat": -1.567819112041899
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 8,
+      "n_trades": 1367,
+      "n_days": 456,
+      "gross_mean_return": -8.953965081572093e-05,
+      "funding_component_mean": -5.344654718361376e-05,
+      "price_component_mean": -3.609310363210715e-05,
+      "net_mean_return_cost1": -0.001089539650815721,
+      "net_mean_return_cost3": -0.003089539650815721,
+      "annualized_net_cost1_pct": -119.30459176432144,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0010895396508157212,
+        "boot_se": 0.0006938500888906369,
+        "t_stat": -1.5702810567592966
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_0",
+      "theta_val": 0.0,
+      "holding_h": 24,
+      "n_trades": 455,
+      "n_days": 455,
+      "gross_mean_return": -0.003560915045900721,
+      "funding_component_mean": -0.00014885076923076924,
+      "price_component_mean": -0.003412064276669952,
+      "net_mean_return_cost1": -0.004560915045900721,
+      "net_mean_return_cost3": -0.006560915045900721,
+      "annualized_net_cost1_pct": -166.4733991753763,
+      "bootstrap_cost1": {
+        "observed_mean": -0.004560915045900722,
+        "boot_se": 0.0019983489631315117,
+        "t_stat": -2.282341638045811
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 7.227e-05,
+      "holding_h": 8,
+      "n_trades": 684,
+      "n_days": 344,
+      "gross_mean_return": -0.0005648508292295112,
+      "funding_component_mean": -8.965824561403509e-05,
+      "price_component_mean": -0.0004751925836154758,
+      "net_mean_return_cost1": -0.0015648508292295112,
+      "net_mean_return_cost3": -0.003564850829229511,
+      "annualized_net_cost1_pct": -171.35116580063146,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0015648508292295112,
+        "boot_se": 0.0009349513700201426,
+        "t_stat": -1.6737243020412902
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q50",
+      "theta_val": 7.227e-05,
+      "holding_h": 24,
+      "n_trades": 308,
+      "n_days": 308,
+      "gross_mean_return": -0.0003500249240694077,
+      "funding_component_mean": -0.00021342860389610393,
+      "price_component_mean": -0.00013659632017330392,
+      "net_mean_return_cost1": -0.0013500249240694078,
+      "net_mean_return_cost3": -0.003350024924069408,
+      "annualized_net_cost1_pct": -49.275909728533385,
+      "bootstrap_cost1": {
+        "observed_mean": -0.001350024924069408,
+        "boot_se": 0.002357588235554525,
+        "t_stat": -0.5726296491091332
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 8,
+      "n_trades": 517,
+      "n_days": 267,
+      "gross_mean_return": 0.00015975532370114434,
+      "funding_component_mean": -0.00010563634429400389,
+      "price_component_mean": 0.00026539166799514853,
+      "net_mean_return_cost1": -0.0008402446762988556,
+      "net_mean_return_cost3": -0.002840244676298856,
+      "annualized_net_cost1_pct": -92.0067920547247,
+      "bootstrap_cost1": {
+        "observed_mean": -0.000840244676298856,
+        "boot_se": 0.0010089836058840048,
+        "t_stat": -0.8327634576011659
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q75",
+      "theta_val": 0.0001,
+      "holding_h": 24,
+      "n_trades": 242,
+      "n_days": 242,
+      "gross_mean_return": -0.0018595247693439295,
+      "funding_component_mean": -0.00025652975206611573,
+      "price_component_mean": -0.0016029950172778131,
+      "net_mean_return_cost1": -0.0028595247693439293,
+      "net_mean_return_cost3": -0.004859524769343929,
+      "annualized_net_cost1_pct": -104.37265408105343,
+      "bootstrap_cost1": {
+        "observed_mean": -0.00285952476934393,
+        "boot_se": 0.002593876447418111,
+        "t_stat": -1.1024136373921125
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.00010543099999999999,
+      "holding_h": 8,
+      "n_trades": 137,
+      "n_days": 77,
+      "gross_mean_return": 0.002846921391326651,
+      "funding_component_mean": -0.00016040737226277372,
+      "price_component_mean": 0.003007328763589425,
+      "net_mean_return_cost1": 0.0018469213913266508,
+      "net_mean_return_cost3": -0.0001530786086733492,
+      "annualized_net_cost1_pct": 202.23789235026825,
+      "bootstrap_cost1": {
+        "observed_mean": 0.0018469213913266508,
+        "boot_se": 0.0017292466320536612,
+        "t_stat": 1.0680497258700679
+      }
+    },
+    {
+      "asset": "SOLUSDT",
+      "theta_key": "theta_q90",
+      "theta_val": 0.00010543099999999999,
+      "holding_h": 24,
+      "n_trades": 72,
+      "n_days": 72,
+      "gross_mean_return": 0.0019017542158407906,
+      "funding_component_mean": -0.00035333166666666666,
+      "price_component_mean": 0.0022550858825074564,
+      "net_mean_return_cost1": 0.0009017542158407906,
+      "net_mean_return_cost3": -0.0010982457841592094,
+      "annualized_net_cost1_pct": 32.91402887818886,
+      "bootstrap_cost1": {
+        "observed_mean": 0.0009017542158407901,
+        "boot_se": 0.004460750938497677,
+        "t_stat": 0.20215300703259825
+      }
+    }
+  ],
+  "n_variants_tested": 24,
+  "n_variants_passing_exploration": 0,
+  "passing_variants": [],
+  "F3A_verdict": "KILLED at exploration -- 0 variants show net-positive, t>3 carry edge under cost1"
+}

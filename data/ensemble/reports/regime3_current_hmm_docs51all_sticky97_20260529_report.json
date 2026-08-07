@@ -1,0 +1,308 @@
+{
+  "model_id": "regime3_current_hmm_wide24_experiment_20260529",
+  "fit_source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+  "validation_policy": "2024Q4 validation; 2025/2026 forward tests; 2026 not used for selection",
+  "feature_sets": {
+    "docs51all": {
+      "feature_set": "docs51all",
+      "feature_cols": [
+        "state7_trend_score",
+        "state7_trend_efficiency_48",
+        "state7_directional_return_48",
+        "state7_volatility_state",
+        "state7_sign_flip_rate_24",
+        "state7_range_compression",
+        "state7_flow_alignment",
+        "state12_log_return",
+        "state12_garman_klass_vol",
+        "state12_net_taker_ratio",
+        "state12_oi_change_rate",
+        "state12_chop_index",
+        "volatility_z",
+        "rsi",
+        "macd_hist",
+        "bb_width_z",
+        "hma_slope",
+        "wick_ratio",
+        "mtf_trend_1h",
+        "mtf_trend_4h",
+        "breakout_strength",
+        "mean_reversion_z",
+        "ofi_acceleration",
+        "taker_acceleration",
+        "compression_score",
+        "atr_pct_rank_288",
+        "bb_width_pct_rank_288",
+        "btc_volume_impulse_z",
+        "vwap_dist_24",
+        "vwap_dist_96",
+        "cvd_12",
+        "cvd_288",
+        "eth_btc_ret_spread_12",
+        "eth_btc_ret_spread_48",
+        "btc_lead_eth_follow_gap_3",
+        "price_cvd_divergence",
+        "crowding_pressure",
+        "long_squeeze_risk",
+        "funding_oi_divergence",
+        "cvp_volume_imbalance",
+        "range_contraction_breakout_dir",
+        "distance_to_day_high_low_pct",
+        "last_funding_rate",
+        "funding_pressure",
+        "funding_roc_288",
+        "volume",
+        "quote_volume",
+        "taker_buy_base",
+        "taker_buy_quote",
+        "volume_btc",
+        "quote_volume_btc"
+      ],
+      "feature_count": 51,
+      "validation": {
+        "rows": 26496,
+        "accuracy": 0.6930857487922706,
+        "balanced_accuracy": 0.8174685448545368,
+        "log_loss": 0.7073613157665947,
+        "recall": {
+          "bull": 0.8742442563482467,
+          "bear": 0.9165786694825766,
+          "chop": 0.6615827087327871
+        },
+        "true_counts": {
+          "bull": 1654,
+          "bear": 1894,
+          "chop": 22948
+        },
+        "pred_counts": {
+          "bull": 5816,
+          "bear": 5379,
+          "chop": 15301
+        },
+        "confusion_matrix": [
+          [
+            1446,
+            126,
+            82
+          ],
+          [
+            121,
+            1736,
+            37
+          ],
+          [
+            4249,
+            3517,
+            15182
+          ]
+        ],
+        "flip_rate": 0.12209850915267031,
+        "mean_state_duration_bars": 8.187886279357231,
+        "median_state_duration_bars": 3.0
+      },
+      "log_likelihood_validation": [
+        -841418.4024353458,
+        626569.814377285,
+        831791.9177706452,
+        945680.9701940397,
+        1000462.6607285828,
+        1027347.3373731021,
+        1037820.0699170907,
+        1046113.3862112714,
+        1054006.3394141267,
+        1059134.4981821051,
+        1062028.1649020857,
+        1064289.7461309067,
+        1066163.5438018811,
+        1067773.5678072239,
+        1069260.837990039,
+        1070583.6315693033,
+        1071735.3578995934,
+        1072749.6684932886,
+        1073674.1540985205,
+        1074559.0048627616,
+        1075421.0466766842,
+        1076327.797766187
+      ],
+      "log_likelihood_final": [
+        -1005510.4295216141,
+        829055.8378148974,
+        1167511.9249640629,
+        1341645.5050416987,
+        1390776.2936050275,
+        1412700.8885784294,
+        1427202.1193874532,
+        1437603.1417378914,
+        1441781.8660405378,
+        1445743.1418897738,
+        1448756.2365682714,
+        1451506.0110744848,
+        1454216.311131081,
+        1456972.4552375374,
+        1459882.801029407,
+        1462653.4875457827,
+        1465186.2323359642,
+        1467450.8034791846,
+        1469431.7983246078,
+        1471159.431767452,
+        1472852.577056204,
+        1474340.0810704324
+      ],
+      "model_path": "data/ensemble/supervised/regime3_current_hmm_docs51all_sticky97_20260529/regime3_current_hmm_docs51all_2024.joblib"
+    }
+  },
+  "outputs": {
+    "docs51all": {
+      "training_features_2024.csv": {
+        "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+        "sidecar": "data/ensemble/supervised/regime3_current_hmm_docs51all_sticky97_20260529/training_features_2024_regime3_current_hmm_docs51all.csv",
+        "rows": 105380,
+        "range": [
+          "2024-01-01 00:00:00",
+          "2024-12-31 23:55:00"
+        ],
+        "metrics": {
+          "rows": 105380,
+          "accuracy": 0.7549250332131334,
+          "balanced_accuracy": 0.8462816210479834,
+          "log_loss": 0.6587081781943035,
+          "recall": {
+            "bull": 0.9313134790841797,
+            "bear": 0.8715321563682219,
+            "chop": 0.7359992276915486
+          },
+          "true_counts": {
+            "bull": 5809,
+            "bear": 6344,
+            "chop": 93227
+          },
+          "pred_counts": {
+            "bull": 21240,
+            "bear": 15014,
+            "chop": 69126
+          },
+          "confusion_matrix": [
+            [
+              5410,
+              132,
+              267
+            ],
+            [
+              571,
+              5529,
+              244
+            ],
+            [
+              15259,
+              9353,
+              68615
+            ]
+          ],
+          "flip_rate": 0.09884322303305212,
+          "mean_state_duration_bars": 10.116156282998944,
+          "median_state_duration_bars": 3.0
+        }
+      },
+      "training_features_2025.csv": {
+        "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2025.csv",
+        "sidecar": "data/ensemble/supervised/regime3_current_hmm_docs51all_sticky97_20260529/training_features_2025_regime3_current_hmm_docs51all.csv",
+        "rows": 105101,
+        "range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "metrics": {
+          "rows": 105101,
+          "accuracy": 0.6881285620498377,
+          "balanced_accuracy": 0.8178038583599393,
+          "log_loss": 0.7791520099267575,
+          "recall": {
+            "bull": 0.9202908307526592,
+            "bear": 0.8816377171215881,
+            "chop": 0.6514830272055706
+          },
+          "true_counts": {
+            "bull": 7427,
+            "bear": 8060,
+            "chop": 89614
+          },
+          "pred_counts": {
+            "bull": 27833,
+            "bear": 18341,
+            "chop": 58927
+          },
+          "confusion_matrix": [
+            [
+              6835,
+              326,
+              266
+            ],
+            [
+              675,
+              7106,
+              279
+            ],
+            [
+              20323,
+              10909,
+              58382
+            ]
+          ],
+          "flip_rate": 0.13033301617507137,
+          "mean_state_duration_bars": 7.672165851522009,
+          "median_state_duration_bars": 2.0
+        }
+      },
+      "training_features_2026_rebuilt.csv": {
+        "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+        "sidecar": "data/ensemble/supervised/regime3_current_hmm_docs51all_sticky97_20260529/training_features_2026_rebuilt_regime3_current_hmm_docs51all.csv",
+        "rows": 16897,
+        "range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "metrics": {
+          "rows": 16897,
+          "accuracy": 0.7337397171095461,
+          "balanced_accuracy": 0.8302440632608925,
+          "log_loss": 0.7007718680402477,
+          "recall": {
+            "bull": 0.9138211382113821,
+            "bear": 0.8736702127659575,
+            "chop": 0.7032408388053378
+          },
+          "true_counts": {
+            "bull": 1230,
+            "bear": 1504,
+            "chop": 14163
+          },
+          "pred_counts": {
+            "bull": 3724,
+            "bear": 3121,
+            "chop": 10052
+          },
+          "confusion_matrix": [
+            [
+              1124,
+              63,
+              43
+            ],
+            [
+              141,
+              1314,
+              49
+            ],
+            [
+              2459,
+              1744,
+              9960
+            ]
+          ],
+          "flip_rate": 0.10765861742424243,
+          "mean_state_duration_bars": 9.284065934065934,
+          "median_state_duration_bars": 2.0
+        }
+      }
+    }
+  }
+}

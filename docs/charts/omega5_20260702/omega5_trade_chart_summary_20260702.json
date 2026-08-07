@@ -1,0 +1,34 @@
+{
+  "validation": {
+    "split": "validation",
+    "path": "/home/llewyn/crypto-scalping/docs/charts/omega5_20260702/omega5_validation_trade_chart_20260702.png",
+    "metrics": {
+      "trades": 186,
+      "pnl": 675.3209498663809,
+      "mdd": -17.315684369802888,
+      "wr": 60.752688172043015,
+      "avg_hold_h": 5.872311827956989,
+      "max_hold_h": 8.0,
+      "longs": 45,
+      "shorts": 141
+    },
+    "skipped": 31,
+    "ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_v5_roll8_side_specific_two_stage_exposure_validation_only_20260701/validation_lf0p900_sf1p050_cap4p40_ledger.csv"
+  },
+  "oos": {
+    "split": "oos",
+    "path": "/home/llewyn/crypto-scalping/docs/charts/omega5_20260702/omega5_oos_trade_chart_20260702.png",
+    "metrics": {
+      "trades": 97,
+      "pnl": 212.68497367391714,
+      "mdd": -19.408271548895584,
+      "wr": 57.73195876288659,
+      "avg_hold_h": 6.6408934707903775,
+      "max_hold_h": 8.0,
+      "longs": 11,
+      "shorts": 86
+    },
+    "skipped": 19,
+    "ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_v5_roll8_side_specific_two_stage_exposure_validation_only_20260701/oos_lf0p900_sf1p050_cap4p40_ledger.csv"
+  }
+}

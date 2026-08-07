@@ -1,0 +1,745 @@
+{
+  "model_id": "alpha3_tabnet_mmoe_pcgrad_parent_v2_20260514",
+  "design": "Alpha3 parent replacement using TabNet sparse feature selection, 4-expert MMoE task routing, and PCGrad multitask training. Frozen Alpha3 downstream layers are preserved; only parent decision frame is replaced.",
+  "baseline": {
+    "name": "alpha3_hgb_parent",
+    "metrics": {
+      "cost1": {
+        "pnl": 654.9863856051624,
+        "mdd": -30.344683106794022,
+        "trades": 199,
+        "wr": 0.2914572864321608,
+        "trades_per_day": 3.3920454545454546,
+        "deep_entries": 127,
+        "long_entries": 82,
+        "short_entries": 117,
+        "avg_notional": 2.1965590441290845,
+        "avg_leverage": 2.223863528097488,
+        "exits": {
+          "deep_alpha_max_hold": 32,
+          "deep_alpha_stop_loss": 80,
+          "v21_2_stop_loss": 57,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_take_profit": 15
+        },
+        "runner_actions": {
+          "deep_entry": 127,
+          "v21_entry": 72,
+          "v21_reject": 33,
+          "v21_add_on": 11
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 343,
+          "exit_market_fallback_after_limit_miss": 24,
+          "entry_market_fallback_after_limit_miss": 42
+        }
+      },
+      "cost2": {
+        "pnl": 550.3741040719237,
+        "mdd": -27.0024625121396,
+        "trades": 199,
+        "wr": 0.3015075376884422,
+        "trades_per_day": 3.3920454545454546,
+        "deep_entries": 131,
+        "long_entries": 80,
+        "short_entries": 119,
+        "avg_notional": 2.1845403101877765,
+        "avg_leverage": 2.209976052840327,
+        "exits": {
+          "deep_alpha_max_hold": 35,
+          "deep_alpha_stop_loss": 82,
+          "v21_2_stop_loss": 53,
+          "v21_2_max_hold": 8,
+          "deep_alpha_take_profit": 14,
+          "v21_2_take_profit": 7
+        },
+        "runner_actions": {
+          "deep_entry": 131,
+          "v21_entry": 68,
+          "v21_reject": 30,
+          "v21_add_on": 10
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 342,
+          "exit_market_fallback_after_limit_miss": 23,
+          "entry_market_fallback_after_limit_miss": 43
+        }
+      },
+      "cost3": {
+        "pnl": 448.56575740675896,
+        "mdd": -29.78088431179661,
+        "trades": 200,
+        "wr": 0.285,
+        "trades_per_day": 3.409090909090909,
+        "deep_entries": 129,
+        "long_entries": 84,
+        "short_entries": 116,
+        "avg_notional": 2.189211132331482,
+        "avg_leverage": 2.211602267415718,
+        "exits": {
+          "deep_alpha_stop_loss": 82,
+          "deep_alpha_max_hold": 34,
+          "v21_2_stop_loss": 56,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_take_profit": 13
+        },
+        "runner_actions": {
+          "deep_entry": 129,
+          "v21_entry": 71,
+          "v21_add_on": 12,
+          "v21_reject": 27
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 347,
+          "entry_market_fallback_after_limit_miss": 45,
+          "exit_market_fallback_after_limit_miss": 20
+        }
+      }
+    },
+    "score": 1101.217432220146
+  },
+  "candidate": {
+    "name": "alpha3_tabnet_mmoe_pcgrad_parent_v2",
+    "selected_runtime": {
+      "name": "mmoe_c0.22_q0.000_u0.130_s1.45_cap4.14_arg",
+      "confidence_floor": 0.22,
+      "quality_floor": 0.0,
+      "uncertainty_max": 0.13,
+      "notional_scale": 1.45,
+      "max_notional": 4.14,
+      "use_expected_buckets": false
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 70.01995287887262,
+        "mdd": -22.328500325330314,
+        "trades": 195,
+        "wr": 0.2923076923076923,
+        "trades_per_day": 3.3238636363636367,
+        "deep_entries": 147,
+        "long_entries": 84,
+        "short_entries": 111,
+        "avg_notional": 2.0999999999999988,
+        "avg_leverage": 2.164102564102564,
+        "exits": {
+          "deep_alpha_max_hold": 27,
+          "deep_alpha_stop_loss": 105,
+          "v21_2_max_hold": 36,
+          "v21_2_stop_loss": 12,
+          "deep_alpha_take_profit": 15
+        },
+        "runner_actions": {
+          "deep_entry": 147,
+          "v21_entry": 48,
+          "v21_add_on": 8,
+          "v21_reject": 25
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 336,
+          "exit_market_fallback_after_limit_miss": 26,
+          "entry_market_fallback_after_limit_miss": 36
+        }
+      },
+      "cost2": {
+        "pnl": 37.34307856416687,
+        "mdd": -23.676748327706687,
+        "trades": 196,
+        "wr": 0.29081632653061223,
+        "trades_per_day": 3.340909090909091,
+        "deep_entries": 149,
+        "long_entries": 86,
+        "short_entries": 110,
+        "avg_notional": 2.0956632653061216,
+        "avg_leverage": 2.1530612244897958,
+        "exits": {
+          "deep_alpha_max_hold": 30,
+          "deep_alpha_stop_loss": 106,
+          "v21_2_max_hold": 36,
+          "v21_2_stop_loss": 11,
+          "deep_alpha_take_profit": 13
+        },
+        "runner_actions": {
+          "deep_entry": 149,
+          "v21_entry": 47,
+          "v21_add_on": 7,
+          "v21_reject": 25
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 336,
+          "exit_market_fallback_after_limit_miss": 26,
+          "entry_market_fallback_after_limit_miss": 37
+        }
+      },
+      "cost3": {
+        "pnl": 14.89504084909381,
+        "mdd": -26.287222669154154,
+        "trades": 195,
+        "wr": 0.2717948717948718,
+        "trades_per_day": 3.3238636363636367,
+        "deep_entries": 147,
+        "long_entries": 86,
+        "short_entries": 109,
+        "avg_notional": 2.097179487179486,
+        "avg_leverage": 2.1538461538461537,
+        "exits": {
+          "deep_alpha_stop_loss": 108,
+          "v21_2_max_hold": 37,
+          "deep_alpha_max_hold": 27,
+          "v21_2_stop_loss": 11,
+          "deep_alpha_take_profit": 12
+        },
+        "runner_actions": {
+          "deep_entry": 147,
+          "v21_entry": 48,
+          "v21_add_on": 7,
+          "v21_reject": 25
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 336,
+          "entry_market_fallback_after_limit_miss": 38,
+          "exit_market_fallback_after_limit_miss": 23
+        }
+      }
+    },
+    "score": 110.1942695995553
+  },
+  "training": {
+    "best_val_loss": 0.741311679829608,
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 4.877818656954524,
+        "val_loss": 1.7116301347921183,
+        "lr": 0.0007,
+        "temp": 1.5051411390304565,
+        "log_vars": [
+          -0.016523918136954308,
+          -0.018360689282417297,
+          -0.0011694785207509995,
+          -0.011012514121830463,
+          -0.0058040558360517025,
+          -0.012351272627711296,
+          -0.012264938093721867,
+          -0.013867516070604324
+        ],
+        "parts": {
+          "action": 0.2937664964671761,
+          "quality": 0.06007003274688656,
+          "bucket": 0.7569153592972714
+        }
+      },
+      {
+        "epoch": 2,
+        "train_loss": 3.9519849009701473,
+        "val_loss": 1.470308447932149,
+        "lr": 0.0007,
+        "temp": 1.5089306831359863,
+        "log_vars": [
+          -0.035370759665966034,
+          -0.03710987791419029,
+          -0.020050672814249992,
+          -0.030372409150004387,
+          -0.024159923195838928,
+          -0.03001318871974945,
+          -0.031104590743780136,
+          -0.03267010673880577
+        ],
+        "parts": {
+          "action": 0.24695646983053104,
+          "quality": 0.015581162932995605,
+          "bucket": 0.6297314923821996
+        }
+      },
+      {
+        "epoch": 3,
+        "train_loss": 3.715448851870467,
+        "val_loss": 1.2898844275282415,
+        "lr": 0.0007,
+        "temp": 1.5109117031097412,
+        "log_vars": [
+          -0.054174624383449554,
+          -0.055702291429042816,
+          -0.0403311513364315,
+          -0.05029459297657013,
+          -0.04296968877315521,
+          -0.04761386290192604,
+          -0.050346776843070984,
+          -0.05129580199718475
+        ],
+        "parts": {
+          "action": 0.2398272081196887,
+          "quality": 0.013539795943963692,
+          "bucket": 0.6049491843217236
+        }
+      },
+      {
+        "epoch": 4,
+        "train_loss": 3.5062736771456366,
+        "val_loss": 1.245913192029401,
+        "lr": 0.0007,
+        "temp": 1.5135135650634766,
+        "log_vars": [
+          -0.07296235859394073,
+          -0.07419425994157791,
+          -0.06095760688185692,
+          -0.07081416994333267,
+          -0.06238225847482681,
+          -0.0655822828412056,
+          -0.06972907483577728,
+          -0.06981711834669113
+        ],
+        "parts": {
+          "action": 0.23512669911814638,
+          "quality": 0.010675616088757785,
+          "bucket": 0.5849175973333263
+        }
+      },
+      {
+        "epoch": 5,
+        "train_loss": 3.3610978686450146,
+        "val_loss": 1.089860187345372,
+        "lr": 0.0007,
+        "temp": 1.5139858722686768,
+        "log_vars": [
+          -0.09177134931087494,
+          -0.09264148026704788,
+          -0.08135596662759781,
+          -0.0911150649189949,
+          -0.08210382610559464,
+          -0.08273202925920486,
+          -0.0892338827252388,
+          -0.08828216791152954
+        ],
+        "parts": {
+          "action": 0.23233404189089335,
+          "quality": 0.008854461530881173,
+          "bucket": 0.5747920924811931
+        }
+      },
+      {
+        "epoch": 6,
+        "train_loss": 3.2274774114757885,
+        "val_loss": 0.9471341559301802,
+        "lr": 0.0007,
+        "temp": 1.5162140130996704,
+        "log_vars": [
+          -0.11046461760997772,
+          -0.11107060313224792,
+          -0.09936847537755966,
+          -0.11003101617097855,
+          -0.09948761016130447,
+          -0.09954416751861572,
+          -0.10764330625534058,
+          -0.10665930062532425
+        ],
+        "parts": {
+          "action": 0.2309830606927906,
+          "quality": 0.006726133566698099,
+          "bucket": 0.5663727536942195
+        }
+      },
+      {
+        "epoch": 7,
+        "train_loss": 3.025145521587904,
+        "val_loss": 0.8793460798787547,
+        "lr": 0.0007,
+        "temp": 1.519432544708252,
+        "log_vars": [
+          -0.12891298532485962,
+          -0.12931664288043976,
+          -0.1185712218284607,
+          -0.13019247353076935,
+          -0.11902523040771484,
+          -0.11746937036514282,
+          -0.12621337175369263,
+          -0.12488989531993866
+        ],
+        "parts": {
+          "action": 0.23018866491275108,
+          "quality": 0.005895522799900617,
+          "bucket": 0.5473463209112749
+        }
+      },
+      {
+        "epoch": 8,
+        "train_loss": 2.8449318242060877,
+        "val_loss": 0.741311679829608,
+        "lr": 0.0007,
+        "temp": 1.5199389457702637,
+        "log_vars": [
+          -0.14771685004234314,
+          -0.14763128757476807,
+          -0.13871541619300842,
+          -0.15091466903686523,
+          -0.13882331550121307,
+          -0.13511353731155396,
+          -0.14468668401241302,
+          -0.14322973787784576
+        ],
+        "parts": {
+          "action": 0.22803319463573918,
+          "quality": 0.005023257731753661,
+          "bucket": 0.5324611561360503
+        }
+      },
+      {
+        "epoch": 9,
+        "train_loss": 3.060324624124448,
+        "val_loss": 0.8093554759636904,
+        "lr": 0.0007,
+        "temp": 1.5256919860839844,
+        "log_vars": [
+          -0.16482260823249817,
+          -0.16598033905029297,
+          -0.15683260560035706,
+          -0.17003792524337769,
+          -0.1572626382112503,
+          -0.14790281653404236,
+          -0.161490797996521,
+          -0.16161368787288666
+        ],
+        "parts": {
+          "action": 0.32931870430418586,
+          "quality": 0.004036945948666594,
+          "bucket": 0.5573061100000256
+        }
+      },
+      {
+        "epoch": 10,
+        "train_loss": 3.2492640656601366,
+        "val_loss": 1.0365040136344268,
+        "lr": 0.0007,
+        "temp": 1.5286986827850342,
+        "log_vars": [
+          -0.1795244812965393,
+          -0.1843181848526001,
+          -0.17127224802970886,
+          -0.1869037002325058,
+          -0.17288070917129517,
+          -0.157042995095253,
+          -0.17573915421962738,
+          -0.17995290458202362
+        ],
+        "parts": {
+          "action": 0.4168732196930177,
+          "quality": 0.003711901966022688,
+          "bucket": 0.5784335569879749
+        }
+      },
+      {
+        "epoch": 11,
+        "train_loss": 3.440794545725772,
+        "val_loss": 1.243614552221892,
+        "lr": 0.0007,
+        "temp": 1.5325802564620972,
+        "log_vars": [
+          -0.19312666356563568,
+          -0.20267125964164734,
+          -0.18225020170211792,
+          -0.2023092359304428,
+          -0.18614353239536285,
+          -0.16210949420928955,
+          -0.18826687335968018,
+          -0.1983344405889511
+        ],
+        "parts": {
+          "action": 0.49284960526742677,
+          "quality": 0.0035478173221157377,
+          "bucket": 0.6003194596734531
+        }
+      },
+      {
+        "epoch": 12,
+        "train_loss": 3.6381935614740355,
+        "val_loss": 1.8985342560233651,
+        "lr": 0.0007,
+        "temp": 1.5351507663726807,
+        "log_vars": [
+          -0.20431827008724213,
+          -0.22100934386253357,
+          -0.1904299408197403,
+          -0.21565796434879303,
+          -0.19767138361930847,
+          -0.1623978316783905,
+          -0.19845381379127502,
+          -0.21668198704719543
+        ],
+        "parts": {
+          "action": 0.5604742991235955,
+          "quality": 0.0030968620159173565,
+          "bucket": 0.6231855885374589
+        }
+      },
+      {
+        "epoch": 13,
+        "train_loss": 3.847483134939772,
+        "val_loss": 1.611221384216141,
+        "lr": 0.00038500000000000003,
+        "temp": 1.538745403289795,
+        "log_vars": [
+          -0.21312376856803894,
+          -0.23931266367435455,
+          -0.19499659538269043,
+          -0.22656872868537903,
+          -0.2068016082048416,
+          -0.1581001877784729,
+          -0.20558872818946838,
+          -0.23495519161224365
+        ],
+        "parts": {
+          "action": 0.6198941067097196,
+          "quality": 0.002856738858379892,
+          "bucket": 0.6481651980351841
+        }
+      },
+      {
+        "epoch": 14,
+        "train_loss": 3.993451035187204,
+        "val_loss": 2.0557239212832608,
+        "lr": 0.00038500000000000003,
+        "temp": 1.5407495498657227,
+        "log_vars": [
+          -0.21686433255672455,
+          -0.2493741810321808,
+          -0.19582203030586243,
+          -0.2322407215833664,
+          -0.21113090217113495,
+          -0.15377236902713776,
+          -0.20821161568164825,
+          -0.24502696096897125
+        ],
+        "parts": {
+          "action": 0.6651777345730933,
+          "quality": 0.0026013505841640107,
+          "bucket": 0.6651597218301507
+        }
+      },
+      {
+        "epoch": 15,
+        "train_loss": 4.179894913930216,
+        "val_loss": 2.5943971894162914,
+        "lr": 0.00038500000000000003,
+        "temp": 1.542724370956421,
+        "log_vars": [
+          -0.2194163203239441,
+          -0.2594318091869354,
+          -0.1946493238210678,
+          -0.237031489610672,
+          -0.2141701728105545,
+          -0.14623108506202698,
+          -0.20963016152381897,
+          -0.2550719082355499
+        ],
+        "parts": {
+          "action": 0.711534221518326,
+          "quality": 0.0027201298591202554,
+          "bucket": 0.6859861541050213
+        }
+      },
+      {
+        "epoch": 16,
+        "train_loss": 4.381226739898042,
+        "val_loss": 2.471743121688619,
+        "lr": 0.00038500000000000003,
+        "temp": 1.5432099103927612,
+        "log_vars": [
+          -0.22118590772151947,
+          -0.2694548964500427,
+          -0.19213484227657318,
+          -0.24134130775928497,
+          -0.21619310975074768,
+          -0.13750624656677246,
+          -0.2094777673482895,
+          -0.26512759923934937
+        ],
+        "parts": {
+          "action": 0.7464883192376208,
+          "quality": 0.0025860071153697398,
+          "bucket": 0.7107962089286632
+        }
+      },
+      {
+        "epoch": 17,
+        "train_loss": 4.549053129031455,
+        "val_loss": 2.662464044032953,
+        "lr": 0.00038500000000000003,
+        "temp": 1.5435407161712646,
+        "log_vars": [
+          -0.22220675647258759,
+          -0.2795056104660034,
+          -0.18703359365463257,
+          -0.24415276944637299,
+          -0.21642574667930603,
+          -0.1266750693321228,
+          -0.20775040984153748,
+          -0.2751326262950897
+        ],
+        "parts": {
+          "action": 0.7703014444318059,
+          "quality": 0.0026074389833338294,
+          "bucket": 0.7330340044012348
+        }
+      },
+      {
+        "epoch": 18,
+        "train_loss": 4.713897430281524,
+        "val_loss": 3.0817715405544517,
+        "lr": 0.00021175000000000002,
+        "temp": 1.5437798500061035,
+        "log_vars": [
+          -0.22253011167049408,
+          -0.28956159949302673,
+          -0.180315300822258,
+          -0.24618838727474213,
+          -0.21572870016098022,
+          -0.11477131396532059,
+          -0.2049071192741394,
+          -0.2851605713367462
+        ],
+        "parts": {
+          "action": 0.7969610169644129,
+          "quality": 0.0026025183303505337,
+          "bucket": 0.7545399791437811
+        }
+      },
+      {
+        "epoch": 19,
+        "train_loss": 4.823006314359031,
+        "val_loss": 3.202258803468921,
+        "lr": 0.00021175000000000002,
+        "temp": 1.5435727834701538,
+        "log_vars": [
+          -0.22253809869289398,
+          -0.29509612917900085,
+          -0.17609903216362,
+          -0.24725812673568726,
+          -0.2149534374475479,
+          -0.10750747472047806,
+          -0.20216086506843567,
+          -0.290701299905777
+        ],
+        "parts": {
+          "action": 0.8042969334289988,
+          "quality": 0.002740466544013442,
+          "bucket": 0.7713847608851363
+        }
+      },
+      {
+        "epoch": 20,
+        "train_loss": 4.968183819980846,
+        "val_loss": 3.5775169094840247,
+        "lr": 0.00021175000000000002,
+        "temp": 1.5433160066604614,
+        "log_vars": [
+          -0.22236579656600952,
+          -0.30062851309776306,
+          -0.17095127701759338,
+          -0.2478950470685959,
+          -0.2134142369031906,
+          -0.09997862577438354,
+          -0.19885294139385223,
+          -0.29626035690307617
+        ],
+        "parts": {
+          "action": 0.8129018876524561,
+          "quality": 0.002651817666097341,
+          "bucket": 0.7922715651483394
+        }
+      },
+      {
+        "epoch": 21,
+        "train_loss": 5.100852520513364,
+        "val_loss": 3.8299978111253115,
+        "lr": 0.00021175000000000002,
+        "temp": 1.542303204536438,
+        "log_vars": [
+          -0.22206607460975647,
+          -0.30614784359931946,
+          -0.16471315920352936,
+          -0.2483261525630951,
+          -0.21128994226455688,
+          -0.09197705239057541,
+          -0.1949484497308731,
+          -0.30181819200515747
+        ],
+        "parts": {
+          "action": 0.8243580266597262,
+          "quality": 0.0028241368447985797,
+          "bucket": 0.8112405062757345
+        }
+      },
+      {
+        "epoch": 22,
+        "train_loss": 5.231290168352863,
+        "val_loss": 4.332943511096549,
+        "lr": 0.00021175000000000002,
+        "temp": 1.5407376289367676,
+        "log_vars": [
+          -0.2217383235692978,
+          -0.3114764094352722,
+          -0.1583375781774521,
+          -0.2485828995704651,
+          -0.20848025381565094,
+          -0.08370634913444519,
+          -0.190152108669281,
+          -0.30729159712791443
+        ],
+        "parts": {
+          "action": 0.8211405051991107,
+          "quality": 0.002916586967651515,
+          "bucket": 0.8324255089888964
+        }
+      }
+    ],
+    "epochs_ran": 22,
+    "swa_start": 41,
+    "used_entmax": true
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "tabnet_parent_did_not_improve_alpha3_cost1"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "normalizer": "expanding_monthly_quantile_fit_prior_months",
+    "training_techniques": [
+      "TabNet shared sparse feature selector",
+      "MMoE 4-expert routed task heads",
+      "PCGrad projected multitask gradients",
+      "HGB soft-label distillation warmup",
+      "oracle-label fine-tuning",
+      "gradient scaler alpha=0.10",
+      "homoscedastic multitask loss",
+      "ReduceLROnPlateau",
+      "early stopping",
+      "gradient clipping",
+      "SWA best-effort",
+      "MC dropout inference",
+      "virtual sink nodes",
+      "entmax15 if installed else sparsemax fallback"
+    ],
+    "selected_runtime": {
+      "name": "mmoe_c0.22_q0.000_u0.130_s1.45_cap4.14_arg",
+      "confidence_floor": 0.22,
+      "quality_floor": 0.0,
+      "uncertainty_max": 0.13,
+      "notional_scale": 1.45,
+      "max_notional": 4.14,
+      "use_expected_buckets": false
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_tabnet_mmoe_pcgrad_parent_v2_20260514/alpha3_tabnet_mmoe_pcgrad_parent_v2.pt",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_tabnet_mmoe_pcgrad_parent_v2_20260514_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_tabnet_mmoe_pcgrad_parent_v2_20260514_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_tabnet_mmoe_pcgrad_parent_v2_20260514_grid.csv"
+  }
+}

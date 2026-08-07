@@ -1,0 +1,298 @@
+{
+  "model_id": "hf_v13_equity_circuit_breaker_v17_20260511",
+  "design": "v13 margin110 parent with validation-selected equity high-watermark circuit breaker and optional profit lock.",
+  "base_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "split_policy": "Circuit config selected on 2025 Oct-Dec validation only; 2026 fixed OOS not used for selection.",
+  "selected_config": {
+    "name": "eq_cb_0",
+    "max_notional": 1.9,
+    "dd_halt": 0.14,
+    "resume_after_bars": 999999,
+    "profit_lock_equity": 99.0,
+    "lock_after_profit": false
+  },
+  "selection_result": {
+    "config": {
+      "name": "eq_cb_0",
+      "max_notional": 1.9,
+      "dd_halt": 0.14,
+      "resume_after_bars": 999999,
+      "profit_lock_equity": 99.0,
+      "lock_after_profit": false
+    },
+    "validation_cost1": {
+      "pnl": 22.140556382498655,
+      "mdd": -14.19603386535433,
+      "trades": 59,
+      "wr": 0.1694915254237288,
+      "trades_per_day": 0.6413285525570863,
+      "long_entries": 10,
+      "short_entries": 49,
+      "avg_notional": 1.8946257712779508,
+      "avg_leverage": 2.4836895451657974,
+      "action_counts": {
+        "cash": 19541,
+        "long": 10,
+        "short": 49
+      },
+      "exits": {
+        "learned_stop_loss": 48,
+        "learned_max_hold": 9,
+        "learned_take_profit": 1,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 3909
+      }
+    },
+    "validation_cost2": {
+      "pnl": 9.07222836760251,
+      "mdd": -14.33475068738691,
+      "trades": 28,
+      "wr": 0.17857142857142858,
+      "trades_per_day": 0.30435931307793923,
+      "long_entries": 2,
+      "short_entries": 26,
+      "avg_notional": 1.8989347603309032,
+      "avg_leverage": 2.51724481482649,
+      "action_counts": {
+        "cash": 8056,
+        "long": 2,
+        "short": 26
+      },
+      "exits": {
+        "learned_stop_loss": 22,
+        "learned_max_hold": 4,
+        "learned_take_profit": 1,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 17099
+      }
+    },
+    "validation_cost3": {
+      "pnl": 5.867401225781843,
+      "mdd": -14.273609453042301,
+      "trades": 21,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 0.22826948480845444,
+      "long_entries": 2,
+      "short_entries": 19,
+      "avg_notional": 1.898579680441205,
+      "avg_leverage": 2.481920485829628,
+      "action_counts": {
+        "cash": 5044,
+        "long": 2,
+        "short": 19
+      },
+      "exits": {
+        "learned_stop_loss": 16,
+        "learned_max_hold": 3,
+        "learned_take_profit": 1,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 20561
+      }
+    },
+    "selection_score": -54.06468291857322
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 27.222664893542547,
+      "mdd": -15.488817290563206,
+      "trades": 38,
+      "wr": 0.21052631578947367,
+      "trades_per_day": 0.6477272727272727,
+      "long_entries": 5,
+      "short_entries": 33,
+      "avg_notional": 1.8940083758115658,
+      "avg_leverage": 2.6583101770180435,
+      "action_counts": {
+        "cash": 6609,
+        "long": 5,
+        "short": 33
+      },
+      "exits": {
+        "learned_stop_loss": 28,
+        "learned_max_hold": 9,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 7689
+      }
+    },
+    "cost2": {
+      "pnl": -12.607622880595159,
+      "mdd": -14.250173324141391,
+      "trades": 19,
+      "wr": 0.05263157894736842,
+      "trades_per_day": 0.32386363636363635,
+      "long_entries": 0,
+      "short_entries": 19,
+      "avg_notional": 1.8999999999999992,
+      "avg_leverage": 2.5413947572273785,
+      "action_counts": {
+        "cash": 4440,
+        "long": 0,
+        "short": 19
+      },
+      "exits": {
+        "learned_stop_loss": 16,
+        "learned_max_hold": 2,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 11711
+      }
+    },
+    "cost3": {
+      "pnl": -14.977628937752485,
+      "mdd": -15.418047994363294,
+      "trades": 17,
+      "wr": 0.058823529411764705,
+      "trades_per_day": 0.2897727272727273,
+      "long_entries": 0,
+      "short_entries": 17,
+      "avg_notional": 1.8999999999999995,
+      "avg_leverage": 2.526435744863066,
+      "action_counts": {
+        "cash": 3877,
+        "long": 0,
+        "short": 17
+      },
+      "exits": {
+        "learned_stop_loss": 15,
+        "learned_max_hold": 1,
+        "equity_circuit_breaker": 1
+      },
+      "guard_actions": {
+        "halted": 12375
+      }
+    }
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "oos_cost1_below_100pct_target",
+      "oos_mdd_above_15pct_target"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "selected_config": {
+      "name": "eq_cb_0",
+      "max_notional": 1.9,
+      "dd_halt": 0.14,
+      "resume_after_bars": 999999,
+      "profit_lock_equity": 99.0,
+      "lock_after_profit": false
+    },
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 27.222664893542547,
+        "mdd": -15.488817290563206,
+        "trades": 38,
+        "wr": 0.21052631578947367,
+        "trades_per_day": 0.6477272727272727,
+        "long_entries": 5,
+        "short_entries": 33,
+        "avg_notional": 1.8940083758115658,
+        "avg_leverage": 2.6583101770180435,
+        "action_counts": {
+          "cash": 6609,
+          "long": 5,
+          "short": 33
+        },
+        "exits": {
+          "learned_stop_loss": 28,
+          "learned_max_hold": 9,
+          "equity_circuit_breaker": 1
+        },
+        "guard_actions": {
+          "halted": 7689
+        }
+      },
+      "cost2": {
+        "pnl": -12.607622880595159,
+        "mdd": -14.250173324141391,
+        "trades": 19,
+        "wr": 0.05263157894736842,
+        "trades_per_day": 0.32386363636363635,
+        "long_entries": 0,
+        "short_entries": 19,
+        "avg_notional": 1.8999999999999992,
+        "avg_leverage": 2.5413947572273785,
+        "action_counts": {
+          "cash": 4440,
+          "long": 0,
+          "short": 19
+        },
+        "exits": {
+          "learned_stop_loss": 16,
+          "learned_max_hold": 2,
+          "equity_circuit_breaker": 1
+        },
+        "guard_actions": {
+          "halted": 11711
+        }
+      },
+      "cost3": {
+        "pnl": -14.977628937752485,
+        "mdd": -15.418047994363294,
+        "trades": 17,
+        "wr": 0.058823529411764705,
+        "trades_per_day": 0.2897727272727273,
+        "long_entries": 0,
+        "short_entries": 17,
+        "avg_notional": 1.8999999999999995,
+        "avg_leverage": 2.526435744863066,
+        "action_counts": {
+          "cash": 3877,
+          "long": 0,
+          "short": 17
+        },
+        "exits": {
+          "learned_stop_loss": 15,
+          "learned_max_hold": 1,
+          "equity_circuit_breaker": 1
+        },
+        "guard_actions": {
+          "halted": 12375
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_equity_circuit_breaker_v17_20260511_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_equity_circuit_breaker_v17_20260511_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_equity_circuit_breaker_v17_20260511_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_equity_circuit_breaker_v17_20260511_summary_cost1_ledger.csv"
+    }
+  }
+}

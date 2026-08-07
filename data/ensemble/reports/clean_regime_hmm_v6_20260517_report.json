@@ -1,0 +1,333 @@
+{
+  "model_id": "clean_regime_2024_unsup_hmm_v6_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_hmm_v6_20260517/clean_regime_state_v6_2024.joblib",
+  "clean_prefix": "clean_regime_2024_unsup_v4_",
+  "fit_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "fit_rows": 105380,
+  "fit_range": [
+    "2024-01-01 00:00:00",
+    "2024-12-31 23:55:00"
+  ],
+  "feature_cols": [
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "net_taker_ratio",
+    "smart_money_flow",
+    "taker_acceleration",
+    "ofi_acceleration",
+    "volatility_z",
+    "bb_width_z",
+    "amihud_illiquidity_z",
+    "volume",
+    "quote_volume",
+    "trades",
+    "taker_buy_base",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "count_long_short_ratio",
+    "last_funding_rate",
+    "whale_retail_ratio",
+    "squeeze_power",
+    "oi_change_rate",
+    "trade_intensity",
+    "big_trade_ratio",
+    "log_return",
+    "rsi",
+    "macd_hist",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "btc_corr_60",
+    "eth_btc_ratio_change",
+    "fvg_dist",
+    "chop_index",
+    "cvp_poc_dist",
+    "cvp_cluster_position",
+    "cvp_volume_imbalance",
+    "breakout_strength",
+    "long_squeeze_risk",
+    "funding_price_divergence",
+    "kalman_velocity",
+    "ofti",
+    "kel",
+    "mta_funding",
+    "svps",
+    "pred_mdjd",
+    "conf_mdjd",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_trend_bias"
+  ],
+  "feature_count": 53,
+  "states": 8,
+  "pca_components": 12,
+  "validation": {
+    "rows": 26496,
+    "accuracy": 0.412175422705314,
+    "balanced_accuracy": 0.345402577938826,
+    "log_loss": 1.4706907038054562,
+    "true_counts": {
+      "bull": 6590,
+      "bear": 5741,
+      "chop": 3148,
+      "whipsaw": 1004,
+      "normal": 10013
+    },
+    "pred_counts": {
+      "bull": 6025,
+      "bear": 5426,
+      "chop": 5102,
+      "whipsaw": 772,
+      "normal": 9171
+    },
+    "confusion_matrix": [
+      [
+        2681,
+        595,
+        1166,
+        190,
+        1958
+      ],
+      [
+        503,
+        3214,
+        613,
+        121,
+        1290
+      ],
+      [
+        219,
+        108,
+        1026,
+        78,
+        1717
+      ],
+      [
+        373,
+        222,
+        125,
+        39,
+        245
+      ],
+      [
+        2249,
+        1287,
+        2172,
+        344,
+        3961
+      ]
+    ]
+  },
+  "state_class_matrix_validation": [
+    [
+      0.20753329131795364,
+      0.3330398300876589,
+      0.1121512707037752,
+      0.1867616962224139,
+      0.16051391166819828
+    ],
+    [
+      0.39648392856491743,
+      0.08599562532341075,
+      0.07081950167334333,
+      0.272732463326753,
+      0.17396848111157562
+    ],
+    [
+      0.17598031048824755,
+      0.17391645503369846,
+      0.20776104679781274,
+      0.22995556563383168,
+      0.21238662204640954
+    ],
+    [
+      0.16779475106834255,
+      0.15965165964854597,
+      0.26877795238117963,
+      0.18802321026544952,
+      0.21575242663648247
+    ],
+    [
+      0.19661125543118363,
+      0.2086478527191132,
+      0.19672609708210664,
+      0.20020312371524768,
+      0.19781167105234884
+    ],
+    [
+      0.1604131501136403,
+      0.14625020382311235,
+      0.23843306033844064,
+      0.21521604898817998,
+      0.2396875367366267
+    ],
+    [
+      0.22064169813004925,
+      0.11440832327634799,
+      0.293268268686696,
+      0.15427384173222658,
+      0.21740786817468027
+    ],
+    [
+      0.05395674596336541,
+      0.5277375542633695,
+      0.07293816764445868,
+      0.20174316455350316,
+      0.14362436757530322
+    ]
+  ],
+  "state_class_matrix_final": [
+    [
+      0.42245405431320554,
+      0.06802224767031428,
+      0.10332599299047346,
+      0.2244631257229254,
+      0.18173457930308135
+    ],
+    [
+      0.24808280503228675,
+      0.08766410555124184,
+      0.3000247778781787,
+      0.1488502571451885,
+      0.21537805439310434
+    ],
+    [
+      0.21117104559784222,
+      0.2746283058990022,
+      0.08504328644638286,
+      0.2585502821182366,
+      0.17060707993853633
+    ],
+    [
+      0.053066130847456906,
+      0.4735480389382425,
+      0.08595065491312202,
+      0.22811301861185568,
+      0.15932215668932276
+    ],
+    [
+      0.1884461043586216,
+      0.19864309105632363,
+      0.19860206419239956,
+      0.21928305842304308,
+      0.19502568196961217
+    ],
+    [
+      0.204977455247675,
+      0.13230619615052447,
+      0.2506717302303689,
+      0.1886460324974225,
+      0.22339858587400907
+    ],
+    [
+      0.11268925822653782,
+      0.18218994247495002,
+      0.28981347929258283,
+      0.18384517166978365,
+      0.23146214833614578
+    ],
+    [
+      0.2089113527259165,
+      0.2576236203483298,
+      0.16220031021671408,
+      0.18898772335233213,
+      0.1822769933567074
+    ]
+  ],
+  "log_likelihood_validation": [
+    -1369073.4229993385,
+    -1084350.8863368754,
+    -764621.5877754212,
+    -687987.1082246248,
+    -662829.6964568108,
+    -651890.4774030987,
+    -648119.6783057164,
+    -645990.070477204,
+    -644400.0327200805,
+    -643134.8183914076,
+    -641982.1719920018,
+    -640556.6522663468,
+    -637635.6301970311,
+    -634585.0884585807,
+    -632355.8899699595,
+    -630723.6371926476,
+    -629495.7577942996,
+    -628622.8026170062
+  ],
+  "log_likelihood_final": [
+    -1861984.0554330181,
+    -1482010.7924338311,
+    -1059611.8053170245,
+    -972850.6140616781,
+    -940273.254414653,
+    -924431.0694618397,
+    -916420.8242706244,
+    -912669.5553916405,
+    -910764.1771009194,
+    -909621.0233215957,
+    -908858.0953980562,
+    -907683.9187694538,
+    -903904.3552686933,
+    -900916.4392757775,
+    -899410.4643461491,
+    -898663.9477213854,
+    -898164.9286220598,
+    -897789.9928283769
+  ],
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+      "rows": 105380,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:55:00"
+      ],
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_hmm_v6_20260517/training_features_2024_clean_regime_hmm_v6.csv",
+      "clean_feature_count": 19,
+      "probability_sum_min": 0.9999999999999997,
+      "probability_sum_max": 1.0000000000000004,
+      "pred_counts": {
+        "bull": 16472,
+        "bear": 28691,
+        "chop": 58780,
+        "whipsaw": 1378,
+        "normal": 59
+      },
+      "confidence_mean": 0.31722144806183555,
+      "entropy_mean": 0.9474953314852519
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+      "rows": 105064,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_hmm_v6_20260517/training_features_2025_clean_regime_hmm_v6.csv",
+      "clean_feature_count": 19,
+      "probability_sum_min": 0.9999999999999997,
+      "probability_sum_max": 1.0000000000000004,
+      "pred_counts": {
+        "bull": 17124,
+        "bear": 39457,
+        "chop": 46750,
+        "whipsaw": 1607,
+        "normal": 126
+      },
+      "confidence_mean": 0.30686169572732724,
+      "entropy_mean": 0.9523844928773446
+    }
+  },
+  "notes": [
+    "This replaces the previous BGMM clean_regime sidecar with an HMM-style Gaussian latent-state model.",
+    "Output columns intentionally keep the clean_regime_2024_unsup_v4_ prefix for downstream compatibility.",
+    "No risk_off, transition, cluster id, hidden-state probability, or hard label columns are written.",
+    "Output probabilities are causal filtered probabilities; inference does not use future rows in the transform sequence.",
+    "Hidden states are mapped to the 5 current RegimeEngine taxonomy classes using 2024 labels."
+  ]
+}

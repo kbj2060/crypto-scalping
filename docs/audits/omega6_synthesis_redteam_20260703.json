@@ -1,0 +1,93 @@
+{
+  "model_id": "omega6_synthesis_v1_20260703",
+  "audit_id": "omega6_synthesis_redteam_20260703",
+  "verdict": "CONDITIONAL_PASS_WITH_WARNINGS",
+  "checks": [
+    {
+      "name": "fail_fast_on_broken_artifact_path",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "raised": "Omega6 primary bundle missing: /nonexistent/bundle.pt"
+      }
+    },
+    {
+      "name": "l2_train_val_non_overlap",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "split_ts": "2025-10-01 00:00:00",
+        "val_start": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "l4_sidecar_train_window_before_val",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "train_end": "2025-09-30 23:55:00",
+        "val_start": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "l3_gate_train_window_before_val",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "train_end": "2025-09-30 23:55:00",
+        "val_start": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "forbidden_feature_prefixes_absent",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "violations": {}
+      }
+    },
+    {
+      "name": "l6_governor_reduce_only",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "shock_scale_applied_as_multiply": true,
+        "macro_veto_forces_cash": true,
+        "shock_scale_value": 0.5,
+        "shock_scale_le_one": true
+      }
+    },
+    {
+      "name": "futures_sizing_contract_notional_eq_margin_times_leverage",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "max_abs_error": 0.0,
+        "bars_checked": 400,
+        "sided_decisions": 372
+      }
+    },
+    {
+      "name": "cost_stress_trade_count_non_collapse",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "cost1_trades": 97,
+        "cost3_trades": 97,
+        "ratio": 1.0,
+        "min_ratio": 0.9
+      }
+    },
+    {
+      "name": "sizing_sensitivity_informational",
+      "pass": false,
+      "severity": "warning",
+      "details": {
+        "current_val_pnl": -13.482727414450302,
+        "note": "2026-07-03 session found validation PnL flips from +27.69% (uncapped L4 mapping, cap=0.6) to -13.48% (MDD-capped L4 mapping, cap=0.3) using the SAME L2/L3 signal. This is a sizing-sensitivity finding, not a pass/fail gate by itself, but it is a material caveat: the underlying directional signal's edge is not clearly robust to reasonable resizing choices. See docs/model_contracts/omega6_synthesis_v1_20260703_contract.md."
+      }
+    }
+  ],
+  "n_blockers": 0,
+  "n_warnings": 1
+}

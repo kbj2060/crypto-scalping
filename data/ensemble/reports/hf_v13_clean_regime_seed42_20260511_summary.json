@@ -1,0 +1,507 @@
+{
+  "model_id": "hf_clean_regime_core_loop_20260511",
+  "design": "Fully learned HF core retrained with explicit clean_regime_2024_unsup_v4_* inputs; old regime-v2 ids removed.",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "split_policy": "train=2025-01-01..2025-09-30, selection=2025-10-01..2025-12-31, OOS=2026 fixed",
+  "feature_contract": {
+    "feature_count": 93,
+    "clean_regime_features": [
+      "clean_regime_2024_unsup_v4_bear_prob",
+      "clean_regime_2024_unsup_v4_bull_prob",
+      "clean_regime_2024_unsup_v4_chop_prob",
+      "clean_regime_2024_unsup_v4_cluster",
+      "clean_regime_2024_unsup_v4_cluster_confidence",
+      "clean_regime_2024_unsup_v4_cluster_prob_0",
+      "clean_regime_2024_unsup_v4_cluster_prob_1",
+      "clean_regime_2024_unsup_v4_cluster_prob_2",
+      "clean_regime_2024_unsup_v4_cluster_prob_3",
+      "clean_regime_2024_unsup_v4_cluster_prob_4",
+      "clean_regime_2024_unsup_v4_confidence",
+      "clean_regime_2024_unsup_v4_entropy",
+      "clean_regime_2024_unsup_v4_factor_crowding",
+      "clean_regime_2024_unsup_v4_factor_flow",
+      "clean_regime_2024_unsup_v4_factor_liquidity",
+      "clean_regime_2024_unsup_v4_factor_trend",
+      "clean_regime_2024_unsup_v4_factor_vol",
+      "clean_regime_2024_unsup_v4_normal_prob",
+      "clean_regime_2024_unsup_v4_risk_off_prob",
+      "clean_regime_2024_unsup_v4_state_code",
+      "clean_regime_2024_unsup_v4_transition_risk",
+      "clean_regime_2024_unsup_v4_trend_bias",
+      "clean_regime_2024_unsup_v4_whipsaw_prob"
+    ],
+    "feature_cols": [
+      "side_hint",
+      "mom_21d",
+      "abs_mom_21d",
+      "mom_3d",
+      "abs_mom_3d",
+      "mom_1d",
+      "abs_mom_1d",
+      "log_return",
+      "volatility_z",
+      "garch_vol_z",
+      "rogers_satchell_vol",
+      "amihud_illiquidity_z",
+      "liquidity_vacuum",
+      "execution_quality",
+      "jump_z",
+      "jump_flag",
+      "evt_tail_flag",
+      "evt_excess_z",
+      "funding_abs",
+      "funding_pressure",
+      "funding_price_divergence",
+      "long_squeeze_risk",
+      "crowding_pressure",
+      "smart_money_flow",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "ofi_acceleration",
+      "whale_conviction",
+      "m7_gate_block",
+      "m7_tail_risk",
+      "m7_expected_ret",
+      "m7_composite_score",
+      "m7_confidence",
+      "m7_qwidth",
+      "pred_patchtst",
+      "conf_patchtst",
+      "ai_dir_edge",
+      "ai_dir_p_up",
+      "ai_dir_p_down",
+      "ai_dir_p_flat",
+      "ai_dir_entropy",
+      "patchtst_median",
+      "patchtst_regime_sim",
+      "patchtst_pred",
+      "patchtst_confidence",
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_anchor_revert_prob",
+      "ai_anchor_overheat",
+      "ai_anchor_trend_escape_prob",
+      "timesnet_cycle_sin",
+      "timesnet_cycle_cos",
+      "timesnet_cycle_delta",
+      "ai_flow_pressure",
+      "ai_flow_exhaustion",
+      "ai_flow_flip_prob",
+      "ai_flow_slope",
+      "dlinear_smf_ema",
+      "dlinear_smf_slope",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "rsi",
+      "trade_intensity",
+      "big_trade_ratio",
+      "whale_retail_ratio",
+      "squeeze_power",
+      "breakout_strength",
+      "clean_regime_2024_unsup_v4_bear_prob",
+      "clean_regime_2024_unsup_v4_bull_prob",
+      "clean_regime_2024_unsup_v4_chop_prob",
+      "clean_regime_2024_unsup_v4_cluster",
+      "clean_regime_2024_unsup_v4_cluster_confidence",
+      "clean_regime_2024_unsup_v4_cluster_prob_0",
+      "clean_regime_2024_unsup_v4_cluster_prob_1",
+      "clean_regime_2024_unsup_v4_cluster_prob_2",
+      "clean_regime_2024_unsup_v4_cluster_prob_3",
+      "clean_regime_2024_unsup_v4_cluster_prob_4",
+      "clean_regime_2024_unsup_v4_confidence",
+      "clean_regime_2024_unsup_v4_entropy",
+      "clean_regime_2024_unsup_v4_factor_crowding",
+      "clean_regime_2024_unsup_v4_factor_flow",
+      "clean_regime_2024_unsup_v4_factor_liquidity",
+      "clean_regime_2024_unsup_v4_factor_trend",
+      "clean_regime_2024_unsup_v4_factor_vol",
+      "clean_regime_2024_unsup_v4_normal_prob",
+      "clean_regime_2024_unsup_v4_risk_off_prob",
+      "clean_regime_2024_unsup_v4_state_code",
+      "clean_regime_2024_unsup_v4_transition_risk",
+      "clean_regime_2024_unsup_v4_trend_bias",
+      "clean_regime_2024_unsup_v4_whipsaw_prob"
+    ]
+  },
+  "audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0,
+    "oos_cost_metrics": {
+      "cost1": {
+        "pnl": 88.56382231198019,
+        "mdd": -37.874116882184126,
+        "trades": 77,
+        "wr": 0.2077922077922078,
+        "trades_per_day": 1.3125,
+        "long_entries": 26,
+        "short_entries": 51,
+        "avg_notional": 2.4137902345916156,
+        "avg_leverage": 2.592026601995419,
+        "action_counts": {
+          "cash": 12440,
+          "long": 26,
+          "short": 51
+        },
+        "exits": {
+          "learned_stop_loss": 61,
+          "learned_max_hold": 13,
+          "learned_take_profit": 3
+        }
+      },
+      "cost2": {
+        "pnl": 67.81100145174688,
+        "mdd": -31.765199385716603,
+        "trades": 84,
+        "wr": 0.19047619047619047,
+        "trades_per_day": 1.4318181818181819,
+        "long_entries": 29,
+        "short_entries": 55,
+        "avg_notional": 2.4324267749237904,
+        "avg_leverage": 2.6087554946156724,
+        "action_counts": {
+          "cash": 12552,
+          "long": 29,
+          "short": 55
+        },
+        "exits": {
+          "learned_stop_loss": 68,
+          "learned_max_hold": 12,
+          "learned_take_profit": 4
+        }
+      },
+      "cost3": {
+        "pnl": 45.89579136775428,
+        "mdd": -34.825321031310665,
+        "trades": 84,
+        "wr": 0.19047619047619047,
+        "trades_per_day": 1.4318181818181819,
+        "long_entries": 28,
+        "short_entries": 56,
+        "avg_notional": 2.419511319185923,
+        "avg_leverage": 2.598805239707854,
+        "action_counts": {
+          "cash": 12569,
+          "long": 28,
+          "short": 56
+        },
+        "exits": {
+          "learned_stop_loss": 68,
+          "learned_max_hold": 12,
+          "learned_take_profit": 4
+        }
+      }
+    },
+    "selected_model": "data/ensemble/supervised/hf_v13_clean_regime_seed42_20260511/v13_clean_regime_h288.pkl",
+    "verdict": "iterate"
+  },
+  "selected": {
+    "name": "v13_clean_regime_h288",
+    "model": "data/ensemble/supervised/hf_v13_clean_regime_seed42_20260511/v13_clean_regime_h288.pkl",
+    "training_meta": {
+      "candidates": 6524,
+      "stride_bars": 12,
+      "max_train_horizon_bars": 288
+    },
+    "train_cost1": {
+      "pnl": 919176085.3554877,
+      "mdd": -19.9503197517233,
+      "trades": 271,
+      "wr": 0.5018450184501845,
+      "trades_per_day": 0.9926866184195464,
+      "long_entries": 134,
+      "short_entries": 137,
+      "avg_notional": 2.2616082200565617,
+      "avg_leverage": 2.4233241511707044,
+      "action_counts": {
+        "cash": 54238,
+        "long": 134,
+        "short": 137
+      },
+      "exits": {
+        "learned_take_profit": 80,
+        "learned_stop_loss": 135,
+        "learned_max_hold": 56
+      }
+    },
+    "validation_cost1": {
+      "pnl": -2.0925653955024104,
+      "mdd": -26.867436803268873,
+      "trades": 71,
+      "wr": 0.1267605633802817,
+      "trades_per_day": 0.7717682581619174,
+      "long_entries": 10,
+      "short_entries": 61,
+      "avg_notional": 2.336071798423047,
+      "avg_leverage": 2.4810694990636786,
+      "action_counts": {
+        "cash": 23348,
+        "long": 10,
+        "short": 61
+      },
+      "exits": {
+        "learned_stop_loss": 62,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      }
+    },
+    "validation_cost2": {
+      "pnl": -25.227601057923387,
+      "mdd": -40.624350144804076,
+      "trades": 76,
+      "wr": 0.11842105263157894,
+      "trades_per_day": 0.8261181354972637,
+      "long_entries": 10,
+      "short_entries": 66,
+      "avg_notional": 2.3445802385248253,
+      "avg_leverage": 2.495857074618949,
+      "action_counts": {
+        "cash": 23431,
+        "long": 10,
+        "short": 66
+      },
+      "exits": {
+        "learned_stop_loss": 67,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      }
+    },
+    "validation_cost3": {
+      "pnl": -41.120954206582205,
+      "mdd": -51.76426556713838,
+      "trades": 80,
+      "wr": 0.1125,
+      "trades_per_day": 0.8695980373655408,
+      "long_entries": 10,
+      "short_entries": 70,
+      "avg_notional": 2.341226933337442,
+      "avg_leverage": 2.496995452460653,
+      "action_counts": {
+        "cash": 23484,
+        "long": 10,
+        "short": 70
+      },
+      "exits": {
+        "learned_stop_loss": 71,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      }
+    },
+    "selection_score": -190.90855250335017
+  },
+  "selected_config": {
+    "notional_buckets": [
+      0.2,
+      0.32,
+      0.5,
+      0.75,
+      1.05,
+      1.45,
+      2.0,
+      2.7,
+      3.6
+    ],
+    "leverage_buckets": [
+      1.5,
+      2.0,
+      3.0,
+      4.0,
+      5.0
+    ],
+    "take_profit_buckets": [
+      0.007,
+      0.011,
+      0.018,
+      0.03,
+      0.05,
+      0.09,
+      0.18,
+      0.45,
+      0.9
+    ],
+    "stop_loss_buckets": [
+      0.004,
+      0.006,
+      0.009,
+      0.014,
+      0.022,
+      0.035,
+      0.055
+    ],
+    "max_hold_buckets": [
+      6,
+      12,
+      24,
+      48,
+      96,
+      192,
+      288
+    ],
+    "cooldown_buckets": [
+      0,
+      1,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "max_train_horizon_bars": 288,
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "cash_score": 0.02,
+    "adverse_penalty": 2.45,
+    "size_penalty": 0.18,
+    "hold_penalty": 0.042,
+    "turnover_bonus": 0.0012,
+    "max_margin_fraction": 1.0
+  },
+  "label_distribution": {
+    "action": {
+      "0": 5557,
+      "1": 457,
+      "2": 510
+    },
+    "notional": {
+      "0": 5557,
+      "3": 2,
+      "4": 32,
+      "5": 157,
+      "6": 284,
+      "7": 311,
+      "8": 181
+    },
+    "leverage": {
+      "0": 5748,
+      "1": 284,
+      "2": 311,
+      "3": 181
+    },
+    "take_profit": {
+      "0": 5557,
+      "3": 3,
+      "4": 47,
+      "5": 190,
+      "6": 435,
+      "7": 213,
+      "8": 79
+    },
+    "stop_loss": {
+      "0": 6033,
+      "1": 78,
+      "2": 99,
+      "3": 106,
+      "4": 84,
+      "5": 77,
+      "6": 47
+    },
+    "max_hold": {
+      "0": 5560,
+      "1": 14,
+      "2": 28,
+      "3": 56,
+      "4": 157,
+      "5": 310,
+      "6": 399
+    },
+    "cooldown": {
+      "0": 6523,
+      "6": 1
+    },
+    "quality_mean": 0.031021029385308537,
+    "quality_p95": 0.07878177817720278
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 88.56382231198019,
+      "mdd": -37.874116882184126,
+      "trades": 77,
+      "wr": 0.2077922077922078,
+      "trades_per_day": 1.3125,
+      "long_entries": 26,
+      "short_entries": 51,
+      "avg_notional": 2.4137902345916156,
+      "avg_leverage": 2.592026601995419,
+      "action_counts": {
+        "cash": 12440,
+        "long": 26,
+        "short": 51
+      },
+      "exits": {
+        "learned_stop_loss": 61,
+        "learned_max_hold": 13,
+        "learned_take_profit": 3
+      }
+    },
+    "cost2": {
+      "pnl": 67.81100145174688,
+      "mdd": -31.765199385716603,
+      "trades": 84,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 29,
+      "short_entries": 55,
+      "avg_notional": 2.4324267749237904,
+      "avg_leverage": 2.6087554946156724,
+      "action_counts": {
+        "cash": 12552,
+        "long": 29,
+        "short": 55
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 12,
+        "learned_take_profit": 4
+      }
+    },
+    "cost3": {
+      "pnl": 45.89579136775428,
+      "mdd": -34.825321031310665,
+      "trades": 84,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 28,
+      "short_entries": 56,
+      "avg_notional": 2.419511319185923,
+      "avg_leverage": 2.598805239707854,
+      "action_counts": {
+        "cash": 12569,
+        "long": 28,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 12,
+        "learned_take_profit": 4
+      }
+    }
+  },
+  "artifacts": {
+    "report": "data/ensemble/reports/hf_v13_clean_regime_seed42_20260511_summary.json",
+    "audit": "data/ensemble/reports/hf_v13_clean_regime_seed42_20260511_audit.json",
+    "grid": "data/ensemble/reports/hf_v13_clean_regime_seed42_20260511_summary_grid.json",
+    "model": "data/ensemble/supervised/hf_v13_clean_regime_seed42_20260511/v13_clean_regime_h288.pkl",
+    "ledgers": {
+      "cost1": "data/ensemble/reports/hf_v13_clean_regime_seed42_20260511_summary_cost1_ledger.csv"
+    }
+  }
+}

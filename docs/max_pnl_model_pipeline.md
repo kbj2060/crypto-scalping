@@ -1,5 +1,8 @@
 # Max PnL Model Pipeline
 
+> Current rank-1 baseline update, 2026-05-06 KST:
+> The current highest-return main candidate is no longer the DSAC model described below. The canonical current rank-1 model is `current_top_muzero_az_stage2_azexit_2026`: MuZero Entry Planner -> AZ Risk Overlay -> Stage2 MuZero Sleeve Overlay (`g0.55 / p0.00 / d1 / score_floor0.12`) -> AZ Exit Governor (`threshold 0.45`) -> Execution Accounting. Verified 2026 OOS: `+752.65%`, MDD `-18.76%`, trades `353`, trades/day `6.02`, cost 2x `+279.36%`, cost 3x `+75.84%`. `Stage3 exit arbiter` and `Stage4 regime overlay` are excluded. See [2026-05-06_current_top_muzero_az_stage2_azexit.md](model_contracts/2026-05-06_current_top_muzero_az_stage2_azexit.md).
+
 이 문서는 현재 워크스페이스에서 확인된 **최대 수익률 메인 DSAC 모델**의 전체 파이프라인을 정리한 것이다.
 
 ## 1. 최종 우승 모델
@@ -231,13 +234,10 @@
 ### 5.4 M7 Ensemble Output
 
 - `m7_trend_xgb_dn`
-- `m7_trend_xgb_fl`
 - `m7_trend_xgb_up`
 - `m7_mtl_dn`
-- `m7_mtl_fl`
 - `m7_mtl_up`
 - `m7_quant_dn`
-- `m7_quant_fl`
 - `m7_quant_up`
 - `m7_confidence`
 - `m7_action`
@@ -297,7 +297,6 @@
 
 주 원천 컬럼:
 - `m7_trend_xgb_dn`
-- `m7_trend_xgb_fl`
 - `m7_trend_xgb_up`
 - `m7_quality_pred`
 - `m7_hold_pred`
@@ -360,7 +359,6 @@
 메인 29-state가 직접 영향을 크게 받는 컬럼은 주로 아래다.
 
 - `m7_trend_xgb_dn`
-- `m7_trend_xgb_fl`
 - `m7_trend_xgb_up`
 - `m7_quality_pred`
 - `m7_hold_pred`

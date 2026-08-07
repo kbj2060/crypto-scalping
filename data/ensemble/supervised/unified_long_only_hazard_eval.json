@@ -1,0 +1,94 @@
+{
+  "config_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/unified_long_only_specialists_eval.json",
+  "base_calibration_result": {
+    "pnl_pct": -7.586330981318145,
+    "trades": 145,
+    "wr_pct": 38.62068965517241,
+    "mdd_pct": -13.158004935857281,
+    "longs": 145,
+    "shorts": 0
+  },
+  "hazard_rows": 23,
+  "val_auc": null,
+  "val_ap": null,
+  "test_auc": 0.5,
+  "test_ap": 0.25,
+  "threshold_search": [
+    {
+      "hazard_threshold": 0.55,
+      "holdout_2025": {
+        "pnl_pct": -3.0977289474948932,
+        "trades": 33,
+        "wr_pct": 27.27272727272727,
+        "mdd_pct": -3.724712814965081,
+        "longs": 33,
+        "shorts": 0
+      },
+      "score": -4.028907151236163
+    },
+    {
+      "hazard_threshold": 0.6,
+      "holdout_2025": {
+        "pnl_pct": -3.0977289474948932,
+        "trades": 33,
+        "wr_pct": 27.27272727272727,
+        "mdd_pct": -3.724712814965081,
+        "longs": 33,
+        "shorts": 0
+      },
+      "score": -4.028907151236163
+    },
+    {
+      "hazard_threshold": 0.65,
+      "holdout_2025": {
+        "pnl_pct": -3.0977289474948932,
+        "trades": 33,
+        "wr_pct": 27.27272727272727,
+        "mdd_pct": -3.724712814965081,
+        "longs": 33,
+        "shorts": 0
+      },
+      "score": -4.028907151236163
+    },
+    {
+      "hazard_threshold": 0.7,
+      "holdout_2025": {
+        "pnl_pct": -3.0977289474948932,
+        "trades": 33,
+        "wr_pct": 27.27272727272727,
+        "mdd_pct": -3.724712814965081,
+        "longs": 33,
+        "shorts": 0
+      },
+      "score": -4.028907151236163
+    }
+  ],
+  "best_threshold": {
+    "hazard_threshold": 0.55,
+    "holdout_2025": {
+      "pnl_pct": -3.0977289474948932,
+      "trades": 33,
+      "wr_pct": 27.27272727272727,
+      "mdd_pct": -3.724712814965081,
+      "longs": 33,
+      "shorts": 0
+    },
+    "score": -4.028907151236163
+  },
+  "holdout_2025": {
+    "pnl_pct": -3.0977289474948932,
+    "trades": 33,
+    "wr_pct": 27.27272727272727,
+    "mdd_pct": -3.724712814965081,
+    "longs": 33,
+    "shorts": 0
+  },
+  "oos_2026": {
+    "pnl_pct": 0.5267460648673117,
+    "trades": 20,
+    "wr_pct": 55.00000000000001,
+    "mdd_pct": -1.6782527044322593,
+    "longs": 20,
+    "shorts": 0
+  }
+}

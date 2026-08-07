@@ -1,0 +1,135 @@
+{
+  "account_credentials_used": false,
+  "endpoint_allowlist": [
+    "/fapi/v1/klines",
+    "/fapi/v1/fundingRate",
+    "/futures/data/openInterestHist",
+    "/futures/data/topLongShortPositionRatio",
+    "/futures/data/topLongShortAccountRatio",
+    "/futures/data/globalLongShortAccountRatio",
+    "/futures/data/takerlongshortRatio"
+  ],
+  "failure_reason": null,
+  "fresh_start_utc": "2026-07-18 03:55:00",
+  "model_id": "eth_micro_scalp_source_stable_fast_twitch_v5_20260718",
+  "model_sha256": "ca44f05440261bb5afed0f8b50762c6665eedabda14b9f3928beba8bbc6c6fc1",
+  "order_endpoints_used": false,
+  "output": "/home/llewyn/crypto-scalping/data/live/eth_micro_scalp_v5_features_1m.csv",
+  "output_end_utc": "2026-07-18 03:56:00",
+  "output_rows": 61,
+  "output_sha256": "db1f9411949e5146a9965c463e113e6fa4de95a61e0b040091cffaee2dc1376f",
+  "output_start_utc": "2026-07-18 02:56:00",
+  "parity": {
+    "canonical_source_coverage_end_utc": "2026-06-30 16:00:00",
+    "end_utc": "2026-06-30 16:00:00",
+    "max_scaled_error": 0.006262653565592659,
+    "p99_scaled_error": 3.7149445756273926e-08,
+    "pass": true,
+    "rows": 360,
+    "start_utc": "2026-06-30 10:01:00",
+    "thresholds": {
+      "max_scaled_error": 0.1,
+      "p99_scaled_error": 0.02
+    },
+    "worst_features": [
+      {
+        "max_scaled_error": 0.006262653565592659,
+        "name": "execution_quality",
+        "p99_scaled_error": 0.0037510991592263464
+      },
+      {
+        "max_scaled_error": 2.471734327613184e-07,
+        "name": "bb_width_z",
+        "p99_scaled_error": 2.471734327613184e-07
+      },
+      {
+        "max_scaled_error": 8.632247937497e-08,
+        "name": "mean_reversion_z",
+        "p99_scaled_error": 8.632247937497e-08
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "bar_open_close_logret",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "bar_range_pct",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "log_volume",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "log_quote_volume",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "log_trade_count",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "bar_taker_buy_ratio",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "net_taker_ratio",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "taker_acceleration",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "trade_intensity",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "big_trade_ratio",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "log_return",
+        "p99_scaled_error": 0.0
+      },
+      {
+        "max_scaled_error": 0.0,
+        "name": "volatility_z",
+        "p99_scaled_error": 0.0
+      }
+    ]
+  },
+  "public_market_data_only": true,
+  "published": true,
+  "schema_version": "eth_micro_scalp_v5.feature_stream_build.v1",
+  "source": {
+    "btc_kline_rows": 6049,
+    "causal_context_start_utc": "2026-06-26 15:56:00",
+    "eth_kline_rows": 30241,
+    "funding_rows": 65,
+    "metric_rows": 6192,
+    "source_end_utc": "2026-07-18 03:56:00",
+    "source_start_utc": "2026-06-27 03:56:00"
+  },
+  "stream_contract": {
+    "actual_rows": 61,
+    "available_book_values_finite": true,
+    "available_micro_values_finite": true,
+    "covers_fresh_start": true,
+    "minimum_required_rows": 60,
+    "no_infinite_values": true,
+    "one_minute_cadence": true,
+    "pass": true,
+    "required_values_finite": true
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "model_id": "state_option_moe_2026",
+  "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/state_option_moe_2026_contract.md",
+  "data": {
+    "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_rows": 87496,
+    "validation_rows": 17568,
+    "oos_rows": 16897,
+    "feature_cols": [
+      "log_return",
+      "rogers_satchell_vol",
+      "garch_vol_z",
+      "volatility_z",
+      "jump_flag",
+      "jump_z",
+      "wick_ratio",
+      "hurst_48",
+      "amihud_illiquidity_z",
+      "liquidity_vacuum",
+      "execution_quality",
+      "ofti",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "trade_intensity",
+      "big_trade_ratio",
+      "ofi_acceleration",
+      "sum_open_interest_value",
+      "sum_toptrader_long_short_ratio",
+      "count_long_short_ratio",
+      "oi_change_rate",
+      "long_squeeze_risk",
+      "crowding_pressure",
+      "whale_retail_ratio",
+      "whale_conviction",
+      "last_funding_rate",
+      "funding_abs",
+      "funding_pressure",
+      "funding_roc_288",
+      "funding_price_divergence",
+      "ou_funding_z",
+      "ou_halflife",
+      "btc_corr_60",
+      "eth_btc_ratio_change",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "rsi",
+      "breakout_strength",
+      "m7_action",
+      "m7_hold_pred",
+      "m7_expected_ret",
+      "m7_confidence",
+      "m7_qwidth",
+      "m7_tp_offset",
+      "m7_sl_offset",
+      "pred_patchtst",
+      "conf_patchtst",
+      "patchtst_median",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_flow_pressure",
+      "ai_flow_exhaustion",
+      "ai_flow_flip_prob",
+      "ai_flow_slope",
+      "dlinear_smf_ema",
+      "dlinear_smf_slope",
+      "regime_bull",
+      "regime_bear",
+      "regime_chop",
+      "regime_whipsaw",
+      "regime_normal",
+      "regime_persistence",
+      "cross_scale_curvature",
+      "evt_tail_flag",
+      "evt_excess_z",
+      "evt_candidate_side",
+      "evt_candidate_label",
+      "evt_cost_hurdle",
+      "evt_side_margin"
+    ]
+  },
+  "training": {
+    "state_tokens": 64,
+    "candidate_train_rows": 450000,
+    "max_iter": 60,
+    "seed": 42
+  },
+  "selected_config": {
+    "name": "cv0.0_co0.0_to0.00_p0.55_u0.0000_c30_mt12",
+    "lambda_cvar": 0.0,
+    "lambda_cost": 0.0,
+    "lambda_turnover": 0.0,
+    "prob_large_loss_block": 0.55,
+    "min_utility": 0.0,
+    "cost_3x_required": false,
+    "max_daily_trades": 12,
+    "loss_cooldown_bars": 24
+  },
+  "validation": {
+    "candidate": {
+      "pnl": 1227.0963870316657,
+      "mdd": -9.1166434791358,
+      "trades": 391,
+      "trades_per_day": 6.409836065573771,
+      "wr": 0.6649616368286445,
+      "avg_notional": 2.1342710997442436,
+      "avg_leverage": 2.1342710997442436,
+      "long_entries": 197,
+      "short_entries": 194
+    },
+    "cost_3x": {
+      "pnl": -16.24597350342185,
+      "mdd": -33.38765301708331,
+      "trades": 332,
+      "trades_per_day": 5.442622950819672,
+      "wr": 0.37349397590361444,
+      "avg_notional": 1.0957981927710796,
+      "avg_leverage": 1.1725301204819265,
+      "long_entries": 155,
+      "short_entries": 177
+    },
+    "score": 918.7028779075529
+  },
+  "oos": {
+    "candidate": {
+      "pnl": 362.6561012937483,
+      "mdd": -10.073050921470772,
+      "trades": 310,
+      "trades_per_day": 5.254237288135593,
+      "wr": 0.6129032258064516,
+      "avg_notional": 2.1132258064516125,
+      "avg_leverage": 2.1132258064516125,
+      "long_entries": 150,
+      "short_entries": 160
+    },
+    "cost_2x": {
+      "pnl": 11.151299918211333,
+      "mdd": -21.32069345890082,
+      "trades": 262,
+      "trades_per_day": 4.440677966101695,
+      "wr": 0.46564885496183206,
+      "avg_notional": 1.6448282442748101,
+      "avg_leverage": 1.6787022900763353,
+      "long_entries": 137,
+      "short_entries": 125
+    },
+    "cost_3x": {
+      "pnl": -26.855081188282725,
+      "mdd": -42.38576388735533,
+      "trades": 332,
+      "trades_per_day": 5.627118644067797,
+      "wr": 0.39457831325301207,
+      "avg_notional": 1.0553463855421652,
+      "avg_leverage": 1.138253012048192,
+      "long_entries": 180,
+      "short_entries": 152
+    }
+  },
+  "baseline_reference": {
+    "pnl": 752.648580357841,
+    "mdd": -18.755787211251405,
+    "trades": 353,
+    "trades_per_day": 6.017045454545455,
+    "avg_leverage": 1.5960290252000644,
+    "cost_2x_pnl": 279.3638542719212,
+    "cost_3x_pnl": 75.840036609542
+  },
+  "research_reference": {
+    "pnl": 210.53568634188076,
+    "mdd": -18.015154932248112,
+    "trades_per_day": 6.0,
+    "cost_3x_pnl": 0.0
+  },
+  "audit": {
+    "notional_nonnegative": true,
+    "trades_positive": true,
+    "mdd_finite": true,
+    "pnl_finite": true,
+    "passed": true
+  },
+  "promotion_gate": {
+    "baseline_pnl_gate": false,
+    "baseline_mdd_gate": true,
+    "trades_per_day_gate": false,
+    "avg_leverage_gate": true,
+    "cost_2x_survival": true,
+    "cost_3x_survival": false,
+    "invariant_audit_passed": true,
+    "research_gate": false,
+    "decision": "reject"
+  },
+  "artifacts": {
+    "model_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/state_option_moe_2026",
+    "state_encoder": "/home/llewyn/crypto-scalping/data/ensemble/supervised/state_option_moe_2026/state_encoder.pkl",
+    "option_critics": "/home/llewyn/crypto-scalping/data/ensemble/supervised/state_option_moe_2026/option_critics.pkl",
+    "option_selector": "/home/llewyn/crypto-scalping/data/ensemble/supervised/state_option_moe_2026/option_selector.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/state_option_moe_2026.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/state_option_moe_2026_grid.csv",
+    "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/state_option_moe_2026_ledger.csv",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/state_option_moe_2026.md"
+  },
+  "artifact_sha256": {
+    "state_encoder": "927749f20a0beeb4538d6f9daee28eb62271e86d789ef3bb3d7eed6e818f0654",
+    "option_critics": "6b6b3bf19c81ebca437f9302957e0685389ae8d7d3560a2f472d757a69a1a4e9",
+    "option_selector": "3a33be57f9c4ed0b42fd312a54f2e2255ba5abd0d089df68bcfb5d6b8c5360eb"
+  }
+}

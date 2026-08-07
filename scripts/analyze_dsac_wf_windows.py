@@ -109,7 +109,6 @@ def analyze(csv_path: str, ckpt_path: str, train_ratio: float, windows: int) -> 
     window_results: list[dict[str, object]] = []
     feature_cols = [
         "m7_trend_xgb_dn",
-        "m7_trend_xgb_fl",
         "m7_trend_xgb_up",
         "m7_q50",
         "m7_quality_pred",

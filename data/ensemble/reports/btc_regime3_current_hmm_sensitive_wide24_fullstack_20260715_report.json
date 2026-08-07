@@ -1,0 +1,248 @@
+{
+  "model_id": "btc_regime3_current_hmm_sensitive_wide24_fullstack_20260715",
+  "label_mode": "balancedish_adx16_slope15_bb012",
+  "label_config": {
+    "trend_adx_min": 16.0,
+    "weak_adx_max": 12.0,
+    "slope_min": 0.00015,
+    "tight_bb_max": 0.012,
+    "prefix_stem": "regime3_current_sensitive"
+  },
+  "prefix_stem": "regime3_current_sensitive",
+  "fit_source": "data/splits/year_oos/btc_features_2024.csv",
+  "validation_policy": "2024Q4 validation; 2025/2026 forward tests; 2026 not used for selection",
+  "feature_sets": {
+    "wide24": {
+      "feature_set": "wide24",
+      "label_mode": "balancedish_adx16_slope15_bb012",
+      "label_config": {
+        "trend_adx_min": 16.0,
+        "weak_adx_max": 12.0,
+        "slope_min": 0.00015,
+        "tight_bb_max": 0.012,
+        "prefix_stem": "regime3_current_sensitive"
+      },
+      "feature_cols": [
+        "state7_trend_score",
+        "state7_trend_efficiency_48",
+        "state7_directional_return_48",
+        "state7_volatility_state",
+        "state7_sign_flip_rate_24",
+        "state7_range_compression",
+        "state7_flow_alignment",
+        "state12_log_return",
+        "state12_garman_klass_vol",
+        "state12_net_taker_ratio",
+        "state12_oi_change_rate",
+        "state12_chop_index",
+        "volatility_z",
+        "rsi",
+        "macd_hist",
+        "bb_width_z",
+        "hma_slope",
+        "wick_ratio",
+        "mtf_trend_1h",
+        "mtf_trend_4h",
+        "breakout_strength",
+        "mean_reversion_z",
+        "ofi_acceleration",
+        "taker_acceleration"
+      ],
+      "feature_count": 24,
+      "validation": {
+        "rows": 26496,
+        "accuracy": 0.7449426328502415,
+        "balanced_accuracy": 0.7937273228896126,
+        "log_loss": 0.6840961516313457,
+        "recall": {
+          "bull": 0.7850467289719626,
+          "bear": 0.868866695614416,
+          "chop": 0.727268544082459
+        },
+        "true_counts": {
+          "bull": 2461,
+          "bear": 2303,
+          "chop": 21732
+        },
+        "pred_counts": {
+          "bull": 4630,
+          "bear": 5487,
+          "chop": 16379
+        },
+        "confusion_matrix": [
+          [
+            1932,
+            228,
+            301
+          ],
+          [
+            29,
+            2001,
+            273
+          ],
+          [
+            2669,
+            3258,
+            15805
+          ]
+        ],
+        "flip_rate": 0.1051141724853746,
+        "mean_state_duration_bars": 9.510409188801148,
+        "median_state_duration_bars": 4.0
+      },
+      "log_likelihood_validation": [
+        -133850.7420355255,
+        400113.01954018313,
+        471396.6102398319,
+        504319.66948143515,
+        519290.728395533,
+        526530.8266499008,
+        531404.736350087,
+        535175.6214308965,
+        538104.6535048326,
+        540577.4805994299,
+        542665.7871189086,
+        544464.0246649631,
+        546032.9592725912,
+        547422.1823178778,
+        548772.5666451354,
+        550157.7048745541,
+        551486.1094923663,
+        552638.2769280629,
+        553572.5416601489,
+        554344.7061218299,
+        555012.2626983157,
+        555594.1457741765
+      ],
+      "log_likelihood_final": [
+        -172880.9819918703,
+        556520.69572603,
+        678555.881151981,
+        710158.773845523,
+        721926.0567912398,
+        728082.5874095373,
+        732262.2943575068,
+        735510.5892940755,
+        738121.1331873271,
+        740238.169595335,
+        741950.7395501361,
+        743359.9802704124,
+        744524.8468287218,
+        745454.0737243457,
+        746181.4011503927,
+        746777.6834005238,
+        747294.7852134,
+        747773.5177777694,
+        748247.0072812971,
+        748746.5297762381,
+        749292.2587123554,
+        749942.252286499
+      ],
+      "model_path": "data/ensemble/supervised/btc_regime3_current_hmm_sensitive_wide24_fullstack_20260715/regime3_current_sensitive_hmm_wide24_2024.joblib"
+    }
+  },
+  "outputs": {
+    "wide24": {
+      "btc_features_2025.csv": {
+        "source": "data/splits/year_oos/btc_features_2025.csv",
+        "sidecar": "data/ensemble/supervised/btc_regime3_current_hmm_sensitive_wide24_fullstack_20260715/btc_features_2025_regime3_current_sensitive_hmm_wide24.csv",
+        "rows": 105120,
+        "range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "metrics": {
+          "rows": 105120,
+          "accuracy": 0.7657914764079148,
+          "balanced_accuracy": 0.7986435916777527,
+          "log_loss": 0.6729025362100655,
+          "recall": {
+            "bull": 0.8236760124610591,
+            "bear": 0.8141809290953546,
+            "chop": 0.758073833476844
+          },
+          "true_counts": {
+            "bull": 6420,
+            "bear": 6953,
+            "chop": 91747
+          },
+          "pred_counts": {
+            "bull": 13113,
+            "bear": 20988,
+            "chop": 71019
+          },
+          "confusion_matrix": [
+            [
+              5288,
+              55,
+              1077
+            ],
+            [
+              901,
+              5661,
+              391
+            ],
+            [
+              6924,
+              15272,
+              69551
+            ]
+          ],
+          "flip_rate": 0.09786051998211551,
+          "mean_state_duration_bars": 10.217729393468119,
+          "median_state_duration_bars": 4.0
+        }
+      },
+      "btc_features_2026.csv": {
+        "source": "data/splits/year_oos/btc_features_2026.csv",
+        "sidecar": "data/ensemble/supervised/btc_regime3_current_hmm_sensitive_wide24_fullstack_20260715/btc_features_2026_regime3_current_sensitive_hmm_wide24.csv",
+        "rows": 55499,
+        "range": [
+          "2026-01-01 00:00:00",
+          "2026-07-12 16:50:00"
+        ],
+        "metrics": {
+          "rows": 55499,
+          "accuracy": 0.7733472675183337,
+          "balanced_accuracy": 0.7918684268187876,
+          "log_loss": 0.6435304665235406,
+          "recall": {
+            "bull": 0.7861136999068034,
+            "bear": 0.8220507166482911,
+            "chop": 0.7674408639012684
+          },
+          "true_counts": {
+            "bull": 4292,
+            "bear": 4535,
+            "chop": 46672
+          },
+          "pred_counts": {
+            "bull": 6512,
+            "bear": 11918,
+            "chop": 37069
+          },
+          "confusion_matrix": [
+            [
+              3374,
+              42,
+              876
+            ],
+            [
+              432,
+              3728,
+              375
+            ],
+            [
+              2706,
+              8148,
+              35818
+            ]
+          ],
+          "flip_rate": 0.10014775307218278,
+          "mean_state_duration_bars": 9.98363014930743,
+          "median_state_duration_bars": 4.0
+        }
+      }
+    }
+  }
+}

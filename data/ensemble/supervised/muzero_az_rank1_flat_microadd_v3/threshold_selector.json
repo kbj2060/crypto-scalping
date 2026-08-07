@@ -1,0 +1,25 @@
+{
+  "type": "muzero_az_rank1_flat_microadd_v3_2026_threshold_selector",
+  "selected_defense_config": {
+    "mode": "identity_no_active_row_defense"
+  },
+  "selected_microadd_config": {
+    "vote_margin_min": 0.15,
+    "vote_agreement_min": 2,
+    "microadd_survival_prob_min": 0.62,
+    "microadd_edge_floor_3x": 0.0005,
+    "microadd_max_cvar_loss": 0.018,
+    "microadd_notional_cap": 0.05,
+    "microadd_leverage_ceiling": 1.0,
+    "microadd_entries_per_day_cap": 1.25,
+    "microadd_cooldown_bars": 12
+  },
+  "validation_score": 0.2619597858518915,
+  "eligible_count": 0,
+  "ineligible_counts": {
+    "microadd_entry_count": 139,
+    "trades_per_day": 142,
+    "pnl": 160
+  },
+  "grid_count": 160
+}

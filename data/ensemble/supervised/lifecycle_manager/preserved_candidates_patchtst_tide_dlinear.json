@@ -1,0 +1,186 @@
+{
+  "type": "preserved_lifecycle_candidates_patchtst_tide_dlinear",
+  "created_from_reports": {
+    "walkforward": "data/ensemble/reports/lifecycle_walkforward_patchtst_tide_dlinear_2026.json",
+    "cost_stress": "data/ensemble/reports/lifecycle_cost_stress_patchtst_tide_dlinear_2026.json",
+    "ai_stress": "data/ensemble/reports/lifecycle_ai_failure_stress_patchtst_tide_dlinear_2026.json"
+  },
+  "base_policy": "data/ensemble/supervised/fully_learned_ai_combo_grid/patchtst__tide__dlinear.pkl",
+  "lifecycle_model": "data/ensemble/supervised/lifecycle_manager/patchtst_tide_dlinear_lifecycle_exit.pkl",
+  "audit": {
+    "train_rows": 105064,
+    "eval_rows": 16897,
+    "train_start": "2025-01-01 00:00:00",
+    "train_end": "2025-12-31 23:55:00",
+    "eval_start": "2026-01-01 00:00:00",
+    "eval_end": "2026-02-28 16:00:00",
+    "timestamp_overlap_rows": 0,
+    "train_duplicate_timestamps": 0,
+    "eval_duplicate_timestamps": 0,
+    "lifecycle_feature_count": 99,
+    "expected_feature_count": 99,
+    "feature_count_match": true,
+    "suspicious_lifecycle_features": [
+      "lc_unrealized",
+      "lc_peak_unrealized"
+    ],
+    "sample_meta": {
+      "samples": 22886,
+      "exit_labels": 2610,
+      "exit_label_rate": 0.1140435200559294,
+      "entries": 218,
+      "min_age": 3,
+      "sample_stride": 1,
+      "exit_edge": 0.003,
+      "adverse_edge": 0.8
+    }
+  },
+  "preserved": {
+    "highest_return": {
+      "name": "best_validation_scaleup",
+      "config": {
+        "exit_threshold": 0.85,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": 0.1,
+        "scale_up_multiplier": 1.25,
+        "max_notional": 3.6,
+        "min_age": 3
+      },
+      "full_eval": {
+        "pnl": 383.51803547606835,
+        "mdd": -27.466326665218865,
+        "trades": 81,
+        "wr": 0.38271604938271603,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 40,
+        "short_entries": 41,
+        "avg_notional": 2.3222114681144985,
+        "avg_leverage": 2.4942837266277493,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 30
+      },
+      "cost_stress": {
+        "cost_1x": {
+          "pnl": 383.51803547606835,
+          "mdd": -27.466326665218865,
+          "trades": 81,
+          "wr": 0.38271604938271603,
+          "trades_per_day": 1.3806818181818183,
+          "lifecycle_exits": 14,
+          "scale_downs": 0,
+          "scale_ups": 30
+        },
+        "cost_2x": {
+          "pnl": 265.982850212476,
+          "mdd": -30.91206458723782,
+          "trades": 76,
+          "wr": 0.32894736842105265,
+          "trades_per_day": 1.2954545454545454,
+          "lifecycle_exits": 14,
+          "scale_downs": 0,
+          "scale_ups": 31
+        },
+        "cost_3x": {
+          "pnl": 151.03461668854342,
+          "mdd": -37.913235869012816,
+          "trades": 83,
+          "wr": 0.26506024096385544,
+          "trades_per_day": 1.4147727272727273,
+          "lifecycle_exits": 13,
+          "scale_downs": 0,
+          "scale_ups": 32
+        }
+      },
+      "ai_stress_normal": {
+        "pnl": 383.51803547606835,
+        "mdd": -27.466326665218865,
+        "trades": 81,
+        "wr": 0.38271604938271603,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 40,
+        "short_entries": 41,
+        "avg_notional": 2.3222114681144985,
+        "avg_leverage": 2.4942837266277493,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 30
+      },
+      "status": "preserved_not_live_default_due_mdd"
+    },
+    "pragmatic_live_candidate": {
+      "name": "best_eval_scaledown",
+      "config": {
+        "exit_threshold": 0.85,
+        "scale_threshold": 0.65,
+        "scale_multiplier": 0.5,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0,
+        "max_notional": 3.6,
+        "min_age": 3
+      },
+      "full_eval": {
+        "pnl": 305.4268085314828,
+        "mdd": -22.35217722805333,
+        "trades": 60,
+        "wr": 0.38333333333333336,
+        "trades_per_day": 1.0227272727272727,
+        "long_entries": 19,
+        "short_entries": 41,
+        "avg_notional": 2.417599734308796,
+        "avg_leverage": 2.6093299494105424,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 0
+      },
+      "cost_stress": {
+        "cost_1x": {
+          "pnl": 305.4268085314828,
+          "mdd": -22.35217722805333,
+          "trades": 60,
+          "wr": 0.38333333333333336,
+          "trades_per_day": 1.0227272727272727,
+          "lifecycle_exits": 10,
+          "scale_downs": 12,
+          "scale_ups": 0
+        },
+        "cost_2x": {
+          "pnl": 216.21958657623512,
+          "mdd": -23.851185947241827,
+          "trades": 62,
+          "wr": 0.3548387096774194,
+          "trades_per_day": 1.0568181818181819,
+          "lifecycle_exits": 10,
+          "scale_downs": 11,
+          "scale_ups": 0
+        },
+        "cost_3x": {
+          "pnl": 168.88097064408564,
+          "mdd": -24.657919323385926,
+          "trades": 64,
+          "wr": 0.328125,
+          "trades_per_day": 1.090909090909091,
+          "lifecycle_exits": 11,
+          "scale_downs": 8,
+          "scale_ups": 0
+        }
+      },
+      "ai_stress_normal": {
+        "pnl": 305.4268085314828,
+        "mdd": -22.35217722805333,
+        "trades": 60,
+        "wr": 0.38333333333333336,
+        "trades_per_day": 1.0227272727272727,
+        "long_entries": 19,
+        "short_entries": 41,
+        "avg_notional": 2.417599734308796,
+        "avg_leverage": 2.6093299494105424,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 0
+      },
+      "status": "candidate_for_live_after_extended_search"
+    }
+  }
+}

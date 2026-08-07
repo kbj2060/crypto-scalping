@@ -1,0 +1,71 @@
+{
+  "type": "microstructure_wnc_strict_causal_retest_audit",
+  "rebuild": [
+    {
+      "source": "/home/llewyn/crypto-scalping/tmp/pipeline_audit_causal_regime/trade_candidates_2025_causal_regime.csv",
+      "output": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2025_microstructure_wnc_strict_causal.csv",
+      "rows": 105064,
+      "cols_before": 144,
+      "cols_after": 144,
+      "recomputed_base_regime": true
+    },
+    {
+      "source": "/home/llewyn/crypto-scalping/tmp/pipeline_audit_causal_regime/trade_candidates_2026_causal_regime_strict_scored.csv",
+      "output": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_microstructure_wnc_strict_causal.csv",
+      "rows": 16897,
+      "cols_before": 144,
+      "cols_after": 144,
+      "recomputed_base_regime": true
+    }
+  ],
+  "input_audit": [
+    {
+      "path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2025_microstructure_wnc_strict_causal.csv",
+      "rows": 105064,
+      "missing": [],
+      "transitions": 3216,
+      "segment_len_max": 320,
+      "stable_rate": 0.3851842686362598,
+      "bad_start_len_count": 0,
+      "bad_start_age_count": 0,
+      "bad_len_age_count": 0,
+      "bad_age_frac_count": 0,
+      "stable_before_min_len_count": 0,
+      "bad_start_len_examples": [],
+      "bad_len_age_examples": [],
+      "bad_age_frac_examples": [],
+      "blocking": []
+    },
+    {
+      "path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_microstructure_wnc_strict_causal.csv",
+      "rows": 16897,
+      "missing": [],
+      "transitions": 510,
+      "segment_len_max": 165,
+      "stable_rate": 0.3840918506243712,
+      "bad_start_len_count": 0,
+      "bad_start_age_count": 0,
+      "bad_len_age_count": 0,
+      "bad_age_frac_count": 0,
+      "stable_before_min_len_count": 0,
+      "bad_start_len_examples": [],
+      "bad_len_age_examples": [],
+      "bad_age_frac_examples": [],
+      "blocking": []
+    }
+  ],
+  "blocking": [],
+  "verdict": "pass",
+  "feature_audit": {
+    "searched_feature_sets": [
+      "no_m7_aux",
+      "minimal",
+      "no_m7_all"
+    ],
+    "selected_feature_set": "no_m7_all",
+    "forbidden_feature_sets_present": [],
+    "blocking": []
+  },
+  "report_out": "data/ensemble/reports/microstructure_wnc_strict_causal_retest_grid450_2026.json",
+  "model_out": "data/ensemble/supervised/microstructure_wnc_strict_causal_retest_grid450.pkl"
+}

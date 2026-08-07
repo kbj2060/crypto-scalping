@@ -1,0 +1,34 @@
+{
+  "method": "permutation_importance",
+  "metric": "roc_auc_score(multi_class='ovr', average='macro') vs zigzag_action (0=cash,1=long,2=short) label; importance = baseline_auc - permuted_auc",
+  "val_window": {
+    "start": "2025-09-01",
+    "end": "2025-12-31 23:59:59",
+    "rule": "CLAUDE.md Fresh-Forward Validation Rule fixed VAL split"
+  },
+  "n_rows": 35136,
+  "seed": 20260724,
+  "permutations_per_feature": 1,
+  "routing_held_fixed": true,
+  "components": {
+    "h48qual": {
+      "component": "h48qual",
+      "bundle": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630/true_3head_tabm_bundle.pt",
+      "n_rows": 35136,
+      "baseline_auc_direction": 0.7520549676232937,
+      "baseline_auc_quality": 0.5755858082813983
+    },
+    "zig075": {
+      "component": "zig075",
+      "bundle": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629/true_3head_tabm_bundle.pt",
+      "n_rows": 35136,
+      "baseline_auc_direction": 0.7545541768338521,
+      "baseline_auc_quality": 0.7555260739136823
+    }
+  },
+  "data_sources": {
+    "base_frame": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+    "regime3_wide24_overlay": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2025_regime3_current_sensitive_hmm_wide24.csv",
+    "labels": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/zigzag_action_labels_20260531/zigzag_action_labels_2025.csv"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "execution_component_is_ohlcv_proxy_not_live_l2_orderbook"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "selected_config": {
+    "name": "deep_or_strict",
+    "scope": "deep",
+    "min_hold": 3,
+    "mae_trigger": 0.018,
+    "unreal_trigger": -0.0135,
+    "adverse_flow_th": 0.5,
+    "opp_utility_th": 0.025,
+    "require_both": false,
+    "cooldown_after": 6,
+    "flow_th": 0.1,
+    "fee_mult": 0.6,
+    "slip_mult": 0.35
+  },
+  "parent_frozen": true,
+  "v27_entry_frozen": true,
+  "v21_2_model_frozen": true
+}

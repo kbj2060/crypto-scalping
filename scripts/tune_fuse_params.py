@@ -238,15 +238,14 @@ def _compute_dsac_stream(df: pd.DataFrame, ckpt_path: str, device: str) -> pd.Da
 
 def _trend_signal_from_row(row: dict[str, float]) -> dict[str, float]:
     p_dn = float(np.clip(row.get("m7_trend_xgb_dn", 0.0), 0.0, 1.0))
-    p_fl = float(np.clip(row.get("m7_trend_xgb_fl", 0.0), 0.0, 1.0))
     p_up = float(np.clip(row.get("m7_trend_xgb_up", 0.0), 0.0, 1.0))
-    s = p_dn + p_fl + p_up
+    s = p_dn + p_up
     if s <= 1e-12:
-        p_dn = p_fl = p_up = 1.0 / 3.0
+        p_dn = p_up = 0.5
     else:
-        p_dn, p_fl, p_up = p_dn / s, p_fl / s, p_up / s
+        p_dn, p_up = p_dn / s, p_up / s
 
-    t_dir = int(np.argmax([p_dn, p_fl, p_up]))
+    t_dir = 2 if p_up >= p_dn else 0
     m7_action = int(np.clip(round(row.get("m7_action", 0.0)), -1, 1))
     if m7_action > 0:
         t_dir = 2
@@ -263,7 +262,6 @@ def _trend_signal_from_row(row: dict[str, float]) -> dict[str, float]:
         "strength": strength,
         "rev_prob": rev_prob,
         "prob_dn": p_dn,
-        "prob_flat": p_fl,
         "prob_up": p_up,
         "m7_confidence": m7_conf,
         "m7_action": float(m7_action),
@@ -657,7 +655,6 @@ def _to_arrays(df: pd.DataFrame) -> dict[str, np.ndarray]:
         "dsac_score",
         "dsac_raw_action",
         "m7_trend_xgb_dn",
-        "m7_trend_xgb_fl",
         "m7_trend_xgb_up",
         "m7_confidence",
         "m7_action",

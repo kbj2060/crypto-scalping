@@ -1,0 +1,159 @@
+{
+  "status": "pass",
+  "verdict": "shadow_candidate_not_default",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "one_month_parity_candidate_only_not_full_2026_live_promotion",
+    "previous_parent_plus_downstream_full_2026_report_did_not_beat_alpha3"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "model_meta": {
+    "snapshot_count": 20052,
+    "positive_rate": 0.8720825852782765,
+    "jackpot_rate": 0.3833532814681827,
+    "bad_rate": 0.08477957310991423,
+    "cost3_positive_rate": 0.8723319369638939,
+    "target_mean": 0.012465419239048602,
+    "target_p10": -0.0014223086883659573,
+    "target_cost2_p90": 0.048660514136489745,
+    "target_p75": 0.01959459649244273,
+    "target_p95": 0.04479031968635111
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "selected_config": {
+    "name": "v21_2_jackpot_runner_1",
+    "full_edge_th": 99.0,
+    "half_edge_th": 99.0,
+    "p_th": 0.6,
+    "q10_floor": -0.006,
+    "jackpot_p": 0.2,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.5,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "full_add_frac": 0.2,
+    "half_add_frac": 0.0,
+    "max_total_mult": 1.35,
+    "max_entry_notional": 2.75,
+    "dd_block": 0.3
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 199.5442148936891,
+      "mdd": -31.741344176793795,
+      "trades": 80,
+      "wr": 0.2,
+      "trades_per_day": 1.3636363636363638,
+      "long_entries": 26,
+      "short_entries": 54,
+      "avg_notional": 2.5442550650576323,
+      "avg_leverage": 2.6265866309482573,
+      "action_counts": {
+        "cash": 12565,
+        "long": 26,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 64,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 12,
+        "jackpot_add": 12,
+        "reject": 31
+      }
+    },
+    "cost2": {
+      "pnl": 113.24305052028865,
+      "mdd": -33.83742243071508,
+      "trades": 84,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 29,
+      "short_entries": 55,
+      "avg_notional": 2.5262024910375263,
+      "avg_leverage": 2.582028060883188,
+      "action_counts": {
+        "cash": 12606,
+        "long": 29,
+        "short": 55
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 13,
+        "jackpot_add": 13,
+        "reject": 32
+      }
+    },
+    "cost3": {
+      "pnl": 24.714228358176072,
+      "mdd": -43.356241663986125,
+      "trades": 93,
+      "wr": 0.16129032258064516,
+      "trades_per_day": 1.5852272727272727,
+      "long_entries": 35,
+      "short_entries": 58,
+      "avg_notional": 2.523076311145801,
+      "avg_leverage": 2.5850181543329804,
+      "action_counts": {
+        "cash": 12797,
+        "long": 35,
+        "short": 58
+      },
+      "exits": {
+        "learned_stop_loss": 78,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "runner_actions": {
+        "add_on": 14,
+        "jackpot_add": 14,
+        "reject": 26
+      }
+    }
+  },
+  "parent_replacement": {
+    "enabled": true,
+    "candidate": "ft_grouped_hgb_surrogate",
+    "mutable_surface": "parent_only",
+    "frozen_layers": [
+      "teacher_gate",
+      "v21_2_runner",
+      "v27_deep_scout",
+      "v31_exit",
+      "execution",
+      "accounting",
+      "data"
+    ],
+    "parity_summary": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_parent_replacement_parity_20260516_summary.json",
+    "activation": "Set FINAL_GOVERNOR_V21_2_JACKPOT_REPORT_PATH to this report path. Not enabled by default."
+  }
+}

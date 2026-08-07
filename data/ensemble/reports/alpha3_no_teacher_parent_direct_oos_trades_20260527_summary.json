@@ -1,0 +1,40 @@
+{
+  "model_id": "alpha3_no_teacher_parent_direct_oos_trades_20260527",
+  "alpha_sub_version": "alpha3.1",
+  "alpha_sub_version_name": "alpha3_1_no_teacher_parent_direct_20260527",
+  "status": "named_sub_version_candidate_not_live_promoted",
+  "variant": "no_teacher_parent_direct",
+  "metrics_cost3": {
+    "pnl": 122.02353682607266,
+    "mdd": -30.35985114338784,
+    "trades": 260,
+    "wr": 0.36538461538461536,
+    "trades_per_day": 4.431818181818182,
+    "deep_entries": 123,
+    "long_entries": 105,
+    "short_entries": 155,
+    "avg_notional": 2.025387262259355,
+    "avg_leverage": 2.1556820892522106,
+    "exits": {
+      "deep_alpha_hard_stop_loss": 78,
+      "deep_alpha_max_hold": 31,
+      "v21_2_hard_stop_loss": 71,
+      "v21_2_giveback_exit": 52,
+      "v21_2_max_hold": 11,
+      "v21_2_take_profit": 3,
+      "deep_alpha_giveback_exit": 11,
+      "deep_alpha_take_profit": 3
+    },
+    "runner_actions": {
+      "deep_entry": 123,
+      "v21_entry": 137
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 520
+    }
+  },
+  "ledger_rows": 260,
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_no_teacher_parent_direct_oos_trades_20260527_cost3_ledger.csv",
+  "chart_full": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_no_teacher_parent_direct_oos_trades_20260527_candles_cost3.png",
+  "chart_zoom": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_no_teacher_parent_direct_oos_trades_20260527_trade_windows_cost3.png"
+}

@@ -1,0 +1,54 @@
+{
+  "model_id": "alpha3_runtime_native_live_parity_after_mae_forced_fix_20260516",
+  "created_at_kst": "2026-05-16",
+  "purpose": "Record Alpha3 CSV canonical versus trading_bot FinalGovernorRuntime runtime-native parity fixes for future model architecture and backtest work.",
+  "canonical_reference": {
+    "report": "data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516.json",
+    "ledger": "data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516_ledger_corrected.csv",
+    "start_index": 6999,
+    "end_index": 15638,
+    "start_timestamp_utc": "2026-01-25 07:15:00",
+    "end_timestamp_utc": "2026-02-24 07:10:00",
+    "pnl_pct": 338.68067144958997,
+    "mdd_pct": -29.617312952777574,
+    "action_events": 237,
+    "event_counts": {
+      "OPEN": 114,
+      "CLOSE": 113,
+      "UPSIZE": 9,
+      "FORCED_END": 1
+    }
+  },
+  "runtime_native_result": {
+    "report": "data/ensemble/reports/alpha3_runtime_native_trading_bot_logic_after_mae_forced_fix_fast_20260516_1m.json",
+    "ledger": "data/ensemble/reports/alpha3_runtime_native_trading_bot_logic_after_mae_forced_fix_fast_20260516_1m_ledger.csv",
+    "pnl_pct": 338.67987283290336,
+    "mdd_pct": -29.617095389040106,
+    "action_events": 237,
+    "first_action_diff": null,
+    "pnl_diff_pct": -0.000798616686648046,
+    "event_counts": {
+      "OPEN": 114,
+      "CLOSE": 113,
+      "UPSIZE": 9,
+      "FORCED_END": 1
+    }
+  },
+  "fixed_contract_gaps": [
+    "Alpha2.1 teacher and V31 sequence models must use frame-level inference and latest row, not latest-row-only zero-padded sequences.",
+    "V21.2 jackpot add-on must use canonical parent-bundle feature frame and Alpha2.1-constrained decision row.",
+    "V21.2 jackpot add-on must receive cumulative MFE and cumulative MAE.",
+    "meta_router current/peak equity must be updated before FinalGovernorRuntime.decide.",
+    "V21.2 add-on reject consumes the one-shot add-on attempt for the active parent position.",
+    "V31 deep cooldown decrements before entry evaluation.",
+    "Forced-end close uses canonical stop index, not stop+1."
+  ],
+  "primary_docs": {
+    "model_contract": "docs/model_contracts/alpha3_csv_native_backtest_parity_20260516.md",
+    "redteam_audit": "docs/experiments/alpha3_csv_native_parity_redteam_20260516.md",
+    "model_architect_memory": "docs/subagents/model_architect.md",
+    "backtest_expert_memory": "docs/subagents/implementation_maintainer.md"
+  },
+  "required_runtime_native_command": "venv/bin/python scripts/backtest_alpha3_runtime_native_20260515.py --start-index 6999 --end-index 15638 --accelerated-cache --alpha3-csv-execution-parity --alpha3-csv-state-parity --alpha3-csv-mark-parity --alpha3-csv-cooldown-parity-env --report-out data/ensemble/reports/alpha3_runtime_native_trading_bot_logic_after_mae_forced_fix_fast_20260516_1m.json --ledger-out data/ensemble/reports/alpha3_runtime_native_trading_bot_logic_after_mae_forced_fix_fast_20260516_1m_ledger.csv --progress 0",
+  "promotion_warning": "This parity proves research/backtest comparability, not live exchange fill validity. OHLCV maker touch still requires real L2 queue and partial-fill validation."
+}

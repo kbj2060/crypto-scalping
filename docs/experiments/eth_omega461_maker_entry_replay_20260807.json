@@ -1,0 +1,101 @@
+{
+  "fee_saving_bps_when_maker_filled": 2.5,
+  "fill_rule": "post-only at entry 1m open; strict trade-through; fallback taker at open[entry+K]",
+  "ledger_role": "diagnostic lookup of entry timestamps/sides/outcomes only",
+  "splits": {
+    "VAL": {
+      "trades_in_ledger": 30,
+      "trades_matched_1m": 30,
+      "deadline_5m": {
+        "fill_rate": 0.9,
+        "improvement_mean_bps": -0.22721665478143696,
+        "improvement_min_bps": -42.46011322696863,
+        "fallback_slippage_mean_bps": -24.77216654781437,
+        "unfilled_trades": 3,
+        "unfilled_trade_returns": [
+          -0.0557,
+          0.138,
+          0.0868
+        ],
+        "pnl_missed_if_no_fallback": 0.16918629614556868,
+        "fill_rate_winners": 0.8666666666666667,
+        "fill_rate_losers": 0.9333333333333333
+      },
+      "deadline_15m": {
+        "fill_rate": 0.9,
+        "improvement_mean_bps": -0.6569157511014687,
+        "improvement_min_bps": -32.08239875910901,
+        "fallback_slippage_mean_bps": -29.06915751101469,
+        "unfilled_trades": 3,
+        "unfilled_trade_returns": [
+          -0.0557,
+          0.138,
+          0.0868
+        ],
+        "pnl_missed_if_no_fallback": 0.16918629614556868,
+        "fill_rate_winners": 0.8666666666666667,
+        "fill_rate_losers": 0.9333333333333333
+      },
+      "deadline_30m": {
+        "fill_rate": 0.9,
+        "improvement_mean_bps": -1.941050237758416,
+        "improvement_min_bps": -50.079296043918916,
+        "fallback_slippage_mean_bps": -41.91050237758416,
+        "unfilled_trades": 3,
+        "unfilled_trade_returns": [
+          -0.0557,
+          0.138,
+          0.0868
+        ],
+        "pnl_missed_if_no_fallback": 0.16918629614556868,
+        "fill_rate_winners": 0.8666666666666667,
+        "fill_rate_losers": 0.9333333333333333
+      },
+      "ledger_total_trade_return": 0.8621012313792045,
+      "per_trade_return_mean_bps": 287.3670771264015
+    },
+    "OOS_extended": {
+      "trades_in_ledger": 33,
+      "trades_matched_1m": 33,
+      "deadline_5m": {
+        "fill_rate": 0.9090909090909091,
+        "improvement_mean_bps": 1.5916428396109303,
+        "improvement_min_bps": -15.661668919150218,
+        "fallback_slippage_mean_bps": -7.491928764279769,
+        "unfilled_trades": 3,
+        "unfilled_trade_returns": [
+          0.1144,
+          -0.0422,
+          0.1507
+        ],
+        "pnl_missed_if_no_fallback": 0.2228681577269038,
+        "fill_rate_winners": 0.875,
+        "fill_rate_losers": 0.9411764705882353
+      },
+      "deadline_15m": {
+        "fill_rate": 1.0,
+        "improvement_mean_bps": 2.5,
+        "improvement_min_bps": 2.5,
+        "fallback_slippage_mean_bps": 0.0,
+        "unfilled_trades": 0,
+        "unfilled_trade_returns": [],
+        "pnl_missed_if_no_fallback": 0.0,
+        "fill_rate_winners": 1.0,
+        "fill_rate_losers": 1.0
+      },
+      "deadline_30m": {
+        "fill_rate": 1.0,
+        "improvement_mean_bps": 2.5,
+        "improvement_min_bps": 2.5,
+        "fallback_slippage_mean_bps": 0.0,
+        "unfilled_trades": 0,
+        "unfilled_trade_returns": [],
+        "pnl_missed_if_no_fallback": 0.0,
+        "fill_rate_winners": 1.0,
+        "fill_rate_losers": 1.0
+      },
+      "ledger_total_trade_return": 1.0081568574953472,
+      "per_trade_return_mean_bps": 305.5020780288931
+    }
+  }
+}

@@ -1,0 +1,438 @@
+{
+  "model_id": "hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512",
+  "design": "Two-stage v40.6 parent split. Stage 1 keeps Chronos/Kairos PLS encoded HGB but only trains action and quality heads. Stage 2 trains one LightGBM bucket allocator family for notional, leverage, TP, SL, max_hold, and cooldown. Stage 2 training uses forward OOF action/quality predictions to avoid same-row stacking leakage and compares AQ-only versus AQ+encoded-context inputs.",
+  "split_policy": "Train=2025 Jan-Sep, selection=2025 Q4, OOS=2026 fixed",
+  "projection_spec": {
+    "macro_dim": 1,
+    "micro_dim": 1,
+    "drop_raw_micro": true
+  },
+  "stage1_hparams": {
+    "max_iter": 220,
+    "learning_rate": 0.04,
+    "max_leaf_nodes": 31,
+    "l2_regularization": 0.08,
+    "cash_weight": 0.35
+  },
+  "selected_bucket_hparams": {
+    "n_estimators": 180,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_child_samples": 40,
+    "reg_alpha": 0.2,
+    "reg_lambda": 1.0,
+    "path_smooth": 1.0,
+    "extra_trees": true
+  },
+  "selected_stage2_mode": "aq_plus_context",
+  "stage2_feature_cols": [
+    "aq_p_cash",
+    "aq_p_long",
+    "aq_p_short",
+    "aq_trade_prob",
+    "aq_dir_edge",
+    "aq_action",
+    "aq_side",
+    "aq_action_conf",
+    "aq_action_margin",
+    "aq_action_entropy",
+    "aq_quality",
+    "aq_abs_quality",
+    "aq_quality_x_side",
+    "aq_quality_x_trade_prob",
+    "ctx_000",
+    "ctx_001",
+    "ctx_002",
+    "ctx_003",
+    "ctx_004",
+    "ctx_005",
+    "ctx_006",
+    "ctx_007",
+    "ctx_008",
+    "ctx_009",
+    "ctx_010",
+    "ctx_011",
+    "ctx_012",
+    "ctx_013",
+    "ctx_014",
+    "ctx_015",
+    "ctx_016",
+    "ctx_017",
+    "ctx_018",
+    "ctx_019",
+    "ctx_020",
+    "ctx_021",
+    "ctx_022",
+    "ctx_023",
+    "ctx_024",
+    "ctx_025",
+    "ctx_026",
+    "ctx_027",
+    "ctx_028",
+    "ctx_029",
+    "ctx_030",
+    "ctx_031",
+    "ctx_032",
+    "ctx_033",
+    "ctx_034",
+    "ctx_035",
+    "ctx_036",
+    "ctx_037",
+    "ctx_038",
+    "ctx_039",
+    "ctx_040",
+    "ctx_041",
+    "ctx_042",
+    "ctx_043",
+    "ctx_044",
+    "ctx_045",
+    "ctx_046",
+    "ctx_047",
+    "ctx_048",
+    "ctx_049",
+    "ctx_050",
+    "ctx_051",
+    "ctx_052",
+    "ctx_053",
+    "ctx_054",
+    "ctx_055",
+    "ctx_056",
+    "ctx_057",
+    "ctx_058",
+    "ctx_059",
+    "ctx_060",
+    "ctx_061",
+    "ctx_062",
+    "ctx_063",
+    "ctx_064",
+    "ctx_065",
+    "ctx_066",
+    "ctx_067",
+    "ctx_068",
+    "ctx_069",
+    "ctx_070",
+    "ctx_071",
+    "ctx_072",
+    "ctx_073",
+    "ctx_074",
+    "ctx_075",
+    "ctx_076",
+    "ctx_077",
+    "ctx_078",
+    "ctx_079",
+    "ctx_080",
+    "ctx_081",
+    "ctx_082"
+  ],
+  "stage2_oof_rows": 979,
+  "stage2_oof_trade_rows": 156,
+  "validation": {
+    "cost1": {
+      "pnl": 20.222814889968287,
+      "mdd": -47.90119359178191,
+      "trades": 84,
+      "wr": 0.15476190476190477,
+      "trades_per_day": 0.9130779392338177,
+      "long_entries": 16,
+      "short_entries": 68,
+      "avg_notional": 3.5245898744903323,
+      "avg_leverage": 3.512112593830936,
+      "action_counts": {
+        "cash": 21168,
+        "long": 16,
+        "short": 68
+      },
+      "exits": {
+        "learned_stop_loss": 71,
+        "learned_max_hold": 12,
+        "learned_take_profit": 1
+      }
+    },
+    "cost2": {
+      "pnl": -20.682201643276755,
+      "mdd": -60.04255257638316,
+      "trades": 87,
+      "wr": 0.13793103448275862,
+      "trades_per_day": 0.9456878656350255,
+      "long_entries": 17,
+      "short_entries": 70,
+      "avg_notional": 3.519123091239692,
+      "avg_leverage": 3.507921865481701,
+      "action_counts": {
+        "cash": 21433,
+        "long": 17,
+        "short": 70
+      },
+      "exits": {
+        "learned_stop_loss": 74,
+        "learned_max_hold": 12,
+        "learned_take_profit": 1
+      }
+    },
+    "cost3": {
+      "pnl": -50.00153867668655,
+      "mdd": -73.0866224858778,
+      "trades": 92,
+      "wr": 0.13043478260869565,
+      "trades_per_day": 1.0000377429703717,
+      "long_entries": 19,
+      "short_entries": 73,
+      "avg_notional": 3.518858297425925,
+      "avg_leverage": 3.508432930114458,
+      "action_counts": {
+        "cash": 21979,
+        "long": 19,
+        "short": 73
+      },
+      "exits": {
+        "learned_stop_loss": 79,
+        "learned_max_hold": 12,
+        "learned_take_profit": 1
+      }
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 17.45899350694049,
+      "mdd": -41.41691408580056,
+      "trades": 22,
+      "wr": 0.22727272727272727,
+      "trades_per_day": 0.375,
+      "long_entries": 6,
+      "short_entries": 16,
+      "avg_notional": 3.448064808247982,
+      "avg_leverage": 3.4636130664531803,
+      "action_counts": {
+        "cash": 15017,
+        "long": 6,
+        "short": 16
+      },
+      "exits": {
+        "learned_max_hold": 6,
+        "learned_stop_loss": 16
+      }
+    },
+    "cost2": {
+      "pnl": 1.6446771093437507,
+      "mdd": -43.99386175654655,
+      "trades": 23,
+      "wr": 0.17391304347826086,
+      "trades_per_day": 0.3920454545454546,
+      "long_entries": 6,
+      "short_entries": 17,
+      "avg_notional": 3.459249529105212,
+      "avg_leverage": 3.471056408988992,
+      "action_counts": {
+        "cash": 15247,
+        "long": 6,
+        "short": 17
+      },
+      "exits": {
+        "learned_max_hold": 5,
+        "learned_stop_loss": 18
+      }
+    },
+    "cost3": {
+      "pnl": -7.59901292257481,
+      "mdd": -46.21344497201911,
+      "trades": 23,
+      "wr": 0.17391304347826086,
+      "trades_per_day": 0.3920454545454546,
+      "long_entries": 6,
+      "short_entries": 17,
+      "avg_notional": 3.459249529105212,
+      "avg_leverage": 3.471056408988992,
+      "action_counts": {
+        "cash": 15262,
+        "long": 6,
+        "short": 17
+      },
+      "exits": {
+        "learned_max_hold": 5,
+        "learned_stop_loss": 18
+      }
+    }
+  },
+  "baseline_v40_6_oos": {
+    "baseline": {
+      "cost1": {
+        "pnl": 13.25617742308074,
+        "mdd": -34.787307692791515,
+        "trades": 80,
+        "wr": 0.175,
+        "trades_per_day": 1.3636363636363638,
+        "long_entries": 26,
+        "short_entries": 54,
+        "avg_notional": 2.7541836093735172,
+        "avg_leverage": 3.0408401119589064,
+        "action_counts": {
+          "cash": 13243,
+          "long": 26,
+          "short": 54
+        },
+        "exits": {
+          "learned_stop_loss": 66,
+          "learned_max_hold": 9,
+          "learned_take_profit": 4,
+          "forced_end": 1
+        }
+      },
+      "cost2": {
+        "pnl": -14.938621324730905,
+        "mdd": -39.40138579881241,
+        "trades": 81,
+        "wr": 0.1728395061728395,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 26,
+        "short_entries": 55,
+        "avg_notional": 2.760212352371307,
+        "avg_leverage": 3.038818428906757,
+        "action_counts": {
+          "cash": 13244,
+          "long": 26,
+          "short": 55
+        },
+        "exits": {
+          "learned_stop_loss": 67,
+          "learned_max_hold": 9,
+          "learned_take_profit": 4,
+          "forced_end": 1
+        }
+      },
+      "cost3": {
+        "pnl": -52.80738058547178,
+        "mdd": -56.44826209755542,
+        "trades": 91,
+        "wr": 0.13186813186813187,
+        "trades_per_day": 1.5511363636363638,
+        "long_entries": 28,
+        "short_entries": 63,
+        "avg_notional": 2.7737635730043513,
+        "avg_leverage": 3.038632385344876,
+        "action_counts": {
+          "cash": 13464,
+          "long": 28,
+          "short": 63
+        },
+        "exits": {
+          "learned_stop_loss": 79,
+          "learned_max_hold": 8,
+          "learned_take_profit": 4
+        }
+      }
+    },
+    "target_aware_full": {
+      "cost1": {
+        "pnl": 125.60804218560504,
+        "mdd": -32.83678858576566,
+        "trades": 56,
+        "wr": 0.23214285714285715,
+        "trades_per_day": 0.9545454545454546,
+        "long_entries": 37,
+        "short_entries": 19,
+        "avg_notional": 2.9239520775089813,
+        "avg_leverage": 3.0859879586380154,
+        "action_counts": {
+          "cash": 13767,
+          "long": 37,
+          "short": 19
+        },
+        "exits": {
+          "learned_max_hold": 8,
+          "learned_stop_loss": 42,
+          "learned_take_profit": 6
+        }
+      },
+      "cost2": {
+        "pnl": 77.38544941372747,
+        "mdd": -40.717225075520226,
+        "trades": 58,
+        "wr": 0.22413793103448276,
+        "trades_per_day": 0.9886363636363636,
+        "long_entries": 38,
+        "short_entries": 20,
+        "avg_notional": 2.932353784388931,
+        "avg_leverage": 3.0870876050216514,
+        "action_counts": {
+          "cash": 13859,
+          "long": 38,
+          "short": 20
+        },
+        "exits": {
+          "learned_max_hold": 7,
+          "learned_stop_loss": 44,
+          "learned_take_profit": 7
+        }
+      },
+      "cost3": {
+        "pnl": 49.66066786233203,
+        "mdd": -47.49432009751647,
+        "trades": 61,
+        "wr": 0.21311475409836064,
+        "trades_per_day": 1.0397727272727273,
+        "long_entries": 41,
+        "short_entries": 20,
+        "avg_notional": 2.936125380986449,
+        "avg_leverage": 3.0949495483960376,
+        "action_counts": {
+          "cash": 13779,
+          "long": 41,
+          "short": 20
+        },
+        "exits": {
+          "learned_max_hold": 8,
+          "learned_stop_loss": 47,
+          "learned_take_profit": 6
+        }
+      }
+    },
+    "delta_cost1_pnl": 112.3518647625243,
+    "delta_cost1_mdd": 1.9505191070258547,
+    "delta_cost2_pnl": 92.32407073845837,
+    "delta_cost3_pnl": 102.46804844780382
+  },
+  "audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "cost3_not_survived"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025 Q4 bucket allocator HP selection",
+    "oos_window": "2026 fixed OOS only after selection",
+    "stage1": "v40_6 encoded action/quality HGB only",
+    "stage2": "LightGBM bucket allocator selected between AQ-only and AQ+encoded-context features",
+    "stage2_forward_oof": true,
+    "stage2_selected_mode": "aq_plus_context",
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    }
+  },
+  "artifacts": {
+    "action_quality_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512/action_quality_parent.pkl",
+    "bucket_allocator": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512/lgbm_bucket_allocator.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_aq_lgbm_bucket_allocator_v40_11_20260512_grid.csv"
+  }
+}

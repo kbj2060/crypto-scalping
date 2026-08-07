@@ -1,0 +1,142 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "oos_cost1_did_not_beat_v21_2",
+    "cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "policy": "deep_residual_scout_sleeve_v27_1",
+  "v21_2_preserved": true,
+  "deep_sleeve_only_when_parent_cash": true,
+  "forbidden_sequence_columns": [],
+  "train_snapshot_count": 26141,
+  "target_mean": [
+    0.0025978130288422108,
+    0.002350033260881901,
+    -0.00688099255785346,
+    -0.007157753221690655,
+    0.0011960641713812947,
+    0.000951694673858583
+  ],
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "selected_config": {
+    "name": "v27_1_slow_guard",
+    "edge_th": 0.012,
+    "margin_th": 0.004,
+    "q10_floor": -0.004,
+    "cost3_edge_th": 0.004,
+    "notional": 1.0,
+    "take_profit": 0.045,
+    "stop_loss": 0.022,
+    "max_hold": 48,
+    "cooldown": 12
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 119.61303327805327,
+      "mdd": -31.741344176793785,
+      "trades": 138,
+      "wr": 0.35507246376811596,
+      "trades_per_day": 2.3522727272727275,
+      "deep_entries": 74,
+      "long_entries": 60,
+      "short_entries": 78,
+      "avg_notional": 1.7251309621651048,
+      "avg_leverage": 1.7624977676877989,
+      "exits": {
+        "deep_alpha_max_hold": 58,
+        "v21_2_max_hold": 8,
+        "v21_2_stop_loss": 49,
+        "v21_2_take_profit": 7,
+        "deep_alpha_take_profit": 1,
+        "deep_alpha_stop_loss": 14,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "deep_entry": 74,
+        "v21_entry": 64,
+        "v21_reject": 27,
+        "v21_add_on": 10
+      }
+    },
+    "cost2": {
+      "pnl": 63.46039882332206,
+      "mdd": -33.83742243071507,
+      "trades": 141,
+      "wr": 0.3191489361702128,
+      "trades_per_day": 2.403409090909091,
+      "deep_entries": 74,
+      "long_entries": 65,
+      "short_entries": 76,
+      "avg_notional": 1.7359094137147162,
+      "avg_leverage": 1.7658600796644388,
+      "exits": {
+        "deep_alpha_max_hold": 57,
+        "v21_2_max_hold": 8,
+        "v21_2_stop_loss": 52,
+        "deep_alpha_stop_loss": 14,
+        "v21_2_take_profit": 7,
+        "deep_alpha_take_profit": 2,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "deep_entry": 74,
+        "v21_entry": 67,
+        "v21_reject": 29,
+        "v21_add_on": 9
+      }
+    },
+    "cost3": {
+      "pnl": -4.44573097515033,
+      "mdd": -47.572767671364524,
+      "trades": 146,
+      "wr": 0.2534246575342466,
+      "trades_per_day": 2.4886363636363638,
+      "deep_entries": 75,
+      "long_entries": 72,
+      "short_entries": 74,
+      "avg_notional": 1.7448314978335473,
+      "avg_leverage": 1.7595052978796548,
+      "exits": {
+        "deep_alpha_max_hold": 58,
+        "v21_2_max_hold": 8,
+        "v21_2_stop_loss": 57,
+        "deep_alpha_stop_loss": 14,
+        "v21_2_take_profit": 6,
+        "deep_alpha_take_profit": 2,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "deep_entry": 75,
+        "v21_entry": 71,
+        "v21_reject": 24,
+        "v21_add_on": 8
+      }
+    }
+  }
+}

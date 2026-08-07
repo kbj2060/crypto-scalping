@@ -1,0 +1,209 @@
+{
+  "feature_count": 92,
+  "contains_tp_sl_action_score": false,
+  "best_by_selection": "parent_direct_raw_no_teacher_fast",
+  "selection_score": -22.517926270310333,
+  "selected_validation_metrics": {
+    "cost1": {
+      "pnl": -6.55560160912807,
+      "mdd": -28.083408957295084,
+      "trades": 80,
+      "trades_per_day": 0.8695980373655408,
+      "wr": 0.075,
+      "avg_notional": 2.37333005177003
+    },
+    "cost2": {
+      "pnl": -8.521363998506137,
+      "mdd": -28.63681434618962,
+      "trades": 82,
+      "trades_per_day": 0.8913379882996793,
+      "wr": 0.07317073170731707,
+      "avg_notional": 2.374326246779561
+    },
+    "cost3": {
+      "pnl": -7.661725756004079,
+      "mdd": -29.447213099893666,
+      "trades": 82,
+      "trades_per_day": 0.8913379882996793,
+      "wr": 0.07317073170731707,
+      "avg_notional": 2.3866321879923653
+    }
+  },
+  "selected_metrics": {
+    "cost1": {
+      "pnl": 34.208688130480766,
+      "mdd": -27.609710807938935,
+      "trades": 67,
+      "trades_per_day": 1.1420454545454546,
+      "wr": 0.16417910447761194,
+      "avg_notional": 2.4097290514181817
+    },
+    "cost2": {
+      "pnl": 30.51575388367249,
+      "mdd": -28.50267724687474,
+      "trades": 70,
+      "trades_per_day": 1.1931818181818181,
+      "wr": 0.15714285714285714,
+      "avg_notional": 2.4136106286515346
+    },
+    "cost3": {
+      "pnl": 24.386312988887404,
+      "mdd": -29.183232795974334,
+      "trades": 72,
+      "trades_per_day": 1.2272727272727273,
+      "wr": 0.1527777777777778,
+      "avg_notional": 2.4361045753673998
+    }
+  },
+  "selected_parent_scale_runtime": null,
+  "train_meta": {
+    "candidates": 13047,
+    "stride_bars": 6,
+    "max_train_horizon_bars": 288
+  },
+  "experiments": [
+    {
+      "name": "parent_direct_raw_no_teacher_fast",
+      "selection_score": -22.517926270310333,
+      "validation_metrics": {
+        "cost1": {
+          "pnl": -6.55560160912807,
+          "mdd": -28.083408957295084,
+          "trades": 80,
+          "wr": 0.075,
+          "trades_per_day": 0.8695980373655408,
+          "deep_entries": 0,
+          "long_entries": 27,
+          "short_entries": 53,
+          "avg_notional": 2.37333005177003,
+          "avg_leverage": 2.5344720692593206,
+          "exits": {
+            "v21_2_stop_loss": 74,
+            "v21_2_max_hold": 6
+          },
+          "runner_actions": {
+            "v21_entry": 80
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 160
+          }
+        },
+        "cost2": {
+          "pnl": -8.521363998506137,
+          "mdd": -28.63681434618962,
+          "trades": 82,
+          "wr": 0.07317073170731707,
+          "trades_per_day": 0.8913379882996793,
+          "deep_entries": 0,
+          "long_entries": 27,
+          "short_entries": 55,
+          "avg_notional": 2.374326246779561,
+          "avg_leverage": 2.5361447212785113,
+          "exits": {
+            "v21_2_stop_loss": 76,
+            "v21_2_max_hold": 6
+          },
+          "runner_actions": {
+            "v21_entry": 82
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 164
+          }
+        },
+        "cost3": {
+          "pnl": -7.661725756004079,
+          "mdd": -29.447213099893666,
+          "trades": 82,
+          "wr": 0.07317073170731707,
+          "trades_per_day": 0.8913379882996793,
+          "deep_entries": 0,
+          "long_entries": 26,
+          "short_entries": 56,
+          "avg_notional": 2.3866321879923653,
+          "avg_leverage": 2.54742848165229,
+          "exits": {
+            "v21_2_stop_loss": 76,
+            "v21_2_max_hold": 6
+          },
+          "runner_actions": {
+            "v21_entry": 82
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 164
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 34.208688130480766,
+          "mdd": -27.609710807938935,
+          "trades": 67,
+          "wr": 0.16417910447761194,
+          "trades_per_day": 1.1420454545454546,
+          "deep_entries": 0,
+          "long_entries": 26,
+          "short_entries": 41,
+          "avg_notional": 2.4097290514181817,
+          "avg_leverage": 2.657691264777983,
+          "exits": {
+            "v21_2_stop_loss": 56,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 67
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 134
+          }
+        },
+        "cost2": {
+          "pnl": 30.51575388367249,
+          "mdd": -28.50267724687474,
+          "trades": 70,
+          "wr": 0.15714285714285714,
+          "trades_per_day": 1.1931818181818181,
+          "deep_entries": 0,
+          "long_entries": 27,
+          "short_entries": 43,
+          "avg_notional": 2.4136106286515346,
+          "avg_leverage": 2.667682471286184,
+          "exits": {
+            "v21_2_stop_loss": 59,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 70
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 140
+          }
+        },
+        "cost3": {
+          "pnl": 24.386312988887404,
+          "mdd": -29.183232795974334,
+          "trades": 72,
+          "wr": 0.1527777777777778,
+          "trades_per_day": 1.2272727272727273,
+          "deep_entries": 0,
+          "long_entries": 27,
+          "short_entries": 45,
+          "avg_notional": 2.4361045753673998,
+          "avg_leverage": 2.6935393420490414,
+          "exits": {
+            "v21_2_stop_loss": 61,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 72
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 144
+          }
+        }
+      }
+    }
+  ]
+}

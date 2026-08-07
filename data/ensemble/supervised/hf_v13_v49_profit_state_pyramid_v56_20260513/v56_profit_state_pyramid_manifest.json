@@ -1,0 +1,28 @@
+{
+  "model_id": "hf_v13_v49_profit_state_pyramid_v56_20260513",
+  "selected_config": {
+    "name": "v56_identity_v49",
+    "scope": "none",
+    "add_trigger_mfe": 99.0,
+    "max_close_p": 0.0,
+    "addon_frac": 0.0,
+    "max_total_mult": 1.0,
+    "opposite_utility_block": -99.0,
+    "dd_block": 0.0,
+    "require_unrealized": 99.0
+  },
+  "overlay": {
+    "name": "v33_rl_p055_n1",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "close_p_th": 0.55,
+    "min_hold": 1,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48
+  },
+  "v49_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_v31_rl_surrounding_v49_v50_v51_20260512/v49_exit_rl_raw_all.pkl",
+  "raw_state_feature_count": 164
+}

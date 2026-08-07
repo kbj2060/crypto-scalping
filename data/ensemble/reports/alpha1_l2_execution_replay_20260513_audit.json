@@ -1,0 +1,46 @@
+{
+  "status": "pass",
+  "verdict": "shadow_collect_l2",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "historical_l2_snapshots_insufficient_conservative_ohlc_replay_only",
+    "real_live_l2_fill_model_requires_forward_shadow_collection",
+    "l2_replay_taker_fallback_uses_same_bar_close_after_high_low_touch_window"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "live_l2_stats": {
+    "storage": "duckdb",
+    "db_path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb",
+    "table": "orderbook_decision_snapshots",
+    "exists": true,
+    "rows": 229,
+    "first_timestamp_kst": "2026-05-13 23:50:00",
+    "last_timestamp_kst": "2026-05-14 22:55:00",
+    "usable_for_replay": false
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "red_team_note": "This resolves live data collection for alpha1.4 execution warnings. It does not claim historical L2 validation until enough orderbook_snapshots.jsonl rows exist."
+}

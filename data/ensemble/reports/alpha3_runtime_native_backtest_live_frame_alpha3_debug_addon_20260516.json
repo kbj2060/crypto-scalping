@@ -1,0 +1,111 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-16T04:34:36.738123+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_backtest_live_frame_alpha3_debug_addon_20260516_ledger.csv",
+  "range": {
+    "start_index": 6999,
+    "stop_index": 8398,
+    "rows_evaluated": 1400,
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-01-30 03:50:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "execution_parity_contract": "alpha3_csv_next_open_limit_touch0_fee20",
+    "window_bars": 7000,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame",
+    "v31_config_override": null,
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_state_parity": true,
+    "alpha3_csv_decision_parity": true,
+    "alpha3_csv_mark_parity": false,
+    "alpha3_limit_config": {
+      "name": "next_open_limit_touch0_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "penetration_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "skip",
+      "exit_miss": "market_fallback"
+    },
+    "alpha3_fee": 0.0005,
+    "alpha3_slip": 0.0002
+  },
+  "metrics": {
+    "final_equity": 1.2158611137685855,
+    "return_pct": 21.586111376858554,
+    "max_drawdown_pct": 15.109191027480495,
+    "decision_counts": {
+      "2": 618,
+      "0": 729,
+      "1": 53
+    },
+    "entry_counts": {
+      "SHORT": 8,
+      "LONG": 2
+    },
+    "closed_trades": 10,
+    "win_rate": 0.3,
+    "avg_closed_pnl_pct": 2.2587902244406273,
+    "median_closed_pnl_pct": -0.843853398077421,
+    "resize_events": 2,
+    "regime_counts": {
+      "BEAR": 367,
+      "WHIPSAW": 136,
+      "NORMAL": 461,
+      "BULL": 297,
+      "CHOP": 139
+    },
+    "exit_reason_top20": {
+      "learned_stop_loss": 5,
+      "v31_deep_alpha_stop_loss": 2,
+      "learned_max_hold": 1,
+      "v31_deep_alpha_max_hold": 1,
+      "learned_take_profit": 1
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "alpha3_csv_execution_parity: _try_immediate_limit route fees plus LotBook alpha3 pnl math",
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_execution_parity_note": "entries/exits/upsizes/downsizes pass through _try_immediate_limit; maker fills use maker_fee_mult; entry misses skip; exit misses close fallback",
+    "alpha3_csv_state_parity": true,
+    "alpha3_csv_state_parity_note": "close events arm lifecycle parent cooldown and V31 deep cooldown like canonical CSV Alpha3; same-bar flip re-entry is suppressed",
+    "alpha3_csv_decision_parity": true,
+    "alpha3_csv_decision_parity_note": "parent raw decisions, teacher probability rows, and V31 q are injected from canonical CSV full-frame precompute",
+    "alpha3_csv_mark_parity": false,
+    "alpha3_csv_mark_parity_note": "",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide",
+    "accelerated_live_cache": {
+      "enabled": true,
+      "prepared_rows": 16897,
+      "parent_decision_rows": 16897,
+      "teacher_decision_rows": 16897,
+      "window_bars": 7000
+    },
+    "csv_decision_parity": {
+      "enabled": true,
+      "parent_decision_rows": 16897,
+      "teacher_decision_rows": 16897,
+      "v31_q_rows": 16897,
+      "teacher_runtime": {
+        "name": "noflip_c0.56_parent_scale1.10",
+        "confidence": 0.56,
+        "parent_notional_scale": 1.1,
+        "max_notional": 2.75
+      },
+      "source": "canonical_csv_alpha3_full_2026_precompute"
+    }
+  },
+  "errors_sample": []
+}

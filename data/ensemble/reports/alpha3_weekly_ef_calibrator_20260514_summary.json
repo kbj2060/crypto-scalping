@@ -1,0 +1,419 @@
+{
+  "model_id": "alpha3_weekly_ef_calibrator_20260514",
+  "design": "Alpha3 + weekly EF runtime calibrator. Frozen model weights are unchanged. EF selects teacher confidence, parent notional scale, and post-only limit/fallback execution parameters once per week using only prior data, then replays 2026 OOS continuously.",
+  "experiments": [
+    {
+      "name": "alpha3_baseline_fixed_runtime",
+      "runtime": {
+        "name": "noflip_c0.56_parent_scale1.10",
+        "confidence": 0.56,
+        "parent_notional_scale": 1.1,
+        "max_notional": 2.75
+      },
+      "limit_cfg": {
+        "name": "next_open_limit_offset2_entry_fallback_fee20",
+        "anchor": "next_open",
+        "entry_offset_bps": 2.0,
+        "exit_offset_bps": 2.0,
+        "penetration_bps": 0.5,
+        "maker_fee_mult": 0.2,
+        "entry_miss": "market_fallback",
+        "exit_miss": "market_fallback"
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 747.7633445835039,
+          "mdd": -27.371163392481957,
+          "trades": 193,
+          "wr": 0.31088082901554404,
+          "trades_per_day": 3.2897727272727275,
+          "deep_entries": 129,
+          "long_entries": 81,
+          "short_entries": 112,
+          "avg_notional": 2.206280642502077,
+          "avg_leverage": 2.1869131861033577,
+          "exits": {
+            "deep_alpha_max_hold": 34,
+            "deep_alpha_stop_loss": 80,
+            "v21_2_stop_loss": 49,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 15
+          },
+          "runner_actions": {
+            "deep_entry": 129,
+            "v21_entry": 64,
+            "v21_reject": 28,
+            "v21_add_on": 13
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 329,
+            "exit_market_fallback_after_limit_miss": 24,
+            "entry_market_fallback_after_limit_miss": 46
+          }
+        },
+        "cost2": {
+          "pnl": 510.8304626482262,
+          "mdd": -29.678188621789392,
+          "trades": 197,
+          "wr": 0.29949238578680204,
+          "trades_per_day": 3.3579545454545454,
+          "deep_entries": 132,
+          "long_entries": 81,
+          "short_entries": 116,
+          "avg_notional": 2.2058993096593955,
+          "avg_leverage": 2.188115420438316,
+          "exits": {
+            "deep_alpha_max_hold": 34,
+            "deep_alpha_stop_loss": 84,
+            "v21_2_stop_loss": 50,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 132,
+            "v21_entry": 65,
+            "v21_reject": 25,
+            "v21_add_on": 14
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 338,
+            "exit_market_fallback_after_limit_miss": 24,
+            "entry_market_fallback_after_limit_miss": 46
+          }
+        },
+        "cost3": {
+          "pnl": 436.67780103550973,
+          "mdd": -30.387082488046524,
+          "trades": 196,
+          "wr": 0.2857142857142857,
+          "trades_per_day": 3.340909090909091,
+          "deep_entries": 130,
+          "long_entries": 82,
+          "short_entries": 114,
+          "avg_notional": 2.210573048307824,
+          "avg_leverage": 2.188326976316353,
+          "exits": {
+            "deep_alpha_stop_loss": 84,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 51,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 13
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 66,
+            "v21_add_on": 16,
+            "v21_reject": 22
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 342,
+            "entry_market_fallback_after_limit_miss": 46,
+            "exit_market_fallback_after_limit_miss": 20
+          }
+        }
+      },
+      "score": 1099.06048589849
+    },
+    {
+      "name": "alpha3_weekly_ef_calibrator",
+      "metrics": {
+        "cost1": {
+          "pnl": 621.8377465381991,
+          "mdd": -32.52774463832095,
+          "trades": 196,
+          "wr": 0.30612244897959184,
+          "trades_per_day": 3.340909090909091,
+          "deep_entries": 131,
+          "long_entries": 82,
+          "short_entries": 114,
+          "avg_notional": 2.192698718738874,
+          "avg_leverage": 2.1858972603740026,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 83,
+            "v21_2_stop_loss": 50,
+            "v21_2_max_hold": 9,
+            "deep_alpha_take_profit": 16,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 131,
+            "v21_entry": 65,
+            "v21_reject": 29,
+            "v21_add_on": 12
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 377,
+            "exit_market_fallback_after_limit_miss": 9,
+            "entry_market_fallback_after_limit_miss": 18
+          },
+          "candidate_usage": {
+            "weekly_c0.56_parent_scale1.25::next_open_limit_offset2_entry_fallback_fee20": 2016,
+            "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20": 6048,
+            "weekly_c0.50_parent_scale1.25::weekly_next_open_touch0_fallback_fee20": 4032,
+            "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20": 4799
+          }
+        },
+        "cost2": {
+          "pnl": 542.1284316124661,
+          "mdd": -31.162454893012782,
+          "trades": 199,
+          "wr": 0.3015075376884422,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 132,
+          "long_entries": 81,
+          "short_entries": 118,
+          "avg_notional": 2.193551831111786,
+          "avg_leverage": 2.187128156133013,
+          "exits": {
+            "deep_alpha_max_hold": 34,
+            "deep_alpha_stop_loss": 83,
+            "v21_2_stop_loss": 52,
+            "v21_2_max_hold": 9,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 132,
+            "v21_entry": 67,
+            "v21_reject": 30,
+            "v21_add_on": 11
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 383,
+            "exit_market_fallback_after_limit_miss": 9,
+            "entry_market_fallback_after_limit_miss": 17
+          },
+          "candidate_usage": {
+            "weekly_c0.56_parent_scale1.25::next_open_limit_offset2_entry_fallback_fee20": 2016,
+            "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20": 6048,
+            "weekly_c0.50_parent_scale1.25::weekly_next_open_touch0_fallback_fee20": 4032,
+            "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20": 4799
+          }
+        },
+        "cost3": {
+          "pnl": 398.0372387940373,
+          "mdd": -32.82293889881516,
+          "trades": 199,
+          "wr": 0.2814070351758794,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 131,
+          "long_entries": 84,
+          "short_entries": 115,
+          "avg_notional": 2.1973206753328918,
+          "avg_leverage": 2.189647865506809,
+          "exits": {
+            "deep_alpha_stop_loss": 84,
+            "deep_alpha_max_hold": 34,
+            "v21_2_stop_loss": 53,
+            "v21_2_max_hold": 9,
+            "deep_alpha_take_profit": 13,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 131,
+            "v21_entry": 68,
+            "v21_add_on": 11,
+            "v21_reject": 29
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 385,
+            "entry_market_fallback_after_limit_miss": 18,
+            "exit_market_fallback_after_limit_miss": 6
+          },
+          "candidate_usage": {
+            "weekly_c0.56_parent_scale1.25::next_open_limit_offset2_entry_fallback_fee20": 2016,
+            "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20": 6048,
+            "weekly_c0.50_parent_scale1.25::weekly_next_open_touch0_fallback_fee20": 4032,
+            "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20": 4799
+          }
+        }
+      },
+      "score": 973.8220017786077
+    }
+  ],
+  "weekly_schedule": [
+    {
+      "week_start": "2026-01-01 00:00:00",
+      "week_end": "2026-01-08 00:00:00",
+      "calibration_source": "2025Q4_validation",
+      "candidate": "weekly_c0.56_parent_scale1.25::next_open_limit_offset2_entry_fallback_fee20",
+      "confidence": 0.56,
+      "parent_notional_scale": 1.25,
+      "limit_cfg": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-01-08 00:00:00",
+      "week_end": "2026-01-15 00:00:00",
+      "calibration_source": "trailing_28d_2025-12-11..2026-01-08",
+      "candidate": "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 0.95,
+      "limit_cfg": "weekly_next_open_touch0_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-01-15 00:00:00",
+      "week_end": "2026-01-22 00:00:00",
+      "calibration_source": "trailing_28d_2025-12-18..2026-01-15",
+      "candidate": "weekly_c0.50_parent_scale1.25::weekly_next_open_touch0_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 1.25,
+      "limit_cfg": "weekly_next_open_touch0_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-01-22 00:00:00",
+      "week_end": "2026-01-29 00:00:00",
+      "calibration_source": "trailing_28d_2025-12-25..2026-01-22",
+      "candidate": "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 0.95,
+      "limit_cfg": "weekly_next_open_touch0_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-01-29 00:00:00",
+      "week_end": "2026-02-05 00:00:00",
+      "calibration_source": "trailing_28d_2026-01-01..2026-01-29",
+      "candidate": "weekly_c0.50_parent_scale0.95::weekly_next_open_touch0_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 0.95,
+      "limit_cfg": "weekly_next_open_touch0_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-02-05 00:00:00",
+      "week_end": "2026-02-12 00:00:00",
+      "calibration_source": "trailing_28d_2026-01-08..2026-02-05",
+      "candidate": "weekly_c0.50_parent_scale1.25::weekly_next_open_touch0_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 1.25,
+      "limit_cfg": "weekly_next_open_touch0_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-02-12 00:00:00",
+      "week_end": "2026-02-19 00:00:00",
+      "calibration_source": "trailing_28d_2026-01-15..2026-02-12",
+      "candidate": "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 1.1,
+      "limit_cfg": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-02-19 00:00:00",
+      "week_end": "2026-02-26 00:00:00",
+      "calibration_source": "trailing_28d_2026-01-22..2026-02-19",
+      "candidate": "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 1.1,
+      "limit_cfg": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    },
+    {
+      "week_start": "2026-02-26 00:00:00",
+      "week_end": "2026-03-01 00:00:00",
+      "calibration_source": "trailing_28d_2026-01-29..2026-02-26",
+      "candidate": "weekly_c0.50_parent_scale1.10::next_open_limit_offset2_entry_fallback_fee20",
+      "confidence": 0.5,
+      "parent_notional_scale": 1.1,
+      "limit_cfg": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    }
+  ],
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "weekly_calibrator_selects_only_from_prior_window_or_2025q4_for_first_week",
+      "signal_limit_fill_uses_5m_high_low_touch_proxy_not_queue_fill",
+      "real_l2_queue_and_partial_fill_require_forward_shadow_validation",
+      "weekly_ef_did_not_improve_cost1_pnl",
+      "weekly_ef_worsened_cost1_mdd"
+    ],
+    "selection_uses_current_week": false,
+    "selection_uses_2026_current_or_future": false,
+    "calibration_policy": "first_week_2025Q4_validation_then_trailing_28d_prior_only",
+    "frozen_layers": {
+      "hgb_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+      "teacher_deep_overlay": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_l2_teacher_deep_parent_20260514/teacher_deep_parent_l2_replay.pt",
+      "v27_deep_scout": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt",
+      "v21_2_jackpot_runner": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+      "v31_exit_overlay": "fixed alpha1_l2_conservative_fee20 overlay"
+    },
+    "base_runtime": {
+      "name": "noflip_c0.56_parent_scale1.10",
+      "confidence": 0.56,
+      "parent_notional_scale": 1.1,
+      "max_notional": 2.75
+    },
+    "base_limit_config": {
+      "name": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "penetration_bps": 0.5,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    }
+  },
+  "artifacts": {
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_weekly_ef_calibrator_20260514_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_weekly_ef_calibrator_20260514_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_weekly_ef_calibrator_20260514_grid.csv",
+    "schedule": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_weekly_ef_calibrator_20260514_schedule.csv"
+  }
+}

@@ -1,0 +1,1375 @@
+{
+  "type": "strict_ai_group_ablation_no_m7_no_sniper",
+  "variants": {
+    "patchtst": {
+      "train_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2025_patchtst_strict.csv",
+        "rows": 105064,
+        "cols": 151,
+        "selected_ai_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score",
+          "evt_oof_available"
+        ],
+        "strict_cols": 110
+      },
+      "eval_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2026_patchtst_strict.csv",
+        "rows": 16897,
+        "cols": 151,
+        "selected_ai_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score"
+        ],
+        "strict_cols": 111
+      },
+      "micro": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/micro_patchtst_strict.pkl",
+        "feature_count": 110,
+        "ai_feature_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 51853,
+          "target_regimes": [
+            "whipsaw",
+            "normal",
+            "chop"
+          ],
+          "target_counts": {
+            "0": 20326,
+            "1": 15630,
+            "2": 15897
+          },
+          "feature_count": 110,
+          "feature_mode": "full",
+          "model_mode": "ensemble",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_wide",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 220,
+                "learning_rate": 0.04,
+                "max_leaf_nodes": 47,
+                "l2_regularization": 0.01,
+                "random_state": 101,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "hgb_fast",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 140,
+                "learning_rate": 0.06,
+                "max_leaf_nodes": 63,
+                "l2_regularization": 0.035,
+                "random_state": 102,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "cat_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 420,
+                "depth": 6,
+                "learning_rate": 0.045,
+                "l2_leaf_reg": 4.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 104
+              }
+            },
+            {
+              "name": "cat_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 320,
+                "depth": 7,
+                "learning_rate": 0.055,
+                "l2_leaf_reg": 7.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 105
+              }
+            }
+          ]
+        }
+      },
+      "trend": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trend_patchtst_strict.pkl",
+        "feature_count": 110,
+        "ai_feature_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 53211,
+          "target_regimes": [
+            "bull",
+            "bear"
+          ],
+          "target_counts": {
+            "0": 16579,
+            "1": 18428,
+            "2": 18204
+          },
+          "feature_count": 110,
+          "feature_mode": "full",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_trend_wide",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.02,
+                "learning_rate": 0.038,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 240,
+                "max_leaf_nodes": 63,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 211,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "hgb_trend_fast",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.035,
+                "learning_rate": 0.055,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 160,
+                "max_leaf_nodes": 47,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 212,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "cat_trend_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 460,
+                "learning_rate": 0.04,
+                "depth": 6,
+                "l2_leaf_reg": 5.0,
+                "loss_function": "MultiClass",
+                "random_seed": 213,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            },
+            {
+              "name": "cat_trend_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 340,
+                "learning_rate": 0.052,
+                "depth": 7,
+                "l2_leaf_reg": 8.0,
+                "loss_function": "MultiClass",
+                "random_seed": 214,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            }
+          ]
+        }
+      },
+      "governor_no_sniper": {
+        "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_patchtst_strict_no_sniper.json",
+        "pnl_pct": 8677.617372174724,
+        "mdd_pct": -14.039874166867284,
+        "trades": 653,
+        "win_rate_pct": 79.17304747320061,
+        "trades_per_day": 11.1300230810203,
+        "trend_entries": 196,
+        "micro_entries": 457
+      }
+    },
+    "tide": {
+      "train_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2025_tide_strict.csv",
+        "rows": 105064,
+        "cols": 147,
+        "selected_ai_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score",
+          "evt_oof_available"
+        ],
+        "strict_cols": 106
+      },
+      "eval_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2026_tide_strict.csv",
+        "rows": 16897,
+        "cols": 147,
+        "selected_ai_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score"
+        ],
+        "strict_cols": 107
+      },
+      "micro": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/micro_tide_strict.pkl",
+        "feature_count": 106,
+        "ai_feature_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 51853,
+          "target_regimes": [
+            "whipsaw",
+            "normal",
+            "chop"
+          ],
+          "target_counts": {
+            "0": 20326,
+            "1": 15630,
+            "2": 15897
+          },
+          "feature_count": 106,
+          "feature_mode": "full",
+          "model_mode": "ensemble",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_wide",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 220,
+                "learning_rate": 0.04,
+                "max_leaf_nodes": 47,
+                "l2_regularization": 0.01,
+                "random_state": 101,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "hgb_fast",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 140,
+                "learning_rate": 0.06,
+                "max_leaf_nodes": 63,
+                "l2_regularization": 0.035,
+                "random_state": 102,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "cat_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 420,
+                "depth": 6,
+                "learning_rate": 0.045,
+                "l2_leaf_reg": 4.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 104
+              }
+            },
+            {
+              "name": "cat_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 320,
+                "depth": 7,
+                "learning_rate": 0.055,
+                "l2_leaf_reg": 7.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 105
+              }
+            }
+          ]
+        }
+      },
+      "trend": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trend_tide_strict.pkl",
+        "feature_count": 106,
+        "ai_feature_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 53211,
+          "target_regimes": [
+            "bull",
+            "bear"
+          ],
+          "target_counts": {
+            "0": 16579,
+            "1": 18428,
+            "2": 18204
+          },
+          "feature_count": 106,
+          "feature_mode": "full",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_trend_wide",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.02,
+                "learning_rate": 0.038,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 240,
+                "max_leaf_nodes": 63,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 211,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "hgb_trend_fast",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.035,
+                "learning_rate": 0.055,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 160,
+                "max_leaf_nodes": 47,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 212,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "cat_trend_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 460,
+                "learning_rate": 0.04,
+                "depth": 6,
+                "l2_leaf_reg": 5.0,
+                "loss_function": "MultiClass",
+                "random_seed": 213,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            },
+            {
+              "name": "cat_trend_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 340,
+                "learning_rate": 0.052,
+                "depth": 7,
+                "l2_leaf_reg": 8.0,
+                "loss_function": "MultiClass",
+                "random_seed": 214,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            }
+          ]
+        }
+      },
+      "governor_no_sniper": {
+        "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_tide_strict_no_sniper.json",
+        "pnl_pct": 13068.148604658543,
+        "mdd_pct": -13.589513650357487,
+        "trades": 661,
+        "win_rate_pct": 78.66868381240545,
+        "trades_per_day": 11.266378647097119,
+        "trend_entries": 198,
+        "micro_entries": 463
+      }
+    },
+    "timesnet": {
+      "train_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2025_timesnet_strict.csv",
+        "rows": 105064,
+        "cols": 148,
+        "selected_ai_cols": [
+          "ai_anchor_revert_prob",
+          "ai_anchor_overheat",
+          "ai_anchor_trend_escape_prob",
+          "timesnet_cycle_sin",
+          "timesnet_cycle_cos",
+          "timesnet_cycle_delta"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score",
+          "evt_oof_available"
+        ],
+        "strict_cols": 107
+      },
+      "eval_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2026_timesnet_strict.csv",
+        "rows": 16897,
+        "cols": 148,
+        "selected_ai_cols": [
+          "ai_anchor_revert_prob",
+          "ai_anchor_overheat",
+          "ai_anchor_trend_escape_prob",
+          "timesnet_cycle_sin",
+          "timesnet_cycle_cos",
+          "timesnet_cycle_delta"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score"
+        ],
+        "strict_cols": 108
+      },
+      "micro": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/micro_timesnet_strict.pkl",
+        "feature_count": 107,
+        "ai_feature_cols": [
+          "ai_anchor_revert_prob",
+          "ai_anchor_overheat",
+          "ai_anchor_trend_escape_prob",
+          "timesnet_cycle_sin",
+          "timesnet_cycle_cos",
+          "timesnet_cycle_delta"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 51853,
+          "target_regimes": [
+            "whipsaw",
+            "normal",
+            "chop"
+          ],
+          "target_counts": {
+            "0": 20326,
+            "1": 15630,
+            "2": 15897
+          },
+          "feature_count": 107,
+          "feature_mode": "full",
+          "model_mode": "ensemble",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_wide",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 220,
+                "learning_rate": 0.04,
+                "max_leaf_nodes": 47,
+                "l2_regularization": 0.01,
+                "random_state": 101,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "hgb_fast",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 140,
+                "learning_rate": 0.06,
+                "max_leaf_nodes": 63,
+                "l2_regularization": 0.035,
+                "random_state": 102,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "cat_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 420,
+                "depth": 6,
+                "learning_rate": 0.045,
+                "l2_leaf_reg": 4.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 104
+              }
+            },
+            {
+              "name": "cat_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 320,
+                "depth": 7,
+                "learning_rate": 0.055,
+                "l2_leaf_reg": 7.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 105
+              }
+            }
+          ]
+        }
+      },
+      "trend": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trend_timesnet_strict.pkl",
+        "feature_count": 107,
+        "ai_feature_cols": [
+          "ai_anchor_revert_prob",
+          "ai_anchor_overheat",
+          "ai_anchor_trend_escape_prob",
+          "timesnet_cycle_sin",
+          "timesnet_cycle_cos",
+          "timesnet_cycle_delta"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 53211,
+          "target_regimes": [
+            "bull",
+            "bear"
+          ],
+          "target_counts": {
+            "0": 16579,
+            "1": 18428,
+            "2": 18204
+          },
+          "feature_count": 107,
+          "feature_mode": "full",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_trend_wide",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.02,
+                "learning_rate": 0.038,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 240,
+                "max_leaf_nodes": 63,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 211,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "hgb_trend_fast",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.035,
+                "learning_rate": 0.055,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 160,
+                "max_leaf_nodes": 47,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 212,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "cat_trend_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 460,
+                "learning_rate": 0.04,
+                "depth": 6,
+                "l2_leaf_reg": 5.0,
+                "loss_function": "MultiClass",
+                "random_seed": 213,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            },
+            {
+              "name": "cat_trend_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 340,
+                "learning_rate": 0.052,
+                "depth": 7,
+                "l2_leaf_reg": 8.0,
+                "loss_function": "MultiClass",
+                "random_seed": 214,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            }
+          ]
+        }
+      },
+      "governor_no_sniper": {
+        "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_timesnet_strict_no_sniper.json",
+        "pnl_pct": 16976.943050660917,
+        "mdd_pct": -15.42162038986925,
+        "trades": 646,
+        "win_rate_pct": 79.41176470588235,
+        "trades_per_day": 11.010711960703084,
+        "trend_entries": 198,
+        "micro_entries": 448
+      }
+    },
+    "dlinear": {
+      "train_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2025_dlinear_strict.csv",
+        "rows": 105064,
+        "cols": 148,
+        "selected_ai_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score",
+          "evt_oof_available"
+        ],
+        "strict_cols": 107
+      },
+      "eval_csv": {
+        "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trade_candidates_2026_dlinear_strict.csv",
+        "rows": 16897,
+        "cols": 148,
+        "selected_ai_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ],
+        "dropped_base_ai_cols": [
+          "conf_patchtst",
+          "pred_patchtst"
+        ],
+        "strict_drop_cols": [
+          "sig_ai_squeeze",
+          "m7_trend_xgb_dn",
+          "m7_trend_xgb_fl",
+          "m7_trend_xgb_up",
+          "m7_mtl_dn",
+          "m7_mtl_fl",
+          "m7_mtl_up",
+          "m7_quant_dn",
+          "m7_quant_fl",
+          "m7_quant_up",
+          "m7_confidence",
+          "m7_action",
+          "m7_size",
+          "m7_q10",
+          "m7_q50",
+          "m7_q90",
+          "m7_qwidth",
+          "m7_quality_pred",
+          "m7_hold_pred",
+          "m7_target_hold",
+          "m7_entry_long_offset",
+          "m7_entry_short_offset",
+          "m7_entry_long_price",
+          "m7_entry_short_price",
+          "m7_tp_offset",
+          "m7_sl_offset",
+          "m7_tp_price",
+          "m7_sl_price",
+          "m7_gmm_cluster",
+          "m7_gmm_conf",
+          "m7_gmm_vol_rank",
+          "m7_iso_pred",
+          "m7_iso_score",
+          "m7_vae_error",
+          "m7_iso_anom",
+          "m7_vae_anom",
+          "m7_gate_block",
+          "m7_expected_ret",
+          "m7_tail_risk",
+          "m7_composite_score"
+        ],
+        "strict_cols": 108
+      },
+      "micro": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/micro_dlinear_strict.pkl",
+        "feature_count": 107,
+        "ai_feature_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 51853,
+          "target_regimes": [
+            "whipsaw",
+            "normal",
+            "chop"
+          ],
+          "target_counts": {
+            "0": 20326,
+            "1": 15630,
+            "2": 15897
+          },
+          "feature_count": 107,
+          "feature_mode": "full",
+          "model_mode": "ensemble",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_wide",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 220,
+                "learning_rate": 0.04,
+                "max_leaf_nodes": 47,
+                "l2_regularization": 0.01,
+                "random_state": 101,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "hgb_fast",
+              "weight": 1.0,
+              "params": {
+                "max_iter": 140,
+                "learning_rate": 0.06,
+                "max_leaf_nodes": 63,
+                "l2_regularization": 0.035,
+                "random_state": 102,
+                "class_weight": "balanced"
+              }
+            },
+            {
+              "name": "cat_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 420,
+                "depth": 6,
+                "learning_rate": 0.045,
+                "l2_leaf_reg": 4.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 104
+              }
+            },
+            {
+              "name": "cat_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 320,
+                "depth": 7,
+                "learning_rate": 0.055,
+                "l2_leaf_reg": 7.0,
+                "loss_function": "MultiClass",
+                "auto_class_weights": "Balanced",
+                "random_seed": 105
+              }
+            }
+          ]
+        }
+      },
+      "trend": {
+        "model_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/trend_dlinear_strict.pkl",
+        "feature_count": 107,
+        "ai_feature_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ],
+        "train_summary": {
+          "train_rows": 105064,
+          "train_target_rows": 53211,
+          "target_regimes": [
+            "bull",
+            "bear"
+          ],
+          "target_counts": {
+            "0": 16579,
+            "1": 18428,
+            "2": 18204
+          },
+          "feature_count": 107,
+          "feature_mode": "full",
+          "model": "WeightedProbabilityEnsemble",
+          "model_configs": [
+            {
+              "name": "hgb_trend_wide",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.02,
+                "learning_rate": 0.038,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 240,
+                "max_leaf_nodes": 63,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 211,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "hgb_trend_fast",
+              "weight": 1.0,
+              "params": {
+                "categorical_features": "from_dtype",
+                "class_weight": "balanced",
+                "early_stopping": "auto",
+                "interaction_cst": null,
+                "l2_regularization": 0.035,
+                "learning_rate": 0.055,
+                "loss": "log_loss",
+                "max_bins": 255,
+                "max_depth": null,
+                "max_features": 1.0,
+                "max_iter": 160,
+                "max_leaf_nodes": 47,
+                "min_samples_leaf": 20,
+                "monotonic_cst": null,
+                "n_iter_no_change": 10,
+                "random_state": 212,
+                "scoring": "loss",
+                "tol": 1e-07,
+                "validation_fraction": 0.1,
+                "verbose": 0,
+                "warm_start": false
+              }
+            },
+            {
+              "name": "cat_trend_smooth",
+              "weight": 2.0,
+              "params": {
+                "iterations": 460,
+                "learning_rate": 0.04,
+                "depth": 6,
+                "l2_leaf_reg": 5.0,
+                "loss_function": "MultiClass",
+                "random_seed": 213,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            },
+            {
+              "name": "cat_trend_deep",
+              "weight": 2.0,
+              "params": {
+                "iterations": 340,
+                "learning_rate": 0.052,
+                "depth": 7,
+                "l2_leaf_reg": 8.0,
+                "loss_function": "MultiClass",
+                "random_seed": 214,
+                "verbose": false,
+                "auto_class_weights": "Balanced",
+                "allow_writing_files": false
+              }
+            }
+          ]
+        }
+      },
+      "governor_no_sniper": {
+        "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_dlinear_strict_no_sniper.json",
+        "pnl_pct": 10051.378205524554,
+        "mdd_pct": -15.313330850072527,
+        "trades": 656,
+        "win_rate_pct": 78.35365853658537,
+        "trades_per_day": 11.181156418299107,
+        "trend_entries": 198,
+        "micro_entries": 458
+      }
+    }
+  },
+  "ranking_by_pnl": [
+    {
+      "variant": "timesnet",
+      "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_timesnet_strict_no_sniper.json",
+      "pnl_pct": 16976.943050660917,
+      "mdd_pct": -15.42162038986925,
+      "trades": 646,
+      "win_rate_pct": 79.41176470588235,
+      "trades_per_day": 11.010711960703084,
+      "trend_entries": 198,
+      "micro_entries": 448
+    },
+    {
+      "variant": "tide",
+      "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_tide_strict_no_sniper.json",
+      "pnl_pct": 13068.148604658543,
+      "mdd_pct": -13.589513650357487,
+      "trades": 661,
+      "win_rate_pct": 78.66868381240545,
+      "trades_per_day": 11.266378647097119,
+      "trend_entries": 198,
+      "micro_entries": 463
+    },
+    {
+      "variant": "dlinear",
+      "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_dlinear_strict_no_sniper.json",
+      "pnl_pct": 10051.378205524554,
+      "mdd_pct": -15.313330850072527,
+      "trades": 656,
+      "win_rate_pct": 78.35365853658537,
+      "trades_per_day": 11.181156418299107,
+      "trend_entries": 198,
+      "micro_entries": 458
+    },
+    {
+      "variant": "patchtst",
+      "report_out": "/home/llewyn/crypto-scalping/tmp/ai_feature_ablation_strict/governor_2026_patchtst_strict_no_sniper.json",
+      "pnl_pct": 8677.617372174724,
+      "mdd_pct": -14.039874166867284,
+      "trades": 653,
+      "win_rate_pct": 79.17304747320061,
+      "trades_per_day": 11.1300230810203,
+      "trend_entries": 196,
+      "micro_entries": 457
+    }
+  ]
+}

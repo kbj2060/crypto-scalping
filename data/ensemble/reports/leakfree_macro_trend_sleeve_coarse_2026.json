@@ -1,0 +1,1508 @@
+{
+  "type": "macro_trend_sleeve_leakfree_coarse_search",
+  "method": "select_on_2025_train_validation_eval_2026",
+  "top_by_eval": [
+    {
+      "score": -1000000349.2323768,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -222.9256779819466,
+        "mdd": -378.4168127153769,
+        "trades": 536,
+        "wr": 0.3787313432835821,
+        "trades_per_day": 1.963394935324269,
+        "long_entries": 265,
+        "short_entries": 271
+      },
+      "validation": {
+        "pnl": -126.30669878021375,
+        "mdd": -118.21947411888529,
+        "trades": 198,
+        "wr": 0.4292929292929293,
+        "trades_per_day": 2.152255142479713,
+        "long_entries": 98,
+        "short_entries": 100
+      },
+      "eval": {
+        "pnl": 340.30219215275565,
+        "mdd": -73.82802375684474,
+        "trades": 104,
+        "wr": 0.40384615384615385,
+        "trades_per_day": 1.7727272727272727,
+        "long_entries": 46,
+        "short_entries": 58
+      }
+    },
+    {
+      "score": -1000000359.4655839,
+      "cfg": {
+        "ema": 288,
+        "mom": 96,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -232.4977864354942,
+        "mdd": -956.0716900475209,
+        "trades": 670,
+        "wr": 0.4,
+        "trades_per_day": 2.4542436691553364,
+        "long_entries": 341,
+        "short_entries": 329
+      },
+      "validation": {
+        "pnl": -126.9677974851686,
+        "mdd": -112.2902513387448,
+        "trades": 236,
+        "wr": 0.4322033898305085,
+        "trades_per_day": 2.5653142102283453,
+        "long_entries": 115,
+        "short_entries": 121
+      },
+      "eval": {
+        "pnl": 261.90203078723255,
+        "mdd": -69.31451512862161,
+        "trades": 136,
+        "wr": 0.375,
+        "trades_per_day": 2.3181818181818183,
+        "long_entries": 62,
+        "short_entries": 74
+      }
+    },
+    {
+      "score": -1000000376.3671442,
+      "cfg": {
+        "ema": 576,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -265.248291841976,
+        "mdd": -278.94311660155194,
+        "trades": 454,
+        "wr": 0.40969162995594716,
+        "trades_per_day": 1.6630248146216757,
+        "long_entries": 221,
+        "short_entries": 233
+      },
+      "validation": {
+        "pnl": -111.11885240066701,
+        "mdd": -104.86809998806575,
+        "trades": 162,
+        "wr": 0.3888888888888889,
+        "trades_per_day": 1.76093602566522,
+        "long_entries": 83,
+        "short_entries": 79
+      },
+      "eval": {
+        "pnl": 237.03779505650857,
+        "mdd": -66.65522815011859,
+        "trades": 83,
+        "wr": 0.4457831325301205,
+        "trades_per_day": 1.4147727272727273,
+        "long_entries": 35,
+        "short_entries": 48
+      }
+    },
+    {
+      "score": -1000000340.5622494,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -225.97292549050874,
+        "mdd": -283.377703853964,
+        "trades": 525,
+        "wr": 0.40190476190476193,
+        "trades_per_day": 1.923101382547092,
+        "long_entries": 262,
+        "short_entries": 263
+      },
+      "validation": {
+        "pnl": -114.58932392030576,
+        "mdd": -108.83309554953873,
+        "trades": 198,
+        "wr": 0.37373737373737376,
+        "trades_per_day": 2.152255142479713,
+        "long_entries": 98,
+        "short_entries": 100
+      },
+      "eval": {
+        "pnl": 227.06450818875058,
+        "mdd": -58.92662348376643,
+        "trades": 101,
+        "wr": 0.39603960396039606,
+        "trades_per_day": 1.7215909090909092,
+        "long_entries": 44,
+        "short_entries": 57
+      }
+    },
+    {
+      "score": -1000000334.5739499,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -210.841850993679,
+        "mdd": -361.2987616243785,
+        "trades": 427,
+        "wr": 0.4168618266978923,
+        "trades_per_day": 1.564122457804968,
+        "long_entries": 195,
+        "short_entries": 232
+      },
+      "validation": {
+        "pnl": -123.73209892599249,
+        "mdd": -106.70608189430668,
+        "trades": 147,
+        "wr": 0.4421768707482993,
+        "trades_per_day": 1.5978863936591812,
+        "long_entries": 70,
+        "short_entries": 77
+      },
+      "eval": {
+        "pnl": 219.62443504232124,
+        "mdd": -84.07049998424088,
+        "trades": 80,
+        "wr": 0.4,
+        "trades_per_day": 1.3636363636363638,
+        "long_entries": 33,
+        "short_entries": 47
+      }
+    },
+    {
+      "score": -1000000317.9636142,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -196.0667383452864,
+        "mdd": -461.12782815141475,
+        "trades": 537,
+        "wr": 0.42830540037243947,
+        "trades_per_day": 1.9670579855767396,
+        "long_entries": 266,
+        "short_entries": 271
+      },
+      "validation": {
+        "pnl": -121.89687585535162,
+        "mdd": -111.52186079587443,
+        "trades": 186,
+        "wr": 0.40860215053763443,
+        "trades_per_day": 2.021815436874882,
+        "long_entries": 92,
+        "short_entries": 94
+      },
+      "eval": {
+        "pnl": 178.08317536083064,
+        "mdd": -77.91882074358453,
+        "trades": 106,
+        "wr": 0.36792452830188677,
+        "trades_per_day": 1.8068181818181819,
+        "long_entries": 49,
+        "short_entries": 57
+      }
+    },
+    {
+      "score": -1000000312.7281132,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -202.87663674922243,
+        "mdd": -249.18736484901493,
+        "trades": 415,
+        "wr": 0.41204819277108434,
+        "trades_per_day": 1.5201658547753203,
+        "long_entries": 189,
+        "short_entries": 226
+      },
+      "validation": {
+        "pnl": -109.85147647039663,
+        "mdd": -103.82015046153292,
+        "trades": 146,
+        "wr": 0.3561643835616438,
+        "trades_per_day": 1.5870164181921118,
+        "long_entries": 70,
+        "short_entries": 76
+      },
+      "eval": {
+        "pnl": 174.90438617843017,
+        "mdd": -70.65034811997155,
+        "trades": 77,
+        "wr": 0.4025974025974026,
+        "trades_per_day": 1.3125,
+        "long_entries": 32,
+        "short_entries": 45
+      }
+    },
+    {
+      "score": -1000000323.6365492,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -201.04076569505304,
+        "mdd": -333.8131170341647,
+        "trades": 432,
+        "wr": 0.39814814814814814,
+        "trades_per_day": 1.5824377090673214,
+        "long_entries": 204,
+        "short_entries": 228
+      },
+      "validation": {
+        "pnl": -122.5957835425238,
+        "mdd": -106.96879980971397,
+        "trades": 148,
+        "wr": 0.4594594594594595,
+        "trades_per_day": 1.6087563691262503,
+        "long_entries": 70,
+        "short_entries": 78
+      },
+      "eval": {
+        "pnl": 171.25870146956058,
+        "mdd": -86.39813091788918,
+        "trades": 78,
+        "wr": 0.41025641025641024,
+        "trades_per_day": 1.3295454545454546,
+        "long_entries": 31,
+        "short_entries": 47
+      }
+    },
+    {
+      "score": -1000000360.663939,
+      "cfg": {
+        "ema": 576,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -260.95205636794503,
+        "mdd": -282.98255246452595,
+        "trades": 407,
+        "wr": 0.4152334152334152,
+        "trades_per_day": 1.490861452755555,
+        "long_entries": 198,
+        "short_entries": 209
+      },
+      "validation": {
+        "pnl": -99.71188254963445,
+        "mdd": -99.7778537935828,
+        "trades": 134,
+        "wr": 0.23134328358208955,
+        "trades_per_day": 1.4565767125872806,
+        "long_entries": 68,
+        "short_entries": 66
+      },
+      "eval": {
+        "pnl": 163.56692596231977,
+        "mdd": -71.88378534261672,
+        "trades": 72,
+        "wr": 0.4305555555555556,
+        "trades_per_day": 1.2272727272727273,
+        "long_entries": 29,
+        "short_entries": 43
+      }
+    },
+    {
+      "score": -1000000329.9488331,
+      "cfg": {
+        "ema": 288,
+        "mom": 96,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -228.7675980245819,
+        "mdd": -467.13723347710834,
+        "trades": 667,
+        "wr": 0.39280359820089955,
+        "trades_per_day": 2.443254518397924,
+        "long_entries": 340,
+        "short_entries": 327
+      },
+      "validation": {
+        "pnl": -101.18123507377356,
+        "mdd": -100.45712732174161,
+        "trades": 235,
+        "wr": 0.28936170212765955,
+        "trades_per_day": 2.554444234761276,
+        "long_entries": 115,
+        "short_entries": 120
+      },
+      "eval": {
+        "pnl": 161.1086919712775,
+        "mdd": -52.279331823080845,
+        "trades": 136,
+        "wr": 0.36764705882352944,
+        "trades_per_day": 2.3181818181818183,
+        "long_entries": 62,
+        "short_entries": 74
+      }
+    },
+    {
+      "score": -1000000309.0987726,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -198.1759628748661,
+        "mdd": -313.12345010371627,
+        "trades": 527,
+        "wr": 0.4155597722960152,
+        "trades_per_day": 1.9304274830520332,
+        "long_entries": 264,
+        "short_entries": 263
+      },
+      "validation": {
+        "pnl": -110.9228097261806,
+        "mdd": -106.38446269071511,
+        "trades": 186,
+        "wr": 0.3548387096774194,
+        "trades_per_day": 2.021815436874882,
+        "long_entries": 92,
+        "short_entries": 94
+      },
+      "eval": {
+        "pnl": 142.38228506352866,
+        "mdd": -63.30316413438928,
+        "trades": 104,
+        "wr": 0.375,
+        "trades_per_day": 1.7727272727272727,
+        "long_entries": 48,
+        "short_entries": 56
+      }
+    },
+    {
+      "score": -1000000300.9649546,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -190.8909941516507,
+        "mdd": -232.58862699157206,
+        "trades": 420,
+        "wr": 0.4095238095238095,
+        "trades_per_day": 1.5384811060376735,
+        "long_entries": 198,
+        "short_entries": 222
+      },
+      "validation": {
+        "pnl": -110.07396040617625,
+        "mdd": -104.06792912537142,
+        "trades": 146,
+        "wr": 0.3561643835616438,
+        "trades_per_day": 1.5870164181921118,
+        "long_entries": 70,
+        "short_entries": 76
+      },
+      "eval": {
+        "pnl": 135.9427422616501,
+        "mdd": -73.71024889728521,
+        "trades": 74,
+        "wr": 0.3783783783783784,
+        "trades_per_day": 1.2613636363636365,
+        "long_entries": 30,
+        "short_entries": 44
+      }
+    },
+    {
+      "score": -1000000344.3232391,
+      "cfg": {
+        "ema": 576,
+        "mom": 288,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -245.5324704784887,
+        "mdd": -295.6625086270913,
+        "trades": 412,
+        "wr": 0.4199029126213592,
+        "trades_per_day": 1.5091767040179083,
+        "long_entries": 203,
+        "short_entries": 209
+      },
+      "validation": {
+        "pnl": -98.79076867453747,
+        "mdd": -99.5086880831445,
+        "trades": 136,
+        "wr": 0.2647058823529412,
+        "trades_per_day": 1.4783166635214193,
+        "long_entries": 68,
+        "short_entries": 68
+      },
+      "eval": {
+        "pnl": 97.7441306832543,
+        "mdd": -77.90430261352196,
+        "trades": 76,
+        "wr": 0.42105263157894735,
+        "trades_per_day": 1.2954545454545454,
+        "long_entries": 32,
+        "short_entries": 44
+      }
+    },
+    {
+      "score": -1000000340.8388,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -217.5673867434531,
+        "mdd": -291.8411719747086,
+        "trades": 391,
+        "wr": 0.40153452685422,
+        "trades_per_day": 1.4322526487160245,
+        "long_entries": 190,
+        "short_entries": 201
+      },
+      "validation": {
+        "pnl": -123.27141317594956,
+        "mdd": -107.79489128431211,
+        "trades": 132,
+        "wr": 0.44696969696969696,
+        "trades_per_day": 1.4348367616531421,
+        "long_entries": 59,
+        "short_entries": 73
+      },
+      "eval": {
+        "pnl": 96.34522174246909,
+        "mdd": -90.14048373192092,
+        "trades": 72,
+        "wr": 0.4305555555555556,
+        "trades_per_day": 1.2272727272727273,
+        "long_entries": 29,
+        "short_entries": 43
+      }
+    },
+    {
+      "score": -1000000331.7476155,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -224.54727283197082,
+        "mdd": -309.7891045328955,
+        "trades": 377,
+        "wr": 0.4270557029177719,
+        "trades_per_day": 1.3809699451814355,
+        "long_entries": 179,
+        "short_entries": 198
+      },
+      "validation": {
+        "pnl": -107.20034260531908,
+        "mdd": -102.80312629722066,
+        "trades": 131,
+        "wr": 0.3435114503816794,
+        "trades_per_day": 1.423966786186073,
+        "long_entries": 60,
+        "short_entries": 71
+      },
+      "eval": {
+        "pnl": 94.87931677726935,
+        "mdd": -77.2067117187156,
+        "trades": 73,
+        "wr": 0.410958904109589,
+        "trades_per_day": 1.2443181818181819,
+        "long_entries": 31,
+        "short_entries": 42
+      }
+    },
+    {
+      "score": -1000000367.1112903,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -246.0375548550948,
+        "mdd": -478.94780955589954,
+        "trades": 391,
+        "wr": 0.40153452685422,
+        "trades_per_day": 1.4322526487160245,
+        "long_entries": 185,
+        "short_entries": 206
+      },
+      "validation": {
+        "pnl": -121.07373551024105,
+        "mdd": -106.0306770320285,
+        "trades": 131,
+        "wr": 0.4351145038167939,
+        "trades_per_day": 1.423966786186073,
+        "long_entries": 60,
+        "short_entries": 71
+      },
+      "eval": {
+        "pnl": 94.3306598695002,
+        "mdd": -88.72026990240036,
+        "trades": 76,
+        "wr": 0.42105263157894735,
+        "trades_per_day": 1.2954545454545454,
+        "long_entries": 32,
+        "short_entries": 44
+      }
+    },
+    {
+      "score": -1000000301.3759402,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -196.8990704688026,
+        "mdd": -217.9254925351536,
+        "trades": 379,
+        "wr": 0.41952506596306066,
+        "trades_per_day": 1.3882960456863769,
+        "long_entries": 185,
+        "short_entries": 194
+      },
+      "validation": {
+        "pnl": -104.47686967114484,
+        "mdd": -101.77502538134043,
+        "trades": 131,
+        "wr": 0.2900763358778626,
+        "trades_per_day": 1.423966786186073,
+        "long_entries": 59,
+        "short_entries": 72
+      },
+      "eval": {
+        "pnl": 85.42188132907644,
+        "mdd": -79.30090805771745,
+        "trades": 68,
+        "wr": 0.39705882352941174,
+        "trades_per_day": 1.1590909090909092,
+        "long_entries": 28,
+        "short_entries": 40
+      }
+    },
+    {
+      "score": -1000000343.4474064,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -212.95027385688297,
+        "mdd": -296.72201123726285,
+        "trades": 612,
+        "wr": 0.4019607843137255,
+        "trades_per_day": 2.2417867545120385,
+        "long_entries": 286,
+        "short_entries": 326
+      },
+      "validation": {
+        "pnl": -130.49713248377915,
+        "mdd": -111.59004310181761,
+        "trades": 215,
+        "wr": 0.4558139534883721,
+        "trades_per_day": 2.3370447254198905,
+        "long_entries": 95,
+        "short_entries": 120
+      },
+      "eval": {
+        "pnl": 79.58198038862162,
+        "mdd": -88.59903282018801,
+        "trades": 112,
+        "wr": 0.4017857142857143,
+        "trades_per_day": 1.9090909090909092,
+        "long_entries": 38,
+        "short_entries": 74
+      }
+    },
+    {
+      "score": -1000000347.4047157,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -215.43848939423808,
+        "mdd": -437.11460085501335,
+        "trades": 557,
+        "wr": 0.43087971274685816,
+        "trades_per_day": 2.0403189906261527,
+        "long_entries": 273,
+        "short_entries": 284
+      },
+      "validation": {
+        "pnl": -131.96622619416115,
+        "mdd": -112.69028207809254,
+        "trades": 203,
+        "wr": 0.4482758620689655,
+        "trades_per_day": 2.2066050198150595,
+        "long_entries": 83,
+        "short_entries": 120
+      },
+      "eval": {
+        "pnl": 75.11775684920971,
+        "mdd": -90.21337371370973,
+        "trades": 104,
+        "wr": 0.41346153846153844,
+        "trades_per_day": 1.7727272727272727,
+        "long_entries": 36,
+        "short_entries": 68
+      }
+    },
+    {
+      "score": -1000000355.5428039,
+      "cfg": {
+        "ema": 864,
+        "mom": 48,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -227.8743502160532,
+        "mdd": -261.57644538102426,
+        "trades": 669,
+        "wr": 0.4663677130044843,
+        "trades_per_day": 2.450580618902866,
+        "long_entries": 331,
+        "short_entries": 338
+      },
+      "validation": {
+        "pnl": -127.66845366944915,
+        "mdd": -114.03922031758947,
+        "trades": 224,
+        "wr": 0.5,
+        "trades_per_day": 2.434874504623514,
+        "long_entries": 98,
+        "short_entries": 126
+      },
+      "eval": {
+        "pnl": 38.40941811578222,
+        "mdd": -64.66244454803444,
+        "trades": 135,
+        "wr": 0.43703703703703706,
+        "trades_per_day": 2.3011363636363638,
+        "long_entries": 53,
+        "short_entries": 82
+      }
+    }
+  ],
+  "top_by_validation": [
+    {
+      "score": -1000000300.9649546,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -190.8909941516507,
+        "mdd": -232.58862699157206,
+        "trades": 420,
+        "wr": 0.4095238095238095,
+        "trades_per_day": 1.5384811060376735,
+        "long_entries": 198,
+        "short_entries": 222
+      },
+      "validation": {
+        "pnl": -110.07396040617625,
+        "mdd": -104.06792912537142,
+        "trades": 146,
+        "wr": 0.3561643835616438,
+        "trades_per_day": 1.5870164181921118,
+        "long_entries": 70,
+        "short_entries": 76
+      }
+    },
+    {
+      "score": -1000000301.3759402,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -196.8990704688026,
+        "mdd": -217.9254925351536,
+        "trades": 379,
+        "wr": 0.41952506596306066,
+        "trades_per_day": 1.3882960456863769,
+        "long_entries": 185,
+        "short_entries": 194
+      },
+      "validation": {
+        "pnl": -104.47686967114484,
+        "mdd": -101.77502538134043,
+        "trades": 131,
+        "wr": 0.2900763358778626,
+        "trades_per_day": 1.423966786186073,
+        "long_entries": 59,
+        "short_entries": 72
+      }
+    },
+    {
+      "score": -1000000309.0987726,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -198.1759628748661,
+        "mdd": -313.12345010371627,
+        "trades": 527,
+        "wr": 0.4155597722960152,
+        "trades_per_day": 1.9304274830520332,
+        "long_entries": 264,
+        "short_entries": 263
+      },
+      "validation": {
+        "pnl": -110.9228097261806,
+        "mdd": -106.38446269071511,
+        "trades": 186,
+        "wr": 0.3548387096774194,
+        "trades_per_day": 2.021815436874882,
+        "long_entries": 92,
+        "short_entries": 94
+      }
+    },
+    {
+      "score": -1000000312.7281132,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -202.87663674922243,
+        "mdd": -249.18736484901493,
+        "trades": 415,
+        "wr": 0.41204819277108434,
+        "trades_per_day": 1.5201658547753203,
+        "long_entries": 189,
+        "short_entries": 226
+      },
+      "validation": {
+        "pnl": -109.85147647039663,
+        "mdd": -103.82015046153292,
+        "trades": 146,
+        "wr": 0.3561643835616438,
+        "trades_per_day": 1.5870164181921118,
+        "long_entries": 70,
+        "short_entries": 76
+      }
+    },
+    {
+      "score": -1000000317.9636142,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -196.0667383452864,
+        "mdd": -461.12782815141475,
+        "trades": 537,
+        "wr": 0.42830540037243947,
+        "trades_per_day": 1.9670579855767396,
+        "long_entries": 266,
+        "short_entries": 271
+      },
+      "validation": {
+        "pnl": -121.89687585535162,
+        "mdd": -111.52186079587443,
+        "trades": 186,
+        "wr": 0.40860215053763443,
+        "trades_per_day": 2.021815436874882,
+        "long_entries": 92,
+        "short_entries": 94
+      }
+    },
+    {
+      "score": -1000000323.6365492,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -201.04076569505304,
+        "mdd": -333.8131170341647,
+        "trades": 432,
+        "wr": 0.39814814814814814,
+        "trades_per_day": 1.5824377090673214,
+        "long_entries": 204,
+        "short_entries": 228
+      },
+      "validation": {
+        "pnl": -122.5957835425238,
+        "mdd": -106.96879980971397,
+        "trades": 148,
+        "wr": 0.4594594594594595,
+        "trades_per_day": 1.6087563691262503,
+        "long_entries": 70,
+        "short_entries": 78
+      }
+    },
+    {
+      "score": -1000000329.9488331,
+      "cfg": {
+        "ema": 288,
+        "mom": 96,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -228.7675980245819,
+        "mdd": -467.13723347710834,
+        "trades": 667,
+        "wr": 0.39280359820089955,
+        "trades_per_day": 2.443254518397924,
+        "long_entries": 340,
+        "short_entries": 327
+      },
+      "validation": {
+        "pnl": -101.18123507377356,
+        "mdd": -100.45712732174161,
+        "trades": 235,
+        "wr": 0.28936170212765955,
+        "trades_per_day": 2.554444234761276,
+        "long_entries": 115,
+        "short_entries": 120
+      }
+    },
+    {
+      "score": -1000000331.7476155,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -224.54727283197082,
+        "mdd": -309.7891045328955,
+        "trades": 377,
+        "wr": 0.4270557029177719,
+        "trades_per_day": 1.3809699451814355,
+        "long_entries": 179,
+        "short_entries": 198
+      },
+      "validation": {
+        "pnl": -107.20034260531908,
+        "mdd": -102.80312629722066,
+        "trades": 131,
+        "wr": 0.3435114503816794,
+        "trades_per_day": 1.423966786186073,
+        "long_entries": 60,
+        "short_entries": 71
+      }
+    },
+    {
+      "score": -1000000334.5739499,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0.0025,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -210.841850993679,
+        "mdd": -361.2987616243785,
+        "trades": 427,
+        "wr": 0.4168618266978923,
+        "trades_per_day": 1.564122457804968,
+        "long_entries": 195,
+        "short_entries": 232
+      },
+      "validation": {
+        "pnl": -123.73209892599249,
+        "mdd": -106.70608189430668,
+        "trades": 147,
+        "wr": 0.4421768707482993,
+        "trades_per_day": 1.5978863936591812,
+        "long_entries": 70,
+        "short_entries": 77
+      }
+    },
+    {
+      "score": -1000000340.5622494,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -225.97292549050874,
+        "mdd": -283.377703853964,
+        "trades": 525,
+        "wr": 0.40190476190476193,
+        "trades_per_day": 1.923101382547092,
+        "long_entries": 262,
+        "short_entries": 263
+      },
+      "validation": {
+        "pnl": -114.58932392030576,
+        "mdd": -108.83309554953873,
+        "trades": 198,
+        "wr": 0.37373737373737376,
+        "trades_per_day": 2.152255142479713,
+        "long_entries": 98,
+        "short_entries": 100
+      }
+    },
+    {
+      "score": -1000000340.8388,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -217.5673867434531,
+        "mdd": -291.8411719747086,
+        "trades": 391,
+        "wr": 0.40153452685422,
+        "trades_per_day": 1.4322526487160245,
+        "long_entries": 190,
+        "short_entries": 201
+      },
+      "validation": {
+        "pnl": -123.27141317594956,
+        "mdd": -107.79489128431211,
+        "trades": 132,
+        "wr": 0.44696969696969696,
+        "trades_per_day": 1.4348367616531421,
+        "long_entries": 59,
+        "short_entries": 73
+      }
+    },
+    {
+      "score": -1000000342.5075208,
+      "cfg": {
+        "ema": 864,
+        "mom": 48,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -234.60632221959824,
+        "mdd": -186.21461640059565,
+        "trades": 574,
+        "wr": 0.46689895470383275,
+        "trades_per_day": 2.102590844918154,
+        "long_entries": 293,
+        "short_entries": 281
+      },
+      "validation": {
+        "pnl": -107.90119863438807,
+        "mdd": -103.57211167513476,
+        "trades": 188,
+        "wr": 0.34574468085106386,
+        "trades_per_day": 2.043555387809021,
+        "long_entries": 80,
+        "short_entries": 108
+      }
+    },
+    {
+      "score": -1000000343.4474064,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -212.95027385688297,
+        "mdd": -296.72201123726285,
+        "trades": 612,
+        "wr": 0.4019607843137255,
+        "trades_per_day": 2.2417867545120385,
+        "long_entries": 286,
+        "short_entries": 326
+      },
+      "validation": {
+        "pnl": -130.49713248377915,
+        "mdd": -111.59004310181761,
+        "trades": 215,
+        "wr": 0.4558139534883721,
+        "trades_per_day": 2.3370447254198905,
+        "long_entries": 95,
+        "short_entries": 120
+      }
+    },
+    {
+      "score": -1000000344.3232391,
+      "cfg": {
+        "ema": 576,
+        "mom": 288,
+        "slope": 144,
+        "band": 0.0025,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -245.5324704784887,
+        "mdd": -295.6625086270913,
+        "trades": 412,
+        "wr": 0.4199029126213592,
+        "trades_per_day": 1.5091767040179083,
+        "long_entries": 203,
+        "short_entries": 209
+      },
+      "validation": {
+        "pnl": -98.79076867453747,
+        "mdd": -99.5086880831445,
+        "trades": 136,
+        "wr": 0.2647058823529412,
+        "trades_per_day": 1.4783166635214193,
+        "long_entries": 68,
+        "short_entries": 68
+      }
+    },
+    {
+      "score": -1000000344.3990854,
+      "cfg": {
+        "ema": 864,
+        "mom": 48,
+        "slope": 144,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -219.5441288528002,
+        "mdd": -244.2609608615804,
+        "trades": 602,
+        "wr": 0.46511627906976744,
+        "trades_per_day": 2.205156251987332,
+        "long_entries": 308,
+        "short_entries": 294
+      },
+      "validation": {
+        "pnl": -124.85495645907731,
+        "mdd": -112.96099942566697,
+        "trades": 204,
+        "wr": 0.46078431372549017,
+        "trades_per_day": 2.217474995282129,
+        "long_entries": 83,
+        "short_entries": 121
+      }
+    },
+    {
+      "score": -1000000344.859163,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -223.41358611610525,
+        "mdd": -331.52803195412844,
+        "trades": 521,
+        "wr": 0.4126679462571977,
+        "trades_per_day": 1.9084491815372093,
+        "long_entries": 254,
+        "short_entries": 267
+      },
+      "validation": {
+        "pnl": -121.44557689487672,
+        "mdd": -110.04287687862555,
+        "trades": 182,
+        "wr": 0.42857142857142855,
+        "trades_per_day": 1.9783355350066052,
+        "long_entries": 78,
+        "short_entries": 104
+      }
+    },
+    {
+      "score": -1000000346.716731,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -227.80226281023675,
+        "mdd": -279.60222196889816,
+        "trades": 573,
+        "wr": 0.41535776614310643,
+        "trades_per_day": 2.0989277946656832,
+        "long_entries": 268,
+        "short_entries": 305
+      },
+      "validation": {
+        "pnl": -118.91446817082168,
+        "mdd": -108.54309519995633,
+        "trades": 192,
+        "wr": 0.4114583333333333,
+        "trades_per_day": 2.087035289677298,
+        "long_entries": 89,
+        "short_entries": 103
+      }
+    },
+    {
+      "score": -1000000347.4047157,
+      "cfg": {
+        "ema": 864,
+        "mom": 288,
+        "slope": 144,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.25,
+        "trail": 0.12,
+        "max_hold": 1152,
+        "min_hold": 48,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -215.43848939423808,
+        "mdd": -437.11460085501335,
+        "trades": 557,
+        "wr": 0.43087971274685816,
+        "trades_per_day": 2.0403189906261527,
+        "long_entries": 273,
+        "short_entries": 284
+      },
+      "validation": {
+        "pnl": -131.96622619416115,
+        "mdd": -112.69028207809254,
+        "trades": 203,
+        "wr": 0.4482758620689655,
+        "trades_per_day": 2.2066050198150595,
+        "long_entries": 83,
+        "short_entries": 120
+      }
+    },
+    {
+      "score": -1000000349.2323768,
+      "cfg": {
+        "ema": 288,
+        "mom": 288,
+        "slope": 48,
+        "band": 0,
+        "notional": 5.0,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -222.9256779819466,
+        "mdd": -378.4168127153769,
+        "trades": 536,
+        "wr": 0.3787313432835821,
+        "trades_per_day": 1.963394935324269,
+        "long_entries": 265,
+        "short_entries": 271
+      },
+      "validation": {
+        "pnl": -126.30669878021375,
+        "mdd": -118.21947411888529,
+        "trades": 198,
+        "wr": 0.4292929292929293,
+        "trades_per_day": 2.152255142479713,
+        "long_entries": 98,
+        "short_entries": 100
+      }
+    },
+    {
+      "score": -1000000355.5428039,
+      "cfg": {
+        "ema": 864,
+        "mom": 48,
+        "slope": 48,
+        "band": 0,
+        "notional": 3.5,
+        "sl": 0.4,
+        "trail": 0.2,
+        "max_hold": 5000,
+        "min_hold": 96,
+        "cd": 6
+      },
+      "train": {
+        "pnl": -227.8743502160532,
+        "mdd": -261.57644538102426,
+        "trades": 669,
+        "wr": 0.4663677130044843,
+        "trades_per_day": 2.450580618902866,
+        "long_entries": 331,
+        "short_entries": 338
+      },
+      "validation": {
+        "pnl": -127.66845366944915,
+        "mdd": -114.03922031758947,
+        "trades": 224,
+        "wr": 0.5,
+        "trades_per_day": 2.434874504623514,
+        "long_entries": 98,
+        "short_entries": 126
+      }
+    }
+  ]
+}

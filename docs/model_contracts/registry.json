@@ -1,0 +1,1295 @@
+{
+  "last_updated_kst": "2026-07-02",
+  "current_live_main": {
+    "alias": "omega5_event_risk_governor",
+    "name": "omega5_event_risk_governor_20260702",
+    "contract": "docs/model_contracts/omega5_event_risk_governor_20260702_contract.md",
+    "promotion_audit": "docs/audits/omega5_live_promotion_blocked_20260702.md",
+    "source_report": "tmp/causal_regen_20260516/omega4_6_2_v5_roll8_side_specific_two_stage_exposure_validation_only_20260701/report.json",
+    "entrypoint": "trading_bot.py + trading_bot_modules/omega5_live.py",
+    "decision_logic": "blocked: do not run as live trading policy",
+    "execution_logic": "blocked",
+    "status": "blocked_not_live_promotable_ledger_contamination"
+  },
+  "current_omega_live_baseline": {
+    "alias": "omega5_event_risk_governor",
+    "name": "omega5_event_risk_governor_20260702",
+    "contract": "docs/model_contracts/omega5_event_risk_governor_20260702_contract.md",
+    "source_artifact": "tmp/causal_regen_20260516/omega4_6_2_v5_roll8_side_specific_two_stage_exposure_validation_only_20260701",
+    "status": "blocked_not_live_promotable_ledger_contamination",
+    "promotion_audit": "docs/audits/omega5_live_promotion_blocked_20260702.md",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630/omega_artifact_integrity_audit_20260630.json",
+    "validation_cost3": {
+      "pnl_pct": 675.3209498663826,
+      "mdd_pct": -17.315684369802863,
+      "wr": 0.6075268817204301,
+      "trades": 186
+    },
+    "oos_cost3": {
+      "pnl_pct": 212.6849736739169,
+      "mdd_pct": -19.408271548895605,
+      "wr": 0.5773195876288659,
+      "trades": 97
+    },
+    "note": "Omega5 event-risk governor is blocked from live promotion. A side-thread audit found validation/test ledger dependence in the promoted model-selection path, so prior PnL readouts must not be used as live evidence."
+  },
+  "current_omega_research_baseline": {
+    "alias": "omega4.6_plus_t12_nohold_risk1",
+    "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "display_version": "Omega 4.6",
+    "contract": "docs/model_contracts/omega4_6_plus_t12_nohold_risk1_20260630_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_6_plus_t12_nohold_risk1_20260630/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_6_plus_t12_nohold_risk1_20260630/runtime_contract.json",
+    "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_plus_t12_nohold_risk1_20260630/promotion_manifest.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630",
+    "source_report": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630/report.json",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630/omega_artifact_integrity_audit_20260630.json",
+    "status": "current_omega_research_baseline_not_live_wired_conditional_swing",
+    "redteam_verdict": "CONDITIONAL_PASS_MAX_HOLD_AND_PNL_TARGET_EXCLUDED_NOT_DAYTRADING_LIVE_PASS",
+    "promotion_type": "conditional_swing_runner_plus_t12_priority_router_h48qual_zig075",
+    "baseline_type": "conditional_swing_runner",
+    "selection_scope": "validation_only_source_selection; OOS diagnostic readout only",
+    "selection_oos_independent": true,
+    "conditional_pass_excludes": [
+      "max_hold_24h",
+      "pnl_target_validation_oos_100pct"
+    ],
+    "artifact_integrity_promotion_pass": true,
+    "router_order": "h48qual > zig075",
+    "scale_map": {
+      "h48qual_L": 0.38,
+      "h48qual_S": 2.499,
+      "zig075_L": 2.446,
+      "zig075_S": 2.478
+    },
+    "risk_contract": {
+      "notional": "margin_fraction * leverage",
+      "pnl": "realized_price_move * notional",
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "notional_scaled_sltp": false
+    },
+    "components": {
+      "h48qual": {
+        "quality_threshold": 0.5,
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630",
+        "precomputed_prediction_tag": "q050"
+      },
+      "zig075": {
+        "quality_threshold": 0.75,
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629",
+        "precomputed_prediction_tag": "q075"
+      }
+    },
+    "validation_cost3": {
+      "pnl_pct": 117.16674838792906,
+      "mdd_pct": -17.431511291376623,
+      "wr": 0.5172413793103449,
+      "trades": 29,
+      "max_leverage": 5.0,
+      "avg_notional": 1.411557461309998,
+      "max_notional": 1.8,
+      "max_margin_fraction": 0.3870894431927618,
+      "max_hold_hours": 222.0,
+      "hold_over_24h_count": 21,
+      "overlap_count": 0,
+      "accounting_error_max_abs": 0.0,
+      "notional_contract_error_max_abs": 0.0
+    },
+    "oos_cost3": {
+      "pnl_pct": 67.8462084780387,
+      "mdd_pct": -13.275817100563392,
+      "wr": 0.5384615384615384,
+      "trades": 13,
+      "max_leverage": 5.000000000000001,
+      "avg_notional": 1.407994809696035,
+      "max_notional": 1.8,
+      "max_margin_fraction": 0.4393397607695104,
+      "max_hold_hours": 218.5,
+      "hold_over_24h_count": 12,
+      "overlap_count": 0,
+      "accounting_error_max_abs": 0.0,
+      "notional_contract_error_max_abs": 0.0
+    },
+    "known_full_live_daytrading_blockers": {
+      "validation_max_hold_hours": 222.0,
+      "oos_max_hold_hours": 218.5,
+      "time_stop_24h_destroys_validation_pnl": true
+    },
+    "upgrade_priorities": [
+      "Preserve no-hold swing alpha and reduce tail hold time without blunt 24h time-stop.",
+      "Search exit, partial-profit, and trailing-giveback policies that preserve TP runners.",
+      "Improve OOS toward 100% using validation-only selection and blind OOS readout.",
+      "Preserve exact-threshold parent predictions and risk sidecar precomputed_prediction_dir/tag."
+    ],
+    "note": "Omega4.6 is a conditional swing/runner research baseline. It is not day-trading live PASS because max-hold exceeds 24h; live wiring unchanged."
+  },
+  "active_shadow_candidate": {
+    "alias": "alpha3",
+    "name": "alpha3_teacher_l2_limit_fallback_20260514",
+    "contract": "docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md",
+    "entrypoint": "scripts/eval_alpha2_1_signal_immediate_limit_20260514.py",
+    "decision_logic": "alpha2_1_teacher_gate_plus_v21_2_plus_v27_v31",
+    "execution_logic": "next_open_limit_touch0_fee20_close_fallback_corrected",
+    "status": "active_shadow_candidate_requires_real_l2_fill_validation",
+    "promotion_blocker": "requires_real_l2_queue_partial_fill_post_only_reject_validation"
+  },
+  "alpha3_1_next_sub_model": {
+    "alias": "alpha3.1",
+    "name": "alpha3_1_no_teacher_parent_direct_20260527",
+    "contract": "docs/model_contracts/alpha3_1_no_teacher_parent_direct_20260527_contract.md",
+    "base_model_alias": "alpha3",
+    "entrypoint": "scripts/ablate_alpha3_teacher_layer_20260527.py::no_teacher_parent_direct + scripts/plot_no_teacher_parent_direct_oos_trades_20260527.py",
+    "decision_logic": "parent_direct_no_teacher + V21.2 runner + V27/V31 + guard_soft3_hard1p45",
+    "status": "named_sub_version_candidate_not_live_promoted",
+    "cost3_pnl_pct": 122.02353682607266,
+    "cost3_mdd_pct": -30.35985114338784,
+    "cost3_wr": 0.36538461538461536,
+    "cost3_trades": 260,
+    "promotion_blocker": "requires live-runtime parity and real L2 queue/partial-fill/post-only validation"
+  },
+  "frozen_backtest_protocol": {
+    "alias": "alpha3_frozen_backtest",
+    "name": "alpha3_frozen_backtest_protocol_20260515",
+    "contract": "docs/model_contracts/alpha3_frozen_backtest_protocol_20260515.md",
+    "base_model_alias": "alpha3",
+    "baseline_entrypoint": "scripts/eval_alpha2_1_signal_immediate_limit_20260514.py",
+    "required_baseline_cost1_pnl_pct": 654.92,
+    "required_baseline_cost1_mdd_pct": -29.62,
+    "purpose": "Freeze Alpha3 stack and allow only the declared mutable layer during candidate backtests."
+  },
+  "alpha6_main_candidate": {
+    "alias": "alpha6_main_candidate",
+    "name": "alpha6_entry_quality_exit_5bucket_main_20260522",
+    "contract": "docs/model_contracts/alpha6_entry_quality_exit_5bucket_main_20260522_contract.md",
+    "script": "scripts/alpha6_catboost_entry_quality_exit_policy_20260522.py",
+    "artifact_dir": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522",
+    "variant": "current_tail111",
+    "entry_threshold": 0.0034163351358086967,
+    "exit_threshold": 0.35,
+    "status": "active_alpha6_research_main_not_live_promoted",
+    "decision_logic": "CatBoost action + quality + 5-bucket target horizon + horizon-aware exit",
+    "boundary": "Owns entry/quality/exit alpha only. DSAC is expected to replace fixed notional and later own SL/TP.",
+    "cost1_pnl_pct": 15.296962572690598,
+    "cost1_mdd_pct": -4.807712060281455,
+    "cost2_pnl_pct": 14.23872598420457,
+    "cost3_pnl_pct": 12.044721436642503
+  },
+  "design_policies": [
+    {
+      "alias": "regime3_whipsaw_risk_policy",
+      "name": "regime3_whipsaw_risk_policy_20260529",
+      "contract": "docs/model_contracts/regime3_whipsaw_risk_policy_20260529.md",
+      "status": "design_policy_for_next_action_classifier",
+      "note": "New action classifiers should use bull/bear/chop as medium-horizon structure classes. Whipsaw is risk/veto/sizing context, not an independent action-regime class."
+    },
+    {
+      "alias": "regime3_hmm_mamba_risk_cleanfunding",
+      "name": "regime3_hmm_mamba_risk_cleanfunding_20260529",
+      "contract": "docs/model_contracts/regime3_hmm_mamba_risk_cleanfunding_20260529_contract.md",
+      "status": "research_artifact_not_live_wired",
+      "note": "Current Regime3 HMM is usable as causal context; Mamba future h12/h24 accuracy is weak and should remain low-weight context/risk input until improved."
+    },
+    {
+      "alias": "regime3_current_hmm_wide24_experiment",
+      "name": "regime3_current_hmm_wide24_experiment_20260529",
+      "contract": "docs/model_contracts/regime3_current_hmm_wide24_experiment_20260529_contract.md",
+      "status": "confirmed_next_regime3_current_not_live_wired",
+      "note": "Wide24 improves 2026 balanced accuracy from 0.7655 to 0.8143 but raises flip rate from 0.0417 to 0.0520. Use as next Regime3 CURRENT for research candidates."
+    },
+    {
+      "alias": "regime3_pred_mamba_wide24_current",
+      "name": "regime3_pred_mamba_wide24_current_cleanfunding_20260529",
+      "contract": "docs/model_contracts/regime3_pred_mamba_wide24_current_20260529_contract.md",
+      "status": "research_artifact_not_live_wired",
+      "note": "PRED retrain with confirmed wide24 current context. Improves risk AUC, especially instability and false-breakout, but future direction recall is still not strong enough for action ownership."
+    },
+    {
+      "alias": "regime3_pred_tft_vsn_wide24_current",
+      "name": "regime3_pred_tft_vsn_docs48all_wide24_current_cleanfunding_20260529",
+      "contract": "docs/model_contracts/regime3_pred_tft_vsn_wide24_current_20260529_contract.md",
+      "status": "main_regime3_pred_research_candidate_not_live_wired",
+      "note": "User-selected main Regime3 PRED candidate is Docs48 all raw. It uses TFT/VSN with raw audit-approved features plus regime3_current_wide24_* and reaches 2026 bacc 0.6911 with bull recall 0.6277. Docs40 stable remains the validation-defensive alternative."
+    }
+  ],
+  "fixed_preprocessing_contracts": [
+    {
+      "alias": "regime4_tp18_sl10",
+      "name": "fixed_regime4_tp18_sl10_preprocess_20260517",
+      "contract": "docs/model_contracts/fixed_regime4_tp18_sl10_preprocess_20260517_contract.md",
+      "train_csv": "tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2025_regime4_tp18_sl10_fixed.csv",
+      "eval_csv": "tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2026_regime4_tp18_sl10_fixed.csv",
+      "status": "frozen_preprocessing_input",
+      "note": "Regime4 bull/bear/chop/whipsaw plus current auxiliary factor/risk/transition scores and tp_sl_action_score with TP 1.8%, SL 1.0%, 48-bar horizon. Future Regime4 uses no-mdjd all74 TFT, excluding pred_mdjd/conf_mdjd. Active DSAC/Router specs must replace ambiguous clean_regime4_2024_unsup_v1_* with clean_regime4_state24_sticky090_v2_*."
+    }
+  ],
+  "active_contracts": [
+    {
+      "alias": "alpha1",
+      "name": "alpha1_v31_deep_notional2_live_20260513",
+      "contract": "docs/model_contracts/alpha1_v31_deep_notional2_live_20260513_contract.md",
+      "status": "previous_live_main"
+    },
+    {
+      "alias": "alpha2",
+      "name": "alpha2_teacher_l2_replay_shadow_20260514",
+      "contract": "docs/model_contracts/alpha2_teacher_l2_replay_shadow_20260514_contract.md",
+      "status": "shadow_collect_l2"
+    },
+    {
+      "alias": "alpha3",
+      "name": "alpha3_teacher_l2_limit_fallback_20260514",
+      "contract": "docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md",
+      "status": "current_live_main_and_active_shadow_candidate"
+    },
+    {
+      "alias": "alpha3.1",
+      "name": "alpha3_1_no_teacher_parent_direct_20260527",
+      "contract": "docs/model_contracts/alpha3_1_no_teacher_parent_direct_20260527_contract.md",
+      "status": "named_sub_version_candidate_not_live_promoted",
+      "note": "Alpha3 state24-v2 stack with Teacher removed from active decision path. Parent decisions pass directly into V21.2/V27/V31/guard stack. OOS Cost3 PnL +122.02%, MDD -30.36%, WR 36.54%, trades 260."
+    },
+    {
+      "alias": "alpha5",
+      "name": "alpha5_regime4_tp18_sl10_no_teacher_no_deep_20260517",
+      "contract": "docs/model_contracts/alpha5_regime4_tp18_sl10_no_teacher_no_deep_20260517_contract.md",
+      "status": "candidate_only_not_live_main",
+      "note": "Alpha4.3 no-teacher/no-deep structure retrained with Regime4 replacement features and TP 1.8/SL 1.0 action score. Positive OOS but below Alpha4.3 reference."
+    },
+    {
+      "alias": "alpha5.1",
+      "name": "alpha5_1_regime4_interactions_no_teacher_no_deep_20260517",
+      "contract": "docs/model_contracts/alpha5_1_regime4_interactions_no_teacher_no_deep_20260517_contract.md",
+      "status": "failed_candidate_not_live_main",
+      "note": "Adds 22 TP/SL x current/future Regime4 interaction features. Feature contract passes with zero legacy clean_regime_2024_unsup_v4 leakage, but 2026 OOS underperforms Alpha5 and Alpha4.3."
+    },
+    {
+      "alias": "alpha5.2",
+      "name": "alpha5_2_regime4_factor_bridge_no_teacher_no_deep_20260517",
+      "contract": "docs/model_contracts/alpha5_2_regime4_factor_bridge_no_teacher_no_deep_20260517_contract.md",
+      "status": "failed_candidate_not_live_main",
+      "note": "Feature-only retest of Alpha5 with current Regime4 expanded to 20 columns, including factor/risk/transition auxiliary scores. Selection and runner logic unchanged from Alpha5. Positive OOS but below Alpha5 and Alpha4.3."
+    },
+    {
+      "alias": "alpha6",
+      "name": "alpha6_entry_quality_exit_5bucket_main_20260522",
+      "contract": "docs/model_contracts/alpha6_entry_quality_exit_5bucket_main_20260522_contract.md",
+      "status": "active_alpha6_research_main_not_live_promoted",
+      "note": "CatBoost EQE 5-bucket target horizon candidate. Owns entry action, quality, target bucket, and exit alpha; notional/SL/TP remain reserved for DSAC. Selected current_tail111 Cost1/2/3 PnL: 15.30/14.24/12.04%, MDD about -4.81%."
+    },
+    {
+      "alias": "omega4.3_valonly_logrisk_tail050_margin_leverage_sidecar",
+      "name": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+      "contract": "docs/model_contracts/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623_contract.md",
+      "status": "current_omega_research_baseline_not_live_wired",
+      "redteam_verdict": "REDTEAM_PASS_CLEAN_RESEARCH_BASELINE_NOT_LIVE_WIRED",
+      "note": "Omega4.3 current research baseline reset to validation-only log-risk HGB sidecar. Red-team verdict PASS for clean research baseline, not live-wired. Validation +30.33%, OOS readout +32.44%. Full dynamic-risk exit replay remains diagnostic only."
+    },
+    {
+      "alias": "omega4.3_logrisk_tail050_margin_leverage_sidecar",
+      "name": "omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623",
+      "contract": "docs/model_contracts/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623_contract.md",
+      "status": "previous_omega4_research_baseline_superseded_by_valonly_redteam_pass",
+      "note": "Superseded by validation-only Omega4.3 sidecar after red-team found OOS selection in this row. Omega4.3 research baseline: Omega4.2 exit0.70 ATR safety runtime plus tail_penalty=0.5 log-risk HGB sidecar for sizing-only margin_fraction and leverage. Validation +29.39%, OOS +31.42%. Full dynamic-risk exit replay is diagnostic only; not live-wired."
+    },
+    {
+      "alias": "omega4.2_atr_safety_exit070",
+      "name": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+      "contract": "docs/model_contracts/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622_contract.md",
+      "status": "previous_omega4_research_baseline_not_live_wired",
+      "note": "Previous Omega4 research baseline before Omega4.3 promotion. Omega4.2 research baseline: Omega4.1 exit0.70 bundle plus ATR192 TPx12 SLx6 floor TP 7.5% / SL 4.0% safety SLTP. Validation +16.02%, OOS +13.32%. Not live-wired."
+    },
+    {
+      "alias": "omega1.1",
+      "name": "omega1_1_tabm_expertdq_20260602",
+      "contract": "docs/model_contracts/omega1_1_tabm_expertdq_20260602_contract.md",
+      "status": "named_research_candidate_not_live_promoted",
+      "note": "Omega1 Expert-DQ candidate where only expert-local Direction and Quality heads are replaced by TabM-style BatchEnsemble classifiers. Regime3 router, replay decision builder, fixed risk template, expert scales, runner, and Cost accounting are unchanged. Best research replay variant hard_floor_0p00: OOS Cost3 PnL +14.16%, MDD -10.77%, WR 49.29%, trades 211."
+    },
+    {
+      "alias": "omega1.2",
+      "name": "omega1_2_softfloor00_tabm_expertdq_20260603",
+      "contract": "docs/model_contracts/omega1_2_softfloor00_tabm_expertdq_20260603_contract.md",
+      "status": "named_research_candidate_not_live_promoted",
+      "note": "Fixed Omega1.1 TabM Expert-DQ to the pure soft-regime variant soft_floor_0p00. Each bull/bear/chop Direction and Quality TabM sees all rows with sample_weight=P(regime)_t and no floor term. OOS Cost3 PnL +4.34%, MDD -9.09%, WR 49.27%, trades 205; OOS Direction/Quality filtered BAcc 59.43%, proxy WR 66.33%."
+    },
+    {
+      "alias": "omega1.2_current_final_tp_sl_baseline",
+      "name": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+      "contract": "docs/model_contracts/omega1_2_true_3head_tabm_final_tp_sl_current_20260606_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_manifest.json",
+      "status": "previous_omega_research_baseline_not_live_promoted",
+      "note": "Previous Omega1.2 research baseline selected by user on 2026-06-06 before the Omega1.2.1 aggressive promotion. Fixed final TP/SL template on frozen true 3-head TabM: validation +42.82% / MDD -5.47% / WR 63.64% / trades 33; OOS +32.15% / MDD -4.14% / WR 72.22% / trades 18."
+    },
+    {
+      "alias": "omega1.2.1",
+      "name": "omega1_2_1_current_baseline_growth_20260606",
+      "contract": "docs/model_contracts/omega1_2_1_current_baseline_growth_20260606_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_manifest.json",
+      "status": "research_growth_branch_not_live_promoted",
+      "note": "Growth branch on top of the current Omega1.2 final TP/SL baseline. Static balanced compensated exposure candidate: validation +61.14% / MDD -7.32%, OOS +45.31% / MDD -5.54%. Static aggressive candidate: validation +100.54% / MDD -10.68%, OOS +72.76% / MDD -8.11%. Learned exposure selector tested but weaker than static balanced: OOS +35.97% / MDD -4.14%."
+    },
+    {
+      "alias": "omega1.2.1_true_leverage_price_barrier",
+      "name": "omega1_2_1_true_leverage_price_barrier_scale200_cap090",
+      "contract": "docs/model_contracts/omega1_2_1_true_leverage_price_barrier_20260610_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_1_true_leverage_price_barrier_scale200_cap090/baseline_manifest.json",
+      "status": "audited_research_candidate_not_clean_untouched_oos",
+      "note": "Previous Omega research baseline before TP runner only baseline selection on 2026-06-12. Original preserve-price-barrier replay was validation +276.67% and OOS +186.43%, but 2026-06-13 red-team clean intrabar/taker replay is validation +49.16% / MDD -33.16% / WR 46.67% / trades 45 and OOS +120.07% / MDD -15.64% / WR 65.00% / trades 20. Do not cite +186.43% as clean untouched OOS."
+    },
+    {
+      "alias": "omega1.2.1_tp_runner_clean_repair",
+      "name": "omega1_2_1_tp_runner_clean_repair_20260613",
+      "contract": "docs/model_contracts/omega1_2_1_tp_runner_clean_repair_20260613_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_1_tp_runner_clean_repair_20260613/baseline_manifest.json",
+      "status": "clean_repair_candidate_shadow_required",
+      "note": "Clean TP-runner repair of the deprecated 20260612 baseline. Config selected on validation only; OOS is reported once after selection. Active TP-runner decision is deterministic mom3_quality and no longer uses the OOS-mined meta-selector bundle. Validation +160.22% / MDD -27.64% / WR 59.46% / trades 37; OOS +85.70% / MDD -15.64% / WR 66.67% / trades 18."
+    },
+    {
+      "alias": "omega1.2.2_tp_runner_cash_sleeve",
+      "name": "omega1_2_2_tp_runner_cash_sleeve_20260615",
+      "contract": "docs/model_contracts/omega1_2_2_tp_runner_cash_sleeve_20260615_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_2_tp_runner_cash_sleeve_20260615/candidate_manifest.json",
+      "status": "redteam_pass_shadow_candidate_not_live_wired",
+      "note": "Next Omega version named on 2026-06-15. Preserves Omega1.2.1 TP-runner clean-repair primary and adds a parent-CASH-only HGB sleeve trained on Omega state features. Red Team PASS excludes PnL/OOS lift and checks only logical, data, feature, and contract blockers. Validation +172.46% / MDD -26.54% / WR 60.87% / trades 46; OOS +86.26% / MDD -15.64% / WR 60.00% / trades 40."
+    },
+    {
+      "alias": "omega1.2.3_ev_hgb_cash_sleeve",
+      "name": "omega1_2_3_ev_hgb_cash_sleeve_20260615",
+      "contract": "docs/model_contracts/omega1_2_3_ev_hgb_cash_sleeve_20260615_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_3_ev_hgb_cash_sleeve_20260615/candidate_manifest.json",
+      "status": "walkforward_pass_live_wired",
+      "note": "Supersedes Omega1.2.2 classifier sleeve. Uses HGB long/short EV regressors with base_tp026_sl014_n0405_h192, min_edge 0.002, robust ev_min 0.002. Wired into trading_bot.py through the Omega1.2.1 CASH branch. Validation +160.50% / MDD -28.45% / WR 59.57% / trades 47; OOS +91.89% / MDD -15.64% / WR 61.76% / trades 34. Monthly walk-forward selected ev_min=0.002 improved 3/4 folds with total combo delta +6.10p."
+    },
+    {
+      "alias": "omega1.2.8_full_retrain_numeric_cash_sleeve",
+      "name": "omega1_2_8_full_retrain_numeric_cash_sleeve_20260616",
+      "contract": "docs/model_contracts/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616/candidate_manifest.json",
+      "status": "previous_omega_research_baseline_not_live_wired",
+      "note": "Full-retrained 3-head TabM parent plus parent-CASH-only HGB EV lower-bound and numeric utility agreement/veto regressors. Selected validation config full_retrain_ev_cal0.50_ev0.001_numcfg1_u0.002_m0.000. Validation +116.52% / MDD -10.79% / WR 69.05% / trades 42; OOS +82.25% / MDD -8.11% / WR 62.50% / trades 32. This is research baseline only; live runtime remains Omega1.2.3. Superseded as current research baseline by omega4_6_plus_t12_nohold_risk1_20260630 on 2026-06-30."
+    },
+    {
+      "alias": "omega1.2.1_tp_runner_only_baseline",
+      "name": "omega1_2_1_tp_runner_only_baseline_20260612",
+      "contract": "docs/model_contracts/omega1_2_1_tp_runner_only_baseline_20260612_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_1_tp_runner_only_baseline_20260612/baseline_manifest.json",
+      "status": "deprecated_do_not_use_active_or_candidate",
+      "note": "Deprecated by 2026-06-13 red-team audit. OOS +205.92% was OOS-mined through TP-runner/config selection and replay is not runtime-equivalent. Do not use as active runtime, candidate baseline, clean OOS comparison, or promotion evidence. See docs/audits/omega1_2_1_tp_runner_baseline_redteam_20260613.md."
+    },
+    {
+      "alias": "omega1.2.1_aggressive_current_baseline",
+      "name": "omega1_2_1_aggressive_compensated_scale200_cap090",
+      "contract": "docs/model_contracts/omega1_2_1_aggressive_current_baseline_20260606_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_1_aggressive_compensated_scale200_cap090/baseline_manifest.json",
+      "status": "previous_effective_notional_baseline",
+      "note": "Previous Omega live baseline. Effective-notional accounting, not true-leverage accounting. Validation +100.54% / MDD -10.68% / WR 63.64% / trades 33; OOS +72.76% / MDD -8.11% / WR 72.22% / trades 18."
+    },
+    {
+      "alias": "omega1.2_exit_feature_lifecycle_baseline",
+      "name": "omega1_2_exit_feature_lifecycle_baseline_20260604",
+      "contract": "docs/model_contracts/omega1_2_exit_feature_lifecycle_baseline_20260604_contract.md",
+      "status": "research_baseline_not_live_promoted",
+      "note": "New Omega1.2 lifecycle research baseline. Frozen 3-head TabM Direction/Quality remain unchanged; Exit Head is used only as feature-only entry/lifecycle risk context, not as an immediate threshold exit owner. Discrete Mamba lifecycle controller OOS Cost3 PnL +16.07%, MDD -5.40%, WR 65.63%, trades 32."
+    },
+    {
+      "alias": "omega1.2_post_lifecycle_bucket_adapter",
+      "name": "omega1_2_post_lifecycle_bucket_adapter_20260605",
+      "contract": "docs/model_contracts/omega1_2_post_lifecycle_bucket_adapter_20260605_contract.md",
+      "manifest": "data/ensemble/supervised/omega1_2_post_lifecycle_bucket_adapter_20260605/candidate_manifest.json",
+      "status": "research_candidate_not_live_promoted",
+      "note": "Post-lifecycle HGB bucket adapter on top of frozen Omega1.2 Exit-feature Mamba lifecycle. Stable candidate base_nogate_topk2: OOS +29.41%, MDD -2.34%, WR 78.12%, trades 32. Aggressive candidate fixed_wide_lev5_cap120_nogate_topk2: OOS +39.36%, MDD -8.82%, WR 66.77%, trades 36. fixed_ultra_wide_lev5_cap120_nogate_topk2 is blocked research-only because validation PnL/MDD collapsed to -32.13%/-34.93%."
+    },
+    {
+      "alias": "omega4.6_plus_t12_nohold_risk1",
+      "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+      "contract": "docs/model_contracts/omega4_6_plus_t12_nohold_risk1_20260630_contract.md",
+      "manifest": "data/ensemble/supervised/omega4_6_plus_t12_nohold_risk1_20260630/candidate_manifest.json",
+      "status": "current_omega_research_baseline_not_live_wired_conditional_swing",
+      "note": "Omega4.6 conditional swing/runner baseline. Validation +117.17% / MDD -17.43% / trades 29; OOS readout +67.85% / MDD -13.28% / trades 13. Not day-trading live PASS; max-hold and PnL target excluded from mandatory gates."
+    },
+    {
+      "alias": "omega4.6.1_duration_ou_halflife_risk_gate",
+      "name": "omega4_6_1_duration_ou_halflife_risk_gate_20260630",
+      "contract": "docs/model_contracts/omega4_6_1_duration_ou_halflife_risk_gate_20260630_contract.md",
+      "manifest": "data/ensemble/supervised/omega4_6_1_duration_ou_halflife_risk_gate_20260630/candidate_manifest.json",
+      "status": "conditional_upgrade_candidate_not_live_wired",
+      "note": "Current best conditional Omega4.6 upgrade candidate. Improves validation/OOS PnL, MDD, and max hold versus Omega4.6 baseline, but remains not live-wired and not day-trading PASS."
+    }
+  ],
+  "deprecated_contracts": [
+    {
+      "alias": "omega2_1_hgb_12seed_cash_sleeve",
+      "name": "omega2_1_label_atr1_h24_hgb_12seed_ensemble_thr055",
+      "contract": "docs/model_contracts/omega2_1_hgb_12seed_cash_sleeve_20260609_contract.md",
+      "status": "deprecated_historical_reference_only",
+      "active_path_allowed": false,
+      "reason": "Accounting audit 2026-06-09: fallback risk stored notional and leverage, but legacy replay used notional_exposure as the only PnL/fee/MDD exposure base. Corrected leverage-exposure OOS changed from +102.61% / -8.11% MDD to +33.88% / -23.98% MDD."
+    },
+    {
+      "alias": "omega1_2_1_cash_fallback_sleeve_family",
+      "name": "omega1_2_1_cash_fallback_extra_base_edge006_thr055_20260606",
+      "contract": "docs/model_contracts/omega1_2_1_cash_fallback_sleeve_20260606_contract.md",
+      "status": "deprecated_historical_reference_only",
+      "active_path_allowed": false,
+      "reason": "Accounting audit 2026-06-09: this fallback family inherits metadata-leverage replay semantics. Descendants must be rebuilt and rerun under explicit leverage-exposure accounting before comparison or stacking."
+    },
+    {
+      "alias": "alpha5_catboost_major_direction",
+      "name": "alpha5_24_catboost_gpu_direction_refined_20260519",
+      "contract": "docs/model_contracts/alpha5_catboost_major_direction_deprecated_20260521.md",
+      "status": "deprecated_historical_reference_only",
+      "active_path_allowed": false,
+      "reason": "Direct CatBoost NONE/LONG/SHORT action ownership overlaps with the current DSAC final-policy design. Router5 a5dir_* may remain as causal auxiliary probabilities, but CatBoost Major/Direction must not own live or frozen-backtest actions."
+    },
+    {
+      "alias": "regime4_pred_tft_h12_mdjd_official",
+      "name": "regime4_pred_tft_vsn_h12_official_20260517",
+      "contract": "docs/model_contracts/regime4_official_v1_20260517_contract.md",
+      "status": "deprecated_historical_reference_only",
+      "active_path_allowed": false,
+      "reason": "Depends on pred_mdjd/conf_mdjd. 2026 rebuilt frames did not contain those fields and the old transform path silently median-filled missing TFT inputs."
+    }
+  ],
+  "comparison_baselines": {
+    "alpha1": {
+      "cost1_pnl_pct": 361.19,
+      "cost1_mdd_pct": -31.74,
+      "cost2_pnl_pct": 88.74,
+      "cost3_pnl_pct": 0.58,
+      "source_report": "data/ensemble/reports/v31_deep_scout_notional_sensitivity_20260513.json"
+    },
+    "alpha2_shadow": {
+      "cost1_pnl_pct": 699.14,
+      "cost1_mdd_pct": -29.72,
+      "cost2_pnl_pct": 463.54,
+      "cost3_pnl_pct": 420.8,
+      "source_report": "data/ensemble/reports/alpha1_l2_teacher_deep_parent_20260514_summary.json",
+      "source_audit": "data/ensemble/reports/alpha1_l2_teacher_deep_parent_20260514_audit.json",
+      "verdict": "shadow_collect_l2"
+    },
+    "alpha2_1_aggressive_runtime": {
+      "cost1_pnl_pct": 718.7,
+      "cost1_mdd_pct": -26.66,
+      "cost2_pnl_pct": 443.82,
+      "cost3_pnl_pct": 360.15,
+      "source_report": "data/ensemble/reports/alpha2_teacher_l2_runtime_sweep_20260514_summary.json",
+      "source_audit": "data/ensemble/reports/alpha2_teacher_l2_runtime_sweep_20260514_audit.json",
+      "verdict": "shadow_collect_l2",
+      "note": "Aggressive branch: cost1 PnL/MDD improved, but combined score below Alpha2 due to lower cost2/cost3 durability."
+    },
+    "alpha3": {
+      "name": "Alpha3 corrected selected next_open_limit_touch0_fee20",
+      "cost1_pnl_pct": 654.92,
+      "cost1_mdd_pct": -29.62,
+      "cost2_pnl_pct": 602.26,
+      "cost3_pnl_pct": 456.48,
+      "trades_per_day_cost1": 3.32,
+      "source_report": "data/ensemble/reports/alpha2_1_signal_immediate_limit_20260514_summary.json",
+      "source_audit": "data/ensemble/reports/alpha2_1_signal_immediate_limit_20260514_audit.json",
+      "source_l2_shadow_audit": "data/ensemble/reports/alpha3_live_l2_shadow_audit_latest.json",
+      "verdict": "candidate_retest_required_with_real_l2_ticks",
+      "note": "Alias requested by user. Alpha3 means Alpha2.1 decision stack plus corrected selected next_open_limit_touch0_fee20 execution. The older +747.76% open-fallback result is deprecated."
+    },
+    "omega1_2_exit_feature_lifecycle_baseline": {
+      "name": "Omega1.2 Exit-Feature Lifecycle Baseline",
+      "cost3_pnl_pct": 16.074043573945662,
+      "cost3_mdd_pct": -5.395957353690917,
+      "cost3_wr": 0.65625,
+      "cost3_trades": 32,
+      "source_report": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604/report.json",
+      "source_manifest": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604/baseline_manifest.json",
+      "verdict": "research_baseline_not_live_promoted",
+      "note": "Use as the baseline for Omega1.2 experiments that preserve Exit Head as feature-only risk context. Do not use as live promotion evidence without runtime-native parity and comparison to the prior +32.15% Omega1.2 final TP/SL baseline."
+    },
+    "omega1_2_current_final_tp_sl_baseline": {
+      "name": "Omega1.2 Current Final TP/SL Baseline",
+      "cost3_pnl_pct": 32.14560500542696,
+      "cost3_mdd_pct": -4.135192490277451,
+      "cost3_wr": 0.7222222222222222,
+      "cost3_trades": 18,
+      "validation_cost3_pnl_pct": 42.822624455902236,
+      "validation_cost3_mdd_pct": -5.471616800975976,
+      "validation_cost3_wr": 0.6363636363636364,
+      "validation_cost3_trades": 33,
+      "source_manifest": "data/ensemble/supervised/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_manifest.json",
+      "source_artifact": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+      "verdict": "previous_omega_research_baseline_not_live_promoted",
+      "note": "Previous Omega1.2 research baseline on 2026-06-06. The current live baseline is the Omega1.2.1 aggressive compensated candidate."
+    },
+    "omega1_2_1_aggressive_current_baseline": {
+      "name": "Omega1.2.1 Aggressive Current Baseline",
+      "cost3_pnl_pct": 72.76004148106665,
+      "cost3_mdd_pct": -8.108170708968387,
+      "cost3_wr": 0.7222222222222222,
+      "cost3_trades": 18,
+      "validation_cost3_pnl_pct": 100.54272942091158,
+      "validation_cost3_mdd_pct": -10.677652697162888,
+      "validation_cost3_wr": 0.6363636363636364,
+      "validation_cost3_trades": 33,
+      "source_manifest": "data/ensemble/supervised/omega1_2_1_aggressive_compensated_scale200_cap090/baseline_manifest.json",
+      "source_artifact": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606",
+      "verdict": "live_promoted_pending_restart",
+      "note": "Current Omega live baseline after user accepted MDD around -10%. Future candidates must compare against this aggressive compensated exposure replay."
+    },
+    "omega_accounting_audit_20260609": {
+      "name": "Omega Accounting Audit 2026-06-09",
+      "contract": "docs/model_contracts/omega_accounting_audit_20260609.md",
+      "verdict": "full_inventory_completed_with_promotion_safe_true_leverage_ranking",
+      "inventory_counts": {
+        "json_reports_inspected": 284,
+        "omega_rl_scripts_inspected": 94,
+        "omega_contracts_inspected": 14,
+        "explicit_true_leverage_exposure_reports": 38,
+        "documented_metadata_effective_notional_reports": 72,
+        "metadata_effective_notional_unstated_reports": 33,
+        "deprecated_invalid_true_leverage_reports": 9,
+        "mixed_or_suspect_reports": 4,
+        "unknown_needs_manual_review_reports": 128
+      },
+      "highest_accounting_normal_oos": {
+        "name": "omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_ultra_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260710",
+        "cost3_pnl_pct": 81.35053758269424,
+        "cost3_mdd_pct": -8.540793137055713,
+        "cost3_wr": 0.8,
+        "cost3_trades": 30,
+        "validation_cost3_pnl_pct": -31.60768129692918,
+        "validation_cost3_mdd_pct": -34.66996201527621,
+        "verdict": "research_only_oos_overfit_risk"
+      },
+      "highest_corrected_omega2_1_oos_diagnostic": {
+        "name": "omega2_1_hgb_calibration_exposure_levexp_20260609::static_t0.45_m0.00_a0.84_s2.5_cap0.9",
+        "cost3_pnl_pct": 97.82199534561624,
+        "cost3_mdd_pct": -29.58460557921889,
+        "cost3_wr": 0.49032258064516127,
+        "cost3_trades": 155,
+        "validation_cost3_pnl_pct": -10.750938430785428,
+        "validation_cost3_mdd_pct": -45.70243455460318,
+        "verdict": "corrected_accounting_diagnostic_only_validation_collapse"
+      },
+      "best_accounting_normal_stable_candidate": {
+        "name": "omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_lev5_eff_cap150_comp_tpup_voltarget_trainall_c96_replayk2_s260726",
+        "cost3_pnl_pct": 79.76253691158956,
+        "cost3_mdd_pct": -10.787332338158595,
+        "cost3_wr": 0.6857142857142857,
+        "cost3_trades": 35,
+        "validation_cost3_pnl_pct": 11.692291631078277,
+        "validation_cost3_mdd_pct": -15.899476518974797,
+        "verdict": "best_current_accounting_normal_stable_research_candidate"
+      },
+      "source_report": "tmp/causal_regen_20260516/omega2_1_hgb_calibration_exposure_levexp_20260609/report.json",
+      "source_audit": "tmp/causal_regen_20260516/omega2_1_hgb_scale25_levexp_accounting_audit_20260609/report.json",
+      "source_inventory_summary": "tmp/causal_regen_20260516/omega_full_accounting_audit_20260609/summary.json",
+      "source_report_inventory": "tmp/causal_regen_20260516/omega_full_accounting_audit_20260609/omega_report_accounting_inventory.csv",
+      "source_script_inventory": "tmp/causal_regen_20260516/omega_full_accounting_audit_20260609/omega_script_accounting_inventory.csv"
+    },
+    "deprecated_alpha3_747_open_fallback": {
+      "cost1_pnl_pct": 747.76,
+      "cost1_mdd_pct": -27.37,
+      "cost2_pnl_pct": 510.83,
+      "cost3_pnl_pct": 436.68,
+      "reason_deprecated": "Maker miss fallback checked next-bar high/low but filled fallback at the same bar open. Retain as historical reference only."
+    },
+    "omega1_2_8_full_retrain_numeric_cash_sleeve_20260616": {
+      "name": "Omega1.2.8 Full-Retrain Numeric Cash Sleeve",
+      "cost3_pnl_pct": 82.25147410181816,
+      "cost3_mdd_pct": -8.108170708968377,
+      "cost3_wr": 0.625,
+      "cost3_trades": 32,
+      "validation_cost3_pnl_pct": 116.52479178582453,
+      "validation_cost3_mdd_pct": -10.788999567193569,
+      "validation_cost3_wr": 0.6904761904761905,
+      "validation_cost3_trades": 42,
+      "source_manifest": "data/ensemble/supervised/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616/candidate_manifest.json",
+      "source_report": "tmp/causal_regen_20260516/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616/report.json",
+      "source_artifact": "tmp/causal_regen_20260516/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616",
+      "verdict": "current_omega_research_baseline_not_live_wired",
+      "note": "Current Omega research comparison baseline. Selection is validation-only; OOS diagnostic best rows are not defaults. Live baseline remains omega1_2_3_ev_hgb_cash_sleeve_20260615."
+    }
+  },
+  "previous_omega_research_baseline_before_omega4_2": {
+    "alias": "omega1.2.8_full_retrain_numeric_cash_sleeve",
+    "name": "omega1_2_8_full_retrain_numeric_cash_sleeve_20260616",
+    "contract": "docs/model_contracts/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616_contract.md",
+    "manifest": "data/ensemble/supervised/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616/candidate_manifest.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega1_2_8_full_retrain_numeric_cash_sleeve_20260616",
+    "parent_artifact": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_full_retrain_cash_alpha43_20260608",
+    "status": "current_omega_research_baseline_not_live_wired",
+    "validation_cost3": {
+      "pnl_pct": 116.52479178582453,
+      "mdd_pct": -10.788999567193569,
+      "wr": 0.6904761904761905,
+      "trades": 42,
+      "fallback_entries": 9
+    },
+    "oos_cost3": {
+      "pnl_pct": 82.25147410181816,
+      "mdd_pct": -8.108170708968377,
+      "wr": 0.625,
+      "trades": 32,
+      "fallback_entries": 14
+    },
+    "note": "Omega1.2.8 is the selected-by-validation full-retrained parent + HGB numeric EV lower-bound agreement/veto cash sleeve baseline. Live runtime remains Omega1.2.3 until separate runtime-native promotion."
+  },
+  "current_omega4_research_baseline": {
+    "alias": "omega4.6_plus_t12_nohold_risk1",
+    "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "display_version": "Omega 4.6",
+    "contract": "docs/model_contracts/omega4_6_plus_t12_nohold_risk1_20260630_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_6_plus_t12_nohold_risk1_20260630/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_6_plus_t12_nohold_risk1_20260630/runtime_contract.json",
+    "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_plus_t12_nohold_risk1_20260630/promotion_manifest.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630",
+    "source_report": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630/report.json",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega_creative_until_10am_20260630/plus_t12_diagnostic_nohold_risk1_20260630/omega_artifact_integrity_audit_20260630.json",
+    "status": "current_omega_research_baseline_not_live_wired_conditional_swing",
+    "redteam_verdict": "CONDITIONAL_PASS_MAX_HOLD_AND_PNL_TARGET_EXCLUDED_NOT_DAYTRADING_LIVE_PASS",
+    "promotion_type": "conditional_swing_runner_plus_t12_priority_router_h48qual_zig075",
+    "baseline_type": "conditional_swing_runner",
+    "selection_scope": "validation_only_source_selection; OOS diagnostic readout only",
+    "selection_oos_independent": true,
+    "conditional_pass_excludes": [
+      "max_hold_24h",
+      "pnl_target_validation_oos_100pct"
+    ],
+    "artifact_integrity_promotion_pass": true,
+    "router_order": "h48qual > zig075",
+    "scale_map": {
+      "h48qual_L": 0.38,
+      "h48qual_S": 2.499,
+      "zig075_L": 2.446,
+      "zig075_S": 2.478
+    },
+    "risk_contract": {
+      "notional": "margin_fraction * leverage",
+      "pnl": "realized_price_move * notional",
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "notional_scaled_sltp": false
+    },
+    "components": {
+      "h48qual": {
+        "quality_threshold": 0.5,
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630",
+        "precomputed_prediction_tag": "q050"
+      },
+      "zig075": {
+        "quality_threshold": 0.75,
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629",
+        "precomputed_prediction_tag": "q075"
+      }
+    },
+    "validation_cost3": {
+      "pnl_pct": 117.16674838792906,
+      "mdd_pct": -17.431511291376623,
+      "wr": 0.5172413793103449,
+      "trades": 29,
+      "max_leverage": 5.0,
+      "avg_notional": 1.411557461309998,
+      "max_notional": 1.8,
+      "max_margin_fraction": 0.3870894431927618,
+      "max_hold_hours": 222.0,
+      "hold_over_24h_count": 21,
+      "overlap_count": 0,
+      "accounting_error_max_abs": 0.0,
+      "notional_contract_error_max_abs": 0.0
+    },
+    "oos_cost3": {
+      "pnl_pct": 67.8462084780387,
+      "mdd_pct": -13.275817100563392,
+      "wr": 0.5384615384615384,
+      "trades": 13,
+      "max_leverage": 5.000000000000001,
+      "avg_notional": 1.407994809696035,
+      "max_notional": 1.8,
+      "max_margin_fraction": 0.4393397607695104,
+      "max_hold_hours": 218.5,
+      "hold_over_24h_count": 12,
+      "overlap_count": 0,
+      "accounting_error_max_abs": 0.0,
+      "notional_contract_error_max_abs": 0.0
+    },
+    "known_full_live_daytrading_blockers": {
+      "validation_max_hold_hours": 222.0,
+      "oos_max_hold_hours": 218.5,
+      "time_stop_24h_destroys_validation_pnl": true
+    },
+    "upgrade_priorities": [
+      "Preserve no-hold swing alpha and reduce tail hold time without blunt 24h time-stop.",
+      "Search exit, partial-profit, and trailing-giveback policies that preserve TP runners.",
+      "Improve OOS toward 100% using validation-only selection and blind OOS readout.",
+      "Preserve exact-threshold parent predictions and risk sidecar precomputed_prediction_dir/tag."
+    ],
+    "note": "Omega4.6 is a conditional swing/runner research baseline. It is not day-trading live PASS because max-hold exceeds 24h; live wiring unchanged."
+  },
+  "previous_omega4_research_baseline_before_omega4_3": {
+    "alias": "omega4.2_atr_safety_exit070",
+    "name": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+    "display_version": "Omega 4.2",
+    "contract": "docs/model_contracts/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/runtime_contract.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+    "parent_artifact": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+    "status": "previous_omega4_research_baseline_not_live_wired",
+    "promotion_type": "runtime_contract_overlay_on_omega4_1_weights",
+    "weights_retrained": false,
+    "selected_variant": "atr192_tp12_sl6",
+    "runtime_template": {
+      "quality_threshold": 0.7,
+      "exit_threshold": 0.7,
+      "max_hold_bars": 0,
+      "cooldown_bars": 0,
+      "cost_multiplier": 3.0,
+      "position_pnl_contract": "PnL = realized_price_move * notional, after fee/slippage cost multiplier",
+      "notional_contract": "notional is inherited from Omega 4.1 baseline decisions; leverage metadata remains separate",
+      "leverage_metadata": 2.0,
+      "price_move_take_profit_expr": "clip(max(0.075, atr_pct_192 * 12.0), 0.0, 0.22)",
+      "price_move_stop_loss_expr": "clip(max(0.040, atr_pct_192 * 6.0), 0.0, 0.12)",
+      "notional_scaled_sltp": false,
+      "live_wiring_changed": false
+    },
+    "validation_cost3": {
+      "pnl_pct": 16.023119805554952,
+      "mdd_pct": -7.111720601366911,
+      "wr": 0.6705882352941176,
+      "trades": 85
+    },
+    "oos_cost3": {
+      "pnl_pct": 13.323971155450787,
+      "mdd_pct": -4.384161221061122,
+      "wr": 0.6615384615384615,
+      "trades": 65
+    },
+    "note": "Previous Omega4 research baseline before Omega4.3 log-risk margin+leverage sidecar promotion. Omega4.2 keeps Omega4.1 3-head weights and promotes ATR192 TPx12 SLx6 safety SLTP with TP floor 7.5% and SL floor 4.0%; not live-wired."
+  },
+  "previous_omega4_research_baseline_before_valonly_omega4_3": {
+    "alias": "omega4.3_logrisk_tail050_margin_leverage_sidecar",
+    "name": "omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "display_version": "Omega 4.3",
+    "contract": "docs/model_contracts/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/runtime_contract.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "parent_artifact": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+    "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/risk_sidecar.pkl",
+    "status": "previous_omega4_research_baseline_superseded_by_valonly_redteam_pass",
+    "promotion_type": "log_risk_margin_leverage_sidecar_overlay_on_omega4_2_runtime_contract",
+    "weights_retrained": false,
+    "risk_sidecar_trained": true,
+    "selected_variant": "risk_1673",
+    "runtime_template": {
+      "quality_threshold": 0.7,
+      "exit_threshold": 0.7,
+      "max_hold_bars": 0,
+      "cooldown_bars": 0,
+      "cost_multiplier": 3.0,
+      "atr_safety_sltp": {
+        "atr_window_bars": 192,
+        "take_profit_atr_multiple": 12.0,
+        "stop_loss_atr_multiple": 6.0,
+        "floor_take_profit_price_move": 0.075,
+        "floor_stop_loss_price_move": 0.04,
+        "cap_take_profit_price_move": 0.22,
+        "cap_stop_loss_price_move": 0.12,
+        "sltp_hit_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location"
+      },
+      "risk_sidecar_mode": "sizing_only_trade_level_overlay",
+      "risk_sidecar_outputs": [
+        "margin_fraction",
+        "leverage"
+      ],
+      "risk_sidecar_feature_mode": "parent_outputs",
+      "risk_sidecar_side_split_model": true,
+      "risk_sizing_contract": "notional = margin_fraction * leverage; PnL = realized_price_move * notional",
+      "sltp_notional_scaled": false,
+      "full_replay_dynamic_exit_enabled": false,
+      "live_wiring_changed": false,
+      "fail_fast_required": true
+    },
+    "validation_cost3": {
+      "pnl_pct": 29.394467639408784,
+      "mdd_pct": -7.6603674358250995,
+      "wr": 0.6705882352941176,
+      "trades": 85,
+      "avg_notional": 0.5296724416168492,
+      "avg_margin_fraction": 0.22370870360417983,
+      "avg_leverage": 2.257382661268968,
+      "log_risk_utility": 0.2047688913884562
+    },
+    "oos_cost3": {
+      "pnl_pct": 31.416421856154496,
+      "mdd_pct": -5.3669033722919535,
+      "wr": 0.6615384615384615,
+      "trades": 65,
+      "avg_notional": 0.5382444403310983,
+      "avg_margin_fraction": 0.22722648543807725,
+      "avg_leverage": 2.2698793702317106,
+      "log_risk_utility": 0.25854200556525764
+    },
+    "note": "Omega4.3 research baseline: Omega4.2 exit0.70 ATR safety runtime plus tail_penalty=0.5 log-risk HGB sidecar for sizing-only margin_fraction and leverage. Validation +29.39%, OOS +31.42%. Full dynamic-risk exit replay is diagnostic only; not live-wired.",
+    "superseded_by": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "superseded_reason": "OOS-guarded mapping selection failed clean OOS red-team; validation-only sidecar received clean research baseline PASS."
+  },
+  "current_omega_reproducible_architecture_baseline": {
+    "alias": "omega4.4_topdown_reproducible_architecture_baseline",
+    "name": "omega4_4_topdown_reproducible_architecture_baseline_20260623",
+    "display_version": "Omega 4.4",
+    "contract": "docs/model_contracts/omega4_4_topdown_reproducible_architecture_baseline_20260623_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_4_topdown_reproducible_architecture_baseline_20260623/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_4_topdown_reproducible_architecture_baseline_20260623/runtime_contract.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega4_4_topdown_reproducible_architecture_baseline_20260623",
+    "parent_artifact": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/true_3head_tabm_bundle.pt",
+    "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/risk_sidecar.pkl",
+    "status": "current_omega_reproducible_architecture_baseline_not_live_wired",
+    "redteam_verdict": "REDTEAM_PASS_CLEAN_RESEARCH_REPRODUCIBLE_ARCHITECTURE_BASELINE_NOT_PERFORMANCE_CHAMPION",
+    "baseline_role": "top_down_reproducible_architecture_baseline_not_performance_champion",
+    "performance_champion_reference": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "selected_variant": "risk_5241",
+    "selection_scope": "validation_only",
+    "selection_policy": "validation-only log_risk max with validation_mdd >= -7.00 and trades >= 0.95 * baseline trades; OOS excluded from filter/sort/tie-break",
+    "runtime_template": {
+      "model_id": "omega4_4_topdown_reproducible_architecture_baseline_20260623",
+      "display_version": "Omega 4.4 top-down reproducible architecture baseline",
+      "role": "top_down_reproducible_architecture_baseline",
+      "base_model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+      "parent_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/true_3head_tabm_bundle.pt",
+      "parent_report": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/report.json",
+      "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/risk_sidecar.pkl",
+      "risk_report": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/report.json",
+      "quality_threshold": 0.7,
+      "exit_threshold": 0.75,
+      "max_hold_bars": 0,
+      "cooldown_bars": 0,
+      "topdown_sequence": {
+        "parent_recipe": "same_as_direction + terminal_giveback + epochs2 + train15k + exit15k + q0.70",
+        "exit_threshold": 0.75,
+        "risk_sidecar": "HGB side-split parent_outputs dynamic_leverage validation-only logrisk tail050"
+      },
+      "atr_safety_sltp": {
+        "atr_window_bars": 192,
+        "take_profit_atr_multiple": 12.0,
+        "stop_loss_atr_multiple": 6.0,
+        "floor_take_profit_price_move": 0.075,
+        "floor_stop_loss_price_move": 0.04,
+        "cap_take_profit_price_move": 0.22,
+        "cap_stop_loss_price_move": 0.12,
+        "sltp_hit_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location"
+      },
+      "price_move_take_profit_expr": "clip(max(0.075, atr_pct_192 * 12.0), 0.0, 0.22)",
+      "price_move_stop_loss_expr": "clip(max(0.040, atr_pct_192 * 6.0), 0.0, 0.12)",
+      "risk_sidecar": {
+        "mode": "sizing_only_trade_level_overlay",
+        "model_kind": "hgb",
+        "feature_mode": "parent_outputs",
+        "side_split_model": true,
+        "dynamic_leverage": true,
+        "selection_objective": "log_risk",
+        "selection_scope": "validation_only",
+        "log_risk_params": {
+          "tail_budget": 0.02,
+          "tail_penalty": 0.5,
+          "liquidation_buffer": 0.12,
+          "liquidation_penalty": 0.25
+        },
+        "selected_variant": "risk_5241",
+        "selected_mapping": {
+          "min_scale": 0.95,
+          "max_scale": 1.65,
+          "temp": 2.1,
+          "floor": 0.06,
+          "cap": 0.28,
+          "long_scale": 0.75,
+          "short_scale": 1.25,
+          "leverage_min": 1.0,
+          "leverage_max": 2.5,
+          "leverage_temp": 1.35,
+          "leverage_floor": 1.0,
+          "leverage_cap": 3.0,
+          "long_leverage_scale": 0.9,
+          "short_leverage_scale": 1.1
+        },
+        "outputs": [
+          "margin_fraction",
+          "leverage"
+        ],
+        "notional_contract": "notional = margin_fraction * leverage"
+      },
+      "pnl_contract": "PnL = realized_price_move * notional, after fee/slippage cost multiplier",
+      "sltp_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location",
+      "notional_scaled_sltp": false,
+      "execution_contract": {
+        "parent_model_owns": [
+          "direction",
+          "quality_gate",
+          "exit_head",
+          "entry_time_atr_sltp_barrier_timing"
+        ],
+        "risk_sidecar_owns": [
+          "entry_time_margin_fraction",
+          "entry_time_leverage",
+          "trade_pnl_sizing"
+        ],
+        "full_replay_dynamic_exit_enabled": false,
+        "runtime_must_fail_on_missing_sidecar_or_contract_mismatch": true
+      },
+      "fail_fast_required": true
+    },
+    "validation_cost3": {
+      "pnl_pct": 19.10497849397168,
+      "mdd_pct": -6.969755743075179,
+      "wr": 0.5909090909090909,
+      "trades": 44,
+      "avg_notional": 0.43297382222693925,
+      "avg_margin_fraction": 0.23893660219124005,
+      "avg_leverage": 1.7761279783384587,
+      "log_risk_utility": 0.14836977735641843
+    },
+    "oos_cost3_readout": {
+      "pnl_pct": 22.214969926235106,
+      "mdd_pct": -5.548408532243498,
+      "wr": 0.6666666666666666,
+      "trades": 36,
+      "avg_notional": 0.45666178807293645,
+      "avg_margin_fraction": 0.24710653209256117,
+      "avg_leverage": 1.8102866643805366,
+      "log_risk_utility": 0.18700525529329443
+    },
+    "note": "Omega4.4 structural baseline created from the top-down retrained stack. Omega4.3 remains the performance champion; Omega4.4 is the clean reproducible architecture baseline for future work."
+  },
+  "previous_omega4_research_baseline_before_omega4_6": {
+    "alias": "omega4.3_valonly_logrisk_tail050_margin_leverage_sidecar",
+    "name": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "display_version": "Omega 4.3",
+    "contract": "docs/model_contracts/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623/runtime_contract.json",
+    "source_artifact": "tmp/causal_regen_20260516/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "parent_artifact": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+    "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623/risk_sidecar.pkl",
+    "status": "previous_omega4_research_baseline_before_omega4_6",
+    "redteam_verdict": "REDTEAM_PASS_CLEAN_RESEARCH_BASELINE_NOT_LIVE_WIRED",
+    "promotion_type": "validation_only_log_risk_margin_leverage_sidecar_overlay_on_omega4_2_runtime_contract",
+    "weights_retrained": false,
+    "risk_sidecar_trained": true,
+    "selected_variant": "risk_3473",
+    "selection_scope": "validation_only",
+    "selection_policy": "validation-only log_risk max with validation_mdd >= -8.00 and trades >= 0.95 * baseline trades; OOS excluded from filter/sort/tie-break",
+    "runtime_template": {
+      "model_id": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+      "display_version": "Omega 4.3 validation-only full-pass candidate",
+      "base_model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+      "baseline_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+      "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623/risk_sidecar.pkl",
+      "quality_threshold": 0.7,
+      "exit_threshold": 0.7,
+      "max_hold_bars": 0,
+      "cooldown_bars": 0,
+      "atr_safety_sltp": {
+        "atr_window_bars": 192,
+        "take_profit_atr_multiple": 12.0,
+        "stop_loss_atr_multiple": 6.0,
+        "floor_take_profit_price_move": 0.075,
+        "floor_stop_loss_price_move": 0.04,
+        "cap_take_profit_price_move": 0.22,
+        "cap_stop_loss_price_move": 0.12,
+        "sltp_hit_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location"
+      },
+      "price_move_take_profit_expr": "clip(max(0.075, atr_pct_192 * 12.0), 0.0, 0.22)",
+      "price_move_stop_loss_expr": "clip(max(0.040, atr_pct_192 * 6.0), 0.0, 0.12)",
+      "risk_sidecar": {
+        "mode": "sizing_only_trade_level_overlay",
+        "model_kind": "hgb",
+        "feature_mode": "parent_outputs",
+        "side_split_model": true,
+        "dynamic_leverage": true,
+        "selection_objective": "log_risk",
+        "selection_scope": "validation_only",
+        "log_risk_params": {
+          "tail_budget": 0.02,
+          "tail_penalty": 0.5,
+          "liquidation_buffer": 0.12,
+          "liquidation_penalty": 0.25
+        },
+        "selected_variant": "risk_3473",
+        "selected_mapping": {
+          "min_scale": 0.85,
+          "max_scale": 1.65,
+          "temp": 2.1,
+          "floor": 0.06,
+          "cap": 0.32,
+          "long_scale": 0.75,
+          "short_scale": 1.1,
+          "leverage_min": 1.25,
+          "leverage_max": 3.0,
+          "leverage_temp": 1.7,
+          "leverage_floor": 1.0,
+          "leverage_cap": 3.0,
+          "long_leverage_scale": 0.75,
+          "short_leverage_scale": 1.25
+        },
+        "outputs": [
+          "margin_fraction",
+          "leverage"
+        ],
+        "notional_contract": "notional = margin_fraction * leverage"
+      },
+      "pnl_contract": "PnL = realized_price_move * notional, after fee/slippage cost multiplier",
+      "sltp_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location",
+      "notional_scaled_sltp": false,
+      "execution_contract": {
+        "parent_model_owns": [
+          "direction",
+          "quality_gate",
+          "exit_head",
+          "entry_time_atr_sltp_barrier_timing"
+        ],
+        "risk_sidecar_owns": [
+          "entry_time_margin_fraction",
+          "entry_time_leverage",
+          "trade_pnl_sizing"
+        ],
+        "full_replay_dynamic_exit_enabled": false,
+        "runtime_must_fail_on_missing_sidecar_or_contract_mismatch": true
+      },
+      "fail_fast_required": true
+    },
+    "validation_cost3": {
+      "pnl_pct": 30.326541948024065,
+      "mdd_pct": -7.9085141871933935,
+      "wr": 0.6705882352941176,
+      "trades": 85,
+      "avg_notional": 0.5535874161677686,
+      "avg_margin_fraction": 0.23456184950367348,
+      "avg_leverage": 2.257382661268968,
+      "log_risk_utility": 0.2055482405836782
+    },
+    "oos_cost3": {
+      "pnl_pct": 32.44445655635533,
+      "mdd_pct": -5.715959498799483,
+      "wr": 0.6615384615384615,
+      "trades": 65,
+      "avg_notional": 0.5613027059937815,
+      "avg_margin_fraction": 0.23741002202339617,
+      "avg_leverage": 2.2698793702317106,
+      "log_risk_utility": 0.2628645208299939
+    },
+    "note": "Omega4.3 current research baseline reset to validation-only log-risk HGB sidecar. Red-team verdict PASS for clean research baseline, not live-wired. Validation +30.33%, OOS readout +32.44%. Full dynamic-risk exit replay remains diagnostic only.",
+    "superseded_by": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "superseded_reason": "Omega4.6 conditional swing/runner baseline selected for research/upgrade work; Omega4.3 remains historical research baseline, not current."
+  },
+  "current_omega4_6_upgrade_candidate": {
+    "alias": "omega4.6.1_duration_ou_halflife_risk_gate",
+    "name": "omega4_6_1_duration_ou_halflife_risk_gate_20260630",
+    "display_version": "Omega 4.6.1",
+    "base_model_id": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "contract": "docs/model_contracts/omega4_6_1_duration_ou_halflife_risk_gate_20260630_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_6_1_duration_ou_halflife_risk_gate_20260630/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/runtime_contract.json",
+    "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/promotion_manifest.json",
+    "source_report": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/report.json",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/omega_artifact_integrity_audit_20260630.json",
+    "status": "conditional_upgrade_candidate_not_live_wired",
+    "classification": "conditional_upgrade_candidate_not_daytrading_pass",
+    "selection_scope": "validation_only_duration_priority; OOS readout only",
+    "artifact_integrity_promotion_pass": true,
+    "rule_contract": {
+      "feature": "ou_halflife",
+      "op": "le",
+      "threshold": 0.005415348,
+      "hit_scale": 0.0,
+      "behavior": "entry-time exposure gate; if condition hits, notional and leverage are scaled by hit_scale"
+    },
+    "conditional_pass_excludes": [
+      "max_hold_24h",
+      "pnl_target_validation_oos_100pct"
+    ],
+    "conditional_non_pnl_gate_pass": true,
+    "baseline_reference": {
+      "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+      "validation_pnl_pct": 117.16674838792906,
+      "validation_mdd_pct": -17.431511291376623,
+      "validation_trades": 29,
+      "validation_max_hold_hours": 222.0,
+      "oos_pnl_pct": 67.8462084780387,
+      "oos_mdd_pct": -13.275817100563392,
+      "oos_trades": 13,
+      "oos_max_hold_hours": 218.5
+    },
+    "validation_cost3": {
+      "pnl_pct": 175.85666646198916,
+      "mdd_pct": -10.603830226421218,
+      "wr": 0.6190476190476191,
+      "trades": 21,
+      "skipped": 8,
+      "avg_hold_hours": 60.373015873015866,
+      "max_hold_hours": 115.33333333333333,
+      "hold_over_24h_count": 15,
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "avg_notional": 1.3662199801149821
+    },
+    "oos_cost3": {
+      "pnl_pct": 72.58681779350384,
+      "mdd_pct": -7.469861534818922,
+      "wr": 0.6666666666666666,
+      "trades": 9,
+      "skipped": 4,
+      "avg_hold_hours": 59.407407407407405,
+      "max_hold_hours": 133.5,
+      "hold_over_24h_count": 8,
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "avg_notional": 1.5402513398070685
+    },
+    "risk_contract": {
+      "notional": "margin_fraction * leverage",
+      "pnl": "realized_price_move * notional",
+      "max_leverage": 5.0,
+      "max_notional": 1.8
+    },
+    "remaining_risks": [
+      "Trade count drops from 29 to 21 validation and 13 to 9 OOS.",
+      "Validation sample remains small.",
+      "Max hold remains above 24h, so this is not day-trading PASS.",
+      "Live feature parity for ou_halflife must be verified before runtime wiring."
+    ],
+    "note": "Current best conditional Omega4.6 upgrade candidate. Improves validation/OOS PnL, MDD, and max hold versus Omega4.6 baseline, but remains not live-wired and not day-trading PASS."
+  },
+  "current_omega4_6_2_candidate": {
+    "alias": "omega4.6.2_cap220_short_boost125_time_stop120h",
+    "name": "omega4_6_2_cap220_short_boost125_time_stop120h_20260630",
+    "display_version": "Omega 4.6.2",
+    "base_model_id": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "contract": "docs/model_contracts/omega4_6_2_cap220_short_boost125_time_stop120h_20260630_contract.md",
+    "manifest": "data/ensemble/supervised/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/candidate_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/runtime_contract.json",
+    "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/promotion_manifest.json",
+    "source_report": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/report.json",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/omega_artifact_integrity_audit_20260630.json",
+    "redteam_report": "docs/audits/omega4_6_2_cap220_short_boost125_time_stop120h_20260630_redteam_20260630.md",
+    "runtime_shadow_walkforward_audit": "docs/audits/omega4_6_2_cap220_runtime_native_walkforward_20260701.md",
+    "runtime_shadow_walkforward_report": "tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/report.json",
+    "status": "omega4_6_2_research_detail_line_candidate_not_live_wired",
+    "classification": "conditional_diagnostic_pass_full_live_fail_fresh_holdout_required",
+    "selection_scope": "cap220 balanced diagnostic candidate; OOS readout considered for detail-line choice, so no clean-OOS promotion claim",
+    "artifact_integrity_promotion_pass": true,
+    "redteam_verdict": "CONDITIONAL_DIAGNOSTIC_PASS_FULL_LIVE_FAIL_FRESH_HOLDOUT_REQUIRED",
+    "conditional_diagnostic_pass": true,
+    "full_live_pass": false,
+    "rule_contract": {
+      "entry_gate": {
+        "feature": "rsi",
+        "op": "ge",
+        "threshold": 56.656189,
+        "scope": "short_entries",
+        "hit_scale": 0.0,
+        "behavior": "skip short entries when RSI is greater than or equal to the threshold",
+        "source_idea": "Omega4.6 duration-risk robust selected rule"
+      },
+      "exposure_overlay": {
+        "mode": "side_factor_with_notional_cap",
+        "spec": "short_boost125_cap220",
+        "long_factor": 0.9,
+        "short_factor": 1.25,
+        "tested_notional_cap": 2.2,
+        "leverage_cap": 5.0,
+        "behavior": "scale short exposure moderately, then clamp by tested notional cap and leverage cap",
+        "source_idea": "Notional gate removed from red-team pass: moderate short exposure expansion under leverage cap"
+      },
+      "lifecycle_overlay": {
+        "mode": "time_stop",
+        "max_hold_hours": 120.0,
+        "scope": "all_positions",
+        "source_idea": "Omega1 horizon-router max-hold diagnostic"
+      }
+    },
+    "conditional_pass_excludes": [
+      "max_hold_24h",
+      "oos_pnl_target_100pct",
+      "runtime_native_replay_available",
+      "clean_oos_selection_claim_allowed"
+    ],
+    "conditional_gate_checks": {
+      "artifact_integrity_pass": true,
+      "validation_mdd_lte_20_abs": true,
+      "oos_mdd_lte_20_abs": true,
+      "validation_leverage_lte_5": true,
+      "oos_leverage_lte_5": true,
+      "validation_no_overlap": true,
+      "oos_no_overlap": true,
+      "validation_accounting_consistent": true,
+      "oos_accounting_consistent": true,
+      "validation_notional_contract_consistent": true,
+      "oos_notional_contract_consistent": true
+    },
+    "full_live_checks": {
+      "validation_max_hold_lte_24h": false,
+      "oos_max_hold_lte_24h": false,
+      "validation_pnl_gte_100pct": true,
+      "oos_pnl_gte_100pct": false,
+      "runtime_native_replay_available": false,
+      "clean_oos_selection_claim_allowed": false
+    },
+    "baseline_reference": {
+      "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+      "validation_pnl_pct": 117.16674838792906,
+      "validation_mdd_pct": -17.431511291376623,
+      "validation_wr": 0.5172413793103449,
+      "validation_trades": 29,
+      "validation_max_hold_hours": 222.0,
+      "validation_max_notional": 1.8,
+      "oos_pnl_pct": 67.8462084780387,
+      "oos_mdd_pct": -13.275817100563392,
+      "oos_wr": 0.5384615384615384,
+      "oos_trades": 13,
+      "oos_max_hold_hours": 218.5,
+      "oos_max_notional": 1.8
+    },
+    "validation_cost3": {
+      "pnl_pct": 211.14258330879252,
+      "mdd_pct": -13.718151633931718,
+      "wr": 0.6521739130434783,
+      "trades": 23,
+      "skipped": 6,
+      "avg_hold_hours": 63.26811594202899,
+      "max_hold_hours": 120.0,
+      "hold_over_24h_count": 17,
+      "max_leverage": 5.0,
+      "max_notional": 1.917602315132258,
+      "avg_notional": 1.4170948122453524
+    },
+    "oos_cost3": {
+      "pnl_pct": 79.31781513301281,
+      "mdd_pct": -10.134105321862275,
+      "wr": 0.6153846153846154,
+      "trades": 13,
+      "skipped": 0,
+      "avg_hold_hours": 67.78846153846153,
+      "max_hold_hours": 120.0,
+      "hold_over_24h_count": 12,
+      "max_leverage": 5.000000000000001,
+      "max_notional": 2.196698803847552,
+      "avg_notional": 1.4790570502256064
+    },
+    "risk_contract": {
+      "notional": "margin_fraction * leverage",
+      "pnl": "realized_price_move * notional",
+      "max_leverage": 5.0,
+      "tested_notional_cap": 2.2,
+      "observed_validation_max_notional": 1.917602315132258,
+      "observed_oos_max_notional": 2.196698803847552,
+      "runtime_reference_notional_cap": 1.8,
+      "notional_lte_1p8_redteam_gate_removed": true,
+      "notional_contract_consistency_required": true,
+      "notional_scaled_sltp": false
+    },
+    "remaining_risks": [
+      "Not live-wired; runtime-native replay parity is still required.",
+      "Max hold remains 120h, so this is not a 24h day-trading live pass.",
+      "OOS PnL readout remains below 100%.",
+      "OOS readout was considered for this detail-line choice; fresh holdout or walk-forward is required before clean promotion."
+    ],
+    "note": "Omega4.6.2 cap220 research/detail-line candidate. It keeps Omega4.6 parent components and adds short RSI skip, short exposure boost with cap220, and 120h time stop. Not live-wired and not a full live pass."
+  }
+}

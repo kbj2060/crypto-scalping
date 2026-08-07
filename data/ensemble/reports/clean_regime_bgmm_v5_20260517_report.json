@@ -1,0 +1,263 @@
+{
+  "model_id": "clean_regime_2024_unsup_bgmm_v5_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/clean_regime_bgmm_v5.joblib",
+  "clean_prefix": "clean_regime_2024_unsup_v4_",
+  "fit_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "fit_rows": 105380,
+  "feature_cols": [
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "net_taker_ratio",
+    "smart_money_flow",
+    "taker_acceleration",
+    "ofi_acceleration",
+    "volatility_z",
+    "bb_width_z",
+    "amihud_illiquidity_z",
+    "log_return",
+    "rsi",
+    "macd_hist",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "btc_corr_60",
+    "eth_btc_ratio_change",
+    "fvg_dist",
+    "chop_index",
+    "cvp_poc_dist",
+    "cvp_cluster_position",
+    "cvp_volume_imbalance",
+    "breakout_strength",
+    "long_squeeze_risk",
+    "funding_price_divergence",
+    "kalman_velocity",
+    "ofti",
+    "kel"
+  ],
+  "feature_count": 30,
+  "components": 5,
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+      "rows": 105380,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:55:00"
+      ],
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2024_clean_regime_bgmm_v5.csv",
+      "clean_feature_count": 24,
+      "diagnostics": {
+        "rows": 105380,
+        "cluster_counts": {
+          "0": 13186,
+          "1": 21213,
+          "2": 60152,
+          "3": 746,
+          "4": 10083
+        },
+        "avg_cluster_confidence": 0.9200081173402729,
+        "avg_cluster_entropy": 0.12806578528150614,
+        "clusters": [
+          {
+            "cluster": 0,
+            "rows": 13186,
+            "share": 0.12512810780034161,
+            "avg_confidence": 0.8863359876089237,
+            "future_label_mix": {
+              "bull": 0.37259068143876156,
+              "bear": 0.3458794961299135,
+              "normal": 0.1228562756108666,
+              "chop": 0.11450903020185157,
+              "whipsaw": 0.04416451661860677
+            },
+            "future_ret_mean": 0.00021360076263779614,
+            "future_range_width_mean": 0.018280245656649846,
+            "future_long_quality_mean": -0.0009199754045036362,
+            "future_short_quality_mean": 0.0011594379753674202
+          },
+          {
+            "cluster": 1,
+            "rows": 21213,
+            "share": 0.20130005693680014,
+            "avg_confidence": 0.8826049806178835,
+            "future_label_mix": {
+              "bull": 0.3694237479958502,
+              "bear": 0.3551824955201358,
+              "normal": 0.128454211072338,
+              "chop": 0.09256814109214373,
+              "whipsaw": 0.054371404319532204
+            },
+            "future_ret_mean": 0.00015930903012278738,
+            "future_range_width_mean": 0.01975780261709569,
+            "future_long_quality_mean": -0.0010125530151666362,
+            "future_short_quality_mean": 0.0012840876160396552
+          },
+          {
+            "cluster": 2,
+            "rows": 60152,
+            "share": 0.5708104004554944,
+            "avg_confidence": 0.9377141893735949,
+            "future_label_mix": {
+              "bull": 0.3542158656244803,
+              "bear": 0.3419923499085315,
+              "chop": 0.19155163811741227,
+              "normal": 0.09070347580242807,
+              "whipsaw": 0.021536670547147845
+            },
+            "future_ret_mean": 5.545095867808591e-05,
+            "future_range_width_mean": 0.014256836179921413,
+            "future_long_quality_mean": -0.000361819295663378,
+            "future_short_quality_mean": 0.0004918384435795428
+          },
+          {
+            "cluster": 3,
+            "rows": 746,
+            "share": 0.007079142152211046,
+            "avg_confidence": 0.9692811568230073,
+            "future_label_mix": {
+              "bull": 0.4128686327077748,
+              "bear": 0.3096514745308311,
+              "normal": 0.1126005361930295,
+              "chop": 0.08847184986595175,
+              "whipsaw": 0.07640750670241286
+            },
+            "future_ret_mean": 0.0058378820414865225,
+            "future_range_width_mean": 0.036465573030980275,
+            "future_long_quality_mean": 0.0027206331920661803,
+            "future_short_quality_mean": -0.0019417933072569749
+          },
+          {
+            "cluster": 4,
+            "rows": 10083,
+            "share": 0.09568229265515278,
+            "avg_confidence": 0.9334373480451879,
+            "future_label_mix": {
+              "bull": 0.36616086482197757,
+              "bear": 0.3615987305365467,
+              "normal": 0.13478131508479618,
+              "whipsaw": 0.08568878310026777,
+              "chop": 0.051770306456411785
+            },
+            "future_ret_mean": 0.0006881162798959021,
+            "future_range_width_mean": 0.025708340921822802,
+            "future_long_quality_mean": -0.0017292884468749212,
+            "future_short_quality_mean": 0.002213405903392444
+          }
+        ]
+      },
+      "augmented": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2024_clean_regime_bgmm_v5_augmented.csv"
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+      "rows": 105064,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_clean_regime_bgmm_v5.csv",
+      "clean_feature_count": 24,
+      "diagnostics": {
+        "rows": 105064,
+        "cluster_counts": {
+          "0": 11699,
+          "1": 25088,
+          "2": 52142,
+          "3": 1187,
+          "4": 14948
+        },
+        "avg_cluster_confidence": 0.9086993268802789,
+        "avg_cluster_entropy": 0.14484236637254877,
+        "clusters": [
+          {
+            "cluster": 0,
+            "rows": 11699,
+            "share": 0.11135117642579762,
+            "avg_confidence": 0.8408866209279034,
+            "future_label_mix": {
+              "bull": 0.3697213198837408,
+              "bear": 0.35159856385706956,
+              "chop": 0.1201914857240554,
+              "normal": 0.11848179175927509,
+              "whipsaw": 0.04000683877585912
+            },
+            "future_ret_mean": -0.00015403093669655066,
+            "future_range_width_mean": 0.01964090762408101,
+            "future_long_quality_mean": -0.0010944495229688064,
+            "future_short_quality_mean": 0.001342109316631726
+          },
+          {
+            "cluster": 1,
+            "rows": 25088,
+            "share": 0.23878778649204294,
+            "avg_confidence": 0.8675567542581102,
+            "future_label_mix": {
+              "bull": 0.37198549049308405,
+              "bear": 0.36592657551720015,
+              "normal": 0.11782995176784788,
+              "chop": 0.09546777215290789,
+              "whipsaw": 0.04879021006896002
+            },
+            "future_ret_mean": -5.114180579121352e-05,
+            "future_range_width_mean": 0.021309963709773207,
+            "future_long_quality_mean": -0.0008469500039514419,
+            "future_short_quality_mean": 0.0011168922697179383
+          },
+          {
+            "cluster": 2,
+            "rows": 52142,
+            "share": 0.4962879768522044,
+            "avg_confidence": 0.9341793492262295,
+            "future_label_mix": {
+              "bull": 0.3555568349741877,
+              "bear": 0.3431784597079087,
+              "chop": 0.20037614907785903,
+              "normal": 0.07993167904504193,
+              "whipsaw": 0.02095687719500259
+            },
+            "future_ret_mean": 0.00011529065798882829,
+            "future_range_width_mean": 0.015731758910704368,
+            "future_long_quality_mean": -0.00020673756135681227,
+            "future_short_quality_mean": 0.00034844308392857685
+          },
+          {
+            "cluster": 3,
+            "rows": 1187,
+            "share": 0.011297875580598492,
+            "avg_confidence": 0.9631209954854727,
+            "future_label_mix": {
+              "bull": 0.3951137320977254,
+              "bear": 0.34203875315922494,
+              "normal": 0.12047177759056445,
+              "whipsaw": 0.12047177759056445,
+              "chop": 0.02190395956192081
+            },
+            "future_ret_mean": 0.00024093139456347285,
+            "future_range_width_mean": 0.0378790256899295,
+            "future_long_quality_mean": -0.001990975718988785,
+            "future_short_quality_mean": 0.0029963928266062484
+          },
+          {
+            "cluster": 4,
+            "rows": 14948,
+            "share": 0.1422751846493566,
+            "avg_confidence": 0.937535221393739,
+            "future_label_mix": {
+              "bull": 0.3783783783783784,
+              "bear": 0.36312550173936314,
+              "normal": 0.12998394434038,
+              "whipsaw": 0.07726786192132727,
+              "chop": 0.05124431362055124
+            },
+            "future_ret_mean": 0.00013733824432916124,
+            "future_range_width_mean": 0.02741676901442204,
+            "future_long_quality_mean": -0.001108763408186059,
+            "future_short_quality_mean": 0.0015636440252978277
+          }
+        ]
+      },
+      "augmented": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_clean_regime_bgmm_v5_augmented.csv"
+    }
+  }
+}

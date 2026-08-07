@@ -1,0 +1,35 @@
+{
+  "name": "unified_sparse_shadow_rule_v1",
+  "description": "Calibration-selected sparse candidate + handcrafted regime/side veto rule. Use for shadow only.",
+  "candidate_params": {
+    "quality_min": 0.007,
+    "raw_edge_min": 0.65,
+    "sup_prob_min": 0.9,
+    "debounce_bars": 12,
+    "require_agreement": false,
+    "sign_change_only": true
+  },
+  "veto_rule": {
+    "bull": "skip",
+    "bear": "short",
+    "chop": "skip",
+    "whipsaw": "long",
+    "normal": "short"
+  },
+  "hold_scale": 1.0,
+  "close_on_opp": false,
+  "selection_metrics": {
+    "calibration_avg_pnl_pct": 18.19484739509984,
+    "calibration_avg_trades": 3.75,
+    "calibration_positive_folds": 3,
+    "holdout_pnl_pct": 4.198137276615577,
+    "holdout_trades": 13,
+    "holdout_wr_pct": 61.53846153846154,
+    "holdout_mdd_pct": -13.352540371068212
+  },
+  "notes": [
+    "This rule is intentionally sparse.",
+    "Attempts to increase trade frequency degraded holdout performance.",
+    "Do not promote beyond shadow without additional walk-forward confirmation."
+  ]
+}

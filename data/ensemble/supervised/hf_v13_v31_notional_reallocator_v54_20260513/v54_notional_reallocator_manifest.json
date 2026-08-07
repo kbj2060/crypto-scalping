@@ -1,0 +1,37 @@
+{
+  "model_id": "hf_v13_v31_notional_reallocator_v54_20260513",
+  "selected_config": {
+    "name": "v54_pm2.00_tp0.50_balanced",
+    "parent_mult": 2.0,
+    "parent_cap": 4.14,
+    "deep_mult": 1.0,
+    "addon_frac": 0.2,
+    "addon_total_mult": 1.35,
+    "addon_cap": 4.14,
+    "tpsl_power": 0.5,
+    "quality_floor": -99.0,
+    "confidence_floor": 0.0,
+    "vol_throttle": 0.0
+  },
+  "selected_overlay": {
+    "name": "v31_notional1_time_decay",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.04,
+    "base_sl": 0.018,
+    "base_hold": 48,
+    "tp_util_mult": 1.5,
+    "sl_vol_mult": 2.5,
+    "trail_gap_mult": 1.0,
+    "trail_decay": 0.5,
+    "hold_decay_start": 18,
+    "hold_decay_rate": 0.025,
+    "tp_cap": 0.075,
+    "sl_cap": 0.036
+  },
+  "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "jackpot_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+  "v27_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt"
+}

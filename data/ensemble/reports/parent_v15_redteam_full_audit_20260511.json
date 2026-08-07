@@ -1,0 +1,183 @@
+{
+  "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
+  "status": "fail",
+  "blocking": [
+    "source_reproduction_missing_parent_policy_or_exit_artifact",
+    "source_reproduction_missing_train_or_eval_csv"
+  ],
+  "warnings": [
+    "cost3_stress_negative",
+    "report_verdict_is_shadow_candidate"
+  ],
+  "checks": {
+    "exists": {
+      "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_causal_sleeve_conformal_veto_v1_5_2026.json": true,
+      "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_causal_sleeve_conformal_veto_v1_5_ledger.csv": true,
+      "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_causal_sleeve_conformal_veto_v1_5/sleeve_conformal_veto.pkl": true
+    },
+    "source_compile": {
+      "ok": true,
+      "returncode": 0,
+      "stderr": ""
+    },
+    "source_import": {
+      "ok": true,
+      "module": "scripts.train_eval_clean_base_causal_sleeve_conformal_veto_v1_5",
+      "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5"
+    },
+    "source_inputs": {
+      "default_policy_exists": false,
+      "default_exit_exists": false,
+      "train_csv_exists": false,
+      "eval_csv_exists": false
+    },
+    "artifact": {
+      "passed": true,
+      "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
+      "selected_config_match_report": true,
+      "selected_residual_q_match_report": true,
+      "sleeve_features": [
+        "side",
+        "quality",
+        "confidence",
+        "core_notional",
+        "leverage",
+        "account_dd",
+        "daily_dd",
+        "loss_streak",
+        "funding_abs",
+        "funding_pressure",
+        "liquidity_vacuum",
+        "amihud_illiquidity_z",
+        "m7_tail_risk",
+        "evt_tail_flag",
+        "ai_adverse_risk"
+      ],
+      "conformal_features": [
+        "side",
+        "quality",
+        "confidence",
+        "core_notional",
+        "leverage",
+        "funding_abs",
+        "funding_pressure",
+        "liquidity_vacuum",
+        "amihud_illiquidity_z",
+        "m7_tail_risk",
+        "evt_tail_flag",
+        "ai_adverse_risk"
+      ],
+      "forbidden_runtime_features": []
+    },
+    "ledger": {
+      "passed": true,
+      "rows": 363,
+      "missing_columns": [],
+      "nonfinite_numeric_values": 0,
+      "cash_transition_max_abs_error": 4.440892098500626e-16,
+      "fee_sum_max_abs_error": 3.0010716134398763e-16,
+      "report_pnl": 210.08473478264494,
+      "final_pnl_from_ledger": 210.08473478264494,
+      "trade_count_match": true,
+      "timestamp_monotonic": true,
+      "exit_idx_not_before_entry_idx": true
+    },
+    "report_metrics": {
+      "verdict": "shadow_candidate",
+      "cost_1x": {
+        "pnl": 210.08473478264494,
+        "mdd": -18.0151549322481,
+        "trades": 363,
+        "core_trades_per_day": 6.1525423728813555,
+        "wr": 0.49586776859504134,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 301,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 42,
+          "CONFORMAL_VETO": 20
+        },
+        "sleeve_fraction": 0.11570247933884298,
+        "core_lane_pnl_contribution": 241.9901343921614,
+        "sleeve_lane_pnl_contribution": 3.149938040326683,
+        "add_contribution": 3.149938040326683,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.2566419417190486,
+        "net_notional_max": 3.2566419417190486,
+        "reason_counts": {
+          "predicted_same_edge": 63,
+          "conformal_veto": 20,
+          "daily_dd_disable": 4
+        }
+      },
+      "cost_2x": {
+        "pnl": 132.64871701412386,
+        "mdd": -18.337955335873435,
+        "trades": 318,
+        "core_trades_per_day": 5.389830508474576,
+        "wr": 0.31446540880503143,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 277,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 33,
+          "CONFORMAL_VETO": 8
+        },
+        "sleeve_fraction": 0.10377358490566038,
+        "core_lane_pnl_contribution": 174.5942699290568,
+        "sleeve_lane_pnl_contribution": 2.3766493584236033,
+        "add_contribution": 2.3766493584236033,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.4354531679769087,
+        "net_notional_max": 3.4354531679769087,
+        "reason_counts": {
+          "predicted_same_edge": 42,
+          "conformal_veto": 8,
+          "daily_dd_disable": 9
+        }
+      },
+      "cost_3x": {
+        "pnl": -8.960164718645814,
+        "mdd": -9.98372366515592,
+        "trades": 179,
+        "core_trades_per_day": 3.0338983050847457,
+        "wr": 0.1452513966480447,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 170,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 7,
+          "CONFORMAL_VETO": 2
+        },
+        "sleeve_fraction": 0.03910614525139665,
+        "core_lane_pnl_contribution": 6.3379528087617665,
+        "sleeve_lane_pnl_contribution": 0.30948353235654874,
+        "add_contribution": 0.30948353235654874,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.7482364303254063,
+        "net_notional_max": 2.7482364303254063,
+        "reason_counts": {
+          "predicted_same_edge": 9,
+          "conformal_veto": 2,
+          "daily_dd_disable": 3,
+          "account_dd_disable": 104
+        }
+      },
+      "promotion_gate": {
+        "clean_base_pnl_gate": true,
+        "clean_base_mdd_gate": false,
+        "sleeve_v12_pnl_gate": false,
+        "sleeve_v12_mdd_gate": false,
+        "trades_per_day_gate": true,
+        "cost2_survival": true,
+        "cost3_not_worse_than_clean_base": false,
+        "sleeve_fraction_active": true,
+        "preservation_audit_passed": true,
+        "accounting_audit_passed": true,
+        "causality_audit_passed": true,
+        "decision": "shadow_candidate"
+      },
+      "preservation_audit_passed": true,
+      "accounting_audit_passed": true,
+      "causality_audit_passed": true
+    }
+  },
+  "redteam_verdict": "See blocking list."
+}

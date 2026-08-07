@@ -1,0 +1,353 @@
+{
+  "model_id": "regime3_transition_hazard_sensitive_h6_20260530",
+  "status": "selected_transition_hazard_h6_withcurrent_thr046_research_candidate",
+  "selected_at": "2026-05-30",
+  "purpose": "Dedicated h6 transition hazard/destination head. Threshold selected on validation with persistence_bacc>=0.60 constraint.",
+  "model_path": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/regime3_transition_hazard_h6.joblib",
+  "include_current_features": true,
+  "feature_count": 66,
+  "feature_cols": [
+    "regime3_current_sensitive_wide24_bear_prob",
+    "regime3_current_sensitive_wide24_bull_prob",
+    "regime3_current_sensitive_wide24_chop_prob",
+    "regime3_current_sensitive_wide24_confidence",
+    "regime3_current_sensitive_wide24_directional_bias",
+    "regime3_current_sensitive_wide24_entropy",
+    "regime3_current_sensitive_wide24_margin",
+    "regime3_current_sensitive_wide24_range_prob",
+    "regime3_current_sensitive_wide24_trend_prob",
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12"
+  ],
+  "threshold": 0.46,
+  "validation_original_report_threshold": 0.06,
+  "validation": {
+    "hazard": {
+      "rows": 26490,
+      "transition_rate": 0.34450736126840314,
+      "threshold": 0.06,
+      "accuracy": 0.381766704416761,
+      "balanced_accuracy": 0.5281609376886077,
+      "log_loss": 0.6006039648442905,
+      "confusion_matrix": [
+        [
+          997,
+          16367
+        ],
+        [
+          10,
+          9116
+        ]
+      ],
+      "roc_auc": 0.7337233806188141
+    },
+    "future": {
+      "rows": 26490,
+      "accuracy": 0.3101925254813137,
+      "balanced_accuracy": 0.3207476106076122,
+      "transition_rows": 9126,
+      "persistence_rows": 17364,
+      "confusion_matrix": [
+        [
+          2930,
+          1340,
+          2699
+        ],
+        [
+          2223,
+          1652,
+          2219
+        ],
+        [
+          4761,
+          5031,
+          3635
+        ]
+      ],
+      "transition_accuracy": 0.7911461757615603,
+      "transition_balanced_accuracy": 0.766534657088135,
+      "transition_confusion_matrix": [
+        [
+          1990,
+          542,
+          232
+        ],
+        [
+          567,
+          1595,
+          312
+        ],
+        [
+          136,
+          117,
+          3635
+        ]
+      ],
+      "persistence_accuracy": 0.0574176457037549,
+      "persistence_balanced_accuracy": 0.07976308568900918
+    }
+  },
+  "outputs": {
+    "training_features_2024": {
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2024_regime3_transition_hazard_h6_thr046.csv",
+      "rows": 105374,
+      "threshold": 0.46,
+      "overall_acc": 0.6760681002903942,
+      "overall_bacc": 0.629818622530162,
+      "transition_rows": 34351,
+      "transition_acc": 0.6917702541410731,
+      "transition_bacc": 0.6499393178592846,
+      "persistence_rows": 71023,
+      "persistence_acc": 0.6684735930614026,
+      "persistence_bacc": 0.6296769594442306,
+      "hazard_precision": 0.5231286454957874,
+      "hazard_recall": 0.7519431748711828,
+      "fire_rate": 0.46857858674815417,
+      "confusion_matrix": [
+        [
+          15827,
+          2146,
+          7849
+        ],
+        [
+          2029,
+          11691,
+          9919
+        ],
+        [
+          7491,
+          4700,
+          43722
+        ]
+      ],
+      "transition_confusion_matrix": [
+        [
+          5874,
+          1052,
+          3393
+        ],
+        [
+          718,
+          4242,
+          4186
+        ],
+        [
+          720,
+          519,
+          13647
+        ]
+      ]
+    },
+    "training_features_2025": {
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2025_regime3_transition_hazard_h6_thr046.csv",
+      "rows": 105095,
+      "threshold": 0.46,
+      "overall_acc": 0.6109519958133117,
+      "overall_bacc": 0.570507504498951,
+      "transition_rows": 35366,
+      "transition_acc": 0.5849968896680428,
+      "transition_bacc": 0.5370861446202619,
+      "persistence_rows": 69729,
+      "persistence_acc": 0.624116221371309,
+      "persistence_bacc": 0.5990114710618898,
+      "hazard_precision": 0.4928209296025388,
+      "hazard_recall": 0.7201266753378952,
+      "fire_rate": 0.49172653313668585,
+      "confusion_matrix": [
+        [
+          15677,
+          3148,
+          9106
+        ],
+        [
+          3092,
+          10659,
+          12192
+        ],
+        [
+          8242,
+          5107,
+          37872
+        ]
+      ],
+      "transition_confusion_matrix": [
+        [
+          4752,
+          1818,
+          4021
+        ],
+        [
+          1391,
+          2844,
+          5496
+        ],
+        [
+          1095,
+          856,
+          13093
+        ]
+      ]
+    },
+    "training_features_2026_rebuilt": {
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2026_rebuilt_regime3_transition_hazard_h6_thr046.csv",
+      "rows": 16891,
+      "threshold": 0.46,
+      "overall_acc": 0.631519744242496,
+      "overall_bacc": 0.5881386970515009,
+      "transition_rows": 5401,
+      "transition_acc": 0.5617478244769487,
+      "transition_bacc": 0.5162896193805029,
+      "persistence_rows": 11490,
+      "persistence_acc": 0.6643167972149695,
+      "persistence_bacc": 0.638559701727158,
+      "hazard_precision": 0.49389843852512794,
+      "hazard_recall": 0.696907980003703,
+      "fire_rate": 0.4511870226747972,
+      "confusion_matrix": [
+        [
+          2192,
+          524,
+          1278
+        ],
+        [
+          530,
+          1991,
+          1879
+        ],
+        [
+          1179,
+          834,
+          6484
+        ]
+      ],
+      "transition_confusion_matrix": [
+        [
+          623,
+          302,
+          638
+        ],
+        [
+          233,
+          450,
+          882
+        ],
+        [
+          167,
+          145,
+          1961
+        ]
+      ]
+    }
+  },
+  "oos_2026": {
+    "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2026_rebuilt_regime3_transition_hazard_h6_thr046.csv",
+    "rows": 16891,
+    "threshold": 0.46,
+    "overall_acc": 0.631519744242496,
+    "overall_bacc": 0.5881386970515009,
+    "transition_rows": 5401,
+    "transition_acc": 0.5617478244769487,
+    "transition_bacc": 0.5162896193805029,
+    "persistence_rows": 11490,
+    "persistence_acc": 0.6643167972149695,
+    "persistence_bacc": 0.638559701727158,
+    "hazard_precision": 0.49389843852512794,
+    "hazard_recall": 0.696907980003703,
+    "fire_rate": 0.4511870226747972,
+    "confusion_matrix": [
+      [
+        2192,
+        524,
+        1278
+      ],
+      [
+        530,
+        1991,
+        1879
+      ],
+      [
+        1179,
+        834,
+        6484
+      ]
+    ],
+    "transition_confusion_matrix": [
+      [
+        623,
+        302,
+        638
+      ],
+      [
+        233,
+        450,
+        882
+      ],
+      [
+        167,
+        145,
+        1961
+      ]
+    ]
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_used_as_target_source": true,
+    "current_used_as_input_features": true,
+    "forbidden_current_feature_count_when_disabled": 9
+  }
+}

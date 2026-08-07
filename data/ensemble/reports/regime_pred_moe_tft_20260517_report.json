@@ -1,0 +1,331 @@
+{
+  "model_id": "regime_pred_moe_tft_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_20260517/regime_pred_tft_moe_2024.pt",
+  "train_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "predict_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+  "clean_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_hmm_v6_20260517/training_features_2024_clean_regime_hmm_v6.csv",
+  "clean_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_hmm_v6_20260517/training_features_2025_clean_regime_hmm_v6.csv",
+  "device": "cuda",
+  "horizon_bars": 36,
+  "seq_len": 72,
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw",
+    "normal"
+  ],
+  "validation_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004228528078089256,
+      "abs_ret_55": 0.005544679992295798,
+      "range_35": 0.010733023633379468,
+      "range_55": 0.014330216850626257,
+      "range_65": 0.016987628602388782,
+      "eff_25": 0.20403416991709633,
+      "eff_45": 0.3603938350747628,
+      "eff_50": 0.3990494494688897,
+      "adverse_45": 0.004819009703531501
+    },
+    "label_counts": {
+      "bull": 22602,
+      "bear": 19902,
+      "chop": 36902,
+      "whipsaw": 5128,
+      "normal": 20809
+    },
+    "label_share": {
+      "bull": 0.21455625907748974,
+      "bear": 0.18892569985665872,
+      "chop": 0.35030329495077983,
+      "whipsaw": 0.048679076920156064,
+      "normal": 0.19753566919491566
+    },
+    "threshold_policy": "thresholds_fit_on_pre_validation_2024_rows_only",
+    "threshold_fit_rows": 78884,
+    "embargo_bars": 36
+  },
+  "final_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004372901806545071,
+      "abs_ret_55": 0.005743159064446447,
+      "range_35": 0.0110209271474907,
+      "range_55": 0.014792764942309968,
+      "range_65": 0.017391002409697955,
+      "eff_25": 0.20527470543951218,
+      "eff_45": 0.36245988118798184,
+      "eff_50": 0.40098534730800445,
+      "adverse_45": 0.004941124880986553
+    },
+    "label_counts": {
+      "bull": 22066,
+      "bear": 19506,
+      "chop": 38783,
+      "whipsaw": 4894,
+      "normal": 20094
+    },
+    "label_share": {
+      "bull": 0.2094681184321692,
+      "bear": 0.18516655117093683,
+      "chop": 0.3681592512079588,
+      "whipsaw": 0.04645776178768404,
+      "normal": 0.19074831740125114
+    },
+    "threshold_policy": "thresholds_fit_on_all_2024_rows_for_final_2024_only_model"
+  },
+  "feature_count": 83,
+  "feature_cols": [
+    "clean_regime_2024_unsup_v4_bear_prob",
+    "clean_regime_2024_unsup_v4_bull_prob",
+    "clean_regime_2024_unsup_v4_chop_prob",
+    "clean_regime_2024_unsup_v4_confidence",
+    "clean_regime_2024_unsup_v4_directional_bias",
+    "clean_regime_2024_unsup_v4_entropy",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_instability_prob",
+    "clean_regime_2024_unsup_v4_margin",
+    "clean_regime_2024_unsup_v4_micro_prob",
+    "clean_regime_2024_unsup_v4_normal_prob",
+    "clean_regime_2024_unsup_v4_range_prob",
+    "clean_regime_2024_unsup_v4_trend_bias",
+    "clean_regime_2024_unsup_v4_trend_prob",
+    "clean_regime_2024_unsup_v4_whipsaw_prob",
+    "log_return",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "amihud_illiquidity_z",
+    "btc_corr_60",
+    "eth_btc_ratio_change",
+    "fvg_dist",
+    "chop_index",
+    "cvp_poc_dist",
+    "cvp_cluster_position",
+    "cvp_volume_imbalance",
+    "turtle_signal",
+    "dual_momentum",
+    "mean_reversion_z",
+    "breakout_strength",
+    "volume_profile_signal",
+    "funding_roc_288",
+    "long_squeeze_risk",
+    "funding_price_divergence",
+    "ofi_acceleration",
+    "kalman_velocity",
+    "ofti",
+    "kel",
+    "mta_funding",
+    "svps",
+    "pred_mdjd",
+    "conf_mdjd",
+    "volume",
+    "quote_volume",
+    "trades",
+    "taker_buy_base",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "count_long_short_ratio",
+    "last_funding_rate",
+    "whale_retail_ratio",
+    "smart_money_flow",
+    "squeeze_power",
+    "oi_change_rate",
+    "net_taker_ratio",
+    "taker_acceleration",
+    "trade_intensity",
+    "big_trade_ratio",
+    "hour_sin",
+    "hour_cos",
+    "minute_sin",
+    "minute_cos",
+    "session_europe",
+    "session_us",
+    "is_hour_open",
+    "bb_width",
+    "close_btc",
+    "quote_volume_btc",
+    "taker_buy_quote",
+    "volume_btc"
+  ],
+  "clean_features_used": [
+    "clean_regime_2024_unsup_v4_bear_prob",
+    "clean_regime_2024_unsup_v4_bull_prob",
+    "clean_regime_2024_unsup_v4_chop_prob",
+    "clean_regime_2024_unsup_v4_confidence",
+    "clean_regime_2024_unsup_v4_directional_bias",
+    "clean_regime_2024_unsup_v4_entropy",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_instability_prob",
+    "clean_regime_2024_unsup_v4_margin",
+    "clean_regime_2024_unsup_v4_micro_prob",
+    "clean_regime_2024_unsup_v4_normal_prob",
+    "clean_regime_2024_unsup_v4_range_prob",
+    "clean_regime_2024_unsup_v4_trend_bias",
+    "clean_regime_2024_unsup_v4_trend_prob",
+    "clean_regime_2024_unsup_v4_whipsaw_prob"
+  ],
+  "validation_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.5225292902726393,
+      "val_log_loss": 1.5308959147046388,
+      "val_balanced_accuracy": 0.3249109275311273
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 1.438247329913653,
+      "val_log_loss": 1.6326986527984555,
+      "val_balanced_accuracy": 0.30982774896838267
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 1.365120408626703,
+      "val_log_loss": 1.6803509915299382,
+      "val_balanced_accuracy": 0.30211455636200374
+    }
+  ],
+  "selected_final_epochs": 1,
+  "final_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.5182252483091492
+    }
+  ],
+  "validation": {
+    "rows": 26459,
+    "accuracy": 0.30775917457197927,
+    "balanced_accuracy": 0.3249109275311273,
+    "log_loss": 1.5308959147046388,
+    "true_counts": {
+      "bull": 6109,
+      "bear": 5304,
+      "chop": 7895,
+      "whipsaw": 1436,
+      "normal": 5715
+    },
+    "pred_counts": {
+      "bull": 223,
+      "bear": 10212,
+      "chop": 9180,
+      "whipsaw": 5526,
+      "normal": 1318
+    },
+    "confusion_matrix": [
+      [
+        32,
+        2420,
+        1764,
+        1526,
+        367
+      ],
+      [
+        35,
+        2465,
+        1493,
+        1080,
+        231
+      ],
+      [
+        79,
+        2504,
+        4569,
+        446,
+        297
+      ],
+      [
+        13,
+        441,
+        150,
+        743,
+        89
+      ],
+      [
+        64,
+        2382,
+        1204,
+        1731,
+        334
+      ]
+    ]
+  },
+  "train_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_20260517/training_features_2024_regime_pred_tft_moe.csv",
+  "predict_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_20260517/training_features_2025_regime_pred_tft_moe.csv",
+  "predict_probability_sum_min": 0.9999999999999998,
+  "predict_probability_sum_max": 1.0000000000000002,
+  "predict_counts": {
+    "bull": 12051,
+    "bear": 16625,
+    "chop": 18538,
+    "whipsaw": 48328,
+    "normal": 9522
+  },
+  "predict_confidence_mean": 0.34989636644257105,
+  "predict_entropy_mean": 0.9123502614520271,
+  "predict_path_diagnostics": {
+    "bull": {
+      "rows": 12051,
+      "future_ret_mean": 0.0005832910623378765,
+      "range_width_mean": 0.015806620350419274,
+      "long_quality_mean": -0.00010540346863702335,
+      "short_quality_mean": 0.00023845461919543533,
+      "trend_efficiency_mean": 0.42977151579149786
+    },
+    "bear": {
+      "rows": 16625,
+      "future_ret_mean": -0.00023555422905574224,
+      "range_width_mean": 0.016455075358155394,
+      "long_quality_mean": -0.00028354212837582545,
+      "short_quality_mean": 0.00042991530336719834,
+      "trend_efficiency_mean": 0.415305501642687
+    },
+    "chop": {
+      "rows": 18538,
+      "future_ret_mean": -2.3120818608539823e-05,
+      "range_width_mean": 0.011224969639517636,
+      "long_quality_mean": -0.0001614738136412615,
+      "short_quality_mean": 0.00023283736873748692,
+      "trend_efficiency_mean": 0.40332662371031347
+    },
+    "whipsaw": {
+      "rows": 48328,
+      "future_ret_mean": 0.0001241691168028232,
+      "range_width_mean": 0.02481513212573163,
+      "long_quality_mean": -0.0010585820322615428,
+      "short_quality_mean": 0.0014330411639019971,
+      "trend_efficiency_mean": 0.4148852150132772
+    },
+    "normal": {
+      "rows": 9522,
+      "future_ret_mean": -0.00036096380068686117,
+      "range_width_mean": 0.017634985524735265,
+      "long_quality_mean": -0.00038372354979772984,
+      "short_quality_mean": 0.0005514709324951704,
+      "trend_efficiency_mean": 0.4118848860892677
+    }
+  },
+  "notes": [
+    "Future regime predictor uses a TFT-style PyTorch sequence model with variable gating, multi-scale attention pooling, and known future time covariates.",
+    "Feature columns are named regime_pred_* instead of regime_future_* because the certified feature audit blocks the token 'future' in model inputs.",
+    "risk_off and transition are not classes or outputs.",
+    "The clean_regime HMM sidecar is consumed as current-state context for MoE routing.",
+    "Sidecar intentionally writes soft probability and routing-shape columns only; no hard argmax label columns."
+  ]
+}

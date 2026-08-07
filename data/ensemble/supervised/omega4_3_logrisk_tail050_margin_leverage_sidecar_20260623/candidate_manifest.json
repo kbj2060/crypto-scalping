@@ -1,0 +1,252 @@
+{
+  "model_id": "omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623",
+  "display_version": "Omega 4.3",
+  "status": "current_omega_research_baseline_not_live_wired",
+  "created_kst": "2026-06-23",
+  "promotion_type": "log_risk_margin_leverage_sidecar_overlay_on_omega4_2_runtime_contract",
+  "weights_retrained": false,
+  "risk_sidecar_trained": true,
+  "base_model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+  "base_model_manifest": "data/ensemble/supervised/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/candidate_manifest.json",
+  "baseline_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+  "source_sidecar_run": "omega4_2_trade_risk_sidecar_20260622_v7b_parent_side_hgb_mae050_margin_leverage_logrisk_tb020_tp050_liq012",
+  "source_sidecar_report": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v7b_parent_side_hgb_mae050_margin_leverage_logrisk_tb020_tp050_liq012/report.json",
+  "contract": "docs/model_contracts/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623_contract.md",
+  "manifest": "data/ensemble/supervised/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/candidate_manifest.json",
+  "runtime_contract": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/runtime_contract.json",
+  "promotion_manifest": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/promotion_manifest.json",
+  "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/risk_sidecar.pkl",
+  "risk_sidecar_source_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v7b_parent_side_hgb_mae050_margin_leverage_logrisk_tb020_tp050_liq012/risk_sidecar.pkl",
+  "risk_mapping_ranking": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/risk_mapping_ranking.csv",
+  "source_report_copy": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/source_report.json",
+  "selected_variant": "risk_1673",
+  "selection_policy": "validation log_risk max with validation_mdd >= -8.00, oos_mdd >= -5.70, and trades >= 0.95 * baseline trades",
+  "design": "Omega 4.3 keeps the Omega 4.2 direction, quality, exit-head, and ATR price-move SLTP contract unchanged. A separate HGB sidecar predicts trade-level risk score from parent outputs and maps it to margin_fraction and leverage. The promoted path is sizing-only; dynamic risk values must not be fed into exit replay/live exit timing without a separate retrained exit contract.",
+  "risk_model": {
+    "model_kind": "hgb",
+    "risk_feature_mode": "parent_outputs",
+    "side_split_model": true,
+    "score_quality_blend": 0.0,
+    "dynamic_leverage": true,
+    "selection_objective": "log_risk",
+    "log_risk_params": {
+      "tail_budget": 0.02,
+      "tail_penalty": 0.5,
+      "liquidation_buffer": 0.12,
+      "liquidation_penalty": 0.25
+    }
+  },
+  "risk_label": {
+    "rows": 242,
+    "target": "trade net_per_notional from Omega 4.2 replay",
+    "target_mae_penalty": 0.5,
+    "target_mean": -0.008331243867716337,
+    "target_p25": -0.06039607019021092,
+    "target_p50": 0.0047621271704982,
+    "target_p75": 0.016536696315455887,
+    "train_score_q50": -0.007478951547507495,
+    "train_score_iqr": 0.040401859910081064
+  },
+  "selected_mapping": {
+    "min_scale": 0.75,
+    "max_scale": 1.65,
+    "temp": 2.1,
+    "floor": 0.06,
+    "cap": 0.32,
+    "long_scale": 0.75,
+    "short_scale": 1.1,
+    "leverage_min": 1.25,
+    "leverage_max": 3.0,
+    "leverage_temp": 1.7,
+    "leverage_floor": 1.0,
+    "leverage_cap": 3.0,
+    "long_leverage_scale": 0.75,
+    "short_leverage_scale": 1.25
+  },
+  "runtime_template": {
+    "quality_threshold": 0.7,
+    "exit_threshold": 0.7,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "cost_multiplier": 3.0,
+    "atr_safety_sltp": {
+      "atr_window_bars": 192,
+      "take_profit_atr_multiple": 12.0,
+      "stop_loss_atr_multiple": 6.0,
+      "floor_take_profit_price_move": 0.075,
+      "floor_stop_loss_price_move": 0.04,
+      "cap_take_profit_price_move": 0.22,
+      "cap_stop_loss_price_move": 0.12,
+      "sltp_hit_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location"
+    },
+    "risk_sidecar_mode": "sizing_only_trade_level_overlay",
+    "risk_sidecar_outputs": [
+      "margin_fraction",
+      "leverage"
+    ],
+    "risk_sidecar_feature_mode": "parent_outputs",
+    "risk_sidecar_side_split_model": true,
+    "risk_sizing_contract": "notional = margin_fraction * leverage; PnL = realized_price_move * notional",
+    "sltp_notional_scaled": false,
+    "full_replay_dynamic_exit_enabled": false,
+    "live_wiring_changed": false,
+    "fail_fast_required": true
+  },
+  "training_data": {
+    "new_neural_training_for_omega4_3": false,
+    "inherited_parent_training_contract": "same_as_omega4_2",
+    "risk_sidecar_target": "trade net_per_notional from Omega 4.2 replay",
+    "risk_sidecar_target_mae_penalty": 0.5,
+    "risk_sidecar_rows": 242,
+    "risk_sidecar_source_ledger": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v7b_parent_side_hgb_mae050_margin_leverage_logrisk_tb020_tp050_liq012/train_baseline_trade_ledger.csv"
+  },
+  "validation_cost3_sizing_only": {
+    "pnl": 29.394467639408784,
+    "mdd": -7.6603674358250995,
+    "trades": 85,
+    "wr": 0.6705882352941176,
+    "trades_per_day": 0.9241571973271925,
+    "avg_notional": 0.5296724416168492,
+    "avg_margin_fraction": 0.22370870360417983,
+    "avg_leverage": 2.257382661268968,
+    "log_growth_sum": 0.25769544121889687,
+    "tail_excess_sum": 0.09067252071490231,
+    "liquidation_excess_sum": 0.030361157891958812,
+    "log_risk_utility": 0.2047688913884562,
+    "long_entries": 22,
+    "short_entries": 63,
+    "exit_reasons": {
+      "exit_head": 62,
+      "stop_loss": 18,
+      "take_profit": 4,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3_sizing_only": {
+    "pnl": 31.416421856154496,
+    "mdd": -5.3669033722919535,
+    "trades": 65,
+    "wr": 0.6615384615384615,
+    "trades_per_day": 1.1122333788842018,
+    "avg_notional": 0.5382444403310983,
+    "avg_margin_fraction": 0.22722648543807725,
+    "avg_leverage": 2.2698793702317106,
+    "log_growth_sum": 0.2732008883277945,
+    "tail_excess_sum": 0.02931776552507367,
+    "liquidation_excess_sum": 0.0,
+    "log_risk_utility": 0.25854200556525764,
+    "long_entries": 20,
+    "short_entries": 45,
+    "exit_reasons": {
+      "exit_head": 54,
+      "stop_loss": 8,
+      "take_profit": 2,
+      "forced_end": 1
+    }
+  },
+  "full_replay_diagnostic_not_promoted": {
+    "status": "diagnostic_only_not_runtime_contract",
+    "reason": "validation MDD weakens when dynamic risk values are fed into full exit replay; promoted contract keeps exit timing unchanged.",
+    "validation": {
+      "pnl": 30.24852385012682,
+      "mdd": -10.24616529687965,
+      "trades": 79,
+      "wr": 0.6835443037974683,
+      "trades_per_day": 0.8589225716335083,
+      "avg_notional": 0.5314596544490062,
+      "avg_margin_fraction": 0.2236806281610866,
+      "avg_leverage": 2.2660610924210336,
+      "long_entries": 19,
+      "short_entries": 60,
+      "exit_reasons": {
+        "stop_loss": 19,
+        "exit_head": 55,
+        "take_profit": 4,
+        "forced_end": 1
+      },
+      "log_growth_sum": 0.26427416137676396,
+      "tail_excess_sum": 0.12651692690691585,
+      "liquidation_excess_sum": 0.04183454473800749,
+      "log_risk_utility": 0.19055706173880413
+    },
+    "oos": {
+      "pnl": 32.77399632027924,
+      "mdd": -5.383745830772801,
+      "trades": 59,
+      "wr": 0.6610169491525424,
+      "trades_per_day": 1.009565682371814,
+      "avg_notional": 0.5333943274607206,
+      "avg_margin_fraction": 0.2263536632041285,
+      "avg_leverage": 2.260539617306744,
+      "long_entries": 19,
+      "short_entries": 40,
+      "exit_reasons": {
+        "stop_loss": 8,
+        "exit_head": 48,
+        "take_profit": 2,
+        "forced_end": 1
+      },
+      "log_growth_sum": 0.28347822103952597,
+      "tail_excess_sum": 0.029553830566727987,
+      "liquidation_excess_sum": 0.0,
+      "log_risk_utility": 0.268701305756162
+    }
+  },
+  "reference_baselines": {
+    "omega4_2_atr192_tp12_sl6_exit070": {
+      "validation": {
+        "pnl": 16.023119805554952,
+        "mdd": -7.071370324865356,
+        "trades": 85,
+        "wr": 0.6705882352941176,
+        "trades_per_day": 0.9241571973271925,
+        "avg_notional": 0.38752941176470596,
+        "avg_margin_fraction": 0.19376470588235298,
+        "avg_leverage": 2.0,
+        "log_growth_sum": 0.14861929392751558,
+        "tail_excess_sum": 0.003435331176219584,
+        "liquidation_excess_sum": 0.0,
+        "log_risk_utility": 0.145183962751296,
+        "long_entries": 22,
+        "short_entries": 63,
+        "exit_reasons": {
+          "exit_head": 62,
+          "stop_loss": 18,
+          "take_profit": 4,
+          "forced_end": 1
+        }
+      },
+      "oos": {
+        "pnl": 13.32397115545092,
+        "mdd": -4.341784618360256,
+        "trades": 65,
+        "wr": 0.6615384615384615,
+        "trades_per_day": 1.1122333788842018,
+        "avg_notional": 0.389423076923077,
+        "avg_margin_fraction": 0.1947115384615385,
+        "avg_leverage": 2.0,
+        "log_growth_sum": 0.12508053208991896,
+        "tail_excess_sum": 0.0,
+        "liquidation_excess_sum": 0.0,
+        "log_risk_utility": 0.12508053208991896,
+        "long_entries": 20,
+        "short_entries": 45,
+        "exit_reasons": {
+          "exit_head": 54,
+          "stop_loss": 8,
+          "take_profit": 2,
+          "forced_end": 1
+        }
+      }
+    },
+    "omega4_2_margin_leverage_pnl_max_v6_note": "Higher OOS PnL but selected by PnL rather than log-risk tail objective; not the Omega 4.3 baseline."
+  },
+  "artifact_ledgers": {
+    "validation_sizing_only": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/validation_selected_risk_trade_ledger.csv",
+    "oos_sizing_only": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/oos_selected_risk_trade_ledger.csv",
+    "validation_full_replay_diagnostic": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/validation_selected_risk_replayed_trade_ledger.csv",
+    "oos_full_replay_diagnostic": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/oos_selected_risk_replayed_trade_ledger.csv",
+    "validation_baseline": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/validation_baseline_trade_ledger.csv",
+    "oos_baseline": "tmp/causal_regen_20260516/omega4_3_logrisk_tail050_margin_leverage_sidecar_20260623/oos_baseline_trade_ledger.csv"
+  }
+}

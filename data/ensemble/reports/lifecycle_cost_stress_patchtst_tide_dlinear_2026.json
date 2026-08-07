@@ -1,0 +1,242 @@
+{
+  "type": "lifecycle_cost_stress_patchtst_tide_dlinear_2026",
+  "results": {
+    "cost_1x": {
+      "entry_only": {
+        "pnl": 286.9501820902332,
+        "mdd": -22.967215052515144,
+        "trades": 60,
+        "wr": 0.3,
+        "trades_per_day": 1.0227272727272727
+      },
+      "early_exit_0.84": {
+        "pnl": 241.0562103887999,
+        "mdd": -24.38730306846032,
+        "trades": 72,
+        "wr": 0.3194444444444444,
+        "trades_per_day": 1.2272727272727273,
+        "lifecycle_exits": 15,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "best_eval_scaledown": {
+        "pnl": 305.4268085314828,
+        "mdd": -22.35217722805333,
+        "trades": 60,
+        "wr": 0.38333333333333336,
+        "trades_per_day": 1.0227272727272727,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 0
+      },
+      "best_validation_scaleup": {
+        "pnl": 383.51803547606835,
+        "mdd": -27.466326665218865,
+        "trades": 81,
+        "wr": 0.38271604938271603,
+        "trades_per_day": 1.3806818181818183,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 30
+      },
+      "highest_return_regime_conf_scaleup": {
+        "pnl": 415.0789607761554,
+        "mdd": -26.361468723271376,
+        "trades": 80,
+        "wr": 0.3875,
+        "trades_per_day": 1.3636363636363638,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 31
+      },
+      "mdd_safe_hybrid_guarded": {
+        "pnl": 380.9666559681487,
+        "mdd": -22.886168837611788,
+        "trades": 61,
+        "wr": 0.39344262295081966,
+        "trades_per_day": 1.0397727272727273,
+        "lifecycle_exits": 10,
+        "scale_downs": 13,
+        "scale_ups": 20
+      },
+      "highest_return_ext_hybrid": {
+        "pnl": 542.6677424060668,
+        "mdd": -23.27437193692743,
+        "trades": 55,
+        "wr": 0.43636363636363634,
+        "trades_per_day": 0.9375,
+        "lifecycle_exits": 11,
+        "scale_downs": 13,
+        "scale_ups": 19
+      },
+      "mdd_safe_ext_hybrid": {
+        "pnl": 419.1246236017606,
+        "mdd": -22.754458076111927,
+        "trades": 56,
+        "wr": 0.42857142857142855,
+        "trades_per_day": 0.9545454545454546,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 22
+      }
+    },
+    "cost_2x": {
+      "entry_only": {
+        "pnl": 174.01627408255052,
+        "mdd": -24.175021263580533,
+        "trades": 61,
+        "wr": 0.26229508196721313,
+        "trades_per_day": 1.0397727272727273
+      },
+      "early_exit_0.84": {
+        "pnl": 191.85025107347298,
+        "mdd": -27.323511480614115,
+        "trades": 75,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 1.278409090909091,
+        "lifecycle_exits": 19,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "best_eval_scaledown": {
+        "pnl": 216.21958657623512,
+        "mdd": -23.851185947241827,
+        "trades": 62,
+        "wr": 0.3548387096774194,
+        "trades_per_day": 1.0568181818181819,
+        "lifecycle_exits": 10,
+        "scale_downs": 11,
+        "scale_ups": 0
+      },
+      "best_validation_scaleup": {
+        "pnl": 265.982850212476,
+        "mdd": -30.91206458723782,
+        "trades": 76,
+        "wr": 0.32894736842105265,
+        "trades_per_day": 1.2954545454545454,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 31
+      },
+      "highest_return_regime_conf_scaleup": {
+        "pnl": 269.46771872520986,
+        "mdd": -31.634258901791547,
+        "trades": 78,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 1.3295454545454546,
+        "lifecycle_exits": 13,
+        "scale_downs": 0,
+        "scale_ups": 32
+      },
+      "mdd_safe_hybrid_guarded": {
+        "pnl": 265.9673580594278,
+        "mdd": -24.393258958582187,
+        "trades": 63,
+        "wr": 0.36507936507936506,
+        "trades_per_day": 1.0738636363636365,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 19
+      },
+      "highest_return_ext_hybrid": {
+        "pnl": 409.8689620862975,
+        "mdd": -24.787432763841444,
+        "trades": 57,
+        "wr": 0.40350877192982454,
+        "trades_per_day": 0.9715909090909092,
+        "lifecycle_exits": 11,
+        "scale_downs": 13,
+        "scale_ups": 19
+      },
+      "mdd_safe_ext_hybrid": {
+        "pnl": 304.02428748129876,
+        "mdd": -24.259540736594577,
+        "trades": 59,
+        "wr": 0.3898305084745763,
+        "trades_per_day": 1.0056818181818181,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 20
+      }
+    },
+    "cost_3x": {
+      "entry_only": {
+        "pnl": 166.966729269227,
+        "mdd": -29.388988695254493,
+        "trades": 63,
+        "wr": 0.2698412698412698,
+        "trades_per_day": 1.0738636363636365
+      },
+      "early_exit_0.84": {
+        "pnl": 111.65509069977384,
+        "mdd": -30.714186016104428,
+        "trades": 74,
+        "wr": 0.2702702702702703,
+        "trades_per_day": 1.2613636363636365,
+        "lifecycle_exits": 13,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "best_eval_scaledown": {
+        "pnl": 168.88097064408564,
+        "mdd": -24.657919323385926,
+        "trades": 64,
+        "wr": 0.328125,
+        "trades_per_day": 1.090909090909091,
+        "lifecycle_exits": 11,
+        "scale_downs": 8,
+        "scale_ups": 0
+      },
+      "best_validation_scaleup": {
+        "pnl": 151.03461668854342,
+        "mdd": -37.913235869012816,
+        "trades": 83,
+        "wr": 0.26506024096385544,
+        "trades_per_day": 1.4147727272727273,
+        "lifecycle_exits": 13,
+        "scale_downs": 0,
+        "scale_ups": 32
+      },
+      "highest_return_regime_conf_scaleup": {
+        "pnl": 164.16485304852634,
+        "mdd": -37.005350942177984,
+        "trades": 82,
+        "wr": 0.2682926829268293,
+        "trades_per_day": 1.3977272727272727,
+        "lifecycle_exits": 13,
+        "scale_downs": 0,
+        "scale_ups": 32
+      },
+      "mdd_safe_hybrid_guarded": {
+        "pnl": 212.6786414546528,
+        "mdd": -25.212601382735823,
+        "trades": 62,
+        "wr": 0.3548387096774194,
+        "trades_per_day": 1.0568181818181819,
+        "lifecycle_exits": 11,
+        "scale_downs": 9,
+        "scale_ups": 18
+      },
+      "highest_return_ext_hybrid": {
+        "pnl": 361.54657112031634,
+        "mdd": -25.61604283616483,
+        "trades": 59,
+        "wr": 0.3728813559322034,
+        "trades_per_day": 1.0056818181818181,
+        "lifecycle_exits": 12,
+        "scale_downs": 10,
+        "scale_ups": 19
+      },
+      "mdd_safe_ext_hybrid": {
+        "pnl": 280.6988509420101,
+        "mdd": -25.075758143548242,
+        "trades": 61,
+        "wr": 0.36065573770491804,
+        "trades_per_day": 1.0397727272727273,
+        "lifecycle_exits": 11,
+        "scale_downs": 8,
+        "scale_ups": 20
+      }
+    }
+  }
+}

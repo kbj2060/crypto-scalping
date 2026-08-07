@@ -1,0 +1,174 @@
+{
+  "model_id": "omega1_2_post_lifecycle_bucket_adapter_20260605",
+  "alias": "omega1.2_post_lifecycle_bucket_adapter",
+  "status": "research_candidate_not_live_promoted",
+  "created_kst": "2026-06-05",
+  "contract": "docs/model_contracts/omega1_2_post_lifecycle_bucket_adapter_20260605_contract.md",
+  "training_script": "scripts/train_eval_omega1_2_post_lifecycle_bucket_adapter_20260605.py",
+  "baseline_contract": "docs/model_contracts/omega1_2_exit_feature_lifecycle_baseline_20260604_contract.md",
+  "baseline_artifact_dir": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604",
+  "feature_audit": {
+    "adapter_columns": 218,
+    "forbidden_count": 0,
+    "forbidden_prefixes": [
+      "clean_regime4_*",
+      "regime4_pred_*",
+      "tp_sl_action_score",
+      "teacher_*"
+    ]
+  },
+  "selected": {
+    "stable": "base_nogate_topk2",
+    "aggressive": "fixed_wide_lev5_cap120_nogate_topk2",
+    "high_return_research": "base_lev5_cap150_comp_tpup_voltarget_topk2",
+    "blocked_research_only": "fixed_ultra_wide_lev5_cap120_nogate_topk2"
+  },
+  "candidates": {
+    "base_nogate_topk2": {
+      "status": "stable_research_candidate_not_live_promoted",
+      "bucket_preset": "base",
+      "entry_gate": false,
+      "enter_topk": 3,
+      "replay_enter_topk": 2,
+      "max_leverage": 3,
+      "use_leverage_exposure": false,
+      "notional_cap": 1.2,
+      "tp_buckets": [0.018, 0.022, 0.026, 0.03, 0.034],
+      "sl_buckets": [0.008, 0.01, 0.012, 0.014, 0.018],
+      "notional_buckets": [0.25, 0.3375, 0.405, 0.45, 0.55],
+      "leverage_buckets": [1.0, 2.0, 3.0],
+      "validation_mean": {
+        "pnl_pct": 8.87,
+        "mdd_pct": -7.89,
+        "wr_pct": 51.52,
+        "trades": 90.25
+      },
+      "oos_mean": {
+        "pnl_pct": 29.41,
+        "mdd_pct": -2.34,
+        "wr_pct": 78.12,
+        "trades": 32.0
+      },
+      "reports": [
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_nogate_traink3_replayk2_s260692/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_nogate_traink3_replayk2_s260693/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_nogate_traink3_replayk2_s260694/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_nogate_traink3_replayk2_s260695/report.json"
+      ],
+      "reference_artifact": "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_nogate_traink3_replayk2_s260693/post_bucket_adapter.pkl"
+    },
+    "fixed_wide_lev5_cap120_nogate_topk2": {
+      "status": "aggressive_research_candidate_not_live_promoted",
+      "bucket_preset": "fixed_wide",
+      "entry_gate": false,
+      "enter_topk": 3,
+      "replay_enter_topk": 2,
+      "max_leverage": 5,
+      "use_leverage_exposure": true,
+      "notional_cap": 1.2,
+      "tp_buckets": [0.026, 0.034, 0.045, 0.06, 0.08],
+      "sl_buckets": [0.018, 0.024, 0.032, 0.045, 0.06],
+      "notional_buckets": [0.25, 0.3375, 0.405, 0.45, 0.55],
+      "leverage_buckets": [1.0, 2.0, 3.0, 4.0, 5.0],
+      "validation_mean": {
+        "pnl_pct": 0.97,
+        "mdd_pct": -15.02,
+        "wr_pct": 48.52,
+        "trades": 90.0
+      },
+      "oos_mean": {
+        "pnl_pct": 39.36,
+        "mdd_pct": -8.82,
+        "wr_pct": 66.77,
+        "trades": 36.0
+      },
+      "promotion_warning": "Validation MDD is materially worse than stable candidate; use only as explicit aggressive branch.",
+      "reports": [
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260707/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260711/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260712/report.json"
+      ],
+      "reference_artifact": "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260711/post_bucket_adapter.pkl"
+    },
+    "base_lev5_cap150_comp_tpup_voltarget_topk2": {
+      "status": "high_return_research_candidate_not_live_promoted",
+      "bucket_preset": "base",
+      "entry_gate": false,
+      "enter_topk": 3,
+      "replay_enter_topk": 2,
+      "max_leverage": 5,
+      "use_leverage_exposure": true,
+      "notional_cap": 1.5,
+      "compensate_sltp_by_notional": true,
+      "compensate_ref_notional": 0.45,
+      "vol_target_leverage": {
+        "enabled": true,
+        "high_atr": 0.008,
+        "medium_atr": 0.005
+      },
+      "tp_upshift": {
+        "enabled": true,
+        "mult": 1.35,
+        "max": 1
+      },
+      "tp_buckets": [0.018, 0.022, 0.026, 0.03, 0.034],
+      "sl_buckets": [0.008, 0.01, 0.012, 0.014, 0.018],
+      "notional_buckets": [0.25, 0.3375, 0.405, 0.45, 0.55],
+      "leverage_buckets": [1.0, 2.0, 3.0, 4.0, 5.0],
+      "validation_mean": {
+        "pnl_pct": 7.94,
+        "mdd_pct": -17.49,
+        "wr_pct": 49.22,
+        "trades": 89.33
+      },
+      "oos_mean": {
+        "pnl_pct": 78.09,
+        "mdd_pct": -11.17,
+        "wr_pct": 68.57,
+        "trades": 35.0
+      },
+      "promotion_warning": "OOS PnL is high but validation MDD is materially worse than stable; research branch only.",
+      "reports": [
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_lev5_eff_cap150_comp_tpup_voltarget_trainall_c128_replayk2_s260725/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_lev5_eff_cap150_comp_tpup_voltarget_trainall_c96_replayk2_s260726/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_lev5_eff_cap150_comp_tpup_voltarget_trainall_c96_replayk2_s260727/report.json"
+      ],
+      "reference_artifact": "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_base_lev5_eff_cap150_comp_tpup_voltarget_trainall_c96_replayk2_s260726/post_bucket_adapter.pkl"
+    },
+    "fixed_ultra_wide_lev5_cap120_nogate_topk2": {
+      "status": "blocked_research_only",
+      "bucket_preset": "fixed_ultra_wide",
+      "entry_gate": false,
+      "enter_topk": 3,
+      "replay_enter_topk": 2,
+      "max_leverage": 5,
+      "use_leverage_exposure": true,
+      "notional_cap": 1.2,
+      "tp_buckets": [0.04, 0.06, 0.08, 0.12, 0.16],
+      "sl_buckets": [0.025, 0.04, 0.06, 0.08, 0.1],
+      "validation_mean": {
+        "pnl_pct": -32.13,
+        "mdd_pct": -34.93,
+        "wr_pct": 48.11,
+        "trades": 88.0
+      },
+      "oos_mean": {
+        "pnl_pct": 72.06,
+        "mdd_pct": -9.01,
+        "wr_pct": 77.58,
+        "trades": 31.0
+      },
+      "blocker": "Validation collapse; not promotion evidence despite high OOS PnL.",
+      "reports": [
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_ultra_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260708/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_ultra_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260709/report.json",
+        "tmp/causal_regen_20260516/omega1_2_post_lifecycle_bucket_adapter_20260605_hgb_fixed_ultra_wide_lev5_eff_cap120_nogate_traink3_replayk2_s260710/report.json"
+      ]
+    }
+  },
+  "live_wiring": {
+    "trading_bot_py_updated": false,
+    "requires_runtime_native_parity": true,
+    "requires_current_live_feature_contract_validation": true
+  }
+}

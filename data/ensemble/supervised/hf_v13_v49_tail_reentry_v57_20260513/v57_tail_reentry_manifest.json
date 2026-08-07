@@ -1,0 +1,30 @@
+{
+  "model_id": "hf_v13_v49_tail_reentry_v57_20260513",
+  "selected_config": {
+    "name": "v57_tail_1",
+    "min_realized": 0.01,
+    "min_mfe": 0.025,
+    "same_utility_min": 0.01,
+    "opposite_utility_max": 0.01,
+    "delay_bars": 1,
+    "notional": 1.2,
+    "tp": 0.035,
+    "sl": 0.018,
+    "max_hold": 36,
+    "max_reentries": 1
+  },
+  "overlay": {
+    "name": "v33_rl_p055_n1",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "close_p_th": 0.55,
+    "min_hold": 1,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48
+  },
+  "v49_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_v31_rl_surrounding_v49_v50_v51_20260512/v49_exit_rl_raw_all.pkl",
+  "raw_state_feature_count": 164
+}

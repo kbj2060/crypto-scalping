@@ -1,0 +1,35 @@
+{
+  "official_regime_experiment_line": "regime4_official_v1_20260517",
+  "date": "2026-05-17",
+  "classes": ["bull", "bear", "chop", "whipsaw"],
+  "removed_class": "normal",
+  "current_regime": {
+    "model_id": "clean_regime4_2024_unsup_raw_state12_v1_20260517",
+    "prefix": "clean_regime4_2024_unsup_v1_",
+    "script": "/home/llewyn/crypto-scalping/scripts/retrain_clean_regime4_hmm_raw_state12_20260517.py",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_regime4_raw_state12_v1_20260517_report.json",
+    "sidecar_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2024_clean_regime4_raw_state12_v1.csv",
+    "sidecar_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2025_clean_regime4_raw_state12_v1.csv",
+    "validation": {
+      "accuracy": 0.6436,
+      "balanced_accuracy": 0.6203,
+      "log_loss": 0.9516
+    }
+  },
+  "future_regime": {
+    "model_id": "regime4_pred_tft_vsn_select_20260517",
+    "prefix": "regime4_pred_",
+    "script": "/home/llewyn/crypto-scalping/scripts/build_regime4_pred_tft_vsn_select_20260517.py",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/regime4_pred_tft_vsn_h12_official_20260517_report.json",
+    "importance": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_vsn_h12_official_20260517/regime4_pred_tft_vsn_importance.csv",
+    "sidecar_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_vsn_h12_official_20260517/training_features_2024_regime4_pred_tft_vsn_selected.csv",
+    "sidecar_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_vsn_h12_official_20260517/training_features_2025_regime4_pred_tft_vsn_selected.csv",
+    "horizon_bars": 12,
+    "validation": {
+      "accuracy": 0.6009,
+      "balanced_accuracy": 0.6004,
+      "log_loss": 0.9228
+    }
+  },
+  "status": "official_experiment_line"
+}

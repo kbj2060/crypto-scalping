@@ -1,0 +1,87 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+  ],
+  "feature_count": 93,
+  "clean_regime_feature_count": 23,
+  "forbidden_feature_cols": [],
+  "train_range": [
+    "2025-01-01 00:00:00",
+    "2025-12-31 23:55:00"
+  ],
+  "eval_range": [
+    "2026-01-01 00:00:00",
+    "2026-02-28 16:00:00"
+  ],
+  "train_eval_timestamp_overlap": 0,
+  "oos_cost_metrics": {
+    "cost1": {
+      "pnl": 88.56382231198019,
+      "mdd": -37.874116882184126,
+      "trades": 77,
+      "wr": 0.2077922077922078,
+      "trades_per_day": 1.3125,
+      "long_entries": 26,
+      "short_entries": 51,
+      "avg_notional": 2.4137902345916156,
+      "avg_leverage": 2.592026601995419,
+      "action_counts": {
+        "cash": 12440,
+        "long": 26,
+        "short": 51
+      },
+      "exits": {
+        "learned_stop_loss": 61,
+        "learned_max_hold": 13,
+        "learned_take_profit": 3
+      }
+    },
+    "cost2": {
+      "pnl": 67.81100145174688,
+      "mdd": -31.765199385716603,
+      "trades": 84,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 29,
+      "short_entries": 55,
+      "avg_notional": 2.4324267749237904,
+      "avg_leverage": 2.6087554946156724,
+      "action_counts": {
+        "cash": 12552,
+        "long": 29,
+        "short": 55
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 12,
+        "learned_take_profit": 4
+      }
+    },
+    "cost3": {
+      "pnl": 45.89579136775428,
+      "mdd": -34.825321031310665,
+      "trades": 84,
+      "wr": 0.19047619047619047,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 28,
+      "short_entries": 56,
+      "avg_notional": 2.419511319185923,
+      "avg_leverage": 2.598805239707854,
+      "action_counts": {
+        "cash": 12569,
+        "long": 28,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 12,
+        "learned_take_profit": 4
+      }
+    }
+  },
+  "selected_model": "data/ensemble/supervised/hf_v13_clean_regime_seed42_20260511/v13_clean_regime_h288.pkl",
+  "verdict": "iterate"
+}

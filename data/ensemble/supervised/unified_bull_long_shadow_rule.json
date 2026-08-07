@@ -1,0 +1,35 @@
+{
+  "source": "exploratory_posthoc_positive_both",
+  "notes": "2025 holdout and 2026 OOS both positive in post-hoc bull_long-only search; not selection-valid for production promotion.",
+  "candidate_params": {
+    "quality_min": 0.005,
+    "raw_edge_min": 0.45,
+    "sup_prob_min": 0.75,
+    "debounce_bars": 6,
+    "sign_change_only": true,
+    "require_agreement": false
+  },
+  "thresholds": {
+    "bull_long": 0.5
+  },
+  "hold_scale_by_regime": {
+    "bull": 0.4,
+    "whipsaw": 0.4,
+    "normal": 0.4
+  },
+  "exit_min_hold_bars": 2,
+  "exit_prob_flip_margin": 0.0,
+  "exit_quality_floor": null,
+  "holdout_2025": {
+    "pnl_pct": 1.8770770793675728,
+    "trades": 32,
+    "wr_pct": 53.125,
+    "mdd_pct": -1.6651533300731103
+  },
+  "oos_2026": {
+    "pnl_pct": 0.15355814169510928,
+    "trades": 18,
+    "wr_pct": 61.111111111111114,
+    "mdd_pct": -2.3665001301395594
+  }
+}

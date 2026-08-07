@@ -1,0 +1,32 @@
+{
+  "model_id": "hf_v13_v31_bracket_tp_sl_v47_20260512",
+  "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "jackpot_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+  "v27_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt",
+  "selected_config": {
+    "name": "v47_parent_bracket_maker045_pen0",
+    "owners": "parent",
+    "maker_fee_mult": 0.45,
+    "tp_penetration": 0.0,
+    "stop_slip_mult": 1.0,
+    "both_hit": "stop_first"
+  },
+  "overlay": {
+    "name": "v31_notional1_time_decay",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.04,
+    "base_sl": 0.018,
+    "base_hold": 48,
+    "tp_util_mult": 1.5,
+    "sl_vol_mult": 2.5,
+    "trail_gap_mult": 1.0,
+    "trail_decay": 0.5,
+    "hold_decay_start": 18,
+    "hold_decay_rate": 0.025,
+    "tp_cap": 0.075,
+    "sl_cap": 0.036
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "type": "fully_learned_governor_policy_v1",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__dlinear.csv",
+  "model_out": "/home/llewyn/crypto-scalping/data/ensemble/supervised/fully_learned_ai_combo_grid/patchtst__dlinear.pkl",
+  "config": {
+    "notional_buckets": [
+      0.2,
+      0.32,
+      0.5,
+      0.75,
+      1.05,
+      1.45,
+      2.0,
+      2.7,
+      3.6
+    ],
+    "leverage_buckets": [
+      1.5,
+      2.0,
+      3.0,
+      4.0,
+      5.0
+    ],
+    "take_profit_buckets": [
+      0.007,
+      0.011,
+      0.018,
+      0.03,
+      0.05,
+      0.09,
+      0.18,
+      0.45,
+      0.9
+    ],
+    "stop_loss_buckets": [
+      0.004,
+      0.006,
+      0.009,
+      0.014,
+      0.022,
+      0.035,
+      0.055
+    ],
+    "max_hold_buckets": [
+      6,
+      12,
+      24,
+      48,
+      96,
+      192,
+      288
+    ],
+    "cooldown_buckets": [
+      0,
+      1,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "max_train_horizon_bars": 288,
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "cash_score": 0.02,
+    "adverse_penalty": 2.45,
+    "size_penalty": 0.18,
+    "hold_penalty": 0.042,
+    "turnover_bonus": 0.0012,
+    "max_margin_fraction": 1.0
+  },
+  "training_meta": {
+    "candidates": 6524,
+    "stride_bars": 12,
+    "max_train_horizon_bars": 288
+  },
+  "label_distribution": {
+    "action": {
+      "0": 5557,
+      "1": 457,
+      "2": 510
+    },
+    "notional": {
+      "0": 5557,
+      "3": 2,
+      "4": 32,
+      "5": 157,
+      "6": 284,
+      "7": 311,
+      "8": 181
+    },
+    "leverage": {
+      "0": 5748,
+      "1": 284,
+      "2": 311,
+      "3": 181
+    },
+    "take_profit": {
+      "0": 5557,
+      "3": 3,
+      "4": 47,
+      "5": 190,
+      "6": 435,
+      "7": 213,
+      "8": 79
+    },
+    "stop_loss": {
+      "0": 6033,
+      "1": 78,
+      "2": 99,
+      "3": 106,
+      "4": 84,
+      "5": 77,
+      "6": 47
+    },
+    "max_hold": {
+      "0": 5560,
+      "1": 14,
+      "2": 28,
+      "3": 56,
+      "4": 157,
+      "5": 310,
+      "6": 399
+    },
+    "cooldown": {
+      "0": 6523,
+      "6": 1
+    },
+    "quality_mean": 0.031021029385308537,
+    "quality_p95": 0.07878177817720278
+  },
+  "train": {
+    "pnl": 394477256.72414505,
+    "mdd": -16.48818074842515,
+    "trades": 239,
+    "wr": 0.5230125523012552,
+    "trades_per_day": 0.8754690103404856,
+    "long_entries": 115,
+    "short_entries": 124,
+    "avg_notional": 2.2328311919967234,
+    "avg_leverage": 2.4115906029810907,
+    "avg_take_profit": 0.20800619163232814,
+    "avg_stop_loss": 0.008196724620955094,
+    "avg_max_hold_bars": 196.5732217573222,
+    "action_counts": {
+      "cash": 54770,
+      "long": 115,
+      "short": 124
+    },
+    "exits": {
+      "learned_take_profit": 66,
+      "learned_stop_loss": 113,
+      "learned_max_hold": 60
+    }
+  },
+  "validation": {
+    "pnl": 100.27835529720126,
+    "mdd": -22.413280079952557,
+    "trades": 62,
+    "wr": 0.25806451612903225,
+    "trades_per_day": 0.6739384789582941,
+    "long_entries": 10,
+    "short_entries": 52,
+    "avg_notional": 2.3317917063525573,
+    "avg_leverage": 2.476523538118926,
+    "avg_take_profit": 0.18997052500534015,
+    "avg_stop_loss": 0.006943043730607299,
+    "avg_max_hold_bars": 185.58064516129033,
+    "action_counts": {
+      "cash": 22875,
+      "long": 10,
+      "short": 52
+    },
+    "exits": {
+      "learned_stop_loss": 46,
+      "learned_max_hold": 13,
+      "learned_take_profit": 3
+    }
+  },
+  "eval": {
+    "pnl": 156.8190145785128,
+    "mdd": -28.818987419999175,
+    "trades": 61,
+    "wr": 0.2786885245901639,
+    "trades_per_day": 1.0397727272727273,
+    "long_entries": 23,
+    "short_entries": 38,
+    "avg_notional": 2.42290702759267,
+    "avg_leverage": 2.6290699180505737,
+    "avg_take_profit": 0.2711127319366109,
+    "avg_stop_loss": 0.009766683497025684,
+    "avg_max_hold_bars": 180.49180327868854,
+    "action_counts": {
+      "cash": 12993,
+      "long": 23,
+      "short": 38
+    },
+    "exits": {
+      "learned_stop_loss": 44,
+      "learned_max_hold": 13,
+      "learned_take_profit": 4
+    }
+  }
+}

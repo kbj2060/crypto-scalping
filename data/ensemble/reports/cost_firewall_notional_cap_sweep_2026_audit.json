@@ -1,0 +1,51 @@
+{
+  "model_id": "cost_firewall_notional_cap_sweep_2026",
+  "status": "pass",
+  "pre_run": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [],
+    "context": {
+      "feature_rows": 16897,
+      "ledger_rows": 363,
+      "timestamp_alignment_mismatches_gt_300s": 0,
+      "missing_feature_rows": 0
+    },
+    "dsac": {
+      "path": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_priority1_full_retrain_20260507/best_dsac_agents.pth",
+      "epoch": 180,
+      "global_step": 0,
+      "state_dim": 29,
+      "best_val_pnl": 0.0
+    },
+    "pre_run_checks": {
+      "experiment_family": "cost_firewall_notional_multiplier_cap_sweep",
+      "selection_uses_validation_only": true,
+      "holdout_is_report_only": true,
+      "diagnostic_caps_may_exceed_current_live_limit": true,
+      "declared_entry_time_inputs": [
+        "DGG signal fields",
+        "deep prediction fields",
+        "M7 prediction fields",
+        "regime fields"
+      ]
+    }
+  },
+  "post_selection": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [],
+    "invariants": {
+      "no_new_entries_created": true,
+      "uses_existing_dgg_v2_entries_and_exits": true,
+      "no_side_flip": true,
+      "selected_cap_lte_current_live_limit": true,
+      "selected_max_margin_fraction_lte_1": true,
+      "selected_no_liquidations": true,
+      "selected_no_ruin": true,
+      "selected_cost2_survives": true,
+      "selected_cost3_survives": true,
+      "selection_uses_validation_only": true
+    }
+  }
+}

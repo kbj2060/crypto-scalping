@@ -1,0 +1,332 @@
+{
+  "model_id": "omega4_4_topdown_reproducible_architecture_baseline_20260623",
+  "display_version": "Omega 4.4 top-down reproducible architecture baseline",
+  "status": "current_omega_reproducible_architecture_baseline_not_live_wired",
+  "created_kst": "2026-06-23",
+  "baseline_role": "Omega4.4 reproducible architecture baseline; not Omega4.3 performance champion replacement",
+  "promotion_type": "top_down_reproducible_parent_plus_validation_only_logrisk_margin_leverage_sidecar",
+  "weights_retrained": true,
+  "risk_sidecar_trained": true,
+  "base_model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+  "contract": "docs/model_contracts/omega4_4_topdown_reproducible_architecture_baseline_20260623_contract.md",
+  "manifest": "data/ensemble/supervised/omega4_4_topdown_reproducible_architecture_baseline_20260623/candidate_manifest.json",
+  "runtime_contract": "tmp/causal_regen_20260516/omega4_4_topdown_reproducible_architecture_baseline_20260623/runtime_contract.json",
+  "promotion_manifest": "tmp/causal_regen_20260516/omega4_4_topdown_reproducible_architecture_baseline_20260623/promotion_manifest.json",
+  "source_candidate_manifest": "data/ensemble/supervised/omega4_3_topdown_best_parent_exit075_valonly_logrisk_tail050_20260623/candidate_manifest.json",
+  "source_contract": "docs/model_contracts/omega4_3_topdown_best_parent_exit075_valonly_logrisk_tail050_20260623_contract.md",
+  "source_redteam_report": "docs/audits/omega4_3_topdown_best_parent_exit075_redteam_20260623.md",
+  "parent_report": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/report.json",
+  "parent_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/true_3head_tabm_bundle.pt",
+  "risk_report": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/report.json",
+  "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/risk_sidecar.pkl",
+  "redteam_report": "docs/audits/omega4_4_topdown_reproducible_architecture_baseline_20260623_redteam.md",
+  "redteam_json": "tmp/causal_regen_20260516/omega4_4_topdown_reproducible_architecture_baseline_20260623/redteam_report.json",
+  "redteam_verdict": "REDTEAM_PASS_CLEAN_RESEARCH_REPRODUCIBLE_ARCHITECTURE_BASELINE_NOT_PERFORMANCE_CHAMPION",
+  "selected_variant": "risk_5241",
+  "selection_policy": "validation-only log_risk max with validation_mdd >= -7.00 and trades >= 0.95 * baseline trades; OOS excluded from filter/sort/tie-break",
+  "selection_scope": "validation_only",
+  "oos_usage_policy": "OOS excluded from mapping filter/sort/tie-break; OOS is selected-row readout only.",
+  "topdown_sequence": {
+    "parent_recipe": "same_as_direction + terminal_giveback + epochs2 + train15k + exit15k + q0.70",
+    "exit_threshold": 0.75,
+    "risk_sidecar": "HGB side-split parent_outputs dynamic_leverage validation-only logrisk tail050"
+  },
+  "risk_model": {
+    "model_kind": "hgb",
+    "risk_feature_mode": "parent_outputs",
+    "side_split_model": true,
+    "score_quality_blend": 0.0,
+    "dynamic_leverage": true,
+    "selection_objective": "log_risk",
+    "selection_scope": "validation_only",
+    "log_risk_params": {
+      "tail_budget": 0.02,
+      "tail_penalty": 0.5,
+      "liquidation_buffer": 0.12,
+      "liquidation_penalty": 0.25
+    }
+  },
+  "risk_label": {
+    "rows": 143,
+    "target": "trade net_per_notional from Omega 4.2 replay",
+    "target_mae_penalty": 0.5,
+    "target_mean": -0.012448396559704006,
+    "target_p25": -0.0617692780027842,
+    "target_p50": -0.0007989822451009497,
+    "target_p75": 0.02117718897222898,
+    "train_score_q50": -0.02010851911487158,
+    "train_score_iqr": 0.04342023344130003
+  },
+  "selected_mapping": {
+    "min_scale": 0.95,
+    "max_scale": 1.65,
+    "temp": 2.1,
+    "floor": 0.06,
+    "cap": 0.28,
+    "long_scale": 0.75,
+    "short_scale": 1.25,
+    "leverage_min": 1.0,
+    "leverage_max": 2.5,
+    "leverage_temp": 1.35,
+    "leverage_floor": 1.0,
+    "leverage_cap": 3.0,
+    "long_leverage_scale": 0.9,
+    "short_leverage_scale": 1.1
+  },
+  "runtime_template": {
+    "model_id": "omega4_4_topdown_reproducible_architecture_baseline_20260623",
+    "display_version": "Omega 4.4 top-down reproducible architecture baseline",
+    "role": "top_down_reproducible_architecture_baseline",
+    "base_model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+    "parent_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/true_3head_tabm_bundle.pt",
+    "parent_report": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_topdown_best_parent_e2_train15k_exit15k_q070_20260623/report.json",
+    "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/risk_sidecar.pkl",
+    "risk_report": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v14_topdown_best_parent_e2_train15k_exit15k_exit075_valonly_logrisk_tail050_20260623/report.json",
+    "quality_threshold": 0.7,
+    "exit_threshold": 0.75,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "topdown_sequence": {
+      "parent_recipe": "same_as_direction + terminal_giveback + epochs2 + train15k + exit15k + q0.70",
+      "exit_threshold": 0.75,
+      "risk_sidecar": "HGB side-split parent_outputs dynamic_leverage validation-only logrisk tail050"
+    },
+    "atr_safety_sltp": {
+      "atr_window_bars": 192,
+      "take_profit_atr_multiple": 12.0,
+      "stop_loss_atr_multiple": 6.0,
+      "floor_take_profit_price_move": 0.075,
+      "floor_stop_loss_price_move": 0.04,
+      "cap_take_profit_price_move": 0.22,
+      "cap_stop_loss_price_move": 0.12,
+      "sltp_hit_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location"
+    },
+    "price_move_take_profit_expr": "clip(max(0.075, atr_pct_192 * 12.0), 0.0, 0.22)",
+    "price_move_stop_loss_expr": "clip(max(0.040, atr_pct_192 * 6.0), 0.0, 0.12)",
+    "risk_sidecar": {
+      "mode": "sizing_only_trade_level_overlay",
+      "model_kind": "hgb",
+      "feature_mode": "parent_outputs",
+      "side_split_model": true,
+      "dynamic_leverage": true,
+      "selection_objective": "log_risk",
+      "selection_scope": "validation_only",
+      "log_risk_params": {
+        "tail_budget": 0.02,
+        "tail_penalty": 0.5,
+        "liquidation_buffer": 0.12,
+        "liquidation_penalty": 0.25
+      },
+      "selected_variant": "risk_5241",
+      "selected_mapping": {
+        "min_scale": 0.95,
+        "max_scale": 1.65,
+        "temp": 2.1,
+        "floor": 0.06,
+        "cap": 0.28,
+        "long_scale": 0.75,
+        "short_scale": 1.25,
+        "leverage_min": 1.0,
+        "leverage_max": 2.5,
+        "leverage_temp": 1.35,
+        "leverage_floor": 1.0,
+        "leverage_cap": 3.0,
+        "long_leverage_scale": 0.9,
+        "short_leverage_scale": 1.1
+      },
+      "outputs": [
+        "margin_fraction",
+        "leverage"
+      ],
+      "notional_contract": "notional = margin_fraction * leverage"
+    },
+    "pnl_contract": "PnL = realized_price_move * notional, after fee/slippage cost multiplier",
+    "sltp_contract": "raw directional price_move compared to TP/SL price-move barriers; margin/notional do not change barrier location",
+    "notional_scaled_sltp": false,
+    "execution_contract": {
+      "parent_model_owns": [
+        "direction",
+        "quality_gate",
+        "exit_head",
+        "entry_time_atr_sltp_barrier_timing"
+      ],
+      "risk_sidecar_owns": [
+        "entry_time_margin_fraction",
+        "entry_time_leverage",
+        "trade_pnl_sizing"
+      ],
+      "full_replay_dynamic_exit_enabled": false,
+      "runtime_must_fail_on_missing_sidecar_or_contract_mismatch": true
+    },
+    "fail_fast_required": true
+  },
+  "parent_q070_without_risk": {
+    "validation": {
+      "pnl": 26.091393532254536,
+      "mdd": -7.603026523194956,
+      "trades": 35,
+      "wr": 0.5142857142857142,
+      "trades_per_day": 0.380535316546491,
+      "avg_notional": 0.378,
+      "avg_leverage": 2.0,
+      "long_entries": 12,
+      "short_entries": 23,
+      "exit_reasons": {
+        "stop_loss": 16,
+        "take_profit": 18,
+        "forced_end": 1
+      }
+    },
+    "oos": {
+      "pnl": 27.37964358742233,
+      "mdd": -4.899058684460089,
+      "trades": 22,
+      "wr": 0.6363636363636364,
+      "trades_per_day": 0.37644822054542215,
+      "avg_notional": 0.38965909090909095,
+      "avg_leverage": 2.0,
+      "long_entries": 5,
+      "short_entries": 17,
+      "exit_reasons": {
+        "stop_loss": 8,
+        "take_profit": 13,
+        "forced_end": 1
+      }
+    },
+    "validation_aggressive_scale200_cap090": {
+      "pnl": 56.37704272463289,
+      "mdd": -14.82996266377652,
+      "trades": 35,
+      "wr": 0.5142857142857142,
+      "trades_per_day": 0.380535316546491,
+      "avg_notional": 0.756,
+      "avg_leverage": 2.0,
+      "long_entries": 12,
+      "short_entries": 23,
+      "exit_reasons": {
+        "stop_loss": 16,
+        "take_profit": 18,
+        "forced_end": 1
+      }
+    },
+    "oos_aggressive_scale200_cap090": {
+      "pnl": 60.422526596752846,
+      "mdd": -9.619184482053033,
+      "trades": 22,
+      "wr": 0.6363636363636364,
+      "trades_per_day": 0.37644822054542215,
+      "avg_notional": 0.7793181818181819,
+      "avg_leverage": 2.0,
+      "long_entries": 5,
+      "short_entries": 17,
+      "exit_reasons": {
+        "stop_loss": 8,
+        "take_profit": 13,
+        "forced_end": 1
+      }
+    }
+  },
+  "validation_cost3_sizing_only": {
+    "pnl": 19.10497849397168,
+    "mdd": -6.969755743075179,
+    "trades": 44,
+    "wr": 0.5909090909090909,
+    "trades_per_day": 0.47838725508701724,
+    "avg_notional": 0.43297382222693925,
+    "avg_margin_fraction": 0.23893660219124005,
+    "avg_leverage": 1.7761279783384587,
+    "log_growth_sum": 0.1748350904564679,
+    "tail_excess_sum": 0.04610357737588036,
+    "liquidation_excess_sum": 0.013654097648437113,
+    "log_risk_utility": 0.14836977735641843,
+    "long_entries": 14,
+    "short_entries": 30,
+    "exit_reasons": {
+      "stop_loss": 17,
+      "exit_head": 17,
+      "take_profit": 9,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3_sizing_only_readout": {
+    "pnl": 22.214969926235106,
+    "mdd": -5.548408532243498,
+    "trades": 36,
+    "wr": 0.6666666666666666,
+    "trades_per_day": 0.6160061790743272,
+    "avg_notional": 0.45666178807293645,
+    "avg_margin_fraction": 0.24710653209256117,
+    "avg_leverage": 1.8102866643805366,
+    "log_growth_sum": 0.20061135673447605,
+    "tail_excess_sum": 0.027212202882363264,
+    "liquidation_excess_sum": 0.0,
+    "log_risk_utility": 0.18700525529329443,
+    "long_entries": 9,
+    "short_entries": 27,
+    "exit_reasons": {
+      "exit_head": 23,
+      "stop_loss": 9,
+      "take_profit": 3,
+      "forced_end": 1
+    }
+  },
+  "full_replay_diagnostic_not_promoted": {
+    "status": "diagnostic_only_not_runtime_contract",
+    "reason": "Promoted Omega4.4 architecture baseline keeps risk sidecar sizing-only; full dynamic-risk exit replay remains diagnostic until separately promoted.",
+    "validation": {
+      "pnl": 19.104435738436255,
+      "mdd": -9.029040048181248,
+      "trades": 44,
+      "wr": 0.5909090909090909,
+      "trades_per_day": 0.47838725508701724,
+      "avg_notional": 0.43297382222693925,
+      "avg_margin_fraction": 0.23893660219124005,
+      "avg_leverage": 1.776127978338459,
+      "long_entries": 14,
+      "short_entries": 30,
+      "exit_reasons": {
+        "stop_loss": 17,
+        "exit_head": 17,
+        "take_profit": 9,
+        "forced_end": 1
+      },
+      "log_growth_sum": 0.1748305334952155,
+      "tail_excess_sum": 0.04610357737588036,
+      "liquidation_excess_sum": 0.013654097648437113,
+      "log_risk_utility": 0.14836522039516603
+    },
+    "oos": {
+      "pnl": 25.69611401370708,
+      "mdd": -5.562738653208809,
+      "trades": 35,
+      "wr": 0.6857142857142857,
+      "trades_per_day": 0.5988948963222624,
+      "avg_notional": 0.4614806918555627,
+      "avg_margin_fraction": 0.24873508593324842,
+      "avg_leverage": 1.8187252557201075,
+      "long_entries": 8,
+      "short_entries": 27,
+      "exit_reasons": {
+        "stop_loss": 8,
+        "exit_head": 23,
+        "take_profit": 3,
+        "forced_end": 1
+      },
+      "log_growth_sum": 0.2286970143625939,
+      "tail_excess_sum": 0.027212202882363264,
+      "liquidation_excess_sum": 0.0,
+      "log_risk_utility": 0.21509091292141225
+    }
+  },
+  "performance_champion_reference": {
+    "model_id": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+    "role": "current Omega4.3 performance champion, preserved separately",
+    "validation_pnl": 30.326541948024065,
+    "oos_pnl": 32.44445655635533
+  },
+  "lineage": {
+    "promoted_from": "omega4_3_topdown_best_parent_exit075_valonly_logrisk_tail050_20260623",
+    "reason": "User selected the top-down reproducible architecture as the new Omega4.4 structural baseline while preserving Omega4.3 as performance champion.",
+    "parent_reproducibility_note": "Parent weights were retrained top-down under current scripts; this is the baseline for future reproducible architecture work."
+  }
+}

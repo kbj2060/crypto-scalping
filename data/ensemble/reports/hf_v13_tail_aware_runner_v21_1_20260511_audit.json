@@ -1,0 +1,145 @@
+{
+  "status": "pass",
+  "verdict": "promote",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "model_meta": {
+    "snapshot_count": 20052,
+    "positive_rate": 0.8720825852782765,
+    "jackpot_rate": 0.3833532814681827,
+    "bad_rate": 0.08477957310991423,
+    "cost3_positive_rate": 0.8723319369638939,
+    "target_mean": 0.012465419239048602,
+    "target_p10": -0.0014223086883659573,
+    "target_cost2_p90": 0.048660514136489745,
+    "target_p75": 0.01959459649244273,
+    "target_p95": 0.04479031968635111
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "selected_config": {
+    "name": "v21_1_tail_runner_1",
+    "full_edge_th": 0.002,
+    "half_edge_th": 0.002,
+    "p_th": 0.6,
+    "q10_floor": -0.006,
+    "jackpot_p": 0.25,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.5,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "full_add_frac": 0.2,
+    "half_add_frac": 0.1,
+    "max_total_mult": 1.35,
+    "max_entry_notional": 2.75,
+    "dd_block": 0.3
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 194.36258306094462,
+      "mdd": -32.675898852590166,
+      "trades": 81,
+      "wr": 0.19753086419753085,
+      "trades_per_day": 1.3806818181818183,
+      "long_entries": 27,
+      "short_entries": 54,
+      "avg_notional": 2.537109317187181,
+      "avg_leverage": 2.616218552311983,
+      "action_counts": {
+        "cash": 12565,
+        "long": 27,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 65,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 16,
+        "jackpot_add": 11,
+        "reject": 28,
+        "full_add": 4,
+        "half_add": 1
+      }
+    },
+    "cost2": {
+      "pnl": 102.28449040477336,
+      "mdd": -34.83071904741912,
+      "trades": 85,
+      "wr": 0.18823529411764706,
+      "trades_per_day": 1.4488636363636365,
+      "long_entries": 30,
+      "short_entries": 55,
+      "avg_notional": 2.528835402907673,
+      "avg_leverage": 2.5856894403780437,
+      "action_counts": {
+        "cash": 12622,
+        "long": 30,
+        "short": 55
+      },
+      "exits": {
+        "learned_stop_loss": 69,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 19,
+        "jackpot_add": 13,
+        "reject": 27,
+        "full_add": 6
+      }
+    },
+    "cost3": {
+      "pnl": 20.297902100472776,
+      "mdd": -45.73111577023248,
+      "trades": 94,
+      "wr": 0.1595744680851064,
+      "trades_per_day": 1.6022727272727273,
+      "long_entries": 36,
+      "short_entries": 58,
+      "avg_notional": 2.516400475304256,
+      "avg_leverage": 2.5741153321686796,
+      "action_counts": {
+        "cash": 12794,
+        "long": 36,
+        "short": 58
+      },
+      "exits": {
+        "learned_stop_loss": 79,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "runner_actions": {
+        "add_on": 19,
+        "jackpot_add": 14,
+        "reject": 17,
+        "full_add": 5
+      }
+    }
+  }
+}

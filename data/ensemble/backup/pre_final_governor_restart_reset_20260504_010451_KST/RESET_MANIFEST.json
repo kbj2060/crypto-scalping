@@ -1,0 +1,26 @@
+{
+  "reset_at_kst": "2026-05-04T01:04:51+09:00",
+  "reset_at_utc": "2026-05-03T16:04:51+00:00",
+  "scope": "trade_records_and_equity_state_only_after_stopping_old_bot",
+  "old_bot_pid": 814374,
+  "old_bot_stopped": true,
+  "restart_cmd_len": 2,
+  "backed_up": [
+    "data/live/trade_journal.jsonl",
+    "data/live/dashboard_events.jsonl",
+    "data/live/dashboard_state.json",
+    "data/live/dashboard_state_dsac_compact.json",
+    "data/live/daily_trade_report_state.json",
+    "data/live/ensemble_tracker_state.json",
+    "data/live/ensemble_trade_records.jsonl",
+    "data/live/trade_journal_dsac_compact.jsonl",
+    "data/live/dashboard_events_dsac_compact.jsonl",
+    "data/ensemble/governor_live_state.json"
+  ],
+  "removed_legacy_active_files": [],
+  "preserved": [
+    "data/live/microstructure.duckdb",
+    "data/live/polymarket.duckdb",
+    "data/live/tail_risk.duckdb"
+  ]
+}

@@ -60,8 +60,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _prepare_work_frame(eval_rows: int, warmup_rows: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    rl_path = ROOT / "data" / "splits" / "year_oos" / "rl_base_2025.csv"
-    feat_path = ROOT / "data" / "splits" / "year_oos" / "training_features_2025.csv"
+    rl_path = ROOT / "data" / "splits" / "year_oos" / "rl_base_2024.csv"
+    feat_path = ROOT / "data" / "splits" / "year_oos" / "training_features_2024.csv"
     rl_df, work_df = _load_frames(str(rl_path), str(feat_path), "timestamp")
     keep_rows = max(int(eval_rows), 1) + max(int(warmup_rows), 0)
     if keep_rows < len(rl_df):

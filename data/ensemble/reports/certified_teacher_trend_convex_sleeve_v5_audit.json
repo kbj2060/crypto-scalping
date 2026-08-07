@@ -1,0 +1,15 @@
+{
+  "model_id": "certified_teacher_trend_convex_sleeve_v5",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "M7 embedded provenance caveat remains"
+  ],
+  "invariants": {
+    "rare_event_universe": true,
+    "legacy_regime_v2_quarantined": true,
+    "2026_fixed_oos_no_selection": true,
+    "cost_1x_2x_3x_reported": true,
+    "next_bar_open_execution": true
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "v31_original_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "v31_original_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "v31_v40_6_hgb_pls_parent:missing_train_features_zero_filled:garch_vol_z,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "v31_v40_6_hgb_pls_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "v31_v40_9_lgbm_low_mdd_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "v31_v40_9_lgbm_low_mdd_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "v31_v40_9_lgbm_low_mdd_parent:cost2_not_survived",
+    "v31_v40_9_lgbm_low_mdd_parent:cost3_not_survived",
+    "v31_v40_10_lgbm_tradefloor_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "v31_v40_10_lgbm_tradefloor_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "v31_v40_10_lgbm_tradefloor_parent:cost2_not_survived",
+    "v31_v40_10_lgbm_tradefloor_parent:cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31 per parent variant",
+  "oos_window": "2026 fixed OOS only after overlay selection",
+  "v27_entry_frozen": true,
+  "v21_2_runner_model_preserved": true,
+  "runner_feature_schema": "original parent raw schema used for V21.2 feature frame",
+  "encoded_parents_regenerate_factors": true
+}

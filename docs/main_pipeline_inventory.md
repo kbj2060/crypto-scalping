@@ -1,5 +1,26 @@
 # Main Pipeline Inventory
 
+## Current Governor Main Stack
+
+The active governor research main is now documented in
+`docs/main_governor_trend5x_design.md`.
+
+Current stack:
+
+- High-Conviction Sniper Sleeve 5x: `sniper_notional_exposure=5.0`, `sniper_leverage=5.0`
+- Bull/Bear Trend Sleeve 5x: `trend_bull_bear_sleeve_v1_c68_g34_notional5_leverage5.pkl`
+- W/N/C Microstructure Sleeve 5x: `microstructure_wnc_sleeve_realistic_5x.pkl`
+- Day Trader Controller: removed from the main governor evaluator
+
+2026 OOS main result:
+
+- PnL: `+45,377`
+- MDD: `-13.59%`
+- Trades/day: `18.12`
+- Win rate: `72.44%`
+
+This means the former `Legacy Leverage Sniper` is still active. It should be read as the high-conviction sniper sleeve, not as a deprecated module.
+
 Current main stack:
 
 - M7 data: improved M7 redesign clean dataset.
@@ -28,7 +49,7 @@ Data and feature pipeline:
 - `docs/unified_pipeline_design.md`
 - `docs/feature_contract_manifest.json`
 
-M7 supervised and unsupervised training/inference:
+M7 supervised training/inference:
 
 - `ensemble/seven_model_ensemble.py`
 - `ensemble/artifact_utils.py`
@@ -40,11 +61,8 @@ M7 supervised and unsupervised training/inference:
 - `ensemble/supervised/train_quantile_forest.py`
 - `ensemble/supervised/train_multitarget_lgbm.py`
 - `ensemble/supervised/train_manifold_hgb.py`
-- `ensemble/unsupervised/common.py`
-- `ensemble/unsupervised/live_unsupervised_hub.py`
-- `ensemble/unsupervised/train_gmm_volatility.py`
-- `ensemble/unsupervised/train_isolation_forest.py`
-- `ensemble/unsupervised/train_vae_anomaly.py`
+
+Historical M7 unsupervised artifacts/scripts for `gmm_volatility`, `isolation_forest`, and `vae_anomaly` are diagnostic-only. They are not active M7 generation or required-column contract inputs unless retrained/rescored under a new explicit contract.
 
 DSAC training, runtime, and validation:
 

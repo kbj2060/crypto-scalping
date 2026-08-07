@@ -1,0 +1,226 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "no_gbdt_retrained_candidate_beat_alpha3_current"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after parent/downstream selection",
+  "train_meta": {
+    "candidates": 6524,
+    "stride_bars": 12,
+    "max_train_horizon_bars": 288
+  },
+  "label_training_config": {
+    "notional_buckets": [
+      0.2,
+      0.32,
+      0.5,
+      0.75,
+      1.05,
+      1.45,
+      2.0,
+      2.7,
+      3.6
+    ],
+    "leverage_buckets": [
+      1.5,
+      2.0,
+      3.0,
+      4.0,
+      5.0
+    ],
+    "take_profit_buckets": [
+      0.007,
+      0.011,
+      0.018,
+      0.03,
+      0.05,
+      0.09,
+      0.18,
+      0.45,
+      0.9
+    ],
+    "stop_loss_buckets": [
+      0.004,
+      0.006,
+      0.009,
+      0.014,
+      0.022,
+      0.035,
+      0.055
+    ],
+    "max_hold_buckets": [
+      6,
+      12,
+      24,
+      48,
+      96,
+      192,
+      288
+    ],
+    "cooldown_buckets": [
+      0,
+      1,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "max_train_horizon_bars": 288,
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "cash_score": 0.02,
+    "adverse_penalty": 2.45,
+    "size_penalty": 0.18,
+    "hold_penalty": 0.042,
+    "turnover_bonus": 0.0012,
+    "max_margin_fraction": 1.0
+  },
+  "runtime_config": {
+    "notional_buckets": [
+      0.22999999999999998,
+      0.368,
+      0.575,
+      0.8624999999999999,
+      1.2075,
+      1.6674999999999998,
+      2.3,
+      3.105,
+      4.14
+    ],
+    "leverage_buckets": [
+      1.5,
+      2.0,
+      3.0,
+      4.0,
+      5.0
+    ],
+    "take_profit_buckets": [
+      0.007,
+      0.011,
+      0.018,
+      0.03,
+      0.05,
+      0.09,
+      0.18,
+      0.45,
+      0.9
+    ],
+    "stop_loss_buckets": [
+      0.004,
+      0.006,
+      0.009,
+      0.014,
+      0.022,
+      0.035,
+      0.055
+    ],
+    "max_hold_buckets": [
+      6,
+      12,
+      24,
+      48,
+      96,
+      192,
+      288
+    ],
+    "cooldown_buckets": [
+      0,
+      1,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "max_train_horizon_bars": 288,
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "cash_score": 0.02,
+    "adverse_penalty": 2.45,
+    "size_penalty": 0.18,
+    "hold_penalty": 0.042,
+    "turnover_bonus": 0.0012,
+    "max_margin_fraction": 1.1
+  },
+  "base_feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "best_candidate": {
+    "name": "hgb",
+    "score": 743.1818076972185,
+    "selected_teacher_runtime": {
+      "name": "noflip_c0.56_parent_scale1.10",
+      "confidence": 0.56,
+      "parent_notional_scale": 1.1,
+      "max_notional": 2.75
+    },
+    "selected_runner_config": {
+      "name": "v21_2_jackpot_runner_0",
+      "full_edge_th": 99.0,
+      "half_edge_th": 99.0,
+      "p_th": 0.6,
+      "q10_floor": -0.006,
+      "jackpot_p": 0.2,
+      "jackpot_q90": 0.015,
+      "bad_cap": 0.35,
+      "min_unrealized": 0.004,
+      "min_bars_since_entry": 3,
+      "full_add_frac": 0.2,
+      "half_add_frac": 0.0,
+      "max_total_mult": 1.35,
+      "max_entry_notional": 2.75,
+      "dd_block": 0.3
+    },
+    "runner_meta": {
+      "snapshot_count": 20026,
+      "positive_rate": 0.8640767002896235,
+      "jackpot_rate": 0.38130430440427443,
+      "bad_rate": 0.08034555078398083,
+      "cost3_positive_rate": 0.8649255967242585,
+      "target_mean": 0.011105890013755964,
+      "target_p10": -0.0015878529132520238,
+      "target_cost2_p90": 0.04647227728119395,
+      "target_p75": 0.018361428334601602,
+      "target_p95": 0.03053074009473139
+    },
+    "artifacts": {
+      "parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_gbdt_parent_full_retrain_20260515/hgb/parent.pkl",
+      "runner": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_gbdt_parent_full_retrain_20260515/hgb/runner.pkl",
+      "teacher_gate": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_gbdt_parent_full_retrain_20260515/hgb/teacher_gate.pt"
+    }
+  },
+  "alpha3_execution_contract": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  }
+}

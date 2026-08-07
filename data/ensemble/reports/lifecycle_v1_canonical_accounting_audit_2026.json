@@ -1,0 +1,355 @@
+{
+  "type": "lifecycle_v1_canonical_accounting_audit_2026",
+  "top_level_verdict": "audit_artifact_only_not_promoted",
+  "best_research_candidate": "clean_base_lifecycle_editor_v1",
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "cost_1x_pnl": 177.3298088749005,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "clean_base_oos_recomputed": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.49586776859504134,
+    "avg_notional": 0.6002625849524619,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {
+      "model_cooldown": 307,
+      "loss_cooldown": 4392,
+      "daily_trade_budget": 12,
+      "daily_dd_lock": 730,
+      "daily_loss_lock": 126
+    },
+    "exits": {
+      "exit_governor": 362,
+      "forced_end": 1
+    },
+    "exit_prob_mean": 0.10361317687454565,
+    "exit_prob_p95": 0.42294485622328093
+  },
+  "lifecycle_v1_reference": {
+    "source_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json",
+    "source_verdict": "implemented_but_reject_for_promotion_gate",
+    "selected_for_report": "redteam_constrained",
+    "selected_config": {
+      "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+      "threshold_shift": -0.03,
+      "delta_scale": 1.0,
+      "max_delta": 0.12,
+      "min_age_delta": 3,
+      "shrink_margin": 999.0,
+      "shrink_mult": 1.0,
+      "boost_margin": 0.12,
+      "boost_mult": 1.15,
+      "max_notional": 3.6
+    }
+  },
+  "candidate_oos": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "edit_counts": {
+      "boost": 363
+    },
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "action_distribution": {
+      "BOOST__BASE_EXIT": 269,
+      "BOOST__LIFECYCLE_EARLY_EXIT": 94
+    }
+  },
+  "cost_path_changing_1x": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.20043885648466803,
+    "exit_prob_p95": 0.4421842673379731,
+    "threshold_mean": 0.47183559052211677,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "cost_path_changing_2x": {
+    "pnl": 133.04811062975435,
+    "mdd": -18.34037596426664,
+    "trades": 318,
+    "trades_per_day": 5.420454545454546,
+    "wr": 0.4308176100628931,
+    "avg_notional": 0.5621237878428561,
+    "avg_leverage": 1.5940868238379102,
+    "long_entries": 149,
+    "short_entries": 169,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 239,
+      "lifecycle_early_exit": 79
+    },
+    "edit_counts": {
+      "boost": 318
+    },
+    "exit_prob_mean": 0.19510390361680333,
+    "exit_prob_p95": 0.43030474587045453,
+    "threshold_mean": 0.47108062014837365,
+    "effective_notional_mean": 0.5621237878428561
+  },
+  "cost_path_changing_3x": {
+    "pnl": -8.649826535038951,
+    "mdd": -9.573938887195565,
+    "trades": 179,
+    "trades_per_day": 3.0511363636363638,
+    "wr": 0.18994413407821228,
+    "avg_notional": 0.29440907251482246,
+    "avg_leverage": 1.5879536491158919,
+    "long_entries": 85,
+    "short_entries": 94,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 156,
+      "lifecycle_early_exit": 23
+    },
+    "edit_counts": {
+      "boost": 179
+    },
+    "exit_prob_mean": 0.31253292783248676,
+    "exit_prob_p95": 0.5408608318505461,
+    "threshold_mean": 0.4754381935583804,
+    "effective_notional_mean": 0.29440907251482246
+  },
+  "cost_fixed_ledger_1x": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "edit_counts": {
+      "boost": 363
+    },
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "action_distribution": {
+      "BOOST__BASE_EXIT": 269,
+      "BOOST__LIFECYCLE_EARLY_EXIT": 94
+    }
+  },
+  "cost_fixed_ledger_2x": {
+    "pnl": 116.73165085574801,
+    "mdd": -18.34037596426664,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.4490358126721763,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "edit_counts": {
+      "boost": 363
+    },
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "action_distribution": {
+      "BOOST__BASE_EXIT": 269,
+      "BOOST__LIFECYCLE_EARLY_EXIT": 94
+    }
+  },
+  "cost_fixed_ledger_3x": {
+    "pnl": 52.844616032425584,
+    "mdd": -23.871508138479513,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.33884297520661155,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "edit_counts": {
+      "boost": 363
+    },
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "action_distribution": {
+      "BOOST__BASE_EXIT": 269,
+      "BOOST__LIFECYCLE_EARLY_EXIT": 94
+    }
+  },
+  "trade_count_path_changing": {
+    "1x": 363,
+    "2x": 318,
+    "3x": 179
+  },
+  "trade_count_fixed_ledger": {
+    "1x": 363,
+    "2x": 363,
+    "3x": 363
+  },
+  "action_distribution": {
+    "BOOST__BASE_EXIT": 269,
+    "BOOST__LIFECYCLE_EARLY_EXIT": 94
+  },
+  "edit_counts": {
+    "boost": 363
+  },
+  "exits": {
+    "base_exit": 269,
+    "lifecycle_early_exit": 94
+  },
+  "decision_frame_audit": {
+    "passed": true,
+    "rows": 16897,
+    "active_rows": 16897,
+    "cash_rows": 0,
+    "long_rows": 7900,
+    "short_rows": 8997,
+    "violations": {
+      "nonfinite_values": 0,
+      "negative_notional": 0,
+      "leverage_below_one_active": 0,
+      "leverage_above_cap": 0,
+      "notional_above_max": 0,
+      "active_action_side_mismatch": 0,
+      "cash_has_exposure": 0,
+      "position_fraction_mismatch": 0,
+      "negative_cooldown": 0
+    },
+    "notional": {
+      "max": 3.0380552603853426,
+      "mean": 0.8042273420435015,
+      "p95": 1.7381261779863437
+    },
+    "leverage": {
+      "max": 2.5708089733514607,
+      "mean": 1.5912971481880236,
+      "p95": 1.8325242533448571
+    }
+  },
+  "preservation_audit": {
+    "passed": true,
+    "base_trades": 363,
+    "candidate_trades": 363,
+    "ledger_trades": 363,
+    "violations": {
+      "trade_count_changed": 0,
+      "entry_idx_changed": 0,
+      "side_changed": 0,
+      "candidate_side_changed": 0,
+      "entry_deleted": 0,
+      "new_entries": 0,
+      "exit_after_base": 0,
+      "negative_effective_notional": 0,
+      "effective_notional_cap": 0,
+      "leverage_increased": 0,
+      "leverage_changed": 0,
+      "cooldown_changed": 0
+    },
+    "measured_policy_changes": {
+      "notional_increased_over_base": 363,
+      "notional_decreased_vs_base": 0,
+      "notional_equal_to_base": 0
+    },
+    "strict_base_notional_preservation_passed": false,
+    "note": "Lifecycle V1 intentionally edits notional; measured notional increases are reported separately from side/timing/leverage/cap invariants."
+  },
+  "accounting_audit": {
+    "passed": true,
+    "ledger_prior_state_fix": "prior_trade_giveback_pre_decision is written before the current trade executes; current_trade_giveback_after_close is written after close and carried to the next row.",
+    "path_changing_and_fixed_ledger_costs_separated": true,
+    "giveback_carry_audit": {
+      "passed": true,
+      "rows_checked": 363,
+      "violations": 0,
+      "first_prior_trade_giveback": 0.0,
+      "max_abs_carry_diff": 0.0,
+      "tolerance": 1e-12
+    }
+  },
+  "reject_reasons": [
+    "audit_artifact_only_not_promoted",
+    "Lifecycle V1 MDD gate miss vs clean base: -0.256654 percentage points",
+    "realistic funding/impact/partial-fill replay missing",
+    "path-changing 3x cost stress does not survive",
+    "Lifecycle V1 intentionally boosts notional over clean base; requires risk approval before promotion"
+  ],
+  "promotion_gate": {
+    "pnl_beats_clean_base": true,
+    "mdd_beats_clean_base": false,
+    "trades_per_day_at_least_clean_base": true,
+    "fixed_ledger_cost_1x_positive": true,
+    "fixed_ledger_cost_2x_positive": true,
+    "fixed_ledger_cost_3x_positive": true,
+    "path_changing_cost_1x_positive": true,
+    "path_changing_cost_2x_positive": true,
+    "path_changing_cost_3x_positive": false,
+    "cost_3x_survives_both_views": false,
+    "invariant_audit_passed": true
+  },
+  "data_contract": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "split_contract": {
+      "train_labels": "2025-01-01 through 2025-10-31",
+      "validation_selection": "2025-11-01 through 2025-12-31",
+      "one_shot_oos": "2026-01-01 through 2026-02-28",
+      "oos_threshold_selection": false
+    },
+    "runtime_inputs": [
+      "frozen clean base decisions",
+      "frozen clean base exit governor state",
+      "train-only lifecycle hazard buckets",
+      "validation-selected LifecycleRuntimeConfig"
+    ]
+  },
+  "artifacts": {
+    "script": "/home/llewyn/crypto-scalping/scripts/audit_lifecycle_v1_canonical_accounting_2026.py",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_canonical_accounting_audit_2026.json",
+    "ledger_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_canonical_accounting_audit_2026_ledger.csv",
+    "fixed_ledger_cost_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_canonical_accounting_audit_2026_fixed_ledger_cost.csv",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/lifecycle_v1_canonical_accounting_audit_2026.md"
+  },
+  "frozen_artifacts": {
+    "base_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_v4_clean_train_to_2025_10.pkl",
+    "base_policy_sha256": "5a2515c7840c94d0695be52433c524afc646d6fa17d1e6f6055db80b281622fb",
+    "base_exit_governor": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_no_limit_exit_clean_train_to_2025_10.pkl",
+    "base_exit_governor_sha256": "0378def51dbc1a1ed0b30219b7799a872d82a9be49e78bcf517e9d951d376fe3",
+    "lifecycle_v1_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_lifecycle_editor_v1/lifecycle_editor.pkl",
+    "lifecycle_v1_model_sha256": "4ea2a2405d08743133499ea791c9e2f2466c53ddd5319677bf5e40c81ed7060c"
+  }
+}

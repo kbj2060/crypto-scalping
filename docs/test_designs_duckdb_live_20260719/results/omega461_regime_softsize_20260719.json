@@ -1,0 +1,45 @@
+{
+  "stage": "omega461_regime_softsize",
+  "generated_at": "2026-07-19T16:18:36.021346+09:00",
+  "method_note": "Soft position-sizing dampening by chop_prob (entries NOT vetoed, only notional scaled: mult = max(floor, 1 - chop_prob)). Same live-matching config (duration-gate off, ETH notional_multiplier=1.5) and genuine bar-by-bar fresh-forward replay as the hard-gate test.",
+  "baseline": {
+    "pnl": 34.625529646353016,
+    "mdd": -36.34909365110997,
+    "trades": 39,
+    "wr": 0.4358974358974359,
+    "mark_to_market_mdd": -38.928519755211276
+  },
+  "variants": {
+    "linear_floor0": {
+      "pnl": 108.13453901600924,
+      "mdd": -16.455986049542137,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -17.266310687913144
+    },
+    "linear_floor0.3": {
+      "pnl": 106.22194843342645,
+      "mdd": -16.455986049542137,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -17.266310687913144
+    },
+    "linear_floor0.5": {
+      "pnl": 102.83927692303263,
+      "mdd": -19.407175240674146,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -20.81630147840712
+    }
+  },
+  "baseline_pnl_mdd": [
+    34.625529646353016,
+    -36.34909365110997
+  ],
+  "variants_strictly_improving_both": [
+    "linear_floor0",
+    "linear_floor0.3",
+    "linear_floor0.5"
+  ],
+  "verdict": "ACCEPTED -- ['linear_floor0', 'linear_floor0.3', 'linear_floor0.5'] beat baseline on BOTH pnl and mdd"
+}

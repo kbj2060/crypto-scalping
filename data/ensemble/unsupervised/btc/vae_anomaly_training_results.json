@@ -1,0 +1,17 @@
+{
+  "best_val_score": -0.05469425810788716,
+  "best_params": {
+    "latent_dim": 14,
+    "hidden_dim": 192,
+    "learning_rate": 0.003987992712427741,
+    "beta": 0.016053835242532618,
+    "batch_size": 512,
+    "epochs": 60,
+    "threshold_q": 0.9411715639036874,
+    "feature_count": 25
+  },
+  "threshold": 0.04835263267159462,
+  "val_anomaly_ratio": 0.4007180937874007,
+  "data_hash": "",
+  "config_hash": ""
+}

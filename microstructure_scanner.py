@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from trading_bot_modules.duckdb_access import serialized_duckdb_access
+
 logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent
@@ -24,6 +26,7 @@ _DEPTH_WS_URL = "wss://fstream.binance.com/ws/{symbol}@depth20@100ms"
 _TRADE_WS_URL = "wss://fstream.binance.com/ws/{symbol}@aggTrade"
 _OI_URL       = "https://fapi.binance.com/fapi/v1/openInterest?symbol={SYMBOL}"
 _FUND_URL     = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol={SYMBOL}"
+_AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades?symbol={SYMBOL}&limit={LIMIT}"
 
 _DB_PATH = str(_ROOT / "data/live/microstructure.duckdb")
 _TABLE   = "microstructure_1m"
@@ -31,6 +34,11 @@ _TABLE   = "microstructure_1m"
 class MicrostructureScanner:
     def __init__(self, symbol: str = "ethusdt"):
         self.symbol  = symbol.lower()
+        # ETH (the default/original symbol) keeps the original unsuffixed table name so existing
+        # consumers (audit scripts, feature views) keep working unchanged; other symbols get their
+        # own table so BTC/SOL microstructure never mixes into ETH's rows (the table had no symbol
+        # column to disambiguate by).
+        self._table = _TABLE if self.symbol == "ethusdt" else f"{_TABLE}_{self.symbol.replace('usdt', '')}"
         self._running = False
 
         self._depth_task: asyncio.Task | None = None
@@ -67,6 +75,7 @@ class MicrostructureScanner:
         self._eai_hist:   deque[float] = deque(maxlen=60)
 
         self._fund_rate:  float = 0.0
+        self._last_agg_trade_id: int | None = None
         self._shadow_state: dict[str, float | str] = {
             "shadow_toxicity_score": 0.0,
             "shadow_toxicity_regime": "normal",
@@ -79,7 +88,7 @@ class MicrostructureScanner:
         self._prev_bid_vol10: float = 0.0
         self._prev_ask_vol10: float = 0.0
         self._cached: dict = {}
-        self._db_path = str(_ROOT / "data/live/microstructure.duckdb")
+        self._db_path = str(os.getenv("QUANT_MICRO_DB_PATH", str(_ROOT / "data/live/microstructure.duckdb")))
         self._warmup_30m_ready: bool = False
         self._bootstrap_loaded_rows: int = 0
         self._last_hist_bucket_min: int | None = None
@@ -97,6 +106,8 @@ class MicrostructureScanner:
         self.whale_usd_th     = float(os.getenv("MS_WHALE_USD_TH",     "100000"))
         self.eai_threshold    = float(os.getenv("MS_EAI_THRESHOLD",    "2.0"))
         self.poll_interval_sec = float(os.getenv("MS_POLL_INTERVAL_SEC", "10"))
+        self.trade_rest_fallback_enabled = os.getenv("MS_TRADE_REST_FALLBACK_ENABLE", "true").strip().lower() in ("1", "true", "yes", "on")
+        self.trade_rest_fallback_limit = int(float(os.getenv("MS_TRADE_REST_FALLBACK_LIMIT", "500")))
         self.whale_intent_nif_th = float(os.getenv("MS_WHALE_INTENT_NIF_TH", "0.10"))
         self.whale_flow_entry_th = float(os.getenv("MS_WHALE_FLOW_ENTRY_TH", "0.12"))
         self.whale_flow_exit_th = float(os.getenv("MS_WHALE_FLOW_EXIT_TH", "0.08"))
@@ -106,12 +117,13 @@ class MicrostructureScanner:
         self.enabled          = os.getenv("MS_ENABLE", "true").strip().lower() in ("1", "true", "yes", "on")
         self.dsac_intercept_enabled = os.getenv("MS_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
 
+    @serialized_duckdb_access(lambda self: self._db_path)
     def _db_init(self) -> None:
         import duckdb
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         con = duckdb.connect(self._db_path)
         con.execute(f"""
-            CREATE TABLE IF NOT EXISTS {_TABLE} (
+            CREATE TABLE IF NOT EXISTS {self._table} (
                 ts TIMESTAMPTZ, obi DOUBLE, taker_buy_ratio DOUBLE, spoofing_score DOUBLE,
                 nif_whale DOUBLE, nif_retail DOUBLE, eai DOUBLE, oi_delta_pct DOUBLE,
                 funding_rate DOUBLE, kelly_mult DOUBLE, signal_bias INTEGER,
@@ -120,6 +132,28 @@ class MicrostructureScanner:
                 shadow_queue_bias INTEGER, shadow_regime_tag VARCHAR, shadow_regime_conf DOUBLE
             )
         """)
+        existing_cols = {str(r[1]) for r in con.execute(f"PRAGMA table_info('{self._table}')").fetchall()}
+        extra_cols = [
+            ("data_stale", "BOOLEAN"),
+            ("depth_connected", "BOOLEAN"),
+            ("trade_connected", "BOOLEAN"),
+            ("poll_connected", "BOOLEAN"),
+            ("depth_age_sec", "DOUBLE"),
+            ("trade_age_sec", "DOUBLE"),
+            ("poll_age_sec", "DOUBLE"),
+            ("recent_trade_count_5m", "INTEGER"),
+            ("recent_trade_notional_5m", "DOUBLE"),
+            ("recent_whale_count_5m", "INTEGER"),
+            ("valid_taker_flow", "BOOLEAN"),
+            ("valid_nif", "BOOLEAN"),
+            ("warmup_30m_ready", "BOOLEAN"),
+            ("schema_version", "INTEGER"),
+            ("mark_price", "DOUBLE"),
+            ("whale_position_score", "DOUBLE"),
+        ]
+        for col_name, col_type in extra_cols:
+            if col_name not in existing_cols:
+                con.execute(f"ALTER TABLE {self._table} ADD COLUMN {col_name} {col_type}")
         try:
             rows = con.execute(
                 f"""
@@ -130,8 +164,9 @@ class MicrostructureScanner:
                     shadow_absorption_score,
                     shadow_toxicity_score,
                     shadow_queue_bias,
-                    eai
-                FROM {_TABLE}
+                    eai,
+                    mark_price
+                FROM {self._table}
                 WHERE ts >= now() - INTERVAL '60 minutes'
                 ORDER BY ts ASC
                 """
@@ -139,7 +174,7 @@ class MicrostructureScanner:
             rows_5m = con.execute(
                 f"""
                 SELECT oi_delta_pct
-                FROM {_TABLE}
+                FROM {self._table}
                 WHERE ts >= now() - INTERVAL '5 minutes'
                 ORDER BY ts ASC
                 """
@@ -152,6 +187,7 @@ class MicrostructureScanner:
                 shadow_toxicity_score,
                 shadow_queue_bias,
                 eai,
+                mark_price,
             ) in rows:
                 ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
                 self._nif_hist.append(float(nif_whale or 0.0))
@@ -160,6 +196,11 @@ class MicrostructureScanner:
                 self._tox_hist.append(float(shadow_toxicity_score or 0.0))
                 self._bias_hist.append(int(shadow_queue_bias or 0))
                 self._eai_hist.append(float(eai or 0.0))
+                price = float(mark_price or 0.0)
+                if price > 0.0:
+                    self._price_hist.append(price)
+                    self._price_obs.append((ts_ms, price))
+                    self._last_hist_bucket_min = ts_ms // 60_000
             self._bootstrap_loaded_rows = len(rows)
             # 재시작 직후 OI 원시 시계열(self._oi_obs)이 비어도 OIΔ5m를 즉시 사용 가능하도록 시드
             if rows_5m:
@@ -185,24 +226,59 @@ class MicrostructureScanner:
         )
         con.close()
 
+    @serialized_duckdb_access(lambda self, *_args, **_kwargs: self._db_path)
     def _db_insert(self, bucket_ts: datetime, sig: dict) -> None:
         import duckdb
         try:
             con = duckdb.connect(self._db_path)
+            valid_taker_flow = bool(sig.get("valid_taker_flow", False))
+            valid_nif = bool(sig.get("valid_nif", False))
             con.execute(f"""
-                INSERT INTO {_TABLE} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO {self._table} (
+                    ts, obi, taker_buy_ratio, spoofing_score,
+                    nif_whale, nif_retail, eai, oi_delta_pct,
+                    funding_rate, kelly_mult, signal_bias,
+                    shadow_toxicity_score, shadow_toxicity_regime,
+                    shadow_queue_collapse, shadow_absorption_score,
+                    shadow_queue_bias, shadow_regime_tag, shadow_regime_conf,
+                    data_stale, depth_connected, trade_connected, poll_connected,
+                    depth_age_sec, trade_age_sec, poll_age_sec,
+                    recent_trade_count_5m, recent_trade_notional_5m, recent_whale_count_5m,
+                    valid_taker_flow, valid_nif, warmup_30m_ready, schema_version,
+                    mark_price, whale_position_score
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, [
-                    bucket_ts, sig.get("obi", 0.0), sig.get("taker_buy_ratio", 0.5), sig.get("spoofing_score", 0.0),
-                    sig.get("nif_whale", 0.0), sig.get("nif_retail", 0.0), sig.get("eai", 0.0), sig.get("oi_delta_pct", 0.0),
+                    bucket_ts, sig.get("obi", 0.0),
+                    (sig.get("taker_buy_ratio", 0.5) if valid_taker_flow else None),
+                    sig.get("spoofing_score", 0.0),
+                    (sig.get("nif_whale", 0.0) if valid_nif else None),
+                    (sig.get("nif_retail", 0.0) if valid_taker_flow else None),
+                    sig.get("eai", 0.0), sig.get("oi_delta_pct", 0.0),
                     sig.get("funding_rate", 0.0), sig.get("kelly_mult", 1.0), int(sig.get("signal_bias", 0)),
                     sig.get("shadow_toxicity_score", 0.0), sig.get("shadow_toxicity_regime", "normal"),
                     sig.get("shadow_queue_collapse", 0.0), sig.get("shadow_absorption_score", 0.0),
                     int(sig.get("shadow_queue_bias", 0)), sig.get("shadow_regime_tag", "normal"), sig.get("shadow_regime_conf", 0.0),
+                    bool(sig.get("data_stale", True)),
+                    bool(sig.get("depth_connected", False)),
+                    bool(sig.get("trade_connected", False)),
+                    bool(sig.get("poll_connected", False)),
+                    sig.get("depth_age_sec"),
+                    sig.get("trade_age_sec"),
+                    sig.get("poll_age_sec"),
+                    int(sig.get("recent_trade_count_5m", 0)),
+                    float(sig.get("recent_trade_notional_5m", 0.0)),
+                    int(sig.get("recent_whale_count_5m", 0)),
+                    valid_taker_flow,
+                    valid_nif,
+                    bool(sig.get("warmup_30m_ready", False)),
+                    3,
+                    float(sig.get("mark_price", 0.0) or 0.0),
+                    float(sig.get("whale_position_score", 0.0) or 0.0),
                 ]
             )
             con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("MS duckdb insert failed: %s", e, exc_info=True)
 
     async def _depth_loop(self) -> None:
         import websockets
@@ -239,16 +315,23 @@ class MicrostructureScanner:
         url = _TRADE_WS_URL.format(symbol=self.symbol)
         delay = 3.0
         _logged_connected = False
+        outage_open = False
         while self._running:
             try:
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                     delay = 3.0
                     self._trade_connected = True
-                    if not _logged_connected:
+                    if outage_open:
+                        logger.info("MS trade WS recovered: %s", url)
+                        outage_open = False
+                    elif not _logged_connected:
                         logger.info("📡 MS Trade WS 연결: %s", url)
-                        _logged_connected = True
-                    async for raw in ws:
-                        if not self._running: break
+                    _logged_connected = True
+                    while self._running:
+                        # A WebSocket ping/pong can keep the transport open even when
+                        # the aggTrade stream has stopped delivering market events.
+                        # Bound recv so the outer reconnect loop repairs that state.
+                        raw = await asyncio.wait_for(ws.recv(), timeout=35.0)
                         try:
                             msg = json.loads(raw)
                             self._trade_last_msg_ts = time.time()
@@ -263,9 +346,54 @@ class MicrostructureScanner:
             except Exception as e:
                 self._trade_connected = False
                 _logged_connected = False
-                logger.warning("MS trade WS disconnected; reconnecting... (%s)", e)
+                if not outage_open:
+                    logger.warning(
+                        "MS trade WS disconnected; reconnecting... (%s: %s)",
+                        type(e).__name__, e,
+                    )
+                    outage_open = True
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, 60.0)
+
+    async def _poll_recent_agg_trades(self, session) -> None:
+        """Backfill trade flow when the websocket connects but does not deliver messages."""
+        if not self.trade_rest_fallback_enabled:
+            return
+        try:
+            limit = int(np.clip(self.trade_rest_fallback_limit, 1, 1000))
+            url = _AGG_TRADES_URL.format(SYMBOL=self.symbol.upper(), LIMIT=limit)
+            async with session.get(url, timeout=5) as r:
+                rows = await r.json(content_type=None)
+            if not isinstance(rows, list) or not rows:
+                return
+            appended = 0
+            max_trade_id = self._last_agg_trade_id
+            async with self._trade_lock:
+                for row in rows:
+                    try:
+                        trade_id = int(row.get("a", 0))
+                        if self._last_agg_trade_id is not None and trade_id <= self._last_agg_trade_id:
+                            continue
+                        price = float(row.get("p", 0.0))
+                        qty = float(row.get("q", 0.0))
+                        qty_usd = price * qty
+                        ts_ms = int(row.get("T", 0))
+                        is_buyer_maker = bool(row.get("m", False))
+                        if qty_usd <= 0 or ts_ms <= 0:
+                            continue
+                        self._trades.append((ts_ms, is_buyer_maker, qty_usd))
+                        self._trade_notional_qty.append((ts_ms, qty_usd, qty))
+                        appended += 1
+                        max_trade_id = trade_id if max_trade_id is None else max(max_trade_id, trade_id)
+                    except Exception:
+                        continue
+                if max_trade_id is not None:
+                    self._last_agg_trade_id = int(max_trade_id)
+            if appended > 0:
+                self._trade_last_msg_ts = time.time()
+                self._trade_connected = True
+        except Exception as e:
+            logger.debug("MS aggTrades REST fallback failed: %s", e)
 
     async def _poll_loop(self) -> None:
         import aiohttp
@@ -313,6 +441,7 @@ class MicrostructureScanner:
                                 self._oi_hist.append(oi)
                             if mark > 0:
                                 self._price_hist.append(mark)
+                    await self._poll_recent_agg_trades(session)
                     self._poll_last_msg_ts = time.time()
             except Exception as e:
                 self._poll_connected = False
@@ -327,15 +456,21 @@ class MicrostructureScanner:
         ask_vol = sum(q for _, q in asks)
         return float((bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-8))
 
-    def _compute_nif_and_taker(self, window_sec: int = 300) -> tuple[float, float, float]:
+    def _compute_nif_and_taker(self, window_sec: int = 300) -> tuple[float, float, float, int, float, int]:
         cutoff = int(time.time() * 1000) - window_sec * 1000
         wb = ws_ = rb = rs_ = tb = ts = 0.0
+        trade_count = 0
+        whale_count = 0
+        total_notional = 0.0
         for t_ms, is_buyer_maker, usd in self._trades:
             if t_ms < cutoff: continue
+            trade_count += 1
+            total_notional += float(usd)
             is_taker_buy = not is_buyer_maker
             if is_taker_buy: tb += usd
             else: ts += usd
             if usd >= self.whale_usd_th:
+                whale_count += 1
                 if is_taker_buy: wb += usd
                 else: ws_ += usd
             else:
@@ -344,7 +479,7 @@ class MicrostructureScanner:
         nif_whale = (wb - ws_) / (wb + ws_ + 1e-8)
         nif_retail = (rb - rs_) / (rb + rs_ + 1e-8)
         taker_buy_ratio = tb / (tb + ts + 1e-8)
-        return float(nif_whale), float(nif_retail), float(taker_buy_ratio)
+        return float(nif_whale), float(nif_retail), float(taker_buy_ratio), int(trade_count), float(total_notional), int(whale_count)
 
     def _compute_whale_flow_window(self, window_sec: int = 10) -> tuple[float, float]:
         cutoff = int(time.time() * 1000) - window_sec * 1000
@@ -416,8 +551,27 @@ class MicrostructureScanner:
         return 0.0, 0
 
     def compute_signal(self) -> dict:
+        now_ts = time.time()
+        depth_age_sec = (now_ts - self._depth_last_msg_ts) if self._depth_last_msg_ts > 0 else None
+        trade_age_sec = (now_ts - self._trade_last_msg_ts) if self._trade_last_msg_ts > 0 else None
+        poll_age_sec = (now_ts - self._poll_last_msg_ts) if self._poll_last_msg_ts > 0 else None
+        depth_stale = (depth_age_sec is None or depth_age_sec > 10.0 or not self._depth_connected)
+        trade_stale = (trade_age_sec is None or trade_age_sec > 30.0 or not self._trade_connected)
+        poll_stale = (poll_age_sec is None or poll_age_sec > 130.0 or not self._poll_connected)
+
         obi = self._compute_obi()
-        nif_whale, nif_retail, taker_buy_ratio = self._compute_nif_and_taker(300)
+        (
+            nif_whale,
+            nif_retail,
+            taker_buy_ratio_raw,
+            recent_trade_count_5m,
+            recent_trade_notional_5m,
+            recent_whale_count_5m,
+        ) = self._compute_nif_and_taker(300)
+        valid_taker_flow = bool((not trade_stale) and recent_trade_count_5m > 0)
+        valid_nif = bool((not trade_stale) and recent_whale_count_5m > 0)
+        # 결측/스테일 체결 흐름을 0.0 매도 압력으로 위장하지 않도록 중립값을 사용한다.
+        taker_buy_ratio = float(taker_buy_ratio_raw if valid_taker_flow else 0.5)
         eai = self._compute_eai()
         spoofing_score, spoof_bias = self._detect_spoofing(obi, taker_buy_ratio)
         # 5분(300초) 롤링 OI 변화율: NIF(300초)와 타임프레임 동기화
@@ -642,19 +796,19 @@ class MicrostructureScanner:
             "whale_position_confidence": int(whale_position_confidence),
             "whale_position_score": float(pos_score),
         }
-        now_ts = time.time()
-        ws_stale = (
-            (self._depth_last_msg_ts <= 0 or now_ts - self._depth_last_msg_ts > 10.0)
-            or (self._trade_last_msg_ts <= 0 or now_ts - self._trade_last_msg_ts > 10.0)
-            or (self._poll_last_msg_ts <= 0 or now_ts - self._poll_last_msg_ts > 130.0)
-            or (not self._depth_connected)
-            or (not self._trade_connected)
-            or (not self._poll_connected)
-        )
+        ws_stale = bool(depth_stale or trade_stale or poll_stale)
         out["data_stale"] = bool(ws_stale)
         out["depth_connected"] = bool(self._depth_connected)
         out["trade_connected"] = bool(self._trade_connected)
         out["poll_connected"] = bool(self._poll_connected)
+        out["depth_age_sec"] = float(depth_age_sec) if depth_age_sec is not None else None
+        out["trade_age_sec"] = float(trade_age_sec) if trade_age_sec is not None else None
+        out["poll_age_sec"] = float(poll_age_sec) if poll_age_sec is not None else None
+        out["recent_trade_count_5m"] = int(recent_trade_count_5m)
+        out["recent_trade_notional_5m"] = float(recent_trade_notional_5m)
+        out["recent_whale_count_5m"] = int(recent_whale_count_5m)
+        out["valid_taker_flow"] = bool(valid_taker_flow)
+        out["valid_nif"] = bool(valid_nif)
         self._warmup_30m_ready = self._is_30m_ready()
         out["warmup_30m_ready"] = bool(self._warmup_30m_ready)
         out["warmup_price_samples"] = int(min(len(self._price_hist), 30))

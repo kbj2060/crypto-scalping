@@ -1,0 +1,902 @@
+{
+  "type": "ai_failover_policy_patchtst_tide_dlinear_2026",
+  "base_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/fully_learned_ai_combo_grid/patchtst__tide__dlinear.pkl",
+  "dropout_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/fully_learned_ai_dropout/patchtst_tide_dlinear_dropout.pkl",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "results": {
+    "normal": {
+      "stress": {
+        "mode": "normal",
+        "changed_cols": []
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 0.0,
+        "dlinear": 0.0,
+        "any_zero_group": 0.0,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 286.9501820902332,
+          "mdd": -22.967215052515144,
+          "trades": 60,
+          "wr": 0.3,
+          "trades_per_day": 1.0227272727272727,
+          "long_entries": 23,
+          "short_entries": 37,
+          "avg_notional": 2.365399825111006,
+          "avg_leverage": 2.5432809554514626
+        },
+        "dropout": {
+          "pnl": 135.29826029532575,
+          "mdd": -29.15583486175969,
+          "trades": 68,
+          "wr": 0.23529411764705882,
+          "trades_per_day": 1.1590909090909092,
+          "long_entries": 32,
+          "short_entries": 36,
+          "avg_notional": 2.39531427475226,
+          "avg_leverage": 2.5661729394708073
+        },
+        "dropout_on_any_zero": {
+          "pnl": 286.9501820902332,
+          "mdd": -22.967215052515144,
+          "trades": 60,
+          "wr": 0.3,
+          "trades_per_day": 1.0227272727272727,
+          "long_entries": 23,
+          "short_entries": 37,
+          "avg_notional": 2.365399825111006,
+          "avg_leverage": 2.5432809554514626
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 286.9501820902332,
+          "mdd": -22.967215052515144,
+          "trades": 60,
+          "wr": 0.3,
+          "trades_per_day": 1.0227272727272727,
+          "long_entries": 23,
+          "short_entries": 37,
+          "avg_notional": 2.365399825111006,
+          "avg_leverage": 2.5432809554514626
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 286.9501820902332,
+          "mdd": -22.967215052515144,
+          "trades": 60,
+          "wr": 0.3,
+          "trades_per_day": 1.0227272727272727,
+          "long_entries": 23,
+          "short_entries": 37,
+          "avg_notional": 2.365399825111006,
+          "avg_leverage": 2.5432809554514626
+        }
+      }
+    },
+    "patchtst_zero": {
+      "stress": {
+        "mode": "patchtst_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ]
+      },
+      "health": {
+        "patchtst": 1.0,
+        "tide": 0.0,
+        "dlinear": 0.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 99.7271021095151,
+          "mdd": -23.824793068903084,
+          "trades": 75,
+          "wr": 0.24,
+          "trades_per_day": 1.278409090909091,
+          "long_entries": 29,
+          "short_entries": 46,
+          "avg_notional": 2.3002808356302626,
+          "avg_leverage": 2.443937282347833
+        },
+        "dropout": {
+          "pnl": 123.73119847690378,
+          "mdd": -21.128904537365923,
+          "trades": 64,
+          "wr": 0.265625,
+          "trades_per_day": 1.090909090909091,
+          "long_entries": 28,
+          "short_entries": 36,
+          "avg_notional": 2.251623198581481,
+          "avg_leverage": 2.4409995284064334
+        },
+        "dropout_on_any_zero": {
+          "pnl": 123.73119847690378,
+          "mdd": -21.128904537365923,
+          "trades": 64,
+          "wr": 0.265625,
+          "trades_per_day": 1.090909090909091,
+          "long_entries": 28,
+          "short_entries": 36,
+          "avg_notional": 2.251623198581481,
+          "avg_leverage": 2.4409995284064334
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 99.7271021095151,
+          "mdd": -23.824793068903084,
+          "trades": 75,
+          "wr": 0.24,
+          "trades_per_day": 1.278409090909091,
+          "long_entries": 29,
+          "short_entries": 46,
+          "avg_notional": 2.3002808356302626,
+          "avg_leverage": 2.443937282347833
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 46.95412782364934,
+          "mdd": -12.737353227169123,
+          "trades": 75,
+          "wr": 0.24,
+          "trades_per_day": 1.278409090909091,
+          "long_entries": 29,
+          "short_entries": 46,
+          "avg_notional": 1.1501404178151313,
+          "avg_leverage": 2.443937282347833
+        }
+      }
+    },
+    "tide_zero": {
+      "stress": {
+        "mode": "tide_zero",
+        "changed_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ]
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 1.0,
+        "dlinear": 0.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 117.66869693027803,
+          "mdd": -26.62198637253216,
+          "trades": 34,
+          "wr": 0.29411764705882354,
+          "trades_per_day": 0.5795454545454546,
+          "long_entries": 15,
+          "short_entries": 19,
+          "avg_notional": 2.313499777276357,
+          "avg_leverage": 2.5387159124454906
+        },
+        "dropout": {
+          "pnl": 173.13741820493865,
+          "mdd": -30.171832255489672,
+          "trades": 54,
+          "wr": 0.2777777777777778,
+          "trades_per_day": 0.9204545454545455,
+          "long_entries": 21,
+          "short_entries": 33,
+          "avg_notional": 2.3435028770477397,
+          "avg_leverage": 2.511643773851448
+        },
+        "dropout_on_any_zero": {
+          "pnl": 173.13741820493865,
+          "mdd": -30.171832255489672,
+          "trades": 54,
+          "wr": 0.2777777777777778,
+          "trades_per_day": 0.9204545454545455,
+          "long_entries": 21,
+          "short_entries": 33,
+          "avg_notional": 2.3435028770477397,
+          "avg_leverage": 2.511643773851448
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 117.66869693027803,
+          "mdd": -26.62198637253216,
+          "trades": 34,
+          "wr": 0.29411764705882354,
+          "trades_per_day": 0.5795454545454546,
+          "long_entries": 15,
+          "short_entries": 19,
+          "avg_notional": 2.313499777276357,
+          "avg_leverage": 2.5387159124454906
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 52.17034657776865,
+          "mdd": -14.227763158533602,
+          "trades": 34,
+          "wr": 0.29411764705882354,
+          "trades_per_day": 0.5795454545454546,
+          "long_entries": 15,
+          "short_entries": 19,
+          "avg_notional": 1.1567498886381784,
+          "avg_leverage": 2.5387159124454906
+        }
+      }
+    },
+    "dlinear_zero": {
+      "stress": {
+        "mode": "dlinear_zero",
+        "changed_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 0.0,
+        "dlinear": 1.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 233.00633967199263,
+          "mdd": -24.94648627309256,
+          "trades": 61,
+          "wr": 0.2786885245901639,
+          "trades_per_day": 1.0397727272727273,
+          "long_entries": 26,
+          "short_entries": 35,
+          "avg_notional": 2.2883308626133996,
+          "avg_leverage": 2.474393273666864
+        },
+        "dropout": {
+          "pnl": 206.71815674683845,
+          "mdd": -24.97929700310061,
+          "trades": 62,
+          "wr": 0.27419354838709675,
+          "trades_per_day": 1.0568181818181819,
+          "long_entries": 25,
+          "short_entries": 37,
+          "avg_notional": 2.2656863397557983,
+          "avg_leverage": 2.439405996057494
+        },
+        "dropout_on_any_zero": {
+          "pnl": 206.71815674683845,
+          "mdd": -24.97929700310061,
+          "trades": 62,
+          "wr": 0.27419354838709675,
+          "trades_per_day": 1.0568181818181819,
+          "long_entries": 25,
+          "short_entries": 37,
+          "avg_notional": 2.2656863397557983,
+          "avg_leverage": 2.439405996057494
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 233.00633967199263,
+          "mdd": -24.94648627309256,
+          "trades": 61,
+          "wr": 0.2786885245901639,
+          "trades_per_day": 1.0397727272727273,
+          "long_entries": 26,
+          "short_entries": 35,
+          "avg_notional": 2.2883308626133996,
+          "avg_leverage": 2.474393273666864
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 91.31584656519722,
+          "mdd": -13.403589549509931,
+          "trades": 61,
+          "wr": 0.2786885245901639,
+          "trades_per_day": 1.0397727272727273,
+          "long_entries": 26,
+          "short_entries": 35,
+          "avg_notional": 1.1441654313066998,
+          "avg_leverage": 2.474393273666864
+        }
+      }
+    },
+    "patchtst__tide_zero": {
+      "stress": {
+        "mode": "patchtst__tide_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim",
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ]
+      },
+      "health": {
+        "patchtst": 1.0,
+        "tide": 1.0,
+        "dlinear": 0.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 1.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 204.9270710998623,
+          "mdd": -19.442899057389106,
+          "trades": 48,
+          "wr": 0.2708333333333333,
+          "trades_per_day": 0.8181818181818182,
+          "long_entries": 21,
+          "short_entries": 27,
+          "avg_notional": 2.412841122813771,
+          "avg_leverage": 2.6078487111087134
+        },
+        "dropout": {
+          "pnl": 74.7053198644254,
+          "mdd": -23.307095088436203,
+          "trades": 54,
+          "wr": 0.24074074074074073,
+          "trades_per_day": 0.9204545454545455,
+          "long_entries": 14,
+          "short_entries": 40,
+          "avg_notional": 2.2009397721448374,
+          "avg_leverage": 2.3773242041583695
+        },
+        "dropout_on_any_zero": {
+          "pnl": 74.7053198644254,
+          "mdd": -23.307095088436203,
+          "trades": 54,
+          "wr": 0.24074074074074073,
+          "trades_per_day": 0.9204545454545455,
+          "long_entries": 14,
+          "short_entries": 40,
+          "avg_notional": 2.2009397721448374,
+          "avg_leverage": 2.3773242041583695
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 0.0,
+          "mdd": 0.0,
+          "trades": 0,
+          "wr": 0.0,
+          "trades_per_day": 0.0,
+          "long_entries": 0,
+          "short_entries": 0,
+          "avg_notional": 0.0,
+          "avg_leverage": 0.0
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 82.36148700468404,
+          "mdd": -10.254038339353178,
+          "trades": 48,
+          "wr": 0.2708333333333333,
+          "trades_per_day": 0.8181818181818182,
+          "long_entries": 21,
+          "short_entries": 27,
+          "avg_notional": 1.2064205614068855,
+          "avg_leverage": 2.6078487111087134
+        }
+      }
+    },
+    "patchtst__dlinear_zero": {
+      "stress": {
+        "mode": "patchtst__dlinear_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim",
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "health": {
+        "patchtst": 1.0,
+        "tide": 0.0,
+        "dlinear": 1.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 1.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 196.7951497502797,
+          "mdd": -21.255719904656935,
+          "trades": 63,
+          "wr": 0.2857142857142857,
+          "trades_per_day": 1.0738636363636365,
+          "long_entries": 22,
+          "short_entries": 41,
+          "avg_notional": 2.2935368283050033,
+          "avg_leverage": 2.4996052204947294
+        },
+        "dropout": {
+          "pnl": 171.1040191340509,
+          "mdd": -21.358797124421535,
+          "trades": 67,
+          "wr": 0.2835820895522388,
+          "trades_per_day": 1.1420454545454546,
+          "long_entries": 27,
+          "short_entries": 41,
+          "avg_notional": 2.2532521661187066,
+          "avg_leverage": 2.448654079994276
+        },
+        "dropout_on_any_zero": {
+          "pnl": 171.1040191340509,
+          "mdd": -21.358797124421535,
+          "trades": 67,
+          "wr": 0.2835820895522388,
+          "trades_per_day": 1.1420454545454546,
+          "long_entries": 27,
+          "short_entries": 41,
+          "avg_notional": 2.2532521661187066,
+          "avg_leverage": 2.448654079994276
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 0.0,
+          "mdd": 0.0,
+          "trades": 0,
+          "wr": 0.0,
+          "trades_per_day": 0.0,
+          "long_entries": 0,
+          "short_entries": 0,
+          "avg_notional": 0.0,
+          "avg_leverage": 0.0
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 78.9393872422219,
+          "mdd": -11.287623416108461,
+          "trades": 63,
+          "wr": 0.2857142857142857,
+          "trades_per_day": 1.0738636363636365,
+          "long_entries": 22,
+          "short_entries": 41,
+          "avg_notional": 1.1467684141525016,
+          "avg_leverage": 2.4996052204947294
+        }
+      }
+    },
+    "tide__dlinear_zero": {
+      "stress": {
+        "mode": "tide__dlinear_zero",
+        "changed_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore",
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 1.0,
+        "dlinear": 1.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 1.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 65.37965973214685,
+          "mdd": -22.895495486423613,
+          "trades": 46,
+          "wr": 0.2826086956521739,
+          "trades_per_day": 0.7840909090909092,
+          "long_entries": 18,
+          "short_entries": 28,
+          "avg_notional": 2.3126018264090105,
+          "avg_leverage": 2.5447831436453994
+        },
+        "dropout": {
+          "pnl": 246.2932386051542,
+          "mdd": -20.434320002801122,
+          "trades": 49,
+          "wr": 0.3469387755102041,
+          "trades_per_day": 0.8352272727272727,
+          "long_entries": 14,
+          "short_entries": 35,
+          "avg_notional": 2.3069064199953417,
+          "avg_leverage": 2.465632110970166
+        },
+        "dropout_on_any_zero": {
+          "pnl": 246.2932386051542,
+          "mdd": -20.434320002801122,
+          "trades": 49,
+          "wr": 0.3469387755102041,
+          "trades_per_day": 0.8352272727272727,
+          "long_entries": 14,
+          "short_entries": 35,
+          "avg_notional": 2.3069064199953417,
+          "avg_leverage": 2.465632110970166
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 0.0,
+          "mdd": 0.0,
+          "trades": 0,
+          "wr": 0.0,
+          "trades_per_day": 0.0,
+          "long_entries": 0,
+          "short_entries": 0,
+          "avg_notional": 0.0,
+          "avg_leverage": 0.0
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 31.45368643843385,
+          "mdd": -12.373500956532357,
+          "trades": 46,
+          "wr": 0.2826086956521739,
+          "trades_per_day": 0.7840909090909092,
+          "long_entries": 18,
+          "short_entries": 28,
+          "avg_notional": 1.1563009132045052,
+          "avg_leverage": 2.5447831436453994
+        }
+      }
+    },
+    "all_ai_zero": {
+      "stress": {
+        "mode": "all_ai_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim",
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore",
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "health": {
+        "patchtst": 1.0,
+        "tide": 1.0,
+        "dlinear": 1.0,
+        "any_zero_group": 1.0,
+        "two_plus_zero_groups": 1.0,
+        "all_zero_groups": 1.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 120.73485066690144,
+          "mdd": -16.86630554713593,
+          "trades": 39,
+          "wr": 0.3333333333333333,
+          "trades_per_day": 0.6647727272727273,
+          "long_entries": 17,
+          "short_entries": 22,
+          "avg_notional": 2.343866778271285,
+          "avg_leverage": 2.565834577519962
+        },
+        "dropout": {
+          "pnl": 161.5651547194911,
+          "mdd": -19.477173806192106,
+          "trades": 57,
+          "wr": 0.3157894736842105,
+          "trades_per_day": 0.9715909090909092,
+          "long_entries": 18,
+          "short_entries": 40,
+          "avg_notional": 2.1521180067655385,
+          "avg_leverage": 2.3089800897454946
+        },
+        "dropout_on_any_zero": {
+          "pnl": 161.5651547194911,
+          "mdd": -19.477173806192106,
+          "trades": 57,
+          "wr": 0.3157894736842105,
+          "trades_per_day": 0.9715909090909092,
+          "long_entries": 18,
+          "short_entries": 40,
+          "avg_notional": 2.1521180067655385,
+          "avg_leverage": 2.3089800897454946
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 0.0,
+          "mdd": 0.0,
+          "trades": 0,
+          "wr": 0.0,
+          "trades_per_day": 0.0,
+          "long_entries": 0,
+          "short_entries": 0,
+          "avg_notional": 0.0,
+          "avg_leverage": 0.0
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 52.61165288584812,
+          "mdd": -8.857304503445206,
+          "trades": 39,
+          "wr": 0.3333333333333333,
+          "trades_per_day": 0.6647727272727273,
+          "long_entries": 17,
+          "short_entries": 22,
+          "avg_notional": 1.1719333891356425,
+          "avg_leverage": 2.565834577519962
+        }
+      }
+    },
+    "patchtst_stale_1d": {
+      "stress": {
+        "mode": "patchtst_stale_1d",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ],
+        "shift_bars": 288
+      },
+      "health": {
+        "patchtst": 0.017044445759602296,
+        "tide": 0.0,
+        "dlinear": 0.0,
+        "any_zero_group": 0.017044445759602296,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 173.33932186661957,
+          "mdd": -26.536923216693463,
+          "trades": 69,
+          "wr": 0.2753623188405797,
+          "trades_per_day": 1.1761363636363638,
+          "long_entries": 34,
+          "short_entries": 35,
+          "avg_notional": 2.219206550568961,
+          "avg_leverage": 2.3807713507263975
+        },
+        "dropout": {
+          "pnl": 175.62369452195193,
+          "mdd": -25.860631291848513,
+          "trades": 67,
+          "wr": 0.2537313432835821,
+          "trades_per_day": 1.1420454545454546,
+          "long_entries": 35,
+          "short_entries": 32,
+          "avg_notional": 2.3292479249726536,
+          "avg_leverage": 2.4883481399149754
+        },
+        "dropout_on_any_zero": {
+          "pnl": 173.33932186661957,
+          "mdd": -26.536923216693463,
+          "trades": 69,
+          "wr": 0.2753623188405797,
+          "trades_per_day": 1.1761363636363638,
+          "long_entries": 34,
+          "short_entries": 35,
+          "avg_notional": 2.219206550568961,
+          "avg_leverage": 2.3807713507263975
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 173.33932186661957,
+          "mdd": -26.536923216693463,
+          "trades": 69,
+          "wr": 0.2753623188405797,
+          "trades_per_day": 1.1761363636363638,
+          "long_entries": 34,
+          "short_entries": 35,
+          "avg_notional": 2.219206550568961,
+          "avg_leverage": 2.3807713507263975
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 173.33932186661957,
+          "mdd": -26.536923216693463,
+          "trades": 69,
+          "wr": 0.2753623188405797,
+          "trades_per_day": 1.1761363636363638,
+          "long_entries": 34,
+          "short_entries": 35,
+          "avg_notional": 2.219206550568961,
+          "avg_leverage": 2.3807713507263975
+        }
+      }
+    },
+    "tide_stale_1d": {
+      "stress": {
+        "mode": "tide_stale_1d",
+        "changed_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ],
+        "shift_bars": 288
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 0.017044445759602296,
+        "dlinear": 0.0,
+        "any_zero_group": 0.017044445759602296,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 300.58346119046394,
+          "mdd": -29.021435696436892,
+          "trades": 58,
+          "wr": 0.29310344827586204,
+          "trades_per_day": 0.9886363636363636,
+          "long_entries": 22,
+          "short_entries": 36,
+          "avg_notional": 2.3036918725307,
+          "avg_leverage": 2.5045025766322406
+        },
+        "dropout": {
+          "pnl": 101.9371582419506,
+          "mdd": -29.174631390472427,
+          "trades": 59,
+          "wr": 0.2711864406779661,
+          "trades_per_day": 1.0056818181818181,
+          "long_entries": 25,
+          "short_entries": 34,
+          "avg_notional": 2.295464450246126,
+          "avg_leverage": 2.435203021199146
+        },
+        "dropout_on_any_zero": {
+          "pnl": 300.58346119046394,
+          "mdd": -29.021435696436892,
+          "trades": 58,
+          "wr": 0.29310344827586204,
+          "trades_per_day": 0.9886363636363636,
+          "long_entries": 22,
+          "short_entries": 36,
+          "avg_notional": 2.3036918725307,
+          "avg_leverage": 2.5045025766322406
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 300.58346119046394,
+          "mdd": -29.021435696436892,
+          "trades": 58,
+          "wr": 0.29310344827586204,
+          "trades_per_day": 0.9886363636363636,
+          "long_entries": 22,
+          "short_entries": 36,
+          "avg_notional": 2.3036918725307,
+          "avg_leverage": 2.5045025766322406
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 300.58346119046394,
+          "mdd": -29.021435696436892,
+          "trades": 58,
+          "wr": 0.29310344827586204,
+          "trades_per_day": 0.9886363636363636,
+          "long_entries": 22,
+          "short_entries": 36,
+          "avg_notional": 2.3036918725307,
+          "avg_leverage": 2.5045025766322406
+        }
+      }
+    },
+    "dlinear_stale_1d": {
+      "stress": {
+        "mode": "dlinear_stale_1d",
+        "changed_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ],
+        "shift_bars": 288
+      },
+      "health": {
+        "patchtst": 0.0,
+        "tide": 0.0,
+        "dlinear": 0.017044445759602296,
+        "any_zero_group": 0.017044445759602296,
+        "two_plus_zero_groups": 0.0,
+        "all_zero_groups": 0.0
+      },
+      "strategies": {
+        "base": {
+          "pnl": 144.1993704826312,
+          "mdd": -22.298387911738537,
+          "trades": 59,
+          "wr": 0.2542372881355932,
+          "trades_per_day": 1.0056818181818181,
+          "long_entries": 25,
+          "short_entries": 34,
+          "avg_notional": 2.2988503028323857,
+          "avg_leverage": 2.5148131241485894
+        },
+        "dropout": {
+          "pnl": 82.63133862593489,
+          "mdd": -23.216231449862512,
+          "trades": 60,
+          "wr": 0.25,
+          "trades_per_day": 1.0227272727272727,
+          "long_entries": 28,
+          "short_entries": 32,
+          "avg_notional": 2.324289750821772,
+          "avg_leverage": 2.535673168955939
+        },
+        "dropout_on_any_zero": {
+          "pnl": 144.1993704826312,
+          "mdd": -22.298387911738537,
+          "trades": 59,
+          "wr": 0.2542372881355932,
+          "trades_per_day": 1.0056818181818181,
+          "long_entries": 25,
+          "short_entries": 34,
+          "avg_notional": 2.2988503028323857,
+          "avg_leverage": 2.5148131241485894
+        },
+        "cash_on_two_plus_zero": {
+          "pnl": 144.1993704826312,
+          "mdd": -22.298387911738537,
+          "trades": 59,
+          "wr": 0.2542372881355932,
+          "trades_per_day": 1.0056818181818181,
+          "long_entries": 25,
+          "short_entries": 34,
+          "avg_notional": 2.2988503028323857,
+          "avg_leverage": 2.5148131241485894
+        },
+        "half_notional_on_any_zero": {
+          "pnl": 144.1993704826312,
+          "mdd": -22.298387911738537,
+          "trades": 59,
+          "wr": 0.2542372881355932,
+          "trades_per_day": 1.0056818181818181,
+          "long_entries": 25,
+          "short_entries": 34,
+          "avg_notional": 2.2988503028323857,
+          "avg_leverage": 2.5148131241485894
+        }
+      }
+    }
+  }
+}

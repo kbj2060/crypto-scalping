@@ -1,0 +1,29 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "selection_uses_2026": false,
+  "deep_sleeve_only_when_parent_cash": true,
+  "removed_legacy_prefix": "clean_regime_2024_unsup_v4_",
+  "required_current_regime_prefix": "clean_regime4_state24_sticky090_v2_",
+  "required_future_regime_prefix": "regime4_pred_",
+  "source_audit": "data/ensemble/reports/alpha3_regime4_state24_v2_plus_pred_full_retrain_20260526_audit.json",
+  "selected_config": {
+    "name": "v31_state24_v2_plus_pred_runtime_base",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.2,
+    "cooldown": 12,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48,
+    "tp_util_mult": 0.0,
+    "sl_vol_mult": 1.0,
+    "trail_gap_mult": 1.0,
+    "trail_decay": 0.0,
+    "hold_decay_start": 999,
+    "hold_decay_rate": 0.0,
+    "tp_cap": 0.07,
+    "sl_cap": 0.035,
+    "trail_activation": 0.0
+  }
+}

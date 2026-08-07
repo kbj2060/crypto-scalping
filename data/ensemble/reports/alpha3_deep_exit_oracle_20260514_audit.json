@@ -1,0 +1,57 @@
+{
+  "status": "pass",
+  "verdict": "shadow_candidate",
+  "blocking": [],
+  "warnings": [
+    "signal_limit_fill_uses_5m_high_low_touch_proxy_not_queue_fill",
+    "real_l2_queue_and_partial_fill_require_forward_shadow_validation",
+    "deep_oracle_labels_are_counterfactual_to_ohlc_touch_model_not_real_queue_fills"
+  ],
+  "selection_uses_2026": false,
+  "train_window": "2025-07-01..2025-09-30",
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "selected_policy": {
+    "name": "deep_conf0.35_fallback_exit4_pen0",
+    "mode": "deep",
+    "min_confidence": 0.35,
+    "fallback_arm": "exit4_pen0",
+    "fixed_arm": ""
+  },
+  "validation_best_any_policy": {
+    "name": "fixed_front_run_exit4_pen0",
+    "mode": "fixed",
+    "min_confidence": 1.0,
+    "fallback_arm": "exit4_pen0",
+    "fixed_arm": "exit4_pen0"
+  },
+  "event_summary": {
+    "train_events": 254,
+    "val_events": 359,
+    "train_label_counts": [
+      5,
+      23,
+      8,
+      4,
+      11,
+      203
+    ],
+    "val_label_counts": [
+      9,
+      22,
+      19,
+      9,
+      16,
+      284
+    ],
+    "arms": [
+      "baseline_exit2_pen05",
+      "exit0_pen0",
+      "exit1_pen0",
+      "exit2_pen0",
+      "exit3_pen0",
+      "exit4_pen0"
+    ]
+  },
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_deep_exit_oracle_20260514/deep_exit_oracle.pt"
+}

@@ -1,0 +1,1347 @@
+{
+  "type": "daily_momentum_sleeve",
+  "top_by_eval": [
+    {
+      "score": 122.79739984990033,
+      "cfg": {
+        "look_days": 21,
+        "look": 6048,
+        "thr": 0.05,
+        "persist": 5,
+        "update": 288,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 683.7095613478103,
+        "mdd": -76.20056544096347,
+        "trades": 4,
+        "wr": 0.75,
+        "trades_per_day": 0.014652201009882605,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "validation": {
+        "pnl": 1.9707182447320726,
+        "mdd": -70.05035436589216,
+        "trades": 2,
+        "wr": 0.5,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 1,
+        "short_entries": 1
+      },
+      "eval": {
+        "pnl": 187.58870669582112,
+        "mdd": -60.514829519238745,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 125.46790173320952,
+      "cfg": {
+        "look_days": 21,
+        "look": 6048,
+        "thr": 0.05,
+        "persist": 5,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 538.1019263594784,
+        "mdd": -62.44385577601417,
+        "trades": 4,
+        "wr": 0.75,
+        "trades_per_day": 0.014652201009882605,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "validation": {
+        "pnl": 13.106658337000688,
+        "mdd": -56.08211909683038,
+        "trades": 2,
+        "wr": 0.5,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 1,
+        "short_entries": 1
+      },
+      "eval": {
+        "pnl": 132.94279055603516,
+        "mdd": -46.37875046908426,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 107.69867803936425,
+      "cfg": {
+        "look_days": 21,
+        "look": 6048,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 477.179400116158,
+        "mdd": -62.439571218372826,
+        "trades": 5,
+        "wr": 0.6,
+        "trades_per_day": 0.018315251262353255,
+        "long_entries": 2,
+        "short_entries": 3
+      },
+      "validation": {
+        "pnl": 11.676767646953712,
+        "mdd": -56.636469818314474,
+        "trades": 2,
+        "wr": 0.5,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 1,
+        "short_entries": 1
+      },
+      "eval": {
+        "pnl": 132.94279055603516,
+        "mdd": -46.37875046908426,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 154.3235973819244,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 2,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 793.0104090526271,
+        "mdd": -74.56044088889098,
+        "trades": 39,
+        "wr": 0.28205128205128205,
+        "trades_per_day": 0.14285895984635538,
+        "long_entries": 19,
+        "short_entries": 20
+      },
+      "validation": {
+        "pnl": 1.682409319239242,
+        "mdd": -67.80570710023581,
+        "trades": 15,
+        "wr": 0.2,
+        "trades_per_day": 0.1630496320060389,
+        "long_entries": 4,
+        "short_entries": 11
+      },
+      "eval": {
+        "pnl": 103.23890358640422,
+        "mdd": -60.514829519238475,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 163.5800800585227,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 806.6290207537584,
+        "mdd": -75.04309724052595,
+        "trades": 34,
+        "wr": 0.20588235294117646,
+        "trades_per_day": 0.12454370858400214,
+        "long_entries": 16,
+        "short_entries": 18
+      },
+      "validation": {
+        "pnl": 6.722803683751177,
+        "mdd": -67.39998940683404,
+        "trades": 10,
+        "wr": 0.3,
+        "trades_per_day": 0.1086997546706926,
+        "long_entries": 4,
+        "short_entries": 6
+      },
+      "eval": {
+        "pnl": 102.09056909938239,
+        "mdd": -60.514829519238525,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 276.68340480171514,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1276.0491278324725,
+        "mdd": -70.41645481844147,
+        "trades": 16,
+        "wr": 0.375,
+        "trades_per_day": 0.05860880403953042,
+        "long_entries": 9,
+        "short_entries": 7
+      },
+      "validation": {
+        "pnl": 3.8710255276410477,
+        "mdd": -68.09995134202202,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 100.81943782776102,
+        "mdd": -60.514829519238546,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 153.10918409974792,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.01,
+        "persist": 2,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 796.9227493485505,
+        "mdd": -75.34771504754427,
+        "trades": 20,
+        "wr": 0.35,
+        "trades_per_day": 0.07326100504941302,
+        "long_entries": 11,
+        "short_entries": 9
+      },
+      "validation": {
+        "pnl": 0.07839944665435361,
+        "mdd": -68.09995134202202,
+        "trades": 7,
+        "wr": 0.2857142857142857,
+        "trades_per_day": 0.07608982826948481,
+        "long_entries": 3,
+        "short_entries": 4
+      },
+      "eval": {
+        "pnl": 100.81943782776102,
+        "mdd": -60.514829519238546,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 220.76141061546295,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1034.348935026038,
+        "mdd": -74.1783979691063,
+        "trades": 25,
+        "wr": 0.28,
+        "trades_per_day": 0.09157625631176627,
+        "long_entries": 12,
+        "short_entries": 13
+      },
+      "validation": {
+        "pnl": 5.391577609376119,
+        "mdd": -66.60870037521131,
+        "trades": 7,
+        "wr": 0.14285714285714285,
+        "trades_per_day": 0.07608982826948481,
+        "long_entries": 2,
+        "short_entries": 5
+      },
+      "eval": {
+        "pnl": 99.95645108599129,
+        "mdd": -60.514829519238525,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 232.8254686362744,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1104.3327824576986,
+        "mdd": -70.41645481844152,
+        "trades": 10,
+        "wr": 0.4,
+        "trades_per_day": 0.03663050252470651,
+        "long_entries": 5,
+        "short_entries": 5
+      },
+      "validation": {
+        "pnl": 2.942175705893302,
+        "mdd": -68.09995134202178,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 95.4688143124782,
+        "mdd": -60.51482951923859,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 141.56108725532644,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 3,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 706.6914757811022,
+        "mdd": -72.6882857421459,
+        "trades": 17,
+        "wr": 0.29411764705882354,
+        "trades_per_day": 0.06227185429200107,
+        "long_entries": 9,
+        "short_entries": 8
+      },
+      "validation": {
+        "pnl": 11.088120994094442,
+        "mdd": -68.09995134202178,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 95.4688143124782,
+        "mdd": -60.51482951923859,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 133.87100045822578,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.01,
+        "persist": 3,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 705.4623000634602,
+        "mdd": -75.51118855277961,
+        "trades": 14,
+        "wr": 0.35714285714285715,
+        "trades_per_day": 0.051282703534589115,
+        "long_entries": 7,
+        "short_entries": 7
+      },
+      "validation": {
+        "pnl": 3.7053281264042948,
+        "mdd": -68.09995134202178,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 95.4688143124782,
+        "mdd": -60.51482951923859,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 148.42595170967184,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 2,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 616.1845369732905,
+        "mdd": -60.84479833042384,
+        "trades": 39,
+        "wr": 0.28205128205128205,
+        "trades_per_day": 0.14285895984635538,
+        "long_entries": 19,
+        "short_entries": 20
+      },
+      "validation": {
+        "pnl": 12.417385582298701,
+        "mdd": -54.018784057974734,
+        "trades": 15,
+        "wr": 0.26666666666666666,
+        "trades_per_day": 0.1630496320060389,
+        "long_entries": 4,
+        "short_entries": 11
+      },
+      "eval": {
+        "pnl": 80.79019462691643,
+        "mdd": -46.378750469083485,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 164.76377515996535,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 1,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 731.5872986335961,
+        "mdd": -60.30441542841476,
+        "trades": 40,
+        "wr": 0.35,
+        "trades_per_day": 0.14652201009882604,
+        "long_entries": 18,
+        "short_entries": 22
+      },
+      "validation": {
+        "pnl": 0.5031590190437418,
+        "mdd": -54.31810425873871,
+        "trades": 11,
+        "wr": 0.18181818181818182,
+        "trades_per_day": 0.11956973013776186,
+        "long_entries": 4,
+        "short_entries": 7
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 159.09454545771968,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 1,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 702.858334668743,
+        "mdd": -63.622499455838735,
+        "trades": 80,
+        "wr": 0.325,
+        "trades_per_day": 0.2930440201976521,
+        "long_entries": 37,
+        "short_entries": 43
+      },
+      "validation": {
+        "pnl": 2.0161703080113114,
+        "mdd": -54.31810425873871,
+        "trades": 21,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.22826948480845444,
+        "long_entries": 5,
+        "short_entries": 16
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 156.74543168579493,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 644.6809608955255,
+        "mdd": -57.437705717537256,
+        "trades": 64,
+        "wr": 0.3125,
+        "trades_per_day": 0.23443521615812168,
+        "long_entries": 35,
+        "short_entries": 29
+      },
+      "validation": {
+        "pnl": 10.297441802117625,
+        "mdd": -52.36112517010203,
+        "trades": 31,
+        "wr": 0.3225806451612903,
+        "trades_per_day": 0.33696923947914703,
+        "long_entries": 8,
+        "short_entries": 23
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 155.45184542207636,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 625.2424954136516,
+        "mdd": -61.373093711594585,
+        "trades": 34,
+        "wr": 0.20588235294117646,
+        "trades_per_day": 0.12454370858400214,
+        "long_entries": 16,
+        "short_entries": 18
+      },
+      "validation": {
+        "pnl": 16.35467859416304,
+        "mdd": -53.60672851274979,
+        "trades": 10,
+        "wr": 0.3,
+        "trades_per_day": 0.1086997546706926,
+        "long_entries": 4,
+        "short_entries": 6
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 116.40458919305458,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.01,
+        "persist": 1,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 477.1155325835525,
+        "mdd": -61.16384447066402,
+        "trades": 15,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.054945753787059765,
+        "long_entries": 7,
+        "short_entries": 8
+      },
+      "validation": {
+        "pnl": 15.761914564643863,
+        "mdd": -54.31810425873871,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 1,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 113.95819169556107,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 474.2254537694813,
+        "mdd": -57.23175612108148,
+        "trades": 14,
+        "wr": 0.35714285714285715,
+        "trades_per_day": 0.051282703534589115,
+        "long_entries": 7,
+        "short_entries": 7
+      },
+      "validation": {
+        "pnl": 14.03803677066815,
+        "mdd": -54.31810425873871,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 1,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 109.99513361175921,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 1,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 465.0815941303678,
+        "mdd": -57.273605356243905,
+        "trades": 16,
+        "wr": 0.375,
+        "trades_per_day": 0.05860880403953042,
+        "long_entries": 7,
+        "short_entries": 9
+      },
+      "validation": {
+        "pnl": 12.360943596644681,
+        "mdd": -54.31810425873871,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 1,
+        "short_entries": 3
+      },
+      "eval": {
+        "pnl": 80.06216188182471,
+        "mdd": -46.37875046908368,
+        "trades": 1,
+        "wr": 0.0,
+        "trades_per_day": 0.017045454545454548,
+        "long_entries": 0,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 135.9874377452157,
+      "cfg": {
+        "look_days": 14,
+        "look": 4032,
+        "thr": 0.01,
+        "persist": 5,
+        "update": 288,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 680.2324814997448,
+        "mdd": -73.40322304783022,
+        "trades": 7,
+        "wr": 0.42857142857142855,
+        "trades_per_day": 0.025641351767294557,
+        "long_entries": 3,
+        "short_entries": 4
+      },
+      "validation": {
+        "pnl": 9.119617740599995,
+        "mdd": -66.59515018516026,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 1,
+        "short_entries": 2
+      },
+      "eval": {
+        "pnl": 79.64587674036683,
+        "mdd": -60.51482951923883,
+        "trades": 2,
+        "wr": 0.0,
+        "trades_per_day": 0.034090909090909095,
+        "long_entries": 1,
+        "short_entries": 1
+      }
+    }
+  ],
+  "top_by_validation": [
+    {
+      "score": 276.68340480171514,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1276.0491278324725,
+        "mdd": -70.41645481844147,
+        "trades": 16,
+        "wr": 0.375,
+        "trades_per_day": 0.05860880403953042,
+        "long_entries": 9,
+        "short_entries": 7
+      },
+      "validation": {
+        "pnl": 3.8710255276410477,
+        "mdd": -68.09995134202202,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 267.15577599964814,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.01,
+        "persist": 2,
+        "update": 288,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1234.9575629767917,
+        "mdd": -72.51242891000793,
+        "trades": 9,
+        "wr": 0.4444444444444444,
+        "trades_per_day": 0.03296745227223586,
+        "long_entries": 4,
+        "short_entries": 5
+      },
+      "validation": {
+        "pnl": 4.616287939494312,
+        "mdd": -68.09995134202205,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 1,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 260.05287082763704,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.12,
+        "persist": 2,
+        "update": 288,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1073.0089679364933,
+        "mdd": -70.69167036720788,
+        "trades": 3,
+        "wr": 1.0,
+        "trades_per_day": 0.010989150757411954,
+        "long_entries": 2,
+        "short_entries": 1
+      },
+      "validation": {
+        "pnl": 16.903715786393427,
+        "mdd": -57.55154347143985,
+        "trades": 2,
+        "wr": 0.5,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 0,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 232.8254686362744,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1104.3327824576986,
+        "mdd": -70.41645481844152,
+        "trades": 10,
+        "wr": 0.4,
+        "trades_per_day": 0.03663050252470651,
+        "long_entries": 5,
+        "short_entries": 5
+      },
+      "validation": {
+        "pnl": 2.942175705893302,
+        "mdd": -68.09995134202178,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 221.15796198286253,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.12,
+        "persist": 2,
+        "update": 288,
+        "notional": 5.0
+      },
+      "train": {
+        "pnl": 1100.543180716224,
+        "mdd": -84.95836717362096,
+        "trades": 3,
+        "wr": 0.6666666666666666,
+        "trades_per_day": 0.010989150757411954,
+        "long_entries": 2,
+        "short_entries": 1
+      },
+      "validation": {
+        "pnl": 0.887141360184418,
+        "mdd": -72.43248727818896,
+        "trades": 2,
+        "wr": 0.5,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 0,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 220.76141061546295,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 1034.348935026038,
+        "mdd": -74.1783979691063,
+        "trades": 25,
+        "wr": 0.28,
+        "trades_per_day": 0.09157625631176627,
+        "long_entries": 12,
+        "short_entries": 13
+      },
+      "validation": {
+        "pnl": 5.391577609376119,
+        "mdd": -66.60870037521131,
+        "trades": 7,
+        "wr": 0.14285714285714285,
+        "trades_per_day": 0.07608982826948481,
+        "long_entries": 2,
+        "short_entries": 5
+      }
+    },
+    {
+      "score": 214.46125902969627,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.01,
+        "persist": 2,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 872.1849437535864,
+        "mdd": -58.471031359508984,
+        "trades": 9,
+        "wr": 0.4444444444444444,
+        "trades_per_day": 0.03296745227223586,
+        "long_entries": 4,
+        "short_entries": 5
+      },
+      "validation": {
+        "pnl": 15.051231608777261,
+        "mdd": -54.3181042587388,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 1,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 214.3826867688506,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 876.1419517817902,
+        "mdd": -56.49836286191926,
+        "trades": 16,
+        "wr": 0.375,
+        "trades_per_day": 0.05860880403953042,
+        "long_entries": 9,
+        "short_entries": 7
+      },
+      "validation": {
+        "pnl": 13.983407340880749,
+        "mdd": -54.31810425873886,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 199.2723866123826,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.12,
+        "persist": 2,
+        "update": 288,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 716.9106549591824,
+        "mdd": -56.77691740341921,
+        "trades": 3,
+        "wr": 1.0,
+        "trades_per_day": 0.010989150757411954,
+        "long_entries": 2,
+        "short_entries": 1
+      },
+      "validation": {
+        "pnl": 20.04472287258703,
+        "mdd": -44.60335498597805,
+        "trades": 2,
+        "wr": 1.0,
+        "trades_per_day": 0.021739950934138517,
+        "long_entries": 0,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 194.15382628196,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 880.2576972668415,
+        "mdd": -71.59870170673884,
+        "trades": 8,
+        "wr": 0.375,
+        "trades_per_day": 0.02930440201976521,
+        "long_entries": 4,
+        "short_entries": 4
+      },
+      "validation": {
+        "pnl": 20.289304649293747,
+        "mdd": -68.09995134202207,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 2,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 192.26568834617657,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 790.6332106045978,
+        "mdd": -56.49836286191944,
+        "trades": 10,
+        "wr": 0.4,
+        "trades_per_day": 0.03663050252470651,
+        "long_entries": 5,
+        "short_entries": 5
+      },
+      "validation": {
+        "pnl": 13.243594212505094,
+        "mdd": -54.318104258738984,
+        "trades": 4,
+        "wr": 0.25,
+        "trades_per_day": 0.043479901868277035,
+        "long_entries": 2,
+        "short_entries": 2
+      }
+    },
+    {
+      "score": 187.05324294165985,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 3,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 749.8987958199476,
+        "mdd": -60.434749446582416,
+        "trades": 25,
+        "wr": 0.28,
+        "trades_per_day": 0.09157625631176627,
+        "long_entries": 12,
+        "short_entries": 13
+      },
+      "validation": {
+        "pnl": 15.205227656036001,
+        "mdd": -52.813341834681516,
+        "trades": 7,
+        "wr": 0.14285714285714285,
+        "trades_per_day": 0.07608982826948481,
+        "long_entries": 2,
+        "short_entries": 5
+      }
+    },
+    {
+      "score": 175.2881461217247,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 5,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 668.6946104820258,
+        "mdd": -57.612249812979634,
+        "trades": 8,
+        "wr": 0.375,
+        "trades_per_day": 0.02930440201976521,
+        "long_entries": 4,
+        "short_entries": 4
+      },
+      "validation": {
+        "pnl": 26.750702018696092,
+        "mdd": -54.31810425873892,
+        "trades": 3,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.03260992640120778,
+        "long_entries": 2,
+        "short_entries": 1
+      }
+    },
+    {
+      "score": 164.76377515996535,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 1,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 731.5872986335961,
+        "mdd": -60.30441542841476,
+        "trades": 40,
+        "wr": 0.35,
+        "trades_per_day": 0.14652201009882604,
+        "long_entries": 18,
+        "short_entries": 22
+      },
+      "validation": {
+        "pnl": 0.5031590190437418,
+        "mdd": -54.31810425873871,
+        "trades": 11,
+        "wr": 0.18181818181818182,
+        "trades_per_day": 0.11956973013776186,
+        "long_entries": 4,
+        "short_entries": 7
+      }
+    },
+    {
+      "score": 163.5800800585227,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 48,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 806.6290207537584,
+        "mdd": -75.04309724052595,
+        "trades": 34,
+        "wr": 0.20588235294117646,
+        "trades_per_day": 0.12454370858400214,
+        "long_entries": 16,
+        "short_entries": 18
+      },
+      "validation": {
+        "pnl": 6.722803683751177,
+        "mdd": -67.39998940683404,
+        "trades": 10,
+        "wr": 0.3,
+        "trades_per_day": 0.1086997546706926,
+        "long_entries": 4,
+        "short_entries": 6
+      }
+    },
+    {
+      "score": 160.31205825510324,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.05,
+        "persist": 5,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 702.7438200815882,
+        "mdd": -57.194347239692256,
+        "trades": 15,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.054945753787059765,
+        "long_entries": 7,
+        "short_entries": 8
+      },
+      "validation": {
+        "pnl": 6.506083973906263,
+        "mdd": -55.93999036960003,
+        "trades": 6,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.06521985280241556,
+        "long_entries": 2,
+        "short_entries": 4
+      }
+    },
+    {
+      "score": 159.09454545771968,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.02,
+        "persist": 1,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 702.858334668743,
+        "mdd": -63.622499455838735,
+        "trades": 80,
+        "wr": 0.325,
+        "trades_per_day": 0.2930440201976521,
+        "long_entries": 37,
+        "short_entries": 43
+      },
+      "validation": {
+        "pnl": 2.0161703080113114,
+        "mdd": -54.31810425873871,
+        "trades": 21,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 0.22826948480845444,
+        "long_entries": 5,
+        "short_entries": 16
+      }
+    },
+    {
+      "score": 156.74543168579493,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 12,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 644.6809608955255,
+        "mdd": -57.437705717537256,
+        "trades": 64,
+        "wr": 0.3125,
+        "trades_per_day": 0.23443521615812168,
+        "long_entries": 35,
+        "short_entries": 29
+      },
+      "validation": {
+        "pnl": 10.297441802117625,
+        "mdd": -52.36112517010203,
+        "trades": 31,
+        "wr": 0.3225806451612903,
+        "trades_per_day": 0.33696923947914703,
+        "long_entries": 8,
+        "short_entries": 23
+      }
+    },
+    {
+      "score": 155.45184542207636,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 1,
+        "update": 48,
+        "notional": 2.5
+      },
+      "train": {
+        "pnl": 625.2424954136516,
+        "mdd": -61.373093711594585,
+        "trades": 34,
+        "wr": 0.20588235294117646,
+        "trades_per_day": 0.12454370858400214,
+        "long_entries": 16,
+        "short_entries": 18
+      },
+      "validation": {
+        "pnl": 16.35467859416304,
+        "mdd": -53.60672851274979,
+        "trades": 10,
+        "wr": 0.3,
+        "trades_per_day": 0.1086997546706926,
+        "long_entries": 4,
+        "short_entries": 6
+      }
+    },
+    {
+      "score": 154.3235973819244,
+      "cfg": {
+        "look_days": 30,
+        "look": 8640,
+        "thr": 0.035,
+        "persist": 2,
+        "update": 12,
+        "notional": 3.5
+      },
+      "train": {
+        "pnl": 793.0104090526271,
+        "mdd": -74.56044088889098,
+        "trades": 39,
+        "wr": 0.28205128205128205,
+        "trades_per_day": 0.14285895984635538,
+        "long_entries": 19,
+        "short_entries": 20
+      },
+      "validation": {
+        "pnl": 1.682409319239242,
+        "mdd": -67.80570710023581,
+        "trades": 15,
+        "wr": 0.2,
+        "trades_per_day": 0.1630496320060389,
+        "long_entries": 4,
+        "short_entries": 11
+      }
+    }
+  ]
+}

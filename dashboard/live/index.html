@@ -1,250 +1,187 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
-
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Live Signal Board</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>인공지능 트레이딩 대시보드</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css?v=20260807-ribbon-entrytime-v1">
 </head>
-
 <body>
   <main class="app">
-    <header class="top topbar">
-      <div id="topClock" class="top-clock">-</div>
-      <div id="topPrice" class="top-clock top-price">-</div>
-      <div id="topSession" class="ops-session top-session">-</div>
+    <header class="top">
+      <div class="topbar">
+        <nav class="page-tabs" aria-label="대시보드 탭">
+          <button type="button" class="page-tab active" data-page-tab="live">라이브</button>
+          <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
+        </nav>
+        <div id="topClock" class="top-clock">-</div>
+        <div id="topSession" class="ops-session top-session">-</div>
+      </div>
     </header>
 
-    <section class="dsac-wrap">
-      <article class="panel dsac-panel">
-        <h3>🧠 DSAC</h3>
-        <div class="playbook-grid dsac-grid">
-          <div><span>결정</span><strong id="dsacDecision">-</strong></div>
-          <div><span>현재 포지션/Kelly</span><strong id="dsacRl">-</strong></div>
-          <div><span>진입가</span><strong id="dsacEntry">-</strong></div>
-          <div><span>레짐</span><strong id="dsacRegime">-</strong></div>
-          <div><span>미실현손익</span><strong id="dsacUnreal">-</strong></div>
-          <div><span>매매결정 시각</span><strong id="dsacDecisionAt">-</strong></div>
-          <div><span>24h / MDD</span><strong id="dsacPnlMdd">-</strong></div>
-          <div><span>소스</span><strong id="dsacSource">-</strong></div>
-        </div>
-        <small id="dsacStamp" class="panel-stamp">-</small>
+    <div id="liveTabPanel">
+    <section id="executionAlertBanner" class="execution-alert-banner hidden" role="alert" aria-live="assertive">
+      <div class="execution-alert-icon" aria-hidden="true">!</div>
+      <div class="execution-alert-copy">
+        <strong id="executionAlertTitle">트레이딩봇 실행 알림</strong>
+        <span id="executionAlertReason">-</span>
+      </div>
+      <time id="executionAlertTime">-</time>
+    </section>
+
+    <section class="indicator-row secondary-row">
+      <article id="cardWhale" class="panel indicator-card">
+        <div class="ind-head">수급 흐름</div>
+        <div id="whaleText" class="ind-value">-</div>
+        <div id="whaleStatusText" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardWhalePos" class="panel indicator-card">
+        <div class="ind-head">고래 포지션</div>
+        <div id="whaleIntentText" class="ind-value">-</div>
+        <div id="whaleIntentPct" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardObi" class="panel indicator-card">
+        <div class="ind-head">호가 불균형</div>
+        <div id="obiText" class="ind-value">-</div>
+        <div id="obiGaugeRightTxt" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardTox" class="panel indicator-card">
+        <div class="ind-head">독성</div>
+        <div id="toxText" class="ind-value">-</div>
+        <div id="toxStatusLabel" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardEai" class="panel indicator-card">
+        <div class="ind-head">에너지 지수</div>
+        <div id="eaiText" class="ind-value">-</div>
+        <div id="eaiGaugeRightTxt" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardRisk" class="panel indicator-card">
+        <div class="ind-head">꼬리 리스크</div>
+        <div id="riskText" class="ind-value">-</div>
+        <div id="riskStatusLabel" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
       </article>
     </section>
 
-    <section class="duo-panels ensemble-panels">
-      <section class="panel ensemble-panel">
-        <h3>🟢 롱 에이전트</h3>
-        <div class="playbook-grid">
-          <div><span>실시간 결정</span><strong id="ensBalDecision">-</strong></div>
-          <div><span>현재 포지션/Kelly</span><strong id="ensBalPos">-</strong></div>
-          <div><span>미실현 손익</span><strong id="ensBalWinRate">-</strong></div>
-          <div><span>MDD</span><strong id="ensBalMdd">-</strong></div>
-          <div><span>진입가</span><strong id="ensBalEntry">-</strong></div>
-          <div><span>매매결정 시각</span><strong id="ensBalDecisionAt">-</strong></div>
-        </div>
-        <p id="ensBalTotal">누적: -</p>
-        <small id="ensBalParamMeta" class="card-updated ens-param-meta">모델: -</small>
-        <small id="ensBalStamp" class="panel-stamp">-</small>
-      </section>
-      <section class="panel ensemble-panel">
-        <h3>🔴 숏 에이전트</h3>
-        <div class="playbook-grid">
-          <div><span>실시간 결정</span><strong id="ensLowDecision">-</strong></div>
-          <div><span>현재 포지션/Kelly</span><strong id="ensLowPos">-</strong></div>
-          <div><span>미실현 손익</span><strong id="ensLowWinRate">-</strong></div>
-          <div><span>MDD</span><strong id="ensLowMdd">-</strong></div>
-          <div><span>진입가</span><strong id="ensLowEntry">-</strong></div>
-          <div><span>매매결정 시각</span><strong id="ensLowDecisionAt">-</strong></div>
-        </div>
-        <p id="ensLowTotal">누적: -</p>
-        <small id="ensLowParamMeta" class="card-updated ens-param-meta">모델: -</small>
-        <small id="ensLowStamp" class="panel-stamp">-</small>
-      </section>
-    </section>
-
-    <section class="duo-panels ensemble-panels quant-panels">
-      <section class="panel ensemble-panel">
-        <h3>📐 퀀트 공식 로직</h3>
-        <div class="playbook-grid">
-          <div><span id="quantHorizonLabel">30분 방향</span><strong id="quantSignal">-</strong></div>
-          <div><span>방향 확률(상승/하락)</span><strong id="quantPredPrice">-</strong></div>
-          <div><span>예상 변동률</span><strong id="quantRet">-</strong></div>
-          <div><span>확신도</span><strong id="quantConf">-</strong></div>
-          <div><span>Win Rate (모델/기준)</span><strong id="quantWinRate">-</strong></div>
-          <div><span>정확도 (모델/기준)</span><strong id="quantRmse">-</strong></div>
-        </div>
-        <p id="quantMeta">설정/모델: -</p>
-        <small id="quantStamp" class="panel-stamp">-</small>
-      </section>
-    </section>
-
-    <section class="duo-panels ensemble-panels polymarket-panels">
-      <section class="panel ensemble-panel">
-        <h3>🎯 Polymarket 확률 보드</h3>
-        <div class="playbook-grid">
-          <div><span>이벤트</span><strong id="polyEvent">-</strong></div>
-          <div><span>가중 기대가</span><strong id="polyTarget">-</strong></div>
-          <div><span>꼬리위험(상/하)</span><strong id="polyTail">-</strong></div>
-          <div><span>북 임밸런스</span><strong id="polyImbalance">-</strong></div>
-          <div><span>이벤트 변동성</span><strong id="polyVol">-</strong></div>
-          <div><span>신호/리스크</span><strong id="polySignal">-</strong></div>
-          <div><span>실행 결론</span><strong id="polyGateDecision">-</strong></div>
-          <div><span>충격값(d1m / z / d3m)</span><strong id="polyShock">-</strong></div>
-          <div><span>임계값(1m / z / 3m)</span><strong id="polyThreshold">-</strong></div>
-        </div>
-        <p id="polyMeta">LIVE</p>
-        <small id="polyStamp" class="panel-stamp">-</small>
-      </section>
-    </section>
-
-    <section class="micro-icons">
-      <article class="micro-card micro-top-wide card-whale">
-        <div class="micro-head"><span class="mi">🐋</span><span class="ttl">고래흐름</span></div>
-        <svg id="whaleSpark" class="sparkline" viewBox="0 0 320 84" preserveAspectRatio="none"></svg>
-        <div id="whaleText" class="gauge-center">-</div>
-        <div class="mini-desc" id="whaleStatusText">-</div>
-        <div id="whaleHist" class="hist-list fixed-hist">-</div>
-        <small id="whaleStamp" class="card-updated">-</small>
-      </article>
-
-      <article class="micro-card micro-top-wide card-whale-pos">
-        <div class="micro-head"><span class="mi">🧠</span><span id="whaleIntentTitle" class="ttl">고래포지션(5m)</span></div>
-        <svg id="whalePosSpark" class="sparkline" viewBox="0 0 320 84" preserveAspectRatio="none"></svg>
-        <div id="whaleIntentText" class="gauge-center">-</div>
-        <div id="whaleIntentPct" class="mini-desc">롱추정치 - / 숏추정치 -</div>
-        <div id="whaleIntentHist" class="hist-list fixed-hist">-</div>
-        <small id="whaleIntentStamp" class="card-updated">-</small>
-      </article>
-
-      <article class="micro-card micro-bottom card-obi">
-        <div class="micro-head"><span class="mi">🧱</span><span class="ttl">호가벽</span></div>
-        <div class="lr-gauge">
-          <div class="lr-side left"><span id="obiGaugeLeftFill"></span></div>
-          <div class="lr-sep"></div>
-          <div class="lr-side right"><span id="obiGaugeRightFill"></span></div>
-        </div>
-        <div class="lr-labels">
-          <span id="obiGaugeLeftTxt">매도 0%</span>
-          <span id="obiGaugeRightTxt">매수 0%</span>
-        </div>
-        <p id="obiText">-</p>
-        <small id="obiStamp" class="card-updated">-</small>
-      </article>
-
-      <article class="micro-card micro-bottom card-eai">
-        <div class="micro-head"><span class="mi">⚡</span><span class="ttl">EAI</span></div>
-        <div class="lr-gauge">
-          <div class="lr-side left"><span id="eaiGaugeLeftFill"></span></div>
-          <div class="lr-sep"></div>
-          <div class="lr-side right"><span id="eaiGaugeRightFill"></span></div>
-        </div>
-        <div class="lr-labels">
-          <span id="eaiGaugeLeftTxt">평온 0%</span>
-          <span id="eaiGaugeRightTxt">과열 0%</span>
-        </div>
-        <p id="eaiText">-</p>
-        <small id="eaiStamp" class="card-updated">-</small>
-      </article>
-
-    </section>
-
-    <section class="meter-grid">
+    <section class="market-chart-wrap">
       <article class="panel">
-        <h3>☣️ Micro Toxicity</h3>
-        <div class="meter"><span id="toxFill"></span></div>
-        <p id="toxText">-</p>
+        <div class="chart-panel-head">
+          <h3>실시간 시장 차트</h3>
+          <div id="assetTabs" class="asset-tabs" aria-label="자산 선택">
+            <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
+            <button type="button" class="asset-tab" data-asset="sol">SOL</button>
+            <button type="button" class="asset-tab" data-asset="btc">BTC</button>
+          </div>
+        </div>
+        <div id="chartAiRibbon" class="chart-ai-ribbon hold">
+          <div class="ribbon-item ribbon-primary">
+            <span>AI 판단</span>
+            <strong id="chartDecisionText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>진입 체결</span>
+            <strong id="chartEntryLiquidityText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>비중</span>
+            <strong id="chartPositionPctText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>진입가</span>
+            <strong id="chartEntryText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>진입 시각</span>
+            <strong id="chartEntryTimeText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>레버리지 / 노출</span>
+            <strong id="chartExposureText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>미실현손익</span>
+            <strong id="chartUnrealizedPnlText">-</strong>
+          </div>
+          <div class="ribbon-item ribbon-risk">
+            <span>TP / SL</span>
+            <strong id="chartRiskText">-</strong>
+          </div>
+          <div class="ribbon-item">
+            <span>레짐</span>
+            <strong id="chartRegimeText">-</strong>
+          </div>
+        </div>
+        <div class="chart-container">
+          <svg id="candleSvg" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div id="riskLevelNote" class="chart-note">-</div>
+        <div id="chartStamp" class="panel-stamp">-</div>
       </article>
-      <article class="panel">
-        <h3>🛡️ Aftershock Risk</h3>
-        <div class="meter"><span id="riskFill"></span></div>
-        <p id="riskText">-</p>
-      </article>
-    </section>
-
-    <section class="duo-panels">
-      <section class="panel playbook-panel">
-        <h3>📘 HFT Playbook Router</h3>
-        <div class="playbook-grid">
-          <div><span>선택 플레이북</span><strong id="pbName">-</strong></div>
-          <div><span>강제 액션</span><strong id="pbAction">-</strong></div>
-          <div><span>Kelly</span><strong id="pbKelly">-</strong></div>
-          <div><span>우선순위</span><strong id="pbPriority">-</strong></div>
-        </div>
-        <div class="pb-evals">
-          <div class="pb-row" data-pb="PB_VETO_SHIELD"><span>PB 방어쉴드 (VETO)</span><strong id="pbVetoState">-</strong>
-            <div class="pb-meter"><span id="pbVetoGauge"></span></div><small id="pbVetoDetail">-</small>
-          </div>
-          <div class="pb-row" data-pb="PB_CRISIS_SNIPER"><span>PB 위기 스나이퍼</span><strong id="pbCrisisState">-</strong>
-            <div class="pb-meter"><span id="pbCrisisGauge"></span></div><small id="pbCrisisDetail">-</small>
-          </div>
-          <div class="pb-row" data-pb="PB_SQUEEZE_SNIPER"><span>PB 스퀴즈 스나이퍼</span><strong id="pbSqueezeState">-</strong>
-            <div class="pb-meter"><span id="pbSqueezeGauge"></span></div><small id="pbSqueezeDetail">-</small>
-          </div>
-        </div>
-        <small id="pbStamp" class="panel-stamp">-</small>
-      </section>
-
-      <section class="panel playbook-panel mft-panel">
-        <h3>📗 MFT Playbook Router</h3>
-        <div class="playbook-grid">
-          <div><span>선택 플레이북</span><strong id="mftName">-</strong></div>
-          <div><span>강제 액션</span><strong id="mftAction">-</strong></div>
-          <div><span>Kelly</span><strong id="mftKelly">-</strong></div>
-          <div><span>우선순위</span><strong id="mftPriority">-</strong></div>
-        </div>
-        <div class="pb-evals">
-          <div class="pb-row" data-pb="PB_TREND_SIGNAL"><span>PB 추세 신호</span><strong id="mftTrendState">-</strong>
-            <div class="pb-meter"><span id="mftTrendGauge"></span></div><small id="mftTrendDetail">-</small>
-          </div>
-          <div class="pb-row" data-pb="PB_WHALE_SIGNAL"><span>PB 고래 신호</span><strong id="mftWhaleState">-</strong>
-            <div class="pb-meter"><span id="mftWhaleGauge"></span></div><small id="mftWhaleDetail">-</small>
-          </div>
-          <div class="pb-row" data-pb="PB_MEAN_REVERT_SIGNAL"><span>PB 평균회귀 신호</span><strong
-              id="mftRevertState">-</strong>
-            <div class="pb-meter"><span id="mftRevertGauge"></span></div><small id="mftRevertDetail">-</small>
-          </div>
-        </div>
-        <small id="mftStamp" class="panel-stamp">-</small>
-      </section>
     </section>
 
     <section class="charts">
       <article class="panel">
-        <h3>Trade Equity</h3>
-        <svg id="equitySvg" viewBox="0 0 800 280" preserveAspectRatio="none"></svg>
+        <h3>노출 변화</h3>
+        <svg id="exposureSvg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
       </article>
       <article class="panel">
-        <h3>Recent Trade PnL</h3>
+        <h3>최근 거래 손익</h3>
         <svg id="pnlSvg" viewBox="0 0 800 280" preserveAspectRatio="none"></svg>
       </article>
     </section>
 
-    <section class="duo-panels">
-      <section class="panel trade-journal-panel">
-        <h3>Recent Trades</h3>
+    <section class="charts single-chart">
+      <article class="panel">
+        <h3>거래 누적 성과</h3>
+        <svg id="equitySvg" viewBox="0 0 800 280" preserveAspectRatio="none"></svg>
+      </article>
+    </section>
+
+    <section class="journal-wrap">
+      <article class="panel">
         <div class="trade-journal-summary">
-          <strong id="tradeJournalSummary">-</strong>
-          <small id="tradeJournalStamp" class="panel-stamp">-</small>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <strong>최근 거래</strong>
+            <span id="journalTotalPnl" class="pnl-badge">-</span>
+          </div>
         </div>
-        <div id="tradeJournalList" class="trade-journal-list">-</div>
+        <div id="tradeJournalList" class="trade-journal-list"></div>
+      </article>
+    </section>
+
+    </div>
+
+    <section id="opsTabPanel" class="ops-tab-panel hidden" aria-live="polite">
+      <div class="ops-panel-head">
+        <div>
+          <p class="eyebrow">READ-ONLY OPERATIONS</p>
+          <h2>운영 관리</h2>
+          <p id="opsUpdatedAt" class="muted">상태 불러오는 중…</p>
+        </div>
+        <div id="opsWatchdogBadge" class="ops-badge neutral">WATCHDOG -</div>
+      </div>
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>헬스 체크</h3><p id="opsHeartbeatText" class="muted">-</p></div>
+          <span class="ops-readonly">읽기 전용 · 30초 갱신</span>
+        </div>
+        <div id="opsHealthList" class="ops-health-list"></div>
       </section>
     </section>
 
-    <div id="pbModal" class="pb-modal hidden" aria-hidden="true">
-      <div class="pb-modal-backdrop" data-close="1"></div>
-      <article class="pb-modal-card" role="dialog" aria-modal="true" aria-labelledby="pbModalTitle">
-        <button id="pbModalClose" class="pb-modal-close" type="button">✕</button>
-        <h3 id="pbModalTitle">플레이북 설명</h3>
-        <p id="pbModalThreshold">-</p>
-        <p id="pbModalLogic">-</p>
-        <p id="pbModalConditions">-</p>
-        <p id="pbModalNarration">-</p>
-      </article>
-    </div>
   </main>
-  <script src="./app.js?v=20260419-02"></script>
+  <script src="./app.js?v=20260807-ribbon-entrytime-v1"></script>
+  <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
-
 </html>

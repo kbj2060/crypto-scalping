@@ -1,0 +1,28 @@
+{
+  "train_events": 254,
+  "val_events": 359,
+  "train_label_counts": [
+    5,
+    23,
+    8,
+    4,
+    11,
+    203
+  ],
+  "val_label_counts": [
+    9,
+    22,
+    19,
+    9,
+    16,
+    284
+  ],
+  "arms": [
+    "baseline_exit2_pen05",
+    "exit0_pen0",
+    "exit1_pen0",
+    "exit2_pen0",
+    "exit3_pen0",
+    "exit4_pen0"
+  ]
+}

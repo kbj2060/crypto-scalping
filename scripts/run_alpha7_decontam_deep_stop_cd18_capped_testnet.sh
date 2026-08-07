@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/llewyn/crypto-scalping
+set +u
+source /home/llewyn/miniconda3/etc/profile.d/conda.sh
+conda activate quant_ai
+set -u
+
+mkdir -p data/live/capped_testnet_alpha7_deep_stop_cd18 logs
+
+export FINAL_GOVERNOR_ALPHA7_MODEL_ID="alpha7_submodel_01965_decontam_deep_stop_cd18_20260528"
+export FINAL_GOVERNOR_ALPHA43_STICKY_MODEL_ID="$FINAL_GOVERNOR_ALPHA7_MODEL_ID"
+export FINAL_GOVERNOR_FULLY_LEARNED_MODEL_VERSION="Alpha7.1-01965-decontam-deep-stop-cd18"
+export FINAL_GOVERNOR_FULLY_LEARNED_RUNTIME_CONFIG_PATH="data/ensemble/supervised/alpha7_submodel_01965_decontam_v2_tp_20260528/alpha7_decontam_deep_stop_cd18_runtime_config.json"
+
+export BINANCE_ACCOUNT_ENABLED=1
+export BINANCE_POSITION_SYNC_ENABLED=1
+export BINANCE_ACCOUNT_TESTNET=1
+export BINANCE_EXECUTION_ENABLED=1
+export BINANCE_EXECUTION_DRY_RUN=0
+export BINANCE_EXECUTION_REQUIRE_TESTNET=1
+export BINANCE_EXECUTION_MAX_TARGET_NOTIONAL_USDT="${BINANCE_EXECUTION_MAX_TARGET_NOTIONAL_USDT:-25.0}"
+export BINANCE_EXECUTION_MIN_NOTIONAL_USDT="${BINANCE_EXECUTION_MIN_NOTIONAL_USDT:-5.0}"
+export BINANCE_EXECUTION_REBALANCE_TOLERANCE_USDT="${BINANCE_EXECUTION_REBALANCE_TOLERANCE_USDT:-5.0}"
+export GOVERNOR_EXPOSURE_CAP="${GOVERNOR_EXPOSURE_CAP:-1.0}"
+export BINANCE_EXECUTION_AUDIT_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/binance_execution_audit.jsonl"
+export QUANT_MICRO_DB_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/microstructure.duckdb"
+export QUANT_TAIL_DB_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/tail_risk.duckdb"
+export ORDERBOOK_RECORDER_DUCKDB_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/orderbook_snapshots.duckdb"
+export ORDERBOOK_RECORDER_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/orderbook_snapshots.jsonl"
+
+export FINAL_GOVERNOR_RUNTIME_STATE_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/final_governor_runtime_state.json"
+export FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/pending_next_open_intent.json"
+export DASHBOARD_STATE_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/dashboard_state.json"
+export COMPACT_DASHBOARD_STATE_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/dashboard_state_governor.json"
+export DASHBOARD_EVENTS_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/dashboard_events.jsonl"
+export TRADE_JOURNAL_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/trade_journal.jsonl"
+export POSITION_ACCOUNTING_AUDIT_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/position_accounting_audit.jsonl"
+export DAILY_TRADE_REPORT_STATE_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/daily_trade_report_state.json"
+export ENSEMBLE_TRACKER_STATE_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/ensemble_tracker_state.json"
+export ENSEMBLE_TRADE_RECORDS_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/ensemble_trade_records.jsonl"
+export DATA_PIPELINE_HEALTH_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/data_pipeline_health.json"
+export DATA_PIPELINE_HEALTH_JSONL_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/data_pipeline_health.jsonl"
+export DATA_PIPELINE_FEATURE_SNAPSHOT_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/decision_feature_snapshot.json"
+export DATA_PIPELINE_FEATURE_SNAPSHOT_JSONL_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/decision_feature_snapshot.jsonl"
+export DATA_PIPELINE_FEATURE_FRAME_SNAPSHOT_PATH="data/live/capped_testnet_alpha7_deep_stop_cd18/decision_feature_frame_snapshot.pkl.gz"
+
+exec python trading_bot.py

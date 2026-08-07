@@ -1,0 +1,8 @@
+{
+  "experiment_id": "btc-shared-policy-v1-r3",
+  "selection_scope": "train-only diagnostic shards: 10,000 terminal bars each from 2024 and 2025 adaptive-squeeze datasets; Validation/OOS excluded",
+  "selection_method": "mean absolute Spearman correlation to soft trajectory labels across the two train shards",
+  "direction_features": ["mtf_trend_1h", "vwap_dist_24", "kalman_velocity", "rsi", "hma_slope", "macd_hist", "log_return", "funding_price_divergence", "funding_oi_divergence", "btc_ret_6", "btc_ret_3", "fvg_dist", "mtf_trend_4h", "range_contraction_breakout_dir", "btc_ret_12", "cvd_12", "btc_ret_1", "compression_release_up", "oi_up_price_up", "compression_release_down", "distance_to_day_high_low_pct", "btc_ret_z_48", "sig_trend_health", "breakout_strength"],
+  "action_features": ["mtf_trend_1h", "vwap_dist_24", "kalman_velocity", "rsi", "hma_slope", "garman_klass_vol", "macd_hist", "log_return", "funding_price_divergence", "funding_oi_divergence", "btc_ret_6", "btc_ret_3", "fvg_dist", "mtf_trend_4h", "bb_width", "range_contraction_breakout_dir", "btc_ret_12", "trades", "cvd_12", "btc_ret_1", "compression_release_up", "compression_release_down", "oi_up_price_up", "distance_to_day_high_low_pct"],
+  "validation_requirement": "Feature-count and adapter-width choices must be selected on 2025 Validation only before any 2026 OOS evaluation."
+}

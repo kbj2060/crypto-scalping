@@ -1,0 +1,153 @@
+{
+  "status": "pass",
+  "model": "safe learned cap, no MDD governor",
+  "blocking": [],
+  "warnings": [],
+  "checks": {
+    "py_compile": true,
+    "source": {
+      "default_model_points_to_safe_cap": true,
+      "default_report_points_to_safe_cap": true,
+      "safe_cap_layer_present": true,
+      "safe_cap_enabled_default_true": true,
+      "dsac_overlay_default_false": true,
+      "risk_cap_override_present": true,
+      "safe_cap_block_source_present": true,
+      "position_accounting_audit_enabled": true
+    },
+    "model_audit": {
+      "model_id": "clean_base_deep_gated_gross_v2_safe_cap_buckets",
+      "status": "pass",
+      "blocking": [],
+      "invariants": {
+        "parent_trained_before_cap_train": true,
+        "cap_map_learned_before_validation": true,
+        "selection_uses_2025_validation_only": true,
+        "oos_is_2026_report_only": true,
+        "safe_fallback_cap_lte_configured_max": true,
+        "no_new_entries_created": true,
+        "max_margin_fraction_lte_1": true,
+        "no_liquidations": true,
+        "no_ruin": true,
+        "cost2_survives": true,
+        "cost3_survives": true
+      }
+    },
+    "report_model_id": "clean_base_deep_gated_gross_v2_safe_cap_buckets",
+    "report_verdict": "promote_candidate",
+    "selected_candidate": {
+      "name": "learned_action_edge3_min10_buf0p0035_gatefinal",
+      "scheme": "action_edge3",
+      "cost_buffer": 0.0035,
+      "gate_notional_mode": "final",
+      "fallback_cap": 3.6,
+      "max_notional": 5.0
+    },
+    "validation_cost1": {
+      "pnl": 167311.49728603585,
+      "mdd": -21.16601621132206,
+      "trades": 388,
+      "blocked": 307,
+      "boosted": 386,
+      "avg_notional": 4.925257731958765,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "validation_cost2": {
+      "pnl": 12786.001963330627,
+      "mdd": -21.92204839743995,
+      "trades": 246,
+      "blocked": 449,
+      "boosted": 245,
+      "avg_notional": 4.890243902439024,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "validation_cost3": {
+      "pnl": 1794.6206001130388,
+      "mdd": -28.994465342720133,
+      "trades": 165,
+      "blocked": 530,
+      "boosted": 164,
+      "avg_notional": 4.856565656565656,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "oos_cost1": {
+      "pnl": 1597.4630368626497,
+      "mdd": -33.074780412722006,
+      "trades": 154,
+      "blocked": 209,
+      "boosted": 153,
+      "avg_notional": 4.9058441558441555,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "oos_cost2": {
+      "pnl": 447.5551080906966,
+      "mdd": -33.58649105655501,
+      "trades": 100,
+      "blocked": 263,
+      "boosted": 100,
+      "avg_notional": 4.875000000000001,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "oos_cost3": {
+      "pnl": 241.2115465132285,
+      "mdd": -34.095494415155635,
+      "trades": 70,
+      "blocked": 293,
+      "boosted": 70,
+      "avg_notional": 4.845238095238096,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidations": 0,
+      "ruin_events": 0
+    },
+    "payload_keys": [
+      "deep_meta",
+      "head_meta",
+      "head_model",
+      "model_id",
+      "selected_cap_candidate",
+      "selected_parent_config",
+      "sequence_features",
+      "sequence_scaler",
+      "state_model",
+      "torch_model"
+    ],
+    "payload_candidate_name": "learned_action_edge3_min10_buf0p0035_gatefinal",
+    "live_formula_smoke": {
+      "high_bucket": "HIGH|e2",
+      "high_cap": 5.0,
+      "planned_high": 5.0,
+      "high_cost_pass": true,
+      "high_expected": 0.0228526785624125,
+      "high_hurdle": 0.0105,
+      "low_bucket": "HIGH|e0",
+      "low_cap": 3.6,
+      "planned_low": 3.6,
+      "low_cost_pass": false,
+      "low_expected": 0.0,
+      "low_hurdle": 0.00854
+    },
+    "ledger": {
+      "rows": 363,
+      "blocked": 209,
+      "max_experiment_notional": 5.0,
+      "max_margin_fraction": 1.0,
+      "liquidated_count": 0
+    }
+  }
+}

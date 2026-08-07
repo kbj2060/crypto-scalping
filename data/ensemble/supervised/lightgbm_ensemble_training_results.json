@@ -1,0 +1,31 @@
+{
+  "test_metrics": {
+    "tradeability_mae": 0.003782215246372662,
+    "top10_rate": 0.10000634558030332,
+    "top10_positive_rate": 1.0,
+    "top10_mean_tradeability": 0.012999660228394275,
+    "long_edge_corr": 0.0412770910409544,
+    "short_edge_corr": 0.06909641814423685,
+    "long_adverse_rate": 0.5162764134780126,
+    "short_adverse_rate": 0.5247160352814265,
+    "long_adverse_auc": 0.5466924138652484,
+    "long_adverse_ap": 0.5450310688546022,
+    "short_adverse_auc": 0.5374269413275022,
+    "short_adverse_ap": 0.5482255613252018
+  },
+  "oos_metrics": {
+    "tradeability_mae": 0.004053794227993812,
+    "top10_rate": 0.10002961208172935,
+    "top10_positive_rate": 1.0,
+    "top10_mean_tradeability": 0.015681609009582806,
+    "long_edge_corr": 0.037586744352272154,
+    "short_edge_corr": 0.09874815018095733,
+    "long_adverse_rate": 0.5084394432928635,
+    "short_adverse_rate": 0.505655907610305,
+    "long_adverse_auc": 0.5463566742216389,
+    "long_adverse_ap": 0.5348259466747353,
+    "short_adverse_auc": 0.532803461634234,
+    "short_adverse_ap": 0.5182723410767712
+  },
+  "artifact": "data/ensemble/supervised/m7_path_models.json"
+}

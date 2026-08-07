@@ -1,0 +1,19 @@
+{
+  "verdict": "PASS",
+  "cutoff_reports": [
+    {
+      "cutoff": "2026-06-15 14:37:00",
+      "status": "compared",
+      "n_columns_compared": 141,
+      "n_mismatches": 0,
+      "mismatches": []
+    },
+    {
+      "cutoff": "2026-06-22 03:12:00",
+      "status": "compared",
+      "n_columns_compared": 141,
+      "n_mismatches": 0,
+      "mismatches": []
+    }
+  ]
+}

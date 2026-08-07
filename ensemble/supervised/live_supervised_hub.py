@@ -136,40 +136,31 @@ class MultiTargetLGBMBrain:
 
         probs_arr = np.asarray(self.direction_model.predict(last_row), dtype=np.float64)
         probs = probs_arr.reshape(-1)
-        if probs.size > 3:
-            probs = probs[:3]
-        if probs.size < 3:
-            probs = np.pad(probs, (0, 3 - probs.size), constant_values=0.0)
+        if probs.size != 2:
+            raise ValueError(f"MULTITARGET_LGBM direction model must emit 2-class [DOWN, UP], got shape={probs_arr.shape}")
         probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
         denom = float(probs.sum())
         if denom <= 1e-12:
-            probs = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+            probs = np.array([0.5, 0.5], dtype=np.float64)
         else:
             probs = probs / denom
 
-        trend_dir = int(np.argmax(probs))
-        strength = float(np.clip((probs[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
-        if trend_dir == 2:
-            rev_prob = float(probs[0])
-        elif trend_dir == 0:
-            rev_prob = float(probs[2])
-        else:
-            rev_prob = 0.5
+        trend_dir = 2 if probs[1] >= probs[0] else 0
+        strength = float(np.clip(abs(probs[1] - probs[0]), 0.0, 1.0))
+        rev_prob = float(probs[0] if trend_dir == 2 else probs[1])
 
         quality_pred = float(np.asarray(self.quality_model.predict(last_row), dtype=np.float64).reshape(-1)[0])
         hold_pred = float(np.asarray(self.hold_model.predict(last_row), dtype=np.float64).reshape(-1)[0])
 
-        p_down, p_flat, p_up = (float(probs[0]), float(probs[1]), float(probs[2]))
+        p_down, p_up = (float(probs[0]), float(probs[1]))
         return {
             "trend_dir": trend_dir,
             "strength": strength,
             "rev_prob": rev_prob,
-            "probs": [p_down, p_flat, p_up],
+            "probs": [p_down, p_up],
             "p_down": p_down,
-            "p_flat": p_flat,
             "p_up": p_up,
             "prob_dn": p_down,
-            "prob_flat": p_flat,
             "prob_up": p_up,
             "quality_pred": quality_pred,
             "hold_pred": hold_pred,
@@ -188,63 +179,53 @@ def trend_signal_to_dict(signal, default_model: str) -> dict | None:
         return None
 
     probs = out.get("probs", [])
-    if not isinstance(probs, (list, tuple)) or len(probs) < 3:
-        p_dn = float(out.get("p_down", out.get("prob_dn", 0.333)))
-        p_fl = float(out.get("p_flat", out.get("prob_flat", 0.333)))
-        p_up = float(out.get("p_up", out.get("prob_up", 0.333)))
-        probs = [p_dn, p_fl, p_up]
-    probs = np.asarray(probs[:3], dtype=np.float64)
+    if not isinstance(probs, (list, tuple)) or len(probs) < 2:
+        p_dn = float(out.get("p_down", out.get("prob_dn", 0.5)))
+        p_up = float(out.get("p_up", out.get("prob_up", 0.5)))
+        probs = [p_dn, p_up]
+    probs = np.asarray(probs[:2], dtype=np.float64)
     probs = np.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
     denom = float(probs.sum())
     if denom <= 1e-12:
-        probs = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+        probs = np.array([0.5, 0.5], dtype=np.float64)
     else:
         probs = probs / denom
 
-    out["probs"] = [float(probs[0]), float(probs[1]), float(probs[2])]
+    out["probs"] = [float(probs[0]), float(probs[1])]
     out["p_down"] = float(probs[0])
-    out["p_flat"] = float(probs[1])
-    out["p_up"] = float(probs[2])
+    out["p_up"] = float(probs[1])
     out["prob_dn"] = float(probs[0])
-    out["prob_flat"] = float(probs[1])
-    out["prob_up"] = float(probs[2])
-    out["trend_dir"] = int(out.get("trend_dir", int(np.argmax(probs))))
-    out["strength"] = float(out.get("strength", np.clip((probs[int(np.argmax(probs))] - 1.0 / 3.0) * 1.5, 0.0, 1.0)))
+    out["prob_up"] = float(probs[1])
+    out["trend_dir"] = int(out.get("trend_dir", 2 if probs[1] >= probs[0] else 0))
+    out["strength"] = float(out.get("strength", np.clip(abs(probs[1] - probs[0]), 0.0, 1.0)))
     if "rev_prob" not in out:
         if out["trend_dir"] == 2:
             out["rev_prob"] = float(probs[0])
-        elif out["trend_dir"] == 0:
-            out["rev_prob"] = float(probs[2])
         else:
-            out["rev_prob"] = 0.5
+            out["rev_prob"] = float(probs[1])
     out.setdefault("trend_model", default_model)
     return out
 
 
 def blend_trend_signals(sig_a: dict, sig_b: dict, w_a: float = 0.5, w_b: float = 0.5) -> dict:
-    pa = np.asarray(sig_a.get("probs", [1 / 3, 1 / 3, 1 / 3]), dtype=np.float64)
-    pb = np.asarray(sig_b.get("probs", [1 / 3, 1 / 3, 1 / 3]), dtype=np.float64)
-    if pa.size < 3:
-        pa = np.pad(pa, (0, 3 - pa.size), constant_values=0.0)
-    if pb.size < 3:
-        pb = np.pad(pb, (0, 3 - pb.size), constant_values=0.0)
-    pa = np.nan_to_num(pa[:3], nan=0.0, posinf=0.0, neginf=0.0)
-    pb = np.nan_to_num(pb[:3], nan=0.0, posinf=0.0, neginf=0.0)
+    pa = np.asarray(sig_a.get("probs", [0.5, 0.5]), dtype=np.float64)
+    pb = np.asarray(sig_b.get("probs", [0.5, 0.5]), dtype=np.float64)
+    if pa.size < 2:
+        pa = np.pad(pa, (0, 2 - pa.size), constant_values=0.0)
+    if pb.size < 2:
+        pb = np.pad(pb, (0, 2 - pb.size), constant_values=0.0)
+    pa = np.nan_to_num(pa[:2], nan=0.0, posinf=0.0, neginf=0.0)
+    pb = np.nan_to_num(pb[:2], nan=0.0, posinf=0.0, neginf=0.0)
     p = (float(w_a) * pa) + (float(w_b) * pb)
     denom = float(p.sum())
     if denom <= 1e-12:
-        p = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float64)
+        p = np.array([0.5, 0.5], dtype=np.float64)
     else:
         p = p / denom
 
-    trend_dir = int(np.argmax(p))
-    strength = float(np.clip((p[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
-    if trend_dir == 2:
-        rev_prob = float(p[0])
-    elif trend_dir == 0:
-        rev_prob = float(p[2])
-    else:
-        rev_prob = 0.5
+    trend_dir = 2 if p[1] >= p[0] else 0
+    strength = float(np.clip(abs(p[1] - p[0]), 0.0, 1.0))
+    rev_prob = float(p[0] if trend_dir == 2 else p[1])
 
     q_vals = [sig_a.get("quality_pred"), sig_b.get("quality_pred")]
     q_vals = [float(v) for v in q_vals if v is not None and np.isfinite(v)]
@@ -255,13 +236,11 @@ def blend_trend_signals(sig_a: dict, sig_b: dict, w_a: float = 0.5, w_b: float =
         "trend_dir": trend_dir,
         "strength": strength,
         "rev_prob": rev_prob,
-        "probs": [float(p[0]), float(p[1]), float(p[2])],
+        "probs": [float(p[0]), float(p[1])],
         "p_down": float(p[0]),
-        "p_flat": float(p[1]),
-        "p_up": float(p[2]),
+        "p_up": float(p[1]),
         "prob_dn": float(p[0]),
-        "prob_flat": float(p[1]),
-        "prob_up": float(p[2]),
+        "prob_up": float(p[1]),
         "quality_pred": float(np.mean(q_vals)) if q_vals else None,
         "hold_pred": float(np.mean(h_vals)) if h_vals else None,
         "trend_model": f"{sig_a.get('trend_model', 'A')}+{sig_b.get('trend_model', 'B')}",

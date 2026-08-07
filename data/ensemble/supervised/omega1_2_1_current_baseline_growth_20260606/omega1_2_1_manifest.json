@@ -1,0 +1,69 @@
+{
+  "model_id": "omega1_2_1_current_baseline_growth_20260606",
+  "alias": "omega1.2.1",
+  "status": "research_growth_branch_not_live_promoted",
+  "created_kst": "2026-06-06",
+  "parent_baseline": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "parent_manifest": "data/ensemble/supervised/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_manifest.json",
+  "contract": "docs/model_contracts/omega1_2_1_current_baseline_growth_20260606_contract.md",
+  "static_candidates": {
+    "balanced": {
+      "name": "omega1_2_1_balanced_compensated_exposure_scale135_cap055",
+      "mode": "compensated_tp_sl",
+      "scale": 1.35,
+      "cap": 0.55,
+      "validation_pnl_pct": 61.144613,
+      "validation_mdd_pct": -7.323271,
+      "validation_wr": 0.6363636363636364,
+      "validation_trades": 33,
+      "oos_pnl_pct": 45.31454,
+      "oos_mdd_pct": -5.54379,
+      "oos_wr": 0.7222222222222222,
+      "oos_trades": 18
+    },
+    "aggressive": {
+      "name": "omega1_2_1_aggressive_compensated_exposure_scale200_cap090",
+      "mode": "compensated_tp_sl",
+      "scale": 2.0,
+      "cap": 0.9,
+      "validation_pnl_pct": 100.542729,
+      "validation_mdd_pct": -10.677653,
+      "validation_wr": 0.6363636363636364,
+      "validation_trades": 33,
+      "oos_pnl_pct": 72.760041,
+      "oos_mdd_pct": -8.108171,
+      "oos_wr": 0.7222222222222222,
+      "oos_trades": 18
+    }
+  },
+  "learned_selector": {
+    "script": "scripts/train_eval_omega1_2_1_exposure_selector_20260606.py",
+    "report": "tmp/causal_regen_20260516/omega1_2_1_exposure_selector_20260606/report.json",
+    "ranking": "tmp/causal_regen_20260516/omega1_2_1_exposure_selector_20260606/selector_ranking.csv",
+    "strict_candidates": "tmp/causal_regen_20260516/omega1_2_1_exposure_selector_20260606/selector_strict_candidates.csv",
+    "status": "tested_not_promoted_over_static_balanced",
+    "method": "ExtraTrees/HGB selector trained on 2025 validation active-signal replay labels; validation ranking uses expanding OOF scores; OOS uses selector refit on all validation active signals.",
+    "best_strict_candidate": {
+      "name": "omega1_2_1_learned_extra_win_top40_scale200_cap090",
+      "model_name": "extra_win",
+      "top_frac": 0.4,
+      "threshold": 0.5392702398282354,
+      "scale": 2.0,
+      "cap": 0.9,
+      "validation_pnl_pct": 54.181264150647145,
+      "validation_mdd_pct": -5.471616800975976,
+      "validation_wr": 0.6363636363636364,
+      "validation_trades": 33,
+      "oos_pnl_pct": 35.97402042596984,
+      "oos_mdd_pct": -4.135192490277473,
+      "oos_wr": 0.7222222222222222,
+      "oos_trades": 18,
+      "diagnostic_warning": "OOF win AUC is weak: extra_win 0.3714, hgb_win 0.3570, hgb_net 0.3657. Treat as a small overlay only, not as reliable alpha ownership."
+    }
+  },
+  "live_wiring": {
+    "trading_bot_py_updated": false,
+    "requires_runtime_native_parity": true,
+    "requires_current_live_feature_contract_validation": true
+  }
+}

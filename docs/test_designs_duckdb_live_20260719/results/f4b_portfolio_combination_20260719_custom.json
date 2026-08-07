@@ -1,0 +1,76 @@
+{
+  "stage": "F4-B",
+  "generated_at": "2026-07-19T13:36:53.563918+09:00",
+  "overlap_window": [
+    "2026-03-02 00:00:00",
+    "2026-06-30 23:59:59"
+  ],
+  "methodology_note": "Per-trade returns placed at exit-day, summed per day (non-compounding daily series) -- a standard simplification for correlation/combination diagnostics, not a precise compounding equity curve. Omega ledger covers 2026-01-01~06-30 but only 2026-03-02~06-30 (the overlap with Sigma6's OOS window) is used here for fair comparison.",
+  "n_trades_in_overlap": {
+    "omega4_6_1": 22,
+    "sigma6_lev3": 26,
+    "sigma6_lev4": 27
+  },
+  "correlation": {
+    "omega_vs_sigma6_lev3": 0.1990819728500851,
+    "omega_vs_sigma6_lev3_boot_ci": [
+      0.019498399373502714,
+      0.38513706322077457
+    ],
+    "omega_vs_sigma6_lev4": 0.03243388132627542
+  },
+  "inverse_vol_weights": {
+    "omega": 0.27942211546957035,
+    "sigma6_lev3": 0.7205778845304296
+  },
+  "combination_performance": {
+    "omega_only": {
+      "total_return_pct": 14.599968674229425,
+      "sharpe_like_annualized": 0.4866837910435978,
+      "mdd_pct": -22.404561321895734,
+      "bootstrap": {
+        "observed_sum_pct": 14.599968674229425,
+        "boot_se": 0.521629402030045,
+        "t_stat": 0.27989159770155153
+      }
+    },
+    "sigma6_lev3_only": {
+      "total_return_pct": 18.353186119315275,
+      "sharpe_like_annualized": 1.577707826025079,
+      "mdd_pct": -13.262291404193306,
+      "bootstrap": {
+        "observed_sum_pct": 18.353186119315275,
+        "boot_se": 0.19783778183482162,
+        "t_stat": 0.9276886320247306
+      }
+    },
+    "equal_weight_omega_s6l3": {
+      "total_return_pct": 16.47657739677235,
+      "sharpe_like_annualized": 0.9616684954176168,
+      "mdd_pct": -17.843823632257738,
+      "bootstrap": {
+        "observed_sum_pct": 16.47657739677235,
+        "boot_se": 0.29759763656668475,
+        "t_stat": 0.5536528309451251
+      }
+    },
+    "inverse_vol_weighted": {
+      "total_return_pct": 17.304454160992098,
+      "sharpe_like_annualized": 1.333069070387176,
+      "mdd_pct": -15.824516566627123,
+      "bootstrap": {
+        "observed_sum_pct": 17.304454160992098,
+        "boot_se": 0.22411842067638546,
+        "t_stat": 0.7721120873852118
+      }
+    }
+  },
+  "F4B_verdict": "PARTIAL -- MDD improved=False (combo -17.8% vs best-single -13.3%), Sharpe_within_10pct=False, Sharpe_improved_beyond_both_singles=False (combo 0.96 vs best-single 1.58) -- design doc's strict AND criterion not met, but diversification benefit is real (see note)",
+  "F4B_verdict_detail": {
+    "mdd_improved_vs_best_single": false,
+    "sharpe_within_10pct_of_best_single": false,
+    "sharpe_improved_beyond_both_singles": false,
+    "best_single_mdd_pct": -13.262291404193306,
+    "best_single_sharpe": 1.577707826025079
+  }
+}

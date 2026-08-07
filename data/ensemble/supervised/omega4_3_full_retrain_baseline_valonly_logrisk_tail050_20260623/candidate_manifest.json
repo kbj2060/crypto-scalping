@@ -1,0 +1,314 @@
+{
+  "model_id": "omega4_3_full_retrain_baseline_valonly_logrisk_tail050_20260623",
+  "display_version": "Omega 4.3 full-retrain baseline validation-only logrisk tail050 test",
+  "status": "rejected_research_test_not_upgrade",
+  "created_kst": "2026-06-23",
+  "reference_baseline_id": "omega4_3_valonly_logrisk_tail050_margin_leverage_sidecar_20260623",
+  "contract": "docs/model_contracts/omega4_3_full_retrain_baseline_valonly_logrisk_tail050_20260623_contract.md",
+  "manifest": "data/ensemble/supervised/omega4_3_full_retrain_baseline_valonly_logrisk_tail050_20260623/candidate_manifest.json",
+  "redteam_report": "docs/audits/omega4_3_full_retrain_baseline_valonly_logrisk_tail050_redteam_20260623.md",
+  "redteam_json": "tmp/causal_regen_20260516/omega4_3_full_retrain_baseline_valonly_logrisk_tail050_redteam_20260623/report.json",
+  "parent_report": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_full_retrain_baseline_e2_fulltrain_fullexit_q070_20260623/report.json",
+  "parent_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_full_retrain_baseline_e2_fulltrain_fullexit_q070_20260623/true_3head_tabm_bundle.pt",
+  "risk_report": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v9_full_retrain_baseline_parent_e2_fulltrain_fullexit_valonly_logrisk_tail050_20260623/report.json",
+  "risk_sidecar_artifact": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_v9_full_retrain_baseline_parent_e2_fulltrain_fullexit_valonly_logrisk_tail050_20260623/risk_sidecar.pkl",
+  "selection_scope": "validation_only",
+  "oos_usage_policy": "OOS excluded from filter/sort/tie-break; OOS is selected-row readout only.",
+  "parent_q070_without_atr_exit_risk": {
+    "validation": {
+      "pnl": 4.008579467719486,
+      "mdd": -16.384343415237666,
+      "trades": 35,
+      "wr": 0.4,
+      "trades_per_day": 0.380535316546491,
+      "avg_notional": 0.3722142857142858,
+      "avg_leverage": 2.0,
+      "long_entries": 23,
+      "short_entries": 12,
+      "exit_reasons": {
+        "take_profit": 13,
+        "stop_loss": 21,
+        "forced_end": 1
+      }
+    },
+    "oos": {
+      "pnl": 4.015581896015208,
+      "mdd": -9.272798154842555,
+      "trades": 22,
+      "wr": 0.4090909090909091,
+      "trades_per_day": 0.37644822054542215,
+      "avg_notional": 0.38659090909090915,
+      "avg_leverage": 2.0,
+      "long_entries": 10,
+      "short_entries": 12,
+      "exit_reasons": {
+        "stop_loss": 13,
+        "take_profit": 9
+      }
+    },
+    "validation_aggressive_scale200_cap090": {
+      "pnl": 6.718539624011877,
+      "mdd": -30.312976563383664,
+      "trades": 35,
+      "wr": 0.4,
+      "trades_per_day": 0.380535316546491,
+      "avg_notional": 0.7444285714285716,
+      "avg_leverage": 2.0,
+      "long_entries": 23,
+      "short_entries": 12,
+      "exit_reasons": {
+        "take_profit": 13,
+        "stop_loss": 21,
+        "forced_end": 1
+      }
+    },
+    "oos_aggressive_scale200_cap090": {
+      "pnl": 7.209721076216757,
+      "mdd": -17.762080395609082,
+      "trades": 22,
+      "wr": 0.4090909090909091,
+      "trades_per_day": 0.37644822054542215,
+      "avg_notional": 0.7731818181818183,
+      "avg_leverage": 2.0,
+      "long_entries": 10,
+      "short_entries": 12,
+      "exit_reasons": {
+        "stop_loss": 13,
+        "take_profit": 9
+      }
+    }
+  },
+  "omega4_2_replayed_baseline_before_risk": {
+    "validation": {
+      "pnl": -8.846923434472032,
+      "mdd": -13.788047106257329,
+      "trades": 134,
+      "wr": 0.6716417910447762,
+      "trades_per_day": 1.45690664049228,
+      "avg_notional": 0.3697388059701491,
+      "avg_margin_fraction": 0.18486940298507454,
+      "avg_leverage": 2.0,
+      "long_entries": 98,
+      "short_entries": 36,
+      "exit_reasons": {
+        "exit_head": 104,
+        "stop_loss": 28,
+        "take_profit": 1,
+        "forced_end": 1
+      }
+    },
+    "oos": {
+      "pnl": -15.10597012958641,
+      "mdd": -16.314183904049894,
+      "trades": 73,
+      "wr": 0.6575342465753424,
+      "trades_per_day": 1.249123640900719,
+      "avg_notional": 0.3874315068493153,
+      "avg_margin_fraction": 0.19371575342465766,
+      "avg_leverage": 2.0,
+      "long_entries": 30,
+      "short_entries": 43,
+      "exit_reasons": {
+        "stop_loss": 18,
+        "exit_head": 55
+      }
+    }
+  },
+  "selected_variant": "risk_1683",
+  "selected_mapping": {
+    "min_scale": 0.75,
+    "max_scale": 1.65,
+    "temp": 2.1,
+    "floor": 0.06,
+    "cap": 0.32,
+    "long_scale": 0.55,
+    "short_scale": 1.25,
+    "leverage_min": 1.25,
+    "leverage_max": 3.0,
+    "leverage_temp": 1.7,
+    "leverage_floor": 1.0,
+    "leverage_cap": 3.0,
+    "long_leverage_scale": 0.75,
+    "short_leverage_scale": 1.25
+  },
+  "validation_cost3_sizing_only": {
+    "pnl": 4.829335079881059,
+    "mdd": -6.943714986453397,
+    "trades": 134,
+    "wr": 0.6716417910447762,
+    "trades_per_day": 1.45690664049228,
+    "avg_notional": 0.2761316928302397,
+    "avg_margin_fraction": 0.1458965819913318,
+    "avg_leverage": 1.673298386714779,
+    "log_growth_sum": 0.047163461614349846,
+    "tail_excess_sum": 0.00377112022917523,
+    "liquidation_excess_sum": 0.0,
+    "log_risk_utility": 0.045277901499762234,
+    "long_entries": 98,
+    "short_entries": 36,
+    "exit_reasons": {
+      "exit_head": 104,
+      "stop_loss": 28,
+      "take_profit": 1,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3_sizing_only_readout": {
+    "pnl": -10.229078201072516,
+    "mdd": -14.576286751621815,
+    "trades": 73,
+    "wr": 0.6575342465753424,
+    "trades_per_day": 1.249123640900719,
+    "avg_notional": 0.41397549432220654,
+    "avg_margin_fraction": 0.19397271619542902,
+    "avg_leverage": 1.9569067110234428,
+    "log_growth_sum": -0.10790907382030925,
+    "tail_excess_sum": 0.03924988443838415,
+    "liquidation_excess_sum": 0.002100867430177511,
+    "log_risk_utility": -0.12805923289704574,
+    "long_entries": 30,
+    "short_entries": 43,
+    "exit_reasons": {
+      "exit_head": 55,
+      "stop_loss": 18
+    }
+  },
+  "full_replay_diagnostic_not_promoted": {
+    "validation": {
+      "pnl": -3.7761280191700997,
+      "mdd": -11.304758618222866,
+      "trades": 128,
+      "wr": 0.6640625,
+      "trades_per_day": 1.3916720147985957,
+      "avg_notional": 0.2859809693724178,
+      "avg_margin_fraction": 0.14954856989893064,
+      "avg_leverage": 1.692592623624137,
+      "long_entries": 91,
+      "short_entries": 37,
+      "exit_reasons": {
+        "exit_head": 96,
+        "stop_loss": 30,
+        "take_profit": 1,
+        "forced_end": 1
+      },
+      "log_growth_sum": -0.03849270961154542,
+      "tail_excess_sum": 0.031863506589606114,
+      "liquidation_excess_sum": 0.0030284038786543427,
+      "log_risk_utility": -0.05518156387601205
+    },
+    "oos": {
+      "pnl": -8.902422708749391,
+      "mdd": -13.286872635584812,
+      "trades": 69,
+      "wr": 0.6521739130434783,
+      "trades_per_day": 1.1806785098924604,
+      "avg_notional": 0.40783837016342805,
+      "avg_margin_fraction": 0.19205124665394713,
+      "avg_leverage": 1.93354291992803,
+      "long_entries": 29,
+      "short_entries": 40,
+      "exit_reasons": {
+        "stop_loss": 18,
+        "exit_head": 51
+      },
+      "log_growth_sum": -0.0932389760247544,
+      "tail_excess_sum": 0.045552477554750975,
+      "liquidation_excess_sum": 0.002100867430177511,
+      "log_risk_utility": -0.11654043165967425
+    }
+  },
+  "reference_baseline": {
+    "validation_cost3_sizing_only": {
+      "pnl": 30.326541948024065,
+      "mdd": -7.9085141871933935,
+      "trades": 85,
+      "wr": 0.6705882352941176,
+      "trades_per_day": 0.9241571973271925,
+      "avg_notional": 0.5535874161677686,
+      "avg_margin_fraction": 0.23456184950367348,
+      "avg_leverage": 2.257382661268968,
+      "log_growth_sum": 0.26487297615583283,
+      "tail_excess_sum": 0.10346889219832983,
+      "liquidation_excess_sum": 0.030361157891958812,
+      "log_risk_utility": 0.2055482405836782,
+      "long_entries": 22,
+      "short_entries": 63,
+      "exit_reasons": {
+        "exit_head": 62,
+        "stop_loss": 18,
+        "take_profit": 4,
+        "forced_end": 1
+      }
+    },
+    "oos_cost3_sizing_only_readout": {
+      "pnl": 32.44445655635533,
+      "mdd": -5.715959498799483,
+      "trades": 65,
+      "wr": 0.6615384615384615,
+      "trades_per_day": 1.1122333788842018,
+      "avg_notional": 0.5613027059937815,
+      "avg_margin_fraction": 0.23741002202339617,
+      "avg_leverage": 2.2698793702317106,
+      "log_growth_sum": 0.28099317574997174,
+      "tail_excess_sum": 0.036257309839955634,
+      "liquidation_excess_sum": 0.0,
+      "log_risk_utility": 0.2628645208299939,
+      "long_entries": 20,
+      "short_entries": 45,
+      "exit_reasons": {
+        "exit_head": 54,
+        "stop_loss": 8,
+        "take_profit": 2,
+        "forced_end": 1
+      }
+    },
+    "full_replay_diagnostic": {
+      "validation": {
+        "pnl": 31.340757484965852,
+        "mdd": -10.520724661794311,
+        "trades": 79,
+        "wr": 0.6835443037974683,
+        "trades_per_day": 0.8589225716335083,
+        "avg_notional": 0.5559124250029076,
+        "avg_margin_fraction": 0.23475255905299938,
+        "avg_leverage": 2.2660610924210336,
+        "long_entries": 19,
+        "short_entries": 60,
+        "exit_reasons": {
+          "stop_loss": 19,
+          "exit_head": 55,
+          "take_profit": 4,
+          "forced_end": 1
+        },
+        "log_growth_sum": 0.2726249621173694,
+        "tail_excess_sum": 0.14059797507368849,
+        "liquidation_excess_sum": 0.04183454473800749,
+        "log_risk_utility": 0.19186733839602327
+      },
+      "oos": {
+        "pnl": 33.72704294581139,
+        "mdd": -5.733649710776422,
+        "trades": 59,
+        "wr": 0.6610169491525424,
+        "trades_per_day": 1.009565682371814,
+        "avg_notional": 0.5561515326017442,
+        "avg_margin_fraction": 0.23641995195524534,
+        "avg_leverage": 2.260539617306744,
+        "long_entries": 19,
+        "short_entries": 40,
+        "exit_reasons": {
+          "stop_loss": 8,
+          "exit_head": 48,
+          "take_profit": 2,
+          "forced_end": 1
+        },
+        "log_growth_sum": 0.29063054352928885,
+        "tail_excess_sum": 0.03730006640684473,
+        "liquidation_excess_sum": 0.0,
+        "log_risk_utility": 0.2719805103258665
+      }
+    }
+  },
+  "redteam_verdict": "REDTEAM_PASS_CLEAN_RESEARCH_TEST_NOT_UPGRADE",
+  "live_wiring_status": "not_live_wired"
+}

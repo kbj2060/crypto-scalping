@@ -1,0 +1,85 @@
+{
+  "model_id": "alpha1_parent_only_swap_20260513",
+  "variant": "v40_8_lgbm_native_parent",
+  "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_native_v40_8_20260512/target_aware_full_bundle.pkl",
+  "metrics": {
+    "cost1": {
+      "pnl": 39.773466694757076,
+      "mdd": -49.66044691858688,
+      "trades": 182,
+      "wr": 0.25824175824175827,
+      "trades_per_day": 3.1022727272727275,
+      "deep_entries": 130,
+      "long_entries": 84,
+      "short_entries": 98,
+      "avg_notional": 2.2142857142857144,
+      "avg_leverage": 2.2970521541950095,
+      "exits": {
+        "deep_alpha_stop_loss": 87,
+        "deep_alpha_max_hold": 30,
+        "v21_2_stop_loss": 42,
+        "deep_alpha_take_profit": 13,
+        "v21_2_max_hold": 9,
+        "v21_2_take_profit": 1
+      },
+      "runner_actions": {
+        "deep_entry": 130,
+        "v21_entry": 52,
+        "v21_add_on": 16,
+        "v21_reject": 1
+      }
+    },
+    "cost2": {
+      "pnl": -34.917670442267045,
+      "mdd": -60.85228233993829,
+      "trades": 183,
+      "wr": 0.23497267759562843,
+      "trades_per_day": 3.119318181818182,
+      "deep_entries": 132,
+      "long_entries": 84,
+      "short_entries": 99,
+      "avg_notional": 2.209016393442623,
+      "avg_leverage": 2.28974759302628,
+      "exits": {
+        "deep_alpha_max_hold": 33,
+        "deep_alpha_stop_loss": 89,
+        "v21_2_stop_loss": 41,
+        "deep_alpha_take_profit": 10,
+        "v21_2_max_hold": 9,
+        "v21_2_take_profit": 1
+      },
+      "runner_actions": {
+        "deep_entry": 132,
+        "v21_entry": 51,
+        "v21_add_on": 8,
+        "v21_reject": 3
+      }
+    },
+    "cost3": {
+      "pnl": -47.26217797838053,
+      "mdd": -56.00898975952777,
+      "trades": 179,
+      "wr": 0.21787709497206703,
+      "trades_per_day": 3.0511363636363638,
+      "deep_entries": 130,
+      "long_entries": 82,
+      "short_entries": 97,
+      "avg_notional": 2.2053072625698324,
+      "avg_leverage": 2.284605834885163,
+      "exits": {
+        "deep_alpha_max_hold": 27,
+        "deep_alpha_stop_loss": 94,
+        "deep_alpha_take_profit": 9,
+        "v21_2_stop_loss": 38,
+        "v21_2_max_hold": 9,
+        "v21_2_take_profit": 2
+      },
+      "runner_actions": {
+        "deep_entry": 130,
+        "v21_entry": 49,
+        "v21_add_on": 8,
+        "v21_reject": 2
+      }
+    }
+  }
+}

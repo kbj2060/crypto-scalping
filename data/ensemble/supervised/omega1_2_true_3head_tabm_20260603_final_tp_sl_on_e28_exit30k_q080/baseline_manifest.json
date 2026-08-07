@@ -1,0 +1,99 @@
+{
+  "model_id": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "alias": "omega1.2_current_final_tp_sl_baseline",
+  "status": "current_omega_research_baseline_not_live_promoted",
+  "created_kst": "2026-06-06",
+  "source_artifact": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "baseline_artifact_dir": "data/ensemble/supervised/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "contract": "docs/model_contracts/omega1_2_true_3head_tabm_final_tp_sl_current_20260606_contract.md",
+  "training_script": "scripts/train_eval_omega1_2_tabm_3head_20260603.py",
+  "evaluation_scripts": [
+    "scripts/eval_omega1_2_true3head_overlays_20260604.py"
+  ],
+  "decision_boundary": {
+    "direction_head": "Frozen 3-head TabM Direction output, routed by bull/bear/chop expert",
+    "quality_head": "Frozen 3-head TabM Quality output, expert-threshold gated",
+    "exit_head": "Trained in the bundle but not used as immediate exit owner for this baseline",
+    "risk_template": "Fixed final TP/SL/no-max-hold template selected by validation grid",
+    "accounting": "Cost3 maker-limit entry/exit replay with fee/slippage multiplier 3.0"
+  },
+  "selected_runtime_template": {
+    "take_profit": 0.026,
+    "stop_loss": 0.014,
+    "notional_exposure": 0.405,
+    "leverage": 2.0,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "cost_multiplier": 3.0
+  },
+  "validation_cost3": {
+    "pnl_pct": 42.822624455902236,
+    "mdd_pct": -5.471616800975976,
+    "wr": 0.6363636363636364,
+    "trades": 33,
+    "long_entries": 9,
+    "short_entries": 24,
+    "exit_reasons": {
+      "take_profit": 20,
+      "stop_loss": 12,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3": {
+    "pnl_pct": 32.14560500542696,
+    "mdd_pct": -4.135192490277451,
+    "wr": 0.7222222222222222,
+    "trades": 18,
+    "long_entries": 3,
+    "short_entries": 15,
+    "exit_reasons": {
+      "take_profit": 13,
+      "stop_loss": 5
+    }
+  },
+  "artifacts": {
+    "bundle": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/true_3head_tabm_bundle.pt",
+    "report": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/report.json",
+    "validation_predictions": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/validation_predictions_2025_true3head.csv",
+    "oos_predictions": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/oos_predictions_2026_true3head.csv",
+    "validation_ledger": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_validation_trade_ledger_regenerated_20260606.csv",
+    "oos_ledger": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_oos_trade_ledger_20260604.csv",
+    "validation_chart": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_validation_trade_chart_20260606.png",
+    "oos_chart": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_oos_trade_chart_20260604.png",
+    "growth_grid": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_static_exposure_growth_grid_20260606.csv"
+  },
+  "baseline_rule": "Use this model as the current Omega1.2 research baseline before testing growth layers. Any candidate must reproduce this replay first and compare validation plus OOS against these fixed metrics.",
+  "initial_growth_scan": {
+    "best_balanced_static_candidate": {
+      "mode": "compensated_tp_sl",
+      "scale": 1.35,
+      "cap": 0.55,
+      "validation_pnl_pct": 61.144613,
+      "validation_mdd_pct": -7.323271,
+      "validation_wr": 0.6363636363636364,
+      "validation_trades": 33,
+      "oos_pnl_pct": 45.31454,
+      "oos_mdd_pct": -5.54379,
+      "oos_wr": 0.7222222222222222,
+      "oos_trades": 18
+    },
+    "highest_static_oos_candidate": {
+      "mode": "compensated_tp_sl",
+      "scale": 2.0,
+      "cap": 0.9,
+      "validation_pnl_pct": 100.542729,
+      "validation_mdd_pct": -10.677653,
+      "validation_wr": 0.6363636363636364,
+      "validation_trades": 33,
+      "oos_pnl_pct": 72.760041,
+      "oos_mdd_pct": -8.108171,
+      "oos_wr": 0.7222222222222222,
+      "oos_trades": 18
+    }
+  },
+  "live_wiring": {
+    "trading_bot_py_updated": false,
+    "requires_runtime_native_parity": true,
+    "requires_current_live_feature_contract_validation": true
+  }
+}

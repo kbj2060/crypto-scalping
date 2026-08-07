@@ -1,0 +1,364 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-16T13:11:29.790709+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_trading_bot_logic_with_decision_parity_after_fixes_20260516_1m_ledger.csv",
+  "range": {
+    "start_index": 6999,
+    "stop_index": 15638,
+    "rows_evaluated": 8640,
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-02-24 07:10:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "execution_parity_contract": "alpha3_csv_next_open_limit_touch0_fee20",
+    "window_bars": 7000,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame",
+    "v31_config_override": null,
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_state_parity": true,
+    "alpha3_csv_decision_parity": true,
+    "alpha3_csv_mark_parity": true,
+    "alpha3_limit_config": {
+      "name": "next_open_limit_touch0_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "penetration_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "skip",
+      "exit_miss": "market_fallback"
+    },
+    "alpha3_fee": 0.0005,
+    "alpha3_slip": 0.0002
+  },
+  "metrics": {
+    "final_equity": 2.5252937653950855,
+    "return_pct": 152.52937653950855,
+    "max_drawdown_pct": 31.189537847170325,
+    "decision_counts": {
+      "2": 692,
+      "0": 5168,
+      "1": 837
+    },
+    "entry_counts": {
+      "SHORT": 49,
+      "LONG": 66
+    },
+    "closed_trades": 115,
+    "win_rate": 0.2956521739130435,
+    "avg_closed_pnl_pct": 0.943196552577847,
+    "median_closed_pnl_pct": -0.3146863399956479,
+    "resize_events": 0,
+    "regime_counts": {
+      "BEAR": 1684,
+      "BULL": 1684,
+      "NORMAL": 2293,
+      "CHOP": 755,
+      "WHIPSAW": 281
+    },
+    "exit_reason_top20": {
+      "v31_deep_alpha_stop_loss": 50,
+      "learned_stop_loss": 31,
+      "v31_deep_alpha_max_hold": 14,
+      "v31_deep_alpha_take_profit": 10,
+      "learned_max_hold": 6,
+      "learned_take_profit": 3,
+      "forced_end": 1
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "alpha3_csv_execution_parity: _try_immediate_limit route fees plus LotBook alpha3 pnl math",
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_execution_parity_note": "entries/exits/upsizes/downsizes pass through _try_immediate_limit; maker fills use maker_fee_mult; entry misses skip; exit misses close fallback",
+    "alpha3_csv_state_parity": true,
+    "alpha3_csv_state_parity_note": "close events arm lifecycle parent cooldown and V31 deep cooldown like canonical CSV Alpha3; same-bar flip re-entry is suppressed",
+    "alpha3_csv_decision_parity": true,
+    "alpha3_csv_decision_parity_note": "parent raw decisions, teacher probability rows, and V31 q are injected from canonical CSV full-frame precompute",
+    "alpha3_csv_mark_parity": true,
+    "alpha3_csv_mark_parity_note": "V21.2/V31 exit decisions use CSV-style mark unrealized: fill entry price plus exit-side slippage only",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide",
+    "accelerated_live_cache": {
+      "enabled": true,
+      "prepared_rows": 16897,
+      "parent_decision_rows": 16897,
+      "teacher_decision_rows": 16897,
+      "window_bars": 7000
+    },
+    "csv_decision_parity": {
+      "enabled": true,
+      "parent_decision_rows": 16897,
+      "teacher_decision_rows": 16897,
+      "v31_q_rows": 16897,
+      "teacher_runtime": {
+        "name": "noflip_c0.56_parent_scale1.10",
+        "confidence": 0.56,
+        "parent_notional_scale": 1.1,
+        "max_notional": 2.75
+      },
+      "source": "canonical_csv_alpha3_full_2026_precompute"
+    }
+  },
+  "errors_sample": [
+    {
+      "i": 7000,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7001,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7002,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7003,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7004,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7005,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7006,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7007,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7008,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7009,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7010,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7011,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7012,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7013,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7014,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7015,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7016,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7017,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7018,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7019,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7020,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7021,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7022,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7023,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7024,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7025,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7026,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7027,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7028,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7029,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7030,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7031,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7032,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7033,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7034,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7035,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7036,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7040,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7041,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7042,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7043,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7044,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7045,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7046,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7047,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7048,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7049,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7050,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7051,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    },
+    {
+      "i": 7052,
+      "stage": "decide",
+      "error": "_install_alpha3_csv_decision_parity.<locals>.csv_add_on_decision() got an unexpected keyword argument 'parent_bundle'"
+    }
+  ]
+}

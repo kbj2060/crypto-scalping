@@ -1,0 +1,13 @@
+{
+  "model_id": "certified_teacher_cost_aware_allocator_v4",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "M7 embedded provenance caveat remains"
+  ],
+  "invariants": {
+    "cost_aware_gate": true,
+    "daily_budget": true,
+    "2026_fixed_oos_no_selection": true
+  }
+}

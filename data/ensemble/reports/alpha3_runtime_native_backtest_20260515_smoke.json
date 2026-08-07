@@ -1,0 +1,58 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-15T17:26:14.974739+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_backtest_20260515_smoke_ledger.csv",
+  "range": {
+    "start_index": 6999,
+    "stop_index": 7198,
+    "rows_evaluated": 200,
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-01-25 23:50:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "window_bars": 7000,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame"
+  },
+  "metrics": {
+    "final_equity": 1.1169704113966836,
+    "return_pct": 11.697041139668363,
+    "max_drawdown_pct": 3.150641312860436,
+    "decision_counts": {
+      "2": 190,
+      "0": 10
+    },
+    "entry_counts": {
+      "SHORT": 2
+    },
+    "closed_trades": 1,
+    "win_rate": 0.0,
+    "avg_closed_pnl_pct": -0.5974681659404322,
+    "median_closed_pnl_pct": -0.5974681659404322,
+    "resize_events": 1,
+    "regime_counts": {
+      "BEAR": 92,
+      "WHIPSAW": 60,
+      "NORMAL": 39,
+      "BULL": 9
+    },
+    "exit_reason_top20": {
+      "v31_deep_alpha_max_hold": 1
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "router._trade_math per closed lot; same-side upsize stored as new lot; downsize closes delta exposure",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide"
+  },
+  "errors_sample": []
+}

@@ -1,0 +1,1214 @@
+{
+  "activation_allowed": false,
+  "controller_formula_trained": false,
+  "controller_id": "microstructure_operating_controller_v1_20260719",
+  "created_at_utc": "2026-07-18 16:01:51.327846+00:00",
+  "eth": {
+    "base_margin_fraction": 0.3,
+    "base_notional": 0.8999999999999999,
+    "diagnostics": {
+      "risk_detector": {
+        "risk_threshold": 0.3244851547216056,
+        "uncertainty_center": 0.21399415748663433,
+        "uncertainty_scale": 0.1874837113565268
+      },
+      "valid_tail_rows": 0
+    },
+    "fixed_leverage": 3.0,
+    "module_verdicts": {
+      "combined_controller": false,
+      "dynamic_margin_sizing_utility": false,
+      "micro_dynamic_exit": false,
+      "opportunity_entry_gate": false,
+      "opportunity_magnitude_detector": true,
+      "risk_entry_gate": false
+    },
+    "notional_contract": "notional = margin_fraction * leverage",
+    "splits": {
+      "development": {
+        "bars": 16376,
+        "end": "2026-07-12 08:55:00",
+        "opportunity_magnitude": {
+          "high_abs_move_15m_bp": 22.89658905480356,
+          "high_abs_move_1m_bp": 6.77988630649698,
+          "high_abs_move_5m_bp": 14.232192708013304,
+          "high_prob_abs_gt_9bp_15m": 0.7087511394712853,
+          "high_prob_abs_gt_9bp_1m": 0.24931631722880584,
+          "high_prob_abs_gt_9bp_5m": 0.5528714676390155,
+          "high_rows": 2194,
+          "high_to_low_abs_move_5m_ratio": 1.8573853776653704,
+          "low_abs_move_15m_bp": 13.688546334070399,
+          "low_abs_move_1m_bp": 3.188228051607596,
+          "low_abs_move_5m_bp": 7.662487752489134,
+          "low_prob_abs_gt_9bp_15m": 0.5037037037037037,
+          "low_prob_abs_gt_9bp_1m": 0.047754405912450254,
+          "low_prob_abs_gt_9bp_5m": 0.27743035815804434,
+          "low_rows": 1759
+        },
+        "start": "2026-07-01 00:00:00",
+        "variants": {
+          "combined_controller": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 1593,
+              "risk_blocks": 6
+            },
+            "dynamic_risk_sizing": {
+              "additive_cost_pct": 1.6251423958997167,
+              "additive_gross_return_pct": 3.5119499110178616,
+              "average_margin_fraction_when_active": 0.15123288856489647,
+              "average_notional_when_active": 0.4536986656946894,
+              "bars": 16376,
+              "compounded_return_pct": 1.8358364136284777,
+              "entries_or_reversals": 40,
+              "exposure_fraction": 0.7680752320468979,
+              "max_drawdown_pct": 3.507010407398614,
+              "max_margin_fraction": 0.20349615160613135,
+              "positive_day_fraction": 0.5,
+              "turnover": 36.11427546443815
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.2399999999999998,
+              "additive_gross_return_pct": 7.187084208671876,
+              "average_margin_fraction_when_active": 0.3,
+              "average_notional_when_active": 0.9,
+              "bars": 16376,
+              "compounded_return_pct": 3.7386105208026432,
+              "entries_or_reversals": 40,
+              "exposure_fraction": 0.7680752320468979,
+              "max_drawdown_pct": 6.975258981256949,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 72.0
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -0.75,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "micro_dynamic_exit": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.4019999999999992,
+              "additive_gross_return_pct": 9.874338370359508,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000004,
+              "bars": 16376,
+              "compounded_return_pct": 6.356817929016079,
+              "entries_or_reversals": 42,
+              "exposure_fraction": 0.8657181240840254,
+              "max_drawdown_pct": 7.06585836929301,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 75.6
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "opportunity_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 1589,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.2399999999999998,
+              "additive_gross_return_pct": 7.057122868754958,
+              "average_margin_fraction_when_active": 0.3,
+              "average_notional_when_active": 0.9,
+              "bars": 16376,
+              "compounded_return_pct": 3.6037116427388938,
+              "entries_or_reversals": 40,
+              "exposure_fraction": 0.7686858817782121,
+              "max_drawdown_pct": 7.076649623717279,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 72.0
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "parent": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.4019999999999992,
+              "additive_gross_return_pct": 9.874338370359508,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000004,
+              "bars": 16376,
+              "compounded_return_pct": 6.356817929016079,
+              "entries_or_reversals": 42,
+              "exposure_fraction": 0.8657181240840254,
+              "max_drawdown_pct": 7.06585836929301,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 75.6
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "risk_entry_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.4019999999999992,
+              "additive_gross_return_pct": 9.874338370359508,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000004,
+              "bars": 16376,
+              "compounded_return_pct": 6.356817929016079,
+              "entries_or_reversals": 42,
+              "exposure_fraction": 0.8657181240840254,
+              "max_drawdown_pct": 7.06585836929301,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 75.6
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          }
+        }
+      },
+      "tune": {
+        "bars": 14395,
+        "end": "2026-06-20 23:54:00",
+        "opportunity_magnitude": {
+          "high_abs_move_15m_bp": 25.913339506800014,
+          "high_abs_move_1m_bp": 7.7086524406808525,
+          "high_abs_move_5m_bp": 15.897640429982598,
+          "high_prob_abs_gt_9bp_15m": 0.7187669010275824,
+          "high_prob_abs_gt_9bp_1m": 0.2752839372633856,
+          "high_prob_abs_gt_9bp_5m": 0.5689561925365062,
+          "high_rows": 1849,
+          "high_to_low_abs_move_5m_ratio": 1.8654539453840457,
+          "low_abs_move_15m_bp": 15.084330383708792,
+          "low_abs_move_1m_bp": 3.7209964372858018,
+          "low_abs_move_5m_bp": 8.522129677508447,
+          "low_prob_abs_gt_9bp_15m": 0.5291545189504373,
+          "low_prob_abs_gt_9bp_1m": 0.08493084202863382,
+          "low_prob_abs_gt_9bp_5m": 0.3058994901675164,
+          "low_rows": 4121
+        },
+        "start": "2026-06-11 00:00:00",
+        "variants": {
+          "combined_controller": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 1,
+              "opportunity_blocks": 2090,
+              "risk_blocks": 8
+            },
+            "dynamic_risk_sizing": {
+              "additive_cost_pct": 1.67424912630703,
+              "additive_gross_return_pct": 8.378576690486272,
+              "average_margin_fraction_when_active": 0.15681610855537012,
+              "average_notional_when_active": 0.4704483256661104,
+              "bars": 14395,
+              "compounded_return_pct": 6.87953404273034,
+              "entries_or_reversals": 41,
+              "exposure_fraction": 0.4061132337617228,
+              "max_drawdown_pct": 2.120069829625937,
+              "max_margin_fraction": 0.20098411692760068,
+              "positive_day_fraction": 0.7,
+              "turnover": 37.20553614015623
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.320999999999999,
+              "additive_gross_return_pct": 16.370393596566824,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": 13.726096999020786,
+              "entries_or_reversals": 41,
+              "exposure_fraction": 0.4061132337617228,
+              "max_drawdown_pct": 3.4805881564192065,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.7,
+              "turnover": 73.79999999999998
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -0.75,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "micro_dynamic_exit": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 1,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 4.292999999999999,
+              "additive_gross_return_pct": 13.35822084831761,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": 9.235558524160004,
+              "entries_or_reversals": 53,
+              "exposure_fraction": 0.5518582841264328,
+              "max_drawdown_pct": 3.8272194734756404,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.7,
+              "turnover": 95.4
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "opportunity_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 2072,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 3.320999999999999,
+              "additive_gross_return_pct": 16.135921730633523,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": 13.458716683714389,
+              "entries_or_reversals": 41,
+              "exposure_fraction": 0.40798888502952413,
+              "max_drawdown_pct": 3.4786334637760374,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.7,
+              "turnover": 73.79999999999998
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "parent": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 4.211999999999999,
+              "additive_gross_return_pct": 13.363604331902929,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000002,
+              "bars": 14395,
+              "compounded_return_pct": 9.329978552300421,
+              "entries_or_reversals": 52,
+              "exposure_fraction": 0.5519277526919069,
+              "max_drawdown_pct": 3.8272194734755183,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.7,
+              "turnover": 93.6
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "risk_entry_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 2
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 4.211999999999999,
+              "additive_gross_return_pct": 13.376251184458848,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000002,
+              "bars": 14395,
+              "compounded_return_pct": 9.343844860931716,
+              "entries_or_reversals": 52,
+              "exposure_fraction": 0.5517888155609587,
+              "max_drawdown_pct": 3.8272194734755183,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.7,
+              "turnover": 93.6
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          }
+        }
+      },
+      "validation": {
+        "bars": 14395,
+        "end": "2026-06-30 23:54:00",
+        "opportunity_magnitude": {
+          "high_abs_move_15m_bp": 29.035988930142754,
+          "high_abs_move_1m_bp": 8.281772766951498,
+          "high_abs_move_5m_bp": 17.414891373003904,
+          "high_prob_abs_gt_9bp_15m": 0.7284552845528456,
+          "high_prob_abs_gt_9bp_1m": 0.3,
+          "high_prob_abs_gt_9bp_5m": 0.5861788617886179,
+          "high_rows": 1230,
+          "high_to_low_abs_move_5m_ratio": 1.6642428634732962,
+          "low_abs_move_15m_bp": 18.046806411450174,
+          "low_abs_move_1m_bp": 4.665616642843309,
+          "low_abs_move_5m_bp": 10.46415265177031,
+          "low_prob_abs_gt_9bp_15m": 0.6185394433982004,
+          "low_prob_abs_gt_9bp_1m": 0.13069845253032203,
+          "low_prob_abs_gt_9bp_5m": 0.4081974069427018,
+          "low_rows": 4782
+        },
+        "start": "2026-06-21 00:00:00",
+        "variants": {
+          "combined_controller": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 1369,
+              "risk_blocks": 2
+            },
+            "dynamic_risk_sizing": {
+              "additive_cost_pct": 0.7537732699312268,
+              "additive_gross_return_pct": -1.2268734114556628,
+              "average_margin_fraction_when_active": 0.15823256015031126,
+              "average_notional_when_active": 0.4746976804509338,
+              "bars": 14395,
+              "compounded_return_pct": -2.0398530465683296,
+              "entries_or_reversals": 18,
+              "exposure_fraction": 0.5234456408475165,
+              "max_drawdown_pct": 4.5020179822914175,
+              "max_margin_fraction": 0.20357233453200504,
+              "positive_day_fraction": 0.4,
+              "turnover": 16.75051710958282
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 1.4579999999999995,
+              "additive_gross_return_pct": -2.3576391898268407,
+              "average_margin_fraction_when_active": 0.3000000000000001,
+              "average_notional_when_active": 0.9000000000000002,
+              "bars": 14395,
+              "compounded_return_pct": -4.016549909861578,
+              "entries_or_reversals": 18,
+              "exposure_fraction": 0.5234456408475165,
+              "max_drawdown_pct": 8.537993006153599,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.3,
+              "turnover": 32.4
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -0.75,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "micro_dynamic_exit": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 2.1059999999999994,
+              "additive_gross_return_pct": -0.13007176883093122,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": -2.5137631744395095,
+              "entries_or_reversals": 26,
+              "exposure_fraction": 0.618687044112539,
+              "max_drawdown_pct": 8.155027258498315,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 46.8
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -0.75,
+              "passive_exit_opportunity": 0.15,
+              "urgent_exit_risk": 0.9
+            }
+          },
+          "opportunity_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 1369,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 1.4579999999999995,
+              "additive_gross_return_pct": -2.2021361943507145,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": -3.867165198225153,
+              "entries_or_reversals": 18,
+              "exposure_fraction": 0.5235845779784647,
+              "max_drawdown_pct": 8.461932825537833,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.3,
+              "turnover": 32.4
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.7,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "parent": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 0
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 2.1059999999999994,
+              "additive_gross_return_pct": -0.13007176883093122,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": -2.5137631744395095,
+              "entries_or_reversals": 26,
+              "exposure_fraction": 0.618687044112539,
+              "max_drawdown_pct": 8.155027258498315,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 46.8
+            },
+            "policy": {
+              "max_entry_risk": 1.01,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          },
+          "risk_entry_gate": {
+            "counters": {
+              "alignment_blocks": 0,
+              "micro_exits": 0,
+              "opportunity_blocks": 0,
+              "risk_blocks": 2
+            },
+            "fixed_sizing": {
+              "additive_cost_pct": 2.1059999999999994,
+              "additive_gross_return_pct": -0.3201241205124473,
+              "average_margin_fraction_when_active": 0.30000000000000004,
+              "average_notional_when_active": 0.9000000000000001,
+              "bars": 14395,
+              "compounded_return_pct": -2.6988875085400044,
+              "entries_or_reversals": 26,
+              "exposure_fraction": 0.6185481069815908,
+              "max_drawdown_pct": 8.329438949552426,
+              "max_margin_fraction": 0.3,
+              "positive_day_fraction": 0.5,
+              "turnover": 46.8
+            },
+            "policy": {
+              "max_entry_risk": 0.7,
+              "min_entry_alignment": -1.01,
+              "min_opportunity": 0.0,
+              "passive_exit_alignment": -1.01,
+              "passive_exit_opportunity": -0.01,
+              "urgent_exit_risk": 1.01
+            }
+          }
+        }
+      }
+    }
+  },
+  "execution_assist": {
+    "diagnostic_pass": true,
+    "fixed_policy_rows": [
+      {
+        "arm": "naive_join",
+        "deadline_min": 5,
+        "forced_deadline_rate": 0.002,
+        "improve_daily_t": 61.17,
+        "improve_mean_bps": 1.278,
+        "maker_fill_rate": 0.998,
+        "mean_fill_delay_min": 0.28,
+        "n_days": 70,
+        "n_intents": 86493,
+        "p05_improve_bps": -5.79,
+        "p95_improve_bps": 2.58,
+        "side": "long"
+      },
+      {
+        "arm": "naive_join",
+        "deadline_min": 5,
+        "forced_deadline_rate": 0.001,
+        "improve_daily_t": 63.95,
+        "improve_mean_bps": 1.343,
+        "maker_fill_rate": 0.999,
+        "mean_fill_delay_min": 0.26,
+        "n_days": 70,
+        "n_intents": 86493,
+        "p05_improve_bps": -5.59,
+        "p95_improve_bps": 2.58,
+        "side": "short"
+      }
+    ],
+    "limitation": "one-minute strict trade-through proxy; actual queue position and fills are not observed",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/micro_exec_placement_replay_20260718.json"
+  },
+  "fresh_forward_bar_by_bar": true,
+  "future_rows_used_for_entry": false,
+  "historical_validation_and_development_are_diagnostic_only": true,
+  "locked_reporting_splits": [
+    "validation",
+    "development"
+  ],
+  "multi_asset_allocator": {
+    "diagnostic_pass": false,
+    "evidence_class": "short-window reusable-layer research diagnostic; shadow confirmation required",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/micro_scalp_reuse_layers_test_20260718.json",
+    "splits": {
+      "development": {
+        "allocator_mdd_pct": 2.338965462110665,
+        "allocator_return_pct": -1.227143761345706,
+        "concurrent_return_pct": -1.0354223058032463,
+        "improved": false,
+        "selected_bars": {
+          "btc": 0,
+          "eth": 645,
+          "sol": 75
+        }
+      },
+      "fresh_shadow": {
+        "allocator_mdd_pct": 0.0,
+        "allocator_return_pct": 0.0,
+        "concurrent_return_pct": 0.0,
+        "improved": false,
+        "selected_bars": {
+          "btc": 0,
+          "eth": 0,
+          "sol": 0
+        }
+      },
+      "validation": {
+        "allocator_mdd_pct": 3.1047174702337865,
+        "allocator_return_pct": -2.4320837005080143,
+        "concurrent_return_pct": 0.3161039996553594,
+        "improved": false,
+        "selected_bars": {
+          "btc": 0,
+          "eth": 886,
+          "sol": 302
+        }
+      }
+    }
+  },
+  "order_submission_supported": false,
+  "parent_model_id": "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718",
+  "parent_model_sha256": "0f31d880ebec386c9d33de0cc1b345ec6e9873da37760c4cd77b44c653bc6d5c",
+  "promotion_pass": false,
+  "saved_parent_exit_timestamps_used": false,
+  "schema_version": "microstructure.operating_controller.evaluation.v1",
+  "selected_policies": {
+    "combined_controller": {
+      "max_entry_risk": 0.7,
+      "min_entry_alignment": -0.75,
+      "min_opportunity": 0.7,
+      "passive_exit_alignment": -0.75,
+      "passive_exit_opportunity": 0.15,
+      "urgent_exit_risk": 0.9
+    },
+    "micro_dynamic_exit": {
+      "max_entry_risk": 1.01,
+      "min_entry_alignment": -1.01,
+      "min_opportunity": 0.0,
+      "passive_exit_alignment": -0.75,
+      "passive_exit_opportunity": 0.15,
+      "urgent_exit_risk": 0.9
+    },
+    "opportunity_gate": {
+      "max_entry_risk": 1.01,
+      "min_entry_alignment": -1.01,
+      "min_opportunity": 0.7,
+      "passive_exit_alignment": -1.01,
+      "passive_exit_opportunity": -0.01,
+      "urgent_exit_risk": 1.01
+    },
+    "risk_entry_gate": {
+      "max_entry_risk": 0.7,
+      "min_entry_alignment": -1.01,
+      "min_opportunity": 0.0,
+      "passive_exit_alignment": -1.01,
+      "passive_exit_opportunity": -0.01,
+      "urgent_exit_risk": 1.01
+    }
+  },
+  "tail_risk_readiness": {
+    "historical_schema_v2_eligible": false,
+    "meaningful_schema_v3_rows": 63,
+    "performance_testable": false,
+    "schema_segments": [
+      {
+        "end": "2026-07-18 23:54:00+09:00",
+        "event_bars": 0,
+        "nonzero_aftershock": 0,
+        "rows": 95924,
+        "schema_version": 2,
+        "start": "2026-05-03 17:36:00+09:00"
+      },
+      {
+        "end": "2026-07-19 01:00:00+09:00",
+        "event_bars": 5,
+        "nonzero_aftershock": 42,
+        "rows": 63,
+        "schema_version": 3,
+        "start": "2026-07-18 23:58:00+09:00"
+      }
+    ]
+  },
+  "threshold_selection_split": "tune only",
+  "top_tune_candidates": {
+    "micro_dynamic_exit": [
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 1,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.292999999999999,
+          "additive_gross_return_pct": 13.35822084831761,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 9.235558524160004,
+          "entries_or_reversals": 53,
+          "exposure_fraction": 0.5518582841264328,
+          "max_drawdown_pct": 3.8272194734756404,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 95.4
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -0.75,
+          "passive_exit_opportunity": 0.15,
+          "urgent_exit_risk": 0.9
+        },
+        "score": 8.278753655791093
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 1,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.292999999999999,
+          "additive_gross_return_pct": 13.35822084831761,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 9.235558524160004,
+          "entries_or_reversals": 53,
+          "exposure_fraction": 0.5518582841264328,
+          "max_drawdown_pct": 3.8272194734756404,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 95.4
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -0.75,
+          "passive_exit_opportunity": 0.15,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.278753655791093
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 5,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.616999999999999,
+          "additive_gross_return_pct": 13.442112509878823,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 8.973521684201401,
+          "entries_or_reversals": 57,
+          "exposure_fraction": 0.5515804098645363,
+          "max_drawdown_pct": 3.8272194734754628,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 102.6
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -0.75,
+          "passive_exit_opportunity": 0.25,
+          "urgent_exit_risk": 0.9
+        },
+        "score": 8.016716815832535
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 5,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.616999999999999,
+          "additive_gross_return_pct": 13.442112509878823,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 8.973521684201401,
+          "entries_or_reversals": 57,
+          "exposure_fraction": 0.5515804098645363,
+          "max_drawdown_pct": 3.8272194734754628,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 102.6
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -0.75,
+          "passive_exit_opportunity": 0.25,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.016716815832535
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 4,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.535999999999999,
+          "additive_gross_return_pct": 13.357291773941139,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 8.969370224462004,
+          "entries_or_reversals": 56,
+          "exposure_fraction": 0.5516498784300105,
+          "max_drawdown_pct": 3.827219473475396,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 100.79999999999998
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -0.5,
+          "passive_exit_opportunity": 0.15,
+          "urgent_exit_risk": 0.9
+        },
+        "score": 8.012565356093155
+      }
+    ],
+    "opportunity_gate": [
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 2072,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 3.320999999999999,
+          "additive_gross_return_pct": 16.135921730633523,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 13.458716683714389,
+          "entries_or_reversals": 41,
+          "exposure_fraction": 0.40798888502952413,
+          "max_drawdown_pct": 3.4786334637760374,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 73.79999999999998
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.7,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 12.58905831777038
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.363604331902929,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.329978552300421,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5519277526919069,
+          "max_drawdown_pct": 3.8272194734755183,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.373173683931542
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 283,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.1309999999999985,
+          "additive_gross_return_pct": 13.066076677278032,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 9.099353405384104,
+          "entries_or_reversals": 51,
+          "exposure_fraction": 0.5322681486627301,
+          "max_drawdown_pct": 3.878625350566589,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.8,
+          "turnover": 91.8
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.5,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.129697067742457
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 1070,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 3.887999999999999,
+          "additive_gross_return_pct": 12.445176150222323,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 8.696569090981288,
+          "entries_or_reversals": 48,
+          "exposure_fraction": 0.47759638763459533,
+          "max_drawdown_pct": 3.673637825375864,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.8,
+          "turnover": 86.39999999999998
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.6,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 7.778159634637323
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 5271,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 1.2959999999999998,
+          "additive_gross_return_pct": 5.990587390642757,
+          "average_margin_fraction_when_active": 0.30000000000000004,
+          "average_notional_when_active": 0.9000000000000001,
+          "bars": 14395,
+          "compounded_return_pct": 4.725410279314168,
+          "entries_or_reversals": 16,
+          "exposure_fraction": 0.1857589440778048,
+          "max_drawdown_pct": 3.5613314416793385,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.5,
+          "turnover": 28.799999999999997
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.8,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 3.8350774188943335
+      }
+    ],
+    "risk_entry_gate": [
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 2
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.376251184458848,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.343844860931716,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5517888155609587,
+          "max_drawdown_pct": 3.8272194734755183,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 0.7,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.387039992562837
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.363604331902929,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.329978552300421,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5519277526919069,
+          "max_drawdown_pct": 3.8272194734755183,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 0.8,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.373173683931542
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.363604331902929,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.329978552300421,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5519277526919069,
+          "max_drawdown_pct": 3.8272194734755183,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 0.9,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.373173683931542
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 0
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.363604331902929,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.329978552300421,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5519277526919069,
+          "max_drawdown_pct": 3.8272194734755183,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 1.01,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.373173683931542
+      },
+      {
+        "counters": {
+          "alignment_blocks": 0,
+          "micro_exits": 0,
+          "opportunity_blocks": 0,
+          "risk_blocks": 17
+        },
+        "metrics": {
+          "additive_cost_pct": 4.211999999999999,
+          "additive_gross_return_pct": 13.225158743157406,
+          "average_margin_fraction_when_active": 0.3000000000000001,
+          "average_notional_when_active": 0.9000000000000002,
+          "bars": 14395,
+          "compounded_return_pct": 9.17943670590402,
+          "entries_or_reversals": 52,
+          "exposure_fraction": 0.5507467870788468,
+          "max_drawdown_pct": 3.827219473475285,
+          "max_margin_fraction": 0.3,
+          "positive_day_fraction": 0.7,
+          "turnover": 93.6
+        },
+        "policy": {
+          "max_entry_risk": 0.6,
+          "min_entry_alignment": -1.01,
+          "min_opportunity": 0.0,
+          "passive_exit_alignment": -1.01,
+          "passive_exit_opportunity": -0.01,
+          "urgent_exit_risk": 1.01
+        },
+        "score": 8.2226318375352
+      }
+    ]
+  },
+  "trade_ledgers_used_as_input": false
+}

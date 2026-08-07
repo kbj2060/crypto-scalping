@@ -1,0 +1,1089 @@
+{
+  "type": "clean_base_plus_causal_conviction_sleeve_v1_1",
+  "verdict": "reject_for_promotion_gate",
+  "selected_config": {
+    "name": "same0.0025_hedge0.0025_frac0.25_bars6_same1_hedge1_acct0.080_day0.015",
+    "same_threshold": 0.0025,
+    "hedge_threshold": 0.0025,
+    "max_sleeve_frac": 0.25,
+    "max_sleeve_bars": 6,
+    "same_enabled": true,
+    "hedge_enabled": true,
+    "account_dd_disable": 0.08,
+    "daily_dd_disable": 0.015
+  },
+  "training": {
+    "rows": 740,
+    "same_positive_rate": 0.4554054054054054,
+    "hedge_positive_rate": 0.051351351351351354,
+    "same_mean": -0.000280450255874125,
+    "hedge_mean": -0.010921039169754263
+  },
+  "validation_grid_rows": 16,
+  "validation_selected_on": "2025-11-01 through 2025-12-31 only",
+  "candidate_total_oos": {
+    "pnl": 210.53568634188076,
+    "mdd": -18.015154932248112,
+    "trades": 363,
+    "core_trades_per_day": 6.1525423728813555,
+    "wr": 0.49586776859504134,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 324,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 39,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.10743801652892562,
+    "core_lane_pnl_contribution": 242.25020860420153,
+    "sleeve_lane_pnl_contribution": 3.277329192611529,
+    "add_contribution": 3.277329192611529,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 3.2566419417190486,
+    "net_notional_max": 3.2566419417190486,
+    "reason_counts": {
+      "predicted_same_edge": 40,
+      "daily_dd_disable": 4
+    }
+  },
+  "core_lane_oos": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "core_trades_per_day": null,
+    "wr": 0.5730027548209367,
+    "sleeve_action_counts": null,
+    "sleeve_fraction": null,
+    "core_lane_pnl_contribution": null,
+    "sleeve_lane_pnl_contribution": null,
+    "add_contribution": null,
+    "hedge_contribution": null,
+    "gross_notional_max": null,
+    "net_notional_max": null,
+    "reason_counts": null
+  },
+  "sleeve_lane_oos": {
+    "pnl_contribution": 3.277329192611529,
+    "sleeve_fraction": 0.10743801652892562
+  },
+  "cost_1x": {
+    "pnl": 210.53568634188076,
+    "mdd": -18.015154932248112,
+    "trades": 363,
+    "core_trades_per_day": 6.1525423728813555,
+    "wr": 0.49586776859504134,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 324,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 39,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.10743801652892562,
+    "core_lane_pnl_contribution": 242.25020860420153,
+    "sleeve_lane_pnl_contribution": 3.277329192611529,
+    "add_contribution": 3.277329192611529,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 3.2566419417190486,
+    "net_notional_max": 3.2566419417190486,
+    "reason_counts": {
+      "predicted_same_edge": 40,
+      "daily_dd_disable": 4
+    }
+  },
+  "cost_2x": {
+    "pnl": 134.05097988569312,
+    "mdd": -18.337955335873435,
+    "trades": 318,
+    "core_trades_per_day": 5.389830508474576,
+    "wr": 0.31446540880503143,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 292,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 26,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.08176100628930817,
+    "core_lane_pnl_contribution": 175.3647438554361,
+    "sleeve_lane_pnl_contribution": 2.683656005484826,
+    "add_contribution": 2.683656005484826,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 3.4354531679769087,
+    "net_notional_max": 3.4354531679769087,
+    "reason_counts": {
+      "predicted_same_edge": 27,
+      "daily_dd_disable": 9
+    }
+  },
+  "cost_3x": {
+    "pnl": -9.14808954879296,
+    "mdd": -10.169535660404316,
+    "trades": 179,
+    "core_trades_per_day": 3.0338983050847457,
+    "wr": 0.1452513966480447,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 169,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 10,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.055865921787709494,
+    "core_lane_pnl_contribution": 6.332675214440644,
+    "sleeve_lane_pnl_contribution": 0.1998745174120778,
+    "add_contribution": 0.1998745174120778,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 2.7482364303254063,
+    "net_notional_max": 2.7482364303254063,
+    "reason_counts": {
+      "predicted_same_edge": 10,
+      "daily_dd_disable": 3,
+      "account_dd_disable": 68
+    }
+  },
+  "validation_cost_1x": {
+    "pnl": 923.10591609748,
+    "mdd": -12.899098192984738,
+    "trades": 695,
+    "core_trades_per_day": 11.39344262295082,
+    "wr": 0.581294964028777,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 609,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 86,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.1237410071942446,
+    "core_lane_pnl_contribution": 1202.268238449864,
+    "sleeve_lane_pnl_contribution": 21.069797862943144,
+    "add_contribution": 21.069797862943144,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 3.2659467162569644,
+    "net_notional_max": 3.2659467162569644,
+    "reason_counts": {
+      "predicted_same_edge": 86,
+      "daily_dd_disable": 7
+    }
+  },
+  "validation_cost_2x": {
+    "pnl": 140.14402577318438,
+    "mdd": -12.38769661181146,
+    "trades": 590,
+    "core_trades_per_day": 9.672131147540984,
+    "wr": 0.4135593220338983,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 536,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 53,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 1
+    },
+    "sleeve_fraction": 0.09152542372881356,
+    "core_lane_pnl_contribution": 281.37791699808776,
+    "sleeve_lane_pnl_contribution": 5.329443759022368,
+    "add_contribution": 3.8949416869951294,
+    "hedge_contribution": 1.4345020720272388,
+    "gross_notional_max": 3.2659467162569644,
+    "net_notional_max": 3.2659467162569644,
+    "reason_counts": {
+      "predicted_same_edge": 53,
+      "daily_dd_disable": 14,
+      "account_dd_disable": 235,
+      "predicted_hedge_edge": 1
+    }
+  },
+  "validation_cost_3x": {
+    "pnl": 10.2274195955109,
+    "mdd": -16.950588627505837,
+    "trades": 544,
+    "core_trades_per_day": 8.918032786885245,
+    "wr": 0.29044117647058826,
+    "sleeve_action_counts": {
+      "NO_SLEEVE": 514,
+      "ADD_SAME_SIDE_15": 0,
+      "ADD_SAME_SIDE_25": 30,
+      "HEDGE_OPPOSITE_15": 0,
+      "HEDGE_OPPOSITE_25": 0
+    },
+    "sleeve_fraction": 0.05514705882352941,
+    "core_lane_pnl_contribution": 100.03179230543506,
+    "sleeve_lane_pnl_contribution": -0.2761232866656955,
+    "add_contribution": -0.2761232866656955,
+    "hedge_contribution": 0.0,
+    "gross_notional_max": 2.4925817502781564,
+    "net_notional_max": 2.4925817502781564,
+    "reason_counts": {
+      "predicted_same_edge": 30,
+      "daily_dd_disable": 9,
+      "account_dd_disable": 291
+    }
+  },
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "cost_1x_pnl": 177.3298088749005,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "clean_base_validation_reference": {
+    "pnl": 553.6100808441419,
+    "mdd": -12.65692178918314,
+    "trades": 695,
+    "core_trades_per_day": null,
+    "wr": 0.581294964028777,
+    "sleeve_action_counts": null,
+    "sleeve_fraction": null,
+    "core_lane_pnl_contribution": null,
+    "sleeve_lane_pnl_contribution": null,
+    "add_contribution": null,
+    "hedge_contribution": null,
+    "gross_notional_max": null,
+    "net_notional_max": null,
+    "reason_counts": null
+  },
+  "clean_base_oos_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "core_trades_per_day": null,
+    "wr": 0.49586776859504134,
+    "sleeve_action_counts": null,
+    "sleeve_fraction": null,
+    "core_lane_pnl_contribution": null,
+    "sleeve_lane_pnl_contribution": null,
+    "add_contribution": null,
+    "hedge_contribution": null,
+    "gross_notional_max": null,
+    "net_notional_max": null,
+    "reason_counts": null
+  },
+  "lifecycle_v1_reference": {
+    "validation": {
+      "pnl": 908.4222875243677,
+      "mdd": -12.696352061226445,
+      "trades": 695,
+      "core_trades_per_day": null,
+      "wr": 0.6690647482014388,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "oos": {
+      "pnl": 207.2368875907697,
+      "mdd": -18.016318445365364,
+      "trades": 363,
+      "core_trades_per_day": null,
+      "wr": 0.5730027548209367,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json"
+  },
+  "sleeve_action_counts": {
+    "NO_SLEEVE": 324,
+    "ADD_SAME_SIDE_15": 0,
+    "ADD_SAME_SIDE_25": 39,
+    "HEDGE_OPPOSITE_15": 0,
+    "HEDGE_OPPOSITE_25": 0
+  },
+  "sleeve_fraction": 0.10743801652892562,
+  "add_contribution": 3.277329192611529,
+  "hedge_contribution": 0.0,
+  "gross_notional_max": 3.2566419417190486,
+  "net_notional_max": 3.2566419417190486,
+  "preservation_audit": {
+    "decision_frame_audit": {
+      "passed": true,
+      "rows": 16897,
+      "active_rows": 16897,
+      "cash_rows": 0,
+      "long_rows": 7900,
+      "short_rows": 8997,
+      "violations": {
+        "nonfinite_values": 0,
+        "negative_notional": 0,
+        "leverage_below_one_active": 0,
+        "leverage_above_cap": 0,
+        "notional_above_max": 0,
+        "active_action_side_mismatch": 0,
+        "cash_has_exposure": 0,
+        "position_fraction_mismatch": 0,
+        "negative_cooldown": 0
+      },
+      "notional": {
+        "max": 3.0380552603853426,
+        "mean": 0.8042273420435015,
+        "p95": 1.7381261779863437
+      },
+      "leverage": {
+        "max": 2.5708089733514607,
+        "mean": 1.5912971481880236,
+        "p95": 1.8325242533448571
+      }
+    },
+    "core_lane_preservation": {
+      "passed": true,
+      "violations": {
+        "trade_count_changed": 0,
+        "entry_idx_changed": 0,
+        "core_side_changed": 0,
+        "core_exit_changed": 0,
+        "core_notional_changed": 0,
+        "leverage_changed": 0,
+        "gross_cap": 0,
+        "net_cap": 0
+      },
+      "base_trades": 363,
+      "candidate_trades": 363
+    },
+    "passed": true
+  },
+  "causality_audit": {
+    "passed": true,
+    "runtime_uses_future_returns": false,
+    "runtime_decision_features": "current features plus predicted same/hedge utility only",
+    "training_labels_use_future": true,
+    "oos_threshold_selection": false
+  },
+  "sleeve_accounting_audit": {
+    "passed": true,
+    "sleeve_cash_realized_at_sleeve_exit": true,
+    "sleeve_entry_exit_fee_charged_independently": true
+  },
+  "realistic_replay": {
+    "run": false,
+    "note": "Controlled two-lane replay only. Funding/impact/partial fills not simulated."
+  },
+  "reject_reasons": [
+    "total_pnl >= 230",
+    "total_mdd >= -18.0",
+    "cost3 >= 70"
+  ],
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_plus_causal_conviction_sleeve_v1_1/causal_sleeve_regressors.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_plus_causal_conviction_sleeve_v1_1_2026.json",
+    "grid_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_plus_causal_conviction_sleeve_v1_1_grid.csv",
+    "ledger_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_plus_causal_conviction_sleeve_v1_1_ledger.csv",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/clean_base_plus_causal_conviction_sleeve_v1_1.md"
+  },
+  "frozen_artifacts": {
+    "base_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_v4_clean_train_to_2025_10.pkl",
+    "base_policy_sha256": "5a2515c7840c94d0695be52433c524afc646d6fa17d1e6f6055db80b281622fb",
+    "base_exit_governor": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_no_limit_exit_clean_train_to_2025_10.pkl",
+    "base_exit_governor_sha256": "0378def51dbc1a1ed0b30219b7799a872d82a9be49e78bcf517e9d951d376fe3",
+    "lifecycle_v1_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_lifecycle_editor_v1/lifecycle_editor.pkl",
+    "lifecycle_v1_model_sha256": "4ea2a2405d08743133499ea791c9e2f2466c53ddd5319677bf5e40c81ed7060c"
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "split_contract": {
+      "train_labels": "2025-01-01 through 2025-10-31",
+      "validation_selection": "2025-11-01 through 2025-12-31",
+      "one_shot_oos": "2026-01-01 through 2026-02-28",
+      "oos_threshold_selection": false
+    }
+  },
+  "feature_contract": {
+    "features": [
+      "side",
+      "quality",
+      "confidence",
+      "core_notional",
+      "leverage",
+      "account_dd",
+      "daily_dd",
+      "loss_streak",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk"
+    ],
+    "runtime_forbidden": [
+      "future close",
+      "future high/low",
+      "end_px",
+      "same_raw from future price",
+      "opp_raw from future price",
+      "future realized return"
+    ]
+  },
+  "validation_top10": [
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.25_bars6_same1_hedge1_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.25,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": true,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 923.10591609748,
+        "mdd": -12.899098192984738,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 609,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 86,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.1237410071942446,
+        "core_lane_pnl_contribution": 1202.268238449864,
+        "sleeve_lane_pnl_contribution": 21.069797862943144,
+        "add_contribution": 21.069797862943144,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.2659467162569644,
+        "net_notional_max": 3.2659467162569644,
+        "reason_counts": {
+          "predicted_same_edge": 86,
+          "daily_dd_disable": 7
+        }
+      },
+      "validation_cost3": {
+        "pnl": 10.2274195955109,
+        "mdd": -16.950588627505837,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 514,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 30,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.05514705882352941,
+        "core_lane_pnl_contribution": 100.03179230543506,
+        "sleeve_lane_pnl_contribution": -0.2761232866656955,
+        "add_contribution": -0.2761232866656955,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.4925817502781564,
+        "net_notional_max": 2.4925817502781564,
+        "reason_counts": {
+          "predicted_same_edge": 30,
+          "daily_dd_disable": 9,
+          "account_dd_disable": 291
+        }
+      },
+      "selection_score": 926.1741419761332
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.25_bars6_same1_hedge0_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.25,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": false,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 923.10591609748,
+        "mdd": -12.899098192984738,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 609,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 86,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.1237410071942446,
+        "core_lane_pnl_contribution": 1202.268238449864,
+        "sleeve_lane_pnl_contribution": 21.069797862943144,
+        "add_contribution": 21.069797862943144,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.2659467162569644,
+        "net_notional_max": 3.2659467162569644,
+        "reason_counts": {
+          "predicted_same_edge": 86,
+          "daily_dd_disable": 7
+        }
+      },
+      "validation_cost3": {
+        "pnl": 10.2274195955109,
+        "mdd": -16.950588627505837,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 514,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 30,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.05514705882352941,
+        "core_lane_pnl_contribution": 100.03179230543506,
+        "sleeve_lane_pnl_contribution": -0.2761232866656955,
+        "add_contribution": -0.2761232866656955,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.4925817502781564,
+        "net_notional_max": 2.4925817502781564,
+        "reason_counts": {
+          "predicted_same_edge": 30,
+          "daily_dd_disable": 9,
+          "account_dd_disable": 291
+        }
+      },
+      "selection_score": 926.1741419761332
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.10_bars6_same1_hedge1_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": true,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 913.7897442457996,
+        "mdd": -12.7719191148992,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 607,
+          "ADD_SAME_SIDE_15": 88,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.12661870503597122,
+        "core_lane_pnl_contribution": 1198.3097611238036,
+        "sleeve_lane_pnl_contribution": 8.49839395957845,
+        "add_contribution": 8.49839395957845,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "predicted_same_edge": 88,
+          "daily_dd_disable": 6
+        }
+      },
+      "validation_cost3": {
+        "pnl": 11.942173950911151,
+        "mdd": -16.950588627505493,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 513,
+          "ADD_SAME_SIDE_15": 31,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.05698529411764706,
+        "core_lane_pnl_contribution": 101.04601689481228,
+        "sleeve_lane_pnl_contribution": -0.09559824972133497,
+        "add_contribution": -0.09559824972133497,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "predicted_same_edge": 31,
+          "daily_dd_disable": 9,
+          "account_dd_disable": 286
+        }
+      },
+      "selection_score": 917.372396431073
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.10_bars6_same1_hedge0_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": false,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 913.7897442457996,
+        "mdd": -12.7719191148992,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 607,
+          "ADD_SAME_SIDE_15": 88,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.12661870503597122,
+        "core_lane_pnl_contribution": 1198.3097611238036,
+        "sleeve_lane_pnl_contribution": 8.49839395957845,
+        "add_contribution": 8.49839395957845,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "predicted_same_edge": 88,
+          "daily_dd_disable": 6
+        }
+      },
+      "validation_cost3": {
+        "pnl": 11.942173950911151,
+        "mdd": -16.950588627505493,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 513,
+          "ADD_SAME_SIDE_15": 31,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.05698529411764706,
+        "core_lane_pnl_contribution": 101.04601689481228,
+        "sleeve_lane_pnl_contribution": -0.09559824972133497,
+        "add_contribution": -0.09559824972133497,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "predicted_same_edge": 31,
+          "daily_dd_disable": 9,
+          "account_dd_disable": 286
+        }
+      },
+      "selection_score": 917.372396431073
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0040_hedge0.0025_frac0.25_bars6_same1_hedge1_acct0.080_day0.015",
+        "same_threshold": 0.004,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.25,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": true,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 913.0199205222178,
+        "mdd": -12.899098192984749,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 645,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 50,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.07194244604316546,
+        "core_lane_pnl_contribution": 1195.0499981761266,
+        "sleeve_lane_pnl_contribution": 11.183008964350734,
+        "add_contribution": 11.183008964350734,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.2659467162569644,
+        "net_notional_max": 3.2659467162569644,
+        "reason_counts": {
+          "predicted_same_edge": 50,
+          "daily_dd_disable": 7
+        }
+      },
+      "validation_cost3": {
+        "pnl": 10.72371389783533,
+        "mdd": -16.95058862750558,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 529,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 15,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.027573529411764705,
+        "core_lane_pnl_contribution": 100.41485049513416,
+        "sleeve_lane_pnl_contribution": -0.9840198597676266,
+        "add_contribution": -0.9840198597676266,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.4925817502781564,
+        "net_notional_max": 2.4925817502781564,
+        "reason_counts": {
+          "daily_dd_disable": 9,
+          "predicted_same_edge": 15,
+          "account_dd_disable": 291
+        }
+      },
+      "selection_score": 916.2370346915684
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0040_hedge0.0025_frac0.25_bars6_same1_hedge0_acct0.080_day0.015",
+        "same_threshold": 0.004,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.25,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": false,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 913.0199205222178,
+        "mdd": -12.899098192984749,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 645,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 50,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.07194244604316546,
+        "core_lane_pnl_contribution": 1195.0499981761266,
+        "sleeve_lane_pnl_contribution": 11.183008964350734,
+        "add_contribution": 11.183008964350734,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.2659467162569644,
+        "net_notional_max": 3.2659467162569644,
+        "reason_counts": {
+          "predicted_same_edge": 50,
+          "daily_dd_disable": 7
+        }
+      },
+      "validation_cost3": {
+        "pnl": 10.72371389783533,
+        "mdd": -16.95058862750558,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 529,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 15,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.027573529411764705,
+        "core_lane_pnl_contribution": 100.41485049513416,
+        "sleeve_lane_pnl_contribution": -0.9840198597676266,
+        "add_contribution": -0.9840198597676266,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.4925817502781564,
+        "net_notional_max": 2.4925817502781564,
+        "reason_counts": {
+          "daily_dd_disable": 9,
+          "predicted_same_edge": 15,
+          "account_dd_disable": 291
+        }
+      },
+      "selection_score": 916.2370346915684
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0040_hedge0.0025_frac0.10_bars6_same1_hedge1_acct0.080_day0.015",
+        "same_threshold": 0.004,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": true,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 909.0229535004287,
+        "mdd": -12.7719191148992,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 645,
+          "ADD_SAME_SIDE_15": 50,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.07194244604316546,
+        "core_lane_pnl_contribution": 1194.4333418183685,
+        "sleeve_lane_pnl_contribution": 4.478964090020245,
+        "add_contribution": 4.478964090020245,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "predicted_same_edge": 50,
+          "daily_dd_disable": 6
+        }
+      },
+      "validation_cost3": {
+        "pnl": 12.153167495681183,
+        "mdd": -16.950588627505248,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 529,
+          "ADD_SAME_SIDE_15": 15,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.027573529411764705,
+        "core_lane_pnl_contribution": 101.20769255898237,
+        "sleeve_lane_pnl_contribution": -0.3985149707889137,
+        "add_contribution": -0.3985149707889137,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "daily_dd_disable": 10,
+          "predicted_same_edge": 15,
+          "account_dd_disable": 285
+        }
+      },
+      "selection_score": 912.668903749133
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0040_hedge0.0025_frac0.10_bars6_same1_hedge0_acct0.080_day0.015",
+        "same_threshold": 0.004,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": true,
+        "hedge_enabled": false,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 909.0229535004287,
+        "mdd": -12.7719191148992,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.581294964028777,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 645,
+          "ADD_SAME_SIDE_15": 50,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.07194244604316546,
+        "core_lane_pnl_contribution": 1194.4333418183685,
+        "sleeve_lane_pnl_contribution": 4.478964090020245,
+        "add_contribution": 4.478964090020245,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "predicted_same_edge": 50,
+          "daily_dd_disable": 6
+        }
+      },
+      "validation_cost3": {
+        "pnl": 12.153167495681183,
+        "mdd": -16.950588627505248,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 529,
+          "ADD_SAME_SIDE_15": 15,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.027573529411764705,
+        "core_lane_pnl_contribution": 101.20769255898237,
+        "sleeve_lane_pnl_contribution": -0.3985149707889137,
+        "add_contribution": -0.3985149707889137,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "daily_dd_disable": 10,
+          "predicted_same_edge": 15,
+          "account_dd_disable": 285
+        }
+      },
+      "selection_score": 912.668903749133
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.10_bars6_same0_hedge1_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": false,
+        "hedge_enabled": true,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 906.3251849194936,
+        "mdd": -12.687109120376249,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.5841726618705037,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 695,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.0,
+        "core_lane_pnl_contribution": 1193.9934995800859,
+        "sleeve_lane_pnl_contribution": 0.0,
+        "add_contribution": 0.0,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "daily_dd_disable": 5
+        }
+      },
+      "validation_cost3": {
+        "pnl": 13.119285792243796,
+        "mdd": -16.950588627505326,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 544,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.0,
+        "core_lane_pnl_contribution": 101.73735409453415,
+        "sleeve_lane_pnl_contribution": 0.0,
+        "add_contribution": 0.0,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "daily_dd_disable": 11,
+          "account_dd_disable": 283
+        }
+      },
+      "selection_score": 910.2609706571667
+    },
+    {
+      "runtime_config": {
+        "name": "same0.0025_hedge0.0025_frac0.10_bars6_same0_hedge0_acct0.080_day0.015",
+        "same_threshold": 0.0025,
+        "hedge_threshold": 0.0025,
+        "max_sleeve_frac": 0.1,
+        "max_sleeve_bars": 6,
+        "same_enabled": false,
+        "hedge_enabled": false,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.015
+      },
+      "validation": {
+        "pnl": 906.3251849194936,
+        "mdd": -12.687109120376249,
+        "trades": 695,
+        "core_trades_per_day": 11.39344262295082,
+        "wr": 0.5841726618705037,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 695,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.0,
+        "core_lane_pnl_contribution": 1193.9934995800859,
+        "sleeve_lane_pnl_contribution": 0.0,
+        "add_contribution": 0.0,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 3.1252765593292904,
+        "net_notional_max": 3.1252765593292904,
+        "reason_counts": {
+          "daily_dd_disable": 5
+        }
+      },
+      "validation_cost3": {
+        "pnl": 13.119285792243796,
+        "mdd": -16.950588627505326,
+        "trades": 544,
+        "core_trades_per_day": 8.918032786885245,
+        "wr": 0.29044117647058826,
+        "sleeve_action_counts": {
+          "NO_SLEEVE": 544,
+          "ADD_SAME_SIDE_15": 0,
+          "ADD_SAME_SIDE_25": 0,
+          "HEDGE_OPPOSITE_15": 0,
+          "HEDGE_OPPOSITE_25": 0
+        },
+        "sleeve_fraction": 0.0,
+        "core_lane_pnl_contribution": 101.73735409453415,
+        "sleeve_lane_pnl_contribution": 0.0,
+        "add_contribution": 0.0,
+        "hedge_contribution": 0.0,
+        "gross_notional_max": 2.247647534643374,
+        "net_notional_max": 2.247647534643374,
+        "reason_counts": {
+          "daily_dd_disable": 11,
+          "account_dd_disable": 283
+        }
+      },
+      "selection_score": 910.2609706571667
+    }
+  ]
+}

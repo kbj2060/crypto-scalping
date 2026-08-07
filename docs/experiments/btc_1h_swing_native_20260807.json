@@ -1,0 +1,44 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "btc-1h-swing-native-entry-20260807",
+  "hypothesis": "A BTC entry model built natively on 1h bars with a multi-day (96-bar / 4-day) triple-barrier horizon extracts a net-positive edge that the exhaustively-falsified 5m representation cannot, because per-trade expected move at this scale is a large multiple of round-trip cost and the 5m efficiency ceiling does not bind.",
+  "research": {
+    "line_id": "btc_1h_native_swing_entry",
+    "related_prior_line_ids": ["btc_sigma3_1h_5m_exit_precision", "btc_barrier_horizon_calibration", "btc_tripbarrier_entry_axis_20260807_gates"],
+    "prior_failure_reassessment": "All decisive BTC entry-axis falsifications (2026-08-05 barrier/horizon sweep 0/148, 2026-08-07 G0'-G8 gates and the ~18 entry tests that followed) were run at 5m decision cadence with horizons up to 288 5m-bars (24h); the structural 'BTC efficiency ceiling' finding (2026-07-20) is likewise a 5m-scalping conclusion. The one prior 1h BTC line (btc_sigma3_1h_5m_exit_precision) used 1h only as an entry signal grafted onto 5m exit precision and failed on the 5m-exit side (WR 41.7%->8.3% on fresh data), never testing a 1h-native multi-day hold. Separately, ETH Sigma3-1h showed 1h is a sample-count sweet spot (2h/4h starve training data) and ETH's live edge (Omega4.6.1) is carried by multi-day holds -- a regime BTC 5m models structurally cannot reach because their horizon caps at 24h. This contract changes the representation (bar interval AND holding scale), which is exactly condition (b) of the 2026-08-07 session-close rule for resuming BTC work.",
+    "retest_design": "Nothing here reuses a 5m model, 5m exit path, or any saved ledger: 1h bars are freshly resampled from the pinned raw 5m frame, features are 1h-causal (completed bars only), labels are ATR-scaled triple-barrier on 1h bars with a 96-bar horizon and explicit timeout class. Cheap falsification gate: LightGBM, N=5 genuinely random non-clustered seeds, purge+embargo sized to the 96-bar horizon, candidate selection on VAL only, one OOS read after selection. Distinguishing outcome vs prior lines: if 1h-native fails the same way 5m did (VAL/OOS decorrelation), that extends the efficiency ceiling to 1h and closes the timeframe axis for BTC; if it passes, the difference is attributable to representation scale, the single variable changed."
+  },
+  "market": {"symbols": ["BTCUSDT"], "bar_interval": "1h"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/btc_features_1h_swing_20260807.parquet",
+    "raw_sources": ["klines", "derivatives_funding", "open_interest", "toptrader_long_short_ratio", "cross_asset_eth"]
+  },
+  "features": {
+    "groups": ["momentum_multi_horizon", "volatility", "oscillators", "structural_price_location", "volume_activity", "derivatives_funding", "open_interest", "positioning", "cross_asset_eth", "time_session", "ohlcv_raw"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_atr_scaled", "horizon_bars": "96", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "lightgbm_5seed_purge_embargo96 (cheap gate; no deeper architecture until the gate passes)",
+    "seeds": ["914237", "60481", "7754321", "283009", "51418"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {
+    "minimum_trades_per_split": "15",
+    "validation_pass_criteria": "seed-median VAL net PnL > 0 after 10bps_roundtrip_conservative cost with >= 15 trades and >= 4/5 seeds VAL-positive; OOS is read once, after VAL-only selection, and must show >= 4/5 seeds net-positive to proceed beyond the cheap gate"
+  },
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_conservative", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

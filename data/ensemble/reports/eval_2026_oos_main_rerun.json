@@ -1,0 +1,28 @@
+{
+  "checkpoint": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "checkpoint_best_val_pnl": -20.83004633033978,
+  "checkpoint_epoch": 50,
+  "rl_csv": "data/rl_training_data_full.csv",
+  "feat_csv": "data/training_features_5m.csv",
+  "data_period": "2026-01-01 ~ 2026-02-28",
+  "data_rows": 16897,
+  "note": "진짜 OOS: 학습/검증 어디에도 사용되지 않은 데이터",
+  "results": [
+    {
+      "method": "training_env",
+      "pnl_pct": -18.2711,
+      "wr_pct": 45.81,
+      "trades": 179,
+      "sharpe": -1.456,
+      "mdd_pct": -40.8851
+    },
+    {
+      "method": "closed_loop",
+      "pnl_pct": -13.2799,
+      "wr_pct": 42.72,
+      "trades": 103,
+      "sharpe": -0.8678,
+      "mdd_pct": -27.7159
+    }
+  ]
+}

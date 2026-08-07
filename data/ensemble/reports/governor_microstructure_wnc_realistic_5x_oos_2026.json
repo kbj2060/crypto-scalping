@@ -1,0 +1,115 @@
+{
+  "type": "governor_with_microstructure_wnc_sleeve",
+  "eval_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_oofdet_router_regime_v3_manifest_policy.csv",
+  "micro_model": "data/ensemble/supervised/microstructure_wnc_sleeve_realistic_5x.pkl",
+  "sniper_ckpt": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/regime_rl_meta_controller_v3/best.pth",
+  "day_ckpt": null,
+  "day_mode": "rule",
+  "eval_days": 58.670138888888886,
+  "active_regimes": [
+    "bull",
+    "bear"
+  ],
+  "risk_config": {
+    "sniper_notional_exposure": 5.0,
+    "sniper_leverage": 5.0,
+    "sniper_bypass_risk": true,
+    "portfolio_daily_loss_limit": 0.08,
+    "portfolio_daily_drawdown_limit": 0.09,
+    "portfolio_max_consecutive_losses": 6
+  },
+  "micro_config": {
+    "entry_confidence": 0.38863652678908955,
+    "entry_gap": 0.31359495255093583,
+    "max_hold_bars": 20,
+    "stop_loss": 0.013589913419911162,
+    "take_profit": 0.03198217427139267,
+    "trailing_stop": 0.010312381961659083,
+    "max_notional_exposure": 5.0,
+    "min_notional_exposure": 0.4,
+    "max_leverage": 5.0,
+    "cooldown_bars": 0,
+    "whipsaw_notional_mult": 1.985530121100684,
+    "chop_notional_mult": 1.2751447902716229,
+    "normal_notional_mult": 1.3974664052707788,
+    "fee": 0.0005,
+    "slippage": 0.0002,
+    "portfolio_soft_drawdown": 0.12375981874050213,
+    "portfolio_hard_drawdown": 0.4018745282297362,
+    "portfolio_min_drawdown_scale": 0.7168514671520293
+  },
+  "result": {
+    "pnl": 9257.517216871185,
+    "trades": 998,
+    "wr": 0.6713426853707415,
+    "mdd": -14.320742238661966,
+    "long_entries": 561,
+    "short_entries": 436,
+    "force_closes": 43,
+    "controller_closes": 980,
+    "switch_closes": 0,
+    "entry_vetoes": 0,
+    "invalid_actions": 0,
+    "risk_blocks": 0,
+    "risk_forced_exits": 35,
+    "avg_risk_score": 0.34059452055364736,
+    "avg_leverage": 3.1540020151366472,
+    "avg_margin_fraction": 0.48597570149173935,
+    "avg_notional_exposure": 2.2283993841555843,
+    "risk_reason_counts": {},
+    "risk_exit_reason_counts": {
+      "regime_mismatch": 23,
+      "risk_exit": 12
+    },
+    "risk_resize_reason_counts": {
+      "delta_too_small": 243,
+      "exit_pending": 35,
+      "reduce_not_needed": 423,
+      "resize_add": 21,
+      "resize_cooldown": 174,
+      "resize_hold_warmup": 272,
+      "resize_reduce": 10
+    },
+    "resize_events": 31,
+    "resize_add_events": 21,
+    "resize_reduce_events": 10,
+    "resize_realized_pnl": 0.0013970011240389368,
+    "resize_fee_paid": 245.95789847890072,
+    "active_rows": 1664,
+    "action_counts": {
+      "CASH_HOLD": 10713,
+      "ALLOW_CURRENT": 1159,
+      "ALLOW_BULL": 185,
+      "ALLOW_BEAR": 51,
+      "ALLOW_FADE": 304,
+      "CLOSE": 468
+    },
+    "sniper_entries": 137,
+    "day_entries": 383,
+    "micro_entries": 477,
+    "micro_entry_signals": 596,
+    "micro_blocks": 4480,
+    "micro_closes": 477,
+    "sniper_governor_blocks": 15,
+    "sniper_governor_scaled": 137,
+    "source_counts": {
+      "cash": 9268,
+      "day": 1768,
+      "sniper_override": 142,
+      "micro": 477,
+      "sniper": 1702
+    },
+    "micro_regime_entries": {
+      "whipsaw": 67,
+      "normal": 345,
+      "chop": 65
+    },
+    "trades_per_day": 17.010356868083093,
+    "portfolio_governor": {
+      "peak_equity": 940528.8384035127,
+      "max_drawdown_frac": 0.14320742238661976,
+      "sniper_blocks": 15,
+      "sniper_scaled": 137
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "components": [
+    "regime_filter",
+    "direction_hgb",
+    "meta_quality",
+    "duration_model",
+    "risk_sidecar",
+    "router"
+  ],
+  "regime_cutoffs": {
+    "chop_index_p33": 42.198396777797605,
+    "hurst_48_p50": 0.5143833175711754
+  },
+  "val_sweep": [
+    {
+      "threshold": 0.3,
+      "n_signals": 4299,
+      "n_filled": 3226,
+      "fill_rate": 0.7504070714119563,
+      "hit_rate": 0.5291382517048977,
+      "avg_pnl_pct": -0.0002814698076230576,
+      "total_pnl_pct": -0.9080215993919837
+    },
+    {
+      "threshold": 0.4,
+      "n_signals": 3312,
+      "n_filled": 2545,
+      "fill_rate": 0.7684178743961353,
+      "hit_rate": 0.5508840864440079,
+      "avg_pnl_pct": -0.00022939735510301936,
+      "total_pnl_pct": -0.5838162687371843
+    },
+    {
+      "threshold": 0.45,
+      "n_signals": 2154,
+      "n_filled": 1660,
+      "fill_rate": 0.7706592386258124,
+      "hit_rate": 0.6030120481927711,
+      "avg_pnl_pct": -9.690535310613599e-05,
+      "total_pnl_pct": -0.16086288615618574
+    },
+    {
+      "threshold": 0.5,
+      "n_signals": 1363,
+      "n_filled": 1055,
+      "fill_rate": 0.7740278796771827,
+      "hit_rate": 0.6578199052132702,
+      "avg_pnl_pct": 5.864657021038328e-05,
+      "total_pnl_pct": 0.061872131571954356
+    },
+    {
+      "threshold": 0.55,
+      "n_signals": 795,
+      "n_filled": 602,
+      "fill_rate": 0.7572327044025158,
+      "hit_rate": 0.7275747508305648,
+      "avg_pnl_pct": 0.0002576251352446841,
+      "total_pnl_pct": 0.15509033141729983
+    },
+    {
+      "threshold": 0.6,
+      "n_signals": 442,
+      "n_filled": 334,
+      "fill_rate": 0.755656108597285,
+      "hit_rate": 0.7904191616766467,
+      "avg_pnl_pct": 0.00046672873334957727,
+      "total_pnl_pct": 0.1558873969387588
+    },
+    {
+      "threshold": 0.65,
+      "n_signals": 214,
+      "n_filled": 160,
+      "fill_rate": 0.7476635514018691,
+      "hit_rate": 0.84375,
+      "avg_pnl_pct": 0.0007357343841884157,
+      "total_pnl_pct": 0.11771750147014651
+    },
+    {
+      "threshold": 0.7,
+      "n_signals": 66,
+      "n_filled": 49,
+      "fill_rate": 0.7424242424242424,
+      "hit_rate": 0.8775510204081632,
+      "avg_pnl_pct": 0.0010452232334363122,
+      "total_pnl_pct": 0.0512159384383793
+    }
+  ],
+  "chosen_router_threshold": 0.6,
+  "oos_at_chosen_threshold": {
+    "n_signals": 1284,
+    "n_filled": 1040,
+    "fill_rate": 0.8099688473520249,
+    "hit_rate": 0.7528846153846154,
+    "avg_pnl_pct": 0.000592640823007883,
+    "total_pnl_pct": 0.6163464559281984
+  },
+  "oos_regime_veto_only_no_router": {
+    "n_signals": 8595,
+    "n_filled": 6962,
+    "fill_rate": 0.8100058173356602,
+    "hit_rate": 0.5387819592071244,
+    "avg_pnl_pct": -0.00025683034308370044,
+    "total_pnl_pct": -1.7880528485487226
+  },
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "oos_total_pnl_pct": 3.7390646402123644
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "known_limitation": "Components 3-5 and the router are trained on the same single-pass purged-OOF set (no further router-level CV nesting) -- see module docstring."
+}

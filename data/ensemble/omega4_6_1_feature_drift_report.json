@@ -1,0 +1,686 @@
+{
+  "checked_at": "2026-07-07T12:41:26.514762",
+  "snapshot_created_at": "2026-07-07T12:40:15.877101+09:00",
+  "snapshot_range": [
+    "2026-07-04 18:10:00",
+    "2026-07-07 03:35:00"
+  ],
+  "status": "PASS",
+  "n_columns_checked": 96,
+  "n_drifted": 0,
+  "tolerance": 0.001,
+  "results": [
+    {
+      "col": "amihud_illiquidity_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "bb_width",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "bb_width_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "big_trade_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "breakout_strength",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "btc_corr_60",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "chop_index",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "close",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "close_btc",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "count_long_short_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cross_scale_curvature",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "crowding_pressure",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cvp_cluster_position",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cvp_poc_dist",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cvp_regime",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cvp_vah_val_width",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "cvp_volume_imbalance",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "dual_momentum",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "eth_btc_ratio_change",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "evt_excess_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "evt_tail_flag",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "execution_quality",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "fibonacci_level",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_abs",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_pressure",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_price_divergence",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_roc_12",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_roc_288",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_roc_48",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "funding_z_score",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "fvg_dist",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "garch_vol_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "garman_klass_vol",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "high",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "hma_slope",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "hour_cos",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "hour_sin",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "hurst_288",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "hurst_48",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "is_hour_open",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "jump_flag",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "jump_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "kalman_velocity",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "kel",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "last_funding_rate",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "liquidity_vacuum",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "log_return",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "long_squeeze_risk",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "low",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "macd_hist",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "mean_reversion_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "minute_cos",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "minute_sin",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "mta_funding",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "mtf_trend_1h",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "mtf_trend_4h",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "net_taker_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "ofi_acceleration",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "ofti",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "oi_change_rate",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "open",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "ou_funding_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "ou_halflife",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "parkinson_vol",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "quote_volume",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "quote_volume_btc",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "realized_skewness",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "realized_vol_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "regime_persistence",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "regime_trending",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "rogers_satchell_vol",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "rsi",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "session_europe",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "session_us",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "short_squeeze_risk",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "sig_liquidity_trap",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "sig_trend_health",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "sig_volume_confirm",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "smart_money_flow",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "squeeze_power",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "sum_open_interest_value",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "sum_toptrader_long_short_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "svps",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "taker_acceleration",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "taker_buy_base",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "taker_buy_quote",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "trade_intensity",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "trades",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "turtle_signal",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "volatility_z",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "volume",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "volume_btc",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "volume_profile_signal",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "whale_conviction",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "whale_retail_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    },
+    {
+      "col": "wick_ratio",
+      "max_abs_diff": 0.0,
+      "max_rel_diff": 0.0,
+      "n": 200,
+      "note": ""
+    }
+  ]
+}

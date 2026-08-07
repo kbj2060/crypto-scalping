@@ -1,0 +1,64 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "btc-shared-policy-v1",
+  "hypothesis": "A shared 5-minute backbone can predict a cost-aware soft distribution over target signed margin actions, from which direction, sizing, partial reduction, reversal, and full exit-to-flat are derived consistently.",
+  "research": {
+    "line_id": "btc-shared-policy-v1",
+    "related_prior_line_ids": [
+      "btc_5m_quality_classifier_stack",
+      "btc_advanced_rl_direction",
+      "btc_tpfirst_three_way_label"
+    ],
+    "prior_failure_reassessment": "Prior BTC lines used quality/direction or RL targets that did not jointly model the current position, target exposure, turnover cost, and full-exit-to-flat action contract. This experiment first treats the teacher only as a diagnostic target, not as a promotion result.",
+    "retest_design": "Freeze and preflight the registered BTC feature dataset, analyze every feature before selection, train only on the pre-Validation period, select on Validation only, and score the learned policy solely in a bar-by-bar fresh-forward OOS runner."
+  },
+  "market": {
+    "symbols": ["BTCUSDT"],
+    "bar_interval": "5m"
+  },
+  "data": {
+    "feature_dataset": "data/splits/year_oos/btc_features_2026.csv",
+    "raw_sources": ["Binance 5m klines", "registered derived features"]
+  },
+  "features": {
+    "groups": ["all registered causal BTC feature columns, pending statistical feature analysis"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {
+    "type": "cost_aware_soft_trajectory_target_margin_distribution",
+    "horizon_bars": 48,
+    "timeout_handling": "not_applicable"
+  },
+  "splits": {
+    "train_end": "2025-08-31",
+    "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31",
+    "oos_start": "2026-01-01",
+    "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "multinomial_lightgbm_action_distribution",
+    "candidate_architecture": "shared_sequence_backbone_soft_action_head",
+    "seeds": ["270705"]
+  },
+  "selection": {
+    "minimum_trades_per_split": 15,
+    "validation_pass_criteria": "Cost-adjusted Validation PnL is positive, bar-level MDD is within the pre-registered cap, and action entropy and turnover are not degenerate."
+  },
+  "execution": {
+    "entry_timing": "next_bar_open",
+    "cost_model": "one_way_21bp_per_notional_turnover",
+    "sizing_contract": "margin_fraction_times_leverage"
+  },
+  "evaluation": {
+    "candidate_selection_scope": "validation_only",
+    "final_evaluation": "fresh_forward_oos_only"
+  }
+}

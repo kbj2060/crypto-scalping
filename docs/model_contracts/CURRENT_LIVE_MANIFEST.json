@@ -1,0 +1,179 @@
+{
+  "artifacts": {
+    "btc": {
+      "bundle": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_20260806_swingtransition/true_3head_tabm_bundle.pt",
+        "sha256": "98e371b1e4e8ce0f45eb4ea797e808a293aba80f7f7ee279005ff15046fd2459",
+        "size_bytes": 1409493
+      },
+      "regime3": {
+        "exists": true,
+        "path": "data/ensemble/supervised/btc_regime3_current_hmm_sensitive_wide24_20260708/regime3_current_sensitive_hmm_wide24_2024.joblib",
+        "sha256": "4197e0aa3b513e7be76ed19edd8326b3567ea33f34019a2f5f2f0c1f4f312216",
+        "size_bytes": 9830
+      },
+      "sidecar": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/btc_omega4_2_trade_risk_sidecar_20260708_h48qual_q055_20260806_swingtransition/risk_sidecar.pkl",
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_20260806_swingtransition",
+        "precomputed_prediction_tag": "q055",
+        "quality_threshold": 0.55,
+        "report": {
+          "exists": true,
+          "path": "tmp/causal_regen_20260516/btc_omega4_2_trade_risk_sidecar_20260708_h48qual_q055_20260806_swingtransition/report.json",
+          "sha256": "2cfe586aa58034505213b6cc90b4244edb8b3ad99f9009d309877bf41081c157",
+          "size_bytes": 32325
+        },
+        "selection_scope": "validation_only",
+        "sha256": "d859a782334cb3669f505b90e362751b998f10ef9a104ae303395301e78640c5",
+        "size_bytes": 121051
+      }
+    },
+    "eth": {
+      "h48qual_bundle": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630/true_3head_tabm_bundle.pt",
+        "sha256": "5f9a11ac7b17cf72a234935f48f7343cdaa3f160cfca34b35a21cf3d8be9c1b7",
+        "size_bytes": 1280085
+      },
+      "h48qual_sidecar": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630/risk_sidecar.pkl",
+        "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630",
+        "precomputed_prediction_tag": "q050",
+        "quality_threshold": 0.5,
+        "report": {
+          "exists": true,
+          "path": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630/report.json",
+          "sha256": "aad86fafd4d47519f19b1c15567f7b011436dc48587b55c010c3a3ab86a50602",
+          "size_bytes": 31841
+        },
+        "selection_scope": "validation_only",
+        "sha256": "548d5f8f1df94c8301a6fbde42840ac08ef48b7283db05af0305a72feb56da05",
+        "size_bytes": 122200
+      },
+      "zig075_bundle": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629/true_3head_tabm_bundle.pt",
+        "sha256": "d637317b2ee2bf17e6aff9c6cc27ad4eca16f0aeeb19094820ac2bd222c65c2f",
+        "size_bytes": 1280085
+      },
+      "zig075_sidecar": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630/risk_sidecar.pkl",
+        "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629",
+        "precomputed_prediction_tag": "q075",
+        "quality_threshold": 0.75,
+        "report": {
+          "exists": true,
+          "path": "tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630/report.json",
+          "sha256": "1bda03841a86ef68bc0e3215bd08338e05828e5a6077436dc82dcb64a51e05ba",
+          "size_bytes": 32121
+        },
+        "selection_scope": "validation_only",
+        "sha256": "3e40cc35ee6e266c1a39a21e410a496ff966ed94cbdd9dc04fdf4a97f2141b23",
+        "size_bytes": 121037
+      }
+    },
+    "sol": {
+      "bundle": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/sol_omega4_3head_parent72_loose_entry_quality_20260707_adaptive_squeeze_20260720/true_3head_tabm_bundle.pt",
+        "sha256": "0fd2b06c303db0e04f370b1f2af13349dcc0c6806e5721b3cdd3debf2932bf23",
+        "size_bytes": 1396821
+      },
+      "regime3": {
+        "exists": true,
+        "path": "data/ensemble/supervised/sol_regime3_current_hmm_sensitive_wide24_20260707/regime3_current_sensitive_hmm_wide24_2024.joblib",
+        "sha256": "c3558f2909ae6c2736b6b736bdb9767bd017278379b13b17549c0e69fd721f0d",
+        "size_bytes": 9830
+      },
+      "sidecar": {
+        "exists": true,
+        "path": "tmp/causal_regen_20260516/sol_omega4_2_trade_risk_sidecar_20260707_adaptive_squeeze_q070_20260720/risk_sidecar.pkl",
+        "precomputed_prediction_dir": "tmp/causal_regen_20260516/sol_omega4_3head_parent72_loose_entry_quality_20260707_adaptive_squeeze_20260720",
+        "precomputed_prediction_tag": "q070",
+        "quality_threshold": 0.7,
+        "report": {
+          "exists": true,
+          "path": "tmp/causal_regen_20260516/sol_omega4_2_trade_risk_sidecar_20260707_adaptive_squeeze_q070_20260720/report.json",
+          "sha256": "cc7baff7ac424bb2b05659de1d7c7d945e4332f7022ea5e376d701274d2d3e4a",
+          "size_bytes": 32693
+        },
+        "selection_scope": "validation_oos_guard",
+        "sha256": "64de9db038ea353a7c82a9682dad769dbd0e2d6ee14043cd377586ed5161a5b4",
+        "size_bytes": 181305
+      }
+    }
+  },
+  "asset_config": {
+    "btc": {
+      "account_symbol": "BTC/USDT:USDT",
+      "bundle_path": "tmp/causal_regen_20260516/btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_20260806_swingtransition/true_3head_tabm_bundle.pt",
+      "component": "h48qual",
+      "current_regime_path": "data/ensemble/supervised/btc_regime3_current_hmm_sensitive_wide24_20260708/regime3_current_sensitive_hmm_wide24_2024.joblib",
+      "duration_threshold": 0.0054143218,
+      "label": "BTC",
+      "quality_threshold": 0.55,
+      "scale_map": {
+        "h48qual_L": 0.5,
+        "h48qual_S": 2.5
+      },
+      "sidecar_path": "tmp/causal_regen_20260516/btc_omega4_2_trade_risk_sidecar_20260708_h48qual_q055_20260806_swingtransition/risk_sidecar.pkl",
+      "symbol": "BTCUSDT"
+    },
+    "sol": {
+      "account_symbol": "SOL/USDT:USDT",
+      "bundle_path": "tmp/causal_regen_20260516/sol_omega4_3head_parent72_loose_entry_quality_20260707_adaptive_squeeze_20260720/true_3head_tabm_bundle.pt",
+      "component": "zig075",
+      "current_regime_path": "data/ensemble/supervised/sol_regime3_current_hmm_sensitive_wide24_20260707/regime3_current_sensitive_hmm_wide24_2024.joblib",
+      "duration_threshold": 0.0055208323,
+      "label": "SOL",
+      "quality_threshold": 0.7,
+      "scale_map": {
+        "zig075_L": 1.0,
+        "zig075_S": 1.75
+      },
+      "sidecar_path": "tmp/causal_regen_20260516/sol_omega4_2_trade_risk_sidecar_20260707_adaptive_squeeze_q070_20260720/risk_sidecar.pkl",
+      "symbol": "SOLUSDT"
+    }
+  },
+  "model": {
+    "model_id": "omega4_6_1_duration_ou_halflife_risk_gate_20260630",
+    "model_version": "Omega4.6.1-live-20260706"
+  },
+  "promotion_blockers": [
+    "snapshot_only_until_unified_promotion_gate_passes",
+    "dirty_worktree",
+    "sol_sidecar_selection_scope_validation_oos_guard"
+  ],
+  "promotion_eligible": false,
+  "runtime_flags": {
+    "binance_account": {
+      "enabled": false,
+      "present": true
+    },
+    "binance_execution": {
+      "enabled": false,
+      "present": true
+    },
+    "omega4_6_1_enabled": true,
+    "shadow_assets_enabled": true,
+    "sol_btc_real_execution_enabled": true
+  },
+  "schema_version": "current_live_manifest_v1",
+  "sizing": {
+    "contract": "notional = margin_fraction * leverage",
+    "eth_notional_multiplier": 1.5,
+    "sol_notional_multiplier": 1.5
+  },
+  "snapshot_date": "2026-07-29",
+  "source": {
+    "git_branch": "main",
+    "git_commit": "717a821c38a3854cc7d965dd70262f978c244203",
+    "tracked_changes": 143,
+    "untracked_entries": 4060,
+    "worktree_clean": false
+  }
+}

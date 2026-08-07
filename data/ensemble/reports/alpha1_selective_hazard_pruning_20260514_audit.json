@@ -1,0 +1,45 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "hazard_pruning_cost1_below_alpha1"
+  ],
+  "selection_uses_2026": false,
+  "train_window": "2025-01-01..2025-09-30 trade ledger only",
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS after selection",
+  "label_meta": {
+    "n": 312,
+    "hazards": 29,
+    "hazard_rate": 0.09294871794871795,
+    "realized_cut_pct": -2.207199974650152,
+    "mae_cut_pct": -2.2440557385770483,
+    "fee_cut_pct": 0.27499999999999997,
+    "realized_mean_pct": 6.042264448473898,
+    "realized_min_pct": -5.125875242707356
+  },
+  "design": "Selective Hazard Pruning: hazard-centric features, delta-cluster similarity, cost-sensitive score, probabilistic soft notional scaling, and veto-the-veto super-trade pass-through.",
+  "base_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  }
+}

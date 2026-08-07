@@ -1,0 +1,67 @@
+{
+  "feature_cols": [
+    "ud_cand_side",
+    "ud_cand_hold",
+    "ud_cand_quality",
+    "ud_cand_raw_edge",
+    "ud_cand_sup_prob_max",
+    "ud_cand_agree",
+    "ud_cat_long_prob",
+    "ud_cat_flat_prob",
+    "ud_cat_short_prob",
+    "ud_cat_edge",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal"
+  ],
+  "model_path": "unified_sparse_meta_gate_catboost.pkl",
+  "threshold": 0.4986390591833536,
+  "meta": {
+    "algorithm": "unified_sparse_meta_gate_catboost",
+    "csv_path": "data/rl_training_2025_unified_sparse_candidates.csv",
+    "cost_buffer": 0.0015,
+    "train_ratio": 0.85,
+    "val_ratio": 0.15,
+    "val_auc": 0.503968253968254,
+    "val_ap": 0.7894179894179894,
+    "test_auc": 0.4435215946843853,
+    "test_ap": 0.47115009160816446,
+    "classification_report": {
+      "0": {
+        "precision": 0.46808510638297873,
+        "recall": 0.4489795918367347,
+        "f1-score": 0.4583333333333333,
+        "support": 49.0
+      },
+      "1": {
+        "precision": 0.4,
+        "recall": 0.4186046511627907,
+        "f1-score": 0.4090909090909091,
+        "support": 43.0
+      },
+      "accuracy": 0.43478260869565216,
+      "macro avg": {
+        "precision": 0.4340425531914894,
+        "recall": 0.4337921214997627,
+        "f1-score": 0.4337121212121212,
+        "support": 92.0
+      },
+      "weighted avg": {
+        "precision": 0.43626271970397784,
+        "recall": 0.43478260869565216,
+        "f1-score": 0.4353178524374176,
+        "support": 92.0
+      }
+    },
+    "candidate_rows_preholdout": 182,
+    "candidate_rows_holdout": 92
+  }
+}

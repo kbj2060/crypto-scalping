@@ -1,0 +1,240 @@
+{
+  "model_id": "regime_pred_moe_tft_clean_target_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_clean_target_20260517/regime_pred_tft_clean_target_2024.pt",
+  "train_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "predict_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+  "clean_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_raw_state12_v9_20260517/training_features_2024_clean_regime_raw_state12_v9.csv",
+  "clean_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_raw_state12_v9_20260517/training_features_2025_clean_regime_raw_state12_v9.csv",
+  "device": "cuda",
+  "horizon_bars": 36,
+  "seq_len": 72,
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw",
+    "normal"
+  ],
+  "feature_count": 77,
+  "feature_cols": [
+    "clean_regime_2024_unsup_v4_bear_prob",
+    "clean_regime_2024_unsup_v4_bull_prob",
+    "clean_regime_2024_unsup_v4_chop_prob",
+    "clean_regime_2024_unsup_v4_confidence",
+    "clean_regime_2024_unsup_v4_directional_bias",
+    "clean_regime_2024_unsup_v4_entropy",
+    "clean_regime_2024_unsup_v4_instability_prob",
+    "clean_regime_2024_unsup_v4_margin",
+    "clean_regime_2024_unsup_v4_micro_prob",
+    "clean_regime_2024_unsup_v4_normal_prob",
+    "clean_regime_2024_unsup_v4_range_prob",
+    "clean_regime_2024_unsup_v4_trend_prob",
+    "clean_regime_2024_unsup_v4_whipsaw_prob",
+    "log_return",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "amihud_illiquidity_z",
+    "btc_corr_60",
+    "eth_btc_ratio_change",
+    "fvg_dist",
+    "chop_index",
+    "cvp_poc_dist",
+    "cvp_cluster_position",
+    "cvp_volume_imbalance",
+    "turtle_signal",
+    "dual_momentum",
+    "mean_reversion_z",
+    "breakout_strength",
+    "volume_profile_signal",
+    "funding_roc_288",
+    "long_squeeze_risk",
+    "funding_price_divergence",
+    "ofi_acceleration",
+    "kalman_velocity",
+    "ofti",
+    "kel",
+    "mta_funding",
+    "svps",
+    "pred_mdjd",
+    "conf_mdjd",
+    "volume",
+    "quote_volume",
+    "trades",
+    "taker_buy_base",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "count_long_short_ratio",
+    "last_funding_rate",
+    "whale_retail_ratio",
+    "smart_money_flow",
+    "squeeze_power",
+    "oi_change_rate",
+    "net_taker_ratio",
+    "taker_acceleration",
+    "trade_intensity",
+    "big_trade_ratio",
+    "hour_sin",
+    "hour_cos",
+    "minute_sin",
+    "minute_cos",
+    "session_europe",
+    "session_us",
+    "is_hour_open",
+    "bb_width",
+    "close_btc",
+    "quote_volume_btc",
+    "taker_buy_quote",
+    "volume_btc"
+  ],
+  "validation_label_meta": {
+    "horizon": 36,
+    "label_source": "argmax_clean_regime_raw_state12_v9_at_t_plus_horizon",
+    "label_counts": {
+      "bull": 31471,
+      "bear": 26128,
+      "chop": 31318,
+      "whipsaw": 16409,
+      "normal": 18
+    },
+    "label_share": {
+      "bull": 0.2987450637910085,
+      "bear": 0.24802551640340217,
+      "chop": 0.29729267922235725,
+      "whipsaw": 0.15576587181044957,
+      "normal": 0.00017086877278250305
+    },
+    "target_clean_confidence_mean": 0.5061472575202094,
+    "split_policy": "Q4_2024_validation_with_horizon_embargo",
+    "embargo_bars": 36
+  },
+  "final_label_meta": {
+    "horizon": 36,
+    "label_source": "argmax_clean_regime_raw_state12_v9_at_t_plus_horizon",
+    "label_counts": {
+      "bull": 31471,
+      "bear": 26128,
+      "chop": 31318,
+      "whipsaw": 16409,
+      "normal": 18
+    },
+    "label_share": {
+      "bull": 0.2987450637910085,
+      "bear": 0.24802551640340217,
+      "chop": 0.29729267922235725,
+      "whipsaw": 0.15576587181044957,
+      "normal": 0.00017086877278250305
+    },
+    "target_clean_confidence_mean": 0.5061472575202094
+  },
+  "validation_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.3965441653361688,
+      "val_log_loss": 1.3114983375719873,
+      "val_balanced_accuracy": 0.3218984491858409
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 1.3090893855461707,
+      "val_log_loss": 1.3496756648635444,
+      "val_balanced_accuracy": 0.30447916240703016
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 1.225517587019847,
+      "val_log_loss": 1.4737120726977664,
+      "val_balanced_accuracy": 0.28082534618807714
+    }
+  ],
+  "validation": {
+    "rows": 26460,
+    "accuracy": 0.41311413454270596,
+    "balanced_accuracy": 0.3218984491858409,
+    "log_loss": 1.3114983375719873,
+    "true_counts": {
+      "bull": 8201,
+      "bear": 6643,
+      "chop": 7396,
+      "whipsaw": 4218,
+      "normal": 2
+    },
+    "pred_counts": {
+      "bull": 4568,
+      "bear": 9828,
+      "chop": 8983,
+      "whipsaw": 3081,
+      "normal": 0
+    },
+    "confusion_matrix": [
+      [
+        2500,
+        1955,
+        2746,
+        1000,
+        0
+      ],
+      [
+        556,
+        3821,
+        1732,
+        534,
+        0
+      ],
+      [
+        920,
+        2404,
+        3568,
+        504,
+        0
+      ],
+      [
+        592,
+        1647,
+        937,
+        1042,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        1,
+        0
+      ]
+    ]
+  },
+  "selected_final_epochs": 1,
+  "final_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.378863040951715
+    }
+  ],
+  "train_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_clean_target_20260517/training_features_2024_regime_pred_tft_clean_target.csv",
+  "predict_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_tft_clean_target_20260517/training_features_2025_regime_pred_tft_clean_target.csv",
+  "predict_probability_sum_min": 0.9999999999999998,
+  "predict_probability_sum_max": 1.0000000000000002,
+  "predict_counts": {
+    "bull": 28569,
+    "bear": 23016,
+    "chop": 34184,
+    "whipsaw": 19295,
+    "normal": 0
+  },
+  "predict_confidence_mean": 0.4338461779805131,
+  "predict_entropy_mean": 0.818011868541895,
+  "notes": [
+    "Target is the v9 clean-regime argmax at t+horizon, not future MFE/MAE path labels.",
+    "This aligns future regime prediction with the current clean HMM taxonomy.",
+    "No hard argmax label columns are written to sidecars."
+  ]
+}

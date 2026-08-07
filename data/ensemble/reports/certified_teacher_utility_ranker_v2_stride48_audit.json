@@ -1,0 +1,17 @@
+{
+  "model_id": "certified_teacher_utility_ranker_v2",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "m7_existing_artifacts_have_no_embedded_training_provenance; v2 uses compressed M7 teacher meta with caveat"
+  ],
+  "invariants": {
+    "2025_declared_as_training_year": true,
+    "2026_fixed_oos_no_selection": true,
+    "ai_contracts_2024_certified": true,
+    "legacy_regime_v2_quarantined": true,
+    "labels_are_execution_replay_net_utility": true,
+    "adaptive_contract_family_used": true,
+    "cost_1x_2x_3x_reported": true
+  }
+}

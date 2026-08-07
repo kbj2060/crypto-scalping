@@ -1,0 +1,374 @@
+{
+  "audit_id": "omega4_6_2_cap220_runtime_native_walkforward_20260701",
+  "created_at_utc": "2026-06-30T15:18:51.267259+00:00",
+  "model_id": "omega4_6_2_cap220_short_boost125_time_stop120h_20260630",
+  "variant": "short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h",
+  "runtime_contract": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/runtime_contract.json",
+  "source_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630",
+  "runtime_replay": {
+    "ledger_contract_parity_pass": true,
+    "ledger_contract_parity": {
+      "validation": {
+        "pass": true,
+        "checks": {
+          "pnl": {
+            "observed": 211.14258330879227,
+            "expected": 211.14258330879252,
+            "diff": -2.5579538487363607e-13,
+            "pass": true
+          },
+          "mdd": {
+            "observed": -13.718151633931729,
+            "expected": -13.718151633931718,
+            "diff": -1.0658141036401503e-14,
+            "pass": true
+          },
+          "trades": {
+            "observed": 23,
+            "expected": 23,
+            "diff": 0.0,
+            "pass": true
+          },
+          "wr": {
+            "observed": 0.6521739130434783,
+            "expected": 0.6521739130434783,
+            "diff": 0.0,
+            "pass": true
+          },
+          "avg_hold_hours": {
+            "observed": 63.26811594202898,
+            "expected": 63.26811594202899,
+            "diff": -1.4210854715202004e-14,
+            "pass": true
+          },
+          "max_hold_hours": {
+            "observed": 120.0,
+            "expected": 120.0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "hold_over_24h_count": {
+            "observed": 17,
+            "expected": 17,
+            "diff": 0.0,
+            "pass": true
+          },
+          "max_leverage": {
+            "observed": 5.0,
+            "expected": 5.0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "max_notional": {
+            "observed": 1.917602315132258,
+            "expected": 1.917602315132258,
+            "diff": 0.0,
+            "pass": true
+          },
+          "avg_notional": {
+            "observed": 1.4170948122453524,
+            "expected": 1.4170948122453524,
+            "diff": 0.0,
+            "pass": true
+          },
+          "skipped": {
+            "observed": 6,
+            "expected": 6,
+            "diff": 0.0,
+            "pass": true
+          },
+          "overlap_count": {
+            "observed": 0,
+            "expected": 0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "accounting_error_max_abs": {
+            "observed": 9.020562075079397e-17,
+            "expected": 0.0,
+            "diff": 9.020562075079397e-17,
+            "pass": true
+          },
+          "notional_contract_error_max_abs": {
+            "observed": 2.220446049250313e-16,
+            "expected": 2.220446049250313e-16,
+            "diff": 0.0,
+            "pass": true
+          }
+        },
+        "tolerance": 1e-09
+      },
+      "oos": {
+        "pass": true,
+        "checks": {
+          "pnl": {
+            "observed": 79.31781513301279,
+            "expected": 79.31781513301281,
+            "diff": -2.842170943040401e-14,
+            "pass": true
+          },
+          "mdd": {
+            "observed": -10.134105321862252,
+            "expected": -10.134105321862275,
+            "diff": 2.3092638912203256e-14,
+            "pass": true
+          },
+          "trades": {
+            "observed": 13,
+            "expected": 13,
+            "diff": 0.0,
+            "pass": true
+          },
+          "wr": {
+            "observed": 0.6153846153846154,
+            "expected": 0.6153846153846154,
+            "diff": 0.0,
+            "pass": true
+          },
+          "avg_hold_hours": {
+            "observed": 67.78846153846153,
+            "expected": 67.78846153846153,
+            "diff": 0.0,
+            "pass": true
+          },
+          "max_hold_hours": {
+            "observed": 120.0,
+            "expected": 120.0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "hold_over_24h_count": {
+            "observed": 12,
+            "expected": 12,
+            "diff": 0.0,
+            "pass": true
+          },
+          "max_leverage": {
+            "observed": 5.000000000000001,
+            "expected": 5.000000000000001,
+            "diff": 0.0,
+            "pass": true
+          },
+          "max_notional": {
+            "observed": 2.196698803847552,
+            "expected": 2.196698803847552,
+            "diff": 0.0,
+            "pass": true
+          },
+          "avg_notional": {
+            "observed": 1.4790570502256064,
+            "expected": 1.4790570502256064,
+            "diff": 0.0,
+            "pass": true
+          },
+          "skipped": {
+            "observed": 0,
+            "expected": 0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "overlap_count": {
+            "observed": 0,
+            "expected": 0,
+            "diff": 0.0,
+            "pass": true
+          },
+          "accounting_error_max_abs": {
+            "observed": 8.326672684688674e-17,
+            "expected": 0.0,
+            "diff": 8.326672684688674e-17,
+            "pass": true
+          },
+          "notional_contract_error_max_abs": {
+            "observed": 2.220446049250313e-16,
+            "expected": 2.220446049250313e-16,
+            "diff": 0.0,
+            "pass": true
+          }
+        },
+        "tolerance": 1e-09
+      }
+    },
+    "governor_position_router_shadow_available": true,
+    "governor_position_router_shadow_info": {
+      "available": true,
+      "implementation": "source_equivalent_trade_math_shadow",
+      "trading_bot_imported": false,
+      "reason": "Default audit path avoids importing trading_bot because it initializes live/runtime modules.",
+      "fee_rate": 0.0005,
+      "slip_rate": 0.0002,
+      "taker_fee": 0.0005,
+      "maker_fee": 0.0001,
+      "exposure_cap": 5.0
+    },
+    "governor_position_router_shadow_parity_pass": false,
+    "final_governor_runtime_decide_replay_available": false,
+    "final_governor_runtime_decide_replay_unavailable_reason": "No Omega4.6.2 cap220 adapter or exact short_boost125_cap220 policy wiring exists in trading_bot.FinalGovernorRuntime.decide().",
+    "full_runtime_native_promotion_pass": false,
+    "validation": {
+      "native_accounting_shadow_available": true,
+      "native_accounting_shadow_parity_pass": false,
+      "native_trade_return_diff_max_abs": 0.0014335318191873447,
+      "native_trade_return_diff_mean_abs": 0.001078553221309352,
+      "ledger_metrics": {
+        "pnl": 211.14258330879227,
+        "mdd": -13.718151633931729,
+        "trades": 23,
+        "wr": 0.6521739130434783,
+        "max_hold_hours": 120.0,
+        "hold_over_24h_count": 17,
+        "avg_hold_hours": 63.26811594202898,
+        "max_leverage": 5.0,
+        "avg_notional": 1.4170948122453524,
+        "max_notional": 1.917602315132258,
+        "skipped": 6,
+        "overlap_count": 0,
+        "accounting_error_max_abs": 9.020562075079397e-17,
+        "notional_contract_error_max_abs": 2.220446049250313e-16,
+        "long_trades": 6,
+        "short_trades": 17,
+        "reason_counts": {
+          "stop_loss": 8,
+          "take_profit": 14,
+          "time_stop_120h_exit": 1
+        },
+        "source_counts": {
+          "h48qual": 8,
+          "zig075": 15
+        }
+      },
+      "native_shadow_metrics": {
+        "pnl": 204.32976805036796,
+        "mdd": -13.951152199986971,
+        "trades": 23,
+        "wr": 0.6521739130434783,
+        "max_hold_hours": 120.0,
+        "hold_over_24h_count": 17,
+        "avg_hold_hours": 63.26811594202898,
+        "max_leverage": 5.0,
+        "avg_notional": 1.4170948122453524,
+        "max_notional": 1.917602315132258,
+        "skipped": 0,
+        "overlap_count": 0,
+        "accounting_error_max_abs": 9.020562075079397e-17,
+        "notional_contract_error_max_abs": 2.220446049250313e-16,
+        "long_trades": 6,
+        "short_trades": 17,
+        "reason_counts": {
+          "stop_loss": 8,
+          "take_profit": 14,
+          "time_stop_120h_exit": 1
+        },
+        "source_counts": {
+          "h48qual": 8,
+          "zig075": 15
+        }
+      },
+      "artifacts": {
+        "decisions": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/validation_runtime_native_decisions.csv",
+        "trade_journal": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/validation_runtime_native_trade_journal.csv",
+        "closes": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/validation_runtime_native_closes.csv"
+      }
+    },
+    "oos": {
+      "native_accounting_shadow_available": true,
+      "native_accounting_shadow_parity_pass": false,
+      "native_trade_return_diff_max_abs": 0.0016384427924015788,
+      "native_trade_return_diff_mean_abs": 0.0011444267348115003,
+      "ledger_metrics": {
+        "pnl": 79.31781513301279,
+        "mdd": -10.134105321862252,
+        "trades": 13,
+        "wr": 0.6153846153846154,
+        "max_hold_hours": 120.0,
+        "hold_over_24h_count": 12,
+        "avg_hold_hours": 67.78846153846153,
+        "max_leverage": 5.000000000000001,
+        "avg_notional": 1.4790570502256064,
+        "max_notional": 2.196698803847552,
+        "skipped": 0,
+        "overlap_count": 0,
+        "accounting_error_max_abs": 8.326672684688674e-17,
+        "notional_contract_error_max_abs": 2.220446049250313e-16,
+        "long_trades": 1,
+        "short_trades": 12,
+        "reason_counts": {
+          "stop_loss": 5,
+          "take_profit": 5,
+          "time_stop_120h_exit": 3
+        },
+        "source_counts": {
+          "zig075": 13
+        }
+      },
+      "native_shadow_metrics": {
+        "pnl": 76.80920132697071,
+        "mdd": -10.322085547380244,
+        "trades": 13,
+        "wr": 0.6153846153846154,
+        "max_hold_hours": 120.0,
+        "hold_over_24h_count": 12,
+        "avg_hold_hours": 67.78846153846153,
+        "max_leverage": 5.000000000000001,
+        "avg_notional": 1.4790570502256064,
+        "max_notional": 2.196698803847552,
+        "skipped": 0,
+        "overlap_count": 0,
+        "accounting_error_max_abs": 8.326672684688674e-17,
+        "notional_contract_error_max_abs": 2.220446049250313e-16,
+        "long_trades": 1,
+        "short_trades": 12,
+        "reason_counts": {
+          "stop_loss": 5,
+          "take_profit": 5,
+          "time_stop_120h_exit": 3
+        },
+        "source_counts": {
+          "zig075": 13
+        }
+      },
+      "artifacts": {
+        "decisions": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/oos_runtime_native_decisions.csv",
+        "trade_journal": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/oos_runtime_native_trade_journal.csv",
+        "closes": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/oos_runtime_native_closes.csv"
+      }
+    }
+  },
+  "fresh_holdout_walkforward": {
+    "fresh_holdout_available": false,
+    "fresh_holdout_unavailable_reason": "Exact candidate artifacts expose validation ledgers for 2025-10..2025-12 and OOS ledgers for 2026-01..2026-02 only. The component eval market ends at or near the OOS window, and no exact post-OOS prediction/ledger artifact is present for this model.",
+    "eval_has_material_bars_after_oos": false,
+    "oos_exit_max": "2026-02-27 22:30:00",
+    "eval_market_max": "2026-02-28 16:00:00",
+    "market_spans": {
+      "train": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha5_a5dir_2024_train_2025_score_20260529_cleanfunding_stable48/02_fixed_regime4_state24_sticky090_tp18_sl10_preprocess_2024_to_2025/trade_candidates_2025_regime4_state24_sticky090_tp18_sl10_fixed.csv",
+        "start": "2025-01-01 00:00:00",
+        "end": "2025-12-31 23:55:00",
+        "rows": 105064
+      },
+      "eval": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_01965_cleanfunding_candidates_20260529/trade_candidates_2026_alpha6_current_tail111_exact.csv",
+        "start": "2026-01-01 00:00:00",
+        "end": "2026-02-28 16:00:00",
+        "rows": 16897
+      }
+    },
+    "fixed_candidate_monthly_readout": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/monthly_walkforward_readout.csv",
+    "fixed_candidate_oos_monthly_positive": true,
+    "fixed_candidate_oos_monthly_positive_count": 2,
+    "fixed_candidate_oos_monthly_count": 2,
+    "clean_oos_promotion_claim_allowed": false
+  },
+  "artifacts": {
+    "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701",
+    "monthly_walkforward_readout": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_6_2_cap220_runtime_native_walkforward_20260701/monthly_walkforward_readout.csv",
+    "audit_json": "/home/llewyn/crypto-scalping/docs/audits/omega4_6_2_cap220_runtime_native_walkforward_20260701.json",
+    "audit_md": "/home/llewyn/crypto-scalping/docs/audits/omega4_6_2_cap220_runtime_native_walkforward_20260701.md"
+  },
+  "overall": {
+    "runtime_native_replay_status": "FAIL_FINAL_GOVERNOR_RUNTIME_DECIDE_NOT_AVAILABLE",
+    "fresh_holdout_status": "FAIL_NO_EXACT_FRESH_HOLDOUT_AVAILABLE",
+    "promotion_status": "BLOCKED_FOR_FULL_PROMOTION"
+  }
+}

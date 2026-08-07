@@ -20,6 +20,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 POLYMARKET_ENABLE = _env_flag("POLYMARKET_ENABLE", True)
+POLYMARKET_EVENT_SLUG = os.getenv("POLYMARKET_EVENT_SLUG", "").strip()
 POLYMARKET_EVENT_PREFIX = os.getenv("POLYMARKET_EVENT_PREFIX", "ethereum-price").strip() or "ethereum-price"
 POLYMARKET_SLUG_TZ = os.getenv("POLYMARKET_SLUG_TZ", "Asia/Seoul").strip() or "Asia/Seoul"
 POLYMARKET_GAMMA_URL = os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com/events")
@@ -27,6 +28,7 @@ POLYMARKET_CLOB_PRICE_URL = os.getenv("POLYMARKET_CLOB_PRICE_URL", "https://clob
 POLYMARKET_CLOB_BOOK_URL = os.getenv("POLYMARKET_CLOB_BOOK_URL", "https://clob.polymarket.com/book")
 POLYMARKET_TIMEOUT_SEC = float(os.getenv("POLYMARKET_TIMEOUT_SEC", "2.5"))
 POLYMARKET_MAX_MARKETS = int(float(os.getenv("POLYMARKET_MAX_MARKETS", "20")))
+POLYMARKET_SLUG_LOOKAHEAD_DAYS = int(float(os.getenv("POLYMARKET_SLUG_LOOKAHEAD_DAYS", "5")))
 POLYMARKET_EXIT_ENABLE = _env_flag("POLYMARKET_EXIT_ENABLE", False)
 POLYMARKET_SHOCK_1M_TH = float(os.getenv("POLYMARKET_SHOCK_1M_TH", "0.02"))
 POLYMARKET_SHOCK_Z_TH = float(os.getenv("POLYMARKET_SHOCK_Z_TH", "1.5"))
@@ -224,35 +226,67 @@ def _poly_book_imbalance(token_id: str) -> dict:
         return {"bid_notional": 0.0, "ask_notional": 0.0, "imbalance": 0.0, "raw_book": {}}
 
 
+def _slug_for_date(prefix: str, ts: pd.Timestamp) -> str:
+    month = ts.strftime("%B").lower()
+    day = str(int(ts.day))
+    return f"{prefix}-on-{month}-{day}"
+
+
+def _event_has_open_markets(ev: dict) -> bool:
+    if not isinstance(ev, dict) or bool(ev.get("closed", False)):
+        return False
+    mkts = list((ev or {}).get("markets", []) or [])
+    for row in mkts:
+        m = dict(row or {})
+        if bool(m.get("closed", False)):
+            continue
+        if m.get("acceptingOrders") is False:
+            continue
+        if _poly_extract_token_ids(m):
+            return True
+    return False
+
+
+def _fetch_polymarket_event_by_slug(slug: str) -> dict:
+    query = urlencode({"slug": slug})
+    url = f"{POLYMARKET_GAMMA_URL}?{query}"
+    ev_raw = _poly_http_json(url, timeout=POLYMARKET_TIMEOUT_SEC)
+    if isinstance(ev_raw, list):
+        return dict(ev_raw[0] or {}) if ev_raw else {}
+    if isinstance(ev_raw, dict):
+        items = ev_raw.get("events", ev_raw.get("data", []))
+        if isinstance(items, list):
+            return dict(items[0] or {}) if items else dict(ev_raw)
+        return dict(ev_raw)
+    return {}
+
+
 def _resolve_polymarket_slug() -> tuple[str, str]:
     prefix = str(POLYMARKET_EVENT_PREFIX or "").strip() or "ethereum-price"
+    if POLYMARKET_EVENT_SLUG:
+        return POLYMARKET_EVENT_SLUG, "env_override"
     try:
         now_local = pd.Timestamp.now(tz=POLYMARKET_SLUG_TZ)
-        month = now_local.strftime("%B").lower()
-        day = str(int(now_local.day))
-        return f"{prefix}-on-{month}-{day}", "auto_today"
+        fallback = _slug_for_date(prefix, now_local)
+        for offset in range(0, max(0, POLYMARKET_SLUG_LOOKAHEAD_DAYS) + 1):
+            candidate_ts = now_local + pd.Timedelta(days=offset)
+            slug = _slug_for_date(prefix, candidate_ts)
+            try:
+                ev = _fetch_polymarket_event_by_slug(slug)
+                if _event_has_open_markets(ev):
+                    mode = "auto_active_today" if offset == 0 else f"auto_active_plus_{offset}d"
+                    return slug, mode
+            except Exception:
+                continue
+        return fallback, "auto_today_fallback_no_open_event"
     except Exception:
         now_utc = pd.Timestamp.utcnow()
-        month = now_utc.strftime("%B").lower()
-        day = str(int(now_utc.day))
-        return f"{prefix}-on-{month}-{day}", "auto_utc_fallback"
+        return _slug_for_date(prefix, now_utc), "auto_utc_fallback"
 
 
 def _fetch_polymarket_rows_by_slug(slug: str) -> tuple[list[dict], dict]:
-    query = urlencode({"slug": slug})
-    url = f"{POLYMARKET_GAMMA_URL}?{query}"
     rows: list[dict] = []
-    ev_raw = _poly_http_json(url, timeout=POLYMARKET_TIMEOUT_SEC)
-    if isinstance(ev_raw, list):
-        ev = dict(ev_raw[0] or {}) if ev_raw else {}
-    elif isinstance(ev_raw, dict):
-        items = ev_raw.get("events", ev_raw.get("data", []))
-        if isinstance(items, list):
-            ev = dict(items[0] or {}) if items else dict(ev_raw)
-        else:
-            ev = dict(ev_raw)
-    else:
-        ev = {}
+    ev = _fetch_polymarket_event_by_slug(slug)
     mkts = list((ev or {}).get("markets", []) or [])
     for m in mkts[:max(1, POLYMARKET_MAX_MARKETS)]:
         md = dict(m or {})
@@ -674,6 +708,23 @@ def get_polymarket_snapshot_cached(current_price: float) -> dict:
 
 def polymarket_public_view(snapshot: dict) -> dict:
     out = dict(snapshot or {})
+    raw_payload = dict(out.get("raw_payload", {}) or {})
+    markets = list(raw_payload.get("markets", []) or [])
+    if markets:
+        compact = []
+        for market in markets:
+            item = dict(market or {})
+            try:
+                prob = float(item.get("prob", 0.0) or 0.0)
+            except Exception:
+                prob = 0.0
+            compact.append(
+                {
+                    "label": _poly_compact_label(str(item.get("label", "") or "")),
+                    "prob": prob,
+                }
+            )
+        out["markets"] = sorted(compact, key=lambda x: float(x.get("prob", 0.0)), reverse=True)[:5]
     out.pop("raw_payload", None)
     return out
 
@@ -685,7 +736,12 @@ def append_polymarket_snapshot_to_duckdb(
     raw_payload: dict | None = None,
     logger: logging.Logger | None = None,
 ) -> None:
-    """Append one 10s snapshot as JSON list of {label, prob} markets."""
+    """Append one 10s raw snapshot.
+
+    Derived AI features are intentionally not persisted in the live store.
+    They should be rebuilt from snapshot_json/markets_json during replay,
+    training, or model-specific preprocessing.
+    """
     try:
         parent = os.path.dirname(db_path)
         if parent:
@@ -699,33 +755,54 @@ def append_polymarket_snapshot_to_duckdb(
             """
             CREATE TABLE IF NOT EXISTS polymarket_markets_10s_json (
                 ts TIMESTAMP WITH TIME ZONE,
-                markets_json VARCHAR
+                markets_json VARCHAR,
+                snapshot_json VARCHAR,
+                current_price DOUBLE,
+                schema_version INTEGER
             )
             """
         )
+        existing_cols = {str(r[1]) for r in con.execute("PRAGMA table_info('polymarket_markets_10s_json')").fetchall()}
+        if "snapshot_json" not in existing_cols:
+            con.execute("ALTER TABLE polymarket_markets_10s_json ADD COLUMN snapshot_json VARCHAR")
+        if "current_price" not in existing_cols:
+            con.execute("ALTER TABLE polymarket_markets_10s_json ADD COLUMN current_price DOUBLE")
+        if "schema_version" not in existing_cols:
+            con.execute("ALTER TABLE polymarket_markets_10s_json ADD COLUMN schema_version INTEGER")
         markets = list(raw_obj.get("markets", []) or [])
-        if markets:
-            compact = []
-            for m in markets:
-                md = dict(m or {})
-                try:
-                    prob = float(md.get("prob", 0.0) or 0.0)
-                except Exception:
-                    prob = 0.0
-                compact.append(
-                    {
-                        "label": _poly_compact_label(str(md.get("label", "") or "")),
-                        "prob": prob,
-                    }
-                )
-            compact = sorted(compact, key=lambda x: float(x.get("prob", 0.0)), reverse=True)[:5]
-            payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
-            con.execute(
-                """
-                INSERT INTO polymarket_markets_10s_json VALUES (?, ?)
-                """,
-                [ts.to_pydatetime(), payload],
+        compact = []
+        for m in markets:
+            md = dict(m or {})
+            try:
+                prob = float(md.get("prob", 0.0) or 0.0)
+            except Exception:
+                prob = 0.0
+            compact.append(
+                {
+                    "label": _poly_compact_label(str(md.get("label", "") or "")),
+                    "prob": prob,
+                }
             )
+        compact = sorted(compact, key=lambda x: float(x.get("prob", 0.0)), reverse=True)[:5]
+        payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        snapshot_payload = json.dumps(
+            {
+                **dict(snapshot or {}),
+                "raw_payload": raw_obj,
+                "storage_format": "raw_snapshot_v2",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+        con.execute(
+            """
+            INSERT INTO polymarket_markets_10s_json (
+                ts, markets_json, snapshot_json, current_price, schema_version
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [ts.to_pydatetime(), payload, snapshot_payload, float(current_price or 0.0), 2],
+        )
         con.close()
     except Exception as e:
         if logger is not None:

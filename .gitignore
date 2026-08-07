@@ -7,6 +7,21 @@ data/ensemble/unsupervised/isolation_forest.pkl
 binance_raw_data/
 binance_data/
 
+# Oversized artifacts under data/ensemble/ that exceed GitHub's 100MB push limit
+data/ensemble/deepscalp_pnl_v1_20260717/cache/base.npy
+data/ensemble/deepscalp_pnl_v1_20260717/cache/micro.npy
+data/ensemble/retrained_v22_market_state_v5_20260511/market_state_v5_2025.csv
+data/ensemble/supervised/certified_teacher_cost_aware_allocator_v4/features_2025.csv
+data/ensemble/supervised/certified_teacher_dual_side_execution_router_v3/features_2025.csv
+data/ensemble/supervised/certified_teacher_regime_moe_v1/features_2025.csv
+data/ensemble/supervised/certified_teacher_trend_convex_sleeve_v5/features_2025.csv
+data/ensemble/supervised/certified_teacher_utility_ranker_v2/features_2025.csv
+data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2024_clean_regime_bgmm_v5_augmented.csv
+data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_clean_regime_bgmm_v5_augmented.csv
+data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/full_train_macro_79341236e920eed7.npy
+data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/full_train_micro_542bcba1ea4390e2.npy
+data/ensemble/unsupervised/btc/isolation_forest_btc.pkl
+
 # PyTorch Lightning
 lightning_logs/
 
@@ -52,3 +67,6 @@ dist/
 build/
 *.egg-info/
 backups/
+
+# Scratch / experiment output
+tmp/

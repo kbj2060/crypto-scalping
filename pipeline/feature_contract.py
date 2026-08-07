@@ -9,6 +9,10 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = ROOT / "docs" / "feature_contract_manifest.json"
+FORBIDDEN_ACTIVE_REGIME_PREFIXES = (
+    "clean_regime_2024_unsup_v4_",
+    "clean_regime4_2024_unsup_v1_",
+)
 
 
 def load_feature_contract(manifest_path: str | Path | None = None) -> dict:
@@ -43,8 +47,30 @@ def apply_feature_drop(df: pd.DataFrame, drop_cols: Iterable[str]) -> tuple[pd.D
     return df.drop(columns=cols), cols
 
 
+def forbidden_active_regime_columns(cols: Iterable[str]) -> list[str]:
+    return [
+        str(c)
+        for c in cols
+        if str(c).startswith(FORBIDDEN_ACTIVE_REGIME_PREFIXES)
+    ]
+
+
+def assert_no_forbidden_active_regime_columns(cols: Iterable[str], *, name: str = "feature contract") -> None:
+    bad = forbidden_active_regime_columns(cols)
+    if bad:
+        raise RuntimeError(f"{name} contains forbidden active regime columns: {bad[:20]}")
+
+
+def drop_forbidden_active_regime_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    cols = forbidden_active_regime_columns(df.columns)
+    if not cols:
+        return df, []
+    return df.drop(columns=cols), cols
+
+
 def rl_passthrough_keep(contract: dict) -> set[str]:
     keep = set()
     keep.update(flatten_feature_groups(contract.get("shared_base_features", {})))
     keep.update(flatten_feature_groups(contract.get("m7_outputs", {})))
+    keep.difference_update(forbidden_active_regime_columns(keep))
     return keep

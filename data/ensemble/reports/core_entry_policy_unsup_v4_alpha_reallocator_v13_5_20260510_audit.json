@@ -1,0 +1,17 @@
+{
+  "model_id": "core_entry_policy_unsup_v4_alpha_reallocator_v13_5_20260510",
+  "status": "pass",
+  "checks": {
+    "contaminated_columns_absent": true,
+    "train_validation_overlap_zero": true,
+    "train_eval_overlap_zero": true,
+    "validation_eval_overlap_zero": true,
+    "ledger_rows_match_report_trades": true,
+    "core_models_not_retrained": true,
+    "cost2_survival": true,
+    "cost3_survival": true
+  },
+  "contaminated_columns": [],
+  "ledger_rows": 209,
+  "report_trades": 209
+}

@@ -1,0 +1,615 @@
+{
+  "type": "hf_final_selection_hf_v4_2026",
+  "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_entry_grid/hf_v4_balanced_h144.pkl",
+  "audit": {
+    "train_rows": 105064,
+    "eval_rows": 16897,
+    "train_valid_timestamp_rows": 105064,
+    "eval_valid_timestamp_rows": 16897,
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "timestamp_overlap_rows": 0,
+    "train_duplicate_timestamps": 0,
+    "eval_duplicate_timestamps": 0,
+    "policy_feature_count": 79,
+    "label_distribution": {
+      "action": {
+        "1": 13000,
+        "2": 13141
+      },
+      "notional": {
+        "0": 15574,
+        "1": 681,
+        "2": 314,
+        "3": 230,
+        "4": 799,
+        "5": 1094,
+        "6": 2113,
+        "7": 2097,
+        "8": 1582,
+        "9": 1131,
+        "10": 526
+      },
+      "leverage": {
+        "0": 22902,
+        "1": 1582,
+        "2": 1657
+      },
+      "take_profit": {
+        "0": 17366,
+        "1": 332,
+        "2": 261,
+        "3": 493,
+        "4": 865,
+        "5": 1532,
+        "6": 1526,
+        "7": 1431,
+        "8": 1034,
+        "9": 1301
+      },
+      "stop_loss": {
+        "0": 22836,
+        "1": 668,
+        "2": 664,
+        "3": 563,
+        "4": 546,
+        "5": 457,
+        "6": 407
+      },
+      "max_hold": {
+        "0": 17076,
+        "1": 430,
+        "2": 566,
+        "3": 435,
+        "4": 405,
+        "5": 748,
+        "6": 672,
+        "7": 1165,
+        "8": 1285,
+        "9": 3359
+      },
+      "cooldown": {
+        "0": 7949,
+        "2": 18033,
+        "4": 83,
+        "6": 76
+      },
+      "quality_mean": 0.014499789940668363,
+      "quality_p95": 0.06188453357821794
+    }
+  },
+  "accounting": "entry fee, exit fee, entry/exit slippage, forced end close fee, no same-position resize in this HF overlay",
+  "selection_overfit_note": "HF model trained on 2025. Overlay grids are research-selected on 2026; monthly Jan/Feb breakdown is included to reduce selection-risk blindness, not a substitute for future live validation.",
+  "monthly_balanced_selection": {
+    "name": "m1.5_q0.0_d0.04_dd0.035_max16_cd12_g0.12_pb0.015x1.1_hb-1.0x1.0",
+    "entry_config": {
+      "notional_mult": 1.5,
+      "quality_floor": 0.0,
+      "confidence_floor": 0.0,
+      "max_notional": 3.6
+    },
+    "risk_config": {
+      "max_daily_trades": 16,
+      "daily_loss_limit": 0.04,
+      "daily_dd_limit": 0.035,
+      "global_dd_cut": 0.12,
+      "global_dd_mult": 0.45,
+      "loss_cooldown_bars": 12,
+      "loss_streak_soft": 2,
+      "loss_streak_mult": 0.65,
+      "max_notional": 3.6,
+      "daily_profit_boost_start": 0.015,
+      "daily_profit_boost_mult": 1.1,
+      "equity_high_boost_dd": -1.0,
+      "equity_high_boost_mult": 1.0
+    },
+    "full_2026": {
+      "pnl": 174.96230052678223,
+      "mdd": -7.563562766725429,
+      "trades": 587,
+      "trades_per_day": 10.005681818181818,
+      "wr": 0.4514480408858603,
+      "avg_notional": 0.6007256210267132,
+      "avg_leverage": 1.5781246541441067,
+      "long_entries": 279,
+      "short_entries": 308,
+      "entry_blocks": {
+        "model_cooldown": 465,
+        "loss_cooldown": 3864,
+        "daily_dd_lock": 822,
+        "daily_trade_budget": 21
+      },
+      "exits": {
+        "max_hold": 435,
+        "stop_loss": 122,
+        "take_profit": 26,
+        "daily_dd_risk_exit": 4
+      }
+    },
+    "monthly": {
+      "name": "m1.5_q0.0_d0.04_dd0.035_max16_cd12_g0.12_pb0.015x1.1_hb-1.0x1.0",
+      "full": {
+        "pnl": 174.96230052678223,
+        "mdd": -7.563562766725429,
+        "trades": 587,
+        "trades_per_day": 10.005681818181818,
+        "wr": 0.4514480408858603,
+        "avg_notional": 0.6007256210267132,
+        "avg_leverage": 1.5781246541441067,
+        "long_entries": 279,
+        "short_entries": 308,
+        "entry_blocks": {
+          "model_cooldown": 465,
+          "loss_cooldown": 3864,
+          "daily_dd_lock": 822,
+          "daily_trade_budget": 21
+        },
+        "exits": {
+          "max_hold": 435,
+          "stop_loss": 122,
+          "take_profit": 26,
+          "daily_dd_risk_exit": 4
+        }
+      },
+      "jan": {
+        "pnl": 61.47149847805329,
+        "mdd": -6.686857917539268,
+        "trades": 294,
+        "trades_per_day": 9.484933348269296,
+        "wr": 0.43537414965986393,
+        "avg_notional": 0.5437237521589138,
+        "avg_leverage": 1.586837186382343,
+        "long_entries": 144,
+        "short_entries": 150,
+        "entry_blocks": {
+          "model_cooldown": 244,
+          "loss_cooldown": 1981,
+          "daily_dd_lock": 287
+        },
+        "exits": {
+          "max_hold": 244,
+          "stop_loss": 45,
+          "take_profit": 5
+        }
+      },
+      "feb": {
+        "pnl": 70.65250096106325,
+        "mdd": -7.563562766725451,
+        "trades": 289,
+        "trades_per_day": 10.44578313253012,
+        "wr": 0.47058823529411764,
+        "avg_notional": 0.648222899438559,
+        "avg_leverage": 1.5655604722106948,
+        "long_entries": 132,
+        "short_entries": 157,
+        "entry_blocks": {
+          "loss_cooldown": 1836,
+          "model_cooldown": 222,
+          "daily_dd_lock": 692,
+          "daily_trade_budget": 21
+        },
+        "exits": {
+          "stop_loss": 76,
+          "max_hold": 190,
+          "take_profit": 21,
+          "daily_dd_risk_exit": 2
+        }
+      },
+      "min_month_pnl": 61.47149847805329
+    },
+    "ai_stress": {
+      "normal": {
+        "stress": {
+          "mode": "normal",
+          "changed_cols": []
+        },
+        "eval": {
+          "pnl": 174.96230052678223,
+          "mdd": -7.563562766725429,
+          "trades": 587,
+          "trades_per_day": 10.005681818181818,
+          "wr": 0.4514480408858603,
+          "avg_notional": 0.6007256210267132,
+          "avg_leverage": 1.5781246541441067,
+          "long_entries": 279,
+          "short_entries": 308,
+          "entry_blocks": {
+            "model_cooldown": 465,
+            "loss_cooldown": 3864,
+            "daily_dd_lock": 822,
+            "daily_trade_budget": 21
+          },
+          "exits": {
+            "max_hold": 435,
+            "stop_loss": 122,
+            "take_profit": 26,
+            "daily_dd_risk_exit": 4
+          }
+        }
+      },
+      "all_ai_zero": {
+        "stress": {
+          "mode": "all_ai_zero",
+          "changed_cols": [
+            "pred_patchtst",
+            "conf_patchtst",
+            "ai_dir_edge",
+            "ai_dir_p_up",
+            "ai_dir_p_down",
+            "ai_dir_p_flat",
+            "ai_dir_entropy",
+            "patchtst_median",
+            "patchtst_regime_sim",
+            "ai_adverse_risk",
+            "ai_reward_risk",
+            "ai_vol_regime_pct",
+            "tide_vol_raw",
+            "tide_vol_zscore",
+            "ai_flow_pressure",
+            "ai_flow_exhaustion",
+            "ai_flow_flip_prob",
+            "ai_flow_slope",
+            "dlinear_smf_ema",
+            "dlinear_smf_slope"
+          ]
+        },
+        "eval": {
+          "pnl": 28.416005259633103,
+          "mdd": -13.336079401777445,
+          "trades": 684,
+          "trades_per_day": 11.65909090909091,
+          "wr": 0.44590643274853803,
+          "avg_notional": 0.4301793957887536,
+          "avg_leverage": 1.5611698760098542,
+          "long_entries": 367,
+          "short_entries": 317,
+          "entry_blocks": {
+            "model_cooldown": 640,
+            "loss_cooldown": 4536,
+            "daily_trade_budget": 212,
+            "daily_dd_lock": 696,
+            "daily_loss_lock": 272
+          },
+          "exits": {
+            "max_hold": 570,
+            "stop_loss": 92,
+            "take_profit": 17,
+            "daily_dd_risk_exit": 4,
+            "forced_end": 1
+          }
+        }
+      },
+      "patchtst_zero": {
+        "stress": {
+          "mode": "patchtst_zero",
+          "changed_cols": [
+            "pred_patchtst",
+            "conf_patchtst",
+            "ai_dir_edge",
+            "ai_dir_p_up",
+            "ai_dir_p_down",
+            "ai_dir_p_flat",
+            "ai_dir_entropy",
+            "patchtst_median",
+            "patchtst_regime_sim"
+          ]
+        },
+        "eval": {
+          "pnl": 85.37409554618081,
+          "mdd": -11.865001703446044,
+          "trades": 610,
+          "trades_per_day": 10.397727272727273,
+          "wr": 0.4557377049180328,
+          "avg_notional": 0.6242744474307124,
+          "avg_leverage": 1.5756918517266492,
+          "long_entries": 319,
+          "short_entries": 291,
+          "entry_blocks": {
+            "model_cooldown": 481,
+            "loss_cooldown": 3975,
+            "daily_dd_lock": 467,
+            "daily_trade_budget": 42
+          },
+          "exits": {
+            "max_hold": 432,
+            "stop_loss": 152,
+            "take_profit": 25,
+            "daily_dd_risk_exit": 1
+          }
+        }
+      },
+      "tide_zero": {
+        "stress": {
+          "mode": "tide_zero",
+          "changed_cols": [
+            "ai_adverse_risk",
+            "ai_reward_risk",
+            "ai_vol_regime_pct",
+            "tide_vol_raw",
+            "tide_vol_zscore"
+          ]
+        },
+        "eval": {
+          "pnl": 33.54373032850364,
+          "mdd": -11.701520733995341,
+          "trades": 692,
+          "trades_per_day": 11.795454545454547,
+          "wr": 0.41184971098265893,
+          "avg_notional": 0.47671588467753806,
+          "avg_leverage": 1.5698873795824022,
+          "long_entries": 318,
+          "short_entries": 374,
+          "entry_blocks": {
+            "model_cooldown": 643,
+            "loss_cooldown": 4872,
+            "daily_trade_budget": 221,
+            "daily_dd_lock": 197,
+            "daily_loss_lock": 345
+          },
+          "exits": {
+            "max_hold": 559,
+            "stop_loss": 113,
+            "take_profit": 18,
+            "daily_dd_risk_exit": 1,
+            "forced_end": 1
+          }
+        }
+      },
+      "dlinear_zero": {
+        "stress": {
+          "mode": "dlinear_zero",
+          "changed_cols": [
+            "ai_flow_pressure",
+            "ai_flow_exhaustion",
+            "ai_flow_flip_prob",
+            "ai_flow_slope",
+            "dlinear_smf_ema",
+            "dlinear_smf_slope"
+          ]
+        },
+        "eval": {
+          "pnl": 36.71625011723461,
+          "mdd": -15.80641203725337,
+          "trades": 571,
+          "trades_per_day": 9.732954545454545,
+          "wr": 0.436077057793345,
+          "avg_notional": 0.5526816506144372,
+          "avg_leverage": 1.573877816094808,
+          "long_entries": 272,
+          "short_entries": 299,
+          "entry_blocks": {
+            "model_cooldown": 458,
+            "loss_cooldown": 3852,
+            "daily_dd_lock": 788,
+            "daily_trade_budget": 26
+          },
+          "exits": {
+            "max_hold": 434,
+            "stop_loss": 122,
+            "take_profit": 12,
+            "daily_dd_risk_exit": 2,
+            "forced_end": 1
+          }
+        }
+      }
+    }
+  },
+  "highest_return_mdd20_selection": {
+    "name": "m1.5_q0.0_d0.06_dd0.07_max12_cd12_g0.12_pb999.0x1.0_hb0.015x1.28",
+    "entry_config": {
+      "notional_mult": 1.5,
+      "quality_floor": 0.0,
+      "confidence_floor": 0.0,
+      "max_notional": 3.6
+    },
+    "risk_config": {
+      "max_daily_trades": 12,
+      "daily_loss_limit": 0.06,
+      "daily_dd_limit": 0.07,
+      "global_dd_cut": 0.12,
+      "global_dd_mult": 0.45,
+      "loss_cooldown_bars": 12,
+      "loss_streak_soft": 2,
+      "loss_streak_mult": 0.65,
+      "max_notional": 3.6,
+      "daily_profit_boost_start": 999.0,
+      "daily_profit_boost_mult": 1.0,
+      "equity_high_boost_dd": 0.015,
+      "equity_high_boost_mult": 1.28
+    },
+    "full_2026": {
+      "pnl": 176.61400188439842,
+      "mdd": -9.818613025424971,
+      "trades": 591,
+      "trades_per_day": 10.073863636363637,
+      "wr": 0.45346869712351945,
+      "avg_notional": 0.7105919911279373,
+      "avg_leverage": 1.586428357332846,
+      "long_entries": 281,
+      "short_entries": 310,
+      "entry_blocks": {
+        "model_cooldown": 451,
+        "loss_cooldown": 3864,
+        "daily_trade_budget": 685
+      },
+      "exits": {
+        "max_hold": 409,
+        "stop_loss": 142,
+        "take_profit": 39,
+        "forced_end": 1
+      }
+    }
+  },
+  "cost_stress": {
+    "cost_1x": {
+      "monthly_balanced": {
+        "pnl": 174.96230052678223,
+        "mdd": -7.563562766725429,
+        "trades": 587,
+        "trades_per_day": 10.005681818181818,
+        "wr": 0.4514480408858603,
+        "avg_notional": 0.6007256210267132,
+        "avg_leverage": 1.5781246541441067,
+        "long_entries": 279,
+        "short_entries": 308,
+        "entry_blocks": {
+          "model_cooldown": 465,
+          "loss_cooldown": 3864,
+          "daily_dd_lock": 822,
+          "daily_trade_budget": 21
+        },
+        "exits": {
+          "max_hold": 435,
+          "stop_loss": 122,
+          "take_profit": 26,
+          "daily_dd_risk_exit": 4
+        }
+      },
+      "highest_return_mdd20": {
+        "pnl": 176.61400188439842,
+        "mdd": -9.818613025424971,
+        "trades": 591,
+        "trades_per_day": 10.073863636363637,
+        "wr": 0.45346869712351945,
+        "avg_notional": 0.7105919911279373,
+        "avg_leverage": 1.586428357332846,
+        "long_entries": 281,
+        "short_entries": 310,
+        "entry_blocks": {
+          "model_cooldown": 451,
+          "loss_cooldown": 3864,
+          "daily_trade_budget": 685
+        },
+        "exits": {
+          "max_hold": 409,
+          "stop_loss": 142,
+          "take_profit": 39,
+          "forced_end": 1
+        }
+      }
+    },
+    "cost_2x": {
+      "monthly_balanced": {
+        "pnl": 26.45390142527542,
+        "mdd": -14.218390225001675,
+        "trades": 561,
+        "trades_per_day": 9.5625,
+        "wr": 0.33511586452762926,
+        "avg_notional": 0.5426400426415552,
+        "avg_leverage": 1.5811719352453195,
+        "long_entries": 259,
+        "short_entries": 302,
+        "entry_blocks": {
+          "model_cooldown": 450,
+          "loss_cooldown": 4476,
+          "daily_dd_lock": 713
+        },
+        "exits": {
+          "max_hold": 412,
+          "stop_loss": 123,
+          "take_profit": 22,
+          "daily_dd_risk_exit": 4
+        }
+      },
+      "highest_return_mdd20": {
+        "pnl": 28.82769862436414,
+        "mdd": -13.58602584519809,
+        "trades": 576,
+        "trades_per_day": 9.818181818181818,
+        "wr": 0.34375,
+        "avg_notional": 0.596410780337146,
+        "avg_leverage": 1.586012617487037,
+        "long_entries": 274,
+        "short_entries": 302,
+        "entry_blocks": {
+          "model_cooldown": 450,
+          "loss_cooldown": 4528,
+          "daily_trade_budget": 384
+        },
+        "exits": {
+          "max_hold": 400,
+          "stop_loss": 147,
+          "take_profit": 29
+        }
+      }
+    },
+    "cost_3x": {
+      "monthly_balanced": {
+        "pnl": -26.091817147910092,
+        "mdd": -26.091817147910092,
+        "trades": 593,
+        "trades_per_day": 10.107954545454547,
+        "wr": 0.16020236087689713,
+        "avg_notional": 0.19723948310533773,
+        "avg_leverage": 1.5765053784977705,
+        "long_entries": 279,
+        "short_entries": 314,
+        "entry_blocks": {
+          "model_cooldown": 470,
+          "loss_cooldown": 5976,
+          "daily_dd_lock": 456,
+          "daily_trade_budget": 133,
+          "zero_notional": 803
+        },
+        "exits": {
+          "max_hold": 290,
+          "stop_loss": 39,
+          "daily_dd_risk_exit": 2,
+          "account_dd_risk_exit": 262
+        }
+      },
+      "highest_return_mdd20": {
+        "pnl": -15.314118917503905,
+        "mdd": -17.273305198187426,
+        "trades": 552,
+        "trades_per_day": 9.40909090909091,
+        "wr": 0.25,
+        "avg_notional": 0.36065442567392286,
+        "avg_leverage": 1.584506274810288,
+        "long_entries": 252,
+        "short_entries": 300,
+        "entry_blocks": {
+          "model_cooldown": 433,
+          "loss_cooldown": 4968,
+          "daily_trade_budget": 259,
+          "daily_dd_lock": 224
+        },
+        "exits": {
+          "max_hold": 406,
+          "stop_loss": 91,
+          "daily_dd_risk_exit": 2,
+          "take_profit": 15,
+          "account_dd_risk_exit": 37,
+          "forced_end": 1
+        }
+      }
+    }
+  },
+  "source_reports": [
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_entry_grid_patchtst_tide_dlinear_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_entry_overlay_grid_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_risk_overlay_grid_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_risk_monthly_audit_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_profit_pyramid_grid_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_trailing_lock_grid_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_cost_quality_scan_hf_v4_2026.json",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_cost_quality_top_candidate_audit_2026.json"
+  ],
+  "rejected_or_secondary_experiments": {
+    "trailing_lock": {
+      "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_trailing_lock_grid_hf_v4_2026.json",
+      "conclusion": "No trailing-lock config beat the no-trailing monthly-balanced selection; trailing reduced full-period pnl."
+    },
+    "cost_quality_scan": {
+      "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_cost_quality_scan_hf_v4_2026.json",
+      "top_1x_secondary_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_cost_quality_top_candidate_audit_2026.json",
+      "conclusion": "q0.01 equity-high candidate reached 176.46% / -7.02% / 8.61 trades/day at 1x, but failed 2x cost stress, so it is not promoted above monthly-balanced selection."
+    }
+  }
+}

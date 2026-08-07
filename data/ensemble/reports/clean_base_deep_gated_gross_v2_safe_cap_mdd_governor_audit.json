@@ -1,0 +1,15 @@
+{
+  "model_id": "clean_base_deep_gated_gross_v2_safe_cap_mdd_governor",
+  "status": "pass",
+  "blocking": [],
+  "invariants": {
+    "parent_trained_before_cap_train": true,
+    "cap_map_learned_before_validation": true,
+    "mdd_governor_selected_on_2025_validation_only": true,
+    "oos_is_2026_report_only": true,
+    "no_new_entries_created": true,
+    "cost2_survives": true,
+    "cost3_survives": true,
+    "no_liquidation_or_ruin": true
+  }
+}

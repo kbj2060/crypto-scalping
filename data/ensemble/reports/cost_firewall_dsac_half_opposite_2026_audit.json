@@ -1,0 +1,68 @@
+{
+  "model_id": "cost_firewall_dsac_half_opposite_2026",
+  "status": "pass",
+  "pre_run": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [],
+    "context": {
+      "feature_rows": 16897,
+      "ledger_rows": 363,
+      "timestamp_alignment_mismatches_gt_300s": 0,
+      "missing_feature_rows": 0
+    },
+    "dsac": {
+      "path": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_priority1_full_retrain_20260507/best_dsac_agents.pth",
+      "epoch": 180,
+      "global_step": 0,
+      "state_dim": 29,
+      "best_val_pnl": 0.0
+    },
+    "pre_run_checks": {
+      "experiment_family": "formal_cost_firewall_plus_dsac_soft_scaler",
+      "cost_firewall_is_declared_layer_not_dsac_only_candidate": true,
+      "candidate_max_notional_lte_3p6": true,
+      "feature_entry_idx_timestamp_aligned": true,
+      "declared_entry_time_inputs": [
+        "DGG signal fields",
+        "deep prediction fields",
+        "M7 prediction fields",
+        "regime fields",
+        "DSAC actor signal at entry_idx"
+      ],
+      "forbidden_selection_inputs": [
+        "holdout metrics",
+        "future realized pnl",
+        "future realized drawdown"
+      ]
+    }
+  },
+  "post_selection": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [],
+    "invariants": {
+      "no_new_entries_created": true,
+      "uses_existing_dgg_v2_entries_and_exits": true,
+      "max_notional_lte_3p6": true,
+      "no_side_flip": true,
+      "same_side_boost_only_when_dsac_side_matches_core_side": true,
+      "opposite_veto_only_when_dsac_side_opposes_core_side": true,
+      "blocked_rows_retained_for_audit": true,
+      "selection_uses_validation_only": true,
+      "formal_cost_firewall_declared": true,
+      "cost_gate_uses_entry_time_prediction_proxy_only": true,
+      "cost_gate_does_not_use_realized_pnl_columns": true,
+      "full_mdd_lte_noop": true,
+      "full_cost2_survives": true,
+      "full_cost3_survives": true
+    },
+    "baseline_replay": {
+      "source_final_cash": 8.960582860566412,
+      "noop_replay_final_cash": 8.960582860566412,
+      "final_cash_abs_error": 0.0,
+      "noop_replay_pnl": 796.0582860566411,
+      "noop_replay_mdd_mark_to_market": -24.945436703379887
+    }
+  }
+}

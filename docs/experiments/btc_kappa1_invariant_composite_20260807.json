@@ -1,0 +1,45 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "btc-kappa1-invariant-composite-20260807",
+  "hypothesis": "A sign-constrained composite policy (~10-20 params) over four frozen, individually-verified-real BTC signals (event-gate windows, contrarian 1m flow, GMM/IF anomaly, P3-role pivot exit + trailing envelope), optimized for WORST-QUARTER net PnL and selected only by quarterly LOWO, clears the maker-execution cost bar (~5-7bps roundtrip incl. ~1bp adverse selection, per the Stage-0 audit) on held-out quarters where every pooled-VAL-optimized predictor has failed.",
+  "research": {
+    "line_id": "btc_kappa1_invariant_composite_policy",
+    "related_prior_line_ids": ["global_1m_scalping", "btc_zigzag_pivot_exit_primitives", "btc_1h_native_swing_entry"],
+    "prior_failure_reassessment": "The three parent failures died for orthogonal, individually-documented reasons, none of which was 'the signal is not real': (1) global_1m_scalping -- contrarian flow confirmed real 5x but gross edge < TAKER costs; Kappa1 replaces taker entry with post-only maker entry, and the 2026-08-07 Stage-0 audit (docs/experiments/btc_kappa1_stage0_maker_fill_audit_20260807.json) measured 98.1% 15-min fill rate in event windows under a strict trade-through rule with only ~1bp adverse selection, cutting the cost bar roughly in half. (2) btc_zigzag_pivot_exit_primitives -- P3 proved true adverse-pivot bars are profitable to exit (t=2.2-8.2 every bucket/split) but precision dilution killed every standalone exit design; Kappa1 demotes the nowcast to exit-only inside an already-open position, where a false positive costs bounded forgone profit, not new risk. (3) btc_1h_native_swing_entry and the ~25 entry-axis failures before it share one signature: pooled-VAL optimization followed by OOS sign flip (5 reproductions); Kappa1 trains NO new predictor (frozen primitives, ~10-20 sign-constrained fusion params vs effective_n ~4k) and replaces the pooled objective with worst-quarter optimization + quarterly LOWO selection -- LOWO being the only selection method in this repo that ever passed a held-out test (Sigma6, 4/5). The event-gate closure condition ('do not resume without fundamentally new execution primitives') is satisfied by the maker-first primitive itself.",
+    "retest_design": "Nothing is retrained: GMM/IF scores, event-gate series, and the G8-frozen pivot nowcaster are consumed read-only; the only fitted object is the fusion layer (weights >= 0 with pre-fixed signs, entry/size thresholds), optimized by CMA-ES from 5 genuinely random non-clustered seed initializations. Environments = calendar quarters 2025Q1..2026Q2 (dataset span 2025-01-01..2026-07-12). Objective = maximize worst-quarter net PnL (CVaR@25 tiebreak). Selection = leave-one-quarter-out: for each held-out quarter, optimize on the remaining quarters and evaluate frozen on the held-out one; pass requires >= 4/5 held-out quarters net-positive per seed AND sign-agreement across all 5 seeds AND >= 15 trades per held-out quarter. Single pooled-VAL selection is banned. Costs: maker 2bps entry + taker 5bps exit + 1bp measured adverse selection (7bps roundtrip conservative envelope, taker exit assumed as worst case), fills only where the Stage-0 conservative trade-through rule fills. Final promotion evidence can ONLY come from post-2026-08 accumulating fresh data (both historical OOS windows are spent); the LOWO table is a research gate, not a promotion claim.",
+    "stage0_audit": "docs/experiments/btc_kappa1_stage0_maker_fill_audit_20260807.json (v1 pre-registered rule KILLed at 24.3% -- degenerate placement rule, 75% post-only rejections; v2 at-touch amendment recorded post-hoc, accepted by user 2026-08-07)"
+  },
+  "market": {"symbols": ["BTCUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/btc_kappa1_primitives_5m_20260807.parquet",
+    "raw_sources": ["klines_5m", "klines_1m_taker_flow", "gmm_volatility_cached_causal_scores", "isolation_forest_cached_causal_scores", "event_gate_series_20260804"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "atr", "gmm_volatility_regime", "isolation_forest_anomaly", "event_gate", "taker_flow_1m_aggregated"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "none_policy_net_pnl (no supervised label; reward = realized net PnL of the policy)", "horizon_bars": "288", "timeout_handling": "mark_to_market"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "cma_es_sign_constrained_linear_fusion",
+    "candidate_architecture": "frozen 4-primitive composite: entry permission = event-gate window; direction = contrarian flow; score = nonneg-weighted oriented primitives; sizing = margin_fraction buckets {0.10,0.20,0.30} x leverage 3; exit = pivot-nowcast trigger OR trailing 0.5*SL @ 0.3*TP OR ATR TP/SL OR 288-bar time exit; execution = post-only maker entry per Stage-0 v2 fill rule",
+    "seeds": ["914237", "60481", "7754321", "283009", "51418"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {
+    "minimum_trades_per_split": "15",
+    "validation_pass_criteria": "quarterly LOWO: >= 4/5 held-out quarters net-positive (7bps conservative roundtrip cost envelope) for every seed, sign-agreement across all 5 CMA-ES seeds, >= 15 trades per held-out quarter; pooled single-VAL selection banned; splits block below retained only for schema compatibility -- the note in splits applies"
+  },
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "maker2_takerexit5_adverse1_bps_conservative", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

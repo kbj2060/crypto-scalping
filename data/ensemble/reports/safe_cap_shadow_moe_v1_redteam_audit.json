@@ -1,0 +1,48 @@
+{
+  "model_id": "safe_cap_shadow_moe_v1",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "selection fell back to shadow_noop; this is audit-safe but not an alpha improvement"
+  ],
+  "checked_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/safe_cap_shadow_moe_v1_2026.json",
+  "checked_ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/safe_cap_shadow_moe_v1_ledger.csv",
+  "checked_base_ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/safe_cap_shadow_moe_v1_base_safe_cap_ledger.csv",
+  "metrics": {
+    "oos_cost1": {
+      "pnl": 1597.4630368626497,
+      "mdd": -33.074780412722006,
+      "trades": 154,
+      "blocked": 209,
+      "avg_notional": 4.9058441558441555,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0
+    },
+    "oos_cost2": {
+      "pnl": 447.5551080906966,
+      "mdd": -33.58649105655501,
+      "trades": 100,
+      "blocked": 263,
+      "avg_notional": 4.875000000000001,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0
+    },
+    "oos_cost3": {
+      "pnl": 241.2115465132285,
+      "mdd": -34.095494415155635,
+      "trades": 70,
+      "blocked": 293,
+      "avg_notional": 4.845238095238096,
+      "max_notional": 5.0,
+      "max_margin_fraction": 1.0
+    }
+  },
+  "invariants": {
+    "no_new_entries": true,
+    "no_side_changes": true,
+    "no_exit_changes": true,
+    "accounting_columns_present": true,
+    "cost2_survives": true,
+    "cost3_survives": true
+  }
+}

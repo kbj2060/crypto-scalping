@@ -1,0 +1,87 @@
+[
+  {
+    "mode": "base",
+    "pnl": 286.9501820902332,
+    "mdd": -22.967215052515144,
+    "trades": 60,
+    "wr": 0.3,
+    "trades_per_day": 1.0227272727272727,
+    "long_entries": 23,
+    "short_entries": 37,
+    "avg_notional": 2.365399825111006,
+    "avg_leverage": 2.5432809554514626,
+    "exits": {
+      "sl": 42,
+      "hold": 12,
+      "tp": 6
+    }
+  },
+  {
+    "mode": "agree_attack",
+    "pnl": 254.74981088978797,
+    "mdd": -36.805092776345084,
+    "trades": 72,
+    "wr": 0.2361111111111111,
+    "trades_per_day": 1.2272727272727273,
+    "long_entries": 38,
+    "short_entries": 34,
+    "avg_notional": 2.9198396964633715,
+    "avg_leverage": 3.2306234038436483,
+    "exits": {
+      "sl": 55,
+      "hold": 10,
+      "tp": 7
+    }
+  },
+  {
+    "mode": "agree_max_notional",
+    "pnl": 268.6424584072889,
+    "mdd": -36.805092776345084,
+    "trades": 71,
+    "wr": 0.2535211267605634,
+    "trades_per_day": 1.2102272727272727,
+    "long_entries": 37,
+    "short_entries": 34,
+    "avg_notional": 2.92695897177958,
+    "avg_leverage": 3.2392993858926395,
+    "exits": {
+      "sl": 53,
+      "hold": 11,
+      "tp": 7
+    }
+  },
+  {
+    "mode": "agree_only_attack",
+    "pnl": 229.13438853910372,
+    "mdd": -22.967215052515122,
+    "trades": 53,
+    "wr": 0.3018867924528302,
+    "trades_per_day": 0.9034090909090909,
+    "long_entries": 24,
+    "short_entries": 29,
+    "avg_notional": 2.3086627924983807,
+    "avg_leverage": 2.4726903570512637,
+    "exits": {
+      "sl": 37,
+      "hold": 11,
+      "tp": 5
+    }
+  },
+  {
+    "mode": "quality_blend",
+    "pnl": 260.27776517200726,
+    "mdd": -36.805092776345084,
+    "trades": 72,
+    "wr": 0.2361111111111111,
+    "trades_per_day": 1.2272727272727273,
+    "long_entries": 38,
+    "short_entries": 34,
+    "avg_notional": 2.902006446460436,
+    "avg_leverage": 3.2085739868724166,
+    "exits": {
+      "sl": 55,
+      "hold": 10,
+      "tp": 7
+    }
+  }
+]

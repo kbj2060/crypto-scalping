@@ -1,0 +1,22 @@
+{
+  "status": "pass",
+  "verdict": "candidate_retest_required_with_real_l2_ticks",
+  "blocking": [],
+  "warnings": [
+    "signal_immediate_limit_uses_5m_high_low_touch_proxy_not_queue_fill",
+    "market_fallback_after_limit_miss_uses_same_next_bar_close_not_next_bar_open",
+    "live_post_only_reject_partial_fill_and_queue_position_not_modeled"
+  ],
+  "selection_uses_2026": false,
+  "selected_config": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "fallback_contract": "signal i -> maker touch check on i+1 high/low -> if miss, market fallback at i+1 close +/- slippage"
+}

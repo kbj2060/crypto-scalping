@@ -1,0 +1,235 @@
+{
+  "model_id": "alpha1_dt_liquid_parent_20260513",
+  "design": "Experimental alpha1 parent replacement. DT-style sequence policy conditions on desired return/downside/cost, uses a liquid time-constant gate before a causal Transformer, and predicts CASH/LONG/SHORT plus notional bucket. TP/SL/hold are fixed for this first low-interference parent replacement test.",
+  "selected_config": {
+    "name": "dt_liquid_p0.56_e0.0015",
+    "prob_th": 0.56,
+    "edge_th": 0.0015,
+    "margin_th": 0.001,
+    "max_notional": 2.3,
+    "fixed_leverage": 2.0,
+    "take_profit": 0.04,
+    "stop_loss": 0.018,
+    "max_hold": 48,
+    "cooldown": 12
+  },
+  "experiments": [
+    {
+      "name": "alpha1",
+      "metrics": {
+        "cost1": {
+          "pnl": 361.18717637569534,
+          "mdd": -31.741344176793795,
+          "trades": 199,
+          "wr": 0.2964824120603015,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 128,
+          "long_entries": 84,
+          "short_entries": 115,
+          "avg_notional": 2.1901619420416902,
+          "avg_leverage": 2.2123608661733103,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 56,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 71,
+            "v21_reject": 29,
+            "v21_add_on": 11
+          }
+        },
+        "cost2": {
+          "pnl": 88.74076757432363,
+          "mdd": -38.03968051948192,
+          "trades": 205,
+          "wr": 0.2634146341463415,
+          "trades_per_day": 3.494318181818182,
+          "deep_entries": 133,
+          "long_entries": 85,
+          "short_entries": 120,
+          "avg_notional": 2.1883526536808127,
+          "avg_leverage": 2.2092771926663635,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 87,
+            "v21_2_stop_loss": 57,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 133,
+            "v21_entry": 72,
+            "v21_add_on": 10,
+            "v21_reject": 29
+          }
+        },
+        "cost3": {
+          "pnl": 0.5776148307049533,
+          "mdd": -48.47537013484388,
+          "trades": 206,
+          "wr": 0.22815533980582525,
+          "trades_per_day": 3.5113636363636367,
+          "deep_entries": 130,
+          "long_entries": 91,
+          "short_entries": 115,
+          "avg_notional": 2.192206142497522,
+          "avg_leverage": 2.2032231449951607,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 88,
+            "deep_alpha_take_profit": 15,
+            "v21_2_stop_loss": 62,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 76,
+            "v21_add_on": 11,
+            "v21_reject": 14
+          }
+        }
+      },
+      "score": 387.27660311852765
+    },
+    {
+      "name": "dt_liquid_parent::dt_liquid_p0.56_e0.0015",
+      "metrics": {
+        "cost1": {
+          "pnl": -63.726347499677296,
+          "mdd": -63.97057895676982,
+          "trades": 292,
+          "wr": 0.386986301369863,
+          "trades_per_day": 4.9772727272727275,
+          "deep_entries": 4,
+          "long_entries": 219,
+          "short_entries": 73,
+          "avg_notional": 1.2217037665517363,
+          "avg_leverage": 2.0,
+          "exits": {
+            "v21_2_max_hold": 208,
+            "v21_2_stop_loss": 69,
+            "v21_2_take_profit": 10,
+            "deep_alpha_max_hold": 1,
+            "deep_alpha_stop_loss": 3,
+            "forced_end": 1
+          },
+          "runner_actions": {
+            "v21_entry": 288,
+            "v21_reject": 47,
+            "deep_entry": 4
+          }
+        },
+        "cost2": {
+          "pnl": -81.44468820657715,
+          "mdd": -81.56430251170904,
+          "trades": 295,
+          "wr": 0.3050847457627119,
+          "trades_per_day": 5.028409090909091,
+          "deep_entries": 3,
+          "long_entries": 218,
+          "short_entries": 77,
+          "avg_notional": 1.2352457620329775,
+          "avg_leverage": 2.0,
+          "exits": {
+            "v21_2_max_hold": 208,
+            "v21_2_stop_loss": 77,
+            "v21_2_take_profit": 6,
+            "deep_alpha_max_hold": 1,
+            "deep_alpha_stop_loss": 2,
+            "forced_end": 1
+          },
+          "runner_actions": {
+            "v21_entry": 292,
+            "v21_reject": 30,
+            "deep_entry": 3
+          }
+        },
+        "cost3": {
+          "pnl": -88.78677291053839,
+          "mdd": -88.85583973401663,
+          "trades": 297,
+          "wr": 0.26936026936026936,
+          "trades_per_day": 5.0625,
+          "deep_entries": 3,
+          "long_entries": 221,
+          "short_entries": 76,
+          "avg_notional": 1.2451262610528606,
+          "avg_leverage": 2.0,
+          "exits": {
+            "v21_2_max_hold": 205,
+            "v21_2_stop_loss": 80,
+            "v21_2_take_profit": 8,
+            "deep_alpha_max_hold": 1,
+            "deep_alpha_stop_loss": 2,
+            "forced_end": 1
+          },
+          "runner_actions": {
+            "v21_entry": 294,
+            "v21_reject": 25,
+            "deep_entry": 3
+          }
+        }
+      },
+      "score": -133.25275105144678
+    }
+  ],
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "parent_replacement": true,
+    "architecture": "Decision Transformer style sequence policy + liquid time gate + CVaR/cost3 future-utility targets",
+    "selected_config": {
+      "name": "dt_liquid_p0.56_e0.0015",
+      "prob_th": 0.56,
+      "edge_th": 0.0015,
+      "margin_th": 0.001,
+      "max_notional": 2.3,
+      "fixed_leverage": 2.0,
+      "take_profit": 0.04,
+      "stop_loss": 0.018,
+      "max_hold": 48,
+      "cooldown": 12
+    },
+    "parent_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_dt_liquid_parent_20260513/dt_liquid_parent.pt",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_dt_liquid_parent_20260513_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_dt_liquid_parent_20260513_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_dt_liquid_parent_20260513_grid.csv"
+  }
+}

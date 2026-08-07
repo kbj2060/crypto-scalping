@@ -179,7 +179,6 @@ def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
     m7_qwidth = nz(col("m7_qwidth"), 0.0)
     m7_expected_ret = nz(col("m7_expected_ret"), 0.0)
     m7_mtl_dn = nz(col("m7_mtl_dn"), 0.0)
-    m7_mtl_fl = nz(col("m7_mtl_fl"), 0.0)
     m7_mtl_up = nz(col("m7_mtl_up"), 0.0)
     m7_quant_10 = nz(col("m7_quantile_10"), 0.0)
     m7_quant_50 = nz(col("m7_quantile_50"), 0.0)
@@ -207,13 +206,13 @@ def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
     risk_bucket = np.where(out["shadow_aftershock_prob"] >= 0.75, 2, np.where(out["shadow_aftershock_prob"] >= 0.45, 1, 0))
     out["shadow_risk_bucket"] = risk_bucket.astype(np.float64)
 
-    probs = pd.concat([m7_mtl_dn, m7_mtl_fl, m7_mtl_up], axis=1).clip(lower=0.0)
+    probs = pd.concat([m7_mtl_dn, m7_mtl_up], axis=1).clip(lower=0.0)
     probs_sum = probs.sum(axis=1).replace(0.0, np.nan)
-    probs_norm = probs.div(probs_sum, axis=0).fillna(1.0 / 3.0)
+    probs_norm = probs.div(probs_sum, axis=0).fillna(0.5)
     out["mode_prob"] = probs_norm.max(axis=1).clip(0.0, 1.0)
     top2 = np.sort(probs_norm.to_numpy(dtype=np.float64), axis=1)[:, -2:]
     out["mode_spread"] = (top2[:, 1] - top2[:, 0]).clip(0.0, 1.0)
-    entropy = -(probs_norm * np.log(np.clip(probs_norm, 1e-9, 1.0))).sum(axis=1) / math.log(3.0)
+    entropy = -(probs_norm * np.log(np.clip(probs_norm, 1e-9, 1.0))).sum(axis=1) / math.log(2.0)
     out["entropy"] = entropy.clip(0.0, 1.0)
 
     out["tail_down_prob"] = ((m7_mtl_dn * 0.70) + (m7_quant_10 > 0).astype(float) * 0.30).clip(0.0, 1.0)

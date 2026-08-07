@@ -1,12 +1,13 @@
 """
 DSAC 코인 트레이딩 에이전트 (Distributional Soft Actor-Critic)
 ================================================================
-기존 단일 DSAC를 현재 라이브 피처 스키마에 맞는 compact state(29D)로 정리한다.
+기존 단일 DSAC를 현재 라이브 피처 스키마에 맞는 compact state로 정리한다.
 
-Compact State (29D)
-  Block A: M7 + Regime + MTF 문맥 (17)
-  Block B: 미시구조 + 유동성/스마트플로우 (6)
-  Block C: 포지션 상태 + 최근 모멘텀 (6)
+Compact State (18D)
+  Block A: M7 + Regime 문맥 (10)
+  Block B: execution context (4)
+  Block C: position/risk state (3)
+  Block D: AI meta insights (1)
 """
 
 import copy
@@ -79,28 +80,35 @@ from ensemble.train_rl_agent import (  # noqa: E402
     STATE_CONF,
     STATE_PRED,
 )
-from ensemble.rl_continuous_common import (  # noqa: E402
-    ReplayBuffer,
-    SACTradingEnv as _BaseSACTradingEnv,
-)
+from ensemble.rl_continuous_common import ReplayBuffer  # noqa: E402
+from ensemble.rl_continuous_dsac_baseline import SACTradingEnv as _BaseSACTradingEnv  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DSAC Unified State Spec (29 + 9 = 38)
+# DSAC Compact+AI State Spec (18D minimal unified state)
 # ─────────────────────────────────────────────────────────────────────────────
-DSAC_STATE_DIM = 40
+DSAC_STATE_DIM = 18
+DSAC_ACTION_DIM = 1
+DSAC_STATE_SCHEMA = "baseline29_plus_ai1_meta_state_ablate18_v21"
 
 AI_FEATS = [
-    "patchtst_median", "patchtst_regime_sim",
-    "tide_vol_raw", "tide_vol_zscore",
-    "timesnet_cycle_sin", "timesnet_cycle_cos", "timesnet_cycle_delta",
-    "dlinear_smf_ema", "dlinear_smf_slope"
+    "patchtst_regime_sim",
 ]
 
 # action threshold는 기존 SAC/DSAC와 동일
 _POS_THRESH = 0.12
 _NTR_ENTRY_THRESH = 0.06
-_CLOSE_THRESH = 0.03
+_CLOSE_THRESH = 0.05
+_REV_EXIT_THRESH = 0.08
+_MIN_HOLD_BARS = 8
+_REENTRY_COOLDOWN_BARS = 3
+_ENTRY_HYSTERESIS = 0.06
+_HOLD_CLOSE_THRESH = 0.02
+_SHORT_ENTRY_BIAS_EXTRA = 0.06
+_FORCE_CLOSE_HEAVY_PENALTY = 0.60
+_OPEN_CHURN_PENALTY = 0.035
+_CLOSE_CHURN_PENALTY = 0.025
+_SHORT_HOLD_CHURN_PENALTY = 0.080
 
 LOG_STD_MIN = -20
 LOG_STD_MAX = 2
@@ -125,6 +133,256 @@ def _norm_tanh(x: float, scale: float) -> float:
     return float(np.tanh(float(x) / s))
 
 
+def _soft_gate_enabled(default: bool = False) -> bool:
+    v = os.getenv("RL_UNIFIED_SOFT_GATE_ENABLE")
+    if v is None:
+        return bool(default)
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _futures_exec_enabled(default: bool = False) -> bool:
+    v = os.getenv("RL_UNIFIED_FUTURES_EXEC_ENABLE")
+    if v is None:
+        return bool(default)
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _short_entry_thresh(base_thresh: float, regime_name: str) -> float:
+    extra = _SHORT_ENTRY_BIAS_EXTRA if regime_name in {"bull", "whipsaw"} else 0.0
+    return float(base_thresh + extra)
+
+
+def _long_entry_thresh(base_thresh: float) -> float:
+    return float(base_thresh + _ENTRY_HYSTERESIS)
+
+
+def _same_side_resize_enabled(default: bool = False) -> bool:
+    v = os.getenv("RL_SAME_SIDE_RESIZE_ENABLE")
+    if v is None:
+        return bool(default)
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _unlevered_pnl_from_exposure(pnl: float, exposure: float) -> float:
+    exp = max(float(exposure or 0.0), 1e-8)
+    return float(pnl) / exp
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return float(default)
+
+
+def _normalize_leverage_usage(current_leverage: float, margin_usage: float, max_leverage: float | None = None) -> float:
+    cur = max(float(current_leverage), 0.0)
+    margin = float(np.clip(float(margin_usage), 0.0, 1.0))
+    max_lev = max(1.0, float(_max_futures_leverage() if max_leverage is None else max_leverage))
+    effective = margin * max(cur, 1.0)
+    return float(np.clip(effective / max_lev, 0.0, 1.0))
+
+
+def _max_futures_leverage(default: float = 5.0) -> float:
+    try:
+        return max(1.0, float(os.getenv("RL_MAX_LEVERAGE", str(default))))
+    except Exception:
+        return float(default)
+
+
+def _leverage_levels(default: tuple[float, ...] = (1.0, 3.0, 5.0)) -> tuple[float, ...]:
+    raw = os.getenv("RL_LEVERAGE_LEVELS", ",".join(str(x) for x in default))
+    levels = []
+    for tok in str(raw).split(","):
+        try:
+            val = float(tok.strip())
+        except Exception:
+            continue
+        if np.isfinite(val) and val >= 1.0:
+            levels.append(val)
+    if not levels:
+        levels = list(default)
+    levels = sorted(set(max(1.0, float(v)) for v in levels))
+    max_lev = _max_futures_leverage()
+    return tuple(float(v) for v in levels if v <= max_lev + 1e-9) or (1.0,)
+
+
+def _snap_leverage_bucket(target_leverage: float, lev_cap: float | None = None) -> float:
+    allowed = [float(v) for v in _leverage_levels() if lev_cap is None or float(v) <= float(lev_cap) + 1e-9]
+    if not allowed:
+        return 1.0
+    target = max(1.0, float(target_leverage))
+    return float(min(allowed, key=lambda v: abs(v - target)))
+
+
+def _min_trade_exposure(default: float = 0.10) -> float:
+    try:
+        return float(np.clip(float(os.getenv("RL_MIN_TRADE_EXPOSURE", str(default))), 0.0, _max_futures_leverage()))
+    except Exception:
+        return float(default)
+
+
+def _risk_max_margin(default: float = 0.35) -> float:
+    try:
+        return float(np.clip(float(os.getenv("RL_RISK_MAX_MARGIN", str(default))), 0.01, 1.0))
+    except Exception:
+        return float(default)
+
+
+def _net_edge_min(default: float = 0.0015) -> float:
+    try:
+        return max(0.0, float(os.getenv("RL_NET_EDGE_MIN", str(default))))
+    except Exception:
+        return float(default)
+
+
+def _action_to_futures_leverage(action_abs: float, pos_thresh: float = _POS_THRESH, max_leverage: float | None = None) -> float:
+    max_lev = _max_futures_leverage() if max_leverage is None else max(1.0, float(max_leverage))
+    den = max(1.0 - float(pos_thresh), 1e-6)
+    intensity = float(np.clip((float(action_abs) - float(pos_thresh)) / den, 0.0, 1.0))
+    return float(1.0 + intensity * (max_lev - 1.0))
+
+
+def _risk_overlay_from_features(features: dict[str, Any] | None, conviction: float) -> tuple[float, float, float]:
+    max_lev = _max_futures_leverage()
+    features = features or {}
+    regime = np.asarray([_safe_float(features.get(c, 0.0), 0.0) for c in REGIME_COLS], dtype=np.float32)
+    regime = np.nan_to_num(regime, nan=0.0)
+    regime_idx = int(np.argmax(regime)) if regime.size and float(np.max(regime)) > 0.0 else 4
+
+    if regime_idx == 0:
+        lev_cap = min(max_lev, float(os.getenv("RL_RISK_CHOP_LEV_CAP", "1.4")))
+    elif regime_idx == 1:
+        lev_cap = min(max_lev, float(os.getenv("RL_RISK_WHIPSAW_LEV_CAP", "1.2")))
+    elif regime_idx in (2, 3):
+        lev_cap = min(max_lev, float(os.getenv("RL_RISK_TREND_LEV_CAP", str(max_lev))))
+    else:
+        lev_cap = min(max_lev, float(os.getenv("RL_RISK_NORMAL_LEV_CAP", "2.5")))
+    lev_cap = max(1.0, lev_cap)
+
+    vol_pct = float(np.clip(_safe_float(features.get("ai_vol_regime_pct", 0.5), 0.5), 0.0, 1.0))
+    tide_z = _safe_float(features.get("tide_vol_zscore", 0.0), 0.0)
+    adverse = float(np.clip((np.tanh(tide_z / 3.0) + 1.0) * 0.5, 0.0, 1.0))
+    flow_flip = float(np.clip(_safe_float(features.get("ai_flow_flip_prob", 0.5), 0.5), 0.0, 1.0))
+    q50 = _safe_float(features.get("m7_q50", 0.0), 0.0)
+    qwidth = max(0.0, _safe_float(features.get("m7_qwidth", np.nan), np.nan))
+    if not np.isfinite(qwidth) or qwidth <= 1e-12:
+        qwidth = max(abs(_safe_float(features.get("garch_vol_z", 0.0), 0.0)) * 0.002, 5e-4)
+    uncertainty = float(np.clip(qwidth / 0.015, 0.0, 1.0))
+    # Opportunity gate only: M7 direction can invert out-of-sample, so q50 is
+    # used as magnitude/edge filter while the policy remains responsible for
+    # long-vs-short direction.
+    edge_buffer = _net_edge_min() * (1.0 + 0.35 * vol_pct + 0.35 * flow_flip + 0.20 * uncertainty)
+    if abs(q50) <= edge_buffer:
+        return 0.0, 1.0, 0.0
+
+    reward_edge = float(np.clip(abs(q50) / max(qwidth, 1e-4), 0.0, 1.0))
+    risk_damp = (
+        (1.0 - 0.55 * vol_pct)
+        * (1.0 - 0.45 * adverse)
+        * (1.0 - 0.35 * flow_flip)
+        * (1.0 - 0.25 * uncertainty)
+    )
+    risk_damp = float(np.clip(risk_damp, 0.10, 1.0))
+    opportunity = float(np.clip(0.55 + 0.45 * reward_edge, 0.55, 1.0))
+    effective = float(np.clip(conviction * risk_damp * opportunity, 0.0, 1.0))
+
+    leverage = float(1.0 + (lev_cap - 1.0) * effective)
+    leverage = _snap_leverage_bucket(leverage, lev_cap=lev_cap)
+    exposure_cap = float(max(_min_trade_exposure(), lev_cap * _risk_max_margin()))
+    exposure_cap = min(exposure_cap, lev_cap)
+    exposure = float(_min_trade_exposure() + (exposure_cap - _min_trade_exposure()) * effective)
+    if effective <= 1e-8:
+        exposure = 0.0
+    margin_fraction = float(np.clip(exposure / max(leverage, 1e-8), 0.0, _risk_max_margin()))
+    exposure = float(margin_fraction * leverage)
+    return margin_fraction, leverage, exposure
+
+
+def _decode_futures_action(action: Any, features: dict[str, Any] | None = None) -> tuple[float, float, float, float]:
+    arr = np.asarray(action, dtype=np.float32).reshape(-1)
+    if arr.size <= 1:
+        direction = float(np.clip(arr[0] if arr.size else 0.0, -1.0, 1.0))
+        den = max(1.0 - float(_POS_THRESH), 1e-6)
+        conviction = float(np.clip((abs(direction) - float(_POS_THRESH)) / den, 0.0, 1.0))
+    else:
+        direction = float(np.clip(arr[0], -1.0, 1.0))
+        dir_intensity = float(
+            np.clip((abs(direction) - float(_POS_THRESH)) / max(1.0 - float(_POS_THRESH), 1e-6), 0.0, 1.0)
+        )
+        raw_conviction = float(np.clip((arr[1] + 1.0) * 0.5, 0.0, 1.0))
+        conviction = dir_intensity * raw_conviction
+    if abs(direction) <= _POS_THRESH:
+        conviction = 0.0
+    overlay_features = dict(features or {})
+    overlay_features["_policy_direction"] = direction
+    margin_fraction, leverage, exposure = _risk_overlay_from_features(overlay_features, conviction)
+    return direction, margin_fraction, leverage, exposure
+
+
+def _futures_risk_features(
+    *,
+    pos_sign: float,
+    unrealized_pnl: float,
+    max_drawdown: float,
+    exposure_usage: float,
+    current_leverage: float,
+    max_leverage: float,
+    hold_vs_expected: float,
+    q50: float,
+    tp_offset: float,
+    sl_offset: float,
+    ai_adverse_raw: float,
+    ai_reward_raw: float,
+    ai_vol_pct: float,
+    ai_flow_flip: float,
+) -> tuple[float, float, float, float, float, float]:
+    in_pos = abs(float(pos_sign)) > 0.0
+    exposure = max(float(exposure_usage), 0.0)
+    leverage = max(float(current_leverage), 0.0)
+    max_lev = max(float(max_leverage), 1.0)
+    adverse_ref = max(abs(float(sl_offset)), abs(float(ai_adverse_raw)), 5e-4)
+    reward_ref = max(abs(float(tp_offset)), abs(float(ai_reward_raw)) * adverse_ref, adverse_ref, 5e-4)
+
+    risk_adjusted_exposure = float(np.clip(exposure * np.clip(float(ai_adverse_raw) / 0.010, 0.0, 3.0), 0.0, 1.0))
+    stop_pressure = 0.0
+    take_profit_pressure = 0.0
+    liquidation_buffer = 1.0
+    expected_edge_vs_risk = _norm_tanh(abs(float(q50)), adverse_ref)
+
+    if in_pos:
+        stop_pressure = float(np.clip(max(0.0, -float(unrealized_pnl)) / adverse_ref, 0.0, 3.0) / 3.0)
+        take_profit_pressure = float(np.clip(max(0.0, float(unrealized_pnl)) / reward_ref, 0.0, 3.0) / 3.0)
+        side_edge = float(pos_sign) * float(q50)
+        expected_edge_vs_risk = _norm_tanh(side_edge, adverse_ref)
+        notional = max(exposure * max_lev, 1e-6)
+        raw_loss = max(0.0, -float(unrealized_pnl) / notional)
+        raw_dd = max(0.0, -float(max_drawdown) / notional)
+        liq_move = max(0.90 / max(leverage, 1.0), 1e-4)
+        liquidation_buffer = float(np.clip((liq_move - max(raw_loss, raw_dd)) / liq_move, 0.0, 1.0))
+
+    hold_risk = max(0.0, float(hold_vs_expected)) * float(np.clip(ai_vol_pct, 0.0, 1.0))
+    scale_down_pressure = float(
+        np.clip(
+            0.35 * stop_pressure
+            + 0.20 * risk_adjusted_exposure
+            + 0.20 * float(np.clip(ai_flow_flip, 0.0, 1.0))
+            + 0.15 * hold_risk
+            + 0.10 * (1.0 - liquidation_buffer),
+            0.0,
+            1.0,
+        )
+    )
+    return (
+        float(liquidation_buffer),
+        float(stop_pressure),
+        float(take_profit_pressure),
+        float(risk_adjusted_exposure),
+        float(expected_edge_vs_risk),
+        float(scale_down_pressure),
+    )
+
+
 def _pick_first(features: dict[str, Any], keys: list[str], default: float = 0.0) -> float:
     for k in keys:
         if k in features:
@@ -132,21 +390,21 @@ def _pick_first(features: dict[str, Any], keys: list[str], default: float = 0.0)
     return float(default)
 
 
-def _normalize_prob3(dn: float, fl: float, up: float) -> tuple[float, float, float]:
-    p = np.array([max(dn, 0.0), max(fl, 0.0), max(up, 0.0)], dtype=np.float64)
+def _normalize_prob2(dn: float, up: float) -> tuple[float, float]:
+    p = np.array([max(dn, 0.0), max(up, 0.0)], dtype=np.float64)
     s = float(p.sum())
     if s <= 1e-12:
-        return (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+        return (0.5, 0.5)
     p = p / s
-    return float(p[0]), float(p[1]), float(p[2])
+    return float(p[0]), float(p[1])
 
 
-def _prob_entropy_norm(dn: float, fl: float, up: float) -> float:
-    p = np.array([dn, fl, up], dtype=np.float64)
+def _prob_entropy_norm2(dn: float, up: float) -> float:
+    p = np.array([dn, up], dtype=np.float64)
     p = np.clip(p, 1e-12, 1.0)
     p = p / max(float(p.sum()), 1e-12)
     ent = float(-np.sum(p * np.log(p)))
-    return float(np.clip(ent / np.log(3.0), 0.0, 1.0))
+    return float(np.clip(ent / np.log(2.0), 0.0, 1.0))
 
 
 def _hmm_cache_key(csv_path: str, train_ratio: float, n_iter: int) -> str:
@@ -239,6 +497,10 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         # 부모 __init__ 내부 reset() 호출 전에 guard 활성화
         self._compact_ready = False
         self._n_rows = len(df)
+        if specialist_pos_thresh is None:
+            specialist_pos_thresh = _POS_THRESH
+        if specialist_close_thresh is None:
+            specialist_close_thresh = _CLOSE_THRESH
         super().__init__(
             df=df,
             initial_balance=initial_balance,
@@ -263,6 +525,12 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
             terminal_quality_loss=terminal_quality_loss,
         )
         self._n_rows = len(self.df)
+        self.max_leverage = _max_futures_leverage()
+        self.leverage_levels = _leverage_levels()
+        self.current_notional_exposure = 0.0
+        self.min_hold_bars = int(os.getenv("RL_UNIFIED_MIN_HOLD_BARS", str(_MIN_HOLD_BARS)))
+        self.reentry_cooldown_bars = int(os.getenv("RL_UNIFIED_REENTRY_COOLDOWN_BARS", str(_REENTRY_COOLDOWN_BARS)))
+        self._bars_since_close = 999999
 
         close = np.maximum(self._close_np.astype(np.float64), 1e-8)
         log_close = np.log(close)
@@ -300,7 +568,6 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         # M7 columns (없으면 fallback 사용)
         self._m7_prob_up_np = self._col_first_or_none("m7_trend_xgb_up", "m7_prob_up", "trend_up_prob")
         self._m7_prob_dn_np = self._col_first_or_none("m7_trend_xgb_dn", "m7_prob_dn", "trend_dn_prob")
-        self._m7_prob_fl_np = self._col_first_or_none("m7_trend_xgb_fl", "m7_prob_fl", "trend_flat_prob")
         self._m7_quality_np = self._col_or_none("m7_quality_pred")
         self._m7_hold_np = self._col_or_none("m7_hold_pred")
         self._m7_q10_np = self._col_or_none("m7_q10")
@@ -319,7 +586,7 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         self._m7_tp_offset_np = self._col_or_none("m7_tp_offset")
         self._m7_sl_offset_np = self._col_or_none("m7_sl_offset")
 
-        # AI 모델 피처 로드 (9개)
+        # AI 모델 피처 로드
         self._ai_feats_dict = {}
         missing_ai = []
         for col in AI_FEATS:
@@ -342,6 +609,134 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         self._compact_ready = True
         # 부모 init 시 생성된 placeholder state를 실제 unified state로 갱신
         self.reset()
+
+    def reset(self, start_idx=None):
+        st = super().reset(start_idx=start_idx)
+        self.current_notional_exposure = 0.0
+        self._lots = []
+        self._bars_since_close = 999999
+        return st
+
+    def _lot_total_notional(self) -> float:
+        return float(sum(float(x.get("exposure", 0.0) or 0.0) for x in getattr(self, "_lots", [])))
+
+    def _lot_total_margin(self) -> float:
+        return float(sum(float(x.get("margin_fraction", 0.0) or 0.0) for x in getattr(self, "_lots", [])))
+
+    def _lot_weighted_entry(self) -> float:
+        lots = getattr(self, "_lots", [])
+        total = self._lot_total_notional()
+        if total <= 1e-12 or not lots:
+            return 0.0
+        return float(
+            sum(float(x.get("entry_price", 0.0) or 0.0) * float(x.get("exposure", 0.0) or 0.0) for x in lots)
+            / total
+        )
+
+    def _lot_oldest_entry_idx(self) -> int:
+        lots = getattr(self, "_lots", [])
+        if not lots:
+            return int(self.current_step)
+        return int(min(int(x.get("entry_idx", self.current_step)) for x in lots))
+
+    def _lot_trade_pnl(self, side: str, entry_price: float, exit_price: float, exposure: float) -> float:
+        exp = max(float(exposure), 0.0)
+        if exp <= 1e-12:
+            return 0.0
+        if str(side).upper() == "LONG":
+            raw = (float(exit_price) * (1.0 - self.slip) - float(entry_price)) / max(float(entry_price), 1e-8)
+        else:
+            raw = (float(entry_price) - float(exit_price) * (1.0 + self.slip)) / max(float(entry_price), 1e-8)
+        return float(raw * exp)
+
+    def _lot_mark_pnl(self, price: float) -> float:
+        total = 0.0
+        for lot in getattr(self, "_lots", []):
+            total += self._lot_trade_pnl(
+                str(lot.get("side", "")),
+                float(lot.get("entry_price", 0.0) or 0.0),
+                float(price),
+                float(lot.get("exposure", 0.0) or 0.0),
+            )
+        return float(total)
+
+    def _sync_position_from_lots(self) -> None:
+        lots = getattr(self, "_lots", [])
+        total_exp = self._lot_total_notional()
+        total_margin = self._lot_total_margin()
+        if not lots or total_exp <= 1e-12:
+            self.pos = None
+            self.entry_price = 0.0
+            self.entry_idx = int(self.current_step)
+            self.current_leverage = 0.0
+            self.current_margin_fraction = 0.0
+            self.current_notional_exposure = 0.0
+            self.unrealized_pnl = 0.0
+            self.hold_count = 0
+            return
+        self.pos = str(lots[0].get("side", "")).upper()
+        self.entry_price = self._lot_weighted_entry()
+        self.entry_idx = self._lot_oldest_entry_idx()
+        self.current_notional_exposure = float(np.clip(total_exp, 0.0, self.max_leverage))
+        self.current_margin_fraction = float(np.clip(total_margin, 0.0, 1.0))
+        self.current_leverage = (
+            float(np.clip(total_exp / max(total_margin, 1e-8), 1.0, self.max_leverage))
+            if total_margin > 1e-12 else float(np.clip(total_exp, 1.0, self.max_leverage))
+        )
+
+    def _lot_add(self, side: str, entry_price: float, margin_fraction: float, leverage: float, exposure: float, entry_idx: int) -> None:
+        exp = max(float(exposure), 0.0)
+        if exp <= 1e-12:
+            return
+        self._lots.append(
+            {
+                "side": str(side).upper(),
+                "entry_price": float(entry_price),
+                "exposure": float(exp),
+                "margin_fraction": float(np.clip(margin_fraction, 0.0, 1.0)),
+                "leverage": float(np.clip(leverage, 1.0, self.max_leverage)),
+                "entry_idx": int(entry_idx),
+            }
+        )
+        self._sync_position_from_lots()
+
+    def _lot_reduce(self, close_exposure: float, exit_price: float) -> float:
+        remaining = float(max(close_exposure, 0.0))
+        realized = 0.0
+        while remaining > 1e-12 and getattr(self, "_lots", []):
+            lot = self._lots[0]
+            lot_exp = float(lot.get("exposure", 0.0) or 0.0)
+            take = min(lot_exp, remaining)
+            realized += self._lot_trade_pnl(
+                str(lot.get("side", "")),
+                float(lot.get("entry_price", 0.0) or 0.0),
+                float(exit_price),
+                float(take),
+            )
+            old_exp = max(lot_exp, 1e-12)
+            remain_exp = lot_exp - take
+            remaining -= take
+            if remain_exp <= 1e-12:
+                self._lots.pop(0)
+            else:
+                scale = remain_exp / old_exp
+                lot["exposure"] = float(remain_exp)
+                lot["margin_fraction"] = float(np.clip(float(lot.get("margin_fraction", 0.0) or 0.0) * scale, 0.0, 1.0))
+        self._sync_position_from_lots()
+        return float(realized)
+
+    def _rebalance_margin_targets(self, target_margin_total: float, target_leverage: float) -> None:
+        lots = getattr(self, "_lots", [])
+        total_exp = self._lot_total_notional()
+        if not lots or total_exp <= 1e-12:
+            return
+        tgt_margin = float(np.clip(target_margin_total, 0.0, 1.0))
+        lev = float(np.clip(target_leverage, 1.0, self.max_leverage))
+        for lot in lots:
+            share = float(lot.get("exposure", 0.0) or 0.0) / max(total_exp, 1e-12)
+            lot["margin_fraction"] = float(np.clip(tgt_margin * share, 0.0, 1.0))
+            lot["leverage"] = lev
+        self._sync_position_from_lots()
 
     def _col_or_none(self, col: str) -> np.ndarray | None:
         if col not in self.df.columns:
@@ -388,6 +783,255 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         proxy = np.abs(self._logret_np.astype(np.float64)) * 0.25 + 2e-4
         return np.clip(proxy, 0.0, 0.02).astype(np.float32)
 
+    def _overlay_feature_dict(self, idx: int) -> dict[str, float]:
+        i = min(max(int(idx), 0), self._n_rows - 1)
+        out = {c: float(self._feat_np[i][self._regime_slice][j]) for j, c in enumerate(REGIME_COLS)}
+        out["ai_vol_regime_pct"] = float(self._arr_at(self._ai_feats_dict.get("ai_vol_regime_pct"), i, 0.5))
+        out["tide_vol_zscore"] = float(self._arr_at(self._ai_feats_dict.get("tide_vol_zscore"), i, 0.0))
+        out["ai_flow_flip_prob"] = float(self._arr_at(self._ai_feats_dict.get("ai_flow_flip_prob"), i, 0.5))
+        out["m7_q50"] = float(self._arr_at(self._m7_q50_np, i, 0.0))
+        out["m7_qwidth"] = float(self._arr_at(self._m7_qwidth_np, i, np.nan))
+        out["garch_vol_z"] = float(self._arr_at(self._garch_vol_z_np, i, 0.0))
+        return out
+
+    def step(self, action: float):
+        if not _futures_exec_enabled(default=False):
+            action = float(np.clip(action, -1.0, 1.0))
+            regime_name = self.regime_bucket(self.current_step)
+            long_entry_thresh = _long_entry_thresh(self.pos_thresh)
+            short_entry_thresh = _short_entry_thresh(self.pos_thresh, regime_name)
+            if self.pos is None:
+                if action > 0.0 and action < long_entry_thresh:
+                    action = 0.0
+                elif action < 0.0 and abs(action) < short_entry_thresh:
+                    action = 0.0
+            if self.pos == "LONG" and action < -_REV_EXIT_THRESH and self.hold_count >= self.min_hold_bars:
+                action = 0.0
+            elif self.pos == "SHORT" and action > _REV_EXIT_THRESH and self.hold_count >= self.min_hold_bars:
+                action = 0.0
+            if self.pos is None and self._bars_since_close < self.reentry_cooldown_bars:
+                if abs(action) > self.pos_thresh:
+                    action = 0.0
+            next_state, reward, done, info = super().step(action)
+            if bool(info.get("force_closed", False)):
+                reward -= _FORCE_CLOSE_HEAVY_PENALTY
+            return next_state, reward, done, info
+        arr = np.asarray(action, dtype=np.float32).reshape(-1)
+        raw_direction = float(np.clip(arr[0] if arr.size else 0.0, -1.0, 1.0))
+        fill_step = min(self.current_step + 1, len(self._open_np) - 1)
+        fill_price = float(self._open_np[fill_step])
+        decision_step = self.current_step
+        regime_name = self.regime_bucket(decision_step)
+        long_entry_thresh = _long_entry_thresh(self.pos_thresh)
+        short_entry_thresh = _short_entry_thresh(self.pos_thresh, regime_name)
+        overlay_features = self._overlay_feature_dict(decision_step)
+        direction = raw_direction
+        active_signal = bool(direction > long_entry_thresh or direction < -short_entry_thresh)
+        target_margin = 1.0 if active_signal else 0.0
+        target_leverage = 1.0 if active_signal else 0.0
+        target_exposure = 1.0 if active_signal else 0.0
+
+        if self.pos is not None:
+            prev_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
+        else:
+            prev_portfolio_value = self.balance
+
+        force_close = bool(
+            self.force_close_enable
+            and self.pos is not None
+            and self.unrealized_pnl <= self.force_close_th
+        )
+
+        is_entering_long = False
+        is_entering_short = False
+        is_closing = False
+        if force_close:
+            is_closing = True
+        elif self.pos is None:
+            if self._bars_since_close >= self.reentry_cooldown_bars and direction > long_entry_thresh and target_exposure > 1e-8:
+                is_entering_long = True
+            elif self._bars_since_close >= self.reentry_cooldown_bars and direction < -short_entry_thresh and target_exposure > 1e-8:
+                is_entering_short = True
+        else:
+            if self.hold_count >= self.min_hold_bars and (abs(direction) < _HOLD_CLOSE_THRESH or target_exposure <= 1e-8):
+                is_closing = True
+            elif self.pos == "LONG" and direction < -_REV_EXIT_THRESH and self.hold_count >= self.min_hold_bars:
+                is_closing = True
+            elif self.pos == "SHORT" and direction > _REV_EXIT_THRESH and self.hold_count >= self.min_hold_bars:
+                is_closing = True
+
+        self._just_closed = False
+        self._last_realized_pnl = 0.0
+        self._was_force_closed = force_close
+        self._last_closed_side = ""
+        self._last_closed_hold_count = 0
+
+        if is_entering_long:
+            entry_fill = fill_price * (1.0 + self.slip)
+            new_exp = float(np.clip(target_exposure, 0.0, self.max_leverage))
+            self.balance -= self.balance * self.fee * new_exp
+            self._lot_add("LONG", entry_fill, target_margin, target_leverage, new_exp, fill_step)
+        elif is_entering_short:
+            entry_fill = fill_price * (1.0 - self.slip)
+            new_exp = float(np.clip(target_exposure, 0.0, self.max_leverage))
+            self.balance -= self.balance * self.fee * new_exp
+            self._lot_add("SHORT", entry_fill, target_margin, target_leverage, new_exp, fill_step)
+        elif is_closing and self.pos is not None:
+            closed_side = str(self.pos)
+            closed_hold_count = int(self.hold_count)
+            base_balance = self.balance
+            close_exp = float(np.clip(getattr(self, "current_notional_exposure", 0.0), 0.0, self.max_leverage))
+            realized_pnl = self._lot_reduce(close_exp, fill_price)
+            self.balance = base_balance * (1.0 + realized_pnl)
+            self.balance -= base_balance * self.fee * close_exp
+            self.total_trades += 1
+            if realized_pnl > 0:
+                self.win_trades += 1
+            self._just_closed = True
+            self._last_realized_pnl = realized_pnl
+            self._last_closed_side = closed_side
+            self._last_closed_hold_count = closed_hold_count
+            self._lots = []
+            self.pos = None
+            self.current_leverage = 0.0
+            self.current_margin_fraction = 0.0
+            self.current_notional_exposure = 0.0
+            self.hold_count = 0
+            self.unrealized_pnl = 0.0
+            self.peak_pnl = 0.0
+            self.max_drawdown = 0.0
+            self._bars_since_close = 0
+
+        self.current_step += 1
+        done = self.current_step >= self.end_step
+        next_price = self._close_np[min(self.current_step, len(self._close_np) - 1)]
+        if self.pos is None:
+            self._bars_since_close += 1
+
+        if self.pos is not None:
+            self._sync_position_from_lots()
+            self.hold_count = self.current_step - self.entry_idx
+            self.unrealized_pnl = self._lot_mark_pnl(next_price)
+            self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
+            self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
+
+        if self.pos is not None:
+            current_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
+        else:
+            current_portfolio_value = self.balance
+
+        step_delta = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8) * 50.0
+        r1_pnl = float(np.tanh(step_delta))
+
+        regime_step = min(max(decision_step, 0), len(self._feat_np) - 1)
+        regime_raw = self._feat_np[regime_step]
+        o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
+        regime_vec = regime_raw[o : o + self._n_regime]
+        regime_idx = int(np.argmax(regime_vec))
+
+        r2_drawdown = 0.0
+        if self.pos is not None and self.unrealized_pnl < -abs(self.dd_soft_start):
+            dd_excess = abs(self.unrealized_pnl) - abs(self.dd_soft_start)
+            dd_den = max(abs(self.dd_hard_scale) - abs(self.dd_soft_start), 1e-6)
+            dd_ratio = np.clip(dd_excess / dd_den, 0.0, 3.0)
+            r2_drawdown = -self.dd_penalty_coeff * float(dd_ratio ** 2)
+
+        r3_quality = 0.0
+        if self._just_closed:
+            if self._was_force_closed:
+                r3_quality = -_FORCE_CLOSE_HEAVY_PENALTY
+            elif self._last_realized_pnl > 0:
+                r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
+            else:
+                r3_quality = -0.08 if self.side_mode == "both" else -0.05
+
+        r4_time_decay = 0.0
+        if self.pos is not None and self.hold_count > self.hold_plateau_start:
+            if abs(float(self.unrealized_pnl)) < self.hold_plateau_pnl_abs:
+                r4_time_decay = -self.hold_plateau_penalty * float(
+                    np.clip((self.hold_count - self.hold_plateau_start) / 96.0, 0.0, 1.0)
+                )
+
+        r7_adverse_hold = 0.0
+        if (
+            self.pos is not None
+            and self.unrealized_pnl < -abs(self.adverse_hold_pnl_th)
+            and self.hold_count > self.adverse_hold_start
+        ):
+            r7_adverse_hold = -self.adverse_hold_penalty * float(
+                np.clip(abs(self.unrealized_pnl) / 0.02, 0.0, 1.0)
+            )
+
+        r5_idle = 0.0
+        if self.pos is None:
+            if self.specialist_idle_penalty is not None:
+                r5_idle = float(self.specialist_idle_penalty)
+            else:
+                r5_idle = 0.0
+
+        r6_trade_cost = 0.0
+        if is_entering_long or is_entering_short:
+            r6_trade_cost -= _OPEN_CHURN_PENALTY
+        if self._just_closed:
+            r6_trade_cost -= _CLOSE_CHURN_PENALTY
+            if self._last_closed_hold_count > 0 and self._last_closed_hold_count < 12:
+                short_hold_ratio = 1.0 - float(self._last_closed_hold_count) / 12.0
+                r6_trade_cost -= _SHORT_HOLD_CHURN_PENALTY * float(np.clip(short_hold_ratio, 0.0, 1.0))
+
+        r8_kelly_regime = 0.0
+        if self.pos is not None:
+            step_ret = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8)
+            exposure_scale = float(np.clip(getattr(self, "current_notional_exposure", 0.0), 0.0, 1.5))
+            is_aligned = (self.pos == "LONG" and regime_idx == 2) or (self.pos == "SHORT" and regime_idx == 3)
+            if step_ret > 0.0 and is_aligned:
+                r8_kelly_regime += self.kelly_align_bonus * exposure_scale * float(np.clip(step_ret / 0.002, 0.0, 1.0))
+            if step_ret < 0.0 and regime_idx in (0, 1):
+                extra = max(self.kelly_chop_loss_penalty - 1.0, 0.0)
+                r8_kelly_regime -= extra * abs(r1_pnl) * exposure_scale
+
+        raw_reward = (
+            r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold + r8_kelly_regime
+        )
+        reward = float(np.clip(raw_reward, -2.0, 2.0))
+
+        if done and self.pos is not None:
+            base_balance = self.balance
+            ep_fill_step = min(self.current_step, len(self._open_np) - 1)
+            ep_end_price = float(self._open_np[ep_fill_step])
+            close_exp = float(np.clip(getattr(self, "current_notional_exposure", 0.0), 0.0, self.max_leverage))
+            ep_realized = self._lot_reduce(close_exp, ep_end_price)
+            self.balance = base_balance * (1.0 + ep_realized)
+            self.balance -= base_balance * self.fee * close_exp
+            self.total_trades += 1
+            if ep_realized > 0:
+                self.win_trades += 1
+            terminal_r = float(np.tanh(ep_realized * 50.0)) * self.terminal_reward_scale
+            if ep_realized > 0:
+                terminal_r += self.terminal_quality_win * min(ep_realized / 0.01, 1.0)
+            else:
+                terminal_r -= self.terminal_quality_loss
+            reward = float(np.clip(raw_reward + terminal_r, -2.0, 2.0))
+            self._lots = []
+            self.pos = None
+            self.current_leverage = 0.0
+            self.current_margin_fraction = 0.0
+            self.current_notional_exposure = 0.0
+
+        info = {
+            "pnl_pct": (self.balance / self.initial_balance - 1) * 100,
+            "wr": self.win_trades / max(1, self.total_trades),
+            "force_closed": bool(self._just_closed and self._was_force_closed),
+            "closed_side": self._last_closed_side,
+            "closed_hold_count": int(self._last_closed_hold_count),
+            "regime_bucket": self.regime_bucket(decision_step),
+            "leverage": float(self.current_leverage),
+            "execution_leverage": float(self.current_leverage),
+            "margin_fraction": float(self.current_margin_fraction),
+            "notional_exposure": float(getattr(self, "current_notional_exposure", 0.0)),
+            "exposure_bucket": float(getattr(self, "current_notional_exposure", 0.0)),
+        }
+        return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
+
     def _get_stacked_state(self, raw_state):
         # DSAC는 frame stack 없이 compact 단일 상태 사용
         return np.asarray(raw_state, dtype=np.float32)
@@ -433,22 +1077,19 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         z = float(np.clip(signal_score * _FALLBACK_SIGNAL_GAIN, -12.0, 12.0))
 
         dn = self._arr_at(self._m7_prob_dn_np, idx, np.nan)
-        fl = self._arr_at(self._m7_prob_fl_np, idx, np.nan)
         up = self._arr_at(self._m7_prob_up_np, idx, np.nan)
-        if not np.isfinite(dn) or not np.isfinite(fl) or not np.isfinite(up):
+        if not np.isfinite(dn) or not np.isfinite(up):
             up = _sigmoid(z)
             dn = _sigmoid(-z)
-            fl = float(np.exp(-abs(z) * 0.75))
-        dn, fl, up = _normalize_prob3(dn, fl, up)
+        dn, up = _normalize_prob2(dn, up)
         if self.phase == "train":
             if np.random.rand() < _M7_DIR_DROPOUT:
-                dn, fl, up = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+                dn, up = (0.5, 0.5)
             else:
                 dn = float(np.clip(dn + np.random.normal(0.0, _M7_DIR_NOISE), 0.0, 1.0))
-                fl = float(np.clip(fl + np.random.normal(0.0, _M7_DIR_NOISE), 0.0, 1.0))
                 up = float(np.clip(up + np.random.normal(0.0, _M7_DIR_NOISE), 0.0, 1.0))
-                dn, fl, up = _normalize_prob3(dn, fl, up)
-        trend_entropy = _prob_entropy_norm(dn, fl, up)
+                dn, up = _normalize_prob2(dn, up)
+        trend_entropy = _prob_entropy_norm2(dn, up)
 
         quality_raw = self._arr_at(self._m7_quality_np, idx, np.nan)
         if not np.isfinite(quality_raw):
@@ -511,10 +1152,6 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         tp_offset = self._arr_at(self._m7_tp_offset_np, idx, max(q90, 0.0))
         sl_offset = self._arr_at(self._m7_sl_offset_np, idx, max(-q10, 0.0))
         tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
-        long_offset = self._arr_at(self._m7_entry_long_offset_np, idx, max(q10, 0.0))
-        short_offset = self._arr_at(self._m7_entry_short_offset_np, idx, max(q10, 0.0))
-        entry_long_offset_norm = _norm_tanh(long_offset, 0.0050)
-        entry_short_offset_norm = _norm_tanh(short_offset, 0.0050)
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(self._mtf_trend_1h_np[idx]), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(self._mtf_trend_4h_np[idx]), 0.0200)
@@ -531,73 +1168,42 @@ class DSACCompactTradingEnv(_BaseSACTradingEnv):
         smart_flow_norm = _norm_tanh(_safe_float(self._smart_money_flow_np[idx]), 0.0500)
         taker_accel_norm = _norm_tanh(_safe_float(self._taker_acceleration_np[idx]), 0.0500)
 
-        # ── Block C: Agent Private State ──────────────────────────────────
+        # ── Block C: Agent Private State (direction-only position context) ──
         pos_sign = 1.0 if self.pos == "LONG" else (-1.0 if self.pos == "SHORT" else 0.0)
-        margin_usage = float(np.clip(self.current_leverage if self.pos is not None else 0.0, 0.0, 1.0))
-        current_position = float(pos_sign * margin_usage)
-        unrealized_norm = _norm_tanh(self.unrealized_pnl, 0.02)
-        time_in_trade_norm = float(np.clip(self.hold_count / 96.0, 0.0, 1.0))
-        hold_vs_expected = 0.0
-        if self.pos is not None:
-            hold_vs_expected = float(np.tanh(((self.hold_count / max(hold_raw, 1.0)) - 1.0) * 1.25))
-        drawdown_norm = float(np.clip(self.max_drawdown / 0.05, -1.0, 1.0))
+        max_lev = max(1.0, _safe_float(getattr(self, "max_leverage", _max_futures_leverage()), _max_futures_leverage()))
+        current_position = float(pos_sign)
+        current_exp = float(np.clip(getattr(self, "current_notional_exposure", 0.0), 0.0, max_lev))
+        unrealized_unlev = _unlevered_pnl_from_exposure(self.unrealized_pnl, current_exp) if self.pos is not None else 0.0
+        drawdown_unlev = _unlevered_pnl_from_exposure(self.max_drawdown, current_exp) if self.pos is not None else 0.0
+        unrealized_norm = _norm_tanh(unrealized_unlev, 0.02)
+        drawdown_norm = float(np.clip(drawdown_unlev / 0.05, -1.0, 1.0))
 
-        # ── Block D: AI Model Insights (9) ────────────────────────────────
-        pt_med_raw = self._arr_at(self._ai_feats_dict.get("patchtst_median"), idx, 0.0)
-        close_price = max(1e-8, _safe_float(self._close_np[idx]))
-        if abs(pt_med_raw) > 0.5:
-            pt_med_raw = (pt_med_raw - close_price) / close_price
-        ai_p_med = _norm_tanh(pt_med_raw, 0.0030)
+        # ── Block D: AI Meta Insights (4) ─────────────────────────────────
         ai_p_reg = float(np.clip(self._arr_at(self._ai_feats_dict["patchtst_regime_sim"], idx, 1.0), 0.0, 1.0))
-        ai_t_vol = _norm_tanh(self._arr_at(self._ai_feats_dict["tide_vol_raw"], idx, 0.0), 0.0100)
-        ai_t_zsc = float(np.tanh(self._arr_at(self._ai_feats_dict["tide_vol_zscore"], idx, 0.0) / 2.0))
-        ai_tn_sin = float(np.clip(_safe_float(self._ai_feats_dict["timesnet_cycle_sin"][idx]), -1.0, 1.0))
-        ai_tn_cos = float(np.clip(_safe_float(self._ai_feats_dict["timesnet_cycle_cos"][idx]), -1.0, 1.0))
-        ai_tn_del = _norm_tanh(self._arr_at(self._ai_feats_dict["timesnet_cycle_delta"], idx, 0.0), 0.20)
-        ai_dl_ema = _norm_tanh(self._arr_at(self._ai_feats_dict["dlinear_smf_ema"], idx, 0.0), 0.0500)
-        ai_dl_slp = _norm_tanh(self._arr_at(self._ai_feats_dict["dlinear_smf_slope"], idx, 0.0), 0.0100)
-
         state = np.array(
             [
-                # Block A (17)
+                # Block A (10)
                 up * _M7_DIR_SCALE,
                 dn * _M7_DIR_SCALE,
-                fl * _M7_DIR_SCALE,
+                float(np.clip(up - dn, -1.0, 1.0)) * _M7_DIR_SCALE,
                 trend_entropy * _M7_DIR_SCALE,
                 quality_norm,
                 hold_norm,
-                q_mid_norm,
                 q_uncertainty_norm,
-                q_skew,
-                gmm_cluster_norm,
-                gmm_conf,
                 vol_rank,
-                anomaly_score,
                 tp_offset_norm,
                 sl_offset_norm,
-                entry_long_offset_norm,
-                entry_short_offset_norm,
-                mtf_1h_norm,
-                mtf_4h_norm,
-                # Block B (6)
+                # Block B (4)
                 spread_norm,
-                rs_vol_norm,
                 micro5_norm,
-                amihud_norm,
                 smart_flow_norm,
                 taker_accel_norm,
-                # Block C (6)
+                # Block C (3)
                 current_position,
                 unrealized_norm,
-                time_in_trade_norm,
-                hold_vs_expected,
-                margin_usage,
                 drawdown_norm,
-                # Block D (9)
-                ai_p_med, ai_p_reg,
-                ai_t_vol, ai_t_zsc,
-                ai_tn_sin, ai_tn_cos, ai_tn_del,
-                ai_dl_ema, ai_dl_slp
+                # Block D (1)
+                ai_p_reg,
             ],
             dtype=np.float32,
         )
@@ -802,26 +1408,28 @@ class GaussianActor(nn.Module):
     - Gating: state 기반 softmax mixture (hard 분기보다 안정적)
     """
 
-    def __init__(self, state_dim=DSAC_STATE_DIM, hidden_dim=256):
+    def __init__(self, state_dim=DSAC_STATE_DIM, hidden_dim=256, action_dim=DSAC_ACTION_DIM):
         super().__init__()
         self.feat = CompactFeatureExtractor(state_dim, hidden_dim)
+        self.action_dim = int(action_dim)
         self.n_heads = 4
         self.gate_head = nn.Linear(hidden_dim, self.n_heads)
-        self.mu_heads = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(self.n_heads)])
-        self.log_std_heads = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(self.n_heads)])
+        self.mu_heads = nn.ModuleList([nn.Linear(hidden_dim, self.action_dim) for _ in range(self.n_heads)])
+        self.log_std_heads = nn.ModuleList([nn.Linear(hidden_dim, self.action_dim) for _ in range(self.n_heads)])
 
     def _mix_heads(self, feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         gate_logits = self.gate_head(feat)  # [B,4]
         gate = torch.softmax(gate_logits, dim=-1)
 
-        mu_stack = torch.cat([h(feat) for h in self.mu_heads], dim=1)  # [B,4]
-        log_std_stack = torch.cat(
+        mu_stack = torch.stack([h(feat) for h in self.mu_heads], dim=1)  # [B,4,A]
+        log_std_stack = torch.stack(
             [h(feat).clamp(LOG_STD_MIN, LOG_STD_MAX) for h in self.log_std_heads],
             dim=1,
-        )  # [B,4]
+        )  # [B,4,A]
 
-        mu = (gate * mu_stack).sum(dim=1, keepdim=True)
-        log_std = (gate * log_std_stack).sum(dim=1, keepdim=True).clamp(LOG_STD_MIN, LOG_STD_MAX)
+        gate3 = gate.unsqueeze(-1)
+        mu = (gate3 * mu_stack).sum(dim=1)
+        log_std = (gate3 * log_std_stack).sum(dim=1).clamp(LOG_STD_MIN, LOG_STD_MAX)
         return mu, log_std, gate
 
     def forward(self, state):
@@ -855,20 +1463,21 @@ class GaussianActor(nn.Module):
 class DistributionalTwinCritic(nn.Module):
     """각 Critic이 N개 quantile을 출력하는 Twin Critic."""
 
-    def __init__(self, state_dim=DSAC_STATE_DIM, hidden_dim=256, n_quantiles=32):
+    def __init__(self, state_dim=DSAC_STATE_DIM, hidden_dim=256, n_quantiles=32, action_dim=DSAC_ACTION_DIM):
         super().__init__()
         self.n_quantiles = int(n_quantiles)
+        self.action_dim = int(action_dim)
 
         self.feat1 = CompactFeatureExtractor(state_dim, hidden_dim)
         self.q1 = nn.Sequential(
-            nn.Linear(hidden_dim + 1, hidden_dim),
+            nn.Linear(hidden_dim + self.action_dim, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, self.n_quantiles),
         )
 
         self.feat2 = CompactFeatureExtractor(state_dim, hidden_dim)
         self.q2 = nn.Sequential(
-            nn.Linear(hidden_dim + 1, hidden_dim),
+            nn.Linear(hidden_dim + self.action_dim, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, self.n_quantiles),
         )
@@ -924,9 +1533,9 @@ class DSACAgent:
         redo_ratio=0.10,
         alpha_min=5e-3,
         alpha_init=0.03,
-        anti_flat_lambda=0.08,
-        anti_flat_min_abs=0.18,
-        anti_flat_anneal_updates=120000,
+        anti_flat_lambda=0.03,
+        anti_flat_min_abs=0.10,
+        anti_flat_anneal_updates=60000,
         device="cuda",
     ):
         self.device = device
@@ -973,15 +1582,16 @@ class DSACAgent:
         self._no_trade_hist: deque[float] = deque(maxlen=self.primacy_window)
         self._imb_hist: deque[float] = deque(maxlen=self.primacy_window)
         self._ent_hist: deque[float] = deque(maxlen=self.primacy_window)
-        self.actor = GaussianActor(state_dim, hidden_dim).to(device)
-        self.critic = DistributionalTwinCritic(state_dim, hidden_dim, self.n_quantiles).to(device)
+        self.action_dim = int(DSAC_ACTION_DIM)
+        self.actor = GaussianActor(state_dim, hidden_dim, self.action_dim).to(device)
+        self.critic = DistributionalTwinCritic(state_dim, hidden_dim, self.n_quantiles, self.action_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic).to(device)
         self.critic_target.eval()
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
 
-        self.target_entropy = -1.0  # action_dim=1
+        self.target_entropy = -float(self.action_dim)
         self.log_alpha = torch.tensor([np.log(self.alpha_init)], dtype=torch.float32, device=device, requires_grad=True)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=lr_alpha)
         self.taus = torch.linspace(
@@ -998,14 +1608,14 @@ class DSACAgent:
     def alpha(self) -> float:
         return float(torch.clamp(self.log_alpha.exp(), min=self.alpha_min).item())
 
-    def act(self, state: np.ndarray, deterministic: bool = False) -> float:
+    def act(self, state: np.ndarray, deterministic: bool = False) -> np.ndarray:
         state_ts = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             if deterministic:
                 action = self.actor.deterministic(state_ts)
             else:
                 action, _ = self.actor.sample(state_ts)
-        return float(action.cpu().item())
+        return action.cpu().numpy().reshape(-1).astype(np.float32)
 
     def _pessimism_weight(self, q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
         base = torch.full((q1.shape[0], 1), self.pessimism_min_weight, device=q1.device, dtype=q1.dtype)
@@ -1053,7 +1663,9 @@ class DSACAgent:
 
         s, a, r, ns, d = self.memory.sample(batch_size)
         s = torch.FloatTensor(s).to(self.device)
-        a = torch.FloatTensor(a).unsqueeze(1).to(self.device)
+        a = torch.FloatTensor(a).to(self.device)
+        if a.ndim == 1:
+            a = a.unsqueeze(1)
         r = torch.FloatTensor(r).unsqueeze(1).to(self.device)
         ns = torch.FloatTensor(ns).to(self.device)
         d = torch.FloatTensor(d).unsqueeze(1).to(self.device)
@@ -1091,15 +1703,17 @@ class DSACAgent:
         q1_new, q2_new = self.critic(s, new_action)
         q_cvar = self._cvar_min(q1_new, q2_new)  # [B,1]
         alpha = torch.clamp(self.log_alpha.exp().detach(), min=self.alpha_min)
-        bias_reg = new_action.mean().pow(2)
+        dir_action = new_action[:, :1]
+        bias_reg = dir_action.mean().pow(2)
         anti_flat_lambda_eff = self.anti_flat_lambda
         if self.anti_flat_anneal_updates > 0:
             anti_flat_lambda_eff *= max(0.0, 1.0 - float(self._updates) / float(self.anti_flat_anneal_updates))
         det_action_batch = self.actor.deterministic(s)
-        action_abs_mean = new_action.abs().mean()
-        det_action_abs_mean = det_action_batch.abs().mean()
+        action_abs_mean = dir_action.abs().mean()
+        det_dir_batch = det_action_batch[:, :1]
+        det_action_abs_mean = det_dir_batch.abs().mean()
         anti_flat_pen = torch.relu(torch.tensor(self.anti_flat_min_abs, device=self.device) - det_action_abs_mean)
-        side_balance_pen = torch.tanh(4.0 * new_action).mean().abs()
+        side_balance_pen = torch.tanh(4.0 * dir_action).mean().abs()
         actor_loss = (
             (alpha * log_prob - q_cvar).mean()
             + self.direction_reg_lambda * bias_reg
@@ -1123,12 +1737,12 @@ class DSACAgent:
         if self.dynamic_entropy:
             action_std = float(new_action.detach().std().item())
             policy_entropy = float((-log_prob.detach()).mean().item())
-            act_np = new_action.detach().squeeze(-1).cpu().numpy()
+            act_np = dir_action.detach().squeeze(-1).cpu().numpy()
             n_pos = float(np.sum(act_np > 0.05))
             n_neg = float(np.sum(act_np < -0.05))
             sign_imbalance = abs(n_pos - n_neg) / max(n_pos + n_neg, 1.0)
             det_action = self.actor.deterministic(s)
-            det_np = det_action.detach().squeeze(-1).cpu().numpy()
+            det_np = det_action[:, :1].detach().squeeze(-1).cpu().numpy()
             n_entry = float(np.sum(np.abs(det_np) > _NTR_ENTRY_THRESH))
             entry_rate = n_entry / max(float(det_np.shape[0]), 1.0)
             no_trade_rate = 1.0 - entry_rate
@@ -1237,7 +1851,7 @@ class DSACAgent:
 class DSACRouter:
     """라이브 추론 라우터.
 
-    입력(features, pos)으로 compact 30D 상태를 구성해 actor를 실행한다.
+    입력(features, pos)으로 compact 35D 상태를 구성해 actor를 실행한다.
     """
 
     def __init__(self, actor, device="cuda", hmm_detector=None, mtf_features=None):
@@ -1275,14 +1889,12 @@ class DSACRouter:
         z = float(np.clip(signal_score * _FALLBACK_SIGNAL_GAIN, -12.0, 12.0))
 
         dn = _pick_first(features, ["m7_trend_xgb_dn", "m7_prob_dn", "trend_dn_prob"], np.nan)
-        fl = _pick_first(features, ["m7_trend_xgb_fl", "m7_prob_fl", "trend_flat_prob"], np.nan)
         up = _pick_first(features, ["m7_trend_xgb_up", "m7_prob_up", "trend_up_prob"], np.nan)
-        if not np.isfinite(dn) or not np.isfinite(fl) or not np.isfinite(up):
+        if not np.isfinite(dn) or not np.isfinite(up):
             up = _sigmoid(z)
             dn = _sigmoid(-z)
-            fl = float(np.exp(-abs(z) * 0.75))
-        dn, fl, up = _normalize_prob3(dn, fl, up)
-        trend_entropy = _prob_entropy_norm(dn, fl, up)
+        dn, up = _normalize_prob2(dn, up)
+        trend_entropy = _prob_entropy_norm2(dn, up)
 
         quality_raw = _pick_first(features, ["m7_quality_pred", "expected_quality"], np.nan)
         if not np.isfinite(quality_raw):
@@ -1345,10 +1957,6 @@ class DSACRouter:
         tp_offset = _safe_float(features.get("m7_tp_offset", max(q90, 0.0)), max(q90, 0.0))
         sl_offset = _safe_float(features.get("m7_sl_offset", max(-q10, 0.0)), max(-q10, 0.0))
         tp_offset_norm = _norm_tanh(tp_offset, 0.0100)
-        long_offset = _safe_float(features.get("m7_entry_long_offset", max(q10, 0.0)))
-        short_offset = _safe_float(features.get("m7_entry_short_offset", max(q10, 0.0)))
-        entry_long_offset_norm = _norm_tanh(long_offset, 0.0050)
-        entry_short_offset_norm = _norm_tanh(short_offset, 0.0050)
         sl_offset_norm = _norm_tanh(sl_offset, 0.0100)
         mtf_1h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_1h", 0.0), 0.0), 0.0100)
         mtf_4h_norm = _norm_tanh(_safe_float(features.get("mtf_trend_4h", 0.0), 0.0), 0.0200)
@@ -1398,74 +2006,42 @@ class DSACRouter:
         if pos_sign != 0.0:
             hold_vs_expected = float(np.tanh(((hold_count_proxy / max(hold_raw, 1.0)) - 1.0) * 1.25))
 
+        current_exp = 1.0 if pos_sign != 0.0 else 0.0
         unr = _safe_float(pos.get("unrealized", 0.0), 0.0) if isinstance(pos, dict) else 0.0
-        unrealized_norm = _norm_tanh(unr, 0.02)
-
         mdd = _safe_float(pos.get("mdd", 0.0), 0.0) if isinstance(pos, dict) else 0.0
+        if pos_sign != 0.0 and current_exp > 1e-8:
+            unr = _unlevered_pnl_from_exposure(unr, current_exp)
+            mdd = _unlevered_pnl_from_exposure(mdd, current_exp)
+        unrealized_norm = _norm_tanh(unr, 0.02)
         drawdown_norm = float(np.clip(mdd / 0.05, -1.0, 1.0))
+        current_position = float(pos_sign)
 
-        margin_usage = _safe_float(pos.get("margin_usage", np.nan), np.nan) if isinstance(pos, dict) else np.nan
-        if not np.isfinite(margin_usage):
-            margin_usage = 1.0 if pos_sign != 0.0 else 0.0
-        margin_usage = float(np.clip(margin_usage, 0.0, 1.0))
-        current_position = float(pos_sign * margin_usage)
-
-        # ── Block D: AI Model Insights (9) ────────────────────────────────
-        pt_med_raw = _safe_float(features.get("patchtst_median", 0.0))
-        close_price = max(1e-8, _safe_float(features.get("close", 0.0)))
-        if abs(pt_med_raw) > 0.5 and close_price > 0.0:
-            pt_med_raw = (pt_med_raw - close_price) / close_price
-        ai_p_med = _norm_tanh(pt_med_raw, 0.0030)
+        # ── Block D: AI Meta Insights (4) ─────────────────────────────────
         ai_p_reg = float(np.clip(_safe_float(features.get("patchtst_regime_sim", 1.0)), 0.0, 1.0))
-        ai_t_vol = _norm_tanh(_safe_float(features.get("tide_vol_raw", 0.0)), 0.0100)
-        ai_t_zsc = float(np.tanh(_safe_float(features.get("tide_vol_zscore", 0.0)) / 2.0))
-        ai_tn_sin = _safe_float(features.get("timesnet_cycle_sin", 0.0))
-        ai_tn_cos = _safe_float(features.get("timesnet_cycle_cos", 0.0))
-        ai_tn_del = _norm_tanh(_safe_float(features.get("timesnet_cycle_delta", 0.0)), 1.0)
-        ai_dl_ema = _norm_tanh(_safe_float(features.get("dlinear_smf_ema", 0.0)), 0.0500)
-        ai_dl_slp = _norm_tanh(_safe_float(features.get("dlinear_smf_slope", 0.0)), 0.0100)
-
         state = np.array(
             [
-                # Block A (17)
+                # Block A (10)
                 up * _M7_DIR_SCALE,
                 dn * _M7_DIR_SCALE,
-                fl * _M7_DIR_SCALE,
+                float(np.clip(up - dn, -1.0, 1.0)) * _M7_DIR_SCALE,
                 trend_entropy * _M7_DIR_SCALE,
                 quality_norm,
                 hold_norm,
-                q_mid_norm,
                 q_uncertainty_norm,
-                q_skew,
-                gmm_cluster_norm,
-                gmm_conf,
                 vol_rank,
-                anomaly_score,
                 tp_offset_norm,
                 sl_offset_norm,
-                entry_long_offset_norm,
-                entry_short_offset_norm,
-                mtf_1h_norm,
-                mtf_4h_norm,
-                # Block B (6)
+                # Block B (4)
                 spread_norm,
-                rs_vol_norm,
                 micro5_norm,
-                amihud_norm,
                 smart_flow_norm,
                 taker_accel_norm,
-                # Block C (6)
+                # Block C (3)
                 current_position,
                 unrealized_norm,
-                time_in_trade_norm,
-                hold_vs_expected,
-                margin_usage,
                 drawdown_norm,
-                # Block D (9)
-                ai_p_med, ai_p_reg,
-                ai_t_vol, ai_t_zsc,
-                ai_tn_sin, ai_tn_cos, ai_tn_del,
-                ai_dl_ema, ai_dl_slp
+                # Block D (1)
+                ai_p_reg,
             ],
             dtype=np.float32,
         )
@@ -1484,34 +2060,105 @@ class DSACRouter:
             action = self.actor.deterministic(state)
         action_val = float(action.cpu().item())
         abs_action = abs(action_val)
+        if not _futures_exec_enabled(default=False):
+            cur_pos = pos.get("type") if isinstance(pos, dict) else None
+            hold_count_proxy = float(_safe_float(pos.get("hold_count", 0.0), 0.0)) if isinstance(pos, dict) else 0.0
+            reg_idx, _ = self._fallback_regime(features)
+            regime_name = REGIME_COLS[int(np.clip(reg_idx, 0, len(REGIME_COLS) - 1))]
+            long_entry_thresh = _long_entry_thresh(_POS_THRESH)
+            short_entry_thresh = _short_entry_thresh(_POS_THRESH, regime_name)
+            if cur_pos is not None:
+                if abs_action < _HOLD_CLOSE_THRESH:
+                    action_int, leverage = 0, 0.0
+                elif cur_pos == "LONG" and action_val < -_REV_EXIT_THRESH:
+                    if hold_count_proxy >= float(_MIN_HOLD_BARS):
+                        action_int, leverage = 0, 0.0
+                    else:
+                        action_int = 1
+                        leverage = 1.0
+                elif cur_pos == "SHORT" and action_val > _REV_EXIT_THRESH:
+                    if hold_count_proxy >= float(_MIN_HOLD_BARS):
+                        action_int, leverage = 0, 0.0
+                    else:
+                        action_int = 2
+                        leverage = 1.0
+                else:
+                    action_int = 1 if cur_pos == "LONG" else 2
+                    leverage = abs_action
+            else:
+                if action_val > long_entry_thresh:
+                    action_int, leverage = 1, abs_action
+                elif action_val < -short_entry_thresh:
+                    action_int, leverage = 2, abs_action
+                else:
+                    action_int, leverage = 0, 0.0
+            info = {
+                "agent": "DSAC",
+                "raw_action": round(action_val, 4),
+                "kelly": float(leverage),
+                "leverage": float(leverage),
+                "long_edge": max(action_val, 0.0),
+                "short_edge": max(-action_val, 0.0),
+                "score": float(abs_action),
+                "state_dim": DSAC_STATE_DIM,
+                "futures_exec_enabled": False,
+            }
+            return action_int, leverage, info
+
+        direction = float(np.clip(action_val, -1.0, 1.0))
+        active_signal = abs(direction) > _POS_THRESH
+        margin_fraction = 1.0 if active_signal else 0.0
+        leverage = 1.0 if active_signal else 0.0
+        notional_exposure = 1.0 if active_signal else 0.0
 
         cur_pos = pos.get("type") if isinstance(pos, dict) else None
+        hold_count_proxy = float(_safe_float(pos.get("hold_count", 0.0), 0.0)) if isinstance(pos, dict) else 0.0
         if cur_pos is not None:
-            if abs_action < _CLOSE_THRESH:
-                action_int, leverage = 0, 0.0
-            elif cur_pos == "LONG" and action_val < -_POS_THRESH:
-                action_int, leverage = 0, 0.0
-            elif cur_pos == "SHORT" and action_val > _POS_THRESH:
-                action_int, leverage = 0, 0.0
+            if abs(direction) < _CLOSE_THRESH or notional_exposure <= 1e-8:
+                if hold_count_proxy >= float(_MIN_HOLD_BARS):
+                    action_int, leverage = 0, 0.0
+                    margin_fraction = 0.0
+                    notional_exposure = 0.0
+                else:
+                    action_int = 1 if cur_pos == "LONG" else 2
+            elif cur_pos == "LONG" and direction < -_REV_EXIT_THRESH:
+                if hold_count_proxy >= float(_MIN_HOLD_BARS):
+                    action_int, leverage = 0, 0.0
+                    margin_fraction = 0.0
+                    notional_exposure = 0.0
+                else:
+                    action_int = 1
+            elif cur_pos == "SHORT" and direction > _REV_EXIT_THRESH:
+                if hold_count_proxy >= float(_MIN_HOLD_BARS):
+                    action_int, leverage = 0, 0.0
+                    margin_fraction = 0.0
+                    notional_exposure = 0.0
+                else:
+                    action_int = 2
             else:
                 action_int = 1 if cur_pos == "LONG" else 2
-                leverage = abs_action
         else:
-            if action_val > _POS_THRESH:
-                action_int, leverage = 1, abs_action
-            elif action_val < -_POS_THRESH:
-                action_int, leverage = 2, abs_action
+            if direction > _POS_THRESH and notional_exposure > 1e-8:
+                action_int = 1
+            elif direction < -_POS_THRESH and notional_exposure > 1e-8:
+                action_int = 2
             else:
                 action_int, leverage = 0, 0.0
+                margin_fraction = 0.0
+                notional_exposure = 0.0
 
         info = {
             "agent": "DSAC",
             "raw_action": round(action_val, 4),
             "kelly": float(leverage),  # backward-compatible key
+            "leverage": float(leverage),
+            "margin_fraction": float(margin_fraction),
+            "notional_exposure": float(notional_exposure),
             "long_edge": max(action_val, 0.0),
             "short_edge": max(-action_val, 0.0),
             "score": float(abs_action),
             "state_dim": DSAC_STATE_DIM,
+            "futures_exec_enabled": True,
         }
         return action_int, leverage, info
 
@@ -1523,7 +2170,7 @@ SACRouter = DSACRouter
 def train(
     csv_path: str = "data/rl_training_2025_unified.csv",
     train_ratio: float = 0.8,
-    episodes: int = 1500,
+    episodes: int = 1000,
     fresh_start: bool = False,
     use_lr_scheduler: bool = True,
     lr_factor: float = 0.5,
@@ -1539,8 +2186,8 @@ def train(
     pessimism_weight_min: float = 0.55,
     pessimism_weight_max: float = 0.75,
     dynamic_entropy: bool = True,
-    entropy_min: float = -1.20,
-    entropy_max: float = -0.65,
+    entropy_min: float = -0.80,
+    entropy_max: float = -0.45,
     entropy_std_low: float = 0.18,
     entropy_std_high: float = 0.35,
     entropy_step: float = 0.05,
@@ -1561,10 +2208,10 @@ def train(
     redo_tau: float = 5e-3,
     redo_ratio: float = 0.10,
     alpha_min: float = 5e-3,
-    alpha_init: float = 0.05,
-    anti_flat_lambda: float = 0.08,
-    anti_flat_min_abs: float = 0.18,
-    anti_flat_anneal_updates: int = 120000,
+    alpha_init: float = 0.03,
+    anti_flat_lambda: float = 0.03,
+    anti_flat_min_abs: float = 0.10,
+    anti_flat_anneal_updates: int = 60000,
     soft_gate_warmup_epochs: int = 20,
     soft_gate_ramp_epochs: int = 80,
     min_val_trades_for_best: int = 80,
@@ -1666,7 +2313,7 @@ def train(
     )
     agent = DSACAgent(
         DSAC_STATE_DIM,
-        hidden_dim=512,
+        hidden_dim=256,
         gamma=float(gamma),
         n_quantiles=32,
         cvar_frac=float(cvar_frac),
@@ -1850,7 +2497,19 @@ def train(
         "m7_dir_dropout": float(_M7_DIR_DROPOUT),
         "m7_dir_noise": float(_M7_DIR_NOISE),
         "fallback_signal_gain": float(_FALLBACK_SIGNAL_GAIN),
+        "max_futures_leverage": float(_max_futures_leverage()),
+        "leverage_levels": [float(x) for x in _leverage_levels()],
+        "min_trade_exposure": float(_min_trade_exposure()),
+        "risk_max_margin": float(_risk_max_margin()),
+        "net_edge_min": float(_net_edge_min()),
+        "soft_gate_enabled": bool(_soft_gate_enabled(default=False)),
+        "futures_exec_enabled": bool(_futures_exec_enabled(default=False)),
+        "early_exit_window": int(os.getenv("RL_EARLY_EXIT_WINDOW", "3")),
+        "early_exit_penalty": float(os.getenv("RL_EARLY_EXIT_PENALTY", "0.035")),
         "state_dim": int(DSAC_STATE_DIM),
+        "action_dim": int(DSAC_ACTION_DIM),
+        "state_schema": DSAC_STATE_SCHEMA,
+        "ai_feats": list(AI_FEATS),
     }
     try:
         cfg_dir = os.path.dirname(config_json_path)
@@ -1866,6 +2525,17 @@ def train(
     if (not fresh_start) and os.path.exists(ckpt_path):
         try:
             ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+            ckpt_state_dim = int(ckpt.get("state_dim", -1))
+            if ckpt_state_dim != int(DSAC_STATE_DIM):
+                raise ValueError(f"checkpoint state_dim={ckpt_state_dim} != current state_dim={DSAC_STATE_DIM}")
+            ckpt_action_dim = int(ckpt.get("action_dim", -1))
+            if ckpt_action_dim != int(DSAC_ACTION_DIM):
+                raise ValueError(f"checkpoint action_dim={ckpt_action_dim} != current action_dim={DSAC_ACTION_DIM}")
+            ckpt_state_schema = str(ckpt.get("state_schema", ""))
+            if ckpt_state_schema != DSAC_STATE_SCHEMA:
+                raise ValueError(
+                    f"checkpoint state_schema={ckpt_state_schema or 'missing'} != current state_schema={DSAC_STATE_SCHEMA}"
+                )
             agent.actor.load_state_dict(ckpt["actor"])
             agent.critic.load_state_dict(ckpt["critic"])
             agent.critic_target.load_state_dict(ckpt["critic_target"])
@@ -1908,7 +2578,7 @@ def train(
                 )
                 ws = warmup_env.reset()
                 for _ in range(refill_steps):
-                    wa = np.random.uniform(-1.0, 1.0)
+                    wa = np.random.uniform(-1.0, 1.0, size=DSAC_ACTION_DIM).astype(np.float32)
                     w_regime = warmup_env.regime_bucket()
                     w_prog = float(warmup_env.current_step / max(1, warmup_env.end_step))
                     wns, wr, wd, _ = warmup_env.step(wa)
@@ -1940,44 +2610,59 @@ def train(
                 "bad_val_count": bad_val_count,
                 "epoch": ep,
                 "state_dim": DSAC_STATE_DIM,
+                "action_dim": DSAC_ACTION_DIM,
+                "state_schema": DSAC_STATE_SCHEMA,
                 "actor_sched": actor_sched_state,
                 "critic_sched": critic_sched_state,
             },
             ckpt_path,
         )
 
-    def _apply_normal_soft_gate(action: float, state_vec: np.ndarray, regime: str, gate_scale: float = 1.0) -> float:
+    def _apply_normal_soft_gate(action, state_vec: np.ndarray, regime: str, gate_scale: float = 1.0):
         """저신뢰 레짐(normal/chop/whipsaw) 과매매를 줄이는 소프트 게이트."""
-        a = float(action)
+        a = np.asarray(action, dtype=np.float32).reshape(-1).copy()
+        scalar = a.size <= 1
+        if a.size == 0:
+            a = np.zeros(DSAC_ACTION_DIM, dtype=np.float32)
+        if not _soft_gate_enabled(default=False):
+            return float(a[0]) if scalar else a
         gs = float(np.clip(gate_scale, 0.0, 1.0))
         if gs <= 1e-9:
-            return a
+            return float(a[0]) if scalar else a
 
-        def _mix(mult: float) -> float:
+        def _out(v: np.ndarray):
+            return float(v[0]) if scalar else v.astype(np.float32)
+
+        def _mix(mult: float):
             # gate_scale=0이면 원래 action, 1이면 full gate
-            return a * (1.0 - gs * (1.0 - float(mult)))
+            out = a.copy()
+            m = 1.0 - gs * (1.0 - float(mult))
+            out[0] *= m
+            if out.size > 1:
+                out[1:] = -1.0 + (out[1:] + 1.0) * m
+            return _out(out)
 
         try:
             trend_entropy = float(state_vec[3])  # scaled by _M7_DIR_SCALE
             q_uncertainty = float(state_vec[7])  # 0~1
         except Exception:
-            return a
+            return _out(a)
         if regime == "whipsaw":
             if trend_entropy > 0.24:
                 return _mix(0.80)
-            return a
+            return _out(a)
         if regime == "chop":
             if trend_entropy > 0.28 and q_uncertainty > 0.35:
                 return _mix(0.40)
             return _mix(0.60)
         if regime != "normal":
-            return a
+            return _out(a)
         # trend entropy 높고 quantile 불확실성이 높으면 action 크기 축소
         if trend_entropy > 0.30 and q_uncertainty > 0.40:
             return _mix(0.45)
         if trend_entropy > 0.24 and q_uncertainty > 0.32:
             return _mix(0.65)
-        return a
+        return _out(a)
 
     def _soft_gate_scale(ep_now: int) -> float:
         warm = int(max(0, soft_gate_warmup_epochs))
@@ -2039,8 +2724,7 @@ def train(
             with torch.no_grad():
                 a = agent.act(st, deterministic=True)
             # 평가 시에는 과매매 억제를 위해 gate 하한을 둔다.
-            eval_gate_scale = max(0.50, _soft_gate_scale(ep))
-            a = _apply_normal_soft_gate(a, st, e.regime_bucket(), gate_scale=eval_gate_scale)
+            a = _apply_normal_soft_gate(a, st, e.regime_bucket(), gate_scale=_soft_gate_scale(ep))
             st, _, done, info = e.step(a)
             if prev_pos is None and e.pos == "LONG":
                 le += 1
@@ -2105,7 +2789,7 @@ def train(
                 global_step += 1
 
                 if global_step < warmup_steps:
-                    action = np.random.uniform(-1.0, 1.0)
+                    action = np.random.uniform(-1.0, 1.0, size=DSAC_ACTION_DIM).astype(np.float32)
                 else:
                     action = agent.act(state, deterministic=False)
 
@@ -2139,7 +2823,7 @@ def train(
             ep_steps = max(int(env.current_step - env.start_step), 1)
             avg_reward = float(ep_reward / ep_steps)
             logger.info(
-                "Ep %04d | PnL:%6.1f%% Tr:%4d WR:%4.0f%% AvgRew:%+.4f | buf:%6d | α:%.4f | Htgt:%+.3f | CVaR_Q:%+.4f | Tstd:%.3f Vw:%.3f Imb:%.3f Ent:%.3f NTR:%.3f Breg:%.4f Sbal:%.4f AFp:%.4f Aabs:%.3f Dabs:%.3f CQL:%.4f Qdis:%.4f Rst:%d Redo:%d",
+                "Ep %04d | \033[32mPnL:%6.1f%%\033[0m Tr:%4d WR:%4.0f%% AvgRew:%+.4f | buf:%6d | α:%.4f | Htgt:%+.3f | CVaR_Q:%+.4f | Tstd:%.3f Vw:%.3f Imb:%.3f Ent:%.3f NTR:%.3f Breg:%.4f Sbal:%.4f AFp:%.4f Aabs:%.3f Dabs:%.3f CQL:%.4f Qdis:%.4f Rst:%d Redo:%d",
                 ep,
                 pnl,
                 env.total_trades,
@@ -2192,7 +2876,7 @@ def train(
                 agent.actor.train()
 
                 logger.info(
-                    "    [VAL] PnL:%6.2f%% | Tr:%4d | WR:%.0f%% | MDD:%.2f%% | L:%4d S:%4d | SideBal:%.3f | SidePen:%.2f | FCL:%3d FCS:%3d | AvgHoldL:%4.1f AvgHoldS:%4.1f | Score:%.2f",
+                    "    [VAL] \033[32mPnL:%6.2f%%\033[0m | Tr:%4d | WR:%.0f%% | MDD:%.2f%% | L:%4d S:%4d | SideBal:%.3f | SidePen:%.2f | FCL:%3d FCS:%3d | AvgHoldL:%4.1f AvgHoldS:%4.1f | Score:%.2f",
                     float(overall["pnl"]),
                     int(overall["tr"]),
                     float(overall["wr"]) * 100.0,
@@ -2233,6 +2917,8 @@ def train(
                             "best_score": best_val_score,
                             "epoch": ep,
                             "state_dim": DSAC_STATE_DIM,
+                            "action_dim": DSAC_ACTION_DIM,
+                            "state_schema": DSAC_STATE_SCHEMA,
                             "meta": {
                                 "algo": "DSAC",
                                 "n_quantiles": agent.n_quantiles,
@@ -2277,7 +2963,7 @@ def train(
                         },
                         best_path,
                     )
-                    logger.info("    🎉 [NEW BEST] 저장 완료 (PnL:%.2f%% | score:%.2f)", best_val_pnl, best_val_score)
+                    logger.info("    🎉 [NEW BEST] 저장 완료 (\033[32mPnL:%.2f%%\033[0m | score:%.2f)", best_val_pnl, best_val_score)
                 else:
                     bad_val_count += 1
 
@@ -2394,9 +3080,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--redo-ratio", type=float, default=0.10)
     p.add_argument("--alpha-min", type=float, default=5e-3)
     p.add_argument("--alpha-init", type=float, default=0.03)
-    p.add_argument("--anti-flat-lambda", type=float, default=0.08)
-    p.add_argument("--anti-flat-min-abs", type=float, default=0.18)
-    p.add_argument("--anti-flat-anneal-updates", type=int, default=120000)
+    p.add_argument("--anti-flat-lambda", type=float, default=0.03)
+    p.add_argument("--anti-flat-min-abs", type=float, default=0.10)
+    p.add_argument("--anti-flat-anneal-updates", type=int, default=60000)
     p.add_argument("--soft-gate-warmup-epochs", type=int, default=20)
     p.add_argument("--soft-gate-ramp-epochs", type=int, default=80)
     p.add_argument("--min-val-trades-for-best", type=int, default=80)

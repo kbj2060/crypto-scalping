@@ -1,0 +1,38 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "weekly_calibrator_selects_only_from_prior_window_or_2025q4_for_first_week",
+    "signal_limit_fill_uses_5m_high_low_touch_proxy_not_queue_fill",
+    "real_l2_queue_and_partial_fill_require_forward_shadow_validation",
+    "weekly_ef_did_not_improve_cost1_pnl",
+    "weekly_ef_worsened_cost1_mdd"
+  ],
+  "selection_uses_current_week": false,
+  "selection_uses_2026_current_or_future": false,
+  "calibration_policy": "first_week_2025Q4_validation_then_trailing_28d_prior_only",
+  "frozen_layers": {
+    "hgb_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+    "teacher_deep_overlay": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_l2_teacher_deep_parent_20260514/teacher_deep_parent_l2_replay.pt",
+    "v27_deep_scout": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt",
+    "v21_2_jackpot_runner": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+    "v31_exit_overlay": "fixed alpha1_l2_conservative_fee20 overlay"
+  },
+  "base_runtime": {
+    "name": "noflip_c0.56_parent_scale1.10",
+    "confidence": 0.56,
+    "parent_notional_scale": 1.1,
+    "max_notional": 2.75
+  },
+  "base_limit_config": {
+    "name": "next_open_limit_offset2_entry_fallback_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 2.0,
+    "exit_offset_bps": 2.0,
+    "penetration_bps": 0.5,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "market_fallback",
+    "exit_miss": "market_fallback"
+  }
+}

@@ -1,0 +1,589 @@
+{
+  "type": "lifecycle_manager_grid_patchtst_tide_dlinear_2026",
+  "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/fully_learned_ai_combo_grid/patchtst__tide__dlinear.pkl",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "model_out": "/home/llewyn/crypto-scalping/data/ensemble/supervised/lifecycle_manager/patchtst_tide_dlinear_lifecycle_exit.pkl",
+  "sample_meta": {
+    "samples": 22886,
+    "exit_labels": 2610,
+    "exit_label_rate": 0.1140435200559294,
+    "entries": 218,
+    "min_age": 3,
+    "sample_stride": 1,
+    "exit_edge": 0.003,
+    "adverse_edge": 0.8
+  },
+  "baseline": {
+    "train": {
+      "pnl": 723795464.0733926,
+      "mdd": -17.420734315625886,
+      "trades": 218,
+      "wr": 0.591743119266055,
+      "trades_per_day": 0.7985449550386019,
+      "long_entries": 120,
+      "short_entries": 98,
+      "avg_notional": 2.2411344180093593,
+      "avg_leverage": 2.4150002837051345
+    },
+    "validation": {
+      "pnl": 99.01797467184284,
+      "mdd": -20.61715539558383,
+      "trades": 73,
+      "wr": 0.2054794520547945,
+      "trades_per_day": 0.7935082090960559,
+      "long_entries": 16,
+      "short_entries": 57,
+      "avg_notional": 2.359299727633787,
+      "avg_leverage": 2.536050366552408
+    },
+    "eval": {
+      "pnl": 286.9501820902332,
+      "mdd": -22.967215052515144,
+      "trades": 60,
+      "wr": 0.3,
+      "trades_per_day": 1.0227272727272727,
+      "long_entries": 23,
+      "short_entries": 37,
+      "avg_notional": 2.365399825111006,
+      "avg_leverage": 2.5432809554514626
+    }
+  },
+  "grid": [
+    {
+      "name": "early_exit_0.60",
+      "config": {
+        "name": "early_exit_0.60",
+        "exit_threshold": 0.6,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 76.37599059333881,
+        "mdd": -29.876562975509955,
+        "trades": 146,
+        "wr": 0.4041095890410959,
+        "trades_per_day": 1.5870164181921118,
+        "long_entries": 19,
+        "short_entries": 127,
+        "avg_notional": 2.3643681808576162,
+        "avg_leverage": 2.511635207668987,
+        "lifecycle_exits": 89,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 234.08334275312234,
+        "mdd": -27.88034099188257,
+        "trades": 81,
+        "wr": 0.3950617283950617,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 26,
+        "short_entries": 55,
+        "avg_notional": 2.3036375698302654,
+        "avg_leverage": 2.472872350459376,
+        "lifecycle_exits": 33,
+        "scale_downs": 0,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "early_exit_0.72",
+      "config": {
+        "name": "early_exit_0.72",
+        "exit_threshold": 0.72,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 58.323377719030624,
+        "mdd": -25.82220943083954,
+        "trades": 133,
+        "wr": 0.3609022556390977,
+        "trades_per_day": 1.4457067371202115,
+        "long_entries": 20,
+        "short_entries": 113,
+        "avg_notional": 2.3583250178873425,
+        "avg_leverage": 2.4950737063390243,
+        "lifecycle_exits": 72,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 248.86812382732936,
+        "mdd": -25.10684676265794,
+        "trades": 72,
+        "wr": 0.3611111111111111,
+        "trades_per_day": 1.2272727272727273,
+        "long_entries": 25,
+        "short_entries": 47,
+        "avg_notional": 2.311340951404138,
+        "avg_leverage": 2.48093310200687,
+        "lifecycle_exits": 20,
+        "scale_downs": 0,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "early_exit_0.84",
+      "config": {
+        "name": "early_exit_0.84",
+        "exit_threshold": 0.84,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 102.53429964774287,
+        "mdd": -23.331130614094075,
+        "trades": 114,
+        "wr": 0.35964912280701755,
+        "trades_per_day": 1.2391772032458956,
+        "long_entries": 17,
+        "short_entries": 97,
+        "avg_notional": 2.3584080851063587,
+        "avg_leverage": 2.5098094276287912,
+        "lifecycle_exits": 45,
+        "scale_downs": 0,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 241.0562103887999,
+        "mdd": -24.38730306846032,
+        "trades": 72,
+        "wr": 0.3194444444444444,
+        "trades_per_day": 1.2272727272727273,
+        "long_entries": 29,
+        "short_entries": 43,
+        "avg_notional": 2.3313541183034627,
+        "avg_leverage": 2.509615050298384,
+        "lifecycle_exits": 15,
+        "scale_downs": 0,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "exit_0.75_scaledown_0.55_m0.50",
+      "config": {
+        "name": "exit_0.75_scaledown_0.55_m0.50",
+        "exit_threshold": 0.75,
+        "scale_threshold": 0.55,
+        "scale_multiplier": 0.5,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 46.22862564908814,
+        "mdd": -24.04534646014683,
+        "trades": 96,
+        "wr": 0.375,
+        "trades_per_day": 1.043517644838649,
+        "long_entries": 15,
+        "short_entries": 81,
+        "avg_notional": 2.3988164693803617,
+        "avg_leverage": 2.5480014067506613,
+        "lifecycle_exits": 46,
+        "scale_downs": 20,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 210.8072663941528,
+        "mdd": -25.133516857572246,
+        "trades": 68,
+        "wr": 0.38235294117647056,
+        "trades_per_day": 1.1590909090909092,
+        "long_entries": 21,
+        "short_entries": 47,
+        "avg_notional": 2.3416269015218156,
+        "avg_leverage": 2.5130656436646484,
+        "lifecycle_exits": 18,
+        "scale_downs": 10,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "exit_0.75_scaledown_0.65_m0.50",
+      "config": {
+        "name": "exit_0.75_scaledown_0.65_m0.50",
+        "exit_threshold": 0.75,
+        "scale_threshold": 0.65,
+        "scale_multiplier": 0.5,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 63.79776010117047,
+        "mdd": -21.50588307184037,
+        "trades": 90,
+        "wr": 0.3888888888888889,
+        "trades_per_day": 0.9782977920362333,
+        "long_entries": 15,
+        "short_entries": 75,
+        "avg_notional": 2.3572758882191382,
+        "avg_leverage": 2.5111119608338086,
+        "lifecycle_exits": 42,
+        "scale_downs": 13,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 251.30840439086808,
+        "mdd": -25.133516857572225,
+        "trades": 68,
+        "wr": 0.36764705882352944,
+        "trades_per_day": 1.1590909090909092,
+        "long_entries": 21,
+        "short_entries": 47,
+        "avg_notional": 2.3416269015218156,
+        "avg_leverage": 2.5130656436646484,
+        "lifecycle_exits": 17,
+        "scale_downs": 5,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "exit_0.85_scaledown_0.55_m0.50",
+      "config": {
+        "name": "exit_0.85_scaledown_0.55_m0.50",
+        "exit_threshold": 0.85,
+        "scale_threshold": 0.55,
+        "scale_multiplier": 0.5,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 34.392391096249185,
+        "mdd": -20.533338008472835,
+        "trades": 81,
+        "wr": 0.37037037037037035,
+        "trades_per_day": 0.88046801283261,
+        "long_entries": 14,
+        "short_entries": 67,
+        "avg_notional": 2.406396675775701,
+        "avg_leverage": 2.5570705967559957,
+        "lifecycle_exits": 29,
+        "scale_downs": 29,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 283.04195956324594,
+        "mdd": -21.322069522149967,
+        "trades": 60,
+        "wr": 0.4,
+        "trades_per_day": 1.0227272727272727,
+        "long_entries": 19,
+        "short_entries": 41,
+        "avg_notional": 2.417599734308796,
+        "avg_leverage": 2.6093299494105424,
+        "lifecycle_exits": 10,
+        "scale_downs": 15,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "exit_0.85_scaledown_0.65_m0.50",
+      "config": {
+        "name": "exit_0.85_scaledown_0.65_m0.50",
+        "exit_threshold": 0.85,
+        "scale_threshold": 0.65,
+        "scale_multiplier": 0.5,
+        "scale_up_threshold": null,
+        "scale_up_multiplier": 1.0
+      },
+      "validation": {
+        "pnl": 52.82823513689141,
+        "mdd": -20.42711050926086,
+        "trades": 76,
+        "wr": 0.3815789473684211,
+        "trades_per_day": 0.8261181354972637,
+        "long_entries": 14,
+        "short_entries": 62,
+        "avg_notional": 2.371243635353866,
+        "avg_leverage": 2.5280342034945056,
+        "lifecycle_exits": 26,
+        "scale_downs": 22,
+        "scale_ups": 0
+      },
+      "eval": {
+        "pnl": 305.4268085314828,
+        "mdd": -22.35217722805333,
+        "trades": 60,
+        "wr": 0.38333333333333336,
+        "trades_per_day": 1.0227272727272727,
+        "long_entries": 19,
+        "short_entries": 41,
+        "avg_notional": 2.417599734308796,
+        "avg_leverage": 2.6093299494105424,
+        "lifecycle_exits": 10,
+        "scale_downs": 12,
+        "scale_ups": 0
+      }
+    },
+    {
+      "name": "exit_0.75_scaleup_0.10_m1.25",
+      "config": {
+        "name": "exit_0.75_scaleup_0.10_m1.25",
+        "exit_threshold": 0.75,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": 0.1,
+        "scale_up_multiplier": 1.25
+      },
+      "validation": {
+        "pnl": 61.7980548946004,
+        "mdd": -30.60130075608889,
+        "trades": 129,
+        "wr": 0.35658914728682173,
+        "trades_per_day": 1.4022268352519345,
+        "long_entries": 19,
+        "short_entries": 110,
+        "avg_notional": 2.351529683319241,
+        "avg_leverage": 2.4901895635076596,
+        "lifecycle_exits": 64,
+        "scale_downs": 0,
+        "scale_ups": 18
+      },
+      "eval": {
+        "pnl": 369.87514549472013,
+        "mdd": -25.56246012101432,
+        "trades": 85,
+        "wr": 0.4117647058823529,
+        "trades_per_day": 1.4488636363636365,
+        "long_entries": 41,
+        "short_entries": 44,
+        "avg_notional": 2.308664012842968,
+        "avg_leverage": 2.469028982985124,
+        "lifecycle_exits": 25,
+        "scale_downs": 0,
+        "scale_ups": 30
+      }
+    },
+    {
+      "name": "exit_0.85_scaleup_0.10_m1.25",
+      "config": {
+        "name": "exit_0.85_scaleup_0.10_m1.25",
+        "exit_threshold": 0.85,
+        "scale_threshold": null,
+        "scale_multiplier": 1.0,
+        "scale_up_threshold": 0.1,
+        "scale_up_multiplier": 1.25
+      },
+      "validation": {
+        "pnl": 107.96836801858416,
+        "mdd": -26.09488663244801,
+        "trades": 99,
+        "wr": 0.3333333333333333,
+        "trades_per_day": 1.0761275712398566,
+        "long_entries": 18,
+        "short_entries": 81,
+        "avg_notional": 2.3439422477978744,
+        "avg_leverage": 2.503880522618353,
+        "lifecycle_exits": 40,
+        "scale_downs": 0,
+        "scale_ups": 19
+      },
+      "eval": {
+        "pnl": 383.51803547606835,
+        "mdd": -27.466326665218865,
+        "trades": 81,
+        "wr": 0.38271604938271603,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 40,
+        "short_entries": 41,
+        "avg_notional": 2.3222114681144985,
+        "avg_leverage": 2.4942837266277493,
+        "lifecycle_exits": 14,
+        "scale_downs": 0,
+        "scale_ups": 30
+      }
+    }
+  ],
+  "ranked_by_eval_pnl": [
+    {
+      "name": "exit_0.85_scaleup_0.10_m1.25",
+      "pnl": 383.51803547606835,
+      "mdd": -27.466326665218865,
+      "trades": 81,
+      "validation_pnl": 107.96836801858416,
+      "validation_mdd": -26.09488663244801,
+      "lifecycle_exits": 14,
+      "scale_downs": 0,
+      "scale_ups": 30
+    },
+    {
+      "name": "exit_0.75_scaleup_0.10_m1.25",
+      "pnl": 369.87514549472013,
+      "mdd": -25.56246012101432,
+      "trades": 85,
+      "validation_pnl": 61.7980548946004,
+      "validation_mdd": -30.60130075608889,
+      "lifecycle_exits": 25,
+      "scale_downs": 0,
+      "scale_ups": 30
+    },
+    {
+      "name": "exit_0.85_scaledown_0.65_m0.50",
+      "pnl": 305.4268085314828,
+      "mdd": -22.35217722805333,
+      "trades": 60,
+      "validation_pnl": 52.82823513689141,
+      "validation_mdd": -20.42711050926086,
+      "lifecycle_exits": 10,
+      "scale_downs": 12,
+      "scale_ups": 0
+    },
+    {
+      "name": "exit_0.85_scaledown_0.55_m0.50",
+      "pnl": 283.04195956324594,
+      "mdd": -21.322069522149967,
+      "trades": 60,
+      "validation_pnl": 34.392391096249185,
+      "validation_mdd": -20.533338008472835,
+      "lifecycle_exits": 10,
+      "scale_downs": 15,
+      "scale_ups": 0
+    },
+    {
+      "name": "exit_0.75_scaledown_0.65_m0.50",
+      "pnl": 251.30840439086808,
+      "mdd": -25.133516857572225,
+      "trades": 68,
+      "validation_pnl": 63.79776010117047,
+      "validation_mdd": -21.50588307184037,
+      "lifecycle_exits": 17,
+      "scale_downs": 5,
+      "scale_ups": 0
+    },
+    {
+      "name": "early_exit_0.72",
+      "pnl": 248.86812382732936,
+      "mdd": -25.10684676265794,
+      "trades": 72,
+      "validation_pnl": 58.323377719030624,
+      "validation_mdd": -25.82220943083954,
+      "lifecycle_exits": 20,
+      "scale_downs": 0,
+      "scale_ups": 0
+    },
+    {
+      "name": "early_exit_0.84",
+      "pnl": 241.0562103887999,
+      "mdd": -24.38730306846032,
+      "trades": 72,
+      "validation_pnl": 102.53429964774287,
+      "validation_mdd": -23.331130614094075,
+      "lifecycle_exits": 15,
+      "scale_downs": 0,
+      "scale_ups": 0
+    },
+    {
+      "name": "early_exit_0.60",
+      "pnl": 234.08334275312234,
+      "mdd": -27.88034099188257,
+      "trades": 81,
+      "validation_pnl": 76.37599059333881,
+      "validation_mdd": -29.876562975509955,
+      "lifecycle_exits": 33,
+      "scale_downs": 0,
+      "scale_ups": 0
+    },
+    {
+      "name": "exit_0.75_scaledown_0.55_m0.50",
+      "pnl": 210.8072663941528,
+      "mdd": -25.133516857572246,
+      "trades": 68,
+      "validation_pnl": 46.22862564908814,
+      "validation_mdd": -24.04534646014683,
+      "lifecycle_exits": 18,
+      "scale_downs": 10,
+      "scale_ups": 0
+    }
+  ],
+  "ranked_by_validation_balanced": [
+    {
+      "name": "early_exit_0.84",
+      "validation_score": 55.87203841955472,
+      "validation_pnl": 102.53429964774287,
+      "validation_mdd": -23.331130614094075,
+      "eval_pnl": 241.0562103887999,
+      "eval_mdd": -24.38730306846032,
+      "eval_trades": 72
+    },
+    {
+      "name": "exit_0.85_scaleup_0.10_m1.25",
+      "validation_score": 55.77859475368814,
+      "validation_pnl": 107.96836801858416,
+      "validation_mdd": -26.09488663244801,
+      "eval_pnl": 383.51803547606835,
+      "eval_mdd": -27.466326665218865,
+      "eval_trades": 81
+    },
+    {
+      "name": "exit_0.75_scaledown_0.65_m0.50",
+      "validation_score": 20.78599395748973,
+      "validation_pnl": 63.79776010117047,
+      "validation_mdd": -21.50588307184037,
+      "eval_pnl": 251.30840439086808,
+      "eval_mdd": -25.133516857572225,
+      "eval_trades": 68
+    },
+    {
+      "name": "early_exit_0.60",
+      "validation_score": 16.622864642318902,
+      "validation_pnl": 76.37599059333881,
+      "validation_mdd": -29.876562975509955,
+      "eval_pnl": 234.08334275312234,
+      "eval_mdd": -27.88034099188257,
+      "eval_trades": 81
+    },
+    {
+      "name": "exit_0.85_scaledown_0.65_m0.50",
+      "validation_score": 11.974014118369688,
+      "validation_pnl": 52.82823513689141,
+      "validation_mdd": -20.42711050926086,
+      "eval_pnl": 305.4268085314828,
+      "eval_mdd": -22.35217722805333,
+      "eval_trades": 60
+    },
+    {
+      "name": "early_exit_0.72",
+      "validation_score": 6.678958857351546,
+      "validation_pnl": 58.323377719030624,
+      "validation_mdd": -25.82220943083954,
+      "eval_pnl": 248.86812382732936,
+      "eval_mdd": -25.10684676265794,
+      "eval_trades": 72
+    },
+    {
+      "name": "exit_0.75_scaleup_0.10_m1.25",
+      "validation_score": 0.5954533824226189,
+      "validation_pnl": 61.7980548946004,
+      "validation_mdd": -30.60130075608889,
+      "eval_pnl": 369.87514549472013,
+      "eval_mdd": -25.56246012101432,
+      "eval_trades": 85
+    },
+    {
+      "name": "exit_0.75_scaledown_0.55_m0.50",
+      "validation_score": -1.8620672712055253,
+      "validation_pnl": 46.22862564908814,
+      "validation_mdd": -24.04534646014683,
+      "eval_pnl": 210.8072663941528,
+      "eval_mdd": -25.133516857572246,
+      "eval_trades": 68
+    },
+    {
+      "name": "exit_0.85_scaledown_0.55_m0.50",
+      "validation_score": -6.674284920696486,
+      "validation_pnl": 34.392391096249185,
+      "validation_mdd": -20.533338008472835,
+      "eval_pnl": 283.04195956324594,
+      "eval_mdd": -21.322069522149967,
+      "eval_trades": 60
+    }
+  ]
+}

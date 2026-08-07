@@ -23,8 +23,8 @@ from ensemble.supervised.train_trend_xgb import compute_atr, make_triple_barrier
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_DATA_PATH = "data/training_features_5m.csv"
-DEFAULT_RL_DATA_PATH = "data/rl_training_data_full.csv"
+DEFAULT_DATA_PATH = "data/splits/year_oos/training_features_2024.csv"
+DEFAULT_RL_DATA_PATH = "data/splits/year_oos/rl_base_2024.csv"
 
 PRED_CONF_MAP = {}
 
@@ -59,11 +59,6 @@ RL_ALPHA_COLS = [
     "tlad",
     "mtmb",
     "fcsz",
-    "regime_bull",
-    "regime_bear",
-    "regime_chop",
-    "regime_whipsaw",
-    "regime_normal",
 ]
 
 CATEGORICAL_HINTS = [
@@ -72,12 +67,44 @@ CATEGORICAL_HINTS = [
     "session_us",
     "cvp_regime",
     "regime_break",
+]
+
+FORBIDDEN_FEATURE_NAMES = {
     "regime_bull",
     "regime_bear",
     "regime_chop",
     "regime_whipsaw",
     "regime_normal",
-]
+}
+
+FORBIDDEN_FEATURE_PREFIXES = (
+    "m7_",
+    "teacher_",
+    "a5dir_",
+    "clean_regime_2024_unsup_v4_",
+    "clean_regime4_2024_unsup_v1_",
+)
+
+FORBIDDEN_FEATURE_FRAGMENTS = (
+    "future",
+    "target",
+    "label",
+    "trade_pnl",
+    "cash_after",
+    "_x_trend_prob",
+    "_x_instability_prob",
+    "_x_chop_prob",
+)
+
+
+def is_forbidden_feature(col: str) -> bool:
+    c = str(col)
+    lc = c.lower()
+    if c in FORBIDDEN_FEATURE_NAMES:
+        return True
+    if any(c.startswith(prefix) for prefix in FORBIDDEN_FEATURE_PREFIXES):
+        return True
+    return any(fragment in lc for fragment in FORBIDDEN_FEATURE_FRAGMENTS)
 
 
 def _combine_pred_conf(df: pd.DataFrame) -> pd.DataFrame:
@@ -147,6 +174,7 @@ def select_feature_columns(
     for c in extra_cols + base_must_include:
         if c in df.columns and c not in cols:
             cols.append(c)
+    cols = [c for c in cols if not is_forbidden_feature(c)]
     ordered = [c for c in base_must_include if c in cols]
     ordered.extend([c for c in cols if c not in ordered])
     return ordered

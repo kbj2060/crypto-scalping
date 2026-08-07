@@ -1,0 +1,273 @@
+{
+  "metrics": {
+    "pnl_pct": 5498.01807283204,
+    "mdd_pct": -2.425615315601559,
+    "trades": 1177,
+    "wr_pct": 77.23024638912489,
+    "long_entries": 131,
+    "short_entries": 1046,
+    "avg_hold_bars": 11.719626168224298,
+    "avg_fraction": 0.43577252007643125,
+    "avg_leverage": 1.0035437141778698,
+    "avg_exposure": 0.43931623425430105
+  },
+  "regime_summary": {
+    "BEAR": {
+      "trades": 480,
+      "pnl_pct_sum": 247.99525887599384,
+      "avg_pnl_pct": 0.5166567893249876
+    },
+    "BULL": {
+      "trades": 196,
+      "pnl_pct_sum": 21.41659282998818,
+      "avg_pnl_pct": 0.10926833076524581
+    },
+    "CHOP": {
+      "trades": 102,
+      "pnl_pct_sum": 23.646382706236814,
+      "avg_pnl_pct": 0.23182728143369427
+    },
+    "NORMAL": {
+      "trades": 163,
+      "pnl_pct_sum": 46.032766124313284,
+      "avg_pnl_pct": 0.28240960812462135
+    },
+    "WHIPSAW": {
+      "trades": 235,
+      "pnl_pct_sum": 65.50614823592366,
+      "avg_pnl_pct": 0.27874956696137726
+    },
+    "whipsaw": {
+      "trades": 1,
+      "pnl_pct_sum": -0.03746817697102039,
+      "avg_pnl_pct": -0.03746817697102039
+    }
+  },
+  "trade_rows_tail": [
+    {
+      "ts": "2026-02-27 22:30:00",
+      "side": "SHORT",
+      "entry_price": 1922.1249,
+      "exit_price": 1889.07,
+      "hold_bars": 42,
+      "exposure": 1.0283466458320618,
+      "pnl_frac": 0.016251848092514898,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-27 22:55:00",
+      "side": "SHORT",
+      "entry_price": 1912.6172,
+      "exit_price": 1920.1,
+      "hold_bars": 3,
+      "exposure": 0.13861698949337006,
+      "pnl_frac": -0.000736608003340411,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_veto_floor",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 05:50:00",
+      "side": "LONG",
+      "entry_price": 1925.93,
+      "exit_price": 1917.28,
+      "hold_bars": 80,
+      "exposure": 0.1369039139151573,
+      "pnl_frac": -0.0008062901924105192,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 06:10:00",
+      "side": "SHORT",
+      "entry_price": 1922.5697,
+      "exit_price": 1909.93,
+      "hold_bars": 2,
+      "exposure": 0.8772127354145052,
+      "pnl_frac": 0.004541267428874507,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 06:20:00",
+      "side": "SHORT",
+      "entry_price": 1903.3811,
+      "exit_price": 1890.6,
+      "hold_bars": 0,
+      "exposure": 1.0330521540641786,
+      "pnl_frac": 0.00549330835618389,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 06:30:00",
+      "side": "SHORT",
+      "entry_price": 1889.0522,
+      "exit_price": 1869.19,
+      "hold_bars": 0,
+      "exposure": 1.1472181569099429,
+      "pnl_frac": 0.010460908611465092,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 06:45:00",
+      "side": "SHORT",
+      "entry_price": 1868.3229,
+      "exit_price": 1858.1,
+      "hold_bars": 1,
+      "exposure": 0.8898358613777162,
+      "pnl_frac": 0.0036250202820047317,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 06:55:00",
+      "side": "SHORT",
+      "entry_price": 1861.4373,
+      "exit_price": 1841.51,
+      "hold_bars": 0,
+      "exposure": 1.1144526111316682,
+      "pnl_frac": 0.010375032987841148,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 07:05:00",
+      "side": "SHORT",
+      "entry_price": 1861.2026,
+      "exit_price": 1854.84,
+      "hold_bars": 0,
+      "exposure": 0.8978865526771547,
+      "pnl_frac": 0.0018135782610906315,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 07:20:00",
+      "side": "SHORT",
+      "entry_price": 1869.6643,
+      "exit_price": 1849.52,
+      "hold_bars": 1,
+      "exposure": 0.9160995721817017,
+      "pnl_frac": 0.008591656041983864,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 07:50:00",
+      "side": "SHORT",
+      "entry_price": 1852.21,
+      "exit_price": 1868.03,
+      "hold_bars": 4,
+      "exposure": 0.1063755483031273,
+      "pnl_frac": -0.0010578670965354364,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_veto_floor",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 08:05:00",
+      "side": "SHORT",
+      "entry_price": 1871.0338,
+      "exit_price": 1858.35,
+      "hold_bars": 1,
+      "exposure": 0.7555239319801331,
+      "pnl_frac": 0.0040659768576638555,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 08:20:00",
+      "side": "SHORT",
+      "entry_price": 1863.6997,
+      "exit_price": 1855.94,
+      "hold_bars": 1,
+      "exposure": 0.8647979557514192,
+      "pnl_frac": 0.002391326957135842,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 08:50:00",
+      "side": "SHORT",
+      "entry_price": 1861.2158,
+      "exit_price": 1853.0,
+      "hold_bars": 4,
+      "exposure": 0.6782260119915009,
+      "pnl_frac": 0.002045460080129402,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 09:05:00",
+      "side": "SHORT",
+      "entry_price": 1857.8108,
+      "exit_price": 1843.98,
+      "hold_bars": 1,
+      "exposure": 0.6251639723777771,
+      "pnl_frac": 0.0037807258431035162,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 09:45:00",
+      "side": "SHORT",
+      "entry_price": 1858.0665,
+      "exit_price": 1849.26,
+      "hold_bars": 5,
+      "exposure": 0.7368824601173402,
+      "pnl_frac": 0.002462234172660116,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 10:05:00",
+      "side": "SHORT",
+      "entry_price": 1860.7075,
+      "exit_price": 1851.6,
+      "hold_bars": 2,
+      "exposure": 0.6432732889652253,
+      "pnl_frac": 0.0022492190800205147,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_veto_floor",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 13:45:00",
+      "side": "SHORT",
+      "entry_price": 1860.0127,
+      "exit_price": 1890.61,
+      "hold_bars": 41,
+      "exposure": 0.16279818463325502,
+      "pnl_frac": -0.002907040023936047,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_hold",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 15:15:00",
+      "side": "LONG",
+      "entry_price": 1900.25,
+      "exit_price": 1882.29,
+      "hold_bars": 9,
+      "exposure": 0.17686339020729067,
+      "pnl_frac": -0.001918530611412117,
+      "source": "DSAC_COMPACT|UNIFIED_NATIVE|compact_veto_floor",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 16:00:00",
+      "side": "SHORT",
+      "entry_price": 1895.4703,
+      "exit_price": 1893.73,
+      "hold_bars": 8,
+      "exposure": 0.7780317783355714,
+      "pnl_frac": -0.0003746817697102039,
+      "source": "final_mark",
+      "event": "final_mark"
+    }
+  ],
+  "equity_final": 55.9801807283204,
+  "generated_at": "2026-04-29T19:27:14.715272Z",
+  "mode": "compact",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_unified.pth",
+  "script": "/home/llewyn/crypto-scalping/scripts/backtest_trading_bot_native_2026.py"
+}

@@ -1,0 +1,119 @@
+{
+  "model_id": "alpha3_csv_native_parity_redteam_20260516",
+  "verdict": "pass_for_csv_loop_parity_baseline",
+  "live_promotion_verdict": "blocked_until_real_l2_queue_fill_validation",
+  "created_at_kst": "2026-05-16",
+  "scope": {
+    "workspace": "/home/llewyn/crypto-scalping",
+    "reference_report": "data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516.json",
+    "reference_ledger": "data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516_ledger_corrected.csv",
+    "parity_report": "data/ensemble/reports/alpha3_runtime_native_backtest_live_frame_alpha3_csv_loop_exact_20260516_1m.json",
+    "parity_ledger": "data/ensemble/reports/alpha3_runtime_native_backtest_live_frame_alpha3_csv_loop_exact_20260516_1m_ledger.csv",
+    "start_index_abs": 6999,
+    "end_index_abs": 15638,
+    "start_timestamp": "2026-01-25 07:15:00",
+    "end_timestamp": "2026-02-24 07:10:00",
+    "rows": 8640
+  },
+  "parity_result": {
+    "action_events_match": true,
+    "first_action_diff": null,
+    "reference_action_events": 237,
+    "candidate_action_events": 237,
+    "ledger_rows_reference": 8648,
+    "ledger_rows_candidate": 8648,
+    "event_counts_reference": {
+      "HOLD": 7523,
+      "COOLDOWN": 888,
+      "OPEN": 114,
+      "CLOSE": 113,
+      "UPSIZE": 9,
+      "FORCED_END": 1
+    },
+    "event_counts_candidate": {
+      "HOLD": 7523,
+      "COOLDOWN": 888,
+      "OPEN": 114,
+      "CLOSE": 113,
+      "UPSIZE": 9,
+      "FORCED_END": 1
+    },
+    "final_cash_reference": 4.3868067144959,
+    "final_cash_candidate": 4.3868067144959,
+    "final_cash_diff": 0.0,
+    "final_equity_reference": 4.440568861658766,
+    "final_equity_candidate": 4.440568861658766,
+    "final_equity_diff": 0.0,
+    "final_pnl_reference_pct": 338.68067144958997,
+    "final_pnl_candidate_pct": 338.68067144958997,
+    "final_pnl_diff_pct": 0.0,
+    "mdd_signed_pct": -29.617312952777574,
+    "trades": 114
+  },
+  "root_causes": [
+    {
+      "id": "csv_vs_native_not_same_simulator",
+      "severity": "critical",
+      "finding": "The canonical CSV evaluator and early native runtime replay used different state, accounting, decision, and forced-end contracts.",
+      "impact": "A direct PnL comparison produced false deltas; the early native one-month replay was +101.5907% versus the corrected CSV baseline +338.6807%."
+    },
+    {
+      "id": "teacher_sequence_contract_gap",
+      "severity": "critical",
+      "finding": "Alpha2.1 teacher is a 72-bar sequence model; latest-row-only inference can zero-pad the historical sequence and change decisions.",
+      "impact": "Parent/teacher accept-prune decisions can diverge from CSV canonical output."
+    },
+    {
+      "id": "entry_slippage_double_count_risk",
+      "severity": "high",
+      "finding": "Native mark/close paths could treat already-filled entry prices as raw prices and apply entry-side synthetic slippage again.",
+      "impact": "Stop/TP/max-hold timing and realized PnL diverged from canonical execution accounting."
+    },
+    {
+      "id": "v21_2_addon_feature_frame_mismatch",
+      "severity": "high",
+      "finding": "V21.2 add-on gating used a different live adapter feature context than the CSV _feature_frame inputs.",
+      "impact": "Jackpot accept/reject timing and same-side resize counts could diverge."
+    },
+    {
+      "id": "forced_end_off_by_one",
+      "severity": "medium",
+      "finding": "CSV canonical forces remaining position at len(df)-1 after looping range(0, len(df)-2); native stop interpretation can force on a different bar.",
+      "impact": "Final action timestamp, final mark, and final PnL can differ."
+    },
+    {
+      "id": "ledger_display_semantics_mismatch",
+      "severity": "medium",
+      "finding": "After action parity, diagnostic rows still differed in close-row equity/realized display, cooldown labels, and UPSIZE reason labels.",
+      "impact": "First-diff tooling could point to logging noise instead of true behavioral divergence."
+    }
+  ],
+  "rejected_fixes": [
+    {
+      "id": "v21_reject_one_shot_global_semantics",
+      "reason": "Changed strategy behavior instead of restoring parity.",
+      "observed_result": {
+        "pnl_pct": 210.8023507332448,
+        "mdd_pct": -29.629509897090134,
+        "trades": 118
+      }
+    }
+  ],
+  "fixed_or_recorded": [
+    "Added --alpha3-csv-loop-parity to scripts/backtest_alpha3_runtime_native_20260515.py.",
+    "Added --compare-csv-ledger action-event comparison report.",
+    "Matched corrected canonical CSV ledger at action-event and full-ledger level.",
+    "Recorded red-team blockers for live promotion.",
+    "Recorded frozen backtest parity protocol for future Alpha3 experiments."
+  ],
+  "remaining_red_team_blockers": [
+    "synthetic_ohlcv_touch_fill_not_real_l2_queue_fill",
+    "maker_fill_probability_not_validated_by_forward_l2_snapshots",
+    "csv_loop_parity_is_not_live_exchange_promotion",
+    "live_feature_recompute_vs_precomputed_csv_features_still_requires_shadow_monitoring"
+  ],
+  "documents": {
+    "redteam_markdown": "docs/experiments/alpha3_csv_native_parity_redteam_20260516.md",
+    "backtest_protocol": "docs/model_contracts/alpha3_csv_native_backtest_parity_20260516.md"
+  }
+}

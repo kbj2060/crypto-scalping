@@ -1,0 +1,217 @@
+{
+  "model_id": "alpha6_catboost_entry_quality_exit_policy_20260522",
+  "variant": "current_tail111",
+  "train_rows": 78273,
+  "val_rows": 26205,
+  "label_meta": {
+    "candidates": 26059,
+    "stride_bars": 3,
+    "max_train_horizon_bars": 96,
+    "score_horizons": [
+      6,
+      12,
+      24,
+      48,
+      96
+    ],
+    "trained_heads": [
+      "action",
+      "quality",
+      "target_bucket",
+      "exit"
+    ],
+    "removed_heads": [
+      "notional",
+      "take_profit",
+      "stop_loss",
+      "max_hold",
+      "cooldown"
+    ],
+    "labeling_basis": "multi_horizon_risk_adjusted_direction_no_tp_sl",
+    "fixed_notional": 0.25,
+    "fee": 0.0004,
+    "slip": 0.00015,
+    "cash_score": 0.0008,
+    "min_net_edge": 0.00025,
+    "dynamic_min_edge_atr_frac": 0.08,
+    "direction_margin": 0.00015,
+    "terminal_weight": 0.5,
+    "mfe_weight": 0.5,
+    "mae_penalty_lambda": 0.7,
+    "path_vol_penalty_lambda": 0.06,
+    "hold_penalty": 0.004,
+    "exit_adverse_penalty": 1.2,
+    "exit_giveback_penalty": 0.35
+  },
+  "entry_label_distribution": {
+    "action": {
+      "0": 7424,
+      "1": 9354,
+      "2": 9281
+    },
+    "target_bucket": {
+      "0": 3362,
+      "1": 3375,
+      "2": 3679,
+      "3": 3867,
+      "4": 4352
+    },
+    "quality_mean": 0.0023929044543098406,
+    "quality_p95": 0.008753208148944787
+  },
+  "exit_meta": {
+    "samples": 5101,
+    "close_rate": 0.2803371887865124,
+    "trade_entries_used": 1000,
+    "state_dim": 27,
+    "state_features": [
+      "side",
+      "ret",
+      "hold_frac",
+      "remaining_frac",
+      "target_horizon_frac",
+      "mae",
+      "mfe",
+      "giveback",
+      "giveback_ratio",
+      "current_atr_pct",
+      "entry_atr_pct",
+      "ret_atr",
+      "mae_atr",
+      "mfe_atr",
+      "side_obi",
+      "side_obi_delta",
+      "side_taker_delta",
+      "side_nif_whale",
+      "side_nif_whale_delta",
+      "side_eai",
+      "side_eai_delta",
+      "side_oi_delta_pct",
+      "side_funding_rate",
+      "risk_off_prob",
+      "whipsaw_prob",
+      "regime_confidence",
+      "target_bucket"
+    ],
+    "target_horizon_distribution": {
+      "6": 189,
+      "12": 179,
+      "24": 210,
+      "48": 190,
+      "96": 232
+    },
+    "step": 8,
+    "cost_mult": 3.0,
+    "weight_scale": 80.0
+  },
+  "raw_feature_count": 112,
+  "missing_features": [
+    "fibonacci_level",
+    "funding_roc_12",
+    "funding_roc_48",
+    "funding_z_score",
+    "hh_count_24",
+    "hl_count_24",
+    "hurst_288",
+    "ret_12",
+    "ret_24",
+    "ret_48",
+    "short_squeeze_risk",
+    "trend_accel"
+  ],
+  "model_feature_count": 112,
+  "use_pca": false,
+  "best": {
+    "entry_threshold": 0.0034163351358086967,
+    "exit_threshold": 0.35,
+    "score": 2.964686439717159,
+    "pnl": 15.296962572690598,
+    "mdd": -4.807712060281455,
+    "trades": 61,
+    "trades_per_day": 0.6704064109902691,
+    "wr": 0.7049180327868853,
+    "long_entries": 21,
+    "short_entries": 40,
+    "avg_notional": 0.25,
+    "exit_model_closes": 60,
+    "exits": "{\"end\": 1, \"exit_model\": 60}"
+  },
+  "best_backtest": {
+    "cost1": {
+      "pnl": 15.296962572690598,
+      "mdd": -4.807712060281455,
+      "trades": 61,
+      "wr": 0.7049180327868853,
+      "trades_per_day": 0.6704064109902691,
+      "long_entries": 21,
+      "short_entries": 40,
+      "avg_notional": 0.25,
+      "exit_model_closes": 60,
+      "exits": {
+        "exit_model": 60,
+        "end": 1
+      }
+    },
+    "cost2": {
+      "pnl": 14.23872598420457,
+      "mdd": -4.807174110015189,
+      "trades": 63,
+      "wr": 0.6825396825396826,
+      "trades_per_day": 0.6923869490555238,
+      "long_entries": 22,
+      "short_entries": 41,
+      "avg_notional": 0.25,
+      "exit_model_closes": 62,
+      "exits": {
+        "exit_model": 62,
+        "end": 1
+      }
+    },
+    "cost3": {
+      "pnl": 12.044721436642503,
+      "mdd": -4.8066362801213565,
+      "trades": 63,
+      "wr": 0.6507936507936508,
+      "trades_per_day": 0.6923869490555238,
+      "long_entries": 22,
+      "short_entries": 41,
+      "avg_notional": 0.25,
+      "exit_model_closes": 62,
+      "exits": {
+        "exit_model": 62,
+        "end": 1
+      }
+    }
+  },
+  "params": {
+    "feature_csv": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/dsac_feature_inventory_regime_fixed_20260521/rl_training_2025_direction_router_feature_inventory_base_with_family_pca.csv",
+    "spec_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/dsac_feature_variant_specs_regime_fixed_20260521",
+    "label_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha5_13_hgb_high_quality_training_data_20260518",
+    "out_dir": "tmp/causal_regen_20260516/alpha6_entry_quality_exit_target_bucket5_n025_current_tail111_20260522",
+    "variant": "current_tail111",
+    "iterations": 650,
+    "learning_rate": 0.055,
+    "depth": 4,
+    "l2_leaf_reg": 5.0,
+    "exit_iterations": 120,
+    "exit_learning_rate": 0.045,
+    "exit_depth": 5,
+    "task_type": "CPU",
+    "seed": 42,
+    "stride_bars": 3,
+    "batch_size": 1024,
+    "entry_thresholds": 5,
+    "exit_threshold_grid": "0.35,0.45,0.55,0.70",
+    "fixed_notional": 0.25,
+    "exit_step": 8,
+    "exit_max_trades": 1000,
+    "exit_cost_mult": 3.0,
+    "exit_weight_scale": 80.0,
+    "min_exit_hold": 2,
+    "exit_on_flip": false,
+    "cash_action_weight": 0.35,
+    "verbose": 100,
+    "no_pca": false,
+    "smoke": false
+  }
+}

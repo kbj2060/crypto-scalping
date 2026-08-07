@@ -68,13 +68,13 @@ def _load_frame(rl_csv: str) -> pd.DataFrame:
     return df
 
 
-def _entropy_3(a: float, b: float, c: float) -> float:
-    p = np.asarray([max(a, 0.0), max(b, 0.0), max(c, 0.0)], dtype=np.float64)
+def _entropy_2(a: float, b: float) -> float:
+    p = np.asarray([max(a, 0.0), max(b, 0.0)], dtype=np.float64)
     s = float(p.sum())
     if s <= 1e-12:
         return 1.0
     p = p / s
-    return float(-(p * np.log(np.maximum(p, 1e-12))).sum() / np.log(3.0))
+    return float(-(p * np.log(np.maximum(p, 1e-12))).sum() / np.log(2.0))
 
 
 def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -147,22 +147,20 @@ def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     q_dn = out.get("m7_quant_dn", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
-    q_fl = out.get("m7_quant_fl", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
     q_up = out.get("m7_quant_up", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
     m_dn = out.get("m7_mtl_dn", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
-    m_fl = out.get("m7_mtl_fl", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
     m_up = out.get("m7_mtl_up", pd.Series(0.0, index=out.index)).to_numpy(dtype=np.float64)
     mode_prob = []
     mode_spread = []
     entropy = []
-    for a, b, c in zip(m_dn, m_fl, m_up):
-        arr = sorted([max(a, 0.0), max(b, 0.0), max(c, 0.0)], reverse=True)
+    for a, b in zip(m_dn, m_up):
+        arr = sorted([max(a, 0.0), max(b, 0.0)], reverse=True)
         s = max(sum(arr), 1e-12)
         top1 = arr[0] / s
         top2 = arr[1] / s
         mode_prob.append(top1)
         mode_spread.append(top1 - top2)
-        entropy.append(_entropy_3(a, b, c))
+        entropy.append(_entropy_2(a, b))
     out["mode_prob"] = mode_prob
     out["mode_spread"] = mode_spread
     out["entropy"] = entropy

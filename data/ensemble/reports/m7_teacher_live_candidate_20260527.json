@@ -1,0 +1,27 @@
+{
+  "candidate": "teacher_features_with_m7_upstream",
+  "status": "active_live_candidate",
+  "audit": "data/ensemble/reports/m7_teacher_live_provenance_20260527_audit.json",
+  "allowed_feature_prefixes": [
+    "teacher_",
+    "m7_",
+    "ai_"
+  ],
+  "conditions": [
+    "2025 teacher_* uses 2024-trained AI/M7 scores.",
+    "2026 teacher_* uses transform-only/OOS AI/M7 scores.",
+    "Future M7 rebuilds must rerun this audit and keep timestamp-exact joins."
+  ],
+  "blocking": [],
+  "warnings": [
+    "m7_2025: target-named m7 outputs are model predictions, not direct labels: ['m7_target_hold']",
+    "m7_2026: target-named m7 outputs are model predictions, not direct labels: ['m7_target_hold']",
+    "trend_xgb: embedded model provenance absent; covered by external audit + operator attestation",
+    "entry_price_model: embedded model provenance absent; covered by external audit + operator attestation",
+    "multi_target_lgbm: embedded model provenance absent; covered by external audit + operator attestation",
+    "quantile_forest: embedded model provenance absent; covered by external audit + operator attestation",
+    "gmm_volatility: embedded model provenance absent; covered by external audit + operator attestation",
+    "isolation_forest: embedded model provenance absent; covered by external audit + operator attestation",
+    "vae_anomaly: embedded model provenance absent; covered by external audit + operator attestation"
+  ]
+}

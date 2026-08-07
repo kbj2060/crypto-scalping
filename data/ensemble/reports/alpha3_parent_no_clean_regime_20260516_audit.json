@@ -1,0 +1,40 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "no_clean_regime_parent_did_not_improve_cost1_pnl",
+    "no_clean_regime_parent_worsened_cost1_mdd"
+  ],
+  "primary_mutable_surface": "parent_only",
+  "changed_layers": [
+    "parent"
+  ],
+  "frozen_layers": [
+    "teacher_gate",
+    "v21_2_runner",
+    "v27_deep_scout",
+    "v31_exit",
+    "execution",
+    "accounting",
+    "data"
+  ],
+  "removed_prefix": "clean_regime_2024_unsup_v4_",
+  "selection_uses_2026": false,
+  "oos_window": "2026 fixed OOS",
+  "alpha3_execution_contract": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "runtime": {
+    "name": "noflip_c0.56_parent_scale1.10",
+    "confidence": 0.56,
+    "parent_notional_scale": 1.1,
+    "max_notional": 2.75
+  }
+}

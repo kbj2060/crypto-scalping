@@ -1,0 +1,96 @@
+{
+  "design": "docs/btc_kappa1_invariant_composite_policy_design_20260807.md",
+  "gate_series": "tmp/research_20260804/btc_event_gate_prototype/gate_series.csv",
+  "m1_coverage": [
+    "2024-01-01 00:00:00",
+    "2026-07-12 09:00:00"
+  ],
+  "kill_threshold_fill_15m": 0.3,
+  "rules": {
+    "v1_preregistered": {
+      "fill_rule": "post-only resting at decision 1m close; cross-at-open = no fill; strict trade-through",
+      "event_windows": {
+        "events_attempted": 1894,
+        "crossed_at_open_noFill": 1415,
+        "fill_rate": {
+          "5m": 0.23812038014783526,
+          "15m": 0.24340021119324182,
+          "30m": 0.24656810982048574
+        },
+        "markout_15m": {
+          "mean_bps": 2.440689694075095,
+          "t_stat": 1.0299623312392527,
+          "n": 467
+        },
+        "markout_60m": {
+          "mean_bps": 5.977559820675874,
+          "t_stat": 1.2783786363704193,
+          "n": 467
+        }
+      },
+      "baseline_random": {
+        "events_attempted": 19995,
+        "crossed_at_open_noFill": 14967,
+        "fill_rate": {
+          "5m": 0.22920730182545637,
+          "15m": 0.23895973993498373,
+          "30m": 0.24301075268817204
+        },
+        "markout_15m": {
+          "mean_bps": -0.6600406142507461,
+          "t_stat": -1.1472531459065012,
+          "n": 4859
+        },
+        "markout_60m": {
+          "mean_bps": -1.8686992553149355,
+          "t_stat": -1.6918988770135095,
+          "n": 4859
+        }
+      },
+      "verdict": "KILL"
+    },
+    "v2_amended_posthoc": {
+      "fill_rule": "post-only resting at next 1m open (the touch at arrival); strict trade-through; no queue credit",
+      "event_windows": {
+        "events_attempted": 1894,
+        "crossed_at_open_noFill": 0,
+        "fill_rate": {
+          "5m": 0.9656810982048575,
+          "15m": 0.9809926082365364,
+          "30m": 0.986272439281943
+        },
+        "markout_15m": {
+          "mean_bps": -1.2044339535120168,
+          "t_stat": -1.071249765485996,
+          "n": 1868
+        },
+        "markout_60m": {
+          "mean_bps": -0.9448234646187597,
+          "t_stat": -0.4093591165459039,
+          "n": 1868
+        }
+      },
+      "baseline_random": {
+        "events_attempted": 19995,
+        "crossed_at_open_noFill": 0,
+        "fill_rate": {
+          "5m": 0.9512878219554889,
+          "15m": 0.9718429607401851,
+          "30m": 0.9813953488372092
+        },
+        "markout_15m": {
+          "mean_bps": -0.6173796475295636,
+          "t_stat": -2.278610453910429,
+          "n": 19623
+        },
+        "markout_60m": {
+          "mean_bps": -1.0208646674240047,
+          "t_stat": -1.929024193589898,
+          "n": 19623
+        }
+      },
+      "verdict": "PASS"
+    }
+  },
+  "note": "v1 conflated post-only placement rejection (75% cross-at-open) with resting-order non-fill; v2 re-prices to the touch at arrival, the behaviour of a real post-only engine, and was adopted AFTER seeing v1 -- recorded as a post-hoc amendment."
+}

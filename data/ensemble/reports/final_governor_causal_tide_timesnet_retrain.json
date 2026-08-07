@@ -1,0 +1,332 @@
+{
+  "type": "final_governor_causal_ai_retrain",
+  "groups": [
+    "tide",
+    "timesnet"
+  ],
+  "train_csv": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_v1_causal_tide_timesnet.csv",
+    "rows": 105064,
+    "cols": 153,
+    "ai_groups": [
+      "tide",
+      "timesnet"
+    ],
+    "selected_ai_cols": [
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_anchor_revert_prob",
+      "ai_anchor_overheat",
+      "ai_anchor_trend_escape_prob",
+      "timesnet_cycle_sin",
+      "timesnet_cycle_cos",
+      "timesnet_cycle_delta"
+    ],
+    "causal_regime": true
+  },
+  "eval_csv_unscored": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_causal_tide_timesnet_unscored.csv",
+    "rows": 16897,
+    "cols": 153,
+    "ai_groups": [
+      "tide",
+      "timesnet"
+    ],
+    "selected_ai_cols": [
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_anchor_revert_prob",
+      "ai_anchor_overheat",
+      "ai_anchor_trend_escape_prob",
+      "timesnet_cycle_sin",
+      "timesnet_cycle_cos",
+      "timesnet_cycle_delta"
+    ],
+    "causal_regime": true
+  },
+  "eval_csv": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_causal_tide_timesnet_scored.csv",
+    "rows": 16897,
+    "cols": 153
+  },
+  "event_detector": {
+    "model_out": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidate_detector_catboost_causal.pkl",
+    "meta_out": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidate_detector_catboost_causal.json",
+    "scored_train_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_v1_causal_tide_timesnet_event_scored.csv",
+    "meta": {
+      "algorithm": "trade_candidate_detector_catboost",
+      "csv_path": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_v1_causal_tide_timesnet.csv",
+      "train_ratio": 0.7,
+      "val_ratio": 0.15,
+      "val_balanced_acc": 0.5983365607627297,
+      "test_balanced_acc": 0.5767949500921778,
+      "test_candidate_dir_f1": 0.3260733030406818,
+      "classification_report": {
+        "0": {
+          "precision": 0.9919816723940436,
+          "recall": 0.7380262485086074,
+          "f1-score": 0.846364347146208,
+          "support": 5867.0
+        },
+        "1": {
+          "precision": 0.4214586255259467,
+          "recall": 0.3675840978593272,
+          "f1-score": 0.39268213002286834,
+          "support": 4905.0
+        },
+        "2": {
+          "precision": 0.43790390559145825,
+          "recall": 0.6247745039085989,
+          "f1-score": 0.5149087304864954,
+          "support": 4989.0
+        },
+        "accuracy": 0.5868916946894233,
+        "macro avg": {
+          "precision": 0.6171147345038162,
+          "recall": 0.5767949500921778,
+          "f1-score": 0.5846517358851906,
+          "support": 15761.0
+        },
+        "weighted avg": {
+          "precision": 0.6390402649030142,
+          "recall": 0.5868916946894233,
+          "f1-score": 0.6002541164181269,
+          "support": 15761.0
+        }
+      },
+      "scored_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_v1_causal_tide_timesnet_event_scored.csv"
+    }
+  },
+  "micro": {
+    "model_out": "/home/llewyn/crypto-scalping/data/ensemble/supervised/microstructure_wnc_sleeve_causal_tide_timesnet_5x.pkl",
+    "feature_count": 148,
+    "ai_feature_cols": [
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_anchor_revert_prob",
+      "ai_anchor_overheat",
+      "ai_anchor_trend_escape_prob",
+      "timesnet_cycle_sin",
+      "timesnet_cycle_cos",
+      "timesnet_cycle_delta"
+    ],
+    "train_summary": {
+      "train_rows": 105064,
+      "train_target_rows": 50286,
+      "target_regimes": [
+        "whipsaw",
+        "normal",
+        "chop"
+      ],
+      "target_counts": {
+        "0": 19326,
+        "1": 15452,
+        "2": 15508
+      },
+      "feature_count": 148,
+      "feature_mode": "full",
+      "model_mode": "ensemble",
+      "model": "WeightedProbabilityEnsemble",
+      "model_configs": [
+        {
+          "name": "hgb_wide",
+          "weight": 1.0,
+          "params": {
+            "max_iter": 220,
+            "learning_rate": 0.04,
+            "max_leaf_nodes": 47,
+            "l2_regularization": 0.01,
+            "random_state": 101,
+            "class_weight": "balanced"
+          }
+        },
+        {
+          "name": "hgb_fast",
+          "weight": 1.0,
+          "params": {
+            "max_iter": 140,
+            "learning_rate": 0.06,
+            "max_leaf_nodes": 63,
+            "l2_regularization": 0.035,
+            "random_state": 102,
+            "class_weight": "balanced"
+          }
+        },
+        {
+          "name": "cat_smooth",
+          "weight": 2.0,
+          "params": {
+            "iterations": 420,
+            "depth": 6,
+            "learning_rate": 0.045,
+            "l2_leaf_reg": 4.0,
+            "loss_function": "MultiClass",
+            "auto_class_weights": "Balanced",
+            "random_seed": 104
+          }
+        },
+        {
+          "name": "cat_deep",
+          "weight": 2.0,
+          "params": {
+            "iterations": 320,
+            "depth": 7,
+            "learning_rate": 0.055,
+            "l2_leaf_reg": 7.0,
+            "loss_function": "MultiClass",
+            "auto_class_weights": "Balanced",
+            "random_seed": 105
+          }
+        }
+      ]
+    }
+  },
+  "trend": {
+    "model_out": "/home/llewyn/crypto-scalping/data/ensemble/supervised/trend_bull_bear_sleeve_causal_tide_timesnet_5x.pkl",
+    "feature_count": 148,
+    "ai_feature_cols": [
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_anchor_revert_prob",
+      "ai_anchor_overheat",
+      "ai_anchor_trend_escape_prob",
+      "timesnet_cycle_sin",
+      "timesnet_cycle_cos",
+      "timesnet_cycle_delta"
+    ],
+    "train_summary": {
+      "train_rows": 105064,
+      "train_target_rows": 54778,
+      "target_regimes": [
+        "bull",
+        "bear"
+      ],
+      "target_counts": {
+        "0": 17579,
+        "1": 18606,
+        "2": 18593
+      },
+      "feature_count": 148,
+      "feature_mode": "full",
+      "model": "WeightedProbabilityEnsemble",
+      "model_configs": [
+        {
+          "name": "hgb_trend_wide",
+          "weight": 1.0,
+          "params": {
+            "categorical_features": "from_dtype",
+            "class_weight": "balanced",
+            "early_stopping": "auto",
+            "interaction_cst": null,
+            "l2_regularization": 0.02,
+            "learning_rate": 0.038,
+            "loss": "log_loss",
+            "max_bins": 255,
+            "max_depth": null,
+            "max_features": 1.0,
+            "max_iter": 240,
+            "max_leaf_nodes": 63,
+            "min_samples_leaf": 20,
+            "monotonic_cst": null,
+            "n_iter_no_change": 10,
+            "random_state": 211,
+            "scoring": "loss",
+            "tol": 1e-07,
+            "validation_fraction": 0.1,
+            "verbose": 0,
+            "warm_start": false
+          }
+        },
+        {
+          "name": "hgb_trend_fast",
+          "weight": 1.0,
+          "params": {
+            "categorical_features": "from_dtype",
+            "class_weight": "balanced",
+            "early_stopping": "auto",
+            "interaction_cst": null,
+            "l2_regularization": 0.035,
+            "learning_rate": 0.055,
+            "loss": "log_loss",
+            "max_bins": 255,
+            "max_depth": null,
+            "max_features": 1.0,
+            "max_iter": 160,
+            "max_leaf_nodes": 47,
+            "min_samples_leaf": 20,
+            "monotonic_cst": null,
+            "n_iter_no_change": 10,
+            "random_state": 212,
+            "scoring": "loss",
+            "tol": 1e-07,
+            "validation_fraction": 0.1,
+            "verbose": 0,
+            "warm_start": false
+          }
+        },
+        {
+          "name": "cat_trend_smooth",
+          "weight": 2.0,
+          "params": {
+            "iterations": 460,
+            "learning_rate": 0.04,
+            "depth": 6,
+            "l2_leaf_reg": 5.0,
+            "loss_function": "MultiClass",
+            "random_seed": 213,
+            "verbose": false,
+            "auto_class_weights": "Balanced",
+            "allow_writing_files": false
+          }
+        },
+        {
+          "name": "cat_trend_deep",
+          "weight": 2.0,
+          "params": {
+            "iterations": 340,
+            "learning_rate": 0.052,
+            "depth": 7,
+            "l2_leaf_reg": 8.0,
+            "loss_function": "MultiClass",
+            "random_seed": 214,
+            "verbose": false,
+            "auto_class_weights": "Balanced",
+            "allow_writing_files": false
+          }
+        }
+      ]
+    }
+  },
+  "governor": {
+    "report_out": "/home/llewyn/crypto-scalping/data/ensemble/reports/governor_causal_tide_timesnet_2026.json",
+    "pnl_pct": -21.60913409654932,
+    "mdd_pct": -26.714688612763716,
+    "trades": 18,
+    "win_rate_pct": 33.33333333333333,
+    "trades_per_day": 0.30680002367284137,
+    "sniper_entries": 3,
+    "trend_entries": 0,
+    "micro_entries": 15,
+    "trend_regime_entries": {
+      "bull": 0,
+      "bear": 0
+    },
+    "micro_regime_entries": {
+      "whipsaw": 0,
+      "normal": 14,
+      "chop": 1
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "selected_at_kst": "2026-05-29",
+  "selection_status": "main_regime3_pred_research_candidate",
+  "model_family": "regime3_pred_tft_vsn_wide24_current",
+  "selected_variant": "Docs48 all raw",
+  "artifact_dir": "data/ensemble/supervised/regime3_pred_tft_vsn_docs48all_wide24_current_cleanfunding_20260529",
+  "report": "data/ensemble/reports/regime3_pred_tft_vsn_docs48all_wide24_current_cleanfunding_20260529_report.json",
+  "script": "scripts/train_regime3_pred_tft_vsn_wide24_current_20260529.py",
+  "input_contract": {
+    "classes": ["bull", "bear", "chop"],
+    "current_prefix": "regime3_current_wide24_",
+    "pred_prefix": "regime3_pred_tft_h12_",
+    "feature_pack": "docs_regime_pred_all",
+    "forbidden_prefixes": [
+      "clean_regime_2024_unsup_v4_",
+      "clean_regime4_2024_unsup_v1_",
+      "clean_regime4_state24_sticky090_v2_",
+      "regime4_pred_"
+    ]
+  },
+  "selection_reason": {
+    "primary": "Best 2026 balanced accuracy and bull recall among tested clean Regime3 PRED variants.",
+    "validation_note": "Validation balanced accuracy is slightly below Docs40 stable, so this is an aggressive main research candidate, not a live-promoted sidecar."
+  },
+  "metrics": {
+    "validation_balanced_accuracy": 0.6746462315081169,
+    "validation_log_loss": 0.7497315449251246,
+    "validation_recall": {
+      "bull": 0.5877226955848179,
+      "bear": 0.7071210861734553,
+      "chop": 0.7290949127660776
+    },
+    "test_2026_balanced_accuracy": 0.6910886551441816,
+    "test_2026_log_loss": 0.7337760649054059,
+    "test_2026_recall": {
+      "bull": 0.6277324632952692,
+      "bear": 0.7012987012987013,
+      "chop": 0.7442348008385744
+    }
+  }
+}

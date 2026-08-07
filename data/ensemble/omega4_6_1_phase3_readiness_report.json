@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-07-07T12:35:07.366842",
+  "microstructure_gate": {
+    "ready": false,
+    "rows": 79658,
+    "range": [
+      "2026-05-03 17:36:00+09:00",
+      "2026-07-07 12:34:00+09:00"
+    ],
+    "total_span_months": 2.13,
+    "longest_contiguous_months": 0.48,
+    "target_contiguous_months": 4.0,
+    "note": "not ready: longest contiguous segment is 0.5 months, need 4.0; total span 2.1 months but has gaps"
+  },
+  "trade_count_gate": {
+    "ready": false,
+    "oos_baseline_trades": 24,
+    "live_closed_trades_since": 0,
+    "effective_trade_count": 24,
+    "target_trade_count": 48,
+    "note": "not ready: 24/48 trades (need 24 more live closed trades; run scripts/monitor_omega4_6_1_live_drift_20260707.py to refresh count)"
+  }
+}

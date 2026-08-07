@@ -1,0 +1,59 @@
+{
+  "alias": "alpha6_main_candidate",
+  "name": "alpha6_entry_quality_exit_5bucket_main_20260522",
+  "status": "active_alpha6_research_main_not_live_promoted",
+  "created_kst": "2026-05-22",
+  "contract": "docs/model_contracts/alpha6_entry_quality_exit_5bucket_main_20260522_contract.md",
+  "script": "scripts/alpha6_catboost_entry_quality_exit_policy_20260522.py",
+  "variant": "current_tail111",
+  "artifact_dir": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522",
+  "bundle": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522/current_tail111_bundle.joblib",
+  "summary": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522/current_tail111_summary.json",
+  "threshold_grid": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522/current_tail111_threshold_grid.csv",
+  "val_predictions": "data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522/current_tail111_val_predictions.csv",
+  "entry_threshold": 0.0034163351358086967,
+  "exit_threshold": 0.35,
+  "fixed_notional_eval_only": 0.25,
+  "target_bucket_mapping": {
+    "0": 6,
+    "1": 12,
+    "2": 24,
+    "3": 48,
+    "4": 96
+  },
+  "selected_backtest": {
+    "cost1": {
+      "pnl_pct": 15.296962572690598,
+      "mdd_pct": -4.807712060281455,
+      "trades": 61,
+      "win_rate": 0.7049180327868853
+    },
+    "cost2": {
+      "pnl_pct": 14.23872598420457,
+      "mdd_pct": -4.807174110015189,
+      "trades": 63,
+      "win_rate": 0.6825396825396826
+    },
+    "cost3": {
+      "pnl_pct": 12.044721436642503,
+      "mdd_pct": -4.8066362801213565,
+      "trades": 63,
+      "win_rate": 0.6507936507936508
+    }
+  },
+  "responsibility_boundary": {
+    "owns": [
+      "entry_action_alpha",
+      "entry_quality_alpha",
+      "target_horizon_bucket_alpha",
+      "position_aware_exit_alpha"
+    ],
+    "reserved_for_dsac_or_execution_layer": [
+      "dynamic_notional",
+      "stop_loss",
+      "take_profit",
+      "l2_placement",
+      "live_exchange_execution"
+    ]
+  }
+}

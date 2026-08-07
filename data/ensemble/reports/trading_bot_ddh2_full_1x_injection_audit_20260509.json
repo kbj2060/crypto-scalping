@@ -1,0 +1,68 @@
+{
+  "model_id": "ddh2_v22_1_sniper_trend_micro_full_1x_live_injection",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "upstream_audit_warning:v22_entries_ignored_portfolio_lock",
+    "upstream_audit_warning:eval_window_extends_beyond_available_v22_sniper_ledger",
+    "selection-risk: 2026 Full was used for iteration; shadow forward validation is required.",
+    "coverage-risk: V22 historical ledger ends near 2026-02-07; later Full trades are trend/micro fallback-heavy.",
+    "parity-risk: live V22 is recomputed from current features, not replayed from historical V22 ledger."
+  ],
+  "invariants": {
+    "py_compile_trading_bot": true,
+    "ddh2_default_enabled": true,
+    "legacy_layers_default_off": true,
+    "legacy_sniper_not_loaded_when_disabled": true,
+    "trend_micro_default_on": true,
+    "audited_report_required": true,
+    "ddh2_required_artifacts_fail_closed": true,
+    "ddh2_report_identity_checked": true,
+    "ddh2_report_audit_pair_checked": true,
+    "ddh2_full_1x_cost_tier_checked": true,
+    "ddh2_layer_toggles_checked": true,
+    "lifecycle_fallthrough": true,
+    "v22_1_lifecycle_entry_labeled_as_ddh2": true,
+    "v22_1_parent_sizing_preserved": true,
+    "fallback_dd": true,
+    "cost_gap_filters": true,
+    "raw_trend_micro_exits": true,
+    "report_config_exists": true,
+    "report_is_full_1x": true,
+    "cfg_trend_cost_gap_buffer": true,
+    "cfg_micro_cost_gap_buffer": true,
+    "cfg_fallback_account_dd_block": true,
+    "cfg_fallback_account_dd_release": true,
+    "cfg_micro_max_notional": true,
+    "cfg_trend_max_notional": true,
+    "upstream_audit_pass": true,
+    "runtime_load_smoke_pass": true,
+    "decision_smoke_pass": true
+  },
+  "runtime_smoke": {
+    "ddh2_enabled": true,
+    "audit_status": "pass",
+    "legacy_sniper_loaded": false,
+    "trend_max_notional": 5.0,
+    "micro_max_notional": 2.0,
+    "sample_action": 2,
+    "sample_exposure": 5.0,
+    "sample_fraction": 1.0,
+    "sample_exec_leverage": 5.0,
+    "sample_source": "v22_1_scout_param_grid|entry_core",
+    "sample_decision_logic": "ddh2_v22_1_sniper_trend_micro_full_1x",
+    "sample_sub_decision_logic": "deep_state_safe_cap_reallocator_v22_1_scout_param_grid"
+  },
+  "red_team_reaudit": {
+    "status": "pass",
+    "blocking": [],
+    "decision": "shadow_test_allowed",
+    "notes": [
+      "previous blocker ddh2 artifact soft-disable is fixed by fail-closed RuntimeError",
+      "legacy sniper actor is not loaded while DDH2 default disables legacy sniper",
+      "remaining risks are forward-shadow validation risks, not live-injection blockers"
+    ]
+  },
+  "report_path": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_1_sniper_trend5x_micro2x_firewall_t003_m010_chop08_ddfw_all15_12_cmult_t000_m030_mreg_w02_n01_c04_mtp035_tr015_txtp025_tr010_mes_age8_mfe005_stop008_c3only_tes_age4_mfe006_stop008_ddtier_c2_14_11_c3_13_10_finalcheck_full_1x_2026.json",
+  "audit_path": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_1_sniper_trend5x_micro2x_firewall_t003_m010_chop08_ddfw_all15_12_cmult_t000_m030_mreg_w02_n01_c04_mtp035_tr015_txtp025_tr010_mes_age8_mfe005_stop008_c3only_tes_age4_mfe006_stop008_ddtier_c2_14_11_c3_13_10_finalcheck_full_1x_2026_audit.json"
+}

@@ -1,0 +1,99 @@
+{
+  "model_id": "hf_v13_convex_runner_pyramid_v18_full2025fit_20260511",
+  "warning": "config selected by prior 2025 validation; runner utility head refit on full 2025 only; 2026 fixed OOS",
+  "selected_config": {
+    "name": "v18_pyr_6",
+    "pred_utility_threshold": 0.0015,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "add_frac": 0.25,
+    "max_total_mult": 1.35,
+    "dd_block": 0.3,
+    "max_entry_notional": 2.75
+  },
+  "runner_meta": {
+    "snapshot_count": 22266,
+    "target_mean": 0.022377147692167074,
+    "target_p75": 0.03557906331246166,
+    "target_p95": 0.07790459903326219
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 164.50230948383862,
+      "mdd": -33.7846613533027,
+      "trades": 84,
+      "wr": 0.17857142857142858,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 30,
+      "short_entries": 54,
+      "avg_notional": 2.5309277204949816,
+      "avg_leverage": 2.5960106229062867,
+      "action_counts": {
+        "cash": 12689,
+        "long": 30,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 69,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 30
+      }
+    },
+    "cost2": {
+      "pnl": 56.92521055879107,
+      "mdd": -41.79106154515991,
+      "trades": 91,
+      "wr": 0.16483516483516483,
+      "trades_per_day": 1.5511363636363638,
+      "long_entries": 34,
+      "short_entries": 57,
+      "avg_notional": 2.5167869608912325,
+      "avg_leverage": 2.580754426199111,
+      "action_counts": {
+        "cash": 12776,
+        "long": 34,
+        "short": 57
+      },
+      "exits": {
+        "learned_stop_loss": 76,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 31
+      }
+    },
+    "cost3": {
+      "pnl": -1.7234332809434316,
+      "mdd": -47.59322456818313,
+      "trades": 109,
+      "wr": 0.13761467889908258,
+      "trades_per_day": 1.8579545454545456,
+      "long_entries": 37,
+      "short_entries": 72,
+      "avg_notional": 2.5298976929832806,
+      "avg_leverage": 2.6357381963776727,
+      "action_counts": {
+        "cash": 12877,
+        "long": 37,
+        "short": 72
+      },
+      "exits": {
+        "learned_stop_loss": 94,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 23
+      }
+    }
+  },
+  "artifacts": {
+    "ledger": {
+      "cost1": "data/ensemble/reports/hf_v13_convex_runner_pyramid_v18_full2025fit_20260511_cost1_ledger.csv"
+    }
+  }
+}

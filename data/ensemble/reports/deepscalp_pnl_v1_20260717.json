@@ -1,0 +1,808 @@
+{
+  "model_id": "deepscalp_pnl_v1_20260717",
+  "model_family": "causal TCN-GRU discrete position policy with learned margin fraction",
+  "objective": "cost-adjusted log-equity maximization with CVaR/drawdown penalties and auxiliary distribution targets",
+  "execution_assumption": {
+    "fee_per_notional_change": 0.00045,
+    "low_cost_proxy_without_fill_model": false,
+    "actual_order_fill_events_available": false
+  },
+  "config": {
+    "seed": 17,
+    "window": 120,
+    "block": 64,
+    "burn_in": 8,
+    "leverage": 3.0,
+    "max_margin_fraction": 0.3,
+    "fee_per_notional": 0.00045,
+    "base_channels": 64,
+    "base_hidden": 96,
+    "micro_channels": 32,
+    "dropout": 0.1,
+    "pretrain_batch_size": 768,
+    "policy_batch_size": 8,
+    "pretrain_epochs": 4,
+    "policy_epochs": 16,
+    "pretrain_samples": 240000,
+    "pretrain_lr": 0.0003,
+    "policy_lr": 0.0002,
+    "weight_decay": 0.0001,
+    "grad_clip": 1.0,
+    "profit_scale": 10000.0,
+    "cvar_weight": 0.01,
+    "drawdown_weight": 0.02,
+    "auxiliary_weight": 0.05,
+    "pretrain_end": "2026-03-31 23:59:00",
+    "pretrain_val_end": "2026-04-30 23:59:00",
+    "micro_train_start": "2026-05-03 00:00:00",
+    "micro_train_end": "2026-06-20 23:59:00",
+    "validation_end": "2026-06-30 23:59:00",
+    "development_oos_end": "2026-07-12 09:00:00"
+  },
+  "device": "cuda",
+  "data": {
+    "source_signature": {
+      "cache_schema_version": 4,
+      "base_csv": {
+        "path": "/home/llewyn/crypto-scalping/data/training_features_1m.csv",
+        "size": 2804059953,
+        "mtime_ns": 1784137459807584358
+      },
+      "micro_db": {
+        "path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb",
+        "observed_size": 38285312
+      },
+      "base_features": [
+        "whale_retail_ratio",
+        "whale_conviction",
+        "smart_money_flow",
+        "squeeze_power",
+        "oi_change_rate",
+        "net_taker_ratio",
+        "taker_acceleration",
+        "trade_intensity",
+        "big_trade_ratio",
+        "log_return",
+        "volatility_z",
+        "rsi",
+        "macd_hist",
+        "bb_width_z",
+        "hma_slope",
+        "wick_ratio",
+        "garman_klass_vol",
+        "realized_vol_ratio",
+        "amihud_illiquidity_z",
+        "chop_index",
+        "hour_sin",
+        "hour_cos",
+        "minute_sin",
+        "minute_cos",
+        "cvp_poc_dist",
+        "cvp_volume_imbalance",
+        "mean_reversion_z",
+        "breakout_strength",
+        "funding_z_score",
+        "long_squeeze_risk",
+        "short_squeeze_risk",
+        "ofi_acceleration",
+        "kalman_velocity",
+        "realized_skewness",
+        "cvd_slope_12",
+        "cvd_slope_48",
+        "compression_score",
+        "vwap_dist_24",
+        "funding_oi_divergence",
+        "upper_wick_z",
+        "lower_wick_z",
+        "liquidity_vacuum",
+        "execution_quality"
+      ],
+      "micro_columns": [
+        "obi",
+        "taker_buy_ratio",
+        "nif_whale",
+        "nif_retail",
+        "oi_delta_pct",
+        "funding_rate",
+        "recent_trade_count_5m",
+        "recent_trade_notional_5m",
+        "recent_whale_count_5m",
+        "data_stale",
+        "depth_connected",
+        "trade_connected",
+        "poll_connected",
+        "depth_age_sec",
+        "trade_age_sec",
+        "poll_age_sec",
+        "valid_taker_flow",
+        "valid_nif",
+        "warmup_30m_ready"
+      ],
+      "book_columns": [
+        "spread_bps",
+        "microprice_edge_bps",
+        "imbalance_1",
+        "imbalance_5",
+        "imbalance_10",
+        "imbalance_20",
+        "bid_notional_1",
+        "ask_notional_1",
+        "bid_notional_5",
+        "ask_notional_5",
+        "bid_notional_10",
+        "ask_notional_10",
+        "bid_notional_20",
+        "ask_notional_20"
+      ],
+      "contract_sha256": "7d12fa98d1e59ca3c6d0a80f758cdf05b790ad1cca60535c40f550e241a489fa"
+    },
+    "base_feature_names": [
+      "bar_open_close_logret",
+      "bar_range_pct",
+      "log_volume",
+      "log_quote_volume",
+      "log_trade_count",
+      "bar_taker_buy_ratio",
+      "whale_retail_ratio",
+      "whale_conviction",
+      "smart_money_flow",
+      "squeeze_power",
+      "oi_change_rate",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "trade_intensity",
+      "big_trade_ratio",
+      "log_return",
+      "volatility_z",
+      "rsi",
+      "macd_hist",
+      "bb_width_z",
+      "hma_slope",
+      "wick_ratio",
+      "garman_klass_vol",
+      "realized_vol_ratio",
+      "amihud_illiquidity_z",
+      "chop_index",
+      "hour_sin",
+      "hour_cos",
+      "minute_sin",
+      "minute_cos",
+      "cvp_poc_dist",
+      "cvp_volume_imbalance",
+      "mean_reversion_z",
+      "breakout_strength",
+      "funding_z_score",
+      "long_squeeze_risk",
+      "short_squeeze_risk",
+      "ofi_acceleration",
+      "kalman_velocity",
+      "realized_skewness",
+      "cvd_slope_12",
+      "cvd_slope_48",
+      "compression_score",
+      "vwap_dist_24",
+      "funding_oi_divergence",
+      "upper_wick_z",
+      "lower_wick_z",
+      "liquidity_vacuum",
+      "execution_quality"
+    ],
+    "micro_feature_names": [
+      "micro_obi",
+      "micro_taker_buy_ratio",
+      "micro_nif_whale",
+      "micro_nif_retail",
+      "micro_oi_delta_pct",
+      "micro_funding_rate",
+      "micro_recent_trade_count_5m",
+      "micro_recent_trade_notional_5m",
+      "micro_recent_whale_count_5m",
+      "micro_data_stale",
+      "micro_depth_connected",
+      "micro_trade_connected",
+      "micro_poll_connected",
+      "micro_depth_age_sec",
+      "micro_trade_age_sec",
+      "micro_poll_age_sec",
+      "micro_valid_taker_flow",
+      "micro_valid_nif",
+      "micro_warmup_30m_ready",
+      "book_spread_bps",
+      "book_microprice_edge_bps",
+      "book_imbalance_1",
+      "book_imbalance_5",
+      "book_imbalance_10",
+      "book_imbalance_20",
+      "book_bid_notional_1",
+      "book_ask_notional_1",
+      "book_bid_notional_5",
+      "book_ask_notional_5",
+      "book_bid_notional_10",
+      "book_ask_notional_10",
+      "book_bid_notional_20",
+      "book_ask_notional_20",
+      "micro_available",
+      "book_available",
+      "micro_age_min",
+      "book_age_min"
+    ],
+    "aux_target_names": [
+      "ret_1m_bp",
+      "ret_2m_bp",
+      "ret_3m_bp",
+      "ret_5m_bp",
+      "mfe_5m_bp",
+      "mae_5m_bp",
+      "rv_5m_bp"
+    ],
+    "n_rows": 1329383,
+    "timestamp_min": "2024-01-01 00:00:00",
+    "timestamp_max": "2026-07-12 09:00:00",
+    "coverage": {
+      "micro_rows_read": 87034,
+      "book_rows_read": 9902,
+      "micro_coverage_after_start": 0.8609743341786641,
+      "book_coverage_after_start": 0.49321597379145654,
+      "usdc_usdt_mixed_without_symbol_feature": true
+    },
+    "duckdb_open_mode": "read_only",
+    "excluded_rule_inputs": [
+      "scalp_action",
+      "scalp_tp_move",
+      "scalp_sl_move",
+      "kelly_mult",
+      "signal_bias",
+      "eai",
+      "shadow_regime_tag",
+      "saved trade ledgers",
+      "saved exit timestamps",
+      "all BTC-derived features (source 5m candles are stamped at bar open and are not decision-time safe without a +5m availability shift)"
+    ],
+    "split_counts": {
+      "pretrain_windows": 1180697,
+      "pretrain_validation_windows": 43200,
+      "policy_train_blocks": 2204,
+      "validation_bars": 14400,
+      "development_oos_bars": 16376
+    }
+  },
+  "validation": {
+    "bars": 14400,
+    "days": 10,
+    "compounded_return_pct": 0.0,
+    "additive_net_return_pct": 0.0,
+    "additive_gross_return_pct": 0.0,
+    "max_drawdown_pct": 0.0,
+    "entries_or_reversals": 0,
+    "exits_or_reversals": 0,
+    "exposure_fraction": 0.0,
+    "average_margin_when_active": 0.0,
+    "turnover": 0.0,
+    "mean_daily_return_pct": 0.0,
+    "positive_day_fraction": 0.0,
+    "mean_daily_return_95pct_bootstrap_ci": [
+      0.0,
+      0.0
+    ],
+    "side_fraction": {
+      "SHORT": 0.0,
+      "CASH": 1.0,
+      "LONG": 0.0
+    }
+  },
+  "validation_cost_stress": {
+    "2.00bp_per_notional_change": {
+      "bars": 14400,
+      "days": 10,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "3.25bp_per_notional_change": {
+      "bars": 14400,
+      "days": 10,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "4.50bp_per_notional_change": {
+      "bars": 14400,
+      "days": 10,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "5.50bp_per_notional_change": {
+      "bars": 14400,
+      "days": 10,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    }
+  },
+  "development_oos": {
+    "bars": 16376,
+    "days": 12,
+    "compounded_return_pct": 0.0,
+    "additive_net_return_pct": 0.0,
+    "additive_gross_return_pct": 0.0,
+    "max_drawdown_pct": 0.0,
+    "entries_or_reversals": 0,
+    "exits_or_reversals": 0,
+    "exposure_fraction": 0.0,
+    "average_margin_when_active": 0.0,
+    "turnover": 0.0,
+    "mean_daily_return_pct": 0.0,
+    "positive_day_fraction": 0.0,
+    "mean_daily_return_95pct_bootstrap_ci": [
+      0.0,
+      0.0
+    ],
+    "side_fraction": {
+      "SHORT": 0.0,
+      "CASH": 1.0,
+      "LONG": 0.0
+    }
+  },
+  "development_oos_cost_stress": {
+    "2.00bp_per_notional_change": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "3.25bp_per_notional_change": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "4.50bp_per_notional_change": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "5.50bp_per_notional_change": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exits_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "average_margin_when_active": 0.0,
+      "turnover": 0.0,
+      "mean_daily_return_pct": 0.0,
+      "positive_day_fraction": 0.0,
+      "mean_daily_return_95pct_bootstrap_ci": [
+        0.0,
+        0.0
+      ],
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    }
+  },
+  "histories": {
+    "base_pretraining": [
+      {
+        "epoch": 1,
+        "train_loss": 0.5865402461621708,
+        "validation_loss": 0.3838189066886902
+      },
+      {
+        "epoch": 2,
+        "train_loss": 0.5795122186977643,
+        "validation_loss": 0.3832924329621451
+      },
+      {
+        "epoch": 3,
+        "train_loss": 0.5785451188635903,
+        "validation_loss": 0.3829986698150635
+      },
+      {
+        "epoch": 4,
+        "train_loss": 0.5779432610581858,
+        "validation_loss": 0.38283596420288085
+      }
+    ],
+    "policy_training": [
+      {
+        "epoch": 1,
+        "temperature": 1.0,
+        "action_mode": "soft",
+        "training_fee_per_notional": 0.0001125,
+        "train": {
+          "loss": 0.025590454845729728,
+          "negative_log_growth": 0.002425479667662111,
+          "cvar_loss": 0.07999471219955012,
+          "soft_drawdown": 2.670204401880071e-05,
+          "auxiliary_loss": 0.4472898744802544,
+          "mean_net_bp": -0.0024250998926974494,
+          "mean_turnover": 0.002489833447897041
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": 0.0,
+          "additive_net_return_pct": 0.0,
+          "additive_gross_return_pct": 0.0,
+          "max_drawdown_pct": 0.0,
+          "entries_or_reversals": 0,
+          "exits_or_reversals": 0,
+          "exposure_fraction": 0.0,
+          "average_margin_when_active": 0.0,
+          "turnover": 0.0,
+          "mean_daily_return_pct": 0.0,
+          "positive_day_fraction": 0.0,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            0.0,
+            0.0
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 1.0,
+            "LONG": 0.0
+          }
+        },
+        "validation_score": 0.0
+      },
+      {
+        "epoch": 2,
+        "temperature": 0.95,
+        "action_mode": "soft",
+        "training_fee_per_notional": 0.000225,
+        "train": {
+          "loss": 0.021377702925246263,
+          "negative_log_growth": -0.00045450765791580733,
+          "cvar_loss": 0.03813167194354152,
+          "soft_drawdown": 7.30372857356417e-06,
+          "auxiliary_loss": 0.42901494974891347,
+          "mean_net_bp": 0.0004564887973298733,
+          "mean_turnover": 0.00022280000926464024
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": 0.0,
+          "additive_net_return_pct": 0.0,
+          "additive_gross_return_pct": 0.0,
+          "max_drawdown_pct": 0.0,
+          "entries_or_reversals": 0,
+          "exits_or_reversals": 0,
+          "exposure_fraction": 0.0,
+          "average_margin_when_active": 0.0,
+          "turnover": 0.0,
+          "mean_daily_return_pct": 0.0,
+          "positive_day_fraction": 0.0,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            0.0,
+            0.0
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 1.0,
+            "LONG": 0.0
+          }
+        },
+        "validation_score": 0.0
+      },
+      {
+        "epoch": 3,
+        "temperature": 0.9,
+        "action_mode": "soft",
+        "training_fee_per_notional": 0.0003375,
+        "train": {
+          "loss": 0.01967176350940397,
+          "negative_log_growth": -0.00244134073469415,
+          "cvar_loss": 0.07759528970537771,
+          "soft_drawdown": 1.3194114401720572e-05,
+          "auxiliary_loss": 0.42673774214758387,
+          "mean_net_bp": 0.002449894662916357,
+          "mean_turnover": 0.0003912358672913388
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": -1.8310957853661658,
+          "additive_net_return_pct": -1.8370630095887464,
+          "additive_gross_return_pct": -1.0751842870377004,
+          "max_drawdown_pct": 2.4497511536763716,
+          "entries_or_reversals": 12,
+          "exits_or_reversals": 12,
+          "exposure_fraction": 0.0030555555555555557,
+          "average_margin_when_active": 0.20705975812267174,
+          "turnover": 16.930639266967773,
+          "mean_daily_return_pct": -0.1835340416649689,
+          "positive_day_fraction": 0.1,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            -0.004978079715852762,
+            0.0007579790010575182
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 0.9969444444444444,
+            "LONG": 0.0030555555555555557
+          }
+        },
+        "validation_score": -3.0559713622043514
+      },
+      {
+        "epoch": 4,
+        "temperature": 0.85,
+        "action_mode": "soft",
+        "training_fee_per_notional": 0.00045,
+        "train": {
+          "loss": 0.015034013436229872,
+          "negative_log_growth": -0.007392376954589634,
+          "cvar_loss": 0.10364152533741393,
+          "soft_drawdown": 1.9858145843381468e-05,
+          "auxiliary_loss": 0.4277915515113568,
+          "mean_net_bp": 0.0074250735560089315,
+          "mean_turnover": 0.0004951323349218185
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": -3.025168498667208,
+          "additive_net_return_pct": -3.0536675520124845,
+          "additive_gross_return_pct": -1.947404544443998,
+          "max_drawdown_pct": 3.567258000397877,
+          "entries_or_reversals": 17,
+          "exits_or_reversals": 17,
+          "exposure_fraction": 0.0033333333333333335,
+          "average_margin_when_active": 0.2513858576615651,
+          "turnover": 24.58362340927124,
+          "mean_daily_return_pct": -0.3028835096822369,
+          "positive_day_fraction": 0.2,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            -0.009219000298567103,
+            0.0012809343743314936
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 0.9966666666666667,
+            "LONG": 0.0033333333333333335
+          }
+        },
+        "validation_score": -4.808797498866147
+      },
+      {
+        "epoch": 5,
+        "temperature": 0.8,
+        "action_mode": "gumbel",
+        "training_fee_per_notional": 0.00045,
+        "train": {
+          "loss": 0.014805163412044445,
+          "negative_log_growth": -0.008054772515731822,
+          "cvar_loss": 0.15392847362807885,
+          "soft_drawdown": 3.690510124400042e-05,
+          "auxiliary_loss": 0.42639825244744617,
+          "mean_net_bp": 0.008107057208090355,
+          "mean_turnover": 0.0007575404238574871
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": -2.6028396231632223,
+          "additive_net_return_pct": -2.6226737560136826,
+          "additive_gross_return_pct": -1.5741164574137656,
+          "max_drawdown_pct": 2.682674661918927,
+          "entries_or_reversals": 16,
+          "exits_or_reversals": 16,
+          "exposure_fraction": 0.003611111111111111,
+          "average_margin_when_active": 0.2056990179878015,
+          "turnover": 23.301274061203003,
+          "mean_daily_return_pct": -0.26124437718156646,
+          "positive_day_fraction": 0.2,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            -0.006879383623323698,
+            0.0013340216976616248
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 0.9963888888888889,
+            "LONG": 0.003611111111111111
+          }
+        },
+        "validation_score": -3.9441769541226854
+      },
+      {
+        "epoch": 6,
+        "temperature": 0.75,
+        "action_mode": "gumbel",
+        "training_fee_per_notional": 0.00045,
+        "train": {
+          "loss": 0.021678200356014397,
+          "negative_log_growth": -0.003806721534036681,
+          "cvar_loss": 0.4102583036098319,
+          "soft_drawdown": 7.405156350654104e-05,
+          "auxiliary_loss": 0.4276171508582606,
+          "mean_net_bp": 0.003875256481851762,
+          "mean_turnover": 0.0010790742738297763
+        },
+        "validation": {
+          "bars": 14400,
+          "days": 10,
+          "compounded_return_pct": -0.004294584226915976,
+          "additive_net_return_pct": -0.0030028797482373193,
+          "additive_gross_return_pct": 0.17373362788930535,
+          "max_drawdown_pct": 0.5418765602716369,
+          "entries_or_reversals": 3,
+          "exits_or_reversals": 3,
+          "exposure_fraction": 0.0009027777777777777,
+          "average_margin_when_active": 0.10073855920479848,
+          "turnover": 3.927477888762951,
+          "mean_daily_return_pct": -0.0004294584226915976,
+          "positive_day_fraction": 0.0,
+          "mean_daily_return_95pct_bootstrap_ci": [
+            -1.2883752680747929e-05,
+            0.0
+          ],
+          "side_fraction": {
+            "SHORT": 0.0,
+            "CASH": 0.9990972222222222,
+            "LONG": 0.0009027777777777777
+          }
+        },
+        "validation_score": -0.2752328643627344
+      }
+    ]
+  },
+  "legacy_reference_only_not_same_accounting": {
+    "hgb_maker_triple_barrier_additive_total_pnl_pct": 3.7390646402123644,
+    "gru_maker_triple_barrier_additive_total_pnl_pct": 3.601387173683871,
+    "warning": "legacy models use overlapping triple-barrier trades and additive trade PnL; compare directionally, not as portfolio-equivalent returns"
+  },
+  "artifacts": {
+    "checkpoint": "/home/llewyn/crypto-scalping/data/ensemble/deepscalp_pnl_v1_20260717/model.pt",
+    "scalers": "/home/llewyn/crypto-scalping/data/ensemble/deepscalp_pnl_v1_20260717/scalers.json",
+    "development_oos_diagnostic_ledger": "/home/llewyn/crypto-scalping/data/ensemble/deepscalp_pnl_v1_20260717/development_oos_policy_ledger.csv"
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "triple_barrier_labels_used": false,
+    "fixed_entry_threshold_used": false,
+    "fixed_tp_sl_used": false,
+    "fixed_holding_period_used": false,
+    "duckdb_opened_read_only": true,
+    "usdc_usdt_orderbook_mixed": true,
+    "leverage": 3.0,
+    "notional_formula": "signed_notional = side * margin_fraction * leverage"
+  },
+  "promotion": {
+    "promotion_pass": false,
+    "reason": "No profitable active policy survived validation; the selected network is the degenerate all-CASH policy.",
+    "next_untouched_start": "after model freeze at 2026-07-17"
+  }
+}

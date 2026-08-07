@@ -1,0 +1,10 @@
+{
+  "schema_version": "architecture_feature_analysis_v1",
+  "experiment_id": "btc-1h-swing-native-entry-20260807",
+  "preflight_dataset_sha256": "50df33320d728e83b2cb91bf706ff95e41aaf4752efa9c49319458f29436398a",
+  "feature_count": 48,
+  "numeric_feature_count": 48,
+  "constant_feature_count": 0,
+  "exact_duplicate_numeric_feature_pairs": [],
+  "high_correlation_pairs_abs_ge_0_98": 6
+}

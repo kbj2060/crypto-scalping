@@ -1,0 +1,18 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [],
+  "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_repro_20260511/v13_clean_regime_h288.pkl",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "selected_on": "2025-10-01..2025-12-31 validation only",
+  "oos": "2026 fixed",
+  "selected_gate": {
+    "quality_min": 0.06,
+    "confidence_min": 0.68,
+    "transition_max": 0.7,
+    "risk_off_max": 0.85,
+    "min_notional": 1.2
+  },
+  "verdict": "iterate"
+}

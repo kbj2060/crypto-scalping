@@ -1,0 +1,165 @@
+{
+  "experiment": "pure_eth_threshold_sweep_causal",
+  "n_features": 104,
+  "val_sweep": [
+    {
+      "threshold": 0.34,
+      "n_signals": 10053,
+      "n_filled": 8746,
+      "fill_rate": 0.869989057992639,
+      "hit_rate": 0.3861193688543334,
+      "avg_pnl_pct": -0.0007367369358684377,
+      "total_pnl_pct": -6.4435012411053565
+    },
+    {
+      "threshold": 0.38,
+      "n_signals": 5175,
+      "n_filled": 4592,
+      "fill_rate": 0.8873429951690821,
+      "hit_rate": 0.39939024390243905,
+      "avg_pnl_pct": -0.0007608785525448152,
+      "total_pnl_pct": -3.4939543132857915
+    },
+    {
+      "threshold": 0.4,
+      "n_signals": 4021,
+      "n_filled": 3583,
+      "fill_rate": 0.8910718726684904,
+      "hit_rate": 0.4044097125313983,
+      "avg_pnl_pct": -0.0007706814948759452,
+      "total_pnl_pct": -2.7613517961405116
+    },
+    {
+      "threshold": 0.42,
+      "n_signals": 2526,
+      "n_filled": 2268,
+      "fill_rate": 0.8978622327790974,
+      "hit_rate": 0.3985890652557319,
+      "avg_pnl_pct": -0.0008208367339836959,
+      "total_pnl_pct": -1.8616577126750222
+    },
+    {
+      "threshold": 0.45,
+      "n_signals": 305,
+      "n_filled": 271,
+      "fill_rate": 0.8885245901639345,
+      "hit_rate": 0.3948339483394834,
+      "avg_pnl_pct": -0.0008093178913207237,
+      "total_pnl_pct": -0.2193251485479161
+    },
+    {
+      "threshold": 0.48,
+      "n_signals": 24,
+      "n_filled": 23,
+      "fill_rate": 0.9583333333333334,
+      "hit_rate": 0.5217391304347826,
+      "avg_pnl_pct": -0.00035776626843081304,
+      "total_pnl_pct": -0.0082286241739087
+    },
+    {
+      "threshold": 0.5,
+      "n_signals": 2,
+      "n_filled": 2,
+      "fill_rate": 1.0,
+      "hit_rate": 1.0,
+      "avg_pnl_pct": 0.00114791028596585,
+      "total_pnl_pct": 0.0022958205719317
+    },
+    {
+      "threshold": 0.52,
+      "n_signals": 1,
+      "n_filled": 1,
+      "fill_rate": 1.0,
+      "hit_rate": 1.0,
+      "avg_pnl_pct": 0.0008500000000000001,
+      "total_pnl_pct": 0.0008500000000000001
+    },
+    {
+      "threshold": 0.55,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.6,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.65,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.7,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.75,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.8,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.85,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    },
+    {
+      "threshold": 0.9,
+      "n_signals": 0,
+      "n_filled": 0,
+      "fill_rate": null,
+      "hit_rate": null,
+      "avg_pnl_pct": null,
+      "total_pnl_pct": null
+    }
+  ],
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "best_val_threshold": 0.48,
+  "oos_at_chosen_threshold": {
+    "n_signals": 94,
+    "n_filled": 86,
+    "fill_rate": 0.9148936170212766,
+    "hit_rate": 0.4418604651162791,
+    "avg_pnl_pct": -0.00031319647057624183,
+    "total_pnl_pct": -0.026934896469556796
+  }
+}

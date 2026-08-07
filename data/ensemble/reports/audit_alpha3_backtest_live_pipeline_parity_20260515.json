@@ -1,0 +1,2777 @@
+{
+  "model_id": "audit_alpha3_backtest_live_pipeline_parity_20260515",
+  "created_at": "2026-05-15T17:46:54.440772+09:00",
+  "verdict": "schema_parity_pass_value_parity_not_provable",
+  "blocking": [],
+  "warnings": [
+    "live_processed_tail_has_high_nan_ratio_even_if_last_row_is_clean"
+  ],
+  "backtest_contracts": {
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "eval_csv_stats": {
+      "rows": 16897,
+      "cols": 206,
+      "first_ts": "2026-01-01 00:00:00",
+      "last_ts": "2026-02-28 16:00:00",
+      "duplicate_timestamps": 0,
+      "median_gap_sec": 300.0,
+      "bad_5m_gaps": 0,
+      "numeric_cols": 205,
+      "last_nan": 0,
+      "last_inf": 0,
+      "tail_nan_ratio": 0.0
+    },
+    "eval_after_regime_stats": {
+      "rows": 16897,
+      "cols": 211,
+      "first_ts": "2026-01-01 00:00:00",
+      "last_ts": "2026-02-28 16:00:00",
+      "duplicate_timestamps": 0,
+      "median_gap_sec": 300.0,
+      "bad_5m_gaps": 0,
+      "numeric_cols": 210,
+      "last_nan": 0,
+      "last_inf": 0,
+      "tail_nan_ratio": 0.0
+    },
+    "parent_feature_contract": {
+      "required": 93,
+      "missing_count": 0,
+      "missing_cols": [],
+      "last_nonfinite_count": 0,
+      "last_nonfinite_cols": []
+    },
+    "v27_sequence_contract": {
+      "required": 80,
+      "missing_count": 0,
+      "missing_cols": [],
+      "last_nonfinite_count": 0,
+      "last_nonfinite_cols": []
+    },
+    "teacher_sequence_contract": {
+      "required": 0,
+      "missing_count": 0,
+      "missing_cols": [],
+      "last_nonfinite_count": 0,
+      "last_nonfinite_cols": []
+    },
+    "ai_feature_contract": {
+      "required": 20,
+      "missing_count": 0,
+      "missing_cols": [],
+      "last_nonfinite_count": 0,
+      "last_nonfinite_cols": []
+    },
+    "execution_contract": {
+      "backtest_limit_cfg": {
+        "name": "alpha3_current_live_touch0_skip_entry_exit_fallback",
+        "anchor": "next_open",
+        "entry_offset_bps": 0.0,
+        "exit_offset_bps": 0.0,
+        "penetration_bps": 0.0,
+        "maker_fee_mult": 0.2,
+        "entry_miss": "skip",
+        "exit_miss": "market_fallback"
+      },
+      "fill_contract": "optimistic_immediate_limit_touch0_on_5m_ohlc_proxy",
+      "bar_contract": "signal_i_fills_next_bar_open_or_limit_proxy"
+    }
+  },
+  "live_contracts": {
+    "health_path": "/home/llewyn/crypto-scalping/data/live/data_pipeline_health.json",
+    "health_age_sec": 106.015375,
+    "health_status": "OK",
+    "health_warnings": [],
+    "bar_contract": "signal_close_next_open",
+    "raw_eth": {
+      "rows": 7000,
+      "last_ts": "2026-05-15 17:40:00",
+      "age_sec": 308.381481,
+      "last_gap_sec": 300.0,
+      "dup_ts": 0
+    },
+    "processed": {
+      "rows": 1200,
+      "last_ts": "2026-05-15 17:40:00",
+      "age_sec": 308.386259,
+      "last_gap_sec": 300.0,
+      "dup_ts": 0
+    },
+    "quality": {
+      "last_nan": 0,
+      "last_inf": 0,
+      "tail_nan_ratio": 0.3814102564102564,
+      "numeric_cols": 234
+    },
+    "ai": {
+      "groups": [
+        "patchtst",
+        "tide",
+        "dlinear"
+      ],
+      "missing_cols": [],
+      "missing_count": 0,
+      "nonfinite_cols": [],
+      "nonfinite_count": 0,
+      "zero_cols": [
+        "ai_flow_slope",
+        "dlinear_smf_slope",
+        "tide_vol_zscore"
+      ],
+      "zero_count": 3,
+      "errors": [],
+      "timing": {
+        "predict_all": {
+          "sec": 0.9504604249959812,
+          "models": [
+            {
+              "model": "PatchTST",
+              "sec": 0.947650939997402,
+              "cache_hit": false,
+              "status": "live"
+            }
+          ],
+          "frame_key": [
+            1200,
+            "2026-05-15 08:40:00",
+            2256.64
+          ]
+        },
+        "best_ai_features": {
+          "sec": 1.869318505996489,
+          "groups": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "sec": 0.00370635099534411,
+              "cache_hit": true,
+              "status": "live"
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "sec": 0.9682508849946316,
+              "cache_hit": false,
+              "status": "live"
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "sec": 0.897336483001709,
+              "cache_hit": false,
+              "status": "live"
+            }
+          ],
+          "frame_key": [
+            1200,
+            "2026-05-15 08:40:00",
+            2256.64
+          ]
+        }
+      },
+      "trace_tail": [
+        {
+          "group": "patchtst",
+          "model": "PatchTST",
+          "status": "live",
+          "cols": [
+            "ai_dir_edge",
+            "ai_dir_entropy",
+            "ai_dir_p_down",
+            "ai_dir_p_flat",
+            "ai_dir_p_up",
+            "patchtst_median",
+            "patchtst_regime_sim"
+          ],
+          "cache_hit": true
+        },
+        {
+          "group": "tide",
+          "model": "TiDE",
+          "status": "live",
+          "cols": [
+            "ai_adverse_risk",
+            "ai_reward_risk",
+            "ai_vol_regime_pct",
+            "tide_vol_raw",
+            "tide_vol_zscore"
+          ],
+          "cache_hit": false
+        },
+        {
+          "group": "dlinear",
+          "model": "DLinear",
+          "status": "live",
+          "cols": [
+            "ai_flow_exhaustion",
+            "ai_flow_flip_prob",
+            "ai_flow_pressure",
+            "ai_flow_slope",
+            "dlinear_smf_ema",
+            "dlinear_smf_slope"
+          ],
+          "cache_hit": false
+        }
+      ]
+    },
+    "v31": {
+      "seq_col_count": 80,
+      "missing_seq_cols": [],
+      "missing_seq_count": 0,
+      "nonfinite_seq_cols": [],
+      "nonfinite_seq_count": 0,
+      "q_long": 0.0162815260887146,
+      "q_short": -0.017029326409101486,
+      "edge": 0.0,
+      "margin": 0.0,
+      "selected_side": "LONG",
+      "pass_gate": false
+    },
+    "alpha2_1": {
+      "parent_action": 0,
+      "parent_side": 0,
+      "teacher_pred_action": 0,
+      "teacher_confidence": 0.0,
+      "teacher_quality": 0.0,
+      "keep_parent": false,
+      "reason": ""
+    },
+    "regime": {
+      "raw": "normal",
+      "raw_values": {
+        "bull": 0.0,
+        "bear": 0.0,
+        "chop": 0.0,
+        "whipsaw": 0.0,
+        "normal": 1.0
+      },
+      "clean_enabled": true,
+      "clean_confidence": 0.24949322948418112,
+      "clean_transition_risk": 0.5131817877818075,
+      "clean_missing_input_col_count": 0
+    },
+    "decision": {
+      "action": 1,
+      "source": "alpha2_1|lifecycle_v1|hold",
+      "position_signal": "HOLD",
+      "position_reason": "v31_deep_alpha_hold",
+      "score": 0.0,
+      "conviction": 0.0
+    },
+    "decision_feature_snapshot": {
+      "path": "/home/llewyn/crypto-scalping/data/live/decision_feature_snapshot.json",
+      "exists": true,
+      "age_sec": 106.010326,
+      "timestamp": "2026-05-15 08:40:00",
+      "row_count": 1200,
+      "column_count": 235,
+      "feature_hash_sha256": "ab757184098c8353a6b88efeddac49791dadc05159fe5a012456bed35896867e",
+      "decision": {
+        "action": 1,
+        "source": "alpha2_1|lifecycle_v1|hold",
+        "position_signal": "HOLD",
+        "position_reason": "v31_deep_alpha_hold",
+        "score": 0.0,
+        "conviction": 0.0
+      },
+      "health_summary_status": "OK",
+      "v27_sequence_contract": {
+        "required": 80,
+        "missing_count": 0,
+        "missing_cols": [],
+        "last_nonfinite_count": 0,
+        "last_nonfinite_cols": []
+      },
+      "teacher_sequence_contract": {},
+      "ai_feature_contract": {
+        "required": 20,
+        "missing_count": 0,
+        "missing_cols": [],
+        "last_nonfinite_count": 0,
+        "last_nonfinite_cols": []
+      }
+    },
+    "recent_log_flags": {
+      "exists": true,
+      "has_redteam_block_after_recent_restart": false,
+      "has_v31_on": true,
+      "has_alpha2_on": true,
+      "has_governor_ready": true,
+      "last_pipe_line": "2026-05-15 17:45:08,465 - INFO - [PIPE] OK raw=7000 proc=1200 tail=2500 age=5.1m gap=5.0m align=OK pxΔ=0.00bp | feat nan=0 inf=0 missAI=0 nfAI=0 zeroAI=3 v31miss=0 v31nf=0 | reg=NORMAL clean(conf=0.25,tr=0.51,miss=0) | a2 parent=HOLD teacher=HOLD conf=0.00 keep=False | v31 side=LONG pass=False edge=0.0000 margin=0.0000 | action=LONG src=alpha2_1|lifecycle_v1|hold reason=v31_deep_alpha_hold warn=-",
+      "last_ai_line": "2026-05-15 17:45:08,725 - INFO - [AI] 17:45 px=2,256.64 regime=NORMAL action=LONG signal=LONG pos=LONG trans=HOLD_LONG exp=2.00 frac=1.00 lev=2.00x | owner=lifecycle_v1 sleeve=alpha2_1|lifecycle_v1|hold | trend U/D/F=53/47/0 score=+0.000 conv=0.000 | reason=v31_deep_alpha_hold unrl=-0.67% | reg45=->- conf=0.25 alpha2_1|lifecycle_v1|hold"
+    },
+    "health_tail": [
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T16:50:07.095566+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:45:00",
+          "age_sec": 307.088858,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:45:00",
+          "age_sec": 307.091675,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:45:00",
+          "age_sec": 307.092403,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:45:00",
+          "age_sec": 307.093171,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 16:45:00",
+        "execution_bar_kst": "2026-05-15 16:45:00",
+        "processed_last_kst": "2026-05-15 16:45:00",
+        "signal_align_ok": true,
+        "decision_price": 2266.36,
+        "execution_price": 2266.36,
+        "processed_close": 2266.36,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.8316213579964824,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.8292881329980446,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:45:00",
+                2266.36
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.6281744000007166,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.002965512001537718,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.8165637039928697,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8086216869996861,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:45:00",
+                2266.36
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "normal",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 0.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 1.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24893816443049285,
+          "clean_transition_risk": 0.4170620074423029,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T16:55:08.805451+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:50:00",
+          "age_sec": 308.798124,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:50:00",
+          "age_sec": 308.801043,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:50:00",
+          "age_sec": 308.801905,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:50:00",
+          "age_sec": 308.802675,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 16:50:00",
+        "execution_bar_kst": "2026-05-15 16:50:00",
+        "processed_last_kst": "2026-05-15 16:50:00",
+        "signal_align_ok": true,
+        "decision_price": 2264.73,
+        "execution_price": 2264.73,
+        "processed_close": 2264.73,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.9276743230002467,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.9250972989975708,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:50:00",
+                2264.73
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.8371000119950622,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.0032195829990087077,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9390461120055988,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.894807997989119,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:50:00",
+                2264.73
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "normal",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 0.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 1.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24678719241384034,
+          "clean_transition_risk": 0.47586465973962644,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:00:08.011805+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:55:00",
+          "age_sec": 308.00495,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 16:55:00",
+          "age_sec": 308.007413,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:55:00",
+          "age_sec": 308.008181,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 16:55:00",
+          "age_sec": 308.008892,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 16:55:00",
+        "execution_bar_kst": "2026-05-15 16:55:00",
+        "processed_last_kst": "2026-05-15 16:55:00",
+        "signal_align_ok": true,
+        "decision_price": 2265.29,
+        "execution_price": 2265.29,
+        "processed_close": 2265.29,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 1.2596203110006172,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 1.2567546070058597,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:55:00",
+                2265.29
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.8112928490008926,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.00505029599298723,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9451315370097291,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8610656550008571,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 07:55:00",
+                2265.29
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "normal",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 0.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 1.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24501519298755048,
+          "clean_transition_risk": 0.484751831038479,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:05:07.458370+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:00:00",
+          "age_sec": 307.451133,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:00:00",
+          "age_sec": 307.454,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:00:00",
+          "age_sec": 307.454789,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:00:00",
+          "age_sec": 307.455525,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:00:00",
+        "execution_bar_kst": "2026-05-15 17:00:00",
+        "processed_last_kst": "2026-05-15 17:00:00",
+        "signal_align_ok": true,
+        "decision_price": 2259.46,
+        "execution_price": 2259.46,
+        "processed_close": 2259.46,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.8955023890011944,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.8927160300081596,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:00:00",
+                2259.46
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.7287384689989267,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.003348895988892764,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.8689285869913874,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8564383839984657,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:00:00",
+                2259.46
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24302992519624025,
+          "clean_transition_risk": 0.48407121510857193,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:10:07.433644+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:05:00",
+          "age_sec": 307.426912,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:05:00",
+          "age_sec": 307.429592,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:05:00",
+          "age_sec": 307.430436,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:05:00",
+          "age_sec": 307.431153,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:05:00",
+        "execution_bar_kst": "2026-05-15 17:05:00",
+        "processed_last_kst": "2026-05-15 17:05:00",
+        "signal_align_ok": true,
+        "decision_price": 2259.08,
+        "execution_price": 2259.08,
+        "processed_close": 2259.08,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.8913937869947404,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.8888510039978428,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:05:00",
+                2259.08
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.742789433003054,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.0030124320037430152,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.8754627570015145,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8642896950041177,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:05:00",
+                2259.08
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.246447650156541,
+          "clean_transition_risk": 0.4677080750271958,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:15:07.907508+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:10:00",
+          "age_sec": 307.900498,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:10:00",
+          "age_sec": 307.903189,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:10:00",
+          "age_sec": 307.903985,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:10:00",
+          "age_sec": 307.90495,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:10:00",
+        "execution_bar_kst": "2026-05-15 17:10:00",
+        "processed_last_kst": "2026-05-15 17:10:00",
+        "signal_align_ok": true,
+        "decision_price": 2257.89,
+        "execution_price": 2257.89,
+        "processed_close": 2257.89,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 1.1556161010084907,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 1.1528281020000577,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:10:00",
+                2257.89
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.8398564950039145,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.003230336995329708,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9323192960000597,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.9042817220033612,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:10:00",
+                2257.89
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.2460801558453818,
+          "clean_transition_risk": 0.4467018941073868,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:20:07.777711+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 7.769389,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 6999,
+          "last_ts": "2026-05-15 17:15:00",
+          "age_sec": 307.772401,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 7.773302,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1199,
+          "last_ts": "2026-05-15 17:15:00",
+          "age_sec": 307.774147,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:15:00",
+        "execution_bar_kst": "2026-05-15 17:20:00",
+        "processed_last_kst": "2026-05-15 17:15:00",
+        "signal_align_ok": true,
+        "decision_price": 2255.87,
+        "execution_price": 2255.86,
+        "processed_close": 2255.87,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.9156319470057497,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.9132205049972981,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1199,
+                "2026-05-15 08:15:00",
+                2255.87
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.88684794800065,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.0031151860021054745,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9503293260058854,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.9333806789945811,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1199,
+                "2026-05-15 08:15:00",
+                2255.87
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.246708972206613,
+          "clean_transition_risk": 0.4293937837106361,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:25:08.532355+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 308.525124,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 308.528168,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 308.528983,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:20:00",
+          "age_sec": 308.529761,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:20:00",
+        "execution_bar_kst": "2026-05-15 17:20:00",
+        "processed_last_kst": "2026-05-15 17:20:00",
+        "signal_align_ok": true,
+        "decision_price": 2255.73,
+        "execution_price": 2255.73,
+        "processed_close": 2255.73,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.8332954850047827,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.8309025459893746,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:20:00",
+                2255.73
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.6710213289916283,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.0029752870032098144,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.8419720429956215,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8260500049946131,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:20:00",
+                2255.73
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.26167801117200795,
+          "clean_transition_risk": 0.4489286168201591,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:30:07.985660+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:25:00",
+          "age_sec": 307.975894,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:25:00",
+          "age_sec": 307.979551,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:25:00",
+          "age_sec": 307.980764,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:25:00",
+          "age_sec": 307.982264,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:25:00",
+        "execution_bar_kst": "2026-05-15 17:25:00",
+        "processed_last_kst": "2026-05-15 17:25:00",
+        "signal_align_ok": true,
+        "decision_price": 2252.83,
+        "execution_price": 2252.83,
+        "processed_close": 2252.83,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.963624048003112,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.9612062119995244,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:25:00",
+                2252.83
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.7726365910057211,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.003403462003916502,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.8896326989925001,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.8795694290020037,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:25:00",
+                2252.83
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24549858312928066,
+          "clean_transition_risk": 0.3745700777426335,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:35:07.953194+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:30:00",
+          "age_sec": 307.944539,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:30:00",
+          "age_sec": 307.948462,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:30:00",
+          "age_sec": 307.949508,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:30:00",
+          "age_sec": 307.950492,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:30:00",
+        "execution_bar_kst": "2026-05-15 17:30:00",
+        "processed_last_kst": "2026-05-15 17:30:00",
+        "signal_align_ok": true,
+        "decision_price": 2254.57,
+        "execution_price": 2254.57,
+        "processed_close": 2254.57,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.9657485520001501,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.9627937879995443,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:30:00",
+                2254.57
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.9164491400006227,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.004461789998458698,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9491066969931126,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.9628493019990856,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:30:00",
+                2254.57
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.2525771393358031,
+          "clean_transition_risk": 0.5160921851030533,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:40:08.327276+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:35:00",
+          "age_sec": 308.318726,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:35:00",
+          "age_sec": 308.322231,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:35:00",
+          "age_sec": 308.323228,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:35:00",
+          "age_sec": 308.324141,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:35:00",
+        "execution_bar_kst": "2026-05-15 17:35:00",
+        "processed_last_kst": "2026-05-15 17:35:00",
+        "signal_align_ok": true,
+        "decision_price": 2255.18,
+        "execution_price": 2255.18,
+        "processed_close": 2255.18,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.9178294950106647,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.9147553389921086,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:35:00",
+                2255.18
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.9163729789870558,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.0030276869947556406,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9666475630074274,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.9466727649996756,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:35:00",
+                2255.18
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "bear",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 1.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 0.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24506131820344534,
+          "clean_transition_risk": 0.47497775189081903,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      },
+      {
+        "schema_version": "live.data_pipeline_health.v1",
+        "updated_at": "2026-05-15T17:45:08.388861+09:00",
+        "status": "OK",
+        "warnings": [],
+        "bar_contract": "signal_close_next_open",
+        "raw_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:40:00",
+          "age_sec": 308.381481,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "signal_eth": {
+          "rows": 7000,
+          "last_ts": "2026-05-15 17:40:00",
+          "age_sec": 308.384724,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "raw_processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:40:00",
+          "age_sec": 308.385539,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "processed": {
+          "rows": 1200,
+          "last_ts": "2026-05-15 17:40:00",
+          "age_sec": 308.386259,
+          "last_gap_sec": 300.0,
+          "dup_ts": 0
+        },
+        "quality": {
+          "last_nan": 0,
+          "last_inf": 0,
+          "tail_nan_ratio": 0.3814102564102564,
+          "numeric_cols": 234
+        },
+        "signal_bar_kst": "2026-05-15 17:40:00",
+        "execution_bar_kst": "2026-05-15 17:40:00",
+        "processed_last_kst": "2026-05-15 17:40:00",
+        "signal_align_ok": true,
+        "decision_price": 2256.64,
+        "execution_price": 2256.64,
+        "processed_close": 2256.64,
+        "price_diff_bps": 0.0,
+        "missing_ohlcv_cols": [],
+        "ai": {
+          "groups": [
+            "patchtst",
+            "tide",
+            "dlinear"
+          ],
+          "missing_cols": [],
+          "missing_count": 0,
+          "nonfinite_cols": [],
+          "nonfinite_count": 0,
+          "zero_cols": [
+            "ai_flow_slope",
+            "dlinear_smf_slope",
+            "tide_vol_zscore"
+          ],
+          "zero_count": 3,
+          "errors": [],
+          "timing": {
+            "predict_all": {
+              "sec": 0.9504604249959812,
+              "models": [
+                {
+                  "model": "PatchTST",
+                  "sec": 0.947650939997402,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:40:00",
+                2256.64
+              ]
+            },
+            "best_ai_features": {
+              "sec": 1.869318505996489,
+              "groups": [
+                {
+                  "group": "patchtst",
+                  "model": "PatchTST",
+                  "sec": 0.00370635099534411,
+                  "cache_hit": true,
+                  "status": "live"
+                },
+                {
+                  "group": "tide",
+                  "model": "TiDE",
+                  "sec": 0.9682508849946316,
+                  "cache_hit": false,
+                  "status": "live"
+                },
+                {
+                  "group": "dlinear",
+                  "model": "DLinear",
+                  "sec": 0.897336483001709,
+                  "cache_hit": false,
+                  "status": "live"
+                }
+              ],
+              "frame_key": [
+                1200,
+                "2026-05-15 08:40:00",
+                2256.64
+              ]
+            }
+          },
+          "trace_tail": [
+            {
+              "group": "patchtst",
+              "model": "PatchTST",
+              "status": "live",
+              "cols": [
+                "ai_dir_edge",
+                "ai_dir_entropy",
+                "ai_dir_p_down",
+                "ai_dir_p_flat",
+                "ai_dir_p_up",
+                "patchtst_median",
+                "patchtst_regime_sim"
+              ],
+              "cache_hit": true
+            },
+            {
+              "group": "tide",
+              "model": "TiDE",
+              "status": "live",
+              "cols": [
+                "ai_adverse_risk",
+                "ai_reward_risk",
+                "ai_vol_regime_pct",
+                "tide_vol_raw",
+                "tide_vol_zscore"
+              ],
+              "cache_hit": false
+            },
+            {
+              "group": "dlinear",
+              "model": "DLinear",
+              "status": "live",
+              "cols": [
+                "ai_flow_exhaustion",
+                "ai_flow_flip_prob",
+                "ai_flow_pressure",
+                "ai_flow_slope",
+                "dlinear_smf_ema",
+                "dlinear_smf_slope"
+              ],
+              "cache_hit": false
+            }
+          ]
+        },
+        "v31": {
+          "seq_col_count": 80,
+          "missing_seq_cols": [],
+          "missing_seq_count": 0,
+          "nonfinite_seq_cols": [],
+          "nonfinite_seq_count": 0,
+          "q_long": 0.0162815260887146,
+          "q_short": -0.017029326409101486,
+          "edge": 0.0,
+          "margin": 0.0,
+          "selected_side": "LONG",
+          "pass_gate": false
+        },
+        "alpha2_1": {
+          "parent_action": 0,
+          "parent_side": 0,
+          "teacher_pred_action": 0,
+          "teacher_confidence": 0.0,
+          "teacher_quality": 0.0,
+          "keep_parent": false,
+          "reason": ""
+        },
+        "regime": {
+          "raw": "normal",
+          "raw_values": {
+            "bull": 0.0,
+            "bear": 0.0,
+            "chop": 0.0,
+            "whipsaw": 0.0,
+            "normal": 1.0
+          },
+          "clean_enabled": true,
+          "clean_confidence": 0.24949322948418112,
+          "clean_transition_risk": 0.5131817877818075,
+          "clean_missing_input_col_count": 0
+        },
+        "decision": {
+          "action": 1,
+          "source": "alpha2_1|lifecycle_v1|hold",
+          "position_signal": "HOLD",
+          "position_reason": "v31_deep_alpha_hold",
+          "score": 0.0,
+          "conviction": 0.0
+        }
+      }
+    ]
+  },
+  "structural_mismatches": [
+    "Backtest reads a precomputed Jan-Feb 2026 CSV with AI feature columns already materialized; live recomputes AI features every cycle from the current 1200-bar frame.",
+    "Backtest evaluates a fixed historical artifact window; live is May 2026 current market and cannot be numerically equal without replaying the exact same historical bars through trading_bot.py.",
+    "Backtest fills are simulated inside eval scripts; live journal uses scheduled next-open shadow accounting plus optional exchange/dry-run paths.",
+    "The live feature snapshot now persists the final prepared decision row, but numerical parity still requires replaying identical bars and model artifacts through the same runtime path."
+  ],
+  "required_fix_for_true_parity": [
+    "Use the persisted live decision feature snapshot as the seed for a replay parity harness.",
+    "Build a replay harness that feeds the same OHLCV rows into trading_bot.FinalGovernorRuntime._prepare_frame and compares model logits/actions against the backtest evaluator at the same timestamps.",
+    "Move backtest to that shared runtime path instead of a separate eval script path, then keep eval scripts as wrappers only."
+  ]
+}

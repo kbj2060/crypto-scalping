@@ -7,8 +7,17 @@ from typing import Iterable
 import pandas as pd
 from .registry import get_m7_columns
 
-STATE_PRED = ["pred_patchtst"]
-STATE_CONF = ["conf_patchtst"]
+FORBIDDEN_ACTIVE_REGIME_PREFIXES = (
+    "clean_regime_2024_unsup_v4_",
+    "clean_regime4_2024_unsup_v1_",
+)
+
+
+def _is_forbidden_active_regime_col(col: str) -> bool:
+    return str(col).startswith(FORBIDDEN_ACTIVE_REGIME_PREFIXES)
+
+STATE_PRED: list[str] = []
+STATE_CONF: list[str] = []
 STATE_REGIME = ["regime_chop", "regime_whipsaw", "regime_bull", "regime_bear", "regime_normal"]
 STATE_ELITE = [
     "sig_ai_squeeze",
@@ -34,6 +43,56 @@ STATE_HIGH_ORDER = [
     "execution_quality",
 ]
 STATE_SYNTH = ["ofti", "kel"]
+STATE_DIRECTION_ALPHA = [
+    "cvd_12",
+    "cvd_48",
+    "cvd_288",
+    "cvd_slope_12",
+    "cvd_slope_48",
+    "price_cvd_divergence",
+    "cvd_breakout_z",
+    "btc_ret_1",
+    "btc_ret_3",
+    "btc_ret_6",
+    "btc_ret_12",
+    "btc_ret_z_48",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "eth_btc_beta_residual_z",
+    "btc_lead_eth_follow_gap_3",
+    "btc_breakout_eth_lag_dir",
+    "btc_volume_impulse_z",
+    "btc_eth_volume_rank_spread",
+    "btc_impulse_x_eth_beta",
+    "bb_width_pct_rank_288",
+    "atr_pct_rank_288",
+    "compression_score",
+    "compression_release_up",
+    "compression_release_down",
+    "range_contraction_breakout_dir",
+    "vwap_dist_24",
+    "vwap_dist_96",
+    "vwap_dist_288",
+    "anchored_vwap_session_dist",
+    "vwap_reclaim_flag",
+    "vwap_reject_flag",
+    "distance_to_day_high_low_pct",
+    "funding_oi_divergence",
+    "funding_flip_signal",
+    "oi_up_price_down",
+    "oi_up_price_up",
+    "crowded_long_unwind_risk",
+    "crowded_short_squeeze_risk",
+    "upper_wick_z",
+    "lower_wick_z",
+    "sweep_prev_high_reclaim",
+    "sweep_prev_low_reclaim",
+    "failed_breakout_up",
+    "failed_breakout_down",
+    "cvd_slope_48_x_trend_prob",
+    "funding_oi_divergence_x_instability_prob",
+    "vwap_reclaim_x_chop_prob",
+]
 
 # PatchTST 추론에서 close 외 exog 계산 시 필요한 선행 컬럼들.
 # 런타임/학습 프루닝에서 빠지면 funding_pressure KeyError가 발생할 수 있다.
@@ -107,6 +166,11 @@ ELITE_BUILDER_REQUIRED_COLS = [
     "btc_corr_60",
     "eth_btc_ratio_change",
     "session_us",
+    "session_europe",
+    "session_japan",
+    "session_europe_open",
+    "session_us_open",
+    "session_japan_open",
     "hour_cos",
     "cvp_poc_dist",
     "cvp_volume_imbalance",
@@ -139,6 +203,7 @@ def build_rl_feature_keep(include_entry_price: bool = False) -> set[str]:
     cols.update(STATE_HIGH_ORDER)
     cols.update(STATE_REGIME)
     cols.update(STATE_SYNTH)
+    cols.update(STATE_DIRECTION_ALPHA)
     cols.update(NF_RUNTIME_REQUIRED_COLS)
     cols.update(get_m7_columns("rl_keep", include_entry_price=include_entry_price))
     return cols
@@ -182,6 +247,7 @@ def build_active_feature_keep(
     keep = build_rl_feature_keep(include_entry_price=include_entry_price)
     if include_m7_artifacts:
         keep.update(load_m7_model_feature_keep(project_root=project_root))
+    keep = {c for c in keep if not _is_forbidden_active_regime_col(c)}
     return keep
 
 
@@ -194,6 +260,7 @@ def prune_to_feature_keep(
     keep = build_rl_feature_keep(include_entry_price=include_entry_price)
     if extra_keep is not None:
         keep.update([str(c) for c in extra_keep])
+    keep = {c for c in keep if not _is_forbidden_active_regime_col(c)}
     cols = [c for c in df.columns if c in keep]
     if not cols:
         return df.copy()
@@ -215,6 +282,7 @@ def prune_to_active_feature_keep(
     )
     if extra_keep is not None:
         keep.update([str(c) for c in extra_keep])
+    keep = {c for c in keep if not _is_forbidden_active_regime_col(c)}
     cols = [c for c in df.columns if c in keep]
     if not cols:
         return df.copy()

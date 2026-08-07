@@ -1,0 +1,164 @@
+{
+  "model_id": "alpha3_exit_guard_persistence_20260527",
+  "design": "Two-stage stop-loss overlay with persistence soft-stop, widened early hard-stop, and giveback exit to reduce immediate stop-outs before delayed trend realization.",
+  "base_model": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+  "selected": {
+    "guard": {
+      "name": "guard_soft3_hard1p45",
+      "hard_sl_mult": 1.45,
+      "soft_sl_mult": 1.0,
+      "early_bars": 18,
+      "early_sl_mult": 1.35,
+      "soft_min_hold": 3,
+      "soft_persist_bars": 3,
+      "regime_bad_th": 0.5,
+      "flow_bad_th": 0.02,
+      "giveback_trigger": 0.72,
+      "giveback_min_mfe": 0.014,
+      "giveback_min_hold": 3,
+      "entry_quality_min": -999.0,
+      "entry_conf_min": 0.0,
+      "same_side_entry_gap": 0,
+      "cooldown_after_hard_stop": 0,
+      "cooldown_after_soft_stop": 0,
+      "cooldown_after_giveback": 0
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 169.42626842666832,
+        "mdd": -25.797791111971247,
+        "trades": 255,
+        "wr": 0.3843137254901961,
+        "trades_per_day": 4.346590909090909,
+        "deep_entries": 127,
+        "long_entries": 105,
+        "short_entries": 150,
+        "avg_notional": 1.9490187576560256,
+        "avg_leverage": 2.1104903157688346,
+        "exits": {
+          "deep_alpha_hard_stop_loss": 80,
+          "v21_2_hard_stop_loss": 64,
+          "deep_alpha_max_hold": 34,
+          "v21_2_giveback_exit": 50,
+          "v21_2_max_hold": 11,
+          "v21_2_take_profit": 3,
+          "deep_alpha_giveback_exit": 11,
+          "deep_alpha_take_profit": 2
+        },
+        "runner_actions": {
+          "deep_entry": 127,
+          "v21_entry": 128
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 510
+        }
+      },
+      "cost2": {
+        "pnl": 161.27613200735652,
+        "mdd": -27.475504666812512,
+        "trades": 253,
+        "wr": 0.37549407114624506,
+        "trades_per_day": 4.3125,
+        "deep_entries": 123,
+        "long_entries": 108,
+        "short_entries": 145,
+        "avg_notional": 1.9650768441875917,
+        "avg_leverage": 2.13193407964345,
+        "exits": {
+          "deep_alpha_hard_stop_loss": 73,
+          "v21_2_hard_stop_loss": 66,
+          "deep_alpha_max_hold": 38,
+          "v21_2_max_hold": 11,
+          "v21_2_giveback_exit": 50,
+          "v21_2_take_profit": 3,
+          "deep_alpha_giveback_exit": 10,
+          "deep_alpha_take_profit": 2
+        },
+        "runner_actions": {
+          "deep_entry": 123,
+          "v21_entry": 130
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 506
+        }
+      },
+      "cost3": {
+        "pnl": 113.15581501155832,
+        "mdd": -31.596600613522476,
+        "trades": 259,
+        "wr": 0.3667953667953668,
+        "trades_per_day": 4.4147727272727275,
+        "deep_entries": 124,
+        "long_entries": 110,
+        "short_entries": 149,
+        "avg_notional": 1.9755865670684956,
+        "avg_leverage": 2.145280180371328,
+        "exits": {
+          "deep_alpha_hard_stop_loss": 79,
+          "deep_alpha_max_hold": 32,
+          "v21_2_hard_stop_loss": 68,
+          "v21_2_giveback_exit": 53,
+          "v21_2_max_hold": 11,
+          "v21_2_take_profit": 3,
+          "deep_alpha_giveback_exit": 10,
+          "deep_alpha_take_profit": 3
+        },
+        "runner_actions": {
+          "deep_entry": 124,
+          "v21_entry": 135
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 518
+        }
+      }
+    },
+    "score": 266.9180454442563,
+    "val_score": 345.7001010291931
+  },
+  "baseline": {
+    "guard": "baseline_guard_off",
+    "val_score": 298.2047012458996,
+    "val_cost3_pnl": 149.61107428244054,
+    "oos_score": 240.07719180422302,
+    "oos_cost3_pnl": 122.9750293610019,
+    "oos_cost3_mdd": -37.02204820962388,
+    "oos_cost3_wr": 0.21333333333333335,
+    "oos_cost3_trades": 225,
+    "oos_sl_ratio": 0.7555555555555555,
+    "oos_exits": "{\"deep_alpha_hard_stop_loss\": 90, \"v21_2_hard_stop_loss\": 80, \"deep_alpha_max_hold\": 35, \"v21_2_max_hold\": 12, \"v21_2_take_profit\": 4, \"deep_alpha_take_profit\": 3, \"forced_end\": 1}",
+    "name": "baseline_guard_off",
+    "hard_sl_mult": 1.0,
+    "soft_sl_mult": 1.0,
+    "early_bars": 0,
+    "early_sl_mult": 1.0,
+    "soft_min_hold": 1,
+    "soft_persist_bars": 1,
+    "regime_bad_th": 1.0,
+    "flow_bad_th": 9.0,
+    "giveback_trigger": 9.0,
+    "giveback_min_mfe": 9.0,
+    "giveback_min_hold": 0,
+    "entry_quality_min": -999.0,
+    "entry_conf_min": 0.0,
+    "same_side_entry_gap": 0,
+    "cooldown_after_hard_stop": 0,
+    "cooldown_after_soft_stop": 0,
+    "cooldown_after_giveback": 0
+  },
+  "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_exit_guard_persistence_20260527_grid.csv",
+  "audit": {
+    "status": "pass",
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS",
+    "selected_guard": "guard_soft3_hard1p45",
+    "baseline_guard": "baseline_guard_off",
+    "delta_vs_baseline": {
+      "cost3_pnl": -9.819214349443584,
+      "cost3_mdd": 5.425447596101407,
+      "cost3_wr": 0.15346203346203344,
+      "cost3_trades": 34,
+      "sl_ratio": -0.187987987987988
+    }
+  }
+}

@@ -1,0 +1,566 @@
+{
+  "top20": [
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 10.877274954410288,
+        "trades": 3,
+        "wr_pct": 66.66666666666666,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 4.044929035374687
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 10.877274954410288,
+        "trades": 3,
+        "wr_pct": 66.66666666666666,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 4.044929035374687
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00330735009013278,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 8.649905631158706,
+        "trades": 3,
+        "wr_pct": 66.66666666666666,
+        "mdd_pct": -7.560676776292419
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 2.7583560175775554
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00330735009013278,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 8.649905631158706,
+        "trades": 3,
+        "wr_pct": 66.66666666666666,
+        "mdd_pct": -7.560676776292419
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 2.7583560175775554
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00330735009013278,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.00522085334,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 5.373542119339603,
+        "trades": 4,
+        "wr_pct": 75.0,
+        "mdd_pct": -8.660431787908418
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 1.1190291855165586
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00330735009013278,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.00522085334,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 5.373542119339603,
+        "trades": 4,
+        "wr_pct": 75.0,
+        "mdd_pct": -8.660431787908418
+      },
+      "oos": {
+        "pnl_pct": -0.13992701959605336,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.04999999999999449
+      },
+      "oos_2x": {
+        "pnl_pct": -0.27970815673729055,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.10000000000000009
+      },
+      "score": 0.9916130973104829
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.01949275054656894,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.0210603396474107,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0009288470562139599
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.003828667267863,
+        "ud_cat_short_prob_max": 0.02214974175188525,
+        "m7_tail_risk_max": 0.0022657698399999996,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.0005606879451831
+      },
+      "holdout": {
+        "pnl_pct": 3.641335954878322,
+        "trades": 3,
+        "wr_pct": 33.33333333333333,
+        "mdd_pct": -5.665631294066287
+      },
+      "oos": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "oos_2x": {
+        "pnl_pct": 0.0,
+        "trades": 0,
+        "wr_pct": 0.0,
+        "mdd_pct": 0.0
+      },
+      "score": 0.7887564855853019
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.024257657851755966,
+        "m7_tail_risk_max": 0.0031110046499999997,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 4.244054720047785,
+        "trades": 4,
+        "wr_pct": 75.0,
+        "mdd_pct": -8.262736264785154
+      },
+      "oos": {
+        "pnl_pct": -0.13992701959605336,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.04999999999999449
+      },
+      "oos_2x": {
+        "pnl_pct": -0.27970815673729055,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.10000000000000009
+      },
+      "score": 0.5429980960976544
+    },
+    {
+      "filters": {
+        "rogers_satchell_vol_max": 0.00351324843726035,
+        "ud_cat_short_prob_max": 0.02602871456330659,
+        "m7_tail_risk_max": 0.0031110046499999997,
+        "garch_vol_z_max": 1.235007440000002,
+        "smart_money_flow_min": -0.00152744837959582
+      },
+      "holdout": {
+        "pnl_pct": 4.244054720047785,
+        "trades": 4,
+        "wr_pct": 75.0,
+        "mdd_pct": -8.262736264785154
+      },
+      "oos": {
+        "pnl_pct": -0.13992701959605336,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.04999999999999449
+      },
+      "oos_2x": {
+        "pnl_pct": -0.27970815673729055,
+        "trades": 1,
+        "wr_pct": 0.0,
+        "mdd_pct": -0.10000000000000009
+      },
+      "score": 0.5429980960976544
+    }
+  ],
+  "positive_2x_count": 0,
+  "positive_2x": []
+}

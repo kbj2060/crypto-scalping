@@ -1,0 +1,35 @@
+{
+  "audit_scope": "ledger_replay_invariant_audit_only_not_trading_bot_e2e",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [],
+  "source_ledger": "data/ensemble/reports/clean_base_deep_gated_gross_v2_ledger.csv",
+  "dsac_overlay_ledger": "data/ensemble/reports/lifecycle_cost_caps_dsac_full_retrain_v2_experiment_2026_best_dsac_alpha_ledger.csv",
+  "source_rows": 363,
+  "candidate_rows": 323,
+  "blocked_trade_count": 40,
+  "dsac_half_rows": 41,
+  "notional_min": 1.5,
+  "notional_max": 3.6,
+  "final_cash": 8.777337301932613,
+  "pnl_pct": 777.7337301932613,
+  "mdd_pct": -13.832413018783773,
+  "source_final_cash": 8.960582860566412,
+  "invariants_checked": [
+    "finite_numeric",
+    "notional_0_to_3p6",
+    "no_new_trade_ids",
+    "cash_continuity",
+    "pnl_formula",
+    "entry_fee_formula",
+    "exit_fee_formula",
+    "cash_after_formula",
+    "side_matches_source",
+    "per_unit_raw_matches_source_core_pnl",
+    "dsac_half_opposite_semantics"
+  ],
+  "reason_counts": {
+    "": 282,
+    "dsac_half_opposite": 41
+  }
+}

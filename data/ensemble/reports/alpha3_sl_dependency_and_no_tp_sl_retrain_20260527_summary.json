@@ -1,0 +1,88 @@
+{
+  "model_id": "alpha3_sl_dependency_and_no_tp_sl_retrain_20260527",
+  "design": "Two retrained variants: (1) stop-loss dependency reduced by widened SL buckets, (2) no TP/SL bucket by fixed single TP/SL values.",
+  "protocol": {
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS",
+    "selection_uses_2026": false
+  },
+  "baseline_cost3": {
+    "pnl": 122.9750293610019,
+    "mdd": -37.02204820962388,
+    "trades": 225,
+    "wr": 0.21333333333333335,
+    "trades_per_day": 3.835227272727273,
+    "deep_entries": 128,
+    "long_entries": 72,
+    "short_entries": 153,
+    "avg_notional": 1.8510586311072599,
+    "avg_leverage": 1.9956646841974917,
+    "exits": {
+      "deep_alpha_stop_loss": 90,
+      "v21_2_stop_loss": 80,
+      "deep_alpha_max_hold": 35,
+      "v21_2_max_hold": 12,
+      "v21_2_take_profit": 4,
+      "deep_alpha_take_profit": 3,
+      "forced_end": 1
+    },
+    "runner_actions": {
+      "deep_entry": 128,
+      "v21_entry": 97
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 449,
+      "forced_end_market": 1
+    }
+  },
+  "baseline_stoploss_ratio_cost3": 0.7555555555555555,
+  "variants": [
+    {
+      "variant": "sl_dependency_reduced",
+      "oos_cost3_pnl": 63.92966161484757,
+      "oos_cost3_mdd": -44.888339489652004,
+      "oos_cost3_wr": 0.19523809523809524,
+      "oos_cost3_trades": 210,
+      "oos_cost3_v21_sl": 85,
+      "oos_cost3_deep_sl": 84,
+      "stoploss_ratio_cost3": 0.8047619047619048,
+      "score": 118.24038582698724,
+      "tp_buckets": "[0.007, 0.011, 0.018, 0.03, 0.05, 0.09, 0.18, 0.45, 0.9]",
+      "sl_buckets": "[0.0058, 0.0087, 0.01215, 0.0182, 0.026399999999999996, 0.04025, 0.060500000000000005]"
+    },
+    {
+      "variant": "no_tp_sl_bucket_fixed",
+      "oos_cost3_pnl": -37.209800695210205,
+      "oos_cost3_mdd": -39.08905999861366,
+      "oos_cost3_wr": 0.2046783625730994,
+      "oos_cost3_trades": 171,
+      "oos_cost3_v21_sl": 2,
+      "oos_cost3_deep_sl": 123,
+      "stoploss_ratio_cost3": 0.7309941520467836,
+      "score": -55.169111064405925,
+      "tp_buckets": "[0.04]",
+      "sl_buckets": "[0.022]"
+    }
+  ],
+  "selected_variant": {
+    "variant": "sl_dependency_reduced",
+    "oos_cost3_pnl": 63.92966161484757,
+    "oos_cost3_mdd": -44.888339489652004,
+    "oos_cost3_wr": 0.19523809523809524,
+    "oos_cost3_trades": 210,
+    "oos_cost3_v21_sl": 85,
+    "oos_cost3_deep_sl": 84,
+    "stoploss_ratio_cost3": 0.8047619047619048,
+    "score": 118.24038582698724,
+    "tp_buckets": "[0.007, 0.011, 0.018, 0.03, 0.05, 0.09, 0.18, 0.45, 0.9]",
+    "sl_buckets": "[0.0058, 0.0087, 0.01215, 0.0182, 0.026399999999999996, 0.04025, 0.060500000000000005]"
+  },
+  "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_sl_dependency_and_no_tp_sl_retrain_20260527_grid.csv",
+  "delta_vs_baseline_cost3": {
+    "pnl": -59.045367746154334,
+    "mdd": -7.866291280028122,
+    "wr": -0.01809523809523811,
+    "trades": -15,
+    "stoploss_ratio": 0.049206349206349254
+  }
+}

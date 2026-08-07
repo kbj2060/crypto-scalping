@@ -1,0 +1,18 @@
+{
+  "model_id": "core_entry_policy_unsup_v4_retrained_v13_3_20260510",
+  "status": "pass",
+  "checks": {
+    "contaminated_columns_absent": true,
+    "forbidden_model_features_absent": true,
+    "train_validation_overlap_zero": true,
+    "train_eval_overlap_zero": true,
+    "validation_eval_overlap_zero": true,
+    "ledger_rows_match_report_trades": true,
+    "cost2_survival": false,
+    "cost3_survival": false
+  },
+  "contaminated_columns": [],
+  "forbidden_model_features": [],
+  "ledger_rows": 144,
+  "report_trades": 144
+}

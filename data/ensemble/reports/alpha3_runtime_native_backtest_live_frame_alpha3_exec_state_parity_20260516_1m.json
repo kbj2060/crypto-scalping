@@ -1,0 +1,94 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-16T03:30:08.697048+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_backtest_live_frame_alpha3_exec_state_parity_20260516_1m_ledger.csv",
+  "range": {
+    "start_index": 6999,
+    "stop_index": 15638,
+    "rows_evaluated": 8640,
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-02-24 07:10:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "execution_parity_contract": "alpha3_csv_next_open_limit_touch0_fee20",
+    "window_bars": 7000,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame",
+    "v31_config_override": null,
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_state_parity": true,
+    "alpha3_limit_config": {
+      "name": "next_open_limit_touch0_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "penetration_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "skip",
+      "exit_miss": "market_fallback"
+    },
+    "alpha3_fee": 0.0005,
+    "alpha3_slip": 0.0002
+  },
+  "metrics": {
+    "final_equity": 3.995256653018232,
+    "return_pct": 299.5256653018232,
+    "max_drawdown_pct": 27.725802017592116,
+    "decision_counts": {
+      "2": 1832,
+      "0": 5114,
+      "1": 1694
+    },
+    "entry_counts": {
+      "SHORT": 49,
+      "LONG": 63
+    },
+    "closed_trades": 112,
+    "win_rate": 0.29464285714285715,
+    "avg_closed_pnl_pct": 1.436461212704997,
+    "median_closed_pnl_pct": -0.31337792417720584,
+    "resize_events": 11,
+    "regime_counts": {
+      "BEAR": 2349,
+      "WHIPSAW": 424,
+      "NORMAL": 2991,
+      "BULL": 1983,
+      "CHOP": 893
+    },
+    "exit_reason_top20": {
+      "v31_deep_alpha_stop_loss": 49,
+      "learned_stop_loss": 29,
+      "v31_deep_alpha_max_hold": 14,
+      "v31_deep_alpha_take_profit": 9,
+      "learned_take_profit": 6,
+      "learned_max_hold": 4,
+      "forced_end": 1
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "alpha3_csv_execution_parity: _try_immediate_limit route fees plus LotBook alpha3 pnl math",
+    "alpha3_csv_execution_parity": true,
+    "alpha3_csv_execution_parity_note": "entries/exits/upsizes/downsizes pass through _try_immediate_limit; maker fills use maker_fee_mult; entry misses skip; exit misses close fallback",
+    "alpha3_csv_state_parity": true,
+    "alpha3_csv_state_parity_note": "close events arm lifecycle parent cooldown and V31 deep cooldown like canonical CSV Alpha3; same-bar flip re-entry is suppressed",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide",
+    "accelerated_live_cache": {
+      "enabled": true,
+      "prepared_rows": 16897,
+      "parent_decision_rows": 16897,
+      "teacher_decision_rows": 16897,
+      "window_bars": 7000
+    }
+  },
+  "errors_sample": []
+}

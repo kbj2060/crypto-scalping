@@ -13,6 +13,7 @@ from .schema import (
     STATE_HIGH_ORDER,
     STATE_REGIME,
     STATE_SYNTH,
+    STATE_DIRECTION_ALPHA,
     MARKET_BASE_COLS,
     ELITE_BUILDER_REQUIRED_COLS,
     M7_STATE_COLS,
@@ -25,6 +26,7 @@ from .schema import (
 from .m7 import trend_signal_from_m7
 from .registry import (
     M7_GENERATED_COLS,
+    M7_DIRECTION_COLS,
     M7_DEPRECATED_COLS,
     M7_RL_CORE_COLS,
     M7_RL_AUX_COLS,
@@ -49,6 +51,7 @@ __all__ = [
     "STATE_HIGH_ORDER",
     "STATE_REGIME",
     "STATE_SYNTH",
+    "STATE_DIRECTION_ALPHA",
     "MARKET_BASE_COLS",
     "ELITE_BUILDER_REQUIRED_COLS",
     "M7_STATE_COLS",
@@ -59,6 +62,7 @@ __all__ = [
     "prune_to_active_feature_keep",
     "trend_signal_from_m7",
     "M7_GENERATED_COLS",
+    "M7_DIRECTION_COLS",
     "M7_DEPRECATED_COLS",
     "M7_RL_CORE_COLS",
     "M7_RL_AUX_COLS",

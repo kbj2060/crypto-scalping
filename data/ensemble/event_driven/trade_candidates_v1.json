@@ -1,0 +1,22 @@
+{
+  "csv_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/rl_training_2025_m7.csv",
+  "output_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_v1.csv",
+  "rows": 105064,
+  "candidate_rows": 68159,
+  "candidate_longs": 34058,
+  "candidate_shorts": 34101,
+  "avg_candidate_quality": 0.0014922476491623683,
+  "avg_candidate_horizon": 4.0255138719758214,
+  "params": {
+    "horizons": [
+      4,
+      8,
+      12
+    ],
+    "atr_window": 14,
+    "tp_mult": 0.9,
+    "sl_mult": 0.6,
+    "min_move": 0.0018,
+    "side_margin_min": 0.00025
+  }
+}

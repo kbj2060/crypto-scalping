@@ -1,0 +1,113 @@
+{
+  "model_id": "alpha7_sniper_primary_state24_sticky_alpha43_fallback_20260525_live",
+  "display_name": "Alpha7 Sniper Primary",
+  "lineage_model_id": "alpha5_state24_sticky_fallback_alpha43_20260525",
+  "cfg": {
+    "mode": "fallback",
+    "primary": "alpha7_primary_sniper",
+    "secondary": "alpha43_no_legacy_cash_only_fallback",
+    "primary_lineage": "alpha5_state24_sticky",
+    "secondary_lineage": "alpha43_no_legacy"
+  },
+  "runner_config": {
+    "name": "v21_2_parent_noop",
+    "full_edge_th": 99.0,
+    "half_edge_th": 99.0,
+    "p_th": 1.0,
+    "q10_floor": 99.0,
+    "jackpot_p": 99.0,
+    "jackpot_q90": 99.0,
+    "bad_cap": 0.0,
+    "min_unrealized": 99.0,
+    "min_bars_since_entry": 999,
+    "full_add_frac": 0.0,
+    "half_add_frac": 0.0,
+    "max_total_mult": 1.0,
+    "max_entry_notional": 99.0,
+    "dd_block": 99.0
+  },
+  "selection_score": 245.19434243202576,
+  "validation_metrics": {
+    "cost1": {
+      "pnl": 159.47250109246278,
+      "mdd": -23.76058609261359,
+      "trades": 104,
+      "trades_per_day": 1.130477448575203,
+      "wr": 0.17307692307692307,
+      "avg_notional": 2.3596423317204054
+    },
+    "cost2": {
+      "pnl": 128.6431613208104,
+      "mdd": -22.428432584321744,
+      "trades": 107,
+      "trades_per_day": 1.1630873749764108,
+      "wr": 0.1588785046728972,
+      "avg_notional": 2.353927335534626
+    },
+    "cost3": {
+      "pnl": 120.49541292537684,
+      "mdd": -22.54683319360321,
+      "trades": 111,
+      "trades_per_day": 1.2065672768446878,
+      "wr": 0.15315315315315314,
+      "avg_notional": 2.35716208766746
+    }
+  },
+  "selected_metrics": {
+    "cost1": {
+      "pnl": 149.85664487871824,
+      "mdd": -20.310675247143074,
+      "trades": 80,
+      "trades_per_day": 1.3636363636363638,
+      "wr": 0.225,
+      "avg_notional": 2.4124873592194804
+    },
+    "cost2": {
+      "pnl": 140.92130400857138,
+      "mdd": -20.56968130684219,
+      "trades": 80,
+      "trades_per_day": 1.3636363636363638,
+      "wr": 0.225,
+      "avg_notional": 2.4124873592194804
+    },
+    "cost3": {
+      "pnl": 141.02924587868313,
+      "mdd": -20.827895584149115,
+      "trades": 82,
+      "trades_per_day": 1.3977272727272727,
+      "wr": 0.21951219512195122,
+      "avg_notional": 2.431190515431687
+    }
+  },
+  "audit": {
+    "selection_uses_2026": false,
+    "train": {
+      "rows": 78568,
+      "timestamp_rows": 78568,
+      "active_rows": 9953,
+      "long_rows": 4725,
+      "short_rows": 5228,
+      "avg_active_notional": 2.5083994076995717
+    },
+    "validation": {
+      "rows": 26496,
+      "timestamp_rows": 26496,
+      "active_rows": 985,
+      "long_rows": 122,
+      "short_rows": 863,
+      "avg_active_notional": 2.3454601705425553
+    },
+    "oos": {
+      "rows": 16897,
+      "timestamp_rows": 16897,
+      "active_rows": 1354,
+      "long_rows": 561,
+      "short_rows": 793,
+      "avg_active_notional": 2.3673386811179857
+    },
+    "feature_sources": {
+      "primary": "alpha5 state24_sticky retrain",
+      "secondary": "alpha43 no_legacy"
+    }
+  }
+}

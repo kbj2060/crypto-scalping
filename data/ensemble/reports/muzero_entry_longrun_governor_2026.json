@@ -1,0 +1,1257 @@
+{
+  "type": "muzero_entry_longrun_governor_2026",
+  "note": "Long-run MuZero-style entry training. Planner params are selected on late-2025 validation, then evaluated once on 2026 with AlphaZero-style exit fixed at 0.45.",
+  "model_out": "/home/llewyn/crypto-scalping/data/ensemble/supervised/muzero_style/mz_entry_longrun_governor.pt",
+  "audit": {
+    "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "train_core_rows": 87496,
+    "validation_rows": 17568,
+    "eval_rows": 16897,
+    "train_core_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_validation_overlap": 0,
+    "train_eval_overlap": 0,
+    "validation_eval_overlap": 0
+  },
+  "label_meta": {
+    "samples": 87349,
+    "search_horizon": 144,
+    "dynamics_step": 12,
+    "temperature": 0.012,
+    "target_policy_argmax": {
+      "block": 6264,
+      "half": 0,
+      "keep": 0,
+      "boost": 81085
+    },
+    "reward_mean": 0.03827633336186409,
+    "reward_std": 0.16968756914138794
+  },
+  "train_meta": {
+    "samples": 87349,
+    "state_dim": 79,
+    "epochs": 64,
+    "hidden_dim": 256,
+    "latent_dim": 192,
+    "final_loss": 1.1731927480873303,
+    "value_mean": 0.2379789799451828,
+    "value_std": 0.29617801308631897,
+    "policy_entropy_mean": 1.1644933223724365
+  },
+  "grid_mode": "full",
+  "validation_ranked_by_score": [
+    {
+      "name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 661.3145918353961,
+        "mdd": -12.4758006362507,
+        "trades": 381,
+        "trades_per_day": 6.24625718677065,
+        "wr": 0.6430446194225722,
+        "avg_notional": 1.024156240893434,
+        "avg_leverage": 1.594120993560431,
+        "long_entries": 165,
+        "short_entries": 216,
+        "entry_blocks": {
+          "cash_signal": 5368,
+          "model_cooldown": 295,
+          "loss_cooldown": 3264,
+          "daily_dd_lock": 1204,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 381
+        },
+        "exit_prob_mean": 0.1675999207009711,
+        "exit_prob_p95": 0.5419147312641144
+      },
+      "score": 623.8871899266439
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf-0.05_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 605.3509874479522,
+        "mdd": -10.81683397755725,
+        "trades": 409,
+        "trades_per_day": 6.7052997096829285,
+        "wr": 0.6210268948655256,
+        "avg_notional": 0.9913691008115582,
+        "avg_leverage": 1.5947732901656952,
+        "long_entries": 185,
+        "short_entries": 224,
+        "entry_blocks": {
+          "cash_signal": 4546,
+          "model_cooldown": 314,
+          "loss_cooldown": 3720,
+          "daily_dd_lock": 869,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 409
+        },
+        "exit_prob_mean": 0.1672778737900001,
+        "exit_prob_p95": 0.5528387069702146
+      },
+      "score": 572.9004855152805
+    },
+    {
+      "name": "mzlr_g0.70_p0.08_d1_sf0.16_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 563.3873220929215,
+        "mdd": -9.06817738573491,
+        "trades": 390,
+        "trades_per_day": 6.39380656913531,
+        "wr": 0.6487179487179487,
+        "avg_notional": 1.0139161403810455,
+        "avg_leverage": 1.5935057962559958,
+        "long_entries": 169,
+        "short_entries": 221,
+        "entry_blocks": {
+          "cash_signal": 4812,
+          "model_cooldown": 300,
+          "loss_cooldown": 3288,
+          "daily_dd_lock": 1655,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 390
+        },
+        "exit_prob_mean": 0.16958543193279196,
+        "exit_prob_p95": 0.5656983226537704
+      },
+      "score": 536.1827899357168
+    },
+    {
+      "name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 549.9875996101167,
+        "mdd": -14.125843695949625,
+        "trades": 374,
+        "trades_per_day": 6.131496556042579,
+        "wr": 0.6390374331550802,
+        "avg_notional": 1.0188147163443242,
+        "avg_leverage": 1.5944836223997905,
+        "long_entries": 165,
+        "short_entries": 209,
+        "entry_blocks": {
+          "cash_signal": 5350,
+          "model_cooldown": 291,
+          "loss_cooldown": 3240,
+          "daily_dd_lock": 1364,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 374
+        },
+        "exit_prob_mean": 0.16814679888979922,
+        "exit_prob_p95": 0.5417430073022842
+      },
+      "score": 507.61006852226785
+    },
+    {
+      "name": "mzlr_g0.55_p0.08_d1_sf0.16_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 517.0386924197509,
+        "mdd": -8.355265075731378,
+        "trades": 367,
+        "trades_per_day": 6.01673592531451,
+        "wr": 0.6430517711171662,
+        "avg_notional": 1.0167189957956937,
+        "avg_leverage": 1.596660809836519,
+        "long_entries": 155,
+        "short_entries": 212,
+        "entry_blocks": {
+          "cash_signal": 5655,
+          "model_cooldown": 273,
+          "loss_cooldown": 3144,
+          "daily_dd_lock": 1098,
+          "daily_loss_lock": 509,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 367
+        },
+        "exit_prob_mean": 0.1670570007136764,
+        "exit_prob_p95": 0.5575999915599823
+      },
+      "score": 491.97289719255673
+    },
+    {
+      "name": "mzlr_g0.70_p0.24_d2_sf0.00_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 510.3718447552312,
+        "mdd": -12.475800636250723,
+        "trades": 329,
+        "trades_per_day": 5.393749644219275,
+        "wr": 0.6200607902735562,
+        "avg_notional": 1.048676998114433,
+        "avg_leverage": 1.6058714096683109,
+        "long_entries": 138,
+        "short_entries": 191,
+        "entry_blocks": {
+          "cash_signal": 6399,
+          "model_cooldown": 248,
+          "loss_cooldown": 3000,
+          "daily_dd_lock": 961,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 329
+        },
+        "exit_prob_mean": 0.16343694401651315,
+        "exit_prob_p95": 0.5244138121604919
+      },
+      "score": 472.94444284647903
+    },
+    {
+      "name": "mzlr_g0.70_p0.24_d2_sf0.00_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 510.3718447552312,
+        "mdd": -12.475800636250723,
+        "trades": 329,
+        "trades_per_day": 5.393749644219275,
+        "wr": 0.6200607902735562,
+        "avg_notional": 1.048676998114433,
+        "avg_leverage": 1.6058714096683109,
+        "long_entries": 138,
+        "short_entries": 191,
+        "entry_blocks": {
+          "cash_signal": 6399,
+          "model_cooldown": 248,
+          "loss_cooldown": 3000,
+          "daily_dd_lock": 961,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 329
+        },
+        "exit_prob_mean": 0.16343694401651315,
+        "exit_prob_p95": 0.5244138121604919
+      },
+      "score": 472.94444284647903
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf-0.05_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 510.9838038217246,
+        "mdd": -12.736039022078149,
+        "trades": 401,
+        "trades_per_day": 6.574144703136563,
+        "wr": 0.6184538653366584,
+        "avg_notional": 0.9873841468960942,
+        "avg_leverage": 1.595408592559227,
+        "long_entries": 182,
+        "short_entries": 219,
+        "entry_blocks": {
+          "cash_signal": 4525,
+          "model_cooldown": 309,
+          "loss_cooldown": 3672,
+          "daily_dd_lock": 1051,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 401
+        },
+        "exit_prob_mean": 0.16744881834933922,
+        "exit_prob_p95": 0.5500503897666927
+      },
+      "score": 472.77568675549014
+    },
+    {
+      "name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 504.2264416996133,
+        "mdd": -14.125843695949602,
+        "trades": 372,
+        "trades_per_day": 6.098707804405988,
+        "wr": 0.6370967741935484,
+        "avg_notional": 1.017571067732593,
+        "avg_leverage": 1.5972409174219648,
+        "long_entries": 164,
+        "short_entries": 208,
+        "entry_blocks": {
+          "cash_signal": 5422,
+          "model_cooldown": 287,
+          "loss_cooldown": 3240,
+          "daily_dd_lock": 1286,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 372
+        },
+        "exit_prob_mean": 0.16731169525604017,
+        "exit_prob_p95": 0.5466929078102112
+      },
+      "score": 461.8489106117645
+    },
+    {
+      "name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 504.2264416996133,
+        "mdd": -14.125843695949602,
+        "trades": 372,
+        "trades_per_day": 6.098707804405988,
+        "wr": 0.6370967741935484,
+        "avg_notional": 1.017571067732593,
+        "avg_leverage": 1.5972409174219648,
+        "long_entries": 164,
+        "short_entries": 208,
+        "entry_blocks": {
+          "cash_signal": 5422,
+          "model_cooldown": 287,
+          "loss_cooldown": 3240,
+          "daily_dd_lock": 1286,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 372
+        },
+        "exit_prob_mean": 0.16731169525604017,
+        "exit_prob_p95": 0.5466929078102112
+      },
+      "score": 461.8489106117645
+    },
+    {
+      "name": "mzlr_g0.55_p0.16_d2_sf0.08_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 489.63676830684716,
+        "mdd": -12.47580063625071,
+        "trades": 322,
+        "trades_per_day": 5.278989013491205,
+        "wr": 0.6304347826086957,
+        "avg_notional": 1.045514391905955,
+        "avg_leverage": 1.602421273614359,
+        "long_entries": 133,
+        "short_entries": 189,
+        "entry_blocks": {
+          "cash_signal": 6645,
+          "model_cooldown": 244,
+          "loss_cooldown": 2856,
+          "daily_dd_lock": 961,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 322
+        },
+        "exit_prob_mean": 0.1640452255868994,
+        "exit_prob_p95": 0.5116891860961914
+      },
+      "score": 452.209366398095
+    },
+    {
+      "name": "mzlr_g0.55_p0.16_d2_sf0.08_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 489.63676830684716,
+        "mdd": -12.47580063625071,
+        "trades": 322,
+        "trades_per_day": 5.278989013491205,
+        "wr": 0.6304347826086957,
+        "avg_notional": 1.045514391905955,
+        "avg_leverage": 1.602421273614359,
+        "long_entries": 133,
+        "short_entries": 189,
+        "entry_blocks": {
+          "cash_signal": 6645,
+          "model_cooldown": 244,
+          "loss_cooldown": 2856,
+          "daily_dd_lock": 961,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 322
+        },
+        "exit_prob_mean": 0.1640452255868994,
+        "exit_prob_p95": 0.5116891860961914
+      },
+      "score": 452.209366398095
+    },
+    {
+      "name": "mzlr_g0.85_p0.24_d2_sf0.16_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 487.3329283263285,
+        "mdd": -12.47580063625071,
+        "trades": 292,
+        "trades_per_day": 4.787157738942335,
+        "wr": 0.5993150684931506,
+        "avg_notional": 1.053239131344111,
+        "avg_leverage": 1.6057149176994836,
+        "long_entries": 122,
+        "short_entries": 170,
+        "entry_blocks": {
+          "cash_signal": 7173,
+          "model_cooldown": 216,
+          "loss_cooldown": 2808,
+          "daily_dd_lock": 1000,
+          "daily_loss_lock": 254
+        },
+        "exits": {
+          "exit_governor": 292
+        },
+        "exit_prob_mean": 0.15510485673667157,
+        "exit_prob_p95": 0.5061419606208788
+      },
+      "score": 449.90552641757637
+    },
+    {
+      "name": "mzlr_g0.85_p0.24_d2_sf0.16_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 487.3329283263285,
+        "mdd": -12.47580063625071,
+        "trades": 292,
+        "trades_per_day": 4.787157738942335,
+        "wr": 0.5993150684931506,
+        "avg_notional": 1.053239131344111,
+        "avg_leverage": 1.6057149176994836,
+        "long_entries": 122,
+        "short_entries": 170,
+        "entry_blocks": {
+          "cash_signal": 7173,
+          "model_cooldown": 216,
+          "loss_cooldown": 2808,
+          "daily_dd_lock": 1000,
+          "daily_loss_lock": 254
+        },
+        "exits": {
+          "exit_governor": 292
+        },
+        "exit_prob_mean": 0.15510485673667157,
+        "exit_prob_p95": 0.5061419606208788
+      },
+      "score": 449.90552641757637
+    },
+    {
+      "name": "mzlr_g0.70_p0.08_d2_sf0.08_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 475.12379850789097,
+        "mdd": -10.823829496308335,
+        "trades": 367,
+        "trades_per_day": 6.01673592531451,
+        "wr": 0.6239782016348774,
+        "avg_notional": 1.018502795528627,
+        "avg_leverage": 1.5929629829623142,
+        "long_entries": 159,
+        "short_entries": 208,
+        "entry_blocks": {
+          "cash_signal": 5694,
+          "model_cooldown": 276,
+          "loss_cooldown": 3312,
+          "daily_dd_lock": 1221,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 4
+        },
+        "exits": {
+          "exit_governor": 367
+        },
+        "exit_prob_mean": 0.16837541371310388,
+        "exit_prob_p95": 0.5437015771865842
+      },
+      "score": 442.652310018966
+    },
+    {
+      "name": "mzlr_g0.85_p0.24_d2_sf0.16_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 476.16567355716467,
+        "mdd": -12.475800636250723,
+        "trades": 293,
+        "trades_per_day": 4.803552114760631,
+        "wr": 0.6006825938566553,
+        "avg_notional": 1.0510968710513544,
+        "avg_leverage": 1.6067079595097302,
+        "long_entries": 123,
+        "short_entries": 170,
+        "entry_blocks": {
+          "cash_signal": 7157,
+          "model_cooldown": 216,
+          "loss_cooldown": 2808,
+          "daily_dd_lock": 1000,
+          "daily_loss_lock": 254
+        },
+        "exits": {
+          "exit_governor": 293
+        },
+        "exit_prob_mean": 0.1547878811270273,
+        "exit_prob_p95": 0.504329681396483
+      },
+      "score": 438.7382716484125
+    },
+    {
+      "name": "mzlr_g0.70_p0.08_d2_sf0.00_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 468.9361838899771,
+        "mdd": -10.84854351197777,
+        "trades": 398,
+        "trades_per_day": 6.524961575681676,
+        "wr": 0.635678391959799,
+        "avg_notional": 0.9994904631441764,
+        "avg_leverage": 1.5911944021229543,
+        "long_entries": 183,
+        "short_entries": 215,
+        "entry_blocks": {
+          "cash_signal": 5072,
+          "model_cooldown": 308,
+          "loss_cooldown": 3480,
+          "daily_dd_lock": 1324,
+          "daily_trade_budget": 61,
+          "daily_loss_lock": 254
+        },
+        "exits": {
+          "exit_governor": 398
+        },
+        "exit_prob_mean": 0.1699351033417388,
+        "exit_prob_p95": 0.5560810446739196
+      },
+      "score": 436.3905533540438
+    },
+    {
+      "name": "mzlr_g0.55_p0.24_d2_sf0.00_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 473.7190113571524,
+        "mdd": -12.475800636250723,
+        "trades": 310,
+        "trades_per_day": 5.082256503671657,
+        "wr": 0.6129032258064516,
+        "avg_notional": 1.052297763860109,
+        "avg_leverage": 1.604947707114451,
+        "long_entries": 134,
+        "short_entries": 176,
+        "entry_blocks": {
+          "cash_signal": 6894,
+          "model_cooldown": 226,
+          "loss_cooldown": 2880,
+          "daily_dd_lock": 872,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 310
+        },
+        "exit_prob_mean": 0.16235971950860587,
+        "exit_prob_p95": 0.5077551245689391
+      },
+      "score": 436.2916094484002
+    },
+    {
+      "name": "mzlr_g0.55_p0.24_d2_sf0.00_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 473.7190113571524,
+        "mdd": -12.475800636250723,
+        "trades": 310,
+        "trades_per_day": 5.082256503671657,
+        "wr": 0.6129032258064516,
+        "avg_notional": 1.052297763860109,
+        "avg_leverage": 1.604947707114451,
+        "long_entries": 134,
+        "short_entries": 176,
+        "entry_blocks": {
+          "cash_signal": 6894,
+          "model_cooldown": 226,
+          "loss_cooldown": 2880,
+          "daily_dd_lock": 872,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 310
+        },
+        "exit_prob_mean": 0.16235971950860587,
+        "exit_prob_p95": 0.5077551245689391
+      },
+      "score": 436.2916094484002
+    },
+    {
+      "name": "mzlr_g0.85_p0.24_d2_sf0.16_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 472.71887292702513,
+        "mdd": -12.475800636250723,
+        "trades": 292,
+        "trades_per_day": 4.787157738942335,
+        "wr": 0.5993150684931506,
+        "avg_notional": 1.0516265809505678,
+        "avg_leverage": 1.605830707963716,
+        "long_entries": 122,
+        "short_entries": 170,
+        "entry_blocks": {
+          "cash_signal": 7167,
+          "model_cooldown": 215,
+          "loss_cooldown": 2808,
+          "daily_dd_lock": 1000,
+          "daily_loss_lock": 254
+        },
+        "exits": {
+          "exit_governor": 292
+        },
+        "exit_prob_mean": 0.1546250580774846,
+        "exit_prob_p95": 0.5027879655361176
+      },
+      "score": 435.29147101827294
+    },
+    {
+      "name": "mzlr_g0.55_p0.16_d2_sf-0.05_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 477.0126001842307,
+        "mdd": -14.112448029779944,
+        "trades": 401,
+        "trades_per_day": 6.574144703136563,
+        "wr": 0.6384039900249376,
+        "avg_notional": 0.9888066101733594,
+        "avg_leverage": 1.588749614681196,
+        "long_entries": 175,
+        "short_entries": 226,
+        "entry_blocks": {
+          "cash_signal": 4566,
+          "model_cooldown": 316,
+          "loss_cooldown": 3480,
+          "daily_dd_lock": 1578,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 57
+        },
+        "exits": {
+          "exit_governor": 401
+        },
+        "exit_prob_mean": 0.1740411822777308,
+        "exit_prob_p95": 0.565475285053253
+      },
+      "score": 434.67525609489087
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf0.00_cf0.35_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 473.456246011009,
+        "mdd": -13.974220702265017,
+        "trades": 374,
+        "trades_per_day": 6.131496556042579,
+        "wr": 0.5962566844919787,
+        "avg_notional": 1.0094278346142818,
+        "avg_leverage": 1.6007129807124272,
+        "long_entries": 158,
+        "short_entries": 216,
+        "entry_blocks": {
+          "cash_signal": 5067,
+          "model_cooldown": 282,
+          "loss_cooldown": 3624,
+          "daily_dd_lock": 982,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 374
+        },
+        "exit_prob_mean": 0.16434445091863373,
+        "exit_prob_p95": 0.5342399597167965
+      },
+      "score": 431.53358390421397
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf0.00_cf0.35_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 473.456246011009,
+        "mdd": -13.974220702265017,
+        "trades": 374,
+        "trades_per_day": 6.131496556042579,
+        "wr": 0.5962566844919787,
+        "avg_notional": 1.0094278346142818,
+        "avg_leverage": 1.6007129807124272,
+        "long_entries": 158,
+        "short_entries": 216,
+        "entry_blocks": {
+          "cash_signal": 5067,
+          "model_cooldown": 282,
+          "loss_cooldown": 3624,
+          "daily_dd_lock": 982,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 374
+        },
+        "exit_prob_mean": 0.16434445091863373,
+        "exit_prob_p95": 0.5342399597167965
+      },
+      "score": 431.53358390421397
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf0.00_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 469.93070358381993,
+        "mdd": -13.974220702264951,
+        "trades": 381,
+        "trades_per_day": 6.24625718677065,
+        "wr": 0.5984251968503937,
+        "avg_notional": 1.0057233273046546,
+        "avg_leverage": 1.600033377025947,
+        "long_entries": 160,
+        "short_entries": 221,
+        "entry_blocks": {
+          "cash_signal": 5053,
+          "model_cooldown": 285,
+          "loss_cooldown": 3672,
+          "daily_dd_lock": 982,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 381
+        },
+        "exit_prob_mean": 0.16625786691575875,
+        "exit_prob_p95": 0.5427717149257658
+      },
+      "score": 428.0080414770251
+    },
+    {
+      "name": "mzlr_g0.70_p0.16_d2_sf0.00_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 468.653421293799,
+        "mdd": -13.974220702264951,
+        "trades": 381,
+        "trades_per_day": 6.24625718677065,
+        "wr": 0.5984251968503937,
+        "avg_notional": 1.0057233273046546,
+        "avg_leverage": 1.600033377025947,
+        "long_entries": 160,
+        "short_entries": 221,
+        "entry_blocks": {
+          "cash_signal": 5059,
+          "model_cooldown": 285,
+          "loss_cooldown": 3672,
+          "daily_dd_lock": 982,
+          "daily_loss_lock": 427,
+          "daily_trade_budget": 17
+        },
+        "exits": {
+          "exit_governor": 381
+        },
+        "exit_prob_mean": 0.16625266400416686,
+        "exit_prob_p95": 0.5430653989315027
+      },
+      "score": 426.73075918700414
+    },
+    {
+      "name": "mzlr_g0.55_p0.16_d2_sf0.08_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 464.09075727007627,
+        "mdd": -12.475800636250733,
+        "trades": 321,
+        "trades_per_day": 5.262594637672909,
+        "wr": 0.6261682242990654,
+        "avg_notional": 1.0410948054706022,
+        "avg_leverage": 1.6041558780041016,
+        "long_entries": 131,
+        "short_entries": 190,
+        "entry_blocks": {
+          "cash_signal": 6621,
+          "model_cooldown": 243,
+          "loss_cooldown": 2880,
+          "daily_dd_lock": 937,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 321
+        },
+        "exit_prob_mean": 0.1633306110800973,
+        "exit_prob_p95": 0.510125994682312
+      },
+      "score": 426.6633553613241
+    },
+    {
+      "name": "mzlr_g0.70_p0.24_d2_sf0.00_cf0.00_vf-0.05_azexit0.45",
+      "eval": {
+        "pnl": 461.86159573208084,
+        "mdd": -12.47580063625071,
+        "trades": 328,
+        "trades_per_day": 5.377355268400979,
+        "wr": 0.6158536585365854,
+        "avg_notional": 1.042708357190103,
+        "avg_leverage": 1.6060686500728918,
+        "long_entries": 138,
+        "short_entries": 190,
+        "entry_blocks": {
+          "cash_signal": 6373,
+          "model_cooldown": 249,
+          "loss_cooldown": 3024,
+          "daily_dd_lock": 943,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 328
+        },
+        "exit_prob_mean": 0.16259644166049142,
+        "exit_prob_p95": 0.5240329235792159
+      },
+      "score": 424.4341938233287
+    },
+    {
+      "name": "mzlr_g0.70_p0.24_d2_sf0.00_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 460.6899405242386,
+        "mdd": -12.47580063625071,
+        "trades": 328,
+        "trades_per_day": 5.377355268400979,
+        "wr": 0.6158536585365854,
+        "avg_notional": 1.0429575127046204,
+        "avg_leverage": 1.60603905106578,
+        "long_entries": 138,
+        "short_entries": 190,
+        "entry_blocks": {
+          "cash_signal": 6379,
+          "model_cooldown": 249,
+          "loss_cooldown": 3024,
+          "daily_dd_lock": 943,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 328
+        },
+        "exit_prob_mean": 0.16274174660350843,
+        "exit_prob_p95": 0.5244204550981522
+      },
+      "score": 423.26253861548645
+    },
+    {
+      "name": "mzlr_g0.55_p0.16_d2_sf0.08_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 456.2823267210021,
+        "mdd": -12.475800636250733,
+        "trades": 320,
+        "trades_per_day": 5.2462002618546135,
+        "wr": 0.625,
+        "avg_notional": 1.041612836529193,
+        "avg_leverage": 1.603327048720967,
+        "long_entries": 130,
+        "short_entries": 190,
+        "entry_blocks": {
+          "cash_signal": 6635,
+          "model_cooldown": 242,
+          "loss_cooldown": 2880,
+          "daily_dd_lock": 937,
+          "daily_loss_lock": 427
+        },
+        "exits": {
+          "exit_governor": 320
+        },
+        "exit_prob_mean": 0.16326433045758726,
+        "exit_prob_p95": 0.5101268291473389
+      },
+      "score": 418.8549248122499
+    },
+    {
+      "name": "mzlr_g0.70_p0.08_d1_sf0.16_cf0.00_vf0.05_azexit0.45",
+      "eval": {
+        "pnl": 447.33712501620033,
+        "mdd": -9.49625368761976,
+        "trades": 385,
+        "trades_per_day": 6.311834690043832,
+        "wr": 0.6415584415584416,
+        "avg_notional": 1.0058204954934922,
+        "avg_leverage": 1.5937914084424696,
+        "long_entries": 168,
+        "short_entries": 217,
+        "entry_blocks": {
+          "cash_signal": 4832,
+          "model_cooldown": 297,
+          "loss_cooldown": 3312,
+          "daily_dd_lock": 1673,
+          "daily_loss_lock": 254,
+          "daily_trade_budget": 49
+        },
+        "exits": {
+          "exit_governor": 385
+        },
+        "exit_prob_mean": 0.17025325935774513,
+        "exit_prob_p95": 0.5637190937995904
+      },
+      "score": 418.84836395334105
+    }
+  ],
+  "selected_validation": {
+    "name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.00_vf-0.05_azexit0.45",
+    "eval": {
+      "pnl": 661.3145918353961,
+      "mdd": -12.4758006362507,
+      "trades": 381,
+      "trades_per_day": 6.24625718677065,
+      "wr": 0.6430446194225722,
+      "avg_notional": 1.024156240893434,
+      "avg_leverage": 1.594120993560431,
+      "long_entries": 165,
+      "short_entries": 216,
+      "entry_blocks": {
+        "cash_signal": 5368,
+        "model_cooldown": 295,
+        "loss_cooldown": 3264,
+        "daily_dd_lock": 1204,
+        "daily_loss_lock": 254,
+        "daily_trade_budget": 49
+      },
+      "exits": {
+        "exit_governor": 381
+      },
+      "exit_prob_mean": 0.1675999207009711,
+      "exit_prob_p95": 0.5419147312641144
+    },
+    "score": 623.8871899266439
+  },
+  "selected_planner": {
+    "gamma": 0.55,
+    "prior_weight": 0.08,
+    "depth": 2,
+    "score_floor": 0.08,
+    "confidence_floor": 0.0,
+    "value_floor": -0.05
+  },
+  "final_2026": [
+    {
+      "name": "baseline_hf_no_limit",
+      "eval": {
+        "pnl": 216.27632468150387,
+        "mdd": -17.793126681150873,
+        "trades": 536,
+        "trades_per_day": 9.136363636363637,
+        "wr": 0.5186567164179104,
+        "avg_notional": 0.6014376222262948,
+        "avg_leverage": 1.5747924897015144,
+        "long_entries": 260,
+        "short_entries": 276,
+        "entry_blocks": {
+          "model_cooldown": 444,
+          "loss_cooldown": 6192,
+          "daily_trade_budget": 1069,
+          "daily_dd_lock": 732,
+          "daily_loss_lock": 292
+        },
+        "exits": {
+          "exit_governor": 535,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.26148306848275327,
+        "exit_prob_p95": 0.6199096736839728
+      },
+      "monthly": {
+        "jan": {
+          "pnl": 54.88582144661016,
+          "mdd": -6.49001592159374,
+          "trades": 331,
+          "trades_per_day": 10.678615436316791,
+          "wr": 0.46827794561933533,
+          "avg_notional": 0.5680364259951031,
+          "avg_leverage": 1.5858502598244153,
+          "long_entries": 159,
+          "short_entries": 172,
+          "entry_blocks": {
+            "model_cooldown": 279,
+            "loss_cooldown": 4224,
+            "daily_trade_budget": 648,
+            "daily_dd_lock": 89,
+            "daily_loss_lock": 50
+          },
+          "exits": {
+            "exit_governor": 330,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.3439879299855591,
+          "exit_prob_p95": 0.7396697935054976
+        },
+        "feb": {
+          "pnl": 103.74679874776271,
+          "mdd": -17.793126681150937,
+          "trades": 206,
+          "trades_per_day": 7.44578313253012,
+          "wr": 0.5970873786407767,
+          "avg_notional": 0.6601367909887206,
+          "avg_leverage": 1.5577028032304872,
+          "long_entries": 102,
+          "short_entries": 104,
+          "entry_blocks": {
+            "loss_cooldown": 1992,
+            "daily_dd_lock": 619,
+            "model_cooldown": 165,
+            "daily_loss_lock": 242,
+            "daily_trade_budget": 421
+          },
+          "exits": {
+            "exit_governor": 205,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.22066064294049928,
+          "exit_prob_p95": 0.48994597880960294
+        }
+      },
+      "score": 162.89694463805125
+    },
+    {
+      "name": "selected_mz_longrun_entry_az_exit0.45",
+      "eval": {
+        "pnl": 305.8878931301292,
+        "mdd": -39.78222125618578,
+        "trades": 349,
+        "trades_per_day": 5.948863636363637,
+        "wr": 0.6074498567335244,
+        "avg_notional": 0.9711158377015844,
+        "avg_leverage": 1.595393608779558,
+        "long_entries": 163,
+        "short_entries": 186,
+        "entry_blocks": {
+          "cash_signal": 5316,
+          "model_cooldown": 263,
+          "loss_cooldown": 3264,
+          "daily_dd_lock": 395,
+          "daily_trade_budget": 54,
+          "daily_loss_lock": 212
+        },
+        "exits": {
+          "exit_governor": 349
+        },
+        "exit_prob_mean": 0.15737659218465272,
+        "exit_prob_p95": 0.5079963803291317
+      },
+      "monthly": {
+        "jan": {
+          "pnl": 131.01153373848865,
+          "mdd": -8.304958492196345,
+          "trades": 172,
+          "trades_per_day": 5.549008625518091,
+          "wr": 0.627906976744186,
+          "avg_notional": 1.025416528979878,
+          "avg_leverage": 1.6203281396619125,
+          "long_entries": 74,
+          "short_entries": 98,
+          "entry_blocks": {
+            "cash_signal": 4293,
+            "model_cooldown": 131,
+            "loss_cooldown": 1536,
+            "daily_dd_lock": 130,
+            "daily_trade_budget": 28
+          },
+          "exits": {
+            "exit_governor": 171,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.1665907996403303,
+          "exit_prob_p95": 0.5736064314842224
+        },
+        "feb": {
+          "pnl": 102.29108338607422,
+          "mdd": -31.550692381692315,
+          "trades": 178,
+          "trades_per_day": 6.433734939759036,
+          "wr": 0.5898876404494382,
+          "avg_notional": 0.944153809604346,
+          "avg_leverage": 1.5725061698594611,
+          "long_entries": 90,
+          "short_entries": 88,
+          "entry_blocks": {
+            "cash_signal": 1026,
+            "loss_cooldown": 1728,
+            "model_cooldown": 132,
+            "daily_loss_lock": 212,
+            "daily_dd_lock": 206,
+            "daily_trade_budget": 26
+          },
+          "exits": {
+            "exit_governor": 178
+          },
+          "exit_prob_mean": 0.15075111125505058,
+          "exit_prob_p95": 0.4463352143764496
+        }
+      },
+      "score": 186.54122936157188
+    }
+  ],
+  "cost_stress": {
+    "cost_1x": [
+      {
+        "name": "baseline_hf_no_limit",
+        "eval": {
+          "pnl": 216.27632468150387,
+          "mdd": -17.793126681150873,
+          "trades": 536,
+          "trades_per_day": 9.136363636363637,
+          "wr": 0.5186567164179104,
+          "avg_notional": 0.6014376222262948,
+          "avg_leverage": 1.5747924897015144,
+          "long_entries": 260,
+          "short_entries": 276,
+          "entry_blocks": {
+            "model_cooldown": 444,
+            "loss_cooldown": 6192,
+            "daily_trade_budget": 1069,
+            "daily_dd_lock": 732,
+            "daily_loss_lock": 292
+          },
+          "exits": {
+            "exit_governor": 535,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.26148306848275327,
+          "exit_prob_p95": 0.6199096736839728
+        },
+        "score": 162.89694463805125
+      },
+      {
+        "name": "selected_mz_longrun_entry_az_exit0.45",
+        "eval": {
+          "pnl": 305.8878931301292,
+          "mdd": -39.78222125618578,
+          "trades": 349,
+          "trades_per_day": 5.948863636363637,
+          "wr": 0.6074498567335244,
+          "avg_notional": 0.9711158377015844,
+          "avg_leverage": 1.595393608779558,
+          "long_entries": 163,
+          "short_entries": 186,
+          "entry_blocks": {
+            "cash_signal": 5316,
+            "model_cooldown": 263,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 395,
+            "daily_trade_budget": 54,
+            "daily_loss_lock": 212
+          },
+          "exits": {
+            "exit_governor": 349
+          },
+          "exit_prob_mean": 0.15737659218465272,
+          "exit_prob_p95": 0.5079963803291317
+        },
+        "score": 186.54122936157188
+      }
+    ],
+    "cost_2x": [
+      {
+        "name": "baseline_hf_no_limit",
+        "eval": {
+          "pnl": 208.54303234335993,
+          "mdd": -18.675709131728723,
+          "trades": 444,
+          "trades_per_day": 7.568181818181818,
+          "wr": 0.3918918918918919,
+          "avg_notional": 0.5558002449009622,
+          "avg_leverage": 1.5815113584122265,
+          "long_entries": 211,
+          "short_entries": 233,
+          "entry_blocks": {
+            "model_cooldown": 363,
+            "loss_cooldown": 6456,
+            "daily_dd_lock": 800,
+            "daily_loss_lock": 198,
+            "daily_trade_budget": 196
+          },
+          "exits": {
+            "exit_governor": 443,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.23367473500636232,
+          "exit_prob_p95": 0.5353637308381062
+        },
+        "score": 152.51590494817376
+      },
+      {
+        "name": "selected_mz_longrun_entry_az_exit0.45",
+        "eval": {
+          "pnl": 129.15365771811912,
+          "mdd": -39.81729071245413,
+          "trades": 312,
+          "trades_per_day": 5.318181818181818,
+          "wr": 0.46794871794871795,
+          "avg_notional": 0.892627272377959,
+          "avg_leverage": 1.5942961801206126,
+          "long_entries": 142,
+          "short_entries": 170,
+          "entry_blocks": {
+            "cash_signal": 5142,
+            "model_cooldown": 233,
+            "loss_cooldown": 3960,
+            "daily_loss_lock": 319,
+            "daily_dd_lock": 516,
+            "daily_trade_budget": 28
+          },
+          "exits": {
+            "exit_governor": 312
+          },
+          "exit_prob_mean": 0.15665777913178922,
+          "exit_prob_p95": 0.5099511146545411
+        },
+        "score": 9.701785580756734
+      }
+    ],
+    "cost_3x": [
+      {
+        "name": "baseline_hf_no_limit",
+        "eval": {
+          "pnl": 6.1916979988765775,
+          "mdd": -22.233233716250357,
+          "trades": 537,
+          "trades_per_day": 9.153409090909092,
+          "wr": 0.2905027932960894,
+          "avg_notional": 0.37366801746024186,
+          "avg_leverage": 1.5828607614167296,
+          "long_entries": 257,
+          "short_entries": 280,
+          "entry_blocks": {
+            "model_cooldown": 435,
+            "loss_cooldown": 9120,
+            "daily_trade_budget": 123,
+            "daily_dd_lock": 100,
+            "daily_loss_lock": 397
+          },
+          "exits": {
+            "exit_governor": 536,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.30008689910276004,
+          "exit_prob_p95": 0.6747891010250278
+        },
+        "score": -60.5080031498745
+      },
+      {
+        "name": "selected_mz_longrun_entry_az_exit0.45",
+        "eval": {
+          "pnl": 54.50409906269944,
+          "mdd": -37.28656236039301,
+          "trades": 293,
+          "trades_per_day": 4.994318181818182,
+          "wr": 0.42662116040955633,
+          "avg_notional": 0.8376239363431813,
+          "avg_leverage": 1.5933158749483742,
+          "long_entries": 133,
+          "short_entries": 160,
+          "entry_blocks": {
+            "cash_signal": 4878,
+            "model_cooldown": 221,
+            "loss_cooldown": 4008,
+            "daily_dd_lock": 748,
+            "daily_loss_lock": 432
+          },
+          "exits": {
+            "exit_governor": 293
+          },
+          "exit_prob_mean": 0.15385017307912066,
+          "exit_prob_p95": 0.4901517242193223
+        },
+        "score": -57.355588018479594
+      }
+    ]
+  },
+  "decision": {
+    "selected_validation_name": "mzlr_g0.55_p0.08_d2_sf0.08_cf0.00_vf-0.05_azexit0.45",
+    "selected_validation_pnl": 661.3145918353961,
+    "selected_2026_pnl": 305.8878931301292,
+    "selected_2026_mdd": -39.78222125618578,
+    "baseline_2026_pnl": 216.27632468150387
+  }
+}

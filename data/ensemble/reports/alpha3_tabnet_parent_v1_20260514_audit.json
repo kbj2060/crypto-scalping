@@ -1,0 +1,36 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "tabnet_parent_did_not_improve_alpha3_cost1"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "normalizer": "expanding_monthly_quantile_fit_prior_months",
+  "training_techniques": [
+    "HGB soft-label distillation warmup",
+    "oracle-label fine-tuning",
+    "gradient scaler alpha=0.10",
+    "homoscedastic multitask loss",
+    "ReduceLROnPlateau",
+    "early stopping",
+    "gradient clipping",
+    "SWA best-effort",
+    "MC dropout inference",
+    "virtual sink nodes",
+    "entmax15 if installed else sparsemax fallback"
+  ],
+  "selected_runtime": {
+    "name": "tabnet_c0.38_q-0.015_u0.090_s1.10_cap3.10_arg",
+    "confidence_floor": 0.38,
+    "quality_floor": -0.015,
+    "uncertainty_max": 0.09,
+    "notional_scale": 1.1,
+    "max_notional": 3.1,
+    "use_expected_buckets": false
+  }
+}

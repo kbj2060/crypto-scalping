@@ -1,0 +1,307 @@
+{
+  "model_id": "regime_pred_moe_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_20260517/regime_pred_moe_2024.joblib",
+  "train_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "predict_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+  "clean_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2024_clean_regime_bgmm_v5.csv",
+  "clean_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_clean_regime_bgmm_v5.csv",
+  "horizon_bars": 36,
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw",
+    "normal"
+  ],
+  "validation_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004228528078089256,
+      "abs_ret_55": 0.005544679992295798,
+      "range_35": 0.010733023633379468,
+      "range_55": 0.014330216850626257,
+      "range_65": 0.016987628602388782,
+      "eff_25": 0.20403416991709633,
+      "eff_45": 0.3603938350747628,
+      "eff_50": 0.3990494494688897,
+      "adverse_45": 0.004819009703531501
+    },
+    "label_counts": {
+      "bull": 22602,
+      "bear": 19902,
+      "chop": 36902,
+      "whipsaw": 5128,
+      "normal": 20809
+    },
+    "label_share": {
+      "bull": 0.21455625907748974,
+      "bear": 0.18892569985665872,
+      "chop": 0.35030329495077983,
+      "whipsaw": 0.048679076920156064,
+      "normal": 0.19753566919491566
+    },
+    "threshold_policy": "thresholds_fit_on_pre_validation_2024_rows_only",
+    "threshold_fit_rows": 78884
+  },
+  "final_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004372901806545071,
+      "abs_ret_55": 0.005743159064446447,
+      "range_35": 0.0110209271474907,
+      "range_55": 0.014792764942309968,
+      "range_65": 0.017391002409697955,
+      "eff_25": 0.20527470543951218,
+      "eff_45": 0.36245988118798184,
+      "eff_50": 0.40098534730800445,
+      "adverse_45": 0.004941124880986553
+    },
+    "label_counts": {
+      "bull": 22066,
+      "bear": 19506,
+      "chop": 38783,
+      "whipsaw": 4894,
+      "normal": 20094
+    },
+    "label_share": {
+      "bull": 0.2094681184321692,
+      "bear": 0.18516655117093683,
+      "chop": 0.3681592512079588,
+      "whipsaw": 0.04645776178768404,
+      "normal": 0.19074831740125114
+    },
+    "threshold_policy": "thresholds_fit_on_all_2024_rows_for_final_2024_only_model"
+  },
+  "feature_count": 77,
+  "feature_cols": [
+    "amihud_illiquidity_z",
+    "bb_width",
+    "bb_width_z",
+    "big_trade_ratio",
+    "breakout_strength",
+    "btc_corr_60",
+    "chop_index",
+    "clean_regime_2024_unsup_v4_cluster_confidence",
+    "clean_regime_2024_unsup_v4_cluster_entropy",
+    "clean_regime_2024_unsup_v4_cluster_prob_0",
+    "clean_regime_2024_unsup_v4_cluster_prob_1",
+    "clean_regime_2024_unsup_v4_cluster_prob_2",
+    "clean_regime_2024_unsup_v4_cluster_prob_3",
+    "clean_regime_2024_unsup_v4_cluster_prob_4",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_trend_bias",
+    "close_btc",
+    "conf_mdjd",
+    "count_long_short_ratio",
+    "cvp_cluster_position",
+    "cvp_poc_dist",
+    "cvp_volume_imbalance",
+    "dual_momentum",
+    "eth_btc_ratio_change",
+    "funding_price_divergence",
+    "funding_roc_288",
+    "fvg_dist",
+    "garman_klass_vol",
+    "hma_slope",
+    "hour_cos",
+    "hour_sin",
+    "is_hour_open",
+    "kalman_velocity",
+    "kel",
+    "last_funding_rate",
+    "log_return",
+    "long_squeeze_risk",
+    "macd_hist",
+    "mean_reversion_z",
+    "minute_cos",
+    "minute_sin",
+    "mta_funding",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "net_taker_ratio",
+    "ofi_acceleration",
+    "ofti",
+    "oi_change_rate",
+    "parkinson_vol",
+    "pred_mdjd",
+    "quote_volume",
+    "quote_volume_btc",
+    "rogers_satchell_vol",
+    "rsi",
+    "session_europe",
+    "session_us",
+    "smart_money_flow",
+    "squeeze_power",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "svps",
+    "taker_acceleration",
+    "taker_buy_base",
+    "taker_buy_quote",
+    "trade_intensity",
+    "trades",
+    "turtle_signal",
+    "volatility_z",
+    "volume",
+    "volume_btc",
+    "volume_profile_signal",
+    "whale_retail_ratio",
+    "wick_ratio"
+  ],
+  "selected_clean_features_used": [
+    "clean_regime_2024_unsup_v4_cluster_confidence",
+    "clean_regime_2024_unsup_v4_cluster_entropy",
+    "clean_regime_2024_unsup_v4_cluster_prob_0",
+    "clean_regime_2024_unsup_v4_cluster_prob_1",
+    "clean_regime_2024_unsup_v4_cluster_prob_2",
+    "clean_regime_2024_unsup_v4_cluster_prob_3",
+    "clean_regime_2024_unsup_v4_cluster_prob_4",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_trend_bias"
+  ],
+  "forbidden_outputs_excluded": [
+    "clean_regime_2024_unsup_v4_bear_prob",
+    "clean_regime_2024_unsup_v4_bull_prob",
+    "clean_regime_2024_unsup_v4_chop_prob",
+    "clean_regime_2024_unsup_v4_cluster",
+    "clean_regime_2024_unsup_v4_normal_prob",
+    "clean_regime_2024_unsup_v4_risk_off_prob",
+    "clean_regime_2024_unsup_v4_state_code",
+    "clean_regime_2024_unsup_v4_transition_risk",
+    "clean_regime_2024_unsup_v4_whipsaw_prob",
+    "cvp_regime",
+    "regime_bear",
+    "regime_break",
+    "regime_bull",
+    "regime_chop",
+    "regime_normal",
+    "regime_trending",
+    "regime_whipsaw"
+  ],
+  "validation": {
+    "rows": 26459,
+    "accuracy": 0.3165274575758721,
+    "balanced_accuracy": 0.3282584602187938,
+    "log_loss": 1.488739971863341,
+    "true_counts": {
+      "bull": 6109,
+      "bear": 5304,
+      "chop": 7895,
+      "whipsaw": 1436,
+      "normal": 5715
+    },
+    "pred_counts": {
+      "bull": 738,
+      "bear": 10309,
+      "chop": 7437,
+      "whipsaw": 4800,
+      "normal": 3175
+    },
+    "confusion_matrix": [
+      [
+        180,
+        2515,
+        1241,
+        1328,
+        845
+      ],
+      [
+        142,
+        2398,
+        1103,
+        978,
+        683
+      ],
+      [
+        261,
+        2429,
+        4254,
+        350,
+        601
+      ],
+      [
+        26,
+        501,
+        60,
+        673,
+        176
+      ],
+      [
+        129,
+        2466,
+        779,
+        1471,
+        870
+      ]
+    ]
+  },
+  "train_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_20260517/training_features_2024_regime_pred_moe.csv",
+  "predict_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_20260517/training_features_2025_regime_pred_moe.csv",
+  "predict_probability_sum_min": 0.9999999999999997,
+  "predict_probability_sum_max": 1.0000000000000004,
+  "predict_counts": {
+    "bull": 3449,
+    "bear": 40540,
+    "chop": 25351,
+    "whipsaw": 26638,
+    "normal": 9086
+  },
+  "predict_confidence_mean": 0.3463324836516053,
+  "predict_entropy_mean": 0.9168973988085694,
+  "predict_path_diagnostics": {
+    "bull": {
+      "rows": 3449,
+      "future_ret_mean": -0.00022966126306952163,
+      "range_width_mean": 0.017879446819453335,
+      "long_quality_mean": -0.0014907708150521948,
+      "short_quality_mean": 0.001660244085845616,
+      "trend_efficiency_mean": 0.4184113932854475
+    },
+    "bear": {
+      "rows": 40540,
+      "future_ret_mean": -0.00022433398372390733,
+      "range_width_mean": 0.01827351513034067,
+      "long_quality_mean": -0.00036972712824978203,
+      "short_quality_mean": 0.0005529161860486275,
+      "trend_efficiency_mean": 0.41757904635915266
+    },
+    "chop": {
+      "rows": 25351,
+      "future_ret_mean": 0.00029794418645445975,
+      "range_width_mean": 0.01168058373170607,
+      "long_quality_mean": 7.981555970513355e-05,
+      "short_quality_mean": -5.628225379314652e-06,
+      "trend_efficiency_mean": 0.4051064115274421
+    },
+    "whipsaw": {
+      "rows": 26638,
+      "future_ret_mean": 0.0001893688596859899,
+      "range_width_mean": 0.028848428036584335,
+      "long_quality_mean": -0.0014155462951370157,
+      "short_quality_mean": 0.0019143449816799922,
+      "trend_efficiency_mean": 0.41961876219264804
+    },
+    "normal": {
+      "rows": 9086,
+      "future_ret_mean": 0.0002803310375897733,
+      "range_width_mean": 0.01895932597467138,
+      "long_quality_mean": -0.0008768682354257397,
+      "short_quality_mean": 0.0010832278692375857,
+      "trend_efficiency_mean": 0.40871438058722165
+    }
+  },
+  "notes": [
+    "5-class supervised trading-regime predictor for MoE expert routing.",
+    "risk_off and transition are not classes or outputs.",
+    "clean_regime BGMM is used only as selected prior/embedding features.",
+    "Final MoE routing should consume regime_pred_* probabilities, not clean_regime_* cluster ids."
+  ]
+}

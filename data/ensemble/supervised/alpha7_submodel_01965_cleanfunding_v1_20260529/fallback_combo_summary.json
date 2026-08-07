@@ -1,0 +1,70 @@
+{
+  "model_id": "alpha7_submodel_01965_cleanfunding_v1_20260529",
+  "source_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_submodel_01965_cleanfunding_v1_20260529/report.json",
+  "ranking": [
+    {
+      "variant": "both_v2_tp",
+      "primary_model": "primary_v2_tp",
+      "fallback_model": "fallback_v2_tp",
+      "val_cost3_pnl": 24.47022217341326,
+      "val_cost3_mdd": -27.768498429852993,
+      "val_cost3_trades": 90,
+      "val_cost3_wr": 0.1111111111111111,
+      "oos_cost3_pnl": 46.89524513365435,
+      "oos_cost3_mdd": -32.18350426153462,
+      "oos_cost3_trades": 78,
+      "oos_cost3_wr": 0.15384615384615385,
+      "oos_combo_active": 1082,
+      "oos_primary_active": 848,
+      "oos_fallback_active": 952
+    },
+    {
+      "variant": "primary_v2_fallback_no_tp",
+      "primary_model": "primary_v2_tp",
+      "fallback_model": "fallback_no_tp",
+      "val_cost3_pnl": 9.714653031775743,
+      "val_cost3_mdd": -29.40157462144567,
+      "val_cost3_trades": 103,
+      "val_cost3_wr": 0.0970873786407767,
+      "oos_cost3_pnl": 55.301345320109085,
+      "oos_cost3_mdd": -31.469893565047645,
+      "oos_cost3_trades": 73,
+      "oos_cost3_wr": 0.1643835616438356,
+      "oos_combo_active": 1101,
+      "oos_primary_active": 848,
+      "oos_fallback_active": 984
+    },
+    {
+      "variant": "primary_no_tp_fallback_v2",
+      "primary_model": "primary_no_tp",
+      "fallback_model": "fallback_v2_tp",
+      "val_cost3_pnl": 42.7257698499514,
+      "val_cost3_mdd": -29.52271729395396,
+      "val_cost3_trades": 90,
+      "val_cost3_wr": 0.1111111111111111,
+      "oos_cost3_pnl": 43.9510626582605,
+      "oos_cost3_mdd": -32.2326346153639,
+      "oos_cost3_trades": 76,
+      "oos_cost3_wr": 0.18421052631578946,
+      "oos_combo_active": 1100,
+      "oos_primary_active": 871,
+      "oos_fallback_active": 952
+    },
+    {
+      "variant": "both_no_tp",
+      "primary_model": "primary_no_tp",
+      "fallback_model": "fallback_no_tp",
+      "val_cost3_pnl": -7.378717545059777,
+      "val_cost3_mdd": -34.339119846199296,
+      "val_cost3_trades": 103,
+      "val_cost3_wr": 0.07766990291262135,
+      "oos_cost3_pnl": 45.51492090259806,
+      "oos_cost3_mdd": -33.492632750406926,
+      "oos_cost3_trades": 73,
+      "oos_cost3_wr": 0.1780821917808219,
+      "oos_combo_active": 1116,
+      "oos_primary_active": 871,
+      "oos_fallback_active": 984
+    }
+  ]
+}

@@ -1,0 +1,318 @@
+{
+  "baseline_sniper_micro": {
+    "pnl": 13987.647320942639,
+    "mdd": -14.077185285116222,
+    "trades": 691,
+    "trades_per_day": 11.777712019885188,
+    "wr": 0.7452966714905933,
+    "sniper_entries": 142,
+    "trend_entries": 0,
+    "micro_entries": 548,
+    "day_entries": 0,
+    "trend_regime_entries": {},
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 398,
+      "chop": 78
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_baseline_recheck.json"
+  },
+  "trend_v1_default_sniper_trend_micro": {
+    "pnl": 28040.534540478882,
+    "mdd": -13.589513650357487,
+    "trades": 1416,
+    "trades_per_day": 24.134935195596853,
+    "wr": 0.7048022598870056,
+    "sniper_entries": 75,
+    "trend_entries": 786,
+    "micro_entries": 554,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 336,
+      "bear": 450
+    },
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 402,
+      "chop": 80
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_sniper_trend_micro_v1_2026.json"
+  },
+  "trend_v1_default_trend_micro_no_sniper": {
+    "pnl": 15100.329900597993,
+    "mdd": -13.5895136503575,
+    "trades": 1430,
+    "trades_per_day": 24.373557436231284,
+    "wr": 0.6979020979020979,
+    "sniper_entries": 0,
+    "trend_entries": 880,
+    "micro_entries": 549,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 391,
+      "bear": 489
+    },
+    "micro_regime_entries": {
+      "whipsaw": 64,
+      "normal": 405,
+      "chop": 80
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1.pkl",
+    "sniper_enabled": false,
+    "report_path": "tmp/governor_no_day_trend_micro_v1_2026.json"
+  },
+  "trend_c64_g32_sniper_trend_micro": {
+    "pnl": 18155.25617345106,
+    "mdd": -13.984672151719202,
+    "trades": 1114,
+    "trades_per_day": 18.98751257619696,
+    "wr": 0.7199281867145422,
+    "sniper_entries": 97,
+    "trend_entries": 465,
+    "micro_entries": 551,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 189,
+      "bear": 276
+    },
+    "micro_regime_entries": {
+      "whipsaw": 69,
+      "normal": 402,
+      "chop": 80
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1_c64_g32.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_sniper_trend_micro_c64_g32_2026.json"
+  },
+  "trend_c68_g34_sniper_trend_micro_aggressive": {
+    "pnl": 30634.86991433108,
+    "mdd": -13.62349903872352,
+    "trades": 1042,
+    "trades_per_day": 17.760312481505593,
+    "wr": 0.7312859884836852,
+    "sniper_entries": 101,
+    "trend_entries": 386,
+    "micro_entries": 554,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 153,
+      "bear": 233
+    },
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 402,
+      "chop": 80
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1_c68_g34.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_sniper_trend_micro_c68_g34_2026.json"
+  },
+  "trend_c72_g36_sniper_trend_micro": {
+    "pnl": 20745.448298076986,
+    "mdd": -13.832109618979915,
+    "trades": 961,
+    "trades_per_day": 16.379712374977807,
+    "wr": 0.7440166493236212,
+    "sniper_entries": 110,
+    "trend_entries": 301,
+    "micro_entries": 549,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 113,
+      "bear": 188
+    },
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 398,
+      "chop": 79
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1_c72_g36.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_sniper_trend_micro_c72_g36_2026.json"
+  },
+  "trend_c76_g38_sniper_trend_micro_prod": {
+    "pnl": 19429.92592770863,
+    "mdd": -14.077185285116256,
+    "trades": 880,
+    "trades_per_day": 14.999112268450022,
+    "wr": 0.7454545454545455,
+    "sniper_entries": 122,
+    "trend_entries": 209,
+    "micro_entries": 548,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 81,
+      "bear": 128
+    },
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 397,
+      "chop": 79
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1_c76_g38.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_no_day_sniper_trend_micro_c76_g38_2026.json"
+  },
+  "trend_c76_g38_2026_02": {
+    "pnl": 3645.3413311030276,
+    "mdd": -14.077185285116212,
+    "trades": 515,
+    "trades_per_day": 18.612121972643994,
+    "wr": 0.7339805825242719,
+    "sniper_entries": 60,
+    "trend_entries": 133,
+    "micro_entries": 321,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 47,
+      "bear": 86
+    },
+    "micro_regime_entries": {
+      "whipsaw": 40,
+      "normal": 235,
+      "chop": 46
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_v1_c76_g38.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_sniper_trend_micro_c76_g38_2026_02.json"
+  },
+  "trend_c76_g38_fee2x": {
+    "pnl": 378.2971463746467,
+    "mdd": -18.724204925067333,
+    "trades": 832,
+    "trades_per_day": 14.180978871989112,
+    "wr": 0.7487980769230769,
+    "sniper_entries": 117,
+    "trend_entries": 192,
+    "micro_entries": 522,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 72,
+      "bear": 120
+    },
+    "micro_regime_entries": {
+      "whipsaw": 60,
+      "normal": 384,
+      "chop": 78
+    },
+    "cost_config": {
+      "trade_fee": 0.001,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 2.0,
+      "slip_multiplier": 1.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_prod_c76_g38.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_sniper_trend_micro_c76_g38_fee2x.json"
+  },
+  "trend_c76_g38_slip2x": {
+    "pnl": 5060.549435235056,
+    "mdd": -18.64480679918079,
+    "trades": 850,
+    "trades_per_day": 14.487778895661952,
+    "wr": 0.6964705882352941,
+    "sniper_entries": 115,
+    "trend_entries": 192,
+    "micro_entries": 542,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 73,
+      "bear": 119
+    },
+    "micro_regime_entries": {
+      "whipsaw": 69,
+      "normal": 394,
+      "chop": 79
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0004,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 2.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_prod_c76_g38.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_sniper_trend_micro_c76_g38_slip2x.json"
+  },
+  "trend_c76_g38_cost2x": {
+    "pnl": -36.79426105369225,
+    "mdd": -40.83625495679026,
+    "trades": 250,
+    "trades_per_day": 4.261111439900574,
+    "wr": 0.716,
+    "sniper_entries": 29,
+    "trend_entries": 43,
+    "micro_entries": 178,
+    "day_entries": 0,
+    "trend_regime_entries": {
+      "bull": 21,
+      "bear": 22
+    },
+    "micro_regime_entries": {
+      "whipsaw": 21,
+      "normal": 131,
+      "chop": 26
+    },
+    "cost_config": {
+      "trade_fee": 0.001,
+      "trade_slip": 0.0004,
+      "fee_multiplier": 2.0,
+      "slip_multiplier": 2.0
+    },
+    "trend_model": "data/ensemble/supervised/trend_bull_bear_sleeve_prod_c76_g38.pkl",
+    "sniper_enabled": true,
+    "report_path": "tmp/governor_sniper_trend_micro_c76_g38_cost2x.json"
+  }
+}

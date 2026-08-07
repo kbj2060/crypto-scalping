@@ -503,26 +503,71 @@ class RegimeEngine:
     전제: df에 mtf_trend_1h 컬럼이 이미 있어야 함 (호출 전 계산 필요).
     """
     COLS = ['regime_bull', 'regime_bear', 'regime_chop', 'regime_whipsaw', 'regime_normal']
+    VERSION = "v3_semantic_drift_flip_20260503"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        diff_abs_sum = df['close'].diff().abs().rolling(24).sum()
-        net_change   = df['close'] - df['close'].shift(24)
-        er           = (net_change.abs() / diff_abs_sum).fillna(0)
+        close = pd.to_numeric(df['close'], errors='coerce').ffill()
+        diff_abs = close.diff().abs()
+        net_change_24 = close - close.shift(24)
+        net_change_48 = close - close.shift(48)
+        er_24 = (net_change_24.abs() / (diff_abs.rolling(24, min_periods=4).sum() + 1e-12)).fillna(0)
+        er_48 = (net_change_48.abs() / (diff_abs.rolling(48, min_periods=8).sum() + 1e-12)).fillna(0)
+        ret_48 = (close / close.shift(48) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0)
 
-        raw_vol      = df['close'].pct_change().rolling(24).std().fillna(0)
+        ret = close.pct_change()
+        raw_vol = ret.rolling(24, min_periods=4).std().fillna(0)
         # bfill 제거: 롤링 초반 NaN을 미래 변동성으로 채우는 룩어헤드 편향 방지
-        vol_mean_24h = raw_vol.rolling(288).mean().ffill().fillna(0)
-        vol_std_24h  = raw_vol.rolling(288).std().ffill().fillna(0) + 1e-8
-        vol_z        = (raw_vol - vol_mean_24h) / vol_std_24h
-        mtf_1h_trend = df['mtf_trend_1h'].fillna(0.0)
+        vol_mean_24h = raw_vol.rolling(288, min_periods=24).mean().ffill().fillna(0)
+        vol_std_24h = raw_vol.rolling(288, min_periods=24).std().ffill().fillna(0) + 1e-8
+        vol_z = (raw_vol - vol_mean_24h) / vol_std_24h
+        mtf_1h_trend = pd.to_numeric(df['mtf_trend_1h'], errors='coerce').fillna(0.0)
+
+        ret_sign = np.sign(ret.where(ret.abs() >= 1e-8, np.nan)).ffill().fillna(0.0)
+        sign_flip_24 = (
+            (ret_sign != ret_sign.shift(1))
+            .astype(float)
+            .rolling(24, min_periods=4)
+            .mean()
+            .fillna(0.0)
+        )
 
         for col in self.COLS:
             df[col] = 0.0
 
-        bull_idx    = (er >= 0.20) & (net_change > 0) & (mtf_1h_trend > 0)
-        bear_idx    = (er >= 0.20) & (net_change < 0) & (mtf_1h_trend < 0)
-        chop_idx    = ~(bull_idx | bear_idx) & (vol_z < -0.5)
-        whipsaw_idx = ~(bull_idx | bear_idx) & (vol_z >  0.5)
+        trend_idx = (er_24 >= 0.20) | (er_48 >= 0.16)
+        bull_idx = trend_idx & (net_change_48 > 0) & (mtf_1h_trend > 0)
+        bear_idx = trend_idx & (net_change_48 < 0) & (mtf_1h_trend < 0)
+
+        drift_bull_idx = (
+            ~bear_idx
+            & (net_change_48 > 0)
+            & (mtf_1h_trend > 0.00015)
+            & (er_48 >= 0.08)
+            & (ret_48 > 0.0015)
+        )
+        bull_idx = bull_idx | drift_bull_idx
+        drift_bear_idx = (
+            ~bull_idx
+            & (net_change_48 < 0)
+            & (mtf_1h_trend < -0.00015)
+            & (er_48 >= 0.08)
+            & (ret_48 < -0.0015)
+        )
+        bear_idx = bear_idx | drift_bear_idx
+
+        whipsaw_idx = (
+            ~(bull_idx | bear_idx)
+            & (vol_z > 0.5)
+            & (er_24 < 0.18)
+            & (sign_flip_24 > 0.52)
+        )
+        chop_idx = (
+            ~(bull_idx | bear_idx | whipsaw_idx)
+            & (vol_z < -0.5)
+            & (er_24 < 0.14)
+            & (er_48 < 0.14)
+            & (mtf_1h_trend.abs() < 0.0005)
+        )
 
         df.loc[bull_idx,    'regime_bull']    = 1.0
         df.loc[bear_idx,    'regime_bear']    = 1.0
@@ -667,10 +712,16 @@ class VolatilityModelEngine:
         """GARCH(1,1): σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}
         파라미터: α=0.10, β=0.85 (크립토 표준값, α+β=0.95 < 1)
         """
-        _rets = df['log_return'].values.astype(np.float64)
+        _rets = (
+            pd.to_numeric(df['log_return'], errors='coerce')
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .to_numpy(dtype=np.float64)
+        )
         N = len(_rets)
         _eps2 = _rets ** 2
-        _init_var = float(np.nanmean(_eps2[:min(288, N)])) or 1e-8
+        # Causal init: do not seed the first bar with the next 288 bars.
+        _init_var = max(float(_eps2[0]) if N else 0.0, 1e-8)
         _alpha, _beta = 0.10, 0.85
         _omega = _init_var * (1.0 - _alpha - _beta)
 
@@ -831,7 +882,11 @@ class NewEliteSignalEngine:
         is_swing_low  = (low  == local_min_arr)
 
         for i in range(window, n):
-            s, e = i - window, i
+            # A centered local-extrema filter needs `confirm` bars after a pivot candidate.
+            # At bar i, only candidates up to i-confirm are fully confirmed and causal.
+            s, e = i - window, i - confirm + 1
+            if e <= s:
+                continue
 
             # ── Equal Highs ──
             swing_h_idx = np.where(is_swing_high[s:e])[0]

@@ -1,0 +1,29 @@
+{
+  "stage": "holdout_chop_vs_flat",
+  "generated_at": "2026-07-19T20:59:57.377423+09:00",
+  "baseline": {
+    "pnl": -43.99471952968466,
+    "mdd": -51.347086012791166,
+    "trades": 16,
+    "wr": 0.25,
+    "mark_to_market_mdd": -52.91862617006298
+  },
+  "flat_control": {
+    "pnl": -22.2526426238811,
+    "mdd": -27.521003748923867,
+    "trades": 16,
+    "wr": 0.25,
+    "mark_to_market_mdd": -28.651118871309468
+  },
+  "chop_based": {
+    "pnl": -14.136097172735774,
+    "mdd": -29.699385976554428,
+    "trades": 16,
+    "wr": 0.25,
+    "mark_to_market_mdd": -31.595847163724088
+  },
+  "chop_extra_value_vs_flat_on_holdout": {
+    "extra_pnl_pp": 8.116545451145328,
+    "extra_mdd_pp": -2.1783822276305607
+  }
+}

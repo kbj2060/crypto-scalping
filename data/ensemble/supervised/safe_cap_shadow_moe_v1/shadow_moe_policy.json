@@ -1,0 +1,390 @@
+{
+  "model_id": "safe_cap_shadow_moe_v1",
+  "selected_safe_cap_candidate": {
+    "name": "learned_action_edge3_min10_buf0p0035_gatefinal",
+    "scheme": "action_edge3",
+    "min_bucket_trades": 10,
+    "cost_buffer": 0.0035,
+    "gate_notional_mode": "final",
+    "max_notional": 5.0,
+    "selectable": true,
+    "cap_map": {
+      "DEFENSIVE|e2": 5.0,
+      "HIGH|e0": 3.6,
+      "HIGH|e1": 5.0,
+      "HIGH|e2": 5.0
+    },
+    "fallback_cap_raw": 5.0,
+    "fallback_cap": 3.6,
+    "thresholds": {
+      "edge3": [
+        0.0015764515711690907,
+        0.0035705357124824998
+      ],
+      "edge2": [
+        0.0023771093201228263
+      ],
+      "vol2": [
+        0.0
+      ]
+    },
+    "learn_diagnostics": {
+      "fallback_cap": 5.0,
+      "global_scores": [
+        {
+          "cap": 3.6,
+          "score": 3340.7779237444547,
+          "metrics": {
+            "pnl": 3390.046975754193,
+            "mdd": -24.634526004869205,
+            "trades": 187,
+            "blocked": 186,
+            "boosted": 0,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.6951871657754011,
+            "trades_per_day": 6.049196899921375,
+            "avg_notional": 3.5326203208556266,
+            "max_notional": 3.6,
+            "max_margin_fraction": 0.72,
+            "min_liq_buffer_pct": 4112.781739259536,
+            "final_cash": 34.900469757541934,
+            "reason_counts": {
+              "cost_gate_block": 186
+            },
+            "bucket_counts": {
+              "HIGH|e0": 119,
+              "HIGH|e1": 114,
+              "DEFENSIVE|e2": 16,
+              "HIGH|e2": 106,
+              "DEFENSIVE|e1": 3,
+              "MID|e1": 7,
+              "MID|e2": 3,
+              "MID|e0": 5
+            },
+            "cap_counts": {
+              "3.6": 373
+            },
+            "cost_mult": 1.0
+          }
+        },
+        {
+          "cap": 4.0,
+          "score": 5310.49347464721,
+          "metrics": {
+            "pnl": 5363.530305561389,
+            "mdd": -26.518415457089397,
+            "trades": 196,
+            "blocked": 177,
+            "boosted": 196,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.6938775510204082,
+            "trades_per_day": 6.3403347186341685,
+            "avg_notional": 3.9285714285714293,
+            "max_notional": 4.0,
+            "max_margin_fraction": 0.8,
+            "min_liq_buffer_pct": 3649.900626538417,
+            "final_cash": 54.63530305561388,
+            "reason_counts": {
+              "cost_gate_block": 177
+            },
+            "bucket_counts": {
+              "HIGH|e0": 119,
+              "HIGH|e1": 114,
+              "DEFENSIVE|e2": 16,
+              "HIGH|e2": 106,
+              "DEFENSIVE|e1": 3,
+              "MID|e1": 7,
+              "MID|e2": 3,
+              "MID|e0": 5
+            },
+            "cap_counts": {
+              "4.0": 373
+            },
+            "cost_mult": 1.0
+          }
+        },
+        {
+          "cap": 4.5,
+          "score": 8488.573670916714,
+          "metrics": {
+            "pnl": 8546.002270215358,
+            "mdd": -28.714299649322548,
+            "trades": 202,
+            "blocked": 171,
+            "boosted": 202,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.6831683168316832,
+            "trades_per_day": 6.534426597776031,
+            "avg_notional": 4.4183168316831685,
+            "max_notional": 4.5,
+            "max_margin_fraction": 0.9,
+            "min_liq_buffer_pct": 3187.039976377757,
+            "final_cash": 86.46002270215358,
+            "reason_counts": {
+              "cost_gate_block": 171
+            },
+            "bucket_counts": {
+              "HIGH|e0": 119,
+              "HIGH|e1": 114,
+              "DEFENSIVE|e2": 16,
+              "HIGH|e2": 106,
+              "DEFENSIVE|e1": 3,
+              "MID|e1": 7,
+              "MID|e2": 3,
+              "MID|e0": 5
+            },
+            "cap_counts": {
+              "4.5": 373
+            },
+            "cost_mult": 1.0
+          }
+        },
+        {
+          "cap": 5.0,
+          "score": 13926.969798265382,
+          "metrics": {
+            "pnl": 13988.472641646249,
+            "mdd": -30.75142169043351,
+            "trades": 207,
+            "blocked": 166,
+            "boosted": 207,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.6811594202898551,
+            "trades_per_day": 6.69616983039425,
+            "avg_notional": 4.911433172302737,
+            "max_notional": 5.0,
+            "max_margin_fraction": 1.0,
+            "min_liq_buffer_pct": 2816.7719188096894,
+            "final_cash": 140.88472641646248,
+            "reason_counts": {
+              "cost_gate_block": 166
+            },
+            "bucket_counts": {
+              "HIGH|e0": 119,
+              "HIGH|e1": 114,
+              "DEFENSIVE|e2": 16,
+              "HIGH|e2": 106,
+              "DEFENSIVE|e1": 3,
+              "MID|e1": 7,
+              "MID|e2": 3,
+              "MID|e0": 5
+            },
+            "cap_counts": {
+              "5.0": 373
+            },
+            "cost_mult": 1.0
+          }
+        }
+      ],
+      "bucket_choices": {
+        "DEFENSIVE|e2": {
+          "count": 16,
+          "selected_cap": 5.0,
+          "selected_score": -0.362242587956203,
+          "selected_metrics": {
+            "pnl": 61.14060079291082,
+            "mdd": -30.75142169043351,
+            "trades": 16,
+            "blocked": 0,
+            "boosted": 16,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.625,
+            "trades_per_day": 0.604327868852459,
+            "avg_notional": 4.166666666666666,
+            "max_notional": 4.166666666666667,
+            "max_margin_fraction": 0.8333333333333334,
+            "min_liq_buffer_pct": 3589.533399486306,
+            "final_cash": 1.6114060079291082,
+            "reason_counts": {},
+            "bucket_counts": {
+              "DEFENSIVE|e2": 16
+            },
+            "cap_counts": {
+              "5.0": 16
+            },
+            "cost_mult": 1.0
+          },
+          "all_scores": [
+            {
+              "cap": 3.6,
+              "score": -7.219285825864638
+            },
+            {
+              "cap": 4.0,
+              "score": -5.694096542013142
+            },
+            {
+              "cap": 4.5,
+              "score": -3.28855197187103
+            },
+            {
+              "cap": 5.0,
+              "score": -0.362242587956203
+            }
+          ]
+        },
+        "HIGH|e0": {
+          "count": 119,
+          "selected_cap": 3.6,
+          "selected_score": 0.0,
+          "selected_metrics": {
+            "pnl": 0.0,
+            "mdd": 0.0,
+            "trades": 0,
+            "blocked": 119,
+            "boosted": 0,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.0,
+            "trades_per_day": 0.0,
+            "avg_notional": 0.0,
+            "max_notional": 0.0,
+            "max_margin_fraction": 0.0,
+            "min_liq_buffer_pct": NaN,
+            "final_cash": 1.0,
+            "reason_counts": {
+              "cost_gate_block": 119
+            },
+            "bucket_counts": {
+              "HIGH|e0": 119
+            },
+            "cap_counts": {
+              "3.6": 119
+            },
+            "cost_mult": 1.0
+          },
+          "all_scores": [
+            {
+              "cap": 3.6,
+              "score": 0.0
+            },
+            {
+              "cap": 4.0,
+              "score": 0.0
+            },
+            {
+              "cap": 4.5,
+              "score": 0.0
+            },
+            {
+              "cap": 5.0,
+              "score": 0.0
+            }
+          ]
+        },
+        "HIGH|e1": {
+          "count": 114,
+          "selected_cap": 5.0,
+          "selected_score": 182.9817645295542,
+          "selected_metrics": {
+            "pnl": 198.66610332266475,
+            "mdd": -7.842169396555276,
+            "trades": 79,
+            "blocked": 35,
+            "boosted": 79,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.6455696202531646,
+            "trades_per_day": 2.570266606416629,
+            "avg_notional": 5.0,
+            "max_notional": 5.0,
+            "max_margin_fraction": 1.0,
+            "min_liq_buffer_pct": 3069.906236918482,
+            "final_cash": 2.9866610332266474,
+            "reason_counts": {
+              "cost_gate_block": 35
+            },
+            "bucket_counts": {
+              "HIGH|e1": 114
+            },
+            "cap_counts": {
+              "5.0": 114
+            },
+            "cost_mult": 1.0
+          },
+          "all_scores": [
+            {
+              "cap": 3.6,
+              "score": 94.48731514383759
+            },
+            {
+              "cap": 4.0,
+              "score": 126.84613301634869
+            },
+            {
+              "cap": 4.5,
+              "score": 150.51780985208703
+            },
+            {
+              "cap": 5.0,
+              "score": 182.9817645295542
+            }
+          ]
+        },
+        "HIGH|e2": {
+          "count": 106,
+          "selected_cap": 5.0,
+          "selected_score": 2693.4432326884717,
+          "selected_metrics": {
+            "pnl": 2724.325596788181,
+            "mdd": -15.44118204985473,
+            "trades": 106,
+            "blocked": 0,
+            "boosted": 106,
+            "liquidations": 0,
+            "ruin_events": 0,
+            "wr": 0.7358490566037735,
+            "trades_per_day": 3.548942106486863,
+            "avg_notional": 5.0,
+            "max_notional": 5.0,
+            "max_margin_fraction": 1.0,
+            "min_liq_buffer_pct": 2816.77191880969,
+            "final_cash": 28.24325596788181,
+            "reason_counts": {},
+            "bucket_counts": {
+              "HIGH|e2": 106
+            },
+            "cap_counts": {
+              "5.0": 106
+            },
+            "cost_mult": 1.0
+          },
+          "all_scores": [
+            {
+              "cap": 3.6,
+              "score": 1041.2163599633313
+            },
+            {
+              "cap": 4.0,
+              "score": 1379.6438575404607
+            },
+            {
+              "cap": 4.5,
+              "score": 1937.9775937488278
+            },
+            {
+              "cap": 5.0,
+              "score": 2693.4432326884717
+            }
+          ]
+        }
+      }
+    }
+  },
+  "selected_shadow_config": {
+    "name": "shadow_noop",
+    "reduce_threshold": 99.0,
+    "veto_threshold": 99.0,
+    "boost_threshold": 99.0,
+    "reduce_mult": 1.0,
+    "boost_mult": 1.0,
+    "support_margin": 0.0,
+    "cost_buffer_extra": 0.0,
+    "max_notional": 5.0
+  }
+}

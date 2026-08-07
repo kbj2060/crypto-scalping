@@ -1,0 +1,1140 @@
+{
+  "type": "clean_base_lifecycle_editor_v1",
+  "verdict": "implemented_but_reject_for_promotion_gate",
+  "recommendation": "Keep as research artifact; do not promote until one-shot OOS beats the clean-base PnL/MDD gates with positive 1x/2x cost stress.",
+  "note": "Frozen clean base policy and frozen clean base exit governor. V1 reconstructs the base-admitted trade plan and only edits lifecycle exposure/early exits inside those fixed trades; entry timing, side, and cooldown are audited independently.",
+  "cost_1x": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.20043885648466803,
+    "exit_prob_p95": 0.4421842673379731,
+    "threshold_mean": 0.47183559052211677,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "cost_2x": {
+    "pnl": 127.77647896152212,
+    "mdd": -18.281324431112466,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.46831955922865015,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.20008686244784482,
+    "exit_prob_p95": 0.4420239459191045,
+    "threshold_mean": 0.47159034864525834,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "cost_3x": {
+    "pnl": 68.83403070823721,
+    "mdd": -20.202675787463285,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.39669421487603307,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.19974043520773047,
+    "exit_prob_p95": 0.44212229603036063,
+    "threshold_mean": 0.47154911940073685,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_lifecycle_editor_v1/lifecycle_editor.pkl",
+    "grid_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_grid.csv",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json"
+  },
+  "frozen_artifacts": {
+    "base_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_v4_clean_train_to_2025_10.pkl",
+    "base_policy_sha256": "5a2515c7840c94d0695be52433c524afc646d6fa17d1e6f6055db80b281622fb",
+    "base_exit_governor": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_scope_muzero_az_2026/hf_no_limit_exit_clean_train_to_2025_10.pkl",
+    "base_exit_governor_sha256": "0378def51dbc1a1ed0b30219b7799a872d82a9be49e78bcf517e9d951d376fe3"
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "train_rows": 87496,
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "validation_rows": 17568,
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "eval_rows": 16897,
+    "split_contract": {
+      "train_labels": "2025-01-01 through 2025-10-31",
+      "validation_selection": "2025-11-01 through 2025-12-31",
+      "one_shot_oos": "2026-01-01 through 2026-02-28",
+      "oos_threshold_selection": false
+    }
+  },
+  "base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "cost_1x_pnl": 177.3298088749005,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "clean_base_validation_reference": {
+    "pnl": 553.6100808441419,
+    "mdd": -12.65692178918314,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.581294964028777,
+    "avg_notional": 0.6854554803333598,
+    "avg_leverage": 1.5784158089388312,
+    "long_entries": 337,
+    "short_entries": 358,
+    "entry_blocks": {
+      "model_cooldown": 605,
+      "loss_cooldown": 6979,
+      "daily_dd_lock": 459,
+      "daily_trade_budget": 59,
+      "daily_loss_lock": 328
+    },
+    "exits": {
+      "exit_governor": 695
+    },
+    "exit_prob_mean": 0.3035069468027682,
+    "exit_prob_p95": 0.6774809296412989
+  },
+  "clean_base_oos_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.49586776859504134,
+    "avg_notional": 0.6002625849524619,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {
+      "model_cooldown": 307,
+      "loss_cooldown": 4392,
+      "daily_trade_budget": 12,
+      "daily_dd_lock": 730,
+      "daily_loss_lock": 126
+    },
+    "exits": {
+      "exit_governor": 362,
+      "forced_end": 1
+    },
+    "exit_prob_mean": 0.10361317687454565,
+    "exit_prob_p95": 0.42294485622328093
+  },
+  "base_trade_plan": {
+    "validation_trades": 695,
+    "eval_trades": 363
+  },
+  "training": {
+    "sample_meta": {
+      "entries_sampled": 2427,
+      "samples": 14562,
+      "exit_labels": 3886,
+      "exit_label_rate": 0.2668589479467106,
+      "entry_stride": 36,
+      "min_age": 3,
+      "max_age": 144,
+      "age_stride": 24,
+      "future_horizon": 72,
+      "exit_edge": 0.0015,
+      "adverse_gap": 0.012,
+      "max_samples": 30000
+    },
+    "global_hazard_rate": 0.2668589479467106,
+    "bucket_count": 54,
+    "thresholds": {
+      "drawdown_p70": 0.0029756268561417845,
+      "funding_abs_p85": 0.00010611250000000017,
+      "funding_pressure_p85": 0.02465304,
+      "liquidity_vacuum_p85": 0.7204015238004225,
+      "amihud_illiquidity_z_p85": 1.164764307755649,
+      "m7_tail_risk_p85": 0.0,
+      "ai_adverse_risk_p85": 0.0061294529354199555
+    }
+  },
+  "validation_top10": [
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh0.06x0.80_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 0.06,
+        "shrink_mult": 0.8,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh0.10x0.65_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 0.1,
+        "shrink_mult": 0.65,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep0_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 0,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 879.885785851817,
+        "mdd": -12.696352061226468,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6705035971223021,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_early_exit": 626,
+          "base_exit": 69
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.27995390633755457,
+        "exit_prob_p95": 0.6676279127719041,
+        "threshold_mean": 0.4718962907846511,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 828.7060748864778
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep0_sh0.06x0.80_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 0,
+        "shrink_margin": 0.06,
+        "shrink_mult": 0.8,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 879.885785851817,
+        "mdd": -12.696352061226468,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6705035971223021,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_early_exit": 626,
+          "base_exit": 69
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.27995390633755457,
+        "exit_prob_p95": 0.6676279127719041,
+        "threshold_mean": 0.4718962907846511,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 828.7060748864778
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep0_sh0.10x0.65_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 0,
+        "shrink_margin": 0.1,
+        "shrink_mult": 0.65,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 879.885785851817,
+        "mdd": -12.696352061226468,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6705035971223021,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_early_exit": 626,
+          "base_exit": 69
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.27995390633755457,
+        "exit_prob_p95": 0.6676279127719041,
+        "threshold_mean": 0.4718962907846511,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 828.7060748864778
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale0.60_maxd0.08_agep3_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 0.6,
+        "max_delta": 0.08,
+        "min_age_delta": 3,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 823.5882799922232,
+        "mdd": -12.696352061226456,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6647482014388489,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24514034895236525,
+        "exit_prob_p95": 0.536921651695908,
+        "threshold_mean": 0.44932512862251106,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 772.4085690268842
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale0.60_maxd0.08_agep3_sh0.06x0.80_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 0.6,
+        "max_delta": 0.08,
+        "min_age_delta": 3,
+        "shrink_margin": 0.06,
+        "shrink_mult": 0.8,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 823.5882799922232,
+        "mdd": -12.696352061226456,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6647482014388489,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24514034895236525,
+        "exit_prob_p95": 0.536921651695908,
+        "threshold_mean": 0.44932512862251106,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 772.4085690268842
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale0.60_maxd0.08_agep3_sh0.10x0.65_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 0.6,
+        "max_delta": 0.08,
+        "min_age_delta": 3,
+        "shrink_margin": 0.1,
+        "shrink_mult": 0.65,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 823.5882799922232,
+        "mdd": -12.696352061226456,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6647482014388489,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24514034895236525,
+        "exit_prob_p95": 0.536921651695908,
+        "threshold_mean": 0.44932512862251106,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 772.4085690268842
+    },
+    {
+      "runtime_config": {
+        "name": "shift-0.03_scale0.60_maxd0.08_agep0_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 0.6,
+        "max_delta": 0.08,
+        "min_age_delta": 0,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 802.610230903434,
+        "mdd": -12.696352061226456,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6647482014388489,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_early_exit": 646,
+          "base_exit": 49
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.28022458437089753,
+        "exit_prob_p95": 0.6635258269862747,
+        "threshold_mean": 0.4503707184472022,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 751.4305199380949
+    }
+  ],
+  "selected": {
+    "balanced_score": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+    "redteam_constrained": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+    "max_validation_pnl": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15"
+  },
+  "selected_for_report": "redteam_constrained",
+  "selected_eval": {
+    "balanced_score": {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289,
+      "oos": {
+        "pnl": 207.2368875907697,
+        "mdd": -18.016318445365364,
+        "trades": 363,
+        "trades_per_day": 6.1875,
+        "wr": 0.5730027548209367,
+        "avg_notional": 0.6903019726953306,
+        "avg_leverage": 1.5814535601585094,
+        "long_entries": 173,
+        "short_entries": 190,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 269,
+          "lifecycle_early_exit": 94
+        },
+        "edit_counts": {
+          "boost": 363
+        },
+        "exit_prob_mean": 0.20043885648466803,
+        "exit_prob_p95": 0.4421842673379731,
+        "threshold_mean": 0.47183559052211677,
+        "effective_notional_mean": 0.6903019726953306
+      },
+      "cost_stress": {
+        "cost_1x": {
+          "pnl": 207.2368875907697,
+          "mdd": -18.016318445365364,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.5730027548209367,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20043885648466803,
+          "exit_prob_p95": 0.4421842673379731,
+          "threshold_mean": 0.47183559052211677,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_2x": {
+          "pnl": 127.77647896152212,
+          "mdd": -18.281324431112466,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.46831955922865015,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20008686244784482,
+          "exit_prob_p95": 0.4420239459191045,
+          "threshold_mean": 0.47159034864525834,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_3x": {
+          "pnl": 68.83403070823721,
+          "mdd": -20.202675787463285,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.39669421487603307,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.19974043520773047,
+          "exit_prob_p95": 0.44212229603036063,
+          "threshold_mean": 0.47154911940073685,
+          "effective_notional_mean": 0.6903019726953306
+        }
+      },
+      "decision_invariant_audit": {
+        "decision_frame_audit": {
+          "passed": true,
+          "rows": 16897,
+          "active_rows": 16897,
+          "cash_rows": 0,
+          "long_rows": 7900,
+          "short_rows": 8997,
+          "violations": {
+            "nonfinite_values": 0,
+            "negative_notional": 0,
+            "leverage_below_one_active": 0,
+            "leverage_above_cap": 0,
+            "notional_above_max": 0,
+            "active_action_side_mismatch": 0,
+            "cash_has_exposure": 0,
+            "position_fraction_mismatch": 0,
+            "negative_cooldown": 0
+          },
+          "notional": {
+            "max": 3.0380552603853426,
+            "mean": 0.8042273420435015,
+            "p95": 1.7381261779863437
+          },
+          "leverage": {
+            "max": 2.5708089733514607,
+            "mean": 1.5912971481880236,
+            "p95": 1.8325242533448571
+          }
+        },
+        "entry_side_timing_cooldown_preservation": {
+          "passed": true,
+          "base_trades": 363,
+          "edited_trades": 363,
+          "violations": {
+            "trade_count_changed": 0,
+            "entry_idx_changed": 0,
+            "side_changed": 0,
+            "cooldown_changed": 0,
+            "entry_deleted": 0,
+            "side_flip": 0,
+            "effective_exit_after_base_exit": 0,
+            "negative_effective_notional": 0
+          }
+        },
+        "passed": true
+      },
+      "promotable_by_contract": false
+    },
+    "redteam_constrained": {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289,
+      "oos": {
+        "pnl": 207.2368875907697,
+        "mdd": -18.016318445365364,
+        "trades": 363,
+        "trades_per_day": 6.1875,
+        "wr": 0.5730027548209367,
+        "avg_notional": 0.6903019726953306,
+        "avg_leverage": 1.5814535601585094,
+        "long_entries": 173,
+        "short_entries": 190,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 269,
+          "lifecycle_early_exit": 94
+        },
+        "edit_counts": {
+          "boost": 363
+        },
+        "exit_prob_mean": 0.20043885648466803,
+        "exit_prob_p95": 0.4421842673379731,
+        "threshold_mean": 0.47183559052211677,
+        "effective_notional_mean": 0.6903019726953306
+      },
+      "cost_stress": {
+        "cost_1x": {
+          "pnl": 207.2368875907697,
+          "mdd": -18.016318445365364,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.5730027548209367,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20043885648466803,
+          "exit_prob_p95": 0.4421842673379731,
+          "threshold_mean": 0.47183559052211677,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_2x": {
+          "pnl": 127.77647896152212,
+          "mdd": -18.281324431112466,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.46831955922865015,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20008686244784482,
+          "exit_prob_p95": 0.4420239459191045,
+          "threshold_mean": 0.47159034864525834,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_3x": {
+          "pnl": 68.83403070823721,
+          "mdd": -20.202675787463285,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.39669421487603307,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.19974043520773047,
+          "exit_prob_p95": 0.44212229603036063,
+          "threshold_mean": 0.47154911940073685,
+          "effective_notional_mean": 0.6903019726953306
+        }
+      },
+      "decision_invariant_audit": {
+        "decision_frame_audit": {
+          "passed": true,
+          "rows": 16897,
+          "active_rows": 16897,
+          "cash_rows": 0,
+          "long_rows": 7900,
+          "short_rows": 8997,
+          "violations": {
+            "nonfinite_values": 0,
+            "negative_notional": 0,
+            "leverage_below_one_active": 0,
+            "leverage_above_cap": 0,
+            "notional_above_max": 0,
+            "active_action_side_mismatch": 0,
+            "cash_has_exposure": 0,
+            "position_fraction_mismatch": 0,
+            "negative_cooldown": 0
+          },
+          "notional": {
+            "max": 3.0380552603853426,
+            "mean": 0.8042273420435015,
+            "p95": 1.7381261779863437
+          },
+          "leverage": {
+            "max": 2.5708089733514607,
+            "mean": 1.5912971481880236,
+            "p95": 1.8325242533448571
+          }
+        },
+        "entry_side_timing_cooldown_preservation": {
+          "passed": true,
+          "base_trades": 363,
+          "edited_trades": 363,
+          "violations": {
+            "trade_count_changed": 0,
+            "entry_idx_changed": 0,
+            "side_changed": 0,
+            "cooldown_changed": 0,
+            "entry_deleted": 0,
+            "side_flip": 0,
+            "effective_exit_after_base_exit": 0,
+            "negative_effective_notional": 0
+          }
+        },
+        "passed": true
+      },
+      "promotable_by_contract": false
+    },
+    "max_validation_pnl": {
+      "runtime_config": {
+        "name": "shift-0.03_scale1.00_maxd0.12_agep3_sh999.00x1.00_bo0.12x1.15",
+        "threshold_shift": -0.03,
+        "delta_scale": 1.0,
+        "max_delta": 0.12,
+        "min_age_delta": 3,
+        "shrink_margin": 999.0,
+        "shrink_mult": 1.0,
+        "boost_margin": 0.12,
+        "boost_mult": 1.15,
+        "max_notional": 3.6
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7882738023833621,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 426,
+          "lifecycle_early_exit": 269
+        },
+        "edit_counts": {
+          "boost": 695
+        },
+        "exit_prob_mean": 0.24405284266252716,
+        "exit_prob_p95": 0.5484685089799124,
+        "threshold_mean": 0.4705952435542971,
+        "effective_notional_mean": 0.7882738023833621
+      },
+      "validation_score": 857.2425765590289,
+      "oos": {
+        "pnl": 207.2368875907697,
+        "mdd": -18.016318445365364,
+        "trades": 363,
+        "trades_per_day": 6.1875,
+        "wr": 0.5730027548209367,
+        "avg_notional": 0.6903019726953306,
+        "avg_leverage": 1.5814535601585094,
+        "long_entries": 173,
+        "short_entries": 190,
+        "entry_blocks": {},
+        "exits": {
+          "base_exit": 269,
+          "lifecycle_early_exit": 94
+        },
+        "edit_counts": {
+          "boost": 363
+        },
+        "exit_prob_mean": 0.20043885648466803,
+        "exit_prob_p95": 0.4421842673379731,
+        "threshold_mean": 0.47183559052211677,
+        "effective_notional_mean": 0.6903019726953306
+      },
+      "cost_stress": {
+        "cost_1x": {
+          "pnl": 207.2368875907697,
+          "mdd": -18.016318445365364,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.5730027548209367,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20043885648466803,
+          "exit_prob_p95": 0.4421842673379731,
+          "threshold_mean": 0.47183559052211677,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_2x": {
+          "pnl": 127.77647896152212,
+          "mdd": -18.281324431112466,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.46831955922865015,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.20008686244784482,
+          "exit_prob_p95": 0.4420239459191045,
+          "threshold_mean": 0.47159034864525834,
+          "effective_notional_mean": 0.6903019726953306
+        },
+        "cost_3x": {
+          "pnl": 68.83403070823721,
+          "mdd": -20.202675787463285,
+          "trades": 363,
+          "trades_per_day": 6.1875,
+          "wr": 0.39669421487603307,
+          "avg_notional": 0.6903019726953306,
+          "avg_leverage": 1.5814535601585094,
+          "long_entries": 173,
+          "short_entries": 190,
+          "entry_blocks": {},
+          "exits": {
+            "base_exit": 269,
+            "lifecycle_early_exit": 94
+          },
+          "edit_counts": {
+            "boost": 363
+          },
+          "exit_prob_mean": 0.19974043520773047,
+          "exit_prob_p95": 0.44212229603036063,
+          "threshold_mean": 0.47154911940073685,
+          "effective_notional_mean": 0.6903019726953306
+        }
+      },
+      "decision_invariant_audit": {
+        "decision_frame_audit": {
+          "passed": true,
+          "rows": 16897,
+          "active_rows": 16897,
+          "cash_rows": 0,
+          "long_rows": 7900,
+          "short_rows": 8997,
+          "violations": {
+            "nonfinite_values": 0,
+            "negative_notional": 0,
+            "leverage_below_one_active": 0,
+            "leverage_above_cap": 0,
+            "notional_above_max": 0,
+            "active_action_side_mismatch": 0,
+            "cash_has_exposure": 0,
+            "position_fraction_mismatch": 0,
+            "negative_cooldown": 0
+          },
+          "notional": {
+            "max": 3.0380552603853426,
+            "mean": 0.8042273420435015,
+            "p95": 1.7381261779863437
+          },
+          "leverage": {
+            "max": 2.5708089733514607,
+            "mean": 1.5912971481880236,
+            "p95": 1.8325242533448571
+          }
+        },
+        "entry_side_timing_cooldown_preservation": {
+          "passed": true,
+          "base_trades": 363,
+          "edited_trades": 363,
+          "violations": {
+            "trade_count_changed": 0,
+            "entry_idx_changed": 0,
+            "side_changed": 0,
+            "cooldown_changed": 0,
+            "entry_deleted": 0,
+            "side_flip": 0,
+            "effective_exit_after_base_exit": 0,
+            "negative_effective_notional": 0
+          }
+        },
+        "passed": true
+      },
+      "promotable_by_contract": false
+    }
+  },
+  "realistic_replay": {
+    "run": false,
+    "note": "Not run in v1; this experiment uses the canonical simple fixed-base-trade replay to stay lightweight."
+  },
+  "promotion_gate": {
+    "oos_pnl_min": 177.3298088749005,
+    "oos_mdd_min": -17.75966486035323,
+    "trades_per_day_min": 5.5,
+    "cost_1x_positive": true,
+    "cost_2x_positive": true,
+    "cost_3x_reported": true,
+    "decision_invariant_required": true,
+    "no_oos_threshold_selection": true
+  }
+}

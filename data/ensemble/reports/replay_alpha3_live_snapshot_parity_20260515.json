@@ -1,0 +1,92 @@
+{
+  "model_id": "replay_alpha3_live_snapshot_parity_20260515",
+  "created_at": "2026-05-15T17:46:58.272180+09:00",
+  "snapshot_path": "/home/llewyn/crypto-scalping/data/live/decision_feature_frame_snapshot.pkl.gz",
+  "snapshot_created_at": "2026-05-15T17:45:08.395973+09:00",
+  "snapshot_timestamp": "2026-05-15 08:40:00",
+  "frame_shape": [
+    1200,
+    235
+  ],
+  "router_snapshot": {
+    "pos": "LONG",
+    "entry_price": 2261.04,
+    "hold_bars": 17,
+    "position_fraction": 1.0,
+    "margin_fraction": 1.0,
+    "execution_leverage": 2.0,
+    "notional_exposure": 2.0,
+    "total_exposure": 2.0,
+    "position_realized_pnl_frac": 0.0,
+    "trade_id": "trade-20260515T071507.479209Z",
+    "opened_at": "2026-05-15T16:15:07.479238+09:00",
+    "decision_at": "2026-05-15 16:10:00",
+    "entry_price_source": "live_next_open_proxy",
+    "entry_decision_price": 2261.04,
+    "exchange_entry_price": 0.0,
+    "entry_execution_liquidity": "",
+    "entry_execution_route": "",
+    "entry_execution_order_type": ""
+  },
+  "expected": {
+    "action": 1,
+    "source": "alpha2_1|lifecycle_v1|hold",
+    "position_reason": "v31_deep_alpha_hold",
+    "health_v31": {
+      "seq_col_count": 80,
+      "missing_seq_cols": [],
+      "missing_seq_count": 0,
+      "nonfinite_seq_cols": [],
+      "nonfinite_seq_count": 0,
+      "q_long": 0.0162815260887146,
+      "q_short": -0.017029326409101486,
+      "edge": 0.0,
+      "margin": 0.0,
+      "selected_side": "LONG",
+      "pass_gate": false
+    }
+  },
+  "replay": {
+    "action": 1,
+    "exposure": 2.0,
+    "fraction": 1.0,
+    "leverage": 2.0,
+    "regime": "NORMAL",
+    "source": "alpha2_1|lifecycle_v1|hold",
+    "position_signal": "HOLD",
+    "position_reason": "v31_deep_alpha_hold",
+    "score": 0.0,
+    "conviction": 0.0,
+    "v31": {
+      "q_long": 0.0162815260887146,
+      "q_short": -0.017029326409101486,
+      "q_long_raw": 0.0362815260887146,
+      "q_short_raw": -0.017029326409101486,
+      "edge": 0.0,
+      "margin": 0.0,
+      "selected_side": "LONG",
+      "pass_gate": false,
+      "guard_reasons": [],
+      "transition_risk": 0.0
+    },
+    "alpha2_1": {
+      "parent_action_before": 0,
+      "teacher_pred_action": 0,
+      "teacher_confidence": 0.0,
+      "keep_parent": false,
+      "reason": ""
+    }
+  },
+  "replay_error": "",
+  "direct_v31_latest_from_frame": {
+    "q_long": 0.03791077807545662,
+    "q_short": -0.01226744707673788
+  },
+  "parity": {
+    "action_match": true,
+    "source_match": true,
+    "reason_match": true,
+    "full_decision_match": true,
+    "note": "Direct V31 latest can differ from health_v31 while in-position, because health_v31 records active entry-state trace for lifecycle hold decisions."
+  }
+}

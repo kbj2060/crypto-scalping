@@ -1,0 +1,74 @@
+{
+  "model_id": "omega3_aggressive_compensated_scale200_cap090_20260618",
+  "alias": "omega3_aggressive_compensated_baseline",
+  "status": "live_wired_baseline",
+  "created_kst": "2026-06-18",
+  "source_model_id": "omega1_2_1_aggressive_compensated_scale200_cap090",
+  "source_manifest": "data/ensemble/supervised/omega1_2_1_aggressive_compensated_scale200_cap090/baseline_manifest.json",
+  "contract": "docs/model_contracts/omega1_2_1_aggressive_current_baseline_20260606_contract.md",
+  "parent_model_id": "omega1_2_true_3head_tabm_20260603_full_retrain_cash_alpha43_20260608",
+  "parent_artifact": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_full_retrain_cash_alpha43_20260608/true_3head_tabm_bundle.pt",
+  "live_adapter": "trading_bot_modules/omega1_2_1_live.py",
+  "trading_bot_entrypoint": "FinalGovernorRuntime.omega1_2_1_adapter",
+  "cash_sleeve_default_enabled": false,
+  "decision_boundary": {
+    "entry_alpha": "Regime-routed full-retrained 3-head TabM parent",
+    "risk_transform": "Aggressive compensated TP/SL plus exposure transform",
+    "scale": 2.0,
+    "cap": 0.9,
+    "accounting": "Cost3 maker-limit replay accounting with fee/slippage multiplier 3.0"
+  },
+  "runtime_template": {
+    "base_take_profit": 0.026,
+    "base_stop_loss": 0.014,
+    "base_notional_exposure": 0.405,
+    "base_leverage_metadata": 2.0,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "compensated_scale": 2.0,
+    "notional_cap": 0.9,
+    "cost_multiplier": 3.0
+  },
+  "validation_cost3": {
+    "pnl_pct": 100.54272942091158,
+    "mdd_pct": -10.677652697162888,
+    "wr": 0.6363636363636364,
+    "trades": 33,
+    "long_entries": 9,
+    "short_entries": 24,
+    "exit_reasons": {
+      "take_profit": 20,
+      "stop_loss": 12,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3": {
+    "pnl_pct": 72.76004148106665,
+    "mdd_pct": -8.108170708968387,
+    "wr": 0.7222222222222222,
+    "trades": 18,
+    "long_entries": 3,
+    "short_entries": 15,
+    "exit_reasons": {
+      "take_profit": 13,
+      "stop_loss": 5
+    }
+  },
+  "artifacts": {
+    "validation_ledger": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_validation_trade_ledger_20260606.csv",
+    "oos_ledger": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_oos_trade_ledger_20260606.csv",
+    "validation_chart": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_validation_trade_chart_20260606.png",
+    "oos_chart": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_oos_trade_chart_20260606.png"
+  },
+  "live_wiring": {
+    "default_env_enable": "FINAL_GOVERNOR_OMEGA1_2_1_ENABLE=1",
+    "default_cash_sleeve": "OMEGA123_CASH_SLEEVE_ENABLE=0",
+    "default_manifest_path": "data/ensemble/supervised/omega3_full_retrain_hf7_dynamic_cash_sleeve_20260618/candidate_manifest.json",
+    "fail_fast_contract": true
+  },
+  "redteam_status": {
+    "standalone_redteam_report": false,
+    "feature_contract_passed": true,
+    "known_blockers": []
+  }
+}

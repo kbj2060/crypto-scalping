@@ -1,0 +1,93 @@
+{
+  "status": "pass",
+  "verdict": "pnl_challenger_not_cost3_promote",
+  "blocking": [],
+  "warnings": [
+    "cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_note": "v18 config came from 2025 validation run; this variant refits runner utility head on full 2025 only and evaluates fixed 2026 OOS",
+  "checks": {
+    "ledger_rows": 84,
+    "add_on_rows": 30,
+    "add_on_loser_rows": 16,
+    "entry_fill_timestamps_present": true,
+    "exit_fill_timestamps_present": true,
+    "add_on_fee_recorded": false,
+    "exit_fee_recorded": true
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 164.50230948383862,
+      "mdd": -33.7846613533027,
+      "trades": 84,
+      "wr": 0.17857142857142858,
+      "trades_per_day": 1.4318181818181819,
+      "long_entries": 30,
+      "short_entries": 54,
+      "avg_notional": 2.5309277204949816,
+      "avg_leverage": 2.5960106229062867,
+      "action_counts": {
+        "cash": 12689,
+        "long": 30,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 69,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 30
+      }
+    },
+    "cost2": {
+      "pnl": 56.92521055879107,
+      "mdd": -41.79106154515991,
+      "trades": 91,
+      "wr": 0.16483516483516483,
+      "trades_per_day": 1.5511363636363638,
+      "long_entries": 34,
+      "short_entries": 57,
+      "avg_notional": 2.5167869608912325,
+      "avg_leverage": 2.580754426199111,
+      "action_counts": {
+        "cash": 12776,
+        "long": 34,
+        "short": 57
+      },
+      "exits": {
+        "learned_stop_loss": 76,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 31
+      }
+    },
+    "cost3": {
+      "pnl": -1.7234332809434316,
+      "mdd": -47.59322456818313,
+      "trades": 109,
+      "wr": 0.13761467889908258,
+      "trades_per_day": 1.8579545454545456,
+      "long_entries": 37,
+      "short_entries": 72,
+      "avg_notional": 2.5298976929832806,
+      "avg_leverage": 2.6357381963776727,
+      "action_counts": {
+        "cash": 12877,
+        "long": 37,
+        "short": 72
+      },
+      "exits": {
+        "learned_stop_loss": 94,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 23
+      }
+    }
+  }
+}

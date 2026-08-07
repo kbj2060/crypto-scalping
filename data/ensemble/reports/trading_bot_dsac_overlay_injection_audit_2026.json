@@ -1,0 +1,130 @@
+{
+  "audit_id": "trading_bot_dsac_overlay_injection_audit_2026",
+  "created_at_utc": "2026-05-07T05:43:39.828043+00:00",
+  "status": "pass",
+  "blocking": [],
+  "injected_into": "trading_bot.py",
+  "live_order_flags_changed": false,
+  "model_stack": {
+    "base": "Clean Base Lifecycle V1",
+    "gross_layer": "Deep Gated Gross V2",
+    "new_overlay": "DSAC full retrain v2 cost gate + half-if-opposite notional reducer"
+  },
+  "dsac_overlay": {
+    "checkpoint": "data/ensemble/ckpt/dsac_full_retrain_v2/dsac_checkpoint.pth",
+    "mode": "half_if_opposite",
+    "threshold": 0.5,
+    "scale": 0.5,
+    "cost_gate_enabled": true,
+    "cost_buffer": 0.0035,
+    "max_notional_cap": 3.6
+  },
+  "source_experiment": {
+    "report": "data/ensemble/reports/lifecycle_cost_caps_dsac_full_retrain_v2_experiment_2026.json",
+    "accounting_audit": "data/ensemble/reports/lifecycle_cost_caps_dsac_full_retrain_v2_accounting_audit.json",
+    "best_candidate": "cost_0.0035__dsac_half_if_opposite_0.50",
+    "pnl_pct": 777.7337301932613,
+    "mdd_pct": -13.832413018783773,
+    "trades": 323,
+    "avg_notional": 3.3176,
+    "cost2_pnl_pct": 96.0327,
+    "cost3_pnl_pct": -56.3244
+  },
+  "checks": [
+    {
+      "name": "py_compile",
+      "status": "pass"
+    },
+    {
+      "name": "ledger_replay_accounting_audit",
+      "status": "pass",
+      "blocking": []
+    },
+    {
+      "name": "live_overlay_semantics_smoke",
+      "status": "pass",
+      "covered": [
+        "dsac_half_opposite",
+        "dsac_cost_gate_block"
+      ]
+    },
+    {
+      "name": "FinalGovernorRuntime_init",
+      "status": "pass",
+      "covered": [
+        "DGG model load",
+        "DSAC checkpoint load",
+        "router load"
+      ]
+    }
+  ],
+  "audit_notes": [
+    "Binance live execution flags and API behavior were not enabled or changed by this injection.",
+    "DSAC overlay only adjusts Lifecycle V1 entry notional: it may block low edge trades or halve exposure when DSAC strongly disagrees with the base side.",
+    "The DSAC experiment audit was ledger replay invariant audit, not a guarantee of future live trading performance.",
+    "Cost 3x survival is not passed by the selected DSAC candidate; keep fee/slippage monitoring active."
+  ],
+  "runtime_verification": {
+    "verified_at_utc": "2026-05-07T05:49:33.610032+00:00",
+    "pid_file": "data/live/trading_bot.pid",
+    "pid": 2378482,
+    "log_path": "logs/trading_bot_dsac_overlay_live.log",
+    "dashboard_updated_at": "2026-05-07T05:48:40.561019+00:00",
+    "dashboard_lifecycle_dsac_overlay": {
+      "enabled": true,
+      "checkpoint": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_full_retrain_v2/dsac_checkpoint.pth",
+      "checkpoint_meta": {
+        "epoch": 22,
+        "global_step": 88708,
+        "state_dim": 29,
+        "best_val_pnl": 0.0
+      },
+      "mode": "half_if_opposite",
+      "threshold": 0.5,
+      "scale": 0.5,
+      "cost_gate_enabled": true,
+      "cost_buffer": 0.0035
+    },
+    "dashboard_latest_sleeve_dsac_overlay": {
+      "enabled": true,
+      "applied": true,
+      "blocked": false,
+      "checkpoint": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_full_retrain_v2/dsac_checkpoint.pth",
+      "checkpoint_meta": {
+        "epoch": 22,
+        "global_step": 88708,
+        "state_dim": 29,
+        "best_val_pnl": 0.0
+      },
+      "mode": "half_if_opposite",
+      "threshold": 0.5,
+      "scale": 0.5,
+      "cost_gate_enabled": true,
+      "cost_buffer": 0.0035,
+      "input_notional": 3.0,
+      "output_notional": 1.5,
+      "dsac_action": 2,
+      "dsac_side": -1,
+      "dsac_score": 0.8142721652984619,
+      "dsac_info": {
+        "agent": "DSAC",
+        "raw_action": -0.8143,
+        "kelly": 1.0,
+        "long_edge": 0.0,
+        "short_edge": 0.8142721652984619,
+        "score": 0.8142721652984619,
+        "state_dim": 29
+      },
+      "core_side": 1,
+      "edge_proxy": 0.002808369230479002,
+      "expected_edge": 0.008425107691437006,
+      "round_trip_hurdle": 0.0077,
+      "fee_rate": 0.0005,
+      "slippage_rate": 0.0002,
+      "reason": "dsac_half_opposite",
+      "pre_overlay_notional": 3.0,
+      "post_risk_notional": 1.5
+    },
+    "binance_execution_changed": false
+  }
+}

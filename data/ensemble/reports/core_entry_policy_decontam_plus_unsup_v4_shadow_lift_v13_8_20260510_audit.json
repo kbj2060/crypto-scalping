@@ -1,0 +1,18 @@
+{
+  "model_id": "core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510",
+  "status": "pass",
+  "selection_status": "shadow_only_oos_observed_candidate",
+  "checks": {
+    "contaminated_columns_absent": true,
+    "train_validation_overlap_zero": true,
+    "train_eval_overlap_zero": true,
+    "validation_eval_overlap_zero": true,
+    "ledger_rows_match_report_trades": true,
+    "cost2_survival": true,
+    "cost3_survival": true,
+    "selection_warning_present": true
+  },
+  "contaminated_columns": [],
+  "ledger_rows": 216,
+  "report_trades": 216
+}

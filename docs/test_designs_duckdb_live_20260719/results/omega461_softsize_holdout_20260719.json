@@ -1,0 +1,21 @@
+{
+  "stage": "omega461_softsize_holdout_slice",
+  "generated_at": "2026-07-19T19:37:03.929655+09:00",
+  "caveat": "NOT a blind holdout -- the linear/floor0 formula was already selected by looking at performance across the full 2026-01~07 window, which includes this slice. This only checks recent-slice robustness, not genuine unseen generalization.",
+  "holdout_start": "2026-05-01 00:00:00",
+  "baseline_holdout_slice": {
+    "pnl": -43.99471952968466,
+    "mdd": -51.347086012791166,
+    "trades": 16,
+    "wr": 0.25,
+    "mark_to_market_mdd": -52.91862617006298
+  },
+  "softsize_holdout_slice": {
+    "pnl": -14.136097172735774,
+    "mdd": -29.699385976554428,
+    "trades": 16,
+    "wr": 0.25,
+    "mark_to_market_mdd": -31.595847163724088
+  },
+  "verdict": "HOLDS UP on recent slice (both pnl and mdd improved)"
+}

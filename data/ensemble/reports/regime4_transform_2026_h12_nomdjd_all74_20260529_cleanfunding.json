@@ -1,0 +1,65 @@
+{
+  "model_id": "transform_regime4_official_sidecars_20260517",
+  "source": "data/splits/year_oos/training_features_2026_rebuilt.csv",
+  "rows": 16897,
+  "range": [
+    "2026-01-01 00:00:00",
+    "2026-02-28 16:00:00"
+  ],
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw"
+  ],
+  "clean_regime4": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/clean_regime4_raw_state12_v1_2024.joblib",
+    "output": "tmp/causal_regen_20260516/funding_clean_retrain_20260529/training_features_2026_rebuilt_clean_regime4_raw_state12_v1_for_transform.csv",
+    "rows": 16897,
+    "prob_sum_min": 0.9999999999999998,
+    "prob_sum_max": 1.0000000000000002,
+    "pred_counts": {
+      "bull": 4514,
+      "bear": 5445,
+      "chop": 4328,
+      "whipsaw": 2610
+    },
+    "audit": {
+      "prob_sum_min": 0.9999999999999998,
+      "prob_sum_max": 1.0000000000000002,
+      "nan_count": 0
+    }
+  },
+  "future_regime4": {
+    "model": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/regime4_pred_tft_vsn_selected_2024.pt",
+    "output": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2026_rebuilt_regime4_pred_tft_vsn_selected.csv",
+    "rows": 16897,
+    "feature_count": 74,
+    "prob_sum_min": 0.9999999999999998,
+    "prob_sum_max": 1.0000000000000002,
+    "pred_counts": {
+      "bull": 5001,
+      "bear": 3252,
+      "chop": 3785,
+      "whipsaw": 4859
+    },
+    "missing_feature_fallback": {
+      "columns": [],
+      "policy": "fail_closed_no_missing",
+      "count": 0
+    },
+    "audit": {
+      "prob_sum_min": 0.9999999999999998,
+      "prob_sum_max": 1.0000000000000002,
+      "nan_count": 0
+    }
+  },
+  "contract": {
+    "current_regime": "frozen 2024 HMM raw-state12",
+    "future_regime": "frozen 2024 TFT VSN-selected h12",
+    "horizon_bars": 12,
+    "normal_class": "disabled",
+    "risk_off_transition_classes": "disabled",
+    "risk_off_transition_auxiliary_features": "enabled_on_current_regime4_sidecar"
+  }
+}

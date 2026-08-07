@@ -1,0 +1,52 @@
+{
+  "model_id": "hf_v13_v31_winner_addon_reallocator_v54_1_20260513",
+  "selected_config": {
+    "name": "v54_1_add20",
+    "min_unrealized": 0.0075,
+    "min_bars": 3,
+    "jackpot_p": 0.35,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.35,
+    "cost3_floor": 0.4,
+    "full_add_frac": 0.6,
+    "max_total_mult": 2.0,
+    "max_entry_notional": 4.14,
+    "dd_block": 0.3,
+    "deep_mult": 1.0
+  },
+  "selected_overlay": {
+    "name": "v31_notional1_time_decay",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.04,
+    "base_sl": 0.018,
+    "base_hold": 48,
+    "tp_util_mult": 1.5,
+    "sl_vol_mult": 2.5,
+    "trail_gap_mult": 1.0,
+    "trail_decay": 0.5,
+    "hold_decay_start": 18,
+    "hold_decay_rate": 0.025,
+    "tp_cap": 0.075,
+    "sl_cap": 0.036
+  },
+  "selected_add_config": {
+    "name": "v21_2_jackpot_runner_1_v54_1_add20",
+    "full_edge_th": 99.0,
+    "half_edge_th": 99.0,
+    "p_th": 0.6,
+    "q10_floor": -0.006,
+    "jackpot_p": 0.35,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.35,
+    "min_unrealized": 0.0075,
+    "min_bars_since_entry": 3,
+    "full_add_frac": 0.6,
+    "half_add_frac": 0.0,
+    "max_total_mult": 2.0,
+    "max_entry_notional": 4.14,
+    "dd_block": 0.3
+  }
+}

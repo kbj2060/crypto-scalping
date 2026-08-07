@@ -1,0 +1,120 @@
+{
+  "date": "2026-05-26",
+  "scope": "reanalysis of legacy clean_regime_2024_unsup_v4_* vs state24_v2 on 2025 aligned timestamps",
+  "rows_joined": 105064,
+  "old_prefix_col_count": 23,
+  "mapped_pair_count": 14,
+  "missing_suffix_count": 9,
+  "missing_suffixes": [
+    "clean_regime_2024_unsup_v4_normal_prob",
+    "clean_regime_2024_unsup_v4_state_code",
+    "clean_regime_2024_unsup_v4_cluster",
+    "clean_regime_2024_unsup_v4_cluster_confidence",
+    "clean_regime_2024_unsup_v4_cluster_prob_0",
+    "clean_regime_2024_unsup_v4_cluster_prob_1",
+    "clean_regime_2024_unsup_v4_cluster_prob_2",
+    "clean_regime_2024_unsup_v4_cluster_prob_3",
+    "clean_regime_2024_unsup_v4_cluster_prob_4"
+  ],
+  "mapped_pairs": [
+    {
+      "suffix": "factor_crowding",
+      "pearson_corr": 1.0,
+      "mae": 0.0,
+      "std_old": 0.12534451239987593,
+      "std_state24_v2": 0.12534451239987593
+    },
+    {
+      "suffix": "factor_liquidity",
+      "pearson_corr": 0.9837513902990118,
+      "mae": 0.017642905701643143,
+      "std_old": 0.07167621242189137,
+      "std_state24_v2": 0.06983061962794691
+    },
+    {
+      "suffix": "factor_flow",
+      "pearson_corr": 0.9366031613741614,
+      "mae": 0.031028215030005767,
+      "std_old": 0.10375827176465016,
+      "std_state24_v2": 0.09464186386809166
+    },
+    {
+      "suffix": "trend_bias",
+      "pearson_corr": 0.9340561631084349,
+      "mae": 0.0400479389911341,
+      "std_old": 0.13977473931187764,
+      "std_state24_v2": 0.12552613021936293
+    },
+    {
+      "suffix": "factor_trend",
+      "pearson_corr": 0.9238567347918447,
+      "mae": 0.07148084840368968,
+      "std_old": 0.2320688283316244,
+      "std_state24_v2": 0.21093747598162163
+    },
+    {
+      "suffix": "factor_vol",
+      "pearson_corr": 0.8868866906555537,
+      "mae": 0.22833201620216453,
+      "std_old": 0.09887679813725764,
+      "std_state24_v2": 0.07511737641026178
+    },
+    {
+      "suffix": "risk_off_prob",
+      "pearson_corr": 0.770571015663026,
+      "mae": 0.22175277527540585,
+      "std_old": 0.04813272728652758,
+      "std_state24_v2": 0.03504288484587688
+    },
+    {
+      "suffix": "bear_prob",
+      "pearson_corr": 0.635820784890161,
+      "mae": 0.14264351970922784,
+      "std_old": 0.03363538295802147,
+      "std_state24_v2": 0.20563920492528384
+    },
+    {
+      "suffix": "bull_prob",
+      "pearson_corr": 0.6053770445642972,
+      "mae": 0.1368028145226431,
+      "std_old": 0.03774314818957123,
+      "std_state24_v2": 0.19408190621093263
+    },
+    {
+      "suffix": "confidence",
+      "pearson_corr": 0.3089417387628747,
+      "mae": 0.23483148254633612,
+      "std_old": 0.00906132395160646,
+      "std_state24_v2": 0.1133146273308536
+    },
+    {
+      "suffix": "entropy",
+      "pearson_corr": 0.2982066031473087,
+      "mae": 0.12365118687090502,
+      "std_old": 0.008867359243929361,
+      "std_state24_v2": 0.08615778924593609
+    },
+    {
+      "suffix": "transition_risk",
+      "pearson_corr": 0.12329671844765121,
+      "mae": 0.450708550415738,
+      "std_old": 0.06488213393698326,
+      "std_state24_v2": 0.013316296241433212
+    },
+    {
+      "suffix": "chop_prob",
+      "pearson_corr": 0.10105483514725293,
+      "mae": 0.10695390378093547,
+      "std_old": 0.013955197196907413,
+      "std_state24_v2": 0.129082540499666
+    },
+    {
+      "suffix": "whipsaw_prob",
+      "pearson_corr": -0.050470009410648026,
+      "mae": 0.09038150232977117,
+      "std_old": 0.009674795933844259,
+      "std_state24_v2": 0.11016609542886803
+    }
+  ],
+  "verdict": "old prefix is not a drop-in alias for state24_v2 and is deprecated for active paths"
+}

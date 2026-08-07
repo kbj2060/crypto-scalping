@@ -1,0 +1,76 @@
+{
+  "stage": "F4-B",
+  "generated_at": "2026-07-19T13:00:04.779709+09:00",
+  "overlap_window": [
+    "2026-03-02 00:00:00",
+    "2026-06-30 23:59:59"
+  ],
+  "methodology_note": "Per-trade returns placed at exit-day, summed per day (non-compounding daily series) -- a standard simplification for correlation/combination diagnostics, not a precise compounding equity curve. Omega ledger covers 2026-01-01~06-30 but only 2026-03-02~06-30 (the overlap with Sigma6's OOS window) is used here for fair comparison.",
+  "n_trades_in_overlap": {
+    "omega4_6_1": 16,
+    "sigma6_lev3": 26,
+    "sigma6_lev4": 27
+  },
+  "correlation": {
+    "omega_vs_sigma6_lev3": 0.1239577382834415,
+    "omega_vs_sigma6_lev3_boot_ci": [
+      -0.02144863714907947,
+      0.2939516952571578
+    ],
+    "omega_vs_sigma6_lev4": 0.015837601374071485
+  },
+  "inverse_vol_weights": {
+    "omega": 0.3676135273105199,
+    "sigma6_lev3": 0.6323864726894801
+  },
+  "combination_performance": {
+    "omega_only": {
+      "total_return_pct": 40.59633014731669,
+      "sharpe_like_annualized": 2.0286671619526397,
+      "mdd_pct": -13.826842296739628,
+      "bootstrap": {
+        "observed_sum_pct": 40.59633014731669,
+        "boot_se": 0.3396473073905458,
+        "t_stat": 1.1952495799013274
+      }
+    },
+    "sigma6_lev3_only": {
+      "total_return_pct": 18.353186119315275,
+      "sharpe_like_annualized": 1.577707826025079,
+      "mdd_pct": -13.262291404193306,
+      "bootstrap": {
+        "observed_sum_pct": 18.353186119315275,
+        "boot_se": 0.19783778183482162,
+        "t_stat": 0.9276886320247306
+      }
+    },
+    "equal_weight_omega_s6l3": {
+      "total_return_pct": 29.474758133315994,
+      "sharpe_like_annualized": 2.419771892011593,
+      "mdd_pct": -10.439038580749315,
+      "bootstrap": {
+        "observed_sum_pct": 29.474758133315994,
+        "boot_se": 0.2078234539909255,
+        "t_stat": 1.418259468183172
+      }
+    },
+    "inverse_vol_weighted": {
+      "total_return_pct": 26.530066753924807,
+      "sharpe_like_annualized": 2.4053644809816292,
+      "mdd_pct": -11.17828166811099,
+      "bootstrap": {
+        "observed_sum_pct": 26.530066753924807,
+        "boot_se": 0.1883819319847403,
+        "t_stat": 1.4083127014576882
+      }
+    }
+  },
+  "F4B_verdict": "ACCEPTED (both criteria) -- combo MDD -10.4% beats best-single -13.3% AND Sharpe 2.42 within 10% of best-single 2.03",
+  "F4B_verdict_detail": {
+    "mdd_improved_vs_best_single": true,
+    "sharpe_within_10pct_of_best_single": true,
+    "sharpe_improved_beyond_both_singles": true,
+    "best_single_mdd_pct": -13.262291404193306,
+    "best_single_sharpe": 2.0286671619526397
+  }
+}

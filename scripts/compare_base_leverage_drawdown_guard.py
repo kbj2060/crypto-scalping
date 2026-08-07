@@ -64,7 +64,6 @@ def simulate_base_multiplier(df: pd.DataFrame, ckpt_path: str, base_mult: float)
 
             row_dict = last_row.to_dict()
             row_dict.setdefault("m7_prob_dn", _safe_float(row_dict.get("prob_dn", row_dict.get("m7_trend_xgb_dn", 0.0))))
-            row_dict.setdefault("m7_prob_fl", _safe_float(row_dict.get("prob_flat", row_dict.get("m7_trend_xgb_fl", 0.0))))
             row_dict.setdefault("m7_prob_up", _safe_float(row_dict.get("prob_up", row_dict.get("m7_trend_xgb_up", 0.0))))
             for k, v in _m7_defaults().items():
                 row_dict.setdefault(k, v)

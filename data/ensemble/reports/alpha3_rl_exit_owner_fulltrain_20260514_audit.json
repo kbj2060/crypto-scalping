@@ -1,0 +1,19 @@
+{
+  "model_id": "alpha3_rl_exit_owner_fulltrain_20260514",
+  "status": "shadow_candidate",
+  "selection_uses_2026": false,
+  "base_contract": "docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md",
+  "front_run_contract": "docs/model_contracts/alpha3_exit_front_run_layer_20260514_contract.md",
+  "causality": [
+    "Train: 2025-01-01..2025-09-30 only.",
+    "Selection: 2025-10-01..2025-12-31 only.",
+    "2026 used only once for fixed OOS reporting.",
+    "RL state uses live-available current position, current bar features, Alpha3 decision outputs, and frozen V27 q only."
+  ],
+  "limitations": [
+    "Backtest still uses 5m high/low immediate-limit touch proxy.",
+    "No real queue position, partial fill, post-only reject, or L2 replay validation yet.",
+    "This first exit-owner policy can close 100% early and select exit placement, but does not yet perform partial close/TWAP sizing.",
+    "Production promotion requires live shadow route/fallback audit against fixed exit4_pen0."
+  ]
+}

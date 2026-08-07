@@ -1,0 +1,109 @@
+{
+  "experiment": "A_meta_labeling",
+  "n_blocks_oof": 5,
+  "meta_train_n": 865257,
+  "meta_train_positive_rate": 0.4308835409595068,
+  "val_sweep": [
+    {
+      "threshold": 0.3,
+      "n_signals": 15797,
+      "n_filled": 11542,
+      "fill_rate": 0.7306450591884535,
+      "hit_rate": 0.5282446716340322,
+      "avg_pnl_pct": -0.0002931267237525771,
+      "total_pnl_pct": -3.3832686455522447
+    },
+    {
+      "threshold": 0.4,
+      "n_signals": 12180,
+      "n_filled": 9020,
+      "fill_rate": 0.7405582922824302,
+      "hit_rate": 0.553880266075388,
+      "avg_pnl_pct": -0.0002390817636797769,
+      "total_pnl_pct": -2.1565175083915875
+    },
+    {
+      "threshold": 0.5,
+      "n_signals": 4638,
+      "n_filled": 3407,
+      "fill_rate": 0.7345838723587753,
+      "hit_rate": 0.6692104490754329,
+      "avg_pnl_pct": 5.852743526310092e-05,
+      "total_pnl_pct": 0.19940297194138484
+    },
+    {
+      "threshold": 0.55,
+      "n_signals": 2540,
+      "n_filled": 1827,
+      "fill_rate": 0.7192913385826771,
+      "hit_rate": 0.7405582922824302,
+      "avg_pnl_pct": 0.00027757688764166316,
+      "total_pnl_pct": 0.5071329737213186
+    },
+    {
+      "threshold": 0.6,
+      "n_signals": 1308,
+      "n_filled": 926,
+      "fill_rate": 0.7079510703363915,
+      "hit_rate": 0.8056155507559395,
+      "avg_pnl_pct": 0.0005117303043636152,
+      "total_pnl_pct": 0.4738622618407077
+    },
+    {
+      "threshold": 0.65,
+      "n_signals": 570,
+      "n_filled": 413,
+      "fill_rate": 0.724561403508772,
+      "hit_rate": 0.8619854721549637,
+      "avg_pnl_pct": 0.0007632685381173027,
+      "total_pnl_pct": 0.315229906242446
+    },
+    {
+      "threshold": 0.7,
+      "n_signals": 189,
+      "n_filled": 139,
+      "fill_rate": 0.7354497354497355,
+      "hit_rate": 0.935251798561151,
+      "avg_pnl_pct": 0.0012266971176235323,
+      "total_pnl_pct": 0.170510899349671
+    },
+    {
+      "threshold": 0.75,
+      "n_signals": 32,
+      "n_filled": 27,
+      "fill_rate": 0.84375,
+      "hit_rate": 1.0,
+      "avg_pnl_pct": 0.0017467048516212702,
+      "total_pnl_pct": 0.0471610309937743
+    }
+  ],
+  "chosen_meta_threshold": 0.55,
+  "oos_at_chosen_meta_threshold": {
+    "n_signals": 9880,
+    "n_filled": 7822,
+    "fill_rate": 0.7917004048582996,
+    "hit_rate": 0.7256456149322424,
+    "avg_pnl_pct": 0.0003989735617379912,
+    "total_pnl_pct": 3.120771199914567
+  },
+  "oos_ungated_primary_only": {
+    "n_signals": 39046,
+    "n_filled": 31141,
+    "fill_rate": 0.7975464836346873,
+    "hit_rate": 0.5449086413409974,
+    "avg_pnl_pct": -0.00023526116747737096,
+    "total_pnl_pct": -7.326268016412809
+  },
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "method": "fixed primary confidence threshold=0.55, no meta-model",
+    "oos_total_pnl_pct": 3.7390646402123644
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Meta-model trained on purged 5-block OOF primary predictions (never sees primary's in-sample/memorized confidence). Meta threshold chosen on val by realized maker-fill PnL, applied unchanged to OOS."
+}

@@ -1,0 +1,82 @@
+{
+  "model_id": "alpha1_parent_only_swap_20260513",
+  "variant": "v40_9_lgbm_native_quant_parent",
+  "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_native_quant_v40_9_20260512/target_aware_full_bundle.pkl",
+  "metrics": {
+    "cost1": {
+      "pnl": 59.36227756089336,
+      "mdd": -17.84820115746727,
+      "trades": 169,
+      "wr": 0.2781065088757396,
+      "trades_per_day": 2.8806818181818183,
+      "deep_entries": 158,
+      "long_entries": 78,
+      "short_entries": 91,
+      "avg_notional": 2.048816568047337,
+      "avg_leverage": 2.0676716445947214,
+      "exits": {
+        "deep_alpha_stop_loss": 108,
+        "deep_alpha_max_hold": 29,
+        "deep_alpha_take_profit": 21,
+        "v21_2_stop_loss": 8,
+        "v21_2_max_hold": 3
+      },
+      "runner_actions": {
+        "deep_entry": 158,
+        "v21_entry": 11,
+        "v21_reject": 1,
+        "v21_add_on": 5
+      }
+    },
+    "cost2": {
+      "pnl": -24.722482649239264,
+      "mdd": -39.70223092467053,
+      "trades": 172,
+      "wr": 0.2558139534883721,
+      "trades_per_day": 2.931818181818182,
+      "deep_entries": 161,
+      "long_entries": 78,
+      "short_entries": 94,
+      "avg_notional": 2.04796511627907,
+      "avg_leverage": 2.0664913252122554,
+      "exits": {
+        "deep_alpha_max_hold": 32,
+        "deep_alpha_stop_loss": 111,
+        "deep_alpha_take_profit": 18,
+        "v21_2_stop_loss": 8,
+        "v21_2_max_hold": 3
+      },
+      "runner_actions": {
+        "deep_entry": 161,
+        "v21_entry": 11,
+        "v21_reject": 1,
+        "v21_add_on": 4
+      }
+    },
+    "cost3": {
+      "pnl": -58.79936924765532,
+      "mdd": -59.65495838339451,
+      "trades": 172,
+      "wr": 0.21511627906976744,
+      "trades_per_day": 2.931818181818182,
+      "deep_entries": 160,
+      "long_entries": 77,
+      "short_entries": 95,
+      "avg_notional": 2.052325581395349,
+      "avg_leverage": 2.0725359911406422,
+      "exits": {
+        "deep_alpha_max_hold": 28,
+        "deep_alpha_stop_loss": 115,
+        "deep_alpha_take_profit": 17,
+        "v21_2_stop_loss": 10,
+        "v21_2_max_hold": 2
+      },
+      "runner_actions": {
+        "deep_entry": 160,
+        "v21_entry": 12,
+        "v21_add_on": 4,
+        "v21_reject": 1
+      }
+    }
+  }
+}

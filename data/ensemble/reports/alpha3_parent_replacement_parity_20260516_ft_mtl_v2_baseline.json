@@ -1,0 +1,87 @@
+{
+  "model": "alpha3_runtime_native_backtest_csv_loop_parity",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_baseline_ledger.csv",
+  "range": {
+    "start_index_abs": 6999,
+    "end_index_abs": 15638,
+    "rows": 8640,
+    "start_timestamp": "2026-01-25 07:15:00",
+    "end_timestamp": "2026-02-24 07:10:00"
+  },
+  "metrics": {
+    "final_equity": 4.3868067144959,
+    "return_pct": 338.68067144958997,
+    "max_drawdown_pct": 29.617312952777574,
+    "mdd_signed_pct": -29.617312952777574,
+    "closed_trades": 114,
+    "win_rate": 0.3157894736842105,
+    "avg_closed_pnl_pct": 1.5026078172822808,
+    "median_closed_pnl_pct": -0.2792873429281655,
+    "deep_entries": 75,
+    "long_entries": 65,
+    "short_entries": 49,
+    "avg_notional": 2.1901128532086536,
+    "avg_leverage": 2.1262420039436214,
+    "trades_per_day": 3.8004398657251994,
+    "exit_reason_top20": {
+      "deep_alpha_stop_loss": 49,
+      "v21_2_stop_loss": 29,
+      "deep_alpha_max_hold": 14,
+      "deep_alpha_take_profit": 11,
+      "v21_2_take_profit": 6,
+      "v21_2_max_hold": 4,
+      "forced_end": 1
+    },
+    "runner_actions": {
+      "deep_entry": 75,
+      "v21_entry": 39,
+      "v21_reject": 15,
+      "v21_add_on": 9
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 236,
+      "forced_end_market": 1
+    }
+  },
+  "parity_compare": {
+    "enabled": true,
+    "reference": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516_ledger_corrected.csv",
+    "action_events_match": true,
+    "first_action_diff": null,
+    "reference_action_events": 237,
+    "candidate_action_events": 237,
+    "final_cash_reference": 4.3868067144959,
+    "final_cash_candidate": 4.3868067144959,
+    "final_cash_diff": 0.0,
+    "final_equity_reference": 4.440568861658766,
+    "final_equity_candidate": 4.440568861658766,
+    "final_equity_diff": 0.0,
+    "final_pnl_reference_pct": 338.68067144958997,
+    "final_pnl_candidate_pct": 338.68067144958997,
+    "final_pnl_diff_pct": 0.0
+  },
+  "audit": {
+    "loop_contract": "canonical_csv_alpha3_backtest_signal_limit",
+    "execution_contract": "next_open_limit_touch0_fee20",
+    "limit_config": {
+      "name": "next_open_limit_touch0_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 0.0,
+      "exit_offset_bps": 0.0,
+      "penetration_bps": 0.0,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "skip",
+      "exit_miss": "market_fallback"
+    },
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "teacher_runtime": {
+      "name": "noflip_c0.56_parent_scale1.10",
+      "confidence": 0.56,
+      "parent_notional_scale": 1.1,
+      "max_notional": 2.75
+    },
+    "note": "This mode freezes the live artifact inputs but executes the canonical CSV Alpha3 loop for action/PnL parity logging."
+  }
+}

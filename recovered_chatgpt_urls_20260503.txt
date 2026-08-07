@@ -1,0 +1,39 @@
+2026-04-25 12:15:07	그래픽카드 전원 연결 방법	https://chatgpt.com/c/69ecb012-8870-83ab-ad34-f4c7ed551679
+2026-04-24 05:03:21	이체내역 매칭 분석	https://chatgpt.com/c/69ea4974-e83c-83a7-bf13-2d38f234c457
+2026-04-21 17:59:59	모니터 끄는 기능 여부	https://chatgpt.com/c/69e7bb0f-c5cc-83a3-868e-f6180ff0df8d
+2026-04-21 04:47:19	오라클 클라우드 인증 방법	https://chatgpt.com/c/69e6f0c3-c1bc-83a6-a701-1695c34c16c8
+2026-04-21 04:47:18	우연히 대체어 추천	https://chatgpt.com/c/69e4ee89-affc-83ab-81ba-efd62113d3db
+2026-04-19 21:53:15	주말 무료 주차 여부	https://chatgpt.com/c/69e0365f-5e18-83a4-8a75-17d5ba691df2
+2026-04-19 14:48:49	버스 노선 정리	https://chatgpt.com/c/69e4eb3b-663c-83aa-8293-040a9891d11d
+2026-04-16 00:13:00	롱/숏 비율 해석	https://chatgpt.com/c/69de54d4-ddf4-83aa-820e-1020c73e4194
+2026-04-15 05:27:52	숏 포지션 수익 문제	https://chatgpt.com/c/69d6c5c1-51cc-83a5-a82d-ce8ea2a84830
+2026-04-15 03:31:57	IRP 해지 지방세	https://chatgpt.com/c/69ddc2c4-fc2c-83a9-ac10-b513c3adecc4
+2026-04-13 15:14:23	토지 매입 추가비용	https://chatgpt.com/c/69dcf56d-9ae8-83a6-94d6-4fc56b8716c5
+2026-04-12 13:33:39	미국채 선물 지연 이유	https://chatgpt.com/c/69d85414-f6ec-83a9-bf60-501a2f6e4fff
+2026-04-08 21:45:22	레이더와 요격기 대체 이름	https://chatgpt.com/c/69d6cc67-e18c-83a2-b591-627da445c6a0
+2026-04-08 21:41:40	스타크래프트 미사일 터렛	https://chatgpt.com/c/69d6cb75-5aec-83a9-94bd-a62c5bf17ed5
+2026-04-08 09:21:39	아이디어 뱅크 - 2호점 개설을 위한 매출	https://chatgpt.com/g/g-69c1273c287c81918378d184fcbc5634-aidieo-baengkeu/c/69d3d205-7844-83a7-9eec-ca2e3d515f77
+2026-04-07 04:17:51	스파이럴 믹서 반죽 문제	https://chatgpt.com/c/69c9e864-717c-83aa-820f-04f5c871d33e
+2026-04-06 10:49:04	FundingRate 데이터 종류	https://chatgpt.com/c/69d06383-88dc-83ab-8767-367782bb7df1
+2026-03-29 23:25:08	소금빵 버터동굴 문제	https://chatgpt.com/c/69bac80f-1988-8322-93d7-caf4224254d7
+2026-03-29 14:42:31	KIMHILL KB-401 믹서 스펙	https://chatgpt.com/c/69c8d85b-8bb0-83aa-a302-43b88f9b3254
+2026-03-27 14:20:52	프랑스 건축물 질문	https://chatgpt.com/c/69c690a0-f74c-83aa-9258-c6d2ab25d279
+2026-03-25 08:32:01	전문가용 지표 추천	https://chatgpt.com/c/69c30193-eee4-83a8-bb51-691c0f846d37
+2026-03-24 11:31:24	냉장고 이동 시 주의사항	https://chatgpt.com/c/69c1dc0f-a44c-83a3-a61a-2a8ee284561a
+2026-03-23 11:49:56	ChatGPT - 아이디어 뱅크	https://chatgpt.com/g/g-69c1273c287c81918378d184fcbc5634-aidieo-baengkeu/c/69c12854-4a18-83a5-90a7-a2508867997c
+2026-03-23 11:00:47	ChatGPT - 프리렌	https://chatgpt.com/g/g-69c11b7dad008191a8bd6f893f9db2cc-peuriren/c/69c11d5c-a4b4-83ab-935d-04f7d608c685
+2026-03-23 10:47:05	ChatGPT - 페르소나 생성 AI	https://chatgpt.com/g/g-l8X2ILvo2-pereusona-saengseong-ai/c/69c11a27-0b00-83a5-8fcf-97c863288667
+2026-03-23 10:34:12	ChatGPT - 존나조쿤	https://chatgpt.com/g/g-690d40ae4bac819185be035cdead7276-jonnajokun/c/69c11721-a24c-83ab-9749-398a190cf843
+2026-03-22 14:36:21	Flutter 프론트엔드 질문	https://chatgpt.com/c/69bffe53-e624-8320-9a71-e492b2b0ae3d
+2026-03-18 05:43:38	전쟁의 경제적 영향	https://chatgpt.com/c/69ba3b87-f0e0-8322-960c-645433fc5ce1
+2026-03-15 08:29:45	ChatGPT - 존나조쿤	https://chatgpt.com/g/g-690d40ae4bac819185be035cdead7276-jonnajokun/c/69b66df5-85a4-8320-aa85-65cec869eaad
+2026-03-14 06:10:19	소금빵 공정 차이	https://chatgpt.com/c/69b226f6-0e5c-8322-aa11-3d5597b3f8ac
+2026-03-13 15:08:51	ChatGPT - 손금 전문가	https://chatgpt.com/g/g-HWVF7nmko-songeum-jeonmunga/c/699730bc-3f38-8323-bdf5-94d3158c50be
+2026-03-13 15:08:46	사주팔자 명리학 - ("방문율 1위" 운세, 사주, 궁합, 인생, 사업, 자녀, 길일) - 사주 상담 방법 안내	https://chatgpt.com/g/g-bOHE77cGN-sajupalja-myeongrihag-bangmunyul-1wi-unse-saju-gunghab-insaeng-saeob-janyeo-gilil/c/691b2cfc-19a4-8324-8a5c-db530ba8d8e8
+2026-03-13 15:08:36	사주팔자 명리학 - ("방문율 1위" 운세, 사주, 궁합, 인생, 사업, 자녀, 길일) - 사주 상담 안내	https://chatgpt.com/g/g-bOHE77cGN-sajupalja-myeongrihag-bangmunyul-1wi-unse-saju-gunghab-insaeng-saeob-janyeo-gilil/c/691b2d1b-a400-8321-be1a-6b3b861b9b10
+2026-03-13 15:08:29	사주팔자 운세박사 - 무료 AI 사주 "세계 1위" 사주풀이, 궁합, 신년운세, 연애운 - 사주팔자 풀이 요청	https://chatgpt.com/g/g-mHCPUrEvZ-sajupalja-unsebagsa-muryo-ai-saju-segye-1wi-sajupuli-gunghab-sinnyeonunse-yeonaeun/c/68fcca5e-8428-8321-9110-dce011f17bc0
+2026-03-05 09:31:24	냉온수기 식초 세척법	https://chatgpt.com/c/69a8d213-9304-8321-ac98-bbc7017e2ff2
+2026-03-04 15:18:40	터보에어 냉동고 팬 수	https://chatgpt.com/c/69a8252f-06c8-8323-86bf-d181acc40c9d
+2026-02-23 14:11:31	베이커리 - 가벼운 소금빵 만들기	https://chatgpt.com/c/67a4621f-a86c-8005-ae31-c28dab706fc4
+2026-02-23 13:48:20	ChatGPT	https://chatgpt.com/c/67a4621f-a86c-8005-ae31-c28dab706fc4?src=history_search
+2026-02-05 08:03:30	PPO xLSTM 트레이딩 개선	https://chatgpt.com/c/697c1937-6088-8320-87ec-9a621d7e2de0

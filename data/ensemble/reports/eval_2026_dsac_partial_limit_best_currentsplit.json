@@ -4,11 +4,11 @@
   "data_rows": 16897,
   "baseline_market": {
     "method": "market_closed_loop",
-    "pnl_pct": 342.1429,
-    "wr_pct": 43.58,
-    "trades": 670,
-    "sharpe": 22.089,
-    "mdd_pct": -3.7293
+    "pnl_pct": -30.5624,
+    "wr_pct": 40.66,
+    "trades": 182,
+    "sharpe": -2.776,
+    "mdd_pct": -42.1007
   },
   "tested_configs": [
     {
@@ -25,17 +25,17 @@
         "fallback_conf": 0.65,
         "fallback_edge": 0.03
       },
-      "pnl_pct": 9.2835,
-      "wr_pct": 51.49,
-      "trades": 101,
-      "sharpe": 1.7655,
-      "mdd_pct": -12.5309,
-      "market_entries": 101,
-      "maker_entries": 50,
+      "pnl_pct": -13.8945,
+      "wr_pct": 38.65,
+      "trades": 163,
+      "sharpe": -1.0224,
+      "mdd_pct": -36.4556,
+      "market_entries": 163,
+      "maker_entries": 88,
       "fallback_entries": 0,
-      "missed_entries": 48,
+      "missed_entries": 51,
       "maker_entry_ratio": 1.0,
-      "delta_vs_market_pct": -332.8594
+      "delta_vs_market_pct": 16.6679
     },
     {
       "method": "partial_limit",
@@ -51,17 +51,17 @@
         "fallback_conf": 0.62,
         "fallback_edge": 0.03
       },
-      "pnl_pct": 16.1051,
-      "wr_pct": 47.31,
-      "trades": 93,
-      "sharpe": 2.4338,
-      "mdd_pct": -12.2536,
-      "market_entries": 93,
-      "maker_entries": 45,
-      "fallback_entries": 3,
-      "missed_entries": 43,
-      "maker_entry_ratio": 0.9375,
-      "delta_vs_market_pct": -326.0378
+      "pnl_pct": -21.9563,
+      "wr_pct": 36.42,
+      "trades": 151,
+      "sharpe": -1.9579,
+      "mdd_pct": -35.7656,
+      "market_entries": 151,
+      "maker_entries": 79,
+      "fallback_entries": 1,
+      "missed_entries": 51,
+      "maker_entry_ratio": 0.9875,
+      "delta_vs_market_pct": 8.6061
     },
     {
       "method": "partial_limit",
@@ -77,17 +77,17 @@
         "fallback_conf": 0.6,
         "fallback_edge": 0.02
       },
-      "pnl_pct": 6.0902,
-      "wr_pct": 44.06,
-      "trades": 143,
-      "sharpe": 1.5028,
-      "mdd_pct": -6.788,
-      "market_entries": 143,
-      "maker_entries": 63,
-      "fallback_entries": 4,
-      "missed_entries": 72,
-      "maker_entry_ratio": 0.9403,
-      "delta_vs_market_pct": -336.0527
+      "pnl_pct": -7.1822,
+      "wr_pct": 38.62,
+      "trades": 145,
+      "sharpe": -0.3851,
+      "mdd_pct": -31.1711,
+      "market_entries": 145,
+      "maker_entries": 73,
+      "fallback_entries": 1,
+      "missed_entries": 50,
+      "maker_entry_ratio": 0.9865,
+      "delta_vs_market_pct": 23.3802
     },
     {
       "method": "partial_limit",
@@ -103,43 +103,43 @@
         "fallback_conf": 0.58,
         "fallback_edge": 0.02
       },
-      "pnl_pct": 8.2975,
-      "wr_pct": 41.26,
-      "trades": 143,
-      "sharpe": 1.8668,
-      "mdd_pct": -8.5273,
-      "market_entries": 143,
+      "pnl_pct": -8.2475,
+      "wr_pct": 39.84,
+      "trades": 128,
+      "sharpe": -0.5368,
+      "mdd_pct": -25.5974,
+      "market_entries": 128,
       "maker_entries": 68,
       "fallback_entries": 1,
-      "missed_entries": 68,
+      "missed_entries": 43,
       "maker_entry_ratio": 0.9855,
-      "delta_vs_market_pct": -333.8454
+      "delta_vs_market_pct": 22.3149
     }
   ],
   "best_partial_limit": {
     "method": "partial_limit",
     "config": {
-      "name": "market85_limit15",
-      "market_share": 0.85,
-      "limit_share": 0.15,
-      "entry_scale": 0.35,
-      "volatility_mult": 0.25,
-      "liquidity_mult": 0.2,
-      "model_anchor": 0.9,
+      "name": "market80_limit20",
+      "market_share": 0.8,
+      "limit_share": 0.2,
+      "entry_scale": 0.3,
+      "volatility_mult": 0.2,
+      "liquidity_mult": 0.15,
+      "model_anchor": 0.92,
       "entry_ttl": 1,
-      "fallback_conf": 0.62,
-      "fallback_edge": 0.03
+      "fallback_conf": 0.6,
+      "fallback_edge": 0.02
     },
-    "pnl_pct": 16.1051,
-    "wr_pct": 47.31,
-    "trades": 93,
-    "sharpe": 2.4338,
-    "mdd_pct": -12.2536,
-    "market_entries": 93,
-    "maker_entries": 45,
-    "fallback_entries": 3,
-    "missed_entries": 43,
-    "maker_entry_ratio": 0.9375,
-    "delta_vs_market_pct": -326.0378
+    "pnl_pct": -7.1822,
+    "wr_pct": 38.62,
+    "trades": 145,
+    "sharpe": -0.3851,
+    "mdd_pct": -31.1711,
+    "market_entries": 145,
+    "maker_entries": 73,
+    "fallback_entries": 1,
+    "missed_entries": 50,
+    "maker_entry_ratio": 0.9865,
+    "delta_vs_market_pct": 23.3802
   }
 }

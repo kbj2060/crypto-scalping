@@ -1,0 +1,133 @@
+{
+  "model_id": "alpha3_csv_canonical_aligned_native_1m_20260516",
+  "purpose": "Canonical CSV Alpha3 backtest sliced to the same timestamp window as native live-runtime 1m replay.",
+  "baseline_contract": "alpha3_teacher_l2_limit_fallback_20260514 / next_open_limit_touch0_fee20",
+  "range": {
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-02-24 07:10:00",
+    "start_index_in_full_2026": 6999,
+    "stop_index_in_full_2026": 15638,
+    "rows": 8640,
+    "sequence_context": "parent/teacher/V27 decisions computed on full 2026 frame before slicing; position/accounting reset at aligned start_ts"
+  },
+  "config": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 338.68067144958997,
+      "mdd": -29.617312952777574,
+      "trades": 114,
+      "wr": 0.3157894736842105,
+      "trades_per_day": 3.8004398657251994,
+      "deep_entries": 75,
+      "long_entries": 65,
+      "short_entries": 49,
+      "avg_notional": 2.1901128532086536,
+      "avg_leverage": 2.1262420039436214,
+      "exits": {
+        "v21_2_stop_loss": 29,
+        "v21_2_max_hold": 4,
+        "deep_alpha_max_hold": 14,
+        "deep_alpha_stop_loss": 49,
+        "v21_2_take_profit": 6,
+        "deep_alpha_take_profit": 11,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "v21_entry": 39,
+        "v21_reject": 15,
+        "deep_entry": 75,
+        "v21_add_on": 9
+      },
+      "route_counts": {
+        "signal_immediate_maker_limit": 236,
+        "forced_end_market": 1
+      }
+    },
+    "cost2": {
+      "pnl": 306.4701549919022,
+      "mdd": -30.09337812096048,
+      "trades": 114,
+      "wr": 0.3157894736842105,
+      "trades_per_day": 3.8004398657251994,
+      "deep_entries": 75,
+      "long_entries": 64,
+      "short_entries": 50,
+      "avg_notional": 2.189901411872808,
+      "avg_leverage": 2.1217460797849985,
+      "exits": {
+        "v21_2_stop_loss": 29,
+        "v21_2_max_hold": 4,
+        "deep_alpha_max_hold": 14,
+        "deep_alpha_stop_loss": 49,
+        "v21_2_take_profit": 6,
+        "deep_alpha_take_profit": 11,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "v21_entry": 39,
+        "v21_reject": 13,
+        "deep_entry": 75,
+        "v21_add_on": 10
+      },
+      "route_counts": {
+        "signal_immediate_maker_limit": 237,
+        "forced_end_market": 1
+      }
+    },
+    "cost3": {
+      "pnl": 247.27629575735187,
+      "mdd": -31.397871677089594,
+      "trades": 117,
+      "wr": 0.29914529914529914,
+      "trades_per_day": 3.9004514411390208,
+      "deep_entries": 77,
+      "long_entries": 65,
+      "short_entries": 52,
+      "avg_notional": 2.189475128949847,
+      "avg_leverage": 2.1253131508840233,
+      "exits": {
+        "v21_2_stop_loss": 30,
+        "v21_2_max_hold": 4,
+        "deep_alpha_max_hold": 15,
+        "deep_alpha_stop_loss": 51,
+        "v21_2_take_profit": 6,
+        "deep_alpha_take_profit": 10,
+        "forced_end": 1
+      },
+      "runner_actions": {
+        "v21_entry": 40,
+        "v21_reject": 15,
+        "deep_entry": 77,
+        "v21_add_on": 8
+      },
+      "route_counts": {
+        "signal_immediate_maker_limit": 241,
+        "forced_end_market": 1
+      }
+    }
+  },
+  "native_live_runtime_1m_reference": {
+    "report": "data/ensemble/reports/alpha3_runtime_native_backtest_live_frame_20260516_1m.json",
+    "return_pct": 101.59069669071089,
+    "max_drawdown_pct": 33.39706684844403,
+    "closed_trades": 122
+  },
+  "audit": {
+    "selection_uses_2026": false,
+    "uses_full_2026_for_sequence_context_before_slice": true,
+    "position_state_reset_at_window_start": true,
+    "warnings": [
+      "CSV canonical simulator still differs from native live-runtime router/accounting/fill lifecycle.",
+      "OHLCV high_low touch proxy is not real L2 queue fill."
+    ]
+  }
+}

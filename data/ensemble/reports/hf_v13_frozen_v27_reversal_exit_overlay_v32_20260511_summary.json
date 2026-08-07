@@ -1,0 +1,333 @@
+{
+  "model_id": "hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511",
+  "design": "V32 freezes the trained V27 entry model and V21.2 jackpot parent. A tabular reversal-probability classifier monitors open deep_alpha positions and closes them when reversal risk exceeds a threshold.",
+  "selected_config": {
+    "name": "v32_p062_precision",
+    "edge_th": 0.012,
+    "margin_th": 0.005,
+    "notional": 1.0,
+    "cooldown": 12,
+    "reversal_p_th": 0.62,
+    "min_hold": 2,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48
+  },
+  "selection_result": {
+    "config": {
+      "name": "v32_p062_precision",
+      "edge_th": 0.012,
+      "margin_th": 0.005,
+      "notional": 1.0,
+      "cooldown": 12,
+      "reversal_p_th": 0.62,
+      "min_hold": 2,
+      "base_tp": 0.045,
+      "base_sl": 0.022,
+      "base_hold": 48
+    },
+    "validation_cost1": {
+      "pnl": -37.414312808421144,
+      "mdd": -42.90879121510754,
+      "trades": 258,
+      "wr": 0.40310077519379844,
+      "trades_per_day": 2.804453670503869,
+      "deep_entries": 211,
+      "long_entries": 85,
+      "short_entries": 173,
+      "avg_notional": 1.2928888005680148,
+      "avg_leverage": 1.2923122712308852,
+      "exits": {
+        "deep_alpha_max_hold": 132,
+        "deep_alpha_stop_loss": 32,
+        "deep_alpha_reversal_overlay": 47,
+        "v21_2_stop_loss": 42,
+        "v21_2_max_hold": 4,
+        "v21_2_take_profit": 1
+      },
+      "runner_actions": {
+        "deep_entry": 211,
+        "v21_entry": 47,
+        "v21_reject": 10,
+        "v21_add_on": 7
+      }
+    },
+    "validation_cost2": {
+      "pnl": -60.20050044917167,
+      "mdd": -60.21882550346543,
+      "trades": 260,
+      "wr": 0.3423076923076923,
+      "trades_per_day": 2.8261936214380072,
+      "deep_entries": 210,
+      "long_entries": 85,
+      "short_entries": 175,
+      "avg_notional": 1.3103579680002437,
+      "avg_leverage": 1.3088187094576305,
+      "exits": {
+        "deep_alpha_stop_loss": 34,
+        "deep_alpha_reversal_overlay": 45,
+        "deep_alpha_max_hold": 131,
+        "v21_2_stop_loss": 45,
+        "v21_2_max_hold": 4,
+        "v21_2_take_profit": 1
+      },
+      "runner_actions": {
+        "deep_entry": 210,
+        "v21_entry": 50,
+        "v21_reject": 8,
+        "v21_add_on": 6
+      }
+    },
+    "validation_cost3": {
+      "pnl": -74.42923947173534,
+      "mdd": -74.42923947173534,
+      "trades": 262,
+      "wr": 0.30916030534351147,
+      "trades_per_day": 2.847933572372146,
+      "deep_entries": 210,
+      "long_entries": 85,
+      "short_entries": 177,
+      "avg_notional": 1.3212662071854118,
+      "avg_leverage": 1.3212555511408148,
+      "exits": {
+        "deep_alpha_stop_loss": 34,
+        "deep_alpha_reversal_overlay": 46,
+        "deep_alpha_max_hold": 130,
+        "v21_2_stop_loss": 47,
+        "v21_2_max_hold": 4,
+        "v21_2_take_profit": 1
+      },
+      "runner_actions": {
+        "deep_entry": 210,
+        "v21_entry": 52,
+        "v21_reject": 4,
+        "v21_add_on": 4
+      }
+    },
+    "selection_score": -72.18841278526594
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 243.8576372498561,
+      "mdd": -31.741344176793806,
+      "trades": 142,
+      "wr": 0.4014084507042254,
+      "trades_per_day": 2.4204545454545454,
+      "deep_entries": 76,
+      "long_entries": 57,
+      "short_entries": 85,
+      "avg_notional": 1.7221083602670297,
+      "avg_leverage": 1.7529082514173246,
+      "exits": {
+        "deep_alpha_max_hold": 50,
+        "deep_alpha_reversal_overlay": 20,
+        "v21_2_stop_loss": 51,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_stop_loss": 6
+      },
+      "runner_actions": {
+        "deep_entry": 76,
+        "v21_entry": 66,
+        "v21_reject": 27,
+        "v21_add_on": 10
+      }
+    },
+    "cost2": {
+      "pnl": 154.61232453835382,
+      "mdd": -32.06749580075747,
+      "trades": 145,
+      "wr": 0.36551724137931035,
+      "trades_per_day": 2.471590909090909,
+      "deep_entries": 77,
+      "long_entries": 59,
+      "short_entries": 86,
+      "avg_notional": 1.726925157393216,
+      "avg_leverage": 1.7517969417018198,
+      "exits": {
+        "deep_alpha_max_hold": 49,
+        "deep_alpha_reversal_overlay": 22,
+        "v21_2_stop_loss": 53,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_stop_loss": 6
+      },
+      "runner_actions": {
+        "deep_entry": 77,
+        "v21_entry": 68,
+        "v21_reject": 28,
+        "v21_add_on": 9
+      }
+    },
+    "cost3": {
+      "pnl": 49.78648911504053,
+      "mdd": -39.21751404744028,
+      "trades": 151,
+      "wr": 0.2913907284768212,
+      "trades_per_day": 2.5738636363636367,
+      "deep_entries": 78,
+      "long_entries": 65,
+      "short_entries": 86,
+      "avg_notional": 1.7407234139829382,
+      "avg_leverage": 1.7547180277545444,
+      "exits": {
+        "deep_alpha_max_hold": 52,
+        "deep_alpha_reversal_overlay": 19,
+        "v21_2_stop_loss": 59,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 6,
+        "deep_alpha_stop_loss": 7
+      },
+      "runner_actions": {
+        "deep_entry": 78,
+        "v21_entry": 73,
+        "v21_add_on": 12,
+        "v21_reject": 26
+      }
+    }
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "promote",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "policy": "frozen_v27_reversal_exit_overlay_v32",
+    "v27_entry_frozen": true,
+    "v21_2_preserved": true,
+    "deep_sleeve_only_when_parent_cash": true,
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    },
+    "train_rows": 30190,
+    "positive_rate": 0.14216628022524014,
+    "selected_config": {
+      "name": "v32_p062_precision",
+      "edge_th": 0.012,
+      "margin_th": 0.005,
+      "notional": 1.0,
+      "cooldown": 12,
+      "reversal_p_th": 0.62,
+      "min_hold": 2,
+      "base_tp": 0.045,
+      "base_sl": 0.022,
+      "base_hold": 48
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 243.8576372498561,
+        "mdd": -31.741344176793806,
+        "trades": 142,
+        "wr": 0.4014084507042254,
+        "trades_per_day": 2.4204545454545454,
+        "deep_entries": 76,
+        "long_entries": 57,
+        "short_entries": 85,
+        "avg_notional": 1.7221083602670297,
+        "avg_leverage": 1.7529082514173246,
+        "exits": {
+          "deep_alpha_max_hold": 50,
+          "deep_alpha_reversal_overlay": 20,
+          "v21_2_stop_loss": 51,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_stop_loss": 6
+        },
+        "runner_actions": {
+          "deep_entry": 76,
+          "v21_entry": 66,
+          "v21_reject": 27,
+          "v21_add_on": 10
+        }
+      },
+      "cost2": {
+        "pnl": 154.61232453835382,
+        "mdd": -32.06749580075747,
+        "trades": 145,
+        "wr": 0.36551724137931035,
+        "trades_per_day": 2.471590909090909,
+        "deep_entries": 77,
+        "long_entries": 59,
+        "short_entries": 86,
+        "avg_notional": 1.726925157393216,
+        "avg_leverage": 1.7517969417018198,
+        "exits": {
+          "deep_alpha_max_hold": 49,
+          "deep_alpha_reversal_overlay": 22,
+          "v21_2_stop_loss": 53,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_stop_loss": 6
+        },
+        "runner_actions": {
+          "deep_entry": 77,
+          "v21_entry": 68,
+          "v21_reject": 28,
+          "v21_add_on": 9
+        }
+      },
+      "cost3": {
+        "pnl": 49.78648911504053,
+        "mdd": -39.21751404744028,
+        "trades": 151,
+        "wr": 0.2913907284768212,
+        "trades_per_day": 2.5738636363636367,
+        "deep_entries": 78,
+        "long_entries": 65,
+        "short_entries": 86,
+        "avg_notional": 1.7407234139829382,
+        "avg_leverage": 1.7547180277545444,
+        "exits": {
+          "deep_alpha_max_hold": 52,
+          "deep_alpha_reversal_overlay": 19,
+          "v21_2_stop_loss": 59,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 6,
+          "deep_alpha_stop_loss": 7
+        },
+        "runner_actions": {
+          "deep_entry": 78,
+          "v21_entry": 73,
+          "v21_add_on": 12,
+          "v21_reject": 26
+        }
+      }
+    },
+    "baseline_v27": {
+      "cost1": 226.82447187089713,
+      "cost2": 123.11659362616143,
+      "cost3": 14.22783363158393
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511/v32_reversal_exit_overlay.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_frozen_v27_reversal_exit_overlay_v32_20260511_summary_cost1_ledger.csv"
+    }
+  }
+}

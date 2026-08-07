@@ -1,0 +1,114 @@
+{
+  "status": "pass",
+  "verdict": "do_not_promote",
+  "blocking": [],
+  "warnings": [
+    "policy_uses_legacy_regime_columns:regime_chop,regime_whipsaw,regime_bull,regime_bear,regime_normal",
+    "cost3_not_survived",
+    "base_mdd_above_15pct"
+  ],
+  "csv_path": "data/rl_training_2026_unified.csv",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_agents.pth",
+  "config_path": "data/ensemble/ckpt/dsac_train_config_latest.json",
+  "device": "cuda",
+  "ckpt_epoch": 110,
+  "train_config": {
+    "csv_path": "data/splits/year_oos/rl_training_2025_m7.csv",
+    "saved_at": "2026-05-11T06:08:39.082321",
+    "train_ratio": 0.8,
+    "market_state_cols": [
+      "market_state_2024_unsup_v5_factor_vol",
+      "market_state_2024_unsup_v5_risk_off_prob",
+      "market_state_2024_unsup_v5_prob_2",
+      "market_state_2024_unsup_v5_prob_3",
+      "market_state_2024_unsup_v5_factor_liquidity_stress",
+      "market_state_2024_unsup_v5_confidence",
+      "market_state_2024_unsup_v5_trend_bias"
+    ],
+    "terminate_on_regime_change": true
+  },
+  "checks": {
+    "base_cost1": {
+      "pnl": 7.120561189245045,
+      "wr": 0.41379310344827586,
+      "mdd": -28.658311907011846,
+      "tr": 87,
+      "long_entries": 45,
+      "short_entries": 42,
+      "side_balance": 0.4827586206896552,
+      "force_closed_long": 4,
+      "force_closed_short": 2,
+      "avg_hold_long": 222.46341463414635,
+      "avg_hold_short": 167.71794871794873
+    },
+    "base_cost2": {
+      "pnl": -62.63758067242796,
+      "wr": 0.3333333333333333,
+      "mdd": -67.66399148884554,
+      "tr": 138,
+      "long_entries": 90,
+      "short_entries": 48,
+      "side_balance": 0.34782608695652173,
+      "force_closed_long": 10,
+      "force_closed_short": 5,
+      "avg_hold_long": 178.0581395348837,
+      "avg_hold_short": 24.829268292682926
+    },
+    "base_cost3": {
+      "pnl": -63.34962175284993,
+      "wr": 0.30158730158730157,
+      "mdd": -68.19139890869351,
+      "tr": 126,
+      "long_entries": 72,
+      "short_entries": 54,
+      "side_balance": 0.42857142857142855,
+      "force_closed_long": 10,
+      "force_closed_short": 4,
+      "avg_hold_long": 191.95454545454547,
+      "avg_hold_short": 90.0
+    },
+    "legacy_regime_zero_ablation": {
+      "pnl": 21.81357860802644,
+      "wr": 0.296875,
+      "mdd": -20.175878591066944,
+      "tr": 64,
+      "long_entries": 31,
+      "short_entries": 33,
+      "side_balance": 0.484375,
+      "force_closed_long": 3,
+      "force_closed_short": 1,
+      "avg_hold_long": 272.2142857142857,
+      "avg_hold_short": 311.03846153846155
+    },
+    "market_state_zero_ablation": {
+      "pnl": 7.120561189245045,
+      "wr": 0.41379310344827586,
+      "mdd": -28.658311907011846,
+      "tr": 87,
+      "long_entries": 45,
+      "short_entries": 42,
+      "side_balance": 0.4827586206896552,
+      "force_closed_long": 4,
+      "force_closed_short": 2,
+      "avg_hold_long": 222.46341463414635,
+      "avg_hold_short": 167.71794871794873
+    },
+    "legacy_regime_cols_present": [
+      "regime_chop",
+      "regime_whipsaw",
+      "regime_bull",
+      "regime_bear",
+      "regime_normal"
+    ],
+    "market_state_cols_present": [],
+    "eval_range": [
+      "2026-01-01 21:20:00",
+      "2026-02-28 16:00:00"
+    ],
+    "eval_rows": 16641
+  },
+  "notes": [
+    "This audit does not tune on 2026; it reproduces a pre-existing checkpoint and stress-tests it.",
+    "Legacy regime columns are treated as a red-team risk because previous project bugs involved regime-derived artifacts."
+  ]
+}

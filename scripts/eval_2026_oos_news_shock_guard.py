@@ -88,7 +88,6 @@ def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
     ou_halflife = nz(col("ou_halflife"), 0.0)
     m7_expected_ret = nz(col("m7_expected_ret"), 0.0)
     m7_mtl_dn = nz(col("m7_mtl_dn"), 0.0)
-    m7_mtl_fl = nz(col("m7_mtl_fl"), 0.0)
     m7_mtl_up = nz(col("m7_mtl_up"), 0.0)
 
     out["signal_bias"] = np.tanh(net_taker_ratio)
@@ -111,13 +110,13 @@ def build_proxy_frame(df: pd.DataFrame) -> pd.DataFrame:
     out["shadow_decay_half_life"] = ou_halflife.clip(lower=0.0)
     out["shadow_risk_bucket"] = np.where(out["shadow_aftershock_prob"] >= 0.75, 2, np.where(out["shadow_aftershock_prob"] >= 0.45, 1, 0))
 
-    probs = pd.concat([m7_mtl_dn, m7_mtl_fl, m7_mtl_up], axis=1).clip(lower=0.0)
+    probs = pd.concat([m7_mtl_dn, m7_mtl_up], axis=1).clip(lower=0.0)
     probs_sum = probs.sum(axis=1).replace(0.0, np.nan)
-    probs_norm = probs.div(probs_sum, axis=0).fillna(1.0 / 3.0)
+    probs_norm = probs.div(probs_sum, axis=0).fillna(0.5)
     out["mode_prob"] = probs_norm.max(axis=1).clip(0.0, 1.0)
     top2 = np.sort(probs_norm.to_numpy(dtype=np.float64), axis=1)[:, -2:]
     out["mode_spread"] = (top2[:, 1] - top2[:, 0]).clip(0.0, 1.0)
-    entropy = -(probs_norm * np.log(np.clip(probs_norm, 1e-9, 1.0))).sum(axis=1) / math.log(3.0)
+    entropy = -(probs_norm * np.log(np.clip(probs_norm, 1e-9, 1.0))).sum(axis=1) / math.log(2.0)
     out["entropy"] = entropy.clip(0.0, 1.0)
 
     out["tail_down_prob"] = m7_mtl_dn.clip(0.0, 1.0)

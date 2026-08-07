@@ -1,0 +1,17 @@
+{
+  "status": "pass",
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS",
+  "base_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+  "selected_variant": "sl_front_open_cap090",
+  "baseline_variant": "baseline",
+  "delta_vs_baseline": {
+    "cost3_pnl": 9.018538185622617,
+    "cost3_mdd": 6.799641546328328,
+    "cost3_wr": 0.007864823348694316,
+    "cost3_trades": -8,
+    "v21_stop_loss": -9,
+    "deep_stop_loss": 1
+  }
+}

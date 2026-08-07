@@ -1,0 +1,212 @@
+{
+  "feature_count": 93,
+  "contains_tp_sl_action_score": true,
+  "best_by_selection": "parent_direct_raw_no_teacher_fast",
+  "selection_score": 12.398579435505384,
+  "selected_validation_metrics": {
+    "cost1": {
+      "pnl": 13.212737635511873,
+      "mdd": -23.901955633757144,
+      "trades": 78,
+      "trades_per_day": 0.8478580864314023,
+      "wr": 0.14102564102564102,
+      "avg_notional": 2.3423423595387067
+    },
+    "cost2": {
+      "pnl": 11.68893963522233,
+      "mdd": -23.771337497387613,
+      "trades": 78,
+      "trades_per_day": 0.8478580864314023,
+      "wr": 0.14102564102564102,
+      "avg_notional": 2.3437705824549906
+    },
+    "cost3": {
+      "pnl": 7.638344786528206,
+      "mdd": -25.316408968063975,
+      "trades": 80,
+      "trades_per_day": 0.8695980373655408,
+      "wr": 0.1375,
+      "avg_notional": 2.3474479087056883
+    }
+  },
+  "selected_metrics": {
+    "cost1": {
+      "pnl": 85.41927739544737,
+      "mdd": -21.416844197875772,
+      "trades": 58,
+      "trades_per_day": 0.9886363636363636,
+      "wr": 0.22413793103448276,
+      "avg_notional": 2.3818879959621944
+    },
+    "cost2": {
+      "pnl": 88.92696083937533,
+      "mdd": -21.733772436638965,
+      "trades": 60,
+      "trades_per_day": 1.0227272727272727,
+      "wr": 0.21666666666666667,
+      "avg_notional": 2.394453094920794
+    },
+    "cost3": {
+      "pnl": 83.27840373215021,
+      "mdd": -23.884212874354915,
+      "trades": 62,
+      "trades_per_day": 1.0568181818181819,
+      "wr": 0.20967741935483872,
+      "avg_notional": 2.38676292764467
+    }
+  },
+  "selected_parent_scale_runtime": null,
+  "train_meta": {
+    "candidates": 13047,
+    "stride_bars": 6,
+    "max_train_horizon_bars": 288
+  },
+  "experiments": [
+    {
+      "name": "parent_direct_raw_no_teacher_fast",
+      "selection_score": 12.398579435505384,
+      "validation_metrics": {
+        "cost1": {
+          "pnl": 13.212737635511873,
+          "mdd": -23.901955633757144,
+          "trades": 78,
+          "wr": 0.14102564102564102,
+          "trades_per_day": 0.8478580864314023,
+          "deep_entries": 0,
+          "long_entries": 14,
+          "short_entries": 64,
+          "avg_notional": 2.3423423595387067,
+          "avg_leverage": 2.464547233398629,
+          "exits": {
+            "v21_2_stop_loss": 67,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 78
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 156
+          }
+        },
+        "cost2": {
+          "pnl": 11.68893963522233,
+          "mdd": -23.771337497387613,
+          "trades": 78,
+          "wr": 0.14102564102564102,
+          "trades_per_day": 0.8478580864314023,
+          "deep_entries": 0,
+          "long_entries": 14,
+          "short_entries": 64,
+          "avg_notional": 2.3437705824549906,
+          "avg_leverage": 2.4693629836081437,
+          "exits": {
+            "v21_2_stop_loss": 67,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 78
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 156
+          }
+        },
+        "cost3": {
+          "pnl": 7.638344786528206,
+          "mdd": -25.316408968063975,
+          "trades": 80,
+          "wr": 0.1375,
+          "trades_per_day": 0.8695980373655408,
+          "deep_entries": 0,
+          "long_entries": 14,
+          "short_entries": 66,
+          "avg_notional": 2.3474479087056883,
+          "avg_leverage": 2.4713187724174928,
+          "exits": {
+            "v21_2_stop_loss": 69,
+            "v21_2_max_hold": 10,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "v21_entry": 80
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 160
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 85.41927739544737,
+          "mdd": -21.416844197875772,
+          "trades": 58,
+          "wr": 0.22413793103448276,
+          "trades_per_day": 0.9886363636363636,
+          "deep_entries": 0,
+          "long_entries": 23,
+          "short_entries": 35,
+          "avg_notional": 2.3818879959621944,
+          "avg_leverage": 2.549341199147105,
+          "exits": {
+            "v21_2_stop_loss": 45,
+            "v21_2_max_hold": 11,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "v21_entry": 58
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 116
+          }
+        },
+        "cost2": {
+          "pnl": 88.92696083937533,
+          "mdd": -21.733772436638965,
+          "trades": 60,
+          "wr": 0.21666666666666667,
+          "trades_per_day": 1.0227272727272727,
+          "deep_entries": 0,
+          "long_entries": 21,
+          "short_entries": 39,
+          "avg_notional": 2.394453094920794,
+          "avg_leverage": 2.553198911810914,
+          "exits": {
+            "v21_2_stop_loss": 47,
+            "v21_2_max_hold": 11,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "v21_entry": 60
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 120
+          }
+        },
+        "cost3": {
+          "pnl": 83.27840373215021,
+          "mdd": -23.884212874354915,
+          "trades": 62,
+          "wr": 0.20967741935483872,
+          "trades_per_day": 1.0568181818181819,
+          "deep_entries": 0,
+          "long_entries": 22,
+          "short_entries": 40,
+          "avg_notional": 2.38676292764467,
+          "avg_leverage": 2.5444170742862955,
+          "exits": {
+            "v21_2_stop_loss": 49,
+            "v21_2_max_hold": 11,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "v21_entry": 62
+          },
+          "route_counts": {
+            "signal_immediate_maker_limit": 124
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "model_id": "alpha7_submodel_01965_cleanfunding_v1_20260529",
+  "display_name": "Alpha7.1-01965 clean funding v1",
+  "promoted_at": "2026-05-29",
+  "role": "research_baseline_for_alpha8_retest",
+  "status": "research_only_not_live_wired",
+  "source_candidate": "01965_random_alpha7_combo_primary_fallback",
+  "lineage": {
+    "base_live_model": "alpha7_submodel_01965_decontam_v2_tp_20260528",
+    "clean_funding_remediation": "tmp/causal_regen_20260516/funding_clean_retrain_20260529",
+    "candidate_csv": "alpha7_01965_cleanfunding_candidates_20260529",
+    "decision_source": "alpha7_combo_primary_fallback",
+    "primary": "primary_no_tp",
+    "fallback": "fallback_v2_tp",
+    "current_regime": "clean_regime4_state24_sticky090_v2_20260517",
+    "future_regime": "regime4_pred_tft_h12_nomdjd_all74_20260517_cleanfunding_rescore",
+    "tp_sl_action_score": "alpha7_01965_cleanfunding_candidates_20260529"
+  },
+  "artifacts": {
+    "primary_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/primary_parent.pkl",
+    "primary_summary": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/primary_summary.json",
+    "fallback_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/fallback_alpha43_no_legacy_parent.pkl",
+    "fallback_summary": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/fallback_alpha43_no_legacy_summary.json",
+    "tp_sl_action_score": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/tp_sl_path_edge_predictor.pkl",
+    "runtime_config": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529/alpha7_01965_cleanfunding_runtime_config.json"
+  },
+  "inputs": {
+    "train_csv": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_01965_cleanfunding_candidates_20260529/trade_candidates_2025_alpha6_current_tail111_exact.csv",
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_01965_cleanfunding_candidates_20260529/trade_candidates_2026_alpha6_current_tail111_exact.csv"
+  },
+  "validation_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_submodel_01965_cleanfunding_v1_20260529/report.json",
+  "selected_variant_by_validation": "primary_no_tp_fallback_v2",
+  "selected_validation_cost3": {
+    "pnl": 42.7257698499514,
+    "mdd": -29.52271729395396,
+    "trades": 90,
+    "wr": 0.1111111111111111
+  },
+  "reported_oos_cost3": {
+    "pnl": 43.9510626582605,
+    "mdd": -32.2326346153639,
+    "trades": 76,
+    "wr": 0.18421052631578946
+  },
+  "audit": {
+    "legacy_regime_columns": 0,
+    "current_regime_v2_columns": 20,
+    "future_regime_pred_columns": 12,
+    "selection_uses_2026": false,
+    "selection_note": "Selected by 2025Q4 validation only. This live-style directory is for Alpha8 retest input wiring; not live-wired.",
+    "feature_contract_fail_fast": true,
+    "legacy_contract_layer": false
+  }
+}

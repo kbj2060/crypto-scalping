@@ -1,0 +1,53 @@
+{
+  "model_id": "alpha3_deep_alpha_runtime_v32_20260515",
+  "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_deep_alpha_runtime_v32_20260515/v32_deep_alpha_runtime.pt",
+  "selected_config": {
+    "name": "v32_runtime_utility_mae",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.034,
+    "base_sl": 0.014,
+    "base_hold": 36,
+    "tp_util_mult": 1.1,
+    "sl_vol_mult": 2.1,
+    "trail_gap_mult": 0.75,
+    "trail_decay": 0.55,
+    "hold_decay_start": 12,
+    "hold_decay_rate": 0.035,
+    "tp_cap": 0.06,
+    "sl_cap": 0.026,
+    "trail_activation": 0.006
+  },
+  "train_rows": 105064,
+  "eval_rows": 16897,
+  "feature_count": 80,
+  "target_mean": [
+    -0.009968489408493042,
+    -0.009090328589081764
+  ],
+  "target_std": [
+    0.023103412240743637,
+    0.02197565883398056
+  ],
+  "losses": [
+    0.00035261888218575404,
+    0.0002524045300307363,
+    0.00024201241924613206,
+    0.000232912080545014,
+    0.0002203691537495794,
+    0.00020142667561062088,
+    0.0001825476555113014,
+    0.00016567847938620347,
+    0.00014678659487695083,
+    0.00013053325465129677,
+    0.00011980724055001949,
+    0.0001085494532659548
+  ],
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha3_deep_alpha_runtime_v32_20260515/v32_deep_alpha_runtime.pt",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_deep_alpha_runtime_v32_20260515_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_deep_alpha_runtime_v32_20260515_audit.json"
+  }
+}

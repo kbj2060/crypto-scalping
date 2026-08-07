@@ -1,0 +1,50 @@
+{
+  "model_id": "alpha3_rescue_exit_governor_v2_20260515",
+  "status": "reject_do_not_promote",
+  "selection_uses_2026": false,
+  "selected_config": {
+    "name": "giveback_h2_mfe0.015_gb0.50_q-0.002_exit0",
+    "min_hold": 2,
+    "sl_progress": 99.0,
+    "adverse_q_margin": -0.002,
+    "min_mfe": 0.015,
+    "giveback_frac": 0.5,
+    "time_frac": 99.0,
+    "exit_arm": "exit0_pen0",
+    "maker_fee_mult": 0.2
+  },
+  "causality": [
+    "Selection: 2025-10-01..2025-12-31 only.",
+    "2026 is fixed OOS after config selection.",
+    "Rescue state uses current open-position state and frozen V27 q only."
+  ],
+  "exit_attribution_cost1": {
+    "baseline": {
+      "deep_alpha_max_hold": 33,
+      "deep_alpha_stop_loss": 83,
+      "v21_2_stop_loss": 49,
+      "v21_2_max_hold": 8,
+      "deep_alpha_take_profit": 15,
+      "v21_2_take_profit": 7
+    },
+    "rescue": {
+      "deep_alpha_max_hold": 18,
+      "deep_alpha_stop_loss": 90,
+      "deep_alpha_rescue_profit_giveback": 16,
+      "v21_2_stop_loss": 74,
+      "v21_2_rescue_profit_giveback": 31,
+      "deep_alpha_take_profit": 14,
+      "v21_2_max_hold": 4,
+      "v21_2_take_profit": 4
+    },
+    "baseline_stop_loss_plus_max_hold": 173,
+    "rescue_stop_loss_plus_max_hold": 186
+  },
+  "blocking": [
+    "rescue_exit_underperforms_corrected_alpha3_baseline_on_2026_oos"
+  ],
+  "warnings": [
+    "5m OHLC high/low touch proxy is still not real queue simulation.",
+    "Rescue close is full reduce-only close; no partial close/TWAP yet."
+  ]
+}

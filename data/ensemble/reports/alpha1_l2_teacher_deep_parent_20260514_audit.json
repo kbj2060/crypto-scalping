@@ -1,0 +1,100 @@
+{
+  "status": "pass",
+  "verdict": "shadow_collect_l2",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "historical_l2_snapshots_insufficient_conservative_ohlc_replay_only",
+    "real_live_l2_fill_model_requires_forward_shadow_collection"
+  ],
+  "selection_uses_2026": false,
+  "train_window": "2025-01-01..2025-09-30",
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "teacher_deep_parent_retrained": true,
+  "v27_deep_scout_preserved": true,
+  "v21_2_model_preserved": true,
+  "v31_exit_preserved": true,
+  "live_l2_stats": {
+    "storage": "duckdb",
+    "db_path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb",
+    "table": "orderbook_decision_snapshots",
+    "exists": true,
+    "rows": 74,
+    "first_timestamp_kst": "2026-05-13 23:50:00",
+    "last_timestamp_kst": "2026-05-14 10:30:00",
+    "usable_for_replay": false
+  },
+  "selected_runtime": {
+    "name": "cash_preserve_noflip_c0.56",
+    "confidence": 0.56,
+    "skip_on_cash": true,
+    "allow_flip": false,
+    "use_learned_size": false,
+    "notional_scale": 1.0,
+    "max_notional": 2.75
+  },
+  "selected_variant": {
+    "name": "alpha1_l2_conservative_fee20",
+    "layer": "conservative_l2_replay",
+    "overlay": {
+      "name": "alpha1_l2_conservative_fee20",
+      "edge_th": 0.01,
+      "margin_th": 0.004,
+      "notional": 2.0,
+      "cooldown": 12,
+      "base_tp": 0.04,
+      "base_sl": 0.018,
+      "base_hold": 48,
+      "tp_util_mult": 1.5,
+      "sl_vol_mult": 2.5,
+      "trail_gap_mult": 1.0,
+      "trail_decay": 0.5,
+      "hold_decay_start": 18,
+      "hold_decay_rate": 0.025,
+      "tp_cap": 0.075,
+      "sl_cap": 0.036
+    },
+    "smart_addon": false,
+    "addon_ofti_th": 0.0,
+    "addon_trap_th": -999.0,
+    "addon_taker_th": -999.0,
+    "addon_ofi_th": -999.0,
+    "dynamic_scout_gate": false,
+    "scout_vol_scale": 0.0,
+    "scout_edge_vol_scale": 0.0,
+    "scout_vol_cap": 3.0,
+    "execution_sniper": true,
+    "sniper_flow_th": 0.2,
+    "sniper_fee_mult": 0.2,
+    "sniper_slip_mult": 0.0,
+    "mdd_entry_guard": false,
+    "mdd_soft_start": 0.2,
+    "mdd_hard_start": 0.3,
+    "mdd_parent_scale_col": "",
+    "mdd_deep_scale": 0.5,
+    "mdd_hard_scale_mult": 0.5
+  },
+  "parent_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "red_team_note": "L2 replay remains a shadow validation harness. The combined model is not a live promote candidate until enough real L2 decision snapshots validate maker fill assumptions."
+}

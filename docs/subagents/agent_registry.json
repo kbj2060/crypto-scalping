@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "updated_at_kst": "2026-06-30",
+  "project": "crypto-scalping",
+  "goal": "Real-time crypto futures training bot with high OOS return, controlled MDD, sufficient trade volume, and realistic execution costs.",
+  "current_model_alias": "omega4.6_plus_t12_nohold_risk1",
+  "current_model_name": "omega4_6_plus_t12_nohold_risk1_20260630",
+  "current_model_contract": "docs/model_contracts/omega4_6_plus_t12_nohold_risk1_20260630_contract.md",
+  "current_model_execution_contract": "conditional_swing_runner_plus_t12_priority_router_h48qual_zig075_maxhold_pnl_target_excluded",
+  "current_model_oos": {
+    "cost3_pnl_pct": 67.8462084780387,
+    "cost3_mdd_pct": -13.275817100563392,
+    "cost3_wr": 0.5384615384615384,
+    "cost3_trades": 13,
+    "redteam_pass": true,
+    "redteam_verdict": "CONDITIONAL_PASS_MAX_HOLD_AND_PNL_TARGET_EXCLUDED_NOT_DAYTRADING_LIVE_PASS",
+    "redteam_blockers": [],
+    "excluded_mandatory_gates": [
+      "max_hold_24h",
+      "pnl_target_validation_oos_100pct"
+    ],
+    "max_hold_hours": 218.5,
+    "selection_policy": "validation_only_source_selection_oos_readout_only",
+    "live_wired": false,
+    "live_baseline_remains": "omega1_2_3_ev_hgb_cash_sleeve_20260615",
+    "note": "Omega4.6 is current research/upgrade baseline only. Max-hold and PnL target are excluded from mandatory pass; day-trading live promotion remains blocked until a successor solves hold-time without killing alpha."
+  },
+  "active_feature_contracts": {
+    "futures_risk_sizing_contract": "Omega risk heads/sidecars must distinguish price-move targets, margin_fraction, leverage, and notional explicitly. Required sizing contract: notional = margin_fraction * leverage; PnL = price_move * notional.",
+    "futures_risk_spec_removed_fields": "Do not multiply leverage again after notional is derived. If leverage is fixed, document the fixed value and derive notional from margin_fraction.",
+    "futures_risk_blocker": "New active/live Omega risk artifacts that directly learn account-threshold heads such as long_take_profit/long_stop_loss are blockers unless the run is explicitly historical reproduction.",
+    "omega_artifact_integrity_policy": "docs/model_contracts/omega_artifact_integrity_policy_20260630.md",
+    "omega_artifact_integrity_audit": "scripts/audit_omega_artifact_integrity_20260630.py",
+    "omega_promotion_requires_exact_parent_predictions": true,
+    "omega_required_parent_prediction_files": "train_predictions_qXXX.csv, validation_predictions_qXXX.csv, oos_predictions_qXXX.csv where qXXX = round(quality_threshold * 100) zero-padded.",
+    "omega_risk_sidecar_requires_precomputed_parent_prediction_tag": true,
+    "omega_trade_ledger_fallback_for_promotion": false,
+    "regime4_current_dsac_prefix": "clean_regime4_state24_sticky090_v2_*",
+    "regime4_current_forbidden_active_prefix": "clean_regime4_2024_unsup_v1_*",
+    "clean_regime_2024_unsup_v4_forbidden_active_prefix": "clean_regime_2024_unsup_v4_*",
+    "regime4_fixed_spec_dir": "tmp/causal_regen_20260516/dsac_feature_variant_specs_regime_fixed_20260521",
+    "regime4_fixed_spec_required_legacy_prefix_count": 0,
+    "regime4_current_note": "DSAC/Router active specs must drop ambiguous legacy prefixes and use the explicit state24 sticky090 v2 prefix. clean_regime4_2024_unsup_v1_* and clean_regime_2024_unsup_v4_* are allowed only for historical reproduction/debug.",
+    "legacy_regime_doc_policy": "Docs Manager must document clean_regime_2024_unsup_v4_* and clean_regime4_2024_unsup_v1_* as historical/reference-only, not active inputs, even when old audit rows contain legacy regime verdicts.",
+    "funding_clean_gate": "Any active/live or promotion candidate using funding-family columns or artifacts that may embed them must prove ETHUSDT-only backward/as-of clean funding provenance. Direct CSV patching is not enough for old derived artifacts.",
+    "funding_clean_audit": "docs/audits/funding_clean_retrain_rescore_20260529.md",
+    "funding_stale_risk_example": "tmp/causal_regen_20260516/alpha7_1_01965_v2only_tp_sl_action_score_20260528/trade_candidates_20*_alpha6_current_tail111_exact.csv",
+    "regime3_whipsaw_risk_policy": "docs/model_contracts/regime3_whipsaw_risk_policy_20260529.md",
+    "regime3_redesign_note": "For new action-classifier/Alpha8+ candidates, bull/bear/chop are the medium-horizon structure classes. Whipsaw is risk/veto/sizing context, not an independent action-regime class.",
+    "regime3_active_policy": "docs/active_live/regime3_policy_20260530.md",
+    "regime3_pred_direction_removed": "regime3_pred_* future-class probabilities are removed from active action/direction ownership. They must not drive long/short direction, primary/fallback labels, or hard future regime selection.",
+    "regime3_risk_features_only": "Use regime3_stability_h6_score, regime3_transition_h6_risk_prob, regime3_transition_h6_risk_pred, and regime3_churn_h6_risk_score only as stability/transition-risk context for veto, size throttle, leverage reduction, and TP/SL/hold tightening."
+  },
+  "current_candidate_architecture": {
+    "status": "candidate_not_live_main",
+    "current_regime_context": "clean_regime4_state24_sticky090_v2_*",
+    "future_regime_context": "regime4_pred_* from regime4_pred_tft_h12_nomdjd_all74_20260517",
+    "router_context": "a5dir_* from Router5 CatBoost auxiliary probabilities",
+    "final_action_owner": "DSAC",
+    "forbidden_action_owner": "CatBoost Major/Direction or Router layer direct LONG/SHORT/CASH ownership"
+  },
+  "agents": [
+    {
+      "id": "model_architect",
+      "name": "Model Architect",
+      "definition": "docs/subagents/model_architect.md",
+      "mission": "Design supervised, unsupervised, deep learning, RL model architecture, and the required data/state contracts for the trading bot.",
+      "primary_paths": [
+        "docs/model_contracts/registry.json",
+        "docs/model_contracts/",
+        "docs/feature_contract_manifest.json",
+        "features/engineering.py",
+        "features/schema.py",
+        "features/registry.py",
+        "config/pipeline.yaml",
+        "pipeline/build_rl_dataset.py",
+        "pipeline/augment_m7_dataset.py",
+        "ensemble/train_rl_dsac_agent.py",
+        "ensemble/train_rl_dsac_unified_controller.py",
+        "ensemble/rl_continuous_common.py",
+        "ensemble/rl_runtime_primitives.py",
+        "ensemble/fully_learned_governor_policy.py",
+        "scripts/audit_live_duckdb_quality.py",
+        "scripts/create_live_feature_views.py",
+        "scripts/duckdb_persist_worker.py",
+        "tail_risk_interceptor.py",
+        "microstructure_scanner.py",
+        "trading_bot.py",
+        "scripts/backtest_trading_bot_native_2026.py"
+      ],
+      "outputs": [
+        "architecture proposal",
+        "state/schema impact",
+        "state contract",
+        "model data contract",
+        "layer input/output contract",
+        "train validation test split contract",
+        "feature contract updates",
+        "filtering and drift policy",
+        "experiment plan",
+        "red-team validation requests"
+      ]
+    },
+    {
+      "id": "data_architect",
+      "name": "Data Architect",
+      "definition": "docs/subagents/data_architect.md",
+      "status": "merged_into_model_architect",
+      "merged_into": "model_architect",
+      "mission": "Legacy alias. Data pipeline, market state contract, signal/noise filtering, and live data quality controls are now owned by Model Architect.",
+      "primary_paths": [
+        "docs/model_contracts/registry.json",
+        "docs/model_contracts/",
+        "features/engineering.py",
+        "features/schema.py",
+        "features/registry.py",
+        "config/pipeline.yaml",
+        "scripts/run_pipeline.py",
+        "pipeline/build_rl_dataset.py",
+        "pipeline/augment_m7_dataset.py",
+        "scripts/audit_live_duckdb_quality.py",
+        "scripts/create_live_feature_views.py",
+        "scripts/duckdb_persist_worker.py",
+        "tail_risk_interceptor.py",
+        "microstructure_scanner.py",
+        "core/data_collector.py"
+      ],
+      "outputs": [
+        "state contract",
+        "model data contract",
+        "layer input/output contract",
+        "train validation test split contract",
+        "feature contract updates",
+        "data quality checks",
+        "filtering and drift policy"
+      ]
+    },
+    {
+      "id": "red_team",
+      "name": "Red Team",
+      "definition": "docs/subagents/red_team.md",
+      "mission": "Adversarially test model logic, data bias, execution costs, slippage, leverage, and live safety assumptions.",
+      "primary_paths": [
+        "docs/live_dsac_winner_20260503.md",
+        "ensemble/rl_continuous_common.py",
+        "ensemble/risk_leverage_engine.py",
+        "trading_bot.py",
+        "core/binance_client.py",
+        "core/risk_manager.py",
+        "core/config.py",
+        "scripts/backtest_trading_bot_native_2026.py",
+        "scripts/eval_lifecycle_ai_stress.py",
+        "scripts/eval_lifecycle_walkforward.py",
+        "scripts/eval_lifecycle_guard_search.py",
+        "scripts/eval_hf_risk_monthly_audit.py"
+      ],
+      "outputs": [
+        "blocking findings",
+        "stress scenarios",
+        "cost and leverage audit",
+        "live promotion veto or approval"
+      ]
+    },
+    {
+      "id": "implementation_maintainer",
+      "name": "Implementation Maintainer",
+      "definition": "docs/subagents/implementation_maintainer.md",
+      "mission": "Implement architect and red-team recommendations as maintainable code, refactor safely, and run targeted verification.",
+      "primary_paths": [
+        "features/schema.py",
+        "features/registry.py",
+        "pipeline/build_rl_dataset.py",
+        "pipeline/augment_m7_dataset.py",
+        "ensemble/rl_continuous_common.py",
+        "ensemble/train_rl_dsac_agent.py",
+        "ensemble/train_rl_dsac_unified_controller.py",
+        "ensemble/risk_leverage_engine.py",
+        "ensemble/rl_runtime_primitives.py",
+        "ensemble/fully_learned_governor_policy.py",
+        "trading_bot.py",
+        "scripts/backtest_trading_bot_native_2026.py",
+        "scripts/eval_lifecycle_ai_stress.py",
+        "scripts/eval_lifecycle_walkforward.py"
+      ],
+      "outputs": [
+        "implementation plan",
+        "code changes",
+        "refactoring notes",
+        "test and audit results",
+        "remaining technical debt"
+      ]
+    },
+    {
+      "id": "docs_manager",
+      "name": "Docs Manager",
+      "definition": "docs/subagents/docs_manager.md",
+      "mission": "Maintain the docs folder, especially active/live specifications, so model and trading bot code changes update architecture, runtime, and module contracts in the same change set.",
+      "primary_paths": [
+        "docs/active_live/",
+        "docs/subagents/README.md",
+        "docs/subagents/agent_registry.json",
+        "docs/alpha7_submodel_01965_decontam_v2_tp_20260528.md",
+        "docs/alpha7_submodel_01965_decontam_deep_stop_cd18_20260528.md",
+        "trading_bot.py",
+        "data/ensemble/supervised/alpha7_submodel_01965_decontam_v2_tp_20260528/"
+      ],
+      "outputs": [
+        "updated active docs",
+        "model architecture notes",
+        "trading bot runtime notes",
+        "module input output contracts",
+        "documentation debt"
+      ]
+    }
+  ],
+  "promotion_gate": {
+    "requires_model_architect": true,
+    "requires_data_architect": false,
+    "data_architect_merged_into_model_architect": true,
+    "requires_red_team": true,
+    "requires_implementation_maintainer": true,
+    "requires_model_data_contract": true,
+    "requires_omega_artifact_integrity_audit_for_omega_candidates": true,
+    "omega_artifact_integrity_audit": "scripts/audit_omega_artifact_integrity_20260630.py",
+    "omega_artifact_integrity_policy": "docs/model_contracts/omega_artifact_integrity_policy_20260630.md",
+    "default_on_failure": "keep conservative baseline or rollback from controller to compact"
+  },
+  "current_omega_upgrade_candidate": {
+    "model_id": "omega4_6_1_duration_ou_halflife_risk_gate_20260630",
+    "base_model_id": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "contract": "docs/model_contracts/omega4_6_1_duration_ou_halflife_risk_gate_20260630_contract.md",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/runtime_contract.json",
+    "candidate_manifest": "data/ensemble/supervised/omega4_6_1_duration_ou_halflife_risk_gate_20260630/candidate_manifest.json",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/omega_artifact_integrity_audit_20260630.json",
+    "status": "conditional_upgrade_candidate_not_live_wired",
+    "classification": "conditional_upgrade_candidate_not_daytrading_pass",
+    "selection_scope": "validation_only_duration_priority; OOS readout only",
+    "rule_contract": {
+      "feature": "ou_halflife",
+      "op": "le",
+      "threshold": 0.005415348,
+      "hit_scale": 0.0,
+      "behavior": "entry-time exposure gate; if condition hits, notional and leverage are scaled by hit_scale"
+    },
+    "validation_cost3": {
+      "pnl_pct": 175.85666646198916,
+      "mdd_pct": -10.603830226421218,
+      "wr": 0.6190476190476191,
+      "trades": 21,
+      "skipped": 8,
+      "avg_hold_hours": 60.373015873015866,
+      "max_hold_hours": 115.33333333333333,
+      "hold_over_24h_count": 15,
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "avg_notional": 1.3662199801149821
+    },
+    "oos_cost3": {
+      "pnl_pct": 72.58681779350384,
+      "mdd_pct": -7.469861534818922,
+      "wr": 0.6666666666666666,
+      "trades": 9,
+      "skipped": 4,
+      "avg_hold_hours": 59.407407407407405,
+      "max_hold_hours": 133.5,
+      "hold_over_24h_count": 8,
+      "max_leverage": 5.0,
+      "max_notional": 1.8,
+      "avg_notional": 1.5402513398070685
+    },
+    "remaining_risks": [
+      "Trade count drops from 29 to 21 validation and 13 to 9 OOS.",
+      "Validation sample remains small.",
+      "Max hold remains above 24h, so this is not day-trading PASS.",
+      "Live feature parity for ou_halflife must be verified before runtime wiring."
+    ]
+  }
+}

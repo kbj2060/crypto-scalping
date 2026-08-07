@@ -1,0 +1,22 @@
+{
+  "model_id": "deep_state_safe_cap_reallocator_v2_mdd_governor",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [],
+  "invariants": {
+    "parent_train_before_cap_train": true,
+    "cap_train_before_selection": true,
+    "selection_before_holdout": true,
+    "holdout_never_used_for_selection": true,
+    "oos_report_only": true,
+    "cap_choices_lte_exchange_cap": true,
+    "holdout_no_liquidations": true,
+    "holdout_no_ruin": true,
+    "oos_no_liquidations": true,
+    "oos_no_ruin": true,
+    "holdout_cost2_profitable": true,
+    "holdout_cost3_profitable": true,
+    "oos_cost2_profitable": true,
+    "oos_cost3_profitable": true
+  }
+}

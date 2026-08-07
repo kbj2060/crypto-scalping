@@ -1,0 +1,69 @@
+{
+  "A": {
+    "val": {
+      "taker_fee": {
+        "n_trades": 14311,
+        "hit_rate": 0.6006568373978058,
+        "avg_pnl_pct": -0.00041018298193233425,
+        "total_pnl_pct": -5.8701286544336355
+      },
+      "maker_fee": {
+        "n_trades": 14311,
+        "hit_rate": 0.6006568373978058,
+        "avg_pnl_pct": 8.981701806766585e-05,
+        "total_pnl_pct": 1.285371345566366
+      }
+    },
+    "oos": {
+      "taker_fee": {
+        "n_trades": 37582,
+        "hit_rate": 0.5902293651216007,
+        "avg_pnl_pct": -0.0003922342664021211,
+        "total_pnl_pct": -14.740948199924516
+      },
+      "maker_fee": {
+        "n_trades": 37582,
+        "hit_rate": 0.5902293651216007,
+        "avg_pnl_pct": 0.0001077657335978789,
+        "total_pnl_pct": 4.050051800075485
+      }
+    }
+  },
+  "B2": {
+    "val": {
+      "taker_fee": {
+        "n_trades": 11213,
+        "hit_rate": 0.5426736823330063,
+        "avg_pnl_pct": -0.0005304784036172096,
+        "total_pnl_pct": -5.948254339759771
+      },
+      "maker_fee": {
+        "n_trades": 11213,
+        "hit_rate": 0.5426736823330063,
+        "avg_pnl_pct": -3.0478403617209576e-05,
+        "total_pnl_pct": -0.341754339759771
+      }
+    },
+    "oos": {
+      "taker_fee": {
+        "n_trades": 14729,
+        "hit_rate": 0.5098105777717428,
+        "avg_pnl_pct": -0.0006322964773341694,
+        "total_pnl_pct": -9.313094814654981
+      },
+      "maker_fee": {
+        "n_trades": 14729,
+        "hit_rate": 0.5098105777717428,
+        "avg_pnl_pct": -0.00013229647733416924,
+        "total_pnl_pct": -1.9485948146549787
+      }
+    }
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Same trained models/predictions as the unfiltered baseline (argmax, no confidence filter); only the assumed round-trip fee changes (0.0900% taker vs 0.0400% maker). No retrain -- isolates fee-assumption effect from the model itself."
+}

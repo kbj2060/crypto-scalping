@@ -81,7 +81,7 @@ def build_playbook_features(row, side: str) -> dict[str, float]:
     tail_up = _clip(_safe_float(getattr(row, "tail_up_prob", row.get("tail_up_prob", 0.0) if hasattr(row, "get") else 0.0)), 0.0, 1.0)
     tail_down = _clip(_safe_float(getattr(row, "tail_down_prob", row.get("tail_down_prob", 0.0) if hasattr(row, "get") else 0.0)), 0.0, 1.0)
     qwidth = _clip(_safe_float(getattr(row, "m7_qwidth", row.get("m7_qwidth", 0.0) if hasattr(row, "get") else 0.0)) / 0.02, 0.0, 1.5)
-    m7_conf = _clip(_safe_float(getattr(row, "m7_confidence", row.get("m7_confidence", 0.0) if hasattr(row, "get") else 0.0)), 0.0, 1.0)
+    m7_quality = _clip(_safe_float(getattr(row, "m7_quality_pred", row.get("m7_quality_pred", 0.0) if hasattr(row, "get") else 0.0)), 0.0, 1.0)
 
     flow_align = _clip(0.45 * signal_bias + 0.35 * nif_whale + 0.20 * ((2.0 * taker_buy_ratio) - 1.0), -1.0, 1.0)
     direction_pressure = _clip(np.tanh(gap / 0.01) + 0.55 * np.tanh(mom_1m / 0.003) + 0.20 * np.tanh(prob_mom / 0.03), -1.5, 1.5)
@@ -115,7 +115,7 @@ def build_playbook_features(row, side: str) -> dict[str, float]:
         "uncertainty": float(uncertainty),
         "direction_pressure": float(direction_pressure),
         "micro_quality": float(micro_quality),
-        "m7_confidence": float(m7_conf),
+        "m7_quality": float(m7_quality),
         "qwidth": float(qwidth),
     }
 
@@ -157,7 +157,7 @@ def compute_playbook_meta_controller(side: str, row, cfg: PlaybookMetaConfig | N
             0.75 * align
             + 0.35 * event_energy
             + 0.25 * f["micro_quality"]
-            + 0.20 * f["m7_confidence"]
+            + 0.20 * f["m7_quality"]
             - 0.55 * hazard
         )
     )

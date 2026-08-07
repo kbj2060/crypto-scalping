@@ -1,0 +1,179 @@
+{
+  "model_id": "regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530",
+  "status": "best_no_current_h6_pred_research_candidate",
+  "selected_at": "2026-05-30",
+  "purpose": "Predict t+6 sensitive CURRENT regime without using current regime probabilities as input features.",
+  "horizon_bars": 6,
+  "feature_pack": "docs_regime_pred_rolled",
+  "seq_len": 72,
+  "include_current_features": false,
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "pred_prefix": "regime3_pred_sensitive_nocur_tft_h6_",
+  "output_stem": "regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530",
+  "model_path": "data/ensemble/supervised/regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530/regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530_2024.pt",
+  "selected_feature_count": 57,
+  "current_feature_count": 0,
+  "selected_feature_cols": [
+    "cvd_288",
+    "last_funding_rate_roll_pct_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_pressure_roll_pct_288",
+    "volume_roll_pct_288",
+    "dual_momentum",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_roll_pct_288",
+    "cvd_12",
+    "mean_reversion_z",
+    "taker_buy_base_roll_pct_288",
+    "eth_btc_ret_spread_48",
+    "compression_score",
+    "taker_buy_quote_roll_pct_288",
+    "funding_price_divergence",
+    "distance_to_day_high_low_pct",
+    "taker_buy_base_roll_delta_log_12",
+    "btc_volume_impulse_z",
+    "volume_roll_delta_log_12",
+    "eth_btc_ret_spread_12",
+    "volume_btc_roll_pct_288",
+    "bb_width_pct_rank_288",
+    "atr_pct_rank_288",
+    "crowding_pressure",
+    "macd_hist",
+    "volume_btc_roll_log_iqr_288",
+    "btc_lead_eth_follow_gap_3",
+    "quote_volume_btc_roll_log_iqr_288",
+    "cvp_volume_imbalance",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_quote_roll_delta_log_12",
+    "vwap_dist_24",
+    "quote_volume_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "volume_btc_roll_delta_log_12",
+    "rsi",
+    "volume_roll_log_iqr_288",
+    "quote_volume_roll_log_iqr_288",
+    "price_cvd_divergence",
+    "taker_buy_quote_roll_log_iqr_288",
+    "anchored_vwap_session_dist",
+    "funding_oi_divergence",
+    "vwap_dist_96",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "log_return",
+    "btc_impulse_x_eth_beta",
+    "funding_pressure_roll_log_iqr_288",
+    "long_squeeze_risk",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "last_funding_rate_roll_log_iqr_288",
+    "oi_up_price_up",
+    "range_contraction_breakout_dir",
+    "crowded_short_squeeze_risk",
+    "funding_roc_288_roll_delta_log_12",
+    "last_funding_rate_roll_delta_log_12"
+  ],
+  "validation": {
+    "rows": 26490,
+    "accuracy": 0.6511136277840694,
+    "balanced_accuracy": 0.6533763943096362,
+    "log_loss": 0.7877766002412058,
+    "recall": {
+      "bull": 0.655330750466351,
+      "bear": 0.6598293403347555,
+      "chop": 0.6449690921278022
+    },
+    "true_counts": {
+      "bull": 6969,
+      "bear": 6094,
+      "chop": 13427
+    },
+    "pred_counts": {
+      "bull": 7583,
+      "bear": 7378,
+      "chop": 11529
+    },
+    "confusion_matrix": [
+      [
+        4567,
+        931,
+        1471
+      ],
+      [
+        675,
+        4021,
+        1398
+      ],
+      [
+        2341,
+        2426,
+        8660
+      ]
+    ]
+  },
+  "oos_2026": {
+    "rows": 16891,
+    "accuracy": 0.6846249481972648,
+    "balanced_accuracy": 0.6694709060141579,
+    "log_loss": 0.724743029063088,
+    "recall": {
+      "bull": 0.6096644967451177,
+      "bear": 0.6727272727272727,
+      "chop": 0.7260209485700836
+    },
+    "true_counts": {
+      "bull": 3994,
+      "bear": 4400,
+      "chop": 8497
+    },
+    "pred_counts": {
+      "bull": 3740,
+      "bear": 4849,
+      "chop": 8302
+    },
+    "confusion_matrix": [
+      [
+        2435,
+        592,
+        967
+      ],
+      [
+        274,
+        2960,
+        1166
+      ],
+      [
+        1031,
+        1297,
+        6169
+      ]
+    ]
+  },
+  "sidecars": {
+    "training_features_2024.csv": "data/ensemble/supervised/regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530/training_features_2024_regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530.csv",
+    "training_features_2025.csv": "data/ensemble/supervised/regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530/training_features_2025_regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530.csv",
+    "training_features_2026_rebuilt.csv": "data/ensemble/supervised/regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530/training_features_2026_rebuilt_regime3_pred_sensitive_h6_nocurrent_rolled_top72_d96_e10_20260530.csv"
+  },
+  "leakage_audit": {
+    "forbidden_prefixes": [
+      "clean_regime_2024_unsup_v4_",
+      "clean_regime4_2024_unsup_v1_",
+      "clean_regime4_state24_sticky090_v2_",
+      "regime4_pred_"
+    ],
+    "forbidden_regime_features": [],
+    "uses_2026_for_selection": false,
+    "future_labels_use_future_current_argmax": true,
+    "future_labels_are_targets_not_features": true
+  },
+  "transition_audit_2026": {
+    "all_acc": 0.6846249481972648,
+    "all_bacc": 0.6694709060141579,
+    "transition_rows": 5401,
+    "transition_acc": 0.2679133493797445,
+    "transition_bacc": 0.25343009316343734,
+    "persistence_rows": 11490,
+    "persistence_acc": 0.8805047867711053,
+    "persistence_bacc": 0.8882328682146382
+  }
+}

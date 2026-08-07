@@ -1,0 +1,175 @@
+{
+  "type": "dsac_layer_rl_2026",
+  "note": "True DSAC run: Gaussian actor + distributional twin critic + replay buffer + environment step. The current HF no-limit accounting/risk controls are preserved inside the layer environment.",
+  "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_entry_grid/hf_v4_balanced_h144.pkl",
+  "exit_bundle": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_entry_grid/hf_no_limit_exit_governor_fast.pkl",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "device": "cuda",
+  "episodes": 8,
+  "episode_len": 4096,
+  "audit": {
+    "train_rows": 105064,
+    "eval_rows": 16897,
+    "train_valid_timestamp_rows": 105064,
+    "eval_valid_timestamp_rows": 16897,
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "timestamp_overlap_rows": 0,
+    "train_duplicate_timestamps": 0,
+    "eval_duplicate_timestamps": 0,
+    "policy_feature_count": 79,
+    "label_distribution": {
+      "action": {
+        "1": 13000,
+        "2": 13141
+      },
+      "notional": {
+        "0": 15574,
+        "1": 681,
+        "2": 314,
+        "3": 230,
+        "4": 799,
+        "5": 1094,
+        "6": 2113,
+        "7": 2097,
+        "8": 1582,
+        "9": 1131,
+        "10": 526
+      },
+      "leverage": {
+        "0": 22902,
+        "1": 1582,
+        "2": 1657
+      },
+      "take_profit": {
+        "0": 17366,
+        "1": 332,
+        "2": 261,
+        "3": 493,
+        "4": 865,
+        "5": 1532,
+        "6": 1526,
+        "7": 1431,
+        "8": 1034,
+        "9": 1301
+      },
+      "stop_loss": {
+        "0": 22836,
+        "1": 668,
+        "2": 664,
+        "3": 563,
+        "4": 546,
+        "5": 457,
+        "6": 407
+      },
+      "max_hold": {
+        "0": 17076,
+        "1": 430,
+        "2": 566,
+        "3": 435,
+        "4": 405,
+        "5": 748,
+        "6": 672,
+        "7": 1165,
+        "8": 1285,
+        "9": 3359
+      },
+      "cooldown": {
+        "0": 7949,
+        "2": 18033,
+        "4": 83,
+        "6": 76
+      },
+      "quality_mean": 0.014499789940668363,
+      "quality_p95": 0.06188453357821794
+    }
+  },
+  "candidates": {
+    "entry_filter": {
+      "ckpt": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_layer_rl/entry_filter.pth",
+      "best": {
+        "score": 280.091180599748,
+        "eval": {
+          "pnl": 280.4563554348366,
+          "mdd": -22.770349670177236,
+          "trades": 551,
+          "wr": 0.5390199637023594,
+          "trades_per_day": 9.393157333964721,
+          "long_entries": 285,
+          "short_entries": 266,
+          "avg_notional": 0.6016059231247559,
+          "avg_leverage": 1.5767648197136621,
+          "entry_blocks": {
+            "model_cooldown": 459,
+            "loss_cooldown": 6072,
+            "dsac_filter_block": 240,
+            "zero_notional": 240,
+            "daily_trade_budget": 904,
+            "daily_dd_lock": 557
+          },
+          "exits": {
+            "exit_governor": 550,
+            "forced_end": 1
+          }
+        },
+        "episode": 1
+      },
+      "final_eval": {
+        "pnl": 280.4563554348366,
+        "mdd": -22.770349670177236,
+        "trades": 551,
+        "wr": 0.5390199637023594,
+        "trades_per_day": 9.393157333964721,
+        "long_entries": 285,
+        "short_entries": 266,
+        "avg_notional": 0.6016059231247559,
+        "avg_leverage": 1.5767648197136621,
+        "entry_blocks": {
+          "model_cooldown": 459,
+          "loss_cooldown": 6072,
+          "dsac_filter_block": 240,
+          "zero_notional": 240,
+          "daily_trade_budget": 904,
+          "daily_dd_lock": 557
+        },
+        "exits": {
+          "exit_governor": 550,
+          "forced_end": 1
+        }
+      },
+      "updates": 7681,
+      "memory": 32768
+    }
+  },
+  "baseline": {
+    "pnl": 216.27632468150387,
+    "mdd": -17.793126681150873,
+    "trades": 536,
+    "trades_per_day": 9.136363636363637,
+    "wr": 0.5186567164179104,
+    "avg_notional": 0.6014376222262948,
+    "avg_leverage": 1.5747924897015144,
+    "long_entries": 260,
+    "short_entries": 276,
+    "entry_blocks": {
+      "model_cooldown": 444,
+      "loss_cooldown": 6192,
+      "daily_trade_budget": 1069,
+      "daily_dd_lock": 732,
+      "daily_loss_lock": 292
+    },
+    "exits": {
+      "exit_governor": 535,
+      "forced_end": 1
+    },
+    "exit_prob_mean": 0.26148306848275327,
+    "exit_prob_p95": 0.6199096736839728
+  }
+}

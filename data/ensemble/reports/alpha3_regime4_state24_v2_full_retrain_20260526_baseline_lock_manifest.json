@@ -1,0 +1,37 @@
+{
+  "summary": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+    "sha256": "abd6ca7f2ae065fc9533c29b72aedfd970d4e06381f0358713daf82d91a01639",
+    "size": 25845
+  },
+  "audit": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_audit.json",
+    "sha256": "d634505461dd9db989ba492bdbc4c76a38af6e30b8642004a56fecda327e3d87",
+    "size": 7753
+  },
+  "grid": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_grid.csv",
+    "sha256": "0483d9886d4cb43a229009a6e554aedcf2fc814991addd159d83a6337a14d81f",
+    "size": 81199
+  },
+  "ledger": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_oos_cost3_ledger.csv",
+    "sha256": "10715b9b757f873cec9b7425db3885789aeee904402637a774469b047b2533e4",
+    "size": 51506
+  },
+  "chart_full": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_oos_candles_cost3.png",
+    "sha256": "006db09161fcc0bb35c93aedae94bcd50c4bbc428c7b6077aba37e2b136c8bc4",
+    "size": 258465
+  },
+  "chart_zoom": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_oos_trade_windows_cost3.png",
+    "sha256": "66d7558af1da4bf3a09f9ea15b3ebcf2a4478625151d6ffc5ce376f489963eb8",
+    "size": 253858
+  },
+  "eval_script": {
+    "path": "/home/llewyn/crypto-scalping/scripts/eval_alpha3_regime4_state24_v2_full_retrain_20260526.py",
+    "sha256": "85a45eb123425c02b49ba98c138a7cc1065a3a98c5728d3795eca8433ac09399",
+    "size": 23123
+  }
+}

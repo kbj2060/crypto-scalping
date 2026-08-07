@@ -178,6 +178,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-path", default="")
     p.add_argument("--timestamp-col", default="timestamp")
     p.add_argument("--feature-manifest", default="docs/feature_contract_manifest.json")
+    p.add_argument("--trend-xgb-meta", default="")
+    p.add_argument("--entry-price-meta", default="")
+    p.add_argument("--multi-target-meta", default="")
+    p.add_argument("--quantile-meta", default="")
+    p.add_argument("--lightgbm-ensemble-meta", default="")
     p.add_argument("--limit", type=int, default=0, help="debug: only first N rows (0=all)")
     p.add_argument(
         "--startup-check-only",
@@ -326,7 +331,18 @@ def main() -> int:
             raise
     logger.info("Work cols after enrichment: %d", len(work_df.columns))
 
-    ensemble = SevenModelEnsemble()
+    meta_paths = {
+        key: path
+        for key, path in {
+            "trend_xgb": args.trend_xgb_meta,
+            "entry_price_model": args.entry_price_meta,
+            "multi_target_lgbm": args.multi_target_meta,
+            "quantile_forest": args.quantile_meta,
+            "lightgbm_ensemble": args.lightgbm_ensemble_meta,
+        }.items()
+        if str(path).strip()
+    }
+    ensemble = SevenModelEnsemble(meta_paths=meta_paths or None)
     m7 = ensemble.predict_batch(work_df)
     raw_m7_cols = list(m7.columns)
     drop_cols = [c for c in get_m7_columns("deprecated", include_entry_price=True) if c in m7.columns]

@@ -1,0 +1,293 @@
+{
+  "type": "dt_lifecycle_iql_cql_cvar_vs_zero_style",
+  "note": "Candidate is a shadow surrogate: trajectory window interface + empirical IQL/CQL lower-bound gate + CVaR critic + allocator stub. Existing MuZero/AZ result is read from its report artifact, not retrained.",
+  "inputs": {
+    "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/fully_learned_ai_combo_grid/patchtst__tide__dlinear.pkl",
+    "entry_source": "heuristic",
+    "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "zero_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/zero_style_remaining_layers_walkforward_2026.json",
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "leverage_cap": 3.6,
+    "max_notional": 3.6,
+    "start": null,
+    "end": null,
+    "smoke_rows": null
+  },
+  "audit": {
+    "train_range": {
+      "rows": 105064,
+      "start": "2025-01-01 00:00:00",
+      "end": "2025-12-31 23:55:00"
+    },
+    "eval_range": {
+      "rows": 16897,
+      "start": "2026-01-01 00:00:00",
+      "end": "2026-02-28 16:00:00"
+    },
+    "candidate_fit": {
+      "samples": 104918,
+      "groups": 52,
+      "global": {
+        "count": 104918,
+        "mean_edge": -0.0008190980192552507,
+        "lower_bound": -0.012122313807428498,
+        "cvar": -0.024806378724338322,
+        "positive_rate": 0.4711012409691378
+      }
+    },
+    "zero_artifact_period_note": "Exact only when start/end/smoke_rows match the artifact's full eval period."
+  },
+  "candidate_config": {
+    "horizon_bars": 144,
+    "window_bars": 48,
+    "lb_quantile": 0.2,
+    "cvar_alpha": 0.2,
+    "min_support": 20,
+    "min_lower_bound": -0.012,
+    "min_cvar": -0.02,
+    "iql_floor": -0.004,
+    "cql_penalty": 0.01,
+    "exit_min_age": 3,
+    "exit_lower_bound": -0.02,
+    "exit_cvar": -0.03,
+    "tail_drawdown_stop": 0.055,
+    "scale_down_lower_bound": -0.012,
+    "scale_down_mult": 0.5,
+    "scale_up_lower_bound": 0.018,
+    "scale_up_mult": 1.15,
+    "max_notional": 3.6,
+    "leverage_cap": 3.6
+  },
+  "candidate": {
+    "eval": {
+      "pnl": 3.880657461786119,
+      "mdd": -4.300554669121004,
+      "trades": 31,
+      "wr": 0.45161290322580644,
+      "trades_per_day": 0.5284090909090909,
+      "long_entries": 31,
+      "short_entries": 0,
+      "avg_notional": 0.715535486875627,
+      "avg_leverage": 1.4618008467402208,
+      "gate_blocks": 13106,
+      "lifecycle_exits": 3,
+      "scale_downs": 62,
+      "scale_ups": 0
+    },
+    "cost_stress": {
+      "cost_1x": {
+        "pnl": 3.880657461786119,
+        "mdd": -4.300554669121004,
+        "trades": 31,
+        "wr": 0.45161290322580644,
+        "trades_per_day": 0.5284090909090909,
+        "long_entries": 31,
+        "short_entries": 0,
+        "avg_notional": 0.715535486875627,
+        "avg_leverage": 1.4618008467402208,
+        "gate_blocks": 13106,
+        "lifecycle_exits": 3,
+        "scale_downs": 62,
+        "scale_ups": 0
+      },
+      "cost_2x": {
+        "pnl": 0.7062192163199255,
+        "mdd": -4.822658173964545,
+        "trades": 31,
+        "wr": 0.41935483870967744,
+        "trades_per_day": 0.5284090909090909,
+        "long_entries": 31,
+        "short_entries": 0,
+        "avg_notional": 0.715535486875627,
+        "avg_leverage": 1.4618008467402208,
+        "gate_blocks": 13106,
+        "lifecycle_exits": 3,
+        "scale_downs": 62,
+        "scale_ups": 0
+      },
+      "cost_3x": {
+        "pnl": -2.372278162503494,
+        "mdd": -6.798709227498256,
+        "trades": 31,
+        "wr": 0.3548387096774194,
+        "trades_per_day": 0.5284090909090909,
+        "long_entries": 31,
+        "short_entries": 0,
+        "avg_notional": 0.715535486875627,
+        "avg_leverage": 1.4618008467402208,
+        "gate_blocks": 13106,
+        "lifecycle_exits": 3,
+        "scale_downs": 62,
+        "scale_ups": 0
+      }
+    }
+  },
+  "zero_style_muzero_az_artifact": {
+    "available": true,
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/reports/zero_style_remaining_layers_walkforward_2026.json",
+    "type": "zero_style_remaining_layers_walkforward_2026",
+    "decision": {
+      "final_validation_name": "stage4_regime_mz_g0.55_p0.16_d1_sf-0.20",
+      "final_validation_pnl": 2539.170557087262,
+      "final_eval_pnl": 606.871005100815,
+      "final_eval_mdd": -30.791229665573773,
+      "final_eval_trades": 222
+    },
+    "eval": {
+      "pnl": 606.871005100815,
+      "mdd": -30.791229665573773,
+      "trades": 222,
+      "wr": 0.6486486486486487,
+      "trades_per_day": 3.784090909090909,
+      "long_entries": 100,
+      "short_entries": 122,
+      "avg_notional": 1.5490042996508324,
+      "avg_leverage": 1.5982504298928906
+    },
+    "cost_stress": {
+      "cost_1x": {
+        "pnl": 606.871005100815,
+        "mdd": -30.791229665573773,
+        "trades": 222,
+        "wr": 0.6486486486486487,
+        "trades_per_day": 3.784090909090909,
+        "long_entries": 100,
+        "short_entries": 122,
+        "avg_notional": 1.5490042996508324,
+        "avg_leverage": 1.5982504298928906
+      },
+      "cost_2x": {
+        "pnl": -26.12690253295299,
+        "mdd": -69.93045374622949,
+        "trades": 129,
+        "wr": 0.4806201550387597,
+        "trades_per_day": 2.1988636363636362,
+        "long_entries": 57,
+        "short_entries": 72,
+        "avg_notional": 1.3997111216848737,
+        "avg_leverage": 1.6102661583230917
+      },
+      "cost_3x": {
+        "pnl": 55.050777288364536,
+        "mdd": -27.336359457280402,
+        "trades": 240,
+        "wr": 0.4083333333333333,
+        "trades_per_day": 4.090909090909091,
+        "long_entries": 105,
+        "short_entries": 135,
+        "avg_notional": 0.9747231827523136,
+        "avg_leverage": 1.599156535503138
+      }
+    },
+    "audit": {
+      "source_audit": {
+        "train_rows": 105064,
+        "eval_rows": 16897,
+        "train_valid_timestamp_rows": 105064,
+        "eval_valid_timestamp_rows": 16897,
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "timestamp_overlap_rows": 0,
+        "train_duplicate_timestamps": 0,
+        "eval_duplicate_timestamps": 0,
+        "policy_feature_count": 79,
+        "label_distribution": {
+          "action": {
+            "1": 13000,
+            "2": 13141
+          },
+          "notional": {
+            "0": 15574,
+            "1": 681,
+            "2": 314,
+            "3": 230,
+            "4": 799,
+            "5": 1094,
+            "6": 2113,
+            "7": 2097,
+            "8": 1582,
+            "9": 1131,
+            "10": 526
+          },
+          "leverage": {
+            "0": 22902,
+            "1": 1582,
+            "2": 1657
+          },
+          "take_profit": {
+            "0": 17366,
+            "1": 332,
+            "2": 261,
+            "3": 493,
+            "4": 865,
+            "5": 1532,
+            "6": 1526,
+            "7": 1431,
+            "8": 1034,
+            "9": 1301
+          },
+          "stop_loss": {
+            "0": 22836,
+            "1": 668,
+            "2": 664,
+            "3": 563,
+            "4": 546,
+            "5": 457,
+            "6": 407
+          },
+          "max_hold": {
+            "0": 17076,
+            "1": 430,
+            "2": 566,
+            "3": 435,
+            "4": 405,
+            "5": 748,
+            "6": 672,
+            "7": 1165,
+            "8": 1285,
+            "9": 3359
+          },
+          "cooldown": {
+            "0": 7949,
+            "2": 18033,
+            "4": 83,
+            "6": 76
+          },
+          "quality_mean": 0.014499789940668363,
+          "quality_p95": 0.06188453357821794
+        }
+      },
+      "train_rows": 87496,
+      "validation_rows": 17568,
+      "eval_rows": 16897,
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-10-31 23:55:00"
+      ],
+      "validation_range": [
+        "2025-11-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_validation_overlap": 0,
+      "train_eval_overlap": 0,
+      "validation_eval_overlap": 0
+    }
+  },
+  "delta_vs_zero_artifact": {
+    "pnl": -602.9903476390289,
+    "mdd": 26.490674996452768,
+    "trades": -191
+  }
+}

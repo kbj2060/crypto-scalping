@@ -1,0 +1,368 @@
+{
+  "model_id": "alpha2_teacher_l2_runtime_sweep_20260514",
+  "design": "Alpha2.1 runtime-only improvement sweep over teacher confidence and parent notional scale. The deep teacher checkpoint, HGB parent, V27 scout, V21.2 runner, V31 exit, and L2 replay mechanism are fixed.",
+  "experiments": [
+    {
+      "name": "alpha2_reference",
+      "runtime": {
+        "confidence": 0.56,
+        "parent_notional_scale": 1.0
+      },
+      "variant": {
+        "name": "alpha1_l2_conservative_fee20",
+        "layer": "conservative_l2_replay",
+        "overlay": {
+          "name": "alpha1_l2_conservative_fee20",
+          "edge_th": 0.01,
+          "margin_th": 0.004,
+          "notional": 2.0,
+          "cooldown": 12,
+          "base_tp": 0.04,
+          "base_sl": 0.018,
+          "base_hold": 48,
+          "tp_util_mult": 1.5,
+          "sl_vol_mult": 2.5,
+          "trail_gap_mult": 1.0,
+          "trail_decay": 0.5,
+          "hold_decay_start": 18,
+          "hold_decay_rate": 0.025,
+          "tp_cap": 0.075,
+          "sl_cap": 0.036
+        },
+        "smart_addon": false,
+        "addon_ofti_th": 0.0,
+        "addon_trap_th": -999.0,
+        "addon_taker_th": -999.0,
+        "addon_ofi_th": -999.0,
+        "dynamic_scout_gate": false,
+        "scout_vol_scale": 0.0,
+        "scout_edge_vol_scale": 0.0,
+        "scout_vol_cap": 3.0,
+        "execution_sniper": true,
+        "sniper_flow_th": 0.2,
+        "sniper_fee_mult": 0.2,
+        "sniper_slip_mult": 0.0,
+        "mdd_entry_guard": false,
+        "mdd_soft_start": 0.2,
+        "mdd_hard_start": 0.3,
+        "mdd_parent_scale_col": "",
+        "mdd_deep_scale": 0.5,
+        "mdd_hard_scale_mult": 0.5
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 699.1379839727641,
+          "mdd": -29.72199717591575,
+          "trades": 194,
+          "wr": 0.30927835051546393,
+          "trades_per_day": 3.306818181818182,
+          "deep_entries": 129,
+          "long_entries": 81,
+          "short_entries": 113,
+          "avg_notional": 2.1786072180110145,
+          "avg_leverage": 2.1924875206903995,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 50,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 16
+          },
+          "runner_actions": {
+            "deep_entry": 129,
+            "v21_entry": 65,
+            "v21_reject": 29,
+            "v21_add_on": 14
+          },
+          "route_counts": {
+            "conservative_maker_replay": 297,
+            "l2_replay_taker_fallback": 105
+          }
+        },
+        "cost2": {
+          "pnl": 463.5399506168309,
+          "mdd": -30.624252567409794,
+          "trades": 196,
+          "wr": 0.29081632653061223,
+          "trades_per_day": 3.340909090909091,
+          "deep_entries": 130,
+          "long_entries": 82,
+          "short_entries": 114,
+          "avg_notional": 2.1806112259904937,
+          "avg_leverage": 2.1941144466671725,
+          "exits": {
+            "deep_alpha_max_hold": 34,
+            "deep_alpha_stop_loss": 83,
+            "v21_2_stop_loss": 51,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 13
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 66,
+            "v21_reject": 29,
+            "v21_add_on": 13
+          },
+          "route_counts": {
+            "conservative_maker_replay": 297,
+            "l2_replay_taker_fallback": 108
+          }
+        },
+        "cost3": {
+          "pnl": 420.8033028238044,
+          "mdd": -27.94688408838849,
+          "trades": 195,
+          "wr": 0.28205128205128205,
+          "trades_per_day": 3.3238636363636367,
+          "deep_entries": 129,
+          "long_entries": 81,
+          "short_entries": 114,
+          "avg_notional": 2.1783469330418175,
+          "avg_leverage": 2.1885016064688267,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 84,
+            "v21_2_stop_loss": 51,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 13
+          },
+          "runner_actions": {
+            "deep_entry": 129,
+            "v21_entry": 66,
+            "v21_add_on": 15,
+            "v21_reject": 23
+          },
+          "route_counts": {
+            "conservative_maker_replay": 302,
+            "l2_replay_taker_fallback": 103
+          }
+        }
+      },
+      "score": 1023.5692535859088
+    },
+    {
+      "name": "alpha2_1::noflip_c0.56_parent_scale1.10::alpha1_l2_conservative_fee20",
+      "runtime": {
+        "name": "noflip_c0.56_parent_scale1.10",
+        "confidence": 0.56,
+        "parent_notional_scale": 1.1,
+        "max_notional": 2.75
+      },
+      "variant": {
+        "name": "alpha1_l2_conservative_fee20",
+        "layer": "conservative_l2_replay",
+        "overlay": {
+          "name": "alpha1_l2_conservative_fee20",
+          "edge_th": 0.01,
+          "margin_th": 0.004,
+          "notional": 2.0,
+          "cooldown": 12,
+          "base_tp": 0.04,
+          "base_sl": 0.018,
+          "base_hold": 48,
+          "tp_util_mult": 1.5,
+          "sl_vol_mult": 2.5,
+          "trail_gap_mult": 1.0,
+          "trail_decay": 0.5,
+          "hold_decay_start": 18,
+          "hold_decay_rate": 0.025,
+          "tp_cap": 0.075,
+          "sl_cap": 0.036
+        },
+        "smart_addon": false,
+        "addon_ofti_th": 0.0,
+        "addon_trap_th": -999.0,
+        "addon_taker_th": -999.0,
+        "addon_ofi_th": -999.0,
+        "dynamic_scout_gate": false,
+        "scout_vol_scale": 0.0,
+        "scout_edge_vol_scale": 0.0,
+        "scout_vol_cap": 3.0,
+        "execution_sniper": true,
+        "sniper_flow_th": 0.2,
+        "sniper_fee_mult": 0.2,
+        "sniper_slip_mult": 0.0,
+        "mdd_entry_guard": false,
+        "mdd_soft_start": 0.2,
+        "mdd_hard_start": 0.3,
+        "mdd_parent_scale_col": "",
+        "mdd_deep_scale": 0.5,
+        "mdd_hard_scale_mult": 0.5
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 718.6999180429929,
+          "mdd": -26.65525389383484,
+          "trades": 192,
+          "wr": 0.3177083333333333,
+          "trades_per_day": 3.272727272727273,
+          "deep_entries": 130,
+          "long_entries": 79,
+          "short_entries": 113,
+          "avg_notional": 2.20295178258079,
+          "avg_leverage": 2.186112796728715,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 34,
+            "v21_2_stop_loss": 47,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 16
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 62,
+            "v21_reject": 28,
+            "v21_add_on": 14
+          },
+          "route_counts": {
+            "conservative_maker_replay": 289,
+            "l2_replay_taker_fallback": 109
+          }
+        },
+        "cost2": {
+          "pnl": 443.8246454913869,
+          "mdd": -28.97288721220539,
+          "trades": 195,
+          "wr": 0.28717948717948716,
+          "trades_per_day": 3.3238636363636367,
+          "deep_entries": 130,
+          "long_entries": 82,
+          "short_entries": 113,
+          "avg_notional": 2.2080110974507736,
+          "avg_leverage": 2.1903557894410417,
+          "exits": {
+            "deep_alpha_max_hold": 33,
+            "deep_alpha_stop_loss": 84,
+            "v21_2_stop_loss": 50,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 13
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 65,
+            "v21_reject": 27,
+            "v21_add_on": 13
+          },
+          "route_counts": {
+            "conservative_maker_replay": 291,
+            "l2_replay_taker_fallback": 112
+          }
+        },
+        "cost3": {
+          "pnl": 360.1451308552912,
+          "mdd": -29.688679702822675,
+          "trades": 196,
+          "wr": 0.2755102040816326,
+          "trades_per_day": 3.340909090909091,
+          "deep_entries": 130,
+          "long_entries": 80,
+          "short_entries": 116,
+          "avg_notional": 2.210573048307824,
+          "avg_leverage": 2.188326976316353,
+          "exits": {
+            "deep_alpha_max_hold": 31,
+            "deep_alpha_stop_loss": 86,
+            "v21_2_stop_loss": 51,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 13
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 66,
+            "v21_add_on": 15,
+            "v21_reject": 22
+          },
+          "route_counts": {
+            "conservative_maker_replay": 301,
+            "l2_replay_taker_fallback": 106
+          }
+        }
+      },
+      "score": 1017.1352089078621
+    }
+  ],
+  "audit": {
+    "status": "pass",
+    "verdict": "shadow_collect_l2",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "historical_l2_snapshots_insufficient_conservative_ohlc_replay_only",
+      "real_live_l2_fill_model_requires_forward_shadow_collection",
+      "alpha2_1_runtime_sweep_did_not_beat_alpha2_reference"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "l2_stats": {
+      "storage": "duckdb",
+      "db_path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb",
+      "table": "orderbook_decision_snapshots",
+      "exists": true,
+      "rows": 80,
+      "first_timestamp_kst": "2026-05-13 23:50:00",
+      "last_timestamp_kst": "2026-05-14 11:00:00",
+      "usable_for_replay": false
+    },
+    "selected_runtime": {
+      "name": "noflip_c0.56_parent_scale1.10",
+      "confidence": 0.56,
+      "parent_notional_scale": 1.1,
+      "max_notional": 2.75
+    },
+    "selected_variant": {
+      "name": "alpha1_l2_conservative_fee20",
+      "layer": "conservative_l2_replay",
+      "overlay": {
+        "name": "alpha1_l2_conservative_fee20",
+        "edge_th": 0.01,
+        "margin_th": 0.004,
+        "notional": 2.0,
+        "cooldown": 12,
+        "base_tp": 0.04,
+        "base_sl": 0.018,
+        "base_hold": 48,
+        "tp_util_mult": 1.5,
+        "sl_vol_mult": 2.5,
+        "trail_gap_mult": 1.0,
+        "trail_decay": 0.5,
+        "hold_decay_start": 18,
+        "hold_decay_rate": 0.025,
+        "tp_cap": 0.075,
+        "sl_cap": 0.036
+      },
+      "smart_addon": false,
+      "addon_ofti_th": 0.0,
+      "addon_trap_th": -999.0,
+      "addon_taker_th": -999.0,
+      "addon_ofi_th": -999.0,
+      "dynamic_scout_gate": false,
+      "scout_vol_scale": 0.0,
+      "scout_edge_vol_scale": 0.0,
+      "scout_vol_cap": 3.0,
+      "execution_sniper": true,
+      "sniper_flow_th": 0.2,
+      "sniper_fee_mult": 0.2,
+      "sniper_slip_mult": 0.0,
+      "mdd_entry_guard": false,
+      "mdd_soft_start": 0.2,
+      "mdd_hard_start": 0.3,
+      "mdd_parent_scale_col": "",
+      "mdd_deep_scale": 0.5,
+      "mdd_hard_scale_mult": 0.5
+    }
+  },
+  "artifacts": {
+    "teacher_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_l2_teacher_deep_parent_20260514/teacher_deep_parent_l2_replay.pt",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha2_teacher_l2_runtime_sweep_20260514_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha2_teacher_l2_runtime_sweep_20260514_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha2_teacher_l2_runtime_sweep_20260514_grid.csv"
+  }
+}

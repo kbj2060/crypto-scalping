@@ -1,0 +1,233 @@
+{
+  "model_id": "alpha1_teacher_constrained_deep_parent_20260513",
+  "design": "Teacher-constrained deep parent. A sequence Transformer imitates alpha1 parent active trajectories, but original parent CASH bars remain CASH so V27 deep scout is preserved. It can skip/resize/optionally flip only inside teacher-active parent candidates.",
+  "selected_config": {
+    "name": "cash_preserve_noflip_c0.38",
+    "confidence": 0.38,
+    "skip_on_cash": true,
+    "allow_flip": false,
+    "use_learned_size": false,
+    "notional_scale": 1.0,
+    "max_notional": 2.75
+  },
+  "experiments": [
+    {
+      "name": "alpha1",
+      "metrics": {
+        "cost1": {
+          "pnl": 361.18717637569534,
+          "mdd": -31.741344176793795,
+          "trades": 199,
+          "wr": 0.2964824120603015,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 128,
+          "long_entries": 84,
+          "short_entries": 115,
+          "avg_notional": 2.1901619420416902,
+          "avg_leverage": 2.2123608661733103,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 56,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 71,
+            "v21_reject": 29,
+            "v21_add_on": 11
+          }
+        },
+        "cost2": {
+          "pnl": 88.74076757432363,
+          "mdd": -38.03968051948192,
+          "trades": 205,
+          "wr": 0.2634146341463415,
+          "trades_per_day": 3.494318181818182,
+          "deep_entries": 133,
+          "long_entries": 85,
+          "short_entries": 120,
+          "avg_notional": 2.1883526536808127,
+          "avg_leverage": 2.2092771926663635,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 87,
+            "v21_2_stop_loss": 57,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 133,
+            "v21_entry": 72,
+            "v21_add_on": 10,
+            "v21_reject": 29
+          }
+        },
+        "cost3": {
+          "pnl": 0.5776148307049533,
+          "mdd": -48.47537013484388,
+          "trades": 206,
+          "wr": 0.22815533980582525,
+          "trades_per_day": 3.5113636363636367,
+          "deep_entries": 130,
+          "long_entries": 91,
+          "short_entries": 115,
+          "avg_notional": 2.192206142497522,
+          "avg_leverage": 2.2032231449951607,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 88,
+            "deep_alpha_take_profit": 15,
+            "v21_2_stop_loss": 62,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 76,
+            "v21_add_on": 11,
+            "v21_reject": 14
+          }
+        }
+      },
+      "score": 393.3295894476188
+    },
+    {
+      "name": "teacher_constrained::cash_preserve_noflip_c0.38",
+      "metrics": {
+        "cost1": {
+          "pnl": 398.58854441216477,
+          "mdd": -31.741344176793806,
+          "trades": 195,
+          "wr": 0.30256410256410254,
+          "trades_per_day": 3.3238636363636367,
+          "deep_entries": 128,
+          "long_entries": 84,
+          "short_entries": 111,
+          "avg_notional": 2.1821930868879713,
+          "avg_leverage": 2.193063015757892,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 52,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 67,
+            "v21_reject": 26,
+            "v21_add_on": 14
+          }
+        },
+        "cost2": {
+          "pnl": 88.54948343287028,
+          "mdd": -39.77566879224573,
+          "trades": 201,
+          "wr": 0.26865671641791045,
+          "trades_per_day": 3.4261363636363638,
+          "deep_entries": 132,
+          "long_entries": 84,
+          "short_entries": 117,
+          "avg_notional": 2.1843170123453963,
+          "avg_leverage": 2.1949380374072174,
+          "exits": {
+            "deep_alpha_max_hold": 33,
+            "deep_alpha_stop_loss": 85,
+            "v21_2_stop_loss": 54,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 132,
+            "v21_entry": 69,
+            "v21_add_on": 17,
+            "v21_reject": 23
+          }
+        },
+        "cost3": {
+          "pnl": 0.8579975129333839,
+          "mdd": -48.46029994830149,
+          "trades": 203,
+          "wr": 0.2315270935960591,
+          "trades_per_day": 3.460227272727273,
+          "deep_entries": 130,
+          "long_entries": 90,
+          "short_entries": 113,
+          "avg_notional": 2.1878276643691543,
+          "avg_leverage": 2.194482425691218,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 88,
+            "deep_alpha_take_profit": 15,
+            "v21_2_stop_loss": 59,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 73,
+            "v21_add_on": 11,
+            "v21_reject": 13
+          }
+        }
+      },
+      "score": 430.71497529099133
+    }
+  ],
+  "audit": {
+    "status": "pass",
+    "verdict": "promote",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "cash_preserving": true,
+    "new_parent_entries_allowed_in_teacher_cash": false,
+    "v27_deep_scout_preserved": true,
+    "selected_config": {
+      "name": "cash_preserve_noflip_c0.38",
+      "confidence": 0.38,
+      "skip_on_cash": true,
+      "allow_flip": false,
+      "use_learned_size": false,
+      "notional_scale": 1.0,
+      "max_notional": 2.75
+    },
+    "parent_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_teacher_constrained_deep_parent_20260513/teacher_constrained_deep_parent.pt",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_teacher_constrained_deep_parent_20260513_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_teacher_constrained_deep_parent_20260513_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_teacher_constrained_deep_parent_20260513_grid.csv"
+  }
+}

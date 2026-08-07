@@ -1,0 +1,129 @@
+{
+  "stage": "omega461_regime_filter_transplant",
+  "generated_at": "2026-07-19T15:39:38.976641+09:00",
+  "method_note": "Genuine bar-by-bar fresh-forward replay (native._candidate_for_asset monkeypatched to gate ETH entries on regime3_current_sensitive_wide24_chop_prob, same source Sigma6 uses, already merge-asof'd onto the 5m ETH frame at native resolution -- no new data merging needed). Live-matching config preserved (duration-gate off, ETH notional_multiplier=1.5). Exits are NOT gated -- only new-entry candidate generation, matching Sigma6's own design.",
+  "baseline_no_filter": {
+    "portfolio": {
+      "pnl": 34.625529646353016,
+      "mdd": -36.34909365110997,
+      "trades": 39,
+      "wr": 0.4358974358974359,
+      "mark_to_market_mdd": -38.928519755211276
+    },
+    "per_asset": {
+      "eth": {
+        "trades": 39,
+        "wr": 0.4358974358974359,
+        "mean_trade_return": 0.014743430707554165,
+        "sum_trade_return": 0.5749937975946124
+      },
+      "sol": {
+        "trades": 0,
+        "wr": 0.0,
+        "mean_trade_return": 0.0,
+        "sum_trade_return": 0.0
+      },
+      "btc": {
+        "trades": 0,
+        "wr": 0.0,
+        "mean_trade_return": 0.0,
+        "sum_trade_return": 0.0
+      }
+    }
+  },
+  "regime_filter_variants": {
+    "reg_thr_0.34": {
+      "portfolio": {
+        "pnl": 46.13313530777114,
+        "mdd": -43.256911050813784,
+        "trades": 31,
+        "wr": 0.45161290322580644,
+        "mark_to_market_mdd": -45.20325150689379
+      },
+      "per_asset": {
+        "eth": {
+          "trades": 31,
+          "wr": 0.45161290322580644,
+          "mean_trade_return": 0.019941172472605777,
+          "sum_trade_return": 0.6181763466507791
+        },
+        "sol": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        },
+        "btc": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        }
+      }
+    },
+    "reg_thr_0.42": {
+      "portfolio": {
+        "pnl": 20.59968997372261,
+        "mdd": -49.49396402120737,
+        "trades": 33,
+        "wr": 0.42424242424242425,
+        "mark_to_market_mdd": -54.87726191690765
+      },
+      "per_asset": {
+        "eth": {
+          "trades": 33,
+          "wr": 0.42424242424242425,
+          "mean_trade_return": 0.012290815174035102,
+          "sum_trade_return": 0.40559690074315835
+        },
+        "sol": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        },
+        "btc": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        }
+      }
+    },
+    "reg_thr_0.5": {
+      "portfolio": {
+        "pnl": 32.30987221975854,
+        "mdd": -49.80277809144642,
+        "trades": 37,
+        "wr": 0.4594594594594595,
+        "mark_to_market_mdd": -53.93372225904134
+      },
+      "per_asset": {
+        "eth": {
+          "trades": 37,
+          "wr": 0.4594594594594595,
+          "mean_trade_return": 0.01527101242157237,
+          "sum_trade_return": 0.5650274595981777
+        },
+        "sol": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        },
+        "btc": {
+          "trades": 0,
+          "wr": 0.0,
+          "mean_trade_return": 0.0,
+          "sum_trade_return": 0.0
+        }
+      }
+    }
+  },
+  "baseline_pnl_mdd": [
+    34.625529646353016,
+    -36.34909365110997
+  ],
+  "variants_strictly_improving_both": [],
+  "verdict": "REJECTED -- no regime-filter variant strictly improves both pnl and mdd vs baseline"
+}

@@ -1,0 +1,69 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "ft_transformer_mtl_parent_did_not_beat_alpha3_hgb_parent"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after runtime selection",
+  "alpha3_execution_contract": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "alpha3_teacher_runtime": {
+    "name": "noflip_c0.56_parent_scale1.10",
+    "confidence": 0.56,
+    "parent_notional_scale": 1.1,
+    "max_notional": 2.75
+  },
+  "ft_selected_runtime": {
+    "name": "ft_mtl_replace_c0.46_q0.020_s1.10_cap2.75_u0.040",
+    "model_key": "ft_transformer_mtl",
+    "mode": "replace",
+    "confidence": 0.46,
+    "quality_floor": 0.02,
+    "notional_scale": 1.1,
+    "max_notional": 2.75,
+    "uncertainty_max": 0.04
+  },
+  "train_meta": {
+    "candidates": 13047,
+    "stride_bars": 6,
+    "max_train_horizon_bars": 288
+  },
+  "val_meta": {
+    "candidates": 4368,
+    "stride_bars": 6,
+    "max_train_horizon_bars": 288
+  },
+  "base_feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "status": "pass",
+  "verdict": "runtime_native_backtest_required_before_promotion",
+  "blocking": [],
+  "warnings": [],
+  "selection_uses_2026": false,
+  "deep_sleeve_only_when_parent_cash": true,
+  "policy": "alpha3_deep_alpha_runtime_v32_utility",
+  "selected_config": {
+    "name": "v32_runtime_utility_mae",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.034,
+    "base_sl": 0.014,
+    "base_hold": 36,
+    "tp_util_mult": 1.1,
+    "sl_vol_mult": 2.1,
+    "trail_gap_mult": 0.75,
+    "trail_decay": 0.55,
+    "hold_decay_start": 12,
+    "hold_decay_rate": 0.035,
+    "tp_cap": 0.06,
+    "sl_cap": 0.026,
+    "trail_activation": 0.006
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "forbidden_feature_cols": [],
+    "feature_count": 80,
+    "train_eval_timestamp_overlap": 0
+  }
+}

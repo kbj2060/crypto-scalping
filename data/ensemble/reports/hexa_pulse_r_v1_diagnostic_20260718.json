@@ -1,0 +1,191 @@
+{
+  "formula_id": "hexa_pulse_r_v1_20260718",
+  "evaluation_class": "research_diagnostic_only",
+  "formula_config": {
+    "entry_threshold": 0.65,
+    "exit_threshold": 0.15,
+    "confirmation_bars": 2,
+    "toxicity_exit_threshold": 0.8,
+    "tail_risk_exit_threshold": 0.45
+  },
+  "source": {
+    "micro_start": "2026-05-03 08:36:00",
+    "micro_end": "2026-07-18 14:49:00",
+    "price_start": "2023-12-31 15:00:00",
+    "price_end": "2026-07-15 16:36:00",
+    "tail_rows": 95919,
+    "tail_active_rows": 0,
+    "tail_probability_min": 0.0,
+    "tail_probability_max": 0.0
+  },
+  "splits": {
+    "may_research": {
+      "bars": 41242,
+      "available_fraction": 0.7959119344357694,
+      "trades": 14,
+      "win_rate": 0.2857142857142857,
+      "compounded_return_pct": -0.821392300077195,
+      "additive_gross_return_pct": 0.4358303635389249,
+      "additive_cost_pct": 1.26,
+      "max_drawdown_pct": 0.821392300077195,
+      "exposure_fraction": 0.0007516609281800106,
+      "long_entries": 5,
+      "short_entries": 9,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 4.35,
+        "max": 5
+      }
+    },
+    "june_validation_diagnostic": {
+      "bars": 43200,
+      "available_fraction": 0.8110648148148148,
+      "trades": 7,
+      "win_rate": 0.0,
+      "compounded_return_pct": -0.48824998501151295,
+      "additive_gross_return_pct": 0.14069762689178367,
+      "additive_cost_pct": 0.63,
+      "max_drawdown_pct": 0.48824998501151295,
+      "exposure_fraction": 0.00032407407407407406,
+      "long_entries": 5,
+      "short_entries": 2,
+      "holding_minutes": {
+        "median": 1.0,
+        "p95": 4.699999999999999,
+        "max": 5
+      }
+    },
+    "july_reused_diagnostic": {
+      "bars": 21156,
+      "available_fraction": 0.9457364341085271,
+      "trades": 10,
+      "win_rate": 0.2,
+      "compounded_return_pct": -0.6309026837774123,
+      "additive_gross_return_pct": 0.26775906678183636,
+      "additive_cost_pct": 0.9000000000000001,
+      "max_drawdown_pct": 0.6336071679995836,
+      "exposure_fraction": 0.0012289657780298732,
+      "long_entries": 5,
+      "short_entries": 5,
+      "holding_minutes": {
+        "median": 2.5,
+        "p95": 4.549999999999999,
+        "max": 5
+      }
+    },
+    "all_available": {
+      "bars": 105598,
+      "available_fraction": 0.8321275024148185,
+      "trades": 31,
+      "win_rate": 0.1935483870967742,
+      "compounded_return_pct": -1.9282972547823296,
+      "additive_gross_return_pct": 0.8442870572125449,
+      "additive_cost_pct": 2.79,
+      "max_drawdown_pct": 1.9282972547823296,
+      "exposure_fraction": 0.0006723612189624803,
+      "long_entries": 15,
+      "short_entries": 16,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 5.0,
+        "max": 5
+      }
+    }
+  },
+  "fee_stress": {
+    "2.00_bps_per_notional_change": {
+      "bars": 105598,
+      "available_fraction": 0.8321275024148185,
+      "trades": 31,
+      "win_rate": 0.3870967741935484,
+      "compounded_return_pct": -0.39595524231336165,
+      "additive_gross_return_pct": 0.8442870572125449,
+      "additive_cost_pct": 1.2400000000000002,
+      "max_drawdown_pct": 0.6135478312547127,
+      "exposure_fraction": 0.0006723612189624803,
+      "long_entries": 15,
+      "short_entries": 16,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 5.0,
+        "max": 5
+      }
+    },
+    "3.25_bps_per_notional_change": {
+      "bars": 105598,
+      "available_fraction": 0.8321275024148185,
+      "trades": 31,
+      "win_rate": 0.22580645161290322,
+      "compounded_return_pct": -1.1650479964390725,
+      "additive_gross_return_pct": 0.8442870572125449,
+      "additive_cost_pct": 2.015,
+      "max_drawdown_pct": 1.2341577267681036,
+      "exposure_fraction": 0.0006723612189624803,
+      "long_entries": 15,
+      "short_entries": 16,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 5.0,
+        "max": 5
+      }
+    },
+    "4.50_bps_per_notional_change": {
+      "bars": 105598,
+      "available_fraction": 0.8321275024148185,
+      "trades": 31,
+      "win_rate": 0.1935483870967742,
+      "compounded_return_pct": -1.9282972547823296,
+      "additive_gross_return_pct": 0.8442870572125449,
+      "additive_cost_pct": 2.79,
+      "max_drawdown_pct": 1.9282972547823296,
+      "exposure_fraction": 0.0006723612189624803,
+      "long_entries": 15,
+      "short_entries": 16,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 5.0,
+        "max": 5
+      }
+    },
+    "5.50_bps_per_notional_change": {
+      "bars": 105598,
+      "available_fraction": 0.8321275024148185,
+      "trades": 31,
+      "win_rate": 0.12903225806451613,
+      "compounded_return_pct": -2.5347187055347553,
+      "additive_gross_return_pct": 0.8442870572125449,
+      "additive_cost_pct": 3.4099999999999997,
+      "max_drawdown_pct": 2.5347187055347553,
+      "exposure_fraction": 0.0006723612189624803,
+      "long_entries": 15,
+      "short_entries": 16,
+      "holding_minutes": {
+        "median": 2.0,
+        "p95": 5.0,
+        "max": 5
+      }
+    }
+  },
+  "data_contract": {
+    "decision_uses_micro_row_at_or_before_d_minus_2m": true,
+    "tail_risk_historical_contract_valid": false,
+    "tail_risk_diagnostic_substitution": "shadow_aftershock_prob=0.0",
+    "whale_position_reconstructed_from": [
+      "nif_whale",
+      "oi_delta_pct"
+    ],
+    "thresholds_tuned": false
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "fixed_holding_period_used": false
+  },
+  "promotion": {
+    "promotion_pass": false,
+    "live_candidate": false,
+    "reason": "historical tail-risk input is invalid and July was reused during prior research"
+  }
+}

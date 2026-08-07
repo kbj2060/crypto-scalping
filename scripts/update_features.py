@@ -10,8 +10,43 @@
 사용법:
   python scripts/update_features.py --start 2024-01-01 --end 2024-12-31
   python scripts/update_features.py          # 기본: 2024-01-01 ~ 오늘
+
+[중요 -- 2026-07-13 재현성 버그 및 수정 이력]
+--start 기본값이 2024-01-01이라, check_gaps()의 gap_start = min(start, ts_min)은 거의 항상
+2024-01-01로 잡힌다. 즉 이 스크립트를 실행할 때마다 "새로 추가된 구간"만 계산하는 게 아니라
+2024년부터 전체 raw klines/funding/metrics를 다시 로드해서 GARCH/OU 재귀 피처
+(garch_vol/garch_vol_z/ou_halflife 등, features/elite.py VolatilityModelEngine)를 처음부터
+다시 계산한다. 개별 피처 공식 자체는 과거만 보는 causal rolling window라 문제 없지만, raw
+데이터가 재수집 때마다 완전히 동일하지 않으면 재계산 결과가 미세하게 달라질 수 있다.
+과거에는 merge_and_save()가 `concat([new_df, existing])` 순서로 합친 뒤
+drop_duplicates(keep='first' 기본값)를 적용해서, 방금 재계산한 값이 기존 캐시값을
+"조용히" 덮어썼다 -- 그래서 같은 과거 구간을 다시 계산할 때마다 옛날 백테스트 숫자가
+재현되지 않는 사고가 있었다(project memory: project-portfolio-3asset-design.md 참고).
+2026-07-13에 concat 순서를 `[existing, new_df]`로 바꿔 기존 캐시값이 항상 우선하도록
+고쳤다 -- 앞으로는 이 스크립트를 몇 번을 다시 돌려도 이미 저장된 과거 피처값은 절대
+바뀌지 않는다. 피처 계산 로직 자체의 버그를 고쳐서 과거 값을 의도적으로 전부
+재생성하고 싶은 경우에만 `data/splits/year_oos/training_features_2026_rebuilt.csv`를
+먼저 삭제하고 실행할 것 (그래야 진짜 전체 재빌드가 됨을 명확히 인지한 상태로 하게 됨).
+
+[중요 -- 2026-07-30 원본 metrics zip 무결성 고정]
+07-13 fix는 feature 병합 로직만 다뤘다. 그런데 실제로는 그보다 위쪽, 원본
+`binance_data/metrics/ETHUSDT-metrics-*.zip` 자체가 조용히 바뀌는 사고가 있었다: 2026-07-02에
+Jan-Jun 2026 구간 zip의 78개(약 43%)가 새로 채워졌고(03-11/03-16/04-14에도 각각 반복),
+그 결과 `sum_open_interest_value`/`sum_toptrader_long_short_ratio`/`count_long_short_ratio`/
+`whale_retail_ratio` 값이 이전에 이 파일들로 만든 feature 대비 89%의 행에서 달라졌다
+(자세한 내용: `docs/pipeline_integrity_and_research_redesign_20260730.md`,
+project memory `project-omega461-baseline-drift-bisection-20260730`). `_download_file`은 파일이
+이미 존재하면 절대 재다운로드하지 않으므로 코드 자체가 덮어쓰지는 않지만, 파일이 없던 날짜가
+나중에 채워지거나 로컬 파일이 삭제된 뒤 다시 받아지면 이전에 그 파일로 만들어진 feature 값과
+새로 받은 파일로 만든 feature 값이 소리 없이 달라진다.
+이를 막기 위해 `ensure_metrics()`가 각 zip 파일의 sha256을
+`binance_data/RAW_SOURCE_MANIFEST.json`에 기록한다: 처음 보는 파일은 등록하고, 이미 등록된
+파일의 내용이 바뀌면(해시 불일치) 즉시 실패한다(AGENTS.md의 fail-fast 계약과 동일 방향) --
+조용한 보정이나 자동 허용은 하지 않는다.
 """
 
+import hashlib
+import json
 import os
 import sys
 import io
@@ -36,11 +71,15 @@ METRICS_DIR      = os.path.join(BINANCE_DIR, 'metrics')
 FUNDING_RATE_DIR = os.path.join(BINANCE_DIR, 'funding_rate')
 ETH_KLINES_DIR   = os.path.join(BINANCE_DIR, 'klines', 'ETHUSDT')
 BTC_KLINES_DIR   = os.path.join(BINANCE_DIR, 'klines', 'BTCUSDT')
+RAW_SOURCE_MANIFEST = os.path.join(BINANCE_DIR, 'RAW_SOURCE_MANIFEST.json')
 
 ETH_CSV      = os.path.join(DATA_DIR, 'eth_5m_1year.csv')
 BTC_CSV      = os.path.join(DATA_DIR, 'btc_5m_1year.csv')
 METRICS_CSV  = os.path.join(DATA_DIR, 'TOTAL_ETHUSDT_metrics.csv')
-FUNDING_CSV  = os.path.join(DATA_DIR, 'TOTAL_ETHFIUSDT_fundingRate.csv')
+# Funding is symbol-scoped and must come from ETHUSDT monthly funding zips.
+# Do not mix legacy single-file funding CSVs here; an ETHFIUSDT CSV previously
+# shared this path and contaminates ETHUSDT features.
+FUNDING_CSV  = None
 FEATURES_CSV = os.path.join(DATA_DIR, 'training_features_5m.csv')
 
 KLINES_COLS = [
@@ -125,10 +164,57 @@ def _download_file(url: str, save_path: str) -> bool:
         return False
 
 
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_raw_source_manifest() -> dict:
+    if os.path.exists(RAW_SOURCE_MANIFEST):
+        with open(RAW_SOURCE_MANIFEST, 'r') as f:
+            return json.load(f)
+    return {"schema_version": "raw_source_manifest_v1", "files": {}}
+
+
+def _save_raw_source_manifest(manifest: dict) -> None:
+    with open(RAW_SOURCE_MANIFEST, 'w') as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+
+
+def _verify_and_register_raw_source(manifest: dict, rel_path: str, abs_path: str) -> None:
+    """rel_path의 현재 내용을 해싱해 manifest와 대조한다.
+
+    - manifest에 없으면 지금 상태를 기준선으로 등록한다.
+    - manifest에 있고 해시가 같으면 그대로 둔다.
+    - manifest에 있는데 해시가 다르면 원본 소스가 조용히 바뀐 것이므로 즉시 실패한다
+      (fail-fast -- AGENTS.md 계약, 2026-07-30 발견된 metrics zip 재수집 drift 참고).
+    """
+    entry = manifest["files"].get(rel_path)
+    digest = _sha256_file(abs_path)
+    if entry is None:
+        manifest["files"][rel_path] = {
+            "sha256": digest,
+            "size_bytes": os.path.getsize(abs_path),
+            "first_seen": datetime.utcnow().isoformat() + "Z",
+        }
+        return
+    if entry["sha256"] != digest:
+        raise RuntimeError(
+            f"Raw source drift detected: {rel_path} content changed since it was first "
+            f"registered ({entry['first_seen']}, sha256={entry['sha256']}) -- now sha256={digest}. "
+            f"Refusing to silently use a changed raw source file. See "
+            f"docs/pipeline_integrity_and_research_redesign_20260730.md."
+        )
+
+
 def ensure_metrics(gap_start: datetime, gap_end: datetime):
-    """gap 구간의 metrics 일별 ZIP 확인 및 다운로드."""
+    """gap 구간의 metrics 일별 ZIP 확인 및 다운로드. 모든 파일은 sha256으로 고정된다."""
     os.makedirs(METRICS_DIR, exist_ok=True)
     print(f"\n  [Metrics] {gap_start.date()} ~ {gap_end.date()} 확인 중...")
+    manifest = _load_raw_source_manifest()
     curr = gap_start.replace(hour=0, minute=0, second=0)
     count_dl = 0
     while curr <= gap_end:
@@ -140,7 +226,11 @@ def ensure_metrics(gap_start: datetime, gap_end: datetime):
                    f'/metrics/ETHUSDT/{fname}')
             if _download_file(url, save_path):
                 count_dl += 1
+        if os.path.exists(save_path):
+            rel_path = os.path.relpath(save_path, BINANCE_DIR)
+            _verify_and_register_raw_source(manifest, rel_path, save_path)
         curr += timedelta(days=1)
+    _save_raw_source_manifest(manifest)
     print(f"  → metrics {count_dl}개 신규 다운로드")
 
 
@@ -182,16 +272,19 @@ def ensure_klines(gap_start: datetime, gap_end: datetime):
             tmp = pd.read_csv(api_csv, usecols=['timestamp'], parse_dates=['timestamp'])
             if not tmp.empty:
                 api_max = tmp['timestamp'].max().to_pydatetime().replace(tzinfo=None)
+                target_start = max(gap_start, api_max - timedelta(minutes=5))
                 if api_max >= gap_end:
-                    print(f"  ⏭️  {symbol} api.csv가 이미 범위( ~ {gap_end.date()}) 커버 → 건너뜀")
-                    continue
-                # 남은 구간만 이어서 다운로드
-                target_start = max(gap_start, api_max)
-                print(f"  ℹ️  기존 파일 존재({api_max.date()}까지). 이후부터 이어서 다운로드합니다.")
+                    print(f"  ℹ️  기존 파일이 범위를 커버합니다. 마지막 봉을 재확인합니다.")
+                else:
+                    print(f"  ℹ️  기존 파일 존재({api_max.date()}까지). 마지막 봉부터 이어서 다운로드합니다.")
 
         base_url = 'https://fapi.binance.com/fapi/v1/klines'
+        target_end = gap_end + timedelta(days=1)
+        if target_start >= target_end:
+            print(f"  ⏭️  {symbol} api.csv가 이미 범위( ~ {gap_end.date()}) 커버 → 건너뜀")
+            continue
         start_ms = int(target_start.timestamp() * 1000)
-        end_ms   = int(gap_end.timestamp() * 1000) + 86_400_000
+        end_ms   = int(target_end.timestamp() * 1000)
         all_rows = []
         curr_ms  = start_ms
 
@@ -220,7 +313,7 @@ def ensure_klines(gap_start: datetime, gap_end: datetime):
             if os.path.exists(api_csv):
                 old = pd.read_csv(api_csv, parse_dates=['timestamp'])
                 df = pd.concat([old, df], ignore_index=True)
-            df = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+            df = df.drop_duplicates(subset=['timestamp'], keep='last').sort_values('timestamp')
             df.to_csv(api_csv, index=False)
             print(f"  ✅ {symbol} api.csv 저장 ({len(df):,}봉)")
         else:
@@ -283,7 +376,7 @@ def load_all_sources(gap_start: datetime, gap_end: datetime):
             df['timestamp'] = pd.to_datetime(df['timestamp'])
         dfs_eth.append(df)
     eth_df = (pd.concat(dfs_eth, ignore_index=True)
-              .drop_duplicates(subset=['timestamp'])
+              .drop_duplicates(subset=['timestamp'], keep='last')
               .sort_values('timestamp').reset_index(drop=True))
     eth_df['timestamp'] = eth_df['timestamp'].astype('datetime64[us]')
     eth_df = eth_df[(eth_df['timestamp'] >= pd.Timestamp(gap_start).tz_localize(None))
@@ -303,7 +396,7 @@ def load_all_sources(gap_start: datetime, gap_end: datetime):
             df['timestamp'] = pd.to_datetime(df['timestamp'])
         dfs_btc.append(df)
     btc_df = (pd.concat(dfs_btc, ignore_index=True)
-              .drop_duplicates(subset=['timestamp'])
+              .drop_duplicates(subset=['timestamp'], keep='last')
               .sort_values('timestamp').reset_index(drop=True))
     btc_df['timestamp'] = btc_df['timestamp'].astype('datetime64[us]')
     btc_df = btc_df[['timestamp', 'close', 'volume', 'quote_volume']]
@@ -325,11 +418,19 @@ def load_all_sources(gap_start: datetime, gap_end: datetime):
 
     # ── Funding ──
     dfs_fund = []
-    if os.path.exists(FUNDING_CSV):
+    if FUNDING_CSV and os.path.exists(FUNDING_CSV):
         df = pd.read_csv(FUNDING_CSV)
         df['timestamp'] = pd.to_datetime(df['calc_time'], errors='coerce')
         df = df.dropna(subset=['timestamp'])[['timestamp', 'last_funding_rate']]
         dfs_fund.append(df)
+    bad_funding_zips = [
+        fname for fname in sorted(os.listdir(FUNDING_RATE_DIR))
+        if fname.endswith('.zip') and 'ETHUSDT' not in fname
+    ]
+    if bad_funding_zips:
+        raise RuntimeError(
+            f"Funding zip contract violation: expected ETHUSDT files only, got {bad_funding_zips[:5]}"
+        )
     zip_fund = _load_zips_df(FUNDING_RATE_DIR, ts_col_candidates=['calcTime', 'calc_time'])
     if not zip_fund.empty:
         # Binance zip의 컬럼명 정리
@@ -456,7 +557,13 @@ def merge_and_save(new_df: pd.DataFrame):
         all_cols = ["timestamp"] + all_cols
         existing = existing.reindex(columns=all_cols)
         new_df = new_df.reindex(columns=all_cols)
-        result = pd.concat([new_df[all_cols], existing[all_cols]], ignore_index=True)
+        # existing (previously-saved) rows go FIRST so drop_duplicates(keep='first' default)
+        # preserves them over a fresh recompute -- gap_start defaults to 2024-01-01 (see
+        # check_gaps), so build_features() reprocesses the whole raw history on every run;
+        # without this, that full recompute silently overwrote already-cached historical rows,
+        # making backtest numbers non-reproducible across extension runs even though the
+        # per-row formulas themselves are causal (found 2026-07-13, see project memory).
+        result = pd.concat([existing[all_cols], new_df[all_cols]], ignore_index=True)
     else:
         result = new_df
 

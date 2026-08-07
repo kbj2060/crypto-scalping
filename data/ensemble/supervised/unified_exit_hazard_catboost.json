@@ -1,0 +1,75 @@
+{
+  "feature_cols": [
+    "haz_side",
+    "haz_bars_held_norm",
+    "haz_remaining_norm",
+    "haz_current_pnl",
+    "haz_mfe_sofar",
+    "haz_mae_sofar",
+    "haz_long_prob",
+    "haz_flat_prob",
+    "haz_short_prob",
+    "haz_prob_max",
+    "m7_target_quality",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "patchtst_regime_sim",
+    "timesnet_cycle_delta",
+    "dlinear_smf_slope",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal"
+  ],
+  "model_path": "unified_exit_hazard_catboost.pkl",
+  "threshold": 0.5037674258805237,
+  "meta": {
+    "algorithm": "unified_exit_hazard_catboost",
+    "csv_path": "/home/llewyn/crypto-scalping/data/rl_training_2025_unified_dircat_tsfm_oof.csv",
+    "rule_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/unified_sparse_shadow_rule.json",
+    "gate_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/unified_tsfm_conformal_gate.json",
+    "min_hold_bars": 2,
+    "improve_margin": 0.0015,
+    "adverse_gap": 0.0035,
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "val_auc": 0.6444444444444446,
+    "test_auc": 0.44999999999999996,
+    "val_ap": 0.3466666666666666,
+    "test_ap": 0.22936570675701112,
+    "classification_report": {
+      "0": {
+        "precision": 0.75,
+        "recall": 0.3,
+        "f1-score": 0.42857142857142855,
+        "support": 20.0
+      },
+      "1": {
+        "precision": 0.17647058823529413,
+        "recall": 0.6,
+        "f1-score": 0.2727272727272727,
+        "support": 5.0
+      },
+      "accuracy": 0.36,
+      "macro avg": {
+        "precision": 0.4632352941176471,
+        "recall": 0.44999999999999996,
+        "f1-score": 0.35064935064935066,
+        "support": 25.0
+      },
+      "weighted avg": {
+        "precision": 0.6352941176470588,
+        "recall": 0.36,
+        "f1-score": 0.39740259740259737,
+        "support": 25.0
+      }
+    },
+    "hazard_rows": 159,
+    "trade_rows": 56
+  }
+}

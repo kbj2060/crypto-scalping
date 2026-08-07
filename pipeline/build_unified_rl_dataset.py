@@ -23,6 +23,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 AI_COLS = [
+    "ai_dir_edge",
+    "ai_dir_entropy",
+    "ai_adverse_risk",
+    "ai_reward_risk",
+    "ai_vol_regime_pct",
+    "ai_flow_exhaustion",
+    "ai_flow_flip_prob",
+    "ai_anchor_revert_prob",
     "patchtst_median",
     "patchtst_regime_sim",
     "tide_vol_raw",
@@ -93,25 +101,19 @@ def _num(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
     return pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(default)
 
 
-def _causal_anomaly_flag(s: pd.Series, window: int = 512, z_th: float = 2.0) -> pd.Series:
-    x = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    mu = x.rolling(window=window, min_periods=max(20, window // 8)).mean()
-    sd = x.rolling(window=window, min_periods=max(20, window // 8)).std(ddof=0).replace(0.0, np.nan)
-    z = (x - mu) / (sd + 1e-8)
-    return (z > float(z_th)).astype(float).fillna(0.0)
-
-
 def _ensure_m7_compat(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     close = _num(out, "close", 0.0).clip(lower=1e-8)
 
-    # Prob aliases required by rl_core.
+    # Direction probabilities required by rl_core. M7 is 2-class: [DOWN, UP].
     if "m7_trend_xgb_dn" not in out.columns:
-        out["m7_trend_xgb_dn"] = _num(out, "m7_prob_dn", 1.0 / 3.0)
-    if "m7_trend_xgb_fl" not in out.columns:
-        out["m7_trend_xgb_fl"] = _num(out, "m7_prob_fl", 1.0 / 3.0)
+        if "m7_prob_dn" not in out.columns:
+            raise ValueError("missing M7 binary DOWN probability: expected m7_trend_xgb_dn or m7_prob_dn")
+        out["m7_trend_xgb_dn"] = _num(out, "m7_prob_dn")
     if "m7_trend_xgb_up" not in out.columns:
-        out["m7_trend_xgb_up"] = _num(out, "m7_prob_up", 1.0 / 3.0)
+        if "m7_prob_up" not in out.columns:
+            raise ValueError("missing M7 binary UP probability: expected m7_trend_xgb_up or m7_prob_up")
+        out["m7_trend_xgb_up"] = _num(out, "m7_prob_up")
 
     # Quantile derived width.
     if "m7_qwidth" not in out.columns:
@@ -129,24 +131,12 @@ def _ensure_m7_compat(df: pd.DataFrame) -> pd.DataFrame:
     if "m7_sl_offset" not in out.columns:
         out["m7_sl_offset"] = ((_num(out, "m7_sl_price", close) - close) / close).abs().fillna(0.0)
 
-    # Vol rank fallback.
-    if "m7_gmm_vol_rank" not in out.columns:
-        gz = _num(out, "garch_vol_z", 0.0).abs()
-        out["m7_gmm_vol_rank"] = np.clip(gz / 3.0, 0.0, 1.0)
-
-    # Anomaly flags fallback (causal rolling z-score).
-    if "m7_iso_anom" not in out.columns:
-        out["m7_iso_anom"] = _causal_anomaly_flag(_num(out, "m7_iso_score", 0.0), window=512, z_th=2.0)
-    if "m7_vae_anom" not in out.columns:
-        out["m7_vae_anom"] = _causal_anomaly_flag(_num(out, "m7_vae_error", 0.0), window=512, z_th=2.0)
-
     # Final finite cleanup for derived cols.
     derived = [
-        "m7_trend_xgb_dn", "m7_trend_xgb_fl", "m7_trend_xgb_up",
+        "m7_trend_xgb_dn", "m7_trend_xgb_up",
         "m7_qwidth",
         "m7_entry_long_offset", "m7_entry_short_offset",
         "m7_tp_offset", "m7_sl_offset",
-        "m7_gmm_vol_rank", "m7_iso_anom", "m7_vae_anom",
     ]
     for c in derived:
         out[c] = pd.to_numeric(out[c], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)

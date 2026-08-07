@@ -1,0 +1,152 @@
+{
+  "model_id": "omega2_1_label_atr1_h24_hgb_12seed_ensemble_thr055",
+  "status": "deprecated_historical_reference_only_accounting_invalid_true_leverage",
+  "artifact": "data/ensemble/supervised/omega2_1_label_atr1_h24_hgb_12seed_ensemble_thr055/omega2_1_hgb_12seed_cash_sleeve.joblib",
+  "contract": "docs/model_contracts/omega2_1_hgb_12seed_cash_sleeve_20260609_contract.md",
+  "runtime_adapter": "trading_bot_modules/omega2_1_cash_sleeve.py",
+  "parent_baseline": "omega1_2_1_aggressive_compensated_scale200_cap090",
+  "feature_count": 42,
+  "feature_cols": [
+    "bar_range_pct",
+    "body_pct",
+    "atr14_pct",
+    "ret_1",
+    "ret_3",
+    "ret_6",
+    "ret_12",
+    "ret_24",
+    "ret_vol_6",
+    "range_mean_6",
+    "ret_vol_12",
+    "range_mean_12",
+    "ret_vol_24",
+    "range_mean_24",
+    "ret_vol_48",
+    "range_mean_48",
+    "ema9_21_gap",
+    "tod_sin",
+    "tod_cos",
+    "router_confidence",
+    "router_margin",
+    "dir_p_cash",
+    "dir_p_long",
+    "dir_p_short",
+    "dir_confidence",
+    "dir_side_edge",
+    "dir_trade_prob",
+    "quality_p_cash",
+    "quality_p_long",
+    "quality_p_short",
+    "quality_for_action",
+    "router_is_bull",
+    "router_is_bear",
+    "router_is_chop",
+    "side",
+    "base_notional",
+    "base_tp",
+    "base_sl",
+    "primary_is_cash",
+    "primary_active_roll_12",
+    "primary_active_roll_48",
+    "primary_cash_streak"
+  ],
+  "forbidden_features": {
+    "prefixes": [
+      "clean_regime4_",
+      "regime4_pred_",
+      "teacher_",
+      "exit_head_"
+    ],
+    "exact": [
+      "tp_sl_action_score"
+    ]
+  },
+  "threshold": 0.55,
+  "risk": {
+    "name": "tp026_sl014_n0.30_h192",
+    "take_profit": 0.026,
+    "stop_loss": 0.014,
+    "notional": 0.3,
+    "leverage": 2.0,
+    "max_hold_bars": 192
+  },
+  "seeds": [
+    260000,
+    260001,
+    260002,
+    260003,
+    260004,
+    260005,
+    260006,
+    260007,
+    260008,
+    260009,
+    260608,
+    260780
+  ],
+  "training": {
+    "split": "2025 validation primary-cash rows",
+    "train_rows": 20085,
+    "label_diag": {
+      "atr_mult": 1.0,
+      "max_hold": 24,
+      "min_barrier": 0.0035,
+      "tie_count": 46,
+      "label_counts": {
+        "0": 2105,
+        "1": 12068,
+        "2": 12291
+      }
+    }
+  },
+  "metrics": {
+    "validation_full_train_sanity": {
+      "validation_pnl": 139.42512795441405,
+      "validation_mdd": -11.001552688567495,
+      "validation_wr": 0.6666666666666666,
+      "validation_trades": 63,
+      "validation_fallback_entries": 30,
+      "validation_primary_takeovers": 26,
+      "validation_exit_reasons": {
+        "fallback_primary_takeover": 26,
+        "primary_take_profit": 20,
+        "primary_stop_loss": 12,
+        "fallback_take_profit": 3,
+        "fallback_max_hold": 1,
+        "primary_forced_end": 1
+      }
+    },
+    "oos_full_train_parity": {
+      "oos_pnl": 102.61148286407757,
+      "oos_mdd": -8.108170708968377,
+      "oos_wr": 0.6097560975609756,
+      "oos_trades": 41,
+      "oos_fallback_entries": 23,
+      "oos_primary_takeovers": 12,
+      "oos_exit_reasons": {
+        "primary_stop_loss": 5,
+        "primary_take_profit": 13,
+        "fallback_primary_takeover": 12,
+        "fallback_max_hold": 5,
+        "fallback_take_profit": 5,
+        "fallback_forced_end": 1
+      }
+    },
+    "selection_reference": {
+      "source_report": "tmp/causal_regen_20260516/omega2_architect_priority_experiments_20260609/report.json",
+      "validation_oof_pnl": 111.959707,
+      "oos_full_train_pnl": 102.611483,
+      "oos_full_train_mdd": -8.108171,
+      "oos_full_train_wr": 0.609756,
+      "oos_full_train_trades": 41
+    }
+  },
+  "notes": [
+    "Deprecated by 2026-06-14 red-team audit for true-leverage accounting mismatch.",
+    "Legacy OOS +102.611483% / MDD -8.108171% must not be used as live promotion evidence.",
+    "Corrected true-leverage OOS is +33.877901% / MDD -23.976364% / WR 43.410853% / trades 129.",
+    "Validation full-train sanity is in-sample and must not be used as selection evidence.",
+    "Selection evidence is the OOF validation and full-train OOS result from omega2_architect_priority_experiments_20260609.",
+    "Active live path is unchanged until explicit live promotion."
+  ]
+}

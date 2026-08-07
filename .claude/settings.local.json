@@ -15,7 +15,35 @@
       "Bash(/tmp/m7_gap_analysis.md:*)",
       "Read(//tmp/**)",
       "Bash(codex exec:*)",
-      "Bash(jobs -l)"
+      "Bash(jobs -l)",
+      "Read(//c/Users/kbj20/.claude/projects/--wsl-localhost-ubuntu-home-llewyn-crypto-scalping/**)",
+      "Read(//c/Users/kbj20/.claude/projects/--wsl-localhost-ubuntu-home-llewyn-crypto-scalping/memory/**)",
+      "Bash(find /c/Users/kbj20/.claude/projects -maxdepth 1 -iname \"*crypto*\" 2>&1)",
+      "Bash(conda env *)",
+      "Read(///wsl.localhost/ubuntu/home/llewyn/crypto-scalping/ensemble/**)",
+      "Read(///wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs/**)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls -la data/ensemble/supervised/ | grep -i sol; echo \"---all files---\"; ls data/ensemble/supervised/)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && find docs -maxdepth 3 -type d | sort)",
+      "Bash(find \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs/test_designs_duckdb_live_20260719\" -type f | sort)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && find docs -maxdepth 1 -type f -name \"*.md\" | sort)",
+      "Bash(find \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs/experiments\" -maxdepth 1 -type f 2>/dev/null | sort | head -100)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls docs/model_contracts | sort)",
+      "Bash(cat \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs/test_designs_duckdb_live_20260719/README.md\")",
+      "Read(///wsl.localhost/ubuntu/home/llewyn/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls docs/experiments | sort)",
+      "Bash(cat \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs/test_designs_duckdb_live_20260719/results/factor_execution_results_20260719.md\")",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && which python python3 2>&1; ls venv/Scripts 2>&1 | head; ls venv/bin 2>&1 | head)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls docs/test_designs_duckdb_live_20260719/results | sort)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && find docs -iname \"*test_design*\" -o -iname \"*inventory*\" | sort)",
+      "Bash(find \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/docs\" -iname \"*factor_execution_test_design*\")",
+      "Bash(venv/bin/python -c ' *)",
+      "Bash(find \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/scripts\" -iname \"*research_f*\" | sort)",
+      "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls venv/bin/python* 2>&1; find . -maxdepth 2 -iname \"venv*\" 2>&1; ls -la venv 2>&1 | head -20)",
+      "Bash(ls -la \"/mnt/c/Users/kbj20/AppData/Local/Temp\" 2>/dev/null | head -1; echo \"---trying wsl path via powershell instead---\")"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "codex"
+  ]
 }

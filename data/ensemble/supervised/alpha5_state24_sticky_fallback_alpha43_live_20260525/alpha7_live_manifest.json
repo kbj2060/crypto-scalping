@@ -1,0 +1,37 @@
+{
+  "model_id": "alpha7_sniper_primary_state24_sticky_alpha43_fallback_20260525_live",
+  "display_name": "Alpha7 Sniper Primary",
+  "promoted_at": "2026-05-25",
+  "role": "live_trading_bot_primary_model",
+  "lineage": {
+    "primary": "alpha5_regime4_state24_sticky090_retrain_20260525",
+    "fallback": "alpha4_3_no_legacy_parent",
+    "tp_sl_action_score": "alpha4_2_tp_sl_action_score_20260517",
+    "current_regime": "clean_regime4_state24_sticky090_v2_20260517",
+    "future_regime": "regime4_pred_tft_h12_nomdjd_all74_20260517"
+  },
+  "runtime_native_oos_2026_01_02": {
+    "cost1": {
+      "pnl": 129.15177141889012,
+      "mdd": -21.711949453593903,
+      "trades": 75,
+      "trades_per_day": 1.278409090909091,
+      "win_rate": 0.22666666666666666
+    },
+    "cost2": {
+      "pnl": 122.25905156776373,
+      "mdd": -21.687871658307746,
+      "trades": 75,
+      "trades_per_day": 1.278409090909091,
+      "win_rate": 0.22666666666666666
+    },
+    "cost3": {
+      "pnl": 120.07472800817834,
+      "mdd": -21.950273851631373,
+      "trades": 79,
+      "trades_per_day": 1.3465909090909092,
+      "win_rate": 0.21518987341772153
+    }
+  },
+  "audit_report": "tmp/causal_regen_20260516/live_alpha5_fallback_audit_20260525/report.json"
+}

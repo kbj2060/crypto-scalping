@@ -1,0 +1,206 @@
+{
+  "status": "pass",
+  "model": "clean_base_causal_sleeve_conformal_veto_v1_5",
+  "blocking": [],
+  "warnings": [],
+  "checks": {
+    "py_compile": true,
+    "source": {
+      "adapter_imported": true,
+      "v15_default_enabled": true,
+      "fully_learned_default_disabled_under_v15": true,
+      "v21_v22_default_disabled_under_v15": true,
+      "regime_predictor_default_disabled_under_v15": true,
+      "entry_apply_present": true,
+      "v15_risk_order_matches_backtest": true,
+      "v15_exit_unrealized_basis_matches_backtest": true,
+      "v15_backtest_parity_default_present": true,
+      "sleeve_exit_resize_present": true,
+      "resize_charges_delta_cost": true,
+      "next_bar_open_execution_present": true,
+      "v15_shadow_allows_late_backtest_fill": true,
+      "v15_live_entry_floor_defaults_enabled": true,
+      "v15_cost_firewall_present": true,
+      "dsac_overlay_default_false": true,
+      "ledger_model_fields_present": true,
+      "adapter_uses_funding_abs_first": true,
+      "adapter_has_conformal_veto": true,
+      "adapter_has_gross_cap": true
+    },
+    "artifact": {
+      "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
+      "keys": [
+        "calibration",
+        "conformal_features",
+        "conformal_model",
+        "conformal_train_meta",
+        "model_id",
+        "selected_config",
+        "selected_residual_q",
+        "sleeve_features",
+        "sleeve_model",
+        "sleeve_train_meta"
+      ],
+      "selected_config": {
+        "name": "sv_same0.0015_frac0.25_bars6_acct0.06_day0.015_q0.80_lcb-0.0050_adv0.020",
+        "same_threshold": 0.0015,
+        "max_sleeve_frac": 0.25,
+        "max_sleeve_bars": 6,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.015,
+        "residual_quantile": 0.8,
+        "lcb_veto_threshold": -0.005,
+        "adverse_veto_cut": 0.02
+      },
+      "selected_residual_q": 0.007019416005513834,
+      "sleeve_features": [
+        "side",
+        "quality",
+        "confidence",
+        "core_notional",
+        "leverage",
+        "account_dd",
+        "daily_dd",
+        "loss_streak",
+        "funding_abs",
+        "funding_pressure",
+        "liquidity_vacuum",
+        "amihud_illiquidity_z",
+        "m7_tail_risk",
+        "evt_tail_flag",
+        "ai_adverse_risk"
+      ],
+      "conformal_features": [
+        "side",
+        "quality",
+        "confidence",
+        "core_notional",
+        "leverage",
+        "funding_abs",
+        "funding_pressure",
+        "liquidity_vacuum",
+        "amihud_illiquidity_z",
+        "m7_tail_risk",
+        "evt_tail_flag",
+        "ai_adverse_risk"
+      ]
+    },
+    "report": {
+      "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
+      "verdict": "shadow_candidate",
+      "cost_1x": {
+        "pnl": 210.08473478264494,
+        "mdd": -18.0151549322481,
+        "trades": 363,
+        "core_trades_per_day": 6.1525423728813555,
+        "sleeve_fraction": 0.11570247933884298
+      },
+      "preservation_audit": {
+        "decision_frame_audit": {
+          "passed": true,
+          "rows": 16897,
+          "active_rows": 16897,
+          "cash_rows": 0,
+          "long_rows": 7900,
+          "short_rows": 8997,
+          "violations": {
+            "nonfinite_values": 0,
+            "negative_notional": 0,
+            "leverage_below_one_active": 0,
+            "leverage_above_cap": 0,
+            "notional_above_max": 0,
+            "active_action_side_mismatch": 0,
+            "cash_has_exposure": 0,
+            "position_fraction_mismatch": 0,
+            "negative_cooldown": 0
+          },
+          "notional": {
+            "max": 3.0380552603853426,
+            "mean": 0.8042273420435015,
+            "p95": 1.7381261779863437
+          },
+          "leverage": {
+            "max": 2.5708089733514607,
+            "mean": 1.5912971481880236,
+            "p95": 1.8325242533448571
+          }
+        },
+        "core_lane_preservation": {
+          "passed": true,
+          "violations": {
+            "trade_count_changed": 0,
+            "entry_idx_changed": 0,
+            "core_side_changed": 0,
+            "core_exit_changed": 0,
+            "core_notional_changed": 0,
+            "leverage_changed": 0,
+            "gross_cap": 0,
+            "net_cap": 0
+          },
+          "base_trades": 363,
+          "candidate_trades": 363
+        },
+        "passed": true
+      },
+      "sleeve_accounting_audit": {
+        "passed": true,
+        "final_pnl_from_ledger": 210.08473478264494,
+        "report_pnl": 210.08473478264494,
+        "max_step_equity_error": 4.440892098500626e-16,
+        "nonfinite_numeric_cells": 0
+      },
+      "causality_audit": {
+        "passed": true,
+        "runtime_uses_future_returns": false,
+        "training_labels_use_future": true,
+        "validation_calibration_and_selection": true,
+        "oos_threshold_selection": false,
+        "conformal_can_modify_core_lane": false
+      }
+    },
+    "constants": {
+      "v15_enabled": true,
+      "v15_required": true,
+      "fully_learned_disabled": true,
+      "deep_gated_disabled": true,
+      "safe_cap_disabled": true,
+      "adaptive_disabled": true,
+      "v21_disabled": true,
+      "v22_disabled": true,
+      "v22_not_required": true,
+      "constant_gross_disabled": true,
+      "regime_predictor_disabled": true,
+      "legacy_sleeves_disabled": true,
+      "execution_policy_disabled": true,
+      "v15_hard_stop_default_disabled": true,
+      "next_open_enabled": true,
+      "v15_backtest_parity_enabled": true,
+      "v15_schedule_disabled_for_backtest_parity": true,
+      "v15_live_dust_floor_enabled": true,
+      "v15_live_min_entry_floor_enabled": true,
+      "v15_cost_firewall_enabled": true,
+      "v15_cost_firewall_cost3_disable": true,
+      "dsac_overlay_disabled": true
+    },
+    "runtime": {
+      "v15_adapter_loaded": true,
+      "lifecycle_policy_loaded": true,
+      "lifecycle_exit_loaded": true,
+      "lifecycle_editor_loaded": true,
+      "fully_learned_not_loaded": true,
+      "v21_not_loaded": true,
+      "v22_not_loaded": true,
+      "regime_predictor_not_loaded": true,
+      "legacy_micro_trend_not_loaded": true
+    },
+    "live_backtest_parity": {
+      "entry_contract": "Lifecycle V1 core decision is edited by V1.5 same-side sleeve/conformal veto only.",
+      "sleeve_exit_contract": "Active V1.5 sleeve resizes down to core notional after selected max_sleeve_bars.",
+      "cost_contract": "Router resize closes only the delta exposure through _trade_math, so fee/slippage is charged on sleeve delta.",
+      "execution_contract": "V1.5 shadow parity decides on the closed signal bar and fills at signal+1 open, matching the research ledger. Real exchange mode still refuses impossible late fills.",
+      "entry_floor_contract": "Live mode keeps dust/min-entry exposure floors at 0.22/0.30 by default; set env floors to 0 for exact research parity.",
+      "cost_firewall_contract": "Cost3 and stress gates are sleeve-only: they may reduce/remove V1.5 sleeve, but do not replace Lifecycle V1 core side, entry, exit, leverage, or cooldown.",
+      "dsac_contract": "DSAC overlay remains disabled by default; enabling it is an active notional scaler/blocker, not shadow telemetry."
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "model_id": "cost_firewall_learned_cap_buckets_2026",
+  "status": "pass",
+  "blocking": [],
+  "context": {
+    "feature_rows": 16897,
+    "ledger_rows": 363,
+    "timestamp_alignment_mismatches_gt_300s": 0,
+    "missing_feature_rows": 0
+  },
+  "dsac": {
+    "path": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/dsac_priority1_full_retrain_20260507/best_dsac_agents.pth",
+    "epoch": 180,
+    "global_step": 0,
+    "state_dim": 29,
+    "best_val_pnl": 0.0
+  },
+  "invariants": {
+    "bucket_map_learned_before_validation": true,
+    "selection_uses_validation_only": true,
+    "holdout_is_report_only": true,
+    "no_new_entries_created": true,
+    "max_margin_fraction_lte_1": true,
+    "no_liquidations": true,
+    "no_ruin": true,
+    "cost2_survives": true,
+    "cost3_survives": true
+  }
+}

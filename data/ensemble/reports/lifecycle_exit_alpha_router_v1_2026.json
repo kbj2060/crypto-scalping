@@ -1,0 +1,1022 @@
+{
+  "type": "lifecycle_exit_alpha_router_v1",
+  "verdict": "reject_for_promotion_gate",
+  "selected_config": {
+    "name": "p0.55_cap0.10_acct0.06_day0.012_lock24",
+    "router_prob_threshold": 0.55,
+    "alpha_fraction_cap": 0.1,
+    "account_dd_disable": 0.06,
+    "daily_dd_disable": 0.012,
+    "alpha_loss_lock_bars": 24
+  },
+  "validation_grid_rows": 432,
+  "validation_selected_on": "2025-11-01 through 2025-12-31",
+  "cost_1x": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.4931129476584022,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 363,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "daily_dd_disable": 8,
+      "lifecycle_defense_priority": 15
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 207.2368875907697,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "cost_2x": {
+    "pnl": 127.77647896152212,
+    "mdd": -18.281324431112466,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.35537190082644626,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 363,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "daily_dd_disable": 16,
+      "lifecycle_defense_priority": 15
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 127.77647896152212,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "cost_3x": {
+    "pnl": 68.83403070823721,
+    "mdd": -20.202675787463285,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.26721763085399447,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 363,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "daily_dd_disable": 40,
+      "account_dd_disable": 225,
+      "lifecycle_defense_priority": 15
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 68.83403070823721,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "validation_cost_1x": {
+    "pnl": 908.4222875243677,
+    "mdd": -12.696352061226445,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.5841726618705037,
+    "avg_notional": 0.7882738023833624,
+    "avg_leverage": 1.5784158089388303,
+    "long_entries": 337,
+    "short_entries": 358,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 695,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "lifecycle_defense_priority": 33,
+      "daily_dd_disable": 13,
+      "account_dd_disable": 3
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 908.4222875243677,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "validation_cost_2x": {
+    "pnl": 423.82630414527046,
+    "mdd": -13.015263803659693,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.44316546762589926,
+    "avg_notional": 0.7882738023833624,
+    "avg_leverage": 1.5784158089388303,
+    "long_entries": 337,
+    "short_entries": 358,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 695,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "lifecycle_defense_priority": 33,
+      "daily_dd_disable": 48,
+      "account_dd_disable": 4
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 423.82630414527046,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "validation_cost_3x": {
+    "pnl": 171.98707782488407,
+    "mdd": -14.85927204337576,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.34532374100719426,
+    "avg_notional": 0.7882738023833624,
+    "avg_leverage": 1.5784158089388303,
+    "long_entries": 337,
+    "short_entries": 358,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 695,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "lifecycle_defense_priority": 33,
+      "daily_dd_disable": 133,
+      "account_dd_disable": 232
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 171.98707782488407,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "cost_1x_pnl": 177.3298088749005,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "lifecycle_v1_reference": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.20043885648466803,
+    "exit_prob_p95": 0.4421842673379731,
+    "threshold_mean": 0.47183559052211677,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "exit_v1_reference": {
+    "pnl": 287.4120741690296,
+    "mdd": -21.04627868197555,
+    "trades": 613,
+    "trades_per_day": 10.448863636363637,
+    "wr": 0.5758564437194127,
+    "avg_notional": 0.6610405606787929,
+    "avg_leverage": 1.5753365897166878,
+    "long_entries": 298,
+    "short_entries": 315,
+    "entry_blocks": {
+      "model_cooldown": 503,
+      "loss_cooldown": 6216,
+      "daily_trade_budget": 85,
+      "daily_dd_lock": 326,
+      "daily_loss_lock": 479
+    },
+    "exits": {
+      "exit_governor_recalibrated": 612,
+      "forced_end": 1
+    },
+    "exit_prob_mean": 0.2715604007685862,
+    "exit_prob_p95": 0.6557708863066268,
+    "threshold_mean": 0.5054623485926986,
+    "threshold_p05": 0.3149068577497212,
+    "threshold_p95": 0.5900000000000001,
+    "min_exit_age_mean": 6.0,
+    "bucket_counts_top10": {
+      "short|a0_12|flat|dd_lo|tail|same": 586,
+      "short|a12_48|flat|dd_lo|tail|same": 566,
+      "long|a0_12|flat|dd_lo|tail|same": 561,
+      "long|a12_48|flat|dd_lo|tail|same": 332,
+      "short|a12_48|flat|dd_hi|tail|same": 332,
+      "long|a0_12|flat|dd_lo|tail|opp": 205,
+      "short|a48p|flat|dd_hi|tail|same": 205,
+      "short|a0_12|flat|dd_hi|tail|same": 196,
+      "short|a0_12|flat|dd_lo|tail|opp": 182,
+      "long|a12_48|flat|dd_hi|tail|same": 168
+    }
+  },
+  "candidate_oos": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.4931129476584022,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "mode_counts": {
+      "CORE_LIFECYCLE": 363,
+      "ALPHA_EXIT": 0
+    },
+    "router_disable_counts": {
+      "daily_dd_disable": 8,
+      "lifecycle_defense_priority": 15
+    },
+    "alpha_mode_fraction": 0.0,
+    "alpha_mode_pnl_contribution": 0.0,
+    "lifecycle_mode_pnl_contribution": 207.2368875907697,
+    "alpha_mode_mdd_contribution": 0.0
+  },
+  "alpha_mode_fraction": 0.0,
+  "alpha_mode_pnl_contribution": 0.0,
+  "alpha_mode_mdd_contribution": 0.0,
+  "mode_counts": {
+    "CORE_LIFECYCLE": 363,
+    "ALPHA_EXIT": 0
+  },
+  "preservation_audit": {
+    "decision_frame_audit": {
+      "passed": true,
+      "rows": 16897,
+      "active_rows": 16897,
+      "cash_rows": 0,
+      "long_rows": 7900,
+      "short_rows": 8997,
+      "violations": {
+        "nonfinite_values": 0,
+        "negative_notional": 0,
+        "leverage_below_one_active": 0,
+        "leverage_above_cap": 0,
+        "notional_above_max": 0,
+        "active_action_side_mismatch": 0,
+        "cash_has_exposure": 0,
+        "position_fraction_mismatch": 0,
+        "negative_cooldown": 0
+      },
+      "notional": {
+        "max": 3.0380552603853426,
+        "mean": 0.8042273420435015,
+        "p95": 1.7381261779863437
+      },
+      "leverage": {
+        "max": 2.5708089733514607,
+        "mean": 1.5912971481880236,
+        "p95": 1.8325242533448571
+      }
+    },
+    "entry_side_exit_notional_leverage_preservation": {
+      "passed": true,
+      "base_trades": 363,
+      "routed_trades": 363,
+      "violations": {
+        "trade_count_changed": 0,
+        "entry_idx_changed": 0,
+        "side_changed": 0,
+        "entry_deleted": 0,
+        "notional_increased_above_lifecycle_v1": 0,
+        "leverage_changed": 0,
+        "exit_after_base_exit": 0,
+        "lifecycle_defense_overridden": 0,
+        "new_entries": 0
+      }
+    },
+    "passed": true
+  },
+  "causality_audit": {
+    "passed": true,
+    "router_granularity": "per_trade_entry_time_approximation",
+    "training_labels": "train split counterfactual lifecycle-vs-alpha utilities only",
+    "validation_selection": "validation split only; OOS run once after config selection",
+    "oos_threshold_selection": false,
+    "entry_authority": false,
+    "future_features_used_at_routing_time": false,
+    "ledger_prior_state_fix": "ledger records account_dd_prior, daily_dd_prior, loss_streak_prior, and prior_trade_giveback_pre_decision before executing the current trade; current_trade_giveback_after_close is recorded separately for the next decision."
+  },
+  "realistic_replay": {
+    "run": false,
+    "note": "Per-trade fixed-plan replay only. Funding/impact/partial-fill realistic replay was not run for this first router implementation."
+  },
+  "reject_reasons": [
+    "OOS PnL >= 220",
+    "OOS MDD >= -17.759665"
+  ],
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/lifecycle_exit_alpha_router_v1/alpha_router.pkl",
+    "train_matrix": "/home/llewyn/crypto-scalping/data/ensemble/supervised/lifecycle_exit_alpha_router_v1/router_train_matrix.csv",
+    "grid_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_exit_alpha_router_v1_grid.csv",
+    "ledger_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_exit_alpha_router_v1_ledger.csv",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_exit_alpha_router_v1_2026.json",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/lifecycle_exit_alpha_router_v1.md"
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "train_rows": 87496,
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "validation_rows": 17568,
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "oos_rows": 16897,
+    "train_trades": 1479,
+    "validation_trades": 695,
+    "oos_trades": 363
+  },
+  "feature_contract": {
+    "router_features": [
+      "side",
+      "age",
+      "unrealized",
+      "peak_unrealized",
+      "drawdown_from_trade_peak",
+      "quality_score",
+      "confidence",
+      "exit_prob",
+      "exit_hazard_bucket_code",
+      "exit_hazard_rate",
+      "exit_threshold_delta",
+      "exit_bucket_support",
+      "lifecycle_action_proposal",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk",
+      "daily_dd",
+      "account_dd",
+      "loss_streak"
+    ],
+    "granularity": "per_trade_entry_time",
+    "unavailable_safe_defaults": {},
+    "approximated_features": {
+      "age": "0 at entry-time route decision",
+      "unrealized": "0.0 at entry-time route decision",
+      "peak_unrealized": "0.0 at entry-time route decision",
+      "drawdown_from_trade_peak": "0.0 at entry-time route decision",
+      "daily_dd/account_dd/loss_streak": "pre-decision replay state, not updated with current trade outcome"
+    },
+    "exit_v1_bucket": "string bucket is stored in ledger; deterministic hash code is used by the numeric classifier"
+  },
+  "training": {
+    "method": "constant_probability_router",
+    "train_rows": 1479,
+    "alpha_label_count": 0,
+    "alpha_label_rate": 0.0,
+    "feature_cols": [
+      "side",
+      "age",
+      "unrealized",
+      "peak_unrealized",
+      "drawdown_from_trade_peak",
+      "quality_score",
+      "confidence",
+      "exit_prob",
+      "exit_hazard_bucket_code",
+      "exit_hazard_rate",
+      "exit_threshold_delta",
+      "exit_bucket_support",
+      "lifecycle_action_proposal",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk",
+      "daily_dd",
+      "account_dd",
+      "loss_streak"
+    ]
+  },
+  "selection_score": 960.0184108718329,
+  "validation_top10": [
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.012_lock24",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.012,
+        "alpha_loss_lock_bars": 24
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 13,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 133,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.012_lock48",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.012,
+        "alpha_loss_lock_bars": 48
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 13,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 133,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.012_lock72",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.012,
+        "alpha_loss_lock_bars": 72
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 13,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 133,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.015_lock24",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.015,
+        "alpha_loss_lock_bars": 24
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 5,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 75,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.015_lock48",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.015,
+        "alpha_loss_lock_bars": 48
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 5,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 75,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.015_lock72",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.015,
+        "alpha_loss_lock_bars": 72
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 5,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 75,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.020_lock24",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.02,
+        "alpha_loss_lock_bars": 24
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 34,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.020_lock48",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.02,
+        "alpha_loss_lock_bars": 48
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 34,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.06_day0.020_lock72",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.06,
+        "daily_dd_disable": 0.02,
+        "alpha_loss_lock_bars": 72
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "account_dd_disable": 3
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 34,
+          "account_dd_disable": 232
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    },
+    {
+      "config": {
+        "name": "p0.55_cap0.10_acct0.08_day0.012_lock24",
+        "router_prob_threshold": 0.55,
+        "alpha_fraction_cap": 0.1,
+        "account_dd_disable": 0.08,
+        "daily_dd_disable": 0.012,
+        "alpha_loss_lock_bars": 24
+      },
+      "validation": {
+        "pnl": 908.4222875243677,
+        "mdd": -12.696352061226445,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.5841726618705037,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 13
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 908.4222875243677,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 171.98707782488407,
+        "mdd": -14.85927204337576,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.34532374100719426,
+        "avg_notional": 0.7882738023833624,
+        "avg_leverage": 1.5784158089388303,
+        "long_entries": 337,
+        "short_entries": 358,
+        "mode_counts": {
+          "CORE_LIFECYCLE": 695,
+          "ALPHA_EXIT": 0
+        },
+        "router_disable_counts": {
+          "lifecycle_defense_priority": 33,
+          "daily_dd_disable": 133,
+          "account_dd_disable": 127
+        },
+        "alpha_mode_fraction": 0.0,
+        "alpha_mode_pnl_contribution": 0.0,
+        "lifecycle_mode_pnl_contribution": 171.98707782488407,
+        "alpha_mode_mdd_contribution": 0.0
+      },
+      "selection_score": 960.0184108718329
+    }
+  ],
+  "promotion_gate": {
+    "passed": false,
+    "shadow_continue_passed": false,
+    "requirements": {
+      "oos_pnl_min": 220.0,
+      "oos_mdd_min": -17.759665,
+      "trades_per_day_min": 6.0,
+      "cost2_min": 120.0,
+      "cost3_min": 60.0,
+      "alpha_mode_fraction_max": 0.25,
+      "alpha_mode_mdd_contribution_max": 0.35
+    }
+  }
+}

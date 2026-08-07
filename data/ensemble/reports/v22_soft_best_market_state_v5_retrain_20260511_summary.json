@@ -1,0 +1,213 @@
+{
+  "model_id": "v22_soft_best_market_state_v5_retrain_20260511",
+  "design": "V22 soft-best replacement retrain using 2024-only unsupervised market-state features, no legacy regime inputs, next-bar-open execution, fee+slippage on entry and exit.",
+  "data": {
+    "state_train_2024": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+    "train_2025": "/home/llewyn/crypto-scalping/data/splits/year_oos/rl_training_2025_m7.csv",
+    "eval_2026": "/home/llewyn/crypto-scalping/data/splits/year_oos/rl_training_2026_m7_supervised_redesign_clean.csv",
+    "materialized_2025": "/home/llewyn/crypto-scalping/data/ensemble/retrained_v22_market_state_v5_20260511/market_state_v5_2025.csv",
+    "materialized_2026": "/home/llewyn/crypto-scalping/data/ensemble/retrained_v22_market_state_v5_20260511/market_state_v5_2026.csv",
+    "fit_range": [
+      "2025-01-01 00:00:00",
+      "2025-08-31 23:55:00"
+    ],
+    "selection_range": [
+      "2025-09-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "holdout_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 20:50:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ]
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/retrained_v22_market_state_v5_20260511/v22_soft_best_market_state_v5_retrain.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_audit.json",
+    "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/v22_soft_best_market_state_v5_retrain_20260511_contract.md",
+    "selection_grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_summary_selection_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_summary_cost1_ledger.csv",
+      "cost2": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_summary_cost2_ledger.csv",
+      "cost3": "/home/llewyn/crypto-scalping/data/ensemble/reports/v22_soft_best_market_state_v5_retrain_20260511_summary_cost3_ledger.csv"
+    }
+  },
+  "selected_config": {
+    "threshold": 0.58,
+    "gap": 0.06,
+    "max_notional": 1.0,
+    "min_notional": 0.35,
+    "leverage": 5.0,
+    "max_hold_bars": 36,
+    "stop_loss": 0.012,
+    "take_profit": 0.035,
+    "trailing_stop": 0.011,
+    "cooldown_bars": 2,
+    "state_conf_floor": 0.24,
+    "risk_off_cap": 0.92,
+    "candidate_stride": 8
+  },
+  "selection_result": {
+    "pnl": -2.0105849745924664,
+    "mdd": -8.39171487649385,
+    "trades": 128,
+    "trades_per_day": 2.0984801047418453,
+    "wr": 0.4921875,
+    "long_entries": 48,
+    "short_entries": 80,
+    "avg_notional": 0.4866983752322782,
+    "max_notional": 0.7233547619261846,
+    "max_margin_fraction": 0.14467095238523692,
+    "final_equity": 0.9798941502540753,
+    "coverage_start": "2025-09-01 00:00:00",
+    "coverage_end": "2025-10-31 23:55:00",
+    "block_reason_counts": {
+      "probability_below_threshold": 1498,
+      "state_direction_conflict": 2
+    }
+  },
+  "selection_score": -125.00928511929874,
+  "holdout_result": {
+    "pnl": -13.621045512224427,
+    "mdd": -16.729578772468358,
+    "trades": 170,
+    "trades_per_day": 2.7929264118653734,
+    "wr": 0.4235294117647059,
+    "long_entries": 52,
+    "short_entries": 118,
+    "avg_notional": 0.5004167589030869,
+    "max_notional": 0.7994956938149393,
+    "max_margin_fraction": 0.15989913876298786,
+    "final_equity": 0.8637895448777557,
+    "coverage_start": "2025-11-01 00:00:00",
+    "coverage_end": "2025-12-31 20:50:00",
+    "block_reason_counts": {
+      "probability_below_threshold": 1359,
+      "state_direction_conflict": 23
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -15.201080436847104,
+      "mdd": -18.976601891082932,
+      "trades": 207,
+      "trades_per_day": 3.5284090909090913,
+      "wr": 0.42028985507246375,
+      "long_entries": 131,
+      "short_entries": 76,
+      "avg_notional": 0.5350696850155391,
+      "max_notional": 0.8429705785050481,
+      "max_margin_fraction": 0.16859411570100963,
+      "final_equity": 0.847989195631529,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "probability_below_threshold": 1152,
+        "state_direction_conflict": 10
+      }
+    },
+    "cost2": {
+      "pnl": -27.38861020602514,
+      "mdd": -28.651503040431102,
+      "trades": 207,
+      "trades_per_day": 3.5284090909090913,
+      "wr": 0.3719806763285024,
+      "long_entries": 131,
+      "short_entries": 76,
+      "avg_notional": 0.5350696850155391,
+      "max_notional": 0.8429705785050481,
+      "max_margin_fraction": 0.16859411570100963,
+      "final_equity": 0.7261138979397486,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "probability_below_threshold": 1152,
+        "state_direction_conflict": 10
+      }
+    },
+    "cost3": {
+      "pnl": -37.82831259285485,
+      "mdd": -38.7004996484644,
+      "trades": 207,
+      "trades_per_day": 3.5284090909090913,
+      "wr": 0.3188405797101449,
+      "long_entries": 131,
+      "short_entries": 76,
+      "avg_notional": 0.5350696850155391,
+      "max_notional": 0.8429705785050481,
+      "max_margin_fraction": 0.16859411570100963,
+      "final_equity": 0.6217168740714515,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "probability_below_threshold": 1152,
+        "state_direction_conflict": 10
+      }
+    }
+  },
+  "feature_audit": {
+    "state_fit_feature_count": 43,
+    "model_feature_count": 118,
+    "market_state_feature_count": 17,
+    "contaminated_feature_cols": [],
+    "market_state_features": [
+      "market_state_2024_unsup_v5_cluster",
+      "market_state_2024_unsup_v5_confidence",
+      "market_state_2024_unsup_v5_entropy",
+      "market_state_2024_unsup_v5_factor_btc_decouple",
+      "market_state_2024_unsup_v5_factor_flow",
+      "market_state_2024_unsup_v5_factor_funding_crowd",
+      "market_state_2024_unsup_v5_factor_liquidity_stress",
+      "market_state_2024_unsup_v5_factor_trend",
+      "market_state_2024_unsup_v5_factor_vol",
+      "market_state_2024_unsup_v5_prob_0",
+      "market_state_2024_unsup_v5_prob_1",
+      "market_state_2024_unsup_v5_prob_2",
+      "market_state_2024_unsup_v5_prob_3",
+      "market_state_2024_unsup_v5_prob_4",
+      "market_state_2024_unsup_v5_risk_off_prob",
+      "market_state_2024_unsup_v5_trend_bias",
+      "market_state_2024_unsup_v5_trend_prob"
+    ]
+  },
+  "audit": {
+    "model_id": "v22_soft_best_market_state_v5_retrain_20260511",
+    "status": "pass",
+    "blocking": [],
+    "warnings": [],
+    "invariants": {
+      "legacy_regime_columns_absent_from_model_inputs": true,
+      "market_state_features_present": true,
+      "ledger_covers_full_eval_window": true,
+      "no_eval_window_extends_beyond_available_sniper_ledger_warning": true
+    },
+    "feature_audit": {
+      "feature_count": 118,
+      "market_state_feature_count": 17,
+      "contaminated_feature_cols": [],
+      "state_features": [
+        "market_state_2024_unsup_v5_cluster",
+        "market_state_2024_unsup_v5_confidence",
+        "market_state_2024_unsup_v5_entropy",
+        "market_state_2024_unsup_v5_factor_btc_decouple",
+        "market_state_2024_unsup_v5_factor_flow",
+        "market_state_2024_unsup_v5_factor_funding_crowd",
+        "market_state_2024_unsup_v5_factor_liquidity_stress",
+        "market_state_2024_unsup_v5_factor_trend",
+        "market_state_2024_unsup_v5_factor_vol",
+        "market_state_2024_unsup_v5_prob_0",
+        "market_state_2024_unsup_v5_prob_1",
+        "market_state_2024_unsup_v5_prob_2",
+        "market_state_2024_unsup_v5_prob_3",
+        "market_state_2024_unsup_v5_prob_4",
+        "market_state_2024_unsup_v5_risk_off_prob",
+        "market_state_2024_unsup_v5_trend_bias",
+        "market_state_2024_unsup_v5_trend_prob"
+      ]
+    }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "model_id": "hf_v13_v31_parent_swap_v40_20260512",
+  "variant": "v31_v40_6_hgb_pls_parent",
+  "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_full_v40_6_20260512/target_aware_full_bundle.pkl",
+  "parent_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_target_aware_full_v40_6_20260512_summary.json",
+  "v27_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt",
+  "jackpot_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+  "selected_overlay": {
+    "name": "v31_precision",
+    "edge_th": 0.012,
+    "margin_th": 0.005,
+    "notional": 1.0,
+    "cooldown": 12,
+    "base_tp": 0.038,
+    "base_sl": 0.017,
+    "base_hold": 48,
+    "tp_util_mult": 1.2,
+    "sl_vol_mult": 2.3,
+    "trail_gap_mult": 0.8,
+    "trail_decay": 0.7,
+    "hold_decay_start": 18,
+    "hold_decay_rate": 0.03,
+    "tp_cap": 0.07,
+    "sl_cap": 0.032
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 44.492989170170105,
+      "mdd": -46.387762427816845,
+      "trades": 143,
+      "wr": 0.2727272727272727,
+      "trades_per_day": 2.4375,
+      "deep_entries": 95,
+      "long_entries": 75,
+      "short_entries": 68,
+      "avg_notional": 1.5561014487882374,
+      "avg_leverage": 1.6956098892468,
+      "exits": {
+        "deep_alpha_max_hold": 30,
+        "deep_alpha_stop_loss": 63,
+        "v21_2_max_hold": 9,
+        "v21_2_stop_loss": 36,
+        "v21_2_take_profit": 3,
+        "deep_alpha_take_profit": 2
+      },
+      "runner_actions": {
+        "deep_entry": 95,
+        "v21_entry": 48,
+        "v21_add_on": 17,
+        "v21_reject": 7
+      }
+    },
+    "cost2": {
+      "pnl": 46.14454427650714,
+      "mdd": -46.97557309927621,
+      "trades": 150,
+      "wr": 0.22666666666666666,
+      "trades_per_day": 2.556818181818182,
+      "deep_entries": 98,
+      "long_entries": 81,
+      "short_entries": 69,
+      "avg_notional": 1.575388936646293,
+      "avg_leverage": 1.7240381670280176,
+      "exits": {
+        "deep_alpha_max_hold": 31,
+        "deep_alpha_stop_loss": 65,
+        "v21_2_max_hold": 7,
+        "v21_2_stop_loss": 40,
+        "v21_2_take_profit": 5,
+        "deep_alpha_take_profit": 2
+      },
+      "runner_actions": {
+        "deep_entry": 98,
+        "v21_entry": 52,
+        "v21_reject": 11,
+        "v21_add_on": 13
+      }
+    },
+    "cost3": {
+      "pnl": 18.900708384686826,
+      "mdd": -51.23354560244295,
+      "trades": 146,
+      "wr": 0.21232876712328766,
+      "trades_per_day": 2.4886363636363638,
+      "deep_entries": 92,
+      "long_entries": 78,
+      "short_entries": 68,
+      "avg_notional": 1.6151256198420818,
+      "avg_leverage": 1.7778347345958065,
+      "exits": {
+        "deep_alpha_max_hold": 29,
+        "deep_alpha_stop_loss": 61,
+        "v21_2_max_hold": 8,
+        "v21_2_stop_loss": 42,
+        "v21_2_take_profit": 4,
+        "deep_alpha_take_profit": 2
+      },
+      "runner_actions": {
+        "deep_entry": 92,
+        "v21_entry": 54,
+        "v21_reject": 11,
+        "v21_add_on": 11
+      }
+    }
+  }
+}

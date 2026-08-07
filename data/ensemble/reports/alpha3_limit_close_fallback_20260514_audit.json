@@ -1,0 +1,34 @@
+{
+  "status": "pass",
+  "verdict": "causal_ohlcv_close_fallback_retest",
+  "blocking": [],
+  "warnings": [
+    "limit_fill_uses_next_bar_5m_high_low_touch_proxy_not_orderbook_queue",
+    "fallback_uses_same_next_bar_close_after_touch_window_to_preserve_ohlcv_time_order",
+    "live_two_second_fallback_requires_forward_shadow_validation"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "selected_config": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "selected_entry_fallback_config": {
+    "name": "next_open_limit_touch0_entry_fallback_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "market_fallback",
+    "exit_miss": "market_fallback"
+  },
+  "fallback_contract": "signal i -> maker touch check on i+1 high/low -> if miss, market fallback at i+1 close +/- slippage"
+}

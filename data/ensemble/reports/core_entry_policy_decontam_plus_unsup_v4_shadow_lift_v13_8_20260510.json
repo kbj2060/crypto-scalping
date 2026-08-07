@@ -1,0 +1,347 @@
+{
+  "model_id": "core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510",
+  "verdict": "shadow_candidate_oos_beats_v13",
+  "selection_warning": "Fixed after V13.7/V13.6 diagnostics; OOS-beating research candidate, not a validation-selected promote candidate.",
+  "design": "V13.1 decontaminated regime router plus tiny clean-unsup-v4 risk-trim lift. Quality exposure is scaled 1.06, scout exposure 1.05, and clean risk/chop/whipsaw probabilities apply only small trims/boosts.",
+  "selected_config": {
+    "profile": "q106_s105_clean_risk_trim_shadow",
+    "selection_note": "Fixed after V13.7/V13.6 diagnostics; OOS-beating research candidate, not a validation-selected promote candidate.",
+    "scout_threshold": 0.7,
+    "scout_scale": 0.5,
+    "scout_max_notional": 0.24,
+    "scout_tp_mult": 1.0,
+    "scout_sl_mult": 0.9,
+    "scout_hold_mult": 1.0,
+    "dd_trigger": 0.06,
+    "throttle": 0.55,
+    "loss_cooldown": 0,
+    "trend_mult": 1.1,
+    "normal_mult": 1.0,
+    "chop_mult": 0.85,
+    "whipsaw_mult": 0.75,
+    "quality_lane_mult": 1.06,
+    "quality_cap_mult": 1.06,
+    "scout_lane_mult": 1.05,
+    "scout_cap_mult": 1.05,
+    "absolute_max_notional": 1.2,
+    "risk_floor": 0.55,
+    "risk_mult": 0.95,
+    "chop_floor": 0.5,
+    "chop_mult_clean": 0.97,
+    "whipsaw_floor": 0.24,
+    "whipsaw_mult_clean": 0.99,
+    "align_floor": 0.35,
+    "confidence_floor": 0.45,
+    "low_risk_ceiling": 0.25,
+    "align_boost": 1.01,
+    "low_risk_boost": 1.01,
+    "min_clean_mult": 0.94,
+    "max_clean_mult": 1.02,
+    "block_scout_dirty_state": false,
+    "scout_risk_block": 0.9,
+    "scout_chop_block": 0.9,
+    "scout_whipsaw_block": 0.9
+  },
+  "validation_cost_1x": {
+    "pnl": 26.439199182294782,
+    "mdd": -5.074468800240206,
+    "trades": 326,
+    "trades_per_day": 3.5436120022645783,
+    "wr": 0.4785276073619632,
+    "long_entries": 143,
+    "short_entries": 183,
+    "avg_notional": 0.20002154847999307,
+    "avg_leverage": 1.5000004510245548,
+    "lane_counts": {
+      "quality": 83,
+      "scout": 243,
+      "cash": 8380,
+      "risk_off": 0,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "bear": 103,
+      "bull": 80,
+      "chop": 33,
+      "normal": 103,
+      "whipsaw": 7
+    },
+    "exits": {
+      "learned_max_hold": 278,
+      "learned_stop_loss": 34,
+      "learned_take_profit": 13,
+      "forced_end": 1
+    }
+  },
+  "validation_cost_2x": {
+    "pnl": 3.688619322220865,
+    "mdd": -7.397703260752431,
+    "trades": 312,
+    "trades_per_day": 3.391432345725609,
+    "wr": 0.4166666666666667,
+    "long_entries": 128,
+    "short_entries": 184,
+    "avg_notional": 0.1949674759341007,
+    "avg_leverage": 1.5000004270035334,
+    "lane_counts": {
+      "quality": 85,
+      "scout": 227,
+      "cash": 7648,
+      "risk_off": 1064,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "bear": 104,
+      "bull": 69,
+      "chop": 31,
+      "normal": 101,
+      "whipsaw": 7
+    },
+    "exits": {
+      "learned_max_hold": 270,
+      "learned_stop_loss": 31,
+      "learned_take_profit": 10,
+      "forced_end": 1
+    }
+  },
+  "validation_cost_3x": {
+    "pnl": 3.1264587630573715,
+    "mdd": -7.867483917009565,
+    "trades": 308,
+    "trades_per_day": 3.3479524438573316,
+    "wr": 0.40584415584415584,
+    "long_entries": 127,
+    "short_entries": 181,
+    "avg_notional": 0.19642604606499542,
+    "avg_leverage": 1.500000418507456,
+    "lane_counts": {
+      "quality": 88,
+      "scout": 220,
+      "cash": 7596,
+      "risk_off": 1380,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "bear": 101,
+      "bull": 72,
+      "chop": 29,
+      "normal": 97,
+      "whipsaw": 9
+    },
+    "exits": {
+      "learned_max_hold": 265,
+      "learned_stop_loss": 31,
+      "learned_take_profit": 11,
+      "forced_end": 1
+    }
+  },
+  "cost_1x": {
+    "pnl": 30.83189954201877,
+    "mdd": -4.421148166789768,
+    "trades": 216,
+    "trades_per_day": 3.681818181818182,
+    "wr": 0.5185185185185185,
+    "long_entries": 95,
+    "short_entries": 121,
+    "avg_notional": 0.2427246844135762,
+    "avg_leverage": 1.5000029107427426,
+    "lane_counts": {
+      "quality": 88,
+      "scout": 128,
+      "cash": 4579,
+      "risk_off": 0,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "normal": 63,
+      "bull": 46,
+      "bear": 73,
+      "chop": 24,
+      "whipsaw": 10
+    },
+    "exits": {
+      "learned_max_hold": 179,
+      "learned_stop_loss": 25,
+      "learned_take_profit": 12
+    }
+  },
+  "cost_2x": {
+    "pnl": 21.65059291528064,
+    "mdd": -5.64874769275161,
+    "trades": 216,
+    "trades_per_day": 3.681818181818182,
+    "wr": 0.4861111111111111,
+    "long_entries": 95,
+    "short_entries": 121,
+    "avg_notional": 0.2427246844135762,
+    "avg_leverage": 1.5000029107427426,
+    "lane_counts": {
+      "quality": 88,
+      "scout": 128,
+      "cash": 4580,
+      "risk_off": 0,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "normal": 63,
+      "bull": 46,
+      "bear": 73,
+      "chop": 24,
+      "whipsaw": 10
+    },
+    "exits": {
+      "learned_max_hold": 179,
+      "learned_stop_loss": 25,
+      "learned_take_profit": 12
+    }
+  },
+  "cost_3x": {
+    "pnl": 12.253561288558812,
+    "mdd": -6.766513325903622,
+    "trades": 216,
+    "trades_per_day": 3.681818181818182,
+    "wr": 0.4583333333333333,
+    "long_entries": 95,
+    "short_entries": 121,
+    "avg_notional": 0.24085996774690951,
+    "avg_leverage": 1.5000029107427426,
+    "lane_counts": {
+      "quality": 88,
+      "scout": 128,
+      "cash": 4580,
+      "risk_off": 0,
+      "clean_block": 0
+    },
+    "regime_counts": {
+      "normal": 63,
+      "bull": 46,
+      "bear": 73,
+      "chop": 24,
+      "whipsaw": 10
+    },
+    "exits": {
+      "learned_max_hold": 179,
+      "learned_stop_loss": 25,
+      "learned_take_profit": 12
+    }
+  },
+  "promotion_gate": {
+    "positive_oos": true,
+    "trades_per_day_min3": true,
+    "cost2_survival": true,
+    "cost3_survival": true,
+    "pnl_vs_v13_1": true,
+    "mdd_vs_v13_1": true,
+    "pnl_vs_v13_2": true,
+    "mdd_vs_v13_2": true,
+    "audit_pass": true,
+    "selection_is_shadow_only": true
+  },
+  "red_team_audit": {
+    "model_id": "core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510",
+    "status": "pass",
+    "selection_status": "shadow_only_oos_observed_candidate",
+    "checks": {
+      "contaminated_columns_absent": true,
+      "train_validation_overlap_zero": true,
+      "train_eval_overlap_zero": true,
+      "validation_eval_overlap_zero": true,
+      "ledger_rows_match_report_trades": true,
+      "cost2_survival": true,
+      "cost3_survival": true,
+      "selection_warning_present": true
+    },
+    "contaminated_columns": [],
+    "ledger_rows": 216,
+    "report_trades": 216
+  },
+  "split": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-09-30 23:55:00"
+    ],
+    "validation_range": [
+      "2025-10-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_rows": 78568,
+    "validation_rows": 26496,
+    "eval_rows": 16897,
+    "train_validation_overlap_rows": 0,
+    "train_eval_overlap_rows": 0,
+    "validation_eval_overlap_rows": 0
+  },
+  "references": {
+    "v13_1_cost_1x": {
+      "pnl": 23.230917943908636,
+      "mdd": -5.022470388203903,
+      "trades": 214,
+      "trades_per_day": 3.647727272727273,
+      "wr": 0.5186915887850467,
+      "long_entries": 95,
+      "short_entries": 119,
+      "avg_notional": 0.22797947400852392,
+      "avg_leverage": 1.5000028951606474,
+      "lane_counts": {
+        "quality": 86,
+        "scout": 128,
+        "cash": 4509,
+        "risk_off": 0,
+        "regime_block": 0
+      },
+      "regime_counts": {
+        "normal": 64,
+        "bull": 44,
+        "bear": 72,
+        "chop": 24,
+        "whipsaw": 10
+      },
+      "exits": {
+        "learned_max_hold": 182,
+        "learned_stop_loss": 23,
+        "learned_take_profit": 9
+      }
+    },
+    "v13_2_cost_1x": {
+      "pnl": 16.64102050191567,
+      "mdd": -5.193967736699923,
+      "trades": 214,
+      "trades_per_day": 3.647727272727273,
+      "wr": 0.5233644859813084,
+      "long_entries": 92,
+      "short_entries": 122,
+      "avg_notional": 0.20718956412190853,
+      "avg_leverage": 1.5000018725379825,
+      "lane_counts": {
+        "quality": 83,
+        "scout": 131,
+        "cash": 4526,
+        "risk_off": 0,
+        "regime_block": 0
+      },
+      "regime_counts": {
+        "normal": 92,
+        "chop": 42,
+        "bull": 24,
+        "bear": 56
+      },
+      "exits": {
+        "learned_max_hold": 184,
+        "learned_stop_loss": 22,
+        "learned_take_profit": 7,
+        "forced_end": 1
+      }
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510/decontam_plus_unsup_v4_shadow_lift_manifest.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510.json",
+    "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510_ledger.csv",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510_audit.json",
+    "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/core_entry_policy_decontam_plus_unsup_v4_shadow_lift_v13_8_20260510_contract.md"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "experiment": "trailing_stop_label_pure_eth",
+  "label_config": {
+    "K_MAX": 60,
+    "SL_ATR_MULT": 1.0,
+    "TRAIL_ATR_MULT": 0.6,
+    "MIN_PROFITABLE_MOVE": 0.0015
+  },
+  "n_features": 104,
+  "val_sweep": [
+    {
+      "threshold": 0.34,
+      "n_trades": 18711,
+      "hit_rate": 0.11308855753300198,
+      "avg_pnl_pct": -0.0009076956418860609,
+      "total_pnl_pct": -16.983893155330087
+    },
+    {
+      "threshold": 0.38,
+      "n_trades": 14189,
+      "hit_rate": 0.11635774191274931,
+      "avg_pnl_pct": -0.0008935703723816437,
+      "total_pnl_pct": -12.678870013723143
+    },
+    {
+      "threshold": 0.4,
+      "n_trades": 11416,
+      "hit_rate": 0.12140854940434478,
+      "avg_pnl_pct": -0.0008803919513128398,
+      "total_pnl_pct": -10.050554516187379
+    },
+    {
+      "threshold": 0.42,
+      "n_trades": 9062,
+      "hit_rate": 0.12557934230854115,
+      "avg_pnl_pct": -0.0008643603426560236,
+      "total_pnl_pct": -7.832833425148886
+    },
+    {
+      "threshold": 0.45,
+      "n_trades": 6293,
+      "hit_rate": 0.136183060543461,
+      "avg_pnl_pct": -0.0008379474940809235,
+      "total_pnl_pct": -5.273203580251252
+    },
+    {
+      "threshold": 0.48,
+      "n_trades": 4408,
+      "hit_rate": 0.1499546279491833,
+      "avg_pnl_pct": -0.0007983145358005212,
+      "total_pnl_pct": -3.5189704738086975
+    },
+    {
+      "threshold": 0.5,
+      "n_trades": 3514,
+      "hit_rate": 0.16135458167330677,
+      "avg_pnl_pct": -0.0007782413602130095,
+      "total_pnl_pct": -2.7347401397885154
+    },
+    {
+      "threshold": 0.55,
+      "n_trades": 1935,
+      "hit_rate": 0.17984496124031008,
+      "avg_pnl_pct": -0.000743750911222853,
+      "total_pnl_pct": -1.4391580132162205
+    },
+    {
+      "threshold": 0.6,
+      "n_trades": 968,
+      "hit_rate": 0.18801652892561985,
+      "avg_pnl_pct": -0.0006979727911259901,
+      "total_pnl_pct": -0.6756376618099584
+    },
+    {
+      "threshold": 0.65,
+      "n_trades": 363,
+      "hit_rate": 0.18181818181818182,
+      "avg_pnl_pct": -0.0006689828748673414,
+      "total_pnl_pct": -0.2428407835768449
+    },
+    {
+      "threshold": 0.7,
+      "n_trades": 96,
+      "hit_rate": 0.17708333333333334,
+      "avg_pnl_pct": -0.0005744305574004948,
+      "total_pnl_pct": -0.0551453335104475
+    }
+  ],
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Market-order entry (no maker-fill sim yet) -- first-pass viability check only.",
+  "best_val_threshold": 0.7,
+  "oos_at_chosen_threshold": {
+    "n_trades": 196,
+    "hit_rate": 0.19387755102040816,
+    "avg_pnl_pct": -0.0005411368503846479,
+    "total_pnl_pct": -0.106062822675391
+  }
+}

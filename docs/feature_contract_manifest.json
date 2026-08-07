@@ -1,4 +1,71 @@
 {
+  "fixed_preprocessing": {
+    "model_id": "fixed_regime4_tp18_sl10_preprocess_20260517",
+    "status": "frozen_preprocessing_input",
+    "builder": "scripts/build_fixed_regime4_tp_sl_preprocess_20260517.py",
+    "regime4_transformer": "scripts/transform_regime4_official_sidecars_20260517.py",
+    "train_csv": "tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2025_regime4_tp18_sl10_fixed.csv",
+    "eval_csv": "tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2026_regime4_tp18_sl10_fixed.csv",
+    "manifest": "tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/fixed_regime4_tp18_sl10_preprocess_manifest.json",
+    "regime4": {
+      "classes": [
+        "bull",
+        "bear",
+        "chop",
+        "whipsaw"
+      ],
+      "current_prefix": "clean_regime4_state24_sticky090_v2_",
+      "future_prefix": "regime4_pred_",
+      "future_model": "regime4_pred_tft_h12_nomdjd_all74_20260517",
+      "current_feature_count": 20,
+      "future_feature_count": 12,
+      "current_auxiliary_features": [
+        "factor_trend",
+        "factor_flow",
+        "factor_vol",
+        "factor_crowding",
+        "factor_liquidity",
+        "trend_bias",
+        "risk_off_prob",
+        "transition_risk"
+      ],
+      "excluded_features": [
+        "pred_mdjd",
+        "conf_mdjd"
+      ],
+      "normal_class": "disabled",
+      "risk_off_transition_classes": "disabled",
+      "risk_off_transition_auxiliary_features": "enabled",
+      "forbidden_active_prefixes": [
+        "clean_regime_2024_unsup_v4_",
+        "clean_regime4_2024_unsup_v1_"
+      ],
+      "next_regime_policy": {
+        "contract": "docs/model_contracts/regime3_whipsaw_risk_policy_20260529.md",
+        "status": "design_policy_for_next_action_classifier",
+        "direction_classes": [
+          "bull",
+          "bear",
+          "chop"
+        ],
+        "whipsaw_handling": "risk_veto_sizing_context_not_action_class",
+        "preferred_future_horizons_bars": [
+          12,
+          24,
+          48
+        ],
+        "fail_fast": "Do not silently alias Regime4 fields into Regime3 fields. Missing Regime3 columns require upstream regeneration."
+      }
+    },
+    "tp_sl": {
+      "feature": "tp_sl_action_score",
+      "tp": 0.018,
+      "sl": 0.01,
+      "horizon_bars": 48,
+      "entry_reference": "next_bar_open",
+      "same_bar_tie": "sl_wins"
+    }
+  },
   "shared_base_features": {
     "price_returns": [
       "open",
@@ -137,48 +204,35 @@
       "mtf_trend_1h"
     ]
   },
-  "m7_unsupervised_inputs": {
-    "gmm_volatility": [
-      "parkinson_vol",
-      "garman_klass_vol",
-      "rogers_satchell_vol",
-      "bb_width_z",
-      "realized_vol_ratio"
+  "m7_removed_from_active_contract": {
+    "model_meta_keys": [
+      "gmm_volatility",
+      "isolation_forest",
+      "vae_anomaly"
     ],
-    "isolation_forest": [
-      "smart_money_flow",
-      "net_taker_ratio",
-      "whale_retail_ratio",
-      "crowding_pressure",
-      "oi_change_rate",
-      "trade_intensity",
-      "cvp_volume_imbalance"
+    "generated_required_columns": [
+      "m7_gmm_cluster",
+      "m7_gmm_conf",
+      "m7_gmm_vol_rank",
+      "m7_iso_pred",
+      "m7_iso_score",
+      "m7_iso_anom",
+      "m7_vae_error",
+      "m7_vae_threshold",
+      "m7_vae_anom",
+      "m7_gate_block",
+      "m7_size",
+      "m7_hdb_label",
+      "m7_hdb_prob"
     ],
-    "vae_anomaly": [
-      "cvp_volume_imbalance",
-      "mean_reversion_z",
-      "trade_intensity",
-      "rsi",
-      "volatility_z",
-      "liquidity_vacuum",
-      "smart_money_flow"
-    ],
-    "hdbscan_regime": []
+    "historical_artifact_policy": "diagnostic_only_until_retrained_rescored"
   },
   "m7_outputs": {
-    "action_sizing": [
-      "m7_action",
-      "m7_confidence",
-      "m7_size"
-    ],
     "quantiles_uncertainty": [
       "m7_q10",
-      "m7_q50",
       "m7_q90",
       "m7_qwidth",
-      "m7_expected_ret",
-      "m7_tail_risk",
-      "m7_composite_score"
+      "m7_tail_risk"
     ],
     "execution": [
       "m7_entry_long_offset",
@@ -186,16 +240,6 @@
       "m7_tp_offset",
       "m7_sl_offset",
       "m7_target_hold"
-    ],
-    "unsupervised_summaries": [
-      "m7_gmm_cluster",
-      "m7_gmm_conf",
-      "m7_gmm_vol_rank",
-      "m7_iso_score",
-      "m7_vae_error",
-      "m7_iso_anom",
-      "m7_vae_anom",
-      "m7_gate_block"
     ]
   },
   "dsac_compact_state": {
@@ -216,20 +260,13 @@
       "smart_money_flow_norm"
     ],
     "m7_summaries": [
-      "m7_anomaly_score",
-      "m7_gmm_conf",
-      "m7_gmm_vol_rank",
-      "m7_prob_up_scaled",
-      "m7_prob_dn_scaled",
-      "m7_prob_fl_scaled",
-      "m7_q_mid_norm",
       "m7_q_uncertainty_norm",
-      "m7_q_skew",
       "m7_quality_norm",
       "m7_hold_norm",
+      "m7_entry_long_offset_norm",
+      "m7_entry_short_offset_norm",
       "m7_tp_offset_norm",
-      "m7_sl_offset_norm",
-      "m7_trend_entropy_scaled"
+      "m7_sl_offset_norm"
     ]
   },
   "cleanup_priorities": {

@@ -1,0 +1,2744 @@
+{
+  "type": "hf_entry_overlay_grid_hf_v4_2026",
+  "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_entry_grid/hf_v4_balanced_h144.pkl",
+  "audit": {
+    "train_rows": 105064,
+    "eval_rows": 16897,
+    "train_valid_timestamp_rows": 105064,
+    "eval_valid_timestamp_rows": 16897,
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "timestamp_overlap_rows": 0,
+    "train_duplicate_timestamps": 0,
+    "eval_duplicate_timestamps": 0,
+    "policy_feature_count": 79,
+    "label_distribution": {
+      "action": {
+        "1": 13000,
+        "2": 13141
+      },
+      "notional": {
+        "0": 15574,
+        "1": 681,
+        "2": 314,
+        "3": 230,
+        "4": 799,
+        "5": 1094,
+        "6": 2113,
+        "7": 2097,
+        "8": 1582,
+        "9": 1131,
+        "10": 526
+      },
+      "leverage": {
+        "0": 22902,
+        "1": 1582,
+        "2": 1657
+      },
+      "take_profit": {
+        "0": 17366,
+        "1": 332,
+        "2": 261,
+        "3": 493,
+        "4": 865,
+        "5": 1532,
+        "6": 1526,
+        "7": 1431,
+        "8": 1034,
+        "9": 1301
+      },
+      "stop_loss": {
+        "0": 22836,
+        "1": 668,
+        "2": 664,
+        "3": 563,
+        "4": 546,
+        "5": 457,
+        "6": 407
+      },
+      "max_hold": {
+        "0": 17076,
+        "1": 430,
+        "2": 566,
+        "3": 435,
+        "4": 405,
+        "5": 748,
+        "6": 672,
+        "7": 1165,
+        "8": 1285,
+        "9": 3359
+      },
+      "cooldown": {
+        "0": 7949,
+        "2": 18033,
+        "4": 83,
+        "6": 76
+      },
+      "quality_mean": 0.014499789940668363,
+      "quality_p95": 0.06188453357821794
+    }
+  },
+  "grid": [
+    {
+      "name": "m1.0_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q0.0_c0.0",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q0.0_c0.38",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q0.0_c0.45",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 96.90419715403367,
+        "mdd": -21.41674388874325,
+        "trades": 803,
+        "trades_per_day": 13.6875,
+        "wr": 0.44209215442092153,
+        "avg_notional": 0.49128524947863167,
+        "avg_leverage": 1.5831615648276796,
+        "long_entries": 408,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m1.0_q0.01_c0.0",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.95966705809268,
+        "mdd": -22.700416821794235,
+        "trades": 643,
+        "trades_per_day": 10.960227272727273,
+        "wr": 0.45878693623639194,
+        "avg_notional": 0.5454713824138425,
+        "avg_leverage": 1.5978757049132783,
+        "long_entries": 319,
+        "short_entries": 324
+      }
+    },
+    {
+      "name": "m1.0_q0.01_c0.38",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.95966705809268,
+        "mdd": -22.700416821794235,
+        "trades": 643,
+        "trades_per_day": 10.960227272727273,
+        "wr": 0.45878693623639194,
+        "avg_notional": 0.5454713824138425,
+        "avg_leverage": 1.5978757049132783,
+        "long_entries": 319,
+        "short_entries": 324
+      }
+    },
+    {
+      "name": "m1.0_q0.01_c0.45",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.95966705809268,
+        "mdd": -22.700416821794235,
+        "trades": 643,
+        "trades_per_day": 10.960227272727273,
+        "wr": 0.45878693623639194,
+        "avg_notional": 0.5454713824138425,
+        "avg_leverage": 1.5978757049132783,
+        "long_entries": 319,
+        "short_entries": 324
+      }
+    },
+    {
+      "name": "m1.0_q0.02_c0.0",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 35.50165863440127,
+        "mdd": -18.745849677272897,
+        "trades": 323,
+        "trades_per_day": 5.505681818181818,
+        "wr": 0.4117647058823529,
+        "avg_notional": 0.7463502404642329,
+        "avg_leverage": 1.660022161770866,
+        "long_entries": 154,
+        "short_entries": 169
+      }
+    },
+    {
+      "name": "m1.0_q0.02_c0.38",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 35.50165863440127,
+        "mdd": -18.745849677272897,
+        "trades": 323,
+        "trades_per_day": 5.505681818181818,
+        "wr": 0.4117647058823529,
+        "avg_notional": 0.7463502404642329,
+        "avg_leverage": 1.660022161770866,
+        "long_entries": 154,
+        "short_entries": 169
+      }
+    },
+    {
+      "name": "m1.0_q0.02_c0.45",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 35.50165863440127,
+        "mdd": -18.745849677272897,
+        "trades": 323,
+        "trades_per_day": 5.505681818181818,
+        "wr": 0.4117647058823529,
+        "avg_notional": 0.7463502404642329,
+        "avg_leverage": 1.660022161770866,
+        "long_entries": 154,
+        "short_entries": 169
+      }
+    },
+    {
+      "name": "m1.0_q0.035_c0.0",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 10.507031466491036,
+        "mdd": -31.800093690426976,
+        "trades": 123,
+        "trades_per_day": 2.096590909090909,
+        "wr": 0.35772357723577236,
+        "avg_notional": 0.9983264946069138,
+        "avg_leverage": 1.758392238519417,
+        "long_entries": 54,
+        "short_entries": 69
+      }
+    },
+    {
+      "name": "m1.0_q0.035_c0.38",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 10.507031466491036,
+        "mdd": -31.800093690426976,
+        "trades": 123,
+        "trades_per_day": 2.096590909090909,
+        "wr": 0.35772357723577236,
+        "avg_notional": 0.9983264946069138,
+        "avg_leverage": 1.758392238519417,
+        "long_entries": 54,
+        "short_entries": 69
+      }
+    },
+    {
+      "name": "m1.0_q0.035_c0.45",
+      "config": {
+        "notional_mult": 1.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 10.507031466491036,
+        "mdd": -31.800093690426976,
+        "trades": 123,
+        "trades_per_day": 2.096590909090909,
+        "wr": 0.35772357723577236,
+        "avg_notional": 0.9983264946069138,
+        "avg_leverage": 1.758392238519417,
+        "long_entries": 54,
+        "short_entries": 69
+      }
+    },
+    {
+      "name": "m1.5_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q0.0_c0.0",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q0.0_c0.38",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q0.0_c0.45",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 125.90831543326763,
+        "mdd": -25.57749416024886,
+        "trades": 943,
+        "trades_per_day": 16.073863636363637,
+        "wr": 0.39236479321314954,
+        "avg_notional": 0.8113011314032021,
+        "avg_leverage": 1.5943818956871634,
+        "long_entries": 463,
+        "short_entries": 480
+      }
+    },
+    {
+      "name": "m1.5_q0.01_c0.0",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 177.1344745686913,
+        "mdd": -24.662139322479383,
+        "trades": 752,
+        "trades_per_day": 12.818181818181818,
+        "wr": 0.4109042553191489,
+        "avg_notional": 0.9005205666681534,
+        "avg_leverage": 1.6107119526568943,
+        "long_entries": 361,
+        "short_entries": 391
+      }
+    },
+    {
+      "name": "m1.5_q0.01_c0.38",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 177.1344745686913,
+        "mdd": -24.662139322479383,
+        "trades": 752,
+        "trades_per_day": 12.818181818181818,
+        "wr": 0.4109042553191489,
+        "avg_notional": 0.9005205666681534,
+        "avg_leverage": 1.6107119526568943,
+        "long_entries": 361,
+        "short_entries": 391
+      }
+    },
+    {
+      "name": "m1.5_q0.01_c0.45",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 177.1344745686913,
+        "mdd": -24.662139322479383,
+        "trades": 752,
+        "trades_per_day": 12.818181818181818,
+        "wr": 0.4109042553191489,
+        "avg_notional": 0.9005205666681534,
+        "avg_leverage": 1.6107119526568943,
+        "long_entries": 361,
+        "short_entries": 391
+      }
+    },
+    {
+      "name": "m1.5_q0.02_c0.0",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 135.4096367710672,
+        "mdd": -26.107605412917778,
+        "trades": 391,
+        "trades_per_day": 6.6647727272727275,
+        "wr": 0.3836317135549872,
+        "avg_notional": 1.1923779912385821,
+        "avg_leverage": 1.668639128406532,
+        "long_entries": 187,
+        "short_entries": 204
+      }
+    },
+    {
+      "name": "m1.5_q0.02_c0.38",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 135.4096367710672,
+        "mdd": -26.107605412917778,
+        "trades": 391,
+        "trades_per_day": 6.6647727272727275,
+        "wr": 0.3836317135549872,
+        "avg_notional": 1.1923779912385821,
+        "avg_leverage": 1.668639128406532,
+        "long_entries": 187,
+        "short_entries": 204
+      }
+    },
+    {
+      "name": "m1.5_q0.02_c0.45",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 135.4096367710672,
+        "mdd": -26.107605412917778,
+        "trades": 391,
+        "trades_per_day": 6.6647727272727275,
+        "wr": 0.3836317135549872,
+        "avg_notional": 1.1923779912385821,
+        "avg_leverage": 1.668639128406532,
+        "long_entries": 187,
+        "short_entries": 204
+      }
+    },
+    {
+      "name": "m1.5_q0.035_c0.0",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 56.61803323285519,
+        "mdd": -22.359047877806294,
+        "trades": 159,
+        "trades_per_day": 2.710227272727273,
+        "wr": 0.32075471698113206,
+        "avg_notional": 1.5815569793765332,
+        "avg_leverage": 1.7819457993160728,
+        "long_entries": 82,
+        "short_entries": 77
+      }
+    },
+    {
+      "name": "m1.5_q0.035_c0.38",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 56.61803323285519,
+        "mdd": -22.359047877806294,
+        "trades": 159,
+        "trades_per_day": 2.710227272727273,
+        "wr": 0.32075471698113206,
+        "avg_notional": 1.5815569793765332,
+        "avg_leverage": 1.7819457993160728,
+        "long_entries": 82,
+        "short_entries": 77
+      }
+    },
+    {
+      "name": "m1.5_q0.035_c0.45",
+      "config": {
+        "notional_mult": 1.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 56.61803323285519,
+        "mdd": -22.359047877806294,
+        "trades": 159,
+        "trades_per_day": 2.710227272727273,
+        "wr": 0.32075471698113206,
+        "avg_notional": 1.5815569793765332,
+        "avg_leverage": 1.7819457993160728,
+        "long_entries": 82,
+        "short_entries": 77
+      }
+    },
+    {
+      "name": "m2.0_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q0.0_c0.0",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q0.0_c0.38",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q0.0_c0.45",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 191.41944078421352,
+        "mdd": -34.317120481337696,
+        "trades": 1061,
+        "trades_per_day": 18.085227272727273,
+        "wr": 0.3901979264844486,
+        "avg_notional": 1.1292038611698383,
+        "avg_leverage": 1.599882372033581,
+        "long_entries": 511,
+        "short_entries": 550
+      }
+    },
+    {
+      "name": "m2.0_q0.01_c0.0",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 284.49065770283346,
+        "mdd": -34.3171204813377,
+        "trades": 874,
+        "trades_per_day": 14.897727272727273,
+        "wr": 0.40045766590389015,
+        "avg_notional": 1.2540869510634312,
+        "avg_leverage": 1.6197065197972627,
+        "long_entries": 417,
+        "short_entries": 457
+      }
+    },
+    {
+      "name": "m2.0_q0.01_c0.38",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 284.49065770283346,
+        "mdd": -34.3171204813377,
+        "trades": 874,
+        "trades_per_day": 14.897727272727273,
+        "wr": 0.40045766590389015,
+        "avg_notional": 1.2540869510634312,
+        "avg_leverage": 1.6197065197972627,
+        "long_entries": 417,
+        "short_entries": 457
+      }
+    },
+    {
+      "name": "m2.0_q0.01_c0.45",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 284.49065770283346,
+        "mdd": -34.3171204813377,
+        "trades": 874,
+        "trades_per_day": 14.897727272727273,
+        "wr": 0.40045766590389015,
+        "avg_notional": 1.2540869510634312,
+        "avg_leverage": 1.6197065197972627,
+        "long_entries": 417,
+        "short_entries": 457
+      }
+    },
+    {
+      "name": "m2.0_q0.02_c0.0",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 132.74687397070556,
+        "mdd": -34.717427398111845,
+        "trades": 475,
+        "trades_per_day": 8.09659090909091,
+        "wr": 0.35789473684210527,
+        "avg_notional": 1.6041121335174304,
+        "avg_leverage": 1.6759904651690423,
+        "long_entries": 219,
+        "short_entries": 256
+      }
+    },
+    {
+      "name": "m2.0_q0.02_c0.38",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 132.74687397070556,
+        "mdd": -34.717427398111845,
+        "trades": 475,
+        "trades_per_day": 8.09659090909091,
+        "wr": 0.35789473684210527,
+        "avg_notional": 1.6041121335174304,
+        "avg_leverage": 1.6759904651690423,
+        "long_entries": 219,
+        "short_entries": 256
+      }
+    },
+    {
+      "name": "m2.0_q0.02_c0.45",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 132.74687397070556,
+        "mdd": -34.717427398111845,
+        "trades": 475,
+        "trades_per_day": 8.09659090909091,
+        "wr": 0.35789473684210527,
+        "avg_notional": 1.6041121335174304,
+        "avg_leverage": 1.6759904651690423,
+        "long_entries": 219,
+        "short_entries": 256
+      }
+    },
+    {
+      "name": "m2.0_q0.035_c0.0",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 79.65861940855856,
+        "mdd": -29.352821997490086,
+        "trades": 187,
+        "trades_per_day": 3.1875,
+        "wr": 0.31016042780748665,
+        "avg_notional": 2.104945202418418,
+        "avg_leverage": 1.782091646717686,
+        "long_entries": 98,
+        "short_entries": 89
+      }
+    },
+    {
+      "name": "m2.0_q0.035_c0.38",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 79.65861940855856,
+        "mdd": -29.352821997490086,
+        "trades": 187,
+        "trades_per_day": 3.1875,
+        "wr": 0.31016042780748665,
+        "avg_notional": 2.104945202418418,
+        "avg_leverage": 1.782091646717686,
+        "long_entries": 98,
+        "short_entries": 89
+      }
+    },
+    {
+      "name": "m2.0_q0.035_c0.45",
+      "config": {
+        "notional_mult": 2.0,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 79.65861940855856,
+        "mdd": -29.352821997490086,
+        "trades": 187,
+        "trades_per_day": 3.1875,
+        "wr": 0.31016042780748665,
+        "avg_notional": 2.104945202418418,
+        "avg_leverage": 1.782091646717686,
+        "long_entries": 98,
+        "short_entries": 89
+      }
+    },
+    {
+      "name": "m2.75_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q0.0_c0.0",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q0.0_c0.38",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q0.0_c0.45",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 254.80854043478885,
+        "mdd": -46.86905640696977,
+        "trades": 1224,
+        "trades_per_day": 20.863636363636363,
+        "wr": 0.375,
+        "avg_notional": 1.5775605552391712,
+        "avg_leverage": 1.6042372220879848,
+        "long_entries": 564,
+        "short_entries": 660
+      }
+    },
+    {
+      "name": "m2.75_q0.01_c0.0",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 355.61517836713347,
+        "mdd": -46.869056406969754,
+        "trades": 1014,
+        "trades_per_day": 17.28409090909091,
+        "wr": 0.373767258382643,
+        "avg_notional": 1.7381085107210026,
+        "avg_leverage": 1.6218100146223027,
+        "long_entries": 477,
+        "short_entries": 537
+      }
+    },
+    {
+      "name": "m2.75_q0.01_c0.38",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 355.61517836713347,
+        "mdd": -46.869056406969754,
+        "trades": 1014,
+        "trades_per_day": 17.28409090909091,
+        "wr": 0.373767258382643,
+        "avg_notional": 1.7381085107210026,
+        "avg_leverage": 1.6218100146223027,
+        "long_entries": 477,
+        "short_entries": 537
+      }
+    },
+    {
+      "name": "m2.75_q0.01_c0.45",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 355.61517836713347,
+        "mdd": -46.869056406969754,
+        "trades": 1014,
+        "trades_per_day": 17.28409090909091,
+        "wr": 0.373767258382643,
+        "avg_notional": 1.7381085107210026,
+        "avg_leverage": 1.6218100146223027,
+        "long_entries": 477,
+        "short_entries": 537
+      }
+    },
+    {
+      "name": "m2.75_q0.02_c0.0",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.17493401575653,
+        "mdd": -49.73101701123659,
+        "trades": 553,
+        "trades_per_day": 9.426136363636363,
+        "wr": 0.3399638336347197,
+        "avg_notional": 2.201159791003507,
+        "avg_leverage": 1.68162867379759,
+        "long_entries": 239,
+        "short_entries": 314
+      }
+    },
+    {
+      "name": "m2.75_q0.02_c0.38",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.17493401575653,
+        "mdd": -49.73101701123659,
+        "trades": 553,
+        "trades_per_day": 9.426136363636363,
+        "wr": 0.3399638336347197,
+        "avg_notional": 2.201159791003507,
+        "avg_leverage": 1.68162867379759,
+        "long_entries": 239,
+        "short_entries": 314
+      }
+    },
+    {
+      "name": "m2.75_q0.02_c0.45",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.17493401575653,
+        "mdd": -49.73101701123659,
+        "trades": 553,
+        "trades_per_day": 9.426136363636363,
+        "wr": 0.3399638336347197,
+        "avg_notional": 2.201159791003507,
+        "avg_leverage": 1.68162867379759,
+        "long_entries": 239,
+        "short_entries": 314
+      }
+    },
+    {
+      "name": "m2.75_q0.035_c0.0",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.85836725439542,
+        "mdd": -37.73583478633341,
+        "trades": 238,
+        "trades_per_day": 4.056818181818182,
+        "wr": 0.29411764705882354,
+        "avg_notional": 2.7089347859754676,
+        "avg_leverage": 1.774783353251174,
+        "long_entries": 105,
+        "short_entries": 133
+      }
+    },
+    {
+      "name": "m2.75_q0.035_c0.38",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.85836725439542,
+        "mdd": -37.73583478633341,
+        "trades": 238,
+        "trades_per_day": 4.056818181818182,
+        "wr": 0.29411764705882354,
+        "avg_notional": 2.7089347859754676,
+        "avg_leverage": 1.774783353251174,
+        "long_entries": 105,
+        "short_entries": 133
+      }
+    },
+    {
+      "name": "m2.75_q0.035_c0.45",
+      "config": {
+        "notional_mult": 2.75,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 92.85836725439542,
+        "mdd": -37.73583478633341,
+        "trades": 238,
+        "trades_per_day": 4.056818181818182,
+        "wr": 0.29411764705882354,
+        "avg_notional": 2.7089347859754676,
+        "avg_leverage": 1.774783353251174,
+        "long_entries": 105,
+        "short_entries": 133
+      }
+    },
+    {
+      "name": "m3.5_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q0.0_c0.0",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q0.0_c0.38",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q0.0_c0.45",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 67.02293615616246,
+        "mdd": -48.482300995798475,
+        "trades": 1405,
+        "trades_per_day": 23.948863636363637,
+        "wr": 0.3501779359430605,
+        "avg_notional": 1.9528501408701562,
+        "avg_leverage": 1.6032515443738504,
+        "long_entries": 618,
+        "short_entries": 787
+      }
+    },
+    {
+      "name": "m3.5_q0.01_c0.0",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 78.956771933256,
+        "mdd": -48.4823009957985,
+        "trades": 1171,
+        "trades_per_day": 19.960227272727273,
+        "wr": 0.34329632792485054,
+        "avg_notional": 2.130638972583736,
+        "avg_leverage": 1.6209063907677994,
+        "long_entries": 509,
+        "short_entries": 662
+      }
+    },
+    {
+      "name": "m3.5_q0.01_c0.38",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 78.956771933256,
+        "mdd": -48.4823009957985,
+        "trades": 1171,
+        "trades_per_day": 19.960227272727273,
+        "wr": 0.34329632792485054,
+        "avg_notional": 2.130638972583736,
+        "avg_leverage": 1.6209063907677994,
+        "long_entries": 509,
+        "short_entries": 662
+      }
+    },
+    {
+      "name": "m3.5_q0.01_c0.45",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 78.956771933256,
+        "mdd": -48.4823009957985,
+        "trades": 1171,
+        "trades_per_day": 19.960227272727273,
+        "wr": 0.34329632792485054,
+        "avg_notional": 2.130638972583736,
+        "avg_leverage": 1.6209063907677994,
+        "long_entries": 509,
+        "short_entries": 662
+      }
+    },
+    {
+      "name": "m3.5_q0.02_c0.0",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 29.26520169270448,
+        "mdd": -53.3436254056162,
+        "trades": 623,
+        "trades_per_day": 10.619318181818182,
+        "wr": 0.3162118780096308,
+        "avg_notional": 2.6235932574570766,
+        "avg_leverage": 1.6820616747902397,
+        "long_entries": 272,
+        "short_entries": 351
+      }
+    },
+    {
+      "name": "m3.5_q0.02_c0.38",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 29.26520169270448,
+        "mdd": -53.3436254056162,
+        "trades": 623,
+        "trades_per_day": 10.619318181818182,
+        "wr": 0.3162118780096308,
+        "avg_notional": 2.6235932574570766,
+        "avg_leverage": 1.6820616747902397,
+        "long_entries": 272,
+        "short_entries": 351
+      }
+    },
+    {
+      "name": "m3.5_q0.02_c0.45",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 29.26520169270448,
+        "mdd": -53.3436254056162,
+        "trades": 623,
+        "trades_per_day": 10.619318181818182,
+        "wr": 0.3162118780096308,
+        "avg_notional": 2.6235932574570766,
+        "avg_leverage": 1.6820616747902397,
+        "long_entries": 272,
+        "short_entries": 351
+      }
+    },
+    {
+      "name": "m3.5_q0.035_c0.0",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 60.13089976562591,
+        "mdd": -47.545872559290025,
+        "trades": 251,
+        "trades_per_day": 4.278409090909091,
+        "wr": 0.29880478087649404,
+        "avg_notional": 3.103706921958523,
+        "avg_leverage": 1.7744565815285227,
+        "long_entries": 100,
+        "short_entries": 151
+      }
+    },
+    {
+      "name": "m3.5_q0.035_c0.38",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 60.13089976562591,
+        "mdd": -47.545872559290025,
+        "trades": 251,
+        "trades_per_day": 4.278409090909091,
+        "wr": 0.29880478087649404,
+        "avg_notional": 3.103706921958523,
+        "avg_leverage": 1.7744565815285227,
+        "long_entries": 100,
+        "short_entries": 151
+      }
+    },
+    {
+      "name": "m3.5_q0.035_c0.45",
+      "config": {
+        "notional_mult": 3.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 60.13089976562591,
+        "mdd": -47.545872559290025,
+        "trades": 251,
+        "trades_per_day": 4.278409090909091,
+        "wr": 0.29880478087649404,
+        "avg_notional": 3.103706921958523,
+        "avg_leverage": 1.7744565815285227,
+        "long_entries": 100,
+        "short_entries": 151
+      }
+    },
+    {
+      "name": "m4.5_q-1.0_c0.0",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q-1.0_c0.38",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q-1.0_c0.45",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": -1.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q0.0_c0.0",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q0.0_c0.38",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q0.0_c0.45",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.0,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 87.67503666982964,
+        "mdd": -52.48080190789306,
+        "trades": 1558,
+        "trades_per_day": 26.556818181818183,
+        "wr": 0.3465982028241335,
+        "avg_notional": 2.313969636335947,
+        "avg_leverage": 1.6003163175899038,
+        "long_entries": 728,
+        "short_entries": 830
+      }
+    },
+    {
+      "name": "m4.5_q0.01_c0.0",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 84.8731973546,
+        "mdd": -51.914893219209276,
+        "trades": 1287,
+        "trades_per_day": 21.9375,
+        "wr": 0.34032634032634035,
+        "avg_notional": 2.5190399297095483,
+        "avg_leverage": 1.6181890068069855,
+        "long_entries": 586,
+        "short_entries": 701
+      }
+    },
+    {
+      "name": "m4.5_q0.01_c0.38",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 84.8731973546,
+        "mdd": -51.914893219209276,
+        "trades": 1287,
+        "trades_per_day": 21.9375,
+        "wr": 0.34032634032634035,
+        "avg_notional": 2.5190399297095483,
+        "avg_leverage": 1.6181890068069855,
+        "long_entries": 586,
+        "short_entries": 701
+      }
+    },
+    {
+      "name": "m4.5_q0.01_c0.45",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.01,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 84.8731973546,
+        "mdd": -51.914893219209276,
+        "trades": 1287,
+        "trades_per_day": 21.9375,
+        "wr": 0.34032634032634035,
+        "avg_notional": 2.5190399297095483,
+        "avg_leverage": 1.6181890068069855,
+        "long_entries": 586,
+        "short_entries": 701
+      }
+    },
+    {
+      "name": "m4.5_q0.02_c0.0",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": -10.362088207249043,
+        "mdd": -60.966635320948285,
+        "trades": 690,
+        "trades_per_day": 11.761363636363637,
+        "wr": 0.30579710144927535,
+        "avg_notional": 3.0171832615370606,
+        "avg_leverage": 1.6794887508975127,
+        "long_entries": 295,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m4.5_q0.02_c0.38",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": -10.362088207249043,
+        "mdd": -60.966635320948285,
+        "trades": 690,
+        "trades_per_day": 11.761363636363637,
+        "wr": 0.30579710144927535,
+        "avg_notional": 3.0171832615370606,
+        "avg_leverage": 1.6794887508975127,
+        "long_entries": 295,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m4.5_q0.02_c0.45",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.02,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": -10.362088207249043,
+        "mdd": -60.966635320948285,
+        "trades": 690,
+        "trades_per_day": 11.761363636363637,
+        "wr": 0.30579710144927535,
+        "avg_notional": 3.0171832615370606,
+        "avg_leverage": 1.6794887508975127,
+        "long_entries": 295,
+        "short_entries": 395
+      }
+    },
+    {
+      "name": "m4.5_q0.035_c0.0",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.0,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 50.69362370952428,
+        "mdd": -48.72336739292654,
+        "trades": 268,
+        "trades_per_day": 4.568181818181818,
+        "wr": 0.2947761194029851,
+        "avg_notional": 3.359758347792019,
+        "avg_leverage": 1.7684884953786206,
+        "long_entries": 103,
+        "short_entries": 165
+      }
+    },
+    {
+      "name": "m4.5_q0.035_c0.38",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.38,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 50.69362370952428,
+        "mdd": -48.72336739292654,
+        "trades": 268,
+        "trades_per_day": 4.568181818181818,
+        "wr": 0.2947761194029851,
+        "avg_notional": 3.359758347792019,
+        "avg_leverage": 1.7684884953786206,
+        "long_entries": 103,
+        "short_entries": 165
+      }
+    },
+    {
+      "name": "m4.5_q0.035_c0.45",
+      "config": {
+        "notional_mult": 4.5,
+        "quality_floor": 0.035,
+        "confidence_floor": 0.45,
+        "max_notional": 3.6
+      },
+      "eval": {
+        "pnl": 50.69362370952428,
+        "mdd": -48.72336739292654,
+        "trades": 268,
+        "trades_per_day": 4.568181818181818,
+        "wr": 0.2947761194029851,
+        "avg_notional": 3.359758347792019,
+        "avg_leverage": 1.7684884953786206,
+        "long_entries": 103,
+        "short_entries": 165
+      }
+    }
+  ],
+  "ranked_by_pnl": [
+    {
+      "name": "m2.75_q0.01_c0.0",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.75_q0.01_c0.38",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.75_q0.01_c0.45",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.0_q0.01_c0.0",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.0_q0.01_c0.38",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.0_q0.01_c0.45",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.75_q-1.0_c0.0",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q-1.0_c0.38",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q-1.0_c0.45",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.0",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.38",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.45",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.0_q-1.0_c0.0",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q-1.0_c0.38",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q-1.0_c0.45",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.0",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.38",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.45",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m1.5_q0.01_c0.0",
+      "pnl": 177.1344745686913,
+      "mdd": -24.662139322479383,
+      "trades": 752,
+      "trades_per_day": 12.818181818181818,
+      "wr": 0.4109042553191489,
+      "avg_notional": 0.9005205666681534,
+      "avg_leverage": 1.6107119526568943,
+      "long_entries": 361,
+      "short_entries": 391
+    },
+    {
+      "name": "m1.5_q0.01_c0.38",
+      "pnl": 177.1344745686913,
+      "mdd": -24.662139322479383,
+      "trades": 752,
+      "trades_per_day": 12.818181818181818,
+      "wr": 0.4109042553191489,
+      "avg_notional": 0.9005205666681534,
+      "avg_leverage": 1.6107119526568943,
+      "long_entries": 361,
+      "short_entries": 391
+    }
+  ],
+  "ranked_goal_5_to_25_trades_per_day": [
+    {
+      "name": "m2.75_q0.01_c0.0",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.75_q0.01_c0.38",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.75_q0.01_c0.45",
+      "pnl": 355.61517836713347,
+      "mdd": -46.869056406969754,
+      "trades": 1014,
+      "trades_per_day": 17.28409090909091,
+      "wr": 0.373767258382643,
+      "avg_notional": 1.7381085107210026,
+      "avg_leverage": 1.6218100146223027,
+      "long_entries": 477,
+      "short_entries": 537
+    },
+    {
+      "name": "m2.0_q0.01_c0.0",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.0_q0.01_c0.38",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.0_q0.01_c0.45",
+      "pnl": 284.49065770283346,
+      "mdd": -34.3171204813377,
+      "trades": 874,
+      "trades_per_day": 14.897727272727273,
+      "wr": 0.40045766590389015,
+      "avg_notional": 1.2540869510634312,
+      "avg_leverage": 1.6197065197972627,
+      "long_entries": 417,
+      "short_entries": 457
+    },
+    {
+      "name": "m2.75_q-1.0_c0.0",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q-1.0_c0.38",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q-1.0_c0.45",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.0",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.38",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.75_q0.0_c0.45",
+      "pnl": 254.80854043478885,
+      "mdd": -46.86905640696977,
+      "trades": 1224,
+      "trades_per_day": 20.863636363636363,
+      "wr": 0.375,
+      "avg_notional": 1.5775605552391712,
+      "avg_leverage": 1.6042372220879848,
+      "long_entries": 564,
+      "short_entries": 660
+    },
+    {
+      "name": "m2.0_q-1.0_c0.0",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q-1.0_c0.38",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q-1.0_c0.45",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.0",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.38",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m2.0_q0.0_c0.45",
+      "pnl": 191.41944078421352,
+      "mdd": -34.317120481337696,
+      "trades": 1061,
+      "trades_per_day": 18.085227272727273,
+      "wr": 0.3901979264844486,
+      "avg_notional": 1.1292038611698383,
+      "avg_leverage": 1.599882372033581,
+      "long_entries": 511,
+      "short_entries": 550
+    },
+    {
+      "name": "m1.5_q0.01_c0.0",
+      "pnl": 177.1344745686913,
+      "mdd": -24.662139322479383,
+      "trades": 752,
+      "trades_per_day": 12.818181818181818,
+      "wr": 0.4109042553191489,
+      "avg_notional": 0.9005205666681534,
+      "avg_leverage": 1.6107119526568943,
+      "long_entries": 361,
+      "short_entries": 391
+    },
+    {
+      "name": "m1.5_q0.01_c0.38",
+      "pnl": 177.1344745686913,
+      "mdd": -24.662139322479383,
+      "trades": 752,
+      "trades_per_day": 12.818181818181818,
+      "wr": 0.4109042553191489,
+      "avg_notional": 0.9005205666681534,
+      "avg_leverage": 1.6107119526568943,
+      "long_entries": 361,
+      "short_entries": 391
+    }
+  ],
+  "stress": {
+    "normal": {
+      "stress": {
+        "mode": "normal",
+        "changed_cols": []
+      },
+      "results": [
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.0,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 355.61517836713347,
+            "mdd": -46.869056406969754,
+            "trades": 1014,
+            "trades_per_day": 17.28409090909091,
+            "wr": 0.373767258382643,
+            "avg_notional": 1.7381085107210026,
+            "avg_leverage": 1.6218100146223027,
+            "long_entries": 477,
+            "short_entries": 537
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.38,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 355.61517836713347,
+            "mdd": -46.869056406969754,
+            "trades": 1014,
+            "trades_per_day": 17.28409090909091,
+            "wr": 0.373767258382643,
+            "avg_notional": 1.7381085107210026,
+            "avg_leverage": 1.6218100146223027,
+            "long_entries": 477,
+            "short_entries": 537
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.45,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 355.61517836713347,
+            "mdd": -46.869056406969754,
+            "trades": 1014,
+            "trades_per_day": 17.28409090909091,
+            "wr": 0.373767258382643,
+            "avg_notional": 1.7381085107210026,
+            "avg_leverage": 1.6218100146223027,
+            "long_entries": 477,
+            "short_entries": 537
+          }
+        }
+      ]
+    },
+    "all_ai_zero": {
+      "stress": {
+        "mode": "all_ai_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim",
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore",
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "results": [
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.0,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 118.42242998752619,
+            "mdd": -48.07125017246613,
+            "trades": 1140,
+            "trades_per_day": 19.431818181818183,
+            "wr": 0.3736842105263158,
+            "avg_notional": 1.5670174708216287,
+            "avg_leverage": 1.6003267551375429,
+            "long_entries": 594,
+            "short_entries": 546
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.38,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 118.42242998752619,
+            "mdd": -48.07125017246613,
+            "trades": 1140,
+            "trades_per_day": 19.431818181818183,
+            "wr": 0.3736842105263158,
+            "avg_notional": 1.5670174708216287,
+            "avg_leverage": 1.6003267551375429,
+            "long_entries": 594,
+            "short_entries": 546
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.45,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 118.42242998752619,
+            "mdd": -48.07125017246613,
+            "trades": 1140,
+            "trades_per_day": 19.431818181818183,
+            "wr": 0.3736842105263158,
+            "avg_notional": 1.5670174708216287,
+            "avg_leverage": 1.6003267551375429,
+            "long_entries": 594,
+            "short_entries": 546
+          }
+        }
+      ]
+    },
+    "patchtst_zero": {
+      "stress": {
+        "mode": "patchtst_zero",
+        "changed_cols": [
+          "pred_patchtst",
+          "conf_patchtst",
+          "ai_dir_edge",
+          "ai_dir_p_up",
+          "ai_dir_p_down",
+          "ai_dir_p_flat",
+          "ai_dir_entropy",
+          "patchtst_median",
+          "patchtst_regime_sim"
+        ]
+      },
+      "results": [
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.0,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 63.10565710356533,
+            "mdd": -51.97365750184167,
+            "trades": 1049,
+            "trades_per_day": 17.88068181818182,
+            "wr": 0.36129647283126787,
+            "avg_notional": 1.7912076213590775,
+            "avg_leverage": 1.6192766811464612,
+            "long_entries": 535,
+            "short_entries": 514
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.38,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 63.10565710356533,
+            "mdd": -51.97365750184167,
+            "trades": 1049,
+            "trades_per_day": 17.88068181818182,
+            "wr": 0.36129647283126787,
+            "avg_notional": 1.7912076213590775,
+            "avg_leverage": 1.6192766811464612,
+            "long_entries": 535,
+            "short_entries": 514
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.45,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 63.10565710356533,
+            "mdd": -51.97365750184167,
+            "trades": 1049,
+            "trades_per_day": 17.88068181818182,
+            "wr": 0.36129647283126787,
+            "avg_notional": 1.7912076213590775,
+            "avg_leverage": 1.6192766811464612,
+            "long_entries": 535,
+            "short_entries": 514
+          }
+        }
+      ]
+    },
+    "tide_zero": {
+      "stress": {
+        "mode": "tide_zero",
+        "changed_cols": [
+          "ai_adverse_risk",
+          "ai_reward_risk",
+          "ai_vol_regime_pct",
+          "tide_vol_raw",
+          "tide_vol_zscore"
+        ]
+      },
+      "results": [
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.0,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 78.21827615790735,
+            "mdd": -42.454283888730714,
+            "trades": 1149,
+            "trades_per_day": 19.585227272727273,
+            "wr": 0.38816362053959963,
+            "avg_notional": 1.4936387480537883,
+            "avg_leverage": 1.6079018968435617,
+            "long_entries": 554,
+            "short_entries": 595
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.38,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 78.21827615790735,
+            "mdd": -42.454283888730714,
+            "trades": 1149,
+            "trades_per_day": 19.585227272727273,
+            "wr": 0.38816362053959963,
+            "avg_notional": 1.4936387480537883,
+            "avg_leverage": 1.6079018968435617,
+            "long_entries": 554,
+            "short_entries": 595
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.45,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 78.21827615790735,
+            "mdd": -42.454283888730714,
+            "trades": 1149,
+            "trades_per_day": 19.585227272727273,
+            "wr": 0.38816362053959963,
+            "avg_notional": 1.4936387480537883,
+            "avg_leverage": 1.6079018968435617,
+            "long_entries": 554,
+            "short_entries": 595
+          }
+        }
+      ]
+    },
+    "dlinear_zero": {
+      "stress": {
+        "mode": "dlinear_zero",
+        "changed_cols": [
+          "ai_flow_pressure",
+          "ai_flow_exhaustion",
+          "ai_flow_flip_prob",
+          "ai_flow_slope",
+          "dlinear_smf_ema",
+          "dlinear_smf_slope"
+        ]
+      },
+      "results": [
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.0,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 195.24926013356128,
+            "mdd": -53.08344284128983,
+            "trades": 977,
+            "trades_per_day": 16.65340909090909,
+            "wr": 0.37871033776867963,
+            "avg_notional": 1.7970729190795263,
+            "avg_leverage": 1.6170350507946212,
+            "long_entries": 433,
+            "short_entries": 544
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.38,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 195.24926013356128,
+            "mdd": -53.08344284128983,
+            "trades": 977,
+            "trades_per_day": 16.65340909090909,
+            "wr": 0.37871033776867963,
+            "avg_notional": 1.7970729190795263,
+            "avg_leverage": 1.6170350507946212,
+            "long_entries": 433,
+            "short_entries": 544
+          }
+        },
+        {
+          "config": {
+            "notional_mult": 2.75,
+            "quality_floor": 0.01,
+            "confidence_floor": 0.45,
+            "max_notional": 3.6
+          },
+          "eval": {
+            "pnl": 195.24926013356128,
+            "mdd": -53.08344284128983,
+            "trades": 977,
+            "trades_per_day": 16.65340909090909,
+            "wr": 0.37871033776867963,
+            "avg_notional": 1.7970729190795263,
+            "avg_leverage": 1.6170350507946212,
+            "long_entries": 433,
+            "short_entries": 544
+          }
+        }
+      ]
+    }
+  }
+}

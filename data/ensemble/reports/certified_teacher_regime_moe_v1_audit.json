@@ -1,0 +1,17 @@
+{
+  "model_id": "certified_teacher_regime_moe_v1",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "m7_existing_artifacts_have_no_embedded_training_provenance; treat as teacher-input caveat until M7 is force-retrained with provenance writer"
+  ],
+  "invariants": {
+    "2025_declared_as_training_year": true,
+    "2026_fixed_oos_no_selection": true,
+    "ai_contracts_2024_certified": true,
+    "legacy_regime_v2_quarantined": true,
+    "next_bar_open_execution": true,
+    "entry_and_exit_cost_charged": true,
+    "cost_1x_2x_3x_reported": true
+  }
+}

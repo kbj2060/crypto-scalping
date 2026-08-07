@@ -1,0 +1,33 @@
+{
+  "train_csv": "/home/llewyn/crypto-scalping/data/rl_training_2025_unified.csv",
+  "test_csv": "/home/llewyn/crypto-scalping/data/rl_training_2026_unified.csv",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/unified_direction_catboost.pkl",
+  "rule_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/unified_sparse_shadow_rule.json",
+  "candidate_params": {
+    "quality_min": 0.007,
+    "raw_edge_min": 0.65,
+    "sup_prob_min": 0.9,
+    "debounce_bars": 12,
+    "require_agreement": false,
+    "sign_change_only": true
+  },
+  "veto_rule": {
+    "bull": "skip",
+    "bear": "short",
+    "chop": "skip",
+    "whipsaw": "long",
+    "normal": "short"
+  },
+  "hold_scale": 1.0,
+  "close_on_opp": false,
+  "candidate_rows": 57,
+  "take_rows": 30,
+  "backtest": {
+    "pnl_pct": -1.101147763890853,
+    "trades": 30,
+    "wr_pct": 50.0,
+    "mdd_pct": -6.1970058077413075,
+    "longs": 2,
+    "shorts": 28
+  }
+}

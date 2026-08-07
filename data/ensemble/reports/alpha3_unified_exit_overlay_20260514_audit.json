@@ -1,0 +1,48 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "signal_limit_fill_uses_5m_high_low_touch_proxy_not_queue_fill",
+    "real_l2_queue_and_partial_fill_require_forward_shadow_validation",
+    "unified_exit_did_not_improve_alpha3_cost1_pnl",
+    "unified_exit_worsened_alpha3_cost1_mdd"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "frozen_layers": {
+    "hgb_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+    "teacher": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_l2_teacher_deep_parent_20260514/teacher_deep_parent_l2_replay.pt",
+    "v27_deep_scout": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_deep_alpha_candidate_expansion_v27_20260511/v27_deep_alpha_candidate_expansion.pt",
+    "v21_2_jackpot": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_v21_2_20260511/v21_2_jackpot_runner.pkl",
+    "execution": {
+      "name": "next_open_limit_offset2_entry_fallback_fee20",
+      "anchor": "next_open",
+      "entry_offset_bps": 2.0,
+      "exit_offset_bps": 2.0,
+      "penetration_bps": 0.5,
+      "maker_fee_mult": 0.2,
+      "entry_miss": "market_fallback",
+      "exit_miss": "market_fallback"
+    }
+  },
+  "selected_config": {
+    "name": "unified_aggressive_lock",
+    "parent_opposite_conf": 0.78,
+    "parent_quality_floor": -0.08,
+    "cash_conf": 0.93,
+    "deep_opposite_edge": 0.01,
+    "deep_opposite_margin": 0.004,
+    "bail_min_hold": 2,
+    "bail_loss_floor": 0.006,
+    "bail_giveback": 0.006,
+    "soft_sl": 0.01,
+    "soft_sl_min_hold": 1,
+    "trail_start": 0.02,
+    "trail_gap_mult": 0.65,
+    "trail_min_gap": 0.006,
+    "trail_decay_start": 10,
+    "trail_decay_rate": 0.035
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-16T00:35:28.331877+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_feature_contract_fix_full_20260515_ledger.csv",
+  "range": {
+    "start_index": 1199,
+    "stop_index": 16895,
+    "rows_evaluated": 15697,
+    "start_ts": "2026-01-05 03:55:00",
+    "stop_ts": "2026-02-28 15:55:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "window_bars": 1200,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame",
+    "v31_config_override": null
+  },
+  "metrics": {
+    "final_equity": 1.3915971458444911,
+    "return_pct": 39.15971458444911,
+    "max_drawdown_pct": 37.18861388132589,
+    "decision_counts": {
+      "0": 9765,
+      "2": 4316,
+      "1": 1616
+    },
+    "entry_counts": {
+      "SHORT": 125,
+      "LONG": 65
+    },
+    "closed_trades": 190,
+    "win_rate": 0.24210526315789474,
+    "avg_closed_pnl_pct": 0.2255489677618234,
+    "median_closed_pnl_pct": -0.3072417808708751,
+    "resize_events": 14,
+    "regime_counts": {
+      "NORMAL": 5481,
+      "BEAR": 4023,
+      "BULL": 3527,
+      "WHIPSAW": 745,
+      "CHOP": 1921
+    },
+    "exit_reason_top20": {
+      "v31_deep_alpha_stop_loss": 92,
+      "learned_stop_loss": 44,
+      "v31_deep_alpha_max_hold": 38,
+      "learned_max_hold": 8,
+      "learned_take_profit": 4,
+      "v31_deep_alpha_take_profit": 4
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "router._trade_math per closed lot; same-side upsize stored as new lot; downsize closes delta exposure",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide"
+  },
+  "errors_sample": []
+}

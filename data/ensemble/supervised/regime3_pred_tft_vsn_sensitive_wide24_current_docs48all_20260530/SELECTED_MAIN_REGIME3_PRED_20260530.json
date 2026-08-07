@@ -1,0 +1,156 @@
+{
+  "model_id": "regime3_pred_tft_vsn_sensitive_wide24_current_docs48all_20260530",
+  "status": "selected_main_regime3_pred_for_sensitive_current_review",
+  "selected_at": "2026-05-30",
+  "feature_pack": "docs_regime_pred_all",
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "pred_prefix": "regime3_pred_sensitive_tft_h12_",
+  "output_stem": "regime3_pred_tft_vsn_sensitive_wide24_current",
+  "model_path": "data/ensemble/supervised/regime3_pred_tft_vsn_sensitive_wide24_current_docs48all_20260530/regime3_pred_tft_vsn_sensitive_wide24_current_2024.pt",
+  "selected_feature_count": 48,
+  "current_feature_count": 9,
+  "selected_feature_cols": [
+    "cvd_288",
+    "regime3_current_sensitive_wide24_bull_prob",
+    "regime3_current_sensitive_wide24_chop_prob",
+    "dual_momentum",
+    "bb_width_pct_rank_288",
+    "distance_to_day_high_low_pct",
+    "cvp_volume_imbalance",
+    "regime3_current_sensitive_wide24_confidence",
+    "regime3_current_sensitive_wide24_trend_prob",
+    "btc_volume_impulse_z",
+    "mean_reversion_z",
+    "regime3_current_sensitive_wide24_entropy",
+    "eth_btc_ret_spread_12",
+    "regime3_current_sensitive_wide24_range_prob",
+    "eth_btc_ret_spread_48",
+    "atr_pct_rank_288",
+    "cvd_12",
+    "regime3_current_sensitive_wide24_margin",
+    "regime3_current_sensitive_wide24_bear_prob",
+    "compression_score",
+    "regime3_current_sensitive_wide24_directional_bias",
+    "mtf_trend_1h",
+    "funding_price_divergence",
+    "rsi",
+    "crowding_pressure",
+    "macd_hist",
+    "vwap_dist_96",
+    "price_cvd_divergence",
+    "btc_lead_eth_follow_gap_3",
+    "taker_buy_quote",
+    "vwap_dist_24",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "funding_oi_divergence",
+    "quote_volume",
+    "log_return",
+    "quote_volume_btc",
+    "taker_buy_base",
+    "volume",
+    "long_squeeze_risk",
+    "mtf_trend_4h",
+    "funding_roc_288",
+    "volume_btc",
+    "funding_pressure",
+    "last_funding_rate",
+    "oi_up_price_up",
+    "range_contraction_breakout_dir",
+    "crowded_short_squeeze_risk"
+  ],
+  "validation": {
+    "rows": 26484,
+    "accuracy": 0.5760081558676937,
+    "balanced_accuracy": 0.5614693213030602,
+    "log_loss": 0.9340721226116493,
+    "recall": {
+      "bull": 0.5613959500215424,
+      "bear": 0.5090252707581228,
+      "chop": 0.6139867431295152
+    },
+    "true_counts": {
+      "bull": 6963,
+      "bear": 6094,
+      "chop": 13427
+    },
+    "pred_counts": {
+      "bull": 7773,
+      "bear": 6657,
+      "chop": 12054
+    },
+    "confusion_matrix": [
+      [
+        3909,
+        1199,
+        1855
+      ],
+      [
+        1037,
+        3102,
+        1955
+      ],
+      [
+        2827,
+        2356,
+        8244
+      ]
+    ]
+  },
+  "oos_2026": {
+    "rows": 16885,
+    "accuracy": 0.5905833580100681,
+    "balanced_accuracy": 0.5759541001348313,
+    "log_loss": 0.8999136822983543,
+    "recall": {
+      "bull": 0.4974962443665498,
+      "bear": 0.6018181818181818,
+      "chop": 0.6285478742197621
+    },
+    "true_counts": {
+      "bull": 3994,
+      "bear": 4400,
+      "chop": 8491
+    },
+    "pred_counts": {
+      "bull": 3624,
+      "bear": 5635,
+      "chop": 7626
+    },
+    "confusion_matrix": [
+      [
+        1987,
+        972,
+        1035
+      ],
+      [
+        498,
+        2648,
+        1254
+      ],
+      [
+        1139,
+        2015,
+        5337
+      ]
+    ]
+  },
+  "sidecars": {
+    "training_features_2024.csv": "data/ensemble/supervised/regime3_pred_tft_vsn_sensitive_wide24_current_docs48all_20260530/training_features_2024_regime3_pred_tft_vsn_sensitive_wide24_current.csv",
+    "training_features_2025.csv": "data/ensemble/supervised/regime3_pred_tft_vsn_sensitive_wide24_current_docs48all_20260530/training_features_2025_regime3_pred_tft_vsn_sensitive_wide24_current.csv",
+    "training_features_2026_rebuilt.csv": "data/ensemble/supervised/regime3_pred_tft_vsn_sensitive_wide24_current_docs48all_20260530/training_features_2026_rebuilt_regime3_pred_tft_vsn_sensitive_wide24_current.csv"
+  },
+  "leakage_audit": {
+    "forbidden_prefixes": [
+      "clean_regime_2024_unsup_v4_",
+      "clean_regime4_2024_unsup_v1_",
+      "clean_regime4_state24_sticky090_v2_",
+      "regime4_pred_"
+    ],
+    "forbidden_regime_features": [],
+    "uses_2026_for_selection": false,
+    "future_labels_use_future_current_argmax": true,
+    "future_labels_are_targets_not_features": true
+  }
+}

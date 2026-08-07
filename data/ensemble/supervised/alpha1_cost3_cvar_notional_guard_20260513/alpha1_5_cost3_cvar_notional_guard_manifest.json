@@ -1,0 +1,21 @@
+{
+  "model_id": "alpha1_cost3_cvar_notional_guard_20260513",
+  "selected_config": {
+    "name": "cvar_deep_r0.15_h0.35_s0.50_0.00",
+    "scope": "deep",
+    "risk_th": 0.15,
+    "high_risk_th": 0.35,
+    "scale": 0.5,
+    "high_scale": 0.0,
+    "min_notional": 0.0,
+    "parent_cap": 99.0,
+    "add_cap_mult": 1.35,
+    "flow_th": 0.1,
+    "fee_mult": 0.6,
+    "slip_mult": 0.35
+  },
+  "parent_frozen": true,
+  "v27_frozen": true,
+  "v31_exit_frozen": true,
+  "v21_2_frozen": true
+}

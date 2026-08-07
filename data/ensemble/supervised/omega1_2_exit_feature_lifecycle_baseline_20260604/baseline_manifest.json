@@ -1,0 +1,37 @@
+{
+  "model_id": "omega1_2_exit_feature_lifecycle_baseline_20260604",
+  "alias": "omega1.2_exit_feature_lifecycle_baseline",
+  "status": "research_baseline_not_live_promoted",
+  "created_kst": "2026-06-05",
+  "source_artifact": "tmp/causal_regen_20260516/omega1_2_mamba_sac_lifecycle_controller_20260604_mid600_e800_noresize_noreverse_edge002_q075_seed260604",
+  "baseline_artifact_dir": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604",
+  "contract": "docs/model_contracts/omega1_2_exit_feature_lifecycle_baseline_20260604_contract.md",
+  "artifacts": {
+    "report": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604/report.json",
+    "lifecycle_controller": "data/ensemble/supervised/omega1_2_exit_feature_lifecycle_baseline_20260604/lifecycle_controller.pt"
+  },
+  "frozen_3head_source": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "decision_boundary": {
+    "direction_head": "Frozen 3-head TabM Direction output",
+    "quality_head": "Frozen 3-head TabM Quality output",
+    "exit_head": "Feature-only entry/lifecycle risk signal; not an immediate threshold exit owner",
+    "controller": "Discrete Mamba offline SAC-style lifecycle controller"
+  },
+  "oos_cost3": {
+    "pnl_pct": 16.074043573945662,
+    "mdd_pct": -5.395957353690917,
+    "wr": 0.65625,
+    "trades": 32,
+    "long_entries": 6,
+    "short_entries": 26
+  },
+  "validation_cost3": {
+    "pnl_pct": 8.353216453146771,
+    "mdd_pct": -6.876020598594024,
+    "wr": 0.5393258426966292,
+    "trades": 89,
+    "long_entries": 20,
+    "short_entries": 69
+  },
+  "promotion_note": "Use as the new Omega1.2 exit-feature lifecycle research baseline. Do not wire to live trading_bot.py without runtime-native parity, current live data feature-contract validation, and comparison against the prior +32.15% Omega1.2 final TP/SL baseline."
+}

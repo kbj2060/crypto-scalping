@@ -1,0 +1,11 @@
+{
+  "model_id": "omega4_4_microstructure_only_high_edge_riskaware_sidecar_20260625",
+  "base_model_id": "omega4_4_topdown_reproducible_architecture_baseline_20260623",
+  "status": "blocked_not_promoted",
+  "verdict": "BLOCKED_NO_CLEAN_BASELINE_UPGRADE",
+  "feature_mode": "microstructure_only",
+  "report": "tmp/causal_regen_20260516/omega4_4_microstructure_only_high_edge_riskaware_sidecar_20260625/report.json",
+  "model": "tmp/causal_regen_20260516/omega4_4_microstructure_only_high_edge_riskaware_sidecar_20260625/duckdb_micro_context_sidecar.pkl",
+  "enabled_for_baseline": false,
+  "reason": "No clean baseline upgrade unless validation/OOS are both positive and baseline live-trade overlap exists."
+}

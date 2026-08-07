@@ -1,0 +1,39 @@
+{
+  "schema_version": "architecture_preflight_v1",
+  "pass": true,
+  "created_at": "2026-08-07T01:18:30.895715+00:00",
+  "experiment_id": "btc-kappa1-invariant-composite-20260807",
+  "dataset": {
+    "path": "data/splits/year_oos/btc_kappa1_primitives_5m_20260807.parquet",
+    "sha256": "4239f6a04fa79ef1eebfde7e4c587e84a64b4186868b592d10f3b56afca54c4d",
+    "manifest_sha256": "4239f6a04fa79ef1eebfde7e4c587e84a64b4186868b592d10f3b56afca54c4d",
+    "rows": 160497,
+    "schema_hash": "eb8ab1bac06c9d5aa305756806cab4a9e98f5f42622afcab1ac797670074de3a",
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "atr_pct_14",
+      "atr_pct_96",
+      "gmm_cluster_rank",
+      "gmm_confidence",
+      "if_score",
+      "evt_raw_score",
+      "evt_agreement",
+      "evt_gate_fired",
+      "flow_mean_5m",
+      "flow_mean_15m"
+    ]
+  },
+  "checks": {
+    "forbidden_feature_columns": [],
+    "timestamp_valid_unique_sorted": true,
+    "higher_timeframe": {
+      "enabled": false,
+      "rows_checked": 0
+    }
+  }
+}

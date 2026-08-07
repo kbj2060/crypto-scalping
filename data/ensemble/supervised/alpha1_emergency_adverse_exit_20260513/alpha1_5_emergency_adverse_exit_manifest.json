@@ -1,0 +1,21 @@
+{
+  "model_id": "alpha1_emergency_adverse_exit_20260513",
+  "selected_config": {
+    "name": "emergency_or_all_84",
+    "scope": "all",
+    "min_hold": 1,
+    "mae_trigger": 0.008,
+    "unreal_trigger": -0.006,
+    "adverse_flow_th": 0.35000000000000003,
+    "opp_utility_th": 0.0125,
+    "require_both": false,
+    "cooldown_after": 6,
+    "flow_th": 0.1,
+    "fee_mult": 0.6,
+    "slip_mult": 0.35
+  },
+  "parent_frozen": true,
+  "v27_frozen": true,
+  "v31_exit_frozen": false,
+  "v21_2_frozen": true
+}

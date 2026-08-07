@@ -1,0 +1,57 @@
+{
+  "audit_id": "trading_bot_resize_cost_accounting_patch_2026",
+  "created_at_utc": "2026-05-07T06:40:43.400782+00:00",
+  "status": "pass",
+  "blocking": [],
+  "files_changed": [
+    "trading_bot.py",
+    "trading_bot_modules/position_accounting.py"
+  ],
+  "fix": {
+    "summary": "Recognize downsizing resize PnL/cost in live strategy state and audit rows, not only as an estimate.",
+    "state_fields": [
+      "position_realized_pnl_frac",
+      "last_resize_realized_pnl_frac"
+    ],
+    "resize_payload_fields": [
+      "pnl_frac",
+      "resize_realized_pnl_frac",
+      "resize_gross_return_frac",
+      "costs_recognized_in_strategy_equity"
+    ],
+    "audit_behavior": "RESIZE rows can now carry realized_pnl_frac and costs_recognized_in_strategy_equity=True when downsizing closes exposure."
+  },
+  "checks": [
+    {
+      "name": "py_compile",
+      "status": "pass"
+    },
+    {
+      "name": "resize_accounting_smoke",
+      "status": "pass",
+      "covered": [
+        "DOWNSIZE realized pnl",
+        "fee cost",
+        "slippage cost",
+        "audit recognition"
+      ]
+    },
+    {
+      "name": "resize_then_close_smoke",
+      "status": "pass",
+      "covered": [
+        "partial realized pnl persists until final close",
+        "state resets after close"
+      ]
+    }
+  ],
+  "runtime_verification": {
+    "verified_at_utc": "2026-05-07T06:46:15.401238+00:00",
+    "pid": 2580762,
+    "log_path": "logs/trading_bot_dsac_overlay_live.log",
+    "dashboard_updated_at": "2026-05-07T06:45:27.094304+00:00",
+    "dashboard_position_realized_field_present": true,
+    "dashboard_position_realized_pnl_frac": 0.0,
+    "binance_execution_changed": false
+  }
+}

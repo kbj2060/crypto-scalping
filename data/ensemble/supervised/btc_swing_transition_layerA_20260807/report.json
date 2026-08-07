@@ -1,0 +1,50 @@
+{
+  "model_id": "btc_swing_transition_layerA_20260807",
+  "created_at": "2026-08-07T01:54:23.640189+00:00",
+  "recipe": "exact re-run of eval_btc_5m_layerA_layerB_20260806.py Layer A",
+  "label": "transition_soon (pivot imminent within 24 bars)",
+  "train_split_end": "2025-09-01",
+  "params": {
+    "n_estimators": 400,
+    "num_leaves": 31,
+    "learning_rate": 0.05,
+    "min_child_samples": 100,
+    "class_weight": "balanced"
+  },
+  "n_features": 110,
+  "metrics": {
+    "VAL": {
+      "auc": 0.751922468769241,
+      "ap": 0.512967060885828,
+      "base_rate": 0.25964822404371585,
+      "n": 35136
+    },
+    "OOS": {
+      "auc": 0.7704673382825411,
+      "ap": 0.6425096906834051,
+      "base_rate": 0.3558641975308642,
+      "n": 25920
+    }
+  },
+  "repro_check": {
+    "rows": 271773,
+    "max_abs_diff": 0.0,
+    "corr": 1.0,
+    "atol": 1e-09,
+    "reference": "/home/llewyn/crypto-scalping/tmp/btc_1h_volregime_20260805/btc5m_layerA_pred.parquet"
+  },
+  "inputs": {
+    "panel": {
+      "path": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_features_causalfix_final_2024_2026.parquet",
+      "sha256": "bfa943e768d5369f0ab5c1ecc4389cb5659f80662f01b9bca1df3f4d5dc3b878"
+    },
+    "pivot_labels": {
+      "path": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_5m_pivot_transition_labels_20260806.parquet",
+      "sha256": "e9cb02f55e5d70e3a673070005de7dc7457f198856d013ee1ec5e63fccfaf247"
+    },
+    "dvol_csv": {
+      "path": "/home/llewyn/crypto-scalping/data/derivatives/deribit_dvol/BTC_dvol_hourly.csv",
+      "sha256": "f3e0ab833e4d922999d8ad4cebcdd8a97b9422d636188e7fbd2fbab4110d7731"
+    }
+  }
+}

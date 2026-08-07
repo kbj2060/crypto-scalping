@@ -1,0 +1,51 @@
+{
+  "model_id": "omega1_2_1_tp_runner_clean_repair_20260613",
+  "status": "clean_repair_candidate_shadow_required",
+  "selection_policy": "validation_only_no_oos_selection",
+  "accounting_policy": "next_open_taker_entry_intrabar_high_low_price_barrier_exit_taker_fee_cost3",
+  "oos_usage": "reported_once_after_validation_selection",
+  "selected_config": {
+    "candidate_id": 190,
+    "mode": "mom3_quality",
+    "quality_min": 0.7,
+    "extend_mult": 1.75,
+    "floor_frac": 0.75,
+    "max_extensions": 2
+  },
+  "validation": {
+    "pnl_pct": 160.2156541637729,
+    "mdd_pct": -27.640859723754485,
+    "wr": 0.5945945945945946,
+    "trades": 37
+  },
+  "oos": {
+    "pnl_pct": 85.70147046533403,
+    "mdd_pct": -15.64416893312579,
+    "wr": 0.6666666666666666,
+    "trades": 18
+  },
+  "baseline_clean_accounting": {
+    "validation": {
+      "pnl_pct": 49.156279644084,
+      "mdd_pct": -33.163346241545355,
+      "wr": 0.4666666666666667,
+      "trades": 45
+    },
+    "oos": {
+      "pnl_pct": 120.06602072914193,
+      "mdd_pct": -15.64416893312578,
+      "wr": 0.65,
+      "trades": 20
+    }
+  },
+  "artifacts": {
+    "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613",
+    "ranking": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/validation_only_ranking.csv",
+    "report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/report.json",
+    "validation_selected_ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/validation_selected_ledger.csv",
+    "oos_selected_ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/oos_selected_ledger.csv",
+    "validation_baseline_ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/validation_baseline_ledger.csv",
+    "oos_baseline_ledger": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_tp_runner_clean_repair_20260613/oos_baseline_ledger.csv"
+  },
+  "promotion_blockers": []
+}

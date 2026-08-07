@@ -1,0 +1,17 @@
+{
+  "model_id": "alpha3_dsac_exit_owner_v7_20260515",
+  "selection_uses_2026": false,
+  "status": "research_candidate",
+  "base_contract": "docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md",
+  "notes": [
+    "Uses DSACAgent architecture and training techniques from ensemble/train_rl_dsac_agent.py.",
+    "State/reward replay is Alpha3 exit-owner specific, not the original DSAC trading env.",
+    "L2/orderbook/queue data is intentionally removed.",
+    "Only hold and close_100 DSAC actions are included. Execution placement is not learned by DSAC.",
+    "Feature sweep is based on alpha3_exit_owner_feature_analysis_20260515: market features are reduced by top-k or target-aware PLS."
+  ],
+  "promotion_gate": [
+    "Must beat Alpha3 corrected next_open_limit_touch0_fee20 on the same eval horizon.",
+    "Must survive cost2/cost3 stress and later real L2 shadow route/fallback audit if orderbook data is reintroduced."
+  ]
+}

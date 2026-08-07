@@ -1,0 +1,377 @@
+{
+  "model_id": "deepscalp_pnl_v1_20260717",
+  "checkpoint_frozen": true,
+  "validation_replay": {
+    "bars": 14400,
+    "days": 10,
+    "compounded_return_pct": 0.0,
+    "additive_net_return_pct": 0.0,
+    "additive_gross_return_pct": 0.0,
+    "max_drawdown_pct": 0.0,
+    "entries_or_reversals": 0,
+    "exposure_fraction": 0.0,
+    "turnover": 0.0,
+    "positive_day_fraction": 0.0,
+    "side_fraction": {
+      "SHORT": 0.0,
+      "CASH": 1.0,
+      "LONG": 0.0
+    }
+  },
+  "development_oos_replay": {
+    "bars": 16376,
+    "days": 12,
+    "compounded_return_pct": 0.0,
+    "additive_net_return_pct": 0.0,
+    "additive_gross_return_pct": 0.0,
+    "max_drawdown_pct": 0.0,
+    "entries_or_reversals": 0,
+    "exposure_fraction": 0.0,
+    "turnover": 0.0,
+    "positive_day_fraction": 0.0,
+    "side_fraction": {
+      "SHORT": 0.0,
+      "CASH": 1.0,
+      "LONG": 0.0
+    }
+  },
+  "timing_controls": {
+    "correct_alignment": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "features_lagged_1m": {
+      "bars": 16375,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "features_led_1m_noncausal_control": {
+      "bars": 16375,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "returns_randomly_shuffled": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    }
+  },
+  "frozen_input_ablation": {
+    "all_microstructure_replaced_by_training_median": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "orderbook_replaced_by_training_median": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    },
+    "all_base_market_features_replaced_by_training_median": {
+      "bars": 16376,
+      "days": 12,
+      "compounded_return_pct": 0.0,
+      "additive_net_return_pct": 0.0,
+      "additive_gross_return_pct": 0.0,
+      "max_drawdown_pct": 0.0,
+      "entries_or_reversals": 0,
+      "exposure_fraction": 0.0,
+      "turnover": 0.0,
+      "positive_day_fraction": 0.0,
+      "side_fraction": {
+        "SHORT": 0.0,
+        "CASH": 1.0,
+        "LONG": 0.0
+      }
+    }
+  },
+  "top_base_raw_feature_ic": [
+    {
+      "feature": "rsi",
+      "spearman_next_1m_return": -0.06150313164650514
+    },
+    {
+      "feature": "kalman_velocity",
+      "spearman_next_1m_return": -0.05746524984556943
+    },
+    {
+      "feature": "vwap_dist_24",
+      "spearman_next_1m_return": -0.05536931721958066
+    },
+    {
+      "feature": "hma_slope",
+      "spearman_next_1m_return": -0.052439469569867475
+    },
+    {
+      "feature": "cvp_volume_imbalance",
+      "spearman_next_1m_return": -0.04631837800067265
+    },
+    {
+      "feature": "breakout_strength",
+      "spearman_next_1m_return": -0.04556525249173196
+    },
+    {
+      "feature": "macd_hist",
+      "spearman_next_1m_return": -0.04407087467801226
+    },
+    {
+      "feature": "log_return",
+      "spearman_next_1m_return": -0.040344368267328484
+    },
+    {
+      "feature": "funding_oi_divergence",
+      "spearman_next_1m_return": 0.04034436106178845
+    },
+    {
+      "feature": "bar_open_close_logret",
+      "spearman_next_1m_return": -0.040286454775166264
+    },
+    {
+      "feature": "mean_reversion_z",
+      "spearman_next_1m_return": 0.03871349064479752
+    },
+    {
+      "feature": "bar_taker_buy_ratio",
+      "spearman_next_1m_return": -0.03868515780036867
+    },
+    {
+      "feature": "net_taker_ratio",
+      "spearman_next_1m_return": -0.03868515153997946
+    },
+    {
+      "feature": "realized_skewness",
+      "spearman_next_1m_return": -0.027932607731868928
+    },
+    {
+      "feature": "smart_money_flow",
+      "spearman_next_1m_return": -0.025577519128921818
+    },
+    {
+      "feature": "oi_change_rate",
+      "spearman_next_1m_return": -0.025577519128921818
+    },
+    {
+      "feature": "taker_acceleration",
+      "spearman_next_1m_return": -0.024739676579268476
+    },
+    {
+      "feature": "cvd_slope_12",
+      "spearman_next_1m_return": -0.02397302948082316
+    },
+    {
+      "feature": "liquidity_vacuum",
+      "spearman_next_1m_return": 0.02301708217565427
+    },
+    {
+      "feature": "big_trade_ratio",
+      "spearman_next_1m_return": -0.02168672411472447
+    }
+  ],
+  "top_micro_raw_feature_ic": [
+    {
+      "feature": "micro_obi",
+      "spearman_next_1m_return": 0.10910742736071181
+    },
+    {
+      "feature": "micro_taker_buy_ratio",
+      "spearman_next_1m_return": -0.024014217296868347
+    },
+    {
+      "feature": "micro_nif_retail",
+      "spearman_next_1m_return": -0.022025091490404092
+    },
+    {
+      "feature": "book_spread_bps",
+      "spearman_next_1m_return": 0.019776820323826928
+    },
+    {
+      "feature": "book_age_min",
+      "spearman_next_1m_return": -0.017473614666167814
+    },
+    {
+      "feature": "micro_nif_whale",
+      "spearman_next_1m_return": -0.016829403026136416
+    },
+    {
+      "feature": "book_bid_notional_1",
+      "spearman_next_1m_return": -0.012425027199940623
+    },
+    {
+      "feature": "micro_poll_age_sec",
+      "spearman_next_1m_return": 0.010081687380712795
+    },
+    {
+      "feature": "micro_trade_age_sec",
+      "spearman_next_1m_return": 0.010081148567942115
+    },
+    {
+      "feature": "book_bid_notional_5",
+      "spearman_next_1m_return": -0.009534426036431197
+    },
+    {
+      "feature": "book_ask_notional_20",
+      "spearman_next_1m_return": 0.009323791421554827
+    },
+    {
+      "feature": "book_microprice_edge_bps",
+      "spearman_next_1m_return": -0.009173487284753565
+    },
+    {
+      "feature": "book_imbalance_1",
+      "spearman_next_1m_return": -0.00863256488509101
+    },
+    {
+      "feature": "micro_funding_rate",
+      "spearman_next_1m_return": -0.008357312046930158
+    },
+    {
+      "feature": "micro_oi_delta_pct",
+      "spearman_next_1m_return": -0.008157570677642096
+    },
+    {
+      "feature": "book_bid_notional_10",
+      "spearman_next_1m_return": -0.007705203861982007
+    },
+    {
+      "feature": "book_imbalance_5",
+      "spearman_next_1m_return": -0.007237167399751032
+    },
+    {
+      "feature": "book_bid_notional_20",
+      "spearman_next_1m_return": -0.006834270140860659
+    },
+    {
+      "feature": "book_imbalance_20",
+      "spearman_next_1m_return": -0.006535948404091404
+    },
+    {
+      "feature": "book_ask_notional_5",
+      "spearman_next_1m_return": 0.00645782508706202
+    }
+  ],
+  "max_absolute_raw_feature_ic": 0.10910742736071181,
+  "asof_age_checks": {
+    "micro_age_min": {
+      "minimum": 0.0,
+      "maximum": 2.0,
+      "negative_count": 0
+    },
+    "book_age_min": {
+      "minimum": 0.003309816587716341,
+      "maximum": 5.9935712814331055,
+      "negative_count": 0
+    }
+  },
+  "daily_pnl_concentration": {
+    "largest_positive_day_share": null,
+    "worst_day_additive_return_pct": 0.0,
+    "best_day_additive_return_pct": 0.0
+  },
+  "break_even_cost": {
+    "per_notional_change": null,
+    "basis_points_per_notional_change": null
+  },
+  "existing_full_feature_truncation_audit": {
+    "verdict": "PASS",
+    "cutoff_reports": [
+      {
+        "cutoff": "2026-06-15 14:37:00",
+        "status": "compared",
+        "n_columns_compared": 141,
+        "n_mismatches": 0,
+        "mismatches": []
+      },
+      {
+        "cutoff": "2026-06-22 03:12:00",
+        "status": "compared",
+        "n_columns_compared": 141,
+        "n_mismatches": 0,
+        "mismatches": []
+      }
+    ]
+  },
+  "audit_checks": {
+    "shuffled_returns_are_unprofitable": false,
+    "one_minute_feature_lag_degrades_return": false,
+    "no_negative_asof_age": true,
+    "max_absolute_raw_feature_ic_below_0_25": true,
+    "truncated_feature_rebuild_passed": true,
+    "btc_5m_open_timestamp_semantic_leak_excluded": true
+  },
+  "audit_pass": false,
+  "promotion_pass": false,
+  "promotion_note": "Audit pass only supports causal development status; July is consumed and the history is not promotion-length."
+}

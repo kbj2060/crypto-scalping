@@ -1,0 +1,31 @@
+{
+  "schema_version": "frozen_baseline_registry_v1",
+  "baselines": [
+    {
+      "id": "omega461_eth_greedy_router_20260706",
+      "description": "Omega4.6.1 ETH h48qual>zig075 greedy single-slot router with duration gate, 2026-01-01..06-30 OOS",
+      "source_report": "tmp/causal_regen_20260516/omega4_6_1_extended_oos_20260706/greedy_router_result.json",
+      "features_path": "data/splits/year_oos/training_features_2026_rebuilt.csv",
+      "features_sha256_at_freeze": null,
+      "frozen_at": "2026-07-06",
+      "reference": {"pnl": 145.3353677513158, "mdd": -10.134492720083554, "trades": 24},
+      "tolerance": {"pnl": 1.0, "mdd": 0.5, "trades": 0},
+      "wired": true,
+      "known_status": "confirmed_non_reproducible_20260730",
+      "notes": "See project memory project-omega461-baseline-drift-bisection-20260730: root cause is upstream binance_data/metrics/ETHUSDT-metrics-*.zip files being retroactively revised by Binance (78 of the Jan-Jun window's files re-downloaded 2026-07-02), not a code bug. features_sha256_at_freeze is null because this baseline predates scripts/dataset_snapshot.py -- no original hash was ever recorded, so this checker cannot pinpoint which byte changed, only that the replay no longer reproduces. Confirmed NOT recoverable from any file currently on disk."
+    },
+    {
+      "id": "sigma6_1h_regime_trend_lev4_oos",
+      "description": "Sigma6 1h trend-scan + Regime3 filter + trailing stop, lev4, OOS (tape_ensemble.parquet production signal tape)",
+      "source_report": null,
+      "features_path": null,
+      "features_sha256_at_freeze": null,
+      "frozen_at": "unknown (before 2026-07-20)",
+      "reference": {"pnl": 45.9, "mdd": null, "trades": null},
+      "tolerance": {},
+      "wired": false,
+      "known_status": "confirmed_non_reproducible_20260726_not_wired",
+      "notes": "project-selection-stats-instrument-20260726: tape_ensemble.parquet was silently regenerated 2026-07-20; OOS flipped +45.9%/+16.6% -> -22.0%/-9.7%. Uses a separate 1h trend-scanning pipeline (scripts/eval_sigma6_fresh_window_20260720.py and related) that has not been wired into a compute_metrics() runner yet -- needs its own follow-up pass, not chased in this session to avoid scope creep."
+    }
+  ]
+}

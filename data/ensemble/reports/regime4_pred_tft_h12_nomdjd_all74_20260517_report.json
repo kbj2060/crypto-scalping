@@ -1,0 +1,495 @@
+{
+  "model_id": "regime4_pred_tft_vsn_select_20260517",
+  "base_model_id": "regime4_pred_tft_clean_target_20260517",
+  "model_path": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/regime4_pred_tft_vsn_selected_2024.pt",
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw"
+  ],
+  "clean_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2024_clean_regime4_raw_state12_v1.csv",
+  "clean_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2025_clean_regime4_raw_state12_v1.csv",
+  "horizon_bars": 12,
+  "seq_len": 72,
+  "all_feature_count": 74,
+  "all_feature_cols": [
+    "clean_regime4_2024_unsup_v1_bear_prob",
+    "clean_regime4_2024_unsup_v1_bull_prob",
+    "clean_regime4_2024_unsup_v1_chop_prob",
+    "clean_regime4_2024_unsup_v1_confidence",
+    "clean_regime4_2024_unsup_v1_directional_bias",
+    "clean_regime4_2024_unsup_v1_entropy",
+    "clean_regime4_2024_unsup_v1_instability_prob",
+    "clean_regime4_2024_unsup_v1_margin",
+    "clean_regime4_2024_unsup_v1_micro_prob",
+    "clean_regime4_2024_unsup_v1_range_prob",
+    "clean_regime4_2024_unsup_v1_trend_prob",
+    "clean_regime4_2024_unsup_v1_whipsaw_prob",
+    "log_return",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rogers_satchell_vol",
+    "parkinson_vol",
+    "amihud_illiquidity_z",
+    "btc_corr_60",
+    "eth_btc_ratio_change",
+    "fvg_dist",
+    "chop_index",
+    "cvp_poc_dist",
+    "cvp_cluster_position",
+    "cvp_volume_imbalance",
+    "turtle_signal",
+    "dual_momentum",
+    "mean_reversion_z",
+    "breakout_strength",
+    "volume_profile_signal",
+    "funding_roc_288",
+    "long_squeeze_risk",
+    "funding_price_divergence",
+    "ofi_acceleration",
+    "kalman_velocity",
+    "ofti",
+    "kel",
+    "mta_funding",
+    "svps",
+    "volume",
+    "quote_volume",
+    "trades",
+    "taker_buy_base",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "count_long_short_ratio",
+    "last_funding_rate",
+    "whale_retail_ratio",
+    "smart_money_flow",
+    "squeeze_power",
+    "oi_change_rate",
+    "net_taker_ratio",
+    "taker_acceleration",
+    "trade_intensity",
+    "big_trade_ratio",
+    "hour_sin",
+    "hour_cos",
+    "minute_sin",
+    "minute_cos",
+    "session_europe",
+    "session_us",
+    "is_hour_open",
+    "bb_width",
+    "close_btc",
+    "quote_volume_btc",
+    "taker_buy_quote",
+    "volume_btc"
+  ],
+  "selected_feature_count": 74,
+  "selected_feature_cols": [
+    "close_btc",
+    "sum_toptrader_long_short_ratio",
+    "sum_open_interest_value",
+    "btc_corr_60",
+    "minute_sin",
+    "clean_regime4_2024_unsup_v1_bear_prob",
+    "hour_cos",
+    "trade_intensity",
+    "funding_price_divergence",
+    "kalman_velocity",
+    "session_europe",
+    "ofi_acceleration",
+    "clean_regime4_2024_unsup_v1_bull_prob",
+    "net_taker_ratio",
+    "hour_sin",
+    "svps",
+    "taker_acceleration",
+    "log_return",
+    "mean_reversion_z",
+    "clean_regime4_2024_unsup_v1_entropy",
+    "trades",
+    "whale_retail_ratio",
+    "clean_regime4_2024_unsup_v1_whipsaw_prob",
+    "hma_slope",
+    "session_us",
+    "dual_momentum",
+    "macd_hist",
+    "cvp_cluster_position",
+    "count_long_short_ratio",
+    "eth_btc_ratio_change",
+    "chop_index",
+    "clean_regime4_2024_unsup_v1_chop_prob",
+    "clean_regime4_2024_unsup_v1_directional_bias",
+    "amihud_illiquidity_z",
+    "long_squeeze_risk",
+    "clean_regime4_2024_unsup_v1_trend_prob",
+    "quote_volume",
+    "breakout_strength",
+    "clean_regime4_2024_unsup_v1_instability_prob",
+    "cvp_volume_imbalance",
+    "squeeze_power",
+    "fvg_dist",
+    "clean_regime4_2024_unsup_v1_range_prob",
+    "quote_volume_btc",
+    "funding_roc_288",
+    "big_trade_ratio",
+    "volatility_z",
+    "cvp_poc_dist",
+    "clean_regime4_2024_unsup_v1_margin",
+    "garman_klass_vol",
+    "clean_regime4_2024_unsup_v1_micro_prob",
+    "mtf_trend_1h",
+    "is_hour_open",
+    "rsi",
+    "wick_ratio",
+    "mta_funding",
+    "minute_cos",
+    "clean_regime4_2024_unsup_v1_confidence",
+    "kel",
+    "bb_width_z",
+    "mtf_trend_4h",
+    "volume_btc",
+    "bb_width",
+    "parkinson_vol",
+    "taker_buy_quote",
+    "taker_buy_base",
+    "rogers_satchell_vol",
+    "volume_profile_signal",
+    "volume",
+    "last_funding_rate",
+    "turtle_signal",
+    "oi_change_rate",
+    "smart_money_flow",
+    "ofti"
+  ],
+  "selection_policy": "drop_importance_below_0_exclude_pred_mdjd_conf_mdjd",
+  "excluded_features": [
+    "pred_mdjd",
+    "conf_mdjd"
+  ],
+  "importance_path": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/regime4_pred_tft_vsn_importance.csv",
+  "top_20_vsn_importance": [
+    {
+      "feature": "close_btc",
+      "vsn_importance": 0.06196245962027649,
+      "raw_gate_abs_score": 1.9011268189383879
+    },
+    {
+      "feature": "sum_toptrader_long_short_ratio",
+      "vsn_importance": 0.049781695140680905,
+      "raw_gate_abs_score": 1.527397658261988
+    },
+    {
+      "feature": "sum_open_interest_value",
+      "vsn_importance": 0.025089187764572925,
+      "raw_gate_abs_score": 0.7697842857903905
+    },
+    {
+      "feature": "btc_corr_60",
+      "vsn_importance": 0.020463015753630576,
+      "raw_gate_abs_score": 0.6278444768653976
+    },
+    {
+      "feature": "minute_sin",
+      "vsn_importance": 0.018648372914298716,
+      "raw_gate_abs_score": 0.5721677624517016
+    },
+    {
+      "feature": "clean_regime4_2024_unsup_v1_bear_prob",
+      "vsn_importance": 0.018316318720279046,
+      "raw_gate_abs_score": 0.5619797044330173
+    },
+    {
+      "feature": "hour_cos",
+      "vsn_importance": 0.018312948953934375,
+      "raw_gate_abs_score": 0.5618763135539161
+    },
+    {
+      "feature": "trade_intensity",
+      "vsn_importance": 0.017651118015512474,
+      "raw_gate_abs_score": 0.541570074028439
+    },
+    {
+      "feature": "funding_price_divergence",
+      "vsn_importance": 0.016409720291092656,
+      "raw_gate_abs_score": 0.5034816165765127
+    },
+    {
+      "feature": "kalman_velocity",
+      "vsn_importance": 0.01632067394831838,
+      "raw_gate_abs_score": 0.5007495044006242
+    },
+    {
+      "feature": "session_europe",
+      "vsn_importance": 0.015748082539800656,
+      "raw_gate_abs_score": 0.48318130440182155
+    },
+    {
+      "feature": "ofi_acceleration",
+      "vsn_importance": 0.015648975761385134,
+      "raw_gate_abs_score": 0.48014051881101394
+    },
+    {
+      "feature": "clean_regime4_2024_unsup_v1_bull_prob",
+      "vsn_importance": 0.015444957794706667,
+      "raw_gate_abs_score": 0.4738808572292328
+    },
+    {
+      "feature": "net_taker_ratio",
+      "vsn_importance": 0.015316852764686518,
+      "raw_gate_abs_score": 0.4699503497944938
+    },
+    {
+      "feature": "hour_sin",
+      "vsn_importance": 0.015271143556530845,
+      "raw_gate_abs_score": 0.46854790382915074
+    },
+    {
+      "feature": "svps",
+      "vsn_importance": 0.015251601275306122,
+      "raw_gate_abs_score": 0.4679483092493481
+    },
+    {
+      "feature": "taker_acceleration",
+      "vsn_importance": 0.0151148092460237,
+      "raw_gate_abs_score": 0.4637512680557039
+    },
+    {
+      "feature": "log_return",
+      "vsn_importance": 0.015076188926277762,
+      "raw_gate_abs_score": 0.4625663227505154
+    },
+    {
+      "feature": "mean_reversion_z",
+      "vsn_importance": 0.014922617947208628,
+      "raw_gate_abs_score": 0.4578544712728924
+    },
+    {
+      "feature": "clean_regime4_2024_unsup_v1_entropy",
+      "vsn_importance": 0.014792789612441706,
+      "raw_gate_abs_score": 0.45387108955118394
+    }
+  ],
+  "validation_label_meta": {
+    "horizon": 12,
+    "label_source": "argmax_clean_regime4_at_t_plus_horizon",
+    "label_counts": {
+      "bull": 31845,
+      "bear": 31096,
+      "chop": 26873,
+      "whipsaw": 15554
+    },
+    "split_policy": "Q4_2024_validation_with_horizon_embargo",
+    "embargo_bars": 12
+  },
+  "all_features": {
+    "training_history": [
+      {
+        "epoch": 1.0,
+        "train_loss": 1.050391565148647,
+        "val_log_loss": 0.9416485444463616,
+        "val_balanced_accuracy": 0.591562092572281
+      },
+      {
+        "epoch": 2.0,
+        "train_loss": 0.9281061440706253,
+        "val_log_loss": 0.9102113380899424,
+        "val_balanced_accuracy": 0.6072650350857556
+      },
+      {
+        "epoch": 3.0,
+        "train_loss": 0.8822887299152521,
+        "val_log_loss": 0.9452772402652807,
+        "val_balanced_accuracy": 0.5807549731585672
+      },
+      {
+        "epoch": 4.0,
+        "train_loss": 0.8479392585846094,
+        "val_log_loss": 0.9495201797701173,
+        "val_balanced_accuracy": 0.5906626126664178
+      }
+    ],
+    "best_epoch": 2,
+    "validation": {
+      "rows": 26484,
+      "accuracy": 0.61939284096058,
+      "balanced_accuracy": 0.6072650350857556,
+      "log_loss": 0.9102113380899424,
+      "true_counts": {
+        "bull": 8302,
+        "bear": 7766,
+        "chop": 6419,
+        "whipsaw": 3997
+      },
+      "pred_counts": {
+        "bull": 6189,
+        "bear": 7655,
+        "chop": 7803,
+        "whipsaw": 4837
+      },
+      "confusion_matrix": [
+        [
+          4756,
+          190,
+          2116,
+          1240
+        ],
+        [
+          100,
+          5501,
+          1149,
+          1016
+        ],
+        [
+          704,
+          1017,
+          4132,
+          566
+        ],
+        [
+          629,
+          947,
+          406,
+          2015
+        ]
+      ]
+    }
+  },
+  "selected_features": {
+    "training_history": [
+      {
+        "epoch": 1.0,
+        "train_loss": 1.0625304614122097,
+        "val_log_loss": 0.9840968075957943,
+        "val_balanced_accuracy": 0.5745276227933942
+      },
+      {
+        "epoch": 2.0,
+        "train_loss": 0.9413688194293243,
+        "val_log_loss": 0.9486086735843097,
+        "val_balanced_accuracy": 0.600905392597402
+      },
+      {
+        "epoch": 3.0,
+        "train_loss": 0.8917999428052169,
+        "val_log_loss": 0.9229056463969652,
+        "val_balanced_accuracy": 0.6123690622429494
+      },
+      {
+        "epoch": 4.0,
+        "train_loss": 0.8570804332311337,
+        "val_log_loss": 0.9125890718796922,
+        "val_balanced_accuracy": 0.6138228165896774
+      },
+      {
+        "epoch": 5.0,
+        "train_loss": 0.8286191064577836,
+        "val_log_loss": 0.8988966259309439,
+        "val_balanced_accuracy": 0.605649360143007
+      },
+      {
+        "epoch": 6.0,
+        "train_loss": 0.7877985514127291,
+        "val_log_loss": 0.9375005468089426,
+        "val_balanced_accuracy": 0.597105786101836
+      }
+    ],
+    "best_epoch": 5,
+    "validation": {
+      "rows": 26484,
+      "accuracy": 0.6219226702914967,
+      "balanced_accuracy": 0.605649360143007,
+      "log_loss": 0.8988966259309439,
+      "true_counts": {
+        "bull": 8302,
+        "bear": 7766,
+        "chop": 6419,
+        "whipsaw": 3997
+      },
+      "pred_counts": {
+        "bull": 6539,
+        "bear": 6905,
+        "chop": 9089,
+        "whipsaw": 3951
+      },
+      "confusion_matrix": [
+        [
+          4873,
+          136,
+          2286,
+          1007
+        ],
+        [
+          184,
+          5135,
+          1582,
+          865
+        ],
+        [
+          700,
+          727,
+          4688,
+          304
+        ],
+        [
+          782,
+          907,
+          533,
+          1775
+        ]
+      ]
+    }
+  },
+  "final_label_meta": {
+    "horizon": 12,
+    "label_source": "argmax_clean_regime4_at_t_plus_horizon",
+    "label_counts": {
+      "bull": 31845,
+      "bear": 31096,
+      "chop": 26873,
+      "whipsaw": 15554
+    }
+  },
+  "selected_final_epochs": 5,
+  "final_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.037847624308821
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 0.9187770606814951
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 0.8826474720153256
+    },
+    {
+      "epoch": 4.0,
+      "train_loss": 0.8489515867786132
+    },
+    {
+      "epoch": 5.0,
+      "train_loss": 0.8214488539142885
+    }
+  ],
+  "train_sidecar": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2024_regime4_pred_tft_vsn_selected.csv",
+  "predict_sidecar": "data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2025_regime4_pred_tft_vsn_selected.csv",
+  "predict_probability_sum_min": 0.9999999999999998,
+  "predict_probability_sum_max": 1.0000000000000002,
+  "predict_counts": {
+    "bull": 24998,
+    "bear": 24983,
+    "chop": 29698,
+    "whipsaw": 25385
+  },
+  "predict_confidence_mean": 0.6387986210468402,
+  "predict_entropy_mean": 0.6211130267636873,
+  "notes": [
+    "VSN-style importance uses TFT-lite feature gate because pytorch_forecasting is not installed."
+  ]
+}

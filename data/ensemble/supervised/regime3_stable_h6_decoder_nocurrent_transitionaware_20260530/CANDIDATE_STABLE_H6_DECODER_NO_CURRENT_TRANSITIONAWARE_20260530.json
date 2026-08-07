@@ -1,0 +1,148 @@
+{
+  "model_id": "regime3_stable_h6_decoder_20260530",
+  "status": "candidate_stable_h6_decoder_no_current_transitionaware",
+  "selected_at": "2026-05-30",
+  "purpose": "Full Regime3 h6 classifier without CURRENT stable/sensitive probability inputs; transition-aware selection.",
+  "model_path": "data/ensemble/supervised/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530/regime3_stable_h6_decoder.joblib",
+  "horizon_bars": 6,
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "feature_count": 57,
+  "current_feature_count": 0,
+  "selected_config": {
+    "min_duration": 6,
+    "transition_weight": 2.0,
+    "mode": "direct",
+    "threshold": null,
+    "validation": {
+      "rows": 26490,
+      "accuracy": 0.7332200830502076,
+      "balanced_accuracy": 0.728253612439258,
+      "transition_rows": 4721,
+      "persistence_rows": 21769,
+      "confusion_matrix": [
+        [
+          4536,
+          677,
+          920
+        ],
+        [
+          512,
+          4202,
+          1277
+        ],
+        [
+          1641,
+          2040,
+          10685
+        ]
+      ],
+      "transition_accuracy": 0.29442914636729506,
+      "transition_balanced_accuracy": 0.2940181486187731,
+      "persistence_accuracy": 0.8283798061463549,
+      "persistence_balanced_accuracy": 0.8378186586131685
+    },
+    "score": 0.5981842093368704
+  },
+  "selection_constraints": {
+    "min_validation_transition_bacc": 0.25,
+    "min_validation_persistence_bacc": 0.65,
+    "feasible_config_count": 17
+  },
+  "oos_2026": {
+    "rows": 16891,
+    "accuracy": 0.7582736368480256,
+    "balanced_accuracy": 0.7409974417891726,
+    "transition_rows": 2640,
+    "persistence_rows": 14251,
+    "confusion_matrix": [
+      [
+        2518,
+        466,
+        627
+      ],
+      [
+        266,
+        3129,
+        898
+      ],
+      [
+        749,
+        1077,
+        7161
+      ]
+    ],
+    "transition_accuracy": 0.28863636363636364,
+    "transition_balanced_accuracy": 0.2772874064540731,
+    "persistence_accuracy": 0.8452740158585362,
+    "persistence_balanced_accuracy": 0.8403056979081773
+  },
+  "direct_oos_2026": {
+    "rows": 16891,
+    "accuracy": 0.7582736368480256,
+    "balanced_accuracy": 0.7409974417891726,
+    "transition_rows": 2640,
+    "persistence_rows": 14251,
+    "confusion_matrix": [
+      [
+        2518,
+        466,
+        627
+      ],
+      [
+        266,
+        3129,
+        898
+      ],
+      [
+        749,
+        1077,
+        7161
+      ]
+    ],
+    "transition_accuracy": 0.28863636363636364,
+    "transition_balanced_accuracy": 0.2772874064540731,
+    "persistence_accuracy": 0.8452740158585362,
+    "persistence_balanced_accuracy": 0.8403056979081773
+  },
+  "gated_oos_2026": {
+    "rows": 16891,
+    "accuracy": 0.6305724942276952,
+    "balanced_accuracy": 0.602394146319893,
+    "transition_rows": 2640,
+    "persistence_rows": 14251,
+    "confusion_matrix": [
+      [
+        2120,
+        486,
+        1005
+      ],
+      [
+        511,
+        2226,
+        1556
+      ],
+      [
+        1192,
+        1490,
+        6305
+      ]
+    ],
+    "transition_accuracy": 0.4465909090909091,
+    "transition_balanced_accuracy": 0.4193774131274131,
+    "persistence_accuracy": 0.6646551119219704,
+    "persistence_balanced_accuracy": 0.6460973945424776
+  },
+  "sidecars": {
+    "training_features_2024.csv": "data/ensemble/supervised/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530/training_features_2024_regime3_stable_h6_decoder.csv",
+    "training_features_2025.csv": "data/ensemble/supervised/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530/training_features_2025_regime3_stable_h6_decoder.csv",
+    "training_features_2026_rebuilt.csv": "data/ensemble/supervised/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530/training_features_2026_rebuilt_regime3_stable_h6_decoder.csv"
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "target_source": "stable_smoothed_current_argmax_t_plus_horizon",
+    "current_probability_features_used_as_model_inputs": false,
+    "current_feature_count": 0,
+    "current_sidecar_used_for_label_generation_only": true
+  }
+}

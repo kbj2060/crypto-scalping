@@ -1,0 +1,115 @@
+{
+  "A": {
+    "val_sweep": [
+      {
+        "threshold": 0.34,
+        "n_trades": 14252,
+        "hit_rate": 0.6011787819253438,
+        "avg_pnl_pct": -0.00040891111131306725,
+        "total_pnl_pct": -5.827801158433834
+      },
+      {
+        "threshold": 0.4,
+        "n_trades": 11196,
+        "hit_rate": 0.6457663451232583,
+        "avg_pnl_pct": -0.0002946422428837476,
+        "total_pnl_pct": -3.298814551326438
+      },
+      {
+        "threshold": 0.45,
+        "n_trades": 7963,
+        "hit_rate": 0.7087780987065176,
+        "avg_pnl_pct": -0.00012204524378811589,
+        "total_pnl_pct": -0.9718462762847668
+      },
+      {
+        "threshold": 0.5,
+        "n_trades": 5569,
+        "hit_rate": 0.7717723110073622,
+        "avg_pnl_pct": 5.5379637079316506e-05,
+        "total_pnl_pct": 0.30840919889471363
+      },
+      {
+        "threshold": 0.55,
+        "n_trades": 3983,
+        "hit_rate": 0.8177253326638212,
+        "avg_pnl_pct": 0.00018505649564033182,
+        "total_pnl_pct": 0.7370800221354417
+      },
+      {
+        "threshold": 0.6,
+        "n_trades": 2895,
+        "hit_rate": 0.8542314335060449,
+        "avg_pnl_pct": 0.0002912980624926137,
+        "total_pnl_pct": 0.8433078909161166
+      }
+    ],
+    "chosen_threshold": 0.6,
+    "oos_at_chosen_threshold": {
+      "n_trades": 8729,
+      "hit_rate": 0.8183067934471303,
+      "avg_pnl_pct": 0.0003693450689773145,
+      "total_pnl_pct": 3.2240131071029783
+    }
+  },
+  "B2": {
+    "val_sweep": [
+      {
+        "threshold": 0.34,
+        "n_trades": 11194,
+        "hit_rate": 0.5427907807754154,
+        "avg_pnl_pct": -0.0005301638681221879,
+        "total_pnl_pct": -5.9346543397597715
+      },
+      {
+        "threshold": 0.4,
+        "n_trades": 9620,
+        "hit_rate": 0.5681912681912682,
+        "avg_pnl_pct": -0.0004636653925072239,
+        "total_pnl_pct": -4.460461075919494
+      },
+      {
+        "threshold": 0.45,
+        "n_trades": 7498,
+        "hit_rate": 0.6053614297145905,
+        "avg_pnl_pct": -0.00035142328090968957,
+        "total_pnl_pct": -2.6349717602608522
+      },
+      {
+        "threshold": 0.5,
+        "n_trades": 5479,
+        "hit_rate": 0.6526738455922614,
+        "avg_pnl_pct": -0.00019777836565157007,
+        "total_pnl_pct": -1.0836276654049524
+      },
+      {
+        "threshold": 0.55,
+        "n_trades": 4096,
+        "hit_rate": 0.6982421875,
+        "avg_pnl_pct": -5.0907691836138825e-05,
+        "total_pnl_pct": -0.20851790576082463
+      },
+      {
+        "threshold": 0.6,
+        "n_trades": 3119,
+        "hit_rate": 0.739980763065085,
+        "avg_pnl_pct": 8.816622057739249e-05,
+        "total_pnl_pct": 0.2749904419808872
+      }
+    ],
+    "chosen_threshold": 0.6,
+    "oos_at_chosen_threshold": {
+      "n_trades": 3766,
+      "hit_rate": 0.7089750398300584,
+      "avg_pnl_pct": -9.597758623846178e-05,
+      "total_pnl_pct": -0.36145158977404707
+    }
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Confidence threshold chosen on val by max total_pnl_pct among thresholds with >=20 val trades; applied unchanged to OOS (no OOS-side selection)."
+}

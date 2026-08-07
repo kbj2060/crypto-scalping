@@ -1,0 +1,32 @@
+{
+  "base": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+  "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2026_rebuilt_regime3_current_sensitive_hmm_wide24.csv",
+  "label_config": {
+    "trend_adx_min": 16.0,
+    "weak_adx_max": 12.0,
+    "slope_min": 0.00015,
+    "tight_bb_max": 0.012,
+    "prefix_stem": "regime3_current_sensitive"
+  },
+  "rows": 16897,
+  "range": [
+    "2026-01-01 00:00:00",
+    "2026-02-28 16:00:00"
+  ],
+  "pred_counts": {
+    "chop": 8502,
+    "bear": 4400,
+    "bull": 3995
+  },
+  "true_counts": {
+    "chop": 11827,
+    "bear": 2721,
+    "bull": 2349
+  },
+  "agreement_rate": 0.7173462744865953,
+  "charts": [
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_current_sensitive_wide24_oos_2026_full.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_current_sensitive_wide24_oos_2026-01.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_current_sensitive_wide24_oos_2026-02.png"
+  ]
+}

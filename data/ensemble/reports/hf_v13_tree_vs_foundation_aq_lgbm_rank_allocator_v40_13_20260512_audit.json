@@ -1,0 +1,39 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "cost2_not_survived",
+    "cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025 Q4 rank allocator HP selection",
+  "oos_window": "2026 fixed OOS only after selection",
+  "stage1": "original v40_6 encoded action/quality HGB heads reused for final inference",
+  "stage2": "side-aware LightGBM rank allocator over candidate bucket tuples",
+  "runtime": "Q4-selected notional multiplier/floor/cap overlay",
+  "stage2_forward_oof": true,
+  "stage2_context_feature_count": 50,
+  "stage2_candidate_grid_size": 14504,
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  }
+}

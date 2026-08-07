@@ -1,0 +1,71 @@
+{
+  "feature_cols": [
+    "m7_prob_up",
+    "m7_prob_fl",
+    "m7_prob_dn",
+    "m7_q50",
+    "m7_qwidth",
+    "m7_gmm_vol_rank",
+    "m7_iso_score",
+    "m7_composite_score",
+    "m7_expected_ret",
+    "m7_tail_risk",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal"
+  ],
+  "model_path": "unified_direction_catboost.pkl",
+  "meta": {
+    "algorithm": "unified_direction_catboost",
+    "csv_path": "data/rl_training_2025_unified.csv",
+    "atr_mult": 0.8,
+    "max_hold": 8,
+    "atr_window": 14,
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "val_balanced_acc": 0.6286310189729345,
+    "test_balanced_acc": 0.6277527851119284,
+    "test_dir_f1": 0.48655353958004044,
+    "classification_report": {
+      "0": {
+        "precision": 0.7950490274875422,
+        "recall": 0.6635363563187551,
+        "f1-score": 0.723363802559415,
+        "support": 7454.0
+      },
+      "1": {
+        "precision": 0.09895150720838794,
+        "recall": 0.5571955719557196,
+        "f1-score": 0.16805787423483584,
+        "support": 542.0
+      },
+      "2": {
+        "precision": 0.7970116038785566,
+        "recall": 0.6625264270613108,
+        "f1-score": 0.7235731293744138,
+        "support": 7568.0
+      },
+      "accuracy": 0.6593420714469288,
+      "macro avg": {
+        "precision": 0.5636707128581623,
+        "recall": 0.6277527851119284,
+        "f1-score": 0.5383316020562215,
+        "support": 15564.0
+      },
+      "weighted avg": {
+        "precision": 0.771762463759445,
+        "recall": 0.6593420714469288,
+        "f1-score": 0.7041276404021282,
+        "support": 15564.0
+      }
+    }
+  }
+}

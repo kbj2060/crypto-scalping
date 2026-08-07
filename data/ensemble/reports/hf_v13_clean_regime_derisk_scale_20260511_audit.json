@@ -1,0 +1,99 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "oos_mdd_target_not_met"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed, used only after de-risk scale selection",
+  "selected_scale": 0.6,
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 40.55826761972183,
+      "mdd": -19.27560297169495,
+      "trades": 60,
+      "wr": 0.26666666666666666,
+      "trades_per_day": 1.0227272727272727,
+      "long_entries": 18,
+      "short_entries": 42,
+      "avg_notional": 1.255835241459684,
+      "avg_leverage": 2.6321811180475785,
+      "action_counts": {
+        "cash": 12106,
+        "long": 18,
+        "short": 42
+      },
+      "exits": {
+        "learned_stop_loss": 42,
+        "learned_max_hold": 17,
+        "forced_end": 1
+      }
+    },
+    "cost2": {
+      "pnl": 22.31138454101298,
+      "mdd": -19.967568593814743,
+      "trades": 63,
+      "wr": 0.23809523809523808,
+      "trades_per_day": 1.0738636363636365,
+      "long_entries": 20,
+      "short_entries": 43,
+      "avg_notional": 1.242165891751374,
+      "avg_leverage": 2.6002117012237123,
+      "action_counts": {
+        "cash": 12295,
+        "long": 20,
+        "short": 43
+      },
+      "exits": {
+        "learned_stop_loss": 46,
+        "learned_max_hold": 16,
+        "forced_end": 1
+      }
+    },
+    "cost3": {
+      "pnl": 9.367571550704913,
+      "mdd": -20.654180031295144,
+      "trades": 63,
+      "wr": 0.23809523809523808,
+      "trades_per_day": 1.0738636363636365,
+      "long_entries": 19,
+      "short_entries": 44,
+      "avg_notional": 1.245636613454308,
+      "avg_leverage": 2.6067319007236556,
+      "action_counts": {
+        "cash": 12289,
+        "long": 19,
+        "short": 44
+      },
+      "exits": {
+        "learned_stop_loss": 46,
+        "learned_max_hold": 16,
+        "forced_end": 1
+      }
+    }
+  }
+}

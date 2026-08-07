@@ -1,0 +1,132 @@
+{
+  "folds": [
+    {
+      "fold": 1,
+      "train_end": "2025-06-30",
+      "test_start": "2025-07-01",
+      "test_end": "2025-08-15",
+      "n_train": 786009,
+      "n_test": 64736,
+      "n_signals": 9454,
+      "n_filled": 7048,
+      "fill_rate": 0.7455045483393272,
+      "hit_rate": 0.6986379114642451,
+      "avg_pnl_pct": 0.00020367769217066896,
+      "total_pnl_pct": 1.435520374418875
+    },
+    {
+      "fold": 2,
+      "train_end": "2025-08-15",
+      "test_start": "2025-08-16",
+      "test_end": "2025-09-30",
+      "n_train": 852184,
+      "n_test": 64801,
+      "n_signals": 7559,
+      "n_filled": 5492,
+      "fill_rate": 0.7265511311019976,
+      "hit_rate": 0.7268754552075747,
+      "avg_pnl_pct": 0.00029472070803290054,
+      "total_pnl_pct": 1.6186061285166897
+    },
+    {
+      "fold": 3,
+      "train_end": "2025-09-30",
+      "test_start": "2025-10-01",
+      "test_end": "2025-11-15",
+      "n_train": 918424,
+      "n_test": 64801,
+      "n_signals": 12947,
+      "n_filled": 9609,
+      "fill_rate": 0.742179655518653,
+      "hit_rate": 0.7350400666042252,
+      "avg_pnl_pct": 0.00045437447192802553,
+      "total_pnl_pct": 4.366084300756397
+    },
+    {
+      "fold": 4,
+      "train_end": "2025-11-15",
+      "test_start": "2025-11-16",
+      "test_end": "2026-01-01",
+      "n_train": 984664,
+      "n_test": 66241,
+      "n_signals": 12461,
+      "n_filled": 9251,
+      "fill_rate": 0.7423962763823129,
+      "hit_rate": 0.743487190573992,
+      "avg_pnl_pct": 0.0004987818877772062,
+      "total_pnl_pct": 4.614231243826935
+    },
+    {
+      "fold": 5,
+      "train_end": "2026-01-01",
+      "test_start": "2026-01-02",
+      "test_end": "2026-02-15",
+      "n_train": 1052344,
+      "n_test": 63361,
+      "n_signals": 12520,
+      "n_filled": 9598,
+      "fill_rate": 0.7666134185303515,
+      "hit_rate": 0.7320275057303605,
+      "avg_pnl_pct": 0.0005798836048230485,
+      "total_pnl_pct": 5.56572283909162
+    },
+    {
+      "fold": 6,
+      "train_end": "2026-02-15",
+      "test_start": "2026-02-16",
+      "test_end": "2026-04-01",
+      "n_train": 1117144,
+      "n_test": 63361,
+      "n_signals": 13816,
+      "n_filled": 10183,
+      "fill_rate": 0.7370440069484655,
+      "hit_rate": 0.7591083177845429,
+      "avg_pnl_pct": 0.00045683116881245077,
+      "total_pnl_pct": 4.651911792017186
+    },
+    {
+      "fold": 7,
+      "train_end": "2026-04-01",
+      "test_start": "2026-04-02",
+      "test_end": "2026-05-15",
+      "n_train": 1181944,
+      "n_test": 61921,
+      "n_signals": 7437,
+      "n_filled": 4848,
+      "fill_rate": 0.6518757563533683,
+      "hit_rate": 0.7570132013201321,
+      "avg_pnl_pct": 0.0003314965875928724,
+      "total_pnl_pct": 1.6070954566502453
+    },
+    {
+      "fold": 8,
+      "train_end": "2026-05-15",
+      "test_start": "2026-05-16",
+      "test_end": "2026-07-12",
+      "n_train": 1245304,
+      "n_test": 82081,
+      "n_signals": 13344,
+      "n_filled": 9312,
+      "fill_rate": 0.697841726618705,
+      "hit_rate": 0.7591280068728522,
+      "avg_pnl_pct": 0.00045239736349671233,
+      "total_pnl_pct": 4.212724248881385
+    }
+  ],
+  "summary": {
+    "fixed_threshold": 0.55,
+    "n_folds": 8,
+    "n_folds_positive": 8,
+    "pct_folds_positive": 1.0,
+    "mean_pnl_pct": 3.508987048019917,
+    "min_pnl_pct": 1.435520374418875,
+    "max_pnl_pct": 5.56572283909162
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Fixed threshold=0.55 (chosen once on the original single-window val split) held constant across all 8 folds to avoid per-fold multiple-comparison overfitting -- this tests policy stability over time, not per-fold optimal tuning."
+}

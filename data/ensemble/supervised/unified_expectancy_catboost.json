@@ -1,0 +1,36 @@
+{
+  "feature_cols": [
+    "ud_sup_long_prob",
+    "ud_sup_flat_prob",
+    "ud_sup_short_prob",
+    "ud_sup_edge",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "m7_expected_ret",
+    "m7_tail_risk",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal"
+  ],
+  "model_path": "unified_expectancy_catboost.pkl",
+  "meta": {
+    "algorithm": "unified_expectancy_catboost",
+    "csv_path": "data/rl_training_2025_unified_supdir_cat.csv",
+    "horizon": 8,
+    "clip_abs": 0.05,
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "val_rmse": 0.005336218881771716,
+    "test_rmse": 0.005708848902847955,
+    "val_mae": 0.003484901412297132,
+    "test_mae": 0.003637799268631843,
+    "val_ic": 0.03649641300098025,
+    "test_ic": 0.005051651648831595
+  }
+}

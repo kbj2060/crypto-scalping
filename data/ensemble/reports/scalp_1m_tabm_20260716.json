@@ -1,0 +1,33 @@
+{
+  "val": {
+    "n_signals": 4904,
+    "n_filled": 3032,
+    "fill_rate": 0.6182707993474714,
+    "hit_rate": 0.7394459102902374,
+    "avg_pnl_pct": 0.0002797602525752648,
+    "total_pnl_pct": 0.8482330858082028
+  },
+  "oos": {
+    "n_signals": 13193,
+    "n_filled": 9486,
+    "fill_rate": 0.7190176608807701,
+    "hit_rate": 0.7239089184060721,
+    "avg_pnl_pct": 0.00033978884869776576,
+    "total_pnl_pct": 3.223237018747006
+  },
+  "model": "TabM (K=8, hidden=192, layers=3)",
+  "fixed_threshold": 0.55,
+  "best_internal_val_loss": 0.9482362270355225,
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "model": "HistGradientBoostingClassifier",
+    "oos_total_pnl_pct": 3.7390646402123644
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Same base triple-barrier label, val/OOS split, and maker-fill evaluation as the HGB baseline -- only the classifier architecture changes."
+}

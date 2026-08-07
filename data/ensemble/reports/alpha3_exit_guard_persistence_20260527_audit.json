@@ -1,0 +1,15 @@
+{
+  "status": "pass",
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS",
+  "selected_guard": "guard_soft3_hard1p45",
+  "baseline_guard": "baseline_guard_off",
+  "delta_vs_baseline": {
+    "cost3_pnl": -9.819214349443584,
+    "cost3_mdd": 5.425447596101407,
+    "cost3_wr": 0.15346203346203344,
+    "cost3_trades": 34,
+    "sl_ratio": -0.187987987987988
+  }
+}

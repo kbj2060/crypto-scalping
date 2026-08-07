@@ -1,0 +1,106 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "oos_mdd_target_not_met"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed, used only after governor selection",
+  "selected_governor": {
+    "dd_soft": 0.1,
+    "dd_hard": 0.18,
+    "dd_scale": 0.55,
+    "loss_streak_limit": 1,
+    "loss_cooldown_bars": 24,
+    "min_quality_after_loss": 0.07,
+    "risk_off_cap_after_loss": 0.78,
+    "stop_loss_scale": 0.55,
+    "max_notional": 2.2
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 39.49861820078861,
+      "mdd": -17.924873080037063,
+      "trades": 35,
+      "trades_per_day": 0.5965909090909091,
+      "wr": 0.2,
+      "long_entries": 14,
+      "short_entries": 21,
+      "avg_notional": 1.6776919854770118,
+      "avg_leverage": 2.7434196350199564,
+      "block_reason_counts": {
+        "loss_cooldown": 672,
+        "post_loss_quality_risk_gate": 194
+      },
+      "exits": {
+        "governed_stop_loss": 28,
+        "learned_max_hold": 6,
+        "learned_take_profit": 1
+      }
+    },
+    "cost2": {
+      "pnl": 18.182853704871583,
+      "mdd": -18.43211533143616,
+      "trades": 24,
+      "trades_per_day": 0.4090909090909091,
+      "wr": 0.20833333333333334,
+      "long_entries": 13,
+      "short_entries": 11,
+      "avg_notional": 1.6289735192253099,
+      "avg_leverage": 2.52894853985253,
+      "block_reason_counts": {
+        "loss_cooldown": 456,
+        "post_loss_quality_risk_gate": 161,
+        "dd_hard_block": 155
+      },
+      "exits": {
+        "governed_stop_loss": 19,
+        "learned_max_hold": 5
+      }
+    },
+    "cost3": {
+      "pnl": -6.987705868385341,
+      "mdd": -18.666300871906493,
+      "trades": 28,
+      "trades_per_day": 0.4772727272727273,
+      "wr": 0.17857142857142858,
+      "long_entries": 12,
+      "short_entries": 16,
+      "avg_notional": 1.575460731285446,
+      "avg_leverage": 2.662184963597098,
+      "block_reason_counts": {
+        "loss_cooldown": 552,
+        "post_loss_quality_risk_gate": 160,
+        "dd_hard_block": 177
+      },
+      "exits": {
+        "governed_stop_loss": 23,
+        "learned_max_hold": 5
+      }
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+  ],
+  "feature_count": 93,
+  "clean_regime_feature_count": 23,
+  "forbidden_feature_cols": [],
+  "train_range": [
+    "2025-01-01 00:00:00",
+    "2025-12-31 23:55:00"
+  ],
+  "eval_range": [
+    "2026-01-01 00:00:00",
+    "2026-02-28 16:00:00"
+  ],
+  "train_eval_timestamp_overlap": 0,
+  "oos_cost_metrics": {
+    "cost1": {
+      "pnl": -45.8107868901178,
+      "mdd": -56.59703984699356,
+      "trades": 609,
+      "wr": 0.26929392446633826,
+      "trades_per_day": 10.380681818181818,
+      "long_entries": 27,
+      "short_entries": 582,
+      "avg_notional": 1.0513795827737593,
+      "avg_leverage": 1.8028219326031663,
+      "action_counts": {
+        "cash": 51,
+        "long": 27,
+        "short": 582
+      },
+      "exits": {
+        "learned_max_hold": 232,
+        "learned_stop_loss": 364,
+        "learned_take_profit": 12,
+        "forced_end": 1
+      }
+    },
+    "cost2": {
+      "pnl": -79.53037443305382,
+      "mdd": -80.91950676641324,
+      "trades": 643,
+      "wr": 0.2208398133748056,
+      "trades_per_day": 10.960227272727273,
+      "long_entries": 28,
+      "short_entries": 615,
+      "avg_notional": 1.068180685148887,
+      "avg_leverage": 1.8148749722987685,
+      "action_counts": {
+        "cash": 59,
+        "long": 28,
+        "short": 615
+      },
+      "exits": {
+        "learned_max_hold": 231,
+        "learned_stop_loss": 400,
+        "learned_take_profit": 11,
+        "forced_end": 1
+      }
+    },
+    "cost3": {
+      "pnl": -93.8347294778341,
+      "mdd": -93.99949002169689,
+      "trades": 691,
+      "wr": 0.18523878437047755,
+      "trades_per_day": 11.778409090909092,
+      "long_entries": 31,
+      "short_entries": 660,
+      "avg_notional": 1.068885364224348,
+      "avg_leverage": 1.8093083951112614,
+      "action_counts": {
+        "cash": 60,
+        "long": 31,
+        "short": 660
+      },
+      "exits": {
+        "learned_max_hold": 230,
+        "learned_stop_loss": 450,
+        "learned_take_profit": 10,
+        "forced_end": 1
+      }
+    }
+  },
+  "selected_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_parent_dcn_hybrid_v36_20260512/balanced_clean_regime_h144.pkl",
+  "verdict": "iterate"
+}

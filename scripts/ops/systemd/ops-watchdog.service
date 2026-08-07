@@ -1,0 +1,19 @@
+[Unit]
+Description=crypto-scalping ops_watchdog (read-only 24/7 operations monitor)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/ops_watchdog.py --interval-seconds 30
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ops_watchdog
+
+[Install]
+WantedBy=multi-user.target

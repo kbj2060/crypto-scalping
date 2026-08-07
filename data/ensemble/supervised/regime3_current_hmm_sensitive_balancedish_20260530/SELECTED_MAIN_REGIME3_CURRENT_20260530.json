@@ -1,0 +1,105 @@
+{
+  "model_id": "regime3_current_hmm_sensitive_balancedish_20260530",
+  "status": "selected_main_regime3_current",
+  "selected_at": "2026-05-30",
+  "selected_feature_set": "wide24",
+  "label_mode": "balancedish_adx16_slope15_bb012",
+  "label_config": {
+    "trend_adx_min": 16.0,
+    "weak_adx_max": 12.0,
+    "slope_min": 0.00015,
+    "tight_bb_max": 0.012,
+    "prefix_stem": "regime3_current_sensitive"
+  },
+  "prefix_stem": "regime3_current_sensitive",
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "model_path": "data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/regime3_current_sensitive_hmm_wide24_2024.joblib",
+  "sidecars": {
+    "training_features_2024.csv": "data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2024_regime3_current_sensitive_hmm_wide24.csv",
+    "training_features_2025.csv": "data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2025_regime3_current_sensitive_hmm_wide24.csv",
+    "training_features_2026_rebuilt.csv": "data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2026_rebuilt_regime3_current_sensitive_hmm_wide24.csv"
+  },
+  "validation": {
+    "rows": 26496,
+    "accuracy": 0.728449577294686,
+    "balanced_accuracy": 0.7637661141816077,
+    "log_loss": 0.6587589733128363,
+    "recall": {
+      "bull": 0.8070999738971548,
+      "bear": 0.78215152332165,
+      "chop": 0.7020468453260181
+    },
+    "true_counts": {
+      "bull": 3831,
+      "bear": 3709,
+      "chop": 18956
+    },
+    "pred_counts": {
+      "bull": 6142,
+      "bear": 6046,
+      "chop": 14308
+    },
+    "confusion_matrix": [
+      [
+        3092,
+        90,
+        649
+      ],
+      [
+        457,
+        2901,
+        351
+      ],
+      [
+        2593,
+        3055,
+        13308
+      ]
+    ],
+    "flip_rate": 0.11183242121154935,
+    "mean_state_duration_bars": 8.93927125506073,
+    "median_state_duration_bars": 4.0
+  },
+  "oos_2026": {
+    "rows": 16897,
+    "accuracy": 0.7173462744865953,
+    "balanced_accuracy": 0.7740329952652724,
+    "log_loss": 0.65440163718801,
+    "recall": {
+      "bull": 0.8041719880800341,
+      "bear": 0.8478500551267916,
+      "chop": 0.6700769425889913
+    },
+    "true_counts": {
+      "bull": 2349,
+      "bear": 2721,
+      "chop": 11827
+    },
+    "pred_counts": {
+      "bull": 3995,
+      "bear": 4400,
+      "chop": 8502
+    },
+    "confusion_matrix": [
+      [
+        1889,
+        33,
+        427
+      ],
+      [
+        264,
+        2307,
+        150
+      ],
+      [
+        1842,
+        2060,
+        7925
+      ]
+    ],
+    "flip_rate": 0.12748579545454544,
+    "mean_state_duration_bars": 7.840835266821346,
+    "median_state_duration_bars": 3.0
+  }
+}

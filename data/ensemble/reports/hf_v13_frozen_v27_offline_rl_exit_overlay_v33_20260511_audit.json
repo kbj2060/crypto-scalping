@@ -1,0 +1,137 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "oos_cost1_did_not_beat_v27"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "policy": "frozen_v27_offline_rl_exit_overlay_v33",
+  "v27_entry_frozen": true,
+  "v21_2_preserved": true,
+  "deep_sleeve_only_when_parent_cash": true,
+  "rl_formulation": "constrained offline dynamic-programming close/hold labels over V27 deep_alpha episodes",
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "train_rows": 30190,
+  "close_rate": 0.17933090427293805,
+  "selected_config": {
+    "name": "v33_rl_p060_n1",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "close_p_th": 0.6,
+    "min_hold": 2,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 220.52262243897022,
+      "mdd": -31.741344176793795,
+      "trades": 169,
+      "wr": 0.40236686390532544,
+      "trades_per_day": 2.8806818181818183,
+      "deep_entries": 100,
+      "long_entries": 67,
+      "short_entries": 102,
+      "avg_notional": 1.6395833136192277,
+      "avg_leverage": 1.6818407503624369,
+      "exits": {
+        "deep_alpha_max_hold": 60,
+        "deep_alpha_rl_exit_overlay": 31,
+        "v21_2_stop_loss": 54,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_stop_loss": 9
+      },
+      "runner_actions": {
+        "deep_entry": 100,
+        "v21_entry": 69,
+        "v21_reject": 29,
+        "v21_add_on": 9
+      }
+    },
+    "cost2": {
+      "pnl": 115.34980620752853,
+      "mdd": -33.43314463303444,
+      "trades": 172,
+      "wr": 0.36627906976744184,
+      "trades_per_day": 2.931818181818182,
+      "deep_entries": 101,
+      "long_entries": 70,
+      "short_entries": 102,
+      "avg_notional": 1.649045671364918,
+      "avg_leverage": 1.6837989627047385,
+      "exits": {
+        "deep_alpha_max_hold": 61,
+        "deep_alpha_rl_exit_overlay": 31,
+        "v21_2_stop_loss": 56,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_stop_loss": 9
+      },
+      "runner_actions": {
+        "deep_entry": 101,
+        "v21_entry": 71,
+        "v21_reject": 29,
+        "v21_add_on": 9
+      }
+    },
+    "cost3": {
+      "pnl": 8.567065146784469,
+      "mdd": -41.12880974914761,
+      "trades": 184,
+      "wr": 0.31521739130434784,
+      "trades_per_day": 3.1363636363636367,
+      "deep_entries": 102,
+      "long_entries": 76,
+      "short_entries": 108,
+      "avg_notional": 1.7003697110037437,
+      "avg_leverage": 1.7480561228913076,
+      "exits": {
+        "deep_alpha_max_hold": 61,
+        "deep_alpha_rl_exit_overlay": 30,
+        "v21_2_stop_loss": 69,
+        "deep_alpha_stop_loss": 11,
+        "v21_2_max_hold": 7,
+        "v21_2_take_profit": 6
+      },
+      "runner_actions": {
+        "deep_entry": 102,
+        "v21_entry": 82,
+        "v21_reject": 24,
+        "v21_add_on": 10
+      }
+    }
+  },
+  "baseline_v27": {
+    "cost1": 226.82447187089713,
+    "cost2": 123.11659362616143,
+    "cost3": 14.22783363158393
+  }
+}

@@ -87,7 +87,6 @@ def _load_frame(csv_path: str, start: str | None, end: str | None) -> pd.DataFra
 def _m7_defaults() -> dict[str, float]:
     return {
         "m7_trend_xgb_dn": 1.0 / 3.0,
-        "m7_trend_xgb_fl": 1.0 / 3.0,
         "m7_trend_xgb_up": 1.0 / 3.0,
         "m7_confidence": 0.0,
         "m7_action": 0.0,
@@ -191,7 +190,6 @@ def _extract_current_coupled_events(df: pd.DataFrame, ckpt_path: str) -> list[Tr
             _sync()
             row_dict = last_row.to_dict()
             row_dict.setdefault("m7_prob_dn", _safe_float(row_dict.get("prob_dn", row_dict.get("m7_trend_xgb_dn", 0.0))))
-            row_dict.setdefault("m7_prob_fl", _safe_float(row_dict.get("prob_flat", row_dict.get("m7_trend_xgb_fl", 0.0))))
             row_dict.setdefault("m7_prob_up", _safe_float(row_dict.get("prob_up", row_dict.get("m7_trend_xgb_up", 0.0))))
             for k, v in _m7_defaults().items():
                 row_dict.setdefault(k, v)

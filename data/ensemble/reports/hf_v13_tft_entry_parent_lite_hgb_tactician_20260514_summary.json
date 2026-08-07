@@ -1,0 +1,327 @@
+{
+  "model_id": "hf_v13_tft_entry_parent_lite_hgb_tactician_20260514",
+  "selected": {
+    "name": "alpha1_hgb_parent_baseline",
+    "metrics": {
+      "cost1": {
+        "pnl": 361.18717637569534,
+        "mdd": -31.741344176793795,
+        "trades": 199,
+        "wr": 0.2964824120603015,
+        "trades_per_day": 3.3920454545454546,
+        "deep_entries": 128,
+        "long_entries": 84,
+        "short_entries": 115,
+        "avg_notional": 2.1901619420416902,
+        "avg_leverage": 2.2123608661733103,
+        "exits": {
+          "deep_alpha_stop_loss": 80,
+          "deep_alpha_max_hold": 33,
+          "v21_2_stop_loss": 56,
+          "v21_2_max_hold": 8,
+          "deep_alpha_take_profit": 15,
+          "v21_2_take_profit": 7
+        },
+        "runner_actions": {
+          "deep_entry": 128,
+          "v21_entry": 71,
+          "v21_reject": 29,
+          "v21_add_on": 11
+        },
+        "route_counts": {
+          "taker": 409
+        }
+      },
+      "cost2": {
+        "pnl": 88.74076757432363,
+        "mdd": -38.03968051948192,
+        "trades": 205,
+        "wr": 0.2634146341463415,
+        "trades_per_day": 3.494318181818182,
+        "deep_entries": 133,
+        "long_entries": 85,
+        "short_entries": 120,
+        "avg_notional": 2.1883526536808127,
+        "avg_leverage": 2.2092771926663635,
+        "exits": {
+          "deep_alpha_max_hold": 32,
+          "deep_alpha_stop_loss": 87,
+          "v21_2_stop_loss": 57,
+          "v21_2_max_hold": 8,
+          "deep_alpha_take_profit": 14,
+          "v21_2_take_profit": 7
+        },
+        "runner_actions": {
+          "deep_entry": 133,
+          "v21_entry": 72,
+          "v21_add_on": 10,
+          "v21_reject": 29
+        },
+        "route_counts": {
+          "taker": 420
+        }
+      },
+      "cost3": {
+        "pnl": 0.5776148307049533,
+        "mdd": -48.47537013484388,
+        "trades": 206,
+        "wr": 0.22815533980582525,
+        "trades_per_day": 3.5113636363636367,
+        "deep_entries": 130,
+        "long_entries": 91,
+        "short_entries": 115,
+        "avg_notional": 2.192206142497522,
+        "avg_leverage": 2.2032231449951607,
+        "exits": {
+          "deep_alpha_max_hold": 27,
+          "deep_alpha_stop_loss": 88,
+          "deep_alpha_take_profit": 15,
+          "v21_2_stop_loss": 62,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 6
+        },
+        "runner_actions": {
+          "deep_entry": 130,
+          "v21_entry": 76,
+          "v21_add_on": 11,
+          "v21_reject": 14
+        },
+        "route_counts": {
+          "taker": 423
+        }
+      }
+    },
+    "score": 249.47971001082112
+  },
+  "experiments": [
+    {
+      "name": "alpha1_hgb_parent_baseline",
+      "metrics": {
+        "cost1": {
+          "pnl": 361.18717637569534,
+          "mdd": -31.741344176793795,
+          "trades": 199,
+          "wr": 0.2964824120603015,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 128,
+          "long_entries": 84,
+          "short_entries": 115,
+          "avg_notional": 2.1901619420416902,
+          "avg_leverage": 2.2123608661733103,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 56,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 71,
+            "v21_reject": 29,
+            "v21_add_on": 11
+          },
+          "route_counts": {
+            "taker": 409
+          }
+        },
+        "cost2": {
+          "pnl": 88.74076757432363,
+          "mdd": -38.03968051948192,
+          "trades": 205,
+          "wr": 0.2634146341463415,
+          "trades_per_day": 3.494318181818182,
+          "deep_entries": 133,
+          "long_entries": 85,
+          "short_entries": 120,
+          "avg_notional": 2.1883526536808127,
+          "avg_leverage": 2.2092771926663635,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 87,
+            "v21_2_stop_loss": 57,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 133,
+            "v21_entry": 72,
+            "v21_add_on": 10,
+            "v21_reject": 29
+          },
+          "route_counts": {
+            "taker": 420
+          }
+        },
+        "cost3": {
+          "pnl": 0.5776148307049533,
+          "mdd": -48.47537013484388,
+          "trades": 206,
+          "wr": 0.22815533980582525,
+          "trades_per_day": 3.5113636363636367,
+          "deep_entries": 130,
+          "long_entries": 91,
+          "short_entries": 115,
+          "avg_notional": 2.192206142497522,
+          "avg_leverage": 2.2032231449951607,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 88,
+            "deep_alpha_take_profit": 15,
+            "v21_2_stop_loss": 62,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 76,
+            "v21_add_on": 11,
+            "v21_reject": 14
+          },
+          "route_counts": {
+            "taker": 423
+          }
+        }
+      },
+      "score": 249.47971001082112
+    },
+    {
+      "name": "tft_entry_lite_hgb_tactician::tft_entry_hgb_tactician_c0.46_q0.000_u0.070",
+      "selected_runtime": {
+        "name": "tft_entry_hgb_tactician_c0.46_q0.000_u0.070",
+        "confidence": 0.46,
+        "quality_floor": 0.0,
+        "uncertainty_max": 0.07
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 8.889505097307971,
+          "mdd": -42.926847034962975,
+          "trades": 184,
+          "wr": 0.2554347826086957,
+          "trades_per_day": 3.1363636363636367,
+          "deep_entries": 148,
+          "long_entries": 93,
+          "short_entries": 91,
+          "avg_notional": 2.081304617121921,
+          "avg_leverage": 2.084674727534634,
+          "exits": {
+            "deep_alpha_stop_loss": 102,
+            "deep_alpha_max_hold": 29,
+            "deep_alpha_take_profit": 17,
+            "v21_2_stop_loss": 30,
+            "v21_2_max_hold": 4,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 148,
+            "v21_entry": 36,
+            "v21_reject": 10,
+            "v21_add_on": 3
+          },
+          "route_counts": {
+            "taker": 371
+          }
+        },
+        "cost2": {
+          "pnl": -48.21754770037341,
+          "mdd": -56.6425808066096,
+          "trades": 192,
+          "wr": 0.22916666666666666,
+          "trades_per_day": 3.272727272727273,
+          "deep_entries": 153,
+          "long_entries": 97,
+          "short_entries": 95,
+          "avg_notional": 2.0859681313453975,
+          "avg_leverage": 2.0943569791072636,
+          "exits": {
+            "deep_alpha_max_hold": 34,
+            "deep_alpha_stop_loss": 105,
+            "deep_alpha_take_profit": 14,
+            "v21_2_stop_loss": 34,
+            "v21_2_max_hold": 3,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 153,
+            "v21_entry": 39,
+            "v21_reject": 5,
+            "v21_add_on": 1
+          },
+          "route_counts": {
+            "taker": 385
+          }
+        },
+        "cost3": {
+          "pnl": -70.93826177390442,
+          "mdd": -71.70072150384104,
+          "trades": 189,
+          "wr": 0.19047619047619047,
+          "trades_per_day": 3.221590909090909,
+          "deep_entries": 153,
+          "long_entries": 96,
+          "short_entries": 93,
+          "avg_notional": 2.080358445961504,
+          "avg_leverage": 2.088828677375342,
+          "exits": {
+            "deep_alpha_max_hold": 29,
+            "deep_alpha_stop_loss": 112,
+            "deep_alpha_take_profit": 12,
+            "v21_2_stop_loss": 31,
+            "v21_2_max_hold": 3,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 153,
+            "v21_entry": 36,
+            "v21_reject": 4,
+            "v21_add_on": 1
+          },
+          "route_counts": {
+            "taker": 379
+          }
+        }
+      },
+      "score": -209.67003966802463
+    }
+  ],
+  "artifact_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tft_entry_parent_lite_hgb_tactician_20260514",
+  "grid_path": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tft_entry_parent_lite_hgb_tactician_20260514_grid.csv",
+  "audit_path": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tft_entry_parent_lite_hgb_tactician_20260514_audit.json",
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "tft_entry_lite_hgb_tactician_cost1_below_alpha1"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS after selection",
+    "design": "TFT Entry Parent Lite predicts only action/quality. Frozen HGB tactician heads produce notional, leverage, TP, SL, max_hold, and cooldown conditioned on TFT side.",
+    "base_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    }
+  }
+}

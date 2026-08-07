@@ -1,0 +1,385 @@
+{
+  "model_id": "regime3_transition_hazard_sensitive_h6_20260530",
+  "model_path": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/regime3_transition_hazard_h6.joblib",
+  "horizon_bars": 6,
+  "classes": [
+    "bull",
+    "bear",
+    "chop"
+  ],
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "include_current_features": true,
+  "feature_count": 66,
+  "feature_cols": [
+    "regime3_current_sensitive_wide24_bear_prob",
+    "regime3_current_sensitive_wide24_bull_prob",
+    "regime3_current_sensitive_wide24_chop_prob",
+    "regime3_current_sensitive_wide24_confidence",
+    "regime3_current_sensitive_wide24_directional_bias",
+    "regime3_current_sensitive_wide24_entropy",
+    "regime3_current_sensitive_wide24_margin",
+    "regime3_current_sensitive_wide24_range_prob",
+    "regime3_current_sensitive_wide24_trend_prob",
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12"
+  ],
+  "threshold_selected_on_validation": 0.06,
+  "validation": {
+    "hazard": {
+      "rows": 26490,
+      "transition_rate": 0.34450736126840314,
+      "threshold": 0.06,
+      "accuracy": 0.381766704416761,
+      "balanced_accuracy": 0.5281609376886077,
+      "log_loss": 0.6006039648442905,
+      "confusion_matrix": [
+        [
+          997,
+          16367
+        ],
+        [
+          10,
+          9116
+        ]
+      ],
+      "roc_auc": 0.7337233806188141
+    },
+    "future": {
+      "rows": 26490,
+      "accuracy": 0.3101925254813137,
+      "balanced_accuracy": 0.3207476106076122,
+      "transition_rows": 9126,
+      "persistence_rows": 17364,
+      "confusion_matrix": [
+        [
+          2930,
+          1340,
+          2699
+        ],
+        [
+          2223,
+          1652,
+          2219
+        ],
+        [
+          4761,
+          5031,
+          3635
+        ]
+      ],
+      "transition_accuracy": 0.7911461757615603,
+      "transition_balanced_accuracy": 0.766534657088135,
+      "transition_confusion_matrix": [
+        [
+          1990,
+          542,
+          232
+        ],
+        [
+          567,
+          1595,
+          312
+        ],
+        [
+          136,
+          117,
+          3635
+        ]
+      ],
+      "persistence_accuracy": 0.0574176457037549,
+      "persistence_balanced_accuracy": 0.07976308568900918
+    }
+  },
+  "label_counts_2024": {
+    "transition": 34351,
+    "persistence": 71023,
+    "future": {
+      "bull": 25822,
+      "bear": 23639,
+      "chop": 55913
+    }
+  },
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2024_regime3_transition_hazard_h6.csv",
+      "rows": 105374,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:25:00"
+      ],
+      "hazard": {
+        "rows": 105374,
+        "transition_rate": 0.3259912312335111,
+        "threshold": 0.06,
+        "accuracy": 0.36093343709074344,
+        "balanced_accuracy": 0.5258836022424366,
+        "log_loss": 0.5579910607392204,
+        "confusion_matrix": [
+          [
+            3687,
+            67336
+          ],
+          [
+            5,
+            34346
+          ]
+        ],
+        "roc_auc": 0.788725323377667
+      },
+      "future": {
+        "rows": 105374,
+        "accuracy": 0.3310873650046501,
+        "balanced_accuracy": 0.3593338425556592,
+        "transition_rows": 34351,
+        "persistence_rows": 71023,
+        "confusion_matrix": [
+          [
+            12371,
+            3855,
+            9596
+          ],
+          [
+            7860,
+            8035,
+            7744
+          ],
+          [
+            18980,
+            22451,
+            14482
+          ]
+        ],
+        "transition_accuracy": 0.9082996128205875,
+        "transition_balanced_accuracy": 0.8969592569218316,
+        "transition_confusion_matrix": [
+          [
+            8850,
+            1022,
+            447
+          ],
+          [
+            747,
+            7869,
+            530
+          ],
+          [
+            196,
+            208,
+            14482
+          ]
+        ],
+        "persistence_accuracy": 0.051912760654999085,
+        "persistence_balanced_accuracy": 0.07952371247152515
+      }
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2025.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2025_regime3_transition_hazard_h6.csv",
+      "rows": 105095,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:25:00"
+      ],
+      "hazard": {
+        "rows": 105095,
+        "transition_rate": 0.3365145820448166,
+        "threshold": 0.06,
+        "accuracy": 0.37833388838669774,
+        "balanced_accuracy": 0.5312152727316393,
+        "log_loss": 0.5942004065844976,
+        "confusion_matrix": [
+          [
+            4438,
+            65291
+          ],
+          [
+            43,
+            35323
+          ]
+        ],
+        "roc_auc": 0.7424401416256156
+      },
+      "future": {
+        "rows": 105095,
+        "accuracy": 0.3061420619439555,
+        "balanced_accuracy": 0.31386300390732114,
+        "transition_rows": 35366,
+        "persistence_rows": 69729,
+        "confusion_matrix": [
+          [
+            11555,
+            5135,
+            11241
+          ],
+          [
+            9983,
+            6589,
+            9371
+          ],
+          [
+            16972,
+            20219,
+            14030
+          ]
+        ],
+        "transition_accuracy": 0.7842560651473166,
+        "transition_balanced_accuracy": 0.7600151710852296,
+        "transition_confusion_matrix": [
+          [
+            7315,
+            2189,
+            1087
+          ],
+          [
+            1980,
+            6391,
+            1360
+          ],
+          [
+            500,
+            514,
+            14030
+          ]
+        ],
+        "persistence_accuracy": 0.06364640250111145,
+        "persistence_balanced_accuracy": 0.08557817112418471
+      }
+    },
+    "training_features_2026_rebuilt.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_withcurrent_20260530/training_features_2026_rebuilt_regime3_transition_hazard_h6.csv",
+      "rows": 16891,
+      "range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 15:30:00"
+      ],
+      "hazard": {
+        "rows": 16891,
+        "transition_rate": 0.3197560831211888,
+        "threshold": 0.06,
+        "accuracy": 0.35681723995026937,
+        "balanced_accuracy": 0.5266033076748673,
+        "log_loss": 0.58003104049017,
+        "confusion_matrix": [
+          [
+            639,
+            10851
+          ],
+          [
+            13,
+            5388
+          ]
+        ],
+        "roc_auc": 0.7486660997729686
+      },
+      "future": {
+        "rows": 16891,
+        "accuracy": 0.28867444201053816,
+        "balanced_accuracy": 0.3044170044550458,
+        "transition_rows": 5401,
+        "persistence_rows": 11490,
+        "confusion_matrix": [
+          [
+            1661,
+            868,
+            1465
+          ],
+          [
+            1823,
+            1086,
+            1491
+          ],
+          [
+            2899,
+            3469,
+            2129
+          ]
+        ],
+        "transition_accuracy": 0.7844843547491205,
+        "transition_balanced_accuracy": 0.7614914134185294,
+        "transition_confusion_matrix": [
+          [
+            1054,
+            332,
+            177
+          ],
+          [
+            327,
+            1054,
+            184
+          ],
+          [
+            58,
+            86,
+            2129
+          ]
+        ],
+        "persistence_accuracy": 0.05561357702349869,
+        "persistence_balanced_accuracy": 0.08699298764658242
+      }
+    }
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_used_as_target_source": true,
+    "current_used_as_input_features": true,
+    "forbidden_current_feature_count_when_disabled": 9
+  }
+}

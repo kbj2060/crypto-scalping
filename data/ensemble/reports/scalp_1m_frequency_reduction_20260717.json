@@ -1,0 +1,251 @@
+{
+  "oos_window": {
+    "start": "2026-05-31",
+    "end": "2026-07-12",
+    "n_days": 41.99930555555556
+  },
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "threshold": 0.55,
+    "cooldown_min": 0,
+    "trades_per_day": 192.26508374807784,
+    "oos_total_pnl_pct": 3.7390646402123644
+  },
+  "scenarios": [
+    {
+      "lever": "threshold_only",
+      "threshold": 0.55,
+      "cooldown_min": 0,
+      "trades_per_day": 192.26508374807784,
+      "n_signals": 11339,
+      "n_filled": 8075,
+      "fill_rate": 0.712143928035982,
+      "hit_rate": 0.7559133126934985,
+      "avg_pnl_pct": 0.00046304206070741353,
+      "total_pnl_pct": 3.7390646402123644
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.6,
+      "cooldown_min": 0,
+      "trades_per_day": 146.09765373104713,
+      "n_signals": 8729,
+      "n_filled": 6136,
+      "fill_rate": 0.7029442089586436,
+      "hit_rate": 0.7933507170795306,
+      "avg_pnl_pct": 0.0006016493314266901,
+      "total_pnl_pct": 3.6917202976341708
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.65,
+      "cooldown_min": 0,
+      "trades_per_day": 110.47801716298218,
+      "n_signals": 6654,
+      "n_filled": 4640,
+      "fill_rate": 0.6973249173429517,
+      "hit_rate": 0.8269396551724137,
+      "avg_pnl_pct": 0.0007309247137213167,
+      "total_pnl_pct": 3.3914906716669098
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.7,
+      "cooldown_min": 0,
+      "trades_per_day": 79.64417401081367,
+      "n_signals": 4878,
+      "n_filled": 3345,
+      "fill_rate": 0.6857318573185732,
+      "hit_rate": 0.8645739910313901,
+      "avg_pnl_pct": 0.0008743785718442188,
+      "total_pnl_pct": 2.9247963228189118
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.75,
+      "cooldown_min": 0,
+      "trades_per_day": 54.71519039666661,
+      "n_signals": 3385,
+      "n_filled": 2298,
+      "fill_rate": 0.678877400295421,
+      "hit_rate": 0.8929503916449086,
+      "avg_pnl_pct": 0.0009945743355001023,
+      "total_pnl_pct": 2.285531822979235
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.8,
+      "cooldown_min": 0,
+      "trades_per_day": 34.333901023495756,
+      "n_signals": 2152,
+      "n_filled": 1442,
+      "fill_rate": 0.6700743494423792,
+      "hit_rate": 0.9167822468793343,
+      "avg_pnl_pct": 0.0010877791690180106,
+      "total_pnl_pct": 1.5685775617239712
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.85,
+      "cooldown_min": 0,
+      "trades_per_day": 17.66695877908034,
+      "n_signals": 1121,
+      "n_filled": 742,
+      "fill_rate": 0.6619090098126673,
+      "hit_rate": 0.9285714285714286,
+      "avg_pnl_pct": 0.001069262574311101,
+      "total_pnl_pct": 0.7933928301388369
+    },
+    {
+      "lever": "threshold_only",
+      "threshold": 0.9,
+      "cooldown_min": 0,
+      "trades_per_day": 5.404851270688999,
+      "n_signals": 352,
+      "n_filled": 227,
+      "fill_rate": 0.6448863636363636,
+      "hit_rate": 0.947136563876652,
+      "avg_pnl_pct": 0.0010952045033468414,
+      "total_pnl_pct": 0.24861142225973298
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 0,
+      "trades_per_day": 192.26508374807784,
+      "n_signals": 11339,
+      "n_filled": 8075,
+      "fill_rate": 0.712143928035982,
+      "hit_rate": 0.7559133126934985,
+      "avg_pnl_pct": 0.00046304206070741353,
+      "total_pnl_pct": 3.7390646402123644
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 5,
+      "trades_per_day": 91.1443641594603,
+      "n_signals": 5305,
+      "n_filled": 3828,
+      "fill_rate": 0.721583411875589,
+      "hit_rate": 0.7560083594566354,
+      "avg_pnl_pct": 0.0004370274761451923,
+      "total_pnl_pct": 1.672941178683796
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 10,
+      "trades_per_day": 57.31047140329701,
+      "n_signals": 3429,
+      "n_filled": 2407,
+      "fill_rate": 0.7019539224263633,
+      "hit_rate": 0.7627752388865808,
+      "avg_pnl_pct": 0.00043645718551429334,
+      "total_pnl_pct": 1.050552445532904
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 20,
+      "trades_per_day": 33.54817374625903,
+      "n_signals": 2054,
+      "n_filled": 1409,
+      "fill_rate": 0.6859785783836416,
+      "hit_rate": 0.7714691270404542,
+      "avg_pnl_pct": 0.00045297372774905065,
+      "total_pnl_pct": 0.6382399823984124
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 30,
+      "trades_per_day": 23.976586914466175,
+      "n_signals": 1483,
+      "n_filled": 1007,
+      "fill_rate": 0.6790289952798382,
+      "hit_rate": 0.7825223435948362,
+      "avg_pnl_pct": 0.0004707972171978571,
+      "total_pnl_pct": 0.4740927977182421
+    },
+    {
+      "lever": "cooldown_only",
+      "threshold": 0.55,
+      "cooldown_min": 60,
+      "trades_per_day": 12.809735610707849,
+      "n_signals": 828,
+      "n_filled": 538,
+      "fill_rate": 0.6497584541062802,
+      "hit_rate": 0.775092936802974,
+      "avg_pnl_pct": 0.00047336421362856193,
+      "total_pnl_pct": 0.2546699469321663
+    },
+    {
+      "lever": "threshold_plus_cooldown",
+      "threshold": 0.65,
+      "cooldown_min": 20,
+      "trades_per_day": 26.333768746176357,
+      "n_signals": 1644,
+      "n_filled": 1106,
+      "fill_rate": 0.6727493917274939,
+      "hit_rate": 0.833634719710669,
+      "avg_pnl_pct": 0.0006638215529466152,
+      "total_pnl_pct": 0.7341866375589564
+    },
+    {
+      "lever": "threshold_plus_cooldown",
+      "threshold": 0.65,
+      "cooldown_min": 60,
+      "trades_per_day": 12.024008333471121,
+      "n_signals": 742,
+      "n_filled": 505,
+      "fill_rate": 0.6805929919137467,
+      "hit_rate": 0.8297029702970297,
+      "avg_pnl_pct": 0.0005820950848879896,
+      "total_pnl_pct": 0.29395801786843473
+    },
+    {
+      "lever": "threshold_plus_cooldown",
+      "threshold": 0.75,
+      "cooldown_min": 20,
+      "trades_per_day": 18.35744638634898,
+      "n_signals": 1151,
+      "n_filled": 771,
+      "fill_rate": 0.6698523023457863,
+      "hit_rate": 0.8715953307392996,
+      "avg_pnl_pct": 0.000817441548625295,
+      "total_pnl_pct": 0.6302474339901024
+    },
+    {
+      "lever": "threshold_plus_cooldown",
+      "threshold": 0.75,
+      "cooldown_min": 60,
+      "trades_per_day": 9.30967773938061,
+      "n_signals": 590,
+      "n_filled": 391,
+      "fill_rate": 0.6627118644067796,
+      "hit_rate": 0.887468030690537,
+      "avg_pnl_pct": 0.0008046682041281213,
+      "total_pnl_pct": 0.31462526781409544
+    },
+    {
+      "lever": "threshold_plus_cooldown",
+      "threshold": 0.85,
+      "cooldown_min": 20,
+      "trades_per_day": 8.928719059508259,
+      "n_signals": 582,
+      "n_filled": 375,
+      "fill_rate": 0.6443298969072165,
+      "hit_rate": 0.92,
+      "avg_pnl_pct": 0.0009666375982891641,
+      "total_pnl_pct": 0.36248909935843654
+    }
+  ],
+  "not_implemented_note": "Max-concurrent-open-positions cap would need per-trade exit timing (simulate_maker_fills only returns fill status + realized outcome, not exit offset) -- noted as a natural next step, not built in this pass.",
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  }
+}

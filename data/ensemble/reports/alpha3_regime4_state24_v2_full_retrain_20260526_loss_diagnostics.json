@@ -1,0 +1,135 @@
+{
+  "rows": 225,
+  "wr": 0.21333333333333335,
+  "ret_sum_pct": 102.63803165670157,
+  "ret_median_bps": -35.392571849247005,
+  "trades_per_day_est_59d": 3.8350093744673597,
+  "side_counts": {
+    "SHORT": 153,
+    "LONG": 72
+  },
+  "owner_counts": {
+    "deep_alpha": 128,
+    "v21_2": 97
+  },
+  "exit_reason_counts": {
+    "deep_alpha_stop_loss": 90,
+    "v21_2_stop_loss": 80,
+    "deep_alpha_max_hold": 35,
+    "v21_2_max_hold": 12,
+    "v21_2_take_profit": 4,
+    "deep_alpha_take_profit": 3,
+    "forced_end": 1
+  },
+  "loss_share": 0.7866666666666666,
+  "loss_by_reason": {
+    "deep_alpha_stop_loss": 90,
+    "v21_2_stop_loss": 80,
+    "deep_alpha_max_hold": 7
+  },
+  "loss_by_owner": {
+    "deep_alpha": 97,
+    "v21_2": 80
+  },
+  "loss_hold_bucket": {
+    "<=2": 42,
+    "3-6": 36,
+    "7-12": 33,
+    "25-48": 32,
+    "13-24": 25,
+    "49+": 9
+  },
+  "immediate_exit_rate": 0.18666666666666668,
+  "quick_exit_rate": 0.3466666666666667,
+  "immediate_loss_rate": 0.18666666666666668,
+  "owner_perf": [
+    {
+      "owner": "deep_alpha",
+      "n": 128,
+      "wr": 0.2421875,
+      "ret_sum_pct": 2.7796978817035285,
+      "median_hold": 18.0,
+      "sl_share": 0.703125
+    },
+    {
+      "owner": "v21_2",
+      "n": 97,
+      "wr": 0.17525773195876287,
+      "ret_sum_pct": 99.85833377499809,
+      "median_hold": 7.0,
+      "sl_share": 0.8247422680412371
+    }
+  ],
+  "top_loss_patterns": [
+    {
+      "owner": "v21_2",
+      "exit_reason": "v21_2_stop_loss",
+      "hold_bucket": "<=2",
+      "count": 31,
+      "ret_sum_pct": -47.8409582849655
+    },
+    {
+      "owner": "deep_alpha",
+      "exit_reason": "deep_alpha_stop_loss",
+      "hold_bucket": "7-12",
+      "count": 26,
+      "ret_sum_pct": -10.33397689002059
+    },
+    {
+      "owner": "deep_alpha",
+      "exit_reason": "deep_alpha_stop_loss",
+      "hold_bucket": "3-6",
+      "count": 20,
+      "ret_sum_pct": -6.60952230310901
+    },
+    {
+      "owner": "deep_alpha",
+      "exit_reason": "deep_alpha_stop_loss",
+      "hold_bucket": "25-48",
+      "count": 18,
+      "ret_sum_pct": -11.938078543185911
+    },
+    {
+      "owner": "v21_2",
+      "exit_reason": "v21_2_stop_loss",
+      "hold_bucket": "3-6",
+      "count": 16,
+      "ret_sum_pct": -27.466795279235818
+    },
+    {
+      "owner": "deep_alpha",
+      "exit_reason": "deep_alpha_stop_loss",
+      "hold_bucket": "13-24",
+      "count": 15,
+      "ret_sum_pct": -6.69552391260709
+    },
+    {
+      "owner": "deep_alpha",
+      "exit_reason": "deep_alpha_stop_loss",
+      "hold_bucket": "<=2",
+      "count": 11,
+      "ret_sum_pct": -1.8825711969619598
+    },
+    {
+      "owner": "v21_2",
+      "exit_reason": "v21_2_stop_loss",
+      "hold_bucket": "13-24",
+      "count": 10,
+      "ret_sum_pct": -14.53781716170271
+    },
+    {
+      "owner": "v21_2",
+      "exit_reason": "v21_2_stop_loss",
+      "hold_bucket": "49+",
+      "count": 9,
+      "ret_sum_pct": -16.66797847779051
+    },
+    {
+      "owner": "v21_2",
+      "exit_reason": "v21_2_stop_loss",
+      "hold_bucket": "7-12",
+      "count": 7,
+      "ret_sum_pct": -12.954446431625453
+    }
+  ]
+}

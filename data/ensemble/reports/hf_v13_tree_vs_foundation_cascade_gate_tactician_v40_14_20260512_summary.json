@@ -1,0 +1,529 @@
+{
+  "model_id": "hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512",
+  "design": "Two-stage cascade tree. Stage 1 is the original v40.6 gate view: action and quality heads only. Stage 2 is a LightGBM tactician for notional, leverage, TP, SL, max_hold, and cooldown. Unlike v40_11, stage2 train rows are filtered by Stage1 forward-OOF pass decisions instead of true trade labels, then Q4 selects feature mode, pass filter, classifier-vs-ordinal head mode, and LightGBM hyperparameters.",
+  "split_policy": "Train=2025 Jan-Sep, selection=2025 Q4, OOS=2026 fixed",
+  "projection_spec": {
+    "macro_dim": 1,
+    "micro_dim": 1,
+    "drop_raw_micro": true
+  },
+  "stage1_hparams": {
+    "max_iter": 220,
+    "learning_rate": 0.04,
+    "max_leaf_nodes": 31,
+    "l2_regularization": 0.08,
+    "cash_weight": 0.35
+  },
+  "selected_bucket_hparams": {
+    "n_estimators": 180,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_child_samples": 40,
+    "reg_alpha": 0.2,
+    "reg_lambda": 1.0,
+    "path_smooth": 1.0,
+    "extra_trees": true
+  },
+  "selected_stage2_mode": "aq_plus_context",
+  "selected_filter_mode": "gate_pass_all",
+  "selected_head_mode": "ordinal_regressor",
+  "stage2_feature_cols": [
+    "aq_p_cash",
+    "aq_p_long",
+    "aq_p_short",
+    "aq_trade_prob",
+    "aq_dir_edge",
+    "aq_action",
+    "aq_side",
+    "aq_action_conf",
+    "aq_action_margin",
+    "aq_action_entropy",
+    "aq_quality",
+    "aq_abs_quality",
+    "aq_quality_x_side",
+    "aq_quality_x_trade_prob",
+    "ctx_000",
+    "ctx_001",
+    "ctx_002",
+    "ctx_003",
+    "ctx_004",
+    "ctx_005",
+    "ctx_006",
+    "ctx_007",
+    "ctx_008",
+    "ctx_009",
+    "ctx_010",
+    "ctx_011",
+    "ctx_012",
+    "ctx_013",
+    "ctx_014",
+    "ctx_015",
+    "ctx_016",
+    "ctx_017",
+    "ctx_018",
+    "ctx_019",
+    "ctx_020",
+    "ctx_021",
+    "ctx_022",
+    "ctx_023",
+    "ctx_024",
+    "ctx_025",
+    "ctx_026",
+    "ctx_027",
+    "ctx_028",
+    "ctx_029",
+    "ctx_030",
+    "ctx_031",
+    "ctx_032",
+    "ctx_033",
+    "ctx_034",
+    "ctx_035",
+    "ctx_036",
+    "ctx_037",
+    "ctx_038",
+    "ctx_039",
+    "ctx_040",
+    "ctx_041",
+    "ctx_042",
+    "ctx_043",
+    "ctx_044",
+    "ctx_045",
+    "ctx_046",
+    "ctx_047",
+    "ctx_048",
+    "ctx_049",
+    "ctx_050",
+    "ctx_051",
+    "ctx_052",
+    "ctx_053",
+    "ctx_054",
+    "ctx_055",
+    "ctx_056",
+    "ctx_057",
+    "ctx_058",
+    "ctx_059",
+    "ctx_060",
+    "ctx_061",
+    "ctx_062",
+    "ctx_063",
+    "ctx_064",
+    "ctx_065",
+    "ctx_066",
+    "ctx_067",
+    "ctx_068",
+    "ctx_069",
+    "ctx_070",
+    "ctx_071",
+    "ctx_072",
+    "ctx_073",
+    "ctx_074",
+    "ctx_075",
+    "ctx_076",
+    "ctx_077",
+    "ctx_078",
+    "ctx_079",
+    "ctx_080",
+    "ctx_081",
+    "ctx_082",
+    "sidectx_000",
+    "sidectx_001",
+    "sidectx_002",
+    "sidectx_003",
+    "sidectx_004",
+    "sidectx_005",
+    "sidectx_006",
+    "sidectx_007",
+    "sidectx_008",
+    "sidectx_009",
+    "sidectx_010",
+    "sidectx_011",
+    "sidectx_012",
+    "sidectx_013",
+    "sidectx_014",
+    "sidectx_015",
+    "sidectx_016",
+    "sidectx_017",
+    "sidectx_018",
+    "sidectx_019",
+    "sidectx_020",
+    "sidectx_021",
+    "sidectx_022",
+    "sidectx_023",
+    "sidectx_024",
+    "sidectx_025",
+    "sidectx_026",
+    "sidectx_027",
+    "sidectx_028",
+    "sidectx_029",
+    "sidectx_030",
+    "sidectx_031",
+    "sidectx_032",
+    "sidectx_033",
+    "sidectx_034",
+    "sidectx_035",
+    "sidectx_036",
+    "sidectx_037",
+    "sidectx_038",
+    "sidectx_039",
+    "sidectx_040",
+    "sidectx_041",
+    "sidectx_042",
+    "sidectx_043",
+    "sidectx_044",
+    "sidectx_045",
+    "sidectx_046",
+    "sidectx_047",
+    "sidectx_048",
+    "sidectx_049",
+    "sidectx_050",
+    "sidectx_051",
+    "sidectx_052",
+    "sidectx_053",
+    "sidectx_054",
+    "sidectx_055",
+    "sidectx_056",
+    "sidectx_057",
+    "sidectx_058",
+    "sidectx_059",
+    "sidectx_060",
+    "sidectx_061",
+    "sidectx_062",
+    "sidectx_063",
+    "sidectx_064",
+    "sidectx_065",
+    "sidectx_066",
+    "sidectx_067",
+    "sidectx_068",
+    "sidectx_069",
+    "sidectx_070",
+    "sidectx_071",
+    "sidectx_072",
+    "sidectx_073",
+    "sidectx_074",
+    "sidectx_075",
+    "sidectx_076",
+    "sidectx_077",
+    "sidectx_078",
+    "sidectx_079",
+    "sidectx_080",
+    "sidectx_081",
+    "sidectx_082"
+  ],
+  "stage2_oof_rows": 979,
+  "stage2_oof_pred_pass_rows": 40,
+  "stage2_oof_true_trade_rows": 156,
+  "stage2_train_rows": 40,
+  "validation": {
+    "cost1": {
+      "pnl": 13.28991695653745,
+      "mdd": -12.90662334271011,
+      "trades": 93,
+      "wr": 0.3118279569892473,
+      "trades_per_day": 1.010907718437441,
+      "long_entries": 18,
+      "short_entries": 75,
+      "avg_notional": 1.2074999999999991,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 24294,
+        "long": 18,
+        "short": 75
+      },
+      "exits": {
+        "learned_stop_loss": 60,
+        "learned_max_hold": 26,
+        "learned_take_profit": 7
+      }
+    },
+    "cost2": {
+      "pnl": -4.818784127824616,
+      "mdd": -22.284464623823563,
+      "trades": 95,
+      "wr": 0.2736842105263158,
+      "trades_per_day": 1.0326476693715796,
+      "long_entries": 18,
+      "short_entries": 77,
+      "avg_notional": 1.207499999999999,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 24359,
+        "long": 18,
+        "short": 77
+      },
+      "exits": {
+        "learned_stop_loss": 64,
+        "learned_max_hold": 24,
+        "learned_take_profit": 7
+      }
+    },
+    "cost3": {
+      "pnl": -15.298540544865869,
+      "mdd": -29.571954676394064,
+      "trades": 95,
+      "wr": 0.2631578947368421,
+      "trades_per_day": 1.0326476693715796,
+      "long_entries": 18,
+      "short_entries": 77,
+      "avg_notional": 1.207499999999999,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 24469,
+        "long": 18,
+        "short": 77
+      },
+      "exits": {
+        "learned_stop_loss": 65,
+        "learned_max_hold": 23,
+        "learned_take_profit": 7
+      }
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 9.564892770728672,
+      "mdd": -4.0764446933514,
+      "trades": 24,
+      "wr": 0.4583333333333333,
+      "trades_per_day": 0.4090909090909091,
+      "long_entries": 7,
+      "short_entries": 17,
+      "avg_notional": 1.2074999999999998,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 16304,
+        "long": 7,
+        "short": 17
+      },
+      "exits": {
+        "learned_max_hold": 8,
+        "learned_stop_loss": 13,
+        "learned_take_profit": 3
+      }
+    },
+    "cost2": {
+      "pnl": 4.709634355658809,
+      "mdd": -4.920054017798703,
+      "trades": 24,
+      "wr": 0.375,
+      "trades_per_day": 0.4090909090909091,
+      "long_entries": 7,
+      "short_entries": 17,
+      "avg_notional": 1.2074999999999998,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 16351,
+        "long": 7,
+        "short": 17
+      },
+      "exits": {
+        "learned_max_hold": 7,
+        "learned_stop_loss": 14,
+        "learned_take_profit": 3
+      }
+    },
+    "cost3": {
+      "pnl": 1.4792291145363956,
+      "mdd": -6.1428950094137065,
+      "trades": 24,
+      "wr": 0.2916666666666667,
+      "trades_per_day": 0.4090909090909091,
+      "long_entries": 7,
+      "short_entries": 17,
+      "avg_notional": 1.2074999999999998,
+      "avg_leverage": 2.0,
+      "action_counts": {
+        "cash": 16354,
+        "long": 7,
+        "short": 17
+      },
+      "exits": {
+        "learned_max_hold": 7,
+        "learned_stop_loss": 14,
+        "learned_take_profit": 3
+      }
+    }
+  },
+  "baseline_v40_6_oos": {
+    "baseline": {
+      "cost1": {
+        "pnl": 13.25617742308074,
+        "mdd": -34.787307692791515,
+        "trades": 80,
+        "wr": 0.175,
+        "trades_per_day": 1.3636363636363638,
+        "long_entries": 26,
+        "short_entries": 54,
+        "avg_notional": 2.7541836093735172,
+        "avg_leverage": 3.0408401119589064,
+        "action_counts": {
+          "cash": 13243,
+          "long": 26,
+          "short": 54
+        },
+        "exits": {
+          "learned_stop_loss": 66,
+          "learned_max_hold": 9,
+          "learned_take_profit": 4,
+          "forced_end": 1
+        }
+      },
+      "cost2": {
+        "pnl": -14.938621324730905,
+        "mdd": -39.40138579881241,
+        "trades": 81,
+        "wr": 0.1728395061728395,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 26,
+        "short_entries": 55,
+        "avg_notional": 2.760212352371307,
+        "avg_leverage": 3.038818428906757,
+        "action_counts": {
+          "cash": 13244,
+          "long": 26,
+          "short": 55
+        },
+        "exits": {
+          "learned_stop_loss": 67,
+          "learned_max_hold": 9,
+          "learned_take_profit": 4,
+          "forced_end": 1
+        }
+      },
+      "cost3": {
+        "pnl": -52.80738058547178,
+        "mdd": -56.44826209755542,
+        "trades": 91,
+        "wr": 0.13186813186813187,
+        "trades_per_day": 1.5511363636363638,
+        "long_entries": 28,
+        "short_entries": 63,
+        "avg_notional": 2.7737635730043513,
+        "avg_leverage": 3.038632385344876,
+        "action_counts": {
+          "cash": 13464,
+          "long": 28,
+          "short": 63
+        },
+        "exits": {
+          "learned_stop_loss": 79,
+          "learned_max_hold": 8,
+          "learned_take_profit": 4
+        }
+      }
+    },
+    "target_aware_full": {
+      "cost1": {
+        "pnl": 125.60804218560504,
+        "mdd": -32.83678858576566,
+        "trades": 56,
+        "wr": 0.23214285714285715,
+        "trades_per_day": 0.9545454545454546,
+        "long_entries": 37,
+        "short_entries": 19,
+        "avg_notional": 2.9239520775089813,
+        "avg_leverage": 3.0859879586380154,
+        "action_counts": {
+          "cash": 13767,
+          "long": 37,
+          "short": 19
+        },
+        "exits": {
+          "learned_max_hold": 8,
+          "learned_stop_loss": 42,
+          "learned_take_profit": 6
+        }
+      },
+      "cost2": {
+        "pnl": 77.38544941372747,
+        "mdd": -40.717225075520226,
+        "trades": 58,
+        "wr": 0.22413793103448276,
+        "trades_per_day": 0.9886363636363636,
+        "long_entries": 38,
+        "short_entries": 20,
+        "avg_notional": 2.932353784388931,
+        "avg_leverage": 3.0870876050216514,
+        "action_counts": {
+          "cash": 13859,
+          "long": 38,
+          "short": 20
+        },
+        "exits": {
+          "learned_max_hold": 7,
+          "learned_stop_loss": 44,
+          "learned_take_profit": 7
+        }
+      },
+      "cost3": {
+        "pnl": 49.66066786233203,
+        "mdd": -47.49432009751647,
+        "trades": 61,
+        "wr": 0.21311475409836064,
+        "trades_per_day": 1.0397727272727273,
+        "long_entries": 41,
+        "short_entries": 20,
+        "avg_notional": 2.936125380986449,
+        "avg_leverage": 3.0949495483960376,
+        "action_counts": {
+          "cash": 13779,
+          "long": 41,
+          "short": 20
+        },
+        "exits": {
+          "learned_max_hold": 8,
+          "learned_stop_loss": 47,
+          "learned_take_profit": 6
+        }
+      }
+    },
+    "delta_cost1_pnl": 112.3518647625243,
+    "delta_cost1_mdd": 1.9505191070258547,
+    "delta_cost2_pnl": 92.32407073845837,
+    "delta_cost3_pnl": 102.46804844780382
+  },
+  "audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025 Q4 cascade tactician HP/filter/head selection",
+    "oos_window": "2026 fixed OOS only after selection",
+    "stage1": "original v40_6 gate action/quality heads; OOF gate predictions used for stage2 train filtering",
+    "stage2": "LightGBM tactician trained only on Stage1 OOF pass rows, with classifier vs ordinal head selection",
+    "stage2_forward_oof": true,
+    "stage2_selected_mode": "aq_plus_context",
+    "stage2_selected_filter_mode": "gate_pass_all",
+    "stage2_selected_head_mode": "ordinal_regressor",
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    }
+  },
+  "artifacts": {
+    "action_quality_parent": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512/action_quality_parent.pkl",
+    "bucket_allocator": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512/lgbm_bucket_allocator.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tree_vs_foundation_cascade_gate_tactician_v40_14_20260512_grid.csv"
+  }
+}

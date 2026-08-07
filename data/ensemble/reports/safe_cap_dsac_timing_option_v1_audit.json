@@ -1,0 +1,24 @@
+{
+  "model_id": "safe_cap_dsac_timing_option_v1",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "selection fell back to noop; no timing alpha promoted"
+  ],
+  "invariants": {
+    "parent_trained_before_cap_train": true,
+    "cap_map_learned_before_validation": true,
+    "timing_selection_uses_2025_validation_only": true,
+    "oos_is_2026_report_only": true,
+    "no_new_entries": true,
+    "side_never_changes": true,
+    "exit_index_unchanged": true,
+    "entry_never_before_original": true,
+    "notional_never_above_safe_base": true,
+    "max_margin_fraction_lte_1": true,
+    "no_liquidations": true,
+    "no_ruin": true,
+    "cost2_survives": true,
+    "cost3_survives": true
+  }
+}

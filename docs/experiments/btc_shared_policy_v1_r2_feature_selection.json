@@ -1,0 +1,17 @@
+{
+  "experiment_id": "btc-shared-policy-v1-r2",
+  "revision_of": "docs/experiments/btc_shared_policy_v1_r1.json",
+  "selection_method": "Drop one member of every absolute Spearman correlation pair >= 0.98; retain close when paired with OHLC price-level columns.",
+  "drop_columns": [
+    "atr_pct_rank_288", "btc_impulse_x_eth_beta", "evt_excess_z",
+    "failed_breakout_down", "failed_breakout_up", "high", "jump_z", "low",
+    "oi_change_rate", "open", "ou_funding_z", "parkinson_vol", "quote_volume",
+    "rogers_satchell_vol", "squeeze_power", "taker_buy_quote"
+  ],
+  "retained_feature_count": 125,
+  "notes": [
+    "smart_money_flow is retained and its exact duplicate oi_change_rate is removed.",
+    "close is retained as the canonical price-level feature; open/high/low are removed because each is >=0.98 correlated to retained close.",
+    "Further pruning is deferred until teacher-label correlation and cheap-gate analysis are complete."
+  ]
+}

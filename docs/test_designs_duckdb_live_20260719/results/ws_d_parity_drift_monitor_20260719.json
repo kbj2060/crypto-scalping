@@ -1,0 +1,302 @@
+{
+  "stage": "WS-D",
+  "generated_at": "2026-07-19T02:29:10.613776+09:00",
+  "D1_note": "SKIPPED this pass -- full offline feature recompute requires replicating the entire live feature pipeline (features/elite.py + dependencies), out of scope for this session. D1 acceptance test (inject 1.001x into recompute input, confirm detection) deferred until the offline recompute harness exists.",
+  "D2_drift": {
+    "baseline_n": 86101,
+    "recent_n": 9901,
+    "cutoff": "2026-07-11 17:28:00+00:00",
+    "psi_by_column": {
+      "obi": {
+        "psi": 0.01716990093773112,
+        "alert": "OK"
+      },
+      "taker_buy_ratio": {
+        "psi": 0.006850437136191684,
+        "alert": "OK"
+      },
+      "shadow_toxicity_score": {
+        "psi": 0.00644458658792121,
+        "alert": "OK"
+      },
+      "shadow_queue_collapse": {
+        "psi": 0.016058212597772716,
+        "alert": "OK"
+      },
+      "shadow_absorption_score": {
+        "psi": 0.005874011815204768,
+        "alert": "OK"
+      },
+      "oi_delta_pct": {
+        "psi": 0.017471464908909617,
+        "alert": "OK"
+      },
+      "funding_rate": {
+        "psi": 1.5872803386831815,
+        "alert": "ALERT"
+      }
+    }
+  },
+  "D2_injection_selftest": {
+    "psi_unmodified_recent": 0.024584164411998774,
+    "psi_after_plus1sigma_injection": 3.596495005203922,
+    "detection_pass": true
+  },
+  "D3_shadow_deviation": {
+    "btc_shadow": {
+      "n_rows": 2576,
+      "latest_row_age_hours": 0.06966597277777778,
+      "stale_alert": false,
+      "recent_7d_pnl_sum": 0.0,
+      "hist_daily_bootstrap_ci5": null,
+      "hist_daily_bootstrap_ci95": null,
+      "within_ci": null,
+      "zero_variance_explanation": "BENIGN: research_policy_enabled=False (explicit gate), fresh_start=2026-07-18 06:41:00 -- zero PnL variance expected, not an anomaly"
+    },
+    "sol_shadow": {
+      "n_rows": 2576,
+      "latest_row_age_hours": 0.06968564861111111,
+      "stale_alert": false,
+      "recent_7d_pnl_sum": 0.0,
+      "hist_daily_bootstrap_ci5": null,
+      "hist_daily_bootstrap_ci95": null,
+      "within_ci": null,
+      "zero_variance_explanation": "UNRESOLVED: policy is available/enabled but has NEVER taken a position (fresh_start=2026-07-18 06:41:00) -- could be normal low-frequency behavior or a stuck threshold; requires re-check after more elapsed time, cannot be auto-classified as benign or broken from this data alone"
+    },
+    "eth_v4_shadow": {
+      "n_rows": 3524,
+      "latest_row_age_hours": 0.0530421275,
+      "stale_alert": false,
+      "recent_7d_pnl_sum": 0.0,
+      "hist_daily_bootstrap_ci5": null,
+      "hist_daily_bootstrap_ci95": null,
+      "within_ci": null,
+      "zero_variance_explanation": "UNRESOLVED: policy is available/enabled but has NEVER taken a position (fresh_start=2026-07-18 02:45:00) -- could be normal low-frequency behavior or a stuck threshold; requires re-check after more elapsed time, cannot be auto-classified as benign or broken from this data alone"
+    },
+    "eth_lifecycle_shadow": {
+      "n_rows": 2028,
+      "latest_row_age_hours": 1.6530607011111111,
+      "stale_alert": false,
+      "recent_7d_pnl_sum": 0.0,
+      "hist_daily_bootstrap_ci5": null,
+      "hist_daily_bootstrap_ci95": null,
+      "within_ci": null,
+      "zero_variance_explanation": "UNRESOLVED: policy is available/enabled but has NEVER taken a position (fresh_start=2026-07-18 07:23:00) -- could be normal low-frequency behavior or a stuck threshold; requires re-check after more elapsed time, cannot be auto-classified as benign or broken from this data alone"
+    },
+    "sol_entry_shadow": {
+      "n_rows": 2028,
+      "latest_row_age_hours": 1.6530765738888888,
+      "stale_alert": false,
+      "recent_7d_pnl_sum": 0.0,
+      "hist_daily_bootstrap_ci5": null,
+      "hist_daily_bootstrap_ci95": null,
+      "within_ci": null,
+      "zero_variance_explanation": "UNRESOLVED: policy is available/enabled but has NEVER taken a position (fresh_start=2026-07-18 07:23:00) -- could be normal low-frequency behavior or a stuck threshold; requires re-check after more elapsed time, cannot be auto-classified as benign or broken from this data alone"
+    }
+  },
+  "D4_collection_health": {
+    "microstructure": {
+      "decision_feature_frame": {
+        "n_rows": 111,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-01 17:50:00",
+        "max_ts": "2026-07-02 03:25:00",
+        "latest_row_age_minutes": 23884.185734266666
+      },
+      "decision_feature_frame_live_only_shadow_20260702": {
+        "n_rows": 1425,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-13 08:00:00",
+        "max_ts": "2026-07-18 17:20:00",
+        "latest_row_age_minutes": 9.185799666666666
+      },
+      "decision_feature_frame_omega5_event_risk_governor_20260702": {
+        "n_rows": 2,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-02 04:20:00",
+        "max_ts": "2026-07-02 04:25:00",
+        "latest_row_age_minutes": 23824.185845733333
+      },
+      "microstructure_1m": {
+        "n_rows": 96002,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1859053499999999
+      },
+      "microstructure_1m_btc": {
+        "n_rows": 6082,
+        "ts_col": "ts",
+        "min_ts": "2026-07-14 18:23:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.18595125
+      },
+      "microstructure_1m_sol": {
+        "n_rows": 6100,
+        "ts_col": "ts",
+        "min_ts": "2026-07-14 18:23:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1859892
+      },
+      "microstructure_features_v1": {
+        "n_rows": 96002,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1860262000000001
+      },
+      "microstructure_model_ready_v1": {
+        "n_rows": 95918,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1861145833333333
+      },
+      "orderbook_decision_snapshots": {
+        "n_rows": 11638,
+        "ts_col": "recorded_at_kst",
+        "min_ts": "2026-05-13 23:52:59.391084+09:00",
+        "max_ts": "2026-07-19 02:25:21.726234+09:00",
+        "latest_row_age_minutes": 3.82405145
+      },
+      "orderbook_decision_snapshots_btc": {
+        "n_rows": 1278,
+        "ts_col": "recorded_at_kst",
+        "min_ts": "2026-07-14 18:24:17.083732+09:00",
+        "max_ts": "2026-07-19 02:25:15.028404+09:00",
+        "latest_row_age_minutes": 3.9357142166666668
+      },
+      "orderbook_decision_snapshots_sol": {
+        "n_rows": 1278,
+        "ts_col": "recorded_at_kst",
+        "min_ts": "2026-07-14 18:24:17.136681+09:00",
+        "max_ts": "2026-07-19 02:25:15.029482+09:00",
+        "latest_row_age_minutes": 3.9357294499999997
+      }
+    },
+    "tail_risk": {
+      "tail_risk_1m": {
+        "n_rows": 96075,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1866810166666668
+      },
+      "tail_risk_features_v1": {
+        "n_rows": 96075,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1867163833333334
+      },
+      "tail_risk_model_ready_v1": {
+        "n_rows": 96070,
+        "ts_col": "ts",
+        "min_ts": "2026-05-03 17:36:00+09:00",
+        "max_ts": "2026-07-19 02:28:00+09:00",
+        "latest_row_age_minutes": 1.1867723499999998
+      }
+    },
+    "btc_shadow": {
+      "decisions": {
+        "n_rows": 645,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-18 06:41:00",
+        "max_ts": "2026-07-18 17:25:00",
+        "latest_row_age_minutes": 4.1875028
+      },
+      "observer_metadata": {
+        "n_rows": 1
+      },
+      "shadow_pnl": {
+        "n_rows": 2576,
+        "ts_col": "decision_timestamp",
+        "min_ts": "2026-07-18 06:41:00",
+        "max_ts": "2026-07-18 17:24:00",
+        "latest_row_age_minutes": 5.187903816666666
+      }
+    },
+    "sol_shadow": {
+      "decisions": {
+        "n_rows": 645,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-18 06:41:00",
+        "max_ts": "2026-07-18 17:25:00",
+        "latest_row_age_minutes": 4.1887325833333335
+      },
+      "observer_metadata": {
+        "n_rows": 1
+      },
+      "shadow_pnl": {
+        "n_rows": 2576,
+        "ts_col": "decision_timestamp",
+        "min_ts": "2026-07-18 06:41:00",
+        "max_ts": "2026-07-18 17:24:00",
+        "latest_row_age_minutes": 5.189163033333333
+      }
+    },
+    "eth_v4_shadow": {
+      "decisions": {
+        "n_rows": 882,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-18 02:45:00",
+        "max_ts": "2026-07-18 17:26:00",
+        "latest_row_age_minutes": 3.1899843333333333
+      },
+      "execution_observations": {
+        "n_rows": 0,
+        "ts_col": "decision_timestamp",
+        "min_ts": "None",
+        "max_ts": "None"
+      },
+      "observer_metadata": {
+        "n_rows": 1
+      },
+      "shadow_pnl": {
+        "n_rows": 3524,
+        "ts_col": "decision_timestamp",
+        "min_ts": "2026-07-18 02:45:00",
+        "max_ts": "2026-07-18 17:25:00",
+        "latest_row_age_minutes": 4.19052035
+      }
+    },
+    "eth_lifecycle_shadow": {
+      "decisions": {
+        "n_rows": 508,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-18 07:23:00",
+        "max_ts": "2026-07-18 15:50:00",
+        "latest_row_age_minutes": 99.19117223333333
+      },
+      "observer_metadata": {
+        "n_rows": 1
+      },
+      "shadow_pnl": {
+        "n_rows": 2028,
+        "ts_col": "decision_timestamp",
+        "min_ts": "2026-07-18 07:23:00",
+        "max_ts": "2026-07-18 15:49:00",
+        "latest_row_age_minutes": 100.19141044999999
+      }
+    },
+    "sol_entry_shadow": {
+      "decisions": {
+        "n_rows": 508,
+        "ts_col": "timestamp",
+        "min_ts": "2026-07-18 07:23:00",
+        "max_ts": "2026-07-18 15:50:00",
+        "latest_row_age_minutes": 99.19205628333334
+      },
+      "observer_metadata": {
+        "n_rows": 1
+      },
+      "shadow_pnl": {
+        "n_rows": 2028,
+        "ts_col": "decision_timestamp",
+        "min_ts": "2026-07-18 07:23:00",
+        "max_ts": "2026-07-18 15:49:00",
+        "latest_row_age_minutes": 100.19227756666668
+      }
+    }
+  }
+}

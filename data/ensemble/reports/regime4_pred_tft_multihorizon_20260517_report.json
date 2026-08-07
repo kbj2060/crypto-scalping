@@ -1,0 +1,343 @@
+{
+  "model_id": "regime4_pred_tft_multihorizon_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_multihorizon_20260517/regime4_pred_tft_multihorizon_2024.pt",
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw"
+  ],
+  "horizons": [
+    12,
+    36,
+    72
+  ],
+  "feature_count": 35,
+  "feature_cols": [
+    "sum_toptrader_long_short_ratio",
+    "close_btc",
+    "sum_open_interest_value",
+    "clean_regime4_2024_unsup_v1_bear_prob",
+    "btc_corr_60",
+    "pred_mdjd",
+    "clean_regime4_2024_unsup_v1_trend_prob",
+    "breakout_strength",
+    "hour_sin",
+    "clean_regime4_2024_unsup_v1_bull_prob",
+    "ofi_acceleration",
+    "mean_reversion_z",
+    "squeeze_power",
+    "clean_regime4_2024_unsup_v1_range_prob",
+    "clean_regime4_2024_unsup_v1_chop_prob",
+    "trade_intensity",
+    "bb_width_z",
+    "session_europe",
+    "cvp_cluster_position",
+    "chop_index",
+    "clean_regime4_2024_unsup_v1_instability_prob",
+    "funding_price_divergence",
+    "whale_retail_ratio",
+    "kalman_velocity",
+    "taker_acceleration",
+    "clean_regime4_2024_unsup_v1_micro_prob",
+    "amihud_illiquidity_z",
+    "mtf_trend_1h",
+    "clean_regime4_2024_unsup_v1_entropy",
+    "mta_funding",
+    "minute_sin",
+    "hour_cos",
+    "macd_hist",
+    "trades",
+    "taker_buy_quote"
+  ],
+  "selected_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/regime4_pred_tft_vsn_select_20260517_report.json",
+  "validation_label_meta": {
+    "horizons": [
+      12,
+      36,
+      72
+    ],
+    "label_source": "argmax_clean_regime4_at_t_plus_horizon",
+    "h12_label_counts": {
+      "bull": 31845,
+      "bear": 31043,
+      "chop": 26866,
+      "whipsaw": 15554
+    },
+    "h36_label_counts": {
+      "bull": 31845,
+      "bear": 31067,
+      "chop": 26860,
+      "whipsaw": 15536
+    },
+    "h72_label_counts": {
+      "bull": 31845,
+      "bear": 31073,
+      "chop": 26865,
+      "whipsaw": 15525
+    },
+    "split_policy": "Q4_2024_validation_with_max_horizon_embargo",
+    "embargo_bars": 72
+  },
+  "validation_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.2215324640274048,
+      "val_log_loss_mean": 1.2309270826839378,
+      "val_h12_log_loss": 0.9767057769766508,
+      "val_h12_balanced_accuracy": 0.5569844829783037,
+      "val_h36_log_loss": 1.2926847106332007,
+      "val_h36_balanced_accuracy": 0.40205572515575966,
+      "val_h72_log_loss": 1.4233907604419618,
+      "val_h72_balanced_accuracy": 0.3158660457498217
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 1.1332087310460897,
+      "val_log_loss_mean": 1.3274622688129156,
+      "val_h12_log_loss": 1.0183830605269597,
+      "val_h12_balanced_accuracy": 0.5734839461253217,
+      "val_h36_log_loss": 1.4117928664412311,
+      "val_h36_balanced_accuracy": 0.38130173065141526,
+      "val_h72_log_loss": 1.552210879470556,
+      "val_h72_balanced_accuracy": 0.290832388333802
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 1.0831532111534705,
+      "val_log_loss_mean": 1.3763962708939677,
+      "val_h12_log_loss": 1.0355326478533904,
+      "val_h12_balanced_accuracy": 0.5644671984491282,
+      "val_h36_log_loss": 1.4705804584187756,
+      "val_h36_balanced_accuracy": 0.35798074061170737,
+      "val_h72_log_loss": 1.6230757064097368,
+      "val_h72_balanced_accuracy": 0.28603331591288217
+    }
+  ],
+  "validation_by_horizon": {
+    "h12": {
+      "rows": 26424,
+      "accuracy": 0.569406600060551,
+      "balanced_accuracy": 0.5569844829783037,
+      "log_loss": 0.9767057769766508,
+      "true_counts": {
+        "bull": 8302,
+        "bear": 7713,
+        "chop": 6412,
+        "whipsaw": 3997
+      },
+      "pred_counts": {
+        "bull": 5006,
+        "bear": 7016,
+        "chop": 10451,
+        "whipsaw": 3951
+      },
+      "confusion_matrix": [
+        [
+          3817,
+          250,
+          2879,
+          1356
+        ],
+        [
+          104,
+          4848,
+          2019,
+          742
+        ],
+        [
+          488,
+          756,
+          4848,
+          320
+        ],
+        [
+          597,
+          1162,
+          705,
+          1533
+        ]
+      ]
+    },
+    "h36": {
+      "rows": 26424,
+      "accuracy": 0.40448077505298213,
+      "balanced_accuracy": 0.40205572515575966,
+      "log_loss": 1.2926847106332007,
+      "true_counts": {
+        "bull": 8293,
+        "bear": 7737,
+        "chop": 6411,
+        "whipsaw": 3983
+      },
+      "pred_counts": {
+        "bull": 3545,
+        "bear": 8160,
+        "chop": 10830,
+        "whipsaw": 3889
+      },
+      "confusion_matrix": [
+        [
+          1964,
+          1517,
+          3531,
+          1281
+        ],
+        [
+          443,
+          3882,
+          2419,
+          993
+        ],
+        [
+          726,
+          1634,
+          3639,
+          412
+        ],
+        [
+          412,
+          1127,
+          1241,
+          1203
+        ]
+      ]
+    },
+    "h72": {
+      "rows": 26424,
+      "accuracy": 0.30351195882531035,
+      "balanced_accuracy": 0.3158660457498217,
+      "log_loss": 1.4233907604419618,
+      "true_counts": {
+        "bull": 8257,
+        "bear": 7766,
+        "chop": 6418,
+        "whipsaw": 3983
+      },
+      "pred_counts": {
+        "bull": 1523,
+        "bear": 7926,
+        "chop": 12680,
+        "whipsaw": 4295
+      },
+      "confusion_matrix": [
+        [
+          442,
+          2330,
+          4037,
+          1448
+        ],
+        [
+          427,
+          2654,
+          3457,
+          1228
+        ],
+        [
+          358,
+          1637,
+          3864,
+          559
+        ],
+        [
+          296,
+          1305,
+          1322,
+          1060
+        ]
+      ]
+    }
+  },
+  "validation_avg_prob_against_h36": {
+    "rows": 26424,
+    "accuracy": 0.3753405994550409,
+    "balanced_accuracy": 0.3718139089404289,
+    "log_loss": 1.322624066491498,
+    "true_counts": {
+      "bull": 8293,
+      "bear": 7737,
+      "chop": 6411,
+      "whipsaw": 3983
+    },
+    "pred_counts": {
+      "bull": 3563,
+      "bear": 8120,
+      "chop": 11099,
+      "whipsaw": 3642
+    },
+    "confusion_matrix": [
+      [
+        1690,
+        1711,
+        3470,
+        1422
+      ],
+      [
+        570,
+        3587,
+        2770,
+        810
+      ],
+      [
+        841,
+        1537,
+        3632,
+        401
+      ],
+      [
+        462,
+        1285,
+        1227,
+        1009
+      ]
+    ]
+  },
+  "selected_final_epochs": 1,
+  "final_label_meta": {
+    "horizons": [
+      12,
+      36,
+      72
+    ],
+    "label_source": "argmax_clean_regime4_at_t_plus_horizon",
+    "h12_label_counts": {
+      "bull": 31845,
+      "bear": 31043,
+      "chop": 26866,
+      "whipsaw": 15554
+    },
+    "h36_label_counts": {
+      "bull": 31845,
+      "bear": 31067,
+      "chop": 26860,
+      "whipsaw": 15536
+    },
+    "h72_label_counts": {
+      "bull": 31845,
+      "bear": 31073,
+      "chop": 26865,
+      "whipsaw": 15525
+    }
+  },
+  "final_training_history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.2124462680540222
+    }
+  ],
+  "train_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_multihorizon_20260517/training_features_2024_regime4_pred_tft_multihorizon.csv",
+  "predict_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_multihorizon_20260517/training_features_2025_regime4_pred_tft_multihorizon.csv",
+  "predict_probability_sum_min": 0.9999999999999998,
+  "predict_probability_sum_max": 1.0000000000000002,
+  "predict_counts": {
+    "bull": 36163,
+    "bear": 23788,
+    "chop": 22199,
+    "whipsaw": 22914
+  },
+  "predict_confidence_mean": 0.40610677409092377,
+  "predict_entropy_mean": 0.9190939487218779,
+  "notes": [
+    "Sidecar emits averaged 12/36/72 probabilities; horizon-specific validation metrics are in this report."
+  ]
+}

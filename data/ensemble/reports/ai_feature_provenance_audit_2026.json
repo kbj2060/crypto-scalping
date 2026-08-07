@@ -1,0 +1,58 @@
+{
+  "audit_id": "ai_feature_provenance_audit_2026",
+  "generated_at": "2026-05-07",
+  "status": "conditional_pass_with_provenance_gap",
+  "blocking_for_accounting_backtest": [],
+  "blocking_for_certified_live_promotion": [
+    "existing_neuralforecast_specialist_artifacts_do_not_record_training_data_path_or_timestamp_range"
+  ],
+  "warnings": [
+    "source code default trains PatchTST/TiDE/DLinear on data/splits/year_oos/training_features_2024.csv with expected_year=2024, but the existing artifact contracts cannot independently prove this after the fact",
+    "2025 and 2026 AI feature checkpoints are separated by timestamp range, but their generated features depend on pre-existing neuralforecast artifacts with incomplete provenance"
+  ],
+  "evidence": {
+    "ai_feature_checkpoints": {
+      "2025": {
+        "path": "data/tmp/unified_build_ckpt/03_after_ai.csv",
+        "rows": 105064,
+        "timestamp_start": "2025-01-01 00:00:00",
+        "timestamp_end": "2025-12-31 23:55:00"
+      },
+      "2026": {
+        "path": "data/tmp/unified_build_ckpt_2026/03_after_ai.csv",
+        "rows": 16897,
+        "timestamp_start": "2026-01-01 00:00:00",
+        "timestamp_end": "2026-02-28 16:00:00"
+      }
+    },
+    "router_inference": {
+      "path": "ensemble/ensemble_router.py",
+      "finding": "batch inference warmup avoids bfill and uses forward-fill only, then fills remaining warmup NaNs with 0.0",
+      "status": "pass"
+    },
+    "training_script_after_patch": {
+      "path": "ensemble/supervised/train_alternative_models.py",
+      "finding": "future specialist contracts now include data_path, expected_year, actual_years, timestamp_start, timestamp_end, row count, and artifact_training_provenance_certified",
+      "status": "patched_for_future_training"
+    },
+    "existing_contracts": {
+      "data/nf_patchtst/specialist_contract.json": {
+        "model_name": "PatchTST",
+        "has_training_range": false
+      },
+      "data/nf_tide/specialist_contract.json": {
+        "model_name": "TiDE",
+        "has_training_range": false
+      },
+      "data/nf_dlinear/specialist_contract.json": {
+        "model_name": "DLinear",
+        "has_training_range": false
+      }
+    }
+  },
+  "red_team_conclusion": {
+    "strict_noleak_backtest_can_be_read_as_accounting_valid": true,
+    "strict_noleak_backtest_should_not_be_called_fully_provenance_certified": true,
+    "required_next_step": "force-retrain PatchTST/TiDE/DLinear/TimesNet specialists with the patched contract writer on a frozen 2024-only dataset, rebuild 2025/2026 AI feature checkpoints, then rerun strict no-leak walk-forward"
+  }
+}

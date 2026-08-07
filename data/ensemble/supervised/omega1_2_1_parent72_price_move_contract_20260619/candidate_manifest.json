@@ -1,0 +1,122 @@
+{
+  "model_id": "omega1_2_1_parent72_price_move_contract_20260619",
+  "alias": "omega1.2.1_parent72_price_move_contract",
+  "status": "redteam_pass_repackaged_research_baseline_not_live_wired",
+  "created_kst": "2026-06-19",
+  "source_model_id": "omega1_2_1_aggressive_compensated_scale200_cap090",
+  "source_manifest": "data/ensemble/supervised/omega1_2_1_aggressive_compensated_scale200_cap090/baseline_manifest.json",
+  "parent_baseline": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "contract_summary": {
+    "entry_alpha": "Unchanged parent Omega1.2 true 3-head TabM final action",
+    "risk_schema": "margin_fraction + fixed execution_leverage + price_move TP/SL",
+    "notional": "margin_fraction * execution_leverage",
+    "take_profit": "tp_price_move * notional",
+    "stop_loss": "sl_price_move * notional",
+    "double_leverage_multiplication": false
+  },
+  "selection": {
+    "source_grid": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080/baseline_final_static_exposure_growth_grid_20260606.csv",
+    "selection_rule": "validation_only: max val_pnl among compensated_tp_sl, tie lower cap then lower scale",
+    "selected_validation_row": {
+      "mode": "compensated_tp_sl",
+      "scale": "2.0",
+      "cap": "0.9",
+      "val_pnl": "100.54272942091158",
+      "val_mdd": "-10.677652697162888",
+      "val_wr": "0.6363636363636364",
+      "val_trades": "33"
+    },
+    "final_oos_readout_after_lock": {
+      "oos_pnl": "72.76004148106665",
+      "oos_mdd": "-8.108170708968387",
+      "oos_wr": "0.7222222222222222",
+      "oos_trades": "18"
+    },
+    "selected_uses_oos_for_decision": false,
+    "oos_columns_present_in_source_grid": true
+  },
+  "validation_cost3": {
+    "split": "validation",
+    "variant": "omega1_2_1_aggressive_compensated_scale200_cap090",
+    "pnl": 100.54272942091158,
+    "mdd": -10.677652697162888,
+    "wr": 0.6363636363636364,
+    "trades": 33,
+    "long": 9,
+    "short": 24,
+    "exit_reasons": {
+      "take_profit": 20,
+      "stop_loss": 12,
+      "forced_end": 1
+    },
+    "pnl_pct": 100.54272942091158,
+    "mdd_pct": -10.677652697162888,
+    "long_entries": 9,
+    "short_entries": 24,
+    "risk_contract": "price_move_margin_fraction_fixed_leverage",
+    "avg_margin_fraction": 0.3947727272727273,
+    "max_margin_fraction": 0.405,
+    "avg_notional_exposure": 0.7895454545454546,
+    "max_notional_exposure": 0.81,
+    "execution_leverage_unique": [
+      2.0
+    ],
+    "tp_price_move_unique": [
+      0.064197530864,
+      0.088888888889
+    ],
+    "sl_price_move_unique": [
+      0.034567901235,
+      0.047863247863
+    ],
+    "source_trade_ledger": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_validation_trade_ledger_20260606.csv"
+  },
+  "oos_cost3": {
+    "split": "oos",
+    "variant": "omega1_2_1_aggressive_compensated_scale200_cap090",
+    "pnl": 72.76004148106665,
+    "mdd": -8.108170708968387,
+    "wr": 0.7222222222222222,
+    "trades": 18,
+    "long": 3,
+    "short": 15,
+    "exit_reasons": {
+      "take_profit": 13,
+      "stop_loss": 5
+    },
+    "pnl_pct": 72.76004148106665,
+    "mdd_pct": -8.108170708968387,
+    "long_entries": 3,
+    "short_entries": 15,
+    "risk_contract": "price_move_margin_fraction_fixed_leverage",
+    "avg_margin_fraction": 0.39875,
+    "max_margin_fraction": 0.405,
+    "avg_notional_exposure": 0.7975,
+    "max_notional_exposure": 0.81,
+    "execution_leverage_unique": [
+      2.0
+    ],
+    "tp_price_move_unique": [
+      0.064197530864,
+      0.088888888889
+    ],
+    "sl_price_move_unique": [
+      0.034567901235,
+      0.047863247863
+    ],
+    "source_trade_ledger": "tmp/causal_regen_20260516/omega1_2_1_current_baseline_growth_20260606/omega1_2_1_aggressive_compensated_scale200_cap090_oos_trade_ledger_20260606.csv"
+  },
+  "artifacts": {
+    "validation_contract_ledger": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/omega1_2_1_parent72_price_move_contract_20260619_validation_contract_ledger.csv",
+    "oos_contract_ledger": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/omega1_2_1_parent72_price_move_contract_20260619_oos_contract_ledger.csv",
+    "validation_metrics": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/validation_metrics.json",
+    "oos_metrics": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/oos_metrics.json",
+    "prediction_feature_audit": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/prediction_feature_audit.json",
+    "redteam_report": "tmp/causal_regen_20260516/omega1_2_1_parent72_price_move_contract_20260619/redteam_report.json"
+  },
+  "limitations": [
+    "Research baseline only; not live-wired.",
+    "Does not claim fresh untouched OOS because the historical source grid already exposed OOS columns.",
+    "Preserves source decision and replay economics while making the risk contract explicit."
+  ]
+}

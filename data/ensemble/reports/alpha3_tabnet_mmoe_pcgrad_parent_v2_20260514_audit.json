@@ -1,0 +1,39 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "tabnet_parent_did_not_improve_alpha3_cost1"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "normalizer": "expanding_monthly_quantile_fit_prior_months",
+  "training_techniques": [
+    "TabNet shared sparse feature selector",
+    "MMoE 4-expert routed task heads",
+    "PCGrad projected multitask gradients",
+    "HGB soft-label distillation warmup",
+    "oracle-label fine-tuning",
+    "gradient scaler alpha=0.10",
+    "homoscedastic multitask loss",
+    "ReduceLROnPlateau",
+    "early stopping",
+    "gradient clipping",
+    "SWA best-effort",
+    "MC dropout inference",
+    "virtual sink nodes",
+    "entmax15 if installed else sparsemax fallback"
+  ],
+  "selected_runtime": {
+    "name": "mmoe_c0.22_q0.000_u0.130_s1.45_cap4.14_arg",
+    "confidence_floor": 0.22,
+    "quality_floor": 0.0,
+    "uncertainty_max": 0.13,
+    "notional_scale": 1.45,
+    "max_notional": 4.14,
+    "use_expected_buckets": false
+  }
+}

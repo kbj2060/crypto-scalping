@@ -22,7 +22,6 @@ from ensemble.train_rl_dsac_agent import DSACCompactTradingEnv, DSAC_STATE_DIM, 
 STATE_NAMES = [
     "m7_prob_up_scaled",
     "m7_prob_dn_scaled",
-    "m7_prob_fl_scaled",
     "m7_trend_entropy_scaled",
     "m7_quality_norm",
     "m7_hold_norm",

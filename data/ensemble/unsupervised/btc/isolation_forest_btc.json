@@ -1,0 +1,24 @@
+{
+  "feature_cols": [
+    "sig_volume_confirm",
+    "whale_retail_ratio",
+    "net_taker_ratio",
+    "smart_money_flow",
+    "oi_change_rate"
+  ],
+  "model_path": "isolation_forest_btc.pkl",
+  "meta": {
+    "algorithm": "isolation_forest",
+    "anomaly_ratio": 0.014558749122721116,
+    "score_mean": -0.10913308982333433,
+    "score_std": 0.03291990642385753,
+    "best_val_score": 0.060563020398629264,
+    "best_params": {
+      "n_estimators": 229,
+      "contamination": 0.014553611508969567,
+      "max_samples": 0.9744427686266666,
+      "max_features": 0.9759424231521916,
+      "feature_count": 5
+    }
+  }
+}

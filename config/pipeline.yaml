@@ -52,6 +52,38 @@ augment_rl:
   feature_path: data/splits/year_oos/training_features_2025.csv
   output_path:  data/splits/year_oos/rl_training_2025_m7.csv
 
+# ----- Fixed Alpha4 preprocessing contract -----------------
+# Regime4 + fixed TP/SL action score are frozen as preprocessing inputs.
+# Regime4 taxonomy: bull/bear/chop/whipsaw only.
+# TP/SL label contract: next-bar open entry, 48-bar horizon, TP 1.8%, SL 1.0%, same-bar tie -> SL wins.
+fixed_preprocessing:
+  model_id: fixed_regime4_tp18_sl10_preprocess_20260517
+  builder: scripts/build_fixed_regime4_tp_sl_preprocess_20260517.py
+  regime4_transformer: scripts/transform_regime4_official_sidecars_20260517.py
+  train_csv: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2025_regime4_tp18_sl10_fixed.csv
+  eval_csv: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2026_regime4_tp18_sl10_fixed.csv
+  manifest: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/fixed_regime4_tp18_sl10_preprocess_manifest.json
+  current_regime_2025: data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2025_clean_regime4_raw_state12_v1.csv
+  future_regime_2025: data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2025_regime4_pred_tft_vsn_selected.csv
+  current_regime_2026: data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2026_rebuilt_clean_regime4_raw_state12_v1.csv
+  future_regime_2026: data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2026_rebuilt_regime4_pred_tft_vsn_selected.csv
+  fixed_tp: 0.018
+  fixed_sl: 0.010
+  tp_sl_feature: tp_sl_action_score
+
+# ----- Deprecated action models ----------------------------
+# These artifacts can be used only for historical reproduction.
+# They must not be connected to live trading or frozen active backtests.
+deprecated_action_models:
+  catboost_major_direction:
+    status: deprecated_historical_reference_only
+    active_path_allowed: false
+    contract: docs/model_contracts/alpha5_catboost_major_direction_deprecated_20260521.md
+    scripts:
+      - scripts/train_eval_alpha5_24_catboost_gpu_direction_refined_20260519.py
+      - scripts/backtest_alpha5_32_catboost_action_20260519.py
+    note: "DSAC owns final actions. CatBoost action models may not output live/backtest NONE/LONG/SHORT decisions except under explicit historical reproduction."
+
 # ----- Validation gates ------------------------------------
 validation:
   features_csv_min_rows:    50000

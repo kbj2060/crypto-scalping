@@ -1,0 +1,47 @@
+{
+  "episodes": 845,
+  "states": 35485,
+  "state_owners": {
+    "deep_alpha": 17775,
+    "v21_2": 17710
+  },
+  "actions": [
+    "hold",
+    "baseline_exit2_pen05",
+    "exit0_pen0",
+    "exit1_pen0",
+    "exit2_pen0",
+    "exit3_pen0",
+    "exit4_pen0"
+  ],
+  "train_start": "2025-01-01 00:00:00",
+  "train_end": "2025-09-30 23:55:00",
+  "entry_contract": {
+    "name": "alpha3_corrected_selected_touch0_skip_entry",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "target_argmax_counts": {
+    "hold": 31080,
+    "baseline_exit2_pen05": 3445,
+    "exit0_pen0": 567,
+    "exit1_pen0": 279,
+    "exit2_pen0": 114,
+    "exit3_pen0": 0,
+    "exit4_pen0": 0
+  },
+  "target_mean_by_action": {
+    "hold": -23812.87890625,
+    "baseline_exit2_pen05": 0.044754426926374435,
+    "exit0_pen0": 0.04359596222639084,
+    "exit1_pen0": 0.04337310418486595,
+    "exit2_pen0": 0.0433596670627594,
+    "exit3_pen0": 0.043350525200366974,
+    "exit4_pen0": 0.04334000498056412
+  }
+}

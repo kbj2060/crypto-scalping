@@ -1,0 +1,47 @@
+{
+  "episodes": 845,
+  "states": 35485,
+  "state_owners": {
+    "deep_alpha": 17775,
+    "v21_2": 17710
+  },
+  "actions": [
+    "hold",
+    "close_100"
+  ],
+  "train_start": "2025-01-01 00:00:00",
+  "train_end": "2025-09-30 23:55:00",
+  "base_actions": [
+    "hold",
+    "next_open_limit_touch0_fee20"
+  ],
+  "base_target_argmax_counts": {
+    "hold": 31233,
+    "next_open_limit_touch0_fee20": 4252
+  },
+  "base_target_mean_by_action": {
+    "hold": -23812.87890625,
+    "next_open_limit_touch0_fee20": 0.04359596222639084
+  },
+  "target_argmax_counts": {
+    "hold": 33933,
+    "close_100": 1552
+  },
+  "target_mean_by_action": {
+    "hold": -24408.330078125,
+    "close_100": -737077.4375
+  },
+  "full_state_dim": 123,
+  "feature_modes": [
+    "state16_topbase20"
+  ],
+  "action_scalars": {
+    "hold": 0.0,
+    "close_100": -0.75
+  },
+  "reward_design": {
+    "hold": "Continuation value with mild exit-advantage/giveback/age penalty.",
+    "close_100": "Corrected Alpha3 close value, masked unless near-SL, profit-lock, or clear exit advantage/giveback context.",
+    "partial_profit_lock": "Not a DSAC action. Runtime deterministic one-shot 50% reduce for narrow profit-lock/giveback contexts."
+  }
+}

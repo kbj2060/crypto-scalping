@@ -1,0 +1,40 @@
+{
+  "model_id": "alpha7_sniper_primary_state24_sticky_alpha43_fallback_v2only_highturnover_s1_20260526_live",
+  "display_name": "Alpha7 Sniper Primary v2-only high-turnover s1",
+  "lineage_model_id": "alpha7_v2_only_high_turnover_s1_live_20260526",
+  "cfg": {
+    "mode": "fallback",
+    "primary": "alpha7_primary_sniper_v2_only_high_turnover_s1",
+    "secondary": "alpha43_no_legacy_cash_only_fallback",
+    "primary_lineage": "alpha7_primary_v2_only_high_turnover_s1",
+    "secondary_lineage": "alpha43_no_legacy"
+  },
+  "selection_score": 1.8974963748085674,
+  "selected_metrics": {
+    "cost3": {
+      "pnl": 88.11905353930902,
+      "mdd": -27.195472319985704,
+      "trades": 112,
+      "trades_per_day": 1.9090909090909092,
+      "wr": 0.14285714285714285,
+      "avg_notional": 2.150242984659324
+    }
+  },
+  "validation_metrics": {
+    "cost3": {
+      "pnl": 1.3098374730849294,
+      "mdd": -34.932376256961476,
+      "trades": 173,
+      "trades_per_day": 1.8805057558029818,
+      "wr": 0.12138728323699421,
+      "avg_notional": 2.105786318391033
+    }
+  },
+  "audit": {
+    "selection_uses_2026": false,
+    "feature_sources": {
+      "primary": "alpha7 v2-only current regime4 high-turnover s1",
+      "secondary": "alpha43 no_legacy"
+    }
+  }
+}

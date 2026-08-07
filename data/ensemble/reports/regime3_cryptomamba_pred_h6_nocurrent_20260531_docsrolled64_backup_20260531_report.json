@@ -1,0 +1,419 @@
+{
+  "model_id": "regime3_cryptomamba_pred_h6_nocurrent_20260531",
+  "purpose": "Regime transition/future-context sidecar only; not an action owner.",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/regime3_cryptomamba_pred_h6_nocurrent_20260531_2024.pt",
+  "architecture": {
+    "type": "CryptoMamba C-Block Merge",
+    "seq_len": 60,
+    "d_model": 128,
+    "d_state": 32,
+    "cblocks": 4,
+    "cmblocks": 2
+  },
+  "feature_count": 64,
+  "feature_cols": [
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "volume",
+    "quote_volume",
+    "taker_buy_base",
+    "taker_sell_base",
+    "volume_delta",
+    "trade_intensity",
+    "big_trade_ratio",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12"
+  ],
+  "current_probability_features_used_as_inputs": false,
+  "current_sidecar_used_for_target_and_transition_eval": true,
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 0.8453519770077297,
+      "val": {
+        "accuracy": 0.6541713854284635,
+        "balanced_accuracy": 0.6553209925644374,
+        "label_counts": {
+          "bull": 6969,
+          "bear": 6094,
+          "chop": 13427
+        },
+        "pred_counts": {
+          "bull": 7542,
+          "bear": 7281,
+          "chop": 11667
+        },
+        "confusion_matrix": [
+          [
+            4581,
+            1014,
+            1374
+          ],
+          [
+            533,
+            4008,
+            1553
+          ],
+          [
+            2428,
+            2259,
+            8740
+          ]
+        ],
+        "log_loss": 0.8133739730180128,
+        "ovr_auc": 0.8208108418887438
+      }
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7319723383172766,
+      "val": {
+        "accuracy": 0.6661381653454134,
+        "balanced_accuracy": 0.6470082287772263,
+        "label_counts": {
+          "bull": 6969,
+          "bear": 6094,
+          "chop": 13427
+        },
+        "pred_counts": {
+          "bull": 6764,
+          "bear": 6432,
+          "chop": 13294
+        },
+        "confusion_matrix": [
+          [
+            4297,
+            962,
+            1710
+          ],
+          [
+            489,
+            3685,
+            1920
+          ],
+          [
+            1978,
+            1785,
+            9664
+          ]
+        ],
+        "log_loss": 0.784162813851428,
+        "ovr_auc": 0.8202140973625754
+      }
+    },
+    {
+      "epoch": 3,
+      "loss": 0.6552337748663766,
+      "val": {
+        "accuracy": 0.6290675726689317,
+        "balanced_accuracy": 0.6296832755605486,
+        "label_counts": {
+          "bull": 6969,
+          "bear": 6094,
+          "chop": 13427
+        },
+        "pred_counts": {
+          "bull": 7260,
+          "bear": 7724,
+          "chop": 11506
+        },
+        "confusion_matrix": [
+          [
+            4353,
+            1090,
+            1526
+          ],
+          [
+            669,
+            3878,
+            1547
+          ],
+          [
+            2238,
+            2756,
+            8433
+          ]
+        ],
+        "log_loss": 0.8368327009250219,
+        "ovr_auc": 0.8036817662900279
+      }
+    },
+    {
+      "epoch": 4,
+      "loss": 0.47583079067143524,
+      "val": {
+        "accuracy": 0.6078897697244243,
+        "balanced_accuracy": 0.6007399029641612,
+        "label_counts": {
+          "bull": 6969,
+          "bear": 6094,
+          "chop": 13427
+        },
+        "pred_counts": {
+          "bull": 8287,
+          "bear": 6532,
+          "chop": 11671
+        },
+        "confusion_matrix": [
+          [
+            4469,
+            950,
+            1550
+          ],
+          [
+            1035,
+            3286,
+            1773
+          ],
+          [
+            2783,
+            2296,
+            8348
+          ]
+        ],
+        "log_loss": 0.9491199500361747,
+        "ovr_auc": 0.7822923062995941
+      }
+    }
+  ],
+  "validation": {
+    "future_h6": {
+      "accuracy": 0.6661381653454134,
+      "balanced_accuracy": 0.6470082287772263,
+      "label_counts": {
+        "bull": 6969,
+        "bear": 6094,
+        "chop": 13427
+      },
+      "pred_counts": {
+        "bull": 6764,
+        "bear": 6432,
+        "chop": 13294
+      },
+      "confusion_matrix": [
+        [
+          4297,
+          962,
+          1710
+        ],
+        [
+          489,
+          3685,
+          1920
+        ],
+        [
+          1978,
+          1785,
+          9664
+        ]
+      ],
+      "log_loss": 0.784162813851428,
+      "ovr_auc": 0.8202140973625754
+    },
+    "transition_rate": 0.34450736126840314
+  },
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2024_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "rows": 105380,
+      "valid_eval_rows": 105315,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:55:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.7098229122157338,
+        "balanced_accuracy": 0.686798241925835,
+        "label_counts": {
+          "bull": 25811,
+          "bear": 23616,
+          "chop": 55888
+        },
+        "pred_counts": {
+          "bull": 25647,
+          "bear": 23953,
+          "chop": 55715
+        },
+        "confusion_matrix": [
+          [
+            16804,
+            2895,
+            6112
+          ],
+          [
+            1500,
+            15232,
+            6884
+          ],
+          [
+            7343,
+            5826,
+            42719
+          ]
+        ],
+        "log_loss": 0.6991323717731065,
+        "ovr_auc": 0.8545953249135244
+      },
+      "transition": {
+        "transition_rate": 0.32590799031476997,
+        "transition_prob_auc": 0.7351042582490561,
+        "transition_prob_mean": 0.37181341648101807
+      }
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2025.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2025_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "rows": 105101,
+      "valid_eval_rows": 105036,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.6626489965345215,
+        "balanced_accuracy": 0.658138500087808,
+        "label_counts": {
+          "bull": 27925,
+          "bear": 25940,
+          "chop": 51171
+        },
+        "pred_counts": {
+          "bull": 29550,
+          "bear": 28328,
+          "chop": 47158
+        },
+        "confusion_matrix": [
+          [
+            18340,
+            3642,
+            5943
+          ],
+          [
+            2751,
+            16618,
+            6571
+          ],
+          [
+            8459,
+            8068,
+            34644
+          ]
+        ],
+        "log_loss": 0.7929858347968584,
+        "ovr_auc": 0.8277391171785586
+      },
+      "transition": {
+        "transition_rate": 0.33653223656651055,
+        "transition_prob_auc": 0.6864166995662863,
+        "transition_prob_mean": 0.39085930585861206
+      }
+    },
+    "training_features_2026_rebuilt.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2026_rebuilt_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "rows": 16897,
+      "valid_eval_rows": 16832,
+      "range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.6785289923954373,
+        "balanced_accuracy": 0.6660073157485668,
+        "label_counts": {
+          "bull": 3988,
+          "bear": 4399,
+          "chop": 8445
+        },
+        "pred_counts": {
+          "bull": 4079,
+          "bear": 4710,
+          "chop": 8043
+        },
+        "confusion_matrix": [
+          [
+            2501,
+            587,
+            900
+          ],
+          [
+            398,
+            2889,
+            1112
+          ],
+          [
+            1180,
+            1234,
+            6031
+          ]
+        ],
+        "log_loss": 0.7569583994885556,
+        "ovr_auc": 0.8364048623991155
+      },
+      "transition": {
+        "transition_rate": 0.3203422053231939,
+        "transition_prob_auc": 0.6929145872673321,
+        "transition_prob_mean": 0.3745526671409607
+      }
+    }
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_probability_inputs": [],
+    "forbidden_feature_hits": []
+  }
+}

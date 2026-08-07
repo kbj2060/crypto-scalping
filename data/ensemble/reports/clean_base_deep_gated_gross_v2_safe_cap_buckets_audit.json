@@ -1,0 +1,18 @@
+{
+  "model_id": "clean_base_deep_gated_gross_v2_safe_cap_buckets",
+  "status": "pass",
+  "blocking": [],
+  "invariants": {
+    "parent_trained_before_cap_train": true,
+    "cap_map_learned_before_validation": true,
+    "selection_uses_2025_validation_only": true,
+    "oos_is_2026_report_only": true,
+    "safe_fallback_cap_lte_configured_max": true,
+    "no_new_entries_created": true,
+    "max_margin_fraction_lte_1": true,
+    "no_liquidations": true,
+    "no_ruin": true,
+    "cost2_survives": true,
+    "cost3_survives": true
+  }
+}

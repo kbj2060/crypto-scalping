@@ -1,0 +1,149 @@
+{
+  "model_id": "alpha3_regime4_state24_v2_entry_gate_20260527",
+  "design": "Entry suppression ablation over quality threshold, confidence threshold, and same-side cooldown on top of the selected stop-loss-bucket-widened Alpha3 stack.",
+  "selected_gate_variant": {
+    "gate": {
+      "name": "baseline_no_gate",
+      "quality_min": -999.0,
+      "confidence_min": 0.0,
+      "same_side_cooldown": 0
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 175.88787851696125,
+        "mdd": -36.16671236627427,
+        "trades": 217,
+        "wr": 0.2350230414746544,
+        "trades_per_day": 3.6988636363636367,
+        "deep_entries": 126,
+        "long_entries": 72,
+        "short_entries": 145,
+        "avg_notional": 1.826369240084923,
+        "avg_leverage": 1.9665825862598,
+        "exits": {
+          "deep_alpha_stop_loss": 88,
+          "v21_2_stop_loss": 72,
+          "deep_alpha_max_hold": 36,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 5,
+          "deep_alpha_take_profit": 2,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 126,
+          "v21_entry": 91
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 433,
+          "forced_end_market": 1
+        }
+      },
+      "cost2": {
+        "pnl": 180.8013009418372,
+        "mdd": -32.52418424799725,
+        "trades": 216,
+        "wr": 0.22685185185185186,
+        "trades_per_day": 3.681818181818182,
+        "deep_entries": 125,
+        "long_entries": 71,
+        "short_entries": 145,
+        "avg_notional": 1.8316088927687106,
+        "avg_leverage": 1.9729915851235944,
+        "exits": {
+          "deep_alpha_stop_loss": 87,
+          "v21_2_stop_loss": 72,
+          "deep_alpha_max_hold": 35,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 5,
+          "deep_alpha_take_profit": 3,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 125,
+          "v21_entry": 91
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 431,
+          "forced_end_market": 1
+        }
+      },
+      "cost3": {
+        "pnl": 131.99356754662452,
+        "mdd": -30.222406663295555,
+        "trades": 217,
+        "wr": 0.22119815668202766,
+        "trades_per_day": 3.6988636363636367,
+        "deep_entries": 128,
+        "long_entries": 70,
+        "short_entries": 147,
+        "avg_notional": 1.82082098408061,
+        "avg_leverage": 1.964398589202105,
+        "exits": {
+          "deep_alpha_stop_loss": 91,
+          "v21_2_stop_loss": 71,
+          "deep_alpha_max_hold": 34,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 4,
+          "deep_alpha_take_profit": 3,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 128,
+          "v21_entry": 89
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 433,
+          "forced_end_market": 1
+        }
+      }
+    },
+    "score": 284.1881848765794,
+    "selection_val_score": 305.29987113404707,
+    "eval_gate_stats": {
+      "accepted": 1986,
+      "blocked_quality": 0,
+      "blocked_confidence": 0,
+      "blocked_cooldown": 0
+    }
+  },
+  "baseline_oos": {
+    "gate": "baseline_no_gate",
+    "quality_min": -999.0,
+    "confidence_min": 0.0,
+    "same_side_cooldown": 0,
+    "val_score": 305.29987113404707,
+    "val_cost1_pnl": 173.13040337786015,
+    "val_cost1_mdd": -16.40145128877535,
+    "val_cost3_pnl": 163.74767716845878,
+    "oos_score": 284.1881848765794,
+    "oos_cost3_pnl": 131.99356754662452,
+    "oos_cost3_mdd": -30.222406663295555,
+    "oos_cost3_wr": 0.22119815668202766,
+    "oos_cost3_trades": 217,
+    "oos_cost3_v21_sl": 71,
+    "oos_cost3_deep_sl": 91,
+    "eval_gate_accepted": 1986,
+    "eval_gate_blocked_quality": 0,
+    "eval_gate_blocked_confidence": 0,
+    "eval_gate_blocked_cooldown": 0
+  },
+  "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_entry_gate_20260527_grid.csv",
+  "audit": {
+    "status": "pass",
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS",
+    "base_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+    "sl_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_sl_bucket_widen_20260527_summary.json",
+    "selected_gate": "baseline_no_gate",
+    "baseline_gate": "baseline_no_gate",
+    "delta_vs_baseline_gate": {
+      "cost3_pnl": 0.0,
+      "cost3_mdd": 0.0,
+      "cost3_wr": 0.0,
+      "cost3_trades": 0,
+      "v21_stop_loss": 0,
+      "deep_stop_loss": 0
+    }
+  }
+}

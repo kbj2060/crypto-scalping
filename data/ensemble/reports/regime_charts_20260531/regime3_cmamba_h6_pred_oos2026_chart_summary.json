@@ -1,0 +1,20 @@
+{
+  "rows": 16838,
+  "range": [
+    "2026-01-01 04:55:00",
+    "2026-02-28 16:00:00"
+  ],
+  "pred_counts": {
+    "chop": 7843,
+    "bear": 4705,
+    "bull": 4290
+  },
+  "avg_confidence": 0.661640056117454,
+  "avg_transition_prob": 0.3784670041935335,
+  "charts": [
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260531/regime3_cmamba_h6_pred_oos2026_live_t_full.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260531/regime3_cmamba_h6_pred_oos2026_shifted_tplus6_full.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260531/regime3_cmamba_h6_pred_oos2026_live_t_2026-01.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260531/regime3_cmamba_h6_pred_oos2026_live_t_2026-02.png"
+  ]
+}

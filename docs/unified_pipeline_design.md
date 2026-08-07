@@ -120,8 +120,8 @@ current raw feature spread.
 ### 1. Shared Base Features
 
 These are the reusable raw/runtime features that should be produced by the
-shared feature engine and then selectively consumed by supervised models,
-unsupervised models, and runtime augmentation.
+shared feature engine and then selectively consumed by supervised M7 models and
+runtime augmentation.
 
 | Group | Keep |
 |---|---|
@@ -148,31 +148,27 @@ distribution, and execution-quality signals.
 | `quantile_forest` | `rsi`, `mtf_trend_1h`, `mtf_trend_4h`, `bb_width_z`, `garman_klass_vol`, `rogers_satchell_vol`, `amihud_illiquidity_z`, `btc_corr_60`, `smart_money_flow`, `taker_acceleration`, `liquidity_vacuum`, `cvp_regime`, `cvp_poc_dist`, `whale_retail_ratio`, `fvg_dist` |
 | `entry_price_model` | `cvp_poc_dist`, `cvp_cluster_position`, `cvp_volume_imbalance`, `bb_width_z`, `amihud_illiquidity_z`, `execution_quality`, `smart_money_flow`, `net_taker_ratio`, `trade_intensity`, `fvg_dist`, `wick_ratio`, `mtf_trend_1h` |
 
-### 3. M7 Unsupervised Inputs
+### 3. Removed M7 Unsupervised Layer
 
-The unsupervised layer should stay compact. `hdbscan_regime` is currently the
-lowest-priority component and should be treated as optional until proven useful
-again.
+The active M7 generation and required-column contract no longer includes the
+`gmm_volatility`, `isolation_forest`, or `vae_anomaly` model/meta keys. It also
+does not generate or require `m7_gmm_*`, `m7_iso_*`, `m7_vae_*`, `m7_gate_block`,
+`m7_size`, or `m7_hdb_*` columns.
 
-| Model | Preferred Inputs |
-|---|---|
-| `gmm_volatility` | `parkinson_vol`, `garman_klass_vol`, `rogers_satchell_vol`, `bb_width_z`, `realized_vol_ratio` |
-| `isolation_forest` | `smart_money_flow`, `net_taker_ratio`, `whale_retail_ratio`, `crowding_pressure`, `oi_change_rate`, `trade_intensity`, `cvp_volume_imbalance` |
-| `vae_anomaly` | `cvp_volume_imbalance`, `mean_reversion_z`, `trade_intensity`, `rsi`, `volatility_z`, `liquidity_vacuum`, `smart_money_flow` |
-| `hdbscan_regime` | Optional / experimental only |
+Historical artifacts that still contain those columns are diagnostic-only until
+retrained/rescored under the current active contract.
 
 ### 4. M7 Outputs Passed Forward
 
 The RL handoff contract should not expose the full upstream feature sprawl.
 Instead, M7 should emit compact outputs that summarize directional bias,
-uncertainty, size, horizon, and risk.
+uncertainty, horizon, and risk.
 
 | Group | Keep |
 |---|---|
-| Action / sizing | `m7_action`, `m7_confidence`, `m7_size` |
+| Action context | `m7_action`, `m7_confidence` |
 | Quantiles / uncertainty | `m7_q10`, `m7_q50`, `m7_q90`, `m7_qwidth`, `m7_expected_ret`, `m7_tail_risk`, `m7_composite_score` |
 | Execution | `m7_entry_long_offset`, `m7_entry_short_offset`, `m7_tp_offset`, `m7_sl_offset`, `m7_target_hold` |
-| Unsupervised summaries | `m7_gmm_cluster`, `m7_gmm_conf`, `m7_gmm_vol_rank`, `m7_iso_score`, `m7_vae_error`, `m7_iso_anom`, `m7_vae_anom`, `m7_gate_block` |
 
 ### 5. DSAC Compact State
 
@@ -184,7 +180,6 @@ and M7 summaries.
 |---|---|
 | Position state | `current_position`, `unrealized_pnl_norm`, `time_in_trade_norm`, `drawdown_norm`, `margin_usage` |
 | Core market state | `mtf_trend_1h_norm`, `mtf_trend_4h_norm`, `rogers_satchell_vol_norm`, `micro_vol5_norm`, `spread_norm`, `amihud_norm`, `smart_money_flow_norm` |
-| M7 summaries | `m7_anomaly_score`, `m7_gmm_conf`, `m7_gmm_vol_rank`, `m7_prob_up_scaled`, `m7_prob_dn_scaled`, `m7_prob_fl_scaled`, `m7_q_mid_norm`, `m7_q_uncertainty_norm`, `m7_q_skew`, `m7_quality_norm`, `m7_hold_norm`, `m7_tp_offset_norm`, `m7_sl_offset_norm`, `m7_trend_entropy_scaled` |
 
 ### 6. Deletion / Cleanup Priorities
 

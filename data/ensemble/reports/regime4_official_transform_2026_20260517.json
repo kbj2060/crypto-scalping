@@ -1,0 +1,66 @@
+{
+  "model_id": "transform_regime4_official_sidecars_20260517",
+  "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2026_rebuilt.csv",
+  "rows": 16897,
+  "range": [
+    "2026-01-01 00:00:00",
+    "2026-02-28 16:00:00"
+  ],
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw"
+  ],
+  "clean_regime4": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/clean_regime4_raw_state12_v1_2024.joblib",
+    "output": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2026_rebuilt_clean_regime4_raw_state12_v1.csv",
+    "rows": 16897,
+    "prob_sum_min": 0.9999999999999998,
+    "prob_sum_max": 1.0000000000000002,
+    "pred_counts": {
+      "bull": 4500,
+      "bear": 5458,
+      "chop": 4310,
+      "whipsaw": 2629
+    },
+    "audit": {
+      "prob_sum_min": 0.9999999999999998,
+      "prob_sum_max": 1.0000000000000002,
+      "nan_count": 0
+    }
+  },
+  "future_regime4": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_vsn_h12_official_20260517/regime4_pred_tft_vsn_selected_2024.pt",
+    "output": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime4_pred_tft_vsn_h12_official_20260517/training_features_2026_rebuilt_regime4_pred_tft_vsn_selected.csv",
+    "rows": 16897,
+    "feature_count": 35,
+    "prob_sum_min": 0.9999999999999998,
+    "prob_sum_max": 1.0000000000000002,
+    "pred_counts": {
+      "bull": 3779,
+      "bear": 3873,
+      "chop": 4428,
+      "whipsaw": 4817
+    },
+    "missing_feature_fallback": {
+      "columns": [
+        "pred_mdjd"
+      ],
+      "policy": "artifact_training_median",
+      "count": 1
+    },
+    "audit": {
+      "prob_sum_min": 0.9999999999999998,
+      "prob_sum_max": 1.0000000000000002,
+      "nan_count": 0
+    }
+  },
+  "contract": {
+    "current_regime": "frozen 2024 HMM raw-state12",
+    "future_regime": "frozen 2024 TFT VSN-selected h12",
+    "horizon_bars": 12,
+    "normal_class": "disabled",
+    "risk_off_transition_classes": "disabled"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "contract_id": "eth_omega461_exit_successor_forward_gate_20260724",
+  "created_at_kst": "2026-07-24",
+  "current_live_action": "unchanged",
+  "retired_candidate": {
+    "hazard_variant": "B_post_quality",
+    "sl_probability_min": 0.6,
+    "value_margin": 0.0025,
+    "persistence": 1,
+    "rearm_mode": "cooldown",
+    "rearm_bars": 96,
+    "verdict": "retired_do_not_apply_or_promote"
+  },
+  "consumed_evaluation_intervals": [
+    ["2025-10-01", "2025-12-31"],
+    ["2026-01-01", "2026-03-31"],
+    ["2026-04-01", "2026-07-12 09:00:00"]
+  ],
+  "forbidden_actions": [
+    "retune_hazard_threshold_on_consumed_intervals",
+    "retune_rearm_rule_on_consumed_intervals",
+    "claim_consumed_intervals_as_untouched_oos",
+    "wire_the_retired_candidate_into_live_decisions"
+  ],
+  "successor_target_requirement": "joint_exit_hold_rearm_value_including_post_exit_opportunity_cost",
+  "forward_reconsideration_gate": {
+    "freeze_before_collection": true,
+    "minimum_calendar_days": 90,
+    "minimum_independent_proposed_exit_events": 30,
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "required_metrics": [
+      "pnl",
+      "close_mark_to_market_mdd",
+      "realized_mdd",
+      "cost1_cost2_cost3",
+      "post_exit_reentry_opportunity_cost"
+    ]
+  }
+}

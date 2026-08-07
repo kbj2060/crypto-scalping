@@ -1,0 +1,84 @@
+{
+  "experiment": "A_conf_plus_realistic_maker_fill",
+  "fill_model": {
+    "offset_bp": 1.0,
+    "fill_lookahead_bars": 3,
+    "maker_fee": 0.0002,
+    "taker_fee_exit": 0.00045,
+    "round_trip_fee": 0.00065,
+    "baseline_fill_rate_long": 0.8483040118314085,
+    "baseline_fill_rate_short": 0.8502350409187095
+  },
+  "val_sweep": [
+    {
+      "threshold": 0.34,
+      "n_signals": 14252,
+      "n_filled": 10309,
+      "fill_rate": 0.7233370754981757,
+      "hit_rate": 0.5441846929867107,
+      "avg_pnl_pct": -0.00026276718691889726,
+      "total_pnl_pct": -2.708866929946912
+    },
+    {
+      "threshold": 0.4,
+      "n_signals": 11196,
+      "n_filled": 7778,
+      "fill_rate": 0.6947123972847445,
+      "hit_rate": 0.5914116739521728,
+      "avg_pnl_pct": -0.00014455486098905975,
+      "total_pnl_pct": -1.1243477087729068
+    },
+    {
+      "threshold": 0.45,
+      "n_signals": 7963,
+      "n_filled": 5233,
+      "fill_rate": 0.6571643852819289,
+      "hit_rate": 0.6619529906363463,
+      "avg_pnl_pct": 4.7080604125095926e-05,
+      "total_pnl_pct": 0.24637280138662698
+    },
+    {
+      "threshold": 0.5,
+      "n_signals": 5569,
+      "n_filled": 3511,
+      "fill_rate": 0.630454300592566,
+      "hit_rate": 0.731985189404728,
+      "avg_pnl_pct": 0.0002448512325860099,
+      "total_pnl_pct": 0.8596726776094807
+    },
+    {
+      "threshold": 0.55,
+      "n_signals": 3983,
+      "n_filled": 2450,
+      "fill_rate": 0.6151142355008787,
+      "hit_rate": 0.7836734693877551,
+      "avg_pnl_pct": 0.0003887476696032846,
+      "total_pnl_pct": 0.9524317905280473
+    },
+    {
+      "threshold": 0.6,
+      "n_signals": 2895,
+      "n_filled": 1756,
+      "fill_rate": 0.6065630397236614,
+      "hit_rate": 0.8200455580865603,
+      "avg_pnl_pct": 0.0004840526622916889,
+      "total_pnl_pct": 0.8499964749842057
+    }
+  ],
+  "chosen_threshold": 0.55,
+  "oos_at_chosen_threshold": {
+    "n_signals": 11339,
+    "n_filled": 8075,
+    "fill_rate": 0.712143928035982,
+    "hit_rate": 0.7559133126934985,
+    "avg_pnl_pct": 0.00046304206070741353,
+    "total_pnl_pct": 3.7390646402123644
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Realistic maker-entry simulation: limit order at 1bp passive offset, 3-bar fill window, cancels (no trade) if unfilled. TP/SL computed from actual fill price, remaining horizon budget reduced by fill delay. Exit assumed taker (guaranteed). This replaces tune_scalp_1m_levers_20260716.py's naive maker-fee substitution, which ignored fill risk / adverse selection entirely."
+}

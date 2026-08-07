@@ -1,0 +1,1188 @@
+{
+  "type": "lifecycle_v1_drawdown_governor_v1",
+  "verdict": "implemented_but_reject_for_promotion_gate",
+  "selected_config": {
+    "name": "acct0.080_0.130_day0.020_0.030_gb0.020_tail0_soft0.85_hard0.50",
+    "account_dd_soft": 0.08,
+    "account_dd_hard": 0.13,
+    "daily_dd_soft": 0.02,
+    "daily_dd_hard": 0.03,
+    "trade_giveback_cut": 0.02,
+    "tail_risk_cut_enabled": false,
+    "soft_mult": 0.85,
+    "hard_mult": 0.5
+  },
+  "selection_score": 899.550365678295,
+  "validation_grid_rows": 972,
+  "validation_selected_on": "2025-11-01 through 2025-12-31",
+  "oos_run_count": 1,
+  "oos_threshold_selection": false,
+  "base_layer_id": "clean_base_lifecycle_editor_v1",
+  "base_report_path": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json",
+  "base_report_sha256": "7f98351dc13d3a383493b4644567d405c5a8cbd20dd20b265fa3208eaedf47c1",
+  "note": "Custom fixed-base-trade replay: reconstructs clean_base_lifecycle_editor_v1 selected lifecycle trades, then applies only entry-time risk_mult in [1.00, 0.85, 0.70, 0.50]. No side/action/entry/exit/leverage changes and no mid-trade resizing.",
+  "cost_1x": {
+    "pnl": 189.5380510606501,
+    "mdd": -16.348825650369513,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6826859777623626,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 363
+    },
+    "effective_notional_mean": 0.6826859777623626,
+    "avg_risk_mult": 0.9958677685950418,
+    "risk_mult_counts": {
+      "1.00": 353,
+      "0.85": 10,
+      "0.70": 0,
+      "0.50": 0
+    },
+    "risk_mult_0.50_freq": 0.0,
+    "risk_reason_counts": {
+      "prior_trade_giveback": 10,
+      "daily_dd_soft": 1
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "cost_2x": {
+    "pnl": 115.28029575620083,
+    "mdd": -16.588854005755216,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.46831955922865015,
+    "avg_notional": 0.6815875768497964,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 363
+    },
+    "effective_notional_mean": 0.6815875768497964,
+    "avg_risk_mult": 0.9946280991735543,
+    "risk_mult_counts": {
+      "1.00": 350,
+      "0.85": 13,
+      "0.70": 0,
+      "0.50": 0
+    },
+    "risk_mult_0.50_freq": 0.0,
+    "risk_reason_counts": {
+      "prior_trade_giveback": 10,
+      "daily_dd_soft": 5
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "cost_3x": {
+    "pnl": 54.16467721506522,
+    "mdd": -16.828500042854355,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.39669421487603307,
+    "avg_notional": 0.5659129495279479,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 363
+    },
+    "effective_notional_mean": 0.5659129495279479,
+    "avg_risk_mult": 0.8064738292011008,
+    "risk_mult_counts": {
+      "1.00": 114,
+      "0.85": 155,
+      "0.70": 0,
+      "0.50": 94
+    },
+    "risk_mult_0.50_freq": 0.25895316804407714,
+    "risk_reason_counts": {
+      "account_dd_soft": 242,
+      "daily_dd_soft": 6,
+      "account_dd_hard": 94,
+      "prior_trade_giveback": 8
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "validation_cost_1x": {
+    "pnl": 846.2946859760864,
+    "mdd": -12.510810368072377,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.6690647482014388,
+    "avg_notional": 0.7821552552740497,
+    "avg_leverage": 1.5784158089388312,
+    "long_entries": 337,
+    "short_entries": 358,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 695
+    },
+    "effective_notional_mean": 0.7821552552740497,
+    "avg_risk_mult": 0.9958992805755396,
+    "risk_mult_counts": {
+      "1.00": 676,
+      "0.85": 19,
+      "0.70": 0,
+      "0.50": 0
+    },
+    "risk_mult_0.50_freq": 0.0,
+    "risk_reason_counts": {
+      "prior_trade_giveback": 19
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "validation_cost_2x": {
+    "pnl": 392.9011386921014,
+    "mdd": -12.810508953231082,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.543884892086331,
+    "avg_notional": 0.7814658442883207,
+    "avg_leverage": 1.5784158089388312,
+    "long_entries": 337,
+    "short_entries": 358,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 695
+    },
+    "effective_notional_mean": 0.7814658442883207,
+    "avg_risk_mult": 0.9950359712230217,
+    "risk_mult_counts": {
+      "1.00": 672,
+      "0.85": 23,
+      "0.70": 0,
+      "0.50": 0
+    },
+    "risk_mult_0.50_freq": 0.0,
+    "risk_reason_counts": {
+      "prior_trade_giveback": 19,
+      "daily_dd_soft": 4
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "validation_cost_3x": {
+    "pnl": 152.159084863453,
+    "mdd": -14.038949913679232,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.46906474820143884,
+    "avg_notional": 0.7589849344813661,
+    "avg_leverage": 1.5784158089388312,
+    "long_entries": 337,
+    "short_entries": 358,
+    "entry_blocks": {},
+    "exits": {
+      "lifecycle_v1_exit": 695
+    },
+    "effective_notional_mean": 0.7589849344813661,
+    "avg_risk_mult": 0.9626618705036017,
+    "risk_mult_counts": {
+      "1.00": 522,
+      "0.85": 173,
+      "0.70": 0,
+      "0.50": 0
+    },
+    "risk_mult_0.50_freq": 0.0,
+    "risk_reason_counts": {
+      "daily_dd_soft": 32,
+      "prior_trade_giveback": 19,
+      "account_dd_soft": 133
+    },
+    "max_effective_notional_over_lifecycle": 0.0
+  },
+  "validation_costs": {
+    "cost_1x": {
+      "pnl": 846.2946859760864,
+      "mdd": -12.510810368072377,
+      "trades": 695,
+      "trades_per_day": 11.39409119371549,
+      "wr": 0.6690647482014388,
+      "avg_notional": 0.7821552552740497,
+      "avg_leverage": 1.5784158089388312,
+      "long_entries": 337,
+      "short_entries": 358,
+      "entry_blocks": {},
+      "exits": {
+        "lifecycle_v1_exit": 695
+      },
+      "effective_notional_mean": 0.7821552552740497,
+      "avg_risk_mult": 0.9958992805755396,
+      "risk_mult_counts": {
+        "1.00": 676,
+        "0.85": 19,
+        "0.70": 0,
+        "0.50": 0
+      },
+      "risk_mult_0.50_freq": 0.0,
+      "risk_reason_counts": {
+        "prior_trade_giveback": 19
+      },
+      "max_effective_notional_over_lifecycle": 0.0
+    },
+    "cost_2x": {
+      "pnl": 392.9011386921014,
+      "mdd": -12.810508953231082,
+      "trades": 695,
+      "trades_per_day": 11.39409119371549,
+      "wr": 0.543884892086331,
+      "avg_notional": 0.7814658442883207,
+      "avg_leverage": 1.5784158089388312,
+      "long_entries": 337,
+      "short_entries": 358,
+      "entry_blocks": {},
+      "exits": {
+        "lifecycle_v1_exit": 695
+      },
+      "effective_notional_mean": 0.7814658442883207,
+      "avg_risk_mult": 0.9950359712230217,
+      "risk_mult_counts": {
+        "1.00": 672,
+        "0.85": 23,
+        "0.70": 0,
+        "0.50": 0
+      },
+      "risk_mult_0.50_freq": 0.0,
+      "risk_reason_counts": {
+        "prior_trade_giveback": 19,
+        "daily_dd_soft": 4
+      },
+      "max_effective_notional_over_lifecycle": 0.0
+    },
+    "cost_3x": {
+      "pnl": 152.159084863453,
+      "mdd": -14.038949913679232,
+      "trades": 695,
+      "trades_per_day": 11.39409119371549,
+      "wr": 0.46906474820143884,
+      "avg_notional": 0.7589849344813661,
+      "avg_leverage": 1.5784158089388312,
+      "long_entries": 337,
+      "short_entries": 358,
+      "entry_blocks": {},
+      "exits": {
+        "lifecycle_v1_exit": 695
+      },
+      "effective_notional_mean": 0.7589849344813661,
+      "avg_risk_mult": 0.9626618705036017,
+      "risk_mult_counts": {
+        "1.00": 522,
+        "0.85": 173,
+        "0.70": 0,
+        "0.50": 0
+      },
+      "risk_mult_0.50_freq": 0.0,
+      "risk_reason_counts": {
+        "daily_dd_soft": 32,
+        "prior_trade_giveback": 19,
+        "account_dd_soft": 133
+      },
+      "max_effective_notional_over_lifecycle": 0.0
+    }
+  },
+  "base_lifecycle_validation_reference": {
+    "pnl": 908.4222875243677,
+    "mdd": -12.696352061226445,
+    "trades": 695,
+    "trades_per_day": 11.39409119371549,
+    "wr": 0.6690647482014388,
+    "avg_notional": 0.7882738023833621,
+    "avg_leverage": 1.5784158089388312,
+    "long_entries": 337,
+    "short_entries": 358,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 426,
+      "lifecycle_early_exit": 269
+    },
+    "edit_counts": {
+      "boost": 695
+    },
+    "exit_prob_mean": 0.24405284266252716,
+    "exit_prob_p95": 0.5484685089799124,
+    "threshold_mean": 0.4705952435542971,
+    "effective_notional_mean": 0.7882738023833621
+  },
+  "base_lifecycle_oos_reference": {
+    "pnl": 207.2368875907697,
+    "mdd": -18.016318445365364,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "wr": 0.5730027548209367,
+    "avg_notional": 0.6903019726953306,
+    "avg_leverage": 1.5814535601585094,
+    "long_entries": 173,
+    "short_entries": 190,
+    "entry_blocks": {},
+    "exits": {
+      "base_exit": 269,
+      "lifecycle_early_exit": 94
+    },
+    "edit_counts": {
+      "boost": 363
+    },
+    "exit_prob_mean": 0.20043885648466803,
+    "exit_prob_p95": 0.4421842673379731,
+    "threshold_mean": 0.47183559052211677,
+    "effective_notional_mean": 0.6903019726953306
+  },
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades": 363,
+    "trades_per_day": 6.1875,
+    "cost_1x_pnl": 177.3298088749005,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "preservation_audit": {
+    "decision_frame_audit": {
+      "passed": true,
+      "rows": 16897,
+      "active_rows": 16897,
+      "cash_rows": 0,
+      "long_rows": 7900,
+      "short_rows": 8997,
+      "violations": {
+        "nonfinite_values": 0,
+        "negative_notional": 0,
+        "leverage_below_one_active": 0,
+        "leverage_above_cap": 0,
+        "notional_above_max": 0,
+        "active_action_side_mismatch": 0,
+        "cash_has_exposure": 0,
+        "position_fraction_mismatch": 0,
+        "negative_cooldown": 0
+      },
+      "notional": {
+        "max": 3.0380552603853426,
+        "mean": 0.8042273420435015,
+        "p95": 1.7381261779863437
+      },
+      "leverage": {
+        "max": 2.5708089733514607,
+        "mean": 1.5912971481880236,
+        "p95": 1.8325242533448571
+      }
+    },
+    "entry_side_timing_exit_leverage_notional_preservation": {
+      "passed": true,
+      "base_trades": 363,
+      "governed_trades": 363,
+      "violations": {
+        "trade_count_changed": 0,
+        "entry_idx_changed": 0,
+        "side_changed": 0,
+        "exit_timing_changed": 0,
+        "entry_deleted": 0,
+        "notional_increased_above_lifecycle_v1": 0,
+        "leverage_changed": 0,
+        "invalid_risk_mult": 0
+      }
+    },
+    "passed": true
+  },
+  "causality_audit": {
+    "passed": true,
+    "risk_state_source": "governed cash/closed-equity state before current entry plus current entry-row stress features",
+    "same_bar_or_future_outcome_used_for_sizing": false,
+    "final_trade_outcome_used_for_sizing": false,
+    "mid_trade_resizing": false,
+    "trade_giveback_source": "prior closed trade only; current trade giveback is not used until the next entry",
+    "daily_dd_current_unrealized_note": "At entry there is no open position in this fixed sequential replay, so current_unrealized is 0.0 and daily soft drawdown is applied conservatively.",
+    "tail_stress_source": "current entry row tail/liquidity/funding fields plus prior closed trade PnL or train-derived adverse-risk threshold"
+  },
+  "telemetry_deltas": {
+    "oos_pnl_delta_vs_lifecycle_v1": -17.698836530119593,
+    "oos_mdd_delta_vs_lifecycle_v1": 1.6674927949958516,
+    "oos_avg_notional_delta_vs_lifecycle_v1": -0.00761599493296794,
+    "oos_avg_risk_mult": 0.9958677685950418
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/lifecycle_v1_drawdown_governor_v1/drawdown_governor.pkl",
+    "model_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/lifecycle_v1_drawdown_governor_v1",
+    "grid_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_drawdown_governor_v1_grid.csv",
+    "ledger_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_drawdown_governor_v1_ledger.csv",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_drawdown_governor_v1_2026.json"
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "train_rows": 87496,
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "validation_rows": 17568,
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "eval_rows": 16897
+  },
+  "risk_state_contract": {
+    "account_dd": "governed closed cash versus prior closed-equity peak before current entry",
+    "daily_dd": "governed closed cash versus same-day prior closed-equity peak before current entry",
+    "current_unrealized_at_entry": 0.0,
+    "trade_giveback": "prior closed trade giveback only",
+    "tail_stress_thresholds_train_only": {
+      "liquidity_vacuum_p85": 0.6249214399542755,
+      "funding_abs_p85": 0.00010618,
+      "funding_pressure_abs_p85": 0.0144,
+      "ai_adverse_risk_p85": 0.006123677827417775
+    }
+  },
+  "promotion_gate": {
+    "oos_pnl_min": 205.0,
+    "mdd_min": -17.759665,
+    "trades_per_day_min": 6.0,
+    "cost2_min": 120.0,
+    "cost3_min": 60.0,
+    "avg_risk_mult_min": 0.85,
+    "risk_mult_0.50_freq_max": 0.1,
+    "effective_notional_lte_lifecycle_v1_required": true,
+    "invariant_and_independent_preservation_audit_required": true,
+    "passed": false
+  },
+  "realistic_replay": {
+    "run": false,
+    "ledger_csv": "/home/llewyn/crypto-scalping/data/ensemble/reports/lifecycle_v1_drawdown_governor_v1_ledger.csv",
+    "note": "Ledger is the custom fixed-base-trade replay ledger, not a separate funding/impact/partial-fill realistic replay."
+  },
+  "validation_top10": [
+    {
+      "config": {
+        "name": "acct0.080_0.130_day0.020_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.13,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 152.159084863453,
+        "mdd": -14.038949913679232,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7589849344813661,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7589849344813661,
+        "avg_risk_mult": 0.9626618705036017,
+        "risk_mult_counts": {
+          "1.00": 522,
+          "0.85": 173,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 32,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 133
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.550365678295
+    },
+    {
+      "config": {
+        "name": "acct0.080_0.150_day0.020_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.15,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 152.159084863453,
+        "mdd": -14.038949913679232,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7589849344813661,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7589849344813661,
+        "avg_risk_mult": 0.9626618705036017,
+        "risk_mult_counts": {
+          "1.00": 522,
+          "0.85": 173,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 32,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 133
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.550365678295
+    },
+    {
+      "config": {
+        "name": "acct0.080_0.130_day0.020_0.025_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.13,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.025,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 151.4613595328628,
+        "mdd": -14.15190578093003,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7554875489765006,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7554875489765006,
+        "avg_risk_mult": 0.9586330935251842,
+        "risk_mult_counts": {
+          "1.00": 522,
+          "0.85": 165,
+          "0.70": 0,
+          "0.50": 8
+        },
+        "risk_mult_0.50_freq": 0.011510791366906475,
+        "risk_reason_counts": {
+          "daily_dd_soft": 32,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 133,
+          "daily_dd_hard": 8
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.3061618125884
+    },
+    {
+      "config": {
+        "name": "acct0.080_0.150_day0.020_0.025_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.15,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.025,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 151.4613595328628,
+        "mdd": -14.15190578093003,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7554875489765006,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7554875489765006,
+        "avg_risk_mult": 0.9586330935251842,
+        "risk_mult_counts": {
+          "1.00": 522,
+          "0.85": 165,
+          "0.70": 0,
+          "0.50": 8
+        },
+        "risk_mult_0.50_freq": 0.011510791366906475,
+        "risk_reason_counts": {
+          "daily_dd_soft": 32,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 133,
+          "daily_dd_hard": 8
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.3061618125884
+    },
+    {
+      "config": {
+        "name": "acct0.100_0.130_day0.020_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.1,
+        "account_dd_hard": 0.13,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 151.09319655384746,
+        "mdd": -14.496750668881987,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7718743366417623,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7718743366417623,
+        "avg_risk_mult": 0.9820863309352535,
+        "risk_mult_counts": {
+          "1.00": 612,
+          "0.85": 83,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 35,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 40
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.177304769933
+    },
+    {
+      "config": {
+        "name": "acct0.100_0.150_day0.020_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.1,
+        "account_dd_hard": 0.15,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 151.09319655384746,
+        "mdd": -14.496750668881987,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7718743366417623,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7718743366417623,
+        "avg_risk_mult": 0.9820863309352535,
+        "risk_mult_counts": {
+          "1.00": 612,
+          "0.85": 83,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 35,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 40
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 899.177304769933
+    },
+    {
+      "config": {
+        "name": "acct0.100_0.130_day0.020_0.025_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.1,
+        "account_dd_hard": 0.13,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.025,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 150.25095347957307,
+        "mdd": -14.659394202122634,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7670985179753879,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7670985179753879,
+        "avg_risk_mult": 0.9765467625899295,
+        "risk_mult_counts": {
+          "1.00": 612,
+          "0.85": 72,
+          "0.70": 0,
+          "0.50": 11
+        },
+        "risk_mult_0.50_freq": 0.015827338129496403,
+        "risk_reason_counts": {
+          "daily_dd_soft": 35,
+          "prior_trade_giveback": 19,
+          "daily_dd_hard": 11,
+          "account_dd_soft": 40
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 898.882519693937
+    },
+    {
+      "config": {
+        "name": "acct0.100_0.150_day0.020_0.025_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.1,
+        "account_dd_hard": 0.15,
+        "daily_dd_soft": 0.02,
+        "daily_dd_hard": 0.025,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 846.2946859760864,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7821552552740497,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7821552552740497,
+        "avg_risk_mult": 0.9958992805755396,
+        "risk_mult_counts": {
+          "1.00": 676,
+          "0.85": 19,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 150.25095347957307,
+        "mdd": -14.659394202122634,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7670985179753879,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7670985179753879,
+        "avg_risk_mult": 0.9765467625899295,
+        "risk_mult_counts": {
+          "1.00": 612,
+          "0.85": 72,
+          "0.70": 0,
+          "0.50": 11
+        },
+        "risk_mult_0.50_freq": 0.015827338129496403,
+        "risk_reason_counts": {
+          "daily_dd_soft": 35,
+          "prior_trade_giveback": 19,
+          "daily_dd_hard": 11,
+          "account_dd_soft": 40
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 898.882519693937
+    },
+    {
+      "config": {
+        "name": "acct0.080_0.130_day0.016_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.13,
+        "daily_dd_soft": 0.016,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 845.4435538284741,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7818124536237061,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7818124536237061,
+        "avg_risk_mult": 0.9954676258992806,
+        "risk_mult_counts": {
+          "1.00": 674,
+          "0.85": 21,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19,
+          "daily_dd_soft": 2
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 148.77052191477117,
+        "mdd": -13.838296896643431,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7553932240906533,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7553932240906533,
+        "avg_risk_mult": 0.9585611510791415,
+        "risk_mult_counts": {
+          "1.00": 503,
+          "0.85": 192,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 61,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 131
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 897.513236498644
+    },
+    {
+      "config": {
+        "name": "acct0.080_0.150_day0.016_0.030_gb0.020_tail0_soft0.85_hard0.50",
+        "account_dd_soft": 0.08,
+        "account_dd_hard": 0.15,
+        "daily_dd_soft": 0.016,
+        "daily_dd_hard": 0.03,
+        "trade_giveback_cut": 0.02,
+        "tail_risk_cut_enabled": false,
+        "soft_mult": 0.85,
+        "hard_mult": 0.5
+      },
+      "validation": {
+        "pnl": 845.4435538284741,
+        "mdd": -12.510810368072377,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.6690647482014388,
+        "avg_notional": 0.7818124536237061,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7818124536237061,
+        "avg_risk_mult": 0.9954676258992806,
+        "risk_mult_counts": {
+          "1.00": 674,
+          "0.85": 21,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "prior_trade_giveback": 19,
+          "daily_dd_soft": 2
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "validation_cost3": {
+        "pnl": 148.77052191477117,
+        "mdd": -13.838296896643431,
+        "trades": 695,
+        "trades_per_day": 11.39409119371549,
+        "wr": 0.46906474820143884,
+        "avg_notional": 0.7553932240906533,
+        "avg_leverage": 1.5784158089388312,
+        "long_entries": 337,
+        "short_entries": 358,
+        "entry_blocks": {},
+        "exits": {
+          "lifecycle_v1_exit": 695
+        },
+        "effective_notional_mean": 0.7553932240906533,
+        "avg_risk_mult": 0.9585611510791415,
+        "risk_mult_counts": {
+          "1.00": 503,
+          "0.85": 192,
+          "0.70": 0,
+          "0.50": 0
+        },
+        "risk_mult_0.50_freq": 0.0,
+        "risk_reason_counts": {
+          "daily_dd_soft": 61,
+          "prior_trade_giveback": 19,
+          "account_dd_soft": 131
+        },
+        "max_effective_notional_over_lifecycle": 0.0
+      },
+      "selection_score": 897.513236498644
+    }
+  ]
+}

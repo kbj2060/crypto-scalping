@@ -1,0 +1,50 @@
+{
+  "model_id": "alpha3_guarded_exit_selector_v3_20260515",
+  "status": "promote_guarded_baseline",
+  "selection_uses_2026": false,
+  "selected_config": {
+    "name": "disabled_baseline",
+    "min_hold": 999,
+    "sl_progress": 99.0,
+    "adverse_q_margin": 99.0,
+    "min_mfe": 99.0,
+    "giveback_frac": 99.0,
+    "time_frac": 99.0,
+    "exit_arm": "exit0_pen0",
+    "maker_fee_mult": 0.2
+  },
+  "selector_meta": {
+    "selected_mode": "fail_closed_to_baseline",
+    "baseline_validation_score": -90.07866444702957,
+    "reason": "no_rescue_candidate_passed_trade_count_mdd_and_score_stability_guards",
+    "guards": {
+      "min_score_improvement": 10.0,
+      "max_trade_ratio": 1.0,
+      "max_mdd_degradation_pct": 2.0
+    }
+  },
+  "exit_attribution_cost1": {
+    "baseline": {
+      "deep_alpha_max_hold": 33,
+      "deep_alpha_stop_loss": 83,
+      "v21_2_stop_loss": 49,
+      "v21_2_max_hold": 8,
+      "deep_alpha_take_profit": 15,
+      "v21_2_take_profit": 7
+    },
+    "guarded": {
+      "deep_alpha_max_hold": 33,
+      "deep_alpha_stop_loss": 83,
+      "v21_2_stop_loss": 49,
+      "v21_2_max_hold": 8,
+      "deep_alpha_take_profit": 15,
+      "v21_2_take_profit": 7
+    },
+    "baseline_stop_loss_plus_max_hold": 173,
+    "guarded_stop_loss_plus_max_hold": 173
+  },
+  "blocking": [],
+  "warnings": [
+    "v3 is intentionally fail-closed; it preserves baseline when rescue candidates look unstable."
+  ]
+}

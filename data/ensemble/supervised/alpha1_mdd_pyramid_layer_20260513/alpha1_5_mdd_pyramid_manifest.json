@@ -1,0 +1,23 @@
+{
+  "model_id": "alpha1_mdd_pyramid_layer_20260513",
+  "selected_config": {
+    "name": "mdd_guard_all_0.28",
+    "pyramid_scope": "none",
+    "add_frac": 0.0,
+    "max_total_mult": 1.0,
+    "min_unreal": 99.0,
+    "min_mfe": 99.0,
+    "max_mae_abs": 0.0,
+    "opp_utility_block": -99.0,
+    "dd_entry_block": 0.28,
+    "dd_pyramid_block": 1.0,
+    "mdd_guard_scope": "all",
+    "flow_th": 0.1,
+    "fee_mult": 0.6,
+    "slip_mult": 0.35
+  },
+  "parent_frozen": true,
+  "v27_frozen": true,
+  "v31_exit_frozen": true,
+  "v21_2_frozen": true
+}

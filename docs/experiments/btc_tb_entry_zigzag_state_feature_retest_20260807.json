@@ -1,0 +1,41 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "btc-tb-entry-zigzag-state-feature-retest-20260807",
+  "hypothesis": "Adding the 4 causal zigzag-state features (zz_trend_state, zz_bars_since_pivot, zz_move_from_pivot_pct, zz_dist_to_threshold) as plain model inputs to the causalfix_final triple-barrier entry classifier, evaluated with purge+embargo+uniqueness weighting and N=5 genuinely random seeds, changes the entry model's OOS gross edge relative to a hygiene-matched control trained on causalfix_final alone.",
+  "research": {
+    "line_id": "btc_zigzag_as_entry_model_component",
+    "related_prior_line_ids": ["btc_zigzag_as_entry_model_component", "btc_tripbarrier_entry_axis_20260807_gates"],
+    "prior_failure_reassessment": "Raw zigzag-feature injection into the TB entry input was already tried and reported to 'hurt backtest PnL' (comment in scripts/train_btc_regime_curriculum_meta_transformer_20260807.py, citing scripts/build_btc_5m_zigzag_state_causal_features_20260806.py), but no artifact, seed count, or hygiene setting is recorded for that run, and it necessarily predates gate G2 (2026-08-07), which discovered that this exact label has effective_n ~4,058 (not 43,798 nominal) and that single/few-seed evaluation on it is unreliable (0/12 seeds OOS-positive despite the shipped single seed looking profitable). The prior verdict was very likely reached without purge, without uniqueness weighting, and on 1 seed -- the same conditions G2 showed cannot be trusted on this label.",
+    "retest_design": "Paired comparison, same 5 genuinely random (non-clustered) seeds run twice: (A) causalfix_final only, (B) causalfix_final + the 4 zz_ features, both under G2's D_purge_uniq hygiene (purge=True, embargo_bars=288, uniqueness_weights=True) and otherwise-identical architecture/training config. Compare seed-mean OOS gross edge (bps) and t-stat between A and B, and both against the G0' always_short reference (+2.72bps OOS, 3-seed A_repro-equivalent hygiene). This isolates the single variable (feature presence) the prior informal test did not control for."
+  },
+  "market": {"symbols": ["BTCUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/btc_features_causalfix_final_plus_zigzagstate_20260807.parquet",
+    "raw_sources": ["klines", "derivatives_funding", "orderflow_microstructure", "on-chain", "causal_zigzag_pivot_tracker"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_eth", "regime", "structural_price_location", "time_session", "mtf_1h_sidecar", "zigzag_state_causal"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "transformer_window48_d96_l3_dropout025 (frozen to G2's D_purge_uniq config, only feature set varies)",
+    "seeds": ["481937", "1029384756", "6271", "88420193", "3305577"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "seed-mean OOS gross edge (bps) significantly (t>=2) above the always_short baseline, condition B vs condition A"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_conservative", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

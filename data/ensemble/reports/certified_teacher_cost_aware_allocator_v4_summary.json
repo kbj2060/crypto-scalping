@@ -1,0 +1,208 @@
+{
+  "model_id": "certified_teacher_cost_aware_allocator_v4",
+  "data": {
+    "fit_range": [
+      "2025-01-01 00:00:00",
+      "2025-08-31 23:55:00"
+    ],
+    "selection_range": [
+      "2025-09-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "holdout_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ]
+  },
+  "selected_config": {
+    "top_k_per_day": 6,
+    "min_edge_cost2_margin": 0.04,
+    "trend_lane_only": true,
+    "micro_cap_per_day": 0,
+    "max_notional": 1.0,
+    "min_gap_bars": 12,
+    "catastrophic_q10_pct": -0.8,
+    "min_notional": 0.1,
+    "leverage": 5.0
+  },
+  "selection_score": -12.881270999323887,
+  "selection_result": {
+    "pnl": -6.130219628159894,
+    "mdd": -6.434966497318051,
+    "trades": 193,
+    "trades_per_day": 3.164114532931064,
+    "wr": 0.45595854922279794,
+    "avg_notional": 0.20839512310267275,
+    "max_margin_fraction": 0.10723267927716781,
+    "final_equity": 0.9386978037184011,
+    "coverage_start": "2025-09-01 00:00:00",
+    "coverage_end": "2025-10-31 23:55:00",
+    "block_reason_counts": {
+      "lane_disabled": 8459,
+      "cost2_margin": 1015,
+      "catastrophic_q10": 1356,
+      "daily_budget": 38,
+      "min_gap": 23
+    }
+  },
+  "holdout_result": {
+    "pnl": -0.2367451447035651,
+    "mdd": -2.525740655940878,
+    "trades": 120,
+    "trades_per_day": 1.9673250981954802,
+    "wr": 0.48333333333333334,
+    "avg_notional": 0.20924250685065088,
+    "max_margin_fraction": 0.074,
+    "final_equity": 0.9976325485529643,
+    "coverage_start": "2025-11-01 00:00:00",
+    "coverage_end": "2025-12-31 23:55:00",
+    "block_reason_counts": {
+      "lane_disabled": 10104,
+      "catastrophic_q10": 1978,
+      "cost2_margin": 1328,
+      "min_gap": 14
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -7.688231631880404,
+      "mdd": -8.54704077530708,
+      "trades": 130,
+      "trades_per_day": 2.215909090909091,
+      "wr": 0.36923076923076925,
+      "avg_notional": 0.2192618170281251,
+      "max_margin_fraction": 0.08483229579536615,
+      "final_equity": 0.923117683681196,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "lane_disabled": 9504,
+        "cost2_margin": 1110,
+        "catastrophic_q10": 1694,
+        "min_gap": 24
+      }
+    },
+    "cost2": {
+      "pnl": -7.7979121631218895,
+      "mdd": -8.366024272646966,
+      "trades": 96,
+      "trades_per_day": 1.6363636363636365,
+      "wr": 0.3333333333333333,
+      "avg_notional": 0.21989818846306733,
+      "max_margin_fraction": 0.08216689745434198,
+      "final_equity": 0.9220208783687811,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "lane_disabled": 10479,
+        "cost2_margin": 1923,
+        "catastrophic_q10": 1140,
+        "min_gap": 6
+      }
+    },
+    "cost3": {
+      "pnl": -6.326584226963938,
+      "mdd": -6.624177850092073,
+      "trades": 62,
+      "trades_per_day": 1.0568181818181819,
+      "wr": 0.2903225806451613,
+      "avg_notional": 0.22058636037790075,
+      "max_margin_fraction": 0.074,
+      "final_equity": 0.9367341577303606,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "lane_disabled": 11395,
+        "cost2_margin": 2583,
+        "catastrophic_q10": 711,
+        "min_gap": 5
+      }
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/certified_teacher_cost_aware_allocator_v4/model.pkl",
+    "selection_grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_cost_aware_allocator_v4_summary_selection_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_cost_aware_allocator_v4_summary_cost1_ledger.csv",
+      "cost2": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_cost_aware_allocator_v4_summary_cost2_ledger.csv",
+      "cost3": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_cost_aware_allocator_v4_summary_cost3_ledger.csv"
+    }
+  },
+  "data_audit": {
+    "ai_contracts": {
+      "status": "pass",
+      "blocking": [],
+      "evidence": {
+        "data/nf_patchtst": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_tide": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_dlinear": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_timesnet": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        }
+      }
+    },
+    "feature_contract": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 96,
+      "forbidden_feature_cols": []
+    },
+    "train_eval_overlap": 0
+  },
+  "audit": {
+    "model_id": "certified_teacher_cost_aware_allocator_v4",
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "M7 embedded provenance caveat remains"
+    ],
+    "invariants": {
+      "cost_aware_gate": true,
+      "daily_budget": true,
+      "2026_fixed_oos_no_selection": true
+    }
+  }
+}

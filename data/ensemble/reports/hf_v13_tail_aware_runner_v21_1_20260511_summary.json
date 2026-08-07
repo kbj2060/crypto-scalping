@@ -1,0 +1,366 @@
+{
+  "model_id": "hf_v13_tail_aware_runner_v21_1_20260511",
+  "design": "v21.1 tail-aware add-on runner. It separates robust utility, jackpot capture, bad-add-on risk, and cost3 survival gates.",
+  "base_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tail_aware_runner_v21_1_20260511/v21_1_tail_aware_runner.pkl",
+  "split_policy": "Tail runner trained on 2025 Jan-Sep; config selected on 2025 Oct-Dec; 2026 fixed OOS not used for selection.",
+  "selected_config": {
+    "name": "v21_1_tail_runner_1",
+    "full_edge_th": 0.002,
+    "half_edge_th": 0.002,
+    "p_th": 0.6,
+    "q10_floor": -0.006,
+    "jackpot_p": 0.25,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.5,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "full_add_frac": 0.2,
+    "half_add_frac": 0.1,
+    "max_total_mult": 1.35,
+    "max_entry_notional": 2.75,
+    "dd_block": 0.3
+  },
+  "selection_result": {
+    "config": {
+      "name": "v21_1_tail_runner_1",
+      "full_edge_th": 0.002,
+      "half_edge_th": 0.002,
+      "p_th": 0.6,
+      "q10_floor": -0.006,
+      "jackpot_p": 0.25,
+      "jackpot_q90": 0.015,
+      "bad_cap": 0.5,
+      "min_unrealized": 0.004,
+      "min_bars_since_entry": 3,
+      "full_add_frac": 0.2,
+      "half_add_frac": 0.1,
+      "max_total_mult": 1.35,
+      "max_entry_notional": 2.75,
+      "dd_block": 0.3
+    },
+    "validation_cost1": {
+      "pnl": 2.7792897808419426,
+      "mdd": -30.55010224166721,
+      "trades": 71,
+      "wr": 0.1267605633802817,
+      "trades_per_day": 0.7717682581619174,
+      "long_entries": 10,
+      "short_entries": 61,
+      "avg_notional": 2.530080874519537,
+      "avg_leverage": 2.4834742782045995,
+      "action_counts": {
+        "cash": 23401,
+        "long": 10,
+        "short": 61
+      },
+      "exits": {
+        "learned_stop_loss": 62,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 12,
+        "add_on": 24,
+        "jackpot_add": 18,
+        "full_add": 4,
+        "half_add": 2
+      }
+    },
+    "validation_cost2": {
+      "pnl": -19.962224080357625,
+      "mdd": -39.33785516165839,
+      "trades": 77,
+      "wr": 0.11688311688311688,
+      "trades_per_day": 0.8369881109643329,
+      "long_entries": 10,
+      "short_entries": 67,
+      "avg_notional": 2.541502076518952,
+      "avg_leverage": 2.501082789448483,
+      "action_counts": {
+        "cash": 23465,
+        "long": 10,
+        "short": 67
+      },
+      "exits": {
+        "learned_stop_loss": 68,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 8,
+        "add_on": 19,
+        "jackpot_add": 15,
+        "full_add": 2,
+        "half_add": 2
+      }
+    },
+    "validation_cost3": {
+      "pnl": -43.162348899709755,
+      "mdd": -55.04320134428631,
+      "trades": 82,
+      "wr": 0.0975609756097561,
+      "trades_per_day": 0.8913379882996793,
+      "long_entries": 10,
+      "short_entries": 72,
+      "avg_notional": 2.535326880307895,
+      "avg_leverage": 2.4907543831421766,
+      "action_counts": {
+        "cash": 23759,
+        "long": 10,
+        "short": 72
+      },
+      "exits": {
+        "learned_stop_loss": 74,
+        "learned_max_hold": 6,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 7,
+        "add_on": 13,
+        "jackpot_add": 10,
+        "full_add": 2,
+        "half_add": 1
+      }
+    },
+    "selection_score": -22.473706395677745
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 194.36258306094462,
+      "mdd": -32.675898852590166,
+      "trades": 81,
+      "wr": 0.19753086419753085,
+      "trades_per_day": 1.3806818181818183,
+      "long_entries": 27,
+      "short_entries": 54,
+      "avg_notional": 2.537109317187181,
+      "avg_leverage": 2.616218552311983,
+      "action_counts": {
+        "cash": 12565,
+        "long": 27,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 65,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 16,
+        "jackpot_add": 11,
+        "reject": 28,
+        "full_add": 4,
+        "half_add": 1
+      }
+    },
+    "cost2": {
+      "pnl": 102.28449040477336,
+      "mdd": -34.83071904741912,
+      "trades": 85,
+      "wr": 0.18823529411764706,
+      "trades_per_day": 1.4488636363636365,
+      "long_entries": 30,
+      "short_entries": 55,
+      "avg_notional": 2.528835402907673,
+      "avg_leverage": 2.5856894403780437,
+      "action_counts": {
+        "cash": 12622,
+        "long": 30,
+        "short": 55
+      },
+      "exits": {
+        "learned_stop_loss": 69,
+        "learned_max_hold": 9,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 19,
+        "jackpot_add": 13,
+        "reject": 27,
+        "full_add": 6
+      }
+    },
+    "cost3": {
+      "pnl": 20.297902100472776,
+      "mdd": -45.73111577023248,
+      "trades": 94,
+      "wr": 0.1595744680851064,
+      "trades_per_day": 1.6022727272727273,
+      "long_entries": 36,
+      "short_entries": 58,
+      "avg_notional": 2.516400475304256,
+      "avg_leverage": 2.5741153321686796,
+      "action_counts": {
+        "cash": 12794,
+        "long": 36,
+        "short": 58
+      },
+      "exits": {
+        "learned_stop_loss": 79,
+        "learned_max_hold": 9,
+        "learned_take_profit": 6
+      },
+      "runner_actions": {
+        "add_on": 19,
+        "jackpot_add": 14,
+        "reject": 17,
+        "full_add": 5
+      }
+    }
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "promote",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "model_meta": {
+      "snapshot_count": 20052,
+      "positive_rate": 0.8720825852782765,
+      "jackpot_rate": 0.3833532814681827,
+      "bad_rate": 0.08477957310991423,
+      "cost3_positive_rate": 0.8723319369638939,
+      "target_mean": 0.012465419239048602,
+      "target_p10": -0.0014223086883659573,
+      "target_cost2_p90": 0.048660514136489745,
+      "target_p75": 0.01959459649244273,
+      "target_p95": 0.04479031968635111
+    },
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    },
+    "selected_config": {
+      "name": "v21_1_tail_runner_1",
+      "full_edge_th": 0.002,
+      "half_edge_th": 0.002,
+      "p_th": 0.6,
+      "q10_floor": -0.006,
+      "jackpot_p": 0.25,
+      "jackpot_q90": 0.015,
+      "bad_cap": 0.5,
+      "min_unrealized": 0.004,
+      "min_bars_since_entry": 3,
+      "full_add_frac": 0.2,
+      "half_add_frac": 0.1,
+      "max_total_mult": 1.35,
+      "max_entry_notional": 2.75,
+      "dd_block": 0.3
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 194.36258306094462,
+        "mdd": -32.675898852590166,
+        "trades": 81,
+        "wr": 0.19753086419753085,
+        "trades_per_day": 1.3806818181818183,
+        "long_entries": 27,
+        "short_entries": 54,
+        "avg_notional": 2.537109317187181,
+        "avg_leverage": 2.616218552311983,
+        "action_counts": {
+          "cash": 12565,
+          "long": 27,
+          "short": 54
+        },
+        "exits": {
+          "learned_stop_loss": 65,
+          "learned_max_hold": 9,
+          "learned_take_profit": 7
+        },
+        "runner_actions": {
+          "add_on": 16,
+          "jackpot_add": 11,
+          "reject": 28,
+          "full_add": 4,
+          "half_add": 1
+        }
+      },
+      "cost2": {
+        "pnl": 102.28449040477336,
+        "mdd": -34.83071904741912,
+        "trades": 85,
+        "wr": 0.18823529411764706,
+        "trades_per_day": 1.4488636363636365,
+        "long_entries": 30,
+        "short_entries": 55,
+        "avg_notional": 2.528835402907673,
+        "avg_leverage": 2.5856894403780437,
+        "action_counts": {
+          "cash": 12622,
+          "long": 30,
+          "short": 55
+        },
+        "exits": {
+          "learned_stop_loss": 69,
+          "learned_max_hold": 9,
+          "learned_take_profit": 7
+        },
+        "runner_actions": {
+          "add_on": 19,
+          "jackpot_add": 13,
+          "reject": 27,
+          "full_add": 6
+        }
+      },
+      "cost3": {
+        "pnl": 20.297902100472776,
+        "mdd": -45.73111577023248,
+        "trades": 94,
+        "wr": 0.1595744680851064,
+        "trades_per_day": 1.6022727272727273,
+        "long_entries": 36,
+        "short_entries": 58,
+        "avg_notional": 2.516400475304256,
+        "avg_leverage": 2.5741153321686796,
+        "action_counts": {
+          "cash": 12794,
+          "long": 36,
+          "short": 58
+        },
+        "exits": {
+          "learned_stop_loss": 79,
+          "learned_max_hold": 9,
+          "learned_take_profit": 6
+        },
+        "runner_actions": {
+          "add_on": 19,
+          "jackpot_add": 14,
+          "reject": 17,
+          "full_add": 5
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tail_aware_runner_v21_1_20260511/v21_1_tail_aware_runner.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tail_aware_runner_v21_1_20260511_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tail_aware_runner_v21_1_20260511_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tail_aware_runner_v21_1_20260511_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_tail_aware_runner_v21_1_20260511_summary_cost1_ledger.csv"
+    }
+  }
+}

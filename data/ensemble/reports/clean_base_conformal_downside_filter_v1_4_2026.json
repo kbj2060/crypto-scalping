@@ -1,0 +1,319 @@
+{
+  "model_id": "clean_base_conformal_downside_filter_v1_4",
+  "verdict": "shadow_candidate",
+  "selected_config": {
+    "name": "q0.70_lcb-0.0010_adv0.030_dn0.90_eg0.0030_acct0.08_day0.015",
+    "residual_quantile": 0.7,
+    "lcb_threshold": -0.001,
+    "adverse_cut": 0.03,
+    "scale_down": 0.9,
+    "early_gain_threshold": 0.003,
+    "min_notional": 0.2,
+    "account_dd_disable": 0.08,
+    "daily_dd_disable": 0.015
+  },
+  "selected_residual_q": 0.005108251994112142,
+  "training": {
+    "rows": 1479,
+    "features": [
+      "side",
+      "quality",
+      "confidence",
+      "core_notional",
+      "leverage",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk"
+    ],
+    "full_positive_rate": 0.6375929682217715,
+    "full_mean": 0.0031646741661019,
+    "adverse_mean": 0.0024174231149931636,
+    "early_best_beats_full_rate": 0.11359026369168357
+  },
+  "calibration": {
+    "rows": 695,
+    "residual_mean": 0.005152774590768774,
+    "residual_p60": 0.003952740962859476,
+    "residual_p70": 0.005108251994112142,
+    "residual_p80": 0.007019416005513834,
+    "residual_p90": 0.010767780922923879,
+    "residual_p95": 0.019497118128090896
+  },
+  "validation": {
+    "cost_1x": {
+      "pnl": 823.2419616710447,
+      "mdd": -12.563540039933107,
+      "trades": 695,
+      "trades_per_day": 11.39344262295082,
+      "wr": 0.581294964028777,
+      "avg_notional": 0.7419851309629842,
+      "gross_notional_max": 3.1252765593292904,
+      "avg_scale_delta": -0.04628867142037814,
+      "early_exit_fraction": 0.012949640287769784,
+      "action_counts": {
+        "DOWNSIDE_SCALE": 495,
+        "DOWNSIDE_SCALE_EARLY6": 6,
+        "KEEP": 176,
+        "DOWNSIDE_SCALE_EARLY12": 6,
+        "DOWNSIDE_SCALE_EARLY24": 11,
+        "EARLY24": 1
+      },
+      "reason_counts": {
+        "lcb_below_threshold": 517,
+        "early_return_dominates_full": 24,
+        "daily_dd_disable": 2
+      }
+    },
+    "cost_3x": {
+      "pnl": 14.090766899857531,
+      "mdd": -13.778989138361041,
+      "trades": 544,
+      "trades_per_day": 8.918032786885245,
+      "wr": 0.28860294117647056,
+      "avg_notional": 0.4388718070107096,
+      "gross_notional_max": 2.247647534643374,
+      "avg_scale_delta": -0.028413548214956414,
+      "early_exit_fraction": 0.02022058823529412,
+      "action_counts": {
+        "DOWNSIDE_SCALE": 437,
+        "DOWNSIDE_SCALE_EARLY12": 11,
+        "KEEP": 75,
+        "DOWNSIDE_SCALE_EARLY24": 12,
+        "DOWNSIDE_SCALE_EARLY6": 7,
+        "EARLY24": 2
+      },
+      "reason_counts": {
+        "lcb_below_threshold": 421,
+        "early_return_dominates_full": 32,
+        "daily_dd_disable": 11,
+        "account_dd_disable": 279
+      }
+    },
+    "score": 824.8525262846115
+  },
+  "validation_grid_rows": 108,
+  "cost_1x": {
+    "pnl": 174.34565662656954,
+    "mdd": -17.43817344997761,
+    "trades": 363,
+    "trades_per_day": 6.1525423728813555,
+    "wr": 0.48760330578512395,
+    "avg_notional": 0.6438657996143186,
+    "gross_notional_max": 3.2566419417190486,
+    "avg_scale_delta": -0.04643617308101167,
+    "early_exit_fraction": 0.02203856749311295,
+    "action_counts": {
+      "DOWNSIDE_SCALE": 280,
+      "KEEP": 66,
+      "DOWNSIDE_SCALE_EARLY24": 8,
+      "DOWNSIDE_SCALE_EARLY12": 2,
+      "DOWNSIDE_SCALE_EARLY6": 7
+    },
+    "reason_counts": {
+      "lcb_below_threshold": 295,
+      "early_return_dominates_full": 17,
+      "daily_dd_disable": 3
+    }
+  },
+  "cost_2x": {
+    "pnl": 116.55881873222076,
+    "mdd": -17.755579164152646,
+    "trades": 318,
+    "trades_per_day": 5.389830508474576,
+    "wr": 0.31446540880503143,
+    "avg_notional": 0.5302288274303519,
+    "gross_notional_max": 3.2566419417190486,
+    "avg_scale_delta": -0.03189496041250414,
+    "early_exit_fraction": 0.0220125786163522,
+    "action_counts": {
+      "DOWNSIDE_SCALE": 238,
+      "KEEP": 66,
+      "DOWNSIDE_SCALE_EARLY24": 5,
+      "DOWNSIDE_SCALE_EARLY6": 4,
+      "DOWNSIDE_SCALE_EARLY12": 4,
+      "EARLY12": 1
+    },
+    "reason_counts": {
+      "lcb_below_threshold": 248,
+      "daily_dd_disable": 7,
+      "early_return_dominates_full": 14
+    }
+  },
+  "cost_3x": {
+    "pnl": -8.249483104046174,
+    "mdd": -9.08693144033581,
+    "trades": 179,
+    "trades_per_day": 3.0338983050847457,
+    "wr": 0.1452513966480447,
+    "avg_notional": 0.2751555237138425,
+    "gross_notional_max": 1.9787302298342926,
+    "avg_scale_delta": -0.01925354880098016,
+    "early_exit_fraction": 0.01675977653631285,
+    "action_counts": {
+      "DOWNSIDE_SCALE": 153,
+      "KEEP": 16,
+      "DOWNSIDE_SCALE_EARLY24": 3,
+      "DOWNSIDE_SCALE_EARLY6": 3,
+      "DOWNSIDE_SCALE_EARLY12": 4
+    },
+    "reason_counts": {
+      "lcb_below_threshold": 156,
+      "daily_dd_disable": 3,
+      "early_return_dominates_full": 10,
+      "account_dd_disable": 52
+    }
+  },
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades_per_day": 6.1875,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "sleeve_v12_reference": {
+    "pnl": 210.4912769023236,
+    "mdd": -18.01515493224809,
+    "trades_per_day": 6.1525423728813555,
+    "cost_2x_pnl": 133.15003100682384,
+    "cost_3x_pnl": -9.150155206649814
+  },
+  "lifecycle_core_reference": {
+    "validation": {
+      "pnl": 908.4222875243677,
+      "mdd": -12.696352061226445,
+      "trades": 695,
+      "core_trades_per_day": null,
+      "wr": 0.6690647482014388,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "oos": {
+      "pnl": 207.2368875907697,
+      "mdd": -18.016318445365364,
+      "trades": 363,
+      "core_trades_per_day": null,
+      "wr": 0.5730027548209367,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json"
+  },
+  "promotion_gate": {
+    "clean_base_pnl_gate": false,
+    "clean_base_mdd_gate": true,
+    "sleeve_v12_pnl_gate": false,
+    "sleeve_v12_mdd_gate": true,
+    "trades_per_day_gate": true,
+    "cost2_survival": true,
+    "cost3_not_worse_than_clean_base": false,
+    "downside_only": true,
+    "preservation_audit_passed": true,
+    "accounting_audit_passed": true,
+    "causality_audit_passed": true,
+    "red_team_no_blocking_risk": true,
+    "decision": "shadow_candidate"
+  },
+  "preservation_audit": {
+    "passed": true,
+    "violations": {
+      "trade_count_changed": 0,
+      "entry_idx_changed": 0,
+      "side_changed": 0,
+      "exit_after_core_exit": 0,
+      "negative_notional": 0,
+      "notional_above_core": 0,
+      "notional_above_cap": 0
+    },
+    "base_trades": 363,
+    "edited_trades": 363
+  },
+  "accounting_audit": {
+    "passed": true,
+    "final_pnl_from_ledger": 174.34565662656954,
+    "report_pnl": 174.34565662656954,
+    "max_step_equity_error": 2.220446049250313e-16,
+    "max_fee_identity_error": 8.673617379884035e-19,
+    "nonfinite_numeric_cells": 0
+  },
+  "causality_audit": {
+    "passed": true,
+    "runtime_uses_future_returns": false,
+    "training_labels_use_future": true,
+    "validation_calibration_and_selection": true,
+    "oos_threshold_selection": false,
+    "runtime_features": [
+      "side",
+      "quality",
+      "confidence",
+      "core_notional",
+      "leverage",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk"
+    ],
+    "forbidden_runtime_features": [
+      "evt_candidate_side",
+      "evt_candidate_label",
+      "evt_side_margin",
+      "future high/low/close"
+    ]
+  },
+  "red_team_review": {
+    "blocking_risk": false,
+    "notes": [
+      "Core entries, sides, and trade count are preserved.",
+      "Runtime notional can only shrink from Lifecycle core notional.",
+      "Formal conformal coverage is not claimed because calibration and grid selection share the validation window."
+    ]
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "split_contract": {
+      "train_labels": "2025-01-01 through 2025-10-31",
+      "validation_calibration_selection": "2025-11-01 through 2025-12-31",
+      "one_shot_oos": "2026-01-01 through 2026-02-28",
+      "oos_threshold_selection": false
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_conformal_downside_filter_v1_4/conformal_downside_filter.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_conformal_downside_filter_v1_4_2026.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_conformal_downside_filter_v1_4_grid.csv",
+    "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_conformal_downside_filter_v1_4_ledger.csv",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/clean_base_conformal_downside_filter_v1_4.md",
+    "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/clean_base_conformal_downside_filter_v1_4_contract.md"
+  }
+}

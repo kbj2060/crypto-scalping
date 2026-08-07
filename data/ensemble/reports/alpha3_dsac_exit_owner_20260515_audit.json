@@ -1,0 +1,15 @@
+{
+  "model_id": "alpha3_dsac_exit_owner_20260515",
+  "selection_uses_2026": false,
+  "status": "research_candidate",
+  "base_contract": "docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md",
+  "notes": [
+    "Uses DSACAgent architecture and training techniques from ensemble/train_rl_dsac_agent.py.",
+    "State/reward replay is Alpha3 exit-owner specific, not the original DSAC trading env.",
+    "No partial close, TWAP, true market-close action, or real L2 queue fill labels in this first DSAC exit-owner run."
+  ],
+  "promotion_gate": [
+    "Must beat Alpha3 baseline and fixed exit4_pen0 on same eval horizon.",
+    "Must survive cost2/cost3 stress and real L2 shadow route/fallback audit."
+  ]
+}

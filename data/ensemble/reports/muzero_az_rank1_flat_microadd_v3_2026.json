@@ -1,0 +1,5246 @@
+{
+  "type": "muzero_az_rank1_flat_microadd_v3_2026",
+  "status": "candidate_failed",
+  "note": "Frozen current-top MuZero/AZ Stage2+AZ Exit baseline preserved exactly; deterministic current-bar-vote micro-adds can fire only when exact sequential baseline replay is flat.",
+  "policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_entry_grid/hf_v4_balanced_h144.pkl",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "model_dir": "data/ensemble/supervised/muzero_az_rank1_flat_microadd_v3",
+  "report_out": "data/ensemble/reports/muzero_az_rank1_flat_microadd_v3_2026.json",
+  "baseline_artifacts": {
+    "mz_entry_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/muzero_style/mz_latent_governor.pt",
+    "az_risk_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/zero_style/az_risk_overlay.pt",
+    "rank1_stage2_mz_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/zero_style/remaining_layers_walkforward/wf_stage2_sleeve_mz.pt",
+    "rank1_stage2_mz_model_sha256": "442a9dae1b46e94c4bd93d7123c437483d62e17590804337e010008988ae64b4",
+    "az_exit_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alphazero_style/az_policy_value_governor.pt",
+    "stage3_stage4_excluded": true
+  },
+  "audit": {
+    "source_audit": {
+      "train_rows": 105064,
+      "eval_rows": 16897,
+      "train_valid_timestamp_rows": 105064,
+      "eval_valid_timestamp_rows": 16897,
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "timestamp_overlap_rows": 0,
+      "train_duplicate_timestamps": 0,
+      "eval_duplicate_timestamps": 0,
+      "policy_feature_count": 79,
+      "label_distribution": {
+        "action": {
+          "1": 13000,
+          "2": 13141
+        },
+        "notional": {
+          "0": 15574,
+          "1": 681,
+          "2": 314,
+          "3": 230,
+          "4": 799,
+          "5": 1094,
+          "6": 2113,
+          "7": 2097,
+          "8": 1582,
+          "9": 1131,
+          "10": 526
+        },
+        "leverage": {
+          "0": 22902,
+          "1": 1582,
+          "2": 1657
+        },
+        "take_profit": {
+          "0": 17366,
+          "1": 332,
+          "2": 261,
+          "3": 493,
+          "4": 865,
+          "5": 1532,
+          "6": 1526,
+          "7": 1431,
+          "8": 1034,
+          "9": 1301
+        },
+        "stop_loss": {
+          "0": 22836,
+          "1": 668,
+          "2": 664,
+          "3": 563,
+          "4": 546,
+          "5": 457,
+          "6": 407
+        },
+        "max_hold": {
+          "0": 17076,
+          "1": 430,
+          "2": 566,
+          "3": 435,
+          "4": 405,
+          "5": 748,
+          "6": 672,
+          "7": 1165,
+          "8": 1285,
+          "9": 3359
+        },
+        "cooldown": {
+          "0": 7949,
+          "2": 18033,
+          "4": 83,
+          "6": 76
+        },
+        "quality_mean": 0.014499789940668363,
+        "quality_p95": 0.06188453357821794
+      }
+    },
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_rows": 87496,
+    "validation_rows": 17568,
+    "eval_rows": 16897,
+    "smoke_limits": {
+      "limit_train_rows": null,
+      "limit_val_rows": null,
+      "limit_eval_rows": null
+    }
+  },
+  "baseline_reproduction": {
+    "status": "passed",
+    "passed": true,
+    "smoke_limits_present": false,
+    "target": {
+      "pnl": 752.648580357841,
+      "mdd": -18.755787211251405,
+      "trades": 353,
+      "trades_per_day": 6.017045454545455,
+      "avg_leverage": 1.5960290252000644
+    },
+    "observed": {
+      "pnl": 752.648580357841,
+      "mdd": -18.755787211251405,
+      "trades": 353,
+      "trades_per_day": 6.017045454545455,
+      "avg_leverage": 1.5960290252000644
+    },
+    "diff": {
+      "pnl": 0.0,
+      "mdd": 0.0,
+      "trades": 0.0,
+      "trades_per_day": 0.0,
+      "avg_leverage": 0.0
+    },
+    "tolerance": {
+      "pnl": 1e-06,
+      "mdd": 1e-06,
+      "trades": 0.0,
+      "trades_per_day": 1e-09,
+      "avg_leverage": 1e-09
+    },
+    "hard_gate": "required"
+  },
+  "state_audit": {
+    "defense": {
+      "train": {
+        "rows": 87496,
+        "feature_count": 92,
+        "missing_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true
+      },
+      "validation": {
+        "rows": 17568,
+        "feature_count": 92,
+        "missing_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true
+      },
+      "eval": {
+        "rows": 16897,
+        "feature_count": 92,
+        "missing_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true
+      }
+    },
+    "microadd": {
+      "train": {
+        "rows": 87496,
+        "feature_count": 104,
+        "missing_feature_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true,
+        "baseline_telemetry_unavailable": [
+          "mz_entry_score_0",
+          "mz_entry_score_1",
+          "mz_entry_score_2",
+          "mz_entry_score_3",
+          "az_risk_scale",
+          "az_risk_prob",
+          "stage2_mz_scale",
+          "stage2_mz_score",
+          "az_exit_prob"
+        ],
+        "vote_provenance": {
+          "side_hint": "unavailable",
+          "sources": {
+            "ai_dir_prob": "used_current_bar",
+            "ai_dir_edge": "used_current_bar",
+            "m7_expected_ret": "used_current_bar",
+            "patchtst": "used_current_bar:conf_patchtst",
+            "regime": "used_current_bar:regime_bull,regime_bear"
+          },
+          "candidate_rows": 87496,
+          "long_vote_rows": 45253,
+          "short_vote_rows": 42243,
+          "conflict_rows": 49860,
+          "future_label_side_selection": false
+        }
+      },
+      "validation": {
+        "rows": 17568,
+        "feature_count": 104,
+        "missing_feature_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true,
+        "baseline_telemetry_unavailable": [
+          "mz_entry_score_0",
+          "mz_entry_score_1",
+          "mz_entry_score_2",
+          "mz_entry_score_3",
+          "az_risk_scale",
+          "az_risk_prob",
+          "stage2_mz_scale",
+          "stage2_mz_score",
+          "az_exit_prob"
+        ],
+        "vote_provenance": {
+          "side_hint": "unavailable",
+          "sources": {
+            "ai_dir_prob": "used_current_bar",
+            "ai_dir_edge": "used_current_bar",
+            "m7_expected_ret": "used_current_bar",
+            "patchtst": "used_current_bar:conf_patchtst",
+            "regime": "used_current_bar:regime_bull,regime_bear"
+          },
+          "candidate_rows": 17568,
+          "long_vote_rows": 8981,
+          "short_vote_rows": 8587,
+          "conflict_rows": 10082,
+          "future_label_side_selection": false
+        }
+      },
+      "eval": {
+        "rows": 16897,
+        "feature_count": 104,
+        "missing_feature_cols": [],
+        "nan_count_after_fill": 0,
+        "nonfinite_count_after_fill": 0,
+        "trailing_context_shifted": true,
+        "baseline_telemetry_unavailable": [
+          "mz_entry_score_0",
+          "mz_entry_score_1",
+          "mz_entry_score_2",
+          "mz_entry_score_3",
+          "az_risk_scale",
+          "az_risk_prob",
+          "stage2_mz_scale",
+          "stage2_mz_score",
+          "az_exit_prob"
+        ],
+        "vote_provenance": {
+          "side_hint": "unavailable",
+          "sources": {
+            "ai_dir_prob": "used_current_bar",
+            "ai_dir_edge": "used_current_bar",
+            "m7_expected_ret": "used_current_bar",
+            "patchtst": "used_current_bar:conf_patchtst",
+            "regime": "used_current_bar:regime_bull,regime_bear"
+          },
+          "candidate_rows": 16897,
+          "long_vote_rows": 8466,
+          "short_vote_rows": 8431,
+          "conflict_rows": 9642,
+          "future_label_side_selection": false
+        }
+      }
+    }
+  },
+  "provenance_audit": {
+    "side_hint": "ignored_or_unavailable",
+    "microadd_side_rule": "deterministic_current_bar_vote_only",
+    "future_labels_used_for_side": false,
+    "oos_used_for_selection": false
+  },
+  "sequential_flat_audit": {
+    "train": {
+      "method": "sequential_replay_exact_backtest_no_limit_exit_entry_state",
+      "rows": 87496,
+      "position_open_before_rows": 46498,
+      "flat_for_microadd_rows": 17751,
+      "exact_entry_rows": 1885,
+      "exact_exit_rows": 1885,
+      "exact_closed_trades": 1885,
+      "block_counts": {
+        "cash_signal": 17751,
+        "exit_exit_governor": 1885,
+        "model_cooldown": 1476,
+        "loss_cooldown": 14136,
+        "daily_dd_lock": 4700,
+        "daily_trade_budget": 283,
+        "daily_loss_lock": 765
+      },
+      "exact_backtest_state_claimed": true
+    },
+    "validation": {
+      "method": "sequential_replay_exact_backtest_no_limit_exit_entry_state",
+      "rows": 17568,
+      "position_open_before_rows": 7775,
+      "flat_for_microadd_rows": 4433,
+      "exact_entry_rows": 376,
+      "exact_exit_rows": 376,
+      "exact_closed_trades": 376,
+      "block_counts": {
+        "cash_signal": 4433,
+        "exit_exit_governor": 376,
+        "model_cooldown": 291,
+        "loss_cooldown": 3240,
+        "daily_dd_lock": 1450,
+        "daily_trade_budget": 1
+      },
+      "exact_backtest_state_claimed": true
+    },
+    "eval": {
+      "method": "sequential_replay_exact_backtest_no_limit_exit_entry_state",
+      "rows": 16897,
+      "position_open_before_rows": 8272,
+      "flat_for_microadd_rows": 3758,
+      "exact_entry_rows": 353,
+      "exact_exit_rows": 353,
+      "exact_closed_trades": 353,
+      "block_counts": {
+        "cash_signal": 3758,
+        "exit_exit_governor": 353,
+        "model_cooldown": 257,
+        "loss_cooldown": 3264,
+        "daily_trade_budget": 39,
+        "daily_loss_lock": 118,
+        "daily_dd_lock": 834
+      },
+      "exact_backtest_state_claimed": true
+    }
+  },
+  "vote_audit": {
+    "train": {
+      "side_hint": "unavailable",
+      "sources": {
+        "ai_dir_prob": "used_current_bar",
+        "ai_dir_edge": "used_current_bar",
+        "m7_expected_ret": "used_current_bar",
+        "patchtst": "used_current_bar:conf_patchtst",
+        "regime": "used_current_bar:regime_bull,regime_bear"
+      },
+      "candidate_rows": 87496,
+      "long_vote_rows": 45253,
+      "short_vote_rows": 42243,
+      "conflict_rows": 49860,
+      "future_label_side_selection": false
+    },
+    "validation": {
+      "side_hint": "unavailable",
+      "sources": {
+        "ai_dir_prob": "used_current_bar",
+        "ai_dir_edge": "used_current_bar",
+        "m7_expected_ret": "used_current_bar",
+        "patchtst": "used_current_bar:conf_patchtst",
+        "regime": "used_current_bar:regime_bull,regime_bear"
+      },
+      "candidate_rows": 17568,
+      "long_vote_rows": 8981,
+      "short_vote_rows": 8587,
+      "conflict_rows": 10082,
+      "future_label_side_selection": false
+    },
+    "eval": {
+      "side_hint": "unavailable",
+      "sources": {
+        "ai_dir_prob": "used_current_bar",
+        "ai_dir_edge": "used_current_bar",
+        "m7_expected_ret": "used_current_bar",
+        "patchtst": "used_current_bar:conf_patchtst",
+        "regime": "used_current_bar:regime_bull,regime_bear"
+      },
+      "candidate_rows": 16897,
+      "long_vote_rows": 8466,
+      "short_vote_rows": 8431,
+      "conflict_rows": 9642,
+      "future_label_side_selection": false
+    }
+  },
+  "leakage_audit": {
+    "train_validation_split": "2025-11-01",
+    "microadd_side_from_future_labels": false,
+    "future_windows_only_for_train_validation_labels": true,
+    "oos_fit_rows": 0,
+    "oos_threshold_selection_rows": 0,
+    "oos_final_read_only": true
+  },
+  "invariant_audit": {
+    "validation_selected": {
+      "passed": true,
+      "violations": {
+        "active_side_reversal": 0,
+        "active_created_side": 0,
+        "active_notional_increase": 0,
+        "active_leverage_increase": 0,
+        "active_position_fraction_increase": 0,
+        "microadd_when_baseline_active": 0,
+        "microadd_when_position_open": 0,
+        "microadd_side_without_vote": 0,
+        "microadd_vote_conflict": 0,
+        "microadd_notional_cap_violation": 0,
+        "microadd_leverage_cap_violation": 0,
+        "microadd_churn_cap_violation": 0,
+        "nonfinite_decision_value": 0,
+        "negative_notional_or_leverage": 0
+      },
+      "rows": 17568
+    },
+    "eval_selected": {
+      "passed": true,
+      "violations": {
+        "active_side_reversal": 0,
+        "active_created_side": 0,
+        "active_notional_increase": 0,
+        "active_leverage_increase": 0,
+        "active_position_fraction_increase": 0,
+        "microadd_when_baseline_active": 0,
+        "microadd_when_position_open": 0,
+        "microadd_side_without_vote": 0,
+        "microadd_vote_conflict": 0,
+        "microadd_notional_cap_violation": 0,
+        "microadd_leverage_cap_violation": 0,
+        "microadd_churn_cap_violation": 0,
+        "nonfinite_decision_value": 0,
+        "negative_notional_or_leverage": 0
+      },
+      "rows": 16897
+    }
+  },
+  "cost_and_caps": {
+    "fee": 0.0005,
+    "slip": 0.0002,
+    "max_notional": 3.6,
+    "original_leverage_cap": 5.0,
+    "microadd_notional_cap_candidates": [
+      0.05,
+      0.075,
+      0.1,
+      0.15,
+      0.2
+    ],
+    "microadd_leverage_ceiling_candidates": [
+      1.0,
+      1.2,
+      1.4,
+      1.6
+    ],
+    "microadd_entries_per_day_cap_candidates": [
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.25
+    ]
+  },
+  "frozen_current_config": {
+    "entry": "MuZero entry planner",
+    "risk": "AZ risk overlay",
+    "stage2": {
+      "model": "MuZero sleeve overlay",
+      "gamma": 0.55,
+      "prior": 0.0,
+      "depth": 1,
+      "score_floor": 0.12
+    },
+    "exit": {
+      "model": "AZ exit governor",
+      "threshold": 0.45,
+      "min_exit_age": 6
+    }
+  },
+  "candidate_config": {
+    "architecture": [
+      "Identity active-row baseline preservation",
+      "Current-bar deterministic vote micro-add generator",
+      "HGB survival/edge/CVaR scorer",
+      "Validation-only threshold/quota selector"
+    ],
+    "defense_diagnostic": {
+      "horizon": 144,
+      "cvar_alpha": 0.1,
+      "adverse_threshold": 0.02,
+      "min_edge": 0.0,
+      "max_train_samples": 50000,
+      "seed": 42,
+      "min_notional": 0.05,
+      "scale_floor": 0.35,
+      "hazard_scale_gap": 0.15,
+      "cost_scale": 0.75
+    },
+    "microadd_diagnostic": {
+      "horizon": 144,
+      "short_horizon": 36,
+      "cvar_alpha": 0.1,
+      "max_train_samples": 50000,
+      "seed": 42,
+      "min_notional": 0.05,
+      "approximate_hold_bars": 36
+    },
+    "selected_defense_config": {
+      "mode": "identity_no_active_row_defense"
+    },
+    "selected_microadd_config": {
+      "vote_margin_min": 0.15,
+      "vote_agreement_min": 2,
+      "microadd_survival_prob_min": 0.62,
+      "microadd_edge_floor_3x": 0.0005,
+      "microadd_max_cvar_loss": 0.018,
+      "microadd_notional_cap": 0.05,
+      "microadd_leverage_ceiling": 1.0,
+      "microadd_entries_per_day_cap": 1.25,
+      "microadd_cooldown_bars": 12
+    }
+  },
+  "target_meta": {
+    "defense": {
+      "mode": "disabled_for_loop_3",
+      "reason": "loop_2 active-row defense destroyed rank-1 exposure"
+    },
+    "microadd": {
+      "candidate_rows": 87496,
+      "eligible_rows": 17751,
+      "usable_rows": 17731,
+      "side_from_future_labels": false,
+      "survival_3x_rate": 0.32502396931927136,
+      "edge_3x_quantiles": [
+        -0.08878949,
+        -0.01250887,
+        -0.00463668,
+        0.00371018,
+        0.11838372
+      ],
+      "cvar_3x_quantiles": [
+        -0.08741294,
+        -0.01711388,
+        -0.01078178,
+        0.02389241
+      ]
+    }
+  },
+  "train_meta": {
+    "defense": {
+      "mode": "disabled_for_loop_3"
+    },
+    "microadd": {
+      "samples": 17731,
+      "survival_3x_labels": 5763,
+      "survival_3x_rate": 0.32502396931927136,
+      "edge_mean": -0.004350209839924299,
+      "cvar_mean": -0.013130346614237483
+    }
+  },
+  "validation": {
+    "current_muzero_az": {
+      "name": "current_muzero_az_val",
+      "eval": {
+        "pnl": 1351.1798327156457,
+        "mdd": -9.046813781187824,
+        "trades": 376,
+        "trades_per_day": 6.1642853076791715,
+        "wr": 0.6409574468085106,
+        "avg_notional": 1.4996324911395866,
+        "avg_leverage": 1.607434884473352,
+        "long_entries": 178,
+        "short_entries": 198,
+        "entry_blocks": {
+          "cash_signal": 4433,
+          "model_cooldown": 291,
+          "loss_cooldown": 3240,
+          "daily_dd_lock": 1450,
+          "daily_trade_budget": 1
+        },
+        "exits": {
+          "exit_governor": 376
+        },
+        "exit_prob_mean": 0.1571025717121954,
+        "exit_prob_p95": 0.5029139816761019
+      },
+      "score": 1324.0393913720823
+    },
+    "selected_defense": {
+      "name": "current_muzero_az_val",
+      "eval": {
+        "pnl": 1351.1798327156457,
+        "mdd": -9.046813781187824,
+        "trades": 376,
+        "trades_per_day": 6.1642853076791715,
+        "wr": 0.6409574468085106,
+        "avg_notional": 1.4996324911395866,
+        "avg_leverage": 1.607434884473352,
+        "long_entries": 178,
+        "short_entries": 198,
+        "entry_blocks": {
+          "cash_signal": 4433,
+          "model_cooldown": 291,
+          "loss_cooldown": 3240,
+          "daily_dd_lock": 1450,
+          "daily_trade_budget": 1
+        },
+        "exits": {
+          "exit_governor": 376
+        },
+        "exit_prob_mean": 0.1571025717121954,
+        "exit_prob_p95": 0.5029139816761019
+      },
+      "score": 1324.0393913720823,
+      "config": {
+        "mode": "identity_no_active_row_defense"
+      }
+    },
+    "validation_grid_ranked": [
+      {
+        "name": "microadd_grid_044_val",
+        "eval": {
+          "pnl": 1350.9606374949512,
+          "mdd": -9.046813781187824,
+          "trades": 377,
+          "trades_per_day": 6.180679683497467,
+          "wr": 0.6392572944297082,
+          "avg_notional": 1.495787312117996,
+          "avg_leverage": 1.6058236513580377,
+          "long_entries": 179,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4401,
+            "model_cooldown": 292,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 377
+          },
+          "exit_prob_mean": 0.15715542617866837,
+          "exit_prob_p95": 0.5028670281171799
+        },
+        "score": 1323.8201961513878,
+        "config": {
+          "vote_margin_min": 0.15,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.0005,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.05,
+          "microadd_leverage_ceiling": 1.0,
+          "microadd_entries_per_day_cap": 1.25,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 1,
+          "microadd_entries_per_day": 0.016394375818295667,
+          "microadd_long_entries": 1,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 3990,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 205,
+            "vote_margin": 180,
+            "edge_floor": 2,
+            "position_open": 36,
+            "daily_churn_cap": 19
+          },
+          "avg_microadd_notional": 0.05,
+          "avg_microadd_leverage": 1.0,
+          "daily_entry_counts": {
+            "2025-12-07": 1
+          },
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "pnl"
+        ],
+        "selection_score": 0.2619597858518915
+      },
+      {
+        "name": "microadd_grid_104_val",
+        "eval": {
+          "pnl": 1350.9370180491694,
+          "mdd": -9.046813781187824,
+          "trades": 377,
+          "trades_per_day": 6.180679683497467,
+          "wr": 0.6392572944297082,
+          "avg_notional": 1.495787312117996,
+          "avg_leverage": 1.6068846593155974,
+          "long_entries": 179,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4400,
+            "model_cooldown": 292,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 377
+          },
+          "exit_prob_mean": 0.15718637668108038,
+          "exit_prob_p95": 0.5028200745582578
+        },
+        "score": 1323.796576705606,
+        "config": {
+          "vote_margin_min": 0.2,
+          "vote_agreement_min": 3,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.001,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.05,
+          "microadd_leverage_ceiling": 1.4,
+          "microadd_entries_per_day_cap": 1.0,
+          "microadd_cooldown_bars": 24
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 1,
+          "microadd_entries_per_day": 0.016394375818295667,
+          "microadd_long_entries": 1,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 2546,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 1598,
+            "vote_margin": 231,
+            "edge_floor": 14,
+            "position_open": 36,
+            "daily_churn_cap": 7
+          },
+          "avg_microadd_notional": 0.05,
+          "avg_microadd_leverage": 1.4,
+          "daily_entry_counts": {
+            "2025-12-07": 1
+          },
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "pnl"
+        ],
+        "selection_score": 0.23834034007005866
+      },
+      {
+        "name": "microadd_grid_008_val",
+        "eval": {
+          "pnl": 1350.8156145885596,
+          "mdd": -9.046813781187824,
+          "trades": 377,
+          "trades_per_day": 6.180679683497467,
+          "wr": 0.6392572944297082,
+          "avg_notional": 1.4958536251153436,
+          "avg_leverage": 1.6063541553368177,
+          "long_entries": 179,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4400,
+            "model_cooldown": 292,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 377
+          },
+          "exit_prob_mean": 0.1572036137389029,
+          "exit_prob_p95": 0.5037041783332824
+        },
+        "score": 1323.6751732449961,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.0005,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.2,
+          "microadd_entries_per_day_cap": 1.25,
+          "microadd_cooldown_bars": 72
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 1,
+          "microadd_entries_per_day": 0.016394375818295667,
+          "microadd_long_entries": 1,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 4026,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 226,
+            "vote_margin": 123,
+            "edge_floor": 2,
+            "position_open": 36,
+            "cooldown": 18,
+            "daily_churn_cap": 1
+          },
+          "avg_microadd_notional": 0.075,
+          "avg_microadd_leverage": 1.2,
+          "daily_entry_counts": {
+            "2025-12-07": 1
+          },
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "pnl"
+        ],
+        "selection_score": 0.11693687946023201
+      },
+      {
+        "name": "microadd_grid_029_val",
+        "eval": {
+          "pnl": 1350.8156145885596,
+          "mdd": -9.046813781187824,
+          "trades": 377,
+          "trades_per_day": 6.180679683497467,
+          "wr": 0.6392572944297082,
+          "avg_notional": 1.4958536251153436,
+          "avg_leverage": 1.6063541553368177,
+          "long_entries": 179,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4400,
+            "model_cooldown": 292,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 377
+          },
+          "exit_prob_mean": 0.1572036137389029,
+          "exit_prob_p95": 0.5037041783332824
+        },
+        "score": 1323.6751732449961,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 3,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.0005,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.2,
+          "microadd_entries_per_day_cap": 1.0,
+          "microadd_cooldown_bars": 72
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 1,
+          "microadd_entries_per_day": 0.016394375818295667,
+          "microadd_long_entries": 1,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 2572,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 1692,
+            "vote_margin": 123,
+            "edge_floor": 2,
+            "position_open": 36,
+            "cooldown": 6,
+            "daily_churn_cap": 1
+          },
+          "avg_microadd_notional": 0.075,
+          "avg_microadd_leverage": 1.2,
+          "daily_entry_counts": {
+            "2025-12-07": 1
+          },
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "pnl"
+        ],
+        "selection_score": 0.11693687946023201
+      },
+      {
+        "name": "microadd_grid_129_val",
+        "eval": {
+          "pnl": 1350.766433162951,
+          "mdd": -9.046813781187824,
+          "trades": 377,
+          "trades_per_day": 6.180679683497467,
+          "wr": 0.6392572944297082,
+          "avg_notional": 1.495787312117996,
+          "avg_leverage": 1.6074151632943774,
+          "long_entries": 179,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4399,
+            "model_cooldown": 292,
+            "loss_cooldown": 3264,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 377
+          },
+          "exit_prob_mean": 0.15723555144484708,
+          "exit_prob_p95": 0.5036709666252134
+        },
+        "score": 1323.6259918193875,
+        "config": {
+          "vote_margin_min": 0.3,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.0005,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.05,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 1.25,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 1,
+          "microadd_entries_per_day": 0.016394375818295667,
+          "microadd_long_entries": 1,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 3873,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 159,
+            "vote_margin": 328,
+            "edge_floor": 17,
+            "position_open": 36,
+            "daily_churn_cap": 19
+          },
+          "avg_microadd_notional": 0.05,
+          "avg_microadd_leverage": 1.6,
+          "daily_entry_counts": {
+            "2025-12-07": 1
+          },
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "pnl"
+        ],
+        "selection_score": 0.0677554538516375
+      },
+      {
+        "name": "microadd_grid_000_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.54,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.2,
+          "microadd_leverage_ceiling": 1.0,
+          "microadd_entries_per_day_cap": 0.75,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_002_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.4,
+          "microadd_entries_per_day_cap": 0.75,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_003_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.4,
+          "microadd_entries_per_day_cap": 0.25,
+          "microadd_cooldown_bars": 24
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_004_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.0005,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.2,
+          "microadd_leverage_ceiling": 1.0,
+          "microadd_entries_per_day_cap": 0.25,
+          "microadd_cooldown_bars": 72
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_005_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.58,
+          "microadd_edge_floor_3x": 0.002,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 1.0,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 4059,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124,
+            "edge_floor": 21
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_006_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.008,
+          "microadd_notional_cap": 0.1,
+          "microadd_leverage_ceiling": 1.2,
+          "microadd_entries_per_day_cap": 1.0,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 4075,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124,
+            "cvar": 4,
+            "edge_floor": 1
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_007_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.05,
+          "microadd_leverage_ceiling": 1.2,
+          "microadd_entries_per_day_cap": 0.5,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_009_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.001,
+          "microadd_max_cvar_loss": 0.008,
+          "microadd_notional_cap": 0.1,
+          "microadd_leverage_ceiling": 1.0,
+          "microadd_entries_per_day_cap": 0.25,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_010_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.001,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.2,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 0.75,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_011_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.002,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.0,
+          "microadd_entries_per_day_cap": 1.0,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "survival": 4075,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124,
+            "edge_floor": 5
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_012_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.002,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.15,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 0.75,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_013_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.62,
+          "microadd_edge_floor_3x": 0.002,
+          "microadd_max_cvar_loss": 0.018,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 0.25,
+          "microadd_cooldown_bars": 12
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_014_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.7,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.008,
+          "microadd_notional_cap": 0.05,
+          "microadd_leverage_ceiling": 1.4,
+          "microadd_entries_per_day_cap": 0.75,
+          "microadd_cooldown_bars": 72
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_015_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.7,
+          "microadd_edge_floor_3x": 0.0,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.075,
+          "microadd_leverage_ceiling": 1.4,
+          "microadd_entries_per_day_cap": 0.5,
+          "microadd_cooldown_bars": 36
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      },
+      {
+        "name": "microadd_grid_016_val",
+        "eval": {
+          "pnl": 1351.1798327156457,
+          "mdd": -9.046813781187824,
+          "trades": 376,
+          "trades_per_day": 6.1642853076791715,
+          "wr": 0.6409574468085106,
+          "avg_notional": 1.4996324911395866,
+          "avg_leverage": 1.607434884473352,
+          "long_entries": 178,
+          "short_entries": 198,
+          "entry_blocks": {
+            "cash_signal": 4433,
+            "model_cooldown": 291,
+            "loss_cooldown": 3240,
+            "daily_dd_lock": 1450,
+            "daily_trade_budget": 1
+          },
+          "exits": {
+            "exit_governor": 376
+          },
+          "exit_prob_mean": 0.1571025717121954,
+          "exit_prob_p95": 0.5029139816761019
+        },
+        "score": 1324.0393913720823,
+        "config": {
+          "vote_margin_min": 0.1,
+          "vote_agreement_min": 2,
+          "microadd_survival_prob_min": 0.7,
+          "microadd_edge_floor_3x": 0.001,
+          "microadd_max_cvar_loss": 0.012,
+          "microadd_notional_cap": 0.2,
+          "microadd_leverage_ceiling": 1.6,
+          "microadd_entries_per_day_cap": 0.5,
+          "microadd_cooldown_bars": 72
+        },
+        "defense_config": {
+          "mode": "identity_no_active_row_defense"
+        },
+        "telemetry": {
+          "microadd_entry_count": 0,
+          "microadd_entries_per_day": 0.0,
+          "microadd_long_entries": 0,
+          "microadd_short_entries": 0,
+          "microadd_block_reasons": {
+            "daily_churn_cap": 4080,
+            "baseline_not_flat_seq": 13135,
+            "vote_agreement": 229,
+            "vote_margin": 124
+          },
+          "avg_microadd_notional": 0.0,
+          "avg_microadd_leverage": 0.0,
+          "daily_entry_counts": {},
+          "tail_risk_cap_validation_selected": 0.13911760700205789,
+          "approximate_micro_position_hold_bars": 36
+        },
+        "invariant_audit": {
+          "passed": true,
+          "violations": {
+            "active_side_reversal": 0,
+            "active_created_side": 0,
+            "active_notional_increase": 0,
+            "active_leverage_increase": 0,
+            "active_position_fraction_increase": 0,
+            "microadd_when_baseline_active": 0,
+            "microadd_when_position_open": 0,
+            "microadd_side_without_vote": 0,
+            "microadd_vote_conflict": 0,
+            "microadd_notional_cap_violation": 0,
+            "microadd_leverage_cap_violation": 0,
+            "microadd_churn_cap_violation": 0,
+            "nonfinite_decision_value": 0,
+            "negative_notional_or_leverage": 0
+          },
+          "rows": 17568
+        },
+        "eligible": false,
+        "ineligible_reasons": [
+          "microadd_entry_count",
+          "trades_per_day",
+          "pnl"
+        ],
+        "selection_score": 0.0
+      }
+    ],
+    "selection_trace": {
+      "top_configs": [
+        {
+          "name": "microadd_grid_044_val",
+          "eval": {
+            "pnl": 1350.9606374949512,
+            "mdd": -9.046813781187824,
+            "trades": 377,
+            "trades_per_day": 6.180679683497467,
+            "wr": 0.6392572944297082,
+            "avg_notional": 1.495787312117996,
+            "avg_leverage": 1.6058236513580377,
+            "long_entries": 179,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4401,
+              "model_cooldown": 292,
+              "loss_cooldown": 3264,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 377
+            },
+            "exit_prob_mean": 0.15715542617866837,
+            "exit_prob_p95": 0.5028670281171799
+          },
+          "score": 1323.8201961513878,
+          "config": {
+            "vote_margin_min": 0.15,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.0005,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.05,
+            "microadd_leverage_ceiling": 1.0,
+            "microadd_entries_per_day_cap": 1.25,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 1,
+            "microadd_entries_per_day": 0.016394375818295667,
+            "microadd_long_entries": 1,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 3990,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 205,
+              "vote_margin": 180,
+              "edge_floor": 2,
+              "position_open": 36,
+              "daily_churn_cap": 19
+            },
+            "avg_microadd_notional": 0.05,
+            "avg_microadd_leverage": 1.0,
+            "daily_entry_counts": {
+              "2025-12-07": 1
+            },
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "pnl"
+          ],
+          "selection_score": 0.2619597858518915
+        },
+        {
+          "name": "microadd_grid_104_val",
+          "eval": {
+            "pnl": 1350.9370180491694,
+            "mdd": -9.046813781187824,
+            "trades": 377,
+            "trades_per_day": 6.180679683497467,
+            "wr": 0.6392572944297082,
+            "avg_notional": 1.495787312117996,
+            "avg_leverage": 1.6068846593155974,
+            "long_entries": 179,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4400,
+              "model_cooldown": 292,
+              "loss_cooldown": 3264,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 377
+            },
+            "exit_prob_mean": 0.15718637668108038,
+            "exit_prob_p95": 0.5028200745582578
+          },
+          "score": 1323.796576705606,
+          "config": {
+            "vote_margin_min": 0.2,
+            "vote_agreement_min": 3,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.001,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.05,
+            "microadd_leverage_ceiling": 1.4,
+            "microadd_entries_per_day_cap": 1.0,
+            "microadd_cooldown_bars": 24
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 1,
+            "microadd_entries_per_day": 0.016394375818295667,
+            "microadd_long_entries": 1,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 2546,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 1598,
+              "vote_margin": 231,
+              "edge_floor": 14,
+              "position_open": 36,
+              "daily_churn_cap": 7
+            },
+            "avg_microadd_notional": 0.05,
+            "avg_microadd_leverage": 1.4,
+            "daily_entry_counts": {
+              "2025-12-07": 1
+            },
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "pnl"
+          ],
+          "selection_score": 0.23834034007005866
+        },
+        {
+          "name": "microadd_grid_008_val",
+          "eval": {
+            "pnl": 1350.8156145885596,
+            "mdd": -9.046813781187824,
+            "trades": 377,
+            "trades_per_day": 6.180679683497467,
+            "wr": 0.6392572944297082,
+            "avg_notional": 1.4958536251153436,
+            "avg_leverage": 1.6063541553368177,
+            "long_entries": 179,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4400,
+              "model_cooldown": 292,
+              "loss_cooldown": 3264,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 377
+            },
+            "exit_prob_mean": 0.1572036137389029,
+            "exit_prob_p95": 0.5037041783332824
+          },
+          "score": 1323.6751732449961,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.0005,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.2,
+            "microadd_entries_per_day_cap": 1.25,
+            "microadd_cooldown_bars": 72
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 1,
+            "microadd_entries_per_day": 0.016394375818295667,
+            "microadd_long_entries": 1,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 4026,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 226,
+              "vote_margin": 123,
+              "edge_floor": 2,
+              "position_open": 36,
+              "cooldown": 18,
+              "daily_churn_cap": 1
+            },
+            "avg_microadd_notional": 0.075,
+            "avg_microadd_leverage": 1.2,
+            "daily_entry_counts": {
+              "2025-12-07": 1
+            },
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "pnl"
+          ],
+          "selection_score": 0.11693687946023201
+        },
+        {
+          "name": "microadd_grid_029_val",
+          "eval": {
+            "pnl": 1350.8156145885596,
+            "mdd": -9.046813781187824,
+            "trades": 377,
+            "trades_per_day": 6.180679683497467,
+            "wr": 0.6392572944297082,
+            "avg_notional": 1.4958536251153436,
+            "avg_leverage": 1.6063541553368177,
+            "long_entries": 179,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4400,
+              "model_cooldown": 292,
+              "loss_cooldown": 3264,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 377
+            },
+            "exit_prob_mean": 0.1572036137389029,
+            "exit_prob_p95": 0.5037041783332824
+          },
+          "score": 1323.6751732449961,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 3,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.0005,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.2,
+            "microadd_entries_per_day_cap": 1.0,
+            "microadd_cooldown_bars": 72
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 1,
+            "microadd_entries_per_day": 0.016394375818295667,
+            "microadd_long_entries": 1,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 2572,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 1692,
+              "vote_margin": 123,
+              "edge_floor": 2,
+              "position_open": 36,
+              "cooldown": 6,
+              "daily_churn_cap": 1
+            },
+            "avg_microadd_notional": 0.075,
+            "avg_microadd_leverage": 1.2,
+            "daily_entry_counts": {
+              "2025-12-07": 1
+            },
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "pnl"
+          ],
+          "selection_score": 0.11693687946023201
+        },
+        {
+          "name": "microadd_grid_129_val",
+          "eval": {
+            "pnl": 1350.766433162951,
+            "mdd": -9.046813781187824,
+            "trades": 377,
+            "trades_per_day": 6.180679683497467,
+            "wr": 0.6392572944297082,
+            "avg_notional": 1.495787312117996,
+            "avg_leverage": 1.6074151632943774,
+            "long_entries": 179,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4399,
+              "model_cooldown": 292,
+              "loss_cooldown": 3264,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 377
+            },
+            "exit_prob_mean": 0.15723555144484708,
+            "exit_prob_p95": 0.5036709666252134
+          },
+          "score": 1323.6259918193875,
+          "config": {
+            "vote_margin_min": 0.3,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.0005,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.05,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 1.25,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 1,
+            "microadd_entries_per_day": 0.016394375818295667,
+            "microadd_long_entries": 1,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 3873,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 159,
+              "vote_margin": 328,
+              "edge_floor": 17,
+              "position_open": 36,
+              "daily_churn_cap": 19
+            },
+            "avg_microadd_notional": 0.05,
+            "avg_microadd_leverage": 1.6,
+            "daily_entry_counts": {
+              "2025-12-07": 1
+            },
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "pnl"
+          ],
+          "selection_score": 0.0677554538516375
+        },
+        {
+          "name": "microadd_grid_000_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.54,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.2,
+            "microadd_leverage_ceiling": 1.0,
+            "microadd_entries_per_day_cap": 0.75,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_002_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.4,
+            "microadd_entries_per_day_cap": 0.75,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_003_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.4,
+            "microadd_entries_per_day_cap": 0.25,
+            "microadd_cooldown_bars": 24
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_004_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.0005,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.2,
+            "microadd_leverage_ceiling": 1.0,
+            "microadd_entries_per_day_cap": 0.25,
+            "microadd_cooldown_bars": 72
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_005_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.58,
+            "microadd_edge_floor_3x": 0.002,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 1.0,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 4059,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124,
+              "edge_floor": 21
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_006_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.008,
+            "microadd_notional_cap": 0.1,
+            "microadd_leverage_ceiling": 1.2,
+            "microadd_entries_per_day_cap": 1.0,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 4075,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124,
+              "cvar": 4,
+              "edge_floor": 1
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_007_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.05,
+            "microadd_leverage_ceiling": 1.2,
+            "microadd_entries_per_day_cap": 0.5,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_009_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.001,
+            "microadd_max_cvar_loss": 0.008,
+            "microadd_notional_cap": 0.1,
+            "microadd_leverage_ceiling": 1.0,
+            "microadd_entries_per_day_cap": 0.25,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_010_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.001,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.2,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 0.75,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_011_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.002,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.0,
+            "microadd_entries_per_day_cap": 1.0,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "survival": 4075,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124,
+              "edge_floor": 5
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_012_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.002,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.15,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 0.75,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_013_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.62,
+            "microadd_edge_floor_3x": 0.002,
+            "microadd_max_cvar_loss": 0.018,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 0.25,
+            "microadd_cooldown_bars": 12
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_014_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.7,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.008,
+            "microadd_notional_cap": 0.05,
+            "microadd_leverage_ceiling": 1.4,
+            "microadd_entries_per_day_cap": 0.75,
+            "microadd_cooldown_bars": 72
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_015_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.7,
+            "microadd_edge_floor_3x": 0.0,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.075,
+            "microadd_leverage_ceiling": 1.4,
+            "microadd_entries_per_day_cap": 0.5,
+            "microadd_cooldown_bars": 36
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        },
+        {
+          "name": "microadd_grid_016_val",
+          "eval": {
+            "pnl": 1351.1798327156457,
+            "mdd": -9.046813781187824,
+            "trades": 376,
+            "trades_per_day": 6.1642853076791715,
+            "wr": 0.6409574468085106,
+            "avg_notional": 1.4996324911395866,
+            "avg_leverage": 1.607434884473352,
+            "long_entries": 178,
+            "short_entries": 198,
+            "entry_blocks": {
+              "cash_signal": 4433,
+              "model_cooldown": 291,
+              "loss_cooldown": 3240,
+              "daily_dd_lock": 1450,
+              "daily_trade_budget": 1
+            },
+            "exits": {
+              "exit_governor": 376
+            },
+            "exit_prob_mean": 0.1571025717121954,
+            "exit_prob_p95": 0.5029139816761019
+          },
+          "score": 1324.0393913720823,
+          "config": {
+            "vote_margin_min": 0.1,
+            "vote_agreement_min": 2,
+            "microadd_survival_prob_min": 0.7,
+            "microadd_edge_floor_3x": 0.001,
+            "microadd_max_cvar_loss": 0.012,
+            "microadd_notional_cap": 0.2,
+            "microadd_leverage_ceiling": 1.6,
+            "microadd_entries_per_day_cap": 0.5,
+            "microadd_cooldown_bars": 72
+          },
+          "defense_config": {
+            "mode": "identity_no_active_row_defense"
+          },
+          "telemetry": {
+            "microadd_entry_count": 0,
+            "microadd_entries_per_day": 0.0,
+            "microadd_long_entries": 0,
+            "microadd_short_entries": 0,
+            "microadd_block_reasons": {
+              "daily_churn_cap": 4080,
+              "baseline_not_flat_seq": 13135,
+              "vote_agreement": 229,
+              "vote_margin": 124
+            },
+            "avg_microadd_notional": 0.0,
+            "avg_microadd_leverage": 0.0,
+            "daily_entry_counts": {},
+            "tail_risk_cap_validation_selected": 0.13911760700205789,
+            "approximate_micro_position_hold_bars": 36
+          },
+          "invariant_audit": {
+            "passed": true,
+            "violations": {
+              "active_side_reversal": 0,
+              "active_created_side": 0,
+              "active_notional_increase": 0,
+              "active_leverage_increase": 0,
+              "active_position_fraction_increase": 0,
+              "microadd_when_baseline_active": 0,
+              "microadd_when_position_open": 0,
+              "microadd_side_without_vote": 0,
+              "microadd_vote_conflict": 0,
+              "microadd_notional_cap_violation": 0,
+              "microadd_leverage_cap_violation": 0,
+              "microadd_churn_cap_violation": 0,
+              "nonfinite_decision_value": 0,
+              "negative_notional_or_leverage": 0
+            },
+            "rows": 17568
+          },
+          "eligible": false,
+          "ineligible_reasons": [
+            "microadd_entry_count",
+            "trades_per_day",
+            "pnl"
+          ],
+          "selection_score": 0.0
+        }
+      ],
+      "ineligible_counts": {
+        "microadd_entry_count": 139,
+        "trades_per_day": 142,
+        "pnl": 160
+      },
+      "eligible_count": 0,
+      "grid_count": 160,
+      "selected_from_eligible": false
+    }
+  },
+  "eval": {
+    "baseline_muzero_az": {
+      "name": "current_muzero_az_eval",
+      "eval": {
+        "pnl": 752.648580357841,
+        "mdd": -18.755787211251405,
+        "trades": 353,
+        "trades_per_day": 6.017045454545455,
+        "wr": 0.6147308781869688,
+        "avg_notional": 1.425434962991292,
+        "avg_leverage": 1.5960290252000644,
+        "long_entries": 165,
+        "short_entries": 188,
+        "entry_blocks": {
+          "cash_signal": 3758,
+          "model_cooldown": 257,
+          "loss_cooldown": 3264,
+          "daily_trade_budget": 39,
+          "daily_loss_lock": 118,
+          "daily_dd_lock": 834
+        },
+        "exits": {
+          "exit_governor": 353
+        },
+        "exit_prob_mean": 0.15413935593644892,
+        "exit_prob_p95": 0.4640691369771957
+      },
+      "score": 696.3812187240867,
+      "monthly": {
+        "2026-01": {
+          "pnl": 272.39640204685315,
+          "mdd": -8.004516109582093,
+          "trades": 194,
+          "trades_per_day": 6.258765542735521,
+          "wr": 0.6288659793814433,
+          "avg_notional": 1.4837369256589363,
+          "avg_leverage": 1.6171444971525404,
+          "long_entries": 92,
+          "short_entries": 102,
+          "entry_blocks": {
+            "cash_signal": 3180,
+            "model_cooldown": 141,
+            "loss_cooldown": 1728,
+            "daily_trade_budget": 39
+          },
+          "exits": {
+            "exit_governor": 193,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.16837246744107578,
+          "exit_prob_p95": 0.5245315253734588
+        },
+        "2026-02": {
+          "pnl": 146.8774555215554,
+          "mdd": -17.622465956739163,
+          "trades": 160,
+          "trades_per_day": 5.783132530120482,
+          "wr": 0.6,
+          "avg_notional": 1.3565501084090137,
+          "avg_leverage": 1.571166577721126,
+          "long_entries": 74,
+          "short_entries": 86,
+          "entry_blocks": {
+            "loss_cooldown": 1536,
+            "daily_dd_lock": 977,
+            "cash_signal": 578,
+            "model_cooldown": 116,
+            "daily_loss_lock": 75
+          },
+          "exits": {
+            "exit_governor": 160
+          },
+          "exit_prob_mean": 0.14547964126446702,
+          "exit_prob_p95": 0.422658187150955
+        }
+      }
+    },
+    "rank1_flat_microadd_v3": {
+      "name": "muzero_az_rank1_flat_microadd_v3_2026",
+      "eval": {
+        "pnl": 730.3025542127759,
+        "mdd": -18.755787211251395,
+        "trades": 355,
+        "trades_per_day": 6.051136363636364,
+        "wr": 0.6112676056338028,
+        "avg_notional": 1.4149165793558134,
+        "avg_leverage": 1.5923472999770378,
+        "long_entries": 167,
+        "short_entries": 188,
+        "entry_blocks": {
+          "cash_signal": 3726,
+          "model_cooldown": 259,
+          "loss_cooldown": 3312,
+          "daily_trade_budget": 39,
+          "daily_loss_lock": 118,
+          "daily_dd_lock": 834
+        },
+        "exits": {
+          "exit_governor": 355
+        },
+        "exit_prob_mean": 0.15416252140869324,
+        "exit_prob_p95": 0.46714071035385113
+      },
+      "score": 674.0351925790218,
+      "monthly": {
+        "2026-01": {
+          "pnl": 262.63671918550887,
+          "mdd": -7.840534041737158,
+          "trades": 196,
+          "trades_per_day": 6.323288898846196,
+          "wr": 0.6224489795918368,
+          "avg_notional": 1.4640908536388846,
+          "avg_leverage": 1.61026060226438,
+          "long_entries": 94,
+          "short_entries": 102,
+          "entry_blocks": {
+            "cash_signal": 3148,
+            "model_cooldown": 143,
+            "loss_cooldown": 1776,
+            "daily_trade_budget": 39
+          },
+          "exits": {
+            "exit_governor": 195,
+            "forced_end": 1
+          },
+          "exit_prob_mean": 0.1685907110525982,
+          "exit_prob_p95": 0.5269216865301132
+        },
+        "2026-02": {
+          "pnl": 146.8774555215554,
+          "mdd": -17.622465956739163,
+          "trades": 160,
+          "trades_per_day": 5.783132530120482,
+          "wr": 0.6,
+          "avg_notional": 1.3565501084090137,
+          "avg_leverage": 1.571166577721126,
+          "long_entries": 74,
+          "short_entries": 86,
+          "entry_blocks": {
+            "loss_cooldown": 1536,
+            "daily_dd_lock": 977,
+            "cash_signal": 578,
+            "model_cooldown": 116,
+            "daily_loss_lock": 75
+          },
+          "exits": {
+            "exit_governor": 160
+          },
+          "exit_prob_mean": 0.14547964126446702,
+          "exit_prob_p95": 0.422658187150955
+        }
+      }
+    },
+    "defense_telemetry": {
+      "mode": "identity_no_active_row_defense",
+      "baseline_active_rows": 8386,
+      "final_active_rows": 8386,
+      "veto_rows": 0,
+      "scale_down_rows": 0
+    },
+    "microadd_audit": {
+      "microadd_entry_count": 2,
+      "microadd_entries_per_day": 0.034090909090909095,
+      "microadd_long_entries": 2,
+      "microadd_short_entries": 0,
+      "microadd_block_reasons": {
+        "vote_agreement": 351,
+        "survival": 3085,
+        "vote_margin": 118,
+        "baseline_not_flat_seq": 13139,
+        "edge_floor": 10,
+        "cost_buffer_3x": 1,
+        "position_open": 36,
+        "daily_churn_cap": 155
+      },
+      "avg_microadd_notional": 0.05,
+      "avg_microadd_leverage": 1.0,
+      "daily_entry_counts": {
+        "2026-01-18": 1,
+        "2026-01-31": 1
+      },
+      "tail_risk_cap_validation_selected": 0.14439284623206333,
+      "approximate_micro_position_hold_bars": 36
+    },
+    "delta_vs_baseline": {
+      "pnl": -22.346026145065025,
+      "mdd": 1.0658141036401503e-14,
+      "trades": 2,
+      "trades_per_day": 0.03409090909090917,
+      "avg_leverage": -0.0036817252230265662
+    }
+  },
+  "baseline_muzero_az": {
+    "name": "current_muzero_az_eval",
+    "eval": {
+      "pnl": 752.648580357841,
+      "mdd": -18.755787211251405,
+      "trades": 353,
+      "trades_per_day": 6.017045454545455,
+      "wr": 0.6147308781869688,
+      "avg_notional": 1.425434962991292,
+      "avg_leverage": 1.5960290252000644,
+      "long_entries": 165,
+      "short_entries": 188,
+      "entry_blocks": {
+        "cash_signal": 3758,
+        "model_cooldown": 257,
+        "loss_cooldown": 3264,
+        "daily_trade_budget": 39,
+        "daily_loss_lock": 118,
+        "daily_dd_lock": 834
+      },
+      "exits": {
+        "exit_governor": 353
+      },
+      "exit_prob_mean": 0.15413935593644892,
+      "exit_prob_p95": 0.4640691369771957
+    },
+    "score": 696.3812187240867,
+    "monthly": {
+      "2026-01": {
+        "pnl": 272.39640204685315,
+        "mdd": -8.004516109582093,
+        "trades": 194,
+        "trades_per_day": 6.258765542735521,
+        "wr": 0.6288659793814433,
+        "avg_notional": 1.4837369256589363,
+        "avg_leverage": 1.6171444971525404,
+        "long_entries": 92,
+        "short_entries": 102,
+        "entry_blocks": {
+          "cash_signal": 3180,
+          "model_cooldown": 141,
+          "loss_cooldown": 1728,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 193,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.16837246744107578,
+        "exit_prob_p95": 0.5245315253734588
+      },
+      "2026-02": {
+        "pnl": 146.8774555215554,
+        "mdd": -17.622465956739163,
+        "trades": 160,
+        "trades_per_day": 5.783132530120482,
+        "wr": 0.6,
+        "avg_notional": 1.3565501084090137,
+        "avg_leverage": 1.571166577721126,
+        "long_entries": 74,
+        "short_entries": 86,
+        "entry_blocks": {
+          "loss_cooldown": 1536,
+          "daily_dd_lock": 977,
+          "cash_signal": 578,
+          "model_cooldown": 116,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 160
+        },
+        "exit_prob_mean": 0.14547964126446702,
+        "exit_prob_p95": 0.422658187150955
+      }
+    }
+  },
+  "rank1_flat_microadd_v3": {
+    "name": "muzero_az_rank1_flat_microadd_v3_2026",
+    "eval": {
+      "pnl": 730.3025542127759,
+      "mdd": -18.755787211251395,
+      "trades": 355,
+      "trades_per_day": 6.051136363636364,
+      "wr": 0.6112676056338028,
+      "avg_notional": 1.4149165793558134,
+      "avg_leverage": 1.5923472999770378,
+      "long_entries": 167,
+      "short_entries": 188,
+      "entry_blocks": {
+        "cash_signal": 3726,
+        "model_cooldown": 259,
+        "loss_cooldown": 3312,
+        "daily_trade_budget": 39,
+        "daily_loss_lock": 118,
+        "daily_dd_lock": 834
+      },
+      "exits": {
+        "exit_governor": 355
+      },
+      "exit_prob_mean": 0.15416252140869324,
+      "exit_prob_p95": 0.46714071035385113
+    },
+    "score": 674.0351925790218,
+    "monthly": {
+      "2026-01": {
+        "pnl": 262.63671918550887,
+        "mdd": -7.840534041737158,
+        "trades": 196,
+        "trades_per_day": 6.323288898846196,
+        "wr": 0.6224489795918368,
+        "avg_notional": 1.4640908536388846,
+        "avg_leverage": 1.61026060226438,
+        "long_entries": 94,
+        "short_entries": 102,
+        "entry_blocks": {
+          "cash_signal": 3148,
+          "model_cooldown": 143,
+          "loss_cooldown": 1776,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 195,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.1685907110525982,
+        "exit_prob_p95": 0.5269216865301132
+      },
+      "2026-02": {
+        "pnl": 146.8774555215554,
+        "mdd": -17.622465956739163,
+        "trades": 160,
+        "trades_per_day": 5.783132530120482,
+        "wr": 0.6,
+        "avg_notional": 1.3565501084090137,
+        "avg_leverage": 1.571166577721126,
+        "long_entries": 74,
+        "short_entries": 86,
+        "entry_blocks": {
+          "loss_cooldown": 1536,
+          "daily_dd_lock": 977,
+          "cash_signal": 578,
+          "model_cooldown": 116,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 160
+        },
+        "exit_prob_mean": 0.14547964126446702,
+        "exit_prob_p95": 0.422658187150955
+      }
+    }
+  },
+  "delta_vs_baseline": {
+    "pnl": -22.346026145065025,
+    "mdd": 1.0658141036401503e-14,
+    "trades": 2,
+    "trades_per_day": 0.03409090909090917,
+    "avg_leverage": -0.0036817252230265662
+  },
+  "defense_audit": {
+    "target_meta": {
+      "mode": "disabled_for_loop_3",
+      "reason": "loop_2 active-row defense destroyed rank-1 exposure"
+    },
+    "train_meta": {
+      "mode": "disabled_for_loop_3"
+    },
+    "eval_telemetry": {
+      "mode": "identity_no_active_row_defense",
+      "baseline_active_rows": 8386,
+      "final_active_rows": 8386,
+      "veto_rows": 0,
+      "scale_down_rows": 0
+    }
+  },
+  "microadd_audit": {
+    "target_meta": {
+      "candidate_rows": 87496,
+      "eligible_rows": 17751,
+      "usable_rows": 17731,
+      "side_from_future_labels": false,
+      "survival_3x_rate": 0.32502396931927136,
+      "edge_3x_quantiles": [
+        -0.08878949,
+        -0.01250887,
+        -0.00463668,
+        0.00371018,
+        0.11838372
+      ],
+      "cvar_3x_quantiles": [
+        -0.08741294,
+        -0.01711388,
+        -0.01078178,
+        0.02389241
+      ]
+    },
+    "train_meta": {
+      "samples": 17731,
+      "survival_3x_labels": 5763,
+      "survival_3x_rate": 0.32502396931927136,
+      "edge_mean": -0.004350209839924299,
+      "cvar_mean": -0.013130346614237483
+    },
+    "eval_telemetry": {
+      "microadd_entry_count": 2,
+      "microadd_entries_per_day": 0.034090909090909095,
+      "microadd_long_entries": 2,
+      "microadd_short_entries": 0,
+      "microadd_block_reasons": {
+        "vote_agreement": 351,
+        "survival": 3085,
+        "vote_margin": 118,
+        "baseline_not_flat_seq": 13139,
+        "edge_floor": 10,
+        "cost_buffer_3x": 1,
+        "position_open": 36,
+        "daily_churn_cap": 155
+      },
+      "avg_microadd_notional": 0.05,
+      "avg_microadd_leverage": 1.0,
+      "daily_entry_counts": {
+        "2026-01-18": 1,
+        "2026-01-31": 1
+      },
+      "tail_risk_cap_validation_selected": 0.14439284623206333,
+      "approximate_micro_position_hold_bars": 36
+    }
+  },
+  "diagnostics": {
+    "baseline_pass_count": 8386,
+    "defense_veto_count": 0,
+    "defense_size_down_count": 0,
+    "microadd_entry_count": 2,
+    "microadd_entries_per_day": 0.034090909090909095,
+    "microadd_long_entries": 2,
+    "microadd_short_entries": 0,
+    "microadd_block_reasons": {
+      "vote_agreement": 351,
+      "survival": 3085,
+      "vote_margin": 118,
+      "baseline_not_flat_seq": 13139,
+      "edge_floor": 10,
+      "cost_buffer_3x": 1,
+      "position_open": 36,
+      "daily_churn_cap": 155
+    },
+    "avg_active_leverage_before": 1.6332298403879557,
+    "avg_active_leverage_after": 1.6332298403879557,
+    "avg_microadd_notional": 0.05,
+    "avg_microadd_leverage": 1.0,
+    "turnover_before_candidate": 6609.428322856501,
+    "turnover_after_candidate": 6609.628322856501,
+    "fee_slip_cost_before_candidate": 4.62659982599955,
+    "fee_slip_cost_after_candidate": 4.62673982599955
+  },
+  "calibration_audit": {
+    "selector_artifact": "data/ensemble/supervised/muzero_az_rank1_flat_microadd_v3/threshold_selector.json",
+    "model_artifact": "data/ensemble/supervised/muzero_az_rank1_flat_microadd_v3/rank1_flat_microadd_v3.pkl"
+  },
+  "monthly": {
+    "current_muzero_az": {
+      "2026-01": {
+        "pnl": 272.39640204685315,
+        "mdd": -8.004516109582093,
+        "trades": 194,
+        "trades_per_day": 6.258765542735521,
+        "wr": 0.6288659793814433,
+        "avg_notional": 1.4837369256589363,
+        "avg_leverage": 1.6171444971525404,
+        "long_entries": 92,
+        "short_entries": 102,
+        "entry_blocks": {
+          "cash_signal": 3180,
+          "model_cooldown": 141,
+          "loss_cooldown": 1728,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 193,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.16837246744107578,
+        "exit_prob_p95": 0.5245315253734588
+      },
+      "2026-02": {
+        "pnl": 146.8774555215554,
+        "mdd": -17.622465956739163,
+        "trades": 160,
+        "trades_per_day": 5.783132530120482,
+        "wr": 0.6,
+        "avg_notional": 1.3565501084090137,
+        "avg_leverage": 1.571166577721126,
+        "long_entries": 74,
+        "short_entries": 86,
+        "entry_blocks": {
+          "loss_cooldown": 1536,
+          "daily_dd_lock": 977,
+          "cash_signal": 578,
+          "model_cooldown": 116,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 160
+        },
+        "exit_prob_mean": 0.14547964126446702,
+        "exit_prob_p95": 0.422658187150955
+      }
+    },
+    "muzero_az_rank1_flat_microadd_v3_2026": {
+      "2026-01": {
+        "pnl": 262.63671918550887,
+        "mdd": -7.840534041737158,
+        "trades": 196,
+        "trades_per_day": 6.323288898846196,
+        "wr": 0.6224489795918368,
+        "avg_notional": 1.4640908536388846,
+        "avg_leverage": 1.61026060226438,
+        "long_entries": 94,
+        "short_entries": 102,
+        "entry_blocks": {
+          "cash_signal": 3148,
+          "model_cooldown": 143,
+          "loss_cooldown": 1776,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 195,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.1685907110525982,
+        "exit_prob_p95": 0.5269216865301132
+      },
+      "2026-02": {
+        "pnl": 146.8774555215554,
+        "mdd": -17.622465956739163,
+        "trades": 160,
+        "trades_per_day": 5.783132530120482,
+        "wr": 0.6,
+        "avg_notional": 1.3565501084090137,
+        "avg_leverage": 1.571166577721126,
+        "long_entries": 74,
+        "short_entries": 86,
+        "entry_blocks": {
+          "loss_cooldown": 1536,
+          "daily_dd_lock": 977,
+          "cash_signal": 578,
+          "model_cooldown": 116,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 160
+        },
+        "exit_prob_mean": 0.14547964126446702,
+        "exit_prob_p95": 0.422658187150955
+      }
+    }
+  },
+  "weekly": {
+    "current_muzero_az": {
+      "2025-12-29/2026-01-04": {
+        "pnl": 2.029510539685364,
+        "mdd": -1.6871246366260584,
+        "trades": 11,
+        "trades_per_day": 2.7523892267593397,
+        "wr": 0.8181818181818182,
+        "avg_notional": 1.2281575927785233,
+        "avg_leverage": 1.558308169106352,
+        "long_entries": 7,
+        "short_entries": 4,
+        "entry_blocks": {
+          "cash_signal": 958,
+          "model_cooldown": 11,
+          "loss_cooldown": 48
+        },
+        "exits": {
+          "exit_governor": 11
+        },
+        "exit_prob_mean": 0.24741511202570218,
+        "exit_prob_p95": 0.6252306818962097
+      },
+      "2026-01-05/2026-01-11": {
+        "pnl": 12.795695454059853,
+        "mdd": -3.2580690177693716,
+        "trades": 42,
+        "trades_per_day": 6.002977667493797,
+        "wr": 0.5476190476190477,
+        "avg_notional": 1.4449611808164322,
+        "avg_leverage": 1.6417477290767775,
+        "long_entries": 24,
+        "short_entries": 18,
+        "entry_blocks": {
+          "cash_signal": 753,
+          "model_cooldown": 29,
+          "loss_cooldown": 451
+        },
+        "exits": {
+          "exit_governor": 42
+        },
+        "exit_prob_mean": 0.1782455894451708,
+        "exit_prob_p95": 0.5410168528556818
+      },
+      "2026-01-12/2026-01-18": {
+        "pnl": 10.916454143175013,
+        "mdd": -2.343832180323413,
+        "trades": 39,
+        "trades_per_day": 5.574193548387097,
+        "wr": 0.6410256410256411,
+        "avg_notional": 1.4969749513316863,
+        "avg_leverage": 1.6109794917689906,
+        "long_entries": 18,
+        "short_entries": 21,
+        "entry_blocks": {
+          "cash_signal": 979,
+          "model_cooldown": 29,
+          "loss_cooldown": 336
+        },
+        "exits": {
+          "exit_governor": 38,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.1877256891219727,
+        "exit_prob_p95": 0.5170802026987076
+      },
+      "2026-01-19/2026-01-25": {
+        "pnl": 46.75803052737684,
+        "mdd": -3.5377480998125876,
+        "trades": 54,
+        "trades_per_day": 7.718114143920595,
+        "wr": 0.5740740740740741,
+        "avg_notional": 1.444866541917576,
+        "avg_leverage": 1.5935812308668478,
+        "long_entries": 22,
+        "short_entries": 32,
+        "entry_blocks": {
+          "cash_signal": 329,
+          "loss_cooldown": 552,
+          "model_cooldown": 39,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 53,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.16854776240434247,
+        "exit_prob_p95": 0.533731073141098
+      },
+      "2026-01-26/2026-02-01": {
+        "pnl": 76.5531026158507,
+        "mdd": -17.855217363636577,
+        "trades": 50,
+        "trades_per_day": 7.1464019851116625,
+        "wr": 0.7,
+        "avg_notional": 1.6173845764271046,
+        "avg_leverage": 1.6488128097326982,
+        "long_entries": 22,
+        "short_entries": 28,
+        "entry_blocks": {
+          "model_cooldown": 33,
+          "loss_cooldown": 360,
+          "cash_signal": 163,
+          "daily_loss_lock": 41
+        },
+        "exits": {
+          "exit_governor": 50
+        },
+        "exit_prob_mean": 0.1438710318641502,
+        "exit_prob_p95": 0.41588665246963513
+      },
+      "2026-02-02/2026-02-08": {
+        "pnl": 30.177376798029186,
+        "mdd": -17.62246595673914,
+        "trades": 26,
+        "trades_per_day": 3.7161290322580647,
+        "wr": 0.6153846153846154,
+        "avg_notional": 1.4919274772495283,
+        "avg_leverage": 1.6304630797152397,
+        "long_entries": 13,
+        "short_entries": 13,
+        "entry_blocks": {
+          "cash_signal": 41,
+          "daily_dd_lock": 332,
+          "loss_cooldown": 240,
+          "model_cooldown": 14,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 25,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.11983212142349721,
+        "exit_prob_p95": 0.30669989436864853
+      },
+      "2026-02-09/2026-02-15": {
+        "pnl": 34.93586142033101,
+        "mdd": -7.771055093976942,
+        "trades": 47,
+        "trades_per_day": 6.717617866004963,
+        "wr": 0.6595744680851063,
+        "avg_notional": 1.329736024651456,
+        "avg_leverage": 1.5387652329167616,
+        "long_entries": 23,
+        "short_entries": 24,
+        "entry_blocks": {
+          "model_cooldown": 35,
+          "loss_cooldown": 384,
+          "cash_signal": 187,
+          "daily_dd_lock": 131
+        },
+        "exits": {
+          "exit_governor": 47
+        },
+        "exit_prob_mean": 0.1707085048695605,
+        "exit_prob_p95": 0.44464803338050823
+      },
+      "2026-02-16/2026-02-22": {
+        "pnl": 16.345628096808774,
+        "mdd": -4.949317134887621,
+        "trades": 50,
+        "trades_per_day": 7.1464019851116625,
+        "wr": 0.52,
+        "avg_notional": 1.146527585319954,
+        "avg_leverage": 1.5335820175006092,
+        "long_entries": 22,
+        "short_entries": 28,
+        "entry_blocks": {
+          "model_cooldown": 46,
+          "cash_signal": 347,
+          "loss_cooldown": 552,
+          "daily_dd_lock": 43
+        },
+        "exits": {
+          "exit_governor": 49,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.17180289811141708,
+        "exit_prob_p95": 0.480427585542202
+      },
+      "2026-02-23/2026-03-01": {
+        "pnl": 23.176063776573443,
+        "mdd": -6.443575421678627,
+        "trades": 38,
+        "trades_per_day": 6.705882352941176,
+        "wr": 0.631578947368421,
+        "avg_notional": 1.5801244722317067,
+        "avg_leverage": 1.621166972977162,
+        "long_entries": 15,
+        "short_entries": 23,
+        "entry_blocks": {
+          "cash_signal": 5,
+          "model_cooldown": 21,
+          "loss_cooldown": 336,
+          "daily_dd_lock": 326
+        },
+        "exits": {
+          "exit_governor": 38
+        },
+        "exit_prob_mean": 0.12847131037420326,
+        "exit_prob_p95": 0.45826582908630353
+      }
+    },
+    "muzero_az_rank1_flat_microadd_v3_2026": {
+      "2025-12-29/2026-01-04": {
+        "pnl": 2.029510539685364,
+        "mdd": -1.6871246366260584,
+        "trades": 11,
+        "trades_per_day": 2.7523892267593397,
+        "wr": 0.8181818181818182,
+        "avg_notional": 1.2281575927785233,
+        "avg_leverage": 1.558308169106352,
+        "long_entries": 7,
+        "short_entries": 4,
+        "entry_blocks": {
+          "cash_signal": 958,
+          "model_cooldown": 11,
+          "loss_cooldown": 48
+        },
+        "exits": {
+          "exit_governor": 11
+        },
+        "exit_prob_mean": 0.24741511202570218,
+        "exit_prob_p95": 0.6252306818962097
+      },
+      "2026-01-05/2026-01-11": {
+        "pnl": 12.795695454059853,
+        "mdd": -3.2580690177693716,
+        "trades": 42,
+        "trades_per_day": 6.002977667493797,
+        "wr": 0.5476190476190477,
+        "avg_notional": 1.4449611808164322,
+        "avg_leverage": 1.6417477290767775,
+        "long_entries": 24,
+        "short_entries": 18,
+        "entry_blocks": {
+          "cash_signal": 753,
+          "model_cooldown": 29,
+          "loss_cooldown": 451
+        },
+        "exits": {
+          "exit_governor": 42
+        },
+        "exit_prob_mean": 0.1782455894451708,
+        "exit_prob_p95": 0.5410168528556818
+      },
+      "2026-01-12/2026-01-18": {
+        "pnl": 11.097115682076186,
+        "mdd": -2.343832180323413,
+        "trades": 41,
+        "trades_per_day": 5.860049627791564,
+        "wr": 0.6341463414634146,
+        "avg_notional": 1.4459158144100401,
+        "avg_leverage": 1.593921512952977,
+        "long_entries": 19,
+        "short_entries": 22,
+        "entry_blocks": {
+          "cash_signal": 948,
+          "model_cooldown": 31,
+          "loss_cooldown": 360
+        },
+        "exits": {
+          "exit_governor": 40,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.18679624979654522,
+        "exit_prob_p95": 0.5369308829307555
+      },
+      "2026-01-19/2026-01-25": {
+        "pnl": 46.75803052737684,
+        "mdd": -3.5377480998125876,
+        "trades": 54,
+        "trades_per_day": 7.718114143920595,
+        "wr": 0.5740740740740741,
+        "avg_notional": 1.444866541917576,
+        "avg_leverage": 1.5935812308668478,
+        "long_entries": 22,
+        "short_entries": 32,
+        "entry_blocks": {
+          "cash_signal": 329,
+          "loss_cooldown": 552,
+          "model_cooldown": 39,
+          "daily_trade_budget": 39
+        },
+        "exits": {
+          "exit_governor": 53,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.16854776240434247,
+        "exit_prob_p95": 0.533731073141098
+      },
+      "2026-01-26/2026-02-01": {
+        "pnl": 71.6464587807619,
+        "mdd": -17.855217363636577,
+        "trades": 50,
+        "trades_per_day": 7.1464019851116625,
+        "wr": 0.68,
+        "avg_notional": 1.5817109453573408,
+        "avg_leverage": 1.6360620846155804,
+        "long_entries": 23,
+        "short_entries": 27,
+        "entry_blocks": {
+          "model_cooldown": 33,
+          "loss_cooldown": 384,
+          "cash_signal": 162,
+          "daily_loss_lock": 41
+        },
+        "exits": {
+          "exit_governor": 50
+        },
+        "exit_prob_mean": 0.14437167639154566,
+        "exit_prob_p95": 0.41891579777002314
+      },
+      "2026-02-02/2026-02-08": {
+        "pnl": 30.177376798029186,
+        "mdd": -17.62246595673914,
+        "trades": 26,
+        "trades_per_day": 3.7161290322580647,
+        "wr": 0.6153846153846154,
+        "avg_notional": 1.4919274772495283,
+        "avg_leverage": 1.6304630797152397,
+        "long_entries": 13,
+        "short_entries": 13,
+        "entry_blocks": {
+          "cash_signal": 41,
+          "daily_dd_lock": 332,
+          "loss_cooldown": 240,
+          "model_cooldown": 14,
+          "daily_loss_lock": 75
+        },
+        "exits": {
+          "exit_governor": 25,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.11983212142349721,
+        "exit_prob_p95": 0.30669989436864853
+      },
+      "2026-02-09/2026-02-15": {
+        "pnl": 34.93586142033101,
+        "mdd": -7.771055093976942,
+        "trades": 47,
+        "trades_per_day": 6.717617866004963,
+        "wr": 0.6595744680851063,
+        "avg_notional": 1.329736024651456,
+        "avg_leverage": 1.5387652329167616,
+        "long_entries": 23,
+        "short_entries": 24,
+        "entry_blocks": {
+          "model_cooldown": 35,
+          "loss_cooldown": 384,
+          "cash_signal": 187,
+          "daily_dd_lock": 131
+        },
+        "exits": {
+          "exit_governor": 47
+        },
+        "exit_prob_mean": 0.1707085048695605,
+        "exit_prob_p95": 0.44464803338050823
+      },
+      "2026-02-16/2026-02-22": {
+        "pnl": 16.345628096808774,
+        "mdd": -4.949317134887621,
+        "trades": 50,
+        "trades_per_day": 7.1464019851116625,
+        "wr": 0.52,
+        "avg_notional": 1.146527585319954,
+        "avg_leverage": 1.5335820175006092,
+        "long_entries": 22,
+        "short_entries": 28,
+        "entry_blocks": {
+          "model_cooldown": 46,
+          "cash_signal": 347,
+          "loss_cooldown": 552,
+          "daily_dd_lock": 43
+        },
+        "exits": {
+          "exit_governor": 49,
+          "forced_end": 1
+        },
+        "exit_prob_mean": 0.17180289811141708,
+        "exit_prob_p95": 0.480427585542202
+      },
+      "2026-02-23/2026-03-01": {
+        "pnl": 23.176063776573443,
+        "mdd": -6.443575421678627,
+        "trades": 38,
+        "trades_per_day": 6.705882352941176,
+        "wr": 0.631578947368421,
+        "avg_notional": 1.5801244722317067,
+        "avg_leverage": 1.621166972977162,
+        "long_entries": 15,
+        "short_entries": 23,
+        "entry_blocks": {
+          "cash_signal": 5,
+          "model_cooldown": 21,
+          "loss_cooldown": 336,
+          "daily_dd_lock": 326
+        },
+        "exits": {
+          "exit_governor": 38
+        },
+        "exit_prob_mean": 0.12847131037420326,
+        "exit_prob_p95": 0.45826582908630353
+      }
+    }
+  },
+  "cost_stress": {
+    "cost_1x": [
+      {
+        "name": "current_muzero_az",
+        "eval": {
+          "pnl": 752.648580357841,
+          "mdd": -18.755787211251405,
+          "trades": 353,
+          "trades_per_day": 6.017045454545455,
+          "wr": 0.6147308781869688,
+          "avg_notional": 1.425434962991292,
+          "avg_leverage": 1.5960290252000644,
+          "long_entries": 165,
+          "short_entries": 188,
+          "entry_blocks": {
+            "cash_signal": 3758,
+            "model_cooldown": 257,
+            "loss_cooldown": 3264,
+            "daily_trade_budget": 39,
+            "daily_loss_lock": 118,
+            "daily_dd_lock": 834
+          },
+          "exits": {
+            "exit_governor": 353
+          },
+          "exit_prob_mean": 0.15413935593644892,
+          "exit_prob_p95": 0.4640691369771957
+        },
+        "score": 696.3812187240867
+      },
+      {
+        "name": "muzero_az_rank1_flat_microadd_v3_2026",
+        "eval": {
+          "pnl": 730.3025542127759,
+          "mdd": -18.755787211251395,
+          "trades": 355,
+          "trades_per_day": 6.051136363636364,
+          "wr": 0.6112676056338028,
+          "avg_notional": 1.4149165793558134,
+          "avg_leverage": 1.5923472999770378,
+          "long_entries": 167,
+          "short_entries": 188,
+          "entry_blocks": {
+            "cash_signal": 3726,
+            "model_cooldown": 259,
+            "loss_cooldown": 3312,
+            "daily_trade_budget": 39,
+            "daily_loss_lock": 118,
+            "daily_dd_lock": 834
+          },
+          "exits": {
+            "exit_governor": 355
+          },
+          "exit_prob_mean": 0.15416252140869324,
+          "exit_prob_p95": 0.46714071035385113
+        },
+        "score": 674.0351925790218
+      }
+    ],
+    "cost_2x": [
+      {
+        "name": "current_muzero_az",
+        "eval": {
+          "pnl": 279.3638542719212,
+          "mdd": -19.01003777143362,
+          "trades": 337,
+          "trades_per_day": 5.744318181818182,
+          "wr": 0.5074183976261127,
+          "avg_notional": 1.307282996054983,
+          "avg_leverage": 1.5960788981094198,
+          "long_entries": 159,
+          "short_entries": 178,
+          "entry_blocks": {
+            "cash_signal": 3612,
+            "model_cooldown": 240,
+            "loss_cooldown": 3961,
+            "daily_dd_lock": 1075,
+            "daily_trade_budget": 39,
+            "daily_loss_lock": 118
+          },
+          "exits": {
+            "exit_governor": 337
+          },
+          "exit_prob_mean": 0.15615991875317553,
+          "exit_prob_p95": 0.47406580150127353
+        },
+        "score": 222.3337409576203
+      },
+      {
+        "name": "muzero_az_rank1_flat_microadd_v3_2026",
+        "eval": {
+          "pnl": 279.50353972743113,
+          "mdd": -19.01003777143364,
+          "trades": 339,
+          "trades_per_day": 5.778409090909091,
+          "wr": 0.504424778761062,
+          "avg_notional": 1.302226828788806,
+          "avg_leverage": 1.5941037478317284,
+          "long_entries": 160,
+          "short_entries": 179,
+          "entry_blocks": {
+            "cash_signal": 3557,
+            "model_cooldown": 242,
+            "loss_cooldown": 4009,
+            "daily_dd_lock": 1075,
+            "daily_trade_budget": 39,
+            "daily_loss_lock": 118
+          },
+          "exits": {
+            "exit_governor": 339
+          },
+          "exit_prob_mean": 0.15605371985855687,
+          "exit_prob_p95": 0.4757223129272461
+        },
+        "score": 222.4734264131302
+      }
+    ],
+    "cost_3x": [
+      {
+        "name": "current_muzero_az",
+        "eval": {
+          "pnl": 75.840036609542,
+          "mdd": -20.375257281099767,
+          "trades": 317,
+          "trades_per_day": 5.403409090909091,
+          "wr": 0.41009463722397477,
+          "avg_notional": 1.1469958229614166,
+          "avg_leverage": 1.5956004084766158,
+          "long_entries": 143,
+          "short_entries": 174,
+          "entry_blocks": {
+            "cash_signal": 3454,
+            "model_cooldown": 224,
+            "loss_cooldown": 4464,
+            "daily_loss_lock": 267,
+            "daily_dd_lock": 1315
+          },
+          "exits": {
+            "exit_governor": 317
+          },
+          "exit_prob_mean": 0.16095048396987424,
+          "exit_prob_p95": 0.48349433541297887
+        },
+        "score": 14.714264766242692
+      },
+      {
+        "name": "muzero_az_rank1_flat_microadd_v3_2026",
+        "eval": {
+          "pnl": 75.840036609542,
+          "mdd": -20.375257281099767,
+          "trades": 317,
+          "trades_per_day": 5.403409090909091,
+          "wr": 0.41009463722397477,
+          "avg_notional": 1.1469958229614166,
+          "avg_leverage": 1.5956004084766158,
+          "long_entries": 143,
+          "short_entries": 174,
+          "entry_blocks": {
+            "cash_signal": 3454,
+            "model_cooldown": 224,
+            "loss_cooldown": 4464,
+            "daily_loss_lock": 267,
+            "daily_dd_lock": 1315
+          },
+          "exits": {
+            "exit_governor": 317
+          },
+          "exit_prob_mean": 0.16095048396987424,
+          "exit_prob_p95": 0.48349433541297887
+        },
+        "score": 14.714264766242692
+      }
+    ]
+  },
+  "hard_gates": {
+    "passed": false,
+    "baseline_reproduction": "passed",
+    "invariants": true,
+    "full_oos_target_gates": false,
+    "loop_success_gates": {
+      "reference": "full_oos_current_top_muzero_az_stage2_target",
+      "pnl_improved": false,
+      "mdd_improved": true,
+      "trades_per_day_increased": true,
+      "avg_leverage_target_range": true,
+      "invariants": true,
+      "baseline_reproduction": true,
+      "microadd_entry_count_positive": true,
+      "validation_eligible_config_count_positive": false,
+      "selected_from_validation_eligible_config": false,
+      "exact_backtest_state_claimed": true,
+      "stage3_stage4_excluded": true,
+      "cost_1x_survival": true,
+      "cost_2x_survival": true,
+      "cost_3x_survival": true,
+      "cost_2x_current_top_target": true,
+      "cost_3x_current_top_target": true
+    },
+    "development_smoke_operational": "not_applicable"
+  },
+  "limitations": [
+    "Funding, liquidation, and maintenance-margin path are not first-class in this loop-3 implementation."
+  ]
+}

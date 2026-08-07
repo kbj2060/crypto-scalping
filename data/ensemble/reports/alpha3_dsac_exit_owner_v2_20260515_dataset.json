@@ -1,0 +1,91 @@
+{
+  "episodes": 861,
+  "states": 35717,
+  "state_owners": {
+    "deep_alpha": 17588,
+    "v21_2": 18129
+  },
+  "actions": [
+    "hold_with_guard",
+    "market_close_100",
+    "maker_close_100_0",
+    "maker_close_100_2",
+    "maker_close_100_4",
+    "close_50_market",
+    "close_50_maker2",
+    "twap_maker2"
+  ],
+  "train_start": "2025-01-01 00:00:00",
+  "train_end": "2025-09-30 23:55:00",
+  "base_actions": [
+    "hold",
+    "baseline_exit2_pen05",
+    "exit0_pen0",
+    "exit1_pen0",
+    "exit2_pen0",
+    "exit3_pen0",
+    "exit4_pen0"
+  ],
+  "base_target_argmax_counts": {
+    "hold": 31289,
+    "baseline_exit2_pen05": 3454,
+    "exit0_pen0": 558,
+    "exit1_pen0": 289,
+    "exit2_pen0": 127,
+    "exit3_pen0": 0,
+    "exit4_pen0": 0
+  },
+  "base_target_mean_by_action": {
+    "hold": -24106.16796875,
+    "baseline_exit2_pen05": 0.04211791604757309,
+    "exit0_pen0": 0.040959302335977554,
+    "exit1_pen0": 0.040742140263319016,
+    "exit2_pen0": 0.04072593152523041,
+    "exit3_pen0": 0.040712904185056686,
+    "exit4_pen0": 0.04070347175002098
+  },
+  "target_argmax_counts": {
+    "hold_with_guard": 21110,
+    "market_close_100": 3417,
+    "maker_close_100_0": 1306,
+    "maker_close_100_2": 144,
+    "maker_close_100_4": 0,
+    "close_50_market": 9545,
+    "close_50_maker2": 195,
+    "twap_maker2": 0
+  },
+  "target_mean_by_action": {
+    "hold_with_guard": -27722.373046875,
+    "market_close_100": 0.04091783985495567,
+    "maker_close_100_0": 0.04075941815972328,
+    "maker_close_100_2": 0.0403258241713047,
+    "maker_close_100_4": 0.03990325331687927,
+    "close_50_market": -11570.9609375,
+    "close_50_maker2": -11570.9609375,
+    "twap_maker2": -15910.0302734375
+  },
+  "full_state_dim": 123,
+  "feature_modes": [
+    "state16",
+    "state16_topbase20",
+    "state16_base_pls8",
+    "state16_topbase20_base_pls8"
+  ],
+  "action_scalars": {
+    "hold_with_guard": 0.0,
+    "market_close_100": -0.9,
+    "maker_close_100_0": -0.58,
+    "maker_close_100_2": -0.25,
+    "maker_close_100_4": 0.25,
+    "close_50_market": 0.55,
+    "close_50_maker2": 0.78,
+    "twap_maker2": 0.95
+  },
+  "reward_design": {
+    "market_close_100": "baseline immediate limit fallback target minus direct taker/urgency cost.",
+    "maker_close_100": "exit0/2/4 OHLC immediate-limit proxy targets minus maker offset risk cost.",
+    "partial_close": "52% realized close value plus 48% hold continuation with MAE penalty.",
+    "twap_maker2": "34% maker2 close value plus 66% hold continuation with time penalty.",
+    "hold_with_guard": "hold continuation penalized by exit advantage, giveback, and hold age."
+  }
+}

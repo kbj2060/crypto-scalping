@@ -1,0 +1,65 @@
+{
+  "model_id": "alpha3_runtime_native_backtest_20260515",
+  "created_at": "2026-05-15T21:06:47.046408+09:00",
+  "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_runtime_native_backtest_20260515_artifact_notional_ledger.csv",
+  "range": {
+    "start_index": 6999,
+    "stop_index": 16895,
+    "rows_evaluated": 9897,
+    "start_ts": "2026-01-25 07:15:00",
+    "stop_ts": "2026-02-28 15:55:00",
+    "contract": "signal_bar_close_decision_next_bar_open_fill",
+    "window_bars": 7000,
+    "with_m7_runtime": false,
+    "ai_features": "precomputed_eval_csv_columns_then_FinalGovernorRuntime_prepare_frame"
+  },
+  "metrics": {
+    "final_equity": 0.9126987484181409,
+    "return_pct": -8.730125158185908,
+    "max_drawdown_pct": 28.929959231907553,
+    "decision_counts": {
+      "2": 5586,
+      "0": 3722,
+      "1": 589
+    },
+    "entry_counts": {
+      "SHORT": 130,
+      "LONG": 18
+    },
+    "closed_trades": 147,
+    "win_rate": 0.3877551020408163,
+    "avg_closed_pnl_pct": -0.04651651110577061,
+    "median_closed_pnl_pct": -0.3577628388031621,
+    "resize_events": 2,
+    "regime_counts": {
+      "BEAR": 2663,
+      "WHIPSAW": 471,
+      "NORMAL": 3339,
+      "BULL": 2331,
+      "CHOP": 1093
+    },
+    "exit_reason_top20": {
+      "v31_deep_alpha_max_hold": 97,
+      "v31_deep_alpha_stop_loss": 39,
+      "learned_stop_loss": 6,
+      "v31_deep_alpha_take_profit": 4,
+      "learned_max_hold": 1
+    }
+  },
+  "audit": {
+    "blocking": [],
+    "warnings": [
+      "historical_backtest_uses_precomputed_ai_feature_columns; live_recomputes_some_ai_features_each_cycle"
+    ],
+    "suspicious_non_causal_column_names": [
+      "m7_target_hold"
+    ],
+    "suspicious_non_causal_column_count": 1,
+    "runtime_state_isolated": true,
+    "router_state_isolated": true,
+    "fee_slippage_accounting": "router._trade_math per closed lot; same-side upsize stored as new lot; downsize closes delta exposure",
+    "decision_path": "trading_bot.FinalGovernorRuntime.decide"
+  },
+  "errors_sample": []
+}

@@ -1,0 +1,27 @@
+{
+  "status": "pass",
+  "blocking": [],
+  "warnings": [
+    "reduced_parent_models_retrained_with_feature_subsets_but_v21_2_runner_feature_frame_preserved_from_original_parent",
+    "feature_set_was_selected_from_2025Q4_analysis_not_from_2026",
+    "chronos_kairos_v40_6_parent_is_existing_target_aware_pls_artifact_retested_in_alpha3_contract"
+  ],
+  "selection_uses_2026": false,
+  "oos_window": "2026 fixed OOS only",
+  "alpha3_execution_contract": {
+    "name": "next_open_limit_touch0_fee20",
+    "anchor": "next_open",
+    "entry_offset_bps": 0.0,
+    "exit_offset_bps": 0.0,
+    "penetration_bps": 0.0,
+    "maker_fee_mult": 0.2,
+    "entry_miss": "skip",
+    "exit_miss": "market_fallback"
+  },
+  "runtime": {
+    "name": "noflip_c0.56_parent_scale1.10",
+    "confidence": 0.56,
+    "parent_notional_scale": 1.1,
+    "max_notional": 2.75
+  }
+}

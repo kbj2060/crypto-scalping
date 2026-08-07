@@ -1,0 +1,356 @@
+{
+  "metrics": {
+    "pnl_pct": 3.8898973223287836,
+    "mdd_pct": -15.200818563087303,
+    "trades": 52,
+    "wr_pct": 84.61538461538461,
+    "long_entries": 15,
+    "short_entries": 37,
+    "avg_hold_bars": 321.25,
+    "avg_fraction": 0.5094400103275593,
+    "avg_leverage": 1.00640486066158,
+    "avg_exposure": 0.5158448709891392
+  },
+  "regime_summary": {
+    "BEAR": {
+      "trades": 19,
+      "pnl_pct_sum": 8.727067939448396,
+      "avg_pnl_pct": 0.45931936523412614
+    },
+    "BULL": {
+      "trades": 18,
+      "pnl_pct_sum": 4.260107154271919,
+      "avg_pnl_pct": 0.2366726196817733
+    },
+    "NORMAL": {
+      "trades": 3,
+      "pnl_pct_sum": 1.496143995492183,
+      "avg_pnl_pct": 0.498714665164061
+    },
+    "WHIPSAW": {
+      "trades": 11,
+      "pnl_pct_sum": 3.49942862446464,
+      "avg_pnl_pct": 0.3181298749513309
+    },
+    "whipsaw": {
+      "trades": 1,
+      "pnl_pct_sum": -13.112225894052571,
+      "avg_pnl_pct": -13.112225894052571
+    }
+  },
+  "controller_bucket_counts": {
+    "ctrl_bucket_0.50x": 657,
+    "ctrl_bucket_0.75x": 13725,
+    "ctrl_bucket_1.00x": 1757,
+    "ctrl_bucket_1.50x": 654,
+    "ctrl_bucket_2.00x": 28,
+    "ctrl_bucket_2.50x": 5,
+    "ctrl_bucket_3.00x": 11
+  },
+  "controller_trade_bucket_stats": {
+    "ctrl_bucket_0.50x": {
+      "trades": 3,
+      "wr_pct": 100.0,
+      "pnl_pct_sum": 1.3483805769247903,
+      "avg_pnl_pct": 0.44946019230826345
+    },
+    "ctrl_bucket_0.75x": {
+      "trades": 5,
+      "wr_pct": 60.0,
+      "pnl_pct_sum": -11.511511656458168,
+      "avg_pnl_pct": -2.3023023312916338
+    },
+    "ctrl_bucket_1.00x": {
+      "trades": 16,
+      "wr_pct": 62.5,
+      "pnl_pct_sum": -0.7274187287687806,
+      "avg_pnl_pct": -0.045463670548048785
+    },
+    "ctrl_bucket_1.50x": {
+      "trades": 22,
+      "wr_pct": 100.0,
+      "pnl_pct_sum": 10.917825160077197,
+      "avg_pnl_pct": 0.49626478000350893
+    },
+    "ctrl_bucket_2.00x": {
+      "trades": 5,
+      "wr_pct": 100.0,
+      "pnl_pct_sum": 4.3692294964621015,
+      "avg_pnl_pct": 0.8738458992924203
+    },
+    "ctrl_bucket_3.00x": {
+      "trades": 1,
+      "wr_pct": 100.0,
+      "pnl_pct_sum": 0.4740169713874254,
+      "avg_pnl_pct": 0.4740169713874254
+    }
+  },
+  "execution_leverage_counts": {
+    "1.00x": 49,
+    "1.07x": 1,
+    "1.08x": 1,
+    "1.19x": 1
+  },
+  "total_exposure_counts": {
+    "0.30x": 6,
+    "0.31x": 1,
+    "0.32x": 3,
+    "0.33x": 2,
+    "0.35x": 1,
+    "0.36x": 2,
+    "0.37x": 1,
+    "0.38x": 1,
+    "0.39x": 5,
+    "0.40x": 1,
+    "0.45x": 1,
+    "0.46x": 4,
+    "0.47x": 2,
+    "0.50x": 1,
+    "0.51x": 1,
+    "0.52x": 1,
+    "0.53x": 1,
+    "0.57x": 1,
+    "0.58x": 1,
+    "0.59x": 1,
+    "0.60x": 2,
+    "0.61x": 2,
+    "0.63x": 1,
+    "0.68x": 1,
+    "0.69x": 1,
+    "0.71x": 1,
+    "0.73x": 1,
+    "0.83x": 1,
+    "0.91x": 1,
+    "0.97x": 1,
+    "1.07x": 1,
+    "1.08x": 1,
+    "1.19x": 1
+  },
+  "trade_rows_tail": [
+    {
+      "ts": "2026-01-14 18:35:00",
+      "side": "SHORT",
+      "entry_price": 3341.143,
+      "exit_price": 3321.4,
+      "hold_bars": 34,
+      "exposure": 2.4426813423633575,
+      "pnl_frac": 0.01101976544261074,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-14 19:35:00",
+      "side": "SHORT",
+      "entry_price": 3319.38,
+      "exit_price": 3370.91,
+      "hold_bars": 10,
+      "exposure": 0.3,
+      "pnl_frac": -0.005079082273805158,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-14 22:35:00",
+      "side": "SHORT",
+      "entry_price": 3369.0,
+      "exit_price": 3348.73,
+      "hold_bars": 34,
+      "exposure": 0.6537783741950989,
+      "pnl_frac": 0.0030197691359594714,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_0.75x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 00:00:00",
+      "side": "SHORT",
+      "entry_price": 3356.5134,
+      "exit_price": 3344.84,
+      "hold_bars": 15,
+      "exposure": 0.7169239521026611,
+      "pnl_frac": 0.0014905898983250676,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 00:15:00",
+      "side": "SHORT",
+      "entry_price": 3351.5425,
+      "exit_price": 3339.38,
+      "hold_bars": 1,
+      "exposure": 1.1834505796432495,
+      "pnl_frac": 0.002639447376659332,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 00:30:00",
+      "side": "SHORT",
+      "entry_price": 3347.4602,
+      "exit_price": 3332.4,
+      "hold_bars": 1,
+      "exposure": 0.9176259934902191,
+      "pnl_frac": 0.002845294791107511,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 01:20:00",
+      "side": "SHORT",
+      "entry_price": 3337.7622,
+      "exit_price": 3325.25,
+      "hold_bars": 8,
+      "exposure": 0.7372263073921204,
+      "pnl_frac": 0.0017325548339115482,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 03:30:00",
+      "side": "SHORT",
+      "entry_price": 3325.15,
+      "exit_price": 3295.54,
+      "hold_bars": 24,
+      "exposure": 1.8312610387802124,
+      "pnl_frac": 0.013749737971997078,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_2.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 09:50:00",
+      "side": "SHORT",
+      "entry_price": 3291.7341,
+      "exit_price": 3372.09,
+      "hold_bars": 74,
+      "exposure": 0.3,
+      "pnl_frac": -0.007746379629007483,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 13:50:00",
+      "side": "LONG",
+      "entry_price": 3358.2112,
+      "exit_price": 3375.27,
+      "hold_bars": 46,
+      "exposure": 2.719109058380127,
+      "pnl_frac": 0.010000275828391691,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_2.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 14:30:00",
+      "side": "SHORT",
+      "entry_price": 3374.882,
+      "exit_price": 3357.04,
+      "hold_bars": 6,
+      "exposure": 0.75,
+      "pnl_frac": 0.0029165538342696973,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 15:00:00",
+      "side": "SHORT",
+      "entry_price": 3350.7417,
+      "exit_price": 3339.81,
+      "hold_bars": 4,
+      "exposure": 1.1056833565235138,
+      "pnl_frac": 0.0020606586910432156,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 15:20:00",
+      "side": "SHORT",
+      "entry_price": 3361.067,
+      "exit_price": 3335.04,
+      "hold_bars": 2,
+      "exposure": 0.7632263898849487,
+      "pnl_frac": 0.00484396125672526,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 15:35:00",
+      "side": "SHORT",
+      "entry_price": 3339.2546,
+      "exit_price": 3319.66,
+      "hold_bars": 1,
+      "exposure": 0.9060847163200378,
+      "pnl_frac": 0.004050401568691742,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 15:45:00",
+      "side": "SHORT",
+      "entry_price": 3332.4414,
+      "exit_price": 3292.6,
+      "hold_bars": 0,
+      "exposure": 0.9665848016738892,
+      "pnl_frac": 0.010207447009692006,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 18:10:00",
+      "side": "SHORT",
+      "entry_price": 3308.1687,
+      "exit_price": 3293.12,
+      "hold_bars": 27,
+      "exposure": 1.4026952683925629,
+      "pnl_frac": 0.0044194603958966905,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-15 20:40:00",
+      "side": "SHORT",
+      "entry_price": 3298.8215,
+      "exit_price": 3281.86,
+      "hold_bars": 28,
+      "exposure": 0.839128851890564,
+      "pnl_frac": 0.003141414593534231,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.50x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-16 15:40:00",
+      "side": "SHORT",
+      "entry_price": 3282.853,
+      "exit_price": 3268.17,
+      "hold_bars": 226,
+      "exposure": 0.7506244778633118,
+      "pnl_frac": 0.0023076774186301385,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-01-18 18:30:00",
+      "side": "SHORT",
+      "entry_price": 3267.4695,
+      "exit_price": 3358.75,
+      "hold_bars": 608,
+      "exposure": 0.3,
+      "pnl_frac": -0.008804220353434089,
+      "source": "DSAC_CONTROLLER|UNIFIED_BUCKET|ctrl_bucket_1.00x",
+      "event": "exit"
+    },
+    {
+      "ts": "2026-02-28 16:00:00",
+      "side": "LONG",
+      "entry_price": 3356.7761,
+      "exit_price": 1893.73,
+      "hold_bars": 11772,
+      "exposure": 0.3,
+      "pnl_frac": -0.1311222589405257,
+      "source": "final_mark",
+      "event": "final_mark"
+    }
+  ],
+  "equity_final": 1.0388989732232878,
+  "generated_at": "2026-04-29T21:13:58.937184Z",
+  "mode": "controller_stable",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_unified_controller.pth",
+  "script": "/home/llewyn/crypto-scalping/scripts/backtest_trading_bot_native_2026.py"
+}

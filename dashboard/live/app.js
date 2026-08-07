@@ -1,148 +1,181 @@
-const STATE_URL = "../../data/live/dashboard_state.json";
 const TRADE_JOURNAL_URL = "../../data/live/trade_journal.jsonl";
+const API_EVENTS_URL = "/api/events";
+const API_TRADES_URL = "/api/trades";
+const API_OPS_STATUS_URL = "/api/ops-status";
 const POLL_MS = 2500;
-const MICRO_HISTORY_MAX = 6; // current + past 5
+const CHART_RENDER_MIN_INTERVAL_MS = 5000;
+const JOURNAL_POLL_MS = 10000;
+const CANDLE_HISTORY_POLL_MS = 300000;
+const MICRO_HISTORY_MAX = 40;
+const ASSET_CONFIG = {
+  eth: { label: "ETH", symbol: "ETHUSDC", accountSymbol: "ETH/USDC:USDC", priceDigits: 2 },
+  sol: { label: "SOL", symbol: "SOLUSDC", accountSymbol: "SOL/USDC:USDC", priceDigits: 3 },
+  btc: { label: "BTC", symbol: "BTCUSDC", accountSymbol: "BTC/USDC:USDC", priceDigits: 1 },
+};
+const ASSET_KEYS = Object.keys(ASSET_CONFIG);
+const DEFAULT_ASSET = "eth";
 
 const el = (id) => document.getElementById(id);
+const setT = (id, txt) => {
+  const target = el(id);
+  if (!target || target.textContent === String(txt)) return;
+  target.textContent = txt;
+};
+const setC = (id, cls) => { const target = el(id); if (target && target.className !== cls) target.className = cls; };
+const setB = (id, cls) => {
+  const target = el(id);
+  if (!target) return;
+  target.classList.remove("good-border", "bad-border", "warn-border", "neutral-border");
+  if (cls) target.classList.add(`${cls}-border`);
+};
+const setH = (id, html) => { const target = el(id); if (target) target.innerHTML = html; };
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
-function removeLegacyAgentPanels() {
-  const wrappers = new Set();
-  ["ensBalDecision", "ensLowDecision"].forEach((id) => {
-    const panel = el(id)?.closest(".panel");
-    const wrapper = panel?.closest(".duo-panels");
-    if (wrapper) wrappers.add(wrapper);
-    if (panel) panel.remove();
-  });
-  wrappers.forEach((wrapper) => {
-    if (!wrapper.querySelector(".panel")) wrapper.remove();
-  });
-}
+
 const microHistory = {
   obi: [],
   whale: [],
   whale_intent: [],
   eai: [],
-  kelly: [],
+  tox: [],
+  risk: [],
 };
-let latestState = null;
-let latestEvalMap = {};
-let latestTradeJournal = [];
 
-const PB_INFO = {
-  PB_VETO_SHIELD: {
-    title: "PB 방어쉴드 (VETO)",
-    threshold: "임계값: 펀딩비 극단 역진입 OR 유동성 진공+고독성",
-    logic: "로직: 위험장에서는 어떤 시그널도 무시하고 진입을 차단(HOLD)합니다.",
-    narration: "내레이션: 손실을 막는 신호가 수익 신호보다 우선입니다.",
-  },
-  PB_CRISIS_SNIPER: {
-    title: "PB 위기 스나이퍼",
-    threshold: "임계값: 패닉/가짜돌파/독성함정 중 가장 강한 위기 신호",
-    logic: "로직: 극단 이벤트에서 역추세 고확신 타점만 오버라이드 진입합니다.",
-    narration: "내레이션: 시장이 과잉반응할 때 가장 날카로운 역방향 기회를 잡습니다.",
-  },
-  PB_SQUEEZE_SNIPER: {
-    title: "PB 스퀴즈 스나이퍼",
-    threshold: "임계값: 레버리지 쏠림 + 점화 조건(EAI/펀딩/흡수)",
-    logic: "로직: 압축된 포지션이 터지는 순간 스퀴즈 방향을 빠르게 추종합니다.",
-    narration: "내레이션: 느린 예측보다 빠른 폭발 추종이 중요한 계층입니다.",
-  },
-  PB_TREND_SIGNAL: {
-    title: "PB 추세 신호",
-    threshold: "임계값: 추세 정합(OBI·고래·저독성) 기반 점수 우위",
-    logic: "로직: 저독성 환경에서 호가/고래 방향이 정렬되는 건강한 추세를 추종합니다.",
-    narration: "내레이션: 왜곡이 적은 추세 구간을 선별해 유지력을 우선합니다.",
-  },
-  PB_WHALE_SIGNAL: {
-    title: "PB 고래 신호",
-    threshold: "임계값: 고래 누적체결/잠행흡수 기반 점수 우위",
-    logic: "로직: 가격보다 고래 체결 누적의 방향성을 우선 반영합니다.",
-    narration: "내레이션: 큰 자금의 발자국이 남는 방향이 결국 중기 방향을 만듭니다.",
-  },
-  PB_MEAN_REVERT_SIGNAL: {
-    title: "PB 평균회귀 신호",
-    threshold: "임계값: VWAP 이격/청산 자석/OI 발산 기반 회귀 점수 우위",
-    logic: "로직: 과열·연료고갈·청산자석 구간을 평균 복귀 관점으로 통합 판단합니다.",
-    narration: "내레이션: 과열과 공포의 꼬리를 중심값으로 되돌리는 계층입니다.",
-  },
-  PB9_VACUUM_WHIPSAW: {
-    title: "PB9 유동성 붕괴 긴급회피",
-    threshold: "임계값: queue_collapse > 0.75 && toxicity > 0.85",
-    logic: "로직: 호가 공백과 독성이 동시에 높으면 시장가 진입 금지, HOLD/지정가 대응만 허용",
-    narration: "내레이션: 시장이 비어있을 때는 방향이 맞아도 체결가가 무너집니다. 먼저 살아남는 모드로 전환합니다.",
-  },
-  PB_FUNDING_EXTREME_HOLD: {
-    title: "PB 펀딩비 극단 진입차단",
-    threshold: "임계값: |funding_rate| > 0.002 + 비용 불리한 방향 진입 시도",
-    logic: "로직: 펀딩비가 극단적으로 불리하면 해당 방향 신규 진입을 강제 HOLD로 차단",
-    narration: "내레이션: 방향이 맞아도 보유비용이 수익을 잠식하는 구간은 진입 자체를 멈춥니다.",
-  },
-  PB5_MAMMOTH_SNIPER: {
-    title: "PB5 폭락장 V반등 저점포착",
-    threshold: "임계값: LAI 방어 + 고래 순매수 + 흡수 강화 + 여진 완화",
-    logic: "로직: 청산 매물이 쏟아져도 하락이 멈추고 고래가 받아먹는 구간을 LONG 스나이핑",
-    narration: "내레이션: 공포가 끝나고 수급이 바닥에서 뒤집히는 순간만 노려 진입합니다.",
-  },
-  PB13_BREAKOUT_TRAP: {
-    title: "PB13 가짜돌파 역추세 저격",
-    threshold: "임계값: 소프트 돌파(30분 변동률) + 고독성 + 고래 반대체결",
-    logic: "로직: 이산 돌파 플래그 대신 연속형 돌파 점수를 사용해 함정 구간을 역방향 저격",
-    narration: "내레이션: 군중이 돌파를 추격할 때, 세력이 던지는 쪽으로 선행 대응합니다.",
-  },
-  PB8_HOLY_TRINITY_TRAP: {
-    title: "PB8 가짜벽 역추적 선행매매",
-    threshold: "임계값: OBI-고래체결 다이버전스 + 높은 독성",
-    logic: "로직: 호가벽 방향과 실체결 방향이 충돌하면 벽을 무시하고 고래 체결 방향 추종",
-    narration: "내레이션: 보이는 벽보다 실제로 누가 시장가를 치는지가 핵심입니다.",
-  },
-  PB2_SQUEEZE_IGNITION: {
-    title: "PB2 응축에너지 돌파추격",
-    threshold: "임계값: EAI 고점 + 편향 펀딩 + 흡수 강화",
-    logic: "로직: 한쪽으로 쏠린 포지션이 압축될 때 반대방향 스퀴즈 폭발을 추격",
-    narration: "내레이션: 스프링이 눌린 구간에서 점화 신호가 뜨면 빠르게 동승합니다.",
-  },
-  PB7_HOLY_TRINITY_TREND: {
-    title: "PB7 저독성 정배열 추세추종",
-    threshold: "임계값: OBI와 고래체결 방향 일치 + 낮은 독성",
-    logic: "로직: 왜곡이 적고 수급이 정직하게 한쪽으로 정렬되면 추세 지속 구간으로 판단",
-    narration: "내레이션: 기만이 적은 장에서는 짧게 자르지 않고 추세를 길게 가져갑니다.",
-  },
-  PB10_CVD_DIVERGENCE: {
-    title: "PB10 고래은닉 매집·분배 추적",
-    threshold: "임계값: 30분 고래누적체결(|sum|) 크고 가격변화는 제한적",
-    logic: "로직: 가격은 정체인데 체결 누적이 한쪽으로 쌓이면 은닉 매집/분배로 보고 선행 진입",
-    narration: "내레이션: 차트보다 체결 누적의 방향을 먼저 믿는 플레이북입니다.",
-  },
-  PB_LIQUIDATION_MAGNET: {
-    title: "PB 청산자석 클러스터 추종",
-    threshold: "임계값: 청산클러스터 강도↑ + 클러스터 근접 + 저독성",
-    logic: "로직: 현재가 근처 청산 밀집 방향으로 가격이 빨려가는 구간을 짧게 추종",
-    narration: "내레이션: 청산이 몰린 가격대는 자석처럼 작동하므로, 가까울수록 반응 속도를 우선합니다.",
-  },
-  PB_OI_DIVERGENCE: {
-    title: "PB OI 발산 역추세 포착",
-    threshold: "임계값: 가격 30분 변동 + OI 감소(oi_delta_pct<0) + 저독성",
-    logic: "로직: 가격은 진행되는데 OI가 줄면 추세 연료 고갈로 보고 역추세 스냅백을 노림",
-    narration: "내레이션: 참여자가 줄어든 추세는 쉽게 꺾이므로 되돌림 구간을 짧게 공략합니다.",
-  },
-  PB12_FUNDING_SNAPBACK: {
-    title: "PB12 펀딩 과열 되돌림 포착",
-    threshold: "임계값: 극단 펀딩 + EAI 델타 둔화 + 고래 반대체결",
-    logic: "로직: 과열된 포지션 쏠림이 꺾일 때 스냅백 구간을 반대방향으로 공략",
-    narration: "내레이션: 시장이 한쪽으로 너무 몰리면 결국 반대쪽 복원탄성이 발생합니다.",
-  },
-  PB11_TWAP_ABSORPTION: {
-    title: "PB11 저변동 잠행 매집 추종",
-    threshold: "임계값: 낮은 변동성 + 높은 평균 흡수 + 방향 편향 누적",
-    logic: "로직: 큰 흔들림 없이 한 방향 흡수가 계속되면 기관성 TWAP 흐름으로 판단",
-    narration: "내레이션: 조용할수록 무거운 자금이 누적될 수 있어 천천히 방향을 맞춥니다.",
-  },
-  PB15_VWAP_MEAN_REVERSION: {
-    title: "PB15 VWAP 탄성 회귀",
-    threshold: "임계값: |가격-VWAP 이격| 확대 + 저변동 + 흡수 강화 + 고래 중립",
-    logic: "로직: 박스권에서 VWAP 밴드 이탈이 과도하면 중심선 회귀를 노려 역추세 진입",
-    narration: "내레이션: 추세가 약한 구간에서 과매수·과매도 스파이크를 짧게 되돌림 수익으로 전환합니다.",
-  },
+function pushMicroHistory(key, value) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return;
+  const arr = microHistory[key];
+  if (!arr) return;
+  arr.push(v);
+  if (arr.length > MICRO_HISTORY_MAX) arr.shift();
+}
+
+function renderSparkline(cardId, values, tone) {
+  const svg = document.querySelector(`#${cardId} .ind-spark`);
+  if (!svg) return;
+  if (!values || values.length < 2) { svg.innerHTML = ""; return; }
+  const w = 100, h = 24;
+  const min = Math.min(...values), max = Math.max(...values);
+  const span = Math.max(max - min, 1e-9);
+  const step = w / (values.length - 1);
+  const linePts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / span) * h).toFixed(1)}`);
+  const areaPts = [`0,${h}`, ...linePts, `${w},${h}`].join(" ");
+  const color = tone === "good" ? "var(--good)" : tone === "bad" ? "var(--bad)" : tone === "warn" ? "var(--amber)" : "var(--muted)";
+  svg.innerHTML = `
+    <polygon points="${areaPts}" fill="${color}" opacity="0.14"/>
+    <polyline points="${linePts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+  `;
+}
+let latestState = null;
+let latestMainState = null;
+let latestCompactState = null;
+let latestTradeJournal = [];
+let latestTradeEquitySeries = [];
+let latestLivePrice = 0;
+let latestLivePriceTs = "";
+let lastJournalFetchAt = 0;
+let tradeJournalLoaded = false;
+let tradePanelsRendered = false;
+let tickInFlight = false;
+let tradesEtag = "";
+let latestChartRiskLevels = [];
+let activeChartAsset = DEFAULT_ASSET;
+let latestLivePriceByAsset = {};
+let latestLivePriceTsByAsset = {};
+let candleHistoryByAsset = {};
+let lastCandleHistoryFetchAtByAsset = {};
+let opsStatusEtag = "";
+let opsLastFetchAt = 0;
+let lastChartRenderAt = 0;
+let isScrolling = false;
+let scrollIdleTimer = 0;
+let dashboardEvents = null;
+const OPS_POLL_MS = 30000;
+
+// --- Chart Global Variables ---
+let candleHistory = []; // Array of {time, open, high, low, close}
+const CHART_CANDLE_MIN = 5; 
+const CHART_MAX_CANDLES = 100;
+const MOBILE_CHART_DEFAULT_CANDLES = 34;
+const MOBILE_CHART_MIN_CANDLES = 12;
+const MOBILE_CHART_MAX_CANDLES = 72;
+const mobileChartView = {
+  start: null,
+  size: MOBILE_CHART_DEFAULT_CANDLES,
+  followLatest: true,
+};
+
+function activeAssetConfig() {
+  return ASSET_CONFIG[activeChartAsset] || ASSET_CONFIG[DEFAULT_ASSET];
+}
+
+function assetLabel(asset = activeChartAsset) {
+  return (ASSET_CONFIG[asset] || ASSET_CONFIG[DEFAULT_ASSET]).label;
+}
+
+function syncActiveMarketState() {
+  candleHistory = candleHistoryByAsset[activeChartAsset] || [];
+  latestLivePrice = Number(latestLivePriceByAsset[activeChartAsset] || 0);
+  latestLivePriceTs = String(latestLivePriceTsByAsset[activeChartAsset] || "");
+}
+
+function normalizeAssetKey(value) {
+  const s = String(value || "").toLowerCase();
+  if (s.includes("sol")) return "sol";
+  if (s.includes("btc")) return "btc";
+  return "eth";
+}
+
+function tradeAssetKey(row) {
+  const basis = [
+    row?.symbol,
+    row?.account_symbol,
+    row?.execution_symbol,
+    row?.asset,
+    row?.market,
+    row?.raw_source,
+    row?.source,
+  ].filter(Boolean).join(" ");
+  return normalizeAssetKey(basis);
+}
+
+function chartJournalRows() {
+  return (latestTradeJournal || []).filter((row) => tradeAssetKey(row) === activeChartAsset);
+}
+
+function renderAssetTabs() {
+  document.querySelectorAll(".asset-tab").forEach((btn) => {
+    const asset = normalizeAssetKey(btn.dataset.asset);
+    btn.classList.toggle("active", asset === activeChartAsset);
+  });
+}
+
+async function setActiveChartAsset(asset) {
+  const next = normalizeAssetKey(asset);
+  if (!ASSET_CONFIG[next] || next === activeChartAsset) return;
+  activeChartAsset = next;
+  mobileChartView.start = null;
+  mobileChartView.followLatest = true;
+  latestChartRiskLevels = [];
+  setT("riskLevelNote", "-");
+  syncActiveMarketState();
+  renderAssetTabs();
+  await fetchBinanceHistory(activeChartAsset);
+  lastChartRenderAt = 0;
+  render(latestMainState || latestState || {}, latestCompactState);
+}
+
+function setupAssetTabs() {
+  document.querySelectorAll(".asset-tab").forEach((btn) => {
+    btn.addEventListener("click", () => setActiveChartAsset(btn.dataset.asset));
+  });
+  renderAssetTabs();
+}
+const mobileChartGesture = {
+  panStartX: 0,
+  panStartIndex: 0,
+  pinchStartDistance: 0,
+  pinchStartSize: MOBILE_CHART_DEFAULT_CANDLES,
+  pinchStartCenter: 0,
 };
 
 function fmtNum(v, d = 2) {
@@ -155,18 +188,34 @@ function fmtPct(v, d = 2) {
   return `${s}${n.toFixed(d)}%`;
 }
 
+function fmtPctNoPlus(v, d = 2) {
+  return `${Number(v || 0).toFixed(d)}%`;
+}
+
+function rowTs(row) {
+  const raw = row?.closed_at || row?.ts || row?.opened_at || "";
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v || 0)));
+}
+
+function clampNum(v, min, max) {
+  return Math.max(min, Math.min(max, Number(v || 0)));
 }
 
 function fmtTs(v) {
   if (!v) return "-";
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
+  return `${mo}-${dd} ${hh}:${mm}:${ss}`;
 }
 
 function fmtShortTs(v) {
@@ -183,17 +232,32 @@ function fmtShortTs(v) {
   return `${mo}-${dd} ${hh}:${mm}`;
 }
 
-function fmtDateYmd(v) {
-  if (!v) return "-";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) {
-    const s = String(v);
-    return s.length >= 10 ? s.slice(0, 10) : s;
-  }
-  const yyyy = String(d.getFullYear());
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mo}-${dd}`;
+function tsAgeSec(v) {
+  if (!v) return null;
+  const ms = Date.parse(v);
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.round((Date.now() - ms) / 1000));
+}
+
+function isFinalGovernorState(state) {
+  if (!state) return false;
+  const src = String(state?.signal?.source || state?.agents?.governor?.source || "").toLowerCase();
+  return Boolean(
+    state.governor_mode ||
+    state?.agents?.governor ||
+    src.includes("final_governor") ||
+    src.includes("sniper") ||
+    src.includes("trend") ||
+    src.includes("micro") ||
+    src.includes("cash")
+  );
+}
+
+function usableGovernorShadowState(state) {
+  if (!isFinalGovernorState(state)) return null;
+  const age = tsAgeSec(state?.microstructure?.updated_at || state?.updated_at || state?.cycle_timestamp_kst);
+  if (Number.isFinite(age) && age > 180) return null;
+  return state;
 }
 
 function fmtNowClock() {
@@ -209,809 +273,665 @@ function buildSessionHtml(sess) {
   const sEurOn = Number(sess.session_europe || 0) >= 0.5;
   const sUsOn = Number(sess.session_us || 0) >= 0.5;
   return [
-    `<span class="session-item ${sAsiaOn ? "on" : "off"}"><span class="hist-dot session-led ${sAsiaOn ? "on" : "off"}"></span>ASIA ${sAsiaOn ? "ON" : "OFF"}</span>`,
+    `<span class="session-item ${sAsiaOn ? "on" : "off"}"><span class="session-led ${sAsiaOn ? "on" : "off"}"></span>아시아</span>`,
     `<span class="session-sep">|</span>`,
-    `<span class="session-item ${sEurOn ? "on" : "off"}"><span class="hist-dot session-led ${sEurOn ? "on" : "off"}"></span>EUROPE ${sEurOn ? "ON" : "OFF"}</span>`,
+    `<span class="session-item ${sEurOn ? "on" : "off"}"><span class="session-led ${sEurOn ? "on" : "off"}"></span>유럽</span>`,
     `<span class="session-sep">|</span>`,
-    `<span class="session-item ${sUsOn ? "on" : "off"}"><span class="hist-dot session-led ${sUsOn ? "on" : "off"}"></span>US ${sUsOn ? "ON" : "OFF"}</span>`,
+    `<span class="session-item ${sUsOn ? "on" : "off"}"><span class="session-led ${sUsOn ? "on" : "off"}"></span>미국</span>`,
   ].join("");
 }
 
 function actionLabel(a) {
-  if (a === 1) return { text: "LONG", icon: "▲", cls: "long" };
-  if (a === 2) return { text: "SHORT", icon: "▼", cls: "short" };
-  return { text: "HOLD", icon: "⏸", cls: "hold" };
+  if (a === 1) return { text: "롱", icon: "▲", cls: "long" };
+  if (a === 2) return { text: "숏", icon: "▼", cls: "short" };
+  return { text: "대기", icon: "⏸", cls: "hold" };
 }
 
-function positionOpenedAtText(track) {
-  const pos = String((track || {}).pos || "NONE").toUpperCase();
-  if (pos !== "LONG" && pos !== "SHORT") return "-";
-  return fmtTs((track || {}).opened_at || (track || {}).updated_at || "");
+function sideLabel(value) {
+  const s = String(value || "NONE").toUpperCase();
+  if (s === "LONG") return "롱";
+  if (s === "SHORT") return "숏";
+  if (s === "NONE") return "없음";
+  return s;
 }
 
-function dsacDecisionAtText(state) {
-  const pos = String(((state || {}).position || {}).current || "NONE").toUpperCase();
-  if (pos !== "LONG" && pos !== "SHORT") return "-";
-  const decisionAt = (state || {}).position?.decision_at;
-  if (decisionAt) return fmtTs(decisionAt);
-  const openedAt = (state || {}).position?.opened_at;
-  if (openedAt) return fmtTs(openedAt);
-  const cyc = (state || {}).cycle_timestamp_kst;
-  const holdBars = Number(((state || {}).position || {}).hold_bars || 0);
-  const dt = new Date(cyc);
-  if (Number.isNaN(dt.getTime())) return "-";
-  dt.setMinutes(dt.getMinutes() - Math.max(0, holdBars) * 5);
-  return fmtTs(dt.toISOString());
+function openPosition(state) {
+  const pos = (state || {}).position || {};
+  const side = String(pos.current || "NONE").toUpperCase();
+  const entryPrice = Number(pos.entry_price || (state || {}).entry_price || 0);
+  if ((side === "LONG" || side === "SHORT") && entryPrice > 0) {
+    return { ...pos, current: side, entry_price: entryPrice };
+  }
+  return null;
 }
 
-function initPlaybookModal() {
-  const modal = el("pbModal");
-  if (!modal) return;
-  const titleEl = el("pbModalTitle");
-  const thEl = el("pbModalThreshold");
-  const logicEl = el("pbModalLogic");
-  const condEl = el("pbModalConditions");
-  const narEl = el("pbModalNarration");
-  const close = () => {
-    modal.classList.add("hidden");
-    modal.setAttribute("aria-hidden", "true");
-  };
-  const open = (pbKey) => {
-    const info = PB_INFO[pbKey] || {
-      title: pbKey || "플레이북 설명",
-      threshold: "임계값: -",
-      logic: "로직: -",
-      narration: "내레이션: -",
+function chartPositionState(mainState, compactState) {
+  const shadowState = usableGovernorShadowState(compactState);
+  if (openPosition(shadowState)) return shadowState;
+  if (openPosition(mainState)) return mainState;
+  return shadowState || mainState;
+}
+
+function assetDecisionState(mainState, compactState, asset = activeChartAsset) {
+  const key = normalizeAssetKey(asset);
+  if (key === "eth") return chartPositionState(mainState, compactState);
+  const sources = [compactState, mainState].filter(Boolean);
+  for (const src of sources) {
+    const direct =
+      src?.assets?.[key] ||
+      src?.asset_decisions?.[key] ||
+      src?.asset_states?.[key] ||
+      src?.market_assets?.[key];
+    if (direct) return direct;
+    const upper = key.toUpperCase();
+    const upperDirect =
+      src?.assets?.[upper] ||
+      src?.asset_decisions?.[upper] ||
+      src?.asset_states?.[upper] ||
+      src?.market_assets?.[upper];
+    if (upperDirect) return upperDirect;
+  }
+  return null;
+}
+
+function strategyTagFromRow(row) {
+  const src = String(row?.source || "").toUpperCase();
+  const raw = String(row?.raw_source || "").toUpperCase();
+  const basis = `${src} ${raw}`;
+  if (basis.includes("SNIPER")) return "SNIPER";
+  if (basis.includes("TREND")) return "TREND";
+  if (basis.includes("MICRO") || basis.includes("WNC")) return "MICRO";
+  if (basis.includes("GOVERNOR") || basis.includes("CASH")) return "GOVERNOR";
+  if (basis.includes("COMPACT")) return "COMPACT";
+  if (basis.includes("CONTROLLER")) return "CONTROLLER";
+  return "GOVERNOR";
+}
+
+function strategyDisplayLabel(value) {
+  const s = String(value || "").toUpperCase();
+  if (s === "SNIPER") return "스나이퍼";
+  if (s === "TREND") return "추세";
+  if (s === "MICRO") return "마이크로";
+  if (s === "GOVERNOR") return "거버너";
+  if (s === "COMPACT") return "컴팩트";
+  if (s === "CONTROLLER") return "컨트롤러";
+  if (s.includes("SNIPER")) return "스나이퍼";
+  if (s.includes("TREND")) return "추세";
+  if (s.includes("MICRO") || s.includes("WNC")) return "마이크로";
+  if (s.includes("GOVERNOR")) return "거버너";
+  if (s.includes("COMPACT")) return "컴팩트";
+  if (s.includes("CONTROLLER")) return "컨트롤러";
+  return value || "-";
+}
+
+function normalizeModelVersion(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const compact = raw.replace(/_/g, ".").replace(/\s+/g, "");
+  const vMatch = compact.match(/v?(\d+(?:\.\d+)*)/i);
+  return vMatch ? `v${vMatch[1]}` : compact.toLowerCase();
+}
+
+function tradeGovernorLabel(row) {
+  const basis = [
+    row?.model_version,
+    row?.model_id,
+    row?.decision_logic,
+    row?.raw_source,
+    row?.source,
+  ].filter(Boolean).join(" ");
+  const alphaBasis = basis.toLowerCase();
+  if (
+    alphaBasis.includes("alpha4_3_sticky") ||
+    alphaBasis.includes("alpha4.3 sticky") ||
+    alphaBasis.includes("sticky_current")
+  ) {
+    return "Alpha4.3 Sticky";
+  }
+  if (
+    alphaBasis.includes("alpha3") ||
+    alphaBasis.includes("alpha2_1") ||
+    alphaBasis.includes("alpha2.1") ||
+    alphaBasis.includes("alpha2 1")
+  ) {
+    return "Alpha3";
+  }
+  let version = normalizeModelVersion(row?.model_version);
+  if (!version && /v22[_\s.]?1/i.test(basis)) version = "v22.1";
+  if (!version && /v21/i.test(basis)) version = "v21";
+  const sleeve = strategyDisplayLabel(strategyTagFromRow(row));
+  const base = version ? `거버너 ${version}` : "거버너";
+  return sleeve && sleeve !== "거버너" ? `${base} · ${sleeve}` : base;
+}
+
+function cleanTradeReason(value) {
+  const raw = cleanDisplaySource(value || "");
+  if (!raw || raw === "-") return "";
+  return raw
+    .replace(/^alpha2[._-]?1\s*[|:]/i, "")
+    .replace(/^lifecycle_v1\s*[|:]/i, "")
+    .replace(/^v31_deep_alpha_/i, "V31 ")
+    .replace(/^learned_/i, "")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function closeReasonText(row) {
+  return cleanTradeReason(
+    row?.exit_reason ||
+    row?.close_reason ||
+    row?.reason ||
+    row?.source ||
+    ""
+  );
+}
+
+function liquidityLabel(value) {
+  const s = String(value || "").toLowerCase();
+  if (s === "maker_miss" || s.includes("maker_miss")) return "maker miss";
+  if (s.includes("maker") && s.includes("dry_run") && s.includes("taker")) return "maker→taker shadow";
+  if (s.includes("maker") && s.includes("dry_run")) return "maker shadow";
+  if (s.includes("taker") && s.includes("dry_run")) return "taker shadow";
+  if (s === "maker_taker" || s === "maker+taker" || s === "maker-taker" || s === "mixed") return "maker→taker";
+  if (s.includes("maker") && s.includes("taker")) return "maker→taker";
+  if (s.includes("maker")) return "maker";
+  if (s.includes("taker") || s.includes("market")) return "taker";
+  if (s.includes("synthetic") || s.includes("shadow")) return "shadow model";
+  return "";
+}
+
+function executionLegLiquidity(row, leg) {
+  const prefix = leg === "exit" ? "exit" : "entry";
+  const direct = liquidityLabel(
+    row?.[`${prefix}_execution_liquidity`] ||
+    row?.[`${prefix}_liquidity`] ||
+    row?.[`${prefix}_exec_liquidity`] ||
+    row?.[`${prefix}_order_liquidity`]
+  );
+  if (direct) return direct;
+
+  const route = liquidityLabel(row?.[`${prefix}_execution_route`] || row?.[`${prefix}_execution_order_type`]);
+  if (route) return route;
+
+  const kind = String(row?.[`${prefix}_exec_price_kind`] || "").toLowerCase();
+  if (kind.includes("synthetic_fee_slippage_model")) return "shadow model";
+  if (kind.includes("maker")) return "maker";
+  if (kind.includes("taker") || kind.includes("market")) return "taker";
+  return "";
+}
+
+function priceWithLiquidity(label, price, liquidity) {
+  const liq = liquidity ? ` <span class="trade-journal-liquidity">${liquidity}</span>` : "";
+  return `${label} ${fmtNum(price, 2)}${liq}`;
+}
+
+function feeModelText(row) {
+  const model = String(row?.fee_model || "").replaceAll("_", " ");
+  const entry = Number(row?.entry_fee_rate);
+  const exit = Number(row?.exit_fee_rate);
+  if (!model && !Number.isFinite(entry) && !Number.isFinite(exit)) return "";
+  const entryBps = Number.isFinite(entry) ? `${(entry * 10000).toFixed(2)}bp` : "-";
+  const exitBps = Number.isFinite(exit) ? `${(exit * 10000).toFixed(2)}bp` : "-";
+  return `수수료: ${model || "unknown"} (${entryBps}/${exitBps})`;
+}
+
+function closeTradeRows(filter) {
+  let rows = (latestTradeJournal || []).filter((row) => String(row?.kind || "").toUpperCase() === "CLOSE");
+  if (filter && filter !== "ALL") rows = rows.filter((row) => strategyTagFromRow(row) === filter);
+  return rows.slice().sort((a, b) => rowTs(a) - rowTs(b));
+}
+
+function pnlPctFromRow(row) {
+  if (Number.isFinite(Number(row?.pnl_pct))) return Number(row.pnl_pct);
+  if (Number.isFinite(Number(row?.pnl_frac))) return Number(row.pnl_frac) * 100;
+  return 0;
+}
+
+function executionDelaySec(row) {
+  const n = Number(row?.execution_delay_sec);
+  return Number.isFinite(n) ? n : null;
+}
+
+function executionTimingText(row) {
+  const decisionTs = row?.decision_bar_ts || row?.decision_at || "";
+  const execTs = row?.execution_bar_ts || row?.ts || row?.closed_at || row?.opened_at || "";
+  const delay = executionDelaySec(row);
+  const source = row?.execution_price_source || row?.entry_price_source || row?.exit_price_source || "";
+  const ledger = row?.ledger_ts_kind || "";
+  const parts = [];
+  if (decisionTs) parts.push(`신호 ${fmtShortTs(decisionTs)}`);
+  if (execTs) parts.push(`체결 ${fmtShortTs(execTs)}`);
+  if (delay !== null) parts.push(`지연 ${fmtNum(delay, 1)}s`);
+  if (source) parts.push(String(source));
+  if (ledger) parts.push(String(ledger));
+  return parts.join(" · ");
+}
+
+function aiTimingText(row) {
+  const timing = row?.ai_timing || {};
+  if (!timing || typeof timing !== "object") return "";
+  const total = Number(timing.total_sec ?? timing.total?.sec ?? timing.predict_all?.sec ?? timing.predict_all_sec);
+  return Number.isFinite(total) && total > 0 ? `AI ${fmtNum(total, 2)}s` : "";
+}
+
+function buildTradeEquitySeries(filter) {
+  let equity = 1;
+  return closeTradeRows(filter).map((row, idx) => {
+    const pnlPct = pnlPctFromRow(row);
+    equity *= 1 + pnlPct / 100;
+    return {
+      ...row,
+      chart_index: idx + 1,
+      pnl_pct: pnlPct,
+      equity,
+      cumulative_return_pct: (equity - 1) * 100,
+      ts: row.closed_at || row.ts,
     };
-    titleEl.textContent = info.title;
-    thEl.textContent = info.threshold;
-    logicEl.textContent = info.logic;
-    condEl.innerHTML = buildPbConditionReport(pbKey, latestState, latestEvalMap[pbKey]);
-    narEl.textContent = info.narration;
-    modal.classList.remove("hidden");
-    modal.setAttribute("aria-hidden", "false");
-  };
-
-  document.querySelectorAll(".pb-row[data-pb]").forEach((row) => {
-    row.addEventListener("click", () => open(row.getAttribute("data-pb") || ""));
-  });
-  el("pbModalClose")?.addEventListener("click", close);
-  modal.querySelector(".pb-modal-backdrop")?.addEventListener("click", close);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !modal.classList.contains("hidden")) close();
   });
 }
 
-function yn(cond) {
-  return cond ? "✅" : "❌";
+function normalizeStateTradeTail(rows) {
+  return (rows || [])
+    .filter((row) => row && Number.isFinite(Number(row.equity)))
+    .map((row, idx) => ({
+      ...row,
+      chart_index: idx + 1,
+      pnl_pct: pnlPctFromRow(row),
+      equity: Number(row.equity),
+      cumulative_return_pct: (Number(row.equity) - 1) * 100,
+    }));
 }
 
-function cItem(label, cond, threshold, current) {
+function selectTradeRowsForCharts(filter) {
+  if (latestTradeEquitySeries.length) return latestTradeEquitySeries;
+  const journalSeries = buildTradeEquitySeries(filter);
+  if (journalSeries.length) return journalSeries;
+  const stateRows = latestMainState?.trades_tail || latestCompactState?.trades_tail;
+  return normalizeStateTradeTail(stateRows || []);
+}
+
+function firstPositive(...vals) {
+  for (const v of vals) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function signedRiskPairLabel(tp, sl) {
+  const parts = [];
+  const tpN = Number(tp);
+  const slN = Number(sl);
+  if (Number.isFinite(tpN) && tpN > 0) parts.push(fmtPct(tpN * 100, 1));
+  if (Number.isFinite(slN) && slN > 0) parts.push(`-${fmtPctNoPlus(slN * 100, 1)}`);
+  return parts.join("/");
+}
+
+function signedPriceMovePairLabel(tpMove, slMove) {
+  const parts = [];
+  const tpN = Number(tpMove);
+  const slN = Number(slMove);
+  if (Number.isFinite(tpN) && tpN > 0) parts.push(fmtPctNoPlus(tpN * 100, 1));
+  if (Number.isFinite(slN) && slN > 0) parts.push(fmtPctNoPlus(slN * 100, 1));
+  return parts.join("/");
+}
+
+function riskSummaryText(row) {
+  const tp = firstPositive(row?.effective_take_profit, row?.take_profit);
+  const sl = firstPositive(row?.effective_stop_loss, row?.stop_loss);
+  const exposure = firstPositive(row?.total_exposure, row?.notional_exposure);
+  const parts = [];
+  const riskPair = signedRiskPairLabel(tp, sl);
+  if (riskPair) parts.push(`계정 ${riskPair}`);
+  const priceMovePair = exposure > 0 ? signedPriceMovePairLabel(tp / exposure, sl / exposure) : "";
+  if (priceMovePair) parts.push(`가격 ${priceMovePair}`);
+  return parts.join(" · ");
+}
+
+function thresholdPrice(side, entry, rawMove, takeProfit) {
+  const sideU = String(side || "").toUpperCase();
+  const entryN = Number(entry);
+  const moveN = Number(rawMove);
+  if (!(entryN > 0) || !(moveN > 0) || !["LONG", "SHORT"].includes(sideU)) return 0;
+  if (sideU === "LONG") return takeProfit ? entryN * (1 + moveN) : entryN * Math.max(0, 1 - moveN);
+  return takeProfit ? entryN * Math.max(0, 1 - moveN) : entryN * (1 + moveN);
+}
+
+function activeRiskModel(state, compactState, selectedState = null) {
+  const s = selectedState || chartPositionState(state, compactState) || {};
+  const alt = selectedState
+    ? (activeChartAsset === "eth" ? (s === state ? (compactState || {}) : (state || {})) : {})
+    : (s === state ? (compactState || {}) : (state || {}));
+  const pos = s.position || {};
+  const sig = s.signal || {};
+  const altPos = alt.position || {};
+  const altSig = alt.signal || {};
+  const agents = s.agents || {};
+  const lifecycle = agents.lifecycle_v1 || {};
+  const omega = agents.omega1_2_1 || {};
+  const omega461 = agents.omega4_6_1 || {};
+  const fullyLearned = agents.fully_learned || {};
+  const macro = agents.macro || {};
+  const trace = sig.sleeve_trace || {};
+  const v31 = trace.v31 || {};
+  const cfg = v31.selected_config || {};
+  const side = String(pos.current || altPos.current || "").toUpperCase();
+  const entry = Number(pos.entry_price || altPos.entry_price || s.entry_price || alt.entry_price || 0);
+  const exposure = Number(pos.total_exposure ?? pos.notional_exposure ?? sig.notional_exposure ?? sig.unified_kelly ?? altPos.total_exposure ?? altPos.notional_exposure ?? altSig.notional_exposure ?? altSig.unified_kelly ?? 0);
+  if (!["LONG", "SHORT"].includes(side) || !(entry > 0) || !(exposure > 0)) {
+    return { tp: 0, sl: 0, maxHold: 0, remaining: NaN, tpPrice: 0, slPrice: 0 };
+  }
+  // pos.effective_take_profit / pos.take_profit are raw price-move fractions (e.g. 0.075 = 7.5%
+  // price move), not account-level PnL fractions -- see the Futures Risk Sizing Contract
+  // (PnL = price_move * notional). Account-level threshold = rawMove * exposure, not rawMove / exposure.
+  const rawTp = firstPositive(pos.effective_take_profit, pos.take_profit, sig.effective_take_profit, sig.take_profit, altPos.effective_take_profit, altPos.take_profit, altSig.effective_take_profit, altSig.take_profit, v31.effective_tp, omega461.active_take_profit, omega.active_take_profit, lifecycle.active_take_profit, fullyLearned.active_take_profit, macro.active_take_profit, macro.take_profit);
+  const rawSl = firstPositive(pos.effective_stop_loss, pos.stop_loss, sig.effective_stop_loss, sig.stop_loss, altPos.effective_stop_loss, altPos.stop_loss, altSig.effective_stop_loss, altSig.stop_loss, v31.effective_sl, omega461.active_stop_loss, omega.active_stop_loss, lifecycle.active_stop_loss, fullyLearned.active_stop_loss, macro.active_stop_loss, macro.stop_loss);
+  const maxHold = 0;
+  const rem = Number(pos.max_hold_remaining_bars ?? sig.max_hold_remaining_bars ?? altPos.max_hold_remaining_bars ?? altSig.max_hold_remaining_bars);
+  const tpPrice = firstPositive(pos.take_profit_price, pos.tp_price, sig.take_profit_price, sig.tp_price, altPos.take_profit_price, altPos.tp_price, altSig.take_profit_price, altSig.tp_price, thresholdPrice(side, entry, rawTp, true));
+  const slPrice = firstPositive(pos.stop_price, pos.sl_price, sig.stop_price, sig.sl_price, altPos.stop_price, altPos.sl_price, altSig.stop_price, altSig.sl_price, thresholdPrice(side, entry, rawSl, false));
   return {
-    label: String(label || "-"),
-    cond: Boolean(cond),
-    threshold: String(threshold || "-"),
-    current: String(current || "-"),
-    progress: Number.isFinite(Number(arguments[4])) ? clamp01(Number(arguments[4])) : (cond ? 1 : 0),
+    tp: rawTp > 0 ? rawTp * exposure : 0,
+    sl: rawSl > 0 ? rawSl * exposure : 0,
+    maxHold,
+    remaining: rem,
+    tpPrice,
+    slPrice,
+    exposure,
+    tpMove: rawTp,
+    slMove: rawSl,
   };
 }
 
-function ratioGE(val, th) {
-  const v = Number(val || 0);
-  const t = Number(th || 0);
-  if (t <= 0) return 0;
-  return clamp01(v / t);
+function chartRiskLevels(state, compactState, selectedState = null) {
+  const s = selectedState || chartPositionState(state, compactState) || {};
+  if (!openPosition(s)) return [];
+  const pos = s.position || {};
+  const sig = s.signal || {};
+  const pb = s.playbook || {};
+  const activeRisk = activeRiskModel(state, compactState, selectedState);
+  const out = [];
+  const stop = firstPositive(pos.stop_price, sig.stop_price, activeRisk.slPrice, pb.stop_price, pb.trailing_stop_price, sig.trailing_stop_price);
+  const tp = firstPositive(pos.take_profit_price, pos.tp_price, sig.take_profit_price, sig.tp_price, activeRisk.tpPrice, pb.take_profit_price);
+  const trail = firstPositive(pos.trailing_stop_price, sig.trailing_stop_price, pb.trailing_stop_price);
+  if (stop) out.push({ val: stop, color: "#cf6a5c", label: "손절", dashed: false, width: 2 });
+  if (tp) out.push({ val: tp, color: "#6bab84", label: "익절", dashed: false, width: 2 });
+  if (trail && trail !== stop) out.push({ val: trail, color: "#c48ca8", label: "추적", dashed: true, width: 2 });
+  return out;
 }
 
-function ratioLE(val, th) {
-  const v = Number(val || 0);
-  const t = Number(th || 0);
-  if (t <= 0) return 0;
-  if (v <= 0) return 1;
-  return clamp01(t / v);
+function chartEntryLiquidity(state, compactState) {
+  const s = chartPositionState(state, compactState) || {};
+  const alt = s === state ? (compactState || {}) : (state || {});
+  const pos = s.position || {};
+  const sig = s.signal || {};
+  const altPos = alt.position || {};
+  const altSig = alt.signal || {};
+  const route = liquidityLabel(
+    pos.entry_execution_route ||
+    pos.entry_execution_liquidity ||
+    sig.entry_execution_route ||
+    sig.entry_execution_liquidity ||
+    s.entry_execution_route ||
+    altPos.entry_execution_route ||
+    altSig.entry_execution_route ||
+    ""
+  );
+  if (route === "maker") return "지정가";
+  if (route === "taker") return "시장가";
+  if (route === "maker→taker") return "지정가→시장가";
+  const priceSource = String(pos.entry_price_source || sig.entry_price_source || s.entry_price_source || altPos.entry_price_source || altSig.entry_price_source || "").toLowerCase();
+  if (priceSource.includes("next_bar_open")) return "다음봉 체결";
+  if (priceSource.includes("synthetic")) return "모의 체결";
+  if (Number(pos.entry_price || altPos.entry_price || 0) > 0) return "원장 체결";
+  return route || "-";
 }
 
-function ratioABSGE(val, th) {
-  return ratioGE(Math.abs(Number(val || 0)), th);
-}
-
-function ratioABSLE(val, th) {
-  return ratioLE(Math.abs(Number(val || 0)), th);
-}
-
-function condIcon(label) {
-  if (label.includes("펀딩")) return "💸";
-  if (label.includes("휩소") || label.includes("진공")) return "🌪️";
-  if (label.includes("스퀴즈")) return "🚀";
-  if (label.includes("맘모스") || label.includes("바닥")) return "🩸";
-  if (label.includes("가짜돌파")) return "🎯";
-  if (label.includes("독성")) return "☣️";
-  if (label.includes("추세")) return "🌊";
-  if (label.includes("고래")) return "🐋";
-  if (label.includes("OI")) return "🧲";
-  if (label.includes("VWAP")) return "📏";
-  if (label.includes("청산")) return "⚡";
-  return "•";
-}
-
-function renderConditionCards(items, matched, score) {
-  const statusCls = matched ? "ok" : score >= 0.5 ? "warn" : "idle";
-  const statusTxt = matched ? "발동" : score >= 0.5 ? "근접" : "대기";
-  const head = `<div class="cond-head ${statusCls}">
-    <span class="cond-state">${statusTxt}</span>
-    <span class="cond-score">${fmtNum(score * 100, 0)}점</span>
-  </div>`;
-  const rows = (items || []).map((it) => `
-    <div class="cond-row ${it.cond ? "ok" : "no"}">
-      <div class="cond-title">${condIcon(it.label)} ${it.label}</div>
-      <div class="cond-chip ${it.cond ? "ok" : "no"}">${yn(it.cond)}</div>
-      <div class="cond-meter-wrap">
-        <div class="cond-meter"><span style="width:${fmtNum((it.progress || 0) * 100, 0)}%"></span></div>
-        <span class="cond-meter-txt">${fmtNum((it.progress || 0) * 100, 0)}%</span>
-      </div>
-      <div class="cond-meta">
-        <span class="cond-k">기준</span><span class="cond-v">${it.threshold}</span>
-      </div>
-      <div class="cond-meta">
-        <span class="cond-k">현재</span><span class="cond-v">${it.current}</span>
-      </div>
-    </div>
-  `).join("");
-  return `${head}<div class="cond-grid">${rows}</div>`;
-}
-
-function buildPbConditionReport(pbKey, state, evalObj) {
-  if (!state) return `<div class="cond-empty">조건 평가 데이터 대기 중</div>`;
-  const micro = state.microstructure || {};
-  const tail = state.tail_risk || {};
-  const sig = state.signal || {};
-  const score = Number((evalObj?.meta || {}).unified_score || 0);
-  const matched = Boolean(evalObj?.matched);
-  const items = [];
-
-  const funding = Number(micro.funding_rate || 0);
-  const collapse = Number(micro.queue_collapse || 0);
-  const tox = Number(micro.toxicity_score || 0);
-  const eai = Number(micro.eai || 0);
-  const absb = Number(micro.absorption_score || 0);
-  const oiDelta = Number(micro.oi_delta_pct || 0);
-  const obi = Number(micro.obi || 0);
-  const whale = Number(micro.nif_whale || 0);
-  const price30 = Number(micro.price_change_30m || 0);
-  const vol30 = Number(micro.price_volatility_30m || 0);
-  const vwapGap = Number(micro.vwap_gap_15m || 0);
-  const eaiDelta = Number(micro.eai_delta_15m || 0);
-  const nifSum30 = Number(micro.nif_whale_sum_30m || 0);
-  const nifStd30 = Number(micro.nif_whale_std_30m || 0);
-  const toxAvg30 = Number(micro.toxicity_avg_30m || 0);
-  const nifAvg30 = Number(micro.nif_whale_avg_30m || 0);
-  const absAvg30 = Number(micro.absorption_avg_30m || 0);
-  const biasAvg30 = Number(micro.bias_avg_30m || 0);
-  const lai = Number(tail.lai || 0);
-  const aft = Number(tail.aftershock_prob || 0);
-  const liqDir = Number(tail.liq_cluster_direction || 0);
-  const liqStr = Number(tail.liq_cluster_strength || 0);
-  const liqDist = Number(tail.distance_to_cluster_pct || 1);
-  const baseAction = Number(sig.final_action || 0);
-  const nifZ = nifSum30 / (Math.max(nifStd30, 1e-8) * Math.sqrt(30) + 1e-8);
-
-  if (pbKey === "PB_VETO_SHIELD") {
-    const fundExtreme = Math.abs(funding) > 0.002;
-    const revBlock = (funding > 0 && baseAction === 1) || (funding < 0 && baseAction === 2);
-    const fundVeto = fundExtreme && revBlock;
-    const vacuum = collapse > 0.75 && tox > 0.85;
-    items.push(cItem("펀딩 절대값", fundExtreme, "|funding| > 0.002", fmtNum(Math.abs(funding), 4), ratioABSGE(funding, 0.002)));
-    items.push(cItem("역방향 차단 규칙", revBlock, "funding>0→LONG 차단 / funding<0→SHORT 차단", `funding=${fmtNum(funding,4)}, action=${baseAction}`, revBlock ? 1 : 0));
-    items.push(cItem("펀딩 VETO 최종", fundVeto, "상기 2조건 동시", `${fundVeto}`, fundVeto ? 1 : Math.min(ratioABSGE(funding, 0.002), revBlock ? 1 : 0)));
-    items.push(cItem("큐 붕괴", collapse > 0.75, "collapse > 0.75", fmtNum(collapse, 2), ratioGE(collapse, 0.75)));
-    items.push(cItem("독성 급등", tox > 0.85, "tox > 0.85", fmtNum(tox, 2), ratioGE(tox, 0.85)));
-    items.push(cItem("진공 VETO 최종", vacuum, "큐 붕괴 & 독성 급등", `${vacuum}`, vacuum ? 1 : Math.min(ratioGE(collapse, 0.75), ratioGE(tox, 0.85))));
-    return renderConditionCards(items, matched, score);
+function renderOpsCards(state, compactState) {
+  const selectedAssetState = assetDecisionState(state, compactState, activeChartAsset);
+  if (!selectedAssetState) {
+    const cfg = activeAssetConfig();
+    const price = Number(latestLivePriceByAsset[activeChartAsset] || 0);
+    setT("chartDecisionText", "추적");
+    setT("chartEntryLiquidityText", "상태 없음");
+    setT("chartPositionPctText", "-");
+    setT("chartEntryText", "-");
+    setT("chartEntryTimeText", "-");
+    setT("chartExposureText", "-");
+    setT("chartUnrealizedPnlText", "-");
+    setT("chartRiskText", `${cfg.label} 모델 상태 대기`);
+    setT("chartRegimeText", price > 0 ? fmtNum(price, cfg.priceDigits) : "-");
+    const riskEl = el("chartRiskText");
+    if (riskEl) riskEl.title = `${cfg.accountSymbol} decision state not present in /api/state`;
+    const unrealizedEl = el("chartUnrealizedPnlText");
+    if (unrealizedEl) {
+      unrealizedEl.classList.remove("good-text", "bad-text", "muted-text");
+      unrealizedEl.classList.add("muted-text");
+    }
+    const ribbon = el("chartAiRibbon");
+    if (ribbon) ribbon.className = "chart-ai-ribbon hold";
+    return;
   }
+  const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
+  const pos = active.position || {};
+  const sig = active.signal || state?.signal || {};
+  const agents = active.agents || state?.agents || {};
+  const gov = agents.governor || {};
+  const decision = actionLabel(Number(sig.final_action ?? sig.rl_action ?? 0));
+  const exposure = Number(pos.total_exposure ?? pos.notional_exposure ?? gov.notional_exposure ?? sig.notional_exposure ?? pos.position_fraction ?? 0);
+  const leverage = Number(pos.execution_leverage ?? gov.execution_leverage ?? sig.execution_leverage ?? 1);
+  const positionPct = Number(pos.position_fraction ?? sig.position_fraction ?? 0) * 100;
+  const regime = String(sig.governor_regime || gov.regime || active.regime || "-").toUpperCase();
+  const entryPrice = Number(pos.entry_price || active.entry_price || 0);
+  const entryTime = pos.opened_at || pos.decision_at || active.opened_at || "";
+  const unrealizedPnl = Number(pos.unrealized_pnl_pct ?? sig.position_unrealized_pnl_pct ?? active.position_unrealized_pnl_pct ?? 0);
+  const risk = activeRiskModel(state, compactState, active);
+  const tp = risk.tp;
+  const sl = risk.sl;
+  const tpPrice = risk.tpPrice;
+  const slPrice = risk.slPrice;
+  const priceMovePair = signedPriceMovePairLabel(risk.tpMove, risk.slMove);
 
-  if (pbKey === "PB_CRISIS_SNIPER") {
-    const pb5 = lai > 2.25e8 && whale >= 0.35 && absb > 0.62 && aft < 0.65;
-    const pb13Breakout = price30 >= 0.015;
-    const pb13Breakdown = price30 <= -0.015;
-    const pb13 = (pb13Breakout && tox > 0.70 && whale < -0.10) || (pb13Breakdown && tox > 0.70 && whale > 0.10);
-    const pb8 = (obi > 0.35 && whale < -0.25 && tox > 0.75) || (obi < -0.35 && whale > 0.25 && tox > 0.75);
-    items.push(cItem("PB5-LAI", lai > 2.25e8, "LAI > 2.25억", `${(lai / 1e8).toFixed(2)}억`, ratioGE(lai, 2.25e8)));
-    items.push(cItem("PB5-고래 매수", whale >= 0.35, "whale ≥ 0.35", fmtNum(whale, 2), ratioGE(whale, 0.35)));
-    items.push(cItem("PB5-흡수", absb > 0.62, "absorption > 0.62", fmtNum(absb, 2), ratioGE(absb, 0.62)));
-    items.push(cItem("PB5-여진완화", aft < 0.65, "aftershock < 0.65", fmtNum(aft, 2), ratioLE(aft, 0.65)));
-    items.push(cItem("PB5 최종", pb5, "PB5 4개 조건 동시", `${pb5}`, pb5 ? 1 : Math.min(ratioGE(lai, 2.25e8), ratioGE(whale, 0.35), ratioGE(absb, 0.62), ratioLE(aft, 0.65))));
-    const brk = pb13Breakout || pb13Breakdown;
-    items.push(cItem("PB13-소프트 돌파", brk, "|Δ30| >= 1.5%", `${fmtNum(price30 * 100, 2)}%`, ratioABSGE(price30, 0.015)));
-    items.push(cItem("PB13-독성", tox > 0.70, "tox > 0.70", fmtNum(tox, 2), ratioGE(tox, 0.70)));
-    items.push(cItem("PB13-고래 역행", Math.abs(whale) > 0.10, "|whale| > 0.10", fmtNum(whale, 2), ratioABSGE(whale, 0.10)));
-    items.push(cItem("PB13 최종", pb13, "PB13 3개 조건 동시", `${pb13}`, pb13 ? 1 : Math.min(ratioABSGE(price30, 0.015), ratioGE(tox, 0.70), ratioABSGE(whale, 0.10))));
-    items.push(cItem("PB8-호가벽", Math.abs(obi) > 0.35, "|obi| > 0.35", fmtNum(obi, 2), ratioABSGE(obi, 0.35)));
-    items.push(cItem("PB8-고래 체결", Math.abs(whale) > 0.25, "|whale| > 0.25", fmtNum(whale, 2), ratioABSGE(whale, 0.25)));
-    items.push(cItem("PB8-독성", tox > 0.75, "tox > 0.75", fmtNum(tox, 2), ratioGE(tox, 0.75)));
-    items.push(cItem("PB8 최종", pb8, "PB8 3개 조건 동시", `${pb8}`, pb8 ? 1 : Math.min(ratioABSGE(obi, 0.35), ratioABSGE(whale, 0.25), ratioGE(tox, 0.75))));
-    return renderConditionCards(items, matched, score);
+  setT("chartDecisionText", decision.text);
+  setT("chartEntryLiquidityText", chartEntryLiquidity(state, compactState));
+  setT("chartPositionPctText", fmtPctNoPlus(positionPct, 1));
+  setT("chartEntryText", entryPrice > 0 ? fmtNum(entryPrice, 2) : "-");
+  setT("chartEntryTimeText", entryPrice > 0 && entryTime ? fmtShortTs(entryTime) : "-");
+  setT("chartExposureText", `${fmtNum(leverage, 2)}x / ${fmtNum(exposure, 2)}x`);
+  setT("chartUnrealizedPnlText", String(pos.current || "NONE").toUpperCase() === "NONE" ? "-" : fmtPct(unrealizedPnl, 2));
+  setT("chartRiskText", signedRiskPairLabel(tp, sl) ? `계정 ${signedRiskPairLabel(tp, sl)}${priceMovePair ? ` · 가격 ${priceMovePair}` : ""}` : "-");
+  setT("chartRegimeText", regime);
+  const riskEl = el("chartRiskText");
+  if (riskEl) {
+    const detail = [
+      risk.exposure > 0 ? `exposure ${fmtNum(risk.exposure, 2)}x` : "",
+      tpPrice > 0 ? `TP ${fmtNum(tpPrice, 2)}` : "",
+      slPrice > 0 ? `SL ${fmtNum(slPrice, 2)}` : "",
+    ].filter(Boolean).join(" / ");
+    riskEl.title = detail || "";
   }
-
-  if (pbKey === "PB_SQUEEZE_SNIPER") {
-    const pb2 = eai > 2.0 && Math.abs(funding) > 0.001 && absb > 0.60 && oiDelta > 0.003;
-    const pb12 = Math.abs(funding) > 0.001 && eaiDelta < 0 && Math.abs(whale) > 0.2;
-    items.push(cItem("PB2-EAI", eai > 2.0, "EAI > 2.0", fmtNum(eai, 2), ratioGE(eai, 2.0)));
-    items.push(cItem("PB2-펀딩 압축", Math.abs(funding) > 0.001, "|funding| > 0.001", fmtNum(funding, 4), ratioABSGE(funding, 0.001)));
-    items.push(cItem("PB2-흡수", absb > 0.60, "absorption > 0.60", fmtNum(absb, 2), ratioGE(absb, 0.60)));
-    items.push(cItem("PB2-OI 증가", oiDelta > 0.003, "OIΔ > 0.003", fmtNum(oiDelta, 4), ratioGE(oiDelta, 0.003)));
-    items.push(cItem("PB2 최종", pb2, "PB2 4개 조건 동시", `${pb2}`, pb2 ? 1 : Math.min(ratioGE(eai, 2.0), ratioABSGE(funding, 0.001), ratioGE(absb, 0.60), ratioGE(oiDelta, 0.003))));
-    items.push(cItem("PB12-펀딩 과열", Math.abs(funding) > 0.001, "|funding| > 0.001", fmtNum(funding, 4), ratioABSGE(funding, 0.001)));
-    items.push(cItem("PB12-EAI 둔화", eaiDelta < 0, "eaiΔ15 < 0", fmtNum(eaiDelta, 3), clamp01(Math.max(-eaiDelta, 0) / 0.05)));
-    items.push(cItem("PB12-고래 반대", Math.abs(whale) > 0.2, "|whale| > 0.2", fmtNum(whale, 2), ratioABSGE(whale, 0.2)));
-    items.push(cItem("PB12 최종", pb12, "PB12 3개 조건 동시", `${pb12}`, pb12 ? 1 : Math.min(ratioABSGE(funding, 0.001), clamp01(Math.max(-eaiDelta, 0) / 0.05), ratioABSGE(whale, 0.2))));
-    return renderConditionCards(items, matched, score);
+  const unrealizedEl = el("chartUnrealizedPnlText");
+  if (unrealizedEl) {
+    unrealizedEl.classList.remove("good-text", "bad-text", "muted-text");
+    const unrealizedClass = String(pos.current || "NONE").toUpperCase() === "NONE" ? "muted" : riskClass(unrealizedPnl);
+    unrealizedEl.classList.add(`${unrealizedClass}-text`);
   }
-
-  if (pbKey === "PB_TREND_SIGNAL") {
-    const pb7 = Math.abs(obi) > 0.25 && Math.abs(whale) > 0.25 && tox < 0.38 && toxAvg30 < 0.30 && Math.abs(nifAvg30) > 0.10;
-    items.push(cItem("PB7-호가 정렬", Math.abs(obi) > 0.25, "|obi| > 0.25", fmtNum(obi, 2), ratioABSGE(obi, 0.25)));
-    items.push(cItem("PB7-고래 정렬", Math.abs(whale) > 0.25, "|whale| > 0.25", fmtNum(whale, 2), ratioABSGE(whale, 0.25)));
-    items.push(cItem("PB7-독성(즉시)", tox < 0.38, "tox < 0.38", fmtNum(tox, 2), ratioLE(tox, 0.38)));
-    items.push(cItem("PB7-독성(30m)", toxAvg30 < 0.30, "tox30 < 0.30", fmtNum(toxAvg30, 2), ratioLE(toxAvg30, 0.30)));
-    items.push(cItem("PB7-고래평균(30m)", Math.abs(nifAvg30) > 0.10, "|nif_avg_30m| > 0.10", fmtNum(nifAvg30, 2), ratioABSGE(nifAvg30, 0.10)));
-    items.push(cItem("PB7 최종", pb7, "PB7 5개 조건 동시", `${pb7}`, pb7 ? 1 : Math.min(ratioABSGE(obi, 0.25), ratioABSGE(whale, 0.25), ratioLE(tox, 0.38), ratioLE(toxAvg30, 0.30), ratioABSGE(nifAvg30, 0.10))));
-    return renderConditionCards(items, matched, score);
-  }
-
-  if (pbKey === "PB_WHALE_SIGNAL") {
-    const pb10 = Math.abs(nifZ) > 2.0 && Math.abs(price30) <= 0.002;
-    const pb11 = vol30 > 0 && vol30 < 0.005 && absAvg30 > 0.75 && Math.abs(biasAvg30) > 0.18;
-    items.push(cItem("PB10-고래 z", Math.abs(nifZ) > 2.0, "|nif_z_30m| > 2.0", fmtNum(nifZ, 2), ratioABSGE(nifZ, 2.0)));
-    items.push(cItem("PB10-가격 고정", Math.abs(price30) <= 0.002, "|Δ30| <= 0.2%", `${fmtNum(price30*100,2)}%`, ratioABSLE(price30, 0.002)));
-    items.push(cItem("PB10 최종", pb10, "PB10 2개 조건 동시", `${pb10}`, pb10 ? 1 : Math.min(ratioABSGE(nifZ, 2.0), ratioABSLE(price30, 0.002))));
-    items.push(cItem("PB11-저변동", vol30 > 0 && vol30 < 0.005, "0 < vol30 < 0.5%", `${fmtNum(vol30*100,2)}%`, ratioLE(vol30, 0.005)));
-    items.push(cItem("PB11-흡수 평균", absAvg30 > 0.75, "abs30 > 0.75", fmtNum(absAvg30, 2), ratioGE(absAvg30, 0.75)));
-    items.push(cItem("PB11-편향 평균", Math.abs(biasAvg30) > 0.18, "|bias30| > 0.18", fmtNum(biasAvg30, 2), ratioABSGE(biasAvg30, 0.18)));
-    items.push(cItem("PB11 최종", pb11, "PB11 3개 조건 동시", `${pb11}`, pb11 ? 1 : Math.min(ratioLE(vol30, 0.005), ratioGE(absAvg30, 0.75), ratioABSGE(biasAvg30, 0.18))));
-    return renderConditionCards(items, matched, score);
-  }
-
-  if (pbKey === "PB_MEAN_REVERT_SIGNAL") {
-    const pb15 = Math.abs(vwapGap) > 0.004 && vol30 < 0.006 && absb > 0.60 && Math.abs(whale) < 0.20;
-    const pbLiq = Math.abs(liqDir) > 0 && liqStr >= 0.22 && liqDist <= 0.005 && tox < 0.40;
-    const pbOi = Math.abs(price30) > 0.003 && oiDelta < -0.005 && tox < 0.50;
-    items.push(cItem("PB15-VWAP 이격", Math.abs(vwapGap) > 0.004, "|gap| > 0.4%", `${fmtNum(vwapGap*100,2)}%`, ratioABSGE(vwapGap, 0.004)));
-    items.push(cItem("PB15-저변동", vol30 < 0.006, "vol30 < 0.6%", `${fmtNum(vol30*100,2)}%`, ratioLE(vol30, 0.006)));
-    items.push(cItem("PB15-흡수", absb > 0.60, "absorption > 0.60", fmtNum(absb, 2), ratioGE(absb, 0.60)));
-    items.push(cItem("PB15-고래중립", Math.abs(whale) < 0.20, "|whale| < 0.20", fmtNum(whale, 2), ratioABSLE(whale, 0.20)));
-    items.push(cItem("PB15 최종", pb15, "PB15 4개 조건 동시", `${pb15}`, pb15 ? 1 : Math.min(ratioABSGE(vwapGap, 0.004), ratioLE(vol30, 0.006), ratioGE(absb, 0.60), ratioABSLE(whale, 0.20))));
-    items.push(cItem("PB_LIQ-방향", Math.abs(liqDir) > 0, "|dir| > 0", `${liqDir}`, Math.abs(liqDir) > 0 ? 1 : 0));
-    items.push(cItem("PB_LIQ-강도", liqStr >= 0.22, "strength >= 0.22", fmtNum(liqStr, 2), ratioGE(liqStr, 0.22)));
-    items.push(cItem("PB_LIQ-거리", liqDist <= 0.005, "dist <= 0.5%", `${fmtNum(liqDist*100,2)}%`, ratioLE(liqDist, 0.005)));
-    items.push(cItem("PB_LIQ-독성", tox < 0.40, "tox < 0.40", fmtNum(tox, 2), ratioLE(tox, 0.40)));
-    items.push(cItem("PB_LIQ 최종", pbLiq, "PB_LIQ 4개 조건 동시", `${pbLiq}`, pbLiq ? 1 : Math.min((Math.abs(liqDir) > 0 ? 1 : 0), ratioGE(liqStr, 0.22), ratioLE(liqDist, 0.005), ratioLE(tox, 0.40))));
-    items.push(cItem("PB_OI-30분 변동", Math.abs(price30) > 0.003, "|Δ30| > 0.3%", `${fmtNum(price30*100,2)}%`, ratioABSGE(price30, 0.003)));
-    items.push(cItem("PB_OI-OI 감소", oiDelta < -0.005, "OIΔ < -0.005", fmtNum(oiDelta, 4), clamp01(Math.max(-oiDelta, 0) / 0.005)));
-    items.push(cItem("PB_OI-독성 제한", tox < 0.50, "tox < 0.50", fmtNum(tox, 2), ratioLE(tox, 0.50)));
-    items.push(cItem("PB_OI 최종", pbOi, "PB_OI 3개 조건 동시", `${pbOi}`, pbOi ? 1 : Math.min(ratioABSGE(price30, 0.003), clamp01(Math.max(-oiDelta, 0) / 0.005), ratioLE(tox, 0.50))));
-    return renderConditionCards(items, matched, score);
-  }
-
-  return `<div class="cond-empty">조건 규칙이 등록되지 않은 카드입니다.</div>`;
+  const ribbon = el("chartAiRibbon");
+  if (ribbon) ribbon.className = `chart-ai-ribbon ${decision.cls === "long" ? "good" : decision.cls === "short" ? "bad" : "hold"}`;
 }
 
-function edgeInterpret(v) {
+function executionAlertState(state, compactState) {
+  const explicit = state?.execution_alert || compactState?.execution_alert;
+  if (explicit && typeof explicit === "object") return explicit;
+  const execution = state?.account?.execution || state?.signal?.live_execution || compactState?.signal?.live_execution || {};
+  const enabled = Boolean(execution.enabled);
+  const blocking = Boolean(execution.blocking);
+  const requested = execution.requested_enabled === undefined ? enabled : Boolean(execution.requested_enabled);
+  const error = String(execution.error || execution.last_error || "");
+  const decisionReason = String(state?.signal?.block_reason || state?.signal?.governor_reason || state?.signal?.hold_reason || "");
+  const decisionIssue = /(error|failed|mismatch|bad_|blocked|unavailable|not_ready|pending_reconcile)/i.test(decisionReason);
+  const reason = error || (decisionIssue ? decisionReason : "") || String(execution.disabled_reason || execution.status || "");
+  if (enabled && !blocking && !error && !decisionIssue) return { active: false };
+  const severity = error || /(error|failed|mismatch|bad_)/i.test(decisionReason) ? "error" : (requested ? "blocked" : "disabled");
+  return {
+    active: true,
+    severity,
+    title: severity === "error" ? "트레이딩봇 실행 오류" : (severity === "blocked" ? "실제 주문 실행 차단" : "실제 주문 실행 비활성"),
+    reason: reason || "unknown_execution_state",
+    occurred_at: execution.last_error_at || execution.disabled_at || state?.updated_at || "",
+  };
+}
+
+function renderExecutionAlert(state, compactState) {
+  const banner = el("executionAlertBanner");
+  if (!banner) return;
+  const alert = executionAlertState(state, compactState);
+  if (!alert?.active) {
+    banner.className = "execution-alert-banner hidden";
+    return;
+  }
+  const severity = ["error", "blocked", "disabled"].includes(String(alert.severity)) ? String(alert.severity) : "blocked";
+  banner.className = "execution-alert-banner " + severity;
+  setT("executionAlertTitle", String(alert.title || "트레이딩봇 실행 알림"));
+  setT("executionAlertReason", String(alert.reason || "unknown_execution_state"));
+  setT("executionAlertTime", alert.occurred_at ? "발생 " + fmtTs(alert.occurred_at) : "발생 시각 미상");
+}
+
+function exposureFromRow(row) {
+  return firstPositive(row.total_exposure, row.notional_exposure, row.new_total_exposure, row.new_notional_exposure, row.position_fraction, row.new_position_fraction, row.margin_fraction, row.new_margin_fraction);
+}
+
+function exposureSeries(filter) {
+  let rows = latestTradeJournal || [];
+  if (filter && filter !== "ALL") rows = rows.filter((row) => strategyTagFromRow(row) === filter);
+  // Only CLOSE events: one point per position that has actually been closed.
+  // OPEN/RESIZE rows are excluded so still-open positions (of any asset) never show up here.
+  return rows
+    .filter((row) => String(row.kind || "").toUpperCase() === "CLOSE")
+    .map((row) => ({ ts: row.closed_at || row.ts, exposure: exposureFromRow(row), side: row.side, kind: row.kind }))
+    .filter((row) => Number.isFinite(Number(row.exposure)) && Number(row.exposure) >= 0)
+    .slice(-80);
+}
+
+function riskClass(v) {
   const x = Number(v || 0);
-  if (x >= 0.4) return "LONG 우위 강함";
-  if (x >= 0.15) return "LONG 우위 약함";
-  if (x <= -0.4) return "SHORT 우위 강함";
-  if (x <= -0.15) return "SHORT 우위 약함";
-  return "방향 중립";
-}
-
-function toxInterpret(v, dir = 0) {
-  const x = clamp01(v);
-  const dirTxt = dir > 0 ? "매수벽" : dir < 0 ? "매도벽" : "양방향";
-  if (x >= 0.7) return `${dirTxt} 독성 높음: 진입 경계`;
-  if (x >= 0.4) return `${dirTxt} 독성 주의: 비중 축소`;
-  return `${dirTxt} 독성 낮음: 정상 구간`;
-}
-
-function aftershockInterpret(v, dir = 0) {
-  const x = clamp01(v);
-  const dirTxt = dir > 0 ? "상방" : dir < 0 ? "하방" : "양방향";
-  if (x >= 0.7) return `${dirTxt} 여진 높음: 진입 경계`;
-  if (x >= 0.4) return `${dirTxt} 여진 주의: 비중 축소`;
-  return `${dirTxt} 여진 낮음: 정상 구간`;
-}
-
-function riskClass(v, inverse = false) {
-  const x = Number(v || 0);
-  if (inverse) {
-    if (x < 0.35) return "good";
-    if (x < 0.65) return "warn";
-    return "bad";
-  }
   if (x > 0) return "good";
   if (x < 0) return "bad";
   return "muted";
 }
 
-function obiLabel(v) {
-  const x = Number(v || 0);
-  if (x >= 0.3) return `강한 매수벽 (${fmtNum(x, 2)})`;
-  if (x <= -0.3) return `강한 매도벽 (${fmtNum(x, 2)})`;
-  return `호가 균형 (${fmtNum(x, 2)})`;
+function directionalCaution(score, th = 0.1) {
+  const x = Number(score || 0);
+  if (x >= th) return "롱 진입";
+  if (x <= -th) return "숏 진입";
+  return "중립";
 }
 
-function whaleLabel(micro) {
+function flowRead(micro) {
   const x = Number(micro.nif_whale || 0);
-  if (x >= 0.2) return `매집중 (${fmtNum(x, 2)})`;
-  if (x <= -0.2) return `털기 (${fmtNum(x, 2)})`;
-  return `관망중 (${fmtNum(x, 2)})`;
+  if (x >= 0.2) return "큰손 매수가 강하게 들어옴";
+  if (x >= 0.05) return "큰손 매수 유입";
+  if (x <= -0.2) return "큰손 매도가 강하게 나옴";
+  if (x <= -0.05) return "큰손 매도 유입";
+  return "큰손 수급은 뚜렷하지 않음";
 }
 
-function whaleDescLabel(v) {
+function whalePositionRead(micro) {
+  const score = Number(micro.whale_position_score || 0);
+  const confidence = Number(micro.whale_position_confidence || 0);
+  if (score >= 0.25) return `고래 포지션이 롱 쪽으로 기움`;
+  if (score <= -0.25) return `고래 포지션이 숏 쪽으로 기움`;
+  if (confidence >= 70) return "고래 포지션은 관망에 가까움";
+  return "고래 포지션 판단 약함";
+}
+
+function obiRead(v) {
   const x = Number(v || 0);
-  if (x >= 0.2) return "매수 우위 구간";
-  if (x <= -0.2) return "매도 우위 구간";
-  return "중립 구간";
+  if (x >= 0.3) return "매수 호가가 강하게 받침";
+  if (x >= 0.1) return "매수 호가가 우세함";
+  if (x <= -0.3) return "매도 호가가 강하게 누름";
+  if (x <= -0.1) return "매도 호가가 우세함";
+  return "호가는 균형 상태";
 }
 
-function splitStateAndScore(label) {
-  const s = String(label || "");
-  const m = s.match(/^(.*)\s(\([^)]+\))$/);
-  if (m) return { state: m[1].trim(), score: m[2].trim() };
-  return { state: s, score: "" };
+function eaiRead(micro) {
+  const eai = Number(micro.eai || 0);
+  const bias = Number(micro.eai_bias || micro.signal_bias || micro.obi || 0);
+  if (eai >= 2.5) return bias < 0 ? "하방 변동성 폭발 주의" : bias > 0 ? "상방 변동성 폭발 주의" : "변동성 폭발 주의";
+  if (eai >= 1.5) return "변동성 확대 중";
+  if (eai <= 0.5) return "에너지가 낮아 추격 약함";
+  return "변동성은 보통 수준";
 }
 
-function getStatusColor(status) {
-  const s = String(status || "");
-  if (s.includes("매도") || s.includes("숏")) return "#ff7575";
-  if (s.includes("매수") || s.includes("매집")) return "#2fd077";
-  return "#66D8FF";
+function eaiHint(micro) {
+  const eai = Number(micro.eai || 0);
+  const bias = Number(micro.eai_bias || micro.signal_bias || micro.obi || 0);
+  if (eai < 0.5) return "안정";
+  if (bias >= 0.1) return "롱 진입";
+  if (bias <= -0.1) return "숏 진입";
+  return eai >= 1.5 ? "추격 조심" : "중립";
 }
 
-function getWhaleIntentColor(status) {
-  const s = String(status || "");
-  if (s.includes("롱 구축") || s.includes("롱구축") || s.includes("매수 우세")) return "#2fd077";
-  if (s.includes("숏 구축") || s.includes("숏구축") || s.includes("매도 우세")) return "#ff7575";
-  if (s.includes("중립")) return "#66D8FF";
-  return "#66D8FF";
+function toxRead(v) {
+  const x = clamp01(v);
+  if (x >= 0.7) return "체결 독성이 높아 진입 위험";
+  if (x >= 0.4) return "체결 독성 주의 구간";
+  return "체결 환경은 안정적";
 }
 
-function stripLeadingEmoji(s) {
-  return String(s || "")
-    .replace(/^[\s\uFE0F\u200D\u2600-\u27BF\u{1F300}-\u{1FAFF}]+/gu, "")
-    .trim();
+function toxHint(v, dir = 0) {
+  const x = clamp01(v);
+  if (x < 0.4) return "안정";
+  if (dir > 0) return "롱 진입";
+  if (dir < 0) return "숏 진입";
+  return "진입 조심";
 }
 
-function whaleIntentLabel(micro) {
-  const s = Number(micro.whale_sell_presence_ratio_30m || 0);
-  const buyP = Number(micro.whale_buy_presence_ratio_30m || 0);
-  const oiDelta = Number(micro.oi_delta_pct || 0);
-  const oiCum5m = Number(micro.oi_delta_cum_5m ?? oiDelta);
-  const bias = stripLeadingEmoji(micro.whale_position_bias_30m || "중립");
-  if (s <= 0.05 && buyP <= 0.05) return `중립(신호 약함)`;
-  return `${bias}`;
+function tailRiskRead(tail) {
+  const x = clamp01(tail.aftershock_prob);
+  const dir = Number(tail.z_bias || 0);
+  if (x >= 0.7) return dir < 0 ? "하방 급변 위험 높음" : dir > 0 ? "상방 급변 위험 높음" : "급변 위험 높음";
+  if (x >= 0.4) return "급변 가능성 주의";
+  return "꼬리 리스크 안정";
 }
 
-function whaleIntentHistoryLabel(micro) {
-  const s = Number(micro.whale_sell_presence_ratio_30m || 0);
-  const buyP = Number(micro.whale_buy_presence_ratio_30m || 0);
-  const bias = stripLeadingEmoji(micro.whale_position_bias_30m || "중립");
-  if (s <= 0.05 && buyP <= 0.05) return "중립(신호 약함)";
-  return `${bias}`;
+function tailRiskHint(tail) {
+  const x = clamp01(tail.aftershock_prob);
+  const dir = Number(tail.z_bias || 0);
+  if (x < 0.4) return "안정";
+  if (dir > 0) return "롱 진입";
+  if (dir < 0) return "숏 진입";
+  return "진입 조심";
 }
 
-function whaleIntentGuideLabel(micro) {
-  const bias = stripLeadingEmoji(micro.whale_position_bias_30m || "중립");
-  const est = String(micro.whale_position_estimate || "NEUTRAL").toUpperCase();
-  const score = Number(micro.whale_position_score ?? 0);
-  const longPct = Math.round(clamp01((score + 1) / 2) * 100);
-  const shortPct = Math.round((1 - clamp01((score + 1) / 2)) * 100);
-  const conf = est === "LONG" ? longPct : est === "SHORT" ? shortPct : Math.max(longPct, shortPct);
-  const estText = est === "LONG" ? "롱 우위" : est === "SHORT" ? "숏 우위" : "중립";
-  const prefix = `추정 ${estText} ${fmtNum(conf, 0)}%`;
-  if (bias.includes("신규 롱 구축")) return `${prefix} · 대응: LONG 동승`;
-  if (bias.includes("신규 숏 구축")) return `${prefix} · 대응: SHORT 동승`;
-  if (bias.includes("숏 커버링")) return `${prefix} · 대응: 롱 추격 금지`;
-  if (bias.includes("기존 롱 청산")) return `${prefix} · 대응: 눌림목 LONG 대기`;
-  return `${prefix} · 대응: 관망(HOLD)`;
+function signalTone(signal) {
+  if (String(signal || "").includes("조심")) return "warn";
+  if (signal === "롱 진입") return "good";
+  if (signal === "숏 진입") return "bad";
+  return "neutral";
 }
 
-function eaiLabel(v) {
-  const x = Number(v || 0);
-  if (x >= 2.0) return `에너지 응축 (EAI ${fmtNum(x, 1)})`;
-  return `변동성 평온 (EAI ${fmtNum(x, 1)})`;
-}
-
-function kellyGuideLabel(v) {
-  const x = Number(v || 1);
-  if (x >= 1.3) return `공격적 확대 (×${fmtNum(x, 2)})`;
-  if (x >= 1.1) return `소폭 확대 (×${fmtNum(x, 2)})`;
-  if (x <= 0.6) return `방어적 축소 (×${fmtNum(x, 2)})`;
-  return `비중 유지 (×${fmtNum(x, 2)})`;
-}
-
-function breakParenLine(s) {
-  return String(s || "").replace(/\s+\(/, "\n(");
-}
-
-function pbLabel(name, matched) {
-  if (!matched) return "미선택";
-  const n = String(name || "");
-  if (n === "PB_VETO_SHIELD") return "PB 방어쉴드 (VETO)";
-  if (n === "PB_CRISIS_SNIPER") return "PB 위기 스나이퍼";
-  if (n === "PB_SQUEEZE_SNIPER") return "PB 스퀴즈 스나이퍼";
-  if (n === "PB_TREND_SIGNAL") return "PB 추세 신호";
-  if (n === "PB_WHALE_SIGNAL") return "PB 고래 신호";
-  if (n === "PB_MEAN_REVERT_SIGNAL") return "PB 평균회귀 신호";
-  if (n === "PB9_VACUUM_WHIPSAW") return "PB9 유동성 붕괴 긴급회피";
-  if (n === "PB_FUNDING_EXTREME_HOLD") return "PB 펀딩비 극단 진입차단";
-  if (n === "PB5_MAMMOTH_SNIPER") return "PB5 폭락장 V반등 저점포착";
-  if (n === "PB8_HOLY_TRINITY_TRAP") return "PB8 가짜벽 역추적 선행매매";
-  if (n === "PB2_SQUEEZE_IGNITION") return "PB2 응축에너지 돌파추격";
-  if (n === "PB7_HOLY_TRINITY_TREND") return "PB7 저독성 정배열 추세추종";
-  if (n === "PB13_BREAKOUT_TRAP") return "PB13 가짜돌파 역추세 저격";
-  if (n === "PB10_CVD_DIVERGENCE") return "PB10 고래은닉 매집·분배 추적";
-  if (n === "PB_LIQUIDATION_MAGNET") return "PB 청산자석 클러스터 추종";
-  if (n === "PB_OI_DIVERGENCE") return "PB OI 발산 역추세 포착";
-  if (n === "PB12_FUNDING_SNAPBACK") return "PB12 펀딩 과열 되돌림 포착";
-  if (n === "PB11_TWAP_ABSORPTION") return "PB11 저변동 잠행 매집 추종";
-  if (n === "PB15_VWAP_MEAN_REVERSION") return "PB15 VWAP 탄성 회귀";
-  if (n === "CLASH_RESOLVED") return "충돌회피 관망결정";
-  if (n === "SYNERGY_PERFECT_STORM") return "시너지 풀비중 점화";
-  return n || "선택됨";
-}
-
-function pbEvalMap(list) {
-  const m = {};
-  (list || []).forEach((x) => {
-    const k = String(x?.name || "");
-    if (k) m[k] = x;
-  });
-  return m;
-}
-
-function pickGroupWinnerFromEvals(evals, names) {
-  const matched = (evals || []).filter((e) => Boolean(e?.matched) && names.has(String(e?.name || "")));
-  if (!matched.length) return { matched: false, name: "NONE", action: 0, kelly: 0.0, priority: 0, reason: "" };
-  return matched.reduce((best, cur) => (Number(cur?.priority || 0) > Number(best?.priority || 0) ? cur : best));
-}
-
-function pbEvalRender(evalObj) {
-  if (!evalObj) return { stage: "대기", cls: "muted", score: 0, impliedAction: 0, reco: "UNKNOWN", dirGap: 0, actionable: false, missing: true };
-  const name = String(evalObj.name || "");
-  const meta = evalObj.meta || {};
-  const matched = Boolean(evalObj.matched);
-  const PB_ACTION_SCORE_MIN = 60;
-  const PB_DIR_GAP_MIN = 0.12;
-
-  // ── 🧠 1. 스마트 헬퍼 함수 정의 ──
-  // 목표값 대비 도달률 (0 ~ 1)
-  const hit = (val, target) => clamp01(Math.abs(val) / target);
-  const posHit = (val, target) => clamp01(Number(val || 0) / target);
-  const negHit = (val, target) => clamp01((-Number(val || 0)) / target);
-
-  // 역방향 도달률: 낮을수록 좋음. target 이하면 만점(1), worst 이상이면 0점
-  const invHit = (val, target, worst) => {
-    if (val <= target) return 1.0;
-    if (val >= worst) return 0.0;
-    return clamp01((worst - val) / (worst - target));
-  };
-
-  // 병목 앙상블: 60%는 가장 못 미친 조건(Min)에, 40%는 전체 평균(Avg)에 가중치를 두어 가짜 점수 방지
-  const calcScore = (arr) => {
-    if (!arr.length) return 0;
-    const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-    const min = Math.min(...arr);
-    return (0.6 * min + 0.4 * avg) * 100;
-  };
-
-  // ── 📊 2. 데이터 추출 ──
-  const obi = Number(meta.obi || 0);
-  const whale = Number(meta.nif_whale || 0);
-  const tox = Number(meta.toxicity || 0);
-  const collapse = Number(meta.collapse || 0);
-  const absb = Number(meta.absorption || 0);
-  const eai = Number(meta.eai || 0);
-  const funding = Number(meta.funding || 0);
-  const lai = Number(meta.lai || 0);
-  const aft = Number(meta.aftershock || 0);
-  const whaleSum = Number(meta.sum || 0);
-  const pChange = Number(meta.price_change || 0);
-  const oiDelta = Number(meta.oi_delta_pct ?? meta.oi_delta ?? 0);
-  const eaiDelta = Number(meta.eai_delta || 0);
-  const liqDir = Number(meta.direction || 0);
-  const liqStrength = Number(meta.strength || 0);
-  const liqDistance = Number(meta.distance || 1);
-  const vol = Number(meta.vol || 0);
-  const toxAvg = Number(meta.tox_avg || 0);
-  const nifAvg = Number(meta.nif_avg || 0);
-  const vwapGap = Number(meta.vwap_gap || 0);
-
-  let score = 0;
-  let impliedAction = Number(evalObj.action || 0);
-  let dirGap = 0.0;
-  const unifiedScore = Number(meta.unified_score);
-  const hasUnifiedScore = Number.isFinite(unifiedScore);
-
-  // ── 🎯 3. 플레이북별 최신 Threshold 기반 점수 산출 ──
-  if (hasUnifiedScore) {
-    score = clamp01(unifiedScore) * 100;
-    dirGap = clamp01(Math.abs(unifiedScore - 0.5) * 2.0);
-  }
-  else if (name === "PB9_VACUUM_WHIPSAW") {
-    // 붕괴(0.75)와 독성(0.85)
-    score = calcScore([hit(collapse, 0.75), hit(tox, 0.85)]);
-  }
-  else if (name === "PB5_MAMMOTH_SNIPER") {
-    // LAI(3억 * 0.75 = 2.25억), 고래(0.35), 흡수(0.62), 여진(<0.65, 0.9이상이면 0점)
-    score = calcScore([
-      hit(lai, 225000000),
-      hit(whale, 0.35),
-      hit(absb, 0.62),
-      invHit(aft, 0.65, 0.90)
-    ]);
-  }
-  else if (name === "PB8_HOLY_TRINITY_TRAP") {
-    // 방향성 충돌(다이버전스) 계산 (OBI 0.35, Whale 0.25 기준)
-    const sShort = calcScore([hit(obi, 0.35), hit(-whale, 0.25)]) / 100;
-    const sLong = calcScore([hit(-obi, 0.35), hit(whale, 0.25)]) / 100;
-    dirGap = Math.abs(sLong - sShort);
-
-    if (sShort > sLong) impliedAction = 2;
-    else if (sLong > sShort) impliedAction = 1;
-
-    // 이긴 방향의 다이버전스 점수와 독성(0.75)의 앙상블
-    score = calcScore([Math.max(sShort, sLong), hit(tox, 0.75)]);
-  }
-  else if (name === "PB2_SQUEEZE_IGNITION") {
-    // EAI(2.0), Funding(0.001), 흡수(0.60), OI 델타(0.003)
-    score = calcScore([
-      hit(eai, 2.0),
-      hit(Math.abs(funding), 0.001),
-      hit(absb, 0.60),
-      hit(oiDelta, 0.003),
-    ]);
-    dirGap = calcScore([hit(Math.abs(funding), 0.001), hit(oiDelta, 0.003)]) / 100;
-    if (funding < 0) impliedAction = 1;
-    else if (funding > 0) impliedAction = 2;
-  }
-  else if (name === "PB7_HOLY_TRINITY_TREND") {
-    // OBI(0.25), Whale(0.25) 일치도, 독성(<0.38, 0.7이상이면 0점)
-    const sLong = calcScore([hit(obi, 0.25), hit(whale, 0.25)]) / 100;
-    const sShort = calcScore([hit(-obi, 0.25), hit(-whale, 0.25)]) / 100;
-    dirGap = Math.abs(sLong - sShort);
-
-    if (sLong > sShort) impliedAction = 1;
-    else if (sShort > sLong) impliedAction = 2;
-
-    score = calcScore([Math.max(sLong, sShort), invHit(tox, 0.38, 0.70)]);
-  }
-  else if (name === "PB13_BREAKOUT_TRAP") {
-    score = calcScore([hit(tox, 0.70), hit(whale, 0.25)]);
-    dirGap = hit(Math.abs(whale), 0.25);
-  }
-  else if (name === "PB_FUNDING_EXTREME_HOLD") {
-    score = calcScore([hit(Math.abs(funding), 0.002)]);
-    dirGap = 1.0;
-    impliedAction = 0;
-  }
-  else if (name === "PB10_CVD_DIVERGENCE") {
-    const z30 = Number(meta.nif_z_30m || 0);
-    const sLong = calcScore([posHit(z30, 2.0), invHit(pChange, 0.002, 0.005)]) / 100;
-    const sShort = calcScore([negHit(z30, 2.0), invHit(-pChange, 0.002, 0.005)]) / 100;
-    dirGap = Math.abs(sLong - sShort);
-    if (sLong > sShort) impliedAction = 1;
-    else if (sShort > sLong) impliedAction = 2;
-    score = Math.max(sLong, sShort) * 100;
-  }
-  else if (name === "PB_LIQUIDATION_MAGNET") {
-    if (liqDir > 0) impliedAction = 1;
-    else if (liqDir < 0) impliedAction = 2;
-    score = calcScore([
-      hit(liqStrength, 0.22),
-      invHit(liqDistance, 0.005, 0.015),
-      invHit(tox, 0.40, 0.80),
-    ]);
-    dirGap = hit(liqStrength, 0.22);
-  }
-  else if (name === "PB_OI_DIVERGENCE") {
-    const oiDelta = Number(meta.oi_delta || 0);
-    const sLong = calcScore([negHit(pChange, 0.003), negHit(oiDelta, 0.005), invHit(tox, 0.50, 0.80)]) / 100;
-    const sShort = calcScore([posHit(pChange, 0.003), negHit(oiDelta, 0.005), invHit(tox, 0.50, 0.80)]) / 100;
-    dirGap = Math.abs(sLong - sShort);
-    if (sLong > sShort) impliedAction = 1;
-    else if (sShort > sLong) impliedAction = 2;
-    score = Math.max(sLong, sShort) * 100;
-  }
-  else if (name === "PB12_FUNDING_SNAPBACK") {
-    score = calcScore([hit(Math.abs(funding), 0.001), hit(-eaiDelta, 0.05), hit(whale, 0.2)]);
-    dirGap = calcScore([hit(Math.abs(funding), 0.001), hit(Math.abs(whale), 0.2)]) / 100;
-  }
-  else if (name === "PB11_TWAP_ABSORPTION") {
-    const biasAbs = hit(Number(meta.bias || 0), 0.18);
-    const absVal = Number(meta.absorption ?? meta.abs ?? 0);
-    score = calcScore([invHit(vol, 0.005, 0.02), hit(absVal, 0.75), biasAbs]);
-    dirGap = biasAbs;
-  }
-  else if (name === "PB15_VWAP_MEAN_REVERSION") {
-    if (vwapGap < 0) impliedAction = 1;
-    else if (vwapGap > 0) impliedAction = 2;
-    score = calcScore([
-      hit(vwapGap, 0.004),
-      invHit(vol, 0.006, 0.02),
-      hit(absb, 0.60),
-      invHit(Math.abs(whale), 0.20, 0.60),
-    ]);
-    dirGap = hit(vwapGap, 0.004);
-  }
-
-  if (matched && !hasUnifiedScore) score = 100;
-  score = Math.round(score);
-
-  // ── 🎨 4. UI 렌더링 (단계 및 색상) ──
-  let stage = "대기";
-  if (matched) stage = "발동";
-  else if (score >= 75) stage = "고확률";
-  else if (score >= 50) stage = "주의";
-  else if (score >= 30) stage = "탐색";
-
-  let cls = "muted";
-  if (score >= 75) cls = "good";
-  else if (score >= 50) cls = "warn";
-  else if (score >= 30) cls = "bad";
-
-  let reco = "UNKNOWN";
-  if (name === "PB9_VACUUM_WHIPSAW") {
-    reco = String(meta.reco || "");
-    if (!reco) {
-      const pred = String(meta.pred_dir || "UNKNOWN");
-      if (pred === "DOWN_TAIL_EXPECTED") reco = "[LIMIT_LONG]";
-      else if (pred === "UP_TAIL_EXPECTED") reco = "[LIMIT_SHORT]";
-      else reco = "UNKNOWN";
-    }
-  }
-
-  const actionable =
-    (impliedAction === 1 || impliedAction === 2 || (reco && reco !== "UNKNOWN")) &&
-    score >= PB_ACTION_SCORE_MIN &&
-    (matched || dirGap >= PB_DIR_GAP_MIN);
-
-  return { stage, cls, score, impliedAction, reco, dirGap, actionable, missing: false };
-}
-
-function pushMicroHistoryValue(key, ts, text, value) {
-  const arr = microHistory[key];
-  if (!arr) return;
-  const v = Number(value);
-  const item = { ts: ts || "-", text: text || "-", value: Number.isFinite(v) ? v : 0 };
-  const last = arr[arr.length - 1];
-  if (last && last.ts === item.ts) {
-    arr[arr.length - 1] = item;
-  } else if (!last || last.text !== item.text || last.ts !== item.ts) {
-    arr.push(item);
-  }
-  while (arr.length > MICRO_HISTORY_MAX) arr.shift();
-}
-
-function renderMicroHistory(elId, key) {
-  const arr = microHistory[key] || [];
-  const target = el(elId);
-  if (!target) return;
-  if (!arr.length) {
-    target.textContent = "-";
-    return;
-  }
-  const rows = arr.slice().reverse().map((x, i) => {
-    const color = key === "whale_intent" ? getWhaleIntentColor(x.text) : getStatusColor(x.text);
-    const dot = `<span class="hist-dot" style="background:${color}"></span>`;
-    const cls = i === 0 ? "hist-row now" : "hist-row";
-    return `<div class="${cls}"><span class="hist-ts">${x.ts}</span><span class="hist-val">${dot}${x.text}</span></div>`;
-  });
-  target.innerHTML = rows.join("");
-}
-
-function renderWhaleSparkline() {
-  const svg = el("whaleSpark");
-  if (!svg) return;
-  const pts = (microHistory.whale || []).map((x) => Number(x.value || 0));
-  if (!pts.length) {
-    svg.innerHTML = "";
-    return;
-  }
-  const NS = "http://www.w3.org/2000/svg";
-  const w = 320, h = 84;
-  const pL = 6, pR = 64, pY = 6;
-  const min = Math.min(...pts, -0.2);
-  const max = Math.max(...pts, 0.2);
-  const span = Math.max(max - min, 1e-6);
-  const xAt = (i) => pL + (i * (w - pL - pR)) / Math.max(pts.length - 1, 1);
-  const yAt = (v) => pY + ((max - v) * (h - pY * 2)) / span;
-  const path = pts.map((v, i) => `${i ? "L" : "M"}${xAt(i)},${yAt(v)}`).join(" ");
-  const area = `${path} L${xAt(pts.length - 1)},${h - pY} L${xAt(0)},${h - pY} Z`;
-  const lastV = pts[pts.length - 1] || 0;
-  const lastX = xAt(pts.length - 1);
-  const lastY = yAt(lastV);
-  const labelX = Math.min(w - pY - 8, lastX + 8);
-  const labelY = Math.max(pY + 10, lastY - 8);
-  svg.innerHTML = `
-    <defs>
-      <linearGradient id="whaleSparkGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#66D8FF" stop-opacity="0.35"></stop>
-        <stop offset="100%" stop-color="#66D8FF" stop-opacity="0.02"></stop>
-      </linearGradient>
-    </defs>
-    <path d="${area}" fill="url(#whaleSparkGrad)"></path>
-    <path d="${path}" fill="none" stroke="#66D8FF" stroke-width="2"></path>
-    <circle cx="${lastX}" cy="${lastY}" r="2.8" fill="#66D8FF"></circle>
-    <text x="${labelX}" y="${labelY}" fill="#66D8FF" font-size="10" text-anchor="start" font-family="JetBrains Mono, Roboto Mono, monospace">${fmtNum(lastV, 2)}</text>
-  `;
-}
-
-function renderWhalePosSparkline() {
-  const svg = el("whalePosSpark");
-  if (!svg) return;
-  const pts = (microHistory.whale_intent || []).map((x) => Number(x.value || 0));
-  if (pts.length < 2) {
-    svg.innerHTML = "";
-    return;
-  }
-  const w = 320, h = 84;
-  const pL = 6, pR = 72, pY = 6;
-  const min = 0.0;
-  const max = 1.0;
-  const span = max - min;
-  const xAt = (i) => pL + (i * (w - pL - pR)) / Math.max(pts.length - 1, 1);
-  const yAt = (v) => pY + ((max - v) * (h - pY * 2)) / span;
-
-  const longPts = pts.map((s) => clamp01((s + 1) / 2));
-  const shortPts = longPts.map((l) => clamp01(1 - l));
-
-  const pathOf = (arr) => arr.map((v, i) => `${i ? "L" : "M"}${xAt(i)},${yAt(v)}`).join(" ");
-  const longPath = pathOf(longPts);
-  const shortPath = pathOf(shortPts);
-  const lastLong = longPts[longPts.length - 1] || 0;
-  const lastShort = shortPts[shortPts.length - 1] || 0;
-  const lastX = xAt(longPts.length - 1);
-  const lastYLong = yAt(lastLong);
-  const lastYShort = yAt(lastShort);
-  const labelX = Math.min(w - pY - 8, lastX + 8);
-
-  const midY = yAt(0.5);
-  svg.innerHTML = `
-    <line x1="${pL}" y1="${midY}" x2="${w - pR}" y2="${midY}" stroke="rgba(255,255,255,0.20)" stroke-width="1"></line>
-    <path d="${longPath}" fill="none" stroke="#2fd077" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-    <path d="${shortPath}" fill="none" stroke="#ff7575" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-    <circle cx="${lastX}" cy="${lastYLong}" r="2.6" fill="#2fd077"></circle>
-    <circle cx="${lastX}" cy="${lastYShort}" r="2.6" fill="#ff7575"></circle>
-    <text x="${labelX}" y="${Math.max(pY + 10, lastYLong - 6)}" fill="#2fd077" font-size="10" text-anchor="start" font-family="JetBrains Mono, Roboto Mono, monospace">L ${Math.round(lastLong * 100)}%</text>
-    <text x="${labelX}" y="${Math.min(h - pY, lastYShort + 12)}" fill="#ff7575" font-size="10" text-anchor="start" font-family="JetBrains Mono, Roboto Mono, monospace">S ${Math.round(lastShort * 100)}%</text>
-  `;
-}
-
-function renderLinearGauge(fillId, value01, color = "#66D8FF", labelId = "", label = "") {
-  const fill = el(fillId);
-  if (!fill) return;
-  const v = clamp01(value01);
-  fill.style.height = `${fmtNum(v * 100, 0)}%`;
-  fill.style.background = color;
-  if (labelId) {
-    const lbl = el(labelId);
-    if (lbl) lbl.textContent = label;
-  }
-}
-
-function renderLRGauge(leftFillId, rightFillId, left01, right01, leftTextId = "", rightTextId = "", leftText = "", rightText = "") {
-  const l = el(leftFillId);
-  const r = el(rightFillId);
-  if (l) l.style.width = `${fmtNum(clamp01(left01) * 100, 0)}%`;
-  if (r) r.style.width = `${fmtNum(clamp01(right01) * 100, 0)}%`;
-  if (leftTextId) {
-    const lt = el(leftTextId);
-    if (lt) lt.textContent = leftText;
-  }
-  if (rightTextId) {
-    const rt = el(rightTextId);
-    if (rt) rt.textContent = rightText;
-  }
+function cleanDisplaySource(value) {
+  const head = String(value || "-").split("|")[0].trim();
+  const lower = head.toLowerCase();
+  if (lower.includes("alpha4_3_sticky") || lower.includes("alpha4.3 sticky") || lower.includes("sticky_current")) return "Alpha4.3 Sticky";
+  if (lower === "fully_learned" || lower.includes("fully_learned")) return "완전학습 거버너";
+  if (lower === "sniper" || lower.includes("high_conviction")) return "스나이퍼 5x";
+  if (lower === "trend" || lower.includes("bull_bear")) return "추세 5x";
+  if (lower === "micro" || lower.includes("wnc")) return "W/N/C 마이크로 5x";
+  if (lower === "cash" || lower.includes("no_sleeve_entry")) return "현금 대기";
+  if (lower.includes("final_governor")) return "최종 거버너";
+  if (lower.includes("sniper_priority_entry")) return "스나이퍼 우선 진입";
+  if (lower.includes("trend_sleeve_entry")) return "추세 슬리브 진입";
+  if (lower.includes("micro_sleeve_entry")) return "마이크로 슬리브 진입";
+  return head
+    .replaceAll("DSAC_CONTROLLER", "DSAC 컨트롤러")
+    .replaceAll("DSAC_COMPACT", "DSAC 컴팩트")
+    .replaceAll("DSAC_PRIMARY", "DSAC 기본")
+    .replaceAll("UNIFIED_BUCKET", "통합 버킷")
+    .replaceAll("UNIFIED_NATIVE", "통합 기본")
+    .replaceAll("DISPLAY_ONLY_DISABLED", "표시 전용 비활성")
+    .replaceAll("_", " ");
 }
 
 function setMeter(fillId, value01, tone = "good") {
@@ -1021,42 +941,15 @@ function setMeter(fillId, value01, tone = "good") {
   fill.className = tone;
 }
 
-function fmtDateTick(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${mo}-${dd} ${hh}:${mm}`;
-}
-
-function obiDescLabel(v) {
-  const x = Number(v || 0);
-  if (x >= 0.35) return "매수벽 우세 구간";
-  if (x <= -0.35) return "매도벽 우세 구간";
-  return "균형권";
-}
-
-function eaiDescLabel(v) {
-  const x = Number(v || 0);
-  if (x >= 1.8) return "급변동 경계";
-  if (x >= 1.0) return "변동성 확대 중";
-  return "저변동 구간";
-}
-
 function niceStep(span, targetTicks = 4) {
-  if (!Number.isFinite(span) || span <= 0) return 1;
   const rough = span / Math.max(targetTicks, 1);
-  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const mag = Math.pow(10, Math.floor(Math.log10(rough || 1)));
   const norm = rough / mag;
   const stepNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
   return stepNorm * mag;
 }
 
 function axisTicks(min, max, targetTicks = 4) {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0];
-  if (min === max) return [min];
   const step = niceStep(max - min, targetTicks);
   const start = Math.floor(min / step) * step;
   const end = Math.ceil(max / step) * step;
@@ -1066,540 +959,1158 @@ function axisTicks(min, max, targetTicks = 4) {
 }
 
 function renderLineSvg(svg, points) {
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const w = Math.max(parentW, 400), h = 280;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
-  const vals = points.map((p) => Number(p.equity || 1));
+  
+  const vals = (points || []).map(p => Number(p.equity || 1));
   if (!vals.length) return;
-  const w = 800, h = 280;
-  const ml = 58, mr = 16, mt = 16, mb = 50;
+
+  const ml = 60, mr = 20, mt = 20, mb = 50;
   const cw = w - ml - mr, ch = h - mt - mb;
   const min = Math.min(...vals), max = Math.max(...vals);
-  const pad = Math.max((max - min) * 0.08, 1e-5);
-  const yMin = min - pad, yMax = max + pad;
-  const ySpan = Math.max(yMax - yMin, 1e-8);
+  const pad = Math.max((max - min) * 0.1, 0.001);
+  const yMin = min - pad, yMax = max + pad, ySpan = yMax - yMin;
+  
   const xAt = (i) => ml + (i * cw) / Math.max(vals.length - 1, 1);
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
-
   const NS = "http://www.w3.org/2000/svg";
+
+  // Gradient
   const defs = document.createElementNS(NS, "defs");
   const grad = document.createElementNS(NS, "linearGradient");
-  grad.setAttribute("id", "equityFillGrad");
-  grad.setAttribute("x1", "0");
-  grad.setAttribute("y1", "0");
-  grad.setAttribute("x2", "0");
-  grad.setAttribute("y2", "1");
-  const gs1 = document.createElementNS(NS, "stop");
-  gs1.setAttribute("offset", "0%");
-  gs1.setAttribute("stop-color", "#66d8ff");
-  gs1.setAttribute("stop-opacity", "0.35");
-  const gs2 = document.createElementNS(NS, "stop");
-  gs2.setAttribute("offset", "100%");
-  gs2.setAttribute("stop-color", "#66d8ff");
-  gs2.setAttribute("stop-opacity", "0.03");
-  grad.appendChild(gs1);
-  grad.appendChild(gs2);
+  grad.setAttribute("id", "equityGrad"); grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0"); grad.setAttribute("x2", "0"); grad.setAttribute("y2", "1");
+  const s1 = document.createElementNS(NS, "stop"); s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", "var(--warn)"); s1.setAttribute("stop-opacity", "0.2");
+  const s2 = document.createElementNS(NS, "stop"); s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", "var(--warn)"); s2.setAttribute("stop-opacity", "0");
+  grad.appendChild(s1); grad.appendChild(s2);
   defs.appendChild(grad);
   svg.appendChild(defs);
 
-  axisTicks(yMin, yMax, 4).forEach((t) => {
+  // Grid
+  axisTicks(yMin, yMax, 4).forEach(t => {
     const y = yAt(t);
-    const grid = document.createElementNS(NS, "line");
-    grid.setAttribute("x1", ml);
-    grid.setAttribute("x2", w - mr);
-    grid.setAttribute("y1", y);
-    grid.setAttribute("y2", y);
-    grid.setAttribute("class", "chart-grid");
-    svg.appendChild(grid);
-
-    const lbl = document.createElementNS(NS, "text");
-    lbl.setAttribute("x", ml - 8);
-    lbl.setAttribute("y", y + 4);
-    lbl.setAttribute("text-anchor", "end");
-    lbl.setAttribute("class", "axis-tick");
-    lbl.textContent = t.toFixed(3);
-    svg.appendChild(lbl);
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("stroke", "var(--line)"); line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", ml - 10); txt.setAttribute("y", y + 4);
+    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = `${fmtNum((t - 1) * 100, 0)}%`;
+    svg.appendChild(txt);
   });
 
-  const idxTicks = [0, Math.floor((vals.length - 1) / 2), vals.length - 1].filter((v, i, a) => a.indexOf(v) === i);
-  idxTicks.forEach((idx) => {
+  if (yMin <= 1 && yMax >= 1) {
+    const zero = document.createElementNS(NS, "line");
+    zero.setAttribute("x1", ml); zero.setAttribute("x2", w - mr);
+    zero.setAttribute("y1", yAt(1)); zero.setAttribute("y2", yAt(1));
+    zero.setAttribute("stroke", "var(--hover-line)");
+    zero.setAttribute("stroke-width", "1.5");
+    svg.appendChild(zero);
+  }
+
+  // Time Axis
+  const timeIndices = [0, Math.floor(vals.length / 2), vals.length - 1];
+  [...new Set(timeIndices)].forEach(idx => {
     const x = xAt(idx);
-    const vline = document.createElementNS(NS, "line");
-    vline.setAttribute("x1", x);
-    vline.setAttribute("x2", x);
-    vline.setAttribute("y1", mt);
-    vline.setAttribute("y2", h - mb);
-    vline.setAttribute("class", "chart-grid-v");
-    svg.appendChild(vline);
-
-    const lbl = document.createElementNS(NS, "text");
-    lbl.setAttribute("x", x);
-    lbl.setAttribute("y", h - 24);
-    lbl.setAttribute("text-anchor", "middle");
-    lbl.setAttribute("class", "axis-tick");
-    lbl.textContent = fmtDateTick(points[idx]?.ts);
-    svg.appendChild(lbl);
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", x); txt.setAttribute("y", h - 20);
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = fmtDateTick(points[idx]?.ts || points[idx]?.closed_at);
+    svg.appendChild(txt);
   });
 
-  const linePts = vals.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
-  const areaPts = `${ml},${h - mb} ${linePts} ${w - mr},${h - mb}`;
+  // Line & Area
+  const pts = vals.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
+  const areaPath = document.createElementNS(NS, "polygon");
+  areaPath.setAttribute("points", `${ml},${h - mb} ${pts} ${w - mr},${h - mb}`);
+  areaPath.setAttribute("fill", "url(#equityGrad)");
+  svg.appendChild(areaPath);
 
-  const area = document.createElementNS(NS, "polygon");
-  area.setAttribute("points", areaPts);
-  area.setAttribute("fill", "url(#equityFillGrad)");
-  svg.appendChild(area);
+  const linePath = document.createElementNS(NS, "polyline");
+  linePath.setAttribute("points", pts); linePath.setAttribute("fill", "none");
+  linePath.setAttribute("stroke", "var(--warn)"); linePath.setAttribute("stroke-width", "2.8");
+  linePath.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(linePath);
 
-  const poly = document.createElementNS(NS, "polyline");
-  poly.setAttribute("class", "line");
-  poly.setAttribute("points", linePts);
-  svg.appendChild(poly);
+  const vLine = document.createElementNS(NS, "line");
+  vLine.setAttribute("y1", mt); vLine.setAttribute("y2", h - mb);
+  vLine.setAttribute("stroke", "var(--hover-line)"); vLine.setAttribute("stroke-dasharray", "4,4");
+  vLine.style.display = "none"; vLine.style.pointerEvents = "none";
+  svg.appendChild(vLine);
 
-  const lastX = xAt(vals.length - 1);
-  const lastY = yAt(vals[vals.length - 1]);
-  const last = document.createElementNS(NS, "circle");
-  last.setAttribute("cx", lastX);
-  last.setAttribute("cy", lastY);
-  last.setAttribute("r", "3.2");
-  last.setAttribute("class", "line-dot");
-  svg.appendChild(last);
+  const hoverDot = document.createElementNS(NS, "circle");
+  hoverDot.setAttribute("r", "5");
+  hoverDot.setAttribute("fill", "var(--warn)");
+  hoverDot.setAttribute("stroke", "var(--chart-bg)");
+  hoverDot.setAttribute("stroke-width", "2");
+  hoverDot.style.display = "none";
+  hoverDot.style.pointerEvents = "none";
+  svg.appendChild(hoverDot);
 
-  const yLabel = document.createElementNS(NS, "text");
-  yLabel.setAttribute("x", 14);
-  yLabel.setAttribute("y", mt + ch / 2);
-  yLabel.setAttribute("transform", `rotate(-90 14 ${mt + ch / 2})`);
-  yLabel.setAttribute("class", "axis-label");
-  yLabel.textContent = "Equity (x)";
-  svg.appendChild(yLabel);
+  // Line Chart Tooltip Support
+  svg.onmousemove = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    const mx = (evt.clientX - rect.left) * (w / rect.width);
+    if (mx < ml || mx > w - mr) { hideTooltip(); return; }
+    
+    const idx = Math.min(vals.length - 1, Math.max(0, Math.round(((mx - ml) / cw) * (vals.length - 1))));
+    const p = points[idx];
+    if (!p) return;
+    const timingText = executionTimingText(p);
+    const aiText = aiTimingText(p);
+    
+    const tx = xAt(idx);
+    hoverDot.setAttribute("cx", tx);
+    hoverDot.setAttribute("cy", yAt(vals[idx]));
+    hoverDot.style.display = "block";
 
-  const xLabel = document.createElementNS(NS, "text");
-  xLabel.setAttribute("x", ml + cw / 2);
-  xLabel.setAttribute("y", h - 6);
-  xLabel.setAttribute("text-anchor", "middle");
-  xLabel.setAttribute("class", "axis-label");
-  xLabel.textContent = "Date";
-  svg.appendChild(xLabel);
+    vLine.setAttribute("x1", tx); vLine.setAttribute("x2", tx);
+    vLine.style.display = "block";
+
+    showTooltip(evt.pageX, evt.pageY, `
+      <div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.2);">자산 분석 #${idx + 1}</div>
+      누적자산: <b>${fmtNum(p.equity, 4)}</b><br>
+      누적수익률: <b>${fmtPct(Number(p.cumulative_return_pct ?? ((p.equity - 1) * 100)), 2)}</b><br>
+      거래수익률: <span style="color:${p.pnl_pct >= 0 ? "var(--good)" : "var(--bad)"}">${fmtPct(p.pnl_pct, 2)}</span><br>
+      ${timingText ? `<span style="font-size:10px;color:var(--muted);">${timingText}${aiText ? ` · ${aiText}` : ""}</span><br>` : ""}
+      <span style="font-size:10px;color:var(--muted);">${p.closed_at || p.ts || ""}</span>
+    `);
+  };
+  svg.onmouseleave = () => {
+    hideTooltip();
+    if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
+    if (typeof vLine !== 'undefined') vLine.style.display = "none";
+    if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
+  };
 }
 
 function renderBarSvg(svg, points) {
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const w = Math.max(parentW, 400), h = 280;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
-  const vals = points.map((p) => Number(p.pnl_pct || 0));
+
+  const vals = (points || []).map(p => Number(p.pnl_pct || 0));
   if (!vals.length) return;
-  const w = 800, h = 280;
-  const ml = 58, mr = 16, mt = 16, mb = 50;
+
+  const ml = 45, mr = 10, mt = 10, mb = 35;
   const cw = w - ml - mr, ch = h - mt - mb;
   const min = Math.min(...vals), max = Math.max(...vals);
-  const yMin = Math.min(min, 0), yMax = Math.max(max, 0);
-  const ySpan = Math.max(yMax - yMin, 1e-8);
+  // Flexible but balanced Y scale
+  const yMax = Math.max(max, Math.abs(min), 0.5) * 1.05;
+  const yMin = -yMax, ySpan = yMax - yMin;
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const NS = "http://www.w3.org/2000/svg";
 
-  axisTicks(yMin, yMax, 4).forEach((t) => {
+  const vLine = document.createElementNS(NS, "line");
+  vLine.setAttribute("y1", mt); vLine.setAttribute("y2", h - mb);
+  vLine.setAttribute("stroke", "var(--hover-line)"); vLine.setAttribute("stroke-dasharray", "4,4");
+  vLine.style.display = "none"; vLine.style.pointerEvents = "none";
+  svg.appendChild(vLine);
+
+  const hoverDot = document.createElementNS(NS, "circle");
+  hoverDot.setAttribute("r", "5");
+  hoverDot.setAttribute("fill", "var(--good)");
+  hoverDot.setAttribute("stroke", "var(--chart-bg)");
+  hoverDot.setAttribute("stroke-width", "2");
+  hoverDot.style.display = "none";
+  hoverDot.style.pointerEvents = "none";
+  svg.appendChild(hoverDot);
+
+  // Grid
+  axisTicks(yMin, yMax, 4).forEach(t => {
     const y = yAt(t);
-    const grid = document.createElementNS(NS, "line");
-    grid.setAttribute("x1", ml);
-    grid.setAttribute("x2", w - mr);
-    grid.setAttribute("y1", y);
-    grid.setAttribute("y2", y);
-    grid.setAttribute("class", Math.abs(t) < 1e-10 ? "chart-zero" : "chart-grid");
-    svg.appendChild(grid);
-
-    const lbl = document.createElementNS(NS, "text");
-    lbl.setAttribute("x", ml - 8);
-    lbl.setAttribute("y", y + 4);
-    lbl.setAttribute("text-anchor", "end");
-    lbl.setAttribute("class", "axis-tick");
-    lbl.textContent = `${t.toFixed(2)}%`;
-    svg.appendChild(lbl);
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("stroke", Math.abs(t) < 0.001 ? "var(--hover-line)" : "var(--line)");
+    line.setAttribute("stroke-width", Math.abs(t) < 0.001 ? "1.5" : "1");
+    svg.appendChild(line);
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", ml - 12); txt.setAttribute("y", y + 4);
+    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = `${t.toFixed(0)}%`;
+    svg.appendChild(txt);
   });
 
-  const idxTicks = [0, Math.floor((vals.length - 1) / 2), vals.length - 1].filter((v, i, a) => a.indexOf(v) === i);
-  idxTicks.forEach((idx) => {
-    const x = ml + (idx * cw) / Math.max(vals.length - 1, 1);
-    const lbl = document.createElementNS(NS, "text");
-    lbl.setAttribute("x", x);
-    lbl.setAttribute("y", h - 24);
-    lbl.setAttribute("text-anchor", "middle");
-    lbl.setAttribute("class", "axis-tick");
-    lbl.textContent = fmtDateTick(points[idx]?.ts);
-    svg.appendChild(lbl);
-  });
-
-  const bw = cw / Math.max(vals.length, 1);
+  const bw = Math.min(cw / vals.length, 40);
   const zeroY = yAt(0);
   vals.forEach((v, i) => {
     const bar = document.createElementNS(NS, "rect");
     const hh = Math.abs(zeroY - yAt(v));
-    bar.setAttribute("x", ml + i * bw + 1);
-    bar.setAttribute("y", v >= 0 ? zeroY - hh : zeroY);
-    bar.setAttribute("width", Math.max(bw - 2, 1));
-    bar.setAttribute("height", Math.max(hh, 1));
-    bar.setAttribute("rx", "1.5");
-    bar.setAttribute("class", v >= 0 ? "bar-pos" : "bar-neg");
+    const x = ml + (cw / vals.length) * i + (cw / vals.length - bw) / 2;
+    bar.setAttribute("x", x); bar.setAttribute("y", v >= 0 ? zeroY - hh : zeroY);
+    bar.setAttribute("width", Math.max(bw - 4, 2)); bar.setAttribute("height", Math.max(hh, 1));
+    bar.setAttribute("fill", v >= 0 ? "var(--good)" : "var(--bad)");
+    bar.setAttribute("rx", "3");
     svg.appendChild(bar);
   });
 
-  const yLabel = document.createElementNS(NS, "text");
-  yLabel.setAttribute("x", 14);
-  yLabel.setAttribute("y", mt + ch / 2);
-  yLabel.setAttribute("transform", `rotate(-90 14 ${mt + ch / 2})`);
-  yLabel.setAttribute("class", "axis-label");
-  yLabel.textContent = "PnL (%)";
-  svg.appendChild(yLabel);
+  // Bar Chart Tooltip Support
+  svg.onmousemove = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    const mx = (evt.clientX - rect.left) * (w / rect.width);
+    if (mx < ml || mx > w - mr) { hideTooltip(); return; }
+    
+    const idx = Math.min(vals.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * vals.length)));
+    const p = points[idx];
+    if (!p) return;
+    const timingText = executionTimingText(p);
+    const aiText = aiTimingText(p);
+    
+    const pnl = Number(p.pnl_pct || 0);
+    const bwVal = cw / vals.length;
+    const tx = ml + idx * bwVal + bwVal / 2;
+    hoverDot.setAttribute("cx", tx);
+    hoverDot.setAttribute("cy", yAt(pnl));
+    hoverDot.style.display = "block";
+    hoverDot.setAttribute("fill", pnl >= 0 ? "var(--good)" : "var(--bad)");
 
-  const xLabel = document.createElementNS(NS, "text");
-  xLabel.setAttribute("x", ml + cw / 2);
-  xLabel.setAttribute("y", h - 6);
-  xLabel.setAttribute("text-anchor", "middle");
-  xLabel.setAttribute("class", "axis-label");
-  xLabel.textContent = "Date";
-  svg.appendChild(xLabel);
+    vLine.setAttribute("x1", tx); vLine.setAttribute("x2", tx);
+    vLine.style.display = "block";
+
+    showTooltip(evt.pageX, evt.pageY, `
+      <div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.2);">청산 수익 분석</div>
+      거래수익률: <span style="color:${pnl >= 0 ? "var(--good)" : "var(--bad)"}">${fmtPct(pnl, 2)}</span><br>
+      누적수익률: <b>${fmtPct(Number(p.cumulative_return_pct ?? ((p.equity - 1) * 100)), 2)}</b><br>
+      누적자산: <b>${fmtNum(p.equity, 4)}</b><br>
+      ${timingText ? `<span style="font-size:10px;color:var(--muted);">${timingText}${aiText ? ` · ${aiText}` : ""}</span><br>` : ""}
+      <span style="font-size:10px;color:var(--muted);">${p.closed_at || p.ts || ""}</span>
+    `);
+  };
+  svg.onmouseleave = () => {
+    hideTooltip();
+    if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
+    if (typeof vLine !== 'undefined') vLine.style.display = "none";
+    if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
+  };
+}
+
+function renderExposureSvg(svg, points) {
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const w = Math.max(parentW, 400), h = 240;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = "";
+  const vals = (points || []).map((p) => Number(p.exposure || 0));
+  const NS = "http://www.w3.org/2000/svg";
+  if (!vals.length) {
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", w / 2);
+    txt.setAttribute("y", h / 2);
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = "노출 이력 대기 중...";
+    svg.appendChild(txt);
+    return;
+  }
+
+  const ml = 48, mr = 18, mt = 16, mb = 34;
+  const cw = w - ml - mr, ch = h - mt - mb;
+  const max = Math.max(...vals, 1);
+  const yAt = (v) => mt + ((max - v) * ch) / max;
+  const xAt = (i) => ml + (i * cw) / Math.max(vals.length - 1, 1);
+
+  axisTicks(0, max, 4).forEach((t) => {
+    const y = yAt(t);
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", ml);
+    line.setAttribute("x2", w - mr);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    line.setAttribute("stroke", "var(--line)");
+    svg.appendChild(line);
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", ml - 8);
+    txt.setAttribute("y", y + 4);
+    txt.setAttribute("text-anchor", "end");
+    txt.setAttribute("font-size", "10");
+    txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = `${fmtNum(t, 2)}x`;
+    svg.appendChild(txt);
+  });
+
+  const pts = vals.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
+  const line = document.createElementNS(NS, "polyline");
+  line.setAttribute("points", pts);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", "var(--warn)");
+  line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(line);
+
+  vals.forEach((v, i) => {
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", xAt(i));
+    dot.setAttribute("cy", yAt(v));
+    dot.setAttribute("r", "3");
+    dot.setAttribute("fill", String(points[i].side || "").toUpperCase() === "SHORT" ? "var(--bad)" : "var(--good)");
+    svg.appendChild(dot);
+  });
+
+  const start = document.createElementNS(NS, "text");
+  start.setAttribute("x", ml);
+  start.setAttribute("y", h - 12);
+  start.setAttribute("font-size", "10");
+  start.setAttribute("fill", "var(--muted)");
+  start.textContent = fmtDateTick(points[0]?.ts);
+  svg.appendChild(start);
+  const end = document.createElementNS(NS, "text");
+  end.setAttribute("x", w - mr);
+  end.setAttribute("y", h - 12);
+  end.setAttribute("text-anchor", "end");
+  end.setAttribute("font-size", "10");
+  end.setAttribute("fill", "var(--muted)");
+  end.textContent = fmtDateTick(points[points.length - 1]?.ts);
+  svg.appendChild(end);
 }
 
 function parseTradeJournal(text) {
-  return String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch (_e) {
-        return null;
-      }
-    })
-    .filter(Boolean);
+  return String(text || "").split(/\r?\n/).map(line => {
+    try { return JSON.parse(line.trim()); } catch (e) { return null; }
+  }).filter(Boolean);
 }
 
 function tradeSideClass(side) {
   const s = String(side || "").toUpperCase();
-  if (s === "LONG") return "long";
-  if (s === "SHORT") return "short";
-  return "";
+  return s === "LONG" ? "long" : s === "SHORT" ? "short" : "";
 }
 
-function cleanDisplaySource(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "-";
-  return raw
-    .split("|")
-    .map((part) => String(part || "").trim())
-    .filter(Boolean)
-    .map((part) => {
-      const parenIdx = part.indexOf("(");
-      if (parenIdx >= 0) return part.slice(0, parenIdx).trim();
-      const detailIdx = part.search(/,?\s*\|d1m\|=|,?\s*target=|,?\s*entry=/i);
-      if (detailIdx >= 0) return part.slice(0, detailIdx).trim();
-      return part.trim();
-    })
-    .filter(Boolean)
-    .join(" | ");
-}
+let latestJournalFilter = "ALL";
 
 function renderTradeJournal() {
   const listEl = el("tradeJournalList");
-  const summaryEl = el("tradeJournalSummary");
-  const stampEl = el("tradeJournalStamp");
-  if (!listEl || !summaryEl || !stampEl) return;
+  const pnlEl = el("journalTotalPnl");
+  if (!listEl) return;
 
-  const closes = latestTradeJournal.filter((row) => String(row?.kind || "").toUpperCase() === "CLOSE");
-  const recent = closes.slice(-8).reverse();
-  if (!recent.length) {
-    summaryEl.textContent = "최근 체결 없음";
-    stampEl.textContent = "-";
-    listEl.innerHTML = `<div class="trade-journal-empty">거래 저널 데이터가 아직 없습니다.</div>`;
-    return;
+  // 1. Filter
+  const filtered = closeTradeRows(latestJournalFilter);
+
+  // 2. Calculate compounded return for selected filter
+  const equitySeries = buildTradeEquitySeries(latestJournalFilter);
+  const totalPnl = equitySeries.length ? equitySeries[equitySeries.length - 1].cumulative_return_pct : 0;
+  if (pnlEl) {
+    pnlEl.textContent = `누적 ${fmtPct(totalPnl)}`;
+    pnlEl.className = `pnl-badge ${riskClass(totalPnl)}`;
   }
 
-  const totalPnl = recent.reduce((acc, row) => acc + Number(row?.pnl_pct || 0), 0);
-  const wins = recent.filter((row) => Number(row?.pnl_pct || 0) > 0).length;
-  const lastTs = recent[0]?.ts || recent[0]?.closed_at || "";
-  summaryEl.textContent = `최근 ${recent.length}건 합계 ${fmtPct(totalPnl)} · 승률 ${fmtNum((wins / Math.max(recent.length, 1)) * 100, 1)}%`;
-  stampEl.textContent = fmtTs(lastTs);
-  listEl.innerHTML = recent.map((row) => {
-    const side = String(row?.side || "-").toUpperCase();
+  // 3. Render list (latest 10)
+  const recent = filtered.slice(-10).reverse();
+  listEl.innerHTML = recent.map(row => {
+    const side = String(row.side || "-").toUpperCase();
     const sideCls = tradeSideClass(side);
-    const entry = Number(row?.entry_exec_price ?? row?.entry_price ?? 0);
-    const exit = Number(row?.exit_exec_price ?? row?.exit_price ?? 0);
-    const pnlPct = Number(row?.pnl_pct || 0);
-    const holdBars = Number(row?.hold_bars || 0);
-    const exposure = Number(row?.total_exposure || 0);
-    const reason = String(row?.reason || row?.event || "-");
+    const pnlPct = pnlPctFromRow(row);
+    const coin = assetLabel(tradeAssetKey(row));
+    const source = tradeGovernorLabel(row);
+    const bucket = fmtNum(exposureFromRow(row) || row.execution_leverage || row.leverage || 1, 1);
+    const reasonText = closeReasonText(row);
+    const riskText = riskSummaryText(row);
+    const feeText = feeModelText(row);
+    const subText = [reasonText ? `청산 이유: ${reasonText}` : "", riskText, feeText].filter(Boolean).join(" · ");
+    const entryLiquidity = executionLegLiquidity(row, "entry");
+    const exitLiquidity = executionLegLiquidity(row, "exit");
     return `
       <div class="trade-journal-row">
-        <div class="trade-journal-ts">${fmtTs(row?.closed_at || row?.ts || "")}</div>
-        <div class="trade-journal-side ${sideCls}">${side}</div>
+        <div class="trade-journal-left">
+          <div class="trade-journal-ts">${fmtTs(row.closed_at || row.ts)}</div>
+          <div class="trade-journal-side ${sideCls}">
+            <span class="trade-journal-asset">${coin}</span><span class="journal-label">${source}</span>${sideLabel(side)} <span class="trade-journal-bucket">${bucket}x</span>
+          </div>
+        </div>
         <div class="trade-journal-meta">
-          <div class="trade-journal-main">진입 ${fmtNum(entry, 2)} → 청산 ${fmtNum(exit, 2)} · 노출 ${fmtNum(exposure, 3)}x</div>
-          <div class="trade-journal-sub">보유 ${fmtNum(holdBars, 0)}봉 · ${reason}</div>
+          <div class="trade-journal-main">${priceWithLiquidity("진입", row.entry_price, entryLiquidity)} → ${priceWithLiquidity("청산", row.exit_price, exitLiquidity)}</div>
+          <div class="trade-journal-sub muted">${subText}</div>
         </div>
         <div class="trade-journal-pnl ${riskClass(pnlPct)}">${fmtPct(pnlPct)}</div>
-      </div>
-    `;
+      </div>`;
   }).join("");
 }
 
-function render(state) {
-  removeLegacyAgentPanels();
+function renderTradePanels() {
   renderTradeJournal();
-  const sig = state.signal || {};
-  const pos = state.position || {};
-  const perf = state.performance || {};
-  const ag = state.agents || {};
-  const sess = state.session || {};
-  const micro = state.microstructure || {};
-  const tail = state.tail_risk || {};
-  const pb = state.playbook || {};
-  const globalStamp = fmtTs(state.updated_at || state.cycle_timestamp_kst);
-  const microStampText = fmtTs(micro.updated_at || state.updated_at || state.cycle_timestamp_kst);
-  let peakEq = 1;
-  let maxDrawdown = 0;
-  (state.trades_tail || []).forEach((t) => {
-    const eq = Number(t?.equity || 1);
-    if (!Number.isFinite(eq) || eq <= 0) return;
-    if (eq > peakEq) peakEq = eq;
-    const dd = ((peakEq - eq) / peakEq) * 100;
-    if (dd > maxDrawdown) maxDrawdown = dd;
-  });
 
-  const final = actionLabel(Number(sig.final_action || 0));
-  const posNow = String(pos.current || "NONE").toUpperCase();
-  const reg = String(state.regime || "-").toUpperCase();
-  el("dsacDecision").textContent = final.text;
-  el("dsacDecision").className = final.text === "LONG" ? "good" : final.text === "SHORT" ? "bad" : "warn";
-  el("dsacRl").textContent = `${posNow} / ${fmtNum(sig.unified_kelly || 0, 3)}`;
-  el("dsacRl").className = posNow === "LONG" ? "good" : posNow === "SHORT" ? "bad" : "muted";
-  el("dsacEntry").textContent = Number(pos.entry_price || 0) > 0 ? fmtNum(pos.entry_price, 2) : "-";
-  el("dsacEntry").className = "muted";
-  el("dsacRegime").textContent = reg;
-  el("dsacRegime").className = reg.includes("BULL") ? "good" : reg.includes("BEAR") ? "bad" : "warn";
-  el("dsacUnreal").textContent = fmtPct(pos.unrealized_pnl_pct || 0);
-  el("dsacUnreal").className = riskClass(pos.unrealized_pnl_pct || 0);
-  el("dsacDecisionAt").textContent = dsacDecisionAtText(state);
-  el("dsacDecisionAt").className = "muted";
-  el("dsacPnlMdd").textContent = `${fmtPct(perf.pnl_24h || 0)} / -${fmtNum(maxDrawdown, 2)}%`;
-  el("dsacPnlMdd").className = riskClass(perf.pnl_24h || 0);
-  el("dsacSource").textContent = cleanDisplaySource(sig.source);
-  el("dsacSource").className = "muted";
-  el("dsacStamp").textContent = globalStamp;
+  try {
+    const eqSvg = el("equitySvg");
+    if (eqSvg) renderLineSvg(eqSvg, selectTradeRowsForCharts(latestJournalFilter));
+  } catch (e) { console.error("Equity Render Error:", e); }
 
-  const sessionHtml = buildSessionHtml(sess);
-  const opsSession = el("opsSession");
-  if (opsSession) opsSession.innerHTML = sessionHtml;
-  const topSession = el("topSession");
-  if (topSession) topSession.innerHTML = sessionHtml;
-  const nowEl = el("opsNow");
-  if (nowEl) nowEl.textContent = fmtNowClock();
-  const topClockEl = el("topClock");
-  if (topClockEl) topClockEl.textContent = fmtNowClock();
-  const topPriceEl = el("topPrice");
-  if (topPriceEl) {
-    topPriceEl.textContent = fmtNum(state.price, 2);
-    const pnlBasis = Number(pos.unrealized_pnl_pct ?? perf.pnl_24h ?? 0);
-    topPriceEl.className = `top-clock top-price ${pnlBasis > 0 ? "good" : pnlBasis < 0 ? "bad" : "muted"}`;
-  }
-  const quant = state.quant_formula || {};
-  const qHorizon = Number(quant.horizon_minutes ?? 30);
-  const qDirection = String(quant.direction || "").toUpperCase();
-  const quantSignal = qDirection || String(quant.signal || "HOLD").toUpperCase();
-  const qAccModel = Number(quant.accuracy_model ?? (1 - Number(quant.rmse_model ?? 1)));
-  const qAccBaseline = Number(quant.accuracy_baseline ?? (1 - Number(quant.rmse_naive ?? 1)));
-  const qWinModel = Number(quant.win_rate_model ?? (qAccModel * 100));
-  const qWinBaseline = Number(quant.win_rate_baseline ?? (qAccBaseline * 100));
-  const qConfPct = Number(quant.confidence ?? 0) * 100;
-  const qProbUp = Number(quant.prob_up ?? (quantSignal === "LONG" || quantSignal === "UP" ? 0.5 + Number(quant.confidence ?? 0) * 0.5 : quantSignal === "SHORT" || quantSignal === "DOWN" ? 0.5 - Number(quant.confidence ?? 0) * 0.5 : 0.5));
-  const qProbDown = Number(quant.prob_down ?? (1 - qProbUp));
-  const qAccImprove = (qAccModel - qAccBaseline) * 100;
+  try {
+    const pnSvg = el("pnlSvg");
+    if (pnSvg) renderBarSvg(pnSvg, selectTradeRowsForCharts(latestJournalFilter));
+  } catch (e) { console.error("PnL Render Error:", e); }
 
-  const qHorizonLabelEl = el("quantHorizonLabel");
-  if (qHorizonLabelEl) qHorizonLabelEl.textContent = `${fmtNum(qHorizon, 0)}분 방향`;
-  const qSignalLabel = quantSignal === "LONG" ? "UP" : quantSignal === "SHORT" ? "DOWN" : quantSignal;
-  el("quantSignal").textContent = qSignalLabel;
-  el("quantSignal").className = (qSignalLabel === "UP") ? "good" : (qSignalLabel === "DOWN" ? "bad" : "muted");
-  el("quantPredPrice").textContent = `${fmtNum(qProbUp * 100, 1)}% / ${fmtNum(qProbDown * 100, 1)}%`;
-  el("quantRet").textContent = fmtPct(quant.expected_return_pct ?? 0, 3);
-  el("quantRet").className = riskClass(quant.expected_return_pct ?? 0);
-  el("quantConf").textContent = `${fmtNum(qConfPct, 1)}%`;
-  el("quantConf").className = qConfPct >= 60 ? "good" : qConfPct >= 35 ? "warn" : "muted";
-  el("quantWinRate").textContent = `${fmtNum(qWinModel, 2)}% / ${fmtNum(qWinBaseline, 2)}%`;
-  el("quantRmse").textContent = `${fmtNum(qAccModel * 100, 2)}% / ${fmtNum(qAccBaseline * 100, 2)}% (${qAccImprove >= 0 ? "+" : ""}${fmtNum(qAccImprove, 2)}%p)`;
-  const targetAlias = String(quant.target_alias || `zeta_px_${fmtNum(qHorizon, 0)}m`);
-  el("quantMeta").textContent = `설정: ${fmtNum(quant.bar_minutes ?? 1, 0)}m bar | lookback ${fmtNum(quant.lookback_minutes ?? 15, 0)}m | horizon ${fmtNum(qHorizon, 0)}m | target=${targetAlias}`;
-  el("quantStamp").textContent = fmtTs(quant.updated_at || state.updated_at || state.cycle_timestamp_kst);
-
-  const poly = state.polymarket || {};
-  const polyTailUp = Number(poly.tail_up_prob || 0) * 100;
-  const polyTailDn = Number(poly.tail_down_prob || 0) * 100;
-  const polyImb = Number(poly.book_imbalance || 0) * 100;
-  const polyVol = Number(poly.event_volatility || 0) * 100;
-  const polySignal = String(poly.signal || "HOLD").toUpperCase();
-  const polyRisk = String(poly.risk_state || "NORMAL").toUpperCase();
-  const polyStatus = String(poly.status || "IDLE").toUpperCase();
-  const polySlug = String(poly.slug || "-");
-  const polyTarget = Number(poly.weighted_target || state.price || 0);
-  const srcText = String(sig.source || "");
-  const shockD1 = Number(hasOwn(poly, "shock_delta_1m") ? poly.shock_delta_1m : poly.prob_momentum_1m || 0) * 100;
-  const shockZ = Number(poly.shock_z_1m || 0);
-  const shockD3 = Number(poly.shock_delta_3m || 0) * 100;
-  const gateTrigger = Boolean(poly.shock_trigger);
-  const gateThD1 = Number((state.config && state.config.polymarket_shock_1m_th) ?? 0.04) * 100;
-  const gateThZ = Number((state.config && state.config.polymarket_shock_z_th) ?? 4.0);
-  const gateThD3 = Number((state.config && state.config.polymarket_shock_cum3_th) ?? 0.025) * 100;
-  let gateDecision = "NONE";
-  if (srcText.includes("POLYMARKET_EMERGENCY_EXIT")) gateDecision = "EXIT";
-  else if (srcText.includes("POLYMARKET_EMERGENCY_HOLD")) gateDecision = "HOLD";
-  else if (srcText.includes("POLYMARKET_SHOCK_COOLDOWN")) gateDecision = "COOLDOWN";
-
-  el("polyEvent").textContent = polySlug;
-  el("polyEvent").className = polyStatus === "LIVE" ? "good" : polyStatus === "ERROR" ? "bad" : "muted";
-  el("polyTarget").textContent = fmtNum(polyTarget, 2);
-  el("polyTarget").className = riskClass(((polyTarget - Number(state.price || 0)) / Math.max(Math.abs(Number(state.price || 0)), 1e-8)) * 100);
-  el("polyTail").textContent = `${fmtNum(polyTailUp, 1)}% / ${fmtNum(polyTailDn, 1)}%`;
-  el("polyTail").className = (polyTailUp + polyTailDn) >= 35 ? "warn" : "muted";
-  el("polyImbalance").textContent = `${polyImb >= 0 ? "+" : ""}${fmtNum(polyImb, 1)}%`;
-  el("polyImbalance").className = riskClass(polyImb);
-  el("polyVol").textContent = `${fmtNum(polyVol, 2)}%`;
-  el("polyVol").className = polyVol >= 12 ? "bad" : polyVol >= 7 ? "warn" : "good";
-  el("polySignal").textContent = `${polySignal} / ${polyRisk}`;
-  el("polySignal").className = polySignal === "LONG" ? "good" : polySignal === "SHORT" ? "bad" : "muted";
-  el("polyGateDecision").textContent = gateDecision;
-  el("polyGateDecision").className = gateDecision === "EXIT" ? "bad" : gateDecision === "HOLD" ? "good" : gateDecision === "COOLDOWN" ? "warn" : "muted";
-  el("polyShock").textContent = `${shockD1 >= 0 ? "+" : ""}${fmtNum(shockD1, 2)}%p / ${shockZ >= 0 ? "+" : ""}${fmtNum(shockZ, 2)} / ${shockD3 >= 0 ? "+" : ""}${fmtNum(shockD3, 2)}%p`;
-  el("polyShock").className = gateTrigger ? "bad" : riskClass(shockD1);
-  el("polyThreshold").textContent = `${fmtNum(gateThD1, 2)}%p / ${fmtNum(gateThZ, 2)} / ${fmtNum(gateThD3, 2)}%p`;
-  el("polyThreshold").className = "muted";
-  el("polyMeta").textContent = "LIVE";
-  el("polyStamp").textContent = fmtTs(poly.updated_at || state.shadow_updated_at || state.updated_at || state.cycle_timestamp_kst);
-
-  const obiNow = obiLabel(micro.obi);
-  const whaleNow = whaleLabel(micro);
-  const whaleIntentNow = whaleIntentLabel(micro);
-  const whaleIntentHistNow = whaleIntentHistoryLabel(micro);
-  const whaleIntentWin = Number(micro.whale_position_window_min || 5);
-  const eaiNow = eaiLabel(micro.eai);
-  el("whaleText").textContent = whaleNow;
-  el("whaleStatusText").textContent = whaleDescLabel(micro.nif_whale);
-  el("whaleIntentTitle").textContent = `고래포지션(${fmtNum(whaleIntentWin, 0)}m)`;
-  el("whaleIntentText").textContent = whaleIntentNow;
-  const whaleGuide = whaleIntentGuideLabel(micro);
-  const whaleActionText = whaleGuide.includes("·") ? whaleGuide.split("·").pop().trim() : whaleGuide;
-  const whaleIntentPctEl = el("whaleIntentPct");
-  if (whaleIntentPctEl) whaleIntentPctEl.textContent = whaleActionText;
-  el("obiStamp").textContent = microStampText;
-  el("whaleStamp").textContent = microStampText;
-  el("whaleIntentStamp").textContent = microStampText;
-  el("eaiStamp").textContent = microStampText;
-  pushMicroHistoryValue("obi", microStampText, obiNow, micro.obi);
-  pushMicroHistoryValue("whale", microStampText, whaleNow, micro.nif_whale);
-  pushMicroHistoryValue("whale_intent", microStampText, whaleIntentHistNow, micro.whale_position_score);
-  pushMicroHistoryValue("eai", microStampText, eaiNow, micro.eai);
-  renderMicroHistory("whaleHist", "whale");
-  renderMicroHistory("whaleIntentHist", "whale_intent");
-  renderWhaleSparkline();
-  renderWhalePosSparkline();
-  const obi = Number(micro.obi || 0);
-  const bidPct = clamp01(0.5 + obi / 2);
-  const askPct = clamp01(1.0 - bidPct);
-  renderLRGauge(
-    "obiGaugeLeftFill", "obiGaugeRightFill",
-    askPct, bidPct,
-    "obiGaugeLeftTxt", "obiGaugeRightTxt",
-    `매도 ${fmtNum(askPct * 100, 0)}%`,
-    `매수 ${fmtNum(bidPct * 100, 0)}%`
-  );
-  el("obiText").textContent = obiNow;
-  const eaiV = Number(micro.eai || 0);
-  const volHot = clamp01(eaiV / 2.5);
-  const volCalm = clamp01(1 - volHot);
-  renderLRGauge(
-    "eaiGaugeLeftFill", "eaiGaugeRightFill",
-    volCalm, volHot,
-    "eaiGaugeLeftTxt", "eaiGaugeRightTxt",
-    `평온 ${fmtNum(volCalm * 100, 0)}%`,
-    `과열 ${fmtNum(volHot * 100, 0)}%`
-  );
-  el("eaiText").textContent = eaiNow;
-  const hftNames = new Set(["PB_VETO_SHIELD", "PB_CRISIS_SNIPER", "PB_SQUEEZE_SNIPER"]);
-  const mftNames = new Set(["PB_TREND_SIGNAL", "PB_WHALE_SIGNAL", "PB_MEAN_REVERT_SIGNAL"]);
-  const evalList = pb.evaluations || [];
-  const pbHft = pickGroupWinnerFromEvals(evalList, hftNames);
-  const pbMft = pickGroupWinnerFromEvals(evalList, mftNames);
-  const pbHftMatched = Boolean(pbHft.matched);
-  const pbHftAction = actionLabel(Number(pbHft.action || 0));
-  el("pbName").textContent = pbLabel(pbHft.name, pbHftMatched);
-  el("pbAction").textContent = pbHftMatched ? pbHftAction.text : "BASE";
-  el("pbAction").className = pbHftMatched ? (pbHftAction.cls === "long" ? "good" : pbHftAction.cls === "short" ? "bad" : "warn") : "muted";
-  el("pbKelly").textContent = pbHftMatched ? fmtNum(Number(pbHft.kelly || 0), 3) : "0.000";
-  el("pbPriority").textContent = pbHftMatched ? String(pbHft.priority ?? "-") : "-";
-  el("pbStamp").textContent = fmtTs(pbHft.updated_at || pb.updated_at || state.updated_at);
-  const pbe = pbEvalMap(pb.evaluations || []);
-  latestState = state;
-  latestEvalMap = pbe;
-  const pbVeto = pbEvalRender(pbe.PB_VETO_SHIELD);
-  const pbCrisis = pbEvalRender(pbe.PB_CRISIS_SNIPER);
-  const pbSqueeze = pbEvalRender(pbe.PB_SQUEEZE_SNIPER);
-  const mftTrend = pbEvalRender(pbe.PB_TREND_SIGNAL);
-  const mftWhale = pbEvalRender(pbe.PB_WHALE_SIGNAL);
-  const mftRevert = pbEvalRender(pbe.PB_MEAN_REVERT_SIGNAL);
-  const pbRowDetail = (evalRes) => {
-    if (evalRes.missing) return "데이터 대기";
-    let displayAction = evalRes.actionable ? actionLabel(evalRes.impliedAction).text : "HOLD";
-    if (evalRes.reco && evalRes.reco !== "UNKNOWN") {
-      displayAction = evalRes.actionable ? evalRes.reco : "HOLD";
-    }
-    return `환경 ${fmtNum(evalRes.score, 0)}점 / 실행 ${displayAction} / 방향확신 ${fmtNum((evalRes.dirGap || 0) * 100, 0)}%`;
-  };
-  el("pbVetoState").textContent = pbVeto.stage; el("pbVetoState").className = pbVeto.cls; el("pbVetoDetail").textContent = pbRowDetail(pbVeto); el("pbVetoGauge").style.width = `${fmtNum(pbVeto.score, 0)}%`; el("pbVetoGauge").className = pbVeto.cls;
-  el("pbCrisisState").textContent = pbCrisis.stage; el("pbCrisisState").className = pbCrisis.cls; el("pbCrisisDetail").textContent = pbRowDetail(pbCrisis); el("pbCrisisGauge").style.width = `${fmtNum(pbCrisis.score, 0)}%`; el("pbCrisisGauge").className = pbCrisis.cls;
-  el("pbSqueezeState").textContent = pbSqueeze.stage; el("pbSqueezeState").className = pbSqueeze.cls; el("pbSqueezeDetail").textContent = pbRowDetail(pbSqueeze); el("pbSqueezeGauge").style.width = `${fmtNum(pbSqueeze.score, 0)}%`; el("pbSqueezeGauge").className = pbSqueeze.cls;
-  el("mftTrendState").textContent = mftTrend.stage; el("mftTrendState").className = mftTrend.cls; el("mftTrendDetail").textContent = pbRowDetail(mftTrend); el("mftTrendGauge").style.width = `${fmtNum(mftTrend.score, 0)}%`; el("mftTrendGauge").className = mftTrend.cls;
-  el("mftWhaleState").textContent = mftWhale.stage; el("mftWhaleState").className = mftWhale.cls; el("mftWhaleDetail").textContent = pbRowDetail(mftWhale); el("mftWhaleGauge").style.width = `${fmtNum(mftWhale.score, 0)}%`; el("mftWhaleGauge").className = mftWhale.cls;
-  el("mftRevertState").textContent = mftRevert.stage; el("mftRevertState").className = mftRevert.cls; el("mftRevertDetail").textContent = pbRowDetail(mftRevert); el("mftRevertGauge").style.width = `${fmtNum(mftRevert.score, 0)}%`; el("mftRevertGauge").className = mftRevert.cls;
-
-  const pbMftMatched = Boolean(pbMft.matched);
-  const pbMftAction = actionLabel(Number(pbMft.action || 0));
-  el("mftName").textContent = pbLabel(pbMft.name, pbMftMatched);
-  el("mftAction").textContent = pbMftMatched ? pbMftAction.text : "HOLD";
-  el("mftAction").className = pbMftMatched ? (pbMftAction.text === "LONG" ? "good" : pbMftAction.text === "SHORT" ? "bad" : "warn") : "muted";
-  el("mftKelly").textContent = pbMftMatched ? fmtNum(Number(pbMft.kelly || 0), 3) : "0.000";
-  el("mftPriority").textContent = pbMftMatched ? String(pbMft.priority ?? "-") : "-";
-  el("mftStamp").textContent = fmtTs(pbMft.updated_at || pb.updated_at || state.updated_at);
-
-  const tox = clamp01(micro.toxicity_score);
-  const toxDir = Number(micro.obi || 0) > 0 ? 1 : Number(micro.obi || 0) < 0 ? -1 : 0;
-  setMeter("toxFill", tox, tox > 0.65 ? "bad" : tox > 0.35 ? "warn" : "good");
-  el("toxText").textContent = `${toxInterpret(tox, toxDir)} (score ${fmtNum(tox, 2)})`;
-
-  const aft = clamp01(tail.aftershock_prob);
-  const aftDir = Number(tail.z_bias || 0);
-  setMeter("riskFill", aft, aft > 0.65 ? "bad" : aft > 0.35 ? "warn" : "good");
-  el("riskText").textContent = `${aftershockInterpret(aft, aftDir)} (p ${fmtNum(aft, 2)})`;
-
-  renderLineSvg(el("equitySvg"), state.trades_tail || []);
-  renderBarSvg(el("pnlSvg"), state.trades_tail || []);
+  try {
+    const exSvg = el("exposureSvg");
+    if (exSvg) renderExposureSvg(exSvg, exposureSeries(latestJournalFilter));
+  } catch (e) { console.error("Exposure Render Error:", e); }
 }
 
-function tickOpsClock() {
-  const nowEl = el("opsNow");
-  if (nowEl) nowEl.textContent = fmtNowClock();
-  const topClockEl = el("topClock");
-  if (topClockEl) topClockEl.textContent = fmtNowClock();
+async function fetchBinanceHistory(asset = activeChartAsset) {
+  try {
+    const res = await fetch(`/api/market-history?asset=${asset}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const payload = await res.json();
+    candleHistoryByAsset[asset] = Array.isArray(payload?.candles) ? payload.candles : [];
+    if (asset === activeChartAsset) syncActiveMarketState();
+  } catch (e) { console.error("History Error:", e); }
+}
+
+async function maybeFetchBinanceHistory() {
+  const now = Date.now();
+  const cached = candleHistoryByAsset[activeChartAsset] || [];
+  const lastAt = Number(lastCandleHistoryFetchAtByAsset[activeChartAsset] || 0);
+  if (cached.length && now - lastAt < CANDLE_HISTORY_POLL_MS) return;
+  lastCandleHistoryFetchAtByAsset[activeChartAsset] = now;
+  await fetchBinanceHistory(activeChartAsset);
+}
+
+async function refreshTradeJournals(nonce) {
+  const now = Date.now();
+  if (lastJournalFetchAt && now - lastJournalFetchAt < JOURNAL_POLL_MS) return false;
+
+  const apiHeaders = tradesEtag ? { "If-None-Match": tradesEtag } : {};
+  const apiRes = await fetch(`${API_TRADES_URL}?source=${latestJournalFilter}`, {
+    cache: "no-store",
+    headers: apiHeaders,
+  }).catch(() => null);
+  if (apiRes?.status === 304) {
+    lastJournalFetchAt = now;
+    return false;
+  }
+  if (apiRes && apiRes.ok) {
+    const payload = await apiRes.json();
+    tradesEtag = apiRes.headers.get("ETag") || tradesEtag;
+    latestTradeJournal = Array.isArray(payload?.rows) ? payload.rows : [];
+    latestTradeEquitySeries = Array.isArray(payload?.equity) ? payload.equity : [];
+    lastJournalFetchAt = now;
+    tradeJournalLoaded = true;
+    return true;
+  }
+
+  const journalRes = await fetch(`${TRADE_JOURNAL_URL}?t=${nonce}`, { cache: "no-store" }).catch(() => null);
+  const merged = [];
+  if (journalRes && journalRes.ok) {
+    merged.push(...parseTradeJournal(await journalRes.text()).map(r => ({ ...r, raw_source: r.source || "", source: strategyTagFromRow(r) })));
+  }
+  latestTradeJournal = merged.sort((a, b) => rowTs(a) - rowTs(b));
+  latestTradeEquitySeries = [];
+  lastJournalFetchAt = now;
+  tradeJournalLoaded = true;
+  return true;
+}
+
+function renderLiveMarket() {
+  if (!latestMainState) return;
+  const state = latestMainState;
+  const compactState = latestCompactState;
+  const activeState = usableGovernorShadowState(compactState) || state;
+  const chartState = assetDecisionState(state, compactState, activeChartAsset);
+  const currentPrice = Number(latestLivePrice || chartState?.last_price || chartState?.price || activeState.last_price || activeState.price || 0);
+  const entryPrice = Number(openPosition(chartState)?.entry_price || 0);
+  updateChart(
+    currentPrice,
+    latestLivePriceTs || chartState?.updated_at || chartState?.cycle_timestamp_kst || activeState.updated_at || activeState.cycle_timestamp_kst,
+    entryPrice,
+  );
+  setT("chartStamp", latestLivePriceTs ? fmtTs(latestLivePriceTs) : fmtTs(state.updated_at || state.cycle_timestamp_kst));
+}
+
+function applyDashboardEvent(payload) {
+  const tickers = payload?.tickers || {};
+  Object.entries(tickers).forEach(([asset, ticker]) => {
+    const price = Number(ticker?.price || 0);
+    if (!(price > 0) || !ASSET_CONFIG[asset]) return;
+    latestLivePriceByAsset[asset] = price;
+    latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
+  });
+  if (payload?.state?.state) {
+    latestMainState = payload.state.state;
+    latestCompactState = payload.state.compactState || null;
+  }
+  syncActiveMarketState();
+  if (!latestMainState || isScrolling) return;
+  if (payload?.state?.state) {
+    render(latestMainState, latestCompactState, {
+      stateChanged: true,
+      journalChanged: tradeJournalLoaded && !tradePanelsRendered,
+    });
+    return;
+  }
+  renderLiveMarket();
+}
+
+function connectDashboardEvents() {
+  if (dashboardEvents) return;
+  const events = new EventSource(API_EVENTS_URL);
+  dashboardEvents = events;
+  events.onmessage = (event) => {
+    try {
+      applyDashboardEvent(JSON.parse(event.data));
+    } catch (error) {
+      console.error("Dashboard event parse error:", error);
+    }
+  };
+  events.onerror = () => {
+    if (!document.hidden) console.warn("Dashboard event connection interrupted; reconnecting.");
+  };
+}
+
+function disconnectDashboardEvents() {
+  if (!dashboardEvents) return;
+  dashboardEvents.close();
+  dashboardEvents = null;
+}
+
+function opsTone(status) {
+  const value = String(status || "").toUpperCase();
+  if (value === "OK" || value === "RUNNING") return "good";
+  if (value === "WARN") return "warn";
+  if (value === "CRITICAL" || value === "BLOCKED" || value === "STOPPED") return "bad";
+  return "neutral";
+}
+
+function opsLabel(value) {
+  return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]);
+}
+
+function renderOpsStatus(payload) {
+  const heartbeat = payload?.heartbeat || {};
+  const health = payload?.health || {};
+  const badge = el("opsWatchdogBadge");
+  if (badge) {
+    badge.className = `ops-badge ${heartbeat.status === "ok" ? "good" : "bad"}`;
+    badge.textContent = `WATCHDOG ${heartbeat.status === "ok" ? "RUNNING" : "UNKNOWN"}`;
+  }
+  setT("opsUpdatedAt", `서버 갱신 ${fmtTs(health.updated_at_kst || payload?.generated_at)}`);
+  setT("opsHeartbeatText", `watchdog heartbeat: ${fmtTs(heartbeat.recorded_at_kst)} · ${heartbeat.check_count || 0}개 점검`);
+  const checks = Array.isArray(health.checks) ? health.checks : [];
+  setH("opsHealthList", checks.map((check) => {
+    const details = check?.details || {};
+    const age = Number(details.age_minutes);
+    const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
+    return `<article class="ops-health-row ${opsTone(check.status)}"><div><strong>${escapeHtml(opsLabel(check.component))}</strong><span>${escapeHtml(check.summary || "-")}</span></div><div class="ops-health-meta"><b>${escapeHtml(check.status || "UNKNOWN")}</b><small>${ageText}</small></div></article>`;
+  }).join(""));
+}
+
+async function refreshOpsStatus() {
+  const now = Date.now();
+  if (now - opsLastFetchAt < OPS_POLL_MS) return;
+  opsLastFetchAt = now;
+  try {
+    const res = await fetch(API_OPS_STATUS_URL, { cache: "no-store", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`ops status ${res.status}`);
+    opsStatusEtag = res.headers.get("ETag") || opsStatusEtag;
+    renderOpsStatus(await res.json());
+  } catch (error) {
+    console.error("Ops status fetch error:", error);
+    const badge = el("opsWatchdogBadge");
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "WATCHDOG UNREACHABLE"; }
+  }
+}
+
+function setupPageTabs() {
+  document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
+    const ops = button.dataset.pageTab === "ops";
+    el("liveTabPanel")?.classList.toggle("hidden", ops);
+    el("opsTabPanel")?.classList.toggle("hidden", !ops);
+    document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); }
+  }));
+}
+
+function setupScrollRendering() {
+  document.addEventListener("scroll", () => {
+    isScrolling = true;
+    window.clearTimeout(scrollIdleTimer);
+    scrollIdleTimer = window.setTimeout(() => {
+      isScrolling = false;
+      if (!document.hidden) tick();
+    }, 150);
+  }, { passive: true });
+}
+
+function isMobileChartMode() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches;
+}
+
+function mobileChartMaxStart(total, size) {
+  return Math.max(0, total - size);
+}
+
+function normalizedMobileChartSize(total) {
+  const maxSize = Math.min(MOBILE_CHART_MAX_CANDLES, Math.max(MOBILE_CHART_MIN_CANDLES, total || MOBILE_CHART_DEFAULT_CANDLES));
+  const fallback = Math.min(MOBILE_CHART_DEFAULT_CANDLES, maxSize);
+  return Math.round(clampNum(mobileChartView.size || fallback, MOBILE_CHART_MIN_CANDLES, maxSize));
+}
+
+function visibleCandleWindow(candles) {
+  const source = Array.isArray(candles) ? candles : [];
+  const total = source.length;
+  if (!isMobileChartMode() || total <= MOBILE_CHART_DEFAULT_CANDLES) {
+    return { candles: source, start: 0, end: total, total, includeCurrent: true };
+  }
+
+  const size = normalizedMobileChartSize(total);
+  let start = mobileChartView.followLatest || mobileChartView.start === null
+    ? mobileChartMaxStart(total, size)
+    : Math.round(mobileChartView.start);
+  start = Math.round(clampNum(start, 0, mobileChartMaxStart(total, size)));
+  const end = Math.min(total, start + size);
+
+  mobileChartView.size = size;
+  mobileChartView.start = start;
+  mobileChartView.followLatest = end >= total;
+
+  return {
+    candles: source.slice(start, end),
+    start,
+    end,
+    total,
+    includeCurrent: end >= total,
+  };
+}
+
+function renderLatestCandleChart() {
+  const svg = el("candleSvg");
+  syncActiveMarketState();
+  if (!svg || !candleHistory.length) return;
+  const currentPrice = Number(latestLivePrice || candleHistory[candleHistory.length - 1]?.close || 0);
+  const selected = assetDecisionState(latestMainState || latestState, latestCompactState, activeChartAsset);
+  const entryPrice = selected ? Number(selected?.position?.entry_price || selected?.entry_price || 0) : 0;
+  const riskLevels = selected ? latestChartRiskLevels : [];
+  renderCandleSvg(svg, candleHistory, chartJournalRows(), entryPrice, currentPrice, riskLevels);
+}
+
+function chartTouchDistance(touches) {
+  if (!touches || touches.length < 2) return 0;
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+function setupMobileCandleGestures() {
+  const svg = el("candleSvg");
+  if (!svg) return;
+
+  svg.addEventListener("touchstart", (evt) => {
+    if (!isMobileChartMode() || !candleHistory.length) return;
+    if (evt.touches.length === 1) {
+      mobileChartGesture.panStartX = evt.touches[0].clientX;
+      mobileChartGesture.panStartIndex = mobileChartView.start ?? mobileChartMaxStart(candleHistory.length, normalizedMobileChartSize(candleHistory.length));
+    } else if (evt.touches.length >= 2) {
+      const size = normalizedMobileChartSize(candleHistory.length);
+      const start = mobileChartView.start ?? mobileChartMaxStart(candleHistory.length, size);
+      mobileChartGesture.pinchStartDistance = chartTouchDistance(evt.touches);
+      mobileChartGesture.pinchStartSize = size;
+      mobileChartGesture.pinchStartCenter = start + size / 2;
+    }
+  }, { passive: true });
+
+  svg.addEventListener("touchmove", (evt) => {
+    if (!isMobileChartMode() || !candleHistory.length) return;
+    evt.preventDefault();
+    const total = candleHistory.length;
+
+    if (evt.touches.length >= 2) {
+      const distance = chartTouchDistance(evt.touches);
+      if (!(distance > 0) || !(mobileChartGesture.pinchStartDistance > 0)) return;
+      const rawSize = mobileChartGesture.pinchStartSize * (mobileChartGesture.pinchStartDistance / distance);
+      const size = Math.round(clampNum(rawSize, MOBILE_CHART_MIN_CANDLES, Math.min(MOBILE_CHART_MAX_CANDLES, total)));
+      const start = Math.round(clampNum(mobileChartGesture.pinchStartCenter - size / 2, 0, mobileChartMaxStart(total, size)));
+      mobileChartView.size = size;
+      mobileChartView.start = start;
+      mobileChartView.followLatest = start + size >= total;
+      renderLatestCandleChart();
+      return;
+    }
+
+    if (evt.touches.length === 1) {
+      const rect = svg.getBoundingClientRect();
+      const size = normalizedMobileChartSize(total);
+      const dx = evt.touches[0].clientX - mobileChartGesture.panStartX;
+      const candleDelta = Math.round((-dx / Math.max(rect.width, 1)) * size);
+      const start = Math.round(clampNum(mobileChartGesture.panStartIndex + candleDelta, 0, mobileChartMaxStart(total, size)));
+      mobileChartView.start = start;
+      mobileChartView.size = size;
+      mobileChartView.followLatest = start + size >= total;
+      renderLatestCandleChart();
+    }
+  }, { passive: false });
+
+  svg.addEventListener("wheel", (evt) => {
+    if (!isMobileChartMode() || !candleHistory.length) return;
+    evt.preventDefault();
+    const total = candleHistory.length;
+    const size = normalizedMobileChartSize(total);
+    const start = mobileChartView.start ?? mobileChartMaxStart(total, size);
+    const center = start + size / 2;
+    const factor = evt.deltaY > 0 ? 1.14 : 0.88;
+    const nextSize = Math.round(clampNum(size * factor, MOBILE_CHART_MIN_CANDLES, Math.min(MOBILE_CHART_MAX_CANDLES, total)));
+    const nextStart = Math.round(clampNum(center - nextSize / 2, 0, mobileChartMaxStart(total, nextSize)));
+    mobileChartView.size = nextSize;
+    mobileChartView.start = nextStart;
+    mobileChartView.followLatest = nextStart + nextSize >= total;
+    renderLatestCandleChart();
+  }, { passive: false });
+
+  window.addEventListener("resize", () => {
+    mobileChartView.start = null;
+    mobileChartView.followLatest = true;
+    renderLatestCandleChart();
+  });
+}
+
+function updateChart(price, timestamp, entryPriceArg = 0, force = false) {
+  if (!(Number(price) > 0)) return;
+  const tsMs = Date.parse(timestamp || "");
+  const ts = Math.floor((Number.isFinite(tsMs) ? tsMs : Date.now()) / 1000);
+  const candleTs = Math.floor(ts / (CHART_CANDLE_MIN * 60)) * (CHART_CANDLE_MIN * 60);
+  let last = candleHistory[candleHistory.length - 1];
+  if (!last || last.time < candleTs) {
+    last = { time: candleTs, open: price, high: price, low: price, close: price };
+    candleHistory.push(last);
+    if (candleHistory.length > CHART_MAX_CANDLES) candleHistory.shift();
+  } else {
+    last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.close = price;
+  }
+  const now = Date.now();
+  if (!force && now - lastChartRenderAt < CHART_RENDER_MIN_INTERVAL_MS) return;
+  lastChartRenderAt = now;
+  const svg = el("candleSvg");
+  if (svg) {
+    const selected = assetDecisionState(latestMainState || latestState, latestCompactState, activeChartAsset);
+    const entryPrice = entryPriceArg || (selected ? Number(selected?.position?.entry_price || selected?.entry_price || 0) : 0);
+    const riskLevels = selected ? latestChartRiskLevels : [];
+    renderCandleSvg(svg, candleHistory, chartJournalRows(), entryPrice, price, riskLevels);
+  }
+}
+
+function fmtDateTick(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = []) {
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const parentH = svg.parentElement ? svg.parentElement.clientHeight : 0;
+  const mobileChart = isMobileChartMode();
+  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
+  const h = mobileChart ? Math.max(parentH, 260) : 400;
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 20, mb = 40;
+  const cw = w - ml - mr, ch = h - mt - mb;
+  const NS = "http://www.w3.org/2000/svg";
+  const viewport = visibleCandleWindow(candles);
+  candles = viewport.candles;
+  const includeCurrentPrice = viewport.includeCurrent;
+
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = "";
+  
+  if (!candles.length) {
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", w/2); txt.setAttribute("y", h/2);
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = "시장 데이터 대기 중...";
+    svg.appendChild(txt);
+    return;
+  }
+
+  // Candle visibility takes priority: entry/SL/TP lines never widen the price scale.
+  // If a level falls outside the resulting range, it's drawn clamped to the edge with an off-chart arrow (see priceLabels below).
+  const allPrices = candles.flatMap(c => [c.high, c.low]);
+  if (includeCurrentPrice && currentPrice > 0) allPrices.push(currentPrice);
+
+  const minP = Math.min(...allPrices), maxP = Math.max(...allPrices);
+  const pad = (maxP - minP) * 0.15 || 1;
+  const yMin = minP - pad, yMax = maxP + pad;
+  const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
+
+  const xAt = (i) => ml + (i * cw) / candles.length;
+  const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
+  const bw = (cw / candles.length) * 0.8;
+
+  // Grid & Y-Axis Ticks
+  axisTicks(yMin, yMax, 6).forEach(t => {
+    const y = yAt(t);
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("class", "chart-grid");
+    svg.appendChild(line);
+
+    if (!mobileChart) {
+      const txt = document.createElementNS(NS, "text");
+      txt.setAttribute("x", w - 6); txt.setAttribute("y", y + 4);
+      txt.setAttribute("text-anchor", "end");
+      txt.setAttribute("font-size", "13");
+      txt.setAttribute("font-weight", "700");
+      txt.setAttribute("fill", "var(--muted)");
+      txt.textContent = fmtNum(t, 1);
+      svg.appendChild(txt);
+    }
+  });
+
+  const xTickCount = isMobileChartMode() ? 4 : 6;
+  const xTickStep = Math.max(1, Math.floor((candles.length - 1) / Math.max(1, xTickCount - 1)));
+  const xTickIndexes = [];
+  for (let i = 0; i < candles.length; i += xTickStep) xTickIndexes.push(i);
+  const lastIdx = candles.length - 1;
+  if (!xTickIndexes.includes(lastIdx)) xTickIndexes.push(lastIdx);
+
+  xTickIndexes.forEach((idx) => {
+    const c = candles[idx];
+    if (!c) return;
+    const x = xAt(idx) + bw / 2;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", x);
+    line.setAttribute("x2", x);
+    line.setAttribute("y1", h - mb);
+    line.setAttribute("y2", h - mb + 5);
+    line.setAttribute("stroke", "var(--line)");
+    svg.appendChild(line);
+
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", x);
+    txt.setAttribute("y", h - mb + 21);
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("font-size", isMobileChartMode() ? "12" : "13");
+    txt.setAttribute("font-weight", "700");
+    txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = fmtDateTick(c.time * 1000);
+    svg.appendChild(txt);
+  });
+
+  // Candles
+  candles.forEach((c, i) => {
+    const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
+    const wick = document.createElementNS(NS, "line");
+    wick.setAttribute("x1", x + bw/2); wick.setAttribute("x2", x + bw/2);
+    wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
+    wick.setAttribute("stroke", color); svg.appendChild(wick);
+
+    const body = document.createElementNS(NS, "rect");
+    const yTop = yAt(Math.max(c.open, c.close)), yBot = yAt(Math.min(c.open, c.close));
+    body.setAttribute("x", x); body.setAttribute("y", yTop);
+    body.setAttribute("width", bw); body.setAttribute("height", Math.max(yBot - yTop, 1));
+    body.setAttribute("fill", isUp ? "transparent" : color);
+    body.setAttribute("stroke", color); svg.appendChild(body);
+  });
+
+  // Trade Markers
+  // Track markers per candle to avoid overlap
+  const markerCounts = { top: {}, bottom: {} };
+
+  (journal || []).forEach(t => {
+    const ts = new Date(t.ts || t.closed_at).getTime() / 1000;
+    const idx = candles.findIndex(c => c.time <= ts && ts < c.time + 300);
+    if (idx === -1) return;
+    
+    const x = xAt(idx) + bw/2;
+    const kind = String(t.kind || "").toUpperCase();
+    const side = String(t.side || "").toUpperCase();
+    const isEntry = kind.includes("OPEN") || kind.includes("ENTRY");
+    
+    const candle = candles[idx];
+    const isLong = side === "LONG";
+    const isBuy = (isLong && isEntry) || (!isLong && !isEntry);
+    
+    const sideKey = isBuy ? "bottom" : "top";
+    const count = markerCounts[sideKey][idx] || 0;
+    markerCounts[sideKey][idx] = count + 1;
+    
+    // Position based on Candle High/Low with stacking offset
+    const stackOffset = count * 25; // 25px per additional marker
+    const basePrice = isBuy ? candle.low : candle.high;
+    const baseLineY = yAt(basePrice);
+    const mY = isBuy ? baseLineY + 12 + stackOffset : baseLineY - 12 - stackOffset; 
+    const lY = isBuy ? mY + 15 : mY - 10;            
+    
+    const marker = document.createElementNS(NS, "polygon");
+    const pts = isBuy ? "0,-6 -6,6 6,6" : "0,6 -6,-6 6,-6";
+    marker.setAttribute("points", pts);
+    marker.setAttribute("transform", `translate(${x},${mY})`);
+    marker.setAttribute("fill", isLong ? "var(--good)" : "var(--bad)");
+    marker.setAttribute("stroke", "var(--chart-bg)"); marker.setAttribute("stroke-width", "1");
+    svg.appendChild(marker);
+
+    const lbl = document.createElementNS(NS, "text");
+    lbl.setAttribute("x", x); lbl.setAttribute("y", lY);
+    lbl.setAttribute("text-anchor", "middle"); lbl.setAttribute("font-size", "10");
+    lbl.setAttribute("font-weight", "bold"); lbl.setAttribute("fill", isLong ? "var(--good)" : "var(--bad)");
+    lbl.textContent = isEntry ? "진입" : "청산";
+    svg.appendChild(lbl);
+  });
+
+  const priceLabels = [];
+  if (includeCurrentPrice && currentPrice > 0) priceLabels.push({ val: currentPrice, color: "var(--warn)", label: "현재", dashed: true, width: 2 });
+  if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
+  (riskLevels || []).forEach((level) => {
+    if (Number(level.val) > 0) priceLabels.push(level);
+  });
+
+  // Sort by Y position (Price descending = Y ascending)
+  priceLabels.sort((a, b) => yAt(a.val) - yAt(b.val));
+
+  // Adjust Y to avoid overlap
+  const minGap = 18;
+  for (let i = 1; i < priceLabels.length; i++) {
+    const prevY = yAt(priceLabels[i - 1].val);
+    const currY = yAt(priceLabels[i].val);
+    if (Math.abs(currY - prevY) < minGap) {
+      // Move current label down if it overlaps with previous
+      priceLabels[i].adjustedY = prevY + minGap;
+    }
+  }
+
+  priceLabels.forEach(p => {
+    const rawY = yAt(p.val);
+    const offTop = rawY < mt;
+    const offBottom = rawY > h - mb;
+    const outOfView = offTop || offBottom;
+    const realY = outOfView ? (offTop ? mt + 2 : h - mb - 2) : rawY;
+    const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : realY;
+    const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
+    const lineDashed = p.dashed || outOfView;
+
+    // Line stays at real price
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+    line.setAttribute("y1", realY); line.setAttribute("y2", realY);
+    line.setAttribute("stroke", p.color);
+    line.setAttribute("stroke-width", String(p.width || 2));
+    if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
+    if (outOfView) line.setAttribute("opacity", "0.72");
+    svg.appendChild(line);
+
+    // Left label (follows label position)
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
+    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
+    txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
+    txt.textContent = `${p.label}${offTop ? "↑" : offBottom ? "↓" : ""}`;
+    svg.appendChild(txt);
+
+    // Right box (follows label position)
+    const boxW = mobileChart ? 56 : 64, boxH = 18;
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
+    rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
+    rect.setAttribute("fill", p.color); rect.setAttribute("rx", "2");
+    svg.appendChild(rect);
+
+    const pTxt = document.createElementNS(NS, "text");
+    pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
+    pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
+    pTxt.setAttribute("fill", "#1a1208");
+    pTxt.textContent = `${offTop ? "↑ " : offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
+    svg.appendChild(pTxt);
+  });
+
+  // Create Hover Layer on Top
+  const hoverGroup = document.createElementNS(NS, "g");
+  hoverGroup.setAttribute("class", "hover-layer");
+  svg.appendChild(hoverGroup);
+
+  const vLine = document.createElementNS(NS, "line");
+  vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
+  vLine.setAttribute("y1", mt); vLine.setAttribute("y2", h - mb);
+  vLine.setAttribute("stroke", "var(--hover-line)");
+  vLine.setAttribute("stroke-dasharray", "4,4");
+  vLine.style.display = "none";
+  vLine.style.pointerEvents = "none";
+  hoverGroup.appendChild(vLine);
+
+  // Candlestick Tooltip Support
+  svg.onmousemove = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    const mx = (evt.clientX - rect.left) * (w / rect.width);
+    if (mx < ml || mx > w - mr) { hideTooltip(); return; }
+    
+    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * candles.length)));
+    const c = candles[idx];
+    if (!c) return;
+    
+    const tx = ml + (idx * cw) / candles.length + bw/2;
+    
+    vLine.setAttribute("x1", tx);
+    vLine.setAttribute("x2", tx);
+    vLine.style.display = "block";
+
+    showTooltip(evt.pageX, evt.pageY, `
+      <b>${fmtDateTick(c.time * 1000)}</b><br>
+      시가: ${fmtNum(c.open, 2)}<br>
+      고가: ${fmtNum(c.high, 2)}<br>
+      저가: ${fmtNum(c.low, 2)}<br>
+      종가: ${fmtNum(c.close, 2)}
+    `);
+  };
+  svg.onmouseleave = () => {
+    hideTooltip();
+    if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
+    if (typeof vLine !== 'undefined') vLine.style.display = "none";
+    if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
+  };
+}
+
+function render(state, compactState = null, { stateChanged = true, journalChanged = true } = {}) {
+  const shadowState = usableGovernorShadowState(compactState);
+  const activeState = shadowState || state;
+  syncActiveMarketState();
+  const chartState = assetDecisionState(state, compactState, activeChartAsset);
+  latestState = activeState;
+  latestMainState = state;
+  latestCompactState = shadowState;
+  try {
+    latestChartRiskLevels = chartState ? chartRiskLevels(state, compactState, chartState) : [];
+	    const currentP = Number(latestLivePrice || chartState?.last_price || chartState?.price || activeState.last_price || activeState.price || 0);
+	    const pos = chartState ? openPosition(chartState) : null;
+	    const entryP = Number(pos?.entry_price || 0);
+	    updateChart(currentP, latestLivePriceTs || chartState?.updated_at || chartState?.cycle_timestamp_kst || activeState.updated_at || activeState.cycle_timestamp_kst, entryP);
+	    const riskLineText = latestChartRiskLevels.length ? `리스크 라인: ${latestChartRiskLevels.map((x) => `${x.label} ${fmtNum(x.val, 2)}`).join(" / ")}` : "";
+	    setT("riskLevelNote", riskLineText || "-");
+	  } catch (e) { console.error("Chart Update Error:", e); }
+  
+  const globalStamp = fmtTs(state.updated_at || state.cycle_timestamp_kst);
+
+  renderExecutionAlert(state, compactState);
+  renderOpsCards(state, compactState);
+  setT("chartStamp", latestLivePriceTs ? fmtTs(latestLivePriceTs) : globalStamp);
+  if (journalChanged) {
+    renderTradePanels();
+    tradePanelsRendered = true;
+  }
+  if (!stateChanged) return;
+
+  const sess = state.session || {};
+  const micro = state.microstructure || {}, tail = state.tail_risk || {};
+
+  const sessionHtml = buildSessionHtml(sess);
+  setH("topSession", sessionHtml);
+  setT("topClock", fmtNowClock());
+  
+  // 6 Indicators Grid Borders
+  const toxV = clamp01(micro.toxicity_score);
+  const riskV = clamp01(tail.aftershock_prob);
+  const toxDir = Number(micro.obi || 0) > 0 ? 1 : Number(micro.obi || 0) < 0 ? -1 : 0;
+  const toxSignal = toxHint(toxV, toxDir);
+  const eaiSignal = eaiHint(micro);
+  const riskSignal = tailRiskHint(tail);
+  const whaleTone = Number(micro.nif_whale || 0) > 0.05 ? "good" : (Number(micro.nif_whale || 0) < -0.05 ? "bad" : "neutral");
+  const whalePosTone = Number(micro.whale_position_score || 0) > 0.2 ? "good" : (Number(micro.whale_position_score || 0) < -0.2 ? "bad" : "neutral");
+  const obiTone = Number(micro.obi || 0) > 0.1 ? "good" : (Number(micro.obi || 0) < -0.1 ? "bad" : "neutral");
+  const eaiTone = signalTone(eaiSignal);
+  const toxTone = signalTone(toxSignal);
+  const riskTone = signalTone(riskSignal);
+  setB("cardWhale", whaleTone);
+  setB("cardWhalePos", whalePosTone);
+  setB("cardObi", obiTone);
+  setB("cardEai", eaiTone);
+  setB("cardTox", toxTone);
+  setB("cardRisk", riskTone);
+
+  pushMicroHistory("whale", micro.nif_whale);
+  pushMicroHistory("whale_intent", micro.whale_position_score);
+  pushMicroHistory("obi", micro.obi);
+  pushMicroHistory("eai", micro.eai);
+  pushMicroHistory("tox", toxV);
+  pushMicroHistory("risk", riskV);
+  renderSparkline("cardWhale", microHistory.whale, whaleTone);
+  renderSparkline("cardWhalePos", microHistory.whale_intent, whalePosTone);
+  renderSparkline("cardObi", microHistory.obi, obiTone);
+  renderSparkline("cardEai", microHistory.eai, eaiTone);
+  renderSparkline("cardTox", microHistory.tox, toxTone);
+  renderSparkline("cardRisk", microHistory.risk, riskTone);
+
+  setT("whaleText", flowRead(micro));
+  setT("whaleStatusText", directionalCaution(micro.nif_whale, 0.05));
+  setT("whaleIntentText", whalePositionRead(micro));
+  setT("whaleIntentPct", directionalCaution(micro.whale_position_score, 0.2));
+  setT("obiText", obiRead(micro.obi));
+  setT("eaiText", eaiRead(micro));
+  setT("toxText", toxRead(toxV));
+  setT("riskText", tailRiskRead(tail));
+
+  // Gauges
+  const obiVal = Number(micro.obi || 0);
+  setT("obiGaugeRightTxt", directionalCaution(obiVal, 0.1));
+  setT("eaiGaugeRightTxt", eaiSignal);
+
+  setMeter("toxFill", toxV, toxV > 0.65 ? "bad" : toxV > 0.35 ? "warn" : "good");
+  setT("toxText", toxRead(toxV));
+  setT("toxStatusLabel", toxSignal);
+
+  const aftVal = clamp01(tail.aftershock_prob);
+  setMeter("riskFill", aftVal, aftVal > 0.65 ? "bad" : aftVal > 0.35 ? "warn" : "good");
+  setT("riskText", tailRiskRead(tail));
+  setT("riskStatusLabel", riskSignal);
+
 }
 
 async function tick() {
+  if (document.hidden || tickInFlight) return;
+  tickInFlight = true;
   try {
-    const nonce = Date.now();
-    const [stateRes, journalRes] = await Promise.all([
-      fetch(`${STATE_URL}?t=${nonce}`, { cache: "no-store" }),
-      fetch(`${TRADE_JOURNAL_URL}?t=${nonce}`, { cache: "no-store" }).catch(() => null),
-    ]);
-    if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
-    const state = await stateRes.json();
-    if (journalRes && journalRes.ok) {
-      latestTradeJournal = parseTradeJournal(await journalRes.text());
+    const refreshCandles = maybeFetchBinanceHistory();
+    const refreshJournals = refreshTradeJournals(Date.now());
+    const [, journalChanged] = await Promise.all([refreshCandles, refreshJournals]);
+    if (journalChanged && latestMainState && !isScrolling) {
+      renderTradePanels();
+      tradePanelsRendered = true;
     }
-    render(state);
-  } catch (_e) {}
+    refreshOpsStatus();
+  } catch (e) {
+    console.error("Tick Error:", e);
+  } finally {
+    tickInFlight = false;
+  }
 }
 
+connectDashboardEvents();
 tick();
 setInterval(tick, POLL_MS);
-setInterval(tickOpsClock, 1000);
-initPlaybookModal();
+setInterval(() => {
+  if (!isScrolling) { setT("topClock", fmtNowClock()); }
+}, 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    disconnectDashboardEvents();
+    return;
+  }
+  connectDashboardEvents();
+  tick();
+});
+setupAssetTabs();
+setupPageTabs();
+setupScrollRendering();
+setupMobileCandleGestures();
+
+function showTooltip(x, y, html) {
+  const t = el("chartTooltip");
+  if (!t) return;
+  t.innerHTML = html;
+  t.classList.add("visible");
+  
+  const w = window.innerWidth;
+  const tWidth = t.offsetWidth || 150;
+  // Use a smaller offset (8px) and check right boundary
+  let left = x + 8;
+  if (left + tWidth > w) left = x - tWidth - 8; 
+  
+  t.style.left = left + "px";
+  t.style.top = (y + 15) + "px"; // Position slightly below cursor
+}
+
+function hideTooltip() {
+  const t = el("chartTooltip");
+  if (t) t.classList.remove("visible");
+}

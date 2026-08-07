@@ -1,0 +1,32 @@
+# Alpha7 Active Model Red-Team Audit 2026-06-01
+
+## Scope
+
+- Active model: `alpha7_regime3_current_moe_active_mix_expert_scale_refine_20260601`
+- Active candidate: `bull0.85_bear1.15_chop1.25`
+- Source mix: `bull_practical__bear_risk__chop_practical__conf0.80`
+
+## Verdict
+
+PASS_WITH_WARNINGS: no P0/P1 runtime, metric, scale, or contract break found.
+
+## Findings
+
+- **P2 bull_practical feature contract contains watched legacy/target-adjacent columns**: clean_regime4_state24_sticky090_v2_bear_prob, clean_regime4_state24_sticky090_v2_bull_prob, clean_regime4_state24_sticky090_v2_chop_prob, clean_regime4_state24_sticky090_v2_confidence, clean_regime4_state24_sticky090_v2_directional_bias, clean_regime4_state24_sticky090_v2_entropy, clean_regime4_state24_sticky090_v2_factor_crowding, clean_regime4_state24_sticky090_v2_factor_flow, clean_regime4_state24_sticky090_v2_factor_liquidity, clean_regime4_state24_sticky090_v2_factor_trend, clean_regime4_state24_sticky090_v2_factor_vol, clean_regime4_state24_sticky090_v2_instability_prob, clean_regime4_state24_sticky090_v2_margin, clean_regime4_state24_sticky090_v2_micro_prob, clean_regime4_state24_sticky090_v2_range_prob, clean_regime4_state24_sticky090_v2_risk_off_prob, clean_regime4_state24_sticky090_v2_transition_risk, clean_regime4_state24_sticky090_v2_trend_bias, clean_regime4_state24_sticky090_v2_trend_prob, clean_regime4_state24_sticky090_v2_whipsaw_prob, regime4_pred_bear_prob, regime4_pred_bull_prob, regime4_pred_chop_prob, regime4_pred_confidence, regime4_pred_directional_bias, regime4_pred_entropy, regime4_pred_instability_prob, regime4_pred_margin, regime4_pred_micro_prob, regime4_pred_range_prob, regime4_pred_trend_prob, regime4_pred_whipsaw_prob
+- **P2 bull_practical feature contract contains watched legacy/target-adjacent columns**: tp_sl_action_score
+- **P2 bear_risk feature contract contains watched legacy/target-adjacent columns**: clean_regime4_state24_sticky090_v2_bear_prob, clean_regime4_state24_sticky090_v2_bull_prob, clean_regime4_state24_sticky090_v2_chop_prob, clean_regime4_state24_sticky090_v2_confidence, clean_regime4_state24_sticky090_v2_directional_bias, clean_regime4_state24_sticky090_v2_entropy, clean_regime4_state24_sticky090_v2_factor_crowding, clean_regime4_state24_sticky090_v2_factor_flow, clean_regime4_state24_sticky090_v2_factor_liquidity, clean_regime4_state24_sticky090_v2_factor_trend, clean_regime4_state24_sticky090_v2_factor_vol, clean_regime4_state24_sticky090_v2_instability_prob, clean_regime4_state24_sticky090_v2_margin, clean_regime4_state24_sticky090_v2_micro_prob, clean_regime4_state24_sticky090_v2_range_prob, clean_regime4_state24_sticky090_v2_risk_off_prob, clean_regime4_state24_sticky090_v2_transition_risk, clean_regime4_state24_sticky090_v2_trend_bias, clean_regime4_state24_sticky090_v2_trend_prob, clean_regime4_state24_sticky090_v2_whipsaw_prob, regime4_pred_bear_prob, regime4_pred_bull_prob, regime4_pred_chop_prob, regime4_pred_confidence, regime4_pred_directional_bias, regime4_pred_entropy, regime4_pred_instability_prob, regime4_pred_margin, regime4_pred_micro_prob, regime4_pred_range_prob, regime4_pred_trend_prob, regime4_pred_whipsaw_prob
+- **P2 bear_risk feature contract contains watched legacy/target-adjacent columns**: tp_sl_action_score
+- **P2 chop_practical feature contract contains watched legacy/target-adjacent columns**: clean_regime4_state24_sticky090_v2_bear_prob, clean_regime4_state24_sticky090_v2_bull_prob, clean_regime4_state24_sticky090_v2_chop_prob, clean_regime4_state24_sticky090_v2_confidence, clean_regime4_state24_sticky090_v2_directional_bias, clean_regime4_state24_sticky090_v2_entropy, clean_regime4_state24_sticky090_v2_factor_crowding, clean_regime4_state24_sticky090_v2_factor_flow, clean_regime4_state24_sticky090_v2_factor_liquidity, clean_regime4_state24_sticky090_v2_factor_trend, clean_regime4_state24_sticky090_v2_factor_vol, clean_regime4_state24_sticky090_v2_instability_prob, clean_regime4_state24_sticky090_v2_margin, clean_regime4_state24_sticky090_v2_micro_prob, clean_regime4_state24_sticky090_v2_range_prob, clean_regime4_state24_sticky090_v2_risk_off_prob, clean_regime4_state24_sticky090_v2_transition_risk, clean_regime4_state24_sticky090_v2_trend_bias, clean_regime4_state24_sticky090_v2_trend_prob, clean_regime4_state24_sticky090_v2_whipsaw_prob, regime4_pred_bear_prob, regime4_pred_bull_prob, regime4_pred_chop_prob, regime4_pred_confidence, regime4_pred_directional_bias, regime4_pred_entropy, regime4_pred_instability_prob, regime4_pred_margin, regime4_pred_micro_prob, regime4_pred_range_prob, regime4_pred_trend_prob, regime4_pred_whipsaw_prob
+- **P2 chop_practical feature contract contains watched legacy/target-adjacent columns**: tp_sl_action_score
+- **P2 OOS metrics are materialized for every grid row**: The script sorts by validation score, but ranking.csv/report.json expose OOS for all scale candidates; this is a human process overfit risk, not a direct code selection leak.
+
+## Recomputed Metrics
+
+- Validation Cost3 PnL/MDD/trades/WR: `270.237987` / `-37.738652` / `167` / `0.149701`
+- OOS Cost3 PnL/MDD/trades/WR: `103.720551` / `-27.811862` / `133` / `0.150376`
+
+## Artifacts
+
+- JSON report: `/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_active_redteam_audit_20260601/report.json`
+- Active report: `/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_regime3_current_moe_active_mix_expert_scale_refine_20260601/report.json`
+- Active decisions: `/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_regime3_current_moe_active_mix_expert_scale_refine_20260601/validation_decisions.csv`, `/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/alpha7_regime3_current_moe_active_mix_expert_scale_refine_20260601/oos_2026_decisions.csv`

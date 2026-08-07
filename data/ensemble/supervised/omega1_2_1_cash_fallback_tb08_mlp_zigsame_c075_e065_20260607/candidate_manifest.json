@@ -1,0 +1,123 @@
+{
+  "model_id": "omega1_2_1_cash_fallback_tb08_mlp_zigsame_c075_e065_20260607",
+  "created_at": "2026-06-07",
+  "status": "research_candidate_not_live_promoted",
+  "role": "cash fallback TB signal with ZigZag same-side confirmation; activates only when primary is CASH and no position is open",
+  "base_primary": "omega1_2_1_aggressive_compensated_scale200_cap090",
+  "base_signal": {
+    "label_family": "tb_atr08_h48",
+    "model": "mlp"
+  },
+  "confirm_signal": {
+    "label_family": "zigzag_action",
+    "model": "mlp"
+  },
+  "rule": "zig_same",
+  "confirm_threshold": 0.75,
+  "entry_threshold": 0.65,
+  "feature_count": 42,
+  "feature_columns": [
+    "bar_range_pct",
+    "body_pct",
+    "atr14_pct",
+    "ret_1",
+    "ret_3",
+    "ret_6",
+    "ret_12",
+    "ret_24",
+    "ret_vol_6",
+    "range_mean_6",
+    "ret_vol_12",
+    "range_mean_12",
+    "ret_vol_24",
+    "range_mean_24",
+    "ret_vol_48",
+    "range_mean_48",
+    "ema9_21_gap",
+    "tod_sin",
+    "tod_cos",
+    "router_confidence",
+    "router_margin",
+    "dir_p_cash",
+    "dir_p_long",
+    "dir_p_short",
+    "dir_confidence",
+    "dir_side_edge",
+    "dir_trade_prob",
+    "quality_p_cash",
+    "quality_p_long",
+    "quality_p_short",
+    "quality_for_action",
+    "router_is_bull",
+    "router_is_bear",
+    "router_is_chop",
+    "side",
+    "base_notional",
+    "base_tp",
+    "base_sl",
+    "primary_is_cash",
+    "primary_active_roll_12",
+    "primary_active_roll_48",
+    "primary_cash_streak"
+  ],
+  "risk": {
+    "name": "base_tp026_sl014_n0405_h192",
+    "take_profit": 0.026,
+    "stop_loss": 0.014,
+    "notional": 0.405,
+    "leverage": 2.0,
+    "max_hold_bars": 192
+  },
+  "oos_metrics_reverified": {
+    "pnl": 91.75279135412617,
+    "mdd": -8.17170096770865,
+    "trades": 29,
+    "wr": 0.6896551724137931,
+    "long_entries": 12,
+    "short_entries": 17,
+    "primary_entries": 18,
+    "fallback_entries": 11,
+    "primary_takeovers": 6,
+    "exit_reasons": {
+      "primary_stop_loss": 5,
+      "fallback_primary_takeover": 6,
+      "primary_take_profit": 13,
+      "fallback_take_profit": 4,
+      "fallback_stop_loss": 1
+    }
+  },
+  "filter_diag_oos": {
+    "base_trades": 16818,
+    "allowed": 2483,
+    "zig_same": 2483,
+    "zig_opp": 1455,
+    "sltp_same": 0,
+    "sltp_opp": 0
+  },
+  "label_diag": {
+    "tb_atr08_h48": {
+      "atr_mult": 0.8,
+      "max_hold": 48,
+      "min_barrier": 0.0035,
+      "tie_count": 100,
+      "label_counts": {
+        "0": 264,
+        "1": 12925,
+        "2": 13251
+      }
+    },
+    "zigzag_action": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/zigzag_action_labels_20260531/zigzag_action_labels_2025.csv",
+      "label_counts": {
+        "0": 3069,
+        "1": 12843,
+        "2": 10578
+      }
+    }
+  },
+  "ranking_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_1_cash_fallback_tb_confirm_20260607/report.json",
+  "forbidden_feature_audit": {
+    "passed": true,
+    "forbidden": []
+  }
+}

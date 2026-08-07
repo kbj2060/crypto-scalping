@@ -1,0 +1,16 @@
+{
+  "model_id": "core_entry_policy_decontam_plus_unsup_v4_overlay_v13_7_20260510",
+  "status": "pass",
+  "checks": {
+    "contaminated_columns_absent": true,
+    "train_validation_overlap_zero": true,
+    "train_eval_overlap_zero": true,
+    "validation_eval_overlap_zero": true,
+    "ledger_rows_match_report_trades": true,
+    "cost2_survival": true,
+    "cost3_survival": true
+  },
+  "contaminated_columns": [],
+  "ledger_rows": 214,
+  "report_trades": 214
+}

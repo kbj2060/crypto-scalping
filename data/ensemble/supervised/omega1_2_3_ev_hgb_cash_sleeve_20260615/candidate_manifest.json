@@ -1,0 +1,72 @@
+{
+  "model_id": "omega1_2_3_ev_hgb_cash_sleeve_20260615",
+  "status": "walkforward_pass_live_wired",
+  "base_model_id": "omega1_2_1_tp_runner_clean_repair_20260613",
+  "supersedes": "omega1_2_2_tp_runner_cash_sleeve_20260615",
+  "selection_policy": "EV-HGB robust candidate selected after full sweep, cost stress, and monthly walk-forward. OOS point-best ev_min=0.004 was rejected for walk-forward instability; robust ev_min=0.002 is selected.",
+  "redteam_policy": "PnL and OOS lift are diagnostics for ranking; logical/data/feature contract blockers remain fail-fast. Live wiring requires separate parity check.",
+  "selected_config": {
+    "family": "ev_hgb",
+    "risk": "base_tp026_sl014_n0405_h192",
+    "min_edge": 0.002,
+    "ev_min": 0.002,
+    "long_model": "HistGradientBoostingRegressor",
+    "short_model": "HistGradientBoostingRegressor",
+    "primary_mode": "mom3_quality",
+    "quality_min": 0.7,
+    "extend_mult": 1.75,
+    "floor_frac": 0.75,
+    "max_extensions": 2
+  },
+  "validation": {
+    "pnl_pct": 160.5007131666369,
+    "mdd_pct": -28.448127395412005,
+    "wr": 0.5957446808510638,
+    "trades": 47,
+    "primary_entries": 37,
+    "fallback_entries": 10,
+    "delta_pnl_pct": 0.28505900286398855,
+    "fallback_only_pnl_pct": 0.10954721528191325,
+    "fallback_only_trades": 10,
+    "fallback_only_wr": 0.6,
+    "fallback_only_pf": 1.0809286498216408
+  },
+  "oos": {
+    "pnl_pct": 91.89393462836502,
+    "mdd_pct": -15.64416893312578,
+    "wr": 0.6176470588235294,
+    "trades": 34,
+    "primary_entries": 18,
+    "fallback_entries": 16,
+    "delta_pnl_pct": 6.192464163030991,
+    "fallback_only_pnl_pct": 3.3346338871274694,
+    "fallback_only_trades": 16,
+    "fallback_only_wr": 0.5625,
+    "fallback_only_pf": 1.330745510220509
+  },
+  "walkforward": {
+    "report": "tmp/causal_regen_20260516/omega1_2_3_ev_hgb_cash_sleeve_walkforward_20260615/report.json",
+    "selected_ev_min": 0.002,
+    "positive_delta_folds": 3,
+    "fold_count": 4,
+    "total_combo_delta_pnl_points": 6.098571,
+    "total_fallback_pnl_points": 4.063328,
+    "total_fallback_trades": 28
+  },
+  "artifacts": {
+    "upgrade_script": "scripts/train_eval_omega1_2_3_cash_sleeve_upgrade_20260615.py",
+    "walkforward_script": "scripts/walkforward_omega1_2_3_ev_hgb_cash_sleeve_20260615.py",
+    "live_adapter": "trading_bot_modules/omega1_2_3_cash_sleeve.py",
+    "live_entrypoint": "trading_bot.py",
+    "live_bundle": "data/ensemble/supervised/omega1_2_3_ev_hgb_cash_sleeve_20260615/ev_hgb_cash_sleeve.joblib",
+    "upgrade_report": "tmp/causal_regen_20260516/omega1_2_3_cash_sleeve_upgrade_20260615/report.json",
+    "robust_summary": "tmp/causal_regen_20260516/omega1_2_3_cash_sleeve_upgrade_20260615/robust_ev002_selected_summary.json",
+    "walkforward_report": "tmp/causal_regen_20260516/omega1_2_3_ev_hgb_cash_sleeve_walkforward_20260615/report.json"
+  },
+  "live_wiring": "wired_into_trading_bot_omega1_2_1_cash_branch",
+  "live_wiring_verified": {
+    "py_compile": "trading_bot.py trading_bot_modules/omega1_2_3_cash_sleeve.py trading_bot_modules/omega1_2_1_live.py",
+    "bundle_load": true,
+    "synthetic_inference": true
+  }
+}

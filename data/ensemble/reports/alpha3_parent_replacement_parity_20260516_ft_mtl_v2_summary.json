@@ -1,0 +1,149 @@
+{
+  "model_id": "alpha3_parent_replacement_parity_20260516",
+  "created_at": "2026-05-16T14:38:12.686355+09:00",
+  "base_model_alias": "alpha3",
+  "frozen_protocol": "alpha3_csv_native_backtest_parity_20260516",
+  "primary_mutable_surface": "parent_only",
+  "changed_layers": [
+    "parent"
+  ],
+  "frozen_layers": [
+    "teacher_gate",
+    "v21_2_runner",
+    "v27_deep_scout",
+    "v31_exit",
+    "execution",
+    "accounting",
+    "data"
+  ],
+  "candidate": "ft_mtl_v2",
+  "baseline_parity_gate_passed": true,
+  "baseline_metrics": {
+    "final_equity": 4.3868067144959,
+    "return_pct": 338.68067144958997,
+    "max_drawdown_pct": 29.617312952777574,
+    "mdd_signed_pct": -29.617312952777574,
+    "closed_trades": 114,
+    "win_rate": 0.3157894736842105,
+    "avg_closed_pnl_pct": 1.5026078172822808,
+    "median_closed_pnl_pct": -0.2792873429281655,
+    "deep_entries": 75,
+    "long_entries": 65,
+    "short_entries": 49,
+    "avg_notional": 2.1901128532086536,
+    "avg_leverage": 2.1262420039436214,
+    "trades_per_day": 3.8004398657251994,
+    "exit_reason_top20": {
+      "deep_alpha_stop_loss": 49,
+      "v21_2_stop_loss": 29,
+      "deep_alpha_max_hold": 14,
+      "deep_alpha_take_profit": 11,
+      "v21_2_take_profit": 6,
+      "v21_2_max_hold": 4,
+      "forced_end": 1
+    },
+    "runner_actions": {
+      "deep_entry": 75,
+      "v21_entry": 39,
+      "v21_reject": 15,
+      "v21_add_on": 9
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 236,
+      "forced_end_market": 1
+    }
+  },
+  "candidate_metrics": {
+    "final_equity": 1.2098962870354293,
+    "return_pct": 20.989628703542927,
+    "max_drawdown_pct": 48.8828878809471,
+    "mdd_signed_pct": -48.8828878809471,
+    "closed_trades": 115,
+    "win_rate": 0.26956521739130435,
+    "avg_closed_pnl_pct": 0.2526577976971944,
+    "median_closed_pnl_pct": -0.3306811198112436,
+    "deep_entries": 81,
+    "long_entries": 62,
+    "short_entries": 53,
+    "avg_notional": 2.0916521739130443,
+    "avg_leverage": 2.298101900133264,
+    "trades_per_day": 3.8337770575298067,
+    "exit_reason_top20": {
+      "deep_alpha_stop_loss": 55,
+      "v21_2_stop_loss": 29,
+      "deep_alpha_max_hold": 14,
+      "deep_alpha_take_profit": 11,
+      "v21_2_max_hold": 5,
+      "forced_end": 1
+    },
+    "runner_actions": {
+      "deep_entry": 81,
+      "v21_entry": 34,
+      "v21_reject": 10,
+      "v21_add_on": 6
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 235,
+      "forced_end_market": 1
+    }
+  },
+  "delta_vs_baseline": {
+    "return_pct": -317.69104274604706,
+    "max_drawdown_pct": 19.265574928169528,
+    "closed_trades": 1,
+    "deep_entries": 6
+  },
+  "baseline_action_summary": {
+    "action_events": 237,
+    "event_counts": null,
+    "runner_actions": {
+      "deep_entry": 75,
+      "v21_entry": 39,
+      "v21_reject": 15,
+      "v21_add_on": 9
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 236,
+      "forced_end_market": 1
+    },
+    "first_action_diff_vs_baseline": null
+  },
+  "candidate_action_summary": {
+    "action_events": 236,
+    "event_counts": null,
+    "runner_actions": {
+      "deep_entry": 81,
+      "v21_entry": 34,
+      "v21_reject": 10,
+      "v21_add_on": 6
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 235,
+      "forced_end_market": 1
+    },
+    "first_action_diff_vs_baseline": {
+      "kind": "value",
+      "idx": 0,
+      "col": "notional",
+      "reference": 2.75,
+      "candidate": 2.3100000000000005
+    }
+  },
+  "selection_uses_2026": false,
+  "selection_window": "candidate artifact selected before this retest; this retest uses fixed 2026 one-month window only for evaluation",
+  "oos_window": "2026-01-25 07:15:00..2026-02-24 07:10:00",
+  "warnings": [
+    "candidate_did_not_improve_one_month_return_under_fixed_parity_loop",
+    "candidate_worsened_one_month_mdd_under_fixed_parity_loop"
+  ],
+  "red_team_blockers": [],
+  "verdict": "do_not_promote_iterate",
+  "artifacts": {
+    "summary": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_summary.json",
+    "baseline_report": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_baseline.json",
+    "baseline_ledger": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_baseline_ledger.csv",
+    "candidate_report": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_candidate.json",
+    "candidate_ledger": "data/ensemble/reports/alpha3_parent_replacement_parity_20260516_ft_mtl_v2_candidate_ledger.csv",
+    "canonical_compare_ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_csv_canonical_aligned_native_1m_20260516_ledger_corrected.csv"
+  }
+}

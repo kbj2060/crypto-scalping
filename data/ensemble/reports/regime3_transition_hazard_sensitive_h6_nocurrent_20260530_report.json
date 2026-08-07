@@ -1,0 +1,376 @@
+{
+  "model_id": "regime3_transition_hazard_sensitive_h6_20260530",
+  "model_path": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_nocurrent_20260530/regime3_transition_hazard_h6.joblib",
+  "horizon_bars": 6,
+  "classes": [
+    "bull",
+    "bear",
+    "chop"
+  ],
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "include_current_features": false,
+  "feature_count": 57,
+  "feature_cols": [
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12"
+  ],
+  "threshold_selected_on_validation": 0.05,
+  "validation": {
+    "hazard": {
+      "rows": 26490,
+      "transition_rate": 0.34450736126840314,
+      "threshold": 0.05,
+      "accuracy": 0.3797659494148735,
+      "balanced_accuracy": 0.5266087983314606,
+      "log_loss": 0.6238172481879534,
+      "confusion_matrix": [
+        [
+          945,
+          16419
+        ],
+        [
+          11,
+          9115
+        ]
+      ],
+      "roc_auc": 0.699549854470291
+    },
+    "future": {
+      "rows": 26490,
+      "accuracy": 0.2958097395243488,
+      "balanced_accuracy": 0.30915991829366635,
+      "transition_rows": 9126,
+      "persistence_rows": 17364,
+      "confusion_matrix": [
+        [
+          2705,
+          1636,
+          2628
+        ],
+        [
+          2157,
+          1754,
+          2183
+        ],
+        [
+          4381,
+          5669,
+          3377
+        ]
+      ],
+      "transition_accuracy": 0.755095332018409,
+      "transition_balanced_accuracy": 0.7373937139260965,
+      "transition_confusion_matrix": [
+        [
+          1810,
+          679,
+          275
+        ],
+        [
+          503,
+          1704,
+          267
+        ],
+        [
+          179,
+          332,
+          3377
+        ]
+      ],
+      "persistence_accuracy": 0.05442294402211472,
+      "persistence_balanced_accuracy": 0.07555133654357808
+    }
+  },
+  "label_counts_2024": {
+    "transition": 34351,
+    "persistence": 71023,
+    "future": {
+      "bull": 25822,
+      "bear": 23639,
+      "chop": 55913
+    }
+  },
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_nocurrent_20260530/training_features_2024_regime3_transition_hazard_h6.csv",
+      "rows": 105374,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:25:00"
+      ],
+      "hazard": {
+        "rows": 105374,
+        "transition_rate": 0.3259912312335111,
+        "threshold": 0.05,
+        "accuracy": 0.35874124546852165,
+        "balanced_accuracy": 0.5242573684871742,
+        "log_loss": 0.585024457176304,
+        "confusion_matrix": [
+          [
+            3456,
+            67567
+          ],
+          [
+            5,
+            34346
+          ]
+        ],
+        "roc_auc": 0.7620250600879246
+      },
+      "future": {
+        "rows": 105374,
+        "accuracy": 0.31327462182322013,
+        "balanced_accuracy": 0.3406473544413741,
+        "transition_rows": 34351,
+        "persistence_rows": 71023,
+        "confusion_matrix": [
+          [
+            11504,
+            4936,
+            9382
+          ],
+          [
+            8022,
+            7854,
+            7763
+          ],
+          [
+            17520,
+            24740,
+            13653
+          ]
+        ],
+        "transition_accuracy": 0.8603825216150912,
+        "transition_balanced_accuracy": 0.8514617831242607,
+        "transition_confusion_matrix": [
+          [
+            8164,
+            1589,
+            566
+          ],
+          [
+            849,
+            7738,
+            559
+          ],
+          [
+            403,
+            830,
+            13653
+          ]
+        ],
+        "persistence_accuracy": 0.04866029314447433,
+        "persistence_balanced_accuracy": 0.07448201213901946
+      }
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2025.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_nocurrent_20260530/training_features_2025_regime3_transition_hazard_h6.csv",
+      "rows": 105095,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:25:00"
+      ],
+      "hazard": {
+        "rows": 105095,
+        "transition_rate": 0.3365145820448166,
+        "threshold": 0.05,
+        "accuracy": 0.37704933631476284,
+        "balanced_accuracy": 0.5302751083646671,
+        "log_loss": 0.6148362460458988,
+        "confusion_matrix": [
+          [
+            4299,
+            65430
+          ],
+          [
+            39,
+            35327
+          ]
+        ],
+        "roc_auc": 0.7093028878857962
+      },
+      "future": {
+        "rows": 105095,
+        "accuracy": 0.2913839859175032,
+        "balanced_accuracy": 0.30173261351771713,
+        "transition_rows": 35366,
+        "persistence_rows": 69729,
+        "confusion_matrix": [
+          [
+            10884,
+            6319,
+            10728
+          ],
+          [
+            9929,
+            6842,
+            9172
+          ],
+          [
+            16059,
+            22265,
+            12897
+          ]
+        ],
+        "transition_accuracy": 0.7443307131142906,
+        "transition_balanced_accuracy": 0.7268559692800419,
+        "transition_confusion_matrix": [
+          [
+            6775,
+            2718,
+            1098
+          ],
+          [
+            1845,
+            6652,
+            1234
+          ],
+          [
+            724,
+            1423,
+            12897
+          ]
+        ],
+        "persistence_accuracy": 0.061652970786903585,
+        "persistence_balanced_accuracy": 0.08289542170622186
+      }
+    },
+    "training_features_2026_rebuilt.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+      "sidecar": "data/ensemble/supervised/regime3_transition_hazard_sensitive_h6_nocurrent_20260530/training_features_2026_rebuilt_regime3_transition_hazard_h6.csv",
+      "rows": 16891,
+      "range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 15:30:00"
+      ],
+      "hazard": {
+        "rows": 16891,
+        "transition_rate": 0.3197560831211888,
+        "threshold": 0.05,
+        "accuracy": 0.35450831803919247,
+        "balanced_accuracy": 0.5250042984335976,
+        "log_loss": 0.601469498525042,
+        "confusion_matrix": [
+          [
+            598,
+            10892
+          ],
+          [
+            11,
+            5390
+          ]
+        ],
+        "roc_auc": 0.7196409812900908
+      },
+      "future": {
+        "rows": 16891,
+        "accuracy": 0.26978864484044757,
+        "balanced_accuracy": 0.2858355055077186,
+        "transition_rows": 5401,
+        "persistence_rows": 11490,
+        "confusion_matrix": [
+          [
+            1504,
+            1140,
+            1350
+          ],
+          [
+            1820,
+            1110,
+            1470
+          ],
+          [
+            2717,
+            3837,
+            1943
+          ]
+        ],
+        "transition_accuracy": 0.7330124051101647,
+        "transition_balanced_accuracy": 0.7145891201616457,
+        "transition_confusion_matrix": [
+          [
+            943,
+            454,
+            166
+          ],
+          [
+            309,
+            1073,
+            183
+          ],
+          [
+            116,
+            214,
+            1943
+          ]
+        ],
+        "persistence_accuracy": 0.05204525674499565,
+        "persistence_balanced_accuracy": 0.08127345905123683
+      }
+    }
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_used_as_target_source": true,
+    "current_used_as_input_features": false,
+    "forbidden_current_feature_count_when_disabled": 0
+  }
+}

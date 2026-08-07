@@ -1,0 +1,15 @@
+{
+  "csv_path": "data/rl_training_2025_unified_dircat_oof.csv",
+  "params": {
+    "quality_min": 0.006,
+    "raw_edge_min": 0.55,
+    "sup_prob_min": 0.85,
+    "debounce_bars": 8,
+    "sign_change_only": true,
+    "require_agreement": false
+  },
+  "rows": 103753,
+  "candidate_rows": 1169,
+  "candidate_rows_calib": 893,
+  "candidate_rows_holdout": 276
+}

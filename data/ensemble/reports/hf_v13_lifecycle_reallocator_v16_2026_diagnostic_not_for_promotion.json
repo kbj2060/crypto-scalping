@@ -1,0 +1,226 @@
+{
+  "warning": "2026 diagnostic only, not valid for selection/promotion",
+  "top": [
+    {
+      "config": {
+        "name": "lc_v16_parent_noop",
+        "max_entry_notional": 99.0,
+        "early_close_loss": -99.0,
+        "add_trigger": 99.0,
+        "add_frac": 0.0,
+        "add_cap_mult": 1.0,
+        "add_dd_block": 99.0,
+        "profit_lock_equity": 99.0,
+        "lock_after_profit": false
+      },
+      "pnl": 139.40707050411612,
+      "mdd": -35.04235843898853,
+      "trades": 80,
+      "score": 39.195278309173474
+    },
+    {
+      "config": {
+        "name": "lc_v16_6",
+        "max_entry_notional": 2.15,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 100.48155896364798,
+      "mdd": -35.04275897654492,
+      "trades": 78,
+      "score": 0.2677640809233992
+    },
+    {
+      "config": {
+        "name": "lc_v16_7",
+        "max_entry_notional": 2.15,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 99.9613442231514,
+      "mdd": -35.52552726681657,
+      "trades": 68,
+      "score": -2.666292110931437
+    },
+    {
+      "config": {
+        "name": "lc_v16_10",
+        "max_entry_notional": 2.4,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 99.92270506304008,
+      "mdd": -37.32962304948586,
+      "trades": 81,
+      "score": -11.725410184389219
+    },
+    {
+      "config": {
+        "name": "lc_v16_11",
+        "max_entry_notional": 2.4,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 100.00262095570038,
+      "mdd": -37.98139442659958,
+      "trades": 80,
+      "score": -14.904351177297514
+    },
+    {
+      "config": {
+        "name": "lc_v16_2",
+        "max_entry_notional": 1.9,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 81.40703917340385,
+      "mdd": -34.31097154923317,
+      "trades": 75,
+      "score": -15.14781857276202
+    },
+    {
+      "config": {
+        "name": "lc_v16_5",
+        "max_entry_notional": 2.15,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 77.85312441200425,
+      "mdd": -34.08764545762048,
+      "trades": 83,
+      "score": -17.585102876098162
+    },
+    {
+      "config": {
+        "name": "lc_v16_4",
+        "max_entry_notional": 2.15,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 66.44670761173666,
+      "mdd": -33.48116709817567,
+      "trades": 86,
+      "score": -25.959127879141676
+    },
+    {
+      "config": {
+        "name": "lc_v16_3",
+        "max_entry_notional": 1.9,
+        "early_close_loss": -0.018,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 77.0413758915684,
+      "mdd": -36.13497495015386,
+      "trades": 74,
+      "score": -28.6334988592009
+    },
+    {
+      "config": {
+        "name": "lc_v16_9",
+        "max_entry_notional": 2.4,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 55.05249478838945,
+      "mdd": -37.70617836724658,
+      "trades": 89,
+      "score": -58.478397047843444
+    },
+    {
+      "config": {
+        "name": "lc_v16_8",
+        "max_entry_notional": 2.4,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 50.85029844627336,
+      "mdd": -37.06679766551816,
+      "trades": 91,
+      "score": -59.48368988131743
+    },
+    {
+      "config": {
+        "name": "lc_v16_0",
+        "max_entry_notional": 1.9,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.018,
+        "add_frac": 0.2,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 43.692191451598084,
+      "mdd": -37.17190784847648,
+      "trades": 79,
+      "score": -67.1673477907843
+    },
+    {
+      "config": {
+        "name": "lc_v16_1",
+        "max_entry_notional": 1.9,
+        "early_close_loss": -0.012,
+        "add_trigger": 0.03,
+        "add_frac": 0.25,
+        "add_cap_mult": 1.3,
+        "add_dd_block": 0.12,
+        "profit_lock_equity": 2.0,
+        "lock_after_profit": true
+      },
+      "pnl": 42.557406484775484,
+      "mdd": -38.73987266279156,
+      "trades": 80,
+      "score": -76.14195682918232
+    }
+  ]
+}

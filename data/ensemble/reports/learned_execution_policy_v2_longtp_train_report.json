@@ -1,0 +1,93 @@
+{
+  "type": "learned_execution_policy_v1",
+  "train_csv": "/home/llewyn/crypto-scalping/tmp/pipeline_audit_causal_regime/trade_candidates_2025_causal_regime.csv",
+  "eval_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_causal_regime_predicted_45m_hgb_telemetry.csv",
+  "model_out": "data/ensemble/supervised/learned_execution_policy_v2_longtp.pkl",
+  "macro_config": {
+    "lookback_bars": 6048,
+    "threshold": 0.05,
+    "persist_updates": 5,
+    "update_bars": 288
+  },
+  "training_meta": {
+    "candidates": 13843,
+    "candidate_stride_bars": 6,
+    "max_train_horizon_bars": 3000,
+    "source": "macro"
+  },
+  "label_distribution": {
+    "notional": {
+      "0": 3535,
+      "1": 918,
+      "2": 1035,
+      "3": 885,
+      "4": 1468,
+      "5": 1691,
+      "6": 4311
+    },
+    "leverage": {
+      "0": 2142,
+      "1": 1,
+      "3": 11700
+    },
+    "take_profit": {
+      "0": 4579,
+      "1": 2095,
+      "2": 2522,
+      "3": 2370,
+      "4": 1866,
+      "5": 411
+    },
+    "max_hold": {
+      "0": 2213,
+      "1": 1046,
+      "2": 994,
+      "3": 1230,
+      "4": 2411,
+      "5": 2491,
+      "6": 3458
+    },
+    "quality_mean": 0.14833768548955967,
+    "quality_p95": 0.7425484346220361
+  },
+  "eval_candidate_count": 10157,
+  "eval_decision_sample_count": 1693,
+  "eval_decision_summary": {
+    "notional_exposure": {
+      "mean": 2.3749748643743,
+      "p25": 2.0348732248247514,
+      "p50": 2.342578018612481,
+      "p75": 2.697331156505865
+    },
+    "leverage": {
+      "mean": 4.327476736884045,
+      "p25": 3.870987419323812,
+      "p50": 4.569922166173493,
+      "p75": 4.888096380883422
+    },
+    "take_profit": {
+      "mean": 0.17831210241747816,
+      "p25": 0.05841236134677537,
+      "p50": 0.09591918501149387,
+      "p75": 0.2759272072215436
+    },
+    "max_hold_bars": {
+      "mean": 610.0614294152392,
+      "p25": 162.0,
+      "p50": 325.0,
+      "p75": 888.0
+    },
+    "quality_score": {
+      "mean": 0.1635576358034468,
+      "p25": 0.08660467739980261,
+      "p50": 0.11632358409361919,
+      "p75": 0.2109047882921372
+    },
+    "confidence": {
+      "mean": 0.5821710824939531,
+      "p25": 0.5182670814836816,
+      "p50": 0.5707434749977001,
+      "p75": 0.6352358224721658
+    }
+  }
+}

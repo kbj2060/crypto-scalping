@@ -1,0 +1,10 @@
+{
+  "schema_version": "architecture_feature_analysis_v1",
+  "experiment_id": "btc-kappa1-invariant-composite-20260807",
+  "preflight_dataset_sha256": "4239f6a04fa79ef1eebfde7e4c587e84a64b4186868b592d10f3b56afca54c4d",
+  "feature_count": 15,
+  "numeric_feature_count": 15,
+  "constant_feature_count": 0,
+  "exact_duplicate_numeric_feature_pairs": [],
+  "high_correlation_pairs_abs_ge_0_98": 6
+}

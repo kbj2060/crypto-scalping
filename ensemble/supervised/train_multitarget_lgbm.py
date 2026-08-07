@@ -67,8 +67,7 @@ def _build_models(backend: str, seed: int, n_jobs: int, params: Dict[str, Any]):
             "n_jobs": n_jobs,
         }
         cls = LGBMClassifier(
-            objective="multiclass",
-            num_class=3,
+            objective="binary",
             verbose=-1,
             **common,
         )
@@ -127,6 +126,11 @@ def _build_quality_and_hold_targets(df, y_dir: np.ndarray, horizon: int) -> Tupl
         y_hold[t] = float(best_idx + 1)
 
     return y_quality, y_hold
+
+
+def _directional_binary_labels(y_dir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    mask = (y_dir == 0) | (y_dir == 2)
+    return mask, (y_dir == 2).astype(np.int64)
 
 
 def _select_ranked_features(
@@ -213,12 +217,16 @@ def _tune_params(
         x_train_sel = x_train[selected]
         x_val_sel = x_val[selected]
         dir_model, quality_model, hold_model = _build_models(backend, args.seed, args.n_jobs, params)
-        dir_model.fit(x_train_sel, y_train_dir)
+        train_dir_mask, y_train_bin = _directional_binary_labels(y_train_dir)
+        val_dir_mask, y_val_bin = _directional_binary_labels(y_val_dir)
+        if train_dir_mask.sum() < 50 or val_dir_mask.sum() < 20:
+            return -1e9
+        dir_model.fit(x_train_sel.loc[train_dir_mask], y_train_bin[train_dir_mask])
         quality_model.fit(x_train_sel, y_train_q)
         hold_model.fit(x_train_sel, y_train_h)
 
-        dir_pred = dir_model.predict(x_val_sel)
-        dir_bal_acc = balanced_accuracy_score(y_val_dir, dir_pred)
+        dir_pred = dir_model.predict(x_val_sel.loc[val_dir_mask])
+        dir_bal_acc = balanced_accuracy_score(y_val_bin[val_dir_mask], dir_pred)
         q_mae = float(np.mean(np.abs(quality_model.predict(x_val_sel) - y_val_q)))
         h_mae = float(np.mean(np.abs(hold_model.predict(x_val_sel) - y_val_h)))
 
@@ -285,6 +293,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "seed": args.seed,
             "backend": backend,
             "feature_count": len(ranked_features),
+            "direction_label_policy": "directional_only_exclude_flat",
         }
     )
     results_path = training_results_path(args.save_path, "multitarget_lgbm")
@@ -340,12 +349,18 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
     dir_model, quality_model, hold_model = _build_models(backend, args.seed, args.n_jobs, merged)
     x_trainval_sel = x_trainval[selected_features]
     x_test_sel = x_test[selected_features]
-    dir_model.fit(x_trainval_sel, y_trainval_dir)
+    trainval_dir_mask, y_trainval_bin = _directional_binary_labels(y_trainval_dir)
+    test_dir_mask, y_test_bin = _directional_binary_labels(y_test_dir)
+    if trainval_dir_mask.sum() < 50 or test_dir_mask.sum() < 20:
+        raise ValueError(
+            f"directional samples too few for binary direction head: trainval={trainval_dir_mask.sum()} test={test_dir_mask.sum()}"
+        )
+    dir_model.fit(x_trainval_sel.loc[trainval_dir_mask], y_trainval_bin[trainval_dir_mask])
     quality_model.fit(x_trainval_sel, y_trainval_q)
     hold_model.fit(x_trainval_sel, y_trainval_h)
 
-    dir_pred = dir_model.predict(x_test_sel)
-    dir_bal_acc = balanced_accuracy_score(y_test_dir, dir_pred)
+    dir_pred = dir_model.predict(x_test_sel.loc[test_dir_mask])
+    dir_bal_acc = balanced_accuracy_score(y_test_bin[test_dir_mask], dir_pred)
     q_pred = quality_model.predict(x_test_sel)
     h_pred = hold_model.predict(x_test_sel)
     q_mae = float(np.mean(np.abs(q_pred - y_test_q)))
@@ -378,6 +393,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
         "meta": {
             "algorithm": "multi_target_lgbm",
             "backend": backend,
+            "direction_label_policy": "directional_only_exclude_flat",
+            "direction_classes": ["DOWN", "UP"],
             "direction_balanced_accuracy": float(dir_bal_acc),
             "quality_mae": q_mae,
             "hold_mae": h_mae,
@@ -399,6 +416,7 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
             "backend": backend,
             "data_hash": data_hash,
             "config_hash": config_hash,
+            "direction_label_policy": "directional_only_exclude_flat",
         },
     )
     logger.info("saved meta: %s", meta_path)

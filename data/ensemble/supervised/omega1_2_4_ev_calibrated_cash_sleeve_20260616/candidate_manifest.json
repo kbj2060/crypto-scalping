@@ -1,0 +1,28 @@
+{
+  "model_id": "omega1_2_4_ev_calibrated_cash_sleeve_20260616",
+  "parent_model_id": "omega1_2_3_ev_hgb_cash_sleeve_20260615",
+  "base_model_id": "omega1_2_1_tp_runner_clean_repair_20260613",
+  "status": "walkforward_pass_shadow_candidate",
+  "bundle": "/home/llewyn/crypto-scalping/data/ensemble/supervised/omega1_2_4_ev_calibrated_cash_sleeve_20260616/ev_calibrated_cash_sleeve.joblib",
+  "feature_count": 61,
+  "ev_min": 0.002,
+  "risk": {
+    "name": "base_tp026_sl014_n0405_h192",
+    "take_profit": 0.026,
+    "stop_loss": 0.014,
+    "notional": 0.405,
+    "leverage": 2.0,
+    "max_hold_bars": 192
+  },
+  "calibration": {
+    "type": "absolute_residual_lower_bound",
+    "quantile": 0.5,
+    "long_abs_residual_offset": 0.0010768821918855976,
+    "short_abs_residual_offset": 0.0010608525999764662,
+    "source_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_4_ev_calibrated_cash_sleeve_probe_20260616/report.json",
+    "selection_policy": "validation_only_no_oos_selection"
+  },
+  "probe_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_4_ev_calibrated_cash_sleeve_probe_20260616/report.json",
+  "walkforward_report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega1_2_4_calibrated_cash_sleeve_walkforward_20260616/report.json",
+  "redteam_policy": "PnL is diagnostic; fail only logical, data, feature, contract defects."
+}

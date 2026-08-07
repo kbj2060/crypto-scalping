@@ -1,0 +1,18 @@
+{
+  "status": "pass",
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS",
+  "base_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+  "sl_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_sl_bucket_widen_20260527_summary.json",
+  "selected_gate": "baseline_no_gate",
+  "baseline_gate": "baseline_no_gate",
+  "delta_vs_baseline_gate": {
+    "cost3_pnl": 0.0,
+    "cost3_mdd": 0.0,
+    "cost3_wr": 0.0,
+    "cost3_trades": 0,
+    "v21_stop_loss": 0,
+    "deep_stop_loss": 0
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "contract": "Regime3 CryptoMamba h6 sidecar renamed contract. This is a materialized contract file, not a runtime alias. Columns avoid the word 'future' because values are model sidecar outputs, not future labels.",
+  "source_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531",
+  "output_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_h6_sidecar_20260601",
+  "rename_map": {
+    "regime3_cmamba_h6_future_bull_prob": "regime3_cmamba_h6_sidecar_bull_prob",
+    "regime3_cmamba_h6_future_bear_prob": "regime3_cmamba_h6_sidecar_bear_prob",
+    "regime3_cmamba_h6_future_chop_prob": "regime3_cmamba_h6_sidecar_chop_prob",
+    "regime3_cmamba_h6_future_pred_id": "regime3_cmamba_h6_sidecar_class_id",
+    "regime3_cmamba_h6_future_pred_name": "regime3_cmamba_h6_sidecar_class_name",
+    "regime3_cmamba_h6_confidence": "regime3_cmamba_h6_sidecar_confidence",
+    "regime3_cmamba_h6_transition_prob": "regime3_cmamba_h6_sidecar_transition_prob",
+    "regime3_cmamba_h6_stability_score": "regime3_cmamba_h6_sidecar_stability_score"
+  },
+  "required_output_cols": [
+    "timestamp",
+    "regime3_cmamba_h6_sidecar_bull_prob",
+    "regime3_cmamba_h6_sidecar_bear_prob",
+    "regime3_cmamba_h6_sidecar_chop_prob",
+    "regime3_cmamba_h6_sidecar_class_id",
+    "regime3_cmamba_h6_sidecar_class_name",
+    "regime3_cmamba_h6_sidecar_confidence",
+    "regime3_cmamba_h6_sidecar_transition_prob",
+    "regime3_cmamba_h6_sidecar_stability_score"
+  ],
+  "outputs": [
+    {
+      "year": "2024",
+      "source": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2024_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "output": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_h6_sidecar_20260601/training_features_2024_regime3_cryptomamba_h6_sidecar_20260601.csv",
+      "rows": 105380,
+      "first_timestamp": "2024-01-01 00:00:00",
+      "last_timestamp": "2024-12-31 23:55:00",
+      "columns": [
+        "timestamp",
+        "regime3_cmamba_h6_sidecar_bull_prob",
+        "regime3_cmamba_h6_sidecar_bear_prob",
+        "regime3_cmamba_h6_sidecar_chop_prob",
+        "regime3_cmamba_h6_sidecar_class_id",
+        "regime3_cmamba_h6_sidecar_class_name",
+        "regime3_cmamba_h6_sidecar_confidence",
+        "regime3_cmamba_h6_sidecar_transition_prob",
+        "regime3_cmamba_h6_sidecar_stability_score"
+      ]
+    },
+    {
+      "year": "2025",
+      "source": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2025_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "output": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_h6_sidecar_20260601/training_features_2025_regime3_cryptomamba_h6_sidecar_20260601.csv",
+      "rows": 105101,
+      "first_timestamp": "2025-01-01 00:00:00",
+      "last_timestamp": "2025-12-31 23:55:00",
+      "columns": [
+        "timestamp",
+        "regime3_cmamba_h6_sidecar_bull_prob",
+        "regime3_cmamba_h6_sidecar_bear_prob",
+        "regime3_cmamba_h6_sidecar_chop_prob",
+        "regime3_cmamba_h6_sidecar_class_id",
+        "regime3_cmamba_h6_sidecar_class_name",
+        "regime3_cmamba_h6_sidecar_confidence",
+        "regime3_cmamba_h6_sidecar_transition_prob",
+        "regime3_cmamba_h6_sidecar_stability_score"
+      ]
+    },
+    {
+      "year": "2026",
+      "source": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_h6_nocurrent_20260531/training_features_2026_rebuilt_regime3_cryptomamba_pred_h6_nocurrent_20260531.csv",
+      "output": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_h6_sidecar_20260601/training_features_2026_rebuilt_regime3_cryptomamba_h6_sidecar_20260601.csv",
+      "rows": 57601,
+      "first_timestamp": "2026-01-01 00:00:00",
+      "last_timestamp": "2026-07-20 00:00:00",
+      "columns": [
+        "timestamp",
+        "regime3_cmamba_h6_sidecar_bull_prob",
+        "regime3_cmamba_h6_sidecar_bear_prob",
+        "regime3_cmamba_h6_sidecar_chop_prob",
+        "regime3_cmamba_h6_sidecar_class_id",
+        "regime3_cmamba_h6_sidecar_class_name",
+        "regime3_cmamba_h6_sidecar_confidence",
+        "regime3_cmamba_h6_sidecar_transition_prob",
+        "regime3_cmamba_h6_sidecar_stability_score"
+      ]
+    }
+  ]
+}

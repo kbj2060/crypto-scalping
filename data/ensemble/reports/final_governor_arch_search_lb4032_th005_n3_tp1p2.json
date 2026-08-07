@@ -1,0 +1,196 @@
+{
+  "type": "final_governor_four_model_grid",
+  "eval_csv": "/home/llewyn/crypto-scalping/data/ensemble/event_driven/trade_candidates_2026_causal_regime_predicted_45m_hgb_telemetry.csv",
+  "eval_days": 58.670138888888886,
+  "cost": {
+    "trade_fee": 0.0005,
+    "trade_slip": 0.0002,
+    "fee_multiplier": 1.0,
+    "slip_multiplier": 1.0
+  },
+  "macro_config": {
+    "lookback_bars": 4032,
+    "threshold": 0.05,
+    "persist_updates": 5,
+    "update_bars": 288,
+    "notional_exposure": 3.0,
+    "leverage": 5.0,
+    "min_history_bars": 4032,
+    "bootstrap_current": true,
+    "take_profit": 1.2,
+    "stop_loss": 0.0,
+    "trailing_arm": 0.0,
+    "trailing_gap": 0.0,
+    "lockout_bars": 0,
+    "lockout_until_signal_change": true
+  },
+  "guard_confs": [
+    0.85
+  ],
+  "results": [
+    {
+      "pnl": 34.74835992427465,
+      "trades": 68,
+      "wr": 0.3088235294117647,
+      "mdd": -42.65405226445604,
+      "long_entries": 18,
+      "short_entries": 50,
+      "force_closes": 9,
+      "controller_closes": 67,
+      "switch_closes": 0,
+      "entry_vetoes": 0,
+      "invalid_actions": 0,
+      "risk_blocks": 0,
+      "risk_forced_exits": 0,
+      "avg_risk_score": 0.0,
+      "avg_leverage": 4.779411764705882,
+      "avg_margin_fraction": 0.5735294117647066,
+      "avg_notional_exposure": 2.8676470588235294,
+      "risk_reason_counts": {},
+      "risk_exit_reason_counts": {},
+      "risk_resize_reason_counts": {},
+      "resize_events": 0,
+      "resize_add_events": 0,
+      "resize_reduce_events": 0,
+      "resize_realized_pnl": 0.0,
+      "resize_fee_paid": 0.0,
+      "active_rows": 3,
+      "action_counts": {
+        "CASH_HOLD": 11797,
+        "ALLOW_CURRENT": 3,
+        "ALLOW_BULL": 0,
+        "ALLOW_BEAR": 0,
+        "ALLOW_FADE": 0,
+        "CLOSE": 2
+      },
+      "macro_entries": 65,
+      "macro_entry_signals": 65,
+      "macro_blocks": 6520,
+      "macro_lockout_blocks": 6520,
+      "macro_closes": 58,
+      "sniper_entries": 3,
+      "trend_entries": 0,
+      "micro_entries": 0,
+      "trend_entry_signals": 0,
+      "trend_blocks": 0,
+      "trend_closes": 0,
+      "micro_entry_signals": 0,
+      "micro_blocks": 0,
+      "micro_closes": 0,
+      "sniper_governor_blocks": 0,
+      "sniper_governor_scaled": 3,
+      "source_counts": {
+        "cash": 11762,
+        "sniper": 40,
+        "macro": 65
+      },
+      "trend_regime_entries": {
+        "bull": 0,
+        "bear": 0
+      },
+      "micro_regime_entries": {
+        "whipsaw": 0,
+        "normal": 0,
+        "chop": 0
+      },
+      "regime_predictor_blocks": 935,
+      "trades_per_day": 1.159022311652956,
+      "modules": {
+        "macro": true,
+        "sniper": true,
+        "trend": false,
+        "micro": false
+      },
+      "regime_predictor_guard_conf": 0.85,
+      "portfolio_governor": {
+        "peak_equity": 13505.573024796591,
+        "max_drawdown_frac": 0.42654052264456044,
+        "sniper_blocks": 0,
+        "sniper_scaled": 3
+      },
+      "name": "macro+sniper|guard_0.85"
+    }
+  ],
+  "best": {
+    "pnl": 34.74835992427465,
+    "trades": 68,
+    "wr": 0.3088235294117647,
+    "mdd": -42.65405226445604,
+    "long_entries": 18,
+    "short_entries": 50,
+    "force_closes": 9,
+    "controller_closes": 67,
+    "switch_closes": 0,
+    "entry_vetoes": 0,
+    "invalid_actions": 0,
+    "risk_blocks": 0,
+    "risk_forced_exits": 0,
+    "avg_risk_score": 0.0,
+    "avg_leverage": 4.779411764705882,
+    "avg_margin_fraction": 0.5735294117647066,
+    "avg_notional_exposure": 2.8676470588235294,
+    "risk_reason_counts": {},
+    "risk_exit_reason_counts": {},
+    "risk_resize_reason_counts": {},
+    "resize_events": 0,
+    "resize_add_events": 0,
+    "resize_reduce_events": 0,
+    "resize_realized_pnl": 0.0,
+    "resize_fee_paid": 0.0,
+    "active_rows": 3,
+    "action_counts": {
+      "CASH_HOLD": 11797,
+      "ALLOW_CURRENT": 3,
+      "ALLOW_BULL": 0,
+      "ALLOW_BEAR": 0,
+      "ALLOW_FADE": 0,
+      "CLOSE": 2
+    },
+    "macro_entries": 65,
+    "macro_entry_signals": 65,
+    "macro_blocks": 6520,
+    "macro_lockout_blocks": 6520,
+    "macro_closes": 58,
+    "sniper_entries": 3,
+    "trend_entries": 0,
+    "micro_entries": 0,
+    "trend_entry_signals": 0,
+    "trend_blocks": 0,
+    "trend_closes": 0,
+    "micro_entry_signals": 0,
+    "micro_blocks": 0,
+    "micro_closes": 0,
+    "sniper_governor_blocks": 0,
+    "sniper_governor_scaled": 3,
+    "source_counts": {
+      "cash": 11762,
+      "sniper": 40,
+      "macro": 65
+    },
+    "trend_regime_entries": {
+      "bull": 0,
+      "bear": 0
+    },
+    "micro_regime_entries": {
+      "whipsaw": 0,
+      "normal": 0,
+      "chop": 0
+    },
+    "regime_predictor_blocks": 935,
+    "trades_per_day": 1.159022311652956,
+    "modules": {
+      "macro": true,
+      "sniper": true,
+      "trend": false,
+      "micro": false
+    },
+    "regime_predictor_guard_conf": 0.85,
+    "portfolio_governor": {
+      "peak_equity": 13505.573024796591,
+      "max_drawdown_frac": 0.42654052264456044,
+      "sniper_blocks": 0,
+      "sniper_scaled": 3
+    },
+    "name": "macro+sniper|guard_0.85"
+  }
+}

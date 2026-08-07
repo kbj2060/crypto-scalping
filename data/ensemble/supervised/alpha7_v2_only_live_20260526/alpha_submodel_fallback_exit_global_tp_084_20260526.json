@@ -1,0 +1,17 @@
+{
+  "model_id": "alpha7_alpha_submodel_fallback_exit_global_tp_084_20260526",
+  "design": "Alpha sub model: fallback-only exit overlay selected from runtime-native validation/OOS sweep. Applies global TP compaction on fallback entries.",
+  "source_report": "tmp/causal_regen_20260516/alpha7_fallback_exit_improver_focused_20260526/summary.json",
+  "mode": "global_tp",
+  "tp_scale": 0.84,
+  "conf_thr": 0.0,
+  "qual_thr": 0.0,
+  "sl_scale": 1.0,
+  "hold_cap": 0,
+  "audit": {
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026-01-01..2026-02-28",
+    "oos_cost3_delta_vs_baseline": 19.124092795618836
+  },
+  "created_at": "2026-05-26"
+}

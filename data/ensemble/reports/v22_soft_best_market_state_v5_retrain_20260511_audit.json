@@ -1,0 +1,36 @@
+{
+  "model_id": "v22_soft_best_market_state_v5_retrain_20260511",
+  "status": "pass",
+  "blocking": [],
+  "warnings": [],
+  "invariants": {
+    "legacy_regime_columns_absent_from_model_inputs": true,
+    "market_state_features_present": true,
+    "ledger_covers_full_eval_window": true,
+    "no_eval_window_extends_beyond_available_sniper_ledger_warning": true
+  },
+  "feature_audit": {
+    "feature_count": 118,
+    "market_state_feature_count": 17,
+    "contaminated_feature_cols": [],
+    "state_features": [
+      "market_state_2024_unsup_v5_cluster",
+      "market_state_2024_unsup_v5_confidence",
+      "market_state_2024_unsup_v5_entropy",
+      "market_state_2024_unsup_v5_factor_btc_decouple",
+      "market_state_2024_unsup_v5_factor_flow",
+      "market_state_2024_unsup_v5_factor_funding_crowd",
+      "market_state_2024_unsup_v5_factor_liquidity_stress",
+      "market_state_2024_unsup_v5_factor_trend",
+      "market_state_2024_unsup_v5_factor_vol",
+      "market_state_2024_unsup_v5_prob_0",
+      "market_state_2024_unsup_v5_prob_1",
+      "market_state_2024_unsup_v5_prob_2",
+      "market_state_2024_unsup_v5_prob_3",
+      "market_state_2024_unsup_v5_prob_4",
+      "market_state_2024_unsup_v5_risk_off_prob",
+      "market_state_2024_unsup_v5_trend_bias",
+      "market_state_2024_unsup_v5_trend_prob"
+    ]
+  }
+}

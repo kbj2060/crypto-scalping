@@ -1,0 +1,67 @@
+{
+  "model_id": "alpha3_runtime_native_promotion_decision_20260515",
+  "created_at": "2026-05-15T21:46:58.519589+09:00",
+  "decision": "do_not_promote_v31_or_v32_for_live_entries",
+  "applied_code_safety_changes": [
+    "FINAL_GOVERNOR_V31_DEEP_NOTIONAL default changed 2.0 -> 0.0 so artifact notional is honored",
+    "FINAL_GOVERNOR_V31_ENABLE is now env-controlled and defaults OFF until runtime-native promotion passes",
+    "runtime-native backtest script added; calls trading_bot.FinalGovernorRuntime.decide directly",
+    "v32 utility/MAE retraining script added but candidate failed runtime-native smoke"
+  ],
+  "candidates": [
+    {
+      "name": "live_runtime_original_2x",
+      "return_pct": -17.09533309969875,
+      "mdd_pct": 39.25732688091371,
+      "trades": 178,
+      "win_rate": 0.33146067415730335,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515.json"
+    },
+    {
+      "name": "artifact_notional_no_hidden_2x",
+      "return_pct": -8.730125158185908,
+      "mdd_pct": 28.929959231907553,
+      "trades": 147,
+      "win_rate": 0.3877551020408163,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515_artifact_notional.json"
+    },
+    {
+      "name": "symguard_artifact_notional",
+      "return_pct": -16.749128750507726,
+      "mdd_pct": 34.19520049883147,
+      "trades": 171,
+      "win_rate": 0.3508771929824561,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515_symguard_artifact_notional.json"
+    },
+    {
+      "name": "window1200_live_parity_2k",
+      "return_pct": -7.267417524730524,
+      "mdd_pct": 7.703491724137923,
+      "trades": 27,
+      "win_rate": 0.3333333333333333,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515_window1200_2k.json"
+    },
+    {
+      "name": "v32_retrained_2k",
+      "return_pct": 7.565069942282521,
+      "mdd_pct": 23.08718737748491,
+      "trades": 28,
+      "win_rate": 0.17857142857142858,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515_v32_2k.json"
+    },
+    {
+      "name": "v31_bearonly_2k",
+      "return_pct": -3.8341964301385034,
+      "mdd_pct": 17.252413903391417,
+      "trades": 23,
+      "win_rate": 0.43478260869565216,
+      "report": "data/ensemble/reports/alpha3_runtime_native_backtest_20260515_v31_bearonly_2k.json"
+    }
+  ],
+  "blocking": [
+    "no_tested_v31_candidate_has_positive_runtime_native_full_oos",
+    "v32_retrained_candidate_underperformed_existing_v31_on_2k_smoke",
+    "live_effective_window_1200_retest_failed_2k_smoke"
+  ],
+  "next_required": "train a new entry/exit lifecycle model and pass runtime-native backtest before re-enabling V31 live entries"
+}

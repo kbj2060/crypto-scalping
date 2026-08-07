@@ -1,0 +1,292 @@
+{
+  "baseline_no_day": {
+    "pnl": 13987.647320942639,
+    "mdd": -14.077185285116222,
+    "trades": 691,
+    "trades_per_day": 11.777712019885188,
+    "wr": 0.7452966714905933,
+    "sniper_entries": 142,
+    "day_entries": 0,
+    "micro_entries": 548,
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 398,
+      "chop": 78
+    },
+    "source_counts": {
+      "cash": 10644,
+      "micro": 549,
+      "sniper": 1670
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_baseline_recheck.json"
+  },
+  "2026_01": {
+    "pnl": 385.272505962167,
+    "mdd": -12.322714026648562,
+    "trades": 300,
+    "trades_per_day": 9.67741935483871,
+    "wr": 0.74,
+    "sniper_entries": 73,
+    "day_entries": 0,
+    "micro_entries": 227,
+    "micro_regime_entries": {
+      "whipsaw": 32,
+      "normal": 162,
+      "chop": 33
+    },
+    "source_counts": {
+      "cash": 5615,
+      "micro": 227,
+      "sniper": 902
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "2026-01-01",
+    "eval_end": "2026-02-01",
+    "report_path": "tmp/governor_no_day_2026_01.json"
+  },
+  "2026_02": {
+    "pnl": 2755.254212673541,
+    "mdd": -14.077185285116212,
+    "trades": 389,
+    "trades_per_day": 14.058476596812648,
+    "wr": 0.7480719794344473,
+    "sniper_entries": 67,
+    "day_entries": 0,
+    "micro_entries": 321,
+    "micro_regime_entries": {
+      "whipsaw": 40,
+      "normal": 236,
+      "chop": 45
+    },
+    "source_counts": {
+      "cash": 5044,
+      "micro": 322,
+      "sniper": 752
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "2026-02-01",
+    "eval_end": "2026-03-01",
+    "report_path": "tmp/governor_no_day_2026_02.json"
+  },
+  "2026_q1_partial": {
+    "pnl": 13987.647320942639,
+    "mdd": -14.077185285116222,
+    "trades": 691,
+    "trades_per_day": 11.777712019885188,
+    "wr": 0.7452966714905933,
+    "sniper_entries": 142,
+    "day_entries": 0,
+    "micro_entries": 548,
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 398,
+      "chop": 78
+    },
+    "source_counts": {
+      "cash": 10644,
+      "micro": 549,
+      "sniper": 1670
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "2026-01-01",
+    "eval_end": "2026-04-01",
+    "report_path": "tmp/governor_no_day_2026_q1_partial.json"
+  },
+  "fee2x_only": {
+    "pnl": 249.03036167107416,
+    "mdd": -25.22679745354687,
+    "trades": 650,
+    "trades_per_day": 11.078889743741493,
+    "wr": 0.7461538461538462,
+    "sniper_entries": 132,
+    "day_entries": 0,
+    "micro_entries": 517,
+    "micro_regime_entries": {
+      "whipsaw": 60,
+      "normal": 380,
+      "chop": 77
+    },
+    "source_counts": {
+      "cash": 10873,
+      "micro": 518,
+      "sniper": 1592
+    },
+    "cost_config": {
+      "trade_fee": 0.001,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 2.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_fee2x.json"
+  },
+  "fee3x_only": {
+    "pnl": -40.46155914969171,
+    "mdd": -40.8065433183912,
+    "trades": 146,
+    "trades_per_day": 2.4884890809019353,
+    "wr": 0.7876712328767124,
+    "sniper_entries": 8,
+    "day_entries": 0,
+    "micro_entries": 138,
+    "micro_regime_entries": {
+      "whipsaw": 15,
+      "normal": 101,
+      "chop": 22
+    },
+    "source_counts": {
+      "cash": 15136,
+      "micro": 138,
+      "sniper": 55
+    },
+    "cost_config": {
+      "trade_fee": 0.0015,
+      "trade_slip": 0.0002,
+      "fee_multiplier": 3.0,
+      "slip_multiplier": 1.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_fee3x.json"
+  },
+  "slip2x_only": {
+    "pnl": 4442.440024008963,
+    "mdd": -17.509004969694864,
+    "trades": 684,
+    "trades_per_day": 11.65840089956797,
+    "wr": 0.7046783625730995,
+    "sniper_entries": 137,
+    "day_entries": 0,
+    "micro_entries": 546,
+    "micro_regime_entries": {
+      "whipsaw": 70,
+      "normal": 398,
+      "chop": 78
+    },
+    "source_counts": {
+      "cash": 10606,
+      "micro": 547,
+      "sniper": 1734
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0004,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 2.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_slip2x.json"
+  },
+  "slip3x_only": {
+    "pnl": 427.3669866883749,
+    "mdd": -34.7687689472133,
+    "trades": 646,
+    "trades_per_day": 11.010711960703084,
+    "wr": 0.6486068111455109,
+    "sniper_entries": 97,
+    "day_entries": 0,
+    "micro_entries": 548,
+    "micro_regime_entries": {
+      "whipsaw": 63,
+      "normal": 408,
+      "chop": 77
+    },
+    "source_counts": {
+      "cash": 11141,
+      "micro": 549,
+      "sniper": 1174
+    },
+    "cost_config": {
+      "trade_fee": 0.0005,
+      "trade_slip": 0.0006000000000000001,
+      "fee_multiplier": 1.0,
+      "slip_multiplier": 3.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_slip3x.json"
+  },
+  "cost2x_fee_slip": {
+    "pnl": -38.156646108816105,
+    "mdd": -41.08578942791241,
+    "trades": 243,
+    "trades_per_day": 4.141800319583358,
+    "wr": 0.7119341563786008,
+    "sniper_entries": 37,
+    "day_entries": 0,
+    "micro_entries": 206,
+    "micro_regime_entries": {
+      "whipsaw": 24,
+      "normal": 152,
+      "chop": 30
+    },
+    "source_counts": {
+      "cash": 14080,
+      "micro": 206,
+      "sniper": 464
+    },
+    "cost_config": {
+      "trade_fee": 0.001,
+      "trade_slip": 0.0004,
+      "fee_multiplier": 2.0,
+      "slip_multiplier": 2.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_cost2x.json"
+  },
+  "cost3x_fee_slip": {
+    "pnl": -41.60717710763291,
+    "mdd": -41.60717710763291,
+    "trades": 81,
+    "trades_per_day": 1.380600106527786,
+    "wr": 0.6790123456790124,
+    "sniper_entries": 8,
+    "day_entries": 0,
+    "micro_entries": 73,
+    "micro_regime_entries": {
+      "whipsaw": 6,
+      "normal": 57,
+      "chop": 10
+    },
+    "source_counts": {
+      "cash": 15950,
+      "micro": 73,
+      "sniper": 90
+    },
+    "cost_config": {
+      "trade_fee": 0.0015,
+      "trade_slip": 0.0006000000000000001,
+      "fee_multiplier": 3.0,
+      "slip_multiplier": 3.0
+    },
+    "eval_start": "",
+    "eval_end": "",
+    "report_path": "tmp/governor_no_day_cost3x.json"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "model_id": "omega1_2_2_tp_runner_cash_sleeve_20260615",
+  "status": "redteam_pass_shadow_candidate_not_live_wired",
+  "base_model_id": "omega1_2_1_tp_runner_clean_repair_20260613",
+  "selection_policy": "validation_only_no_oos_selection",
+  "redteam_policy": "PnL and OOS lift are diagnostics only. FAIL is limited to logical defects, data/feature contract violations, forbidden feature leakage, missing train/test cash rows, or failed sleeve candidate generation.",
+  "redteam_pass": true,
+  "redteam_blockers": [],
+  "accounting_policy": "Cost3 next-open entry and intrabar high/low barrier exits; primary TP-runner config frozen from clean repair.",
+  "selected_config": {
+    "model": "hgb",
+    "risk": "mid_tp030_sl018_n055_h192",
+    "min_edge": 0.004,
+    "threshold": 0.55,
+    "primary_mode": "mom3_quality",
+    "quality_min": 0.7,
+    "extend_mult": 1.75,
+    "floor_frac": 0.75,
+    "max_extensions": 2
+  },
+  "validation": {
+    "pnl_pct": 172.46189489696562,
+    "mdd_pct": -26.53514514556511,
+    "wr": 0.6086956521739131,
+    "trades": 46,
+    "primary_entries": 37,
+    "fallback_entries": 9
+  },
+  "oos": {
+    "pnl_pct": 86.25861593777589,
+    "mdd_pct": -15.64416893312577,
+    "wr": 0.6,
+    "trades": 40,
+    "primary_entries": 18,
+    "fallback_entries": 22
+  },
+  "baseline_replay": {
+    "model_id": "omega1_2_1_tp_runner_clean_repair_20260613",
+    "validation": {
+      "pnl_pct": 160.2156541637729,
+      "mdd_pct": -27.640859723754485,
+      "wr": 0.5945945945945946,
+      "trades": 37
+    },
+    "oos": {
+      "pnl_pct": 85.70147046533403,
+      "mdd_pct": -15.64416893312579,
+      "wr": 0.6666666666666666,
+      "trades": 18
+    }
+  },
+  "artifacts": {
+    "script": "scripts/train_eval_omega1_2_2_tp_runner_cash_sleeve_20260615.py",
+    "out_dir": "tmp/causal_regen_20260516/omega1_2_2_tp_runner_cash_sleeve_20260615",
+    "report": "tmp/causal_regen_20260516/omega1_2_2_tp_runner_cash_sleeve_20260615/report.json",
+    "ranking": "tmp/causal_regen_20260516/omega1_2_2_tp_runner_cash_sleeve_20260615/validation_only_ranking.csv"
+  },
+  "live_wiring": "not_live_wired"
+}

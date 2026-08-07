@@ -1,0 +1,61 @@
+{
+  "csv_path": "data/rl_training_2026_unified.csv",
+  "ckpt_path": "data/ensemble/ckpt/best_dsac_agents_clean_retrain_v1.pth",
+  "config_path": "data/ensemble/ckpt/dsac_train_config_clean_retrain_v1.json",
+  "device": "cpu",
+  "ckpt_epoch": 20,
+  "rows": 16641,
+  "overall": {
+    "pnl": -4.88029380308832,
+    "wr": 0.582089552238806,
+    "mdd": -21.147196854882655,
+    "tr": 134,
+    "long_entries": 100,
+    "short_entries": 34,
+    "fcl": 23,
+    "fcs": 0,
+    "avg_hold_long": 42.35164835164835,
+    "avg_hold_short": 389.48387096774195,
+    "side_balance": 0.2537313432835821,
+    "side_pen": 39.40298507462686,
+    "score": -71.41288705932877
+  },
+  "regime_logs": [
+    {
+      "regime": "chop",
+      "rows": 4439,
+      "score": 36.55017119331189,
+      "pnl": 23.906377615181462,
+      "trades": 6
+    },
+    {
+      "regime": "whipsaw",
+      "rows": 2648,
+      "score": 41.57962911948741,
+      "pnl": 31.381250358635903,
+      "trades": 49
+    },
+    {
+      "regime": "bull",
+      "rows": 2834,
+      "score": -132.78991682095312,
+      "pnl": -16.120410646904514,
+      "trades": 86
+    },
+    {
+      "regime": "bear",
+      "rows": 3182,
+      "score": 37.817704300735976,
+      "pnl": 21.34338629498027,
+      "trades": 26
+    },
+    {
+      "regime": "normal",
+      "rows": 3538,
+      "score": 16.290585317639454,
+      "pnl": 27.80065326266805,
+      "trades": 8
+    }
+  ],
+  "val_score": -33.71150738169283
+}

@@ -1,0 +1,20 @@
+{
+  "model_id": "safe_cap_shadow_moe_v1",
+  "status": "pass",
+  "blocking": [],
+  "invariants": {
+    "parent_trained_before_cap_train": true,
+    "cap_map_learned_before_validation": true,
+    "shadow_selection_uses_2025_validation_only": true,
+    "oos_is_2026_report_only": true,
+    "shadow_never_flips_side": true,
+    "shadow_never_changes_exit": true,
+    "shadow_does_not_create_safe_cap_blocked_entries": true,
+    "fees_and_slippage_on_final_notional": true,
+    "max_margin_fraction_lte_1": true,
+    "no_liquidations": true,
+    "no_ruin": true,
+    "cost2_survives": true,
+    "cost3_survives": true
+  }
+}

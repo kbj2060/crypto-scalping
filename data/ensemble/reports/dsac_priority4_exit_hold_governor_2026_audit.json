@@ -1,0 +1,27 @@
+{
+  "model_id": "dsac_priority4_exit_hold_governor_2026",
+  "dsac": {
+    "path": "data/ensemble/ckpt/dsac_priority1_full_retrain_20260507/best_dsac_agents.pth",
+    "epoch": 180,
+    "global_step": 0,
+    "state_dim": 29,
+    "best_val_pnl": 0.0
+  },
+  "status": "pass",
+  "blocking": [],
+  "warnings": [],
+  "invariants": {
+    "no_new_entries_created": true,
+    "entry_index_unchanged": true,
+    "side_never_changes": true,
+    "max_notional_lte_3p6": true,
+    "selection_uses_validation_only": true,
+    "holdout_report_only": true
+  },
+  "baseline_replay": {
+    "source_final_cash": 8.960582860566412,
+    "noop_replay_final_cash": 8.960582860566412,
+    "noop_replay_pnl": 796.0582860566411,
+    "noop_replay_mdd_mark_to_market": -24.945436703379887
+  }
+}

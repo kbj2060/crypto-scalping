@@ -1,0 +1,39 @@
+{
+  "model_id": "alpha3_unified_exit_governor_v1_20260515",
+  "status": "reject_do_not_promote",
+  "selection_uses_2026": false,
+  "causality": [
+    "Train: 2025-01-01..2025-09-30 only.",
+    "Runtime selection: 2025-10-01..2025-12-31 only.",
+    "2026 is fixed OOS and not used for fitting or selection.",
+    "State uses current-bar causal features, open-position state, Alpha3 decision outputs, and frozen V27 q."
+  ],
+  "exit_attribution_cost1": {
+    "baseline": {
+      "deep_alpha_max_hold": 33,
+      "deep_alpha_stop_loss": 83,
+      "v21_2_stop_loss": 49,
+      "v21_2_max_hold": 8,
+      "deep_alpha_take_profit": 15,
+      "v21_2_take_profit": 7
+    },
+    "unified_governor": {
+      "deep_alpha_max_hold": 33,
+      "deep_alpha_stop_loss": 83,
+      "v21_2_stop_loss": 49,
+      "v21_2_max_hold": 8,
+      "deep_alpha_take_profit": 15,
+      "v21_2_take_profit": 7
+    },
+    "baseline_stop_loss_plus_max_hold": 173,
+    "unified_stop_loss_plus_max_hold": 173
+  },
+  "blocking": [
+    "unified_exit_governor_underperforms_corrected_alpha3_baseline_on_2026_oos"
+  ],
+  "warnings": [
+    "Backtest execution uses 5m OHLC maker-touch proxy, not real queue position or partial fills.",
+    "First v1 governor closes 100% only. Partial close/TWAP can be added after shadow attribution is stable.",
+    "TP/SL/max-hold are still fallback rails by design; production should not remove hard safety rails before live shadow confirms exit latency."
+  ]
+}

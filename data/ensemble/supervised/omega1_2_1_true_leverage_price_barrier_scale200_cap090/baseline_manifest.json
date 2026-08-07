@@ -1,0 +1,83 @@
+{
+  "model_id": "omega1_2_1_true_leverage_price_barrier_scale200_cap090",
+  "alias": "omega1.2.1_true_leverage_price_barrier",
+  "status": "live_candidate_shadow_required",
+  "created_kst": "2026-06-10",
+  "parent_baseline": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "previous_baseline": "omega1_2_1_aggressive_compensated_scale200_cap090",
+  "baseline_artifact_dir": "data/ensemble/supervised/omega1_2_1_true_leverage_price_barrier_scale200_cap090",
+  "contract": "docs/model_contracts/omega1_2_1_true_leverage_price_barrier_20260610_contract.md",
+  "decision_boundary": {
+    "entry_alpha": "Unchanged parent Omega1.2 true 3-head TabM final action",
+    "risk_transform": "True leverage exposure with price-barrier-preserving compensated TP/SL",
+    "compensated_scale": 2.0,
+    "margin_notional_cap": 0.9,
+    "base_leverage": 2.0,
+    "accounting": "Cost3 maker-limit replay accounting with fee/slippage multiplier 3.0 and effective_exposure = margin_notional * leverage"
+  },
+  "selected_runtime_template": {
+    "base_take_profit": 0.026,
+    "base_stop_loss": 0.014,
+    "base_margin_notional": 0.405,
+    "base_leverage": 2.0,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "compensated_scale": 2.0,
+    "margin_notional_cap": 0.9,
+    "true_leverage_exposure": true,
+    "preserve_price_barrier": true,
+    "cost_multiplier": 3.0
+  },
+  "validation_cost3_true_leverage": {
+    "pnl_pct": 276.6726656120173,
+    "mdd_pct": -20.34324129117596,
+    "wr": 0.6363636363636364,
+    "trades": 33,
+    "long_entries": 9,
+    "short_entries": 24,
+    "avg_margin_notional": 0.7895454545454544,
+    "avg_leverage": 2.0,
+    "avg_effective_exposure": 1.5790909090909089,
+    "exit_reasons": {
+      "take_profit": 20,
+      "stop_loss": 12,
+      "forced_end": 1
+    }
+  },
+  "oos_cost3_true_leverage": {
+    "pnl_pct": 186.43393604829234,
+    "mdd_pct": -15.597230556126608,
+    "wr": 0.7222222222222222,
+    "trades": 18,
+    "long_entries": 3,
+    "short_entries": 15,
+    "avg_margin_notional": 0.7975000000000003,
+    "avg_leverage": 2.0,
+    "avg_effective_exposure": 1.5950000000000006,
+    "exit_reasons": {
+      "take_profit": 13,
+      "stop_loss": 5
+    }
+  },
+  "failed_diagnostic_same_equity_tp_sl": {
+    "validation_pnl_pct": -5.31254559713501,
+    "validation_mdd_pct": -31.25228797707478,
+    "oos_pnl_pct": 52.65965452998189,
+    "oos_mdd_pct": -17.90897803924866,
+    "reason": "Applying true leverage while leaving equity TP/SL unchanged halves the effective price barrier and increases noisy SL churn."
+  },
+  "artifacts": {
+    "source_predictions_dir": "tmp/causal_regen_20260516/omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+    "diagnostic_dir": "tmp/causal_regen_20260516/omega1_2_1_true_leverage_diagnostic_20260610",
+    "validation_ledger": "tmp/causal_regen_20260516/omega1_2_1_true_leverage_diagnostic_20260610/validation_true_leverage_rerun_preserve_price_barrier_ledger.csv",
+    "oos_ledger": "tmp/causal_regen_20260516/omega1_2_1_true_leverage_diagnostic_20260610/oos_true_leverage_rerun_preserve_price_barrier_ledger.csv"
+  },
+  "live_wiring": {
+    "live_adapter": "trading_bot_modules/omega1_2_1_live.py",
+    "trading_bot_entrypoint": "FinalGovernorRuntime.omega1_2_1_adapter",
+    "default_env_enable": "FINAL_GOVERNOR_OMEGA1_2_1_ENABLE=1",
+    "default_fully_learned": "FINAL_GOVERNOR_FULLY_LEARNED_ENABLE=0 unless explicitly overridden",
+    "fail_fast_contract": true,
+    "shadow_test_required_before_real_exchange": true
+  }
+}

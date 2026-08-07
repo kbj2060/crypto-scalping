@@ -1,7 +1,7 @@
 """
 XGBTrendBrain 학습 스크립트
 ================================================================================
-LightGBM 3-class 분류기 (DOWN / FLAT / UP)
+LightGBM 2-class 방향 분류기 (DOWN / UP)
 
 타겟:  Triple-Barrier 레이블 (de Prado 2018) — 5m 봉 기준
 피처:  ULTIMATE_FEATURE_COLS + MTF 피처 → auto_select_features (상위 N개)
@@ -48,6 +48,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 MISSING_WARN_RATIO = 0.30
 
+FORBIDDEN_FEATURE_NAMES = {
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal",
+}
+FORBIDDEN_FEATURE_PREFIXES = (
+    "m7_",
+    "teacher_",
+    "a5dir_",
+    "clean_regime_2024_unsup_v4_",
+    "clean_regime4_2024_unsup_v1_",
+)
+FORBIDDEN_FEATURE_FRAGMENTS = (
+    "future",
+    "target",
+    "label",
+    "trade_pnl",
+    "cash_after",
+    "_x_trend_prob",
+    "_x_instability_prob",
+    "_x_chop_prob",
+)
+
+
+def is_forbidden_feature(col: str) -> bool:
+    c = str(col)
+    lc = c.lower()
+    if c in FORBIDDEN_FEATURE_NAMES:
+        return True
+    if any(c.startswith(prefix) for prefix in FORBIDDEN_FEATURE_PREFIXES):
+        return True
+    return any(fragment in lc for fragment in FORBIDDEN_FEATURE_FRAGMENTS)
+
 
 # ────────────────────────────────────────────────────────────────
 # 공유 데이터클래스 / Triple-Barrier 유틸 / 추론 모델
@@ -57,24 +92,24 @@ class TrendSignal:
     trend_dir : int
     strength  : float
     rev_prob  : float
-    probs     : Tuple[float, float, float]
+    probs     : Tuple[float, float]
 
     @property
     def is_up(self)   -> bool: return self.trend_dir == 2
     @property
     def is_down(self) -> bool: return self.trend_dir == 0
     @property
-    def is_flat(self) -> bool: return self.trend_dir == 1
+    def is_flat(self) -> bool: return False
 
     def to_arbiter_dict(self) -> dict:
-        p_down, p_flat, p_up = (float(self.probs[0]), float(self.probs[1]), float(self.probs[2]))
+        p_down, p_up = (float(self.probs[0]), float(self.probs[1]))
         return {
             'trend_dir': self.trend_dir,
             'strength': self.strength,
             'rev_prob': self.rev_prob,
-            'probs': [p_down, p_flat, p_up],
-            'p_down': p_down, 'p_flat': p_flat, 'p_up': p_up,
-            'prob_dn': p_down, 'prob_flat': p_flat, 'prob_up': p_up,
+            'probs': [p_down, p_up],
+            'p_down': p_down, 'p_up': p_up,
+            'prob_dn': p_down, 'prob_up': p_up,
         }
 
 
@@ -233,21 +268,23 @@ class XGBTrendBrain:
         return self._to_trend_signal(probs)
 
     def _to_trend_signal(self, probs: np.ndarray) -> TrendSignal:
-        trend_dir = int(np.argmax(probs))
-        strength = float(np.clip((probs[trend_dir] - 1.0 / 3.0) * 1.5, 0.0, 1.0))
-
-        if trend_dir == 2:
-            rev_prob = float(probs[0])
-        elif trend_dir == 0:
-            rev_prob = float(probs[2])
+        p = np.asarray(probs, dtype=np.float64)
+        if p.shape[0] != 2:
+            raise ValueError(f"XGBTrendBrain expects 2-class probabilities [DOWN, UP], got shape={p.shape}")
+        s = float(np.nansum(p))
+        if s <= 1e-12:
+            p = np.array([0.5, 0.5], dtype=np.float64)
         else:
-            rev_prob = 0.5
+            p = np.nan_to_num(p, nan=0.0) / s
+        trend_dir = 2 if p[1] >= p[0] else 0
+        strength = float(np.clip(abs(p[1] - p[0]), 0.0, 1.0))
+        rev_prob = float(p[0] if trend_dir == 2 else p[1])
 
         return TrendSignal(
             trend_dir=trend_dir,
             strength=strength,
             rev_prob=rev_prob,
-            probs=tuple(float(p) for p in probs),
+            probs=tuple(float(v) for v in p),
         )
 
     def save(self, path: str):
@@ -260,9 +297,11 @@ class XGBTrendBrain:
             pickle.dump({'model': self.model, 'feature_cols': self.feature_cols}, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         meta = {
-            'format': 'xgbtrend_pickle_v2',
+            'format': 'xgbtrend_binary_pickle_v1',
             'model_path': os.path.basename(model_path),
             'feature_cols': self.feature_cols,
+            'classes': ['DOWN', 'UP'],
+            'label_policy': 'directional_only_exclude_flat',
         }
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2, ensure_ascii=True)
@@ -300,8 +339,8 @@ class XGBTrendBrain:
 # ────────────────────────────────────────────────────────────────
 # 설정
 # ────────────────────────────────────────────────────────────────
-DATA_PATH   = 'data/training_features_5m.csv'
-RL_DATA_PATH = 'data/rl_training_data_full.csv'
+DATA_PATH   = 'data/splits/year_oos/training_features_2024.csv'
+RL_DATA_PATH = 'data/splits/year_oos/rl_base_2024.csv'
 SAVE_PATH   = 'data/ensemble/supervised/trend_xgb.json'
 MAX_FEATURES = 64      # auto_select_features 상한
 N_TRIALS     = 40      # Optuna 시행 수
@@ -336,7 +375,6 @@ RL_ALPHA_COLS = [  # 합성 알파 + 모델 파생
     'jump_flag', 'jump_z', 'evt_tail_flag', 'evt_excess_z',
     'mshd', 'fvci', 'wpad', 'fdlv',
     'vsdi', 'vebr', 'tlad', 'mtmb', 'fcsz',
-    'regime_bull', 'regime_bear', 'regime_chop', 'regime_whipsaw', 'regime_normal',
 ]
 
 MUST_INCLUDE = [
@@ -456,7 +494,7 @@ def load_data(path: str, rl_path: str = RL_DATA_PATH):
     for c in extra_feats:
         if c in df.columns and c not in combined:
             combined.append(c)
-    feature_candidates = list(dict.fromkeys(combined))
+    feature_candidates = [c for c in dict.fromkeys(combined) if not is_forbidden_feature(c)]
 
     logger.info(f"  ✓ {len(df):,}행, {len(feature_candidates)}개 피처 후보 (signal_*, sig_*, 합성 알파 포함)")
     return df, feature_candidates
@@ -531,8 +569,7 @@ def _resolve_lgbm_device(requested_device: str, X_probe: np.ndarray, y_probe: np
                 max_depth=3,
                 learning_rate=0.1,
                 num_leaves=15,
-                objective='multiclass',
-                num_class=3,
+                objective='binary',
                 n_jobs=1,
                 random_state=42,
                 verbose=-1,
@@ -569,9 +606,9 @@ def train(data_path: str = DATA_PATH,
     labels = build_labels(df, n_jobs=n_jobs_label_eff)
 
     # 유효 행 마스크
-    valid_mask = labels >= 0
+    valid_mask = (labels == 0) | (labels == 2)
     X_all = df[feature_candidates].values.astype(np.float32)
-    y_all = labels
+    y_all = (labels == 2).astype(np.int64)
 
     # 시간 순서 분할
     valid_indices = np.where(valid_mask)[0]
@@ -623,8 +660,8 @@ def train(data_path: str = DATA_PATH,
     X_test  = X_test[:,  feat_idx]
 
     # 클래스 가중치 (불균형 보정)
-    counts = np.bincount(y_train, minlength=3).astype(np.float64)
-    class_weight = {i: counts.sum() / (3.0 * max(counts[i], 1)) for i in range(3)}
+    counts = np.bincount(y_train, minlength=2).astype(np.float64)
+    class_weight = {i: counts.sum() / (2.0 * max(counts[i], 1)) for i in range(2)}
     lgbm_device_eff = _resolve_lgbm_device(lgbm_device, X_train, y_train)
     logger.info(f"LightGBM device={lgbm_device_eff}")
 
@@ -634,17 +671,21 @@ def train(data_path: str = DATA_PATH,
     if os.path.exists(results_path):
         with open(results_path) as f:
             prev = json.load(f)
-        logger.info("기존 trend_xgb_training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
+        if prev.get("label_policy") == "directional_only_exclude_flat":
+            logger.info("기존 binary trend_xgb_training_results.json 발견 -> Optuna 건너뜀 (해시 검증 비활성화)")
+        else:
+            logger.info("기존 trend_xgb 결과는 현재 binary 계약과 맞지 않아 재사용하지 않음")
+            prev = None
     elif os.path.exists(meta_path):
         with open(meta_path, 'r', encoding='utf-8') as f:
             meta_prev = json.load(f)
         meta_best_params = meta_prev.get('meta', {}).get('best_params')
-        if isinstance(meta_best_params, dict):
+        if meta_prev.get("label_policy") == "directional_only_exclude_flat" and isinstance(meta_best_params, dict):
             prev = {
                 'best_params': meta_best_params,
                 'best_val_dir_f1': meta_prev.get('meta', {}).get('best_val_dir_f1', 0.0),
             }
-            logger.info("기존 meta json 발견 -> Optuna 건너뜀")
+            logger.info("기존 binary meta json 발견 -> Optuna 건너뜀")
         else:
             prev = None
     else:
@@ -657,8 +698,7 @@ def train(data_path: str = DATA_PATH,
             **saved_params,
             'n_estimators': boosted_n,
             'class_weight': class_weight,
-            'objective':    'multiclass',
-            'num_class':    3,
+            'objective':    'binary',
             'n_jobs':       n_jobs_lgbm_eff,
             'device':       lgbm_device_eff,
             'random_state': 42,
@@ -682,8 +722,7 @@ def train(data_path: str = DATA_PATH,
                 reg_lambda        = trial.suggest_float('reg_lambda', 1e-4, 5.0, log=True),
                 min_child_samples = trial.suggest_int('min_child_samples', 12, 64),
                 class_weight      = class_weight,
-                objective         = 'multiclass',
-                num_class         = 3,
+                objective         = 'binary',
                 n_jobs            = n_jobs_lgbm_eff,
                 device            = lgbm_device_eff,
                 random_state      = 42,
@@ -696,13 +735,7 @@ def train(data_path: str = DATA_PATH,
                 callbacks = [early_stopping(40, verbose=False), log_evaluation(-1)],
             )
             preds = clf.predict(X_val)
-            # FLAT을 제외한 UP/DOWN 샘플에 대한 방향성 F1 (macro)
-            # FLAT 과다 예측으로 balanced_acc가 오르는 문제를 방지
-            dir_mask = y_val != 1
-            if dir_mask.sum() == 0:
-                return 0.0
-            return f1_score(y_val[dir_mask], preds[dir_mask],
-                            labels=[0, 2], average='macro', zero_division=0)
+            return f1_score(y_val, preds, labels=[0, 1], average='macro', zero_division=0)
 
         logger.info(f"Optuna 튜닝 시작: {n_trials}회 시행...")
         study = optuna.create_study(
@@ -719,8 +752,7 @@ def train(data_path: str = DATA_PATH,
             **study.best_params,
             'n_estimators': boosted_n,
             'class_weight': class_weight,
-            'objective': 'multiclass',
-            'num_class': 3,
+            'objective': 'binary',
             'n_jobs': n_jobs_lgbm_eff,
             'device': lgbm_device_eff,
             'random_state': 42,
@@ -738,11 +770,9 @@ def train(data_path: str = DATA_PATH,
     # ── 테스트셋 평가 ──
     test_preds = final_clf.predict(X_test)
     test_bacc  = balanced_accuracy_score(y_test, test_preds)
-    dir_mask_test = y_test != 1
-    test_dir_f1 = f1_score(y_test[dir_mask_test], test_preds[dir_mask_test],
-                           labels=[0, 2], average='macro', zero_division=0) if dir_mask_test.sum() > 0 else 0.0
-    logger.info(f"\nTest balanced_acc: {test_bacc:.4f}  |  Test dir_f1 (UP/DOWN): {test_dir_f1:.4f}")
-    logger.info("\n" + classification_report(y_test, test_preds, target_names=['DOWN','FLAT','UP']))
+    test_dir_f1 = f1_score(y_test, test_preds, labels=[0, 1], average='macro', zero_division=0)
+    logger.info(f"\nTest binary balanced_acc: {test_bacc:.4f}  |  Test binary dir_f1: {test_dir_f1:.4f}")
+    logger.info("\n" + classification_report(y_test, test_preds, target_names=['DOWN','UP']))
 
     # ── 저장 ──
     brain = XGBTrendBrain()
@@ -761,6 +791,8 @@ def train(data_path: str = DATA_PATH,
             'best_params'   : {k: v for k, v in best_params.items() if k != 'class_weight'},
             'atr_mult'      : ATR_MULT,
             'max_hold_bars' : MAX_HOLD_5M,
+            'label_policy'  : 'directional_only_exclude_flat',
+            'classes'       : ['DOWN', 'UP'],
         }, f, indent=2)
 
     logger.info(f"결과 저장: {results_path}")
@@ -792,7 +824,7 @@ if __name__ == '__main__':
         raise SystemExit(0)
 
     print("\n" + "=" * 70)
-    print("🚀 XGBTrendBrain 학습 (LightGBM 3-class, Triple-Barrier)")
+    print("🚀 XGBTrendBrain 학습 (LightGBM 2-class DOWN/UP, FLAT 제외)")
     print(f"   data={args.data}  rl={args.rl_path}  save={args.save}")
     print(f"   n_trials={args.n_trials}  max_features={args.max_features}")
     print(f"   n_jobs_label={args.n_jobs_label}  n_jobs_lgbm={args.n_jobs_lgbm}  lgbm_device={args.lgbm_device}")

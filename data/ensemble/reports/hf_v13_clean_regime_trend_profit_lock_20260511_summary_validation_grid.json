@@ -1,0 +1,4052 @@
+[
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.85,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.9,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.95,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.0,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.1,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.2,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.0,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.85,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.9,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.95,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.0,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.1,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.2,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.05,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.85,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.9,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.95,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.0,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.1,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.2,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.1,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.85,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.790627225919703,
+      "mdd": -28.576267520075525,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8209396110298295,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -825.5403111968021
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.9,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.349354085102636,
+      "mdd": -28.240533586532692,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.858175976560934,
+      "avg_leverage": 2.5497641146116274,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -817.1851954816716
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.95,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.370636307895431,
+      "mdd": -29.13333699831857,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8890785950582893,
+      "avg_leverage": 2.5317651755448924,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -838.4905468187883
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.0,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.74735284988746,
+      "mdd": -29.41426941101738,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9195645124777274,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -845.5266970866203
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.1,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -12.10164223302488,
+      "mdd": -30.08787130615499,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9720818834114473,
+      "avg_leverage": 2.5476065714866434,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -859.1036656027841
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.2,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.15,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.303300566779996,
+      "mdd": -29.273948994534717,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.0034233382472815,
+      "avg_leverage": 2.5337465582957224,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 25
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.4769363077702
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.85,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.898759240367085,
+      "mdd": -28.66284129402149,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8248927139921631,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -827.6608574405677
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.898759240367085,
+      "mdd": -28.66284129402149,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8248927139921631,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -827.6608574405677
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.898759240367085,
+      "mdd": -28.66284129402149,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8248927139921631,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -827.6608574405677
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.898759240367085,
+      "mdd": -28.66284129402149,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8248927139921631,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -827.6608574405677
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.85,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.898759240367085,
+      "mdd": -28.66284129402149,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8248927139921631,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -827.6608574405677
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.9,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -10.458020973321158,
+      "mdd": -28.327514308598833,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8621290795232677,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -819.3158690861071
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -10.458020973321158,
+      "mdd": -28.327514308598833,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8621290795232677,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -819.3158690861071
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -10.458020973321158,
+      "mdd": -28.327514308598833,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8621290795232677,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -819.3158690861071
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -10.458020973321158,
+      "mdd": -28.327514308598833,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8621290795232677,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -819.3158690861071
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.9,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -10.458020973321158,
+      "mdd": -28.327514308598833,
+      "trades": 58,
+      "trades_per_day": 0.6304585770900171,
+      "wr": 0.10344827586206896,
+      "long_entries": 1,
+      "short_entries": 57,
+      "avg_notional": 1.8621290795232677,
+      "avg_leverage": 2.554642903567982,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 52,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -819.3158690861071
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.95,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.478065284663252,
+      "mdd": -29.219235540021614,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8929646962754987,
+      "avg_leverage": 2.536561273163004,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.595395888347
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.478065284663252,
+      "mdd": -29.219235540021614,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8929646962754987,
+      "avg_leverage": 2.536561273163004,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.595395888347
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.478065284663252,
+      "mdd": -29.219235540021614,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8929646962754987,
+      "avg_leverage": 2.536561273163004,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.595395888347
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.478065284663252,
+      "mdd": -29.219235540021614,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8929646962754987,
+      "avg_leverage": 2.536561273163004,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.595395888347
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 1.95,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.478065284663252,
+      "mdd": -29.219235540021614,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 1.8929646962754987,
+      "avg_leverage": 2.536561273163004,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -840.595395888347
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.0,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.854325202902727,
+      "mdd": -29.499827430342982,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9233858453413164,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -847.6230175332471
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.854325202902727,
+      "mdd": -29.499827430342982,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9233858453413164,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -847.6230175332471
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.854325202902727,
+      "mdd": -29.499827430342982,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9233858453413164,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -847.6230175332471
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.854325202902727,
+      "mdd": -29.499827430342982,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9233858453413164,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -847.6230175332471
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.0,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.854325202902727,
+      "mdd": -29.499827430342982,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9233858453413164,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -847.6230175332471
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.1,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -12.208185146582018,
+      "mdd": -30.17261284255287,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9759032162750363,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -861.183529202891
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -12.208185146582018,
+      "mdd": -30.17261284255287,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9759032162750363,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -861.183529202891
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -12.208185146582018,
+      "mdd": -30.17261284255287,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9759032162750363,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -861.183529202891
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -12.208185146582018,
+      "mdd": -30.17261284255287,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9759032162750363,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -861.183529202891
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.1,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -12.208185146582018,
+      "mdd": -30.17261284255287,
+      "trades": 60,
+      "trades_per_day": 0.6521985280241556,
+      "wr": 0.1,
+      "long_entries": 1,
+      "short_entries": 59,
+      "avg_notional": 1.9759032162750363,
+      "avg_leverage": 2.552322734144453,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 54,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -861.183529202891
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.2,
+      "profit_lock_equity": 1.95
+    },
+    "validation_cost1": {
+      "pnl": -11.410811162206368,
+      "mdd": -29.359677098335002,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.007309439464491,
+      "avg_leverage": 2.538542655913834,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -842.5793776449333
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.0
+    },
+    "validation_cost1": {
+      "pnl": -11.410811162206368,
+      "mdd": -29.359677098335002,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.007309439464491,
+      "avg_leverage": 2.538542655913834,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -842.5793776449333
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.02
+    },
+    "validation_cost1": {
+      "pnl": -11.410811162206368,
+      "mdd": -29.359677098335002,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.007309439464491,
+      "avg_leverage": 2.538542655913834,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -842.5793776449333
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.05
+    },
+    "validation_cost1": {
+      "pnl": -11.410811162206368,
+      "mdd": -29.359677098335002,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.007309439464491,
+      "avg_leverage": 2.538542655913834,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -842.5793776449333
+  },
+  {
+    "config": {
+      "long_trend_bias_floor": 0.2,
+      "max_notional": 2.2,
+      "profit_lock_equity": 2.1
+    },
+    "validation_cost1": {
+      "pnl": -11.410811162206368,
+      "mdd": -29.359677098335002,
+      "trades": 59,
+      "trades_per_day": 0.6413285525570863,
+      "wr": 0.1016949152542373,
+      "long_entries": 1,
+      "short_entries": 58,
+      "avg_notional": 2.007309439464491,
+      "avg_leverage": 2.538542655913834,
+      "block_reason_counts": {
+        "long_trend_bias_floor": 27
+      },
+      "exits": {
+        "learned_stop_loss": 53,
+        "learned_max_hold": 5,
+        "learned_take_profit": 1
+      }
+    },
+    "selection_score": -842.5793776449333
+  }
+]

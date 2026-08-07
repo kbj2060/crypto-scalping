@@ -1,0 +1,49 @@
+{
+  "feature_cols": [
+    "squeeze_power",
+    "macd_hist",
+    "rsi",
+    "chop_index",
+    "trade_intensity",
+    "jump_z",
+    "funding_price_divergence",
+    "funding_z_score",
+    "ou_funding_z",
+    "bb_width_z",
+    "volatility_z",
+    "garch_vol_z",
+    "big_trade_ratio",
+    "amihud_illiquidity_z",
+    "realized_skewness",
+    "mta_funding",
+    "hour_cos",
+    "minute_cos",
+    "minute_sin",
+    "hour_sin",
+    "sig_trend_health",
+    "cvp_volume_imbalance",
+    "dual_momentum",
+    "distance_to_day_high_low_pct",
+    "mean_reversion_z"
+  ],
+  "model_path": "vae_anomaly_btc.pkl",
+  "meta": {
+    "algorithm": "vae_anomaly",
+    "latent_dim": 14,
+    "hidden_dim": 192,
+    "val_anomaly_ratio": 0.4007180937874007,
+    "device": "cuda",
+    "best_val_score": -0.05469425810788716,
+    "best_params": {
+      "latent_dim": 14,
+      "hidden_dim": 192,
+      "learning_rate": 0.003987992712427741,
+      "beta": 0.016053835242532618,
+      "batch_size": 512,
+      "epochs": 60,
+      "threshold_q": 0.9411715639036874,
+      "feature_count": 25
+    },
+    "threshold": 0.04835263267159462
+  }
+}

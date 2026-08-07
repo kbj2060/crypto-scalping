@@ -1,0 +1,145 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "runner_model_meta": {
+    "snapshot_count": 20052,
+    "target_mean": 0.025120157770407926,
+    "target_p75": 0.03763590025530763,
+    "target_p95": 0.08432067973220797
+  },
+  "parent_validation_reference": {
+    "pnl": -3.871660086275719,
+    "mdd": -29.310166542684602,
+    "trades": 73,
+    "wr": 0.1232876712328767,
+    "trades_per_day": 0.7935082090960559,
+    "long_entries": 10,
+    "short_entries": 63,
+    "avg_notional": 2.6532220241703803,
+    "avg_leverage": 2.4881724060135055,
+    "action_counts": {
+      "cash": 23388,
+      "long": 10,
+      "short": 63
+    },
+    "exits": {
+      "learned_stop_loss": 64,
+      "learned_max_hold": 7,
+      "learned_take_profit": 2
+    },
+    "pyramid_actions": {}
+  },
+  "selected_config": {
+    "name": "v18_pyr_6",
+    "pred_utility_threshold": 0.0015,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "add_frac": 0.25,
+    "max_total_mult": 1.35,
+    "dd_block": 0.3,
+    "max_entry_notional": 2.75
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 139.6909577783766,
+      "mdd": -34.966235430413484,
+      "trades": 83,
+      "wr": 0.1686746987951807,
+      "trades_per_day": 1.4147727272727273,
+      "long_entries": 31,
+      "short_entries": 52,
+      "avg_notional": 2.518882996108064,
+      "avg_leverage": 2.5580547027164697,
+      "action_counts": {
+        "cash": 12841,
+        "long": 31,
+        "short": 52
+      },
+      "exits": {
+        "learned_stop_loss": 69,
+        "learned_max_hold": 9,
+        "learned_take_profit": 5
+      },
+      "pyramid_actions": {
+        "add_on": 39
+      }
+    },
+    "cost2": {
+      "pnl": 47.77469045657092,
+      "mdd": -38.67083713388683,
+      "trades": 99,
+      "wr": 0.1414141414141414,
+      "trades_per_day": 1.6875,
+      "long_entries": 30,
+      "short_entries": 69,
+      "avg_notional": 2.5303619294356348,
+      "avg_leverage": 2.6366649296473907,
+      "action_counts": {
+        "cash": 12932,
+        "long": 30,
+        "short": 69
+      },
+      "exits": {
+        "learned_stop_loss": 85,
+        "learned_max_hold": 8,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 41
+      }
+    },
+    "cost3": {
+      "pnl": -1.483323866267694,
+      "mdd": -51.51452373546075,
+      "trades": 100,
+      "wr": 0.14,
+      "trades_per_day": 1.7045454545454546,
+      "long_entries": 37,
+      "short_entries": 63,
+      "avg_notional": 2.542245128175987,
+      "avg_leverage": 2.6297860864859577,
+      "action_counts": {
+        "cash": 12941,
+        "long": 37,
+        "short": 63
+      },
+      "exits": {
+        "learned_stop_loss": 86,
+        "learned_max_hold": 8,
+        "learned_take_profit": 6
+      },
+      "pyramid_actions": {
+        "add_on": 26
+      }
+    }
+  }
+}

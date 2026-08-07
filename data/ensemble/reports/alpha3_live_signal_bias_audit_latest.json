@@ -1,0 +1,47 @@
+{
+  "schema_version": "alpha3_live_signal_bias_audit.v1",
+  "journal_path": "/home/llewyn/crypto-scalping/data/live/trade_journal.jsonl",
+  "dashboard_state_path": "/home/llewyn/crypto-scalping/data/live/dashboard_state.json",
+  "compact_state_path": "/home/llewyn/crypto-scalping/data/live/dashboard_state_dsac_compact.json",
+  "rows_total": 108,
+  "alpha3_rows": 8,
+  "alpha3_open_rows": 4,
+  "alpha3_close_rows": 4,
+  "entry_side_counts": {
+    "LONG": 4
+  },
+  "close_reason_counts": {
+    "v31_deep_alpha_max_hold": 2,
+    "v31_deep_alpha_stop_loss": 2
+  },
+  "missing_diagnostic_field_counts": {
+    "v31_q_long": 8,
+    "v31_q_short": 8,
+    "v31_edge": 8,
+    "v31_margin": 8,
+    "parent_action": 8,
+    "teacher_gate_result": 8
+  },
+  "latest_dashboard_v31": {
+    "q_long": null,
+    "q_short": null,
+    "edge": null,
+    "margin": null,
+    "selected_side": null,
+    "pass_gate": null
+  },
+  "latest_dashboard_teacher_gate": {
+    "reason": null,
+    "teacher_pred_action": null,
+    "teacher_confidence": null,
+    "teacher_quality": null,
+    "keep_parent": null,
+    "parent_action_before": null,
+    "parent_side_before": null
+  },
+  "diagnosis": [
+    "recent_alpha3_entries_are_long_only",
+    "historical_journal_missing_flat_v31_teacher_diagnostics"
+  ],
+  "note": "Rows created before the diagnostic patch can lack q_long/q_short/teacher fields. New OPEN/CLOSE rows will carry flattened V31 and teacher-gate diagnostics."
+}

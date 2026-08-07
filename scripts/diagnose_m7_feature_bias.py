@@ -22,7 +22,6 @@ class Summary:
     n_rows: int
     p_up_mean: float
     p_dn_mean: float
-    p_fl_mean: float
     action_long_ratio: float
     action_short_ratio: float
     action_hold_ratio: float
@@ -43,7 +42,6 @@ def _summarize(pred: pd.DataFrame) -> Summary:
     act = pd.to_numeric(pred.get("m7_action", 0.0), errors="coerce").fillna(0.0).to_numpy()
     p_up = pd.to_numeric(pred.get("m7_prob_up", 0.0), errors="coerce").fillna(0.0).to_numpy()
     p_dn = pd.to_numeric(pred.get("m7_prob_dn", 0.0), errors="coerce").fillna(0.0).to_numpy()
-    p_fl = pd.to_numeric(pred.get("m7_prob_fl", 0.0), errors="coerce").fillna(0.0).to_numpy()
     iso = pd.to_numeric(pred.get("m7_iso_anom", 0.0), errors="coerce").fillna(0.0).to_numpy()
     vae = pd.to_numeric(pred.get("m7_vae_anom", 0.0), errors="coerce").fillna(0.0).to_numpy()
     gate = pd.to_numeric(pred.get("m7_gate_block", 0.0), errors="coerce").fillna(0.0).to_numpy()
@@ -52,7 +50,6 @@ def _summarize(pred: pd.DataFrame) -> Summary:
         n_rows=int(len(pred)),
         p_up_mean=float(np.mean(p_up)),
         p_dn_mean=float(np.mean(p_dn)),
-        p_fl_mean=float(np.mean(p_fl)),
         action_long_ratio=_ratio(act > 0),
         action_short_ratio=_ratio(act < 0),
         action_hold_ratio=_ratio(act == 0),
@@ -120,7 +117,6 @@ def main() -> None:
 
     check_cols = [
         "m7_prob_dn",
-        "m7_prob_fl",
         "m7_prob_up",
         "m7_confidence",
         "m7_gmm_conf",

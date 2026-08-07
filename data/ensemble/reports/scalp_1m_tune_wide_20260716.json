@@ -1,0 +1,177 @@
+{
+  "A_wide": {
+    "val": {
+      "classification_report": {
+        "CASH": {
+          "precision": 0.6448445171849427,
+          "recall": 0.8408294745319106,
+          "f1-score": 0.7299101681289105,
+          "support": 24835.0
+        },
+        "LONG": {
+          "precision": 0.389687235841082,
+          "recall": 0.20843223691646887,
+          "f1-score": 0.2715958465277266,
+          "support": 8847.0
+        },
+        "SHORT": {
+          "precision": 0.4611295681063123,
+          "recall": 0.3166636247490418,
+          "f1-score": 0.37548017096791647,
+          "support": 10958.0
+        },
+        "accuracy": 0.5868279569892473,
+        "macro avg": {
+          "precision": 0.498553773710779,
+          "recall": 0.45530844539914045,
+          "f1-score": 0.4589953952081846,
+          "support": 44640.0
+        },
+        "weighted avg": {
+          "precision": 0.5491786372554452,
+          "recall": 0.5868279569892473,
+          "f1-score": 0.5520752507432509,
+          "support": 44640.0
+        }
+      },
+      "backtest": {
+        "n_trades": 12257,
+        "hit_rate": 0.43354817655217426,
+        "avg_pnl_pct": -0.0005830405464767575,
+        "total_pnl_pct": -7.146327978165616
+      }
+    },
+    "oos": {
+      "classification_report": {
+        "CASH": {
+          "precision": 0.5584455058619192,
+          "recall": 0.5450731087094723,
+          "f1-score": 0.5516782841823056,
+          "support": 23595.0
+        },
+        "LONG": {
+          "precision": 0.44301379990142925,
+          "recall": 0.4058584490348798,
+          "f1-score": 0.42362297496318113,
+          "support": 17718.0
+        },
+        "SHORT": {
+          "precision": 0.45451974738429635,
+          "recall": 0.5031564668440549,
+          "f1-score": 0.4776030704469481,
+          "support": 19167.0
+        },
+        "accuracy": 0.491005291005291,
+        "macro avg": {
+          "precision": 0.48532635104921495,
+          "recall": 0.4846960081961356,
+          "f1-score": 0.4843014431974783,
+          "support": 60480.0
+        },
+        "weighted avg": {
+          "precision": 0.49169345594544167,
+          "recall": 0.491005291005291,
+          "f1-score": 0.4906881454519808,
+          "support": 60480.0
+        }
+      },
+      "backtest": {
+        "n_trades": 37450,
+        "hit_rate": 0.44953271028037384,
+        "avg_pnl_pct": -0.00045390669811333256,
+        "total_pnl_pct": -16.998805844344304
+      }
+    }
+  },
+  "B2_wide": {
+    "val": {
+      "classification_report": {
+        "CASH": {
+          "precision": 0.6027194066749073,
+          "recall": 0.4055897521211113,
+          "f1-score": 0.48488464598249803,
+          "support": 6011.0
+        },
+        "LONG": {
+          "precision": 0.38923439845592966,
+          "recall": 0.47675334909377465,
+          "f1-score": 0.42857142857142855,
+          "support": 3807.0
+        },
+        "SHORT": {
+          "precision": 0.42550948699929725,
+          "recall": 0.5285901353120908,
+          "f1-score": 0.47148140938290833,
+          "support": 4582.0
+        },
+        "accuracy": 0.4635416666666667,
+        "macro avg": {
+          "precision": 0.47248776404337806,
+          "recall": 0.47031107884232554,
+          "f1-score": 0.461645827978945,
+          "support": 14400.0
+        },
+        "weighted avg": {
+          "precision": 0.48989209568578973,
+          "recall": 0.4635416666666667,
+          "f1-score": 0.46573200370588264,
+          "support": 14400.0
+        }
+      },
+      "backtest": {
+        "n_trades": 10355,
+        "hit_rate": 0.4091743119266055,
+        "avg_pnl_pct": -0.0007224662665082065,
+        "total_pnl_pct": -7.481138189692478
+      }
+    },
+    "oos": {
+      "classification_report": {
+        "CASH": {
+          "precision": 0.5488990563340006,
+          "recall": 0.5414668547249647,
+          "f1-score": 0.5451576256745243,
+          "support": 7090.0
+        },
+        "LONG": {
+          "precision": 0.45297504798464494,
+          "recall": 0.3074060290286565,
+          "f1-score": 0.3662565125817537,
+          "support": 5374.0
+        },
+        "SHORT": {
+          "precision": 0.3803283627052267,
+          "recall": 0.5242940199335548,
+          "f1-score": 0.44085552160628544,
+          "support": 4816.0
+        },
+        "accuracy": 0.4638888888888889,
+        "macro avg": {
+          "precision": 0.4607341556746241,
+          "recall": 0.4577223012290587,
+          "f1-score": 0.4507565532875211,
+          "support": 17280.0
+        },
+        "weighted avg": {
+          "precision": 0.4720858571797406,
+          "recall": 0.4638888888888889,
+          "f1-score": 0.46045082504065926,
+          "support": 17280.0
+        }
+      },
+      "backtest": {
+        "n_trades": 10286,
+        "hit_rate": 0.4060859420571651,
+        "avg_pnl_pct": -0.0007580476903432563,
+        "total_pnl_pct": -7.797278542870734
+      }
+    }
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "60-bar/1h horizon, TP_ATR_MULT=2.0/SL_ATR_MULT=1.3, bounds ~2.7x wider than the base 20-bar labels. Same splits as the base A/B2 experiments."
+}

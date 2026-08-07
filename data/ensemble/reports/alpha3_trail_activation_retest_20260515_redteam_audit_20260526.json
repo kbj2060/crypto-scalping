@@ -1,0 +1,120 @@
+{
+  "audit_id": "alpha3_trail_activation_retest_20260515_redteam_audit_20260526",
+  "audit_date": "2026-05-26",
+  "model_id": "alpha3_trail_activation_retest_20260515",
+  "target_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json",
+  "scope": [
+    "execution_contract",
+    "same_bar_open_fallback_regression",
+    "selection_leakage_overlap",
+    "metric_consistency",
+    "live_parity_risk_disclosure"
+  ],
+  "blocker_status": "warn",
+  "summary": {
+    "high": [
+      {
+        "id": "H1",
+        "title": "No direct high-severity contract violation found in execution semantics",
+        "status": "pass",
+        "evidence": [
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:6",
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:12",
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:13",
+          "/home/llewyn/crypto-scalping/scripts/eval_alpha2_1_signal_immediate_limit_20260514.py:105",
+          "/home/llewyn/crypto-scalping/scripts/eval_alpha2_1_signal_immediate_limit_20260514.py:109",
+          "/home/llewyn/crypto-scalping/scripts/eval_alpha2_1_signal_immediate_limit_20260514.py:113",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md:73",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md:76"
+        ],
+        "note": "Contract matches required next_open_limit_touch0_fee20 semantics (entry_miss=skip, exit_miss=market_fallback, fallback on i+1 close path)."
+      }
+    ],
+    "medium": [
+      {
+        "id": "M1",
+        "title": "Report is not protocol-complete under frozen validator",
+        "status": "warn",
+        "evidence": [
+          "/home/llewyn/crypto-scalping/scripts/validate_alpha3_frozen_backtest_report.py",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_frozen_backtest_protocol_20260515.md:81",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_frozen_backtest_protocol_20260515.md:88"
+        ],
+        "validator_output": {
+          "status": "fail",
+          "errors": [
+            "missing baseline metrics"
+          ],
+          "warnings": [
+            "missing primary_mutable_surface"
+          ]
+        },
+        "note": "Performance numbers are internally consistent, but this report format cannot pass promotion gate as-is."
+      },
+      {
+        "id": "M2",
+        "title": "Live parity limitations remain",
+        "status": "warn",
+        "evidence": [
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md:131",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_teacher_l2_limit_fallback_20260514_contract.md:133",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_full_layer_io_runtime_contract_20260516.md:352",
+          "/home/llewyn/crypto-scalping/docs/model_contracts/alpha3_full_layer_io_runtime_contract_20260516.md:355"
+        ],
+        "note": "OHLCV touch replay still does not model queue position/partial fill/post-only reject timing."
+      }
+    ],
+    "low": [
+      {
+        "id": "L1",
+        "title": "Selection leakage / overlap check",
+        "status": "pass",
+        "evidence": [
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:4",
+          "/home/llewyn/crypto-scalping/scripts/eval_hf_v13_frozen_v27_rule_exit_overlay_v31.py:32",
+          "/home/llewyn/crypto-scalping/scripts/eval_hf_v13_frozen_v27_rule_exit_overlay_v31.py:33",
+          "/home/llewyn/crypto-scalping/scripts/eval_alpha3_exit_front_run_layer_20260514.py:126",
+          "/home/llewyn/crypto-scalping/scripts/eval_alpha3_exit_front_run_layer_20260514.py:127"
+        ],
+        "data_check": {
+          "val_window": "2025-10-01 00:00:00 ~ 2025-12-31 23:55:00",
+          "eval_window": "2026-01-01 00:00:00 ~ 2026-02-28 16:00:00",
+          "overlap_count": 0
+        }
+      },
+      {
+        "id": "L2",
+        "title": "Summary metric internal consistency",
+        "status": "pass",
+        "evidence": [
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:45",
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:106",
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:196",
+          "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json:225"
+        ],
+        "note": "metrics == previous_corrected_reference.metrics and comparison_cost1 fields match report metrics."
+      }
+    ]
+  },
+  "required_checks": {
+    "execution_contract": "pass",
+    "same_bar_open_fallback_regression": "pass",
+    "selection_uses_2026": "pass",
+    "split_leakage_overlap": "pass",
+    "metric_reproducibility_path_consistency": "warn",
+    "live_parity_risk_disclosed": "pass"
+  },
+  "repro_commands": [
+    "rg -n \"entry_miss|exit_miss|fallback|trail_activation\" /home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json /home/llewyn/crypto-scalping/scripts/eval_alpha2_1_signal_immediate_limit_20260514.py",
+    "/home/llewyn/miniconda3/envs/quant_ai/bin/python /home/llewyn/crypto-scalping/scripts/validate_alpha3_frozen_backtest_report.py /home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_trail_activation_retest_20260515.json",
+    "/home/llewyn/miniconda3/envs/quant_ai/bin/python - <<'PY'\nimport pandas as pd\ntr=pd.read_csv('/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv',usecols=['timestamp'])\nev=pd.read_csv('/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv',usecols=['timestamp'])\ntr['timestamp']=pd.to_datetime(tr['timestamp']); ev['timestamp']=pd.to_datetime(ev['timestamp'])\nval=tr[tr['timestamp']>=pd.Timestamp('2025-10-01')]\nprint(int(ev['timestamp'].isin(val['timestamp']).sum()))\nPY"
+  ],
+  "backtest_expert_handoff": {
+    "status": "queued_same_contract_replay",
+    "contract_to_freeze": "next_open_limit_touch0_fee20 / entry_miss=skip / exit_miss=market_fallback / fallback=i+1 close",
+    "notes": [
+      "Use canonical backtest path and freeze non-target layers.",
+      "Emit protocol-complete report fields before comparing candidate deltas."
+    ]
+  }
+}

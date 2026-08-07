@@ -1,0 +1,356 @@
+{
+  "model_id": "hf_v13_jackpot_runner_5x_v21_3_20260511",
+  "design": "v21.3 5x jackpot-only expansion. V21.2 jackpot gate is preserved while max entry notional, add-on fraction, and total multiplier are selected on 2025 validation with an absolute 5x notional cap.",
+  "base_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_5x_v21_3_20260511/v21_3_5x_jackpot_runner.pkl",
+  "split_policy": "Tail runner trained on 2025 Jan-Sep; config selected on 2025 Oct-Dec; 2026 fixed OOS not used for selection.",
+  "selected_config": {
+    "name": "v21_3_5x_jackpot_13",
+    "full_edge_th": 99.0,
+    "half_edge_th": 99.0,
+    "p_th": 0.6,
+    "q10_floor": -0.006,
+    "jackpot_p": 0.2,
+    "jackpot_q90": 0.015,
+    "bad_cap": 0.5,
+    "min_unrealized": 0.004,
+    "min_bars_since_entry": 3,
+    "full_add_frac": 0.3,
+    "half_add_frac": 0.0,
+    "max_total_mult": 1.35,
+    "max_entry_notional": 3.0,
+    "max_total_notional": 5.0,
+    "dd_block": 0.3
+  },
+  "selection_result": {
+    "config": {
+      "name": "v21_3_5x_jackpot_13",
+      "full_edge_th": 99.0,
+      "half_edge_th": 99.0,
+      "p_th": 0.6,
+      "q10_floor": -0.006,
+      "jackpot_p": 0.2,
+      "jackpot_q90": 0.015,
+      "bad_cap": 0.5,
+      "min_unrealized": 0.004,
+      "min_bars_since_entry": 3,
+      "full_add_frac": 0.3,
+      "half_add_frac": 0.0,
+      "max_total_mult": 1.35,
+      "max_entry_notional": 3.0,
+      "max_total_notional": 5.0,
+      "dd_block": 0.3
+    },
+    "validation_cost1": {
+      "pnl": 3.8012747698494387,
+      "mdd": -30.52371467600269,
+      "trades": 72,
+      "wr": 0.125,
+      "trades_per_day": 0.7826382336289867,
+      "long_entries": 10,
+      "short_entries": 62,
+      "avg_notional": 2.609327559375862,
+      "avg_leverage": 2.487915378081474,
+      "action_counts": {
+        "cash": 23407,
+        "long": 10,
+        "short": 62
+      },
+      "exits": {
+        "learned_stop_loss": 63,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 19,
+        "add_on": 16,
+        "jackpot_add": 16
+      }
+    },
+    "validation_cost2": {
+      "pnl": -28.950798746298712,
+      "mdd": -45.88095899837449,
+      "trades": 80,
+      "wr": 0.1,
+      "trades_per_day": 0.8695980373655408,
+      "long_entries": 10,
+      "short_entries": 70,
+      "avg_notional": 2.622541469747035,
+      "avg_leverage": 2.504335306895716,
+      "action_counts": {
+        "cash": 23802,
+        "long": 10,
+        "short": 70
+      },
+      "exits": {
+        "learned_stop_loss": 72,
+        "learned_max_hold": 6,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 13,
+        "add_on": 14,
+        "jackpot_add": 14
+      }
+    },
+    "validation_cost3": {
+      "pnl": -44.801236517268904,
+      "mdd": -55.9177518808682,
+      "trades": 84,
+      "wr": 0.10714285714285714,
+      "trades_per_day": 0.9130779392338177,
+      "long_entries": 10,
+      "short_entries": 74,
+      "avg_notional": 2.6210146289835046,
+      "avg_leverage": 2.5052430785894813,
+      "action_counts": {
+        "cash": 23559,
+        "long": 10,
+        "short": 74
+      },
+      "exits": {
+        "learned_stop_loss": 75,
+        "learned_max_hold": 7,
+        "learned_take_profit": 2
+      },
+      "runner_actions": {
+        "reject": 11,
+        "add_on": 9,
+        "jackpot_add": 9
+      }
+    },
+    "selection_score": -25.817760638439438
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 167.49458142539444,
+      "mdd": -32.671860345485705,
+      "trades": 90,
+      "wr": 0.18888888888888888,
+      "trades_per_day": 1.5340909090909092,
+      "long_entries": 36,
+      "short_entries": 54,
+      "avg_notional": 2.650911670423903,
+      "avg_leverage": 2.6087514169827575,
+      "action_counts": {
+        "cash": 12611,
+        "long": 36,
+        "short": 54
+      },
+      "exits": {
+        "learned_stop_loss": 73,
+        "learned_max_hold": 8,
+        "learned_take_profit": 9
+      },
+      "runner_actions": {
+        "add_on": 16,
+        "jackpot_add": 16,
+        "reject": 31
+      }
+    },
+    "cost2": {
+      "pnl": 41.877708422255175,
+      "mdd": -38.75649467634439,
+      "trades": 92,
+      "wr": 0.15217391304347827,
+      "trades_per_day": 1.5681818181818183,
+      "long_entries": 33,
+      "short_entries": 59,
+      "avg_notional": 2.622170988345741,
+      "avg_leverage": 2.588033256539122,
+      "action_counts": {
+        "cash": 12870,
+        "long": 33,
+        "short": 59
+      },
+      "exits": {
+        "learned_stop_loss": 78,
+        "learned_max_hold": 8,
+        "learned_take_profit": 6
+      },
+      "runner_actions": {
+        "add_on": 17,
+        "jackpot_add": 17,
+        "reject": 35
+      }
+    },
+    "cost3": {
+      "pnl": -1.8063309066180588,
+      "mdd": -42.74288552429672,
+      "trades": 99,
+      "wr": 0.15151515151515152,
+      "trades_per_day": 1.6875,
+      "long_entries": 39,
+      "short_entries": 60,
+      "avg_notional": 2.5963134264613537,
+      "avg_leverage": 2.5551812075300115,
+      "action_counts": {
+        "cash": 12825,
+        "long": 39,
+        "short": 60
+      },
+      "exits": {
+        "learned_stop_loss": 84,
+        "learned_max_hold": 8,
+        "learned_take_profit": 7
+      },
+      "runner_actions": {
+        "add_on": 16,
+        "jackpot_add": 16,
+        "reject": 30
+      }
+    }
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "promote",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "cost3_not_survived"
+    ],
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS only after selection",
+    "model_meta": {
+      "snapshot_count": 20052,
+      "positive_rate": 0.8720825852782765,
+      "jackpot_rate": 0.3833532814681827,
+      "bad_rate": 0.08477957310991423,
+      "cost3_positive_rate": 0.8723319369638939,
+      "target_mean": 0.012465419239048602,
+      "target_p10": -0.0014223086883659573,
+      "target_cost2_p90": 0.048660514136489745,
+      "target_p75": 0.01959459649244273,
+      "target_p95": 0.04479031968635111
+    },
+    "feature_audit": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [
+        "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+        "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+      ],
+      "feature_count": 93,
+      "clean_regime_feature_count": 23,
+      "forbidden_feature_cols": [],
+      "train_range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "eval_range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 16:00:00"
+      ],
+      "train_eval_timestamp_overlap": 0
+    },
+    "selected_config": {
+      "name": "v21_3_5x_jackpot_13",
+      "full_edge_th": 99.0,
+      "half_edge_th": 99.0,
+      "p_th": 0.6,
+      "q10_floor": -0.006,
+      "jackpot_p": 0.2,
+      "jackpot_q90": 0.015,
+      "bad_cap": 0.5,
+      "min_unrealized": 0.004,
+      "min_bars_since_entry": 3,
+      "full_add_frac": 0.3,
+      "half_add_frac": 0.0,
+      "max_total_mult": 1.35,
+      "max_entry_notional": 3.0,
+      "max_total_notional": 5.0,
+      "dd_block": 0.3
+    },
+    "metrics": {
+      "cost1": {
+        "pnl": 167.49458142539444,
+        "mdd": -32.671860345485705,
+        "trades": 90,
+        "wr": 0.18888888888888888,
+        "trades_per_day": 1.5340909090909092,
+        "long_entries": 36,
+        "short_entries": 54,
+        "avg_notional": 2.650911670423903,
+        "avg_leverage": 2.6087514169827575,
+        "action_counts": {
+          "cash": 12611,
+          "long": 36,
+          "short": 54
+        },
+        "exits": {
+          "learned_stop_loss": 73,
+          "learned_max_hold": 8,
+          "learned_take_profit": 9
+        },
+        "runner_actions": {
+          "add_on": 16,
+          "jackpot_add": 16,
+          "reject": 31
+        }
+      },
+      "cost2": {
+        "pnl": 41.877708422255175,
+        "mdd": -38.75649467634439,
+        "trades": 92,
+        "wr": 0.15217391304347827,
+        "trades_per_day": 1.5681818181818183,
+        "long_entries": 33,
+        "short_entries": 59,
+        "avg_notional": 2.622170988345741,
+        "avg_leverage": 2.588033256539122,
+        "action_counts": {
+          "cash": 12870,
+          "long": 33,
+          "short": 59
+        },
+        "exits": {
+          "learned_stop_loss": 78,
+          "learned_max_hold": 8,
+          "learned_take_profit": 6
+        },
+        "runner_actions": {
+          "add_on": 17,
+          "jackpot_add": 17,
+          "reject": 35
+        }
+      },
+      "cost3": {
+        "pnl": -1.8063309066180588,
+        "mdd": -42.74288552429672,
+        "trades": 99,
+        "wr": 0.15151515151515152,
+        "trades_per_day": 1.6875,
+        "long_entries": 39,
+        "short_entries": 60,
+        "avg_notional": 2.5963134264613537,
+        "avg_leverage": 2.5551812075300115,
+        "action_counts": {
+          "cash": 12825,
+          "long": 39,
+          "short": 60
+        },
+        "exits": {
+          "learned_stop_loss": 84,
+          "learned_max_hold": 8,
+          "learned_take_profit": 7
+        },
+        "runner_actions": {
+          "add_on": 16,
+          "jackpot_add": 16,
+          "reject": 30
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_jackpot_runner_5x_v21_3_20260511/v21_3_5x_jackpot_runner.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_jackpot_runner_5x_v21_3_20260511_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_jackpot_runner_5x_v21_3_20260511_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_jackpot_runner_5x_v21_3_20260511_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_jackpot_runner_5x_v21_3_20260511_summary_cost1_ledger.csv"
+    }
+  }
+}

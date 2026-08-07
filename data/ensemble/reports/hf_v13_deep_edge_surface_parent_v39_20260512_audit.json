@@ -1,0 +1,103 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "cost1_not_survived",
+    "cost2_not_survived",
+    "cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "baseline_margin110_cost1": 139.4071,
+  "baseline_v31_cost1": 277.0679629973942,
+  "selected_runtime": {
+    "name": "v39_defensive_s0.0055",
+    "score_th": 0.0055,
+    "margin_th": 0.0025,
+    "q90_weight": 0.25,
+    "q10_weight": 0.25,
+    "adverse_weight": 0.85,
+    "base_notional": 0.7,
+    "max_notional": 1.1,
+    "risk_budget": 0.01,
+    "base_tp": 0.03,
+    "base_sl": 0.012,
+    "max_hold": 36,
+    "cooldown": 12,
+    "tp_mult": 1.15,
+    "sl_mult": 1.1,
+    "trail": true,
+    "vol_throttle": true
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -70.53475587671723,
+      "mdd": -70.74788796647904,
+      "trades": 477,
+      "wr": 0.20964360587002095,
+      "trades_per_day": 8.130681818181818,
+      "long_entries": 477,
+      "short_entries": 0,
+      "avg_notional": 0.9810840064468529,
+      "avg_leverage": 1.0,
+      "exits": {
+        "max_hold": 156,
+        "stop_loss": 321
+      }
+    },
+    "cost2": {
+      "pnl": -78.0819078724507,
+      "mdd": -78.19905119629938,
+      "trades": 461,
+      "wr": 0.18655097613882862,
+      "trades_per_day": 7.857954545454546,
+      "long_entries": 461,
+      "short_entries": 0,
+      "avg_notional": 0.9781431332073427,
+      "avg_leverage": 1.0,
+      "exits": {
+        "max_hold": 156,
+        "stop_loss": 305
+      }
+    },
+    "cost3": {
+      "pnl": -90.59106366398649,
+      "mdd": -90.59384357134255,
+      "trades": 467,
+      "wr": 0.14132762312633834,
+      "trades_per_day": 7.960227272727273,
+      "long_entries": 467,
+      "short_entries": 0,
+      "avg_notional": 0.977986266972861,
+      "avg_leverage": 1.0,
+      "exits": {
+        "max_hold": 157,
+        "stop_loss": 310
+      }
+    }
+  }
+}

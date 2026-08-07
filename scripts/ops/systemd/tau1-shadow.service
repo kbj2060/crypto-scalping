@@ -1,0 +1,19 @@
+[Unit]
+Description=crypto-scalping Tau1 (sigma6_regime_tiebreak_shadow) live shadow tracker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/live_sigma6_regime_tiebreak_shadow_20260801.py --poll-seconds 90
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tau1_shadow
+
+[Install]
+WantedBy=multi-user.target

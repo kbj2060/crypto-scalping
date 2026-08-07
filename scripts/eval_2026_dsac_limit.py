@@ -90,14 +90,13 @@ def _build_actor(device: str) -> GaussianActor:
     return actor
 
 
-def _prob_triplet(row: pd.Series) -> tuple[float, float, float]:
-    dn = _safe_float(row.get("m7_trend_xgb_dn", row.get("prob_dn", 1.0 / 3.0)), 1.0 / 3.0)
-    fl = _safe_float(row.get("m7_trend_xgb_fl", row.get("prob_flat", 1.0 / 3.0)), 1.0 / 3.0)
-    up = _safe_float(row.get("m7_trend_xgb_up", row.get("prob_up", 1.0 / 3.0)), 1.0 / 3.0)
-    s = dn + fl + up
+def _prob_pair(row: pd.Series) -> tuple[float, float]:
+    dn = _safe_float(row.get("m7_trend_xgb_dn", row.get("prob_dn", 0.5)), 0.5)
+    up = _safe_float(row.get("m7_trend_xgb_up", row.get("prob_up", 0.5)), 0.5)
+    s = dn + up
     if s <= 1e-12:
-        return (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
-    return (dn / s, fl / s, up / s)
+        return (0.5, 0.5)
+    return (dn / s, up / s)
 
 
 def _flow_alignment(row: pd.Series, side: str) -> float:
@@ -114,7 +113,7 @@ def _compute_entry_plan(row: pd.Series, side: str, current_price: float, kelly: 
     conf = _clip(_safe_float(row.get("m7_confidence", 0.5), 0.5), 0.0, 1.0)
     qwidth = max(_safe_float(row.get("m7_qwidth", 0.01), 0.01), 1e-4)
     amihud = max(_safe_float(row.get("amihud_illiquidity_z", 0.0), 0.0), 0.0)
-    p_dn, _, p_up = _prob_triplet(row)
+    p_dn, p_up = _prob_pair(row)
     signal_edge = p_up - p_dn if side == "LONG" else p_dn - p_up
     flow = _flow_alignment(row, side)
 

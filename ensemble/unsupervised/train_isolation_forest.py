@@ -208,8 +208,8 @@ def train(args: argparse.Namespace) -> Dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Isolation Forest anomaly detector")
-    p.add_argument("--data-path", default="data/training_features_5m.csv")
-    p.add_argument("--rl-path", default="data/rl_training_data_full.csv")
+    p.add_argument("--data-path", default="data/splits/year_oos/training_features_2024.csv")
+    p.add_argument("--rl-path", default="data/splits/year_oos/rl_base_2024.csv")
     p.add_argument("--save-path", default="data/ensemble/unsupervised/isolation_forest.pkl")
     p.add_argument("--min-features", type=int, default=4)
     p.add_argument("--n-estimators", type=int, default=500)

@@ -1,0 +1,193 @@
+{
+  "stage": "WS-C",
+  "generated_at": "2026-07-19T01:59:58.884135+09:00",
+  "n_tail_risk_1m": 96045,
+  "n_micro_1m": 95972,
+  "kline_price_source": "binance_data/klines/ETHUSDT/ETHUSDT-1m-api.csv",
+  "kline_coverage": {
+    "min_ts": "2023-12-31 15:00:00+00:00",
+    "max_ts": "2026-07-15 16:36:00+00:00"
+  },
+  "T_C0_data_quality": {
+    "valid_liq_stream_false_ratio": 5.2058930709563226e-05,
+    "ws_stale_true_ratio": 5.2058930709563226e-05,
+    "liq_event_gt0_ratio": 0.0002082357228382529,
+    "liq_event_gt0_count": 20
+  },
+  "T_C0_rows_excluded_stale": 5,
+  "T_C0_merged_rows": 95992,
+  "T_C0_kline_price_match_ratio": 0.956027585632136,
+  "T_C1_thresholds": {
+    "S1_definition": "shadow_aftershock_prob > 0 (event indicator, NOT quantile -- see note)",
+    "S2_definition": "liq_event_count_1m > 0 (event indicator, NOT quantile -- see note)",
+    "q95_toxicity": 1.0,
+    "deviation_note": "S1/S2 redefined from q95-quantile to raw event-indicator because the underlying variables are zero-inflated to >99.9% -- quantile(0.95)==0 for both in this sample."
+  },
+  "T_C1_zero_inflation_finding": {
+    "aftershock_prob_nonzero_rows": 77,
+    "aftershock_prob_nonzero_ratio": 0.0008021501791815984,
+    "liq_event_nonzero_rows": 20,
+    "liq_event_nonzero_ratio": 0.00020835069589132427,
+    "interpretation": "Raw liquidation events are extremely rare in this 77-day single-asset (ETH) window: 19 minutes with any liquidation event, 74 minutes with nonzero aftershock_prob. This directly limits statistical power for S1/S2 -- flagged per-cell as 'insufficient_n' or 'insufficient_days' where it applies, not silently dropped."
+  },
+  "T_C1_S1_aftershock_q95_n_active": 77,
+  "T_C1_S2_liq_imbalance_q95_n_active": 20,
+  "T_C1_S3_toxicity_q95_n_active": 6562,
+  "T_C1_S4_S1_and_S3_n_active": 6,
+  "T_C1_grid_cells": [
+    {
+      "state": "S1_aftershock_q95",
+      "horizon_min": 5,
+      "n_state": 0,
+      "n_other": 91766,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S1_aftershock_q95",
+      "horizon_min": 15,
+      "n_state": 0,
+      "n_other": 91756,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S1_aftershock_q95",
+      "horizon_min": 60,
+      "n_state": 0,
+      "n_other": 91711,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S2_liq_imbalance_q95",
+      "horizon_min": 5,
+      "n_state": 0,
+      "n_other": 91766,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S2_liq_imbalance_q95",
+      "horizon_min": 15,
+      "n_state": 0,
+      "n_other": 91756,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S2_liq_imbalance_q95",
+      "horizon_min": 60,
+      "n_state": 0,
+      "n_other": 91711,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S3_toxicity_q95",
+      "horizon_min": 5,
+      "n_state": 6286,
+      "n_other": 85480,
+      "mean_diff": -2.8386355353906788e-06,
+      "t_stat": -0.09849519150184226,
+      "p_value_approx": 0.9215390900210024,
+      "p5_state": -0.002449699463825672,
+      "p5_other": -0.0024031475182821004,
+      "p5_diff": -4.6551945543571536e-05,
+      "vol_state": 0.0017955484376839892,
+      "vol_other": 0.001858282826189772,
+      "vol_ratio": 0.9662406671247059,
+      "fdr_significant": false
+    },
+    {
+      "state": "S3_toxicity_q95",
+      "horizon_min": 15,
+      "n_state": 6283,
+      "n_other": 85473,
+      "mean_diff": -5.323490903761039e-05,
+      "t_stat": -0.7431667696897732,
+      "p_value_approx": 0.45738071926543955,
+      "p5_state": -0.00431263798493724,
+      "p5_other": -0.0041449756494330355,
+      "p5_diff": -0.00016766233550420413,
+      "vol_state": 0.0030367785179020892,
+      "vol_other": 0.0031733467560100793,
+      "vol_ratio": 0.9569639725474879,
+      "fdr_significant": false
+    },
+    {
+      "state": "S3_toxicity_q95",
+      "horizon_min": 60,
+      "n_state": 6281,
+      "n_other": 85430,
+      "mean_diff": -4.365070329989874e-05,
+      "t_stat": -0.18916771670598295,
+      "p_value_approx": 0.8499613691528688,
+      "p5_state": -0.008945741067387658,
+      "p5_other": -0.00878810792806708,
+      "p5_diff": -0.00015763313932057842,
+      "vol_state": 0.006309486954523932,
+      "vol_other": 0.006349741821228081,
+      "vol_ratio": 0.9936603931565262,
+      "fdr_significant": false
+    },
+    {
+      "state": "S4_S1_and_S3",
+      "horizon_min": 5,
+      "n_state": 0,
+      "n_other": 91766,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S4_S1_and_S3",
+      "horizon_min": 15,
+      "n_state": 0,
+      "n_other": 91756,
+      "skipped": "insufficient_n"
+    },
+    {
+      "state": "S4_S1_and_S3",
+      "horizon_min": 60,
+      "n_state": 0,
+      "n_other": 91711,
+      "skipped": "insufficient_n"
+    }
+  ],
+  "T_C1_fdr_q": 0.1,
+  "T_C1_n_fdr_significant": 0,
+  "T_C1_n_cells_tested": 3,
+  "T_C1_split_boundary": "2026-06-10 12:47:00+00:00",
+  "T_C1_half1_n": 47640,
+  "T_C1_half2_n": 48352,
+  "T_C1_split_half_reproducibility": [
+    {
+      "cell": "S3_toxicity_q95|5",
+      "half1_diff": -4.536466632211121e-06,
+      "half2_diff": 4.607581209798983e-06,
+      "same_sign": false
+    },
+    {
+      "cell": "S3_toxicity_q95|15",
+      "half1_diff": -6.445055956737356e-05,
+      "half2_diff": -2.2966857195003696e-05,
+      "same_sign": true
+    },
+    {
+      "cell": "S3_toxicity_q95|60",
+      "half1_diff": -4.672954274146117e-05,
+      "half2_diff": 2.4896342093793885e-05,
+      "same_sign": false
+    }
+  ],
+  "T_C1_accepted_cells_fdr_and_reproducible": [],
+  "H_C1_verdict": "REJECTED (0 cells pass both FDR and split-half reproducibility)",
+  "T_C2_redundancy_note": "decision_feature_frame (243 cols) has only 111-1418 rows total vs 96k tail-risk rows -- too sparse for reliable correlation against tail-risk states. Used microstructure_1m.obi (full coverage) as an available proxy for 'does the live feature set already see this'. Full redundancy check against the 243-column live feature frame deferred until frame coverage improves (it was only fixed from a schema bug in 2026-07-02, still sparse).",
+  "T_C2_redundancy_vs_obi": {
+    "S1_aftershock_q95": {
+      "spearman_corr_vs_obi": 0.0019720488090334263
+    },
+    "S2_liq_imbalance_q95": {
+      "spearman_corr_vs_obi": -0.0004735427570778952
+    },
+    "S3_toxicity_q95": {
+      "spearman_corr_vs_obi": 0.0034865289767464715
+    },
+    "S4_S1_and_S3": {
+      "spearman_corr_vs_obi": -0.0006608642930353643
+    }
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "csv_path": "data/rl_training_2025_unified.csv",
+  "output_csv": "data/rl_training_2025_unified_dircat_tsfm_oof.csv",
+  "atr_mult": 0.8,
+  "max_hold": 8,
+  "atr_window": 14,
+  "feature_cols": [
+    "m7_prob_up",
+    "m7_prob_fl",
+    "m7_prob_dn",
+    "m7_q50",
+    "m7_qwidth",
+    "m7_gmm_vol_rank",
+    "m7_iso_score",
+    "m7_composite_score",
+    "m7_expected_ret",
+    "m7_tail_risk",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal",
+    "pred_mdjd",
+    "conf_mdjd",
+    "pred_patchtst",
+    "conf_patchtst",
+    "patchtst_median",
+    "patchtst_regime_sim",
+    "timesnet_cycle_sin",
+    "timesnet_cycle_cos",
+    "timesnet_cycle_delta",
+    "dlinear_smf_ema",
+    "dlinear_smf_slope"
+  ],
+  "folds": [
+    {
+      "fold": 0,
+      "train_rows": 30866,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6478247505827605,
+      "val_dir_f1": 0.4901821688056593,
+      "val_start_idx": 30866,
+      "val_end_idx": 39685
+    },
+    {
+      "fold": 1,
+      "train_rows": 39685,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6444272735828463,
+      "val_dir_f1": 0.5025762842344585,
+      "val_start_idx": 39685,
+      "val_end_idx": 48504
+    },
+    {
+      "fold": 2,
+      "train_rows": 48504,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6645253091958195,
+      "val_dir_f1": 0.4960277433660359,
+      "val_start_idx": 48504,
+      "val_end_idx": 57323
+    },
+    {
+      "fold": 3,
+      "train_rows": 57323,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6362348599185434,
+      "val_dir_f1": 0.49780596896174306,
+      "val_start_idx": 57323,
+      "val_end_idx": 66142
+    },
+    {
+      "fold": 4,
+      "train_rows": 66142,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.655566496827006,
+      "val_dir_f1": 0.5068648502683278,
+      "val_start_idx": 66142,
+      "val_end_idx": 74961
+    },
+    {
+      "fold": 5,
+      "train_rows": 74961,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6495335820255704,
+      "val_dir_f1": 0.4932223796169484,
+      "val_start_idx": 74961,
+      "val_end_idx": 83780
+    },
+    {
+      "fold": 6,
+      "train_rows": 79371,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6325652930401451,
+      "val_dir_f1": 0.4915952078934211,
+      "val_start_idx": 79371,
+      "val_end_idx": 88190
+    }
+  ],
+  "calibration_rows": 57324,
+  "holdout_rows": 15563,
+  "calibration_balanced_acc": 0.645460756042486,
+  "holdout_balanced_acc": 0.6235887712330647
+}

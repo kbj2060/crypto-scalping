@@ -1,0 +1,333 @@
+{
+  "model_id": "omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622",
+  "alias": "omega4.2_atr_safety_exit070",
+  "display_version": "Omega 4.2",
+  "status": "current_omega_research_baseline_not_live_wired",
+  "created_kst": "2026-06-22",
+  "promotion_type": "runtime_contract_overlay_on_omega4_1_weights",
+  "weights_retrained": false,
+  "source_model_id": "omega4_1_exit070_baseline",
+  "source_model_note": "Omega 4.1 baseline bundle with quality threshold 0.70 and exit-head threshold 0.70; ATR safety SLTP is the promoted runtime overlay.",
+  "source_training_report": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/report.json",
+  "contract": "docs/model_contracts/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622_contract.md",
+  "manifest": "data/ensemble/supervised/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/candidate_manifest.json",
+  "runtime_contract": "tmp/causal_regen_20260516/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/runtime_contract.json",
+  "baseline_bundle": "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_smoke_loose_entry_loose_quality_terminal_giveback_exit_e2_train15k_exit15k_q070/true_3head_tabm_bundle.pt",
+  "baseline_model_id": "omega4_3head_parent72_loose_entry_quality_20260620",
+  "baseline_parent_model": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
+  "source_predictions_dir": "tmp/causal_regen_20260516/omega4_frozen_risk_heads_margin_leverage_20260622_e8_fulltrain_q070_price_move_contract",
+  "selection_policy": "validation_first_selected_variant; OOS is fixed readout after selecting atr192_tp12_sl6 by validation PnL/MDD tradeoff",
+  "selected_variant": "atr192_tp12_sl6",
+  "selected_atr_safety": {
+    "atr_window_bars": 192,
+    "take_profit_atr_multiple": 12.0,
+    "stop_loss_atr_multiple": 6.0,
+    "floor_take_profit_price_move": 0.075,
+    "floor_stop_loss_price_move": 0.04,
+    "cap_take_profit_price_move": 0.22,
+    "cap_stop_loss_price_move": 0.12,
+    "atr_definition": "rolling mean true range divided by close; true range uses high-low, abs(high-prev_close), abs(low-prev_close)",
+    "entry_time_freeze": true,
+    "sltp_hit_contract": "compare raw directional price_move to take_profit/stop_loss price-move barriers; do not divide by notional"
+  },
+  "runtime_template": {
+    "quality_threshold": 0.7,
+    "exit_threshold": 0.7,
+    "max_hold_bars": 0,
+    "cooldown_bars": 0,
+    "cost_multiplier": 3.0,
+    "position_pnl_contract": "PnL = realized_price_move * notional, after fee/slippage cost multiplier",
+    "notional_contract": "notional is inherited from Omega 4.1 baseline decisions; leverage metadata remains separate",
+    "leverage_metadata": 2.0,
+    "price_move_take_profit_expr": "clip(max(0.075, atr_pct_192 * 12.0), 0.0, 0.22)",
+    "price_move_stop_loss_expr": "clip(max(0.040, atr_pct_192 * 6.0), 0.0, 0.12)",
+    "notional_scaled_sltp": false,
+    "live_wiring_changed": false
+  },
+  "training_data": {
+    "new_training_for_omega4_2": false,
+    "inherited_omega4_1_label_contract": {
+      "direction_label_dir": "tmp\\causal_regen_20260516\\zigzag_action_labels_parent72_loose_20260620",
+      "quality_mode": "same_as_direction",
+      "quality_label_dir": null
+    },
+    "inherited_label_dir": "tmp\\causal_regen_20260516\\zigzag_action_labels_parent72_loose_20260620",
+    "quality_target_rule": {
+      "active_action_required": true,
+      "side_soft_min": 0.7,
+      "edge_min": 0.0,
+      "mae_max": 0.01,
+      "mfe_mae_min": 1.5,
+      "otherwise": "CASH"
+    },
+    "exit_label": {
+      "mode": "entry_label_terminal_giveback",
+      "exit_edge_min": 0.002,
+      "hold_offsets": [
+        1,
+        2,
+        3,
+        6,
+        12,
+        24,
+        48,
+        96,
+        192,
+        384
+      ],
+      "diag": {
+        "rows": 15000,
+        "positive_rate": 0.0776,
+        "positive_count": 1164,
+        "negative_count": 13836,
+        "continued_exit_reasons": {
+          "hold": 13836,
+          "terminal_window_exit": 1163,
+          "mfe_giveback_exit": 1
+        },
+        "used_segments": 393,
+        "skipped_segments": 0,
+        "risk_template": {
+          "notional": 0.45,
+          "leverage": 2.0,
+          "take_profit": 0.026,
+          "stop_loss": 0.014
+        },
+        "label_mode": "entry_label_terminal_giveback_every_in_position_bar",
+        "terminal_window": 3,
+        "adverse_unreal": -0.01,
+        "min_mfe_for_giveback": 0.006,
+        "giveback_min": 0.65
+      }
+    },
+    "input_contract": {
+      "base_feature_count": 172,
+      "position_feature_count": 13,
+      "total_features": 185,
+      "position_cols": [
+        "pos_side",
+        "pos_hold_bars",
+        "pos_unrealized",
+        "pos_mfe",
+        "pos_mae",
+        "pos_giveback",
+        "pos_dist_to_tp",
+        "pos_dist_to_sl",
+        "pos_notional",
+        "pos_leverage",
+        "pos_exposure",
+        "pos_tp",
+        "pos_sl"
+      ]
+    },
+    "forbidden_feature_policy": {
+      "deny_prefixes": [
+        "clean_regime4_",
+        "regime4_pred_",
+        "regime3_pred_",
+        "teacher_",
+        "teacher_oof_",
+        "a5dir_"
+      ],
+      "deny_tokens": [
+        "target",
+        "future",
+        "label",
+        "pnl",
+        "zigzag",
+        "wave3",
+        "tp_sl_action_score"
+      ]
+    },
+    "label_quality_summary": {
+      "train": {
+        "rows": 78509,
+        "direction_counts": {
+          "0": 6480,
+          "1": 37742,
+          "2": 34287
+        },
+        "quality_counts": {
+          "0": 6480,
+          "1": 37742,
+          "2": 34287
+        },
+        "quality_active_ratio": 0.9174616922900559
+      },
+      "validation": {
+        "rows": 26490,
+        "direction_counts": {
+          "0": 2246,
+          "1": 13154,
+          "2": 11090
+        },
+        "quality_counts": {
+          "0": 2246,
+          "1": 13154,
+          "2": 11090
+        },
+        "quality_active_ratio": 0.9152132880332201
+      },
+      "oos": {
+        "rows": 16832,
+        "direction_counts": {
+          "0": 1404,
+          "1": 7487,
+          "2": 7941
+        },
+        "quality_counts": {
+          "0": 1404,
+          "1": 7487,
+          "2": 7941
+        },
+        "quality_active_ratio": 0.9165874524714829
+      }
+    }
+  },
+  "validation_cost3": {
+    "pnl_pct": 16.023119805554952,
+    "mdd_pct": -7.111720601366911,
+    "wr": 0.6705882352941176,
+    "trades": 85,
+    "trades_per_day": 0.9241571973271925,
+    "long_entries": 22,
+    "short_entries": 63,
+    "avg_notional": 0.38752941176470596,
+    "avg_leverage": 2.0,
+    "exit_reasons": {
+      "stop_loss": 18,
+      "exit_head": 62,
+      "take_profit": 4,
+      "forced_end": 1
+    },
+    "atr_diag": {
+      "atr_window": 192,
+      "tp_mult": 12.0,
+      "sl_mult": 6.0,
+      "min_tp": 0.075,
+      "min_sl": 0.04,
+      "max_tp": 0.22,
+      "max_sl": 0.12,
+      "active_rows": 8699,
+      "atr_pct_p50": 0.0024225201422410853,
+      "atr_pct_p90": 0.0037501948108319685,
+      "tp_p50": 0.075,
+      "tp_p90": 0.075,
+      "sl_p50": 0.04,
+      "sl_p90": 0.04
+    }
+  },
+  "oos_cost3": {
+    "pnl_pct": 13.323971155450787,
+    "mdd_pct": -4.384161221061122,
+    "wr": 0.6615384615384615,
+    "trades": 65,
+    "trades_per_day": 1.1122333788842018,
+    "long_entries": 20,
+    "short_entries": 45,
+    "avg_notional": 0.3894230769230771,
+    "avg_leverage": 2.0,
+    "exit_reasons": {
+      "stop_loss": 8,
+      "exit_head": 54,
+      "take_profit": 2,
+      "forced_end": 1
+    },
+    "atr_diag": {
+      "atr_window": 192,
+      "tp_mult": 12.0,
+      "sl_mult": 6.0,
+      "min_tp": 0.075,
+      "min_sl": 0.04,
+      "max_tp": 0.22,
+      "max_sl": 0.12,
+      "active_rows": 4994,
+      "atr_pct_p50": 0.002260759738380521,
+      "atr_pct_p90": 0.003462000150846981,
+      "tp_p50": 0.075,
+      "tp_p90": 0.075,
+      "sl_p50": 0.04,
+      "sl_p90": 0.04
+    }
+  },
+  "reference_baselines": {
+    "omega4_1_exit070_baseline": {
+      "validation_cost3": {
+        "pnl_pct": 3.2756516763214893,
+        "mdd_pct": -7.817488798061978,
+        "wr": 0.6711409395973155,
+        "trades": 149,
+        "exit_reasons": {
+          "stop_loss": 19,
+          "exit_head": 127,
+          "take_profit": 2,
+          "forced_end": 1
+        }
+      },
+      "oos_cost3": {
+        "pnl_pct": 7.513325496582635,
+        "mdd_pct": -5.61401353413885,
+        "wr": 0.63,
+        "trades": 100,
+        "exit_reasons": {
+          "stop_loss": 6,
+          "exit_head": 92,
+          "take_profit": 1,
+          "forced_end": 1
+        }
+      },
+      "note": "Previous Omega 4.1 exit0.70 baseline with earlier account-threshold SLTP replay contract."
+    },
+    "fixed_price_move_sltp_exit070_not_promoted": {
+      "validation": {
+        "pnl": -2.981096790793014,
+        "mdd": -8.62776452380153,
+        "trades": 239,
+        "wr": 0.5146443514644351
+      },
+      "oos": {
+        "pnl": 2.001072984565999,
+        "mdd": -9.410992452606415,
+        "trades": 134,
+        "wr": 0.5298507462686567
+      }
+    }
+  },
+  "comparison_vs_omega4_1_exit070_baseline": {
+    "validation_delta_pnl_pct": 12.747468129233463,
+    "validation_delta_mdd_pct": 0.7057681966950673,
+    "validation_delta_trades": -64,
+    "oos_delta_pnl_pct": 5.810645658868152,
+    "oos_delta_mdd_pct": 1.2298523130777284,
+    "oos_delta_trades": -35
+  },
+  "artifacts": {
+    "promotion_manifest": "tmp/causal_regen_20260516/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/promotion_manifest.json",
+    "runtime_contract": "tmp/causal_regen_20260516/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/runtime_contract.json",
+    "candidate_manifest": "data/ensemble/supervised/omega4_2_atr192_tp12_sl6_floor_tp075_sl040_exit070_20260622/candidate_manifest.json",
+    "source_grid_report": "tmp/causal_regen_20260516/omega4_1_atr_safety_sltp_20260622_q070_exit070_wider_floor_grid3/report.json",
+    "source_grid_ranking": "tmp/causal_regen_20260516/omega4_1_atr_safety_sltp_20260622_q070_exit070_wider_floor_grid3/ranking.csv",
+    "evaluation_script": "scripts/eval_omega4_1_atr_safety_sltp_20260622.py",
+    "baseline_summary": "tmp/causal_regen_20260516/omega4_1_exit070_baseline_trade_charts_20260621/summary.json"
+  },
+  "live_wiring": {
+    "trading_bot_py_updated": false,
+    "requires_runtime_native_parity": true,
+    "requires_current_live_feature_contract_validation": true,
+    "requires_shadow_or_paper_smoke_before_real_exchange": true,
+    "fail_fast_contract": true
+  },
+  "redteam_status": {
+    "standalone_redteam_report": false,
+    "feature_contract_passed_in_eval": true,
+    "known_blockers": [
+      "not_live_wired",
+      "runtime_native_parity_not_run"
+    ]
+  },
+  "limitations": [
+    "Omega 4.2 does not introduce new neural weights; it promotes an ATR safety SLTP runtime contract over the Omega 4.1 bundle.",
+    "The observed validation/OOS ATR p50 and p90 barriers were floor-dominated; ATR still widens barriers only when atr_pct * multiple exceeds the floor.",
+    "This manifest is a research-baseline promotion, not a live trading deployment."
+  ]
+}

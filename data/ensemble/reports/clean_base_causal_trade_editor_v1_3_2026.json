@@ -1,0 +1,316 @@
+{
+  "model_id": "clean_base_causal_trade_editor_v1_3",
+  "verdict": "shadow_candidate",
+  "selected_config": {
+    "name": "b0.0015_s0.0000_a0.020_eg0.0015_up1.15_dn0.80_acct0.09_day0.018",
+    "boost_threshold": 0.0015,
+    "shrink_threshold": 0.0,
+    "adverse_cut": 0.02,
+    "early_gain_threshold": 0.0015,
+    "scale_up": 1.15,
+    "scale_down": 0.8,
+    "account_dd_disable": 0.09,
+    "daily_dd_disable": 0.018,
+    "max_notional": 3.6,
+    "min_notional": 0.25
+  },
+  "training": {
+    "rows": 1479,
+    "features": [
+      "side",
+      "quality",
+      "confidence",
+      "core_notional",
+      "leverage",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk"
+    ],
+    "full_positive_rate": 0.6375929682217715,
+    "full_mean": 0.0031646741661019,
+    "adverse_mean": 0.0024174231149931636,
+    "early_best_beats_full_rate": 0.11359026369168357
+  },
+  "validation": {
+    "cost_1x": {
+      "pnl": 1097.0409346423357,
+      "mdd": -10.297733945774079,
+      "trades": 695,
+      "trades_per_day": 11.39344262295082,
+      "wr": 0.581294964028777,
+      "avg_notional": 0.8777051468751947,
+      "gross_notional_max": 3.004670978956407,
+      "avg_scale_delta": 0.08943134449183261,
+      "early_exit_fraction": 0.02158273381294964,
+      "action_counts": {
+        "SCALE_UP": 365,
+        "KEEP": 219,
+        "SCALE_DOWN": 54,
+        "SCALE_UP_EARLY6": 3,
+        "SCALE_DOWN_EARLY6": 5,
+        "SCALE_UP_EARLY24": 21,
+        "SCALE_UP_EARLY12": 10,
+        "EARLY6": 4,
+        "SCALE_DOWN_EARLY12": 4,
+        "EARLY24": 3,
+        "SCALE_DOWN_EARLY24": 6,
+        "EARLY12": 1
+      },
+      "reason_counts": {
+        "daily_dd_disable": 2
+      }
+    },
+    "cost_3x": {
+      "pnl": -0.0011195223303950286,
+      "mdd": -24.159429786228237,
+      "trades": 544,
+      "trades_per_day": 8.918032786885245,
+      "wr": 0.28860294117647056,
+      "avg_notional": 0.55391312284931,
+      "gross_notional_max": 2.58479466483988,
+      "avg_scale_delta": 0.08662776762364396,
+      "early_exit_fraction": 0.03125,
+      "action_counts": {
+        "SCALE_UP": 137,
+        "KEEP": 41,
+        "SCALE_DOWN": 310,
+        "EARLY6": 1,
+        "SCALE_DOWN_EARLY12": 18,
+        "EARLY12": 2,
+        "SCALE_DOWN_EARLY24": 12,
+        "SCALE_UP_EARLY24": 8,
+        "SCALE_UP_EARLY12": 5,
+        "SCALE_DOWN_EARLY6": 9,
+        "EARLY24": 1
+      },
+      "reason_counts": {
+        "daily_dd_disable": 11,
+        "account_dd_disable": 304
+      }
+    },
+    "score": 1097.040800299656
+  },
+  "validation_grid_rows": 1296,
+  "cost_1x": {
+    "pnl": 190.78612601011721,
+    "mdd": -18.869253157682163,
+    "trades": 363,
+    "trades_per_day": 6.1525423728813555,
+    "wr": 0.4903581267217631,
+    "avg_notional": 0.7647045375306665,
+    "gross_notional_max": 3.2566419417190486,
+    "avg_scale_delta": 0.07440256483533539,
+    "early_exit_fraction": 0.030303030303030304,
+    "action_counts": {
+      "KEEP": 119,
+      "SCALE_DOWN": 52,
+      "SCALE_UP": 156,
+      "SCALE_UP_EARLY24": 6,
+      "SCALE_UP_EARLY6": 3,
+      "SCALE_DOWN_EARLY24": 6,
+      "EARLY24": 8,
+      "EARLY6": 3,
+      "SCALE_UP_EARLY12": 2,
+      "SCALE_DOWN_EARLY12": 2,
+      "SCALE_DOWN_EARLY6": 6
+    },
+    "reason_counts": {
+      "daily_dd_disable": 2
+    }
+  },
+  "cost_2x": {
+    "pnl": 121.08901941547634,
+    "mdd": -19.200131043428136,
+    "trades": 318,
+    "trades_per_day": 5.389830508474576,
+    "wr": 0.31761006289308175,
+    "avg_notional": 0.6717213552842005,
+    "gross_notional_max": 3.2566419417190486,
+    "avg_scale_delta": 0.10959756744134419,
+    "early_exit_fraction": 0.03459119496855346,
+    "action_counts": {
+      "KEEP": 91,
+      "SCALE_DOWN": 70,
+      "SCALE_UP": 131,
+      "SCALE_UP_EARLY6": 1,
+      "SCALE_UP_EARLY24": 2,
+      "SCALE_DOWN_EARLY6": 3,
+      "EARLY24": 3,
+      "SCALE_UP_EARLY12": 5,
+      "EARLY12": 3,
+      "EARLY6": 4,
+      "SCALE_DOWN_EARLY24": 4,
+      "SCALE_DOWN_EARLY12": 1
+    },
+    "reason_counts": {
+      "daily_dd_disable": 9
+    }
+  },
+  "cost_3x": {
+    "pnl": -16.56384451413938,
+    "mdd": -16.668013955898285,
+    "trades": 179,
+    "trades_per_day": 3.0338983050847457,
+    "wr": 0.13966480446927373,
+    "avg_notional": 0.41717243712581953,
+    "gross_notional_max": 2.5283775158993738,
+    "avg_scale_delta": 0.122763364610997,
+    "early_exit_fraction": 0.0223463687150838,
+    "action_counts": {
+      "KEEP": 24,
+      "SCALE_DOWN": 118,
+      "SCALE_UP": 20,
+      "EARLY12": 1,
+      "SCALE_UP_EARLY6": 1,
+      "SCALE_UP_EARLY24": 2,
+      "SCALE_DOWN_EARLY6": 3,
+      "EARLY24": 2,
+      "SCALE_DOWN_EARLY12": 6,
+      "SCALE_DOWN_EARLY24": 2
+    },
+    "reason_counts": {
+      "daily_dd_disable": 3,
+      "account_dd_disable": 96
+    }
+  },
+  "clean_base_reference": {
+    "pnl": 177.3298088749005,
+    "mdd": -17.75966486035323,
+    "trades_per_day": 6.1875,
+    "cost_2x_pnl": 92.25487780535948,
+    "cost_3x_pnl": -7.969394502459748
+  },
+  "sleeve_v12_reference": {
+    "pnl": 210.4912769023236,
+    "mdd": -18.01515493224809,
+    "trades_per_day": 6.1525423728813555,
+    "cost_2x_pnl": 133.15003100682384,
+    "cost_3x_pnl": -9.150155206649814
+  },
+  "lifecycle_core_reference": {
+    "validation": {
+      "pnl": 908.4222875243677,
+      "mdd": -12.696352061226445,
+      "trades": 695,
+      "core_trades_per_day": null,
+      "wr": 0.6690647482014388,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "oos": {
+      "pnl": 207.2368875907697,
+      "mdd": -18.016318445365364,
+      "trades": 363,
+      "core_trades_per_day": null,
+      "wr": 0.5730027548209367,
+      "sleeve_action_counts": null,
+      "sleeve_fraction": null,
+      "core_lane_pnl_contribution": null,
+      "sleeve_lane_pnl_contribution": null,
+      "add_contribution": null,
+      "hedge_contribution": null,
+      "gross_notional_max": null,
+      "net_notional_max": null,
+      "reason_counts": null
+    },
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_lifecycle_editor_v1_2026.json"
+  },
+  "promotion_gate": {
+    "clean_base_pnl_gate": true,
+    "clean_base_mdd_gate": false,
+    "sleeve_v12_pnl_gate": false,
+    "sleeve_v12_mdd_gate": false,
+    "trades_per_day_gate": true,
+    "cost2_survival": true,
+    "cost3_not_worse_than_clean_base": false,
+    "preservation_audit_passed": true,
+    "accounting_audit_passed": true,
+    "causality_audit_passed": true,
+    "decision": "shadow_candidate"
+  },
+  "preservation_audit": {
+    "passed": true,
+    "violations": {
+      "trade_count_changed": 0,
+      "entry_idx_changed": 0,
+      "side_changed": 0,
+      "exit_after_core_exit": 0,
+      "negative_notional": 0,
+      "notional_above_cap": 0
+    },
+    "base_trades": 363,
+    "edited_trades": 363
+  },
+  "accounting_audit": {
+    "passed": true,
+    "final_pnl_from_ledger": 190.78612601011721,
+    "report_pnl": 190.78612601011721,
+    "max_step_equity_error": 2.220446049250313e-16,
+    "nonfinite_numeric_cells": 0
+  },
+  "causality_audit": {
+    "passed": true,
+    "runtime_uses_future_returns": false,
+    "training_labels_use_future": true,
+    "validation_selection_only": true,
+    "runtime_features": [
+      "side",
+      "quality",
+      "confidence",
+      "core_notional",
+      "leverage",
+      "funding_abs",
+      "funding_pressure",
+      "liquidity_vacuum",
+      "amihud_illiquidity_z",
+      "m7_tail_risk",
+      "evt_tail_flag",
+      "ai_adverse_risk"
+    ],
+    "forbidden_runtime_features": [
+      "evt_candidate_side",
+      "evt_candidate_label",
+      "evt_side_margin",
+      "future high/low/close"
+    ]
+  },
+  "data": {
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "split_contract": {
+      "train_labels": "2025-01-01 through 2025-10-31",
+      "validation_selection": "2025-11-01 through 2025-12-31",
+      "one_shot_oos": "2026-01-01 through 2026-02-28",
+      "oos_threshold_selection": false
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_base_causal_trade_editor_v1_3/trade_editor_regressors.pkl",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_causal_trade_editor_v1_3_2026.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_causal_trade_editor_v1_3_grid.csv",
+    "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/clean_base_causal_trade_editor_v1_3_ledger.csv",
+    "doc": "/home/llewyn/crypto-scalping/docs/experiments/clean_base_causal_trade_editor_v1_3.md",
+    "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/clean_base_causal_trade_editor_v1_3_contract.md"
+  }
+}

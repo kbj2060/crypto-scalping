@@ -1,0 +1,158 @@
+{
+  "csv_metrics_from_corrected_ledger": {
+    "pnl": 338.68067144958997,
+    "mdd": -29.617312952777574,
+    "trades": 114,
+    "wr": 0.3157894736842105,
+    "deep_entries": 75,
+    "long_entries": 65,
+    "short_entries": 49,
+    "avg_notional": 2.1901128532086536,
+    "avg_leverage": 2.1262420039436214,
+    "exits": {
+      "v21_2_stop_loss": 29,
+      "v21_2_max_hold": 4,
+      "deep_alpha_max_hold": 14,
+      "deep_alpha_stop_loss": 49,
+      "v21_2_take_profit": 6,
+      "deep_alpha_take_profit": 11,
+      "forced_end": 1
+    },
+    "runner_actions": {
+      "v21_entry": 39,
+      "v21_reject": 15,
+      "deep_entry": 75,
+      "v21_add_on": 9
+    },
+    "route_counts": {
+      "signal_immediate_maker_limit": 236,
+      "forced_end_market": 1
+    }
+  },
+  "csv_event_counts": {
+    "HOLD": 7523,
+    "COOLDOWN": 888,
+    "OPEN": 114,
+    "CLOSE": 113,
+    "UPSIZE": 9,
+    "FORCED_END": 1
+  },
+  "csv_entries_by_owner": {
+    "deep_alpha": 75,
+    "v21_2": 39
+  },
+  "csv_closes_by_reason": [
+    {
+      "reason": "deep_alpha_max_hold",
+      "count": 14,
+      "sum": 27.504135206639944,
+      "mean": 1.9645810861885675
+    },
+    {
+      "reason": "deep_alpha_stop_loss",
+      "count": 49,
+      "sum": -27.976395250622833,
+      "mean": -0.5709468418494456
+    },
+    {
+      "reason": "deep_alpha_take_profit",
+      "count": 11,
+      "sum": 59.194575291973,
+      "mean": 5.381325026543
+    },
+    {
+      "reason": "forced_end",
+      "count": 1,
+      "sum": 1.248473739548106,
+      "mean": 1.248473739548106
+    },
+    {
+      "reason": "v21_2_max_hold",
+      "count": 4,
+      "sum": 25.45956862697045,
+      "mean": 6.364892156742613
+    },
+    {
+      "reason": "v21_2_stop_loss",
+      "count": 29,
+      "sum": -64.18788325889031,
+      "mean": -2.213375284789321
+    },
+    {
+      "reason": "v21_2_take_profit",
+      "count": 6,
+      "sum": 147.4627056819111,
+      "mean": 24.57711761365185
+    }
+  ],
+  "native_event_counts": {
+    "HOLD": 8386,
+    "OPEN": 123,
+    "CLOSE": 122,
+    "UPSIZE": 9
+  },
+  "native_entries_by_source_reason_side": [
+    {
+      "source": "alpha3|v31_frozen_v27_rule_exit|entry_deep_alpha",
+      "reason": "v31_deep_alpha_entry_parent_cash",
+      "target_side": "LONG",
+      "count": 56
+    },
+    {
+      "source": "alpha3|v31_frozen_v27_rule_exit|entry_deep_alpha",
+      "reason": "v31_deep_alpha_entry_parent_cash",
+      "target_side": "SHORT",
+      "count": 42
+    },
+    {
+      "source": "alpha3|v21_2_jackpot_runner|entry_core",
+      "reason": "alpha2_1_v21_2_jackpot_runner_entry_core",
+      "target_side": "LONG",
+      "count": 15
+    },
+    {
+      "source": "alpha3|v21_2_jackpot_runner|entry_core",
+      "reason": "alpha2_1_v21_2_jackpot_runner_entry_core",
+      "target_side": "SHORT",
+      "count": 10
+    }
+  ],
+  "native_closes_by_reason": [
+    {
+      "reason": "learned_max_hold",
+      "count": 5,
+      "sum": 55.7425198126932,
+      "mean": 11.14850396253864
+    },
+    {
+      "reason": "learned_stop_loss",
+      "count": 18,
+      "sum": -35.62427201016744,
+      "mean": -1.9791262227870798
+    },
+    {
+      "reason": "learned_take_profit",
+      "count": 2,
+      "sum": 54.26891267046079,
+      "mean": 27.134456335230396
+    },
+    {
+      "reason": "v31_deep_alpha_max_hold",
+      "count": 18,
+      "sum": 21.179199918349152,
+      "mean": 1.176622217686064
+    },
+    {
+      "reason": "v31_deep_alpha_stop_loss",
+      "count": 67,
+      "sum": -74.36827235435237,
+      "mean": -1.1099742142440652
+    },
+    {
+      "reason": "v31_deep_alpha_take_profit",
+      "count": 12,
+      "sum": 62.31514872038737,
+      "mean": 5.192929060032281
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "csv_path": "/home/llewyn/crypto-scalping/data/rl_training_2025_unified.csv",
+  "output_csv": "/home/llewyn/crypto-scalping/data/rl_training_2025_unified_dircat_oof.csv",
+  "atr_mult": 0.8,
+  "max_hold": 8,
+  "atr_window": 14,
+  "feature_cols": [
+    "m7_prob_up",
+    "m7_prob_fl",
+    "m7_prob_dn",
+    "m7_q50",
+    "m7_qwidth",
+    "m7_gmm_vol_rank",
+    "m7_iso_score",
+    "m7_composite_score",
+    "m7_expected_ret",
+    "m7_tail_risk",
+    "smart_money_flow",
+    "taker_acceleration",
+    "trade_intensity",
+    "garch_vol_z",
+    "rogers_satchell_vol",
+    "amihud_illiquidity_z",
+    "regime_bull",
+    "regime_bear",
+    "regime_chop",
+    "regime_whipsaw",
+    "regime_normal"
+  ],
+  "folds": [
+    {
+      "fold": 0,
+      "train_rows": 30866,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6373642691149125,
+      "val_dir_f1": 0.489907333734738,
+      "val_start_idx": 30866,
+      "val_end_idx": 39685
+    },
+    {
+      "fold": 1,
+      "train_rows": 39685,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6535034252429015,
+      "val_dir_f1": 0.50020640959757,
+      "val_start_idx": 39685,
+      "val_end_idx": 48504
+    },
+    {
+      "fold": 2,
+      "train_rows": 48504,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6575263831196675,
+      "val_dir_f1": 0.4936106482380162,
+      "val_start_idx": 48504,
+      "val_end_idx": 57323
+    },
+    {
+      "fold": 3,
+      "train_rows": 57323,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6253024815284766,
+      "val_dir_f1": 0.492320081075089,
+      "val_start_idx": 57323,
+      "val_end_idx": 66142
+    },
+    {
+      "fold": 4,
+      "train_rows": 66142,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6605685900838895,
+      "val_dir_f1": 0.5046446227190412,
+      "val_start_idx": 66142,
+      "val_end_idx": 74961
+    },
+    {
+      "fold": 5,
+      "train_rows": 74961,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6470977821278424,
+      "val_dir_f1": 0.488731437129955,
+      "val_start_idx": 74961,
+      "val_end_idx": 83780
+    },
+    {
+      "fold": 6,
+      "train_rows": 79371,
+      "val_rows": 8819,
+      "val_balanced_acc": 0.6242250932997574,
+      "val_dir_f1": 0.48918510418457534,
+      "val_start_idx": 79371,
+      "val_end_idx": 88190
+    }
+  ],
+  "calibration_rows": 57324,
+  "holdout_rows": 15563,
+  "calibration_balanced_acc": 0.6426451230479123,
+  "holdout_balanced_acc": 0.6318949318822965
+}

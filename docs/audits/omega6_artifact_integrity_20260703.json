@@ -1,0 +1,169 @@
+{
+  "model_id": "omega6_synthesis_v1_20260703",
+  "audit_id": "omega6_artifact_integrity_20260703",
+  "promotion_pass": true,
+  "checks": [
+    {
+      "name": "l2_primary_bundle_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_primary/true_3head_tabm_bundle.pt"
+      }
+    },
+    {
+      "name": "l2_primary_bundle_report_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_primary/report.json"
+      }
+    },
+    {
+      "name": "l2_primary_bundle_model_id_matches",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "expected": "omega6_true_3head_tabm_20260703",
+        "found": "omega6_true_3head_tabm_20260703"
+      }
+    },
+    {
+      "name": "l2_primary_bundle_split_ts_traceable_to_shared_boundary",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "split_ts": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "l2_fallback_bundle_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_fallback/true_3head_tabm_bundle.pt"
+      }
+    },
+    {
+      "name": "l2_fallback_bundle_report_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_fallback/report.json"
+      }
+    },
+    {
+      "name": "l2_fallback_bundle_model_id_matches",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "expected": "omega6_true_3head_tabm_20260703",
+        "found": "omega6_true_3head_tabm_20260703"
+      }
+    },
+    {
+      "name": "l2_fallback_bundle_split_ts_traceable_to_shared_boundary",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "split_ts": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "l3_sequence_gate_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_sequence_gate_20260703/tcn_seq_gate_L24_omega6.pt"
+      }
+    },
+    {
+      "name": "l3_sequence_gate_report_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_sequence_gate_20260703/report.json"
+      }
+    },
+    {
+      "name": "l3_sequence_gate_model_id_matches",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "expected": "omega6_sequence_gate_20260703",
+        "found": "omega6_sequence_gate_20260703"
+      }
+    },
+    {
+      "name": "l3_sequence_gate_train_window_before_split_ts",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "train_end": "2025-09-30 23:55:00",
+        "split_ts": "2025-10-01 00:00:00"
+      }
+    },
+    {
+      "name": "l4_risk_sidecar_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_risk_sidecar_20260703/risk_sidecar.pkl"
+      }
+    },
+    {
+      "name": "l4_risk_sidecar_report_exists",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_risk_sidecar_20260703/report.json"
+      }
+    },
+    {
+      "name": "l4_risk_sidecar_model_id_matches",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "expected": "omega6_risk_sidecar_20260703",
+        "found": "omega6_risk_sidecar_20260703"
+      }
+    },
+    {
+      "name": "l4_risk_sidecar_train_window_before_split_ts",
+      "pass": true,
+      "severity": "blocker",
+      "details": {
+        "train_end": "2025-09-30 23:55:00",
+        "split_ts": "2025-10-01 00:00:00"
+      }
+    }
+  ],
+  "n_blockers": 0,
+  "fingerprints": {
+    "l2_primary_bundle": {
+      "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_primary/true_3head_tabm_bundle.pt",
+      "sha256": "7163a38a0149af04ae79b603d58ea597a4befa40ce56eb6584576da92eefb174",
+      "size_bytes": 1460437,
+      "mtime": 1783049261.8358948
+    },
+    "l2_fallback_bundle": {
+      "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_true_3head_tabm_20260703_fallback/true_3head_tabm_bundle.pt",
+      "sha256": "54c2ee5ea2719e693b36fc1cd4bbb307a309262603bab26b279d36cca0259ff5",
+      "size_bytes": 1460437,
+      "mtime": 1783050115.769253
+    },
+    "l3_sequence_gate": {
+      "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_sequence_gate_20260703/tcn_seq_gate_L24_omega6.pt",
+      "sha256": "6c7ac89bfeee7610548ad094671a2b01b0e4b65141c8ec8b2d5b3e083359dfe7",
+      "size_bytes": 155525,
+      "mtime": 1783063538.1600091
+    },
+    "l4_risk_sidecar": {
+      "path": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega6_risk_sidecar_20260703/risk_sidecar.pkl",
+      "sha256": "a33053587d1dfb84d97c83f42de7d595133d816f7fefc15e4cbe10dc9c5638e7",
+      "size_bytes": 267625,
+      "mtime": 1783068442.452301
+    }
+  },
+  "note": "This is an Omega6-specific analog of scripts/audit_omega_artifact_integrity_20260630.py, not that script re-run -- see module docstring for why the original does not apply as-is to Omega6's live bar-by-bar architecture."
+}

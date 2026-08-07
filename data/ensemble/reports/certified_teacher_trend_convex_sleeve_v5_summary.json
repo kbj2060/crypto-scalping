@@ -1,0 +1,211 @@
+{
+  "model_id": "certified_teacher_trend_convex_sleeve_v5",
+  "data": {
+    "fit_range": [
+      "2025-01-01 00:00:00",
+      "2025-08-31 23:55:00"
+    ],
+    "selection_range": [
+      "2025-09-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "holdout_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ]
+  },
+  "event_candidate_counts": {
+    "fit_long": 3820,
+    "fit_short": 3136,
+    "selection": 42598,
+    "holdout": 42124,
+    "oos": 40750
+  },
+  "feature_count": 112,
+  "selected_config": {
+    "top_k_per_day": 1,
+    "min_event_score": 0.7,
+    "min_pred_edge_pct": 0.0,
+    "max_notional": 1.2,
+    "min_notional": 0.2,
+    "min_gap_bars": 36,
+    "max_pred_adverse_pct": 1.8,
+    "leverage": 5.0
+  },
+  "selection_score": -8.460065488047839,
+  "selection_result": {
+    "pnl": -2.0952440954967844,
+    "mdd": -5.200151013270549,
+    "trades": 61,
+    "trades_per_day": 1.0000569249160358,
+    "wr": 0.4262295081967213,
+    "avg_notional": 0.38201478049943405,
+    "max_margin_fraction": 0.14378919848710528,
+    "final_equity": 0.9790475590450322,
+    "coverage_start": "2025-09-01 00:00:00",
+    "coverage_end": "2025-10-31 23:55:00",
+    "block_reason_counts": {
+      "model_gate": 196,
+      "daily_budget": 11239,
+      "min_gap": 66
+    }
+  },
+  "holdout_result": {
+    "pnl": -6.248581190165092,
+    "mdd": -7.27554037752538,
+    "trades": 61,
+    "trades_per_day": 1.0000569249160358,
+    "wr": 0.32786885245901637,
+    "avg_notional": 0.35164253050832217,
+    "max_margin_fraction": 0.12853985102018672,
+    "final_equity": 0.9375141880983491,
+    "coverage_start": "2025-11-01 00:00:00",
+    "coverage_end": "2025-12-31 23:55:00",
+    "block_reason_counts": {
+      "daily_budget": 11465,
+      "model_gate": 254,
+      "min_gap": 232
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -5.255196299907416,
+      "mdd": -5.995319427911394,
+      "trades": 59,
+      "trades_per_day": 1.0056818181818181,
+      "wr": 0.4067796610169492,
+      "avg_notional": 0.35076591118357525,
+      "max_margin_fraction": 0.12622120369559545,
+      "final_equity": 0.9474480370009258,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "model_gate": 342,
+        "daily_budget": 11016,
+        "min_gap": 198
+      }
+    },
+    "cost2": {
+      "pnl": -7.962500540422123,
+      "mdd": -8.037050972182024,
+      "trades": 59,
+      "trades_per_day": 1.0056818181818181,
+      "wr": 0.4067796610169492,
+      "avg_notional": 0.35076591118357525,
+      "max_margin_fraction": 0.12622120369559545,
+      "final_equity": 0.9203749945957788,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "model_gate": 342,
+        "daily_budget": 11016,
+        "min_gap": 198
+      }
+    },
+    "cost3": {
+      "pnl": -10.593116264850277,
+      "mdd": -10.637614570526166,
+      "trades": 59,
+      "trades_per_day": 1.0056818181818181,
+      "wr": 0.3898305084745763,
+      "avg_notional": 0.35076591118357525,
+      "max_margin_fraction": 0.12622120369559545,
+      "final_equity": 0.8940688373514972,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "model_gate": 342,
+        "daily_budget": 11016,
+        "min_gap": 198
+      }
+    }
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/certified_teacher_trend_convex_sleeve_v5/model.pkl",
+    "selection_grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_trend_convex_sleeve_v5_summary_selection_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_trend_convex_sleeve_v5_summary_cost1_ledger.csv",
+      "cost2": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_trend_convex_sleeve_v5_summary_cost2_ledger.csv",
+      "cost3": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_trend_convex_sleeve_v5_summary_cost3_ledger.csv"
+    }
+  },
+  "data_audit": {
+    "ai_contracts": {
+      "status": "pass",
+      "blocking": [],
+      "evidence": {
+        "data/nf_patchtst": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_tide": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_dlinear": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_timesnet": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        }
+      }
+    },
+    "feature_contract": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 112,
+      "forbidden_feature_cols": []
+    },
+    "train_eval_overlap": 0
+  },
+  "audit": {
+    "model_id": "certified_teacher_trend_convex_sleeve_v5",
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "M7 embedded provenance caveat remains"
+    ],
+    "invariants": {
+      "rare_event_universe": true,
+      "legacy_regime_v2_quarantined": true,
+      "2026_fixed_oos_no_selection": true,
+      "cost_1x_2x_3x_reported": true,
+      "next_bar_open_execution": true
+    }
+  }
+}

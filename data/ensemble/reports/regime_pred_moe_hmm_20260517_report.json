@@ -1,0 +1,462 @@
+{
+  "model_id": "regime_pred_moe_hmm_20260517",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_hmm_20260517/regime_pred_hmm_moe_2024.joblib",
+  "train_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+  "predict_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2025.csv",
+  "clean_2024": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2024_clean_regime_bgmm_v5.csv",
+  "clean_2025": "/home/llewyn/crypto-scalping/data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_clean_regime_bgmm_v5.csv",
+  "horizon_bars": 36,
+  "classes": [
+    "bull",
+    "bear",
+    "chop",
+    "whipsaw",
+    "normal"
+  ],
+  "states": 8,
+  "pca_components": 12,
+  "validation_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004228528078089256,
+      "abs_ret_55": 0.005544679992295798,
+      "range_35": 0.010733023633379468,
+      "range_55": 0.014330216850626257,
+      "range_65": 0.016987628602388782,
+      "eff_25": 0.20403416991709633,
+      "eff_45": 0.3603938350747628,
+      "eff_50": 0.3990494494688897,
+      "adverse_45": 0.004819009703531501
+    },
+    "label_counts": {
+      "bull": 22602,
+      "bear": 19902,
+      "chop": 36902,
+      "whipsaw": 5128,
+      "normal": 20809
+    },
+    "label_share": {
+      "bull": 0.21455625907748974,
+      "bear": 0.18892569985665872,
+      "chop": 0.35030329495077983,
+      "whipsaw": 0.048679076920156064,
+      "normal": 0.19753566919491566
+    },
+    "threshold_policy": "thresholds_fit_on_pre_validation_2024_rows_only",
+    "threshold_fit_rows": 78884
+  },
+  "final_label_meta": {
+    "horizon": 36,
+    "thresholds": {
+      "abs_ret_45": 0.004372901806545071,
+      "abs_ret_55": 0.005743159064446447,
+      "range_35": 0.0110209271474907,
+      "range_55": 0.014792764942309968,
+      "range_65": 0.017391002409697955,
+      "eff_25": 0.20527470543951218,
+      "eff_45": 0.36245988118798184,
+      "eff_50": 0.40098534730800445,
+      "adverse_45": 0.004941124880986553
+    },
+    "label_counts": {
+      "bull": 22066,
+      "bear": 19506,
+      "chop": 38783,
+      "whipsaw": 4894,
+      "normal": 20094
+    },
+    "label_share": {
+      "bull": 0.2094681184321692,
+      "bear": 0.18516655117093683,
+      "chop": 0.3681592512079588,
+      "whipsaw": 0.04645776178768404,
+      "normal": 0.19074831740125114
+    },
+    "threshold_policy": "thresholds_fit_on_all_2024_rows_for_final_2024_only_model"
+  },
+  "feature_count": 84,
+  "feature_cols": [
+    "amihud_illiquidity_z",
+    "bb_width",
+    "bb_width_z",
+    "big_trade_ratio",
+    "breakout_strength",
+    "btc_corr_60",
+    "chop_index",
+    "clean_regime_2024_unsup_v4_cluster_confidence",
+    "clean_regime_2024_unsup_v4_cluster_entropy",
+    "clean_regime_2024_unsup_v4_cluster_prob_0",
+    "clean_regime_2024_unsup_v4_cluster_prob_1",
+    "clean_regime_2024_unsup_v4_cluster_prob_2",
+    "clean_regime_2024_unsup_v4_cluster_prob_3",
+    "clean_regime_2024_unsup_v4_cluster_prob_4",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_trend_bias",
+    "close_btc",
+    "conf_mdjd",
+    "count_long_short_ratio",
+    "cvp_cluster_position",
+    "cvp_poc_dist",
+    "cvp_volume_imbalance",
+    "dual_momentum",
+    "eth_btc_ratio_change",
+    "funding_price_divergence",
+    "funding_roc_288",
+    "fvg_dist",
+    "garman_klass_vol",
+    "hma_slope",
+    "hour_cos",
+    "hour_sin",
+    "is_hour_open",
+    "kalman_velocity",
+    "kel",
+    "last_funding_rate",
+    "log_return",
+    "long_squeeze_risk",
+    "macd_hist",
+    "mean_reversion_z",
+    "minute_cos",
+    "minute_sin",
+    "mta_funding",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "net_taker_ratio",
+    "ofi_acceleration",
+    "ofti",
+    "oi_change_rate",
+    "parkinson_vol",
+    "pred_mdjd",
+    "quote_volume",
+    "quote_volume_btc",
+    "rogers_satchell_vol",
+    "router_breakout_flow",
+    "router_flow_alignment",
+    "router_trend_abs",
+    "router_trend_agreement",
+    "router_trend_flow",
+    "router_vol_liq_stress",
+    "router_whipsaw_pressure",
+    "rsi",
+    "session_europe",
+    "session_us",
+    "smart_money_flow",
+    "squeeze_power",
+    "sum_open_interest_value",
+    "sum_toptrader_long_short_ratio",
+    "svps",
+    "taker_acceleration",
+    "taker_buy_base",
+    "taker_buy_quote",
+    "trade_intensity",
+    "trades",
+    "turtle_signal",
+    "volatility_z",
+    "volume",
+    "volume_btc",
+    "volume_profile_signal",
+    "whale_retail_ratio",
+    "wick_ratio"
+  ],
+  "selected_clean_features_used": [
+    "clean_regime_2024_unsup_v4_cluster_confidence",
+    "clean_regime_2024_unsup_v4_cluster_entropy",
+    "clean_regime_2024_unsup_v4_cluster_prob_0",
+    "clean_regime_2024_unsup_v4_cluster_prob_1",
+    "clean_regime_2024_unsup_v4_cluster_prob_2",
+    "clean_regime_2024_unsup_v4_cluster_prob_3",
+    "clean_regime_2024_unsup_v4_cluster_prob_4",
+    "clean_regime_2024_unsup_v4_factor_crowding",
+    "clean_regime_2024_unsup_v4_factor_flow",
+    "clean_regime_2024_unsup_v4_factor_liquidity",
+    "clean_regime_2024_unsup_v4_factor_trend",
+    "clean_regime_2024_unsup_v4_factor_vol",
+    "clean_regime_2024_unsup_v4_trend_bias"
+  ],
+  "router_features_used": [
+    "router_breakout_flow",
+    "router_flow_alignment",
+    "router_trend_abs",
+    "router_trend_agreement",
+    "router_trend_flow",
+    "router_vol_liq_stress",
+    "router_whipsaw_pressure"
+  ],
+  "validation": {
+    "rows": 26459,
+    "accuracy": 0.2483842926792396,
+    "balanced_accuracy": 0.3004595128603971,
+    "log_loss": 1.576115654231723,
+    "true_counts": {
+      "bull": 6109,
+      "bear": 5304,
+      "chop": 7895,
+      "whipsaw": 1436,
+      "normal": 5715
+    },
+    "pred_counts": {
+      "bull": 0,
+      "bear": 126,
+      "chop": 11328,
+      "whipsaw": 13686,
+      "normal": 1319
+    },
+    "confusion_matrix": [
+      [
+        0,
+        25,
+        2210,
+        3551,
+        323
+      ],
+      [
+        0,
+        30,
+        2025,
+        2960,
+        289
+      ],
+      [
+        0,
+        41,
+        5137,
+        2313,
+        404
+      ],
+      [
+        0,
+        4,
+        232,
+        1151,
+        49
+      ],
+      [
+        0,
+        26,
+        1724,
+        3711,
+        254
+      ]
+    ]
+  },
+  "state_class_matrix_validation": [
+    [
+      0.19519123190251975,
+      0.2021888235394512,
+      0.26768123277535805,
+      0.15372274293186283,
+      0.18121596885080815
+    ],
+    [
+      0.19292552984502567,
+      0.188458586413834,
+      0.13354369418308737,
+      0.27182855275458945,
+      0.21324363680346334
+    ],
+    [
+      0.2091560809345473,
+      0.208417813935097,
+      0.2797231062223612,
+      0.12451322146777981,
+      0.1781897774402147
+    ],
+    [
+      0.19885094039948817,
+      0.19926563320011098,
+      0.19992997158268042,
+      0.20280302453688265,
+      0.19915043028083768
+    ],
+    [
+      0.19668579777276504,
+      0.19316379472143586,
+      0.12740011404165955,
+      0.26602741326917656,
+      0.216722880194963
+    ],
+    [
+      0.2019012818765777,
+      0.2043092852936387,
+      0.16350905092038764,
+      0.21707035087684723,
+      0.21321003103254874
+    ],
+    [
+      0.19715599052452484,
+      0.19978237259587084,
+      0.19381144929871746,
+      0.20450559979923885,
+      0.20474458778164795
+    ],
+    [
+      0.20075739053140368,
+      0.1873516311152023,
+      0.17024105251324434,
+      0.23414844743339905,
+      0.2075014784067508
+    ]
+  ],
+  "state_class_matrix_final": [
+    [
+      0.19920513962660807,
+      0.2019821641152269,
+      0.20633489084493553,
+      0.194069567219861,
+      0.19840823819336856
+    ],
+    [
+      0.19783430871982774,
+      0.20953879574141648,
+      0.29860018303904196,
+      0.12196131207009556,
+      0.17206540042961838
+    ],
+    [
+      0.20813753003232624,
+      0.20404095112672405,
+      0.22517256230223606,
+      0.16562696493692666,
+      0.19702199160178688
+    ],
+    [
+      0.2054096428154605,
+      0.19744737484870375,
+      0.14841678662522884,
+      0.23202893339783795,
+      0.216697262312769
+    ],
+    [
+      0.20009064885575267,
+      0.2060939406404935,
+      0.2225997214517494,
+      0.1757160511671512,
+      0.1954996378848532
+    ],
+    [
+      0.19694078288857955,
+      0.19378245471727149,
+      0.1266209016649409,
+      0.2631029888280026,
+      0.21955287190120545
+    ],
+    [
+      0.19333912229696046,
+      0.18225755464184945,
+      0.1059783747332086,
+      0.29870693496753453,
+      0.21971801336044688
+    ],
+    [
+      0.19974591937515096,
+      0.18927474699758537,
+      0.17321588337389718,
+      0.23319672235318042,
+      0.2045667279001861
+    ]
+  ],
+  "hmm_log_likelihood_validation": [
+    -1381898.09977099,
+    -1021136.6509369729,
+    -418551.85816024675,
+    -298391.37045341084,
+    -268267.9511146512,
+    -257968.420154088,
+    -252370.98150133493,
+    -247689.932680018,
+    -242989.21102850398,
+    -238329.0382113841,
+    -233854.08856093956,
+    -230545.56133381545,
+    -228389.2085506921,
+    -227071.7079879959,
+    -226250.8395920793,
+    -225680.75798177155,
+    -225236.0626912597,
+    -224856.07024050274
+  ],
+  "hmm_log_likelihood_final": [
+    -1812481.1054053658,
+    -1440411.45624523,
+    -639960.3092561185,
+    -464097.24627355335,
+    -422886.97661578463,
+    -405097.5761557594,
+    -392294.514351635,
+    -384579.8946558964,
+    -379278.8712842417,
+    -375586.19229944126,
+    -372667.1735913395,
+    -370339.25478076126,
+    -368580.0633964957,
+    -367294.38156966516,
+    -366338.051954167,
+    -365638.49184216815,
+    -365124.12129441265,
+    -364709.01982196514
+  ],
+  "train_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_hmm_20260517/training_features_2024_regime_pred_hmm_moe.csv",
+  "predict_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime_pred_moe_hmm_20260517/training_features_2025_regime_pred_hmm_moe.csv",
+  "predict_probability_sum_min": 0.9999999999999997,
+  "predict_probability_sum_max": 1.0000000000000002,
+  "predict_counts": {
+    "bull": 3211,
+    "bear": 128,
+    "chop": 46022,
+    "whipsaw": 54457,
+    "normal": 1246
+  },
+  "predict_confidence_mean": 0.23850298009318402,
+  "predict_entropy_mean": 0.9926146514767725,
+  "predict_path_diagnostics": {
+    "bull": {
+      "rows": 3211,
+      "future_ret_mean": -3.0275666773401775e-05,
+      "range_width_mean": 0.015545683212470393,
+      "long_quality_mean": -0.0002509924807545476,
+      "short_quality_mean": 0.0003838946599811912,
+      "trend_efficiency_mean": 0.41548978056518643
+    },
+    "bear": {
+      "rows": 128,
+      "future_ret_mean": -0.004022134682026555,
+      "range_width_mean": 0.021618260027475876,
+      "long_quality_mean": -0.004981015775733274,
+      "short_quality_mean": 0.005349010249186091,
+      "trend_efficiency_mean": 0.41658464753710694
+    },
+    "chop": {
+      "rows": 46022,
+      "future_ret_mean": 1.334982559625954e-05,
+      "range_width_mean": 0.015297699218276468,
+      "long_quality_mean": -0.00011687447700433121,
+      "short_quality_mean": 0.00024720629749710494,
+      "trend_efficiency_mean": 0.4089569146565642
+    },
+    "whipsaw": {
+      "rows": 54457,
+      "future_ret_mean": 8.310082209607154e-05,
+      "range_width_mean": 0.023163938886786854,
+      "long_quality_mean": -0.0010570447630372795,
+      "short_quality_mean": 0.0013946429168832355,
+      "trend_efficiency_mean": 0.41877586924776994
+    },
+    "normal": {
+      "rows": 1246,
+      "future_ret_mean": 0.0005777212589547187,
+      "range_width_mean": 0.017106145867962778,
+      "long_quality_mean": 0.0004773800523747339,
+      "short_quality_mean": -0.00031715935081954975,
+      "trend_efficiency_mean": 0.4168647967929399
+    }
+  },
+  "notes": [
+    "Gaussian HMM with diagonal covariance; hmmlearn is not required.",
+    "HMM hidden-state posteriors are mapped to 5 trading regime probabilities using 2024 future-path labels.",
+    "Sidecar intentionally writes soft regime_pred_* columns only; no hard argmax label columns.",
+    "Artifact/model id contains HMM, but output feature names avoid hmm_ to satisfy model feature audits."
+  ]
+}

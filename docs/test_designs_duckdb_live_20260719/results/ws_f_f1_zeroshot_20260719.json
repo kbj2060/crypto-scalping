@@ -1,0 +1,242 @@
+{
+  "stage": "WS-F-F1",
+  "generated_at": "2026-07-19T02:20:09.134644+09:00",
+  "n_windows_requested": 25,
+  "n_windows_actual": 25,
+  "results_per_window": [
+    {
+      "window_idx": 0,
+      "window_end_history": "2024-01-17 06:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 33.739501953125,
+      "realized_vol_lookback": 0.0068117409018656734,
+      "actual_fwd_abs_ret": 0.007704955829409357
+    },
+    {
+      "window_idx": 1,
+      "window_end_history": "2024-02-10 21:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 44.212646484375,
+      "realized_vol_lookback": 0.00407122215733486,
+      "actual_fwd_abs_ret": 0.0018782643345986462
+    },
+    {
+      "window_idx": 2,
+      "window_end_history": "2024-03-06 12:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 152.291748046875,
+      "realized_vol_lookback": 0.008091079314429532,
+      "actual_fwd_abs_ret": 0.0074665929022245565
+    },
+    {
+      "window_idx": 3,
+      "window_end_history": "2024-03-31 04:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 23.345947265625,
+      "realized_vol_lookback": 0.00868045360230636,
+      "actual_fwd_abs_ret": 0.016855203574796973
+    },
+    {
+      "window_idx": 4,
+      "window_end_history": "2024-04-24 19:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 56.358642578125,
+      "realized_vol_lookback": 0.008685686773638079,
+      "actual_fwd_abs_ret": 0.006952556169087071
+    },
+    {
+      "window_idx": 5,
+      "window_end_history": "2024-05-19 11:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 21.47802734375,
+      "realized_vol_lookback": 0.004994279845654468,
+      "actual_fwd_abs_ret": 0.012990166780531914
+    },
+    {
+      "window_idx": 6,
+      "window_end_history": "2024-06-13 02:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 9.453857421875,
+      "realized_vol_lookback": 0.004347182787167029,
+      "actual_fwd_abs_ret": 0.0014273567694996245
+    },
+    {
+      "window_idx": 7,
+      "window_end_history": "2024-07-07 18:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 29.12939453125,
+      "realized_vol_lookback": 0.005856751137659239,
+      "actual_fwd_abs_ret": 0.01933584977866999
+    },
+    {
+      "window_idx": 8,
+      "window_end_history": "2024-08-01 09:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 62.387939453125,
+      "realized_vol_lookback": 0.005454181021907438,
+      "actual_fwd_abs_ret": 0.011543555264869623
+    },
+    {
+      "window_idx": 9,
+      "window_end_history": "2024-08-26 01:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 20.480224609375,
+      "realized_vol_lookback": 0.006022305678423428,
+      "actual_fwd_abs_ret": 0.002791264612393069
+    },
+    {
+      "window_idx": 10,
+      "window_end_history": "2024-09-19 16:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 34.025634765625,
+      "realized_vol_lookback": 0.0058664848347608906,
+      "actual_fwd_abs_ret": 0.004249820872448383
+    },
+    {
+      "window_idx": 11,
+      "window_end_history": "2024-10-14 08:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 33.531494140625,
+      "realized_vol_lookback": 0.0053528589489795055,
+      "actual_fwd_abs_ret": 0.017329781645464698
+    },
+    {
+      "window_idx": 12,
+      "window_end_history": "2024-11-07 23:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 77.17626953125,
+      "realized_vol_lookback": 0.0061848535579893255,
+      "actual_fwd_abs_ret": 0.0023386175568904754
+    },
+    {
+      "window_idx": 13,
+      "window_end_history": "2024-12-02 14:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 91.206787109375,
+      "realized_vol_lookback": 0.007075266517020374,
+      "actual_fwd_abs_ret": 0.007729834578584714
+    },
+    {
+      "window_idx": 14,
+      "window_end_history": "2024-12-27 06:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 68.728515625,
+      "realized_vol_lookback": 0.008367869782757218,
+      "actual_fwd_abs_ret": 0.006119781529568782
+    },
+    {
+      "window_idx": 15,
+      "window_end_history": "2025-01-20 21:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 38.731201171875,
+      "realized_vol_lookback": 0.008217777102846121,
+      "actual_fwd_abs_ret": 0.008445112948744666
+    },
+    {
+      "window_idx": 16,
+      "window_end_history": "2025-02-14 13:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 59.189453125,
+      "realized_vol_lookback": 0.011084178681305689,
+      "actual_fwd_abs_ret": 0.020123661008601964
+    },
+    {
+      "window_idx": 17,
+      "window_end_history": "2025-03-11 04:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 31.1510009765625,
+      "realized_vol_lookback": 0.011894847738323645,
+      "actual_fwd_abs_ret": 0.025454709014894748
+    },
+    {
+      "window_idx": 18,
+      "window_end_history": "2025-04-04 20:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 23.2510986328125,
+      "realized_vol_lookback": 0.006377815946269179,
+      "actual_fwd_abs_ret": 0.00036297641051891665
+    },
+    {
+      "window_idx": 19,
+      "window_end_history": "2025-04-29 11:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 35.2086181640625,
+      "realized_vol_lookback": 0.006789097031624892,
+      "actual_fwd_abs_ret": 0.007469458660656913
+    },
+    {
+      "window_idx": 20,
+      "window_end_history": "2025-05-24 03:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 59.542236328125,
+      "realized_vol_lookback": 0.009587196040378743,
+      "actual_fwd_abs_ret": 0.0027111329702711484
+    },
+    {
+      "window_idx": 21,
+      "window_end_history": "2025-06-17 18:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 47.133544921875,
+      "realized_vol_lookback": 0.006866454171267328,
+      "actual_fwd_abs_ret": 0.005307023865047337
+    },
+    {
+      "window_idx": 22,
+      "window_end_history": "2025-07-12 10:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": false,
+      "q10_q90_width": 81.401611328125,
+      "realized_vol_lookback": 0.005886678200092285,
+      "actual_fwd_abs_ret": 0.02032160941289904
+    },
+    {
+      "window_idx": 23,
+      "window_end_history": "2025-08-06 01:00:00",
+      "kronos_dir_correct": true,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 63.524658203125,
+      "realized_vol_lookback": 0.006564970765844365,
+      "actual_fwd_abs_ret": 0.011060822046482678
+    },
+    {
+      "window_idx": 24,
+      "window_end_history": "2025-08-30 17:00:00",
+      "kronos_dir_correct": false,
+      "momentum_dir_correct": true,
+      "q10_q90_width": 60.7724609375,
+      "realized_vol_lookback": 0.00826009197901499,
+      "actual_fwd_abs_ret": 0.0008742332373039821
+    }
+  ],
+  "summary": {
+    "n_valid_windows": 25,
+    "kronos_direction_accuracy": 0.56,
+    "momentum_benchmark_accuracy": 0.6,
+    "coin_flip_baseline": 0.5,
+    "uncertainty_vs_realized_fwd_move_spearman": 0.024615384615384615
+  },
+  "F1_kill_gate_triggered": true,
+  "F1_verdict": "KILL -- direction accuracy at/below momentum benchmark AND uncertainty proxy uncorrelated with realized move -- stop WS-F track per design doc kill gate"
+}

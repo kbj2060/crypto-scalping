@@ -1,0 +1,21 @@
+{
+  "stage": "WS-E",
+  "generated_at": "2026-07-19T02:12:51.378392+09:00",
+  "design_deviation_note": "Pilot capture duration = 360s (~6 min), NOT the 72h soak test specified in the design doc. This validates the mechanism (round-trip integrity, interval discipline) works correctly; it does NOT satisfy the T-E2 coverage/soak acceptance criteria, which require multi-day monitoring.",
+  "T_E2_pilot_capture": {
+    "n_captured": 36,
+    "n_errors": 0,
+    "target_duration_sec": 360,
+    "target_interval_sec": 10,
+    "gap_p50_sec": 10.002714,
+    "gap_p99_sec": 11.55495976,
+    "gap_max_sec": 11.615815,
+    "coverage_ratio_vs_target": 1.0
+  },
+  "T_E1_roundtrip": {
+    "n_rows_checked": 36,
+    "n_mismatches": 0,
+    "mismatches_sample": []
+  },
+  "T_E1_verdict": "PASS"
+}

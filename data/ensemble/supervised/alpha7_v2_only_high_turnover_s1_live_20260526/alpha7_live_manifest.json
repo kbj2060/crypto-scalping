@@ -1,0 +1,55 @@
+{
+  "model_id": "alpha7_sniper_primary_state24_sticky_alpha43_fallback_v2only_highturnover_s1_20260526_live",
+  "display_name": "Alpha7 Sniper Primary v2-only high-turnover s1",
+  "promoted_at": "2026-05-26",
+  "role": "live_trading_bot_primary_model_candidate",
+  "lineage": {
+    "primary": "alpha7_primary_v2_only_high_turnover_s1_20260526",
+    "fallback": "alpha4_3_no_legacy_parent",
+    "tp_sl_action_score": "alpha4_2_tp_sl_action_score_20260517",
+    "current_regime": "clean_regime4_state24_sticky090_v2_20260517",
+    "future_regime": "regime4_pred_tft_h12_nomdjd_all74_20260517"
+  },
+  "selected_candidate": {
+    "name": "t0015_c015_h030_s6",
+    "turnover_bonus": 0.0015,
+    "cash_score": 0.015,
+    "hold_penalty": 0.03,
+    "stride": 6,
+    "val_cost3_pnl": 1.3098374730849294,
+    "val_cost3_mdd": -34.932376256961476,
+    "val_cost3_trades": 173,
+    "oos_cost3_pnl": 88.11905353930902,
+    "oos_cost3_mdd": -27.195472319985704,
+    "oos_cost3_trades": 112,
+    "oos_cost3_wr": 0.14285714285714285,
+    "delta_oos_trades": 30,
+    "delta_oos_pnl": -52.910192339374106
+  },
+  "baseline_reference": {
+    "validation_cost3_trades": 111,
+    "oos_cost3_trades": 82,
+    "oos_cost3_pnl": 141.02924587868313
+  },
+  "validation_2025_q4": {
+    "cost3": {
+      "pnl": 1.3098374730849294,
+      "mdd": -34.932376256961476,
+      "trades": 173,
+      "trades_per_day": 1.8805057558029818,
+      "wr": 0.12138728323699421,
+      "avg_notional": 2.105786318391033
+    }
+  },
+  "runtime_native_oos_2026_01_02": {
+    "cost3": {
+      "pnl": 88.11905353930902,
+      "mdd": -27.195472319985704,
+      "trades": 112,
+      "trades_per_day": 1.9090909090909092,
+      "wr": 0.14285714285714285,
+      "avg_notional": 2.150242984659324
+    }
+  },
+  "audit_report": "tmp/causal_regen_20260516/alpha7_v2_only_high_turnover_rebuild_20260526/t0015_c015_h030_s6/summary.json"
+}

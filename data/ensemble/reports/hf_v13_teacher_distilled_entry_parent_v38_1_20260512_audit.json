@@ -1,0 +1,694 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "entry_fixed:cost1_not_survived",
+    "entry_fixed:cost3_not_survived",
+    "conviction_gate:cost1_not_survived",
+    "conviction_gate:cost3_not_survived",
+    "learned_sizing:cost1_not_survived",
+    "learned_sizing:cost3_not_survived",
+    "risk_throttled_sizing:cost1_not_survived",
+    "risk_throttled_sizing:cost3_not_survived",
+    "dynamic_exit:cost1_not_survived",
+    "dynamic_exit:cost3_not_survived"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "best_mode": "conviction_gate",
+  "baseline_margin110_cost1": 139.4071,
+  "baseline_v31_cost1": 277.0679629973942,
+  "metrics": {
+    "entry_fixed": {
+      "selected_runtime": {
+        "name": "v38_entry_fixed_c0.58",
+        "mode": "entry_fixed",
+        "confidence": 0.58,
+        "quality_floor": -99.0,
+        "fixed_notional": 1.0,
+        "notional_scale": 1.0,
+        "max_notional": 1.2,
+        "take_profit": 0.04,
+        "stop_loss": 0.018,
+        "max_hold": 48,
+        "cooldown": 12,
+        "vol_throttle": false,
+        "dynamic_exit": false
+      },
+      "selection": {
+        "runtime": {
+          "name": "v38_entry_fixed_c0.58",
+          "mode": "entry_fixed",
+          "confidence": 0.58,
+          "quality_floor": -99.0,
+          "fixed_notional": 1.0,
+          "notional_scale": 1.0,
+          "max_notional": 1.2,
+          "take_profit": 0.04,
+          "stop_loss": 0.018,
+          "max_hold": 48,
+          "cooldown": 12,
+          "vol_throttle": false,
+          "dynamic_exit": false
+        },
+        "validation_cost1": {
+          "pnl": -32.6267322591667,
+          "mdd": -41.94441768184268,
+          "trades": 169,
+          "wr": 0.31952662721893493,
+          "trades_per_day": 1.8370258539347049,
+          "long_entries": 31,
+          "short_entries": 138,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 128,
+            "stop_loss": 33,
+            "take_profit": 8
+          }
+        },
+        "validation_cost2": {
+          "pnl": -46.380345025420944,
+          "mdd": -52.29328073921158,
+          "trades": 169,
+          "wr": 0.28994082840236685,
+          "trades_per_day": 1.8370258539347049,
+          "long_entries": 31,
+          "short_entries": 138,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 128,
+            "stop_loss": 33,
+            "take_profit": 8
+          }
+        },
+        "validation_cost3": {
+          "pnl": -58.17273835067132,
+          "mdd": -61.36990240912772,
+          "trades": 169,
+          "wr": 0.26627218934911245,
+          "trades_per_day": 1.8370258539347049,
+          "long_entries": 31,
+          "short_entries": 138,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 126,
+            "stop_loss": 35,
+            "take_profit": 8
+          }
+        },
+        "selection_score": -64.46075172749393
+      },
+      "oos": {
+        "cost1": {
+          "pnl": -39.495553358003896,
+          "mdd": -42.21616946454273,
+          "trades": 198,
+          "wr": 0.40404040404040403,
+          "trades_per_day": 3.375,
+          "long_entries": 76,
+          "short_entries": 122,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 153,
+            "stop_loss": 41,
+            "take_profit": 3,
+            "forced_end": 1
+          }
+        },
+        "cost2": {
+          "pnl": -54.04626152319651,
+          "mdd": -54.55336551339659,
+          "trades": 198,
+          "wr": 0.3686868686868687,
+          "trades_per_day": 3.375,
+          "long_entries": 76,
+          "short_entries": 122,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 153,
+            "stop_loss": 41,
+            "take_profit": 3,
+            "forced_end": 1
+          }
+        },
+        "cost3": {
+          "pnl": -65.40980992554813,
+          "mdd": -65.38413667803472,
+          "trades": 199,
+          "wr": 0.34673366834170855,
+          "trades_per_day": 3.3920454545454546,
+          "long_entries": 75,
+          "short_entries": 124,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 152,
+            "stop_loss": 43,
+            "take_profit": 3,
+            "forced_end": 1
+          }
+        }
+      }
+    },
+    "conviction_gate": {
+      "selected_runtime": {
+        "name": "v39_conviction_c0.58_q0.020",
+        "mode": "conviction_gate",
+        "confidence": 0.58,
+        "quality_floor": 0.02,
+        "fixed_notional": 1.0,
+        "notional_scale": 1.0,
+        "max_notional": 1.2,
+        "take_profit": 0.04,
+        "stop_loss": 0.018,
+        "max_hold": 48,
+        "cooldown": 12,
+        "vol_throttle": false,
+        "dynamic_exit": false
+      },
+      "selection": {
+        "runtime": {
+          "name": "v39_conviction_c0.58_q0.020",
+          "mode": "conviction_gate",
+          "confidence": 0.58,
+          "quality_floor": 0.02,
+          "fixed_notional": 1.0,
+          "notional_scale": 1.0,
+          "max_notional": 1.2,
+          "take_profit": 0.04,
+          "stop_loss": 0.018,
+          "max_hold": 48,
+          "cooldown": 12,
+          "vol_throttle": false,
+          "dynamic_exit": false
+        },
+        "validation_cost1": {
+          "pnl": -31.937434137327802,
+          "mdd": -41.3504491065302,
+          "trades": 166,
+          "wr": 0.3192771084337349,
+          "trades_per_day": 1.804415927533497,
+          "long_entries": 30,
+          "short_entries": 136,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 125,
+            "stop_loss": 33,
+            "take_profit": 8
+          }
+        },
+        "validation_cost2": {
+          "pnl": -45.603652181592466,
+          "mdd": -51.602238108110065,
+          "trades": 166,
+          "wr": 0.2891566265060241,
+          "trades_per_day": 1.804415927533497,
+          "long_entries": 30,
+          "short_entries": 136,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 125,
+            "stop_loss": 33,
+            "take_profit": 8
+          }
+        },
+        "validation_cost3": {
+          "pnl": -57.38802787831989,
+          "mdd": -60.645173107418785,
+          "trades": 166,
+          "wr": 0.26506024096385544,
+          "trades_per_day": 1.804415927533497,
+          "long_entries": 30,
+          "short_entries": 136,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 123,
+            "stop_loss": 35,
+            "take_profit": 8
+          }
+        },
+        "selection_score": -63.11461868057174
+      },
+      "oos": {
+        "cost1": {
+          "pnl": -24.171437738055047,
+          "mdd": -25.819123368331077,
+          "trades": 114,
+          "wr": 0.39473684210526316,
+          "trades_per_day": 1.9431818181818183,
+          "long_entries": 16,
+          "short_entries": 98,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 93,
+            "stop_loss": 19,
+            "take_profit": 1,
+            "forced_end": 1
+          }
+        },
+        "cost2": {
+          "pnl": -33.66745472142307,
+          "mdd": -34.21090665205958,
+          "trades": 114,
+          "wr": 0.35964912280701755,
+          "trades_per_day": 1.9431818181818183,
+          "long_entries": 16,
+          "short_entries": 98,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 93,
+            "stop_loss": 19,
+            "take_profit": 1,
+            "forced_end": 1
+          }
+        },
+        "cost3": {
+          "pnl": -43.60119356227076,
+          "mdd": -43.87855523312433,
+          "trades": 115,
+          "wr": 0.30434782608695654,
+          "trades_per_day": 1.9602272727272727,
+          "long_entries": 17,
+          "short_entries": 98,
+          "avg_notional": 1.0,
+          "exits": {
+            "max_hold": 92,
+            "stop_loss": 21,
+            "take_profit": 1,
+            "forced_end": 1
+          }
+        }
+      }
+    },
+    "learned_sizing": {
+      "selected_runtime": {
+        "name": "v40_sizing_c0.46",
+        "mode": "learned_sizing",
+        "confidence": 0.46,
+        "quality_floor": 0.0,
+        "fixed_notional": 1.0,
+        "notional_scale": 0.65,
+        "max_notional": 1.6,
+        "take_profit": 0.04,
+        "stop_loss": 0.018,
+        "max_hold": 48,
+        "cooldown": 12,
+        "vol_throttle": false,
+        "dynamic_exit": false
+      },
+      "selection": {
+        "runtime": {
+          "name": "v40_sizing_c0.46",
+          "mode": "learned_sizing",
+          "confidence": 0.46,
+          "quality_floor": 0.0,
+          "fixed_notional": 1.0,
+          "notional_scale": 0.65,
+          "max_notional": 1.6,
+          "take_profit": 0.04,
+          "stop_loss": 0.018,
+          "max_hold": 48,
+          "cooldown": 12,
+          "vol_throttle": false,
+          "dynamic_exit": false
+        },
+        "validation_cost1": {
+          "pnl": -41.868006204350706,
+          "mdd": -48.30907087115003,
+          "trades": 188,
+          "wr": 0.35106382978723405,
+          "trades_per_day": 2.043555387809021,
+          "long_entries": 33,
+          "short_entries": 155,
+          "avg_notional": 1.5266613865537637,
+          "exits": {
+            "max_hold": 108,
+            "stop_loss": 61,
+            "take_profit": 19
+          }
+        },
+        "validation_cost2": {
+          "pnl": -62.63438699254002,
+          "mdd": -64.94541280219246,
+          "trades": 189,
+          "wr": 0.30158730158730157,
+          "trades_per_day": 2.05442536327609,
+          "long_entries": 33,
+          "short_entries": 156,
+          "avg_notional": 1.5267146909756018,
+          "exits": {
+            "max_hold": 105,
+            "stop_loss": 65,
+            "take_profit": 19
+          }
+        },
+        "validation_cost3": {
+          "pnl": -75.46068181714499,
+          "mdd": -75.76763810030927,
+          "trades": 190,
+          "wr": 0.2736842105263158,
+          "trades_per_day": 2.065295338743159,
+          "long_entries": 34,
+          "short_entries": 156,
+          "avg_notional": 1.527724050470382,
+          "exits": {
+            "max_hold": 103,
+            "stop_loss": 68,
+            "take_profit": 19
+          }
+        },
+        "selection_score": -84.84822581632898
+      },
+      "oos": {
+        "cost1": {
+          "pnl": -29.793055334531903,
+          "mdd": -33.27808235384532,
+          "trades": 126,
+          "wr": 0.3492063492063492,
+          "trades_per_day": 2.147727272727273,
+          "long_entries": 17,
+          "short_entries": 109,
+          "avg_notional": 1.4307039682539666,
+          "exits": {
+            "max_hold": 79,
+            "stop_loss": 38,
+            "take_profit": 8,
+            "forced_end": 1
+          }
+        },
+        "cost2": {
+          "pnl": -51.011751646325855,
+          "mdd": -51.477755606497354,
+          "trades": 127,
+          "wr": 0.31496062992125984,
+          "trades_per_day": 2.1647727272727275,
+          "long_entries": 18,
+          "short_entries": 109,
+          "avg_notional": 1.4361009842519668,
+          "exits": {
+            "max_hold": 81,
+            "stop_loss": 39,
+            "take_profit": 6,
+            "forced_end": 1
+          }
+        },
+        "cost3": {
+          "pnl": -61.459811733355174,
+          "mdd": -61.74714609305872,
+          "trades": 128,
+          "wr": 0.2734375,
+          "trades_per_day": 2.181818181818182,
+          "long_entries": 18,
+          "short_entries": 110,
+          "avg_notional": 1.4333492187499983,
+          "exits": {
+            "max_hold": 82,
+            "stop_loss": 40,
+            "take_profit": 5,
+            "forced_end": 1
+          }
+        }
+      }
+    },
+    "risk_throttled_sizing": {
+      "selected_runtime": {
+        "name": "v41_risk_sizing_c0.46",
+        "mode": "risk_throttled_sizing",
+        "confidence": 0.46,
+        "quality_floor": 0.0,
+        "fixed_notional": 1.0,
+        "notional_scale": 0.75,
+        "max_notional": 1.8,
+        "take_profit": 0.04,
+        "stop_loss": 0.018,
+        "max_hold": 48,
+        "cooldown": 12,
+        "vol_throttle": true,
+        "dynamic_exit": false
+      },
+      "selection": {
+        "runtime": {
+          "name": "v41_risk_sizing_c0.46",
+          "mode": "risk_throttled_sizing",
+          "confidence": 0.46,
+          "quality_floor": 0.0,
+          "fixed_notional": 1.0,
+          "notional_scale": 0.75,
+          "max_notional": 1.8,
+          "take_profit": 0.04,
+          "stop_loss": 0.018,
+          "max_hold": 48,
+          "cooldown": 12,
+          "vol_throttle": true,
+          "dynamic_exit": false
+        },
+        "validation_cost1": {
+          "pnl": -41.531208589249935,
+          "mdd": -49.0653693959337,
+          "trades": 189,
+          "wr": 0.3544973544973545,
+          "trades_per_day": 2.05442536327609,
+          "long_entries": 34,
+          "short_entries": 155,
+          "avg_notional": 1.7229057232733311,
+          "exits": {
+            "max_hold": 100,
+            "stop_loss": 65,
+            "take_profit": 24
+          }
+        },
+        "validation_cost2": {
+          "pnl": -63.97548689288091,
+          "mdd": -66.71299024424447,
+          "trades": 193,
+          "wr": 0.3005181347150259,
+          "trades_per_day": 2.097905265144367,
+          "long_entries": 34,
+          "short_entries": 159,
+          "avg_notional": 1.720231416435155,
+          "exits": {
+            "max_hold": 97,
+            "stop_loss": 72,
+            "take_profit": 24
+          }
+        },
+        "validation_cost3": {
+          "pnl": -78.40152518684995,
+          "mdd": -78.45564615253032,
+          "trades": 194,
+          "wr": 0.26804123711340205,
+          "trades_per_day": 2.108775240611436,
+          "long_entries": 34,
+          "short_entries": 160,
+          "avg_notional": 1.7205751264414328,
+          "exits": {
+            "max_hold": 95,
+            "stop_loss": 76,
+            "take_profit": 23
+          }
+        },
+        "selection_score": -85.76227400795591
+      },
+      "oos": {
+        "cost1": {
+          "pnl": -37.155942476105686,
+          "mdd": -39.27271605926471,
+          "trades": 128,
+          "wr": 0.34375,
+          "trades_per_day": 2.181818181818182,
+          "long_entries": 17,
+          "short_entries": 111,
+          "avg_notional": 1.6147331542968781,
+          "exits": {
+            "max_hold": 77,
+            "stop_loss": 42,
+            "take_profit": 8,
+            "forced_end": 1
+          }
+        },
+        "cost2": {
+          "pnl": -50.12363815033163,
+          "mdd": -51.09749310267199,
+          "trades": 127,
+          "wr": 0.31496062992125984,
+          "trades_per_day": 2.1647727272727275,
+          "long_entries": 16,
+          "short_entries": 111,
+          "avg_notional": 1.6089485728346486,
+          "exits": {
+            "max_hold": 78,
+            "stop_loss": 40,
+            "take_profit": 8,
+            "forced_end": 1
+          }
+        },
+        "cost3": {
+          "pnl": -62.50660623302884,
+          "mdd": -62.91173764969319,
+          "trades": 127,
+          "wr": 0.25196850393700787,
+          "trades_per_day": 2.1647727272727275,
+          "long_entries": 16,
+          "short_entries": 111,
+          "avg_notional": 1.6089485728346486,
+          "exits": {
+            "max_hold": 77,
+            "stop_loss": 41,
+            "take_profit": 8,
+            "forced_end": 1
+          }
+        }
+      }
+    },
+    "dynamic_exit": {
+      "selected_runtime": {
+        "name": "v42_dynamic_exit_c0.46",
+        "mode": "dynamic_exit",
+        "confidence": 0.46,
+        "quality_floor": 0.0,
+        "fixed_notional": 1.0,
+        "notional_scale": 0.75,
+        "max_notional": 1.8,
+        "take_profit": 0.04,
+        "stop_loss": 0.018,
+        "max_hold": 48,
+        "cooldown": 12,
+        "vol_throttle": true,
+        "dynamic_exit": true
+      },
+      "selection": {
+        "runtime": {
+          "name": "v42_dynamic_exit_c0.46",
+          "mode": "dynamic_exit",
+          "confidence": 0.46,
+          "quality_floor": 0.0,
+          "fixed_notional": 1.0,
+          "notional_scale": 0.75,
+          "max_notional": 1.8,
+          "take_profit": 0.04,
+          "stop_loss": 0.018,
+          "max_hold": 48,
+          "cooldown": 12,
+          "vol_throttle": true,
+          "dynamic_exit": true
+        },
+        "validation_cost1": {
+          "pnl": -51.60129786093761,
+          "mdd": -58.7482302667438,
+          "trades": 242,
+          "wr": 0.1652892561983471,
+          "trades_per_day": 2.6305340630307605,
+          "long_entries": 39,
+          "short_entries": 203,
+          "avg_notional": 1.7200835488290598,
+          "exits": {
+            "stop_loss": 193,
+            "max_hold": 38,
+            "take_profit": 11
+          }
+        },
+        "validation_cost2": {
+          "pnl": -72.81416581036328,
+          "mdd": -73.28742407804079,
+          "trades": 237,
+          "wr": 0.16455696202531644,
+          "trades_per_day": 2.576184185695414,
+          "long_entries": 40,
+          "short_entries": 197,
+          "avg_notional": 1.7313730933896503,
+          "exits": {
+            "stop_loss": 188,
+            "max_hold": 40,
+            "take_profit": 9
+          }
+        },
+        "validation_cost3": {
+          "pnl": -84.26374224696418,
+          "mdd": -84.30317380281048,
+          "trades": 242,
+          "wr": 0.13636363636363635,
+          "trades_per_day": 2.6305340630307605,
+          "long_entries": 39,
+          "short_entries": 203,
+          "avg_notional": 1.7324891670471712,
+          "exits": {
+            "stop_loss": 190,
+            "max_hold": 44,
+            "take_profit": 8
+          }
+        },
+        "selection_score": -104.1625208516441
+      },
+      "oos": {
+        "cost1": {
+          "pnl": -28.17349647534736,
+          "mdd": -31.5352230639482,
+          "trades": 171,
+          "wr": 0.23391812865497075,
+          "trades_per_day": 2.9147727272727275,
+          "long_entries": 22,
+          "short_entries": 149,
+          "avg_notional": 1.6145882675438648,
+          "exits": {
+            "stop_loss": 121,
+            "max_hold": 49,
+            "take_profit": 1
+          }
+        },
+        "cost2": {
+          "pnl": -56.63280467085927,
+          "mdd": -57.87947497656107,
+          "trades": 175,
+          "wr": 0.18857142857142858,
+          "trades_per_day": 2.9829545454545454,
+          "long_entries": 22,
+          "short_entries": 153,
+          "avg_notional": 1.6126655357142912,
+          "exits": {
+            "max_hold": 49,
+            "stop_loss": 125,
+            "take_profit": 1
+          }
+        },
+        "cost3": {
+          "pnl": -71.39022842904666,
+          "mdd": -72.51173469187479,
+          "trades": 176,
+          "wr": 0.16477272727272727,
+          "trades_per_day": 3.0,
+          "long_entries": 23,
+          "short_entries": 153,
+          "avg_notional": 1.6099905894887017,
+          "exits": {
+            "max_hold": 45,
+            "stop_loss": 130,
+            "take_profit": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "model": "GRU (window=30min, hidden=96, layers=1)",
+  "fixed_threshold": 0.55,
+  "best_internal_val_loss": 0.9499571372844555,
+  "val": {
+    "n_signals": 4959,
+    "n_filled": 2991,
+    "fill_rate": 0.603145795523291,
+    "hit_rate": 0.7455700434637245,
+    "avg_pnl_pct": 0.000280719318619718,
+    "total_pnl_pct": 0.8396314819915764,
+    "trades_per_day": 96.48603239319877
+  },
+  "oos": {
+    "n_signals": 13253,
+    "n_filled": 9487,
+    "fill_rate": 0.7158379234890213,
+    "hit_rate": 0.7339517234109835,
+    "avg_pnl_pct": 0.0003796128569288364,
+    "total_pnl_pct": 3.601387173683871,
+    "trades_per_day": 225.88468724681292
+  },
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "model": "HistGradientBoostingClassifier (single-bar)",
+    "oos_total_pnl_pct": 3.7390646402123644,
+    "oos_trades_per_day": 192.26190476190476
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Prior context: this project's only other sequence model (Sigma1 GRU) failed to beat its baseline. Same base triple-barrier label, val/OOS split, and maker-fill evaluation as the HGB baseline -- only the model looks at a 30min window instead of a single bar."
+}

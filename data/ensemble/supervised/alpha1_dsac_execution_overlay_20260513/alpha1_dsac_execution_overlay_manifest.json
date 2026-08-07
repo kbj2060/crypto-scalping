@@ -1,0 +1,27 @@
+{
+  "model_id": "alpha1_dsac_execution_overlay_20260513",
+  "selected_config": {
+    "name": "dsac_strict_taker_maker_10bp",
+    "taker_agree_th": 0.34,
+    "maker_agree_th": 0.12,
+    "maker_offset": 0.001,
+    "maker_fee_mult": 0.45,
+    "penetration": 0.0001,
+    "opposite_skip_th": 0.08,
+    "fallback_to_taker": false
+  },
+  "checkpoint": {
+    "checkpoint": "/home/llewyn/crypto-scalping/data/ensemble/ckpt/best_dsac_agents.pth",
+    "state_dim": 36,
+    "keys": [
+      "actor",
+      "best_pnl",
+      "best_score",
+      "critic",
+      "epoch",
+      "meta",
+      "state_dim"
+    ]
+  },
+  "note": "Existing project DSAC actor is used as execution agreement/skip router for alpha1 deep_alpha entries only."
+}

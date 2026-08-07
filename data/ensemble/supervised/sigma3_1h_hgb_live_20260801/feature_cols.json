@@ -1,0 +1,60 @@
+{
+  "feature_cols": [
+    "logret_1",
+    "logret_2",
+    "logret_3",
+    "logret_6",
+    "logret_12",
+    "logret_24",
+    "rvol_6",
+    "rvol_12",
+    "rvol_24",
+    "rvol_48",
+    "atr_pct",
+    "rsi_14",
+    "macd_hist",
+    "bb_width",
+    "bb_pos",
+    "btc_logret_1",
+    "btc_logret_6",
+    "btc_logret_24",
+    "eth_btc_spread_6",
+    "funding",
+    "funding_z_48",
+    "funding_roc_6",
+    "oi_change_6",
+    "oi_z_48",
+    "toptrader_z_48",
+    "vol_z_48",
+    "taker_imb",
+    "body_ratio",
+    "upper_wick",
+    "lower_wick",
+    "skew_24",
+    "kurt_24",
+    "dist_sma50",
+    "hurst_proxy",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "classes": [
+    0,
+    1,
+    2
+  ],
+  "seed": 270705,
+  "default_thr": 0.45,
+  "train_rows": 13127,
+  "train_range": [
+    "2024-01-01 00:00:00",
+    "2025-06-30 23:00:00"
+  ],
+  "held_out_range": [
+    "2025-06-30 23:59:59",
+    "2026-07-20 00:00:00"
+  ],
+  "held_out_rows": 9217,
+  "source": "train_sigma3_1h_hgb_20260705.py hyperparameters AND train_mask holdout, persisted for live inference -- identical training set to the model behind the VAL_2025Q4/OOS_2026H1 Sigma6/regime_tiebreak backtest numbers"
+}

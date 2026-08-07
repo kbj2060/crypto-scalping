@@ -1,0 +1,97 @@
+{
+  "audit_id": "omega4_6_2_cap220_short_boost125_time_stop120h_20260630_runtime_replay_holdout_audit_20260630",
+  "created_at_utc": "2026-06-30T15:02:12.813748+00:00",
+  "model_id": "omega4_6_2_cap220_short_boost125_time_stop120h_20260630",
+  "variant": "short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h",
+  "runtime_native_replay_check": {
+    "pass": false,
+    "checks": {
+      "policy_requires_final_governor_runtime_decide": true,
+      "runtime_contract_flags_native_replay_available": false,
+      "manifest_flags_native_replay_available": false,
+      "source_redteam_flags_native_replay_available": false,
+      "model_dir_native_replay_outputs_found": false,
+      "exact_model_runtime_or_backtest_wiring_found": false,
+      "source_evaluator_declares_ledger_level_diagnostic": true
+    },
+    "model_files_checked": [
+      "data/ensemble/supervised/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/candidate_manifest.json",
+      "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/promotion_manifest.json",
+      "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/runtime_contract.json"
+    ],
+    "native_replay_files_found": [],
+    "exact_model_runtime_or_backtest_wiring_hits": [],
+    "policy_reference": "docs/model_contracts/runtime_native_training_backtest_policy_20260515.md",
+    "source_evaluator_reference": "scripts/eval_omega4_6_borrowed_version_upgrades_20260630.py",
+    "conclusion": "FAIL: no FinalGovernorRuntime/trading_bot native replay artifact or exact runtime wiring exists for Omega4.6.2 cap220."
+  },
+  "oos_selection_holdout_check": {
+    "pass": false,
+    "checks": {
+      "source_report_selection_scope": "validation_only; OOS readout only",
+      "script_validation_only_winner": "short_rsi_skip_ge_56p656189__none__time_stop_120h",
+      "omega4_6_2_variant": "short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h",
+      "omega4_6_2_is_script_validation_only_winner": false,
+      "clean_oos_selection_claim_allowed_in_source_audit": false,
+      "fresh_holdout_or_walkforward_outputs_found_for_exact_model": false
+    },
+    "comparison": {
+      "omega4_6_2_cap220": {
+        "validation_monthly_min_pnl": 36.99226610344768,
+        "validation_pnl": 211.14258330879252,
+        "validation_mdd": -13.718151633931718,
+        "validation_trades": 23,
+        "validation_max_hold_hours": 120.0,
+        "oos_pnl": 79.31781513301281,
+        "oos_mdd": -10.134105321862275,
+        "oos_trades": 13,
+        "oos_max_hold_hours": 120.0,
+        "selection_score": 268.6709824639641
+      },
+      "script_validation_only_winner": {
+        "validation_monthly_min_pnl": 38.24051386640672,
+        "validation_pnl": 215.18877957381335,
+        "validation_mdd": -14.920879147314025,
+        "validation_trades": 23,
+        "validation_max_hold_hours": 120.0,
+        "oos_pnl": 67.38310739781828,
+        "oos_mdd": -10.064999615771807,
+        "oos_trades": 13,
+        "oos_max_hold_hours": 120.0,
+        "selection_score": 274.58955037342344
+      },
+      "baseline": {
+        "validation_monthly_min_pnl": 20.18259948222223,
+        "validation_pnl": 117.16674838792906,
+        "validation_mdd": -17.431511291376623,
+        "validation_trades": 29,
+        "validation_max_hold_hours": 222.0,
+        "oos_pnl": 67.8462084780387,
+        "oos_mdd": -13.275817100563392,
+        "oos_trades": 13,
+        "oos_max_hold_hours": 218.5,
+        "selection_score": 147.44064761126242
+      },
+      "cap220_minus_script_winner": {
+        "validation_monthly_min_pnl": -1.2482477629590392,
+        "validation_pnl": -4.046196265020825,
+        "selection_score": -5.918567909459341,
+        "oos_pnl": 11.934707735194536,
+        "oos_mdd": -0.06910570609046829
+      },
+      "cap220_minus_baseline": {
+        "validation_pnl": 93.97583492086346,
+        "oos_pnl": 11.47160665497411
+      }
+    },
+    "fresh_holdout_or_walkforward_required": true,
+    "fresh_holdout_or_walkforward_outputs_found": [],
+    "conclusion": "FAIL: Omega4.6.2 cap220 is not the source script validation-only winner; choosing it relies on OOS readout advantage, and no exact fresh holdout/walk-forward artifact was found."
+  },
+  "overall": {
+    "runtime_native_replay_available": false,
+    "clean_oos_promotion_claim_allowed": false,
+    "fresh_holdout_or_walkforward_required": true,
+    "status": "BLOCKED_FOR_FULL_PROMOTION_UNTIL_RUNTIME_NATIVE_REPLAY_AND_FRESH_HOLDOUT_OR_WALKFORWARD"
+  }
+}

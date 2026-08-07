@@ -1,0 +1,25 @@
+{
+  "model_id": "hf_v13_v49_dual_speed_exit_v58_20260513",
+  "selected_config": {
+    "name": "v58_dual_8",
+    "base_frac": 0.55,
+    "runner_trail_gap": 0.024,
+    "runner_lock_floor": 0.004,
+    "runner_max_hold": 72,
+    "deep_mult": 1.0
+  },
+  "overlay": {
+    "name": "v33_rl_p055_n1",
+    "edge_th": 0.01,
+    "margin_th": 0.004,
+    "notional": 1.0,
+    "cooldown": 12,
+    "close_p_th": 0.55,
+    "min_hold": 1,
+    "base_tp": 0.045,
+    "base_sl": 0.022,
+    "base_hold": 48
+  },
+  "v49_policy": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_v31_rl_surrounding_v49_v50_v51_20260512/v49_exit_rl_raw_all.pkl",
+  "raw_state_feature_count": 164
+}

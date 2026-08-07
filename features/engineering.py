@@ -20,7 +20,8 @@ ULTIMATE_FEATURE_COLS = [
     'rogers_satchell_vol', 'parkinson_vol', 'amihud_illiquidity_z', 
     'btc_corr_60', 'eth_btc_ratio_change', 'fvg_dist', 'chop_index',
     'hour_sin', 'hour_cos', 'minute_sin', 'minute_cos',
-    'session_europe', 'session_us',
+    'session_europe', 'session_us', 'session_japan',
+    'session_europe_open', 'session_us_open', 'session_japan_open',
     'is_hour_open',
     'turtle_signal', 'dual_momentum', 'mean_reversion_z',
     'breakout_strength', 'volume_profile_signal', 'fibonacci_level',
@@ -44,6 +45,29 @@ ULTIMATE_FEATURE_COLS = [
     'sig_volume_confirm', 'sig_liquidity_trap', 'sig_trend_health',
     'regime_persistence', 'cross_scale_curvature', 'liquidity_vacuum',
     'crowding_pressure', 'execution_quality',
+    # Directional alpha extensions.
+    'cvd_12', 'cvd_48', 'cvd_288', 'cvd_slope_12', 'cvd_slope_48',
+    'price_cvd_divergence', 'cvd_breakout_z',
+    'btc_ret_1', 'btc_ret_3', 'btc_ret_6', 'btc_ret_12',
+    'btc_ret_z_48', 'eth_btc_ret_spread_12', 'eth_btc_ret_spread_48',
+    'eth_btc_beta_residual_z', 'btc_lead_eth_follow_gap_3',
+    'btc_breakout_eth_lag_dir', 'btc_volume_impulse_z',
+    'btc_eth_volume_rank_spread', 'btc_impulse_x_eth_beta',
+    'bb_width_pct_rank_288', 'atr_pct_rank_288', 'compression_score',
+    'compression_release_up', 'compression_release_down',
+    'range_contraction_breakout_dir',
+    'vwap_dist_24', 'vwap_dist_96', 'vwap_dist_288',
+    'anchored_vwap_session_dist', 'vwap_reclaim_flag', 'vwap_reject_flag',
+    'distance_to_day_high_low_pct',
+    'funding_oi_divergence', 'funding_flip_signal',
+    'oi_up_price_down', 'oi_up_price_up',
+    'crowded_long_unwind_risk', 'crowded_short_squeeze_risk',
+    'upper_wick_z', 'lower_wick_z',
+    'sweep_prev_high_reclaim', 'sweep_prev_low_reclaim',
+    'failed_breakout_up', 'failed_breakout_down',
+    'cvd_slope_48_x_trend_prob',
+    'funding_oi_divergence_x_instability_prob',
+    'vwap_reclaim_x_chop_prob',
 ]
 
 EXCLUDE_FEATURE_COLS: list = [
@@ -66,10 +90,15 @@ class FeatureEngineer:
         *,
         keep_only_active: bool = True,
         include_entry_price: bool = False,
+        adaptive_squeeze: bool = False,
     ):
         self.candle_minutes = candle_minutes
         self.keep_only_active = bool(keep_only_active)
         self.include_entry_price = bool(include_entry_price)
+        # See FundingRateMomentum -- default False reproduces ETH's exact existing feature
+        # values (fixed 0.0002 funding-rate divisor). Opt in per-symbol for an asset whose own
+        # funding-rate scale differs meaningfully from ETH's (found for SOL, 2026-07-20).
+        self.adaptive_squeeze = bool(adaptive_squeeze)
         self.windows = {
             'short': 5,
             'medium': 20,
@@ -111,7 +140,7 @@ class FeatureEngineer:
         breakout_strength = pd.to_numeric(df["breakout_strength"], errors="coerce")
         df["regime_break"] = (breakout_strength.abs() >= 0.6).astype(float)
         
-        funding_features = FundingRateMomentum(df)
+        funding_features = FundingRateMomentum(df, adaptive_squeeze=self.adaptive_squeeze)
         df = funding_features.add_all_features()
         
         hurst_features = HurstExponentFeatures(df)
@@ -128,6 +157,7 @@ class FeatureEngineer:
         _funding = pd.to_numeric(df["last_funding_rate"], errors="coerce")
         df["funding_abs"] = _funding.abs()
         df["funding_pressure"] = _funding.rolling(window=288, min_periods=1).sum()
+        df = self._create_directional_alpha_features(df)
         # ── 엘리트 퀀트 엔진 (합성 알파 + 변동성 모델 + 신규 Elite 시그널) ──
         from features.elite import (
             SyntheticAlphaEngine, VolatilityModelEngine, NewEliteSignalEngine,
@@ -452,19 +482,41 @@ class FeatureEngineer:
         ts_utc = ts.dt.tz_localize('UTC') if ts.dt.tz is None else ts.dt.tz_convert('UTC')
         start_date = ts_utc.min().date()
         end_date = ts_utc.max().date()
-        
+
+        OPEN_WINDOW_MIN = 30  # "just opened" dummy window, first N minutes after each exchange's open
+
+        def _open_dummy(schedule: pd.DataFrame) -> pd.Series:
+            open_by_date = {o.date(): o for o in schedule['market_open']}
+            open_ts = pd.to_datetime(ts_utc.dt.date.map(open_by_date), utc=True)
+            delta_min = (ts_utc - open_ts).dt.total_seconds() / 60.0
+            return ((delta_min >= 0) & (delta_min < OPEN_WINDOW_MIN)).astype(np.float32)
+
         try:
             # 유럽 세션 (LSE)
             lse = mcal.get_calendar('LSE')
-            df['session_europe'] = ts_utc.isin(mcal.date_range(lse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
-            
+            lse_schedule = lse.schedule(start_date=start_date, end_date=end_date)
+            df['session_europe'] = ts_utc.isin(mcal.date_range(lse_schedule, frequency='1min')).astype(np.float32)
+            df['session_europe_open'] = _open_dummy(lse_schedule)
+
             # 미국 세션 (NYSE)
             nyse = mcal.get_calendar('NYSE')
-            df['session_us'] = ts_utc.isin(mcal.date_range(nyse.schedule(start_date=start_date, end_date=end_date), frequency='1min')).astype(np.float32)
+            nyse_schedule = nyse.schedule(start_date=start_date, end_date=end_date)
+            df['session_us'] = ts_utc.isin(mcal.date_range(nyse_schedule, frequency='1min')).astype(np.float32)
+            df['session_us_open'] = _open_dummy(nyse_schedule)
+
+            # 일본 세션 (JPX)
+            jpx = mcal.get_calendar('JPX')
+            jpx_schedule = jpx.schedule(start_date=start_date, end_date=end_date)
+            df['session_japan'] = ts_utc.isin(mcal.date_range(jpx_schedule, frequency='1min')).astype(np.float32)
+            df['session_japan_open'] = _open_dummy(jpx_schedule)
         except Exception as e:
             logger.warning(f"Market calendars 갱신 실패. 정적 로직으로 대체 ({e})")
             df['session_europe'] = ((hour >= 8) & (hour < 16)).astype(np.float32)
             df['session_us'] = ((hour >= 14.5) & (hour < 21)).astype(np.float32)
+            df['session_japan'] = ((hour >= 0) & (hour < 6)).astype(np.float32)
+            df['session_europe_open'] = ((hour == 7) & (minute < OPEN_WINDOW_MIN)).astype(np.float32)
+            df['session_us_open'] = (((hour == 13) & (minute >= 30)) | ((hour == 14) & (minute < OPEN_WINDOW_MIN - 30))).astype(np.float32)
+            df['session_japan_open'] = ((hour == 0) & (minute < OPEN_WINDOW_MIN)).astype(np.float32)
 
         df['is_hour_open'] = (minute < 5).astype(np.float32)
 
@@ -550,6 +602,23 @@ class FeatureEngineer:
             'cvp_volume_imbalance', 'cvp_regime',
             'amihud_illiquidity_z',
             'kalman_velocity', 'realized_skewness',
+            'cvd_12', 'cvd_48', 'cvd_288', 'cvd_slope_12', 'cvd_slope_48',
+            'price_cvd_divergence', 'cvd_breakout_z',
+            'bb_width_pct_rank_288', 'atr_pct_rank_288', 'compression_score',
+            'compression_release_up', 'compression_release_down',
+            'range_contraction_breakout_dir',
+            'vwap_dist_24', 'vwap_dist_96', 'vwap_dist_288',
+            'anchored_vwap_session_dist', 'vwap_reclaim_flag', 'vwap_reject_flag',
+            'distance_to_day_high_low_pct',
+            'funding_oi_divergence', 'funding_flip_signal',
+            'oi_up_price_down', 'oi_up_price_up',
+            'crowded_long_unwind_risk', 'crowded_short_squeeze_risk',
+            'upper_wick_z', 'lower_wick_z',
+            'sweep_prev_high_reclaim', 'sweep_prev_low_reclaim',
+            'failed_breakout_up', 'failed_breakout_down',
+            'cvd_slope_48_x_trend_prob',
+            'funding_oi_divergence_x_instability_prob',
+            'vwap_reclaim_x_chop_prob',
         ]
         for col in diff_features:
             if col in df.columns:
@@ -572,6 +641,169 @@ class FeatureEngineer:
         df['kalman_velocity']  = self._kalman_trend_velocity(close)
         df['realized_skewness'] = self._realized_skewness(close)
         return df
+
+    def _create_directional_alpha_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Direction-oriented causal features from closed bars only."""
+        close = pd.to_numeric(df['close'], errors='coerce')
+        high = pd.to_numeric(df['high'], errors='coerce')
+        low = pd.to_numeric(df['low'], errors='coerce')
+        opn = pd.to_numeric(df['open'], errors='coerce')
+        volume = pd.to_numeric(df['volume'], errors='coerce').replace(0, np.nan)
+        quote_volume = pd.to_numeric(df['quote_volume'], errors='coerce').replace(0, np.nan)
+        taker_buy_quote = pd.to_numeric(df['taker_buy_quote'], errors='coerce').fillna(0.0)
+
+        taker_sell_quote = (quote_volume.fillna(0.0) - taker_buy_quote).clip(lower=0.0)
+        delta_quote = taker_buy_quote - taker_sell_quote
+        for window in (12, 48, 288):
+            denom = quote_volume.rolling(window, min_periods=1).sum().replace(0, np.nan)
+            df[f'cvd_{window}'] = (delta_quote.rolling(window, min_periods=1).sum() / denom).clip(-1.0, 1.0).fillna(0.0)
+
+        df['cvd_slope_12'] = pd.to_numeric(df['cvd_12'], errors='coerce').diff(3).clip(-1.0, 1.0).fillna(0.0)
+        df['cvd_slope_48'] = pd.to_numeric(df['cvd_48'], errors='coerce').diff(6).clip(-1.0, 1.0).fillna(0.0)
+        price_impulse_48 = np.tanh(close.pct_change(48).fillna(0.0) * 20.0)
+        df['price_cvd_divergence'] = (price_impulse_48 - pd.to_numeric(df['cvd_48'], errors='coerce')).clip(-2.0, 2.0) / 2.0
+        df['cvd_breakout_z'] = self._safe_rolling_z(pd.to_numeric(df['cvd_48'], errors='coerce'), 288).clip(-5.0, 5.0) / 5.0
+
+        if 'close_btc' in df.columns:
+            btc_close = pd.to_numeric(df['close_btc'], errors='coerce').replace(0, np.nan)
+            eth_ret_1 = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            btc_ret_1_raw = btc_close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            for window, scale in ((1, 50.0), (3, 35.0), (6, 28.0), (12, 20.0)):
+                btc_ret = btc_close.pct_change(window).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                df[f'btc_ret_{window}'] = np.tanh(btc_ret * scale)
+
+            btc_ret_3_raw = btc_close.pct_change(3).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            eth_ret_3_raw = close.pct_change(3).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            btc_ret_12_raw = btc_close.pct_change(12).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            eth_ret_12_raw = close.pct_change(12).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            btc_ret_48_raw = btc_close.pct_change(48).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            eth_ret_48_raw = close.pct_change(48).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+            df['btc_ret_z_48'] = self._safe_rolling_z(btc_ret_1_raw, 48).clip(-5.0, 5.0) / 5.0
+            df['eth_btc_ret_spread_12'] = np.tanh((eth_ret_12_raw - btc_ret_12_raw) * 20.0)
+            df['eth_btc_ret_spread_48'] = np.tanh((eth_ret_48_raw - btc_ret_48_raw) * 12.0)
+
+            beta_num = eth_ret_1.rolling(288, min_periods=24).cov(btc_ret_1_raw)
+            beta_den = btc_ret_1_raw.rolling(288, min_periods=24).var()
+            eth_beta = (beta_num / (beta_den + 1e-12)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            beta_residual = (eth_ret_1 - eth_beta * btc_ret_1_raw).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            df['eth_btc_beta_residual_z'] = self._safe_rolling_z(beta_residual, 288).clip(-5.0, 5.0) / 5.0
+            df['btc_lead_eth_follow_gap_3'] = (
+                np.tanh(btc_ret_3_raw * 35.0) - np.tanh(eth_ret_3_raw * 35.0)
+            ).clip(-2.0, 2.0) / 2.0
+
+            btc_prev_high_24 = btc_close.rolling(24, min_periods=1).max().shift(1)
+            btc_prev_low_24 = btc_close.rolling(24, min_periods=1).min().shift(1)
+            eth_prev_high_24 = close.rolling(24, min_periods=1).max().shift(1)
+            eth_prev_low_24 = close.rolling(24, min_periods=1).min().shift(1)
+            btc_break_up_eth_lag = (btc_close > btc_prev_high_24) & (close <= eth_prev_high_24)
+            btc_break_down_eth_lag = (btc_close < btc_prev_low_24) & (close >= eth_prev_low_24)
+            df['btc_breakout_eth_lag_dir'] = (btc_break_up_eth_lag.astype(float) - btc_break_down_eth_lag.astype(float)).fillna(0.0)
+
+            if 'quote_volume_btc' in df.columns:
+                btc_quote_volume_src = df['quote_volume_btc']
+            elif 'volume_btc' in df.columns:
+                btc_quote_volume_src = df['volume_btc']
+            else:
+                btc_quote_volume_src = pd.Series(0.0, index=df.index)
+            btc_quote_volume = pd.to_numeric(btc_quote_volume_src, errors='coerce').replace(0, np.nan)
+            btc_vol_z = self._safe_rolling_z(np.log1p(btc_quote_volume), 288).clip(-5.0, 5.0) / 5.0
+            df['btc_volume_impulse_z'] = btc_vol_z
+            btc_vol_rank = self._rolling_pct_rank(btc_quote_volume, 288).fillna(0.5)
+            eth_vol_rank = self._rolling_pct_rank(quote_volume, 288).fillna(0.5)
+            df['btc_eth_volume_rank_spread'] = (btc_vol_rank - eth_vol_rank).clip(-1.0, 1.0).fillna(0.0)
+            df['btc_impulse_x_eth_beta'] = (
+                np.tanh(btc_ret_3_raw * 35.0) * np.tanh(eth_beta.clip(-3.0, 3.0))
+            ).fillna(0.0)
+
+        atr = self._calc_atr(high, low, close, length=14)
+        df['bb_width_pct_rank_288'] = self._rolling_pct_rank(pd.to_numeric(df['bb_width'], errors='coerce'), 288).fillna(0.5)
+        df['atr_pct_rank_288'] = self._rolling_pct_rank((atr / (close.abs() + 1e-8)).replace([np.inf, -np.inf], np.nan), 288).fillna(0.5)
+        compression = 1.0 - np.maximum(df['bb_width_pct_rank_288'], df['atr_pct_rank_288'])
+        df['compression_score'] = compression.clip(0.0, 1.0).fillna(0.0)
+        atr_pct = (atr / (close.abs() + 1e-8)).replace(0, np.nan)
+        impulse = (close.pct_change() / atr_pct).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        prev_compression = pd.to_numeric(df['compression_score'], errors='coerce').shift(1).fillna(0.0)
+        df['compression_release_up'] = (prev_compression * impulse.clip(lower=0.0)).clip(0.0, 3.0) / 3.0
+        df['compression_release_down'] = (prev_compression * (-impulse.clip(upper=0.0))).clip(0.0, 3.0) / 3.0
+        prev_high_24 = high.rolling(24, min_periods=1).max().shift(1)
+        prev_low_24 = low.rolling(24, min_periods=1).min().shift(1)
+        breakout_up = (close > prev_high_24).astype(float)
+        breakout_down = (close < prev_low_24).astype(float)
+        df['range_contraction_breakout_dir'] = (prev_compression * (breakout_up - breakout_down)).fillna(0.0)
+
+        typical_price = (high + low + close) / 3.0
+        tp_vol = typical_price * volume
+        for window in (24, 96, 288):
+            vwap = tp_vol.rolling(window, min_periods=1).sum() / volume.rolling(window, min_periods=1).sum().replace(0, np.nan)
+            df[f'vwap_dist_{window}'] = ((close - vwap) / (vwap.abs() + 1e-8)).clip(-0.10, 0.10).fillna(0.0)
+
+        ts = pd.to_datetime(df['timestamp'], errors='coerce')
+        session_key = ts.dt.floor('D')
+        session_tp_vol = tp_vol.groupby(session_key).cumsum()
+        session_vol = volume.groupby(session_key).cumsum().replace(0, np.nan)
+        session_vwap = session_tp_vol / session_vol
+        df['anchored_vwap_session_dist'] = ((close - session_vwap) / (session_vwap.abs() + 1e-8)).clip(-0.10, 0.10).fillna(0.0)
+        vwap96_dist = pd.to_numeric(df['vwap_dist_96'], errors='coerce').fillna(0.0)
+        df['vwap_reclaim_flag'] = ((vwap96_dist > 0.0) & (vwap96_dist.shift(1) <= 0.0)).astype(float)
+        df['vwap_reject_flag'] = ((vwap96_dist < 0.0) & (vwap96_dist.shift(1) >= 0.0)).astype(float)
+        day_high = high.groupby(session_key).cummax()
+        day_low = low.groupby(session_key).cummin()
+        df['distance_to_day_high_low_pct'] = ((2.0 * (close - day_low) / (day_high - day_low + 1e-8)) - 1.0).clip(-1.0, 1.0).fillna(0.0)
+
+        funding = pd.to_numeric(df['last_funding_rate'], errors='coerce').fillna(0.0)
+        funding_z = pd.to_numeric(df['funding_z_score'], errors='coerce').fillna(0.0) if 'funding_z_score' in df.columns else self._safe_rolling_z(funding, 288)
+        oi_change = pd.to_numeric(df['oi_change_rate'], errors='coerce').fillna(0.0)
+        price_ret = close.pct_change().fillna(0.0)
+        df['funding_oi_divergence'] = (np.tanh(funding_z) * np.tanh(oi_change * 10.0) - np.tanh(price_ret * 50.0)).clip(-2.0, 2.0) / 2.0
+        funding_sign = np.sign(funding)
+        df['funding_flip_signal'] = np.where(funding_sign != funding_sign.shift(1).fillna(funding_sign), funding_sign, 0.0)
+        oi_up = oi_change > 0.0
+        df['oi_up_price_down'] = (oi_up & (price_ret < 0.0)).astype(float) * np.tanh(oi_change.abs() * 10.0)
+        df['oi_up_price_up'] = (oi_up & (price_ret > 0.0)).astype(float) * np.tanh(oi_change.abs() * 10.0)
+        df['crowded_long_unwind_risk'] = (np.tanh(funding_z.clip(lower=0.0)) * df['oi_up_price_down']).clip(0.0, 1.0).fillna(0.0)
+        df['crowded_short_squeeze_risk'] = (np.tanh((-funding_z).clip(lower=0.0)) * df['oi_up_price_up']).clip(0.0, 1.0).fillna(0.0)
+
+        candle_range = (high - low).replace(0, np.nan)
+        upper_wick = (high - np.maximum(opn, close)) / candle_range
+        lower_wick = (np.minimum(opn, close) - low) / candle_range
+        df['upper_wick_z'] = self._safe_rolling_z(upper_wick.clip(lower=0.0), 288).clip(-5.0, 5.0) / 5.0
+        df['lower_wick_z'] = self._safe_rolling_z(lower_wick.clip(lower=0.0), 288).clip(-5.0, 5.0) / 5.0
+        prev_high = high.rolling(48, min_periods=1).max().shift(1)
+        prev_low = low.rolling(48, min_periods=1).min().shift(1)
+        high_sweep_reject = (high > prev_high) & (close < prev_high)
+        low_sweep_reclaim = (low < prev_low) & (close > prev_low)
+        df['sweep_prev_high_reclaim'] = high_sweep_reject.astype(float)
+        df['sweep_prev_low_reclaim'] = low_sweep_reclaim.astype(float)
+        df['failed_breakout_up'] = (high_sweep_reject.astype(float) * upper_wick.fillna(0.0)).clip(0.0, 1.0)
+        df['failed_breakout_down'] = (low_sweep_reclaim.astype(float) * lower_wick.fillna(0.0)).clip(0.0, 1.0)
+
+        if 'clean_regime4_state24_sticky090_v2_trend_prob' in df.columns:
+            trend_prob = pd.to_numeric(df['clean_regime4_state24_sticky090_v2_trend_prob'], errors='coerce').fillna(0.0)
+            df['cvd_slope_48_x_trend_prob'] = (pd.to_numeric(df['cvd_slope_48'], errors='coerce') * trend_prob).fillna(0.0)
+        if 'clean_regime4_state24_sticky090_v2_instability_prob' in df.columns:
+            instability_prob = pd.to_numeric(df['clean_regime4_state24_sticky090_v2_instability_prob'], errors='coerce').fillna(0.0)
+            df['funding_oi_divergence_x_instability_prob'] = (pd.to_numeric(df['funding_oi_divergence'], errors='coerce') * instability_prob).fillna(0.0)
+        if 'clean_regime4_state24_sticky090_v2_chop_prob' in df.columns:
+            chop_prob = pd.to_numeric(df['clean_regime4_state24_sticky090_v2_chop_prob'], errors='coerce').fillna(0.0)
+            df['vwap_reclaim_x_chop_prob'] = (pd.to_numeric(df['vwap_reclaim_flag'], errors='coerce') * chop_prob).fillna(0.0)
+
+        return df
+
+    @staticmethod
+    def _safe_rolling_z(series: pd.Series, window: int) -> pd.Series:
+        s = pd.to_numeric(series, errors='coerce')
+        mean = s.rolling(window=window, min_periods=1).mean()
+        std = s.rolling(window=window, min_periods=2).std().replace(0, np.nan)
+        return ((s - mean) / std).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    @staticmethod
+    def _rolling_pct_rank(series: pd.Series, window: int) -> pd.Series:
+        s = pd.to_numeric(series, errors='coerce')
+        return s.rolling(window=window, min_periods=2).apply(
+            lambda x: float(np.mean(x <= x[-1])),
+            raw=True,
+        )
 
     def _kalman_trend_velocity(self, close: pd.Series,
                                 obs_noise: float = 1e-3,
@@ -775,14 +1007,27 @@ class QuantSignalFeatures:
 
 class FundingRateMomentum:
     """펀딩비 기반 모멘텀 - 롱/숏 스퀴즈 포착"""
-    
-    def __init__(self, df: pd.DataFrame):
+
+    # z-score cap for the adaptive squeeze mode -- matches this file's own convention elsewhere
+    # for "extreme" cutoffs (evt_tail_flag's 97th-pct threshold, jump_flag's 4-sigma threshold),
+    # not a newly-invented number.
+    ADAPTIVE_SQUEEZE_Z_CAP = 2.0
+
+    def __init__(self, df: pd.DataFrame, *, adaptive_squeeze: bool = False):
         self.df = df
         if 'last_funding_rate' not in df.columns:
             self.funding_rate = pd.Series(0, index=df.index)
         else:
             self.funding_rate = df['last_funding_rate']
-    
+        # Default False preserves the exact prior fixed-divisor (0.0002) behavior for every
+        # existing caller (ETH's live/trained path in particular). Found 2026-07-20: 0.0002 was
+        # calibrated to ETH's funding-rate scale (self-documented "매직 넘버" / magic number) --
+        # SOL's funding rate std is ~3.5x ETH's, so the fixed divisor saturates SOL's
+        # short_squeeze_risk at 1.0 ~22x more often than ETH's (2.0% of bars vs 0.09%), destroying
+        # gradation. Set True only for a symbol whose own rolling funding_z_score should drive the
+        # "extreme" measure instead of ETH's absolute scale.
+        self.adaptive_squeeze = bool(adaptive_squeeze)
+
     def add_all_features(self):
         self.df['funding_roc_12'] = self._calculate_roc(12)
         self.df['funding_roc_48'] = self._calculate_roc(48)
@@ -792,22 +1037,33 @@ class FundingRateMomentum:
         self.df['short_squeeze_risk'] = self._short_squeeze_score()
         self.df['funding_price_divergence'] = self._divergence()
         return self.df
-    
+
     def _calculate_roc(self, window):
         """[수정사항 6] ROC 분모 0에 의한 폭발 방지 및 강한 하한선 적용"""
         shifted = self.funding_rate.shift(window)
         roc = (self.funding_rate - shifted) / (shifted.abs().clip(lower=1e-4) + 1e-8)
         return roc.clip(-10, 10).fillna(0)
-    
+
     def _calculate_zscore(self, window):
         mean = self.funding_rate.rolling(window, min_periods=1).mean()
         std = self.funding_rate.rolling(window, min_periods=1).std()
         z = (self.funding_rate - mean) / (std + 1e-8)
         return z.fillna(0)
-    
+
+    def _funding_extreme(self, sign: float):
+        """Positive-sign (long) or negative-sign (short) 'how extreme is funding' term.
+        Fixed mode (default) reproduces the original absolute-scale behavior exactly. Adaptive
+        mode uses the already-computed rolling funding_z_score instead, which is self-normalizing
+        per symbol and requires funding_z_score to already be in self.df (add_all_features always
+        computes it first)."""
+        if self.adaptive_squeeze:
+            z = self.df['funding_z_score']
+            return np.clip(sign * z / self.ADAPTIVE_SQUEEZE_Z_CAP, 0, 1)
+        return np.clip(sign * self.funding_rate / 0.0002, 0, 1)
+
     def _long_squeeze_score(self):
         """[수정사항 7] 롱/숏 스퀴즈 매직 넘버 대칭 통일 (0.0002)"""
-        funding_extreme = np.clip(self.funding_rate / 0.0002, 0, 1)
+        funding_extreme = self._funding_extreme(1.0)
         funding_surge = np.clip(self.df.get('funding_roc_12', 0) / 3, 0, 1)
         if 'oi_change_rate' in self.df.columns:
             oi_buildup = np.clip(self.df['oi_change_rate'] * 10, 0, 1)
@@ -815,10 +1071,10 @@ class FundingRateMomentum:
             oi_buildup = 0
         score = 0.5 * funding_extreme + 0.3 * funding_surge + 0.2 * oi_buildup
         return score
-    
+
     def _short_squeeze_score(self):
         """[수정사항 7] 롱/숏 스퀴즈 매직 넘버 대칭 통일 (0.0002)"""
-        funding_extreme = np.clip(-self.funding_rate / 0.0002, 0, 1)
+        funding_extreme = self._funding_extreme(-1.0)
         funding_plunge = np.clip(-self.df.get('funding_roc_12', 0) / 3, 0, 1)
         if 'oi_change_rate' in self.df.columns:
             oi_buildup = np.clip(self.df['oi_change_rate'] * 10, 0, 1)

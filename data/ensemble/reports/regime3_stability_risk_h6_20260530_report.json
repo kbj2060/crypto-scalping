@@ -1,0 +1,251 @@
+{
+  "model_id": "regime3_stability_risk_h6_20260530",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_stability_risk_h6_20260530/regime3_stability_risk_h6.joblib",
+  "horizon_bars": 6,
+  "min_duration": 6,
+  "current_prefix": "regime3_current_sensitive_wide24_",
+  "current_sidecar_stem": "regime3_current_sensitive_hmm_wide24",
+  "feature_count": 90,
+  "feature_cols": [
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12",
+    "sr_ret_abs_3",
+    "sr_ret_signed_3",
+    "sr_ret_vol_3",
+    "sr_ret_abs_6",
+    "sr_ret_signed_6",
+    "sr_ret_vol_6",
+    "sr_ret_abs_12",
+    "sr_ret_signed_12",
+    "sr_ret_vol_12",
+    "sr_ret_abs_24",
+    "sr_ret_signed_24",
+    "sr_ret_vol_24",
+    "sr_ret_abs_48",
+    "sr_ret_signed_48",
+    "sr_ret_vol_48",
+    "sr_bb_width_delta_6",
+    "sr_bb_width_delta_24",
+    "sr_rsi_delta_6",
+    "sr_rsi_delta_24",
+    "sr_macd_hist_delta_6",
+    "sr_macd_hist_delta_24",
+    "sr_mean_reversion_z_delta_6",
+    "sr_mean_reversion_z_delta_24",
+    "sr_dual_momentum_delta_6",
+    "sr_dual_momentum_delta_24",
+    "sr_cvd_12_delta_6",
+    "sr_cvd_12_delta_24",
+    "sr_cvd_288_delta_6",
+    "sr_cvd_288_delta_24",
+    "sr_funding_pressure_delta_6",
+    "sr_funding_pressure_delta_24",
+    "sr_volume_delta_6",
+    "sr_volume_delta_24"
+  ],
+  "threshold_selected_on_validation": 0.24999999999999994,
+  "validation": {
+    "transition": {
+      "rows": 26490,
+      "transition_rate": 0.17821819554548887,
+      "threshold": 0.24999999999999994,
+      "accuracy": 0.3673461683654209,
+      "balanced_accuracy": 0.591516555342136,
+      "precision": 0.21217482785003824,
+      "recall": 0.9398432535479772,
+      "fire_rate": 0.7894299735749339,
+      "confusion_matrix": [
+        [
+          5294,
+          16475
+        ],
+        [
+          284,
+          4437
+        ]
+      ],
+      "roc_auc": 0.6830192109094424
+    },
+    "risk": {
+      "risk_corr": 0.28638286841467364,
+      "top20_transition_rate": 0.29690449226123067,
+      "low20_transition_rate": 0.053227633069082674,
+      "top20_avg_risk_target": 0.27563231408078526,
+      "low20_avg_risk_target": 0.04929218573046432
+    }
+  },
+  "outputs": {
+    "training_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_stability_risk_h6_20260530/training_features_2024_regime3_stability_risk_h6.csv",
+      "rows": 105374,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:25:00"
+      ],
+      "transition": {
+        "rows": 105374,
+        "transition_rate": 0.16888416497428207,
+        "threshold": 0.24999999999999994,
+        "accuracy": 0.3802361113747224,
+        "balanced_accuracy": 0.6236795266565214,
+        "precision": 0.21307356902153562,
+        "recall": 0.9912901775679928,
+        "fire_rate": 0.7857061514225521,
+        "confusion_matrix": [
+          [
+            22426,
+            65152
+          ],
+          [
+            155,
+            17641
+          ]
+        ],
+        "roc_auc": 0.8339131959667578
+      },
+      "risk": {
+        "risk_corr": 0.4774521141431828,
+        "top20_transition_rate": 0.46391459074733093,
+        "low20_transition_rate": 0.018457888493475683,
+        "top20_avg_risk_target": 0.39361091340450766,
+        "low20_avg_risk_target": 0.021594306049822064
+      }
+    },
+    "training_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2025.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_stability_risk_h6_20260530/training_features_2025_regime3_stability_risk_h6.csv",
+      "rows": 105095,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:25:00"
+      ],
+      "transition": {
+        "rows": 105095,
+        "transition_rate": 0.16653503972596223,
+        "threshold": 0.24999999999999994,
+        "accuracy": 0.35148199248299156,
+        "balanced_accuracy": 0.5885936205848049,
+        "precision": 0.19741463764306708,
+        "recall": 0.9441206719232088,
+        "fire_rate": 0.7964413150007137,
+        "confusion_matrix": [
+          [
+            20415,
+            67178
+          ],
+          [
+            978,
+            16524
+          ]
+        ],
+        "roc_auc": 0.6800768326627491
+      },
+      "risk": {
+        "risk_corr": 0.29631332759041773,
+        "top20_transition_rate": 0.28440934392692324,
+        "low20_transition_rate": 0.043769922451115655,
+        "top20_avg_risk_target": 0.26598077929492364,
+        "low20_avg_risk_target": 0.041443455920833525
+      }
+    },
+    "training_features_2026_rebuilt.csv": {
+      "source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_stability_risk_h6_20260530/training_features_2026_rebuilt_regime3_stability_risk_h6.csv",
+      "rows": 16891,
+      "range": [
+        "2026-01-01 00:00:00",
+        "2026-02-28 15:30:00"
+      ],
+      "transition": {
+        "rows": 16891,
+        "transition_rate": 0.15629625244212894,
+        "threshold": 0.24999999999999994,
+        "accuracy": 0.3541530992836422,
+        "balanced_accuracy": 0.5871647364459273,
+        "precision": 0.1858043924310358,
+        "recall": 0.9261363636363636,
+        "fire_rate": 0.7790539340477177,
+        "confusion_matrix": [
+          [
+            3537,
+            10714
+          ],
+          [
+            195,
+            2445
+          ]
+        ],
+        "roc_auc": 0.6762255120852763
+      },
+      "risk": {
+        "risk_corr": 0.2976605864655308,
+        "top20_transition_rate": 0.287363125184966,
+        "low20_transition_rate": 0.047055341817105655,
+        "top20_avg_risk_target": 0.2668688961231133,
+        "low20_avg_risk_target": 0.04172832198875407
+      }
+    }
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_probability_features_used_as_model_inputs": false,
+    "current_feature_count": 0,
+    "current_sidecar_used_for_label_generation_only": true
+  }
+}

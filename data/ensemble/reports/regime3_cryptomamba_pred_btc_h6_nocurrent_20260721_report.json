@@ -1,0 +1,421 @@
+{
+  "model_id": "regime3_cryptomamba_pred_btc_h6_nocurrent_20260721",
+  "purpose": "Regime transition/future-context sidecar only; not an action owner.",
+  "model_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_btc_h6_nocurrent_20260721/regime3_cryptomamba_pred_btc_h6_nocurrent_20260721_2024.pt",
+  "architecture": {
+    "type": "CryptoMamba C-Block Merge",
+    "seq_len": 60,
+    "d_model": 128,
+    "d_state": 32,
+    "cblocks": 4,
+    "cmblocks": 2
+  },
+  "seed": 20260531,
+  "feature_count": 64,
+  "feature_pack": "docs_rolled",
+  "feature_cols": [
+    "compression_score",
+    "atr_pct_rank_288",
+    "bb_width_pct_rank_288",
+    "btc_volume_impulse_z",
+    "vwap_dist_96",
+    "vwap_dist_24",
+    "cvd_288",
+    "cvd_12",
+    "eth_btc_ret_spread_12",
+    "eth_btc_ret_spread_48",
+    "btc_lead_eth_follow_gap_3",
+    "btc_impulse_x_eth_beta",
+    "anchored_vwap_session_dist",
+    "range_contraction_breakout_dir",
+    "distance_to_day_high_low_pct",
+    "price_cvd_divergence",
+    "funding_oi_divergence",
+    "funding_price_divergence",
+    "cvp_volume_imbalance",
+    "crowded_short_squeeze_risk",
+    "crowding_pressure",
+    "long_squeeze_risk",
+    "mean_reversion_z",
+    "dual_momentum",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "rsi",
+    "macd_hist",
+    "log_return",
+    "oi_up_price_up",
+    "volume",
+    "quote_volume",
+    "taker_buy_base",
+    "taker_sell_base",
+    "volume_delta",
+    "trade_intensity",
+    "big_trade_ratio",
+    "last_funding_rate_roll_log_iqr_288",
+    "last_funding_rate_roll_pct_288",
+    "last_funding_rate_roll_delta_log_12",
+    "funding_pressure_roll_log_iqr_288",
+    "funding_pressure_roll_pct_288",
+    "funding_pressure_roll_delta_log_12",
+    "funding_roc_288_roll_log_iqr_288",
+    "funding_roc_288_roll_pct_288",
+    "funding_roc_288_roll_delta_log_12",
+    "volume_btc_roll_log_iqr_288",
+    "volume_btc_roll_pct_288",
+    "volume_btc_roll_delta_log_12",
+    "quote_volume_btc_roll_log_iqr_288",
+    "quote_volume_btc_roll_pct_288",
+    "quote_volume_btc_roll_delta_log_12",
+    "taker_buy_base_roll_log_iqr_288",
+    "taker_buy_base_roll_pct_288",
+    "taker_buy_base_roll_delta_log_12",
+    "taker_buy_quote_roll_log_iqr_288",
+    "taker_buy_quote_roll_pct_288",
+    "taker_buy_quote_roll_delta_log_12",
+    "volume_roll_log_iqr_288",
+    "volume_roll_pct_288",
+    "volume_roll_delta_log_12",
+    "quote_volume_roll_log_iqr_288",
+    "quote_volume_roll_pct_288",
+    "quote_volume_roll_delta_log_12"
+  ],
+  "current_probability_features_used_as_inputs": false,
+  "current_sidecar_used_for_target_and_transition_eval": true,
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 0.8350021227613672,
+      "val": {
+        "accuracy": 0.6633824084560211,
+        "balanced_accuracy": 0.6702918632281762,
+        "label_counts": {
+          "bull": 4171,
+          "bear": 5079,
+          "chop": 17240
+        },
+        "pred_counts": {
+          "bull": 6470,
+          "bear": 6984,
+          "chop": 13036
+        },
+        "confusion_matrix": [
+          [
+            2921,
+            768,
+            482
+          ],
+          [
+            543,
+            3317,
+            1219
+          ],
+          [
+            3006,
+            2899,
+            11335
+          ]
+        ],
+        "log_loss": 0.7916994737301366,
+        "ovr_auc": 0.8381611935702974
+      }
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7345138401180119,
+      "val": {
+        "accuracy": 0.6955454888637221,
+        "balanced_accuracy": 0.6691456736023907,
+        "label_counts": {
+          "bull": 4171,
+          "bear": 5079,
+          "chop": 17240
+        },
+        "pred_counts": {
+          "bull": 4734,
+          "bear": 7367,
+          "chop": 14389
+        },
+        "confusion_matrix": [
+          [
+            2527,
+            993,
+            651
+          ],
+          [
+            335,
+            3452,
+            1292
+          ],
+          [
+            1872,
+            2922,
+            12446
+          ]
+        ],
+        "log_loss": 0.7300932947578668,
+        "ovr_auc": 0.8429120285344381
+      }
+    },
+    {
+      "epoch": 3,
+      "loss": 0.6483647862038056,
+      "val": {
+        "accuracy": 0.6668554171385428,
+        "balanced_accuracy": 0.6532455067519082,
+        "label_counts": {
+          "bull": 4171,
+          "bear": 5079,
+          "chop": 17240
+        },
+        "pred_counts": {
+          "bull": 5872,
+          "bear": 6885,
+          "chop": 13733
+        },
+        "confusion_matrix": [
+          [
+            2731,
+            819,
+            621
+          ],
+          [
+            583,
+            3159,
+            1337
+          ],
+          [
+            2558,
+            2907,
+            11775
+          ]
+        ],
+        "log_loss": 0.7813083029171276,
+        "ovr_auc": 0.8240693194274101
+      }
+    },
+    {
+      "epoch": 4,
+      "loss": 0.47131669985783564,
+      "val": {
+        "accuracy": 0.6708191770479426,
+        "balanced_accuracy": 0.6162948597540266,
+        "label_counts": {
+          "bull": 4171,
+          "bear": 5079,
+          "chop": 17240
+        },
+        "pred_counts": {
+          "bull": 4569,
+          "bear": 6675,
+          "chop": 15246
+        },
+        "confusion_matrix": [
+          [
+            2300,
+            904,
+            967
+          ],
+          [
+            508,
+            2881,
+            1690
+          ],
+          [
+            1761,
+            2890,
+            12589
+          ]
+        ],
+        "log_loss": 0.8092461234315993,
+        "ovr_auc": 0.7992303236727715
+      }
+    }
+  ],
+  "validation": {
+    "future_h6": {
+      "accuracy": 0.6955454888637221,
+      "balanced_accuracy": 0.6691456736023907,
+      "label_counts": {
+        "bull": 4171,
+        "bear": 5079,
+        "chop": 17240
+      },
+      "pred_counts": {
+        "bull": 4734,
+        "bear": 7367,
+        "chop": 14389
+      },
+      "confusion_matrix": [
+        [
+          2527,
+          993,
+          651
+        ],
+        [
+          335,
+          3452,
+          1292
+        ],
+        [
+          1872,
+          2922,
+          12446
+        ]
+      ],
+      "log_loss": 0.7300932947578668,
+      "ovr_auc": 0.8429120285344381
+    },
+    "transition_rate": 0.2696866742166855
+  },
+  "outputs": {
+    "btc_features_2024.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_features_2024.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_btc_h6_nocurrent_20260721/btc_features_2024_regime3_cryptomamba_pred_btc_h6_nocurrent_20260721.csv",
+      "rows": 105408,
+      "valid_eval_rows": 105343,
+      "range": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:55:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.7140578870926403,
+        "balanced_accuracy": 0.7067944663426687,
+        "label_counts": {
+          "bull": 14445,
+          "bear": 20916,
+          "chop": 69982
+        },
+        "pred_counts": {
+          "bull": 18171,
+          "bear": 30265,
+          "chop": 56907
+        },
+        "confusion_matrix": [
+          [
+            9793,
+            2717,
+            1935
+          ],
+          [
+            1092,
+            15140,
+            4684
+          ],
+          [
+            7286,
+            12408,
+            50288
+          ]
+        ],
+        "log_loss": 0.6958777757977724,
+        "ovr_auc": 0.8683474588259631
+      },
+      "transition": {
+        "transition_rate": 0.2582800945482851,
+        "transition_prob_auc": 0.6505139827841525,
+        "transition_prob_mean": 0.37461063265800476
+      }
+    },
+    "btc_features_2025.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_features_2025.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_btc_h6_nocurrent_20260721/btc_features_2025_regime3_cryptomamba_pred_btc_h6_nocurrent_20260721.csv",
+      "rows": 105120,
+      "valid_eval_rows": 105055,
+      "range": [
+        "2025-01-01 00:00:00",
+        "2025-12-31 23:55:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.7075722240731046,
+        "balanced_accuracy": 0.6680405694889723,
+        "label_counts": {
+          "bull": 13112,
+          "bear": 20984,
+          "chop": 70959
+        },
+        "pred_counts": {
+          "bull": 15558,
+          "bear": 29274,
+          "chop": 60223
+        },
+        "confusion_matrix": [
+          [
+            7661,
+            3067,
+            2384
+          ],
+          [
+            1200,
+            14309,
+            5475
+          ],
+          [
+            6697,
+            11898,
+            52364
+          ]
+        ],
+        "log_loss": 0.7144632163191927,
+        "ovr_auc": 0.840727150319862
+      },
+      "transition": {
+        "transition_rate": 0.24786064442434916,
+        "transition_prob_auc": 0.6352673870694103,
+        "transition_prob_mean": 0.3845747113227844
+      }
+    },
+    "btc_features_2026.csv": {
+      "source": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_features_2026.csv",
+      "sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_cryptomamba_pred_btc_h6_nocurrent_20260721/btc_features_2026_regime3_cryptomamba_pred_btc_h6_nocurrent_20260721.csv",
+      "rows": 55499,
+      "valid_eval_rows": 55434,
+      "range": [
+        "2026-01-01 00:00:00",
+        "2026-07-12 16:50:00"
+      ],
+      "future_h6": {
+        "accuracy": 0.7014828444636866,
+        "balanced_accuracy": 0.6724777354153031,
+        "label_counts": {
+          "bull": 6511,
+          "bear": 11911,
+          "chop": 37012
+        },
+        "pred_counts": {
+          "bull": 8436,
+          "bear": 15528,
+          "chop": 31470
+        },
+        "confusion_matrix": [
+          [
+            4100,
+            1269,
+            1142
+          ],
+          [
+            637,
+            7866,
+            3408
+          ],
+          [
+            3699,
+            6393,
+            26920
+          ]
+        ],
+        "log_loss": 0.7224014901943436,
+        "ovr_auc": 0.8365427670261333
+      },
+      "transition": {
+        "transition_rate": 0.25657538694663923,
+        "transition_prob_auc": 0.6195795097489456,
+        "transition_prob_mean": 0.38146066665649414
+      }
+    }
+  },
+  "leakage_audit": {
+    "uses_2026_for_selection": false,
+    "current_probability_inputs": [],
+    "forbidden_feature_hits": []
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "base": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2026_rebuilt.csv",
+  "current_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_2026_rebuilt_regime3_current_sensitive_hmm_wide24.csv",
+  "pred_sidecar": "/home/llewyn/crypto-scalping/data/ensemble/supervised/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530/training_features_2026_rebuilt_regime3_stable_h6_decoder.csv",
+  "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/regime3_stable_h6_decoder_nocurrent_transitionaware_20260530_report.json",
+  "horizon_bars": 6,
+  "min_duration": 6,
+  "display_policy": "prediction_made_at_t_displayed_at_t_plus_horizon",
+  "rows": 16891,
+  "valid_rows": 16885,
+  "agreement_rate": 0.7581877405981641,
+  "truth_counts": {
+    "chop": 8987,
+    "bear": 4293,
+    "bull": 3605
+  },
+  "pred_counts": {
+    "chop": 8686,
+    "bear": 4672,
+    "bull": 3527
+  },
+  "charts": [
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_stable_h6_decoder_match_oos_2026_full.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_stable_h6_decoder_match_oos_2026-01.png",
+    "/home/llewyn/crypto-scalping/data/ensemble/reports/regime_charts_20260530/regime3_stable_h6_decoder_match_oos_2026-02.png"
+  ]
+}

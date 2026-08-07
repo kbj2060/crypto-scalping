@@ -1,0 +1,223 @@
+{
+  "status": "pass",
+  "verdict": "promote",
+  "blocking": [],
+  "warnings": [],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS after selection",
+  "baseline_recomputed_v31": {
+    "cost1": {
+      "pnl": 277.0679629973942,
+      "mdd": -31.741344176793795,
+      "trades": 195,
+      "wr": 0.28205128205128205,
+      "trades_per_day": 3.3238636363636367,
+      "deep_entries": 124,
+      "long_entries": 81,
+      "short_entries": 114,
+      "avg_notional": 1.5581652639297248,
+      "avg_leverage": 1.580463765397885,
+      "exits": {
+        "deep_alpha_max_hold": 42,
+        "deep_alpha_stop_loss": 77,
+        "v21_2_stop_loss": 56,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_take_profit": 5
+      },
+      "runner_actions": {
+        "deep_entry": 124,
+        "v21_entry": 71,
+        "v21_reject": 29,
+        "v21_add_on": 10
+      }
+    },
+    "cost2": {
+      "pnl": 112.79299075280105,
+      "mdd": -31.457682333986405,
+      "trades": 202,
+      "wr": 0.25742574257425743,
+      "trades_per_day": 3.4431818181818183,
+      "deep_entries": 127,
+      "long_entries": 86,
+      "short_entries": 116,
+      "avg_notional": 1.565767531367148,
+      "avg_leverage": 1.5843868249007356,
+      "exits": {
+        "deep_alpha_max_hold": 40,
+        "deep_alpha_stop_loss": 82,
+        "v21_2_stop_loss": 60,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 7,
+        "deep_alpha_take_profit": 5
+      },
+      "runner_actions": {
+        "deep_entry": 127,
+        "v21_entry": 75,
+        "v21_add_on": 10,
+        "v21_reject": 27
+      }
+    },
+    "cost3": {
+      "pnl": 20.932424529049154,
+      "mdd": -43.085944427766584,
+      "trades": 200,
+      "wr": 0.23,
+      "trades_per_day": 3.409090909090909,
+      "deep_entries": 123,
+      "long_entries": 90,
+      "short_entries": 110,
+      "avg_notional": 1.5794987309758466,
+      "avg_leverage": 1.5897964573007655,
+      "exits": {
+        "deep_alpha_max_hold": 43,
+        "deep_alpha_stop_loss": 75,
+        "v21_2_stop_loss": 63,
+        "v21_2_max_hold": 8,
+        "v21_2_take_profit": 6,
+        "deep_alpha_take_profit": 5
+      },
+      "runner_actions": {
+        "deep_entry": 123,
+        "v21_entry": 77,
+        "v21_add_on": 12,
+        "v21_reject": 18
+      }
+    }
+  },
+  "feature_audits": {
+    "raw_all": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 164,
+      "forbidden_feature_cols": [],
+      "train_eval_timestamp_overlap": 0
+    },
+    "encoded_pls_all": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 166,
+      "forbidden_feature_cols": [],
+      "train_eval_timestamp_overlap": 0
+    }
+  },
+  "parent_contract_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "best": {
+    "experiment": "v49_exit_rl",
+    "feature_mode": "raw_all",
+    "metrics": {
+      "cost1": {
+        "pnl": 284.7064052940257,
+        "mdd": -31.741344176793817,
+        "trades": 171,
+        "wr": 0.4502923976608187,
+        "trades_per_day": 2.9147727272727275,
+        "deep_entries": 105,
+        "long_entries": 72,
+        "short_entries": 99,
+        "avg_notional": 1.6008213740705186,
+        "avg_leverage": 1.6288141580422426,
+        "exits": {
+          "deep_alpha_max_hold": 52,
+          "deep_alpha_rl_exit_overlay": 46,
+          "v21_2_stop_loss": 51,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_stop_loss": 7
+        },
+        "runner_actions": {
+          "deep_entry": 105,
+          "v21_entry": 66,
+          "v21_reject": 28,
+          "v21_add_on": 10
+        }
+      },
+      "cost2": {
+        "pnl": 143.39789660173733,
+        "mdd": -33.43314463303445,
+        "trades": 171,
+        "wr": 0.39766081871345027,
+        "trades_per_day": 2.9147727272727275,
+        "deep_entries": 104,
+        "long_entries": 72,
+        "short_entries": 99,
+        "avg_notional": 1.6119055875717303,
+        "avg_leverage": 1.6390911952208085,
+        "exits": {
+          "deep_alpha_max_hold": 54,
+          "deep_alpha_rl_exit_overlay": 42,
+          "v21_2_stop_loss": 52,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 7,
+          "deep_alpha_stop_loss": 8
+        },
+        "runner_actions": {
+          "deep_entry": 104,
+          "v21_entry": 67,
+          "v21_reject": 29,
+          "v21_add_on": 8
+        }
+      },
+      "cost3": {
+        "pnl": 40.16953629312883,
+        "mdd": -40.547062482406616,
+        "trades": 177,
+        "wr": 0.3785310734463277,
+        "trades_per_day": 3.0170454545454546,
+        "deep_entries": 106,
+        "long_entries": 76,
+        "short_entries": 101,
+        "avg_notional": 1.6193108860151912,
+        "avg_leverage": 1.6338197550310845,
+        "exits": {
+          "deep_alpha_max_hold": 54,
+          "deep_alpha_rl_exit_overlay": 43,
+          "v21_2_stop_loss": 57,
+          "deep_alpha_stop_loss": 9,
+          "v21_2_max_hold": 8,
+          "v21_2_take_profit": 6
+        },
+        "runner_actions": {
+          "deep_entry": 106,
+          "v21_entry": 71,
+          "v21_reject": 27,
+          "v21_add_on": 8
+        }
+      }
+    },
+    "selected_config": {
+      "name": "v33_rl_p055_n1",
+      "edge_th": 0.01,
+      "margin_th": 0.004,
+      "notional": 1.0,
+      "cooldown": 12,
+      "close_p_th": 0.55,
+      "min_hold": 1,
+      "base_tp": 0.045,
+      "base_sl": 0.022,
+      "base_hold": 48
+    }
+  }
+}

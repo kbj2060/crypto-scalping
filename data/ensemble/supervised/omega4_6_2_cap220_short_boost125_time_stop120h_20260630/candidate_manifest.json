@@ -1,0 +1,209 @@
+{
+  "model_id": "omega4_6_2_cap220_short_boost125_time_stop120h_20260630",
+  "display_version": "Omega 4.6.2 cap220 detail-line candidate",
+  "status": "omega4_6_2_research_detail_line_candidate_not_live_wired",
+  "classification": "conditional_diagnostic_pass_full_live_fail_fresh_holdout_required",
+  "base_model_id": "omega4_6_plus_t12_nohold_risk1_20260630",
+  "contract": "docs/model_contracts/omega4_6_2_cap220_short_boost125_time_stop120h_20260630_contract.md",
+  "runtime_contract": "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/runtime_contract.json",
+  "candidate_manifest": "data/ensemble/supervised/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/candidate_manifest.json",
+  "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_2_cap220_short_boost125_time_stop120h_20260630/promotion_manifest.json",
+  "source_report": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/report.json",
+  "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/omega_artifact_integrity_audit_20260630.json",
+  "redteam_report": "docs/audits/omega4_6_2_cap220_short_boost125_time_stop120h_20260630_redteam_20260630.md",
+  "selection_scope": "cap220 balanced diagnostic candidate; OOS readout considered for detail-line choice, so no clean-OOS promotion claim",
+  "variant": "short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h",
+  "rule_contract": {
+    "entry_gate": {
+      "feature": "rsi",
+      "op": "ge",
+      "threshold": 56.656189,
+      "scope": "short_entries",
+      "hit_scale": 0.0,
+      "behavior": "skip short entries when RSI is greater than or equal to the threshold",
+      "source_idea": "Omega4.6 duration-risk robust selected rule"
+    },
+    "exposure_overlay": {
+      "mode": "side_factor_with_notional_cap",
+      "spec": "short_boost125_cap220",
+      "long_factor": 0.9,
+      "short_factor": 1.25,
+      "tested_notional_cap": 2.2,
+      "leverage_cap": 5.0,
+      "behavior": "scale short exposure moderately, then clamp by tested notional cap and leverage cap",
+      "source_idea": "Notional gate removed from red-team pass: moderate short exposure expansion under leverage cap"
+    },
+    "lifecycle_overlay": {
+      "mode": "time_stop",
+      "max_hold_hours": 120.0,
+      "scope": "all_positions",
+      "source_idea": "Omega1 horizon-router max-hold diagnostic"
+    }
+  },
+  "conditional_diagnostic_gate": {
+    "pass": true,
+    "checks": {
+      "artifact_integrity_pass": true,
+      "validation_mdd_lte_20_abs": true,
+      "oos_mdd_lte_20_abs": true,
+      "validation_leverage_lte_5": true,
+      "oos_leverage_lte_5": true,
+      "validation_no_overlap": true,
+      "oos_no_overlap": true,
+      "validation_accounting_consistent": true,
+      "oos_accounting_consistent": true,
+      "validation_notional_contract_consistent": true,
+      "oos_notional_contract_consistent": true
+    },
+    "failures": []
+  },
+  "full_live_gate": {
+    "pass": false,
+    "checks": {
+      "validation_max_hold_lte_24h": false,
+      "oos_max_hold_lte_24h": false,
+      "validation_pnl_gte_100pct": true,
+      "oos_pnl_gte_100pct": false,
+      "runtime_native_replay_available": false,
+      "clean_oos_selection_claim_allowed": false
+    },
+    "failures": [
+      "validation_max_hold_lte_24h",
+      "oos_max_hold_lte_24h",
+      "oos_pnl_gte_100pct",
+      "runtime_native_replay_available",
+      "clean_oos_selection_claim_allowed"
+    ]
+  },
+  "validation": {
+    "gate_pass": true,
+    "monthly_min_pnl": 36.99226610344768,
+    "monthly_worst_mdd": -13.718151633931718,
+    "monthly_positive_count": 3,
+    "monthly_count": 3,
+    "pnl": 211.14258330879252,
+    "mdd": -13.718151633931718,
+    "trades": 23,
+    "wr": 0.6521739130434783,
+    "avg_hold_hours": 63.26811594202899,
+    "max_hold_hours": 120.0,
+    "hold_over_24h_count": 17,
+    "max_leverage": 5.0,
+    "max_notional": 1.917602315132258,
+    "avg_notional": 1.4170948122453524,
+    "skipped": 6,
+    "entry_hits": 6,
+    "lifecycle_hits": 1,
+    "overlap_count": 0,
+    "accounting_error_max_abs": 0.0,
+    "notional_contract_error_max_abs": 2.220446049250313e-16,
+    "long_trades": 6,
+    "short_trades": 17,
+    "reason_counts": {
+      "stop_loss": 8,
+      "take_profit": 14,
+      "time_stop_120h_exit": 1
+    },
+    "source_counts": {
+      "h48qual": 8,
+      "zig075": 15
+    }
+  },
+  "oos": {
+    "gate_pass": true,
+    "pnl": 79.31781513301281,
+    "mdd": -10.134105321862275,
+    "trades": 13,
+    "wr": 0.6153846153846154,
+    "avg_hold_hours": 67.78846153846153,
+    "max_hold_hours": 120.0,
+    "hold_over_24h_count": 12,
+    "max_leverage": 5.000000000000001,
+    "max_notional": 2.196698803847552,
+    "avg_notional": 1.4790570502256064,
+    "skipped": 0,
+    "entry_hits": 0,
+    "lifecycle_hits": 3,
+    "overlap_count": 0,
+    "accounting_error_max_abs": 0.0,
+    "notional_contract_error_max_abs": 2.220446049250313e-16,
+    "long_trades": 1,
+    "short_trades": 12,
+    "reason_counts": {
+      "stop_loss": 5,
+      "take_profit": 5,
+      "time_stop_120h_exit": 3
+    },
+    "source_counts": {
+      "zig075": 13
+    }
+  },
+  "baseline_reference": {
+    "name": "omega4_6_plus_t12_nohold_risk1_20260630",
+    "validation_pnl_pct": 117.16674838792906,
+    "validation_mdd_pct": -17.431511291376623,
+    "validation_wr": 0.5172413793103449,
+    "validation_trades": 29,
+    "validation_max_hold_hours": 222.0,
+    "validation_max_notional": 1.8,
+    "oos_pnl_pct": 67.8462084780387,
+    "oos_mdd_pct": -13.275817100563392,
+    "oos_wr": 0.5384615384615384,
+    "oos_trades": 13,
+    "oos_max_hold_hours": 218.5,
+    "oos_max_notional": 1.8
+  },
+  "delta_vs_baseline": {
+    "validation_pnl_pp": 93.97583492086346,
+    "validation_mdd_improvement_pp": 3.7133596574449044,
+    "validation_trade_delta": -6,
+    "validation_max_hold_delta_hours": -102.0,
+    "oos_pnl_pp": 11.47160665497411,
+    "oos_mdd_improvement_pp": 3.141711778701117,
+    "oos_trade_delta": 0,
+    "oos_max_hold_delta_hours": -98.5
+  },
+  "components": {
+    "h48qual": {
+      "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630",
+      "report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630/report.json",
+      "quality_threshold": 0.5,
+      "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630",
+      "precomputed_prediction_tag": "q050"
+    },
+    "zig075": {
+      "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630",
+      "report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630/report.json",
+      "quality_threshold": 0.75,
+      "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629",
+      "precomputed_prediction_tag": "q075"
+    }
+  },
+  "artifacts": {
+    "source_report": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/report.json",
+    "ranking": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/borrowed_upgrade_ranking.csv",
+    "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/omega_artifact_integrity_audit_20260630.json",
+    "source_redteam_audit_json": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h_redteam_audit_20260630.json",
+    "source_redteam_audit_md": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h_redteam_audit_20260630.md",
+    "redteam_report": "docs/audits/omega4_6_2_cap220_short_boost125_time_stop120h_20260630_redteam_20260630.md",
+    "validation_ledger": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/validation_short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h_ledger.csv",
+    "oos_ledger": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/oos_short_rsi_skip_ge_56p656189__short_boost125_cap220__time_stop_120h_ledger.csv",
+    "validation_chart": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/charts/omega4_6_cap220_120h_validation_trade_chart.png",
+    "oos_chart": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/charts/omega4_6_cap220_120h_oos_trade_chart.png",
+    "max_hold_sensitivity": "tmp/causal_regen_20260516/omega4_6_borrowed_upgrade_notional_cap220_20260630/max_hold_sensitivity_short_boost125_cap220.csv"
+  },
+  "risk_contract": {
+    "notional": "margin_fraction * leverage",
+    "pnl": "realized_price_move * notional",
+    "max_leverage": 5.0,
+    "tested_notional_cap": 2.2,
+    "observed_validation_max_notional": 1.917602315132258,
+    "observed_oos_max_notional": 2.196698803847552,
+    "runtime_reference_notional_cap": 1.8,
+    "notional_lte_1p8_redteam_gate_removed": true,
+    "notional_contract_consistency_required": true,
+    "notional_scaled_sltp": false
+  },
+  "artifact_integrity_promotion_pass": true,
+  "redteam_verdict": "CONDITIONAL_DIAGNOSTIC_PASS_FULL_LIVE_FAIL_FRESH_HOLDOUT_REQUIRED"
+}

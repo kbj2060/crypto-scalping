@@ -1,0 +1,248 @@
+{
+  "model_id": "sol_regime3_current_hmm_sensitive_wide24_20260707",
+  "label_mode": "balancedish_adx16_slope15_bb012",
+  "label_config": {
+    "trend_adx_min": 16.0,
+    "weak_adx_max": 12.0,
+    "slope_min": 0.00015,
+    "tight_bb_max": 0.012,
+    "prefix_stem": "regime3_current_sensitive"
+  },
+  "prefix_stem": "regime3_current_sensitive",
+  "fit_source": "data/splits/year_oos/sol_features_2024.csv",
+  "validation_policy": "2024Q4 validation; 2025/2026 forward tests; 2026 not used for selection",
+  "feature_sets": {
+    "wide24": {
+      "feature_set": "wide24",
+      "label_mode": "balancedish_adx16_slope15_bb012",
+      "label_config": {
+        "trend_adx_min": 16.0,
+        "weak_adx_max": 12.0,
+        "slope_min": 0.00015,
+        "tight_bb_max": 0.012,
+        "prefix_stem": "regime3_current_sensitive"
+      },
+      "feature_cols": [
+        "state7_trend_score",
+        "state7_trend_efficiency_48",
+        "state7_directional_return_48",
+        "state7_volatility_state",
+        "state7_sign_flip_rate_24",
+        "state7_range_compression",
+        "state7_flow_alignment",
+        "state12_log_return",
+        "state12_garman_klass_vol",
+        "state12_net_taker_ratio",
+        "state12_oi_change_rate",
+        "state12_chop_index",
+        "volatility_z",
+        "rsi",
+        "macd_hist",
+        "bb_width_z",
+        "hma_slope",
+        "wick_ratio",
+        "mtf_trend_1h",
+        "mtf_trend_4h",
+        "breakout_strength",
+        "mean_reversion_z",
+        "ofi_acceleration",
+        "taker_acceleration"
+      ],
+      "feature_count": 24,
+      "validation": {
+        "rows": 26496,
+        "accuracy": 0.6434556159420289,
+        "balanced_accuracy": 0.7148896044037323,
+        "log_loss": 0.7028551923783475,
+        "recall": {
+          "bull": 0.8937686443486907,
+          "bear": 0.7543103448275862,
+          "chop": 0.4965898240349202
+        },
+        "true_counts": {
+          "bull": 6034,
+          "bear": 5800,
+          "chop": 14662
+        },
+        "pred_counts": {
+          "bull": 10669,
+          "bear": 7473,
+          "chop": 8354
+        },
+        "confusion_matrix": [
+          [
+            5393,
+            146,
+            495
+          ],
+          [
+            847,
+            4375,
+            578
+          ],
+          [
+            4429,
+            2952,
+            7281
+          ]
+        ],
+        "flip_rate": 0.1593508209096056,
+        "mean_state_duration_bars": 6.274212645039071,
+        "median_state_duration_bars": 3.0
+      },
+      "log_likelihood_validation": [
+        -69596.0598129584,
+        171149.93630848578,
+        197721.21646234277,
+        209048.61714281744,
+        216322.97744969287,
+        222110.2059201723,
+        227272.97252764172,
+        231237.28280074778,
+        233906.66938752832,
+        235640.47685392882,
+        236779.36401342787,
+        237499.20003199813,
+        237950.4931763773,
+        238313.68788100933,
+        238670.3083147298,
+        238983.47483791117,
+        239171.49414008303,
+        239290.57207469162,
+        239385.5609512451,
+        239512.94097123118,
+        239627.0912402806,
+        239714.862421766
+      ],
+      "log_likelihood_final": [
+        -55696.08429274972,
+        317450.9870939166,
+        377608.2963953696,
+        392273.39237304946,
+        398153.5589089069,
+        402183.150408254,
+        405187.293546777,
+        407339.20625118987,
+        408733.8115939107,
+        409816.69524747436,
+        410646.1199527715,
+        411268.30269448995,
+        411731.1083380073,
+        412062.6543137874,
+        412290.28034481325,
+        412461.8406771066,
+        412605.17776481697,
+        412735.03395462455,
+        412859.0710057236,
+        412980.23851574917,
+        413095.7921528478,
+        413212.73859477945
+      ],
+      "model_path": "data/ensemble/supervised/sol_regime3_current_hmm_sensitive_wide24_20260707/regime3_current_sensitive_hmm_wide24_2024.joblib"
+    }
+  },
+  "outputs": {
+    "wide24": {
+      "sol_features_2025.csv": {
+        "source": "data/splits/year_oos/sol_features_2025.csv",
+        "sidecar": "data/ensemble/supervised/sol_regime3_current_hmm_sensitive_wide24_20260707/sol_features_2025_regime3_current_sensitive_hmm_wide24.csv",
+        "rows": 105120,
+        "range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "metrics": {
+          "rows": 105120,
+          "accuracy": 0.7307077625570776,
+          "balanced_accuracy": 0.7492892554357246,
+          "log_loss": 0.6738444605011492,
+          "recall": {
+            "bull": 0.7972406884618887,
+            "bear": 0.7520431152537881,
+            "chop": 0.6985839625914971
+          },
+          "true_counts": {
+            "bull": 21962,
+            "bear": 22637,
+            "chop": 60521
+          },
+          "pred_counts": {
+            "bull": 28914,
+            "bear": 25678,
+            "chop": 50528
+          },
+          "confusion_matrix": [
+            [
+              17509,
+              310,
+              4143
+            ],
+            [
+              1507,
+              17024,
+              4106
+            ],
+            [
+              9898,
+              8344,
+              42279
+            ]
+          ],
+          "flip_rate": 0.1550813839553268,
+          "mean_state_duration_bars": 6.447893025823468,
+          "median_state_duration_bars": 3.0
+        }
+      },
+      "sol_features_2026.csv": {
+        "source": "data/splits/year_oos/sol_features_2026.csv",
+        "sidecar": "data/ensemble/supervised/sol_regime3_current_hmm_sensitive_wide24_20260707/sol_features_2026_regime3_current_sensitive_hmm_wide24.csv",
+        "rows": 55499,
+        "range": [
+          "2026-01-01 00:00:00",
+          "2026-07-12 16:50:00"
+        ],
+        "metrics": {
+          "rows": 55499,
+          "accuracy": 0.74884232148327,
+          "balanced_accuracy": 0.7699210584686996,
+          "log_loss": 0.6707792192654006,
+          "recall": {
+            "bull": 0.8071543507859884,
+            "bear": 0.7705442902881536,
+            "chop": 0.7320645343319568
+          },
+          "true_counts": {
+            "bull": 8079,
+            "bear": 8433,
+            "chop": 38987
+          },
+          "pred_counts": {
+            "bull": 12292,
+            "bear": 11794,
+            "chop": 31413
+          },
+          "confusion_matrix": [
+            [
+              6521,
+              96,
+              1462
+            ],
+            [
+              525,
+              6498,
+              1410
+            ],
+            [
+              5246,
+              5200,
+              28541
+            ]
+          ],
+          "flip_rate": 0.13456340769036723,
+          "mean_state_duration_bars": 7.430579729548802,
+          "median_state_duration_bars": 3.0
+        }
+      }
+    }
+  }
+}

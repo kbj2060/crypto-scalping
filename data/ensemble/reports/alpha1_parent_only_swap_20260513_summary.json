@@ -1,0 +1,1484 @@
+{
+  "model_id": "alpha1_parent_only_swap_20260513",
+  "design": "Parent-only swap under current alpha1 contract. V21.2, V27, V31 exit, deep notional=2.0, and accounting are fixed; only parent decisions are replaced.",
+  "training_meta": {
+    "candidates": 1631,
+    "stride_bars": 48,
+    "max_train_horizon_bars": 288
+  },
+  "summary": [
+    {
+      "variant": "alpha1_original_parent",
+      "score": 390.1554550299394,
+      "val_pnl": -82.72453691677349,
+      "val_mdd": -83.27305571424152,
+      "val_c2_pnl": -94.8498351624684,
+      "val_c3_pnl": -98.57390401716597,
+      "cost1_pnl": 361.18717637569534,
+      "cost1_mdd": -31.741344176793795,
+      "cost1_trades": 199,
+      "cost1_deep_entries": 128,
+      "cost2_pnl": 88.74076757432363,
+      "cost3_pnl": 0.5776148307049533
+    },
+    {
+      "variant": "v40_6_hgb_pls_parent",
+      "score": 89.29599645257764,
+      "val_pnl": -37.940064533471855,
+      "val_mdd": -58.6971725527335,
+      "val_c2_pnl": -88.35475662817962,
+      "val_c3_pnl": -92.67357966843194,
+      "cost1_pnl": 95.67872768558982,
+      "cost1_mdd": -43.68233276312724,
+      "cost1_trades": 177,
+      "cost1_deep_entries": 127,
+      "cost2_pnl": 34.23524750805582,
+      "cost3_pnl": -25.99910457817103
+    },
+    {
+      "variant": "v40_7_lgbm_parent",
+      "score": 55.81237533636234,
+      "val_pnl": -64.99631728627031,
+      "val_mdd": -74.24631181151564,
+      "val_c2_pnl": -91.15594542539608,
+      "val_c3_pnl": -97.17616022231262,
+      "cost1_pnl": 90.93303826676046,
+      "cost1_mdd": -48.734235783951696,
+      "cost1_trades": 191,
+      "cost1_deep_entries": 119,
+      "cost2_pnl": -6.64255602344026,
+      "cost3_pnl": -60.298120781867695
+    },
+    {
+      "variant": "v40_8_lgbm_native_parent",
+      "score": -5.136185920363632,
+      "val_pnl": -78.00184102633713,
+      "val_mdd": -78.44669728489774,
+      "val_c2_pnl": -93.48373071214951,
+      "val_c3_pnl": -97.41971675263243,
+      "cost1_pnl": 39.773466694757076,
+      "cost1_mdd": -49.66044691858688,
+      "cost1_trades": 182,
+      "cost1_deep_entries": 130,
+      "cost2_pnl": -34.917670442267045,
+      "cost3_pnl": -47.26217797838053
+    },
+    {
+      "variant": "v40_9_lgbm_native_quant_parent",
+      "score": 27.290447651708316,
+      "val_pnl": -77.09371400700742,
+      "val_mdd": -79.91403972800364,
+      "val_c2_pnl": -93.91119324723904,
+      "val_c3_pnl": -97.84285008296473,
+      "cost1_pnl": 59.36227756089336,
+      "cost1_mdd": -17.84820115746727,
+      "cost1_trades": 169,
+      "cost1_deep_entries": 158,
+      "cost2_pnl": -24.722482649239264,
+      "cost3_pnl": -58.79936924765532
+    },
+    {
+      "variant": "v40_10_lgbm_tradefloor_parent",
+      "score": -34.72404611251094,
+      "val_pnl": -81.95774108256401,
+      "val_mdd": -82.01272859015639,
+      "val_c2_pnl": -94.50740529080602,
+      "val_c3_pnl": -97.85824521261937,
+      "cost1_pnl": 18.066631984816194,
+      "cost1_mdd": -34.61655672951266,
+      "cost1_trades": 178,
+      "cost1_deep_entries": 145,
+      "cost2_pnl": -52.010000233605915,
+      "cost3_pnl": -69.08153254750017
+    }
+  ],
+  "best_by_cost1": {
+    "variant": "alpha1_original_parent",
+    "score": 390.1554550299394,
+    "val_pnl": -82.72453691677349,
+    "val_mdd": -83.27305571424152,
+    "val_c2_pnl": -94.8498351624684,
+    "val_c3_pnl": -98.57390401716597,
+    "cost1_pnl": 361.18717637569534,
+    "cost1_mdd": -31.741344176793795,
+    "cost1_trades": 199,
+    "cost1_deep_entries": 128,
+    "cost2_pnl": 88.74076757432363,
+    "cost3_pnl": 0.5776148307049533
+  },
+  "variants": {
+    "alpha1_original_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+      "parent_meta": {
+        "kind": "raw"
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -82.72453691677349,
+          "mdd": -83.27305571424152,
+          "trades": 381,
+          "wr": 0.16535433070866143,
+          "trades_per_day": 4.141460652953388,
+          "deep_entries": 323,
+          "long_entries": 126,
+          "short_entries": 255,
+          "avg_notional": 2.0896390980799464,
+          "avg_leverage": 2.0862959251072306,
+          "exits": {
+            "deep_alpha_stop_loss": 243,
+            "deep_alpha_max_hold": 64,
+            "v21_2_stop_loss": 53,
+            "v21_2_take_profit": 2,
+            "deep_alpha_take_profit": 16,
+            "v21_2_max_hold": 3
+          },
+          "runner_actions": {
+            "deep_entry": 323,
+            "v21_entry": 58,
+            "v21_reject": 6,
+            "v21_add_on": 2
+          }
+        },
+        "cost2": {
+          "pnl": -94.8498351624684,
+          "mdd": -94.8498351624684,
+          "trades": 380,
+          "wr": 0.15526315789473685,
+          "trades_per_day": 4.130590677486318,
+          "deep_entries": 323,
+          "long_entries": 125,
+          "short_entries": 255,
+          "avg_notional": 2.0903016490031567,
+          "avg_leverage": 2.089242405828104,
+          "exits": {
+            "deep_alpha_stop_loss": 240,
+            "deep_alpha_max_hold": 69,
+            "v21_2_stop_loss": 51,
+            "v21_2_take_profit": 2,
+            "deep_alpha_take_profit": 14,
+            "v21_2_max_hold": 4
+          },
+          "runner_actions": {
+            "deep_entry": 323,
+            "v21_entry": 57,
+            "v21_reject": 3,
+            "v21_add_on": 1
+          }
+        },
+        "cost3": {
+          "pnl": -98.57390401716597,
+          "mdd": -98.57390401716597,
+          "trades": 383,
+          "wr": 0.1227154046997389,
+          "trades_per_day": 4.163200603887526,
+          "deep_entries": 324,
+          "long_entries": 123,
+          "short_entries": 260,
+          "avg_notional": 2.089873344997599,
+          "avg_leverage": 2.08852796022061,
+          "exits": {
+            "deep_alpha_stop_loss": 248,
+            "deep_alpha_max_hold": 66,
+            "v21_2_stop_loss": 54,
+            "v21_2_take_profit": 2,
+            "deep_alpha_take_profit": 10,
+            "v21_2_max_hold": 3
+          },
+          "runner_actions": {
+            "deep_entry": 324,
+            "v21_entry": 59,
+            "v21_reject": 1
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 361.18717637569534,
+          "mdd": -31.741344176793795,
+          "trades": 199,
+          "wr": 0.2964824120603015,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 128,
+          "long_entries": 84,
+          "short_entries": 115,
+          "avg_notional": 2.1901619420416902,
+          "avg_leverage": 2.2123608661733103,
+          "exits": {
+            "deep_alpha_stop_loss": 80,
+            "deep_alpha_max_hold": 33,
+            "v21_2_stop_loss": 56,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 71,
+            "v21_reject": 29,
+            "v21_add_on": 11
+          }
+        },
+        "cost2": {
+          "pnl": 88.74076757432363,
+          "mdd": -38.03968051948192,
+          "trades": 205,
+          "wr": 0.2634146341463415,
+          "trades_per_day": 3.494318181818182,
+          "deep_entries": 133,
+          "long_entries": 85,
+          "short_entries": 120,
+          "avg_notional": 2.1883526536808127,
+          "avg_leverage": 2.2092771926663635,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 87,
+            "v21_2_stop_loss": 57,
+            "v21_2_max_hold": 8,
+            "deep_alpha_take_profit": 14,
+            "v21_2_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 133,
+            "v21_entry": 72,
+            "v21_add_on": 10,
+            "v21_reject": 29
+          }
+        },
+        "cost3": {
+          "pnl": 0.5776148307049533,
+          "mdd": -48.47537013484388,
+          "trades": 206,
+          "wr": 0.22815533980582525,
+          "trades_per_day": 3.5113636363636367,
+          "deep_entries": 130,
+          "long_entries": 91,
+          "short_entries": 115,
+          "avg_notional": 2.192206142497522,
+          "avg_leverage": 2.2032231449951607,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 88,
+            "deep_alpha_take_profit": 15,
+            "v21_2_stop_loss": 62,
+            "v21_2_max_hold": 8,
+            "v21_2_take_profit": 6
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 76,
+            "v21_add_on": 11,
+            "v21_reject": 14
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 93,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    },
+    "v40_6_hgb_pls_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_full_v40_6_20260512/target_aware_full_bundle.pkl",
+      "parent_meta": {
+        "variant": "v40_6_hgb_pls_parent",
+        "projection_spec": {
+          "macro_dim": 1,
+          "micro_dim": 1,
+          "drop_raw_micro": true
+        },
+        "macro_cols": [
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "micro_cols": [
+          "net_taker_ratio",
+          "ofi_acceleration",
+          "taker_acceleration",
+          "trade_intensity",
+          "amihud_illiquidity_z",
+          "smart_money_flow",
+          "big_trade_ratio",
+          "whale_retail_ratio",
+          "liquidity_vacuum",
+          "execution_quality",
+          "squeeze_power",
+          "breakout_strength"
+        ],
+        "nan_missing": false,
+        "embedding_cache_consumer": "hf_v13_tree_vs_foundation_target_aware_full_v40_6_20260512",
+        "embedding_cache_paths": {
+          "train_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_macro_1eda8579c043643e.npy",
+          "val_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_macro_bf831aeccdf90498.npy",
+          "eval_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_macro_d4530b3ec043a784.npy",
+          "train_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_micro_c1e3a42ddb3362b2.npy",
+          "val_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_micro_0315b93b0a68047e.npy",
+          "eval_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_micro_169ea126e5daa46a.npy"
+        },
+        "factor_train_shapes": {
+          "macro": [
+            1631,
+            1
+          ],
+          "micro": [
+            1631,
+            1
+          ]
+        }
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -37.940064533471855,
+          "mdd": -58.6971725527335,
+          "trades": 358,
+          "wr": 0.18435754189944134,
+          "trades_per_day": 3.8914512172107947,
+          "deep_entries": 243,
+          "long_entries": 105,
+          "short_entries": 253,
+          "avg_notional": 2.19402374649982,
+          "avg_leverage": 2.337926208033984,
+          "exits": {
+            "deep_alpha_stop_loss": 185,
+            "deep_alpha_max_hold": 47,
+            "v21_2_max_hold": 14,
+            "v21_2_stop_loss": 94,
+            "v21_2_take_profit": 7,
+            "deep_alpha_take_profit": 11
+          },
+          "runner_actions": {
+            "deep_entry": 243,
+            "v21_entry": 115,
+            "v21_add_on": 16,
+            "v21_reject": 29
+          }
+        },
+        "cost2": {
+          "pnl": -88.35475662817962,
+          "mdd": -90.39668343862952,
+          "trades": 353,
+          "wr": 0.1529745042492918,
+          "trades_per_day": 3.8371013398754483,
+          "deep_entries": 244,
+          "long_entries": 105,
+          "short_entries": 248,
+          "avg_notional": 2.1811365112502408,
+          "avg_leverage": 2.323805095950213,
+          "exits": {
+            "deep_alpha_stop_loss": 188,
+            "deep_alpha_max_hold": 47,
+            "v21_2_max_hold": 18,
+            "v21_2_stop_loss": 90,
+            "v21_2_take_profit": 1,
+            "deep_alpha_take_profit": 9
+          },
+          "runner_actions": {
+            "deep_entry": 244,
+            "v21_entry": 109,
+            "v21_add_on": 6,
+            "v21_reject": 8
+          }
+        },
+        "cost3": {
+          "pnl": -92.67357966843194,
+          "mdd": -94.74304962395853,
+          "trades": 356,
+          "wr": 0.13202247191011235,
+          "trades_per_day": 3.8697112662766564,
+          "deep_entries": 241,
+          "long_entries": 106,
+          "short_entries": 250,
+          "avg_notional": 2.1888199515910953,
+          "avg_leverage": 2.33493377866666,
+          "exits": {
+            "deep_alpha_stop_loss": 188,
+            "deep_alpha_max_hold": 46,
+            "v21_2_max_hold": 18,
+            "v21_2_stop_loss": 93,
+            "v21_2_take_profit": 4,
+            "deep_alpha_take_profit": 7
+          },
+          "runner_actions": {
+            "deep_entry": 241,
+            "v21_entry": 115,
+            "v21_add_on": 6,
+            "v21_reject": 8
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 95.67872768558982,
+          "mdd": -43.68233276312724,
+          "trades": 177,
+          "wr": 0.288135593220339,
+          "trades_per_day": 3.0170454545454546,
+          "deep_entries": 127,
+          "long_entries": 100,
+          "short_entries": 77,
+          "avg_notional": 2.188375897760595,
+          "avg_leverage": 2.2998944261338585,
+          "exits": {
+            "deep_alpha_stop_loss": 81,
+            "deep_alpha_max_hold": 31,
+            "v21_2_max_hold": 7,
+            "v21_2_stop_loss": 39,
+            "deep_alpha_take_profit": 15,
+            "v21_2_take_profit": 4
+          },
+          "runner_actions": {
+            "deep_entry": 127,
+            "v21_entry": 50,
+            "v21_reject": 11,
+            "v21_add_on": 17
+          }
+        },
+        "cost2": {
+          "pnl": 34.23524750805582,
+          "mdd": -52.82951455141484,
+          "trades": 183,
+          "wr": 0.25136612021857924,
+          "trades_per_day": 3.119318181818182,
+          "deep_entries": 128,
+          "long_entries": 101,
+          "short_entries": 82,
+          "avg_notional": 2.198654003334552,
+          "avg_leverage": 2.328915919836609,
+          "exits": {
+            "deep_alpha_max_hold": 30,
+            "deep_alpha_stop_loss": 86,
+            "v21_2_max_hold": 7,
+            "v21_2_stop_loss": 43,
+            "deep_alpha_take_profit": 12,
+            "v21_2_take_profit": 5
+          },
+          "runner_actions": {
+            "deep_entry": 128,
+            "v21_entry": 55,
+            "v21_reject": 11,
+            "v21_add_on": 16
+          }
+        },
+        "cost3": {
+          "pnl": -25.99910457817103,
+          "mdd": -59.18047609854108,
+          "trades": 183,
+          "wr": 0.2185792349726776,
+          "trades_per_day": 3.119318181818182,
+          "deep_entries": 126,
+          "long_entries": 100,
+          "short_entries": 83,
+          "avg_notional": 2.205179742193454,
+          "avg_leverage": 2.3375283243881824,
+          "exits": {
+            "deep_alpha_max_hold": 26,
+            "deep_alpha_stop_loss": 89,
+            "deep_alpha_take_profit": 11,
+            "v21_2_max_hold": 7,
+            "v21_2_stop_loss": 45,
+            "v21_2_take_profit": 5
+          },
+          "runner_actions": {
+            "deep_entry": 126,
+            "v21_entry": 57,
+            "v21_reject": 11,
+            "v21_add_on": 10
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 81,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    },
+    "v40_7_lgbm_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_v40_7_20260512/target_aware_full_bundle.pkl",
+      "parent_meta": {
+        "variant": "v40_7_lgbm_parent",
+        "projection_spec": {
+          "macro_dim": 2,
+          "micro_dim": 2,
+          "drop_raw_micro": false
+        },
+        "macro_cols": [
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "micro_cols": [
+          "net_taker_ratio",
+          "ofi_acceleration",
+          "taker_acceleration",
+          "trade_intensity",
+          "amihud_illiquidity_z",
+          "smart_money_flow",
+          "big_trade_ratio",
+          "whale_retail_ratio",
+          "liquidity_vacuum",
+          "execution_quality",
+          "squeeze_power",
+          "breakout_strength"
+        ],
+        "nan_missing": false,
+        "embedding_cache_consumer": "hf_v13_tree_vs_foundation_target_aware_lgbm_v40_7_20260512",
+        "embedding_cache_paths": {
+          "train_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_macro_f9ba9aed6e954ba1.npy",
+          "val_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_macro_404f79c4465e5a6e.npy",
+          "eval_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_macro_fe2d80866dc0b9a8.npy",
+          "train_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_micro_a39e6a2d4f74a398.npy",
+          "val_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_micro_a285a16a38904712.npy",
+          "eval_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_micro_79b6b4e72dd56f94.npy"
+        },
+        "factor_train_shapes": {
+          "macro": [
+            1631,
+            2
+          ],
+          "micro": [
+            1631,
+            2
+          ]
+        }
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -64.99631728627031,
+          "mdd": -74.24631181151564,
+          "trades": 357,
+          "wr": 0.16526610644257703,
+          "trades_per_day": 3.8805812417437253,
+          "deep_entries": 258,
+          "long_entries": 98,
+          "short_entries": 259,
+          "avg_notional": 2.1919482398014014,
+          "avg_leverage": 2.29995737820244,
+          "exits": {
+            "deep_alpha_stop_loss": 193,
+            "deep_alpha_max_hold": 54,
+            "v21_2_stop_loss": 85,
+            "v21_2_max_hold": 11,
+            "v21_2_take_profit": 3,
+            "deep_alpha_take_profit": 11
+          },
+          "runner_actions": {
+            "deep_entry": 258,
+            "v21_entry": 99,
+            "v21_reject": 20,
+            "v21_add_on": 19
+          }
+        },
+        "cost2": {
+          "pnl": -91.15594542539608,
+          "mdd": -91.40047284907978,
+          "trades": 358,
+          "wr": 0.15363128491620112,
+          "trades_per_day": 3.8914512172107947,
+          "deep_entries": 255,
+          "long_entries": 100,
+          "short_entries": 258,
+          "avg_notional": 2.1973797534456043,
+          "avg_leverage": 2.3122396838845845,
+          "exits": {
+            "deep_alpha_stop_loss": 194,
+            "deep_alpha_max_hold": 53,
+            "v21_2_stop_loss": 88,
+            "v21_2_max_hold": 12,
+            "v21_2_take_profit": 3,
+            "deep_alpha_take_profit": 8
+          },
+          "runner_actions": {
+            "deep_entry": 255,
+            "v21_entry": 103,
+            "v21_reject": 13,
+            "v21_add_on": 7
+          }
+        },
+        "cost3": {
+          "pnl": -97.17616022231262,
+          "mdd": -97.17616022231262,
+          "trades": 365,
+          "wr": 0.1232876712328767,
+          "trades_per_day": 3.9675410454802797,
+          "deep_entries": 259,
+          "long_entries": 102,
+          "short_entries": 263,
+          "avg_notional": 2.197656829846722,
+          "avg_leverage": 2.3139695873895008,
+          "exits": {
+            "deep_alpha_stop_loss": 202,
+            "deep_alpha_max_hold": 48,
+            "v21_2_stop_loss": 91,
+            "v21_2_max_hold": 12,
+            "v21_2_take_profit": 3,
+            "deep_alpha_take_profit": 9
+          },
+          "runner_actions": {
+            "deep_entry": 259,
+            "v21_entry": 106,
+            "v21_reject": 7,
+            "v21_add_on": 2
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 90.93303826676046,
+          "mdd": -48.734235783951696,
+          "trades": 191,
+          "wr": 0.2774869109947644,
+          "trades_per_day": 3.2556818181818183,
+          "deep_entries": 119,
+          "long_entries": 93,
+          "short_entries": 98,
+          "avg_notional": 2.261653366897039,
+          "avg_leverage": 2.39637811496169,
+          "exits": {
+            "deep_alpha_stop_loss": 71,
+            "deep_alpha_max_hold": 32,
+            "v21_2_stop_loss": 61,
+            "deep_alpha_take_profit": 16,
+            "v21_2_max_hold": 7,
+            "v21_2_take_profit": 4
+          },
+          "runner_actions": {
+            "deep_entry": 119,
+            "v21_entry": 72,
+            "v21_reject": 13,
+            "v21_add_on": 15
+          }
+        },
+        "cost2": {
+          "pnl": -6.64255602344026,
+          "mdd": -56.873005785930644,
+          "trades": 190,
+          "wr": 0.25263157894736843,
+          "trades_per_day": 3.2386363636363638,
+          "deep_entries": 122,
+          "long_entries": 94,
+          "short_entries": 96,
+          "avg_notional": 2.2491934106001996,
+          "avg_leverage": 2.381064681389284,
+          "exits": {
+            "deep_alpha_max_hold": 35,
+            "deep_alpha_stop_loss": 74,
+            "v21_2_stop_loss": 57,
+            "v21_2_max_hold": 7,
+            "deep_alpha_take_profit": 13,
+            "v21_2_take_profit": 4
+          },
+          "runner_actions": {
+            "deep_entry": 122,
+            "v21_entry": 68,
+            "v21_add_on": 11,
+            "v21_reject": 9
+          }
+        },
+        "cost3": {
+          "pnl": -60.298120781867695,
+          "mdd": -72.42571257667707,
+          "trades": 199,
+          "wr": 0.20100502512562815,
+          "trades_per_day": 3.3920454545454546,
+          "deep_entries": 124,
+          "long_entries": 96,
+          "short_entries": 103,
+          "avg_notional": 2.2605042215025515,
+          "avg_leverage": 2.394425605495525,
+          "exits": {
+            "deep_alpha_max_hold": 28,
+            "deep_alpha_stop_loss": 85,
+            "deep_alpha_take_profit": 11,
+            "v21_2_stop_loss": 65,
+            "v21_2_max_hold": 7,
+            "v21_2_take_profit": 3
+          },
+          "runner_actions": {
+            "deep_entry": 124,
+            "v21_entry": 75,
+            "v21_add_on": 10
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 93,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    },
+    "v40_8_lgbm_native_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_native_v40_8_20260512/target_aware_full_bundle.pkl",
+      "parent_meta": {
+        "variant": "v40_8_lgbm_native_parent",
+        "projection_spec": {
+          "macro_dim": 2,
+          "micro_dim": 2,
+          "drop_raw_micro": false
+        },
+        "macro_cols": [
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "micro_cols": [
+          "net_taker_ratio",
+          "ofi_acceleration",
+          "taker_acceleration",
+          "trade_intensity",
+          "amihud_illiquidity_z",
+          "smart_money_flow",
+          "big_trade_ratio",
+          "whale_retail_ratio",
+          "liquidity_vacuum",
+          "execution_quality",
+          "squeeze_power",
+          "breakout_strength"
+        ],
+        "nan_missing": false,
+        "embedding_cache_consumer": "hf_v13_tree_vs_foundation_target_aware_lgbm_native_v40_8_20260512",
+        "embedding_cache_paths": {
+          "train_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_macro_20fabd820dab2fbf.npy",
+          "val_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_macro_4ab72485ec720f75.npy",
+          "eval_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_macro_49c05344577a39c1.npy",
+          "train_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_micro_44662be67c1453d3.npy",
+          "val_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_micro_6e81f74f2a53e5a2.npy",
+          "eval_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_micro_b9a890a3f27b662b.npy"
+        },
+        "factor_train_shapes": {
+          "macro": [
+            1631,
+            2
+          ],
+          "micro": [
+            1631,
+            2
+          ]
+        }
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -78.00184102633713,
+          "mdd": -78.44669728489774,
+          "trades": 352,
+          "wr": 0.1875,
+          "trades_per_day": 3.8262313644083794,
+          "deep_entries": 294,
+          "long_entries": 102,
+          "short_entries": 250,
+          "avg_notional": 2.1235795454545454,
+          "avg_leverage": 2.1713113275613263,
+          "exits": {
+            "deep_alpha_stop_loss": 215,
+            "deep_alpha_max_hold": 64,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 51,
+            "deep_alpha_take_profit": 15,
+            "v21_2_max_hold": 5
+          },
+          "runner_actions": {
+            "deep_entry": 294,
+            "v21_entry": 58,
+            "v21_add_on": 8,
+            "v21_reject": 1
+          }
+        },
+        "cost2": {
+          "pnl": -93.48373071214951,
+          "mdd": -93.48373071214951,
+          "trades": 358,
+          "wr": 0.1564245810055866,
+          "trades_per_day": 3.8914512172107947,
+          "deep_entries": 304,
+          "long_entries": 108,
+          "short_entries": 250,
+          "avg_notional": 2.113128491620112,
+          "avg_leverage": 2.1568236233040694,
+          "exits": {
+            "deep_alpha_stop_loss": 226,
+            "deep_alpha_max_hold": 63,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 48,
+            "deep_alpha_take_profit": 15,
+            "v21_2_max_hold": 4
+          },
+          "runner_actions": {
+            "deep_entry": 304,
+            "v21_entry": 54,
+            "v21_add_on": 8,
+            "v21_reject": 1
+          }
+        },
+        "cost3": {
+          "pnl": -97.41971675263243,
+          "mdd": -97.41971675263243,
+          "trades": 354,
+          "wr": 0.12146892655367232,
+          "trades_per_day": 3.8479713153425177,
+          "deep_entries": 297,
+          "long_entries": 104,
+          "short_entries": 250,
+          "avg_notional": 2.1207627118644066,
+          "avg_leverage": 2.1674065106268485,
+          "exits": {
+            "deep_alpha_stop_loss": 227,
+            "deep_alpha_max_hold": 59,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 49,
+            "deep_alpha_take_profit": 11,
+            "v21_2_max_hold": 6
+          },
+          "runner_actions": {
+            "deep_entry": 297,
+            "v21_entry": 57,
+            "v21_add_on": 2
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 39.773466694757076,
+          "mdd": -49.66044691858688,
+          "trades": 182,
+          "wr": 0.25824175824175827,
+          "trades_per_day": 3.1022727272727275,
+          "deep_entries": 130,
+          "long_entries": 84,
+          "short_entries": 98,
+          "avg_notional": 2.2142857142857144,
+          "avg_leverage": 2.2970521541950095,
+          "exits": {
+            "deep_alpha_stop_loss": 87,
+            "deep_alpha_max_hold": 30,
+            "v21_2_stop_loss": 42,
+            "deep_alpha_take_profit": 13,
+            "v21_2_max_hold": 9,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 52,
+            "v21_add_on": 16,
+            "v21_reject": 1
+          }
+        },
+        "cost2": {
+          "pnl": -34.917670442267045,
+          "mdd": -60.85228233993829,
+          "trades": 183,
+          "wr": 0.23497267759562843,
+          "trades_per_day": 3.119318181818182,
+          "deep_entries": 132,
+          "long_entries": 84,
+          "short_entries": 99,
+          "avg_notional": 2.209016393442623,
+          "avg_leverage": 2.28974759302628,
+          "exits": {
+            "deep_alpha_max_hold": 33,
+            "deep_alpha_stop_loss": 89,
+            "v21_2_stop_loss": 41,
+            "deep_alpha_take_profit": 10,
+            "v21_2_max_hold": 9,
+            "v21_2_take_profit": 1
+          },
+          "runner_actions": {
+            "deep_entry": 132,
+            "v21_entry": 51,
+            "v21_add_on": 8,
+            "v21_reject": 3
+          }
+        },
+        "cost3": {
+          "pnl": -47.26217797838053,
+          "mdd": -56.00898975952777,
+          "trades": 179,
+          "wr": 0.21787709497206703,
+          "trades_per_day": 3.0511363636363638,
+          "deep_entries": 130,
+          "long_entries": 82,
+          "short_entries": 97,
+          "avg_notional": 2.2053072625698324,
+          "avg_leverage": 2.284605834885163,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 94,
+            "deep_alpha_take_profit": 9,
+            "v21_2_stop_loss": 38,
+            "v21_2_max_hold": 9,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 130,
+            "v21_entry": 49,
+            "v21_add_on": 8,
+            "v21_reject": 2
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 93,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    },
+    "v40_9_lgbm_native_quant_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_native_quant_v40_9_20260512/target_aware_full_bundle.pkl",
+      "parent_meta": {
+        "variant": "v40_9_lgbm_native_quant_parent",
+        "projection_spec": {
+          "macro_dim": 1,
+          "micro_dim": 1,
+          "drop_raw_micro": true
+        },
+        "macro_cols": [
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "micro_cols": [
+          "net_taker_ratio",
+          "ofi_acceleration",
+          "taker_acceleration",
+          "trade_intensity",
+          "amihud_illiquidity_z",
+          "smart_money_flow",
+          "big_trade_ratio",
+          "whale_retail_ratio",
+          "squeeze_power",
+          "breakout_strength"
+        ],
+        "nan_missing": true,
+        "embedding_cache_consumer": "hf_v13_tree_vs_foundation_target_aware_lgbm_native_quant_v40_9_20260512",
+        "embedding_cache_paths": {
+          "train_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_macro_8e0acd079b471a94.npy",
+          "val_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_macro_0eaea8e5bbba26c0.npy",
+          "eval_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_macro_8018e25aed037b49.npy",
+          "train_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_micro_02dd4de1e87ce8ea.npy",
+          "val_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_micro_279d90fe3b2462f5.npy",
+          "eval_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_micro_7ed1ecde910c1309.npy"
+        },
+        "factor_train_shapes": {
+          "macro": [
+            1631,
+            1
+          ],
+          "micro": [
+            1631,
+            1
+          ]
+        }
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -77.09371400700742,
+          "mdd": -79.91403972800364,
+          "trades": 357,
+          "wr": 0.18487394957983194,
+          "trades_per_day": 3.8805812417437253,
+          "deep_entries": 343,
+          "long_entries": 122,
+          "short_entries": 235,
+          "avg_notional": 2.0294117647058822,
+          "avg_leverage": 2.0407718643012758,
+          "exits": {
+            "deep_alpha_stop_loss": 257,
+            "deep_alpha_max_hold": 66,
+            "v21_2_take_profit": 1,
+            "v21_2_stop_loss": 12,
+            "deep_alpha_take_profit": 20,
+            "v21_2_max_hold": 1
+          },
+          "runner_actions": {
+            "deep_entry": 343,
+            "v21_entry": 14,
+            "v21_add_on": 3
+          }
+        },
+        "cost2": {
+          "pnl": -93.91119324723904,
+          "mdd": -93.97363431129338,
+          "trades": 361,
+          "wr": 0.14958448753462603,
+          "trades_per_day": 3.9240611436120028,
+          "deep_entries": 348,
+          "long_entries": 125,
+          "short_entries": 236,
+          "avg_notional": 2.0270083102493075,
+          "avg_leverage": 2.0374400914567117,
+          "exits": {
+            "deep_alpha_stop_loss": 267,
+            "deep_alpha_max_hold": 66,
+            "v21_2_take_profit": 1,
+            "v21_2_stop_loss": 11,
+            "deep_alpha_take_profit": 15,
+            "v21_2_max_hold": 1
+          },
+          "runner_actions": {
+            "deep_entry": 348,
+            "v21_entry": 13,
+            "v21_reject": 1,
+            "v21_add_on": 2
+          }
+        },
+        "cost3": {
+          "pnl": -97.84285008296473,
+          "mdd": -97.84285008296473,
+          "trades": 360,
+          "wr": 0.12222222222222222,
+          "trades_per_day": 3.9131911681449334,
+          "deep_entries": 347,
+          "long_entries": 126,
+          "short_entries": 234,
+          "avg_notional": 2.027083333333333,
+          "avg_leverage": 2.0375440917107586,
+          "exits": {
+            "deep_alpha_stop_loss": 272,
+            "deep_alpha_max_hold": 61,
+            "v21_2_take_profit": 1,
+            "v21_2_stop_loss": 11,
+            "deep_alpha_take_profit": 14,
+            "v21_2_max_hold": 1
+          },
+          "runner_actions": {
+            "deep_entry": 347,
+            "v21_entry": 13,
+            "v21_add_on": 1
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 59.36227756089336,
+          "mdd": -17.84820115746727,
+          "trades": 169,
+          "wr": 0.2781065088757396,
+          "trades_per_day": 2.8806818181818183,
+          "deep_entries": 158,
+          "long_entries": 78,
+          "short_entries": 91,
+          "avg_notional": 2.048816568047337,
+          "avg_leverage": 2.0676716445947214,
+          "exits": {
+            "deep_alpha_stop_loss": 108,
+            "deep_alpha_max_hold": 29,
+            "deep_alpha_take_profit": 21,
+            "v21_2_stop_loss": 8,
+            "v21_2_max_hold": 3
+          },
+          "runner_actions": {
+            "deep_entry": 158,
+            "v21_entry": 11,
+            "v21_reject": 1,
+            "v21_add_on": 5
+          }
+        },
+        "cost2": {
+          "pnl": -24.722482649239264,
+          "mdd": -39.70223092467053,
+          "trades": 172,
+          "wr": 0.2558139534883721,
+          "trades_per_day": 2.931818181818182,
+          "deep_entries": 161,
+          "long_entries": 78,
+          "short_entries": 94,
+          "avg_notional": 2.04796511627907,
+          "avg_leverage": 2.0664913252122554,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 111,
+            "deep_alpha_take_profit": 18,
+            "v21_2_stop_loss": 8,
+            "v21_2_max_hold": 3
+          },
+          "runner_actions": {
+            "deep_entry": 161,
+            "v21_entry": 11,
+            "v21_reject": 1,
+            "v21_add_on": 4
+          }
+        },
+        "cost3": {
+          "pnl": -58.79936924765532,
+          "mdd": -59.65495838339451,
+          "trades": 172,
+          "wr": 0.21511627906976744,
+          "trades_per_day": 2.931818181818182,
+          "deep_entries": 160,
+          "long_entries": 77,
+          "short_entries": 95,
+          "avg_notional": 2.052325581395349,
+          "avg_leverage": 2.0725359911406422,
+          "exits": {
+            "deep_alpha_max_hold": 28,
+            "deep_alpha_stop_loss": 115,
+            "deep_alpha_take_profit": 17,
+            "v21_2_stop_loss": 10,
+            "v21_2_max_hold": 2
+          },
+          "runner_actions": {
+            "deep_entry": 160,
+            "v21_entry": 12,
+            "v21_add_on": 4,
+            "v21_reject": 1
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 83,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    },
+    "v40_10_lgbm_tradefloor_parent": {
+      "parent_model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_tree_vs_foundation_target_aware_lgbm_native_quant_tradefloor_v40_10_20260512/target_aware_full_bundle.pkl",
+      "parent_meta": {
+        "variant": "v40_10_lgbm_tradefloor_parent",
+        "projection_spec": {
+          "macro_dim": 2,
+          "micro_dim": 2,
+          "drop_raw_micro": false
+        },
+        "macro_cols": [
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "micro_cols": [
+          "net_taker_ratio",
+          "ofi_acceleration",
+          "taker_acceleration",
+          "trade_intensity",
+          "amihud_illiquidity_z",
+          "smart_money_flow",
+          "big_trade_ratio",
+          "whale_retail_ratio",
+          "squeeze_power",
+          "breakout_strength"
+        ],
+        "nan_missing": true,
+        "embedding_cache_consumer": "hf_v13_tree_vs_foundation_target_aware_lgbm_native_quant_v40_9_20260512",
+        "embedding_cache_paths": {
+          "train_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_macro_8e0acd079b471a94.npy",
+          "val_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_macro_0eaea8e5bbba26c0.npy",
+          "eval_macro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_macro_8018e25aed037b49.npy",
+          "train_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/tree_train_micro_02dd4de1e87ce8ea.npy",
+          "val_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/val_micro_279d90fe3b2462f5.npy",
+          "eval_micro": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/eval_micro_7ed1ecde910c1309.npy"
+        },
+        "factor_train_shapes": {
+          "macro": [
+            1631,
+            2
+          ],
+          "micro": [
+            1631,
+            2
+          ]
+        }
+      },
+      "validation": {
+        "cost1": {
+          "pnl": -81.95774108256401,
+          "mdd": -82.01272859015639,
+          "trades": 357,
+          "wr": 0.18487394957983194,
+          "trades_per_day": 3.8805812417437253,
+          "deep_entries": 324,
+          "long_entries": 110,
+          "short_entries": 247,
+          "avg_notional": 2.069327731092437,
+          "avg_leverage": 2.1014854329825345,
+          "exits": {
+            "deep_alpha_stop_loss": 239,
+            "deep_alpha_max_hold": 70,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 29,
+            "deep_alpha_take_profit": 15,
+            "v21_2_max_hold": 2
+          },
+          "runner_actions": {
+            "deep_entry": 324,
+            "v21_entry": 33,
+            "v21_add_on": 6,
+            "v21_reject": 1
+          }
+        },
+        "cost2": {
+          "pnl": -94.50740529080602,
+          "mdd": -94.50740529080602,
+          "trades": 359,
+          "wr": 0.14484679665738162,
+          "trades_per_day": 3.902321192677864,
+          "deep_entries": 328,
+          "long_entries": 114,
+          "short_entries": 245,
+          "avg_notional": 2.0647632311977717,
+          "avg_leverage": 2.0951585400472523,
+          "exits": {
+            "deep_alpha_stop_loss": 250,
+            "deep_alpha_max_hold": 64,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 27,
+            "deep_alpha_take_profit": 14,
+            "v21_2_max_hold": 2
+          },
+          "runner_actions": {
+            "deep_entry": 328,
+            "v21_entry": 31,
+            "v21_add_on": 5,
+            "v21_reject": 1
+          }
+        },
+        "cost3": {
+          "pnl": -97.85824521261937,
+          "mdd": -97.85824521261937,
+          "trades": 354,
+          "wr": 0.11581920903954802,
+          "trades_per_day": 3.8479713153425177,
+          "deep_entries": 326,
+          "long_entries": 115,
+          "short_entries": 239,
+          "avg_notional": 2.059322033898305,
+          "avg_leverage": 2.087733570611377,
+          "exits": {
+            "deep_alpha_stop_loss": 255,
+            "deep_alpha_max_hold": 60,
+            "v21_2_take_profit": 2,
+            "v21_2_stop_loss": 23,
+            "deep_alpha_take_profit": 11,
+            "v21_2_max_hold": 3
+          },
+          "runner_actions": {
+            "deep_entry": 326,
+            "v21_entry": 28,
+            "v21_add_on": 3,
+            "v21_reject": 1
+          }
+        }
+      },
+      "metrics": {
+        "cost1": {
+          "pnl": 18.066631984816194,
+          "mdd": -34.61655672951266,
+          "trades": 178,
+          "wr": 0.24157303370786518,
+          "trades_per_day": 3.034090909090909,
+          "deep_entries": 145,
+          "long_entries": 65,
+          "short_entries": 113,
+          "avg_notional": 2.1383121103335685,
+          "avg_leverage": 2.2024211455315226,
+          "exits": {
+            "deep_alpha_stop_loss": 102,
+            "deep_alpha_max_hold": 30,
+            "deep_alpha_take_profit": 13,
+            "v21_2_max_hold": 5,
+            "v21_2_stop_loss": 26,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 145,
+            "v21_entry": 33,
+            "v21_add_on": 16,
+            "v21_reject": 3
+          }
+        },
+        "cost2": {
+          "pnl": -52.010000233605915,
+          "mdd": -57.35701955600396,
+          "trades": 185,
+          "wr": 0.21621621621621623,
+          "trades_per_day": 3.153409090909091,
+          "deep_entries": 148,
+          "long_entries": 67,
+          "short_entries": 118,
+          "avg_notional": 2.1492948953479742,
+          "avg_leverage": 2.21767340781864,
+          "exits": {
+            "deep_alpha_max_hold": 32,
+            "deep_alpha_stop_loss": 106,
+            "deep_alpha_take_profit": 10,
+            "v21_2_max_hold": 5,
+            "v21_2_stop_loss": 30,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 148,
+            "v21_entry": 37,
+            "v21_add_on": 13,
+            "v21_reject": 2
+          }
+        },
+        "cost3": {
+          "pnl": -69.08153254750017,
+          "mdd": -71.28624338493465,
+          "trades": 185,
+          "wr": 0.1783783783783784,
+          "trades_per_day": 3.153409090909091,
+          "deep_entries": 147,
+          "long_entries": 67,
+          "short_entries": 118,
+          "avg_notional": 2.1533489494020284,
+          "avg_leverage": 2.2234765105743346,
+          "exits": {
+            "deep_alpha_max_hold": 27,
+            "deep_alpha_stop_loss": 111,
+            "deep_alpha_take_profit": 9,
+            "v21_2_max_hold": 5,
+            "v21_2_stop_loss": 31,
+            "v21_2_take_profit": 2
+          },
+          "runner_actions": {
+            "deep_entry": 147,
+            "v21_entry": 38,
+            "v21_add_on": 4
+          }
+        }
+      },
+      "feature_audit": {
+        "status": "pass",
+        "blocking": [],
+        "warnings": [
+          "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+          "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+        ],
+        "feature_count": 93,
+        "clean_regime_feature_count": 23,
+        "forbidden_feature_cols": [],
+        "train_range": [
+          "2025-01-01 00:00:00",
+          "2025-12-31 23:55:00"
+        ],
+        "eval_range": [
+          "2026-01-01 00:00:00",
+          "2026-02-28 16:00:00"
+        ],
+        "train_eval_timestamp_overlap": 0
+      }
+    }
+  },
+  "audit": {
+    "status": "pass",
+    "verdict": "iterate",
+    "blocking": [],
+    "warnings": [
+      "alpha1_original_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "alpha1_original_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_6_hgb_pls_parent:missing_train_features_zero_filled:garch_vol_z,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "v40_6_hgb_pls_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_6_hgb_pls_parent:cost3_not_survived",
+      "v40_7_lgbm_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "v40_7_lgbm_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_7_lgbm_parent:cost2_not_survived",
+      "v40_7_lgbm_parent:cost3_not_survived",
+      "v40_8_lgbm_native_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "v40_8_lgbm_native_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_8_lgbm_native_parent:cost2_not_survived",
+      "v40_8_lgbm_native_parent:cost3_not_survived",
+      "v40_9_lgbm_native_quant_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "v40_9_lgbm_native_quant_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_9_lgbm_native_quant_parent:cost2_not_survived",
+      "v40_9_lgbm_native_quant_parent:cost3_not_survived",
+      "v40_10_lgbm_tradefloor_parent:missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "v40_10_lgbm_tradefloor_parent:missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+      "v40_10_lgbm_tradefloor_parent:cost2_not_survived",
+      "v40_10_lgbm_tradefloor_parent:cost3_not_survived",
+      "no_parent_swap_beat_alpha1_original_parent"
+    ],
+    "selection_uses_2026": false,
+    "oos_window": "2026 fixed OOS",
+    "alpha1_contract_fixed": true,
+    "parent_only_swap": true,
+    "deep_notional": 2.0
+  },
+  "artifacts": {
+    "out_dir": "/home/llewyn/crypto-scalping/data/ensemble/supervised/alpha1_parent_only_swap_20260513",
+    "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_parent_only_swap_20260513_summary.json",
+    "audit": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_parent_only_swap_20260513_audit.json",
+    "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha1_parent_only_swap_20260513_grid.csv"
+  }
+}

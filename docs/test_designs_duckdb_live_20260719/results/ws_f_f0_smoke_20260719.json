@@ -1,0 +1,38 @@
+{
+  "stage": "WS-F-F0",
+  "generated_at": "2026-07-19T02:18:29.884660+09:00",
+  "device": "cuda",
+  "model": "NeoQuasar/Kronos-small",
+  "tokenizer": "NeoQuasar/Kronos-Tokenizer-base",
+  "exploration_window_note": "Using rows strictly before 2025-08-31 only (pre-registered exploration split)",
+  "n_rows_1m_exploration": 876060,
+  "n_rows_1h_exploration": 14601,
+  "smoke_test": {
+    "lookback": 400,
+    "pred_len": 20,
+    "window_start": "2025-08-13 11:00:00",
+    "window_end_history": "2025-08-30 02:00:00",
+    "pred_window": [
+      "2025-08-30 03:00:00",
+      "2025-08-30 22:00:00"
+    ],
+    "pred_has_nan": false,
+    "pred_has_inf": false,
+    "pred_close_head": [
+      4300.81689453125,
+      4297.10888671875,
+      4288.96240234375,
+      4310.93505859375,
+      4324.0732421875
+    ],
+    "true_close_head": [
+      4350.85,
+      4350.85,
+      4377.71,
+      4394.15,
+      4399.8
+    ],
+    "single_window_direction_match": true
+  },
+  "F0_verdict": "PASS -- model loads, runs, no NaN/Inf in single-window smoke test"
+}

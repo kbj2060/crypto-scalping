@@ -1,0 +1,75 @@
+{
+  "experiment": "B2_conf_plus_realistic_maker_fill",
+  "val_sweep": [
+    {
+      "threshold": 0.34,
+      "n_signals": 11194,
+      "n_filled": 8630,
+      "fill_rate": 0.7709487225299267,
+      "hit_rate": 0.5086906141367323,
+      "avg_pnl_pct": -0.00030552835120635583,
+      "total_pnl_pct": -2.636709670910851
+    },
+    {
+      "threshold": 0.4,
+      "n_signals": 9620,
+      "n_filled": 7356,
+      "fill_rate": 0.7646569646569646,
+      "hit_rate": 0.5356171832517672,
+      "avg_pnl_pct": -0.0002423436220914527,
+      "total_pnl_pct": -1.782679684104726
+    },
+    {
+      "threshold": 0.45,
+      "n_signals": 7498,
+      "n_filled": 5658,
+      "fill_rate": 0.754601226993865,
+      "hit_rate": 0.5715800636267232,
+      "avg_pnl_pct": -0.00013786552663484227,
+      "total_pnl_pct": -0.7800431496999376
+    },
+    {
+      "threshold": 0.5,
+      "n_signals": 5479,
+      "n_filled": 4021,
+      "fill_rate": 0.7338930461763096,
+      "hit_rate": 0.622979358368565,
+      "avg_pnl_pct": 2.8852316198520594e-05,
+      "total_pnl_pct": 0.1160151634342513
+    },
+    {
+      "threshold": 0.55,
+      "n_signals": 4096,
+      "n_filled": 2941,
+      "fill_rate": 0.718017578125,
+      "hit_rate": 0.6701802108126488,
+      "avg_pnl_pct": 0.00018025562630380563,
+      "total_pnl_pct": 0.5301317969594923
+    },
+    {
+      "threshold": 0.6,
+      "n_signals": 3119,
+      "n_filled": 2192,
+      "fill_rate": 0.7027893555626803,
+      "hit_rate": 0.7153284671532847,
+      "avg_pnl_pct": 0.00034474597233182886,
+      "total_pnl_pct": 0.7556831713513689
+    }
+  ],
+  "chosen_threshold": 0.6,
+  "oos_at_chosen_threshold": {
+    "n_signals": 3766,
+    "n_filled": 2523,
+    "fill_rate": 0.6699415825809878,
+    "hit_rate": 0.6745937376139517,
+    "avg_pnl_pct": 0.00010459198451124988,
+    "total_pnl_pct": 0.26388557692188347
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Same realistic maker-fill model as the A-experiment version, applied to the microstructure-window price+microstructure feature set. ~70-day-bounded window, ~12-day OOS -- thin sample, directional signal only."
+}

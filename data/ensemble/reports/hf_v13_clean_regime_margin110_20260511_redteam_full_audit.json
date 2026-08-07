@@ -1,0 +1,264 @@
+{
+  "status": "fail",
+  "verdict": "reject_until_reselected_without_2026_oos",
+  "blocking": [
+    "oos_parameter_selection_leak:margin110_overlay_selected_on_2026_results"
+  ],
+  "warnings": [
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "position_fraction_above_1_intentional_margin_overlay"
+  ],
+  "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/hf_v13_clean_regime_margin110_20260511/v13_clean_regime_margin110.pkl",
+  "report": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_clean_regime_margin110_20260511_summary.json",
+  "ledger": "/home/llewyn/crypto-scalping/data/ensemble/reports/hf_v13_clean_regime_margin110_20260511_summary_cost1_ledger.csv",
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "ledger_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "position_fraction_above_1_intentional_margin_overlay"
+    ],
+    "checks": {
+      "entry_price_error_sample": [],
+      "entry_fill_delta_min_counts": {
+        "5.0": 80
+      },
+      "exit_fill_delta_min_counts": {
+        "5.0": 80
+      },
+      "max_position_fraction": 1.1,
+      "rows_position_fraction_gt_1": 73,
+      "entry_fee_pct_matches": true,
+      "exit_fee_pct_matches": true
+    }
+  },
+  "leakage_checks": {
+    "train_eval_timestamp_overlap": 0,
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "model_train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "model_eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "report_split_policy": "base model trained on 2025 Jan-Sep, selected on 2025 Oct-Dec, evaluated on fixed 2026 OOS",
+    "oos_parameter_selection_risk": "BLOCKING: margin110 overlay was selected after testing multiple exposure scales on the 2026 OOS frame in the interactive loop; there is no 2025-only selection artifact for notional_bucket_scale=1.15 and max_margin_fraction=1.10."
+  },
+  "recomputed_metrics": {
+    "cost1": {
+      "pnl": 139.40707050411612,
+      "mdd": -35.04235843898853,
+      "trades": 80,
+      "wr": 0.2,
+      "trades_per_day": 1.3636363636363638,
+      "long_entries": 28,
+      "short_entries": 52,
+      "avg_notional": 2.724757081932889,
+      "avg_leverage": 2.5784731179865035,
+      "action_counts": {
+        "cash": 12555,
+        "long": 28,
+        "short": 52
+      },
+      "exits": {
+        "learned_stop_loss": 64,
+        "learned_max_hold": 11,
+        "learned_take_profit": 5
+      }
+    },
+    "cost2": {
+      "pnl": 103.01953110685385,
+      "mdd": -34.8147974134718,
+      "trades": 86,
+      "wr": 0.18604651162790697,
+      "trades_per_day": 1.465909090909091,
+      "long_entries": 30,
+      "short_entries": 56,
+      "avg_notional": 2.724249042323253,
+      "avg_leverage": 2.579857736652925,
+      "action_counts": {
+        "cash": 12640,
+        "long": 30,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 70,
+        "learned_max_hold": 10,
+        "learned_take_profit": 6
+      }
+    },
+    "cost3": {
+      "pnl": 32.04895618355474,
+      "mdd": -43.99081532586213,
+      "trades": 92,
+      "wr": 0.17391304347826086,
+      "trades_per_day": 1.5681818181818183,
+      "long_entries": 36,
+      "short_entries": 56,
+      "avg_notional": 2.6975504487883257,
+      "avg_leverage": 2.5544988788117142,
+      "action_counts": {
+        "cash": 12658,
+        "long": 36,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 76,
+        "learned_max_hold": 10,
+        "learned_take_profit": 6
+      }
+    }
+  },
+  "reported_metrics": {
+    "cost1": {
+      "pnl": 139.40707050411612,
+      "mdd": -35.04235843898853,
+      "trades": 80,
+      "wr": 0.2,
+      "trades_per_day": 1.3636363636363638,
+      "long_entries": 28,
+      "short_entries": 52,
+      "avg_notional": 2.724757081932889,
+      "avg_leverage": 2.5784731179865035,
+      "action_counts": {
+        "cash": 12555,
+        "long": 28,
+        "short": 52
+      },
+      "exits": {
+        "learned_stop_loss": 64,
+        "learned_max_hold": 11,
+        "learned_take_profit": 5
+      }
+    },
+    "cost2": {
+      "pnl": 103.01953110685385,
+      "mdd": -34.8147974134718,
+      "trades": 86,
+      "wr": 0.18604651162790697,
+      "trades_per_day": 1.465909090909091,
+      "long_entries": 30,
+      "short_entries": 56,
+      "avg_notional": 2.724249042323253,
+      "avg_leverage": 2.579857736652925,
+      "action_counts": {
+        "cash": 12640,
+        "long": 30,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 70,
+        "learned_max_hold": 10,
+        "learned_take_profit": 6
+      }
+    },
+    "cost3": {
+      "pnl": 32.04895618355474,
+      "mdd": -43.99081532586213,
+      "trades": 92,
+      "wr": 0.17391304347826086,
+      "trades_per_day": 1.5681818181818183,
+      "long_entries": 36,
+      "short_entries": 56,
+      "avg_notional": 2.6975504487883257,
+      "avg_leverage": 2.5544988788117142,
+      "action_counts": {
+        "cash": 12658,
+        "long": 36,
+        "short": 56
+      },
+      "exits": {
+        "learned_stop_loss": 76,
+        "learned_max_hold": 10,
+        "learned_take_profit": 6
+      }
+    }
+  },
+  "metric_deltas": {
+    "cost1": {
+      "pnl": 0.0,
+      "mdd": 0.0,
+      "trades": 0.0,
+      "trades_per_day": 0.0,
+      "avg_notional": 0.0,
+      "avg_leverage": 0.0
+    },
+    "cost2": {
+      "pnl": 0.0,
+      "mdd": 0.0,
+      "trades": 0.0,
+      "trades_per_day": 0.0,
+      "avg_notional": 0.0,
+      "avg_leverage": 0.0
+    },
+    "cost3": {
+      "pnl": 0.0,
+      "mdd": 0.0,
+      "trades": 0.0,
+      "trades_per_day": 0.0,
+      "avg_notional": 0.0,
+      "avg_leverage": 0.0
+    }
+  },
+  "feature_contract": {
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "regime_named_feature_cols": [
+      "patchtst_regime_sim",
+      "ai_vol_regime_pct",
+      "clean_regime_2024_unsup_v4_bear_prob",
+      "clean_regime_2024_unsup_v4_bull_prob",
+      "clean_regime_2024_unsup_v4_chop_prob",
+      "clean_regime_2024_unsup_v4_cluster",
+      "clean_regime_2024_unsup_v4_cluster_confidence",
+      "clean_regime_2024_unsup_v4_cluster_prob_0",
+      "clean_regime_2024_unsup_v4_cluster_prob_1",
+      "clean_regime_2024_unsup_v4_cluster_prob_2",
+      "clean_regime_2024_unsup_v4_cluster_prob_3",
+      "clean_regime_2024_unsup_v4_cluster_prob_4",
+      "clean_regime_2024_unsup_v4_confidence",
+      "clean_regime_2024_unsup_v4_entropy",
+      "clean_regime_2024_unsup_v4_factor_crowding",
+      "clean_regime_2024_unsup_v4_factor_flow",
+      "clean_regime_2024_unsup_v4_factor_liquidity",
+      "clean_regime_2024_unsup_v4_factor_trend",
+      "clean_regime_2024_unsup_v4_factor_vol",
+      "clean_regime_2024_unsup_v4_normal_prob",
+      "clean_regime_2024_unsup_v4_risk_off_prob",
+      "clean_regime_2024_unsup_v4_state_code",
+      "clean_regime_2024_unsup_v4_transition_risk",
+      "clean_regime_2024_unsup_v4_trend_bias",
+      "clean_regime_2024_unsup_v4_whipsaw_prob"
+    ],
+    "non_clean_regime_cols": []
+  },
+  "accounting_notes": [
+    "Entry fee is charged at entry as cash * fee * notional.",
+    "Exit fee is charged at exit as pre-exit cash * fee * notional.",
+    "Entry/exit slippage is applied to fill prices.",
+    "Stops and take-profits are evaluated on notional-scaled unrealized return, matching the HF labeler contract."
+  ]
+}

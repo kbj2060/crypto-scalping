@@ -1,0 +1,33 @@
+{
+  "source": "trendscan",
+  "action_col": "trendscan_action",
+  "fixed_threshold": 0.55,
+  "val": {
+    "n_signals": 214,
+    "n_filled": 159,
+    "fill_rate": 0.7429906542056075,
+    "hit_rate": 0.4968553459119497,
+    "avg_pnl_pct": -0.000260232801672022,
+    "total_pnl_pct": -0.0413770154658515
+  },
+  "oos": {
+    "n_signals": 888,
+    "n_filled": 661,
+    "fill_rate": 0.7443693693693694,
+    "hit_rate": 0.5506807866868382,
+    "avg_pnl_pct": -7.28812472918219e-05,
+    "total_pnl_pct": -0.04817450445989428
+  },
+  "baseline_for_comparison": {
+    "report": "scalp_1m_tune_maker_realistic_20260716.json",
+    "label": "base triple-barrier (scalp_action)",
+    "oos_total_pnl_pct": 3.7390646402123644
+  },
+  "compliance": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "note": "Classifier trained to predict trendscan_action instead of the base triple-barrier scalp_action; trade P&L still evaluated via the base label's ATR-scaled TP/SL + realistic maker-fill simulation, unchanged."
+}

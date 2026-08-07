@@ -1,0 +1,206 @@
+{
+  "blockers": [],
+  "execution_capability": {
+    "external_observation_ingest_only": true,
+    "order_submission_supported": false,
+    "simulated_fill_supported": false
+  },
+  "fresh_start_utc": "2026-07-18 02:45:00",
+  "model_id": "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718",
+  "model_sha256": "0f31d880ebec386c9d33de0cc1b345ec6e9873da37760c4cd77b44c653bc6d5c",
+  "ready": true,
+  "required_feature_columns": [
+    "timestamp",
+    "close",
+    "bar_open_close_logret",
+    "bar_range_pct",
+    "log_volume",
+    "log_quote_volume",
+    "log_trade_count",
+    "bar_taker_buy_ratio",
+    "net_taker_ratio",
+    "taker_acceleration",
+    "trade_intensity",
+    "big_trade_ratio",
+    "log_return",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "garman_klass_vol",
+    "realized_vol_ratio",
+    "amihud_illiquidity_z",
+    "chop_index",
+    "cvp_volume_imbalance",
+    "mean_reversion_z",
+    "breakout_strength",
+    "funding_z_score",
+    "ofi_acceleration",
+    "kalman_velocity",
+    "realized_skewness",
+    "cvd_slope_12",
+    "cvd_slope_48",
+    "compression_score",
+    "vwap_dist_24",
+    "upper_wick_z",
+    "lower_wick_z",
+    "liquidity_vacuum",
+    "execution_quality",
+    "micro_obi",
+    "micro_taker_buy_ratio",
+    "micro_nif_whale",
+    "micro_nif_retail",
+    "micro_oi_delta_pct",
+    "micro_funding_rate",
+    "micro_recent_trade_count_5m",
+    "micro_recent_trade_notional_5m",
+    "micro_recent_whale_count_5m",
+    "micro_data_stale",
+    "micro_depth_connected",
+    "micro_trade_connected",
+    "micro_poll_connected",
+    "micro_depth_age_sec",
+    "micro_trade_age_sec",
+    "micro_poll_age_sec",
+    "micro_valid_taker_flow",
+    "micro_valid_nif",
+    "micro_warmup_30m_ready",
+    "micro_available",
+    "micro_age_min",
+    "book_spread_bps",
+    "book_available",
+    "book_age_min"
+  ],
+  "schema_version": "eth_micro_scalp_v3.observer_readiness.v1",
+  "sources": {
+    "feature_stream": {
+      "covers_fresh_start": true,
+      "exists": true,
+      "latest_utc": "2026-07-18 02:46:00",
+      "path": "/home/llewyn/crypto-scalping/data/live/eth_micro_scalp_v4_features_1m.csv",
+      "rows": 61,
+      "valid": true
+    },
+    "feature_stream_build": {
+      "parity": {
+        "canonical_source_coverage_end_utc": "2026-06-30 16:00:00",
+        "end_utc": "2026-06-30 16:00:00",
+        "max_scaled_error": 0.006262653565592659,
+        "p99_scaled_error": 3.7149445756273926e-08,
+        "pass": true,
+        "rows": 360,
+        "start_utc": "2026-06-30 10:01:00",
+        "thresholds": {
+          "max_scaled_error": 0.1,
+          "p99_scaled_error": 0.02
+        },
+        "worst_features": [
+          {
+            "max_scaled_error": 0.006262653565592659,
+            "name": "execution_quality",
+            "p99_scaled_error": 0.0037510991592263464
+          },
+          {
+            "max_scaled_error": 2.471734327613184e-07,
+            "name": "bb_width_z",
+            "p99_scaled_error": 2.471734327613184e-07
+          },
+          {
+            "max_scaled_error": 8.632247937497e-08,
+            "name": "mean_reversion_z",
+            "p99_scaled_error": 8.632247937497e-08
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "bar_open_close_logret",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "bar_range_pct",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "log_volume",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "log_quote_volume",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "log_trade_count",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "bar_taker_buy_ratio",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "net_taker_ratio",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "taker_acceleration",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "trade_intensity",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "big_trade_ratio",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "log_return",
+            "p99_scaled_error": 0.0
+          },
+          {
+            "max_scaled_error": 0.0,
+            "name": "volatility_z",
+            "p99_scaled_error": 0.0
+          }
+        ]
+      },
+      "path": "/home/llewyn/crypto-scalping/data/ensemble/eth_micro_scalp_source_stable_opportunity_moe_v4_20260718/fresh_forward_observer/feature_stream_build.json",
+      "published": true,
+      "stream_contract_pass": true
+    },
+    "live_decision_frame_snapshot": {
+      "eligible_as_v3_input": false,
+      "latest_utc": "2026-07-18 02:40:00",
+      "modal_cadence": "0 days 00:05:00",
+      "path": "/home/llewyn/crypto-scalping/data/live/decision_feature_frame_snapshot.pkl.gz",
+      "rows": 612
+    },
+    "microstructure": {
+      "latest_utc": "2026-07-18 02:50:00",
+      "path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb"
+    },
+    "order_book": {
+      "latest_utc": "2026-07-18 02:45:28.111386",
+      "path": "/home/llewyn/crypto-scalping/data/live/microstructure.duckdb"
+    },
+    "training_features": {
+      "latest_utc": "2026-07-12 09:00:00",
+      "path": "/home/llewyn/crypto-scalping/data/training_features_1m.csv",
+      "tail_cadence": "0 days 00:01:00"
+    }
+  },
+  "warnings": [
+    "legacy live decision frame cadence is 0 days 00:05:00, not one minute",
+    "frozen one-minute training feature file ends before the fresh interval"
+  ]
+}

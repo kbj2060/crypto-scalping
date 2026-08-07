@@ -40,10 +40,10 @@ def _load_work_frame(rl_path: str, feature_path: str) -> tuple[pd.DataFrame, pd.
 
 
 def _trend_dir_from_rl(df: pd.DataFrame) -> np.ndarray:
-    xgb_cols = ["m7_trend_xgb_dn", "m7_trend_xgb_fl", "m7_trend_xgb_up"]
+    xgb_cols = ["m7_trend_xgb_dn", "m7_trend_xgb_up"]
     if all(c in df.columns for c in xgb_cols):
         xgb_probs = df[xgb_cols].to_numpy(dtype=np.float64)
-        return np.argmax(np.nan_to_num(xgb_probs, nan=1.0 / 3.0), axis=1)
+        return np.argmax(np.nan_to_num(xgb_probs, nan=0.5), axis=1)
     return np.ones(len(df), dtype=np.int64)
 
 

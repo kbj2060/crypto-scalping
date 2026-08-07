@@ -24,6 +24,12 @@ from ensemble.rl_runtime_primitives import (
 
 _POS_THRESH = 0.15
 _CLOSE_THRESH = 0.05
+_DEFAULT_MAX_LEVERAGE = 5.0
+_DEFAULT_MIN_TRADE_EXPOSURE = 0.10
+_DEFAULT_RISK_MAX_MARGIN = 0.35
+_DEFAULT_NET_EDGE_MIN = 0.0015
+_DEFAULT_EARLY_EXIT_WINDOW = 3
+_DEFAULT_EARLY_EXIT_PENALTY = 0.035
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -77,6 +83,16 @@ class SACTradingEnv:
         #   were effectively ignored.
         self.pos_thresh = float(specialist_pos_thresh) if specialist_pos_thresh is not None else float(_POS_THRESH)
         self.close_thresh = float(specialist_close_thresh) if specialist_close_thresh is not None else float(_CLOSE_THRESH)
+        self.max_leverage = max(1.0, float(os.getenv("RL_MAX_LEVERAGE", str(_DEFAULT_MAX_LEVERAGE))))
+        self.min_trade_exposure = float(
+            np.clip(float(os.getenv("RL_MIN_TRADE_EXPOSURE", str(_DEFAULT_MIN_TRADE_EXPOSURE))), 0.0, self.max_leverage)
+        )
+        self.risk_max_margin = float(np.clip(float(os.getenv("RL_RISK_MAX_MARGIN", str(_DEFAULT_RISK_MAX_MARGIN))), 0.01, 1.0))
+        self.net_edge_min = max(0.0, float(os.getenv("RL_NET_EDGE_MIN", str(_DEFAULT_NET_EDGE_MIN))))
+        self.early_exit_window = max(0, int(os.getenv("RL_EARLY_EXIT_WINDOW", str(_DEFAULT_EARLY_EXIT_WINDOW))))
+        self.early_exit_penalty = max(
+            0.0, float(os.getenv("RL_EARLY_EXIT_PENALTY", str(_DEFAULT_EARLY_EXIT_PENALTY)))
+        )
         self.specialist_idle_penalty = (
             float(specialist_idle_penalty) if specialist_idle_penalty is not None else None
         )
@@ -153,6 +169,13 @@ class SACTradingEnv:
         self._m7_tp_price_np = _num_col_or_default("m7_tp_price", 0.0)
         self._m7_sl_price_np = _num_col_or_default("m7_sl_price", 0.0)
         self._m7_target_hold_np = _num_col_or_default("m7_target_hold", 0.0)
+        self._m7_q50_np = _num_col_or_default("m7_q50", 0.0)
+        self._ai_vol_pct_np = _num_col_or_default("ai_vol_regime_pct", 0.5)
+        self._ai_adverse_np = _num_col_or_default("ai_adverse_risk", 0.0)
+        self._ai_reward_np = _num_col_or_default("ai_reward_risk", 0.0)
+        self._ai_flow_flip_np = _num_col_or_default("ai_flow_flip_prob", 0.5)
+        self._m7_qwidth_np = _num_col_or_default("m7_qwidth", 0.0)
+        self._garch_vol_z_np = _num_col_or_default("garch_vol_z", 0.0)
         self._n_pred = len(STATE_PRED)
         self._n_conf = len(STATE_CONF)
         self._n_elite = len(STATE_ELITE)
@@ -223,6 +246,7 @@ class SACTradingEnv:
         self.entry_price = 0.0
         self.entry_idx = 0
         self.current_leverage = 0.0
+        self.current_margin_fraction = 0.0
         self.total_trades = 0
         self.win_trades = 0
         self.unrealized_pnl = 0.0
@@ -242,19 +266,101 @@ class SACTradingEnv:
         self._frame_stack.clear()
         return self._get_stacked_state(self._build_state(self.current_step))
 
-    def step(self, action: float):
-        action = float(np.clip(action, -1.0, 1.0))
+    def _risk_overlay(self, idx: int, direction: float, conviction: float) -> tuple[float, float, float]:
+        """Convert policy conviction into futures margin/leverage via risk controls."""
+        if abs(direction) <= self.pos_thresh or conviction <= 0.0:
+            return 0.0, 1.0, 0.0
+
+        idx = min(max(int(idx), 0), len(self._close_np) - 1)
+        row = self._feat_np[min(idx, len(self._feat_np) - 1)]
+        o = self._n_pred + self._n_conf + self._n_elite + self._n_alpha
+        regime_vec = np.nan_to_num(row[o : o + self._n_regime], nan=0.0)
+        regime_idx = int(np.argmax(regime_vec)) if regime_vec.size else 4
+
+        # Regime caps are a risk overlay, not a learned action. They keep the
+        # policy from solving alpha and liquidation risk in one unstable output.
+        if regime_idx == 0:  # chop
+            lev_cap = min(self.max_leverage, float(os.getenv("RL_RISK_CHOP_LEV_CAP", "1.4")))
+        elif regime_idx == 1:  # whipsaw
+            lev_cap = min(self.max_leverage, float(os.getenv("RL_RISK_WHIPSAW_LEV_CAP", "1.2")))
+        elif regime_idx in (2, 3):  # bull/bear trend
+            lev_cap = min(self.max_leverage, float(os.getenv("RL_RISK_TREND_LEV_CAP", str(self.max_leverage))))
+        else:
+            lev_cap = min(self.max_leverage, float(os.getenv("RL_RISK_NORMAL_LEV_CAP", "2.5")))
+        lev_cap = max(1.0, lev_cap)
+
+        vol_pct = float(np.clip(self._ai_vol_pct_np[idx], 0.0, 1.0))
+        adverse = float(np.clip(np.tanh(max(0.0, float(self._ai_adverse_np[idx])) / 0.010), 0.0, 1.0))
+        reward_edge = float(np.clip(np.tanh(max(0.0, float(self._ai_reward_np[idx])) / 4.0), 0.0, 1.0))
+        flow_flip = float(np.clip(self._ai_flow_flip_np[idx], 0.0, 1.0))
+        q50_abs = abs(float(self._m7_q50_np[idx]))
+        qwidth = max(0.0, float(self._m7_qwidth_np[idx]))
+        if qwidth <= 1e-12:
+            qwidth = max(abs(float(self._garch_vol_z_np[idx])) * 0.002, 5e-4)
+        uncertainty = float(np.clip(qwidth / 0.015, 0.0, 1.0))
+
+        # Use q50 as an opportunity magnitude gate only. In the current dataset
+        # M7 directional outputs can invert out-of-sample, so direction remains
+        # the policy's job while this overlay only blocks low-edge/noisy periods.
+        edge_buffer = self.net_edge_min * (1.0 + 0.35 * vol_pct + 0.35 * flow_flip + 0.20 * uncertainty)
+        if q50_abs <= edge_buffer:
+            return 0.0, 1.0, 0.0
+
+        risk_damp = (
+            (1.0 - 0.55 * vol_pct)
+            * (1.0 - 0.45 * adverse)
+            * (1.0 - 0.35 * flow_flip)
+            * (1.0 - 0.25 * uncertainty)
+        )
+        risk_damp = float(np.clip(risk_damp, 0.10, 1.0))
+        opportunity = float(np.clip(0.55 + 0.45 * reward_edge, 0.55, 1.0))
+        effective = float(np.clip(conviction * risk_damp * opportunity, 0.0, 1.0))
+
+        leverage = float(1.0 + (lev_cap - 1.0) * effective)
+        exposure_cap = float(max(self.min_trade_exposure, lev_cap * self.risk_max_margin))
+        exposure_cap = min(exposure_cap, lev_cap)
+        exposure = float(self.min_trade_exposure + (exposure_cap - self.min_trade_exposure) * effective)
+        if effective <= 1e-8:
+            exposure = 0.0
+        margin_fraction = float(np.clip(exposure / max(leverage, 1e-8), 0.0, self.risk_max_margin))
+        exposure = float(margin_fraction * leverage)
+        return margin_fraction, leverage, exposure
+
+    def _decode_action(self, action, idx: int | None = None) -> tuple[float, float, float, float]:
+        """Decode 2D policy action into direction plus risk-overlay exposure."""
+        arr = np.asarray(action, dtype=np.float32).reshape(-1)
+        if arr.size <= 1:
+            direction = float(np.clip(arr[0] if arr.size else 0.0, -1.0, 1.0))
+            # Legacy scalar DSAC mode: action magnitude is directly interpreted as
+            # exposure strength. This matches train_rl_dsac_agent.py behaviour.
+            exposure = float(abs(direction)) if abs(direction) > self.pos_thresh else 0.0
+            margin_fraction = exposure
+            leverage = 1.0 if exposure > 0.0 else 0.0
+            return direction, margin_fraction, leverage, exposure
+        else:
+            direction = float(np.clip(arr[0], -1.0, 1.0))
+            dir_intensity = float(
+                np.clip((abs(direction) - float(self.pos_thresh)) / max(1.0 - float(self.pos_thresh), 1e-6), 0.0, 1.0)
+            )
+            raw_conviction = float(np.clip((arr[1] + 1.0) * 0.5, 0.0, 1.0))
+            conviction = dir_intensity * raw_conviction
+        if abs(direction) <= self.pos_thresh:
+            conviction = 0.0
+        margin_fraction, leverage, exposure = self._risk_overlay(self.current_step if idx is None else idx, direction, conviction)
+        return direction, margin_fraction, leverage, exposure
+
+    def step(self, action):
+        decision_step = self.current_step
+        direction_action, margin_fraction, leverage_rate, exposure_rate = self._decode_action(action, decision_step)
         fill_step = min(self.current_step + 1, len(self._open_np) - 1)
         fill_price = float(self._open_np[fill_step])
-        decision_step = self.current_step
 
         if self.pos is not None:
             prev_portfolio_value = self.balance * (1.0 + self.unrealized_pnl)
         else:
             prev_portfolio_value = self.balance
 
-        abs_action = abs(action)
-        leverage_rate = abs_action
+        abs_action = abs(direction_action)
         force_close = bool(
             self.force_close_enable
             and self.pos is not None
@@ -265,23 +371,27 @@ class SACTradingEnv:
         is_entering_short = False
         is_closing = False
         is_adjusting = False
+        exposure_turnover = 0.0
 
         if force_close:
             is_closing = True
         elif self.pos is None:
-            if action > self.pos_thresh:
+            if direction_action > self.pos_thresh and exposure_rate > 0.0:
                 is_entering_long = True
-            elif action < -self.pos_thresh:
+            elif direction_action < -self.pos_thresh and exposure_rate > 0.0:
                 is_entering_short = True
         else:
             if abs_action < self.close_thresh:
                 is_closing = True
-            elif self.pos == "LONG" and action < -self.pos_thresh:
+            elif self.pos == "LONG" and direction_action < -self.pos_thresh:
                 is_closing = True
-            elif self.pos == "SHORT" and action > self.pos_thresh:
+            elif self.pos == "SHORT" and direction_action > self.pos_thresh:
                 is_closing = True
             else:
                 is_adjusting = True
+            if is_adjusting and exposure_rate <= 0.0:
+                is_adjusting = False
+                is_closing = True
 
         self._just_closed = False
         self._last_realized_pnl = 0.0
@@ -294,31 +404,57 @@ class SACTradingEnv:
             self.entry_price = fill_price * (1.0 + self.slip)
             self.entry_idx = fill_step
             self.current_leverage = leverage_rate
-            self.balance -= self.balance * self.fee * self.current_leverage
+            self.current_margin_fraction = margin_fraction
+            exposure_turnover = exposure_rate
+            self.balance -= self.balance * self.fee * exposure_rate
         elif is_entering_short:
             self.pos = "SHORT"
             self.entry_price = fill_price * (1.0 - self.slip)
             self.entry_idx = fill_step
             self.current_leverage = leverage_rate
-            self.balance -= self.balance * self.fee * self.current_leverage
+            self.current_margin_fraction = margin_fraction
+            exposure_turnover = exposure_rate
+            self.balance -= self.balance * self.fee * exposure_rate
         elif is_adjusting and self.pos is not None:
-            old_lev = self.current_leverage
+            old_exposure = self.current_margin_fraction * self.current_leverage
             new_lev = leverage_rate
-            lev_delta = abs(new_lev - old_lev)
-            if lev_delta > 0.05:
-                self.balance -= self.balance * self.fee * lev_delta
+            new_margin = margin_fraction
+            new_exposure = new_margin * new_lev
+            exposure_delta = abs(new_exposure - old_exposure)
+            if exposure_delta > 0.05:
+                exposure_turnover = exposure_delta
+                # Realize PnL at the old exposure before resizing. Otherwise a later
+                # leverage increase would retroactively amplify the whole past move.
+                base_balance = self.balance
+                if self.pos == "LONG":
+                    realized_pnl = (fill_price * (1.0 - self.slip) - self.entry_price) / self.entry_price
+                    self.entry_price = fill_price * (1.0 + self.slip)
+                else:
+                    realized_pnl = (self.entry_price - fill_price * (1.0 + self.slip)) / self.entry_price
+                    self.entry_price = fill_price * (1.0 - self.slip)
+                realized_pnl *= old_exposure
+                self.balance = base_balance * (1.0 + realized_pnl)
+                self.balance -= base_balance * self.fee * exposure_delta
                 self.current_leverage = new_lev
+                self.current_margin_fraction = new_margin
+                self.entry_idx = fill_step
+                self.hold_count = 0
+                self.unrealized_pnl = 0.0
+                self.peak_pnl = 0.0
+                self.max_drawdown = 0.0
         elif is_closing and self.pos is not None:
             closed_side = str(self.pos)
             closed_hold_count = int(self.hold_count)
             base_balance = self.balance
+            close_exposure = self.current_margin_fraction * self.current_leverage
             if self.pos == "LONG":
                 realized_pnl = (fill_price * (1.0 - self.slip) - self.entry_price) / self.entry_price
             else:
                 realized_pnl = (self.entry_price - fill_price * (1.0 + self.slip)) / self.entry_price
-            realized_pnl *= self.current_leverage
+            realized_pnl *= self.current_margin_fraction * self.current_leverage
             self.balance = base_balance * (1.0 + realized_pnl)
-            self.balance -= base_balance * self.fee * self.current_leverage
+            self.balance -= base_balance * self.fee * (self.current_margin_fraction * self.current_leverage)
+            exposure_turnover = close_exposure
             self.total_trades += 1
             if realized_pnl > 0:
                 self.win_trades += 1
@@ -328,6 +464,7 @@ class SACTradingEnv:
             self._last_closed_hold_count = closed_hold_count
             self.pos = None
             self.current_leverage = 0.0
+            self.current_margin_fraction = 0.0
             self.hold_count = 0
             self.unrealized_pnl = 0.0
             self.peak_pnl = 0.0
@@ -343,7 +480,7 @@ class SACTradingEnv:
                 raw_pnl = (next_price * (1.0 - self.slip) - self.entry_price) / self.entry_price
             else:
                 raw_pnl = (self.entry_price - next_price * (1.0 + self.slip)) / self.entry_price
-            self.unrealized_pnl = raw_pnl * self.current_leverage
+            self.unrealized_pnl = raw_pnl * (self.current_margin_fraction * self.current_leverage)
             self.max_drawdown = min(self.max_drawdown, self.unrealized_pnl)
             self.peak_pnl = max(self.peak_pnl, self.unrealized_pnl)
 
@@ -373,9 +510,29 @@ class SACTradingEnv:
             if self._was_force_closed:
                 r3_quality = -0.30
             elif self._last_realized_pnl > 0:
-                r3_quality = 0.15 * min(self._last_realized_pnl / 0.01, 1.0)
+                # Reward meaningful wins, not tiny fee-sensitive scalps.
+                r3_quality = 0.08 * float(np.clip((self._last_realized_pnl - 0.002) / 0.012, 0.0, 1.0))
             else:
-                r3_quality = -0.08 if self.side_mode == "both" else -0.05
+                loss_ratio = float(np.clip(abs(self._last_realized_pnl) / 0.012, 0.0, 2.0))
+                r3_quality = -(0.10 + 0.10 * loss_ratio) if self.side_mode == "both" else -(0.07 + 0.08 * loss_ratio)
+
+        r9_early_exit = 0.0
+        if (
+            self._just_closed
+            and not self._was_force_closed
+            and self.early_exit_window > 0
+            and self._last_closed_hold_count < self.early_exit_window
+        ):
+            shortfall = float((self.early_exit_window - self._last_closed_hold_count) / max(self.early_exit_window, 1))
+            # Do not punish a genuinely strong fast take-profit as much; punish
+            # weak scalps and early losses because they usually lose after costs.
+            strong_profit_credit = 0.0
+            if self._last_realized_pnl > 0.0:
+                strong_profit_credit = float(np.clip((self._last_realized_pnl - 0.002) / 0.006, 0.0, 1.0))
+            loss_multiplier = 1.0
+            if self._last_realized_pnl < 0.0:
+                loss_multiplier += float(np.clip(abs(self._last_realized_pnl) / 0.010, 0.0, 1.0))
+            r9_early_exit = -self.early_exit_penalty * shortfall * (1.0 - strong_profit_credit) * loss_multiplier
 
         r4_time_decay = 0.0
         if self.pos is not None and self.hold_count > self.hold_plateau_start:
@@ -400,23 +557,15 @@ class SACTradingEnv:
         if self.pos is None:
             if self.specialist_idle_penalty is not None:
                 r5_idle = float(self.specialist_idle_penalty)
-            else:
-                # 0=chop, 1=whipsaw, 2=bull, 3=bear, 4=normal
-                if regime_idx in (2, 3):
-                    r5_idle = -0.003
-                elif regime_idx in (0, 1):
-                    r5_idle = -0.0003
-                else:
-                    r5_idle = -0.001
 
-        # 실제 fee/slippage는 balance 변화로 이미 반영됨.
-        # 추가 진입 고정 페널티는 이중 비용이 되어 진입 억제를 과도하게 키울 수 있어 제거.
-        r6_trade_cost = 0.0
+        # Balance already reflects fee/slippage; this shaping term discourages
+        # hyperactive resizing that wins often but loses net expectancy.
+        r6_trade_cost = -0.004 * float(np.clip(exposure_turnover, 0.0, 5.0))
 
         r8_kelly_regime = 0.0
         if self.pos is not None:
             step_ret = (current_portfolio_value - prev_portfolio_value) / (prev_portfolio_value + 1e-8)
-            lev = float(np.clip(self.current_leverage, 0.0, 1.5))
+            lev = float(np.clip((self.current_margin_fraction * self.current_leverage) / max(self.max_leverage, 1e-6), 0.0, 1.0))
             is_aligned = (self.pos == "LONG" and regime_idx == 2) or (self.pos == "SHORT" and regime_idx == 3)
             if step_ret > 0.0 and is_aligned:
                 r8_kelly_regime += self.kelly_align_bonus * lev * float(np.clip(step_ret / 0.002, 0.0, 1.0))
@@ -426,7 +575,15 @@ class SACTradingEnv:
                 r8_kelly_regime -= extra * abs(r1_pnl) * lev
 
         raw_reward = (
-            r1_pnl + r2_drawdown + r3_quality + r4_time_decay + r5_idle + r6_trade_cost + r7_adverse_hold + r8_kelly_regime
+            r1_pnl
+            + r2_drawdown
+            + r3_quality
+            + r4_time_decay
+            + r5_idle
+            + r6_trade_cost
+            + r7_adverse_hold
+            + r8_kelly_regime
+            + r9_early_exit
         )
         # Keep reward linear around 0 and avoid double tanh saturation.
         reward = float(np.clip(raw_reward, -2.0, 2.0))
@@ -439,9 +596,9 @@ class SACTradingEnv:
                 ep_realized = (ep_end_price * (1.0 - self.slip) - self.entry_price) / self.entry_price
             else:
                 ep_realized = (self.entry_price - ep_end_price * (1.0 + self.slip)) / self.entry_price
-            ep_realized *= self.current_leverage
+            ep_realized *= self.current_margin_fraction * self.current_leverage
             self.balance = base_balance * (1.0 + ep_realized)
-            self.balance -= base_balance * self.fee * self.current_leverage
+            self.balance -= base_balance * self.fee * (self.current_margin_fraction * self.current_leverage)
             self.total_trades += 1
             if ep_realized > 0:
                 self.win_trades += 1
@@ -452,6 +609,8 @@ class SACTradingEnv:
                 terminal_r -= self.terminal_quality_loss
             reward = float(np.clip(raw_reward + terminal_r, -2.0, 2.0))
             self.pos = None
+            self.current_leverage = 0.0
+            self.current_margin_fraction = 0.0
 
         info = {
             "pnl_pct": (self.balance / self.initial_balance - 1) * 100,
@@ -460,6 +619,9 @@ class SACTradingEnv:
             "closed_side": self._last_closed_side,
             "closed_hold_count": int(self._last_closed_hold_count),
             "regime_bucket": self.regime_bucket(decision_step),
+            "leverage": float(self.current_leverage),
+            "margin_fraction": float(self.current_margin_fraction),
+            "notional_exposure": float(self.current_margin_fraction * self.current_leverage),
         }
         return self._get_stacked_state(self._build_state(self.current_step)), reward, done, info
 
@@ -518,30 +680,37 @@ class ReplayBuffer:
         self._ptr = 0
         self._size = 0
         self._s = None
-        self._a = np.empty(capacity, np.float32)
+        self._a = None
         self._r = np.empty(capacity, np.float32)
         self._ns = None
         self._d = np.empty(capacity, np.bool_)
 
     def push(self, state, action, reward, next_state, done):
+        state_arr = np.asarray(state, dtype=np.float32)
+        next_state_arr = np.asarray(next_state, dtype=np.float32)
         if self._s is None:
-            sdim = len(state)
-            self._s = np.empty((self._cap, sdim), np.float32)
-            self._ns = np.empty((self._cap, sdim), np.float32)
+            self._s = np.empty((self._cap, *state_arr.shape), np.float32)
+            self._ns = np.empty((self._cap, *next_state_arr.shape), np.float32)
+        action_arr = np.asarray(action, dtype=np.float32).reshape(-1)
+        if self._a is None:
+            self._a = np.empty((self._cap, int(action_arr.size)), np.float32)
         p = self._ptr
-        self._s[p] = state
-        self._a[p] = action
+        self._s[p] = state_arr
+        self._a[p] = action_arr
         self._r[p] = reward
-        self._ns[p] = next_state
+        self._ns[p] = next_state_arr
         self._d[p] = done
         self._ptr = (p + 1) % self._cap
         self._size = min(self._size + 1, self._cap)
 
     def sample(self, batch_size):
         idx = np.random.randint(0, self._size, size=batch_size)
+        actions = self._a[idx]
+        if actions.ndim == 2 and actions.shape[1] == 1:
+            actions = actions[:, 0]
         return (
             self._s[idx],
-            self._a[idx],
+            actions,
             self._r[idx],
             self._ns[idx],
             self._d[idx].astype(np.float32),

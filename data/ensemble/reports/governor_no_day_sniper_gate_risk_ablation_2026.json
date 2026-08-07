@@ -1,0 +1,90 @@
+{
+  "hard_bypass_baseline": {
+    "pnl": 13987.647320942639,
+    "mdd": -14.077185285116222,
+    "trades": 691,
+    "trades_per_day": 11.777712019885188,
+    "wr": 0.7452966714905933,
+    "sniper_entries": 142,
+    "day_entries": 0,
+    "micro_entries": 548,
+    "micro_regime_entries": {
+      "whipsaw": 72,
+      "normal": 398,
+      "chop": 78
+    },
+    "resize_events": 0,
+    "avg_leverage": 3.971014492753623,
+    "avg_notional_exposure": 3.467072548709023,
+    "risk_blocks": 0,
+    "sniper_mask_mode": "hard",
+    "sniper_bypass_risk": true,
+    "report_path": "tmp/governor_no_day_baseline_recheck.json"
+  },
+  "hard_risk_engine": {
+    "pnl": 1093.193981134004,
+    "mdd": -14.077185285116222,
+    "trades": 600,
+    "trades_per_day": 10.226667455761378,
+    "wr": 0.7283333333333334,
+    "sniper_entries": 95,
+    "day_entries": 0,
+    "micro_entries": 504,
+    "micro_regime_entries": {
+      "whipsaw": 66,
+      "normal": 357,
+      "chop": 81
+    },
+    "resize_events": 0,
+    "avg_leverage": 4.563300271759149,
+    "avg_notional_exposure": 3.737575229651435,
+    "risk_blocks": 0,
+    "sniper_mask_mode": "hard",
+    "sniper_bypass_risk": false,
+    "report_path": "tmp/governor_no_day_hard_risk_2026.json"
+  },
+  "env_mask_risk_engine": {
+    "pnl": 142.7055362822258,
+    "mdd": -19.114580691138315,
+    "trades": 449,
+    "trades_per_day": 7.652956146061431,
+    "wr": 0.6904231625835189,
+    "sniper_entries": 215,
+    "day_entries": 0,
+    "micro_entries": 234,
+    "micro_regime_entries": {
+      "whipsaw": 46,
+      "normal": 157,
+      "chop": 31
+    },
+    "resize_events": 0,
+    "avg_leverage": 3.6116018848663307,
+    "avg_notional_exposure": 2.508642467453459,
+    "risk_blocks": 0,
+    "sniper_mask_mode": "env",
+    "sniper_bypass_risk": false,
+    "report_path": "tmp/governor_no_day_env_risk_2026.json"
+  },
+  "env_mask_bypass": {
+    "pnl": 2427.8662788022593,
+    "mdd": -25.538825858491254,
+    "trades": 649,
+    "trades_per_day": 11.061845297981892,
+    "wr": 0.7164869029275809,
+    "sniper_entries": 314,
+    "day_entries": 0,
+    "micro_entries": 334,
+    "micro_regime_entries": {
+      "whipsaw": 42,
+      "normal": 247,
+      "chop": 45
+    },
+    "resize_events": 0,
+    "avg_leverage": 2.5771604938271606,
+    "avg_notional_exposure": 2.210643497068755,
+    "risk_blocks": 0,
+    "sniper_mask_mode": "env",
+    "sniper_bypass_risk": true,
+    "report_path": "tmp/governor_no_day_env_bypass_2026.json"
+  }
+}

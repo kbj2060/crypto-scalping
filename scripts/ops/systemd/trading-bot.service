@@ -1,0 +1,24 @@
+[Unit]
+Description=crypto-scalping trading_bot (live decision/shadow loop)
+After=network-online.target
+Wants=network-online.target
+# Restart forever, never permanently give up (StartLimitIntervalSec=0 disables
+# systemd's default "stop restarting after N crashes" behavior) -- this matches
+# _supervise.sh's guarantee that the loop keeps trying. The tradeoff vs the old
+# bash supervisor is losing its 300s slowdown after a crash-loop; ops_watchdog's
+# trading_bot_process check still pages immediately regardless.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/trading_bot.py
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trading_bot
+
+[Install]
+WantedBy=multi-user.target

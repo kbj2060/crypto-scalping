@@ -1,0 +1,15 @@
+{
+  "status": "deprecated_do_not_use_active_or_candidate",
+  "deprecated_at_kst": "2026-06-13",
+  "model_id": "omega1_2_1_tp_runner_only_baseline_20260612",
+  "reason": "Red-team audit found OOS-mined TP-runner selection and non-runtime-equivalent replay assumptions. The reported OOS +205.92% is not clean holdout evidence.",
+  "audit_report": "tmp/causal_regen_20260516/omega1_2_1_tp_runner_baseline_redteam_audit_20260613/report.json",
+  "audit_doc": "docs/audits/omega1_2_1_tp_runner_baseline_redteam_20260613.md",
+  "blocked_for": [
+    "active_runtime",
+    "candidate_baseline",
+    "promotion_evidence",
+    "clean_oos_comparison",
+    "downstream_model_selection"
+  ]
+}

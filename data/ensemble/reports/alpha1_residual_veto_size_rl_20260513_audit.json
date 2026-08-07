@@ -1,0 +1,92 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "best_did_not_beat_alpha1_cost1",
+    "best_cost3_not_improved"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "parent_full_replacement": false,
+  "direction_change_allowed": false,
+  "new_entry_generation_allowed": false,
+  "actions": {
+    "skip": 0.0,
+    "size_0_5": 0.5,
+    "size_0_75": 0.75,
+    "keep_1_0": 1.0
+  },
+  "selected_config": {
+    "name": "veto_tight_all",
+    "min_pred": 0.0,
+    "complexity_penalty": 0.0001,
+    "parent_allow_skip": true,
+    "deep_allow_skip": true
+  },
+  "train_meta": {
+    "parent_candidates": 5590,
+    "deep_candidates": 2738,
+    "stop_loss_labels": 5226,
+    "rows": 8328,
+    "actions": {
+      "skip": 0.0,
+      "size_0_5": 0.5,
+      "size_0_75": 0.75,
+      "keep_1_0": 1.0
+    },
+    "features": [
+      "is_parent",
+      "is_deep",
+      "side",
+      "base_notional",
+      "leverage",
+      "take_profit",
+      "stop_loss",
+      "max_hold",
+      "cooldown",
+      "quality_score",
+      "confidence",
+      "deep_edge",
+      "deep_margin",
+      "vol_anchor",
+      "volatility_z",
+      "realized_vol_ratio",
+      "bb_width",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "trade_intensity",
+      "oi_change_rate",
+      "last_funding_rate",
+      "ai_dir_entropy",
+      "ai_reward_risk",
+      "ai_adverse_risk",
+      "clean_regime_2024_unsup_v4_confidence",
+      "clean_regime_2024_unsup_v4_entropy",
+      "clean_regime_2024_unsup_v4_transition_risk"
+    ]
+  },
+  "parent_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  }
+}

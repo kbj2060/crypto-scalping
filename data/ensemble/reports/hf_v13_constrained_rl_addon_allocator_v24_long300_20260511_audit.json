@@ -1,0 +1,121 @@
+{
+  "status": "pass",
+  "verdict": "iterate",
+  "blocking": [],
+  "warnings": [
+    "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+    "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence",
+    "oos_cost1_did_not_beat_v21_2"
+  ],
+  "selection_uses_2026": false,
+  "selection_window": "2025-10-01..2025-12-31",
+  "oos_window": "2026 fixed OOS only after selection",
+  "policy": "constrained_offline_rl_addon_allocator",
+  "actions": [
+    "reject",
+    "0.10_add",
+    "0.20_add"
+  ],
+  "forbidden_sequence_columns": [],
+  "train_snapshot_count": 65,
+  "train_action_distribution": {
+    "0": 6,
+    "1": 1,
+    "2": 58
+  },
+  "feature_audit": {
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "missing_train_features_zero_filled:garch_vol_z,liquidity_vacuum,execution_quality,jump_z,jump_flag,evt_tail_flag,evt_excess_z,funding_abs,funding_pressure,crowding_pressure,whale_conviction,patchtst_pred,patchtst_confidence",
+      "missing_eval_features_zero_filled:patchtst_pred,patchtst_confidence"
+    ],
+    "feature_count": 93,
+    "clean_regime_feature_count": 23,
+    "forbidden_feature_cols": [],
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "eval_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_eval_timestamp_overlap": 0
+  },
+  "selected_config": {
+    "name": "v24_full_prob_055",
+    "fragile_th": 0.0,
+    "edge_th": 0.55,
+    "reduce_frac": 0.1,
+    "q10_floor": -0.006
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": 175.8741058787747,
+      "mdd": -30.467012912430324,
+      "trades": 76,
+      "wr": 0.21052631578947367,
+      "trades_per_day": 1.2954545454545454,
+      "long_entries": 25,
+      "short_entries": 51,
+      "avg_notional": 2.5277007478048112,
+      "avg_leverage": 2.6093530855129625,
+      "exits": {
+        "learned_stop_loss": 60,
+        "learned_max_hold": 11,
+        "learned_take_profit": 5
+      },
+      "runner_actions": {
+        "v23_full": 5,
+        "add_on": 5,
+        "v21_reject": 32,
+        "v23_reject": 6
+      }
+    },
+    "cost2": {
+      "pnl": 92.96186494374115,
+      "mdd": -32.25225849651676,
+      "trades": 81,
+      "wr": 0.19753086419753085,
+      "trades_per_day": 1.3806818181818183,
+      "long_entries": 28,
+      "short_entries": 53,
+      "avg_notional": 2.5119859332205845,
+      "avg_leverage": 2.5661257682576366,
+      "exits": {
+        "learned_stop_loss": 65,
+        "learned_max_hold": 11,
+        "learned_take_profit": 5
+      },
+      "runner_actions": {
+        "v23_full": 7,
+        "add_on": 7,
+        "v21_reject": 33,
+        "v23_reject": 5
+      }
+    },
+    "cost3": {
+      "pnl": 20.820122128421794,
+      "mdd": -41.786721404448144,
+      "trades": 91,
+      "wr": 0.17582417582417584,
+      "trades_per_day": 1.5511363636363638,
+      "long_entries": 34,
+      "short_entries": 57,
+      "avg_notional": 2.5159673839647283,
+      "avg_leverage": 2.595405446990333,
+      "exits": {
+        "learned_stop_loss": 75,
+        "learned_max_hold": 11,
+        "learned_take_profit": 5
+      },
+      "runner_actions": {
+        "v23_reject": 5,
+        "v21_reject": 31,
+        "v23_full": 7,
+        "add_on": 7
+      }
+    }
+  }
+}

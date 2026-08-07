@@ -1,20 +1,21 @@
 {
-  "best_val_score": 0.458389755778666,
-  "test_dir_bal_acc": 0.5246297797713514,
-  "test_quality_mae": 0.0038825653364997774,
-  "test_hold_mae": 3.3929973534959186,
+  "best_val_score": 0.4621742159470797,
+  "test_dir_bal_acc": 0.7896726217554513,
+  "test_quality_mae": 0.0035901060639623905,
+  "test_hold_mae": 3.3693326151429344,
   "best_params": {
-    "n_estimators": 272,
-    "learning_rate": 0.05102822580199246,
-    "num_leaves": 64,
-    "subsample": 0.6488152939379115,
-    "colsample_bytree": 0.798070764044508,
-    "min_child_samples": 14,
-    "reg_alpha": 1.8744302901656154,
-    "reg_lambda": 0.0016443693426189251,
-    "feature_count": 30
+    "n_estimators": 694,
+    "learning_rate": 0.013554479633511623,
+    "num_leaves": 36,
+    "subsample": 0.9466338697710562,
+    "colsample_bytree": 0.6971181456949688,
+    "min_child_samples": 48,
+    "reg_alpha": 0.0040666230408908655,
+    "reg_lambda": 0.3674611935568799,
+    "feature_count": 95
   },
   "backend": "lightgbm",
   "data_hash": "",
-  "config_hash": ""
+  "config_hash": "",
+  "direction_label_policy": "directional_only_exclude_flat"
 }

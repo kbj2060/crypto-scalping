@@ -1,0 +1,35 @@
+{
+  "phase": "1-2_completed",
+  "objective": "reduce overtrading and stop-loss dependency while preserving positive cost3 pnl",
+  "baseline_lock_manifest": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_baseline_lock_manifest.json",
+  "loss_diagnostics": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_loss_diagnostics.json",
+  "key_findings": [
+    "stop_loss exits = 170 / 225 (75.6%)",
+    "quick exits (<=6 bars) = 34.7%",
+    "largest pain cluster: v21_2_stop_loss within <=2 bars (31 trades, -47.84%)",
+    "deep_alpha also concentrated in stop_loss at 3-12 bars"
+  ],
+  "counterfactual_priority_signal": {
+    "drop_hold_le_2": {
+      "trade_delta": -42,
+      "ret_delta_pct": 49.72352948192751
+    },
+    "drop_hold_le_6": {
+      "trade_delta": -78,
+      "ret_delta_pct": 83.79984706427234
+    },
+    "drop_v21_sl_le_2": {
+      "trade_delta": -31,
+      "ret_delta_pct": 47.84095828496557
+    },
+    "drop_deep_sl_3_12": {
+      "trade_delta": -46,
+      "ret_delta_pct": 16.943499193129675
+    }
+  },
+  "next_actions": [
+    "A/B test entry cooldown and expected-edge gate focused on v21_2 early-stoploss cluster",
+    "add horizon-aware exit threshold + giveback guard to lower 3-12 bar deep stoplosses",
+    "rerun cost3 oos and compare against locked baseline manifest"
+  ]
+}

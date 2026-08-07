@@ -1,0 +1,57 @@
+{
+  "stage": "F3-B",
+  "generated_at": "2026-07-19T12:18:57.238777+09:00",
+  "limitation_note": "Universe = 3 assets only -- statistically thin cross-section, results are directional signal only, not a robust cross-sectional finding. Kill-gate applies: if no signal here, do not expand universe to go fishing (per design doc anti-pattern).",
+  "data_coverage": {
+    "n_days": 772,
+    "min_date": "2024-06-01 00:00:00+00:00",
+    "max_date": "2026-07-12 00:00:00+00:00"
+  },
+  "exploration_grid": [
+    {
+      "k": 7,
+      "n_days_total": 764,
+      "n_days_exploration": 449,
+      "gross_mean_daily_return": 0.00015349477196617846,
+      "net_mean_daily_return_cost1": -0.0018465052280338217,
+      "net_mean_daily_return_cost3": -0.005846505228033822,
+      "annualized_net_cost1_pct": -67.39744082323449,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0018465052280338214,
+        "boot_se": 0.0006907759279725148,
+        "t_stat": -2.6730885563043127
+      }
+    },
+    {
+      "k": 14,
+      "n_days_total": 757,
+      "n_days_exploration": 442,
+      "gross_mean_daily_return": 0.00030359818803489405,
+      "net_mean_daily_return_cost1": -0.001696401811965106,
+      "net_mean_daily_return_cost3": -0.0056964018119651065,
+      "annualized_net_cost1_pct": -61.918666136726365,
+      "bootstrap_cost1": {
+        "observed_mean": -0.001696401811965106,
+        "boot_se": 0.0006398472772564933,
+        "t_stat": -2.6512604995974303
+      }
+    },
+    {
+      "k": 30,
+      "n_days_total": 741,
+      "n_days_exploration": 426,
+      "gross_mean_daily_return": 0.0008191233396170823,
+      "net_mean_daily_return_cost1": -0.0011808766603829176,
+      "net_mean_daily_return_cost3": -0.005180876660382918,
+      "annualized_net_cost1_pct": -43.10199810397649,
+      "bootstrap_cost1": {
+        "observed_mean": -0.0011808766603829176,
+        "boot_se": 0.0007085784556134249,
+        "t_stat": -1.6665432755228473
+      }
+    }
+  ],
+  "n_variants_passing_exploration": 0,
+  "passing_variants": [],
+  "F3B_verdict": "KILLED at exploration -- 0/3 k-values show net-positive, t>3 cross-sectional edge under cost1"
+}

@@ -1,0 +1,197 @@
+{
+  "model_id": "certified_teacher_dual_side_execution_router_v3",
+  "data": {
+    "fit_range": [
+      "2025-01-01 00:00:00",
+      "2025-08-31 23:55:00"
+    ],
+    "selection_range": [
+      "2025-09-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "holdout_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ]
+  },
+  "data_audit": {
+    "ai_contracts": {
+      "status": "pass",
+      "blocking": [],
+      "evidence": {
+        "data/nf_patchtst": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_tide": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_dlinear": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        },
+        "data/nf_timesnet": {
+          "certified": true,
+          "data_path": "/home/llewyn/crypto-scalping/data/splits/year_oos/training_features_2024.csv",
+          "expected_year": 2024,
+          "actual_years": [
+            2024
+          ],
+          "timestamp_start": "2024-01-01 00:00:00",
+          "timestamp_end": "2024-12-31 23:55:00",
+          "rows_after_limit": 105380
+        }
+      }
+    },
+    "feature_contract": {
+      "status": "pass",
+      "blocking": [],
+      "warnings": [],
+      "feature_count": 96,
+      "forbidden_feature_cols": []
+    },
+    "train_eval_overlap": 0
+  },
+  "artifacts": {
+    "model": "/home/llewyn/crypto-scalping/data/ensemble/supervised/certified_teacher_dual_side_execution_router_v3/model.pkl",
+    "selection_grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_dual_side_execution_router_v3_summary_selection_grid.csv",
+    "ledgers": {
+      "cost1": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_dual_side_execution_router_v3_summary_cost1_ledger.csv",
+      "cost2": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_dual_side_execution_router_v3_summary_cost2_ledger.csv",
+      "cost3": "/home/llewyn/crypto-scalping/data/ensemble/reports/certified_teacher_dual_side_execution_router_v3_summary_cost3_ledger.csv"
+    }
+  },
+  "feature_count": 96,
+  "selected_config": {
+    "min_edge_pct": -0.04,
+    "catastrophic_q10_pct": -1.2,
+    "max_notional": 0.8,
+    "min_notional": 0.1,
+    "leverage": 5.0,
+    "cooldown_bars": 1,
+    "candidate_stride": 2,
+    "target_trades_day": 3.7
+  },
+  "selection_score": -50.877689592531716,
+  "selection_result": {
+    "pnl": -20.668164278336544,
+    "mdd": -21.735299638520434,
+    "trades": 1072,
+    "trades_per_day": 17.574770877212956,
+    "wr": 0.4496268656716418,
+    "avg_notional": 0.2097801873675356,
+    "max_margin_fraction": 0.1191386731845669,
+    "final_equity": 0.7933183572166346,
+    "coverage_start": "2025-09-01 00:00:00",
+    "coverage_end": "2025-10-31 23:55:00",
+    "block_reason_counts": {
+      "low_edge_sized_down": 341,
+      "catastrophic_q10": 24
+    }
+  },
+  "holdout_result": {
+    "pnl": -22.76778821592208,
+    "mdd": -22.889503153329827,
+    "trades": 1112,
+    "trades_per_day": 18.230545909944784,
+    "wr": 0.42176258992805754,
+    "avg_notional": 0.19525757590033685,
+    "max_margin_fraction": 0.14656615497054534,
+    "final_equity": 0.7723221178407792,
+    "coverage_start": "2025-11-01 00:00:00",
+    "coverage_end": "2025-12-31 23:55:00",
+    "block_reason_counts": {
+      "low_edge_sized_down": 382,
+      "catastrophic_q10": 62
+    }
+  },
+  "metrics": {
+    "cost1": {
+      "pnl": -23.738628980369924,
+      "mdd": -24.127738395644695,
+      "trades": 1116,
+      "trades_per_day": 19.022727272727273,
+      "wr": 0.4274193548387097,
+      "avg_notional": 0.2094291896284494,
+      "max_margin_fraction": 0.13122670029267083,
+      "final_equity": 0.7626137101963008,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "low_edge_sized_down": 358,
+        "catastrophic_q10": 64
+      }
+    },
+    "cost2": {
+      "pnl": -45.02508384576734,
+      "mdd": -45.22862644478883,
+      "trades": 1116,
+      "trades_per_day": 19.022727272727273,
+      "wr": 0.34946236559139787,
+      "avg_notional": 0.2094291896284494,
+      "max_margin_fraction": 0.13122670029267083,
+      "final_equity": 0.5497491615423266,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "low_edge_sized_down": 358,
+        "catastrophic_q10": 64
+      }
+    },
+    "cost3": {
+      "pnl": -60.372123857605196,
+      "mdd": -60.46411504216095,
+      "trades": 1116,
+      "trades_per_day": 19.022727272727273,
+      "wr": 0.3046594982078853,
+      "avg_notional": 0.2094291896284494,
+      "max_margin_fraction": 0.13122670029267083,
+      "final_equity": 0.396278761423948,
+      "coverage_start": "2026-01-01 00:00:00",
+      "coverage_end": "2026-02-28 16:00:00",
+      "block_reason_counts": {
+        "low_edge_sized_down": 358,
+        "catastrophic_q10": 64
+      }
+    }
+  },
+  "audit": {
+    "model_id": "certified_teacher_dual_side_execution_router_v3",
+    "status": "pass",
+    "blocking": [],
+    "warnings": [
+      "M7 embedded provenance caveat remains"
+    ],
+    "invariants": {
+      "long_short_heads_separated": true,
+      "2026_fixed_oos_no_selection": true,
+      "cost_1x_2x_3x_reported": true
+    }
+  }
+}

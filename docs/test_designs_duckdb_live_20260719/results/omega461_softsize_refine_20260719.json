@@ -1,0 +1,55 @@
+{
+  "stage": "omega461_softsize_refine",
+  "generated_at": "2026-07-19T18:40:10.723528+09:00",
+  "baseline": {
+    "pnl": 34.625529646353016,
+    "mdd": -36.34909365110997,
+    "trades": 39,
+    "wr": 0.4358974358974359,
+    "mark_to_market_mdd": -38.928519755211276
+  },
+  "variants": {
+    "linear_floor0": {
+      "pnl": 108.13453901600924,
+      "mdd": -16.455986049542137,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -17.266310687913144
+    },
+    "quadratic_floor0": {
+      "pnl": 64.77555313440611,
+      "mdd": -13.521321475624736,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -14.183169160826758
+    },
+    "ramp_0.2_0.6": {
+      "pnl": 109.04672416396375,
+      "mdd": -19.508773373244427,
+      "trades": 34,
+      "wr": 0.5294117647058824,
+      "mark_to_market_mdd": -20.471990520509664
+    },
+    "chop_x_stability": {
+      "pnl": 51.65520235845273,
+      "mdd": -14.988714003163883,
+      "trades": 37,
+      "wr": 0.4864864864864865,
+      "mark_to_market_mdd": -15.725365420445792
+    }
+  },
+  "variants_strictly_improving_both_vs_baseline": [
+    "linear_floor0",
+    "quadratic_floor0",
+    "ramp_0.2_0.6",
+    "chop_x_stability"
+  ],
+  "best_by_pnl": {
+    "tag": "ramp_0.2_0.6",
+    "pnl": 109.04672416396375,
+    "mdd": -19.508773373244427,
+    "trades": 34,
+    "wr": 0.5294117647058824,
+    "mark_to_market_mdd": -20.471990520509664
+  }
+}

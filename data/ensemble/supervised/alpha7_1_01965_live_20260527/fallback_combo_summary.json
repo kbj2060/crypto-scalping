@@ -1,0 +1,72 @@
+{
+  "model_id": "alpha7_1_01965_live_20260527",
+  "display_name": "Alpha7.1-01965",
+  "lineage_model_id": "alpha7_1_01965_live_20260527",
+  "cfg": {
+    "mode": "fallback",
+    "primary": "alpha7_primary_sniper_v2_only",
+    "secondary": "alpha43_no_legacy_cash_only_fallback",
+    "primary_lineage": "alpha7_primary_v2_only",
+    "secondary_lineage": "alpha43_no_legacy"
+  },
+  "selection_score": 5.3442278075469485,
+  "validation_metrics": {
+    "cost1": {
+      "pnl": 159.47250109246278,
+      "mdd": -23.76058609261359,
+      "trades": 104,
+      "trades_per_day": 1.130477448575203,
+      "wr": 0.17307692307692307,
+      "avg_notional": 2.3596423317204054
+    },
+    "cost2": {
+      "pnl": 128.6431613208104,
+      "mdd": -22.428432584321744,
+      "trades": 107,
+      "trades_per_day": 1.1630873749764108,
+      "wr": 0.1588785046728972,
+      "avg_notional": 2.353927335534626
+    },
+    "cost3": {
+      "pnl": 120.49541292537684,
+      "mdd": -22.54683319360321,
+      "trades": 111,
+      "trades_per_day": 1.2065672768446878,
+      "wr": 0.15315315315315314,
+      "avg_notional": 2.35716208766746
+    }
+  },
+  "selected_metrics": {
+    "cost1": {
+      "pnl": 149.85664487871824,
+      "mdd": -20.310675247143074,
+      "trades": 80,
+      "trades_per_day": 1.3636363636363638,
+      "wr": 0.225,
+      "avg_notional": 2.4124873592194804
+    },
+    "cost2": {
+      "pnl": 140.92130400857138,
+      "mdd": -20.56968130684219,
+      "trades": 80,
+      "trades_per_day": 1.3636363636363638,
+      "wr": 0.225,
+      "avg_notional": 2.4124873592194804
+    },
+    "cost3": {
+      "pnl": 141.02924587868313,
+      "mdd": -20.827895584149115,
+      "trades": 82,
+      "trades_per_day": 1.3977272727272727,
+      "wr": 0.21951219512195122,
+      "avg_notional": 2.431190515431687
+    }
+  },
+  "audit": {
+    "selection_uses_2026": false,
+    "feature_sources": {
+      "primary": "alpha7 v2-only current regime4",
+      "secondary": "alpha43 no_legacy"
+    }
+  }
+}

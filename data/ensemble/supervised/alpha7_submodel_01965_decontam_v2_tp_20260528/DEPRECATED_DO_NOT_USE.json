@@ -1,0 +1,18 @@
+{
+  "status": "deprecated_do_not_use_active_or_candidate",
+  "deprecated_at_kst": "2026-05-29",
+  "artifact": "data/ensemble/supervised/alpha7_submodel_01965_decontam_v2_tp_20260528",
+  "reason": "Decontaminated-regime but pre-clean-funding Alpha7 lineage. Funding-derived features and sidecar provenance are stale.",
+  "blocked_uses": [
+    "active_runtime",
+    "live_default",
+    "candidate_baseline",
+    "parent_block",
+    "fallback_block",
+    "tp_sl_sidecar_source",
+    "alpha8_baseline",
+    "promotion_evidence"
+  ],
+  "replacement_research_artifact": "data/ensemble/supervised/alpha7_submodel_01965_cleanfunding_v1_20260529",
+  "audit": "docs/audits/funding_feature_redteam_20260529.md"
+}

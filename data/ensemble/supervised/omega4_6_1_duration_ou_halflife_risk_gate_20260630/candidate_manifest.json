@@ -1,0 +1,94 @@
+{
+  "model_id": "omega4_6_1_duration_ou_halflife_risk_gate_20260630",
+  "display_version": "Omega 4.6.1",
+  "status": "conditional_upgrade_candidate_not_live_wired",
+  "contract": "docs/model_contracts/omega4_6_1_duration_ou_halflife_risk_gate_20260630_contract.md",
+  "runtime_contract": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/runtime_contract.json",
+  "candidate_manifest": "data/ensemble/supervised/omega4_6_1_duration_ou_halflife_risk_gate_20260630/candidate_manifest.json",
+  "promotion_manifest": "tmp/causal_regen_20260516/omega4_6_1_duration_ou_halflife_risk_gate_20260630/promotion_manifest.json",
+  "source_report": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/report.json",
+  "artifact_integrity_audit": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/omega_artifact_integrity_audit_20260630.json",
+  "redteam_report": "docs/audits/omega4_6_1_duration_ou_halflife_risk_gate_20260630_redteam_20260630.md",
+  "selection_scope": "validation_only_duration_priority; OOS readout only",
+  "rule_contract": {
+    "feature": "ou_halflife",
+    "op": "le",
+    "threshold": 0.005415348,
+    "scope": "all",
+    "hit_scale": 0.0,
+    "behavior": "entry-time exposure gate; if condition hits, notional and leverage are scaled by hit_scale"
+  },
+  "conditional_non_pnl_gate": {
+    "pass": true,
+    "checks": {
+      "artifact_integrity_pass": true,
+      "validation_mdd_lte_20_abs": true,
+      "oos_mdd_lte_20_abs": true,
+      "validation_leverage_lte_5": true,
+      "oos_leverage_lte_5": true,
+      "validation_notional_lte_1p8": true,
+      "oos_notional_lte_1p8": true,
+      "validation_no_active_overlaps": true,
+      "oos_no_active_overlaps": true,
+      "validation_accounting_consistent": true,
+      "oos_accounting_consistent": true,
+      "validation_notional_contract_consistent": true,
+      "oos_notional_contract_consistent": true
+    },
+    "failures": []
+  },
+  "validation": {
+    "gate_pass": true,
+    "monthly_min_pnl": 33.41306478018091,
+    "monthly_worst_mdd": -10.603830226421218,
+    "monthly_positive_count": 3,
+    "monthly_count": 3,
+    "pnl": 175.85666646198916,
+    "mdd": -10.603830226421218,
+    "trades": 21,
+    "wr": 0.6190476190476191,
+    "avg_hold_hours": 60.373015873015866,
+    "max_hold_hours": 115.33333333333333,
+    "hold_over_24h_count": 15,
+    "max_leverage": 5.0,
+    "max_notional": 1.8,
+    "avg_notional": 1.3662199801149821,
+    "skipped": 8,
+    "hit_count": 8
+  },
+  "oos": {
+    "pnl": 72.58681779350384,
+    "mdd": -7.469861534818922,
+    "trades": 9,
+    "wr": 0.6666666666666666,
+    "avg_hold_hours": 59.407407407407405,
+    "max_hold_hours": 133.5,
+    "hold_over_24h_count": 8,
+    "max_leverage": 5.0,
+    "max_notional": 1.8,
+    "avg_notional": 1.5402513398070685,
+    "skipped": 4,
+    "hit_count": 4
+  },
+  "components": {
+    "h48qual": {
+      "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630",
+      "report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_h48qual_q050_precomputed_20260630/report.json",
+      "quality_threshold": 0.5,
+      "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630",
+      "precomputed_prediction_tag": "q050"
+    },
+    "zig075": {
+      "out_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630",
+      "report": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_2_trade_risk_sidecar_20260622_plus_t12_livepass_zig075_q075_precomputed_20260630/report.json",
+      "quality_threshold": 0.75,
+      "precomputed_prediction_dir": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_current_only_alllabels_01_zigzag_action_labels_20260531_e2_fulltrain_exit30k_20260629",
+      "precomputed_prediction_tag": "q075"
+    }
+  },
+  "artifacts": {
+    "validation_ledger": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/validation_duration_priority_risk_ledger.csv",
+    "oos_ledger": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/oos_duration_priority_risk_ledger.csv",
+    "ranking": "tmp/causal_regen_20260516/omega4_6_duration_aware_risk_layer_20260630/duration_risk_rule_ranking.csv"
+  }
+}

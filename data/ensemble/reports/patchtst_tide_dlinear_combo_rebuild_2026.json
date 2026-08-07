@@ -1,0 +1,80 @@
+{
+  "type": "patchtst_tide_dlinear_combo_rebuild_2026",
+  "groups": [
+    "patchtst",
+    "tide",
+    "dlinear"
+  ],
+  "train": {
+    "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "rows": 105064,
+    "cols": 162,
+    "groups": [
+      "patchtst",
+      "tide",
+      "dlinear"
+    ],
+    "selected_ai_cols": [
+      "pred_patchtst",
+      "conf_patchtst",
+      "ai_dir_edge",
+      "ai_dir_p_up",
+      "ai_dir_p_down",
+      "ai_dir_p_flat",
+      "ai_dir_entropy",
+      "patchtst_median",
+      "patchtst_regime_sim",
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_flow_pressure",
+      "ai_flow_exhaustion",
+      "ai_flow_flip_prob",
+      "ai_flow_slope",
+      "dlinear_smf_ema",
+      "dlinear_smf_slope"
+    ],
+    "dropped_base_ai_cols": [
+      "conf_patchtst",
+      "pred_patchtst"
+    ]
+  },
+  "eval": {
+    "path": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "rows": 16897,
+    "cols": 162,
+    "groups": [
+      "patchtst",
+      "tide",
+      "dlinear"
+    ],
+    "selected_ai_cols": [
+      "pred_patchtst",
+      "conf_patchtst",
+      "ai_dir_edge",
+      "ai_dir_p_up",
+      "ai_dir_p_down",
+      "ai_dir_p_flat",
+      "ai_dir_entropy",
+      "patchtst_median",
+      "patchtst_regime_sim",
+      "ai_adverse_risk",
+      "ai_reward_risk",
+      "ai_vol_regime_pct",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_flow_pressure",
+      "ai_flow_exhaustion",
+      "ai_flow_flip_prob",
+      "ai_flow_slope",
+      "dlinear_smf_ema",
+      "dlinear_smf_slope"
+    ],
+    "dropped_base_ai_cols": [
+      "conf_patchtst",
+      "pred_patchtst"
+    ]
+  }
+}

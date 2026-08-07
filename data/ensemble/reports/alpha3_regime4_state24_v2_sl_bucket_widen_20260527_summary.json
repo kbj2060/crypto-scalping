@@ -1,0 +1,140 @@
+{
+  "model_id": "alpha3_regime4_state24_v2_sl_bucket_widen_20260527",
+  "design": "Alpha3 state24_v2 candidate stop-loss bucket widening ablation. Parent stop_loss_buckets are widened by predefined scales, while teacher/runtime, v21 runner, deep scout, execution, and overlay remain fixed.",
+  "selected_variant": {
+    "variant": "sl_front_open_cap090",
+    "stop_loss_buckets": [
+      0.0058,
+      0.0087,
+      0.01215,
+      0.0182,
+      0.026399999999999996,
+      0.04025,
+      0.060500000000000005
+    ],
+    "metrics": {
+      "cost1": {
+        "pnl": 175.88787851696125,
+        "mdd": -36.16671236627427,
+        "trades": 217,
+        "wr": 0.2350230414746544,
+        "trades_per_day": 3.6988636363636367,
+        "deep_entries": 126,
+        "long_entries": 72,
+        "short_entries": 145,
+        "avg_notional": 1.826369240084923,
+        "avg_leverage": 1.9665825862598,
+        "exits": {
+          "deep_alpha_stop_loss": 88,
+          "v21_2_stop_loss": 72,
+          "deep_alpha_max_hold": 36,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 5,
+          "deep_alpha_take_profit": 2,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 126,
+          "v21_entry": 91
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 433,
+          "forced_end_market": 1
+        }
+      },
+      "cost2": {
+        "pnl": 180.8013009418372,
+        "mdd": -32.52418424799725,
+        "trades": 216,
+        "wr": 0.22685185185185186,
+        "trades_per_day": 3.681818181818182,
+        "deep_entries": 125,
+        "long_entries": 71,
+        "short_entries": 145,
+        "avg_notional": 1.8316088927687106,
+        "avg_leverage": 1.9729915851235944,
+        "exits": {
+          "deep_alpha_stop_loss": 87,
+          "v21_2_stop_loss": 72,
+          "deep_alpha_max_hold": 35,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 5,
+          "deep_alpha_take_profit": 3,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 125,
+          "v21_entry": 91
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 431,
+          "forced_end_market": 1
+        }
+      },
+      "cost3": {
+        "pnl": 131.99356754662452,
+        "mdd": -30.222406663295555,
+        "trades": 217,
+        "wr": 0.22119815668202766,
+        "trades_per_day": 3.6988636363636367,
+        "deep_entries": 128,
+        "long_entries": 70,
+        "short_entries": 147,
+        "avg_notional": 1.82082098408061,
+        "avg_leverage": 1.964398589202105,
+        "exits": {
+          "deep_alpha_stop_loss": 91,
+          "v21_2_stop_loss": 71,
+          "deep_alpha_max_hold": 34,
+          "v21_2_max_hold": 13,
+          "v21_2_take_profit": 4,
+          "deep_alpha_take_profit": 3,
+          "forced_end": 1
+        },
+        "runner_actions": {
+          "deep_entry": 128,
+          "v21_entry": 89
+        },
+        "route_counts": {
+          "signal_immediate_maker_limit": 433,
+          "forced_end_market": 1
+        }
+      }
+    },
+    "score": 284.1881848765794,
+    "selection_val_score": 305.29987113404707
+  },
+  "baseline_oos": {
+    "variant": "baseline",
+    "stop_loss_buckets": "[0.004, 0.006, 0.009, 0.014, 0.022, 0.035, 0.055]",
+    "val_score": 298.2047012458996,
+    "val_cost1_pnl": 169.59342184574777,
+    "val_cost1_mdd": -15.544207789549125,
+    "val_cost3_pnl": 149.61107428244054,
+    "oos_score": 240.07719180422302,
+    "oos_cost3_pnl": 122.9750293610019,
+    "oos_cost3_mdd": -37.02204820962388,
+    "oos_cost3_wr": 0.21333333333333335,
+    "oos_cost3_trades": 225,
+    "oos_cost3_v21_sl": 80,
+    "oos_cost3_deep_sl": 90
+  },
+  "grid": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_sl_bucket_widen_20260527_grid.csv",
+  "audit": {
+    "status": "pass",
+    "selection_uses_2026": false,
+    "selection_window": "2025-10-01..2025-12-31",
+    "oos_window": "2026 fixed OOS",
+    "base_report": "/home/llewyn/crypto-scalping/data/ensemble/reports/alpha3_regime4_state24_v2_full_retrain_20260526_summary.json",
+    "selected_variant": "sl_front_open_cap090",
+    "baseline_variant": "baseline",
+    "delta_vs_baseline": {
+      "cost3_pnl": 9.018538185622617,
+      "cost3_mdd": 6.799641546328328,
+      "cost3_wr": 0.007864823348694316,
+      "cost3_trades": -8,
+      "v21_stop_loss": -9,
+      "deep_stop_loss": 1
+    }
+  }
+}

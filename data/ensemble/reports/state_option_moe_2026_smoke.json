@@ -1,0 +1,219 @@
+{
+  "model_id": "state_option_moe_2026",
+  "contract": "/home/llewyn/crypto-scalping/docs/model_contracts/state_option_moe_2026_contract.md",
+  "data": {
+    "train_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2025_patchtst__tide__dlinear.csv",
+    "eval_csv": "/home/llewyn/crypto-scalping/tmp/ai_feature_combo_grid/trade_candidates_2026_patchtst__tide__dlinear.csv",
+    "train_range": [
+      "2025-01-01 00:00:00",
+      "2025-10-31 23:55:00"
+    ],
+    "validation_range": [
+      "2025-11-01 00:00:00",
+      "2025-12-31 23:55:00"
+    ],
+    "oos_range": [
+      "2026-01-01 00:00:00",
+      "2026-02-28 16:00:00"
+    ],
+    "train_rows": 87496,
+    "validation_rows": 17568,
+    "oos_rows": 16897,
+    "feature_cols": [
+      "log_return",
+      "rogers_satchell_vol",
+      "garch_vol_z",
+      "volatility_z",
+      "jump_flag",
+      "jump_z",
+      "wick_ratio",
+      "hurst_48",
+      "amihud_illiquidity_z",
+      "liquidity_vacuum",
+      "execution_quality",
+      "ofti",
+      "net_taker_ratio",
+      "taker_acceleration",
+      "trade_intensity",
+      "big_trade_ratio",
+      "ofi_acceleration",
+      "sum_open_interest_value",
+      "sum_toptrader_long_short_ratio",
+      "count_long_short_ratio",
+      "oi_change_rate",
+      "long_squeeze_risk",
+      "crowding_pressure",
+      "whale_retail_ratio",
+      "whale_conviction",
+      "last_funding_rate",
+      "funding_abs",
+      "funding_pressure",
+      "funding_roc_288",
+      "funding_price_divergence",
+      "ou_funding_z",
+      "ou_halflife",
+      "btc_corr_60",
+      "eth_btc_ratio_change",
+      "mtf_trend_1h",
+      "mtf_trend_4h",
+      "rsi",
+      "breakout_strength",
+      "m7_action",
+      "m7_hold_pred",
+      "m7_expected_ret",
+      "m7_confidence",
+      "m7_qwidth",
+      "m7_tp_offset",
+      "m7_sl_offset",
+      "pred_patchtst",
+      "conf_patchtst",
+      "patchtst_median",
+      "tide_vol_raw",
+      "tide_vol_zscore",
+      "ai_flow_pressure",
+      "ai_flow_exhaustion",
+      "ai_flow_flip_prob",
+      "ai_flow_slope",
+      "dlinear_smf_ema",
+      "dlinear_smf_slope",
+      "regime_bull",
+      "regime_bear",
+      "regime_chop",
+      "regime_whipsaw",
+      "regime_normal",
+      "regime_persistence",
+      "cross_scale_curvature",
+      "evt_tail_flag",
+      "evt_excess_z",
+      "evt_candidate_side",
+      "evt_candidate_label",
+      "evt_cost_hurdle",
+      "evt_side_margin"
+    ]
+  },
+  "training": {
+    "state_tokens": 16,
+    "candidate_train_rows": 40000,
+    "max_iter": 12,
+    "seed": 42
+  },
+  "selected_config": {
+    "name": "cv0.4_co0.0_to0.00_p0.55_u-0.0100_c30_mt16",
+    "lambda_cvar": 0.4,
+    "lambda_cost": 0.0,
+    "lambda_turnover": 0.0,
+    "prob_large_loss_block": 0.55,
+    "min_utility": -0.01,
+    "cost_3x_required": false,
+    "max_daily_trades": 16,
+    "loss_cooldown_bars": 24
+  },
+  "validation": {
+    "candidate": {
+      "pnl": 746.6168555071272,
+      "mdd": -5.563269254834746,
+      "trades": 762,
+      "trades_per_day": 12.491803278688524,
+      "wr": 0.6535433070866141,
+      "avg_notional": 1.5,
+      "avg_leverage": 1.5,
+      "long_entries": 481,
+      "short_entries": 281
+    },
+    "cost_3x": {
+      "pnl": -33.047810886628405,
+      "mdd": -33.288897048579436,
+      "trades": 526,
+      "trades_per_day": 8.62295081967213,
+      "wr": 0.30228136882129275,
+      "avg_notional": 0.8820342205323277,
+      "avg_leverage": 1.1254752851711027,
+      "long_entries": 340,
+      "short_entries": 186
+    },
+    "score": 504.3682488205909
+  },
+  "oos": {
+    "candidate": {
+      "pnl": 344.22533301432827,
+      "mdd": -5.8095557281649395,
+      "trades": 674,
+      "trades_per_day": 11.423728813559322,
+      "wr": 0.599406528189911,
+      "avg_notional": 1.5007418397626113,
+      "avg_leverage": 1.5007418397626113,
+      "long_entries": 456,
+      "short_entries": 218
+    },
+    "cost_2x": {
+      "pnl": 87.70962313848847,
+      "mdd": -14.082613660837362,
+      "trades": 589,
+      "trades_per_day": 9.983050847457626,
+      "wr": 0.4533106960950764,
+      "avg_notional": 1.3445246179966066,
+      "avg_leverage": 1.4057724957555178,
+      "long_entries": 410,
+      "short_entries": 179
+    },
+    "cost_3x": {
+      "pnl": -33.330405606646515,
+      "mdd": -33.3913587331681,
+      "trades": 522,
+      "trades_per_day": 8.847457627118644,
+      "wr": 0.3007662835249042,
+      "avg_notional": 0.7054597701149494,
+      "avg_leverage": 1.0181992337164751,
+      "long_entries": 334,
+      "short_entries": 188
+    }
+  },
+  "baseline_reference": {
+    "pnl": 752.648580357841,
+    "mdd": -18.755787211251405,
+    "trades": 353,
+    "trades_per_day": 6.017045454545455,
+    "avg_leverage": 1.5960290252000644,
+    "cost_2x_pnl": 279.3638542719212,
+    "cost_3x_pnl": 75.840036609542
+  },
+  "research_reference": {
+    "pnl": 210.53568634188076,
+    "mdd": -18.015154932248112,
+    "trades_per_day": 6.0,
+    "cost_3x_pnl": 0.0
+  },
+  "audit": {
+    "notional_nonnegative": true,
+    "trades_positive": true,
+    "mdd_finite": true,
+    "pnl_finite": true,
+    "passed": true
+  },
+  "promotion_gate": {
+    "baseline_pnl_gate": false,
+    "baseline_mdd_gate": true,
+    "trades_per_day_gate": true,
+    "avg_leverage_gate": true,
+    "cost_2x_survival": true,
+    "cost_3x_survival": false,
+    "invariant_audit_passed": true,
+    "research_gate": false,
+    "decision": "reject"
+  },
+  "artifacts": {
+    "model_dir": "data/ensemble/supervised/state_option_moe_2026_smoke",
+    "state_encoder": "data/ensemble/supervised/state_option_moe_2026_smoke/state_encoder.pkl",
+    "option_critics": "data/ensemble/supervised/state_option_moe_2026_smoke/option_critics.pkl",
+    "option_selector": "data/ensemble/supervised/state_option_moe_2026_smoke/option_selector.pkl",
+    "report": "data/ensemble/reports/state_option_moe_2026_smoke.json",
+    "grid": "data/ensemble/reports/state_option_moe_2026_smoke_grid.csv",
+    "ledger": "data/ensemble/reports/state_option_moe_2026_smoke_ledger.csv",
+    "doc": "docs/experiments/state_option_moe_2026_smoke.md"
+  },
+  "artifact_sha256": {
+    "state_encoder": "57abfaa7655c57b2de70e5b411b363bc3aa8a2ef24f543458134f4d58c094dea",
+    "option_critics": "d9e6ab2e668840f33b9d266a7a805f89e1a37dc358cddc5d971f681006e6b0b4",
+    "option_selector": "8ab238349881c3ce55447f5513a51b1a0e462b9b8d69c13159972abb360a112c"
+  }
+}
