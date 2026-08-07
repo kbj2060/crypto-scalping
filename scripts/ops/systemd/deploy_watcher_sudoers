@@ -1,0 +1,20 @@
+# Narrowly-scoped NOPASSWD rule so scripts/ops/deploy_watcher.sh (run from
+# cron as the llewyn user, no interactive terminal) can restart exactly
+# these systemd units after a CI-passed git pull, without needing a
+# password every time.
+#
+# Deliberately does NOT grant `systemctl stop`, `disable`, `start` on
+# arbitrary units, or any command outside this exact list -- sudoers
+# matches full command lines verbatim, so nothing beyond these 6 lines is
+# authorized.
+#
+# Install (do NOT edit /etc/sudoers.d/ files directly -- a syntax error
+# there can break sudo system-wide; visudo validates before writing):
+#   sudo visudo -cf scripts/ops/systemd/deploy_watcher_sudoers && \
+#     sudo install -m 0440 scripts/ops/systemd/deploy_watcher_sudoers /etc/sudoers.d/crypto-scalping-deploy-watcher
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart trading-bot.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart ops-watchdog.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart btc-multislot-shadow.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart tau1-shadow.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart prometheus-exporter.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
