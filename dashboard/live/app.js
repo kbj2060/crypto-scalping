@@ -8,9 +8,9 @@ const JOURNAL_POLL_MS = 10000;
 const CANDLE_HISTORY_POLL_MS = 300000;
 const MICRO_HISTORY_MAX = 40;
 const ASSET_CONFIG = {
-  eth: { label: "ETH", symbol: "ETHUSDC", accountSymbol: "ETH/USDC:USDC", priceDigits: 2 },
-  sol: { label: "SOL", symbol: "SOLUSDC", accountSymbol: "SOL/USDC:USDC", priceDigits: 3 },
-  btc: { label: "BTC", symbol: "BTCUSDC", accountSymbol: "BTC/USDC:USDC", priceDigits: 1 },
+  eth: { label: "ETH", symbol: "ETHUSDT", accountSymbol: "ETH/USDT:USDT", priceDigits: 2 },
+  sol: { label: "SOL", symbol: "SOLUSDT", accountSymbol: "SOL/USDT:USDT", priceDigits: 3 },
+  btc: { label: "BTC", symbol: "BTCUSDT", accountSymbol: "BTC/USDT:USDT", priceDigits: 1 },
 };
 const ASSET_KEYS = Object.keys(ASSET_CONFIG);
 const DEFAULT_ASSET = "eth";
@@ -237,6 +237,13 @@ function tsAgeSec(v) {
   const ms = Date.parse(v);
   if (!Number.isFinite(ms)) return null;
   return Math.max(0, Math.round((Date.now() - ms) / 1000));
+}
+
+function isToday(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return false;
+  const d = new Date(ms);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
 }
 
 function isFinalGovernorState(state) {
@@ -710,6 +717,14 @@ function renderOpsCards(state, compactState) {
     }
     const ribbon = el("chartAiRibbon");
     if (ribbon) ribbon.className = "chart-ai-ribbon hold";
+    setT("chartAiSummaryText", `${cfg.label} 모델 상태 대기 중`);
+    setT("heroUnrealizedPnl", "-");
+    const heroUnrealEl0 = el("heroUnrealizedPnl");
+    if (heroUnrealEl0) {
+      heroUnrealEl0.classList.remove("good-text", "bad-text", "muted-text");
+      heroUnrealEl0.classList.add("muted-text");
+    }
+    setT("heroUnrealizedSub", "상태 없음");
     return;
   }
   const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
@@ -751,13 +766,43 @@ function renderOpsCards(state, compactState) {
     riskEl.title = detail || "";
   }
   const unrealizedEl = el("chartUnrealizedPnlText");
+  const posSide = String(pos.current || "NONE").toUpperCase();
   if (unrealizedEl) {
     unrealizedEl.classList.remove("good-text", "bad-text", "muted-text");
-    const unrealizedClass = String(pos.current || "NONE").toUpperCase() === "NONE" ? "muted" : riskClass(unrealizedPnl);
+    const unrealizedClass = posSide === "NONE" ? "muted" : riskClass(unrealizedPnl);
     unrealizedEl.classList.add(`${unrealizedClass}-text`);
   }
   const ribbon = el("chartAiRibbon");
   if (ribbon) ribbon.className = `chart-ai-ribbon ${decision.cls === "long" ? "good" : decision.cls === "short" ? "bad" : "hold"}`;
+
+  // Hero unrealized P&L card
+  setT("heroUnrealizedPnl", posSide === "NONE" ? "-" : fmtPct(unrealizedPnl, 2));
+  const heroUnrealEl = el("heroUnrealizedPnl");
+  if (heroUnrealEl) {
+    heroUnrealEl.classList.remove("good-text", "bad-text", "muted-text");
+    heroUnrealEl.classList.add(`${posSide === "NONE" ? "muted" : riskClass(unrealizedPnl)}-text`);
+  }
+  setT("heroUnrealizedSub", posSide === "NONE" ? "포지션 없음" : `${assetLabel(activeChartAsset)} · ${posSide === "LONG" ? "롱" : "숏"}`);
+
+  // AI decision one-line summary
+  const currentPrice = Number(latestLivePriceByAsset[activeChartAsset] || active.last_price || active.price || 0);
+  let summaryText;
+  if (posSide === "LONG" || posSide === "SHORT") {
+    const sideKr = posSide === "LONG" ? "롱" : "숏";
+    const parts = [`${sideKr} ${fmtPctNoPlus(positionPct, 0)} 비중 보유`, `미실현 ${fmtPct(unrealizedPnl, 2)}`];
+    if (currentPrice > 0 && tpPrice > 0) {
+      const distTp = posSide === "LONG" ? ((tpPrice - currentPrice) / currentPrice) * 100 : ((currentPrice - tpPrice) / currentPrice) * 100;
+      if (distTp > 0) parts.push(`TP까지 ${fmtNum(distTp, 2)}%`);
+    }
+    if (currentPrice > 0 && slPrice > 0) {
+      const distSl = posSide === "LONG" ? ((currentPrice - slPrice) / currentPrice) * 100 : ((slPrice - currentPrice) / currentPrice) * 100;
+      if (distSl > 0) parts.push(`SL까지 ${fmtNum(distSl, 2)}%`);
+    }
+    summaryText = parts.join(" · ");
+  } else {
+    summaryText = `포지션 없음 · AI 판단 ${decision.text}`;
+  }
+  setT("chartAiSummaryText", summaryText);
 }
 
 function executionAlertState(state, compactState) {
@@ -981,8 +1026,8 @@ function renderLineSvg(svg, points) {
   const defs = document.createElementNS(NS, "defs");
   const grad = document.createElementNS(NS, "linearGradient");
   grad.setAttribute("id", "equityGrad"); grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0"); grad.setAttribute("x2", "0"); grad.setAttribute("y2", "1");
-  const s1 = document.createElementNS(NS, "stop"); s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", "var(--warn)"); s1.setAttribute("stop-opacity", "0.2");
-  const s2 = document.createElementNS(NS, "stop"); s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", "var(--warn)"); s2.setAttribute("stop-opacity", "0");
+  const s1 = document.createElementNS(NS, "stop"); s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", "var(--accent)"); s1.setAttribute("stop-opacity", "0.2");
+  const s2 = document.createElementNS(NS, "stop"); s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", "var(--accent)"); s2.setAttribute("stop-opacity", "0");
   grad.appendChild(s1); grad.appendChild(s2);
   defs.appendChild(grad);
   svg.appendChild(defs);
@@ -1031,7 +1076,7 @@ function renderLineSvg(svg, points) {
 
   const linePath = document.createElementNS(NS, "polyline");
   linePath.setAttribute("points", pts); linePath.setAttribute("fill", "none");
-  linePath.setAttribute("stroke", "var(--warn)"); linePath.setAttribute("stroke-width", "2.8");
+  linePath.setAttribute("stroke", "var(--accent)"); linePath.setAttribute("stroke-width", "2.8");
   linePath.setAttribute("stroke-linejoin", "round");
   svg.appendChild(linePath);
 
@@ -1043,7 +1088,7 @@ function renderLineSvg(svg, points) {
 
   const hoverDot = document.createElementNS(NS, "circle");
   hoverDot.setAttribute("r", "5");
-  hoverDot.setAttribute("fill", "var(--warn)");
+  hoverDot.setAttribute("fill", "var(--accent)");
   hoverDot.setAttribute("stroke", "var(--chart-bg)");
   hoverDot.setAttribute("stroke-width", "2");
   hoverDot.style.display = "none";
@@ -1236,7 +1281,7 @@ function renderExposureSvg(svg, points) {
   const line = document.createElementNS(NS, "polyline");
   line.setAttribute("points", pts);
   line.setAttribute("fill", "none");
-  line.setAttribute("stroke", "var(--warn)");
+  line.setAttribute("stroke", "var(--accent)");
   line.setAttribute("stroke-width", "2.5");
   line.setAttribute("stroke-linejoin", "round");
   svg.appendChild(line);
@@ -1295,6 +1340,25 @@ function renderTradeJournal() {
     pnlEl.textContent = `누적 ${fmtPct(totalPnl)}`;
     pnlEl.className = `pnl-badge ${riskClass(totalPnl)}`;
   }
+
+  // 2b. Hero metrics: cumulative return + today's realized P&L
+  setT("heroCumulativePnl", filtered.length ? fmtPct(totalPnl) : "-");
+  const heroCumEl = el("heroCumulativePnl");
+  if (heroCumEl) {
+    heroCumEl.classList.remove("good-text", "bad-text", "muted-text");
+    heroCumEl.classList.add(`${filtered.length ? riskClass(totalPnl) : "muted"}-text`);
+  }
+  setT("heroCumulativeSub", `총 ${filtered.length}건 체결`);
+
+  const todayRows = filtered.filter((row) => isToday(rowTs(row)));
+  const todayPnl = todayRows.reduce((sum, row) => sum + pnlPctFromRow(row), 0);
+  setT("heroTodayPnl", todayRows.length ? fmtPct(todayPnl) : "-");
+  const heroTodayEl = el("heroTodayPnl");
+  if (heroTodayEl) {
+    heroTodayEl.classList.remove("good-text", "bad-text", "muted-text");
+    heroTodayEl.classList.add(`${todayRows.length ? riskClass(todayPnl) : "muted"}-text`);
+  }
+  setT("heroTodaySub", todayRows.length ? `오늘 ${todayRows.length}건 체결` : "오늘 체결 없음");
 
   // 3. Render list (latest 10)
   const recent = filtered.slice(-10).reverse();
@@ -1490,11 +1554,40 @@ function renderOpsStatus(payload) {
   setT("opsUpdatedAt", `서버 갱신 ${fmtTs(health.updated_at_kst || payload?.generated_at)}`);
   setT("opsHeartbeatText", `watchdog heartbeat: ${fmtTs(heartbeat.recorded_at_kst)} · ${heartbeat.check_count || 0}개 점검`);
   const checks = Array.isArray(health.checks) ? health.checks : [];
+  const badCount = checks.filter((c) => opsTone(c.status) === "bad").length;
+  const warnCount = checks.filter((c) => opsTone(c.status) === "warn").length;
+  const summaryEl = el("opsHealthSummary");
+  if (summaryEl) {
+    if (!checks.length) {
+      summaryEl.textContent = "점검 항목 없음";
+      summaryEl.className = "ops-health-summary neutral";
+    } else if (badCount > 0) {
+      summaryEl.textContent = `${badCount}개 이상 감지`;
+      summaryEl.className = "ops-health-summary bad";
+    } else if (warnCount > 0) {
+      summaryEl.textContent = `${warnCount}개 주의`;
+      summaryEl.className = "ops-health-summary warn";
+    } else {
+      summaryEl.textContent = `${checks.length}/${checks.length} 정상`;
+      summaryEl.className = "ops-health-summary good";
+    }
+  }
   setH("opsHealthList", checks.map((check) => {
     const details = check?.details || {};
     const age = Number(details.age_minutes);
     const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-    return `<article class="ops-health-row ${opsTone(check.status)}"><div><strong>${escapeHtml(opsLabel(check.component))}</strong><span>${escapeHtml(check.summary || "-")}</span></div><div class="ops-health-meta"><b>${escapeHtml(check.status || "UNKNOWN")}</b><small>${ageText}</small></div></article>`;
+    const tone = opsTone(check.status);
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(opsLabel(check.component))}</strong>
+        <span>${escapeHtml(check.summary || "-")}</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${escapeHtml(check.status || "UNKNOWN")}</span>
+        <small>${ageText}</small>
+      </div>
+    </article>`;
   }).join(""));
 }
 
@@ -1523,6 +1616,27 @@ function setupPageTabs() {
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
     if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); }
   }));
+}
+
+function setupIndicatorToggle() {
+  const btn = el("indicatorToggleBtn");
+  const row = el("indicatorExtraRow");
+  const label = el("indicatorToggleLabel");
+  if (!btn || !row) return;
+  const apply = (expanded) => {
+    row.classList.toggle("collapsed", !expanded);
+    btn.classList.toggle("expanded", expanded);
+    btn.setAttribute("aria-expanded", String(expanded));
+    if (label) label.textContent = expanded ? "보조 지표 접기" : "보조 지표 더 보기 (+3)";
+  };
+  let expanded = false;
+  try { expanded = localStorage.getItem("dashIndicatorExpanded") === "1"; } catch (e) {}
+  apply(expanded);
+  btn.addEventListener("click", () => {
+    expanded = !expanded;
+    apply(expanded);
+    try { localStorage.setItem("dashIndicatorExpanded", expanded ? "1" : "0"); } catch (e) {}
+  });
 }
 
 function setupScrollRendering() {
@@ -1852,7 +1966,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   });
 
   const priceLabels = [];
-  if (includeCurrentPrice && currentPrice > 0) priceLabels.push({ val: currentPrice, color: "var(--warn)", label: "현재", dashed: true, width: 2 });
+  if (includeCurrentPrice && currentPrice > 0) priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true, width: 2 });
   if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
@@ -2091,6 +2205,7 @@ document.addEventListener("visibilitychange", () => {
 });
 setupAssetTabs();
 setupPageTabs();
+setupIndicatorToggle();
 setupScrollRendering();
 setupMobileCandleGestures();
 

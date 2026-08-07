@@ -17,7 +17,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
-MARKET_SYMBOLS = {"eth": "ETHUSDC", "sol": "SOLUSDC", "btc": "BTCUSDC"}
+MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT"}
 EVENT_POLL_SECONDS = 2.5
 MARKET_HISTORY_CACHE_SECONDS = 300
 SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"

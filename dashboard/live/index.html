@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>인공지능 트레이딩 대시보드</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260807-ribbon-entrytime-v1">
+  <link rel="stylesheet" href="styles.css?v=20260807-accent-signal-v1">
 </head>
 <body>
   <main class="app">
@@ -30,21 +30,25 @@
       <time id="executionAlertTime">-</time>
     </section>
 
-    <section class="indicator-row secondary-row">
-      <article id="cardWhale" class="panel indicator-card">
-        <div class="ind-head">수급 흐름</div>
-        <div id="whaleText" class="ind-value">-</div>
-        <div id="whaleStatusText" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+    <section class="hero-metrics">
+      <article class="panel hero-card hero-primary">
+        <span class="hero-label">누적 수익률</span>
+        <strong id="heroCumulativePnl" class="hero-value">-</strong>
+        <span id="heroCumulativeSub" class="hero-sub">-</span>
       </article>
-
-      <article id="cardWhalePos" class="panel indicator-card">
-        <div class="ind-head">고래 포지션</div>
-        <div id="whaleIntentText" class="ind-value">-</div>
-        <div id="whaleIntentPct" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      <article class="panel hero-card">
+        <span class="hero-label">오늘 손익</span>
+        <strong id="heroTodayPnl" class="hero-value hero-value-sm">-</strong>
+        <span id="heroTodaySub" class="hero-sub">-</span>
       </article>
+      <article class="panel hero-card">
+        <span class="hero-label">미실현 손익</span>
+        <strong id="heroUnrealizedPnl" class="hero-value hero-value-sm">-</strong>
+        <span id="heroUnrealizedSub" class="hero-sub">-</span>
+      </article>
+    </section>
 
+    <section class="indicator-row indicator-row-3 secondary-row">
       <article id="cardObi" class="panel indicator-card">
         <div class="ind-head">호가 불균형</div>
         <div id="obiText" class="ind-value">-</div>
@@ -59,17 +63,38 @@
         <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
       </article>
 
-      <article id="cardEai" class="panel indicator-card">
-        <div class="ind-head">에너지 지수</div>
-        <div id="eaiText" class="ind-value">-</div>
-        <div id="eaiGaugeRightTxt" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-
       <article id="cardRisk" class="panel indicator-card">
         <div class="ind-head">꼬리 리스크</div>
         <div id="riskText" class="ind-value">-</div>
         <div id="riskStatusLabel" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+    </section>
+
+    <button type="button" id="indicatorToggleBtn" class="indicator-toggle-btn" aria-expanded="false" aria-controls="indicatorExtraRow">
+      <span id="indicatorToggleLabel">보조 지표 더 보기 (+3)</span>
+      <span class="indicator-toggle-chevron" aria-hidden="true">▾</span>
+    </button>
+
+    <section id="indicatorExtraRow" class="indicator-row indicator-row-3 secondary-row indicator-extra collapsed">
+      <article id="cardWhale" class="panel indicator-card">
+        <div class="ind-head">수급 흐름</div>
+        <div id="whaleText" class="ind-value">-</div>
+        <div id="whaleStatusText" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardWhalePos" class="panel indicator-card">
+        <div class="ind-head">고래 포지션</div>
+        <div id="whaleIntentText" class="ind-value">-</div>
+        <div id="whaleIntentPct" class="ind-sub">-</div>
+        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
+      </article>
+
+      <article id="cardEai" class="panel indicator-card">
+        <div class="ind-head">에너지 지수</div>
+        <div id="eaiText" class="ind-value">-</div>
+        <div id="eaiGaugeRightTxt" class="ind-sub">-</div>
         <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
       </article>
     </section>
@@ -84,6 +109,7 @@
             <button type="button" class="asset-tab" data-asset="btc">BTC</button>
           </div>
         </div>
+        <div id="chartAiSummaryText" class="chart-ai-summary">-</div>
         <div id="chartAiRibbon" class="chart-ai-ribbon hold">
           <div class="ribbon-item ribbon-primary">
             <span>AI 판단</span>
@@ -174,14 +200,17 @@
       <section class="panel ops-health-panel">
         <div class="ops-health-head">
           <div><h3>헬스 체크</h3><p id="opsHeartbeatText" class="muted">-</p></div>
-          <span class="ops-readonly">읽기 전용 · 30초 갱신</span>
+          <div class="ops-health-head-tools">
+            <span id="opsHealthSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">읽기 전용 · 30초 갱신</span>
+          </div>
         </div>
         <div id="opsHealthList" class="ops-health-list"></div>
       </section>
     </section>
 
   </main>
-  <script src="./app.js?v=20260807-ribbon-entrytime-v1"></script>
+  <script src="./app.js?v=20260807-accent-signal-v1"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
