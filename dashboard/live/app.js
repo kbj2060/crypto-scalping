@@ -1655,7 +1655,7 @@ function setupPageTabs() {
     el("liveTabPanel")?.classList.toggle("hidden", ops);
     el("opsTabPanel")?.classList.toggle("hidden", !ops);
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); }
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); }
   }));
 }
 
