@@ -407,10 +407,13 @@ def telegram_message(check: Check, kind: str) -> str:
     return "\n".join(lines)
 
 
-def send_telegram(message: str) -> bool:
+def send_telegram(message: str) -> bool | None:
+    # None = not configured (no token/chat_id -- retrying would never help, so
+    # this must not be treated the same as a genuine failure). False = configured
+    # but the send itself failed (network/API error) -- this case should be retried.
     token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN", ""), os.getenv("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
-        return False
+        return None
     body = json.dumps({"chat_id": chat_id, "text": message, "parse_mode": "HTML"}).encode()
     request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -462,25 +465,27 @@ def run_once(dry_run: bool) -> list[Check]:
             )
             effective_checks.append(effective)
             kind = notification_kind(str(previous.get("status", "")), confirmed_status, previous.get("last_notified_at_kst"))
-            sent = False
+            sent = None
             if kind:
                 message = telegram_message(effective, kind)
-                sent = False if dry_run else send_telegram(message)
+                sent = None if dry_run else send_telegram(message)
                 print(f"[{kind}] {effective.component} {effective.status}: {effective.summary}")
                 con.execute("INSERT INTO incidents(observed_at_kst, component, status, summary, details_json, notification_kind, telegram_sent) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (iso_now(), effective.component, effective.status, effective.summary, json.dumps(effective.details, default=str), kind, int(sent)))
+                            (iso_now(), effective.component, effective.status, effective.summary, json.dumps(effective.details, default=str), kind, int(bool(sent))))
                 append_jsonl(HISTORY / f"events_{now_kst():%Y%m%d}.jsonl", {
                     "observed_at_kst": iso_now(), "kind": kind, "component": effective.component,
-                    "status": effective.status, "summary": effective.summary, "telegram_sent": sent,
+                    "status": effective.status, "summary": effective.summary, "telegram_sent": bool(sent),
                     "recommended_action": recommended_action(effective.component), "details": effective.details,
                 })
             stored[check.component] = {
                 "status": confirmed_status, "raw_status": check.status, "summary": check.summary, "last_seen_at_kst": iso_now(),
                 **debounce_fields,
-                # Record every attempted notification as the dedupe point. Otherwise a
-                # missing Telegram configuration (or a transient send failure) retries
-                # the same alert every polling interval instead of the documented cadence.
-                "last_notified_at_kst": iso_now() if kind else previous.get("last_notified_at_kst"),
+                # Record every attempted notification as the dedupe point, EXCEPT a
+                # genuine send failure (sent is False -- Telegram configured but the
+                # request itself failed): that case must retry next poll instead of
+                # silently losing the alert. "Not configured" (sent is None) still
+                # advances normally since retrying it every cycle would never help.
+                "last_notified_at_kst": previous.get("last_notified_at_kst") if sent is False else iso_now(),
             }
     observed_at = iso_now()
     snapshot = {"schema_version": "ops_watchdog.health.v1", "updated_at_kst": observed_at, "checks": [asdict(c) for c in effective_checks]}

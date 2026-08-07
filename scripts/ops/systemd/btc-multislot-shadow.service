@@ -1,5 +1,5 @@
 [Unit]
-Description=crypto-scalping ops_watchdog (read-only 24/7 operations monitor)
+Description=crypto-scalping BTC multi-slot (N=3) shadow loop (2026-08-07, shadow-only, no order submission)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -8,15 +8,14 @@ StartLimitIntervalSec=0
 Type=simple
 User=llewyn
 WorkingDirectory=/home/llewyn/crypto-scalping
-ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/ops_watchdog.py --interval-seconds 30
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/run_btc_multislot_shadow_loop_20260807.py
 Restart=always
-# 2026-08-07: progressive backoff, see trading-bot.service for rationale.
 RestartSec=15
 RestartSteps=6
 RestartMaxDelaySec=300
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ops_watchdog
+SyslogIdentifier=btc_multislot_shadow
 
 [Install]
 WantedBy=multi-user.target

@@ -34,6 +34,7 @@ systemd_unit_for() {
     trading_bot) printf '%s' 'trading-bot.service' ;;
     tau1_shadow) printf '%s' 'tau1-shadow.service' ;;
     ops_watchdog) printf '%s' 'ops-watchdog.service' ;;
+    btc_multislot_shadow) printf '%s' 'btc-multislot-shadow.service' ;;
   esac
 }
 
@@ -91,9 +92,9 @@ stop() {
   if ! systemd_managed ops_watchdog; then
     pkill -f "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*ops_watchdog.py" 2>/dev/null && echo "ops_watchdog: stopped" || echo "ops_watchdog: not running"
   fi
-  # btc_multislot_shadow is bash-supervised only (not migrated to systemd), so it
-  # has no systemd_managed guard to skip -- always safe to pkill its child here.
-  pkill -f "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*run_btc_multislot_shadow_loop_20260807.py" 2>/dev/null && echo "btc_multislot_shadow: stopped" || echo "btc_multislot_shadow: not running"
+  if ! systemd_managed btc_multislot_shadow; then
+    pkill -f "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*run_btc_multislot_shadow_loop_20260807.py" 2>/dev/null && echo "btc_multislot_shadow: stopped" || echo "btc_multislot_shadow: not running"
+  fi
 }
 
 status() {
