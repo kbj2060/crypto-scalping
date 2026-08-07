@@ -114,6 +114,8 @@ def recommended_action(component: str) -> str:
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
         return "scripts/ops/triage.sh; df -h ."
+    if component == "btc_multislot_shadow_process":
+        return "scripts/ops/botctl.sh status; tail -n 50 logs/supervisor/btc_multislot_shadow_$(date +%Y%m%d).log"
     return "scripts/ops/triage.sh"
 
 
@@ -440,6 +442,10 @@ def run_once(dry_run: bool) -> list[Check]:
     init_db(db_path)
     checks = [
         check_process("trading_bot_process", "trading_bot.py"),
+        # Shadow-only live-forward A/B loop (2026-08-07) with no order submission --
+        # not required for live trading, but if it dies silently the multi-slot
+        # promotion gate quietly stops accumulating observations. WARN, not CRITICAL.
+        check_process("btc_multislot_shadow_process", "run_btc_multislot_shadow_loop_20260807.py", required=False),
         check_snapshot(), check_heartbeat(), check_pipeline(), check_pipeline_contract(),
         check_data_sources(), check_dashboard(), check_execution_contract(), check_runtime_resources(),
         check_watchdog_storage(),

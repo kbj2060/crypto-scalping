@@ -45,7 +45,7 @@ systemd_managed() {
 start() {
   # _supervise.sh holds its own flock and exits immediately if one is already running,
   # so launching unconditionally here is safe (no duplicate supervisors can result).
-  for name in trading_bot tau1_shadow ops_watchdog; do
+  for name in trading_bot tau1_shadow ops_watchdog btc_multislot_shadow; do
     if systemd_managed "$name"; then
       unit="$(systemd_unit_for "$name")"
       echo "$name: managed by systemd ($unit) -- use 'sudo systemctl start $unit' instead, skipping bash supervisor"
@@ -63,7 +63,7 @@ start() {
 }
 
 stop() {
-  for name in trading_bot tau1_shadow ops_watchdog; do
+  for name in trading_bot tau1_shadow ops_watchdog btc_multislot_shadow; do
     if systemd_managed "$name"; then
       unit="$(systemd_unit_for "$name")"
       echo "$name: managed by systemd ($unit) -- use 'sudo systemctl stop $unit' (killing it here would just get restarted by systemd)"
@@ -91,14 +91,21 @@ stop() {
   if ! systemd_managed ops_watchdog; then
     pkill -f "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*ops_watchdog.py" 2>/dev/null && echo "ops_watchdog: stopped" || echo "ops_watchdog: not running"
   fi
+  # btc_multislot_shadow is bash-supervised only (not migrated to systemd), so it
+  # has no systemd_managed guard to skip -- always safe to pkill its child here.
+  pkill -f "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*run_btc_multislot_shadow_loop_20260807.py" 2>/dev/null && echo "btc_multislot_shadow: stopped" || echo "btc_multislot_shadow: not running"
 }
 
 status() {
-  for name in trading_bot tau1_shadow ops_watchdog; do
+  for name in trading_bot tau1_shadow ops_watchdog btc_multislot_shadow; do
     if systemd_managed "$name"; then
       unit="$(systemd_unit_for "$name")"
-      state="$(systemctl is-active "$unit" 2>/dev/null || echo unknown)"
-      enabled="$(systemctl is-enabled "$unit" 2>/dev/null || echo unknown)"
+      # is-active/is-enabled print a real value (inactive/disabled/failed) AND exit
+      # non-zero for those non-"active"/"enabled" states -- a `|| echo unknown`
+      # fallback fires on that exit code regardless, appending a second bogus line
+      # after the real one. Fall back on emptiness instead of exit status.
+      state="$(systemctl is-active "$unit" 2>/dev/null)"; state="${state:-unknown}"
+      enabled="$(systemctl is-enabled "$unit" 2>/dev/null)"; enabled="${enabled:-unknown}"
       echo "$name: systemd $unit = $state (enabled=$enabled)"
       continue
     fi
@@ -114,6 +121,7 @@ status() {
   pgrep -af "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*trading_bot.py" || echo "trading_bot.py: not running"
   pgrep -af "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*live_sigma6_regime_tiebreak_shadow" || echo "tau1_shadow: not running"
   pgrep -af "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*ops_watchdog.py" || echo "ops_watchdog: not running"
+  pgrep -af "^($PY_PATTERN|[^ ]*venv/bin/python|[^ ]*miniconda3/envs/quant_ai/bin/python) -u .*run_btc_multislot_shadow_loop_20260807.py" || echo "btc_multislot_shadow: not running"
 }
 
 case "${1:-}" in
