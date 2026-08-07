@@ -1,0 +1,132 @@
+{
+  "title": "crypto-scalping ops overview",
+  "uid": "crypto-scalping-ops",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Core processes",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "trading-bot.service",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "expr": "crypto_scalping_systemd_unit_active{unit=\"trading-bot\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "ops-watchdog.service",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "expr": "crypto_scalping_systemd_unit_active{unit=\"ops-watchdog\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "btc-multislot-shadow.service",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "targets": [{ "expr": "crypto_scalping_systemd_unit_active{unit=\"btc-multislot-shadow\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "tau1-shadow.service",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "targets": [{ "expr": "crypto_scalping_systemd_unit_active{unit=\"tau1-shadow\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN (intentional)", "color": "text" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "ops_watchdog checks",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "check status over time (1=OK 0.5=WARN 0=CRITICAL/BLOCKED)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "targets": [{ "expr": "ops_watchdog_check_status", "legendFormat": "{{component}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "check freshness (age_minutes)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "targets": [{ "expr": "ops_watchdog_check_age_minutes", "legendFormat": "{{component}}", "refId": "A" }]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "watchdog heartbeat age (seconds)",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 22 },
+      "targets": [{ "expr": "ops_watchdog_heartbeat_age_seconds", "refId": "A" }]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "host resources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "load average (1m)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 29 },
+      "targets": [{ "expr": "node_load1", "refId": "A" }]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "memory available (GiB)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 29 },
+      "targets": [{ "expr": "node_memory_MemAvailable_bytes / 1024 / 1024 / 1024", "refId": "A" }]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "root filesystem free (GiB)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 36 },
+      "targets": [{ "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"} / 1024 / 1024 / 1024", "refId": "A" }]
+    }
+  ]
+}

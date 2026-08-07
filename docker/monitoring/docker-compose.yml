@@ -1,0 +1,64 @@
+version: "3.8"
+
+# Read-only observability stack for the crypto-scalping ops watchdog.
+# host networking + explicit 127.0.0.1 listen addresses everywhere so nothing
+# here is reachable outside this machine -- the existing public dashboard has
+# its own Cloudflare tunnel with its own access controls; this stack is
+# deliberately not wired into that.
+#
+# Start: cd docker/monitoring && bash render_alertmanager_config.sh && docker compose up -d
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: crypto_scalping_prometheus
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.listen-address=127.0.0.1:9090"
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: crypto_scalping_node_exporter
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - "--web.listen-address=127.0.0.1:9100"
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: crypto_scalping_alertmanager
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=127.0.0.1:9093"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: crypto_scalping_grafana
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - GF_SERVER_HTTP_ADDR=127.0.0.1
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

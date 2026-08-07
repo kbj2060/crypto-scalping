@@ -1,0 +1,42 @@
+groups:
+  - name: crypto_scalping_ops
+    rules:
+      - alert: OpsWatchdogCheckFailing
+        expr: ops_watchdog_check_status < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.component }} is not OK (status={{ $value }})"
+
+      - alert: CoreSystemdUnitDown
+        expr: crypto_scalping_systemd_unit_active{unit=~"trading-bot|ops-watchdog"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.unit }}.service is not active"
+
+      - alert: ShadowSystemdUnitDown
+        expr: crypto_scalping_systemd_unit_active{unit="btc-multislot-shadow"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.unit }}.service is not active (shadow-only, not order-critical)"
+
+      - alert: OpsWatchdogHeartbeatStale
+        expr: ops_watchdog_heartbeat_age_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ops_watchdog heartbeat stale ({{ $value }}s) -- it may be hung"
+
+      - alert: PrometheusExporterDown
+        expr: up{job="ops_watchdog_exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "prometheus_exporter.py is not responding -- this Prometheus stack has gone blind to ops_watchdog state (the existing Telegram-direct alerting from ops_watchdog.py itself is unaffected)"

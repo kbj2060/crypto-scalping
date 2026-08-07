@@ -70,3 +70,6 @@ backups/
 
 # Scratch / experiment output
 tmp/
+
+# Monitoring stack: rendered config contains the real Telegram bot token
+docker/monitoring/alertmanager/alertmanager.yml
