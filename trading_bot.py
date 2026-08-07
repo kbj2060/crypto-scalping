@@ -12595,6 +12595,12 @@ async def main(use_local=False):
                     # missing input or Deribit DVOL failure -- caught by this function's own
                     # error handling like every other per-asset refresh failure (no silent
                     # degraded-feature trading).
+                    # layerA consumes the adapter's regime3_current_* columns, which the adapter
+                    # normally appends INSIDE decide_entry -- pre-append them here so the swing
+                    # provider sees them (found 2026-08-07 in the multislot shadow loop smoke
+                    # test; the adapter recomputes/overwrites them identically afterwards, so
+                    # this only fixes ordering, it does not change decision inputs).
+                    processed = ctx["adapter"].regime3_current.append(processed)
                     processed = ctx["btc_swing_transition"].append(processed, raw_5m=asset_eth)
                 try:
                     regime_frame = final_governor._ensure_regime_features(

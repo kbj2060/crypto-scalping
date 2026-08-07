@@ -59,6 +59,13 @@ _DVOL_RESOLUTION = "3600"
 # frame span (<=1200 5m bars = 100h). 1100h of hourly bars covers everything with margin.
 _DVOL_MIN_HOURS = 1100
 _RAW_5M_COLS = ["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "taker_buy_base"]
+# The bot's live kline buffer is causally TRIMMED to ancillary-complete rows (~500 bars right
+# after boot), far short of what the 1h overlay needs: 48h of mature 1h windows + the frame span
+# + EWM (rsi_14) settling. Below this row count the provider self-fetches raw 5m klines from the
+# Binance futures public REST instead (same public data the training CSVs were built from).
+_MIN_RAW_5M_BARS = 3000
+_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
+_KLINES_TARGET_BARS = 4032  # 14 days of 5m -- puts the rsi EWM truncation error below ~1e-7
 
 
 class BtcSwingTransitionLiveFeature:
@@ -76,6 +83,57 @@ class BtcSwingTransitionLiveFeature:
         # injectable for offline parity tests; defaults to the real REST fetch
         self._dvol_fetcher = dvol_fetcher or self._fetch_dvol_rows
         self._dvol_cache: pd.DataFrame | None = None
+        self._klines_cache: pd.DataFrame | None = None
+
+    # ---------------- raw 5m klines (self-fetched) ----------------
+    def _fetch_klines(self, start_ms: int, end_ms: int) -> list[list]:
+        """Forward pagination: with startTime set, fapi returns the EARLIEST bars of the range
+        ascending, so walk the start cursor forward until the range is covered."""
+        rows: list[list] = []
+        cursor_start = start_ms
+        for _ in range(10):
+            if cursor_start >= end_ms:
+                break
+            resp = requests.get(_KLINES_URL, params={
+                "symbol": "BTCUSDT", "interval": "5m", "limit": 1500,
+                "startTime": cursor_start}, timeout=15)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Binance klines fetch failed: HTTP {resp.status_code} {resp.text[:200]}")
+            data = resp.json()
+            if not data:
+                break
+            rows.extend(data)
+            last_open = int(data[-1][0])
+            if len(data) < 1500 or last_open >= end_ms:
+                break
+            cursor_start = last_open + 300_000
+            time.sleep(0.1)
+        if not rows:
+            raise RuntimeError("Binance klines fetch returned no rows")
+        return rows
+
+    def _refresh_klines_cache(self) -> pd.DataFrame:
+        now_ms = int(time.time() * 1000)
+        if self._klines_cache is None:
+            start = now_ms - (_KLINES_TARGET_BARS + 24) * 300_000
+        else:
+            start = int(self._klines_cache["timestamp"].max().value // 10**6) - 600_000
+        rows = self._fetch_klines(start, now_ms)
+        fresh = pd.DataFrame([[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])]
+                              for r in rows], columns=["open_ms", "open", "high", "low", "close", "volume"])
+        fresh["timestamp"] = pd.to_datetime(fresh["open_ms"], unit="ms")
+        fresh = fresh.drop(columns=["open_ms"])
+        if self._klines_cache is not None:
+            keep = self._klines_cache[self._klines_cache["timestamp"] < fresh["timestamp"].min()]
+            fresh = pd.concat([keep, fresh], ignore_index=True)
+        fresh = fresh.drop_duplicates("timestamp", keep="last").sort_values("timestamp").reset_index(drop=True)
+        # drop the still-forming 5m bar so only closed bars feed the 1h resample
+        cutoff = pd.to_datetime((now_ms // 300_000) * 300_000, unit="ms")
+        fresh = fresh[fresh["timestamp"] < cutoff]
+        self._klines_cache = fresh.tail(_KLINES_TARGET_BARS + 288).reset_index(drop=True)
+        if len(self._klines_cache) < _MIN_RAW_5M_BARS:
+            raise RuntimeError(f"self-fetched klines too short: {len(self._klines_cache)}")
+        return self._klines_cache
 
     # ---------------- DVOL ----------------
     def _fetch_dvol_rows(self, start_ms: int, end_ms: int) -> list[list]:
@@ -146,6 +204,7 @@ class BtcSwingTransitionLiveFeature:
         if missing:
             raise RuntimeError(f"swing_transition mtf1h: raw 5m buffer missing {missing}")
         src = raw_5m[cols].copy()
+        src["timestamp"] = pd.to_datetime(src["timestamp"]).astype("datetime64[ns]")
         r1h = _resample_1h(src)
         feats = _compute_1h_features(r1h)
         logc = np.log(np.maximum(r1h["close"].to_numpy(dtype=np.float64), 1e-12))
@@ -159,11 +218,16 @@ class BtcSwingTransitionLiveFeature:
         return overlay.sort_values("available_at").reset_index(drop=True)
 
     # ---------------- main ----------------
-    def append(self, frame: pd.DataFrame, *, raw_5m: pd.DataFrame) -> pd.DataFrame:
+    def append(self, frame: pd.DataFrame, *, raw_5m: pd.DataFrame | None = None) -> pd.DataFrame:
         if frame.empty:
             raise RuntimeError("swing_transition: empty decision frame")
+        if raw_5m is None or len(raw_5m) < _MIN_RAW_5M_BARS:
+            # bot buffers are causally trimmed right after boot (~500 bars) -- too short for the
+            # 1h overlay's windows; fall back to the provider's own full-depth kline cache
+            raw_5m = self._refresh_klines_cache()
         out = frame.copy()
-        ts = pd.to_datetime(out["timestamp"]).reset_index(drop=True)
+        # live frames arrive as datetime64[us]; merge_asof needs one dtype everywhere, so pin ns
+        ts = pd.to_datetime(out["timestamp"]).astype("datetime64[ns]").reset_index(drop=True)
         work = pd.DataFrame({"timestamp": ts})
 
         in_frame_cols = [c for c in self.feature_columns
