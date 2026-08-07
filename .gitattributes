@@ -1,0 +1,15 @@
+# Normalize text files to LF regardless of which OS (WSL vs Windows tools) last
+# touched them. Without this, core.autocrlf=true on the Windows side and a
+# native-LF checkout on the WSL side fight over every shell/Python edit, and
+# every touched-but-unchanged .sh file shows up as a spurious "M" in git status.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
+
+# Known binaries -- keep explicit so autodetection never guesses wrong.
+*.exe binary
+*.ttf binary
+.bin/cloudflared binary
+.tools/cloudflared/cloudflared binary
+.tools/cloudflared/cloudflared.exe binary
