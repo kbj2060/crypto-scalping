@@ -73,3 +73,12 @@ tmp/
 
 # Monitoring stack: rendered config contains the real Telegram bot token
 docker/monitoring/alertmanager/alertmanager.yml
+
+# Live-mutated runtime state, rewritten continuously by 24/7 governor/shadow loops --
+# tracking these kept the working tree permanently dirty and silently disabled
+# scripts/ops/deploy_watcher.sh's pull safety gate. Backed up separately by
+# scripts/ops/backup_live_data.sh, not via git history.
+data/ensemble/final_governor_runtime_state.json
+data/ensemble/governor_live_state.json
+data/ensemble/omega4_6_1_shadow_btc_state.json
+data/ensemble/omega4_6_1_shadow_sol_state.json
