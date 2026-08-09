@@ -17,9 +17,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = "architecture_experiment_contract_v2"
+SCHEMA_VERSION = "architecture_experiment_contract_v3"
+# v2 stays valid so existing contracts keep preflighting; only v3 must declare an effect-size gate
+LEGACY_SCHEMA_VERSIONS = ("architecture_experiment_contract_v2",)
+ACCEPTED_SCHEMA_VERSIONS = (SCHEMA_VERSION,) + LEGACY_SCHEMA_VERSIONS
 PREFLIGHT_SCHEMA_VERSION = "architecture_preflight_v1"
 FEATURE_ANALYSIS_SCHEMA_VERSION = "architecture_feature_analysis_v1"
 PRIOR_RESEARCH_REGISTRY_PATH = ROOT / "docs/model_contracts/research_line_registry.json"
@@ -129,6 +131,123 @@ def assert_higher_timeframe_availability(decision_timestamps: Any, source_availa
         raise ValueError(f"Higher-timeframe lookahead: {int(violations.sum())} rows use unfinished future bars")
 
 
+def effect_size_report(bucket_a: Any, bucket_b: Any, *, label_a: str = "a", label_b: str = "b") -> dict[str, Any]:
+    """Effect size between two trade/return buckets, for the gate below.
+
+    Added 2026-08-08 after the BTC czz_trend regime-sizing adoption was downgraded: it had been
+    accepted on a paired time-block bootstrap P=0.739 while its own per-trade effect was
+    t=-0.99 (p=0.33) and its RISK channel pointed the wrong way (the bucket it downsized was
+    LESS volatile). A bootstrap P measures whether a difference's SIGN is consistent across
+    blocks; it says nothing about the size of that difference. Both are reported here.
+    """
+    a = np.asarray(bucket_a, dtype=np.float64)
+    b = np.asarray(bucket_b, dtype=np.float64)
+    a, b = a[np.isfinite(a)], b[np.isfinite(b)]
+    if len(a) < 3 or len(b) < 3:
+        raise ValueError("effect_size_report needs >=3 finite observations per bucket")
+    from scipy import stats  # local import: workbench core stays numpy/pandas only
+
+    t_stat, p_mean = stats.ttest_ind(a, b, equal_var=False)
+    pooled_sd = float(np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2.0))
+    lev_stat, p_var = stats.levene(a, b, center="median")
+    return {
+        label_a: {"n": int(len(a)), "mean": float(a.mean()), "sd": float(a.std(ddof=1))},
+        label_b: {"n": int(len(b)), "mean": float(b.mean()), "sd": float(b.std(ddof=1))},
+        "mean_diff": float(a.mean() - b.mean()),
+        "welch_t": float(t_stat), "p_mean": float(p_mean),
+        "cohens_d": float((a.mean() - b.mean()) / pooled_sd) if pooled_sd > 0 else None,
+        "variance_ratio_a_over_b": float(a.var(ddof=1) / max(b.var(ddof=1), 1e-12)),
+        "brown_forsythe_stat": float(lev_stat), "p_variance": float(p_var),
+        "worst5_sum_a": float(np.sort(a)[:5].sum()), "worst5_sum_b": float(np.sort(b)[:5].sum()),
+    }
+
+
+def permutation_label_test(returns: Any, multipliers: Any, *, statistic: str = "mdd",
+                           R: int = 20000, seed: int = 903174) -> dict[str, Any]:
+    """"How special is THIS labelling?" -- reassign the SAME multiplier multiset to trades at
+    random and locate the real assignment in that null. A block bootstrap never asks this: it
+    compares an arm against a baseline, not against other ways of spending the same size budget.
+    """
+    r = np.asarray(returns, dtype=np.float64)
+    m = np.asarray(multipliers, dtype=np.float64)
+    if len(r) != len(m):
+        raise ValueError("returns and multipliers must align")
+    if statistic != "mdd":
+        raise ValueError("only statistic='mdd' is implemented")
+
+    def _mdd(x: np.ndarray) -> float:
+        if len(x) == 0:
+            return 0.0
+        curve = np.concatenate([[1.0], np.cumprod(1.0 + x)])
+        peak = np.maximum.accumulate(curve)
+        return float((curve / np.maximum(peak, 1e-12) - 1.0).min() * 100.0)
+
+    rng = np.random.default_rng(seed)
+    real = _mdd(r * m)
+    null = np.array([_mdd(r * rng.permutation(m)) for _ in range(int(R))])
+    return {"real": real, "baseline_no_overlay": _mdd(r), "null_mean": float(null.mean()),
+            "null_p05": float(np.percentile(null, 5)), "null_p95": float(np.percentile(null, 95)),
+            "percentile_of_null_worse_than_real": float((null < real).mean()), "R": int(R)}
+
+
+def assert_effect_size_gate(contract: dict[str, Any], report: dict[str, Any], *,
+                            permutation: dict[str, Any] | None = None,
+                            selection_window_report: dict[str, Any] | None = None,
+                            falsification: dict[str, Any] | None = None) -> None:
+    """Enforce the contract's declared `selection.effect_size_gate` against measured evidence.
+
+    Raises with every failure listed, so a caller cannot adopt on a consistency statistic alone.
+
+    `falsification`, when supplied, is the dict returned by
+    `core.selection_stats.falsification_audit(returns_matrix)` for the search that produced this
+    line's winner -- the same (periods x configurations) matrix `pbo_cscv` takes, winner included.
+    It asks a question none of the other checks here do: could this exact search have produced its
+    winner out of noise alone? A search whose real best-of-N is unremarkable against a
+    zero-predictability null or a demeaned block-bootstrap microstructure-placebo null cannot tell
+    real predictability from a specification-search artifact, independent of what welch_t or the
+    permutation percentile say about the winner it already picked (Nikolopoulos, "Spurious
+    Predictability in Financial Machine Learning", arXiv:2604.15531, 2026). Run it BEFORE the
+    winner is allowed to consume VAL/OOS budget, not as a replacement for the other checks here.
+    """
+    gate = (contract.get("selection") or {}).get("effect_size_gate") or {}
+    if not gate:
+        raise ValueError("contract declares no selection.effect_size_gate; nothing to enforce")
+    errors: list[str] = []
+    min_abs_t = float(gate.get("min_abs_t", 2.0))
+    if abs(float(report.get("welch_t", 0.0))) < min_abs_t:
+        errors.append(f"|welch_t|={abs(float(report.get('welch_t', 0.0))):.3f} < required {min_abs_t}")
+    if gate.get("risk_channel_tested"):
+        if "p_variance" not in report:
+            errors.append("risk_channel_tested declared but the report has no variance test")
+        elif float(report["variance_ratio_a_over_b"]) <= 1.0:
+            errors.append(
+                f"risk claim rejected: the downsized bucket is NOT riskier "
+                f"(variance ratio {float(report['variance_ratio_a_over_b']):.3f} <= 1.0)")
+    if permutation is not None:
+        need = float(gate.get("min_permutation_percentile", 0.90))
+        got = float(permutation.get("percentile_of_null_worse_than_real", 0.0))
+        if got < need:
+            errors.append(f"label-permutation percentile {got:.3f} < required {need}")
+    if gate.get("premise_checked_in_selection_window"):
+        if selection_window_report is None:
+            errors.append("premise_checked_in_selection_window declared but no selection-window report was supplied")
+        elif np.sign(selection_window_report.get("mean_diff", 0.0)) != np.sign(report.get("mean_diff", 0.0)):
+            errors.append("premise reverses sign between the selection window and the evaluation window "
+                          "(placement luck signature, see the BTC czz_trend downgrade 2026-08-08)")
+    if gate.get("falsification_audit_required"):
+        if falsification is None:
+            errors.append("falsification_audit_required declared but no falsification-audit report was supplied")
+        else:
+            need_fals = float(gate.get("min_falsification_percentile", 0.95))
+            for key in ("zero_predictability_percentile", "microstructure_placebo_percentile"):
+                got_fals = float(falsification.get(key, 0.0))
+                if got_fals < need_fals:
+                    errors.append(f"falsification audit: {key} {got_fals:.3f} < required {need_fals} "
+                                  "(this search's winner is not distinguishable from a noise artifact)")
+    if errors:
+        raise ValueError("Effect-size gate FAILED:\n- " + "\n- ".join(errors))
+
+
 def _write_new_json(payload: dict[str, Any], output: Path) -> None:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing artifact: {output}. Create a revision instead.")
@@ -166,7 +285,20 @@ def build_interactive_contract() -> dict[str, Any]:
             "seeds": _csv(_ask("학습 seed", default="270705")),
             "seed_ensemble_claim": _yes_no(_ask("복수 시드 평균/배깅으로 승격을 주장합니까 (yes/no 또는 예/아니오)", default="no")),
         },
-        "selection": {"minimum_trades_per_split": _ask("split별 최소 거래 수", default="15"), "validation_pass_criteria": _ask("Validation 통과 기준")},
+        "selection": {
+            "minimum_trades_per_split": _ask("split별 최소 거래 수", default="15"),
+            "validation_pass_criteria": _ask("Validation 통과 기준"),
+            "effect_size_gate": {
+                "min_abs_t": float(_ask("효과크기 게이트: 최소 |t| (부트스트랩 P는 유의성이 아님)", default="2.0") or 2.0),
+                "min_permutation_percentile": float(_ask("라벨 순열 검정 최소 백분위", default="0.90") or 0.90),
+                "risk_channel_tested": _yes_no(_ask("MDD/리스크 주장입니까 (yes면 축소 버킷이 실제로 더 위험한지 검정) (yes/no)", default="no")),
+                "premise_checked_in_selection_window": _yes_no(_ask("선택 윈도우에서도 전제 부호를 확인합니까 (yes/no)", default="yes")),
+                "falsification_audit_required": _yes_no(_ask(
+                    "이 라인의 승격 주장이 여러 config를 탐색한 결과입니까 (yes면 core.selection_stats.falsification_audit "
+                    "통과를 요구) (yes/no)", default="yes")),
+                "min_falsification_percentile": float(_ask("Falsification audit 최소 백분위 (제로예측력/미시구조 플라시보 둘 다)", default="0.95") or 0.95),
+            },
+        },
         "execution": {"entry_timing": _ask("체결 규칙", default="next_bar_open"), "cost_model": _ask("비용 모델 식별자"), "sizing_contract": "margin_fraction_times_leverage"},
         "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"},
     }
@@ -174,8 +306,27 @@ def build_interactive_contract() -> dict[str, Any]:
 
 def validate_contract(contract: dict[str, Any]) -> None:
     errors: list[str] = []
-    if contract.get("schema_version") != SCHEMA_VERSION:
-        errors.append(f"schema_version must be {SCHEMA_VERSION}")
+    schema = contract.get("schema_version")
+    if schema not in ACCEPTED_SCHEMA_VERSIONS:
+        errors.append(f"schema_version must be one of {ACCEPTED_SCHEMA_VERSIONS}")
+    if schema == SCHEMA_VERSION:
+        gate = (contract.get("selection") or {}).get("effect_size_gate")
+        if not isinstance(gate, dict) or not gate:
+            errors.append(
+                "selection.effect_size_gate is required: an adoption may not rest on a consistency "
+                "statistic (bootstrap P, months-better count) alone. Declare min_abs_t, "
+                "min_permutation_percentile, risk_channel_tested, premise_checked_in_selection_window, "
+                "falsification_audit_required."
+            )
+        else:
+            try:
+                if float(gate.get("min_abs_t", 0.0)) <= 0.0:
+                    errors.append("selection.effect_size_gate.min_abs_t must be > 0")
+            except (TypeError, ValueError):
+                errors.append("selection.effect_size_gate.min_abs_t must be numeric")
+            for flag in ("risk_channel_tested", "premise_checked_in_selection_window", "falsification_audit_required"):
+                if flag not in gate:
+                    errors.append(f"selection.effect_size_gate.{flag} must be declared (true/false)")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", str(contract.get("experiment_id", ""))):
         errors.append("experiment_id must contain only letters, digits, _ or -")
     for path, value in (("hypothesis", contract.get("hypothesis")), ("research.line_id", contract.get("research", {}).get("line_id")), ("data.feature_dataset", contract.get("data", {}).get("feature_dataset")), ("model.cheap_gate_family", contract.get("model", {}).get("cheap_gate_family")), ("model.candidate_architecture", contract.get("model", {}).get("candidate_architecture")), ("execution.cost_model", contract.get("execution", {}).get("cost_model")), ("selection.validation_pass_criteria", contract.get("selection", {}).get("validation_pass_criteria"))):

@@ -7,6 +7,7 @@ import numpy as np
 from core.selection_stats import (
     RUIN_FLOOR,
     expected_max_sharpe,
+    falsification_audit,
     pbo_cscv,
     periodic_returns,
     probabilistic_sharpe_ratio,
@@ -51,6 +52,31 @@ class SelectionStatisticsTests(unittest.TestCase):
             pbo_cscv(np.ones((30, 1)))
         with self.assertRaisesRegex(ValueError, "even"):
             pbo_cscv(np.ones((30, 2)), n_splits=5)
+
+    def test_falsification_audit_fails_a_pure_noise_search(self) -> None:
+        returns = np.random.default_rng(11).normal(0.0, 1.0, size=(300, 40))
+        result = falsification_audit(returns, n_null_draws=200, seed=3)
+
+        self.assertFalse(result["passes_falsification_audit"])
+        self.assertLess(result["zero_predictability_percentile"], 0.95)
+
+    def test_falsification_audit_passes_a_genuine_edge(self) -> None:
+        rng = np.random.default_rng(11)
+        returns = rng.normal(0.0, 1.0, size=(300, 40))
+        returns[:, 0] += 1.5  # one configuration with a large, real, persistent edge
+        result = falsification_audit(returns, n_null_draws=200, seed=3)
+
+        self.assertTrue(result["passes_falsification_audit"])
+        self.assertGreaterEqual(result["zero_predictability_percentile"], 0.95)
+        self.assertGreaterEqual(result["microstructure_placebo_percentile"], 0.95)
+
+    def test_falsification_audit_rejects_invalid_inputs(self) -> None:
+        with self.assertRaisesRegex(ValueError, "2-D"):
+            falsification_audit(np.ones(10))
+        with self.assertRaisesRegex(ValueError, "at least 2"):
+            falsification_audit(np.ones((30, 1)))
+        with self.assertRaisesRegex(ValueError, "at least 10 periods"):
+            falsification_audit(np.ones((5, 2)))
 
 
 if __name__ == "__main__":

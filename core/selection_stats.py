@@ -15,6 +15,15 @@ bigger than what a search of this size pulls out of pure noise?"
   pbo_cscv                   Probability of Backtest Overfitting via
                              Combinatorially Symmetric Cross-Validation.
                              Bailey, Borwein, Lopez de Prado & Zhu (2017).
+  falsification_audit        Runs the exact same best-of-N selection against synthetic
+                             zero-predictability and microstructure-placebo panels built
+                             from this search's own shape and volatility. A search that
+                             clears its own bar as easily on those as on the real panel
+                             is not measuring skill -- it is an adaptive-specification-
+                             search artifact. Nikolopoulos, "Spurious Predictability in
+                             Financial Machine Learning" (arXiv:2604.15531, 2026). Run
+                             this BEFORE spending VAL/OOS budget on a search's winner,
+                             not after.
 
 Sharpes here are per-period and must match the period of the return series
 passed alongside them (daily returns -> daily Sharpe, n_obs = number of days).
@@ -189,5 +198,114 @@ def pbo_cscv(returns_matrix: np.ndarray, n_splits: int = 10) -> dict:
         "pbo": float(np.mean(lg <= 0.0)),
         "n_combinations": int(lg.size),
         "median_logit": float(np.median(lg)),
+    }
+
+
+def _demeaned_block_bootstrap_panel(
+    panel: np.ndarray, rng: np.random.Generator, block_size: int
+) -> np.ndarray:
+    """Demean every column, then rebuild it from randomly-chosen, circularly-wrapped
+    blocks of its own (demeaned) history (Politis & Romano 1994 circular block
+    bootstrap), independently per column.
+
+    Demeaning first is load-bearing: a plain shuffle or shift of the raw column
+    reorders the same values, so its mean/std -- and therefore its Sharpe -- comes
+    out identical to the original every time, which would make a genuine edge
+    indistinguishable from itself instead of from noise. Forcing the true mean to
+    zero before resampling gives a null where no configuration has real skill, while
+    each column keeps its OWN empirical autocorrelation, volatility-clustering and
+    fat-tail fingerprint (unlike the i.i.d. Gaussian zero_predictability_null) and
+    each column is resampled independently, destroying genuine cross-sectional timing
+    alignment between configurations. This is the "microstructure placebo".
+    """
+    n_periods, n_cfg = panel.shape
+    demeaned = panel - np.nanmean(panel, axis=0, keepdims=True)
+    bs = max(1, min(int(block_size), n_periods))
+    n_blocks = -(-n_periods // bs)  # ceil
+    starts = rng.integers(0, n_periods, size=(n_blocks, n_cfg))
+    offsets = np.arange(bs)
+    idx = (starts[:, None, :] + offsets[None, :, None]) % n_periods
+    idx = idx.reshape(n_blocks * bs, n_cfg)[:n_periods]
+    return np.take_along_axis(demeaned, idx, axis=0)
+
+
+def falsification_audit(
+    returns_matrix: np.ndarray,
+    *,
+    n_null_draws: int = 500,
+    block_size: int = 20,
+    min_percentile: float = 0.95,
+    seed: int = 20260809,
+) -> dict:
+    """Could this exact search have produced its winner out of noise alone?
+
+    returns_matrix  (periods x configurations) per-period returns, the same shape
+                    pbo_cscv takes -- every configuration the search actually tried,
+                    winner included.
+    block_size      bootstrap block length (in periods) for the microstructure
+                    placebo. Should span whatever horizon this data's serial
+                    correlation/vol-clustering actually decays over; too small
+                    degenerates toward i.i.d. resampling, too large toward a single
+                    whole-series draw.
+
+    The real best-of-N Sharpe is compared against two synthetic reference classes,
+    each drawn `n_null_draws` times at the search's own shape (same n_trials, same
+    n_periods -- so the null carries the exact same multiple-testing multiplicity):
+
+      zero_predictability_null   every configuration replaced by i.i.d. Gaussian
+                                 noise at zero mean, matched to its own volatility.
+                                 A market with no edge anywhere.
+      microstructure_placebo_null  every configuration's own return series, demeaned
+                                 and circular-block-bootstrapped (see
+                                 _demeaned_block_bootstrap_panel). Real volatility
+                                 clustering, autocorrelation and fat tails, forced to
+                                 zero true mean, no genuine timing.
+
+    A pipeline whose real winner is unremarkable against either null (falls below
+    `min_percentile` of null draws) cannot tell real predictability from a search
+    artifact, independent of what the headline Sharpe/PnL number says. This is meant
+    to gate a search's winner BEFORE it is allowed to consume VAL/OOS budget, mirroring
+    the "falsification audit" workflow in Nikolopoulos (arXiv:2604.15531, 2026).
+    """
+    m = np.asarray(returns_matrix, dtype=np.float64)
+    if m.ndim != 2:
+        raise ValueError("returns_matrix must be 2-D (periods x configurations)")
+    n_periods, n_cfg = m.shape
+    if n_cfg < 2:
+        raise ValueError("falsification audit needs at least 2 configurations")
+    if n_periods < 10:
+        raise ValueError("falsification audit needs at least 10 periods per configuration")
+
+    real_best = float(np.max(_sharpe_columns(m)))
+
+    rng = np.random.default_rng(seed)
+    col_std = np.nanstd(m, axis=0, ddof=1)
+    col_std = np.where(col_std > 1e-15, col_std, 1e-15)
+
+    zero_pred_null = np.empty(int(n_null_draws), dtype=np.float64)
+    placebo_null = np.empty(int(n_null_draws), dtype=np.float64)
+    for i in range(int(n_null_draws)):
+        synthetic = rng.normal(0.0, col_std, size=(n_periods, n_cfg))
+        zero_pred_null[i] = np.max(_sharpe_columns(synthetic))
+        resampled = _demeaned_block_bootstrap_panel(m, rng, block_size)
+        placebo_null[i] = np.max(_sharpe_columns(resampled))
+
+    zero_pred_percentile = float(np.mean(zero_pred_null < real_best))
+    placebo_percentile = float(np.mean(placebo_null < real_best))
+    passed = zero_pred_percentile >= min_percentile and placebo_percentile >= min_percentile
+
+    return {
+        "real_best_sharpe": real_best,
+        "n_trials": int(n_cfg),
+        "n_periods": int(n_periods),
+        "n_null_draws": int(n_null_draws),
+        "zero_predictability_null_mean": float(zero_pred_null.mean()),
+        "zero_predictability_null_p95": float(np.percentile(zero_pred_null, 95)),
+        "zero_predictability_percentile": zero_pred_percentile,
+        "microstructure_placebo_null_mean": float(placebo_null.mean()),
+        "microstructure_placebo_null_p95": float(np.percentile(placebo_null, 95)),
+        "microstructure_placebo_percentile": placebo_percentile,
+        "min_percentile_required": float(min_percentile),
+        "passes_falsification_audit": bool(passed),
     }
 

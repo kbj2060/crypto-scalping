@@ -43,7 +43,14 @@ class ArchitectureWorkbenchTest(unittest.TestCase):
             "label": {"type": "triple_barrier", "horizon_bars": 48, "timeout_handling": "explicit_class"},
             "splits": dict(workbench.DEFAULT_SPLITS),
             "model": {"cheap_gate_family": "lightgbm", "candidate_architecture": "tabm", "seeds": ["270705"], "seed_ensemble_claim": False},
-            "selection": {"minimum_trades_per_split": 15, "validation_pass_criteria": "positive net PnL"},
+            "selection": {
+                "minimum_trades_per_split": 15, "validation_pass_criteria": "positive net PnL",
+                "effect_size_gate": {
+                    "min_abs_t": 2.0, "min_permutation_percentile": 0.90,
+                    "risk_channel_tested": False, "premise_checked_in_selection_window": False,
+                    "falsification_audit_required": False,
+                },
+            },
             "execution": {"entry_timing": "next_bar_open", "cost_model": "conservative", "sizing_contract": "margin_fraction_times_leverage"},
             "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"},
         }
@@ -173,3 +180,43 @@ class ArchitectureWorkbenchTest(unittest.TestCase):
         written = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(written["revision_of"], str(source))
         self.assertEqual(written["hypothesis"], "A materially different hypothesis.")
+
+
+class EffectSizeGateFalsificationTest(unittest.TestCase):
+    """assert_effect_size_gate's falsification-audit wiring, isolated from the (currently
+    stale, pre-existing) full-contract fixture above -- this only needs selection.effect_size_gate.
+    """
+
+    def contract(self, **gate_overrides):
+        gate = {
+            "min_abs_t": 2.0, "min_permutation_percentile": 0.90,
+            "risk_channel_tested": False, "premise_checked_in_selection_window": False,
+            "falsification_audit_required": True, "min_falsification_percentile": 0.95,
+        }
+        gate.update(gate_overrides)
+        return {"selection": {"effect_size_gate": gate}}
+
+    def passing_report(self):
+        return {"welch_t": 3.0, "mean_diff": 1.0}
+
+    def test_requires_a_falsification_report_when_declared_required(self):
+        with self.assertRaisesRegex(ValueError, "falsification_audit_required declared but no"):
+            workbench.assert_effect_size_gate(self.contract(), self.passing_report())
+
+    def test_rejects_a_falsification_report_below_the_required_percentile(self):
+        falsification = {"zero_predictability_percentile": 0.99, "microstructure_placebo_percentile": 0.40}
+        with self.assertRaisesRegex(ValueError, "microstructure_placebo_percentile 0.400 < required 0.95"):
+            workbench.assert_effect_size_gate(self.contract(), self.passing_report(), falsification=falsification)
+
+    def test_passes_a_falsification_report_above_the_required_percentile(self):
+        falsification = {"zero_predictability_percentile": 0.99, "microstructure_placebo_percentile": 0.98}
+        workbench.assert_effect_size_gate(self.contract(), self.passing_report(), falsification=falsification)
+
+    def test_falsification_audit_not_enforced_when_gate_does_not_require_it(self):
+        workbench.assert_effect_size_gate(self.contract(falsification_audit_required=False), self.passing_report())
+
+    def test_uses_the_gates_own_percentile_threshold(self):
+        falsification = {"zero_predictability_percentile": 0.80, "microstructure_placebo_percentile": 0.80}
+        workbench.assert_effect_size_gate(
+            self.contract(min_falsification_percentile=0.75), self.passing_report(), falsification=falsification
+        )

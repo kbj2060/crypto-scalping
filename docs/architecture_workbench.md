@@ -17,6 +17,7 @@ that a contract author can claim without evidence.
 | Forward-window trend scan assigned to window start | A trailing window ending at row `r` must write its result to `r`, never to the window's first row. Test stored values against a backward and a forward recomputation. |
 | Future values used to fill missing features | Do not use `bfill` on a feature path. Missingness must remain visible or use an explicitly causal prior-value method. |
 | Changed raw/features silently reproduce an old report | Verify raw and dataset manifests before training and write their lineage into every report. |
+| An adoption rests on a consistency statistic with no effect size | `selection.effect_size_gate` is required on contract schema v3 and enforced by `assert_effect_size_gate(...)`: a minimum \|t\|, a label-permutation percentile, an explicit risk-channel test when the claim is about drawdown, a premise sign-check in the selection window, and (when the winner came from a multi-configuration search) a falsification audit against a noise/microstructure-placebo null. |
 
 `preflight` calls `assert_safe_feature_columns(...)` against the actual frame and
 calls `assert_higher_timeframe_availability(...)` against the supplied 1h/4h
@@ -25,6 +26,53 @@ feature before the source hour has completed, and the availability artifact
 itself must cover every decision timestamp that exists in the pinned dataset --
 a standalone sample artifact that isn't built from the dataset's own decision
 points is rejected rather than silently accepted as proof.
+
+## Effect-size gate (contract schema v3, added 2026-08-08)
+
+`SCHEMA_VERSION` is now `architecture_experiment_contract_v3`; `v2` stays accepted so existing
+contracts keep preflighting, but **only v3 may be used for new lines and v3 must declare
+`selection.effect_size_gate`**:
+
+```json
+"effect_size_gate": {
+  "min_abs_t": 2.0,
+  "min_permutation_percentile": 0.90,
+  "risk_channel_tested": true,
+  "premise_checked_in_selection_window": true,
+  "falsification_audit_required": true,
+  "min_falsification_percentile": 0.95
+}
+```
+
+Why it exists: the BTC `czz_trend` regime-sizing overlay was adopted on a paired time-block
+bootstrap `P=0.739`, and a later audit found its own per-trade effect was `t=-0.99` (p=0.33), its
+**risk channel pointed the wrong way** (the bucket it downsized was *less* volatile, variance
+ratio 0.881), and its premise reversed sign between the selection window and the window where it
+"worked". **A bootstrap P measures whether a difference's SIGN is consistent across blocks; it
+says nothing about the size of that difference** — on ETH the same statistic returned `P=0.979`
+for a `t=0.32` difference.
+
+Four helpers implement the standard so each line does not reinvent it:
+
+| Helper | What it answers |
+| --- | --- |
+| `effect_size_report(a, b)` | Welch t, Cohen's d, Brown-Forsythe variance test, worst-5 tails between two buckets |
+| `permutation_label_test(returns, multipliers)` | "How special is THIS labelling?" — reassigns the same multiplier multiset at random, R draws, and locates the real assignment in that null. A bootstrap never asks this. |
+| `core.selection_stats.falsification_audit(returns_matrix)` | "Could this exact search have produced its winner out of noise alone?" — compares the real best-of-N Sharpe against a zero-predictability i.i.d. null and a demeaned circular-block-bootstrap microstructure-placebo null, both drawn at the search's own shape |
+| `assert_effect_size_gate(contract, report, permutation=..., selection_window_report=..., falsification=...)` | Enforces the contract's declared gate and raises with every failure listed |
+
+`risk_channel_tested: true` makes the drawdown case honest: if the claim is "this reduces MDD",
+the bucket being downsized has to actually be riskier, and the gate rejects the claim when the
+variance ratio is ≤ 1. `premise_checked_in_selection_window: true` requires passing the
+selection-window report too, and rejects a rule whose premise flips sign between windows — the
+placement-luck signature. `falsification_audit_required: true` requires passing a
+`falsification_audit(...)` report computed over the same (periods x configurations) matrix the
+search actually tried, and rejects a winner whose real best-of-N Sharpe is unremarkable
+(below `min_falsification_percentile`, default 0.95) against either null — i.e. a search that
+clears its own bar as easily on noise of its own shape as it did on the real data. This is meant
+to run before the winner is allowed to consume VAL/OOS budget, not after: see
+`docs/entry_exit_edge_root_cause_and_literature_review_20260809.md` for why entry-signal searches
+in this repo need it most (Nikolopoulos, arXiv:2604.15531, 2026).
 
 `validate_contract` also enforces the project's seed-diversity gate: if
 `model.seed_ensemble_claim` is true, `model.seeds` must contain at least 5
@@ -81,6 +129,7 @@ to be satisfied by hand or by the referenced script until it is automated here.
 | `cheap_gate` | simple baseline falsification | VAL and OOS pass criteria fail | Not implemented -- build per experiment |
 | `train` | selected candidate model | non-train data is fit, schema differs, seed is unlogged | Not implemented -- contract only records intended seeds; nothing yet checks the trained artifact against them |
 | `fresh_forward` | runtime-native bar-by-bar evaluation | ledger, future rows, or saved exits are input | Implemented elsewhere: `core/causal_futures_backtest.py` |
+| `effect_size` | effect size behind any adoption claim | \|t\| below the declared floor, a risk claim whose downsized bucket is not riskier, a label-permutation percentile below the floor, a premise that flips sign between selection and evaluation windows, or a search winner that is not distinguishable from a noise/microstructure-placebo null | Implemented: `architecture_workbench.effect_size_report` / `permutation_label_test` / `assert_effect_size_gate`; `core.selection_stats.falsification_audit` |
 | `audit` | lineage, sizing and live parity | artifact/prediction/dataset contracts differ | Implemented elsewhere: `core/backtest_metrics.py`, `scripts/audit_omega_artifact_integrity_20260630.py` |
 
 The model-specific scripts may use these stages, but none may bypass their gates.
