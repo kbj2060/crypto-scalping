@@ -12855,7 +12855,7 @@ async def main(use_local=False):
 
             _ai_runtime_errors: list[dict[str, object]] = []
 
-            async def _persist_data_pipeline_snapshot(active_info: dict, *, stage: str, error: Exception | None = None) -> None:
+            async def _persist_data_pipeline_snapshot(active_info: dict, *, stage: str, error: Exception | None = None, write_feature_snapshot: bool = True) -> None:
                 nonlocal _last_data_pipeline_health_log_ts
                 if not DATA_PIPELINE_HEALTH_ENABLE:
                     return
@@ -12930,10 +12930,15 @@ async def main(use_local=False):
                                 _warnings.append("DATA_SNAPSHOT_STALE")
                             _pipe_health["warnings"] = _warnings
                             _pipe_health["status"] = "WARN"
+                    if not write_feature_snapshot:
+                        _warnings = list(_pipe_health.get("warnings", []) or [])
+                        if "feature_snapshot_skipped_incomplete_frame" not in _warnings:
+                            _warnings.append("feature_snapshot_skipped_incomplete_frame")
+                        _pipe_health["warnings"] = _warnings
                     _pipe_loop = asyncio.get_running_loop()
                     await _pipe_loop.run_in_executor(None, _atomic_write_json, DATA_PIPELINE_HEALTH_PATH, _pipe_health)
                     await journal_writer.append(DATA_PIPELINE_HEALTH_JSONL_PATH, _pipe_health)
-                    if DATA_PIPELINE_FEATURE_SNAPSHOT_ENABLE:
+                    if DATA_PIPELINE_FEATURE_SNAPSHOT_ENABLE and write_feature_snapshot:
                         _snapshot_frame = getattr(final_governor, "last_prepared_frame_for_health", None)
                         if not isinstance(_snapshot_frame, pd.DataFrame) or not len(_snapshot_frame):
                             _snapshot_frame = processed_df
@@ -13045,6 +13050,13 @@ async def main(use_local=False):
                             "final_action": 0,
                         },
                         stage="next_open_execution_skipped",
+                        # processed_df here hasn't been through AI-feature injection or elite
+                        # signal computation yet (those run later in the cycle, after this early
+                        # return) -- writing it to the feature-snapshot stream would produce a
+                        # column-incomplete row that poisons any consumer requiring a full history
+                        # window (e.g. the ETH JM shadow's non-finite-feature check). Health/heartbeat
+                        # still gets written so freshness monitoring isn't blind.
+                        write_feature_snapshot=False,
                     )
                     return
                 if (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE) and _next_open_delay_late:
