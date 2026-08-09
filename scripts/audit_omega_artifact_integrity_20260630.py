@@ -163,7 +163,7 @@ def dataset_lineage_checks(report: dict[str, Any], *, prefix: str) -> list[Check
     checks.append(check(f"{prefix}_dataset_lineage_fields_complete", True, f"features_path={features_path}"))
 
     abs_path = resolve_path(features_path)
-    rel_key = str(abs_path.resolve().relative_to(ROOT)) if abs_path is not None else features_path
+    rel_key = abs_path.resolve().relative_to(ROOT).as_posix() if abs_path is not None else features_path
     manifest = _load_dataset_manifest()
     entry = manifest.get("files", {}).get(rel_key)
     if entry is None:
