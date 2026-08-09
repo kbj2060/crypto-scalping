@@ -5,7 +5,7 @@
 #
 # Deliberately does NOT grant `systemctl stop`, `disable`, `start` on
 # arbitrary units, or any command outside this exact list -- sudoers
-# matches full command lines verbatim, so nothing beyond these 6 lines is
+# matches full command lines verbatim, so nothing beyond these lines is
 # authorized.
 #
 # Install (do NOT edit /etc/sudoers.d/ files directly -- a syntax error
@@ -17,4 +17,5 @@ llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart ops-watchdog.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart btc-multislot-shadow.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart tau1-shadow.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart prometheus-exporter.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart eth-jmlam4-shadow.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload

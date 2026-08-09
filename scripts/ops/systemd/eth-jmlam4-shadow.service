@@ -1,0 +1,21 @@
+[Unit]
+Description=crypto-scalping ETH regime3 HMM->JM(lambda=4) swap shadow loop (2026-08-09, shadow-only, no order submission)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/live_eth_jmlam4_regime_swap_shadow_20260809.py
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eth_jmlam4_shadow
+
+[Install]
+WantedBy=multi-user.target

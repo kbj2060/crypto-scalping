@@ -23,6 +23,12 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 BTC_MULTISLOT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_state_20260807.json"
 BTC_MULTISLOT_SHADOW_LEDGER_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_ledger_20260807.csv"
 BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
+# ETH regime3 HMM->JM(lambda=4) swap candidate, shadow-only (see
+# scripts/live_eth_jmlam4_regime_swap_shadow_20260809.py and
+# project-eth-regime3-jm-lam4-swap-retrain-20260809.md -- CLOSED for live promotion).
+ETH_JMLAM4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_jmlam4_regime_swap_shadow" / "state.json"
+ETH_JMLAM4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_jmlam4_regime_swap_shadow" / "closed_trades.jsonl"
+ETH_JMLAM4_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT"}
 EVENT_POLL_SECONDS = 2.5
 MARKET_HISTORY_CACHE_SECONDS = 300
@@ -425,6 +431,7 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
     total_trades = 0
     cumulative_return_pct: float | None = None
     recent_trades: list[dict[str, Any]] = []
+    equity_curve: list[dict[str, Any]] = []
     if BTC_MULTISLOT_SHADOW_LEDGER_PATH.exists():
         with BTC_MULTISLOT_SHADOW_LEDGER_PATH.open("r", encoding="utf-8", newline="") as f:
             rows = list(csv.DictReader(f))
@@ -432,10 +439,21 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
         equity = 1.0
         for row in rows:
             try:
-                equity *= 1.0 + float(row.get("trade_return_net") or 0.0)
+                return_frac = float(row.get("trade_return_net") or 0.0)
             except (TypeError, ValueError):
                 continue
+            equity *= 1.0 + return_frac
+            equity_curve.append(
+                {
+                    "ts": row.get("exit_timestamp"),
+                    "slot": row.get("slot"),
+                    "side": row.get("side"),
+                    "trade_return_pct": return_frac * 100.0,
+                    "cumulative_return_pct": (equity - 1.0) * 100.0,
+                }
+            )
         cumulative_return_pct = (equity - 1.0) * 100.0
+        equity_curve = equity_curve[-500:]
         for row in rows[-5:]:
             try:
                 return_pct = float(row["trade_return_net"]) * 100.0
@@ -445,7 +463,10 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
                 {
                     "slot": row.get("slot"),
                     "side": row.get("side"),
+                    "entry_timestamp": row.get("entry_timestamp"),
                     "exit_timestamp": row.get("exit_timestamp"),
+                    "entry_price": row.get("entry_price"),
+                    "exit_price": row.get("exit_price"),
                     "trade_return_pct": return_pct,
                     "reason": row.get("reason"),
                 }
@@ -455,12 +476,78 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
         "last_bar": last_bar,
         "age_minutes": age_minutes,
         "stale": age_minutes is None or age_minutes >= (BTC_MULTISLOT_SHADOW_BAR_SECONDS / 60.0) * 3,
+        "bar_seconds": BTC_MULTISLOT_SHADOW_BAR_SECONDS,
         "slot_count": len(slots),
         "open_slots": sum(1 for s in slots if s),
         "slots": slots,
         "total_trades": total_trades,
         "cumulative_return_pct": cumulative_return_pct,
         "recent_trades": recent_trades,
+        "equity_curve": equity_curve,
+    }
+
+
+def eth_jmlam4_shadow_payload() -> dict[str, Any]:
+    state = load_json(ETH_JMLAM4_SHADOW_STATE_PATH) or {}
+    last_bar = state.get("last_processed_bar_ts")
+    age_minutes = utc_age_minutes(last_bar)
+    position = state.get("position") if isinstance(state.get("position"), dict) else None
+    trades = parse_jsonl(ETH_JMLAM4_SHADOW_TRADES_PATH)
+    total_trades = len(trades)
+    equity = state.get("equity")
+    cumulative_return_pct = (float(equity) - 1.0) * 100.0 if isinstance(equity, (int, float)) else None
+    mdd_pct = float(state["mdd"]) * 100.0 if isinstance(state.get("mdd"), (int, float)) else None
+    recent_trades: list[dict[str, Any]] = []
+    equity_curve: list[dict[str, Any]] = []
+    running_equity = 1.0
+    for row in trades:
+        try:
+            return_frac = float(row["trade_return_frac"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        running_equity *= 1.0 + return_frac
+        equity_curve.append(
+            {
+                "ts": row.get("exit_ts"),
+                "side": row.get("side"),
+                "trade_return_pct": return_frac * 100.0,
+                "cumulative_return_pct": (running_equity - 1.0) * 100.0,
+            }
+        )
+    equity_curve = equity_curve[-500:]
+    for row in trades[-5:]:
+        try:
+            return_pct = float(row["trade_return_frac"]) * 100.0
+        except (KeyError, TypeError, ValueError):
+            return_pct = None
+        recent_trades.append(
+            {
+                "source_component": row.get("source_component"),
+                "side": row.get("side"),
+                "entry_ts": row.get("entry_ts"),
+                "exit_ts": row.get("exit_ts"),
+                "entry_price": row.get("entry_price"),
+                "exit_price": row.get("exit_price"),
+                "trade_return_pct": return_pct,
+                "reason": row.get("reason"),
+            }
+        )
+    recent_trades.reverse()
+    return {
+        "last_bar": last_bar,
+        "age_minutes": age_minutes,
+        "stale": age_minutes is None or age_minutes >= (ETH_JMLAM4_SHADOW_BAR_SECONDS / 60.0) * 3,
+        "bar_seconds": ETH_JMLAM4_SHADOW_BAR_SECONDS,
+        "position_side": (position or {}).get("side", 0),
+        "position_source_component": (position or {}).get("source_component"),
+        "position": position,
+        "total_trades": total_trades,
+        "cumulative_return_pct": cumulative_return_pct,
+        "mdd_pct": mdd_pct,
+        "recent_trades": recent_trades,
+        "equity_curve": equity_curve,
+        "candidate": state.get("candidate"),
+        "order_submission_supported": state.get("order_submission_supported", False),
     }
 
 
@@ -825,6 +912,16 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_multislot_shadow_payload(), etag)
 
+    async def api_eth_jmlam4_shadow(request: web.Request) -> web.Response:
+        etag = make_etag(
+            "eth-jmlam4-shadow",
+            file_signature(ETH_JMLAM4_SHADOW_STATE_PATH),
+            file_signature(ETH_JMLAM4_SHADOW_TRADES_PATH),
+        )
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, eth_jmlam4_shadow_payload(), etag)
+
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -836,6 +933,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
     app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
+    app.router.add_get("/api/eth-jmlam4-shadow", api_eth_jmlam4_shadow)
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     app.on_startup.append(start_dashboard_events)

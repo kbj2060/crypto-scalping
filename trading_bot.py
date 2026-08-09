@@ -12853,147 +12853,8 @@ async def main(use_local=False):
             except Exception as _heartbeat_error:
                 logger.warning("SYSTEM decision_heartbeat=FAILED reason=%s", _heartbeat_error)
 
-            _execution_delay_sec = 0.0
-            _next_open_delay_late = False
-            if _next_open_execution:
-                _now_kst = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
-                _exec_ts_cmp = pd.Timestamp(execution_time_kst)
-                if _exec_ts_cmp.tzinfo is not None:
-                    _exec_ts_cmp = _exec_ts_cmp.tz_convert("Asia/Seoul").tz_localize(None)
-                _execution_delay_sec = float((_now_kst - _exec_ts_cmp).total_seconds())
-                _early_exec_status = dict(_pre_exec_status)
-                _real_exchange_execution = bool(
-                    _early_exec_status.get("enabled", False)
-                    and not bool(_early_exec_status.get("dry_run", True))
-                )
-                _max_next_open_delay = float(
-                    FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC
-                    if _real_exchange_execution
-                    else FINAL_GOVERNOR_NEXT_OPEN_SHADOW_MAX_DELAY_SEC
-                )
-                _next_open_delay_late = bool(
-                    _execution_delay_sec > float(max(0.0, FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC))
-                )
-                _allow_late_next_open_fill = bool(
-                    FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION
-                    if _real_exchange_execution
-                    else FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION
-                )
-                if (
-                    (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE)
-                    and (
-                        _execution_delay_sec < -2.0
-                        or (
-                            (not _allow_late_next_open_fill)
-                            and _execution_delay_sec > float(max(0.0, _max_next_open_delay))
-                        )
-                    )
-                ):
-                    if not use_local:
-                        try:
-                            await orderbook_recorder.record_decision_snapshot(
-                                fetcher,
-                                timestamp_kst=execution_time_kst,
-                                context={
-                                    "record_reason": "next_open_execution_skipped",
-                                    "decision_bar_ts": str(decision_time_kst),
-                                    "execution_bar_ts": str(execution_time_kst),
-                                    "execution_delay_sec": float(_execution_delay_sec),
-                                },
-                            )
-                        except Exception as _skip_orderbook_error:
-                            logger.warning(
-                                "SYSTEM skipped_cycle_orderbook=FAILED reason=%s",
-                                _skip_orderbook_error,
-                            )
-                    try:
-                        if meta_router.pos in {"LONG", "SHORT"}:
-                            final_governor._sync_owner(meta_router, "unknown")
-                    except Exception as _sync_e:
-                        logger.debug("next-open skip owner sync failed: %s", _sync_e)
-                    logger.warning(
-                        "SYSTEM next_open_execution skipped: signal=%s execution=%s delay=%.2fs max=%.2fs mode=%s",
-                        decision_time_kst,
-                        execution_time_kst,
-                        _execution_delay_sec,
-                        float(_max_next_open_delay),
-                        "real_exchange" if _real_exchange_execution else "shadow",
-                    )
-                    return
-                if (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE) and _next_open_delay_late:
-                    (logger.warning if _real_exchange_execution else logger.info)(
-                        "SYSTEM next_open_execution late_fill_allowed: signal=%s execution=%s delay=%.2fs max=%.2fs mode=%s late_allowed=%s",
-                        decision_time_kst,
-                        execution_time_kst,
-                        _execution_delay_sec,
-                        float(_max_next_open_delay),
-                        "real_exchange" if _real_exchange_execution else "shadow",
-                        bool(_allow_late_next_open_fill),
-                    )
-    
-            current_time_kst = execution_time_kst
-            current_price = float(execution_price)
-            regime_name = 'UNKNOWN'
-            _last_idx = processed_df.index[-1]
-            _last_row = processed_df.iloc[-1]
             _ai_runtime_errors: list[dict[str, object]] = []
-            if runtime_predictor is not None:
-                try:
-                    runtime_predictor.last_errors = []
-                except Exception:
-                    pass
-            
-            if runtime_predictor is not None and len(processed_df) > 0:
-                try:
-                    _ai_features = runtime_predictor.best_ai_features(processed_df)
-                    for _ai_col, _ai_val in _ai_features.items():
-                        processed_df.at[_last_idx, _ai_col] = float(_ai_val)
-                except Exception as _ai_e:
-                    logger.error("Final Governor AI feature injection failed: %s", _ai_e)
-                    _ai_runtime_errors.append({
-                        "model": "AI_FEATURES",
-                        "stage": "best_ai_features",
-                        "error": str(_ai_e),
-                        "fallback": "skip_ai_feature_injection",
-                        "ts": time.time(),
-                    })
-                _ai_runtime_errors.extend(list(getattr(runtime_predictor, "last_errors", []) or []))
-                _ai_runtime_errors = _dedupe_ai_errors(_ai_runtime_errors)
-                if _ai_runtime_errors:
-                    await _notify_patchtst_ai_errors(_ai_runtime_errors, current_time_kst)
-    
-            # Some feature paths return a feature-only frame. The final governor and
-            # regime fallback still need causal OHLCV columns from the aligned bars.
-            try:
-                for _ohlcv_col in ("open", "high", "low", "close", "volume"):
-                    if _ohlcv_col not in processed_df.columns and _ohlcv_col in eth_buffer.columns:
-                        _src = eth_buffer[_ohlcv_col].tail(len(processed_df)).reset_index(drop=True)
-                        if len(_src) == len(processed_df):
-                            processed_df[_ohlcv_col] = pd.to_numeric(_src, errors="coerce").to_numpy()
-                        else:
-                            processed_df[_ohlcv_col] = float(_bar_float(_signal_bar, _ohlcv_col, decision_price))
-                if "close" not in processed_df.columns:
-                    processed_df["close"] = float(decision_price)
-                if "open" not in processed_df.columns:
-                    processed_df["open"] = float(execution_price if _next_open_execution else decision_price)
-            except Exception as _ohlcv_e:
-                logger.debug("Final Governor OHLCV 보강 실패: %s", _ohlcv_e)
-    
-            try:
-                _pre_last = processed_df.iloc[-1]
-                _pre_prev = processed_df.iloc[-2] if len(processed_df) >= 2 else _pre_last
-                _pre_smf_std = processed_df["smart_money_flow"].std() if "smart_money_flow" in processed_df.columns else 1.0
-                _pre_cur = row_to_market_row(_pre_last)
-                _pre_prev_mkt = row_to_market_row(_pre_prev)
-                _pre_elite = elite_runtime.compute_all(
-                    current=_pre_cur, prev=_pre_prev_mkt, smf_std=_pre_smf_std
-                )
-                for _sig_col, _sig_val in _pre_elite.items():
-                    if isinstance(_sig_col, str) and _sig_col.startswith("sig_"):
-                        processed_df.at[_last_idx, _sig_col] = float(_sig_val)
-            except Exception as _pre_e:
-                logger.debug("elite signals 사전 계산 실패: %s", _pre_e)
-    
+
             async def _persist_data_pipeline_snapshot(active_info: dict, *, stage: str, error: Exception | None = None) -> None:
                 nonlocal _last_data_pipeline_health_log_ts
                 if not DATA_PIPELINE_HEALTH_ENABLE:
@@ -13109,7 +12970,156 @@ async def main(use_local=False):
                         _log_data_pipeline_health(_pipe_health)
                 except Exception as _pipe_e:
                     logger.warning("PIPE health=BAD reason=%s", _pipe_e)
+
+            _execution_delay_sec = 0.0
+            _next_open_delay_late = False
+            if _next_open_execution:
+                _now_kst = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)
+                _exec_ts_cmp = pd.Timestamp(execution_time_kst)
+                if _exec_ts_cmp.tzinfo is not None:
+                    _exec_ts_cmp = _exec_ts_cmp.tz_convert("Asia/Seoul").tz_localize(None)
+                _execution_delay_sec = float((_now_kst - _exec_ts_cmp).total_seconds())
+                _early_exec_status = dict(_pre_exec_status)
+                _real_exchange_execution = bool(
+                    _early_exec_status.get("enabled", False)
+                    and not bool(_early_exec_status.get("dry_run", True))
+                )
+                _max_next_open_delay = float(
+                    FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC
+                    if _real_exchange_execution
+                    else FINAL_GOVERNOR_NEXT_OPEN_SHADOW_MAX_DELAY_SEC
+                )
+                _next_open_delay_late = bool(
+                    _execution_delay_sec > float(max(0.0, FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC))
+                )
+                _allow_late_next_open_fill = bool(
+                    FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION
+                    if _real_exchange_execution
+                    else FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION
+                )
+                if (
+                    (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE)
+                    and (
+                        _execution_delay_sec < -2.0
+                        or (
+                            (not _allow_late_next_open_fill)
+                            and _execution_delay_sec > float(max(0.0, _max_next_open_delay))
+                        )
+                    )
+                ):
+                    if not use_local:
+                        try:
+                            await orderbook_recorder.record_decision_snapshot(
+                                fetcher,
+                                timestamp_kst=execution_time_kst,
+                                context={
+                                    "record_reason": "next_open_execution_skipped",
+                                    "decision_bar_ts": str(decision_time_kst),
+                                    "execution_bar_ts": str(execution_time_kst),
+                                    "execution_delay_sec": float(_execution_delay_sec),
+                                },
+                            )
+                        except Exception as _skip_orderbook_error:
+                            logger.warning(
+                                "SYSTEM skipped_cycle_orderbook=FAILED reason=%s",
+                                _skip_orderbook_error,
+                            )
+                    try:
+                        if meta_router.pos in {"LONG", "SHORT"}:
+                            final_governor._sync_owner(meta_router, "unknown")
+                    except Exception as _sync_e:
+                        logger.debug("next-open skip owner sync failed: %s", _sync_e)
+                    logger.warning(
+                        "SYSTEM next_open_execution skipped: signal=%s execution=%s delay=%.2fs max=%.2fs mode=%s",
+                        decision_time_kst,
+                        execution_time_kst,
+                        _execution_delay_sec,
+                        float(_max_next_open_delay),
+                        "real_exchange" if _real_exchange_execution else "shadow",
+                    )
+                    await _persist_data_pipeline_snapshot(
+                        {
+                            "source": "FINAL_GOVERNOR",
+                            "position_signal": "HOLD",
+                            "position_reason": "next_open_execution_skipped",
+                            "final_action": 0,
+                        },
+                        stage="next_open_execution_skipped",
+                    )
+                    return
+                if (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE) and _next_open_delay_late:
+                    (logger.warning if _real_exchange_execution else logger.info)(
+                        "SYSTEM next_open_execution late_fill_allowed: signal=%s execution=%s delay=%.2fs max=%.2fs mode=%s late_allowed=%s",
+                        decision_time_kst,
+                        execution_time_kst,
+                        _execution_delay_sec,
+                        float(_max_next_open_delay),
+                        "real_exchange" if _real_exchange_execution else "shadow",
+                        bool(_allow_late_next_open_fill),
+                    )
     
+            current_time_kst = execution_time_kst
+            current_price = float(execution_price)
+            regime_name = 'UNKNOWN'
+            _last_idx = processed_df.index[-1]
+            _last_row = processed_df.iloc[-1]
+            if runtime_predictor is not None:
+                try:
+                    runtime_predictor.last_errors = []
+                except Exception:
+                    pass
+            
+            if runtime_predictor is not None and len(processed_df) > 0:
+                try:
+                    _ai_features = runtime_predictor.best_ai_features(processed_df)
+                    for _ai_col, _ai_val in _ai_features.items():
+                        processed_df.at[_last_idx, _ai_col] = float(_ai_val)
+                except Exception as _ai_e:
+                    logger.error("Final Governor AI feature injection failed: %s", _ai_e)
+                    _ai_runtime_errors.append({
+                        "model": "AI_FEATURES",
+                        "stage": "best_ai_features",
+                        "error": str(_ai_e),
+                        "fallback": "skip_ai_feature_injection",
+                        "ts": time.time(),
+                    })
+                _ai_runtime_errors.extend(list(getattr(runtime_predictor, "last_errors", []) or []))
+                _ai_runtime_errors = _dedupe_ai_errors(_ai_runtime_errors)
+                if _ai_runtime_errors:
+                    await _notify_patchtst_ai_errors(_ai_runtime_errors, current_time_kst)
+    
+            # Some feature paths return a feature-only frame. The final governor and
+            # regime fallback still need causal OHLCV columns from the aligned bars.
+            try:
+                for _ohlcv_col in ("open", "high", "low", "close", "volume"):
+                    if _ohlcv_col not in processed_df.columns and _ohlcv_col in eth_buffer.columns:
+                        _src = eth_buffer[_ohlcv_col].tail(len(processed_df)).reset_index(drop=True)
+                        if len(_src) == len(processed_df):
+                            processed_df[_ohlcv_col] = pd.to_numeric(_src, errors="coerce").to_numpy()
+                        else:
+                            processed_df[_ohlcv_col] = float(_bar_float(_signal_bar, _ohlcv_col, decision_price))
+                if "close" not in processed_df.columns:
+                    processed_df["close"] = float(decision_price)
+                if "open" not in processed_df.columns:
+                    processed_df["open"] = float(execution_price if _next_open_execution else decision_price)
+            except Exception as _ohlcv_e:
+                logger.debug("Final Governor OHLCV 보강 실패: %s", _ohlcv_e)
+    
+            try:
+                _pre_last = processed_df.iloc[-1]
+                _pre_prev = processed_df.iloc[-2] if len(processed_df) >= 2 else _pre_last
+                _pre_smf_std = processed_df["smart_money_flow"].std() if "smart_money_flow" in processed_df.columns else 1.0
+                _pre_cur = row_to_market_row(_pre_last)
+                _pre_prev_mkt = row_to_market_row(_pre_prev)
+                _pre_elite = elite_runtime.compute_all(
+                    current=_pre_cur, prev=_pre_prev_mkt, smf_std=_pre_smf_std
+                )
+                for _sig_col, _sig_val in _pre_elite.items():
+                    if isinstance(_sig_col, str) and _sig_col.startswith("sig_"):
+                        processed_df.at[_last_idx, _sig_col] = float(_sig_val)
+            except Exception as _pre_e:
+                logger.debug("elite signals 사전 계산 실패: %s", _pre_e)
+
             m7_last = None
             trend_signal = None
 

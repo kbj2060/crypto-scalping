@@ -132,6 +132,7 @@ affects '^scripts/ops_watchdog\.py$' && UNITS_TO_RESTART[ops-watchdog]=1
 affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-exporter]=1
 affects '^scripts/run_btc_multislot_shadow_loop_20260807\.py$' && UNITS_TO_RESTART[btc-multislot-shadow]=1
 affects '^scripts/live_sigma6_regime_tiebreak_shadow_20260801\.py$' && UNITS_TO_RESTART[tau1-shadow]=1
+affects '^scripts/live_eth_jmlam4_regime_swap_shadow_20260809\.py$' && UNITS_TO_RESTART[eth-jmlam4-shadow]=1
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
 

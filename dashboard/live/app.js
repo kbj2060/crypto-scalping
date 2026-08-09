@@ -3,6 +3,7 @@ const API_EVENTS_URL = "/api/events";
 const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
+const API_ETH_JMLAM4_SHADOW_URL = "/api/eth-jmlam4-shadow";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 const JOURNAL_POLL_MS = 10000;
@@ -88,6 +89,11 @@ let opsStatusEtag = "";
 let opsLastFetchAt = 0;
 let btcMultislotEtag = "";
 let btcMultislotLastFetchAt = 0;
+let latestBtcMultislotPayload = null;
+let btcMultislotActiveSlot = 0;
+let ethJmlam4Etag = "";
+let ethJmlam4LastFetchAt = 0;
+let latestEthJmlam4Payload = null;
 let lastChartRenderAt = 0;
 let isScrolling = false;
 let scrollIdleTimer = 0;
@@ -697,6 +703,41 @@ function chartEntryLiquidity(state, compactState) {
   return route || "-";
 }
 
+function assetUnrealizedPnl(state, compactState, asset) {
+  const selectedAssetState = assetDecisionState(state, compactState, asset);
+  const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
+  const pos = active.position || {};
+  const sig = active.signal || state?.signal || {};
+  const posSide = String(pos.current || "NONE").toUpperCase();
+  if (posSide !== "LONG" && posSide !== "SHORT") return { pnlPct: 0, posSide: "NONE" };
+  const pnlPct = Number(pos.unrealized_pnl_pct ?? sig.position_unrealized_pnl_pct ?? active.position_unrealized_pnl_pct ?? 0);
+  return { pnlPct, posSide };
+}
+
+// Sums each asset's account-level unrealized PnL (already notional-scaled, all sleeves of the
+// same account equity per docs/model_contracts -- see 3-asset portfolio design), independent of
+// whichever asset tab is currently active in the chart above.
+function renderCombinedUnrealizedPnl(state, compactState) {
+  let total = 0;
+  let openCount = 0;
+  const parts = [];
+  ASSET_KEYS.forEach((asset) => {
+    const { pnlPct, posSide } = assetUnrealizedPnl(state, compactState, asset);
+    if (posSide === "LONG" || posSide === "SHORT") {
+      total += pnlPct;
+      openCount += 1;
+      parts.push(`${assetLabel(asset)} ${posSide === "LONG" ? "롱" : "숏"} ${fmtPct(pnlPct, 2)}`);
+    }
+  });
+  setT("heroUnrealizedPnl", openCount > 0 ? fmtPct(total, 2) : "-");
+  const heroUnrealEl = el("heroUnrealizedPnl");
+  if (heroUnrealEl) {
+    heroUnrealEl.classList.remove("good-text", "bad-text", "muted-text");
+    heroUnrealEl.classList.add(`${openCount > 0 ? riskClass(total) : "muted"}-text`);
+  }
+  setT("heroUnrealizedSub", openCount > 0 ? parts.join(" · ") : "포지션 없음");
+}
+
 function renderOpsCards(state, compactState) {
   const selectedAssetState = assetDecisionState(state, compactState, activeChartAsset);
   if (!selectedAssetState) {
@@ -721,13 +762,8 @@ function renderOpsCards(state, compactState) {
     const ribbon = el("chartAiRibbon");
     if (ribbon) ribbon.className = "chart-ai-ribbon hold";
     setT("chartAiSummaryText", `${cfg.label} 모델 상태 대기 중`);
-    setT("heroUnrealizedPnl", "-");
-    const heroUnrealEl0 = el("heroUnrealizedPnl");
-    if (heroUnrealEl0) {
-      heroUnrealEl0.classList.remove("good-text", "bad-text", "muted-text");
-      heroUnrealEl0.classList.add("muted-text");
-    }
-    setT("heroUnrealizedSub", "상태 없음");
+    const gaugeEl0 = el("chartRiskGauge");
+    if (gaugeEl0) gaugeEl0.innerHTML = "";
     return;
   }
   const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
@@ -778,15 +814,6 @@ function renderOpsCards(state, compactState) {
   const ribbon = el("chartAiRibbon");
   if (ribbon) ribbon.className = `chart-ai-ribbon ${decision.cls === "long" ? "good" : decision.cls === "short" ? "bad" : "hold"}`;
 
-  // Hero unrealized P&L card
-  setT("heroUnrealizedPnl", posSide === "NONE" ? "-" : fmtPct(unrealizedPnl, 2));
-  const heroUnrealEl = el("heroUnrealizedPnl");
-  if (heroUnrealEl) {
-    heroUnrealEl.classList.remove("good-text", "bad-text", "muted-text");
-    heroUnrealEl.classList.add(`${posSide === "NONE" ? "muted" : riskClass(unrealizedPnl)}-text`);
-  }
-  setT("heroUnrealizedSub", posSide === "NONE" ? "포지션 없음" : `${assetLabel(activeChartAsset)} · ${posSide === "LONG" ? "롱" : "숏"}`);
-
   // AI decision one-line summary
   const currentPrice = Number(latestLivePriceByAsset[activeChartAsset] || active.last_price || active.price || 0);
   let summaryText;
@@ -806,6 +833,7 @@ function renderOpsCards(state, compactState) {
     summaryText = `포지션 없음 · AI 판단 ${decision.text}`;
   }
   setT("chartAiSummaryText", summaryText);
+  renderChartRiskGauge(tp, sl, unrealizedPnl, posSide, tpPrice, slPrice, currentPrice);
 }
 
 function executionAlertState(state, compactState) {
@@ -1486,12 +1514,18 @@ function renderLiveMarket() {
 
 function applyDashboardEvent(payload) {
   const tickers = payload?.tickers || {};
+  let btcPriceUpdated = false;
+  let ethPriceUpdated = false;
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);
     if (!(price > 0) || !ASSET_CONFIG[asset]) return;
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
+    if (asset === "btc") btcPriceUpdated = true;
+    if (asset === "eth") ethPriceUpdated = true;
   });
+  if (btcPriceUpdated && latestBtcMultislotPayload) renderBtcMultislotSlots(latestBtcMultislotPayload);
+  if (ethPriceUpdated && latestEthJmlam4Payload) renderEthJmlam4Position(latestEthJmlam4Payload);
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
@@ -1611,7 +1645,207 @@ async function refreshOpsStatus() {
   }
 }
 
+function slotHoldText(holdBars, barSeconds) {
+  const totalMinutes = Math.round((Number(holdBars || 0) * Number(barSeconds || 300)) / 60);
+  if (!(totalMinutes > 0)) return "-";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}시간 ${minutes}분 (${holdBars}봉)` : `${minutes}분 (${holdBars}봉)`;
+}
+
+// SL/TP/MFE/MAE come from state as raw price-move fractions (e.g. 0.075 = 7.5% price move),
+// not account-level PnL -- see the Futures Risk Sizing Contract (PnL = price_move * notional).
+// All five inputs here must already be converted to account-level % (rawMove * notional * 100)
+// so they share the same scale as the live unrealized-PnL marker.
+function shadowSlotRangeBar(slPct, tpPct, maePct, mfePct, currentPct, currentTitle) {
+  const known = [slPct, tpPct, maePct, mfePct, 0, currentPct].filter((v) => Number.isFinite(v));
+  const lo = Math.min(...known);
+  const hi = Math.max(...known);
+  const span = hi - lo || 1;
+  const pos = (v) => clamp01((v - lo) / span) * 100;
+  const zero = pos(0);
+  const maeFill = Number.isFinite(maePct)
+    ? (() => { const e = pos(maePct); return `<div class="shadow-slot-range-fill bad" style="left:${Math.min(zero, e)}%; width:${Math.abs(zero - e)}%;" title="MAE ${fmtPct(maePct, 2)}"></div>`; })()
+    : "";
+  const mfeFill = Number.isFinite(mfePct)
+    ? (() => { const e = pos(mfePct); return `<div class="shadow-slot-range-fill good" style="left:${Math.min(zero, e)}%; width:${Math.abs(zero - e)}%;" title="MFE ${fmtPct(mfePct, 2)}"></div>`; })()
+    : "";
+  const currentKnown = Number.isFinite(currentPct);
+  const currentCls = currentKnown ? riskClass(currentPct) : "muted";
+  return `
+    <div class="shadow-slot-range">
+      <div class="shadow-slot-range-track">
+        <div class="shadow-slot-range-zero" style="left:${zero}%;"></div>
+        ${maeFill}
+        ${mfeFill}
+        <div class="shadow-slot-range-mark sl" style="left:${pos(slPct)}%;" title="SL ${fmtPct(slPct, 2)}"></div>
+        <div class="shadow-slot-range-mark tp" style="left:${pos(tpPct)}%;" title="TP ${fmtPct(tpPct, 2)}"></div>
+        ${currentKnown ? `<div class="shadow-slot-range-current ${currentCls}" style="left:${pos(currentPct)}%;" title="${currentTitle || `현재 ${fmtPct(currentPct, 2)}`}"></div>` : ""}
+      </div>
+      <div class="shadow-slot-range-labels">
+        <span class="tag sl">SL ${fmtPct(slPct, 1)}</span>
+        <span class="tag zero">0</span>
+        <span class="tag tp">TP ${fmtPct(tpPct, 1)}</span>
+      </div>
+    </div>`;
+}
+
+// tp/sl are account-level fractions from activeRiskModel() (e.g. 0.12 = 12%, rawMove * exposure)
+// -- same convention as signedRiskPairLabel(), which also multiplies by 100 for display.
+// No MFE/MAE tracking is exposed for the real live position, so the gauge shows SL/TP bounds
+// and the current unrealized marker only -- no progress-fill shading.
+function renderChartRiskGauge(tp, sl, unrealizedPnl, posSide, tpPrice, slPrice, currentPrice) {
+  const gaugeEl = el("chartRiskGauge");
+  if (!gaugeEl) return;
+  if (posSide !== "LONG" && posSide !== "SHORT") {
+    gaugeEl.innerHTML = "";
+    return;
+  }
+  if (!(tp > 0) && !(sl > 0)) {
+    gaugeEl.innerHTML = "";
+    return;
+  }
+  const tpPct = tp * 100;
+  const slPct = sl * 100;
+  const distTp = currentPrice > 0 && tpPrice > 0
+    ? (posSide === "LONG" ? (tpPrice - currentPrice) / currentPrice : (currentPrice - tpPrice) / currentPrice) * 100 : null;
+  const distSl = currentPrice > 0 && slPrice > 0
+    ? (posSide === "LONG" ? (currentPrice - slPrice) / currentPrice : (slPrice - currentPrice) / currentPrice) * 100 : null;
+  const distParts = [];
+  if (distTp !== null) distParts.push(`TP까지 ${fmtNum(Math.max(distTp, 0), 2)}%`);
+  if (distSl !== null) distParts.push(`SL까지 ${fmtNum(Math.max(distSl, 0), 2)}%`);
+  const currentTitle = `현재 ${fmtPct(unrealizedPnl, 2)}${distParts.length ? " · " + distParts.join(" · ") : ""}`;
+  gaugeEl.innerHTML = shadowSlotRangeBar(-slPct, tpPct, NaN, NaN, unrealizedPnl, currentTitle);
+}
+
+function shadowPositionCardHtml(pos, idx, livePrice, barSeconds) {
+  if (!pos) {
+    return `<div class="shadow-slot-card empty"><span class="muted">${idx !== null ? "비어있음" : "열린 포지션 없음"}</span></div>`;
+  }
+  const isLong = Number(pos.side) > 0;
+  const sideCls = isLong ? "long" : "short";
+  const entryPrice = Number(pos.entry_price || 0);
+  const notional = Number(pos.notional_exposure ?? pos.notional ?? 0);
+  const tpRaw = Number(pos.take_profit || 0);
+  const slRaw = Number(pos.stop_loss || 0);
+  const mfeRaw = Number(pos.mfe || 0);
+  const maeRaw = Number(pos.mae || 0);
+  const priceMoveFrac = livePrice > 0 && entryPrice > 0
+    ? (isLong ? (livePrice - entryPrice) / entryPrice : (entryPrice - livePrice) / entryPrice)
+    : null;
+  const unrealizedPct = priceMoveFrac !== null ? priceMoveFrac * notional * 100 : null;
+  const tpAcct = tpRaw * notional * 100;
+  const slAcct = -slRaw * notional * 100;
+  const mfeAcct = mfeRaw * notional * 100;
+  const maeAcct = maeRaw * notional * 100;
+  const tpPrice = entryPrice > 0 ? (isLong ? entryPrice * (1 + tpRaw) : entryPrice * (1 - tpRaw)) : 0;
+  const slPrice = entryPrice > 0 ? (isLong ? entryPrice * (1 - slRaw) : entryPrice * (1 + slRaw)) : 0;
+  const distTp = livePrice > 0 && tpPrice > 0
+    ? (isLong ? (tpPrice - livePrice) / livePrice : (livePrice - tpPrice) / livePrice) * 100 : null;
+  const distSl = livePrice > 0 && slPrice > 0
+    ? (isLong ? (livePrice - slPrice) / livePrice : (slPrice - livePrice) / livePrice) * 100 : null;
+  const distParts = [];
+  if (distTp !== null) distParts.push(`TP까지 ${fmtNum(Math.max(distTp, 0), 2)}%`);
+  if (distSl !== null) distParts.push(`SL까지 ${fmtNum(Math.max(distSl, 0), 2)}%`);
+  const currentTitle = `현재 ${unrealizedPct === null ? "-" : fmtPct(unrealizedPct, 2)}${distParts.length ? " · " + distParts.join(" · ") : ""}`;
+  const srcLabel = pos.source_component ? `<span class="shadow-slot-src muted">${pos.source_component}</span>` : "";
+  return `
+    <div class="shadow-slot-card">
+      <div class="shadow-slot-head">
+        <span class="shadow-slot-side ${sideCls}">${sideLabel(isLong ? "LONG" : "SHORT")} · ${fmtNum(Number(pos.leverage || 1), 1)}x</span>
+        ${srcLabel}
+      </div>
+      <div class="shadow-ribbon">
+        <div class="ribbon-item ribbon-primary">
+          <span>미실현손익</span>
+          <strong class="${unrealizedPct === null ? "muted" : riskClass(unrealizedPct)}-text">${unrealizedPct === null ? "-" : fmtPct(unrealizedPct, 2)}</strong>
+        </div>
+        <div class="ribbon-item">
+          <span>진입가 → 현재가</span>
+          <strong>${fmtNum(entryPrice, 1)} → ${livePrice > 0 ? fmtNum(livePrice, 1) : "-"}</strong>
+        </div>
+        <div class="ribbon-item">
+          <span>진입 시각</span>
+          <strong>${fmtTs(pos.entry_timestamp || pos.entry_ts)}</strong>
+        </div>
+        <div class="ribbon-item">
+          <span>보유 시간</span>
+          <strong>${slotHoldText(pos.hold_bars, barSeconds)}</strong>
+        </div>
+        <div class="ribbon-item">
+          <span>마진 · 명목</span>
+          <strong>${fmtPctNoPlus(Number(pos.margin_fraction || 0) * 100, 2)} · ${fmtPctNoPlus(notional * 100, 2)}</strong>
+        </div>
+        <div class="ribbon-item ribbon-risk">
+          <span>TP / SL</span>
+          <strong>계정 ${fmtPct(tpAcct, 2)}/${fmtPct(slAcct, 2)} · 가격 ${fmtPctNoPlus(tpRaw * 100, 1)}/-${fmtPctNoPlus(slRaw * 100, 1)}</strong>
+        </div>
+      </div>
+      ${shadowSlotRangeBar(slAcct, tpAcct, maeAcct, mfeAcct, unrealizedPct, currentTitle)}
+    </div>`;
+}
+
+function renderBtcMultislotSlots(payload) {
+  const listEl = el("btcMultislotSlotList");
+  const tabsEl = el("btcMultislotSlotTabs");
+  if (!listEl) return;
+  const slots = Array.isArray(payload?.slots) ? payload.slots : [];
+  const barSeconds = Number(payload?.bar_seconds || 300);
+  const livePrice = Number(latestLivePriceByAsset["btc"] || 0);
+  if (!slots.length) {
+    if (tabsEl) tabsEl.innerHTML = "";
+    listEl.innerHTML = `<div class="shadow-slot-card empty"><span class="muted">슬롯 정보 없음</span></div>`;
+    return;
+  }
+  if (btcMultislotActiveSlot >= slots.length) btcMultislotActiveSlot = 0;
+  if (tabsEl) {
+    tabsEl.innerHTML = slots.map((slot, idx) => {
+      const dotCls = slot ? (Number(slot.side) > 0 ? "long" : "short") : "";
+      return `<button type="button" class="shadow-slot-tab ${idx === btcMultislotActiveSlot ? "active" : ""}" data-slot-idx="${idx}">
+        <span class="shadow-slot-tab-dot ${dotCls}"></span>슬롯 ${idx + 1}
+      </button>`;
+    }).join("");
+    tabsEl.querySelectorAll(".shadow-slot-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        btcMultislotActiveSlot = Number(btn.dataset.slotIdx || 0);
+        renderBtcMultislotSlots(latestBtcMultislotPayload || payload);
+      });
+    });
+  }
+  listEl.innerHTML = shadowPositionCardHtml(slots[btcMultislotActiveSlot], btcMultislotActiveSlot, livePrice, barSeconds);
+}
+
+function svgEmptyState(svg, text) {
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const h = svg.viewBox?.baseVal?.height || 200;
+  const w = Math.max(parentW, 400);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = "";
+  const NS = "http://www.w3.org/2000/svg";
+  const txt = document.createElementNS(NS, "text");
+  txt.setAttribute("x", w / 2);
+  txt.setAttribute("y", h / 2);
+  txt.setAttribute("text-anchor", "middle");
+  txt.setAttribute("fill", "var(--muted)");
+  txt.textContent = text;
+  svg.appendChild(txt);
+}
+
+function renderShadowCharts(payload, pnlSvgId, eqSvgId) {
+  const points = (payload?.equity_curve || []).map((row) => ({
+    ts: row.ts,
+    equity: 1 + Number(row.cumulative_return_pct || 0) / 100,
+    pnl_pct: Number(row.trade_return_pct || 0),
+    cumulative_return_pct: Number(row.cumulative_return_pct || 0),
+  }));
+  const pnlSvg = el(pnlSvgId);
+  const eqSvg = el(eqSvgId);
+  if (pnlSvg) points.length ? renderBarSvg(pnlSvg, points) : svgEmptyState(pnlSvg, "청산된 거래 없음");
+  if (eqSvg) points.length ? renderLineSvg(eqSvg, points) : svgEmptyState(eqSvg, "청산된 거래 없음");
+}
+
 function renderBtcMultislotShadow(payload) {
+  latestBtcMultislotPayload = payload;
   const badge = el("btcMultislotBadge");
   const stale = Boolean(payload?.stale);
   if (badge) {
@@ -1630,6 +1864,8 @@ function renderBtcMultislotShadow(payload) {
     pnlEl.classList.remove("good-text", "bad-text", "muted-text");
     pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
   }
+  renderBtcMultislotSlots(payload);
+  renderShadowCharts(payload, "btcMultislotPnlSvg", "btcMultislotEquitySvg");
 }
 
 async function refreshBtcMultislotShadow() {
@@ -1649,13 +1885,72 @@ async function refreshBtcMultislotShadow() {
   }
 }
 
+function renderEthJmlam4Position(payload) {
+  const cardEl = el("ethJmlam4PositionCard");
+  if (!cardEl) return;
+  const livePrice = Number(latestLivePriceByAsset["eth"] || 0);
+  const barSeconds = Number(payload?.bar_seconds || 300);
+  cardEl.innerHTML = shadowPositionCardHtml(payload?.position || null, null, livePrice, barSeconds);
+}
+
+function renderEthJmlam4Shadow(payload) {
+  latestEthJmlam4Payload = payload;
+  const badge = el("ethJmlam4Badge");
+  const stale = Boolean(payload?.stale);
+  if (badge) {
+    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
+    badge.textContent = stale ? "STALE" : "LIVE";
+  }
+  const age = Number(payload?.age_minutes);
+  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
+  setT("ethJmlam4Sub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
+
+  const side = Number(payload?.position_side || 0);
+  const posText = side > 0 ? "LONG" : side < 0 ? "SHORT" : "FLAT";
+  const src = payload?.position_source_component;
+  setT("ethJmlam4Position", src ? `${posText} (${src})` : posText);
+
+  setT("ethJmlam4Trades", `${payload?.total_trades ?? 0}건`);
+
+  const pnl = Number(payload?.cumulative_return_pct);
+  const pnlEl = el("ethJmlam4Pnl");
+  setT("ethJmlam4Pnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
+  if (pnlEl) {
+    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
+    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
+  }
+
+  const mdd = Number(payload?.mdd_pct);
+  setT("ethJmlam4Mdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
+
+  renderEthJmlam4Position(payload);
+  renderShadowCharts(payload, "ethJmlam4PnlSvg", "ethJmlam4EquitySvg");
+}
+
+async function refreshEthJmlam4Shadow() {
+  const now = Date.now();
+  if (now - ethJmlam4LastFetchAt < OPS_POLL_MS) return;
+  ethJmlam4LastFetchAt = now;
+  try {
+    const res = await fetch(API_ETH_JMLAM4_SHADOW_URL, { cache: "no-store", headers: ethJmlam4Etag ? { "If-None-Match": ethJmlam4Etag } : {} });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`eth jmlam4 shadow ${res.status}`);
+    ethJmlam4Etag = res.headers.get("ETag") || ethJmlam4Etag;
+    renderEthJmlam4Shadow(await res.json());
+  } catch (error) {
+    console.error("ETH JM lambda4 shadow fetch error:", error);
+    const badge = el("ethJmlam4Badge");
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
+  }
+}
+
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
     const ops = button.dataset.pageTab === "ops";
     el("liveTabPanel")?.classList.toggle("hidden", ops);
     el("opsTabPanel")?.classList.toggle("hidden", !ops);
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); }
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethJmlam4LastFetchAt = 0; refreshEthJmlam4Shadow(); }
   }));
 }
 
@@ -2139,6 +2434,7 @@ function render(state, compactState = null, { stateChanged = true, journalChange
 
   renderExecutionAlert(state, compactState);
   renderOpsCards(state, compactState);
+  renderCombinedUnrealizedPnl(state, compactState);
   setT("chartStamp", latestLivePriceTs ? fmtTs(latestLivePriceTs) : globalStamp);
   if (journalChanged) {
     renderTradePanels();
@@ -2224,6 +2520,7 @@ async function tick() {
     }
     refreshOpsStatus();
     refreshBtcMultislotShadow();
+    refreshEthJmlam4Shadow();
   } catch (e) {
     console.error("Tick Error:", e);
   } finally {

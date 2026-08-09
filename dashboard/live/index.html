@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>인공지능 트레이딩 대시보드</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260807-accent-signal-v1">
+  <link rel="stylesheet" href="styles.css?v=20260810-ribbon-2row-eth-parity-v8">
 </head>
 <body>
   <main class="app">
@@ -148,6 +148,7 @@
             <strong id="chartRegimeText">-</strong>
           </div>
         </div>
+        <div id="chartRiskGauge" class="chart-risk-gauge"></div>
         <div class="chart-container">
           <svg id="candleSvg" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -199,6 +200,45 @@
         <div class="ops-shadow-stat"><span>누적 체결</span><strong id="btcMultislotTrades">-</strong></div>
         <div class="ops-shadow-stat"><span>누적 수익률</span><strong id="btcMultislotPnl">-</strong></div>
       </div>
+      <div id="btcMultislotSlotTabs" class="shadow-slot-tabs"></div>
+      <div id="btcMultislotSlotList" class="shadow-slot-list single"></div>
+      <div class="shadow-chart-grid">
+        <div class="shadow-chart-cell">
+          <p class="shadow-chart-title">청산 거래 손익</p>
+          <svg id="btcMultislotPnlSvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="shadow-chart-cell">
+          <p class="shadow-chart-title">누적 성과</p>
+          <svg id="btcMultislotEquitySvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel ops-shadow-panel">
+      <div class="ops-health-head">
+        <div><h3>ETH JM 레짐 교체 Shadow</h3><p id="ethJmlam4Sub" class="muted">상태 불러오는 중…</p></div>
+        <div class="ops-health-head-tools">
+          <span id="ethJmlam4Badge" class="ops-badge neutral">-</span>
+          <span class="ops-readonly">shadow 전용 · 주문 미실행</span>
+        </div>
+      </div>
+      <div class="ops-shadow-body cols-4">
+        <div class="ops-shadow-stat"><span>현재 포지션</span><strong id="ethJmlam4Position">-</strong></div>
+        <div class="ops-shadow-stat"><span>누적 체결</span><strong id="ethJmlam4Trades">-</strong></div>
+        <div class="ops-shadow-stat"><span>누적 수익률</span><strong id="ethJmlam4Pnl">-</strong></div>
+        <div class="ops-shadow-stat"><span>MDD</span><strong id="ethJmlam4Mdd">-</strong></div>
+      </div>
+      <div id="ethJmlam4PositionCard" class="shadow-slot-list single"></div>
+      <div class="shadow-chart-grid">
+        <div class="shadow-chart-cell">
+          <p class="shadow-chart-title">청산 거래 손익</p>
+          <svg id="ethJmlam4PnlSvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="shadow-chart-cell">
+          <p class="shadow-chart-title">누적 성과</p>
+          <svg id="ethJmlam4EquitySvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
     </section>
 
     </div>
@@ -225,7 +265,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260807-accent-signal-v1"></script>
+  <script src="./app.js?v=20260810-ribbon-2row-eth-parity-v8"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
