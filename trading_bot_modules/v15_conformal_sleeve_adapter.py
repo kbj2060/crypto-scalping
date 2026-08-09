@@ -120,7 +120,6 @@ class ConformalSleeveV15Adapter:
             "funding_pressure": _latest(frame, "funding_pressure", 0.0),
             "liquidity_vacuum": _latest(frame, "liquidity_vacuum", 0.0),
             "amihud_illiquidity_z": _latest(frame, "amihud_illiquidity_z", 0.0),
-            "m7_tail_risk": _latest(frame, "m7_tail_risk", 0.0),
             "evt_tail_flag": _latest(frame, "evt_tail_flag", 0.0),
             "ai_adverse_risk": _latest(frame, "ai_adverse_risk", 0.0),
         }
@@ -169,7 +168,6 @@ class ConformalSleeveV15Adapter:
 
         stress = (
             features["evt_tail_flag"] > 0.0
-            or features["m7_tail_risk"] > 0.0
             or abs(features["liquidity_vacuum"]) > 1.0
             or abs(features["funding_pressure"]) > 0.12
             or abs(features["ai_adverse_risk"]) > 0.75

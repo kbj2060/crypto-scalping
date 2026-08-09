@@ -64,7 +64,7 @@ def prepare_training_data():
     logger.info("🔧 Step 2: 피처 엔지니어링 확인")
     logger.info("-" * 80)
     
-    active_keep = build_active_feature_keep(include_entry_price=False, include_m7_artifacts=True)
+    active_keep = build_active_feature_keep(include_entry_price=False)
     # 필수 피처가 있는지 확인 (실사용 스키마 기준)
     missing_features = [col for col in active_keep if col not in df.columns and col != "timestamp"]
     
@@ -104,7 +104,6 @@ def prepare_training_data():
     df = prune_to_active_feature_keep(
         df if isinstance(df, pd.DataFrame) else pd.DataFrame(df),
         include_entry_price=False,
-        include_m7_artifacts=True,
         extra_keep=["timestamp"],
     )
     

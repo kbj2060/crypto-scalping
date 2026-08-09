@@ -45,7 +45,7 @@ Omega4.6.2 validation/OOS ledger replay는 historical audit 전용이다. `tradi
 - `clean_regime_2024_unsup_v4_*`는 active live/backtest/model-candidate 경로에서 금지한다. 이 prefix는 legacy 5-cluster clean-regime lineage(KMeans cluster semantics + old factor mix)이며 current Regime4 state24 contract와 의미 체계가 다르다. historical reproduction/debug 용도로만 허용한다.
 - Docs Manager must mark any `regime_legacy` / legacy regime prefix rows as historical/reference-only and not active inputs, even if an old audit table gave them a usable-looking verdict.
 - Current fixed Regime4 DSAC specs live under `tmp/causal_regen_20260516/dsac_feature_variant_specs_regime_fixed_20260521/` and must retain legacy prefix count 0.
-- Current DSAC candidate architecture is `clean_regime4_state24_sticky090_v2_*` + `regime4_pred_*` + `a5dir_*` -> DSAC final policy -> execution/ledger. Router5/CatBoost and Regime4 layers are auxiliary context, not action owners.
+- Current DSAC candidate architecture is `clean_regime4_state24_sticky090_v2_*` + `a5dir_*` -> DSAC final policy -> execution/ledger. Router5/CatBoost and Regime4 layers are auxiliary context, not action owners. `regime4_pred_*` (TFT future-regime predictor) and M7 (SevenModelEnsemble) were removed from the codebase entirely; do not reintroduce them.
 - Next action-classifier/regime redesign policy is `Regime3 + Whipsaw Risk`, documented in `docs/model_contracts/regime3_whipsaw_risk_policy_20260529.md`.
   New action classifiers should use bull/bear/chop as direction/structure regime classes and move whipsaw into risk/veto/sizing context. Do not create new active action targets where `whipsaw` is an independent class.
 - Regime3 active policy is `docs/active_live/regime3_policy_20260530.md`.
@@ -83,9 +83,7 @@ Omega4.6.2 validation/OOS ledger replay는 historical audit 전용이다. `tradi
 - Current Omega live-wired report: `tmp/causal_regen_20260516/omega4_6_2_v5_roll8_side_specific_two_stage_exposure_validation_only_20260701/report.json`
 - Current Omega live promotion audit: `tmp/causal_regen_20260516/omega5_live_promotion_20260701/omega5_live_promotion_audit_20260701.json`
 - Current Alpha6 main research candidate: `docs/model_contracts/alpha6_entry_quality_exit_5bucket_main_20260522_contract.md`
-- Unified dataset builder: `pipeline/build_rl_dataset.py`
-- M7 augmentation: `pipeline/augment_m7_dataset.py`
-- Feature contract: `features/schema.py`, `features/registry.py`, `docs/feature_contract_manifest.json`
+- Feature contract: `features/schema.py`, `docs/feature_contract_manifest.json`
 - Base DSAC compact state: `ensemble/train_rl_dsac_agent.py`
 - Controller DSAC state: `ensemble/train_rl_dsac_unified_controller.py`
 - Shared execution/reward env: `ensemble/rl_continuous_common.py`

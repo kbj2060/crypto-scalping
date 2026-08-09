@@ -39,7 +39,6 @@ for _p in [_ROOT_DIR, _SCRIPT_DIR, os.path.join(_ROOT_DIR, "ensemble"), os.path.
         sys.path.insert(0, _p)
 
 from features.schema import prune_to_feature_keep
-from features.registry import find_missing_columns, get_m7_columns, M7_PROB_ALIASES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,17 +59,6 @@ def _resolve_runtime_device(requested: str) -> str:
         return "cuda"
     raise ValueError(f"invalid device: {requested} (expected: auto/cpu/cuda)")
 
-
-def _validate_m7_training_columns(df: pd.DataFrame, tag: str = "DSAC") -> None:
-    required = get_m7_columns("rl_core", include_entry_price=False)
-    missing = find_missing_columns(df.columns, required, aliases=M7_PROB_ALIASES)
-    if not missing:
-        return
-    missing_txt = ", ".join(sorted(missing))
-    raise ValueError(
-        f"[{tag}] missing required M7 columns: {missing_txt}. "
-        "Run scripts/augment_rl_training_with_model7.py before RL training."
-    )
 
 from ensemble.train_rl_agent import (  # noqa: E402
     MultiTimeframeFeatures,
@@ -1511,8 +1499,7 @@ def train(
     before_cols = len(df.columns)
     df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp"])
     if len(df.columns) != before_cols:
-        logger.info("[DATA] feature prune: %d -> %d cols (active M7+RL only)", before_cols, len(df.columns))
-    _validate_m7_training_columns(df, tag="DSAC")
+        logger.info("[DATA] feature prune: %d -> %d cols (active RL only)", before_cols, len(df.columns))
     logger.info("[DATA] csv_path=%s | rows=%d", csv_path, len(df))
     if "timestamp" in df.columns:
         ts = pd.to_datetime(df["timestamp"], errors="coerce")

@@ -115,7 +115,7 @@ def build_features_truncated(cutoff_ts: pd.Timestamp) -> pd.DataFrame:
 
     engineer = FeatureEngineer(candle_minutes=1, keep_only_active=True, include_entry_price=False)
     result = engineer.process(eth_merged, btc_df)
-    result = prune_to_active_feature_keep(result, include_entry_price=False, include_m7_artifacts=True,
+    result = prune_to_active_feature_keep(result, include_entry_price=False,
                                            extra_keep=["timestamp"])
     return result
 

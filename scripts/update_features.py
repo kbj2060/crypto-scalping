@@ -539,7 +539,6 @@ def merge_and_save(new_df: pd.DataFrame):
     new_df = prune_to_active_feature_keep(
         new_df,
         include_entry_price=False,
-        include_m7_artifacts=True,
         extra_keep=["timestamp"],
     )
     if os.path.exists(FEATURES_CSV):
@@ -548,7 +547,6 @@ def merge_and_save(new_df: pd.DataFrame):
         existing = prune_to_active_feature_keep(
             existing,
             include_entry_price=False,
-            include_m7_artifacts=True,
             extra_keep=["timestamp"],
         )
         all_cols = sorted(set(new_df.columns).union(set(existing.columns)))

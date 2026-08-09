@@ -173,7 +173,6 @@ class FeatureEngineer:
             df = prune_to_active_feature_keep(
                 df,
                 include_entry_price=self.include_entry_price,
-                include_m7_artifacts=True,
                 extra_keep=["timestamp"],
             )
             after_cols = len(df.columns)

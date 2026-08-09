@@ -15,10 +15,7 @@
         "whipsaw"
       ],
       "current_prefix": "clean_regime4_state24_sticky090_v2_",
-      "future_prefix": "regime4_pred_",
-      "future_model": "regime4_pred_tft_h12_nomdjd_all74_20260517",
       "current_feature_count": 20,
-      "future_feature_count": 12,
       "current_auxiliary_features": [
         "factor_trend",
         "factor_flow",
@@ -136,112 +133,6 @@
       "execution_quality"
     ]
   },
-  "m7_supervised_inputs": {
-    "trend_xgb": [
-      "mtf_trend_1h",
-      "mtf_trend_4h",
-      "rsi",
-      "macd_hist",
-      "turtle_signal",
-      "btc_corr_60",
-      "bb_width_z",
-      "realized_skewness",
-      "squeeze_power",
-      "funding_price_divergence",
-      "smart_money_flow",
-      "net_taker_ratio",
-      "cvp_cluster_position",
-      "regime_persistence",
-      "cross_scale_curvature",
-      "sig_volume_confirm",
-      "sig_trend_health"
-    ],
-    "multi_target_lgbm": [
-      "btc_corr_60",
-      "whale_retail_ratio",
-      "mtf_trend_1h",
-      "mtf_trend_4h",
-      "bb_width_z",
-      "realized_vol_ratio",
-      "squeeze_power",
-      "turtle_signal",
-      "funding_price_divergence",
-      "smart_money_flow",
-      "crowding_pressure",
-      "execution_quality",
-      "trade_intensity",
-      "long_squeeze_risk"
-    ],
-    "quantile_forest": [
-      "rsi",
-      "mtf_trend_1h",
-      "mtf_trend_4h",
-      "bb_width_z",
-      "garman_klass_vol",
-      "rogers_satchell_vol",
-      "amihud_illiquidity_z",
-      "btc_corr_60",
-      "smart_money_flow",
-      "taker_acceleration",
-      "liquidity_vacuum",
-      "cvp_regime",
-      "cvp_poc_dist",
-      "whale_retail_ratio",
-      "fvg_dist"
-    ],
-    "entry_price_model": [
-      "cvp_poc_dist",
-      "cvp_cluster_position",
-      "cvp_volume_imbalance",
-      "bb_width_z",
-      "amihud_illiquidity_z",
-      "execution_quality",
-      "smart_money_flow",
-      "net_taker_ratio",
-      "trade_intensity",
-      "fvg_dist",
-      "wick_ratio",
-      "mtf_trend_1h"
-    ]
-  },
-  "m7_removed_from_active_contract": {
-    "model_meta_keys": [
-      "gmm_volatility",
-      "isolation_forest",
-      "vae_anomaly"
-    ],
-    "generated_required_columns": [
-      "m7_gmm_cluster",
-      "m7_gmm_conf",
-      "m7_gmm_vol_rank",
-      "m7_iso_pred",
-      "m7_iso_score",
-      "m7_iso_anom",
-      "m7_vae_error",
-      "m7_vae_threshold",
-      "m7_vae_anom",
-      "m7_gate_block",
-      "m7_size",
-      "m7_hdb_label",
-      "m7_hdb_prob"
-    ],
-    "historical_artifact_policy": "diagnostic_only_until_retrained_rescored"
-  },
-  "m7_outputs": {
-    "quantiles_uncertainty": [
-      "m7_q10",
-      "m7_q90",
-      "m7_qwidth",
-      "m7_tail_risk"
-    ],
-    "execution": [
-      "m7_entry_long_offset",
-      "m7_entry_short_offset",
-      "m7_tp_offset",
-      "m7_sl_offset",
-      "m7_target_hold"
-    ]
-  },
   "dsac_compact_state": {
     "position_state": [
       "current_position",
@@ -258,15 +149,6 @@
       "spread_norm",
       "amihud_norm",
       "smart_money_flow_norm"
-    ],
-    "m7_summaries": [
-      "m7_q_uncertainty_norm",
-      "m7_quality_norm",
-      "m7_hold_norm",
-      "m7_entry_long_offset_norm",
-      "m7_entry_short_offset_norm",
-      "m7_tp_offset_norm",
-      "m7_sl_offset_norm"
     ]
   },
   "cleanup_priorities": {

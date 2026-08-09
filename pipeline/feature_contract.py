@@ -71,6 +71,5 @@ def drop_forbidden_active_regime_columns(df: pd.DataFrame) -> tuple[pd.DataFrame
 def rl_passthrough_keep(contract: dict) -> set[str]:
     keep = set()
     keep.update(flatten_feature_groups(contract.get("shared_base_features", {})))
-    keep.update(flatten_feature_groups(contract.get("m7_outputs", {})))
     keep.difference_update(forbidden_active_regime_columns(keep))
     return keep

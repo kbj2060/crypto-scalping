@@ -19,7 +19,6 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
 from features.schema import prune_to_feature_keep
-from features.registry import M7_PROB_ALIASES, find_missing_columns, get_m7_columns
 from ensemble.train_rl_dsac_unified_controller import (
     AI_FEATS,
     DSAC_ACTION_DIM,
@@ -45,15 +44,6 @@ def _env_flag(name: str, default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _validate_m7_training_columns(df: pd.DataFrame, tag: str = "DSAC") -> None:
-    required = get_m7_columns("rl_core", include_entry_price=False)
-    missing = find_missing_columns(df.columns, required, aliases=M7_PROB_ALIASES)
-    if missing:
-        missing_txt = ", ".join(sorted(missing))
-        raise ValueError(
-            f"[{tag}] missing required M7 columns: {missing_txt}. "
-            "Run scripts/augment_rl_training_with_model7.py before evaluation."
-        )
 
 
 def _load_rl_frame(csv_path: str, start: str | None = None, end: str | None = None) -> pd.DataFrame:
@@ -65,7 +55,6 @@ def _load_rl_frame(csv_path: str, start: str | None = None, end: str | None = No
     df = prune_to_feature_keep(df, include_entry_price=False, extra_keep=["timestamp", "ai_ready"] + AI_FEATS)
     if len(df.columns) != before_cols:
         print(f"[DATA] feature prune: {before_cols} -> {len(df.columns)} cols")
-    _validate_m7_training_columns(df, tag="EVAL")
     if "ai_ready" in df.columns:
         ready = pd.to_numeric(df["ai_ready"], errors="coerce").fillna(0.0)
         df = df.loc[ready >= 0.5].reset_index(drop=True)

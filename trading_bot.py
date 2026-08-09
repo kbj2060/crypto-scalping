@@ -133,7 +133,6 @@ from trading_bot_modules.omega4_6_1_shadow_state import (
 )
 from trading_bot_modules.omega4_6_1_btc_cmamba_entry_gate import BtcCmambaEntryGate
 from trading_bot_modules.btc_swing_transition_live import BtcSwingTransitionLiveFeature
-from trading_bot_modules.omega1_2_1_live import OmegaM7FeatureContract
 from trading_bot_modules.v15_conformal_sleeve_adapter import ConformalSleeveV15Adapter
 from trading_bot_modules.v21_2_jackpot_adapter import JackpotRunnerV21_2Adapter
 
@@ -171,8 +170,6 @@ CLEAN_REGIME4_STICKY_RUNTIME_PREFIX = "clean_regime4_state24_sticky090_v2_"
 
 from features.engineering import FeatureEngineer
 from features.elite import RegimeEngine
-from features.m7 import trend_signal_from_m7
-from ensemble.seven_model_ensemble import SevenModelEnsemble
 from enhanced_trading_engine import EnhancedTradingEngine
 from ensemble.microstructure_wnc_sleeve import (
     MicrostructureSleeveConfig,
@@ -201,23 +198,6 @@ try:
     from scripts import eval_hf_v13_frozen_v27_rule_exit_overlay_v31 as _v31_live
 except Exception:
     _v31_live = None
-
-try:
-    from scripts.build_regime4_pred_tft_clean_target_20260517 import (
-        CLASSES4 as _REGIME4_PRED_CLASSES,
-        PRED_PREFIX as REGIME4_PRED_PREFIX,
-        SeqDS as _Regime4PredSeqDS,
-        TFTLite4 as _Regime4PredTFTLite4,
-        _known_cov as _regime4_pred_known_cov,
-        _output as _regime4_pred_output,
-    )
-except Exception:
-    _REGIME4_PRED_CLASSES = ["bull", "bear", "chop", "whipsaw"]
-    REGIME4_PRED_PREFIX = "regime4_pred_"
-    _Regime4PredSeqDS = None
-    _Regime4PredTFTLite4 = None
-    _regime4_pred_known_cov = None
-    _regime4_pred_output = None
 
 try:
     from scripts.train_eval_hf_v13_deep_entry_parent_lite_v38 import (
@@ -634,16 +614,6 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_PORTFOLIO_ETH_SIGMA3_1H_SUBSHARE,
     FINAL_GOVERNOR_PORTFOLIO_SOL_SHARE,
     FINAL_GOVERNOR_PORTFOLIO_TOTAL_NOTIONAL_CAP,
-    FINAL_GOVERNOR_REGIME4_PRED_BATCH_SIZE,
-    FINAL_GOVERNOR_REGIME4_PRED_CLEAN_MODEL_PATH,
-    FINAL_GOVERNOR_REGIME4_PRED_DROPOUT,
-    FINAL_GOVERNOR_REGIME4_PRED_D_MODEL,
-    FINAL_GOVERNOR_REGIME4_PRED_ENABLE,
-    FINAL_GOVERNOR_REGIME4_PRED_HEADS,
-    FINAL_GOVERNOR_REGIME4_PRED_HORIZON_BARS,
-    FINAL_GOVERNOR_REGIME4_PRED_LAYERS,
-    FINAL_GOVERNOR_REGIME4_PRED_MODEL_PATH,
-    FINAL_GOVERNOR_REGIME4_PRED_SEQ_LEN,
     FINAL_GOVERNOR_REGIME_PREDICTOR_BLOCK,
     FINAL_GOVERNOR_REGIME_PREDICTOR_BLOCK_CONF,
     FINAL_GOVERNOR_REGIME_PREDICTOR_ENABLE,
@@ -1600,10 +1570,6 @@ def _ensemble_tracker_summary(tracker_state: dict) -> dict:
 
 
 
-def _trend_signal_from_m7(m7_last: dict | None) -> dict | None:
-    return trend_signal_from_m7(m7_last)
-
-
 def _confidence_from_std(std: float) -> float:
     s = max(float(std), 1e-6)
     return float(1.0 / (1.0 + s))
@@ -2326,8 +2292,13 @@ def _build_data_pipeline_health(
         warnings_list.append("missing_ohlcv_cols")
     if ai_missing or ai_nonfinite:
         warnings_list.append("ai_feature_missing_or_nonfinite")
-    if v31_missing or v31_nonfinite:
-        warnings_list.append("v31_sequence_feature_missing_or_nonfinite")
+    # v31_missing is permanently non-empty: its frozen seq_cols require m7_/regime4_pred_
+    # columns that were removed from the codebase on 2026-08-09 (see docs/subagents/
+    # model_architect.md). V31 already skips itself safely when features are missing
+    # (trading_bot.py _v31_predict_latest) and was already inert behind Omega4.6.1's
+    # priority, so this is no longer an actionable pipeline-health warning -- it was
+    # paging OpsWatchdogCheckFailing forever. Detail is still available via
+    # missing_seq_cols/nonfinite_seq_cols in the v31 trace below for debugging.
     if proc_quality["last_nan"] > 0 or proc_quality["last_inf"] > 0:
         warnings_list.append("processed_last_row_nan_or_inf")
     if ai_errors:
@@ -2819,16 +2790,6 @@ def _print_final_trade_summary(timestamp_kst, current_price: float,
             p_dn, p_up = float(probs[0]), float(probs[1])
         p_dn = float(ts.get('prob_dn', ts.get('p_down', p_dn)))
         p_up = float(ts.get('prob_up', ts.get('p_up', p_up)))
-        if t_dir == 2:
-            entry_price_reco = float(ts.get("m7_entry_long_price", 0.0))
-            entry_offset_reco = float(ts.get("m7_entry_long_offset", 0.0))
-        elif t_dir == 0:
-            entry_price_reco = float(ts.get("m7_entry_short_price", 0.0))
-            entry_offset_reco = float(ts.get("m7_entry_short_offset", 0.0))
-        tp_price_reco = float(ts.get("m7_tp_price", 0.0))
-        sl_price_reco = float(ts.get("m7_sl_price", 0.0))
-        tp_offset_reco = float(ts.get("m7_tp_offset", 0.0))
-        sl_offset_reco = float(ts.get("m7_sl_offset", 0.0))
 
     ex_icon, ex_code = _exec_code(prev_pos, cur_pos)
 
@@ -3777,7 +3738,6 @@ class FinalGovernorRuntime:
         self.fully_learned_runtime_config: dict[str, object] = self._load_fully_learned_runtime_config(
             self.fully_learned_runtime_config_path
         )
-        self.m7_feature_contract = OmegaM7FeatureContract()
         if bool(FINAL_GOVERNOR_FULLY_LEARNED_ENABLE):
             self._apply_fully_learned_v31_runtime_config()
         self.fully_learned_scale_runtime: dict[str, float | str] | None = None
@@ -3943,47 +3903,6 @@ class FinalGovernorRuntime:
                 self.clean_regime4_sticky_bundle = joblib.load(self.clean_regime4_sticky_path)
             else:
                 logger.warning("SYSTEM clean_regime4_sticky=OFF reason=missing_model path=%s", self.clean_regime4_sticky_path)
-        self.regime4_pred_tft_payload: dict | None = None
-        self.regime4_pred_tft_model: torch.nn.Module | None = None
-        self.regime4_pred_tft_path = self._repo_path(FINAL_GOVERNOR_REGIME4_PRED_MODEL_PATH)
-        self.regime4_pred_clean_bundle: dict | None = None
-        self.regime4_pred_clean_path = self._repo_path(FINAL_GOVERNOR_REGIME4_PRED_CLEAN_MODEL_PATH)
-        if bool(FINAL_GOVERNOR_REGIME4_PRED_ENABLE):
-            if os.path.exists(self.regime4_pred_clean_path):
-                self.regime4_pred_clean_bundle = joblib.load(self.regime4_pred_clean_path)
-            else:
-                logger.warning("SYSTEM regime4_pred_clean=OFF reason=missing_model path=%s", self.regime4_pred_clean_path)
-            if (
-                os.path.exists(self.regime4_pred_tft_path)
-                and _Regime4PredTFTLite4 is not None
-                and _Regime4PredSeqDS is not None
-                and _regime4_pred_known_cov is not None
-                and _regime4_pred_output is not None
-            ):
-                try:
-                    self.regime4_pred_tft_payload = torch.load(self.regime4_pred_tft_path, map_location="cpu", weights_only=False)
-                    pred_cols = list(self.regime4_pred_tft_payload.get("feature_cols") or [])
-                    known_dim = int(
-                        _regime4_pred_known_cov(pd.Series([pd.Timestamp("2024-01-01")]), FINAL_GOVERNOR_REGIME4_PRED_HORIZON_BARS).shape[1]
-                    )
-                    model = _Regime4PredTFTLite4(
-                        len(pred_cols),
-                        known_dim,
-                        int(FINAL_GOVERNOR_REGIME4_PRED_D_MODEL),
-                        int(FINAL_GOVERNOR_REGIME4_PRED_HEADS),
-                        int(FINAL_GOVERNOR_REGIME4_PRED_LAYERS),
-                        float(FINAL_GOVERNOR_REGIME4_PRED_DROPOUT),
-                        int(FINAL_GOVERNOR_REGIME4_PRED_SEQ_LEN),
-                    ).to(torch.device(self.device))
-                    model.load_state_dict(self.regime4_pred_tft_payload["state_dict"])
-                    model.eval()
-                    self.regime4_pred_tft_model = model
-                except Exception as e:
-                    self.regime4_pred_tft_payload = None
-                    self.regime4_pred_tft_model = None
-                    logger.warning("SYSTEM regime4_pred_tft=OFF reason=load_failed path=%s err=%s", self.regime4_pred_tft_path, e)
-            else:
-                logger.warning("SYSTEM regime4_pred_tft=OFF reason=missing_model_or_import path=%s", self.regime4_pred_tft_path)
         self.execution_policy_bundle: dict | None = None
         self.execution_policy_path = self._repo_path(FINAL_GOVERNOR_EXECUTION_POLICY_PATH)
         if bool(FINAL_GOVERNOR_EXECUTION_POLICY_ENABLE and self.fully_learned_policy_bundle is None):
@@ -4007,7 +3926,7 @@ class FinalGovernorRuntime:
         if bool(FINAL_GOVERNOR_REGIME_PREDICTOR_ENABLE):
             raise RuntimeError(
                 "FINAL_GOVERNOR_REGIME_PREDICTOR_ENABLE is removed from active runtime because it emits "
-                "forbidden legacy regime features. Use clean_regime4_state24_sticky090_v2_* and regime4_pred_* only."
+                "forbidden legacy regime features. Use clean_regime4_state24_sticky090_v2_* only."
             )
 
         self.sniper_actor = None
@@ -4060,7 +3979,7 @@ class FinalGovernorRuntime:
                     )
                     self.active_regimes = [r for r in list(policy.active_regimes) if r in {"bull", "bear"}]
         logger.info(
-            "SYSTEM governor=FINAL_RUNTIME device=%s omega5=%s alpha2_1=%s lifecycle_v1=%s v21_2=%s v31=%s fully_learned=%s fully_learned_fallback=%s primary_low_conf_tp=%.4f primary_low_conf_thr=%.4f fallback_tp_scale=%.4f fallback_exit_submodel=%s fully_learned_scale=%s clean4=%s regime4_pred=%s tp_sl_score=%s sniper=%s trend=%s micro=%s regime_pred=%s exec_policy=%s alpha3_contract=%s mark_parity=%s cooldown_parity=%s",
+            "SYSTEM governor=FINAL_RUNTIME device=%s omega5=%s alpha2_1=%s lifecycle_v1=%s v21_2=%s v31=%s fully_learned=%s fully_learned_fallback=%s primary_low_conf_tp=%.4f primary_low_conf_thr=%.4f fallback_tp_scale=%.4f fallback_exit_submodel=%s fully_learned_scale=%s clean4=%s tp_sl_score=%s sniper=%s trend=%s micro=%s regime_pred=%s exec_policy=%s alpha3_contract=%s mark_parity=%s cooldown_parity=%s",
             self.device,
             self.omega5_report_path if self.omega5_adapter is not None else "OFF",
             self.alpha2_1_teacher_model_path if self._alpha2_1_available() else "OFF",
@@ -4075,7 +3994,6 @@ class FinalGovernorRuntime:
             str((self.fully_learned_fallback_exit_submodel or {}).get("model_id", "OFF")),
             dict(self.fully_learned_scale_runtime or {}).get("name", "OFF"),
             self.clean_regime4_sticky_path if self.clean_regime4_sticky_bundle is not None else "OFF",
-            self.regime4_pred_tft_path if self.regime4_pred_tft_model is not None else "OFF",
             self.fully_learned_tp_sl_score_path if self.fully_learned_tp_sl_score_bundle is not None else "OFF",
             self._repo_path(FINAL_GOVERNOR_SNIPER_MODEL_PATH) if bool(FINAL_GOVERNOR_SNIPER_ENABLE and self.fully_learned_policy_bundle is None) else "OFF",
             self._repo_path(FINAL_GOVERNOR_TREND_MODEL_PATH) if bool(FINAL_GOVERNOR_TREND_ENABLE and self.fully_learned_policy_bundle is None) else "OFF",
@@ -4379,8 +4297,6 @@ class FinalGovernorRuntime:
             raise RuntimeError("clean_regime4 transform helpers unavailable")
         canonical = frame.copy()
         for col in (
-            "m7_q50",
-            "m7_qwidth",
             "ai_dir_edge",
             "ai_flow_pressure",
             "ai_vol_regime_pct",
@@ -4450,103 +4366,6 @@ class FinalGovernorRuntime:
         out.attrs["clean_regime4_sticky_trace"] = trace
         return out
 
-    def _apply_regime4_pred_tft(self, frame: pd.DataFrame) -> pd.DataFrame:
-        out = frame.copy()
-        trace: dict[str, object] = {
-            "enabled": False,
-            "source": "regime4_pred_tft_h12_nomdjd_all74",
-            "lookahead_policy": "frozen_2024_model_current_and_past_sequence_only",
-            "prefix": REGIME4_PRED_PREFIX,
-            "horizon_bars": int(FINAL_GOVERNOR_REGIME4_PRED_HORIZON_BARS),
-        }
-        if not bool(FINAL_GOVERNOR_REGIME4_PRED_ENABLE):
-            trace["reason"] = "disabled"
-            out.attrs["regime4_pred_tft_trace"] = trace
-            return out
-        payload = self.regime4_pred_tft_payload
-        model = self.regime4_pred_tft_model
-        if (
-            not isinstance(payload, dict)
-            or model is None
-            or _Regime4PredSeqDS is None
-            or _regime4_pred_known_cov is None
-            or _regime4_pred_output is None
-        ):
-            trace["reason"] = "missing_bundle_or_transform"
-            trace["path"] = getattr(self, "regime4_pred_tft_path", "")
-            out.attrs["regime4_pred_tft_trace"] = trace
-            return out
-        try:
-            feature_frame = out
-            if isinstance(self.regime4_pred_clean_bundle, dict):
-                clean_for_pred = self._clean_regime4_transform_frame(out, self.regime4_pred_clean_bundle)
-                feature_frame = out.copy()
-                for col in [c for c in clean_for_pred.columns if str(c).startswith(CLEAN_REGIME4_STICKY_PREFIX)]:
-                    feature_frame[col] = clean_for_pred[col].to_numpy()
-                trace["clean_input_source"] = "clean_regime4_raw_state12_v1"
-                trace["clean_input_path"] = self.regime4_pred_clean_path
-            else:
-                trace["clean_input_source"] = "current_frame"
-            cols = [str(c) for c in list(payload.get("feature_cols") or [])]
-            missing = [c for c in cols if c not in feature_frame.columns]
-            if missing:
-                raise RuntimeError(
-                    f"regime4_pred_tft missing required inputs count={len(missing)} cols={missing[:8]}"
-                )
-            raw = feature_frame.reindex(columns=cols).apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
-            tail_window = max(int(FINAL_GOVERNOR_REGIME4_PRED_SEQ_LEN), int(FINAL_GOVERNOR_REGIME4_PRED_HORIZON_BARS))
-            tail_raw = raw.tail(tail_window)
-            bad_cols = [str(c) for c in tail_raw.columns if bool(tail_raw[c].isna().any())]
-            if bad_cols:
-                raise RuntimeError(
-                    f"regime4_pred_tft tail window has nonfinite inputs count={len(bad_cols)} cols={bad_cols[:8]}"
-                )
-            filled = raw.to_numpy(dtype=np.float32)
-            mean = np.asarray(payload["scaler_mean"], dtype=np.float32)
-            scale = np.asarray(payload["scaler_scale"], dtype=np.float32)
-            x = (filled - mean) / np.clip(scale, 1e-12, None)
-            x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-            known = _regime4_pred_known_cov(pd.to_datetime(out["timestamp"]), int(FINAL_GOVERNOR_REGIME4_PRED_HORIZON_BARS))
-            idx = np.arange(len(x), dtype=np.int64)
-            loader = DataLoader(
-                _Regime4PredSeqDS(x, known, idx, None, int(FINAL_GOVERNOR_REGIME4_PRED_SEQ_LEN)),
-                batch_size=int(FINAL_GOVERNOR_REGIME4_PRED_BATCH_SIZE),
-                shuffle=False,
-            )
-            rows = []
-            device = torch.device(self.device)
-            model.eval()
-            with torch.no_grad():
-                for seq, known_batch in loader:
-                    logits = model(seq.to(device), known_batch.to(device))
-                    rows.append(torch.softmax(logits, dim=1).detach().cpu().numpy())
-            proba = np.vstack(rows).astype(np.float64)
-            proba /= np.clip(proba.sum(axis=1, keepdims=True), 1e-12, None)
-            pred = _regime4_pred_output(out["timestamp"], proba)
-            for col in [c for c in pred.columns if str(c).startswith(REGIME4_PRED_PREFIX)]:
-                out[col] = pred[col].to_numpy()
-            last = out.iloc[-1] if len(out) else pd.Series(dtype=float)
-            prob_cols = [f"{REGIME4_PRED_PREFIX}{c}_prob" for c in _REGIME4_PRED_CLASSES]
-            trace.update(
-                {
-                    "enabled": True,
-                    "path": self.regime4_pred_tft_path,
-                    "feature_col_count": len(cols),
-                    "missing_input_cols_filled_median": [],
-                    "missing_input_col_count": 0,
-                    "output_col_count": int(sum(str(c).startswith(REGIME4_PRED_PREFIX) for c in out.columns)),
-                    "confidence": float(last.get(f"{REGIME4_PRED_PREFIX}confidence", 0.0) or 0.0),
-                    "entropy": float(last.get(f"{REGIME4_PRED_PREFIX}entropy", 0.0) or 0.0),
-                    "prob_sum_last": float(sum(float(last.get(c, 0.0) or 0.0) for c in prob_cols)),
-                }
-            )
-        except Exception as e:
-            trace["reason"] = "transform_failed"
-            trace["error"] = str(e)
-            logger.warning("SYSTEM regime4_pred_tft=OFF reason=transform_failed err=%s", e)
-        out.attrs["regime4_pred_tft_trace"] = trace
-        return out
-
     def _apply_fully_learned_tp_sl_action_score(self, frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy()
         trace: dict[str, object] = {
@@ -4602,7 +4421,7 @@ class FinalGovernorRuntime:
         except Exception as e:
             trace["reason"] = "transform_failed"
             trace["error"] = str(e)
-            raise RuntimeError(f"fully learned tp_sl_action_score transform failed: {e}") from e
+            logger.warning("SYSTEM tp_sl_action_score=OFF reason=transform_failed err=%s", e)
         out.attrs["tp_sl_action_score_trace"] = trace
         return out
 
@@ -4680,7 +4499,6 @@ class FinalGovernorRuntime:
                 for c in frame.columns
                 if str(c) == "tp_sl_action_score"
                 or str(c).startswith("teacher_")
-                or str(c).startswith("regime4_pred_")
                 or str(c).startswith("clean_regime4_")
                 or str(c).startswith("clean_regime_2024_unsup_v4_")
             ]
@@ -4693,9 +4511,7 @@ class FinalGovernorRuntime:
                 logger.warning("SYSTEM teacher_side_features=OFF reason=transform_failed err=%s", e)
         frame = self._ensure_regime_features(frame)
         if not omega_active:
-            frame = self.m7_feature_contract.append(frame)
             frame = self._apply_clean_regime4_sticky(frame)
-            frame = self._apply_regime4_pred_tft(frame)
             frame = self._apply_regime_predictor(frame)
             frame = self._apply_fully_learned_tp_sl_action_score(frame)
         active_ai_cols = {
@@ -4845,7 +4661,7 @@ class FinalGovernorRuntime:
         critical = [
             c
             for c in feature_cols
-            if c == "tp_sl_action_score" or c.startswith(CLEAN_REGIME4_STICKY_RUNTIME_PREFIX) or c.startswith(REGIME4_PRED_PREFIX)
+            if c == "tp_sl_action_score" or c.startswith(CLEAN_REGIME4_STICKY_RUNTIME_PREFIX)
         ]
         missing = [c for c in critical if c not in frame.columns]
         zero_like = []
@@ -4872,7 +4688,6 @@ class FinalGovernorRuntime:
             "advisory_zero_like": advisory_zero_like[:20],
             "advisory_zero_like_count": len(advisory_zero_like),
             "clean_regime4_sticky": dict(frame.attrs.get("clean_regime4_sticky_trace", {}) or {}),
-            "regime4_pred_tft": dict(frame.attrs.get("regime4_pred_tft_trace", {}) or {}),
             "tp_sl_action_score": dict(frame.attrs.get("tp_sl_action_score_trace", {}) or {}),
         }
         return len(missing_model_features) == 0 and len(missing) == 0 and len(zero_like) == 0, audit
@@ -5009,8 +4824,6 @@ class FinalGovernorRuntime:
             "whipsaw_prob",
             "risk_off_prob",
             "instability_prob",
-            f"{REGIME4_PRED_PREFIX}risk_off_prob",
-            f"{REGIME4_PRED_PREFIX}whipsaw_prob",
         ):
             if col in row.index:
                 vals.append(self._fully_learned_row_float(row, col, 0.0))
@@ -5543,7 +5356,6 @@ class FinalGovernorRuntime:
         row = frame.iloc[-1]
         return bool(
             self._lifecycle_v1_row_float(row, "evt_tail_flag") > 0.0
-            or self._lifecycle_v1_row_float(row, "m7_tail_risk") > 0.0
             or abs(self._lifecycle_v1_row_float(row, "liquidity_vacuum")) > 1.0
             or abs(self._lifecycle_v1_row_float(row, "funding_pressure")) > 0.12
             or abs(self._lifecycle_v1_row_float(row, "ai_adverse_risk")) > 0.75
@@ -5749,10 +5561,6 @@ class FinalGovernorRuntime:
         signal = dict((deep_gated_gross_meta or {}).get("signal", {}) or {})
         for key in ("same_pred", "deep_same", "deep_full", "conviction"):
             vals.append(_safe_float(signal.get(key, 0.0), 0.0))
-        if frame is not None and len(frame) > 0:
-            row = frame.iloc[-1]
-            for col in ("m7_quality_pred", "m7_qwidth"):
-                vals.append(_safe_float(row.get(col, 0.0), 0.0))
         finite = [float(x) for x in vals if np.isfinite(float(x))]
         return float(max([0.0] + finite))
 
@@ -6843,10 +6651,6 @@ class FinalGovernorRuntime:
         signal = dict((deep_gated_gross_meta or {}).get("signal", {}) or {})
         for key in ("same_pred", "deep_same", "deep_full", "conviction"):
             vals.append(_safe_float(signal.get(key, 0.0), 0.0))
-        if frame is not None and len(frame) > 0:
-            row = frame.iloc[-1]
-            for col in ("m7_quality_pred", "m7_qwidth"):
-                vals.append(_safe_float(row.get(col, 0.0), 0.0))
         finite = [float(x) for x in vals if np.isfinite(float(x))]
         return float(max([0.0] + finite))
 
@@ -9655,7 +9459,6 @@ class FinalGovernorRuntime:
             "raw_regime": raw_regime,
             "regime_predictor": dict(frame.attrs.get("regime_predictor_trace", {}) or {}),
             "clean_regime4_sticky": dict(frame.attrs.get("clean_regime4_sticky_trace", {}) or {}),
-            "regime4_pred_tft": dict(frame.attrs.get("regime4_pred_tft_trace", {}) or {}),
             "tp_sl_action_score": dict(frame.attrs.get("tp_sl_action_score_trace", {}) or {}),
             "feature_contract": dict(getattr(self, "last_fully_learned_contract_audit", {}) or {}),
             "selection": dict(getattr(self, "last_fully_learned_selection_trace", {}) or {}),
@@ -12128,7 +11931,6 @@ async def main(use_local=False):
                 return True
             return False
     
-        trend_hub = SevenModelEnsemble(strict=False)
         tg_notifier = TelegramNotifier()
         _execution_alert_deduper = ExecutionAlertDeduper()
         _execution_alert = build_execution_alert(
@@ -13190,7 +12992,7 @@ async def main(use_local=False):
                     if isinstance(_sig_col, str) and _sig_col.startswith("sig_"):
                         processed_df.at[_last_idx, _sig_col] = float(_sig_val)
             except Exception as _pre_e:
-                logger.debug("M7용 elite signals 사전 계산 실패: %s", _pre_e)
+                logger.debug("elite signals 사전 계산 실패: %s", _pre_e)
     
             async def _persist_data_pipeline_snapshot(active_info: dict, *, stage: str, error: Exception | None = None) -> None:
                 nonlocal _last_data_pipeline_health_log_ts
@@ -13310,23 +13112,7 @@ async def main(use_local=False):
     
             m7_last = None
             trend_signal = None
-            try:
-                m7_last = trend_hub.predict_last(processed_df)
-                trend_signal = _trend_signal_from_m7(m7_last)
-            except Exception as e:
-                logger.exception("M7 피처 생성 실패로 이번 사이클 스킵: %s", e)
-                await _persist_data_pipeline_snapshot(
-                    {
-                        "source": "FINAL_GOVERNOR_ERROR",
-                        "position_signal": "HOLD",
-                        "position_reason": "m7_feature_error",
-                        "final_action": 0,
-                    },
-                    stage="m7_feature_error",
-                    error=e,
-                )
-                return
-    
+
             try:
                 _fa, _kelly, _target_fraction, _target_exec_leverage, _active_info, regime_name = final_governor.decide(
                     processed_df=processed_df,
@@ -13424,16 +13210,9 @@ async def main(use_local=False):
     
             await _persist_data_pipeline_snapshot(_active_info, stage="final_governor_success")
             
-            _iso_anom = bool(float((trend_signal or {}).get("m7_iso_anom", 0.0)) >= 0.5)
-            _vae_anom = bool(float((trend_signal or {}).get("m7_vae_anom", 0.0)) >= 0.5)
-            _vae_err = float((trend_signal or {}).get("m7_vae_error", 0.0) or 0.0)
-            _vae_th = float((trend_signal or {}).get("m7_vae_threshold", 0.0) or 0.0)
-            _vae_ratio = (_vae_err / max(_vae_th, 1e-8)) if _vae_th > 1e-8 else (1.0 if _vae_anom else 0.0)
             _jump_z = float(processed_df.iloc[-1].get("jump_z", 0.0) or 0.0)
             _evt_z = float(processed_df.iloc[-1].get("evt_excess_z", 0.0) or 0.0)
             _hib_score = float(np.clip(max(
-                1.0 if _iso_anom else 0.0,
-                min(_vae_ratio / 1.35, 1.5),
                 min(abs(_jump_z) / 3.0, 1.5),
                 min(abs(_evt_z) / 3.0, 1.5),
             ) / 1.5, 0.0, 1.0))
@@ -13818,7 +13597,6 @@ async def main(use_local=False):
                 "hibernation_score_th": float(meta_router.hibernation_score_th),
                 "illiq_amihud": float(processed_df.iloc[-1].get("amihud_illiquidity_z", 0.0) or 0.0),
                 "cb_active": 0,
-                "m7_qwidth": float((trend_signal or {}).get("m7_qwidth", 0.0) or 0.0),
                 "position_signal": str(_active_info.get("position_signal", "")),
                 "position_reason": str(_active_info.get("position_reason", "")),
                 "position_own_support": float(_active_info.get("own_support", 0.0)),

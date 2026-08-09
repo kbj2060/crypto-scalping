@@ -130,7 +130,7 @@ def main():
     print(f"  Dropped {before - len(result):,} NaN rows -> {len(result):,} rows")
 
     result = prune_to_active_feature_keep(
-        result, include_entry_price=False, include_m7_artifacts=True, extra_keep=["timestamp"],
+        result, include_entry_price=False, extra_keep=["timestamp"],
     )
     result.to_csv(FEATURES_CSV, index=False)
     print(f"Saved {FEATURES_CSV}: {len(result):,} rows, {len(result.columns)} cols, "

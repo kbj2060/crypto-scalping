@@ -206,7 +206,7 @@ class ScalpLiveRunner:
     def compute_latest_features(self, eth_df: pd.DataFrame, btc_df: pd.DataFrame) -> pd.Series | None:
         engineer = FeatureEngineer(candle_minutes=1, keep_only_active=True, include_entry_price=False)
         result = engineer.process(eth_df.copy(), btc_df.copy())
-        result = prune_to_active_feature_keep(result, include_entry_price=False, include_m7_artifacts=True,
+        result = prune_to_active_feature_keep(result, include_entry_price=False,
                                                extra_keep=["timestamp", "close"])
         if result.empty:
             return None

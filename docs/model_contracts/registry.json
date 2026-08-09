@@ -441,14 +441,6 @@
       "status": "deprecated_historical_reference_only",
       "active_path_allowed": false,
       "reason": "Direct CatBoost NONE/LONG/SHORT action ownership overlaps with the current DSAC final-policy design. Router5 a5dir_* may remain as causal auxiliary probabilities, but CatBoost Major/Direction must not own live or frozen-backtest actions."
-    },
-    {
-      "alias": "regime4_pred_tft_h12_mdjd_official",
-      "name": "regime4_pred_tft_vsn_h12_official_20260517",
-      "contract": "docs/model_contracts/regime4_official_v1_20260517_contract.md",
-      "status": "deprecated_historical_reference_only",
-      "active_path_allowed": false,
-      "reason": "Depends on pred_mdjd/conf_mdjd. 2026 rebuilt frames did not contain those fields and the old transform path silently median-filled missing TFT inputs."
     }
   ],
   "comparison_baselines": {

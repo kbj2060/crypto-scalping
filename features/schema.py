@@ -5,7 +5,6 @@ import os
 from typing import Iterable
 
 import pandas as pd
-from .registry import get_m7_columns
 
 FORBIDDEN_ACTIVE_REGIME_PREFIXES = (
     "clean_regime_2024_unsup_v4_",
@@ -189,8 +188,38 @@ ELITE_BUILDER_REQUIRED_COLS = [
     "evt_excess_z",
 ]
 
-# RL keep-set에서 유지해야 하는 m7 파생 컬럼(SSOT: features.registry)
-M7_STATE_COLS = sorted(get_m7_columns("rl_keep", include_entry_price=True))
+# Base technical-indicator columns (rsi, macd_hist, session flags, cvd_*, btc_ret_*,
+# etc.) that are shared inputs across multiple still-active model contracts (regime3
+# current/cmamba/risk, Omega4.6.1/4.6.2, entry-price/quantile-style scoring). These
+# small JSON files are column-name manifests only (not model weights or predictions);
+# they are the source of truth for "what base features are actually consumed
+# somewhere" so active-path pruning does not silently drop a column another live
+# model still needs.
+_ACTIVE_MODEL_FEATURE_COL_MANIFESTS = [
+    "data/ensemble/supervised/trend_xgb.json",
+    "data/ensemble/supervised/multi_target_lgbm.json",
+    "data/ensemble/supervised/quantile_forest.json",
+    "data/ensemble/supervised/entry_price_model.json",
+]
+
+
+def load_active_model_feature_keep(project_root: str | None = None) -> set[str]:
+    """Union of feature_cols across still-active model contract manifests."""
+    root = project_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    keep: set[str] = set()
+    for rel_path in _ACTIVE_MODEL_FEATURE_COL_MANIFESTS:
+        path = os.path.join(root, rel_path)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            cols = payload.get("feature_cols", [])
+            if isinstance(cols, list):
+                keep.update(str(c) for c in cols)
+        except Exception:
+            continue
+    return keep
 
 
 def build_rl_feature_keep(include_entry_price: bool = False) -> set[str]:
@@ -205,48 +234,17 @@ def build_rl_feature_keep(include_entry_price: bool = False) -> set[str]:
     cols.update(STATE_SYNTH)
     cols.update(STATE_DIRECTION_ALPHA)
     cols.update(NF_RUNTIME_REQUIRED_COLS)
-    cols.update(get_m7_columns("rl_keep", include_entry_price=include_entry_price))
     return cols
-
-
-def load_m7_model_feature_keep(project_root: str | None = None) -> set[str]:
-    """현재 아티팩트가 실제로 요구하는 M7 feature_cols 집합."""
-    root = project_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    meta_paths = [
-        os.path.join(root, "data", "ensemble", "supervised", "trend_xgb.json"),
-        os.path.join(root, "data", "ensemble", "supervised", "multi_target_lgbm.json"),
-        os.path.join(root, "data", "ensemble", "supervised", "quantile_forest.json"),
-        os.path.join(root, "data", "ensemble", "supervised", "entry_price_model.json"),
-        os.path.join(root, "data", "ensemble", "unsupervised", "gmm_volatility.json"),
-        os.path.join(root, "data", "ensemble", "unsupervised", "hdbscan_regime.json"),
-        os.path.join(root, "data", "ensemble", "unsupervised", "isolation_forest.json"),
-        os.path.join(root, "data", "ensemble", "unsupervised", "vae_anomaly.json"),
-    ]
-    keep: set[str] = set()
-    for path in meta_paths:
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            cols = payload.get("feature_cols", [])
-            if isinstance(cols, list):
-                keep.update([str(c) for c in cols])
-        except Exception:
-            continue
-    return keep
 
 
 def build_active_feature_keep(
     *,
     include_entry_price: bool = False,
-    include_m7_artifacts: bool = True,
     project_root: str | None = None,
 ) -> set[str]:
-    """RL + (선택)현재 M7 아티팩트 기준 실제 사용 피처 집합."""
+    """RL + 현재 활성 모델 계약 기준 실제 사용 피처 집합."""
     keep = build_rl_feature_keep(include_entry_price=include_entry_price)
-    if include_m7_artifacts:
-        keep.update(load_m7_model_feature_keep(project_root=project_root))
+    keep.update(load_active_model_feature_keep(project_root=project_root))
     keep = {c for c in keep if not _is_forbidden_active_regime_col(c)}
     return keep
 
@@ -271,14 +269,10 @@ def prune_to_active_feature_keep(
     df: pd.DataFrame,
     *,
     include_entry_price: bool = False,
-    include_m7_artifacts: bool = True,
     extra_keep: Iterable[str] | None = None,
-    project_root: str | None = None,
 ) -> pd.DataFrame:
     keep = build_active_feature_keep(
         include_entry_price=include_entry_price,
-        include_m7_artifacts=include_m7_artifacts,
-        project_root=project_root,
     )
     if extra_keep is not None:
         keep.update([str(c) for c in extra_keep])

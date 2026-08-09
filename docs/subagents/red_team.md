@@ -33,7 +33,7 @@
 - active path에서 `clean_regime_2024_unsup_v4_*`가 입력/파생/조용한 fallback으로 재주입되지 않았는지 확인한다. 발견 시 blocker로 차단한다.
 - DSAC/Router active specs에서는 `clean_regime4_2024_unsup_v1_*`가 제거되고 `clean_regime4_state24_sticky090_v2_*`가 사용되는지 확인한다. `clean_regime4_2024_unsup_v1_*`는 ambiguous legacy export prefix라 historical reproduction 외에는 차단한다.
 - 현재 fixed spec 기준 경로는 `tmp/causal_regen_20260516/dsac_feature_variant_specs_regime_fixed_20260521/`이며, 감사 시 legacy prefix count 0과 state24 prefix 존재를 확인한다.
-- 현재 DSAC 후보 아키텍처는 `clean_regime4_state24_sticky090_v2_*` + `regime4_pred_*` + Router5 `a5dir_*`가 DSAC final policy에 들어가는 구조다. Regime/TFT/Router5는 auxiliary context여야 하며, CatBoost Major/Direction 또는 Router 계층이 직접 live/backtest action owner가 되면 차단한다.
+- 현재 DSAC 후보 아키텍처는 `clean_regime4_state24_sticky090_v2_*` + Router5 `a5dir_*`가 DSAC final policy에 들어가는 구조다. Regime/Router5는 auxiliary context여야 하며, CatBoost Major/Direction 또는 Router 계층이 직접 live/backtest action owner가 되면 차단한다. `regime4_pred_*`(TFT future-regime predictor)와 M7(SevenModelEnsemble)은 코드베이스에서 완전히 제거됐으니 재도입하지 않는다.
 - Regime3 redesign candidates must follow `docs/model_contracts/regime3_whipsaw_risk_policy_20260529.md`: bull/bear/chop are the only new action-regime classes, and whipsaw must be audited as risk/veto/sizing context. A new active action target with independent `whipsaw` class is a blocker unless the user explicitly opens a historical comparison experiment.
 - AI/M7/clean regime artifact의 fit provenance가 2024-only 또는 해당 실험 계약과 일치하는지 확인한다.
 - funding-family cleanliness를 필수 차단 항목으로 확인한다. `last_funding_rate`, `funding_*`, `mta_funding`, `ou_funding_z`, squeeze/crowding 파생 또는 이를 사용한 M7/teacher/regime/policy artifact가 있으면 clean funding provenance 없이는 live/promotion을 차단한다.

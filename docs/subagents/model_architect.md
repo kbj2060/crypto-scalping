@@ -531,10 +531,10 @@ Result: `regime4_both` beat the baseline only marginally on 2025 holdout MDD/PnL
 - Fixed DSAC spec verification path: `tmp/causal_regen_20260516/dsac_feature_variant_specs_regime_fixed_20260521/`. 현재 fixed specs는 legacy prefix 0개, state24 prefix 사용 상태다.
 - Current DSAC candidate architecture:
   - current regime context: `clean_regime4_state24_sticky090_v2_*` from `clean_regime4_state24_sticky090_v2_2024.joblib`.
-  - future regime context: `regime4_pred_*` from `regime4_pred_tft_h12_nomdjd_all74_20260517`.
   - CatBoost/Router context: `a5dir_*` from Router5 fixed `0.8 * Router3 + 0.2 * Router4`.
-  - final action owner: DSAC only. Regime/TFT/Router5 are auxiliary features, not direct trade owners.
+  - final action owner: DSAC only. Regime/Router5 are auxiliary features, not direct trade owners.
   - deprecated direct action owner: CatBoost Major/Direction `LONG/SHORT/CASH` ownership is forbidden in active live/backtest paths.
+  - `regime4_pred_*` (TFT future-regime predictor, was `regime4_pred_tft_h12_nomdjd_all74_20260517`) and M7 (SevenModelEnsemble) were removed from the codebase entirely on 2026-08-09; do not reintroduce them.
 - Alpha6 active research main as of 2026-05-22:
   - contract: `docs/model_contracts/alpha6_entry_quality_exit_5bucket_main_20260522_contract.md`
   - artifact dir: `data/ensemble/supervised/alpha6_entry_quality_exit_5bucket_main_20260522/`

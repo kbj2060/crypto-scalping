@@ -5,8 +5,6 @@
 # Stages:
 #   0  generate-rl-data  — elite/regime/volatility 피처 계산 → rl_training_data_full.csv
 #   1  split-year        — CSV를 연도별로 분리 (supervised 2024, RL 2025)
-#   2  train-ensemble    — 앙상블 M7 모델 9종 학습 (supervised + unsupervised)
-#   3  augment-rl        — SevenModelEnsemble 예측값 추가 → rl_training_2025_m7.csv
 # ============================================================
 
 # ----- Paths ------------------------------------------------
@@ -21,7 +19,6 @@ paths:
   features_rl_csv:     data/splits/year_oos/training_features_2025.csv   # RL 보조 피처
   rl_base_sup_csv:     data/splits/year_oos/rl_base_2024.csv
   rl_base_rl_csv:      data/splits/year_oos/rl_base_2025.csv
-  rl_m7_csv:           data/splits/year_oos/rl_training_2025_m7.csv      # 최종 RL 학습 CSV
 
 # ----- Stage 0: generate-rl-data ---------------------------
 generate_rl_data:
@@ -33,43 +30,6 @@ split_year:
   supervised_year: 2024
   rl_year:         2025
   timestamp_col:   timestamp
-
-# ----- Stage 2: train-ensemble -----------------------------
-train_ensemble:
-  use_optuna:          true       # false → train_all_ensemble.py, true → train_all_ensemble_optuna.py
-  target:              all        # all | supervised | unsupervised
-  xgb_trials:          40
-  supervised_trials:   30
-  unsupervised_trials: 25
-  vae_trials:          20
-  vae_device:          auto       # auto | cpu | cuda
-  skip_completed:      true       # 이미 학습된 모델 스킵
-  continue_on_error:   false
-
-# ----- Stage 3: augment-rl ---------------------------------
-augment_rl:
-  rl_path:      data/rl_training_data_full.csv
-  feature_path: data/splits/year_oos/training_features_2025.csv
-  output_path:  data/splits/year_oos/rl_training_2025_m7.csv
-
-# ----- Fixed Alpha4 preprocessing contract -----------------
-# Regime4 + fixed TP/SL action score are frozen as preprocessing inputs.
-# Regime4 taxonomy: bull/bear/chop/whipsaw only.
-# TP/SL label contract: next-bar open entry, 48-bar horizon, TP 1.8%, SL 1.0%, same-bar tie -> SL wins.
-fixed_preprocessing:
-  model_id: fixed_regime4_tp18_sl10_preprocess_20260517
-  builder: scripts/build_fixed_regime4_tp_sl_preprocess_20260517.py
-  regime4_transformer: scripts/transform_regime4_official_sidecars_20260517.py
-  train_csv: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2025_regime4_tp18_sl10_fixed.csv
-  eval_csv: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/trade_candidates_2026_regime4_tp18_sl10_fixed.csv
-  manifest: tmp/causal_regen_20260516/fixed_regime4_tp18_sl10_preprocess_20260517/fixed_regime4_tp18_sl10_preprocess_manifest.json
-  current_regime_2025: data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2025_clean_regime4_raw_state12_v1.csv
-  future_regime_2025: data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2025_regime4_pred_tft_vsn_selected.csv
-  current_regime_2026: data/ensemble/supervised/clean_regime4_raw_state12_v1_20260517/training_features_2026_rebuilt_clean_regime4_raw_state12_v1.csv
-  future_regime_2026: data/ensemble/supervised/regime4_pred_tft_h12_nomdjd_all74_20260517/training_features_2026_rebuilt_regime4_pred_tft_vsn_selected.csv
-  fixed_tp: 0.018
-  fixed_sl: 0.010
-  tp_sl_feature: tp_sl_action_score
 
 # ----- Deprecated action models ----------------------------
 # These artifacts can be used only for historical reproduction.
@@ -88,5 +48,3 @@ deprecated_action_models:
 validation:
   features_csv_min_rows:    50000
   rl_full_csv_min_rows:     50000
-  rl_m7_csv_min_rows:       40000
-  rl_m7_csv_min_cols:       50

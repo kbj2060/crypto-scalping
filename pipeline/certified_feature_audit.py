@@ -90,7 +90,7 @@ def audit_frame_contract(
     *,
     feature_cols: list[str],
     clean_prefix: str,
-    require_m7: bool = True,
+    require_m7: bool = False,
     require_ai: bool = True,
 ) -> dict[str, Any]:
     blocking: list[str] = []

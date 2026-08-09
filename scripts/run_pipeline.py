@@ -5,18 +5,13 @@
 스테이지:
   0  generate-rl-data  — elite/regime/volatility 피처 계산 → rl_training_data_full.csv
   1  split-year        — CSV를 연도별로 분리 (supervised 2024, RL 2025)
-  2  train-ensemble    — 앙상블 M7 모델 9종 학습 (supervised + unsupervised)
-  3  augment-rl        — SevenModelEnsemble 예측값 추가 → rl_training_2025_m7.csv
 
 사용 예:
   # 전체 실행
   python scripts/run_pipeline.py
 
-  # 2번 스테이지부터 실행
-  python scripts/run_pipeline.py --from-stage 2
-
   # 특정 스테이지만
-  python scripts/run_pipeline.py --stage 3
+  python scripts/run_pipeline.py --stage 1
 
   # 명령어만 출력 (실제 실행 없음)
   python scripts/run_pipeline.py --dry-run
@@ -51,8 +46,6 @@ _DEFAULT_CONFIG = _ROOT / "config" / "pipeline.yaml"
 STAGE_NAMES = {
     0: "generate-rl-data",
     1: "split-year",
-    2: "train-ensemble",
-    3: "augment-rl",
 }
 
 logging.basicConfig(
@@ -201,66 +194,13 @@ def _stage_split_year(cfg: dict, *, dry_run: bool) -> None:
     )
 
 
-def _stage_train_ensemble(cfg: dict, *, dry_run: bool) -> None:
-    sc = _p(cfg, "train_ensemble")
-    paths = _p(cfg, "paths")
-
-    script = (
-        "scripts/train_all_ensemble_optuna.py"
-        if sc.get("use_optuna", True)
-        else "scripts/train_all_ensemble.py"
-    )
-    cmd = [
-        sys.executable, script,
-        "--target",              sc.get("target", "all"),
-        "--data-path",           paths["features_sup_csv"],
-        "--rl-path",             paths["rl_base_sup_csv"],
-        "--xgb-trials",          str(sc.get("xgb_trials", 40)),
-        "--supervised-trials",   str(sc.get("supervised_trials", 30)),
-        "--unsupervised-trials", str(sc.get("unsupervised_trials", 25)),
-        "--vae-trials",          str(sc.get("vae_trials", 20)),
-        "--vae-device",          sc.get("vae_device", "auto"),
-    ]
-    if sc.get("skip_completed", True):
-        cmd.append("--skip-completed")
-    if sc.get("continue_on_error", False):
-        cmd.append("--continue-on-error")
-
-    _run(cmd, dry_run=dry_run, label="stage-2")
-
-
-def _stage_augment_rl(cfg: dict, *, dry_run: bool) -> None:
-    sc = _p(cfg, "augment_rl")
-    paths = _p(cfg, "paths")
-    output = sc.get("output_path") or paths["rl_m7_csv"]
-
-    _run(
-        [
-            sys.executable, "pipeline/augment_m7_dataset.py",
-            "--rl-path",      sc["rl_path"],
-            "--feature-path", sc["feature_path"],
-            "--output-path",  output,
-        ],
-        dry_run=dry_run,
-        label="stage-3",
-    )
-    if not dry_run:
-        val = _p(cfg, "validation")
-        _validate_csv(
-            output,
-            min_rows=val.get("rl_m7_csv_min_rows", 0),
-            min_cols=val.get("rl_m7_csv_min_cols", 0),
-            label="rl_m7_csv",
-        )
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="데이터 파이프라인 통합 관리 (stage 0-3)",
+        description="데이터 파이프라인 통합 관리 (stage 0-1)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="\n".join(f"  {k}  {v}" for k, v in STAGE_NAMES.items()),
     )
@@ -270,15 +210,15 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--stage", type=int, default=None,
-        help="단일 스테이지만 실행 (0-3)",
+        help="단일 스테이지만 실행 (0-1)",
     )
     p.add_argument(
         "--from-stage", type=int, default=0,
         help="시작 스테이지 (포함, 기본값 0)",
     )
     p.add_argument(
-        "--to-stage", type=int, default=3,
-        help="종료 스테이지 (포함, 기본값 3)",
+        "--to-stage", type=int, default=1,
+        help="종료 스테이지 (포함, 기본값 1)",
     )
     p.add_argument(
         "--dry-run", action="store_true",
@@ -318,8 +258,6 @@ def main() -> int:
     stage_fns = {
         0: lambda: _stage_generate_rl_data(cfg, dry_run=args.dry_run),
         1: lambda: _stage_split_year(cfg, dry_run=args.dry_run),
-        2: lambda: _stage_train_ensemble(cfg, dry_run=args.dry_run),
-        3: lambda: _stage_augment_rl(cfg, dry_run=args.dry_run),
     }
 
     for stage_id in range(from_stage, to_stage + 1):

@@ -20,7 +20,6 @@ import experiment_regime3_current_hmm_wide24_20260529 as regime3_current  # noqa
 import train_eval_omega1_2_tabm_3head_20260603 as omega_tabm  # noqa: E402
 import train_regime3_cryptomamba_pred_20260531 as regime3_cmamba  # noqa: E402
 import train_regime3_stability_risk_20260530 as regime3_risk  # noqa: E402
-from ensemble.unsupervised.train_vae_anomaly import VAE  # noqa: E402
 
 
 OMEGA121_MODEL_ID = "omega3_aggressive_compensated_scale200_cap090_20260618"
@@ -57,65 +56,6 @@ FORBIDDEN_FEATURE_PREFIXES = (
     "clean_regime_2024_unsup_v4_",
 )
 FORBIDDEN_FEATURE_NAMES = {"tp_sl_action_score"}
-GMM_VOLATILITY_PATH = ROOT / "data/ensemble/unsupervised/gmm_volatility.pkl"
-ISOLATION_FOREST_PATH = ROOT / "data/ensemble/unsupervised/isolation_forest.pkl"
-VAE_ANOMALY_PATH = ROOT / "data/ensemble/unsupervised/vae_anomaly.pkl"
-OMEGA_M7_REQUIRED_COLS = [
-    "m7_trend_xgb_dn",
-    "m7_trend_xgb_fl",
-    "m7_trend_xgb_up",
-    "m7_mtl_dn",
-    "m7_mtl_fl",
-    "m7_mtl_up",
-    "m7_quant_dn",
-    "m7_quant_fl",
-    "m7_quant_up",
-    "m7_confidence",
-    "m7_action",
-    "m7_size",
-    "m7_q10",
-    "m7_q50",
-    "m7_q90",
-    "m7_qwidth",
-    "m7_quality_pred",
-    "m7_hold_pred",
-    "m7_entry_long_price",
-    "m7_entry_short_price",
-    "m7_entry_long_offset",
-    "m7_entry_short_offset",
-    "m7_tp_offset",
-    "m7_sl_offset",
-    "m7_tp_price",
-    "m7_sl_price",
-    "m7_gmm_cluster",
-    "m7_gmm_conf",
-    "m7_gmm_vol_rank",
-    "m7_iso_pred",
-    "m7_iso_score",
-    "m7_iso_anom",
-    "m7_vae_error",
-    "m7_vae_anom",
-    "m7_gate_block",
-    "m7_expected_ret",
-    "m7_tail_risk",
-    "m7_composite_score",
-    "m7_hdb_prob",
-    "m7_prob_dn",
-    "m7_prob_fl",
-    "m7_prob_up",
-    "m7_vae_threshold",
-]
-OMEGA_AI_REQUIRED_COLS = [
-    "pred_patchtst",
-    "conf_patchtst",
-    "ai_dir_edge",
-    "ai_dir_p_up",
-    "ai_dir_p_down",
-    "ai_dir_p_flat",
-    "ai_dir_entropy",
-    "patchtst_median",
-    "patchtst_regime_sim",
-]
 
 
 @dataclass(frozen=True)
@@ -326,189 +266,6 @@ class Regime3LiveFeatures:
         return out
 
 
-class OmegaM7FeatureContract:
-    def __init__(
-        self,
-        *,
-        gmm_path: str | Path = GMM_VOLATILITY_PATH,
-        isolation_path: str | Path = ISOLATION_FOREST_PATH,
-        vae_path: str | Path = VAE_ANOMALY_PATH,
-    ) -> None:
-        self.gmm_payload = joblib.load(Path(gmm_path))
-        self.iso_payload = joblib.load(Path(isolation_path))
-        self.vae_payload = joblib.load(Path(vae_path))
-        fcols = list(self.vae_payload["feature_cols"])
-        meta = dict(self.vae_payload.get("meta", {}) or {})
-        self.vae_model = VAE(
-            input_dim=len(fcols),
-            latent_dim=int(meta.get("latent_dim", 8)),
-            hidden_dim=int(meta.get("hidden_dim", 128)),
-        )
-        self.vae_model.load_state_dict(self.vae_payload["state_dict"])
-        self.vae_model.eval()
-
-    @staticmethod
-    def _latest_numeric(frame: pd.DataFrame, cols: list[str], tag: str) -> np.ndarray:
-        missing = [c for c in cols if c not in frame.columns]
-        if missing:
-            raise RuntimeError(f"{tag} missing columns: {missing[:40]}")
-        row = frame.iloc[-1]
-        vals = []
-        bad = []
-        for col in cols:
-            try:
-                val = float(row[col])
-            except Exception:
-                bad.append(col)
-                continue
-            if not np.isfinite(val):
-                bad.append(col)
-                continue
-            vals.append(val)
-        if bad:
-            raise RuntimeError(f"{tag} non-finite latest columns: {bad[:40]}")
-        return np.asarray(vals, dtype=np.float32).reshape(1, -1)
-
-    @staticmethod
-    def _standardize(raw: np.ndarray, payload: dict[str, Any], tag: str) -> np.ndarray:
-        mean = np.asarray(payload["mean"], dtype=np.float32).reshape(1, -1)
-        std = np.asarray(payload["std"], dtype=np.float32).reshape(1, -1)
-        if raw.shape[1] != mean.shape[1] or raw.shape[1] != std.shape[1]:
-            raise RuntimeError(f"{tag} feature dimension mismatch raw={raw.shape} mean={mean.shape} std={std.shape}")
-        z = (raw - mean) / np.clip(std, 1e-8, None)
-        if not np.isfinite(z).all():
-            raise RuntimeError(f"{tag} standardized inputs contain non-finite values")
-        return z.astype(np.float32)
-
-    @staticmethod
-    def _set_three_way_from_binary(out: pd.DataFrame, idx: Any, prefix: str) -> tuple[float, float, float]:
-        dn_col = f"{prefix}_dn"
-        fl_col = f"{prefix}_fl"
-        up_col = f"{prefix}_up"
-        missing = [c for c in (dn_col, up_col) if c not in out.columns]
-        if missing:
-            raise RuntimeError(f"Omega M7 missing binary columns for {prefix}: {missing}")
-        dn = float(out.at[idx, dn_col])
-        up = float(out.at[idx, up_col])
-        if not np.isfinite(dn) or not np.isfinite(up):
-            raise RuntimeError(f"Omega M7 non-finite binary probabilities for {prefix}")
-        total = dn + up
-        if total <= 1e-12:
-            raise RuntimeError(f"Omega M7 invalid binary probability sum for {prefix}: {total}")
-        dn = float(np.clip(dn / total, 0.0, 1.0))
-        up = float(np.clip(up / total, 0.0, 1.0))
-        flat = float(np.clip(1.0 - abs(up - dn), 0.0, 1.0))
-        directional = 1.0 - flat
-        dn3 = dn * directional
-        up3 = up * directional
-        out.at[idx, dn_col] = float(dn3)
-        out.at[idx, fl_col] = float(flat)
-        out.at[idx, up_col] = float(up3)
-        return float(dn3), float(flat), float(up3)
-
-    @staticmethod
-    def _set_quantile_three_way(out: pd.DataFrame, idx: Any) -> tuple[float, float, float]:
-        for col in ("m7_q10", "m7_q50", "m7_q90"):
-            if col not in out.columns:
-                raise RuntimeError(f"Omega M7 missing quantile column: {col}")
-        q10 = float(out.at[idx, "m7_q10"])
-        q50 = float(out.at[idx, "m7_q50"])
-        q90 = float(out.at[idx, "m7_q90"])
-        if not all(np.isfinite(v) for v in (q10, q50, q90)):
-            raise RuntimeError("Omega M7 non-finite quantile columns")
-        width = max(q90 - q10, 1e-6)
-        z = float(np.clip(q50 / width, -50.0, 50.0))
-        logits = np.asarray([-z, 0.0, z], dtype=np.float64)
-        probs = np.exp(logits - logits.max())
-        probs = probs / np.clip(probs.sum(), 1e-12, None)
-        out.at[idx, "m7_quant_dn"] = float(probs[0])
-        out.at[idx, "m7_quant_fl"] = float(probs[1])
-        out.at[idx, "m7_quant_up"] = float(probs[2])
-        return float(probs[0]), float(probs[1]), float(probs[2])
-
-    def _append_unsupervised(self, out: pd.DataFrame, idx: Any) -> None:
-        gmm_cols = list(self.gmm_payload["feature_cols"])
-        Regime3LiveFeatures._reject_forbidden(gmm_cols, "Omega M7 GMM")
-        gmm_raw = self._latest_numeric(out, gmm_cols, "Omega M7 GMM")
-        gmm_x = self._standardize(gmm_raw, self.gmm_payload, "Omega M7 GMM")
-        gmm_model = self.gmm_payload["model"]
-        cluster = int(gmm_model.predict(gmm_x)[0])
-        gmm_prob = np.asarray(gmm_model.predict_proba(gmm_x)[0], dtype=np.float64)
-        rank_map = dict(self.gmm_payload.get("cluster_rank_map", {}) or {})
-        rank_raw = float(rank_map.get(str(cluster), rank_map.get(cluster, 0.0)))
-        rank_den = max(float(len(rank_map) - 1), 1.0)
-        out.at[idx, "m7_gmm_cluster"] = float(cluster)
-        out.at[idx, "m7_gmm_conf"] = float(np.clip(gmm_prob.max(), 0.0, 1.0))
-        out.at[idx, "m7_gmm_vol_rank"] = float(np.clip(rank_raw / rank_den, 0.0, 1.0))
-
-        iso_cols = list(self.iso_payload["feature_cols"])
-        Regime3LiveFeatures._reject_forbidden(iso_cols, "Omega M7 IsolationForest")
-        iso_raw = self._latest_numeric(out, iso_cols, "Omega M7 IsolationForest")
-        iso_x = self._standardize(iso_raw, self.iso_payload, "Omega M7 IsolationForest")
-        iso_model = self.iso_payload["model"]
-        iso_pred = int(iso_model.predict(iso_x)[0])
-        iso_score = float(-iso_model.decision_function(iso_x)[0])
-        out.at[idx, "m7_iso_pred"] = float(iso_pred)
-        out.at[idx, "m7_iso_score"] = iso_score
-        out.at[idx, "m7_iso_anom"] = 1.0 if iso_pred == -1 else 0.0
-
-        vae_cols = list(self.vae_payload["feature_cols"])
-        Regime3LiveFeatures._reject_forbidden(vae_cols, "Omega M7 VAE")
-        vae_raw = self._latest_numeric(out, vae_cols, "Omega M7 VAE")
-        vae_x = self._standardize(vae_raw, self.vae_payload, "Omega M7 VAE")
-        xt = torch.from_numpy(vae_x).to(torch.float32)
-        with torch.no_grad():
-            h = self.vae_model.encoder(xt)
-            mu = self.vae_model.mu(h)
-            recon = self.vae_model.decoder(mu)
-            vae_error = float(torch.mean((recon - xt) ** 2, dim=1).cpu().numpy()[0])
-        threshold = 0.1
-        # The active Omega scaler was fitted with this retired constant slot at 0.1.
-        out.at[idx, "m7_vae_error"] = vae_error
-        out.at[idx, "m7_vae_threshold"] = float(threshold)
-        out.at[idx, "m7_vae_anom"] = 1.0 if vae_error > threshold else 0.0
-        out.at[idx, "m7_hdb_prob"] = 0.0
-        out.at[idx, "m7_gate_block"] = (
-            1.0
-            if float(out.at[idx, "m7_iso_anom"]) >= 0.5 and float(out.at[idx, "m7_vae_anom"]) >= 0.5
-            else 0.0
-        )
-
-    def append(self, frame: pd.DataFrame) -> pd.DataFrame:
-        if not len(frame):
-            raise RuntimeError("Omega M7 contract received empty frame")
-        out = frame.copy()
-        idx = out.index[-1]
-        self._set_three_way_from_binary(out, idx, "m7_trend_xgb")
-        self._set_three_way_from_binary(out, idx, "m7_mtl")
-        self._set_quantile_three_way(out, idx)
-        prob_dn, prob_fl, prob_up = self._set_three_way_from_binary(out, idx, "m7_prob")
-        out.at[idx, "m7_confidence"] = float(max(prob_dn, prob_fl, prob_up))
-        if prob_fl >= max(prob_dn, prob_up):
-            out.at[idx, "m7_action"] = 0.0
-        else:
-            out.at[idx, "m7_action"] = 1.0 if prob_up > prob_dn else -1.0
-
-        self._append_unsupervised(out, idx)
-        confidence = float(out.at[idx, "m7_confidence"])
-        gate = float(out.at[idx, "m7_gate_block"])
-        out.at[idx, "m7_size"] = float(np.clip(confidence * (1.0 - 0.5 * gate), 0.0, 1.0))
-        out.at[idx, "m7_composite_score"] = float(out.at[idx, "m7_action"]) * confidence
-
-        if "ai_dir_edge" in out.columns:
-            edge = float(out.at[idx, "ai_dir_edge"])
-            if np.isfinite(edge):
-                out.at[idx, "pred_patchtst"] = float(np.clip(edge, -1.0, 1.0))
-        if "patchtst_regime_sim" in out.columns:
-            conf = float(out.at[idx, "patchtst_regime_sim"])
-            if np.isfinite(conf):
-                out.at[idx, "conf_patchtst"] = float(np.clip(conf, 0.0, 1.0))
-
-        Regime3LiveFeatures._finite_latest(out, OMEGA_M7_REQUIRED_COLS, "Omega M7 contract")
-        Regime3LiveFeatures._finite_latest(out, OMEGA_AI_REQUIRED_COLS, "Omega AI contract")
-        return out
-
-
 class Omega121LiveAdapter:
     def __init__(
         self,
@@ -530,7 +287,6 @@ class Omega121LiveAdapter:
             risk_path=risk_path,
             device=self.device,
         )
-        self.m7_contract = OmegaM7FeatureContract()
         self.bundle = torch.load(Path(bundle_path), map_location="cpu", weights_only=False)
         self.base_cols = list(self.bundle["base_cols"])
         self.pos_cols = list(self.bundle["pos_cols"])
@@ -625,8 +381,7 @@ class Omega121LiveAdapter:
         return effective_exposure, margin_notional, BASE_TP * barrier_scale, BASE_SL * barrier_scale
 
     def decide_latest(self, frame: pd.DataFrame) -> Omega121Decision:
-        enriched = self.m7_contract.append(frame.copy().reset_index(drop=True))
-        enriched = self.regime3.append(enriched)
+        enriched = self.regime3.append(frame.copy().reset_index(drop=True))
         row = enriched.iloc[-1]
         expert, route_conf, route_margin = self._route_expert(row)
         _, _, input_cols = self.models[expert]
