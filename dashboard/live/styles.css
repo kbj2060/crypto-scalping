@@ -19,9 +19,9 @@
   --card-gap: 16px;
   --radius: 18px;
   --radius-sm: 12px;
-  --font-sans: ui-sans-serif, system-ui, "Segoe UI Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Noto Serif KR", serif;
-  --font-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  --font-display: "Space Grotesk", "Pretendard Variable", Pretendard, "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "Pretendard Variable", Pretendard, ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 @keyframes fadeInUp {
