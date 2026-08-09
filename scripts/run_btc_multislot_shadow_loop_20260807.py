@@ -48,24 +48,58 @@ from trading_bot_modules.btc_swing_transition_live import BtcSwingTransitionLive
 from trading_bot_modules.binance_live_fetcher import BinanceLiveFetcher  # noqa: E402
 from features.engineering import FeatureEngineer  # noqa: E402
 import train_eval_omega1_2_tabm_diffusion_risk_btc_swingtransition_20260806 as _omega_cost  # noqa: E402
+from chart_btc_jm_regime_verification_20260808 import causal_zigzag  # noqa: E402
 
 N_SLOTS = int(os.getenv("BTC_MULTISLOT_SHADOW_SLOTS", "3"))
 # 2026-08-07 evening extension: margin multiplier ON TOP of the equal-budget /N split.
-# Pre-registered sweep on the N=3 gated ledgers (VAL selects m s.t. VAL MDD >= -8%; OOS adopt iff
-# PnL >= +19.7 AND MDD >= -12.4 AND worst quarter >= -4): VAL selected 1.5x, OOS +19.98%/-10.40%/
-# worstQ -0.92% -> adopted. Diversification across slots lowers volatility drag, moving the
-# growth-optimal multiplier up from the single-slot ~1.0-1.25x. Set to 1.0 to fall back to the
-# original equal-budget sizing.
+# Diversification across slots lowers volatility drag, moving the growth-optimal multiplier up
+# from the single-slot ~1.0-1.25x. Set to 1.0 to fall back to the original equal-budget sizing.
+#
+# PROVENANCE CORRECTED 2026-08-08 -- read this before quoting any number here.
+# The original sweep ran on the N=3 gated LEDGERS (rescaling trade returns per multiplier). That
+# is invalid: margin_fraction is an INPUT to the exit head, so changing it changes the exits and
+# the ledger itself. Full causal replay
+# (scripts/resweep_btc_multislot_margin_multiplier_fullreplay_20260808.py) over the SAME grid
+# {1.25,1.5,1.75,2.0} plus 1.0, OOS gated:
+#     m1.0  +16.72/-7.27   m1.25 +21.00/-9.03   m1.5 +25.30/-10.77
+#     m1.75 +33.50/-12.48  m2.0  +38.56/-14.17
+# 1. The recorded adoption figure for 1.5x (+19.98%/-10.40%) was wrong; it is +25.30%/-10.77%.
+#    The rescale happened to match at 1.25x, which is why the error went unnoticed.
+# 2. VAL PnL is MONOTONE INCREASING in m and VAL MDD never reaches the -8% bar (worst -6.69 at
+#    2.0x), so the stated VAL rule degenerates to "take the largest multiplier in the grid" and
+#    correctly applied it selects 2.0x, NOT 1.5x.
+# 3. 2.0x then FAILS the OOS gate (MDD -14.17 < -12.4), so a correct execution of the stated rule
+#    REJECTS the multiplier extension and falls back to 1.0.
+# 1.5x does pass all three OOS gates on its own numbers, but selecting it for that reason is
+# OOS cherry-picking, which the rule forbids. The value below is therefore left UNCHANGED pending
+# an explicit decision -- changing live sizing is not a bookkeeping fix.
+# Report: docs/btc_multislot_margin_multiplier_provenance_20260808.md
 MARGIN_MULT = float(os.getenv("BTC_MULTISLOT_SHADOW_MARGIN_MULT", "1.5"))
 COST_MULT = 3.0
-STATE_PATH = ROOT / "data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807.json"
-LEDGER_PATH = ROOT / "data/ensemble/omega4_6_1_btc_multislot_shadow_ledger_20260807.csv"
+
+# 2026-08-08: optional czz_trend regime SIZING overlay, DEFAULT OFF so the running shadow is
+# byte-identical unless the env var is set. Adopted as a risk overlay in
+# data/research/btc_regime_sizing_risk_overlay_frozen_20260808.json: multiply the sidecar
+# margin_fraction by a fixed multiplier from the causal 4% directional-change wave direction at
+# the entry bar (bear 0.5 / chop 1.0 / bull 1.5). Applied BEFORE the /N_SLOTS split, matching the
+# replay in scripts/eval_btc_multislot_shadow_with_regime_sizing_20260808.py (OOS gated
+# +34.71%/-9.24% vs the no-overlay +25.30%/-10.77%). The regime is computed on the 7000-bar
+# primary buffer; a convergence check on the historical panel showed the last-bar czz4 state
+# matches the full-history state 100% of the time from 4000 bars onward, so the buffer is ample.
+REGIME_OVERLAY = os.getenv("BTC_MULTISLOT_SHADOW_REGIME_OVERLAY", "0") == "1"
+REGIME_THETA = float(os.getenv("BTC_MULTISLOT_SHADOW_REGIME_THETA", "0.04"))
+REGIME_MULT = {1: 1.5, 0: 1.0, -1: 0.5}  # causal_zigzag direction -> margin multiplier
+# a suffix keeps the overlay variant's state/ledger separate from the baseline shadow's
+_SUFFIX = os.getenv("BTC_MULTISLOT_SHADOW_SUFFIX", "")
+STATE_PATH = ROOT / f"data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807{_SUFFIX}.json"
+LEDGER_PATH = ROOT / f"data/ensemble/omega4_6_1_btc_multislot_shadow_ledger_20260807{_SUFFIX}.csv"
 KEEP_BARS = 7000
 MODEL_BARS = 600  # in-bot shadow convention (warmup NaNs sit further back in the 7000-bar buffer)
 
 LEDGER_COLS = ["slot", "side", "entry_timestamp", "exit_timestamp", "entry_price", "exit_price",
                "raw_exit_price_move", "mfe", "mae", "margin_fraction", "leverage", "notional",
-               "take_profit", "stop_loss", "reason", "exit_prob", "trade_return_net", "hold_bars"]
+               "take_profit", "stop_loss", "reason", "exit_prob", "trade_return_net", "hold_bars",
+               "regime_dir", "regime_mult"]
 
 
 def log(msg: str) -> None:
@@ -86,7 +120,14 @@ def save_state(state: dict) -> None:
 
 def append_ledger(row: dict) -> None:
     header = not LEDGER_PATH.exists()
-    pd.DataFrame([row])[LEDGER_COLS].to_csv(LEDGER_PATH, mode="a", header=header, index=False)
+    cols = LEDGER_COLS
+    if not header:
+        # an existing ledger may predate a column addition; append in ITS column order so a
+        # headerless append can never shift values into the wrong columns
+        existing = pd.read_csv(LEDGER_PATH, nrows=0).columns.tolist()
+        if existing != LEDGER_COLS:
+            cols = existing
+    pd.DataFrame([row]).reindex(columns=cols).to_csv(LEDGER_PATH, mode="a", header=header, index=False)
 
 
 async def cycle(fetcher, fe, swing, adapter, fee_eff, slip_eff, state, buffers) -> None:
@@ -151,6 +192,7 @@ async def cycle(fetcher, fe, swing, adapter, fee_eff, slip_eff, state, buffers) 
                 "leverage": s["leverage"], "notional": n, "take_profit": s["take_profit"],
                 "stop_loss": s["stop_loss"], "reason": reason, "exit_prob": exit_prob,
                 "trade_return_net": r_net, "hold_bars": s["hold_bars"],
+                "regime_dir": s.get("regime_dir", 0), "regime_mult": s.get("regime_mult", 1.0),
             })
             log(f"EXIT slot={k} side={side} reason={reason} raw={raw_exit:+.4f} net={r_net:+.4f} hold={s['hold_bars']}")
             state["slots"][k] = None
@@ -160,16 +202,23 @@ async def cycle(fetcher, fe, swing, adapter, fee_eff, slip_eff, state, buffers) 
     if not exited and free is not None:
         dec = adapter.decide_entry(processed)
         if dec is not None:
-            margin = float(dec.margin_fraction) * MARGIN_MULT / N_SLOTS
+            regime_dir, regime_mult = 0, 1.0
+            if REGIME_OVERLAY:
+                closes = pd.to_numeric(btc["close"], errors="coerce").to_numpy(dtype=float)
+                regime_dir = int(causal_zigzag(closes, threshold=REGIME_THETA)[-1])
+                regime_mult = REGIME_MULT.get(regime_dir, 1.0)
+            margin = float(dec.margin_fraction) * MARGIN_MULT * regime_mult / N_SLOTS
             notional = margin * float(dec.leverage)
             state["slots"][free] = {
                 "side": int(dec.side), "entry_price": price, "entry_timestamp": last_bar,
                 "margin_fraction": margin, "leverage": float(dec.leverage), "notional": notional,
                 "take_profit": float(dec.take_profit), "stop_loss": float(dec.stop_loss),
                 "mfe": 0.0, "mae": 0.0, "hold_bars": 0,
+                "regime_dir": regime_dir, "regime_mult": regime_mult,
             }
             log(f"ENTRY slot={free} side={dec.side} price={price:.1f} notional={notional:.3f} "
-                f"lev={dec.leverage:.2f} tp={dec.take_profit:.4f} sl={dec.stop_loss:.4f} q={dec.quality_score:.3f}")
+                f"lev={dec.leverage:.2f} tp={dec.take_profit:.4f} sl={dec.stop_loss:.4f} "
+                f"q={dec.quality_score:.3f} regime={regime_dir} mult={regime_mult:.2f}")
 
     state["last_bar"] = last_bar
     save_state(state)
@@ -197,7 +246,9 @@ async def main() -> int:
     if len(state.get("slots", [])) != N_SLOTS:
         raise RuntimeError(f"state slot count {len(state.get('slots', []))} != N_SLOTS {N_SLOTS}")
     buffers: dict = {"eth": None, "btc": None}
-    log(f"btc_multislot_shadow START n_slots={N_SLOTS} bundle={cfg['bundle_path']}")
+    log(f"btc_multislot_shadow START n_slots={N_SLOTS} margin_mult={MARGIN_MULT} "
+        f"regime_overlay={'ON theta=' + str(REGIME_THETA) if REGIME_OVERLAY else 'OFF'} "
+        f"state={STATE_PATH.name} bundle={cfg['bundle_path']}")
 
     while True:
         try:
