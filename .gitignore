@@ -25,6 +25,12 @@ data/ensemble/reports/jm_redesign_20260810/cache/
 data/ensemble/reports/jm_redesign_20260810/sparse_cache/
 data/ensemble/supervised/eth_eval_2026_extended_20260809/*.csv
 
+# 2026-08-10: a checkpoint commit had ~5GB of training-feature CSVs and embedding
+# .npy files under data/ensemble/ that made push fail outright. Trained model
+# artifacts (.pkl) stay tracked; regenerable feature/embedding dumps do not.
+data/ensemble/**/*.csv
+data/ensemble/**/*.npy
+
 # PyTorch Lightning
 lightning_logs/
 
