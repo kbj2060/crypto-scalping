@@ -1,0 +1,79 @@
+{
+  "model_id": "eth_regime3_current_jm_jmlam4_20260809",
+  "label_mode": "balancedish_adx16_slope15_bb012",
+  "prefix_stem": "regime3_current_sensitive",
+  "feature_set": "wide24",
+  "feature_cols": [
+    "state7_trend_score",
+    "state7_trend_efficiency_48",
+    "state7_directional_return_48",
+    "state7_volatility_state",
+    "state7_sign_flip_rate_24",
+    "state7_range_compression",
+    "state7_flow_alignment",
+    "state12_log_return",
+    "state12_garman_klass_vol",
+    "state12_net_taker_ratio",
+    "state12_oi_change_rate",
+    "state12_chop_index",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "breakout_strength",
+    "mean_reversion_z",
+    "ofi_acceleration",
+    "taker_acceleration"
+  ],
+  "fit_source": "/home/llewyn/crypto-scalping/tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv",
+  "jm_lambda": 4.0,
+  "jm_k": 3,
+  "jm_temperature": 4.0,
+  "state_order_bear_chop_bull": [
+    1,
+    0,
+    2
+  ],
+  "state_mean_fwd12bar_logret": {
+    "0": 4.412437983959162e-05,
+    "1": -3.4020358173958384e-05,
+    "2": 0.0001062189471205684
+  },
+  "fit_in_sample_balanced_accuracy": 0.7947629035043745,
+  "outputs": {
+    "training_features_2024.csv": {
+      "year": "2024",
+      "eval_vs_adx_label": {
+        "rows": 105380,
+        "accuracy": 0.7577244258872652,
+        "balanced_accuracy": 0.7947629035043745,
+        "flip_rate": 0.03201776445022253
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/eth_regime3_current_hmm_jmlam4_20260809_2024_maskedname.csv"
+    },
+    "training_features_2025.csv": {
+      "year": "2025",
+      "eval_vs_adx_label": {
+        "rows": 105101,
+        "accuracy": 0.753113671611117,
+        "balanced_accuracy": 0.7703727612765353,
+        "flip_rate": 0.03390104662226451
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/eth_regime3_current_hmm_jmlam4_20260809_2025_maskedname.csv"
+    },
+    "training_features_2026_rebuilt.csv": {
+      "year": "2026",
+      "eval_vs_adx_label": {
+        "rows": 51746,
+        "accuracy": 0.7460480037104317,
+        "balanced_accuracy": 0.7842317927500556,
+        "flip_rate": 0.03074693207073147
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/eth_regime3_current_hmm_jmlam4_20260809_2026_maskedname.csv"
+    }
+  }
+}

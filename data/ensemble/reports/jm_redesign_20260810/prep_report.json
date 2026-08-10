@@ -1,0 +1,396 @@
+{
+  "panels": [
+    "jm6",
+    "jm9",
+    "jm9_perp",
+    "wide24_decorr",
+    "state12",
+    "wide24"
+  ],
+  "scalers": [
+    "robust",
+    "standard"
+  ],
+  "assets": {
+    "btc": {
+      "label_configs": {
+        "frozen": {
+          "trend_adx_min": 16.0,
+          "weak_adx_max": 12.0,
+          "slope_min": 0.00015,
+          "tight_bb_max": 0.012,
+          "prefix_stem": "regime3_current_sensitive"
+        },
+        "qmatched": {
+          "trend_adx_min": 16.051391544665407,
+          "weak_adx_max": 12.081018169399893,
+          "slope_min": 0.00012349526018159445,
+          "tight_bb_max": 0.009986017550425995,
+          "prefix_stem": "regime3_current_sensitive"
+        }
+      },
+      "label_balance": {
+        "frozen": {
+          "2024": {
+            "bull": 0.09133082877959928,
+            "bear": 0.08903498785670917,
+            "chop": 0.8196341833636915
+          },
+          "2025": {
+            "bull": 0.06107305936073059,
+            "bear": 0.06614345509893454,
+            "chop": 0.8727834855403348
+          },
+          "2026": {
+            "bull": 0.07302224616037474,
+            "bear": 0.07762490003101079,
+            "chop": 0.8493528538086145
+          }
+        },
+        "qmatched": {
+          "2024": {
+            "bull": 0.12784608378870674,
+            "bear": 0.12036088342440801,
+            "chop": 0.7517930327868853
+          },
+          "2025": {
+            "bull": 0.08860350076103501,
+            "bear": 0.09155251141552512,
+            "chop": 0.8198439878234399
+          },
+          "2026": {
+            "bull": 0.10076874112520198,
+            "bear": 0.10630171865054105,
+            "chop": 0.792929540224257
+          }
+        }
+      },
+      "panels": {
+        "jm6": {
+          "dim": 6,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864"
+          ]
+        },
+        "jm9": {
+          "dim": 9,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_sortino_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_sortino_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864",
+            "jm_sortino_hl864"
+          ]
+        },
+        "jm9_perp": {
+          "dim": 12,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_sortino_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_sortino_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864",
+            "jm_sortino_hl864",
+            "jm_funding_hl288",
+            "jm_oi_hl288",
+            "jm_taker_hl288"
+          ]
+        },
+        "wide24_decorr": {
+          "dim": 16,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index",
+            "macd_hist",
+            "bb_width_z",
+            "wick_ratio",
+            "mean_reversion_z",
+            "ofi_acceleration"
+          ]
+        },
+        "state12": {
+          "dim": 12,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_range_compression",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index"
+          ]
+        },
+        "wide24": {
+          "dim": 24,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_range_compression",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index",
+            "volatility_z",
+            "rsi",
+            "macd_hist",
+            "bb_width_z",
+            "hma_slope",
+            "wick_ratio",
+            "mtf_trend_1h",
+            "mtf_trend_4h",
+            "breakout_strength",
+            "mean_reversion_z",
+            "ofi_acceleration",
+            "taker_acceleration"
+          ]
+        }
+      },
+      "wide24_decorr_cols": [
+        "state7_trend_score",
+        "state7_trend_efficiency_48",
+        "state7_directional_return_48",
+        "state7_volatility_state",
+        "state7_sign_flip_rate_24",
+        "state7_flow_alignment",
+        "state12_log_return",
+        "state12_garman_klass_vol",
+        "state12_net_taker_ratio",
+        "state12_oi_change_rate",
+        "state12_chop_index",
+        "macd_hist",
+        "bb_width_z",
+        "wick_ratio",
+        "mean_reversion_z",
+        "ofi_acceleration"
+      ]
+    },
+    "eth": {
+      "label_configs": {
+        "frozen": {
+          "trend_adx_min": 16.0,
+          "weak_adx_max": 12.0,
+          "slope_min": 0.00015,
+          "tight_bb_max": 0.012,
+          "prefix_stem": "regime3_current_sensitive"
+        },
+        "qmatched": {
+          "trend_adx_min": 16.000375589168595,
+          "weak_adx_max": 12.00149437582658,
+          "slope_min": 0.00014999957983445042,
+          "tight_bb_max": 0.011999854061251243,
+          "prefix_stem": "regime3_current_sensitive"
+        }
+      },
+      "label_balance": {
+        "frozen": {
+          "2024": {
+            "bull": 0.12355285632947428,
+            "bear": 0.1242930347314481,
+            "chop": 0.7521541089390776
+          },
+          "2025": {
+            "bull": 0.15438482983035365,
+            "bear": 0.15479396009552715,
+            "chop": 0.6908212100741192
+          },
+          "2026": {
+            "bull": 0.11452092915394427,
+            "bear": 0.12976848452054265,
+            "chop": 0.7557105863255131
+          }
+        },
+        "qmatched": {
+          "2024": {
+            "bull": 0.12355285632947428,
+            "bear": 0.1242930347314481,
+            "chop": 0.7521541089390776
+          },
+          "2025": {
+            "bull": 0.15438482983035365,
+            "bear": 0.15479396009552715,
+            "chop": 0.6908212100741192
+          },
+          "2026": {
+            "bull": 0.11452092915394427,
+            "bear": 0.12976848452054265,
+            "chop": 0.7557105863255131
+          }
+        }
+      },
+      "panels": {
+        "jm6": {
+          "dim": 6,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864"
+          ]
+        },
+        "jm9": {
+          "dim": 9,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_sortino_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_sortino_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864",
+            "jm_sortino_hl864"
+          ]
+        },
+        "jm9_perp": {
+          "dim": 12,
+          "cols": [
+            "jm_ret_hl72",
+            "jm_dd_hl72",
+            "jm_sortino_hl72",
+            "jm_ret_hl288",
+            "jm_dd_hl288",
+            "jm_sortino_hl288",
+            "jm_ret_hl864",
+            "jm_dd_hl864",
+            "jm_sortino_hl864",
+            "jm_funding_hl288",
+            "jm_oi_hl288",
+            "jm_taker_hl288"
+          ]
+        },
+        "wide24_decorr": {
+          "dim": 16,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index",
+            "macd_hist",
+            "bb_width_z",
+            "wick_ratio",
+            "mean_reversion_z",
+            "ofi_acceleration"
+          ]
+        },
+        "state12": {
+          "dim": 12,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_range_compression",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index"
+          ]
+        },
+        "wide24": {
+          "dim": 24,
+          "cols": [
+            "state7_trend_score",
+            "state7_trend_efficiency_48",
+            "state7_directional_return_48",
+            "state7_volatility_state",
+            "state7_sign_flip_rate_24",
+            "state7_range_compression",
+            "state7_flow_alignment",
+            "state12_log_return",
+            "state12_garman_klass_vol",
+            "state12_net_taker_ratio",
+            "state12_oi_change_rate",
+            "state12_chop_index",
+            "volatility_z",
+            "rsi",
+            "macd_hist",
+            "bb_width_z",
+            "hma_slope",
+            "wick_ratio",
+            "mtf_trend_1h",
+            "mtf_trend_4h",
+            "breakout_strength",
+            "mean_reversion_z",
+            "ofi_acceleration",
+            "taker_acceleration"
+          ]
+        }
+      },
+      "wide24_decorr_cols": [
+        "state7_trend_score",
+        "state7_trend_efficiency_48",
+        "state7_directional_return_48",
+        "state7_volatility_state",
+        "state7_sign_flip_rate_24",
+        "state7_flow_alignment",
+        "state12_log_return",
+        "state12_garman_klass_vol",
+        "state12_net_taker_ratio",
+        "state12_oi_change_rate",
+        "state12_chop_index",
+        "macd_hist",
+        "bb_width_z",
+        "wick_ratio",
+        "mean_reversion_z",
+        "ofi_acceleration"
+      ]
+    }
+  },
+  "label_reference_asset": "eth",
+  "label_reference_quantiles": {
+    "trend_adx_min": 0.040557980641487947,
+    "weak_adx_max": 0.0035775289428734104,
+    "slope_min": 0.4791895995445056,
+    "tight_bb_max": 0.7143480736382616
+  },
+  "label_frozen_config": {
+    "trend_adx_min": 16.0,
+    "weak_adx_max": 12.0,
+    "slope_min": 0.00015,
+    "tight_bb_max": 0.012,
+    "prefix_stem": "regime3_current_sensitive"
+  }
+}

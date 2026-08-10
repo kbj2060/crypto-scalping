@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev8-regime-feature-filter-20260808",
+  "hypothesis": "Rev6 established that trend-regime conditioning stabilizes SOL's feature-to-direction signs (bull 85% / bear 60% train-to-VAL sign agreement vs 0% unconditional) but its all-feature per-regime experts still lost (-29.5% VAL): with only ~19-21k train rows per trend regime and 126 features, the experts drown the few sign-stable relationships in regime-noise. Hypothesis: restricting each regime's expert to that regime's own top-K oracle-matched features (per-regime univariate direction AUC, selected on TRAIN only) raises signal-to-noise enough to clear costs -- the same filtering that WORSENED the unconditional model (rev 2026-08-08 feature analysis: -32..-54%) should HELP within regime, because within regime the selected signs are stable rather than inverted.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "The unconditional top-20-filtered LGBM was far worse than the full-feature control precisely because unconditional top-train features invert on VAL (0/20 sign agreement) -- filtering concentrated the inversion damage. Within-regime the same measurement shows 85%/60% sign agreement (bull/bear), so the identical filtering operation acts on stable relationships instead; rev6 Stage M never tested filtering. This is the one unexplored cell of the {conditioning} x {filtering} design matrix.",
+    "retest_design": "Regime = rev6's frozen D2 detector (288-bar return +/-4%, training-free causal). Stage 1 (analysis, train-only): per-regime feature distributions (pairwise KS separation) and per-regime univariate direction AUC; per-regime top-K feature lists frozen from TRAIN only, K in {10, 20} pre-registered. Stage 2: per-regime LightGBM 3-class experts trained on that regime's top-K features only (purged train, same hyperparameters as every prior LGBM in this line); chop expert included but its regime showed 35% sign stability -- a pre-registered variant additionally forces CASH in chop (no chop expert), giving 2 K-values x 2 chop-policies x 6 entry-rule thresholds = 24 VAL configs. VAL selection requires PnL > 0, >= 15 trades, >= 3 of 4 VAL months positive, and > the unconditional LGBM control (-6.90%); ONE OOS read of the single selected config; adoption requires OOS PnL > 0. Failure closes the {regime x filtering} cell.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "D2 trend-regime router + per-regime LightGBM experts restricted to per-regime train-selected top-K oracle-matched features (K in {10,20}), optional forced-CASH-in-chop",
+    "seeds": ["903174"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "best of the 24 pre-registered configs must have VAL PnL > 0, >=15 trades, >=3/4 VAL months positive, and beat the unconditional control (-6.90%); single OOS read; adoption requires OOS PnL > 0"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

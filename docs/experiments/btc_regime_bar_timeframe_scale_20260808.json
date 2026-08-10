@@ -1,0 +1,55 @@
+{
+  "name": "btc_regime_bar_timeframe_scale",
+  "date": "2026-08-08",
+  "status": "Stage 0 COMPLETE — gate NOT passed (0 resolvable coarse cells match or beat 5m). Accuracy objective closed; one secondary timeliness finding recorded below.",
+  "stage_0_outcome": {
+    "proceed_to_modelling": false,
+    "coarse_cells_matching_or_beating_5m": [],
+    "primary_finding": "The cost of coarsening is PURE RESOLUTION LOSS and it shrinks monotonically as the oracle wave lengthens relative to the bar — theta=0.5%: 15m/30m/1h are -5.0/-8.4/-11.0pp vs 5m; theta=4%: -1.9/-1.6/-0.8pp. The user's mechanism intuition (bar scale must pair with oracle scale) is CONFIRMED, but the penalty never crosses zero: coarse bars never actually help accuracy at any theta.",
+    "secondary_finding_not_selected_on": "DETECTION LAG INVERTS at theta=4%: 5m 985 min, 15m 892.5, 30m 812.5, 1h 847.5 — every coarse grid detects 4% turns EARLIER than 5m, best at 30m (-17.5%). Mechanism: the causal zigzag's running extreme is set by 5m noise spikes, so confirming a reversal away from that extreme takes longer; coarser bars have less extreme extremes. This is a TIMELINESS win, not an accuracy win, and the 4% consumer (the adopted czz_trend sizing overlay, which currently reads czz4 on 5m) is a case where entering the bear multiplier sooner may matter more than total agreement.",
+    "single_non_monotonicity_flagged": "at theta=4% the 1h penalty (-0.8) is smaller than 15m (-1.9) and 30m (-1.6). One non-monotone cell out of twenty; treated as noise unless a follow-up reproduces it, not as a finding.",
+    "results": "tmp/btc_regime_bar_timeframe_20260808/stage0.json"
+  },
+  "status_note_original": "PRE-REGISTERED — Stage 0 diagnostic (no learning, nothing spent)",
+  "hypothesis_as_stated_by_user": "regime classification may fit better on 30m or 1h bars than on 5m bars",
+
+  "reframing_before_any_run": {
+    "why_bar_size_alone_is_not_the_variable": "The zigzag oracle is defined on the PRICE PATH by a threshold theta, not by bar count. Changing bar size changes three things at once: (1) RESOLUTION — a detector cannot turn faster than one bar; (2) FEATURE NOISE — coarser bars average out 5m microstructure, which is where the user's intuition has real force; (3) ROW COUNT — 1h is 1/12 of 5m. So bar scale only pays when it is PAIRED with an oracle scale.",
+    "resolution_arithmetic_that_decides_it": "At theta=0.5% the oracle's median wave is 16 bars at 5m = 80 minutes. On 1h bars that is 1.3 bars — a 1h detector literally cannot represent a 0.5% wave. Coarse bars are therefore WRONG for the two frozen theta=0.5% detectors. At theta=4% the median wave is ~692 bars at 5m (~2.4 days) = ~58 bars at 1h, which is a normal sequence length with horizon-matched features.",
+    "where_the_value_actually_is": "The live multi-day-hold models decide at 3-4% scale, and the ADOPTED czz_trend sizing overlay consumes czz4 — a NO-LEARNING causal 4% zigzag. There is no learned detector at 4% anywhere in the project. That is the gap this line targets.",
+    "honest_counter_argument": "Supervised 4%-wave direction has already failed in 4 independent frames (entry labels, MoE routing, oracle-wave classifier LGBM 61.7% VAL vs czz4's no-learning 66.4%, 1D-CNN VAL 49.7%). ALL FOUR WERE ON 5m BARS, so the bar-timeframe axis is genuinely untried — but the confirmation tax is structural (you cannot know a 4% turn before price has moved 4%) and coarser bars do not repeal it. Coarser bars can only fix feature noise, not the tax. Stage 0 exists to find out whether that is enough before any model is trained."
+  },
+
+  "stage_0": {
+    "kind": "no-learning measurement; a definitional causal zigzag has no fitted parameter, so nothing is spent and full/VAL/OOS may all be reported",
+    "grid": {"bar_sizes": ["5m", "15m", "30m", "1h"], "theta_pct": [0.5, 1.0, 2.0, 3.0, 4.0]},
+    "reference_oracle": "zigzag_oracle on the 5m close at each theta — the finest available resolution of the true price path, so every bar size is scored against the same reference",
+    "resampling": "5m -> coarser by right-closed/right-labelled aggregation, so the bar stamped T closes at T and uses only bars <= T. The coarse detector state is forward-filled onto the 5m grid (state at 5m bar t = most recent coarse state at or before t). Both steps are causal.",
+    "dual_scoring_required": {
+      "at_5m_resolution": "the live-relevant number — decisions happen on 5m bars, and a 1h detector is correctly penalised on the 11 intermediate bars where it cannot update",
+      "at_native_resolution": "fair to the detector itself; reporting only one of these would be a rigged comparison in whichever direction was chosen"
+    },
+    "headline_diagnostic": "bars_per_oracle_wave = oracle median wave length expressed in bars OF THAT SIZE. Cells below ~8 are unresolvable by construction and are excluded from any later modelling regardless of their agreement score.",
+    "also_reported": ["coverage", "median run (bars AND minutes)", "detection lag (bars AND minutes)", "flips"]
+  },
+
+  "floors_must_be_re_derived_per_bar_size": {
+    "problem": "the frozen detectors' median-run floor of 8 bars is a 5m-bar quantity (40 minutes). Applying '8 bars' to 1h data silently multiplies the floor by 12.",
+    "rule": "any later stage states its run floor in TIME or as a fraction of that cell's own oracle median wave — derived from principle, not carried over as a raw bar count. This is the same move the timeliness-first contract used."
+  },
+
+  "what_stage_0_decides": {
+    "proceed_to_modelling_only_if": "at least one (bar_size, theta) cell with bars_per_oracle_wave >= 8 shows the coarse-bar definitional detector scoring at or above the 5m definitional detector at the SAME theta, measured at 5m resolution. That would mean coarse bars genuinely reduce noise rather than just discard information.",
+    "close_the_line_if": "coarse bars never beat 5m at equal theta at 5m resolution — that would mean the bar-size axis only ever costs resolution, and the user's hypothesis is answered negatively without training anything."
+  },
+
+  "scope": {
+    "this_is_a_detector_line": true,
+    "note": "A better 4% detector has ONE identified consumer: the adopted czz_trend sizing overlay, which currently reads a no-learning czz4. It does NOT reopen the regime-conditioned ENTRY axis, which is closed at three layers (detector, gate form, feature selection) and where detector accuracy was proven not to be the binding constraint (61.3 -> 68.4% with zero entry-PnL movement)."
+  },
+
+  "artifacts": {
+    "script": "scripts/stage0_btc_regime_bar_timeframe_scale_20260808.py",
+    "results": "tmp/btc_regime_bar_timeframe_20260808/stage0.json"
+  }
+}

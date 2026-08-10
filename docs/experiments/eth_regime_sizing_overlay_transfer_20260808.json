@@ -1,0 +1,54 @@
+{
+  "name": "eth_regime_sizing_overlay_transfer_20260808",
+  "created": "2026-08-08 (written before any ETH overlay metric was computed)",
+  "asset": "ETHUSDT",
+  "line": "TRANSFER test of the BTC-adopted regime SIZING overlay onto the live ETH Omega4.6.1 greedy-router stack, judged on RISK",
+
+  "why": "Regimes failed on the DIRECTION axis on all three assets (BTC entry line OOS -19.5%; SOL rev6/rev8; and the 2026-08-08 ETH differential diagnostic showed ETH's regime differential also dies train->OOS, 0.48-0.52 vs random 0.55-0.65). The one lever that survived is EXPOSURE: on BTC, czz_trend (bear 0.5 / chop 1.0 / bull 1.5 on the sidecar margin_fraction) cut full-period MDD -10.34 -> -6.63 and was adopted as a drawdown lever, explicitly NOT as a PnL claim. This contract asks whether that map TRANSFERS to ETH.",
+
+  "why_this_is_a_clean_test": "The map has literal multipliers and NO fitted parameters, and it was selected on BTC, not on ETH. Applying it unchanged to ETH is therefore a genuine out-of-sample transfer test of the rule, not a new fit. Nothing is trained, tuned, or re-selected here.",
+
+  "honest_constraints": [
+    "The ETH greedy-router replay window is the extended OOS 2026-01-01..2026-06-30 only (the component prediction CSVs exist for that window), giving 37 no-gate trades. That is thin; a single point estimate of MDD is noise, which is why consistency + a paired bootstrap are the primary evidence.",
+    "This 2026 window is NOT virgin for ETH -- the Omega4.6.1 lineage has read it repeatedly. The frozen-rule protocol is used for exactly this reason: the rule cannot overfit a window it was never fitted on, so multi-period consistency is the right referee.",
+    "Prior art warns against assuming sizing formulas transfer between assets: project-sol-btc-chop-softsize-transfer-20260720 found ETH's chop soft-sizing formula did NOT transfer to SOL/BTC. This test runs in the opposite direction and may fail the same way.",
+    "The overlay must be evaluated by RE-RUNNING the replay, never by rescaling a saved ledger: ETH's exit head consumes notional and leverage in pos_values (replay_omega4_6_1_greedy_router_20260706.py), so changing margin changes exits and the ledger itself. This is the BTC provenance bug and it is avoided by construction here.",
+    "The BTC result differed by slot count: on the single-slot parent OOS PnL got WORSE (+7.17 vs +10.76) and only MDD improved; both axes improved only on the N=3 shadow. ETH live is single-slot, so the BTC-consistent expectation is MDD improvement with PnL flat-to-worse."
+  ],
+
+  "arms": {
+    "identity": "baseline, no overlay -- REGRESSION GATE: must reproduce the recorded live-config numbers (+77.11% / -15.48% / 37 trades no-gate) or the run is void",
+    "czz_trend": "THE ONLY ADOPTION CANDIDATE. Frozen BTC-adopted map: margin_fraction *= {bear 0.5, chop 1.0, bull 1.5} looked up from causal 4% directional-change regime at the ENTRY-SIGNAL bar",
+    "czz_contra": "DIAGNOSTIC ONLY, never adoptable. Inverted map {bear 1.5, chop 1.0, bull 0.5}. Falsification probe: if the inverted map also improves MDD, the improvement is not the regime map doing work (a pure exposure-variance artifact) and czz_trend must NOT be adopted regardless of its own numbers."
+  },
+
+  "sizing_contract": "notional = margin_fraction x leverage; TP/SL remain price-move targets and are untouched. Total budget scale, entries, exits, router priority and the duration-gate convention are all unchanged.",
+
+  "metrics": {
+    "primary": "max drawdown of the no-gate equity path (less negative is better)",
+    "secondary": "Calmar = total PnL / |MDD|",
+    "guardrail": "total PnL retention versus identity",
+    "also_reported": ["per-month PnL and MDD", "worst-5-trade sum", "trade count", "regime occupancy at entry bars", "mean applied multiplier"]
+  },
+
+  "evaluation_protocol": {
+    "periods": "six calendar months, 2026-01 .. 2026-06",
+    "bootstrap": "PAIRED time-block bootstrap (the BTC lesson: arms share entries and differ only in sizing, so independent resamples have no power). 21-day blocks, B=2000, every arm evaluated on the SAME block draw; reports P(map MDD better than identity)",
+    "note": "the bootstrap measures how much of the observed risk difference survives resampling; it does not manufacture new out-of-sample evidence"
+  },
+
+  "adoption_gates": {
+    "gate_0_regression": "identity reproduces the recorded live-config numbers within 0.5pp PnL and 0.5pp MDD",
+    "gate_1_mdd": "czz_trend full-period MDD strictly better than identity",
+    "gate_2_consistency": "czz_trend monthly MDD better than identity in >= 4 of 6 months",
+    "gate_3_bootstrap": "paired P(czz_trend MDD better than identity) >= 0.70",
+    "gate_4_pnl_guardrail": "czz_trend total PnL >= 60% of identity's total PnL (it is a risk lever, not a PnL claim -- but it may not gut the edge)",
+    "gate_5_not_by_starvation": "trade count within 20% of identity's",
+    "gate_6_falsification": "czz_contra must NOT simultaneously satisfy gate_1 and gate_3",
+    "all_must_pass": true
+  },
+
+  "if_it_passes": "record as a RESEARCH-GRADE drawdown lever for ETH only. No live wiring in this contract: the ETH live stack is untouched, and any wiring needs the usual promotion audit plus a shadow record, exactly as BTC's did.",
+  "if_it_fails": "record the transfer as failed and close the ETH branch of the sizing axis; the BTC adoption is unaffected.",
+  "no_retuning": "no multiplier search, no threshold search, no map search after the numbers are seen. One pass."
+}

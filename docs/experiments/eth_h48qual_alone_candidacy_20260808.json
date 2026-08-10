@@ -1,0 +1,61 @@
+{
+  "name": "eth_h48qual_alone_candidacy_20260808",
+  "created": "2026-08-08, written BEFORE any VAL or tail number for this comparison was computed",
+  "asset": "ETHUSDT",
+  "question": "Should ETH's live config become h48qual ALONE instead of the h48qual>zig075 greedy router?",
+
+  "prior_evidence_stated_up_front": {
+    "2026-08-01_gated_oos_2026H1": {
+      "combined_router": "+82.53% / -15.48% / 31tr",
+      "h48qual_only": "+28.22% / -15.43% / 21tr",
+      "verdict_then": "h48qual-only lost decisively; the memory closed the question with 'do not re-propose without new evidence'"
+    },
+    "2026-08-08_no_gate_oos_2026H1": {
+      "router": "+77.11% / -15.48% / 37tr / Calmar 4.98",
+      "h48qual_only": "+58.76% / -11.75% / 25tr / Calmar 5.00",
+      "what_is_new": "the earlier test was duration-GATED. ETH live runs FINAL_GOVERNOR_OMEGA4_6_1_ETH_DURATION_GATE_OFF=True, so the NO-GATE basis is the live-relevant one, and on that basis h48qual-only ties on Calmar with a materially better drawdown and is the only arm positive in both quarters. That is the new evidence justifying one more look."
+    }
+  },
+
+  "window_honesty": {
+    "oos_2026-01-01..06-30": "CONTAMINATED -- used by both prior comparisons. Descriptive only; cannot decide anything.",
+    "val_2025-10-01..12-31": "never used for THIS comparison, but the components' bundles/sidecars/scale-map were SELECTED on it. Therefore usable only as a FALSIFICATION test: a win here is weak evidence, a loss here is strong evidence against.",
+    "tail_2026-07-01..07-12": "genuinely untouched by both prior comparisons (both stopped at 06-30), but only ~12 days of predictions -- expect 1-3 trades. Reported, never decisive.",
+    "forward_live_shadow": "the only clean referee that can justify a live swap, and it does not exist yet."
+  },
+
+  "metric_basis": {
+    "primary": "NO-GATE (matches the live wiring, gate is off)",
+    "secondary": "duration-gated, reported for comparability with the 2026-08-01 test",
+    "metrics": ["PnL", "MDD", "Calmar", "trades", "win rate", "per-month PnL"]
+  },
+
+  "pre_registered_gates": {
+    "G1_falsification_on_VAL": {
+      "rule": "h48qual_only Calmar >= 0.70 x router Calmar AND h48qual_only MDD >= router MDD - 3.0pp, on the NO-GATE basis",
+      "rationale": "VAL is where h48qual's own components were fit. If it cannot stay within striking distance of the router there, the OOS result was a window artifact and the line closes.",
+      "on_fail": "CLOSE the line. Do not re-propose h48qual-alone for ETH without a genuinely new model or new data."
+    },
+    "G2_tail_report_only": {
+      "rule": "no gate -- the 2026-07-01..07-12 numbers are reported for completeness and explicitly cannot pass or fail the candidate",
+      "rationale": "1-3 trades cannot decide anything; recording it prevents it from being quietly used later as if it could"
+    },
+    "G3_outcome_ceiling": {
+      "rule": "the BEST outcome available from this contract is 'promote to a parallel ETH SHADOW', never a live swap",
+      "rationale": "no window in this dataset can justify replacing a live config for this question; only a forward live record can. This ceiling is fixed now so a good VAL number cannot be talked into a swap later."
+    }
+  },
+
+  "if_G1_passes": "stand up h48qual-alone as a second ETH shadow process alongside the live router (same pattern as the BTC multislot+overlay shadow), and let the live records decide. Minimum 3 months of shadow before any swap discussion.",
+  "if_G1_fails": "close the line and record it; the 2026-08-01 conclusion stands.",
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "method": "three arms through the same imported greedy_replay; equity compounds inside each replay so component removal is a true counterfactual"
+  },
+
+  "script": "scripts/validate_eth_h48qual_alone_contract_20260808.py"
+}

@@ -1,0 +1,102 @@
+{
+  "name": "btc_regime_classifier_evaluation_framework",
+  "date": "2026-08-09",
+  "status": "PRE-REGISTERED — evaluation FRAMEWORK. Individual runs instantiate it and inherit its gates verbatim.",
+  "supersedes_the_scoring_of": [
+    "docs/experiments/btc_regime_ps_label_learnability_g3_20260808.json",
+    "docs/experiments/btc_regime_ps_label_learnability_g3b_20260808.json",
+    "docs/experiments/btc_regime_bocpd_detector_g4_20260808.json"
+  ],
+
+  "why_this_exists": {
+    "the_error_being_corrected": "G3/G3b/G4 all made TRADED RETURN the headline gate for a regime classifier. That evaluated a description-defined object with an entry-model criterion. The same arc had already established that regime labels are description-defined and therefore cannot be scored by PnL.",
+    "the_measurement_that_proves_it": "G3b OOS: the learned detector (agree 61.8, 47-bar runs, 357 switches, traded -55.66%) versus the no-learning czz1.2 (agree 60.5, 46-bar runs, 315 switches, traded +128.39%). At MATCHED persistence and MATCHED turnover, 1.3pp more label agreement came with 184 percentage points LESS traded return. Agreement and PnL are close to unrelated here, in both directions.",
+    "the_mechanism": "agreement weights every bar equally; PnL weights bars by |return|. A price-based rule concentrates its errors on small moves by construction; a learned probability model carries no such alignment and lands errors on large moves.",
+    "consequence": "PnL is removed from regime-classifier scoring entirely. It is neither a gate nor a tiebreak nor a reported headline."
+  },
+
+  "scope": {
+    "evaluates": "a CAUSAL regime classifier against a regime LABEL, on descriptive grounds only",
+    "does_not_evaluate": "whether the regime is tradeable, what it should be sized at, or whether any downstream consumer benefits. Those are separate contracts with their own gates.",
+    "no_pnl_anywhere": "no traded return, no MDD, no sizing, no cost model appears in any gate or headline of this framework."
+  },
+
+  "axis_1_descriptive_validity": {
+    "question": "Do the states differ in measurable statistical properties, and does the difference PERSIST out of sample?",
+    "split_into_two_because_they_fail_differently": {
+      "1a_label_validity": "run the battery on the LABEL itself. If the label's own states are not distinguishable, no classifier can fix that and axes 2-3 would be measuring fidelity to a meaningless target. 1a is therefore a PRECONDITION, checked before any classifier is trained.",
+      "1b_detector_preservation": "run the same battery on the CLASSIFIER's states. A detector can have high bar agreement yet destroy the separation — e.g. by lagging enough that it assigns the calm tail of a move to the state that is supposed to be volatile. That failure is invisible to agreement and is exactly what the 2026-08-08 czz4 lag-artifact test found."
+    },
+    "properties_measured_none_of_which_are_returns": [
+      "realized volatility (per-state variance of log returns)",
+      "return autocorrelation at lags 1,6,12 (trend vs mean-reverting character)",
+      "absolute-move magnitude (median |log return|)",
+      "jump intensity (share of bars beyond 3x trailing sigma) and excess kurtosis",
+      "trade intensity / volume z (activity regime, independent of direction)"
+    ],
+    "statistics": {
+      "per_property": "two-sample test between the states (Brown-Forsythe for scale, Welch t for location, permutation for the rest) reported with an EFFECT SIZE (Cohen's d or variance ratio), never a p-value alone",
+      "null": "PERMUTE THE LABELLING, not the blocks — reassign the same multiset of state labels to blocks at random (circular shift preserves run structure and occupancy, destroys alignment), R>=200. The observed effect must exceed the null's 95th percentile.",
+      "window_discipline": "every effect is reported SEPARATELY for train, VAL and OOS and never pooled. A pooled number hid a 67x reversal on 2026-08-08 (variance ratio 0.097 on VAL vs 6.49 on OOS, pooled to 0.881).",
+      "sign_persistence": "the effect's SIGN must be identical across train, VAL and OOS. A property whose sign flips between windows is not a regime property."
+    },
+    "gate": "at least one property must (i) exceed the permutation null's 95th percentile on OOS, (ii) keep its sign across all three windows, and (iii) show a non-trivial effect size. Properties that pass are named in the verdict; a classifier passing on volume alone is not the same claim as one passing on volatility."
+  },
+
+  "axis_2_turning_point_timing": {
+    "question": "Does the classifier find the label's turning points, how late, and how many does it invent?",
+    "why_not_per_bar_agreement": "per-bar agreement is dominated by long stable middles. A detector can score well while missing every turn — the 2026-08-08 early-wave analysis measured exactly that shape (first-quintile agreement 30.8% against fifth-quintile 90%). Turning points are events, so they get an EVENT-level metric.",
+    "metrics": {
+      "detection_lag_distribution": "bars from each label turning point until the classifier shows the new state — median AND interquartile range, not the median alone",
+      "hit_rate_recall": "share of label turning points detected within a horizon of one quarter of the label's own median run",
+      "false_alarm_rate_precision": "classifier switches that do not correspond to any label turning point within the same horizon",
+      "event_f1": "harmonic mean of the two, the single comparable number",
+      "lag_profile": "agreement as a function of applied shift, to catch a PHASE-SHIFT ARTIFACT — on 2026-08-08 an exp-weighted variant posted an eye-catching early-wave number whose lag profile peaked at NEGATIVE lag with only 53.2% agreement, i.e. shifted early into noise rather than leading."
+    },
+    "gate": "event F1 must exceed the best VAL-eligible no-learning baseline's event F1, and median detection lag must not be worse than that baseline's."
+  },
+
+  "axis_3_block_structure": {
+    "question": "Does the classifier reproduce the label's block structure, or merely its average?",
+    "why_the_median_is_not_enough": "a detector with the correct MEAN run length but the wrong distribution shape — all runs near-identical versus a heavy tail — is not reproducing the structure. Median run alone cannot see this.",
+    "metrics": {
+      "run_length_distribution": "two-sample Kolmogorov-Smirnov (and Anderson-Darling) between the classifier's and the label's run-length distributions, per state",
+      "occupancy_match": "per-state occupancy difference, reported per state so a chop-heavy label is not scored as if it were balanced",
+      "switch_count_ratio": "classifier switches divided by label turning points; 1.0 is structural parity, >>1 is confetti, <<1 is over-smoothing",
+      "coverage": "always reported ALONGSIDE agreement, never folded into it — a candidate reaching high agreement by abstaining on the hard half is a known trap in this project (70.5% at 33.9% coverage on 2026-08-08)"
+    },
+    "gate": "run-length KS statistic must be SMALLER than the best VAL-eligible no-learning baseline's, and the switch-count ratio must lie in [0.5, 2.0]."
+  },
+
+  "decision_rule": {
+    "hierarchy": "Axis 1 is a GATE; axes 2 and 3 are the COMPARISON among candidates that clear it. Validity first, then fidelity. A classifier that reproduces a label whose states are statistically indistinguishable has reproduced nothing.",
+    "order": [
+      "1a on the label — if it fails, the LABEL is rejected and no classifier is trained",
+      "1b on each candidate — a candidate that destroys the label's separation is rejected regardless of axes 2-3",
+      "axes 2 and 3 rank the survivors; both must beat the no-learning baseline"
+    ],
+    "adopt": "1a passed AND 1b passed AND axis-2 gate AND axis-3 gate, on a single OOS read"
+  },
+
+  "cross_cutting_requirements_inherited_from_the_2026_08_08_arc": [
+    "a NO-LEARNING definitional baseline (the causal-zigzag family) is mandatory on every axis; every learned candidate in this project that failed to beat one turned out to be worthless",
+    "a Stage-0 regression gate inside the script: rebuild the frozen incumbent on identical rows/splits and HALT unless it reproduces",
+    "state the label's theta / scale with every number; a single-scale scorecard is not evidence",
+    "floors are derived from the LABEL being evaluated, never carried over from another contract",
+    "EVALUATE A GATE IN THE SAME STAGE THAT SELECTS THE KNOB THAT GATE MEASURES — violated twice on 2026-08-08 (transformer, then G3), where a persistence floor was applied at an inherited lambda and rejected families before the persistence knob was ever tuned",
+    "early-stop deep models on an INNER split carved from TRAIN, never the project VAL window",
+    "exactly ONE OOS read per contract"
+  ],
+
+  "explicitly_reported_but_never_selected_on": [
+    "traded return, for continuity with the earlier contracts and so the agreement-vs-PnL divergence stays visible — clearly marked as NOT a gate",
+    "the candidate that would have won with no run floor, so the floor's cost is visible rather than hidden"
+  ],
+
+  "known_hard_bar": "Axis 1 is not a formality. The one property already tested this way (variance ratio on czz4) FAILED with a 67x VAL/OOS reversal, and the regime differential died train->OOS on all three assets. A label passing axis 1 would be the first in this project to do so.",
+
+  "artifacts": {
+    "framework_doc": "docs/experiments/btc_regime_classifier_evaluation_framework_20260809.json",
+    "first_instantiation": "to be named by the run that adopts it"
+  }
+}

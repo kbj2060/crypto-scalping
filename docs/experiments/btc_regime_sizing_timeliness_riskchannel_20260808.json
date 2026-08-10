@@ -1,0 +1,57 @@
+{
+  "name": "btc_regime_sizing_timeliness_riskchannel",
+  "date": "2026-08-08",
+  "status": "Stage R COMPLETE — gate NOT passed (0/8 OOS cells). Lag-artifact hypothesis REFUTED. Overlay closes for a mechanism reason; bar-timeframe line closes with it. No PnL read spent.",
+  "stage_R_outcome": {
+    "reconciliation_with_the_downgrade_audit": "Recomputed czz4 is IDENTICAL to the stored states (counts 130776/97197/741 match exactly; the apparent mismatch was encoding, stored {0,1,2} vs causal_zigzag {-1,0,1}). Pooling VAL+OOS reproduces the audit's variance ratio to three decimals: 0.881, n=59, bear 34 / bull 25, mean bear +0.106% vs bull +1.143%.",
+    "primary_finding": "The audit's 0.881 is a POOLED number that averages two opposite behaviours. Split by window the variance ratio bear/bull is 0.097 on VAL (bear ~10x LESS volatile, Brown-Forsythe p=0.009 — SIGNIFICANT in the wrong direction) and 6.49 on OOS (bear ~6.5x MORE volatile, p=0.185 — not significant). A ~67x reversal. So the risk channel is not merely inverted, it is UNSTABLE: there is no stable risk relationship to size against in either direction.",
+    "lag_hypothesis_refuted_twice": "Earlier detection does not help and monotonically HURTS. single-slot OOS ratio 6.49 (5m) -> 6.10 (15m) -> 6.02 (30m) -> 3.89 (1h); n3 OOS 1.39 -> 1.30 -> 1.21 -> 1.06. Every coarse grid moves the ratio TOWARD 1, i.e. away from a usable risk signal. On VAL the 5m/15m/30m detectors produce identical trade labels (all 0.097), so at theta=4% detector speed barely differentiates where trades actually sit.",
+    "consequence": "The czz_trend sizing overlay has no risk mechanism at any detector speed. Combined with the effect-size downgrade (no significant mean effect, premise reverses VAL->OOS, permutation percentile backwards), the map's drawdown improvement is placement luck. The theta=3-4% learned-detector line also loses its only identified consumer.",
+    "results": "tmp/btc_regime_sizing_timeliness_20260808/stageR.json"
+  },
+  "status_note_original": "PRE-REGISTERED — Stage R (risk channel), no learning, no PnL read",
+
+  "origin": "User approved a timeliness contract to swap the czz_trend sizing overlay's input from 5m czz4 to 30m czz4, on the strength of Stage 0 finding that coarse grids detect theta=4% turns EARLIER (5m 985 min -> 30m 812.5 min, -17.5%).",
+
+  "why_the_scope_changed_before_the_first_run": {
+    "new_information": "The effect-size audit (project-btc-regime-sizing-effect-size-downgrade-20260808, scripts/audit_btc_regime_sizing_effect_size_20260808.py) DOWNGRADED the czz_trend overlay from ADOPTED to NOT-SUPPORTED: no mechanism is significant (mean p=0.33), the permutation percentile is 73.5% where the map was SELECTED vs 94.6% where it was not, the premise reverses sign VAL->OOS, and decisively the VOLATILITY CHANNEL POINTS THE WRONG WAY — variance ratio bear/bull = 0.881, i.e. bear-labelled trades are LESS volatile, so downsizing bear cannot cut drawdown through a risk channel.",
+    "consequence_for_the_approved_line": "Swapping in a FASTER detector would make a rule whose premise is refuted fire SOONER. Measuring its PnL first would be optimising a component whose measured effect is placement luck.",
+    "the_hypothesis_that_survives": "The 5m czz4 detection lag at theta=4% is 985 minutes (~16.4 h). A label that arrives 16 h late attaches 'bear' to the LATE, CALM tail of a down-wave while the volatile early part is still labelled 'bull'. So variance ratio 0.881 may itself be an ARTIFACT OF LAG rather than a fact about bear regimes. That is directly testable, and Stage 0 already measured that coarse grids cut the lag by 17.5%.",
+    "which_rule_this_follows": "The downgrade's own reusable rule #2 — 'for a RISK claim, test the risk channel'. So the risk channel is tested FIRST, before any sizing or PnL measurement."
+  },
+
+  "stage_R": {
+    "question": "Does a faster theta=4% detector flip the variance ratio bear/bull above 1?",
+    "kind": "no-learning labelling measurement on existing ledgers; no model trained, no sizing applied, no PnL read",
+    "detectors": ["czz4 on 5m (the incumbent the overlay reads)", "czz4 on 15m", "czz4 on 30m", "czz4 on 1h"],
+    "labelling": "each trade is labelled by the detector state at its ENTRY-SIGNAL bar — identical to what the overlay does — so the only thing that varies across arms is detector timeliness",
+    "ledgers": {
+      "single_slot_identity": "continuity with the audit that produced the downgrade (n=59, 41 active OOS)",
+      "n3_identity_m1.5": "3x the sample (124 gated OOS trades); small n is the downgrade's stated weakness, so the higher-power ledger is reported alongside"
+    },
+    "metrics_per_detector_per_ledger_per_split": [
+      "variance ratio bear/bull + Brown-Forsythe p (THE gate)",
+      "mean bear vs bull + Welch t + Cohen's d",
+      "bear share of negative return vs bear share of trades",
+      "bear occupancy (a detector that labels almost nothing bear can post any ratio)"
+    ]
+  },
+
+  "gate": {
+    "pass": "at least one coarse detector reaches variance ratio bear/bull > 1.0 with Brown-Forsythe p < 0.10 on OOS, at bear occupancy >= 15% of trades",
+    "occupancy_floor_reason": "a detector that labels 3% of trades bear can post an arbitrary variance ratio; the floor is set at 15% because the overlay only does work when it actually downsizes a meaningful share",
+    "on_pass": "the lag-artifact hypothesis is supported and the overlay line reopens on a real mechanism — THEN, and only then, a second stage measures sizing and PnL with the faster input.",
+    "on_fail": "the premise is dead independently of detector speed. The czz_trend sizing overlay closes for a MECHANISM reason (not merely an effect-size one), and the bar-timeframe line closes with it. No PnL read is spent either way."
+  },
+
+  "explicitly_not_in_this_stage": [
+    "no sizing multiplier is applied",
+    "no PnL or MDD is computed",
+    "no live config is touched (the A/B shadow keeps running unchanged at 1.5x per the user's decision on the margin-multiplier provenance correction)"
+  ],
+
+  "artifacts": {
+    "script": "scripts/stageR_btc_regime_sizing_timeliness_riskchannel_20260808.py",
+    "results": "tmp/btc_regime_sizing_timeliness_20260808/stageR.json"
+  }
+}

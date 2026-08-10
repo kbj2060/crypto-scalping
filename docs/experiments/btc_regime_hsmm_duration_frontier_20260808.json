@@ -1,0 +1,71 @@
+{
+  "name": "btc_regime_hsmm_duration_frontier",
+  "date": "2026-08-08",
+  "status": "CLOSED at Stage 0 — gate not passed. No HSMM written, no OOS spent.",
+  "stage_0_outcome": {
+    "measured": {
+      "train": {"n_waves": 4901, "median_duration_bars": 15.0, "beta_log_duration": -0.1364, "beta_p": 0.0,
+                "hazard_q10": 0.0467, "hazard_q90": 0.0316, "hazard_ratio": 0.677},
+      "val": {"n_waves": 1136, "median_duration_bars": 18.0, "beta_log_duration": -0.1251, "beta_p": 0.0,
+              "hazard_q10": 0.0391, "hazard_q90": 0.0277, "hazard_ratio": 0.708}
+    },
+    "gate": {"slope_significant": true, "sign_reproduces_on_val": true, "hazard_ratio_>=1.5x": false, "pass": false},
+    "finding": "Duration dependence is REAL, significant (p~0) and sign-stable across windows, and its direction is informative: beta < 0 means waves are SELF-REINFORCING — the longer a wave has run the LESS likely it is to end per bar (hazard 4.67% -> 3.16%). But the effect is far too small to justify an explicit-duration decoder.",
+    "decisive_arithmetic": "Converting the hazard to the switch penalty the decoder actually uses, lambda(d) = -logit(h(d)): 3.016 at the 10th duration percentile and 3.423 at the 90th — a modulation of only x1.135 (13.5%) across the whole duration range. The incumbent's lambda was selected on the grid {0.25, 0.5, 1.0, 2.0}, i.e. 2x between neighbours and 8x end to end. The duration dependence induces a variation SMALLER THAN THE GRID RESOLUTION the tuning already swept, so an HSMM would learn something lambda-tuning has already smoothed over.",
+    "gate_was_too_generous_recorded_honestly": "The 1.5x hazard-ratio bar was a convenient PROXY. The quantity that actually enters the decision is the induced lambda modulation, and even exactly at the 1.5x bar that modulation is only ~14% — still below grid resolution. So the line fails more decisively than the near-miss (0.677 vs a 0.667 bar) suggests. METHODOLOGY: calibrate a gate to the quantity that enters the decision, not to a convenient proxy — the same class of error the effect-size downgrade caught elsewhere today.",
+    "results": "tmp/btc_regime_hsmm_20260808/stage0_duration_law.json"
+  },
+  "status_note_original": "PRE-REGISTERED — Stage 0 (mechanism precondition), no modelling yet",
+
+  "objective_is_not_accuracy": "The two frozen theta=0.5% detectors sit at two points on a persistence<->timeliness frontier: stability-first (OOS total 68.0, median run 7, detection lag 3, Q1 30.8) and timeliness-first (OOS total 68.4, run 4, lag 2, Q1 45.0). This line asks ONLY whether explicit duration modelling pushes that FRONTIER outward — not whether it raises a single agreement number. A higher agreement at shorter runs is not a win; it is a move along the frontier that lambda already buys.",
+
+  "hypothesis": {
+    "claim": "Our jump-penalized decode uses a single scalar lambda — a GEOMETRIC (memoryless) duration prior, identical for every state and every point in a run. An HSMM learns explicit, state-specific duration distributions. If regime durations are non-geometric (the hazard of ending depends on how long the run has already lasted) or state-asymmetric (bull and bear waves have different duration laws), then no single lambda can express that and an explicit-duration decode should dominate the frontier.",
+    "if_durations_are_geometric": "lambda is already the optimal form and HSMM has nothing to add. The line closes at Stage 0 with no model written."
+  },
+
+  "stage_0": {
+    "kind": "no modelling, no decode, no OOS — a property of the TARGET measured on TRAIN",
+    "question": "Is the theta=0.005 oracle wave duration distribution non-geometric and/or state-asymmetric?",
+    "measurements": [
+      "empirical hazard h(d) = P(wave ends at d | survived to d), TRAIN only, bull and bear separately",
+      "logistic regression of 'ends now' on log(duration): slope beta = 0 IS the geometric null, so beta's significance is exactly the test",
+      "geometric MLE vs negative-binomial MLE, likelihood-ratio test (df=1 on the dispersion parameter)",
+      "bull-vs-bear duration asymmetry (Mann-Whitney on durations + separate hazard slopes)",
+      "shape re-checked on VAL for stability — NOT used for selection"
+    ],
+    "gate": {
+      "pass_requires_both": [
+        "hazard slope beta significantly non-zero on TRAIN (p < 0.01)",
+        "hazard ratio between the 10th and 90th percentile of duration >= 1.5 (i.e. the dependence is large enough to matter, not merely detectable)"
+      ],
+      "and_the_sign_must_hold_on_VAL": "the TRAIN hazard slope's SIGN must reproduce on VAL. A dependence that flips sign between windows is the project's signature failure mode and would make the duration law unlearnable.",
+      "on_fail": "close the line. lambda is the correct functional form and no HSMM is written. This costs one cheap measurement and no OOS read."
+    }
+  },
+
+  "stage_1_only_if_stage_0_passes": {
+    "design": "Keep the frozen recipe's nowcaster probabilities EXACTLY as they are and swap ONLY the decoder. That isolates duration modelling as the single variable.",
+    "decoder_form": "The jump-penalized DP is the special case of an explicit-duration decode with a CONSTANT switch penalty. Writing the duration prior in HAZARD form makes the comparison exact: the switch penalty becomes lambda_s(d) = -log h_s(d) + log(1 - h_s(d)), a state- and run-length-dependent penalty that reduces to the incumbent's constant lambda when the hazard is flat.",
+    "causality_requirement": "MUST be an ONLINE decode. Standard HSMM Viterbi is a full-sequence (offline) algorithm; comparing an offline decoder against the incumbent's online one would let it peek. The recursion tracks delta_t(s, d) = best cost of being in state s with current run length d ending at t, and emits state_t = argmin over (s, d) using only data <= t.",
+    "duration_cap": "D_max = 96 bars (8 h at 5m), with the residual mass folded into the last bin",
+    "knob": "a hazard scale/temperature so the curve can be swept to MATCH persistence with each frozen detector — a frontier comparison requires matched-persistence points, not a single operating point"
+  },
+
+  "gates_for_stage_1": {
+    "stage_0_regression_gate": "rebuild the frozen incumbent in the same script and reproduce VAL 70.1 / OOS 68.0 (+/-0.3pp) before any comparison is believed; HALT otherwise",
+    "primary_adopt_rule": "FRONTIER DOMINANCE on the single OOS read: at a persistence matched to a frozen detector (median run within +/-1 bar), the HSMM decode must have HIGHER total agreement AND detection lag no worse. Equivalently it may match total agreement with strictly longer runs AND lower lag. Anything else is a move ALONG the frontier and is not adopted.",
+    "eligibility": "coverage >= 50%, and the run floor is the one belonging to whichever frozen detector is being matched (8 bars for stability-first, 4 for timeliness-first) — floors are per-objective and are not lowered after seeing results",
+    "oos_reads": 1
+  },
+
+  "scope_and_expected_value": {
+    "this_is_a_detector_metric_line_with_no_validated_consumer": true,
+    "stated_up_front": "Detector accuracy was pushed 61.3 -> 68.4% with exactly zero entry-PnL movement, and the last candidate consumer (the czz_trend sizing overlay) closed for a mechanism reason on 2026-08-08. An oracle-routed detector that knows the true wave position tops out at 75.8% vs the frozen 70.1, so ~+5.7pp is the absolute ceiling for any architecture here. A win on this line is a frontier result, NOT a PnL result, and does not reopen the regime-conditioned entry axis."
+  },
+
+  "artifacts": {
+    "stage_0_script": "scripts/stage0_btc_regime_duration_law_20260808.py",
+    "stage_0_results": "tmp/btc_regime_hsmm_20260808/stage0_duration_law.json"
+  }
+}

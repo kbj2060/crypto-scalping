@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev7-maker-exec-20260808",
+  "hypothesis": "The survey's fully-characterized bottleneck is signal MAGNITUDE vs the cost bar (within-regime AUC 0.53-0.55 cannot clear a 10bps taker roundtrip; the LGBM control's VAL gross edge was ~+9bps/trade vs 9bps account cost). Maker-first entry execution attacks the bar instead of the signal: post-only limit entries cut the roundtrip to ~7bps (2bps maker fee, no entry slippage, taker exit 5bps) and improve the entry price to the resting limit. On a ~1000-trade/4-month line, halving the entry-side cost is worth roughly 20-45pp of VAL PnL -- IF the fill-conditioned trade subset is not adversely selected. The ETH maker rejection (unfilled 10% were the runaway winners) applies to multi-day swing entries; the BTC Kappa1 fill audit showed 98% fill and ~-1bp adverse selection at high-frequency cadence, and this SOL line is the high-frequency case the 2026-08-07 memory explicitly reserves maker execution for.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_kappa1_invariant_composite_policy", "btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "ETH maker-entry was REJECTED 2026-08-07 for the Omega4.6.1 swing router because at 63 entries the few unfilled trades were the +17-22% runaway winners -- a low-frequency, long-hold failure mode. The surviving half of the Kappa1 closure is precisely the maker fill audit methodology (conservative 1m strict trade-through, cross-at-open = no fill) and its finding that the cost bar halves at high frequency. This SOL line trades ~250-1000 times per 4-month split with <=24h holds: the regime where a missed fill costs one median trade, not a fat tail.",
+    "retest_design": "Stage A+B in one pre-registered pass, frozen inputs: the saved unconditional LGBM control booster (no retraining), the same TB label TP/SL structure, and newly downloaded SOLUSDT 1m klines. For each of the 6 frozen entry rules: decisions on VAL, post-only limit at the decision 5m bar close, active from the next 1m bar, cross-at-open counted as NO FILL, filled only on strict 1m trade-through within a 15-minute cancel window, no queue-position credit. Filled trades enter at the limit price and run TP/SL (2.5/1.2 sigma from the limit) bar-by-bar on 1m data, 1440-minute horizon, SL checked before TP, non-overlapping. Cost: 7bps roundtrip (2 maker + 5 taker-exit) vs the taker baseline's 10. Metrics recorded per rule: fill rate, maker VAL PnL, and the taker-counterfactual PnL of UNFILLED entries (the adverse-selection number). VAL selection needs PnL > 0, >=15 trades, >=3/4 months positive; ONE OOS read of the selected rule; adoption requires OOS PnL > 0. A VAL fill rate < 50% or unfilled-counterfactual strongly positive (ETH failure shape) is an explicit kill signal regardless of PnL.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "klines_1m_fill_audit", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "FROZEN unconditional LGBM control + maker-first post-only entry execution (1m strict trade-through fill simulation, 15-minute cancel, 7bps roundtrip)",
+    "seeds": ["903174"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "selected rule must have maker VAL PnL > 0 with >=15 trades and >=3/4 VAL months positive; VAL fill rate < 50% or strongly-positive unfilled-counterfactual kills the line regardless of PnL; single OOS read; adoption requires OOS PnL > 0"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "maker_entry_7bps_roundtrip_vs_taker_10bps_baseline", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

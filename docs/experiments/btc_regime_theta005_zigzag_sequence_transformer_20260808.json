@@ -1,0 +1,101 @@
+{
+  "name": "btc_regime_theta005_zigzag_sequence_transformer",
+  "date": "2026-08-08",
+  "status": "CLOSED — halted at Stage 1, 0/12 eligible, no OOS read spent",
+  "outcome": {
+    "stage_0_regression_gate": "PASSED — incumbent reproduced exactly at VAL 70.1 / OOS 68.0",
+    "stage_1": "0 of 12 cells eligible; every cell produced a median run of exactly 7.0 bars against a floor of 8.0",
+    "val_range": {"state_mode": [69.8, 70.2], "geo_mode": [70.5, 71.0], "incumbent": 70.1},
+    "finding": "On identical inputs (state mode) the sequence view is worth nothing — 69.98 mean vs the incumbent's 70.1, inside seed noise. Window length 32/64/128 and depth 1/2 have no effect. The only gain comes from the geo channels (+0.7pp, -1 bar run), and LightGBM showed the SAME trade-off in the incumbent's own selection round (state 69.2 run 8 -> geo 69.9 run 7), where it was rejected on the same floor. The transformer adds nothing the feature-mode choice had not already mapped.",
+    "procedural_weakness_recorded": "The run floor is applied at Stage 1 under the inherited lambda=0.5, but lambda is only swept at Stage 2 — so a family that would clear the floor at higher lambda is rejected before lambda is tuned. Future contracts of this shape should sweep lambda inside the stage that applies the floor. It does not rescue this result: the incumbent passed the identical procedure at the same lambda, and the state cells show no VAL gain for lambda tuning to work with.",
+    "floor_not_lowered": true,
+    "report": "docs/btc_regime_zigzag_sequence_transformer_20260808.md"
+  },
+  "status_note_original": "PRE-REGISTERED (written before the first run)",
+  "question": "Does a small CAUSAL TRANSFORMER over the SEQUENCE of multi-scale causal zigzag states extract information that LightGBM's per-bar tabular view of the same states cannot, for theta=0.5% wave nowcasting?",
+
+  "why_this_cell_is_untried": [
+    "The frozen detector's inputs are 5 causal zigzag DIRECTION states read ONE BAR AT A TIME. LightGBM has no temporal receptive field: it cannot represent 'the 0.1% zigzag has flipped against the 0.5% one three times in the last 20 bars'.",
+    "The 4 previously failed supervised zigzag lines all predicted the 4% wave (a multi-day, macro-driven swing). theta=0.5% is a 16-bar-median NOWCASTING question, and supervised learning already beat the no-learning baseline in this frame (czz05 61.3 -> lgbm_jm 66.0 VAL).",
+    "The 2026-08-06 deepfeat transformer used the 113-feature PANEL on the 4%-scale label. This run uses zigzag geometry ONLY on the 0.5% label - different inputs, different target scale.",
+    "The measured open headroom is early-wave: czz01 scores Q1 55.5% vs the frozen model's 30.8% OOS, i.e. the frozen model under-uses its fastest input. A sequence model is the function class that can see WHEN the fast input turned."
+  ],
+
+  "inputs": {
+    "family": "causal zigzag geometry ONLY - no panel features, no returns, no volume",
+    "thresholds_pct": [0.1, 0.2, 0.35, 0.5, 0.8],
+    "modes": {
+      "state": "5 channels: causal zigzag direction per threshold",
+      "geo": "15 channels: direction + log1p(bars since last flip) + overshoot from that threshold's running extreme in theta units"
+    },
+    "causality": "window ends at bar t inclusive and predicts bar t's regime; every channel is an online state machine that reads no future bar"
+  },
+
+  "target": {
+    "label": "retrospective zigzag wave direction at theta=0.005, binary bull vs bear",
+    "note": "oracle is SCORING/TRAINING-TARGET only and uses future bars; it is never an input",
+    "train_rows": "<= 2025-08-31 minus a 576-bar label purge, rows with oracle dir != 0",
+    "train_stride": 4,
+    "train_stride_reason": "consecutive 5m windows overlap in W-1 bars; the 2026-08-06 deepfeat line diagnosed near-duplicate windows as the cause of epoch-1 memorization, and stride 4 was the fix. VAL/OOS inference stays dense (stride 1)."
+  },
+
+  "architecture": {
+    "model": "small causal Transformer encoder (pre-LN), learned positional embedding, causal attention mask, last-token pooling, single binary head",
+    "fixed": {"n_heads": 4, "d_ff_mult": 2, "dropout": 0.2, "optimizer": "AdamW", "lr": 3e-4, "weight_decay": 5e-4, "batch_size": 512, "max_epochs": 20, "early_stop_patience": 4, "grad_clip": 1.0},
+    "early_stopping_monitor": "INNER validation = the last 10% of TRAIN windows by time, separated from inner-train by a further 576-bar purge gap. The project VAL window (2025Q4) is NEVER used to stop training or pick a checkpoint - the incumbent LightGBM uses a fixed 700 trees with no early stopping, so monitoring VAL here would make the comparison unfair in the transformer's favour.",
+    "input_standardization": "per-channel mean/std computed on TRAIN rows only",
+    "selected_on_val": ["window", "n_layers", "d_model", "mode"]
+  },
+
+  "decode": "the SAME jump-penalized causal online DP as the frozen detector: V_t(s) = -log p_t(s) + min(V_{t-1}(s), min_s' V_{t-1}(s') + lambda). No vote blend (w=1.0), because the incumbent's re-selection dropped it for zigzag-only feature sets.",
+
+  "procedure": {
+    "stage_0_regression_gate": {
+      "action": "reproduce the frozen incumbent (zigzag-only S2_fine5 | state, 5-seed LGBM bag, lambda=0.5) on the identical rows and splits inside this same script",
+      "requirement": "reproduced VAL == 70.1 and OOS == 68.0 (+/- 0.3pp)",
+      "on_failure": "HALT. If the incumbent cannot be reproduced, no comparison in this run is meaningful."
+    },
+    "stage_1_screen": {
+      "action": "12-cell grid, ONE fixed screening seed, scored on VAL at the inherited decode (w=1.0, lambda=0.5)",
+      "grid": {"window": [32, 64, 128], "n_layers": [1, 2], "mode": ["state", "geo"], "d_model": "32 for n_layers=2, 64 for n_layers=1 (held at ~equal capacity)"},
+      "select": "highest VAL agreement subject to eligibility"
+    },
+    "stage_1b_seed_bag": {
+      "action": "retrain the Stage-1 winner with N=5 randomly drawn seeds, average probabilities",
+      "note": "seeds drawn by default_rng and recorded in the results file before scoring"
+    },
+    "stage_2_lambda": {
+      "action": "sweep lambda in {0.25, 0.5, 1.0, 2.0} on the bagged probabilities (post-processing, no retraining)",
+      "select": "highest VAL agreement subject to eligibility"
+    },
+    "oos": "EXACTLY ONE read of the Stage-2 winner.",
+    "n_val_cells_scored": 16
+  },
+
+  "eligibility": {
+    "min_coverage_pct": 50.0,
+    "min_median_run_bars": 8.0,
+    "reason": "the run floor is what stopped 2-3-bar confetti candidates from winning the metric in every prior round; the 1D-CNN zoo entry (46k flips, VAL 49.7%) is exactly what it exists to reject. It is NOT to be lowered after seeing results."
+  },
+
+  "adopt_rule": {
+    "condition": "VAL > 70.1 AND OOS >= 68.0 AND eligible on VAL",
+    "incumbent": {"name": "btc_regime_theta005_zigzagonly_S2fine5_lam05", "val": 70.1, "oos": 68.0},
+    "on_miss": "the transformer is recorded as not beating the per-bar LightGBM view, nothing is re-frozen, and the line stops. No second OOS read, no re-tuning on this validation window."
+  },
+
+  "secondary_reported_not_selected_on": [
+    "wave-quintile agreement (Q1..Q5) and detection lag - reported for the record because early-wave timeliness is the measured headroom, but selecting on them here would be goalpost-shifting: the timeliness objective has its own contract (btc_regime_timeliness_first_20260808.json) with its own floor."
+  ],
+
+  "scope_and_expected_value": {
+    "this_is_a_detector_metric_line_not_a_pnl_line": true,
+    "note": "Pushing detector agreement 61.3 -> 68.4% moved entry PnL by exactly zero (MoE 0/108 VAL cells, timing filter 0/60). An oracle-routed detector that knows the true wave position tops out at 75.8% vs the frozen 70.1, so +5.7pp is the absolute ceiling for ANY architecture on this task. A win here does not reopen the regime-conditioned entry axis."
+  },
+
+  "artifacts": {
+    "script": "scripts/train_eval_btc_regime_zigzag_sequence_transformer_20260808.py",
+    "results": "tmp/regime_zigzag_seqformer_20260808/results.json",
+    "states": "data/research/btc_regime_theta005_seqformer_20260808.parquet"
+  }
+}

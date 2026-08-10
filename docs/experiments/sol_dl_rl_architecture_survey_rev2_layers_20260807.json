@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev2-layers-20260807",
+  "hypothesis": "Layering the surviving SOL TabM-flat entry candidate (VAL +0.65% / OOS +4.08%, frozen rule side_prob_055) with (A) per-side TP-first quality gates and (B) a trailing-stop exit improves seed-mean fresh-forward PnL over the frozen baseline, on the grounds that (A) mirrors the h48qual quality-layer convention that works on ETH live, and (B) trailing stops are the one exit lever with a positive prior specifically on SHORT-HOLD triple-barrier ledgers (project-trailing-stop memory: the original G1 result stands for short-hold TB ledgers; the 2026-08-07 failures were on long-hold parents).",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_zigzag_pivot_exit_primitives", "btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "Quality/threshold layers were the failure point on BTC zig075 and exit-logic tuning failed 23+ times on ETH Omega4.6.1 -- but every one of those exit failures was on long-hold models where reactive exits cut multi-day winners, and the BTC quality-layer failures were on retrospective zigzag labels. This SOL stack holds <=24h against the corrected causal TB label, the ledger type where trailing originally passed G1, and the quality heads are trained on the same causal TB per-side outcomes, not zigzag waves.",
+    "retest_design": "Entry model, entry threshold (0.55) and all 5 seeds stay FROZEN from the parent survey. Layer A: two binary LightGBM heads (long/short TP-first, targets soft_long>soft_cash and soft_short>soft_cash) trained on purged train; gate grid q in {0.40,0.45,0.50,0.55} plus q=0 baseline-reproduction control, selected on seed-mean VAL PnL with >=15 seed-mean trades; adopted only if it beats the frozen baseline VAL (+0.65%). Layer B: trailing stop on top of the frozen layer-A choice; grid activation in {0.5,0.75} x trail-distance in {0.5,1.0} (of tp_move/sl_move respectively), close-based activation and ratchet, intrabar exit priority SL -> trail -> TP; adopted only if it beats the layer-A VAL. Exactly ONE OOS read of the final adopted stack; if neither layer beats baseline VAL, no new OOS read and the layering axis closes.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "frozen 5-seed TabM-flat entry + LightGBM per-side TP-first quality gates (layer A) + close-ratchet trailing-stop exit (layer B)",
+    "seeds": ["903174", "42517", "6688211", "15093", "771442"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "layer A adopted only if best gated seed-mean VAL PnL > frozen baseline +0.65% with seed-mean trades >= 15; layer B adopted only if best trailing config beats the adopted layer-A VAL; single OOS read of the final adopted stack only"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

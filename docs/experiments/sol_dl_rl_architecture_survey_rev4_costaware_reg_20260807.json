@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev4-costaware-reg-20260807",
+  "hypothesis": "Porting the 2026 walk-forward result of arXiv:2606.00060 (hourly BTC: return-magnitude REGRESSION plus a cost-aware execution filter that only changes position when |forecast| exceeds k x roundtrip cost restores after-cost profitability where sign/classification strategies fail at 10bps) to SOL beats the closed classification survey, because the survey's diagnosed failure margin is small (LGBM control gross edge was approximately +9bps/trade vs 10bps cost) and the paper attacks exactly that margin: hourly decision cadence cuts turnover, magnitude filtering skips sub-cost trades, and weak signals HOLD the existing position instead of exiting.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_1h_native_swing_entry", "btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "btc_1h_native_swing_entry closed on BTC with a 1h TB-classification design (5/5 VAL-positive flipped 0/5 OOS) -- different asset, classification target, barrier execution, and no cost-aware magnitude filter; it does not test this recipe. The SOL survey itself closed only classification/quality/RL/trailing axes; a regression target with an execution-side cost filter was never run on SOL. The 2606.00060 evidence is 27-fold walk-forward on 8 years of hourly BTC with the exact 10bps cost figure this project uses.",
+    "retest_design": "Same pinned SOL panel, splits, purge (288 bars + 288 embargo for DL), standardization, sizing (margin 0.30 x leverage 3), and contract seeds. Decision cadence: every on-the-hour 5m bar; target: next-hour open-to-open log return of the exact segment the decision controls (enter open[i+1], next decision segment boundary open[i+13]); execution: position-target replay on the 5m grid, 5bps per side on notional at position changes, weak signals hold the current position. Closed grid: k in {1,2,3} x side in {long_short, long_only} = 6 configs per model family. Families: LightGBM regression (paper's best family, deterministic single fit) and TabM-flat regression (N=5 contract seeds, DL emphasis). VAL-only selection per family (>=15 position entries); each passing family earns ONE OOS read; TabM adoption additionally needs seed-mean OOS > 0 with >=3/5 seeds positive. Failure closes the cost-aware-regression axis on SOL.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "next_hour_open_to_open_log_return_regression", "horizon_bars": "12", "timeout_handling": "not_applicable"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "LightGBM return regression (single deterministic fit) and TabM-flat return regression (5 seeds), each with cost-aware execution filter |yhat| > k*10bps and hold-on-weak-signal position logic at 1h decision cadence",
+    "seeds": ["903174", "42517", "6688211", "15093", "771442"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "per model family: best of the 6 pre-registered (k, side) configs on VAL PnL (seed-mean for TabM) must be > 0 with >=15 position entries; one OOS read per passing family; TabM OOS adoption requires seed-mean > 0 and >=3/5 seeds positive"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

@@ -1,0 +1,79 @@
+{
+  "model_id": "btc_regime3_current_jm_jmlam4_20260809",
+  "label_mode": "balancedish_adx16_slope15_bb012",
+  "prefix_stem": "regime3_current_sensitive",
+  "feature_set": "wide24",
+  "feature_cols": [
+    "state7_trend_score",
+    "state7_trend_efficiency_48",
+    "state7_directional_return_48",
+    "state7_volatility_state",
+    "state7_sign_flip_rate_24",
+    "state7_range_compression",
+    "state7_flow_alignment",
+    "state12_log_return",
+    "state12_garman_klass_vol",
+    "state12_net_taker_ratio",
+    "state12_oi_change_rate",
+    "state12_chop_index",
+    "volatility_z",
+    "rsi",
+    "macd_hist",
+    "bb_width_z",
+    "hma_slope",
+    "wick_ratio",
+    "mtf_trend_1h",
+    "mtf_trend_4h",
+    "breakout_strength",
+    "mean_reversion_z",
+    "ofi_acceleration",
+    "taker_acceleration"
+  ],
+  "fit_source": "/home/llewyn/crypto-scalping/data/splits/year_oos/btc_features_2024.csv",
+  "jm_lambda": 4.0,
+  "jm_k": 3,
+  "jm_temperature": 4.0,
+  "state_order_bear_chop_bull": [
+    0,
+    2,
+    1
+  ],
+  "state_mean_fwd12bar_logret": {
+    "0": 4.133635103851711e-05,
+    "1": 0.0001456480910606281,
+    "2": 9.029062529551778e-05
+  },
+  "fit_in_sample_balanced_accuracy": 0.8177464853390966,
+  "outputs": {
+    "btc_features_2024.csv": {
+      "year": "2024",
+      "eval_vs_adx_label": {
+        "rows": 105408,
+        "accuracy": 0.7503605039465695,
+        "balanced_accuracy": 0.8177464853390966,
+        "flip_rate": 0.030026468830343336
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/btc_regime3_current_hmm_jmlam4_20260809_2024_maskedname.csv"
+    },
+    "btc_features_2025.csv": {
+      "year": "2025",
+      "eval_vs_adx_label": {
+        "rows": 105120,
+        "accuracy": 0.7216990106544902,
+        "balanced_accuracy": 0.8271798180384411,
+        "flip_rate": 0.029081326877158267
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/btc_regime3_current_hmm_jmlam4_20260809_2025_maskedname.csv"
+    },
+    "btc_features_2026.csv": {
+      "year": "2026",
+      "eval_vs_adx_label": {
+        "rows": 61269,
+        "accuracy": 0.73281757495634,
+        "balanced_accuracy": 0.8270099565529033,
+        "flip_rate": 0.03047267741724881
+      },
+      "out_path": "/home/llewyn/crypto-scalping/data/ensemble/supervised/btc_regime3_current_hmm_jmlam4_20260809_2026_maskedname.csv"
+    }
+  }
+}

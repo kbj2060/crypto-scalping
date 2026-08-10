@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev6-regime-moe-20260808",
+  "hypothesis": "The 2026-08-08 oracle feature analysis showed SOL's failure mode is an ANTI-STABLE feature-to-direction map (top-20 train features 0/20 keep sign on VAL, feature-AUC Spearman -0.38): the sign flips with market regime. Regime-conditioning is the one architecture device proven live in this project (ETH Omega4.6.1 bull/bear/chop MoE) that lets the sign change with regime. Hypothesis: (R) a simple causal trend-regime detector stabilizes within-regime feature-direction signs on SOL, and (M) per-regime expert entry models routed by that detector then clear costs where every unconditional model failed.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "SOL/BTC/ETH HMM regime-model retrains were fresh-forward rejected 2026-07-21 -- that closure was about TRAINED (HMM) regime classifiers whose fitted parameters do not transfer forward. This test uses deterministic, training-free causal trend rules (rolling return / EMA-slope thresholds), which cannot suffer fit-nontransfer, and adds a falsifiable Stage R gate that measures the exact mechanism (within-regime sign stability) before any expert model is trained -- a check no prior regime work in this project performed.",
+    "retest_design": "Stage R (detector, no model training): 3 pre-registered causal detectors -- D1: 288-bar close return with theta 2%; D2: same with theta 4%; D3: mtf_trend_4h train-quantile(33/66) split -- each classifying every bar bull/bear/chop. Detector is SELECTED on train-only sub-window stability (sign agreement of within-regime top-20 direction features across the 3 train sub-windows). The selected detector then takes ONE VAL check = the Stage R gate: within-regime top-20 train-to-VAL sign agreement >= 60% in at least 2 of 3 regimes (unconditional baseline measured at 0/20). If the gate fails, the axis closes before any entry model is trained. Stage M (only if R passes): per-regime LightGBM 3-class experts on the TB trade-outcome label (purged train, min 5000 rows per regime), routed causally at decision time; frozen parent rule family (argmax + side-prob thresholds); VAL selection requires PnL > 0, >= 15 trades, >= 3 of 4 VAL months positive, and beating the unconditional LGBM control (-6.90%); ONE OOS read; adoption requires OOS > 0.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "training-free causal trend-regime detector (bull/bear/chop) + per-regime LightGBM 3-class experts on the corrected TB label, with a pre-registered within-regime sign-stability gate between the two stages",
+    "seeds": ["903174"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "Stage R: selected detector must reach >=60% within-regime top-20 train-to-VAL sign agreement in >=2 of 3 regimes. Stage M: VAL PnL > 0, >=15 trades, >=3/4 VAL months positive, and > unconditional LGBM control -6.90%; single OOS read; adoption requires OOS PnL > 0"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

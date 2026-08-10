@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "btc-regime-conditioned-entry-20260808",
+  "hypothesis": "Every closed BTC ML entry line was an UNCONDITIONAL model, and the SOL survey's mechanism work showed (a) the feature-to-direction map is anti-stable unconditionally on every asset measured (BTC's unconditional lines died of exactly this), (b) trend-regime conditioning restores within-regime sign stability, and (c) the binding constraint is within-regime signal MAGNITUDE -- on which the 2026-08-08 60-symbol screen ranks BTC #1 (mean signed VAL edge 0.107, the only symbol with 100% bear-regime train-to-VAL sign agreement, ~2.2x the ETH anchor that supports a live strategy). Hypothesis: D2 trend-regime-conditioned per-regime entry experts on the corrected TB label clear costs on BTC where all unconditional BTC models failed.",
+  "research": {
+    "line_id": "btc_regime_conditioned_entry",
+    "related_prior_line_ids": ["btc_5m_quality_classifier_stack", "btc_tripbarrier_entry_axis_20260807_gates", "btc_barrier_horizon_calibration"],
+    "prior_failure_reassessment": "All prior BTC 5m entry closures (quality stacks, TB entry gates G0'-G8, barrier sweeps, deepfeat, CUSUM, 1h-native) share the unconditional-model structure that the SOL survey proved is sign-anti-stable (top-20 train features 0/20 keep sign on VAL on SOL, 3/20 on ETH... measured 0.15); none conditioned the model on a trend regime. The 20260712-audited swingtransition stack is a different (multi-day swing) family and stays untouched. The screen's BTC #1 rank is train+VAL and carries 60-way multiple-comparisons risk -- which is exactly what this contract's gates exist to referee.",
+    "retest_design": "Identical battle-tested pipeline from the SOL survey, ported: fresh BTC panel via the same FeatureEngineer (secondary series = ETH; columns named *_btc contain ETH by contract naming), corrected TB trade-outcome label (same constants), D2 regime (288-bar return +/-4%), splits train <=2025-08-31 (288-bar purge) / VAL 2025-09-01..12-31 / OOS 2026-01-01..03-31. Stage 0: oracle label-following ceiling on train+VAL must be materially positive. Stage R: within-regime top-20 sign-stability gate (>=60% train-to-VAL agreement in >=2 of 3 regimes) on the FULL panel -- confirms the screen's reduced-pipeline finding before any model. Stage 1: unconditional LGBM control (asset-matched baseline, no OOS read for it). Stage 2 (retraining + tuning, all VAL-only selection): per-regime LGBM experts, chop forced to CASH (pre-registered from rev8's uniform result) with chop-expert kept as one control config; tuning grid = hyperparameters {default: leaves63/mcs200, conservative: leaves31/mcs500} x feature set {full panel, per-regime train-top-20} x 6 entry-rule thresholds (25 configs incl. chop-expert control), PLUS an ETH-architecture-analog family added BEFORE any VAL was seen (2026-08-08 revision, user-directed): per-regime TabM experts (8-expert BatchEnsemble MLP, soft race-conviction KL loss, full features, chop force-cash, the 5 contract seeds with seed-mean selection and >=3/5-positive OOS adoption bar) x 6 entry rules. Selection requires VAL PnL > 0, >=15 trades, >=3/4 VAL months positive, and > the unconditional control's VAL. ONE OOS read of the single selected config; adoption requires OOS PnL > 0. Any fail closes the line; a pass yields a research candidate that must NOT touch the live swingtransition stack without its own promotion audit.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["BTCUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/btc_features_2024_2026_regimeline.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "toptrader_positioning_metrics", "orderflow_microstructure", "cross_asset_eth"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_eth", "structural_price_location", "time_session", "cvp_volume_profile", "toptrader_positioning"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "D2 trend-regime router + per-regime LightGBM experts (chop forced CASH), tuning grid over {leaves63/mcs200, leaves31/mcs500} x {full features, per-regime top-20} x entry-rule thresholds",
+    "seeds": ["903174", "42517", "6688211", "15093", "771442"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "Stage R sign gate >=60% in >=2 regimes; selected Stage-2 config must have VAL PnL > 0, >=15 trades, >=3/4 VAL months positive, and beat the unconditional LGBM control; single OOS read; adoption requires OOS PnL > 0"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

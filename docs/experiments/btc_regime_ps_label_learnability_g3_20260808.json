@@ -1,0 +1,74 @@
+{
+  "name": "btc_regime_ps_label_learnability_g3",
+  "date": "2026-08-08",
+  "status": "HALTED at Stage 1 by a CONTRACT DESIGN ERROR — 0/6 eligible, no OOS spent. The substantive finding (the PS label IS more learnable than any no-learning baseline) survives; the persistence and value questions were never reached.",
+  "outcome": {
+    "stage_0_regression_gate": "PASSED — incumbent reproduced exactly at VAL 70.1 / OOS 68.0",
+    "baselines_vs_the_PS_label": {
+      "czz0.5": {"val_agree": 61.5, "oos_agree": 59.9, "oos_traded_pct": 533.16, "oos_run": 13},
+      "czz0.8": {"val_agree": 63.2, "oos_agree": 62.1, "oos_traded_pct": 318.13, "oos_run": 26},
+      "czz1.2_SELECTED": {"val_agree": 62.2, "oos_agree": 60.5, "oos_traded_pct": 128.39, "oos_run": 46},
+      "czz2": {"val_agree": 52.0, "oos_agree": 58.3, "oos_traded_pct": 75.93, "oos_run": 125.5},
+      "czz3": {"val_agree": 53.8, "oos_agree": 51.2, "oos_traded_pct": 74.55, "oos_run": 381}
+    },
+    "ps_ceiling_traded_pct": {"val": 3421.68, "oos": 2473.83},
+    "stage_1_val": {
+      "S_wide7|state": {"agree": 65.0, "cov": 100.0, "run": 29, "traded_pct": -79.69},
+      "S2_fine5|state": {"agree": 64.7, "cov": 100.0, "run": 33, "traded_pct": -71.23},
+      "S_coarse5|state": {"agree": 63.8, "cov": 100.0, "run": 31, "traded_pct": -83.15},
+      "S2_fine5|geo": {"agree": 63.5, "cov": 100.0, "run": 28, "traded_pct": -89.73},
+      "S_wide7|geo": {"agree": 61.7, "cov": 100.0, "run": 31, "traded_pct": -80.84},
+      "S_coarse5|geo": {"agree": 61.0, "cov": 100.0, "run": 32, "traded_pct": -78.16}
+    },
+    "substantive_finding_that_survives": "4 of 6 cells beat the selected baseline on VAL agreement and the top cell (65.0) beats EVERY baseline including czz0.8's 63.2. The PS label is genuinely more learnable than any no-learning causal rule — the first time all session a learned detector cleared its definitional baseline.",
+    "why_it_halted": "All 6 cells produced 28-33 bar runs against the 52.4-bar floor, so none was eligible and Stage 2 (the lambda sweep) was never reached.",
+    "the_design_error": "The run floor is evaluated at Stage 1 under the INHERITED lambda=2, but lambda is the knob that CONTROLS run length and is only swept at Stage 2. This is the identical procedural weakness recorded earlier the SAME DAY in the zigzag-sequence transformer contract, where it was written up as 'do not repeat'. Unlike that case it is consequential here: those cells had no VAL gain for lambda to work with, whereas these have a clear one (65.0 vs 62.2), and lambda=4 or 8 could plausibly clear 52.4 bars while holding agreement above 60.5. The halt may be discarding a real candidate.",
+    "remedy": "NOT a rerun with a relaxed gate. A new contract that evaluates the floor at the stage where lambda is chosen — the floor VALUE stays 52.4, only the STAGE moves. That is a correction of a design error, not a relaxation: applying a persistence floor before the persistence knob is tuned does not serve the floor's purpose (rejecting confetti), it merely tests one arbitrary lambda. OOS remains unspent, so a corrected contract can still make one clean read.",
+    "results": "tmp/btc_regime_ps_g3_20260808/results.json"
+  },
+  "status_note_original": "PRE-REGISTERED — G3 learnability of the Pagan-Sossounov label",
+
+  "question": "Stage 0e produced the first label in this arc that is BOTH descriptive (pure path geometry, not profit-defined) AND lag-robust (retains 87% of its value at 3-bar lag vs the incumbent's 13%). G3 asks the only question that decides whether that matters: can a CAUSAL detector actually recover it?",
+
+  "target": {
+    "label": "ps_net|P48|A2 — Bry-Boschan / Pagan-Sossounov dating, min_phase 48 bars, window 96, min_cycle 192, censor amplitude 2%",
+    "why_this_one": "highest lag-curve return at the 3-5 bar lag our detectors actually achieve, G1 pass, 209.5-bar median runs, 939 switches",
+    "properties": {"median_run_bars": 209.5, "n_switches": 939, "chop_occupancy": 0.01}
+  },
+
+  "hypothesis_being_tested": "Every detector line closed today trained on a 16-bar-run / 8,173-switch target. A 209-bar-run / 939-switch target is a far easier object to nowcast, so detector accuracy may have been limited by TARGET GRANULARITY rather than by feature information. If a detector on the PS label does not beat its no-learning baseline either, that hypothesis is dead and the axis closes for a reason that has nothing to do with the label.",
+
+  "design": {
+    "architecture_is_held_fixed": "the frozen detector's own recipe — multi-scale causal zigzag states -> LGBM probability (seed-bagged) -> jump-penalized causal DP decode. Only the TARGET changes, so any difference is attributable to the label, not the model.",
+    "stage_0_regression_gate": "rebuild the frozen incumbent (zigzag-only S2_fine5, lambda=0.5, target = zigzag oracle theta=0.005) inside the same script and reproduce VAL 70.1 / OOS 68.0 (+/-0.3pp). HALT otherwise — without a reproduced incumbent nothing here is interpretable.",
+    "label_purge": "max(576, 4 x median phase) bars dropped from the end of TRAIN. The PS label at bar t depends on the next turning point, so the purge must cover a typical phase; 4x the 209.5-bar median gives 838 bars.",
+    "stage_1": "feature set {S2_fine5 = 0.1/0.2/0.35/0.5/0.8%, S_coarse5 = 0.35/0.5/0.8/1.2/2.0%, S_wide7 = both merged} x mode {state, geo}, scored on VAL at inherited lambda",
+    "stage_2": "lambda sweep {0.5, 1, 2, 4, 8} on the Stage-1 winner. Larger lambdas are included because a 209-bar-run target needs far more persistence than the theta=0.5% nowcaster did.",
+    "oos_reads": 1
+  },
+
+  "baselines_that_must_be_beaten": {
+    "no_learning_causal": "causal zigzag (czz) at several thresholds, scored against the same PS label. This is the czz05 discipline: a definitional rule cannot overfit, and every learned candidate in this project that failed to beat one turned out to be worthless.",
+    "the_label_itself": "trading the PS label with perfect foresight is the ceiling; the detector's capture ratio against it is reported"
+  },
+
+  "gates": {
+    "eligibility": "coverage >= 50% AND median run >= 52 bars (one quarter of the PS label's OWN 209.5-bar median run — a per-label floor derived from the target, NOT the 8-bar floor carried over from the theta=0.5% contracts)",
+    "primary_agreement": "OOS agreement vs the PS label must exceed the best no-learning czz baseline",
+    "decisive_value_gate": "HEADLINE — the decoded detector state is TRADED DIRECTLY on OOS (position +1/0/-1, round-trip cost 0.42% per switch) and must return > 0. This folds accuracy, detection lag and turnover into one number and is the thing every earlier detector line never measured. A detector that wins on agreement and loses money does not pass.",
+    "adopt": "all three: eligible, beats the no-learning baseline on agreement, AND positive traded return on the single OOS read"
+  },
+
+  "what_each_outcome_means": {
+    "pass": "target granularity was a real constraint — the detector axis reopens on the PS label, and the next question is whether the traded return survives a proper cost/slippage model and a second window.",
+    "fail_on_agreement": "the label is no easier to nowcast than the old one; target granularity was not the constraint and the axis closes independently of labelling.",
+    "fail_on_value_only": "the label IS learnable but the detector's lag and turnover eat the edge — which would localise the remaining problem to execution rather than to prediction."
+  },
+
+  "scope": "Still a detector line. A pass does not reopen the regime-conditioned ENTRY axis (closed at three layers) nor rehabilitate the czz_trend sizing overlay (closed on mechanism). It would mean the project has, for the first time, a causally-detectable regime label with a positive traded return of its own.",
+
+  "artifacts": {
+    "script": "scripts/g3_btc_regime_ps_label_learnability_20260808.py",
+    "results": "tmp/btc_regime_ps_g3_20260808/results.json"
+  }
+}

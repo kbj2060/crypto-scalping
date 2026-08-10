@@ -1,0 +1,20 @@
+[Unit]
+Description=crypto-scalping BTC multi-slot (N=3) shadow loop WITH czz_trend regime sizing overlay (2026-08-08, shadow-only, no order submission)
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/llewyn/crypto-scalping
+Environment=BTC_MULTISLOT_SHADOW_REGIME_OVERLAY=1
+Environment=BTC_MULTISLOT_SHADOW_SUFFIX=_regime
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/run_btc_multislot_shadow_loop_20260807.py
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=btc_multislot_shadow_regime
+
+[Install]
+WantedBy=default.target

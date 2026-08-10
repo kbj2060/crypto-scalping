@@ -1,0 +1,39 @@
+{
+  "name": "btc_jm_regime_moe_20260808",
+  "created": "2026-08-08T03:10:00+09:00",
+  "asset": "BTCUSDT",
+  "line": "Jump-Model-gated regime MoE entry experts (5m TB labels)",
+  "reopening_argument": "The regime-conditioned entry axis was closed 2026-08-08 (D2 trailing-return gate, OOS -19.5%). This line pre-registers the hypothesis that GATE QUALITY was the binding failure: the D2 gate had 9.4% trend occupancy (expert data starvation, 5-7k rows/expert) and no persistence; the causal Statistical Jump Model gate (k3, lam32/128, train-only fit, causal online decode) has 17-24% bear/bull occupancy (3-5x expert rows), median run 152-264 bars, and 66-70% zigzag-oracle agreement vs the HMM's 51%. If this line also flips OOS, the regime-conditioned entry axis on BTC is closed REGARDLESS of detector quality and must not be reopened from this panel family.",
+  "panel": "data/splits/year_oos/btc_features_2024_2026_regimeline.csv",
+  "labels": "data/splits/year_oos/btc_5m_tripbarrier_tradeoutcome_labels_regimeline_20260808.parquet",
+  "regime_states": "data/research/btc_jm_regime_states_20260808.parquet",
+  "splits": {"train_end": "2025-08-31", "val": "2025-09-01..2025-12-31", "oos": "2026-01-01..2026-03-31"},
+  "design": {
+    "gates": ["czz4 (causal 4% zigzag direction, 2-state)", "czz4_chop3 (czz4 + trailing-24h-range<3% chop overlay)", "jm_lam32"],
+    "experts": "LGBM multiclass hp_conservative (num_leaves=31, min_child_samples=500), 600 trees",
+    "seed_bagging": "N=5 random seeds drawn via default_rng(903174).choice(1e6), probas averaged",
+    "transition_purge": {"jm_lam32": [0, 24], "czz4": [0], "czz4_chop3": [0]},
+    "featsets": ["full", "per-regime top20 by |AUC-0.5|"],
+    "chop_policy": "force_cash always",
+    "bear_policies": ["expert", "long_only (contrarian bounce)", "short_only"],
+    "consensus_filter": "pre-registered 2026-08-08 03:55 KST BEFORE any VAL result was read: additional policy axis {off, on}; on = suppress entries whose side disagrees with the concurrent czz4 wave direction (bull wave -> longs only, bear wave -> shorts only). Evaluated in a val addendum from the SAME saved seed models; same selection gates apply jointly across the full table.",
+    "controls": ["unconditional LGBM (closed line control.json)", "single LGBM + JM regime as feature (5-seed bag)"]
+  },
+  "val_selection_gates": [
+    "n_trades >= 15",
+    "val_pnl > 0",
+    "n_pos_months >= 3 of 4",
+    "val_pnl > max(control_uncond, control_feat)",
+    "family (same gate/featset/purge, 18 rule x bear variants) >= 60% VAL-positive",
+    ">= 4/5 seeds individually VAL-positive"
+  ],
+  "oos_protocol": "exactly one OOS read for the single selected config; per-seed OOS PnL reported; adoption requires OOS pnl > 0 AND >= 4/5 seeds OOS-positive AND >= 2/3 OOS months positive",
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false
+  },
+  "script": "scripts/train_eval_btc_jm_regime_moe_20260808.py",
+  "multiple_comparisons_note": "72 VAL variants scored (2 gates x 2 featsets x purge x 3 bear x 6 rules); the family-robustness and per-seed gates exist to deflate single-cell cherry-picks; the single OOS read is the referee."
+}

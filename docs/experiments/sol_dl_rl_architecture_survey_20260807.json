@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-20260807",
+  "hypothesis": "Applying the BTC/ETH-hardened protocol to SOL for the first time -- the corrected causal triple-barrier trade-outcome label (12-bar cumret vol basis, TP2.5/SL1.2, 288-bar horizon), fresh-forward bar-by-bar evaluation, and N=5 genuinely random seeds -- determines whether SOL's 5m panel contains extractable entry edge for (a) a LightGBM control, (b) deep models (TabM-style flat MLP ensemble and a causal windowed CNN/Transformer encoder), and (c) a continuous-control DSAC RL agent, with DL and RL deliberately emphasized per user direction despite their BTC failures, because SOL has never been tested with this label or these architectures.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_advanced_rl_direction", "btc_jepa_deep_feature_encoder", "btc_5m_quality_classifier_stack", "btc_tripbarrier_entry_axis_20260807_gates"],
+    "prior_failure_reassessment": "All four related lines failed on BTC, and SOL's own architecture-v2 (TCN+CatBoost, 20260719) was rejected before the 20260806 label fix existed. Why those verdicts may not transfer: (1) every BTC DL/RL failure was measured on BTC, whose market-efficiency ceiling (project-btc-ceiling memo 20260720) is believed to be the binding constraint -- SOL is a structurally less efficient market where the same architectures have never been run; (2) SOL's only prior architecture cycle used the retrospective zigzag/wave-style labels and single-bar-noise SL sizing that the 2026-08-06 diagnosis identified as root causes of the acc-vs-PnL gap; the corrected trade-outcome label has never been built for SOL; (3) the BTC advanced-RL verdict (REDQ/TQC/CQL/DSAC-T 3 seeds OOS-negative) predates the corrected label and was trained on BTC reward streams only.",
+    "retest_design": "Identical pinned SOL panel and identical corrected TB trade-outcome label for every candidate. Stage 0: oracle label-following replay must show a real positive ceiling under the 10bps cost model on train+VAL before any model is trained (4-step oracle protocol). Stage 1 cheap gate: LightGBM 3-class on flat features; its VAL/OOS fresh-forward result is the control every DL/RL candidate must beat. Stage 2 DL: flat MLP-ensemble (TabM-style) and causal windowed CNN/Transformer, each N=5 genuinely random seeds, VAL-only selection, single OOS read per pre-registered candidate. Stage 3 RL: DSAC continuous agent on the same panel and cost model, 5 random seeds, evaluated only by fresh-forward replay of its greedy policy. No OOS-derived tuning anywhere; OOS is read once per pre-registered candidate.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "flat MLP-ensemble (TabM-style) N=5 seeds; causal window48 CNN/Transformer N=5 seeds; DSAC continuous RL N=5 seeds -- all against the LightGBM control",
+    "seeds": ["903174", "42517", "6688211", "15093", "771442"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "candidate must be VAL-positive after costs with >=15 trades AND beat the LightGBM control's VAL PnL on seed-mean; only then does it earn its single OOS read; OOS adoption additionally requires seed-mean OOS PnL > 0 with >=3/5 seeds positive"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

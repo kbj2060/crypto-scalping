@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev5-bracket-20260808",
+  "hypothesis": "Changing the decision primitive from predict-the-side (closed 7 ways in this line) to a volatility-breakout BRACKET -- stop-entries armed at +/- b*sigma around next bar's open so the MARKET reveals the side, with the same TB exit structure (TP 2.5 sigma / SL 1.2 sigma / 288-bar horizon) whose oracle ceiling is proven huge on SOL -- converts the unpredictable-direction problem into a predictable-continuation problem: an ML gate only needs to forecast whether a triggered breakout continues (whipsaw avoidance), the mechanism the live SOL adaptive_squeeze strategy already monetizes at coarser granularity.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_5m_quality_classifier_stack", "btc_barrier_horizon_calibration"],
+    "prior_failure_reassessment": "All seven closed axes in this line share one structure: the model commits to a side at decision time from the panel state, and that directional forecast is what decorrelates on fresh data. The bracket primitive has never been tested here or registered as closed: side commitment is deferred to a market-confirmed stop trigger, and the learned component is a binary continuation gate on triggered setups -- a target whose base-rate economics are mechanically computable from data before any model is trained. btc_event_gate closed as real-but-not-actionable for lack of an execution primitive; the bracket IS an execution primitive, so that closure argues FOR this test, not against it.",
+    "retest_design": "Same pinned panel, splits, costs, sizing, purge(288+W)+embargo(288). Stage 0 (no model): mechanical bracket replay on train+VAL for the closed grid b in {0.75,1.0} x trigger-window W in {6,12} bars -- record raw ungated economics AND the oracle-gated ceiling (perfect knowledge of TP-first outcomes); the line dies immediately if no (b,W) oracle ceiling is meaningfully positive after costs. Stage 1: per-(b,W) LightGBM binary gate P(TP-first | triggered setup) trained on mechanically-computed bracket outcome labels over purged train; VAL selection over (b,W) x gate threshold {0.45,0.50,0.55,0.60} requires VAL PnL > 0, >=15 trades, AND positive PnL in >=3 of the 4 VAL months (pre-registered stability screen against grid-size selection noise). ONE OOS read for the single selected config; adoption requires OOS PnL > 0. Ambiguous same-bar double-trigger bars are skipped; entry fills at stop price with the standard 10bps roundtrip; SL checked before TP within every bar including the entry bar.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "bracket_breakout_tb_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "mechanical +/-b*sigma stop-entry bracket with TB exits, gated by per-(b,W) LightGBM binary continuation classifier",
+    "seeds": ["903174"],
+    "seed_ensemble_claim": false
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "selected (b, W, threshold) must have VAL PnL > 0 with >=15 trades and positive PnL in >=3 of 4 VAL months; single OOS read; adoption requires OOS PnL > 0"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

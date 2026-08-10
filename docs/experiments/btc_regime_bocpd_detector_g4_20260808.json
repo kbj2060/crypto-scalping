@@ -1,0 +1,69 @@
+{
+  "name": "btc_regime_bocpd_detector_g4",
+  "date": "2026-08-08",
+  "status": "HALTED at VAL — 0/36 eligible cells, no OOS read spent. The verdict falls on THIS SCRIPT'S direction-assignment step, not on BOCPD.",
+  "outcome": {
+    "eligible_cells": 0,
+    "of": 36,
+    "halted_on": "VAL",
+    "oos_reads_spent": 0,
+    "state_run_bars": "3-4 in EVERY cell, against a 52.4-bar floor",
+    "min_phase_hazard_effect": {
+      "chop0x_agreement_at_100pct_coverage": {"P_min=0": [59.8, 60.0, 60.0], "P_min=24": [59.8, 60.3, 60.8], "P_min=48": [59.4, 59.5, 60.0], "P_min=96": [58.6, 59.0, 59.4]},
+      "reading": "Raising P_min 0 -> 96 (a 4x range) leaves the state run pinned at 4.0 bars and moves agreement by less than 1.5pp, slightly DOWNWARD at the top. The duration prior binds on the run-length axis but DOES NOT PROPAGATE to the direction axis."
+    },
+    "mechanism": "H(r)=0 for r<P_min stops a SPECIFIC hypothesis of length r from ending, but the posterior always retains older hypotheses with r>=P_min (pruning threshold 1e-8) and those supply changepoint mass, so the MAP can jump to a fresh r=0 hypothesis at any bar. This script then recomputes direction each bar as the sign of the move accumulated since the MAP changepoint, so every MAP reset restarts that accumulation near zero and the sign oscillates. Run-length persistence therefore never reaches the state.",
+    "abstention_pattern_reproduced": "chop2x reaches 70.5% agreement at 33.9% coverage while returning -99.55% traded — a textbook instance of the 'high agreement on the easy half' trap this session catalogued.",
+    "reference_points": {
+      "ps_label_ceiling_traded_pct": {"val": 3421.68, "oos": 2473.83},
+      "best_no_learning_baseline": {"name": "czz1.2", "oos_agree": 60.5, "oos_traded_pct": 128.39, "median_run_bars": 46, "switches": 315},
+      "note": "a NO-LEARNING causal zigzag returns +128% traded while every BOCPD cell returns -88% to -99.96% — at 5m, turnover dominates everything"
+    },
+    "what_this_does_and_does_not_settle": {
+      "does_not_settle": "whether BOCPD is a good regime detector. Its run-length recursion was verified correct on synthetic data (true changepoints at 300/600 detected at 303/605, 3-5 bar lag).",
+      "does_settle": "that 'MAP run length -> sign of accumulated move' is not a usable direction rule at 5m resolution.",
+      "fix_for_a_future_contract": "do not recompute direction per bar. Either (a) apply the jump-penalized causal decode directly to a BOCPD-derived bull probability, reusing the technique that already works in this project, or (b) update direction only when the changepoint probability crosses a threshold, i.e. add hysteresis. Both belong in a NEW contract; neither is a mid-run gate change."
+    },
+    "implementation_bug_found_and_fixed_before_the_run": "pruning compacts the run-length arrays, so indexing the hazard by array POSITION silently decouples H(r) from r. The smoke test caught it (run length pinned at 2). Fixed by carrying an explicit `rvals` array of true run lengths. This class of bug is dangerous because it is silent — no crash, no NaN, just a plausible-looking state sequence, and it would have produced the same 'min-phase hazard does nothing' conclusion for an entirely spurious reason.",
+    "results": "tmp/btc_regime_bocpd_20260808/results.json"
+  },
+  "status_note_original": "PRE-REGISTERED — G4, BOCPD as the causal counterpart of the PS label",
+  "method": "Adams & MacKay (2007), Bayesian Online Changepoint Detection. Gaussian observations, Normal-Inverse-Gamma conjugate prior, Student-t posterior predictive, truncated run-length posterior.",
+
+  "why_bocpd_and_not_another_classifier": {
+    "structural_match": "PS is retrospective segmentation + a direction per phase. BOCPD is CAUSAL segmentation + a direction for the current run — the same object computed online. It is the causal counterpart of the label, not a different model of it.",
+    "the_piece_that_matters": "BOCPD carries an explicit HAZARD FUNCTION over run length, so PS's defining constraint (a minimum phase duration) can be written directly into the decoder: H(r)=0 for r<P_min, H(r)=h thereafter. A single scalar lambda in the jump-penalized decode cannot express that.",
+    "consistency_with_what_today_established": "Repeatedly this session the DECODER, not the probability model, did the work — the same LGBM probabilities scored 67.3% VAL by per-bar argmax with unusable 3-bar runs, and became usable only under jump-penalized decoding. So the principled next step is a decoder that can represent the label's own constraint."
+  },
+
+  "the_control_that_carries_the_argument": {
+    "cell": "P_min = 0, i.e. constant hazard = a geometric duration prior, the same family as the incumbent lambda",
+    "logic": "If the min-phase hazard does not beat the constant-hazard control on VAL, then encoding PS's constraint bought nothing — and that verdict stands regardless of how BOCPD scores overall. This is the one comparison that isolates the thesis rather than the method."
+  },
+
+  "grid": {
+    "P_min_bars": [0, 24, 48, 96],
+    "expected_extra_bars_after_min_phase": [200, 400, 800],
+    "chop_band_as_multiple_of_round_trip_cost": [0.0, 1.0, 2.0],
+    "n_val_cells": 36
+  },
+
+  "causality": "Every quantity uses bars <= t: the run-length posterior is the standard online recursion, direction is the sign of the price move accumulated since the MAP changepoint, and observations are standardised with TRAIN-only moments.",
+
+  "gates": {
+    "eligibility": "coverage >= 50% AND median run >= 52.4 bars (a quarter of the PS label's own 209.5-bar median run — derived from the target, not carried over)",
+    "beats_no_learning_baseline": "OOS agreement vs the PS label must exceed the best VAL-eligible causal-zigzag baseline (czz at 0.5/0.8/1.2/2.0/3.0%)",
+    "traded_return_positive": "HEADLINE — the state is traded directly on OOS (position +1/0/-1, 0.42% round-trip per switch) and must return > 0. Agreement has repeatedly moved in this project without moving PnL, so an agreement-only win does not pass.",
+    "min_phase_hazard_beats_constant_hazard_control": "the VAL winner must not be a P_min=0 cell and must beat the best P_min=0 cell on VAL agreement",
+    "adopt": "all four",
+    "oos_reads": 1
+  },
+
+  "scope": "Still a detector line. A pass would mean the project has, for the first time, a causally-detectable regime label whose detector earns a positive traded return of its own. It does not reopen the regime-conditioned ENTRY axis (closed at three layers) nor the czz_trend sizing overlay (closed on mechanism).",
+
+  "artifacts": {
+    "script": "scripts/g4_btc_regime_bocpd_detector_20260808.py",
+    "results": "tmp/btc_regime_bocpd_20260808/results.json",
+    "states": "data/research/btc_regime_bocpd_states_20260808.parquet"
+  }
+}

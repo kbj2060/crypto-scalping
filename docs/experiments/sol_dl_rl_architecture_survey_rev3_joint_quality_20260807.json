@@ -1,0 +1,42 @@
+{
+  "schema_version": "architecture_experiment_contract_v2",
+  "experiment_id": "sol-dl-rl-architecture-survey-rev3-joint-quality-20260807",
+  "hypothesis": "Training the SOL TabM-flat entry model as a multi-task network -- shared BatchEnsemble trunk with the parent 3-class soft race-conviction head PLUS two per-side TP-first binary heads, optimized jointly -- improves the fresh-forward stack over the frozen parent (VAL +0.65% / OOS +4.08%), where rev2 showed the same quality signal FAILS as a post-hoc external gate. Mechanism claim: joint optimization regularizes the shared representation and calibrates the direction probabilities, instead of deleting trades after the fact.",
+  "research": {
+    "line_id": "sol_dl_rl_architecture_survey",
+    "related_prior_line_ids": ["btc_5m_quality_classifier_stack"],
+    "prior_failure_reassessment": "Rev2 (same day) closed the post-hoc quality-gate design: every external LightGBM TP-first gate level reduced VAL PnL on this exact parent. That verdict does not settle the joint-training question -- a post-hoc gate can only remove trades from a frozen decision stream, while joint training changes the decision stream itself; BTC's quality-stack failures were likewise all post-hoc or two-stage, never a single-trunk multi-task fit against the corrected TB label.",
+    "retest_design": "Same panel, label, splits, purge+embargo, standardization, costs, and 5 contract seeds as the parent survey. Grid pre-registered and closed: lambda in {0.25, 1.0} (quality-BCE weight) x entry rules {side_prob_055 (parent-frozen), side_prob_055 AND own-quality>=0.45, side_prob_055 AND own-quality>=0.50} = 6 configs, selected on seed-mean VAL PnL with >=15 seed-mean trades. Early stop on the model's own joint VAL loss. Gate: best config must beat the parent baseline VAL +0.65% to earn ONE OOS read; OOS adoption additionally requires seed-mean OOS > 0 with >=3/5 seeds positive. If the VAL gate fails, the joint-quality axis closes with no OOS read.",
+    "monetization_status": "research_only"
+  },
+  "market": {"symbols": ["SOLUSDT"], "bar_interval": "5m"},
+  "data": {
+    "feature_dataset": "data/splits/year_oos/sol_features_2024_2026.csv",
+    "raw_sources": ["klines", "derivatives_funding_oi", "orderflow_microstructure", "cross_asset_btc"]
+  },
+  "features": {
+    "groups": ["ohlcv_raw", "derivatives_funding", "orderflow_microstructure", "volatility", "momentum_trend", "cross_asset_btc", "structural_price_location", "time_session", "cvp_volume_profile"],
+    "timestamp_column": "timestamp",
+    "analysis_target": "close"
+  },
+  "higher_timeframe": {
+    "enabled": false,
+    "availability_artifact": "",
+    "decision_timestamp_column": "decision_timestamp",
+    "source_available_at_column": "source_available_at"
+  },
+  "label": {"type": "triple_barrier_trade_outcome", "horizon_bars": "288", "timeout_handling": "explicit_class"},
+  "splits": {
+    "train_end": "2025-08-31", "validation_start": "2025-09-01",
+    "validation_end": "2025-12-31", "oos_start": "2026-01-01", "oos_end": "2026-03-31"
+  },
+  "model": {
+    "cheap_gate_family": "lightgbm",
+    "candidate_architecture": "JointTabM: shared 8-expert BatchEnsemble trunk (128x3) with 3-class soft-KL direction head + 2 per-side TP-first BCE heads, loss = KL + lambda*BCE",
+    "seeds": ["903174", "42517", "6688211", "15093", "771442"],
+    "seed_ensemble_claim": true
+  },
+  "selection": {"minimum_trades_per_split": "15", "validation_pass_criteria": "best of the 6 pre-registered configs on seed-mean VAL PnL must exceed the frozen parent baseline +0.6507% with seed-mean trades >= 15; single OOS read for that config only; OOS adoption requires seed-mean > 0 and >=3/5 seeds positive"},
+  "execution": {"entry_timing": "next_bar_open", "cost_model": "10bps_roundtrip_on_price_move", "sizing_contract": "margin_fraction_times_leverage"},
+  "evaluation": {"candidate_selection_scope": "validation_only", "final_evaluation": "fresh_forward_oos_only"}
+}

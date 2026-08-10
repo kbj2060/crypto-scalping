@@ -1,0 +1,50 @@
+{
+  "name": "btc_regime_label_design_bullbearchop",
+  "date": "2026-08-08",
+  "status": "PRE-REGISTERED — Stage 0 label-quality battery, no learning, no PnL read",
+
+  "what_is_different_about_this_line": "Every regime line closed on 2026-08-08 held the LABEL fixed and varied the CLASSIFIER. This one varies the label definition itself and asks which 3-state (bull/bear/chop) labelling is best. The incumbent oracle has NO chop state at all — it forces a directional call on every bar, including bars that are genuinely undecidable.",
+
+  "the_measurement_problem_stated_up_front": {
+    "problem": "A label cannot be scored against an oracle, because the label IS the oracle. There is no ground truth for 'was this really chop'.",
+    "resolution": "Score labels on properties that do not need an external reference: does the labelling SEPARATE outcomes, does that separation PERSIST out of sample against a random-relabelling null, is it PERSISTENT enough to act on, and is it BALANCED. The separation-persistence gate is the one that has actually discriminated in this project — it is what killed the direction differential (survives train->VAL 84-96%, dies train->OOS 36-52%)."
+  },
+
+  "principled_anchor_for_chop": {
+    "idea": "chop should mean 'the state where trading does not pay', which makes the threshold a CONSEQUENCE of costs rather than a free parameter — repairing the incumbent label's arbitrariness.",
+    "two_costs_that_must_both_be_paid": {
+      "confirmation_tax": "2*theta — the price move a CAUSAL detector must observe before it knows the wave turned. At theta=0.5% that is 1.00%.",
+      "round_trip_trading_cost": "2*(fee+slip) = 0.14% at 1x; 0.42% at the replay's cost_mult=3"
+    },
+    "capturable_amplitude": "net = wave_amplitude - 2*theta - trading_cost. A wave with net <= 0 is unmonetisable no matter how well it is detected, so it IS chop by construction.",
+    "immediate_consequence_to_check": "the theta=0.005 family has median wave amplitude 0.97% against a confirmation tax of 1.00% alone — under a cost-aware definition nearly the WHOLE theta=0.5% wave family should classify as chop, which would explain directly why the frozen detector cannot pay."
+  },
+
+  "label_families": [
+    {"id": "zigzag_pure", "params": "theta", "note": "incumbent — no chop state, the baseline every candidate must justify itself against", "causal": false},
+    {"id": "zigzag_amp", "params": "theta, min_amplitude", "note": "wave direction if amplitude >= A else chop", "causal": false},
+    {"id": "zigzag_net", "params": "theta, margin", "note": "THE COST-AWARE ONE — direction if (amplitude - 2*theta - cost) >= margin else chop", "causal": false},
+    {"id": "efficiency_ratio", "params": "window, min_er", "note": "Kaufman ER = |net move| / sum|bar moves| over a TRAILING window; direction by sign of the net move if ER >= e else chop", "causal": true},
+    {"id": "range_band", "params": "window, min_range", "note": "chop if trailing window range < r, else direction by sign of the net move", "causal": true},
+    {"id": "zigzag_duration", "params": "theta, min_bars", "note": "chop if the wave is shorter than D bars", "causal": false}
+  ],
+
+  "causality_note_worth_reporting": "The ER and range-band families are computed on TRAILING windows, so they are causal BY CONSTRUCTION — they need no detector at all. The entire detector enterprise exists only because the zigzag label is retrospective. If a causal label family separates outcomes as well as a retrospective one, it collapses label+detector into a single object and removes detection lag from the problem.",
+
+  "gates": {
+    "G1_cost_validity": "in chop bars the median capturable move must be <= 0, and in bull/bear bars > 0. This is the definition's own claim and it must hold OOS, not just where it was constructed.",
+    "G2_separation_persists": "forward-return ordering bull > chop > bear must hold on TRAIN and still hold on OOS, and the OOS effect must beat a random-relabelling null (circular shift of the state vector, preserving state counts and run structure, R=200). THIS IS THE HEADLINE GATE.",
+    "G4_persistence": "median run >= a floor derived from that label's OWN median wave (one quarter of it), not a floor carried over from another label",
+    "G5_coverage_balance": "chop occupancy in [15%, 60%] — a label whose chop swallows 81% (the retired HMM's behaviour last week) or 0% (the incumbent) is degenerate",
+    "G3_learnability_deferred": "whether a causal detector can recover the label is a SECOND stage, run only on labels that survive G1/G2/G4/G5. Testing learnability first would repeat the mistake of optimising a detector for a label with no validated value."
+  },
+
+  "explicitly_not_in_this_stage": ["no classifier is trained", "no PnL or MDD is computed", "no live config is touched"],
+
+  "scope": "A label that passes still needs a consumer. The detector axis currently has none — accuracy went 61.3 -> 68.4% with zero entry-PnL movement and the last candidate consumer closed the same day. What a cost-aware chop state could plausibly buy is an ABSTENTION rule (do not trade here), which is a different and cheaper claim than a directional edge.",
+
+  "artifacts": {
+    "script": "scripts/stage0_btc_regime_label_design_20260808.py",
+    "results": "tmp/btc_regime_label_design_20260808/stage0.json"
+  }
+}

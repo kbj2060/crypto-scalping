@@ -1,0 +1,53 @@
+{
+  "name": "btc_regime_timeliness_first_20260808",
+  "created": "2026-08-08T (written BEFORE any OOS read of this candidate)",
+  "asset": "BTCUSDT",
+  "reference_definition": {"oracle": "retrospective zigzag wave direction", "theta": 0.005},
+
+  "why_this_contract_exists": "The early-wave research round found exactly one lever that buys early-wave accuracy for free: a causal turn-suspect routing overlay at boost 0.5 raises first-quintile agreement from 34.0% to 49.8% on VAL while leaving total agreement unchanged at 70.1%. It failed the standing selection gate on ONE criterion only -- median run 5 bars against a floor of 8. That floor was chosen for a STABILITY-first labelling objective (half of the oracle's 16-bar median wave). Lowering it inside that contract would be post-hoc goalpost-shifting, so this separate contract states a TIMELINESS-first objective and derives its own floor from principle. The OOS window has NOT been read for this candidate; that read happens once, after this file is written.",
+
+  "objective": "Label the current wave direction as EARLY AS POSSIBLE after a turn, without giving up total accuracy and without degenerating into per-bar noise.",
+
+  "candidate": {
+    "form": "post-processing OVERLAY on the frozen detector -- the frozen model is not retrained and remains intact underneath",
+    "base": "btc_regime_theta005_zigzagonly_S2fine5_lam05 (data/research/btc_regime_theta005_frozen_config_20260808.json)",
+    "turn_suspect_state": "causal zigzag at theta=0.001 disagrees with causal zigzag at theta=0.005 (both nonzero). Causal: both are online state machines. Active on 46.1% of VAL bars and covers 54.6% of first-quintile bars.",
+    "overlay": "logit(p) := logit(p_frozen) + 0.5 * czz(0.001) on turn-suspect bars, unchanged elsewhere",
+    "decode": "unchanged: jump-penalized causal online DP, lambda=0.5",
+    "boost_value_is_fixed": "0.5 is NOT swept here. It is the unique point in {0.5, 1.0, 2.0} with ZERO total-accuracy cost on VAL (70.1 vs 68.2 vs 65.3), which is what the objective 'buy earliness only where it is free' selects. No further tuning."
+  },
+
+  "run_floor_derivation": {
+    "value_bars": 4,
+    "principle_1": "a run shorter than the detector's own post-pivot detection lag (3-4 bars) would flip before the turn it claims could have been confirmed, i.e. pure noise",
+    "principle_2": "one quarter of the theta=0.005 oracle's 16-bar median wave",
+    "note": "both principles independently give 4 bars. The stability-first contract's floor of 8 (half a wave) is retained for that contract; it is not amended."
+  },
+
+  "val_measured_before_this_contract": {"total_pct": 70.1, "q1_pct": 49.8, "median_run_bars": 5.0, "coverage_pct": 100.0},
+  "frozen_baseline_for_reference": {"val_total": 70.1, "val_q1": 34.0, "oos_total": 68.0, "oos_q1": 30.8, "median_run_bars": 8.0},
+
+  "adoption_gates_single_oos_read": {
+    "gate_1_no_accuracy_regression": "OOS total agreement >= 67.0 (frozen model's OOS 68.0 minus at most 1.0pp)",
+    "gate_2_timeliness_gain_persists": "OOS first-quintile agreement >= 38.8 (frozen model's OOS Q1 30.8 plus at least half of the +15.8pp VAL gain)",
+    "gate_3_run_floor": "OOS median run >= 4 bars",
+    "gate_4_not_a_phase_artifact": "lag-profile peak lag >= 0 bars. Mandatory because the same research round produced a candidate with a spectacular Q1 (84.1%) that turned out to be a phase shift into noise (peak agreement 53.2% at -66 bars). A leading peak here would mean the Q1 gain is positional, not informational.",
+    "gate_5_detection_lag": "OOS median post-pivot detection lag <= the frozen model's 3 bars",
+    "all_must_pass": true
+  },
+
+  "if_adopted": "Kept ALONGSIDE the stability-first frozen detector, not replacing it: two detectors for two jobs. Stability-first (8-bar runs) for regime labelling and charting where flicker is costly; timeliness-first for early-turn detection. Both recipes live in their own frozen-config JSONs and downstream code must name which one it reads.",
+  "if_it_fails": "The lever is closed. No re-tuning of boost, lambda, or the floor on this validation window.",
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "oracle_is_scoring_only": true
+  },
+
+  "scope_limit": "This is a DETECTOR contract, not a trading contract. Nothing here claims tradeable edge: the theta=0.005 median wave amplitude (0.97%) is below the 2x0.5% confirmation cost, and a 4-5 bar median run implies heavy turnover. Promotion to any entry/sizing role requires its own contract with PnL gates.",
+
+  "script": "scripts/adopt_btc_regime_timeliness_first_20260808.py"
+}

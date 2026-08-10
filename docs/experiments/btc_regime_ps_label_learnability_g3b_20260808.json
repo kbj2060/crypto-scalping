@@ -1,0 +1,69 @@
+{
+  "name": "btc_regime_ps_label_learnability_g3b",
+  "date": "2026-08-08",
+  "status": "COMPLETE — the corrected staging worked (9 eligible cells vs G3's 0) and ONE OOS read was made. ADOPT = false.",
+  "outcome": {
+    "stage_0_regression_gate": "PASSED — incumbent reproduced at VAL 70.1 / OOS 68.0",
+    "correction_worked": "9 of 18 cells cleared the 52.4-bar floor once lambda was swept in the same stage as the gate, against 0 of 6 in G3. The halt in G3 was purely a staging artifact.",
+    "val_grid_frontier": {
+      "S2_fine5": {"lam1": [65.3, 21, 864], "lam2": [64.7, 33, 612], "lam4": [63.9, 42, 498], "lam8": [63.2, 56, 397], "lam16": [60.7, 86, 291], "lam32": [57.2, 110, 197]},
+      "S_coarse5": {"lam1": [64.1, 24, 768], "lam2": [63.8, 31, 624], "lam4": [63.2, 43, 466], "lam8": [61.6, 73, 331], "lam16": [58.2, 102, 237], "lam32": [55.2, 149.5, 155]},
+      "S_wide7": {"lam1": [65.1, 20, 886], "lam2": [65.0, 29, 662], "lam4": [64.3, 40, 480], "lam8": [63.1, 70.5, 327], "lam16": [59.4, 103.5, 231], "lam32": [55.7, 144, 161]},
+      "format": "[VAL agree, median run bars, switches]",
+      "reading": "a clean monotone frontier — lambda up, run up, agreement down. No cell escapes it."
+    },
+    "val_winner": "S2_fine5|lam8 (VAL agree 63.2, run 56.0)",
+    "would_have_won_with_no_run_floor": "S2_fine5|lam1 (agree 65.3, run 21)",
+    "oos_single_read": {"agree": 61.8, "coverage_pct": 100.0, "median_run_bars": 47.0, "n_switches": 357, "traded_return_pct": -55.66},
+    "gates": {"eligible": false, "beats_no_learning_baseline_agreement": true, "traded_return_positive": false, "adopt": false},
+    "why_eligible_failed": "VAL run 56.0 cleared the 52.4 floor; OOS run fell to 47.0 and missed it. The persistence itself did not transfer.",
+    "THE_RESULT_THAT_MATTERS": {
+      "comparison": {"LGBM_lam8": {"agree": 61.8, "run": 47.0, "switches": 357, "traded_pct": -55.66}, "czz1.2_no_learning": {"agree": 60.5, "run": 46.0, "switches": 315, "traded_pct": 128.39}},
+      "statement": "At matched persistence (47 vs 46 bars) and matched turnover (357 vs 315 switches), the LEARNED detector is 1.3pp MORE accurate against the label and returns 184 percentage points LESS. Agreement with a regime label and PnL are close to unrelated.",
+      "mechanism": "agreement weights every bar equally; PnL weights bars by |return|. czz1.2 is a PRICE-based rule so its errors are structurally concentrated on small moves, while the LGBM's errors carry no such alignment and land on large ones.",
+      "consequence_for_this_arc": "This confirms the user's objection and indicts the headline gate of BOTH G3/G3b and G4: a regime classifier must not be scored by traded return. Those contracts evaluated a description-defined object with an entry-model criterion."
+    },
+    "results": "tmp/btc_regime_ps_g3b_20260808/results.json",
+    "cached_probabilities": "tmp/btc_regime_ps_g3b_20260808/probs_{S2_fine5,S_coarse5,S_wide7}.npy — future lambda work is post-processing, no retrain"
+  },
+  "status_note_original": "PRE-REGISTERED — corrected re-run of G3",
+  "supersedes": "docs/experiments/btc_regime_ps_label_learnability_g3_20260808.json (halted at Stage 1 on a contract design error)",
+
+  "what_was_wrong_with_g3": "G3 evaluated the median-run floor at Stage 1 under an INHERITED lambda=2, but lambda is the knob that CONTROLS run length and was only to be swept at Stage 2. All 6 cells landed at 28-33 bars against a 52.4-bar floor and the run halted before lambda was ever tuned. Applying a persistence floor before the persistence knob is chosen does not serve the floor's purpose (rejecting confetti) — it tests one arbitrary lambda.",
+
+  "what_changes_and_what_does_not": {
+    "floor_value_UNCHANGED": "52.4 bars, still one quarter of the PS label's own 209.5-bar median run. This is a correction of WHERE the gate is evaluated, not a relaxation of the bar.",
+    "stage_structure_changed": "featset x lambda are now selected JOINTLY on VAL, with the floor applied at that same stage.",
+    "oos_still_unspent": "G3 halted before any OOS read, so this contract can still make ONE clean OOS read.",
+    "grid_narrowed_on_the_recorded_VAL_screen": "mode is fixed to `state`: geo lost in all three feature sets on G3's VAL screen (64.7->63.5, 63.8->61.0, 65.0->61.7). Narrowing on VAL is what VAL is for, and the screen is on the record."
+  },
+
+  "grid": {
+    "featsets": ["S2_fine5", "S_coarse5", "S_wide7"],
+    "mode": "state",
+    "lambda": [1, 2, 4, 8, 16, 32],
+    "note": "lambda extended above G3's {0.5..8} because runs sat at 28-33 bars at lambda=2 and may need considerably more penalty to reach 52.4. Extended BEFORE seeing any lambda result.",
+    "n_val_cells": 18
+  },
+
+  "gates": {
+    "stage_0_regression_gate": "reproduce the frozen incumbent at VAL 70.1 / OOS 68.0 (+/-0.3pp) or HALT",
+    "eligibility": "coverage >= 50% AND median run >= 52.4 bars, evaluated on the joint featset x lambda grid",
+    "primary_agreement": "OOS agreement vs the PS label must exceed the best VAL-eligible no-learning czz baseline (czz1.2, OOS 60.5)",
+    "decisive_value_gate": "the decoded state traded directly on OOS must return > 0",
+    "adopt": "all three",
+    "oos_reads": 1
+  },
+
+  "weakness_of_the_value_gate_recorded_up_front": "'> 0' is a weak bar: the no-learning czz0.5 returns +533.16% traded on OOS. A detector can pass this gate while being far worse than a definitional rule. The gate is left as pre-registered rather than tightened mid-arc, but the verdict WILL report the traded return against every baseline, and 'passed the gate but lost to a no-learning rule' will be stated as such.",
+
+  "secondary_reported_not_selected_on": "the cell that WOULD have won with no run floor at all, recorded so the cost of the floor is visible rather than hidden.",
+
+  "caching": "seed-bagged probabilities are written to disk this time, so any future lambda work is post-processing rather than a retrain.",
+
+  "artifacts": {
+    "script": "scripts/g3b_btc_regime_ps_label_lambda_joint_20260808.py",
+    "results": "tmp/btc_regime_ps_g3b_20260808/results.json",
+    "probs": "tmp/btc_regime_ps_g3b_20260808/probs_{featset}.npy"
+  }
+}

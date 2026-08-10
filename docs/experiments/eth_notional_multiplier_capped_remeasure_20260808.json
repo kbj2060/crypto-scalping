@@ -1,0 +1,88 @@
+{
+  "name": "eth_notional_multiplier_capped_remeasure_20260808",
+  "schema_version": "architecture_experiment_contract_v3",
+  "created": "2026-08-08, written BEFORE any capped multiplier number was computed",
+  "asset": "ETHUSDT (inside the 3-asset concurrent portfolio)",
+  "question": "Under the ACTUAL live portfolio configuration (total_notional_cap=3.0, shares eth50/btc30/sol20, duration gate OFF), does FINAL_GOVERNOR_OMEGA4_6_1_ETH_NOTIONAL_MULTIPLIER=1.5 still have any support, or should it revert to the 1.0x default?",
+
+  "framing_that_sets_the_burden_of_proof": {
+    "this_is_not_a_selection": "1.0x is the DEFAULT — it means 'use the notional the risk sidecar itself computed'. 1.5x is an ACTIVE INTERVENTION layered on top of a model that already calibrated its own margin_fraction/leverage (a risk the 07-12 baseline doc itself flagged in writing). Removing an unsupported intervention is not the same act as adopting a new tuned value.",
+    "consequence": "No fresh window is required to REVERT, because reverting fits nothing. A fresh window would be required to ADOPT some other multiplier — and this contract forbids adopting any value other than 1.0x or 1.5x.",
+    "grid_is_frozen": "The multiplier grid is exactly the 07-12 grid [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]. Reported in full for shape, but ONLY 1.0x and 1.5x are decidable outcomes. Picking 1.25x because it scores well would be post-hoc selection and is explicitly forbidden."
+  },
+
+  "prior_evidence_stated_up_front": {
+    "why_1.5x_was_chosen_20260712": "docs/model_contracts/portfolio_concurrent_3asset_CURRENT_BASELINE_20260712.md: chosen (not the PnL-maximising 3.0x) because it was 'the point where OOS improves meaningfully over 1.0x', with validation sign-inversion above ~2.0-2.5x as the ceiling constraint. Note this makes 1.5x an OOS-SELECTED value; validation monotonically preferred 1.0x even then.",
+    "uncapped_recheck_20260808": "scripts/rerun_portfolio_sweep_current_data_20260808.py, tmp/portfolio_sweep_recheck_20260808/report.json. On current data, UNCAPPED, gate off, 1.0x strictly dominates 1.5x on ALL THREE splits and BOTH axes: validation +28.28/−30.94 vs +22.90/−36.71; oos_extended +102.84/−31.20 vs +64.66/−37.82; oos_frozen_q1_2026 +151.72/−22.34 vs +113.47/−37.10. The stated reason for choosing 1.5x (OOS improves over 1.0x) is therefore REFUTED uncapped, and the 07-12 'PnL rises monotonically with the multiplier' claim does not reproduce (now non-monotone: dips at 1.5-2.0, jumps at 2.5).",
+    "what_is_still_unknown_and_is_why_this_contract_exists": "That recheck ran UNCAPPED, but live runs total_notional_cap=3.0. `asset_notional_multipliers` is applied unconditionally BEFORE cap_mode, so a binding cap attenuates the multiplier — possibly to the point where 1.0x and 1.5x converge. The uncapped result cannot be transferred to live.",
+    "companion_result_that_does_reproduce": "The duration-gate stress test at the live reference config DID reproduce: gate_off strictly dominates gate_on on both OOS splits. The live gate-off setting is verified and is NOT in question here."
+  },
+
+  "window_honesty": {
+    "validation_2025Q4": "Reproduces the 07-12 numbers to the decimal (1.0x +28.28, 2.0x +12.17, 2.5x −2.39, 3.0x −18.98), i.e. 2025Q4 data has settled and is unrevised. It was used in 2026-07-12 as a CONSTRAINT (the sign-inversion ceiling), not as the selector. Usable here as supporting evidence, not as sole proof.",
+    "oos_extended_2026H1": "CONTAMINATED — this is the window that SELECTED 1.5x in the first place, and it has been read repeatedly on 2026-08-08. It cannot select anything here. It can only fail to support the incumbent.",
+    "oos_frozen_q1_2026": "Subset of oos_extended; NOT independent. Reported, never counted as a second window.",
+    "mitigation": "Because the only decidable outcomes are 'keep the intervention' or 'remove it', contamination cuts in the safe direction: a contaminated window that still fails to support 1.5x is strong evidence against it, since that window is the one biased in its favour."
+  },
+
+  "configuration_under_test": {
+    "total_notional_cap": 3.0,
+    "cap_mode": "prealloc",
+    "asset_shares": {"eth": 0.5, "btc": 0.3, "sol": 0.2},
+    "duration_gate": "off",
+    "btc_sol_multipliers": 1.0,
+    "eth_multiplier_grid": [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+  },
+
+  "declared_gaps_between_this_replay_and_live": [
+    "The portfolio replay does NOT model FINAL_GOVERNOR_OMEGA4_6_1_ETH_CHOP_SOFT_SIZE_ENABLE=True (grep: no chop handling in replay_portfolio_concurrent_3asset_native_20260712.py or replay_portfolio_rl_gate_2action_native_20260708.py). Live applies an additional chop-conditional size reduction this test cannot see.",
+    "Live applies the multiplier inside trading_bot.py at decision time (trading_bot.py:9224) and the cap at trading_bot.py:11412; the replay applies both in its own engine. Parity between the two has not been re-verified today.",
+    "Costs/slippage follow the replay's model, not live fills.",
+    "Therefore this test answers 'is 1.5x supported under a binding cap in the replay', NOT 'what will live earn'."
+  ],
+
+  "pre_registered_gates": {
+    "G0_regression_HALT": {
+      "rule": "re-running the UNCAPPED multiplier grid inside the same script must reproduce today's uncapped numbers for 1.0x and 1.5x on all three splits to within 0.05pp on PnL and MDD",
+      "on_fail": "HALT. A harness that cannot reproduce the uncapped run cannot be trusted for the capped one."
+    },
+    "G1_capped_dominance": {
+      "rule": "Under cap=3.0, compare 1.0x vs 1.5x on all three splits and both axes (PnL, MDD).",
+      "retain_1.5x_only_if": "1.5x beats 1.0x on PnL in at least 2 of 3 splits AND worsens MDD by no more than 2.0pp on every split",
+      "otherwise": "RECOMMEND REVERT to 1.0x",
+      "rationale": "burden is on the intervention, per the framing above"
+    },
+    "G2_convergence_check": {
+      "rule": "report |PnL(1.5x) − PnL(1.0x)| under the cap versus the same quantity uncapped",
+      "purpose": "quantifies how much the cap attenuates the multiplier. If the gap collapses toward zero, the honest conclusion is 'the flag barely matters under the live cap', which is a different (and weaker) statement than 'revert because 1.0x is better'. This distinction must be stated in the verdict."
+    },
+    "G3_effect_size": {
+      "rule": "see selection.effect_size_gate",
+      "instrument_note": "A per-trade Welch t between 1.0x and 1.5x is DEGENERATE when the cap is not binding, because the multiplier is a deterministic scale on the same trades — the same trap as the multislot variance ratio 0.104 on 2026-08-08. The operative instruments are therefore: (a) MONTHLY paired differences with a sign test, (b) dominance across all three splits on both axes, (c) the risk channel (MDD) reported explicitly rather than inferred. min_abs_t is applied to the monthly difference series, not to per-trade returns, and this substitution is declared here rather than discovered later."
+    },
+    "G4_outcome_ceiling": {
+      "rule": "This contract may RECOMMEND reverting the .env flag to 1.0x. It may NOT change any live configuration. The .env edit is the user's decision and requires their explicit approval.",
+      "also_forbidden": "adopting 1.25x, 1.75x or any value other than 1.0x/1.5x, on any evidence produced here"
+    }
+  },
+
+  "selection": {
+    "effect_size_gate": {
+      "min_abs_t": 2.0,
+      "min_permutation_percentile": 0.90,
+      "risk_channel_tested": true,
+      "premise_checked_in_selection_window": true,
+      "applied_to": "monthly PnL difference series (1.0x minus 1.5x) under the cap, per split; see G3.instrument_note for why per-trade returns are not used"
+    }
+  },
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "method": "3-asset concurrent bar-by-bar replay via replay_portfolio_concurrent_3asset_native_20260712._replay_concurrent; worlds built once per split from causal panels and replayed per config; no saved ledger is read as input"
+  },
+
+  "script": "scripts/remeasure_eth_notional_multiplier_capped_20260808.py"
+}

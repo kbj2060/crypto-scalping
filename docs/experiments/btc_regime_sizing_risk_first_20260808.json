@@ -1,0 +1,56 @@
+{
+  "name": "btc_regime_sizing_risk_first_20260808",
+  "created": "2026-08-08 (written before any risk-metric was computed for the unread maps)",
+  "asset": "BTCUSDT",
+  "line": "regime-conditioned SIZING overlay on the promoted swingtransition stack, judged on RISK",
+
+  "why": "The PnL-first version of this line (docs Part 3) selected czz_trend on VAL and took one OOS read: gated PnL +7.17% vs the baseline's +10.76%, so it missed a PnL bar and was not adopted -- but its MDD improved from -12.41% to -7.72% and its worst quarter from -0.87% to -2.71%. The literature's own use of regimes is exposure reduction, not direction (Shu & Kolm 2024 report the jump-model allocation's headline as max drawdown -55.2% -> -24.5% with return roughly unchanged). This contract re-poses the question with risk as the objective it was always suited to.",
+
+  "honest_constraints": [
+    "NO virgin holdout exists. czz_trend's 2026 window (Q1-Q3) was already read under the PnL contract, so a fresh single-read referee is not available and pretending otherwise would be dishonest.",
+    "The maps are FIXED rules with no fitted parameters (multipliers and thresholds are literals), so the project's frozen-rule protocol applies: evaluate across K non-overlapping periods and judge CONSISTENCY, rather than take one more window. This is the same reasoning used in research_btc_h48qual_sigma9regime_lowo_verified_20260802.py.",
+    "Trade counts are small: 10-14 gated trades on VAL and 41 on OOS, ~51 total. Any single-period risk number is noise. That is why the primary evidence is a bootstrap distribution plus per-period consistency, not a point estimate.",
+    "Replaying the five maps that were never read on OOS is a new measurement. It happens ONCE, in a single pass, under this contract, with no iteration afterwards."
+  ],
+
+  "candidates": ["identity (baseline)", "jm_trend", "jm_skip_bear", "jm_contra", "czz_trend", "czz_consensus", "jm_consensus"],
+  "candidate_definition": "unchanged from scripts/research_btc_swingtransition_regime_sizing_overlay_20260808.py -- sidecar margin_fraction multiplied by a fixed per-regime multiplier looked up at the ENTRY-SIGNAL bar. Total budget scale, entries, exits and the futures sizing contract (notional = margin x leverage) are untouched.",
+
+  "metrics": {
+    "primary": "max drawdown of the gated equity path (less negative is better)",
+    "secondary": "Calmar = total PnL / |MDD|",
+    "guardrail": "total PnL retention versus identity",
+    "also_reported": ["worst calendar period", "downside deviation of trade returns", "sum of the 5 worst trades", "trade count"]
+  },
+
+  "evaluation_protocol": {
+    "periods": "four natural calendar periods spanning the full ledger: VAL 2025Q4, OOS 2026Q1, 2026Q2, 2026Q3-partial",
+    "bootstrap": "stationary block bootstrap over the trade sequence, B=2000, mean block length 5 trades, applied to the combined ledger; reports P(map MDD better than identity) and the Calmar distribution",
+    "note": "the bootstrap resamples trades, so it measures how much of the observed risk difference survives reordering/resampling -- it does not manufacture new out-of-sample evidence"
+  },
+
+  "adoption_gates": {
+    "gate_1_consistency": "map MDD better than identity in >= 3 of the 4 calendar periods",
+    "gate_2_bootstrap": "P(map MDD better than identity) >= 0.70 over B=2000 resamples",
+    "gate_3_pnl_guardrail": "total PnL >= 60% of identity's total PnL",
+    "gate_4_not_by_starvation": "trade count within 20% of identity's (a map must reduce risk by RESIZING, not by quietly refusing to trade)",
+    "all_must_pass": true,
+    "tie_break_if_several_pass": "lowest |MDD|, then highest Calmar"
+  },
+
+  "if_adopted": "the map becomes a RISK overlay recommendation on the promoted stack, recorded as such. It is NOT a claim of higher PnL -- the PnL-first contract already rejected that. Live wiring would still require the usual promotion audit.",
+  "if_none_passes": "the risk axis is closed for this overlay family and the promoted stack keeps its current sizing.",
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "note": "ledgers are OUTPUTS of the causal replay and are used only for metric computation, never as model input"
+  },
+
+  "scripts": [
+    "scripts/research_btc_swingtransition_regime_sizing_overlay_20260808.py --stage risk",
+    "scripts/analyze_btc_regime_sizing_risk_20260808.py"
+  ]
+}

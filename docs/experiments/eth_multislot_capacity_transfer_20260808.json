@@ -1,0 +1,98 @@
+{
+  "name": "eth_multislot_capacity_transfer_20260808",
+  "schema_version": "architecture_experiment_contract_v3",
+  "created": "2026-08-08, written BEFORE any ETH multi-slot number was computed",
+  "asset": "ETHUSDT",
+  "question": "Does the BTC multi-slot (N=3) CAPACITY lever transfer to the ETH greedy router? ETH runs a hard single position slot; 84% occupancy means most gated signals are discarded. Does harvesting them help, or does it destroy the blocking mechanism that makes h48qual valuable?",
+
+  "what_is_being_transferred": {
+    "lever": "concurrent position slots, N=3, equal budget (each slot sizes at 1/N of the sidecar margin_fraction, leverage unchanged)",
+    "explicitly_NOT_transferred": [
+      "the 1.5x margin multiplier -- strict execution of its own selection rule REJECTS it (VAL PnL is monotone in m, the VAL MDD constraint never binds, so the rule degenerates to 'largest m in grid', selects 2.0x, which then fails its own OOS MDD gate). Including it here would confound capacity with sizing.",
+      "the czz_trend regime sizing overlay -- downgraded to NOT-SUPPORTED on 2026-08-08 and its ETH transfer already failed."
+    ],
+    "why_this_one": "it is a position POLICY with a measured mechanism, not a fitted parameter. Total margin budget is unchanged by construction, so it cannot be a disguised leverage increase.",
+    "N_is_FIXED_at_3_by_this_contract": "No slot-count search is performed. N=3 is BTC's adopted value, transferred as-is. This removes all selection freedom, so no window is 'spent' on selection and the multiple-comparisons debt is zero. A sweep over N is explicitly forbidden under this contract; it would require a new one."
+  },
+
+  "prior_evidence_stated_up_front": {
+    "supporting": {
+      "btc_2026-08-07": "OOS slot occupancy 92%; ~625 duration-gated quality-passing signal clusters discarded vs 41 taken trades. N=3 equal-budget OOS gated +25.30% / -10.77% vs single-slot +10.76% / -12.41% (provenance-corrected 2026-08-08).",
+      "eth_2026-07-28": "ETH slot occupancy measured at 84% -- the same pathology, same order of magnitude.",
+      "eth_2026-08-08": "inside the router, h48qual is only consulted on bars where the account is FLAT; it takes 25 trades standing alone vs 8 inside the router. Capacity is demonstrably binding on ETH."
+    },
+    "ADVERSE -- this contract expects to FAIL": {
+      "blocked_basket_is_losing": "The 2026-08-08 ablation found h48qual's 8 router positions BLOCK 10 zig075 entries, and that blocked basket is mostly losing (six of eight: -6.63, -7.44, -12.60, -5.67, -10.30, -6.84). Multi-slot ADMITS exactly those trades. Removing h48qual entirely cost the router 51pp (paired bootstrap p=0.998).",
+      "side_asymmetry": "ETH's only statistically detectable structure in the 2026H1 ledger is SIDE: shorts +3.66%/trade (n=26) vs longs -2.30% (n=11), Welch t=2.299, p=0.031. Extra capacity plausibly admits more longs.",
+      "btc_precedent_caveat": "BTC's own contract logged that 513 of 625 skipped OOS clusters were LONG in a year where longs lost money.",
+      "consequence": "The prior points to FAILURE. That is precisely why the test is worth running: it is a direct, independent falsification test of the 2026-08-08 blocking finding. A pass means capacity was genuinely binding; a fail independently re-confirms blocking. Both outcomes are informative, and the gates below are written so a fail cannot be re-tuned into a pass."
+    }
+  },
+
+  "window_honesty": {
+    "val_2025-10-01..12-31": "the window the components' bundles/sidecars/scale-map were FIT on. Used here for the PREMISE check (G1) and as a falsification gate (G2). A win here is weak evidence; a loss is strong evidence against.",
+    "oos_2026-01-01..06-30": "HEAVILY CONTAMINATED -- already read by the greedy-router re-validation, the h48qual contribution ablation, the regime-sizing transfer, and the h48qual-alone candidacy. Because N is FIXED by this contract and nothing is selected on any window, this window is still usable as a single confirmatory read, but it cannot support a promotion on its own and must be reported with the contamination named.",
+    "tail_2026-07-01..08-04": "genuinely untouched by the multi-slot question, but thin (~5 weeks). Reported, never decisive.",
+    "forward_live_shadow": "the only clean referee for a live change, and it does not exist yet."
+  },
+
+  "metric_basis": {
+    "primary": "NO-GATE (matches the live wiring: FINAL_GOVERNOR_OMEGA4_6_1_ETH_DURATION_GATE_OFF=True)",
+    "secondary": "duration-gated, for comparability with older ETH numbers",
+    "equity_convention": "single shared cash account; concurrent slots mark to market each bar; trade_return recorded at close as cash_after/cash_before - 1 and the curve compounded in EXIT order (the true realized path). At N=1 exit order equals entry order, so this is byte-identical to the incumbent greedy_replay convention.",
+    "mdd": "trade-level MDD from the ledger curve (the convention the +77.11%/-15.48% headline uses). Bar-level MDD reported as secondary only."
+  },
+
+  "pre_registered_gates": {
+    "G0_regression_HALT": {
+      "rule": "the multi-slot replay run at N=1 must reproduce the incumbent no-gate numbers +77.11% / -15.48% / 37 trades within 0.05pp on PnL and MDD and exactly on trade count",
+      "on_fail": "HALT. Do not report any N=3 number. A refactor that changes the N=1 path invalidates every comparison."
+    },
+    "G1_premise_check_on_VAL": {
+      "rule": "on VAL, the incremental trades that N=3 takes and N=1 does not must have a mean per-trade return > 0",
+      "rationale": "this is the capacity hypothesis stated directly. If the admitted trades lose money on the window the components were fit on, capacity is not the binding constraint on ETH and no OOS read is warranted.",
+      "on_fail": "CLOSE the line. Report the premise failure. Do NOT proceed to the OOS read."
+    },
+    "G2_VAL_falsification": {
+      "rule": "N=3 VAL no-gate PnL >= N=1 VAL no-gate PnL AND N=3 VAL MDD >= N=1 VAL MDD - 3.0pp",
+      "on_fail": "CLOSE the line. No OOS read."
+    },
+    "G3_OOS_single_look": {
+      "rule": "ALL of: N=3 OOS no-gate PnL >= N=1 OOS no-gate PnL + 3.0pp (i.e. >= +80.11%); N=3 OOS MDD >= -18.5%; N=3 positive in BOTH 2026 quarters",
+      "reads_allowed": 1,
+      "on_fail": "CLOSE the axis. No re-tuning of slot count, sizing, or slot policy on OOS."
+    },
+    "G4_effect_size": {
+      "rule": "see selection.effect_size_gate -- a PnL difference must clear |Welch t| >= 2.0 on per-trade returns AND a label-permutation percentile >= 0.90. A paired bootstrap P alone may NOT carry this result.",
+      "rationale": "2026-08-08: a t=0.32 / p=0.75 null difference scored bootstrap P=0.979 on this exact ETH ledger family."
+    },
+    "G5_outcome_ceiling": {
+      "rule": "the BEST outcome available from this contract is 'stand up a parallel ETH multi-slot SHADOW'. Never a live swap.",
+      "rationale": "2026H1 is contaminated and no clean window can justify a live position-policy change; only a forward record can."
+    }
+  },
+
+  "selection": {
+    "effect_size_gate": {
+      "min_abs_t": 2.0,
+      "min_permutation_percentile": 0.90,
+      "risk_channel_tested": true,
+      "premise_checked_in_selection_window": true
+    }
+  },
+
+  "live_wiring_blockers_recorded_now": {
+    "one_way_mode": "ETH live runs one-way USDT-M futures. Concurrent opposite-side slots NET OUT on the exchange, so N=3 as replayed is not directly executable. Live adoption would require hedge mode or a same-side-only slot policy. Recorded before results so a pass cannot silently skip this.",
+    "occupancy_interaction": "if N=3 passes, the 2026-08-08 blocking finding and this result are in direct tension and must be reconciled explicitly, not averaged."
+  },
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "method": "multi-slot extension of the imported greedy_replay execution model; one forward bar loop, entry attempted only into a free slot, fill at open[i+1], exits decided per bar from each slot's own TP/SL and the exit head using bar-i state only. No saved ledger is read as input."
+  },
+
+  "script": "scripts/research_eth_multislot_capacity_transfer_20260808.py"
+}

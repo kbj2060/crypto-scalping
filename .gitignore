@@ -21,6 +21,9 @@ data/ensemble/supervised/clean_regime_bgmm_v5_20260517/training_features_2025_cl
 data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/full_train_macro_79341236e920eed7.npy
 data/ensemble/supervised/hf_v13_multitrack_foundation_parent_v40_20260512/embeddings/full_train_micro_542bcba1ea4390e2.npy
 data/ensemble/unsupervised/btc/isolation_forest_btc.pkl
+data/ensemble/reports/jm_redesign_20260810/cache/
+data/ensemble/reports/jm_redesign_20260810/sparse_cache/
+data/ensemble/supervised/eth_eval_2026_extended_20260809/*.csv
 
 # PyTorch Lightning
 lightning_logs/
@@ -82,3 +85,8 @@ data/ensemble/final_governor_runtime_state.json
 data/ensemble/governor_live_state.json
 data/ensemble/omega4_6_1_shadow_btc_state.json
 data/ensemble/omega4_6_1_shadow_sol_state.json
+data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807.json
+data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807_regime.json
+
+# .env backups can contain live API keys/tokens -- never track
+.env.bak*

@@ -1,0 +1,15 @@
+{
+  "schema_version": "architecture_feature_analysis_v1",
+  "experiment_id": "sol-dl-rl-architecture-survey-20260807",
+  "preflight_dataset_sha256": "85b6edb389dee62d227d6f37c02d3012a24d6010646fc865b9d6f5a8a1c277da",
+  "feature_count": 141,
+  "numeric_feature_count": 141,
+  "constant_feature_count": 0,
+  "exact_duplicate_numeric_feature_pairs": [
+    [
+      "smart_money_flow",
+      "oi_change_rate"
+    ]
+  ],
+  "high_correlation_pairs_abs_ge_0_98": 17
+}
