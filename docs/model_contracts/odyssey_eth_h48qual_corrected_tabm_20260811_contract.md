@@ -165,6 +165,35 @@ eth_h48qual_direction_confidence_calibration_20260811.md`.
 양쪽 스플릿 다 이긴 적 없음). 상세: `docs/experiments/eth_zig075_final15_multiseed_pnl_validation_20260812.md`.
 **h48qual에 이식할 근거 없음 — 이 방향은 닫힘.**
 
+**`quality_head` 대체 메커니즘 리서치 완료 (2026-08-12, Model Architect 페르소나 dispatch, 검증됨)**:
+메타라벨링/셀렉티브 분류/컨포멀 문헌 기준 9개 후보를 검증비용순으로 랭킹. 가장 중요한 신규
+발견 둘: (1) 이 세션이 한 번도 직접 답 안 한 질문 — 게이트를 완전히 없앤 `direction_head` 원본도
+VAL/OOS에서 always-short를 확실히 못 이김(VAL 거의 동률, OOS -18.3pp 격패, 단일 실행) — 즉
+문제가 "quality_head가 나쁜 필터"보다 한 단계 더 근본적임(direction_head 자체의 스킬 미검증).
+(2) 이 레포에 **포트폴리오 레이어에서 이미 시도된 RL/bandit 게이트 선례**가 있음
+(`docs/model_contracts/portfolio_online_bandit_gate_native_20260709.md`, `promotion_pass=False`,
+OOS -18.03%, skip rate 96.64% — 검증 완료). 권장 순서: 재학습 불필요한 3개 테스트(dir_confidence/
+margin/entropy 직접 순위상관, trust score, 레짐별 threshold)를 먼저 병렬로 돌려 스칼라 추출의
+마지막 빈틈을 닫고, 동시에 "direction_head 자체가 always-short 대비 진짜 스킬을 갖는가"를 이
+서브프로젝트의 표준 잣대(N≥5 시드)로 정식 검증. 후자가 음성이면 나머지 후보(메타라벨 재설계,
+evidential, bandit 재구성, 신규데이터 재프레이밍) 전부 근거 약화. 상세:
+`docs/experiments/eth_h48qual_quality_head_replacement_research_20260812.md`.
+
+**✅ 위 후자(candidate 9)를 N=5 시드로 정식 검증 완료 (2026-08-12), 확정된 부정 결과**: 사용자가
+`quality_head` 제거 + `PiecewiseLinearEmbeddings`/`LinearEfficientEnsemble×3` 백본 착수를 제안해
+직접 검증. h48orig 5-seed 재현판(`[260620, 481003, 26611, 903174, 155827]`, 실제 h48qual
+레시피 그대로)의 저장된 예측으로 게이트를 완전히 우회한 `direction_head` 원본 대 always-short —
+**5개 시드 전부, VAL·OOS 전부 always-short에 패배**(VAL -7.32%±11.28 vs +8.52%±1.03, 0/5,
+paired p=0.028; OOS +3.58%±8.70 vs +22.89%±5.15, 0/5, paired p=0.002). 단일 라이브 번들
+실행(위 문단, VAL 거의 동률)보다 5시드 평균은 오히려 더 나쁨 — 라이브 인스턴스가 시드 분포 중
+상대적으로 나은 쪽이었을 가능성. **결론: `quality_head`를 제거해도 `direction_head` 단독으로는
+문제가 풀리지 않는다 — 백본을 교체해도 `direction_head`가 풀고 있는 문제(`zigzag_action`) 자체는
+바뀌지 않으므로, 모델 용량을 늘린다고 이 구간에 없는 신호가 생기지 않는다.** `quality_head`
+대체(후보 1~8) 전체의 근거도 함께 약해짐 — 메타라벨링은 구조상 `direction_head`가 이미 고른
+것의 부분집합만 고를 수 있고, 그 원본에 스킬이 없다는 게 이제 이 프로젝트 표준 잣대로 확정됐기
+때문. 상세:
+`docs/experiments/eth_h48qual_ungated_direction_h48orig_5seed_vs_always_short_20260812.md`.
+
 ## 데이터 구간 정의 및 소스 파일 — 표준 참조 (새 진단 전 필독)
 
 **2026-08-12 추가**: `train_predictions_qXXX.csv`를 "학습구간 전체"로 오인해서 confidence-echo/
