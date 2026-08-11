@@ -45,6 +45,16 @@ def _seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(int(seed))
 
 
+def _focal_modulate(ce: torch.Tensor, gamma: float) -> torch.Tensor:
+    """Apply Lin et al. 2017 focal modulation (1-p_t)^gamma to per-sample CE.
+    gamma<=0 is a no-op (returns ce unchanged) so existing bundles reproduce exactly.
+    Class-balance (alpha_t) is left to the caller's existing sample weights."""
+    if float(gamma) <= 0.0:
+        return ce
+    p_t = torch.exp(-ce)
+    return ((1.0 - p_t).clamp(min=0.0) ** float(gamma)) * ce
+
+
 def _read_labels(label_dir: Path, year: int, *, require_diagnostics: bool) -> pd.DataFrame:
     path = label_dir / f"zigzag_action_labels_{int(year)}.csv"
     if not path.exists():
@@ -415,6 +425,7 @@ def _fit_expert_omega4(
     model_path: Path,
     direction_class_weights: dict[int, float],
     quality_class_weights: dict[int, float],
+    direction_focal_gamma: float = 0.0,
 ) -> dict[str, Any]:
     torch.manual_seed(int(seed) + int(expert_idx))
     np.random.seed(int(seed) + int(expert_idx))
@@ -485,6 +496,7 @@ def _fit_expert_omega4(
                 yb[:, None].expand(-1, int(parent.CFG.k)).reshape(-1),
                 reduction="none",
             ).reshape(-1, int(parent.CFG.k))
+            loss_dir_k = _focal_modulate(loss_dir_k, direction_focal_gamma)
             loss_qual_k = torch.nn.functional.cross_entropy(
                 out_dir["quality"].reshape(-1, 3),
                 yqb[:, None].expand(-1, int(parent.CFG.k)).reshape(-1),
@@ -517,6 +529,7 @@ def _fit_expert_omega4(
             vo = model(vx)
             veo = model(ve)
             vdir = torch.nn.functional.cross_entropy(vo["direction"].reshape(-1, 3), vy[:, None].expand(-1, int(parent.CFG.k)).reshape(-1), reduction="none").reshape(-1, int(parent.CFG.k))
+            vdir = _focal_modulate(vdir, direction_focal_gamma)
             vqual = torch.nn.functional.cross_entropy(vo["quality"].reshape(-1, 3), vqy[:, None].expand(-1, int(parent.CFG.k)).reshape(-1), reduction="none").reshape(-1, int(parent.CFG.k))
             vex = torch.nn.functional.cross_entropy(veo["exit"].reshape(-1, 2), vey[:, None].expand(-1, int(parent.CFG.k)).reshape(-1), reduction="none").reshape(-1, int(parent.CFG.k))
             vloss = float(
@@ -551,6 +564,7 @@ def _fit_expert_omega4(
         "quality_target": "omega4_quality_action",
         "direction_class_weights": {str(k): float(v) for k, v in direction_class_weights.items()},
         "quality_class_weights": {str(k): float(v) for k, v in quality_class_weights.items()},
+        "direction_focal_gamma": float(direction_focal_gamma),
     }
     torch.save(payload, model_path)
     return payload
@@ -969,6 +983,7 @@ def main() -> int:
     ap.add_argument("--drop-cmamba-features", action="store_true")
     ap.add_argument("--direction-class-weights", default="")
     ap.add_argument("--quality-class-weights", default="")
+    ap.add_argument("--direction-focal-gamma", type=float, default=0.0)
     ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="cpu")
     args = ap.parse_args()
 
@@ -1066,6 +1081,7 @@ def main() -> int:
             model_path=out_dir / "models" / f"{expert}_3head_tabm.pt",
             direction_class_weights=direction_class_weights,
             quality_class_weights=quality_class_weights,
+            direction_focal_gamma=float(args.direction_focal_gamma),
         )
         models[expert] = payload
         summaries[expert] = {
@@ -1165,6 +1181,7 @@ def main() -> int:
             "direction": {str(k): float(v) for k, v in direction_class_weights.items()},
             "quality": {str(k): float(v) for k, v in quality_class_weights.items()},
         },
+        "direction_focal_gamma": float(args.direction_focal_gamma),
         "input_contract": {
             "base_feature_count": len(base_cols),
             "position_feature_count": len(parent.POS_COLS),

@@ -1,0 +1,15 @@
+{
+  "epochs": 3,
+  "train_rows": 30000,
+  "quality_threshold": 0.5,
+  "val_pnl_mean": 3.852484785232002,
+  "val_mdd_mean": -6.431889298660446,
+  "seeds": [
+    260620,
+    481003,
+    26611,
+    903174,
+    155827
+  ],
+  "selection": "mean VAL pnl s.t. mean VAL mdd >= -8, seeds averaged"
+}

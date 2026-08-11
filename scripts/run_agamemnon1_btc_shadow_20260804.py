@@ -1,5 +1,5 @@
 """
-Odyssey1 -- BTC shadow-monitoring bot (Layer1 CUSUM gate -> Layer2/3 LightGBM
+Agamemnon1 -- BTC shadow-monitoring bot (Layer1 CUSUM gate -> Layer2/3 LightGBM
 quality/direction -> Layer4 RL exit-timing -> Layer5 quantile-uncertainty
 sizing/leverage), first live shadow test of this session's new BTC
 architecture. Modeled directly on Tau1's non-executing shadow pattern
@@ -58,14 +58,14 @@ from train_btc_exit_stopping_rl_20260803 import trail_threshold, STATE_DIM  # no
 from ensemble.train_rl_dsac_unified_2025 import DSACAgent  # noqa: E402
 import joblib  # noqa: E402
 
-MODEL_ID = "btc_odyssey1_shadow_v1_20260804"
+MODEL_ID = "btc_agamemnon1_shadow_v1_20260804"
 STATE_SCHEMA = "micro_scalp_reuse.shadow_bot_step.v1"
 SUMMARY_SCHEMA = "micro_scalp_reuse.shadow_bot.v1"
 ASSET, SYMBOL, CROSS_SYMBOL = "btc", "BTCUSDT", "ETHUSDT"
-MODE = "btc_odyssey1"
+MODE = "btc_agamemnon1"
 
 LIVE_DIR = ROOT / "data/live"
-STATE_PATH = LIVE_DIR / "btc_odyssey1_shadow_state.json"
+STATE_PATH = LIVE_DIR / "btc_agamemnon1_shadow_state.json"
 POLL_SECONDS = 300  # matches 5m bar cadence
 
 BASE_URL = "https://fapi.binance.com"
@@ -251,7 +251,7 @@ def load_state() -> dict[str, Any]:
 
 
 def main():
-    print(f"Odyssey1 BTC shadow starting, model_id={MODEL_ID}", flush=True)
+    print(f"Agamemnon1 BTC shadow starting, model_id={MODEL_ID}", flush=True)
     with open(MODEL_DIR / "btc_cusum_trailing_final_long.pkl", "rb") as f:
         long_model = pickle.load(f)
     with open(MODEL_DIR / "btc_cusum_trailing_final_short.pkl", "rb") as f:

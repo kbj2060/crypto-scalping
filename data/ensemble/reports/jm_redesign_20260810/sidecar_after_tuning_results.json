@@ -1,0 +1,55 @@
+{
+  "selection": {
+    "epochs": 3,
+    "train_rows": 30000,
+    "quality_threshold": 0.5,
+    "val_pnl_mean": 3.852484785232002,
+    "val_mdd_mean": -6.431889298660446,
+    "seeds": [
+      260620,
+      481003,
+      26611,
+      903174,
+      155827
+    ],
+    "selection": "mean VAL pnl s.t. mean VAL mdd >= -8, seeds averaged"
+  },
+  "selection_note": "VAL-selected (mean VAL pnl s.t. mean VAL mdd >= -8)",
+  "results": [
+    {
+      "seed": 260620,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s260620",
+      "out_suffix": "regime_jmredesign_20260810_e3_r30000_s260620_q050",
+      "passed": false,
+      "message": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=17 floor=16, mdd=-10.5792 floor=-8.0000"
+    },
+    {
+      "seed": 481003,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s481003",
+      "out_suffix": "regime_jmredesign_20260810_e3_r30000_s481003_q050",
+      "passed": false,
+      "message": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=16 floor=15, mdd=-16.9334 floor=-8.0000"
+    },
+    {
+      "seed": 26611,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s26611",
+      "out_suffix": "regime_jmredesign_20260810_e3_r30000_s26611_q050",
+      "passed": false,
+      "message": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=15 floor=14, mdd=-10.3717 floor=-8.0000"
+    },
+    {
+      "seed": 903174,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s903174",
+      "out_suffix": "regime_jmredesign_20260810_e3_r30000_s903174_q050",
+      "passed": false,
+      "message": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=20 floor=19, mdd=-9.6622 floor=-8.0000"
+    },
+    {
+      "seed": 155827,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s155827",
+      "out_suffix": "regime_jmredesign_20260810_e3_r30000_s155827_q050",
+      "passed": false,
+      "message": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=17 floor=16, mdd=-11.0469 floor=-8.0000"
+    }
+  ]
+}

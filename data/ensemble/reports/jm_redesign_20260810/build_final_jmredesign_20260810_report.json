@@ -1,0 +1,231 @@
+{
+  "tag": "jmredesign_20260810",
+  "assets": {
+    "btc": {
+      "asset": "btc",
+      "config": {
+        "feature_set": "mrmr_top8",
+        "scaler": "robust",
+        "k": 3,
+        "lambda_per_dim": 0.1,
+        "temperature_ratio": 1.0,
+        "label_basis": "frozen"
+      },
+      "features": [
+        "bb_width",
+        "rsi",
+        "mtf_trend_4h",
+        "bb_width_pct_rank_288",
+        "vwap_dist_24",
+        "parkinson_vol",
+        "kalman_velocity",
+        "bb_width_z"
+      ],
+      "model_path": "data/ensemble/supervised/btc_regime3_current_jm_redesign_jmredesign_20260810_2024.joblib",
+      "outputs": {
+        "2024": "data/ensemble/supervised/btc_regime3_current_hmm_jmredesign_20260810_2024_maskedname.csv",
+        "2025": "data/ensemble/supervised/btc_regime3_current_hmm_jmredesign_20260810_2025_maskedname.csv",
+        "2026": "data/ensemble/supervised/btc_regime3_current_hmm_jmredesign_20260810_2026_maskedname.csv"
+      },
+      "windows": {
+        "val": {
+          "rows": 35136,
+          "accuracy": 0.8503529143897997,
+          "balanced_accuracy": 0.93414236326092,
+          "flip_rate": 0.035861676391063045,
+          "median_run_bars": 14.0,
+          "mean_run_bars": 27.863600317208565,
+          "coverage": {
+            "bull": 0.14031193078324225,
+            "bear": 0.1353028233151184,
+            "chop": 0.7243852459016393
+          },
+          "min_class_coverage": 0.1353028233151184,
+          "economic_separation_fwd1h": 0.0005746779313228946,
+          "economic_separation_tstat": 4.2951091357661255,
+          "whipsaw_share": 0.2268041237113402,
+          "lag_peak_bars": 12,
+          "detection_lag_median": 10.0,
+          "wave_Q1": 0.6711345141215893
+        },
+        "oos": {
+          "rows": 25920,
+          "accuracy": 0.8457947530864197,
+          "balanced_accuracy": 0.9247150036103212,
+          "flip_rate": 0.044253250511207994,
+          "median_run_bars": 13.0,
+          "mean_run_bars": 22.578397212543553,
+          "coverage": {
+            "bull": 0.17503858024691357,
+            "bear": 0.17966820987654322,
+            "chop": 0.6452932098765433
+          },
+          "min_class_coverage": 0.17503858024691357,
+          "economic_separation_fwd1h": -1.0454367836025394e-05,
+          "economic_separation_tstat": -0.06792057178562816,
+          "whipsaw_share": 0.21602787456445993,
+          "lag_peak_bars": 12,
+          "detection_lag_median": 10.0,
+          "wave_Q1": 0.6587183308494784
+        },
+        "full_2025": {
+          "rows": 105120,
+          "accuracy": 0.8446061643835616,
+          "balanced_accuracy": 0.9305744781514393,
+          "flip_rate": 0.037728669412760776,
+          "median_run_bars": 13.0,
+          "mean_run_bars": 26.498613561885556,
+          "coverage": {
+            "bull": 0.1429033485540335,
+            "bear": 0.13656773211567733,
+            "chop": 0.7205289193302892
+          },
+          "min_class_coverage": 0.13656773211567733,
+          "economic_separation_fwd1h": 0.0001642246762430524,
+          "economic_separation_tstat": 2.1256200751582273,
+          "whipsaw_share": 0.23418200151247795
+        },
+        "full_2026": {
+          "rows": 61269,
+          "accuracy": 0.8437382689451436,
+          "balanced_accuracy": 0.9290126262114491,
+          "flip_rate": 0.039922961415420774,
+          "median_run_bars": 14.0,
+          "mean_run_bars": 25.038414384961175,
+          "coverage": {
+            "bull": 0.1502391095007263,
+            "bear": 0.15319329514109908,
+            "chop": 0.6965675953581746
+          },
+          "min_class_coverage": 0.1502391095007263,
+          "economic_separation_fwd1h": -0.00019526451638103413,
+          "economic_separation_tstat": -2.071616720997134,
+          "whipsaw_share": 0.20923579893747446
+        }
+      },
+      "decision_run_oos_balanced_accuracy": 0.9252836806302018,
+      "refit_drift": -0.0005686770198806146,
+      "refit_verdict": "matches decision run",
+      "scaler_restriction_max_dev": 0.0,
+      "fresh_forward_bar_by_bar": true,
+      "trade_ledgers_used_as_input": false,
+      "saved_parent_exit_timestamps_used": false,
+      "future_rows_used_for_entry": false
+    },
+    "eth": {
+      "asset": "eth",
+      "config": {
+        "feature_set": "f_rank_top12",
+        "scaler": "standard",
+        "k": 3,
+        "lambda_per_dim": 4.0,
+        "temperature_ratio": 0.25,
+        "label_basis": "frozen"
+      },
+      "features": [
+        "bb_width",
+        "mtf_trend_4h",
+        "vwap_dist_24",
+        "parkinson_vol",
+        "kalman_velocity",
+        "rsi",
+        "garman_klass_vol",
+        "vwap_dist_96",
+        "bb_width_pct_rank_288",
+        "rogers_satchell_vol",
+        "mtf_trend_1h",
+        "bb_width_z"
+      ],
+      "model_path": "data/ensemble/supervised/eth_regime3_current_jm_redesign_jmredesign_20260810_2024.joblib",
+      "outputs": {
+        "2024": "data/ensemble/supervised/eth_regime3_current_hmm_jmredesign_20260810_2024_maskedname.csv",
+        "2025": "data/ensemble/supervised/eth_regime3_current_hmm_jmredesign_20260810_2025_maskedname.csv",
+        "2026": "data/ensemble/supervised/eth_regime3_current_hmm_jmredesign_20260810_2026_maskedname.csv"
+      },
+      "windows": {
+        "val": {
+          "rows": 35136,
+          "accuracy": 0.8672871129326047,
+          "balanced_accuracy": 0.8494609705708528,
+          "flip_rate": 0.025131635121673546,
+          "median_run_bars": 19.0,
+          "mean_run_bars": 39.74660633484163,
+          "coverage": {
+            "bull": 0.15525387067395263,
+            "bear": 0.15938069216757741,
+            "chop": 0.68536543715847
+          },
+          "min_class_coverage": 0.15525387067395263,
+          "economic_separation_fwd1h": 0.0004498449008365271,
+          "economic_separation_tstat": 2.440790703424656,
+          "whipsaw_share": 0.1493212669683258,
+          "lag_peak_bars": 12,
+          "detection_lag_median": 16.0,
+          "wave_Q1": 0.6645636172450052
+        },
+        "oos": {
+          "rows": 25825,
+          "accuracy": 0.8610261374636979,
+          "balanced_accuracy": 0.8580710251552949,
+          "flip_rate": 0.027455080545229243,
+          "median_run_bars": 20.0,
+          "mean_run_bars": 36.37323943661972,
+          "coverage": {
+            "bull": 0.16960309777347532,
+            "bear": 0.18888673765730882,
+            "chop": 0.6415101645692158
+          },
+          "min_class_coverage": 0.16960309777347532,
+          "economic_separation_fwd1h": -0.0005300440295691377,
+          "economic_separation_tstat": -2.5820634157788995,
+          "whipsaw_share": 0.12816901408450704,
+          "lag_peak_bars": 12,
+          "detection_lag_median": 15.0,
+          "wave_Q1": 0.5804837364470392
+        },
+        "full_2025": {
+          "rows": 105101,
+          "accuracy": 0.8501060884292252,
+          "balanced_accuracy": 0.8404605951089424,
+          "flip_rate": 0.02867745004757374,
+          "median_run_bars": 18.0,
+          "mean_run_bars": 34.859369817578774,
+          "coverage": {
+            "bull": 0.18144451527578234,
+            "bear": 0.1756881475913645,
+            "chop": 0.6428673371328532
+          },
+          "min_class_coverage": 0.1756881475913645,
+          "economic_separation_fwd1h": 0.000402497276876068,
+          "economic_separation_tstat": 3.8592404732105696,
+          "whipsaw_share": 0.15257048092868988
+        },
+        "full_2026": {
+          "rows": 51746,
+          "accuracy": 0.8817879642870946,
+          "balanced_accuracy": 0.8622067032934849,
+          "flip_rate": 0.0240602956807421,
+          "median_run_bars": 20.0,
+          "mean_run_bars": 41.52969502407705,
+          "coverage": {
+            "bull": 0.13724732346461563,
+            "bear": 0.1512967185869439,
+            "chop": 0.7114559579484404
+          },
+          "min_class_coverage": 0.13724732346461563,
+          "economic_separation_fwd1h": -0.00027129296894297936,
+          "economic_separation_tstat": -1.81580525970713,
+          "whipsaw_share": 0.1276083467094703
+        }
+      },
+      "decision_run_oos_balanced_accuracy": 0.858026788052136,
+      "refit_drift": 4.423710315892837e-05,
+      "refit_verdict": "matches decision run",
+      "scaler_restriction_max_dev": 0.0,
+      "fresh_forward_bar_by_bar": true,
+      "trade_ledgers_used_as_input": false,
+      "saved_parent_exit_timestamps_used": false,
+      "future_rows_used_for_entry": false
+    }
+  }
+}

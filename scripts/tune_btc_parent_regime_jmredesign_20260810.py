@@ -39,6 +39,8 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+# the project venv was lost on 2026-08-10; runs use the quant_ai conda env instead
+PYTHON_BIN = str(Path.home() / "anaconda3/envs/quant_ai/bin/python")
 OUT_DIR = ROOT / "data/ensemble/reports/jm_redesign_20260810"
 RUN_ROOT = ROOT / "tmp/causal_regen_20260516"
 BASE = "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_"
@@ -71,7 +73,7 @@ def run_one(epochs: int, rows: int, seed: int, python: str) -> Path | None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--python", default=str(ROOT / "venv/bin/python"))
+    ap.add_argument("--python", default=PYTHON_BIN)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 

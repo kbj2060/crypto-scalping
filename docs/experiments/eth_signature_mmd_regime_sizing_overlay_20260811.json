@@ -1,0 +1,68 @@
+{
+  "name": "eth_signature_mmd_regime_sizing_overlay_20260811",
+  "schema_version": "architecture_experiment_contract_v3",
+  "created": "2026-08-11, written BEFORE the higherOrderKME dependency was confirmed to install and BEFORE any Signature-MMD number was computed",
+  "status": "OPENED -- blocked on IG0 (dependency check). No script exists yet.",
+  "asset": "ETHUSDT",
+  "question": "Does a Signature-MMD path-clustering regime signal (Horvath & Issa, arXiv:2306.15835, github.com/issaz/signature-regime-detection) carry information about h48qual trade OUTCOME VARIANCE/DRAWDOWN that the existing JM/wide24 regime detectors do not, when used as a position-SIZING overlay -- NOT as a classification input feature.",
+  "scope_and_framing": {
+    "why_sizing_and_not_a_14th_classification_feature": "This line was explicitly separated from the same-day 13-feature h48qual input-feature contract (cvp_regime, funding_roc_288, funding_pressure_diff1, ou_halflife, m7_vae_error_dt288, long_squeeze_risk_dt288, whale_retail_ratio_dt288, fvg_dist, realized_skewness, sum_toptrader_long_short_ratio_dt288, breakout_strength, session_japan, eth_vol_risk_premium). This project's own prior literature review (docs/entry_exit_edge_root_cause_and_literature_review_20260809.md) already categorizes Signature-MMD as a SIZING-overlay regime-detector candidate, not an entry/quality-classification candidate. Running it through the F-test/MI-vs-shuffled-null pipeline used for the 13 features would test it for the wrong job.",
+    "why_not_redundant_with_JM": "JM (scripts/build_*_regime3_jm_lam4_20260809.py and the 20260810 redesign) fits a k=3 jump-penalized clustering on a HAND-SELECTED SUMMARY-STATISTIC feature vector (bb_width, rsi, mtf_trend_4h, kalman_velocity, ...), i.e. a Markovian snapshot: the state depends only on the current feature vector, and any path-order information within the lookback window is already lost by the time it reaches the clustering step. Signature-MMD instead transforms the raw PATH itself (price/volume over a window) via iterated-integral signatures and compares path segments with a kernel two-sample test (MMD) -- explicitly designed for non-Markovian, path-dependent structure. The two methods can disagree in a way that is informative, not merely redundant, precisely because they see different representations of the same underlying process.",
+    "why_expectations_should_still_be_tempered": "The same-day input-feature analysis (13-feature contract above) found that even a corrected TabM ensemble barely beats a constant-frequency baseline (VAL logloss within 0.0001-0.0003 of baseline) predicting the h48qual triple-barrier outcome from 13 statistically-validated features. If the 5-minute barrier race is close to intrinsically noisy at this horizon, a richer regime representation may not raise that ceiling even if it captures genuinely different information about price dynamics -- this contract tests a SIZING claim (does variance/MDD differ by regime), which is a lower bar than a DIRECTION claim, but it is not a free pass from the same underlying noise floor."
+  },
+  "implementation_gates": {
+    "purpose": "None of the pre_registered_gates below can be written with real numbers until these three sequential technical go/no-go checks clear. This section exists so a future session does not have to re-derive the plan from conversation history.",
+    "IG0_dependency_check": {
+      "rule": "`higherOrderKME` (the signature-kernel MMD package the reference implementation depends on) must install and import cleanly in the quant_ai conda env.",
+      "known_risk": "The repo's own README warns: 'some users may have issues installing higherOrderKME... conflicts with older h5py versions.'",
+      "on_fail": "HALT this contract. Before abandoning the axis, check whether a plain `iisignature`/`signatory` signature computation plus a hand-rolled RBF-kernel MMD two-sample statistic can reproduce the paper's detection test without the specialized package -- record that decision as a contract revision, do not silently substitute methods."
+    },
+    "IG1_algorithm_confirmation": {
+      "rule": "Read the paper's online/causal regime-CHANGE-detection algorithm (Sections 4.1-4.4 -- NOT Section 5's offline regime-clustering algorithm, which the paper itself frames as an ex-ante historical-analysis tool, not a live signal) directly from `src/` and the matching notebook, not from a summarized fetch. Confirm: raw input channels (price only, or price+volume), window/lookback length used in the paper's crypto experiment (Section 6), and output type (continuous MMD score vs. discrete regime-change flag vs. cluster ID).",
+      "on_fail": "If the online-detection variant cannot be made to run bar-by-bar without seeing data beyond its own causal window, this axis produces no usable live feature and should be closed here -- do not adapt the offline clustering algorithm into a pseudo-causal form by re-fitting it on an expanding window and calling that 'causal'; that reintroduces the exact lookback-into-history bias the paper's online variant exists to avoid."
+    },
+    "IG2_causal_pilot_fit": {
+      "rule": "A pilot fit on ETH's actual 5m price/volume path produces a well-defined signal under this project's existing fresh_forward discipline (see the `fresh_forward` block below) -- no full-history lookback, no future rows, walk-forward only.",
+      "on_fail": "HALT. Document why (e.g. compute cost per bar too high for 5m cadence, window length requires more history than available pre-2024)."
+    }
+  },
+  "prior_evidence_stated_up_front": {
+    "supporting": {
+      "jm_oos_instability": "The 2026-08-10 JM regime redesign showed economic-separation t-stat flipping sign OOS for ETH (VAL t=+2.44 -> OOS t=-2.58) despite strong classification accuracy -- evidence that the current Markovian/summary-statistic regime representation has a real, demonstrated weakness that a structurally different (path-dependent) method might or might not address.",
+      "paper_own_validation": "The paper's abstract states its clustering tools, applied to real cryptocurrency data, 'accurately indicated historical periods of market turmoil' -- an ex-post claim about the offline clustering variant specifically, not yet evidence for the causal online variant this contract requires (see IG1)."
+    },
+    "ADVERSE -- this contract expects a hard time clearing IG0-IG2, and even if it clears them, expects a modest effect at best": {
+      "low_ceiling_from_same_day_work": "See scope_and_framing.why_expectations_should_still_be_tempered above.",
+      "sizing_overlay_track_record_in_this_repo": "The BTC czz_trend regime-sizing overlay -- structurally the closest precedent to what this contract proposes -- was adopted on a paired time-block bootstrap P=0.739 and later downgraded to NOT-SUPPORTED / shadow-only when an audit found its per-trade effect was t=-0.99 (p=0.33) and its risk channel pointed the wrong way (variance ratio 0.881, i.e. it downsized the LESS volatile bucket). This is exactly why schema v3's effect_size_gate exists and is pre-declared below rather than left for later.",
+      "dependency_risk": "higherOrderKME's documented install friction (IG0) is a real chance this axis closes before producing a single number."
+    }
+  },
+  "pre_registered_gates": {
+    "status": "G1 onward CANNOT be written with real numeric thresholds until IG0-IG2 clear -- a window/lookback/cluster-count choice made blind to IG1's findings would itself be a hidden multiple-comparisons search. The POLICY commitments below are fixed now, independent of the eventual numbers.",
+    "G0_regression_HALT": {
+      "rule": "Once implemented, any replay comparing 'with overlay' vs 'without overlay' must reproduce the incumbent no-overlay h48qual numbers exactly when the overlay is set to a no-op (e.g. regime detector disabled / multiplier forced to 1.0)."
+    },
+    "G5_outcome_ceiling_FIXED_NOW": {
+      "rule": "The best outcome available from this contract, at any result, is a parallel SHADOW overlay. Never a live sizing change on the strength of this contract alone.",
+      "rationale": "Mirrors docs/experiments/eth_multislot_capacity_transfer_20260808.json's G5 and the project's standing rule that no 2025H2/2026H1-window result can license a live change without a forward shadow record; doubly true here given the czz_trend precedent above."
+    }
+  },
+  "selection": {
+    "effect_size_gate": {
+      "min_abs_t": 2.0,
+      "min_permutation_percentile": 0.90,
+      "risk_channel_tested": true,
+      "premise_checked_in_selection_window": true,
+      "falsification_audit_required": true,
+      "min_falsification_percentile": 0.95
+    }
+  },
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "method": "TBD pending IG1 -- must be a walk-forward, bar-by-bar causal application of whichever online-detection algorithm IG1 confirms. No full-history refit standing in for the causal variant (see IG1.on_fail)."
+  },
+  "script": "none yet -- IG0 must clear first; this file is the pre-registration, not an implementation record"
+}

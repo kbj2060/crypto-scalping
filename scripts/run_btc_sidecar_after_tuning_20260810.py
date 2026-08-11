@@ -30,6 +30,8 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+# the project venv was lost on 2026-08-10; runs use the quant_ai conda env instead
+PYTHON_BIN = str(Path.home() / "anaconda3/envs/quant_ai/bin/python")
 OUT_DIR = ROOT / "data/ensemble/reports/jm_redesign_20260810"
 RUN_ROOT = ROOT / "tmp/causal_regen_20260516"
 AGG = OUT_DIR / "tune_btc_parent_aggregate.csv"
@@ -56,7 +58,7 @@ def wait_for_sweep(timeout_s: int) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--python", default=str(ROOT / "venv/bin/python"))
+    ap.add_argument("--python", default=PYTHON_BIN)
     ap.add_argument("--timeout-s", type=int, default=6 * 3600)
     args = ap.parse_args()
 
