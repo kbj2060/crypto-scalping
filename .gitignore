@@ -96,3 +96,7 @@ data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807_regime.json
 
 # .env backups can contain live API keys/tokens -- never track
 .env.bak*
+
+# real LAN IPs/ports/usernames for dev<->server SSH automation -- this repo
+# is public, keep them local-only (see handoff.hosts.conf.example)
+scripts/ops/handoff.hosts.conf

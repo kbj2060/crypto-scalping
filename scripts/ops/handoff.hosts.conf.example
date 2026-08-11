@@ -1,0 +1,7 @@
+# Copy this file to handoff.hosts.conf (gitignored, never commit it) and
+# fill in real values. Loaded by handoff.sh via `source`.
+# Format: [alias]="user@lan_ip:ssh_port|repo_path|conda_base|conda_env"
+declare -A HOSTS=(
+  [server]="user@SERVER_LAN_IP:2222|/home/user/crypto-scalping|/home/user/miniconda3|quant_ai"
+  [dev]="user@DEV_LAN_IP:2222|/home/user/crypto-scalping|/home/user/anaconda3|quant_ai"
+)
