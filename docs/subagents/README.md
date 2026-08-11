@@ -26,6 +26,8 @@ Omega4.6.2 validation/OOS ledger replay는 historical audit 전용이다. `tradi
 | Backtest Implementation Maintainer | [implementation_maintainer.md](implementation_maintainer.md) | Alpha3 frozen baseline 계약을 지키는 백테스트 전문가. 한 번에 하나의 레이어만 바꿔 후보를 구현/검증 |
 | Docs Manager | [docs_manager.md](docs_manager.md) | `docs/` 폴더 관리자. active/live 명세, 모델 설계도, 트레이딩봇 런타임, 모듈 I/O 계약을 코드 변경과 함께 최신화 |
 
+이 서면 역할들을 실행 권한이 있는 Claude Code 에이전트 팀(opus5 팀장 + sonnet5 팀원)으로 호출하려면 [architecture_team_workflow.md](architecture_team_workflow.md)를 따른다. 서브프로젝트 폴더(`experiments/<name>/`)와 계약 문서, 팀장 승인 워크플로가 거기 정의되어 있다.
+
 ## Shared Rules
 
 - 호환성 유지를 위한 alias, fallback prefix, legacy compatibility layer를 active path에 추가하지 않는다.
