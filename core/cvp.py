@@ -308,6 +308,71 @@ def add_cvp_features(
     return df
 
 
+def add_cvp_features_incremental(
+    df: pd.DataFrame,
+    cache: dict,
+    lookback: int = 200,
+    n_clusters: int = 4,
+    n_bins: int = 50,
+    output_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """add_cvp_features와 동일한 출력을, timestamp별 결과를 `cache`에 저장해 재사용하며 계산한다.
+
+    각 행의 값은 자신의 과거 lookback봉 윈도우에만 의존하고 그 입력(과거 봉)은 마감 후
+    불변이므로, 이미 계산한 timestamp는 다시 계산하지 않는다. 라이브 루프처럼 같은
+    FeatureEngineer 인스턴스로 슬라이딩 tail 윈도우를 매 사이클 재처리하는 경우, 신규
+    행(보통 1개)만 계산해 매 사이클 O(n_rows * lookback) 재계산을 피한다.
+
+    `cache`는 호출자가 프로세스 생명주기 동안 유지하는 dict(예: 인스턴스당 1개)여야
+    하며, 서로 다른 가격 시계열(symbol)끼리 공유하면 timestamp가 우연히 겹칠 때 잘못된
+    값을 재사용하므로 절대 공유하면 안 된다. 매 호출 후 현재 df에 없는 timestamp는
+    캐시에서 제거되어 슬라이딩 윈도우 밖으로 나간 봉으로 메모리가 무한히 늘지 않는다.
+    """
+    required = ['high', 'low', 'close', 'volume']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"필수 컬럼 누락: {missing}")
+    if 'timestamp' not in df.columns:
+        raise ValueError("필수 컬럼 누락: ['timestamp']")
+
+    n = len(df)
+    high = df['high'].values
+    low = df['low'].values
+    close = df['close'].values
+    volume = df['volume'].values
+    hlc3 = (high + low + close) / 3.0
+    timestamps = df['timestamp'].values
+
+    target_cols = CVP_FEATURE_COLS if output_cols is None else [c for c in output_cols if c in CVP_FEATURE_COLS]
+    if not target_cols:
+        return df
+
+    results = {col: np.zeros(n) for col in target_cols}
+
+    for i in range(n):
+        ts = timestamps[i]
+        feats = cache.get(ts)
+        if feats is None:
+            start = max(0, i - lookback + 1)
+            feats = _compute_cvp_features_at(
+                hlc3[start:i + 1], high[start:i + 1], low[start:i + 1],
+                close[start:i + 1], volume[start:i + 1], close[i],
+                n_clusters=n_clusters, n_bins=n_bins,
+            )
+            cache[ts] = feats
+        for col in target_cols:
+            results[col][i] = feats[col]
+
+    live_ts = set(timestamps.tolist())
+    for stale_ts in [k for k in cache if k not in live_ts]:
+        del cache[stale_ts]
+
+    for col in target_cols:
+        df[col] = results[col]
+
+    return df
+
+
 # ════════════════════════════════════════════════════════════════
 # 5. CLI / 테스트
 # ════════════════════════════════════════════════════════════════

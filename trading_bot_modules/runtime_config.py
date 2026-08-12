@@ -596,9 +596,19 @@ FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH = os.getenv(
     "data/live/pending_next_open_intent.json",
 )
 FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC = float(os.getenv("FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC", "20"))
-FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC = float(os.getenv("FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC", "15"))
+# 2026-08-12: shadow path only had ~10s of slack after the fixed 10s wake offset
+# (FINAL_GOVERNOR_BAR_FETCH_DELAY_SEC) before hitting the old 20s hard deadline. The
+# synchronous per-cycle feature-engineering pass (CVP alone measured ~2.3s/2500 rows before
+# core/cvp.py's add_cvp_features_incremental cache, paid up to 3x for ETH + SOL + BTC shadow
+# in the same cycle) regularly blew that budget, skipping the cycle outright and paging
+# data_pipeline/pipeline_contract via ops_watchdog every time. Widened the shadow budget and
+# switched to allow-late instead of hard-skip so a slow cycle still records a (late) decision.
+# Real-exchange knobs (FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC above and
+# FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION below) intentionally left as-is --
+# fill-price slippage risk on a late real order is a separate decision from shadow timing.
+FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC = float(os.getenv("FINAL_GOVERNOR_NEXT_OPEN_WARN_DELAY_SEC", "30"))
 FINAL_GOVERNOR_NEXT_OPEN_SHADOW_MAX_DELAY_SEC = float(
-    os.getenv("FINAL_GOVERNOR_NEXT_OPEN_SHADOW_MAX_DELAY_SEC", "20")
+    os.getenv("FINAL_GOVERNOR_NEXT_OPEN_SHADOW_MAX_DELAY_SEC", "45")
 )
 FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION = _env_flag(
     "FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION",
@@ -606,7 +616,7 @@ FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION = _env_flag(
 )
 FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION = _env_flag(
     "FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION",
-    False,
+    True,
 )
 FINAL_GOVERNOR_LIVE_COMPLETED_BAR_NEXT_OPEN_PROXY = _env_flag(
     "FINAL_GOVERNOR_LIVE_COMPLETED_BAR_NEXT_OPEN_PROXY",

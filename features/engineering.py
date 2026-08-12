@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from core.cvp import add_cvp_features
+from core.cvp import add_cvp_features_incremental
 from features.high_order_state import add_high_order_state_features
 from features.schema import prune_to_active_feature_keep
 
@@ -99,6 +99,10 @@ class FeatureEngineer:
         # values (fixed 0.0002 funding-rate divisor). Opt in per-symbol for an asset whose own
         # funding-rate scale differs meaningfully from ETH's (found for SOL, 2026-07-20).
         self.adaptive_squeeze = bool(adaptive_squeeze)
+        # CVP는 각 행이 자신의 과거 lookback 윈도우에만 의존해 timestamp별로 캐시 가능하다
+        # (add_cvp_features_incremental). 라이브 루프가 같은 인스턴스로 슬라이딩 tail
+        # 윈도우를 매 사이클 재처리하므로, 심볼별 인스턴스 하나당 캐시 하나를 들고 간다.
+        self._cvp_cache: dict = {}
         self.windows = {
             'short': 5,
             'medium': 20,
@@ -119,8 +123,9 @@ class FeatureEngineer:
         df = self._create_advanced_volatility(df) # [신규 추가] 고급 변동성 지표 통합
         df = self._create_market_structure(df)
         df = self._create_temporal_features(df)
-        df = add_cvp_features(
+        df = add_cvp_features_incremental(
             df,
+            cache=self._cvp_cache,
             lookback=200,
             n_clusters=4,
             output_cols=[
