@@ -18,6 +18,15 @@
 # while the working tree is dirty. A concurrent uncommitted edit at deploy
 # time aborts the run rather than risking `git reset --hard` over it.
 #
+# 2026-08-12: those same concurrent sessions have also been observed running
+# `git pull` directly on this machine, outside this script. Gating on "does
+# HEAD match origin/main" made that silently satisfy the "nothing to do"
+# check forever afterward -- the code landed on disk but the affected
+# service (trading-bot.service) was never restarted, with no retry and no
+# alert. Deploy progress is now tracked independently of HEAD, in
+# $STATE_DIR/last_deployed_sha: the last SHA this script itself confirmed
+# pulled + restarted + healthy.
+#
 # Usage: run periodically from cron, e.g. every 10 minutes:
 #   */10 * * * * cd /home/llewyn/crypto-scalping && /bin/bash scripts/ops/deploy_watcher.sh >> logs/deploy_watcher_cron.log 2>&1
 set -uo pipefail
@@ -60,15 +69,18 @@ working_tree_clean() {
 # refs/remotes/ (refs/codex/... -- unrelated tooling debris found in this
 # repo, not ours to clean up) makes the bare form choke on a bad object.
 git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
-LOCAL_SHA="$(git rev-parse HEAD)"
 REMOTE_SHA="$(git rev-parse origin/main)"
+PRE_RUN_SHA="$(git rev-parse HEAD)"
 
-if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
-  log "up to date ($LOCAL_SHA), nothing to do"
+LAST_DEPLOYED_SHA_FILE="$STATE_DIR/last_deployed_sha"
+LAST_DEPLOYED_SHA="$(cat "$LAST_DEPLOYED_SHA_FILE" 2>/dev/null || true)"
+
+if [[ "$LAST_DEPLOYED_SHA" == "$REMOTE_SHA" ]]; then
+  log "already deployed ($REMOTE_SHA), nothing to do"
   exit 0
 fi
 
-log "new commit available: $REMOTE_SHA (current: $LOCAL_SHA)"
+log "deploy needed: $REMOTE_SHA (last confirmed deploy: ${LAST_DEPLOYED_SHA:-none})"
 
 if ! working_tree_clean; then
   log "working tree dirty (concurrent session?) -- not touching git state this cycle"
@@ -123,7 +135,16 @@ case "$ci_status" in
 esac
 
 # --- which units does this diff actually touch? ---
-changed_files="$(git diff --name-only "$LOCAL_SHA" "$REMOTE_SHA")"
+# No confirmed baseline (first run under this tracking scheme, or the state
+# file was lost) -- we don't actually know what SHA the running services
+# reflect, so treat every tracked file as changed and restart everything
+# mapped below once to establish a known-good baseline, instead of guessing
+# from a diff against an unknown starting point.
+if [[ -z "$LAST_DEPLOYED_SHA" ]]; then
+  changed_files="$(git ls-tree -r --name-only "$REMOTE_SHA")"
+else
+  changed_files="$(git diff --name-only "$LAST_DEPLOYED_SHA" "$REMOTE_SHA")"
+fi
 affects() { echo "$changed_files" | grep -qE "$1"; }
 
 declare -A UNITS_TO_RESTART=()
@@ -168,11 +189,12 @@ log "pulled to $(git rev-parse HEAD)"
 
 if [[ ${#UNITS_TO_RESTART[@]} -eq 0 && "$dashboard_changed" == "0" ]]; then
   log "no deploy-relevant files changed (docs/research/data/etc.), pull only, no restart"
+  echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
   exit 0
 fi
 
 if ! restart_units; then
-  send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but sudo restart failed -- see scripts/ops/systemd/deploy_watcher_sudoers. Services still running old code."
+  send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but sudo restart failed -- see scripts/ops/systemd/deploy_watcher_sudoers. Services still running old code, will retry next poll."
   exit 1
 fi
 
@@ -188,16 +210,18 @@ for unit in "${!UNITS_TO_RESTART[@]}"; do
 done
 
 if [[ "$healthy" == "1" ]]; then
+  echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
   send_telegram "🟢 [DEPLOY] ${REMOTE_SHA:0:8} deployed OK. Restarted: ${!UNITS_TO_RESTART[*]:-dashboard}"
   log "deploy OK"
   exit 0
 fi
 
-log "rolling back to $LOCAL_SHA"
+log "rolling back to $PRE_RUN_SHA"
 if ! working_tree_clean; then
   send_telegram "⛔ [DEPLOY] ${REMOTE_SHA:0:8} failed its health check but the working tree is now dirty -- cannot safely auto-rollback, needs manual attention NOW."
   exit 1
 fi
-git reset --hard "$LOCAL_SHA" >/dev/null 2>&1
+git reset --hard "$PRE_RUN_SHA" >/dev/null 2>&1
 restart_units
-send_telegram "🟠 [DEPLOY] auto-rolled back to ${LOCAL_SHA:0:8} after ${REMOTE_SHA:0:8} failed its post-deploy health check."
+echo "$PRE_RUN_SHA" > "$LAST_DEPLOYED_SHA_FILE"
+send_telegram "🟠 [DEPLOY] auto-rolled back to ${PRE_RUN_SHA:0:8} after ${REMOTE_SHA:0:8} failed its post-deploy health check."
