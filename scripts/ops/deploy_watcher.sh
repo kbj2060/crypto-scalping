@@ -13,10 +13,23 @@
 # itself is what's being granted). Until installed, restarts fail loudly
 # via Telegram but the git pull itself still succeeds.
 #
-# This repo has observed concurrent sessions (other agents/terminals)
-# committing to it mid-session -- never touches git state (pull, reset)
-# while the working tree is dirty. A concurrent uncommitted edit at deploy
-# time aborts the run rather than risking `git reset --hard` over it.
+# This repo doubles as a live research working directory -- untracked and
+# modified experiment output routinely sits here uncommitted for hours (see
+# 2026-08-08 and 2026-08-12 incidents: dirty-tree handling used to refuse to
+# deploy at all, which meant any uncommitted research file blocked EVERY
+# future deploy indefinitely, including ones completely unrelated to it).
+# `git stash push -u` before the merge and `git stash pop` right after is
+# fully reversible and never commits or discards that content -- see the
+# stash step below for what happens on a pop conflict.
+#
+# 2026-08-12: those same concurrent sessions have also been observed running
+# `git pull` directly on this machine, outside this script. Gating on "does
+# HEAD match origin/main" made that silently satisfy the "nothing to do"
+# check forever afterward -- the code landed on disk but the affected
+# service (trading-bot.service) was never restarted, with no retry and no
+# alert. Deploy progress is now tracked independently of HEAD, in
+# $STATE_DIR/last_deployed_sha: the last SHA this script itself confirmed
+# pulled + restarted + healthy.
 #
 # Usage: run periodically from cron, e.g. every 10 minutes:
 #   */10 * * * * cd /home/llewyn/crypto-scalping && /bin/bash scripts/ops/deploy_watcher.sh >> logs/deploy_watcher_cron.log 2>&1
@@ -60,20 +73,18 @@ working_tree_clean() {
 # refs/remotes/ (refs/codex/... -- unrelated tooling debris found in this
 # repo, not ours to clean up) makes the bare form choke on a bad object.
 git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
-LOCAL_SHA="$(git rev-parse HEAD)"
 REMOTE_SHA="$(git rev-parse origin/main)"
+PRE_RUN_SHA="$(git rev-parse HEAD)"
 
-if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
-  log "up to date ($LOCAL_SHA), nothing to do"
+LAST_DEPLOYED_SHA_FILE="$STATE_DIR/last_deployed_sha"
+LAST_DEPLOYED_SHA="$(cat "$LAST_DEPLOYED_SHA_FILE" 2>/dev/null || true)"
+
+if [[ "$LAST_DEPLOYED_SHA" == "$REMOTE_SHA" ]]; then
+  log "already deployed ($REMOTE_SHA), nothing to do"
   exit 0
 fi
 
-log "new commit available: $REMOTE_SHA (current: $LOCAL_SHA)"
-
-if ! working_tree_clean; then
-  log "working tree dirty (concurrent session?) -- not touching git state this cycle"
-  exit 0
-fi
+log "deploy needed: $REMOTE_SHA (last confirmed deploy: ${LAST_DEPLOYED_SHA:-none})"
 
 # --- CI status for the remote commit, via GitHub's check-runs API ---
 auth_header=()
@@ -123,7 +134,16 @@ case "$ci_status" in
 esac
 
 # --- which units does this diff actually touch? ---
-changed_files="$(git diff --name-only "$LOCAL_SHA" "$REMOTE_SHA")"
+# No confirmed baseline (first run under this tracking scheme, or the state
+# file was lost) -- we don't actually know what SHA the running services
+# reflect, so treat every tracked file as changed and restart everything
+# mapped below once to establish a known-good baseline, instead of guessing
+# from a diff against an unknown starting point.
+if [[ -z "$LAST_DEPLOYED_SHA" ]]; then
+  changed_files="$(git ls-tree -r --name-only "$REMOTE_SHA")"
+else
+  changed_files="$(git diff --name-only "$LAST_DEPLOYED_SHA" "$REMOTE_SHA")"
+fi
 affects() { echo "$changed_files" | grep -qE "$1"; }
 
 declare -A UNITS_TO_RESTART=()
@@ -155,24 +175,53 @@ restart_units() {
   return $failed
 }
 
+# This repo doubles as a live research working directory (see header
+# comment) -- stash whatever's dirty right before the merge rather than
+# refusing to deploy. Fully reversible either way: a clean pop restores it
+# exactly, and a conflicted pop leaves the stash undropped for a human to
+# resolve instead of guessing at a merge.
+stashed=0
 if ! working_tree_clean; then
-  log "working tree became dirty while checking CI status -- aborting before pull"
-  exit 0
+  stash_msg="deploy_watcher autostash $(date -Iseconds)"
+  if git stash push -u -m "$stash_msg" >/dev/null 2>&1; then
+    stashed=1
+    log "stashed local changes before pulling: $stash_msg"
+  else
+    send_telegram "⛔ [DEPLOY] could not stash local changes at ${REMOTE_SHA:0:8} -- not deploying, needs manual attention."
+    exit 1
+  fi
 fi
 
 if ! git merge --ff-only origin/main >/dev/null 2>&1; then
   send_telegram "⛔ [DEPLOY] fast-forward pull failed at ${REMOTE_SHA:0:8} -- local state diverged, needs manual attention."
+  [[ "$stashed" == "1" ]] && git stash pop >/dev/null 2>&1
   exit 1
 fi
 log "pulled to $(git rev-parse HEAD)"
 
+if [[ "$stashed" == "1" ]]; then
+  if git stash pop >/dev/null 2>&1; then
+    log "restored stashed local changes"
+  else
+    # Conflict between the just-pulled commit and the stashed changes (would
+    # need both to touch the same lines -- rare). The stash is untouched
+    # (pop only drops on a clean apply), but the working tree may now hold a
+    # half-applied conflict, so stop here instead of restarting anything
+    # against it. Whoever's changes are stashed resolves this by hand
+    # (`git stash list`, `git stash pop`, fix conflicts).
+    send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but restoring stashed local changes conflicted -- work is safe in 'git stash list' but needs manual resolution. NOT restarting services this cycle."
+    exit 1
+  fi
+fi
+
 if [[ ${#UNITS_TO_RESTART[@]} -eq 0 && "$dashboard_changed" == "0" ]]; then
   log "no deploy-relevant files changed (docs/research/data/etc.), pull only, no restart"
+  echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
   exit 0
 fi
 
 if ! restart_units; then
-  send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but sudo restart failed -- see scripts/ops/systemd/deploy_watcher_sudoers. Services still running old code."
+  send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but sudo restart failed -- see scripts/ops/systemd/deploy_watcher_sudoers. Services still running old code, will retry next poll."
   exit 1
 fi
 
@@ -188,16 +237,22 @@ for unit in "${!UNITS_TO_RESTART[@]}"; do
 done
 
 if [[ "$healthy" == "1" ]]; then
+  echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
   send_telegram "🟢 [DEPLOY] ${REMOTE_SHA:0:8} deployed OK. Restarted: ${!UNITS_TO_RESTART[*]:-dashboard}"
   log "deploy OK"
   exit 0
 fi
 
-log "rolling back to $LOCAL_SHA"
+log "rolling back to $PRE_RUN_SHA"
+# Refuses here instead of stashing again: something already went wrong (the
+# health check failed), so any dirty state at this point is new since the
+# pop above succeeded moments ago, not routine research scratch -- worth a
+# human's eyes rather than another automatic step on top of a failure.
 if ! working_tree_clean; then
   send_telegram "⛔ [DEPLOY] ${REMOTE_SHA:0:8} failed its health check but the working tree is now dirty -- cannot safely auto-rollback, needs manual attention NOW."
   exit 1
 fi
-git reset --hard "$LOCAL_SHA" >/dev/null 2>&1
+git reset --hard "$PRE_RUN_SHA" >/dev/null 2>&1
 restart_units
-send_telegram "🟠 [DEPLOY] auto-rolled back to ${LOCAL_SHA:0:8} after ${REMOTE_SHA:0:8} failed its post-deploy health check."
+echo "$PRE_RUN_SHA" > "$LAST_DEPLOYED_SHA_FILE"
+send_telegram "🟠 [DEPLOY] auto-rolled back to ${PRE_RUN_SHA:0:8} after ${REMOTE_SHA:0:8} failed its post-deploy health check."
