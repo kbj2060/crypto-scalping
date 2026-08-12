@@ -13,10 +13,14 @@
 # itself is what's being granted). Until installed, restarts fail loudly
 # via Telegram but the git pull itself still succeeds.
 #
-# This repo has observed concurrent sessions (other agents/terminals)
-# committing to it mid-session -- never touches git state (pull, reset)
-# while the working tree is dirty. A concurrent uncommitted edit at deploy
-# time aborts the run rather than risking `git reset --hard` over it.
+# This repo doubles as a live research working directory -- untracked and
+# modified experiment output routinely sits here uncommitted for hours (see
+# 2026-08-08 and 2026-08-12 incidents: dirty-tree handling used to refuse to
+# deploy at all, which meant any uncommitted research file blocked EVERY
+# future deploy indefinitely, including ones completely unrelated to it).
+# `git stash push -u` before the merge and `git stash pop` right after is
+# fully reversible and never commits or discards that content -- see the
+# stash step below for what happens on a pop conflict.
 #
 # 2026-08-12: those same concurrent sessions have also been observed running
 # `git pull` directly on this machine, outside this script. Gating on "does
@@ -81,11 +85,6 @@ if [[ "$LAST_DEPLOYED_SHA" == "$REMOTE_SHA" ]]; then
 fi
 
 log "deploy needed: $REMOTE_SHA (last confirmed deploy: ${LAST_DEPLOYED_SHA:-none})"
-
-if ! working_tree_clean; then
-  log "working tree dirty (concurrent session?) -- not touching git state this cycle"
-  exit 0
-fi
 
 # --- CI status for the remote commit, via GitHub's check-runs API ---
 auth_header=()
@@ -176,16 +175,44 @@ restart_units() {
   return $failed
 }
 
+# This repo doubles as a live research working directory (see header
+# comment) -- stash whatever's dirty right before the merge rather than
+# refusing to deploy. Fully reversible either way: a clean pop restores it
+# exactly, and a conflicted pop leaves the stash undropped for a human to
+# resolve instead of guessing at a merge.
+stashed=0
 if ! working_tree_clean; then
-  log "working tree became dirty while checking CI status -- aborting before pull"
-  exit 0
+  stash_msg="deploy_watcher autostash $(date -Iseconds)"
+  if git stash push -u -m "$stash_msg" >/dev/null 2>&1; then
+    stashed=1
+    log "stashed local changes before pulling: $stash_msg"
+  else
+    send_telegram "⛔ [DEPLOY] could not stash local changes at ${REMOTE_SHA:0:8} -- not deploying, needs manual attention."
+    exit 1
+  fi
 fi
 
 if ! git merge --ff-only origin/main >/dev/null 2>&1; then
   send_telegram "⛔ [DEPLOY] fast-forward pull failed at ${REMOTE_SHA:0:8} -- local state diverged, needs manual attention."
+  [[ "$stashed" == "1" ]] && git stash pop >/dev/null 2>&1
   exit 1
 fi
 log "pulled to $(git rev-parse HEAD)"
+
+if [[ "$stashed" == "1" ]]; then
+  if git stash pop >/dev/null 2>&1; then
+    log "restored stashed local changes"
+  else
+    # Conflict between the just-pulled commit and the stashed changes (would
+    # need both to touch the same lines -- rare). The stash is untouched
+    # (pop only drops on a clean apply), but the working tree may now hold a
+    # half-applied conflict, so stop here instead of restarting anything
+    # against it. Whoever's changes are stashed resolves this by hand
+    # (`git stash list`, `git stash pop`, fix conflicts).
+    send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but restoring stashed local changes conflicted -- work is safe in 'git stash list' but needs manual resolution. NOT restarting services this cycle."
+    exit 1
+  fi
+fi
 
 if [[ ${#UNITS_TO_RESTART[@]} -eq 0 && "$dashboard_changed" == "0" ]]; then
   log "no deploy-relevant files changed (docs/research/data/etc.), pull only, no restart"
@@ -217,6 +244,10 @@ if [[ "$healthy" == "1" ]]; then
 fi
 
 log "rolling back to $PRE_RUN_SHA"
+# Refuses here instead of stashing again: something already went wrong (the
+# health check failed), so any dirty state at this point is new since the
+# pop above succeeded moments ago, not routine research scratch -- worth a
+# human's eyes rather than another automatic step on top of a failure.
 if ! working_tree_clean; then
   send_telegram "⛔ [DEPLOY] ${REMOTE_SHA:0:8} failed its health check but the working tree is now dirty -- cannot safely auto-rollback, needs manual attention NOW."
   exit 1
