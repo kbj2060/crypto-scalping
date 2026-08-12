@@ -99,7 +99,13 @@ def main() -> int:
         old.to_csv(backup, index=False)
         print(f"backed up existing sidecar to {backup}", flush=True)
 
-    out.to_csv(OUT_PATH, index=False)
+    # write-to-temp-then-atomic-rename: to_csv() truncates OUT_PATH immediately, so writing
+    # directly into it risks a corrupted/truncated canonical file if the process dies mid-write
+    # (2026-08-12: a sibling script's rename-then-write variant of this same risk silently lost
+    # a canonical CSV on both dev and server). Write fully to a temp file first, then rename.
+    tmp_path = OUT_PATH.with_name(OUT_PATH.name + ".tmp_write")
+    out.to_csv(tmp_path, index=False)
+    tmp_path.rename(OUT_PATH)
     print(f"extended cmamba sidecar: {len(out)} rows ({out['timestamp'].iloc[0]}..{out['timestamp'].iloc[-1]}) -> {OUT_PATH}", flush=True)
     return 0
 

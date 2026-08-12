@@ -66,11 +66,17 @@ def _repro_check_and_write(new_df: pd.DataFrame, out_path: Path, tag: str, atol:
     print(f"{tag}: reproducibility max abs diff on overlap = {max_diff:.3e}", flush=True)
     if max_diff > atol:
         raise RuntimeError(f"{tag}: reproducibility FAILED (max diff {max_diff} > {atol}) -- not overwriting")
+    # write-to-temp-then-atomic-rename: never touch out_path until the new file is fully
+    # written -- a crash mid-write used to leave only a stray rename()'d backup with no
+    # canonical file at all (2026-08-12 incident, root-caused after the canonical CSV silently
+    # went missing on both dev and server).
+    tmp_path = out_path.with_name(out_path.name + ".tmp_write")
+    new_df.to_csv(tmp_path, index=False)
     backup = out_path.with_suffix(".csv.bak_pre_extend_20260704")
     if not backup.exists():
         out_path.rename(backup)
         print(f"{tag}: backed up to {backup}", flush=True)
-    new_df.to_csv(out_path, index=False)
+    tmp_path.rename(out_path)
     print(f"{tag}: wrote {len(new_df)} rows -> {out_path}", flush=True)
 
 

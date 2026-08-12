@@ -73,11 +73,17 @@ def main() -> int:
             flush=True,
         )
 
+    # write-to-temp-then-atomic-rename: never touch SIDECAR_PATH until the new file is fully
+    # written -- a crash mid-write used to leave only a stray rename()'d backup with no
+    # canonical file at all (2026-08-12 incident, root-caused after the canonical CSV silently
+    # went missing on both dev and server).
+    tmp_path = SIDECAR_PATH.with_name(SIDECAR_PATH.name + ".tmp_write")
+    sidecar_new.to_csv(tmp_path, index=False)
     backup = SIDECAR_PATH.with_suffix(".csv.bak_pre_extend_20260713")
     if not backup.exists():
         SIDECAR_PATH.rename(backup)
         print(f"backed up existing sidecar to {backup}", flush=True)
-    sidecar_new.to_csv(SIDECAR_PATH, index=False)
+    tmp_path.rename(SIDECAR_PATH)
     print(f"wrote extended sidecar: {len(sidecar_new)} rows -> {SIDECAR_PATH}", flush=True)
     return 0
 
