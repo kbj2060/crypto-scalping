@@ -426,6 +426,7 @@ def _fit_expert_omega4(
     direction_class_weights: dict[int, float],
     quality_class_weights: dict[int, float],
     direction_focal_gamma: float = 0.0,
+    hard_regime_filter: bool = False,
 ) -> dict[str, Any]:
     torch.manual_seed(int(seed) + int(expert_idx))
     np.random.seed(int(seed) + int(expert_idx))
@@ -437,8 +438,14 @@ def _fit_expert_omega4(
     y_dir_np = np.asarray(y_dir, dtype=np.int64)
     y_qual_np = np.asarray(y_qual, dtype=np.int64)
     y_exit_np = np.asarray(y_exit, dtype=np.int64)
-    route_w = parent._route_probs(route_frame)[:, int(expert_idx)].astype(np.float32)
-    exit_w = parent._route_probs(exit_route_frame)[:, int(expert_idx)].astype(np.float32)
+    route_probs = parent._route_probs(route_frame)
+    exit_route_probs = parent._route_probs(exit_route_frame)
+    if hard_regime_filter:
+        route_w = (route_probs.argmax(axis=1) == int(expert_idx)).astype(np.float32)
+        exit_w = (exit_route_probs.argmax(axis=1) == int(expert_idx)).astype(np.float32)
+    else:
+        route_w = route_probs[:, int(expert_idx)].astype(np.float32)
+        exit_w = exit_route_probs[:, int(expert_idx)].astype(np.float32)
     dir_w = compute_sample_weight(class_weight="balanced", y=y_dir_np).astype(np.float32) * route_w
     qual_w = compute_sample_weight(class_weight="balanced", y=y_qual_np).astype(np.float32) * route_w
     dir_w *= np.asarray([float(direction_class_weights.get(int(y), 1.0)) for y in y_dir_np], dtype=np.float32)
@@ -565,6 +572,7 @@ def _fit_expert_omega4(
         "direction_class_weights": {str(k): float(v) for k, v in direction_class_weights.items()},
         "quality_class_weights": {str(k): float(v) for k, v in quality_class_weights.items()},
         "direction_focal_gamma": float(direction_focal_gamma),
+        "hard_regime_filter": bool(hard_regime_filter),
     }
     torch.save(payload, model_path)
     return payload
@@ -984,6 +992,7 @@ def main() -> int:
     ap.add_argument("--direction-class-weights", default="")
     ap.add_argument("--quality-class-weights", default="")
     ap.add_argument("--direction-focal-gamma", type=float, default=0.0)
+    ap.add_argument("--hard-regime-filter", action="store_true")
     ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="cpu")
     args = ap.parse_args()
 
@@ -1082,6 +1091,7 @@ def main() -> int:
             direction_class_weights=direction_class_weights,
             quality_class_weights=quality_class_weights,
             direction_focal_gamma=float(args.direction_focal_gamma),
+            hard_regime_filter=bool(args.hard_regime_filter),
         )
         models[expert] = payload
         summaries[expert] = {
@@ -1182,6 +1192,7 @@ def main() -> int:
             "quality": {str(k): float(v) for k, v in quality_class_weights.items()},
         },
         "direction_focal_gamma": float(args.direction_focal_gamma),
+        "hard_regime_filter": bool(args.hard_regime_filter),
         "input_contract": {
             "base_feature_count": len(base_cols),
             "position_feature_count": len(parent.POS_COLS),

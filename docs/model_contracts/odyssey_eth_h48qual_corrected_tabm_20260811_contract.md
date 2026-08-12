@@ -194,6 +194,331 @@ paired p=0.028; OOS +3.58%±8.70 vs +22.89%±5.15, 0/5, paired p=0.002). 단일 
 때문. 상세:
 `docs/experiments/eth_h48qual_ungated_direction_h48orig_5seed_vs_always_short_20260812.md`.
 
+**독립 재현 + 나머지 3개 무료 후보 완료 (2026-08-12, 별도 세션)**: 위 h48orig 5시드 결과를
+`scripts/diagnose_eth_h48qual_multiseed_ungated_direction_vs_always_short_20260812.py`로
+독립 재실행해 정확히 일치 확인(VAL -7.32±11.28 vs +8.51±1.03, OOS +3.58±8.70 vs +22.89±5.15,
+같은 데이터에 대한 결정론적 시뮬레이션이라 당연한 결과지만 파이프라인 정합성 재확인), 여기에
+h384 v2(15시드)를 더해 **총 40칸 중 2칸만 승**(전부 h384 VAL, Wilcoxon 단측 4그룹 전부 p≈1.0)으로
+범위를 넓혔다. 같은 turn에 팀장 리서치의 나머지 무료 후보 3개(dir_confidence/margin/entropy
+직접 순위상관, trust score, 레짐별 threshold)도 완료 — **전부 부정**(첫째는 h48orig만 명목유의·
+h384 무상관으로 라벨변형 불일치 기각, trust score는 4변형 전부 무신호, 레짐별 threshold는
+VAL/OOS 최적값이 서로 어긋나 그리드서치 노이즈로 판단). 상세: `docs/experiments/
+eth_h48qual_quality_head_replacement_candidates_1_2_3_and_formal_skill_test_20260812.md`.
+
+**곁가지 파일럿: quality_loss_weight=0(단일시드, 서버 GPU)도 가설과 반대 결과** — 공유 TabM
+trunk에서 quality_head의 gradient를 끊으면 direction_head가 나아질 거라는 가설을 테스트했으나,
+5개 threshold·VAL/OOS 전부 기존(quality_loss_weight=0.80)보다 악화(OOS 승률 25~33%→14~24%).
+단일시드라 확정은 아니나 전 threshold·전 스플릿 일관된 방향 — quality_head를 같이 학습시키는
+것 자체가 오히려 공유 표현에 정규화처럼 도움을 주고 있을 가능성. 상세: `docs/experiments/
+eth_h48qual_quality_loss_weight_zero_pilot_20260812.md`.
+
+**🧭 사용자 결정 (2026-08-12): `quality_head` 대체 리서치 전체를 닫고, `direction_head` 자체의
+방향 스킬 존재 여부를 서브 프로젝트의 최상위 질문으로 승격.** 위 두 문서로 quality_head_replacement_research의
+9개 후보 전부(Tier 0의 1·2·3·9 정식 종료, Tier 1 이상은 후보 9 확정으로 근거 상실)가 닫힌
+시점에 AskUserQuestion으로 세 갈래(방향 승격 / focal loss 계속 / Tier-0 마저 닫기 — 이미 닫힘)를
+제시, 방향 승격을 선택. **quality_head 관련 투자(게이팅 재설계·대체 스칼라·threshold 재보정)는
+전부 보류.** 다음 단계는 미착수: (a) `direction_head` 자체의 분류 정확도를 직접 겨냥한 신규 피쳐
+탐색(FINAL12/REL11은 quality 관련성 기준으로 스크리닝된 것이라 다름), (b) 신규 방향 라벨 설계
+(다른 zigzag 파라미터 또는 다른 타겟), (c) 이 VAL/OOS 하락장 구간(2025-10~2026-02/03) 밖에서
+재검증해 "엣지 없음"이 구간 특정적인지 확인. 착수 전 반드시 확인할 선행 문헌: 이미 닫힌 리서치
+라인 `eth_overnight_generic_feature_entry_filter_20260809`(레지스트리 `prior_lines`)가 일반
+피쳐로 방향을 재추정하는 시도를 6개 피쳐군 + 44피쳐 kitchen sink 전부로 이미 실패시켰다 —
+새 계획은 이 선례를 재발견하는 대신 반영해야 한다.
+
+**TabM 백본 대체 후보 문헌 리서치 완료 (2026-08-12, 사용자 지시, Model Architect 페르소나
+dispatch + 리드 세션 검증, 문헌 리서치만 — 학습/구현 없음)**: 피쳐(FINAL12)·라벨·구간을 고정한
+채 TabM을 대체할 모델 후보를 최신 문헌(2024~2026)으로 조사. 핵심: TabM은 TabArena/TALENT에서
+플레인 DL 최상위권이라 같은 계열 내 교체 headroom은 작고, 여지는 (1) 184k행÷12피쳐≈15,411의
+극단적 행/피쳐 비율이 문헌상 GBDT 유리 구간이라는 점, (2) 인덕티브 바이어스가 근본적으로 다른
+계열(시간 드리프트를 명시 모델링하는 Drift-Resilient TabPFN[Helli+ NeurIPS 2024], ICL 파운데이션
+모델 TabICL[ICML 2025], 국소 이웃 기반 ModernNCA[ICLR 2025])뿐. 권장 순위: ① GBDT(비용 거의 0,
+이 정확한 계약으로는 미시도임을 레포 실사로 확인 — "TabM 탓인가 데이터 탓인가"를 가장 싸게
+분리하는 진단으로서의 가치) ② Drift-Resilient TabPFN ③ TabICL ④ ModernNCA ⑤ xRFM.
+정직한 평가: 40칸 중 38칸 always-short 패배 기록과 `eth_overnight_generic_feature_entry_filter_20260809`
+선례를 감안하면 어떤 백본도 신호 부재 자체를 못 풀 확률이 더 높음 — 이 리서치의 실용 가치는
+GBDT를 싸게 돌려 백본 축을 확정적으로 닫거나 열어, 위 최상위 질문(direction_head 방향 스킬)에
+집중할 근거를 강화하는 것. 벤치마크는 전부 IID 스플릿 기준이라(TabReD 경고) walk-forward 순위
+이전 불가, ICL 계열도 Fresh-Forward 규칙 동일 적용(슬라이딩 컨텍스트 필수), TabPFN-3은 라이선스
+확정 전 보류. 상세: `docs/experiments/eth_h48qual_tabm_backbone_replacement_model_research_20260812.md`.
+
+**✅ GBDT 백본 진단 완료 (2026-08-12), 확정된 부정 결과**: 위 1순위 권장안 실행. 기존 h48orig
+학습 파이프라인(`_prepare_frames`)을 그대로 재사용해 FINAL12→zigzag_action 3-class를
+LightGBM으로 학습 — TRAIN 내부 월별 확장윈도우 CV(embargo 48bar)로 Optuna 80 trials HP 탐색 →
+상위 5개 CV 후보를 VAL 거래 시뮬레이션으로 재평가해 always-short 대비 마진 최대 후보 채택
+(select-on-validation-only) → N=8 진짜 무작위 시드(Seed-Diversity Gate)로 최종 검증, VAL/OOS ×
+cost1/2/3에서 always_short/always_long과 대조. TRAIN 윈도우는 h48orig 5시드 재현판과 동일한
+2025-01~09(9개월, isolated-verification 관례 — 라이브 21개월 TRAIN과 다름, "함정 1" 참고).
+
+**결과: 6개 구간(VAL/OOS × cost1/2/3) 전부, 8시드 전부 always-short 패배 — Wilcoxon
+one-sided p=1.0000 전 구간.** CV logloss 0.7823(기저비율 예측치 ≈0.975보다 낮아 분포 수준
+구조는 일부 포착)에도 불구, 방향 판별력은 balanced_accuracy 0.469~0.470으로 약함. 피쳐 중요도는
+`vwap_dist_24`가 압도적(전체 gain의 대부분) — "아무 피쳐도 안 씀"이 아니라 "특정 조합에 강하게
+의존했는데도 결과가 안 남"는 패턴. **인덕티브 바이어스가 근본적으로 다른 두 모델 계열(TabM의
+연속 파라메트릭 MLP 앙상블, 이번 GBDT의 축-정렬 비미분 분할 트리)이 동일 피쳐·라벨·구간에서
+동일하게 실패** — TabM h48orig 5시드(0/5) + h384 v2 15시드(2/40) + 이번 GBDT 8시드(0/48,
+6구간×8시드)를 합쳐 "TabM의 표현력 한계"가 아니라 "FINAL12가 이 구간의 `zigzag_action`을
+예측하는 데 필요한 정보를 담고 있지 않을 가능성"이 세 번째 독립 증거로 강화됨. 남은 백본 후보
+(Drift-Resilient TabPFN 등)의 사전 확률도 한 단계 낮아짐 — 시간적 분포 이동을 정면 모델링하는
+계열만 질적으로 다른 시도로 남고, 우선순위는 낮춤. 상세:
+`docs/experiments/eth_h48qual_gbdt_backbone_diagnostic_20260812.md`.
+
+**오라클 라벨 설계 문헌 리서치 완료 (2026-08-12, 사용자 지시, Model Architect 페르소나 dispatch +
+리드 세션 검증)**: zigzag/triple-barrier 둘 다 실패한 맥락에서 최신(2023~2026) 라벨링 방법론
+문헌 조사. 핵심: 2026년 신규 논문 2건이 이 프로젝트의 정확한 상황을 정면으로 다룸 —
+Label Horizon Paradox(Song/Liu/Chen, arXiv:2602.03395)는 최적 지도신호가 최종 목표와 다른
+중간 호라이즌으로 이동한다고 주장(48/384bar 스윕보다 급진적), Spurious Predictability
+(Nikolopoulos, arXiv:2604.15531)는 이 프로젝트가 이미 수행한 오라클 게이트 검증과 방법론적으로
+동일한 falsification-audit을 권고. 권장 순위: ① 신규 라벨 후보마다 MI/R² 사전 게이트(TabM 풀
+학습 전 필수 관문) ② trend-scanning(t-value 기반 호라이즌 자동선택)으로 zigzag 대체 ③
+zigzag_action 위에 "베팅 여부"만 판별하는 메타라벨 2차 분류기 ④ quality_head를 MFE 분위수 회귀로
+전환 ⑤(보류) AEDL류 regime-aware 라벨(구현 복잡도 최고, 단일 논문 실증뿐). 정직한 결론: 오라클
+게이트가 h48_conservative를 메커니즘상 유효(always-short 15/15 압도)하다고 확인했는데도 GBM
+R²≈0라는 사실은, 문제가 라벨의 정의 방식이 아니라 **FINAL12 12개 피쳐 자체가 미래 경로 정보를
+담고 있지 않을 가능성**을 시사 — 이 경우 라벨을 아무리 재설계해도 상호정보량 예산은 늘지 않음.
+상세: `docs/experiments/eth_h48qual_oracle_label_design_literature_research_20260812.md`.
+
+**신규 탐색 축 스카우팅 완료 + 1순위 후보 실행 (2026-08-12, 내가)**: 위 "방향 승격" 결정에 따라
+(a) 신규 피쳐 (b) 신규 라벨 (c) 다른 구간 세 갈래를 정찰(Model Architect 페르소나 dispatch,
+레지스트리·17개 아이디어 밤샘·데이터 리소스 문서 전체 대조로 이미 닫힌 라인 재발견 방지) —
+상세: `docs/experiments/eth_h48qual_direction_skill_new_directions_scouting_20260812.md`. 가장
+값싼 1순위 후보(TRAIN 내부 2025 Q2~Q3 상승구간 홀드아웃, 재학습 불필요)를 바로 실행: 이 구간
+실제가격 +127.2%인데도 **ungated direction_head가 max(always_long,always_short)=+36.5%에
+완패**(-7.53%, 44%p 격차) — 게이트 있는 라이브 방식은 이 구간에서 손실(-11.01%)까지 기록.
+**하락장 VAL/OOS뿐 아니라 강한 상승구간(TRAIN 내부)에서도 진다** — "하락장 특정적 실패"
+가설이 반증됨, 방향 스킬 부재가 추세 방향과 무관한 더 구조적인 문제라는 근거가 하나 더
+추가됨(단, 인샘플·단일 인스턴스라 스킬 부재의 확정 증거는 아니고 스코프 판단용). 이 결과로
+더 비싼 후보(post-OOS 2026-03~07 진짜 확장)의 시급성은 낮아짐 — 다운/업 두 강한 추세 구간이
+이미 같은 결론에 도달했기 때문. 다음 우선순위는 스카우팅 문서의 통합 순위표(신규 탐색) +
+위 백본 리서치의 GBDT 1순위(구조 축) 두 갈래가 남음 — 둘 다 아직 미착수.
+
+**직전에 착수했던 focal loss 재학습, N=5 시드로 완료·부정 결과 (2026-08-12, 별도 세션)**: 위
+"방향 승격" 결정 이전에 사용자가 지시했던 트랙 — `direction_head` 클래스별 confidence 비대칭을
+학습 단계에서 겨냥하는 focal loss(gamma=2.0)를 표준 5시드로 완주(2024-2025 전체구간 소스로
+정확히 맞춤). **목표였던 calibration 개선이 아니라 정반대**: 정확도는 거의 그대로인데 확신도만
+전반적으로 낮아져 ECE가 학습구간에서 2~4배, OOS에서도 1.2~1.4배 악화(TRAIN LONG ECE
+0.100→0.207, SHORT 0.046→0.180). PnL도 gamma=0(표준 CE) 대비 모든 threshold에서 같거나 나쁨,
+둘 다 OOS에서 always-short(+20.13%)에 크게 못 미침(gamma=0 +3.51%, gamma=2.0 +1.06%) — 이미
+확정된 "direction_head 자체가 always-short 대비 스킬 없음" 결론과 일관된다. 상세:
+`docs/experiments/eth_h48qual_direction_focal_loss_multiseed_result_20260812.md`. 이 결과는
+위 "방향 승격" 결정을 재확인만 할 뿐 바꾸지 않는다 — focal loss는 calibration만 다루는 도구라
+애초에 새 스킬을 만들어낼 수 없었고(오히려 이번엔 calibration도 못 만듦), 이제 quality_head/
+direction_head 게이팅·손실함수 축 전체가 닫힌 것으로 취급한다.
+
+**레짐별 완전분리(hard filter) 학습 파일럿 완료, 부정 결과 (2026-08-12, 내가, 사용자 제안)**:
+사용자가 "레짐별로 TabM을 따로 학습시키면?"을 제안 — 조사해보니 h48orig(final15/jmlam4 포함)가
+**이미** bull/bear/chop을 완전 별도 파일로 학습 중이었으나 **soft weight**(레짐 확률로 가중,
+전체 데이터를 다 봄)였음을 확인. **hard filter**(그 레짐 argmax bar만, 가중치 0/1)만 안 해본
+조합이라 `--hard-regime-filter` 플래그를 추가(`git diff` 13줄, 기본값 False로 기존 동작 완전
+보존)해 h48orig 레시피 그대로 시드 260620 단일 파일럿을 서버에서 학습. **결과: 두 스플릿 모두
+soft-weight보다 악화**(VAL gated -7.98%→-17.21%, OOS +8.02%→+1.72%; always-short 대비 격차도
+더 벌어짐). 레짐을 하드하게 쪼개면 전문가당 유효 표본만 줄어 더 노이즈해지는 것으로 보임 —
+quality_loss_weight=0 파일럿(정보 제거 시 악화)과 같은 패턴. 단일시드지만 두 스플릿 다 같은
+방향이라 N≥5 재현 투자 근거는 약함. **"레짐별 분리학습"은 soft(라이브 구조 자체, N=40칸 확정)·
+hard(이 파일럿) 둘 다 시도되고 둘 다 부정 — 이 방향도 닫힘.** 상세:
+`docs/experiments/eth_h48qual_hard_regime_filter_pilot_20260812.md`.
+
+**GBDT 백본 진단 풀런 완료, 부정 결과 (2026-08-12, 내가 pull+검증)**: 스모크 테스트 이후 서버에서
+계속 실행 중이던 풀런(Optuna 80trial→VAL 재평가로 HP 채택→N=8 진짜 무작위 시드)이 완료됨.
+**8시드·6개 비용조합(VAL/OOS×cost1/2/3) 전부 always-short에 완패, 전부 Wilcoxon p=1.0000** —
+TabM h48orig(N=40칸 중 2칸)와 사실상 같은 결론. 채택된 HP 자체가 이미 VAL always-short 대비
+마진 -13.88%p(HP 선택 절차가 명시적으로 마진 최대화를 목적으로 했는데도 양의 마진 후보가 하나도
+없었음). 분류 balanced_acc≈0.47(3-class chance 0.33보다 높음)이지만 확인해보니 CASH를 거의
+예측 안 해서(선택된 HP가 class_weight_mode=none) 사실상 매 bar 거래 중 — TabM의 ungated 실험과
+비슷한 활성 프로필로 대조되고 있음. **완전히 다른 모델 계열(축-정렬 트리 vs 연속 가중합
+신경망)도 같은 실패를 반복** — "TabM 아키텍처 자체의 문제"라는 가설이 상당히 약해지고, 오늘
+완료된 오라클 라벨 설계 문헌 리서치의 "FINAL12 피쳐 자체가 미래 정보를 안 담고 있을 가능성"
+결론과 수렴. 백본 교체 축의 우선순위는 이걸로 낮아짐 — direction-only 피쳐 재스크리닝과 신규
+라벨 후보(MI/R² 사전 게이트) 쪽이 지금 가장 근거가 강한 다음 방향. 상세:
+`docs/experiments/eth_h48qual_gbdt_backbone_diagnostic_result_20260812.md`.
+
+**✅ Trend-scanning 라벨 MI/R² 사전 게이트 완료 (2026-08-12, 사용자 지시), 결정적 부정 결과**:
+오라클 라벨 리서치 권장안 1(사전 게이트)+2(trend-scanning)를 함께 실행 — De Prado 방식
+(`L∈{8,16,24,32,48,64,80,96}`bar에서 `|t-value|` 최대 윈도우 선택)으로 라벨 구성, 벡터화 구현을
+`scipy.stats.linregress`와 12개 지점에서 직접 대조해 정확성 확인(소수점 6자리 일치). h48orig
+FINAL12 파이프라인 그대로 재사용, `quality_head` 회귀전환 시도와 **동일한 GBM 홀드아웃 설정
+2개**(약한/강한 정규화)로 R² 게이트. **결과: VAL/OOS R² 둘 다, 두 정규화 설정 전부 0 이하**
+(약한 정규화 VAL -0.1049/OOS -0.2272, 강한 정규화 VAL -0.0043/OOS -0.0737), 부호-AUC도 0.5
+근처(0.505~0.545)로 방향 판별력 사실상 없음. 부차 발견: 이산화(임계값 1.65~2.58) 시 CASH
+비중이 0~0.3%로 사실상 소멸 — 8개 윈도우 중 최대 `|t|` 선택이 다중비교 문제를 안고 있다는
+구현 한계(R² 게이트는 연속 타겟 기준이라 이 이슈와 무관하게 이미 결정적으로 부정적). **결론:
+라벨을 zigzag_action에서 trend-scanning으로 바꿔도 FINAL12로는 예측이 안 됨** — GBDT/TabM
+백본 진단(모델을 바꿔도 zigzag_action 예측 안 됨)에 이은 네 번째 독립 증거로 "FINAL12 자체의
+정보량 부족"에 수렴. 오라클 라벨 리서치 권장안 2위는 이걸로 닫힘, 3위(메타라벨)·4위(MFE
+분위수)의 사전 확률도 낮아짐 — 다음은 라벨 축보다 피쳐 확장 또는 구간 밖 재검증이 더 생산적.
+상세: `docs/experiments/eth_h48qual_trend_scanning_label_mi_r2_gate_20260812.md`.
+
+**✅ 피쳐 확장 축 착수 — 신규 탐색 축 스카우팅 (a) 그룹 실행 (2026-08-12, 사용자 지시)**: 두
+후보(direction-only mRMR 재스크리닝, Fear&Greed 백필)를 스카우팅 문서 우선순위대로 실행.
+
+1. **Direction-only mRMR/knockoff 재스크리닝 — 예비적으로 긍정적, 확정 아님**: FINAL12가 실제로는
+   quality 타겟과 섞여 병합됐고 공통윈도우도 6개월뿐이었다는 점을 재확인한 뒤, `zigzag_action`
+   단독 MI로 처음부터 재순위화. 피쳐 풀은 위험에 노출됐던 `fa_features.parquet`(백업 완료,
+   `tmp/eth_h48qual_fa_features_backup_20260812/`) 대신 **커밋된**
+   `data/splits/year_oos/eth_features_2024_2026_analysis.csv`(2024-06~2026-08 커버, M7/AI
+   direction 컬럼 자체가 없어 Model Architect 정책 자동 준수)를 사용, TRAIN(2024-06~2025-09,
+   canonical보다 5개월 짧음)/VAL/OOS(canonical과 동일, 실제 커버). mRMR+`|r|>0.5` 중복제거 후
+   신규 후보 4개(FINAL12엔 없음): `mtf_trend_1h`, `funding_roc_12`, `trades`, `sig_trend_health`
+   — 오염도 체크 전부 통과. 튜닝 없는 단일 LightGBM fit으로 FINAL12(패널가용 9개) 단독 대비
+   +신규4개(13개)를 대조: **VAL balanced_acc 0.469→0.476, OOS 0.464→0.471** — VAL/OOS 둘 다
+   같은 방향으로 소폭 개선(+0.7~1.5pp). **단일 fit(시드평균 없음)이라 예비 신호일 뿐** — 이
+   프로젝트 표준([[tabm_hp_low_signal_pattern]])상 이 정도 효과크기는 시드간 변동에 흔히
+   묻힌다. 다음 단계는 `FINAL13`(FINAL12+`mtf_trend_1h`) 후보로 N≥5 진짜 무작위 시드 GBDT/TabM
+   정식 검증(always-short 대조 포함) — 아직 미착수. 상세:
+   `docs/experiments/eth_h48qual_direction_only_mrmr_rescreen_20260812.md`.
+2. **Fear&Greed Index 백필 — 부정 결과, 사전 기대치와 일치**: alternative.me 무료 API(2018년~
+   일별 히스토리) 전체 백필, 원값/diff1/7일MA편차 3종 전부 오염도 체크(corr(price)≤0.385) 통과했으나
+   MI가 낮고(0.01~0.045, FINAL12 최상위의 1/10 미만) 홀드아웃에서 VAL/OOS 둘 다 오히려 소폭
+   악화(-0.5~0.9pp). 일별 해상도를 5분봉에 forward-fill하는 구조적 정보량 한계가 그대로
+   나타남 — 이 후보는 닫힘. 상세: `docs/experiments/eth_fear_greed_backfill_direction_relevance_20260812.md`.
+
+**부수 조치**: 계약 문서 데이터 리소스 등록부가 경고했던 `fa_features.parquet`(127M, 세션
+scratchpad 전용·git 추적 밖·소멸 위험) 백업을 이번에 완료(`tmp/eth_h48qual_fa_features_backup_20260812/`,
+mRMR/knockoff 스크립트 3종 포함) — 착수 여부와 무관한 시급 권고였던 항목 해소.
+
+**✅ 오토인코더 잠재피쳐(latent factor) MI/R² 게이트 + PnL 대조 완료 (2026-08-12, 사용자 제안),
+부분 긍정 + 실거래 관점 부정**: 사용자 제안("피쳐들이 딥러닝으로 합쳐져서 새 좋은 피쳐가 될 순
+없나") 실행. 사전 이론적 설명: TabM 자체가 이미 FINAL12를 비선형 조합하는 딥러닝이라 진짜
+차별점은 조합 자체가 아니라 **FINAL12(12개)보다 넓은 원시풀(139개)을 직접 압축**하는 것 —
+디노이징 오토인코더(139→64→32→16, 완전 비지도)를 direction-only mRMR과 동일한 zig075 풀·
+TRAIN(2024-06~2025-09)에 학습. **분류 지표는 이 세션 최대 개선폭**: latent-only 16차원이
+FINAL12(패널가용 9개) 대비 VAL balanced_acc 0.469→0.499, OOS 0.464→0.496(둘 다 macro_f1도
++5~6pp) — 오염도(corr(close)≤0.087) 문제 없음. 그러나 **검증된 거래 시뮬레이션(omega._metrics)
+으로 always-short 대조하니 3조합×2구간×3비용=18개 셀 전부 always-short 패배** — latent 단독은
+FINAL12보다 절대PnL·승률이 개선됐지만(VAL cost3 -12.21%→+4.28%) always-short 기준선 자체가
+이 하락장 구간에서 더 강해(+7.82%→+11.55%) 격차를 못 넘음. **분류 지표 개선이 PnL 개선을
+보장하지 않는다는 이 프로젝트 핵심 교훈(`quality_head` 게이트 편향과 동일 패턴)이 오토인코더
+latent에서도 재현** — GBDT/TabM/trend-scanning에 이은 5번째 독립 증거로 "이 자산/구간에서
+방향 예측의 실전 가치가 구조적으로 낮다"에 수렴. 단, latent가 FINAL12보다 방향은 나은 쪽으로
+움직였다는 점은 "완전 무신호"보다 "신호는 있으나 강한 레짐베타 기준선을 못 넘음"이라는 미묘한
+위치를 시사 — N≥5 시드 재현 여부는 미확인(단일 fit). 상세:
+`docs/experiments/eth_h48qual_autoencoder_latent_mi_r2_gate_20260812.md`.
+
+**✅ TCN 시퀀스 모델(다중 bar 윈도우) N=5 시드 정식 검증 완료 (2026-08-12, 사용자 지시), 애매하나
+실용적으로 부정 — 이 세션 유일하게 "완전 셧아웃"이 아닌 결과**: 오토인코더 다음 순서로 실행.
+이 세션의 모든 이전 시도(TabM/GBDT/trend-scanning/오토인코더)는 전부 단일 bar 스냅샷만 봤다 —
+TCN(인과적 dilated conv, 96bar=8시간 윈도우, raw/경량 8피쳐: log_return/volatility_z/rsi/
+macd_hist/bb_width_z/wick_ratio/net_taker_ratio/cvd_12, FINAL12 재사용 회피)으로 시간축 정보를
+직접 테스트. N=5 진짜 무작위 시드(서버 GPU RTX 3070 Ti, 시드당 15~20초 — 로컬 CPU 대비
+15~20배 빠름). **분류 지표는 이 세션 최대·최고 재현성 개선**: VAL balanced_acc=0.521±0.003,
+OOS=0.537±0.007(시드간 편차가 TabM HP 노이즈 수준을 훨씬 밑돎 — 진짜 재현성 있는 개선).
+**거래 시뮬레이션은 엇갈림**: VAL은 2~3/5 시드가 always-short를 이김(Wilcoxon p 0.59~0.78,
+유의하지 않으나 이 세션 최초로 "완전 무경쟁"이 아닌 접전) — 반면 **OOS는 3개 비용조합 전부
+5/5 결정적 패배**(p=1.0000, 다른 모델들과 동일 패턴). 분류 정확도는 VAL보다 OOS가 더 높은데
+(0.521→0.537) 거래 성과는 OOS가 더 나쁨(2~3/5→0/5) — 방향 정확도 개선이 실제 수익 나는
+클래스를 못 맞히는 쪽으로 향했을 가능성. **결론: 승격 요건(N≥5 시드 VAL·OOS 둘 다 유의미한
+승리) 명백히 미충족**(OOS 5/5 패배 하나로 탈락) — 이 자산/구간의 "방향 예측이 always-short를
+안정적으로 이길 실전 가치를 갖는다"는 상위 명제를 뒤집지 않는다. 다만 VAL의 접전은 다른
+모델들의 완전 무경쟁과 질적으로 다르므로, "여러 bar 시간구조"라는 정보원 자체를 완전히
+무가치로 단정하기엔 이르다는 여지는 남김. 상세:
+`docs/experiments/eth_h48qual_tcn_sequence_model_20260812.md`.
+
+**✅ TCN 전체 파라미터 튜닝 + 5개 피쳐셋 종합 탐색 완료 (2026-08-12, 사용자 지시), 이 서브
+프로젝트에서 가장 큰 표본의 결정적 부정 결과 — VAL의 여지도 사실상 해소**: 위 baseline TCN
+결과(VAL 접전)가 진짜 신호인지 확인하기 위해 Optuna 30 trials × 5개 피쳐 테마(raw_lite/
+final12_seq/raw_wide/orderflow_funding/ohlcv_minimal) × N=5 시드 최종검증(서버 GPU RTX
+3070 Ti)으로 철저히 재탐색. **150개 관측 셀(5변형×5시드×2구간×3비용) 중 13승(8.7%), 그
+13승 전부 VAL — OOS는 75개 전부(5변형×5시드×3비용) 예외 없이 always-short 패배.** 최고
+성적조차(raw_lite 5/15, ohlcv_minimal 4/15) VAL 33% 승률 수준으로 유의성 없음(최저
+p≈0.68) — baseline(튜닝 전 VAL 2~3/5)과 비교해도 크게 개선 안 됨, 즉 이전 결과가 HP 미달로
+저평가된 게 아니었음이 확인됨. **부수 발견**: 가장 넓은 피쳐셋(raw_wide, 24컬럼)이 VAL
+완전 셧아웃(0/15)으로 최악, 가장 좁은 피쳐셋들이 상대적으로 나음 — 오토인코더 실험의 "넓은
+원시풀 압축이 도움될 수 있다" 가설과 반대 방향, 저SNR 환경에서 피쳐를 늘릴수록 신호보다
+노이즈/과적합이 더 빨리 는다는 이 세션 반복 패턴과 일치. `final12_seq`(이미 집계된 피쳐
+재시퀀스)도 약함(2/15) — "이미 집계된 값 재집계는 새 정보 없음" 가설 확인. **결론:
+TabM(0/40+)·GBDT(0/48)·오토인코더(0/18)·이번 TCN(OOS 0/75)까지 합쳐 이 서브 프로젝트
+전체에서 OOS에 always-short를 이긴 모델이 단 한 번도 없음** — "특정 모델/라벨/피쳐 문제"가
+아니라 "이 자산·타임프레임·구간·피쳐우주 조합에서 방향 예측 자체가 실전 가치를 갖지 않는다"는
+훨씬 강한 명제로 굳어짐. 남은 방향: (a) 완전히 새 원시 데이터소스(대부분 인프라 벽), (b)
+VAL/OOS 밖 재검증(TRAIN 내부 상승구간은 이미 패배 확인, 진짜 post-OOS 2026-03~07은 미착수),
+(c) 방향 예측 자체를 서브 프로젝트 목표에서 내려놓고 exit_head/사이징/리스크 오버레이로
+전환. 상세: `docs/experiments/eth_h48qual_tcn_hpsearch_multivariant_20260812.md`.
+
+**대체데이터 5종(CoinGlass/Dune/DefiLlama/LunarCrush/Santiment) 접근성 확인 + DefiLlama
+검증 완료 (2026-08-12, 사용자 지시)**: 퀀트펀드 데이터소스 리서치가 짚은 후보 재검토.
+**완전 무료+API키 불필요+전체 구간 백필 가능한 건 DefiLlama뿐** — 나머지는 Dune(계정 가입
+필요), CoinGlass(무료 티어 폐지, $29/월~), LunarCrush(과거 시계열 유료), Santiment(익명
+무료지만 최근 약 12개월 롤링만, TRAIN 대부분 못 채움) — 전부 사용자 결정(가입/결제) 필요해
+보류. DefiLlama(ETH 체인 TVL/DEX거래량/수수료·매출)는 즉시 검증: 오염도 체크는 대체로 통과
+(원값 TVL만 corr(price)=0.842로 오염, detrend 파생 6개는 통과)했으나 **LightGBM 홀드아웃에서
+VAL/OOS 둘 다 소폭 악화** — Fear&Greed와 동일 패턴, 부정 결과. **부수 발견(방법론 함정)**:
+일별 forward-fill 데이터에 `mutual_info_classif`를 직접 적용하면 288-bar 중복블록 구조
+때문에 완전 무관한 랜덤 데이터도 실제 데이터와 거의 동일한 MI를 반환하는 degenerate 현상을
+합성 데이터로 재현·확정 — Fear&Greed 실험 문서에도 소급 caveat 추가(결론 자체는 홀드아웃
+비교로 이미 뒷받침돼 안 바뀜). 앞으로 저해상도 외부 데이터 MI 검증 시 표준 절차에 추가:
+무관한 랜덤 daily 대조군 MI를 함께 계산하거나 GBM 홀드아웃만 신뢰할 것. 상세:
+`docs/experiments/eth_alt_data_source_feasibility_check_20260812.md`,
+`docs/experiments/eth_defillama_onchain_direction_relevance_20260812.md`.
+
+**⚠️ (아래 후속 검증에서 번복됨 — 계약 문서 하단 콜아웃 참고) TCN post-OOS(2026-03~08) 확장
+검증 완료 (2026-08-12, 사용자 지시), 최초 보고 시점엔 이 서브 프로젝트 최초의 유의미한 양성
+결과로 보였음**: `zigzag_action` 라벨은 2026-02-28에서 끊기지만 zig075
+소스 패널의 raw 피쳐+OHLC는 2026-08-04까지 gap 없이 존재함을 확인, 라벨 없이 PnL만 계산하는
+진짜 블라인드 5개월 구간(44,970행) 테스트 실행. 가격 성격 직접 확인: 상승(+7.0%/+7.3%)→
+하락(-11.3%/-21.9%)→재반등(+18.3%), 순변화 -5.4% — VAL/OOS의 일방적 하락과 다른 휩소 레짐.
+오늘 TCN HP서치에서 확정된 `raw_lite`/`ohlcv_minimal` 최적 HP를 그대로 재사용(POST_OOS는
+HP 선택에 전혀 관여 안 함 — data-snooping 없음), N=5 신규 무작위 시드. **결과: 두 피쳐셋
+모두 cost3(3배 비용)에서 5/5 시드 전부 always-short **와** always-long 둘 다** 이김,
+Wilcoxon p=0.0312(유의)** — cost1도 4~5/5(p=0.03~0.06), cost2는 약함(p=0.16/0.09). 거래수
+46~60건/시드·승률 35~49%로 표본/이상치 문제 아님을 확인. 핵심: 이 구간은 always-short도
+always-long도 둘 다 마이너스(-2.83~-5.15%)인 순수 휩소 레짐이라, 동일 active-bar-set에서
+방향만 강제전환한 두 기준선을 모델이 실제로 이겼다는 뜻. **한계**: 단일 구간(n=1 window)이라
+"방향 스킬"과 "휩소 레짐에서는 약한 신호도 두 나쁜 기준선을 동시에 이기기 쉽다"는 대안 가설을
+못 가름 — 확정된 엣지로 취급 금지, 승격 주장 아님. 다음 단계: 비슷한 휩소 성격의 과거 구간
+(2025 Q1→Q2 급반전 등)에서 재현되는지 확인, POST_OOS 내부 순수 추세 구간만 잘라 재평가.
+상세: `docs/experiments/eth_h48qual_tcn_post_oos_extension_20260812.md`.
+
+**❌ 위 결과 후속 검증 완료 (2026-08-12, 사용자 지시 "후속 검증 철저히"), 재현 실패 — 양성
+결과 철회**: 완전히 새로운 독립 N=5 시드로 같은 HP·같은 POST_OOS 구간을 재검증. (1) 월별 PnL
+분해: 6개월 중 1개월(2026-05)만 부분 승, 나머지 전부 "둘 다 승 0%". 월별 복리 누적:
+raw_lite **-8.76%**, ohlcv_minimal **-6.82%** — always_short(-4.20%/-4.66%)보다도 나쁨
+(원래 결과 +12.93%/+14.98%와 정반대). (2) 방법론 검증: VAL/OOS를 동일 월별복리 방식으로
+재계산해 오늘 기록된 전체구간 수치와 대조 → 큰 괴리 없음(시드 표준편차 범위 안) — **월별
+슬라이싱 자체의 회계 왜곡이 아니라 시드가 바뀌면서 결과가 실제로 뒤집혔다는 뜻.** (3) 메커니즘
+직접 테스트(VAL/OOS 내부 반등주 vs 하락주, out-of-sample): OOS 반등주에서는 모델이 5/5 압도
+(model+34%/+29% vs short+10~11%)했지만 **VAL 반등주에서는 정반대로 0/5 완패**(model-17% vs
+short+7%) — "휩소/반등 구간에서 유리하다"는 메커니즘이 진짜라면 VAL·OOS 둘 다 같은 방향이어야
+하는데 정반대로 나와 메커니즘 가설 자체가 기각됨. **결론: POST_OOS 양성 결과는 특정 시드셋에서만
+나타난 재현 안 되는 결과였다 — 🟢 판정 철회, 부정 결과로 재분류.** 이 서브 프로젝트가 오늘
+시도한 모든 축(TabM/GBDT/오토인코더/TCN, 라벨 3종, 피쳐 축 다수, 대체데이터 5종)의 최종 상태는
+예외 없이 전부 부정 결과로 수렴한다. 상세:
+`docs/experiments/eth_h48qual_tcn_post_oos_regime_followup_20260812.md`.
+
+**❌ CNN 캔들차트(4패널: 캔들+거래량+RSI+MACD) 시각 표현 검증 완료 (2026-08-12, 사용자 제안
+"차트만 보고 하는 거 만들 순 없나" + "내가 만든 피쳐들 같이 그려서"), 부정 결과**: 오늘까지
+전부 숫자(스칼라/시퀀스) 표현이었던 것과 질적으로 다른 시각 표현 축. 사전 웹서치로 "진짜
+계량퀀트펀드는 차트가 아니라 숫자를 본다", 관련 학술연구(암호화폐 특화 포함, arXiv
+2605.00875)는 AUC-ROC만 보고하고 실제 거래성과는 없음(오토인코더/TCN에서 겪은 함정과 동일
+위험)을 확인 후 착수. 캔들+거래량+RSI+MACD 4패널 64×128 이미지(numpy 커스텀 래스터라이저,
+228,667장 99초), window=48(TCN과 동일), 단순 4층 CNN, N=5 시드. **오늘의 교훈을 설계에 직접
+반영**: 처음부터 거래 시뮬레이션 필수 포함 + POST_OOS 월별 분해를 같은 실행 안에 포함(TCN
+사례처럼 나중에 재검증하다 뒤집히는 과정 반복 안 함). **결과: OOS 결정적 패배(0/5, 다른
+모든 모델과 동일 패턴), POST_OOS는 통계적으로 유의하지 않음(p=0.16~0.41, TCN의 최초 결과
+p=0.03보다 훨씬 약함)이고 월별 분해도 6개월 중 1개월만 뚜렷** — 처음부터 신뢰 근거 부족으로
+판정, 별도 후속 검증 불필요. 완전히 다른 인덕티브 바이어스(2D 픽셀 CNN)도 같은 결론에 도달—
+TabM·GBDT·오토인코더·TCN·CNN 5가지 서로 다른 표현이 전부 같은 곳(OOS 패배)에 수렴. 상세:
+`docs/experiments/eth_h48qual_cnn_candlestick_multipanel_20260812.md`.
+
+**⚠️ Long/Short/Cash 독립 3모델(one-vs-rest) 검증 완료 (2026-08-12, 사용자 제안 "롱과 숏과
+캐시를 따로 데이터를 취합해서 모델을 따로 만드는게 어때"), 미묘한 부분 재현 + 메커니즘 진단으로
+신호 아님 쪽에 무게**: 공유 3-class softmax 대신 독립 이진분류기 3개(LightGBM)를 argmax로
+결합. 1차 실행(N=5시드)은 POST_OOS(2026-03~08) 5/5 전승·p=0.03의 이 서브 프로젝트 최강
+신호를 냈으나 OOS(2026-01~02)는 0/5 완패. **완전히 새로운 독립 N=5 시드로 재현성 검증**한
+결과 OOS 완패는 그대로, POST_OOS는 cost2/cost3 재현(5/5, p=0.03)했지만 cost1은 약화(4/5,
+p=0.09)하고 월별복리 폭이 6배 축소(+4.64%→+0.73%). **메커니즘 진단(4가지) 결과**: (1)
+피쳐 PSI drift는 OOS보다 POST_OOS가 더 큼(0.032 vs 0.062) — "OOS가 낯선 분포라 실패"
+가설 기각. (2) 모델의 CASH/LONG/SHORT 선택 비율은 두 구간이 거의 동일 — 행동 차이 가설
+기각. (3) "휩소/반등주가 유리하다"는 메커니즘(TCN 후속검증에서 이미 한 번 기각됐던 가설)을
+직접 재테스트했으나 **반등주는 OOS·POST_OOS 둘 다 모델이 손해**(0/5) — 다시 기각. (4) 실제
+격차는 하락주 내부에서 발생하며 `always_short` 기준선 자체의 레짐별 취약성이 핵심 —
+OOS 하락주는 이례적으로 매끄러운 단조추세라 `always_short`가 이론적 최댓값에 가까운
++29.21을 내는 반면(모델이 이기기 사실상 불가능), POST_OOS 하락주는 순하락이지만 내부에
+되돌림이 섞여 `always_short`가 -0.80까지 무너진다(모델의 절대 PnL도 개선되지만 상대 우위의
+대부분은 기준선 붕괴에서 나옴). **결론: POST_OOS 양성 신호를 일반화되는 독립적 방향 엣지로
+단정하기엔 근거가 약함** — LONG/SHORT precision~60%(무작위 33% 대비 우위는 있음)이 매끄러운
+추세를 이기지 못하고 거친 하락에서만 근소한 우위를 내는 수준. 공유 3-class 모델 대비 확실한
+개선이라고 볼 근거 부족. 상세:
+`docs/experiments/eth_h48qual_onevsrest_specialist_and_regime_mechanism_20260812.md`.
+
 ## 데이터 구간 정의 및 소스 파일 — 표준 참조 (새 진단 전 필독)
 
 **2026-08-12 추가**: `train_predictions_qXXX.csv`를 "학습구간 전체"로 오인해서 confidence-echo/

@@ -98,7 +98,9 @@ Odyssey 착수(2026-08-11) 이후 생성된 파일만 집계 — 전부 커밋 �
 
 ### ⚠ 백업 위험 — 위 전부 git 추적 밖
 
-`tmp/`와 `data/*`는 `.gitignore`에서 예외 없이 전부 제외됨(2026-08-12 직접 확인) — 위 라이브 번들·실험 번들·예측 CSV **전부가 git으로 백업되지 않는 로컬 디스크 전용 자산**이다. 한술 더 떠, 회귀 재스크리닝(REL11)이 의존하는 `fa_features.parquet`(122M)는 이 레포 바깥, 다른(이전) 세션의 OS `/tmp` scratchpad에 있음 — 재부팅이나 tmp 정리로 언제든 사라질 수 있다. 계약 문서 미해결 이슈 7의 mRMR/knockoff dedup 스크립트 원본(`mrmr_final_v2.py` 등 후보 8개, 위 "코드" 절 참고)도 같은 scratchpad에만 있고 레포엔 없음 — 지금 상태로는 독립 재현이 불가능하다.
+`tmp/`와 `data/*`는 `.gitignore`에서 예외 없이 전부 제외됨(2026-08-12 직접 확인) — 위 라이브 번들·실험 번들·예측 CSV **전부가 git으로 백업되지 않는 로컬 디스크 전용 자산**이다.
+
+**해소됨 (2026-08-12)**: 회귀 재스크리닝(REL11)이 의존하던 `fa_features.parquet`(127M)와 mRMR/knockoff dedup 스크립트 원본(`h48qual_knockoff_mrmr.py`, `mrmr_final_v2.py`, `zig075_knockoff_mrmr.py`)이 세션 scratchpad(`/tmp/claude-1000/.../f6f0940b-.../scratchpad/`)에만 있던 소멸 위험을 `tmp/eth_h48qual_fa_features_backup_20260812/`로 백업해 해소했다(`fa_features.parquet`, `fa_labels.npz`, `fa_meta.json` + 스크립트 3종). 여전히 git 추적 밖(레포 tmp/ 자체가 gitignore 대상)이지만 최소한 세션 scratchpad보다는 안전한 위치. 계약 문서 미해결 이슈 7의 "독립 재현 불가능" 표현은 이제 "가능하나 git 백업은 아님"으로 갱신 필요.
 
 ## 라이브 수집 duckdb (새 데이터소스 후보)
 
@@ -117,6 +119,8 @@ Odyssey 착수(2026-08-11) 이후 생성된 파일만 집계 — 전부 커밋 �
 | OKX `funding-rate-history` API | ccxt + 네이티브 REST | 보존기간 ~1개월 (`since` 사실상 무시) | candidate 4 전반(펀딩 스프레드) | **인프라 차단** | VAL/OOS 백필 불가능 — 검증 자체가 불가능해 이 절반은 테스트되지 못함 |
 | Deribit 옵션 API | `get_book_summary_by_currency`(현재 스냅샷만), `get_instruments(expired=true)`(만기 계약 메타데이터만) | 과거 시점 조회 불가 | candidate 5: 옵션 스큐/GEX | **인프라 차단** | 특정 과거 시점의 옵션 체인을 조회하는 엔드포인트 자체가 없음 — VAL/OOS 백필 불가능, 재구성하려면 훨씬 큰 프로젝트 필요 |
 | F4-C altdata collector | `scripts/run_f4c_altdata_collector.py` | 2026-08-10 ~ (실측 수집 중) | 거래소간 펀딩 스프레드 + Fear&Greed | 레포 전체 소비처 0건 확인, **미착수** | VAL/OOS 구간과 미중첩이라 duckdb 3종과 같은 사유로 아직 착수 안 함 |
+| CoinGlass 청산/OI 히스토리 API | 미계약(요금제만 조사) — `docs.coinglass.com` | 플랜×인터벌별 상이: 일봉만 all-time, 시간봉대 최대 720일(Professional $699/월), 5분봉 최대 60일 | candidate 1·2(청산/OI) 백필 시도 | **조사 완료(결제 안 함) — 구조적 한계로 사실상 폐기** | 유료 등급을 올려도 TRAIN(2024-06~) 시작을 못 채움 — Professional 720일도 82일 부족, 5분봉은 OOS(2026-01~02)에도 못 닿음. 상세: `docs/experiments/eth_alt_data_source_feasibility_check_20260812.md` "추가 업데이트(2026-08-12)" 절 |
+| LunarCrush 소셜/센티먼트 API | 미계약 — `github.com/lunarcrush/api`(기술스펙 확인), `lunarcrush.com/pricing`(요금제, SPA라 오늘 접근 실패) | **5분봉 상품 자체가 없음**(전체 시계열 엔드포인트가 `bucket=hour\|day`만 지원); 시간봉 "전체 히스토리" 주장은 ETH 토픽 실제 커버 시작일 미확인(계정 필요) | 감성 피쳐 후보(비검증, `galaxy_score`/`alt_rank`/`sentiment`/`social_dominance` 등) | **조사 일부 완료 — 5분봉은 구조적으로 폐기, 시간봉은 계정 없인 보류** | Dune과 동일하게 계정 가입이 전제조건. 요금제 정확한 $ 티어는 SPA라 오늘 미확인. 상세: 위 문서 "추가 업데이트(LunarCrush)" 절 |
 
 ## 인프라
 
