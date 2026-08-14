@@ -234,13 +234,14 @@ body {
 
 .ops-shadow-panel { padding: 0; overflow: hidden; margin-top: 16px; }
 .ops-shadow-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--soft-line); }
+.ops-shadow-body.cols-2 { grid-template-columns: repeat(2, 1fr); }
 .ops-shadow-body.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .ops-shadow-stat { display: grid; gap: 6px; padding: 22px 18px; background: var(--panel); }
 .ops-shadow-stat span { color: var(--muted); font: 11px/1 var(--font-mono); }
 .ops-shadow-stat strong { font: 700 18px/1.1 var(--font-display); color: var(--text); }
 
 @media (max-width: 720px) {
-  .ops-shadow-body, .ops-shadow-body.cols-4 { grid-template-columns: 1fr; }
+  .ops-shadow-body, .ops-shadow-body.cols-2, .ops-shadow-body.cols-4 { grid-template-columns: 1fr; }
 }
 
 .shadow-slot-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 20px 16px 16px; }

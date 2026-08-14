@@ -3,8 +3,7 @@ const API_EVENTS_URL = "/api/events";
 const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
-const API_ETH_JMLAM4_SHADOW_URL = "/api/eth-jmlam4-shadow";
-const API_ETH_EXITHEAD_SHADOW_URL = "/api/eth-exithead-shadow";
+const API_ETH_ODYSSEY4_SHADOW_URL = "/api/eth-odyssey4-shadow";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 const JOURNAL_POLL_MS = 10000;
@@ -92,12 +91,9 @@ let btcMultislotEtag = "";
 let btcMultislotLastFetchAt = 0;
 let latestBtcMultislotPayload = null;
 let btcMultislotActiveSlot = 0;
-let ethJmlam4Etag = "";
-let ethJmlam4LastFetchAt = 0;
-let latestEthJmlam4Payload = null;
-let ethExitheadEtag = "";
-let ethExitheadLastFetchAt = 0;
-let latestEthExitheadPayload = null;
+let ethOdyssey4Etag = "";
+let ethOdyssey4LastFetchAt = 0;
+let latestEthOdyssey4Payload = null;
 let lastChartRenderAt = 0;
 let isScrolling = false;
 let scrollIdleTimer = 0;
@@ -1529,8 +1525,7 @@ function applyDashboardEvent(payload) {
     if (asset === "eth") ethPriceUpdated = true;
   });
   if (btcPriceUpdated && latestBtcMultislotPayload) renderBtcMultislotSlots(latestBtcMultislotPayload);
-  if (ethPriceUpdated && latestEthJmlam4Payload) renderEthJmlam4Position(latestEthJmlam4Payload);
-  if (ethPriceUpdated && latestEthExitheadPayload) renderEthExitheadPosition(latestEthExitheadPayload);
+  if (ethPriceUpdated && latestEthOdyssey4Payload) renderEthOdyssey4Position(latestEthOdyssey4Payload);
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
@@ -1890,17 +1885,17 @@ async function refreshBtcMultislotShadow() {
   }
 }
 
-function renderEthJmlam4Position(payload) {
-  const cardEl = el("ethJmlam4PositionCard");
+function renderEthOdyssey4Position(payload) {
+  const cardEl = el("ethOdyssey4PositionCard");
   if (!cardEl) return;
   const livePrice = Number(latestLivePriceByAsset["eth"] || 0);
   const barSeconds = Number(payload?.bar_seconds || 300);
   cardEl.innerHTML = shadowPositionCardHtml(payload?.position || null, null, livePrice, barSeconds);
 }
 
-function renderEthJmlam4Shadow(payload) {
-  latestEthJmlam4Payload = payload;
-  const badge = el("ethJmlam4Badge");
+function renderEthOdyssey4Shadow(payload) {
+  latestEthOdyssey4Payload = payload;
+  const badge = el("ethOdyssey4Badge");
   const stale = Boolean(payload?.stale);
   if (badge) {
     badge.className = `ops-badge ${stale ? "bad" : "good"}`;
@@ -1908,102 +1903,46 @@ function renderEthJmlam4Shadow(payload) {
   }
   const age = Number(payload?.age_minutes);
   const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-  setT("ethJmlam4Sub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
+  setT("ethOdyssey4Sub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
 
   const side = Number(payload?.position_side || 0);
   const posText = side > 0 ? "LONG" : side < 0 ? "SHORT" : "FLAT";
   const src = payload?.position_source_component;
-  setT("ethJmlam4Position", src ? `${posText} (${src})` : posText);
+  setT("ethOdyssey4Position", src ? `${posText} (${src})` : posText);
 
-  setT("ethJmlam4Trades", `${payload?.total_trades ?? 0}건`);
+  setT("ethOdyssey4Trades", `${payload?.total_trades ?? 0}건`);
 
   const pnl = Number(payload?.cumulative_return_pct);
-  const pnlEl = el("ethJmlam4Pnl");
-  setT("ethJmlam4Pnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
+  const pnlEl = el("ethOdyssey4Pnl");
+  setT("ethOdyssey4Pnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
   if (pnlEl) {
     pnlEl.classList.remove("good-text", "bad-text", "muted-text");
     pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
   }
 
   const mdd = Number(payload?.mdd_pct);
-  setT("ethJmlam4Mdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
+  setT("ethOdyssey4Mdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
 
-  renderEthJmlam4Position(payload);
-  renderShadowCharts(payload, "ethJmlam4PnlSvg", "ethJmlam4EquitySvg");
+  setT("ethOdyssey4GuardBars", `${payload?.h48qual_guard_active_bars ?? 0}bar`);
+  setT("ethOdyssey4VetoBars", `${payload?.zig075_short_veto_bars ?? 0}bar`);
+
+  renderEthOdyssey4Position(payload);
+  renderShadowCharts(payload, "ethOdyssey4PnlSvg", "ethOdyssey4EquitySvg");
 }
 
-async function refreshEthJmlam4Shadow() {
+async function refreshEthOdyssey4Shadow() {
   const now = Date.now();
-  if (now - ethJmlam4LastFetchAt < OPS_POLL_MS) return;
-  ethJmlam4LastFetchAt = now;
+  if (now - ethOdyssey4LastFetchAt < OPS_POLL_MS) return;
+  ethOdyssey4LastFetchAt = now;
   try {
-    const res = await fetch(API_ETH_JMLAM4_SHADOW_URL, { cache: "no-store", headers: ethJmlam4Etag ? { "If-None-Match": ethJmlam4Etag } : {} });
+    const res = await fetch(API_ETH_ODYSSEY4_SHADOW_URL, { cache: "no-store", headers: ethOdyssey4Etag ? { "If-None-Match": ethOdyssey4Etag } : {} });
     if (res.status === 304) return;
-    if (!res.ok) throw new Error(`eth jmlam4 shadow ${res.status}`);
-    ethJmlam4Etag = res.headers.get("ETag") || ethJmlam4Etag;
-    renderEthJmlam4Shadow(await res.json());
+    if (!res.ok) throw new Error(`eth odyssey4 shadow ${res.status}`);
+    ethOdyssey4Etag = res.headers.get("ETag") || ethOdyssey4Etag;
+    renderEthOdyssey4Shadow(await res.json());
   } catch (error) {
-    console.error("ETH JM lambda4 shadow fetch error:", error);
-    const badge = el("ethJmlam4Badge");
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
-  }
-}
-
-function renderEthExitheadPosition(payload) {
-  const cardEl = el("ethExitheadPositionCard");
-  if (!cardEl) return;
-  const livePrice = Number(latestLivePriceByAsset["eth"] || 0);
-  const barSeconds = Number(payload?.bar_seconds || 300);
-  cardEl.innerHTML = shadowPositionCardHtml(payload?.position || null, null, livePrice, barSeconds);
-}
-
-function renderEthExitheadShadow(payload) {
-  latestEthExitheadPayload = payload;
-  const badge = el("ethExitheadBadge");
-  const stale = Boolean(payload?.stale);
-  if (badge) {
-    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
-    badge.textContent = stale ? "STALE" : "LIVE";
-  }
-  const age = Number(payload?.age_minutes);
-  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-  setT("ethExitheadSub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
-
-  const side = Number(payload?.position_side || 0);
-  const posText = side > 0 ? "LONG" : side < 0 ? "SHORT" : "FLAT";
-  const src = payload?.position_source_component;
-  setT("ethExitheadPosition", src ? `${posText} (${src})` : posText);
-
-  setT("ethExitheadTrades", `${payload?.total_trades ?? 0}건`);
-
-  const pnl = Number(payload?.cumulative_return_pct);
-  const pnlEl = el("ethExitheadPnl");
-  setT("ethExitheadPnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
-  if (pnlEl) {
-    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
-    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
-  }
-
-  const mdd = Number(payload?.mdd_pct);
-  setT("ethExitheadMdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
-
-  renderEthExitheadPosition(payload);
-  renderShadowCharts(payload, "ethExitheadPnlSvg", "ethExitheadEquitySvg");
-}
-
-async function refreshEthExitheadShadow() {
-  const now = Date.now();
-  if (now - ethExitheadLastFetchAt < OPS_POLL_MS) return;
-  ethExitheadLastFetchAt = now;
-  try {
-    const res = await fetch(API_ETH_EXITHEAD_SHADOW_URL, { cache: "no-store", headers: ethExitheadEtag ? { "If-None-Match": ethExitheadEtag } : {} });
-    if (res.status === 304) return;
-    if (!res.ok) throw new Error(`eth exithead shadow ${res.status}`);
-    ethExitheadEtag = res.headers.get("ETag") || ethExitheadEtag;
-    renderEthExitheadShadow(await res.json());
-  } catch (error) {
-    console.error("ETH exit-head shadow fetch error:", error);
-    const badge = el("ethExitheadBadge");
+    console.error("ETH Odyssey4 shadow fetch error:", error);
+    const badge = el("ethOdyssey4Badge");
     if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
   }
 }
@@ -2014,7 +1953,7 @@ function setupPageTabs() {
     el("liveTabPanel")?.classList.toggle("hidden", ops);
     el("opsTabPanel")?.classList.toggle("hidden", !ops);
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethJmlam4LastFetchAt = 0; refreshEthJmlam4Shadow(); ethExitheadLastFetchAt = 0; refreshEthExitheadShadow(); }
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethOdyssey4LastFetchAt = 0; refreshEthOdyssey4Shadow(); }
   }));
 }
 
@@ -2584,8 +2523,7 @@ async function tick() {
     }
     refreshOpsStatus();
     refreshBtcMultislotShadow();
-    refreshEthJmlam4Shadow();
-    refreshEthExitheadShadow();
+    refreshEthOdyssey4Shadow();
   } catch (e) {
     console.error("Tick Error:", e);
   } finally {
