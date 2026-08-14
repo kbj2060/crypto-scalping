@@ -1170,8 +1170,12 @@ def main() -> int:
             val_src.to_csv(legacy_val_path, index=False)
             oos_src.to_csv(legacy_oos_path, index=False)
             saved_predictions = {"validation_q045": str(legacy_val_path), "oos_q045": str(legacy_oos_path)}
-    rows.sort(key=lambda r: (float(r["oos_pnl"]), float(r["validation_pnl"])), reverse=True)
+    # VAL-primary ranking is the selection view (OOS must never be the primary sort key for a
+    # threshold that gets deployed) — see docs/experiments/eth_omega461_oos_selection_bias_scope_and_resolution_20260813.md
+    # principle 1. `ranking_by_oos_pnl` is kept for information only, not for selection.
+    rows.sort(key=lambda r: (float(r["validation_pnl"]), float(r["oos_pnl"])), reverse=True)
     pd.DataFrame(rows).to_csv(out_dir / "quality_threshold_ranking.csv", index=False)
+    ranking_by_oos_pnl = sorted(rows, key=lambda r: (float(r["oos_pnl"]), float(r["validation_pnl"])), reverse=True)
     report = {
         "model_id": MODEL_ID,
         "baseline_model": "omega1_2_true_3head_tabm_20260603_final_tp_sl_on_e28_exit30k_q080",
@@ -1216,7 +1220,9 @@ def main() -> int:
         "exit_label": {"mode": str(args.exit_label_mode), "exit_edge_min": float(args.exit_edge_min), "hold_offsets": hold_offsets, "diag": exit_diag},
         "summaries": summaries,
         "results": reports,
-        "ranking_by_oos_pnl": rows,
+        "selection_scope": "validation_only",
+        "ranking_by_validation_pnl": rows,
+        "ranking_by_oos_pnl": ranking_by_oos_pnl,
         "prediction_artifacts": prediction_artifacts,
         "artifacts": {"out_dir": str(out_dir), "ranking": str(out_dir / "quality_threshold_ranking.csv"), "report": str(out_dir / "report.json"), **saved_predictions},
     }

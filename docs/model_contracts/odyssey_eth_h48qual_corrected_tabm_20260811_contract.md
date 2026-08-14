@@ -6,9 +6,10 @@
 |---|---|
 | `ThreeHeadTabMCorrected` 백본 | `design_verified_not_implemented` — TabM 논문 대조 검증은 완료; 코드에 클래스 자체가 없음(레포 전체 grep 0건, 2026-08-11 확인); 어떤 학습 런에도 연결된 적 없음 |
 | FINAL12 피쳐 + `h48_conservative`@384bar 라벨 | `isolated_verification_complete_no_edge` — 구버전 `ThreeHeadTabM`으로 end-to-end 학습, v2 15시드 완료. **결론: 진짜 엣지 없음** — OOS가 통계적으로 유의미해 보였으나 always-short 대조로 `quality_head` 게이트 편향+학습/검증구간 추세 우연 일치로 판명 |
-| `exit_head` 연속가치함수 파이프라인 | `design_only_not_implemented` — 학습 데이터 자체가 아직 없음; 아래 파이프라인은 스펙일 뿐 실제 코드 설명이 아님 |
+| `exit_head` 연속가치함수 파이프라인 | `design_only_not_implemented` — 학습 데이터 자체가 아직 없음; 아래 파이프라인은 스펙일 뿐 실제 코드 설명이 아님. **이 행이 가리키는 설계(Deep Optimal Stopping 연속회귀)는 지금도 미구현 상태** — 아래 행은 완전히 다른, 더 좁은 트랙임에 주의 |
+| `exit_head` 라이브 재라벨(비대칭, 2026-08-13) | `shadow_running_persistent` — 위 행과는 별도 트랙(기존 이진 hold/exit classification exit_head의 학습 라벨을 라이브 실제 ATR 배리어 스케일로 교체, "연속가치함수로 재설계"가 아님). h48qual만 채택(zig075는 원본 유지), 컴포넌트 VAL·포트폴리오 VAL·단일 포트폴리오 OOS 전부 통과(이 세션 유일한 생존 후보). 섀도우봇(`scripts/live_eth_exithead_asymmetric_shadow_20260813.py`) 구축 + 9분 스모크테스트 완료 → **11:55:47 KST부터 서버에서 상시 실행 중**(2026-08-13 23:05 직접 확인, pid=62019, 11시간+ 무중단, 실시간 근접 추적). 전용 systemd 유닛(`scripts/ops/systemd/eth-exithead-shadow.service`) 작성됐으나 미설치(현재도 이미 지속 실행 중이라 급하지 않음). **남은 미해결은 관찰기간·승격 판단 기준 미정뿐** — 상세: "2026-08-13 오버나이트" 절, 미해결 이슈 12·13 |
 
-위 어떤 것도 라이브 승격되지 않았습니다. 이 계약 문서는 `trading_bot.py`나 현재 라이브 아티팩트를 전혀 변경하지 않습니다.
+위 어떤 것도 라이브 승격되지 않았습니다(섀도우 배포 ≠ 승격). 이 계약 문서는 `trading_bot.py`나 현재 라이브 아티팩트를 전혀 변경하지 않습니다.
 
 **✅ 재설계 시도 완료 — 부정 결과 (2026-08-11, 이전 "다른 세션에서 진행 중" 콜아웃을 대체)**:
 이전 버전이 "다른 세션에서 진행 중"이라고 보고받았다고 적었던 `quality_head` 분류→회귀 재설계와
@@ -519,6 +520,104 @@ OOS 하락주는 이례적으로 매끄러운 단조추세라 `always_short`가 
 개선이라고 볼 근거 부족. 상세:
 `docs/experiments/eth_h48qual_onevsrest_specialist_and_regime_mechanism_20260812.md`.
 
+**✅ MFE(Maximum Favorable Excursion) 분위수 회귀 quality_head 검증 완료 (2026-08-12, 오라클
+라벨 문헌 리서치 권장안 4위), 게이트 통과 → 실전 대조 부정**: 하드 임계값(TP/SL 히트) 분류
+대신 `build_omega1_2_triple_barrier_labels_20260619.py`가 이미 계산해둔
+`tb_long_mfe`/`tb_short_mfe`(48bar 배리어 윈도우 내 유리 방향 최대 이탈폭)로 quality_head를
+연속 회귀 전환. **이 세션에서 시도한 라벨×타겟 조합 중 유일하게 MI/R² 사전 게이트를 결정적으로
+통과**(강한 정규화: VAL R²=+0.08/OOS R²=+0.14, spearman VAL+0.28/OOS+0.39 둘 다 p<0.001,
+변동성 confound 아님을 확인 — MFE 높을수록 오히려 MAE 작고 실현손익과 spearman+0.43). 이어서
+TabM 풀 학습(N=5 진짜 무작위 시드, 서버 GPU) 후 필수 always-short/long 대조 결과 **OOS에서
+1/5로 사실상 완패**(VAL도 3/5로 무의미). 통계적 예측가능성이 always_short을 이기는 실전
+엣지로 전환되지 않음 — h48_conservative 오라클 게이트가 겪은 것과 같은 패턴. 이걸로 TabM·
+GBDT·오토인코더·TCN·CNN·one-vs-rest(6모델) + zigzag_action·trend-scanning·MFE회귀(3라벨)
+**7번째 독립 조합이 같은 결론에 수렴**. 오라클 라벨 리서치 권장안 1~4위 전부 소진(5위 AEDL류는
+문헌 자체가 "1~4위 전부 실패 후에야 투자가치" 명시한 최후순위). 상세:
+`docs/experiments/eth_h48qual_mfe_quantile_quality_regression_20260812.md`.
+
+**🔶 "최종 보스" 통합 설계 완료 (2026-08-12, 사용자 지시: always_short 대조 무시하고 절대성능
+기준 재평가 + 최고 요소 결합)**: one-vs-rest 독립 direction(LightGBM 3개) + 방향별 독립 MFE
+분위수 회귀 quality(LightGBM 2개) + FINAL12+오토인코더 latent(16차원) 병합 피쳐 + 비대칭
+게이팅(LONG q0.85 vs SHORT q0.60, "롱은 어디서나 나쁘다"는 이 세션의 반복 발견 반영)을 결합.
+N=5 진짜 무작위 시드 결과 **절대 pnl은 VAL +5.4~6.5%/OOS +8.7~10.6% 둘 다 플러스**(시드별로도
+각 구간 4/5 개별 플러스), always_short 대조는 여전히 패배(0~1/5, 참고용으로만 기록). **다만
+MFE 분위수 회귀 단독 결과(VAL +5.6~6.2%/OOS +9.4~10.2%)와 크기가 사실상 동일 — one-vs-rest·
+latent 추가가 뚜렷한 시너지를 내지 못함.** TCN(재현 안 되는 노이즈)과 trend-scanning(R² 자체가
+음수)은 검토 후 통합 대상에서 제외. 상세: `docs/experiments/eth_h48qual_final_boss_ensemble_20260812.md`.
+
+**⚠️ "최종 보스" 트랙 전체 종결(2026-08-13)** — v2(레짐전문가 라우팅)·v3(듀얼컴포넌트 우선순위결합)
+둘 다 시도했으나 VAL 개선/OOS 악화(각각 OOS 시드 2/5 강한 음수)로 v1보다 나은 근거 없이 종결.
+**사용자 지시로 전략 자체를 전환**: "라이브를 흉내내는 새 모델"을 계속 만드는 대신, 아래 절의
+오버나이트 작업부터는 **실제 라이브 h48qual/zig075 TabM 번들(102개 원본 피쳐, 재학습 없이 그대로
+로딩)을 가져와 그 위에 이 세션이 찾은 인사이트를 얹는 방식**으로 전환했다. 이 절 위의 모든
+내용(FINAL12, h384, 최종보스 v1~v3 등)은 **독립 재구축(standalone reconstruction) 축이며
+2026-08-13부로 이 방향의 신규 시도는 없다** — 아래 "2026-08-13 오버나이트" 절이 현재 진행 중인
+축이다.
+
+## 2026-08-13 오버나이트 — 라이브 모델 직접 주입 단계 (독립 재구축 → 라이브 위에 얹기로 전환)
+
+사용자 지시(요약): "이전에 결정한 실험 중 유망한 레이어나 기술들을 라이브 모델에 접목시키자" →
+"라이브를 뛰어넘어야 한다" → "굳이 따라 만들지 말고 라이브 모델을 가져와서 추가/개선만 하자" →
+"내일까지 내가 멈추라고 할 때까지 계속 문제 해결 진행". 방법론은 기존 라이브 검증 하네스
+(`scripts/research_eth_omega461_exit_sweep_20260721.py` 등, 2026-07-21~28에 이미 만들어져 있던
+"실제 냉동 h48qual/zig075 번들+사이드카로 causal bar-by-bar replay" 패턴)를 재사용 — 새로 발견한
+게 아니라 이미 있던 하네스를 오늘 처음 이 세션이 활용했다. 전 트랙 공통: VAL-first 선별,
+OOS는 오케스트레이터가 명시적으로 열기 전까지 건드리지 않음, 라이브 파일
+(`trading_bot_modules/omega4_6_1_live.py`/`trading_bot.py`/`runtime_config.py`/`.env`) 미변경.
+
+| 트랙 | 결과 | 상세 문서 |
+|---|---|---|
+| **SLTP 폭→거래수 감소** | 대칭·비대칭 MFE기반 학습형 폭 둘 다 **구조적 트레이드오프로 종결**(좁히면 거래수↑이나 SL우세로 PnL 붕괴, 넓히면 원래 문제로 복귀). 파생된 side-finding(`symmetric_scale9`, N=5시드 VAL 5/5 재현 확정)조차 **단일 OOS 확인에서 완전 반전**(0/5) — 이 트랙에서 살아남은 후보 0개. | `eth_omega461_live_sltp_mfe_width_20260813.md`, `_asymmetric_tpsl_20260813.md`, `_wide_calibration_seed_robustness_20260813.md` |
+| **동시 포지션 슬롯 확대** | 균등예산(2026-08-08, 기존 발견 — VAL에서 이미 실패)·MFE회귀 게이팅(2026-08-13 신규, VAL 5/5 강하게 통과 후 **OOS 0/5로 반전**, 원인은 신호 실패가 아니라 다중슬롯 동시노출이 2026Q2 특정 악재구간과 만난 상관관계 리스크) 두 가지 질적으로 다른 진입정책 다 실패. 축 종결. | `eth_multislot_capacity_transfer_20260808.json`(선행), `eth_multislot_mfe_gated_capacity_20260813.md` |
+| **Exit head 무력화** | 근본원인 확정(원래 라벨이 ZigZag 되돌림 근접일 뿐 P&L 무관), 1차 수정(h48_conservative 라벨)은 배리어 스케일이 라이브 대비 10~12배 타이트해 과발동으로 실패, **2차 수정(라이브 실제 ATR 배리어 스케일)은 부분 성공** — h48qual 개선(PnL+MDD 둘 다), zig075 악화 → **비대칭 채택(h48qual만 교체, zig075는 원본 유지)**. 포트폴리오 레벨 VAL 확인(PnL+36.82%→+46.59%, MDD-24.34%→-21.70%) 후 **단일 OOS 확인까지 통과**(PnL+49.32%→+93.27%, MDD-16.20%→-15.48%, 거래수·승률 불변) — **오늘 밤 유일하게 VAL→OOS 반전 없이 끝까지 살아남은 후보**(단, baseline과 후보가 공유하는 `quality_threshold`가 이 OOS 앞 2개월을 선택타겟으로 썼다는 유보 有 — 상대비교는 유효). 다음 단계는 라이브 승격이 아니라 섀도우 테스트 — **✅ 구축 완료(2026-08-13)**: `scripts/live_eth_exithead_asymmetric_shadow_20260813.py`, `Omega461LiveAdapter`를 그대로 재사용(h48qual만 신규 exit_head 번들로 `components_override`, zig075·레짐3 HMM은 완전 원본). 신규 번들 direction/quality/encoder가 `torch.load` 직접 비교로 원본과 비트단위 동일함을 재확인. 원본 사이드카를 신규 번들과 그대로 못 쓰는 문제(Omega Artifact Integrity 계보 검증이 사이드카의 `precomputed_prediction_dir`가 로딩 중인 번들 디렉터리와 정확히 일치할 것을 요구)를 발견해, 사이드카 바이트 그대로 복사 + `report.json`의 lineage 포인터만 재기록하는 우회 구성으로 해결(라이브 파일 무변경). 서버(`handoff.sh`)에서 preflight+9분 타임박스 스모크테스트 정상 동작 확인 — 상세: `docs/experiments/eth_omega461_exit_head_asymmetric_shadow_20260813.md`. | `eth_omega461_live_exit_head_h48cons_relabel_20260813.md`, `_liveatr_relabel_20260813.md`(후속 1~3절 포함), `eth_omega461_exit_head_asymmetric_shadow_20260813.md`(섀도우 봇) |
+| **레짐3 HMM→JM 전환** | 기존 단일시드(08-09/10) 결과가 JM 우세를 시사했으나, **N=5 진짜 무작위 시드 재현 시도 결과 재현 안 됨**(판정기준 4/5 이상 중 1/5~2/5만 충족). 원인 3중: (a) 시드분산이 커서 원 단일시드가 우연히 zig075-우호적이었을 뿐, (b) correctgate 리스크사이드카 자체가 시드에 취약(정정: 10개 중 5개 진짜 실패, 1개는 일시적 버그로 재시도 성공), (c) h48qual+zig075 완전비교는 사실상 N=1이고 그것도 baseline에 패배. **사용자 재이의제기로 심화 조사(같은 날 후속)**: 사이드카 실패는 컴포넌트별로 서로 다른 두 원인(h48qual=기존 희소성 문제 재발, zig075=correctgate 그리드가 HMM 트레이드분포에 캘리브레이션돼 JM 분포와 안 맞음 — 별도 이슈)으로 분해됨. h48qual이 JM에서 진 것이 레짐 라우팅 문제인지 트레이드 레벨로 직접 검증 — **아니다**: 유일한 완전비교(393423992)는 레짐 불일치 0건인 트레이드만으로도 순손실이라 라우팅으로 설명 불가, 손익 분포도 잡음 수준. 축 종결(더 강하게 확정). | `eth_omega461_live_jm_full_retrain_seed_robustness_20260813.md`(부록 2 포함) |
+| **VAL/OOS 근본 불일치 조사** | (1) risk_sidecar `selection_scope="validation_only"` 확인 — 정량화 결과 **zig075만 VAL-특이적**(VAL/OOS 우세폭 비율 3.41×), h48qual은 아님(0.31×, 오히려 OOS쪽). (2) `quality_threshold`가 VAL이 아니라 **OOS pnl을 직접 최대화**하도록 선택됨을 코드로 확인, **영향범위 전수조사 완료**: 8개 파라미터 중 이 하나만 OOS-primary 오염(나머지는 VAL-only이거나 고정값, 사이징은 코드로 VAL-only 강제됨). 윈도우 겹침 **직접 재확인·확정**(2026-01-01 00:00~02-28 16:00, 오늘 밤 모든 OOS 윈도우가 이 구간의 상위집합). 실질 영향: h48qual은 배포값이 미접촉 fresh 구간(03-01~07-12)에서도 최고 성과(선택 절차는 틀렸지만 결과는 견고) — zig075는 배포값·VAL대안 둘 다 fresh에서 마이너스(threshold 선택법과 무관하게 불안정). 라이브 파일 미변경, Artifact Integrity 감사(promotion_pass=true)와는 무관함을 확인. | `eth_val_oos_regime_mismatch_investigation_20260813.md`, `eth_val_only_sizing_bias_quantification_20260813.md`, `eth_omega461_oos_selection_bias_scope_and_resolution_20260813.md` |
+| **라이브 파이프라인 결함 감사** | exit head 성공 패턴("라벨-런타임 배리어 스케일 불일치")을 기준으로 재학습 없이 코드 감사 4갈래 병렬 수행. **h48qual quality head에서 exit head와 동일 버그 클래스 컨펌**(h48_conservative 라벨: 48바/tp_mult1.2/ATR96 vs 라이브 무제한시간/tp_mult12.0/ATR192, ~10배 스케일 불일치 — PRIORITY 1순위 컴포넌트의 진입 필터 자체를 좌우해 exit head보다 파급력 클 가능성). SCALE_MAP×LEVERAGE_CAP 상호작용으로 h48qual 숏(71~79%)이 사이징 예측과 무관하게 캡 포화 확인. quality_threshold의 OOS-primary 선정편향 버그가 **BTC의 현재 배포 번들에도 동일 패턴으로 존재**함을 신규 확인(SOL은 clean). zig075 exit head 회귀는 공유 threshold 미보정 가설로 좁혀짐. 4개 후속 착수(zig075 threshold 재보정·BTC 재점검·SCALE_MAP 어블레이션은 저비용 dev-side, h48qual quality head relabel은 서버 재학습). **코드 수정 완료(2026-08-13, 별도 심층감사 세션)**: 버그 위치 `scripts/train_eval_omega4_3head_parent72_loose_entry_quality_20260620.py`(ETH h48qual/zig075 공용)와 `scripts/train_eval_omega4_3head_parent72_loose_entry_quality_btc_swingtransition_20260806.py`(BTC) 정렬 키를 `(validation_pnl, oos_pnl)` 우선으로 수정 + `report.json`에 `ranking_by_validation_pnl`/`ranking_by_oos_pnl` 양쪽 저장 + `selection_scope` 필드 추가(향후 원칙 1·2 반영). **기존 저장된 `quality_threshold_ranking.csv`로 직접 재확인(재학습 없음, 라이브 파일·배포값 무변경)**: h48qual/zig075는 배포값이 실제로 버그의 OOS-우선 픽과 정확히 일치(h48qual 0.50, zig075 0.75 — 버그가 선택을 좌우함), **BTC는 배포값(0.55)이 버그의 픽(0.60)이 아니라 VAL-우선 픽과 이미 일치**(우연히 버그 영향을 안 받음) — 3가지 사례 전부 위 문단·`eth_omega461_oos_selection_bias_scope_and_resolution_20260813.md`의 기존 결론과 정확히 일치 확인. **미수정으로 남은 동일 버그 6곳(신규 발견, 미확정 배포 영향)**: `train_eval_omega4_3head_parent72_loose_entry_quality_btc_exitonly_20260806.py`, `_btc_20260708.py`, `_btc_swingtransition_zigzag_20260806.py`, `_reduced80_20260724.py`, `eval_omega4_3head_shared_exit_from_bundle_20260620.py`, `train_eval_omega4_separate_risk_tabm_margin_leverage_20260622.py`(리스크사이징 margin/leverage 헤드, quality_threshold와 다른 대상) — 이 중 어느 것이 현재 배포 아티팩트를 만들었는지 확인되지 않아 **의도적으로 손대지 않음**(넓은 범위 정리는 별도 세션 권장, [[feedback_defer_wide_blast_radius_cleanup]]). | `eth_omega461_live_defect_audit_20260813.md` |
+
+**정정(2026-08-13, 심층감사로 재확인)**: 위 행의 "zig075=correctgate 그리드가 HMM 트레이드분포에
+캘리브레이션돼 JM 분포와 안 맞음"이라는 프레이밍은 **같은 원본 문서의 부록3**(더 나중에 별도로
+추가됨)이 반박한다 — 실제 라이브 프로덕션 zig075/h48qual 사이드카는 -25% MDD floor 대비 각각
+11~14pt 여유가 있어 "캘리브레이션 결함"이 아니라 **"게이트가 제 역할대로 더 나쁜 리스크 프로파일을
+정당하게 걸러낸 것"**(moderate-high confidence)이 최종 결론이다. 그리드 재보정을 실행하더라도
+JM 채택 여부의 핵심 결론(유일한 완전비교 393423992가 레짐 불일치 0건 트레이드로도 순손실)은
+바뀌지 않는다고 문서 스스로 명시한다. 상세: 같은 문서 "부록 3".
+
+**메타 패턴(가장 중요한 발견)**: 오늘 밤 VAL에서 명확히 개선을 보였다가 단일 OOS 확인에서
+완전히 뒤집힌 사례가 **5건**(최종보스 v2, v3, symmetric_scale9, 멀티슬롯 MFE게이팅, JM 전체재학습)
+— 전부 이 서브프로젝트의 표준 VAL 구간(2025-10-01~12-31 또는 이를 포함하는 구간)을 선택
+기준으로 썼다. 우연으로 보기 어려운 수준이라, 이 VAL 구간 자체(및 그 구간을 선택기준으로 쓰는
+방법론)의 신뢰도를 이 서브프로젝트의 **미해결 이슈**로 격상해서 취급해야 한다 — VAL 단독 승리는
+승격 근거가 아니라 저비용 사전필터로만, 최소 4개 이상 부호가 섞인 독립 구간에서 일치 확인 전엔
+"확인됨"이라고 쓰지 않는다(전체 실용적 권고 6개: `eth_val_oos_regime_mismatch_investigation_20260813.md`).
+**보강(같은 날, 결함 감사 후)**: 반대로 오늘 밤 유일한 VAL+OOS 생존 사례(exit head 구조 수정)는
+파라미터 튜닝이 아니라 결함 수정이었다 — 표본 1개뿐이라 확정은 아니지만, "파라미터를 더 찾기"보다
+"라벨-런타임 불일치 같은 구조 결함을 찾기"가 이 프로젝트에서 상대적으로 더 생산적이라는 가설과
+일치한다.
+
+**정정(2026-08-13, 심층감사 리서치로 발견)**: 위 "5건" 집계는 다소 부정확함이 확인됨 —
+**"VAL승리→단일OOS반전" 패턴에 정확히 해당하는 건 4건**(최종보스 v2, v3, symmetric_scale9,
+멀티슬롯 MFE게이팅)뿐이다. **JM 전체재학습은 다른 실패 모드**(OOS를 아예 열어보지도 않은 채,
+**VAL 자체에서 N=5 재현 실패**, 1/5~2/5)라 같은 범주로 묶는 건 느슨한 분류다. 또한 v3도
+정밀하게는 "완전히 뒤집힘"이 아니라 **부호는 유지된 채 약화**(VAL+27.44%→OOS+15.13%, 여전히
+양수, 5시드 중 2/5만 음수)였다 — 메타패턴의 방향(같은 VAL 구간을 반복 선택기준으로 쓰는 방법론이
+위험하다) 자체는 4건만으로도 유효하지만, 표본 수를 부풀리지 않도록 정정한다. 실용적 권고
+6개의 정확한 출처도 재확인됨: `eth_val_oos_regime_mismatch_investigation_20260813.md`(문서
+자체 인용은 정확했음) — 별개로 `eth_omega461_oos_selection_bias_scope_and_resolution_20260813.md`에는
+이것과는 다른, "향후 원칙" 5개 목록이 있다(둘을 혼동하지 말 것).
+
+**후속 완료(2026-08-13, 결함 감사 4개 전부 종결)**: zig075 threshold 재보정·BTC 재점검·SCALE_MAP
+어블레이션 3개는 전부 "고칠 것 없음/못 고침"으로 종결. **h48qual quality head relabel(가장 유력한
+후보)은 컴포넌트+포트폴리오 VAL을 강하게 통과**(포트폴리오 PnL+36.82%→+74.76%, MDD-24.34%→
+-11.26%)**했으나 단일 OOS에서 전 지표 반전**(PnL+49.32%→+14.65%, MDD-16.20%→-22.12%, 승률
+45.8%→31.3%). 원인: 이 relabel은 게이트 통과율을 5.4배(1.79%→9.60%) 늘리고 방향 구성을
+숏86.8%→롱68.5%로 뒤집어 트레이드 모집단 자체를 바꿨다 — h48qual의 `direction_head`가
+always-short 대비 검증된 방향 스킬이 없다는 위 "결론" 절의 확정 사실(2026-08-11/12, GBDT/TabM/
+trend-scanning 등 다중 방법론) 위에서는, quality head를 스케일 정확하게 재라벨링해도 "스킬 없는
+direction_head의 어느 부분집합을 통과시킬지"만 바뀔 뿐이다. **위 가설의 정확한 구분선을 재수정**:
+"구조냐 파라미터냐"가 아니라 "이미 확정된 포지션의 부수 로직을 고치는가(exit head, 생존), 아니면
+스킬 미검증 direction_head의 진입 선택 자체를 바꾸는가(quality head, 반전)"다. 채택 가능한 변경
+0건, 라이브 파일 미변경. 상세: `eth_omega461_live_defect_audit_20260813.md`.
+
 ## 데이터 구간 정의 및 소스 파일 — 표준 참조 (새 진단 전 필독)
 
 **2026-08-12 추가**: `train_predictions_qXXX.csv`를 "학습구간 전체"로 오인해서 confidence-echo/
@@ -743,12 +842,80 @@ regime3_current_sensitive_wide24_chop_prob
     게이트 편향 분해 완료. 재현판과 같은 방향(always_short 승, 게이트 후 숏 87~91%로 재현판보다
     더 심함) — 384bar 재설계·FINAL12 축소 특유의 문제가 아니라 게이트 구조 자체의 문제임을
     확정. 단, 게이트 통과율이 0.7~2.5%로 낮아 거래수 9~29건뿐이라 확인 수준으로 취급.
-11. **신규(2026-08-11): `h48_conservative`/FINAL12 조합을 대체할 새 데이터소스 8개 후보가 전부
-    미검증 상태** — `docs/experiments/eth_h48qual_quality_new_data_source_research_20260811.md`.
-    최우선 3개(마이크로구조 toxicity/queue/absorption/spoofing, 청산 캐스케이드, Polymarket)는
-    이미 라이브 연결되어 있어 재학습 없는 순위상관 진단만으로 싸게 죽이거나 살릴 수 있음 — 아직
-    그 진단조차 안 돌아감. `quality_head` 게이트 편향(이슈 9의 근본 원인)은 이 후보들 중 하나가
-    실제 신호를 보이기 전까지 계속 미해결 상태.
+11. ~~신규(2026-08-11): `h48_conservative`/FINAL12 조합을 대체할 새 데이터소스 8개 후보가 전부
+    미검증 상태~~ **부분 해소, 갱신 누락 정정(2026-08-13)** — 8개 중 6개(1~6)는 실제로 08-11/12에
+    착수·종결됨: 후보 1·2·3(마이크로구조/청산/Polymarket)은 라이브 duckdb 커버리지가 VAL/OOS와
+    안 겹쳐 인프라 차단, 후보 5(Deribit)는 과거 시점 옵션체인 조회 API 부재로 인프라 차단, 후보
+    6(ETH 온체인 CoinMetrics)은 검증 완료·부정(`CapMVRVCur` 등 가격추세 오염), 후보 4(펀딩스프레드+
+    basis)는 절반 인프라 차단·절반 라벨변형간 부호불안정으로 부정. **미착수로 남은 건 후보 7
+    (hazard/competing-risks relabel)·8(전체 L2/L3+VPIN)뿐**이며 둘 다 낮은 사전확률(7은 1~6 중
+    하나가 신호를 보여야 조건부 착수, 8은 인프라 최고비용+후보1에 조건부, 후보1 자체가 차단
+    상태). 상세: `docs/model_contracts/odyssey_eth_h48qual_data_resources_20260812.md` "미검증
+    남은 후보" 절. `quality_head` 게이트 편향(이슈 9의 근본 원인)은 이 두 후보가 신호를 보이기
+    전까지 계속 미해결 상태 — 단, 08-13부로 서브프로젝트 전략이 "새 데이터소스로 quality_head
+    보강"에서 "라이브 위에 결함 수정 얹기"로 전환되어(2026-08-13 오버나이트 절), 이 축 자체의
+    우선순위가 실질적으로 낮아졌다.
+12. **신규(2026-08-13), 서브프로젝트 최상위 미해결 이슈로 격상**: VAL 구간(2025-10-01~12-31)
+    자체의 신뢰성 문제. 두 메커니즘 겹침 — (a) 사이징→duration_threshold→quality_threshold→
+    신규 후보들까지 최소 3중으로 같은 ~26,000bar/22~37건 저표본 창을 반복 재사용(거래 1건이
+    헤드라인 PnL을 20~35pp 흔드는 표본), (b) 레짐분류기·피쳐셋이 완전히 다른 3개 독립 모델
+    (HMM/JM/JM+15피쳐)에서 재현된, 주간 가격-오류 상관이 TRAIN·OOS는 강한데 **VAL에서만
+    유독 약한**(p=0.20~0.08 vs p&lt;0.01) 통계적 이상 — 원인 미확정, 표본(14주) 노이즈일 가능성
+    배제 못 해 정직하게 미해결로 유지. 실용적 권고 6개 보유(`eth_val_oos_regime_mismatch_
+    investigation_20260813.md`), 실행은 안 됨. 앞으로 이 VAL 구간 단독 승리는 저비용
+    사전필터로만 취급하고, 최소 4개 이상 부호가 섞인 독립 구간에서 일치 확인 전엔 "확인됨"이라고
+    쓰지 않는다(위 메타 패턴 절 참고).
+13. ~~exit_head 비대칭 채택 섀도우봇이 9분 스모크테스트 이후 상시 실행되지 않고 있음~~
+    **정정(2026-08-13 23:05 서버 직접 확인)** — 오판이었음: dev로 pull된 stale 스냅샷(11:32
+    시점)만 보고 "정지"로 잘못 판단했으나, **서버에 직접 접속해 확인한 결과 실제로는 별도
+    세션이 2026-08-13 11:55:47 KST에 `handoff.sh launch server eth_exithead_asymmetric_shadow`로
+    이미 상시 기동해뒀고, 11시간 넘게 끊김 없이 실행 중**이었다(pid=62019, `last_processed_
+    bar_ts`가 실시간에 근접해 계속 갱신됨, 포지션 없음/equity 1.0 — 아직 h48qual 게이트를
+    통과한 트레이드가 없어 실적 데이터는 축적 전). 전용 systemd 유닛(`scripts/ops/systemd/
+    eth-exithead-shadow.service`, 2026-08-13 신규 작성)은 준비돼 있으나 아직 설치는 안 함 —
+    `handoff.sh launch`(nohup/setsid 기반) 자체가 이미 지속 실행을 제공하므로 급하지 않음,
+    서버 재부팅 시 자동복구가 필요해지면 그때 설치. **남은 진짜 미해결 부분은 상시화 여부가
+    아니라 관찰 기간·승격 판단 기준(예: N일 관찰, 방향일치율 임계값)이 4개 관련 문서 어디에도
+    정의돼 있지 않다는 것** — 이건 여전히 사용자 결정 대기.
+    **신규(2026-08-14), 판단기준에 넣을 구체적 근거 발견**: Odyssey2 다중구간 게이트(#8) G0b
+    부산물로 `asymmetric_tabm_liveatr`(이 섀도우 baseline 자체)를 2025 Q1/Q2/Q3에 처음 돌려본
+    결과, Q1·Q2는 재라벨 전 원본보다 뚜렷이 개선(no_gate +28.54%→+97.70%, +39.99%→+106.45%)인데
+    **2025년 유일한 강한 지속 상승장인 Q3(드리프트 +66.63%, 세 분기 중 가장 낮은 변동성)에서는
+    원본보다 4.7배 악화**(-9.73%→-46.26%). 렛저 레벨 원인 규명 결과 h48qual 거래수가 8건→18건
+    (전부 SHORT)으로 폭증한 게 직접 원인 — exit_head 재라벨은 본질적으로 회전 가속기이고, 회전
+    가속은 숏신호가 맞는 레짐(하락·혼조 — VAL·OOS-Q1이 여기 속함)에서는 이득을, 숏신호가 틀리는
+    레짐(지속 상승)에서는 손실을 증폭시킨다(zig075 숏 자체의 Q3 약세는 재라벨과 무관한 기존 발견의
+    재현일 뿐 — "숏=하락장 베타" 결론 그대로). **아직 forward(OOS)로 검증된 적 없는 in-sample
+    증거**(현재 확보된 OOS 구간엔 지속 상승 레짐이 없음)라는 한계와 함께, 관찰·승격 기준 후보를
+    하나 제안: "지속 상승장 구간을 최소 한 번 섀도우로 관찰하기 전에는 승격하지 않는다." 상세:
+    `docs/experiments/eth_omega461_exit_head_liveatr_sustained_uptrend_vulnerability_20260814.md`.
+14. **신규(2026-08-13), 부분 해소**: `quality_threshold` OOS-우선 정렬 버그 — 현재 배포 아티팩트를
+    만든 3개 스크립트(ETH h48qual/zig075 공용 `train_eval_omega4_3head_parent72_loose_entry_
+    quality_20260620.py`, BTC `..._btc_swingtransition_20260806.py`)는 **코드 수정 완료
+    (2026-08-13, VAL-우선 정렬 + 양쪽 랭킹뷰 저장, 라이브 배포값·아티팩트는 무변경)**. 동일
+    버그가 있는 미수정 스크립트 6개 발견(`..._btc_exitonly_20260806.py`,
+    `..._btc_20260708.py`, `..._btc_swingtransition_zigzag_20260806.py`,
+    `..._reduced80_20260724.py`, `eval_omega4_3head_shared_exit_from_bundle_20260620.py`,
+    `train_eval_omega4_separate_risk_tabm_margin_leverage_20260622.py`) — 어느 것이 현재
+    배포 아티팩트에 관여했는지 미확인이라 **의도적으로 미수정 상태로 남김**(넓은 범위 정리는
+    별도 세션 권장).
+15. **참고(Odyssey 계약 범위 밖, 교차참조), 재보정 파일럿 완료(2026-08-13) — 결정적 부정**:
+    `docs/experiments/eth_omega4_6_1_atr_tpsl_floor_binding_investigation_20260812.md` — 라이브
+    "ATR 적응형" TP/SL(`tp_mult=12.0/sl_mult=6.0`)이 ETH 5분봉 실제 ATR% 규모 대비 과소
+    캘리브레이션돼 `min_tp=0.075/min_sl=0.040` floor가 전체 시간의 95~98.5%에서 바인딩(사실상
+    고정폭), `max_tp/max_sl` 캡은 2025~2026 전체에서 단 한 번도 발동한 적 없는 죽은 파라미터.
+    h48qual/zig075 양쪽 라이브 컴포넌트에 공통 적용되는 코드(`omega4_6_1_live.py:86-97`)라 이
+    계약과 직결되나, 원 문서가 별도 계약(risk_assessment) 소속이라 이 계약이 직접 추적하진 않음.
+    **후속 재보정 파일럿 완료**: `tp_mult:sl_mult` 비율(2:1) 유지한 채 배율만 스윕(12→16→22→28,
+    재학습 불필요 — 런타임 상수라 냉동 예측 재사용한 순수 백테스트 리플레이). floor 바인딩률은
+    의도대로 낮아졌으나(h48qual TP 100%→63.9%, zig075 99.9%→75.0%) **VAL 후보 3개 전부 baseline
+    대비 pnl·mdd 둘 다 악화**(포트폴리오 no_gate PnL +36.82%→-7.25%/+17.14%/+1.32%, 전부 baseline
+    이하) — **OOS는 사전등록 규율대로 열지 않음**(VAL 통과 후보 0개). **결론: "이름을 실제로
+    맞추는" 방향의 재보정은 이 백테스트 구간에서 성과를 개선하지 않고 오히려 해친다** — 버그냐
+    의도된 설계냐를 직접 증명하진 않지만, 고치는 게 이득이 아니라는 실증 근거는 확보됨. 상세:
+    `docs/experiments/eth_omega461_atr_tpsl_recalibration_pilot_20260813.md`. 미탐색으로 남은
+    인접 변형(비율 자체 변경, floor/cap 값 자체 변경, 컴포넌트별 독립 재보정)은 해당 문서
+    "미해결/다음 단계" 절 참고.
 
 ## 승격 게이트
 
@@ -758,3 +925,14 @@ regime3_current_sensitive_wide24_chop_prob
 - 이 구버전 백본 격리검증을 교정된 백본에 대한 근거로(또는 그 반대로) 취급하지 않습니다 — 미해결 이슈 2가 해소되기 전까지는 별도의 열린 질문으로 남습니다.
 - `exit_head` 파이프라인 구축 중 사용하는 어떤 trade-ledger나 candidate-event replay도 진단 전용입니다 — 레포의 Fresh-Forward Validation/OOS/Test Rule에 따라 승격이나 모델 선택 근거로 쓰지 않습니다.
 - 미해결 이슈 5(패널 브릿지)가 해소되기 전까지 FINAL12가 프로덕션 준비 완료라고 주장하지 않습니다.
+- **신규(2026-08-13)**: exit_head 비대칭 채택(2026-08-13 오버나이트 절)은 컴포넌트 VAL·포트폴리오
+  VAL·단일 포트폴리오 OOS를 전부 통과했지만, 섀도우 배포는 승격이 아닙니다 — 미해결 이슈 12(VAL
+  구간 신뢰성)와 미해결 이슈 13(관찰기간·승격기준 미정)이 해소되기 전까지 이 후보를 라이브
+  승격 근거로 쓰지 않습니다. baseline·후보가 공유하는 `quality_threshold`가 이 OOS 앞 2개월을
+  선택타겟으로 쓴 값이라는 유보(미해결 이슈 14)도 유지됩니다 — 상대비교(exit head 유무)는
+  유효하나 절대 OOS 수치는 완전히 깨끗한 홀드아웃으로 읽지 않습니다.
+- **신규(2026-08-13)**: 이 계약이 다루는 h48qual/zig075/BTC의 `quality_threshold` 자체가
+  과거 OOS-primary 선정편향으로 선택됐다는 사실(미해결 이슈 14)은 `scripts/audit_omega_
+  artifact_integrity_20260630.py`의 `promotion_pass=true`를 무효화하지 않습니다 — 그 감사는
+  아티팩트 정합성(threshold와 예측파일 일치)만 검증하며 선택 방법론은 검증 대상이 아닙니다.
+  선택 절차 결함과 아티팩트 무결성은 별개 질문입니다.

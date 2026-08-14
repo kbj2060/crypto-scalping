@@ -4,6 +4,7 @@ const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
 const API_ETH_JMLAM4_SHADOW_URL = "/api/eth-jmlam4-shadow";
+const API_ETH_EXITHEAD_SHADOW_URL = "/api/eth-exithead-shadow";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 const JOURNAL_POLL_MS = 10000;
@@ -94,6 +95,9 @@ let btcMultislotActiveSlot = 0;
 let ethJmlam4Etag = "";
 let ethJmlam4LastFetchAt = 0;
 let latestEthJmlam4Payload = null;
+let ethExitheadEtag = "";
+let ethExitheadLastFetchAt = 0;
+let latestEthExitheadPayload = null;
 let lastChartRenderAt = 0;
 let isScrolling = false;
 let scrollIdleTimer = 0;
@@ -1526,6 +1530,7 @@ function applyDashboardEvent(payload) {
   });
   if (btcPriceUpdated && latestBtcMultislotPayload) renderBtcMultislotSlots(latestBtcMultislotPayload);
   if (ethPriceUpdated && latestEthJmlam4Payload) renderEthJmlam4Position(latestEthJmlam4Payload);
+  if (ethPriceUpdated && latestEthExitheadPayload) renderEthExitheadPosition(latestEthExitheadPayload);
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
@@ -1944,13 +1949,72 @@ async function refreshEthJmlam4Shadow() {
   }
 }
 
+function renderEthExitheadPosition(payload) {
+  const cardEl = el("ethExitheadPositionCard");
+  if (!cardEl) return;
+  const livePrice = Number(latestLivePriceByAsset["eth"] || 0);
+  const barSeconds = Number(payload?.bar_seconds || 300);
+  cardEl.innerHTML = shadowPositionCardHtml(payload?.position || null, null, livePrice, barSeconds);
+}
+
+function renderEthExitheadShadow(payload) {
+  latestEthExitheadPayload = payload;
+  const badge = el("ethExitheadBadge");
+  const stale = Boolean(payload?.stale);
+  if (badge) {
+    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
+    badge.textContent = stale ? "STALE" : "LIVE";
+  }
+  const age = Number(payload?.age_minutes);
+  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
+  setT("ethExitheadSub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
+
+  const side = Number(payload?.position_side || 0);
+  const posText = side > 0 ? "LONG" : side < 0 ? "SHORT" : "FLAT";
+  const src = payload?.position_source_component;
+  setT("ethExitheadPosition", src ? `${posText} (${src})` : posText);
+
+  setT("ethExitheadTrades", `${payload?.total_trades ?? 0}건`);
+
+  const pnl = Number(payload?.cumulative_return_pct);
+  const pnlEl = el("ethExitheadPnl");
+  setT("ethExitheadPnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
+  if (pnlEl) {
+    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
+    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
+  }
+
+  const mdd = Number(payload?.mdd_pct);
+  setT("ethExitheadMdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
+
+  renderEthExitheadPosition(payload);
+  renderShadowCharts(payload, "ethExitheadPnlSvg", "ethExitheadEquitySvg");
+}
+
+async function refreshEthExitheadShadow() {
+  const now = Date.now();
+  if (now - ethExitheadLastFetchAt < OPS_POLL_MS) return;
+  ethExitheadLastFetchAt = now;
+  try {
+    const res = await fetch(API_ETH_EXITHEAD_SHADOW_URL, { cache: "no-store", headers: ethExitheadEtag ? { "If-None-Match": ethExitheadEtag } : {} });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`eth exithead shadow ${res.status}`);
+    ethExitheadEtag = res.headers.get("ETag") || ethExitheadEtag;
+    renderEthExitheadShadow(await res.json());
+  } catch (error) {
+    console.error("ETH exit-head shadow fetch error:", error);
+    const badge = el("ethExitheadBadge");
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
+  }
+}
+
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
     const ops = button.dataset.pageTab === "ops";
     el("liveTabPanel")?.classList.toggle("hidden", ops);
     el("opsTabPanel")?.classList.toggle("hidden", !ops);
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethJmlam4LastFetchAt = 0; refreshEthJmlam4Shadow(); }
+    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethJmlam4LastFetchAt = 0; refreshEthJmlam4Shadow(); ethExitheadLastFetchAt = 0; refreshEthExitheadShadow(); }
   }));
 }
 
@@ -2521,6 +2585,7 @@ async function tick() {
     refreshOpsStatus();
     refreshBtcMultislotShadow();
     refreshEthJmlam4Shadow();
+    refreshEthExitheadShadow();
   } catch (e) {
     console.error("Tick Error:", e);
   } finally {

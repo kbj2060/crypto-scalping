@@ -29,6 +29,13 @@ BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
 ETH_JMLAM4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_jmlam4_regime_swap_shadow" / "state.json"
 ETH_JMLAM4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_jmlam4_regime_swap_shadow" / "closed_trades.jsonl"
 ETH_JMLAM4_SHADOW_BAR_SECONDS = 300
+# ETH exit-head asymmetric-swap candidate (h48qual = new live-ATR-relabeled exit_head,
+# zig075 = fully original live), shadow-only -- the sole overnight exit-head candidate that
+# survived VAL+OOS without a sign flip (see scripts/live_eth_exithead_asymmetric_shadow_20260813.py
+# and docs/experiments/eth_omega461_exit_head_asymmetric_shadow_20260813.md).
+ETH_EXITHEAD_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_exithead_asymmetric_shadow" / "state.json"
+ETH_EXITHEAD_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_exithead_asymmetric_shadow" / "closed_trades.jsonl"
+ETH_EXITHEAD_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT"}
 EVENT_POLL_SECONDS = 2.5
 MARKET_HISTORY_CACHE_SECONDS = 300
@@ -551,6 +558,70 @@ def eth_jmlam4_shadow_payload() -> dict[str, Any]:
     }
 
 
+def eth_exithead_shadow_payload() -> dict[str, Any]:
+    state = load_json(ETH_EXITHEAD_SHADOW_STATE_PATH) or {}
+    last_bar = state.get("last_processed_bar_ts")
+    age_minutes = utc_age_minutes(last_bar)
+    position = state.get("position") if isinstance(state.get("position"), dict) else None
+    trades = parse_jsonl(ETH_EXITHEAD_SHADOW_TRADES_PATH)
+    total_trades = len(trades)
+    equity = state.get("equity")
+    cumulative_return_pct = (float(equity) - 1.0) * 100.0 if isinstance(equity, (int, float)) else None
+    mdd_pct = float(state["mdd"]) * 100.0 if isinstance(state.get("mdd"), (int, float)) else None
+    recent_trades: list[dict[str, Any]] = []
+    equity_curve: list[dict[str, Any]] = []
+    running_equity = 1.0
+    for row in trades:
+        try:
+            return_frac = float(row["trade_return_frac"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        running_equity *= 1.0 + return_frac
+        equity_curve.append(
+            {
+                "ts": row.get("exit_ts"),
+                "side": row.get("side"),
+                "trade_return_pct": return_frac * 100.0,
+                "cumulative_return_pct": (running_equity - 1.0) * 100.0,
+            }
+        )
+    equity_curve = equity_curve[-500:]
+    for row in trades[-5:]:
+        try:
+            return_pct = float(row["trade_return_frac"]) * 100.0
+        except (KeyError, TypeError, ValueError):
+            return_pct = None
+        recent_trades.append(
+            {
+                "source_component": row.get("source_component"),
+                "side": row.get("side"),
+                "entry_ts": row.get("entry_ts"),
+                "exit_ts": row.get("exit_ts"),
+                "entry_price": row.get("entry_price"),
+                "exit_price": row.get("exit_price"),
+                "trade_return_pct": return_pct,
+                "reason": row.get("reason"),
+            }
+        )
+    recent_trades.reverse()
+    return {
+        "last_bar": last_bar,
+        "age_minutes": age_minutes,
+        "stale": age_minutes is None or age_minutes >= (ETH_EXITHEAD_SHADOW_BAR_SECONDS / 60.0) * 3,
+        "bar_seconds": ETH_EXITHEAD_SHADOW_BAR_SECONDS,
+        "position_side": (position or {}).get("side", 0),
+        "position_source_component": (position or {}).get("source_component"),
+        "position": position,
+        "total_trades": total_trades,
+        "cumulative_return_pct": cumulative_return_pct,
+        "mdd_pct": mdd_pct,
+        "recent_trades": recent_trades,
+        "equity_curve": equity_curve,
+        "candidate": state.get("candidate"),
+        "order_submission_supported": state.get("order_submission_supported", False),
+    }
+
+
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -922,6 +993,16 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, eth_jmlam4_shadow_payload(), etag)
 
+    async def api_eth_exithead_shadow(request: web.Request) -> web.Response:
+        etag = make_etag(
+            "eth-exithead-shadow",
+            file_signature(ETH_EXITHEAD_SHADOW_STATE_PATH),
+            file_signature(ETH_EXITHEAD_SHADOW_TRADES_PATH),
+        )
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, eth_exithead_shadow_payload(), etag)
+
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -934,6 +1015,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
     app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
     app.router.add_get("/api/eth-jmlam4-shadow", api_eth_jmlam4_shadow)
+    app.router.add_get("/api/eth-exithead-shadow", api_eth_exithead_shadow)
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     app.on_startup.append(start_dashboard_events)

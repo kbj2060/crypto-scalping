@@ -377,6 +377,10 @@ def main() -> int:
         direction_label_dir=Path(args.direction_label_dir),
         quality_mode="same_as_direction",
         quality_label_dir=None,
+        quality_min_edge=0.0010,
+        quality_max_mae=0.0100,
+        quality_min_mfe_mae=1.20,
+        quality_max_hold_bars=288,
     )
     fee, slip = omega._load_fee_slip()
     train_raw = frames["train_raw"]

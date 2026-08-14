@@ -1,0 +1,21 @@
+[Unit]
+Description=crypto-scalping ETH Odyssey4 shadow loop (h48qual regime-aware exit guard + zig075 SHORT sustained-uptrend entry veto, 2026-08-14, shadow-only, no order submission)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/live_eth_odyssey4_zig075_entry_veto_shadow_20260814.py --poll-seconds 90
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eth_odyssey4_shadow
+
+[Install]
+WantedBy=multi-user.target

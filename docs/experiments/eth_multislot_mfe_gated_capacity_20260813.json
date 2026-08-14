@@ -1,0 +1,112 @@
+{
+  "name": "eth_multislot_mfe_gated_capacity_20260813",
+  "schema_version": "architecture_experiment_contract_v3",
+  "created": "2026-08-13, written BEFORE any number in this contract's arm was computed",
+  "asset": "ETHUSDT",
+  "question": "eth_multislot_capacity_transfer_20260808.json already tested ETH multi-slot N=3 with EQUAL-BUDGET sizing and no admission policy change (the same h48qual/zig075 quality_threshold gates every slot) -- it failed G2 (VAL PnL +36.82%->+14.15%, -62%) despite exposure being nearly unchanged (time-weighted notional -7.8% only), diagnosed as a MARGINAL-SIGNAL-QUALITY problem, not exposure dilution. This contract does NOT resweep N and does NOT resweep budget allocation (both forbidden by the 08-08 contract's own terms -- 'a sweep over N is explicitly forbidden under this contract; it would require a new one'). It tests a QUALITATIVELY DIFFERENT slot-ADMISSION policy: entries into slots beyond the first (N=3 total, still equal-budget-sized at 1/3 margin each, unchanged from 08-08) are additionally gated by whether that bar's direction-matched predicted MFE (from this sub-project's ONLY signal that has ever cleared its own MI/R^2 pre-registration gate -- docs/experiments/eth_h48qual_mfe_quantile_quality_regression_20260812.md step 1) clears a fixed TRAIN-distribution upper quantile. The base slot (occupied_count==0 at entry) is completely untouched -- same signal, same priority order, same 1/3 sizing as 08-08's own first-filled slot. Exactly ONE variable changes relative to both the incumbent (N=1) and 08-08's failed N=3 arm: incremental-slot eligibility.",
+
+  "what_is_being_tested": {
+    "mechanism": "N=3 concurrent slots, EQUAL BUDGET (each slot sizes at 1/3 of the sidecar margin_fraction, leverage unchanged) -- byte-identical sizing convention to eth_multislot_capacity_transfer_20260808.json. The ONLY change: for any entry attempted while >=1 other slot is already open (occupied_count>=1, i.e. this admission is INCREMENTAL over what a single slot could have taken), the candidate must ALSO clear direction_matched_predicted_mfe(bar) >= mfe_cutoff[direction] before being admitted. Entries into a fully-flat account (occupied_count==0) are never gated -- identical eligibility to 08-08's first-filled slot.",
+    "mfe_model": "HistGradientBoostingRegressor, loss=quantile @ q=0.5, max_depth=2, learning_rate=0.03, l2_regularization=2.0, early_stopping=True (the exact 'strong regularization' recipe that passed this sub-project's MI/R^2 gate and that scripts/research_eth_omega461_live_sltp_mfe_width_20260813.py already reused byte-identically for a different mechanism tonight). One model per direction (long/short), trained on TRAIN=2025-01-01..2025-09-30 ONLY, target tb_long_mfe_h48_conservative / tb_short_mfe_h48_conservative (build_omega1_2_triple_barrier_labels_20260619.py's h48_conservative barrier byproduct -- NOT recomputed, NOT a saved trade ledger). Feature panel: the live bundles' own 102 base_cols (verified byte-identical across h48qual/zig075 bundles, re-verified directly by this contract's own script before use) via train_eval_omega1_2_tabm_3head_20260603._base_input -- the SAME causal, point-in-time features the live parent TabMs consume. NO second feature panel is tried under this contract (research_eth_omega461_live_sltp_mfe_width_20260813.py's final10_latent16 autoencoder alternative is explicitly NOT reused here -- one feature-panel axis, not two, keeps this a single-variable test).",
+    "cutoff_rule": "mfe_cutoff[direction] = quantile(model[direction].predict(TRAIN full panel), 0.70) -- FIXED at q=0.70 by this contract, matching the exact precedent quantile-relative gating threshold already used for h48qual's own quality-regression head redesign (docs/experiments/eth_h48qual_mfe_quantile_quality_regression_20260812.md: 'threshold=quantile(train prediction distribution, 0.70)'). NO cutoff sweep is performed under this contract, for the same reason N is not swept: a sweep would need a new contract. Computed once per seed (the cutoff moves with the model it was fit alongside), on ALL TRAIN rows (unconditional on any component's active/side signal), never on VAL or OOS.",
+    "reused_not_reimplemented": "multislot_replay() in scripts/research_eth_multislot_capacity_transfer_20260808.py (lines 59-166), imported UNMODIFIED and used as-is for every N=1 baseline computation in this contract (G0, the VAL baseline, per-seed G1/G2 comparisons) and as the literal starting point (copied then minimally extended) for the new multislot_replay_mfe_gated() function. prepare_component()/PRIORITY/SCALE_MAP/LEVERAGE_CAP/NOTIONAL_CAP/DURATION_THRESHOLD from replay_omega4_6_1_greedy_router_20260706.py, retest_omega4_6_1_extended_oos_20260706.py's COMPONENTS/load_frame_current/DEVICE/COST_MULT, replay_omega4_6_1_greedy_val_20260706.py's load_val_frame/VAL_PRED, and research_eth_omega461_exit_sweep_20260721.py's load_frame/BASE_2025/WIDE24_2025 (for the TRAIN frame only) are all reused unmodified. base102_panel()/train_mfe_models() from research_eth_omega461_live_sltp_mfe_width_20260813.py are reused unmodified for MFE-model training.",
+    "sizing_explicitly_unchanged": "row_margin/n_slots division, SCALE_MAP leverage multiplier, LEVERAGE_CAP/NOTIONAL_CAP, priority order (h48qual before zig075), direction/quality/entry-timing signals, and exit logic (TP/SL/exit-head) are ALL held byte-identical to both the incumbent N=1 and 08-08's failed N=3 arm. This isolates the causal question to admission eligibility alone -- a budget-allocation change confounded with this question is exactly what the parent contract forbids re-testing."
+  },
+
+  "prior_evidence_stated_up_front": {
+    "supporting": {
+      "eth_2026-08-08_mechanism_still_looks_real": "08-08's own diagnostic ruled OUT exposure dilution as the failure cause: at N=3, time-weighted notional fell only -7.8% (1.187->1.095) while VAL PnL fell -62% (36.82->14.15) -- the loss traces to the QUALITY of the marginal trades admitted, not to spreading the same budget thinner. This means the capacity MECHANISM (more slots -> more signal captured) may still be real; only the SELECTOR that chose which extra signals to admit (h48qual/zig075's own quality_threshold) was bad.",
+      "the_08-08_selector_is_independently_known_bad": "the thing that selected 08-08's incremental trades -- h48qual/zig075's own quality gate -- has been exhaustively shown elsewhere in this session/sub-project to carry no real ranking skill: h48qual's gated short-only selection loses to always_short 0/5 seeds (VAL and OOS), zig075's is statistically indistinguishable from always_short (neither confirmed skilled). 08-08's incremental trades were 38 zig075 / 17 h48qual -- both components' own selectors.",
+      "the_mfe_regression_head_is_this_subproject_only_signal_ever_to_clear_its_own_MI_R2_gate": "docs/experiments/eth_h48qual_mfe_quantile_quality_regression_20260812.md step 1: strong-regularization config, TRAIN R2=+0.16, VAL R2=+0.08, OOS R2=+0.14, spearman VAL +0.28/OOS +0.39 (both p<0.001), confound-checked (not a volatility proxy: spearman(MFE,MAE) is NEGATIVE -0.10..-0.32; spearman(MFE,realized_pnl)=+0.43 all splits). Every other label x model combination tried in this sub-project (TabM/GBDT/autoencoder/TCN/CNN/one-vs-rest x zigzag_action/trend-scanning/MFE-regression) failed this cheap gate outright. If '08-08 failed because the selector had no skill' is the correct diagnosis, swapping in the one selector that DOES clear a pre-registered statistical gate is the most direct available test of that diagnosis."
+    },
+    "ADVERSE -- this contract expects a real chance of failure, stated honestly": {
+      "modest_effect_size": "even the MFE regression's PASSING configuration explains a small fraction of variance (R2 0.08-0.16) -- a real signal by this sub-project's standards, but not a strong one. Clearing an MI/R2 gate is necessary, not sufficient, for the signal to usefully rank MARGINAL trades specifically (a different, harder task than ranking trades in general).",
+      "the_same_signal_already_failed_once_tonight_as_a_direct_filter": "the SAME MFE regression head, used to gate full direction+quality trade decisions (a closer role to this contract's use than TP/SL width), lost to always_short on OOS 1/5 seeds (VAL 3/5) in docs/experiments/eth_h48qual_mfe_quantile_quality_regression_20260812.md step 2 -- MI/R2 gate passage did not translate into a practical head-to-head edge there.",
+      "the_same_signal_already_failed_once_tonight_in_a_sibling_mechanism_on_the_SAME_train_window_and_feature_panel": "docs/experiments/eth_omega461_live_sltp_wide_calibration_seed_robustness_20260813.md's OOS confirmation section is the single most directly relevant adverse data point available: the 'symmetric_scale9' config (same base102 panel, same MFE regression recipe, same TRAIN=2025-01..09 window this contract also uses) won VAL 5/5 seeds decisively (mean +95.45% vs baseline +36.82%, MDD also 5/5 better) and then reversed COMPLETELY on a single OOS look (0/5 seeds beat baseline PnL, 4/5 seeds went net negative, MDD 0/5, avg hold time blew out from ~700 to ~1500 bars). The seed-robustness check that this contract's own G1/G2 structure mirrors was NOT sufficient there to distinguish a real candidate from VAL-regime overfitting -- this is a direct, same-night precedent for exactly the failure mode this contract is most at risk of, on the identical underlying model family.",
+      "side_asymmetry_may_reappear": "08-08's incremental trades were 44 SHORT / 11 LONG. If the MFE regression head has inherited any of the short-side regime-beta correlation pervasive in this sub-project's other findings (h48qual_standalone_replay_invalid), an MFE-based admission gate could just be re-selecting 'more of the same short-side drift' on the margin rather than adding real discriminative power -- this would look like a G1/G2 pass without being a real fix.",
+      "fixed_cutoff_is_a_single_untuned_guess": "q=0.70 is inherited from a different application (quality-head gating), not derived for this admission-eligibility use case. Discipline (no sweep) is intentional, but this means a fail here does not rule out some other cutoff working -- and per this contract's own no-re-tuning rule, that possibility is explicitly NOT chased if this fails."
+    }
+  },
+
+  "window_honesty": {
+    "val_2025-10-01..12-31": "the primary decision window for this contract (G1/G2). HEAVILY re-used tonight already by: eth_h48qual_mfe_quantile_quality_regression_20260812 (VAL read for the MI/R2 gate + 5-seed TabM eval), eth_omega461_live_sltp_mfe_width_20260813 (VAL grid: 2 feature panels x 7 tp_scale values x 2 components + priority-combined), eth_omega461_live_sltp_asymmetric_tpsl_20260813 (VAL grid), eth_omega461_live_sltp_wide_calibration_seed_robustness_20260813 (VAL x 5 seeds x 2 configs), and the original eth_multislot_capacity_transfer_20260808 (VAL N=1/N=3). No genuinely unread VAL window exists in this sub-project any longer -- recorded honestly, not treated as disqualifying (per this session's established practice), but a VAL pass here should be weighted accordingly.",
+    "train_2025-01-01..09-30": "the window the MFE regressor is fit on. Same window used to fit h48qual/zig075's own parent bundles/sidecars and every MFE-regression variant tried tonight -- inherent to this sub-project's data budget, not new contamination.",
+    "oos_extended_2026-01-01..06-30": "the window eth_multislot_capacity_transfer_20260808's G0/G3 used (via retest_omega4_6_1_extended_oos_20260706.load_frame_current), inherited unchanged here for G0 and the pre-registered (not-yet-executed) G3. NOTE a window-convention discrepancy: tonight's SIBLING scripts (research_eth_omega461_exit_sweep_20260721 and everything built on it -- the MFE-width and wide-calibration lines) instead use a SHORTER OOS window, 2026-01-01..03-31. This contract inherits the multislot line's own (longer, Jan-Jun) convention for G0/G3 consistency with 08-08, not the shorter one -- flagged explicitly rather than silently reconciled. If G3 is ever run, whoever runs it should re-apply the forward-fill patch for the ~95-row regime3_current_sensitive_wide24_* NaN gap around 2026-02-28 that docs/experiments/eth_omega461_live_sltp_wide_calibration_seed_robustness_20260813.md's OOS section found and fixed in this same WIDE24_2026 source file (causal forward-fill only, applied identically to baseline and candidate before they diverge).",
+    "forward_live_shadow": "the only clean referee for a live change, and it does not exist yet."
+  },
+
+  "metric_basis": {
+    "primary": "NO-GATE (matches live wiring: FINAL_GOVERNOR_OMEGA4_6_1_ETH_DURATION_GATE_OFF=True)",
+    "secondary": "duration-gated, for comparability with older ETH numbers",
+    "equity_convention": "single shared cash account; concurrent slots mark to market each bar; trade_return recorded at close, curve compounded in EXIT order -- byte-identical convention to eth_multislot_capacity_transfer_20260808.json (multislot_replay is reused unmodified).",
+    "mdd": "trade-level MDD from the ledger curve, matching 08-08's primary convention."
+  },
+
+  "seeds": {
+    "n": 5,
+    "values": [454090186, 918777617, 130430114, 828152837, 415921410],
+    "generation": "python random.SystemRandom().sample(range(10_000_000, 999_999_999), 5) -- OS-entropy-backed, not a fixed-increment sequence (per CLAUDE.md Seed-Diversity Ensemble Promotion Gate and this session's own [[tabm_hp_low_signal_pattern]] practice). Pre-registered in this contract BEFORE any seed was trained, to foreclose seed-shopping. Each seed retrains BOTH the long and short MFE regressor (short uses seed+1, matching research_eth_omega461_live_sltp_mfe_width_20260813.train_mfe_models's own existing convention) and recomputes its own TRAIN-distribution cutoffs -- the N=1 baseline does not depend on the MFE model at all and is computed once, shared across all 5 seed comparisons."
+  },
+
+  "pre_registered_gates": {
+    "G0_regression_HALT": {
+      "rule": "multislot_replay() (UNMODIFIED, imported from the 08-08 script) run at n_slots=1 on the OOS extended window (2026-01-01..06-30) must reproduce the incumbent no-gate numbers +77.11% / -15.48% / 37 trades within 0.05pp on PnL and MDD and exactly on trade count -- identical check to 08-08's own G0.",
+      "on_fail": "HALT. Do not report any number from this contract."
+    },
+    "G0b_val_comps_reconstruction_selfcheck": {
+      "rule": "NEW check, specific to this contract's need to rebuild a `components` dict outside of run_window() (which does not return it): components independently rebuilt for VAL from run_window()'s own returned aligned frame + its own written temp aligned-prediction CSVs, then replayed via the UNMODIFIED multislot_replay() at n_slots=1, must exactly match (within 1e-9 relative) the metrics run_window() itself produced for VAL n_slots=1.",
+      "on_fail": "HALT. The independently-rebuilt `components` used for every downstream MFE-gated arm cannot be trusted."
+    },
+    "G0c_gate_disabled_structural_equivalence": {
+      "rule": "NEW check: the new multislot_replay_mfe_gated() function, called at n_slots=3 with the MFE cutoff forced to -infinity (i.e. the extra admission check can never block), must exactly match (within 0.05pp PnL/MDD, exact trade count) the UNMODIFIED multislot_replay() called at n_slots=3 on the identical VAL components -- proving the extension is a faithful superset of the original when its one new condition is a no-op.",
+      "on_fail": "HALT. The extension itself has a bug independent of the MFE model or cutoff."
+    },
+    "G1_premise_compounded_contribution": {
+      "rule": "PER SEED: the COMPOUNDED contribution (np.cumprod of the incremental trades' returns in exit order, minus 1, as a percent -- NOT the mean per-trade return) of the trades this seed's MFE-gated N=3 admits that N=1 does not take must be > 0 on VAL. This directly implements 08-08's own recorded caveat ('G1_caveat: gate on compounded contribution instead of mean; the two disagreed at 08-08's magnitude'). AGGREGATE PASS iff >=4/5 seeds individually satisfy this (matching this session's own established seed-robustness bar from docs/experiments/eth_omega461_live_sltp_wide_calibration_seed_robustness_20260813.md). Mean per-trade return and a permutation percentile (same reassignment methodology as 08-08's permutation_incremental, but computed on the compounded statistic) are reported per seed for context, not as an independent sub-gate.",
+      "on_fail": "CLOSE the line. Report the premise failure. Do NOT proceed to G2/OOS."
+    },
+    "G2_VAL_falsification": {
+      "rule": "PER SEED: this seed's MFE-gated N=3 VAL no-gate PnL >= N=1 VAL no-gate PnL AND this seed's MFE-gated N=3 VAL no-gate MDD >= N=1 VAL no-gate MDD - 3.0pp -- identical numeric form to 08-08's own G2. AGGREGATE PASS iff >=4/5 seeds individually satisfy this.",
+      "on_fail": "CLOSE the line. No OOS read."
+    },
+    "G3_OOS_single_look": {
+      "status": "PRE-REGISTERED ONLY -- NOT EXECUTED under this session's run. Orchestrator decides separately whether to spend this read, per explicit instruction.",
+      "rule": "ALL of: >=4/5 seeds show OOS no-gate PnL >= this seed's own N=1 OOS no-gate PnL + 3.0pp; >=4/5 seeds show OOS no-gate MDD >= -18.5%; >=4/5 seeds positive in BOTH 2026 quarters (Q1+Q2, the Jan-Jun extended window -- see window_honesty for the window-convention caveat vs sibling scripts' shorter OOS).",
+      "reads_allowed": 1,
+      "on_fail": "CLOSE the axis. No re-tuning of slot count, sizing, cutoff quantile, or feature panel on OOS."
+    },
+    "G4_effect_size": {
+      "status": "PRE-REGISTERED ONLY -- NOT EXECUTED under this session's run, contingent on G3 being run and passing.",
+      "rule": "see selection.effect_size_gate below -- a PnL difference must clear |Welch t| >= 2.0 on per-trade returns AND a label-permutation percentile >= 0.90, pooled or per-seed as G3's own OOS ledgers allow. A paired bootstrap P alone may NOT carry this result (08-08 precedent: t=0.32/p=0.75 null difference scored bootstrap P=0.979 on this exact ETH ledger family)."
+    },
+    "G5_outcome_ceiling": {
+      "rule": "the BEST outcome available from this contract, even if every gate above passes, is 'stand up a parallel ETH multi-slot MFE-gated SHADOW'. Never a live swap.",
+      "rationale": "identical to 08-08: no window here is clean enough to justify a live position-policy change; only a forward shadow record could."
+    }
+  },
+
+  "selection": {
+    "effect_size_gate": {
+      "min_abs_t": 2.0,
+      "min_permutation_percentile": 0.90,
+      "risk_channel_tested": true,
+      "premise_checked_in_selection_window": true
+    }
+  },
+
+  "live_wiring_blockers_recorded_now": {
+    "one_way_mode": "ETH live runs one-way USDT-M futures. Concurrent opposite-side slots NET OUT on the exchange, so N=3 as replayed here is not directly executable. Live adoption would require hedge mode or a same-side-only slot policy -- identical blocker to 08-08, restated so a pass cannot silently skip it.",
+    "occupancy_interaction": "if this contract's arm passes where 08-08's failed, the two results are not in tension (08-08 showed the CAPACITY mechanism minus a good selector fails; this contract tests capacity WITH a differently-sourced selector) -- but this reconciliation must be stated explicitly in any promotion writeup, not silently assumed."
+  },
+
+  "fresh_forward": {
+    "fresh_forward_bar_by_bar": true,
+    "trade_ledgers_used_as_input": false,
+    "saved_parent_exit_timestamps_used": false,
+    "future_rows_used_for_entry": false,
+    "method": "multi-slot extension of the imported greedy_replay/multislot_replay execution model; one forward bar loop, entry attempted only into a free slot, fill at open[i+1], exits decided per bar from each slot's own TP/SL and exit head using bar-i state only. The MFE regressor is trained ONLY on TRAIN (strictly before VAL), scored at inference time using only bar-i's own causal feature row -- no saved ledger, no future row, and no parent exit timestamp is read as input anywhere in this pipeline."
+  },
+
+  "script": "scripts/research_eth_multislot_mfe_gated_capacity_20260813.py",
+  "reused_script_reference": "scripts/research_eth_multislot_capacity_transfer_20260808.py (multislot_replay, lines 59-166, imported unmodified) and scripts/research_eth_omega461_live_sltp_mfe_width_20260813.py (base102_panel, train_mfe_models, imported unmodified)"
+}

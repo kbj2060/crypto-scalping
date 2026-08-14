@@ -1,0 +1,21 @@
+[Unit]
+Description=crypto-scalping ETH h48qual/zig075 asymmetric exit_head (live-ATR relabel) shadow loop (2026-08-13, shadow-only, no order submission)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/live_eth_exithead_asymmetric_shadow_20260813.py --poll-seconds 90
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eth_exithead_shadow
+
+[Install]
+WantedBy=multi-user.target

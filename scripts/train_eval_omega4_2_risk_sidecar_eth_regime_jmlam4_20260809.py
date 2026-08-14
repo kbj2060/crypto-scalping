@@ -15,7 +15,12 @@ import train_eval_omega4_2_risk_sidecar_20260622 as sidecar_script  # noqa: E402
 
 sidecar_script.omega.REGIME3_CURRENT_2025 = ROOT / "data/ensemble/supervised/eth_regime3_current_hmm_jmlam4_20260809_2025_maskedname.csv"
 sidecar_script.omega.REGIME3_CURRENT_2026 = ROOT / "data/ensemble/supervised/eth_regime3_current_hmm_jmlam4_20260809_2026_cleansource_maskedname.csv"
-sidecar_script.omega.REGIME3_RISK_2026 = ROOT / "data/ensemble/supervised/regime3_stability_risk_h6_20260530/training_features_2026_rebuilt_regime3_stability_risk_h6_gapfilled_20260809.csv"
+# 2026-08-13: the "_gapfilled_20260809" file this used to point at no longer exists on disk
+# (tmp/data is gitignored, disk-only -- lost to cleanup between 2026-08-10 and today). Verified
+# (scripts/diag_risk_overlay_20260813.py) that omega's own module default
+# (training_features_2026_rebuilt_regime3_stability_risk_h6.csv, no gapfill suffix) merges against
+# this wrapper's actual EVAL_CSV with zero dropped/edge rows, so no override is needed -- leaving
+# REGIME3_RISK_2026 unset here falls through to that valid default.
 
 if __name__ == "__main__":
     _parent_dir = ROOT / "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_regime_jmlam4_20260809"
