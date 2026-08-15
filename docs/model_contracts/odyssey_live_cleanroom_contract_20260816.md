@@ -42,6 +42,21 @@ pickle은 클래스를 저장 시점의 정확한 모듈 경로로 참조하므�
 regime3_current_sensitive_hmm_wide24_2024_odyssey_native.joblib`(원본 파일은 그대로 두고 별도
 파일로 추가 — 원본을 쓰는 다른 시스템에 영향 없음).
 
+## 철저 재검증 (사용자 요청, 아래 3항목 전부 통과 후 확정)
+
+1. **구조적 diff**: 새 새도우 스크립트 vs 08-14 원본을 라인 단위 전수 비교해 **실제 결함 1건
+   발견·수정** — 다른 동시 세션이 원본에 추가한 quality-score 대시보드 진단 블록이 클린룸
+   스크립트에 누락돼 있었다(트레이딩 결정에는 영향 없는 대시보드 전용 필드지만, 방치 시 cutover
+   후 대시보드 UI가 조용히 깨졌을 것). 이식 후 재diff로 잔여 차이가 독스트링/주석/import명뿐임을
+   확인.
+2. **엣지 케이스 수치 검증**(기존 패리티가 커버 못한 경로): SHORT 포지션 `exit_probability`(3곳),
+   veto 분기 실제 트리거(양쪽 상태), guard-engaged 분기(LONG/SHORT), TP/SL 숏서킷, `process_bar()`
+   전체 실행 — **전부 bit-identical/완전 일치**.
+3. **의존성 전수 감사**: 새 스크립트 fresh import 시 로드되는 1차 저장소 모듈이 정확히 5개
+   (`odyssey_tabm_core`/`odyssey_regime3_live`/`odyssey_live_adapter`/
+   `omega4_6_1_runtime_contract`/패키지 init)뿐임을 `sys.modules` diff로 확인 — SOL/BTC/Omega5/
+   dead-sidecar/원본 학습스크립트 전부 0개.
+
 ## 발견된 버그 2건 (수정, 현재 아티팩트엔 no-op으로 검증됨)
 
 1. 원본 `_predict_payload`가 번들 자신의 `config`를 무시하고 전역 싱글턴으로 모델을 재구성하던

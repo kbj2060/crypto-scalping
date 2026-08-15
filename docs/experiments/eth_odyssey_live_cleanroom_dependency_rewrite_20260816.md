@@ -1,7 +1,8 @@
 # ETH 오디세이 라이브 클린룸 의존성 재작성 (2026-08-16)
 
-상태: **구현 완료, 패리티 검증 통과, `scripts/*` 학습스크립트 의존성 완전 제거 완료. 서버 cutover는
-사용자의 sudo 실행 대기 중(직접 실행 불가).**
+상태: **구현 완료, 패리티 검증 통과, `scripts/*` 학습스크립트 의존성 완전 제거 완료, 사용자 요청으로
+철저 재검증 완료(실제 구조적 결함 1건 발견·수정). 서버 cutover는 사용자의 sudo 실행 대기 중(직접
+실행 불가).**
 
 ## 요청
 
@@ -205,6 +206,54 @@ exit_compares=4000 guard_compares=2000` — **mismatch 0건**(총 8,000회 비�
 - 서버 cutover는 root 권한이 필요해 코딩 에이전트가 직접 실행할 수 없다(`deploy_watcher`
   sudoers는 재시작만 허용, 이전 08-14 cutover와 동일한 제약) — 사용자가
   `sudo bash scripts/ops/systemd/cutover_odyssey4_cleanroom_20260816.sh`를 서버에서 실행해야 한다.
+
+## 철저 재검증 (사용자 요청, "제대로 코드 의존성 제거가 됐고 성능은 유지됐는지 철저하게 검증해줘")
+
+기존 수치 패리티(8,000+ 비교, 전부 mismatch 0)만으로는 부족하다고 보고 두 축을 더 팠다.
+
+### 1. 구조적 diff 재검증 — 실제 결함 1건 발견·수정
+
+새 새도우 스크립트와 08-14 원본을 `diff -u`로 라인 단위 전수 비교했다(수치 패리티 테스트는 특정
+입력에 대한 출력만 비교하므로, "아예 실행되지 않는 코드 경로"는 못 잡는다는 한계가 있음).
+결과: 원본의 `process_bar()`에 있던 quality-score 대시보드 진단 블록
+(`state["last_h48qual_quality_score"]` 등 4개 키)이 새 스크립트에 없었다.
+
+원인 확인: `git log`로 추적한 결과 그 블록은 커밋 `0048ab0`(2026-08-16 03:29, "feat: show live
+h48qual/zig075 quality scores on the Odyssey4 shadow dashboard")로 **다른 동시 세션이 원본
+스크립트에 추가한 것**이었다 — 내가 클린룸 스크립트를 처음 작성한 시점 이후에 원본 쪽에 반영된
+변경이라 자동으로 반영되지 않았다. 트레이딩 결정(entry/exit/veto)에는 영향 없는 순수 대시보드용
+필드지만(주석에 명시), 방치했다면 cutover 후 대시보드 UI가 조용히 깨졌을 것이다. 해당 블록을
+그대로 이식해 수정했고, diff 재실행으로 이제 남은 차이가 전부 독스트링/주석/import 이름 변경뿐임을
+확인했다.
+
+### 2. 엣지 케이스 수치 검증 — 기존 패리티 테스트가 커버 안 한 경로들
+
+기존 패리티는 전부 LONG 포지션, veto/guard 비활성 상태만 테스트했다. 추가로 확인:
+
+| 경로 | 결과 |
+|---|---|
+| `exit_probability` SHORT(`side=-1`) — h48qual/zig075/원본 가드 3곳 전부 | bit-identical |
+| `decide_and_queue_entry` veto 분기 — 합성 zig075 SHORT 결정 강제 주입, `detector_active=True/False` 양쪽 | 동작 완전 일치(True일 때 둘 다 거부, False일 때 둘 다 큐잉) |
+| `evaluate_exit_guarded` guard-engaged 분기 — LONG/SHORT 양쪽, 확률 기반 hold 경로 | bit-identical |
+| `evaluate_exit_guarded`의 TP/SL 숏서킷 — guard 활성 상태에서 SL 도달/TP 도달 강제 | 완전 일치 |
+| `process_bar()` 전체 실행(오픈 h48qual LONG 포지션, 신규 quality-score 블록 포함) — `.py` 파일을 모듈로 직접 import해 동일 state/frame으로 나란히 실행 | equity/mdd/position/hold_bars/quality_score 등 검사한 모든 키 완전 일치 |
+
+### 3. 의존성 전수 감사
+
+새 클린룸 새도우 스크립트를 fresh import했을 때 로드되는 **1차 저장소 내부 모듈**을 전수
+나열(`sys.modules` diff, site-packages/stdlib 제외): 정확히 5개 —
+`trading_bot_modules`(패키지 init), `odyssey_tabm_core`, `odyssey_regime3_live`,
+`odyssey_live_adapter`, `omega4_6_1_runtime_contract`(의도적으로 유지한 안전검증 유틸). SOL/BTC/
+dead-sidecar/`omega4_6_1_live`/`runtime_config`/`omega5_live`/`omega4_6_2_source_parent_live`/
+원본 TabM·regime3 HMM 학습스크립트 — **전부 0개**.
+
+### 결론
+
+의존성 제거는 완전하고(5개 모듈만 로드, 원본 학습스크립트 참조 0), 결정 로직은 LONG/SHORT·
+veto·guard·TP/SL 숏서킷·전체 `process_bar()` 실행까지 포함해 전부 수치적으로 동일하다. 단
+구조적 diff가 아니었다면 놓쳤을 대시보드 진단 필드 누락 1건을 발견해 수정했다 — 트레이딩
+성능/PnL에는 영향 없는 문제였지만, "완전히 동일한 동작"이라는 주장을 정확하게 만들기 위해
+고쳤다.
 
 ## 별도로 남긴 발견(이번 범위 밖)
 

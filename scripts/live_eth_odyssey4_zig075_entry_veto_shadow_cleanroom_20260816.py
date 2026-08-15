@@ -397,6 +397,23 @@ def process_bar(
     state["last_detector_score"] = score
     state["last_detector_active"] = bool(detector_active)
     state["detector_bars_seen"] = int(state.get("detector_bars_seen", 0)) + 1
+
+    # Diagnostic-only: entry_decision() computes quality_score before thresholding (see
+    # odyssey_live_adapter.py _Component.entry_decision), but decide_entry()'s priority loop
+    # discards it for any component whose signal doesn't qualify. Read it directly here, every bar
+    # regardless of position/pending state, purely for dashboard display -- does not affect entry
+    #/exit/veto decisions, which still flow through adapter.decide_entry()/evaluate_exit_guarded
+    # unchanged. Regime3CurrentLiveFeatures.append() is a pure transform (returns a new frame,
+    # never mutates self) so calling it here in addition to decide_entry()'s own internal call is
+    # safe -- confirmed by reading trading_bot_modules/odyssey_regime3_live.py. Ported from
+    # live_eth_odyssey4_zig075_entry_veto_shadow_20260814.py (added there 2026-08-16 by a
+    # concurrent session, "feat: show live h48qual/zig075 quality scores on the Odyssey4 shadow
+    # dashboard") so this cleanroom script doesn't regress that dashboard feature.
+    regime3_frame = adapter._with_regime3(frame)
+    for alias in ("h48qual", "zig075"):
+        diag = adapter.components[alias].entry_decision(regime3_frame)
+        state[f"last_{alias}_quality_score"] = float(diag["quality_score"])
+        state[f"last_{alias}_quality_threshold"] = float(adapter.components[alias].cfg.quality_threshold)
     position = state.get("position")
 
     if position is not None and state.get("pending") is None:
