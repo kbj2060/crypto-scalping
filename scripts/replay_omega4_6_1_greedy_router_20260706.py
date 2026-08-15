@@ -87,12 +87,20 @@ def prepare_component(frame: pd.DataFrame, pred_csv: Path, cfg: dict, device: to
 @torch.no_grad()
 def greedy_replay(frame: pd.DataFrame, components: dict, *, fee: float, slip: float, cost_mult: float,
                   device: torch.device, trailing_activate_frac: float | None = None,
-                  trailing_trail_frac: float | None = None) -> tuple[dict, pd.DataFrame]:
+                  trailing_trail_frac: float | None = None,
+                  trailing_retain_frac: float | None = None) -> tuple[dict, pd.DataFrame]:
     """`trailing_*` added 2026-08-07: optional fixed-distance trailing stop carried over from the
     BTC gate-G1 result -- once favorable excursion reaches `activate * take_profit`, force an exit
     when profit falls `trail * |stop_loss|` below the peak. Checked after TP/SL and before the
     exit head, mirroring research_eth_omega461_exit_sweep_20260721.replay_exit_variant. Leaving
-    both at None reproduces this script's original behaviour exactly."""
+    both at None reproduces this script's original behaviour exactly.
+
+    `trailing_retain_frac` added 2026-08-15, mirrors replay_exit_variant's PROPORTIONAL giveback
+    rule (mutually exclusive with the fixed-distance `trailing_trail_frac`): once armed, exit once
+    profit falls to `retain_frac * peak MFE`. retain_frac=0.0 is exactly a breakeven-stop -- once a
+    trade reaches the arm threshold, never let it round-trip past entry."""
+    if trailing_trail_frac is not None and trailing_retain_frac is not None:
+        raise ValueError("pass either trailing_trail_frac (fixed distance) or trailing_retain_frac (proportional)")
     arrays = {c: pd.to_numeric(frame[c], errors="raise").to_numpy(dtype=np.float64) for c in ("open", "high", "low", "close")}
     n = len(frame)
     fee_eff, slip_eff = float(fee) * float(cost_mult), float(slip) * float(cost_mult)
@@ -106,7 +114,8 @@ def greedy_replay(frame: pd.DataFrame, components: dict, *, fee: float, slip: fl
     take_profit = stop_loss = 0.0
     mfe = mae = 0.0
     armed = False
-    trailing_enabled = trailing_activate_frac is not None and trailing_trail_frac is not None
+    trailing_enabled = trailing_activate_frac is not None and (
+        trailing_trail_frac is not None or trailing_retain_frac is not None)
     rows: list[dict] = []
     reasons: dict[str, int] = {}
 
@@ -128,8 +137,12 @@ def greedy_replay(frame: pd.DataFrame, components: dict, *, fee: float, slip: fl
             if not reason and trailing_enabled:
                 if (not armed) and take_profit > 0.0 and mfe >= float(trailing_activate_frac) * take_profit:
                     armed = True
-                if armed and mfe > 0.0 and move <= mfe - float(trailing_trail_frac) * abs(stop_loss):
-                    reason = "trailing_stop"
+                if armed and mfe > 0.0:
+                    if trailing_retain_frac is not None:
+                        if move <= float(trailing_retain_frac) * mfe:
+                            reason = "trailing_stop"
+                    elif move <= mfe - float(trailing_trail_frac) * abs(stop_loss):
+                        reason = "trailing_stop"
             if not reason:
                 hold = max(i - entry_i, 0)
                 giveback = (mfe - move) / max(abs(mfe), 1e-8) if mfe > 0.0 else 0.0
