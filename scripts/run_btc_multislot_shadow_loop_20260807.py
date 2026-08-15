@@ -137,6 +137,19 @@ async def cycle(fetcher, fe, swing, adapter, fee_eff, slip_eff, state, buffers) 
         new_eth, new_btc = await fetcher.fetch_latest_patch()
         eth = pd.concat([buffers["eth"], new_eth]).drop_duplicates("timestamp").tail(KEEP_BARS)
         btc = pd.concat([buffers["btc"], new_btc]).drop_duplicates("timestamp").tail(KEEP_BARS)
+
+    # Binance's kline endpoint includes the currently-forming (not yet closed) candle as the
+    # last row -- confirmed live via a direct API check on 2026-08-15 (a `limit=3` call returned
+    # `is_closed=False` for the newest row, `close_time` still in the future). Using it as-is
+    # made `last_bar` up to one full bar duration too new (the "no new closed bar yet" comment
+    # below assumed the opposite). Trim any trailing row(s) whose bar window hasn't fully
+    # elapsed yet, on both frames identically so eth/btc stay row-aligned for fe.process below.
+    _bar_delta = pd.Timedelta(fetcher.timeframe)
+    _now_utc = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    eth = eth[eth["timestamp"] + _bar_delta <= _now_utc].reset_index(drop=True)
+    btc = btc[btc["timestamp"] + _bar_delta <= _now_utc].reset_index(drop=True)
+    if len(eth) == 0:
+        return  # every fetched bar is still forming; wait for the next poll
     buffers["eth"], buffers["btc"] = eth, btc
 
     last_bar = str(eth["timestamp"].iloc[-1])
