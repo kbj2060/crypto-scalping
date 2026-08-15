@@ -561,6 +561,10 @@ def eth_odyssey4_shadow_payload() -> dict[str, Any]:
         "order_submission_supported": state.get("order_submission_supported", False),
         "h48qual_guard_active_bars": state.get("h48qual_guard_active_bars", 0),
         "zig075_short_veto_bars": state.get("zig075_short_veto_bars", 0),
+        "h48qual_quality_score": state.get("last_h48qual_quality_score"),
+        "h48qual_quality_threshold": state.get("last_h48qual_quality_threshold"),
+        "zig075_quality_score": state.get("last_zig075_quality_score"),
+        "zig075_quality_threshold": state.get("last_zig075_quality_threshold"),
     }
 
 

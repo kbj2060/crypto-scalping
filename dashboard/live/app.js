@@ -201,6 +201,13 @@ function fmtPctNoPlus(v, d = 2) {
   return `${Number(v || 0).toFixed(d)}%`;
 }
 
+function qualityText(score, threshold) {
+  const s = Number(score);
+  if (!Number.isFinite(s)) return "-";
+  const t = Number(threshold);
+  return Number.isFinite(t) ? `${s.toFixed(3)} / ${t.toFixed(2)}` : s.toFixed(3);
+}
+
 function rowTs(row) {
   const raw = row?.closed_at || row?.ts || row?.opened_at || "";
   const ms = Date.parse(raw);
@@ -1925,6 +1932,9 @@ function renderEthOdyssey4Shadow(payload) {
 
   setT("ethOdyssey4GuardBars", `${payload?.h48qual_guard_active_bars ?? 0}bar`);
   setT("ethOdyssey4VetoBars", `${payload?.zig075_short_veto_bars ?? 0}bar`);
+
+  setT("ethOdyssey4H48qualQuality", qualityText(payload?.h48qual_quality_score, payload?.h48qual_quality_threshold));
+  setT("ethOdyssey4Zig075Quality", qualityText(payload?.zig075_quality_score, payload?.zig075_quality_threshold));
 
   renderEthOdyssey4Position(payload);
   renderShadowCharts(payload, "ethOdyssey4PnlSvg", "ethOdyssey4EquitySvg");
