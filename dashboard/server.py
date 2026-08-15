@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -217,7 +217,13 @@ def utc_iso(value: Any) -> str | None:
     return text + "Z"
 
 
-def utc_age_minutes(value: Any) -> float | None:
+def utc_age_minutes(value: Any, *, offset_seconds: float = 0.0) -> float | None:
+    """`offset_seconds` shifts `value` forward before computing age -- use this to convert an
+    OHLCV bar's OPEN-time label (the raw kline convention, e.g. the last-bar timestamps this repo's
+    shadow scripts store) into its CLOSE time (open + bar duration) for a freshness/staleness
+    reading, since a bar is only actually usable/complete once it closes. Without this, "age" reads
+    a full bar duration older than the data actually is. Default 0.0 preserves every existing
+    caller's behavior exactly."""
     encoded = utc_iso(value)
     if encoded is None:
         return None
@@ -225,6 +231,8 @@ def utc_age_minutes(value: Any) -> float | None:
         timestamp = datetime.fromisoformat(encoded.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if offset_seconds:
+        timestamp = timestamp + timedelta(seconds=offset_seconds)
     return max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 60.0)
 
 
@@ -430,7 +438,7 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
     state = load_json(BTC_MULTISLOT_SHADOW_STATE_PATH) or {}
     slots = state.get("slots") if isinstance(state.get("slots"), list) else []
     last_bar = state.get("last_bar")
-    age_minutes = utc_age_minutes(last_bar)
+    age_minutes = utc_age_minutes(last_bar, offset_seconds=BTC_MULTISLOT_SHADOW_BAR_SECONDS)
     total_trades = 0
     cumulative_return_pct: float | None = None
     recent_trades: list[dict[str, Any]] = []
@@ -493,7 +501,7 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
 def eth_odyssey4_shadow_payload() -> dict[str, Any]:
     state = load_json(ETH_ODYSSEY4_SHADOW_STATE_PATH) or {}
     last_bar = state.get("last_processed_bar_ts")
-    age_minutes = utc_age_minutes(last_bar)
+    age_minutes = utc_age_minutes(last_bar, offset_seconds=ETH_ODYSSEY4_SHADOW_BAR_SECONDS)
     position = state.get("position") if isinstance(state.get("position"), dict) else None
     trades = parse_jsonl(ETH_ODYSSEY4_SHADOW_TRADES_PATH)
     total_trades = len(trades)
