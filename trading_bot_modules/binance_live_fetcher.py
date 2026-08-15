@@ -282,14 +282,50 @@ class BinanceLiveFetcher:
             if len(klines) < 1000: break
         return all_klines[-target_limit:]
 
+    async def _fetch_ancillary_series_paginated(self, method, base_params, target_limit, time_key, label):
+        all_rows = []
+        last_end_time = None
+        while len(all_rows) < target_limit:
+            params = dict(base_params)
+            params['limit'] = 500
+            if last_end_time is not None:
+                params['endTime'] = int(last_end_time) - 1
+            rows = await self._call_with_retry(
+                f"fetch_ancillary_paginated[{label}]",
+                lambda: method(params),
+            )
+            if not rows: break
+            all_rows = rows + all_rows
+            first_ts = rows[0].get(time_key)
+            if first_ts is None: break
+            last_end_time = int(first_ts)
+            if len(rows) < 500: break
+        return all_rows[-target_limit:]
+
     async def fetch_ancillary_data(self, limit=500):
+        if limit <= 500:
+            tasks = [
+                self.exchange.fapiDataGetOpenInterestHist({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
+                self.exchange.fapiDataGetTopLongShortAccountRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
+                self.exchange.fapiDataGetTopLongShortPositionRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
+                self.exchange.fapiDataGetGlobalLongShortAccountRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
+                self.exchange.fapiDataGetTakerlongshortRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
+                self.exchange.fapiPublicGetFundingRate({'symbol': self.symbol, 'limit': limit})
+            ]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+        # These /futures/data/* endpoints (and fundingRate) cap at 500 rows per call, same as
+        # fapiPublicGetKlines caps at 1000 -- page backward the same way fetch_klines_raw does so
+        # ancillary history can reach the same depth eth_klines/btc_klines were fetched to,
+        # instead of always being capped at 500 regardless of the requested limit.
+        period_params = {'symbol': self.symbol, 'period': self.ancillary_period}
+        funding_params = {'symbol': self.symbol}
         tasks = [
-            self.exchange.fapiDataGetOpenInterestHist({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
-            self.exchange.fapiDataGetTopLongShortAccountRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
-            self.exchange.fapiDataGetTopLongShortPositionRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
-            self.exchange.fapiDataGetGlobalLongShortAccountRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
-            self.exchange.fapiDataGetTakerlongshortRatio({'symbol': self.symbol, 'period': self.ancillary_period, 'limit': limit}),
-            self.exchange.fapiPublicGetFundingRate({'symbol': self.symbol, 'limit': limit})
+            self._fetch_ancillary_series_paginated(self.exchange.fapiDataGetOpenInterestHist, period_params, limit, 'timestamp', 'openInterestHist'),
+            self._fetch_ancillary_series_paginated(self.exchange.fapiDataGetTopLongShortAccountRatio, period_params, limit, 'timestamp', 'topLongShortAccountRatio'),
+            self._fetch_ancillary_series_paginated(self.exchange.fapiDataGetTopLongShortPositionRatio, period_params, limit, 'timestamp', 'topLongShortPositionRatio'),
+            self._fetch_ancillary_series_paginated(self.exchange.fapiDataGetGlobalLongShortAccountRatio, period_params, limit, 'timestamp', 'globalLongShortAccountRatio'),
+            self._fetch_ancillary_series_paginated(self.exchange.fapiDataGetTakerlongshortRatio, period_params, limit, 'timestamp', 'takerlongshortRatio'),
+            self._fetch_ancillary_series_paginated(self.exchange.fapiPublicGetFundingRate, funding_params, limit, 'fundingTime', 'fundingRate'),
         ]
         return await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -370,7 +406,7 @@ class BinanceLiveFetcher:
     async def fetch_initial_data(self):
         eth_klines = await self.fetch_klines_raw(self.symbol, self.limit)
         btc_klines = await self.fetch_klines_raw('BTCUSDT', self.limit)
-        ancillary = await self.fetch_ancillary_data(500)
+        ancillary = await self.fetch_ancillary_data(self.limit)
         return self._process_to_df(eth_klines, btc_klines, ancillary)
 
     async def fetch_latest_patch(self):
