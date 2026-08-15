@@ -25,10 +25,11 @@ flowchart TD
     H2 --> H3["L3a · h48qual 진입 게이트<br/>action=argmax(direction)<br/>quality[action] ≥ 0.50"]
     Z2 --> Z3["L3b · zig075 진입 게이트<br/>action=argmax(direction)<br/>quality[action] ≥ 0.75"]
     Z3 --> Z4["L4 · Odyssey4 신규<br/>SHORT & 탐지기 ON → 진입 스킵<br/>(zig075 SHORT만, 신규 자유변수 0개)"]
-    H3 --> L5["L5 · 우선순위 중재<br/>PRIORITY=(h48qual, zig075) · 단일 공유 슬롯"]
-    Z4 --> L5
+    H3 --> L4b["L4.5 · Duration OU-halflife 리스크 게이트<br/>funding_roc_12 AR(1) half-life ≤ 0.005417 → notional/leverage=0<br/>(양쪽 컴포넌트 공통, BTC Omega4.6.1과 동일 임계값)"]
+    Z4 --> L4b
+    L4b --> L5["L5 · 우선순위 중재<br/>PRIORITY=(h48qual, zig075) · 단일 공유 슬롯"]
     L5 --> L6["L6 · TP/SL 산출<br/>ATR 기반, floor 0.075/0.040에서 관측상 포화"]
-    L6 --> L7["L7 · 사이징 사이드카<br/>CatBoost risk sidecar → margin_fraction/leverage<br/>SCALE_MAP·LEVERAGE_CAP=5.0·NOTIONAL_CAP=1.8"]
+    L6 --> L7["L7 · 사이징 사이드카<br/>HistGradientBoostingRegressor risk sidecar(selection_objective=log_risk) → margin_fraction/leverage<br/>SCALE_MAP·LEVERAGE_CAP=5.0·NOTIONAL_CAP=1.8"]
     L7 --> L8open["L8 · 포지션 오픈"]
     L8open --> L9["L9 · 보유 중 매 bar 체크<br/>① TP/SL ② (h48qual만) Odyssey3 레짐 exit 가드 ③ exit_head ≥ 0.95"]
     L9 -->|재진입 대기| L8open
@@ -87,6 +88,12 @@ side             = +1 (LONG) / -1 (SHORT) / 0 (CASH)
 - 왜 이 계층이 성공했는가: 모델 헤드를 건드리지 않고, 모델 내부 신호(quality/방향확신도)로 부분집합을 고르지도 않는다(그 축은 Q3 승자·패자를 분리하지 못함이 이미 확인됨). 대신 외부 causal 레짐 신호로 숏 베타 노출 자체를 관리한다.
 - 결과: 2025-Q3(참고 티어) `with_gate` −15.86% → **+20.17%**(부호 반전), MDD −44.37% → −19.72%. 판정 3창(VAL/OOS-Q1/OOS-Q2)은 무손상(OOS 두 창은 발동 0건). 전체 근거: `docs/experiments/eth_omega461_zig075_short_entry_veto_sustained_uptrend_20260814.md`.
 
+### L4.5 — Duration OU-halflife 리스크 게이트 (2026-08-15 문서 정정으로 추가)
+
+- `trading_bot_modules/omega4_6_1_live.py`에 `DURATION_FEATURE="ou_halflife"`, `DURATION_THRESHOLD=0.005417`로 하드코딩돼 실제로 라이브 경로에 걸려 있다 — h48qual/zig075 공통, 컴포넌트 구분 없음.
+- 메커니즘: `funding_roc_12`의 5일 rolling AR(1)에서 뽑은 평균회귀 half-life가 임계값 이하면 그 bar의 진입을 완전 스킵(notional=leverage=0). 원 출처는 BTC `docs/model_contracts/omega4_6_1_duration_ou_halflife_risk_gate_20260630_contract.md`(BTC에서 VAL +175.86%/OOS +72.59%로 conditional_upgrade_candidate) — Odyssey는 이걸 그대로 재사용 중이었다.
+- **이 레이어는 2026-08-15 이전 버전의 이 문서 다이어그램에서 누락돼 있었다** — Alpha/Omega 전체 아키텍처를 교차 조사하는 과정에서 `trading_bot_modules/omega4_6_1_live.py`와 라이브 sidecar pickle을 직접 읽어 발견·검증했다. Odyssey1~4 "세대별 계보"에 이 게이트를 추가한 세대가 없다는 뜻이 아니라, 이 문서가 Omega4.6.1에서 상속된 기존 레이어를 그리지 않았다는 뜻이다. 별도 포트폴리오 notional cap(`FINAL_GOVERNOR_OMEGA4_6_1_ETH_PORTFOLIO_CAP_ENABLE`)도 존재하지만 기본값 OFF.
+
 ### L5 — 우선순위 중재 / 단일 공유 슬롯
 
 - `PRIORITY = ("h48qual", "zig075")` — flat 상태에서 h48qual이 먼저 신호를 내면 그 bar엔 zig075를 아예 조회하지 않는다(zig075는 h48qual이 `side==0`을 반환한 bar에서만 기회를 얻음).
@@ -103,7 +110,7 @@ sl = clip(max(0.040, atr_pct * 6),  0, 0.12)
 
 ### L7 — 사이징 사이드카
 
-- CatBoost 기반 risk sidecar가 `margin_fraction`, `leverage`를 산출 → `long_scale`/`short_scale`, `long_leverage_scale`/`short_leverage_scale`로 방향별 보정.
+- `HistGradientBoostingRegressor` 기반 risk sidecar(`scripts/train_eval_omega4_2_risk_sidecar_20260622.py`, BTC Omega4.2와 동일 클래스/코드)가 `margin_fraction`, `leverage`를 산출 → `long_scale`/`short_scale`, `long_leverage_scale`/`short_leverage_scale`로 방향별 보정. **CatBoost가 아니다** — 라이브 sidecar pickle 2개(h48qual q050, zig075 q075) 모두 직접 열어 `model_kind`가 HGB이고 `selection_objective="log_risk"`(단순 PnL이 아니라 `log_growth - tail_penalty*tail_excess - liquidation_penalty*liquidation_excess`)임을 2026-08-15 확인했다 — 이전 버전 문서의 오기.
 - 포트폴리오 캡: `SCALE_MAP["zig075_S"]=2.478`(레버리지 배율) → `LEVERAGE_CAP=5.0`, `NOTIONAL_CAP=1.8`로 클립.
 - 사이징은 방향(side)을 절대 뒤집거나 거부하지 않는다 — `notional<=0`으로 무효화만 가능.
 
@@ -170,6 +177,15 @@ flowchart LR
 
 ## 관련 문서
 
+- 2026-08-16 업데이트: 배포 중인 오디세이4 새도우 스크립트가 `omega4_6_1_live.py`/
+  `runtime_config.py`(SOL/BTC/dead-sidecar/무관한 Omega5 시스템까지 딸려오던 공유 프로덕션
+  스택) 대신 Odyssey 전용 클린룸 모듈(`trading_bot_modules/odyssey_tabm_core.py`/
+  `.odyssey_regime3_live.py`/`.odyssey_live_adapter.py`)로 교체됐다 — 이 문서가 설명하는 L0~L10
+  파이프라인/판정 로직 자체는 동일하며(실제 아티팩트+실제 데이터로 패리티 검증 완료), 코드
+  위치만 바뀌었다: `docs/experiments/eth_odyssey_live_cleanroom_dependency_rewrite_20260816.md`
+- 2026-08-15 정정 이력: L4.5(Duration OU-halflife 게이트) 누락 추가, L7 사이드카 모델클래스 오기
+  정정(CatBoost→HGB) — 저장소 전체 아키텍처 교차조사 중 발견·검증:
+  `docs/experiments/eth_odyssey_internal_architecture_zoo_cross_pollination_survey_20260815.md`
 - 계약: `docs/model_contracts/odyssey4_eth_entry_veto_baseline_contract_20260814.md`
 - 리소스: `docs/model_contracts/odyssey4_eth_entry_veto_baseline_data_resources_20260814.md`
 - 실험 전체 과정: `docs/experiments/eth_omega461_zig075_short_entry_veto_sustained_uptrend_20260814.md`
