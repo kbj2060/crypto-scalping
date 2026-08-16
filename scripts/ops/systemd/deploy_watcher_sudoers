@@ -18,4 +18,5 @@ llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart btc-multislot-shadow.serv
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart tau1-shadow.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart prometheus-exporter.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart eth-jmlam4-shadow.service
+llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl restart eth-odyssey4-shadow.service
 llewyn ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
