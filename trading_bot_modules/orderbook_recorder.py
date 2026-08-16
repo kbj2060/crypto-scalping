@@ -152,6 +152,8 @@ class OrderBookRecorder:
             row[f"imbalance_{n}"] = _imbalance(b_notional, a_notional)
         if context:
             row["context"] = dict(context)
+        row["bids_json"] = json.dumps(bids, default=_json_default)
+        row["asks_json"] = json.dumps(asks, default=_json_default)
         return row
 
     def _append_row(self, row: dict[str, Any]) -> None:
@@ -210,14 +212,31 @@ class OrderBookRecorder:
                     ask_notional_20 DOUBLE,
                     imbalance_20 DOUBLE,
                     context_json VARCHAR,
-                    schema_version VARCHAR
+                    schema_version VARCHAR,
+                    bids_json VARCHAR,
+                    asks_json VARCHAR
                 )
                 """
             )
+            # WS-E E1 migration: tables created before 2026-08-17 lack bids_json/asks_json.
+            # ALTER TABLE ADD COLUMN IF NOT EXISTS backfills them as NULL on existing rows.
+            existing_cols = {c[1] for c in con.execute(f"PRAGMA table_info('{self.table}')").fetchall()}
+            for col in ("bids_json", "asks_json"):
+                if col not in existing_cols:
+                    con.execute(f"ALTER TABLE {self.table} ADD COLUMN {col} VARCHAR")
             con.execute(
                 f"""
-                INSERT INTO {self.table} VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                INSERT INTO {self.table} (
+                    recorded_at_kst, timestamp_kst, exchange_timestamp, exchange_datetime, symbol,
+                    best_bid, best_ask, mid, spread, spread_bps, microprice, microprice_edge_bps,
+                    levels_bid, levels_ask,
+                    bid_qty_1, ask_qty_1, bid_notional_1, ask_notional_1, imbalance_1,
+                    bid_qty_5, ask_qty_5, bid_notional_5, ask_notional_5, imbalance_5,
+                    bid_qty_10, ask_qty_10, bid_notional_10, ask_notional_10, imbalance_10,
+                    bid_qty_20, ask_qty_20, bid_notional_20, ask_notional_20, imbalance_20,
+                    context_json, schema_version, bids_json, asks_json
+                ) VALUES (
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 [
@@ -257,6 +276,8 @@ class OrderBookRecorder:
                     _safe_float(row.get("imbalance_20")),
                     json.dumps(row.get("context", {}) or {}, ensure_ascii=False, default=_json_default),
                     str(row.get("schema_version", "orderbook_snapshot.v1")),
+                    str(row.get("bids_json", "[]")),
+                    str(row.get("asks_json", "[]")),
                 ],
             )
         finally:

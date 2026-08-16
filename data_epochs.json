@@ -1,0 +1,13 @@
+{
+  "_purpose": "Tracks when newly-added data columns/tables started being populated live. New columns cannot be backfilled -- any research using a field listed here must not require it before its epoch start. See docs/test_designs_duckdb_live_20260719/ws_e_data_flywheel.md (design) and docs/model_contracts/eth_candidate_lob_microstructure_contract_20260817.md (production wiring decision).",
+  "raw_l2_levels": {
+    "description": "orderbook_decision_snapshots(+_btc/_sol).bids_json/asks_json -- top-20-level raw [price, qty] arrays, written alongside the pre-existing depth/imbalance summary columns on the same decision-conditional cadence (not continuous). Round-trip self-validated (WS-E T-E1) before production wiring.",
+    "eth": {"table": "orderbook_decision_snapshots", "epoch_start_utc": "PENDING_FIRST_LIVE_WRITE"},
+    "btc": {"table": "orderbook_decision_snapshots_btc", "epoch_start_utc": "PENDING_FIRST_LIVE_WRITE"},
+    "sol": {"table": "orderbook_decision_snapshots_sol", "epoch_start_utc": "PENDING_FIRST_LIVE_WRITE"},
+    "known_limitations": [
+      "Decision-conditional sampling, not continuous -- WS-A already documented this biases toward active/decision periods. This is the E1 slice of the WS-E design only; the E2 continuous-10s-snapshot table (orderbook_periodic_snapshots) was NOT wired -- see contract doc for why (needs its own bot-latency regression test).",
+      "Pre-epoch rows in these tables have NULL bids_json/asks_json -- do not treat NULL as an empty book, it means 'not collected yet'."
+    ]
+  }
+}
