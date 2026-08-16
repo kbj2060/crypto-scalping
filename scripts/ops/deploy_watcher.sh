@@ -145,9 +145,22 @@ else
   changed_files="$(git diff --name-only "$LAST_DEPLOYED_SHA" "$REMOTE_SHA")"
 fi
 affects() { echo "$changed_files" | grep -qE "$1"; }
+# trading_bot_modules/odyssey_* (odyssey_tabm_core.py / odyssey_regime3_live.py /
+# odyssey_live_adapter.py, added 2026-08-16) is confirmed NOT imported by trading_bot.py or by
+# anything trading_bot.py imports -- it's a standalone dependency chain for the Odyssey4 shadow
+# script only (verified via sys.modules audit + forced-import-blocking tests, see
+# docs/experiments/eth_odyssey_live_cleanroom_dependency_rewrite_20260816.md). The plain
+# 'trading_bot_modules/' prefix match below would otherwise restart the real trading-bot.service
+# on every odyssey_* change, which actually happened twice on 2026-08-16 (harmless -- came back
+# healthy both times, deploy_watcher's own health check didn't roll back -- but still an
+# unnecessary restart of a live-adjacent service for files it never loads). Exclude just that
+# prefix; anything else under trading_bot_modules/ still restarts trading-bot.service by default.
+trading_bot_modules_relevant_change() {
+  echo "$changed_files" | grep -E '^trading_bot_modules/' | grep -qvE '^trading_bot_modules/odyssey_'
+}
 
 declare -A UNITS_TO_RESTART=()
-affects '^trading_bot\.py$|^trading_bot_modules/' && UNITS_TO_RESTART[trading-bot]=1
+{ affects '^trading_bot\.py$' || trading_bot_modules_relevant_change; } && UNITS_TO_RESTART[trading-bot]=1
 affects '^scripts/ops_watchdog\.py$' && UNITS_TO_RESTART[ops-watchdog]=1
 affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-exporter]=1
 affects '^scripts/run_btc_multislot_shadow_loop_20260807\.py$' && UNITS_TO_RESTART[btc-multislot-shadow]=1
