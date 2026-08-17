@@ -52,6 +52,7 @@ class TailRiskInterceptor:
 
     def __init__(self, symbol: str = "ethusdt"):
         self.symbol = symbol.lower()
+        self._table = _TABLE if self.symbol == "ethusdt" else f"{_TABLE}_{self.symbol.replace('usdt', '')}"
         self._running = False
 
         # ── 태스크 핸들 ───────────────────────────────────────────────
@@ -115,7 +116,7 @@ class TailRiskInterceptor:
         os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
         con = duckdb.connect(_DB_PATH)
         con.execute(f"""
-            CREATE TABLE IF NOT EXISTS {_TABLE} (
+            CREATE TABLE IF NOT EXISTS {self._table} (
                 ts TIMESTAMPTZ,
                 long_usd_1m DOUBLE,
                 short_usd_1m DOUBLE,
@@ -128,7 +129,7 @@ class TailRiskInterceptor:
                 shadow_risk_bucket VARCHAR
             )
         """)
-        existing_cols = {str(r[1]) for r in con.execute(f"PRAGMA table_info('{_TABLE}')").fetchall()}
+        existing_cols = {str(r[1]) for r in con.execute(f"PRAGMA table_info('{self._table}')").fetchall()}
         extra_cols = [
             ("ws_connected", "BOOLEAN"),
             ("ws_stale", "BOOLEAN"),
@@ -139,11 +140,11 @@ class TailRiskInterceptor:
         ]
         for col_name, col_type in extra_cols:
             if col_name not in existing_cols:
-                con.execute(f"ALTER TABLE {_TABLE} ADD COLUMN {col_name} {col_type}")
+                con.execute(f"ALTER TABLE {self._table} ADD COLUMN {col_name} {col_type}")
         # 콜드 스타트 방지용 데이터드
         try:
             rows = con.execute(f"""
-                SELECT long_usd_1m, short_usd_1m FROM {_TABLE}
+                SELECT long_usd_1m, short_usd_1m FROM {self._table}
                 WHERE ts >= now() - INTERVAL '{self.window_size} minutes'
                 ORDER BY ts ASC
             """).fetchall()
@@ -190,7 +191,7 @@ class TailRiskInterceptor:
             con = duckdb.connect(_DB_PATH)
             con.execute(
                 f"""
-                INSERT INTO {_TABLE} (
+                INSERT INTO {self._table} (
                     ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, mu_short, sigma_short,
                     shadow_aftershock_prob, shadow_decay_half_life, shadow_risk_bucket,
                     ws_connected, ws_stale, ws_age_sec, liq_event_count_1m, valid_liq_stream, schema_version

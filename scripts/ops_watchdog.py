@@ -11,6 +11,8 @@ import sqlite3
 import subprocess
 import time
 import urllib.request
+
+import duckdb
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -116,6 +118,8 @@ def recommended_action(component: str) -> str:
         return "scripts/ops/triage.sh; df -h ."
     if component == "btc_multislot_shadow_process":
         return "scripts/ops/botctl.sh status; tail -n 50 logs/supervisor/btc_multislot_shadow_$(date +%Y%m%d).log"
+    if component.startswith("duckdb_"):
+        return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -u eth-odyssey4-shadow.service -n 100 --no-pager"
     return "scripts/ops/triage.sh"
 
 
@@ -303,6 +307,35 @@ def check_data_sources() -> Check:
     })
 
 
+def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_column: str,
+                                  warn_minutes: float, critical_minutes: float) -> Check:
+    """Freshness of a specific DuckDB table's latest row -- catches a live-but-silently-not-writing
+    collector that a process-liveness check (check_process) cannot see. Read-only connection so this
+    can never contend with, or corrupt, whatever process is writing the same file."""
+    if not db_path.is_file():
+        return Check(component, "BLOCKED", "duckdb file is missing", {"path": str(db_path)})
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+        try:
+            max_ts = con.execute(f"select max(cast({ts_column} as timestamp)) from {table}").fetchone()[0]
+        finally:
+            con.close()
+    except duckdb.Error as exc:
+        return Check(component, "BLOCKED", "duckdb table cannot be read", {
+            "path": str(db_path), "table": table, "error": f"{type(exc).__name__}: {exc}",
+        })
+    if max_ts is None:
+        return Check(component, "BLOCKED", "duckdb table has no rows", {"path": str(db_path), "table": table})
+    # every timestamp column checked here is KST wall time whether or not duckdb attaches
+    # tzinfo (VARCHAR-cast columns come back naive but are KST strings at the source) --
+    # age_minutes()/parse_kst() already treats a naive value as KST, which is correct here.
+    age = age_minutes(max_ts)
+    return Check(component, stale_status(age, warn_minutes, critical_minutes), "duckdb table freshness", {
+        "path": str(db_path), "table": table, "latest_ts": str(max_ts), "age_minutes": age,
+        "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
+    })
+
+
 def check_runtime_resources() -> Check:
     usage = shutil.disk_usage(ROOT)
     free_gib = usage.free / (1024 ** 3)
@@ -443,6 +476,8 @@ def run_once(dry_run: bool) -> list[Check]:
     OUT.mkdir(parents=True, exist_ok=True)
     state_path, db_path = OUT / "state.json", OUT / "incidents.sqlite"
     init_db(db_path)
+    micro_db = LIVE / "microstructure.duckdb"
+    tail_db = LIVE / "tail_risk.duckdb"
     checks = [
         check_process("trading_bot_process", "trading_bot.py"),
         # Shadow-only live-forward A/B loop (2026-08-07) with no order submission --
@@ -452,6 +487,16 @@ def run_once(dry_run: bool) -> list[Check]:
         check_snapshot(), check_heartbeat(), check_pipeline(), check_pipeline_contract(),
         check_data_sources(), check_dashboard(), check_execution_contract(), check_runtime_resources(),
         check_watchdog_storage(),
+        # DuckDB write-freshness (2026-08-17): the checks above watch process liveness and
+        # dashboard-reported connectivity flags, neither of which catches a process that stays
+        # alive but silently stops persisting rows -- exactly the failure mode found in this
+        # session's dev-collector audit. These read the tables directly instead.
+        check_duckdb_table_freshness("duckdb_orderbook_l2_eth", micro_db, "orderbook_decision_snapshots", "timestamp_kst", 15, 30),
+        check_duckdb_table_freshness("duckdb_orderbook_l2_btc", micro_db, "orderbook_decision_snapshots_btc", "timestamp_kst", 15, 30),
+        check_duckdb_table_freshness("duckdb_orderbook_l2_sol", micro_db, "orderbook_decision_snapshots_sol", "timestamp_kst", 15, 30),
+        check_duckdb_table_freshness("duckdb_microstructure_1m_btc", micro_db, "microstructure_1m_btc", "ts", 5, 10),
+        check_duckdb_table_freshness("duckdb_microstructure_1m_sol", micro_db, "microstructure_1m_sol", "ts", 5, 10),
+        check_duckdb_table_freshness("duckdb_tail_risk_1m_eth", tail_db, "tail_risk_1m", "ts", 5, 10),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})

@@ -21,17 +21,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("duckdb_persist_worker")
 
-BOT_SYMBOL = os.getenv("BOT_SYMBOL", "ETHUSDT").strip().lower()
+_DEFAULT_SYMBOLS = "ETHUSDT,BTCUSDT,SOLUSDT"
+BOT_SYMBOLS = [s.strip().lower() for s in os.getenv("BOT_SYMBOLS", _DEFAULT_SYMBOLS).split(",") if s.strip()]
 
 
 async def main() -> None:
-    logger.info("starting duckdb persistence worker (symbol=%s)", BOT_SYMBOL.upper())
+    logger.info("starting duckdb persistence worker (symbols=%s)", ",".join(s.upper() for s in BOT_SYMBOLS))
 
-    ms_scanner = MicrostructureScanner(symbol=BOT_SYMBOL)
-    tr_interceptor = TailRiskInterceptor(symbol=BOT_SYMBOL)
+    ms_scanners = [MicrostructureScanner(symbol=sym) for sym in BOT_SYMBOLS]
+    tr_interceptors = [TailRiskInterceptor(symbol=sym) for sym in BOT_SYMBOLS]
 
-    ms_scanner.start()
-    tr_interceptor.start()
+    for scanner in ms_scanners:
+        scanner.start()
+    for interceptor in tr_interceptors:
+        interceptor.start()
 
     try:
         while True:
@@ -39,8 +42,10 @@ async def main() -> None:
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.info("shutdown signal received")
     finally:
-        ms_scanner.stop()
-        tr_interceptor.stop()
+        for scanner in ms_scanners:
+            scanner.stop()
+        for interceptor in tr_interceptors:
+            interceptor.stop()
         logger.info("duckdb persistence worker stopped")
 
 
