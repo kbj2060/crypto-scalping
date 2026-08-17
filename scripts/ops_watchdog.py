@@ -310,19 +310,31 @@ def check_data_sources() -> Check:
 def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_column: str,
                                   warn_minutes: float, critical_minutes: float) -> Check:
     """Freshness of a specific DuckDB table's latest row -- catches a live-but-silently-not-writing
-    collector that a process-liveness check (check_process) cannot see. Read-only connection so this
-    can never contend with, or corrupt, whatever process is writing the same file."""
+    collector that a process-liveness check (check_process) cannot see. Read-only, so this can
+    never corrupt whatever process is writing the same file -- but DuckDB briefly refuses a new
+    read-only connection while a writer holds its own connection open across an insert (observed
+    2026-08-17: trading_bot.py's 5-minute decision cycle), so a lock-conflict IOException gets a
+    few short retries before being treated as a real failure."""
     if not db_path.is_file():
         return Check(component, "BLOCKED", "duckdb file is missing", {"path": str(db_path)})
-    try:
-        con = duckdb.connect(str(db_path), read_only=True)
+    last_error: duckdb.Error | None = None
+    for attempt, delay in enumerate((0.0, 0.4, 0.8, 1.6)):
+        if delay:
+            time.sleep(delay)
         try:
-            max_ts = con.execute(f"select max(cast({ts_column} as timestamp)) from {table}").fetchone()[0]
-        finally:
-            con.close()
-    except duckdb.Error as exc:
+            con = duckdb.connect(str(db_path), read_only=True)
+            try:
+                max_ts = con.execute(f"select max(cast({ts_column} as timestamp)) from {table}").fetchone()[0]
+            finally:
+                con.close()
+            last_error = None
+            break
+        except duckdb.Error as exc:
+            last_error = exc
+    if last_error is not None:
         return Check(component, "BLOCKED", "duckdb table cannot be read", {
-            "path": str(db_path), "table": table, "error": f"{type(exc).__name__}: {exc}",
+            "path": str(db_path), "table": table, "error": f"{type(last_error).__name__}: {last_error}",
+            "attempts": attempt + 1,
         })
     if max_ts is None:
         return Check(component, "BLOCKED", "duckdb table has no rows", {"path": str(db_path), "table": table})
