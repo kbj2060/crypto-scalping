@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # regardless of severity. Explicit path so it doesn't depend on invocation cwd.
 load_dotenv(ROOT / ".env")
 LIVE = ROOT / "data" / "live"
+RESEARCH = ROOT / "data" / "research"
 OUT = LIVE / "ops_watchdog"
 HISTORY = OUT / "history"
 KST = ZoneInfo("Asia/Seoul")
@@ -490,6 +491,9 @@ def run_once(dry_run: bool) -> list[Check]:
     init_db(db_path)
     micro_db = LIVE / "microstructure.duckdb"
     tail_db = LIVE / "tail_risk.duckdb"
+    tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
+    gex_db = LIVE / "deribit_gex.duckdb"
+    altdata_db = RESEARCH / "altdata.duckdb"
     checks = [
         check_process("trading_bot_process", "trading_bot.py"),
         # Shadow-only live-forward A/B loop (2026-08-07) with no order submission --
@@ -509,6 +513,16 @@ def run_once(dry_run: bool) -> list[Check]:
         check_duckdb_table_freshness("duckdb_microstructure_1m_btc", micro_db, "microstructure_1m_btc", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_microstructure_1m_sol", micro_db, "microstructure_1m_sol", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_tail_risk_1m_eth", tail_db, "tail_risk_1m", "ts", 5, 10),
+        # 2026-08-17: BTC/SOL liquidation tracking, dev-to-server migration -- deliberately its
+        # own duckdb file, not data/live/tail_risk.duckdb (see supervisor_tail_risk_btc_sol_worker.sh
+        # for why: a shared-file writer caused two real trading_bot.py write failures on first try).
+        check_duckdb_table_freshness("duckdb_tail_risk_1m_btc", tail_btc_sol_db, "tail_risk_1m_btc", "ts", 5, 10),
+        check_duckdb_table_freshness("duckdb_tail_risk_1m_sol", tail_btc_sol_db, "tail_risk_1m_sol", "ts", 5, 10),
+        # hourly cron; one missed run is normal, two in a row is not.
+        check_duckdb_table_freshness("duckdb_deribit_gex", gex_db, "gex_summary", "recorded_at_utc", 90, 150),
+        # daily cron (0 1 * * *); warn/critical give ~1 and ~2 missed days of slack.
+        check_duckdb_table_freshness("duckdb_altdata_fear_greed", altdata_db, "fear_greed_index", "recorded_at_utc", 1800, 2880),
+        check_duckdb_table_freshness("duckdb_altdata_funding_spread", altdata_db, "cross_exchange_funding_spread", "recorded_at_utc", 1800, 2880),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})

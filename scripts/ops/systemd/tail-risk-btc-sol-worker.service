@@ -1,0 +1,25 @@
+[Unit]
+Description=crypto-scalping BTC/SOL liquidation (tail-risk) collector -- server-side, writes its own tail_risk_btc_sol.duckdb (not data/live/tail_risk.duckdb, which trading_bot.py's own TailRiskInterceptor writes for ETH -- concurrent DuckDB writers on the shared file caused real write failures there on first deploy, 2026-08-17)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+Environment=BOT_SYMBOLS=BTCUSDT,SOLUSDT
+Environment=COLLECT_MICROSTRUCTURE=false
+Environment=COLLECT_TAIL_RISK=true
+Environment=QUANT_TAIL_DB_PATH=/home/llewyn/crypto-scalping/data/live/tail_risk_btc_sol.duckdb
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/duckdb_persist_worker.py
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tail_risk_btc_sol_worker
+
+[Install]
+WantedBy=multi-user.target
