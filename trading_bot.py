@@ -12458,9 +12458,21 @@ async def main(use_local=False):
                     else:
                         # See _manage_omega4_6_1_position: TP/SL barriers use the completed bar's
                         # high/low so a wick that touches the barrier isn't missed just because the
-                        # bar's close fell back short of it.
-                        bar_high = float(processed["high"].iloc[-1])
-                        bar_low = float(processed["low"].iloc[-1])
+                        # bar's close fell back short of it. Scanning only the single latest bar isn't
+                        # enough: whenever one fetch catches up by more than one newly-completed bar
+                        # (confirmed live 2026-08-20 right after a restart -- two cycles 13s apart both
+                        # landed on the same bar, proving the loop can run faster than one bar/cycle),
+                        # an earlier bar's extreme would never be the "latest" bar at any cycle and its
+                        # touch would be silently lost. Scan every bar since the last time this position
+                        # was checked instead of just processed.iloc[-1]. See memory
+                        # btc_omega461_shadow_tp_barrier_single_bar_miss_20260820.
+                        last_checked_ts = active.get("last_checked_bar_ts")
+                        unseen = processed[processed["timestamp"] > pd.Timestamp(last_checked_ts)] if last_checked_ts else None
+                        if unseen is None or len(unseen) == 0:
+                            unseen = processed.tail(1)
+                        bar_high = float(unseen["high"].max())
+                        bar_low = float(unseen["low"].min())
+                        active["last_checked_bar_ts"] = str(processed["timestamp"].iloc[-1])
                         bar_high_move = (bar_high - entry) / entry if side > 0 else (entry - bar_low) / entry
                         bar_low_move = (bar_low - entry) / entry if side > 0 else (entry - bar_high) / entry
                         should_exit, reason_key, exit_prob = ctx["adapter"].evaluate_exit(
@@ -12477,6 +12489,30 @@ async def main(use_local=False):
                             stop_loss=float(active.get("stop_loss", 0.0) or 0.0),
                             bar_high_move=bar_high_move,
                             bar_low_move=bar_low_move,
+                        )
+                        # 2026-08-20: per-cycle TP/SL barrier heartbeat -- the HOLD path previously
+                        # logged nothing, so a wick that touched the barrier but wasn't acted on
+                        # left no evidence of whether this cycle even saw it (found while
+                        # investigating a BTC shadow position that held past its take-profit price).
+                        logger.info(
+                            "SYSTEM omega4_6_1_shadow asset=%s bar_ts=%s side=%s entry=%.6f bar_high=%.6f bar_low=%.6f "
+                            "bar_high_move=%.6f bar_low_move=%.6f take_profit=%.6f stop_loss=%.6f hold_bars=%d "
+                            "unseen_bars=%d exit=%s exit_reason=%s exit_prob=%.4f",
+                            asset_key,
+                            str(timestamp_kst),
+                            "LONG" if side > 0 else "SHORT",
+                            entry,
+                            bar_high,
+                            bar_low,
+                            bar_high_move,
+                            bar_low_move,
+                            float(active.get("take_profit", 0.0) or 0.0),
+                            float(active.get("stop_loss", 0.0) or 0.0),
+                            int(router.hold_count or 0),
+                            int(len(unseen)),
+                            bool(should_exit),
+                            str(reason_key),
+                            float(exit_prob),
                         )
                     if should_exit:
                         action = 0
@@ -12554,6 +12590,7 @@ async def main(use_local=False):
                                 "source": source,
                                 "reason": reason,
                                 "entry_price": price,
+                                "last_checked_bar_ts": str(processed["timestamp"].iloc[-1]),
                             }
                         else:
                             reason = "omega4_6_1_shadow_portfolio_risk_blocked"
