@@ -39,6 +39,13 @@ LABEL_CONFIGS = {
         "tight_bb_max": 0.012,
         "prefix_stem": "regime3_current_sensitive",
     },
+    "balancedish_adx16_slope03_bb006": {
+        "trend_adx_min": 16.0,
+        "weak_adx_max": 12.0,
+        "slope_min": 0.00003,
+        "tight_bb_max": 0.006,
+        "prefix_stem": "regime3_current_sensitive_v2",
+    },
 }
 DEFAULT_TRAIN_2024 = ROOT / "tmp/causal_regen_20260516/funding_clean_splits_20260528/training_features_2024.csv"
 DEFAULT_TRANSFORMS = (
