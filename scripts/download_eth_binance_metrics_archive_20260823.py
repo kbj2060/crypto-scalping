@@ -26,8 +26,10 @@ from urllib.request import urlopen
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "data/TOTAL_ETHUSDT_metrics_2024_2026.csv"
-URL = "https://data.binance.vision/data/futures/um/daily/metrics/ETHUSDT/ETHUSDT-metrics-{d}.zip"
+import os
+SYMBOL = os.environ.get("METRICS_SYMBOL", "ETHUSDT").upper()   # 2026-08-23: BTC/SOL 백필용 파라미터화
+OUT = ROOT / f"data/TOTAL_{SYMBOL}_metrics_2024_2026.csv"
+URL = "https://data.binance.vision/data/futures/um/daily/metrics/" + SYMBOL + "/" + SYMBOL + "-metrics-{d}.zip"
 START = date(2024, 1, 1)
 END = date.today() - timedelta(days=1)   # 아카이브는 전일까지 게시됨
 
