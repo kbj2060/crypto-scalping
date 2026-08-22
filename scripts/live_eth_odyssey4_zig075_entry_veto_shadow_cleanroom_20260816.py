@@ -371,17 +371,26 @@ def try_fill_pending(state: dict, frame: pd.DataFrame, fee: float, slip: float) 
         entry_price = float(pos["entry_price"])
         raw_move = (exit_price - entry_price) / entry_price if side > 0 else (entry_price - exit_price) / entry_price
         notional = float(pos["notional_exposure"])
+        # Equity update must stay incremental: bar-by-bar holding marks already applied
+        # `unrealized_move*notional` to state["equity"] and tracked the running total in
+        # `_prev_pnl_frac` (see the `position is not None` branch of process_bar below), so only the
+        # residual since the last mark may be re-applied here or equity double-counts the hold.
         realized_frac = raw_move * notional - float(pos.get("_prev_pnl_frac", 0.0)) - fee * notional
         state["equity"] = float(state.get("equity", 1.0)) * (1.0 + realized_frac)
+        # The ledger/dashboard field is a DIFFERENT quantity: the trade's total return from entry to
+        # exit, not the last-bar residual used for the equity increment above. Reusing `realized_frac`
+        # here previously made closed_trades.jsonl report only the final bar's leftover slice -- for
+        # any multi-bar hold this was frequently the wrong sign relative to the trade's actual outcome.
+        total_trade_return_frac = raw_move * notional - fee * notional
         closed = {
             "entry_ts": pos["entry_ts"], "exit_ts": fill_ts.isoformat(), "side": side,
             "source_component": pos["source_component"], "entry_price": entry_price, "exit_price": exit_price,
             "reason": pending["reason"], "notional_exposure": notional, "raw_price_move": raw_move,
-            "trade_return_frac": realized_frac, "hold_bars": pos["hold_bars"],
+            "trade_return_frac": total_trade_return_frac, "hold_bars": pos["hold_bars"],
         }
         append_jsonl(TRADES_PATH, closed)
         print(f"[fill] EXIT side={side} src={pos['source_component']} reason={pending['reason']} "
-              f"price={exit_price:.2f} trade_return={realized_frac*100:.3f}% equity={state['equity']:.4f} ts={fill_ts}", flush=True)
+              f"price={exit_price:.2f} trade_return={total_trade_return_frac*100:.3f}% equity={state['equity']:.4f} ts={fill_ts}", flush=True)
         state["position"] = None
     state["pending"] = None
     return state
