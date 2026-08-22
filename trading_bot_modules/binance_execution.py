@@ -64,8 +64,16 @@ class BinanceFuturesExecutionAdapter:
         self.maker_entry_fallback_market = bool(config.maker_entry_fallback_market)
         self.maker_exit_fallback_market = bool(config.maker_exit_fallback_market)
         self.maker_fallback_market = bool(self.maker_entry_fallback_market or self.maker_exit_fallback_market)
+        # 2026-08-22: `maker_wait_sec`는 원래 정의만 되고 아무 로직에서도 참조되지 않던
+        # 죽은 설정값이었다 -- `_wait_or_cancel_limit`의 신규 repeg(재호가) 쿨다운으로
+        # 재사용함(가격이 매 poll마다 흔들려도 이 간격보다 자주 취소/재제출하지 않게 함).
         self.maker_wait_sec = float(max(0.0, config.maker_wait_sec))
         self.maker_book_depth = int(max(5, config.maker_book_depth))
+        # ⚠️ 아래 3개(maker_max_spread_bps/maker_min_imbalance/maker_min_microprice_edge_bps)는
+        # 여전히 미사용이다 -- env로 읽어 저장만 하고 `_route_order`의 실제 라우팅 판정에서
+        # 참조되지 않는다(2026-08-22 확인, 이전부터 이랬음). 스프레드/임밸런스 조건부로
+        # maker 라우팅을 걸러내는 게이트는 검증된 적이 없어 여기서 새로 넣지 않았다 --
+        # 필요해지면 별도 연구로 임계값을 먼저 검증할 것.
         self.maker_max_spread_bps = float(max(0.0, config.maker_max_spread_bps))
         self.maker_min_imbalance = float(max(0.0, config.maker_min_imbalance))
         self.maker_min_microprice_edge_bps = float(max(0.0, config.maker_min_microprice_edge_bps))
@@ -785,13 +793,30 @@ class BinanceFuturesExecutionAdapter:
         reason: str,
         wait_sec: float,
     ) -> dict:
+        """postOnly 지정가 대기 + peg(재호가). 시장이 내 가격에서 멀어지면(=체결기회 상실)
+        최우선호가로 취소 후 재호가하며 wait_sec 전체 예산 안에서 반복한다 -- 원래는
+        단일 지정가+대기(static)였음. 2026-08-22 maker 체결 시뮬레이션 연구
+        (docs/experiments/eth_maker_fill_simulation_l2_20260822.md, 저변동 3.1bp/leg~고변동
+        3.7~4.0bp/leg 실측)에서 검증된 peg 정책을 그대로 반영. 재호가 최소 간격은
+        `maker_wait_sec`(기존에 정의만 되고 미사용이던 설정값, 기본 2.0초)를 재사용 --
+        가격이 매 poll마다 흔들려도 과도하게 자주 취소/재제출하지 않기 위한 쿨다운.
+        전체 대기 예산(wait_sec)은 호출부의 "이번 5분봉이 끝날 때까지" 정책을 그대로
+        유지한다(연구의 고정 T=120s를 새로 끌어오지 않음 -- 봇의 결정 주기와 독립된 임의
+        상수를 넣기보다 기존 설계 의도를 보존).
+        """
         oid = str(order.get("id") or order.get("orderId") or "")
         if not oid:
-            return {"status": "unknown", "filled": 0.0, "remaining": float(amount), "order": dict(order)}
+            return {"status": "unknown", "filled": 0.0, "remaining": float(amount), "order": dict(order), "repegs": 0}
+        total_amount = float(amount)
         wait_sec = float(max(0.0, wait_sec))
         deadline = time.monotonic() + wait_sec
         poll_sec = float(min(1.0, max(0.1, wait_sec / 30.0 if wait_sec > 0.0 else 0.1)))
+        repeg_cooldown_sec = float(max(poll_sec, self.maker_wait_sec))
         latest = dict(order)
+        my_price = _safe_float(order.get("price", 0.0), 0.0)
+        cumulative_filled = 0.0  # 취소·재호가로 교체된 이전 주문들의 체결 누적분
+        repegs = 0
+        last_repeg_at = time.monotonic()
         while time.monotonic() < deadline:
             await asyncio.sleep(poll_sec)
             latest = self._safe_order(await self._call(
@@ -799,30 +824,108 @@ class BinanceFuturesExecutionAdapter:
                 lambda: self.exchange.fetch_order(oid, self.symbol),
             ))
             status = str(latest.get("status", "")).lower()
+            cur_filled = _safe_float(latest.get("filled", 0.0), 0.0)
             if status in {"closed", "filled"}:
                 return {
                     "status": "filled",
-                    "filled": _safe_float(latest.get("filled", amount), amount),
+                    "filled": float(cumulative_filled + cur_filled),
                     "remaining": 0.0,
                     "order": latest,
                     "wait_sec": float(wait_sec),
+                    "repegs": int(repegs),
                 }
-        try:
-            cancelled = self._safe_order(await self._call(
-                f"binance_execution.cancel_order[{oid}]",
-                lambda: self.exchange.cancel_order(oid, self.symbol),
-            ))
-            latest.update({"cancel_result": cancelled})
-        except Exception as exc:
-            latest.update({"cancel_error": str(exc)})
-        filled = _safe_float(latest.get("filled", 0.0), 0.0)
-        remaining = max(0.0, float(amount) - filled)
+            remaining_amount = max(0.0, total_amount - cumulative_filled - cur_filled)
+            if remaining_amount <= 1e-12:
+                return {
+                    "status": "filled",
+                    "filled": float(cumulative_filled + cur_filled),
+                    "remaining": 0.0,
+                    "order": latest,
+                    "wait_sec": float(wait_sec),
+                    "repegs": int(repegs),
+                }
+            if time.monotonic() - last_repeg_at < repeg_cooldown_sec:
+                continue
+            try:
+                book = await self._fetch_orderbook_summary()
+            except Exception:
+                continue
+            best_bid = _safe_float(book.get("best_bid", 0.0), 0.0)
+            best_ask = _safe_float(book.get("best_ask", 0.0), 0.0)
+            if best_bid <= 0.0 or best_ask <= 0.0:
+                continue
+            offset_bps = float(self.maker_exit_offset_bps if bool(reduce_only) else self.maker_entry_offset_bps)
+            if str(side).lower() == "buy":
+                target_price = float(self._price_to_precision(best_bid * (1.0 - offset_bps / 10000.0)))
+                moved_away = target_price > my_price + 1e-12
+            else:
+                target_price = float(self._price_to_precision(best_ask * (1.0 + offset_bps / 10000.0)))
+                moved_away = target_price < my_price - 1e-12
+            if not moved_away:
+                continue
+            try:
+                cancelled = self._safe_order(await self._call(
+                    f"binance_execution.cancel_order[{oid}]",
+                    lambda: self.exchange.cancel_order(oid, self.symbol),
+                ))
+                latest.update({"cancel_result": cancelled})
+            except Exception as exc:
+                latest.update({"cancel_error": str(exc)})
+                continue
+            cancel_filled = _safe_float(latest.get("filled", cur_filled), cur_filled)
+            cumulative_filled += cancel_filled
+            remaining_amount = max(0.0, total_amount - cumulative_filled)
+            if remaining_amount <= 1e-12:
+                return {
+                    "status": "filled",
+                    "filled": float(cumulative_filled),
+                    "remaining": 0.0,
+                    "order": latest,
+                    "wait_sec": float(wait_sec),
+                    "repegs": int(repegs),
+                }
+            try:
+                new_order = await self._submit_limit_order(
+                    side=side,
+                    amount=remaining_amount,
+                    price=target_price,
+                    reduce_only=reduce_only,
+                    reason=f"{reason}|repeg{repegs + 1}",
+                    route={"route": "post_only_limit", "reason": "repeg", "maker_price": target_price},
+                )
+            except Exception as exc:
+                latest["repeg_error"] = str(exc)
+                oid = ""
+                break
+            new_oid = str(new_order.get("id") or new_order.get("orderId") or "")
+            if not new_oid:
+                latest = dict(new_order)
+                oid = ""
+                break
+            oid = new_oid
+            my_price = target_price
+            repegs += 1
+            last_repeg_at = time.monotonic()
+            latest = dict(new_order)
+        if oid:
+            try:
+                cancelled = self._safe_order(await self._call(
+                    f"binance_execution.cancel_order[{oid}]",
+                    lambda: self.exchange.cancel_order(oid, self.symbol),
+                ))
+                latest.update({"cancel_result": cancelled})
+            except Exception as exc:
+                latest.update({"cancel_error": str(exc)})
+        cur_filled = _safe_float(latest.get("filled", 0.0), 0.0)
+        total_filled = cumulative_filled + cur_filled
+        remaining = max(0.0, total_amount - total_filled)
         return {
-            "status": "cancelled_unfilled" if filled <= 1e-12 else "cancelled_partial",
-            "filled": float(filled),
+            "status": "cancelled_unfilled" if total_filled <= 1e-12 else "cancelled_partial",
+            "filled": float(total_filled),
             "remaining": float(remaining),
             "order": latest,
             "wait_sec": float(wait_sec),
+            "repegs": int(repegs),
         }
 
     async def _submit_routed_order(
