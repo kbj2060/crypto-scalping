@@ -28,10 +28,13 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 import os
 SYMBOL = os.environ.get("METRICS_SYMBOL", "ETHUSDT").upper()   # 2026-08-23: BTC/SOL 백필용 파라미터화
-OUT = ROOT / f"data/TOTAL_{SYMBOL}_metrics_2024_2026.csv"
+# 2026-08-23(2차): 히스토리 확장 실험용 기간 파라미터화 — 기본값은 기존 동작과 동일
+_OUT_LABEL = os.environ.get("METRICS_OUT_LABEL", "2024_2026")
+OUT = ROOT / f"data/TOTAL_{SYMBOL}_metrics_{_OUT_LABEL}.csv"
 URL = "https://data.binance.vision/data/futures/um/daily/metrics/" + SYMBOL + "/" + SYMBOL + "-metrics-{d}.zip"
-START = date(2024, 1, 1)
-END = date.today() - timedelta(days=1)   # 아카이브는 전일까지 게시됨
+START = date.fromisoformat(os.environ.get("METRICS_START", "2024-01-01"))
+_END_ENV = os.environ.get("METRICS_END", "")
+END = date.fromisoformat(_END_ENV) if _END_ENV else date.today() - timedelta(days=1)   # 아카이브는 전일까지 게시됨
 
 
 def fetch_day(d: date) -> pd.DataFrame | None:

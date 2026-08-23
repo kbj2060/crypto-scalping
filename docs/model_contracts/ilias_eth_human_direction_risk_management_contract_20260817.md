@@ -16,7 +16,7 @@ slug: `ilias_eth_human_direction_risk_management`
 | **일리아스 1(신정의) = 일리아스 라벨로직 후보축 — 2026-08-21**: zigzag/h48qual/cusum 154피쳐 스크리닝 | `등록됨, N=3 예비 스크리닝 — 승격/확정 근거 아님`. 별도 서브프로젝트(`eth_tabm_label_logic_retest_initiative`)에서 진행되던 154피쳐 엔지니어링셋 + 라벨로직(zigzag/h48qual/dc/cusum/분포적회귀) 비교 작업을 사용자 지시로 이관 — 상세는 아래 "일리아스 라벨로직 후보축" 절. Shared Feature Contract의 "신규 피쳐 도입 안 함" 원칙에 대한 **명시적 예외**로 등록(아래 Shared Feature Contract 절 참고). zigzag(→zig075슬롯)/h48qual(seed133725056) 번들이 새 "일리아스 1" 모델 자산으로 지정됨(Label Contract 절 "일리아스 1 — 2026-08-21 재편" 참고) — cusum은 대응 옛슬롯이 없어 이 지정에서 제외, 별도 후보로 유지. Baseline v1(오디세이4 G0)을 대체하지 않음 — 완전히 별도의 탐색 축. |
 | **레짐 분류기 — wide24 HMM 확정, 2026-08-21 → 재확정(앵커드 walk-forward) → 시드검증 CONFIRMED(N=5)** | `재확정 — states=24/sticky=0.90(sticky=0.85와 사실상 동급), 신ADX라벨(balancedish_adx16_slope03_bb006, 불변) 채택. N=5 진짜무작위 시드 전부 OOS 순위 일치(std≈0.0001) — Seed-Diversity Gate CONFIRMED`. 같은 날 네 차례 작업: (1) 최초 확정 TRAIN=2024단독 states=30/sticky=0.85. (2) 앵커드 walk-forward 적용(TRAIN 2026-06-30까지 확장) 재스윕 → **states=24가 VAL·OOS 최상위 클러스터로 재확인**. (3)(4) top-3(states24/0.90·states24/0.85·states30/0.85)에 진짜무작위 시드 N=5(원시드+4개, 2단계로 N=4→N=5 확장) 검증 → **5개 전부 동일 순위** — Open Issue (k) 해소. JM/SJM 대비 wide24 구조우월성 결론은 불변. 상세는 아래 "레짐 분류기 계약" 절. **Open Issue (k)(l)(m)(n) 전부 해소/완료 — (m)은 N=1 재확인(zigzag/h48qual/cusum 전부 VAL→OOS 부호 유지, 아래 절 참고), N≥5 승격게이트는 여전히 미충족(별개 이슈, 반복 없음).** |
 | **라벨 퓨전(3라벨 결합모델) 연구 — 2026-08-21 연구 → 2026-08-22 실제 테스트+최신문헌 재구현 후 종결** | `종결 — 예측레벨 결합 탐색 전체 폐기, 근본원인 정보이론적 확증`. 문헌(Bates & Granger 1969, Krogh & Vedelsby 1994)+feasibility체크(vote/consensus)+정식 스태킹 메타모델(로지스틱회귀, 2024학습→2025평가, long_frac 0.979로 붕괴)에 이어, 08-22 최신문헌 2편(Zou 2025, Felici & Sudoso 2023)을 이 저장소 구조에 맞게 실제 재구현·테스트 — zigzag/cusum/h48qual 각자의 방향확률·품질점수가 순방향48bar수익률에 대해 갖는 선형회수정보가 절편전용모델 이론적하한과 사실상 같음(BCE 0.692대 vs 이론하한 0.6928)을 확인, §6의 극단적 long_frac도 "진짜학습"이 아니라 노이즈계수의 threshold 우연 초과로 재해석. 상세는 아래 "라벨 퓨전(3라벨 결합모델) 연구" 절과 `docs/experiments/ilias_eth_label_fusion_combined_model_research_20260821.md` §6~§8. |
-| **레짐 직결 노출(RDE) 정책 — 시드-안정 방향원 아키텍처 — 2026-08-22 → OOS 조기실행으로 최종 REJECTED** | `REJECTED(OOS 확정 기각, 사용자 지시로 09-30 대기 override) — 방향전략 자체는 폐기, 이 실험 안에서 검증된 집행(비용) 방법론은 독립 자산으로 아래 별도 절에 보존`. wide24 HMM filtered 확률을 유일 방향원으로 쓰는 Schmitt 트리거 정책, VAL에서 시드간 PnL 편차 0.06%p·net +5.86%까지 확인했으나(펀딩 델타뉴트럴 캐리 대안도 별도로 실측 기각, 2026 펀딩 붕괴). 같은 정책을 OOS(2026-07-01~08-19, 레짐분류기/DC154와 동일 override 3번째 사례)에서 N=5 시드 **단일터치**로 평가 — **5/5 전부 음수, −4.90%±0.19%p**, always-long(+43.08%) 대비 **48%p 열위**. 시드안정성이 손익방향을 보장하지 않음을 실증. 이 정책×이 OOS 창은 소진, 재조회·재시도 금지. 상세: `docs/experiments/eth_ilias_regime_direct_exposure_seed_stable_direction_20260822.md`. |
+| **레짐 직결 노출(RDE) 정책 — 시드-안정 방향원 아키텍처 — 2026-08-22 → OOS 조기실행으로 최종 REJECTED** | `REJECTED(OOS 확정 기각, 사용자 지시로 09-30 대기 override) — 방향전략 자체는 폐기, 이 실험 안에서 검증된 집행(비용) 방법론은 독립 자산으로 아래 별도 절에 보존`. wide24 HMM filtered 확률을 유일 방향원으로 쓰는 Schmitt 트리거 정책, VAL에서 시드간 PnL 편차 0.06%p·net +5.86%까지 확인했으나(펀딩 델타뉴트럴 캐리 대안도 별도로 실측 기각, 2026 펀딩 붕괴). 같은 정책을 OOS(2026-07-01~08-19, 레짐분류기/DC154와 동일 override 3번째 사례)에서 N=5 시드 **단일터치**로 평가 — **5/5 전부 음수, −4.90%±0.19%p**, always-long(+43.08%) 대비 **48%p 열위**. 시드안정성이 손익방향을 보장하지 않음을 실증. 이 정책×이 OOS 창은 소진, 재조회·재시도 금지. **같은 날 데이터결함(BTC오염→−4.38%, 이어서 metrics미래참조→−7.37%, 0/5 유지) 2연속 재검증에도 판정 불변, 오히려 악화** — "데이터 버그 때문" 가설 확정적 기각. 상세: `docs/experiments/eth_ilias_regime_direct_exposure_seed_stable_direction_20260822.md`. |
 | **3심볼 데이터 무결성 대수술 — 2026-08-23** | `완료 — metrics 계열 기준 ETH/BTC/SOL 전부 검증·수정됨`. ETH 캐노니컬 2026의 BTC-metrics 병합(2026-01-20~07-12, 07-13 미커밋 재빌드 원인) 발견·제거 + BTC/SOL의 아카이브 vintage 어긋남(**BTC 2024는 24%가 1-bar 미래참조**) 13개 파일 수정 + 오버레이 3종 재생성 + 154셋 패치·2/28 갭 95행 삽입. 사후 재감사 전 파일 exact 99.7~100%. 깨끗한 데이터 위치·보증범위·백업은 아래 "데이터 무결성 현황" 절 참고. 상세: `docs/experiments/eth_binance_metrics_archive_backfill_and_canonical_divergence_20260823.md`. |
 | **peg-maker 집행 인프라 — 비용축(RDE와 독립) — 2026-08-22** | `자산으로 확정 — 방향전략의 성패와 무관하게 재사용 가능`. maker 실효비용 3.1~4.0bp/leg 실측(taker 실측 5.0bp/가정 7bp 대비 절감), **OOS(미터치 데이터)에서도 예측 밴드(3.5~4.0bp) 안에 재확인**(RDE의 방향손실과는 별개로 비용모델 자체는 살아남음), 라이브 섀도우 가동 중(9월 중순 체크포인트). 상세는 독립 절 "peg-maker 집행 인프라 계약" 참고(아래, 라벨 퓨전 절 앞). |
 
@@ -103,11 +103,11 @@ OHLCV/펀딩/CVD 등 나머지 컬럼은 독립 참조본 대조를 한 적이 �
 | 분류 | 위치 | 상태 |
 |---|---|---|
 | **참조 진실값**(아카이브, +5분 종료라벨 보정본) | `data/TOTAL_{ETH,BTC,SOL}USDT_metrics_2024_2026.csv` | 검증됨 — metrics 계열 신규 조인은 반드시 이것 기준. 재생성: `scripts/download_eth_binance_metrics_archive_20260823.py`(METRICS_SYMBOL env) |
-| ETH 캐노니컬 2026 | `data/splits/year_oos/training_features_2026_rebuilt.csv` | **완전 수정**(BTC-metrics 병합 제거, 참조본 100% 일치) |
+| ETH 캐노니컬 2026 | `data/splits/year_oos/training_features_2026_rebuilt.csv` | **완전 수정(2건 순차 발견·수정)**: ①BTC-metrics 병합(01-20~07-12) 제거, ②같은 날 후속 발견 — **07-12 00:05~파일끝(08-19)은 metrics 1버킷 미래참조 조인**(+07-20~08-02 raw OI 스케일결함 ~1/300) 별도 수정(`fix_eth_canonical_2026_oi_futureleak_20260823.py`). 현재 사후 참조본 exact match 99.97~100% |
 | ETH 캐노니컬 2024/2025 | `data/splits/year_oos/training_features_{2024,2025}.csv` | 99.8~100%. 잔여 0~0.2%는 **의도적 보존** — 구 수식 vintage 빌드라 현재 수식 재계산 시 kel 등이 2~5% 바뀌어 수정이 결함보다 큰 왜곡(게이트 실측 판정). 차세대 전체 재빌드에서만 균질화 |
 | BTC 파일군(11개) | `btc_features_{연도,결합}`, `btc_raw_frame*`, `btc_*_metrics4*`, swingtransition/zigzag/regimeline/1h_full | **완전 수정**(2024의 24% 1-bar 미래참조 제거 포함), 사후 exact 99.7~100% |
 | SOL 파일군(5개) | `sol_features_{연도,결합}`, `sol_raw_frame` | **완전 수정**, 사후 exact 99.97~100% |
-| wide24 오버레이 3종 | `tmp/ilias_labellogic_recheck_20260821/{train_2024_2026H1,eval_2026H1,oos_20260701_20260819}_regime3_current_states24_sticky090.csv` | 수정된 캐노니컬로 재생성 완료 — **레짐 소스는 이걸 쓸 것**(구 balancedish 사이드카 아님) |
+| wide24 오버레이 3종 | `tmp/ilias_labellogic_recheck_20260821/{train_2024_2026H1,eval_2026H1,oos_20260701_20260819}_regime3_current_states24_sticky090.csv` | 수정된 캐노니컬로 2회 재생성 완료(2차 수정 후 oos 오버레이만 최대확률변화 0.63 재반영, train/eval은 입력 범위 밖이라 무변화) — **레짐 소스는 이걸 쓸 것**(구 balancedish 사이드카 아님) |
 | 154피쳐셋 | `tmp/ilias_eth_154feature_dataset_20260821/` (2026=51,841행, combined=262,322행) | 오염 25컬럼 패치 + 2/28 갭 95행 삽입 + 금융ML 12컬럼 연속 재계산. `manifest.json`의 `patched_20260823` 참고 |
 | 백업(당시 입력 재현용) | `.bak_pre_btc_metrics_fix_20260823` / `.bak_pre_gap_fix_20260823` / `.bak_pre_metrics_vintage_fix_20260823` | 08-23 이전 실험 재현 시 사용 |
 | ⚠️ 비권장/플래그 | `data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/`(구모델 사이드카, 미재생성), `btc_features_1h_metrics4*.csv`/`btc_features_5m1h_*_metrics4at1h_*.parquet`(종결축 산출물, vintage 불확실) | 새 실험의 소스로 쓰지 말 것 |
@@ -736,6 +736,14 @@ Sigma3-1h 등)에서 흔히 보이는 "시드분산이 HP효과보다 큼" 패�
 **판정: CONFIRMED (N≥5 진짜무작위 시드, OOS 순위 5/5 일치)** — states=24/sticky=0.90 최종pick이
 CLAUDE.md Seed-Diversity Ensemble Promotion Gate를 충족한다. Open Issue (k) 해소.
 
+**⚠️ 후속(2026-08-23) — BTC-metrics 오염 수정 후 재적합 스팟체크**: [[eth_binance_metrics_
+archive_backfill_canonical_divergence_20260823]]에서 wide24의 관측피쳐 `state12_oi_change_rate`
+가 2026-01-20~07-12 구간(TRAIN 내부) 오염됐음이 발견됨 — 위 N=5는 전부 이 오염 데이터로 학습된
+것이었다. states=24/sticky=0.90/seed=7529(baseline seed)만 클린 데이터로 재적합해 스팟체크:
+**OOS balanced_accuracy 0.7691**(기존 N=5 range 0.7682~0.7685) — 시드노이즈(std=0.0001) 대비로는
+실차이지만 절대크기(+0.0006~0.0009)는 작다. N=5 전체 재검증은 안 함(우선순위 낮음 판단, 필요시
+후속 가능) — CONFIRMED 판정은 유지하되 "완전히 클린한 데이터 기준"은 아니라는 점을 기록.
+
 **신규/갱신 Open Issue**:
 - (k) 시드다양성 — **CONFIRMED, 해소**. Top-3 config 전부 N=5 무작위 시드에서 순위·수치 완전
   안정(위 표). 재확인 불필요.
@@ -947,6 +955,12 @@ RDE든, 미래의 raw LOB/OFI 신호든, 지금 라이브 중인 Omega 4.6.1이�
 않은 지위를 얻었다. 이 리포의 압도적 패턴은 "OOS에서 뭐든 뒤집힌다"인데, 이 비용모델은
 그 패턴에서 예외였다.
 
+**⚠️ 2026-08-23 플래그**: 4번 실험이 쓴 83개 전환 timestamp는 이후(같은 날) 발견된 OOS
+창 metrics 미래참조 결함(아래 데이터 무결성 절 참고) 수정 전 오버레이로 뽑힌 것이라, 결함
+수정 후 재계산하면 구체적 전환 시각 집합이 달라질 수 있다. 비용모델 자체(오더북 물리적
+체결 특성)는 레짐 신호와 무관해 결론이 바뀔 가능성은 낮지만, 공식 재확인은 아직 안 함 —
+후속 확인 대상으로만 기록.
+
 ### 라이브 검증 (진행 중)
 
 `scripts/maker_fill_shadow_worker.py`(실주문 없음, 공개 WS만, trading_bot 무접촉) +
@@ -984,6 +998,16 @@ peg/static 가상 leg를 실제 라이브 시장에 굴려 `data/live/maker_fill
   가장 신뢰할 수 있는 근거다.
 
 전체 원본 실험 기록: `docs/experiments/eth_maker_fill_simulation_l2_20260822.md`.
+
+### 후속 — 과거 비용-기각 신호 전수 재심 (2026-08-23, 0/6 부활)
+
+이 비용모델(leg당 7→3.5bp)이 과거 "신호 실재하나 비용 미달" 기각들을 되살리는지 전수
+재심 → **6축 전부 기각 유지**. 최근접인 20-23 UTC 세션 엣지(5.49bp/거래)조차 maker 왕복
+6.2~7.0bp에 미달 + 비용 무관 강건성 결함(TRAIN 음수, 월클러스터 t=1.14). 펀딩 델타뉴트럴
+캐리는 비용 산술을 신규 실측으로 확정(2026Q2 상한 69bp/분기 < 퍼프-only 비용 217bp) —
+maker와 무관하게 펀딩 레짐 붕괴가 사인. **maker 인프라의 가치는 기존 신호 부활이 아니라
+미래 신호의 손익분기 여유 2배 확보로 확정.** 상세:
+`docs/experiments/eth_maker_breakeven_rescreen_20260823.md`.
 
 ## 라벨 퓨전(3라벨 결합모델) 연구 — 2026-08-21 (연구 완료, 실행 없음)
 
