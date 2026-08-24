@@ -593,6 +593,8 @@ def main() -> int:
     x_exit_raw, y_exit, frame_exit, exit_diag = omega4._build_exit_dataset_entry_label_terminal_giveback(
         frames["train_df"],
         frames["s_train_label"],
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=float(args.cost_mult),

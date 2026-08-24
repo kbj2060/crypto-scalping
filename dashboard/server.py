@@ -6,16 +6,70 @@ import csv
 import hashlib
 import json
 import os
+import sys
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
+import pandas as pd
 from aiohttp import ClientSession, ClientTimeout, web
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+# Reuses the exact, already-verified signal formulas from the standalone CLI dashboard rather
+# than re-deriving them here -- see that module's docstring for formula provenance (each formula
+# transcribed verbatim from the 2026-08-14 research scripts). compute_signals/bars_since_last_true
+# are pure functions (no I/O, no sleep) so calling them synchronously inside an async handler is
+# safe -- this file already does the same for scalp_shadow_payload()'s duckdb reads.
+from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
+    FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
+    PCTRANK_WINDOW as EVIDENCE_PCTRANK_WINDOW,
+    SIGNAL_ORDER as EVIDENCE_SIGNAL_ORDER,
+    bars_since_last_true,
+    compute_signals,
+)
+# OI 급변 model indicator (replaces OBI, 2026-08-24) -- computed here from the poller's own
+# duckdb, NOT from trading_bot.py's dashboard_state.json like the other 5 model indicators, so
+# it never touches the live bot. See that module's docstring for the vol-lift validation.
+from scripts.live_oi_delta_signal_20260824 import compute_oi_delta_signal  # noqa: E402
+# Snapshot-tab liquidation map (estimated support/resistance, self-hosted Coinglass-heatmap
+# alternative, 2026-08-24) -- discretionary reading aid only, NOT wired to trading_bot.py.
+# Event-driven variant (2026-08-24): backtested for touch/hold win-rate only (60-67% vs a
+# distance-matched random level over 4.7y), NOT for return/PnL -- see that module's
+# compute_event_driven_levels() docstring for the full methodology and caveats.
+from scripts.live_liquidation_map_20260824 import compute_event_driven_levels  # noqa: E402
+
+EVIDENCE_SIGNAL_SYMBOL = "ETHUSDT"
+EVIDENCE_SIGNAL_INTERVAL = "5m"
+EVIDENCE_SIGNAL_CACHE_SECONDS = 60
+EVIDENCE_SIGNAL_HISTORY_BARS = 48  # 4h strip for the Snapshot tab's per-bar activity graph
+EVIDENCE_SIGNAL_BTC_SYMBOL = "BTCUSDT"  # smt_divergence's cross-asset non-confirmation leg, 2026-08-24
+LIQUIDATION_MAP_SYMBOL = "ETHUSDT"
+LIQUIDATION_MAP_INTERVAL = "1h"
+LIQUIDATION_MAP_FETCH_LIMIT = 1000  # ~41.6 days at 1h -- feeds the event-driven state machine's
+                                     # bootstrap+walk-forward (2026-08-24: fixed-7d -> event-driven,
+                                     # see live_liquidation_map_20260824.compute_event_driven_levels
+                                     # and eth_liquidation_map_event_driven_reset_20260824). Needs
+                                     # enough history for both sides' reset points to settle before
+                                     # "now" (median reset gap 44-54h), not just the 7d bootstrap window
+LIQUIDATION_MAP_CACHE_SECONDS = 300  # structure moves slowly -- no need to recompute every tick
+
+# The 6 model-internal indicators (microstructure/tail_risk) only ever have their LATEST reading
+# persisted by trading_bot.py -- no history is stored anywhere. Rather than touch the live bot
+# (would need a bot restart, open-position risk) or the browser (resets every page load), this
+# dashboard SERVER -- already polling data/live/dashboard_state.json every EVENT_POLL_SECONDS in
+# publish_dashboard_events() -- keeps its own small in-memory sample buffer, gated to a much
+# coarser interval than that poll. It survives page refreshes and new browser sessions as long as
+# THIS SERVER PROCESS stays up; it resets only on a dashboard-server restart (e.g. a deploy), not
+# on every page load like the old client-only accumulation did. Raw values only -- the tone/hint
+# thresholds stay in app.js (single source of truth), applied to this history same as to the
+# live reading, so there is no second copy of that classification logic to drift out of sync.
+MODEL_INDICATOR_SAMPLE_SECONDS = 300  # 5 min, matching the evidence-signal strip's bar cadence
+MODEL_INDICATOR_HISTORY_MAX = 48  # 4h at the sample interval above -- same window as evidence signals
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 # Shadow-only, no order submission -- standalone loop separate from trading_bot.py's
@@ -234,6 +288,16 @@ def utc_age_minutes(value: Any, *, offset_seconds: float = 0.0) -> float | None:
     if offset_seconds:
         timestamp = timestamp + timedelta(seconds=offset_seconds)
     return max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 60.0)
+
+
+def _evidence_last_fired_ts(series: pd.Series, latest: pd.Series) -> str | None:
+    """Exact UTC timestamp of the bar where `series` was last True, derived from
+    bars_since_last_true()'s bar-offset via the fixed 5-minute evidence-signal bar spacing --
+    None if it never fired in the loaded lookback."""
+    bars = bars_since_last_true(series)
+    if bars is None:
+        return None
+    return utc_iso(latest["timestamp"] - pd.Timedelta(minutes=5 * bars))
 
 
 def _require_scalp_contract(condition: bool, field: str) -> None:
@@ -611,6 +675,14 @@ def make_app() -> web.Application:
     latest_event_tickers: dict[str, dict[str, Any]] = {}
     market_history_cache: dict[str, tuple[float, list[dict[str, float | int]]]] = {}
     market_history_locks = {asset: asyncio.Lock() for asset in MARKET_SYMBOLS}
+    evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    evidence_signal_lock = asyncio.Lock()
+    oi_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    oi_signal_lock = asyncio.Lock()
+    liquidation_map_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    liquidation_map_lock = asyncio.Lock()
+    model_indicator_history: deque = deque(maxlen=MODEL_INDICATOR_HISTORY_MAX)
+    model_indicator_sample_state: dict[str, float] = {"last_sample_at": 0.0}
 
     def load_json_cached(path: Path, signature: tuple[int, int] | None = None) -> Any:
         if signature is None:
@@ -701,6 +773,176 @@ def make_app() -> web.Application:
             market_history_cache[asset] = (time.monotonic(), candles)
             return candles
 
+    async def load_evidence_signals() -> dict[str, Any]:
+        """Informational-only reversal-evidence-signal readout for the Snapshot tab -- NOT a
+        trading signal (see docstring in the imported module). Mirrors load_market_history()'s
+        cache/lock pattern but needs a much longer klines window (EVIDENCE_FETCH_LIMIT bars, to
+        warm up orthogonal_combo's EVIDENCE_PCTRANK_WINDOW-bar percentile-rank window) than the
+        chart's own /api/market-history (limit=100), so it gets its own cache rather than sharing
+        market_history_cache."""
+        now = time.monotonic()
+        cached = evidence_signal_cache["payload"]
+        if cached is not None and now - evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+            return cached
+        async with evidence_signal_lock:
+            cached = evidence_signal_cache["payload"]
+            if cached is not None and time.monotonic() - evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+                return cached
+            async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+                async with session.get(
+                    "https://fapi.binance.com/fapi/v1/klines",
+                    params={
+                        "symbol": EVIDENCE_SIGNAL_SYMBOL,
+                        "interval": EVIDENCE_SIGNAL_INTERVAL,
+                        "limit": EVIDENCE_FETCH_LIMIT,
+                    },
+                ) as response:
+                    if response.status != web.HTTPOk.status_code:
+                        raise web.HTTPBadGateway(reason="evidence_signal_upstream_error")
+                    raw = await response.json()
+            cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+                    "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
+            df = pd.DataFrame(raw, columns=cols)
+            for c in ("open", "high", "low", "close", "volume", "taker_buy_base"):
+                df[c] = df[c].astype("float64")
+            df["close_time"] = df["close_time"].astype("int64")
+            df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+            df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+            now_ms = int(time.time() * 1000)
+            if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
+                df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
+
+            # BTC leg for smt_divergence (2026-08-24) -- failure here must never take down the
+            # ETH-only signals, so it's caught and logged, not raised; compute_signals() degrades
+            # smt_divergence to not-fired when btc_df is None.
+            btc_df = None
+            try:
+                async with ClientSession(timeout=ClientTimeout(total=10)) as btc_session:
+                    async with btc_session.get(
+                        "https://fapi.binance.com/fapi/v1/klines",
+                        params={
+                            "symbol": EVIDENCE_SIGNAL_BTC_SYMBOL,
+                            "interval": EVIDENCE_SIGNAL_INTERVAL,
+                            "limit": EVIDENCE_FETCH_LIMIT,
+                        },
+                    ) as btc_response:
+                        if btc_response.status == web.HTTPOk.status_code:
+                            braw = await btc_response.json()
+                            bdf = pd.DataFrame(braw, columns=cols)
+                            for c in ("high", "low"):
+                                bdf[c] = bdf[c].astype("float64")
+                            bdf["close_time"] = bdf["close_time"].astype("int64")
+                            bdf["timestamp"] = pd.to_datetime(bdf["open_time"].astype("int64"), unit="ms", utc=True)
+                            bdf = bdf.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+                            if len(bdf) and int(bdf.iloc[-1]["close_time"]) >= now_ms:
+                                bdf = bdf.iloc[:-1].reset_index(drop=True)
+                            btc_df = bdf[["timestamp", "high", "low"]]
+            except Exception as btc_exc:  # noqa: BLE001 -- ETH signals must still render this cycle
+                print(f"evidence-signal BTC leg failed (smt_divergence family will read as "
+                      f"not-fired this cycle): {btc_exc}", flush=True)
+
+            sig = compute_signals(df, btc_df=btc_df)
+            latest = sig.iloc[-1] if len(sig) else None
+            warmed_up = latest is not None and pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))
+            signals_payload = []
+            for name, description in EVIDENCE_SIGNAL_ORDER:
+                bcol, tcol = f"bottom_{name}", f"top_{name}"
+                # _active = 1h sustain window (2026-08-24) -- rolling-max of the raw bcol/tcol
+                # firing column, not a new/looser firing condition (see compute_signals()
+                # docstring). last_fired_ts always reads the RAW column so it keeps reporting the
+                # true original firing bar even while _active keeps the chip lit.
+                bacol, tacol = f"{bcol}_active", f"{tcol}_active"
+                signals_payload.append({
+                    "name": name,
+                    "description": description,
+                    "bottom_fired": bool(latest[bacol]) if warmed_up else None,
+                    "bottom_last_fired_ts": _evidence_last_fired_ts(sig[bcol], latest) if warmed_up else None,
+                    "top_fired": bool(latest[tacol]) if warmed_up else None,
+                    "top_last_fired_ts": _evidence_last_fired_ts(sig[tcol], latest) if warmed_up else None,
+                    # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
+                    "bottom_history": sig[bacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_history": sig[tacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                })
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "latest_bar_utc": utc_iso(latest["timestamp"]) if latest is not None else None,
+                "price": float(latest["close"]) if latest is not None else None,
+                "bars_loaded": int(len(sig)),
+                "warmed_up": bool(warmed_up),
+                "net_score": int(latest["net_score"]) if warmed_up else None,
+                "bottom_votes": int(latest["bottom_votes"]) if warmed_up else None,
+                "top_votes": int(latest["top_votes"]) if warmed_up else None,
+                "signals": signals_payload,
+            }
+            evidence_signal_cache["ts"] = time.monotonic()
+            evidence_signal_cache["payload"] = payload
+            return payload
+
+    async def load_oi_signal() -> dict[str, Any]:
+        """OI 급변 model indicator -- see scripts/live_oi_delta_signal_20260824.py docstring for
+        the vol-lift validation and why this is computed HERE (dashboard-side) rather than by
+        trading_bot.py. compute_oi_delta_signal() retries through the same brief read-vs-write
+        lock contention window ops_watchdog.py already retries for tail_risk.duckdb (up to ~2.8s
+        of blocking time.sleep across attempts) -- run via asyncio.to_thread so that wait never
+        stalls this process's event loop (and every other concurrent dashboard request) the way
+        calling it inline would."""
+        now = time.monotonic()
+        cached = oi_signal_cache["payload"]
+        if cached is not None and now - oi_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+            return cached
+        async with oi_signal_lock:
+            cached = oi_signal_cache["payload"]
+            if cached is not None and time.monotonic() - oi_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(compute_oi_delta_signal)
+            oi_signal_cache["ts"] = time.monotonic()
+            oi_signal_cache["payload"] = payload
+            return payload
+
+    async def load_liquidation_map() -> dict[str, Any]:
+        """Snapshot-tab liquidation map (estimated support/resistance) -- see
+        scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
+        caveats. Mirrors load_evidence_signals()'s klines-fetch/cache pattern (own cache, since
+        this needs a much longer 1h lookback than the chart's own /api/market-history)."""
+        now = time.monotonic()
+        cached = liquidation_map_cache["payload"]
+        if cached is not None and now - liquidation_map_cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
+            return cached
+        async with liquidation_map_lock:
+            cached = liquidation_map_cache["payload"]
+            if cached is not None and time.monotonic() - liquidation_map_cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
+                return cached
+            async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+                async with session.get(
+                    "https://fapi.binance.com/fapi/v1/klines",
+                    params={
+                        "symbol": LIQUIDATION_MAP_SYMBOL,
+                        "interval": LIQUIDATION_MAP_INTERVAL,
+                        "limit": LIQUIDATION_MAP_FETCH_LIMIT,
+                    },
+                ) as response:
+                    if response.status != web.HTTPOk.status_code:
+                        raise web.HTTPBadGateway(reason="liquidation_map_upstream_error")
+                    raw = await response.json()
+            cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+                    "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
+            df = pd.DataFrame(raw, columns=cols)
+            for c in ("high", "low", "close", "volume"):
+                df[c] = df[c].astype("float64")
+            df["close_time"] = df["close_time"].astype("int64")
+            df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+            df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+            now_ms = int(time.time() * 1000)
+            if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
+                df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
+
+            current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
+            payload = compute_event_driven_levels(df, current_price)
+            payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+            liquidation_map_cache["ts"] = time.monotonic()
+            liquidation_map_cache["payload"] = payload
+            return payload
+
     async def publish_dashboard_events(app: web.Application) -> None:
         nonlocal latest_event_state, latest_event_tickers
         last_state_etag = ""
@@ -709,6 +951,14 @@ def make_app() -> web.Application:
             while True:
                 started = time.monotonic()
                 state_payload, state_etag = dashboard_state_payload()
+                if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
+                    model_indicator_sample_state["last_sample_at"] = started
+                    raw_state = (state_payload or {}).get("state") or {}
+                    model_indicator_history.append({
+                        "sampled_at": datetime.now(timezone.utc).isoformat(),
+                        "microstructure": raw_state.get("microstructure") or {},
+                        "tail_risk": raw_state.get("tail_risk") or {},
+                    })
                 ticker_rows = await asyncio.gather(
                     *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
                 )
@@ -809,6 +1059,38 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="unsupported_market_history_asset")
         candles = await load_market_history(asset)
         return web.json_response({"asset": asset, "candles": candles}, headers={"Cache-Control": "no-cache"})
+
+    async def api_model_indicator_history(request: web.Request) -> web.Response:
+        return web.json_response(
+            {"samples": list(model_indicator_history), "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    async def api_evidence_signals(request: web.Request) -> web.Response:
+        try:
+            payload = await load_evidence_signals()
+        except web.HTTPBadGateway:
+            return web.json_response(
+                {"error": "evidence_signal_upstream_error", "detail": "Binance klines fetch failed."},
+                status=web.HTTPBadGateway.status_code,
+                headers={"Cache-Control": "no-cache"},
+            )
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
+    async def api_oi_signal(request: web.Request) -> web.Response:
+        payload = await load_oi_signal()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
+    async def api_liquidation_map(request: web.Request) -> web.Response:
+        try:
+            payload = await load_liquidation_map()
+        except web.HTTPBadGateway:
+            return web.json_response(
+                {"error": "liquidation_map_upstream_error", "detail": "Binance klines fetch failed."},
+                status=web.HTTPBadGateway.status_code,
+                headers={"Cache-Control": "no-cache"},
+            )
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
     async def api_trades(request: web.Request) -> web.Response:
         source_filter = request.query.get("source", "ALL").upper()
@@ -945,6 +1227,10 @@ def make_app() -> web.Application:
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
+    app.router.add_get("/api/evidence-signals", api_evidence_signals)
+    app.router.add_get("/api/oi-signal", api_oi_signal)
+    app.router.add_get("/api/liquidation-map", api_liquidation_map)
+    app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)

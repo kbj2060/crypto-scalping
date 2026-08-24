@@ -53,6 +53,7 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
+import eval_omega4_1_atr_safety_sltp_20260622 as atr_eval  # noqa: E402
 import train_eval_omega1_2_tabm_3head_20260603 as parent  # noqa: E402
 import train_eval_omega1_2_tabm_diffusion_risk_20260603 as omega  # noqa: E402
 import train_eval_omega1_2_tabm_exit_head_20260603 as exit_head  # noqa: E402
@@ -60,6 +61,19 @@ import train_eval_omega4_1_exit_head_price_move_sltp_retrain_20260622 as pricemo
 import train_eval_omega4_3head_parent72_loose_entry_quality_20260620 as omega4  # noqa: E402
 import train_omega1_regime3_expert_direction_head_volpca_20260602 as hard  # noqa: E402
 import research_eth_omega461_exit_sweep_20260721 as sweep  # noqa: E402
+
+# Live TP/SL is ATR-adaptive, not the old fixed BASE_TEMPLATE take_profit/stop_loss -- and NOT this
+# file's own h48_conservative barrier either (that barrier is deliberately tighter/different, ATR
+# mult 1.2/0.8 floor 0.6%/0.4%, per this file's own module docstring -- it's a labeling-anchor
+# choice, not a claim about what live's TP/SL actually is). pos_tp/pos_sl must independently match
+# what live actually feeds the model: verbatim from trading_bot_modules/omega4_6_1_live.py's
+# `_ComponentConfig` dataclass defaults (confirmed identical across h48qual/zig075/BTC/SOL). 2026-
+# 08-18 fix, see docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_
+# 20260818.md.
+LIVE_ATR_CFG = {
+    "atr_window": 192, "tp_mult": 12.0, "sl_mult": 6.0,
+    "min_tp": 0.075, "min_sl": 0.040, "max_tp": 0.22, "max_sl": 0.12,
+}
 
 MODEL_ID = "eth_omega461_exit_head_h48cons_relabel_20260813"
 OUT_DIR = ROOT / "tmp/causal_regen_20260516" / MODEL_ID
@@ -133,11 +147,64 @@ def _reference_full_window_segment_count(frame: pd.DataFrame) -> int:
     return int(segs)
 
 
+def _risk_sizing_for_component(component: str, frame: pd.DataFrame, *, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Real per-bar margin_fraction/leverage from `component`'s FROZEN, already-live risk sidecar,
+    via `sweep.prep_component` -- the same inference path `_evaluate_val` uses to score this
+    script's own retrained bundles. Local copy of research_eth_omega461_exit_head_liveatr_relabel_
+    20260813.py's `_risk_sizing_for_component` (that module imports this one, so importing it back
+    here would be circular -- duplicated per this repo's existing convention for exactly this
+    situation, e.g. `_retrain_component_exit_head`'s own docstring). 2026-08-18 fix, see
+    docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+
+    train_eval_omega4_2_risk_sidecar_20260622.py:582 hard-gates margin to 0 wherever the PARENT
+    model's own decision wasn't active. This function's candidates are drawn from every
+    zigzag_action bar with a valid h48_conservative barrier match -- measured empirically
+    2026-08-18, only ~3.3%(h48qual)/8.5%(zig075) coincide with a bar where the parent was also
+    active (same order as the sibling liveATR fix's own dense per-bar candidates). Bars where the
+    sidecar was inactive get a REAL (margin, leverage) pair resampled (seeded, with replacement,
+    pairing preserved) from the empirical distribution of bars where it WAS active."""
+    cfg = dict(sweep.COMPONENTS[component])
+    pred_csv = Path(cfg["bundle"]).parent / f"train_predictions_{cfg['q_tag']}.csv"
+    if not pred_csv.exists():
+        raise RuntimeError(f"{component}: missing {pred_csv} -- cannot source real TRAIN-period risk sizing")
+    prepped = sweep.prep_component(component, cfg, frame, pred_csv, oof=True)
+    if len(prepped["frame"]) != len(frame) or not prepped["frame"]["timestamp"].equals(frame["timestamp"]):
+        raise RuntimeError(
+            f"{component}: {pred_csv.name} timestamp coverage does not exactly match the input frame "
+            f"({len(prepped['frame'])} vs {len(frame)} rows) -- refusing to index risk sizing by row "
+            "position, which would silently misalign like the bug this function fixes."
+        )
+    margin = np.asarray(prepped["margin"], dtype=np.float64)
+    leverage = prepped["leverage"]
+    leverage = np.ones(len(frame), dtype=np.float64) if leverage is None else np.asarray(leverage, dtype=np.float64)
+
+    active_idx = np.flatnonzero(margin > 0.0)
+    inactive_idx = np.flatnonzero(margin <= 0.0)
+    if len(active_idx) == 0:
+        raise RuntimeError(f"{component}: risk sidecar is never active over this frame -- nothing real to sample from")
+    print(
+        f"  {component} risk_sizing: locally_active={len(active_idx)}/{len(frame)} "
+        f"({100.0 * len(active_idx) / len(frame):.1f}%) -- inactive bars resampled from this "
+        "empirical active-bar distribution",
+        flush=True,
+    )
+    if len(inactive_idx):
+        rng = np.random.default_rng(int(seed))
+        draw = rng.choice(active_idx, size=len(inactive_idx), replace=True)
+        margin = margin.copy()
+        leverage = leverage.copy()
+        margin[inactive_idx] = margin[draw]
+        leverage[inactive_idx] = leverage[draw]
+    return margin, leverage
+
+
 def _build_exit_dataset_entry_label_h48cons_barrier(
     frame: pd.DataFrame,
     state: pd.DataFrame,
     tb_frame: pd.DataFrame,
     *,
+    risk_margin: np.ndarray,
+    risk_leverage: np.ndarray,
     fee: float,
     slip: float,
     cost_mult: float,
@@ -167,6 +234,8 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
         raise RuntimeError(f"h48cons-barrier exit dataset missing columns: {missing}")
     if len(frame) != len(state):
         raise RuntimeError("h48cons-barrier exit frame/state length mismatch")
+    if len(risk_margin) != len(frame) or len(risk_leverage) != len(frame):
+        raise RuntimeError("risk_margin/risk_leverage length must match frame")
     tb_aligned = _merge_h48cons_barrier_cols(frame, tb_frame)
 
     arrays = {c: pd.to_numeric(frame[c], errors="raise").to_numpy(dtype=np.float64) for c in ("open", "high", "low", "close")}
@@ -181,10 +250,14 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
 
     fee_eff = float(fee) * float(cost_mult)
     slip_eff = float(slip) * float(cost_mult)
-    notional = float(omega.BASE_TEMPLATE["notional"])
-    leverage = float(omega.BASE_TEMPLATE["leverage"])
-    take_profit = float(omega.BASE_TEMPLATE["take_profit"])
-    stop_loss = float(omega.BASE_TEMPLATE["stop_loss"])
+    atr_pct = atr_eval._atr_pct(frame, int(LIVE_ATR_CFG["atr_window"]))
+    tp_mult, sl_mult = float(LIVE_ATR_CFG["tp_mult"]), float(LIVE_ATR_CFG["sl_mult"])
+    min_tp, min_sl = float(LIVE_ATR_CFG["min_tp"]), float(LIVE_ATR_CFG["min_sl"])
+    max_tp, max_sl = float(LIVE_ATR_CFG["max_tp"]), float(LIVE_ATR_CFG["max_sl"])
+    notional_used: list[float] = []
+    leverage_used: list[float] = []
+    tp_used: list[float] = []
+    sl_used: list[float] = []
     tw = max(int(terminal_window), 1)
     bar_delta = np.timedelta64(5, "m")
 
@@ -233,6 +306,19 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
             skip_reasons["entry_not_filled"] = skip_reasons.get("entry_not_filled", 0) + 1
             continue
 
+        # Real per-candidate risk sizing, locked in at the signal bar, matching live's
+        # entry_decision (sized once per trade, held fixed for its whole duration).
+        row_margin = float(risk_margin[i])
+        row_leverage = float(risk_leverage[i])
+        row_notional = row_margin * row_leverage
+        if row_notional <= 0.0:
+            skipped_candidates += 1
+            skip_reasons["risk_sizing_nonpositive"] = skip_reasons.get("risk_sizing_nonpositive", 0) + 1
+            continue
+        a = float(atr_pct[i])
+        row_tp = min(max(min_tp, a * tp_mult), max_tp)
+        row_sl = min(max(min_sl, a * sl_mult), max_sl)
+
         entry_state = state.iloc[int(i)]
         mfe = 0.0
         mae = 0.0
@@ -244,7 +330,10 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
                 if side > 0
                 else (entry_price - px * (1.0 + slip_eff)) / max(entry_price, 1.0e-12)
             )
-            unreal = raw * notional
+            # pos_unrealized/pos_mfe/pos_mae/pos_dist_to_tp/pos_dist_to_sl must match the unscaled
+            # `move` live actually feeds the model -- 2026-08-18 fix, see docs/experiments/
+            # eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+            unreal = raw
             mfe = max(mfe, unreal)
             mae = min(mae, unreal)
             giveback = (mfe - unreal) / max(abs(mfe), 1.0e-8) if mfe > 0.0 else 0.0
@@ -266,8 +355,8 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
                 reason = "hold"
             row = exit_head._position_feature_row(
                 state, entry_state, row_i=int(row_i), side=side, entry_price=float(entry_price),
-                entry_i=int(entry_i), notional=notional, leverage=leverage, take_profit=take_profit,
-                stop_loss=stop_loss, mfe=mfe, mae=mae, unreal=unreal,
+                entry_i=int(entry_i), notional=row_notional, leverage=row_leverage, take_profit=row_tp,
+                stop_loss=row_sl, mfe=mfe, mae=mae, unreal=unreal,
             )
             rows.append(row)
             labels.append(label)
@@ -298,6 +387,10 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
                 break
         if candidate_rows > 0:
             used_candidates += 1
+            notional_used.append(row_notional)
+            leverage_used.append(row_leverage)
+            tp_used.append(row_tp)
+            sl_used.append(row_sl)
             tb_barrier_reason_counts[str(tb_reason)] = tb_barrier_reason_counts.get(str(tb_reason), 0) + 1
         else:
             skipped_candidates += 1
@@ -322,7 +415,23 @@ def _build_exit_dataset_entry_label_h48cons_barrier(
         "used_candidates": int(used_candidates),
         "skipped_candidates": int(skipped_candidates),
         "skip_reasons": skip_reasons,
-        "risk_template": {"notional": notional, "leverage": leverage, "take_profit": take_profit, "stop_loss": stop_loss},
+        "risk_sizing": {
+            "source": "frozen_risk_sidecar_per_candidate",
+            "notional_mean": float(np.mean(notional_used)) if notional_used else 0.0,
+            "notional_min": float(np.min(notional_used)) if notional_used else 0.0,
+            "notional_max": float(np.max(notional_used)) if notional_used else 0.0,
+            "leverage_mean": float(np.mean(leverage_used)) if leverage_used else 0.0,
+            "leverage_min": float(np.min(leverage_used)) if leverage_used else 0.0,
+            "leverage_max": float(np.max(leverage_used)) if leverage_used else 0.0,
+        },
+        "live_atr_tp_sl": {
+            "tp_mean": float(np.mean(tp_used)) if tp_used else 0.0,
+            "tp_min": float(np.min(tp_used)) if tp_used else 0.0,
+            "tp_max": float(np.max(tp_used)) if tp_used else 0.0,
+            "sl_mean": float(np.mean(sl_used)) if sl_used else 0.0,
+            "sl_min": float(np.min(sl_used)) if sl_used else 0.0,
+            "sl_max": float(np.max(sl_used)) if sl_used else 0.0,
+        },
         "label_mode": "entry_label_h48cons_barrier_every_action_bar",
         "barrier_tag": BARRIER_TAG,
         "terminal_window": int(tw),
@@ -440,36 +549,65 @@ def main() -> int:
     )
     tb_frame["timestamp"] = pd.to_datetime(tb_frame["timestamp"])
 
-    print("stage=build_h48cons_barrier_exit_dataset", flush=True)
-    t0 = time.time()
-    x_exit_raw, y_exit, frame_exit, exit_diag = _build_exit_dataset_entry_label_h48cons_barrier(
-        frames["train_df"], frames["s_train_label"], tb_frame,
-        fee=fee, slip=slip, cost_mult=float(args.cost_mult),
-        max_candidates=int(args.max_candidates), max_rows=int(args.max_rows),
-    )
-    build_elapsed = time.time() - t0
-    print(f"  rows={exit_diag['rows']} used_candidates={exit_diag['used_candidates']} elapsed={build_elapsed:.1f}s", flush=True)
-
     reference_full_segments = _reference_full_window_segment_count(frames["train_df"])
-    checkpoint = {
-        "stage": "1_label_density_diversity_checkpoint",
-        "original_recipe_reference": ORIGINAL_RECIPE_REFERENCE,
-        "original_recipe_reference_full_uncapped_train_window_segment_count": reference_full_segments,
-        "new_recipe": exit_diag,
-        "candidate_density_ratio_vs_original_used_segments": float(exit_diag["used_candidates"]) / float(ORIGINAL_RECIPE_REFERENCE["used_segments"]),
-        "candidate_density_ratio_vs_full_window_segments": float(exit_diag["used_candidates"]) / float(reference_full_segments),
-        "build_elapsed_sec": build_elapsed,
-        "build_args": {"max_candidates": int(args.max_candidates), "max_rows": int(args.max_rows), "cost_mult": float(args.cost_mult)},
-    }
-    (out_dir / "stage1_checkpoint.json").write_text(json.dumps(checkpoint, ensure_ascii=False, indent=2, default=_json_default) + "\n", encoding="utf-8")
-    print(json.dumps(checkpoint, ensure_ascii=False, indent=2, default=_json_default), flush=True)
-
     if str(args.stage) == "dataset_only":
+        # Preview build (h48qual's sidecar arbitrarily, just for the density/diversity checkpoint
+        # -- both components share the same candidate_idx/labels, only risk sizing differs, see
+        # the per-component loop below).
+        risk_margin, risk_leverage = _risk_sizing_for_component("h48qual", frames["train_df"], seed=int(args.seed))
+        t0 = time.time()
+        _x, _y, _f, exit_diag = _build_exit_dataset_entry_label_h48cons_barrier(
+            frames["train_df"], frames["s_train_label"], tb_frame,
+            risk_margin=risk_margin, risk_leverage=risk_leverage,
+            fee=fee, slip=slip, cost_mult=float(args.cost_mult),
+            max_candidates=int(args.max_candidates), max_rows=int(args.max_rows),
+        )
+        build_elapsed = time.time() - t0
+        checkpoint = {
+            "stage": "1_label_density_diversity_checkpoint",
+            "original_recipe_reference": ORIGINAL_RECIPE_REFERENCE,
+            "original_recipe_reference_full_uncapped_train_window_segment_count": reference_full_segments,
+            "new_recipe": exit_diag,
+            "candidate_density_ratio_vs_original_used_segments": float(exit_diag["used_candidates"]) / float(ORIGINAL_RECIPE_REFERENCE["used_segments"]),
+            "candidate_density_ratio_vs_full_window_segments": float(exit_diag["used_candidates"]) / float(reference_full_segments),
+            "build_elapsed_sec": build_elapsed,
+            "build_args": {"max_candidates": int(args.max_candidates), "max_rows": int(args.max_rows), "cost_mult": float(args.cost_mult)},
+        }
+        (out_dir / "stage1_checkpoint.json").write_text(json.dumps(checkpoint, ensure_ascii=False, indent=2, default=_json_default) + "\n", encoding="utf-8")
+        print(json.dumps(checkpoint, ensure_ascii=False, indent=2, default=_json_default), flush=True)
         print("stage=done (dataset_only)", flush=True)
         return 0
 
-    results: dict[str, Any] = {"checkpoint": checkpoint, "components": {}}
+    # h48qual and zig075 have SEPARATELY fit risk sidecars with very different sizing scales, so
+    # each component gets its OWN dataset build (same candidate set/barrier/labels -- only the
+    # risk sizing differs) rather than sharing one. 2026-08-18 fix, see docs/experiments/
+    # eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+    results: dict[str, Any] = {"components": {}}
     for component in ("h48qual", "zig075"):
+        print(f"stage=risk_sizing component={component}", flush=True)
+        risk_margin, risk_leverage = _risk_sizing_for_component(component, frames["train_df"], seed=int(args.seed))
+
+        print(f"stage=build_h48cons_barrier_exit_dataset component={component}", flush=True)
+        t0 = time.time()
+        x_exit_raw, y_exit, frame_exit, exit_diag = _build_exit_dataset_entry_label_h48cons_barrier(
+            frames["train_df"], frames["s_train_label"], tb_frame,
+            risk_margin=risk_margin, risk_leverage=risk_leverage,
+            fee=fee, slip=slip, cost_mult=float(args.cost_mult),
+            max_candidates=int(args.max_candidates), max_rows=int(args.max_rows),
+        )
+        build_elapsed = time.time() - t0
+        print(f"  {component} rows={exit_diag['rows']} used_candidates={exit_diag['used_candidates']} elapsed={build_elapsed:.1f}s", flush=True)
+        checkpoint = {
+            "stage": "1_label_density_diversity_checkpoint",
+            "original_recipe_reference": ORIGINAL_RECIPE_REFERENCE,
+            "original_recipe_reference_full_uncapped_train_window_segment_count": reference_full_segments,
+            "new_recipe": exit_diag,
+            "candidate_density_ratio_vs_original_used_segments": float(exit_diag["used_candidates"]) / float(ORIGINAL_RECIPE_REFERENCE["used_segments"]),
+            "candidate_density_ratio_vs_full_window_segments": float(exit_diag["used_candidates"]) / float(reference_full_segments),
+            "build_elapsed_sec": build_elapsed,
+            "build_args": {"max_candidates": int(args.max_candidates), "max_rows": int(args.max_rows), "cost_mult": float(args.cost_mult)},
+        }
+
         print(f"stage=retrain_exit_head component={component}", flush=True)
         t0 = time.time()
         retrain_info = _retrain_component_exit_head(
@@ -481,7 +619,7 @@ def main() -> int:
         print(f"stage=evaluate_val component={component}", flush=True)
         val_metrics = _evaluate_val(component, Path(retrain_info["new_bundle"]))
         print(json.dumps({"component": component, "val": val_metrics}, ensure_ascii=False, indent=2, default=_json_default), flush=True)
-        results["components"][component] = {"retrain": retrain_info, "val_metrics": val_metrics}
+        results["components"][component] = {"checkpoint": checkpoint, "retrain": retrain_info, "val_metrics": val_metrics}
 
     report = {
         "model_id": MODEL_ID,

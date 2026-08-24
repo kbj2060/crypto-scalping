@@ -423,6 +423,25 @@ baseline의 OOS 성과를 인용한 모든 문서(`eth_val_oos_regime_mismatch_i
    진단의 "노이즈 바닥" 문제 자체를 없앤 상태로 다시 비교할 것을 권고한다 — 이번 조사 범위
    밖이라 실행하지 않았다.
 
+   **정정(2026-08-15, 실제로 이 권고를 실행하려다 발견)**: 이 권고는 **실행 불가능한 전제** 위에
+   있었다. `trade_candidates_2026_alpha6_current_tail111_exact.csv`(EVAL_CSV)를 만든 생성
+   스크립트(`scripts/build_alpha7_01965_cleanfunding_candidates_20260529.py`)는 **2026-08-10
+   커밋 `4c46d20`에서 이미 삭제됐다** — 그 커밋 메시지 자체가 "m7 dependence had also made the
+   project's one VAL+OOS-passing model (Omega6 v2) permanently unreproducible"라고 명시해,
+   이 계열을 **의도적으로 재현 불가로 못박은 결정**이었음을 확인했다. 업스트림 5개 소스 중 2개
+   (m7 앙상블, regime4_pred TFT)의 코드·체크포인트가 같은 커밋에서 함께 삭제됐다. 설령 스크립트
+   자체를 git에서 복원해도(`git show`로 텍스트는 가능), `features/elite.py`의 기본 기술지표
+   공식이 그 이후 독립적으로 바뀌었고 옛 버전을 git 히스토리로 복구할 수 없어(2026-07-06 두
+   스크립트 docstring이 이미 정량화: Jan-Feb 2026 겹치는 구간에서 `ou_halflife` 상관계수
+   **-0.03**(사실상 무관), `kel` 0.62, `evt_excess_z` 0.79, `btc_corr_60` 0.85,
+   `dual_momentum` 0.93) — **코드를 복원해도 값이 안 맞는, 닫을 수 없는 상한**이 이미 있다.
+   **결론: "원본과 같은 파이프라인으로 깨끗하게 재비교"는 이제 불가능하다.** 유일하게 남은
+   대안은 이 진단 자체가 노이즈 원인으로 지목한 그 "확장" 파이프라인
+   (`scripts/build_omega4_6_1_extended_parent_predictions_20260706.py`류, 이미 2026-07-12까지
+   생성돼 있고 `training_features_2026_rebuilt.csv`는 07-20까지 존재)을 **더 연장해서 데이터
+   포인트만 늘리는 것**뿐이다 — 노이즈 바닥 자체는 없어지지 않는다. 상세 조사:
+   [[eth_omega4_quality_threshold_alpha67_pipeline_irreproducible_20260815]].
+
 ---
 
 ## 스코프와 한계

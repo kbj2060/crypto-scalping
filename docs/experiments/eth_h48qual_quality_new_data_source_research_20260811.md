@@ -223,7 +223,7 @@ collector.py`)가 Binance-OKX 펀딩비 스프레드(ETH/BTC/SOL)를 이미 매�
 후보의 부속 실험으로만 취급, 우선순위 낮음. 과거 백필 가능성이 확인 전까지는 이 후보 전체가
 사실상 (c)에 가까울 수 있음.
 
-### 후보 5. Deribit 옵션체인 스큐 / OI / GEX 프록시 — ⏸ 인프라 미비로 보류 (2026-08-11 확인)
+### 후보 5. Deribit 옵션체인 스큐 / OI / GEX 프록시 — ⏸ 과거 백필 보류, ▶ 실시간 수집 시작 (2026-08-15)
 
 **라이브 확인(2026-08-11)**: `get_book_summary_by_currency`는 **현재 스냅샷만** 반환(과거 시점
 파라미터 없음), `get_instruments(expired=true)`는 만기 계약의 메타데이터(계약명 등)만 줄 뿐
@@ -231,6 +231,24 @@ collector.py`)가 Binance-OKX 펀딩비 스프레드(ETH/BTC/SOL)를 이미 매�
 엔드포인트가 없다. 정식 히스토리를 만들려면 계약별 과거 trade/chart 데이터를 개별 수집해 재구성
 해야 하는데, 이건 "가장 싼 검증 스텝"의 범위를 벗어나는 별도 엔지니어링 프로젝트다. VAL/OOS
 구간 백필이 사실상 안 되므로 보류 — 아래 원문(제안 당시 논리)은 그대로 둔다.
+
+**재확인(2026-08-15, 독립 세션)**: 위와 동일한 결론을 다시 라이브로 확인(`get_instruments?
+currency=ETH&kind=option&expired=true`가 어제자 38건만 반환, VAL/OOS 구간 종목명 조회 불가).
+외부 유료 대안(CryptoDataDownload 옵션체인 zip은 실제로는 Plus+ 유료, Tardis.dev 무료분은 월
+1일치뿐)도 조사했으나 전부 백필 불가 확인. 사용자가 "오늘부터 실시간 수집만 시작"을 선택해,
+이 절이 스스로 제안한 **"가장 싼 검증 스텝"(아래 문단)을 그대로 착수**: `scripts/
+collect_deribit_option_gex_20260815.py`가 `get_book_summary_by_currency`(ETH+BTC, 1콜/통화)로
+매시 정각 스냅샷을 받아 `data/live/deribit_gex.duckdb`(`option_chain_snapshot`, `gex_summary`
+테이블)에 적재. Gamma는 ticker 그릭스 대신 Black-Scholes(r=0, mark_iv를 sigma로)로 자체 계산 —
+book-summary 응답에 그릭스가 없어 종목당 ticker 호출(700+회/스냅샷)을 피하기 위함. GEX 부호
+컨벤션(콜 OI=딜러숏/풋 OI=딜러롱 가정, SqueezeMetrics식 단순화, 실제 딜러 포지셔닝 미검증)은
+스크립트 docstring에 명시. 크론 등록 완료(`0 * * * *`,
+`scripts/run_deribit_gex_collector.sh`, 로그 `data/research/deribit_gex_collector_cron.log`).
+첫 스냅샷 확인: ETH n=694종목(front_month 292개)/BTC n=818종목(front_month 330개), GEX 값이
+0이 아니고 콜/풋 부호가 반대로 상쇄되는 정상 형태(퇴화 아님) — 아래 "미검증/캐비어트"의 (2)
+통과. (1)(유동성 충분성)은 며칠~몇 주 누적 후 재확인 필요. **아직 어떤 신호/승격 주장도 아님 —
+데이터가 쌓이길 기다리는 단계.** 상세: `docs/experiments/
+eth_trader_research_gex_infra_start_20260815.md`.
 
 **인프라: (b)** — `download_deribit_dvol_20260804.py`가 무료 공개 Deribit REST(`get_
 volatility_index_data`, 인증 불필요)로 BTC+ETH DVOL을 이미 받고 있어, 같은 API 계열(예:

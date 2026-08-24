@@ -115,11 +115,15 @@ def _build_dataset(max_candidates: int) -> tuple[pd.DataFrame, np.ndarray, pd.Da
     valid_idx = np.asarray(tc["valid_candidate_idx"], dtype=np.int64)
     n_sample = min(int(max_candidates), len(valid_idx))
     candidate_idx = np.sort(rng.choice(valid_idx, size=n_sample, replace=False))
+    print("stage=risk_sizing component=h48qual", flush=True)
+    risk_margin, risk_leverage = liveatr._risk_sizing_for_component("h48qual", frames["train_df"], seed=SEED)
+
     print(f"stage=build_live_atr_barrier_exit_dataset candidates_sampled={len(candidate_idx)}/{len(valid_idx)}", flush=True)
     t0 = time.time()
     x_exit_raw, y_exit, frame_exit, exit_diag = liveatr._build_exit_dataset_entry_label_live_atr_barrier(
         frames["train_df"], frames["s_train_label"],
-        candidate_idx=candidate_idx, fee=fee, slip=slip, cost_mult=COST_MULT,
+        candidate_idx=candidate_idx, risk_margin=risk_margin, risk_leverage=risk_leverage,
+        fee=fee, slip=slip, cost_mult=COST_MULT,
         atr_cfg=liveatr.LIVE_ATR_CFG, max_horizon_bars=MAX_HORIZON_BARS, max_rows=0,
     )
     exit_diag["build_elapsed_sec"] = time.time() - t0

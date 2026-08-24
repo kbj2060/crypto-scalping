@@ -2,7 +2,12 @@
 게이트(quality_head) 없이 direction_head의 원본 픽(dir_action)만으로 거래하면 always-short/
 always-long을 이기는가? 지금까지의 always-short 대조는 전부 게이트 통과 후(final_action) 결과만
 비교했음 -- 이건 그 앞 단계(원본 dir_action)를 직접 본다. 재학습 없음, 기존 저장 예측 재사용.
-_to_fixed_decisions()가 {prefix}final_action을 읽는 지점에서 dir_action으로 바꿔치기."""
+_to_fixed_decisions()가 {prefix}final_action을 읽는 지점에서 dir_action으로 바꿔치기.
+
+2026-08-15 갱신: --bundle-dir/--out-csv 인자를 추가해 일반화(로직 변경 없음 -- 기존 하드코딩
+BUNDLE_DIR를 argparse 기본값으로 옮긴 것뿐, zig075 쪽 diagnose_eth_zig075_ungated_direction_vs_always_short_20260815.py와
+동일 패턴). 인자를 생략하면 기존 배포 번들(q050)을 그대로 검사한다."""
+import argparse
 import sys
 from pathlib import Path
 import numpy as np, pandas as pd
@@ -15,10 +20,16 @@ omega.BASE_TEMPLATE["max_hold"] = 0
 omega.BASE_TEMPLATE["cooldown"] = 0
 
 # 라이브 h48qual 번들 -- VAL/OOS는 원본 그대로(이미 정확 확인됨), TRAIN은 2024-2025 전체 재생성판.
-BUNDLE_DIR = ROOT / "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630"
+DEFAULT_BUNDLE_DIR = ROOT / "tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630"
 TRAIN_CSV = ROOT / "tmp/causal_regen_20260516/omega_clean_regime_only_24_25_inputs_20260629/trade_candidates_2024_2025_regime4_state24_sticky090_tp18_sl10_fixed.csv"
 EVAL_CSV = ROOT / "tmp/causal_regen_20260516/alpha7_01965_cleanfunding_candidates_20260529/trade_candidates_2026_alpha6_current_tail111_exact.csv"
 SPLIT_TS = pd.Timestamp("2025-10-01")
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--bundle-dir", type=Path, default=DEFAULT_BUNDLE_DIR, help="validation/oos_predictions_q050.csv를 포함하는 h48qual parent out_dir")
+ap.add_argument("--out-csv", type=Path, default=None, help="결과 CSV 저장 경로 (기본: 화면 출력만, 저장 안 함)")
+args = ap.parse_args()
+BUNDLE_DIR = Path(args.bundle_dir)
 
 fee, slip = omega._load_fee_slip()
 cost_mult = 3.0
@@ -82,4 +93,9 @@ for split_name, price_frame, fname, prefix in [
 df = pd.DataFrame(rows)
 pd.set_option("display.width", 220)
 print()
+print(f"bundle_dir: {BUNDLE_DIR}")
 print(df.to_string(index=False))
+if args.out_csv is not None:
+    args.out_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(args.out_csv, index=False)
+    print("\n저장:", args.out_csv)

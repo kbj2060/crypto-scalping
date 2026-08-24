@@ -169,6 +169,8 @@ def _fit_exit(full_raw: pd.DataFrame, all_feature_cols: list[str], base_cols: li
     x_raw, y, _route, diag = sol._build_exit_dataset_entry_label_terminal_giveback(
         full_raw,
         base_input,
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=3.0,

@@ -198,6 +198,15 @@ def _fast_timescale_checkpoint(
         end_bound = min(entry_i + int(max_horizon_bars), n - 1)
         reason = "timeout"
         bars = end_bound - entry_i + 1
+        # Barrier hit checked against intrabar high/low, matching the ACTUAL live TP/SL hard-check
+        # for h48qual/zig075 (trading_bot.py:9181-9202, omega4_6_1_live.py::evaluate_exit's
+        # bar_high_move/bar_low_move -- computed from the just-completed bar's real high/low, "a
+        # resting TP/SL order fills the instant price touches it intrabar... does not add
+        # lookahead: both bars are already fully closed"). 2026-08-18 CORRECTION: an earlier pass
+        # this same session changed this to close-only based on greedy_replay/_price_move being
+        # close-only and an incomplete trading_bot.py grep -- that missed evaluate_exit entirely,
+        # which is the function that actually governs this. Reverted. See docs/experiments/
+        # eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md finding 2 (corrected).
         for row_i in range(entry_i, end_bound + 1):
             hi = high[row_i]
             lo = low[row_i]
@@ -242,11 +251,76 @@ def _fast_timescale_checkpoint(
     }
 
 
+def _risk_sizing_for_component(component: str, frame: pd.DataFrame, *, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Real per-bar margin_fraction/leverage from `component`'s FROZEN, already-live risk sidecar
+    (`risk_sidecar.pkl`, via `sweep.prep_component`) applied to `frame` -- the SAME inference path
+    `h48cons._evaluate_val` uses to SCORE this script's own retrained bundles (raw margin*leverage,
+    no SCALE_MAP/LEVERAGE_CAP/NOTIONAL_CAP -- that reconciliation is specific to
+    replay_omega4_6_1_greedy_router_20260706's shared-slot accounting, not this family's own
+    train/eval convention). So training-time pos_notional/pos_leverage/pos_exposure and eval-time
+    risk sizing now come from one source of truth, instead of the flat BASE_TEMPLATE constant both
+    used to silently disagree with. 2026-08-18 fix, see docs/experiments/eth_odyssey4_exit_head_
+    liveatr_barrier_and_label_reaudit_20260818.md finding 1b.
+
+    Raises if `component` has no registered sidecar, or if the sidecar's train_predictions_qXXX.csv
+    doesn't cover `frame`'s timestamps exactly -- silently reindexing on a partial/misaligned join
+    would repeat exactly the kind of bug this function exists to fix.
+
+    `train_eval_omega4_2_risk_sidecar_20260622.py:582` hard-gates margin to 0 wherever the PARENT
+    model's own decision wasn't active (by design -- no real trade, no real sizing). But
+    `_build_exit_dataset_entry_label_live_atr_barrier`'s candidates are drawn from every
+    zigzag_action bar, a much denser population -- measured empirically 2026-08-18, only
+    ~3.3%(h48qual)/8.5%(zig075) of candidate bars coincide with a bar where the parent was also
+    active. Indexing margin/leverage directly at each candidate's own bar would silently shrink the
+    exit-head training set to ~3-8% of its sampled size, gutting this recipe's dense-candidate
+    design as a side effect of the bug fix. Per 2026-08-18 user decision: bars where the sidecar was
+    inactive get a REAL (margin, leverage) pair resampled (seeded, with replacement, pairing
+    preserved) from the empirical distribution of bars where it WAS active -- every assigned value
+    is a genuine historical sizing decision (correct marginal variance for the model to learn from);
+    it just isn't tied to that specific candidate's own local market conditions. Bars where the
+    sidecar is already active keep their real, locally-accurate value unchanged."""
+    cfg = dict(h48cons.sweep.COMPONENTS[component])
+    pred_csv = Path(cfg["bundle"]).parent / f"train_predictions_{cfg['q_tag']}.csv"
+    if not pred_csv.exists():
+        raise RuntimeError(f"{component}: missing {pred_csv} -- cannot source real TRAIN-period risk sizing")
+    prepped = h48cons.sweep.prep_component(component, cfg, frame, pred_csv, oof=True)
+    if len(prepped["frame"]) != len(frame) or not prepped["frame"]["timestamp"].equals(frame["timestamp"]):
+        raise RuntimeError(
+            f"{component}: {pred_csv.name} timestamp coverage does not exactly match the input frame "
+            f"({len(prepped['frame'])} vs {len(frame)} rows) -- refusing to index risk sizing by row "
+            "position, which would silently misalign like the bug this function fixes."
+        )
+    margin = np.asarray(prepped["margin"], dtype=np.float64)
+    leverage = prepped["leverage"]
+    leverage = np.ones(len(frame), dtype=np.float64) if leverage is None else np.asarray(leverage, dtype=np.float64)
+
+    active_idx = np.flatnonzero(margin > 0.0)
+    inactive_idx = np.flatnonzero(margin <= 0.0)
+    if len(active_idx) == 0:
+        raise RuntimeError(f"{component}: risk sidecar is never active over this frame -- nothing real to sample from")
+    print(
+        f"  {component} risk_sizing: locally_active={len(active_idx)}/{len(frame)} "
+        f"({100.0 * len(active_idx) / len(frame):.1f}%) -- inactive bars resampled from this "
+        "empirical active-bar distribution",
+        flush=True,
+    )
+    if len(inactive_idx):
+        rng = np.random.default_rng(int(seed))
+        draw = rng.choice(active_idx, size=len(inactive_idx), replace=True)
+        margin = margin.copy()
+        leverage = leverage.copy()
+        margin[inactive_idx] = margin[draw]
+        leverage[inactive_idx] = leverage[draw]
+    return margin, leverage
+
+
 def _build_exit_dataset_entry_label_live_atr_barrier(
     frame: pd.DataFrame,
     state: pd.DataFrame,
     *,
     candidate_idx: np.ndarray,
+    risk_margin: np.ndarray | None,
+    risk_leverage: np.ndarray | None,
     fee: float,
     slip: float,
     cost_mult: float,
@@ -263,13 +337,35 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
     but the barrier end is found by SIMULATING the live ATR-adaptive barrier forward from each
     candidate (via `atr_eval._atr_pct`) instead of reading a precomputed CSV. Only candidates in
     `candidate_idx` are used (subsample -- see module docstring for why the full ~37K population
-    is infeasible at this barrier's ~600-850 bar median duration)."""
+    is infeasible at this barrier's ~600-850 bar median duration).
+
+    `risk_margin`/`risk_leverage` (both aligned to `frame`'s row index, e.g. from
+    `_risk_sizing_for_component`) drive the per-candidate pos_notional/pos_leverage/pos_exposure
+    features -- pass both explicitly, or both None to fall back to the fixed BASE_TEMPLATE constant
+    (only appropriate when no risk sidecar exists yet for this candidate's parent, e.g. a brand-new
+    unregistered research parent; the fallback is recorded in the returned diagnostics as
+    `risk_sizing_source` so it's never ambiguous which mode produced a given dataset). 2026-08-18
+    fix, see docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md
+    finding 1b -- the constant was previously used unconditionally, with zero variance across every
+    training row, though live/replay always fed the model real per-trade sizing."""
     required = {"timestamp", "zigzag_action", "open", "high", "low", "close"}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise RuntimeError(f"live-ATR exit dataset missing columns: {missing}")
     if len(frame) != len(state):
         raise RuntimeError("live-ATR exit frame/state length mismatch")
+    if (risk_margin is None) != (risk_leverage is None):
+        raise RuntimeError("pass both risk_margin and risk_leverage, or neither")
+    if risk_margin is None:
+        risk_sizing_source = "base_template_constant_no_sidecar_available"
+        fixed_notional = float(omega.BASE_TEMPLATE["notional"])
+        fixed_leverage = float(omega.BASE_TEMPLATE["leverage"])
+        risk_margin = np.full(len(frame), fixed_notional / max(fixed_leverage, 1.0e-12), dtype=np.float64)
+        risk_leverage = np.full(len(frame), fixed_leverage, dtype=np.float64)
+    else:
+        risk_sizing_source = "frozen_risk_sidecar_per_candidate"
+        if len(risk_margin) != len(frame) or len(risk_leverage) != len(frame):
+            raise RuntimeError("risk_margin/risk_leverage length must match frame")
 
     arrays = {c: pd.to_numeric(frame[c], errors="raise").to_numpy(dtype=np.float64) for c in ("open", "high", "low", "close")}
     action = pd.to_numeric(frame["zigzag_action"], errors="raise").to_numpy(dtype=np.int64)
@@ -279,10 +375,10 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
 
     fee_eff = float(fee) * float(cost_mult)
     slip_eff = float(slip) * float(cost_mult)
-    notional = float(omega.BASE_TEMPLATE["notional"])
-    leverage = float(omega.BASE_TEMPLATE["leverage"])
-    take_profit = float(omega.BASE_TEMPLATE["take_profit"])
-    stop_loss = float(omega.BASE_TEMPLATE["stop_loss"])
+    notional_used: list[float] = []
+    leverage_used: list[float] = []
+    tp_used: list[float] = []
+    sl_used: list[float] = []
     tw = max(int(terminal_window), 1)
     tp_mult, sl_mult = float(atr_cfg["tp_mult"]), float(atr_cfg["sl_mult"])
     min_tp, min_sl = float(atr_cfg["min_tp"]), float(atr_cfg["min_sl"])
@@ -363,6 +459,17 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
             skip_reasons["entry_not_filled"] = skip_reasons.get("entry_not_filled", 0) + 1
             continue
 
+        # Real per-candidate risk sizing (or the fixed-constant fallback, see risk_sizing_source
+        # above) -- locked in at the signal bar, matching greedy_replay/replay_exit_variant which
+        # both size a trade once at entry and hold notional/leverage fixed for its whole duration.
+        row_margin = float(risk_margin[i])
+        row_leverage = float(risk_leverage[i])
+        row_notional = row_margin * row_leverage
+        if row_notional <= 0.0:
+            skipped_candidates += 1
+            skip_reasons["risk_sizing_nonpositive"] = skip_reasons.get("risk_sizing_nonpositive", 0) + 1
+            continue
+
         a = float(atr_pct[i])
         tp_move = min(max(min_tp, a * tp_mult), max_tp)
         sl_move = min(max(min_sl, a * sl_mult), max_sl)
@@ -375,6 +482,19 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
         end_bound = min(entry_i + int(max_horizon_bars), n - 1)
         tb_reason = "timeout"
         barrier_end_i = end_bound
+        # Barrier hit checked against intrabar high/low, matching the ACTUAL live TP/SL hard-check
+        # for h48qual/zig075 (trading_bot.py:9181-9202, omega4_6_1_live.py::evaluate_exit's
+        # bar_high_move/bar_low_move -- computed from the just-completed bar's real high/low, no
+        # slippage applied there either: "a resting TP/SL order fills the instant price touches it
+        # intrabar... does not add lookahead"). 2026-08-18 CORRECTION: an earlier pass this same
+        # session changed this to close-only based on greedy_replay/_price_move being close-only
+        # and an incomplete trading_bot.py grep -- that missed evaluate_exit entirely, which is the
+        # function that actually governs this barrier. Reverted to intrabar (matches the ORIGINAL
+        # pre-2026-08-18 code exactly). See docs/experiments/eth_odyssey4_exit_head_liveatr_
+        # barrier_and_label_reaudit_20260818.md finding 2 (corrected). Unlike this barrier, the
+        # exit_head's own LEARNED features (pos_unrealized/pos_mfe/pos_mae, the `raw`/`unreal` loop
+        # below) genuinely are close/mark-price-based in live (trading_bot.py:9178's `move`) --
+        # that part of the 2026-08-18 fix (finding 1a) stays correct and is unchanged here.
         for row_i in range(entry_i, end_bound + 1):
             hi = arrays["high"][row_i]
             lo = arrays["low"][row_i]
@@ -404,7 +524,14 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
                 if side > 0
                 else (entry_price - px * (1.0 + slip_eff)) / max(entry_price, 1.0e-12)
             )
-            unreal = raw * notional
+            # pos_unrealized/pos_mfe/pos_mae/pos_dist_to_tp/pos_dist_to_sl must match the unscaled
+            # `move` that greedy_replay/replay_exit_variant actually feed the model at inference --
+            # 2026-08-18 fix, see docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_
+            # reaudit_20260818.md (this `* notional` scaled these features to 45% of their real
+            # magnitude in training only; pos_giveback is unaffected since it's a scale-invariant
+            # ratio). `notional`/`leverage` locals are unchanged -- still used for pos_notional/
+            # pos_leverage/pos_exposure and the retrain bundle's risk_template, out of scope here.
+            unreal = raw
             mfe = max(mfe, unreal)
             mae = min(mae, unreal)
             giveback = (mfe - unreal) / max(abs(mfe), 1.0e-8) if mfe > 0.0 else 0.0
@@ -424,10 +551,15 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
             else:
                 label = 0
                 reason = "hold"
+            # pos_tp/pos_sl/pos_dist_to_tp/pos_dist_to_sl must reflect THIS candidate's actual
+            # ATR barrier (tp_move/sl_move), not the fixed BASE_TEMPLATE take_profit/stop_loss --
+            # 2026-08-17 fix, see docs/experiments/eth_odyssey4_exit_head_tpsl_feature_barrier_
+            # mismatch_20260817.md (the fixed constant was decorrelated from the barrier that
+            # actually produced the label, at ~3-45x scale mismatch depending on ATR/floor).
             row = exit_head._position_feature_row(
                 state, entry_state, row_i=int(row_i), side=side, entry_price=float(entry_price),
-                entry_i=int(entry_i), notional=notional, leverage=leverage, take_profit=take_profit,
-                stop_loss=stop_loss, mfe=mfe, mae=mae, unreal=unreal,
+                entry_i=int(entry_i), notional=row_notional, leverage=row_leverage, take_profit=tp_move,
+                stop_loss=sl_move, mfe=mfe, mae=mae, unreal=unreal,
             )
             rows.append(row)
             labels.append(label)
@@ -461,6 +593,10 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
                 break
         if candidate_rows > 0:
             used_candidates += 1
+            notional_used.append(row_notional)
+            leverage_used.append(row_leverage)
+            tp_used.append(tp_move)
+            sl_used.append(sl_move)
             tb_barrier_reason_counts[str(tb_reason)] = tb_barrier_reason_counts.get(str(tb_reason), 0) + 1
         else:
             skipped_candidates += 1
@@ -491,7 +627,23 @@ def _build_exit_dataset_entry_label_live_atr_barrier(
         "used_candidates": int(used_candidates),
         "skipped_candidates": int(skipped_candidates),
         "skip_reasons": skip_reasons,
-        "risk_template": {"notional": notional, "leverage": leverage, "take_profit": take_profit, "stop_loss": stop_loss},
+        "risk_sizing": {
+            "source": risk_sizing_source,
+            "notional_mean": float(np.mean(notional_used)) if notional_used else 0.0,
+            "notional_min": float(np.min(notional_used)) if notional_used else 0.0,
+            "notional_max": float(np.max(notional_used)) if notional_used else 0.0,
+            "leverage_mean": float(np.mean(leverage_used)) if leverage_used else 0.0,
+            "leverage_min": float(np.min(leverage_used)) if leverage_used else 0.0,
+            "leverage_max": float(np.max(leverage_used)) if leverage_used else 0.0,
+        },
+        "live_atr_tp_sl": {
+            "tp_mean": float(np.mean(tp_used)) if tp_used else 0.0,
+            "tp_min": float(np.min(tp_used)) if tp_used else 0.0,
+            "tp_max": float(np.max(tp_used)) if tp_used else 0.0,
+            "sl_mean": float(np.mean(sl_used)) if sl_used else 0.0,
+            "sl_min": float(np.min(sl_used)) if sl_used else 0.0,
+            "sl_max": float(np.max(sl_used)) if sl_used else 0.0,
+        },
         "label_mode": "entry_label_live_atr_barrier_subsampled_action_bars",
         "atr_cfg": dict(atr_cfg),
         "max_horizon_bars": int(max_horizon_bars),
@@ -614,19 +766,31 @@ def main() -> int:
     valid_idx = np.asarray(tc["valid_candidate_idx"], dtype=np.int64)
     n_sample = min(int(args.max_candidates), len(valid_idx)) if int(args.max_candidates) > 0 else len(valid_idx)
     candidate_idx = np.sort(rng.choice(valid_idx, size=n_sample, replace=False))
-    print(f"stage=build_live_atr_barrier_exit_dataset candidates_sampled={len(candidate_idx)}/{len(valid_idx)}", flush=True)
-    t0 = time.time()
-    x_exit_raw, y_exit, frame_exit, exit_diag = _build_exit_dataset_entry_label_live_atr_barrier(
-        frames["train_df"], frames["s_train_label"],
-        candidate_idx=candidate_idx, fee=fee, slip=slip, cost_mult=float(args.cost_mult),
-        atr_cfg=LIVE_ATR_CFG, max_horizon_bars=int(args.max_horizon_bars), max_rows=int(args.max_rows),
-    )
-    build_elapsed = time.time() - t0
-    print(f"  rows={exit_diag['rows']} used_candidates={exit_diag['used_candidates']} positive_rate={exit_diag['positive_rate']:.4f} elapsed={build_elapsed:.1f}s", flush=True)
-    exit_diag["build_elapsed_sec"] = build_elapsed
+    print(f"stage=candidates_sampled candidates_sampled={len(candidate_idx)}/{len(valid_idx)}", flush=True)
 
-    results: dict[str, Any] = {"checkpoint": checkpoint, "dataset": exit_diag, "components": {}}
+    # h48qual and zig075 have SEPARATELY fit risk sidecars with very different sizing scales (e.g.
+    # greedy_replay's own SCALE_MAP treats them ~6x apart) -- a dataset built with one component's
+    # risk sizing is not a faithful pos_notional/pos_leverage/pos_exposure input for the other, so
+    # each component gets its OWN dataset build (same candidate_idx/barrier/labels -- only the risk
+    # sizing differs) rather than sharing one. 2026-08-18 fix, see docs/experiments/eth_odyssey4_
+    # exit_head_liveatr_barrier_and_label_reaudit_20260818.md finding 1b.
+    results: dict[str, Any] = {"checkpoint": checkpoint, "components": {}}
     for component in ("h48qual", "zig075"):
+        print(f"stage=risk_sizing component={component}", flush=True)
+        risk_margin, risk_leverage = _risk_sizing_for_component(component, frames["train_df"], seed=int(args.seed))
+
+        print(f"stage=build_live_atr_barrier_exit_dataset component={component}", flush=True)
+        t0 = time.time()
+        x_exit_raw, y_exit, frame_exit, exit_diag = _build_exit_dataset_entry_label_live_atr_barrier(
+            frames["train_df"], frames["s_train_label"],
+            candidate_idx=candidate_idx, risk_margin=risk_margin, risk_leverage=risk_leverage,
+            fee=fee, slip=slip, cost_mult=float(args.cost_mult),
+            atr_cfg=LIVE_ATR_CFG, max_horizon_bars=int(args.max_horizon_bars), max_rows=int(args.max_rows),
+        )
+        build_elapsed = time.time() - t0
+        print(f"  {component} rows={exit_diag['rows']} used_candidates={exit_diag['used_candidates']} positive_rate={exit_diag['positive_rate']:.4f} elapsed={build_elapsed:.1f}s", flush=True)
+        exit_diag["build_elapsed_sec"] = build_elapsed
+
         print(f"stage=retrain_exit_head component={component}", flush=True)
         t0 = time.time()
         retrain_info = _retrain_component_exit_head_liveatr(
@@ -638,7 +802,7 @@ def main() -> int:
         print(f"stage=evaluate_val component={component}", flush=True)
         val_metrics = h48cons._evaluate_val(component, Path(retrain_info["new_bundle"]))
         print(json.dumps({"component": component, "val": val_metrics}, ensure_ascii=False, indent=2, default=_json_default), flush=True)
-        results["components"][component] = {"retrain": retrain_info, "val_metrics": val_metrics}
+        results["components"][component] = {"dataset": exit_diag, "retrain": retrain_info, "val_metrics": val_metrics}
 
     report = {
         "model_id": MODEL_ID,

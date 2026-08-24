@@ -38,10 +38,21 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
+import eval_omega4_1_atr_safety_sltp_20260622 as atr_eval  # noqa: E402
 import train_eval_omega1_2_tabm_3head_20260603 as parent  # noqa: E402
 import train_eval_omega1_2_tabm_diffusion_risk_btc_swingtransition_20260806 as omega  # noqa: E402
 import train_eval_omega1_2_tabm_exit_head_20260603 as exit_head  # noqa: E402
 import train_omega1_regime3_expert_direction_head_volpca_20260602 as hard  # noqa: E402
+
+# Live TP/SL is ATR-adaptive, not the old fixed BASE_TEMPLATE take_profit/stop_loss. Verbatim from
+# trading_bot_modules/omega4_6_1_live.py's `_ComponentConfig` dataclass defaults -- confirmed
+# identical across h48qual/zig075/BTC/SOL (every components_override call site in trading_bot.py
+# leaves these 7 fields at their dataclass default). 2026-08-18 fix, see docs/experiments/
+# eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+LIVE_ATR_CFG = {
+    "atr_window": 192, "tp_mult": 12.0, "sl_mult": 6.0,
+    "min_tp": 0.075, "min_sl": 0.040, "max_tp": 0.22, "max_sl": 0.12,
+}
 
 
 MODEL_ID = "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806"
@@ -422,6 +433,8 @@ def _build_exit_dataset_entry_label_terminal_giveback(
     frame: pd.DataFrame,
     state: pd.DataFrame,
     *,
+    risk_margin: np.ndarray | None,
+    risk_leverage: np.ndarray | None,
     fee: float,
     slip: float,
     cost_mult: float,
@@ -431,20 +444,48 @@ def _build_exit_dataset_entry_label_terminal_giveback(
     min_mfe_for_giveback: float = 0.006,
     giveback_min: float = 0.65,
 ) -> tuple[pd.DataFrame, np.ndarray, pd.DataFrame, dict[str, Any]]:
+    """`risk_margin`/`risk_leverage` (aligned to `frame`'s row index) drive pos_notional/pos_
+    leverage/pos_exposure -- pass both explicitly, or both None. None is the ONLY option today:
+    this function runs during the bundle's OWN original parent+exit_head training, before any risk
+    sidecar for THIS bundle can exist (the sidecar is trained afterward, from this bundle's own
+    predictions). None falls back to the fixed BASE_TEMPLATE constant, recorded transparently as
+    risk_sizing_source in the returned diagnostics rather than silently claiming real sizing.
+    2026-08-18 fix, see docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_
+    20260818.md -- ported from the byte-identical ETH original's fix
+    (train_eval_omega4_3head_parent72_loose_entry_quality_20260620.py)."""
     required = {"timestamp", "zigzag_action", "open", "high", "low", "close"}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise RuntimeError(f"entry-label terminal-giveback exit dataset missing columns: {missing}")
     if len(frame) != len(state):
         raise RuntimeError("entry-label terminal-giveback exit frame/state length mismatch")
+    if (risk_margin is None) != (risk_leverage is None):
+        raise RuntimeError("pass both risk_margin and risk_leverage, or neither")
+    if risk_margin is None:
+        risk_sizing_source = "base_template_constant_no_sidecar_available"
+        fixed_notional = float(omega.BASE_TEMPLATE["notional"])
+        fixed_leverage = float(omega.BASE_TEMPLATE["leverage"])
+        risk_margin = np.full(len(frame), fixed_notional / max(fixed_leverage, 1.0e-12), dtype=np.float64)
+        risk_leverage = np.full(len(frame), fixed_leverage, dtype=np.float64)
+    else:
+        risk_sizing_source = "frozen_risk_sidecar_per_candidate"
+        if len(risk_margin) != len(frame) or len(risk_leverage) != len(frame):
+            raise RuntimeError("risk_margin/risk_leverage length must match frame")
     arrays = {c: pd.to_numeric(frame[c], errors="raise").to_numpy(dtype=np.float64) for c in ("open", "high", "low", "close")}
     action = pd.to_numeric(frame["zigzag_action"], errors="raise").to_numpy(dtype=np.int64)
     fee_eff = float(fee) * float(cost_mult)
     slip_eff = float(slip) * float(cost_mult)
-    notional = float(omega.BASE_TEMPLATE["notional"])
-    leverage = float(omega.BASE_TEMPLATE["leverage"])
-    take_profit = float(omega.BASE_TEMPLATE["take_profit"])
-    stop_loss = float(omega.BASE_TEMPLATE["stop_loss"])
+    # pos_tp/pos_sl must reflect the ACTUAL live ATR-adaptive barrier (LIVE_ATR_CFG), not the
+    # stale fixed BASE_TEMPLATE take_profit/stop_loss -- 2026-08-18 fix, see docs/experiments/
+    # eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+    atr_pct = atr_eval._atr_pct(frame, int(LIVE_ATR_CFG["atr_window"]))
+    tp_mult, sl_mult = float(LIVE_ATR_CFG["tp_mult"]), float(LIVE_ATR_CFG["sl_mult"])
+    min_tp, min_sl = float(LIVE_ATR_CFG["min_tp"]), float(LIVE_ATR_CFG["min_sl"])
+    max_tp, max_sl = float(LIVE_ATR_CFG["max_tp"]), float(LIVE_ATR_CFG["max_sl"])
+    notional_used: list[float] = []
+    leverage_used: list[float] = []
+    tp_used: list[float] = []
+    sl_used: list[float] = []
     tw = max(int(terminal_window), 1)
 
     rows: list[dict[str, float]] = []
@@ -481,13 +522,28 @@ def _build_exit_dataset_entry_label_terminal_giveback(
         if not filled or end_i < entry_i:
             skipped_segments += 1
             continue
+        # Real per-segment risk sizing (or the fixed-constant fallback, see risk_sizing_source
+        # above) -- locked in at the signal bar, matching live's entry_decision (sized once per
+        # trade, held fixed for its whole duration).
+        row_margin = float(risk_margin[start_i])
+        row_leverage = float(risk_leverage[start_i])
+        row_notional = row_margin * row_leverage
+        if row_notional <= 0.0:
+            skipped_segments += 1
+            continue
+        a = float(atr_pct[start_i])
+        row_tp = min(max(min_tp, a * tp_mult), max_tp)
+        row_sl = min(max(min_sl, a * sl_mult), max_sl)
         entry_state = state.iloc[int(start_i)]
         mfe = 0.0
         mae = 0.0
         for row_i in range(entry_i, end_i + 1):
             px = float(arrays["close"][int(row_i)])
             raw = (px * (1.0 - slip_eff) - entry_price) / max(entry_price, 1e-12) if side > 0 else (entry_price - px * (1.0 + slip_eff)) / max(entry_price, 1e-12)
-            unreal = raw * notional
+            # pos_unrealized/pos_mfe/pos_mae/pos_dist_to_tp/pos_dist_to_sl must match the unscaled
+            # `move` live actually feeds the model -- 2026-08-18 fix, see docs/experiments/
+            # eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
+            unreal = raw
             mfe = max(mfe, unreal)
             mae = min(mae, unreal)
             giveback = (mfe - unreal) / max(abs(mfe), 1.0e-8) if mfe > 0.0 else 0.0
@@ -514,10 +570,10 @@ def _build_exit_dataset_entry_label_terminal_giveback(
                 side=side,
                 entry_price=float(entry_price),
                 entry_i=int(entry_i),
-                notional=notional,
-                leverage=leverage,
-                take_profit=take_profit,
-                stop_loss=stop_loss,
+                notional=row_notional,
+                leverage=row_leverage,
+                take_profit=row_tp,
+                stop_loss=row_sl,
                 mfe=mfe,
                 mae=mae,
                 unreal=unreal,
@@ -544,6 +600,10 @@ def _build_exit_dataset_entry_label_terminal_giveback(
             if max_samples > 0 and len(rows) >= int(max_samples):
                 break
         used_segments += 1
+        notional_used.append(row_notional)
+        leverage_used.append(row_leverage)
+        tp_used.append(row_tp)
+        sl_used.append(row_sl)
         if max_samples > 0 and len(rows) >= int(max_samples):
             break
     if not rows:
@@ -559,11 +619,22 @@ def _build_exit_dataset_entry_label_terminal_giveback(
         "continued_exit_reasons": reason_counts,
         "used_segments": int(used_segments),
         "skipped_segments": int(skipped_segments),
-        "risk_template": {
-            "notional": notional,
-            "leverage": leverage,
-            "take_profit": take_profit,
-            "stop_loss": stop_loss,
+        "risk_sizing": {
+            "source": risk_sizing_source,
+            "notional_mean": float(np.mean(notional_used)) if notional_used else 0.0,
+            "notional_min": float(np.min(notional_used)) if notional_used else 0.0,
+            "notional_max": float(np.max(notional_used)) if notional_used else 0.0,
+            "leverage_mean": float(np.mean(leverage_used)) if leverage_used else 0.0,
+            "leverage_min": float(np.min(leverage_used)) if leverage_used else 0.0,
+            "leverage_max": float(np.max(leverage_used)) if leverage_used else 0.0,
+        },
+        "live_atr_tp_sl": {
+            "tp_mean": float(np.mean(tp_used)) if tp_used else 0.0,
+            "tp_min": float(np.min(tp_used)) if tp_used else 0.0,
+            "tp_max": float(np.max(tp_used)) if tp_used else 0.0,
+            "sl_mean": float(np.mean(sl_used)) if sl_used else 0.0,
+            "sl_min": float(np.min(sl_used)) if sl_used else 0.0,
+            "sl_max": float(np.max(sl_used)) if sl_used else 0.0,
         },
         "label_mode": "entry_label_terminal_giveback_every_in_position_bar",
         "terminal_window": int(tw),
@@ -646,9 +717,16 @@ def main() -> int:
     else:
         train_fit_frame = train_raw
 
+    # risk_margin/risk_leverage=None: this call trains the bundle's OWN original exit head, before
+    # any risk sidecar for THIS bundle can exist (the sidecar is trained afterward, from this
+    # bundle's own predictions) -- see _build_exit_dataset_entry_label_terminal_giveback's
+    # docstring. 2026-08-18, docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_
+    # reaudit_20260818.md.
     x_exit_raw, y_exit, frame_exit, exit_diag = _build_exit_dataset_entry_label_terminal_giveback(
         frames["train_df"],
         frames["s_train_label"],
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=float(args.cost_mult),

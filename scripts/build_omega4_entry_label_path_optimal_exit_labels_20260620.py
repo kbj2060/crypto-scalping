@@ -84,6 +84,8 @@ def main() -> int:
     x_exit, y_exit, frame_exit, diag = omega4._build_exit_dataset_entry_label_path_optimal(
         train_df,
         state,
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=float(args.cost_mult),

@@ -65,6 +65,32 @@ class ThreeHeadConfig:
 
 CFG = ThreeHeadConfig()
 
+# GCE (Generalized Cross Entropy, Zhang & Sabuncu 2018) loss, available for direction_head/
+# quality_head but NOT used by _fit_expert_3head below (plain cross_entropy stays canonical).
+# q=0.7 is the paper default. Ported from an already-validated isolation test
+# (research_eth_candidate_faithful_tabm_batchensemble_regularizer_isolation_20260816.py's
+# gce_loss/GCE_Q/GCE_EPS, itself defined in
+# research_eth_candidate_faithful_tabm_batchensemble_combo_regularizer_20260816.py), which found
+# GCE-only beats plain CE on this exact 3-head architecture/label under ITS OWN protocol (fixed
+# 40-epoch budget, no early stopping, single seed=260816, expert=bull: val bacc 0.5758 vs 0.5740).
+# 2026-08-16 A1 port attempt: ported into this canonical script's actual training loop (real
+# patience=8 early stopping, CFG defaults) and re-verified with N=5 genuinely random seeds
+# (research_eth_odyssey4_gce_canonical_port_verification_20260816.py) -- the improvement did NOT
+# transfer (mean Δdirection_balanced_accuracy=-0.0048, 4/5 seeds worse, sign_consistent=False).
+# REVERTED for that reason; see docs/experiments/eth_odyssey4_gce_canonical_port_20260816.md.
+# gce_loss is kept defined (still used by several research/candidate scripts) but is not called
+# by _fit_expert_3head.
+GCE_Q = 0.7
+GCE_EPS = 1.0e-7
+
+
+def gce_loss(logits_k: torch.Tensor, target: torch.Tensor, q: float = GCE_Q) -> torch.Tensor:
+    """logits_k: (batch, k, C); target: (batch,) long. Returns (batch, k)."""
+    probs_k = torch.softmax(logits_k, dim=-1)
+    k = logits_k.shape[1]
+    py = probs_k.gather(-1, target.view(-1, 1, 1).expand(-1, k, 1)).squeeze(-1).clamp(min=GCE_EPS)
+    return (1.0 - py.pow(q)) / q
+
 
 def _json_default(obj: Any) -> Any:
     return omega._json_default(obj)

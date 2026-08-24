@@ -188,6 +188,8 @@ def main() -> int:
     x_exit_raw, y_exit, exit_frame, exit_diag = trainer._build_exit_dataset_entry_label_terminal_giveback(
         train,
         train_state,
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=float(args.cost_mult),

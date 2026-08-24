@@ -165,6 +165,8 @@ def main() -> int:
     x_exit_raw, y_exit, exit_frame, exit_diag = tabm._build_exit_dataset_entry_label_terminal_giveback(
         frames["train_df"],
         frames["s_train_label"],
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=3.0,

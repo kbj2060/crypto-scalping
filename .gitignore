@@ -3,6 +3,8 @@ data/*
 data1/*
 !data/ensemble/
 !data/ensemble/**
+!data/discretionary/
+!data/discretionary/**
 data/ensemble/unsupervised/isolation_forest.pkl
 binance_raw_data/
 binance_data/

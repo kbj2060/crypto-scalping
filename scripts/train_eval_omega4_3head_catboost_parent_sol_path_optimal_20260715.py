@@ -171,6 +171,8 @@ def main() -> int:
     x_exit_raw, y_exit, exit_frame, exit_diag = path_optimal.build_exit_dataset_entry_label_path_optimal(
         frames["train_df"],
         frames["s_train_label"],
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=3.0,

@@ -296,6 +296,7 @@ def _fit_exit_head_only(
     epochs: int,
     device: torch.device,
     model_path: Path,
+    hard_regime_filter: bool = False,
 ) -> dict[str, Any]:
     torch.manual_seed(int(seed) + int(expert_idx))
     np.random.seed(int(seed) + int(expert_idx))
@@ -306,7 +307,11 @@ def _fit_exit_head_only(
     classes = sorted(np.unique(y_np).astype(int).tolist())
     if classes != [0, 1]:
         raise RuntimeError(f"{hard.EXPERT_NAMES[expert_idx]} exit labels need both classes [0,1], got {classes}")
-    route_w = parent._route_probs(exit_route_frame)[:, int(expert_idx)].astype(np.float32)
+    route_probs = parent._route_probs(exit_route_frame)
+    if hard_regime_filter:
+        route_w = (route_probs.argmax(axis=1) == int(expert_idx)).astype(np.float32)
+    else:
+        route_w = route_probs[:, int(expert_idx)].astype(np.float32)
     weights = compute_sample_weight(class_weight="balanced", y=y_np).astype(np.float32) * route_w
     if not np.isfinite(weights).all() or float(weights.sum()) <= 0.0:
         raise RuntimeError(f"{hard.EXPERT_NAMES[expert_idx]} invalid exit-only sample weights")

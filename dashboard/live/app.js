@@ -4,11 +4,14 @@ const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
 const API_ETH_ODYSSEY4_SHADOW_URL = "/api/eth-odyssey4-shadow";
+const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
+const API_OI_SIGNAL_URL = "/api/oi-signal";
+const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 const JOURNAL_POLL_MS = 10000;
 const CANDLE_HISTORY_POLL_MS = 300000;
-const MICRO_HISTORY_MAX = 40;
+const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
 const ASSET_CONFIG = {
   eth: { label: "ETH", symbol: "ETHUSDT", accountSymbol: "ETH/USDT:USDT", priceDigits: 2 },
   sol: { label: "SOL", symbol: "SOLUSDT", accountSymbol: "SOL/USDT:USDT", priceDigits: 3 },
@@ -33,40 +36,21 @@ const setB = (id, cls) => {
 const setH = (id, html) => { const target = el(id); if (target) target.innerHTML = html; };
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
-const microHistory = {
-  obi: [],
-  whale: [],
-  whale_intent: [],
-  eai: [],
-  tox: [],
-  risk: [],
-};
-
-function pushMicroHistory(key, value) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return;
-  const arr = microHistory[key];
+// Snapshot tab: same 6 model indicators, but as a tone-per-bar strip (matching the evidence
+// signals' activity-strip graph) instead of a continuous sparkline. Stores the ALREADY-COMPUTED
+// tone string ("good"/"bad"/"neutral") from each render() pass rather than re-deriving it from
+// raw values later -- some tones (toxicity, EAI, tail risk) depend on more than one raw field
+// (e.g. eaiHint() reads both micro.eai and its own internal thresholds), so capturing the tone at
+// computation time is the only way to stay exactly consistent with what the live cards show,
+// instead of an approximation that ignores the cross-field dependency.
+const toneHistory = { whale: [], whale_intent: [], eai: [], tox: [], risk: [] };
+function pushToneHistory(key, tone) {
+  const arr = toneHistory[key];
   if (!arr) return;
-  arr.push(v);
+  arr.push(tone || "neutral");
   if (arr.length > MICRO_HISTORY_MAX) arr.shift();
 }
 
-function renderSparkline(cardId, values, tone) {
-  const svg = document.querySelector(`#${cardId} .ind-spark`);
-  if (!svg) return;
-  if (!values || values.length < 2) { svg.innerHTML = ""; return; }
-  const w = 100, h = 24;
-  const min = Math.min(...values), max = Math.max(...values);
-  const span = Math.max(max - min, 1e-9);
-  const step = w / (values.length - 1);
-  const linePts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / span) * h).toFixed(1)}`);
-  const areaPts = [`0,${h}`, ...linePts, `${w},${h}`].join(" ");
-  const color = tone === "good" ? "var(--good)" : tone === "bad" ? "var(--bad)" : tone === "warn" ? "var(--amber)" : "var(--muted)";
-  svg.innerHTML = `
-    <polygon points="${areaPts}" fill="${color}" opacity="0.14"/>
-    <polyline points="${linePts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-  `;
-}
 let latestState = null;
 let latestMainState = null;
 let latestCompactState = null;
@@ -94,11 +78,31 @@ let btcMultislotActiveSlot = 0;
 let ethOdyssey4Etag = "";
 let ethOdyssey4LastFetchAt = 0;
 let latestEthOdyssey4Payload = null;
+let evidenceLastFetchAt = 0;
+// OI 급변 model indicator (replaces OBI, 2026-08-24) -- fetched separately from classifyIndicators'
+// other 5 fields because it's computed dashboard-side (scripts/live_oi_delta_signal_20260824.py),
+// not read from trading_bot.py's dashboard_state.json. render() reads this module-level var each
+// tick, same pattern as evidence signals feeding their own chip row independently of classifyIndicators.
+let latestOiSignal = null;
+let oiSignalLastFetchAt = 0;
+// Liquidation map (Snapshot tab, 2026-08-24) -- estimated support/resistance, own fetch/render
+// cycle same as latestOiSignal above (computed dashboard-side, not part of trading_bot.py state).
+// lastSnapshotHistoryFetchAt tracks the ETH candle history this panel's chart needs independently
+// of activeChartAsset (the Live tab's chart may be showing SOL/BTC while this stays ETH-only).
+let latestLiquidationMap = null;
+let liquidationMapLastFetchAt = 0;
+let lastSnapshotHistoryFetchAt = 0;
 let lastChartRenderAt = 0;
 let isScrolling = false;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
+// Matches CANDLE_HISTORY_POLL_MS's reasoning: the underlying data is 5m bars, so a new reading
+// only ever exists once every 5 minutes -- polling more often than that just re-fetches the same
+// latest-closed-bar result (server-side cache would absorb it, but there's no reason to ask).
+const EVIDENCE_POLL_MS = 300000;
+const OI_SIGNAL_POLL_MS = 300000; // same reasoning -- underlying data is a 5m poller, no faster
+const LIQUIDATION_MAP_POLL_MS = 300000; // matches server-side cache -- structure moves slowly
 
 // --- Chart Global Variables ---
 let candleHistory = []; // Array of {time, open, high, low, close}
@@ -928,15 +932,6 @@ function whalePositionRead(micro) {
   return "고래 포지션 판단 약함";
 }
 
-function obiRead(v) {
-  const x = Number(v || 0);
-  if (x >= 0.3) return "매수 호가가 강하게 받침";
-  if (x >= 0.1) return "매수 호가가 우세함";
-  if (x <= -0.3) return "매도 호가가 강하게 누름";
-  if (x <= -0.1) return "매도 호가가 우세함";
-  return "호가는 균형 상태";
-}
-
 function eaiRead(micro) {
   const eai = Number(micro.eai || 0);
   const bias = Number(micro.eai_bias || micro.signal_bias || micro.obi || 0);
@@ -946,13 +941,16 @@ function eaiRead(micro) {
   return "변동성은 보통 수준";
 }
 
+// EAI/독성/꼬리리스크는 전부 "위험도" 지표이지 방향(롱/숏) 매매신호가 아니다 -- 예전엔
+// obi/z_bias 부호를 빌려와 "롱 진입"/"숏 진입"으로 표시했는데, 이러면 위험이 높을 때도
+// signalTone()이 우연히 "good"(녹색)을 줘서 "진입해도 된다"는 잘못된 인상을 줄 수 있었다
+// (2026-08-24 사용자 리포트로 발견). 방향 힌트가 필요하면 각 Read() 함수(eaiRead/toxRead/
+// tailRiskRead)가 이미 "상방/하방 ~위험"처럼 서술형으로 제공하므로 여기서는 순수 위험도만 반환.
 function eaiHint(micro) {
   const eai = Number(micro.eai || 0);
-  const bias = Number(micro.eai_bias || micro.signal_bias || micro.obi || 0);
   if (eai < 0.5) return "안정";
-  if (bias >= 0.1) return "롱 진입";
-  if (bias <= -0.1) return "숏 진입";
-  return eai >= 1.5 ? "추격 조심" : "중립";
+  if (eai >= 2.5) return "위험";
+  return eai >= 1.5 ? "확대 주의" : "중립";
 }
 
 function toxRead(v) {
@@ -962,12 +960,11 @@ function toxRead(v) {
   return "체결 환경은 안정적";
 }
 
-function toxHint(v, dir = 0) {
+function toxHint(v) {
   const x = clamp01(v);
   if (x < 0.4) return "안정";
-  if (dir > 0) return "롱 진입";
-  if (dir < 0) return "숏 진입";
-  return "진입 조심";
+  if (x >= 0.7) return "위험";
+  return "주의";
 }
 
 function tailRiskRead(tail) {
@@ -980,18 +977,47 @@ function tailRiskRead(tail) {
 
 function tailRiskHint(tail) {
   const x = clamp01(tail.aftershock_prob);
-  const dir = Number(tail.z_bias || 0);
   if (x < 0.4) return "안정";
-  if (dir > 0) return "롱 진입";
-  if (dir < 0) return "숏 진입";
-  return "진입 조심";
+  if (x >= 0.7) return "위험";
+  return "주의";
 }
 
+// 안정=문제없음(녹색), 주의/확대 주의=경계(호박색), 위험=경계강함(적색) -- eai/tox/risk
+// 세 지표 전용. 방향성 매매신호(롱 진입/숏 진입)는 whale/whale_intent가 directionalCaution()로
+// 별도 처리하므로 여기서 다루지 않는다.
 function signalTone(signal) {
-  if (String(signal || "").includes("조심")) return "warn";
-  if (signal === "롱 진입") return "good";
-  if (signal === "숏 진입") return "bad";
+  const s = String(signal || "");
+  if (s === "위험") return "bad";
+  if (s.includes("주의")) return "warn";
+  if (s === "안정") return "good";
   return "neutral";
+}
+
+// Single source of truth for the 6 model-internal indicators' tone/read-text classification --
+// called both on the live state (render(), every tick) and on server-provided history samples
+// (seedModelIndicatorHistory(), once at page load) so there is exactly one copy of these
+// thresholds, not a live copy and a history copy that could quietly drift apart.
+function classifyIndicators(micro, tail) {
+  micro = micro || {};
+  tail = tail || {};
+  const toxV = clamp01(micro.toxicity_score);
+  const riskV = clamp01(tail.aftershock_prob);
+  const toxSignal = toxHint(toxV);
+  const eaiSignal = eaiHint(micro);
+  const riskSignal = tailRiskHint(tail);
+  const whaleTone = Number(micro.nif_whale || 0) > 0.05 ? "good" : (Number(micro.nif_whale || 0) < -0.05 ? "bad" : "neutral");
+  const whalePosTone = Number(micro.whale_position_score || 0) > 0.2 ? "good" : (Number(micro.whale_position_score || 0) < -0.2 ? "bad" : "neutral");
+  const eaiTone = signalTone(eaiSignal);
+  const toxTone = signalTone(toxSignal);
+  const riskTone = signalTone(riskSignal);
+  return {
+    tox: { tone: toxTone, valueText: toxRead(toxV), subText: toxSignal },
+    risk: { tone: riskTone, valueText: tailRiskRead(tail), subText: riskSignal },
+    whale: { tone: whaleTone, valueText: flowRead(micro), subText: directionalCaution(micro.nif_whale, 0.05) },
+    whale_intent: { tone: whalePosTone, valueText: whalePositionRead(micro), subText: directionalCaution(micro.whale_position_score, 0.2) },
+    eai: { tone: eaiTone, valueText: eaiRead(micro), subText: eaiSignal },
+    toxV, riskV, toxSignal, eaiSignal, riskSignal, whaleTone, whalePosTone, eaiTone, toxTone, riskTone,
+  };
 }
 
 function cleanDisplaySource(value) {
@@ -1468,6 +1494,18 @@ async function maybeFetchBinanceHistory() {
   await fetchBinanceHistory(activeChartAsset);
 }
 
+// Snapshot tab's chart is always ETH (matches the liquidation map's ETH-only scope), independent
+// of whichever asset the Live tab's chart is currently showing -- so it needs its own fetch
+// rather than piggybacking on maybeFetchBinanceHistory()'s activeChartAsset gating.
+async function maybeFetchSnapshotChartHistory() {
+  const now = Date.now();
+  const cached = candleHistoryByAsset.eth || [];
+  if (cached.length && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
+  lastSnapshotHistoryFetchAt = now;
+  await fetchBinanceHistory("eth");
+  renderSnapshotChart();
+}
+
 async function refreshTradeJournals(nonce) {
   const now = Date.now();
   if (lastJournalFetchAt && now - lastJournalFetchAt < JOURNAL_POLL_MS) return false;
@@ -1650,6 +1688,454 @@ async function refreshOpsStatus() {
     const badge = el("opsWatchdogBadge");
     if (badge) { badge.className = "ops-badge bad"; badge.textContent = "WATCHDOG UNREACHABLE"; }
   }
+}
+
+// Small per-bar activity strip (oldest bar left, most recent bar right) for a "good"/"bad"/
+// "neutral" tone-per-bar history -- builds an SVG string directly (no DOM diffing), discrete
+// bars instead of a continuous line. The most recent
+// bar gets the "evidence-bar-live" class ONLY when it's non-neutral, which is what styles.css
+// hooks the pulsing animation to -- idle bars stay static (just color-transition on change, via
+// CSS), so several strips sitting side by side don't all pulse at once when nothing is actually
+// happening. Shared by both the evidence-signal strips (bottom/top fired -> tone) and the
+// Snapshot tab's model-indicator strips (thresholded value -> tone).
+function toneStripSvg(tones) {
+  const n = Math.max(tones.length, 1);
+  const w = 240, h = 20, gap = 1.5;
+  const bw = Math.max((w - gap * (n - 1)) / n, 1);
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const tone = tones[i] || "neutral";
+    const fill = tone === "good" ? "var(--good)" : tone === "bad" ? "var(--bad)" : "rgba(203,209,227,0.16)";
+    const isLast = i === n - 1;
+    // "now" (the last/rightmost bar) always gets a blinking outline, whether or not it's firing --
+    // a neutral (not-firing) last bar is the common case (~80% of bars, see 20260823 firing-rate
+    // measurement), and without this it was visually indistinguishable from the neutral bars to
+    // its left, so there was no way to tell where "now" even was on the strip.
+    let cls = "evidence-bar";
+    if (isLast) cls += tone !== "neutral" ? " evidence-bar-live evidence-bar-now" : " evidence-bar-now";
+    const x = (i * (bw + gap)).toFixed(1);
+    bars.push(`<rect class="${cls}" x="${x}" y="0" width="${bw.toFixed(1)}" height="${h}" rx="2" fill="${fill}"/>`);
+  }
+  return `<svg class="evidence-strip" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars.join("")}</svg>`;
+}
+
+function evidenceStripSvg(bottomHist, topHist) {
+  const n = Math.max(bottomHist.length, topHist.length, 1);
+  const tones = Array.from({ length: n }, (_, i) => (bottomHist[i] ? "good" : topHist[i] ? "bad" : "neutral"));
+  return toneStripSvg(tones);
+}
+
+// Same row/strip UI as renderEvidenceSignals(), but for the 6 model-internal indicators. The two
+// panels LOOK identical on purpose (same ops-health-row/-strip markup) -- the caption on every
+// row is what tells them apart, because the underlying history is NOT the same kind of window:
+// evidence-signal strips are recomputed server-side from real historical klines (always full,
+// survives a refresh); this list's strips are an in-memory tally that starts empty on page load
+// and grows only while the tab stays open (trading_bot doesn't persist a time series for these
+// fields, only the latest reading -- same limitation the Live tab's sparklines already had).
+// Shared open/closed state for the per-signal "자세히" detail toggles (model indicators AND
+// evidence signals use the same key space, prefixed "model:"/"evidence:" to avoid collisions).
+// Kept outside any render function so it survives every re-render -- these lists are rebuilt via
+// innerHTML replacement on every tick/poll, so without this a user's open detail panel would snap
+// shut a few seconds after they opened it.
+const detailOpenKeys = new Set();
+function toggleSignalDetail(btn, key) {
+  const row = btn.closest(".ops-health-row");
+  const detail = row ? row.querySelector(".signal-detail") : null;
+  const open = detailOpenKeys.has(key) ? (detailOpenKeys.delete(key), false) : (detailOpenKeys.add(key), true);
+  if (detail) detail.classList.toggle("open", open);
+  btn.textContent = open ? "접기 ▴" : "자세히 ▾";
+  btn.setAttribute("aria-expanded", String(open));
+}
+
+// Full-detail Korean explanations for the 6 model-internal indicators (formula + live threshold +
+// what it means for a trader) -- shown only when the user clicks "자세히" next to each tile, so
+// the default compact view stays uncluttered. Sourced from microstructure_scanner.py /
+// tail_risk_interceptor.py verbatim, not re-derived.
+// Always-visible "지금 이게 무슨 뜻인지" line, indexed by the exact subText string each
+// indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
+// 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
+const MODEL_INDICATOR_MEANING = {
+  oi_delta: {
+    "안정": "OI(미결제약정)가 평소와 비슷한 속도로 움직이고 있어요 — 변동성 확대 신호는 없어요.",
+    "주의": "OI가 평소보다 빠르게 움직이고 있어요 — 새 포지션이 몰리거나 정리되는 중일 수 있고, 이후 변동성이 조금 커질 가능성이 있어요.",
+    "위험": "OI가 평소보다 훨씬 빠르게 움직이고 있어요 — 실측상 이후 1시간 변동폭이 평소의 1.35배 이상으로 커지는 경향이 있었어요. 방향은 알려주지 않으니 사이즈·스탑 여유를 고려하세요.",
+  },
+  tox: {
+    "안정": "체결 환경이 안정적이라 지금 주문을 넣어도 평소와 비슷한 조건일 가능성이 높아요.",
+    "주의": "지금 시장가로 진입·청산하면 평소보다 체결가가 불리하거나, 곧 급변동이 뒤따를 확률이 약간 있어요. 지정가로 여유있게 접근하는 걸 고려하세요.",
+    "위험": "체결 환경이 많이 불안정해요. 지금 시장가 주문은 피하고 지정가나 관망을 권장해요.",
+  },
+  risk: {
+    "안정": "최근 청산 활동이 평온해서 연쇄 청산으로 인한 급변 가능성은 낮아요.",
+    "주의": "최근 청산이 늘어나는 중이라 그 여파로 후속 급변동이 올 수 있어요. 포지션을 보수적으로 가져가는 걸 고려하세요.",
+    "위험": "청산 캐스케이드가 진행 중이거나 막 끝났을 가능성이 높아요. 신규 진입은 특히 주의하세요.",
+  },
+  whale: {
+    "롱 진입": "큰 금액 단위 거래가 최근 5분간 매수 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
+    "숏 진입": "큰 금액 단위 거래가 최근 5분간 매도 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
+    "중립": "큰손 거래 방향이 뚜렷하지 않아요.",
+  },
+  whale_intent: {
+    "롱 진입": "고래가 롱 포지션을 새로 쌓고 있는 것으로 추정돼요(미결제약정 증가 동반) — 단순 매수 체결보다 신뢰도 있는 신호로 설계됐어요.",
+    "숏 진입": "고래가 숏 포지션을 새로 쌓고 있는 것으로 추정돼요(미결제약정 증가 동반) — 단순 매도 체결보다 신뢰도 있는 신호로 설계됐어요.",
+    "중립": "고래 포지션 방향이 뚜렷하지 않거나 관망 상태로 추정돼요.",
+  },
+  eai: {
+    "안정": "포지션 변화가 적어 에너지가 낮은 상태예요 — 추격 매매의 힘이 약할 수 있어요.",
+    "중립": "포지션 변화와 가격 움직임이 균형 잡혀 있어요.",
+    "확대 주의": "미결제약정이 늘어나는데 가격은 아직 크게 안 움직이고 있어요 — 압력이 쌓이는 중일 수 있어요.",
+    "위험": "압력이 상당히 쌓인 상태예요. 방향이 풀리면 변동성이 커질 수 있으니 큰 포지션은 주의하세요.",
+  },
+};
+
+const MODEL_INDICATOR_DETAIL = {
+  oi_delta: "[계산] 5분마다 미결제약정(OI) 변화량을 직전 1일(288개 샘플) 평균·표준편차로 정규화한 z값.\n" +
+    "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정.\n" +
+    "[의미] '포지션이 얼마나 빨리 쌓이거나 풀리는가'만 봅니다 — 방향(롱/숏)은 전혀 반영하지 않습니다(호가 불균형이 방향을 주장하다 45/45 경제성 실패로 걷힌 자리라, 일부러 방향 주장을 안 하도록 설계). 실측(2024-01~2026-02, 약 22만 봉, 사전등록 없는 탐색적 분석)상 |z|≥2일 때 이후 1시간 변동폭이 평소의 1.35배, 4시간은 1.19배 컸고, OI 급증·급감 양쪽 다 비슷한 크기로 변동성이 커졌습니다(신규 포지션 구축이든 급청산이든 둘 다 변동성 전조). 기존 '에너지 지수'(OI변화/가격변동폭 비율)와는 상관 0.15로 중복 아님을 확인했습니다.\n" +
+    "[유의] 이 값은 봇 내부 상태가 아니라 대시보드 서버가 별도 duckdb(OI 전용 poller)에서 직접 계산합니다 — 아직 실제 매매 결정에는 연결되지 않았습니다. 나머지 5개 지표(독성/꼬리 리스크/수급 흐름/고래 포지션/에너지 지수)는 봇이 실제로 참고하는 값인 것과 다릅니다.",
+  tox: "[계산] mismatch = |호가불균형 − (2×시장가매수비율−1)| : 호가창이 보여주는 방향과 실제 체결(시장가 주문) 방향이 얼마나 어긋나는지. burst = 최근 120건 체결 중 상위 5% 금액이 평균 대비 얼마나 큰지(대형 단일 주문 급증 여부). score = 0.7×mismatch + 0.3×(burst/5), 0~1로 정규화.\n" +
+    "[기준] 0.7 이상 '진입 위험' · 0.4~0.7 '주의 구간' · 0.4 미만 '안정적'.\n" +
+    "[의미] '가격이 위험하다'가 아니라 '지금 주문을 넣으면 불리한 상대와 만날 확률이 평소보다 높다'는 뜻입니다. 예를 들어 호가창엔 매수벽이 두꺼운데 실제 체결은 시장가 매도가 쏟아지고 있다면 mismatch가 커집니다 — 누군가 호가창을 무시하고 밀어붙이고 있다는 신호(마켓메이커 관점의 adverse selection과 같은 개념). '주의 구간'은 위험까진 아니지만 지금 시장가로 들어가면 평소보다 슬리피지가 크거나 곧 급변동이 뒤따를 확률이 약간 높다는 정도로, 지정가로 여유있게 접근하거나 안정 상태로 내려올 때까지 기다리는 판단에 참고하세요.",
+  risk: "[계산] 최근 1분간 롱/숏 강제청산 금액을 각각 자기 과거 평균·표준편차로 정규화(z값) 후 더 큰 쪽(z_peak). 롱/숏 청산 쏠림 비율(imbalance). 지진 여진 모델(Hawkes process)식으로, 큰 청산 발생 후 시간이 지나며 지수적으로 잦아드는 '활성 상태' 값. prob = 0.45×(z_peak/기준치) + 0.35×쏠림비율 + 0.20×활성상태.\n" +
+    "[기준] 0.7 이상 급변위험 높음 · 0.4~0.7 급변 가능성 주의 · 미만 꼬리 리스크 안정.\n" +
+    "[의미] '여진(aftershock)'이라는 이름 그대로, 청산 캐스케이드(한쪽 포지션들이 연쇄적으로 강제청산되며 가격이 그 방향으로 더 튀는 현상)가 막 일어났거나 후속 충격이 올 확률을 추정합니다. 큰 충격 직후엔 이 값이 즉시 0으로 리셋되지 않고 서서히 감쇠합니다.",
+  whale: "[계산] 최근 5분간 체결을 건당 금액 기준으로 큰손/소액으로 나눠, 큰손 거래만 (매수금액−매도금액)/(매수금액+매도금액)으로 계산 (-1~+1).\n" +
+    "[기준] +0.2 이상 강하게 매수유입 · +0.05~0.2 매수유입 · -0.05~-0.2 매도유입 · -0.2 이하 강하게 매도.\n" +
+    "[의미] 큰 금액 단위 거래(개인 소액 매매와 구분)가 최근 5분간 실제로 어느 방향으로 체결됐는지를 보여줍니다. '포지션'이 아니라 '최근 흐름'이라는 점에 유의하세요 — 아래 '고래 포지션'이 여기에 미결제약정 변화까지 더해 포지션 방향을 추정합니다.",
+  whale_intent: "[계산] 위 '수급 흐름'의 방향/세기 + 미결제약정(OI) 변화 방향을 결합하되, 'OI 증가 + 같은 방향 흐름'(신규 포지션 구축)은 가중치를 크게(1.0), 'OI 감소 + 같은 방향'(기존 포지션 청산)은 가중치를 작고 오히려 음수로(-0.35) 반영합니다 — 신규 진입이 청산보다 정보가치가 크다고 보는 설계입니다. pos_score = 0.7×흐름강도(부호포함) + 0.3×OI방향가중×OI강도, -1~+1. 신뢰도 = |pos_score|×100.\n" +
+    "[기준] 0.25 이상 롱 쪽으로 기움 · -0.25 이하 숏 쪽으로 기움 · 신뢰도 70 이상인데 애매하면 관망 · 그 외 판단 약함.\n" +
+    "[의미] 단순히 '누가 사고팔았나'가 아니라 '고래가 새 포지션을 쌓고 있는가, 기존 걸 정리하고 있는가'까지 추정합니다. 온체인 지갑을 직접 보는 게 아니라 체결+미결제약정 조합의 파생 추정치라서 위 태그에 '수급흐름 파생'이라고 표기했습니다.",
+  eai: "[계산] 최근 5분간 가격변동폭(고가−저가)/평균가 = price_range. 같은 5분간 미결제약정(OI) 변화율의 절대값 = oi_delta. EAI = oi_delta / price_range, 0~20으로 clip.\n" +
+    "[기준] 2.5 이상 변동성 폭발 주의 · 1.5~2.5 변동성 확대 중 · 0.5 이하 에너지 낮아 추격 약함 · 그 사이는 보통.\n" +
+    "[의미] '포지션(미결제약정)은 활발히 바뀌는데 가격은 별로 안 움직인다'는 상태를 포착합니다 — 스프링이 눌리는 상황에 비유할 수 있습니다. 힘이 쌓이는데 안 풀리고 있으면 이 값이 치솟고, 나중에 풀릴 때(가격이 뒤늦게 크게 움직일 때) 스퀴즈성 급변동으로 이어질 수 있습니다. 방향 자체는 이 지표엔 없어 옆의 호가불균형/수급흐름과 같이 봐야 합니다.",
+};
+
+// Snapshot tab "12신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
+// index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
+const MODEL_CHIP_IDS = {
+  oi_delta: "modelChipOiDelta",
+  tox: "modelChipTox",
+  risk: "modelChipRisk",
+  whale: "modelChipWhale",
+  whale_intent: "modelChipWhaleIntent",
+  eai: "modelChipEai",
+};
+// whale/whale_intent are directional (tone: good=롱/bad=숏/neutral=중립); oi_delta/tox/risk/eai are
+// risk-level (tone: good=안정/warn=주의/bad=위험). Both families reuse the same good/warn/bad
+// colors, so a bare red chip is ambiguous ("숏" vs "위험") -- 2026-08-24 사용자 리포트. Prefixing
+// an explicit ▲/▼/– arrow on the directional chips only disambiguates by text, not just color.
+const DIRECTIONAL_MODEL_CHIP_KEYS = new Set(["whale", "whale_intent"]);
+
+function renderModelIndicatorList(items) {
+  setH("snapModelIndicatorList", items.map((it) => {
+    const chipId = MODEL_CHIP_IDS[it.key];
+    const chip = chipId ? el(chipId) : null;
+    if (chip) {
+      chip.className = `signal-chip ${it.tone}`;
+      const stateEl = chip.querySelector(".signal-chip-state");
+      if (stateEl) {
+        const arrow = DIRECTIONAL_MODEL_CHIP_KEYS.has(it.key)
+          ? (it.tone === "good" ? "▲ " : it.tone === "bad" ? "▼ " : "– ")
+          : "";
+        stateEl.textContent = `${arrow}${it.subText || "-"}`;
+      }
+    }
+    const n = it.history.length;
+    const capNote = `최근 최대 4시간(${n}/${MICRO_HISTORY_MAX}, 대시보드 서버가 5분마다 자체 기록 — 새로고침해도 유지, 서버 재기동 시에만 리셋)`;
+    const derivedTag = it.derivedTag
+      ? ` <span class="derived-tag" title="${escapeHtml(it.derivedTitle || "")}">${escapeHtml(it.derivedTag)}</span>`
+      : "";
+    const detailKey = `model:${it.key}`;
+    const isOpen = detailOpenKeys.has(detailKey);
+    const detailText = MODEL_INDICATOR_DETAIL[it.key] || "";
+    const meaningText = (MODEL_INDICATOR_MEANING[it.key] || {})[it.subText] || "";
+    return `<article class="ops-health-row ${it.tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(it.label)}${derivedTag}</strong>
+        ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
+        <div class="evidence-strip-wrap">
+          ${toneStripSvg(it.history)}
+          <small class="evidence-strip-caption">${escapeHtml(capNote)}</small>
+        </div>
+        <button type="button" class="detail-toggle" aria-expanded="${isOpen}" onclick="toggleSignalDetail(this, '${detailKey}')">${isOpen ? "접기 ▴" : "자세히 ▾"}</button>
+        <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>
+      </div>
+    </article>`;
+  }).join(""));
+}
+
+// One row of the liquidation-map price ladder -- tag+price+density bar+distance, color-coded by
+// side. Bar width floors at 4% so even a low-weight surviving level stays visible (a 0%-wide bar
+// would look broken/missing rather than "weak").
+function liquidationLevelRowHtml(lv, tag, sideClass) {
+  const pct = Math.round((lv.weight_pct || 0) * 100);
+  const dist = Number(lv.distance_pct);
+  const distText = Number.isFinite(dist) ? `${dist > 0 ? "+" : ""}${fmtNum(dist, 2)}%` : "-";
+  return `<div class="liq-level-row ${sideClass}">
+      <span class="liq-level-tag">${escapeHtml(tag)}</span>
+      <span class="liq-level-price">${fmtNum(lv.price, 2)}</span>
+      <div class="liq-level-bar-track"><div class="liq-level-bar-fill" style="width:${Math.max(pct, 4)}%;"></div></div>
+      <span class="liq-level-dist">${distText}</span>
+    </div>`;
+}
+
+// Renders the Snapshot tab's liquidation-map list as a price ladder: resistance levels (farthest
+// first) above a highlighted current-price row, support levels (nearest first) below -- reads
+// top-to-bottom the same way the chart overlay's lines sit above/below current price.
+function renderLiquidationMapPanel() {
+  const map = latestLiquidationMap;
+  const badge = el("liqMapBadge");
+  if (!map || map.error === "fetch_failed") {
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "연결 실패"; }
+    setH("liquidationMapList", `<p class="muted" style="padding:16px;">청산맵 데이터를 불러오지 못했습니다.</p>`);
+    return;
+  }
+  if (!map.warmed_up) {
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "웜업 중"; }
+    setH("liquidationMapList", `<p class="muted" style="padding:16px;">데이터 수집 중...</p>`);
+    return;
+  }
+  if (badge) { badge.className = "ops-badge neutral"; badge.textContent = `${map.bars_used}봉 · 지지 ${Math.round(map.support_window_hours / 24)}일 · 저항 ${Math.round(map.resistance_window_hours / 24)}일`; }
+  const resistanceRows = (map.resistance_levels || []).slice().reverse()
+    .map((lv, i, arr) => liquidationLevelRowHtml(lv, `저항${arr.length - i}`, "liq-resistance"));
+  const supportRows = (map.support_levels || [])
+    .map((lv, i) => liquidationLevelRowHtml(lv, `지지${i + 1}`, "liq-support"));
+  const currentRow = `<div class="liq-level-row liq-current">
+      <span class="liq-level-tag">현재가</span>
+      <span class="liq-level-price">${fmtNum(map.current_price, 2)}</span>
+      <div class="liq-level-bar-track"></div>
+      <span class="liq-level-dist">-</span>
+    </div>`;
+  const rows = [...resistanceRows, currentRow, ...supportRows];
+  setH("liquidationMapList", rows.length ? rows.join("") : `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
+  setT("liquidationMapUpdatedAt", `청산맵 갱신 ${fmtTs(map.generated_at)}`);
+}
+
+// Display-only Korean name/description for the 6 evidence signals -- the underlying signal key
+// (s.name from the server, matching scripts/live_evidence_signal_dashboard_20260823.py's
+// SIGNAL_ORDER) is left untouched for traceability to the research docs; only the rendered text
+// is translated here, same pattern as cleanDisplaySource().
+// 4가지 독립 시도(강제청산 베토/exit_head 피쳐/사이징 피쳐/투표식 진입 공식) 전부 always_long/
+// always_short 벤치마크에 패배 -- docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md
+const EVIDENCE_SIGNAL_DISCLAIMER = "이 신호를 자동매매 트리거로 직접 연결하는 시도가 4가지(강제청산 베토 · exit_head 피쳐 · 사이징 피쳐 · 투표식 진입 공식) 전부 실패했습니다(always_long/always_short 벤치마크에 짐). 실제 반전이 맞아도 역사적으로 0.5~0.85% 더 불리한 방향으로 움직인 뒤에야 진짜 전환점이 왔습니다 — 정확한 바닥/천장을 찍어주는 신호가 아니라, 사람이 재량 판단할 때 참고하는 확률적 맥락으로만 쓰세요.";
+const EVIDENCE_SIGNAL_KO = {
+  orthogonal_combo: {
+    name: "복합 오실레이터 신호",
+    desc: "스토캐스틱 계열 오실레이터가 최근 3일 중 상/하위 10% 극단 + 순매수 체결량도 하루평균 대비 ±2표준편차 극단 — 서로 다른 두 정보(가격형태/체결량)가 동시에 확인될 때만 발동",
+    detail: "[바닥 조건] p_fast≤0.10 AND p_slow≤0.10 AND delta_z≤-2.0 (천장은 정반대 조건).\n" +
+      "[p_fast/p_slow] 스토캐스틱 %K(14)와 그 3봉 평활선을, 최근 864봉(3일) 안에서 백분위 순위로 표현한 값 — '지금 이 값이 최근 3일 중 몇 번째로 낮은/높은가'.\n" +
+      "[delta_z] 이번 봉의 순매수 체결량(시장가매수량×2−거래량)을 하루(288봉) 평균/표준편차로 정규화한 값.\n" +
+      "['직교(orthogonal)'의 의미] 가격형태 기반 정보(오실레이터)와 체결량 기반 정보(delta_z)라는 서로 독립적인 두 축이 동시에 극단을 가리켜야 발동합니다 — 하나의 정보원만 보는 게 아니라 교차확인.",
+  },
+  liquidity_sweep: {
+    name: "유동성 스윕(저점·고점 사냥)",
+    desc: "직전 4시간 저점/고점을 살짝 뚫었다가 종가는 그 안으로 바로 되돌아와 마감 — 손절/청산 주문을 훑고 반전하는 캔들 패턴",
+    detail: "[바닥 조건] 이번 봉 저가가 직전 48봉(4시간) 최저가보다 낮게 뚫고 내려갔다가, 종가는 그 직전 최저가 위로 다시 올라와 마감 (천장은 정반대).\n" +
+      "[의미] 차트에서 흔히 'stop hunt'라 부르는 패턴입니다 — 직전 저점 아래 쌓여있는 손절/청산 주문들을 순간적으로 건드려 유동성을 흡수한 뒤 바로 되돌리는 움직임. 아래꼬리가 길게 뚫고 몸통은 위에서 마감하는 캔들 모양으로 나타납니다.",
+  },
+  volume_wick_climax: {
+    name: "거래량 꼬리 클라이맥스",
+    desc: "거래량이 하루평균 대비 2표준편차 이상 폭증 + 캔들 범위의 절반 이상이 반대방향 꼬리 — 패닉성 매도/매수가 즉시 흡수됨",
+    detail: "[바닥 조건] vol_z≥2.0(이번 봉 거래량이 하루 평균 대비 2표준편차 이상 폭증) AND 아래꼬리비율≥0.5(캔들 전체 범위의 절반 이상이 아래꼬리) (천장은 정반대).\n" +
+      "[아래꼬리비율] (시가·종가 중 작은값 − 저가) / (고가 − 저가).\n" +
+      "[의미] 거래량이 갑자기 크게 튀면서, 그게 전부 한쪽으로의 밀어내기(예: 급락 후 강한 매수로 되받아침)로 끝난 캔들입니다 — 패닉성 투매/추격매수가 몰렸다가 즉시 흡수됐다는 신호.",
+  },
+  short_term_return_z: {
+    name: "단기(15분) 수익률 급변",
+    desc: "최근 3봉(15분) 수익률이 하루평균 대비 ±2.5표준편차 이상 — 통계적으로 이례적인 단기 쏠림",
+    detail: "[바닥 조건] 최근 3봉(15분) 수익률을 하루 평균/표준편차로 정규화한 값이 -2.5 이하 (천장은 +2.5 이상).\n" +
+      "[의미] 가장 단순하고 직접적인 형태의 신호입니다 — '15분 사이 얼마나 많이/빠르게 움직였나'를 통계적으로 극단적인 수준까지 좁혀서 판단하는, 단기 과매도/과매수의 원형에 가까운 지표입니다.",
+  },
+  taker_delta_z_climax: {
+    name: "체결 매수매도 쏠림 극단",
+    desc: "이번 봉 시장가 순매수(매수-매도) 체결량이 하루평균 대비 ±2표준편차 이상 — 오실레이터 조건 없이 체결량만으로 판단하는 독립 신호",
+    detail: "[바닥 조건] delta_z≤-2.0 — 복합 오실레이터 신호에도 쓰이는 계산이지만, 오실레이터 조건 없이 이것 단독으로도 하나의 신호로 씁니다 (천장은 +2.0 이상).\n" +
+      "[의미] '이번 봉에 시장가 매도가 평소보다 압도적으로 많이 쏟아졌다'는 사실 하나만으로 판단하는 독립 신호입니다 — 가격 형태(오실레이터)는 전혀 고려하지 않습니다.",
+  },
+  // 2026-08-24 추가(같은 날 후속) — ICT 2022 잔여요소 연구(오더블록/SMT/Po3)에서 유일하게 살아남은
+  // SMT 다이버전스(3.12x/2.84x).
+  smt_divergence: {
+    name: "SMT 다이버전스(ETH·BTC 엇갈림)",
+    desc: "ETH는 직전 4시간 저점(고점)을 갱신했는데 BTC는 갱신하지 않음 — 두 자산의 스윙 흐름이 어긋나는 상관자산 비확인 신호",
+    detail: "[바닥 조건] ETH 저가가 직전 48봉(4시간) 최저가보다 낮게 갱신 AND BTC 저가는 같은 기간 자기 자신의 직전 최저가를 갱신하지 못함 (천장은 정반대).\n" +
+      "[의미] ICT(스마트머니 콘셉트)의 SMT 다이버전스를 그대로 이식한 신호입니다 — 두 상관자산 중 하나만 신저점을 찍고 다른 하나는 버텨준다면, 그 신저점은 '진짜 매도세'가 아니라 개별 종목성 소진일 가능성을 시사합니다. 유동성 스윕과 형제 신호지만 되돌림(종가 복귀) 대신 상관자산 비확인을 가짜 돌파 판별 기준으로 씁니다 — 같은 날 검증에서 두 방식이 정밀도상 동급(42~43%)이고 서로 다른 봉의 약 40%에서 발동한다는 것까지 확인됐습니다.",
+  },
+  // 2026-08-24 추가(같은 날 후속) — 피보나치/하모닉 기하학 계열 연구에서 유일하게 sweep급 lift를
+  // 보인 확장소진(3.27x/2.32x). 다른 6종보다 표본이 훨씬 얇고(n~190 vs 수백~수천) 경제성 게이트는
+  // 0/16으로 실패해 "실험적" 등급으로만 편입 — 6종과 동일 신뢰도로 읽지 말 것.
+  fib_extension_exhaustion: {
+    name: "피보나치 확장 소진 (실험적)",
+    desc: "가격이 직전 스윙 구간의 127.2~161.8% 지점까지 확장 — 다른 6종보다 표본이 얇아 실험적 등급으로 표시",
+    detail: "[바닥 조건] 직전 48봉 안에서 고점보다 저점이 먼저 나온 하락 레그일 때, 가격이 그 레그 저점보다 27.2~61.8%만큼 더 아래(레그 폭 기준)까지 내려감 (천장은 정반대: 저점이 먼저 나온 상승 레그의 고점보다 더 위로 확장).\n" +
+      "[의미] 피보나치 확장 비율(127.2%/161.8%)은 되돌림이 끝나고 추세가 소진되는 지점으로 흔히 쓰입니다. 실측 lift는 바닥 3.27배/천장 2.32배로 유동성 스윕과 비슷한 수준이었지만, 표본이 190건 안팎으로 다른 6종(수백~수천 건)보다 훨씬 적고, VAL에서 OOS로 갈 때 lift가 뚜렷이 줄어드는 경향도 확인됐습니다. 시장가 진입 경제성 게이트도 0/16으로 실패했습니다(다른 6종도 자동화는 전부 실패했으나, 이 신호는 표본 자체가 얇다는 점이 추가 약점).",
+  },
+};
+
+// Snapshot tab "13신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
+// index.html) can be updated from the exact same fetch/loop as the full evidenceSignalList below
+// -- one source of truth per tick, no separate poll or duplicated tone logic.
+const EVIDENCE_STRIP_CHIP_IDS = {
+  orthogonal_combo: "eviChipOrthogonal",
+  liquidity_sweep: "eviChipSweep",
+  volume_wick_climax: "eviChipVolWick",
+  short_term_return_z: "eviChipReturnZ",
+  taker_delta_z_climax: "eviChipTakerDelta",
+  smt_divergence: "eviChipSmt",
+  fib_extension_exhaustion: "eviChipFibExt",
+};
+
+function resetEvidenceStripChips() {
+  Object.values(EVIDENCE_STRIP_CHIP_IDS).forEach((id) => {
+    const chip = el(id);
+    if (!chip) return;
+    chip.className = "signal-chip neutral";
+    const stateEl = chip.querySelector(".signal-chip-state");
+    if (stateEl) stateEl.textContent = "-";
+  });
+  const meaningEl = el("evidenceStripMeaning");
+  if (meaningEl) { meaningEl.className = "evidence-strip-meaning hidden"; meaningEl.textContent = "-"; }
+}
+
+// Informational only -- NOT a trading signal. See the disclaimer text baked into the Snapshot
+// tab's markup and docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md:
+// 4/4 independent attempts to wire these into automated decisions lost to simple benchmarks.
+function renderEvidenceSignals(payload) {
+  const badge = el("snapshotEvidenceBadge");
+  const stripBadge = el("evidenceStripBadge");
+  if (!payload || payload.error) {
+    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "EVIDENCE UNREACHABLE"; }
+    if (stripBadge) { stripBadge.className = "ops-badge bad"; stripBadge.textContent = "UNREACHABLE"; }
+    setT("evidenceSubText", "신호 데이터를 불러오지 못했습니다.");
+    resetEvidenceStripChips();
+    return;
+  }
+  if (!payload.warmed_up) {
+    if (badge) { badge.className = "ops-badge warn"; badge.textContent = "WARMING UP"; }
+    if (stripBadge) { stripBadge.className = "ops-badge warn"; stripBadge.textContent = "WARMING UP"; }
+    setT("evidenceSubText", `${payload.bars_loaded || 0}봉 로드됨 · 워밍업 대기 중`);
+    setH("evidenceSignalList", "");
+    resetEvidenceStripChips();
+    return;
+  }
+  if (badge) { badge.className = "ops-badge good"; badge.textContent = "EVIDENCE LIVE"; }
+  setT(
+    "evidenceSubText",
+    `${fmtTs(payload.latest_bar_utc)} · 현재가 ${fmtNum(payload.price, 2)} USDT · ${payload.bars_loaded}봉`
+  );
+  const net = Number(payload.net_score || 0);
+  const scoreBadge = el("evidenceNetScoreBadge");
+  if (scoreBadge) {
+    scoreBadge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
+    scoreBadge.textContent = `NET_SCORE ${net > 0 ? "+" : ""}${net} (바닥=↑힌트 ${payload.bottom_votes}표 · 천장=↓힌트 ${payload.top_votes}표)`;
+  }
+  if (stripBadge) {
+    stripBadge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
+    stripBadge.textContent = `바닥↑ ${payload.bottom_votes || 0} · 천장↓ ${payload.top_votes || 0}`;
+  }
+  const signals = Array.isArray(payload.signals) ? payload.signals : [];
+  const firedMeanings = [];
+  setH("evidenceSignalList", signals.map((s) => {
+    const tone = s.bottom_fired ? "good" : s.top_fired ? "bad" : "neutral";
+    const state = s.bottom_fired ? "BOTTOM 발동" : s.top_fired ? "TOP 발동" : "미발동";
+    const ko = EVIDENCE_SIGNAL_KO[s.name] || { name: s.name, desc: s.description };
+    const detailKey = `evidence:${s.name}`;
+    const isOpen = detailOpenKeys.has(detailKey);
+    const detailText = ko.detail ? `${ko.detail}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}` : "";
+    // 발동 중일 때 바로 보이는 의미(클릭 불필요) -- 2026-08-24 사용자 요청.
+    const meaningText = s.bottom_fired
+      ? `지금 바닥(BOTTOM) 신호가 발동 중이에요 — ${ko.desc || s.description || ""}. 통계적으로 이 부근에서 반등 확률이 평소보다 높다는 신호지만, 실제 반전 전에도 0.5~0.85% 더 불리하게 움직인 사례가 많았어요.`
+      : s.top_fired
+        ? `지금 천장(TOP) 신호가 발동 중이에요 — ${ko.desc || s.description || ""}. 통계적으로 이 부근에서 하락 반전 확률이 평소보다 높다는 신호지만, 실제 반전 전에도 0.5~0.85% 더 불리하게 움직인 사례가 많았어요.`
+        : "";
+    if (meaningText) firedMeanings.push({ tone, text: meaningText });
+    const stripChip = EVIDENCE_STRIP_CHIP_IDS[s.name] ? el(EVIDENCE_STRIP_CHIP_IDS[s.name]) : null;
+    if (stripChip) {
+      stripChip.className = `signal-chip ${tone}`;
+      const stripStateEl = stripChip.querySelector(".signal-chip-state");
+      if (stripStateEl) stripStateEl.textContent = s.bottom_fired ? "바닥" : s.top_fired ? "천장" : "-";
+    }
+    return `<article class="ops-health-row evidence-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(ko.name)}</strong>
+        <span>${escapeHtml(ko.desc || "-")}</span>
+        ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
+        <div class="evidence-strip-wrap">
+          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [])}
+          <small class="evidence-strip-caption">바닥 ${fmtShortTs(s.bottom_last_fired_ts)} · 천장 ${fmtShortTs(s.top_last_fired_ts)}</small>
+        </div>
+        <button type="button" class="detail-toggle" aria-expanded="${isOpen}" onclick="toggleSignalDetail(this, '${detailKey}')">${isOpen ? "접기 ▴" : "자세히 ▾"}</button>
+        <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${escapeHtml(state)}</span>
+      </div>
+    </article>`;
+  }).join(""));
+  const meaningEl = el("evidenceStripMeaning");
+  if (meaningEl) {
+    if (!firedMeanings.length) {
+      meaningEl.className = "evidence-strip-meaning hidden";
+      meaningEl.textContent = "-";
+    } else {
+      const mixedTone = firedMeanings.some((f) => f.tone === "bad") && firedMeanings.some((f) => f.tone === "good");
+      meaningEl.className = `evidence-strip-meaning ${mixedTone ? "warn" : firedMeanings[0].tone}`;
+      meaningEl.textContent = firedMeanings.length > 1
+        ? `${firedMeanings.length}개 신호 동시 발동 — ${firedMeanings[0].text}`
+        : firedMeanings[0].text;
+    }
+  }
+}
+
+async function refreshEvidenceSignals() {
+  const now = Date.now();
+  if (now - evidenceLastFetchAt < EVIDENCE_POLL_MS) return;
+  evidenceLastFetchAt = now;
+  try {
+    const res = await fetch(API_EVIDENCE_SIGNALS_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`evidence signals ${res.status}`);
+    renderEvidenceSignals(await res.json());
+  } catch (error) {
+    console.error("Evidence signal fetch error:", error);
+    renderEvidenceSignals({ error: true });
+  }
+}
+
+async function refreshOiSignal() {
+  const now = Date.now();
+  if (now - oiSignalLastFetchAt < OI_SIGNAL_POLL_MS) return;
+  oiSignalLastFetchAt = now;
+  try {
+    const res = await fetch(API_OI_SIGNAL_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`oi signal ${res.status}`);
+    latestOiSignal = await res.json();
+  } catch (error) {
+    console.error("OI signal fetch error:", error);
+    latestOiSignal = { warmed_up: false, error: "fetch_failed" };
+  }
+}
+
+// Unlike latestOiSignal (picked up by the next state-driven render() pass), the liquidation map
+// has no such host -- it self-triggers both the panel list and the snapshot chart right after a
+// fetch resolves, same pattern as refreshEvidenceSignals().
+async function refreshLiquidationMap() {
+  const now = Date.now();
+  if (now - liquidationMapLastFetchAt < LIQUIDATION_MAP_POLL_MS) return;
+  liquidationMapLastFetchAt = now;
+  try {
+    const res = await fetch(API_LIQUIDATION_MAP_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`liquidation map ${res.status}`);
+    latestLiquidationMap = await res.json();
+  } catch (error) {
+    console.error("Liquidation map fetch error:", error);
+    latestLiquidationMap = { warmed_up: false, error: "fetch_failed" };
+  }
+  renderLiquidationMapPanel();
+  renderSnapshotChart();
 }
 
 function slotHoldText(holdBars, barSeconds) {
@@ -1959,33 +2445,22 @@ async function refreshEthOdyssey4Shadow() {
 
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const ops = button.dataset.pageTab === "ops";
-    el("liveTabPanel")?.classList.toggle("hidden", ops);
-    el("opsTabPanel")?.classList.toggle("hidden", !ops);
+    const target = button.dataset.pageTab; // "live" | "ops" | "snapshot"
+    el("liveTabPanel")?.classList.toggle("hidden", target !== "live");
+    el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
+    el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (ops) { opsLastFetchAt = 0; refreshOpsStatus(); } else { btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethOdyssey4LastFetchAt = 0; refreshEthOdyssey4Shadow(); }
+    if (target === "ops") {
+      opsLastFetchAt = 0; refreshOpsStatus();
+    } else if (target === "snapshot") {
+      evidenceLastFetchAt = 0; refreshEvidenceSignals();
+      oiSignalLastFetchAt = 0; refreshOiSignal();
+      liquidationMapLastFetchAt = 0; refreshLiquidationMap();
+      lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
+    } else {
+      btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethOdyssey4LastFetchAt = 0; refreshEthOdyssey4Shadow();
+    }
   }));
-}
-
-function setupIndicatorToggle() {
-  const btn = el("indicatorToggleBtn");
-  const row = el("indicatorExtraRow");
-  const label = el("indicatorToggleLabel");
-  if (!btn || !row) return;
-  const apply = (expanded) => {
-    row.classList.toggle("collapsed", !expanded);
-    btn.classList.toggle("expanded", expanded);
-    btn.setAttribute("aria-expanded", String(expanded));
-    if (label) label.textContent = expanded ? "보조 지표 접기" : "보조 지표 더 보기 (+3)";
-  };
-  let expanded = false;
-  try { expanded = localStorage.getItem("dashIndicatorExpanded") === "1"; } catch (e) {}
-  apply(expanded);
-  btn.addEventListener("click", () => {
-    expanded = !expanded;
-    apply(expanded);
-    try { localStorage.setItem("dashIndicatorExpanded", expanded ? "1" : "0"); } catch (e) {}
-  });
 }
 
 function setupScrollRendering() {
@@ -2049,6 +2524,41 @@ function renderLatestCandleChart() {
   const entryPrice = selected ? Number(selected?.position?.entry_price || selected?.entry_price || 0) : 0;
   const riskLevels = selected ? latestChartRiskLevels : [];
   renderCandleSvg(svg, candleHistory, chartJournalRows(), entryPrice, currentPrice, riskLevels);
+}
+
+// Turns latestLiquidationMap's support/resistance levels into renderCandleSvg()'s riskLevels
+// shape ({val, color, label, dashed, width}) -- the exact same overlay mechanism the Live chart
+// already uses for TP/SL/trailing lines (see chartRiskLevels() above), just fed different data.
+// Line width scales with weight_pct (1-4px) so denser levels visually read as stronger.
+function liquidationChartLevels() {
+  const map = latestLiquidationMap;
+  if (!map || !map.warmed_up) return [];
+  const toLevel = (lv, idx, color, tag) => ({
+    val: lv.price,
+    color,
+    label: `${tag}${idx + 1}`,
+    dashed: true,
+    width: Math.max(1, Math.min(4, Math.round(1 + (lv.weight_pct || 0) * 3))),
+  });
+  const support = (map.support_levels || []).map((lv, i) => toLevel(lv, i, "var(--liq-support)", "지지"));
+  const resistance = (map.resistance_levels || []).map((lv, i) => toLevel(lv, i, "var(--liq-resistance)", "저항"));
+  return [...support, ...resistance];
+}
+
+// Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
+// bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as overlay lines
+// instead of TP/SL. Only called after its two data sources (candles, liquidation map) actually
+// refresh (every ~5min each), not on every tick, since neither changes faster than that.
+// NOTE: on mobile, pan/zoom (visibleCandleWindow) reads the same module-level mobileChartView the
+// Live chart's gestures write to -- shares the same window index, not independently interactive.
+// Not wired up to setupMobileCandleGestures() (that's hardcoded to #candleSvg); acceptable since
+// this chart is read-only reference, not something a user pinches/pans on its own.
+function renderSnapshotChart() {
+  const svg = el("candleSvgSnapshot");
+  const candles = candleHistoryByAsset.eth || [];
+  if (!svg || !candles.length) return;
+  const currentPrice = Number(latestLivePriceByAsset.eth || candles[candles.length - 1]?.close || 0);
+  renderCandleSvg(svg, candles, [], 0, currentPrice, liquidationChartLevels());
 }
 
 function chartTouchDistance(touches) {
@@ -2321,38 +2831,59 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (Number(level.val) > 0) priceLabels.push(level);
   });
 
-  // Sort by Y position (Price descending = Y ascending)
-  priceLabels.sort((a, b) => yAt(a.val) - yAt(b.val));
-
-  // Adjust Y to avoid overlap
-  const minGap = 18;
-  for (let i = 1; i < priceLabels.length; i++) {
-    const prevY = yAt(priceLabels[i - 1].val);
-    const currY = yAt(priceLabels[i].val);
-    if (Math.abs(currY - prevY) < minGap) {
-      // Move current label down if it overlaps with previous
-      priceLabels[i].adjustedY = prevY + minGap;
-    }
-  }
-
+  // Precompute clamped position/off-view state before sorting -- the liquidation-map overlay can
+  // carry up to a dozen levels several % away from price while this chart's own candle history
+  // spans only ~8h (5m x100), so most or all of them land off-screen and clamp to one of two
+  // identical edge pixels. The decluttering pass below needs that clamped position, not the raw
+  // one, or it can't tell they collide.
   priceLabels.forEach(p => {
     const rawY = yAt(p.val);
-    const offTop = rawY < mt;
-    const offBottom = rawY > h - mb;
-    const outOfView = offTop || offBottom;
-    const realY = outOfView ? (offTop ? mt + 2 : h - mb - 2) : rawY;
-    const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : realY;
-    const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
-    const lineDashed = p.dashed || outOfView;
+    p.offTop = rawY < mt;
+    p.offBottom = rawY > h - mb;
+    p.outOfView = p.offTop || p.offBottom;
+    p.realY = p.outOfView ? (p.offTop ? mt + 2 : h - mb - 2) : rawY;
+  });
 
-    // Line stays at real price
+  // Sort by Y position (Price descending = Y ascending). Off-view levels on the same edge tie on
+  // realY; stable sort then falls back to insertion order, which is nearest-to-price first (see
+  // liquidationChartLevels()) -- so the cascade below places the most relevant level closest to
+  // the edge and farther ones deeper into the chart.
+  priceLabels.sort((a, b) => a.realY - b.realY);
+
+  // Adjust Y to avoid overlap. Off-view levels clamped to the same edge pixel need an
+  // unconditional cascade, not a "would this collide" check -- a distance-gated nudge only fires
+  // once, since every clamped item after the first sits exactly minGap*k away from a still-
+  // identical realY and the gate never re-triggers. In-view levels (current/entry price) keep the
+  // original "only nudge if actually close" behavior since their true positions are meaningful.
+  const minGap = 18;
+  let topStack = mt + 2, bottomStack = h - mb - 2;
+  priceLabels.forEach((p, i) => {
+    if (p.offTop) {
+      p.adjustedY = topStack;
+      topStack += minGap;
+    } else if (p.offBottom) {
+      p.adjustedY = bottomStack;
+      bottomStack -= minGap;
+    } else if (i > 0) {
+      const prev = priceLabels[i - 1];
+      const prevY = prev.adjustedY !== undefined ? prev.adjustedY : prev.realY;
+      if (Math.abs(p.realY - prevY) < minGap) p.adjustedY = prevY + minGap;
+    }
+  });
+
+  priceLabels.forEach(p => {
+    const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
+    const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
+    const lineDashed = p.dashed || p.outOfView;
+
+    // Line stays at real (clamped) price position
     const line = document.createElementNS(NS, "line");
     line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", realY); line.setAttribute("y2", realY);
+    line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
     line.setAttribute("stroke", p.color);
     line.setAttribute("stroke-width", String(p.width || 2));
     if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
-    if (outOfView) line.setAttribute("opacity", "0.72");
+    if (p.outOfView) line.setAttribute("opacity", "0.72");
     svg.appendChild(line);
 
     // Left label (follows label position)
@@ -2360,7 +2891,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
     txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
     txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
-    txt.textContent = `${p.label}${offTop ? "↑" : offBottom ? "↓" : ""}`;
+    txt.textContent = `${p.label}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
     svg.appendChild(txt);
 
     // Right box (follows label position)
@@ -2375,7 +2906,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
     pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
     pTxt.setAttribute("fill", "#1a1208");
-    pTxt.textContent = `${offTop ? "↑ " : offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
+    pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
   });
 
@@ -2462,62 +2993,50 @@ function render(state, compactState = null, { stateChanged = true, journalChange
   setH("topSession", sessionHtml);
   setT("topClock", fmtNowClock());
   
-  // 6 Indicators Grid Borders
-  const toxV = clamp01(micro.toxicity_score);
-  const riskV = clamp01(tail.aftershock_prob);
-  const toxDir = Number(micro.obi || 0) > 0 ? 1 : Number(micro.obi || 0) < 0 ? -1 : 0;
-  const toxSignal = toxHint(toxV, toxDir);
-  const eaiSignal = eaiHint(micro);
-  const riskSignal = tailRiskHint(tail);
-  const whaleTone = Number(micro.nif_whale || 0) > 0.05 ? "good" : (Number(micro.nif_whale || 0) < -0.05 ? "bad" : "neutral");
-  const whalePosTone = Number(micro.whale_position_score || 0) > 0.2 ? "good" : (Number(micro.whale_position_score || 0) < -0.2 ? "bad" : "neutral");
-  const obiTone = Number(micro.obi || 0) > 0.1 ? "good" : (Number(micro.obi || 0) < -0.1 ? "bad" : "neutral");
-  const eaiTone = signalTone(eaiSignal);
-  const toxTone = signalTone(toxSignal);
-  const riskTone = signalTone(riskSignal);
-  setB("cardWhale", whaleTone);
-  setB("cardWhalePos", whalePosTone);
-  setB("cardObi", obiTone);
-  setB("cardEai", eaiTone);
-  setB("cardTox", toxTone);
-  setB("cardRisk", riskTone);
+  // classifyIndicators() is the single source of truth for these thresholds (also reused by
+  // seedModelIndicatorHistory() against server-provided history, so there is only one copy of
+  // this logic to keep correct, not a live copy and a history copy). The 6 model indicators only
+  // render on the Snapshot tab now (renderModelIndicatorList below) -- no Live-tab cards consume
+  // ci/toneHistory anymore.
+  const ci = classifyIndicators(micro, tail);
+  const { whaleTone, whalePosTone, eaiTone, toxTone, riskTone } = ci;
+  // toneHistory feeds the Snapshot tab's activity-strip rows (renderModelIndicatorList below).
+  pushToneHistory("whale", whaleTone);
+  pushToneHistory("whale_intent", whalePosTone);
+  pushToneHistory("eai", eaiTone);
+  pushToneHistory("tox", toxTone);
+  pushToneHistory("risk", riskTone);
 
-  pushMicroHistory("whale", micro.nif_whale);
-  pushMicroHistory("whale_intent", micro.whale_position_score);
-  pushMicroHistory("obi", micro.obi);
-  pushMicroHistory("eai", micro.eai);
-  pushMicroHistory("tox", toxV);
-  pushMicroHistory("risk", riskV);
-  renderSparkline("cardWhale", microHistory.whale, whaleTone);
-  renderSparkline("cardWhalePos", microHistory.whale_intent, whalePosTone);
-  renderSparkline("cardObi", microHistory.obi, obiTone);
-  renderSparkline("cardEai", microHistory.eai, eaiTone);
-  renderSparkline("cardTox", microHistory.tox, toxTone);
-  renderSparkline("cardRisk", microHistory.risk, riskTone);
+  // OI 급변 (replaces 호가 불균형, 2026-08-24) -- fetched separately by refreshOiSignal(), not
+  // part of ci/toneHistory (see scripts/live_oi_delta_signal_20260824.py for why). History comes
+  // from the server payload directly (survives refresh), not client-accumulated toneHistory.
+  const oiWarmedUp = !!(latestOiSignal && latestOiSignal.warmed_up);
+  const oiTone = oiWarmedUp ? latestOiSignal.tone : "neutral";
+  const oiSubText = oiWarmedUp
+    ? (oiTone === "bad" ? "위험" : oiTone === "warn" ? "주의" : "안정")
+    : "웜업 중";
 
-  setT("whaleText", flowRead(micro));
-  setT("whaleStatusText", directionalCaution(micro.nif_whale, 0.05));
-  setT("whaleIntentText", whalePositionRead(micro));
-  setT("whaleIntentPct", directionalCaution(micro.whale_position_score, 0.2));
-  setT("obiText", obiRead(micro.obi));
-  setT("eaiText", eaiRead(micro));
-  setT("toxText", toxRead(toxV));
-  setT("riskText", tailRiskRead(tail));
-
-  // Gauges
-  const obiVal = Number(micro.obi || 0);
-  setT("obiGaugeRightTxt", directionalCaution(obiVal, 0.1));
-  setT("eaiGaugeRightTxt", eaiSignal);
-
-  setMeter("toxFill", toxV, toxV > 0.65 ? "bad" : toxV > 0.35 ? "warn" : "good");
-  setT("toxText", toxRead(toxV));
-  setT("toxStatusLabel", toxSignal);
-
-  const aftVal = clamp01(tail.aftershock_prob);
-  setMeter("riskFill", aftVal, aftVal > 0.65 ? "bad" : aftVal > 0.35 ? "warn" : "good");
-  setT("riskText", tailRiskRead(tail));
-  setT("riskStatusLabel", riskSignal);
-
+  // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
+  renderModelIndicatorList([
+    {
+      key: "oi_delta", label: "OI 급변", tone: oiTone, subText: oiSubText,
+      history: (latestOiSignal && latestOiSignal.tone_history) || [],
+      derivedTag: "= 대시보드 자체계산",
+      derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도 duckdb(OI 전용 poller)에서 직접 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
+    },
+    { key: "tox", label: "독성", tone: ci.tox.tone, subText: ci.tox.subText, history: toneHistory.tox },
+    { key: "risk", label: "꼬리 리스크", tone: ci.risk.tone, subText: ci.risk.subText, history: toneHistory.risk },
+    { key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale },
+    {
+      key: "whale_intent",
+      label: "고래 포지션", tone: ci.whale_intent.tone,
+      subText: ci.whale_intent.subText, history: toneHistory.whale_intent,
+      derivedTag: "= 수급흐름 파생",
+      derivedTitle: "whale_position_score = 0.7 x sign(수급흐름) x |수급흐름| 정규화 + 0.3 x OI방향 보정항 (microstructure_scanner.py) -- 부호와 크기 대부분이 수급 흐름(nif_whale)에서 그대로 옴, 별도 모듈이 두 값만으로 이 값을 재구성 가능",
+    },
+    { key: "eai", label: "에너지 지수", tone: ci.eai.tone, subText: ci.eai.subText, history: toneHistory.eai },
+  ]);
+  setT("snapshotUpdatedAt", `모델 지표 갱신 ${globalStamp}`);
 }
 
 async function tick() {
@@ -2534,6 +3053,10 @@ async function tick() {
     refreshOpsStatus();
     refreshBtcMultislotShadow();
     refreshEthOdyssey4Shadow();
+    refreshEvidenceSignals();
+    refreshOiSignal();
+    refreshLiquidationMap();
+    maybeFetchSnapshotChartHistory();
   } catch (e) {
     console.error("Tick Error:", e);
   } finally {
@@ -2541,9 +3064,39 @@ async function tick() {
   }
 }
 
-connectDashboardEvents();
-tick();
-setInterval(tick, POLL_MS);
+// One-time seed of the Snapshot tab's model-indicator strips from the dashboard server's own
+// history buffer (populated server-side every 5 min regardless of whether any browser tab is
+// open -- see /api/model-indicator-history in dashboard/server.py). Awaited BEFORE the live SSE
+// connection starts so no live tick can race ahead and populate toneHistory first: if that raced,
+// the "already has data" guard below would (correctly, but uselessly) skip seeding, leaving the
+// strip looking exactly as un-warmed-up as before this feature existed.
+async function seedModelIndicatorHistory() {
+  try {
+    const res = await fetch("/api/model-indicator-history", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const payload = await res.json();
+    const samples = Array.isArray(payload.samples) ? payload.samples : [];
+    if (!samples.length) return;
+    if (Object.values(toneHistory).some((arr) => arr.length)) return; // live tick already won the race
+    for (const sample of samples) {
+      const c = classifyIndicators(sample.microstructure, sample.tail_risk);
+      pushToneHistory("tox", c.tox.tone);
+      pushToneHistory("risk", c.risk.tone);
+      pushToneHistory("whale", c.whale.tone);
+      pushToneHistory("whale_intent", c.whale_intent.tone);
+      pushToneHistory("eai", c.eai.tone);
+    }
+  } catch (error) {
+    console.error("Model indicator history seed error (non-fatal, strip just starts empty):", error);
+  }
+}
+
+(async () => {
+  await seedModelIndicatorHistory();
+  connectDashboardEvents();
+  tick();
+  setInterval(tick, POLL_MS);
+})();
 setInterval(() => {
   if (!isScrolling) { setT("topClock", fmtNowClock()); }
 }, 1000);
@@ -2557,7 +3110,6 @@ document.addEventListener("visibilitychange", () => {
 });
 setupAssetTabs();
 setupPageTabs();
-setupIndicatorToggle();
 setupScrollRendering();
 setupMobileCandleGestures();
 

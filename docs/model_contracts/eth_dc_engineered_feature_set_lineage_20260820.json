@@ -1,0 +1,619 @@
+{
+  "feature_set_id": "eth_dc_engineered154_20260820",
+  "final_feature_count": 154,
+  "wrapper_script": "scripts/eth_dc_engineered_features_canonicaldata_20260820.py",
+  "label": "ETH 5m Directional-Change (DC) triple-barrier direction label",
+  "parent_data": {
+    "train_csv": "data/splits/year_oos/training_features_2025.csv",
+    "eval_csv": "data/splits/year_oos/training_features_2026_rebuilt.csv (REGIME3_CURRENT_2026-filtered, 51,746 rows)"
+  },
+  "stages": [
+    {
+      "stage": 0,
+      "name": "canonical_base_158",
+      "feature_count": 158,
+      "description": "Auto-derived numeric feature columns from omega._numeric_feature_cols() on the canonical TRAIN/EVAL frames (includes regime3 HMM overlays).",
+      "source_list": "dc_base_158_cols.json (scratchpad)"
+    },
+    {
+      "stage": 1,
+      "name": "dead_column_removal",
+      "operation": "Exact zero-variance (std<1e-12, pooled 2025+2026) columns dropped -- placeholder REGIME3_CMAMBA/RISK overlays that were never populated with real data.",
+      "removed_count": 11,
+      "removed": [
+        "regime3_churn_h6_risk_score",
+        "regime3_cmamba_h6_sidecar_bear_prob",
+        "regime3_cmamba_h6_sidecar_bull_prob",
+        "regime3_cmamba_h6_sidecar_chop_prob",
+        "regime3_cmamba_h6_sidecar_class_id",
+        "regime3_cmamba_h6_sidecar_confidence",
+        "regime3_cmamba_h6_sidecar_stability_score",
+        "regime3_cmamba_h6_sidecar_transition_prob",
+        "regime3_stability_h6_score",
+        "regime3_transition_h6_risk_pred",
+        "regime3_transition_h6_risk_prob"
+      ],
+      "input_count": 158,
+      "output_count": 147,
+      "script": "scripts/eth_dc_feature_redundancy_audit_20260820.py",
+      "report": "tmp/eth_dc_feature_redundancy_audit_20260820.json"
+    },
+    {
+      "stage": 2,
+      "name": "pairwise_correlation_cluster_dedup",
+      "operation": "Pearson |corr|>=0.95 union-find clustering (mathematically single-linkage); one representative per cluster kept (highest individual direction-agnostic AUC vs DC label, tie-break only -- all individually non-significant).",
+      "removed_count": 14,
+      "removed": [
+        "btc_ret_3",
+        "close",
+        "funding_oi_divergence",
+        "funding_z_score",
+        "garman_klass_vol",
+        "hma_slope",
+        "low",
+        "oi_change_rate",
+        "open",
+        "regime3_current_sensitive_wide24_margin",
+        "rogers_satchell_vol",
+        "taker_buy_base",
+        "taker_buy_quote",
+        "volume_btc"
+      ],
+      "clusters": [
+        {
+          "members": [
+            "open",
+            "high",
+            "low",
+            "close"
+          ],
+          "representative": "high",
+          "member_aucs": {
+            "open": 0.5112541407327242,
+            "high": 0.5112999469068472,
+            "low": 0.5111675506369616,
+            "close": 0.5112111890291817
+          }
+        },
+        {
+          "members": [
+            "volume",
+            "taker_buy_base"
+          ],
+          "representative": "volume",
+          "member_aucs": {
+            "volume": 0.5060703817655127,
+            "taker_buy_base": 0.5037291503813734
+          }
+        },
+        {
+          "members": [
+            "quote_volume",
+            "taker_buy_quote"
+          ],
+          "representative": "quote_volume",
+          "member_aucs": {
+            "quote_volume": 0.5108304538188131,
+            "taker_buy_quote": 0.5080150840997049
+          }
+        },
+        {
+          "members": [
+            "volume_btc",
+            "quote_volume_btc"
+          ],
+          "representative": "quote_volume_btc",
+          "member_aucs": {
+            "volume_btc": 0.5052890108376169,
+            "quote_volume_btc": 0.5068684217244384
+          }
+        },
+        {
+          "members": [
+            "smart_money_flow",
+            "oi_change_rate"
+          ],
+          "representative": "smart_money_flow",
+          "member_aucs": {
+            "smart_money_flow": 0.5020702990397237,
+            "oi_change_rate": 0.5020702990397237
+          }
+        },
+        {
+          "members": [
+            "log_return",
+            "funding_oi_divergence"
+          ],
+          "representative": "log_return",
+          "member_aucs": {
+            "log_return": 0.5097673789594066,
+            "funding_oi_divergence": 0.5090029194232504
+          }
+        },
+        {
+          "members": [
+            "hma_slope",
+            "kalman_velocity"
+          ],
+          "representative": "kalman_velocity",
+          "member_aucs": {
+            "hma_slope": 0.5071578004117547,
+            "kalman_velocity": 0.5073990301047548
+          }
+        },
+        {
+          "members": [
+            "garman_klass_vol",
+            "rogers_satchell_vol",
+            "parkinson_vol"
+          ],
+          "representative": "parkinson_vol",
+          "member_aucs": {
+            "garman_klass_vol": 0.5051385856238305,
+            "rogers_satchell_vol": 0.5047697126237507,
+            "parkinson_vol": 0.5055782548800944
+          }
+        },
+        {
+          "members": [
+            "funding_z_score",
+            "ou_funding_z"
+          ],
+          "representative": "ou_funding_z",
+          "member_aucs": {
+            "funding_z_score": 0.5027174290634439,
+            "ou_funding_z": 0.5027327651105709
+          }
+        },
+        {
+          "members": [
+            "btc_ret_3",
+            "btc_impulse_x_eth_beta"
+          ],
+          "representative": "btc_impulse_x_eth_beta",
+          "member_aucs": {
+            "btc_ret_3": 0.5006340156164315,
+            "btc_impulse_x_eth_beta": 0.500848343270661
+          }
+        },
+        {
+          "members": [
+            "regime3_current_sensitive_wide24_confidence",
+            "regime3_current_sensitive_wide24_margin"
+          ],
+          "representative": "regime3_current_sensitive_wide24_confidence",
+          "member_aucs": {
+            "regime3_current_sensitive_wide24_confidence": 0.5037182980073749,
+            "regime3_current_sensitive_wide24_margin": 0.503713854727698
+          }
+        }
+      ],
+      "input_count": 147,
+      "output_count": 133,
+      "script": "scripts/eth_dc_feature_redundancy_audit_20260820.py",
+      "report": "tmp/eth_dc_feature_redundancy_audit_20260820.json"
+    },
+    {
+      "stage": 3,
+      "name": "probability_simplex_exact_collinearity_fix",
+      "operation": "VIF diagnostic (correlation-matrix-inverse diagonal) found regime3_current_sensitive_wide24_{bull,bear,chop}_prob at VIF~3e13; verified bull+bear+chop=1.0 exactly on every row both years (probability simplex constraint, undetectable by pairwise correlation) -- dropped chop_prob (bull/bear jointly determine it, zero information loss).",
+      "removed_count": 1,
+      "removed": [
+        "regime3_current_sensitive_wide24_chop_prob"
+      ],
+      "input_count": 133,
+      "output_count": 132,
+      "script": "scripts/eth_dc_feature_vif_check_20260820.py",
+      "report": "tmp/eth_dc_feature_vif_check_20260820.json"
+    },
+    {
+      "stage": 4,
+      "name": "iterative_vif_elimination",
+      "operation": "Repeated: compute VIF for all surviving features (corr-matrix-inverse diagonal), drop the single highest-VIF feature, recompute -- until max VIF < 10 (O'Brien 2007 convention, not a derived threshold). Catches multivariate collinearity distributed across 3+ features that pairwise correlation structurally cannot see.",
+      "removed_count": 20,
+      "elimination_trace": [
+        {
+          "step": 1,
+          "removed": "mtf_trend_1h",
+          "vif_at_removal": 259.5809270314409,
+          "n_remaining_after": 131
+        },
+        {
+          "step": 2,
+          "removed": "last_funding_rate",
+          "vif_at_removal": 242.2425280889199,
+          "n_remaining_after": 130
+        },
+        {
+          "step": 3,
+          "removed": "log_return",
+          "vif_at_removal": 144.35442209765156,
+          "n_remaining_after": 129
+        },
+        {
+          "step": 4,
+          "removed": "wick_ratio",
+          "vif_at_removal": 111.89344182700009,
+          "n_remaining_after": 128
+        },
+        {
+          "step": 5,
+          "removed": "kalman_velocity",
+          "vif_at_removal": 45.55857574704336,
+          "n_remaining_after": 127
+        },
+        {
+          "step": 6,
+          "removed": "long_squeeze_risk",
+          "vif_at_removal": 41.71029684741105,
+          "n_remaining_after": 126
+        },
+        {
+          "step": 7,
+          "removed": "mtf_trend_4h",
+          "vif_at_removal": 37.848323030375674,
+          "n_remaining_after": 125
+        },
+        {
+          "step": 8,
+          "removed": "compression_score",
+          "vif_at_removal": 18.20373526540305,
+          "n_remaining_after": 124
+        },
+        {
+          "step": 9,
+          "removed": "short_squeeze_risk",
+          "vif_at_removal": 16.88615998772249,
+          "n_remaining_after": 123
+        },
+        {
+          "step": 10,
+          "removed": "volume",
+          "vif_at_removal": 15.561372011911534,
+          "n_remaining_after": 122
+        },
+        {
+          "step": 11,
+          "removed": "mean_reversion_z",
+          "vif_at_removal": 14.649726364847249,
+          "n_remaining_after": 121
+        },
+        {
+          "step": 12,
+          "removed": "regime3_current_sensitive_wide24_entropy",
+          "vif_at_removal": 13.662919319840887,
+          "n_remaining_after": 120
+        },
+        {
+          "step": 13,
+          "removed": "high",
+          "vif_at_removal": 13.519865980807886,
+          "n_remaining_after": 119
+        },
+        {
+          "step": 14,
+          "removed": "breakout_strength",
+          "vif_at_removal": 13.283268144781335,
+          "n_remaining_after": 118
+        },
+        {
+          "step": 15,
+          "removed": "jump_z",
+          "vif_at_removal": 12.725225983553623,
+          "n_remaining_after": 117
+        },
+        {
+          "step": 16,
+          "removed": "rsi",
+          "vif_at_removal": 12.340169352177442,
+          "n_remaining_after": 116
+        },
+        {
+          "step": 17,
+          "removed": "sum_toptrader_long_short_ratio",
+          "vif_at_removal": 12.025125722489719,
+          "n_remaining_after": 115
+        },
+        {
+          "step": 18,
+          "removed": "volatility_z",
+          "vif_at_removal": 11.776208844347874,
+          "n_remaining_after": 114
+        },
+        {
+          "step": 19,
+          "removed": "vwap_dist_96",
+          "vif_at_removal": 11.17869551588349,
+          "n_remaining_after": 113
+        },
+        {
+          "step": 20,
+          "removed": "cvd_48",
+          "vif_at_removal": 11.129444834652585,
+          "n_remaining_after": 112
+        }
+      ],
+      "input_count": 132,
+      "output_count": 112,
+      "final_max_vif": 9.59421525623605,
+      "script": "scripts/eth_dc_feature_vif_iterative_elimination_20260820.py",
+      "report": "tmp/eth_dc_feature_vif_iterative_elimination_20260820.json"
+    },
+    {
+      "stage": 5,
+      "name": "rit_tree_discovered_combination_features",
+      "operation": "LightGBM fit on 2025(train)-only DC events (2026 kept fully independent for later testing); ancestor-descendant split_feature co-occurrence within trees, split-gain-weighted, top-30 pairs; constructed as combo_a_x_b = raw_a * raw_b across all 2025+2026 bars.",
+      "added_count": 30,
+      "added": [
+        "combo_hurst_288_x_whale_conviction",
+        "combo_funding_roc_288_x_fvg_dist",
+        "combo_execution_quality_x_funding_roc_288",
+        "combo_cvp_vah_val_width_x_upper_wick_z",
+        "combo_minute_sin_x_realized_skewness",
+        "combo_btc_ret_1_x_cvp_vah_val_width",
+        "combo_ou_funding_z_x_turtle_signal",
+        "combo_cvd_slope_48_x_turtle_signal",
+        "combo_count_long_short_ratio_x_cvp_volume_imbalance",
+        "combo_btc_corr_60_x_kel",
+        "combo_cvp_vah_val_width_x_lower_wick_z",
+        "combo_amihud_illiquidity_z_x_upper_wick_z",
+        "combo_bb_width_pct_rank_288_x_ofi_acceleration",
+        "combo_btc_ret_6_x_funding_roc_288",
+        "combo_macd_hist_x_ou_halflife",
+        "combo_minute_sin_x_sig_trend_health",
+        "combo_btc_ret_6_x_cvp_vah_val_width",
+        "combo_lower_wick_z_x_minute_sin",
+        "combo_crowded_short_squeeze_risk_x_ou_halflife",
+        "combo_chop_index_x_funding_roc_288",
+        "combo_btc_corr_60_x_funding_roc_288",
+        "combo_count_long_short_ratio_x_whale_retail_ratio",
+        "combo_ou_funding_z_x_upper_wick_z",
+        "combo_distance_to_day_high_low_pct_x_turtle_signal",
+        "combo_atr_pct_rank_288_x_bb_width_pct_rank_288",
+        "combo_amihud_illiquidity_z_x_minute_sin",
+        "combo_turtle_signal_x_upper_wick_z",
+        "combo_upper_wick_z_x_whale_conviction",
+        "combo_amihud_illiquidity_z_x_realized_skewness",
+        "combo_chop_index_x_cvp_cluster_position"
+      ],
+      "construction_detail": [
+        {
+          "name": "combo_hurst_288_x_whale_conviction",
+          "a": "hurst_288",
+          "b": "whale_conviction",
+          "discovery_gain_score": 195.23582887649536
+        },
+        {
+          "name": "combo_funding_roc_288_x_fvg_dist",
+          "a": "funding_roc_288",
+          "b": "fvg_dist",
+          "discovery_gain_score": 131.60670042037964
+        },
+        {
+          "name": "combo_execution_quality_x_funding_roc_288",
+          "a": "execution_quality",
+          "b": "funding_roc_288",
+          "discovery_gain_score": 129.31830072402954
+        },
+        {
+          "name": "combo_cvp_vah_val_width_x_upper_wick_z",
+          "a": "cvp_vah_val_width",
+          "b": "upper_wick_z",
+          "discovery_gain_score": 125.930100440979
+        },
+        {
+          "name": "combo_minute_sin_x_realized_skewness",
+          "a": "minute_sin",
+          "b": "realized_skewness",
+          "discovery_gain_score": 120.04045915603638
+        },
+        {
+          "name": "combo_btc_ret_1_x_cvp_vah_val_width",
+          "a": "btc_ret_1",
+          "b": "cvp_vah_val_width",
+          "discovery_gain_score": 113.22749853134155
+        },
+        {
+          "name": "combo_ou_funding_z_x_turtle_signal",
+          "a": "ou_funding_z",
+          "b": "turtle_signal",
+          "discovery_gain_score": 112.97003126144409
+        },
+        {
+          "name": "combo_cvd_slope_48_x_turtle_signal",
+          "a": "cvd_slope_48",
+          "b": "turtle_signal",
+          "discovery_gain_score": 109.2585096359253
+        },
+        {
+          "name": "combo_count_long_short_ratio_x_cvp_volume_imbalance",
+          "a": "count_long_short_ratio",
+          "b": "cvp_volume_imbalance",
+          "discovery_gain_score": 106.70141887664795
+        },
+        {
+          "name": "combo_btc_corr_60_x_kel",
+          "a": "btc_corr_60",
+          "b": "kel",
+          "discovery_gain_score": 100.42726993560791
+        },
+        {
+          "name": "combo_cvp_vah_val_width_x_lower_wick_z",
+          "a": "cvp_vah_val_width",
+          "b": "lower_wick_z",
+          "discovery_gain_score": 98.79217982292175
+        },
+        {
+          "name": "combo_amihud_illiquidity_z_x_upper_wick_z",
+          "a": "amihud_illiquidity_z",
+          "b": "upper_wick_z",
+          "discovery_gain_score": 97.00621032714844
+        },
+        {
+          "name": "combo_bb_width_pct_rank_288_x_ofi_acceleration",
+          "a": "bb_width_pct_rank_288",
+          "b": "ofi_acceleration",
+          "discovery_gain_score": 94.93597030639648
+        },
+        {
+          "name": "combo_btc_ret_6_x_funding_roc_288",
+          "a": "btc_ret_6",
+          "b": "funding_roc_288",
+          "discovery_gain_score": 91.51236057281494
+        },
+        {
+          "name": "combo_macd_hist_x_ou_halflife",
+          "a": "macd_hist",
+          "b": "ou_halflife",
+          "discovery_gain_score": 91.49533033370972
+        },
+        {
+          "name": "combo_minute_sin_x_sig_trend_health",
+          "a": "minute_sin",
+          "b": "sig_trend_health",
+          "discovery_gain_score": 91.03453969955444
+        },
+        {
+          "name": "combo_btc_ret_6_x_cvp_vah_val_width",
+          "a": "btc_ret_6",
+          "b": "cvp_vah_val_width",
+          "discovery_gain_score": 90.50260066986084
+        },
+        {
+          "name": "combo_lower_wick_z_x_minute_sin",
+          "a": "lower_wick_z",
+          "b": "minute_sin",
+          "discovery_gain_score": 90.44852066040039
+        },
+        {
+          "name": "combo_crowded_short_squeeze_risk_x_ou_halflife",
+          "a": "crowded_short_squeeze_risk",
+          "b": "ou_halflife",
+          "discovery_gain_score": 90.27375984191895
+        },
+        {
+          "name": "combo_chop_index_x_funding_roc_288",
+          "a": "chop_index",
+          "b": "funding_roc_288",
+          "discovery_gain_score": 88.85145974159241
+        },
+        {
+          "name": "combo_btc_corr_60_x_funding_roc_288",
+          "a": "btc_corr_60",
+          "b": "funding_roc_288",
+          "discovery_gain_score": 88.76841974258423
+        },
+        {
+          "name": "combo_count_long_short_ratio_x_whale_retail_ratio",
+          "a": "count_long_short_ratio",
+          "b": "whale_retail_ratio",
+          "discovery_gain_score": 88.204261302948
+        },
+        {
+          "name": "combo_ou_funding_z_x_upper_wick_z",
+          "a": "ou_funding_z",
+          "b": "upper_wick_z",
+          "discovery_gain_score": 88.16546106338501
+        },
+        {
+          "name": "combo_distance_to_day_high_low_pct_x_turtle_signal",
+          "a": "distance_to_day_high_low_pct",
+          "b": "turtle_signal",
+          "discovery_gain_score": 86.62030076980591
+        },
+        {
+          "name": "combo_atr_pct_rank_288_x_bb_width_pct_rank_288",
+          "a": "atr_pct_rank_288",
+          "b": "bb_width_pct_rank_288",
+          "discovery_gain_score": 85.77931118011475
+        },
+        {
+          "name": "combo_amihud_illiquidity_z_x_minute_sin",
+          "a": "amihud_illiquidity_z",
+          "b": "minute_sin",
+          "discovery_gain_score": 85.0682601928711
+        },
+        {
+          "name": "combo_turtle_signal_x_upper_wick_z",
+          "a": "turtle_signal",
+          "b": "upper_wick_z",
+          "discovery_gain_score": 83.55614185333252
+        },
+        {
+          "name": "combo_upper_wick_z_x_whale_conviction",
+          "a": "upper_wick_z",
+          "b": "whale_conviction",
+          "discovery_gain_score": 83.46924018859863
+        },
+        {
+          "name": "combo_amihud_illiquidity_z_x_realized_skewness",
+          "a": "amihud_illiquidity_z",
+          "b": "realized_skewness",
+          "discovery_gain_score": 82.13086032867432
+        },
+        {
+          "name": "combo_chop_index_x_cvp_cluster_position",
+          "a": "chop_index",
+          "b": "cvp_cluster_position",
+          "discovery_gain_score": 80.83306121826172
+        }
+      ],
+      "input_count": 112,
+      "output_count": 142,
+      "script": "scripts/eth_dc_combination_feature_construction_20260820.py",
+      "report": "tmp/eth_dc_combination_feature_construction_20260820.json"
+    },
+    {
+      "stage": 6,
+      "name": "financial_ml_literature_gap_features",
+      "operation": "Literature gap analysis (financial time-series ML + crypto-specific quant research, cross-checked against actual feature code to rule out false-positive overlaps) found 9 standard feature families absent from the 158-canonical set; implemented the computationally-tractable ones: fractional differentiation (d in {0.3,0.5,0.7}), return-sign Shannon entropy, Corwin-Schultz spread, Roll's implied spread (adapted to log_return for cross-period stationarity), Kyle's Lambda, VPIN approximation, realized semivariance ratio, realized kurtosis, Lo-MacKinlay variance ratio (q in {4,12}). SADF/multifractal-DFA/transfer-entropy/Hawkes deferred (implementation complexity/runtime cost).",
+      "added_count": 12,
+      "added": [
+        "corwin_schultz_spread",
+        "entropy_return_sign_48",
+        "ffd_close_d03",
+        "ffd_close_d05",
+        "ffd_close_d07",
+        "kyle_lambda_48",
+        "realized_kurtosis_96",
+        "realized_semivar_ratio_96",
+        "roll_implied_spread_48",
+        "variance_ratio_q12_96",
+        "variance_ratio_q4_96",
+        "vpin_approx_48"
+      ],
+      "input_count": 142,
+      "output_count": 154,
+      "script": "scripts/eth_dc_financial_ml_feature_construction_20260820.py",
+      "report": "tmp/eth_dc_financial_ml_feature_construction_20260820.json",
+      "literature_review": "docs/feature_redundancy_and_interaction_literature_review_20260820.md"
+    }
+  ],
+  "signal_test_results": {
+    "individual_new42_permutation_null": {
+      "empirical_p": 0.46,
+      "script": "scripts/eth_dc_new42_feature_information_content_20260820.py"
+    },
+    "tabm_n5seed_retrain": {
+      "individual_cond_acc_range": [
+        48.8,
+        51.0
+      ],
+      "baseline_158feat_cond_acc_range": [
+        48.2,
+        51.4
+      ],
+      "oos_pnl_sign_consistent": false,
+      "ensemble_cond_acc": 49.7,
+      "ensemble_pnl": -19.96,
+      "ensemble_mdd": -30.27,
+      "script": "scripts/eth_dc_engineered154_training_runner_20260820.py",
+      "analysis_script": "scripts/eth_dc_engineered154_analysis_20260820.py"
+    },
+    "verdict": "chance-level across every test -- see research_line_registry.json id eth_dc_feature_engineering_redundancy_combination_finml_20260820"
+  },
+  "docs": [
+    "docs/experiments/eth_directional_change_tabm_nhits_training_20260819.md",
+    "docs/feature_redundancy_and_interaction_literature_review_20260820.md"
+  ]
+}

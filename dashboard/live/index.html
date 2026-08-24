@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260814-odyssey4-shadow-v10">
+  <link rel="stylesheet" href="styles.css?v=20260824-liq-chart-offscreen-fix-v27">
 </head>
 <body>
   <main class="app">
@@ -18,6 +18,7 @@
         <nav class="page-tabs" aria-label="대시보드 탭">
           <button type="button" class="page-tab active" data-page-tab="live">라이브</button>
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
+          <button type="button" class="page-tab" data-page-tab="snapshot">스냅샷</button>
         </nav>
         <div id="topClock" class="top-clock">-</div>
         <div id="topSession" class="ops-session top-session">-</div>
@@ -49,57 +50,6 @@
         <span class="hero-label">미실현 손익</span>
         <strong id="heroUnrealizedPnl" class="hero-value hero-value-sm">-</strong>
         <span id="heroUnrealizedSub" class="hero-sub">-</span>
-      </article>
-    </section>
-
-    <section class="indicator-row indicator-row-3 secondary-row">
-      <article id="cardObi" class="panel indicator-card">
-        <div class="ind-head">호가 불균형</div>
-        <div id="obiText" class="ind-value">-</div>
-        <div id="obiGaugeRightTxt" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-
-      <article id="cardTox" class="panel indicator-card">
-        <div class="ind-head">독성</div>
-        <div id="toxText" class="ind-value">-</div>
-        <div id="toxStatusLabel" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-
-      <article id="cardRisk" class="panel indicator-card">
-        <div class="ind-head">꼬리 리스크</div>
-        <div id="riskText" class="ind-value">-</div>
-        <div id="riskStatusLabel" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-    </section>
-
-    <button type="button" id="indicatorToggleBtn" class="indicator-toggle-btn" aria-expanded="false" aria-controls="indicatorExtraRow">
-      <span id="indicatorToggleLabel">보조 지표 더 보기 (+3)</span>
-      <span class="indicator-toggle-chevron" aria-hidden="true">▾</span>
-    </button>
-
-    <section id="indicatorExtraRow" class="indicator-row indicator-row-3 secondary-row indicator-extra collapsed">
-      <article id="cardWhale" class="panel indicator-card">
-        <div class="ind-head">수급 흐름</div>
-        <div id="whaleText" class="ind-value">-</div>
-        <div id="whaleStatusText" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-
-      <article id="cardWhalePos" class="panel indicator-card">
-        <div class="ind-head">고래 포지션</div>
-        <div id="whaleIntentText" class="ind-value">-</div>
-        <div id="whaleIntentPct" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
-      </article>
-
-      <article id="cardEai" class="panel indicator-card">
-        <div class="ind-head">에너지 지수</div>
-        <div id="eaiText" class="ind-value">-</div>
-        <div id="eaiGaugeRightTxt" class="ind-sub">-</div>
-        <svg class="ind-spark" viewBox="0 0 100 24" preserveAspectRatio="none"></svg>
       </article>
     </section>
 
@@ -276,8 +226,169 @@
       </section>
     </section>
 
+    <section id="snapshotTabPanel" class="ops-tab-panel hidden" aria-live="polite">
+      <div class="ops-panel-head">
+        <div>
+          <p class="eyebrow">READ-ONLY SNAPSHOT</p>
+          <h2>스냅샷</h2>
+          <p id="snapshotUpdatedAt" class="muted">상태 불러오는 중…</p>
+        </div>
+        <span id="snapshotEvidenceBadge" class="ops-badge neutral">EVIDENCE -</span>
+      </div>
+
+      <section class="panel ops-health-panel signal-overview-panel">
+        <div class="ops-health-head">
+          <div><h3>13신호 한눈에</h3><p class="muted">아래 두 섹션의 요약 — 자세한 설명·이력은 스크롤해서 확인</p></div>
+        </div>
+        <div class="signal-overview-group">
+          <p class="signal-overview-label">모델 내부 지표</p>
+          <div class="signal-chip-subgroup">
+            <p class="signal-chip-subgroup-label">방향 (롱/숏)</p>
+            <div class="signal-chip-row">
+              <div id="modelChipWhale" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">수급 흐름</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipWhaleIntent" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">고래 포지션</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+            </div>
+          </div>
+          <div class="signal-chip-subgroup">
+            <p class="signal-chip-subgroup-label">위험도 (안정/주의/위험)</p>
+            <div class="signal-chip-row">
+              <div id="modelChipOiDelta" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">OI 급변</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipTox" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">독성</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipRisk" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">꼬리 리스크</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipEai" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">에너지 지수</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="signal-overview-group">
+          <div class="signal-overview-group-head">
+            <p class="signal-overview-label">증거 신호 (ETH 5분봉)</p>
+            <span id="evidenceStripBadge" class="ops-badge neutral">-</span>
+          </div>
+          <div class="signal-chip-row">
+            <div id="eviChipOrthogonal" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">오실레이터+체결</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipSweep" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">유동성 스윕</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipVolWick" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">거래량 클라이맥스</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipReturnZ" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">15분 급변</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipTakerDelta" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">체결 쏠림</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipSmt" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">SMT 다이버전스</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipFibExt" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">확장소진(실험)</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+          </div>
+          <p id="evidenceStripMeaning" class="evidence-strip-meaning hidden">-</p>
+        </div>
+      </section>
+
+      <section class="panel ops-health-panel liq-map-panel">
+        <div class="ops-health-head">
+          <div><h3>청산맵 (지지/저항 추정, ETH)</h3><p id="liquidationMapUpdatedAt" class="muted">상태 불러오는 중…</p></div>
+          <div class="ops-health-head-tools">
+            <span id="liqMapBadge" class="ops-badge neutral">-</span>
+            <span class="ops-readonly">추정치 · 매매 트리거 아님</span>
+          </div>
+        </div>
+        <p class="muted" style="padding:0 16px 12px; font-size:12px; line-height:1.5;">
+          코인글래스식 청산 히트맵을 자체 추정으로 대체한 패널입니다. 실제 포지션 분포는 어떤
+          거래소도 공개하지 않아 코인글래스도 정확히는 모릅니다 — 1시간봉을 거래량·최근성으로
+          가중해 레버리지 10~100배 구간의 예상 청산가를 계산하고, 가격이 이미 통과해 청산됐을
+          구간은 제외한 추정 밀집도입니다. 지지/저항은 고정 기간이 아니라 가격이 레벨을 실제로
+          뚫거나(0.5%+) 너무 멀어지면(10%+) 그때만 다시 계산되는 이벤트 기반 방식입니다 —
+          뚫리거나 이탈한 뒤 새 구간이 형성되는 실제 청산맵 특성을 반영한 설계입니다. 백테스트
+          (4.7년)에서 터치 후 유지율은 무작위 레벨 대비 꾸준히 높았지만(60~67%), 터치 후 실제
+          반응 폭 자체는 크지 않으니 확정적 신호가 아니라 재량 판단 참고용으로만 쓰고
+          자동매매에는 연결되지 않습니다.
+        </p>
+        <div class="chart-container">
+          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div id="liquidationMapList" class="liq-level-list"></div>
+      </section>
+
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>모델 내부 지표</h3><p class="muted">라이브 탭과 동일 소스(trading_bot 실시간 상태) — 이력은 대시보드 서버가 5분마다 자체 기록(봇 자체는 이력 미저장, 최신값만 보유)</p></div>
+          <span class="ops-readonly">읽기 전용 · 라이브 탭과 동기화</span>
+        </div>
+        <div id="snapModelIndicatorList" class="ops-health-list"></div>
+      </section>
+
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>증거 신호 (ETH 5분봉)</h3><p id="evidenceSubText" class="muted">상태 불러오는 중…</p></div>
+          <div class="ops-health-head-tools">
+            <span id="evidenceNetScoreBadge" class="ops-badge neutral">-</span>
+            <span class="ops-readonly">정보용 · 매매 트리거 아님</span>
+          </div>
+        </div>
+        <p class="muted" style="padding:0 16px 12px; font-size:12px; line-height:1.5;">
+          2026-08-14 검증된 반전 증거 신호 중 핵심 6종(오실레이터+체결 조합·유동성 스윕·거래량
+          클라이맥스·15분 급변·체결 쏠림·SMT 다이버전스[08-24 추가]) + 실험적 등급 1종(피보나치
+          확장소진[08-24 추가, 표본이 얇아 별도 등급]) — 2026-08-24에 원래 11종에서 정보 중복이
+          큰 5종(볼린저%b·CVD다이버전스·VWAP이격·스윕+체결쏠림 조합·SMT+체결쏠림 조합)을 정리하고
+          이 7종으로 재구성. 4/4 자동화 시도(강제청산 veto·exit_head 피쳐·사이징 피쳐·투표공식
+          트리거)가 전부 벤치마크에 패했음(상위 6종 기준) — 신호가 발동해도 사람의 재량 판단을
+          돕는 확률 이동 컨텍스트일 뿐, 진입/청산 트리거로 쓰지 않는다. "발동중" 표시는 실제
+          발동 봉 이후 최대 15분(발동 후 시간경과별 lift 실측 — 이 구간까진 전 신호가 랜덤보다
+          확실히 우위, 그 이후 급락)까지 유지된다[08-24 추가·같은날 1시간에서 15분으로 정정] —
+          발동 조건 자체는 안 바뀌었고, 실제 발동 시각은 "마지막 발동" 문구에 그대로 표시됨.
+          자세히 참고.
+        </p>
+        <div id="evidenceSignalList" class="ops-health-list"></div>
+      </section>
+    </section>
+
   </main>
-  <script src="./app.js?v=20260816-odyssey4-quality-v11"></script>
+  <script src="./app.js?v=20260824-liq-chart-offscreen-fix-v27"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

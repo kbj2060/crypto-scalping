@@ -156,6 +156,8 @@ def _train_exit_model(frames: dict[str, Any], base_cols: list[str], out_dir: Pat
     x_exit_raw, y_exit, _route, diag = sol._build_exit_dataset_entry_label_terminal_giveback(
         frames["train_df"],
         frames["s_train_label"],
+        risk_margin=None,
+        risk_leverage=None,
         fee=fee,
         slip=slip,
         cost_mult=FEE_SLIP_COST_MULT,

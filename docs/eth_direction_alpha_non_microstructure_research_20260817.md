@@ -157,11 +157,12 @@ BTC/SOL 등을 포함한 완전히 다른 시스템 설계가 필요하다.
 | 2 | ~~주간+ TSMOM 느린 바이어스~~ (3.2) | ~~최상위 저널 증거 + 신규 데이터 0~~ | **기각(CLOSED)** — `docs/experiments/eth_candidate_weekly_tsmom_bias_cheap_gate_20260817.md`. mom2/mom4 split간 부호 반전, mom1도 유의성 전무(모든 \|z\|<1.3). 결정적: max(always) 대비 벤치마크 백테스트가 TRAIN +2663bp → VAL −3555bp → OOS −3207bp로 완전 반전(교과서적 TRAIN 전용 과적합). registry 등록(`eth_weekly_tsmom_bias_cheap_gate_20260817`) | — |
 | 3 | ~~ETF 플로우 일별 바이어스~~ (3.3) | ~~신생이나 피어리뷰 존재, 무료 일별, 캐노니컬 겹침~~ | **기각(CLOSED)** — `docs/experiments/eth_candidate_etf_flow_daily_bias_cheap_gate_20260817.md`. 오염체크 통과·IC 부호 9/9 일관됐으나 순열귀무 1/9칸만 통과, 방향정정 후 백테스트도 3-split 전부 양수인 보유기간 없음(3일: VAL+5733 vs OOS−7083bp). registry 등록 | — |
 | 4 | ~~스테이블코인 발행량 바이어스~~ (3.4) | ~~자매논문 원문 확보, 무료 데이터~~ | **기각(CLOSED)** — 일별 USDT+USDC 합산 발행잔고 증가 프록시. IC 36칸 전부 순열귀무 미통과, 벤치마크 9칸 전부 음수(가장 깨끗한 기각). `docs/experiments/eth_candidate_stablecoin_issuance_bias_cheap_gate_20260817.md`. 원 전송이벤트 논문(주소분류 필요)은 별도로 미검정 보류 | — |
-| 5- | 세션 시간대 재개, 청산 캐스케이드, 넷플로우, VRP, 크로스베뉴 괴리, FOMC/CPI 방향, 펀딩 정산 타이밍 | 문헌 공백 또는 우리 스크린/비용 게이트에서 기각 | 재제안 금지 (세션은 maker 체결 연구 경유만) | — |
+| 5 | ~~spot-perp 베이스 방향 바이어스~~ | ~~즉시착수가능(게이트無)+문헌근거 인용됨~~ | **기각(CLOSED, 2026-08-20)** — `docs/experiments/eth_candidate_spot_perp_basis_direction_cheap_gate_20260820.md`. 착수 전 재검증 결과 원 인용문헌(Makarov&Schoar/Alexander&Heck)이 실제로 안 맞았고, 진짜 부합문헌(Schmeling/Schrimpf/Todorov "Crypto Carry")은 베이스가 방향이 아니라 변동성/청산크라우딩 신호라고 예측 — 그래도 방향가설로 직접검정(사용자 지시). IC스캔 19/36칸 순열귀무 통과했으나 TRAIN↔VAL↔OOS 부호가 반복적으로 뒤집힘, TRAIN IC부호로 look-ahead없이 고정한 벤치마크 백테스트는 12개 (신호,호라이즌) 조합 전부 3-split 동시양수 실패(0/12) — 문헌 예측이 실증적으로 확인됨. registry 등록(`eth_spot_perp_basis_direction_cheap_gate_20260820`). 신규수집 spot kline(`binance_data/klines_spot/ETHUSDT/`, 2024-01-01~현재, 100%커버리지)은 변동성/청산리스크 신호 재프레이밍 시 재사용 가능(범위 밖) | — |
+| 6- | 세션 시간대 재개, 청산 캐스케이드, 넷플로우, VRP, 크로스베뉴 괴리, FOMC/CPI 방향, 펀딩 정산 타이밍 | 문헌 공백 또는 우리 스크린/비용 게이트에서 기각 | 재제안 금지 (세션은 maker 체결 연구 경유만) | — |
 
 **공통 제약**: GEX는 2026-08-15 이후 데이터라 Fresh-Forward 규칙상 새 split 경계 명시 + forward-shadow 평가 필수. 모든 축은 무료 벤치마크 증분 + breakeven-bp + (모델화 시) N≥5 시드 통과 전 후보 지위 없음.
 
-**정직한 기대치**: 이번 조사에서 즉시 테스트 가능했던 것은 전부 죽었고, 남은 상위 2개도 "방향을 직접 예측"이 아니라 **"언제 방향 베팅을 피하거나 기울일지"의 조건화 레이어**다. 이 리포에서 5m 방향 그 자체를 예측하는 축은, 마이크로스트럭처를 제외하면 문헌적으로도 남아 있지 않다 — 그것이 이번 조사의 가장 단단한 결론이다.
+**정직한 기대치**: 이번 조사에서 즉시 테스트 가능했던 것(TSMOM/ETF/스테이블코인/spot-perp베이스 4종)은 전부 죽었고, 유일하게 남은 GEX도 "방향을 직접 예측"이 아니라 **"언제 방향 베팅을 피하거나 기울일지"의 조건화 레이어**다. 이 리포에서 5m 방향 그 자체를 예측하는 축은, 마이크로스트럭처를 제외하면 문헌적으로도 남아 있지 않다 — 그것이 이번 조사의 가장 단단한 결론이다(2026-08-20 4번째 후보 기각으로 재확인).
 
 ## 5-1. 부록 — "고전 기술지표(RSI/MACD/이동평균 등)로 방향을 맞춰야 하지 않는가" (사용자 질문, 2026-08-17 추가)
 

@@ -64,7 +64,8 @@
 | `orderbook_decision_snapshots` (ETH) | 동일 파일 | 14,094행+, 2026-05-13~현재(~96일, **raw 레벨은 2026-08-17T01:43:28+09:00~**) | 의사결정 시점 20레벨 L2: best bid/ask, mid, spread_bps, microprice, `bid/ask_notional_{1,5,10,20}`, `imbalance_{1,5,10,20}` **+ `bids_json`/`asks_json`(신규, 이 시각 이후 행만)** | 활성 — **raw 레벨 배선 완료** | 여전히 **의사결정 조건부 샘플링**(WS-A가 지적한 활동구간 편향 그대로 적용, 연속 아님). raw 레벨은 신규 행부터만 — 과거 14,093행은 NULL(백필 불가, `data_epochs.json` 참고) |
 | `orderbook_decision_snapshots_btc`/`_sol` | 동일 파일 | 각 4,085행+/4,902행+, 2026-08-02~현재(~15일, raw 레벨은 동일 배포 시점부터) | 동일 스키마 + raw 레벨 | 활성 — raw 레벨 배선 완료 | 이력이 짧아 아직 연구용으로 부족, raw 레벨 축적은 이제부터 시작 |
 | `orderbook_periodic_snapshots`(10초 연속) | — | — | WS-E 설계상 신규 테이블(E2) | **인프라 차단(의도적 보류)** | E1과 별도로 새 fetch 루프 필요, 봇 지연 회귀 테스트 선행 조건 미충족 — 이번 세션에서 의도적으로 배선 안 함 |
-| `tail_risk_1m` | `data/live/tail_risk.duckdb` | 96,013행+, 2026-05-03~현재 | 청산 스트림(long/short 청산 USD, aftershock_prob 등) | 활성 | LOB축과 직접 관련은 낮음, 참고용 |
+| `maker_fill_shadow_legs`/`_heartbeat` (ETH) | `data/live/maker_fill_shadow.duckdb` | 2026-08-22 20:41 KST~ (신규 가동) | 가상 peg/static maker leg 실효비용 원장(5분 간격, T120, 보수적 체결규칙) — maker 체결 시뮬(v1/v2)의 라이브 검증 축 | 활성 — 서버 supervisor+crontab @reboot | 실주문 아님(공개 WS만). 워커 `scripts/maker_fill_shadow_worker.py`, 단일 writer 신규 파일. 대조 분석: `scripts/analyze_eth_maker_fill_shadow_vs_sim_20260822.py`(체크포인트 9월 중순). 하트비트 카운터=0이면 tail_risk식 조용한 사망 의심 |
+| `tail_risk_1m` | `data/live/tail_risk.duckdb` | 128,831행+, 2026-05-03~현재 | 청산 스트림(long/short 청산 USD, aftershock_prob 등) | **활성이나 유효 epoch은 2026-07-18 15:03 UTC~** | **2026-08-17 발견: 07-18 이전 2.5개월은 forceOrder WS 엔드포인트 오류로 전부 무음 0**(commit 7fbfd30/984ed8a가 07-30 수정 커밋, 데이터상 첫 비영은 07-18). 그 기간 `valid_liq_stream=true`는 핸드셰이크만 확인한 가짜 양성. 상세: `docs/experiments/eth_candidate_liquidation_feed_features_cheap_gate_20260817.md` |
 
 ## 인프라
 
@@ -81,6 +82,7 @@
 | 리소스 | 위치 | 커버리지 | 용도 | 상태 | 주의사항 |
 |---|---|---|---|---|---|
 | Binance `data.binance.vision` bookDepth | `https://data.binance.vision/data/futures/um/daily/bookDepth/{SYMBOL}/{SYMBOL}-bookDepth-{YYYY-MM-DD}.zip` | 무료, 일별 아카이브. 2026-08-15 ETHUSDT 실제 파일 검증: 컬럼 `timestamp,percentage,depth,notional`, 30초 간격, 고정 12개 %밴드(±0.2/1/2/3/4/5%)별 **누적** depth/notional | 과거 유동성 참고(전진수집 불필요) | **검증 완료 — 부정 결과(용도 제한)** | **원시 레벨 호가가 아니라 %밴드 집계다** — 개별 가격레벨/큐 정보 없음, 30초 간격이라 WS-E의 10초 연속 스냅샷보다도 성김. DeepLOB/TLOB류 raw-LOB 모델링엔 쓸 수 없음. 과거(WS-E 배선 이전) 유동성 히스토리가 필요할 때 보조 참고자료 정도로만 가치 있음 |
+| Binance `data.binance.vision` aggTrades | `https://data.binance.vision/data/futures/um/daily/aggTrades/{SYMBOL}/{SYMBOL}-aggTrades-{YYYY-MM-DD}.zip` | 무료, 일별 아카이브, 전체 체결 스트림(price/qty/transact_time/is_buyer_maker), ETH 일 7~18MB(zip). 2026-08-22 실검증: 2026-07-19~21 3일 265만건 다운로드·사용 | **maker 체결 시뮬레이션의 핵심 짝 데이터** — WS-E raw L2 스냅샷과 exchange_timestamp(ms)로 정렬해 보수적 체결판정(뚫는 체결/큐 소진) 가능. 사본: `tmp/eth_maker_fill_simulation_20260822/aggtrades/` | 검증 완료 — 긍정 결과 | 스냅샷(10초)과 달리 체결은 연속이므로 큐 모델링의 큐 감소는 체결분만 인정(취소 무시=보수적). 상세: `docs/experiments/eth_maker_fill_simulation_l2_20260822.md` |
 | Tardis.dev | tardis.dev, `docs.tardis.dev` | 50+ 거래소(Binance/Bybit/OKX/Deribit/Coinbase 등), tick-level L2 incremental + 상위 5/25레벨 스냅샷, CSV/API/Python·Node 클라이언트 | 이 조사에서 찾은 가장 유연하고 품질 좋은 유료 소스 | 미검증 후보 | 월결제 시 최근 4개월치만 접근, 연결제 시 전체 이력 접근(문서 확인). 가격은 3rd-party 비교글 기준 Professional ~$599/월로 추정(**1차 소스 아님, 실제 가격은 Tardis 자체 견적 폼에서 재확인 필요**) |
 | Kaiko Research / Amberdata | kaiko.com / amberdata.io | L1/L2 풀뎁스, 100+ 거래소(Kaiko) | 기관용 벤치마크 데이터 | 미검증 후보 | 두 곳 다 공개 가격표 없음("contact sales") — 5절 서베이에서도 확인됨, 이번 스코핑에서도 별도 견적 없이는 비교 불가. 통상 Tardis보다 고가의 기관 티어로 알려져 있으나 1차 확인 안 됨 |
 

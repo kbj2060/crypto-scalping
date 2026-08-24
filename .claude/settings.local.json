@@ -40,7 +40,9 @@
       "Bash(venv/bin/python -c ' *)",
       "Bash(find \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping/scripts\" -iname \"*research_f*\" | sort)",
       "Bash(cd \"//wsl.localhost/ubuntu/home/llewyn/crypto-scalping\" && ls venv/bin/python* 2>&1; find . -maxdepth 2 -iname \"venv*\" 2>&1; ls -la venv 2>&1 | head -20)",
-      "Bash(ls -la \"/mnt/c/Users/kbj20/AppData/Local/Temp\" 2>/dev/null | head -1; echo \"---trying wsl path via powershell instead---\")"
+      "Bash(ls -la \"/mnt/c/Users/kbj20/AppData/Local/Temp\" 2>/dev/null | head -1; echo \"---trying wsl path via powershell instead---\")",
+      "Bash(python3 scripts/build_eth_directional_change_triple_barrier_labels_20260819.py)",
+      "Bash(node --check _extracted.js)"
     ]
   },
   "enabledMcpjsonServers": [

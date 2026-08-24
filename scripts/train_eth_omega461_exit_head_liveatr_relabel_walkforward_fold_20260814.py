@@ -232,10 +232,24 @@ def main() -> int:
     n_sample = min(int(args.max_candidates), len(valid_idx)) if int(args.max_candidates) > 0 else len(valid_idx)
     candidate_idx = np.sort(rng.choice(valid_idx, size=n_sample, replace=False))
     print(f"stage=build_live_atr_barrier_exit_dataset candidates_sampled={len(candidate_idx)}/{len(valid_idx)}", flush=True)
+    # NOTE 2026-08-18: `base._build_exit_dataset_entry_label_live_atr_barrier` now requires an
+    # explicit risk_margin/risk_leverage choice (docs/experiments/eth_odyssey4_exit_head_liveatr_
+    # barrier_and_label_reaudit_20260818.md finding 1b). This script's whole point is a CUSTOM
+    # [--train-start, --train-end) window per fold, which the standard train_predictions_qXXX.csv
+    # (what `base._risk_sizing_for_component` reads) does not necessarily cover -- a fold reaching
+    # into 2026 would need that stitched together with oos_predictions_qXXX.csv, which is a real
+    # per-fold design question, not a one-line fix. Passing None/None here is the same explicit,
+    # labeled fallback as train_eth_candidate_unified_phase2_exit_head_giveback_recal_20260817.py:
+    # this fold's dataset still gets the barrier-convention (finding 2) and pos_unrealized/mfe/mae
+    # scale (finding 1a) fixes for free via the shared function, but pos_notional/pos_leverage/
+    # pos_exposure fall back to the fixed BASE_TEMPLATE constant, recorded transparently as
+    # exit_diag["risk_sizing"]["source"] == "base_template_constant_no_sidecar_available" in this
+    # fold's own report.json rather than silently claiming real per-candidate sizing.
     t0 = time.time()
     x_exit_raw, y_exit, frame_exit, exit_diag = base._build_exit_dataset_entry_label_live_atr_barrier(
         frames["train_df"], frames["s_train_label"],
-        candidate_idx=candidate_idx, fee=fee, slip=slip, cost_mult=float(args.cost_mult),
+        candidate_idx=candidate_idx, risk_margin=None, risk_leverage=None,
+        fee=fee, slip=slip, cost_mult=float(args.cost_mult),
         atr_cfg=base.LIVE_ATR_CFG, max_horizon_bars=int(args.max_horizon_bars), max_rows=int(args.max_rows),
     )
     build_elapsed = time.time() - t0

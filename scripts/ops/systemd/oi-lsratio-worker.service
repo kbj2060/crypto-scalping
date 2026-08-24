@@ -1,0 +1,26 @@
+[Unit]
+Description=crypto-scalping ETH/BTC/SOL OI / long-short-ratio collector -- server-side, writes its own oi_lsratio.duckdb (not tail_risk.duckdb, owned by trading_bot.py's TailRiskInterceptor for ETH, or tail_risk_btc_sol.duckdb, owned by the BTC/SOL instance of this same worker script -- concurrent DuckDB writers on a shared file caused real write failures for the BTC/SOL worker on its first deploy, 2026-08-17, see tail-risk-btc-sol-worker.service)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=llewyn
+WorkingDirectory=/home/llewyn/crypto-scalping
+Environment=BOT_SYMBOLS=ETHUSDT,BTCUSDT,SOLUSDT
+Environment=COLLECT_MICROSTRUCTURE=false
+Environment=COLLECT_TAIL_RISK=false
+Environment=COLLECT_OI_LSRATIO=true
+Environment=QUANT_OI_LSRATIO_DB_PATH=/home/llewyn/crypto-scalping/data/live/oi_lsratio.duckdb
+ExecStart=/home/llewyn/miniconda3/envs/quant_ai/bin/python -u /home/llewyn/crypto-scalping/scripts/duckdb_persist_worker.py
+Restart=always
+RestartSec=15
+RestartSteps=6
+RestartMaxDelaySec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oi_lsratio_worker
+
+[Install]
+WantedBy=multi-user.target

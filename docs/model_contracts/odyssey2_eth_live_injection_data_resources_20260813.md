@@ -31,6 +31,11 @@
 | `scripts/train_eval_omega461_gittins_retirement_exit_head_20260814.py` | Odyssey2 #16(문헌 스카우팅(#6) 5위/최종 후보, arXiv:2405.01157 Dhankhar/Mishra/Bodas, 서버 학습): GBDT(#4)의 `_build_dataset`(seed=260813, max_candidates=1500)을 무수정 재사용 + `_build_transitions`(candidate별 순차 bar 구조에서 `(s_t,r_t,s_{t+1})` TD 전이 복원, 보상=`exit_path_unrealized` bar 증분) + `DGN`(paper Eq 9-11의 (s,x) 쌍 입력 신경망, 참조상태=미니배치 자기자신, 타겟망 대각선 읽기로 M(x) 구현) + 레짐별 3개 학습(bull/bear/chop, route_prob 가중) + `_mem_check`(서버 메모리 안전장치, `run_jm_full_retrain_seed_robustness_20260813.sh` 패턴 재사용) 전부 단일 스크립트, `--device cuda` | 완료, GPU 사용(RTX 3070Ti, ~160 steps/sec), 총 wall time ~8.9분, `dataset_reference_check` 3지표 전부 일치, 메모리 안전 중단 0회 |
 | `scripts/research_eth_omega461_gittins_index_exit_head_20260814.py` | Odyssey2 #16 dev 평가: G0(컴포넌트 2종 + `eth_omega461_multiwindow_confirmation_gate_20260814.run_portfolio_variant` 재사용 포트폴리오 VAL/OOS-Q1 4종) + `_predict_retirement_value_one`(은퇴가치 주입, `_predict_exit_prob_one`과 동일 시그니처) + `replay_exit_variant_gittins`/`greedy_replay_gittins`(무수정 원본의 이름바꾼 복사본, TCN(#5)의 `IS_WINDOWED` 마커 패턴과 동일하게 `is_gittins` 마커로 컴포넌트별 동적 분기) + never-trigger 진단 패스 기반 4점 VAL 그리드 스윕(원기준/완화기준/컴포넌트 가드레일) + OOS 단일터치(승자 있을 시) 전부 단일 스크립트 | 완료, G0 PASS(6지표 전부 일치), VAL 4개 그리드점 전부 게이트+가드레일 결정적 실패(`val_winner=None`) — OOS 미실행(`REJECTED_VAL_GATE`) |
 
+| `scripts/research_eth_omega461_evidence_veto_exit_overlay_20260814.py` | Odyssey2 #18(증거 신호 Candidate C, 하드 변형): `orthogonal_combo`(정의는 증거연구 계열에서 무수정 재사용) 발화 시 h48qual 숏 강제청산 — `build_signal`/`prepare_evidence_veto_components`/`_prep_liveatr_only`(#21·#22가 그대로 import 재사용) + `greedy_replay_evidence_veto_exit`(무수정 원본의 이름바꾼 복사본) | 완료, VAL 결정적 기각(-29.92%p) |
+| `scripts/build_eth_evidence_signal_context_features_20260814.py` | Odyssey2 #20: 증거 신호 6개를 연속값 그대로 사이징 GBM `--risk-context-feature-dir`용 CSV로 추출(#2/#3와 동일 확장점) | 완료, 양쪽 컴포넌트 부정 결과 |
+| `scripts/research_eth_omega461_evidence_veto_exit_overlay_soft_variant_20260815.py` | Odyssey2 #21: #18의 즉시청산을 N-bar exit 임계값 완화로 교체(`greedy_replay_evidence_veto_soft_exit`만 신규, 신호·컴포넌트 준비는 #18에서 import). 사전등록 3×3 그리드를 VAL에서 먼저 전부 실행 후 승자 1개만 OOS 단일터치 | 완료, VAL 통과 셀은 전부 no-op·실개입 셀은 -18.18%p, OOS `REJECTED_SIGN_MISMATCH` |
+| `scripts/diagnose_eth_omega461_evidence_intervention_surface_ceiling_20260815.py` | Odyssey2 #22(후보 아님, 구조 진단): 증거 신호 주입 계열의 **개입 표면**(두 컴포넌트×양방향으로 범위 확대)과 **거래모집단 고정 사후천장**(실제 청산 ∪ 발화 bar 중 사후 최선) + **매칭 랜덤 대조**(발화와 동수의 bar를 같은 보유구간에서 균등추출, 20회, seed 20260815) 측정. G0a(기준선 4수치 재현)/G0c(거래별 수익률 대수 재구성 대조) 자체검증 포함. 신호 정의·창 로딩·리플레이는 #18/게이트 모듈에서 전부 import 재사용 | 완료, G0 전부 PASS — 개선율이 6/6 창에서 랜덤과 사실상 동일, 이 축 종결 권고 |
+
 ## 모델 아티팩트 (Odyssey2가 새로 만든 것, 전부 `tmp/causal_regen_20260516/` 하위, 라이브 미배포)
 
 | 리소스 | 위치 | 용도 | 상태 |
@@ -65,6 +70,10 @@
 | `tmp/causal_regen_20260516/eth_omega461_gittins_retirement_exit_head_20260814/report.json` | 서버 학습 로그: `dataset_reference_check`, transitions/candidate-split 진단, 전문가별 train/val TD-loss 곡선 + elapsed_sec, `_mem_check` 8회 기록(가용 메모리·GPU 메모리) | 완료 |
 | `tmp/causal_regen_20260516/eth_omega461_gittins_index_exit_head_20260814/report.json` | dev 평가: G0(컴포넌트 2종+포트폴리오 4종) + `m_distribution_diagnostic`(never-trigger 진단 패스 M(x) 분포, 사후선택 없는 4점 그리드 근거) + VAL 4후보 스윕(원기준/완화기준/가드레일) + `val_winner_key=null`/`final_verdict="REJECTED_VAL_GATE"`(OOS 미개방이라 OOS 섹션 없음) | 완료 |
 | `tmp/causal_regen_20260516/eth_omega461_gittins_index_exit_head_20260814/portfolio_ledger_val_*.csv`, `_aligned_val_{h48qual,zig075}_predictions.csv` | 거래 원장(diagnostic, 참고용, VAL 4개 그리드점 각각) + 정렬된 예측 CSV | 완료 |
+
+| `tmp/causal_regen_20260516/eth_omega461_evidence_veto_exit_overlay_20260814/`, `..._soft_variant_20260815/` | #18·#21 `report.json` + 거래 원장(diagnostic) | 완료, 둘 다 부정 결과 |
+| `tmp/causal_regen_20260516/eth_{h48qual,zig075}_evidence_signal_context_20260814/`, `omega4_2_trade_risk_sidecar_20260622_odyssey2_{h48qual,zig075}_evidence_signal_ctx_20260814/` | #20 컨텍스트 피쳐 CSV + 재학습된 사이징 사이드카 | 완료, 라이브 미승격(부정 결과) |
+| `tmp/causal_regen_20260516/eth_omega461_evidence_intervention_surface_ceiling_20260815/report.json`, `trade_surface_{2025q1,2025q2,2025q3,val,oos_q1,oos_q2}.csv`, `counterfactual_ledger_{창}_{always_first_fire,hindsight_best_fire}.csv` | #22 감사 산출물: 창별 표면/천장/랜덤대조 + 거래별 발화·반사실 수익률 원장. **반사실 원장은 미래 정보를 의도적으로 쓴 상한 계산물이라 전략 성과로 인용 금지** | 완료 |
 
 ## 재사용 중인 Odyssey(1) 리소스 (그대로 재사용, 재수집 안 함)
 

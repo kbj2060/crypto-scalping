@@ -1,0 +1,650 @@
+<title>Odyssey4 3-Head TabM</title>
+<style>
+  :root {
+    --bg: #f1f0ec;
+    --surface: #ffffff;
+    --surface-2: #f7f6f1;
+    --border: #d9d6cd;
+    --text: #1f2229;
+    --text-dim: #5c6270;
+    --accent: #a86a1e;
+    --accent-soft: #a86a1e1f;
+    --accent-2: #1c7d78;
+    --accent-2-soft: #1c7d781f;
+    --gate: #ab4a33;
+    --gate-soft: #ab4a331f;
+    --code-bg: #ecebe4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b;
+      --surface: #1a1e26;
+      --surface-2: #1f2430;
+      --border: #2d3340;
+      --text: #e8e6df;
+      --text-dim: #929aab;
+      --accent: #e3a13d;
+      --accent-soft: #e3a13d26;
+      --accent-2: #5cbab5;
+      --accent-2-soft: #5cbab526;
+      --gate: #e08872;
+      --gate-soft: #e0887226;
+      --code-bg: #232936;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b;
+    --surface: #1a1e26;
+    --surface-2: #1f2430;
+    --border: #2d3340;
+    --text: #e8e6df;
+    --text-dim: #929aab;
+    --accent: #e3a13d;
+    --accent-soft: #e3a13d26;
+    --accent-2: #5cbab5;
+    --accent-2-soft: #5cbab526;
+    --gate: #e08872;
+    --gate-soft: #e0887226;
+    --code-bg: #232936;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, "Noto Sans KR", "Malgun Gothic", sans-serif;
+    line-height: 1.65;
+  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  code, .mono, .shape { font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+
+  header.hero { margin-bottom: 40px; }
+  .eyebrow {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--accent); font-weight: 700; margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(1.7rem, 3.4vw, 2.35rem); margin: 0 0 12px; text-wrap: balance; letter-spacing: -0.01em; }
+  .lede { font-size: 1.05rem; color: var(--text-dim); max-width: 68ch; margin: 0 0 24px; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 0.78rem; padding: 5px 10px; border-radius: 5px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+
+  h2.section-title {
+    font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 10px;
+    margin: 56px 0 20px;
+  }
+
+  .stage-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 28px 28px 24px; margin-bottom: 22px;
+  }
+  .stage-card.context { background: var(--surface-2); }
+  .stage-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+  .stage-num {
+    font-family: ui-monospace, monospace; font-size: 0.72rem; font-weight: 700;
+    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 100px; padding: 2px 10px; letter-spacing: 0.02em;
+  }
+  .stage-title { font-size: 1.28rem; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .stage-desc { color: var(--text-dim); font-size: 0.96rem; max-width: 78ch; margin: 4px 0 20px; }
+
+  figure { margin: 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { font-size: 0.84rem; color: var(--text-dim); margin-top: 12px; max-width: 78ch; }
+
+  .code-block {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; font-size: 0.82rem; color: var(--text-dim); overflow-x: auto;
+    margin-top: 14px; white-space: pre;
+  }
+  .code-block .kw { color: var(--accent); }
+
+  .repeat-note {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem;
+    color: var(--accent-2); background: var(--accent-2-soft); border: 1px solid var(--accent-2);
+    border-radius: 6px; padding: 6px 12px; margin-top: 14px;
+  }
+
+  .spec-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .spec-table th, .spec-table td {
+    text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+  }
+  .spec-table th { color: var(--text-dim); font-weight: 600; width: 40%; }
+  .spec-table td { font-family: ui-monospace, monospace; color: var(--text); }
+  .table-wrap { overflow-x: auto; }
+
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border); }
+  footer p { font-size: 0.82rem; color: var(--text-dim); max-width: 78ch; }
+  footer ul { font-size: 0.82rem; color: var(--text-dim); padding-left: 20px; margin: 8px 0; }
+  footer code { color: var(--text); }
+</style>
+
+<div class="page">
+
+<header class="hero">
+  <p class="eyebrow">Architecture Reference · ETH Odyssey4</p>
+  <h1>Odyssey4 라이브 딥러닝 모델 — 3-Head BatchEnsemble TabM</h1>
+  <p class="lede">
+    h48qual·zig075 두 컴포넌트가 공유하는 단일 신경망 아키텍처를, 실제 순전파(forward) 순서를
+    따라 5단계로 나눠 그렸다. 학습 절차·데이터 파이프라인은 다루지 않고 구조만 다룬다.
+  </p>
+  <div class="chip-row">
+    <span class="chip">k=<b>8</b> (BatchEnsemble)</span>
+    <span class="chip">hidden=<b>192</b></span>
+    <span class="chip">layers=<b>3</b> → 잔차블록 <b>2</b>개</span>
+    <span class="chip">dropout=<b>0.08</b></span>
+    <span class="chip">활성화=<b>SiLU</b></span>
+    <span class="chip">파라미터 <b>118,552</b>개</span>
+    <span class="chip">헤드 <b>3</b>개</span>
+  </div>
+</header>
+
+<h2 class="section-title">개요</h2>
+<div class="stage-card">
+  <p class="stage-desc" style="margin-bottom:20px;">
+    입력 한 개의 벡터가 5단계를 거쳐 세 갈래(direction / quality / exit)의 확률로 나온다.
+    아래 5개 상자가 이 문서 하단 Stage 1–5와 그대로 대응한다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1200 190" role="img" aria-label="입력 특징에서 앙상블 평균까지 5단계 개요: 입력 특징, BatchEnsemble 아핀, 인코더, 헤드 3분기, 앙상블 평균">
+      <defs>
+        <marker id="a-ov" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" />
+        </marker>
+      </defs>
+      <!-- connecting arrows -->
+      <line x1="220" y1="80" x2="258" y2="80" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-ov)" />
+      <line x1="460" y1="80" x2="498" y2="80" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-ov)" />
+      <line x1="700" y1="80" x2="738" y2="80" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-ov)" />
+      <line x1="940" y1="80" x2="978" y2="80" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-ov)" />
+
+      <!-- box template repeated -->
+      <g>
+        <rect x="20" y="25" width="200" height="110" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="38" cy="25" r="13" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="38" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">1</text>
+        <text x="120" y="58" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">입력 특징</text>
+        <text x="120" y="80" text-anchor="middle" font-size="11" fill="var(--text-dim)">102 base + 13 pos</text>
+        <text x="120" y="115" text-anchor="middle" font-size="12" fill="var(--accent)" font-family="ui-monospace,monospace">(115,)</text>
+      </g>
+      <g>
+        <rect x="260" y="25" width="200" height="110" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="278" cy="25" r="13" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="278" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">2</text>
+        <text x="360" y="58" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">BatchEnsemble 아핀</text>
+        <text x="360" y="80" text-anchor="middle" font-size="11" fill="var(--text-dim)">원소별 scale·bias (k=8)</text>
+        <text x="360" y="115" text-anchor="middle" font-size="12" fill="var(--accent)" font-family="ui-monospace,monospace">(8, 115)</text>
+      </g>
+      <g>
+        <rect x="500" y="25" width="200" height="110" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="518" cy="25" r="13" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="518" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">3</text>
+        <text x="600" y="58" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">인코더</text>
+        <text x="600" y="80" text-anchor="middle" font-size="11" fill="var(--text-dim)">Linear + Norm, 잔차 ×2</text>
+        <text x="600" y="115" text-anchor="middle" font-size="12" fill="var(--accent)" font-family="ui-monospace,monospace">(8, 192)</text>
+      </g>
+      <g>
+        <rect x="740" y="25" width="200" height="110" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="758" cy="25" r="13" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="758" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">4</text>
+        <text x="840" y="58" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">헤드 3분기</text>
+        <text x="840" y="80" text-anchor="middle" font-size="11" fill="var(--text-dim)">direction·quality·exit</text>
+        <text x="840" y="115" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="ui-monospace,monospace">(8,3)+(8,3)+(8,2)</text>
+      </g>
+      <g>
+        <rect x="980" y="25" width="200" height="110" rx="8" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="998" cy="25" r="13" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="998" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">5</text>
+        <text x="1080" y="58" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">앙상블 평균</text>
+        <text x="1080" y="80" text-anchor="middle" font-size="11" fill="var(--text-dim)">softmax → k 평균</text>
+        <text x="1080" y="115" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="ui-monospace,monospace">(3,)+(3,)+(2,)</text>
+      </g>
+    </svg>
+    <figcaption>그림 0 — <code>ThreeHeadTabM.forward()</code> 한 번 호출의 5단계 데이터 흐름 요약.</figcaption>
+  </figure>
+</div>
+
+<h2 class="section-title">이 모델이 시스템에서 차지하는 위치</h2>
+<div class="stage-card context">
+  <p class="stage-desc">
+    아래 순전파 5단계는 <b>이 신경망 하나</b>의 내부다. 그런데 라이브에는 이 신경망의 독립적으로
+    학습된 인스턴스가 <b>6개</b> 존재한다 — h48qual(품질 임계값 0.50)·zig075(0.75) 두 컴포넌트가
+    각각 bull/bear/chop 레짐별로 별도 가중치를 갖기 때문이다. 레짐 라우터는 신경망이 아니라
+    손수 구현한 sticky Gaussian HMM이며, 현재 bar가 어느 레짐인지에 따라 두 컴포넌트가 각자
+    보유한 3개 인스턴스 중 하나씩만 활성화한다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1200 600" role="img" aria-label="레짐 라우터가 bull/bear/chop 중 하나를 고르면 h48qual과 zig075 두 컴포넌트가 각각 해당 레짐의 3-Head TabM 인스턴스를 활성화하고, 두 컴포넌트의 판단이 우선순위 병합과 듀레이션 게이트를 거쳐 최종 액션이 된다">
+      <defs>
+        <marker id="a-ctx" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent-2)" /></marker>
+        <marker id="a-ctx-amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)" /></marker>
+        <marker id="a-ctx-gate" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--gate)" /></marker>
+      </defs>
+
+      <!-- router -->
+      <rect x="430" y="20" width="340" height="64" rx="8" fill="var(--surface)" stroke="var(--accent-2)" stroke-width="1.5" />
+      <text x="600" y="46" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">레짐 라우터 (Gaussian HMM, sticky)</text>
+      <text x="600" y="66" text-anchor="middle" font-size="11" fill="var(--text-dim)">filter_proba (causal) → argmax</text>
+
+      <!-- fan lines to pills -->
+      <line x1="600" y1="84" x2="485" y2="150" stroke="var(--accent-2)" stroke-width="1.3" marker-end="url(#a-ctx)" />
+      <line x1="600" y1="84" x2="600" y2="150" stroke="var(--accent-2)" stroke-width="1.3" marker-end="url(#a-ctx)" />
+      <line x1="600" y1="84" x2="715" y2="150" stroke="var(--accent-2)" stroke-width="1.3" marker-end="url(#a-ctx)" />
+
+      <!-- pills -->
+      <rect x="440" y="150" width="90" height="40" rx="20" fill="var(--surface-2)" stroke="var(--accent-2)" stroke-width="1.3" />
+      <text x="485" y="175" text-anchor="middle" font-size="12" fill="var(--text-dim)">bull</text>
+      <rect x="555" y="150" width="90" height="40" rx="20" fill="var(--surface-2)" stroke="var(--accent-2)" stroke-width="1.3" />
+      <text x="600" y="175" text-anchor="middle" font-size="12" fill="var(--text-dim)">bear</text>
+      <rect x="670" y="150" width="90" height="40" rx="20" fill="var(--accent-2-soft)" stroke="var(--accent-2)" stroke-width="2.2" />
+      <text x="715" y="175" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">chop</text>
+      <text x="715" y="203" text-anchor="middle" font-size="10.5" fill="var(--text-dim)">예: 현재 라우팅</text>
+
+      <!-- dashed shared-routing arrows into both panels -->
+      <path d="M715,190 C715,225 450,240 450,268" fill="none" stroke="var(--accent-2)" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#a-ctx)" />
+      <path d="M715,190 C715,225 1030,240 1030,268" fill="none" stroke="var(--accent-2)" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#a-ctx)" />
+      <text x="880" y="222" text-anchor="middle" font-size="10.5" fill="var(--accent-2)">라우팅 신호 공유</text>
+
+      <!-- panel L: h48qual -->
+      <rect x="30" y="230" width="520" height="150" rx="8" fill="var(--surface)" stroke="var(--border)" stroke-width="1.5" />
+      <text x="290" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">h48qual 컴포넌트 — quality_threshold ≥ 0.50</text>
+      <rect x="60" y="270" width="140" height="70" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="130" y="310" text-anchor="middle" font-size="11.5" fill="var(--text-dim)">bull TabM</text>
+      <rect x="220" y="270" width="140" height="70" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="290" y="310" text-anchor="middle" font-size="11.5" fill="var(--text-dim)">bear TabM</text>
+      <rect x="380" y="270" width="140" height="70" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.2" />
+      <text x="450" y="310" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--text)">chop TabM</text>
+
+      <!-- panel R: zig075 -->
+      <rect x="620" y="230" width="520" height="150" rx="8" fill="var(--surface)" stroke="var(--border)" stroke-width="1.5" />
+      <text x="880" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">zig075 컴포넌트 — quality_threshold ≥ 0.75</text>
+      <rect x="640" y="270" width="140" height="70" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="710" y="310" text-anchor="middle" font-size="11.5" fill="var(--text-dim)">bull TabM</text>
+      <rect x="800" y="270" width="140" height="70" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="870" y="310" text-anchor="middle" font-size="11.5" fill="var(--text-dim)">bear TabM</text>
+      <rect x="960" y="270" width="140" height="70" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.2" />
+      <text x="1030" y="310" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--text)">chop TabM</text>
+
+      <!-- into merge -->
+      <path d="M450,340 C450,385 520,390 520,420" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a-ctx-amber)" />
+      <text x="430" y="400" text-anchor="middle" font-size="10.5" fill="var(--accent)">side_h48</text>
+      <path d="M1030,340 C1030,385 680,390 680,420" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a-ctx-amber)" />
+      <text x="990" y="400" text-anchor="middle" font-size="10.5" fill="var(--accent)">side_zig</text>
+
+      <!-- merge box -->
+      <rect x="450" y="420" width="300" height="64" rx="8" fill="var(--surface)" stroke="var(--gate)" stroke-width="1.5" />
+      <text x="600" y="447" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">우선순위 병합</text>
+      <text x="600" y="466" text-anchor="middle" font-size="10.5" fill="var(--text-dim)">h48qual 우선 → side=0이면 zig075</text>
+
+      <!-- duration gate satellite -->
+      <rect x="800" y="420" width="220" height="64" rx="8" fill="var(--surface)" stroke="var(--gate)" stroke-width="1.3" stroke-dasharray="5,4" />
+      <text x="910" y="447" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">듀레이션 게이트</text>
+      <text x="910" y="466" text-anchor="middle" font-size="10" fill="var(--text-dim)">ou_halflife ≤ 임계값 → veto</text>
+      <line x1="800" y1="452" x2="754" y2="452" stroke="var(--gate)" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#a-ctx-gate)" />
+
+      <!-- merge -> final -->
+      <line x1="600" y1="484" x2="600" y2="518" stroke="var(--gate)" stroke-width="1.5" marker-end="url(#a-ctx-gate)" />
+      <text x="640" y="505" text-anchor="middle" font-size="10.5" fill="var(--gate)">final side</text>
+
+      <!-- final -->
+      <rect x="450" y="520" width="300" height="60" rx="8" fill="var(--gate-soft)" stroke="var(--gate)" stroke-width="2" />
+      <text x="600" y="547" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">최종 액션</text>
+      <text x="600" y="566" text-anchor="middle" font-size="10.5" fill="var(--text-dim)">side(LONG/SHORT/FLAT) + ATR 기반 TP/SL</text>
+    </svg>
+    <figcaption>
+      그림 A — bull/bear/chop 예시로 chop 레짐이 선택된 상황을 그렸다. 포지션 크기(margin_fraction·leverage)는
+      이 신경망이 아니라 별도의 HistGradientBoosting 리스크 사이드카가 direction/quality 출력을 입력받아 정하며,
+      본 문서 범위 밖이다.
+    </figcaption>
+  </figure>
+</div>
+
+<h2 class="section-title">모델 내부 — 순전파 5단계</h2>
+
+<!-- STAGE 1 -->
+<div class="stage-card">
+  <div class="stage-head"><span class="stage-num">STAGE 1</span><h3 class="stage-title">입력 & BatchEnsemble 아핀 변환</h3></div>
+  <p class="stage-desc">
+    115차원 입력 하나를 <code>k=8</code>개의 학습된 원소별 scale·bias로 복제·변형해 8개의 서로 다른
+    "관측"을 만든다. 이게 이 모델이 8개의 독립 네트워크 없이 앙상블 다양성을 얻는 지점이다
+    (TabM 논문 arXiv:2410.24210의 BatchEnsemble 수식 중 <code>R</code> 항에 해당, <code>S</code>·<code>B</code>는 미구현).
+  </p>
+  <figure>
+    <svg viewBox="0 0 1100 320" role="img" aria-label="115차원 입력 벡터에 학습된 8개 원소별 scale과 bias를 곱하고 더해 8개 멤버로 복제하는 BatchEnsemble 입력 아핀 변환">
+      <defs><marker id="a-s1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" /></marker></defs>
+
+      <rect x="40" y="110" width="90" height="100" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.5" />
+      <text x="85" y="150" text-anchor="middle" font-size="15" font-weight="700" fill="var(--text)">x</text>
+      <text x="85" y="175" text-anchor="middle" font-size="11" fill="var(--text-dim)" font-family="ui-monospace,monospace">(115,)</text>
+      <text x="85" y="195" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">102 base+13 pos</text>
+
+      <rect x="220" y="30" width="170" height="70" rx="6" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.3" stroke-dasharray="4,3" />
+      <text x="305" y="55" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">input_scale</text>
+      <text x="305" y="75" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,115) ~N(1,0.03²)</text>
+
+      <rect x="220" y="220" width="170" height="70" rx="6" fill="var(--surface-2)" stroke="var(--accent)" stroke-width="1.3" stroke-dasharray="4,3" />
+      <text x="305" y="245" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">input_bias</text>
+      <text x="305" y="265" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,115) init 0</text>
+
+      <rect x="450" y="110" width="150" height="100" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="525" y="150" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">원소별 아핀</text>
+      <text x="525" y="172" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">x⊙scale+bias</text>
+
+      <!-- stacked motif for 8-member output -->
+      <rect x="686" y="114" width="110" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="678" y="122" width="110" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="670" y="130" width="110" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="725" y="170" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">xₖ</text>
+      <text x="725" y="192" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,115)</text>
+
+      <line x1="130" y1="160" x2="448" y2="160" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s1)" />
+      <line x1="305" y1="100" x2="470" y2="112" stroke="var(--text-dim)" stroke-width="1.3" marker-end="url(#a-s1)" />
+      <line x1="305" y1="220" x2="470" y2="208" stroke="var(--text-dim)" stroke-width="1.3" marker-end="url(#a-s1)" />
+      <line x1="600" y1="160" x2="668" y2="160" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s1)" />
+      <line x1="800" y1="160" x2="1010" y2="160" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s1)" />
+      <text x="905" y="145" text-anchor="middle" font-size="11" fill="var(--text-dim)">Stage 2 →</text>
+    </svg>
+    <figcaption>그림 1 — 8개의 겹친 상자는 <code>k=8</code> 개의 병렬 멤버(진짜 8개 네트워크가 아니라 원소별 파라미터로 다양화된 8개 뷰)를 뜻하며 이후 단계에서 계속 같은 표기를 쓴다.</figcaption>
+  </figure>
+  <div class="code-block">xk <span class="kw">=</span> x.unsqueeze(1) <span class="kw">*</span> self.input_scale.unsqueeze(0) <span class="kw">+</span> self.input_bias.unsqueeze(0)</div>
+</div>
+
+<!-- STAGE 2 -->
+<div class="stage-card">
+  <div class="stage-head"><span class="stage-num">STAGE 2</span><h3 class="stage-title">입력 프로젝션 + 정규화</h3></div>
+  <p class="stage-desc">
+    8개 멤버 전부 <b>같은</b> 가중치의 <code>Linear(115→192)</code>를 통과한다 — 다양성은 이미
+    Stage 1에서 주입됐고, 여기서부터는 가중치를 공유한다. 뒤이은 LayerNorm·SiLU·Dropout도 마찬가지로
+    8개 멤버가 같은 파라미터를 공유한다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1100 260" role="img" aria-label="8개 멤버 입력이 가중치를 공유하는 Linear(115→192)를 지나 192차원이 되고, 역시 공유된 LayerNorm과 SiLU, Dropout을 거친다">
+      <defs><marker id="a-s2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" /></marker></defs>
+
+      <rect x="38" y="98" width="90" height="80" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="30" y="106" width="90" height="80" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="75" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">xₖ</text>
+      <text x="75" y="166" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,115)</text>
+
+      <rect x="160" y="90" width="200" height="100" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="260" y="130" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">in_proj</text>
+      <text x="260" y="152" text-anchor="middle" font-size="11" fill="var(--text-dim)" font-family="ui-monospace,monospace">Linear(115→192)</text>
+      <text x="260" y="172" text-anchor="middle" font-size="10" fill="var(--accent)">가중치 공유 (k 무관)</text>
+
+      <rect x="408" y="98" width="90" height="80" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="400" y="106" width="90" height="80" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="445" y="150" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,192)</text>
+
+      <rect x="530" y="90" width="220" height="100" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="640" y="122" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">Norm → SiLU → Dropout</text>
+      <text x="640" y="144" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">LayerNorm(192)</text>
+      <text x="640" y="163" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">SiLU · Dropout(0.08)</text>
+
+      <rect x="798" y="98" width="90" height="80" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="790" y="106" width="90" height="80" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="835" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">h⁽⁰⁾</text>
+      <text x="835" y="166" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,192)</text>
+
+      <line x1="120" y1="146" x2="158" y2="140" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s2)" />
+      <line x1="360" y1="140" x2="398" y2="146" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s2)" />
+      <line x1="490" y1="146" x2="528" y2="140" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s2)" />
+      <line x1="750" y1="140" x2="788" y2="146" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s2)" />
+      <line x1="880" y1="146" x2="1050" y2="146" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s2)" />
+      <text x="965" y="130" text-anchor="middle" font-size="11" fill="var(--text-dim)">Stage 3 →</text>
+    </svg>
+    <figcaption>그림 2 — <code>h⁽⁰⁾</code>은 잔차 블록에 들어가는 초기 은닉 상태다.</figcaption>
+  </figure>
+</div>
+
+<!-- STAGE 3 -->
+<div class="stage-card">
+  <div class="stage-head"><span class="stage-num">STAGE 3</span><h3 class="stage-title">잔차 인코더 블록</h3></div>
+  <p class="stage-desc">
+    블록마다 다시 한번 원소별 스케일(<code>expert_scale</code>)로 8개 멤버를 갈라놓고, 공유
+    <code>Linear(192→192)</code> → Norm·SiLU·Dropout을 거친 뒤 블록 입력과 항등 스킵(residual add)한다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1100 300" role="img" aria-label="은닉 상태가 원소별 스케일을 곱한 뒤 가중치 공유 Linear와 Norm/SiLU/Dropout을 지나고, 블록 입력과 항등 스킵으로 더해져 출력된다">
+      <defs>
+        <marker id="a-s3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" /></marker>
+        <marker id="a-s3-skip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent-2)" /></marker>
+      </defs>
+
+      <path d="M85,100 Q500,15 850,132" fill="none" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="6,4" marker-end="url(#a-s3-skip)" />
+      <text x="500" y="35" text-anchor="middle" font-size="11" fill="var(--accent-2)">+residual (항등 스킵)</text>
+
+      <rect x="40" y="100" width="90" height="100" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.5" />
+      <text x="85" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">h_in</text>
+      <text x="85" y="167" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,192)</text>
+
+      <rect x="190" y="90" width="180" height="120" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="280" y="130" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">원소별 스케일</text>
+      <text x="280" y="152" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">expert_scale⊙h</text>
+      <text x="280" y="172" text-anchor="middle" font-size="9.5" fill="var(--accent)">(8,192), 블록별 독립 파라미터</text>
+
+      <rect x="410" y="90" width="170" height="120" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="495" y="140" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">Linear(192→192)</text>
+      <text x="495" y="162" text-anchor="middle" font-size="10" fill="var(--accent)">가중치 공유</text>
+
+      <rect x="620" y="90" width="210" height="120" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="725" y="140" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">Norm → SiLU → Dropout</text>
+      <text x="725" y="162" text-anchor="middle" font-size="10" fill="var(--accent)">공유</text>
+
+      <circle cx="870" cy="150" r="20" fill="var(--surface)" stroke="var(--accent-2)" stroke-width="1.8" />
+      <text x="870" y="156" text-anchor="middle" font-size="16" fill="var(--accent-2)">+</text>
+
+      <rect x="930" y="100" width="90" height="100" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.5" />
+      <text x="975" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">h_out</text>
+      <text x="975" y="167" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,192)</text>
+
+      <line x1="130" y1="150" x2="188" y2="150" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s3)" />
+      <line x1="370" y1="150" x2="408" y2="150" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s3)" />
+      <line x1="580" y1="150" x2="618" y2="150" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s3)" />
+      <line x1="830" y1="150" x2="850" y2="150" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s3)" />
+      <line x1="890" y1="150" x2="928" y2="150" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s3)" />
+    </svg>
+    <figcaption>그림 3 — 실제로는 이 블록이 <code>layers-1=2</code>번 반복된다 (아래 표기 참고). 블록 내부 구조는 동일하지만 <code>expert_scale</code>과 <code>Linear</code> 가중치는 블록마다 독립적으로 학습된다.</figcaption>
+  </figure>
+  <span class="repeat-note">↻ ×2 반복 — 블록 0 → 블록 1, 각 블록의 파라미터는 서로 독립</span>
+</div>
+
+<!-- STAGE 4 -->
+<div class="stage-card">
+  <div class="stage-head"><span class="stage-num">STAGE 4</span><h3 class="stage-title">헤드 3분기</h3></div>
+  <p class="stage-desc">
+    잔차 블록을 다 통과한 은닉 상태 <code>h</code> 하나가 서로 독립적인 3개의 선형 헤드로
+    동시에 들어간다. 세 헤드 모두 같은 <code>h</code>를 보되, 헤드끼리 가중치나 표현을 공유하지 않는다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1100 340" role="img" aria-label="공유 은닉 표현이 direction_head, quality_head, exit_head 세 개의 독립적인 선형 레이어로 동시에 분기한다">
+      <defs><marker id="a-s4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" /></marker></defs>
+
+      <rect x="48" y="128" width="90" height="84" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1" />
+      <rect x="40" y="136" width="90" height="84" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="85" y="176" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">h</text>
+      <text x="85" y="198" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,192)</text>
+
+      <line x1="130" y1="178" x2="278" y2="65" stroke="var(--text-dim)" stroke-width="1.3" marker-end="url(#a-s4)" />
+      <line x1="130" y1="178" x2="278" y2="178" stroke="var(--text-dim)" stroke-width="1.3" marker-end="url(#a-s4)" />
+      <line x1="130" y1="178" x2="278" y2="288" stroke="var(--text-dim)" stroke-width="1.3" marker-end="url(#a-s4)" />
+
+      <rect x="280" y="20" width="240" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="400" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">direction_head</text>
+      <text x="400" y="75" text-anchor="middle" font-size="11" fill="var(--text-dim)" font-family="ui-monospace,monospace">Linear(192→3)</text>
+      <text x="400" y="93" text-anchor="middle" font-size="10" fill="var(--accent)">cash / long / short</text>
+
+      <rect x="280" y="133" width="240" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="400" y="165" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">quality_head</text>
+      <text x="400" y="188" text-anchor="middle" font-size="11" fill="var(--text-dim)" font-family="ui-monospace,monospace">Linear(192→3)</text>
+      <text x="400" y="206" text-anchor="middle" font-size="10" fill="var(--accent)">action별 신뢰도</text>
+
+      <rect x="280" y="246" width="240" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+      <text x="400" y="278" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">exit_head</text>
+      <text x="400" y="301" text-anchor="middle" font-size="11" fill="var(--text-dim)" font-family="ui-monospace,monospace">Linear(192→2)</text>
+      <text x="400" y="319" text-anchor="middle" font-size="10" fill="var(--accent)">hold / exit</text>
+
+      <line x1="520" y1="65" x2="588" y2="65" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s4)" />
+      <line x1="520" y1="178" x2="588" y2="178" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s4)" />
+      <line x1="520" y1="291" x2="588" y2="291" stroke="var(--text-dim)" stroke-width="1.5" marker-end="url(#a-s4)" />
+
+      <rect x="598" y="42" width="90" height="46" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="643" y="70" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+      <rect x="598" y="155" width="90" height="46" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="643" y="183" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+      <rect x="598" y="268" width="90" height="46" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+      <text x="643" y="296" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,2)</text>
+
+      <text x="900" y="182" text-anchor="middle" font-size="11" fill="var(--text-dim)">Stage 5 →</text>
+    </svg>
+    <figcaption>그림 4 — 세 헤드 모두 로짓(logit) 단계이며 아직 확률이 아니다. 8-멤버 축(k)도 아직 남아 있다.</figcaption>
+  </figure>
+  <div class="code-block">{<span class="kw">"direction"</span>: direction_head(h), <span class="kw">"quality"</span>: quality_head(h), <span class="kw">"exit"</span>: exit_head(h)}</div>
+</div>
+
+<!-- STAGE 5 -->
+<div class="stage-card">
+  <div class="stage-head"><span class="stage-num">STAGE 5</span><h3 class="stage-title">앙상블 평균</h3></div>
+  <p class="stage-desc">
+    각 헤드의 로짓을 클래스 축으로 softmax한 뒤, <code>k=8</code> 멤버 축으로 평균낸다. 이 순간
+    8개의 "다른 관점"이 하나의 확률로 합쳐진다 — 개별 멤버 가중치를 따로 두지 않고도 앙상블
+    효과를 내는 BatchEnsemble의 핵심이다.
+  </p>
+  <figure>
+    <svg viewBox="0 0 1100 340" role="img" aria-label="세 헤드의 로짓이 각각 클래스 축으로 softmax된 뒤 k=8 멤버 축으로 평균되어 최종 direction, quality, exit 확률이 된다">
+      <defs><marker id="a-s5" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)" /></marker></defs>
+
+      <!-- row 1: direction -->
+      <g>
+        <rect x="30" y="20" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="100" y="60" text-anchor="middle" font-size="11" fill="var(--text-dim)">direction 로짓</text>
+        <text x="100" y="82" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+        <line x1="170" y1="65" x2="208" y2="65" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="210" y="20" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="295" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">softmax</text>
+        <text x="295" y="82" text-anchor="middle" font-size="10" fill="var(--accent)">class축 (dim=-1)</text>
+        <line x1="380" y1="65" x2="418" y2="65" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="420" y="20" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="490" y="60" text-anchor="middle" font-size="11" fill="var(--text-dim)">확률(k별)</text>
+        <text x="490" y="82" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+        <line x1="560" y1="65" x2="598" y2="65" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="600" y="20" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="685" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">평균</text>
+        <text x="685" y="82" text-anchor="middle" font-size="10" fill="var(--accent)">k축 (dim=1), k=8</text>
+        <line x1="770" y1="65" x2="808" y2="65" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="810" y="20" width="240" height="90" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2" />
+        <text x="930" y="55" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">P(direction)</text>
+        <text x="930" y="77" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(3,)</text>
+        <text x="930" y="95" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">cash / long / short</text>
+      </g>
+
+      <!-- row 2: quality -->
+      <g>
+        <rect x="30" y="133" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="100" y="173" text-anchor="middle" font-size="11" fill="var(--text-dim)">quality 로짓</text>
+        <text x="100" y="195" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+        <line x1="170" y1="178" x2="208" y2="178" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="210" y="133" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="295" y="173" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">softmax</text>
+        <text x="295" y="195" text-anchor="middle" font-size="10" fill="var(--accent)">class축 (dim=-1)</text>
+        <line x1="380" y1="178" x2="418" y2="178" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="420" y="133" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="490" y="173" text-anchor="middle" font-size="11" fill="var(--text-dim)">확률(k별)</text>
+        <text x="490" y="195" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,3)</text>
+        <line x1="560" y1="178" x2="598" y2="178" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="600" y="133" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="685" y="173" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">평균</text>
+        <text x="685" y="195" text-anchor="middle" font-size="10" fill="var(--accent)">k축 (dim=1), k=8</text>
+        <line x1="770" y1="178" x2="808" y2="178" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="810" y="133" width="240" height="90" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2" />
+        <text x="930" y="168" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">P(quality)</text>
+        <text x="930" y="190" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(3,)</text>
+        <text x="930" y="208" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">action별 신뢰도</text>
+      </g>
+
+      <!-- row 3: exit -->
+      <g>
+        <rect x="30" y="246" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="100" y="286" text-anchor="middle" font-size="11" fill="var(--text-dim)">exit 로짓</text>
+        <text x="100" y="308" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,2)</text>
+        <line x1="170" y1="291" x2="208" y2="291" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="210" y="246" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="295" y="286" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">softmax</text>
+        <text x="295" y="308" text-anchor="middle" font-size="10" fill="var(--accent)">class축 (dim=-1)</text>
+        <line x1="380" y1="291" x2="418" y2="291" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="420" y="246" width="140" height="90" rx="6" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.3" />
+        <text x="490" y="286" text-anchor="middle" font-size="11" fill="var(--text-dim)">확률(k별)</text>
+        <text x="490" y="308" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(8,2)</text>
+        <line x1="560" y1="291" x2="598" y2="291" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="600" y="246" width="170" height="90" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.8" />
+        <text x="685" y="286" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)">평균</text>
+        <text x="685" y="308" text-anchor="middle" font-size="10" fill="var(--accent)">k축 (dim=1), k=8</text>
+        <line x1="770" y1="291" x2="808" y2="291" stroke="var(--text-dim)" stroke-width="1.4" marker-end="url(#a-s5)" />
+
+        <rect x="810" y="246" width="240" height="90" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2" />
+        <text x="930" y="281" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--text)">P(exit)</text>
+        <text x="930" y="303" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="ui-monospace,monospace">(2,)</text>
+        <text x="930" y="321" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">hold / exit</text>
+      </g>
+    </svg>
+    <figcaption>그림 5 — 세 헤드가 완전히 독립적으로 이 과정을 거친다. 이 세 확률이 그림 A의 컴포넌트 판단(direction argmax → quality 임계값 게이트)에 그대로 쓰인다.</figcaption>
+  </figure>
+  <div class="code-block">torch.softmax(out[<span class="kw">"direction"</span>], dim<span class="kw">=</span>-1).mean(dim<span class="kw">=</span>1)  <span style="opacity:.6"># quality/exit도 동일</span></div>
+</div>
+
+<h2 class="section-title">스펙 요약</h2>
+<div class="stage-card">
+  <div class="table-wrap">
+    <table class="spec-table">
+      <tr><th>앙상블 방식</th><td>TabM 스타일 BatchEnsemble — 논문(arXiv:2410.24210)의 <code>R</code>(사전 곱)만 구현, <code>S</code>·<code>B</code>(사후 스케일·바이어스)와 piecewise-linear 수치형 임베딩은 미구현</td></tr>
+      <tr><th>k (앙상블 멤버 수)</th><td>8</td></tr>
+      <tr><th>hidden</th><td>192</td></tr>
+      <tr><th>layers</th><td>3 → in_proj 1개 + 잔차 블록 2개</td></tr>
+      <tr><th>활성화</th><td>SiLU</td></tr>
+      <tr><th>정규화</th><td>LayerNorm(192), Dropout 0.08</td></tr>
+      <tr><th>입력 차원</th><td>115 = base 102(기술적·오더플로우·OU 96 + 레짐3-current HMM 확률/신뢰도 6) + position-state 13</td></tr>
+      <tr><th>direction_head</th><td>Linear(192→3) — cash / long / short</td></tr>
+      <tr><th>quality_head</th><td>Linear(192→3) — action별 신뢰도, 진입 게이트로 사용</td></tr>
+      <tr><th>exit_head</th><td>Linear(192→2) — hold / exit, 임계값 0.95에서 청산</td></tr>
+      <tr><th>총 파라미터</th><td>118,552</td></tr>
+      <tr><th>독립 인스턴스</th><td>6개 = 컴포넌트(h48qual·zig075) × 레짐(bull·bear·chop), 가중치 공유 없음</td></tr>
+    </table>
+  </div>
+</div>
+
+<footer>
+  <p>
+    이 구조(R-only, 임베딩 없음, residual 있음, k=8)는 논문대로 <code>S</code>·<code>B</code>·수치형 임베딩까지
+    완성하거나 residual을 제거하거나 k=32로 키우는 N≥5 시드 재검증에서 전부 현재 구조를 이기지 못해
+    2026-08-16 최종 종결됐다 (<code>docs/experiments/eth_candidate_faithful_tabm_batchensemble_20260816.md</code>).
+  </p>
+  <p>코드 근거:</p>
+  <ul>
+    <li><code>scripts/train_eval_omega1_2_tabm_3head_20260603.py</code> — <code>ThreeHeadConfig</code>/<code>ThreeHeadTabM</code> 원본 정의</li>
+    <li><code>trading_bot_modules/odyssey_tabm_core.py</code> — 라이브 추론용 벤더링 사본</li>
+    <li><code>trading_bot_modules/odyssey_live_adapter.py</code> — 우선순위 병합·듀레이션 게이트·엔트리/엑싯 결정 로직</li>
+    <li><code>trading_bot_modules/odyssey_regime3_live.py</code> — 레짐 라우터(HMM) 구현</li>
+  </ul>
+</footer>
+
+</div>

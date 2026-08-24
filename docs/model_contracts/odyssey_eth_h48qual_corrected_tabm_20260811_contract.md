@@ -916,6 +916,25 @@ regime3_current_sensitive_wide24_chop_prob
     `docs/experiments/eth_omega461_atr_tpsl_recalibration_pilot_20260813.md`. 미탐색으로 남은
     인접 변형(비율 자체 변경, floor/cap 값 자체 변경, 컴포넌트별 독립 재보정)은 해당 문서
     "미해결/다음 단계" 절 참고.
+16. **신규(2026-08-15), 해소**: `direction_head` 무스킬 확정 범위가 h48qual 라인에만 한정돼
+    있고 zig075는 정식 N≥5시드 대조가 없었던 격차 — **이번에 zig075도 정식으로 닫힘**. 1단계
+    (배포된 단일 시드 번들, ungated) 예비검사에서 VAL +20.30%(양쪽 baseline 승리)/OOS -2.34%
+    (always_short +17.11%에 패)로 h48qual과 달리 애매한 결과가 나와 2단계를 진행했다.
+    `random.SystemRandom().sample(...)`로 뽑은 진짜 무작위 5시드(946043153/932925759/74851798/
+    975176982/542143953)로 `train_eval_omega4_3head_parent72_pinned102_20260727.py
+    --pin-component zig075`(배포 아티팩트와 동일 레시피, 102/115 피쳐 고정) 재학습 → **VAL/OOS
+    10칸 전부 always_short 패**. 1단계의 VAL 승리는 단일시드 노이즈였음이 확정됨 —
+    zig075의 `direction_head`도 h48qual과 동일하게 entry-side 무스킬. 상세:
+    `docs/experiments/eth_omega461_zig075_direction_head_skill_formal_nseed_20260815.md`
+    (1단계: `eth_omega461_zig075_direction_head_skill_stage1_prelim_20260815.md`).
+17. **신규(2026-08-15), 해소**: 라이브 102 base 피처의 중복도 감사(`eth_omega461_live_
+    102feature_redundancy_audit_20260815.md`) 결과 0.9 상관 기준 14개 클러스터·38개 피처가
+    중복(일부는 r=1.0000 완전 중복: `smart_money_flow`≡`oi_change_rate`,
+    `funding_z_score`≡`ou_funding_z`) — 클러스터당 1개만 남겨 78피처로 축소 후 h48qual·zig075
+    둘 다 동일 5시드(이슈16과 동일 시드, paired 비교)로 재학습해 재검증. **20/20칸
+    (컴포넌트2×시드5×VAL/OOS2) 전부 always_short 패배** — 102피처 결과(zig075 10/10,
+    h48qual Odyssey1 기존 38/40)와 동일. 중복 제거는 무스킬 벽에 아무 영향 없음을 재확인.
+    상세: `docs/experiments/eth_omega461_dedup78feature_nseed_skill_retest_20260815.md`.
 
 ## 승격 게이트
 

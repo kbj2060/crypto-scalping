@@ -12,6 +12,8 @@
   --warn: #dc8f4a;
   --amber: #f2b84b;
   --accent: #22d3ee;
+  --liq-support: #5b8def;
+  --liq-resistance: #e0913f;
   --ink: #f5f6fb;
   --line: rgba(203, 209, 227, 0.18);
   --soft-line: rgba(203, 209, 227, 0.095);
@@ -225,9 +227,217 @@ body {
 .ops-health-row.warn .ops-health-status-badge { color: #2c1c09; background: var(--warn); border-color: transparent; }
 .ops-health-row.bad .ops-health-status-badge { color: #2a0e0a; background: var(--bad); border-color: transparent; }
 
+/* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
+   click; it only renders when there's something actionable to say (elevated/firing state). Border
+   color follows the row's tone (good/warn/bad) so danger reads as danger without extra text. */
+.signal-meaning {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 0 6px 6px 0;
+  color: var(--text);
+  font: 11px/1.55 var(--font-sans);
+}
+.ops-health-row.good .signal-meaning { border-left-color: var(--good); }
+.ops-health-row.warn .signal-meaning { border-left-color: var(--amber); }
+.ops-health-row.bad .signal-meaning { border-left-color: var(--bad); }
+
+/* Per-signal "자세히" expandable detail (model indicators + evidence signals, Snapshot tab).
+   Collapsed by default to keep the live-status view compact; open/closed state is tracked in JS
+   (detailOpenKeys) so it survives the periodic re-render. */
+.detail-toggle {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: 800 10px/1.4 var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0.8;
+}
+.detail-toggle:hover { opacity: 1; text-decoration: underline; }
+.signal-detail {
+  display: none;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 6px 6px 0;
+  color: var(--muted);
+  font: 11px/1.65 var(--font-mono);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.signal-detail.open { display: block; }
+
+/* Evidence-signal activity strips (Snapshot tab) -- scoped to .evidence-row so this doesn't
+   change the plain ops-health-row look used by the health-check panel. */
+.ops-health-row.evidence-row.bad .ops-health-dot { animation: statusPulse 2.4s ease-in-out infinite; }
+.evidence-strip-wrap { margin-top: 4px; }
+
+/* Snapshot tab: "12신호 한눈에" compact overview at the top (model indicators + evidence signals
+   share this chip language, see renderModelIndicatorList/renderEvidenceSignals in app.js), so both
+   groups are visible together without scrolling into their full detail sections below. */
+.signal-overview-group {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--soft-line);
+}
+.signal-overview-group:last-child { border-bottom: 0; }
+
+.signal-overview-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.signal-overview-group-head .signal-overview-label { margin-bottom: 0; }
+
+.signal-overview-label {
+  margin: 0 0 8px;
+  font: 700 12px/1.3 var(--font-sans);
+  color: var(--text);
+}
+
+/* auto-fit + minmax means this adapts to however many chips a group actually has (2, 4, 6, 11, ...)
+   at every viewport width without hand-maintained column-count classes -- 2026-08-24: a fixed
+   repeat(N, 1fr) (via now-removed .signal-chip-row-2/-3/-4 modifiers) broke on mobile the moment a
+   different session added 3 more evidence chips (8->11) without updating those counts. This is the
+   self-healing fix: it never goes stale when the item count changes again. */
+.signal-chip-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+/* 2026-08-24 사용자 리포트: 방향(롱/숏, 초록/빨강)과 위험도(안정/주의/위험, 초록/호박/빨강)가
+   같은 색을 재사용해 헷갈림 -- 색은 각자 관습이 강해 그대로 두고, 공간을 갈라 라벨을 붙여서
+   "지금 보는 게 방향인지 위험도인지"를 색과 무관하게 먼저 알 수 있게 한다. */
+.signal-chip-subgroup {
+  margin-bottom: 10px;
+}
+.signal-chip-subgroup:last-child {
+  margin-bottom: 0;
+}
+
+.signal-chip-subgroup-label {
+  margin: 0 0 6px;
+  font: 700 9.5px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.signal-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.signal-chip-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.signal-chip-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 11px/1.25 var(--font-sans);
+  color: var(--muted);
+}
+
+.signal-chip-state {
+  flex: none;
+  font: 800 11px/1 var(--font-mono);
+  color: var(--muted);
+}
+
+.signal-chip.good { border-color: rgba(107, 171, 132, 0.45); background: rgba(107, 171, 132, 0.08); }
+.signal-chip.good .signal-chip-dot { background: var(--good); box-shadow: 0 0 8px var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
+.signal-chip.good .signal-chip-label, .signal-chip.good .signal-chip-state { color: var(--good); }
+
+.signal-chip.bad { border-color: rgba(207, 106, 92, 0.45); background: rgba(207, 106, 92, 0.08); }
+.signal-chip.bad .signal-chip-dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); animation: statusPulse 2.4s ease-in-out infinite; }
+.signal-chip.bad .signal-chip-label, .signal-chip.bad .signal-chip-state { color: var(--bad); }
+
+.signal-chip.warn { border-color: rgba(242, 184, 75, 0.5); background: rgba(242, 184, 75, 0.08); }
+.signal-chip.warn .signal-chip-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.signal-chip.warn .signal-chip-label, .signal-chip.warn .signal-chip-state { color: var(--amber); }
+
+.evidence-strip-meaning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 0 6px 6px 0;
+  color: var(--text);
+  font: 11px/1.55 var(--font-sans);
+}
+.evidence-strip-meaning.good { border-left-color: var(--good); }
+.evidence-strip-meaning.bad { border-left-color: var(--bad); }
+.evidence-strip-meaning.warn { border-left-color: var(--amber); }
+.evidence-strip { display: block; width: 100%; max-width: 320px; height: 20px; }
+.evidence-bar { transition: fill 0.4s ease, opacity 0.4s ease; }
+.evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite; }
+/* "now" marker: blinking outline on the last/rightmost bar, independent of fill color -- marks
+   where the strip's current position is even when nothing is firing there (the common case). */
+@keyframes nowMarkerBlink {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.1; }
+}
+.evidence-bar-now { stroke: var(--accent); stroke-width: 1.5px; animation: nowMarkerBlink 1.3s ease-in-out infinite; }
+.evidence-bar-now.evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite, nowMarkerBlink 1.3s ease-in-out infinite; }
+.evidence-strip-caption { display: block; margin-top: 3px; color: var(--muted); font: 10px/1 var(--font-mono); letter-spacing: 0.02em; }
+
+/* Liquidation map panel (2026-08-24) -- price-ladder list, resistance above the current-price row,
+   support below, matching how the chart overlay's lines read top-to-bottom. */
+.liq-level-list { padding: 4px 0 12px; }
+.liq-level-row {
+  display: grid;
+  grid-template-columns: 56px 84px 1fr 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  font: 600 12px/1.3 var(--font-mono);
+}
+.liq-level-tag { color: var(--muted); }
+.liq-level-price { font-weight: 800; }
+.liq-level-bar-track { height: 8px; border-radius: 4px; background: rgba(203, 209, 227, 0.1); overflow: hidden; }
+.liq-level-bar-fill { height: 100%; border-radius: 4px; }
+.liq-level-dist { text-align: right; color: var(--muted); }
+.liq-level-row.liq-resistance .liq-level-bar-fill { background: var(--liq-resistance); }
+.liq-level-row.liq-resistance .liq-level-price { color: var(--liq-resistance); }
+.liq-level-row.liq-support .liq-level-bar-fill { background: var(--liq-support); }
+.liq-level-row.liq-support .liq-level-price { color: var(--liq-support); }
+.liq-level-row.liq-current { background: rgba(255, 255, 255, 0.03); font-weight: 800; }
+.liq-level-row.liq-current .liq-level-price { color: var(--accent); }
+@media (max-width: 720px) {
+  .liq-level-row { grid-template-columns: 48px 72px 1fr 52px; padding: 6px 12px; font-size: 11px; }
+}
+
 @media (max-width: 720px) {
   .ops-health-list { grid-template-columns: 1fr; }
   .ops-health-row:nth-child(odd) { border-right: 0; }
+  /* base is `auto 1fr auto` (dot | info | meta) -- on narrow viewports a long meta <small>
+     (e.g. "bottom 169bar / 14.1h ago · top not in lookback") sizes its auto column to its full
+     unwrapped width and crushes the 1fr info column down to a sliver, wrapping the title
+     character-by-character. Drop the 3rd column and let meta wrap onto its own full-width row. */
+  .ops-health-row { grid-template-columns: auto 1fr; row-gap: 8px; }
+  .ops-health-meta { grid-column: 1 / -1; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
 }
@@ -489,194 +699,27 @@ body {
 .trade-journal-pnl.bad { color: var(--bad); }
 .trade-journal-pnl.muted { color: var(--muted); }
 
-.indicator-row {
-  display: grid;
-  gap: var(--card-gap);
-  margin-bottom: var(--card-gap);
-}
-
-.indicator-row {
-  grid-template-columns: repeat(6, 1fr);
-}
-
-.indicator-row-3 {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.indicator-toggle-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  margin: -4px 0 var(--card-gap);
-  padding: 8px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  font: 700 11px/1 var(--font-sans);
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
-}
-
-.indicator-toggle-btn:hover {
-  color: var(--text);
-  border-color: rgba(203, 209, 227, 0.3);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.indicator-toggle-chevron {
-  display: inline-block;
-  transition: transform 0.2s ease;
-}
-
-.indicator-toggle-btn.expanded .indicator-toggle-chevron {
-  transform: rotate(180deg);
-}
-
-.indicator-extra {
-  overflow: hidden;
-  max-height: 260px;
-  opacity: 1;
-  transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
-}
-
-.indicator-extra.collapsed {
-  max-height: 0;
-  opacity: 0;
-  margin-bottom: 0;
-  pointer-events: none;
-}
-
-.indicator-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: var(--line);
-}
-
 .good, .long { color: var(--good); text-shadow: 0 0 18px rgba(107, 171, 132, 0.22); }
 .bad, .short { color: var(--bad); text-shadow: 0 0 18px rgba(207, 106, 92, 0.22); }
 .warn, .hold { color: var(--amber); text-shadow: 0 0 18px rgba(242, 184, 75, 0.2); }
 .muted { color: var(--muted); }
 
-.indicator-card.good-border::before { background: var(--good); }
-.indicator-card.bad-border::before { background: var(--bad); }
-.indicator-card.warn-border::before { background: var(--amber); }
-.indicator-card.neutral-border::before { background: var(--line); }
-
-.indicator-card {
-  display: grid;
-  gap: 6px;
-  align-items: start;
-  text-align: left;
-  padding: 16px;
-  min-height: 96px;
-  border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, var(--glass-strong), transparent),
-    rgba(18, 20, 27, 0.72);
-}
-
-.indicator-card > *:not(.ind-spark) {
-  position: relative;
-  z-index: 1;
-}
-
-.ind-spark {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 28px;
-  pointer-events: none;
-  opacity: 0.5;
-  transition: opacity 0.3s ease;
-}
-
-.ind-head {
-  font-size: 11px;
-  font-weight: 900;
+/* "고래 포지션" is a bounded transform of "수급 흐름" (whale_position_score is reconstructable
+   from nif_whale + oi_delta_pct alone -- see hexa_pulse_formula.py::reconstruct_whale_position_score),
+   not an independent signal. Flagged only on the Snapshot tab's card, not the Live tab's. */
+.derived-tag {
+  display: inline-block;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font: 700 8.5px/1.6 var(--font-mono);
   color: var(--muted);
-  text-transform: uppercase;
-}
-
-.ind-value {
-  font-size: 22px;
-  font-weight: 900;
-  color: var(--ink);
-  line-height: 1.05;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-
-.ind-sub {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-  line-height: 1.35;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.secondary-row .ind-value {
-  display: none;
-}
-
-.secondary-row .ind-sub {
-  align-self: center;
-  justify-self: center;
-  font-size: 21px;
-  font-weight: 900;
-  color: var(--ink);
-  line-height: 1.1;
-  text-align: center;
-}
-
-.secondary-row .ind-head {
-  font-size: 12px;
-  font-weight: 900;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.secondary-row .indicator-card {
-  grid-template-rows: auto 1fr;
-  align-items: stretch;
-}
-
-.secondary-row .indicator-card.good-border {
-  border: 1px solid rgba(107, 171, 132, 0.42);
-}
-
-.secondary-row .indicator-card.bad-border {
-  border: 1px solid rgba(207, 106, 92, 0.42);
-}
-
-.secondary-row .indicator-card.warn-border {
-  border: 1px solid rgba(242, 184, 75, 0.46);
-}
-
-.secondary-row .indicator-card.neutral-border {
+  background: rgba(203, 209, 227, 0.08);
   border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  vertical-align: middle;
+  cursor: help;
 }
-
-.secondary-row .indicator-card.good-border .ind-sub { color: var(--good); }
-.secondary-row .indicator-card.bad-border .ind-sub { color: var(--bad); }
-.secondary-row .indicator-card.warn-border .ind-sub { color: var(--amber); }
-.secondary-row .indicator-card.neutral-border .ind-sub { color: var(--ink); }
-
-.indicator-card.neutral-border { border-color: var(--line); }
-.indicator-card.good-border { border-color: var(--good); }
-.indicator-card.bad-border { border-color: var(--bad); }
-.indicator-card.warn-border { border-color: var(--amber); }
 
 .chart-note {
   margin-top: 8px;
@@ -893,7 +936,6 @@ svg {
 }
 
 @media (max-width: 960px) {
-  .indicator-row { grid-template-columns: repeat(2, 1fr); }
   .charts { grid-template-columns: 1fr; }
   .trade-journal-row { grid-template-columns: 1fr; gap: 8px; }
   .trade-journal-pnl { text-align: left; }
@@ -956,26 +998,12 @@ svg {
     font-size: 15px;
   }
 
-  .indicator-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .ind-head {
-    font-size: 10px;
-  }
-
-  .indicator-card {
-    min-height: 82px;
+  .signal-overview-group {
     padding: 12px;
   }
 
-  .secondary-row .ind-head {
-    font-size: 11px;
-  }
-
-  .secondary-row .ind-sub {
-    font-size: clamp(16px, 5vw, 19px);
+  .evidence-strip-meaning {
+    margin-top: 8px;
   }
 
   .market-chart-wrap .chart-container {
@@ -1093,19 +1121,6 @@ svg {
 @media (max-width: 420px) {
   .app {
     padding: 8px;
-  }
-
-  .indicator-row {
-    gap: 8px;
-  }
-
-  .indicator-card {
-    min-height: 72px;
-    padding: 8px;
-  }
-
-  .secondary-row .ind-sub {
-    font-size: clamp(15px, 4.9vw, 17px);
   }
 
   .market-chart-wrap .chart-container {
