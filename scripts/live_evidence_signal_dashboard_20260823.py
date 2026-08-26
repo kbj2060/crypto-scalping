@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """Read-only, on-demand/live terminal dashboard for a human discretionary trader: shows which of
-the 7 validated ETH "reversal evidence" signals (2026-08-14 research lineage + one 2026-08-24
-addition) are firing on the most recently CLOSED ETH/USDT 5-minute bar, right now.
+the 8 validated ETH "reversal evidence" signals (2026-08-14 research lineage + later additions)
+are firing on the most recently CLOSED ETH/USDT 5-minute bar, right now.
+
+2026-08-25: added dalton_rule2_balance_edge as an 8th signal, on user request (dashboard exposure
+now gated on "real statistical information content", not "passed a full economic PnL gate" -- see
+feedback_dashboard_indicators_ic_bar_not_pnl_bar memory). Retrospective lift was real and VAL/OOS
+stable (bottom 1.69->1.89x, top 1.66->1.42x) but the signal failed a *different* kind of test than
+fib_extension_exhaustion below: not an economic/cost-gate failure, but a translation failure --
+0/6 windows beat always_long/always_short even at ZERO transaction cost, because a fixed 1.6xATR
+TP can't survive the signal's own measured 4-5 bar lead time before the real pivot. See
+docs/experiments/eth_dalton_rule2_balance_edge_costgate_20260815.md.
 
 2026-08-24 (same day, later still): trimmed from 11 down to 6 "core" signals + 1 "experimental"
 signal, on user request, for glanceability -- all 11 were genuinely real (non-noise) lift, this
@@ -19,6 +28,39 @@ entry: a genuinely different information family (Fibonacci extension-zone geomet
 overlap with liquidity_sweep) but on a materially thinner sample (n=183-193 vs hundreds-to-
 thousands for the other 6) and steeper VAL->OOS lift decay -- flagged as such in its own
 description/detail text, not held to the same confidence as the 6 core signals.
+
+2026-08-25 (same day, later still): added funding_oscillator_combo as a 9th signal, on user
+request ("find combo candidates using other info sources: liquidation/funding/cross-asset").
+Liquidation was ruled out -- its only data source (tail_risk_1m/oi_lsratio) has zero historical
+overlap with this scorecard's VAL+OOS window, and forcing a recent-only-window test would re-peek
+data still accumulating toward its own pre-registered 09-15 gate. Funding (ETH oscillator oversold
+AND funding_z<=-2, data/TOTAL_ETHUSDT_fundingRate_2025_2026.csv -- the corrected file, see
+eth_funding_ethfi_mislabel_20260824) beat orthogonal_combo at 1h in BOTH the original window
+(4.00x vs 3.51x, n=110) and an independent out-of-window replication on 2026-03-01..07-20 (4.04x
+vs 3.92x @1h, and clearly ahead at 4h/8h too there) -- see research_eth_funding_crossasset_
+combo_signal_20260825.py / research_eth_funding_oscillator_combo_oow_20260825.py. BOTTOM-SIDE ONLY:
+this data's funding rate never exceeds 0.0001 in the validating window (exchange premium-clamp
+behavior, independently confirmed via live API checks the same day, see
+eth_f4c_cross_exchange_funding_spread_status_20260825), so funding_z>=2.0 essentially never fires
+-- the top_funding_oscillator_combo formula is left in verbatim (bidirectional code, matching every
+other signal here) but will rarely-to-never light up; this is a real data characteristic, not a bug.
+2026-08-25 (same day, later still): economic cost-gate run (backtest_eth_funding_oscillator_
+combo_costgate_20260825.py, same engine/TP:SL/6-window convention as dalton_rule2_balance_edge)
+-- FAILED 0/6 windows vs always_long/always_short at the standard 10bp roundtrip cost, breakeven
+cost only 0.0-9.6bp per window. Same failure class as dalton_rule2_balance_edge and
+fib_extension_exhaustion: real detection, fixed-barrier automated entry doesn't survive it.
+
+2026-08-27: funding_oscillator_combo REMOVED as a standalone signal (rarely visible in practice --
+its bottom_last_fired_ts/top_last_fired_ts were both null across the entire live ~5.2-day lookback
+the day this was noticed) and folded into orthogonal_combo's BOTTOM leg instead, as an OR condition
+(delta_z<=-2 OR funding_z<=-2). research_eth_funding_oscillator_union_combo_20260827.py tested this
+union on the same two windows: bottom lift held (3.51x->3.56x original, 3.92x->4.01x OOW) while
+trigger count rose ~3x and the median gap between fires fell from 5.8h to 1.75h (original) / 7.8h to
+3.9h (OOW) -- funding_oscillator_combo alone had gone as long as 55 days without firing. TOP was
+deliberately NOT merged: funding_z>=2.0 fires rarely there too, and in the OOW window its few fires
+were BELOW-baseline (lift 0.78x) and measurably dragged orthogonal_combo's own top lift down
+(4.14x->3.90x if merged) -- so top stays delta_z-only, exactly its pre-2026-08-27 formula. Now 8
+signals total (was 9).
 
 *** NOT A TRADING ALGORITHM. INFORMATIONAL / PROBABILITY-SHIFT CONTEXT ONLY. ***
 See docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md: four
@@ -50,6 +92,14 @@ actually produced the validated numbers -- not approximated from the prose docs:
   - smt_divergence: scripts/analyze_eth_ict2022_ob_smt_po3_component_evidence_20260824.py::add_smt
   - fib_extension_exhaustion (experimental): scripts/analyze_eth_fibonacci_harmonic_geometric_
     evidence_20260824.py::add_leg_direction/add_fib_zones
+  - dalton_rule2_balance_edge (added 2026-08-25, balance_edge_low/balance_edge_high portion only):
+    scripts/analyze_eth_amt_vsa_footprint_ifvg_component_evidence_20260815.py::add_amt_features
+  - orthogonal_combo's funding_z OR-input (2026-08-27, bottom-side only): funding_z leg from
+    scripts/research_eth_funding_crossasset_combo_signal_20260825.py::load_funding_z (rolling
+    z-score of data/TOTAL_ETHUSDT_fundingRate_2025_2026.csv's last_funding_rate); originally a
+    separate funding_oscillator_combo signal (out-of-window replication in scripts/research_eth_
+    funding_oscillator_combo_oow_20260825.py), merged into orthogonal_combo's bottom leg per
+    scripts/research_eth_funding_oscillator_union_combo_20260827.py.
   - The original top-6 set + bottom/top mirror thresholds + net_score = bottom_votes - top_votes
     convention: scripts/backtest_eth_evidence_signal_top6_confluence_20260814.py (the
     pre-registered "top-6" formula, reused here with zero new thresholds).
@@ -82,6 +132,7 @@ import pandas as pd
 import requests
 
 FUTURES_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
+FUNDING_URL = "https://fapi.binance.com/fapi/v1/fundingRate"  # orthogonal_combo's bottom-leg funding_z input (2026-08-27; formerly funding_oscillator_combo's own leg)
 SYMBOL = "ETHUSDT"
 BTC_SYMBOL = "BTCUSDT"  # smt_divergence's cross-asset non-confirmation leg only, 2026-08-24
 INTERVAL = "5m"
@@ -98,6 +149,9 @@ PCTRANK_WINDOW = 864    # p_fast/p_slow rolling percentile-rank window (3 days o
 ZSCORE_WINDOW = 288     # delta_z / vol_z / ret3_z rolling window (1 day of 5m bars)
 SWEEP_LOOKBACK = 48     # liquidity_sweep prior swing high/low lookback (4 hours)
 ATR_N = 14              # _atr_pct window (context line only, not part of any of the 6 signals)
+FUNDING_HISTORY_LIMIT = 100    # 100 x 8h ~= 33 days, warms up FUNDING_Z_WINDOW with margin
+FUNDING_Z_WINDOW = 90          # ~30 days of 8h funding observations, matches research_eth_funding_crossasset_combo_signal_20260825.py::load_funding_z
+FUNDING_Z_MIN_PERIODS = 30     # same
 EPS = 1e-12
 
 DEFAULT_WATCH_INTERVAL_S = 60
@@ -113,8 +167,15 @@ DISCLAIMER = """\
   see module docstring for exactly what was dropped and why). A 7th, EXPERIMENTAL
   signal (fib_extension_exhaustion) was added the same day from a different
   information family (Fibonacci extension geometry) on a thinner sample -- see its
-  own description below. All 7 are probability-shift CONTEXT for a human's own
-  discretionary judgment -- never an automated trigger:
+  own description below. An 8th (dalton_rule2_balance_edge) was added 2026-08-25 --
+  real, VAL/OOS-stable lift, but it failed a DIFFERENT kind of test than
+  fib_extension_exhaustion (see its own bullet below). A 9th (funding_oscillator_
+  combo), also added 2026-08-25, combined the same oscillator leg as orthogonal_
+  combo with a funding-rate extreme; it was REMOVED 2026-08-27 and folded into
+  orthogonal_combo's own BOTTOM leg instead (see orthogonal_combo's bullet below)
+  after it turned out to rarely display at all (up to 55 days without firing).
+  All 8 are probability-shift CONTEXT for a human's own discretionary judgment --
+  never an automated trigger:
     - 4/4 independent attempts to wire the original top-6 subset into automated
       trading decisions (a hard forced-exit veto, an exit_head model feature, a
       position-sizing feature, and a standalone entry-trigger confluence rule
@@ -126,26 +187,59 @@ DISCLAIMER = """\
     - fib_extension_exhaustion additionally failed its own market-order economic
       gate 0/16 (docs/experiments/eth_fibonacci_harmonic_geometric_evidence_20260824.md)
       -- same "context only" status as the rest, but with a thinner evidentiary base.
+    - dalton_rule2_balance_edge failed a TRANSLATION test, not an economic one: 0/6
+      windows beat always_long/always_short even at ZERO transaction cost (breakeven
+      cost 0.0-1.6bp) -- a fixed 1.6xATR TP can't survive the signal's own measured
+      4-5 bar lead time before the real pivot arrives (docs/experiments/
+      eth_dalton_rule2_balance_edge_costgate_20260815.md). The underlying detection
+      itself is real; only a fixed-barrier automated exit was shown not to work.
+    - orthogonal_combo's BOTTOM leg is an OR of two confirming conditions since
+      2026-08-27: taker delta_z<=-2 OR funding_z<=-2 (funding_z beat orthogonal_
+      combo's own OLD delta_z-only lift at 1h in two independent windows before
+      the merge -- research_eth_funding_crossasset_combo_signal_20260825.py /
+      research_eth_funding_oscillator_combo_oow_20260825.py -- but as its own
+      standalone chip it rarely displayed, up to 55 days without firing). The
+      union was verified in research_eth_funding_oscillator_union_combo_20260827.py
+      to hold lift in both windows while ~3x'ing trigger frequency. orthogonal_
+      combo's TOP leg deliberately stays delta_z-only -- funding_z's top leg fires
+      rarely (exchange premium-clamp keeps ETH funding under 0.0001 most of the
+      time) and its few OOW-window fires were BELOW-baseline (0.78x lift), so
+      merging it there would have hurt, not helped. The old standalone funding_
+      oscillator_combo's economic cost-gate result (backtest_eth_funding_
+      oscillator_combo_costgate_20260825.py): FAILED 0/6 windows vs always_long/
+      always_short at the standard 10bp roundtrip cost -- same failure CLASS as
+      dalton_rule2_balance_edge and fib_extension_exhaustion (real detection,
+      fixed-barrier automated entry doesn't survive it). This dashboard's
+      inclusion bar is statistical information content, not that economic gate --
+      see feedback_dashboard_indicators_ic_bar_not_pnl_bar.
     - "fired?" shows a 15-MIN SUSTAIN WINDOW (2026-08-24, corrected same day after an
       empirical decay check), not just the single bar the condition fired on -- once
       a signal fires it stays shown as active through 3 bars later (15 min), the
-      exact bar-offset up to which lift measurably stays above baseline for all 7
-      signals (an initial 1h/12-bar window was tried and found to display several
-      signals as active well past the point their real-time lift had decayed below
-      random -- see scripts/analyze_eth_dashboard7_sustain_window_decay_20260824.py).
+      exact bar-offset up to which lift measurably stays above baseline for the
+      original 7 signals (an initial 1h/12-bar window was tried and found to display
+      several signals as active well past the point their real-time lift had decayed
+      below random -- see scripts/analyze_eth_dashboard7_sustain_window_decay_20260824.py).
+      dalton_rule2_balance_edge (added 2026-08-25) reuses the same 4-bar window as
+      a design default -- its own decay curve was not separately re-measured.
       Not a new/looser firing condition. "last fired" always reports the true
       original firing bar regardless of the sustain window.
   Nothing printed below is an instruction to buy or sell.
 ================================================================================"""
 
+# Ordered by 1h-horizon precision (accuracy), descending -- computed once across all 9 in
+# scripts/research_eth_evidence_signal_scorecard_ci_20260825.py (same live compute_signals(),
+# same VAL+OOS window, same event_study lift methodology as everywhere else in this lineage).
+# Ranking key is each signal's stronger side (max of bottom/top precision) at 1h; re-run that
+# script if a signal's formula changes and this order needs to be re-derived, don't hand-tweak.
 SIGNAL_ORDER = [
-    ("orthogonal_combo", "adaptive oscillator extreme (p_fast/p_slow<=.10 or >=.90) AND taker delta z beyond +-2"),
+    ("orthogonal_combo", "adaptive oscillator extreme (p_fast/p_slow<=.10 or >=.90) AND (BOTTOM: taker delta_z<=-2 OR funding_z<=-2; TOP: taker delta_z>=2 only) -- 2026-08-27: bottom leg OR-merged with the former standalone funding_oscillator_combo signal after research_eth_funding_oscillator_union_combo_20260827.py showed the union beats/matches both originals' lift in two independent windows while ~3x'ing trigger frequency (funding_oscillator_combo alone had gone up to 55 days without firing); TOP deliberately excludes funding_z (its rare OOW-window fires were below-baseline and hurt lift)"),
+    ("fib_extension_exhaustion", "EXPERIMENTAL: price extends 127.2-161.8% beyond a causally-detected 48-bar swing leg (thinner sample, n~190, than the 6 core signals -- see docs/experiments/eth_fibonacci_harmonic_geometric_evidence_20260824.md)"),
+    ("smt_divergence", "ETH breaks its own 48-bar swing low/high while BTC's does NOT (cross-asset non-confirmation)"),
     ("liquidity_sweep", "wick pokes past prior 48-bar swing high/low, closes back inside"),
     ("volume_wick_climax", "volume z-score>=2 AND opposite-direction wick>=50% of bar range"),
     ("short_term_return_z", "3-bar (15m) return z-score beyond +-2.5"),
     ("taker_delta_z_climax", "net aggressive taker buy/sell volume z-score beyond +-2 (standalone)"),
-    ("smt_divergence", "ETH breaks its own 48-bar swing low/high while BTC's does NOT (cross-asset non-confirmation)"),
-    ("fib_extension_exhaustion", "EXPERIMENTAL: price extends 127.2-161.8% beyond a causally-detected 48-bar swing leg (thinner sample, n~190, than the 6 core signals -- see docs/experiments/eth_fibonacci_harmonic_geometric_evidence_20260824.md)"),
+    ("dalton_rule2_balance_edge", "price within 15% of its own 48-bar range edge, gated on a low-volatility regime (rolling ATR% percentile<=30) -- real VAL/OOS-stable lift but failed a fixed-TP/SL translation test even at zero cost, not an economic-gate test, see docs/experiments/eth_dalton_rule2_balance_edge_costgate_20260815.md"),
 ]
 
 
@@ -200,8 +294,53 @@ def fetch_klines(limit: int = FETCH_LIMIT, max_retries: int = 3, timeout: float 
     raise RuntimeError(f"failed to fetch {symbol} klines after {max_retries} attempts: {last_err}")
 
 
-def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Computes the 7 signal families (bottom + top mirror; all bidirectional, including the
+def fetch_funding_history(limit: int = FUNDING_HISTORY_LIMIT, max_retries: int = 3, timeout: float = 15.0,
+                          symbol: str = SYMBOL) -> pd.DataFrame:
+    """GET-only fetch of recent funding-rate history (public, no API key) -- feeds
+    orthogonal_combo's bottom-leg funding_z input only (2026-08-27; formerly a separate
+    funding_oscillator_combo signal's own leg). Returns [calc_time, funding_z], already
+    rolling-z-scored (same FUNDING_Z_WINDOW/FUNDING_Z_MIN_PERIODS convention, verbatim, as
+    scripts/research_eth_funding_crossasset_combo_signal_20260825.py::load_funding_z)."""
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(FUNDING_URL, params={"symbol": symbol, "limit": limit}, timeout=timeout)
+            resp.raise_for_status()
+            raw = resp.json()
+            if not raw:
+                raise ValueError("empty funding-rate response")
+            df = pd.DataFrame(raw)
+            df["calc_time"] = pd.to_datetime(df["fundingTime"].astype(np.int64), unit="ms", utc=True)
+            df["fundingRate"] = df["fundingRate"].astype(np.float64)
+            df = df.sort_values("calc_time").drop_duplicates("calc_time", keep="last").reset_index(drop=True)
+            mean = df["fundingRate"].rolling(FUNDING_Z_WINDOW, min_periods=FUNDING_Z_MIN_PERIODS).mean()
+            std = df["fundingRate"].rolling(FUNDING_Z_WINDOW, min_periods=FUNDING_Z_MIN_PERIODS).std()
+            df["funding_z"] = (df["fundingRate"] - mean) / std.replace(0.0, np.nan)
+            return df[["calc_time", "funding_z"]]
+        except Exception as e:  # noqa: BLE001 -- any fetch/parse failure should retry, never crash the loop
+            last_err = e
+            if attempt < max_retries:
+                sleep_s = 2 ** attempt
+                log_err(f"funding-rate fetch failed (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_s}s...")
+                time.sleep(sleep_s)
+    raise RuntimeError(f"failed to fetch {symbol} funding-rate history after {max_retries} attempts: {last_err}")
+
+
+def fetch_funding_safe() -> pd.DataFrame | None:
+    """Funding fetch for orthogonal_combo's bottom-leg funding_z input -- failure here must never
+    take down the other signals, so it's caught and logged, not raised (mirrors
+    fetch_btc_klines_safe)."""
+    try:
+        return fetch_funding_history()
+    except RuntimeError as e:
+        log_err(f"funding-rate fetch failed ({e}) -- orthogonal_combo's bottom leg degrades to "
+                f"delta_z-only this cycle (its pre-2026-08-27 formula); other signals unaffected.")
+        return None
+
+
+def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
+                    funding_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Computes the 8 signal families (bottom + top mirror; all bidirectional, including the
     experimental 7th) in SIGNAL_ORDER on freshly fetched bars -- 5 of the 6 core signals from
     scripts/backtest_eth_evidence_signal_top6_confluence_20260814.py, smt_divergence from
     analyze_eth_ict2022_ob_smt_po3_component_evidence_20260824.py (2026-08-24), and the
@@ -212,7 +351,9 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None) -> pd.
 
     `btc_df` (BTCUSDT klines, same columns/interval as `df`) is optional -- if omitted (or the
     caller's BTC fetch failed this cycle), smt_divergence simply never fires rather than raising;
-    ETH-only signals are entirely unaffected."""
+    ETH-only signals are entirely unaffected. `funding_df` ([calc_time, funding_z] from
+    fetch_funding_history/fetch_funding_safe) is likewise optional -- if omitted, orthogonal_combo's
+    bottom leg just degrades to its delta_z-only pre-2026-08-27 formula rather than raising."""
     out = df.copy()
     close, open_, high, low, volume = out["close"], out["open"], out["high"], out["low"], out["volume"]
     taker_buy = out["taker_buy_base"]
@@ -273,18 +414,54 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None) -> pd.
     fib_ext_top = leg_up & high.between(swing_high_prior + 0.272 * fib_rng, swing_high_prior + 0.618 * fib_rng)
     fib_ext_bottom = leg_down & low.between(swing_low_prior - 0.618 * fib_rng, swing_low_prior - 0.272 * fib_rng)
 
-    # --- _atr_pct (eval_omega4_1_atr_safety_sltp_20260622.py) -- context line only, not a signal ---
+    # --- _atr_pct (eval_omega4_1_atr_safety_sltp_20260622.py) -- context line, AND the
+    # low-vol-regime gate input for dalton_rule2_balance_edge below (2026-08-25) ---
     prev_close = close.shift(1)
     prev_close.iloc[0] = close.iloc[0]
     tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
     atr_pct = tr.rolling(ATR_N, min_periods=1).mean() / close.clip(lower=1e-12)
 
+    # --- dalton_rule2_balance_edge (analyze_eth_amt_vsa_footprint_ifvg_component_evidence_
+    #     20260815.py::add_amt_features, balance_edge_low/high portion, verbatim -- 2026-08-25) ---
+    # range_low/range_high are NOT shifted (unlike swing_low_prior/swing_high_prior above) --
+    # Dalton Rule 2 asks "is price CURRENTLY sitting near the edge of its own recent range", so
+    # the current bar is deliberately included in the 48-bar window.
+    dalton_atr_pctile = atr_pct.rolling(288, min_periods=144).rank(pct=True)
+    dalton_low_vol_regime = dalton_atr_pctile <= 0.30
+    dalton_range_low = low.rolling(SWEEP_LOOKBACK, min_periods=SWEEP_LOOKBACK).min()
+    dalton_range_high = high.rolling(SWEEP_LOOKBACK, min_periods=SWEEP_LOOKBACK).max()
+    dalton_tol = 0.15 * (dalton_range_high - dalton_range_low)
+    balance_edge_low = dalton_low_vol_regime & ((low - dalton_range_low).abs() <= dalton_tol)
+    balance_edge_high = dalton_low_vol_regime & ((dalton_range_high - high).abs() <= dalton_tol)
+
+    # --- funding_z, orthogonal_combo's bottom-leg OR-input (2026-08-25, merged into orthogonal_
+    #     combo 2026-08-27) -- research_eth_funding_crossasset_combo_signal_20260825.py /
+    #     research_eth_funding_oscillator_combo_oow_20260825.py. funding_z merged in via
+    #     merge_asof(direction="backward"): only the most recently PUBLISHED funding rate as of
+    #     each bar, no lookahead (fetch_funding_history already rolling-z-scored it). Originally a
+    #     separate funding_oscillator_combo signal; research_eth_funding_oscillator_union_combo_
+    #     20260827.py showed OR-ing it into orthogonal_combo's BOTTOM leg (delta_z<=-2 OR
+    #     funding_z<=-2) beats/matches both original signals' lift in two independent windows while
+    #     ~3x'ing trigger frequency and cutting the median gap between fires from 5.8h to 1.75h
+    #     (original window) / 7.8h to 3.9h (OOW) -- funding_oscillator_combo alone had gone up to
+    #     55 days without firing. The TOP leg deliberately does NOT get the same OR: this data's
+    #     funding rate rarely exceeds 0.0001 (exchange premium-clamp, see
+    #     eth_f4c_cross_exchange_funding_spread_status_20260825), and the union script found the
+    #     rare OOW-window top fires funding_z>=2.0 did produce were BELOW-baseline (lift 0.78x) and
+    #     measurably dragged orthogonal_combo's own top lift down (4.14x->3.90x) -- so top stays
+    #     delta_z-only, unchanged from pre-2026-08-27 behavior.
+    if funding_df is not None and len(funding_df):
+        out = pd.merge_asof(out.sort_values("timestamp"), funding_df, left_on="timestamp", right_on="calc_time", direction="backward")
+    else:
+        out["funding_z"] = np.nan
+    funding_z = out["funding_z"]
+
     out["p_fast"], out["p_slow"], out["delta_z"], out["vol_z"] = p_fast, p_slow, delta_z, vol_z
     out["lower_wick_ratio"], out["upper_wick_ratio"] = lower_wick_ratio, upper_wick_ratio
     out["ret3_z"], out["atr_pct"] = ret3_z, atr_pct
 
-    out["bottom_orthogonal_combo"] = (p_fast <= 0.10) & (p_slow <= 0.10) & (delta_z <= -2.0)
-    out["top_orthogonal_combo"] = (p_fast >= 0.90) & (p_slow >= 0.90) & (delta_z >= 2.0)
+    out["bottom_orthogonal_combo"] = (p_fast <= 0.10) & (p_slow <= 0.10) & ((delta_z <= -2.0) | (funding_z <= -2.0))
+    out["top_orthogonal_combo"] = (p_fast >= 0.90) & (p_slow >= 0.90) & (delta_z >= 2.0)  # funding_z top leg deliberately excluded, see 2026-08-27 note above
 
     out["bottom_liquidity_sweep"] = sweep_low
     out["top_liquidity_sweep"] = sweep_high
@@ -322,6 +499,9 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None) -> pd.
 
     out["bottom_fib_extension_exhaustion"] = fib_ext_bottom
     out["top_fib_extension_exhaustion"] = fib_ext_top
+
+    out["bottom_dalton_rule2_balance_edge"] = balance_edge_low
+    out["top_dalton_rule2_balance_edge"] = balance_edge_high
 
     bottom_cols = [f"bottom_{name}" for name, _ in SIGNAL_ORDER]
     top_cols = [f"top_{name}" for name, _ in SIGNAL_ORDER]
@@ -469,7 +649,8 @@ def run_once() -> int:
         log_err(str(e))
         return 1
     btc_raw = fetch_btc_klines_safe()
-    sig = compute_signals(raw, btc_df=btc_raw)
+    funding_raw = fetch_funding_safe()
+    sig = compute_signals(raw, btc_df=btc_raw, funding_df=funding_raw)
     print(render(sig))
     return 0
 
@@ -479,13 +660,14 @@ def run_watch(interval: int) -> int:
         log_err(f"--watch {interval}s is below the floor of {MIN_WATCH_INTERVAL_S}s (avoids hammering "
                 f"Binance's public endpoint); clamping to {MIN_WATCH_INTERVAL_S}s.")
         interval = MIN_WATCH_INTERVAL_S
-    print(f"[watch mode] refreshing every {interval}s (2 requests/cycle -- ETH + BTC). Press Ctrl+C to stop.\n")
+    print(f"[watch mode] refreshing every {interval}s (3 requests/cycle -- ETH + BTC + funding). Press Ctrl+C to stop.\n")
     try:
         while True:
             try:
                 raw = fetch_klines()
                 btc_raw = fetch_btc_klines_safe()
-                sig = compute_signals(raw, btc_df=btc_raw)
+                funding_raw = fetch_funding_safe()
+                sig = compute_signals(raw, btc_df=btc_raw, funding_df=funding_raw)
                 print(render(sig))
             except RuntimeError as e:
                 log_err(f"{e} -- skipping this cycle, will retry in {interval}s.")

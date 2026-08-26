@@ -14,6 +14,7 @@
   --accent: #22d3ee;
   --liq-support: #5b8def;
   --liq-resistance: #e0913f;
+  --liq-magnet: #e879f9;
   --ink: #f5f6fb;
   --line: rgba(203, 209, 227, 0.18);
   --soft-line: rgba(203, 209, 227, 0.095);
@@ -168,7 +169,14 @@ body {
 .page-tab.active { border-color: rgba(34,211,238,.7); background: rgba(34,211,238,.16); color: var(--ink); }
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
-.ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; }
+.ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; position: relative; }
+/* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
+   absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
+   div / EVIDENCE badge's widths on either side, since space-between alone wouldn't land a 3rd
+   item at the true midpoint. flex+gap so either badge can show alone (group still centers) or
+   both at once (side by side, still centered as a pair). Pulsing dot reads as time-sensitive. */
+.session-alert-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; gap: 8px; }
+.session-alert-center .ops-badge.warn { animation: statusPulse 1.4s ease-in-out infinite; }
 .ops-panel-head h2 { margin: 2px 0 6px; font: 500 28px/1.1 var(--font-display); }
 .eyebrow { margin: 0; color: var(--accent); font: 800 10px/1 var(--font-mono); letter-spacing: .12em; }
 .ops-badge, .ops-readonly, .ops-health-summary { border-radius: 999px; font: 800 11px/1 var(--font-mono); padding: 9px 11px; white-space: nowrap; }
@@ -195,6 +203,12 @@ body {
 }
 .ops-health-row:nth-child(odd) { border-right: 1px solid var(--soft-line); }
 .ops-health-row:hover { background: rgba(255, 255, 255, 0.025); }
+
+/* Macro calendar (2026-08-26) -- single-column chronological list, reuses .ops-health-row/-dot/
+   -info/-status-badge as-is (see scripts/live_macro_calendar_20260826.py for the event data). */
+.macro-calendar-list { grid-template-columns: 1fr; }
+.macro-calendar-list .ops-health-row:nth-child(odd) { border-right: none; }
+.macro-calendar-empty { padding: 16px 18px; color: var(--muted); font-size: 12.5px; }
 
 .ops-health-dot {
   width: 9px;
@@ -224,8 +238,21 @@ body {
   color: var(--muted);
 }
 .ops-health-row.good .ops-health-status-badge { color: #122016; background: var(--good); border-color: transparent; }
-.ops-health-row.warn .ops-health-status-badge { color: #2c1c09; background: var(--warn); border-color: transparent; }
+.ops-health-row.warn .ops-health-status-badge { color: #2c1c09; background: var(--amber); border-color: transparent; }
 .ops-health-row.bad .ops-health-status-badge { color: #2a0e0a; background: var(--bad); border-color: transparent; }
+/* 2026-08-27 (user request): fixed absolute size for the model-indicator + evidence-signal badges
+   specifically (미발동/상승압력/주의/안정/... -- see the badge-text values app.js's classifyIndicators()
+   and evidence-signal render feed into this span) -- was sized purely by content/padding before, so
+   "안정" and "BOTTOM 발동" made visibly different-size pills in the same column. NOT applied to
+   #opsHealthList (Ops-tab checklist, longer free-text statuses) or #macroCalendarList (timestamp +
+   category text, different shape) -- both reuse the same base class but weren't part of this ask.
+   width is fixed (not max-width) so text wraps to a second line instead of stretching the pill; the
+   text-align centers both a short one-line label and a wrapped two-line one. */
+#snapModelIndicatorList .ops-health-status-badge,
+#evidenceSignalList .ops-health-status-badge {
+  width: 64px;
+  text-align: center;
+}
 
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border
@@ -242,6 +269,16 @@ body {
 .ops-health-row.good .signal-meaning { border-left-color: var(--good); }
 .ops-health-row.warn .signal-meaning { border-left-color: var(--amber); }
 .ops-health-row.bad .signal-meaning { border-left-color: var(--bad); }
+
+/* 2026-08-25: .ops-health-row.warn is shared markup between the Ops tab's health checklist and the
+   Snapshot tab's model-indicator/evidence-signal rows (renderOpsStatus/renderModelIndicatorList/
+   renderEvidenceSignals all emit the same class, no distinguishing modifier -- see app.js). User
+   asked for 주의(warn) to read as orange (--warn) with no yellow (--amber) specifically within the
+   Snapshot tab; the Ops tab's health checklist keeps the amber above unchanged, so these override
+   only inside #snapshotTabPanel via ID specificity rather than editing the shared base rules. */
+#snapshotTabPanel .ops-health-row.warn .ops-health-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+#snapshotTabPanel .ops-health-row.warn .ops-health-status-badge { background: var(--warn); }
+#snapshotTabPanel .ops-health-row.warn .signal-meaning { border-left-color: var(--warn); }
 
 /* Per-signal "자세히" expandable detail (model indicators + evidence signals, Snapshot tab).
    Collapsed by default to keep the live-status view compact; open/closed state is tracked in JS
@@ -350,6 +387,27 @@ body {
   background: var(--muted);
 }
 
+/* Live PREVIEW of the currently-forming bar (2026-08-26) -- small, deliberately secondary to
+   .signal-chip-dot above (which stays the confirmed/validated reading). Transparent/invisible
+   until renderEvidenceSignalsProvisional() sets .live-bottom/.live-top; faster pulse than the
+   confirmed dot's 2.4s so it visibly reads as "still updating", not a second confirmed state. */
+.signal-chip-live-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: transparent;
+}
+.signal-chip-live-dot.live-bottom { background: var(--good); box-shadow: 0 0 6px var(--good); animation: statusPulse 1s ease-in-out infinite; }
+.signal-chip-live-dot.live-top { background: var(--bad); box-shadow: 0 0 6px var(--bad); animation: statusPulse 1s ease-in-out infinite; }
+.signal-chip-live-dot.live-mixed { background: var(--warn); box-shadow: 0 0 6px var(--warn); animation: statusPulse 1s ease-in-out infinite; }
+/* 2026-08-27 (user request): while this signal is firing in the still-forming bar (same condition
+   as the live dot's own color above), pulse the WHOLE chip's opacity so its border, this dot, and
+   the label/state text all blink together as one unit instead of just the small dot. Toggled on
+   the chip root by renderEvidenceSignalsProvisional -- evidence-signal chips only, model
+   indicators have no provisional feed to key this off of. */
+.signal-chip-live-firing { animation: statusPulse 1s ease-in-out infinite; }
+
 .signal-chip-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -374,9 +432,9 @@ body {
 .signal-chip.bad .signal-chip-dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); animation: statusPulse 2.4s ease-in-out infinite; }
 .signal-chip.bad .signal-chip-label, .signal-chip.bad .signal-chip-state { color: var(--bad); }
 
-.signal-chip.warn { border-color: rgba(242, 184, 75, 0.5); background: rgba(242, 184, 75, 0.08); }
-.signal-chip.warn .signal-chip-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-.signal-chip.warn .signal-chip-label, .signal-chip.warn .signal-chip-state { color: var(--amber); }
+.signal-chip.warn { border-color: rgba(220, 143, 74, 0.5); background: rgba(220, 143, 74, 0.08); }
+.signal-chip.warn .signal-chip-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.signal-chip.warn .signal-chip-label, .signal-chip.warn .signal-chip-state { color: var(--warn); }
 
 .evidence-strip-meaning {
   margin: 10px 0 0;
@@ -389,19 +447,43 @@ body {
 }
 .evidence-strip-meaning.good { border-left-color: var(--good); }
 .evidence-strip-meaning.bad { border-left-color: var(--bad); }
-.evidence-strip-meaning.warn { border-left-color: var(--amber); }
-.evidence-strip { display: block; width: 100%; max-width: 320px; height: 20px; }
+.evidence-strip-meaning.warn { border-left-color: var(--warn); }
+/* 2026-08-26 (user request): dropped the old 320px cap -- it left the strip stopping well short
+   of its row's status badge (.ops-health-status-badge, e.g. "미발동"/"BOTTOM 발동"), even though
+   .ops-health-info (its parent, the row's middle 1fr grid column) had the room to go all the way
+   to the badge column. Applies to both consumers of this class (evidence-signal AND
+   model-indicator panels, both via toneStripSvg()) -- width:100% now fully governs. */
+.evidence-strip { display: block; width: 100%; height: 20px; }
 .evidence-bar { transition: fill 0.4s ease, opacity 0.4s ease; }
 .evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite; }
-/* "now" marker: blinking outline on the last/rightmost bar, independent of fill color -- marks
-   where the strip's current position is even when nothing is firing there (the common case). */
-@keyframes nowMarkerBlink {
-  0%, 100% { stroke-opacity: 1; }
-  50% { stroke-opacity: 0.1; }
+/* 2026-08-27 (user request): the "now" marker (accent-colored outline on the last/rightmost bar)
+   is removed entirely -- first its blink (nowMarkerBlink), then this turn the static outline
+   itself too. Position alone no longer gets any special styling; .evidence-strip-live below is now
+   the only visual signal tied to the last bar, and only while genuinely live/firing.
+   .evidence-bar-provisional below used to borrow this rule's stroke color for its dashed outline
+   (it never set its own) -- that dashed line is gone along with it, fill-opacity is what's left. */
+.evidence-bar-provisional { fill-opacity: 0.6; }
+/* 2026-08-27 (user request): whole-gauge blink, reserved for "this signal's still-forming bar is
+   both provisional AND currently firing (non-neutral)" -- see toneStripSvg's liveFiring param,
+   set by evidenceStripSvg from the provisional liveTone. Narrower than the old per-bar blink it
+   replaces: a provisional-but-neutral forming bar (the common case) or any fully confirmed render
+   (including every model-indicator strip, which never sets liveFiring) stays static. */
+.evidence-strip-live { animation: statusPulse 1.4s ease-in-out infinite; }
+/* Model indicators (#snapModelIndicatorList) have no in-progress bar at all -- their "now" bar is
+   just the latest CONFIRMED sample, same as every bar to its left -- so .evidence-bar-live's
+   confirmed-and-firing pulse (still used by evidence signals, untouched above) doesn't apply here. */
+#snapModelIndicatorList .evidence-bar-live {
+  animation: none;
 }
-.evidence-bar-now { stroke: var(--accent); stroke-width: 1.5px; animation: nowMarkerBlink 1.3s ease-in-out infinite; }
-.evidence-bar-now.evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite, nowMarkerBlink 1.3s ease-in-out infinite; }
-.evidence-strip-caption { display: block; margin-top: 3px; color: var(--muted); font: 10px/1 var(--font-mono); letter-spacing: 0.02em; }
+/* 2026-08-25: caption is now a 2-part row -- 바닥/천장 last-fired text on the left, the hover/
+   current-time label (.strip-time-now) on the right, "그래프 가장 오른쪽 끝" per user request.
+   flex-wrap so a narrow column drops the time to its own line instead of clipping it. */
+.evidence-strip-caption { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 10px; margin-top: 3px; color: var(--muted); font: 10px/1 var(--font-mono); letter-spacing: 0.02em; }
+/* Model indicators have no 바닥/천장 caption -- their hover/current-time label instead shares the
+   "자세히" toggle's own line, right-aligned against it. */
+.strip-time-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin-top: 4px; }
+.strip-time-row .detail-toggle { margin-top: 0; }
+.strip-time-now { font: 10px/1 var(--font-mono); color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; }
 
 /* Liquidation map panel (2026-08-24) -- price-ladder list, resistance above the current-price row,
    support below, matching how the chart overlay's lines read top-to-bottom. */
@@ -530,6 +612,19 @@ body {
 .shadow-slot-range-labels .tag.zero { color: var(--muted); background: rgba(203, 209, 227, 0.07); border: 1px solid var(--line); }
 .chart-risk-gauge { margin: 6px 4px 20px; }
 .chart-risk-gauge:empty { display: none; }
+.liq-cascade-gauge { margin: 10px 4px 16px; display: grid; gap: 8px; }
+.liq-cascade-gauge-track { position: relative; height: 10px; border-radius: 6px; background: rgba(203, 209, 227, 0.08); overflow: hidden; display: flex; }
+.liq-cascade-gauge-track.quiet { background: rgba(107, 171, 132, 0.06); }
+.liq-cascade-gauge-fill { height: 100%; transition: width 0.45s cubic-bezier(.22,.68,0,1.01); }
+.liq-cascade-gauge-fill.long { background: linear-gradient(90deg, rgba(207, 106, 92, 0.35), var(--bad)); }
+.liq-cascade-gauge-fill.short { background: linear-gradient(90deg, var(--good), rgba(107, 171, 132, 0.35)); }
+.liq-cascade-gauge-zero { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: rgba(203, 209, 227, 0.35); transform: translateX(-0.5px); }
+.liq-cascade-gauge-labels { display: flex; justify-content: space-between; }
+.liq-cascade-gauge-labels:has(.tag.quiet) { justify-content: center; }
+.liq-cascade-gauge .tag { font: 800 10px/1 var(--font-mono); padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; background: rgba(203, 209, 227, 0.07); border: 1px solid var(--line); color: var(--muted); }
+.liq-cascade-gauge .tag.long { color: var(--bad); background: rgba(207, 106, 92, 0.12); border-color: rgba(207, 106, 92, 0.22); }
+.liq-cascade-gauge .tag.short { color: var(--good); background: rgba(107, 171, 132, 0.12); border-color: rgba(107, 171, 132, 0.22); }
+.liq-cascade-gauge .tag.quiet { color: var(--good); background: rgba(107, 171, 132, 0.12); border-color: rgba(107, 171, 132, 0.22); }
 .shadow-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line); border-top: 1px solid var(--soft-line); }
 .shadow-chart-cell { background: var(--panel); padding: 22px 18px 16px; }
 .shadow-chart-title { margin: 0 0 10px; font: 600 11.5px/1 var(--font-sans); color: var(--muted); }
