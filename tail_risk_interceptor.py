@@ -99,7 +99,7 @@ class TailRiskInterceptor:
         self.hawkes_beta = float(os.getenv("TR_HAWKES_BETA", "0.005")) # 약 4~5분 뒤 에너지가 25% 이하로 감소하는 속도
         self.hawkes_release_ratio = float(os.getenv("TR_HAWKES_RELEASE_RATIO", "0.35"))
         self.hawkes_sniper_ratio = float(os.getenv("TR_HAWKES_SNIPER_RATIO", "0.55"))
-        self.liq_cluster_window_sec = int(float(os.getenv("TR_LIQ_CLUSTER_WINDOW_SEC", "900")))
+        self.liq_cluster_window_sec = int(float(os.getenv("TR_LIQ_CLUSTER_WINDOW_SEC", "1800")))
         self.liq_cluster_bucket_pct = float(os.getenv("TR_LIQ_CLUSTER_BUCKET_PCT", "0.001"))
         self.dsac_intercept_enabled = os.getenv("TR_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
         self._ws_connected = False
