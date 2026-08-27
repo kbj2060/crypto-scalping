@@ -7,11 +7,13 @@ const API_ETH_ODYSSEY4_SHADOW_URL = "/api/eth-odyssey4-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 const API_OI_SIGNAL_URL = "/api/oi-signal";
-const API_LIQUIDATION_5M_SIGNAL_URL = "/api/liquidation-5m-signal";
+const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
+const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
+const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 2500;
 const CHART_RENDER_MIN_INTERVAL_MS = 5000;
@@ -52,17 +54,19 @@ const setB = (id, cls) => {
 const setH = (id, html) => { const target = el(id); if (target) target.innerHTML = html; };
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
-// Snapshot tab: same 6 model indicators, but as a tone-per-bar strip (matching the evidence
-// signals' activity-strip graph) instead of a continuous sparkline. Stores the ALREADY-COMPUTED
-// tone string ("good"/"bad"/"neutral") from each render() pass rather than re-deriving it from
-// raw values later -- some tones (toxicity, tail risk) depend on more than one raw field, so
-// capturing the tone at computation time is the only way to stay exactly consistent with what the
-// live cards show, instead of an approximation that ignores the cross-field dependency.
-const toneHistory = { whale: [], whale_intent: [], tox: [], risk: [], liq_cascade: [], retail_flow: [] };
-// Parallel to toneHistory, same keys/push/shift cadence -- these 6 indicators have no server-side
+// Snapshot tab: same 5 model indicators (bot-state ones only -- see the "own fetch cycle" model
+// indicators like oi_delta/liq_pressure/liq_direction, which carry their own server-provided
+// tone_history instead), but as a tone-per-bar strip (matching the evidence signals' activity-strip
+// graph) instead of a continuous sparkline. Stores the ALREADY-COMPUTED tone string
+// ("good"/"bad"/"neutral") from each render() pass rather than re-deriving it from raw values
+// later -- some tones (tail risk) depend on more than one raw field, so capturing the tone at
+// computation time is the only way to stay exactly consistent with what the live cards show,
+// instead of an approximation that ignores the cross-field dependency.
+const toneHistory = { whale: [], whale_intent: [], risk: [], liq_cascade: [], retail_flow: [] };
+// Parallel to toneHistory, same keys/push/shift cadence -- these 5 indicators have no server-side
 // timestamp per reading (client-accumulated tally, see comment above), so the only honest per-bar
 // time is "when this browser tab actually pushed the reading", recorded here at push time.
-const toneHistoryTimes = { whale: [], whale_intent: [], tox: [], risk: [], liq_cascade: [], retail_flow: [] };
+const toneHistoryTimes = { whale: [], whale_intent: [], risk: [], liq_cascade: [], retail_flow: [] };
 function pushToneHistory(key, tone) {
   const arr = toneHistory[key];
   if (!arr) return;
@@ -102,6 +106,13 @@ let ethOdyssey4LastFetchAt = 0;
 let latestEthOdyssey4Payload = null;
 let evidenceLastFetchAt = 0;
 let evidenceProvisionalLastFetchAt = 0;
+// Confirmed signals poll every 5min (EVIDENCE_POLL_MS) but the provisional preview polls every 10s
+// and already knows bar_open_utc -- so it's the first to find out when the bar it was tracking has
+// closed. Tracked here so refreshEvidenceSignalsProvisional() can detect that transition and force
+// an immediate confirmed refresh instead of leaving the user looking at a stale confirmed count for
+// up to 5 more minutes (2026-08-27, user report: had to manually reload to see a just-closed bar's
+// signals show up in the confirmed view).
+let lastSeenProvisionalBarOpenUtc = null;
 // Per-signal confirmed history (bottom_history/top_history/latest_bar_utc), captured each time
 // renderEvidenceSignals() runs -- lets refreshEvidenceSignalsProvisional() redraw each signal's
 // strip with one extra live bar every ~10s without waiting on (or duplicating) the 5-min confirmed
@@ -113,10 +124,22 @@ let evidenceHistoryBySignal = {};
 // tick, same pattern as evidence signals feeding their own chip row independently of classifyIndicators.
 let latestOiSignal = null;
 let oiSignalLastFetchAt = 0;
-// 5-minute liquidation $ aggregate (Snapshot tab gauge, 2026-08-25) -- own fetch cycle, same
-// dashboard-side-computed category as latestOiSignal above.
+// Long/short liquidation volume gauge (recreated 2026-08-27, see liquidationVolumeGaugeHtml()) --
+// backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
+// frontend consumer had been removed.
 let latestLiquidation5m = null;
 let liquidation5mLastFetchAt = 0;
+// 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
+// dashboard-side-computed category as latestOiSignal above (scripts/live_spot_perp_basis_signal_
+// 20260827.py). RISK GAUGE, not a price-direction claim -- see MODEL_INDICATOR_DETAIL.liq_pressure.
+let latestBasisLiquidation = null;
+let basisLiquidationLastFetchAt = 0;
+// Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
+// liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
+// not the once-a-minute tail_risk.duckdb path the gauge above reads. Own short poll interval since
+// the source can change sub-second during a real cascade -- see API_LIQ_BURST_STATE_URL below.
+let latestLiqBurstState = null;
+let liqBurstStateLastFetchAt = 0;
 // Directional-only liquidation tilt (liq_net_z_12, 2026-08-25) -- own fetch cycle, same
 // dashboard-side-computed category as latestOiSignal above. Model-indicator tier (like 수급
 // 흐름/고래 포지션), explicitly NOT an evidence-signal-tier chip -- see
@@ -153,11 +176,13 @@ const EVIDENCE_POLL_MS = 300000;
 // labeling, never merged into the confirmed reading.
 const EVIDENCE_PROVISIONAL_POLL_MS = 10000;
 const OI_SIGNAL_POLL_MS = 300000; // same reasoning -- underlying data is a 5m poller, no faster
-// 2026-08-26 user request: was 60000 -- compute_liquidation_5m_signal() is a genuine incremental
-// accumulator (sums whatever 1-minute rows landed in the current 15-min bar so far), not a
-// bar-close-only reading, so polling faster than the server's matching 10s cache (see
-// LIQUIDATION_5M_SIGNAL_CACHE_SECONDS in server.py) gives real reduced staleness.
-const LIQUIDATION_5M_SIGNAL_POLL_MS = 10000;
+const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
+const BASIS_LIQUIDATION_POLL_MS = 300000; // same reasoning -- basis_z48 is a 5m-bar z-score, no faster
+// 2026-08-27: liq_burst_state.json is written the instant a new liquidation event arrives (see
+// tail_risk_interceptor.py::_write_liq_burst_state()), not on a timer -- polling faster than ~1s
+// wouldn't surface anything sooner than the file itself changes, given the remaining hop (this
+// fetch) is the last one in the chain.
+const LIQ_BURST_STATE_POLL_MS = 1000;
 const LIQUIDATION_DIRECTION_POLL_MS = 60000; // same source cadence as liquidation-5m signal above
 const LIQUIDATION_MAP_POLL_MS = 300000; // matches server-side cache -- structure moves slowly
 const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
@@ -814,6 +839,37 @@ function assetUnrealizedPnl(state, compactState, asset) {
   return { pnlPct, posSide };
 }
 
+// Collapses the live governor's 5-way RegimeEngine label (bull/bear/chop/whipsaw/normal, see
+// features/elite.py::RegimeEngine) into the 3 buckets that matter for a discretionary fade/follow
+// call: 추세(bull+bear), 안정횡보(chop only), 불안정·전환구간(whipsaw+normal -- neither a clean
+// trend nor a clean quiet range, the condition most likely to break out against a fade).
+function liveRegimeLabel(raw) {
+  const r = String(raw || "").toLowerCase();
+  if (r === "bull" || r === "bear") return { bucket: "trend", label: "추세", tone: "" };
+  if (r === "chop") return { bucket: "chop", label: "안정횡보", tone: "" };
+  if (r === "whipsaw" || r === "normal") return { bucket: "unstable", label: "불안정·전환구간", tone: "warn-text" };
+  return { bucket: "other", label: String(raw || "-").toUpperCase(), tone: "" };
+}
+
+// A single instant read of "trend" can be boundary flicker (RegimeEngine re-evaluates every
+// render tick, not just once per bar). Only call a 횡보->추세 change trustworthy enough to act on
+// once it has held continuously (per asset, wall-clock) for REGIME_TREND_CONFIRM_MS -- resets the
+// moment the bucket leaves "trend". Client-side only: a page reload forgets the streak and starts
+// re-confirming from 0, so a stale "확인중" right after opening the tab is expected, not a bug.
+const REGIME_TREND_CONFIRM_MS = 15 * 60 * 1000;
+const regimeTrendStreakSince = {};
+function regimeConfirmState(bucket, assetKey) {
+  if (bucket !== "trend") {
+    regimeTrendStreakSince[assetKey] = null;
+    return { suffix: "", tone: "" };
+  }
+  if (!regimeTrendStreakSince[assetKey]) regimeTrendStreakSince[assetKey] = Date.now();
+  const elapsedMs = Date.now() - regimeTrendStreakSince[assetKey];
+  const confirmMin = Math.round(REGIME_TREND_CONFIRM_MS / 60000);
+  if (elapsedMs >= REGIME_TREND_CONFIRM_MS) return { suffix: " 확정", tone: "good-text" };
+  return { suffix: ` (확인중 ${Math.floor(elapsedMs / 60000)}/${confirmMin}분)`, tone: "" };
+}
+
 // Sums each asset's account-level unrealized PnL (already notional-scaled, all sleeves of the
 // same account equity per docs/model_contracts -- see 3-asset portfolio design), independent of
 // whichever asset tab is currently active in the chart above.
@@ -852,6 +908,9 @@ function renderOpsCards(state, compactState) {
     setT("chartUnrealizedPnlText", "-");
     setT("chartRiskText", `${cfg.label} 모델 상태 대기`);
     setT("chartRegimeText", price > 0 ? fmtNum(price, cfg.priceDigits) : "-");
+    const regimeEl = el("chartRegimeText");
+    if (regimeEl) regimeEl.classList.remove("warn-text", "good-text");
+    regimeTrendStreakSince[activeChartAsset] = null;
     const riskEl = el("chartRiskText");
     if (riskEl) riskEl.title = `${cfg.accountSymbol} decision state not present in /api/state`;
     const unrealizedEl = el("chartUnrealizedPnlText");
@@ -875,7 +934,9 @@ function renderOpsCards(state, compactState) {
   const exposure = Number(pos.total_exposure ?? pos.notional_exposure ?? gov.notional_exposure ?? sig.notional_exposure ?? pos.position_fraction ?? 0);
   const leverage = Number(pos.execution_leverage ?? gov.execution_leverage ?? sig.execution_leverage ?? 1);
   const positionPct = Number(pos.position_fraction ?? sig.position_fraction ?? 0) * 100;
-  const regime = String(sig.governor_regime || gov.regime || active.regime || "-").toUpperCase();
+  const regimeRaw = String(sig.governor_regime || gov.regime || active.regime || "-");
+  const regimeInfo = liveRegimeLabel(regimeRaw);
+  const regimeConfirm = regimeConfirmState(regimeInfo.bucket, activeChartAsset);
   const entryPrice = Number(pos.entry_price || active.entry_price || 0);
   const entryTime = pos.opened_at || pos.decision_at || active.opened_at || "";
   const unrealizedPnl = Number(pos.unrealized_pnl_pct ?? sig.position_unrealized_pnl_pct ?? active.position_unrealized_pnl_pct ?? 0);
@@ -894,7 +955,14 @@ function renderOpsCards(state, compactState) {
   setT("chartExposureText", `${fmtNum(leverage, 2)}x / ${fmtNum(exposure, 2)}x`);
   setT("chartUnrealizedPnlText", String(pos.current || "NONE").toUpperCase() === "NONE" ? "-" : fmtPct(unrealizedPnl, 2));
   setT("chartRiskText", signedRiskPairLabel(tp, sl) ? `계정 ${signedRiskPairLabel(tp, sl)}${priceMovePair ? ` · 가격 ${priceMovePair}` : ""}` : "-");
-  setT("chartRegimeText", regime);
+  setT("chartRegimeText", regimeInfo.label + regimeConfirm.suffix);
+  const regimeEl = el("chartRegimeText");
+  if (regimeEl) {
+    regimeEl.classList.remove("warn-text", "good-text");
+    const tone = regimeConfirm.tone || regimeInfo.tone;
+    if (tone) regimeEl.classList.add(tone);
+    regimeEl.title = regimeRaw !== "-" ? `세부 레짐: ${regimeRaw.toUpperCase()}` : "";
+  }
   const riskEl = el("chartRiskText");
   if (riskEl) {
     const detail = [
@@ -1047,23 +1115,21 @@ function whalePositionRead(micro) {
   return "고래 포지션 판단 약함";
 }
 
-// 독성/꼬리리스크는 전부 "위험도" 지표이지 방향(롱/숏) 매매신호가 아니다 -- 예전엔
+// 꼬리리스크는 "위험도" 지표이지 방향(롱/숏) 매매신호가 아니다 -- 예전엔
 // obi/z_bias 부호를 빌려와 "롱 진입"/"숏 진입"으로 표시했는데, 이러면 위험이 높을 때도
 // signalTone()이 우연히 "good"(녹색)을 줘서 "진입해도 된다"는 잘못된 인상을 줄 수 있었다
-// (2026-08-24 사용자 리포트로 발견). 방향 힌트가 필요하면 각 Read() 함수(toxRead/
-// tailRiskRead)가 이미 "상방/하방 ~위험"처럼 서술형으로 제공하므로 여기서는 순수 위험도만 반환.
-function toxRead(v) {
-  const x = clamp01(v);
-  if (x >= 0.7) return "체결 독성이 높아 진입 위험";
-  if (x >= 0.4) return "체결 독성 주의 구간";
-  return "체결 환경은 안정적";
-}
-
-function toxHint(v) {
-  const x = clamp01(v);
-  if (x < 0.4) return "안정";
-  if (x >= 0.7) return "위험";
-  return "주의";
+// (2026-08-24 사용자 리포트로 발견). 방향 힌트가 필요하면 tailRiskRead() 함수가 이미
+// "상방/하방 ~위험"처럼 서술형으로 제공하므로 여기서는 순수 위험도만 반환.
+// 2026-08-27: replaces toxRead/toxHint (독성/toxicity chip removed -- shadow_toxicity_score was
+// independently confirmed uninformative on both direction and volatility-framing axes, see
+// eth_model_indicator_volatility_framing_screen_20260825 memory). sig here is the raw
+// latestBasisLiquidation payload (server-computed, not part of classifyIndicators' micro/tail
+// inputs -- same "own fetch cycle" category as latestOiSignal, see that variable's own comment).
+function basisLiquiditySubText(sig) {
+  if (!sig || !sig.warmed_up) return "웜업 중";
+  if (sig.direction === "short_pressure") return "숏압박↑";
+  if (sig.direction === "long_pressure") return "롱압박↑";
+  return "안정";
 }
 
 function tailRiskRead(tail) {
@@ -1081,65 +1147,75 @@ function tailRiskHint(tail) {
   return "주의";
 }
 
-// Gauge above the Snapshot tab's liquidation-map chart -- tail_risk_interceptor.py (real Binance
-// @forceOrder liquidation events, not the candle-estimated liquidation map below it) computes far
-// more than the single aftershock_prob 꼬리 리스크 shows: actual $ liquidated in the last minute
-// per side, a specific price where recent liquidations have clustered (potential magnet), and a
-// pre-derived FOLLOW/REDUCE/HOLD recommendation. 2026-08-25: this used to render as a text line
-// inside the 꼬리 리스크 row (tailRiskLiveSummary); moved here as its own visual gauge per user
-// request, and removed from that row so the two don't repeat each other. long/short share is
-// normalized against their OWN sum (not some absolute scale), so the bar shows which side currently
-// leans harder, not how large the move is in absolute terms -- the $ tags next to it carry the
-// absolute size so a tiny "$5 vs $2" doesn't read the same as a real imbalance.
-// Always renders something, even with zero liquidation this minute (2026-08-25: originally hid
-// itself via innerHTML="" + :empty{display:none} -- user wants the calm state visible too, since a
-// blank panel and "checked, nothing's happening" look identical otherwise) -- an explicit flat
-// track + "청산 없음 — 안정" tag rather than nothing.
-// 2026-08-25: bar/labels switched from tail.long_usd_1m/short_usd_1m (1-minute) to a separate
-// liq5m payload (5-minute, later same-day widened to 15-minute -- see live_liquidation_5m_signal_
-// 20260825.py's module docstring follow-up note for why) per user request -- see that file for why
-// that needed its own backend query rather than just relabeling. Magnet used to also render as
-// text here, but now that it's drawn as its own line directly on the liquidation-map chart below
-// (liquidationMagnetLevel()), the text was redundant and was removed at the user's request.
-// Recommendation badge (tail.recommendation) and the cascade-energy meter (hawkes_decay_level)
-// were both also removed at the user's request, 2026-08-25 -- recommendation is a simple
-// risk_bucket/aftershock_prob rename (꼬리 리스크's own value, already shown as that tile's
-// 안정/주의/위험 badge), and energy is the raw continuous value the 청산 캐스케이드 tile's own
-// 안정/주의/위험 badge is already a discretized read of -- both judged redundant with data already
-// shown elsewhere rather than kept as this gauge's own thing.
-function renderLiquidationCascadeGauge(liq5m) {
-  const gaugeEl = el("liqCascadeGauge");
-  if (!gaugeEl) return;
-  liq5m = (liq5m && liq5m.warmed_up) ? liq5m : {};
-  const longUsd = Number(liq5m.long_usd_5m || 0), shortUsd = Number(liq5m.short_usd_5m || 0);
+// Sudden-liquidation alert banner (2026-08-27) -- reads liq_burst_state.json (event-triggered, see
+// tail_risk_interceptor.py::_write_liq_burst_state()), a faster/more prominent sibling to the
+// liq_cascade model-indicator tile below (which reads the same hawkes/z-score concept but via the
+// 10s-cadence dashboard_state.json path). Shown only while hawkes_active -- an alert that's always
+// visible isn't an alert, see execution-alert-banner's own hidden-by-default precedent above.
+// Liquidation long/short volume gauge -- recreated 2026-08-27 at user request. This is the bar
+// chart half of the original renderLiquidationCascadeGauge() (2026-08-25): proportional split bar,
+// long=red(--bad)/short=green(--good), with real $ labels alongside so a "$5 vs $2" split doesn't
+// read as visually skewed as a "$500 vs $2" one would (2026-08-25 design note, preserved). The
+// magnet (price/direction/strength) and energy/recommendation sub-parts that used to live in the
+// same gauge were NOT recreated -- user confirmed the magnet is redundant with the chart line
+// (liquidationMagnetLevel()) and never asked for energy/recommendation back. Always renders a row
+// (never disappears) per 2026-08-27 request, with a quiet state for warming-up/no-liquidation.
+// Data: /api/liquidation-5m-signal (scripts/live_liquidation_5m_signal_20260825.py, BAR_MINUTES=30
+// as of this same request -- server.py imports that module, so a dashboard-server restart is
+// needed for the window change, NOT trading_bot.py; this data has nothing to do with that process).
+//
+// 2026-08-27 follow-up: user asked for this to reflect a detected cascade immediately rather than
+// waiting for the current (still-forming) minute to close and land in tail_risk_1m -- but the $
+// totals below CANNOT safely fold in liq_burst_state.json's long_usd_1m/short_usd_1m to get there.
+// Those share a field name with tail_risk_1m's columns but not a definition: tail_risk_1m stores
+// one DISCRETE non-overlapping bucket per completed minute (see this function's data-source comment
+// above, and live_liquidation_5m_signal_20260825.py's own docstring on why that matters), while
+// liq_burst_state.json's version is a continuously-SLIDING trailing-60s value that overlaps
+// whatever's already in the most recent completed bucket -- adding it on top would double-count.
+// Instead: a live "감지중" cue sourced from latestLiqBurstState (already polled every ~1s for the
+// alert banner above, no new fetch here) that flags "something's happening right now" without
+// touching the $ math -- correct-by-construction rather than an approximate merge.
+function liquidationVolumeGaugeHtml() {
+  const liq5m = latestLiquidation5m;
+  const burst = latestLiqBurstState;
+  const cascadeNow = !!(burst && burst.available && burst.hawkes_active);
+  let liveCue = "";
+  if (cascadeNow) {
+    // 2026-08-27: the standalone liqBurstAlertBanner was folded into this one-line cue at user
+    // request (renderLiqBurstAlert() removed) -- same side-selection fix (max of both sides, not
+    // the possibly-stale crisis_type label) carried over, see that removed function's history in
+    // feedback_dashboard_liq_burst_alert memory if this needs revisiting.
+    const bLong = Number(burst.long_usd_1m || 0);
+    const bShort = Number(burst.short_usd_1m || 0);
+    const bUsd = Math.max(bLong, bShort);
+    const bSide = bShort > bLong ? "숏청산" : "롱청산";
+    const bPct = Math.round(clamp01(Number(burst.hawkes_decay_level) || 0) * 100);
+    const detail = bUsd > 0 ? ` · ${bSide} ${fmtUsdCompact(bUsd)} · 에너지${bPct}%` : ` · 에너지${bPct}%`;
+    liveCue = `<span class="liq-vol-gauge-live"><span class="liq-vol-gauge-live-dot" aria-hidden="true"></span>지금 감지중${detail}</span>`;
+  }
+  const tag = `<span class="liq-vol-gauge-tag">청산 규모 <span class="liq-vol-gauge-window">(최근 30분 누적)</span>${liveCue}</span>`;
+  if (!liq5m || !liq5m.warmed_up) {
+    return `<div class="liq-vol-gauge quiet">${tag}<span class="liq-vol-gauge-quiet-text">집계 중...</span></div>`;
+  }
+  const longUsd = Number(liq5m.long_usd_5m || 0);
+  const shortUsd = Number(liq5m.short_usd_5m || 0);
   const total = longUsd + shortUsd;
-  const isQuiet = total <= 0;
-  const longShare = isQuiet ? 0 : (longUsd / total) * 100;
-  const shortShare = isQuiet ? 0 : 100 - longShare;
-  // "이번 15분봉" (this 15-min bar), not "최근 15분" (trailing 15 min) -- 2026-08-25, changed from a
-  // sliding window to a clock-aligned bar that fills from 0 at each :00/:05/:10... UTC boundary and
-  // resets at the next one (matches an OHLCV candle's accumulate-then-reset semantics, what the
-  // user asked for). elapsedLabel surfaces how far into the current bar this reading is, so a small
-  // number right after a boundary reads as "bar just started", not "liquidation went quiet".
-  // Bar widened 5min->15min same day (still labeled "5m" internally -- see backend module docstring
-  // follow-up note) after a real ~$176K burst had already fully reset out of a 5-min bar by the time
-  // it was checked ~2 min later; wider bar = fewer boundary crossings = less likely to vanish right
-  // after a burst, and also shows the all-zero "안정" state less often (liquidation $ is nonzero in
-  // only ~16-21% of individual minutes, so a 15-min bar catches a nonzero minute far more reliably
-  // than a 5-min one did).
-  const elapsedSec = Number(liq5m.bar_elapsed_sec);
-  const elapsedLabel = Number.isFinite(elapsedSec) ? ` (${Math.floor(elapsedSec / 60)}분 ${Math.floor(elapsedSec % 60)}초 경과)` : "";
-  const labelsHtml = isQuiet
-    ? `<span class="tag quiet">이번 15분봉 청산 없음 — 안정</span>`
-    : `<span class="tag long">롱 ${fmtUsdCompact(longUsd)}</span><span class="tag short">숏 ${fmtUsdCompact(shortUsd)}</span>`;
-
-  gaugeEl.innerHTML = `
-    <div class="liq-cascade-gauge-track${isQuiet ? " quiet" : ""}">
-      <div class="liq-cascade-gauge-fill long" style="width:${longShare}%;" title="이번 15분봉 롱 청산 ${fmtUsdCompact(longUsd)}${elapsedLabel}"></div>
-      <div class="liq-cascade-gauge-fill short" style="width:${shortShare}%;" title="이번 15분봉 숏 청산 ${fmtUsdCompact(shortUsd)}${elapsedLabel}"></div>
-      <div class="liq-cascade-gauge-zero"></div>
-    </div>
-    <div class="liq-cascade-gauge-labels">${labelsHtml}</div>`;
+  if (!(total > 0)) {
+    return `<div class="liq-vol-gauge quiet">${tag}<span class="liq-vol-gauge-quiet-text">청산 없음 — 안정</span></div>`;
+  }
+  const longPct = (longUsd / total) * 100;
+  const shortPct = (shortUsd / total) * 100;
+  return `<div class="liq-vol-gauge">
+      ${tag}
+      <div class="liq-vol-gauge-track">
+        <div class="liq-vol-gauge-fill long" style="width:${longPct}%;"></div>
+        <div class="liq-vol-gauge-fill short" style="width:${shortPct}%;"></div>
+      </div>
+      <div class="liq-vol-gauge-labels">
+        <span class="liq-vol-gauge-label long">롱 ${fmtUsdCompact(longUsd)}</span>
+        <span class="liq-vol-gauge-label short">숏 ${fmtUsdCompact(shortUsd)}</span>
+      </div>
+    </div>`;
 }
 
 // 7th model-internal indicator -- 2026-08-25, user asked for a dedicated "청산 캐스케이드" tile
@@ -1167,8 +1243,8 @@ function liqCascadeLiveDetail(tail) {
   return "";
 }
 
-// 안정=문제없음(녹색), 주의=경계(호박색), 위험=경계강함(적색) -- tox/risk
-// 두 지표 전용. 방향성 매매신호(롱 진입/숏 진입)는 whale/whale_intent가 directionalCaution()로
+// 안정=문제없음(녹색), 주의=경계(호박색), 위험=경계강함(적색) -- risk류(리스크게이지)
+// 지표 전용. 방향성 매매신호(롱 진입/숏 진입)는 whale/whale_intent가 directionalCaution()로
 // 별도 처리하므로 여기서 다루지 않는다.
 function signalTone(signal) {
   const s = String(signal || "");
@@ -1178,32 +1254,28 @@ function signalTone(signal) {
   return "neutral";
 }
 
-// Single source of truth for the 6 model-internal indicators' tone/read-text classification --
+// Single source of truth for the 5 model-internal indicators' tone/read-text classification --
 // called both on the live state (render(), every tick) and on server-provided history samples
 // (seedModelIndicatorHistory(), once at page load) so there is exactly one copy of these
 // thresholds, not a live copy and a history copy that could quietly drift apart.
 function classifyIndicators(micro, tail) {
   micro = micro || {};
   tail = tail || {};
-  const toxV = clamp01(micro.toxicity_score);
   const riskV = clamp01(tail.aftershock_prob);
-  const toxSignal = toxHint(toxV);
   const riskSignal = tailRiskHint(tail);
   const cascadeSignal = liqCascadeHint(tail);
   const whaleTone = Number(micro.nif_whale || 0) > 0.05 ? "good" : (Number(micro.nif_whale || 0) < -0.05 ? "bad" : "neutral");
   const whalePosTone = Number(micro.whale_position_score || 0) > 0.2 ? "good" : (Number(micro.whale_position_score || 0) < -0.2 ? "bad" : "neutral");
   const retailFlowTone = Number(micro.nif_retail || 0) > 0.05 ? "good" : (Number(micro.nif_retail || 0) < -0.05 ? "bad" : "neutral");
-  const toxTone = signalTone(toxSignal);
   const riskTone = signalTone(riskSignal);
   const cascadeTone = signalTone(cascadeSignal);
   return {
-    tox: { tone: toxTone, valueText: toxRead(toxV), subText: toxSignal },
     risk: { tone: riskTone, valueText: tailRiskRead(tail), subText: riskSignal },
     liq_cascade: { tone: cascadeTone, valueText: liqCascadeLiveDetail(tail), subText: cascadeSignal },
     whale: { tone: whaleTone, valueText: flowRead(micro), subText: directionalCaution(micro.nif_whale, 0.05) },
     retail_flow: { tone: retailFlowTone, valueText: retailFlowRead(micro), subText: directionalCaution(micro.nif_retail, 0.05) },
     whale_intent: { tone: whalePosTone, valueText: whalePositionRead(micro), subText: directionalCaution(micro.whale_position_score, 0.2) },
-    toxV, riskV, toxSignal, riskSignal, cascadeSignal, whaleTone, whalePosTone, toxTone, riskTone, cascadeTone,
+    riskV, riskSignal, cascadeSignal, whaleTone, whalePosTone, riskTone, cascadeTone,
   };
 }
 
@@ -2014,10 +2086,10 @@ const MODEL_INDICATOR_MEANING = {
     "주의": "OI가 평소보다 빠르게 움직이고 있어요 — 새 포지션이 몰리거나 정리되는 중일 수 있고, 이후 변동성이 조금 커질 가능성이 있어요.",
     "위험": "OI가 평소보다 훨씬 빠르게 움직이고 있어요 — 실측상 이후 1시간 변동폭이 평소의 1.35배 이상으로 커지는 경향이 있었어요. 방향은 알려주지 않으니 사이즈·스탑 여유를 고려하세요.",
   },
-  tox: {
-    "안정": "체결 환경이 안정적이라 지금 주문을 넣어도 평소와 비슷한 조건일 가능성이 높아요.",
-    "주의": "지금 시장가로 진입·청산하면 평소보다 체결가가 불리하거나, 곧 급변동이 뒤따를 확률이 약간 있어요. 지정가로 여유있게 접근하는 걸 고려하세요.",
-    "위험": "체결 환경이 많이 불안정해요. 지금 시장가 주문은 피하고 지정가나 관망을 권장해요.",
+  liq_pressure: {
+    "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
+    "숏압박↑": "베이시스가 콘탱고(선물이 현물보다 비쌈) 쪽 극단이에요 — 실측상 이런 국면 이후 1~4시간 숏 강제청산액이 늘고 롱 청산액은 줄어드는 경향이 있었어요(약 1개월치 탐색적 관측). 가격이 오른다는 뜻은 아니고, '숏 쪽이 청산 압박을 더 받을 수 있다'는 리스크 정보예요.",
+    "롱압박↑": "베이시스가 백워데이션(선물이 현물보다 쌈) 쪽 극단이에요 — 실측상 이런 국면 이후 1~4시간 롱 강제청산액이 늘고 숏 청산액은 줄어드는 경향이 있었어요(약 1개월치 탐색적 관측). 가격이 내린다는 뜻은 아니고, '롱 쪽이 청산 압박을 더 받을 수 있다'는 리스크 정보예요.",
   },
   risk: {
     "안정": "최근 청산 활동이 평온해서 연쇄 청산으로 인한 급변 가능성은 낮아요.",
@@ -2055,14 +2127,15 @@ const MODEL_INDICATOR_DETAIL = {
   oi_delta: "[계산] 5분마다 미결제약정(OI) 변화량을 직전 1일(288개 샘플) 평균·표준편차로 정규화한 z값.\n" +
     "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정.\n" +
     "[의미] '포지션이 얼마나 빨리 쌓이거나 풀리는가'만 봅니다 — 방향(롱/숏)은 전혀 반영하지 않습니다(호가 불균형이 방향을 주장하다 45/45 경제성 실패로 걷힌 자리라, 일부러 방향 주장을 안 하도록 설계). 실측(2024-01~2026-02, 약 22만 봉, 사전등록 없는 탐색적 분석)상 |z|≥2일 때 이후 1시간 변동폭이 평소의 1.35배, 4시간은 1.19배 컸고, OI 급증·급감 양쪽 다 비슷한 크기로 변동성이 커졌습니다(신규 포지션 구축이든 급청산이든 둘 다 변동성 전조). 기존 '에너지 지수'(OI변화/가격변동폭 비율)와는 상관 0.15로 중복 아님을 확인했습니다.\n" +
-    "[유의] 이 값은 봇 내부 상태가 아니라 대시보드 서버가 별도 duckdb(OI 전용 poller)에서 직접 계산합니다 — 아직 실제 매매 결정에는 연결되지 않았습니다. 나머지 4개 지표(독성/꼬리 리스크/수급 흐름/고래 포지션)는 봇이 실제로 참고하는 값인 것과 다릅니다.",
-  tox: "[계산] mismatch = |호가불균형 − (2×시장가매수비율−1)| : 호가창이 보여주는 방향과 실제 체결(시장가 주문) 방향이 얼마나 어긋나는지. burst = 최근 120건 체결 중 상위 5% 금액이 평균 대비 얼마나 큰지(대형 단일 주문 급증 여부). score = 0.7×mismatch + 0.3×(burst/5), 0~1로 정규화.\n" +
-    "[기준] 0.7 이상 '진입 위험' · 0.4~0.7 '주의 구간' · 0.4 미만 '안정적'.\n" +
-    "[의미] '가격이 위험하다'가 아니라 '지금 주문을 넣으면 불리한 상대와 만날 확률이 평소보다 높다'는 뜻입니다. 예를 들어 호가창엔 매수벽이 두꺼운데 실제 체결은 시장가 매도가 쏟아지고 있다면 mismatch가 커집니다 — 누군가 호가창을 무시하고 밀어붙이고 있다는 신호(마켓메이커 관점의 adverse selection과 같은 개념). '주의 구간'은 위험까진 아니지만 지금 시장가로 들어가면 평소보다 슬리피지가 크거나 곧 급변동이 뒤따를 확률이 약간 높다는 정도로, 지정가로 여유있게 접근하거나 안정 상태로 내려올 때까지 기다리는 판단에 참고하세요.",
+    "[유의] 이 값은 봇 내부 상태가 아니라 대시보드 서버가 별도 duckdb(OI 전용 poller)에서 직접 계산합니다 — 아직 실제 매매 결정에는 연결되지 않았습니다. 꼬리 리스크/수급 흐름/고래 포지션은 봇이 실제로 참고하는 값인 것과 다릅니다.",
+  liq_pressure: "[계산] basis_raw = (선물 종가 − 현물 종가) / 현물 종가 (ETHUSDT, fapi.binance.com 선물 vs api.binance.com 현물). basis_z48 = basis_raw를 직전 48봉(4시간) 평균·표준편차로 정규화한 z값.\n" +
+    "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정. 양수 극단=콘탱고(숏압박↑ 힌트), 음수 극단=백워데이션(롱압박↑ 힌트).\n" +
+    "[의미] 2026-08-20에 '베이시스가 방향(다음 봉이 오를지 내릴지)을 예측하는가'로 먼저 테스트했으나 REJECTED(구간마다 부호가 뒤집힘) — 문헌(Schmeling/Schrimpf/Todorov 'Crypto Carry' BIS WP1087; He/Manela/Ross/von Wachter arXiv:2212.06888)이 원래 예측한 축은 방향이 아니라 '미래 변동성'과 '청산 크라우딩'이었습니다. 2026-08-27 그 방향으로 재검정: 변동성 예측은 이것도 부호가 안정적이지 않아 REJECTED급이었지만, 청산 크라우딩(어느 쪽이 강제청산 더 받는가)은 실제 청산 데이터(tail_risk.duckdb)로 확인한 결과 문헌과 부호까지 정확히 일치했습니다 — 베이시스 극단(양수) 이후 1h/4h 숏청산액이 유의하게 늘고(z=+3.9~+4.4) 롱청산액은 유의하게 줄었습니다(z=-4.3~-5.7), 음수 극단은 반대.\n" +
+    "[유의] 이 청산크라우딩 검증은 **약 1개월치 탐색적 표본**입니다(청산 데이터의 신뢰 가능 구간이 2026-07-18부터 시작) — 이 저장소가 다른 모든 신호에 쓰는 VAL/OOS 3-split 재현성 검증은 아직 못 거쳤습니다. 표본이 더 쌓이면 정식 재검증 예정. 가격이 오르내린다는 뜻이 아니라 '어느 쪽 포지션이 청산 압박을 더 받을 가능성'만 알려주는 리스크 정보입니다. 봇 내부 상태가 아니라 대시보드 서버가 매 사이클 spot/perp klines를 직접 fetch해 계산합니다 — 아직 실제 매매 결정에는 연결되지 않았습니다.",
   risk: "[계산] 최근 1분간 롱/숏 강제청산 금액을 각각 자기 과거 평균·표준편차로 정규화(z값) 후 더 큰 쪽(z_peak). 롱/숏 청산 쏠림 비율(imbalance). 지진 여진 모델(Hawkes process)식으로, 큰 청산 발생 후 시간이 지나며 지수적으로 잦아드는 '활성 상태' 값. prob = 0.45×(z_peak/기준치) + 0.35×쏠림비율 + 0.20×활성상태.\n" +
     "[기준] 0.7 이상 급변위험 높음 · 0.4~0.7 급변 가능성 주의 · 미만 꼬리 리스크 안정.\n" +
     "[의미] '여진(aftershock)'이라는 이름 그대로, 청산 캐스케이드(한쪽 포지션들이 연쇄적으로 강제청산되며 가격이 그 방향으로 더 튀는 현상)가 막 일어났거나 후속 충격이 올 확률을 추정합니다. 큰 충격 직후엔 이 값이 즉시 0으로 리셋되지 않고 서서히 감쇠합니다.",
-  liq_cascade: "[계산] 최근 1분 롱/숏 청산 금액을 각각 30분 과거 평균·표준편차로 정규화한 Z값 중 큰 쪽(z_peak). z_peak이 임계값(3.5)을 넘으면 그 순간부터 '캐스케이드 진행중'으로 전환되고, 이후 시간이 지나며 지수적으로 감쇠합니다(현재 파라미터 기준 반감기 약 2~3분). 감쇠된 에너지가 임계값의 35% 아래로 내려가면 캐스케이드가 종료된 것으로 판정합니다.\n" +
+  liq_cascade: "[계산] 최근 1분 롱/숏 청산 금액을 각각 30분 과거 평균·표준편차로 정규화한 Z값 중 큰 쪽(z_peak). z_peak이 임계값(3.5)을 넘으면 그 순간부터 '캐스케이드 진행중'으로 전환되고, 이후 시간이 지나며 지수적으로 감쇠합니다(현재 파라미터 기준 반감기 약 2~3분). 감쇠된 에너지가 임계값의 35% 아래로 내려가면 캐스케이드가 종료된 것으로 판정합니다. 2026-08-27부터(ETH만) Z값 조건에 더해 그 쪽 청산 금액이 최소 $10,000 이상이어야 전환됩니다 — 청산이 성긴(대부분 분(分)이 $0) 데이터라 조용한 구간이 이어지면 평균·표준편차 자체가 거의 0으로 붕괴해, 그 직후엔 평범한 청산 하나에도 Z값만으로는 오검출되던 문제를 막기 위함입니다.\n" +
     "[기준] 캐스케이드 진행중이면 위험 · 아직 진행중은 아니지만 Z≥2.0(청산 급증)이면 주의 · 그 외 안정.\n" +
     "[의미] 꼬리 리스크(aftershock_prob)가 'z_peak+쏠림비율+활성상태'를 섞어 향후 추가 충격 확률을 종합 추정하는 지표라면, 이건 그 재료 중 하나인 '지금 이 순간 실제로 캐스케이드가 벌어지고 있는가'를 가공 없이 그대로 보여주는 원시 상태값입니다. 방향(롱/숏)이나 에너지 잔량(감쇠율) 같은 세부 숫자는 화면에 안 나옵니다 — 안정/주의/위험 배지만으로 충분하다는 판단(사용자 요청으로 정리)이라, 이 지표는 '지금 캐스케이드가 있는가/없는가'만 한눈에 보는 용도입니다.",
   liq_direction: "[계산] liq_net_z_12 = (최근 12분 롱청산 합 − 숏청산 합) / (최근 2일 총청산 롤링평균 + 1% 여유값). 양수면 롱청산 우세, 음수면 숏청산 우세.\n" +
@@ -2085,7 +2158,7 @@ const MODEL_INDICATOR_DETAIL = {
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
   oi_delta: "modelChipOiDelta",
-  tox: "modelChipTox",
+  liq_pressure: "modelChipBasisLiq",
   risk: "modelChipRisk",
   liq_cascade: "modelChipLiqCascade",
   liq_direction: "modelChipLiqDirection",
@@ -2094,7 +2167,7 @@ const MODEL_CHIP_IDS = {
   whale_intent: "modelChipWhaleIntent",
 };
 // whale/whale_intent/liq_direction/retail_flow are directional (tone: good=상승 쪽/bad=하락
-// 쪽/neutral=중립); oi_delta/tox/risk/liq_cascade are risk-level (tone: good=안정/warn=주의/
+// 쪽/neutral=중립); oi_delta/liq_pressure/risk/liq_cascade are risk-level (tone: good=안정/warn=주의/
 // bad=위험). Both families reuse the same good/warn/bad colors, so a bare red chip is ambiguous
 // ("숏" vs "위험") -- 2026-08-24 사용자 리포트. Prefixing an explicit ▲/▼/– arrow on the
 // directional chips only disambiguates by text, not just color.
@@ -2196,7 +2269,7 @@ function renderLiquidationMapPanel() {
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">데이터 수집 중...</p>`);
     return;
   }
-  if (badge) { badge.className = "ops-badge neutral"; badge.textContent = `고정 24시간 롤링 · ${map.bars_used}봉`; }
+  if (badge) { badge.className = "ops-badge neutral hidden"; badge.textContent = ""; }
 
   const liveCurrentPrice = Number(latestLivePriceByAsset.eth || map.current_price || 0);
   const liveRedistanced = (levels, side) => {
@@ -2596,7 +2669,18 @@ async function refreshEvidenceSignalsProvisional() {
   try {
     const res = await fetch(API_EVIDENCE_SIGNALS_PROVISIONAL_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`evidence signals provisional ${res.status}`);
-    renderEvidenceSignalsProvisional(await res.json());
+    const payload = await res.json();
+    if (payload && payload.available && payload.bar_open_utc) {
+      if (lastSeenProvisionalBarOpenUtc && payload.bar_open_utc !== lastSeenProvisionalBarOpenUtc) {
+        // The bar we were just previewing closed and a new one started forming -- the confirmed
+        // signal for that just-closed bar should be available server-side within its own 60s cache,
+        // so pull it now instead of waiting out the rest of the 5-min confirmed poll interval.
+        evidenceLastFetchAt = 0;
+        refreshEvidenceSignals();
+      }
+      lastSeenProvisionalBarOpenUtc = payload.bar_open_utc;
+    }
+    renderEvidenceSignalsProvisional(payload);
   } catch (error) {
     console.error("Evidence signal (provisional) fetch error:", error);
     renderEvidenceSignalsProvisional({ error: true });
@@ -2619,15 +2703,43 @@ async function refreshOiSignal() {
 
 async function refreshLiquidation5mSignal() {
   const now = Date.now();
-  if (now - liquidation5mLastFetchAt < LIQUIDATION_5M_SIGNAL_POLL_MS) return;
+  if (now - liquidation5mLastFetchAt < LIQUIDATION_5M_POLL_MS) return;
   liquidation5mLastFetchAt = now;
   try {
-    const res = await fetch(API_LIQUIDATION_5M_SIGNAL_URL, { cache: "no-store" });
+    const res = await fetch(API_LIQUIDATION_5M_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`liquidation 5m signal ${res.status}`);
     latestLiquidation5m = await res.json();
   } catch (error) {
     console.error("Liquidation 5m signal fetch error:", error);
     latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
+  }
+}
+
+async function refreshBasisLiquiditySignal() {
+  const now = Date.now();
+  if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
+  basisLiquidationLastFetchAt = now;
+  try {
+    const res = await fetch(API_BASIS_LIQUIDATION_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`basis liquidation signal ${res.status}`);
+    latestBasisLiquidation = await res.json();
+  } catch (error) {
+    console.error("Basis liquidation signal fetch error:", error);
+    latestBasisLiquidation = { warmed_up: false, error: "fetch_failed" };
+  }
+}
+
+async function refreshLiqBurstState() {
+  const now = Date.now();
+  if (now - liqBurstStateLastFetchAt < LIQ_BURST_STATE_POLL_MS) return;
+  liqBurstStateLastFetchAt = now;
+  try {
+    const res = await fetch(API_LIQ_BURST_STATE_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`liq burst state ${res.status}`);
+    latestLiqBurstState = await res.json();
+  } catch (error) {
+    console.error("Liq burst state fetch error:", error);
+    latestLiqBurstState = { available: false };
   }
 }
 
@@ -2685,12 +2797,19 @@ async function refreshRegimeWide24() {
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
-const MACRO_CALENDAR_CATEGORY_KO = {
-  econ: "경제지표", fomc: "FOMC", eia: "EIA", earnings: "실적", treasury: "국채입찰",
-};
+// 2026-08-27 (user request): badge date simplified to 오늘/내일 -- this list is already filtered to
+// today/tomorrow only (isTodayOrTomorrowLocal below), so the literal MM/DD+weekday it used to show
+// was redundant with that filter; 오늘/내일 says the same thing shorter and at a uniform width,
+// which also makes the badge's new fixed-width CSS (#macroCalendarList .ops-health-status-badge)
+// behave consistently instead of every badge being a different length. Falls back to MM/DD for the
+// (currently unreachable, since the list is pre-filtered) case of a caller passing another day.
 function fmtMacroCalendarTime(iso) {
   const d = new Date(iso);
-  const datePart = d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", weekday: "short" });
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
+  const datePart = d.toDateString() === today.toDateString() ? "오늘"
+    : d.toDateString() === tomorrow.toDateString() ? "내일"
+    : d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
   const timePart = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${datePart} ${timePart}`;
 }
@@ -2727,14 +2846,13 @@ function renderMacroCalendar(payload) {
   setH("macroCalendarList", events.length
     ? events.map((e) => {
         const tone = e.importance === "high" ? "warn" : "neutral";
-        const catKo = MACRO_CALENDAR_CATEGORY_KO[e.category] || e.category;
         return `<article class="ops-health-row ${tone}">
           <span class="ops-health-dot" aria-hidden="true"></span>
           <div class="ops-health-info">
             <strong>${e.title_ko}</strong>
             <span>${e.detail || ""}</span>
           </div>
-          <span class="ops-health-status-badge">${fmtMacroCalendarTime(e.time_utc)} · ${catKo}</span>
+          <span class="ops-health-status-badge">${fmtMacroCalendarTime(e.time_utc)}</span>
         </article>`;
       }).join("")
     : `<div class="macro-calendar-empty">예정된 일정이 없습니다.</div>`
@@ -3061,6 +3179,8 @@ function setupPageTabs() {
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       oiSignalLastFetchAt = 0; refreshOiSignal();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
+      basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
+      liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
       liquidationDirectionLastFetchAt = 0; refreshLiquidationDirectionSignal();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
@@ -3223,6 +3343,7 @@ function liquidationMagnetLevel() {
     width: Math.max(1, Math.min(4, Math.round(1 + strength * 3))),
   }];
 }
+
 
 // Keeps candleHistoryByAsset.eth's rightmost candle live between the 5-min
 // maybeFetchSnapshotChartHistory() fetches, mirroring updateChart()'s in-place extend/roll logic
@@ -3481,6 +3602,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const regimeByTsForChart = isSnapshotChart && latestRegimeWide24 && latestRegimeWide24.warmed_up
     ? new Map((latestRegimeWide24.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
     : null;
+  // 2026-08-27 user report: ribbon "turns black" and stops updating for stretches -- tracing the
+  // draw loop below, it never paints an invalid color (regimeDominant() only ever returns one of
+  // the 3 REGIME_DOMINANT_COLOR keys); what actually happens is this block draws literally nothing
+  // whenever latestRegimeWide24.warmed_up is false (backend regime compute degrades to that instead
+  // of raising, per load_regime_wide24()'s own docstring), so the ribbon's row just shows the dark
+  // chart background underneath -- indistinguishable from "black" at a glance, and easy to mistake
+  // for a frozen/broken ribbon rather than "no fresh reading available for this window". Flagging
+  // that state explicitly below instead of silently drawing nothing.
+  const regimeRibbonWaiting = isSnapshotChart && !regimeByTsForChart;
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 8;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
@@ -3652,7 +3782,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const xTickIndexes = [];
   for (let i = 0; i < candles.length; i += xTickStep) xTickIndexes.push(i);
   const lastIdx = candles.length - 1;
-  if (!xTickIndexes.includes(lastIdx)) xTickIndexes.push(lastIdx);
+  // Force-adding lastIdx unconditionally could land it only a few px from the previous regular
+  // tick (whenever xTickStep doesn't evenly divide candles.length-1), overlapping both bold 13px
+  // "HH:MM" labels -- 2026-08-27 user report. Merge into the last regular tick instead of adding a
+  // second one when they'd render too close together to read.
+  const minTickPx = mobileChart ? 46 : 52;
+  if (xTickIndexes.length && xAt(lastIdx) - xAt(xTickIndexes[xTickIndexes.length - 1]) < minTickPx) {
+    xTickIndexes[xTickIndexes.length - 1] = lastIdx;
+  } else if (!xTickIndexes.includes(lastIdx)) {
+    xTickIndexes.push(lastIdx);
+  }
 
   xTickIndexes.forEach((idx) => {
     const c = candles[idx];
@@ -3701,6 +3840,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     ribbonLabel.setAttribute("fill", "var(--muted)");
     ribbonLabel.textContent = "레짐";
     svg.appendChild(ribbonLabel);
+  } else if (regimeRibbonWaiting && candles.length) {
+    // See regimeRibbonWaiting's definition above -- an explicit flat placeholder instead of
+    // silently drawing nothing, so a temporary backend hiccup reads as "waiting", not "broken".
+    const waitRect = document.createElementNS(NS, "rect");
+    waitRect.setAttribute("x", xAt(0)); waitRect.setAttribute("y", REGIME_RIBBON_Y);
+    waitRect.setAttribute("width", xAt(candles.length - 1) + bw - xAt(0)); waitRect.setAttribute("height", REGIME_RIBBON_H);
+    waitRect.setAttribute("rx", "1.5");
+    waitRect.setAttribute("fill", "var(--muted)");
+    waitRect.setAttribute("fill-opacity", "0.18");
+    const waitTitle = document.createElementNS(NS, "title");
+    waitTitle.textContent = "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
+    waitRect.appendChild(waitTitle);
+    svg.appendChild(waitRect);
+    const waitLabel = document.createElementNS(NS, "text");
+    waitLabel.setAttribute("x", ml - 6);
+    waitLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H - 1);
+    waitLabel.setAttribute("text-anchor", "end");
+    waitLabel.setAttribute("font-size", "9");
+    waitLabel.setAttribute("fill", "var(--muted)");
+    waitLabel.textContent = "레짐";
+    svg.appendChild(waitLabel);
   }
 
   // Candles
@@ -3811,7 +3971,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // hover/tooltip layer appended right after this.
   if ((densityHistory || []).length) {
     const legendW = mobileChart ? 56 : 72, legendH = 8;
-    const legendX = w - mr - legendW - 6, legendY = mt + 14;
+    // legendY nudged up 2026-08-27 (user report: covering candle wicks near the top of the price
+    // range) -- backing box now sits flush with the SVG's top edge (y=0) instead of dipping well
+    // into the plot area below mt.
+    const legendX = w - mr - legendW - 6, legendY = mt - 4;
     const legendGroup = document.createElementNS(NS, "g");
     legendGroup.setAttribute("pointer-events", "none");
 
@@ -3870,11 +4033,62 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   vLine.style.pointerEvents = "none";
   hoverGroup.appendChild(vLine);
 
+  // Horizontal crosshair + price-at-cursor readout (2026-08-27 user request) -- independent of the
+  // candle-snapped vLine/tooltip above, which stays unchanged. Follows the raw mouse Y continuously
+  // rather than snapping to a candle's OHLC, so it answers "what price is under my cursor right
+  // now" instead of "what did this bar do".
+  const hLine = document.createElementNS(NS, "line");
+  hLine.setAttribute("x1", ml); hLine.setAttribute("x2", w - mr);
+  hLine.setAttribute("y1", 0); hLine.setAttribute("y2", 0);
+  hLine.setAttribute("stroke", "var(--hover-line)");
+  hLine.setAttribute("stroke-dasharray", "4,4");
+  hLine.style.display = "none";
+  hLine.style.pointerEvents = "none";
+  hoverGroup.appendChild(hLine);
+
+  const priceBadgeW = mobileChart ? 56 : 64, priceBadgeH = 18;
+  const priceBadgeRect = document.createElementNS(NS, "rect");
+  priceBadgeRect.setAttribute("x", w - mr + 4);
+  priceBadgeRect.setAttribute("width", priceBadgeW);
+  priceBadgeRect.setAttribute("height", priceBadgeH);
+  priceBadgeRect.setAttribute("fill", "var(--accent)");
+  priceBadgeRect.setAttribute("rx", "2");
+  priceBadgeRect.style.display = "none";
+  priceBadgeRect.style.pointerEvents = "none";
+  hoverGroup.appendChild(priceBadgeRect);
+
+  const priceBadgeText = document.createElementNS(NS, "text");
+  priceBadgeText.setAttribute("x", w - mr + 8);
+  priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
+  priceBadgeText.setAttribute("font-weight", "bold");
+  priceBadgeText.setAttribute("fill", "#0b1220");
+  priceBadgeText.style.display = "none";
+  priceBadgeText.style.pointerEvents = "none";
+  hoverGroup.appendChild(priceBadgeText);
+
   // Candlestick Tooltip Support. regimeByTsForChart/isSnapshotChart computed once near the top of
   // this function (shared with the ribbon drawn above) -- same ETH-only guard applies here.
   svg.onmousemove = (evt) => {
     const rect = svg.getBoundingClientRect();
     const mx = (evt.clientX - rect.left) * (w / rect.width);
+    const my = (evt.clientY - rect.top) * (h / rect.height);
+
+    if (my >= mt && my <= h - mb) {
+      hLine.setAttribute("y1", my); hLine.setAttribute("y2", my);
+      hLine.style.display = "block";
+      const priceAtCursor = yMax - ((my - mt) * ySpan) / ch;
+      const badgeY = Math.max(mt, Math.min(h - mb - priceBadgeH, my - priceBadgeH / 2));
+      priceBadgeRect.setAttribute("y", badgeY);
+      priceBadgeText.setAttribute("y", badgeY + 13);
+      priceBadgeText.textContent = fmtNum(priceAtCursor, 1);
+      priceBadgeRect.style.display = "block";
+      priceBadgeText.style.display = "block";
+    } else {
+      hLine.style.display = "none";
+      priceBadgeRect.style.display = "none";
+      priceBadgeText.style.display = "none";
+    }
+
     if (mx < ml || mx > w - mr) { hideTooltip(); return; }
 
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * candles.length)));
@@ -3904,6 +4118,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
     if (typeof vLine !== 'undefined') vLine.style.display = "none";
     if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
+    hLine.style.display = "none";
+    priceBadgeRect.style.display = "none";
+    priceBadgeText.style.display = "none";
   };
 }
 
@@ -3946,16 +4163,15 @@ function render(state, compactState = null, { stateChanged = true, journalChange
   
   // classifyIndicators() is the single source of truth for these thresholds (also reused by
   // seedModelIndicatorHistory() against server-provided history, so there is only one copy of
-  // this logic to keep correct, not a live copy and a history copy). The 6 model indicators only
+  // this logic to keep correct, not a live copy and a history copy). The 5 model indicators only
   // render on the Snapshot tab now (renderModelIndicatorList below) -- no Live-tab cards consume
   // ci/toneHistory anymore.
   const ci = classifyIndicators(micro, tail);
-  const { whaleTone, whalePosTone, toxTone, riskTone, cascadeTone } = ci;
+  const { whaleTone, whalePosTone, riskTone, cascadeTone } = ci;
   // toneHistory feeds the Snapshot tab's activity-strip rows (renderModelIndicatorList below).
   pushToneHistory("whale", whaleTone);
   pushToneHistory("retail_flow", ci.retail_flow.tone);
   pushToneHistory("whale_intent", whalePosTone);
-  pushToneHistory("tox", toxTone);
   pushToneHistory("risk", riskTone);
   pushToneHistory("liq_cascade", cascadeTone);
 
@@ -3967,6 +4183,12 @@ function render(state, compactState = null, { stateChanged = true, journalChange
   const oiSubText = oiWarmedUp
     ? (oiTone === "bad" ? "위험" : oiTone === "warn" ? "주의" : "안정")
     : "웜업 중";
+
+  // 베이시스 청산압박 (replaces 독성/toxicity, 2026-08-27) -- fetched separately by
+  // refreshBasisLiquiditySignal(), same external-fetch category as latestOiSignal above. RISK
+  // GAUGE (good/warn/bad), NOT directional -- see scripts/live_spot_perp_basis_signal_20260827.py.
+  const basisLiqWarmedUp = !!(latestBasisLiquidation && latestBasisLiquidation.warmed_up);
+  const basisLiqTone = basisLiqWarmedUp ? latestBasisLiquidation.tone : "neutral";
 
   // 청산 방향압력 (2026-08-25) -- fetched separately by refreshLiquidationDirectionSignal(), same
   // external-fetch category as latestOiSignal above. Directional model-indicator, NOT evidence-
@@ -3984,9 +4206,7 @@ function render(state, compactState = null, { stateChanged = true, journalChange
   // unconditional -- only the paint work below is skipped, so history strips have no gap when the
   // user switches back to Snapshot.
   if (activePageTab === "snapshot") {
-    // Snapshot tab: gauge sits above the liquidation-map chart, same tail_risk source as the model
-    // indicators below but its own real-time visual rather than a row in that list.
-    renderLiquidationCascadeGauge(latestLiquidation5m);
+    setH("liqVolumeGauge", liquidationVolumeGaugeHtml());
 
     // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + liquidationMagnetLevel())
     // used to be called ONLY from the two data-fetch functions that feed it, each gated to a 5-minute
@@ -4024,7 +4244,14 @@ function render(state, compactState = null, { stateChanged = true, journalChange
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도 duckdb(OI 전용 poller)에서 직접 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       },
-      { key: "tox", label: "독성", tone: ci.tox.tone, subText: ci.tox.subText, history: toneHistory.tox, times: toneHistoryTimes.tox },
+      {
+        key: "liq_pressure", label: "베이시스 청산압박", tone: basisLiqTone,
+        subText: basisLiquiditySubText(latestBasisLiquidation),
+        history: (latestBasisLiquidation && latestBasisLiquidation.tone_history) || [],
+        times: evenlySpacedBarTimes(latestBasisLiquidation && latestBasisLiquidation.latest_ts_utc, (latestBasisLiquidation && latestBasisLiquidation.tone_history || []).length, 5),
+        derivedTag: "= 대시보드 자체계산·탐색적",
+        derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
+      },
       { key: "risk", label: "꼬리 리스크", tone: ci.risk.tone, subText: ci.risk.subText, history: toneHistory.risk, times: toneHistoryTimes.risk },
       {
         key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,
@@ -4076,6 +4303,8 @@ async function tick() {
       refreshEvidenceSignalsProvisional();
       refreshOiSignal();
       refreshLiquidation5mSignal();
+      refreshBasisLiquiditySignal();
+      refreshLiqBurstState();
       refreshLiquidationDirectionSignal();
       refreshLiquidationMap();
       refreshRegimeWide24();
@@ -4106,7 +4335,6 @@ async function seedModelIndicatorHistory() {
     if (Object.values(toneHistory).some((arr) => arr.length)) return; // live tick already won the race
     for (const sample of samples) {
       const c = classifyIndicators(sample.microstructure, sample.tail_risk);
-      pushToneHistory("tox", c.tox.tone);
       pushToneHistory("risk", c.risk.tone);
       pushToneHistory("liq_cascade", c.liq_cascade.tone);
       pushToneHistory("whale", c.whale.tone);

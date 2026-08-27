@@ -99,6 +99,22 @@ class TailRiskInterceptor:
         self.hawkes_beta = float(os.getenv("TR_HAWKES_BETA", "0.005")) # 약 4~5분 뒤 에너지가 25% 이하로 감소하는 속도
         self.hawkes_release_ratio = float(os.getenv("TR_HAWKES_RELEASE_RATIO", "0.35"))
         self.hawkes_sniper_ratio = float(os.getenv("TR_HAWKES_SNIPER_RATIO", "0.55"))
+        # 2026-08-27: 청산 $ 흐름은 대부분의 분(分)이 정확히 $0인 성긴(zero-inflated) 분포라, 조용한
+        # 구간이 몇 분만 지속돼도 30분 롤링 mu/sigma 자체가 거의 0으로 붕괴한다(서버 실측: 13분 조용 후
+        # mu_long=0.000000/sigma_long=0.000001까지 관측). 그 상태에서 지극히 평범한 청산 하나만 들어와도
+        # 분모(sigma)가 이미 0에 가까워 z가 폭발적으로 커져 재트리거되고, 사이드별 z-score 체크가
+        # 이벤트 하나하나마다 실행돼 이게 거의 계속 반복됨 — 서버 실측 25시간 창에서 hawkes_active
+        # duty cycle 33.5%, 트리거 시점 청산 금액 중앙값 $8,281(최소 $12!)로 확인. z-score만으로는
+        # "최근 대비 이례적"과 "실제로 큰 청산"을 구분 못 하므로, 절대 달러 금액 하한을 AND 조건으로
+        # 추가(z-score 자체/감쇠 로직은 무변경) — $10,000 하한 시뮬레이션상 duty cycle 32.7%→16.0%
+        # (트리거 347→155회, 같은 4000분 창), 진짜 큰 청산(수만~수십만 달러)은 그대로 유지됨.
+        # ETH 실측(위 수치)만으로 검증됐고 BTC/SOL 고유 청산액 분포는 아직 미검증이라, 기본값은
+        # self._table/self._liq_burst_state_path와 같은 심볼분기 관용구로 ethusdt에만 적용 —
+        # BTC/SOL은 별도 검증 전까지 기존 동작(하한 없음) 유지. 전 심볼에 강제 적용하려면
+        # TR_HAWKES_MIN_TRIGGER_USD 환경변수를 명시적으로 설정할 것(다른 퀀트 파라미터와 동일 관례).
+        self.hawkes_min_trigger_usd = float(os.getenv(
+            "TR_HAWKES_MIN_TRIGGER_USD", "10000" if self.symbol == "ethusdt" else "0"
+        ))
         self.liq_cluster_window_sec = int(float(os.getenv("TR_LIQ_CLUSTER_WINDOW_SEC", "1800")))
         self.liq_cluster_bucket_pct = float(os.getenv("TR_LIQ_CLUSTER_BUCKET_PCT", "0.001"))
         self.dsac_intercept_enabled = os.getenv("TR_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -356,8 +372,9 @@ class TailRiskInterceptor:
         z_peak = max(z_long, z_short, 0.0)
         now = time.time()
         crisis = "LONG_CRISIS" if z_long >= z_short else "SHORT_CRISIS"
+        peak_usd = long_1m if z_long >= z_short else short_1m
 
-        if z_peak >= self.z_threshold:
+        if z_peak >= self.z_threshold and peak_usd >= self.hawkes_min_trigger_usd:
             if (not self._hawkes_active) or (self._crisis_type != crisis):
                 self._peak_liq_intensity = z_peak
             else:
