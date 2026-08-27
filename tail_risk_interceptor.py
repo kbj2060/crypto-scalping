@@ -38,6 +38,10 @@ _FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/{symbol}@forceOrder"
 
 _DB_PATH = str(os.getenv("QUANT_TAIL_DB_PATH", str(_ROOT / "data/live/tail_risk.duckdb")))
 _TABLE   = "tail_risk_1m"
+# Small event-triggered sibling of dashboard_state.json's tail_risk block (see
+# _write_liq_burst_state()) -- own file so a burst-driven write burst never touches the much
+# larger, 10s-timer-driven dashboard_state.json trading_bot.py owns.
+_LIQ_BURST_STATE_PATH = _ROOT / "data/live/liq_burst_state.json"
 
 
 class TailRiskInterceptor:
@@ -53,6 +57,7 @@ class TailRiskInterceptor:
     def __init__(self, symbol: str = "ethusdt"):
         self.symbol = symbol.lower()
         self._table = _TABLE if self.symbol == "ethusdt" else f"{_TABLE}_{self.symbol.replace('usdt', '')}"
+        self._liq_burst_state_path = _LIQ_BURST_STATE_PATH if self.symbol == "ethusdt" else _LIQ_BURST_STATE_PATH.with_name(f"liq_burst_state_{self.symbol.replace('usdt', '')}.json")
         self._running = False
 
         # ── 태스크 핸들 ───────────────────────────────────────────────
@@ -375,6 +380,46 @@ class TailRiskInterceptor:
             self._crisis_type = None
             self._peak_liq_intensity = 0.0
 
+    def _write_liq_burst_state(self, long_1m: float, short_1m: float) -> None:
+        """Small dedicated burst-alert state file, written from two call sites -- 2026-08-27 user
+        request for sub-few-second "sudden liquidation" detection, separate from the once-a-minute
+        tail_risk.duckdb persistence and the 10s-cadence dashboard_state.json handoff (both still
+        unchanged, still their own writers). (1) _ws_loop() calls this right after each new event is
+        appended and _update_hawkes_state() has just run on it, so a burst's ONSET is reflected the
+        instant it happens instead of waiting for the next periodic tick. (2) _agg_loop() ALSO calls
+        this every 10s regardless of new events -- added 2026-08-27 after discovering that without
+        it, hawkes_decay_level/long_usd_1m/short_usd_1m would freeze at whatever they were at the
+        last event and could show a "crisis still active" snapshot minutes stale once a cascade had
+        actually already decayed away, since decay is a function of elapsed time, not of new events
+        arriving. Onset latency stays event-driven (fast); decay/resolution latency is now bounded to
+        ~10s instead of unbounded. Cheap by design: a handful of scalar fields, no external calls, so
+        even a genuine multi-event-per-second cascade just means a few small writes per second, not a
+        bottleneck. dashboard/server.py's load_json_cached() already keys off (mtime, size) rather
+        than a timer, so it picks up whichever call wrote most recently on its very next poll."""
+        try:
+            z_long = (long_1m - self.mu_long) / max(self.sigma_long, 1.0)
+            z_short = (short_1m - self.mu_short) / max(self.sigma_short, 1.0)
+            ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
+            payload = {
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "hawkes_active": bool(self._hawkes_active),
+                "hawkes_decay_level": float(self._hawkes_decay_level),
+                "crisis_type": str(self._crisis_type or ""),
+                "z_long": float(z_long),
+                "z_short": float(z_short),
+                "long_usd_1m": float(long_1m),
+                "short_usd_1m": float(short_1m),
+                "liq_event_count_1m": int(self._count_liq_events_1m()),
+                "ws_connected": bool(self._ws_connected),
+                "ws_age_sec": (float(ws_age_sec) if ws_age_sec is not None else None),
+                "valid_liq_stream": bool(valid_liq_stream),
+            }
+            tmp_path = self._liq_burst_state_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(payload))
+            tmp_path.replace(self._liq_burst_state_path)  # atomic on POSIX -- never a half-written read
+        except Exception:
+            logger.debug("liq_burst_state write failed", exc_info=True)
+
     # ── WebSocket ────────────────────────────────────────────────────────────
 
     async def _ws_loop(self) -> None:
@@ -405,6 +450,9 @@ class TailRiskInterceptor:
                             if qty_usd > 0 and side in ("BUY", "SELL"):
                                 async with self._lock:
                                     self._liq_events.append((ts_ms, side, qty_usd, price))
+                                    long_1m, short_1m = self._aggregate_1m()
+                                self._update_hawkes_state(long_1m, short_1m)
+                                self._write_liq_burst_state(long_1m, short_1m)
                         except Exception:
                             pass
             except Exception as e:
@@ -431,6 +479,7 @@ class TailRiskInterceptor:
                     liq_event_count_1m = self._count_liq_events_1m()
 
                 self._update_hawkes_state(long_1m, short_1m)
+                self._write_liq_burst_state(long_1m, short_1m)
                 # 2. 매 10초마다 섀도우 상태 갱신 및 터미널 로그 출력
                 self._shadow_state = self._compute_shadow_aftershock(long_1m, short_1m)
                 logger.info("%s", self.status_line())

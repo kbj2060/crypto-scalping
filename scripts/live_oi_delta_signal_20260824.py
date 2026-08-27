@@ -75,6 +75,11 @@ def compute_oi_delta_signal(symbol: str = SYMBOL) -> dict:
         return {"warmed_up": False, "error": "db_missing", "oi_delta_z": None, "tone": "neutral",
                 "tone_history": [], "bars_loaded": 0, "latest_ts_utc": None}
     import duckdb
+    # oi_lsratio_collector.py writes one table per symbol (ETHUSDT -> oi_lsratio_5m, others ->
+    # oi_lsratio_5m_<suffix>, same branching as its own self._table) -- this was hardcoded to the
+    # ETH table only, so symbol="BTCUSDT"/"SOLUSDT" silently returned no_rows instead of reading
+    # oi_lsratio_5m_btc/_sol.
+    table = TABLE if symbol.upper() == "ETHUSDT" else f"{TABLE}_{symbol.lower().replace('usdt', '')}"
     # oi_lsratio_collector.py polls every 5 min via short-lived write connections, but DuckDB
     # briefly refuses a NEW read-only connection while that writer's connection is open across
     # its insert -- same lock-contention window ops_watchdog.py::check_duckdb_table_freshness()
@@ -92,7 +97,7 @@ def compute_oi_delta_signal(symbol: str = SYMBOL) -> dict:
                 df = con.execute(
                     f"""
                     SELECT ts, sum_open_interest
-                    FROM {TABLE}
+                    FROM {table}
                     WHERE symbol = ? AND sum_open_interest IS NOT NULL
                     ORDER BY ts DESC
                     LIMIT ?
