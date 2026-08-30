@@ -2036,7 +2036,7 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
   const n = Math.max(list.length, 1);
-  const w = 240, h = 20, gap = 1.5;
+  const w = 240, h = 15, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
 
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
