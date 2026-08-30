@@ -327,7 +327,11 @@ def evidence_signals(asset: str = "eth"):
 
 ⚠️ **이 저장소를 동시에 건드리는 다른 세션과의 충돌이 이 문서 작업 중에만 4회 발생**(BTC 배포 2회 + 라이브탭 제거 1회 + XRP 1회, 매번 호메로스 증거신호 프로젝트 관련) — 매번 커밋 직전 `git diff`로 훅 단위까지 확인해 분리 커밋 처리함. 이 devmachine에서 대시보드 파일을 커밋하기 전엔 이 확인을 습관화할 것.
 
-**✅ 2026-08-31 후속 4 — SOL을 스냅샷 코인 스위처에 추가, 배포 완료.** XRP보다도 작업량이 적었음 — `server.py`의 `MARKET_SYMBOLS`에 sol이 이미 있어서(옛 라이브 탭 다중자산 차트가 남긴 것) `coin_config.py`에 sol 항목 추가 + 프론트 코인탭 1개, 총 3파일뿐. SOL의 tail-risk는 BTC와 **같은 파일**(`tail_risk_btc_sol.duckdb`)의 별도 테이블(`tail_risk_1m_sol`, 19769+ rows — BTC와 같은 워커가 같은 시점부터 수집해 온 것)이라 이번엔 이 파일이 이미 §3에서 확인된 경로 그대로 재사용됨. 커밋 `a722cda` + 배포 + 실서버 재검증(4개 엔드포인트 전부 `warmed_up=true`, ETH/BTC 회귀 없음, `trading_bot.py` 무변경) 완료. 이걸로 ETH/BTC/SOL/XRP 4코인 중 **HYPE만 미착수**(과거데이터 없어 Tier1~2도 제한적, §7 참고) — Tier 1~2 범위에서는 사실상 완결.
+**✅ 2026-08-31 후속 4 — SOL을 스냅샷 코인 스위처에 추가, 배포 완료.** XRP보다도 작업량이 적었음 — `server.py`의 `MARKET_SYMBOLS`에 sol이 이미 있어서(옛 라이브 탭 다중자산 차트가 남긴 것) `coin_config.py`에 sol 항목 추가 + 프론트 코인탭 1개, 총 3파일뿐. SOL의 tail-risk는 BTC와 **같은 파일**(`tail_risk_btc_sol.duckdb`)의 별도 테이블(`tail_risk_1m_sol`, 19769+ rows — BTC와 같은 워커가 같은 시점부터 수집해 온 것)이라 이번엔 이 파일이 이미 §3에서 확인된 경로 그대로 재사용됨. 커밋 `a722cda` + 배포 + 실서버 재검증(4개 엔드포인트 전부 `warmed_up=true`, ETH/BTC 회귀 없음, `trading_bot.py` 무변경) 완료.
+
+**✅ 2026-08-31 후속 5 — HYPE 추가, 배포 완료. 단 베이시스청산압박 1개는 구조적으로 미지원.** HYPE는 §7에서 "과거 시세 데이터 없음"으로 Tier3~4가 막힌다고 이미 확인했지만, Tier1~2(청산맵/청산방향압력/5분신호)는 **최근 롤링 윈도우만 필요**(`LIQUIDATION_MAP_LOOKBACK_HOURS=24h`)해서 과거 데이터 부재와 무관하게 동작 — 이 구분을 이번에 실증. 다만 새로 발견된 진짜 구조적 제약: **HYPEUSDT는 바이낸스 현물(spot) 상장이 없음**(`api.binance.com/api/v3/klines`가 `Invalid symbol` 반환, 선물(perp)만 실재 — 라이브 실측 확인). 베이시스청산압박(`live_spot_perp_basis_signal_20260827.py`)은 현물+선물 두 다리가 모두 필요해 이 신호 하나만 HYPE에서 영구적으로 미지원 — "아직 데이터 부족"이 아니라 "이 마켓 자체가 없음"이므로, 매 캐시 주기마다 14초씩 낭비되는 재시도 대신 `NO_SPOT_MARKET_SYMBOLS` 즉시 단락 처리 추가(`warmed_up=false`/`error="no_spot_market"`, 0.3초 응답). 청산맵/청산방향압력/5분신호는 선물데이터만 쓰므로 영향 없음 — 4개 엔드포인트 중 3개 정상, 1개는 의도적/영구적 미지원으로 명확히 구분됨. 이 작업 중 `live_spot_perp_basis_signal_20260827.py` 자체가(2026-08-27부터 라이브 배포돼 있었음에도) 한 번도 git커밋된 적 없었던 게 발견돼 이번에 최초 커밋됨. 커밋 `b338d87` + 배포 + 실서버 재검증(청산맵/방향/5분신호 `warmed_up=true`, 베이시스는 `no_spot_market` 즉답, 4코인 회귀 없음, `trading_bot.py` 무변경) 완료.
+
+이걸로 ETH/BTC/SOL/XRP/HYPE **5코인 전부 Tier1~2 배포 완료**(HYPE는 베이시스청산압박 제외 3/4) — 이 설계도서의 원래 스코프(§1 "4코인 확장")를 사실상 완결.
 
 ---
 
