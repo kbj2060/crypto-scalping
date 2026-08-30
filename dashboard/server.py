@@ -1060,19 +1060,19 @@ def make_app() -> web.Application:
             latest = sig.iloc[-1] if len(sig) else None
             warmed_up = latest is not None and pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))
             # taker_delta_z_climax / short_term_return_z / liquidity_sweep / orthogonal_combo /
-            # smt_divergence REPLACED with their TabPFN meta-label models' live probability
-            # (2026-08-30/31; dalton_rule2_balance_edge removed 2026-08-31, see METALABEL_SIGNALS'
-            # own module docstring) -- reuses this cycle's already-fetched `df` and already-computed
-            # `latest` fire state, no separate fetch/compute_signals() call. Fail-soft: a GPU/TabPFN
-            # hiccup must not block the other signals from rendering.
+            # smt_divergence / fib_extension_exhaustion REPLACED with their TabPFN meta-label
+            # models' live probability (2026-08-30/31; dalton_rule2_balance_edge removed 2026-08-31,
+            # see METALABEL_SIGNALS' own module docstring) -- reuses this cycle's already-fetched
+            # `df` and already-computed `latest` fire state, no separate fetch/compute_signals()
+            # call. Fail-soft: a GPU/TabPFN hiccup must not block the other signals from rendering.
             metalabels: dict[str, dict] = {}
             if warmed_up:
                 try:
                     metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, latest)
                 except Exception as metalabel_exc:  # noqa: BLE001
                     print(f"evidence-signal metalabel leg failed (taker_delta_z_climax/"
-                          f"short_term_return_z/liquidity_sweep/orthogonal_combo/smt_divergence will "
-                          f"read as not-fired this cycle): {metalabel_exc}", flush=True)
+                          f"short_term_return_z/liquidity_sweep/orthogonal_combo/smt_divergence/"
+                          f"fib_extension_exhaustion will read as not-fired this cycle): {metalabel_exc}", flush=True)
             signals_payload = []
             for name, description in EVIDENCE_SIGNAL_ORDER:
                 bcol, tcol = f"bottom_{name}", f"top_{name}"
