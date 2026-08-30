@@ -1447,37 +1447,46 @@ def make_app() -> web.Application:
         async with ClientSession(timeout=timeout) as session:
             while True:
                 started = time.monotonic()
-                state_payload, state_etag = dashboard_state_payload()
-                if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
-                    model_indicator_sample_state["last_sample_at"] = started
-                    raw_state = (state_payload or {}).get("state") or {}
-                    model_indicator_history.append({
-                        "sampled_at": datetime.now(timezone.utc).isoformat(),
-                        "microstructure": raw_state.get("microstructure") or {},
-                        "tail_risk": raw_state.get("tail_risk") or {},
-                    })
-                ticker_rows = await asyncio.gather(
-                    *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
-                )
-                latest_event_tickers = {
-                    asset: ticker for asset, ticker in ticker_rows if ticker is not None
-                }
-                state_changed = state_etag != last_state_etag
-                if state_changed:
-                    latest_event_state = state_payload
-                    last_state_etag = state_etag
-                payload = {
-                    "state": state_payload if state_changed else None,
-                    "tickers": latest_event_tickers,
-                }
-                encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-                for queue in tuple(event_clients):
-                    if queue.full():
-                        try:
-                            queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            pass
-                    queue.put_nowait(encoded)
+                try:
+                    state_payload, state_etag = dashboard_state_payload()
+                    if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
+                        model_indicator_sample_state["last_sample_at"] = started
+                        raw_state = (state_payload or {}).get("state") or {}
+                        model_indicator_history.append({
+                            "sampled_at": datetime.now(timezone.utc).isoformat(),
+                            "microstructure": raw_state.get("microstructure") or {},
+                            "tail_risk": raw_state.get("tail_risk") or {},
+                        })
+                    ticker_rows = await asyncio.gather(
+                        *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
+                    )
+                    latest_event_tickers = {
+                        asset: ticker for asset, ticker in ticker_rows if ticker is not None
+                    }
+                    state_changed = state_etag != last_state_etag
+                    if state_changed:
+                        latest_event_state = state_payload
+                        last_state_etag = state_etag
+                    payload = {
+                        "state": state_payload if state_changed else None,
+                        "tickers": latest_event_tickers,
+                    }
+                    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                    for queue in tuple(event_clients):
+                        if queue.full():
+                            try:
+                                queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                        queue.put_nowait(encoded)
+                except Exception as exc:  # noqa: BLE001 -- one bad cycle (a malformed state file, a
+                    # transient ticker/gather hiccup, ...) must not permanently kill this loop: it is
+                    # the sole source of SSE pushes for every connected browser tab (Ops/Snapshot
+                    # alike), so an uncaught exception here would silently freeze everyone's live
+                    # updates until the next full server restart. asyncio.CancelledError subclasses
+                    # BaseException, not Exception, so server shutdown (stop_dashboard_events's
+                    # task.cancel()) still propagates through this unaffected.
+                    print(f"publish_dashboard_events cycle failed (will retry next cycle): {exc}", flush=True)
                 await asyncio.sleep(max(0.0, EVENT_POLL_SECONDS - (time.monotonic() - started)))
 
     async def start_dashboard_events(app: web.Application) -> None:

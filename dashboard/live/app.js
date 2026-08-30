@@ -1,9 +1,5 @@
-const TRADE_JOURNAL_URL = "../../data/live/trade_journal.jsonl";
 const API_EVENTS_URL = "/api/events";
-const API_TRADES_URL = "/api/trades";
 const API_OPS_STATUS_URL = "/api/ops-status";
-const API_BTC_MULTISLOT_SHADOW_URL = "/api/btc-multislot-shadow";
-const API_ETH_ODYSSEY4_SHADOW_URL = "/api/eth-odyssey4-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
@@ -16,8 +12,8 @@ const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 2500;
-const CHART_RENDER_MIN_INTERVAL_MS = 5000;
-// 2026-08-25 perf pass: split from CHART_RENDER_MIN_INTERVAL_MS -- the Snapshot chart's own data
+// 2026-08-25 perf pass: split from the Live tab's own chart-render throttle (removed with the Live
+// tab) -- the Snapshot chart's own data
 // (latestLiquidationMap) only changes once per LIQUIDATION_MAP_POLL_MS (5min), so redrawing its
 // ~250-400 SVG nodes every 5s (60x more often than the data changes) was pure waste. Coarser than
 // the Live chart's interval on purpose: this chart is read-only reference, not something a user
@@ -27,16 +23,16 @@ const CHART_RENDER_MIN_INTERVAL_MS = 5000;
 // two redraw cadences would let a real price sweep sit un-darkened for up to 5min, undermining why
 // sweep-darkening exists. Slower-but-synchronized beats faster-but-inconsistent here.
 const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 20000;
-const JOURNAL_POLL_MS = 10000;
 const CANDLE_HISTORY_POLL_MS = 300000;
 const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
+// Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
+// applyDashboardEvent()) -- eth/btc still need their live price tracked for the Snapshot tab's own
+// coin switcher (activeSnapshotAsset), sol is tracked too for parity even though nothing reads it.
 const ASSET_CONFIG = {
-  eth: { label: "ETH", symbol: "ETHUSDT", accountSymbol: "ETH/USDT:USDT", priceDigits: 2 },
-  sol: { label: "SOL", symbol: "SOLUSDT", accountSymbol: "SOL/USDT:USDT", priceDigits: 3 },
-  btc: { label: "BTC", symbol: "BTCUSDT", accountSymbol: "BTC/USDT:USDT", priceDigits: 1 },
+  eth: { label: "ETH", symbol: "ETHUSDT" },
+  sol: { label: "SOL", symbol: "SOLUSDT" },
+  btc: { label: "BTC", symbol: "BTCUSDT" },
 };
-const ASSET_KEYS = Object.keys(ASSET_CONFIG);
-const DEFAULT_ASSET = "eth";
 
 const el = (id) => document.getElementById(id);
 const setT = (id, txt) => {
@@ -77,33 +73,14 @@ function pushToneHistory(key, tone) {
   if (times.length > MICRO_HISTORY_MAX) times.shift();
 }
 
-let latestState = null;
 let latestMainState = null;
 let latestCompactState = null;
-let latestTradeJournal = [];
-let latestTradeEquitySeries = [];
-let latestLivePrice = 0;
-let latestLivePriceTs = "";
-let lastJournalFetchAt = 0;
-let tradeJournalLoaded = false;
-let tradePanelsRendered = false;
 let tickInFlight = false;
-let tradesEtag = "";
-let latestChartRiskLevels = [];
-let activeChartAsset = DEFAULT_ASSET;
 let latestLivePriceByAsset = {};
 let latestLivePriceTsByAsset = {};
 let candleHistoryByAsset = {};
-let lastCandleHistoryFetchAtByAsset = {};
 let opsStatusEtag = "";
 let opsLastFetchAt = 0;
-let btcMultislotEtag = "";
-let btcMultislotLastFetchAt = 0;
-let latestBtcMultislotPayload = null;
-let btcMultislotActiveSlot = 0;
-let ethOdyssey4Etag = "";
-let ethOdyssey4LastFetchAt = 0;
-let latestEthOdyssey4Payload = null;
 let evidenceLastFetchAt = 0;
 let evidenceProvisionalLastFetchAt = 0;
 // Confirmed signals poll every 5min (EVIDENCE_POLL_MS) but the provisional preview polls every 10s
@@ -162,10 +139,9 @@ let regimeWide24LastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
-let lastChartRenderAt = 0;
 let lastSnapshotChartRenderAt = 0;
 let lastModelIndicatorHtmlByTarget = {};
-let activePageTab = "snapshot"; // "live" | "ops" | "snapshot" -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
+let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
 let isScrolling = false;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
@@ -210,7 +186,6 @@ const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals'
                                         // is cheap enough (no new external fetch) to poll this often
 
 // --- Chart Global Variables ---
-let candleHistory = []; // Array of {time, open, high, low, close}
 const CHART_CANDLE_MIN = 5;
 const CHART_MAX_CANDLES = 100;
 // Snapshot tab's own chart only -- narrower than CHART_MAX_CANDLES (Live tab, unaffected) so every
@@ -227,77 +202,6 @@ const mobileChartView = {
   size: MOBILE_CHART_DEFAULT_CANDLES,
   followLatest: true,
 };
-
-function activeAssetConfig() {
-  return ASSET_CONFIG[activeChartAsset] || ASSET_CONFIG[DEFAULT_ASSET];
-}
-
-function assetLabel(asset = activeChartAsset) {
-  return (ASSET_CONFIG[asset] || ASSET_CONFIG[DEFAULT_ASSET]).label;
-}
-
-function syncActiveMarketState() {
-  candleHistory = candleHistoryByAsset[activeChartAsset] || [];
-  latestLivePrice = Number(latestLivePriceByAsset[activeChartAsset] || 0);
-  latestLivePriceTs = String(latestLivePriceTsByAsset[activeChartAsset] || "");
-}
-
-function normalizeAssetKey(value) {
-  const s = String(value || "").toLowerCase();
-  if (s.includes("sol")) return "sol";
-  if (s.includes("btc")) return "btc";
-  return "eth";
-}
-
-function tradeAssetKey(row) {
-  const basis = [
-    row?.symbol,
-    row?.account_symbol,
-    row?.execution_symbol,
-    row?.asset,
-    row?.market,
-    row?.raw_source,
-    row?.source,
-  ].filter(Boolean).join(" ");
-  return normalizeAssetKey(basis);
-}
-
-function chartJournalRows() {
-  return (latestTradeJournal || []).filter((row) => tradeAssetKey(row) === activeChartAsset);
-}
-
-function renderAssetTabs() {
-  // 2026-08-31: scoped to #assetTabs (was a bare ".asset-tab" query) -- the Snapshot tab's own
-  // coin switcher (#snapshotAssetTabs, see renderSnapshotAssetTabs()) reuses the same "asset-tab"
-  // CSS class for identical styling but must stay driven by activeSnapshotAsset, not this
-  // Live-tab-chart-only activeChartAsset. No behavior change for #assetTabs itself.
-  document.querySelectorAll("#assetTabs .asset-tab").forEach((btn) => {
-    const asset = normalizeAssetKey(btn.dataset.asset);
-    btn.classList.toggle("active", asset === activeChartAsset);
-  });
-}
-
-async function setActiveChartAsset(asset) {
-  const next = normalizeAssetKey(asset);
-  if (!ASSET_CONFIG[next] || next === activeChartAsset) return;
-  activeChartAsset = next;
-  mobileChartView.start = null;
-  mobileChartView.followLatest = true;
-  latestChartRiskLevels = [];
-  setT("riskLevelNote", "-");
-  syncActiveMarketState();
-  renderAssetTabs();
-  await fetchBinanceHistory(activeChartAsset);
-  lastChartRenderAt = 0;
-  render(latestMainState || latestState || {}, latestCompactState);
-}
-
-function setupAssetTabs() {
-  document.querySelectorAll("#assetTabs .asset-tab").forEach((btn) => {
-    btn.addEventListener("click", () => setActiveChartAsset(btn.dataset.asset));
-  });
-  renderAssetTabs();
-}
 
 function renderSnapshotAssetTabs() {
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
@@ -337,13 +241,6 @@ function setupSnapshotAssetTabs() {
   });
   renderSnapshotAssetTabs();
 }
-const mobileChartGesture = {
-  panStartX: 0,
-  panStartIndex: 0,
-  pinchStartDistance: 0,
-  pinchStartSize: MOBILE_CHART_DEFAULT_CANDLES,
-  pinchStartCenter: 0,
-};
 
 function fmtNum(v, d = 2) {
   return Number(v || 0).toFixed(d);
@@ -364,19 +261,6 @@ function fmtUsdCompact(v) {
   if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
   if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
   return `$${n.toFixed(0)}`;
-}
-
-function qualityText(score, threshold) {
-  const s = Number(score);
-  if (!Number.isFinite(s)) return "-";
-  const t = Number(threshold);
-  return Number.isFinite(t) ? `${s.toFixed(3)} / ${t.toFixed(2)}` : s.toFixed(3);
-}
-
-function rowTs(row) {
-  const raw = row?.closed_at || row?.ts || row?.opened_at || "";
-  const ms = Date.parse(raw);
-  return Number.isFinite(ms) ? ms : 0;
 }
 
 function clamp01(v) {
@@ -438,41 +322,6 @@ function fmtHourMinute(v) {
   return `${hh}:${mm}`;
 }
 
-function tsAgeSec(v) {
-  if (!v) return null;
-  const ms = Date.parse(v);
-  if (!Number.isFinite(ms)) return null;
-  return Math.max(0, Math.round((Date.now() - ms) / 1000));
-}
-
-function isToday(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return false;
-  const d = new Date(ms);
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-}
-
-function isFinalGovernorState(state) {
-  if (!state) return false;
-  const src = String(state?.signal?.source || state?.agents?.governor?.source || "").toLowerCase();
-  return Boolean(
-    state.governor_mode ||
-    state?.agents?.governor ||
-    src.includes("final_governor") ||
-    src.includes("sniper") ||
-    src.includes("trend") ||
-    src.includes("micro") ||
-    src.includes("cash")
-  );
-}
-
-function usableGovernorShadowState(state) {
-  if (!isFinalGovernorState(state)) return null;
-  const age = tsAgeSec(state?.microstructure?.updated_at || state?.updated_at || state?.cycle_timestamp_kst);
-  if (Number.isFinite(age) && age > 180) return null;
-  return state;
-}
-
 function fmtNowClock() {
   const d = new Date();
   const hh = String(d.getHours()).padStart(2, "0");
@@ -492,648 +341,6 @@ function buildSessionHtml(sess) {
     `<span class="session-sep">|</span>`,
     `<span class="session-item ${sUsOn ? "on" : "off"}"><span class="session-led ${sUsOn ? "on" : "off"}"></span>미국</span>`,
   ].join("");
-}
-
-function actionLabel(a) {
-  if (a === 1) return { text: "롱", icon: "▲", cls: "long" };
-  if (a === 2) return { text: "숏", icon: "▼", cls: "short" };
-  return { text: "대기", icon: "⏸", cls: "hold" };
-}
-
-function sideLabel(value) {
-  const s = String(value || "NONE").toUpperCase();
-  if (s === "LONG") return "롱";
-  if (s === "SHORT") return "숏";
-  if (s === "NONE") return "없음";
-  return s;
-}
-
-function openPosition(state) {
-  const pos = (state || {}).position || {};
-  const side = String(pos.current || "NONE").toUpperCase();
-  const entryPrice = Number(pos.entry_price || (state || {}).entry_price || 0);
-  if ((side === "LONG" || side === "SHORT") && entryPrice > 0) {
-    return { ...pos, current: side, entry_price: entryPrice };
-  }
-  return null;
-}
-
-function chartPositionState(mainState, compactState) {
-  const shadowState = usableGovernorShadowState(compactState);
-  if (openPosition(shadowState)) return shadowState;
-  if (openPosition(mainState)) return mainState;
-  return shadowState || mainState;
-}
-
-function assetDecisionState(mainState, compactState, asset = activeChartAsset) {
-  const key = normalizeAssetKey(asset);
-  if (key === "eth") return chartPositionState(mainState, compactState);
-  const sources = [compactState, mainState].filter(Boolean);
-  for (const src of sources) {
-    const direct =
-      src?.assets?.[key] ||
-      src?.asset_decisions?.[key] ||
-      src?.asset_states?.[key] ||
-      src?.market_assets?.[key];
-    if (direct) return direct;
-    const upper = key.toUpperCase();
-    const upperDirect =
-      src?.assets?.[upper] ||
-      src?.asset_decisions?.[upper] ||
-      src?.asset_states?.[upper] ||
-      src?.market_assets?.[upper];
-    if (upperDirect) return upperDirect;
-  }
-  return null;
-}
-
-function strategyTagFromRow(row) {
-  const src = String(row?.source || "").toUpperCase();
-  const raw = String(row?.raw_source || "").toUpperCase();
-  const basis = `${src} ${raw}`;
-  if (basis.includes("SNIPER")) return "SNIPER";
-  if (basis.includes("TREND")) return "TREND";
-  if (basis.includes("MICRO") || basis.includes("WNC")) return "MICRO";
-  if (basis.includes("GOVERNOR") || basis.includes("CASH")) return "GOVERNOR";
-  if (basis.includes("COMPACT")) return "COMPACT";
-  if (basis.includes("CONTROLLER")) return "CONTROLLER";
-  return "GOVERNOR";
-}
-
-function strategyDisplayLabel(value) {
-  const s = String(value || "").toUpperCase();
-  if (s === "SNIPER") return "스나이퍼";
-  if (s === "TREND") return "추세";
-  if (s === "MICRO") return "마이크로";
-  if (s === "GOVERNOR") return "거버너";
-  if (s === "COMPACT") return "컴팩트";
-  if (s === "CONTROLLER") return "컨트롤러";
-  if (s.includes("SNIPER")) return "스나이퍼";
-  if (s.includes("TREND")) return "추세";
-  if (s.includes("MICRO") || s.includes("WNC")) return "마이크로";
-  if (s.includes("GOVERNOR")) return "거버너";
-  if (s.includes("COMPACT")) return "컴팩트";
-  if (s.includes("CONTROLLER")) return "컨트롤러";
-  return value || "-";
-}
-
-function normalizeModelVersion(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const compact = raw.replace(/_/g, ".").replace(/\s+/g, "");
-  const vMatch = compact.match(/v?(\d+(?:\.\d+)*)/i);
-  return vMatch ? `v${vMatch[1]}` : compact.toLowerCase();
-}
-
-function tradeGovernorLabel(row) {
-  const basis = [
-    row?.model_version,
-    row?.model_id,
-    row?.decision_logic,
-    row?.raw_source,
-    row?.source,
-  ].filter(Boolean).join(" ");
-  const alphaBasis = basis.toLowerCase();
-  if (
-    alphaBasis.includes("alpha4_3_sticky") ||
-    alphaBasis.includes("alpha4.3 sticky") ||
-    alphaBasis.includes("sticky_current")
-  ) {
-    return "Alpha4.3 Sticky";
-  }
-  if (
-    alphaBasis.includes("alpha3") ||
-    alphaBasis.includes("alpha2_1") ||
-    alphaBasis.includes("alpha2.1") ||
-    alphaBasis.includes("alpha2 1")
-  ) {
-    return "Alpha3";
-  }
-  let version = normalizeModelVersion(row?.model_version);
-  if (!version && /v22[_\s.]?1/i.test(basis)) version = "v22.1";
-  if (!version && /v21/i.test(basis)) version = "v21";
-  const sleeve = strategyDisplayLabel(strategyTagFromRow(row));
-  const base = version ? `거버너 ${version}` : "거버너";
-  return sleeve && sleeve !== "거버너" ? `${base} · ${sleeve}` : base;
-}
-
-function cleanTradeReason(value) {
-  const raw = cleanDisplaySource(value || "");
-  if (!raw || raw === "-") return "";
-  return raw
-    .replace(/^alpha2[._-]?1\s*[|:]/i, "")
-    .replace(/^lifecycle_v1\s*[|:]/i, "")
-    .replace(/^v31_deep_alpha_/i, "V31 ")
-    .replace(/^learned_/i, "")
-    .replace(/_/g, " ")
-    .trim();
-}
-
-function closeReasonText(row) {
-  return cleanTradeReason(
-    row?.exit_reason ||
-    row?.close_reason ||
-    row?.reason ||
-    row?.source ||
-    ""
-  );
-}
-
-function liquidityLabel(value) {
-  const s = String(value || "").toLowerCase();
-  if (s === "maker_miss" || s.includes("maker_miss")) return "maker miss";
-  if (s.includes("maker") && s.includes("dry_run") && s.includes("taker")) return "maker→taker shadow";
-  if (s.includes("maker") && s.includes("dry_run")) return "maker shadow";
-  if (s.includes("taker") && s.includes("dry_run")) return "taker shadow";
-  if (s === "maker_taker" || s === "maker+taker" || s === "maker-taker" || s === "mixed") return "maker→taker";
-  if (s.includes("maker") && s.includes("taker")) return "maker→taker";
-  if (s.includes("maker")) return "maker";
-  if (s.includes("taker") || s.includes("market")) return "taker";
-  if (s.includes("synthetic") || s.includes("shadow")) return "shadow model";
-  return "";
-}
-
-function executionLegLiquidity(row, leg) {
-  const prefix = leg === "exit" ? "exit" : "entry";
-  const direct = liquidityLabel(
-    row?.[`${prefix}_execution_liquidity`] ||
-    row?.[`${prefix}_liquidity`] ||
-    row?.[`${prefix}_exec_liquidity`] ||
-    row?.[`${prefix}_order_liquidity`]
-  );
-  if (direct) return direct;
-
-  const route = liquidityLabel(row?.[`${prefix}_execution_route`] || row?.[`${prefix}_execution_order_type`]);
-  if (route) return route;
-
-  const kind = String(row?.[`${prefix}_exec_price_kind`] || "").toLowerCase();
-  if (kind.includes("synthetic_fee_slippage_model")) return "shadow model";
-  if (kind.includes("maker")) return "maker";
-  if (kind.includes("taker") || kind.includes("market")) return "taker";
-  return "";
-}
-
-function priceWithLiquidity(label, price, liquidity) {
-  const liq = liquidity ? ` <span class="trade-journal-liquidity">${liquidity}</span>` : "";
-  return `${label} ${fmtNum(price, 2)}${liq}`;
-}
-
-function feeModelText(row) {
-  const model = String(row?.fee_model || "").replaceAll("_", " ");
-  const entry = Number(row?.entry_fee_rate);
-  const exit = Number(row?.exit_fee_rate);
-  if (!model && !Number.isFinite(entry) && !Number.isFinite(exit)) return "";
-  const entryBps = Number.isFinite(entry) ? `${(entry * 10000).toFixed(2)}bp` : "-";
-  const exitBps = Number.isFinite(exit) ? `${(exit * 10000).toFixed(2)}bp` : "-";
-  return `수수료: ${model || "unknown"} (${entryBps}/${exitBps})`;
-}
-
-function closeTradeRows(filter) {
-  let rows = (latestTradeJournal || []).filter((row) => String(row?.kind || "").toUpperCase() === "CLOSE");
-  if (filter && filter !== "ALL") rows = rows.filter((row) => strategyTagFromRow(row) === filter);
-  return rows.slice().sort((a, b) => rowTs(a) - rowTs(b));
-}
-
-function pnlPctFromRow(row) {
-  if (Number.isFinite(Number(row?.pnl_pct))) return Number(row.pnl_pct);
-  if (Number.isFinite(Number(row?.pnl_frac))) return Number(row.pnl_frac) * 100;
-  return 0;
-}
-
-function executionDelaySec(row) {
-  const n = Number(row?.execution_delay_sec);
-  return Number.isFinite(n) ? n : null;
-}
-
-function executionTimingText(row) {
-  const decisionTs = row?.decision_bar_ts || row?.decision_at || "";
-  const execTs = row?.execution_bar_ts || row?.ts || row?.closed_at || row?.opened_at || "";
-  const delay = executionDelaySec(row);
-  const source = row?.execution_price_source || row?.entry_price_source || row?.exit_price_source || "";
-  const ledger = row?.ledger_ts_kind || "";
-  const parts = [];
-  if (decisionTs) parts.push(`신호 ${fmtShortTs(decisionTs)}`);
-  if (execTs) parts.push(`체결 ${fmtShortTs(execTs)}`);
-  if (delay !== null) parts.push(`지연 ${fmtNum(delay, 1)}s`);
-  if (source) parts.push(String(source));
-  if (ledger) parts.push(String(ledger));
-  return parts.join(" · ");
-}
-
-function aiTimingText(row) {
-  const timing = row?.ai_timing || {};
-  if (!timing || typeof timing !== "object") return "";
-  const total = Number(timing.total_sec ?? timing.total?.sec ?? timing.predict_all?.sec ?? timing.predict_all_sec);
-  return Number.isFinite(total) && total > 0 ? `AI ${fmtNum(total, 2)}s` : "";
-}
-
-function buildTradeEquitySeries(filter) {
-  let equity = 1;
-  return closeTradeRows(filter).map((row, idx) => {
-    const pnlPct = pnlPctFromRow(row);
-    equity *= 1 + pnlPct / 100;
-    return {
-      ...row,
-      chart_index: idx + 1,
-      pnl_pct: pnlPct,
-      equity,
-      cumulative_return_pct: (equity - 1) * 100,
-      ts: row.closed_at || row.ts,
-    };
-  });
-}
-
-function normalizeStateTradeTail(rows) {
-  return (rows || [])
-    .filter((row) => row && Number.isFinite(Number(row.equity)))
-    .map((row, idx) => ({
-      ...row,
-      chart_index: idx + 1,
-      pnl_pct: pnlPctFromRow(row),
-      equity: Number(row.equity),
-      cumulative_return_pct: (Number(row.equity) - 1) * 100,
-    }));
-}
-
-function selectTradeRowsForCharts(filter) {
-  if (latestTradeEquitySeries.length) return latestTradeEquitySeries;
-  const journalSeries = buildTradeEquitySeries(filter);
-  if (journalSeries.length) return journalSeries;
-  const stateRows = latestMainState?.trades_tail || latestCompactState?.trades_tail;
-  return normalizeStateTradeTail(stateRows || []);
-}
-
-function firstPositive(...vals) {
-  for (const v of vals) {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return 0;
-}
-
-function signedRiskPairLabel(tp, sl) {
-  const parts = [];
-  const tpN = Number(tp);
-  const slN = Number(sl);
-  if (Number.isFinite(tpN) && tpN > 0) parts.push(fmtPct(tpN * 100, 1));
-  if (Number.isFinite(slN) && slN > 0) parts.push(`-${fmtPctNoPlus(slN * 100, 1)}`);
-  return parts.join("/");
-}
-
-function signedPriceMovePairLabel(tpMove, slMove) {
-  const parts = [];
-  const tpN = Number(tpMove);
-  const slN = Number(slMove);
-  if (Number.isFinite(tpN) && tpN > 0) parts.push(fmtPctNoPlus(tpN * 100, 1));
-  if (Number.isFinite(slN) && slN > 0) parts.push(fmtPctNoPlus(slN * 100, 1));
-  return parts.join("/");
-}
-
-function riskSummaryText(row) {
-  const tp = firstPositive(row?.effective_take_profit, row?.take_profit);
-  const sl = firstPositive(row?.effective_stop_loss, row?.stop_loss);
-  const exposure = firstPositive(row?.total_exposure, row?.notional_exposure);
-  const parts = [];
-  const riskPair = signedRiskPairLabel(tp, sl);
-  if (riskPair) parts.push(`계정 ${riskPair}`);
-  const priceMovePair = exposure > 0 ? signedPriceMovePairLabel(tp / exposure, sl / exposure) : "";
-  if (priceMovePair) parts.push(`가격 ${priceMovePair}`);
-  return parts.join(" · ");
-}
-
-function thresholdPrice(side, entry, rawMove, takeProfit) {
-  const sideU = String(side || "").toUpperCase();
-  const entryN = Number(entry);
-  const moveN = Number(rawMove);
-  if (!(entryN > 0) || !(moveN > 0) || !["LONG", "SHORT"].includes(sideU)) return 0;
-  if (sideU === "LONG") return takeProfit ? entryN * (1 + moveN) : entryN * Math.max(0, 1 - moveN);
-  return takeProfit ? entryN * Math.max(0, 1 - moveN) : entryN * (1 + moveN);
-}
-
-function activeRiskModel(state, compactState, selectedState = null) {
-  const s = selectedState || chartPositionState(state, compactState) || {};
-  const alt = selectedState
-    ? (activeChartAsset === "eth" ? (s === state ? (compactState || {}) : (state || {})) : {})
-    : (s === state ? (compactState || {}) : (state || {}));
-  const pos = s.position || {};
-  const sig = s.signal || {};
-  const altPos = alt.position || {};
-  const altSig = alt.signal || {};
-  const agents = s.agents || {};
-  const lifecycle = agents.lifecycle_v1 || {};
-  const omega = agents.omega1_2_1 || {};
-  const omega461 = agents.omega4_6_1 || {};
-  const fullyLearned = agents.fully_learned || {};
-  const macro = agents.macro || {};
-  const trace = sig.sleeve_trace || {};
-  const v31 = trace.v31 || {};
-  const cfg = v31.selected_config || {};
-  const side = String(pos.current || altPos.current || "").toUpperCase();
-  const entry = Number(pos.entry_price || altPos.entry_price || s.entry_price || alt.entry_price || 0);
-  const exposure = Number(pos.total_exposure ?? pos.notional_exposure ?? sig.notional_exposure ?? sig.unified_kelly ?? altPos.total_exposure ?? altPos.notional_exposure ?? altSig.notional_exposure ?? altSig.unified_kelly ?? 0);
-  if (!["LONG", "SHORT"].includes(side) || !(entry > 0) || !(exposure > 0)) {
-    return { tp: 0, sl: 0, maxHold: 0, remaining: NaN, tpPrice: 0, slPrice: 0 };
-  }
-  // pos.effective_take_profit / pos.take_profit are raw price-move fractions (e.g. 0.075 = 7.5%
-  // price move), not account-level PnL fractions -- see the Futures Risk Sizing Contract
-  // (PnL = price_move * notional). Account-level threshold = rawMove * exposure, not rawMove / exposure.
-  const rawTp = firstPositive(pos.effective_take_profit, pos.take_profit, sig.effective_take_profit, sig.take_profit, altPos.effective_take_profit, altPos.take_profit, altSig.effective_take_profit, altSig.take_profit, v31.effective_tp, omega461.active_take_profit, omega.active_take_profit, lifecycle.active_take_profit, fullyLearned.active_take_profit, macro.active_take_profit, macro.take_profit);
-  const rawSl = firstPositive(pos.effective_stop_loss, pos.stop_loss, sig.effective_stop_loss, sig.stop_loss, altPos.effective_stop_loss, altPos.stop_loss, altSig.effective_stop_loss, altSig.stop_loss, v31.effective_sl, omega461.active_stop_loss, omega.active_stop_loss, lifecycle.active_stop_loss, fullyLearned.active_stop_loss, macro.active_stop_loss, macro.stop_loss);
-  const maxHold = 0;
-  const rem = Number(pos.max_hold_remaining_bars ?? sig.max_hold_remaining_bars ?? altPos.max_hold_remaining_bars ?? altSig.max_hold_remaining_bars);
-  const tpPrice = firstPositive(pos.take_profit_price, pos.tp_price, sig.take_profit_price, sig.tp_price, altPos.take_profit_price, altPos.tp_price, altSig.take_profit_price, altSig.tp_price, thresholdPrice(side, entry, rawTp, true));
-  const slPrice = firstPositive(pos.stop_price, pos.sl_price, sig.stop_price, sig.sl_price, altPos.stop_price, altPos.sl_price, altSig.stop_price, altSig.sl_price, thresholdPrice(side, entry, rawSl, false));
-  return {
-    tp: rawTp > 0 ? rawTp * exposure : 0,
-    sl: rawSl > 0 ? rawSl * exposure : 0,
-    maxHold,
-    remaining: rem,
-    tpPrice,
-    slPrice,
-    exposure,
-    tpMove: rawTp,
-    slMove: rawSl,
-  };
-}
-
-function chartRiskLevels(state, compactState, selectedState = null) {
-  const s = selectedState || chartPositionState(state, compactState) || {};
-  if (!openPosition(s)) return [];
-  const pos = s.position || {};
-  const sig = s.signal || {};
-  const pb = s.playbook || {};
-  const activeRisk = activeRiskModel(state, compactState, selectedState);
-  const out = [];
-  const stop = firstPositive(pos.stop_price, sig.stop_price, activeRisk.slPrice, pb.stop_price, pb.trailing_stop_price, sig.trailing_stop_price);
-  const tp = firstPositive(pos.take_profit_price, pos.tp_price, sig.take_profit_price, sig.tp_price, activeRisk.tpPrice, pb.take_profit_price);
-  const trail = firstPositive(pos.trailing_stop_price, sig.trailing_stop_price, pb.trailing_stop_price);
-  if (stop) out.push({ val: stop, color: "#cf6a5c", label: "손절", dashed: false, width: 2 });
-  if (tp) out.push({ val: tp, color: "#6bab84", label: "익절", dashed: false, width: 2 });
-  if (trail && trail !== stop) out.push({ val: trail, color: "#c48ca8", label: "추적", dashed: true, width: 2 });
-  return out;
-}
-
-function chartEntryLiquidity(state, compactState) {
-  const s = chartPositionState(state, compactState) || {};
-  const alt = s === state ? (compactState || {}) : (state || {});
-  const pos = s.position || {};
-  const sig = s.signal || {};
-  const altPos = alt.position || {};
-  const altSig = alt.signal || {};
-  const route = liquidityLabel(
-    pos.entry_execution_route ||
-    pos.entry_execution_liquidity ||
-    sig.entry_execution_route ||
-    sig.entry_execution_liquidity ||
-    s.entry_execution_route ||
-    altPos.entry_execution_route ||
-    altSig.entry_execution_route ||
-    ""
-  );
-  if (route === "maker") return "지정가";
-  if (route === "taker") return "시장가";
-  if (route === "maker→taker") return "지정가→시장가";
-  const priceSource = String(pos.entry_price_source || sig.entry_price_source || s.entry_price_source || altPos.entry_price_source || altSig.entry_price_source || "").toLowerCase();
-  if (priceSource.includes("next_bar_open")) return "다음봉 체결";
-  if (priceSource.includes("synthetic")) return "모의 체결";
-  if (Number(pos.entry_price || altPos.entry_price || 0) > 0) return "원장 체결";
-  return route || "-";
-}
-
-function assetUnrealizedPnl(state, compactState, asset) {
-  const selectedAssetState = assetDecisionState(state, compactState, asset);
-  const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
-  const pos = active.position || {};
-  const sig = active.signal || state?.signal || {};
-  const posSide = String(pos.current || "NONE").toUpperCase();
-  if (posSide !== "LONG" && posSide !== "SHORT") return { pnlPct: 0, posSide: "NONE" };
-  const pnlPct = Number(pos.unrealized_pnl_pct ?? sig.position_unrealized_pnl_pct ?? active.position_unrealized_pnl_pct ?? 0);
-  return { pnlPct, posSide };
-}
-
-// Collapses the live governor's 5-way RegimeEngine label (bull/bear/chop/whipsaw/normal, see
-// features/elite.py::RegimeEngine) into the 3 buckets that matter for a discretionary fade/follow
-// call: 추세(bull+bear), 안정횡보(chop only), 불안정·전환구간(whipsaw+normal -- neither a clean
-// trend nor a clean quiet range, the condition most likely to break out against a fade).
-function liveRegimeLabel(raw) {
-  const r = String(raw || "").toLowerCase();
-  if (r === "bull" || r === "bear") return { bucket: "trend", label: "추세", tone: "" };
-  if (r === "chop") return { bucket: "chop", label: "안정횡보", tone: "" };
-  if (r === "whipsaw" || r === "normal") return { bucket: "unstable", label: "불안정·전환구간", tone: "warn-text" };
-  return { bucket: "other", label: String(raw || "-").toUpperCase(), tone: "" };
-}
-
-// A single instant read of "trend" can be boundary flicker (RegimeEngine re-evaluates every
-// render tick, not just once per bar). Only call a 횡보->추세 change trustworthy enough to act on
-// once it has held continuously (per asset, wall-clock) for REGIME_TREND_CONFIRM_MS -- resets the
-// moment the bucket leaves "trend". Client-side only: a page reload forgets the streak and starts
-// re-confirming from 0, so a stale "확인중" right after opening the tab is expected, not a bug.
-const REGIME_TREND_CONFIRM_MS = 15 * 60 * 1000;
-const regimeTrendStreakSince = {};
-function regimeConfirmState(bucket, assetKey) {
-  if (bucket !== "trend") {
-    regimeTrendStreakSince[assetKey] = null;
-    return { suffix: "", tone: "" };
-  }
-  if (!regimeTrendStreakSince[assetKey]) regimeTrendStreakSince[assetKey] = Date.now();
-  const elapsedMs = Date.now() - regimeTrendStreakSince[assetKey];
-  const confirmMin = Math.round(REGIME_TREND_CONFIRM_MS / 60000);
-  if (elapsedMs >= REGIME_TREND_CONFIRM_MS) return { suffix: " 확정", tone: "good-text" };
-  return { suffix: ` (확인중 ${Math.floor(elapsedMs / 60000)}/${confirmMin}분)`, tone: "" };
-}
-
-// Sums each asset's account-level unrealized PnL (already notional-scaled, all sleeves of the
-// same account equity per docs/model_contracts -- see 3-asset portfolio design), independent of
-// whichever asset tab is currently active in the chart above.
-function renderCombinedUnrealizedPnl(state, compactState) {
-  let total = 0;
-  let openCount = 0;
-  const parts = [];
-  ASSET_KEYS.forEach((asset) => {
-    const { pnlPct, posSide } = assetUnrealizedPnl(state, compactState, asset);
-    if (posSide === "LONG" || posSide === "SHORT") {
-      total += pnlPct;
-      openCount += 1;
-      parts.push(`${assetLabel(asset)} ${posSide === "LONG" ? "롱" : "숏"} ${fmtPct(pnlPct, 2)}`);
-    }
-  });
-  setT("heroUnrealizedPnl", openCount > 0 ? fmtPct(total, 2) : "-");
-  const heroUnrealEl = el("heroUnrealizedPnl");
-  if (heroUnrealEl) {
-    heroUnrealEl.classList.remove("good-text", "bad-text", "muted-text");
-    heroUnrealEl.classList.add(`${openCount > 0 ? riskClass(total) : "muted"}-text`);
-  }
-  setT("heroUnrealizedSub", openCount > 0 ? parts.join(" · ") : "포지션 없음");
-}
-
-function renderOpsCards(state, compactState) {
-  const selectedAssetState = assetDecisionState(state, compactState, activeChartAsset);
-  if (!selectedAssetState) {
-    const cfg = activeAssetConfig();
-    const price = Number(latestLivePriceByAsset[activeChartAsset] || 0);
-    setT("chartDecisionText", "추적");
-    setT("chartEntryLiquidityText", "상태 없음");
-    setT("chartPositionPctText", "-");
-    setT("chartEntryText", "-");
-    setT("chartEntryTimeText", "-");
-    setT("chartExposureText", "-");
-    setT("chartUnrealizedPnlText", "-");
-    setT("chartRiskText", `${cfg.label} 모델 상태 대기`);
-    setT("chartRegimeText", price > 0 ? fmtNum(price, cfg.priceDigits) : "-");
-    const regimeEl = el("chartRegimeText");
-    if (regimeEl) regimeEl.classList.remove("warn-text", "good-text");
-    regimeTrendStreakSince[activeChartAsset] = null;
-    const riskEl = el("chartRiskText");
-    if (riskEl) riskEl.title = `${cfg.accountSymbol} decision state not present in /api/state`;
-    const unrealizedEl = el("chartUnrealizedPnlText");
-    if (unrealizedEl) {
-      unrealizedEl.classList.remove("good-text", "bad-text", "muted-text");
-      unrealizedEl.classList.add("muted-text");
-    }
-    const ribbon = el("chartAiRibbon");
-    if (ribbon) ribbon.className = "chart-ai-ribbon hold";
-    setT("chartAiSummaryText", `${cfg.label} 모델 상태 대기 중`);
-    const gaugeEl0 = el("chartRiskGauge");
-    if (gaugeEl0) gaugeEl0.innerHTML = "";
-    return;
-  }
-  const active = selectedAssetState || usableGovernorShadowState(compactState) || state || {};
-  const pos = active.position || {};
-  const sig = active.signal || state?.signal || {};
-  const agents = active.agents || state?.agents || {};
-  const gov = agents.governor || {};
-  const decision = actionLabel(Number(sig.final_action ?? sig.rl_action ?? 0));
-  const exposure = Number(pos.total_exposure ?? pos.notional_exposure ?? gov.notional_exposure ?? sig.notional_exposure ?? pos.position_fraction ?? 0);
-  const leverage = Number(pos.execution_leverage ?? gov.execution_leverage ?? sig.execution_leverage ?? 1);
-  const positionPct = Number(pos.position_fraction ?? sig.position_fraction ?? 0) * 100;
-  const regimeRaw = String(sig.governor_regime || gov.regime || active.regime || "-");
-  const regimeInfo = liveRegimeLabel(regimeRaw);
-  const regimeConfirm = regimeConfirmState(regimeInfo.bucket, activeChartAsset);
-  const entryPrice = Number(pos.entry_price || active.entry_price || 0);
-  const entryTime = pos.opened_at || pos.decision_at || active.opened_at || "";
-  const unrealizedPnl = Number(pos.unrealized_pnl_pct ?? sig.position_unrealized_pnl_pct ?? active.position_unrealized_pnl_pct ?? 0);
-  const risk = activeRiskModel(state, compactState, active);
-  const tp = risk.tp;
-  const sl = risk.sl;
-  const tpPrice = risk.tpPrice;
-  const slPrice = risk.slPrice;
-  const priceMovePair = signedPriceMovePairLabel(risk.tpMove, risk.slMove);
-
-  setT("chartDecisionText", decision.text);
-  setT("chartEntryLiquidityText", chartEntryLiquidity(state, compactState));
-  setT("chartPositionPctText", fmtPctNoPlus(positionPct, 1));
-  setT("chartEntryText", entryPrice > 0 ? fmtNum(entryPrice, 2) : "-");
-  setT("chartEntryTimeText", entryPrice > 0 && entryTime ? fmtShortTs(entryTime) : "-");
-  setT("chartExposureText", `${fmtNum(leverage, 2)}x / ${fmtNum(exposure, 2)}x`);
-  setT("chartUnrealizedPnlText", String(pos.current || "NONE").toUpperCase() === "NONE" ? "-" : fmtPct(unrealizedPnl, 2));
-  setT("chartRiskText", signedRiskPairLabel(tp, sl) ? `계정 ${signedRiskPairLabel(tp, sl)}${priceMovePair ? ` · 가격 ${priceMovePair}` : ""}` : "-");
-  setT("chartRegimeText", regimeInfo.label + regimeConfirm.suffix);
-  const regimeEl = el("chartRegimeText");
-  if (regimeEl) {
-    regimeEl.classList.remove("warn-text", "good-text");
-    const tone = regimeConfirm.tone || regimeInfo.tone;
-    if (tone) regimeEl.classList.add(tone);
-    regimeEl.title = regimeRaw !== "-" ? `세부 레짐: ${regimeRaw.toUpperCase()}` : "";
-  }
-  const riskEl = el("chartRiskText");
-  if (riskEl) {
-    const detail = [
-      risk.exposure > 0 ? `exposure ${fmtNum(risk.exposure, 2)}x` : "",
-      tpPrice > 0 ? `TP ${fmtNum(tpPrice, 2)}` : "",
-      slPrice > 0 ? `SL ${fmtNum(slPrice, 2)}` : "",
-    ].filter(Boolean).join(" / ");
-    riskEl.title = detail || "";
-  }
-  const unrealizedEl = el("chartUnrealizedPnlText");
-  const posSide = String(pos.current || "NONE").toUpperCase();
-  if (unrealizedEl) {
-    unrealizedEl.classList.remove("good-text", "bad-text", "muted-text");
-    const unrealizedClass = posSide === "NONE" ? "muted" : riskClass(unrealizedPnl);
-    unrealizedEl.classList.add(`${unrealizedClass}-text`);
-  }
-  const ribbon = el("chartAiRibbon");
-  if (ribbon) ribbon.className = `chart-ai-ribbon ${decision.cls === "long" ? "good" : decision.cls === "short" ? "bad" : "hold"}`;
-
-  // AI decision one-line summary
-  const currentPrice = Number(latestLivePriceByAsset[activeChartAsset] || active.last_price || active.price || 0);
-  let summaryText;
-  if (posSide === "LONG" || posSide === "SHORT") {
-    const sideKr = posSide === "LONG" ? "롱" : "숏";
-    const parts = [`${sideKr} ${fmtPctNoPlus(positionPct, 0)} 비중 보유`, `미실현 ${fmtPct(unrealizedPnl, 2)}`];
-    if (currentPrice > 0 && tpPrice > 0) {
-      const distTp = posSide === "LONG" ? ((tpPrice - currentPrice) / currentPrice) * 100 : ((currentPrice - tpPrice) / currentPrice) * 100;
-      if (distTp > 0) parts.push(`TP까지 ${fmtNum(distTp, 2)}%`);
-    }
-    if (currentPrice > 0 && slPrice > 0) {
-      const distSl = posSide === "LONG" ? ((currentPrice - slPrice) / currentPrice) * 100 : ((slPrice - currentPrice) / currentPrice) * 100;
-      if (distSl > 0) parts.push(`SL까지 ${fmtNum(distSl, 2)}%`);
-    }
-    summaryText = parts.join(" · ");
-  } else {
-    summaryText = `포지션 없음 · AI 판단 ${decision.text}`;
-  }
-  setT("chartAiSummaryText", summaryText);
-  renderChartRiskGauge(tp, sl, unrealizedPnl, posSide, tpPrice, slPrice, currentPrice);
-}
-
-function executionAlertState(state, compactState) {
-  const explicit = state?.execution_alert || compactState?.execution_alert;
-  if (explicit && typeof explicit === "object") return explicit;
-  const execution = state?.account?.execution || state?.signal?.live_execution || compactState?.signal?.live_execution || {};
-  const enabled = Boolean(execution.enabled);
-  const blocking = Boolean(execution.blocking);
-  const requested = execution.requested_enabled === undefined ? enabled : Boolean(execution.requested_enabled);
-  const error = String(execution.error || execution.last_error || "");
-  const decisionReason = String(state?.signal?.block_reason || state?.signal?.governor_reason || state?.signal?.hold_reason || "");
-  const decisionIssue = /(error|failed|mismatch|bad_|blocked|unavailable|not_ready|pending_reconcile)/i.test(decisionReason);
-  const reason = error || (decisionIssue ? decisionReason : "") || String(execution.disabled_reason || execution.status || "");
-  if (enabled && !blocking && !error && !decisionIssue) return { active: false };
-  const severity = error || /(error|failed|mismatch|bad_)/i.test(decisionReason) ? "error" : (requested ? "blocked" : "disabled");
-  return {
-    active: true,
-    severity,
-    title: severity === "error" ? "트레이딩봇 실행 오류" : (severity === "blocked" ? "실제 주문 실행 차단" : "실제 주문 실행 비활성"),
-    reason: reason || "unknown_execution_state",
-    occurred_at: execution.last_error_at || execution.disabled_at || state?.updated_at || "",
-  };
-}
-
-function renderExecutionAlert(state, compactState) {
-  const banner = el("executionAlertBanner");
-  if (!banner) return;
-  const alert = executionAlertState(state, compactState);
-  if (!alert?.active) {
-    banner.className = "execution-alert-banner hidden";
-    return;
-  }
-  const severity = ["error", "blocked", "disabled"].includes(String(alert.severity)) ? String(alert.severity) : "blocked";
-  banner.className = "execution-alert-banner " + severity;
-  setT("executionAlertTitle", String(alert.title || "트레이딩봇 실행 알림"));
-  setT("executionAlertReason", String(alert.reason || "unknown_execution_state"));
-  setT("executionAlertTime", alert.occurred_at ? "발생 " + fmtTs(alert.occurred_at) : "발생 시각 미상");
-}
-
-function exposureFromRow(row) {
-  return firstPositive(row.total_exposure, row.notional_exposure, row.new_total_exposure, row.new_notional_exposure, row.position_fraction, row.new_position_fraction, row.margin_fraction, row.new_margin_fraction);
-}
-
-function exposureSeries(filter) {
-  let rows = latestTradeJournal || [];
-  if (filter && filter !== "ALL") rows = rows.filter((row) => strategyTagFromRow(row) === filter);
-  // Only CLOSE events: one point per position that has actually been closed.
-  // OPEN/RESIZE rows are excluded so still-open positions (of any asset) never show up here.
-  return rows
-    .filter((row) => String(row.kind || "").toUpperCase() === "CLOSE")
-    .map((row) => ({ ts: row.closed_at || row.ts, exposure: exposureFromRow(row), side: row.side, kind: row.kind }))
-    .filter((row) => Number.isFinite(Number(row.exposure)) && Number(row.exposure) >= 0)
-    .slice(-80);
-}
-
-function riskClass(v) {
-  const x = Number(v || 0);
-  if (x > 0) return "good";
-  if (x < 0) return "bad";
-  return "muted";
 }
 
 function directionalCaution(score, th = 0.1) {
@@ -1325,29 +532,6 @@ function classifyIndicators(micro, tail) {
   };
 }
 
-function cleanDisplaySource(value) {
-  const head = String(value || "-").split("|")[0].trim();
-  const lower = head.toLowerCase();
-  if (lower.includes("alpha4_3_sticky") || lower.includes("alpha4.3 sticky") || lower.includes("sticky_current")) return "Alpha4.3 Sticky";
-  if (lower === "fully_learned" || lower.includes("fully_learned")) return "완전학습 거버너";
-  if (lower === "sniper" || lower.includes("high_conviction")) return "스나이퍼 5x";
-  if (lower === "trend" || lower.includes("bull_bear")) return "추세 5x";
-  if (lower === "micro" || lower.includes("wnc")) return "W/N/C 마이크로 5x";
-  if (lower === "cash" || lower.includes("no_sleeve_entry")) return "현금 대기";
-  if (lower.includes("final_governor")) return "최종 거버너";
-  if (lower.includes("sniper_priority_entry")) return "스나이퍼 우선 진입";
-  if (lower.includes("trend_sleeve_entry")) return "추세 슬리브 진입";
-  if (lower.includes("micro_sleeve_entry")) return "마이크로 슬리브 진입";
-  return head
-    .replaceAll("DSAC_CONTROLLER", "DSAC 컨트롤러")
-    .replaceAll("DSAC_COMPACT", "DSAC 컴팩트")
-    .replaceAll("DSAC_PRIMARY", "DSAC 기본")
-    .replaceAll("UNIFIED_BUCKET", "통합 버킷")
-    .replaceAll("UNIFIED_NATIVE", "통합 기본")
-    .replaceAll("DISPLAY_ONLY_DISABLED", "표시 전용 비활성")
-    .replaceAll("_", " ");
-}
-
 function setMeter(fillId, value01, tone = "good") {
   const fill = el(fillId);
   if (!fill) return;
@@ -1372,436 +556,15 @@ function axisTicks(min, max, targetTicks = 4) {
   return ticks;
 }
 
-function renderLineSvg(svg, points) {
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const w = Math.max(parentW, 400), h = 280;
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-  
-  const vals = (points || []).map(p => Number(p.equity || 1));
-  if (!vals.length) return;
-
-  const ml = 60, mr = 20, mt = 20, mb = 50;
-  const cw = w - ml - mr, ch = h - mt - mb;
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const pad = Math.max((max - min) * 0.1, 0.001);
-  const yMin = min - pad, yMax = max + pad, ySpan = yMax - yMin;
-  
-  const xAt = (i) => ml + (i * cw) / Math.max(vals.length - 1, 1);
-  const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
-  const NS = "http://www.w3.org/2000/svg";
-
-  // Gradient
-  const defs = document.createElementNS(NS, "defs");
-  const grad = document.createElementNS(NS, "linearGradient");
-  grad.setAttribute("id", "equityGrad"); grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0"); grad.setAttribute("x2", "0"); grad.setAttribute("y2", "1");
-  const s1 = document.createElementNS(NS, "stop"); s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", "var(--accent)"); s1.setAttribute("stop-opacity", "0.2");
-  const s2 = document.createElementNS(NS, "stop"); s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", "var(--accent)"); s2.setAttribute("stop-opacity", "0");
-  grad.appendChild(s1); grad.appendChild(s2);
-  defs.appendChild(grad);
-  svg.appendChild(defs);
-
-  // Grid
-  axisTicks(yMin, yMax, 4).forEach(t => {
-    const y = yAt(t);
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", y); line.setAttribute("y2", y);
-    line.setAttribute("stroke", "var(--line)"); line.setAttribute("stroke-width", "1");
-    svg.appendChild(line);
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", ml - 10); txt.setAttribute("y", y + 4);
-    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = `${fmtNum((t - 1) * 100, 0)}%`;
-    svg.appendChild(txt);
-  });
-
-  if (yMin <= 1 && yMax >= 1) {
-    const zero = document.createElementNS(NS, "line");
-    zero.setAttribute("x1", ml); zero.setAttribute("x2", w - mr);
-    zero.setAttribute("y1", yAt(1)); zero.setAttribute("y2", yAt(1));
-    zero.setAttribute("stroke", "var(--hover-line)");
-    zero.setAttribute("stroke-width", "1.5");
-    svg.appendChild(zero);
-  }
-
-  // Time Axis
-  const timeIndices = [0, Math.floor(vals.length / 2), vals.length - 1];
-  [...new Set(timeIndices)].forEach(idx => {
-    const x = xAt(idx);
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", x); txt.setAttribute("y", h - 20);
-    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = fmtDateTick(points[idx]?.ts || points[idx]?.closed_at);
-    svg.appendChild(txt);
-  });
-
-  // Line & Area
-  const pts = vals.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
-  const areaPath = document.createElementNS(NS, "polygon");
-  areaPath.setAttribute("points", `${ml},${h - mb} ${pts} ${w - mr},${h - mb}`);
-  areaPath.setAttribute("fill", "url(#equityGrad)");
-  svg.appendChild(areaPath);
-
-  const linePath = document.createElementNS(NS, "polyline");
-  linePath.setAttribute("points", pts); linePath.setAttribute("fill", "none");
-  linePath.setAttribute("stroke", "var(--accent)"); linePath.setAttribute("stroke-width", "2.8");
-  linePath.setAttribute("stroke-linejoin", "round");
-  svg.appendChild(linePath);
-
-  const vLine = document.createElementNS(NS, "line");
-  vLine.setAttribute("y1", mt); vLine.setAttribute("y2", h - mb);
-  vLine.setAttribute("stroke", "var(--hover-line)"); vLine.setAttribute("stroke-dasharray", "4,4");
-  vLine.style.display = "none"; vLine.style.pointerEvents = "none";
-  svg.appendChild(vLine);
-
-  const hoverDot = document.createElementNS(NS, "circle");
-  hoverDot.setAttribute("r", "5");
-  hoverDot.setAttribute("fill", "var(--accent)");
-  hoverDot.setAttribute("stroke", "var(--chart-bg)");
-  hoverDot.setAttribute("stroke-width", "2");
-  hoverDot.style.display = "none";
-  hoverDot.style.pointerEvents = "none";
-  svg.appendChild(hoverDot);
-
-  // Line Chart Tooltip Support
-  svg.onmousemove = (evt) => {
-    const rect = svg.getBoundingClientRect();
-    const mx = (evt.clientX - rect.left) * (w / rect.width);
-    if (mx < ml || mx > w - mr) { hideTooltip(); return; }
-    
-    const idx = Math.min(vals.length - 1, Math.max(0, Math.round(((mx - ml) / cw) * (vals.length - 1))));
-    const p = points[idx];
-    if (!p) return;
-    const timingText = executionTimingText(p);
-    const aiText = aiTimingText(p);
-    
-    const tx = xAt(idx);
-    hoverDot.setAttribute("cx", tx);
-    hoverDot.setAttribute("cy", yAt(vals[idx]));
-    hoverDot.style.display = "block";
-
-    vLine.setAttribute("x1", tx); vLine.setAttribute("x2", tx);
-    vLine.style.display = "block";
-
-    showTooltip(evt.pageX, evt.pageY, `
-      <div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.2);">자산 분석 #${idx + 1}</div>
-      누적자산: <b>${fmtNum(p.equity, 4)}</b><br>
-      누적수익률: <b>${fmtPct(Number(p.cumulative_return_pct ?? ((p.equity - 1) * 100)), 2)}</b><br>
-      거래수익률: <span style="color:${p.pnl_pct >= 0 ? "var(--good)" : "var(--bad)"}">${fmtPct(p.pnl_pct, 2)}</span><br>
-      ${timingText ? `<span style="font-size:10px;color:var(--muted);">${timingText}${aiText ? ` · ${aiText}` : ""}</span><br>` : ""}
-      <span style="font-size:10px;color:var(--muted);">${p.closed_at || p.ts || ""}</span>
-    `);
-  };
-  svg.onmouseleave = () => {
-    hideTooltip();
-    if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
-    if (typeof vLine !== 'undefined') vLine.style.display = "none";
-    if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
-  };
-}
-
-function renderBarSvg(svg, points) {
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const w = Math.max(parentW, 400), h = 280;
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-
-  const vals = (points || []).map(p => Number(p.pnl_pct || 0));
-  if (!vals.length) return;
-
-  const ml = 45, mr = 10, mt = 10, mb = 35;
-  const cw = w - ml - mr, ch = h - mt - mb;
-  const min = Math.min(...vals), max = Math.max(...vals);
-  // Flexible but balanced Y scale
-  const yMax = Math.max(max, Math.abs(min), 0.5) * 1.05;
-  const yMin = -yMax, ySpan = yMax - yMin;
-  const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
-  const NS = "http://www.w3.org/2000/svg";
-
-  const vLine = document.createElementNS(NS, "line");
-  vLine.setAttribute("y1", mt); vLine.setAttribute("y2", h - mb);
-  vLine.setAttribute("stroke", "var(--hover-line)"); vLine.setAttribute("stroke-dasharray", "4,4");
-  vLine.style.display = "none"; vLine.style.pointerEvents = "none";
-  svg.appendChild(vLine);
-
-  const hoverDot = document.createElementNS(NS, "circle");
-  hoverDot.setAttribute("r", "5");
-  hoverDot.setAttribute("fill", "var(--good)");
-  hoverDot.setAttribute("stroke", "var(--chart-bg)");
-  hoverDot.setAttribute("stroke-width", "2");
-  hoverDot.style.display = "none";
-  hoverDot.style.pointerEvents = "none";
-  svg.appendChild(hoverDot);
-
-  // Grid
-  axisTicks(yMin, yMax, 4).forEach(t => {
-    const y = yAt(t);
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", y); line.setAttribute("y2", y);
-    line.setAttribute("stroke", Math.abs(t) < 0.001 ? "var(--hover-line)" : "var(--line)");
-    line.setAttribute("stroke-width", Math.abs(t) < 0.001 ? "1.5" : "1");
-    svg.appendChild(line);
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", ml - 12); txt.setAttribute("y", y + 4);
-    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10"); txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = `${t.toFixed(0)}%`;
-    svg.appendChild(txt);
-  });
-
-  const bw = Math.min(cw / vals.length, 40);
-  const zeroY = yAt(0);
-  vals.forEach((v, i) => {
-    const bar = document.createElementNS(NS, "rect");
-    const hh = Math.abs(zeroY - yAt(v));
-    const x = ml + (cw / vals.length) * i + (cw / vals.length - bw) / 2;
-    bar.setAttribute("x", x); bar.setAttribute("y", v >= 0 ? zeroY - hh : zeroY);
-    bar.setAttribute("width", Math.max(bw - 4, 2)); bar.setAttribute("height", Math.max(hh, 1));
-    bar.setAttribute("fill", v >= 0 ? "var(--good)" : "var(--bad)");
-    bar.setAttribute("rx", "3");
-    svg.appendChild(bar);
-  });
-
-  // Bar Chart Tooltip Support
-  svg.onmousemove = (evt) => {
-    const rect = svg.getBoundingClientRect();
-    const mx = (evt.clientX - rect.left) * (w / rect.width);
-    if (mx < ml || mx > w - mr) { hideTooltip(); return; }
-    
-    const idx = Math.min(vals.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * vals.length)));
-    const p = points[idx];
-    if (!p) return;
-    const timingText = executionTimingText(p);
-    const aiText = aiTimingText(p);
-    
-    const pnl = Number(p.pnl_pct || 0);
-    const bwVal = cw / vals.length;
-    const tx = ml + idx * bwVal + bwVal / 2;
-    hoverDot.setAttribute("cx", tx);
-    hoverDot.setAttribute("cy", yAt(pnl));
-    hoverDot.style.display = "block";
-    hoverDot.setAttribute("fill", pnl >= 0 ? "var(--good)" : "var(--bad)");
-
-    vLine.setAttribute("x1", tx); vLine.setAttribute("x2", tx);
-    vLine.style.display = "block";
-
-    showTooltip(evt.pageX, evt.pageY, `
-      <div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.2);">청산 수익 분석</div>
-      거래수익률: <span style="color:${pnl >= 0 ? "var(--good)" : "var(--bad)"}">${fmtPct(pnl, 2)}</span><br>
-      누적수익률: <b>${fmtPct(Number(p.cumulative_return_pct ?? ((p.equity - 1) * 100)), 2)}</b><br>
-      누적자산: <b>${fmtNum(p.equity, 4)}</b><br>
-      ${timingText ? `<span style="font-size:10px;color:var(--muted);">${timingText}${aiText ? ` · ${aiText}` : ""}</span><br>` : ""}
-      <span style="font-size:10px;color:var(--muted);">${p.closed_at || p.ts || ""}</span>
-    `);
-  };
-  svg.onmouseleave = () => {
-    hideTooltip();
-    if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
-    if (typeof vLine !== 'undefined') vLine.style.display = "none";
-    if (typeof hoverDots !== 'undefined') hoverDots.forEach(d => d.style.display = "none");
-  };
-}
-
-function renderExposureSvg(svg, points) {
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const w = Math.max(parentW, 400), h = 240;
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-  const vals = (points || []).map((p) => Number(p.exposure || 0));
-  const NS = "http://www.w3.org/2000/svg";
-  if (!vals.length) {
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", w / 2);
-    txt.setAttribute("y", h / 2);
-    txt.setAttribute("text-anchor", "middle");
-    txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = "노출 이력 대기 중...";
-    svg.appendChild(txt);
-    return;
-  }
-
-  const ml = 48, mr = 18, mt = 16, mb = 34;
-  const cw = w - ml - mr, ch = h - mt - mb;
-  const max = Math.max(...vals, 1);
-  const yAt = (v) => mt + ((max - v) * ch) / max;
-  const xAt = (i) => ml + (i * cw) / Math.max(vals.length - 1, 1);
-
-  axisTicks(0, max, 4).forEach((t) => {
-    const y = yAt(t);
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml);
-    line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", y);
-    line.setAttribute("y2", y);
-    line.setAttribute("stroke", "var(--line)");
-    svg.appendChild(line);
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", ml - 8);
-    txt.setAttribute("y", y + 4);
-    txt.setAttribute("text-anchor", "end");
-    txt.setAttribute("font-size", "10");
-    txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = `${fmtNum(t, 2)}x`;
-    svg.appendChild(txt);
-  });
-
-  const pts = vals.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" ");
-  const line = document.createElementNS(NS, "polyline");
-  line.setAttribute("points", pts);
-  line.setAttribute("fill", "none");
-  line.setAttribute("stroke", "var(--accent)");
-  line.setAttribute("stroke-width", "2.5");
-  line.setAttribute("stroke-linejoin", "round");
-  svg.appendChild(line);
-
-  vals.forEach((v, i) => {
-    const dot = document.createElementNS(NS, "circle");
-    dot.setAttribute("cx", xAt(i));
-    dot.setAttribute("cy", yAt(v));
-    dot.setAttribute("r", "3");
-    dot.setAttribute("fill", String(points[i].side || "").toUpperCase() === "SHORT" ? "var(--bad)" : "var(--good)");
-    svg.appendChild(dot);
-  });
-
-  const start = document.createElementNS(NS, "text");
-  start.setAttribute("x", ml);
-  start.setAttribute("y", h - 12);
-  start.setAttribute("font-size", "10");
-  start.setAttribute("fill", "var(--muted)");
-  start.textContent = fmtDateTick(points[0]?.ts);
-  svg.appendChild(start);
-  const end = document.createElementNS(NS, "text");
-  end.setAttribute("x", w - mr);
-  end.setAttribute("y", h - 12);
-  end.setAttribute("text-anchor", "end");
-  end.setAttribute("font-size", "10");
-  end.setAttribute("fill", "var(--muted)");
-  end.textContent = fmtDateTick(points[points.length - 1]?.ts);
-  svg.appendChild(end);
-}
-
-function parseTradeJournal(text) {
-  return String(text || "").split(/\r?\n/).map(line => {
-    try { return JSON.parse(line.trim()); } catch (e) { return null; }
-  }).filter(Boolean);
-}
-
-function tradeSideClass(side) {
-  const s = String(side || "").toUpperCase();
-  return s === "LONG" ? "long" : s === "SHORT" ? "short" : "";
-}
-
-let latestJournalFilter = "ALL";
-
-function renderTradeJournal() {
-  const listEl = el("tradeJournalList");
-  const pnlEl = el("journalTotalPnl");
-  if (!listEl) return;
-
-  // 1. Filter
-  const filtered = closeTradeRows(latestJournalFilter);
-
-  // 2. Calculate compounded return for selected filter
-  const equitySeries = buildTradeEquitySeries(latestJournalFilter);
-  const totalPnl = equitySeries.length ? equitySeries[equitySeries.length - 1].cumulative_return_pct : 0;
-  if (pnlEl) {
-    pnlEl.textContent = `누적 ${fmtPct(totalPnl)}`;
-    pnlEl.className = `pnl-badge ${riskClass(totalPnl)}`;
-  }
-
-  // 2b. Hero metrics: cumulative return + today's realized P&L
-  setT("heroCumulativePnl", filtered.length ? fmtPct(totalPnl) : "-");
-  const heroCumEl = el("heroCumulativePnl");
-  if (heroCumEl) {
-    heroCumEl.classList.remove("good-text", "bad-text", "muted-text");
-    heroCumEl.classList.add(`${filtered.length ? riskClass(totalPnl) : "muted"}-text`);
-  }
-  setT("heroCumulativeSub", `총 ${filtered.length}건 체결`);
-
-  const todayRows = filtered.filter((row) => isToday(rowTs(row)));
-  const todayPnl = todayRows.reduce((sum, row) => sum + pnlPctFromRow(row), 0);
-  setT("heroTodayPnl", todayRows.length ? fmtPct(todayPnl) : "-");
-  const heroTodayEl = el("heroTodayPnl");
-  if (heroTodayEl) {
-    heroTodayEl.classList.remove("good-text", "bad-text", "muted-text");
-    heroTodayEl.classList.add(`${todayRows.length ? riskClass(todayPnl) : "muted"}-text`);
-  }
-  setT("heroTodaySub", todayRows.length ? `오늘 ${todayRows.length}건 체결` : "오늘 체결 없음");
-
-  // 3. Render list (latest 10)
-  const recent = filtered.slice(-10).reverse();
-  listEl.innerHTML = recent.map(row => {
-    const side = String(row.side || "-").toUpperCase();
-    const sideCls = tradeSideClass(side);
-    const pnlPct = pnlPctFromRow(row);
-    const coin = assetLabel(tradeAssetKey(row));
-    const source = tradeGovernorLabel(row);
-    const bucket = fmtNum(exposureFromRow(row) || row.execution_leverage || row.leverage || 1, 1);
-    const reasonText = closeReasonText(row);
-    const riskText = riskSummaryText(row);
-    const feeText = feeModelText(row);
-    const subText = [reasonText ? `청산 이유: ${reasonText}` : "", riskText, feeText].filter(Boolean).join(" · ");
-    const entryLiquidity = executionLegLiquidity(row, "entry");
-    const exitLiquidity = executionLegLiquidity(row, "exit");
-    return `
-      <div class="trade-journal-row">
-        <div class="trade-journal-left">
-          <div class="trade-journal-ts">${fmtTs(row.closed_at || row.ts)}</div>
-          <div class="trade-journal-side ${sideCls}">
-            <span class="trade-journal-asset">${coin}</span><span class="journal-label">${source}</span>${sideLabel(side)} <span class="trade-journal-bucket">${bucket}x</span>
-          </div>
-        </div>
-        <div class="trade-journal-meta">
-          <div class="trade-journal-main">${priceWithLiquidity("진입", row.entry_price, entryLiquidity)} → ${priceWithLiquidity("청산", row.exit_price, exitLiquidity)}</div>
-          <div class="trade-journal-sub muted">${subText}</div>
-        </div>
-        <div class="trade-journal-pnl ${riskClass(pnlPct)}">${fmtPct(pnlPct)}</div>
-      </div>`;
-  }).join("");
-}
-
-function renderTradePanels() {
-  renderTradeJournal();
-
-  try {
-    const eqSvg = el("equitySvg");
-    if (eqSvg) renderLineSvg(eqSvg, selectTradeRowsForCharts(latestJournalFilter));
-  } catch (e) { console.error("Equity Render Error:", e); }
-
-  try {
-    const pnSvg = el("pnlSvg");
-    if (pnSvg) renderBarSvg(pnSvg, selectTradeRowsForCharts(latestJournalFilter));
-  } catch (e) { console.error("PnL Render Error:", e); }
-
-  try {
-    const exSvg = el("exposureSvg");
-    if (exSvg) renderExposureSvg(exSvg, exposureSeries(latestJournalFilter));
-  } catch (e) { console.error("Exposure Render Error:", e); }
-}
-
-async function fetchBinanceHistory(asset = activeChartAsset) {
+async function fetchBinanceHistory(asset) {
   try {
     const res = await fetch(`/api/market-history?asset=${asset}`, { cache: "no-store" });
     if (!res.ok) return;
     const payload = await res.json();
     candleHistoryByAsset[asset] = Array.isArray(payload?.candles) ? payload.candles : [];
-    if (asset === activeChartAsset) syncActiveMarketState();
   } catch (e) { console.error("History Error:", e); }
 }
 
-async function maybeFetchBinanceHistory() {
-  const now = Date.now();
-  const cached = candleHistoryByAsset[activeChartAsset] || [];
-  const lastAt = Number(lastCandleHistoryFetchAtByAsset[activeChartAsset] || 0);
-  if (cached.length && now - lastAt < CANDLE_HISTORY_POLL_MS) return;
-  lastCandleHistoryFetchAtByAsset[activeChartAsset] = now;
-  await fetchBinanceHistory(activeChartAsset);
-}
-
-// Snapshot tab's chart is always ETH (matches the liquidation map's ETH-only scope), independent
-// of whichever asset the Live tab's chart is currently showing -- so it needs its own fetch
-// rather than piggybacking on maybeFetchBinanceHistory()'s activeChartAsset gating.
 async function maybeFetchSnapshotChartHistory() {
   const now = Date.now();
   const cached = candleHistoryByAsset[activeSnapshotAsset] || [];
@@ -1811,85 +574,20 @@ async function maybeFetchSnapshotChartHistory() {
   renderSnapshotChart();
 }
 
-async function refreshTradeJournals(nonce) {
-  const now = Date.now();
-  if (lastJournalFetchAt && now - lastJournalFetchAt < JOURNAL_POLL_MS) return false;
-
-  const apiHeaders = tradesEtag ? { "If-None-Match": tradesEtag } : {};
-  const apiRes = await fetch(`${API_TRADES_URL}?source=${latestJournalFilter}`, {
-    cache: "no-store",
-    headers: apiHeaders,
-  }).catch(() => null);
-  if (apiRes?.status === 304) {
-    lastJournalFetchAt = now;
-    return false;
-  }
-  if (apiRes && apiRes.ok) {
-    const payload = await apiRes.json();
-    tradesEtag = apiRes.headers.get("ETag") || tradesEtag;
-    latestTradeJournal = Array.isArray(payload?.rows) ? payload.rows : [];
-    latestTradeEquitySeries = Array.isArray(payload?.equity) ? payload.equity : [];
-    lastJournalFetchAt = now;
-    tradeJournalLoaded = true;
-    return true;
-  }
-
-  const journalRes = await fetch(`${TRADE_JOURNAL_URL}?t=${nonce}`, { cache: "no-store" }).catch(() => null);
-  const merged = [];
-  if (journalRes && journalRes.ok) {
-    merged.push(...parseTradeJournal(await journalRes.text()).map(r => ({ ...r, raw_source: r.source || "", source: strategyTagFromRow(r) })));
-  }
-  latestTradeJournal = merged.sort((a, b) => rowTs(a) - rowTs(b));
-  latestTradeEquitySeries = [];
-  lastJournalFetchAt = now;
-  tradeJournalLoaded = true;
-  return true;
-}
-
-function renderLiveMarket() {
-  if (!latestMainState) return;
-  const state = latestMainState;
-  const compactState = latestCompactState;
-  const activeState = usableGovernorShadowState(compactState) || state;
-  const chartState = assetDecisionState(state, compactState, activeChartAsset);
-  const currentPrice = Number(latestLivePrice || chartState?.last_price || chartState?.price || activeState.last_price || activeState.price || 0);
-  const entryPrice = Number(openPosition(chartState)?.entry_price || 0);
-  updateChart(
-    currentPrice,
-    latestLivePriceTs || chartState?.updated_at || chartState?.cycle_timestamp_kst || activeState.updated_at || activeState.cycle_timestamp_kst,
-    entryPrice,
-  );
-  setT("chartStamp", latestLivePriceTs ? fmtTs(latestLivePriceTs) : fmtTs(state.updated_at || state.cycle_timestamp_kst));
-}
-
 function applyDashboardEvent(payload) {
   const tickers = payload?.tickers || {};
-  let btcPriceUpdated = false;
-  let ethPriceUpdated = false;
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);
     if (!(price > 0) || !ASSET_CONFIG[asset]) return;
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
-    if (asset === "btc") btcPriceUpdated = true;
-    if (asset === "eth") ethPriceUpdated = true;
   });
-  if (btcPriceUpdated && latestBtcMultislotPayload) renderBtcMultislotSlots(latestBtcMultislotPayload);
-  if (ethPriceUpdated && latestEthOdyssey4Payload) renderEthOdyssey4Position(latestEthOdyssey4Payload);
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
   }
-  syncActiveMarketState();
-  if (!latestMainState || isScrolling) return;
-  if (payload?.state?.state) {
-    render(latestMainState, latestCompactState, {
-      stateChanged: true,
-      journalChanged: tradeJournalLoaded && !tradePanelsRendered,
-    });
-    return;
-  }
-  renderLiveMarket();
+  if (!latestMainState || isScrolling || !payload?.state?.state) return;
+  render(latestMainState, latestCompactState, { stateChanged: true });
 }
 
 function connectDashboardEvents() {
@@ -2317,11 +1015,9 @@ const SIGNAL_HORIZON = {
   // -- evidence signals (모두 이 저장소 표준 스코어카드: 1시간/4시간/8시간 중 1시간이 대표 지평) --
   orthogonal_combo: { text: "2시간", title: "발동 조건 자체는 오실레이터(p_fast/p_slow) 이중극단+delta_z/funding_z 확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 3.57xATR 이상 강하게 도달할 확률'로 평가(2026-08-31 교체, 이 저장소 분류·경제성 둘 다 역대 최고 성적)" },
   fib_extension_exhaustion: { text: "1시간", title: "1시간 기준 평가(실험적 등급, 표본 n≈190로 다른 6종보다 얇고 VAL→OOS lift 감쇠 확인)" },
-  smt_divergence: { text: "1시간", title: "1시간·4시간·8시간 중 1시간 기준 정밀도/lift로 평가" },
-  volume_wick_climax: { text: "1시간", title: "1시간·4시간·8시간 중 1시간 기준 정밀도/lift로 평가" },
+  smt_divergence: { text: "6시간", title: "발동 조건 자체는 ETH-BTC 48봉 스윙 교차자산 비확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '6시간 안 4.2xATR 도달 확률'로 평가(2026-08-31 교체, 이 저장소 분류 AUC 역대 최고)" },
   short_term_return_z: { text: "1시간", title: "발동 조건 자체는 15분(3봉) 수익률 급변이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 1.75xATR 도달 확률'로 평가" },
   taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
-  dalton_rule2_balance_edge: { text: "2.5시간", title: "발동 조건 자체는 기존과 동일, 신뢰도는 2026-08-30부터 TabPFN 메타라벨 모델의 실시간 확률(2.5시간 안 도달 확률)로 교체" },
   liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
 };
 
@@ -2487,7 +1183,7 @@ function renderLiquidationMapPanel() {
 // Display-only Korean name/description for the 6 evidence signals -- the underlying signal key
 // (s.name from the server, matching scripts/live_evidence_signal_dashboard_20260823.py's
 // SIGNAL_ORDER) is left untouched for traceability to the research docs; only the rendered text
-// is translated here, same pattern as cleanDisplaySource().
+// is translated here.
 // 4가지 독립 시도(강제청산 베토/exit_head 피쳐/사이징 피쳐/투표식 진입 공식) 전부 always_long/
 // always_short 벤치마크에 패배 -- docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md
 const EVIDENCE_SIGNAL_DISCLAIMER = "이 신호를 자동매매 트리거로 직접 연결하는 시도가 4가지(강제청산 베토 · exit_head 피쳐 · 사이징 피쳐 · 투표식 진입 공식) 전부 실패했습니다(always_long/always_short 벤치마크에 짐). 실제 반전이 맞아도 역사적으로 0.5~0.85% 더 불리한 방향으로 움직인 뒤에야 진짜 전환점이 왔습니다 — 정확한 바닥/천장을 찍어주는 신호가 아니라, 사람이 재량 판단할 때 참고하는 확률적 맥락으로만 쓰세요.";
@@ -2523,11 +1219,6 @@ const EVIDENCE_SIGNAL_KO = {
       "[검증] VAL 0.659 / OOS 0.637 / HOLDOUT 0.661.\n" +
       "[경제성] 트레일링스톱 VAL +10.70bp / OOS +14.49bp / 홀드아웃 +1.97bp(승률67.7%) — 이 신호 최초로 3구간 전부 통과(단, 실거래 미배포 · 재량 참고용).",
   },
-  volume_wick_climax: {
-    name: "거래량 꼬리 클라이맥스",
-    detail: "[조건] 거래량 2표준편차↑ 폭증 + 꼬리비율(캔들범위 대비) 50%↑ (꼬리비율 = (시가·종가 중 작은값−저가)/(고가−저가), 천장은 반대쪽 꼬리로 정반대).\n" +
-      "[의미] 패닉성 매도/매수가 몰렸다가 즉시 흡수됐다는 신호.",
-  },
   short_term_return_z: {
     name: "단기(15분) 수익률 급변",
     detail: "[조건] 최근 15분 수익률이 하루평균 대비 ±2.5표준편차 이상.\n" +
@@ -2541,12 +1232,12 @@ const EVIDENCE_SIGNAL_KO = {
       "[검증] VAL 0.633 / OOS 0.645 / HOLDOUT 0.667.\n" +
       "[경제성] 트레일링스톱 VAL+OOS +8.68bp / 홀드아웃 +2.17bp(승률64.7%) — 이 신호 최초 완주(단, 실거래 미배포 · 재량 참고용).",
   },
-  // 2026-08-24 추가(같은 날 후속) — ICT 2022 잔여요소 연구(오더블록/SMT/Po3)에서 유일하게 살아남은
-  // SMT 다이버전스(3.12x/2.84x).
   smt_divergence: {
     name: "SMT 다이버전스(ETH·BTC 엇갈림)",
-    detail: "[조건] ETH는 직전 4시간 저점(고점) 갱신, BTC는 미갱신 — 상관자산 비확인.\n" +
-      "[의미] ICT SMT 다이버전스 — 두 자산 중 하나만 신저점이면 '진짜 매도세'가 아닐 가능성. 유동성 스윕과 정밀도 동급(42~43%).",
+    detail: "[조건] ETH는 직전 48봉(4시간) 저점(고점) 갱신, BTC는 자기 48봉 스윙을 미갱신 — 상관자산 비확인(ICT SMT 다이버전스, 유동성 스윕과 형제신호).\n" +
+      "[신뢰도] 발동 시점 23피쳐(Tier0 그대로 — ablation 결과 변동성레짐·세션타이밍 전부 진짜 기여로 확인돼 축소 안 함)를 TabPFN에 넣어 '6시간 안 4.2×ATR 도달확률' 산출.\n" +
+      "[검증] VAL 0.661 / OOS 0.625 / HOLDOUT 0.682 — 이 저장소 분류성능 역대 최고.\n" +
+      "[경제성] 트레일링스톱 VAL +7.00bp(승률72.4%) / OOS +6.18bp(승률69.6%) / 홀드아웃 +3.24bp(승률70.3%) — 96조합 중 71개 통과, 승률이 구간마다 거의 안 줄어드는 이 저장소 최고 안정성.",
   },
   // 2026-08-24 추가(같은 날 후속) — 피보나치/하모닉 기하학 계열 연구에서 유일하게 sweep급 lift를
   // 보인 확장소진(3.27x/2.32x). 다른 6종보다 표본이 훨씬 얇고(n~190 vs 수백~수천) 경제성 게이트는
@@ -2556,16 +1247,6 @@ const EVIDENCE_SIGNAL_KO = {
     detail: "[조건] 가격이 직전 스윙 구간의 127.2~161.8% 지점까지 확장.\n" +
       "[의미] 피보나치 확장 소진 — 리프트는 준수(3.27x/2.32x)하나 표본 n~190로 얇고(다른 6종은 수백~수천) 경제성 게이트 0/16 실패, 실험적 등급.",
   },
-  // 2026-08-25 추가 — AMT(마켓프로파일 이론) Dalton 룰2. "경제성 아니라 통계적 정보성이 대시보드
-  // 노출 기준"이라는 사용자 원칙 재확인 이후 첫 추가 사례(feedback_dashboard_indicators_ic_bar_not_
-  // pnl_bar 메모리). 다른 7종과 실패 사유가 다름 — 경제성 게이트(시장가 비용)가 아니라 고정 TP:SL
-  // 번역 자체가 실패(비용 0이어도 짐). 탐지 자체는 실재하는 정보라 사용자가 재량 참고용으로 채택.
-  dalton_rule2_balance_edge: {
-    name: "Dalton 룰2 — 레인지 가장자리 반응",
-    detail: "[조건] 저변동성 국면(ATR%백분위 30%이하)에서 가격이 직전 4시간 레인지 가장자리(±15%이내)에 위치 — Dalton 룰2.\n" +
-      "[신뢰도] 상태진입 시점 23피쳐를 TabPFN에 넣어 '2.5시간 안 1.90×ATR 도달확률' 산출.\n" +
-      "[검증] VAL 0.598 / OOS 0.605 / HOLDOUT 0.576(이 계열 중 가장 안정) — 단, 리프트 0.86배 · 정의변수 미포함 · 경제성 미검증 등 유보사항 있어 재량 참고용.",
-  },
 };
 
 // Snapshot tab "13신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
@@ -2574,12 +1255,10 @@ const EVIDENCE_SIGNAL_KO = {
 const EVIDENCE_STRIP_CHIP_IDS = {
   orthogonal_combo: "eviChipOrthogonal",
   liquidity_sweep: "eviChipSweep",
-  volume_wick_climax: "eviChipVolWick",
   short_term_return_z: "eviChipReturnZ",
   taker_delta_z_climax: "eviChipTakerDelta",
   smt_divergence: "eviChipSmt",
   fib_extension_exhaustion: "eviChipFibExt",
-  dalton_rule2_balance_edge: "eviChipDalton",
 };
 
 function resetEvidenceStripChips() {
@@ -3066,316 +1745,11 @@ function renderMacroCalendar(payload) {
   );
 }
 
-function slotHoldText(holdBars, barSeconds) {
-  const totalMinutes = Math.round((Number(holdBars || 0) * Number(barSeconds || 300)) / 60);
-  if (!(totalMinutes > 0)) return "-";
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours > 0 ? `${hours}시간 ${minutes}분 (${holdBars}봉)` : `${minutes}분 (${holdBars}봉)`;
-}
-
-// SL/TP/MFE/MAE come from state as raw price-move fractions (e.g. 0.075 = 7.5% price move),
-// not account-level PnL -- see the Futures Risk Sizing Contract (PnL = price_move * notional).
-// All five inputs here must already be converted to account-level % (rawMove * notional * 100)
-// so they share the same scale as the live unrealized-PnL marker.
-function shadowSlotRangeBar(slPct, tpPct, maePct, mfePct, currentPct, currentTitle) {
-  const known = [slPct, tpPct, maePct, mfePct, 0, currentPct].filter((v) => Number.isFinite(v));
-  const lo = Math.min(...known);
-  const hi = Math.max(...known);
-  const span = hi - lo || 1;
-  const pos = (v) => clamp01((v - lo) / span) * 100;
-  const zero = pos(0);
-  const maeFill = Number.isFinite(maePct)
-    ? (() => { const e = pos(maePct); return `<div class="shadow-slot-range-fill bad" style="left:${Math.min(zero, e)}%; width:${Math.abs(zero - e)}%;" title="MAE ${fmtPct(maePct, 2)}"></div>`; })()
-    : "";
-  const mfeFill = Number.isFinite(mfePct)
-    ? (() => { const e = pos(mfePct); return `<div class="shadow-slot-range-fill good" style="left:${Math.min(zero, e)}%; width:${Math.abs(zero - e)}%;" title="MFE ${fmtPct(mfePct, 2)}"></div>`; })()
-    : "";
-  const currentKnown = Number.isFinite(currentPct);
-  const currentCls = currentKnown ? riskClass(currentPct) : "muted";
-  return `
-    <div class="shadow-slot-range">
-      <div class="shadow-slot-range-track">
-        <div class="shadow-slot-range-zero" style="left:${zero}%;"></div>
-        ${maeFill}
-        ${mfeFill}
-        <div class="shadow-slot-range-mark sl" style="left:${pos(slPct)}%;" title="SL ${fmtPct(slPct, 2)}"></div>
-        <div class="shadow-slot-range-mark tp" style="left:${pos(tpPct)}%;" title="TP ${fmtPct(tpPct, 2)}"></div>
-        ${currentKnown ? `<div class="shadow-slot-range-current ${currentCls}" style="left:${pos(currentPct)}%;" title="${currentTitle || `현재 ${fmtPct(currentPct, 2)}`}"></div>` : ""}
-      </div>
-      <div class="shadow-slot-range-labels">
-        <span class="tag sl">SL ${fmtPct(slPct, 1)}</span>
-        <span class="tag zero">0</span>
-        <span class="tag tp">TP ${fmtPct(tpPct, 1)}</span>
-      </div>
-    </div>`;
-}
-
-// tp/sl are account-level fractions from activeRiskModel() (e.g. 0.12 = 12%, rawMove * exposure)
-// -- same convention as signedRiskPairLabel(), which also multiplies by 100 for display.
-// No MFE/MAE tracking is exposed for the real live position, so the gauge shows SL/TP bounds
-// and the current unrealized marker only -- no progress-fill shading.
-function renderChartRiskGauge(tp, sl, unrealizedPnl, posSide, tpPrice, slPrice, currentPrice) {
-  const gaugeEl = el("chartRiskGauge");
-  if (!gaugeEl) return;
-  if (posSide !== "LONG" && posSide !== "SHORT") {
-    gaugeEl.innerHTML = "";
-    return;
-  }
-  if (!(tp > 0) && !(sl > 0)) {
-    gaugeEl.innerHTML = "";
-    return;
-  }
-  const tpPct = tp * 100;
-  const slPct = sl * 100;
-  const distTp = currentPrice > 0 && tpPrice > 0
-    ? (posSide === "LONG" ? (tpPrice - currentPrice) / currentPrice : (currentPrice - tpPrice) / currentPrice) * 100 : null;
-  const distSl = currentPrice > 0 && slPrice > 0
-    ? (posSide === "LONG" ? (currentPrice - slPrice) / currentPrice : (slPrice - currentPrice) / currentPrice) * 100 : null;
-  const distParts = [];
-  if (distTp !== null) distParts.push(`TP까지 ${fmtNum(Math.max(distTp, 0), 2)}%`);
-  if (distSl !== null) distParts.push(`SL까지 ${fmtNum(Math.max(distSl, 0), 2)}%`);
-  const currentTitle = `현재 ${fmtPct(unrealizedPnl, 2)}${distParts.length ? " · " + distParts.join(" · ") : ""}`;
-  gaugeEl.innerHTML = shadowSlotRangeBar(-slPct, tpPct, NaN, NaN, unrealizedPnl, currentTitle);
-}
-
-function shadowPositionCardHtml(pos, idx, livePrice, barSeconds) {
-  if (!pos) {
-    return `<div class="shadow-slot-card empty"><span class="muted">${idx !== null ? "비어있음" : "열린 포지션 없음"}</span></div>`;
-  }
-  const isLong = Number(pos.side) > 0;
-  const sideCls = isLong ? "long" : "short";
-  const entryPrice = Number(pos.entry_price || 0);
-  const notional = Number(pos.notional_exposure ?? pos.notional ?? 0);
-  const tpRaw = Number(pos.take_profit || 0);
-  const slRaw = Number(pos.stop_loss || 0);
-  const mfeRaw = Number(pos.mfe || 0);
-  const maeRaw = Number(pos.mae || 0);
-  const priceMoveFrac = livePrice > 0 && entryPrice > 0
-    ? (isLong ? (livePrice - entryPrice) / entryPrice : (entryPrice - livePrice) / entryPrice)
-    : null;
-  const unrealizedPct = priceMoveFrac !== null ? priceMoveFrac * notional * 100 : null;
-  const tpAcct = tpRaw * notional * 100;
-  const slAcct = -slRaw * notional * 100;
-  const mfeAcct = mfeRaw * notional * 100;
-  const maeAcct = maeRaw * notional * 100;
-  const tpPrice = entryPrice > 0 ? (isLong ? entryPrice * (1 + tpRaw) : entryPrice * (1 - tpRaw)) : 0;
-  const slPrice = entryPrice > 0 ? (isLong ? entryPrice * (1 - slRaw) : entryPrice * (1 + slRaw)) : 0;
-  const distTp = livePrice > 0 && tpPrice > 0
-    ? (isLong ? (tpPrice - livePrice) / livePrice : (livePrice - tpPrice) / livePrice) * 100 : null;
-  const distSl = livePrice > 0 && slPrice > 0
-    ? (isLong ? (livePrice - slPrice) / livePrice : (slPrice - livePrice) / livePrice) * 100 : null;
-  const distParts = [];
-  if (distTp !== null) distParts.push(`TP까지 ${fmtNum(Math.max(distTp, 0), 2)}%`);
-  if (distSl !== null) distParts.push(`SL까지 ${fmtNum(Math.max(distSl, 0), 2)}%`);
-  const currentTitle = `현재 ${unrealizedPct === null ? "-" : fmtPct(unrealizedPct, 2)}${distParts.length ? " · " + distParts.join(" · ") : ""}`;
-  const srcLabel = pos.source_component ? `<span class="shadow-slot-src muted">${pos.source_component}</span>` : "";
-  return `
-    <div class="shadow-slot-card">
-      <div class="shadow-slot-head">
-        <span class="shadow-slot-side ${sideCls}">${sideLabel(isLong ? "LONG" : "SHORT")} · ${fmtNum(Number(pos.leverage || 1), 1)}x</span>
-        ${srcLabel}
-      </div>
-      <div class="shadow-ribbon">
-        <div class="ribbon-item ribbon-primary">
-          <span>미실현손익</span>
-          <strong class="${unrealizedPct === null ? "muted" : riskClass(unrealizedPct)}-text">${unrealizedPct === null ? "-" : fmtPct(unrealizedPct, 2)}</strong>
-        </div>
-        <div class="ribbon-item">
-          <span>진입가 → 현재가</span>
-          <strong>${fmtNum(entryPrice, 1)} → ${livePrice > 0 ? fmtNum(livePrice, 1) : "-"}</strong>
-        </div>
-        <div class="ribbon-item">
-          <span>진입 시각</span>
-          <strong>${fmtTs(pos.entry_timestamp || pos.entry_ts)}</strong>
-        </div>
-        <div class="ribbon-item">
-          <span>보유 시간</span>
-          <strong>${slotHoldText(pos.hold_bars, barSeconds)}</strong>
-        </div>
-        <div class="ribbon-item">
-          <span>마진 · 명목</span>
-          <strong>${fmtPctNoPlus(Number(pos.margin_fraction || 0) * 100, 2)} · ${fmtPctNoPlus(notional * 100, 2)}</strong>
-        </div>
-        <div class="ribbon-item ribbon-risk">
-          <span>TP / SL</span>
-          <strong>계정 ${fmtPct(tpAcct, 2)}/${fmtPct(slAcct, 2)} · 가격 ${fmtPctNoPlus(tpRaw * 100, 1)}/-${fmtPctNoPlus(slRaw * 100, 1)}</strong>
-        </div>
-      </div>
-      ${shadowSlotRangeBar(slAcct, tpAcct, maeAcct, mfeAcct, unrealizedPct, currentTitle)}
-    </div>`;
-}
-
-function renderBtcMultislotSlots(payload) {
-  const listEl = el("btcMultislotSlotList");
-  const tabsEl = el("btcMultislotSlotTabs");
-  if (!listEl) return;
-  const slots = Array.isArray(payload?.slots) ? payload.slots : [];
-  const barSeconds = Number(payload?.bar_seconds || 300);
-  const livePrice = Number(latestLivePriceByAsset["btc"] || 0);
-  if (!slots.length) {
-    if (tabsEl) tabsEl.innerHTML = "";
-    listEl.innerHTML = `<div class="shadow-slot-card empty"><span class="muted">슬롯 정보 없음</span></div>`;
-    return;
-  }
-  if (btcMultislotActiveSlot >= slots.length) btcMultislotActiveSlot = 0;
-  if (tabsEl) {
-    tabsEl.innerHTML = slots.map((slot, idx) => {
-      const dotCls = slot ? (Number(slot.side) > 0 ? "long" : "short") : "";
-      return `<button type="button" class="shadow-slot-tab ${idx === btcMultislotActiveSlot ? "active" : ""}" data-slot-idx="${idx}">
-        <span class="shadow-slot-tab-dot ${dotCls}"></span>슬롯 ${idx + 1}
-      </button>`;
-    }).join("");
-    tabsEl.querySelectorAll(".shadow-slot-tab").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        btcMultislotActiveSlot = Number(btn.dataset.slotIdx || 0);
-        renderBtcMultislotSlots(latestBtcMultislotPayload || payload);
-      });
-    });
-  }
-  listEl.innerHTML = shadowPositionCardHtml(slots[btcMultislotActiveSlot], btcMultislotActiveSlot, livePrice, barSeconds);
-}
-
-function svgEmptyState(svg, text) {
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const h = svg.viewBox?.baseVal?.height || 200;
-  const w = Math.max(parentW, 400);
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-  const NS = "http://www.w3.org/2000/svg";
-  const txt = document.createElementNS(NS, "text");
-  txt.setAttribute("x", w / 2);
-  txt.setAttribute("y", h / 2);
-  txt.setAttribute("text-anchor", "middle");
-  txt.setAttribute("fill", "var(--muted)");
-  txt.textContent = text;
-  svg.appendChild(txt);
-}
-
-function renderShadowCharts(payload, pnlSvgId, eqSvgId) {
-  const points = (payload?.equity_curve || []).map((row) => ({
-    ts: row.ts,
-    equity: 1 + Number(row.cumulative_return_pct || 0) / 100,
-    pnl_pct: Number(row.trade_return_pct || 0),
-    cumulative_return_pct: Number(row.cumulative_return_pct || 0),
-  }));
-  const pnlSvg = el(pnlSvgId);
-  const eqSvg = el(eqSvgId);
-  if (pnlSvg) points.length ? renderBarSvg(pnlSvg, points) : svgEmptyState(pnlSvg, "청산된 거래 없음");
-  if (eqSvg) points.length ? renderLineSvg(eqSvg, points) : svgEmptyState(eqSvg, "청산된 거래 없음");
-}
-
-function renderBtcMultislotShadow(payload) {
-  latestBtcMultislotPayload = payload;
-  const badge = el("btcMultislotBadge");
-  const stale = Boolean(payload?.stale);
-  if (badge) {
-    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
-    badge.textContent = stale ? "STALE" : "LIVE";
-  }
-  const age = Number(payload?.age_minutes);
-  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-  setT("btcMultislotSub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
-  setT("btcMultislotSlots", `${payload?.open_slots ?? "-"} / ${payload?.slot_count ?? "-"}`);
-  setT("btcMultislotTrades", `${payload?.total_trades ?? 0}건`);
-  const pnl = Number(payload?.cumulative_return_pct);
-  const pnlEl = el("btcMultislotPnl");
-  setT("btcMultislotPnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
-  if (pnlEl) {
-    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
-    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
-  }
-  renderBtcMultislotSlots(payload);
-  renderShadowCharts(payload, "btcMultislotPnlSvg", "btcMultislotEquitySvg");
-}
-
-async function refreshBtcMultislotShadow() {
-  const now = Date.now();
-  if (now - btcMultislotLastFetchAt < OPS_POLL_MS) return;
-  btcMultislotLastFetchAt = now;
-  try {
-    const res = await fetch(API_BTC_MULTISLOT_SHADOW_URL, { cache: "no-store", headers: btcMultislotEtag ? { "If-None-Match": btcMultislotEtag } : {} });
-    if (res.status === 304) return;
-    if (!res.ok) throw new Error(`btc multislot shadow ${res.status}`);
-    btcMultislotEtag = res.headers.get("ETag") || btcMultislotEtag;
-    renderBtcMultislotShadow(await res.json());
-  } catch (error) {
-    console.error("BTC multislot shadow fetch error:", error);
-    const badge = el("btcMultislotBadge");
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
-  }
-}
-
-function renderEthOdyssey4Position(payload) {
-  const cardEl = el("ethOdyssey4PositionCard");
-  if (!cardEl) return;
-  const livePrice = Number(latestLivePriceByAsset["eth"] || 0);
-  const barSeconds = Number(payload?.bar_seconds || 300);
-  cardEl.innerHTML = shadowPositionCardHtml(payload?.position || null, null, livePrice, barSeconds);
-}
-
-function renderEthOdyssey4Shadow(payload) {
-  latestEthOdyssey4Payload = payload;
-  const badge = el("ethOdyssey4Badge");
-  const stale = Boolean(payload?.stale);
-  if (badge) {
-    badge.className = `ops-badge ${stale ? "bad" : "good"}`;
-    badge.textContent = stale ? "STALE" : "LIVE";
-  }
-  const age = Number(payload?.age_minutes);
-  const ageText = Number.isFinite(age) ? `${age.toFixed(age < 10 ? 1 : 0)}분 전` : "-";
-  setT("ethOdyssey4Sub", `마지막 bar ${fmtTs(payload?.last_bar)} · ${ageText} 갱신`);
-
-  const side = Number(payload?.position_side || 0);
-  const posText = side > 0 ? "LONG" : side < 0 ? "SHORT" : "FLAT";
-  const src = payload?.position_source_component;
-  setT("ethOdyssey4Position", src ? `${posText} (${src})` : posText);
-
-  setT("ethOdyssey4Trades", `${payload?.total_trades ?? 0}건`);
-
-  const pnl = Number(payload?.cumulative_return_pct);
-  const pnlEl = el("ethOdyssey4Pnl");
-  setT("ethOdyssey4Pnl", Number.isFinite(pnl) ? fmtPct(pnl, 2) : "-");
-  if (pnlEl) {
-    pnlEl.classList.remove("good-text", "bad-text", "muted-text");
-    pnlEl.classList.add(`${Number.isFinite(pnl) ? riskClass(pnl) : "muted"}-text`);
-  }
-
-  const mdd = Number(payload?.mdd_pct);
-  setT("ethOdyssey4Mdd", Number.isFinite(mdd) ? fmtPctNoPlus(mdd, 2) : "-");
-
-  setT("ethOdyssey4GuardBars", `${payload?.h48qual_guard_active_bars ?? 0}bar`);
-  setT("ethOdyssey4VetoBars", `${payload?.zig075_short_veto_bars ?? 0}bar`);
-
-  setT("ethOdyssey4H48qualQuality", qualityText(payload?.h48qual_quality_score, payload?.h48qual_quality_threshold));
-  setT("ethOdyssey4Zig075Quality", qualityText(payload?.zig075_quality_score, payload?.zig075_quality_threshold));
-
-  renderEthOdyssey4Position(payload);
-  renderShadowCharts(payload, "ethOdyssey4PnlSvg", "ethOdyssey4EquitySvg");
-}
-
-async function refreshEthOdyssey4Shadow() {
-  const now = Date.now();
-  if (now - ethOdyssey4LastFetchAt < OPS_POLL_MS) return;
-  ethOdyssey4LastFetchAt = now;
-  try {
-    const res = await fetch(API_ETH_ODYSSEY4_SHADOW_URL, { cache: "no-store", headers: ethOdyssey4Etag ? { "If-None-Match": ethOdyssey4Etag } : {} });
-    if (res.status === 304) return;
-    if (!res.ok) throw new Error(`eth odyssey4 shadow ${res.status}`);
-    ethOdyssey4Etag = res.headers.get("ETag") || ethOdyssey4Etag;
-    renderEthOdyssey4Shadow(await res.json());
-  } catch (error) {
-    console.error("ETH Odyssey4 shadow fetch error:", error);
-    const badge = el("ethOdyssey4Badge");
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "UNREACHABLE"; }
-  }
-}
 
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.pageTab; // "live" | "ops" | "snapshot"
+    const target = button.dataset.pageTab; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31)
     activePageTab = target;
-    el("liveTabPanel")?.classList.toggle("hidden", target !== "live");
     el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
@@ -3394,8 +1768,6 @@ function setupPageTabs() {
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
-    } else {
-      btcMultislotLastFetchAt = 0; refreshBtcMultislotShadow(); ethOdyssey4LastFetchAt = 0; refreshEthOdyssey4Shadow();
     }
   }));
 }
@@ -3450,17 +1822,6 @@ function visibleCandleWindow(candles) {
     total,
     includeCurrent: end >= total,
   };
-}
-
-function renderLatestCandleChart() {
-  const svg = el("candleSvg");
-  syncActiveMarketState();
-  if (!svg || !candleHistory.length) return;
-  const currentPrice = Number(latestLivePrice || candleHistory[candleHistory.length - 1]?.close || 0);
-  const selected = assetDecisionState(latestMainState || latestState, latestCompactState, activeChartAsset);
-  const entryPrice = selected ? Number(selected?.position?.entry_price || selected?.entry_price || 0) : 0;
-  const riskLevels = selected ? latestChartRiskLevels : [];
-  renderCandleSvg(svg, candleHistory, chartJournalRows(), entryPrice, currentPrice, riskLevels);
 }
 
 // Time series of density snapshots for the chart's background heatmap, 2026-08-25 -- replaces the
@@ -3620,110 +1981,6 @@ function regimeDominant(r) {
     : r.bear_prob >= r.chop_prob ? "bear" : "chop";
 }
 
-function chartTouchDistance(touches) {
-  if (!touches || touches.length < 2) return 0;
-  const dx = touches[0].clientX - touches[1].clientX;
-  const dy = touches[0].clientY - touches[1].clientY;
-  return Math.hypot(dx, dy);
-}
-
-function setupMobileCandleGestures() {
-  const svg = el("candleSvg");
-  if (!svg) return;
-
-  svg.addEventListener("touchstart", (evt) => {
-    if (!isMobileChartMode() || !candleHistory.length) return;
-    if (evt.touches.length === 1) {
-      mobileChartGesture.panStartX = evt.touches[0].clientX;
-      mobileChartGesture.panStartIndex = mobileChartView.start ?? mobileChartMaxStart(candleHistory.length, normalizedMobileChartSize(candleHistory.length));
-    } else if (evt.touches.length >= 2) {
-      const size = normalizedMobileChartSize(candleHistory.length);
-      const start = mobileChartView.start ?? mobileChartMaxStart(candleHistory.length, size);
-      mobileChartGesture.pinchStartDistance = chartTouchDistance(evt.touches);
-      mobileChartGesture.pinchStartSize = size;
-      mobileChartGesture.pinchStartCenter = start + size / 2;
-    }
-  }, { passive: true });
-
-  svg.addEventListener("touchmove", (evt) => {
-    if (!isMobileChartMode() || !candleHistory.length) return;
-    evt.preventDefault();
-    const total = candleHistory.length;
-
-    if (evt.touches.length >= 2) {
-      const distance = chartTouchDistance(evt.touches);
-      if (!(distance > 0) || !(mobileChartGesture.pinchStartDistance > 0)) return;
-      const rawSize = mobileChartGesture.pinchStartSize * (mobileChartGesture.pinchStartDistance / distance);
-      const size = Math.round(clampNum(rawSize, MOBILE_CHART_MIN_CANDLES, Math.min(MOBILE_CHART_MAX_CANDLES, total)));
-      const start = Math.round(clampNum(mobileChartGesture.pinchStartCenter - size / 2, 0, mobileChartMaxStart(total, size)));
-      mobileChartView.size = size;
-      mobileChartView.start = start;
-      mobileChartView.followLatest = start + size >= total;
-      renderLatestCandleChart();
-      return;
-    }
-
-    if (evt.touches.length === 1) {
-      const rect = svg.getBoundingClientRect();
-      const size = normalizedMobileChartSize(total);
-      const dx = evt.touches[0].clientX - mobileChartGesture.panStartX;
-      const candleDelta = Math.round((-dx / Math.max(rect.width, 1)) * size);
-      const start = Math.round(clampNum(mobileChartGesture.panStartIndex + candleDelta, 0, mobileChartMaxStart(total, size)));
-      mobileChartView.start = start;
-      mobileChartView.size = size;
-      mobileChartView.followLatest = start + size >= total;
-      renderLatestCandleChart();
-    }
-  }, { passive: false });
-
-  svg.addEventListener("wheel", (evt) => {
-    if (!isMobileChartMode() || !candleHistory.length) return;
-    evt.preventDefault();
-    const total = candleHistory.length;
-    const size = normalizedMobileChartSize(total);
-    const start = mobileChartView.start ?? mobileChartMaxStart(total, size);
-    const center = start + size / 2;
-    const factor = evt.deltaY > 0 ? 1.14 : 0.88;
-    const nextSize = Math.round(clampNum(size * factor, MOBILE_CHART_MIN_CANDLES, Math.min(MOBILE_CHART_MAX_CANDLES, total)));
-    const nextStart = Math.round(clampNum(center - nextSize / 2, 0, mobileChartMaxStart(total, nextSize)));
-    mobileChartView.size = nextSize;
-    mobileChartView.start = nextStart;
-    mobileChartView.followLatest = nextStart + nextSize >= total;
-    renderLatestCandleChart();
-  }, { passive: false });
-
-  window.addEventListener("resize", () => {
-    mobileChartView.start = null;
-    mobileChartView.followLatest = true;
-    renderLatestCandleChart();
-  });
-}
-
-function updateChart(price, timestamp, entryPriceArg = 0, force = false) {
-  if (!(Number(price) > 0)) return;
-  const tsMs = Date.parse(timestamp || "");
-  const ts = Math.floor((Number.isFinite(tsMs) ? tsMs : Date.now()) / 1000);
-  const candleTs = Math.floor(ts / (CHART_CANDLE_MIN * 60)) * (CHART_CANDLE_MIN * 60);
-  let last = candleHistory[candleHistory.length - 1];
-  if (!last || last.time < candleTs) {
-    last = { time: candleTs, open: price, high: price, low: price, close: price };
-    candleHistory.push(last);
-    if (candleHistory.length > CHART_MAX_CANDLES) candleHistory.shift();
-  } else {
-    last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.close = price;
-  }
-  const now = Date.now();
-  if (!force && now - lastChartRenderAt < CHART_RENDER_MIN_INTERVAL_MS) return;
-  lastChartRenderAt = now;
-  const svg = el("candleSvg");
-  if (svg) {
-    const selected = assetDecisionState(latestMainState || latestState, latestCompactState, activeChartAsset);
-    const entryPrice = entryPriceArg || (selected ? Number(selected?.position?.entry_price || selected?.entry_price || 0) : 0);
-    const riskLevels = selected ? latestChartRiskLevels : [];
-    renderCandleSvg(svg, candleHistory, chartJournalRows(), entryPrice, price, riskLevels);
-  }
-}
-
 function fmtDateTick(ts) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
@@ -3807,11 +2064,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // chart per user request: "레짐 그래프를 청산맵 안에 넣을 순 없어?") -- drawn in this same svg/loop
   // so alignment with the candle columns above it is guaranteed by construction (same xAt/bw, no
   // second element to keep in sync), and the hover crosshair can sweep through it directly. Only on
-  // the Snapshot tab's chart (svg id "candleSvgSnapshot", always ETH -- see that call site's own
-  // comment); latestRegimeWide24 is always ETH too, so other renderCandleSvg() callers (BTC/SOL on
-  // the Live tab) must not draw or tooltip-show it.
+  // the Snapshot tab's chart (svg id "candleSvgSnapshot"); latestRegimeWide24 is an ETH-only trained
+  // model (see docs/eth_dashboard_multicoin_expansion_design_20260831.md -- no BTC regime classifier
+  // exists yet), so it must only ever be drawn when the Snapshot tab's own coin switcher is on ETH --
+  // 2026-08-31 fix: this used to key off svg.id alone, so picking BTC in the Snapshot tab silently
+  // overlaid ETH's bull/bear/chop ribbon on BTC candles (found while building that coin switcher).
   const isSnapshotChart = svg.id === "candleSvgSnapshot";
-  const regimeByTsForChart = isSnapshotChart && latestRegimeWide24 && latestRegimeWide24.warmed_up
+  const isEthSnapshotChart = isSnapshotChart && activeSnapshotAsset === "eth";
+  const regimeByTsForChart = isEthSnapshotChart && latestRegimeWide24 && latestRegimeWide24.warmed_up
     ? new Map((latestRegimeWide24.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
     : null;
   // 2026-08-27 user report: ribbon "turns black" and stops updating for stretches -- tracing the
@@ -3822,7 +2082,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // chart background underneath -- indistinguishable from "black" at a glance, and easy to mistake
   // for a frozen/broken ribbon rather than "no fresh reading available for this window". Flagging
   // that state explicitly below instead of silently drawing nothing.
-  const regimeRibbonWaiting = isSnapshotChart && !regimeByTsForChart;
+  const regimeRibbonWaiting = isEthSnapshotChart && !regimeByTsForChart;
+  // 2026-08-31: distinct from regimeRibbonWaiting above -- BTC (or any future non-ETH Snapshot coin)
+  // has no trained regime classifier at all, a permanent gap, not a transient "still warming up"
+  // one. Kept as its own flag (rather than folding into regimeRibbonWaiting) so the flat band's own
+  // tooltip can say so honestly instead of implying an auto-retry that will never resolve anything --
+  // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
+  // (swap this placeholder out once a real BTC regime classifier is trained).
+  const regimeRibbonUnsupported = isSnapshotChart && !isEthSnapshotChart;
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 8;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
@@ -4052,9 +2319,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     ribbonLabel.setAttribute("fill", "var(--muted)");
     ribbonLabel.textContent = "레짐";
     svg.appendChild(ribbonLabel);
-  } else if (regimeRibbonWaiting && candles.length) {
-    // See regimeRibbonWaiting's definition above -- an explicit flat placeholder instead of
-    // silently drawing nothing, so a temporary backend hiccup reads as "waiting", not "broken".
+  } else if ((regimeRibbonWaiting || regimeRibbonUnsupported) && candles.length) {
+    // Flat gray placeholder instead of silently drawing nothing, so the row still reads as
+    // intentional -- but the two causes get different wording (regimeRibbonWaiting: transient,
+    // auto-retries; regimeRibbonUnsupported: this coin has no trained regime model at all yet, see
+    // regimeRibbonUnsupported's own definition above) so a permanent gap never reads as "any
+    // second now".
     const waitRect = document.createElementNS(NS, "rect");
     waitRect.setAttribute("x", xAt(0)); waitRect.setAttribute("y", REGIME_RIBBON_Y);
     waitRect.setAttribute("width", xAt(candles.length - 1) + bw - xAt(0)); waitRect.setAttribute("height", REGIME_RIBBON_H);
@@ -4062,7 +2332,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     waitRect.setAttribute("fill", "var(--muted)");
     waitRect.setAttribute("fill-opacity", "0.18");
     const waitTitle = document.createElementNS(NS, "title");
-    waitTitle.textContent = "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
+    waitTitle.textContent = regimeRibbonUnsupported
+      ? "레짐: 이 코인용 레짐분류기가 아직 없음 (ETH 전용 모델) -- 추후 학습 예정"
+      : "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
     waitRect.appendChild(waitTitle);
     svg.appendChild(waitRect);
     const waitLabel = document.createElementNS(NS, "text");
@@ -4071,7 +2343,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     waitLabel.setAttribute("text-anchor", "end");
     waitLabel.setAttribute("font-size", "9");
     waitLabel.setAttribute("fill", "var(--muted)");
-    waitLabel.textContent = "레짐";
+    waitLabel.textContent = regimeRibbonUnsupported ? "레짐 (미지원)" : "레짐";
     svg.appendChild(waitLabel);
   }
 
@@ -4347,34 +2619,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   };
 }
 
-function render(state, compactState = null, { stateChanged = true, journalChanged = true } = {}) {
-  const shadowState = usableGovernorShadowState(compactState);
-  const activeState = shadowState || state;
-  syncActiveMarketState();
-  const chartState = assetDecisionState(state, compactState, activeChartAsset);
-  latestState = activeState;
+function render(state, compactState = null, { stateChanged = true } = {}) {
   latestMainState = state;
-  latestCompactState = shadowState;
-  try {
-    latestChartRiskLevels = chartState ? chartRiskLevels(state, compactState, chartState) : [];
-	    const currentP = Number(latestLivePrice || chartState?.last_price || chartState?.price || activeState.last_price || activeState.price || 0);
-	    const pos = chartState ? openPosition(chartState) : null;
-	    const entryP = Number(pos?.entry_price || 0);
-	    updateChart(currentP, latestLivePriceTs || chartState?.updated_at || chartState?.cycle_timestamp_kst || activeState.updated_at || activeState.cycle_timestamp_kst, entryP);
-	    const riskLineText = latestChartRiskLevels.length ? `리스크 라인: ${latestChartRiskLevels.map((x) => `${x.label} ${fmtNum(x.val, 2)}`).join(" / ")}` : "";
-	    setT("riskLevelNote", riskLineText || "-");
-	  } catch (e) { console.error("Chart Update Error:", e); }
-  
-  const globalStamp = fmtTs(state.updated_at || state.cycle_timestamp_kst);
-
-  renderExecutionAlert(state, compactState);
-  renderOpsCards(state, compactState);
-  renderCombinedUnrealizedPnl(state, compactState);
-  setT("chartStamp", latestLivePriceTs ? fmtTs(latestLivePriceTs) : globalStamp);
-  if (journalChanged) {
-    renderTradePanels();
-    tradePanelsRendered = true;
-  }
   if (!stateChanged) return;
 
   const sess = state.session || {};
@@ -4538,22 +2784,15 @@ async function tick() {
   if (document.hidden || tickInFlight) return;
   tickInFlight = true;
   try {
-    const refreshCandles = maybeFetchBinanceHistory();
-    const refreshJournals = refreshTradeJournals(Date.now());
-    const [, journalChanged] = await Promise.all([refreshCandles, refreshJournals]);
-    if (journalChanged && latestMainState && !isScrolling) {
-      renderTradePanels();
-      tradePanelsRendered = true;
-    }
-    refreshOpsStatus();
-    refreshBtcMultislotShadow();
-    refreshEthOdyssey4Shadow();
-    // 2026-08-25: perf pass -- these 6 only matter while the Snapshot tab is actually visible;
-    // gating them stops background fetch/compute work for a hidden panel (see activePageTab,
-    // set by setupPageTabs()'s click handler). The tab-click force-refresh block in
-    // setupPageTabs() still fires immediately on switching to Snapshot, so this doesn't delay
+    // 2026-08-25 perf pass (Snapshot's 6 fetches), extended 2026-08-31 to Ops's own status poll
+    // now that the Live tab (previously the 3rd, always-unconditional, tab) is gone -- each branch
+    // only matters while that tab is actually visible; gating stops background fetch/compute work
+    // for a hidden panel (see activePageTab, set by setupPageTabs()'s click handler). Both tabs'
+    // click handlers already force an immediate refresh on switching to them, so this doesn't delay
     // first paint after a tab switch -- it only stops the ongoing poll while elsewhere.
-    if (activePageTab === "snapshot") {
+    if (activePageTab === "ops") {
+      refreshOpsStatus();
+    } else if (activePageTab === "snapshot") {
       refreshEvidenceSignals();
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
@@ -4616,11 +2855,9 @@ document.addEventListener("visibilitychange", () => {
   connectDashboardEvents();
   tick();
 });
-setupAssetTabs();
 setupSnapshotAssetTabs();
 setupPageTabs();
 setupScrollRendering();
-setupMobileCandleGestures();
 
 function showTooltip(x, y, html) {
   const t = el("chartTooltip");
