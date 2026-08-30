@@ -2027,15 +2027,16 @@ function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
 // 2026-08-31 user request ("병합 세그먼트로 바꿔줘"): merge consecutive same-tone bars into one
 // wider rect instead of drawing every raw 5-min bar -- segment WIDTH now carries duration (design
 // candidate "02 병합 세그먼트"), paired with the persistent time axis below it (stripAxisHtml,
-// unchanged by this). Bar height shrunk from 20 to 10 (user request: "지금 눈금의 높이와 똑같이") to
-// match .evidence-strip-axis's own compact row -- no room for in-segment text at that height, so
-// hover (unchanged mechanism, now resolves to the whole segment's tone/start-time) carries the
-// exact label+time instead, same tradeoff this dashboard's other compact chips already make.
+// unchanged by this). Height briefly shrunk 20->10 to match .evidence-strip-axis's compact row, but
+// the user found that too short to read and asked it back to the original 20 -- no room for
+// in-segment text either way, so hover (unchanged mechanism, resolves to the whole segment's
+// tone/start~end range) still carries the exact label+time, same tradeoff this dashboard's other
+// compact chips already make.
 function toneStripSvg(tones, times, provisionalLast, liveFiring, key) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
   const n = Math.max(list.length, 1);
-  const w = 240, h = 10, gap = 1.5;
+  const w = 240, h = 20, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
 
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
