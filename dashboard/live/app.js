@@ -126,7 +126,7 @@ let liquidationDirectionLastFetchAt = 0;
 let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
 let liquidationMapLastFetchAt = 0;
-// Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL added) -- deliberately separate from
+// Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL then HYPE added) -- deliberately separate from
 // activeChartAsset (the Live tab's chart asset, which the Snapshot tab has never followed -- see
 // the comment on lastSnapshotHistoryFetchAt above). Only backs the 4 signals server.py now accepts
 // an ?asset= for (basis liquidation / liquidation direction / liquidation 5m / liquidation map,
@@ -134,7 +134,7 @@ let liquidationMapLastFetchAt = 0;
 // stay ETH-only regardless of this (see docs/eth_dashboard_multicoin_expansion_design_20260831.md
 // section 6.4 for why: those are trained-model or trading_bot.py-sourced, not a symbol swap away).
 let activeSnapshotAsset = "eth";
-const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp"];
+const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let sessionAlertsLastFetchAt = 0;

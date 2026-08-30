@@ -64,11 +64,12 @@
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
       <div class="ops-panel-head">
-        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="ETH/BTC/SOL/XRP 전환은 청산맵·베이시스청산압박·청산방향압력에만 적용됩니다. 증거신호·레짐·특화감지기·수급흐름·리테일수급·청산캐스케이드는 ETH 고정입니다.">
+        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="ETH/BTC/SOL/XRP/HYPE 전환은 청산맵·베이시스청산압박·청산방향압력에만 적용됩니다(HYPE는 바이낸스 현물 상장이 없어 베이시스청산압박만 미지원). 증거신호·레짐·특화감지기·수급흐름·리테일수급·청산캐스케이드는 ETH 고정입니다.">
           <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
           <button type="button" class="asset-tab" data-asset="btc">BTC</button>
           <button type="button" class="asset-tab" data-asset="sol">SOL</button>
           <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
+          <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
         </div>
         <div class="session-alert-center">
           <span id="sessionVolAlertBadge" class="ops-badge warn" style="display:none">⚠️ 시장 오픈 변동성 주의</span>
@@ -218,7 +219,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260831-sol-coin-add-v170"></script>
+  <script src="./app.js?v=20260831-hype-coin-add-v171"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
