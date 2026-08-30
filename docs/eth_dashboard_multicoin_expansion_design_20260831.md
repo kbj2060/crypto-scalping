@@ -314,7 +314,9 @@ def evidence_signals(asset: str = "eth"):
 5. **Step 4 — Tier 3**: `liq_magnet_collector.py`에 실제 symbol 인자 추가, Hawkes 임계값 코인별 재튜닝, 세션 변동성 경보 타 코인 재검증. *(미착수)*
 6. **Step 5 (가장 비쌈, 최후순위)**: 증거신호 8종·레짐분류기·특화감지기 코인별 리서치 재수행 — **XRP부터 권장**(데이터 병목 없음), HYPE는 데이터 축적 후. *(미착수)*
 
-**2026-08-31 구현 검증 방법**: 로컬 서버 기동 후 4개 엔드포인트에 `?asset=btc` curl로 실제 BTC 값 확인(베이시스 z48, 청산맵 현재가 $79,304 등 ETH와 다른 실제 BTC 데이터 확인) + Node vm 하네스로 `app.js`를 실제 서버 데이터에 태워 `setActiveSnapshotAsset("btc")`→`render()` 전체 실행까지 예외 없음 확인. 로컬 devmachine에는 BTC용 `tail_risk_btc_sol.duckdb`가 없어(§3의 서버-로컬 괴리) 청산방향압력·청산5분신호는 로컬에서 `db_missing`으로 우아하게 저하되는 것까지만 확인 — 실제 서버 배포 후 재확인 필요.
+**2026-08-31 구현 검증 방법**: 로컬 서버 기동 후 4개 엔드포인트에 `?asset=btc` curl로 실제 BTC 값 확인(베이시스 z48, 청산맵 현재가 $79,304 등 ETH와 다른 실제 BTC 데이터 확인) + Node vm 하네스로 `app.js`를 실제 서버 데이터에 태워 `setActiveSnapshotAsset("btc")`→`render()` 전체 실행까지 예외 없음 확인. 로컬 devmachine에는 BTC용 `tail_risk_btc_sol.duckdb`가 없어(§3의 서버-로컬 괴리) 청산방향압력·청산5분신호는 로컬에서 `db_missing`으로 우아하게 저하되는 것까지만 확인.
+
+**✅ 2026-08-31 후속 — 커밋(`790c95e`) + `handoff.sh push server`로 실서버 배포 + 재시작 + 실서버 재검증까지 완료.** 서버에는 `tail_risk_btc_sol.duckdb`가 실존해 청산방향압력·청산5분신호도 BTC가 완전히 `warmed_up=true`로 확인됨(로컬의 `db_missing`은 devmachine 한계였을 뿐, 서버에서는 정상 동작). `trading_bot.py`(실거래봇)는 재시작 영향 없음. 자세한 배포 절차·경합 이슈는 memory `eth-dashboard-multicoin-expansion-design-20260831` 참고.
 
 ---
 
