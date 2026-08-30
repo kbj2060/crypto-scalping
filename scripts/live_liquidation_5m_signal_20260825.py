@@ -42,6 +42,7 @@ stopped working). Same "don't rename, just widen the window" convention as the f
 """
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,8 +50,14 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "data" / "live" / "tail_risk.duckdb"
-TABLE = "tail_risk_1m"
+for _p in (ROOT, ROOT / "scripts"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+# 2026-08-31: DB_PATH/TABLE moved into per-coin COIN_CONFIG, same reasoning as the sibling module
+# live_liquidation_direction_signal_20260825.py -- see coin_config.py's docstring.
+from coin_config import COIN_CONFIG  # noqa: E402
+
 BAR_MINUTES = 30  # widened from 15 2026-08-27 (previously 5->15 on 2026-08-25), see docstring
 FETCH_ROWS = 60  # 2x BAR_MINUTES of buffer -- filtering to the current bar happens in Python
                   # below (against already tz_convert'd timestamps), not in the SQL WHERE clause,
@@ -63,13 +70,18 @@ def _bar_start(now_utc: datetime) -> datetime:
     return now_utc.replace(minute=floored_minute, second=0, microsecond=0)
 
 
-def compute_liquidation_5m_signal() -> dict:
+def compute_liquidation_5m_signal(coin: str = "eth") -> dict:
     """Returns {"warmed_up", "error", "long_usd_5m", "short_usd_5m", "bars_used",
     "bar_start_utc", "bar_elapsed_sec", "latest_ts_utc"}. bars_used grows from ~0 to BAR_MINUTES
     (15) and bar_elapsed_sec from ~0 to BAR_MINUTES*60 (900) over the life of the current bar, then
     both reset at the next boundary -- reported honestly (never padded to look like a full bar),
-    same "never raises, degrade to warmed_up=False" contract as compute_oi_delta_signal()."""
-    if not DB_PATH.exists():
+    same "never raises, degrade to warmed_up=False" contract as compute_oi_delta_signal().
+
+    coin: key into COIN_CONFIG (2026-08-31, BTC added) -- see coin_config.py for why BTC's
+    tail-risk stream lives in a different duckdb file/table than ETH's."""
+    cfg = COIN_CONFIG[coin]
+    db_path, table = cfg["tail_risk_db_path"], cfg["tail_risk_table"]
+    if not db_path.exists():
         return {"warmed_up": False, "error": "db_missing", "long_usd_5m": None, "short_usd_5m": None,
                 "bars_used": 0, "bar_start_utc": None, "bar_elapsed_sec": None, "latest_ts_utc": None}
     import duckdb
@@ -81,12 +93,12 @@ def compute_liquidation_5m_signal() -> dict:
         if delay:
             time.sleep(delay)
         try:
-            con = duckdb.connect(str(DB_PATH), read_only=True)
+            con = duckdb.connect(str(db_path), read_only=True)
             try:
                 df = con.execute(
                     f"""
                     SELECT ts, long_usd_1m, short_usd_1m
-                    FROM {TABLE}
+                    FROM {table}
                     ORDER BY ts DESC
                     LIMIT ?
                     """,

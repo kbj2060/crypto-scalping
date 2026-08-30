@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260827-remove-now-outline-v107">
+  <link rel="stylesheet" href="styles.css?v=20260831-evidence-text-shrink-v162">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -17,7 +17,7 @@
        every single call despite the stops (VIRIDIS_STOPS in app.js) being constant. id is resolved
        document-wide by SVG url(#...) references, so candleSvg/candleSvgSnapshot (each wiped and
        rebuilt independently) can both reference #viridisGradient without redefining it. -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true">
     <defs>
       <linearGradient id="viridisGradient" x1="0%" x2="100%" y1="0%" y2="0%">
         <stop offset="0%" stop-color="rgb(68,1,84)"></stop>
@@ -245,7 +245,10 @@
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
       <div class="ops-panel-head">
-        <div></div>
+        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="ETH/BTC 전환은 청산맵·베이시스청산압박·청산방향압력에만 적용됩니다. 증거신호·레짐·특화감지기·수급흐름·리테일수급·청산캐스케이드는 ETH 고정입니다.">
+          <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
+          <button type="button" class="asset-tab" data-asset="btc">BTC</button>
+        </div>
         <div class="session-alert-center">
           <span id="sessionVolAlertBadge" class="ops-badge warn" style="display:none">⚠️ 시장 오픈 변동성 주의</span>
           <span id="macroEventAlertBadge" class="ops-badge warn" style="display:none">⚠️ 발표 변동성 주의</span>
@@ -269,14 +272,14 @@
                 <span class="signal-chip-label">리테일 수급</span>
                 <span class="signal-chip-state">-</span>
               </div>
-              <div id="modelChipWhaleIntent" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">고래 포지션</span>
-                <span class="signal-chip-state">-</span>
-              </div>
               <div id="modelChipLiqDirection" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
                 <span class="signal-chip-label">청산 방향압력</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipBasisLiq" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">베이시스 청산압박</span>
                 <span class="signal-chip-state">-</span>
               </div>
             </div>
@@ -284,21 +287,6 @@
           <div class="signal-chip-subgroup">
             <p class="signal-chip-subgroup-label">위험도 (안정/주의/위험)</p>
             <div class="signal-chip-row">
-              <div id="modelChipOiDelta" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">OI 급변</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-              <div id="modelChipTox" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">독성</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-              <div id="modelChipRisk" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">꼬리 리스크</span>
-                <span class="signal-chip-state">-</span>
-              </div>
               <div id="modelChipLiqCascade" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
                 <span class="signal-chip-label">청산 캐스케이드</span>
@@ -365,6 +353,18 @@
           </div>
           <p id="evidenceStripMeaning" class="evidence-strip-meaning hidden">-</p>
         </div>
+        <div class="signal-overview-group">
+          <div class="signal-overview-group-head">
+            <p class="signal-overview-label">특화 감지기 (이벤트 트리거)</p>
+          </div>
+          <div class="signal-chip-row">
+            <div id="modelChipVRebound" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">V자 반등락</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="panel ops-health-panel liq-map-panel">
@@ -373,7 +373,7 @@
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
-        <div id="liqCascadeGauge" class="liq-cascade-gauge"></div>
+        <div id="liqVolumeGauge"></div>
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -393,6 +393,10 @@
         <div id="evidenceSignalList" class="ops-health-list"></div>
       </section>
 
+      <section class="panel ops-health-panel">
+        <div id="snapSpecializedSignalList" class="ops-health-list"></div>
+      </section>
+
       <section class="panel ops-health-panel macro-calendar-panel">
         <div class="ops-health-head">
           <div><h3>주요 경제 일정</h3><p id="macroCalendarSub" class="muted">불러오는 중…</p></div>
@@ -405,7 +409,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260827-orthogonal-funding-merge-v108"></script>
+  <script src="./app.js?v=20260831-evidence-text-shrink-v162"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -30,7 +30,7 @@ load_dotenv(REPO_ROOT / ".env")
 # are pure functions (no I/O, no sleep) -- that makes them correctness-safe to call from an async
 # handler, but NOT free: 2026-08-25 perf pass moved the compute_signals() call itself behind
 # asyncio.to_thread (see load_evidence_signals()) so its pandas rolling-window work doesn't block
-# the event loop for its duration, matching the pattern load_oi_signal()/load_liquidation_5m_signal()/
+# the event loop for its duration, matching the pattern load_liquidation_5m_signal()/
 # load_liquidation_direction_signal() already used.
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
@@ -42,10 +42,25 @@ from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     bars_since_last_true,
     compute_signals,
 )
-# OI 급변 model indicator (replaces OBI, 2026-08-24) -- computed here from the poller's own
-# duckdb, NOT from trading_bot.py's dashboard_state.json like the other 5 model indicators, so
-# it never touches the live bot. See that module's docstring for the vol-lift validation.
-from scripts.live_oi_delta_signal_20260824 import compute_oi_delta_signal  # noqa: E402
+# 유동성스윕 반등예측 event-triggered signal (2026-08-29, TabPFN Tier0+rsi model -- see
+# docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md). Own klines fetch +
+# a frozen historical TabPFN context, NOT from trading_bot.py's dashboard_state.json -- computed
+# dashboard-side so it never touches the live bot.
+from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v_rebound_signal  # noqa: E402
+# taker_delta_z_climax / short_term_return_z evidence-signal chips REPLACED in-place with their
+# TabPFN meta-label models' live probability (2026-08-30, user decision -- unlike V_REBOUND above,
+# these stay in the "증거 신호" row and reuse the klines/compute_signals() this endpoint already
+# computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
+# fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
+from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
+# 2026-08-30: liquidity_sweep now trained on the SAME Tier0+rsi schema as taker/short_term_
+# return_z/dalton_rule2_balance_edge (standard touch-based-MFE redo, replacing the V_REBOUND-model
+# relay bridge this import used to be) -- it lives in METALABEL_SIGNALS above and is handled by
+# compute_evidence_signal_metalabels() like every other signal there, no separate import/call.
+# 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own live spot+perp
+# klines fetch each cache cycle (no persistent collector), same "computed here, not bot state"
+# category as OI 급변 above. See that module's docstring for the liquidation-crowding validation.
+from scripts.live_spot_perp_basis_signal_20260827 import compute_basis_liquidation_signal  # noqa: E402
 # 5-minute liquidation $ aggregate for the Snapshot tab's liquidation gauge (2026-08-25) -- reads
 # tail_risk.duckdb's own per-minute persisted history read-only, same "computed here, not from
 # trading_bot.py's dashboard_state.json" category as OI 급변 above. See that module's docstring for
@@ -94,6 +109,13 @@ from scripts.live_liquidation_map_20260824 import compute_spliced_levels, comput
 # imprecise for a dashboard chip). Loaded independently of whatever trading_bot.py's live regime
 # routing currently uses. See that module's docstring for why DAYS_BACK isn't shortened and why
 # this is expensive enough to need its own cache.
+# 2026-08-27: reverted from the 2-class trend/chop GBM2 model (2026-08-27, built for a low-flip
+# discretionary display) back to GBM3 here -- a same-day cost-gated backtest found GBM2's much
+# broader chop definition (55-57% of all bars vs GBM3's narrower slice) dilutes a liquidation-
+# confluence filter's selectivity (see eth_evidence_signal_liquidation_confluence_gbm2gate_rejected_
+# 20260827 memory) and the user asked to match the GBM3-based analysis. GBM2 remains a valid,
+# separately-loadable model for anything that specifically wants a low-flip label; it is simply not
+# what this dashboard endpoint serves right now.
 from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal as compute_regime_wide24_signal  # noqa: E402
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
@@ -101,9 +123,15 @@ from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal 
 # same-day empirical research (NYSE open real effect, LSE/JPX marginal) behind the chosen windows.
 from scripts.live_session_volatility_alert_20260826 import compute_session_volatility_alert  # noqa: E402
 # US macro/corporate event calendar for the Snapshot tab (2026-08-26) -- see that module's
-# docstring for the 5 sources (FRED/FOMC-static/EIA-rule-based/Finnhub/Treasury) and their
+# docstring for the 6 sources (FRED/FOMC-static/Fed Chair HTML/EIA-rule-based/Finnhub/Treasury) and their
 # individual caveats. Independent of evidence-signal's klines fetch -- own cache below.
 from scripts.live_macro_calendar_20260826 import compute_macro_calendar, compute_macro_event_alert  # noqa: E402
+# 2026-08-31: per-coin registry for the 4 Snapshot-tab signals wired to BTC this session (basis
+# liquidation, liquidation direction, liquidation 5m, liquidation map) -- see
+# docs/eth_dashboard_multicoin_expansion_design_20260831.md section 6. Evidence signals/regime/
+# specialized-detector (EVIDENCE_SIGNAL_SYMBOL etc. below) are untouched -- those are trained ML
+# models with no BTC-trained artifact yet, not something a symbol swap alone can serve.
+from scripts.coin_config import COIN_CONFIG  # noqa: E402
 
 EVIDENCE_SIGNAL_SYMBOL = "ETHUSDT"
 EVIDENCE_SIGNAL_INTERVAL = "5m"
@@ -115,8 +143,7 @@ EVIDENCE_SIGNAL_PROVISIONAL_CACHE_SECONDS = 8
 EVIDENCE_SIGNAL_HISTORY_BARS = 48  # 4h strip for the Snapshot tab's per-bar activity graph
 EVIDENCE_SIGNAL_BTC_SYMBOL = "BTCUSDT"  # smt_divergence's cross-asset non-confirmation leg, 2026-08-24
 EVIDENCE_SIGNAL_FUNDING_URL = "https://fapi.binance.com/fapi/v1/fundingRate"  # orthogonal_combo's bottom-leg funding_z input (2026-08-27; formerly funding_oscillator_combo's own leg)
-LIQUIDATION_MAP_SYMBOL = "ETHUSDT"
-LIQUIDATION_MAP_INTERVAL = "1h"
+LIQUIDATION_MAP_INTERVAL = "1h"  # symbol now comes from COIN_CONFIG[asset]["binance_symbol"] (2026-08-31)
 LIQUIDATION_MAP_LOOKBACK_HOURS = 24  # 2026-08-25: 168h->24h. Both event-driven (floor=ceiling=Nh
                                       # sweep, research_eth_liquidation_map_event_driven_window_
                                       # sweep_20260825) and this stateless mechanism (research_eth_
@@ -148,10 +175,14 @@ MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/da
 # liquidation-direction signals that happen to share that constant. Unlike the evidence signals,
 # this one is a genuinely incremental accumulator (compute_liquidation_5m_signal() sums whatever
 # 1-minute rows have landed in the current BAR_MINUTES=15 window so far, see its docstring) rather
-# than a bar-close-only reading -- so a shorter cache here means real reduced staleness (up to 10s
+# than a bar-close-only reading -- so a shorter cache here means real reduced staleness (up to 1s
 # lag behind a new duckdb row instead of up to 60s), not a "provisional/unconfirmed" reading like
-# the evidence-signal preview needed its own separate endpoint for.
-LIQUIDATION_5M_SIGNAL_CACHE_SECONDS = 10
+# the evidence-signal preview needed its own separate endpoint for. 2026-08-27: dropped 10s->1s per
+# user request -- safe to poll this tightly since compute_liquidation_5m_signal() only reads a local
+# duckdb (no external API/rate-limit exposure); note the duckdb itself only gains a new row once a
+# minute (tail_risk_interceptor.py's insert cadence), so this mostly tightens worst-case staleness
+# rather than surfacing meaningfully new data every second.
+LIQUIDATION_5M_SIGNAL_CACHE_SECONDS = 1
 LIQUIDATION_MAP_DISPLAY_HOURS = 6  # 2026-08-25 user request: density-history snapshot count for the
                                     # chart's time-varying heatmap overlay (see compute_heatmap_
                                     # history() docstring) -- matches the Snapshot-tab chart's own
@@ -173,6 +204,10 @@ MODEL_INDICATOR_SAMPLE_SECONDS = 300  # 5 min, matching the evidence-signal stri
 MODEL_INDICATOR_HISTORY_MAX = 48  # 4h at the sample interval above -- same window as evidence signals
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
+# 2026-08-27: tail_risk_interceptor.py's event-triggered sibling of dashboard_state.json's
+# tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
+# liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
+LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 # Shadow-only, no order submission -- standalone loop separate from trading_bot.py's
 # single-slot BTC shadow (see scripts/run_btc_multislot_shadow_loop_20260807.py).
 BTC_MULTISLOT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_state_20260807.json"
@@ -780,14 +815,19 @@ def make_app() -> web.Application:
     evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     evidence_signal_provisional_lock = asyncio.Lock()
-    oi_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    oi_signal_lock = asyncio.Lock()
-    liquidation_5m_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    liquidation_5m_lock = asyncio.Lock()
-    liquidation_direction_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    liquidation_direction_lock = asyncio.Lock()
-    liquidation_map_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    liquidation_map_lock = asyncio.Lock()
+    v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    v_rebound_lock = asyncio.Lock()
+    # 2026-08-31: keyed by asset (was a single shared slot) so an ETH and a BTC request don't
+    # evict each other's cached reading -- same per-asset dict/lock shape as market_history_cache/
+    # market_history_locks above.
+    basis_liquidation_cache: dict[str, dict[str, Any]] = {}
+    basis_liquidation_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
+    liquidation_5m_cache: dict[str, dict[str, Any]] = {}
+    liquidation_5m_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
+    liquidation_direction_cache: dict[str, dict[str, Any]] = {}
+    liquidation_direction_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
+    liquidation_map_cache: dict[str, dict[str, Any]] = {}
+    liquidation_map_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
     regime_wide24_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     regime_wide24_lock = asyncio.Lock()
     macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -1019,15 +1059,30 @@ def make_app() -> web.Application:
             sig = await asyncio.to_thread(compute_signals, df, btc_df=btc_df, funding_df=funding_df)
             latest = sig.iloc[-1] if len(sig) else None
             warmed_up = latest is not None and pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))
+            # taker_delta_z_climax / short_term_return_z / dalton_rule2_balance_edge / liquidity_sweep
+            # REPLACED with their TabPFN meta-label models' live probability (2026-08-30) -- reuses
+            # this cycle's already-fetched `df` and already-computed `latest` fire state, no separate
+            # fetch/compute_signals() call. Fail-soft: a GPU/TabPFN hiccup must not block the other
+            # signals from rendering.
+            metalabels: dict[str, dict] = {}
+            if warmed_up:
+                try:
+                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, latest)
+                except Exception as metalabel_exc:  # noqa: BLE001
+                    print(f"evidence-signal metalabel leg failed (taker_delta_z_climax/"
+                          f"short_term_return_z/dalton_rule2_balance_edge/liquidity_sweep will read "
+                          f"as not-fired this cycle): {metalabel_exc}", flush=True)
             signals_payload = []
             for name, description in EVIDENCE_SIGNAL_ORDER:
                 bcol, tcol = f"bottom_{name}", f"top_{name}"
-                # _active = 1h sustain window (2026-08-24) -- rolling-max of the raw bcol/tcol
-                # firing column, not a new/looser firing condition (see compute_signals()
-                # docstring). last_fired_ts always reads the RAW column so it keeps reporting the
-                # true original firing bar even while _active keeps the chip lit.
+                # _active = per-signal sustain window (2026-08-24 default 20min/4 bars; 2026-08-30:
+                # taker_delta_z_climax/short_term_return_z instead use their own trained HORIZON,
+                # 2h/1h) -- rolling-max of the raw bcol/tcol firing column, not a new/looser firing
+                # condition (see compute_signals() docstring, SUSTAIN_BARS_OVERRIDE). last_fired_ts
+                # always reads the RAW column so it keeps reporting the true original firing bar
+                # even while _active keeps the chip lit.
                 bacol, tacol = f"{bcol}_active", f"{tcol}_active"
-                signals_payload.append({
+                entry = {
                     "name": name,
                     "description": description,
                     "bottom_fired": bool(latest[bacol]) if warmed_up else None,
@@ -1037,7 +1092,11 @@ def make_app() -> web.Application:
                     # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
                     "bottom_history": sig[bacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
                     "top_history": sig[tacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                })
+                }
+                if name in metalabels:
+                    entry["model_proba"] = metalabels[name]["proba"]
+                    entry["model_side"] = metalabels[name]["side"]
+                signals_payload.append(entry)
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see
             # api_session_alerts()'s docstring.
@@ -1187,28 +1246,54 @@ def make_app() -> web.Application:
                 "signals": signals_payload,
             })
 
-    async def load_oi_signal() -> dict[str, Any]:
-        """OI 급변 model indicator -- see scripts/live_oi_delta_signal_20260824.py docstring for
-        the vol-lift validation and why this is computed HERE (dashboard-side) rather than by
-        trading_bot.py. compute_oi_delta_signal() retries through the same brief read-vs-write
-        lock contention window ops_watchdog.py already retries for tail_risk.duckdb (up to ~2.8s
-        of blocking time.sleep across attempts) -- run via asyncio.to_thread so that wait never
-        stalls this process's event loop (and every other concurrent dashboard request) the way
-        calling it inline would."""
+    async def load_v_rebound_signal() -> dict[str, Any]:
+        """유동성스윕 반등예측 event-triggered signal -- see
+        scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
+        validated TabPFN model and why this is computed HERE (dashboard-side) rather than by
+        trading_bot.py. Each call re-fits TabPFN on its frozen historical context (~3s measured
+        on this server's GPU, 2026-08-29) -- asyncio.to_thread so that never stalls the event loop,
+        same reasoning as load_evidence_signals() above."""
         now = time.monotonic()
-        cached = oi_signal_cache["payload"]
-        if cached is not None and now - oi_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+        cached = v_rebound_cache["payload"]
+        if cached is not None and now - v_rebound_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
             return cached
-        async with oi_signal_lock:
-            cached = oi_signal_cache["payload"]
-            if cached is not None and time.monotonic() - oi_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+        async with v_rebound_lock:
+            cached = v_rebound_cache["payload"]
+            if cached is not None and time.monotonic() - v_rebound_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
                 return cached
-            payload = await asyncio.to_thread(compute_oi_delta_signal)
-            oi_signal_cache["ts"] = time.monotonic()
-            oi_signal_cache["payload"] = payload
+            payload = await asyncio.to_thread(compute_eth_sweep_v_rebound_signal)
+            v_rebound_cache["ts"] = time.monotonic()
+            v_rebound_cache["payload"] = payload
             return payload
 
-    async def load_liquidation_5m_signal() -> dict[str, Any]:
+    async def load_basis_liquidation_signal(asset: str = "eth") -> dict[str, Any]:
+        """베이시스 청산압박 model indicator -- see scripts/live_spot_perp_basis_signal_20260827.py
+        docstring for the liquidation-crowding validation (exploratory, ~1 month) and why this is
+        computed HERE (dashboard-side, own live spot+perp klines fetch) rather than by
+        trading_bot.py. asyncio.to_thread so the two blocking HTTP calls inside
+        compute_basis_liquidation_signal() never stall this process's event loop, same reasoning
+        as load_evidence_signals() above.
+
+        asset: 2026-08-31, BTC added -- the underlying validation (basis_z48 extreme ->
+        forward liquidation-volume tilt) was only ever measured on ETH; BTC's reading is exposed
+        with the same exploratory caveat, not a re-validated one (see design doc section 6.5)."""
+        now = time.monotonic()
+        cache = basis_liquidation_cache.setdefault(asset, {"ts": 0.0, "payload": None})
+        cached = cache["payload"]
+        if cached is not None and now - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+            return cached
+        async with basis_liquidation_locks[asset]:
+            cached = cache["payload"]
+            if cached is not None and time.monotonic() - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(
+                compute_basis_liquidation_signal, symbol=COIN_CONFIG[asset]["binance_symbol"]
+            )
+            cache["ts"] = time.monotonic()
+            cache["payload"] = payload
+            return payload
+
+    async def load_liquidation_5m_signal(asset: str = "eth") -> dict[str, Any]:
         """Liquidation $ aggregate (BAR_MINUTES=15 rolling bar, despite the module's "_5m" filename
         -- widened 2026-08-25, see that script's docstring) for the Snapshot tab's liquidation
         gauge. Underlying duckdb gets a new row once per minute (tail_risk_interceptor.py's own
@@ -1216,56 +1301,69 @@ def make_app() -> web.Application:
         bar so far -- a genuine incremental accumulator, not a bar-close-only reading -- so
         LIQUIDATION_5M_SIGNAL_CACHE_SECONDS (10s, 2026-08-26 user request, own dedicated constant)
         gives real reduced staleness rather than just re-serving an unchanged value. Same
-        asyncio.to_thread reasoning as load_oi_signal() above."""
+        asyncio.to_thread reasoning as load_evidence_signals() above.
+
+        asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
         now = time.monotonic()
-        cached = liquidation_5m_cache["payload"]
-        if cached is not None and now - liquidation_5m_cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
+        cache = liquidation_5m_cache.setdefault(asset, {"ts": 0.0, "payload": None})
+        cached = cache["payload"]
+        if cached is not None and now - cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
             return cached
-        async with liquidation_5m_lock:
-            cached = liquidation_5m_cache["payload"]
-            if cached is not None and time.monotonic() - liquidation_5m_cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
+        async with liquidation_5m_locks[asset]:
+            cached = cache["payload"]
+            if cached is not None and time.monotonic() - cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
                 return cached
-            payload = await asyncio.to_thread(compute_liquidation_5m_signal)
-            liquidation_5m_cache["ts"] = time.monotonic()
-            liquidation_5m_cache["payload"] = payload
+            payload = await asyncio.to_thread(compute_liquidation_5m_signal, coin=asset)
+            cache["ts"] = time.monotonic()
+            cache["payload"] = payload
             return payload
 
-    async def load_liquidation_direction_signal() -> dict[str, Any]:
+    async def load_liquidation_direction_signal(asset: str = "eth") -> dict[str, Any]:
         """Directional-only liquidation tilt (liq_net_z_12, contrarian sign) -- model-indicator
         tier, no PnL/economic claim. See scripts/live_liquidation_direction_signal_20260825.py
         docstring. Same 60s cache reasoning as load_liquidation_5m_signal() above (underlying data
-        updates once per minute)."""
+        updates once per minute).
+
+        asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
         now = time.monotonic()
-        cached = liquidation_direction_cache["payload"]
-        if cached is not None and now - liquidation_direction_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+        cache = liquidation_direction_cache.setdefault(asset, {"ts": 0.0, "payload": None})
+        cached = cache["payload"]
+        if cached is not None and now - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
             return cached
-        async with liquidation_direction_lock:
-            cached = liquidation_direction_cache["payload"]
-            if cached is not None and time.monotonic() - liquidation_direction_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+        async with liquidation_direction_locks[asset]:
+            cached = cache["payload"]
+            if cached is not None and time.monotonic() - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
                 return cached
-            payload = await asyncio.to_thread(compute_liquidation_direction_signal)
-            liquidation_direction_cache["ts"] = time.monotonic()
-            liquidation_direction_cache["payload"] = payload
+            payload = await asyncio.to_thread(compute_liquidation_direction_signal, coin=asset)
+            cache["ts"] = time.monotonic()
+            cache["payload"] = payload
             return payload
 
-    async def load_liquidation_map() -> dict[str, Any]:
+    async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
         scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
         caveats. Mirrors load_evidence_signals()'s klines-fetch/cache pattern (own cache, since
-        this needs a much longer 1h lookback than the chart's own /api/market-history)."""
+        this needs a much longer 1h lookback than the chart's own /api/market-history).
+
+        asset: 2026-08-31, BTC added. compute_spliced_levels()/compute_spliced_heatmap_history()
+        take a plain OHLCV dataframe -- no code change needed there, only the klines fetch below
+        swaps symbol. BIN_WIDTH_PCT/LOOKBACK_HOURS/etc. in that module are still ETH-tuned
+        constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
+        BTC's own liquidity/volatility."""
         now = time.monotonic()
-        cached = liquidation_map_cache["payload"]
-        if cached is not None and now - liquidation_map_cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
+        cache = liquidation_map_cache.setdefault(asset, {"ts": 0.0, "payload": None})
+        cached = cache["payload"]
+        if cached is not None and now - cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
             return cached
-        async with liquidation_map_lock:
-            cached = liquidation_map_cache["payload"]
-            if cached is not None and time.monotonic() - liquidation_map_cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
+        async with liquidation_map_locks[asset]:
+            cached = cache["payload"]
+            if cached is not None and time.monotonic() - cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
                 return cached
             async with ClientSession(timeout=ClientTimeout(total=10)) as session:
                 async with session.get(
                     "https://fapi.binance.com/fapi/v1/klines",
                     params={
-                        "symbol": LIQUIDATION_MAP_SYMBOL,
+                        "symbol": COIN_CONFIG[asset]["binance_symbol"],
                         "interval": LIQUIDATION_MAP_INTERVAL,
                         "limit": LIQUIDATION_MAP_FETCH_LIMIT,
                     },
@@ -1297,8 +1395,8 @@ def make_app() -> web.Application:
                 compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
             )
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
-            liquidation_map_cache["ts"] = time.monotonic()
-            liquidation_map_cache["payload"] = payload
+            cache["ts"] = time.monotonic()
+            cache["payload"] = payload
             return payload
 
     async def load_regime_wide24() -> dict[str, Any]:
@@ -1323,7 +1421,7 @@ def make_app() -> web.Application:
 
     async def load_macro_calendar() -> dict[str, Any]:
         """US macro/corporate event calendar for the Snapshot tab -- see scripts/live_macro_
-        calendar_20260826.py docstring for the 5 sources. compute_macro_calendar() is blocking
+        calendar_20260826.py docstring for the 6 sources. compute_macro_calendar() is blocking
         (requests, no aiohttp) and never raises (each source degrades independently), same
         asyncio.to_thread pattern as load_regime_wide24() above."""
         now = time.monotonic()
@@ -1486,21 +1584,34 @@ def make_app() -> web.Application:
             )
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
-    async def api_oi_signal(request: web.Request) -> web.Response:
-        payload = await load_oi_signal()
+    async def api_v_rebound_signal(request: web.Request) -> web.Response:
+        payload = await load_v_rebound_signal()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
+    def _query_coin_asset(request: web.Request) -> str:
+        """Shared `?asset=` parsing for the 4 Snapshot-tab signals wired to multiple coins
+        (2026-08-31) -- raises the same 400 shape as api_market_history()'s existing
+        unsupported-asset check."""
+        asset = request.query.get("asset", "eth").lower()
+        if asset not in COIN_CONFIG:
+            raise web.HTTPBadRequest(reason="unsupported_asset")
+        return asset
+
+    async def api_basis_liquidation_signal(request: web.Request) -> web.Response:
+        payload = await load_basis_liquidation_signal(_query_coin_asset(request))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
     async def api_liquidation_5m_signal(request: web.Request) -> web.Response:
-        payload = await load_liquidation_5m_signal()
+        payload = await load_liquidation_5m_signal(_query_coin_asset(request))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
     async def api_liquidation_direction_signal(request: web.Request) -> web.Response:
-        payload = await load_liquidation_direction_signal()
+        payload = await load_liquidation_direction_signal(_query_coin_asset(request))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
     async def api_liquidation_map(request: web.Request) -> web.Response:
         try:
-            payload = await load_liquidation_map()
+            payload = await load_liquidation_map(_query_coin_asset(request))
         except web.HTTPBadGateway:
             return web.json_response(
                 {"error": "liquidation_map_upstream_error", "detail": "Binance klines fetch failed."},
@@ -1516,6 +1627,18 @@ def make_app() -> web.Application:
     async def api_macro_calendar(request: web.Request) -> web.Response:
         payload = await load_macro_calendar()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
+    async def api_liq_burst_state(request: web.Request) -> web.Response:
+        # load_json_cached() keys off (mtime, size), not a timer -- so this serves the freshest
+        # write tail_risk_interceptor.py has made (event-triggered, see its _write_liq_burst_state()
+        # docstring) without needing its own cache TTL/lock here.
+        payload = load_json_cached(LIQ_BURST_STATE_PATH)
+        if not payload:
+            return web.json_response({"available": False}, headers={"Cache-Control": "no-cache"})
+        # tail_risk_interceptor.py's _write_liq_burst_state() never sets "available" itself (it
+        # always writes on success) -- the frontend's renderLiqBurstAlert() checks payload.available
+        # to distinguish this from the {"available": False} fallback above, so stamp it here.
+        return web.json_response({**payload, "available": True}, headers={"Cache-Control": "no-cache"})
 
     async def api_session_alerts(request: web.Request) -> web.Response:
         """Split out of /api/evidence-signals (2026-08-27, user report: badges only updated on a
@@ -1669,12 +1792,14 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
-    app.router.add_get("/api/oi-signal", api_oi_signal)
+    app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
+    app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
+    app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
