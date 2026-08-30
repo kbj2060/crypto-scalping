@@ -38,6 +38,15 @@ COIN_CONFIG: dict[str, dict] = {
         "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_btc_sol.duckdb",
         "tail_risk_table": "tail_risk_1m_btc",
     },
+    "sol": {
+        "binance_symbol": "SOLUSDT",
+        # SAME file+worker as btc (scripts/ops/supervisor_tail_risk_btc_sol_worker.sh's
+        # BOT_SYMBOLS="BTCUSDT,SOLUSDT"), separate table -- confirmed live 2026-08-31: table has
+        # 19769+ rows (longer history than xrp's, same worker start as btc's), comfortably past
+        # TRAIL_WIN's 2-day warmup.
+        "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_btc_sol.duckdb",
+        "tail_risk_table": "tail_risk_1m_sol",
+    },
     "xrp": {
         "binance_symbol": "XRPUSDT",
         # XRP gets its own fully dedicated worker + file (scripts/ops/supervisor_xrp_worker.sh,
