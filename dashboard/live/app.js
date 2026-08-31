@@ -125,6 +125,10 @@ let liquidationDirectionLastFetchAt = 0;
 // see below), independently of activeChartAsset (the Live tab's own, separate coin selector).
 let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
+// Confirmed evidence-signals payload (2026-08-31, feeds evidenceSignalTpLevels() below) -- stashed
+// globally like latestLiquidationMap/latestRegimeWide24 so the Snapshot chart's own render cycle
+// can read it without renderEvidenceSignals() needing to know about the chart.
+let latestEvidenceSignals = null;
 let liquidationMapLastFetchAt = 0;
 // Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL then HYPE added) -- deliberately separate from
 // activeChartAsset (the Live tab's chart asset, which the Snapshot tab has never followed -- see
@@ -407,9 +411,10 @@ function basisLiquiditySubText(sig) {
 // long=red(--bad)/short=green(--good), with real $ labels alongside so a "$5 vs $2" split doesn't
 // read as visually skewed as a "$500 vs $2" one would (2026-08-25 design note, preserved). The
 // magnet (price/direction/strength) and energy/recommendation sub-parts that used to live in the
-// same gauge were NOT recreated -- user confirmed the magnet is redundant with the chart line
-// (liquidationMagnetLevel()) and never asked for energy/recommendation back. Always renders a row
-// (never disappears) per 2026-08-27 request, with a quiet state for warming-up/no-liquidation.
+// same gauge were NOT recreated -- user confirmed the magnet was redundant with the chart line
+// (liquidationMagnetLevel(), itself removed 2026-08-31 per user request) and never asked for
+// energy/recommendation back. Always renders a row (never disappears) per 2026-08-27 request, with
+// a quiet state for warming-up/no-liquidation.
 // Data: /api/liquidation-5m-signal (scripts/live_liquidation_5m_signal_20260825.py, BAR_MINUTES=30
 // as of this same request -- server.py imports that module, so a dashboard-server restart is
 // needed for the window change, NOT trading_bot.py; this data has nothing to do with that process).
@@ -1019,6 +1024,8 @@ const SIGNAL_HORIZON = {
   short_term_return_z: { text: "1시간", title: "발동 조건 자체는 15분(3봉) 수익률 급변이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 1.75xATR 도달 확률'로 평가" },
   taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
   liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
+  demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
+  kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
 };
 
 function horizonBadgeHtml(key) {
@@ -1090,6 +1097,20 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
     // 2026-08-31 user request: default caption shows the LAST segment's own range+label, not just
     // "지금 시간" -- see lastSegmentRangeLabel().
     const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time");
+    // 2026-08-31: optional `it.proba` (0-1) opts an item into the same inline probability meter
+    // renderEvidenceSignals() uses (see .meter-col in styles.css) -- state text, then the meter bar,
+    // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
+    // (수급 흐름/청산 캐스케이드/베이시스 청산압박/청산 방향압력, all categorical-only) keep the plain
+    // .ops-health-status-badge pill, unchanged -- there's no probability to gauge for those.
+    const metaHtml = it.proba != null
+      ? `<div class="meter-col">
+          <span class="meter-state ${it.tone}">${escapeHtml(it.subText || "-")}</span>
+          <div class="meter-gauge">
+            <span class="meter-track"><span class="meter-fill ${it.tone}" style="width:${clamp01(it.proba) * 100}%"></span></span>
+            <span class="meter-pct">${Math.round(clamp01(it.proba) * 100)}%</span>
+          </div>
+        </div>`
+      : `<span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>`;
     return `<article class="ops-health-row ${it.tone}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
@@ -1107,7 +1128,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
         <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
       </div>
       <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>
+        ${metaHtml}
       </div>
     </article>`;
   }).join("");
@@ -1215,7 +1236,7 @@ const EVIDENCE_SIGNAL_KO = {
   liquidity_sweep: {
     name: "유동성 스윕(저점·고점 사냥)",
     detail: "[조건] 직전 4시간 저점/고점을 살짝 뚫었다가 종가는 그 안으로 복귀(stop hunt 패턴).\n" +
-      "[신뢰도] 발동 시점 23피쳐(Tier0+rsi)를 TabPFN에 넣어 '150분 안 4.0×ATR 도달확률' 산출('특화 감지기'의 'V자 반등락'과는 별개 모델).\n" +
+      "[신뢰도] 발동 시점 23피쳐(Tier0+rsi)를 TabPFN에 넣어 '150분 안 4.0×ATR 도달확률' 산출('특화 감지기'의 'V자 급등락'과는 별개 모델).\n" +
       "[검증] VAL 0.659 / OOS 0.637 / HOLDOUT 0.661.\n" +
       "[경제성] 트레일링스톱 VAL +10.70bp / OOS +14.49bp / 홀드아웃 +1.97bp(승률67.7%) — 이 신호 최초로 3구간 전부 통과(단, 실거래 미배포 · 재량 참고용).",
   },
@@ -1248,6 +1269,23 @@ const EVIDENCE_SIGNAL_KO = {
       "[검증] VAL 0.605 / OOS 0.620 / HOLDOUT 0.621. ablation상 변동성레짐 의존도가 이 저장소 최고(제거시 VAL 0.514로 붕괴) — 경제적으로 타당한 메커니즘.\n" +
       "[경제성] 트레일링스톱 VAL +15.15bp(승률93.2%) / OOS +3.00bp(승률87.6%) / 홀드아웃 +2.54bp(승률90.6%) — 단 승률은 exit구조(ARM0.5) 자체효과(무작위진입도 82~84%), bp 우위(무작위 대비 +5~18bp)가 진짜 근거.",
   },
+  // 2026-08-31: 호메로스 '후보 풀' 트랙 신규 2종(기존 8개와 별개, docs/homer/README.md "후보 풀"
+  // 절 참조) — 사전점검→HORIZON/GAP/K그리드→TabPFN확인→순열중요도→경제성게이트→룩어헤드감사→
+  // 홀드아웃까지 전체 파이프라인 완료 후 배포.
+  demarker_extreme: {
+    name: "DeMarker 오실레이터 극단",
+    detail: "[조건] DeMarker(14, 고/저가 기반 오실레이터) ≥0.90(과매수)/≤0.10(과매도).\n" +
+      "[신뢰도] 발동 시점 24피쳐(Tier0 23개+dem)를 TabPFN에 넣어 '40분 안 0.70×ATR 도달확률' 산출.\n" +
+      "[검증] VAL 0.753 / OOS 0.716 / HOLDOUT 0.746 — 이 저장소 분류성능 역대 최고(단, 순열중요도상 실제 드라이버는 bb_pctb이고 dem 자신은 단독으론 무의미 — 룩어헤드 감사로 계산버그 아님 확인).\n" +
+      "[경제성] 트레일링스톱 VAL +12.14bp(승률70.7%) / OOS +20.20bp(승률80.0%, 이 저장소 OOS bp 역대 최고) / 홀드아웃 +11.53bp(승률77.9%) — 96개 조합 전부 통과(역대 최고), 홀드아웃 축소폭도 이 저장소 최소.",
+  },
+  kalman_deviation_meanrev: {
+    name: "칼만필터 추세이탈 평균회귀",
+    detail: "[조건] (종가-칼만필터 추세선)/추세선을 288봉 롤링 z-score, ≥2.0(과열)/≤-2.0(과냉).\n" +
+      "[신뢰도] 발동 시점 24피쳐(Tier0 23개+kalman_dev_z)를 TabPFN에 넣어 '1시간 안 2.5×ATR 도달확률' 산출.\n" +
+      "[검증] VAL 0.657 / OOS 0.631 / HOLDOUT 0.628.\n" +
+      "[경제성] 트레일링스톱 VAL +10.26bp(승률71.2%) / OOS +11.00bp(승률71.0%) / 홀드아웃 +5.80bp(승률71.8%) — 96개 조합 전부 통과.",
+  },
 };
 
 // Snapshot tab "13신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
@@ -1260,6 +1298,8 @@ const EVIDENCE_STRIP_CHIP_IDS = {
   taker_delta_z_climax: "eviChipTakerDelta",
   smt_divergence: "eviChipSmt",
   fib_extension_exhaustion: "eviChipFibExt",
+  demarker_extreme: "eviChipDemarker",
+  kalman_deviation_meanrev: "eviChipKalman",
 };
 
 function resetEvidenceStripChips() {
@@ -1358,12 +1398,14 @@ function renderEvidenceSignals(payload) {
   const badge = el("snapshotEvidenceBadge");
   const stripBadge = el("evidenceStripBadge");
   if (!payload || payload.error) {
+    latestEvidenceSignals = null;
     if (badge) { badge.className = "ops-badge bad"; badge.textContent = "EVIDENCE UNREACHABLE"; }
     if (stripBadge) { stripBadge.className = "ops-badge bad"; stripBadge.textContent = "UNREACHABLE"; }
     resetEvidenceStripChips();
     return;
   }
   if (!payload.warmed_up) {
+    latestEvidenceSignals = null;
     if (badge) { badge.className = "ops-badge warn"; badge.textContent = "WARMING UP"; }
     if (stripBadge) { stripBadge.className = "ops-badge warn"; stripBadge.textContent = "WARMING UP"; }
     setH("evidenceSignalList", "");
@@ -1381,6 +1423,7 @@ function renderEvidenceSignals(payload) {
     stripBadge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
     stripBadge.textContent = `바닥↑ ${payload.bottom_votes || 0} · 천장↓ ${payload.top_votes || 0}`;
   }
+  latestEvidenceSignals = payload;
   const signals = Array.isArray(payload.signals) ? payload.signals : [];
   const firedMeanings = [];
   setH("evidenceSignalList", signals.map((s) => {
@@ -1395,7 +1438,31 @@ function renderEvidenceSignals(payload) {
     // 자체(bottom_fired/top_fired)는 기존 규칙 그대로(모델이 학습된 조건과 동일해야 하므로) -- 이
     // 확률은 그 발동을 "얼마나 신뢰할지"만 대체하는 것이지 "발동 여부"를 바꾸는 게 아님.
     const modelPctText = s.model_proba != null ? `${Math.round(s.model_proba * 100)}%` : null;
-    const stateWithModel = modelPctText ? `${state} · ${modelPctText}` : state;
+    // 2026-08-31 user request: the price level implied by this signal's own trained K*ATR% target
+    // (server-computed from the fire bar's own entry/ATR, see _tp_price in
+    // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
+    // economics config, just the label's own touch target, shown next to the state/probability.
+    const modelTpText = s.model_tp_price != null ? `익절 ${fmtNum(s.model_tp_price, 2)}` : null;
+    // Evolution of this meta column, all 2026-08-31 (see eth_dashboard_evidence_signal_tp_price_
+    // display_20260831 memory for the full history): joined into the status badge itself (broke its
+    // fixed 64px pill sizing) -> split into badge + <small> below it (user: "not clean") -> a
+    // probability ring ("옵션 B" of a 4-way mockup), unconditional (no model_proba = empty "0%"
+    // reading, not a different fallback element, so fired/not-fired rows' columns still line up) ->
+    // user decided the ring itself "생각보다 별로" -> an inline meter bar instead, first as a
+    // horizontal row (gauge left, state+price stacked right) -> user asked for the gauge to sit
+    // BETWEEN the state text and price instead, matching the original mockup's own "옵션 A" layout
+    // exactly (see the vertical .meter-col template below: state, then gauge, then price). Class
+    // names generalized from evidence-meter-* to meter-* in this same pass -- renderModelIndicatorList
+    // now reuses this same component for "V자 급등락" (see its own it.proba handling), so it's no
+    // longer evidence-signal-specific. metaTone priority (below) carries over unchanged.
+    // metaTone: follows model_side (the side the probability was computed for) EXCEPT when the
+    // row's raw tone is "warn" (혼재 -- bottom_fired AND top_fired at once), which always shows
+    // amber/주의 color regardless of which single side model_side picked (model_side is otherwise
+    // "bottom"/"top" whenever model_proba is present, even for a raw-혼재 row, since the backend's
+    // side field is singular -- see compute_evidence_signal_metalabels()'s bottom-priority
+    // tie-break -- so without this warn check first, 혼재 rows would silently render as plain
+    // good/bad and never show as the mixed-signal warning they actually are).
+    const metaTone = tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
     const ko = EVIDENCE_SIGNAL_KO[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
     const isOpen = detailOpenKeys.has(detailKey);
@@ -1446,7 +1513,14 @@ function renderEvidenceSignals(payload) {
         <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
       </div>
       <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${escapeHtml(stateWithModel)}</span>
+        <div class="meter-col">
+          <span class="meter-state ${metaTone}">${escapeHtml(state)}</span>
+          <div class="meter-gauge">
+            <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((s.model_proba != null ? s.model_proba * 100 : 0) / 100) * 100}%"></span></span>
+            <span class="meter-pct">${modelPctText || "0%"}</span>
+          </div>
+          ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
+        </div>
       </div>
     </article>`;
   }).join(""));
@@ -1482,6 +1556,10 @@ async function refreshEvidenceSignals() {
     console.error("Evidence signal fetch error:", error);
     renderEvidenceSignals({ error: true });
   }
+  // 2026-08-31: redraw the Snapshot chart's evidenceSignalTpLevels() lines right away (same idiom
+  // as refreshLiquidationMap()/refreshRegimeWide24() below) instead of waiting up to ~5s for the
+  // next render() tick to pick up the updated latestEvidenceSignals.
+  renderSnapshotChart();
 }
 
 // Live PREVIEW of the currently-forming bar (2026-08-26) -- small live-dot overlay on the strip
@@ -1888,36 +1966,37 @@ function nearestLiquidationLevel() {
   }];
 }
 
-// Liquidation magnet as a chart line -- 2026-08-25, user asked for the same tail_risk-derived
-// magnet the gauge above this chart already shows (real @forceOrder events clustered over the last
-// 15min) to also appear ON the chart, not just as a number in the gauge. Distinct color
-// (--liq-magnet) from --liq-support/--liq-resistance on purpose: this is a different data source
-// (real recent events, not the candle-estimated liquidation map nearestLiquidationLevel() draws
-// from) and the two can sit close together on the chart, so reusing the S/R colors here would make
-// them impossible to tell apart at a glance. Reads latestMainState (updated every tick by render(),
-// not scoped to this chart's own ~5min refresh cadence) rather than taking tail as a parameter, so
-// this chart's other two callers (maybeFetchSnapshotChartHistory/refreshLiquidationMap) don't each
-// need to know how to fetch tail_risk themselves.
-function liquidationMagnetLevel() {
-  // 2026-08-31: latestMainState.tail_risk is dashboard_state.json's top-level block, written by
-  // trading_bot.py for ETH only (see docs/eth_dashboard_multicoin_expansion_design_20260831.md
-  // section 2.2) -- no BTC equivalent exists yet, so this line is simply omitted rather than drawn
-  // from the wrong coin's data.
+// Evidence-signal take-profit lines (2026-08-31 user request, follow-up to the label-chip TP-price
+// text) -- one AVERAGED line per side (long/short), not one per fired signal. First shipped as one
+// line per signal, but with several signals often firing at once (see
+// eth_dashboard_evidence_signal_tp_price_display_20260831 memory) that cluttered the chart with a
+// pile of near-identical dashed lines; user asked to collapse each side down to a single average
+// instead ("롱과 숏 각각 익절가들 모아서 평균을 낸 익절가를 보여줘"). Same generic
+// {val,color,label,dashed,width} shape nearestLiquidationLevel() above already feeds into
+// riskLevels. Reads latestEvidenceSignals (set by renderEvidenceSignals()), not a parameter, so
+// this chart's other callers don't need to know how to fetch evidence signals themselves.
+//
+// ETH-only: /api/evidence-signals is a single, non-per-asset endpoint (every K/ATR% value it was
+// trained on is ETH's own), so it must not draw on a BTC/SOL/XRP/HYPE chart just because that's the
+// active Snapshot coin.
+//
+// Label is "롱익절"/"숏익절" (bottom-side signals bet long, top-side bet short), not each signal's
+// own EVIDENCE_SIGNAL_KO name -- those are full phrases ("칼만필터 추세이탈 평균회귀") far too long
+// for the chart's left-margin tag column, which every existing tag ("지지1"/"저항1"/"진입"/"현재")
+// keeps to <=3 characters.
+function evidenceSignalTpLevels() {
   if (activeSnapshotAsset !== "eth") return [];
-  const tail = latestMainState?.tail_risk || {};
-  const clusterDir = Number(tail.liq_cluster_direction || 0);
-  const price = Number(tail.liq_cluster_price || 0);
-  if (clusterDir === 0 || !(price > 0)) return [];
-  const strength = clamp01(Number(tail.liq_cluster_strength) || 0);
-  return [{
-    val: price,
-    color: "var(--liq-magnet)",
-    label: "자석",
-    dashed: true,
-    width: Math.max(1, Math.min(4, Math.round(1 + strength * 3))),
-  }];
+  const signals = latestEvidenceSignals?.signals;
+  if (!Array.isArray(signals)) return [];
+  const withTp = signals.filter((s) => s.model_tp_price != null);
+  const avg = (arr) => arr.reduce((sum, v) => sum + v, 0) / arr.length;
+  const longTp = withTp.filter((s) => s.model_side === "bottom").map((s) => s.model_tp_price);
+  const shortTp = withTp.filter((s) => s.model_side === "top").map((s) => s.model_tp_price);
+  const levels = [];
+  if (longTp.length) levels.push({ val: avg(longTp), color: "var(--good)", label: "롱익절", dashed: true, width: 2 });
+  if (shortTp.length) levels.push({ val: avg(shortTp), color: "var(--bad)", label: "숏익절", dashed: true, width: 2 });
+  return levels;
 }
-
 
 // Keeps candleHistoryByAsset[activeSnapshotAsset]'s rightmost candle live between the 5-min
 // maybeFetchSnapshotChartHistory() fetches, mirroring updateChart()'s in-place extend/roll logic
@@ -1949,11 +2028,12 @@ function updateSnapshotCandleLive() {
 // bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as a density
 // profile strip plus a single line for the nearest support/resistance level (2026-08-24: the full
 // 12-line overlay was removed for clutter, see nearestLiquidationLevel/liquidationDensityHistory
-// above; the level list below the chart is still the place to read every level's exact price) and,
-// 2026-08-25, the liquidation magnet line (see liquidationMagnetLevel above). Called both right
-// after its two 5-min data sources (candles, liquidation map) refresh, AND every ~5s from render()
-// (see updateSnapshotCandleLive() above and the call site in render()) so the candle body, the
-// magnet line, and the current-price line all stay in sync instead of only some of them moving.
+// above; the level list below the chart is still the place to read every level's exact price) and
+// the long/short averaged evidence-signal TP lines (see evidenceSignalTpLevels above; the
+// liquidation magnet line that used to live here too was removed 2026-08-31 per user request).
+// Called both right after its two 5-min data sources (candles, liquidation map) refresh, AND every
+// ~5s from render() (see updateSnapshotCandleLive() above and the call site in render()) so the
+// candle body and the current-price line stay in sync instead of only one of them moving.
 // NOTE: on mobile, pan/zoom (visibleCandleWindow) reads the same module-level mobileChartView the
 // Live chart's gestures write to -- shares the same window index, not independently interactive.
 // Not wired up to setupMobileCandleGestures() (that's hardcoded to #candleSvg); acceptable since
@@ -1967,7 +2047,7 @@ function renderSnapshotChart() {
   // behind every visible column (see that constant's comment).
   const candles = fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel(), ...liquidationMagnetLevel()];
+  const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
   renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, liquidationDensityHistory());
 }
 
@@ -2643,7 +2723,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   pushToneHistory("retail_flow", ci.retail_flow.tone);
   pushToneHistory("liq_cascade", cascadeTone);
 
-  // V자 반등락 (2026-08-29, TabPFN Tier0+rsi 모델, 2026-08-30 "유동성스윕 반등예측"에서 개명) -- fetched
+  // V자 급등락 (2026-08-29, TabPFN Tier0+rsi 모델, 2026-08-30 "유동성스윕 반등예측"에서 개명,
+  // 2026-08-31 "V자 반등락"에서 다시 "V자 급등락"으로 개명 -- 사용자 요청) -- fetched
   // separately by refreshVReboundSignal(), "own fetch cycle, dashboard-side compute" category (own
   // klines fetch + frozen TabPFN context, not part of ci/toneHistory). Fires on EVERY liquidity_sweep
   // (14,259건, 2024-01~) -- frequent, large validated sample. tone is neutral (no recent sweep) or,
@@ -2707,17 +2788,17 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   if (activePageTab === "snapshot") {
     setH("liqVolumeGauge", liquidationVolumeGaugeHtml());
 
-    // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + liquidationMagnetLevel())
-    // used to be called ONLY from the two data-fetch functions that feed it, each gated to a 5-minute
-    // interval (maybeFetchSnapshotChartHistory/refreshLiquidationMap) -- a reasonable cadence for
-    // candles/the liquidation map, since neither source changes faster than that. But
-    // liquidationMagnetLevel() reads latestMainState.tail_risk, which updates on every SSE tick (this
-    // render() call itself) -- so the magnet line could sit stale for up to 5 minutes after a real
-    // change, or simply never have painted yet if the chart's first 5-min-gated render happened
-    // before tail_risk had arrived. Throttled to SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS, same
-    // pattern the Live tab's own chart uses for its own frequent-tick redraws (own constant since
-    // 2026-08-25 -- see its definition for why Snapshot can afford a coarser interval) -- cheap
-    // since renderSnapshotChart() only redraws from already-cached data, no network fetch of its own.
+    // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + the old liquidationMagnetLevel(),
+    // removed 2026-08-31) used to be called ONLY from the two data-fetch functions that feed it, each
+    // gated to a 5-minute interval (maybeFetchSnapshotChartHistory/refreshLiquidationMap) -- a
+    // reasonable cadence for candles/the liquidation map, since neither source changes faster than
+    // that. But the current-price line reads latestLivePriceByAsset, which updates on every SSE tick
+    // (this render() call itself) -- so it could sit stale for up to 5 minutes after a real change, or
+    // simply never have painted yet if the chart's first 5-min-gated render happened before a live
+    // price had arrived. Throttled to SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS, same pattern the Live
+    // tab's own chart uses for its own frequent-tick redraws (own constant since 2026-08-25 -- see its
+    // definition for why Snapshot can afford a coarser interval) -- cheap since renderSnapshotChart()
+    // only redraws from already-cached data, no network fetch of its own.
     const nowForSnapshotChart = Date.now();
     if (nowForSnapshotChart - lastSnapshotChartRenderAt >= SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) {
       lastSnapshotChartRenderAt = nowForSnapshotChart;
@@ -2736,19 +2817,22 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
 
     // 특화 감지기 (2026-08-30 user request): event-triggered, model-driven detectors that don't fit
     // either the always-on model-indicator gauges below or the scorecard-gated evidence-signal tier
-    // above -- V자 반등락 is the first resident (TabPFN, fires only on a liquidity_sweep, long idle
-    // "대기" gaps between events), more will land here over time. Reuses renderModelIndicatorList's
-    // row/strip markup verbatim (2nd param = its own target list, own memoized-html slot) rather than
-    // a new template -- same reasoning as the model-indicator/evidence-signal panels already sharing
-    // one markup. Append new specialized-detector objects to this array as they're built.
+    // above -- V자 급등락(2026-08-31, "V자 반등락"에서 개명)이 첫 입주(TabPFN, fires only on a
+    // liquidity_sweep, long idle "대기" gaps between events), more will land here over time. Reuses
+    // renderModelIndicatorList's row/strip markup verbatim (2nd param = its own target list, own
+    // memoized-html slot) rather than a new template -- same reasoning as the model-indicator/
+    // evidence-signal panels already sharing one markup. Append new specialized-detector objects to
+    // this array as they're built.
+    // 2026-08-31: liveText's old "급등 확률(TabPFN) 76%" sentence (shown under the title) dropped in
+    // favor of `proba` -- renderModelIndicatorList now shows that as the same inline meter bar the
+    // evidence-signal list uses (user: "인라인 미터로 바꿔줘"), in the meta column next to the state,
+    // instead of duplicating the same number as a plain sentence.
     renderModelIndicatorList([
       {
-        key: "v_rebound", label: "V자 반등락", tone: vReboundTone, subText: vReboundSubText,
+        key: "v_rebound", label: "V자 급등락", tone: vReboundTone, subText: vReboundSubText,
         history: (latestVRebound && latestVRebound.history) || [],
         times: (latestVRebound && latestVRebound.times) || [],
-        liveText: vReboundProbaShown != null
-          ? `${vReboundSubText} 확률(TabPFN) ${Math.round(vReboundProbaShown * 100)}%`
-          : "",
+        proba: vReboundProbaShown,
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       },

@@ -1068,7 +1068,7 @@ def make_app() -> web.Application:
             metalabels: dict[str, dict] = {}
             if warmed_up:
                 try:
-                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, latest)
+                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, sig)
                 except Exception as metalabel_exc:  # noqa: BLE001
                     print(f"evidence-signal metalabel leg failed (taker_delta_z_climax/"
                           f"short_term_return_z/liquidity_sweep/orthogonal_combo/smt_divergence/"
@@ -1091,12 +1091,23 @@ def make_app() -> web.Application:
                     "top_fired": bool(latest[tacol]) if warmed_up else None,
                     "top_last_fired_ts": _evidence_last_fired_ts(sig[tcol], latest) if warmed_up else None,
                     # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
-                    "bottom_history": sig[bacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "top_history": sig[tacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    # 2026-08-31 fix: reads the RAW bcol/tcol, not the _active (sustain-window)
+                    # column used above for bottom_fired/top_fired. Using _active here made any
+                    # signal whose SUSTAIN_BARS_OVERRIDE exceeds EVIDENCE_SIGNAL_HISTORY_BARS
+                    # (currently only smt_divergence: 72-bar/6h sustain vs this 48-bar/4h strip)
+                    # show every visible cell as fired continuously once triggered even once, since
+                    # the sustain window never fully rolls off within the display window -- looked
+                    # like the same signal stuck permanently on (user report). bottom_fired/
+                    # top_fired and their last_fired_ts correctly keep using _active/raw
+                    # respectively; only this per-bar activity graph needs the true discrete
+                    # firing pattern.
+                    "bottom_history": sig[bcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_history": sig[tcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
                 }
                 if name in metalabels:
                     entry["model_proba"] = metalabels[name]["proba"]
                     entry["model_side"] = metalabels[name]["side"]
+                    entry["model_tp_price"] = metalabels[name].get("tp_price")
                 signals_payload.append(entry)
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see

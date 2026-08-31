@@ -14,7 +14,6 @@
   --accent: #22d3ee;
   --liq-support: #5b8def;
   --liq-resistance: #e0913f;
-  --liq-magnet: #e879f9;
   --ink: #f5f6fb;
   --line: rgba(203, 209, 227, 0.18);
   --soft-line: rgba(203, 209, 227, 0.095);
@@ -240,19 +239,69 @@ body {
 .ops-health-row.good .ops-health-status-badge { color: #122016; background: var(--good); border-color: transparent; }
 .ops-health-row.warn .ops-health-status-badge { color: #2c1c09; background: var(--amber); border-color: transparent; }
 .ops-health-row.bad .ops-health-status-badge { color: #2a0e0a; background: var(--bad); border-color: transparent; }
-/* 2026-08-27 (user request): fixed absolute size for the model-indicator + evidence-signal badges
-   specifically (미발동/상승압력/주의/안정/... -- see the badge-text values app.js's classifyIndicators()
-   and evidence-signal render feed into this span) -- was sized purely by content/padding before, so
-   "안정" and "BOTTOM 발동" made visibly different-size pills in the same column. NOT applied to
-   #opsHealthList (Ops-tab checklist, longer free-text statuses) or #macroCalendarList (timestamp +
-   category text, different shape) -- both reuse the same base class but weren't part of this ask.
-   width is fixed (not max-width) so text wraps to a second line instead of stretching the pill; the
-   text-align centers both a short one-line label and a wrapped two-line one. */
+/* 2026-08-27 (user request): fixed absolute size for the model-indicator badges specifically
+   (미발동/상승압력/주의/안정/... -- see the badge-text values app.js's classifyIndicators() feeds
+   into this span) -- was sized purely by content/padding before, so "안정" and "BOTTOM 발동" made
+   visibly different-size pills in the same column. NOT applied to #opsHealthList (Ops-tab
+   checklist, longer free-text statuses) -- still out of scope, different content shape. width is
+   fixed (not max-width) so text wraps to a second line instead of stretching the pill; the
+   text-align centers both a short one-line label and a wrapped two-line one.
+   2026-08-30: #snapSpecializedSignalList (특화 감지기, reuses renderModelIndicatorList's same
+   markup -- see that function's targetId param) missed this list when it was added, so its "대기"
+   badge rendered smaller than every other panel's badges -- same rule now applies here too.
+   2026-08-31: #evidenceSignalList dropped out of this selector -- that list's rows no longer render
+   a .ops-health-status-badge at all (see .meter-col below, which now renders unconditionally for
+   every row, fired or not). #snapSpecializedSignalList stays in this selector -- V자 급등락 still
+   falls back to the plain badge while idle (no it.proba yet), unlike evidence signals. */
 #snapModelIndicatorList .ops-health-status-badge,
-#evidenceSignalList .ops-health-status-badge {
+#snapSpecializedSignalList .ops-health-status-badge {
   width: 64px;
   text-align: center;
 }
+/* 2026-08-27 (user request, same ask extended to the macro calendar): #macroCalendarList's badge
+   now shows just 오늘/내일 + time ("오늘 14:30", category dropped same day per a follow-up request),
+   so its own width shrank from an earlier 100px (sized for the category text) down to fit this --
+   still its own rule rather than reusing the 64px above since the content shape (short label vs
+   date+time) differs. */
+#macroCalendarList .ops-health-status-badge {
+  width: 72px;
+  text-align: center;
+}
+
+/* Inline probability meter (2026-08-31, 9th pass -- see
+   eth_dashboard_evidence_signal_tp_price_display_20260831 memory for the full redesign history:
+   crammed badge -> badge+<small> -> probability ring ("옵션 B" of a 4-way mockup) -> user decided
+   the ring itself "생각보다 별로" -> this inline meter bar ("옵션 A" of the same mockup), first laid
+   out horizontally (gauge left, state+price stacked right) -> user asked for the gauge to sit
+   BETWEEN the state text and price instead, matching the mockup's own vertical layout exactly (see
+   .meter-col below: state, then gauge, then price, top to bottom). Renamed evidence-meter-* ->
+   meter-* in this same pass since renderModelIndicatorList now reuses it too (V자 급등락's
+   probability, via it.proba) -- no longer evidence-signal-specific.
+   - Renders unconditionally for every EVIDENCE-signal row, fired or not -- no model_proba means an
+     empty (0%) bar with the neutral/warn state text, not a differently-shaped fallback pill (keeps
+     that list's columns lined up, "오와 열이 안맞아"/"너비를 맞춰줘" from the ring era). Not forced
+     for renderModelIndicatorList's other (non-evidence) rows -- most of those have no probability
+     concept at all, so they keep the plain .ops-health-status-badge pill; nothing to align against
+     since V자 급등락 is currently the only row in its own list.
+   - .meter-col has a fixed WIDTH (not max-width, same technique the old fixed-64px badge used) +
+     justify-items:end, so state/gauge/price all right-align to the same column regardless of which
+     line is longest in a given row.
+   - warn (혼재)/neutral (not fired) color variants alongside good/bad. */
+.meter-col { display: grid; gap: 4px; justify-items: end; width: 92px; }
+.meter-state { font: 800 11.5px/1.2 var(--font-sans); white-space: nowrap; }
+.meter-state.good { color: var(--good); }
+.meter-state.bad { color: var(--bad); }
+.meter-state.warn { color: var(--amber); }
+.meter-state.neutral { color: var(--muted); }
+.meter-gauge { display: flex; align-items: center; gap: 5px; }
+.meter-track { width: 36px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.meter-fill { display: block; height: 100%; border-radius: 2px; }
+.meter-fill.good { background: var(--good); }
+.meter-fill.bad { background: var(--bad); }
+.meter-fill.warn { background: var(--amber); }
+.meter-fill.neutral { background: var(--muted); }
+.meter-pct { font: 700 10px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
+.meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border
@@ -339,15 +388,35 @@ body {
   color: var(--text);
 }
 
-/* auto-fit + minmax means this adapts to however many chips a group actually has (2, 4, 6, 11, ...)
-   at every viewport width without hand-maintained column-count classes -- 2026-08-24: a fixed
-   repeat(N, 1fr) (via now-removed .signal-chip-row-2/-3/-4 modifiers) broke on mobile the moment a
-   different session added 3 more evidence chips (8->11) without updating those counts. This is the
-   self-healing fix: it never goes stale when the item count changes again. */
+/* 2026-08-27 user request 기원 (원래 증거 신호 그룹 전용): 데스크톱 4열/모바일 2열 고정.
+   2026-08-24 교훈(고정 repeat(N,1fr) 파손)은 "열 개수가 칩 개수에 맞춰 골라 써야 하는 여러
+   모디파이어 클래스" 구조였던 게 원인 -- 이건 그거와 달리 열 개수가 칩 개수와 무관하게 항상
+   고정 4/2이므로 칩이 늘어도(8->11 등) 그냥 다음 줄로 더 넘어갈 뿐 깨지지 않는다(마지막 줄만
+   덜 채워질 수 있음, 레이아웃 파손 아님).
+   2026-08-30: 이전엔 이 그룹(.signal-chip-row-evidence)만 고정열이고 나머지(모델지표/특화감지기
+   등, .signal-chip-row)는 auto-fit+minmax였는데, 그 둘의 실제 렌더링 폭이 갈라짐(칩 1개뿐인
+   위험도/특화감지기 행이 다른 행보다 눈에 띄게 크거나 작게 보임 -- 사용자가 실측 스크린샷으로
+   확인, 증거신호 315px vs 나머지 200px) -- 별도 클래스를 없애고 이 고정열 규칙 하나로 모든
+   signal-chip-row를 통일해, 칩이 몇 개든 어느 그룹이든 트랙 폭이 항상 동일해지도록 함. */
 .signal-chip-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
+}
+@media (max-width: 720px) {
+  .signal-chip-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/* 2026-08-31 모바일 최적화 -- 일반 스마트폰 폭(480px 이하)에서는 2열도 칩 하나당 ~170px밖에
+   안 남아 .signal-chip-label(nowrap+ellipsis)이 "리테일 수...", "청산 방..."처럼 잘려서 무슨
+   신호인지 안 보이는 문제 실측 확인 -- 1열로 한 번 더 좁혀 라벨에 전체 칩 폭을 내줌(세로로 길어
+   지는 대신 라벨이 안 잘리는 쪽을 택함, 이 칩들의 목적 자체가 "한눈에 상태 읽기"라 라벨 가독성이
+   더 중요). */
+@media (max-width: 480px) {
+  .signal-chip-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 2026-08-24 사용자 리포트: 방향(롱/숏, 초록/빨강)과 위험도(안정/주의/위험, 초록/호박/빨강)가
@@ -453,7 +522,14 @@ body {
    .ops-health-info (its parent, the row's middle 1fr grid column) had the room to go all the way
    to the badge column. Applies to both consumers of this class (evidence-signal AND
    model-indicator panels, both via toneStripSvg()) -- width:100% now fully governs. */
-.evidence-strip { display: block; width: 100%; height: 20px; }
+/* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
+   too tall) -> settled on 15px, the midpoint, per explicit user request each step. */
+.evidence-strip { display: block; width: 100%; height: 15px; }
+/* 2026-08-31 user request: a persistent time axis under the strip (design candidate "01 눈금 축")
+   so roughly-when is visible without hovering -- see stripAxisHtml() in app.js, 5 evenly spaced
+   ticks. Matches .evidence-strip-caption's font/color so the two read as one family; smaller
+   size since these are secondary to the caption's 바닥/천장 last-fired text above it. */
+.evidence-strip-axis { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font: 9.5px/1 var(--font-mono); letter-spacing: 0.02em; opacity: 0.75; }
 .evidence-bar { transition: fill 0.4s ease, opacity 0.4s ease; }
 .evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite; }
 /* 2026-08-27 (user request): the "now" marker (accent-colored outline on the last/rightmost bar)
@@ -461,13 +537,23 @@ body {
    itself too. Position alone no longer gets any special styling; .evidence-strip-live below is now
    the only visual signal tied to the last bar, and only while genuinely live/firing.
    .evidence-bar-provisional below used to borrow this rule's stroke color for its dashed outline
-   (it never set its own) -- that dashed line is gone along with it, fill-opacity is what's left. */
-.evidence-bar-provisional { fill-opacity: 0.6; }
+   (it never set its own) -- that dashed line is gone along with it, fill-opacity is what's left.
+   2026-08-31 (user request): this bar (the still-forming, not-yet-confirmed segment -- see
+   toneStripSvg's merge guard, it never merges into the confirmed segment before it even when the
+   tone matches) now ALWAYS pulses, not just while actively firing -- previously a neutral/idle
+   forming bar (the common case) just sat there as a small static gray block visually detached from
+   the rest of the strip, which read as a rendering glitch rather than "this one's still live".
+   Independent of .evidence-strip-live below (that stays tone-gated, an extra amplified whole-gauge
+   cue only while something's genuinely firing) -- the two can overlap (slightly different periods,
+   1.4s vs this rule's 1.4s coincide here but .evidence-bar-live is 1.5s) without conflicting, same
+   as they already did before this change whenever the forming bar's own tone was non-neutral. */
+.evidence-bar-provisional { fill-opacity: 0.6; animation: statusPulse 1.4s ease-in-out infinite; }
 /* 2026-08-27 (user request): whole-gauge blink, reserved for "this signal's still-forming bar is
    both provisional AND currently firing (non-neutral)" -- see toneStripSvg's liveFiring param,
-   set by evidenceStripSvg from the provisional liveTone. Narrower than the old per-bar blink it
-   replaces: a provisional-but-neutral forming bar (the common case) or any fully confirmed render
-   (including every model-indicator strip, which never sets liveFiring) stays static. */
+   set by evidenceStripSvg from the provisional liveTone. An extra amplified cue (the WHOLE strip
+   pulses, not just the one bar) layered on top of .evidence-bar-provisional's own always-on pulse
+   above, only while something's genuinely firing -- a fully confirmed render (including every
+   model-indicator strip, which never sets liveFiring) stays static. */
 .evidence-strip-live { animation: statusPulse 1.4s ease-in-out infinite; }
 /* Model indicators (#snapModelIndicatorList) have no in-progress bar at all -- their "now" bar is
    just the latest CONFIRMED sample, same as every bar to its left -- so .evidence-bar-live's
@@ -509,6 +595,38 @@ body {
 .liq-level-row.liq-current .liq-level-price { color: var(--accent); }
 @media (max-width: 720px) {
   .liq-level-row { grid-template-columns: 48px 72px 1fr 52px; padding: 6px 12px; font-size: 11px; }
+}
+
+/* 2026-08-27: the liq-burst alert banner (removed) used to sit right below this panel's header,
+   visually separating the header's divider line from the gauge underneath. Now that the banner's
+   info lives inline in the gauge tag (see .liq-vol-gauge-live below), that divider reads as an
+   orphaned line with nothing between it and the gauge -- scoped override, not touching the base
+   .ops-health-head rule shared by 5 other panel headers. */
+.liq-map-panel .ops-health-head { border-bottom: none; }
+
+/* Liquidation long/short volume gauge (2026-08-27, recreated) -- proportional split bar, long=red
+   (--bad)/short=green(--good), real $ labels alongside so relative size isn't the only cue. */
+.liq-vol-gauge { padding: 8px 18px 10px; font: 600 12px/1.3 var(--font-mono); }
+.liq-vol-gauge-tag { display: block; margin-bottom: 6px; color: var(--muted); }
+.liq-vol-gauge-window { font-weight: 400; }
+.liq-vol-gauge-live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--bad); font-weight: 700; }
+.liq-vol-gauge-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); animation: statusPulse 1.1s ease-in-out infinite; }
+.liq-vol-gauge-quiet-text { color: var(--muted); font-weight: 400; }
+.liq-vol-gauge-track {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(203, 209, 227, 0.1);
+}
+.liq-vol-gauge-fill { height: 100%; }
+.liq-vol-gauge-fill.long { background: var(--bad); }
+.liq-vol-gauge-fill.short { background: var(--good); }
+.liq-vol-gauge-labels { display: flex; justify-content: space-between; margin-top: 4px; }
+.liq-vol-gauge-label.long { color: var(--bad); }
+.liq-vol-gauge-label.short { color: var(--good); }
+@media (max-width: 720px) {
+  .liq-vol-gauge { padding: 8px 12px 10px; font-size: 11px; }
 }
 
 @media (max-width: 720px) {
@@ -612,19 +730,6 @@ body {
 .shadow-slot-range-labels .tag.zero { color: var(--muted); background: rgba(203, 209, 227, 0.07); border: 1px solid var(--line); }
 .chart-risk-gauge { margin: 6px 4px 20px; }
 .chart-risk-gauge:empty { display: none; }
-.liq-cascade-gauge { margin: 10px 4px 16px; display: grid; gap: 8px; }
-.liq-cascade-gauge-track { position: relative; height: 10px; border-radius: 6px; background: rgba(203, 209, 227, 0.08); overflow: hidden; display: flex; }
-.liq-cascade-gauge-track.quiet { background: rgba(107, 171, 132, 0.06); }
-.liq-cascade-gauge-fill { height: 100%; transition: width 0.45s cubic-bezier(.22,.68,0,1.01); }
-.liq-cascade-gauge-fill.long { background: linear-gradient(90deg, rgba(207, 106, 92, 0.35), var(--bad)); }
-.liq-cascade-gauge-fill.short { background: linear-gradient(90deg, var(--good), rgba(107, 171, 132, 0.35)); }
-.liq-cascade-gauge-zero { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: rgba(203, 209, 227, 0.35); transform: translateX(-0.5px); }
-.liq-cascade-gauge-labels { display: flex; justify-content: space-between; }
-.liq-cascade-gauge-labels:has(.tag.quiet) { justify-content: center; }
-.liq-cascade-gauge .tag { font: 800 10px/1 var(--font-mono); padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; background: rgba(203, 209, 227, 0.07); border: 1px solid var(--line); color: var(--muted); }
-.liq-cascade-gauge .tag.long { color: var(--bad); background: rgba(207, 106, 92, 0.12); border-color: rgba(207, 106, 92, 0.22); }
-.liq-cascade-gauge .tag.short { color: var(--good); background: rgba(107, 171, 132, 0.12); border-color: rgba(107, 171, 132, 0.22); }
-.liq-cascade-gauge .tag.quiet { color: var(--good); background: rgba(107, 171, 132, 0.12); border-color: rgba(107, 171, 132, 0.22); }
 .shadow-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line); border-top: 1px solid var(--soft-line); }
 .shadow-chart-cell { background: var(--panel); padding: 22px 18px 16px; }
 .shadow-chart-title { margin: 0 0 10px; font: 600 11.5px/1 var(--font-sans); color: var(--muted); }
@@ -816,6 +921,25 @@ body {
   cursor: help;
 }
 
+/* 2026-08-30 (user request): "이 신호의 학습 horizon을 배지로" -- this signal's own
+   train/backtest/prediction time window (e.g. "30분", "1시간"), distinct from .derived-tag's
+   "where this number comes from" lineage note. Accent-colored (not muted) so it reads as a
+   distinct fact about the signal, not a footnote. Same pill shape/size as .derived-tag for visual
+   consistency -- see horizonBadgeHtml()/SIGNAL_HORIZON in app.js. */
+.horizon-badge {
+  display: inline-block;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font: 700 8.5px/1.6 var(--font-mono);
+  color: var(--accent);
+  background: rgba(122, 162, 247, 0.1);
+  border: 1px solid rgba(122, 162, 247, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+  vertical-align: middle;
+  cursor: help;
+}
+
 .chart-note {
   margin-top: 8px;
   font-size: 11px;
@@ -965,6 +1089,7 @@ body {
 .ribbon-item strong.good-text { color: var(--good); }
 .ribbon-item strong.bad-text { color: var(--bad); }
 .ribbon-item strong.muted-text { color: var(--muted); }
+.ribbon-item strong.warn-text { color: var(--amber); }
 
 .market-chart-wrap, .charts, .journal-wrap {
   margin-bottom: var(--card-gap);
@@ -1097,6 +1222,13 @@ svg {
     padding: 12px;
   }
 
+  /* 2026-08-31 모바일 최적화 -- "증거 신호" 그룹 헤더가 라벨 텍스트 + 배지 2개(evidenceStripBadge/
+     evidenceProvisionalBadge, 둘 다 white-space:nowrap 긴 텍스트)를 한 줄(space-between)에 욱여
+     넣다 오른쪽으로 넘치던 문제 -- wrap만 허용해서 배지가 다음 줄로 자연스럽게 내려가게 함. */
+  .signal-overview-group-head {
+    flex-wrap: wrap;
+  }
+
   .evidence-strip-meaning {
     margin-top: 8px;
   }
@@ -1114,6 +1246,17 @@ svg {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;
+  }
+
+  /* 2026-08-31 모바일 최적화 -- 스냅샷 탭 헤더(.ops-panel-head, 코인탭+세션경보+EVIDENCE 배지가
+     한 줄 flex)가 코인탭 5개(BTC/SOL/XRP/HYPE 확장 이후 최소폭 5x48px=240px) + 배지들을 375px
+     폭에 다 못 담아 오른쪽으로 넘치던 문제 -- .chart-panel-head와 같은 처리(세로 스택)로 통일.
+     .ops-panel-head는 운영 관리 탭 헤더(제목+WATCHDOG 배지 2개뿐)에서도 재사용되는데, 거기도
+     세로로 쌓이는 것 자체는 문제없음(오히려 더 안전). */
+  .ops-panel-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
   }
 
   .asset-tabs {

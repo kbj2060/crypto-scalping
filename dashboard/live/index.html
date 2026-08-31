@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260831-strip-height-15px-mid-v164">
+  <link rel="stylesheet" href="styles.css?v=20260831-meter-vertical-vrebound-v173">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -160,6 +160,18 @@
               <span class="signal-chip-label">체결 쏠림</span>
               <span class="signal-chip-state">-</span>
             </div>
+            <div id="eviChipDemarker" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
+              <span class="signal-chip-label">DeMarker 극단</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipKalman" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
+              <span class="signal-chip-label">칼만 추세이탈</span>
+              <span class="signal-chip-state">-</span>
+            </div>
           </div>
           <p id="evidenceStripMeaning" class="evidence-strip-meaning hidden">-</p>
         </div>
@@ -170,7 +182,7 @@
           <div class="signal-chip-row">
             <div id="modelChipVRebound" class="signal-chip neutral">
               <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">V자 반등락</span>
+              <span class="signal-chip-label">V자 급등락</span>
               <span class="signal-chip-state">-</span>
             </div>
           </div>
@@ -219,7 +231,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260831-hype-coin-add-v171"></script>
+  <script src="./app.js?v=20260831-meter-vertical-vrebound-v180"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

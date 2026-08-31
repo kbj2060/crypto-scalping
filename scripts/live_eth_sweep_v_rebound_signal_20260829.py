@@ -1,47 +1,61 @@
 #!/usr/bin/env python3
-"""Read-only live event-triggered signal: when a liquidity_sweep fires (wick pierces the causal
-48-bar swing high/low, close reclaims back inside -- the dashboard's own `liquidity_sweep`
-evidence-signal definition), what's the probability it forms a clean V자반등 (sustained reversal)
-within 60 minutes vs 지지/횡보 (no real reversal attempt)?
+"""Read-only live event-triggered signal: this dashboard's "V자 반등락" specialized-detector chip.
 
-Backed by the TabPFN (Tier0 22 features + rsi) model, v7b label (2026-08-30, user-driven redesign
-after the v4 binary label's "지지/횡보" bucket was found to visually overlap with genuine V자반등
-examples): V자반등(1) = a close within the first 30min reaches 1.5x pre-sweep ATR AND the 60min
-window's peak-to-end giveback ratio stays <=0.20 (a real, sustained move, not just a brief touch).
-지지/횡보(0) = the first 30min's best CLOSE never even reached 1.0x ATR (genuinely never
-attempted a real move) -- everything in between (reached 1.0-1.5x ATR, or reached 1.5x+ but gave
-back too much) is EXCLUDED from training entirely as fuzzy/ambiguous, not forced into either
-class -- see docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md for the full
-v5->v6->v7->v7b design history. Validated: VAL AUC 0.7342+/-0.0008, OOS AUC 0.7621+/-0.0005,
-reserved-holdout AUC 0.7788+/-0.0005 -- far above v4's own 0.663/0.667/0.682 on the same 3
-chronological periods (this v7b population is a stricter, ~42%-of-events subset by design, so the
-two AUCs are not measuring identical tasks, but the jump is large and consistent across all 3
-splits and all 4 seeds). TabPFN is in-context inference, not a saved/trained model file: every
-call re-fits on the SAME FROZEN TRAIN context
-(data/labels/eth_5m_sweep_v_rebound_20260829/tabpfn_train_context_frozen_v7b_20260830.csv,
-3,783 rows, ts<2025-09-01 -- exactly the configuration that produced the numbers above, not
-re-extended with newer data). Live inference always returns a continuous probability for any new
-sweep (the fuzzy middle was only excluded from TRAINING, not from what the model can be asked to
-score) -- there is no separate "판단보류" model output, just this one probability.
+**2026-08-31 upgrade -- 9-trigger multitrigger model replaces the sweep-only v7b model.** Full
+history: memory eth_v_rebound_sweep_gated_recall_gap_20260831 (5-stage recall-gap diagnostic that
+motivated this, then the label/feature/TabPFN/holdout chain that validated it), docs/homer/
+README.md's "V자반등/지지횡보" section. Filename/function name kept unchanged from the v1-v7b
+lineage per this project's established convention (dated filenames are not renamed through later
+version upgrades -- e.g. build_eth_5m_liquidity_sweep_v_rebound_labels_20260829.py stayed named
+through its own v1->v4 evolution).
+
+**Why this upgrade happened**: a 90-day recall-gap audit found the OLD sweep-only trigger caught
+only ~25.5% of an estimated true population of qualifying V-shaped reversals (sweep is just one of
+several conditions that precede a real V자반등; most instances happen without a sweep at all, at
+equal or better quality). Widening the candidate pool to 9 triggers (all OR'd, not AND'd) closes
+that gap while reusing the EXACT SAME v7b outcome/label formula unchanged (fast_move_atr_mult>=1.5x
+within 30min AND giveback_ratio<=0.20 within 60min) -- trigger and label are fully decoupled axes;
+only which bars get scored changed, not what "V자반등" means.
+
+The 9 triggers (OR'd; downside=candidate for an upward rebound, upside=mirror):
+  1. liquidity_sweep, 2. taker_delta_z_climax, 3. short_term_return_z, 4. orthogonal_combo,
+  5. smt_divergence, 6. fib_extension_exhaustion, 7. demarker_extreme, 8. kalman_deviation_meanrev
+  -- all 8 reused verbatim via compute_signals() (live_evidence_signal_dashboard_20260823.py),
+  the same canonical pre-TabPFN boolean-trigger source this dashboard's own evidence-signal chips
+  use (demarker_extreme/kalman_deviation_meanrev were themselves 2026-08-31 Homer candidate-pool
+  additions to that function, independently validated and deployed by a concurrent session).
+  9. local_extreme -- the only genuinely new trigger, no precondition: bar is the highest/lowest
+  in a +-30min (+-6 bar) window. Turned out to be both the single largest AND highest-hit-rate
+  trigger of the 9 (22.2% vs the others' 12-20%) in the full-history label build.
+
+Validated (data/labels/eth_5m_v_rebound_multitrigger_20260831/): cheap_gate VAL/OOS AUC
+0.8296/0.8119 (single seed) -> 4-seed stability (VAL mean=0.8289 std=0.0007, OOS mean=0.8125
+std=0.0004, all 4 seeds beat sweep-only v7b) -> HOLDOUT (classification+economics, ONE-TIME spend):
+VAL/OOS/HOLDOUT AUC 0.8292/0.8127/0.8465 (HOLDOUT is the HIGHEST of the three, no degradation;
+sweep-only v7b was 0.7342/0.7621/0.7788 for comparison) + trailing-stop economics (SL=4.0/ARM=1.5/
+Trail=0.1, selected on VAL+OOS only) VAL+11.97bp/OOS+20.96bp/HOLDOUT+9.28bp (win rate 83.8/86.7/
+85.7%, stable across splits) -- sweep-only v7b never passed its own economic gate (0/205 SL/ARM/
+Trail combos were simultaneously profitable on VAL+OOS). This is the first time this project's
+"V자반등" model family has cleared BOTH a classification bar this strong AND an economic gate.
+
+TabPFN is in-context inference, not a saved/trained model file: every call re-fits on the SAME
+FROZEN TRAIN context (data/labels/eth_5m_v_rebound_multitrigger_20260831/tabpfn_train_context_
+frozen_multitrigger_v1_20260831.csv, 6,000 rows -- a random subsample of the full 17,961-row TRAIN
+split preserving its NATURAL ~32.7% label rate, not rebalanced, so live probabilities stay
+calibrated the same way the validated VAL/OOS/HOLDOUT numbers above were measured; sized down from
+the full TRAIN set specifically for live latency -- measured 2.88s fit+predict(1 row) on the
+server GPU with this context size, research_eth_v_rebound_multitrigger_live_latency_check_
+20260831.py, comparable to the sweep-only v7b script's own ~3s/cycle at its 3,783-row context).
+Single-seed inference (random_state=20260829, matching this script's own pre-upgrade convention --
+the 4-seed ensemble was for validation robustness, not live serving). Live inference always returns
+a continuous probability for any new candidate (the excluded middle only applies to TRAINING).
 
 *** DISCRETIONARY READING AID -- NOT WIRED INTO trading_bot.py, NOT AUTOMATED ENTRY/EXIT. ***
-This dashboard's formal pre-registered VAL/OOS/holdout evidence-signal bar, unlike the
-liquidation-cascade-gated sibling (live_liquidation_cascade_sweep_trend_signal_20260828.py, n=121
-over 41 days) -- this one applies to EVERY liquidity_sweep (14,259 events, 2024-01 onward), not
-just cascade-co-occurring ones, so it fires far more often (~14.7/day historically) and rests on
-a much larger validated sample. See feedback_dashboard_indicators_ic_bar_not_pnl_bar: exposure
-bar is statistical information content, not an economic/cost-gate pass -- this hasn't been tested
-as an automated-entry economic strategy, only as a classifier of an already-defined event's outcome.
-
-Feature formulas are reused, not reimplemented, from build_eth_5m_sweep_v_rebound_features_
-tier0_20260829.py::build_indicator_frame (same compute_indicators/add_creative_indicators/
-add_broad_indicators/add_causal_columns chain), just fed with freshly-fetched klines instead of
-the static training CSV. rsi uses Wilder smoothing (verified 2026-08-29 to match the canonical
-training_features_*.csv rsi column to ~0.03 mean abs diff, corr 0.997).
-
-TabPFN inference measured at ~3s per fit+predict cycle on the server GPU (2026-08-29) -- cheap
-enough to run on every cache refresh (EVIDENCE_SIGNAL_CACHE_SECONDS=60 in dashboard/server.py,
-same pattern as every other live_*_signal module here).
+Feature/BTC-fetch/RSI-Wilder machinery below is otherwise unchanged from the pre-upgrade version
+(Tier0 22 + rsi = 23 features, exact same formulas) -- only trigger detection changed, from sweep-
+only to 9-way OR. Values are reused, not reimplemented, from build_eth_5m_v_rebound_multitrigger_
+labels_20260831.py::main() (candidate/trigger construction) and this script's own pre-existing
+_build_features()/_rsi_wilder() (Tier0 feature computation, untouched).
 """
 from __future__ import annotations
 
@@ -62,18 +76,19 @@ for p in (ROOT, ROOT / "scripts"):
 from analyze_eth_broad_evidence_signal_sweep_20260814 import add_broad_indicators  # noqa: E402
 from analyze_eth_creative_reversal_evidence_signals_20260814 import add_creative_indicators  # noqa: E402
 from backtest_eth_slowk_williamsr_persistence_confluence_20260814 import compute_indicators  # noqa: E402
+from live_evidence_signal_dashboard_20260823 import compute_signals  # noqa: E402
 
-TRAIN_CONTEXT_CSV = ROOT / "data/labels/eth_5m_sweep_v_rebound_20260829/tabpfn_train_context_frozen_v7b_20260830.csv"
+TRAIN_CONTEXT_CSV = ROOT / "data/labels/eth_5m_v_rebound_multitrigger_20260831/tabpfn_train_context_frozen_multitrigger_v1_20260831.csv"
 SWEEP_IMPL_SCRIPT = ROOT / "scripts/build_eth_5m_sweep_followthrough_v2_labels_20260829.py"
 
 FUTURES_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 SYMBOL = "ETHUSDT"
+BTC_SYMBOL = "BTCUSDT"
 FETCH_LIMIT = 1500          # ~5.2 days at 5m -- clears the 864-bar longest indicator warmup with margin
 SWEEP_LOOKBACK_BARS = 48    # 4h -- matches the live liquidity_sweep definition elsewhere on this dashboard
 HISTORY_BARS = 48           # 4h sparkline strip, matches this dashboard's HISTORY_BARS convention
-ACTIVE_WINDOW_MINUTES = 60  # v7b: the label's own forecast horizon widened 30->60min (fast-window
-                             # close-confirm at 30min, giveback held/checked over the full 60min) --
-                             # a call is only "live" for the window it actually makes a claim about
+ACTIVE_WINDOW_MINUTES = 60  # v7b outcome window, unchanged by the trigger-side upgrade
+LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigger_labels_20260831.py
 
 TIER0 = [
     "is_downside", "sweep_penetration_atr", "atr", "atr_percentile_864",
@@ -84,6 +99,10 @@ TIER0 = [
     "adx14", "pdi", "ndi", "bb_width_pctile",
 ]
 FEATURES = TIER0 + ["rsi"]
+
+NAMED_TRIGGERS = ["liquidity_sweep", "taker_delta_z_climax", "short_term_return_z",
+                  "orthogonal_combo", "smt_divergence", "fib_extension_exhaustion",
+                  "demarker_extreme", "kalman_deviation_meanrev"]
 
 _TRAIN_CACHE: pd.DataFrame | None = None
 _SWEEP_IMPL = None
@@ -111,13 +130,14 @@ def _load_train_context() -> pd.DataFrame:
 def _empty(error: str) -> dict:
     return {"warmed_up": False, "error": error, "event_active": False, "call": None,
             "direction": None, "proba_rebound": None, "minutes_ago": None,
-            "sweep_ts_utc": None, "price": None, "tone": "neutral", "history": [], "times": []}
+            "sweep_ts_utc": None, "price": None, "tone": "neutral", "history": [], "times": [],
+            "triggers": None}
 
 
-def _fetch_klines() -> pd.DataFrame | None:
+def _fetch_klines(symbol: str) -> pd.DataFrame | None:
     try:
         resp = requests.get(FUTURES_KLINES_URL,
-                             params={"symbol": SYMBOL, "interval": "5m", "limit": FETCH_LIMIT},
+                             params={"symbol": symbol, "interval": "5m", "limit": FETCH_LIMIT},
                              timeout=15)
         resp.raise_for_status()
         raw = resp.json()
@@ -147,9 +167,11 @@ def _rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
 
 
 def _build_features(kl: pd.DataFrame) -> pd.DataFrame:
-    """Exact port of build_eth_5m_sweep_v_rebound_features_tier0_20260829.py::build_indicator_frame
-    + main()'s per-row feature derivation (lines 119-153 of that script), fed with freshly-fetched
-    klines instead of the static training CSV -- same functions, same formulas, same column names."""
+    """Unchanged by the 2026-08-31 trigger upgrade -- exact port of
+    build_eth_5m_sweep_v_rebound_features_tier0_20260829.py::build_indicator_frame + main()'s
+    per-row feature derivation, fed with freshly-fetched klines instead of the static training
+    CSV. Produces sweep_level_low/high/atr (used generically for ANY trigger's direction-relative
+    features now, not sweep-specific) plus all Tier0 columns."""
     sweep_impl = _load_sweep_impl()
     frame = compute_indicators(kl)
     frame = add_creative_indicators(frame)
@@ -172,46 +194,60 @@ def _build_features(kl: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def _sweep_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    """Same trigger condition as label_events() in build_eth_5m_liquidity_sweep_v_rebound_labels_
-    20260829.py: a bar's low/high pierces the causal 48-bar swing level and its close reclaims
-    back inside. Computes the same per-event features that script does (is_downside,
-    sweep_penetration_atr, flow_aligned_delta_z) for every qualifying row in `frame`."""
-    low, high, close = frame["low"], frame["high"], frame["close"]
-    level_low, level_high, atr = frame["sweep_level_low"], frame["sweep_level_high"], frame["atr"]
+def _multitrigger_rows(frame: pd.DataFrame, sig: pd.DataFrame) -> pd.DataFrame:
+    """Any of the 9 triggers OR'd, with generic (non-sweep-specific) direction-relative features
+    computed the same way build_eth_5m_v_rebound_multitrigger_features_tier0_20260831.py does for
+    training -- is_downside/sweep_penetration_atr/flow_aligned_delta_z are well-defined for any
+    candidate regardless of which trigger(s) fired (they describe "how extended is this bar vs.
+    the recent 48-bar range", not literally "did a sweep happen"). Returns one row per firing bar
+    with a `triggers` column listing which of the 9 fired (comma-joined, sorted)."""
+    n = len(frame)
+    low, high, close = frame["low"].to_numpy(), frame["high"].to_numpy(), frame["close"].to_numpy()
 
-    is_down_sweep = level_low.notna() & (low < level_low) & (close > level_low)
-    is_up_sweep = level_high.notna() & (high > level_high) & (close < level_high)
-    sweeps = frame.loc[is_down_sweep | is_up_sweep].copy()
-    if sweeps.empty:
-        return sweeps
+    down = {name: sig[f"bottom_{name}"].fillna(False).to_numpy() for name in NAMED_TRIGGERS}
+    up = {name: sig[f"top_{name}"].fillna(False).to_numpy() for name in NAMED_TRIGGERS}
 
-    is_down = is_down_sweep.loc[sweeps.index]
-    sweeps["is_downside"] = is_down.astype(np.int8)
-    level = np.where(is_down, level_low.loc[sweeps.index], level_high.loc[sweeps.index]).astype(float)
-    penetration = np.where(
-        is_down, level - sweeps["low"].to_numpy(), sweeps["high"].to_numpy() - level
-    )
-    sweeps["sweep_penetration_atr"] = penetration / sweeps["atr"].to_numpy()
-    sweeps["flow_aligned_delta_z"] = np.where(is_down, sweeps["delta_z"], -sweeps["delta_z"])
-    return sweeps
+    W = LOCAL_EXTREME_W
+    local_low = np.zeros(n, dtype=bool)
+    local_high = np.zeros(n, dtype=bool)
+    for i in range(W, n - W):
+        seg_lo, seg_hi = low[i - W:i + W + 1], high[i - W:i + W + 1]
+        if low[i] == seg_lo.min():
+            local_low[i] = True
+        if high[i] == seg_hi.max():
+            local_high[i] = True
+    down["local_extreme"] = local_low
+    up["local_extreme"] = local_high
+
+    level_low = frame["sweep_level_low"].to_numpy()
+    level_high = frame["sweep_level_high"].to_numpy()
+    atr = frame["atr"].to_numpy()
+    delta_z = frame["delta_z"].to_numpy()
+
+    rows = []
+    for is_down, triggers in ((True, down), (False, up)):
+        any_fire = np.zeros(n, dtype=bool)
+        for arr in triggers.values():
+            any_fire |= arr
+        for i in np.flatnonzero(any_fire):
+            fired = sorted(name for name, arr in triggers.items() if arr[i])
+            level = level_low[i] if is_down else level_high[i]
+            penetration = (level - low[i]) if is_down else (high[i] - level)
+            rows.append({
+                "pos": i, "timestamp": frame["timestamp"].iloc[i], "is_downside": int(is_down),
+                "sweep_penetration_atr": penetration / atr[i] if np.isfinite(atr[i]) and atr[i] > 0 else np.nan,
+                "flow_aligned_delta_z": delta_z[i] if is_down else -delta_z[i],
+                "triggers": ",".join(fired),
+            })
+    return pd.DataFrame(rows)
 
 
 def _predicted_tone(direction: str | None, call: str | None) -> str:
-    """direction is which side the sweep pierced (down=swept below support, up=swept above
-    resistance); call is the model's rebound-vs-continuation read. rebound predicts a genuine,
-    sustained bounce back the other way (down+rebound=bullish/good, up+rebound=bearish/bad) --
-    this is the only call type the v7b label actually validated as a directional move (giveback
-    ratio <=0.20 held over the full 60min). continuation ("미반등") only means the label's fast-
-    window never even reached 1.0x ATR -- i.e. no rebound attempt was made -- NOT that price
-    decisively kept moving the way the sweep pierced (that stronger claim was never checked by the
-    label). 2026-08-31 user request: stop folding continuation into good/bad by direction (it was
-    overclaiming a decisive move the label never validated, see dashboard MODEL_INDICATOR_DETAIL.
-    v_rebound's "[배지 표시]" paragraph) -- continuation now always maps to its own "flat" tone,
-    direction-agnostic, distinct from "neutral" (used only when there's no active sweep at all).
-    2026-08-29 user request (superseded by the above for continuation, still applies to rebound):
-    read short/long/no-signal like the dashboard's other directional model-indicators (see
-    DIRECTIONAL_MODEL_CHIP_KEYS in app.js) instead of a flat warn/neutral tone."""
+    """direction is which side the candidate leans (down=support-side, expecting an upward
+    rebound; up=resistance-side, expecting a downward reversal); call is the model's rebound-vs-
+    continuation read. Unchanged by the 2026-08-31 trigger upgrade -- semantics identical, see
+    dashboard MODEL_INDICATOR_DETAIL.v_rebound's "[배지 표시]" paragraph for the full history of
+    this tone-mapping decision."""
     if call == "rebound" and direction in ("up", "down"):
         return "good" if direction == "down" else "bad"
     if call == "continuation" and direction in ("up", "down"):
@@ -224,73 +260,82 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
     "direction" ("up"|"down"|None), "proba_rebound" (0-1 or None), "minutes_ago",
     "sweep_ts_utc", "price", "tone" ("good"|"bad"|"flat"|"neutral", direction x call resolved via
     _predicted_tone), "history" (oldest-to-newest tone strings, HISTORY_BARS long), "times"
-    (matching ISO timestamps)}. Never raises."""
+    (matching ISO timestamps), "triggers" (comma-joined names of which of the 9 triggers fired for
+    the current event, or None). Never raises."""
     try:
-        kl = _fetch_klines()
+        kl = _fetch_klines(SYMBOL)
         if kl is None or len(kl) < 900:
             return _empty("price_fetch_failed_or_insufficient_history")
+        btc_kl = _fetch_klines(BTC_SYMBOL)  # None on failure -- smt_divergence just won't fire this cycle
 
         frame = _build_features(kl)
-        sweeps = _sweep_rows(frame).dropna(subset=FEATURES)
-        if sweeps.empty and frame[FEATURES + ["atr"]].tail(1).isna().any(axis=1).all():
+        sig = compute_signals(kl, btc_df=btc_kl, funding_df=None)
+        candidates = _multitrigger_rows(frame, sig)
+        candidates = candidates.merge(frame[["timestamp"] + [c for c in FEATURES if c not in
+                                       ("is_downside", "sweep_penetration_atr", "flow_aligned_delta_z")]],
+                                       on="timestamp", how="left")
+        candidates = candidates.dropna(subset=FEATURES)
+        if candidates.empty and frame[FEATURES + ["atr"]].tail(1).isna().any(axis=1).all():
             return _empty("indicators_not_warmed_up")
 
         now = frame["timestamp"].iloc[-1]
         price = float(frame["close"].iloc[-1])
 
-        proba_by_ts: dict[pd.Timestamp, float] = {}
-        if not sweeps.empty:
+        proba_by_pos: dict[int, float] = {}
+        if not candidates.empty:
             train = _load_train_context()
             from tabpfn import TabPFNClassifier
             clf = TabPFNClassifier(device="cuda", random_state=20260829)
             clf.fit(train[FEATURES], train["label"].to_numpy())
-            proba = clf.predict_proba(sweeps[FEATURES])[:, 1]
-            for ts, p in zip(sweeps["timestamp"], proba):
-                proba_by_ts[ts] = float(p)
+            proba = clf.predict_proba(candidates[FEATURES])[:, 1]
+            for pos, p in zip(candidates["pos"], proba):
+                proba_by_pos[int(pos)] = float(p)
 
         def call_of(p: float) -> str:
             return "rebound" if p >= 0.5 else "continuation"
 
-        # per-event (timestamp, swept side, call) so both the history loop and the current read can
-        # resolve a real predicted price direction, not just "was a sweep active" -- see
-        # _predicted_tone() below.
-        sweep_events = []
-        if not sweeps.empty:
-            for row in sweeps.itertuples():
-                p_row = proba_by_ts.get(row.timestamp)
-                if p_row is None:
-                    continue
-                direction = "down" if int(row.is_downside) == 1 else "up"
-                sweep_events.append({"t0": row.timestamp, "direction": direction, "call": call_of(p_row)})
-        sweep_events.sort(key=lambda e: e["t0"])
+        events = []
+        for row in candidates.itertuples():
+            p_row = proba_by_pos.get(int(row.pos))
+            if p_row is None:
+                continue
+            direction = "down" if int(row.is_downside) == 1 else "up"
+            events.append({"t0": frame["timestamp"].iloc[int(row.pos)], "direction": direction,
+                            "call": call_of(p_row), "proba": p_row, "triggers": row.triggers})
+        events.sort(key=lambda e: e["t0"])
 
-        # sparkline: for each of the last HISTORY_BARS bars, was a sweep active (within
-        # ACTIVE_WINDOW_MINUTES of it) at that time, and which way did it predict?
+        # 2026-08-31 fix: pick the OLDEST still-unexpired event ([0]), not the newest ([-1]).
+        # With 9 triggers firing far more densely than sweep alone did, a newer candidate is
+        # almost always available before an older one's ACTIVE_WINDOW_MINUTES elapses -- always
+        # showing the newest meant a call got overwritten after a single 5min bar nearly every
+        # cycle (user-reported: "V자반등 shows for 5min then flips back to 미반등"), defeating the
+        # documented 60-minute persistence this field's own name (minutes_ago) implies. Taking the
+        # oldest active event instead lets each call actually hold the display for its intended
+        # window before yielding to whatever is next in the queue.
         hist_bars = frame.tail(HISTORY_BARS)["timestamp"]
         history, times = [], []
         for bar_ts in hist_bars:
-            covering = [e for e in sweep_events if e["t0"] <= bar_ts <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
-            tone = _predicted_tone(covering[-1]["direction"], covering[-1]["call"]) if covering else "neutral"
+            covering = [e for e in events if e["t0"] <= bar_ts <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
+            tone = _predicted_tone(covering[0]["direction"], covering[0]["call"]) if covering else "neutral"
             history.append(tone)
             times.append(bar_ts.isoformat())
 
-        current = [e for e in sweep_events if e["t0"] <= now <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
+        current = [e for e in events if e["t0"] <= now <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
         if not current:
             return {"warmed_up": True, "error": None, "event_active": False, "call": None,
                     "direction": None, "proba_rebound": None, "minutes_ago": None,
                     "sweep_ts_utc": None, "price": price, "tone": "neutral",
-                    "history": history, "times": times}
+                    "history": history, "times": times, "triggers": None}
 
-        latest = current[-1]
-        p = proba_by_ts[latest["t0"]]
-        minutes_ago = int((now - latest["t0"]).total_seconds() // 60)
+        shown = current[0]
+        minutes_ago = int((now - shown["t0"]).total_seconds() // 60)
         return {
-            "warmed_up": True, "error": None, "event_active": True, "call": latest["call"],
-            "direction": latest["direction"],
-            "proba_rebound": round(p, 4), "minutes_ago": minutes_ago,
-            "sweep_ts_utc": latest["t0"].isoformat(), "price": price,
-            "tone": _predicted_tone(latest["direction"], latest["call"]),
-            "history": history, "times": times,
+            "warmed_up": True, "error": None, "event_active": True, "call": shown["call"],
+            "direction": shown["direction"],
+            "proba_rebound": round(shown["proba"], 4), "minutes_ago": minutes_ago,
+            "sweep_ts_utc": shown["t0"].isoformat(), "price": price,
+            "tone": _predicted_tone(shown["direction"], shown["call"]),
+            "history": history, "times": times, "triggers": shown["triggers"],
         }
     except Exception as e:  # noqa: BLE001 -- never raise, same contract as sibling live_* modules
         return _empty(f"compute_error: {e}")
