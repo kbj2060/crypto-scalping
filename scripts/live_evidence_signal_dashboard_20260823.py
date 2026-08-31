@@ -624,6 +624,65 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
         n_bars = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
         out[f"bottom_{name}_active"] = out[f"bottom_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
         out[f"top_{name}_active"] = out[f"top_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
+
+    # --- history-strip fill window (2026-09-01, user request) -- a SEPARATE concept from _active
+    # above. _active (bottom_fired/top_fired badge, votes, net_score) is UNCHANGED: fixed bar-count
+    # per signal's own trained HORIZON. This is only for the Snapshot tab's per-bar strip
+    # (dashboard/server.py's bottom_history/top_history): a single raw-fire bar was too subtle to
+    # read at a glance, so instead fill every bar from the fire through whichever comes first --
+    # this signal's own K*ATR take-profit price (the exact same K each signal's live TabPFN
+    # metalabel's tp_price uses, see live_evidence_signal_metalabel_20260829.py::_tp_price/
+    # METALABEL_SIGNALS) actually being touched, or its trained HORIZON elapsing. User explicitly
+    # confirmed this can fill the ENTIRE visible 48-bar/4h strip when the horizon genuinely runs
+    # that long (smt_divergence's 72-bar/6h horizon exceeds it) -- no cap added, unlike the
+    # rejected middle-ground design. What must still never happen (this is built directly on top of
+    # eth_dashboard_evidence_signal_history_strip_sustain_window_bug_20260831's fix) is a genuine
+    # second re-fire silently disappearing into one indistinguishable block -- so the true raw
+    # column also rides along separately (bottom_{name}/top_{name} are already exactly that) purely
+    # so the frontend can force a visible segment boundary at each actual re-fire even mid-fill
+    # (app.js::toneStripSvg's rawFire param).
+    #
+    # K must match METALABEL_SIGNALS[name]["k"] in live_evidence_signal_metalabel_20260829.py
+    # exactly -- manually synced (not imported), same reason SUSTAIN_BARS_OVERRIDE above is: that
+    # module pulls in TabPFN/torch, which compute_signals() and its other callers must not be
+    # forced to import just for eight float constants.
+    K_OVERRIDE = {
+        "taker_delta_z_climax": 2.00, "short_term_return_z": 1.75,
+        "liquidity_sweep": 4.00, "orthogonal_combo": 3.571, "smt_divergence": 4.20,
+        "fib_extension_exhaustion": 2.35,
+        "demarker_extreme": 0.70, "kalman_deviation_meanrev": 2.5,
+    }
+
+    def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str) -> pd.Series:
+        n = len(raw)
+        filled = np.zeros(n, dtype=bool)
+        raw_arr = raw.fillna(False).to_numpy()
+        high_a, low_a, close_a, atr_a = high.to_numpy(), low.to_numpy(), close.to_numpy(), atr_pct.to_numpy()
+        for i in np.flatnonzero(raw_arr):
+            end = min(i + horizon_bars, n - 1)
+            if not np.isnan(atr_a[i]):
+                target = k * atr_a[i]
+                level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
+                for b in range(i + 1, end + 1):
+                    touched = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
+                    if touched:
+                        end = b
+                        break
+            filled[i:end + 1] = True
+        return pd.Series(filled, index=raw.index)
+
+    for name, _ in SIGNAL_ORDER:
+        if name in K_OVERRIDE:
+            horizon = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
+            out[f"bottom_{name}_fill"] = _fill_until_tp_or_horizon(out[f"bottom_{name}"], K_OVERRIDE[name], horizon, "bottom")
+            out[f"top_{name}_fill"] = _fill_until_tp_or_horizon(out[f"top_{name}"], K_OVERRIDE[name], horizon, "top")
+        else:
+            # No metalabel K for this signal (shouldn't currently happen -- SIGNAL_ORDER's names are
+            # exactly K_OVERRIDE's keys today) -- fall back to the raw column so the strip degrades
+            # to single-bar blips instead of raising.
+            out[f"bottom_{name}_fill"] = out[f"bottom_{name}"]
+            out[f"top_{name}_fill"] = out[f"top_{name}"]
+
     active_bottom_cols = [f"{c}_active" for c in bottom_cols]
     active_top_cols = [f"{c}_active" for c in top_cols]
     out["bottom_votes"] = out[active_bottom_cols].sum(axis=1).astype(int)

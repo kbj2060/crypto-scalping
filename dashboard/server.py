@@ -1091,18 +1091,24 @@ def make_app() -> web.Application:
                     "top_fired": bool(latest[tacol]) if warmed_up else None,
                     "top_last_fired_ts": _evidence_last_fired_ts(sig[tcol], latest) if warmed_up else None,
                     # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
-                    # 2026-08-31 fix: reads the RAW bcol/tcol, not the _active (sustain-window)
-                    # column used above for bottom_fired/top_fired. Using _active here made any
-                    # signal whose SUSTAIN_BARS_OVERRIDE exceeds EVIDENCE_SIGNAL_HISTORY_BARS
-                    # (currently only smt_divergence: 72-bar/6h sustain vs this 48-bar/4h strip)
-                    # show every visible cell as fired continuously once triggered even once, since
-                    # the sustain window never fully rolls off within the display window -- looked
-                    # like the same signal stuck permanently on (user report). bottom_fired/
-                    # top_fired and their last_fired_ts correctly keep using _active/raw
-                    # respectively; only this per-bar activity graph needs the true discrete
-                    # firing pattern.
-                    "bottom_history": sig[bcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "top_history": sig[tcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    # 2026-08-31 fix: switched from the _active (sustain-window) column to the RAW
+                    # bcol/tcol -- using _active here made smt_divergence's 72-bar/6h sustain (which
+                    # exceeds this 48-bar/4h strip) look permanently stuck on (user report). See
+                    # eth_dashboard_evidence_signal_history_strip_sustain_window_bug_20260831.
+                    # 2026-09-01 (user follow-up): a single raw-fire bar was too subtle to read at a
+                    # glance, so this now sends the "fill" column instead (active from the fire bar
+                    # through whichever comes first, this signal's own K*ATR take-profit price or
+                    # its trained HORIZON -- see compute_signals()'s _fill_until_tp_or_horizon).
+                    # User explicitly confirmed this may fill the ENTIRE visible strip when the
+                    # horizon runs that long (no cap at EVIDENCE_SIGNAL_HISTORY_BARS this time). The
+                    # true raw column rides along separately in bottom_raw_fire/top_raw_fire purely
+                    # so the frontend can force a visible segment boundary at each actual re-fire
+                    # even mid-fill (app.js::toneStripSvg) -- otherwise a second real trigger inside
+                    # an already-active fill window would silently disappear into one block again.
+                    "bottom_history": sig[f"{bcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_history": sig[f"{tcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "bottom_raw_fire": sig[bcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_raw_fire": sig[tcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
                 }
                 if name in metalabels:
                     entry["model_proba"] = metalabels[name]["proba"]
