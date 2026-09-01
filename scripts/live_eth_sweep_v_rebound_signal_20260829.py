@@ -101,13 +101,15 @@ Feature/BTC-fetch/RSI-Wilder machinery below is unchanged from the pre-redesign 
 not reimplemented, from build_eth_5m_v_rebound_multitrigger_labels_20260831.py::main() and this
 script's own pre-existing _build_features()/_rsi_wilder().
 
-**배지 지속성** (2026-09-01, 매 봉 전환 직후 사용자가 화면에서 "신호가 유지가 안 된다"고 보고해
-추가): 매 봉 채점에서 배지가 현재 봉만 반영하면 사건당 평균 1.2봉, 즉 대부분 5분만 떴다 사라진다
-(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측). 그래서 배지만 증거신호 8종 칩의
-`_fill_until_tp_or_horizon`과 **같은 계약**으로 유지시킨다 -- 마지막 콜을 "익절 도달(라벨의
-1.5xATR 빠른 다리) 또는 호라이즌 경과(60분/12봉)" 중 먼저 오는 쪽까지. `_badge_pos()` 참고.
-⚠️**히스토리 스트립은 봉별 기록 그대로**다 -- 지속성은 배지에만 적용된다. 스트립까지 앞으로
-칠하면 매 봉 설계의 장점(모델의 실제 봉별 판단 track)이 사라진다.
+**콜 지속성(배지 + 히스토리 스트립 둘 다)** -- 2026-09-01, 매 봉 전환 직후 사용자가 화면에서
+"신호가 유지가 안 된다", 이어서 "막대 게이지에 5분 칸 하나만 들어와 있다"고 보고해 추가.
+매 봉 채점에서 콜이 봉 하나만 차지하면 사건당 평균 1.2봉, 즉 대부분 5분만 떴다 사라진다
+(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측). 48칸 스트립에서 한 칸은 사실상 안 보인다.
+그래서 증거신호 8종 칩의 `_fill_until_tp_or_horizon`과 **같은 계약**으로 맞춘다 -- 콜을 발동봉부터
+"익절 도달(라벨의 1.5xATR 빠른 다리) 또는 호라이즌 경과(60분/12봉)" 중 먼저 오는 쪽까지 유지.
+정의는 `_call_end_pos()` **한 곳에만** 두고 배지와 스트립이 함께 쓴다. 구간이 겹치면 나중 콜이
+덮어쓴다(배지가 최근 콜을 보여주는 것과 일치). 스트립 창 직전에 발동한 콜도 창 안으로 칠해지므로
+채점 범위를 `HISTORY_BARS + 1 + BADGE_HORIZON_BARS`로 넓혔다.
 ⚠️예전 게이트 시절의 지연확인 문제는 재발하지 않는다 -- 그건 local_extreme이 30분 뒤에야
 확정되던 데서 왔고, 지금은 봉 자체에서 즉시 점수가 나온다. 여기서 늘리는 건 "이미 현재인 신호의
 표시 시간"이지 "확정이 늦는 신호"가 아니다. 룩어헤드도 없다: `_fetch_klines()`가 형성중 봉을
@@ -166,8 +168,7 @@ PROBA_THRESHOLD = 0.60
 # (live_evidence_signal_dashboard_20260823.py:656)과 **같은 계약**으로 맞춘다 -- 마지막 콜을
 # "익절 도달 또는 호라이즌 경과" 중 먼저 오는 쪽까지 유지. 값은 이 신호 자신의 라벨 정의에서
 # 가져온다(research_eth_v_rebound_label_redesign_variant_screen_20260901.py: FULL_BARS/ATR_MULT).
-# ⚠️히스토리 스트립은 **봉별 기록 그대로 둔다** -- 배지만 지속시킨다. 스트립까지 앞으로 칠하면
-# 매 봉 설계의 장점(모델의 실제 봉별 판단 track)이 사라진다.
+# 배지와 히스토리 스트립 **둘 다** 이 지속 규칙을 따른다(정의는 `_call_end_pos()` 한 곳).
 # ⚠️예전 게이트 시절의 지연확인 문제는 재발하지 않는다 -- 그건 local_extreme이 30분 뒤에야
 # 확정되던 데서 왔고, 지금은 봉 자체에서 즉시 점수가 나온다. 여기서 늘리는 건 "이미 현재인
 # 신호의 표시 시간"이지 "확정이 늦는 신호"가 아니다.
@@ -335,39 +336,49 @@ def _every_bar_rows(frame: pd.DataFrame, sig: pd.DataFrame, n_tail: int) -> pd.D
     return pd.DataFrame(rows)
 
 
-def _badge_pos(best_by_pos: dict, frame: pd.DataFrame, last_pos: int,
-               threshold: float) -> int | None:
-    """배지에 띄울 콜의 위치. **가장 최근** 콜(proba>=threshold) 하나를 찾아, 아직 살아있으면
-    그 위치를, 이미 익절에 도달했으면 None을 돌려준다. 호라이즌 밖은 애초에 탐색하지 않는다.
+def _call_end_pos(pos: int, direction: str, frame: pd.DataFrame, last_pos: int) -> int:
+    """콜 하나가 표시되는 **마지막 봉 위치**. 익절에 닿은 봉, 없으면 호라이즌 끝(확정봉 범위 내).
+
+    증거신호 8종 칩의 `_fill_until_tp_or_horizon`
+    (live_evidence_signal_dashboard_20260823.py:656)과 같은 계약이다 -- 배지와 히스토리 스트립
+    **둘 다** 이 함수 하나를 기준으로 삼는다("콜이 얼마나 지속되는가"의 정의는 한 곳에만 둔다).
 
     익절 판정은 이 신호 자신의 라벨 정의를 그대로 쓴다 -- 라벨의 빠른 다리가
     `fast_close_max - extreme >= ATR_MULT * pre_atr`(종가 기준, 앵커는 그 봉의 저가/고가)이므로
-    여기서도 **종가 기준**으로 본다. 증거신호 칩들은 intrabar 고가/저가 터치를 쓰지만 그건
-    그쪽 라벨이 그렇게 정의돼서다 -- 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md의 배리어 컨벤션
-    항목: 리플레이/표시 편의로 두 컨벤션을 섞지 말 것).
+    여기서도 **종가 기준**으로 본다. 증거신호는 intrabar 고가/저가 터치를 쓰지만 그건 그쪽 라벨이
+    그렇게 정의돼서다 -- 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md 배리어 컨벤션 항목).
 
     ⚠️룩어헤드 없음: `frame`은 `_fetch_klines()`가 형성중 봉을 이미 버린 **확정 봉만** 담고
-    있고, 여기서 보는 close[pos+1..last_pos]는 전부 과거의 확정 봉이다."""
-    close = frame["close"].to_numpy()
-    low, high = frame["low"].to_numpy(), frame["high"].to_numpy()
+    있고, 여기서 보는 close[pos+1..horizon_end]는 전부 과거의 확정 봉이다."""
+    horizon_end = min(pos + BADGE_HORIZON_BARS, last_pos)
     atr = frame["atr"].to_numpy()
-    oldest = max(0, last_pos - BADGE_HORIZON_BARS)
-    for pos in range(last_pos, oldest - 1, -1):
-        b = best_by_pos.get(pos)
-        if b is None or b["proba"] < threshold:
+    pre_atr = atr[pos - 1] if pos >= 1 else np.nan
+    if not np.isfinite(pre_atr) or pre_atr <= 0:
+        return horizon_end  # ATR을 못 구하면 호라이즌으로만 판정
+    close = frame["close"].to_numpy()
+    if direction == "down":  # 지지쪽 -- 위로 반등하는 게 익절
+        target = frame["low"].to_numpy()[pos] + BADGE_ATR_MULT * pre_atr
+        for b in range(pos + 1, horizon_end + 1):
+            if close[b] >= target:
+                return b
+    else:                    # 저항쪽 -- 아래로 반전하는 게 익절
+        target = frame["high"].to_numpy()[pos] - BADGE_ATR_MULT * pre_atr
+        for b in range(pos + 1, horizon_end + 1):
+            if close[b] <= target:
+                return b
+    return horizon_end
+
+
+def _call_spans(best_by_pos: dict, frame: pd.DataFrame, last_pos: int,
+                threshold: float) -> list[tuple[int, int, dict]]:
+    """(시작봉, 끝봉, 콜) 목록을 오래된 순으로. 끝봉은 `_call_end_pos()` 정의."""
+    spans = []
+    for pos in sorted(best_by_pos):
+        b = best_by_pos[pos]
+        if b["proba"] < threshold:
             continue
-        if pos == last_pos:
-            return pos  # 방금 마감된 봉의 콜은 무조건 살아있다
-        pre_atr = atr[pos - 1] if pos >= 1 else np.nan
-        if not np.isfinite(pre_atr) or pre_atr <= 0:
-            return pos  # ATR을 못 구하면 호라이즌만으로 판정(루프 범위가 이미 보장)
-        if b["direction"] == "down":  # 지지쪽 -- 위로 반등하는 게 익절
-            reached = close[pos + 1:last_pos + 1].max() >= low[pos] + BADGE_ATR_MULT * pre_atr
-        else:                          # 저항쪽 -- 아래로 반전하는 게 익절
-            reached = close[pos + 1:last_pos + 1].min() <= high[pos] - BADGE_ATR_MULT * pre_atr
-        # 익절에 도달했으면 소멸. 더 오래된 콜은 이 콜에 이미 대체됐으므로 되살리지 않는다.
-        return None if reached else pos
-    return None
+        spans.append((pos, _call_end_pos(pos, b["direction"], frame, last_pos), b))
+    return spans
 
 
 def _predicted_tone(direction: str | None, call: str | None) -> str:
@@ -411,7 +422,10 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
         # 2026-09-01 매 봉 스코어링: 트리거 게이트 제거. 최근 HISTORY_BARS+1 봉 전부를 양방향으로
         # 채점한다(예측 비용은 예측 행수가 아니라 컨텍스트 크기가 지배 -- 314행이 1행과 같은
         # 시간이었던 실측, research_eth_v_rebound_pool_a_context_size_tabpfn_20260901.py).
-        candidates = _every_bar_rows(frame, sig, HISTORY_BARS + 1)
+        # +BADGE_HORIZON_BARS: 스트립 창 **직전**에 발동한 콜도 창 안으로 칠해져 들어오므로 그만큼
+        # 더 거슬러 채점해야 한다. 예측 비용은 예측 행수가 아니라 컨텍스트 크기가 지배하므로
+        # (314행이 1행과 같은 시간이었던 실측) 이 확장은 사실상 공짜다.
+        candidates = _every_bar_rows(frame, sig, HISTORY_BARS + 1 + BADGE_HORIZON_BARS)
         candidates = candidates.merge(frame[["timestamp"] + [c for c in FEATURES if c not in
                                        ("is_downside", "sweep_penetration_atr", "flow_aligned_delta_z")]],
                                        on="timestamp", how="left")
@@ -448,21 +462,32 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
                     "triggers": row.triggers or None,
                 }
 
-        # 히스토리: 각 봉이 "그 봉 자신의" 점수로 칠해진다. 이벤트/60분창/afterglow 개념이
-        # 사라졌으므로 과거 이벤트가 이후 봉을 덮어쓰는 일도 없다 -- 지연확인 UX 문제의 원인이
-        # 구조적으로 제거됨.
+        # 콜 구간: 발동봉부터 "익절 도달 또는 호라이즌 경과"까지. 배지와 스트립이 같은 정의를
+        # 공유한다(증거신호 8종의 _fill_until_tp_or_horizon과 동일 계약).
+        last_pos = len(frame) - 1
+        spans = _call_spans(best_by_pos, frame, last_pos, PROBA_THRESHOLD)
+
+        # 히스토리 스트립: 콜 구간을 앞으로 칠한다. 겹치면 **나중 콜이 덮어쓴다**(배지가 최근
+        # 콜을 보여주는 것과 일치 -- spans가 오래된 순이라 그냥 순서대로 쓰면 된다).
+        fill: dict[int, str] = {}
+        for start, end, b in spans:
+            tone = _predicted_tone(b["direction"], call_of(b["proba"]))
+            for q in range(start, end + 1):
+                fill[q] = tone
+
         history, times = [], []
         for pos in range(max(0, len(frame) - HISTORY_BARS), len(frame)):
             times.append(frame["timestamp"].iloc[pos].isoformat())
-            b = best_by_pos.get(pos)
-            history.append(_predicted_tone(b["direction"], call_of(b["proba"])) if b else "neutral")
+            if pos in fill:
+                history.append(fill[pos])
+            else:
+                b = best_by_pos.get(pos)
+                # 콜 구간 밖: 그 봉 자신의 읽기(대개 '미반등'). 점수 자체가 없으면 중립.
+                history.append(_predicted_tone(b["direction"], call_of(b["proba"])) if b else "neutral")
 
-        # 배지: 살아있는 최근 콜을 우선 띄우고(익절 도달/호라이즌 경과 전까지), 없으면 현재 봉
-        # 자신의 읽기로 떨어진다(대개 '미반등'). 스트립은 위에서 만든 봉별 기록 그대로.
-        last_pos = len(frame) - 1
-        badge_pos = _badge_pos(best_by_pos, frame, last_pos, PROBA_THRESHOLD)
-        if badge_pos is None:
-            badge_pos = last_pos
+        # 배지: 아직 살아있는(끝봉이 현재 봉 이상인) 콜 중 가장 최근 것. 없으면 현재 봉 자신의
+        # 읽기로 떨어진다(대개 '미반등').
+        badge_pos = next((start for start, end, _ in reversed(spans) if end >= last_pos), last_pos)
 
         cur = best_by_pos.get(badge_pos)
         if cur is None:
