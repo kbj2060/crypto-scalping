@@ -152,11 +152,14 @@ body {
 
 /* 2026-09-01: sticky header (user request) -- .top (clock/session/page-tabs row) and the snapshot
    tab's coin-selector row (#snapshotTabPanel > .ops-panel-head below) both pin to the viewport top
-   while the page scrolls, stacked directly beneath each other. Solid-ish blurred background is
-   required since body's own background is a gradient, not a flat color (see body{} above) -- a
-   flat --bg fill would visibly mismatch the gradient at whatever scroll position the header sits
-   at, so a translucent blur reads as intentional instead of a seam. z-index below the 1000 used by
-   .chart-tooltip elsewhere so tooltips still float above a pinned header. */
+   while the page scrolls, stacked directly beneath each other. Fully opaque background (#14161e,
+   a shade sampled from body's own dark gradient -- see body{} above, which is NOT a flat color, so
+   this is an approximation rather than an exact match at every scroll position) -- an EARLIER
+   version here used a translucent rgba()+blur combo, which a user report showed let scrolled
+   content visibly show through; solid is the deliberately safer choice for a pinned header whose
+   entire job is to sit ON TOP of scrolling content. backdrop-filter blur kept purely for a soft
+   edge on any sub-pixel antialiasing seam, no longer load-bearing for opacity. z-index below the
+   1000 used by .chart-tooltip elsewhere so tooltips still float above a pinned header. */
 .top {
   display: flex;
   justify-content: space-between;
@@ -165,7 +168,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(20, 22, 30, 0.92);
+  background: #14161e;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
@@ -194,7 +197,7 @@ body {
   position: sticky;
   top: var(--sticky-top-h);
   z-index: 40;
-  background: rgba(20, 22, 30, 0.92);
+  background: #14161e;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }

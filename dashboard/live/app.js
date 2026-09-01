@@ -1911,12 +1911,16 @@ function setupPageTabs() {
 // offset is measured at runtime into the --sticky-top-h CSS var instead of hardcoded per-breakpoint
 // -- stays correct even if either row's content ever changes height (e.g. a badge wrapping to a
 // 2nd line), not just across the one mobile breakpoint this was written against.
+// 2026-09-01 fix (user-reported): deliberately uses offsetHeight ONLY, NOT + .top's own 12px
+// margin-bottom -- an earlier version included the margin, which left that 12px strip painted by
+// neither sticky bar's background once both were stuck, so scrolling page content showed through
+// in that gap. Pinning the 2nd bar flush against the 1st bar's own content-box edge (no gap between
+// their painted backgrounds) closes it -- costs a ~12px one-time shift in the coin-tab row exactly
+// when it transitions into the stuck state, a fair trade for not being able to see through the header.
 function syncStickyHeaderOffset() {
   const topEl = document.querySelector(".top");
   if (!topEl) return;
-  const marginBottom = parseFloat(getComputedStyle(topEl).marginBottom) || 0;
-  const h = topEl.offsetHeight + marginBottom;
-  document.documentElement.style.setProperty("--sticky-top-h", `${h}px`);
+  document.documentElement.style.setProperty("--sticky-top-h", `${topEl.offsetHeight}px`);
 }
 
 function setupScrollRendering() {
