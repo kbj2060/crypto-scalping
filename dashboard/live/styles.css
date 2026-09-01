@@ -302,15 +302,6 @@ body {
 .meter-fill.neutral { background: var(--muted); }
 .meter-pct { font: 700 10px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
 .meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
-/* 2026-09-01 저ATR 경고 (표시 전용, 모델/발동 로직 무관 -- app.js의 lowAtrText 참고).
-   ⚠️최초 배포는 meter-price와 같은 white-space:nowrap을 그대로 물려받았는데, 이 문구("저변동
-   ATR X.Xbp < 평소 Y.Ybp")는 가격 한 줄보다 훨씬 길어(실측 ~180px, .meter-col의 고정 92px보다
-   2배) CSS Grid의 기본 min-width:auto 때문에 이 한 줄 때문에 .meter-col 트랙 전체가 92px를
-   무시하고 넓어져 뷰포트 밖으로 밀려남(375px 모바일뿐 아니라 1280px 데스크톱에서도 재현 확인,
-   Playwright 375/360/1280px 실측) -- state/gauge/price 등 다른 줄은 원래 짧아서 안 걸렸을 뿐
-   같은 그리드 트랙을 공유하는 한 항상 잠재해있던 문제. min-width:0으로 그리드 트랙 확장(min-
-   content contamination)을 막고, 줄바꿈 허용 폭을 짧게 잡아 2줄 안에서 접히게 함. */
-.meter-lowatr { font: 700 10px/1.15 var(--font-mono); color: var(--warn, #d98a2b); white-space: normal; min-width: 0; max-width: 92px; text-align: right; }
 
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border
@@ -947,6 +938,14 @@ body {
   padding: 1px 7px;
   vertical-align: middle;
   cursor: help;
+}
+/* 2026-09-01: 저ATR 경고를 .meter-col(우측 확률열)에서 이 제목줄의 horizon-badge 옆으로 이동
+   (사용자 요청 -- 이전엔 우측에 쌓여있어 오버플로우 소동이 있었음, eth_dashboard_low_atr_warning_
+   overflow_fix_20260901 메모리 참고). 같은 pill 모양/크기를 그대로 쓰고 색만 warn 계열로. */
+.horizon-badge.low-atr-badge {
+  color: var(--warn, #d98a2b);
+  background: rgba(217, 138, 43, 0.12);
+  border-color: rgba(217, 138, 43, 0.4);
 }
 
 .chart-note {

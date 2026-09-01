@@ -1478,6 +1478,15 @@ function renderEvidenceSignals(payload) {
     const lowAtrText = (s.model_low_atr === true && s.model_atr_bp != null)
       ? `저변동 ATR ${fmtNum(s.model_atr_bp, 1)}bp < 평소 ${fmtNum(s.model_atr_median_bp, 1)}bp`
       : null;
+    // 2026-09-01 (user request): moved next to the horizon-badge on the title line (was stacked in
+    // .meter-col on the right, see eth_dashboard_low_atr_warning_overflow_fix_20260901 memory for
+    // that version's overflow saga) -- same pill shape as horizon-badge (.horizon-badge base class,
+    // low-atr-badge modifier just recolors it warn/amber), short visible text (bp value only, the
+    // full "X.Xbp < 평소 Y.Ybp" comparison + explanation lives in the title tooltip, same convention
+    // horizon-badge itself already uses for its own longer explanation).
+    const lowAtrBadgeHtml = lowAtrText
+      ? ` <span class="horizon-badge low-atr-badge" title="${escapeHtml(lowAtrText)} — 이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ 저ATR ${fmtNum(s.model_atr_bp, 1)}bp</span>`
+      : "";
     // Evolution of this meta column, all 2026-08-31 (see eth_dashboard_evidence_signal_tp_price_
     // display_20260831 memory for the full history): joined into the status badge itself (broke its
     // fixed 64px pill sizing) -> split into badge + <small> below it (user: "not clean") -> a
@@ -1538,7 +1547,7 @@ function renderEvidenceSignals(payload) {
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}</strong>
+        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${lowAtrBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
@@ -1558,7 +1567,6 @@ function renderEvidenceSignals(payload) {
             <span class="meter-pct">${modelPctText || "0%"}</span>
           </div>
           ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
-          ${lowAtrText ? `<span class="meter-lowatr" title="이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ ${escapeHtml(lowAtrText)}</span>` : ""}
         </div>
       </div>
     </article>`;
