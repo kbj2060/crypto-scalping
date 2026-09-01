@@ -7,6 +7,7 @@ const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
+const API_REGIME_BTC_URL = "/api/regime-btc";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
@@ -133,6 +134,7 @@ let liquidationDirectionLastFetchAt = 0;
 // see below), independently of activeChartAsset (the Live tab's own, separate coin selector).
 let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
+let latestRegimeBtc = null;
 // Confirmed evidence-signals payload (2026-08-31, feeds evidenceSignalTpLevels() below) -- stashed
 // globally like latestLiquidationMap/latestRegimeWide24 so the Snapshot chart's own render cycle
 // can read it without renderEvidenceSignals() needing to know about the chart.
@@ -148,6 +150,7 @@ let liquidationMapLastFetchAt = 0;
 let activeSnapshotAsset = "eth";
 const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
+let regimeBtcLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
@@ -1812,6 +1815,25 @@ async function refreshRegimeWide24() {
   renderSnapshotChart();
 }
 
+// BTC regime overlay (2026-09-02). Separate endpoint and separate state from latestRegimeWide24
+// because they are two different trained models on two different assets -- the 2026-08-31 bug this
+// replaces was exactly one variable being reused for both (ETH's ribbon drawn over BTC candles).
+// Same poll interval, which matches the server-side cache TTL for both endpoints.
+async function refreshRegimeBtc() {
+  const now = Date.now();
+  if (now - regimeBtcLastFetchAt < REGIME_WIDE24_POLL_MS) return;
+  regimeBtcLastFetchAt = now;
+  try {
+    const res = await fetch(API_REGIME_BTC_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`regime btc ${res.status}`);
+    latestRegimeBtc = await res.json();
+  } catch (error) {
+    console.error("Regime BTC fetch error:", error);
+    latestRegimeBtc = { warmed_up: false, error: "fetch_failed", history: [] };
+  }
+  renderSnapshotChart();
+}
+
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
@@ -1897,6 +1919,7 @@ function setupPageTabs() {
       liquidationDirectionLastFetchAt = 0; refreshLiquidationDirectionSignal();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
+      regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
@@ -2223,9 +2246,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-08-31 fix: this used to key off svg.id alone, so picking BTC in the Snapshot tab silently
   // overlaid ETH's bull/bear/chop ribbon on BTC candles (found while building that coin switcher).
   const isSnapshotChart = svg.id === "candleSvgSnapshot";
-  const isEthSnapshotChart = isSnapshotChart && activeSnapshotAsset === "eth";
-  const regimeByTsForChart = isEthSnapshotChart && latestRegimeWide24 && latestRegimeWide24.warmed_up
-    ? new Map((latestRegimeWide24.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
+  // 2026-09-02: BTC now has its own trained regime classifier, so the ribbon is no longer ETH-only.
+  // Each asset reads its OWN endpoint's state -- never share one variable across assets, which is
+  // precisely the 2026-08-31 bug this structure replaces (ETH's ribbon drawn over BTC candles).
+  // Assets with no classifier still fall through to the "unsupported" grey band below.
+  const REGIME_SOURCE_BY_ASSET = { eth: () => latestRegimeWide24, btc: () => latestRegimeBtc };
+  const regimeSource = isSnapshotChart ? (REGIME_SOURCE_BY_ASSET[activeSnapshotAsset] || null) : null;
+  const latestRegimeForChart = regimeSource ? regimeSource() : null;
+  const regimeByTsForChart = latestRegimeForChart && latestRegimeForChart.warmed_up
+    ? new Map((latestRegimeForChart.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
     : null;
   // 2026-08-27 user report: ribbon "turns black" and stops updating for stretches -- tracing the
   // draw loop below, it never paints an invalid color (regimeDominant() only ever returns one of
@@ -2235,14 +2264,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // chart background underneath -- indistinguishable from "black" at a glance, and easy to mistake
   // for a frozen/broken ribbon rather than "no fresh reading available for this window". Flagging
   // that state explicitly below instead of silently drawing nothing.
-  const regimeRibbonWaiting = isEthSnapshotChart && !regimeByTsForChart;
+  const regimeRibbonWaiting = Boolean(regimeSource) && !regimeByTsForChart;
   // 2026-08-31: distinct from regimeRibbonWaiting above -- BTC (or any future non-ETH Snapshot coin)
   // has no trained regime classifier at all, a permanent gap, not a transient "still warming up"
   // one. Kept as its own flag (rather than folding into regimeRibbonWaiting) so the flat band's own
   // tooltip can say so honestly instead of implying an auto-retry that will never resolve anything --
   // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
   // (swap this placeholder out once a real BTC regime classifier is trained).
-  const regimeRibbonUnsupported = isSnapshotChart && !isEthSnapshotChart;
+  const regimeRibbonUnsupported = isSnapshotChart && !regimeSource;
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 8;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
@@ -2963,6 +2992,7 @@ async function tick() {
       refreshLiquidationDirectionSignal();
       refreshLiquidationMap();
       refreshRegimeWide24();
+      refreshRegimeBtc();
       refreshMacroCalendar();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();

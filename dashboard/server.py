@@ -117,6 +117,16 @@ from scripts.live_liquidation_map_20260824 import compute_spliced_levels, comput
 # separately-loadable model for anything that specifically wants a low-flip label; it is simply not
 # what this dashboard endpoint serves right now.
 from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal as compute_regime_wide24_signal  # noqa: E402
+# BTC-native regime scorer (2026-09-02). Until now the Snapshot tab's BTC ribbon was a hard-coded
+# grey "model not available" band -- app.js gated the ribbon on activeSnapshotAsset === "eth" to stop
+# ETH's classifier being drawn over BTC candles (memory eth-dashboard-btc-regime-classifier-not-
+# trained-todo-20260831). This is the BTC model that guard was waiting for: same GBM config and the
+# same 136 feature_cols as the ETH scorer, trained on BTC's canonical features against a BTC-native
+# label (S=24 scale + K=3 confirm) picked by re-screening the grid on BTC rather than porting ETH's
+# choice -- ETH's S12_K3 scores only 3/10 on BTC. Same return contract, so it caches/serves
+# identically. See scripts/live_regime_btc_signal_20260902.py and
+# docs/experiments/btc_regime_s24k3_label_train_20260902.md.
+from scripts.live_regime_btc_signal_20260902 import compute_regime_btc_signal  # noqa: E402
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
 # own; computed fresh on every evidence-signal refresh. See that module's docstring for the
@@ -830,6 +840,8 @@ def make_app() -> web.Application:
     liquidation_map_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
     regime_wide24_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     regime_wide24_lock = asyncio.Lock()
+    regime_btc_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    regime_btc_lock = asyncio.Lock()
     macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     macro_calendar_lock = asyncio.Lock()
     model_indicator_history: deque = deque(maxlen=MODEL_INDICATOR_HISTORY_MAX)
@@ -1445,6 +1457,25 @@ def make_app() -> web.Application:
             regime_wide24_cache["payload"] = payload
             return payload
 
+    async def load_regime_btc() -> dict[str, Any]:
+        """BTC regime overlay for the Snapshot tab when its coin switcher is on BTC -- the BTC twin
+        of load_regime_wide24() above, same cache TTL, same asyncio.to_thread offload (the scorer
+        fetches from Binance and runs FeatureEngineer, both blocking), and the same never-raises
+        contract (degrades to warmed_up=False so the ribbon shows its waiting state rather than
+        breaking the chart)."""
+        now = time.monotonic()
+        cached = regime_btc_cache["payload"]
+        if cached is not None and now - regime_btc_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
+            return cached
+        async with regime_btc_lock:
+            cached = regime_btc_cache["payload"]
+            if cached is not None and time.monotonic() - regime_btc_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(compute_regime_btc_signal)
+            regime_btc_cache["ts"] = time.monotonic()
+            regime_btc_cache["payload"] = payload
+            return payload
+
     async def load_macro_calendar() -> dict[str, Any]:
         """US macro/corporate event calendar for the Snapshot tab -- see scripts/live_macro_
         calendar_20260826.py docstring for the 6 sources. compute_macro_calendar() is blocking
@@ -1659,6 +1690,10 @@ def make_app() -> web.Application:
         payload = await load_regime_wide24()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_regime_btc(request: web.Request) -> web.Response:
+        payload = await load_regime_btc()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_macro_calendar(request: web.Request) -> web.Response:
         payload = await load_macro_calendar()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -1833,6 +1868,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
+    app.router.add_get("/api/regime-btc", api_regime_btc)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/session-alerts", api_session_alerts)
