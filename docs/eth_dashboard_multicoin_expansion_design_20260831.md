@@ -308,9 +308,9 @@ def evidence_signals(asset: str = "eth"):
 ## 8. 단계별 로드맵
 
 1. **Step 0 — 재확인**: 서버 SSH로 §3의 "서버측·미검증" 11개 파일 로컬 재확인, 미커밋 상태인 `l2_anomaly_snapshot_collector.py`/`liq_magnet_collector.py` 커밋 여부 결정. *(미착수)*
-2. **Step 1 — 레지스트리+리팩터**: `coin_config.py` 신설, 계산 함수 8개에 `symbol` 파라미터 추가(§6.1~6.2). 이후 모든 단계의 전제조건이자 가장 leverage 높은 단일 작업. **✅ 2026-08-31 구현 완료(BTC 대상)** — `scripts/coin_config.py` 신설(ETH/BTC), `live_liquidation_direction_signal_20260825.py`/`live_liquidation_5m_signal_20260825.py`가 `coin` 파라미터로 리팩터됨(8개 중 2개 — 나머지 6개는 Tier4 소속이라 §6.2 원칙대로 보류).
-3. **Step 2 — 프론트 배선**: 스냅샷 탭 코인 스위처 추가(§6.4의 결정 필요 사항 확정 후), `ASSET_CONFIG`에 xrp/hype 추가. **✅ 2026-08-31 구현 완료(ETH/BTC만)** — §9-a 결정: 라이브 탭의 `activeChartAsset`와 공유하지 않고 **독립적인 `activeSnapshotAsset`**로 확정(코드 자체에 이미 "스냅샷 차트는 라이브 탭 자산선택과 무관"이라는 기존 설계의도 주석이 있어 그대로 따름 — §6.4 문서 작성 시의 "공유" 추천은 기각). xrp/hype 프론트 추가는 미착수.
-4. **Step 3 — Tier 1~2 패널 배선**: 매크로 캘린더 → 모델 내부 지표 5종 → 청산맵 순. **✅ 2026-08-31 부분 구현 완료** — 베이시스청산압박·청산방향압력·청산맵(+캔들차트+5분신호)까지 BTC로 배선+검증. 수급흐름/리테일수급/청산캐스케이드는 `dashboard_state.json`이 trading_bot.py를 통해서만 채워져 **의도적으로 보류**(§2.2 참고, trading_bot.py 미변경 원칙).
+2. **Step 1 — 레지스트리+리팩터**: `coin_config.py` 신설, 계산 함수 8개에 `symbol` 파라미터 추가(§6.1~6.2). 이후 모든 단계의 전제조건이자 가장 leverage 높은 단일 작업. **✅ 2026-08-31 구현 완료(BTC → XRP 순으로 확장)** — `scripts/coin_config.py`에 ETH/BTC/XRP 등록, `live_liquidation_direction_signal_20260825.py`/`live_liquidation_5m_signal_20260825.py`가 `coin` 파라미터로 리팩터됨(8개 중 2개 — 나머지 6개는 Tier4 소속이라 §6.2 원칙대로 보류). XRP 추가 시점엔 `server.py`의 4개 load_* 함수가 이미 `COIN_CONFIG`/`MARKET_SYMBOLS`에만 제네릭 의존하도록 되어 있어 함수 리팩터 자체가 불필요 — 순수 설정 추가 4곳(coin_config.py/MARKET_SYMBOLS/SNAPSHOT_ASSET_KEYS/코인탭 버튼)뿐이었음, 이 패턴이 완전히 기계적임을 재확인.
+3. **Step 2 — 프론트 배선**: 스냅샷 탭 코인 스위처 추가(§6.4의 결정 필요 사항 확정 후), `ASSET_CONFIG`에 xrp/hype 추가. **✅ 2026-08-31 구현 완료(ETH/BTC/XRP)** — §9-a 결정: 라이브 탭의 `activeChartAsset`와 공유하지 않고 **독립적인 `activeSnapshotAsset`**로 확정(코드 자체에 이미 "스냅샷 차트는 라이브 탭 자산선택과 무관"이라는 기존 설계의도 주석이 있어 그대로 따름 — §6.4 문서 작성 시의 "공유" 추천은 기각). 이후 라이브 탭 자체가 제거되어 이 구분은 무의미해짐(아래 "후속 2" 참고). hype 프론트 추가는 미착수(과거데이터 없어 Tier1~2도 제한적, §7 참고).
+4. **Step 3 — Tier 1~2 패널 배선**: 매크로 캘린더 → 모델 내부 지표 5종 → 청산맵 순. **✅ 2026-08-31 구현 완료(BTC, 이어서 XRP)** — 베이시스청산압박·청산방향압력·청산맵(+캔들차트+5분신호)까지 BTC/XRP 둘 다 배선+실서버 검증 완료. 수급흐름/리테일수급/청산캐스케이드는 `dashboard_state.json`이 trading_bot.py를 통해서만 채워져 **의도적으로 보류**(§2.2 참고, trading_bot.py 미변경 원칙).
 5. **Step 4 — Tier 3**: `liq_magnet_collector.py`에 실제 symbol 인자 추가, Hawkes 임계값 코인별 재튜닝, 세션 변동성 경보 타 코인 재검증. *(미착수)*
 6. **Step 5 (가장 비쌈, 최후순위)**: 증거신호 8종·레짐분류기·특화감지기 코인별 리서치 재수행 — **XRP부터 권장**(데이터 병목 없음), HYPE는 데이터 축적 후. *(미착수)*
 
@@ -318,12 +318,27 @@ def evidence_signals(asset: str = "eth"):
 
 **✅ 2026-08-31 후속 — 커밋(`790c95e`) + `handoff.sh push server`로 실서버 배포 + 재시작 + 실서버 재검증까지 완료.** 서버에는 `tail_risk_btc_sol.duckdb`가 실존해 청산방향압력·청산5분신호도 BTC가 완전히 `warmed_up=true`로 확인됨(로컬의 `db_missing`은 devmachine 한계였을 뿐, 서버에서는 정상 동작). `trading_bot.py`(실거래봇)는 재시작 영향 없음. 자세한 배포 절차·경합 이슈는 memory `eth-dashboard-multicoin-expansion-design-20260831` 참고.
 
+**✅ 2026-08-31 후속 2 — 라이브 탭 제거 + 최적화 2건 + BTC 레짐 리본 버그 수정, 배포 완료.** 이 설계도서와 직접 관련된 부분만 요약:
+- BTC 스냅샷 코인 스위처 작업 중 발견된 버그(§ "구현 검증 방법" 상단 문단 참고)를 수정 — `renderCandleSvg()`의 레짐 리본이 `activeSnapshotAsset === "eth"` 조건 없이 그려지고 있어, BTC 선택 시 ETH 전용 `latestRegimeWide24` 데이터를 그대로 겹쳐 그리던 문제를 회색 "미지원" 플레이스홀더로 교체(§6.2에서 이미 "레짐분류기는 Tier4, 코인별 재학습 전엔 노출 금지"라고 정한 원칙을 프론트에서도 실제로 강제하게 됨). 실제 BTC 레짐분류기 학습은 미착수 — memory `eth-dashboard-btc-regime-classifier-not-trained-todo-20260831` 참고.
+- 라이브 탭 자체를 제거(스냅샷·운영관리 2탭 체제로 축소)한 것은 이 설계도서의 스코프(코인 확장)와는 별개 결정이었으나, 그 결과 §9-a("라이브 탭·스냅샷 탭의 코인 선택 상태 공유 여부")는 **더 이상 유효한 질문이 아님** — 라이브 탭 자체가 없으므로 스냅샷 탭의 `activeSnapshotAsset`만 유일한 코인 선택 상태로 남음.
+- 커밋 `60ab72b` + `handoff.sh push server` + 서버 프로세스 재시작 + curl 기반 실서버 재검증(ETH/BTC 청산방향압력·청산맵 값 구분 확인, SSE 스트림 정상, `trading_bot.py` 무변경) 완료.
+
+**✅ 2026-08-31 후속 3 — XRP를 스냅샷 코인 스위처에 추가, 배포 완료.** 사용자가 위 §9-(b)에서 원래 추천됐던 파일럿 코인(XRP)을 이번에 실제로 진행. `coin_config.py`에 xrp 항목 추가(전용 `tail_risk_xrp.duckdb`/`tail_risk_1m_xrp` — BTC/SOL과 달리 완전히 독립된 워커+파일이라 단일-writer 경합 우려 자체가 없음, 서버 SSH로 5397+ rows·2026-08-27부터 누적 확인) + `server.py`의 `MARKET_SYMBOLS`에 xrp 추가 + 프론트 코인탭 1개 추가, 총 4파일. `server.py`의 4개 load_* 함수가 이미 완전히 제네릭했기 때문에 **함수 리팩터가 전혀 필요 없었음** — Step 1에서 예상한 대로 이 패턴이 진짜 기계적임이 실증됨. 커밋 `170c79a` + 배포 + 실서버 재검증(4개 엔드포인트 전부 `warmed_up=true`, 청산맵 현재가 $1.39 등 실제 XRP 고유값) 완료. §9-(b)는 이제 "XRP 파일럿 검증 완료, 다음은 SOL 또는 HYPE 판단"으로 갱신.
+
+⚠️ **이 저장소를 동시에 건드리는 다른 세션과의 충돌이 이 문서 작업 중에만 4회 발생**(BTC 배포 2회 + 라이브탭 제거 1회 + XRP 1회, 매번 호메로스 증거신호 프로젝트 관련) — 매번 커밋 직전 `git diff`로 훅 단위까지 확인해 분리 커밋 처리함. 이 devmachine에서 대시보드 파일을 커밋하기 전엔 이 확인을 습관화할 것.
+
+**✅ 2026-08-31 후속 4 — SOL을 스냅샷 코인 스위처에 추가, 배포 완료.** XRP보다도 작업량이 적었음 — `server.py`의 `MARKET_SYMBOLS`에 sol이 이미 있어서(옛 라이브 탭 다중자산 차트가 남긴 것) `coin_config.py`에 sol 항목 추가 + 프론트 코인탭 1개, 총 3파일뿐. SOL의 tail-risk는 BTC와 **같은 파일**(`tail_risk_btc_sol.duckdb`)의 별도 테이블(`tail_risk_1m_sol`, 19769+ rows — BTC와 같은 워커가 같은 시점부터 수집해 온 것)이라 이번엔 이 파일이 이미 §3에서 확인된 경로 그대로 재사용됨. 커밋 `a722cda` + 배포 + 실서버 재검증(4개 엔드포인트 전부 `warmed_up=true`, ETH/BTC 회귀 없음, `trading_bot.py` 무변경) 완료.
+
+**✅ 2026-08-31 후속 5 — HYPE 추가, 배포 완료. 단 베이시스청산압박 1개는 구조적으로 미지원.** HYPE는 §7에서 "과거 시세 데이터 없음"으로 Tier3~4가 막힌다고 이미 확인했지만, Tier1~2(청산맵/청산방향압력/5분신호)는 **최근 롤링 윈도우만 필요**(`LIQUIDATION_MAP_LOOKBACK_HOURS=24h`)해서 과거 데이터 부재와 무관하게 동작 — 이 구분을 이번에 실증. 다만 새로 발견된 진짜 구조적 제약: **HYPEUSDT는 바이낸스 현물(spot) 상장이 없음**(`api.binance.com/api/v3/klines`가 `Invalid symbol` 반환, 선물(perp)만 실재 — 라이브 실측 확인). 베이시스청산압박(`live_spot_perp_basis_signal_20260827.py`)은 현물+선물 두 다리가 모두 필요해 이 신호 하나만 HYPE에서 영구적으로 미지원 — "아직 데이터 부족"이 아니라 "이 마켓 자체가 없음"이므로, 매 캐시 주기마다 14초씩 낭비되는 재시도 대신 `NO_SPOT_MARKET_SYMBOLS` 즉시 단락 처리 추가(`warmed_up=false`/`error="no_spot_market"`, 0.3초 응답). 청산맵/청산방향압력/5분신호는 선물데이터만 쓰므로 영향 없음 — 4개 엔드포인트 중 3개 정상, 1개는 의도적/영구적 미지원으로 명확히 구분됨. 이 작업 중 `live_spot_perp_basis_signal_20260827.py` 자체가(2026-08-27부터 라이브 배포돼 있었음에도) 한 번도 git커밋된 적 없었던 게 발견돼 이번에 최초 커밋됨. 커밋 `b338d87` + 배포 + 실서버 재검증(청산맵/방향/5분신호 `warmed_up=true`, 베이시스는 `no_spot_market` 즉답, 4코인 회귀 없음, `trading_bot.py` 무변경) 완료.
+
+이걸로 ETH/BTC/SOL/XRP/HYPE **5코인 전부 Tier1~2 배포 완료**(HYPE는 베이시스청산압박 제외 3/4) — 이 설계도서의 원래 스코프(§1 "4코인 확장")를 사실상 완결.
+
 ---
 
 ## 9. 결정이 필요한 지점 (착수 전 확인)
 
-- **(a) 코인 선택 상태 공유 범위**: 라이브 탭·스냅샷 탭이 코인 선택을 공유할지, 독립적일지(§6.4). 추천: 공유하되 라이브 탭은 "3자산 동시운용" 성격상 예외 처리 검토.
-- **(b) 4코인 동시 진행 vs 순차 진행**: 추천은 XRP 단독 파일럿으로 Step 1~5 전체를 먼저 검증한 뒤 BTC/SOL/HYPE로 확산 — 데이터 병목 없는 코인에서 파이프라인 자체의 결함을 먼저 드러내는 편이 저렴합니다.
+- ~~(a) 코인 선택 상태 공유 범위~~: **2026-08-31 라이브 탭 제거로 소멸** — 스냅샷 탭의 `activeSnapshotAsset`만 유일한 코인 선택 상태로 남음(위 "후속 2" 참고).
+- ~~(b) 4코인 동시 진행 vs 순차 진행~~: **2026-08-31 XRP까지 완료로 사실상 해소** — 실제로는 BTC → XRP 순으로 진행했고 둘 다 Tier 1~2까지 실서버 배포 완료(위 "후속 3" 참고). 다음 후보는 SOL(BTC와 유사한 검증 필요) 또는 HYPE(과거데이터 없어 Tier1~2도 제한적, §7 참고).
 - **(c) Tier 4 콘텐츠의 코인별 노출 기준**: IC 재검증 통과를 노출 조건으로 강제할지(§6.5 추천안), 아니면 "참고용" 표시로 미검증 상태로도 먼저 노출할지.
 - **(d) 교차자산 신호(smt_divergence류)의 코인별 재정의**: BTC 대시보드의 교차자산 파트너를 무엇으로 할지(ETH? 아니면 폐기?).
 - **(e) `hyperliquid_execution_audit.jsonl`의 스코프 포함 여부**: HYPE의 Binance 데이터 수집과는 별개로 보이는 이 실행감사로그가 이번 대시보드 확장과 관련 있는지 확인 필요 — 별도 조사를 원하시면 말씀해주세요.

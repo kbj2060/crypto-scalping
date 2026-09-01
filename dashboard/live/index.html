@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260831-strip-height-15px-mid-v164">
+  <link rel="stylesheet" href="styles.css?v=20260901-low-atr-warning">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -35,192 +35,11 @@
         <nav class="page-tabs" aria-label="대시보드 탭">
           <button type="button" class="page-tab active" data-page-tab="snapshot">스냅샷</button>
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
-          <button type="button" class="page-tab" data-page-tab="live">라이브</button>
         </nav>
         <div id="topClock" class="top-clock">-</div>
         <div id="topSession" class="ops-session top-session">-</div>
       </div>
     </header>
-
-    <div id="liveTabPanel" class="hidden">
-    <section id="executionAlertBanner" class="execution-alert-banner hidden" role="alert" aria-live="assertive">
-      <div class="execution-alert-icon" aria-hidden="true">!</div>
-      <div class="execution-alert-copy">
-        <strong id="executionAlertTitle">트레이딩봇 실행 알림</strong>
-        <span id="executionAlertReason">-</span>
-      </div>
-      <time id="executionAlertTime">-</time>
-    </section>
-
-    <section class="hero-metrics">
-      <article class="panel hero-card hero-primary">
-        <span class="hero-label">누적 수익률</span>
-        <strong id="heroCumulativePnl" class="hero-value">-</strong>
-        <span id="heroCumulativeSub" class="hero-sub">-</span>
-      </article>
-      <article class="panel hero-card">
-        <span class="hero-label">오늘 손익</span>
-        <strong id="heroTodayPnl" class="hero-value hero-value-sm">-</strong>
-        <span id="heroTodaySub" class="hero-sub">-</span>
-      </article>
-      <article class="panel hero-card">
-        <span class="hero-label">미실현 손익</span>
-        <strong id="heroUnrealizedPnl" class="hero-value hero-value-sm">-</strong>
-        <span id="heroUnrealizedSub" class="hero-sub">-</span>
-      </article>
-    </section>
-
-    <section class="market-chart-wrap">
-      <article class="panel">
-        <div class="chart-panel-head">
-          <h3>실시간 시장 차트</h3>
-          <div id="assetTabs" class="asset-tabs" aria-label="자산 선택">
-            <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
-            <button type="button" class="asset-tab" data-asset="sol">SOL</button>
-            <button type="button" class="asset-tab" data-asset="btc">BTC</button>
-          </div>
-        </div>
-        <div id="chartAiSummaryText" class="chart-ai-summary">-</div>
-        <div id="chartAiRibbon" class="chart-ai-ribbon hold">
-          <div class="ribbon-item ribbon-primary">
-            <span>AI 판단</span>
-            <strong id="chartDecisionText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>진입 체결</span>
-            <strong id="chartEntryLiquidityText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>비중</span>
-            <strong id="chartPositionPctText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>진입가</span>
-            <strong id="chartEntryText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>진입 시각</span>
-            <strong id="chartEntryTimeText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>레버리지 / 노출</span>
-            <strong id="chartExposureText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>미실현손익</span>
-            <strong id="chartUnrealizedPnlText">-</strong>
-          </div>
-          <div class="ribbon-item ribbon-risk">
-            <span>TP / SL</span>
-            <strong id="chartRiskText">-</strong>
-          </div>
-          <div class="ribbon-item">
-            <span>레짐</span>
-            <strong id="chartRegimeText">-</strong>
-          </div>
-        </div>
-        <div id="chartRiskGauge" class="chart-risk-gauge"></div>
-        <div class="chart-container">
-          <svg id="candleSvg" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
-        </div>
-        <div id="riskLevelNote" class="chart-note">-</div>
-        <div id="chartStamp" class="panel-stamp">-</div>
-      </article>
-    </section>
-
-    <section class="charts">
-      <article class="panel">
-        <h3>노출 변화</h3>
-        <svg id="exposureSvg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
-      </article>
-      <article class="panel">
-        <h3>최근 거래 손익</h3>
-        <svg id="pnlSvg" viewBox="0 0 800 280" preserveAspectRatio="none"></svg>
-      </article>
-    </section>
-
-    <section class="charts single-chart">
-      <article class="panel">
-        <h3>거래 누적 성과</h3>
-        <svg id="equitySvg" viewBox="0 0 800 280" preserveAspectRatio="none"></svg>
-      </article>
-    </section>
-
-    <section class="journal-wrap">
-      <article class="panel">
-        <div class="trade-journal-summary">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <strong>최근 거래</strong>
-            <span id="journalTotalPnl" class="pnl-badge">-</span>
-          </div>
-        </div>
-        <div id="tradeJournalList" class="trade-journal-list"></div>
-      </article>
-    </section>
-
-    <section class="panel ops-shadow-panel">
-      <div class="ops-health-head">
-        <div><h3>BTC 멀티슬롯 Shadow (N=3)</h3><p id="btcMultislotSub" class="muted">상태 불러오는 중…</p></div>
-        <div class="ops-health-head-tools">
-          <span id="btcMultislotBadge" class="ops-badge neutral">-</span>
-          <span class="ops-readonly">shadow 전용 · 주문 미실행</span>
-        </div>
-      </div>
-      <div class="ops-shadow-body">
-        <div class="ops-shadow-stat"><span>슬롯 점유</span><strong id="btcMultislotSlots">-</strong></div>
-        <div class="ops-shadow-stat"><span>누적 체결</span><strong id="btcMultislotTrades">-</strong></div>
-        <div class="ops-shadow-stat"><span>누적 수익률</span><strong id="btcMultislotPnl">-</strong></div>
-      </div>
-      <div id="btcMultislotSlotTabs" class="shadow-slot-tabs"></div>
-      <div id="btcMultislotSlotList" class="shadow-slot-list single"></div>
-      <div class="shadow-chart-grid">
-        <div class="shadow-chart-cell">
-          <p class="shadow-chart-title">청산 거래 손익</p>
-          <svg id="btcMultislotPnlSvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
-        </div>
-        <div class="shadow-chart-cell">
-          <p class="shadow-chart-title">누적 성과</p>
-          <svg id="btcMultislotEquitySvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel ops-shadow-panel">
-      <div class="ops-health-head">
-        <div><h3>ETH 오디세이4 Shadow</h3><p id="ethOdyssey4Sub" class="muted">상태 불러오는 중…</p></div>
-        <div class="ops-health-head-tools">
-          <span id="ethOdyssey4Badge" class="ops-badge neutral">-</span>
-          <span class="ops-readonly">shadow 전용 · 주문 미실행</span>
-        </div>
-      </div>
-      <div class="ops-shadow-body cols-4">
-        <div class="ops-shadow-stat"><span>현재 포지션</span><strong id="ethOdyssey4Position">-</strong></div>
-        <div class="ops-shadow-stat"><span>누적 체결</span><strong id="ethOdyssey4Trades">-</strong></div>
-        <div class="ops-shadow-stat"><span>누적 수익률</span><strong id="ethOdyssey4Pnl">-</strong></div>
-        <div class="ops-shadow-stat"><span>MDD</span><strong id="ethOdyssey4Mdd">-</strong></div>
-      </div>
-      <div class="ops-shadow-body cols-2">
-        <div class="ops-shadow-stat"><span>h48qual 레짐 가드 발동</span><strong id="ethOdyssey4GuardBars">-</strong></div>
-        <div class="ops-shadow-stat"><span>zig075 SHORT 진입거부</span><strong id="ethOdyssey4VetoBars">-</strong></div>
-      </div>
-      <div class="ops-shadow-body cols-2">
-        <div class="ops-shadow-stat"><span>h48qual quality (진입 기준선)</span><strong id="ethOdyssey4H48qualQuality">-</strong></div>
-        <div class="ops-shadow-stat"><span>zig075 quality (진입 기준선)</span><strong id="ethOdyssey4Zig075Quality">-</strong></div>
-      </div>
-      <div id="ethOdyssey4PositionCard" class="shadow-slot-list single"></div>
-      <div class="shadow-chart-grid">
-        <div class="shadow-chart-cell">
-          <p class="shadow-chart-title">청산 거래 손익</p>
-          <svg id="ethOdyssey4PnlSvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
-        </div>
-        <div class="shadow-chart-cell">
-          <p class="shadow-chart-title">누적 성과</p>
-          <svg id="ethOdyssey4EquitySvg" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
-        </div>
-      </div>
-    </section>
-
-    </div>
 
     <section id="opsTabPanel" class="ops-tab-panel hidden" aria-live="polite">
       <div class="ops-panel-head">
@@ -245,9 +64,12 @@
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
       <div class="ops-panel-head">
-        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="ETH/BTC 전환은 청산맵·베이시스청산압박·청산방향압력에만 적용됩니다. 증거신호·레짐·특화감지기·수급흐름·리테일수급·청산캐스케이드는 ETH 고정입니다.">
+        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="ETH/BTC/SOL/XRP/HYPE 전환은 청산맵·베이시스청산압박·청산방향압력에만 적용됩니다(HYPE는 바이낸스 현물 상장이 없어 베이시스청산압박만 미지원). 증거신호·레짐·특화감지기·수급흐름·리테일수급·청산캐스케이드는 ETH 고정입니다.">
           <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
           <button type="button" class="asset-tab" data-asset="btc">BTC</button>
+          <button type="button" class="asset-tab" data-asset="sol">SOL</button>
+          <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
+          <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
         </div>
         <div class="session-alert-center">
           <span id="sessionVolAlertBadge" class="ops-badge warn" style="display:none">⚠️ 시장 오픈 변동성 주의</span>
@@ -326,12 +148,6 @@
               <span class="signal-chip-label">유동성 스윕</span>
               <span class="signal-chip-state">-</span>
             </div>
-            <div id="eviChipVolWick" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">거래량 클라이맥스</span>
-              <span class="signal-chip-state">-</span>
-            </div>
             <div id="eviChipReturnZ" class="signal-chip neutral">
               <span class="signal-chip-dot" aria-hidden="true"></span>
               <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
@@ -344,10 +160,16 @@
               <span class="signal-chip-label">체결 쏠림</span>
               <span class="signal-chip-state">-</span>
             </div>
-            <div id="eviChipDalton" class="signal-chip neutral">
+            <div id="eviChipDemarker" class="signal-chip neutral">
               <span class="signal-chip-dot" aria-hidden="true"></span>
               <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">Dalton 룰2</span>
+              <span class="signal-chip-label">DeMarker 극단</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="eviChipKalman" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
+              <span class="signal-chip-label">칼만 추세이탈</span>
               <span class="signal-chip-state">-</span>
             </div>
           </div>
@@ -360,7 +182,7 @@
           <div class="signal-chip-row">
             <div id="modelChipVRebound" class="signal-chip neutral">
               <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">V자 반등락</span>
+              <span class="signal-chip-label">V자 급등락</span>
               <span class="signal-chip-state">-</span>
             </div>
           </div>
@@ -409,7 +231,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260831-vrebound-flat-tone-split-v166"></script>
+  <script src="./app.js?v=20260901-low-atr-warning"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

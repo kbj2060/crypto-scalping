@@ -1,0 +1,1845 @@
+# 호메로스 프로젝트 (Project Homer)
+
+Status: `active`
+
+Last updated: 2026-09-01 KST — **트레일링스톱 경제성게이트 방향뒤집기(direction-flip) 대조군
+신설+ETH 배포신호 9개 전수 소급감사 완료**(계기: ZDC(지그재그방향) 신규 라벨 그리드서치에서
+ARM극소 조합이 노이즈수확 허위positive를 만드는 걸 발견). ETH 배포신호 8개(giveback9트리거/
+taker/str_z/liquidity_sweep_topdown/orthogonal_combo/smt_divergence/demarker_extreme/kalman_
+deviation_meanrev)는 전부 무혐의, **`fib_extension_exhaustion`는 96셀 그리드 전체재검증(통과
+9개 전부 ARM=0.5, 방향뒤집기 진짜 0개)으로 "경제성게이트 통과" 클레임을 철회함**(2026-09-01
+사용자결정 — 분류/AUC는 그대로 유효, 자동매매 미연결이라 실질 리스크는 없었음). **다음 코인
+(BTC/SOL/XRP/HYPE) 포팅 또는 신규 신호에 트레일링스톱
+경제성게이트를 쓸 때는 이 검정을 반드시 표준 절차로 포함할 것** — 아직 BTC/SOL 포팅판 config는
+미감사. 상세: 재사용 방법론 템플릿 5.8)절, [[feedback_trailing_stop_low_arm_noise_harvest_
+artifact_20260901]]. 이전 업데이트(2026-08-31 KST): "V자반등/지지횡보"(liquidity_sweep 계열 특화 감지기, 원래 8개 순차
+로스터와는 별개) **sweep 단독 트리거(v7b) → 9트리거 통합모델로 교체 배포 완료**. 90일 재현율갭
+진단(sweep이 진짜 V자반등 총량의 25.5%만 커버)에서 시작해 sweep+기존5개증거신호+
+demarker_extreme+kalman_deviation_meanrev(호메로스 후보풀)+local_extreme(유일한 신규,
+사전조건없음) 9개를 OR로 통합, 라벨식(v7b의 fast_move/giveback 공식)은 그대로 재사용. TabPFN
+cheap_gate→4시드안정성→HOLDOUT(분류+경제성 동시,1회성) 전부 통과: **HOLDOUT AUC
+0.8465**(v7b 0.7788보다 높음, 3구간 중 최고)+경제성 원래 +9.28bp로 보고했으나 **2026-09-01
+local_extreme 진입시점 현실성 보정 후 +4.75bp로 정정**(승률85.7%, v7b는 경제성게이트 자체를
+한 번도 통과 못 했었음 — 정정 후에도 여전히 압도적 우위). **2026-09-01 사용자 결정: 방향추세
+신호로 giveback(wick-앵커+giveback라벨) 채택 확정** — 같은 날 별도로 탐색한 ZDC(지그재그방향)
+대안모델은 경제성게이트 최종 실패로 보류(아래 "ZDC" 절 참조). 대시보드 배포 중 SIGTERM행 버그
+재현(kill -9로 해결) 포함 전체 경위는 "V자반등 9트리거 통합모델" 절 및 [[eth_v_rebound_sweep_
+gated_recall_gap_20260831]], 경제성 정정 상세는 [[project_v_rebound_local_extreme_entry_
+timing_realism_20260901]]
+참고. 이전 업데이트: `fib_extension_exhaustion`(#8, 최후순위) 분류+경제성 완료 —
+**원래 8개 신호 전부 처리 완료**(6개 배포 진행 중 + 2개 제거). 레그 반대극값 기준 27.2~61.8%
+확장("확장소진") 되돌림베팅 신호. 기존 문서의 "표본 n~190 최소"는 5.5개월 좁은 창 기준 오기였음을
+확인 — 전체이력(2024-01~) 재측정시 bottom1078/top1072, Fresh-Forward 4구간 전부 세자릿수, 이
+저장소 스윙계열(liquidity_sweep/smt_divergence) 중 겹침 6.0~9.5%로 가장 독립적. **⭐이 신호에서
+처음으로 라벨 자체에 MAE(최대역행폭) 캡 추가** — 사용자가 시각검증 차트에서 "MFE는 K 넘겼는데
+같은 윈도우 안에 -6.58xATR 급락이 공존하는 HIT 예시"를 직접 지적, 순서무관 전체윈도우
+`MFE≥K AND MAE<2.0×K` 동시조건으로 재정의(대칭 1.0×K는 50/50 캘리브레이션 자체가 불가능해서
+2.0×K로 확정, 시각검증 재승인). 그리드 스크리닝 중 **K보정 이봉우리(bimodal) 버그**도 발견·수정
+— joint hit_rate(K) 곡선이 내부정점을 가져 0.5crossing이 두 번(작은K/큰K) 존재하는데 최근접탐색이
+방향 없이 아무 쪽이나 골라 H=6/GAP=12가 OOS AUC 0.39(랜덤이하)로 붕괴했던 것을 발견, 항상
+정점이후(큰K) 분기를 쓰도록 고정. 최종 HORIZON=20(100분)/GAP=18/K=2.35 — GAP=12가 그리드
+경계값이라 5.6)절대로 GAP=18/24까지 확장검증(18에서미세정점,24는하락, 추가확장불필요). VAL0.6054/
+OOS0.6201/**HOLDOUT0.6210**. Ablation: 변동성레짐 제거시 VAL만 -0.091(거의동전), OOS/HOLDOUT도
+각각 -0.031/-0.021로 이 저장소에서 가장 크게 변동성레짐에 의존(순열중요도도 atr_percentile_864
+단독 지배, 2위와 10배차) — 세션타이밍도 3구간전부소폭기여, 23피쳐그대로유지. **경제성
+(트레일링스톱)도 사전에 무작위기준선부터 확인**(orthogonal_combo 교훈 선제적용) — SL3.5/ARM0.5/
+Trail0.1 그리드1위이나 ARM0.5라 승률88~93%는 무작위진입도승률82~84%인 exit구조 자체효과로 확인,
+단 bp기준(VAL+15.15/OOS+3.00bp)은 무작위(-2.89/-2.11bp)를 뚜렷이능가해 진짜엣지 생존, 낙관/비관
+이중검증도 견고(±0.3~2.3bp). HOLDOUT+2.54bp(승률90.6%,n=288,총수익+7.4%) 전부 통과 — 이 프로젝트
+6번째 경제성게이트 통과 신호. **⚠️2026-09-01 정정: 이 "6번째 통과" 클레임은 96셀 그리드 전체
+방향뒤집기 재검증(진짜0/9)으로 철회됨 — 위 최신 업데이트 및 5.8)절 참조**. **2026-08-31 배포까지
+완료**(증거신호 칩 자체 교체, 분류확률만 표시하므로 배포 자체는 유효). 이전
+업데이트: `smt_divergence`(#7) v1 완료+배포(이 프로젝트 HOLDOUT AUC 역대최고 0.6823) + 같은 요청으로
+`volume_wick_climax`(#4)/`dalton_rule2_balance_edge`(#5)를 대시보드 증거신호에서 완전히 제거
+(`SIGNAL_ORDER` 8→6개 축소, `compute_signals()`원 규칙계산은 보존). orthogonal_combo는 배포직후
+심층검증으로 kept-only 헤드라인 AUC가 과대평가였음이 드러나 정정(전체모집단 0.665/0.680/0.667) —
+상세는 각 신호별 상세 섹션과 하단 메모리 링크 참고.)
+
+## 정의
+
+대시보드 증거신호(evidence signal) 8종의 **단순 조건/임계값 로직**을, 신호별 **딥러닝(TabPFN)
+메타라벨링 분류모델**로 대체·보강하는 이니셔티브. "이 신호가 발동했을 때 실제로 믿을만한가
+(정해진 ATR 배수만큼 유리한 방향으로 움직이는가)"를 학습된 확률로 답하는 것이 목표.
+
+**이름 유래**: 이 저장소는 이미 오디세이(Odyssey, 대규모 아키텍처 연구트랙)·일리아스(Ilias) 등
+호메로스 서사시 계열 이름을 서브프로젝트에 써왔음 — 호메로스는 그 두 작품의 저자이므로, "증거신호
+전체를 관통하는 상위 이니셔티브"라는 위치에 자연스럽게 맞아떨어지는 이름. 2026-08-30 사용자가
+명명.
+
+**시작일**: 2026-08-29 (taker_delta_z_climax / liquidity_sweep 두 신호가 동시에, 서로 다른
+동시세션에서 착수됨). 이 폴더는 2026-08-30 소급 정리.
+
+## 범위 (Scope)
+
+**포함**: `scripts/live_evidence_signal_dashboard_20260823.py::SIGNAL_ORDER`의 원래 8개 증거신호
+각각에 대해 메타라벨링 분류모델을 순서대로 구축하는 작업.
+
+원래 8개 신호: `orthogonal_combo`, `fib_extension_exhaustion`, `smt_divergence`,
+`liquidity_sweep`, `volume_wick_climax`, `short_term_return_z`, `taker_delta_z_climax`,
+`dalton_rule2_balance_edge`. **⚠️2026-08-31 — `volume_wick_climax`(#4)와
+`dalton_rule2_balance_edge`(#5)가 대시보드 증거신호에서 완전히 제거됨**(둘 다 Homer 업그레이드로
+누적된 부정적 증거 — 리프트<1x·경제성 트레일링스톱 FAILED — 가 결정적이었음). `SIGNAL_ORDER`
+자체가 8→6개로 축소(`compute_signals()`의 원 규칙 계산은 삭제 안 함, 표시/투표집계에서만 제외).
+**⭐2026-08-31 — 원래 8개 신호 전부 처리 완료**: `orthogonal_combo`/`smt_divergence`/
+`liquidity_sweep`/`short_term_return_z`/`taker_delta_z_climax`(분류+경제성+배포 완료) +
+`fib_extension_exhaustion`(#8, 2026-08-31 배포까지 완료) + `volume_wick_climax`/
+`dalton_rule2_balance_edge`(위 사유로 제거). 현재 대시보드 증거신호는 6개 그대로(fib_extension_exhaustion는
+기존 칩 in-place 교체라 개수 불변) — Homer 원래 8개 신호 전부 분류+경제성+배포(또는 제거) 완결.
+
+**제외 (별개 프로젝트, 혼동 금지)**:
+- `evidence_signal_quant_use_contract_20260815.md` — 횡단면 60코인 퀀트알파 활용 서브프로젝트.
+  2026-08-15 경제성 불가로 종결(이벤트당 초과수익 0.24bp vs 비용 10bp). 이건 "신호를 여러 자산에
+  걸쳐 알파로 쓸 수 있나"였고, 호메로스는 "신호 자체(단일자산)를 더 정확하게 만들 수 있나" — 다른
+  질문.
+- `docs/experiments/eth_evidence_signal_liquidation_confluence_20260827.md` — 증거신호×청산맵
+  confluence 연구. 피쳐 결합 탐색이지 DL 대체가 아님.
+- 레짐모델(GBM2/GBM3/wide24 HMM), 청산맵/청산캐스케이드, 매크로캘린더, 세션변동성경보 — 이들
+  중 다수가 호메로스 모델의 피쳐 후보로 테스트됐지만(대부분 REJECTED, 아래 참조) 그 자체는 완전히
+  별개 트랙.
+- **미확정**: 다른 대시보드 "모델지표"급 지표(레짐모델 등)로 이 방법론을 확장할지는 아직 사용자
+  결정 없음 — 필요시 확인 후 이 프로젝트 범위로 편입.
+
+## 진행 현황 (작업 순서)
+
+| # | 신호 | 상태 | 최종모델 | VAL / OOS / HOLDOUT (AUC) | 배포 | 경제성게이트 |
+|---|---|---|---|---|---|---|
+| 1~2 | `taker_delta_z_climax` | ✅완료 (v4) | Tier0 23피쳐 + TabPFN | 0.622 / 0.608 / 0.650 | ✅2026-08-30 증거신호 칩 자체 교체 배포(아래 참조) | ⭐고정TP:SL은실패, ATR트레일링스톱(SL2.0/ARM1.5/Trail0.2)으로 VAL/OOS 독립 표준비용(10bp)통과(+4.64/+5.93bp) — 이 저장소 최초, 아래 "경제성 게이트" 섹션 |
+| 1~2 | `liquidity_sweep` | ✅완료 (top/down 표준재학습, v7b/V자반등은 별개 모델로 보존) | Tier0(22)+rsi(23) + TabPFN | **0.659 / 0.637 / 0.661** | ✅2026-08-30 증거신호 칩 자체 교체 배포(아래 참조, V자반등 방식에서 taker식으로 전환) | ⭐트레일링스톱(SL4.0/ARM2.0/Trail0.1)으로 VAL+10.70bp/OOS+14.49bp/홀드아웃+1.97bp(승률67.7%,n=913) 전부 통과 — 이 신호 최초 성공, 아래 "경제성 게이트" 섹션 |
+| 3 | `short_term_return_z` | ✅완료 (v1) | Tier0급 23피쳐 + TabPFN | 0.674 / 0.649 / 0.643 | ✅2026-08-30 증거신호 칩 자체 교체 배포(아래 참조) | 미검증 |
+| 4 | `volume_wick_climax` | ✅완료 (v1→**v2**, H=16로교체), **이 프로젝트 최초의 뚜렷한 약신호** | Tier0 23피쳐 + TabPFN | v2: 0.597/0.598/**0.529**(역대최저) | ⚠️**2026-08-31 대시보드에서 완전히 제거됨**(아래참조) | ❌FAILED (v1·v2 둘다 트레일링스톱 0/12, 아래참조) |
+| 5 | `dalton_rule2_balance_edge` | ✅완료 (v1), **레짐/상태형 신호(이산이벤트 아님)** | Tier0 23피쳐 + TabPFN | 0.598/0.605/0.576 (이 프로젝트 최고 안정성) | ⚠️**2026-08-31 대시보드에서 완전히 제거됨**(아래참조, 8/30에 배포됐다가 철회) | ❌FAILED(2026-08-31, atr_pct_288 기준 사이징 96조합 전부 실패, 아래참조) |
+| 6 | `orthogonal_combo` | ✅완료 (v2), **플래그십, ⚠️심층검증으로 헤드라인 하향조정됨** | Tier0 20피쳐(23-세션타이밍3개) + TabPFN | kept-only **0.684/0.727/0.725** → 전체모집단 재평가 **0.665/0.680/0.667**(아래 심층검증 참조) | ✅2026-08-31 증거신호 칩 자체 교체 배포(아래 참조) | ⭐트레일링스톱(SL4.0/ARM0.5/Trail0.1)으로 VAL+9.36bp/OOS+15.13bp/홀드아웃+3.78bp 전부 통과 — 승률91~96%는 exit구조 자체효과(무작위도83~85%), bp 기준으로는 무작위·오실레이터단독 둘 다 능가(아래 참조) |
+| 7 | `smt_divergence` | ✅완료 (v1), **이 프로젝트 HOLDOUT AUC 역대 최고** | Tier0 23피쳐(전부유지) + TabPFN | **0.6613/0.6253/0.6823** | ✅2026-08-31 증거신호 칩 자체 교체 배포(아래참조) | ⭐트레일링스톱(SL4.0/ARM2.0/Trail0.1)으로 VAL+7.00bp/OOS+6.18bp/홀드아웃+3.24bp(승률72.4/69.6/70.3%) 전부 통과 — 이 프로젝트 최고 안정성(승률 거의 안 줄어듦), 아래 참조 |
+| 8 | `fib_extension_exhaustion` | ✅분류만 완료(2026-08-31), ⚠️⚠️2026-09-01 경제성게이트 통과 클레임 철회(96셀그리드 전체 진짜0/9, 사용자결정) | Tier0 23피쳐(전부유지) + TabPFN | **0.6054/0.6201/0.6210** | ✅2026-08-31 증거신호 칩 자체 교체 배포(아래참조, 분류확률만 표시) | ❌철회 — 원래 SL3.5/ARM0.5/Trail0.1로 VAL+15.15bp/OOS+3.00bp/홀드아웃+2.54bp(승률93.2/87.6/90.6%) 통과로 봤으나, 방향뒤집기 대조군을 96셀 전체에 적용하니 통과한 9개(전부ARM=0.5) 중 진짜 0개 — 나머지 ARM대는 애초 VAL+OOS 동시양수조합 자체가 없어 대안도 없음, 아래 참조 |
+
+⚠️ **1~2번 순서 표기 불일치**: `taker_delta_z_climax`와 `liquidity_sweep`은 같은 날(2026-08-29)
+서로 다른 동시세션에서 병행 진행됨(이 저장소에서 반복 확인된 동시세션 패턴). taker 문서
+(`docs/experiments/eth_taker_delta_climax_metalabel_20260829.md`)는 liquidity_sweep=1번/
+taker=2번으로, short_term_return_z 메모리는 taker=1번/liquidity_sweep=2번으로 서로 다르게
+기록함 — 실질적 영향 없음(둘 다 완료). **3번부터는 두 소스 모두 완전히 일치.**
+
+## 후보 풀 (Candidate Pool, 2026-08-31 신설)
+
+기존 1~8번 순차 진행과 별개 트랙: "라벨설계/TabPFN 착수 전 raw rule 리프트만 먼저 검사해 후보를
+쌓아두고, 나중에 한꺼번에 phase1 진단→라벨설계→TabPFN 튜닝을 몰아서 하자"는 사용자 결정(2026-08-31)
+으로 신설. 각 항목 상태는 **후보 등록만**(이름·근거만 등록) → **사전점검 완료**(raw rule 리프트,
+event_study vs zigzag피벗까지 검사됨) → **다음 단계 진행 확정** 또는 **보류**(사전점검 결과를 보고
+사용자가 결정) 순서로 진행. 2026-08-31 사전점검 5종 전부 완료 후, 칼만필터·DeMarker 2개만 다음
+단계(phase1 진단→라벨설계→TabPFN) 진행 확정, 나머지 4개(VPOC/Renko/BTC-ETH/TPO)는 보류.
+
+| 후보 | 상태 | 리프트(1h 헤드라인) | 비고 |
+|---|---|---|---|
+| DeMarker 극단값(원래 3룰 중 "DeMarker 단독" 성분만 승계) | ✅**전체파이프라인완료**(2026-08-31, H=8/GAP=12/K=0.70) — VAL/OOS/**HOLDOUT** AUC **0.7527/0.7157/0.7464**(이 프로젝트 분류 최고), 경제성 **96/96**(역대최고)+홀드아웃 **+11.53bp**(VAL+12.14/OOS+20.20bp 역대최고bp 대비 거의무손실) — ✅**2026-08-31 대시보드 배포완료**(신규 8번째 슬롯, v173) | dem≥0.90/≤0.10: top 1.89x / bottom 2.12x | 원래 SMC다이버전스/Wyckoff스프링/VP엣지 3룰(top2.84x/bottom1.30x/양방향2.12·2.18x, [[eth_demarker_evidence_signal_lift_check_20260831]])은 컴포넌트분해상 "DeMarker 단독"이 리프트 대부분을 설명 → 사용자 확인 후 **SMC/Wyckoff 결합조건은 버리고 DeMarker 극단값만 승계**. 자기상관 레짐게이트 결과는 아래 참조 |
+| VPOC 핀볼(POC 반발/자석) | 보류(사전점검 완료, 진행 안 함) | top 1.06x / bottom 1.10x | **리프트 사실상 없음**(신뢰구간이 baseline을 포함) — 같은 "터치+리젝트" 구조라도 48봉 스윙익스트림(2.78~3.01x, DeMarker 사전점검 `_sweep_alone`)과 달리 200봉 롤링 POC는 리젝트 레벨로 약함 |
+| Renko 벽돌 차트 반전 돌파 | 보류(사전점검 완료, 진행 안 함) | top 0.69x / bottom 0.83x | **1h에서 baseline보다 유의하게 낮음**(신뢰구간이 baseline 아래) — 4h(1.13x/1.21x)·8h(1.12x/1.14x)엔 약하게 우위로 반전, "반전 벽돌 직후는 오히려 쉬어가고 몇 시간 뒤에야 진짜 반전이 온다"는 지연패턴 |
+| BTC-ETH 스프레드 Z-score 평균회귀 (통계적 차익거래) | 보류(사전점검 완료, 진행 안 함) | top 1.28x / bottom 1.70x | **비대칭** — bottom(ETH가 BTC대비 저평가→ETH반등)은 1h/4h/8h 전부(1.70/1.33/1.18x) 견고, top(ETH고평가→ETH반락)은 1h만 약하게 우위고 4h(0.98x)·8h(1.00x)엔 리프트 소멸. 인접 선행연구(`research_cross_sectional_relative_strength_eth_20260809.py`, 스킵필터 프레이밍이라 다른 질문)의 데이터 파이프만 재사용 |
+| 칼만필터 추세이탈 평균회귀 | ✅**전체파이프라인완료**(2026-08-31, H=12/GAP=12/K=2.5) — VAL/OOS/**HOLDOUT** AUC **0.6569/0.6311/0.6284**, 경제성 **96/96**+홀드아웃 **+5.80bp**(VAL+10.26/OOS+11.00bp 대비 절반가량 축소되나 생존) — ✅**2026-08-31 대시보드 배포완료**(신규 9번째 슬롯, v173) | top 2.16x / bottom 2.36x | 이번 5개 중 최강, 4h(1.36/1.41x)·8h(1.16/1.17x)까지 양방향 모두 견고 — 기존 8개 신호의 raw-lift 수준(dalton 1.6~1.74x)과 비교해도 준수. 자기상관 레짐게이트 결과는 아래 참조 |
+| TPO 싱글프린트 채우기 | 보류(사전점검 완료, 진행 안 함) | top 1.08x / bottom 1.58x | BTC-ETH와 같은 **비대칭 패턴** — bottom은 1h/4h/8h(1.58/1.34/1.17x) 전부 유지되는 약~중간 신호, top은 전 구간 baseline 근접(1.08~1.11x)으로 약함 |
+
+**⭐2026-08-31 자기상관 레짐게이트 검증 — 이론과 정반대(gate 채택 안 함)**: 칼만·DeMarker 둘 다
+"평균회귀" 가설이라 `features/engineering.py::_return_autocorrelation`(lag-1/48봉롤링, 이미
+구현·미사용)로 "지금이 진짜 평균회귀 레짐(autocorr<0)인가"를 게이트로 걸어보면 나아질 것이라
+예상했으나, **4개 신호/side 전부 정반대로 나옴** — momentum레짐(autocorr≥0)에서 걸러진 발동이
+meanrev레짐보다 항상 더 강함(demarker bottom: gated_meanrev 1.62x vs gated_momentum **2.48x**,
+ungated 2.12x; kalman bottom: 2.29x vs **2.40x**, ungated 2.36x — 12개 비교(2신호×2side×3호라이즌)
+전부 같은 방향). 두 신호 다 이 게이트로 넘기지 않기로 함(오히려 해가 됨) — "오실레이터 극단값은
+횡보구간보다 추세구간에서 만날 때 더 드물고 유의미하다"는 가설이 사후적으로 그럴듯하나 확정 아님,
+관찰만. 코드 `scripts/research_eth_autocorr_regime_gate_kalman_demarker_20260831.py`, 상세
+[[eth_autocorr_regime_gate_kalman_demarker_20260831]].
+
+**⭐2026-08-31 HORIZON×GAP×K 그리드 확정 — v2 애매중간지대 제외는 GBM 재검증에서 폐기**: 사용자
+제안으로 "peak±0.2 근접미스 + 터치후역전(end<0)" 중간지대 제외(v2)를 시도해 20+8예시 시각검증까지
+통과시켰으나, liquidity_sweep_topdown 방식 GBM 프록시 그리드(H∈{8..48}×GAP∈{3,6,12})로 실제
+재검증하니 **두 신호 최적 셀에서 plain(제외없음)이 v2와 같거나 더 나음**(디마커 0.6547 vs 0.6490,
+칼만 0.6188 vs 0.5857) — taker v5(RECLASSIFY, 기각됨)와는 다른 연산(EXCLUDE)이라 다를 거라
+가정했지만 이득 없어 **plain으로 원위치**. 확정: 칼만 H=12/GAP=12/K=2.5(min(VAL,OOS)=0.6293,
+gap=0.0154), 디마커 H=8/GAP=12/K=**0.70**(min=0.6990, gap=0.0030 — 이 신호 전체에서 가장
+안정적인 지점). ⚠️디마커 K는 최초 추천(K=2.0)이 **틀렸었음** — hit_rate가 50/50에서 멀면
+불안정하다고 지레짐작했다가 사용자가 "K=1.0이 낫지 않냐"고 이의제기 → 실제로는 소수클래스
+절대표본수(val 20~30건 이상이면 건전)로 판단해야 했고, 그 기준으로 그리드를 K<1.0까지 더
+확장하니 K=1.0도 아니고 진짜 정점은 **K=0.70**이었음(그리드 경계값 안 믿기 원칙, smt_divergence
+H=48 사례와 동일 패턴). 코드
+`scripts/research_eth_kalman_demarker_gridscreen_20260831.py`,
+`scripts/research_eth_kalman_demarker_ksweep_20260831.py`, 상세
+[[eth_kalman_demarker_horizon_gap_k_screening_20260831]].
+
+**⭐2026-08-31 전체 파이프라인 완결(TabPFN확인→순열중요도→bb_pctb ablation→경제성게이트→룩어헤드
+감사→홀드아웃, 1회성 소진)**: 두 신호 다 홀드아웃 생존. 디마커 VAL/OOS/**HOLDOUT** AUC
+**0.7527/0.7157/0.7464**(이 프로젝트 분류 최고, 홀드아웃 축소 거의 없음), 경제성 SL2.0/ARM1.5/
+Trail0.1 **96/96**(역대최고) + 홀드아웃 **+11.53bp**(VAL+12.14/OOS+20.20bp 역대최고bp 대비
+축소 미미) + 낙관비관 교차검증 통과. 칼만 VAL/OOS/HOLDOUT AUC **0.6569/0.6311/0.6284**, 경제성
+SL4.0/ARM1.5/Trail0.1 **96/96** + 홀드아웃 **+5.80bp**(VAL/OOS 대비 절반가량 축소되나 생존).
+순열중요도에서 디마커는 `bb_pctb`(볼린저%B)가 `dem` 자신(단독 AUC 0.51, 무의미)보다 압도적
+드라이버(단독 0.7333)임이 드러나 홀드아웃 전 룩어헤드/오염/로직 감사를 별도 요청받아 수행 —
+계산 버그 아님 확인(dalton과 같은 "트리거는 유효, 세부신뢰도는 다른 변수" 패턴). 배포 여부는
+아직 미결정. 상세: [[eth_kalman_demarker_economics_gate_20260831]],
+[[eth_kalman_demarker_lookahead_audit_20260831]], [[eth_kalman_demarker_final_complete_20260831]].
+
+**⭐⭐2026-09-01 BTC 포팅에서 발견 — 메타신호(V자급등락) 피더로 쓸 때는 자기 H/K/GAP/문턱값이
+그대로 안 통함, 원인은 GAP이 아니라 칼만편차 자체**: BTC에 두 신호를 이식하며 V자급등락(9트리거
+라이브의 후보풀 구성원) 피더로 union했더니(6→8트리거) 전 구간 AUC 하락(VAL −0.028/OOS −0.014/
+HOLDOUT −0.009). "봉단위 원시발동 → 각 신호 자기 스크립트의 `cluster_dedup(GAP=6)` 재사용"으로
+부분 회복(VAL −0.015)됐으나 OOS/HOLDOUT은 거의 그대로였다. 여기서 **GAP=6과 문턱값
+(dem≤0.10/≥0.90, kalman_dev_z≤-2.0/≥2.0)이 실은 각 신호 "자기 과제"(터치기반MFE)로만
+스크리닝됐을 뿐 V자급등락 피더 목적함수로는 한 번도 재검증된 적이 없었다는 것**을 깨닫고
+직접 그리드스크리닝(로컬 CPU, GPU 불필요)한 결과:
+- GAP은 6→96봉(30분→8시간)까지 넓혀도 순증후보 품질 거의 불변(칼만은 오히려 완만 악화) —
+  "메아리/근접중복"은 실재하지만(기존 6트리거 발동 6봉 이내 위치 비율 DeMarker 97~98%/칼만
+  88~89%) 품질저하의 주범이 아니었음.
+- **DeMarker**는 문턱값을 강화해도 순증후보 성공률이 27~48%대(바닥)/25~29%대(천장)로 안정 —
+  기준선(6트리거 42~47%)엔 못 미치지만 실질적 신호.
+- **칼만편차**는 바닥(13~16%대)도 약하지만, **천장 쪽은 문턱값을 강화할수록(z≥2.0→2.5→3.0→
+  3.5→4.0) 순증후보 성공률이 10.7%→9.3%→7.5%→6.1%→4.3%로 단조 악화** — "더 극단적인 과매수
+  칼만편차"일수록 V자급등락(빠른 이동+되돌림無 지속)과 상관이 더 낮아짐(추정: 극단값일수록
+  되돌림 없는 강한 모멘텀/추세지속 구간일 확률↑, 미검증 가설).
+- **결론**: 8트리거 부진의 주범은 칼만이었다. BTC는 칼만을 빼고 DeMarker만 추가한 7트리거로
+  재확인 중. 상세: [[btc_v_rebound_feeder_gap_threshold_screen_20260901]],
+  [[btc_v_rebound_7trigger_demarker_only_20260901]].
+
+**⚠️BTC(또는 다른 코인) 트레일링스톱 경제성게이트를 만들 때는 5.8)절 방향뒤집기 대조군을 처음부터
+그리드 전체에 포함할 것** — 2026-09-01 ETH 배포신호 9개 전수감사에서 8개는 진짜, `fib_extension_
+exhaustion`은 96셀 전체재검증(진짜0/9)으로 경제성게이트 통과 클레임이 철회됐다. BTC 포팅판은
+아직 이 검정을 거치지 않았다.
+
+**⚠️ETH 재검토 필요**: ETH 라이브 9트리거 V_REBOUND는 kalman_deviation_meanrev를 이미
+포함하는데, 그 GAP(=12, ETH 자기 과제 기준으로 확정된 값)이나 문턱값이 V자급등락 피더
+역할로는 한 번도 재검증된 적이 없다 — 위와 같은 패턴(칼만이 V자급등락을 끌어내림, 특히
+천장쪽)이 ETH에도 있는지 같은 방법론(GAP/문턱값을 피더 목적함수로 직접 스윕, TabPFN 불필요한
+순수 lift/hit-rate 스크리닝 단계)으로 확인 필요 — 아직 미착수.
+
+**⭐⭐2026-09-01 재사용 가능한 프로토콜로 정리**: 위 발견(GAP은 대체로 무관, 신호 자체의
+순증후보 성공률이 핵심)을 일반화해서, **새 신호를 V자급등락 후보풀에 추가할지 판단하는 절차·
+판정기준·신호별 스코어카드**를 별도 문서로 정리했다 — `docs/homer/v_rebound_feeder_signal_
+protocol.md`. 다음에 어떤 신호(smt_divergence 포함, 자산 무관)를 V자급등락에 추가하려 할 때는
+이 문서의 절차(로컬 CPU 순증후보 성공률 테스트 → 통과한 것만 GPU/TabPFN)를 먼저 거칠 것 — GPU를
+먼저 태우고 나중에 원인을 찾는 순서(이번 BTC 8트리거가 그랬음)는 반복하지 않는다.
+
+### 왜 나머지는 후보에서 뺐는가 (2026-08-31, 사용자가 제시한 20개 전략 중 선별)
+사용자가 마이크로스트럭처/주문흐름 5·퀀트파생 5·가격액션/VP 5·대안차팅 5, 총 20개 전략을 제시 →
+아래 3가지 사유로 제외:
+1. **이미 존재(중복)**: CVD 다이버전스 스캘핑(`playbook_router.py::PB10_CVD_DIVERGENCE`가
+   `nif_whale` 버전으로 이미 라이브 — 완전 동일 정의는 아니나 "order-flow가 가격과 반대로 움직이면
+   진입" 개념 자체가 겹침), 유동성사냥·스탑런(=이미 완료된 `liquidity_sweep` 신호 그 자체),
+   펀딩비 과열 역추세(=`orthogonal_combo`/`funding_oscillator_union_combo`로 이미 충분히 탐색·
+   배포), HMM 국면전환 스캘핑(=이미 별도 성숙 트랙인 레짐모델, 위 "범위" 절의 제외 목록 참조),
+   GEX/Max Pain 핀레이트(=이미 별도 Deribit GEX 트랙), Spoofing 헌팅·Iceberg 흡수 매매
+   (=`microstructure_scanner.py`에 `spoofing_score`/`shadow_absorption_score`로 이미 라이브
+   구현 — 단 execution veto 용도이지 Homer식 zigzag피벗 리프트 검증은 안 됨, "완전 신규"는 아님).
+2. **데이터/인프라로 지금 불가(이미 게이트된 결정)**: Order Book Imbalance 추종, Tick차트 기반
+   스캘핑, VWAP/TWAP 알고리즘 프론트러닝 — 전부 L2 호가창 깊이 또는 틱단위 체결 히스토리가
+   필요한데 이 저장소의 L2/microstructure_1m 데이터는 2026-05-03 이후로만 존재하고
+   [[eth_candidate_lob_microstructure_data_scoping_20260817]]/[[eth_lob_raw_l2_early_peek_ofi_ic_
+   20260824]]에서 이미 09-14/09-30 게이트를 걸어둔 상태 — 그 전에 조기실행 금지가 기존 결정.
+3. **같은 부류로 이미 반증됨**: Three-Push Pattern/Wolfe Waves(=지그재그 전환횟수 형태판별,
+   `liquidity_sweep` v7b 개발중 이미 소진·기각된 방법론과 동일 부류 — 위 "이미 소진된 시도" 절
+   참조), Fractal Chaos Bands/Alligator(=Elliott/Gann/하모닉과 같은 esoteric TA 계열,
+   [[eth_tuning_hypothesis_directly_refuted_elliott_gann_harmonic_20260824]]에서 이미
+   직접반증됨).
+
+**보류(포함 여부 사용자 결정 필요)**: Larry Williams 변동성 돌파(전봉 레인지×K배수 돌파)는
+신규·저비용이지만 이미 여러 차례 탐색된 "돌파" 계열과 겹침이 큼; Anchored VWAP 이탈/회귀는 기존
+rolling VWAP dev 피처(`analyze_eth_creative_reversal_evidence_signals_20260814.py`)와 개념적으로
+인접하고, 크립토는 TradFi처럼 명확한 "세션 시가"가 없어 앵커 시점 정의 자체가 별도 설계결정 필요 —
+원하면 추가.
+
+## 신호별 상세
+
+### `taker_delta_z_climax` (v4 최종)
+- **라벨**: 같은-side 3봉이내 연속발동을 최극단 delta_z봉 하나로 통합(클러스터 앵커링) → 그 봉
+  종가=entry → 이후 24봉(2h) intrabar 고/저가 기준 MFE ≥ 2.0×ATR%면 hit=1(터치기반, 지속성조건
+  없음). 발동 10,233건.
+- **핵심 발견**: 발동봉이 진짜 극값인 경우는 14%뿐, 70%는 발동봉 **이후**(median 지연 20분)에
+  진짜 극값 도래.
+- **버전 이력**: v1(종가부호, NULL) → v2(크기임계값 추가, 약한양) → v3(MFE 전환, 급등) →
+  v4(클러스터앵커링+검증3종, 소폭개선) → v5(지속성체크 추가, **역효과로 기각** — 반면교사).
+- ✅2026-08-30 대시보드 증거신호 칩 자체 교체 배포(아래 "배포 방식" 섹션).
+- ⭐**경제성 게이트 — 이 저장소 최초로 (조건부) 통과**: 고정 TP:SL 브라켓은 예상대로 실패
+  (TP=2.0x/SL=1.0x, VAL+OOS -2.36bp@10bp비용) — Grinold's Law식 진단(SL 폭 스윕하며 "라벨은
+  승리인데 그 SL에 먼저 걸리는" 비율 측정)이 SL=0.5x일 때 57.5%, SL=2.0x일 때 12.2%로 SL폭에
+  민감하게 반응함을 확인 → ATR 트레일링스톱(초기SL=2.0x/무장=1.5x/추적=0.2x)으로 교체하니
+  VAL +4.64bp, OOS +5.93bp(둘 다 독립적으로 표준비용 10bp 통과). 확률(proba) 기반 R:R
+  스케일링은 `corr(proba,pnl)≈0`으로 기각. 트레일 폭이 좁을수록 결과가 좋아지는 패턴이라
+  낙관적/비관적 봉내순서 이중검증까지 통과시킴(비관적 시나리오도 VAL+OOS +4.75bp 유지) —
+  전체 과정은 [[eth_taker_delta_climax_trailing_stop_costgate_breakthrough_20260830]],
+  일반화된 정책은 [[feedback_trailing_stop_default_costgate_logic_20260830]].
+  ✅2026-08-30 표준 백테스트 엔진(`core.causal_futures_backtest`, 트레일링스톱 exit 모드 신규
+  추가) 검증도 통과 — 더 보수적인 가정(entry=다음봉시가, 포지션중첩시 스킵)에서도 VAL
+  +4.31bp/OOS +4.75bp/VAL+OOS +4.49bp, scratchpad 수치와 근접.
+  **⚠️2026-08-30 v4(gap=3) 단일 홀드아웃 노출 — FAILED**: avg_trade **-0.98bp**(승률60.8%는
+  유지, 손익만 뒤집힘) — v4 폐기.
+  **⭐✅같은 날 v5(CLUSTER_GAP_MERGE 3→12봉, 그 외 전부 v4와 동일)로 최종 완주**: 후보수 축소
+  목적으로 CLUSTER_GAP_MERGE를 넓혔더니(연속발동 병합 창) VAL/OOS AUC(0.622/0.608→0.633/0.645)와
+  트레일링 경제성(+4.49→+8.68bp)이 동시 개선 → 사용자 결정으로 같은 홀드아웃에 v5를 마지막으로
+  한 번 더 노출 → **win_rate 64.7%/avg_trade +2.17bp로 생존**(v4의 -0.98bp와 대비, VAL/OOS
+  대비 규모는 ~75%↓지만 부호 유지). **taker_delta_z_climax는 v5 설계로 TRAIN/VAL/OOS/HOLDOUT을
+  전부 통과한 이 저장소 최초 사례**로 최종 확정, 이 홀드아웃 구간 재사용은 이제 금지(성공/실패
+  무관 단일노출 원칙). 상세: [[eth_taker_delta_climax_trailing_stop_costgate_breakthrough_20260830]].
+- ⚠️⚠️**2026-08-31 ATR_HIT_MULT(K) 미보정 발견 — 영향 미미하나 홀드아웃 재노출 발생**:
+  orthogonal_combo 심층검증 계기로 다른 신호도 점검하다 발견 — K=2.0은 v4(GAP=3) 모집단에서
+  실제로 50.5%/49.5%였지만, v5로 GAP을 3→12로 넓히며 "unchanged from v4"로 재보정 없이
+  이월돼 현재 v5 모집단에서는 58.9% hit rate(정답은 K=2.4, TRAIN만 써도 전기간을 써도 동일해
+  미래데이터 누수는 아니고 단순 재보정 누락). K=2.4로 재검증한 AUC는 0.633/0.640/0.646으로
+  원래 보고치(0.633/0.645/0.667)와 거의 동일 — 배포된 K=2.0/v5 설계는 바꾸지 않음. **다만 이
+  재검증 자체가 위에서 "다시 검증하지 않는다"고 못박은 홀드아웃을 두 번째로 건드렸음** — 그
+  구간은 이제 완전히 소진, 어떤 이유로도(진단 목적이라도) 다시 쓰지 않는다. 상세:
+  [[eth_evidence_signal_cross_signal_k_calibration_audit_20260831]].
+- ⚠️**재라벨링(트레일링 실제청산 결과) 시도 — REJECTED(2026-08-30)**: 사용자가 "터치 라벨이
+  돈이 되는지 라벨 자체가 불완전한 것 아니냐"는 우려 제기 → 라벨을 "터치 여부"에서 "검증된
+  트레일링스톱(SL2.0/ARM1.5/Trail0.2)으로 실제 청산했을 때 비용(10bp) 초과 순이익이었는가"로
+  전면 교체해 동일 23피쳐/동일 TabPFN으로 재학습. 결과: AUC가 VAL 0.622→**0.527**, OOS
+  0.608→**0.524**로 붕괴(balanced_accuracy는 사실상 동전던지기 0.50), corr(proba,pnl)은
+  VAL+OOS -0.02→+0.024로 부호는 바뀌었지만 여전히 잡음 수준 — proba 필터링 기대값도 VAL에서
+  비단조(top50%가 top25%보다 높음)라 신뢰불가. **원인 추정**: 터치라벨(2h 안에 큰 움직임이
+  있었나)은 방향성모멘텀 정보라 학습 가능하지만, 트레일링 실제청산 결과는 같은 가격경로에
+  "그 특정 청산규칙이 얼마나 매끄럽게 캡처했나"라는 경로의존적 잡음을 얹은 것이라 발동시점
+  피쳐로 예측 불가(구 라벨과 신 라벨의 일치율 81.8%이지만 그 불일치 18.2%가 바로 이 잡음
+  성분). **결론**: 무조건부(entry=터치라벨, exit=트레일링스톱, 신뢰도 기반 필터링 없음)
+  설계가 현재로선 최선 — 신뢰도 기반 사이징/필터링은 이 신호에서 폐기.
+- 문서: `docs/experiments/eth_taker_delta_climax_metalabel_20260829.md` (재사용 방법론 템플릿
+  원본), 코드 `scripts/research_eth_taker_delta_climax_metalabel_tabpfn_20260829.py`,
+  재라벨링실험 `scripts/research_eth_taker_delta_climax_trailing_relabel_tabpfn_20260830.py`.
+
+### `liquidity_sweep` — top/down 표준 재학습 (2026-08-30, 증거신호 배포용 최종)
+
+**배경**: 아래 "V자반등/지지횡보" 절의 v7b 모델은 이 신호를 가장 깊게 탐색했지만 (a) giveback비율·
+30/60분 이중창·애매한 중간지대 제외라는 **특화된 형태판별 라벨**이라 taker/short_term_return_z가
+쓰는 "증거신호 칩 자체 교체" 배선(공용 `METALABEL_SIGNALS`/`compute_evidence_signal_metalabels()`,
+Tier0 23피쳐 스키마 공유)에 안 맞았고, (b) 경제성 게이트가 3가지 exit 구조 전부(트레일링/고정TP·SL/
+무TP시간청산) FAILED였음 — 그래서 별도 "특화 감지기" 칩("V자 반등락")으로만 배포되고, 증거신호
+`liquidity_sweep` 칩 자체는 그 모델의 확률을 그대로 빌려쓰는 임시 브리지로만 연결돼 있었음(발동조건은
+같아도 라벨 질문 자체가 다름 — "느린 확정형 되돌림" vs 이 칩이 원래 뜻하던 "터치 즉시 유리한 방향").
+사용자가 "V자반등 특화라 탑/다운 라벨 설계부터 다시 진행해서 증거신호를 대체해야 한다"고 명시적으로
+요청 → taker와 완전히 동일한 표준 템플릿(터치기반 MFE, 클러스터앵커링, Tier0+rsi 23피쳐, 지속성/
+확정창/제외구간 없음)으로 처음부터 재작업.
+
+**라벨 설계**: phase1 진단(발화봉↔실제극값 어긋남 — AT fire 24.5%/AFTER(지연) 75.5%/BEFORE 0%,
+후자는 스윕 정의 자체가 직전 48봉 극값을 보장하므로 구조적으로 당연함; 클러스터링은 taker보다
+더 뚜렷함, 3봉이내 재발화 33%) → HORIZON×GAP 그리드(8개 호라이즌×3개 GAP, K=1.5 고정 GBM
+프록시 스크리닝) → 승자(H=30/GAP=12) TabPFN 4시드 확인 → **K(ATR배수) 자체가 최적화 안 돼있었음을
+발견**(K=1.5 GBM 최고였으나 TabPFN에서 K를 1.5→2.5→4.0으로 올릴수록 단조 개선, min(VAL,OOS)
+0.577→0.638) → 순차보정(taker의 "HORIZON 먼저 고정 후 K 보정" 전례 그대로)으로 **K=4.0 채택**.
+**최종: HORIZON=30(150분)/CLUSTER_GAP_MERGE=12(스윕침투깊이로 앵커, delta_z크기 대신 스윕 자신의
+"레벨-극값 거리"를 쓰는 정의내재적·비순환적 지표)/K=4.0×ATR 터치기반 MFE**(지속성조건 없음),
+발동 14,263건→클러스터앵커 후 6,386건(bottom 3,105/top 3,281), hit_rate 30.5%. ⚠️2026-08-31
+확인: 이 30.5%는 버그가 아님 — K가 dalton/orthogonal_combo식 "50/50 균형점"이 아니라 HORIZON/GAP과
+동급의 VAL/OOS AUC 기준 하이퍼파라미터로 선택됐기 때문(바로 위 문단 그대로). 상세: [[eth_evidence_signal_cross_signal_k_calibration_audit_20260831]].
+
+**차트검증**: 10 HIT+10 NO_HIT 캔들예시, 버그 없음 확인 — 의심스러워 보였던 2건(발화봉이 레벨을
+"늦게" 터치하는 것처럼 보임)은 실제로는 스윕 정의상 발화봉이 항상 레벨을 터치한다는 사실을 수치로
+재확인, 얇은 최초 꼬리 vs 이후 더 눈에 띄는 캔들 사이의 시각적 착시였을 뿐(실제 라벨/코드 버그 아님).
+
+**결과**: VAL AUC **0.6587**±0.0007 / OOS AUC **0.6372**±0.0021 / HOLDOUT AUC **0.6612**±0.0008
+(4시드, 홀드아웃 1회성) — taker(0.622/0.608/0.650)보다 좋고, 세 구간이 좁은 밴드 안에서 홀드아웃이
+가장 높아 과적합 징후 없음. 순열중요도 1~2위는 `hour_utc`/`atr_percentile_864`(세션·변동성레짐)지만,
+변동성레짐 3피쳐(atr_pct/atr_percentile_864/realized_vol_ratio) 그룹 어블레이션은 VAL−0.016/
+OOS−0.005로 **제거하면 VAL·OOS 둘 다 나빠짐**(taker와 같은 "진짜 기여" 패턴 — volume_wick_climax의
+"제거하면 VAL만 좋아짐"이라는 과적합 패턴과는 다름).
+
+**⭐경제성 게이트 — 이 신호 최초로 견고하게 통과**: ATR 트레일링스톱, SL-race진단(SL=0.5x일 때
+승자의 58% 조기손절→SL=4.0x일 때 4.5%)→96개 SL×ARM×Trail 그리드(표준 백테스트엔진
+`core.causal_futures_backtest`, ATR트레일링 exit 모드)→**91/96 조합이 VAL·OOS 동시 이익**(표준비용
+10bp 반영). 최종 채택 **SL=4.0×ATR/ARM=2.0×ATR/Trail=0.1×ATR**: VAL +10.70bp(승률71.5%)/OOS
++14.49bp(승률71.5%). 봉내 유불리 순서(낙관/비관) 이중검증 — 표준엔진이 이미 "비관적"(스톱을 먼저
+체크, 유리한 갱신은 그 다음) 컨벤션이라 별도로 "낙관적"(유리한 갱신 먼저) 버전을 직접 구현해
+동일 트레이드로 교차검증한 결과 차이는 1~1.4bp뿐(전체 엣지 7~15bp 대비 작음) — 방향 무관하게 견고.
+**홀드아웃(1회성) +1.97bp(승률67.7%, 913건, 총계좌수익+18.0%)로 VAL/OOS 대비 축소됐지만 부호
+유지하며 생존**(taker v5 +2.17bp, short_term_return_z +3.70bp와 같은 "홀드아웃 축소하나 생존"
+패턴). V자반등(위 절)은 같은 방법론으로 3가지 exit구조 전부 FAILED였던 것과 정반대 결과.
+
+**배포**: `live_evidence_signal_metalabel_20260829.py`의 공용 `METALABEL_SIGNALS`에 등록(taker/
+short_term_return_z/dalton_rule2_balance_edge와 동일 배선, Tier0 스키마를 공유하므로 별도 모듈
+불필요) — 이전의 V자반등-릴레이 브리지(`live_evidence_signal_liquidity_sweep_metalabel_20260830.py`)는
+삭제. `SUSTAIN_BARS_OVERRIDE["liquidity_sweep"]=30`, `app.js`의 `EVIDENCE_SIGNAL_KO`/
+`SIGNAL_HORIZON` 갱신, 캐시버스터 v152. 서버에서 실제 과거 발동봉(2024-02-20 17:00, bottom)으로
+`compute_evidence_signal_metalabels()` 직접 재현해 proba=0.191 정상 반환 확인(taker 회귀없음도
+같이 확인), 공개도메인(`thesan.xyz`) `/api/evidence-signals` 200+캐시버스터+8개 신호명 확인 완료.
+**"V자 반등락"(특화 감지기 패널) 칩은 사용자 결정으로 이 재작업과 무관하게 별도 모델로 그대로 유지**.
+
+**How to apply**: "liquidity_sweep/유동성스윕 증거신호 어떻게 됐냐"류 질문엔 이 절이 최신 정답 —
+in-place 배포 완료, 경제성 게이트까지 통과한 이 프로젝트에서 가장 강한 결과 중 하나. 아래 "V자반등"
+절은 그 특화모델("V자 반등락" 칩) 자체의 역사로만 유효, 증거신호 배포 상태 설명으로는 구식.
+파일: `scripts/research_eth_liquidity_sweep_topdown_metalabel_{phase1,gridscreen,ksweep_tabpfn_confirm,
+ksweep,final,holdout}_20260830.py`, `scripts/backtest_eth_liquidity_sweep_topdown_trailing_
+{gridsearch,optimistic_crosscheck,holdout_exposure}_20260830.py`, 데이터
+`data/labels/eth_5m_liquidity_sweep_topdown_metalabel_20260830/`.
+
+### `liquidity_sweep`("V자 반등락" 특화 칩 전용 모델 역사) → "V자반등/지지횡보" (v7b→**9트리거 통합모델**(2026-08-31, 현재 배포판), 이 프로젝트에서 가장 깊게 탐색됨)
+
+⚠️**2026-08-31 — v7b(sweep 단독 트리거)를 9트리거 통합모델로 교체 배포 완료**. 아래 v7b 절(라벨
+설계 v1~v7b 역사, "이미 소진된 확장 시도")은 여전히 유효한 계보 기록이지만 **현재 라이브 배포
+상태 설명으로는 구식** — 최신 상태는 이 섹션 바로 아래 "9트리거 통합모델" 절 참고.
+- **라벨(v7b 최종, 2026-08-30, 사용자 코드리뷰+육안검증으로 v4를 대체)**: 스윕 후 **30분 내
+  종가**로 ATR(스윕 직전 기준, 스윕봉 자신 아님)×1.5 이상 도달 AND **60분 전체 창**에서
+  정점 대비 종가 반납비율≤20% → **V자반등(1)**. 30분 내 종가가 ATR×1.0에도 못 미치면(반등
+  시도 자체가 없었던 경우만) → **지지횡보(0)**. **그 사이(전체의 41.5~58.4%, 정의에 따라
+  다름)는 라벨 없이 학습에서 통째로 제외** — 애매한 사례를 억지로 양분하지 않는 설계.
+  V자반등 15.7%(2,234) / 지지횡보 25.9%(3,699) / 제외 58.4%(8,326), TRAIN 3,783건.
+  - **v3→v4**(2026-08-30 오전): 사용자가 코드를 직접 읽고 결함 2개 발견 — ① ATR이 스윕봉
+    자신의(정의상 이례적으로 큰) 변동성을 포함해 계산됨(스윕 직전 기준으로 수정) ② 반등폭
+    도달에 시간제약이 없어 30분 아무 때나 도달해도 인정됨(첫 15분 이내로 제한) — 이 v4
+    수정만으로 VAL 0.643→0.663/OOS 0.657→0.667/홀드아웃 0.648→0.682, 이 서브프로젝트
+    역대 최대 개선.
+  - **v4→v7b**(2026-08-30 오후): v4의 "지지/횡보"(0) 라벨 예시를 10~20개씩 캔들 차트로 반복
+    육안검증하다 사용자가 "지지횡보 예시가 V자반등이랑 너무 비슷해 보인다"고 지적 → 원인
+    추적 결과 v4는 "스윕레벨만 안 깨면 통과"라는 약한 유지조건이라 반납률 80~90%인
+    사실상-실패 사례까지 통과시켰음을 확인. 3-클래스(지속/횡보/실패) 분리, 지그재그
+    전환횟수 판별(20개 손그림 기준 대비 최선 70% 일치, 소표본이라 기각) 등 여러 대안을
+    시험한 끝에, 최종적으로 "애매한 중간지대를 아예 제외"하는 v7b로 수렴 — 이 결정만으로
+    VAL 0.663→**0.734**/OOS 0.667→**0.762**/홀드아웃 0.682→**0.779**, v3→v4보다도 3배
+    이상 큰 개선(다만 학습모집단이 42%로 줄어든 '더 쉬운 문제'라는 점은 감안).
+  - 라벨 확정까지(v1 기준) 51.7%→53.3%→64.7%→43.9%(v3)→v4→v7b, 총 6단계. 사용자의 육안
+    차트 검증에서 이번까지 포함 최소 4차례 실제 라벨 결함을 발견·수정.
+- **최종모델**: Tier0(ETH 자체 OHLCV+taker파생 22개) + `rsi` = 23피쳐 + TabPFN, 구조 자체는
+  v1부터 불변 — 전부 라벨 쪽 개선만으로 나온 성능향상.
+- **판정별 정밀도**(2026-08-30, v7b): V자반등 콜 VAL 62.3%/OOS 74.1%(평균발생률 35~43%
+  대비 1.7배) — 신뢰 가능한 쪽. 지지횡보 콜 VAL 75.0%/OOS 69.8%(1.2배뿐) — 다수쪽이라
+  숫자만 높아 보임, 힘은 약함. v4 때와 동일한 비대칭 패턴 유지.
+- **⚠️중요 정정 (v4 라벨 기준으로 측정된 값, v7b로 재측정 안 함)**: 유동성스윕 자체는 무작위봉
+  대비 리프트가 없음(0.91x/0.93x). v7b 라벨 기준 재측정 전까지는 이 캐비엇을 유지.
+- **배포**: 대시보드 "유동성스윕 반등예측" 칩(`/api/v-rebound-signal`,
+  `scripts/live_eth_sweep_v_rebound_signal_20260829.py`, 2026-08-30 v7b로 갱신 — 캐시버스터
+  v142, 관찰창 30→60분). 학습 컨텍스트는 검증된 TRAIN 3,783건에 동결
+  (`tabpfn_train_context_frozen_v7b_20260830.csv`). 라이브 추론은 애매한 중간지대 배제와
+  무관하게 항상 하나의 연속 확률을 반환함(그 배제는 학습 시점에만 적용 — 별도의 "판단보류"
+  모델출력은 없음).
+- **⭐경제성게이트 재검증(2026-08-30) — v7b로도 여전히 FAILED**: 분류 성능이 크게 올랐으니
+  taker/short_term_return_z 방식(ATR 트레일링스톱, SL-race진단→그리드서치→낙관/비관
+  이중검증)으로 정확히 재적용 — [[eth_v_rebound_trailing_stop_costgate_marginal_20260830]]이
+  "재라벨링 확정 시 재진단 필수"라고 명시적으로 남긴 지시 이행. 모델이 실제로 콜한
+  VAL+OOS 354건(proba≥50%, 정밀도 66.95%)에 entry=다음봉시가, downside=LONG/upside=SHORT로
+  SL(0.5~5.0×ATR)×ARM(0.10~1.5×ATR)×Trail(0.10~0.5×ATR) 205개 조합 전수탐색.
+  **SL-race**(V자반등 정답 237건 중, SL=0.5x일 때 67.9%→SL=2.0x일 때 7.2%로 v4때보다도
+  빠르게 수렴하지만) **경제성은 여전히 0/205 — VAL과 OOS가 동시에 양수인 조합이 하나도
+  없음**(가장 좋아 보이는 SL4.0/ARM1.5/Trail0.1도 VAL −0.94~−1.36bp/OOS +15.45~+15.61bp로
+  한쪽만 크게 이익). **결론: taker/short_term_return_z와 정반대로, 분류 정확도가 이만큼
+  올라도 exit 메커니즘(트레일링스톱)만으로는 여전히 경제성을 살릴 수 없음** — 기존
+  가설("이 신호의 손실은 SL-race가 아니라 순수 분류오류가 지배적")이 v7b로도 재확인됨.
+  자동매매 승격 불가, 모델지표(재량참고) 등급 유지. 상세:
+  [[eth_liquidity_sweep_v_rebound_feature_plan_20260829]].
+- **⭐경제성게이트 재검증2(2026-08-30) — 고정TP/SL+시간청산도 FAILED, 사용자 가설 반증**:
+  "트레일링 대신 30분 내 빠른 익절 구조가 맞지 않을까"라는 사용자 문제제기를 동일 354건
+  후보군으로 검증. 문자 그대로(Horizon=30분)는 트레일링스톱보다도 나쁨(VAL −10.57bp/OOS
+  −9.48bp). 그리드를 넓히면 14/280 통과하지만 해부해보면 TP가 사실상 도달불가능해지고
+  시간청산이 대신 일하는 퇴화 패턴이었고, TP를 아예 없앤 SL+시간청산이 오히려 더
+  좋음(60분 기준 VAL +5.60bp/OOS +11.63bp) — 그런데 이 OOS 양수도 숏 51건 쏠림(승률
+  84.3%, +34.48bp)이라 신뢰 어려움. **exit 구조 3종(트레일링/고정TP/무TP시간청산) 전부
+  broad하게는 통과 못 함** — 손실원인이 exit가 아니라 분류오류라는 결론이 세 번째
+  각도에서도 재확인. 상세: [[eth_liquidity_sweep_v_rebound_feature_plan_20260829]] 8)절.
+- **이미 소진된 확장 시도(반복 금지)**: 아래 "이미 소진된 시도" 섹션 참조 — 대안 아키텍처 5종,
+  신호 결합 2종, 지그재그 형태판별, GAP_MERGE류 중복제거(적용대상 아님 확인) 전부 검증 완료.
+- 문서: `docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md`(전체 이력,
+  가장 상세) + `docs/experiments/eth_liquidity_sweep_frequency_investigation_20260829.md`(빈도
+  조사 원본).
+
+### V자반등 9트리거 통합모델 (2026-08-31, v7b 대체 — 현재 배포판)
+
+**⚠️2026-09-01 — local_extreme "측정방법 불일치" 발견 후 정정됨(라이브 시스템 오염 아님)**:
+BTC 쪽에서 `local_extreme`을 다른 5개 트리거와 다른 방식(중심창 `range(W,n-W)`으로 배치계산 후
+직접 hit-rate 측정)으로 재봤더니 93.4%/89.4%라는 비현실적 수치가 나와 한때 "라이브 룩어헤드
+오염"으로 의심됐으나, 다른 세션의 ETH 라이브 27h 실측([[eth_evidence_signal_v_rebound_live_
+window_check_20260901]], 실제 적중률 23%, 39건)과 대조해 **측정방법 불일치였음으로 정정**
+— 라이브는 애초에 항상 30분 지연확인만 노출하므로(구조상 "지금 이 봉"은 로컬극값 판정 불가)
+사용자가 그 과장된 수치를 본 적이 없고, 인과적으로 재정의하면 23.5%/19.4%로 라이브 실측과
+거의 일치한다. 이 절의 HOLDOUT AUC 0.8465 등 headline 수치는 split간 누수가 없어 유효한 걸로
+판단(TRAIN/VAL/OOS/HOLDOUT 전부 같은 방식으로 일관 계산). 다만 "local_extreme이 다른 트리거보다
+훨씬 강하다"는 식의 신호별 순위 비교는 인과적으로 공정하게 다시 재보는 게 맞음 — 상세:
+[[v_rebound_local_extreme_lookahead_contamination_20260901]]
+(`docs/experiments/v_rebound_local_extreme_lookahead_contamination_20260901.md`).
+
+**📋체크리스트로 전부 모음**: 이 절 이후로도 local_extreme 관련 추가 문제(지연확인 구조로 인한
+"신호가 갑자기 과거기록과 함께 나타남" UX 이슈, 성공률 지표 자체의 분모왜곡, BTC93%/ETH22% 수치
+불일치 미해결, ETH 9트리거의 orthogonal_combo 완전중복/kalman·demarker dedup누락 등)가 계속
+발견됨 — 전부 `docs/homer/v_rebound_open_issues_20260901.md`에 한곳에 모아뒀다. **한 번에 몰아서
+처리할 계획이면 이 문서를 체크리스트로 사용할 것**, 아무것도 아직 안 고쳐짐.
+
+**배경 — 왜 v7b를 교체했는가**: 사용자가 "V자반등을 잘 못 잡는 것 같다"고 지적 →
+[[eth_v_rebound_sweep_gated_recall_gap_20260831]]에서 5단계로 실측 진단:
+1. **6.5시간 소표본 확인**(오늘 KST 00:00~06:36): 실제 sweep 2건 전부 실패(애매권), 스윕 없는
+   로컬극값 3건이 오히려 깨끗하게 V자반등 기준 충족.
+2. **90일 확장 실측**: sweep은 진짜 V자반등 총량(추정 799건, 8.9건/일) 중 **25.5%만 커버** —
+   놓치는 쪽(70.6%)이 품질 낮은 신호라서가 아니라(중앙값 fast/giveback 스윕·비스윕 거의 동일)
+   순전히 "sweep만 트리거로 쓴다"는 게이트 설계 때문임을 확인.
+3. **기존 5개 증거신호와 상관확인**: 이 갭의 27%만 기존신호(taker/str_z/orthogonal_combo/
+   smt_div/fib_ext)와 겹침 — 하지만
+4. **신호별 단독 적중률**을 직접 재보니 5개 전부 sweep(16.4%)과 대등하거나 더 나은 적중률
+   (12~21%)이라 "약한 대체품"이 아니었음(27% 겹침은 "이미 잡은 것과 겹치는 비율"이라는 좁은
+   질문의 답이었을 뿐).
+5. **최종 합집합 정산**: sweep 단독 25.5% → sweep+5개기존신호 50.8% → 여기에 사전조건 없는
+   "로컬극값"(±30분 안 최고/최저가면 무조건 후보) 트리거까지 더하면 100%(측정된 총량 기준).
+   **트리거(어떤 바가 후보인가)와 라벨(v7b의 fast_move/giveback 정답공식)은 완전히 분리된 별개
+   축** — sweep 하나만 트리거로 쓰는 게 문제였지 v7b 라벨 정의 자체는 바꾸지 않음.
+
+사용자가 "지금 진행 중인 증거신호(칼만이탈/DeMarker극단값)도 추가하는 게 낫지 않냐"고 제안 →
+처음엔 "이 둘은 아직 자기 TabPFN 검증도 안 끝났다"고 신중론 → 검증 대기 작업을 서버에서
+착수하던 중 사용자가 `handoff.hosts.conf`(credential 파일) 직접 열람 시도를 차단하며 **"둘 다
+넣어줘"로 결정 번복**(TabPFN 대기 없이 원시 트리거만 즉시 추가) — 이후 병행 세션이 이 둘의
+전체 파이프라인을 완결시켜(위 "후보 풀" 절 참고, 둘 다 홀드아웃 생존·디마커는 프로젝트 최고
+기록) 이 결정이 결과적으로 맞았음이 확인됨.
+
+**9개 트리거** (OR, downside=상승반등 후보/upside=하락반전 후보 — 라벨식은 전부 동일한 v7b
+공식으로 채점, 트리거 종류가 뭐든 무관):
+1. `liquidity_sweep`, 2. `taker_delta_z_climax`, 3. `short_term_return_z`, 4. `orthogonal_combo`,
+5. `smt_divergence`, 6. `fib_extension_exhaustion`, 7. `demarker_extreme`,
+8. `kalman_deviation_meanrev` — 전부 `compute_signals()`(`live_evidence_signal_dashboard_
+20260823.py`) 재사용, 신규 재구현 없음. 9. `local_extreme` — 유일한 신규 트리거, 사전조건
+없음(±30분/±6봉 안에서 최고/최저가면 후보).
+
+**라벨 빌드**(`scripts/build_eth_5m_v_rebound_multitrigger_labels_20260831.py`, 전체 히스토리
+2023-12-31~2026-08-28, ETH 27만9,634봉, 실행 16.5~28.8초): 총 후보 66,395건(V자반등
+9,315건/14.0%, 지지횡보 18,870건/28.4%, 애매 38,210건/57.5%). 트리거별 적중률: sweep
+15.7%·taker 13.2%·str_z 13.6%·orthogonal_combo 12.2%·smt_div 13.3%·fib_ext 19.9%·
+demarker_extreme 12.9%·**kalman_deviation_meanrev 9.5%**(9개 중 최저 — "평균회귀" 컨셉이라 v7b의
+급격한 V자 기준과는 안 맞을 수 있음, 배포 후에도 유효한 관찰로 남겨둠)·**local_extreme
+22.2%**(9개 중 최고, 물량도 최대 30,275건 — "약한 보충재"가 아니라 최우수 트리거). sweep
+단독 population(14,266건/2,234건)이 옛 v7b 기록(14,259건/2,234건)과 거의 완전히 일치해 재사용
+공식의 정합성을 확인. Tier0 23피쳐(22+rsi) 결합 후 66,382행(NaN 296행/0.45%, 클린).
+
+**육안검증**: 트리거별 3건씩 21예시(`multitrigger_v_rebound_21examples.png`) + 신규 2개 트리거
+보충 10예시(`kalman_demarker_supplement_10examples.png`) 전부 사용자 승인 — 특히 local_extreme/
+kalman/demarker는 sweep과 달리 "완만한 추세이탈·모멘텀소진 후 반전"이라는 시각적으로 구분되는
+패턴임을 확인(트리거 다양성이 진짜라는 방증, 단순 중복 아님).
+
+**TabPFN 검증** (전부 서버 GPU, `handoff.sh`): TRAIN 17,961건이 TabPFN 권장 1만건 상한을 넘어
+`ignore_pretraining_limits=True` 사용.
+- **cheap_gate**(단일시드): VAL AUC 0.8296 / OOS AUC 0.8119 — v7b(0.7342/0.7621) 대비 이미 우위.
+- **4시드 안정성**(이 프로젝트 공용 시드 [20260829/141592/271828/577215] 재사용): VAL
+  mean=0.8289 **std=0.0007**(범위 0.8281~0.8298) / OOS mean=0.8125 **std=0.0004**(범위
+  0.8121~0.8129) — std가 v7b 대비 우위폭의 100분의 1 수준, 이 프로젝트에서 나온 시드안정성 중
+  최고. 4개 시드 전부 v7b 상회(부호일관성 100%).
+- **HOLDOUT**(분류+경제성 동시, 1회성 소진 — 칼만/디마커와 동일 컨벤션): 분류 **VAL/OOS/HOLDOUT
+  AUC 0.8292/0.8127/0.8465**(v7b 0.7342/0.7621/0.7788 대비 전 구간 우위, **HOLDOUT이 세 구간
+  중 오히려 최고** — 붕괴 없음). 경제성(SL/ARM/Trail 그리드는 VAL+OOS만으로 선정 →
+  **SL=4.0/ARM=1.5/Trail=0.1**, HOLDOUT은 이 확정값으로 딱 한 번만 평가): VAL n=875
+  +11.97bp(승률83.8%) / OOS n=611 +20.96bp(승률86.7%) / HOLDOUT n=1123 +9.28bp(승률85.7%)
+  — VAL/OOS 대비 축소(약 -22~-56%)는 있지만 이 프로젝트 전형 패턴(대개 50%+ 축소)보다 완만,
+  승률은 세 구간 내내 거의 그대로. **v7b는 경제성 게이트를 한 번도 통과 못 했음**(3가지 exit
+  구조 전부 FAILED, 0/205 SL·ARM·Trail조합) — 9트리거 모델이 이 서브프로젝트 최초로 분류+경제성
+  둘 다 통과한 V자반등 모델.
+  **⚠️2026-09-01 정정**: 위 경제성 수치는 local_extreme트리거(called population의 73~76%)에
+  비현실적 즉시진입(+1봉=5분뒤)을 가정했음 — local_extreme은 자기정의상 30분(+7봉)이 지나야
+  발동을 알 수 있는 지연형 트리거. 그 후보만 현실적 진입(+7봉)으로 재계산하면 **VAL+4.30bp/
+  OOS+11.67bp/HOLDOUT+4.75bp**(3구간 전부 양수 유지, 대략 절반으로 축소) — **정정된 공식
+  헤드라인**(사용자결정 2026-09-01). 상세: [[project_v_rebound_local_extreme_entry_timing_
+  realism_20260901]]. 단 이 정정치도 `docs/homer/v_rebound_open_issues_20260901.md` 6번
+  항목(라벨식 자체의 held_up 얽힘, 진짜분류스킬 0.66~0.69 추정)이 풀리기 전까지는 잠정치임.
+
+**배포** (2026-08-31): `scripts/live_eth_sweep_v_rebound_signal_20260829.py`를 **동일 파일/동일
+함수명**(`compute_eth_sweep_v_rebound_signal`)에서 in-place 업그레이드(이 프로젝트 관례 —
+날짜박힌 파일명은 버전이 올라가도 리네임 안 함, v1→v7b도 같은 파일 안에서 이뤄짐) — `dashboard/
+server.py`의 import 구문은 무변경. 주요 변경: `_sweep_rows()`(sweep 전용 후보탐지) 제거 →
+`compute_signals()` 8개 named 트리거 + 자체 local_extreme 탐지를 OR하는 `_multitrigger_rows()`로
+교체, BTC klines 라이브 fetch 신규 추가(smt_divergence용), 출력에 `triggers` 필드 신규 추가(어느
+트리거가 발동했는지 노출). Tier0 피쳐 빌드(`_build_features`)는 무변경 재사용.
+- **라이브 학습 컨텍스트**: 전체 TRAIN(17,961건)은 라이브 레이턴시에 너무 커서(v7b의 3,783건
+  대비 4.75배) `tabpfn_train_context_frozen_multitrigger_v1_20260831.csv`로 **6,000건 무작위
+  서브샘플** 새로 고정 — **자연 라벨비율(32.5%→32.8%) 그대로 보존, 인위적 재균형 안 함**(검증된
+  VAL/OOS/HOLDOUT 수치가 이 자연비율 기준으로 나왔으므로, 재균형하면 라이브 확률 캘리브레이션이
+  검증치와 어긋날 위험). 서버 실측 레이턴시 fit+predict(1행) **2.88초**(v7b의 원래 ~3초와
+  대등, `research_eth_v_rebound_multitrigger_live_latency_check_20260831.py`). 추론은 단일시드
+  (`random_state=20260829`) — 4시드 앙상블은 검증용이었고 라이브는 v7b 때와 동일하게 단일시드.
+- **재시작 이슈**: 대시보드 서버 재시작 중 SIGTERM행 버그
+  ([[feedback_dashboard_server_sigterm_shutdown_hang_20260827]])가 재현(자식PID가 6초+ 지나도
+  안 죽고 curl도 연결거부) — `kill -9`로 전환하니 감시자(`supervise_server.sh`)가 즉시 새 PID로
+  정상 재기동, `curl 127.0.0.1:8787/api/v-rebound-signal` http_status=200(2.59초) +
+  공개도메인(`thesan.xyz`) http_status=200 둘 다 확인. 응답 JSON 필드/48봉 히스토리 정상 확인.
+- **서버 작업 원칙**: `handoff.hosts.conf`(credential) 직접 열람 금지 — `handoff.sh`의 push/
+  pull/launch/stop/status/logs 서브커맨드로만 서버와 상호작용(GPU 확인도 `nvidia-smi` 대신
+  `torch.cuda.*`나 `ps`로, 서버에 `nvidia-smi` 자체가 PATH에 없음을 이번에 확인).
+
+**⚠️배포 직후 버그 발견+수정(2026-08-31)**: 사용자가 "5분만 나오고 다시 미반등으로 바뀐다"고
+리포트 → 실측(`history` 48봉)으로 즉시 재현: "good"(반등) 1봉만 뜨고 바로 "flat"(미반등)에
+덮이는 패턴이 4시간 안에 3회. **원인**: v7b 원본의 `current[-1]`(최신 발동 이벤트 표시) 로직을
+그대로 재사용했는데, sweep 저빈도(평균 1.7시간/1회) 세계에선 문제없었던 게 9트리거로 발동빈도가
+폭증(사실상 거의 매 5분봉마다 발동)하면서 60분 지속표시 의도가 무력화됨 — **v7b 자체에 잠재해
+있던 설계결함이 트리거 밀도 증가로 처음 드러난 것**. `current[-1]`→`current[0]`(가장 오래된
+미만료 이벤트 선택)으로 수정, 히스토리 스파크라인의 동일 패턴도 함께 수정. 서버 실측: 수정전
+히스토리 런길이 1~4봉(1봉 스파이크 다수) → 수정후 3~18봉(안정적). 재배포 시 SIGTERM행버그
+재차 재현 → kill-9로 해결(이 시점부터 이 버그의 재현·해결 패턴이 완전히 고정됨). **교훈**:
+트리거 소스를 늘릴 때 이벤트-선택/지속시간 로직도 발동빈도 변화에 맞춰 재검토 필요 — 로직
+자체를 안 건드려도 전제조건(저빈도)이 깨지면 새로 버그가 될 수 있음.
+
+**How to apply**: "V자반등 지금 어떻게 됐냐/9트리거가 뭐냐/왜 sweep에서 바꿨냐" 질문엔 이 절이
+최신 정답 — 위 v7b 절(라벨 v1~v7b 설계사, "이미 소진된 확장 시도")은 이제 계보 기록으로만
+유효. liquidity_sweep이 v1~v7b까지 갔던 것, 칼만/디마커가 사전점검~홀드아웃까지 갔던 것과 동급의
+전체 연구사이클을 완주(진단→라벨→육안검증→cheap_gate→N시드→HOLDOUT→배포). 코드 전체:
+`scripts/{build_eth_5m_v_rebound_multitrigger_labels,build_eth_5m_v_rebound_multitrigger_
+features_tier0,render_eth_5m_v_rebound_multitrigger_20examples,render_eth_5m_v_rebound_kalman_
+demarker_supplement,research_eth_v_rebound_multitrigger_tabpfn_cheap_gate,research_eth_v_rebound_
+multitrigger_tabpfn_seed_stability,research_eth_v_rebound_multitrigger_holdout,research_eth_v_
+rebound_multitrigger_live_latency_check}_20260831.py`, 데이터
+`data/labels/eth_5m_v_rebound_multitrigger_20260831/`, 홀드아웃 산출물
+`data/research/eth_v_rebound_multitrigger_holdout_20260831/`. 상세 진단 5단계는
+[[eth_v_rebound_sweep_gated_recall_gap_20260831]].
+
+### ZDC(지그재그 방향확인) — giveback과 다른 라벨식 시도, ⚠️최종 FAILED (2026-09-01)
+
+**동기**: 사용자가 "이번 호메로스 프로젝트에서는 오메가를 쓰지 않고 증거신호를 가지고 다른
+딥러닝/강화학습 모델을 만들고 싶다"고 요청 → 기존 V자반등 9트리거(위 절)와 같은 트리거
+population을 재사용하되, **라벨 판정식만 giveback(고정30/60분+빠른이동+제한된되돌림)에서
+ZDC(지그재그류 단일임계치 선착경쟁, 시간제한 없음, 최대288봉=24h)로 교체**해서 완전히 다른
+문제정의로 만들 수 있는지 탐색. `build_wave3_action_labels_20260531.py::_zigzag_pivots()`의
+순수 피벗검출 로직(매 봉 CASH/LONG/SHORT로 분류하는 `build_zigzag_action_labels()`와는 무관,
+이미 momentum-chasing 편향으로 실패판정난 그 방식은 안 씀)을 트리거 이벤트에 앵커링해 재사용.
+
+**3개 앵커/추적 변형 시도**: 종가앵커(REJECTED, raw-lift 4칸전부<1.0) → wick앵커(시작점만
+wick, subsequent봉은 종가추적, raw-lift 1.01~1.05x) → 완전wick(시작점+subsequent봉 전부wick,
+raw-lift 동급). wick앵커/완전wick 둘 다 TabPFN까지 진행(사용자가 raw-lift 약해도 진행 지시,
+이 프로젝트의 V자반등 성공 선례를 근거로).
+
+**결과 — wick앵커가 완전wick보다 신뢰도 높음(AUC는 반대)**:
+
+| | wick앵커 | 완전wick |
+|---|---|---|
+| Step D VAL/OOS AUC | 0.5732/0.5774 | **0.5889/0.6122**(더높음) |
+| Step E(경제성) VAL+OOS동시양수 | 48/205 | 33/205 |
+| **방향뒤집기 통과(진짜)비율** | **43/48(90%)** | **11/33(33%, 훨씬취약)** |
+| 최선조합 | SL4.0/ARM1.5: VAL+1.06bp·75.2%/OOS+6.09bp·76.6% | 절대수익·gap 둘다 큰 조합 없음 |
+
+완전wick은 AUC가 더 높은데도 경제성게이트에서 노이즈수확 아티팩트(5.8)절)에 훨씬 취약 — **AUC만
+보고 신호 우열을 판단하면 안 된다**는 사례. giveback 자신(위 절)과 비교하면 VAL/OOS/HOLDOUT
+AUC 0.8292/0.8127/0.8465·경제성게이트 91/91(100%)진짜로 압도적 우위 — 라벨판정식이 엄격할수록
+(빠르고 깨끗한 이동 요구) 아티팩트에 강하다는 일반 패턴(5.8)절)의 근거이기도 함. 순수 방향정확도
+(SL/exit구조 없이 호라이즌별)는 두 변형 다 동일한 감쇠곡선(6봉=30분 hit_rate 58~63%→288~400봉
+=24~33h대 50%로 무작위수렴) — ZDC 라벨 자체가 "가까운 미래의 첫 임계치반응"만 묻는 설계라
+당연한 결과, exit을 별도 설계할 때 참고할 것.
+
+**exit 라벨(두 번째 피벗) 병행 구축**: entry(첫 피벗) 확정 직후부터 `_zigzag_pivots()`의 trend
+분기를 이어 돌려 "확정된 스윙이 반대로 꺾이는 지점"(두 번째 피벗)을 추가 컬럼으로만 저장(학습
+미투입, 순수 진단용) — entry확정→exit확정 median 36봉(3h)/p90 132봉(11h).
+
+**HOLDOUT 완료(2026-09-01) — 최종 FAILED**: wick앵커 config(SL4.0/ARM1.5/Trail0.1, Step E에서
+방향뒤집기로 이미 검증된 값을 그대로 고정 — combined-sort 재선정 안 함)로 HOLDOUT 소진.
+분류 AUC=0.5436(VAL/OOS 0.5732/0.5774보다 낮음, 3구간 중 최저 — giveback은 반대로 HOLDOUT이
+최고였음). 경제성 원래 HOLDOUT+1.02bp로 방향뒤집기까지 통과(진짜)했으나, **giveback과 동일한
+local_extreme 진입시점 현실성 보정**(위 "V자반등 9트리거" 절 참조)을 적용하니 **VAL/OOS/HOLDOUT
+전부 마이너스(-10.47/-5.85/-7.36bp)로 뒤집힘** — giveback은 원래 마진이 두꺼워 같은 보정에도
+살아남았지만 ZDC는 애초 마진(+1~6bp)이 너무 얇아 전멸. **최종 확정: 경제성게이트 FAILED.**
+
+**✅2026-09-01 최종 결정: 방향추세 신호는 giveback(wick-앵커+giveback라벨, 위 "V자반등 9트리거"
+절)로 확정, ZDC는 보류.** 분류 AUC(0.57/0.58/0.54)는 기록으로 남기되 giveback(0.83/0.81/0.85)
+대비 3분의 2 수준이라 대체 근거 없음. 상세: [[eth_v_rebound_multitrigger_zigzag_direction_
+rejected_20260901]], 경제성 보정 상세는 [[project_v_rebound_local_extreme_entry_timing_
+realism_20260901]].
+
+### `short_term_return_z` (v1 최종, 한 번에 성공)
+- **라벨**: HORIZON=12(1h), intrabar MFE ≥ 1.75×ATR면 hit(지속성조건 없음), 클러스터 앵커링
+  (gap≤3봉). 4,522건 → dropna 후 4,510건.
+- **핵심 발견 (taker와 정반대)**: 발동봉의 88~89%가 진짜 극값 **이전**에 옴(median -75분,
+  `ret3_z`가 뒤돌아보는 지표라 당연). 방향적중률은 15분~1h에서 최고, 2h/4h로 갈수록 감소
+  (taker는 반대로 넓은 창이 유리했음).
+- **v1 한 번에 성공한 이유**: taker/liquidity_sweep은 라벨을 4~5버전 갈아엎어야 했지만, 이
+  신호는 **phase1 진단(호라이즌 민감도+발동봉-극값 어긋남)을 라벨 설계 전에 먼저 실측**하고 그에
+  맞춰 설계해서 처음부터 맞아떨어짐 — 방법론 템플릿의 경고가 정확히 실증된 사례.
+- 순열중요도 1위 `bb_pctb`, 2위 `p_slow`(오실레이터/포지션 계열 — taker는 `atr_percentile_864`가
+  압도적 1위였던 것과 대조적).
+- ✅2026-08-30 대시보드 증거신호 칩 자체 교체 배포(아래 "배포 방식" 섹션).
+- 무작위봉 대비 리프트 **1.22x** 확인(`|ret3_z|>=2.5` 극값조건 자체가 정보를 더함) — V_REBOUND의
+  0.91x/0.93x(정보 없음)와 대조적.
+- ⭐**경제성 게이트(2026-08-30) — taker보다도 강한 통과**: taker와 동일한 SL-race진단→트레일링
+  스톱 방법론을 개별 재검증(자동승계 안 함). 최종 SL=2.0×ATR/ARM=1.0×ATR/Trail=0.2×ATR —
+  VAL+OOS 낙관 +13.43bp/비관 +12.50bp(발산률4.5%), VAL·OOS 각각 독립으로도 낙관/비관 모두
+  견고히 양수(VAL +11.72/+11.03, OOS +15.47/+14.26) — 이 저장소 전체 신호 역사상 최고
+  경제성 수치. ✅표준 백테스트 엔진 검증도 통과(VAL+OOS +12.33bp, scratchpad 비관값
+  +12.50bp와 거의 일치). **⚠️2026-08-30 단일 홀드아웃 노출 — 생존, 그러나 규모 대폭 축소**:
+  avg_trade +3.70bp(taker처럼 부호가 뒤집히진 않았으나 VAL+OOS의 약 30% 수준으로 축소, 승률은
+  76.4%로 거의 그대로 유지) — 실거래 기대값 근거로는 VAL/OOS 수치가 아니라 이 홀드아웃 수치를
+  보수적 기준으로 쓸 것. 상세: [[eth_short_term_return_z_trailing_stop_costgate_confirmed_20260830]].
+- 문서: `docs/experiments/eth_short_term_return_z_metalabel_20260829.md`, 코드
+  `scripts/research_eth_short_term_return_z_metalabel_tabpfn_20260829.py`,
+  `scripts/research_eth_short_term_return_z_metalabel_ablation_vol_20260829.py`, 데이터
+  `data/labels/eth_5m_short_term_return_z_metalabel_20260829/`.
+
+### `volume_wick_climax` (v2/H=16 최종 — ⚠️2026-08-31 대시보드 증거신호에서 완전히 제거됨)
+
+⚠️**2026-08-31 업데이트**: 배포 보류 상태로 있던 이 신호를, smt_divergence 배포 요청과 동시에
+사용자가 dalton_rule2_balance_edge와 함께 대시보드 증거신호에서 완전히 제거하라고 지시 —
+`SIGNAL_ORDER`(단일 소스)에서 빠져 이제 원 규칙 기반 칩조차 표시되지 않음(8→6개 신호로 축소).
+재라벨링/재시도는 더 이상 검토 대상 아님, 이 신호는 종결. `compute_signals()`의 원 규칙 계산
+자체는 삭제하지 않음(다른 신호 진단용 재사용 가능성 보존). 상세: [[eth_smt_divergence_metalabel_v1_final_20260831]]
+"배포" 섹션. 아래는 그 이전(연구·배포보류 판단) 기록.
+
+**신호 정의**: `vol_z`(288봉/24h 거래량 z-score) >= 2.0 AND `lower_wick_ratio`(bottom)/
+`upper_wick_ratio`(top) >= 0.5 — 거래량 클라이맥스 + 긴 꼬리. taker(`delta_z`)나
+short_term_return_z(`ret3_z`)와 달리 부호 있는 z-score 하나가 아니라 **두 변수(거래량 극값 AND
+꼬리형태)의 AND**이자 **같은-봉 구조패턴**(발동봉 자신의 꼬리가 이미 봉내 배척된 탐색을 담고
+있음)이라, 이 프로젝트의 다른 두 신호와 근본적으로 다른 성격.
+
+**최종 채택 라벨(v2)**: 클러스터 앵커링(gap≤3봉, `vol_z` 최댓값 — 부호 없는 크기라 delta_z/
+ret3_z처럼 side별 idxmin/idxmax 분기 없이 항상 idxmax) 후 발동봉 종가=entry, **HORIZON=16봉
+(80분)**, hit=intrabar MFE≥1.65×ATR(터치기반, 지속성조건 없음). 발동 3,103건(bottom 1,804/
+top 1,299). 20예시 캔들차트로 사용자 시각검증 완료(질문 1건 — "왜 이 top예시가 hit인가"→발동
+20분 뒤 실제 -1.45%(2.19×ATR) 하락 후 완전반등, taker v5의 "터치 vs 지속성" 트레이드오프
+실물사례로 확인, 라벨 버그 아님).
+
+**v1(HORIZON=24)→v2(HORIZON=16) 교체 경위**: phase1 진단(발동봉 정확히 극값=27.0%/26.0% —
+taker의 거의 2배, 그러나 과반은 여전히 발동봉 이후(중앙값+10분) 진짜 극값 도래; 클러스터링은
+taker/short_term_return_z보다 훨씬 약함) 이후, 사용자 지시로 HORIZON/GAP을 phase1 직감이 아닌
+실제 TabPFN VAL/OOS AUC 9조합 스크리닝(HORIZON∈{6,12,24}×GAP∈{3,6,12})으로 확정 → 처음엔
+H=24(VAL AUC 최댓값)를 채택. 이후 사용자가 "단순 로직으론 이 신호가 다른 2개보다 나은데 왜
+메타라벨은 최약체냐, 라벨/피쳐 버그 아니냐"고 재검증을 요청 → 후보 가설 2개(ATR자기포함오염,
+클러스터앵커기준불일치) 검증했으나 둘 다 결정적 영향 없음. 대신 **HORIZON 선택 절차 자체의
+결함**을 발견 — 원래 3점(6/12/24) 그리드에서 VAL AUC 최댓값만 보고 H=24를 골랐는데, 8점
+(8/12/16/20/24/30/36/48)으로 재검사하니 H=24는 VAL-OOS 격차가 전체 중 둘째로 큰 "VAL 과적합"
+지점이었고 H=16이 VAL≈OOS로 훨씬 안정적 → 사용자가 v2(H=16)로 정식 교체 확정.
+
+**최종 분류 성능(v1 vs v2)**:
+
+| | v1(HORIZON=24) | v2(HORIZON=16, 최종) |
+|---|---|---|
+| VAL | 0.6121±0.0038 | 0.5969±0.0042 |
+| OOS | 0.5633±0.0012 | 0.5976±0.0027 (+0.034) |
+| HOLDOUT | 0.5652±0.0024 | **0.5287±0.0021** (-0.037, 이 신호 역대 최저) |
+
+v2는 VAL·OOS 격차를 0.049→0.0007로 크게 줄였지만, **그 안정성은 세 번째 독립구간(HOLDOUT)까지
+일반화되지 않음** — HOLDOUT은 오히려 v1보다도 낮은, 이 프로젝트 전체에서 나온 가장 낮은
+수치(거의 동전던지기)로 반전됐다. "VAL/OOS 합의가 HOLDOUT까지 보장하지 않는다"는 이 신호가
+반복 실증한 패턴이 HORIZON 선택 자체에도 재현된 것 — **"HORIZON 선택절차 버그를 고쳤다"와
+"신호가 쓸만해졌다"는 완전히 별개 결론**이며 전자만 맞다.
+
+**배포 보류 근거 — 네 가지 독립 각도 전부 부정적** (분류 AUC/HORIZON 재조정과 무관하게 모두 v1·
+v2 양쪽에서 확인):
+1. **순열중요도 — 신호 자신의 정의 변수가 무가치**: 두 HORIZON 모두에서 `vol_z`/`lower_wick_ratio`/
+   `upper_wick_ratio`(발동조건을 정의하는 바로 그 변수들) 중요도가 0 또는 음수. 대신
+   `realized_vol_ratio`/`nyse_open_flag`/`atr_percentile_864`/`er_24` 같은 세션·변동성레짐류가
+   상위권 — taker(레짐 제거해도 AUC -0.01~0.012뿐이라 "레짐 프록시 아님"이 증명됨)와 정반대.
+2. **그룹 ablation으로 재확인**: 신호 자신의 정의변수 3개를 실제로 제거하고 재학습하면 VAL AUC가
+   오히려 오름(0.6121→0.6216) — 순열중요도의 음수값이 우연이 아님을 재학습으로 증명. 세션/
+   변동성레짐 그룹은 제거시 VAL만 뚜렷이 하락하고 OOS/HOLDOUT은 거의 불변 — VAL 한정 과적합
+   가능성. "무엇이 이 신호를 작동시키는가"에 명확한 답을 못 낸 이 프로젝트 최초 사례.
+   (`scripts/research_eth_volume_wick_climax_metalabel_ablation_20260830.py`)
+3. **Omega 150여 피쳐로 교체/결합해도 못 살아남음**: `data/splits/year_oos/training_features_*.csv`
+   (가격·시간추세 오염 7개 제외 134개)로 tier0(23) 대체/결합 재학습 — VAL·OOS(사전등록 주기준)
+   둘 다 tier0가 일관 우세, omega는 HOLDOUT에서만 앞섬(설계선택 근거로 못 씀 — 이미 실증된
+   VAL/OOS-HOLDOUT 어긋남 패턴을 홀드아웃 쪽으로 역이용하는 순환오염이 되므로).
+   (`scripts/research_eth_volume_wick_climax_metalabel_omega_features_20260830.py`)
+4. **트레일링스톱 경제성 게이트 — v1·v2 둘 다 FAILED**: taker/short_term_return_z와 동일
+   방법론(Grinold's Law SL-race진단→그리드서치→낙관/비관 이중검증)으로 재테스트. v1(SL-race
+   SL=0.5x 73.0%→2.5x 18.0%)·v2(67.2%→12.9%) 둘 다 12개 SL×ARM×Trail 조합 **VAL·OOS 동시양수
+   0/12**(v1 최선 합산-0.73bp, v2 최선 VAL+0.04bp/OOS-0.93bp). taker/short_term_return_z(트레일링
+   으로 경제성 살아남)와 반대로 liquidity_sweep/V_REBOUND와 같은 부류. 이미 VAL+OOS에서 FAILED라
+   홀드아웃 경제성 노출은 하지 않음.
+
+무작위봉 대비 리프트도 v1(0.941x)·v2(0.994x) 둘 다 1.0 미만 — "climax"(거래량 극값) 조건
+자체가 순수 꼬리형태 단독보다 나을 게 없다는 신호.
+
+**방법론 교훈(남은 5~8번 신호에 적용, 상세는 "재사용 방법론 템플릿" 5.5)절)**: HORIZON 후보는
+6~8점 이상 촘촘한 그리드로, 선택 기준은 단일 split의 AUC 최댓값이 아니라 VAL-OOS 격차가 작으면서
+둘 다 합리적으로 높은 지점으로 삼을 것 — 단, 이렇게 골라도 HOLDOUT 일반화까지 보장하진 않는다는
+걸 이 신호 자체가 실증했으므로 별개로 기억할 것.
+
+**파일**: 라벨/AUC `scripts/research_eth_volume_wick_climax_metalabel_tabpfn_20260830.py`(v1),
+`scripts/research_eth_volume_wick_climax_metalabel_v2_horizon16_20260830.py`(v2 최종, 커밋됨),
+`scripts/research_eth_volume_wick_climax_anchor_and_horizon_recheck_20260830.py`(호라이즌 재검증,
+커밋됨), ablation `scripts/research_eth_volume_wick_climax_metalabel_ablation_20260830.py`, Omega
+피쳐 `scripts/research_eth_volume_wick_climax_metalabel_omega_features_20260830.py`. phase1 진단
++ 시각검증 차트는 scratchpad(미커밋). 데이터 `data/labels/eth_5m_volume_wick_climax_metalabel_
+v2_horizon16_20260830/`. 전문(각 후속조사의 세부 수치·과정)은
+[[eth_volume_wick_climax_metalabel_v1_weak_signal_20260830]].
+
+### `dalton_rule2_balance_edge` (v1 최종 — ⚠️2026-08-31 대시보드 증거신호에서 완전히 제거됨)
+
+⚠️**2026-08-31 업데이트**: 2026-08-30 배포됐던 이 신호를, 경제성(트레일링스톱) FAILED 확정
+직후 같은 날 사용자가 volume_wick_climax와 함께 대시보드 증거신호에서 완전히 제거하라고 지시 —
+`SIGNAL_ORDER`(단일 소스)와 `METALABEL_SIGNALS`에서 모두 제거(8→6개 신호로 축소). 리프트<1x +
+경제성 0/96 FAILED가 누적된 결과. `compute_signals()`의 원 규칙 계산 자체는 삭제하지 않음(다른
+신호 진단용 재사용 가능성 보존). 상세: [[eth_smt_divergence_metalabel_v1_final_20260831]]
+"배포" 섹션. 아래는 그 이전(연구·배포 판단) 기록.
+
+**신호 정의**: `dalton_atr_pctile(=14봉ATR의 288봉내 백분위) <= 0.30` AND `|가격-48봉자기범위edge|
+<= 15%*범위폭`. range_low/high는 shift 없이 현재봉 포함 — "지금 최근 48봉 자기범위의 가장자리에
+있다"는 위치 신호(bottom="하단근처"/top="상단근처"일 뿐 "진짜 최저/최고점"이라는 뜻 아님).
+taker/short_term_return_z/volume_wick_climax와 근본적으로 다른 **저변동성 레짐 상태 변수**
+(이산 이벤트 아님).
+
+**Phase1 진단 — 이 프로젝트 최초로 완전히 다른 성격**: 08-25 사전점검("8개 중 리프트 최약
+1.6~1.74x, 발동 압도적으로 잦음")을 정밀 재확인 — 전체봉의 4.1%/6.7%(bottom/top) 발동, 연속발동
+gap 중앙값 1봉(5분), 연속런 3,400~4,611개(런 길이 중앙값 2봉이나 최대 32~40봉/160~200분).
+앵커=**런-시작봉**(유일하게 라이브 실행가능한 기준) 채택 — 런-시작↔진짜극값 어긋남이 정확히
+시작=4.6~4.9%(4개 신호 중 최악)이고 naive 방향적중률도 전구간 50~54%로 가장 평평. 사용자에게
+3가지 선택지 제시 → **"그대로 템플릿 적용"** 결정.
+
+**⚠️사용자가 시각검증 차트에서 직접 발견 — ATR 자기포함 오염(실제 버그, 수정완료)**: 20예시
+차트에서 "이 top예시(2025-04-21)가 왜 hit인가" 질문 → 발동봉 atr_pct(14봉)=0.0944%(전체
+27만봉 중 하위 5%)로 극도로 압축된 값 확인 — 이 신호 자체가 "저변동성 백분위≤30%"를 발동조건
+으로 걸기 때문에, 그 압축된 14봉 ATR을 그대로 hit 문턱값(K×ATR) 분모로 쓰면 노이즈 수준(0.18%)
+움직임이 "1.86×ATR"로 부풀려짐. **수정**: hit 문턱값 분모를 dalton_atr_pctile이 이미 쓰는
+같은 **288봉(24h) 평균 ATR**로 교체(14봉 atr_pct는 모델 피쳐로는 그대로 유지). 같은 사례
+재확인 — move_atr_mult 1.86x→1.18x로 축소(왜곡 해소, 문턱은 여전히 살짝 넘김). 남은 신호(#6~8)
+에서 "발동조건이 변동성/레짐 percentile을 직접 게이트로 거는" 패턴이 또 나오면 동일 오염
+가능성을 확인할 것.
+
+**최종 라벨**: HORIZON∈{6,8,12,16,20,24,30,36,48}×GAP∈{3,6,12} 27조합 스크리닝(volume_wick_climax
+교훈대로 처음부터 촘촘하게+max(min(VAL,OOS)) 기준) → **HORIZON=30(2.5h)/GAP=12/K=1.90** 채택,
+발동 4,157건.
+
+**⭐최종 결과 — 이 프로젝트에서 가장 안정적인 신호(그러나 절대성능은 낮음)**:
+
+| 구간 | AUC | 시드분산 |
+|---|---|---|
+| VAL | 0.5979 | ±0.0007 |
+| OOS | 0.6047 | ±0.0008 |
+| HOLDOUT | 0.5755 | ±0.0001 |
+
+taker(0.633/0.645/0.667)·short_term_return_z(0.674/0.649/0.643)보다 낮지만, volume_wick_climax
+(0.597/0.598/**0.529**, HOLDOUT 급락)와 달리 3구간이 서로 크게 어긋나지 않고 시드분산도
+이 프로젝트 전체에서 가장 작음 — phase1의 비관적 진단에도 불구하고 지금까지 중 가장 예측
+가능하고 재현되는 신호로 나온 역설적 결과.
+
+**⚠️리프트 0.863x(1.0 미만)**: 저변동성레짐 게이트를 빼고 "범위가장자리 근접" 조건만 전체봉에
+적용한 기준선(57.49%)이 실제 발동(49.6%)보다 나음 — volume_wick_climax와 같은 패턴("게이트이
+오히려 방해"), 08-25 사전점검의 "리프트 최약" 판정과 정확히 부합.
+
+**순열중요도 — 2개 피쳐가 거의 전부 지배**: `realized_vol_ratio`(+0.041), `hour_utc`(+0.029)
+다음 급격히 감소(3위는 17배 작은 +0.0024). **이 신호를 정의하는 변수(48봉 range-edge 거리,
+dalton 자신의 288봉 ATR백분위)가 Tier0 23피쳐에 아예 없음** — 가장 가까운 대리변수인
+`atr_percentile_864`(864봉 창, dalton의 288봉과 다름)조차 거의 0/음수. taker/short_term_return_z/
+volume_wick_climax와 달리 "신호 자신의 정의변수 ablation"이 원천적으로 불가능한 구조 — 대신
+range-edge 거리/dalton 고유 288봉 percentile을 신규 피쳐로 추가하는 실험이 자연스러운 다음
+단계이나 아직 미실행.
+
+**Omega 150여 피쳐 추가(2026-08-30, 사용자 요청) — 결론은 동일(tier0 우세), 그러나 개념가설
+부분적중**: `compression_score`/`distance_to_day_high_low_pct`/`bb_width_pct_rank_288` 등 dalton
+정의(레인지위치+압축)와 개념적으로 관련된 Omega 피쳐가 있어 기대를 걸었으나, AUC는
+volume_wick_climax와 같은 패턴(VAL·OOS는 tier0_23 우세(0.598/0.605) > omega_134(0.587/0.576) ≈
+combined_157(0.588/0.587), omega는 HOLDOUT에서만 소폭 앞섬(0.581~0.582 vs tier0 0.575) — 설계
+선택 근거로 못 씀). **157개 전체 순열중요도에서 `realized_vol_ratio`가 서로 다른 두 파이프라인
+(tier0 14봉판 vs Omega 독립계산판)에서 나란히 1~2위**(3위 이하 전부를 합쳐도 못 따라옴) —
+"최근/장기 실현변동성 비율"이 계산방식과 무관하게 이 신호의 진짜 핵심 드라이버임을 재확인.
+`compression_score`(3위)/`distance_to_day_high_low_pct`(12위)/`bb_width_pct_rank_288`(16위)도
+top25에 실제로 등장해 개념적 관련성 가설 자체는 틀리지 않았으나, tier0의 realized_vol_ratio/
+atr_percentile_864가 이미 커버하던 정보의 재포장 수준이라 VAL/OOS를 못 넘김. 코드:
+`scripts/research_eth_dalton_rule2_balance_edge_metalabel_omega_features_20260830.py`(커밋됨).
+
+**⭐경제성(트레일링스톱) — 2026-08-31, FAILED**: taker/liquidity_sweep/orthogonal_combo와 동일한
+표준엔진 + 96개 SL×ARM×Trail 그리드. **사이징은 14봉 `atr_pct`가 아니라 288봉 `atr_pct_288`을
+사용** — dalton의 발동조건 자체가 14봉 ATR을 저변동성 게이트로 걸어 발동 시점 14봉 ATR이 항상
+인위적으로 눌려있기 때문(위 라벨 자기포함오염 수정과 동일한 이유). **결과: 96/96 조합 전부
+실패** — VAL·OOS 동시 양수 0개, 최선(SL=4.0/ARM=2.0/Trail=0.1)도 VAL&minus;0.57bp/OOS&minus;3.98bp.
+volume_wick_climax(0/12)·V자반등(0/205)에 이어 이 프로젝트에서 트레일링스톱이 실패한 세 번째
+신호 — 리프트<1x 캐비엇과 정합적. HOLDOUT은 노출하지 않음(VAL/OOS 단계에서 이미 명확히 실패).
+own-feature(Omega) 추가는 위에서 완료·기각됨.
+
+**✅2026-08-30 대시보드 배포(taker/short_term_return_z와 동일 방식, 증거신호 칩 자체 교체)**:
+`METALABEL_SIGNALS`에 추가(HORIZON=30/GAP=12/K=1.90). **배포 계기로 공유 캐시 로직의 실제
+버그를 발견·수정**(taker/short_term_return_z에도 소급 적용) — 기존 로직은 원시발동조건이
+True인 매 봉마다 무조건 재추론했는데, dalton은 원시발동(레짐상태)이 최대 32~40봉 연속되므로
+같은 런 안에서 수십 번 불필요 재추론 + 학습앵커(런의 첫 봉)가 아닌 봉으로 평가하는 train/serve
+불일치가 발생함 — "현재 유효한 캐시가 있는가"를 먼저 확인하도록 재구성해 해결(다른 2개 신호는
+원시발동이 드물게만 연속되므로 이번 수정으로 순수 개선, 하위호환). 서버에서 실제 과거 발동봉
+(2026-08-28 09:00 UTC)으로 직접 재현 검증 완료. 상세는
+[[eth_evidence_signal_metalabel_dashboard_replace_deployed_20260830]] "dalton 추가" 섹션.
+
+**파일**: `scripts/research_eth_dalton_rule2_balance_edge_metalabel_tabpfn_20260830.py`(스크리닝+
+최종패널, ATR수정 포함, 커밋됨), `scripts/backtest_eth_dalton_rule2_balance_edge_trailing_
+gridsearch_20260831.py`(경제성 그리드, FAILED, 커밋됨). phase1 진단+시각검증 차트는
+scratchpad(미커밋). 데이터 `data/labels/eth_5m_dalton_rule2_balance_edge_metalabel_20260830/`.
+전문은 [[eth_dalton_rule2_balance_edge_metalabel_v1_20260830]].
+
+### `orthogonal_combo` (v2 최종 — 플래그십, ⚠️2026-08-31 심층검증으로 헤드라인 하향조정됨)
+
+**신호 정의**: `(p_fast<=0.10)&(p_slow<=0.10)&((delta_z<=-2.0)|(funding_z<=-2.0))`(bottom),
+`(p_fast>=0.90)&(p_slow>=0.90)&(delta_z>=2.0)`(top, funding_z 의도적 제외) — 오실레이터(864봉
+백분위) 이중극단 + order-flow/펀딩 확인조건. 8개 중 원 룰 리프트 1위(3.56x@1h)였던 신호.
+funding_z(`data/TOTAL_ETHUSDT_fundingRate_2025_2026.csv`)는 2025-01-01~2026-07-31만 커버 —
+그 밖 구간은 compute_signals()의 NaN=False 특성으로 자동으로 delta_z단독으로 저하(bottom
+발동의 32%가 2025년 이전, 정상 처리 확인). 모델 피쳐로는 추가 안 함(pre-2025 TRAIN dropna
+손실 방지).
+
+**Phase1 진단 — 이 프로젝트 최고 사전지표**: 발동봉 정확히 극값 9.3%/10.5%, 중앙값 지연 +6봉
+(+30분), naive 방향적중률이 **15분~4시간 전구간 54~58%로 가장 평평하고 견고함**(다른 신호는
+특정구간에서만 강함).
+
+**⭐라벨 v2 — 중간지대 제외(사용자가 직접 발견, liquidity_sweep v7b 원칙 첫 이식)**: v1(단일
+K=1.75 균형점) 차트에서 사용자가 "NO_HIT의 0.8x같은 값이 애매하지 않냐" 질문 → 확인해보니
+NO_HIT 중 "확실한 미스"(0~0.3K) 비율이 **9.2%뿐**(다른 4개 완료신호는 18~32%, 교차검증 결과
+orthogonal_combo만의 이상치로 확인). **v2**: HIT=move_atr_mult≥K_hi, MISS=≤K_lo, 중간 제외
+(K_lo=K_center/1.4, K_hi=2×K_lo 자동보정). 다른 4개 신호는 상대적으로 건강하고 이미 홀드아웃
+소진돼 재작업 안 함(사용자 결정).
+
+**HORIZON/GAP 스크리닝(27조합, max(min(VAL,OOS)) 기준)**: **HORIZON=24(2h)/GAP=12** 채택(VAL
+0.7224/OOS 0.7188, 격차 0.0036). raw VAL최댓값 기준(H=48)은 OOS 0.6669로 격차 0.0972 —
+volume_wick_climax 교훈(VAL단독최댓값 함정)이 여기서도 실증, 올바른 기준으로 회피.
+
+**⭐그룹 Ablation → 피쳐셋을 20개로 확정**:
+
+| 구성 | VAL | OOS | HOLDOUT |
+|---|---|---|---|
+| 전체 23피쳐 | 0.7230 | 0.7162 | 0.7076 |
+| 변동성레짐 제거(19) | 0.6521(-0.071) | 0.6421(-0.074) | 0.6640(-0.044) |
+| **세션타이밍 제거(20)** | 0.6844(-0.039) | **0.7274(+0.011)** | **0.7245(+0.017)** |
+| 신호자신변수 제거(20) | 0.7235(≈동일) | 0.7129(≈동일) | 0.7061(≈동일) |
+
+변동성레짐(atr_pct/atr_percentile_864/realized_vol_ratio/bb_width_pctile)은 taker(-0.01~0.012)
+와 달리 **진짜 크게 기여**(-0.07~0.074, 제거해도 0.64~0.66은 유지). **세션타이밍(nyse_open_flag/
+hour_utc/weekday) 제거가 OOS·HOLDOUT을 오히려 개선** — VAL만 손해, volume_wick_climax/dalton과
+같은 "VAL한정과적합" 패턴. 신호 자신의 정의변수(p_fast/p_slow/delta_z)는 기여 사실상 0(중립,
+음수는 아님). **같은 ablation run·같은 홀드아웃 노출 내 대안이라 새 노출 아님** — 사용자가
+20피쳐(세션타이밍 제거) 구성을 최종 채택.
+
+**⭐최종 확정 — kept-only 헤드라인 (⚠️아래 심층검증에서 하향조정됨, "역대 최고"로 인용 금지)**:
+
+| 구간 | AUC (kept-only, 중간지대제외 64%만 평가) | 시드분산 |
+|---|---|---|
+| VAL | 0.6844 | ±0.0017 |
+| **OOS** | **0.7274** | ±0.0012 |
+| **HOLDOUT** | **0.7245** | ±0.0018 |
+
+taker(0.633/0.645/0.667)·short_term_return_z(0.674/0.649/0.643)·liquidity_sweep(0.659/0.637/
+0.661)·volume_wick_climax(0.597/0.598/0.529)·dalton(0.598/0.605/0.576)의 kept-only(해당사항
+없는 신호는 원래 수치)와 비교하면 이 표는 전부 능가. OOS·HOLDOUT이 거의 일치하고 VAL보다 높음
+(taker와 같은 "OOS/HOLDOUT이 VAL보다 견고"한 패턴 자체는 유효). **리프트**: 확인조건(delta_z/
+funding_z) 있는 경우 vs 오실레이터 단독 기준선 — **1.232x**(1.0 이상, volume_wick_climax·
+dalton의 게이트무효화 패턴과 정반대 — 확인조건이 실제 정보를 더함). **⚠️이 표는 중간지대(애매한
+결과)를 제외한 64%만 평가한 값 — 전체 모집단 기준 실제 수치는 아래 "심층검증" 섹션 참고,
+상당히 낮아짐.**
+
+**⭐경제성 게이트(2026-08-31) — 3구간 전부 통과, 이 프로젝트 최고 성적**: taker/liquidity_sweep과
+동일한 표준엔진(`core.causal_futures_backtest.simulate_single_position`, ATR트레일링 exit 모드)
+사용. **중요**: exclude-middle로 필터링된 classifier 학습용 CSV(1,493건)가 아니라 `build_raw_
+fires()`로 재생성한 H=24/GAP=12 원본 미필터 fire 전체(2,334건)에 대해 실행 — exclude-middle은
+classifier 학습만을 위한 장치이고 실제 대시보드는 라벨 결과와 무관하게 원 신호 그대로 발동하기
+때문(liquidity_sweep과 동일 원칙, 새 스크립트로 원본 fire 2,334건 재현 확인). 96개 SL×ARM×Trail
+그리드 → **73/96 조합이 VAL·OOS 동시 이익**(표준비용 10bp 반영, liquidity_sweep의 91/96보다는
+낮지만 여전히 압도적 비율). 최종 채택 **SL=4.0×ATR/ARM=0.5×ATR/Trail=0.1×ATR**(min(VAL,OOS)
+1위): VAL **+9.36bp**(승률91.5%)/OOS **+15.13bp**(승률96.0%). 봉내 유불리 순서(낙관/비관)
+이중검증 — Trail=0.1이 그리드 내 최협폭이라 특히 필요했음(feedback_intrabar_ordering_optimistic_
+pessimistic_bracket_20260830) — 괴리 −1.0~−1.3bp로 견고, 순위 불변. **홀드아웃(1회성) +3.78bp
+(승률91.5%, 343건, 총계좌수익+13.6%)로 VAL/OOS 대비 축소됐지만 부호 유지하며 생존** — taker
+v5(+2.17bp)/short_term_return_z(+3.70bp)/liquidity_sweep(+1.97bp) 전부보다 높은 홀드아웃 절대값.
+**VAL/OOS/HOLDOUT 세 구간 전부에서 liquidity_sweep(+10.70/+14.49/+1.97bp)을 능가** — 평균bp
+기준으로는 이 프로젝트 최고. **⚠️승률(91~96%) 자체는 과대해석 주의** — 아래 심층검증에서
+완전 무작위 진입도 이 exit구조로 승률 83~85%가 나옴이 확인됨(ARM=0.5가 작은 유리한 움직임만
+으로 즉시 무장하는 exit구조 자체의 특성). 신호의 진짜 우위는 승률이 아니라 평균bp에서 나타남 —
+무작위(VAL&minus;3.55bp)·오실레이터단독(VAL+6.47bp) 둘 다보다 실신호(VAL+9.36bp)가 뚜렷이 높음.
+
+**⚠️⚠️심층검증(2026-08-31) — 사용자가 "수치가 너무 높다"고 직접 문제제기해 실행, 4가지 독립 점검**:
+
+1. **K_center 전기간(2024~2026) calibration 누수 우려**: `calibrate_k_center()`가 VAL/OOS/HOLDOUT
+   데이터까지 포함된 전체기간으로 라벨 문턱(K_center)을 정함 — TRAIN(<2025-09-01)만으로
+   재계산해도 **동일 K_center=2.5**가 나와, K_lo/K_hi/kept population/AUC 전부 원본과 100% 재현.
+   **가정이 아니라 재계산으로 무해함을 직접 확인**.
+2. **kept-only(중간지대 제외) 헤드라인 AUC는 과대평가**: 원 classifier(956건 exclude-middle
+   TRAIN)를 전체 미필터 모집단(중간지대 포함, 라벨은 move_atr_mult≥2.5로 단순화)에 재평가하면
+   VAL/OOS/HOLDOUT **0.665/0.680/0.667**로 하락(각각 &minus;0.019/&minus;0.048/&minus;0.057) —
+   taker(0.667)·liquidity_sweep(0.661)과 비슷한 급이지 압도적 1위가 아님. **"역대 최고 AUC"
+   표현은 철회** — kept-only 평가방식(더 쉬운 부분집합만 평가) 자체의 한계였음.
+3. **오실레이터 단독(확인조건 없음) 경제성 기준선**: 동일 exit구조로 VAL+6.47bp(승률94.6%)/
+   OOS+7.85bp(승률95.2%) — 실신호보다 낮지만 양수. 확인조건은 승률보다 트레이드당 손익폭으로
+   가치를 더함(승률차는 거의 없음 — 승률 자체가 exit구조의 본질적 특성).
+4. **완전 무작위 진입 기준선**(같은 exit구조, 2,000봉×2회 무작위 표본): VAL 승률83.7%(평균
+   &minus;3.55bp), OOS 승률85.4%(평균&minus;0.41bp). **무작위조차 승률 83~85%** — ARM=0.5×ATR이
+   신호 품질과 무관하게 승률을 높이는 exit구조 자체의 특성. 그러나 평균손익은 음수/거의 0이라
+   승률만으로 경제성 판단 불가 — 실신호는 무작위·오실레이터단독 둘 다를 **bp 기준**으로 확실히
+   능가, 경제성 결론 자체는 생존.
+
+**종합**: 사용자의 의심은 정당·생산적이었음 — K누수는 실측상 기우로 판명, 분류 AUC 헤드라인은
+실제 과대평가로 정정 필요, 경제성의 "높은 승률" 프레이밍은 오해소지가 있었지만 "무작위·약한
+기준선 대비 뚜렷한 bp 우위"라는 핵심 결론 자체는 검증 후에도 생존. orthogonal_combo는 여전히
+유효한 신호이나 "이 프로젝트 역대 최고"라는 과장된 표현은 정정.
+
+**배포(2026-08-31)**: `live_evidence_signal_metalabel_20260829.py`의 공용 `METALABEL_SIGNALS`에
+등록(taker/short_term_return_z/dalton/liquidity_sweep과 동일 배선) — 증거신호 "복합 오실레이터
+신호" 칩 자체 교체(V_REBOUND식 신규 칩 아님). **이 신호만의 차이점**: 20피쳐(23-세션타이밍3개)를
+쓰므로, 하드코딩된 전역 `FEATURE_COLUMNS`만 참조하던 `_predict_proba`/
+`compute_evidence_signal_metalabels()`를 신호별 `feature_columns` 오버라이드를 지원하도록
+리팩터(키 없으면 기존 23개로 폴백 — 다른 4개 신호는 동작 완전히 불변). `ORTHOGONAL_COMBO_
+FEATURE_COLUMNS = [c for c in FEATURE_COLUMNS if c not in ("nyse_open_flag","hour_utc","weekday")]`
+로 ablation이 실제 검증한 20개 세트와 정확히 일치함을 프로그램적으로 보장. train_context는
+exclude-middle 적용 후 TRAIN 구간(956건, classifier가 실제로 학습한 데이터 — 경제성용 원본fire
+2,334건과는 다른 파일)을 그대로 사용. `SUSTAIN_BARS_OVERRIDE["orthogonal_combo"]=24`, `app.js`의
+`SIGNAL_HORIZON`/`EVIDENCE_SIGNAL_KO` 갱신, 캐시버스터 v158. 서버에서 실제 과거 발동봉
+(2026-08-28 10:55 UTC, top)으로 `build_indicator_frame`+`_predict_proba` 직접 재현해 proba=0.5543
+정상 반환 확인, `supervise_server.sh` 감시자를 통해 자식 PID만 재기동, 공개도메인
+(`thesan.xyz/dashboard/live/`) 캐시버스터+새 설명 텍스트 서빙 확인 완료.
+
+**상태**: 분류(AUC)·경제성(트레일링스톱)·배포·심층검증 네 가지 전부 완료 — 이 프로젝트에서
+분류+경제성+배포 세 축 모두 끝난 신호는 taker_delta_z_climax와 orthogonal_combo뿐.
+
+**파일**: `scripts/research_eth_orthogonal_combo_metalabel_tabpfn_20260830.py`(스크리닝+최종패널,
+커밋됨), `scripts/research_eth_orthogonal_combo_metalabel_ablation_20260830.py`(ablation,
+커밋됨), `scripts/build_eth_orthogonal_combo_raw_fires_H24_GAP12_20260831.py`(경제성용 원본fire
+재생성), `scripts/backtest_eth_orthogonal_combo_trailing_{gridsearch,optimistic_crosscheck,
+holdout_exposure}_20260831.py`(경제성 게이트 3단계), `scripts/research_eth_orthogonal_combo_
+deep_audit_20260831.py`(심층검증 체크1·2, 서버GPU — 첫 실행에서 피쳐셋 실수를 직접 발견해
+`FINAL_FEATURE_COLUMNS`로 수정 후 재실행), `scripts/backtest_eth_orthogonal_combo_trailing_
+{oscillator_only,random_entry}_baseline_20260831.py`(심층검증 체크3·4, 로컬). 전부 커밋됨.
+phase1 진단+시각검증 차트는 scratchpad(미커밋). 배포 관련 `live_evidence_signal_metalabel_
+20260829.py`/`live_evidence_signal_dashboard_20260823.py`/`app.js`/`index.html`은 이 프로젝트
+기존 관행대로 서버 rsync만 하고 git 커밋은 하지 않음(taker~liquidity_sweep 전부 동일 패턴).
+데이터 `data/labels/eth_5m_orthogonal_combo_metalabel_20260830/`. 전문은
+[[eth_orthogonal_combo_metalabel_v2_final_20260830]].
+
+### `smt_divergence` (v1 최종 — 이 프로젝트 HOLDOUT AUC 역대 최고)
+
+**신호 정의**: `bottom = ETH low < ETH 자기 48봉 직전 스윙로우 AND BTC low > BTC 자기 48봉 직전
+스윙로우`(ETH는 새 저점을 뚫는데 BTC는 자기 저점을 못 뚫음 — 교차자산 비확인), top은 정반대.
+liquidity_sweep과 완전히 같은 `swing_low_prior`/`swing_high_prior`(48봉)를 재사용하는 "형제
+신호" — phase1에서 같은 봉 중복률 60.6%(bottom)/56.2%(top) 확인(기존 "약 40% 독립적" 기록과
+정합). ATR 자기포함 오염 없음(발동봉 atr_pct가 전체 대비 53~56%tile로 게이트 효과 없음 확인).
+
+**Phase1**: 다른 7개 원 신호와 동일하게 naive lift가 15분(~1.1~1.15x)→8시간(~1.0~1.04x)으로
+단조감소(무작위봉 대비, raw 정확도만 보면 착시). 발동봉=진짜극값 12.6%/13.1%뿐, 중앙값 지연
+15~16봉(75~80분) — 터치기반 MFE 라벨링 근거.
+
+**⭐K 캘리브레이션 — 이번엔 처음부터 TRAIN만 사용**: taker 심층검증 교훈([[eth_evidence_signal_cross_signal_k_calibration_audit_20260831]])을
+선제 반영해 K를 항상 TRAIN(<2025-09-01) 구간만으로 50/50 균형 캘리브레이션(전기간 계산 시
+미래데이터 누수 우려를 원천 차단).
+
+**⭐그리드 스크리닝 — 경계값을 안 믿고 확장하다 K_GRID 버그 발견**: 1차(H=6~48×GAP=3/6/12,
+27조합)에서 max(min(VAL,OOS)) 기준 H=48/GAP=12가 선택됐으나, GAP=12 열의 min(VAL,OOS)이
+그리드 끝까지 계속 상승 중이었음 — 5.6)절 교훈대로 H=60~96으로 확장(GAP=12만, 9/9 이겼던
+패턴이 근거). 확장 중 `K_GRID` 상한이 3.50으로 잘려있어 더 큰 K가 필요한 H=60 이상에서
+hit_rate가 55~64%로 나오는 버그를 직접 발견 → 상한을 8.0으로 넓혀 재실행(원 9점 그리드는
+전부 K≤3.50이라 영향 없음, 재실행 불필요 확인). **결과: H=72(6시간)/GAP=12/K=4.20에서 진짜
+국소정점**(min(VAL,OOS)=0.6244, H=48의 0.6218보다 높고 격차도 더 작음(0.0374 vs 0.0415), 양옆
+H=60=0.6121/H=84=0.6152보다 높은 내부 정점) — GAP=12가 H=72에서도 10/10으로 재확인.
+
+**⭐"50/50이 데이터 질을 희생하는 것 아니냐" — 사용자 질문에 직접 확인**: orthogonal_combo의
+exclude-middle을 이끌어낸 바로 그 진단(NO_HIT "확실한 미스"[0,0.3K) 비율)을 플레이스홀더
+(H=12, 24.5%)와 최종 승자(H=72/K=4.20, **24.8%**) 둘 다에서 실행 — 건강한 18~32% 범위 안,
+orthogonal_combo의 9.2% 이상치와 다름. exclude-middle 불필요, 단순 단일 K로 충분함을 실측으로
+확인(가정 아님).
+
+**⭐최종 확정 — 이 프로젝트 HOLDOUT AUC 역대 최고**:
+
+| 구간 | AUC | 시드분산 |
+|---|---|---|
+| VAL | 0.6613 | ±0.0010 |
+| OOS | 0.6253 | ±0.0015 |
+| **HOLDOUT** | **0.6823** | ±0.0008 |
+
+taker(0.633/0.645/0.667)·liquidity_sweep(0.659/0.637/0.661)·short_term_return_z(0.674/0.649/
+0.643)·orthogonal_combo(전체모집단 정정치 0.665/0.680/0.667) 전부의 HOLDOUT을 능가 — OOS·
+HOLDOUT이 VAL보다 높은 taker/orthogonal_combo와 같은 신뢰유형이면서 절대 수치도 최고.
+
+**Ablation — orthogonal_combo와 정반대 결론**:
+
+| 구성 | VAL | OOS | HOLDOUT |
+|---|---|---|---|
+| 전체 23피쳐 | 0.6613 | 0.6253 | 0.6823 |
+| 변동성레짐 제거 | 0.6350(-0.026) | 0.5985(-0.027) | 0.6494(-0.033) |
+| 세션타이밍 제거 | 0.6468(-0.015) | 0.6120(-0.013) | 0.6522(-0.030) |
+| 신호자신변수(is_bottom) 제거 | 0.6609(≈동일) | 0.6242(≈동일) | 0.6803(≈동일) |
+
+변동성레짐·세션타이밍 **둘 다 3구간 전부에서 제거하면 나빠짐**(진짜 기여) — orthogonal_combo의
+"세션타이밍 제거가 OOS/HOLDOUT을 오히려 개선"과 정반대 결과. **전체 23피쳐 그대로가 최선 —
+피쳐셋 변경 없음**. 순열중요도 1~3위(`atr_pct`/`hour_utc`/`atr_percentile_864`)가 근소한 차이로
+지배, 신호자신변수(`is_bottom`)는 사실상 기여 없음. **BTC 비확인 조건 자체는 모델 피쳐로
+노출되지 않음**(dalton과 같은 캐비엇 — 정의변수가 발동조건에만 쓰이고 Tier0 피쳐셋엔 없음).
+
+**⭐경제성(트레일링스톱 cost-gate) — 2026-08-31, 전 구간 통과·이 프로젝트 최고 안정성**:
+classifier CSV가 plain single-K(exclude-middle 아님)라 그대로 전체 raw fire 5,441건 사용
+(orthogonal_combo처럼 별도 재생성 불필요). 96개 SL×ARM×Trail 그리드 → 71/96 조합이 VAL·OOS
+동시 이익. 최종 채택 **SL=4.0×ATR/ARM=2.0×ATR/Trail=0.1×ATR**(min(VAL,OOS) 1위, 낙관/비관
+이중검증 괴리 −1.0~−1.1bp로 견고):
+
+| 구간 | 평균 트레이드 | 승률 | n |
+|---|---|---|---|
+| VAL | +7.00bp | 72.4% | 609 |
+| OOS | +6.18bp | 69.6% | 385 |
+| HOLDOUT | +3.24bp | 70.3% | 646 |
+
+**승률이 72.4%→69.6%→70.3%로 거의 안 줄어듦 — 이 프로젝트에서 가장 안정적인 경제성 패턴**
+(다른 신호들은 HOLDOUT에서 승률·bp 모두 크게 축소되는 경향). orthogonal_combo 심층검증 교훈을
+선제 반영해 무작위 진입 기준선도 확인(같은 exit구조, VAL/OOS 각 2,000봉 무작위 표본): 무작위
+승률 64.8%/65.2%(평균bp 거의 0)로 실신호보다 뚜렷이 낮음 — ARM=2.0(orthogonal_combo의 0.5보다
+훨씬 큼)이라 exit구조 자체의 승률 부풀림 효과가 작고, 경제성 우위가 진짜 신호에서 나옴을 확인.
+
+**⭐배포(2026-08-31) — 증거신호 칩 자체 교체 + dalton/volume_wick_climax 대시보드에서 제거**:
+taker/liquidity_sweep/orthogonal_combo와 동일한 방식(기존 "SMT 다이버전스" 칩 in-place 교체) —
+`METALABEL_SIGNALS`에 등록(23피쳐 그대로, 오버라이드 불필요). **같은 요청에서 사용자가
+`dalton_rule2_balance_edge`와 `volume_wick_climax`를 대시보드 증거신호에서 완전히 제거하기로
+결정** — 둘 다 Homer 업그레이드 이후 누적된 부정적 증거(리프트<1x, 경제성 트레일링스톱 FAILED)가
+결정적이었음. `SIGNAL_ORDER`(`live_evidence_signal_dashboard_20260823.py`, 단일 소스 —
+`bottom_votes`/`top_votes` 집계와 `/api/evidence-signals` 페이로드가 전부 여기서 파생)가 8→6개로
+축소, dalton의 `METALABEL_SIGNALS` 항목도 제거. **`compute_signals()`의 원 규칙 계산 자체는
+삭제하지 않음**(liquidity_sweep phase1 중복도 체크 등에서 재사용 가능해 보존) — 표시/집계에서만
+제외. app.js `EVIDENCE_SIGNAL_KO`/`SIGNAL_HORIZON`/`EVIDENCE_STRIP_CHIP_IDS`와 index.html의
+정적 칩 2개도 제거, 캐시버스터 v167. 서버에서 실제 과거 발동봉(2026-08-20 09:20 UTC, top)으로
+직접 재현해 proba=0.4459 정상 반환 확인, `/api/evidence-signals`가 정확히 6개 신호만 반환하는 것도
+확인.
+
+**상태**: 분류·경제성·배포 세 가지 전부 완료. taker/liquidity_sweep/short_term_return_z/
+orthogonal_combo에 이어 이 프로젝트 5번째로 경제성 게이트를 통과했고, taker/orthogonal_combo와
+함께 세 축 모두 마친 신호.
+
+**파일**: `scripts/research_eth_smt_divergence_metalabel_tabpfn_20260831.py`(1차 스크리닝),
+`scripts/research_eth_smt_divergence_metalabel_horizon_extend_20260831.py`(그리드 확장 +
+K_GRID 버그수정), `scripts/research_eth_smt_divergence_h72_gap_confirm_20260831.py`(H=72 GAP
+재확인), `scripts/research_eth_smt_divergence_metalabel_final_20260831.py`(4시드 VAL/OOS/
+HOLDOUT 단일노출), `scripts/research_eth_smt_divergence_metalabel_ablation_20260831.py`(ablation),
+`scripts/backtest_eth_smt_divergence_trailing_{gridsearch,optimistic_crosscheck,random_entry_
+baseline,holdout_exposure}_20260831.py`(경제성 게이트 4단계). 전부 커밋됨. phase1 진단+시각검증
+차트는 scratchpad(미커밋). 데이터
+`data/labels/eth_5m_smt_divergence_metalabel_20260831/`. 전문은
+[[eth_smt_divergence_metalabel_v1_final_20260831]].
+
+### `fib_extension_exhaustion` (v1, 분류+경제성 완료 — Homer 원래 8개 신호 중 마지막)
+
+**신호 정의**: 인과적 48봉 레그방향 판정(벡터화 argmin/argmax로 저점/고점 봉오프셋 비교, 나중에
+나온 극값이 "최근 레그의 끝점") 후, 레그 반대 극값 기준 27.2~61.8% 확장한 "소진" 구간 터치 —
+bottom = 하락레그가 자기 48봉 스윙로우를 27.2~61.8% 더 뚫음(되돌림 반등 베팅), top = 정반대.
+liquidity_sweep/smt_divergence와 같은 `swing_low_prior`/`swing_high_prior`(48봉) 재사용하는
+스윙계열 3번째 신호지만, 겹침은 6.0~9.5%로 셋 중 가장 독립적(smt_divergence는 56~61%).
+
+**표본 크기 정정**: 기존 문서 "n~190"은 2026-08-24 원 리서치가 5.5개월 VAL+OOS 풀링 창만 본
+결과였음. 전체이력(2024-01-01~, 32개월) 재측정시 bottom=1078/top=1072, Fresh-Forward
+TRAIN678/655·VAL124/136·OOS103/94·HOLDOUT173/187 — 전 구간 세자릿수로 다른 신호들과 동등하게
+다룰 수 있는 표본. 나이브 리프트는 이 저장소에서 가장 가파르게 감쇠(15분1.46~1.57x→6시간
+1.01~1.02x). 발동봉=진짜극값 23.5~27.4%뿐(중앙값지연 +4~5봉), ATR자기포함오염 없음(52.8~59.0
+%tile).
+
+**⭐⭐라벨에 MAE 캡 추가 — 이 신호에서 처음(사용자 시각검증 발견)**: 플레이스홀더(H=12/GAP=6)
+차트 HIT 예시 중 하나(2025-07-05 15:45 bottom)가 bar6(16:15)에서 MFE+2.54xATR 터치해 HIT
+판정됐으나, 같은 12봉 윈도우 bar10(16:35)에서 -6.58xATR 급락이 공존 — 사용자가 "결국 큰 손실을
+입게 된다"고 직접 지적. 대칭 배리어(손실캡=K, 1.0×K)로는 50/50 캘리브레이션 자체가 불가능함을
+실측 확인(최대달성 43.8%)해 배수를 스윕(1.0/1.5/2.0/3.0×K) → **2.0×K 채택**(50.3%달성, 기존
+HIT의 2.8%만 재분류, 지적받은 예시는 4개 배수 전부에서 뒤집힘 확인). 순서무관 전체윈도우
+`hit = MFE≥K AND MAE<2.0×K`로 재정의, 재생성한 20예시 차트(주황 제목=재분류된 사례)로 재승인.
+그리드 스크리닝의 K 재캘리브레이션(`calibrate_k_train_only`)도 이 조건 그대로 적용.
+
+**⭐K보정 이봉우리(bimodal) 버그 발견·수정**: joint hit_rate(K)는 K가 커질수록 MFE≥K는
+어려워지고 MAE<2K는 쉬워져 내부에 정점(hit_rate~0.59~0.62)을 갖고 앞뒤로 0.5crossing이 두 번
+존재 — 원래 코드(전체 그리드 최근접탐색)는 조합마다 방향 없이 아무 쪽이나 골라 H=6/GAP=12가
+K=0.55(작은쪽,"거의움직임없음+매우타이트한손실캡")로 뽑혀 **OOS AUC 0.3885(랜덤이하)로 붕괴**한 걸
+발견 — 다른 모든 신호의 K가 유의미한 크기의 움직임을 뜻한다는 관례에 맞춰 **항상 정점 이후(큰K)
+분기만 탐색**하도록 고정, 전체 27조합 재실행 후 모든 K가 HORIZON에 따라 매끄럽게 단조증가함을
+확인(예: GAP=12열 H6→48 K=1.50→3.15). 최종 승자(H=20/GAP=12)는 재실행 전후 동일 — 재현성 확인.
+
+**⭐그리드 경계값 재확인**: max(min(VAL,OOS)) 기준 H=20/GAP=12 선택(VAL0.6044/OOS0.6157) — H=20은
+GAP=12열에서 양옆(H16=0.5761,H24=0.5767)보다 높은 내부정점이라 HORIZON 확장 불필요. 단 GAP=12가
+그리드 최대값(GAP_GRID=[3,6,12])이라 5.6)절대로 GAP∈{18,24}까지 확장검증 — GAP=18이 H=20에서
+미세하게더높음(0.6062, +0.3%정도, 노이즈수준)이나 GAP=24는하락(0.6001)해 GAP=18이 진짜(얕은)
+내부정점으로 확정. **최종: HORIZON=20(100분)/GAP=18/K=2.35/K_loss=4.70**.
+
+**⭐최종 분류 성능**:
+
+| 구간 | AUC | 시드분산 |
+|---|---|---|
+| VAL | 0.6054 | ±0.0010 |
+| OOS | 0.6201 | ±0.0027 |
+| **HOLDOUT** | **0.6210** | ±0.0023 |
+
+taker(0.633/0.645/0.667)급, OOS≈HOLDOUT로 VAL보다 높은(taker/orthogonal_combo/smt_divergence와
+같은) 신뢰유형.
+
+**Ablation — 이 저장소에서 변동성레짐 의존도 최고**:
+
+| 구성 | VAL | OOS | HOLDOUT |
+|---|---|---|---|
+| 전체 23피쳐 | 0.6054 | 0.6201 | 0.6210 |
+| 변동성레짐 제거 | 0.5140(-0.091) | 0.5892(-0.031) | 0.5996(-0.021) |
+| 세션타이밍 제거 | 0.5934(-0.012) | 0.6051(-0.015) | 0.6040(-0.017) |
+| 신호자신변수(is_bottom) 제거 | 0.6041(≈동일) | 0.6142(≈동일) | 0.6185(≈동일) |
+
+변동성레짐 제거시 VAL이 거의 동전던지기(0.514)로 붕괴 — 순열중요도도 `atr_percentile_864`
+단독이 2위(`is_bottom` +0.00874)의 10배 이상(+0.10981)으로 지배, 이 저장소에서 가장 극단적인
+단일피쳐 의존. 경제적으로 타당한 메커니즘(이미 큰 레그+추가확장이 있어야 발동하는 신호라, 그
+"소진"이 실제로 깨끗하게 반전하는지는 현재 변동성 레짐에 강하게 좌우됨)이라 재설계 불필요 —
+smt_divergence와 마찬가지로 세션타이밍도 3구간전부 소폭 진짜기여, 23피쳐 그대로 유지.
+
+**⭐경제성(트레일링스톱) — 사전에 무작위기준선부터 확인, orthogonal_combo 패턴 선제감지**:
+96개 SL×ARM×Trail 그리드 → **9/96만** VAL·OOS 동시통과(이 저장소 최저 통과율), 상위 9개 전부
+ARM=0.5(그리드 최소값). 채택 **SL=3.5×ATR/ARM=0.5×ATR/Trail=0.1×ATR**(min(VAL,OOS) 1위):
+
+| 구간 | 평균 트레이드 | 승률 | n |
+|---|---|---|---|
+| VAL | +15.15bp | 93.2% | 220 |
+| OOS | +3.00bp | 87.6% | 153 |
+| HOLDOUT | +2.54bp | 90.6% | 288 |
+
+승률 88~93%가 orthogonal_combo(ARM=0.5, 승률91~96%)와 똑같은 패턴이라 **경제성 그리드 결과를
+보고하기 전에 선제적으로** 무작위 진입 기준선 확인(같은 exit구조, VAL/OOS 각 2,000봉): 무작위도
+승률 82.2%/83.7%로 높음 — **승률은 ARM=0.5 exit구조 자체효과 확정**. 그러나 **bp 기준으로는
+뚜렷한 우위 생존**: 무작위 평균bp는 VAL-2.89bp/OOS-2.11bp로 오히려 음수인데 실신호는
+VAL+15.15bp/OOS+3.00bp — 진짜 엣지는 승률이 아니라 bp에 있음(orthogonal_combo와 동일 결론).
+낙관/비관 이중검증(상위 4개 후보)도 견고(괴리 -2.31~+0.47bp). **HOLDOUT+2.54bp(승률90.6%,
+n=288,총계좌수익+7.40%)** — 이 프로젝트 6번째로 경제성 게이트 통과(taker/liquidity_sweep/
+short_term_return_z/orthogonal_combo/smt_divergence에 이어).
+
+**⚠️⚠️2026-09-01 방향뒤집기 대조군 소급감사 — 경제성게이트 통과 클레임 철회(사용자결정)**: 위
+무작위진입기준선 검정은 "이 타이밍이 아무 타이밍보다 나은가"만 확인했을 뿐, "이 타이밍에서
+방향이 맞았는가"는 검정한 적이 없었다(재사용방법론 5.8)절 신설 계기). **1단계**(배포config만
+검사): side를 전부 뒤집으니 VAL real+15.15bp>flip-6.98bp(진짜) / OOS real+3.00bp<flip+8.54bp
+(틀린방향이 더 좋음, 의심) / HOLDOUT real+2.54bp>flip-1.47bp(진짜) — 이때는 "3구간 중 2개는
+견고"로 봄. **2단계**(96셀 그리드 전체를 VAL+OOS로 재실행 후 통과 9개 전부에 방향뒤집기 적용,
+`research_fib_extension_exhaustion_costgate_full_grid_flip_audit_20260901.py`) — **결정적으로
+9/9 전부 아티팩트, 진짜 0개**. ARM=1.0/1.5/2.0(그리드 나머지 3/4)은 애초에 VAL+OOS 동시양수
+조합 자체가 하나도 없어 "덜 의심스러운 대안"이 그리드 어디에도 없음 — 이 신호의 경제성 통과
+가능구간은 ARM=0.5 하나뿐이고 그 구간 전부가 진다. HOLDOUT 개별통과는 3번째 독립표본(n=288)의
+우연일 가능성이 높음. **사용자 결정: "경제성게이트 통과" 클레임 철회**(분류/AUC는 그대로 유효,
+자동매매 미연결이라 실질 리스크 없었음). **교훈: 단일 배포config만 방향뒤집기 하면 오판 가능 —
+반드시 그리드 전체에 적용할 것.** 상세: [[eth_fib_extension_exhaustion_metalabel_v1_final_
+20260831]], 5.8)절.
+
+**상태**: 분류+ablation+배포는 완료(2026-08-31), **경제성게이트는 2026-09-01 철회**(위 참조).
+증거신호 칩 자체 교체(taker/
+liquidity_sweep/orthogonal_combo/smt_divergence와 동일 방식) — 23피쳐 그대로라 오버라이드 불필요,
+`METALABEL_SIGNALS`에 등록 + `SUSTAIN_BARS_OVERRIDE["fib_extension_exhaustion"]=20` 추가. 서버에서
+실제 과거 발동봉(2026-08-27 09:25 UTC, top)으로 직접 재현해 proba=0.4545 정상 반환 확인,
+`/api/evidence-signals`가 정확히 6개 신호를 반환하는 것과 `SIGNAL_ORDER`의 낡은 "EXPERIMENTAL/
+표본n~190" 설명 문구도 정정 완료 확인. 캐시버스터 v168.
+
+**파일**: `scripts/research_eth_fib_extension_exhaustion_metalabel_tabpfn_20260831.py`(1차
+스크리닝+K보정bimodal버그수정), `scripts/research_eth_fib_extension_exhaustion_gap_extend_
+confirm_20260831.py`(GAP 경계확장확인), `scripts/research_eth_fib_extension_exhaustion_metalabel_
+final_20260831.py`(4시드 VAL/OOS/HOLDOUT 단일노출), `scripts/research_eth_fib_extension_
+exhaustion_metalabel_ablation_20260831.py`(ablation),
+`scripts/backtest_eth_fib_extension_exhaustion_trailing_{gridsearch,optimistic_crosscheck,
+random_entry_baseline,holdout_exposure}_20260831.py`(경제성 게이트 4단계). 전부 커밋됨. phase1
+진단+시각검증 차트(원본+MAE캡수정본)는 scratchpad(미커밋). 데이터
+`data/labels/eth_5m_fib_extension_exhaustion_metalabel_20260831/`. 전문은
+[[eth_fib_extension_exhaustion_metalabel_v1_final_20260831]].
+
+## 배포 방식 — 증거신호 칩 자체 교체 (2026-08-30, V_REBOUND와 다른 패턴)
+
+`taker_delta_z_climax`/`short_term_return_z`는 사용자가 명시적으로 "V자반등처럼 새 칩을 추가하지
+말고, 두 신호가 원래 있던 증거신호 칩 자체를 교체해달라"고 요청 — V_REBOUND(liquidity_sweep)가
+"모델 내부 지표" 그룹에 완전히 새로운 독립 칩(`/api/v-rebound-signal`, 자체 klines fetch+60s
+캐시)으로 추가된 것과 다른 배포 아키텍처.
+
+**핵심 설계**: 발동 조건(`bottom_/top_<signal>`, `compute_signals()`)은 전혀 변경하지 않음 —
+모델이 그 조건으로 학습됐으므로 조건 자체를 건드리면 재검증이 필요해짐. 대신 `dashboard/server.py`의
+`load_evidence_signals()`가 이미 매 60초 캐시 주기마다 fetch/compute하는 klines(`df`)와
+`compute_signals()` 결과(`sig`)를 그대로 재사용해, 그 자리에서 TabPFN 추론만 추가로 끼워넣음
+(`scripts/live_evidence_signal_metalabel_20260829.py::compute_evidence_signal_metalabels()`) —
+별도 fetch/캐시 없이 기존 캐시 사이클에 얹혀감. 발동 시 `model_proba`/`model_side` 필드가
+signals 배열에 추가되고, `app.js`가 상태뱃지에 `"바닥 발동 · 68%"` 형태로 표시. RAW 발동 직후
+그 최초 발동 시점의 확률을 캐시해 재사용(재추론 안 함).
+
+**⚠️2026-08-30 수정 — 캐시 유지시간을 SUSTAIN_BARS(4, 20분)에서 각 신호의 학습된 HORIZON으로
+교체**: 원래는 나머지 6개(규칙기반)와 똑같이 4봉만 캐시가 유지됐는데, 이 두 신호는 모델이 실제로
+2h/1h짜리 예측을 하므로(taker=24봉, short_term_return_z=12봉) 화면이 20분 만에 조용히 꺼지는 건
+모델이 실제로 주장하는 기간보다 훨씬 짧게 보여주는 것이었다(사용자 지적, 24.03.30 사례 추적
+중 발견). `compute_evidence_signal_metalabels()`의 캐시 TTL과 `compute_signals()`의 `_active`
+둘 다 `SUSTAIN_BARS_OVERRIDE`/`METALABEL_SIGNALS[...]["horizon_bars"]`로 각각 24/12를 쓰도록
+수정, 로컬에서 경계(23봉째 True, 24봉째 False 등) 정확히 검증 후 배포. 상세:
+[[eth_evidence_signal_sustain_window_matches_trained_horizon_20260830]].
+
+**net_score/투표수 — 이제 이 두 신호만 유지시간이 다름**: `bottom_votes`/`top_votes`가 쓰는
+`_active`도 위와 같이 개별 HORIZON을 쓰도록 바뀌어서, 이 두 신호는 이제 나머지 6개(4봉)보다
+훨씬 오래(24/12봉) 투표에 남아있는다 — 2026-08-25 검증된 votes≥1~4 리프트 테이블은 그 당시
+전부 4봉 기준이었으므로 이 변경 이후 재검증 없이 그대로 신뢰하지 말 것(아직 재검증 안 함).
+
+**경제성 미검증 상태 명시**: `EVIDENCE_SIGNAL_KO`의 두 신호 detail 텍스트에 "자동매매 근거 아님,
+경제성 게이트 미검증"을 직접 명시 — liquidity_sweep의 cost-gate FAILED 전례를 고려해 처음부터
+과대해석 방지.
+
+**검증**: 서버(`llewyn`)에서 실제 과거 발동봉으로 TabPFN 추론 직접 재현(6초, proba 정상 반환),
+공개도메인(`thesan.xyz`) curl로 새 캐시버스터(`v137`)와 `/api/evidence-signals` 응답에
+`model_proba`/`model_side` 필드 존재 확인 완료. `kill -9` 필요(SIGTERM 무반응, 기존 알려진 패턴).
+
+이 "기존 캐시 사이클에 얹혀가기" 패턴은 향후 신호(4~8번)도 증거신호 칩 자체를 교체하기로 하면
+그대로 재사용 가능 — `compute_evidence_signal_metalabels()`의 `METALABEL_SIGNALS` dict에 항목만
+추가하면 됨(신호마다 프로즌 TRAIN 컨텍스트 CSV만 준비하면 나머지 배선은 공용). **단, 유지시간은
+절반만 자동 승계됨** — 칩 표시 캐시(`compute_evidence_signal_metalabels`)는 신호 이름만으로
+범용 동작해 그 신호의 `horizon_bars`만 채우면 되지만, `_active`/net_score 유지시간
+(`compute_signals()`의 `SUSTAIN_BARS_OVERRIDE`)은 완전히 별개 코드경로라 매번 명시적으로
+추가해줘야 함 — 안 하면 칩엔 몇 시간짜리 확률이 떠 있는데 그 신호의 투표 기여는 여전히 4봉만에
+사라지는 새로운 불일치가 생김.
+
+**2026-08-30 추가 — `liquidity_sweep`도 이 패턴에 합류**: 표준 템플릿으로 재학습된 뒤
+`METALABEL_SIGNALS`에 등록, `SUSTAIN_BARS_OVERRIDE["liquidity_sweep"]=30` 추가 — 이제 이
+"기존 캐시 사이클에 얹혀가기" 패턴을 쓰는 신호는 taker/short_term_return_z/dalton_rule2_
+balance_edge/liquidity_sweep 4개. V_REBOUND식 독립 칩(`/api/v-rebound-signal`)은 "V자 반등락"
+특화 감지기 하나만 남음(liquidity_sweep 증거신호 칩과는 이제 완전히 분리된 별개 모델).
+
+### ⭐저ATR 경고 배포 (2026-09-01) — 증거신호 8종 공통, 표시 전용
+
+5.9~5.11절의 발견을 사용자가 재량 판단에 쓸 수 있게 칩에 노출한 것. **모델·라벨·발동 로직을
+전혀 건드리지 않는 순수 표시 기능**이다.
+
+- **규칙**: 발동봉의 ATR이 **그 신호 자신의 발동시 ATR 중앙값**보다 낮으면 경고.
+  신호별 임계값(2026-09-01 실측, 라이브 경로 동일, HOLDOUT 이전):
+  taker 31.5 / str_z 37.0 / liquidity_sweep 26.4 / orthogonal 32.3 / smt 24.4 /
+  fib 26.2 / demarker 32.6 / kalman 36.6 (bp).
+  → `live_evidence_signal_metalabel_20260829.py`의 `METALABEL_SIGNALS[*]["atr_median_bp"]`
+- **왜 신호별인가**: ATR은 시장 하나의 값이다(동시발동 720봉에서 차이 0.0 실측). 신호마다
+  다른 건 **발동하는 봉의 ATR 분포** — str_z는 중앙값 37.0bp인 고변동에서, smt는 24.4bp인
+  저변동에서 주로 터진다. 그래서 공통 임계값을 쓰면 신호마다 의미가 달라진다.
+- **표시**: `⚠ 저변동 ATR 15.6bp < 평소 31.5bp` + 호버 툴팁. `.meter-lowatr`(styles.css),
+  `lowAtrText`(app.js), `model_atr_bp`/`model_atr_median_bp`/`model_low_atr`(server.py).
+- **⚠️표시되는 ATR은 "현재 봉"이 아니라 "발동 봉"의 값**이다(afterglow 동안 고정, 최대
+  smt 6시간 / demarker 40분). proba·tp_price와 같은 시점을 가리켜 일관되게 하려는 의도 —
+  경고의 뜻은 "지금 시장이 조용하다"가 아니라 **"이 발동을 근거로 진입했다면 수수료를 넘기기
+  어려웠을 것"**이다.
+- **검증**: 발동 경로 4건 실측 정확, True/False 양방향 동작 확인(항상 True로 굳는 버그 아님),
+  8/8 신호 신규 필드 보유, 미발동시 None 정상. 배포 후 로컬 `127.0.0.1:8787` 및 공개
+  `thesan.xyz` 둘 다 http=200.
+- **⚠️배포 중 발견한 위험**: 서버의 `app.js`가 git HEAD와도 로컬과도 다른 상태였다(다른 세션이
+  이미 배포한 버전). 그냥 push하면 그 작업을 덮어쓸 뻔했다. **내 변경만 되돌린 사본의 해시를
+  서버 것과 대조**해 정확히 일치함을 확인한 뒤에야 진행했다(로컬 = 서버 + 내 변경분).
+  **공유 저장소에서 대시보드 파일을 배포할 때는 이 대조를 먼저 할 것.**
+
+**⚠️왜 "필터"가 아니라 "경고"인가**: 8개 증거신호는 `trading_bot.py`에 언급 0건으로 **자동매매에
+연결돼 있지 않다**(대시보드 표시 전용). 그래서 5.10절의 ATR 하한은 적용할 거래 주체 자체가
+없다 — 자동매매 승격(갭분석의 "8번째 경로: 독립 브라켓 전략") 시점에야 진입 조건으로 쓸 값이다.
+지금 할 수 있는 건 재량 판단자에게 그 사실을 알리는 것뿐이고, 그게 이 배포다.
+
+## 재사용 방법론 템플릿
+
+(원본: `docs/experiments/eth_taker_delta_climax_metalabel_20260829.md` "재사용 가능한 방법론
+템플릿" 섹션 — **다음 신호 착수 전 반드시 재확인**)
+
+> 📋 **별도 프로토콜 문서 2종** — 아래 5.x)절은 발견 경위와 함께 서술돼 있고, 절차만 뽑아
+> 재사용하려면 이쪽을 볼 것:
+> - `docs/homer/v_rebound_feeder_signal_protocol.md` — "이 신호를 다른 메타신호의 **후보풀에
+>   넣어도 되는가**"
+> - `docs/homer/evidence_signal_economics_tuning_protocol.md` — "이 신호 **자체의 경제성을
+>   어떻게 재보고 어떻게 튜닝하는가**" (2026-09-01 신설, 아래 5.9~5.11절의 절차판.
+>   Step 0~5 체크리스트 + 관측 밴드 + 8종 스코어카드)
+
+### 1) 데이터/피쳐 빌더 (klines 전용)
+```python
+from analyze_eth_broad_evidence_signal_sweep_20260814 import add_broad_indicators
+from analyze_eth_creative_reversal_evidence_signals_20260814 import add_creative_indicators
+from backtest_eth_slowk_williamsr_persistence_confluence_20260814 import compute_indicators
+from live_evidence_signal_dashboard_20260823 import compute_signals
+# + ret3_z/atr_pct/atr_percentile_864/hour_utc/weekday/nyse_open_flag/er_24/
+#   realized_vol_ratio/rsi(Wilder-14) 인라인 -- 전부 taker 스크립트에 이미 구현됨
+```
+소스: `binance_data/klines/ETHUSDT/ETHUSDT-5m-api.csv`(2023-12-31~현재, 갭 0) — 이것만으로
+23개 피쳐 확보, 전체 2024~2026 이력 사용 가능(microstructure_1m류 duckdb 피쳐는 2026-05-03부터만
+있어 불가).
+
+### 2) 라벨 설계 전 진단 체크리스트 (신호마다 반드시 재측정 — 복붙 금지)
+1. 원시 hit rate의 호라이즌 민감도(15min/30min/1h/2h/4h)부터 실측
+2. 크기 분포 확인(hit의 상당수가 노이즈 크기인지)
+3. **발동봉↔실제극값 어긋남 직접 측정**(±2h 넓은 창 argmax/argmin) — taker는 +20분 지연,
+   short_term_return_z는 -75분 선행. **방향이 신호마다 반대일 수 있어 절대 복붙 금지.**
+4. 연속발동 클러스터링 확인 → 필요시 클러스터 앵커링
+5. 지속성 체크를 넣고 싶다면 단일시점 스냅샷이 아니라 **관찰창 전체 유지 여부**로(v5/V_REBOUND
+   버그 둘 다의 공통 반면교사)
+6. 예시 10개를 캔들 이미지로 시각 검증(HIT/NO_HIT 각 10개) — 숫자만으론 놓치는 라벨 버그를
+   실제로 여러 차례 잡아냄
+
+### 3) 라벨 정의 (3개 신호 공통 수렴 형태)
+발동봉 종가=entry → 고정 윈도우(신호별 상이, 12~24봉) intrabar 고/저가 기준 MFE ≥ K×ATR%면
+hit=1(터치기반, 지속성조건 없음). K는 스윕 후 균형분포(50/50 근접)로 선택.
+
+### 4) 모델 사다리
+naive → 단일임계값 → **TabPFN(Tier0 22~23개 klines파생 피쳐 전체)**. GBM/TabM 둘 다 이 샘플
+크기(5천~1만행)에서 TabPFN에 확실히 못 미침(GBM은 조기종료로 언더핏 경향) — 사실상 이 프로젝트의
+표준모델. 서버 `llewyn`, `quant_ai` conda env, `TabPFNClassifier(device="cuda")`
+(TABPFN_TOKEN 불필요, 라이선스는 https://ux.priorlabs.ai 사전동의 완료 상태 — 모델별 개별동의
+필요할 수 있음). 실행: `bash scripts/ops/handoff.sh launch server <job> -- python scripts/...py`.
+
+### 5) 필수 검증 3종 (매 신호 반복)
+1. 룩어헤드 감사 — 재사용 함수 내부를 실제로 라인단위로 읽고 확인(신뢰만 하고 넘어가지 말 것)
+2. permutation feature importance(직접 구현 — sklearn 래퍼가 TabPFN엔 안 맞을 수 있음)
+3. 상위 피쳐(특히 변동성/레짐 계열) ablation — 신호가 한 피쳐군에 몰빵됐는지 확인
+
+### 5.5) HORIZON 선택 절차 (2026-08-30, volume_wick_climax에서 발견된 방법론 결함 반영)
+HORIZON 후보를 6~8점 이상 **촘촘하게** 스크리닝할 것(3점은 부족 — volume_wick_climax는 6/12/24
+3점만 봤을 때 24가 최선으로 나왔지만, 8/12/16/20/24/30/36/48로 재검사하니 24는 VAL-OOS 격차가
+전체 중 둘째로 큰 "VAL 과적합" 지점이었고 실제로는 H=16이 VAL≈OOS로 훨씬 안정적이었음). 선택
+기준도 **단일 split(VAL)의 AUC 최댓값이 아니라 VAL-OOS 격차가 작으면서 둘 다 합리적으로 높은
+지점**(예: min(VAL,OOS) 최대화)으로 삼을 것 — "VAL이 제일 높다"만 보고 고르면 VAL 노이즈에
+과적합된 지점을 뽑을 위험이 있다. taker/short_term_return_z는 phase1 직감이 우연히 맞아서 이
+함정이 드러나지 않았을 뿐, 매 신호마다 반드시 이 기준으로 재확인할 것.
+⚠️**단, 이렇게 골라도 HOLDOUT까지 안전하다는 보장은 없음**(volume_wick_climax v2 실증 — VAL·OOS
+격차는 0.0007로 거의 일치했지만 HOLDOUT은 0.529로 오히려 이 신호 역대 최저) — VAL-OOS 격차
+기준은 "3점 그리드+VAL단독 최댓값"보다 나은 선택 절차일 뿐, HOLDOUT 일반화를 보장하진 않는다는
+걸 별개로 기억할 것.
+상세: [[eth_volume_wick_climax_metalabel_v1_weak_signal_20260830]] "후속4/후속5" 섹션.
+
+### 5.6) 그리드 경계값 자체를 의심할 것 + 자동보정 파라미터의 탐색범위도 넓게 (2026-08-31, smt_divergence)
+5.5)의 "그리드가 좁으면 위험" 교훈은 HORIZON뿐 아니라 **선택된 값이 그리드의 끝(경계)에 걸렸을
+때도 그대로 적용**된다 — min(VAL,OOS)이 그리드 끝까지 계속 오르고 있다면 그 끝값을 최종으로
+채택하지 말고 반드시 더 넓혀서 진짜 정점(양옆보다 낮은 내부 지점)을 확인할 것(smt_divergence:
+1차 그리드 H=6~48에서 H=48이 경계면서 계속 상승 중이었음 → H=60~96으로 확장해서야 H=72가 진짜
+정점임을 발견). 또한 **K처럼 매 조합마다 자동으로 재계산되는 파라미터도 자체 탐색범위(grid)가
+있다면, HORIZON이 커질수록 필요한 K도 커진다는 걸 감안해 미리 충분히 넓게 잡을 것** — 좁으면
+계산이 "가장 가까운 값"을 조용히 반환해 hit_rate가 목표(예:50%)에서 크게 벗어나는데도 에러 없이
+넘어가는 버그가 생긴다(smt_divergence: K_GRID 상한이 3.50으로 잘려있어 H=60 이상에서 필요한
+K>3.50이 3.50으로 눌려 hit_rate가 50%가 아니라 55~64%로 나왔었음 — 그리드 확장 도중 hit_rate가
+목표치에서 벗어난 걸 보고 직접 발견·수정). 상세: [[eth_smt_divergence_metalabel_v1_final_20260831]].
+
+### 5.7) 순수 MFE-터치 라벨의 맹점 — 같은 윈도우 안 대형 역행폭(MAE) 체크 + joint-K 캘리브레이션은 이봉우리일 수 있음 (2026-08-31, fib_extension_exhaustion)
+지금까지 모든 신호의 라벨은 "HORIZON 안에 MFE(최대유리폭)가 K×ATR% 이상이면 hit=1"만 봤다 —
+같은 윈도우 안에서 MAE(최대역행폭)가 얼마나 컸는지는 안 봤다. fib_extension_exhaustion에서
+사용자가 시각검증 차트로 "MFE는 터치했는데 같은 창 안에 훨씬 큰 역행이 공존하는 HIT 예시"를
+직접 잡아냈다 — 실전 포지션이라면 그 짧은 터치를 놓치고 큰 손실 쪽으로 끌려갔을 수 있다는
+지적. **앞으로 큰 변동성/역방향 스윙이 흔한 신호(이미 극단 구간에서 발동하는 신호일수록 위험)를
+설계할 때는 phase1 시각검증 단계에서 이 실패모드부터 확인할 것** — 대응은 순서무관 전체윈도우
+`hit = MFE≥K AND MAE<K_LOSS_MULT×K`로 라벨을 바꾸는 것. K_LOSS_MULT는 스윕해서 결정(대칭
+1.0×K는 50/50 캘리브레이션 자체가 불가능할 수 있음 — fib_extension_exhaustion에서 최대달성
+43.8%로 확인됨 — 2.0×K가 절충점이었으나 신호마다 다시 스윕할 것).
+
+**부작용 — K 캘리브레이션이 이봉우리(bimodal)가 될 수 있음**: MAE 캡을 추가하면 K가 커질수록
+MFE≥K조건은 어려워지지만 MAE<K_LOSS_MULT×K조건은 쉬워져, joint hit_rate(K)가 내부에 정점을
+갖는 종모양이 되고 목표(예:50%)를 앞뒤로 두 번 지날 수 있다. "전체 그리드에서 0.5에 가장
+가까운 K"를 단순 탐색하면 조합마다 방향 없이 아무 쪽이나(작은K="거의 안 움직이는데 손실캡도
+매우타이트" / 큰K="유의미한 크기 움직임, 손실캡도 비례해서 큼") 골라버릴 수 있다 —
+fib_extension_exhaustion의 H=6/GAP=12가 이 함정으로 K=0.55를 골라 OOS AUC 0.39(랜덤이하)로
+붕괴했다(다른 조합들의 K가 매끄럽게 단조증가하는데 이 조합만 튀는 걸 보고 발견). **MAE
+캡처럼 K가 두 방향으로 영향을 주는 joint 조건을 쓸 때는, 캘리브레이션 탐색을 항상 정점
+이후(큰K, "유의미한 움직임") 분기로 고정할 것** — 이 저장소의 다른 모든 신호가 K를 유의미한
+크기의 움직임으로 다루는 관례와도 일치한다. 상세:
+[[eth_fib_extension_exhaustion_metalabel_v1_final_20260831]].
+
+### 5.8) 트레일링스톱 경제성게이트 — 방향뒤집기(direction-flip) 대조군 필수 (2026-09-01, ZDC/전체 배포신호 소급감사)
+
+`simulate_trailing()`/`core.causal_futures_backtest.simulate_single_position` 기반 SL×ARM×Trail
+그리드서치에서 "VAL+OOS 동시양수"만으로 조합을 채택하면 안 된다 — **ARM(트레일링 발동임계치)이
+그리드의 낮은 쪽(예 0.1~0.5×ATR)에 있으면, 진입 방향이 맞았는지와 거의 무관하게 봉 단위 양방향
+노이즈만으로 거의 항상 발동해 승률 90%+ 허위positive를 만들 수 있다**(초저역치 ARM은 진입봉
+자체의 고가/저가 스윙만으로도 즉시 무장되고, 그 직후 아주 좁은 폭만 되돌려도 이익으로 청산되는
+구조). ZDC(지그재그방향, 이번 세션 신규 라벨) 그리드 최상위(SL=5.0/ARM=0.1/Trail=0.1, 승률
+97.6%/98.3%)가 이 패턴으로 발견됨 — side를 전부 뒤집은(일부러 틀린 방향) 대조군을 같은 조합에
+돌리니 승률이 96.0%/95.9%로 거의 그대로였다(방향과 무관하게 발동한다는 뜻).
+
+**검정 방법**: candidate population(entry_price/atr/side/forward OHLC 또는 `core.causal_futures_
+backtest`용 decision_indices/scores)의 side(또는 scores)를 전부 반전시킨 뒤 동일 그리드서치를
+다시 돌려, "실제 방향"이 "뒤집은 방향"을 VAL·OOS 양쪽에서 명확히 이겨야만(둘 다 real>flip **AND**
+real>0) 그 조합을 "진짜"로 채택한다 — 이 저장소의 "비-동어반복 베이스라인"(트리거/라벨 레벨에서
+이미 확립된 원칙, 라벨 자체가 무작위 봉보다 나은지 확인하는 것)을 **그리드서치/exit구조 레벨에도
+동일하게 적용**한 것. "무작위 진입 타이밍" 기준선(orthogonal_combo/fib_extension_exhaustion이
+이미 씀)과는 다른 축을 검정한다 — 무작위기준선은 "이 타이밍이 아무 타이밍보다 나은가", 방향뒤집기는
+"이 타이밍에서 이 방향이 반대 방향보다 나은가". **둘 다 통과해야 안전** — fib_extension_exhaustion은
+무작위기준선은 통과했지만 방향뒤집기는 실패했다(아래).
+
+**2026-09-01 전체 배포신호 소급감사 결과**(HOLDOUT은 이미 소진/보고된 수치만 진단용으로 확인,
+새 파라미터 선정에는 안 씀): giveback 9트리거(91/91=100%)/taker_delta_z_climax/short_term_
+return_z/liquidity_sweep_topdown/orthogonal_combo/smt_divergence/demarker_extreme/kalman_
+deviation_meanrev **8개 전부 진짜**. **`fib_extension_exhaustion`은 배포config 단일검사에서는
+"VAL·HOLDOUT 진짜, OOS만 이상"으로 보였으나, 96셀 그리드 전체를 VAL+OOS로 재실행해 통과한 9개
+(전부 ARM=0.5, 나머지 ARM대는 애초 통과조합 자체가 없었음) 각각에 방향뒤집기를 적용하니 9/9
+전부 아티팩트로 판명** — "경제성게이트 통과" 클레임을 사용자 결정으로 철회함(분류/AUC는 유효,
+자동매매 미연결이라 실질 리스크 없었음). v7b/dalton_rule2/trend_continuation은 애초에 VAL+OOS
+동시양수 조합이 0개라(진짜 실패) 오염과 무관.
+
+**다음 코인(BTC/SOL/XRP/HYPE) 또는 신규 신호에 트레일링스톱 경제성게이트를 적용할 때 반드시
+지킬 것**:
+1. 205셀(또는 96셀) 그리드에서 VAL+OOS 동시양수 조합을 추린 뒤, **채택 전에 그 조합 전부**에
+   방향뒤집기 대조군을 반드시 적용할 것 — combined-sort 최상위나 배포된 단일 config 하나만
+   검사하면 오판할 수 있다(fib_extension_exhaustion 사례: 단일config만 봤을 땐 "3구간 중 2개
+   견고"로 보였지만, 그리드 전체를 보니 진짜가 하나도 없었음).
+2. 특히 ARM이 그리드 최소값 근처인 조합은 기본적으로 의심할 것 — 통과조합 전부가 그 ARM대에
+   몰려있다면(fib_extension_exhaustion처럼) 더더욱.
+3. 이 저장소의 다른 신호(BTC/SOL 포팅판 포함, 아직 미감사)도 같은 `simulate_trailing`/
+   `simulate_single_position` 구조를 재사용한다면 동일 위험이 있을 수 있음 — 이번 세션에서
+   ETH 9개 배포신호만 감사했고, **BTC/SOL 등 다른 코인으로 포팅된 트레일링스톱 config는 아직
+   이 검정을 거치지 않았다**.
+
+상세: `[[feedback_trailing_stop_low_arm_noise_harvest_artifact_20260901]]`(전체 감사기록·스크립트
+목록), `[[eth_fib_extension_exhaustion_metalabel_v1_final_20260831]]`(fib_extension_exhaustion
+캐비어트 상세), `[[eth_v_rebound_multitrigger_zigzag_direction_rejected_20260901]]`(최초 발견
+경위, ZDC wick-앵커/완전wick 자체 비교도 포함).
+
+### 6) Fresh-Forward 분할 (CLAUDE.md 계약)
+TRAIN < 2025-09-01 / VAL 2025-09~12 / OOS 2026-01~03 / 예비홀드아웃(2026-04~08 등, 971일
+데이터면 충분히 확보 가능) — 홀드아웃은 세션 끝에 **딱 1회만** 노출 후 소진 처리(재사용 금지,
+피쳐/모델 선택에 다시 쓰면 OOS재사용오염과 동일 문제).
+
+## 이미 소진된 시도 (반복 금지)
+
+전부 `liquidity_sweep`(가장 깊게 탐색된 신호)에서 검증됨 — 다른 신호에 자동으로 승계되진
+않지만, 재시도 전 이 기록부터 확인할 것.
+
+**대안 모델 아키텍처 (5축 전부 TabPFN 못 넘음)**:
+- GBM(HistGradientBoosting) — 베이스라인, TabPFN에 밀림(VAL+0.020/OOS+0.014)
+- TabM — REJECTED(GBM보다도 낮음, VAL 정확도가 naive 이하)
+- 라벨 느슨화(1h 터치, 지속조건 제거) — REJECTED, "정확도 착시"(다수결 기준선도 같이 올라가
+  실제 리프트는 오히려 음수)
+- 하이브리드 zigzag 앵커(레벨 대신 확정 zigzag 피벗 사용) — REJECTED, VAL은 개선/OOS는 악화로
+  결론 불안정, 기존(3구간 검증완료)이 더 탄탄
+- xLSTM(순수 PyTorch sLSTM 직접구현, 튜닝 포함) — REJECTED, TabM과 거의 동급
+
+**신호 결합/확장 시도 (2축 전부 무효과 이하)**:
+- 다른 트리거의 이벤트 모집단을 풀링(pooling) — `dalton_rule2_balance_edge`와 풀링 시 명확히
+  악화(VAL−0.035/OOS−0.025), **8개 전체로 확장할 근거 없음**
+- 같은 이벤트에 나머지 7개 신호를 이진 피쳐로 추가(직교 결합) — null(무변화), 이미 포화 상태라
+  무효과
+- 신규 피쳐 후보 10개(Tier1: 펀딩/OI/BTC/청산맵근접도, Omega4.6.1 후보 6종) — 전부 REJECTED,
+  예외는 `rsi` 하나뿐(채택됨)
+- 정규화(regularization) 강화 — TRAIN-VAL 격차는 줄지만 VAL/OOS 실제 성능은 불변
+
+**라벨 형태판별 방법론 시도 (2026-08-30, v4→v7b 전환 과정에서 소진)**:
+- 지그재그(zigzag) 전환횟수로 "깨끗한 V/역V 모양인가" 직접 판별 — 사용자가 손그림으로 표시한
+  20개 예시 대비 파라미터(관찰창 길이 0~8봉·ATR배수 0.4~1.2배) 그리드서치 최적조합도 70%
+  일치뿐, 소표본(20개)이라 파라미터 확정 불가로 기각. 종가일관+시간제약제거 버전도 65%로
+  동급 — 순수 모양판별 알고리즘 자체가 이 문제엔 잘 안 맞는 것으로 판단.
+- taker_delta_z_climax의 `CLUSTER_GAP_MERGE`(근접 중복발화 병합) 적용 검토 — 근접 스윕 이벤트
+  개수와 "모양이 깨끗한가" 사이 상관 거의 없음(오히려 정반대 사례 존재)을 확인, 적용 대상
+  아님으로 결론.
+- 결국 채택된 해법은 형태판별이 아니라 **"애매하면 아예 제외"**(v7b) — 근본적으로 다른 접근.
+
+**Exit 구조 시도 (2026-08-30, 트레일링스톱 실패 후 "다른 로직이 필요하다"는 가설 검증)**:
+- 트레일링스톱(ATR 기반 SL+ARM+Trail) — REJECTED, 205개 조합 중 VAL·OOS 동시양수 0개.
+- 고정 TP/SL + 시간청산(라벨 자신의 30분/60분 창에 맞춘 구조) — 문자 그대로의 "30분 내 빠른
+  익절"은 트레일링스톱보다도 나쁨. 그리드를 넓히면 일부 통과하지만 해부하면 TP가 사실상
+  도달불가능해지고 시간청산이 대신 일하는 퇴화 패턴이었고, TP를 아예 제거한 SL+시간청산이
+  더 좋게 나오지만 그 OOS 양수분마저 숏 51건 쏠림(승률84.3%)이라 소표본 편중으로 신뢰
+  어려움 — REJECTED.
+- 결국 exit 구조를 3가지(트레일링/고정TP/무TP시간청산) 다 시도해도 broad하게 통과하는 조합
+  없음 — 손실 원인이 exit가 아니라 분류오류라는 기존 결론 재확인. 상세:
+  `docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md` 8)절.
+
+### 5.9) ⭐ATR 정규화 라벨의 저변동성 결함 — 절대 bp 하한을 반드시 점검할 것 (2026-09-01, V_REBOUND에서 발견, **8개 증거신호 전부에 적용 권고**)
+
+> 📋 5.9~5.11절은 **발견 경위 기록**이다. 절차만 뽑은 재사용판은
+> `docs/homer/evidence_signal_economics_tuning_protocol.md`(Step 0~5 + 관측 밴드 + 스코어카드).
+
+**발견 경위**: V자반등 매 봉 재설계의 육안검증(20예시) 중 **사용자가 차트 한 칸을 직접 짚어**
+"이건 왜 트리거에 안 잡혔냐"고 물었고, 까보니 9개 트리거 전부 자기 문턱 근처에도 못 갔다 —
+애초에 극단적인 일이 없었기 때문. **ATR이 1.471(=5.0bp)로 시장이 사실상 죽어 있었고, 그래서
+라벨의 `fast_mult >= 1.5×ATR` 문턱이 겨우 7.5bp로 내려앉아 8.5bp 노이즈에 "V자반등" 라벨이
+붙어 있었다.**
+
+**메커니즘(일반)**: 이 프로젝트의 라벨은 거의 전부 **ATR 정규화**(K×ATR 터치, N×ATR 도달 등)를
+쓴다. ATR 정규화는 변동성 레짐 간 비교를 가능하게 하는 올바른 설계지만, **저변동성 구간에서는
+문턱 자체가 거래비용 아래로 내려간다**. 그러면 라벨은 "성공"이라 말하는데 실제로는 왕복 수수료도
+못 건지는 움직임이 양성으로 학습된다.
+
+**V_REBOUND 실측(TRAIN+VAL, 사건 8,172건)**:
+- 죽은시장(ATR<10bp) 사건의 반등폭 중앙값 = 19.2bp(트리거 포착) / 18.1bp(미포착) — **왕복비용
+  10bp의 2배도 안 됨**, 20bp 미만이 57~64%.
+- 이 결함은 **미포착 사건만의 문제가 아니라 지금 배포된 모델이 학습한 데이터에도 4.0% 들어있다** —
+  즉 선재 결함이지 재설계가 만든 문제가 아니다.
+
+**처방과 그 한계(반드시 같이 읽을 것)**: `is_v` 조건에 `AND fast_move_bp >= FLOOR`를 AND로 추가하고,
+하한 미달 후보는 chop(0)이 아니라 **ambiguous(제외)**로 보낸다(그 봉은 실제로 K×ATR을 움직였으므로
+"실패"라고 가르치면 틀린 학습). 하한 스윕 결과(고정 타겟 평가로 라벨난이도 차이 통제,
+`scripts/research_eth_v_rebound_absolute_bp_floor_sweep_20260901.py`):
+
+| FLOOR | 사건수(하한없음대비) | 제거양성 ATR중앙값 | 고정타겟 AUC | delta |
+|---|---|---|---|---|
+| 0bp | 8,172 (100%) | — | 0.6891±0.0007 | 기준 |
+| 10bp | 8,169 (100%) | 5.2bp | 0.6866±0.0014 | −0.003 |
+| 20bp | 8,025 (98.2%) | 9.1bp | 0.6970±0.0013 | +0.008 |
+| 30bp | 7,489 (91.6%) | 12.4bp | 0.7104±0.0019 | **+0.021** |
+| 40bp | 6,630 (81.1%) | 14.6bp | 0.7123±0.0017 | +0.023 |
+
+**⚠️그러나 경제성 게이트에서는 이득이 사라졌다**(`backtest_eth_v_rebound_every_bar_trailing_
+costgate_20260901.py`): 같은 config(SL4.0/ARM1.5/Trail0.1)에서 FLOOR=0이 **+8.01bp**, FLOOR=30이
+**+7.43bp**로 오히려 소폭 열세, 방향뒤집기 생존율도 27/29 vs 24/30으로 낮다. **즉 절대 bp 하한은
+분류 지표는 올리지만 실제 수익성으로는 전이되지 않는다** — 9-9가 경고했던 순환성(평가 타겟이 그
+하한 라벨이라 유리)이 실제로 상당 부분이었음을 경제성이 독립적으로 밝혀낸 것.
+
+**그래서 결론은 "무조건 하한을 걸어라"가 아니다**:
+1. **진단은 반드시 하라** — 신호마다 "죽은시장(ATR 하위 10%대) 구간에서 라벨 양성의 절대 bp가
+   왕복비용의 몇 배인가"를 실측한다. 2배 미만이면 그 신호는 이 결함을 갖고 있다.
+2. **하한 도입 여부는 분류 AUC가 아니라 경제성 게이트로 판단하라.** 분류 개선만 보고 채택하면
+   순환성에 속는다(V_REBOUND가 실제로 그럴 뻔했다).
+3. **하한 미달 후보는 chop이 아니라 ambiguous로.**
+
+**✅8개 증거신호 진단 완료 (2026-09-01, 사용자 지시) — 7개 정상, `demarker_extreme` 1개만 결함**
+
+`scripts/research_eth_evidence_signal_atr_label_bp_floor_diagnostic_20260901.py` →
+`data/labels/evidence_signal_atr_bp_floor_diagnostic_20260901.json`. 지표는 **최소 자격 움직임
+= K × atr_pct × 1e4**(그 봉에서 라벨이 hit이 되려면 최소 얼마나 움직여야 하는가). 6개는 **실제
+배포된 frozen train context CSV**를 그대로 읽었고, demarker/kalman 2개는 서버 빌드라 로컬에 없어
+compute_signals()+causal ATR로 재구성했다(재구성 n=9,992/15,445가 기존 feeder 감사의 원시 발동수와
+일치해 정합성 확인됨).
+
+| 신호 | K | horizon | 문턱bp 중앙값(전체) | 저ATR 10%구간 | 비용대비(저ATR) | <10bp | <20bp | 판정 |
+|---|---|---|---|---|---|---|---|---|
+| smt_divergence | 4.20 | 72 | 100.9 | 58.8 | 5.88x | 0.0% | 0.0% | OK |
+| liquidity_sweep | 4.00 | 30 | 101.8 | 56.2 | 5.62x | 0.0% | 0.0% | OK |
+| orthogonal_combo | 3.571 | 24 | 106.0 | 51.1 | 5.11x | 0.0% | 0.0% | OK |
+| fib_extension_exhaustion | 2.35 | 20 | 62.8 | 33.8 | 3.38x | 0.0% | 0.8% | OK |
+| kalman_deviation_meanrev | 2.50 | 12 | 87.6 | 31.0 | 3.10x | 0.0% | 0.5% | OK |
+| taker_delta_z_climax | 2.00 | 24 | 58.0 | 28.4 | 2.84x | 0.0% | 1.5% | OK |
+| short_term_return_z | 1.75 | 12 | 62.0 | 22.6 | 2.26x | 0.0% | 0.9% | OK |
+| **demarker_extreme** | **0.70** | **8** | **21.7** | **8.9** | **0.89x** | **8.7%** | **43.9%** | **⚠️결함** |
+
+**⚠️`demarker_extreme` 상세**: 저변동성 10% 구간에서 최소 자격 움직임이 **8.9bp로 왕복비용 10bp보다
+작다** — hit이어도 순손실. 전체 발동의 **8.7%가 비용 미만, 43.9%가 비용 2배 미만**. 전체 중앙값
+21.7bp(2.17x)도 8개 중 최저로 애초에 마진이 얇다. 이 신호는 **배포 중이고 이 프로젝트 분류
+HOLDOUT AUC 역대 최고(0.7464)·경제성 96/96 통과** 기록을 갖고 있어, 그 헤드라인들이 이 얇은
+마진 위에서 나온 것임을 감안해 재해석해야 한다.
+
+**메커니즘(일반화)**: 위 표는 K 순으로 정확히 정렬된다 — **K가 낮을수록 위험**하고, K가 낮아진
+이유는 **horizon이 짧기 때문**이다(demarker는 horizon=8봉=40분으로 8개 중 최단, 그 짧은 창에서
+hit_rate 균형을 맞추려니 K가 0.70까지 내려감). **짧은 horizon + 낮은 K 조합이 이 결함의 위험군**
+이라는 게 재사용 가능한 판별 규칙이다.
+
+**✅demarker 경제성 게이트 저ATR 제외 재실행 완료 (2026-09-01)** —
+`scripts/backtest_eth_demarker_trailing_gridsearch_atr_floor_20260901.py` →
+`data/research/eth_demarker_atr_floor_costgate_20260901/`. 기존 게이트
+(`backtest_eth_kalman_demarker_trailing_gridsearch_20260831.py`)의 엔진·상수·96셀 그리드를
+그대로 재사용하고 **①ATR 하한 필터 ②방향뒤집기 대조군** 둘만 추가.
+
+**기준선 재현 확인**: FLOOR=0에서 96/96 통과, 최상위 SL2.0/ARM1.5/Trail0.1의 OOS **+20.20bp**로
+2026-08-31 원본 기록과 정확히 일치 — 재실행이 충실함을 검증.
+
+| FLOOR | 후보 유지 | val_n | VAL bp | OOS bp | VAL승률 | OOS승률 | 방향뒤집기 |
+|---|---|---|---|---|---|---|---|
+| 0bp | 100.0% (2,581) | 314 | +12.14 | +20.20 | 70.7% | 80.0% | 96/96 |
+| 10bp | 88.5% | 280 | +13.63 | +16.99 | 92.5%* | 95.1%* | 96/96 |
+| **20bp** | **49.8%** | **155** | **+21.61** | **+25.03** | 70.3% | 74.7% | **96/96** |
+| 30bp | 22.2% (574) | 66 | +34.79 | +35.63 | 69.7% | 75.9% | 96/96 |
+
+(*FLOOR=10의 최상위는 ARM=0.5 조합이라 승률이 다른 계열 — ARM=1.5 계열로 비교하면 70%대로 동일)
+
+**⭐kalman 대조군이 진단을 검증했다**: 같은 하한을 kalman(진단 OK, 문턱 중앙값 78.7bp)에 걸면
+사실상 무효과 — FLOOR=30에서도 후보 96.8% 유지, VAL +10.26→+10.49bp. **하한이 demarker만
+바꾸고 kalman은 안 바꾼다** = 진단이 결함 신호를 정확히 골라냈다는 독립 방증.
+
+**⚠️개선의 정체는 "정확도 향상"이 아니라 "고정비용 부담 제거"다**: ARM=1.5 계열 승률이 하한
+전 구간에서 70.7%→70.3%→69.7%로 **거의 불변**인데 bp만 오른다. 즉 신호가 똑똑해진 게 아니라
+**수수료를 못 갚는 트레이드를 안 하게 된 것**이다(ATR이 클수록 총수익이 커지는데 비용 10bp는
+고정이므로, 저ATR 트레이드에서 비용 비중이 압도적이었다). 이건 정당한 개선이지만 성격을
+정확히 이해해야 한다 — 분류기 성능 주장으로 인용하면 안 된다.
+
+**권고와 그 한계**:
+- **FLOOR=20bp가 균형점** — 후보 절반을 남기면서 VAL bp를 약 2배로(+12.14→+21.61), 표본도
+  n=155/158로 유지. FLOOR=30은 bp가 더 좋아 보이나 **n=66/79로 너무 얇다**(이 저장소가 반복
+  경고해온 소표본 패턴).
+- **⚠️HOLDOUT 문제**: demarker의 HOLDOUT은 이미 소진됐다. 하한 도입은 배포 config 변경인데
+  이를 깨끗하게 재검증할 HOLDOUT이 없다 — 도입 여부는 이 제약을 감안한 사용자 판단 사항.
+- 하한값 0/10/20/30은 **진단에서 사전 지정**한 값이지 그리드 쇼핑 결과가 아니다(선택편향 방어).
+- ⚠️앞선 진단의 demarker/kalman 수치는 로컬 재구성이었으나, **이번 경제성 재실행은 저장소 원본
+  파이프라인(build_fires + 표준 엔진)을 그대로 썼으므로** 그 캐비어트가 해소됐다.
+
+### 5.10) ATR 하한의 일반화 — 6개 증거신호 전수 스윕: 건당 bp는 전부 오르나 **총수익은 대부분 감소** (2026-09-01)
+
+demarker 결과를 받고 사용자가 "다른 증거신호도 이런 개선이 가능한가"를 물어 전수 조사했다
+(`scripts/backtest_eth_evidence_signals_atr_floor_costgate_sweep_20260901.py` →
+`data/research/eth_evidence_signals_atr_floor_costgate_20260901/`).
+
+**⚠️먼저 5.9)절 진단의 프레이밍을 정정해야 한다 — 두 질문은 다르다**:
+- **라벨 결함**(K×ATR이 비용 아래): K가 낮은 **demarker만** 해당. 5.9)절 표가 답한 질문.
+- **경제성 기회**(저ATR 구간에서 고정 10bp 비용이 수익 잠식): **ATR 자체**의 문제라 K와 무관.
+  SL/ARM/Trail이 전부 ATR 배수인데 비용만 고정이기 때문. ATR 자체로 보면 **6개 신호 전부**가
+  저ATR 구간에서 많이 거래한다(ATR<25bp 비중: smt 52.7%/liquidity_sweep 48.6%/fib 45.1%/
+  taker 38.3%/orthogonal 34.9%/str_z 21.1%). **따라서 하한은 K×ATR이 아니라 ATR(bp)에 걸어야
+  공정한 비교가 된다.**
+
+각 신호의 기존 gridsearch가 전부 같은 구조(사전빌드 fires CSV + 표준 엔진 + 96셀)라 그대로
+재사용하고 ATR 하한 필터 + 방향뒤집기 대조군만 추가. VAL+OOS만(HOLDOUT 미터치).
+
+**건당 bp — best 조합의 min(VAL,OOS)**:
+
+| 신호 | ATR중앙 | F0 | F20 | F25 | F30 | 진짜조합 F0→F25 |
+|---|---|---|---|---|---|---|
+| taker_delta_z_climax | 30.7 | +5.51 | +7.85 | +9.79 | **+11.46** | 71→90 |
+| short_term_return_z | 36.0 | +13.95 | +15.74 | +17.94 | **+18.92** | 96→96 |
+| liquidity_sweep | 25.6 | +10.74 | +13.11 | **+19.06** | +18.94 | 91→94 |
+| orthogonal_combo | 30.4 | +7.07 | +7.75 | +11.45 | **+13.72** | 63→77 |
+| smt_divergence | 24.1 | +6.18 | +9.14 | **+12.31** | +12.28 | 68→87 |
+| fib_extension_exhaustion | 26.5 | 진짜0 | 진짜0 | +0.87 | +1.12 | 0→2 |
+
+**⭐⭐그러나 총수익(건당bp × 거래수)으로 보면 그림이 뒤집힌다**:
+
+| 신호 | F25의 VAL 총합 | F25의 OOS 총합 | 판정 |
+|---|---|---|---|
+| taker_delta_z_climax | 102.5% | 105.5% | **양축 모두 개선(유일)** |
+| smt_divergence | 99.2% | 106.0% | 거의 중립 |
+| liquidity_sweep | 88.4% | 103.2% | 혼재 |
+| orthogonal_combo | 99.8% | 84.5% | 총합 감소 |
+| short_term_return_z | 97.6% | 91.2% | 총합 감소 |
+| **demarker(5.9절)** | **87.9%** | — | **총합 감소** |
+
+**⚠️5.9)절 demarker 결론 정정**: "FLOOR=20에서 VAL bp 약 2배(+12.14→+21.61)"는 **건당** 수치다.
+총합으로는 3,812→3,350(87.9%)로 **오히려 줄어든다**. 다른 신호들도 마찬가지 —
+**하한은 공짜 개선이 아니라 "거래량을 건당 품질과 맞바꾸는" 거래다.**
+
+**그래서 언제 걸 가치가 있는가**:
+1. **슬롯/자본 제약이 있으면 유리** — `trading_bot.py`에는 같은 심볼에서 여러 전략이 동시에
+   포지션을 갖는 구조가 없다(자동매매 갭분석 2번 항목). 슬롯이 희소하면 건당 품질이 지배한다.
+2. **견고성은 별도로 개선된다** — 방향뒤집기 통과 조합 수가 taker 71→90, smt 68→87,
+   orthogonal 63→77로 늘어난다. bp 논쟁과 무관한 진짜 이득.
+3. **`taker_delta_z_climax`가 유일하게 양축 모두 개선** — 하한 도입 1순위 후보.
+4. 승률은 전 신호에서 거의 불변(70%대 유지) — 5.9)절과 같은 결론: **정확도 향상이 아니라
+   고정비용 부담 제거**다.
+
+**fib_extension_exhaustion 주의**: F0/F20에서 진짜 조합 0개로, 2026-09-01 방향뒤집기 소급감사가
+경제성 클레임을 철회한 결과를 그대로 재현한다. F25/F30에서 1~2개가 나타나나 OOS가 +0.87/+1.12bp로
+사실상 0 — **하한이 이 신호를 구제하지 못한다**고 읽어야 한다.
+
+⚠️**공통 제약**: 6개 신호 전부 HOLDOUT이 이미 소진됐다. 하한 도입은 배포 config 변경인데 이를
+깨끗이 재검증할 자원이 없다.
+
+### 5.11) ⭐신규 진단축 "비용 잠식 격차" + 8종 전체지표 종합 (2026-09-01)
+
+`scripts/research_eth_evidence_signals_atr_floor_full_metrics_20260901.py`. 평균 bp만 보면
+안 된다는 이 저장소 원칙(exit 스모크테스트의 "평균43.32bp인데 중앙값-1.03bp" 왜도 아티팩트,
+ZDC의 좌왜곡)에 따라 원장 전체에서 중앙값·승패비대칭·꼬리의존도까지 계산.
+
+**⭐발견 1 — 기존 게이트들의 "win_rate"는 수익률이 아니라 정확도였다**: 전부
+`(price_move > 0)`, 즉 **비용 차감 전 방향 정확도**를 보고해왔다. 실제로 돈을 벌었는지는
+`(trade_return > 0)`이고 둘은 다르다. 이 둘의 차이가 새 진단축이 된다:
+
+**비용 잠식 격차 = 방향정확도 − 수익승률** ("방향은 맞았는데 수수료를 못 넘긴 비율"):
+
+| 신호 | 방향정확도 | 수익승률 | **격차** |
+|---|---|---|---|
+| **fib_extension_exhaustion** | 91.1% | 68.1% | **23.0pp** ⚠️ |
+| kalman_deviation_meanrev | 71.2% | 65.8% | 5.3pp |
+| demarker_extreme | 70.7% | 65.6% | 5.1pp |
+| liquidity_sweep | 70.2% | 67.7% | 2.5pp |
+| orthogonal_combo | 73.6% | 71.8% | 1.9pp |
+| short_term_return_z | 80.2% | 78.4% | 1.8pp |
+| taker_delta_z_climax | 70.7% | 69.6% | 1.1pp |
+| smt_divergence | 72.4% | 71.9% | 0.5pp |
+
+**fib의 23.0pp는 독보적** — 방향을 91% 맞히고도 4번 중 1번꼴로 수수료를 못 넘긴다. 2026-09-01
+방향뒤집기 감사가 fib의 경제성 클레임을 철회한 것이 **완전히 독립적인 지표로 재확인**된 셈이다.
+
+**발견 2 — 분포 모양은 오히려 안심할 만하다(왜도 아티팩트 아님)**: 거의 모든 신호에서
+**중앙값 > 평균**이다(예: liquidity_sweep 평균+19.06 vs 중앙값+45.15). 이건 트레일링스톱의
+전형적 서명 — 준수한 승리 다수 + 가끔 큰 손실(SL). 이 저장소가 경계해온 패턴(평균≫중앙값,
+소수 대박이 평균을 끌어올림)과 **정반대**다. 상위1% 기여도도 0.07~0.24로 낮다.
+**예외는 fib**(중앙값 +13.65 ≪ 평균 +21.68, 상위1% 기여 0.35) — 여기서도 혼자 취약.
+
+**종합 순위 (각 신호의 best 하한, VAL 기준, profit factor 순)**:
+
+| 신호 | 하한 | n | 수익승률 | 평균bp | 중앙bp | PF | 총bp | 상위1% |
+|---|---|---|---|---|---|---|---|---|
+| **demarker_extreme** | K×ATR 10 | 280 | **86.4%** | +13.63 | +12.00 | **4.08** | 3,816 | 0.14 |
+| ~~fib_extension_exhaustion~~ | 30 | 88 | 73.9% | +21.68 | +13.65 | 3.48 | 1,908 | 0.35 ⚠️ |
+| **short_term_return_z** | 25 | 386 | 78.5% | +17.94 | **+30.74** | **1.93** | **6,925** | 0.18 |
+| liquidity_sweep | 25 | 364 | 67.3% | +19.06 | +45.15 | 1.67 | 6,937 | 0.20 |
+| orthogonal_combo | 30 | 131 | 79.4% | +13.72 | +35.10 | 1.58 | 1,798 | **0.07** |
+| kalman_deviation_meanrev | (하한무효) | 749 | 65.8% | +10.26 | +19.62 | 1.51 | **7,683** | 0.24 |
+| taker_delta_z_climax | 30 | 539 | 70.1% | +12.09 | +32.18 | 1.49 | 6,519 | 0.21 |
+| smt_divergence | 25 | 283 | 68.9% | +14.95 | +49.78 | 1.41 | 4,231 | 0.16 |
+
+**판정**:
+1. **`demarker_extreme` @ K×ATR 10bp가 유일한 "순수 이득"** — 총수익이 사실상 불변(3,811→3,816)
+   인데 수익승률 65.6%→86.4%, PF 1.92→4.08, 꼬리의존 0.222→0.137. 후보도 88.5% 유지.
+   ⚠️**단 교란 요인**: 이 하한에서 best config가 ARM 1.5→0.5로 바뀌었다. 즉 하한 단독 효과가
+   아니라 하한+config 동시 변경이다. ARM=0.5는 노이즈수확 경계구간이나 방향뒤집기는
+   gap +26/+33bp로 통과했다.
+2. **`short_term_return_z`가 종합 최우수 신호** — PF 1.93·수익승률 78.5%·중앙값 +30.74·
+   총수익 3위·꼬리의존 0.18·비용잠식격차 1.8pp로 **모든 축에서 상위권이고 하한 전 구간에서 안정**.
+3. **`taker_delta_z_climax`가 하한의 최대 수혜자** — 건당·총수익 양축 모두 개선되는 유일한 신호
+   (5.10절).
+4. **`fib_extension_exhaustion`은 실패로 취급** — PF 3.48이 높아 보이나 n=88·꼬리의존 0.35·
+   진짜조합 1~2개·비용잠식 23pp. 하한이 구제하지 못한다.
+5. `kalman`은 총수익 1위(7,683)지만 건당이 가장 낮고(+10.26) 하한이 무효 — 물량으로 버는 신호.
+
+**일반 교훈(신호 무관)**: **ATR 정규화 지표로 "품질 동급"을 판정할 때는 절대 크기(bp)를 반드시 같이
+볼 것.** V_REBOUND에서 "미포착 사건도 fast_mult 중앙값 2.28로 포착(2.42)과 동급"이라는 판정이
+한 번 내려졌었는데, 정규화가 저변동성 구간의 미세 움직임을 가리고 있었다.
+
+## 공통 교훈 (신호 무관하게 적용)
+
+1. **통계적 엣지 ≠ 경제적 엣지.** liquidity_sweep이 실증사례 — 분류 AUC 통과해도 고정TP/SL
+   매매규칙 cost-gate는 별도로 반드시 통과해야 함. 앞으로 완성되는 신호도 승격 전 개별 cost-gate
+   필요.
+2. **발동봉-실제극값 어긋남 방향은 신호마다 다르고, 반드시 실측**해야 함(복붙 금지) — taker는
+   지연, short_term_return_z는 선행, 정반대로 나올 수 있음이 실증됨.
+3. **지속성/confirmed 조건은 트리거 봉 자신의 값이 아니라 트리거를 정의하는 레벨/임계값과
+   비교**해야 하고, 스냅샷이 아니라 관찰창 전체 유지 여부를 기본으로 검토할 것 — 순간포착식은
+   노이즈에 취약함이 두 신호(taker v5, V_REBOUND)에서 각각 실증됨.
+4. **한 번 라벨/모델이 통과했다고 끝난 게 아님** — 사용자가 육안 차트로 반복 재검증하는 패턴이
+   강함(V_REBOUND는 2라운드 반례 제시로 라벨 버그를 두 번 잡음).
+5. **피쳐/모델은 포화된다** — Tier0(~22~23개) 확립 후 신규 피쳐 10/10, 정규화 튜닝 전부
+   liquidity_sweep에서 무효과였음. 무작정 다음 후보를 테스트하러 가지 말고 "이미 포화 아닌가"
+   부터 의심할 것.
+6. **TabPFN이 이 데이터 규모(5천~1만행)의 사실상 기본 모델** — GBM/TabM/xLSTM 전부 못 넘음,
+   시드 분산도 극히 작음(std 0.0002~0.001).
+7. **K(hit/miss 임계값)를 50/50 균형점으로 캘리브레이션했다면, CLUSTER_GAP_MERGE 등 클러스터링
+   파라미터를 나중에 바꿀 때마다 K도 재보정할 것** — 앵커 모집단 분포 자체가 바뀌므로 이전 K가
+   더 이상 균형점이 아니게 됨(taker v4→v5에서 GAP 3→12 변경 시 K=2.0을 "unchanged"로 이월해
+   실제로는 58.9% hit rate로 드리프트, 2026-08-31 발견 — 다행히 AUC 영향은 미미했지만 항상
+   그렇다는 보장은 없음). **단, 모든 신호가 K를 50/50 목표로 캘리브레이션하는 건 아님** —
+   liquidity_sweep의 K=4.0은 HORIZON/GAP과 동급으로 VAL/OOS AUC 격차 최소화 기준 그리드서치로
+   선택된 하이퍼파라미터라 애초에 50%를 목표하지 않음(30.6% hit rate가 정상) — "50%에서 먼
+   K=이상하다"고 넘겨짚기 전에 그 신호의 K가애초에 어떤 방식으로 선택됐는지부터 확인할 것.
+   상세: [[eth_evidence_signal_cross_signal_k_calibration_audit_20260831]].
+8. **트레일링스톱 경제성게이트의 "VAL+OOS 동시양수"만으로는 부족, 방향뒤집기 대조군을 통과조합
+   전체(그리드)에 반드시 적용할 것** — 단일(배포)config만 검사하면 오판할 수 있다(fib_extension_
+   exhaustion: 배포config 하나만 봤을 땐 "3구간 중 2개 견고"로 보였으나, 96셀 그리드 전체로
+   보니 통과한 9개 전부 아티팩트였음 — "경제성게이트 통과" 클레임 철회, 분류는 유효). ARM이
+   그리드 낮은 쪽인 조합은 방향예측 실력과 무관하게 봉노이즈만으로 승률90%+ 허위positive를
+   만들 수 있음(무작위 진입 타이밍 기준선과는 다른 축의 검정). 2026-09-01 ETH 배포신호 9개
+   전수감사: 8개 진짜, fib_extension_exhaustion만 철회. 상세: 5.8)절, [[feedback_trailing_stop_
+   low_arm_noise_harvest_artifact_20260901]].
+
+## 관련되었으나 아직 미확정
+
+`scripts/research_eth_evidence_signal_reliability_gate_20260828.py`(git 미커밋) — "어떤 구간에서
+8개 신호가 특히 잘/안 맞는가"를 판별하는 게이트 분류기, 설계는 `/home/kbj20/.claude/plans/
+pure-hugging-book.md`(2026-08-28 승인)에 있으나 실행 미완료(출력 디렉토리 비어있음). 호메로스와
+목적이 인접(신호 신뢰도를 학습으로 판별)하지만 "신호별 개별 메타라벨" vs "8개 공통 레짐 게이트"로
+구조가 다름 — 호메로스 범위에 편입할지는 사용자 확인 필요.
+
+## 다음 단계
+
+0. **`liquidity_sweep`(#2) — top/down 표준 재학습으로 완전 재작업, 배포 완료(2026-08-30)**.
+   V자반등(giveback비율/확정창 특화라벨) 대신 taker와 동일한 터치기반 MFE 라벨로 재학습,
+   VAL/OOS/HOLDOUT 0.659/0.637/0.661 + 경제성 게이트(트레일링스톱) VAL+10.70bp/OOS+14.49bp/
+   홀드아웃+1.97bp 전부 통과(이 프로젝트 최초로 이 신호가 경제성까지 견고하게 통과) →
+   `METALABEL_SIGNALS` 등록, 증거신호 칩 in-place 교체 배포 완료. 위 신호별 상세 섹션 참조.
+1. **`volume_wick_climax`(#4) — 배포 보류로 종결(사용자 확정, 2026-08-30)**. 네 가지 독립
+   각도(순열중요도/ablation/Omega150여피쳐/경제성) 전부 부정적으로 수렴, HORIZON도 v2(H=16)로
+   재확정했으나 배포하지 않기로 결정. 위 신호별 상세 섹션 참조.
+2. **`dalton_rule2_balance_edge`(#5) — v1 완료(2026-08-30), 경제성 2026-08-31 FAILED 확정**.
+   레짐/상태형 신호(이산이벤트 아님)로 판명, ATR자기포함오염을 사용자가 직접 발견해 수정,
+   VAL/OOS/HOLDOUT 0.598/0.605/0.576(이 프로젝트 최고 안정성이나 리프트0.863x<1). 경제성
+   (트레일링스톱, atr_pct_288 기준 사이징) 96조합 그리드 전부 실패(VAL·OOS 동시양수 0개) —
+   volume_wick_climax/V자반등과 같은 그룹, HOLDOUT 미노출. own-feature 추가 실험은 여전히
+   사용자 결정 대기. 위 신호별 상세 섹션 참조.
+3. **`orthogonal_combo`(#6, 플래그십) — 분류+경제성+배포+심층검증 네 가지 전부 완료
+   (2026-08-31)**. 중간지대 제외 라벨(liquidity_sweep v7b 원칙 첫 이식, 사용자가 v1의 NO_HIT
+   문턱근접 몰림을 직접 발견) + ablation으로 세션타이밍 3개 제거한 20피쳐 채택 → kept-only
+   헤드라인 AUC 0.684/0.727/0.725. 경제성(트레일링스톱 SL4.0/ARM0.5/Trail0.1×ATR, exclude-middle
+   필터 이전 원본 fire 2,334건 재생성해 테스트)도 VAL+9.36bp/OOS+15.13bp/홀드아웃+3.78bp로
+   3구간 전부 통과, liquidity_sweep을 bp 기준으로 능가. 증거신호 칩 자체 교체로 배포까지 완료 —
+   20피쳐(다른 4개 신호는 23피쳐)를 쓰므로 공용 `_predict_proba`가 신호별 `feature_columns`
+   오버라이드를 지원하도록 리팩터(다른 신호는 동작 불변). **배포 직후 사용자가 "수치가 너무
+   높다"고 심층검증 요청** — kept-only AUC는 중간지대 제외로 쉬운 부분집합만 평가한 과대평가로
+   확인(전체모집단 재평가시 0.665/0.680/0.667, taker·liquidity_sweep급으로 하향, "역대 최고"
+   표현 철회), K_center calibration 누수는 실측상 무해 확인, 경제성 91~96% 승률은 exit구조
+   자체 효과(무작위진입도 승률83~85%)이나 평균bp 기준 우위는 생존. 위 신호별 상세 섹션 참조.
+4. **배포 방식은 신호마다 새로 확인할 것** — 증거신호 칩 자체 교체(taker/short_term_return_z
+   방식) vs V_REBOUND식 신규 칩 추가, 자동 승계 가정 금지(2개 신호를 배포한 세션이 명시적으로
+   남긴 원칙).
+5. **교차신호 K보정 감사(2026-08-31)** — orthogonal_combo 심층검증 문제(exclude-middle/K누수/
+   승률착시)가 다른 5개 신호에도 있는지 점검. exclude-middle·승률착시는 orthogonal_combo만의
+   문제로 확정. K누수는 대부분 무해(liquidity_sweep은 K가 애초에 50%목표가 아니라 VAL/OOS
+   AUC기준 하이퍼파라미터라 진단 부적용)했으나 **taker v5에서 진짜 재보정누락 버그 발견**(K=2.0이
+   v4때50/50이었는데 GAP변경(v5)시 재보정 안 됨, 현재58.9%hit rate) — K=2.4 재검증 AUC는 원래치와
+   거의 동일해 배포 설계 불변, 단 이 재검증이 taker의 단일노출 홀드아웃을 두 번째로 건드려 이제
+   완전 소진. 상세: [[eth_evidence_signal_cross_signal_k_calibration_audit_20260831]].
+6. **`smt_divergence`(#7) — 분류+경제성+배포 세 가지 전부 완료(2026-08-31), 이 프로젝트
+   HOLDOUT AUC 역대 최고**. ETH-BTC 교차자산 비확인(liquidity_sweep 형제신호), HORIZON=72(6h)/
+   GAP=12/K=4.20(TRAIN만 캘리브레이션), Tier0 23피쳐 그대로(ablation으로 변동성레짐·세션타이밍
+   둘 다 진짜 기여 확인 — orthogonal_combo와 정반대). VAL/OOS/HOLDOUT 0.6613/0.6253/0.6823.
+   그리드 경계값을 안 믿고 확장하다 K_GRID 상한버그를 발견·수정해 진짜 정점(H=72)을 찾았고,
+   50/50 캘리브레이션이 데이터 질을 희생하는지 ambiguous-middle 진단으로 직접 확인(건강,
+   exclude-middle 불필요). 경제성(트레일링스톱 SL4.0/ARM2.0/Trail0.1×ATR)도 VAL+7.00bp/
+   OOS+6.18bp/홀드아웃+3.24bp(승률72.4/69.6/70.3%)로 3구간 전부 통과 — 승률이 거의 안 줄어드는
+   이 프로젝트 최고 안정성, 무작위 진입 기준선 대비 검증 완료. 증거신호 칩 자체 교체로 배포까지
+   완료(23피쳐 그대로라 오버라이드 불필요). 위 신호별 상세 섹션 참조.
+7. **`volume_wick_climax`(#4)·`dalton_rule2_balance_edge`(#5) — 2026-08-31 대시보드 증거신호에서
+   완전히 제거**. smt_divergence 배포 요청과 동시에 사용자가 지시 — 둘 다 Homer 업그레이드로
+   누적된 부정적 증거(리프트<1x, 경제성 트레일링스톱 FAILED)가 결정적. `SIGNAL_ORDER`(단일
+   소스, `bottom_votes`/`top_votes`·`/api/evidence-signals`가 전부 여기서 파생)가 8→6개로 축소.
+   `compute_signals()`의 원 규칙 계산 자체는 삭제 안 함 — 표시/집계에서만 제외. 위 두 신호별
+   상세 섹션 참조.
+8. **`fib_extension_exhaustion`(#8) — 분류+경제성 완료(2026-08-31), 원래 8개 신호 전부 처리
+   완료**. 레그반대극값 기준 27.2~61.8% 확장("소진") 되돌림베팅, liquidity_sweep/smt_divergence와
+   같은 스윙계열이나 겹침 6.0~9.5%로 가장 독립적. 기존 "표본 n~190"은 5.5개월 좁은 창 기준
+   오기로 정정(전체이력 재측정시 bottom1078/top1072, 4구간 전부 세자릿수). **⭐이 신호 최초로
+   라벨에 MAE(최대역행폭) 캡 추가** — 사용자가 시각검증 차트에서 "MFE 터치+같은 윈도우 대형역행
+   공존" HIT 예시를 직접 지적, `MFE≥K AND MAE<2.0×K`(순서무관 전체윈도우)로 재정의(대칭1.0×K는
+   50/50자체불가확인, 2.0×K채택). 그리드 스크리닝 중 **K캘리브레이션 이봉우리 버그**도 발견·
+   수정(joint hit_rate(K)가 내부정점 가져 0.5crossing 2번 존재, 방향없는 최근접탐색이 H=6/GAP=12를
+   K=0.55로골라 OOS AUC0.39붕괴 — 항상 정점이후 큰K분기로 고정, 재사용방법론 5.7)절 신설). 최종
+   HORIZON=20(100분)/GAP=18/K=2.35(GAP=12가 그리드경계라 18/24까지 확장검증). VAL/OOS/HOLDOUT
+   0.6054/0.6201/0.6210. Ablation: 변동성레짐 의존도 이 저장소 최고(VAL -0.091, 거의동전 붕괴,
+   순열중요도도 atr_percentile_864 단독지배)나 경제적으로타당한메커니즘이라 23피쳐 그대로 유지.
+   경제성(트레일링스톱 SL3.5/ARM0.5/Trail0.1)도 사전에 무작위기준선부터 확인(orthogonal_combo
+   패턴 선제감지 — 승률88~93%는 ARM0.5 exit구조 자체효과, 무작위도승률82~84%로확인)한 뒤 bp
+   기준우위(VAL+15.15/OOS+3.00bp vs 무작위-2.89/-2.11bp) 생존 확인, HOLDOUT+2.54bp(승률90.6%,
+   n=288,총수익+7.40%)로 3구간 전부 통과로 봤으나(당시 "6번째 경제성게이트 통과"로 기록),
+   **⚠️2026-09-01 96셀 그리드 전체 방향뒤집기 재검증(통과9개 전부 진짜0개)으로 이 경제성게이트
+   통과 클레임은 철회됨** — 분류는 유효. **2026-08-31 배포까지 완료**(증거신호 칩 자체 교체,
+   23피쳐 그대로라 오버라이드 불필요, 분류확률만 표시하므로 배포 자체는 유효) — 이로써 Homer 원래
+   8개 신호 전부 분류+배포(또는 부정적증거로 제거) 완결(경제성게이트는 5개 신호만 유효, 위 신호별
+   상세 섹션 참조).
+
+## 원본 근거 (세션 메모리)
+
+`eth_evidence_signal_8_recheck_predl_20260829`, `eth_taker_delta_climax_metalabel_v4_final_20260829`,
+`eth_short_term_return_z_metalabel_v1_final_20260829`, `eth_liquidity_sweep_v_rebound_feature_plan_20260829`,
+`eth_liquidity_sweep_frequency_and_orphaned_labeling_wip_20260829`, `evidence_signal_quant_use_subproject`,
+`concurrent_claude_sessions_shared_repo`, `eth_evidence_signal_metalabel_dashboard_replace_deployed_20260830`,
+`eth_v_rebound_trailing_stop_costgate_marginal_20260830`(v4 트레일링 원본 + 2026-08-30 v7b 재진단 후속),
+`eth_taker_delta_climax_trailing_stop_costgate_breakthrough_20260830`,
+`feedback_trailing_stop_default_costgate_logic_20260830`.

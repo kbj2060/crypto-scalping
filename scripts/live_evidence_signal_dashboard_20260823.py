@@ -233,13 +233,26 @@ DISCLAIMER = """\
 # script if a signal's formula changes and this order needs to be re-derived, don't hand-tweak.
 SIGNAL_ORDER = [
     ("orthogonal_combo", "adaptive oscillator extreme (p_fast/p_slow<=.10 or >=.90) AND (BOTTOM: taker delta_z<=-2 OR funding_z<=-2; TOP: taker delta_z>=2 only) -- 2026-08-27: bottom leg OR-merged with the former standalone funding_oscillator_combo signal after research_eth_funding_oscillator_union_combo_20260827.py showed the union beats/matches both originals' lift in two independent windows while ~3x'ing trigger frequency (funding_oscillator_combo alone had gone up to 55 days without firing); TOP deliberately excludes funding_z (its rare OOW-window fires were below-baseline and hurt lift)"),
-    ("fib_extension_exhaustion", "EXPERIMENTAL: price extends 127.2-161.8% beyond a causally-detected 48-bar swing leg (thinner sample, n~190, than the 6 core signals -- see docs/experiments/eth_fibonacci_harmonic_geometric_evidence_20260824.md)"),
+    ("fib_extension_exhaustion", "price extends 27.2-61.8% beyond a causally-detected 48-bar swing leg's opposite extreme (\"extension exhaustion\", betting on reversal) -- 2026-08-31: TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.605/0.620/0.621; the earlier \"thinner sample, n~190\" note was a 5.5-month-window artifact, full-history recount is bottom=1078/top=1072, see docs/homer/README.md"),
     ("smt_divergence", "ETH breaks its own 48-bar swing low/high while BTC's does NOT (cross-asset non-confirmation)"),
     ("liquidity_sweep", "wick pokes past prior 48-bar swing high/low, closes back inside"),
-    ("volume_wick_climax", "volume z-score>=2 AND opposite-direction wick>=50% of bar range"),
     ("short_term_return_z", "3-bar (15m) return z-score beyond +-2.5"),
     ("taker_delta_z_climax", "net aggressive taker buy/sell volume z-score beyond +-2 (standalone)"),
-    ("dalton_rule2_balance_edge", "price within 15% of its own 48-bar range edge, gated on a low-volatility regime (rolling ATR% percentile<=30) -- real VAL/OOS-stable lift but failed a fixed-TP/SL translation test even at zero cost, not an economic-gate test, see docs/experiments/eth_dalton_rule2_balance_edge_costgate_20260815.md"),
+    ("demarker_extreme", "DeMarker(14) high/low-based oscillator >=0.90 (top) or <=0.10 (bottom) -- 2026-08-31: Homer candidate-pool signal (not one of the original 8), TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.7527/0.7157/0.7464 (this project's best classification result). Permutation importance found bb_pctb, not dem itself, is the actual classification driver -- confirmed not a lookahead bug via a dedicated audit, see docs/homer/README.md"),
+    ("kalman_deviation_meanrev", "(close - Kalman-filtered trend level)/level, rolling-288-bar z-scored, >=2.0 (top) or <=-2.0 (bottom) -- 2026-08-31: Homer candidate-pool signal, TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.6569/0.6311/0.6284, see docs/homer/README.md"),
+    # 2026-08-31: volume_wick_climax and dalton_rule2_balance_edge REMOVED from the dashboard
+    # entirely (user decision) -- both accumulated consistent negative evidence across independent
+    # angles after their Homer TabPFN metalabel upgrade: volume_wick_climax had this project's
+    # worst HOLDOUT AUC (0.529, barely above random) and a 0/12 trailing-stop cost-gate FAILED
+    # (v1 and v2); dalton_rule2_balance_edge had lift<1x (its own low-vol-regime gate added no
+    # information over the edge-proximity condition alone) and a 0/96 trailing-stop cost-gate
+    # FAILED. Neither's rule-based detection was ever proven wrong, but neither showed any
+    # validated informational or economic edge worth continuing to surface here -- see
+    # eth_volume_wick_climax_metalabel_v1_weak_signal_20260830.md /
+    # eth_dalton_rule2_balance_edge_metalabel_v1_20260830.md. compute_signals() itself still
+    # computes bottom_volume_wick_climax/top_volume_wick_climax and bottom_dalton_rule2_balance_edge/
+    # top_dalton_rule2_balance_edge unchanged (used by liquidity_sweep's phase1 overlap check and
+    # any future re-evaluation) -- only removed from this display/voting list.
 ]
 
 
@@ -503,6 +516,50 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
     out["bottom_dalton_rule2_balance_edge"] = balance_edge_low
     out["top_dalton_rule2_balance_edge"] = balance_edge_high
 
+    # --- demarker_extreme (2026-08-31 addition, Homer candidate-pool signal, not one of the
+    # original 8) -- verbatim formula from research_eth_demarker_evidence_signal_lift_check_
+    # 20260831.py::compute_demarker(), inlined here to match this module's own self-contained
+    # convention (no cross-script imports elsewhere in this file). ---
+    dem_up_move = high.diff()
+    dem_down_move = low.shift(1) - low
+    dem_de_max = dem_up_move.clip(lower=0.0).fillna(0.0)
+    dem_de_min = dem_down_move.clip(lower=0.0).fillna(0.0)
+    dem_sma_max = dem_de_max.rolling(14, min_periods=14).mean()
+    dem_sma_min = dem_de_min.rolling(14, min_periods=14).mean()
+    dem = dem_sma_max / (dem_sma_max + dem_sma_min).replace(0.0, np.nan)
+
+    # --- kalman_deviation_meanrev (2026-08-31 addition, Homer candidate-pool signal) -- same
+    # F/H/Q/R as features/engineering.py::_kalman_trend_velocity, extended to also keep the level
+    # state x[0] (that live feature only returns velocity x[1]) -- inlined verbatim from
+    # research_eth_candidate_pool_raw_lift_check_20260831.py::kalman_level_and_velocity(). ---
+    _kf_close = close.to_numpy()
+    _kf_F = np.array([[1.0, 1.0], [0.0, 1.0]])
+    _kf_H = np.array([[1.0, 0.0]])
+    _kf_Q = np.eye(2) * 1e-5
+    _kf_R = np.array([[1e-3]])
+    _kf_x = np.array([_kf_close[0], 0.0])
+    _kf_P = np.eye(2)
+    _kf_levels = np.empty(len(_kf_close))
+    for _kf_i in range(len(_kf_close)):
+        _kf_x = _kf_F @ _kf_x
+        _kf_P = _kf_F @ _kf_P @ _kf_F.T + _kf_Q
+        _kf_S = (_kf_H @ _kf_P @ _kf_H.T + _kf_R)[0, 0]
+        _kf_K = (_kf_P @ _kf_H.T).flatten() / _kf_S
+        _kf_inn = _kf_close[_kf_i] - (_kf_H @ _kf_x)[0]
+        _kf_x = _kf_x + _kf_K * _kf_inn
+        _kf_P = (np.eye(2) - np.outer(_kf_K, _kf_H)) @ _kf_P
+        _kf_levels[_kf_i] = _kf_x[0]
+    kalman_dev = pd.Series((_kf_close - _kf_levels) / _kf_levels, index=out.index)
+    kalman_dev_mean = kalman_dev.rolling(ZSCORE_WINDOW, min_periods=ZSCORE_WINDOW).mean()
+    kalman_dev_std = kalman_dev.rolling(ZSCORE_WINDOW, min_periods=ZSCORE_WINDOW).std()
+    kalman_dev_z = (kalman_dev - kalman_dev_mean) / kalman_dev_std.replace(0.0, np.nan)
+
+    out["dem"], out["kalman_dev_z"] = dem, kalman_dev_z
+    out["bottom_demarker_extreme"] = dem <= 0.10
+    out["top_demarker_extreme"] = dem >= 0.90
+    out["bottom_kalman_deviation_meanrev"] = kalman_dev_z <= -2.0
+    out["top_kalman_deviation_meanrev"] = kalman_dev_z >= 2.0
+
     bottom_cols = [f"bottom_{name}" for name, _ in SIGNAL_ORDER]
     top_cols = [f"top_{name}" for name, _ in SIGNAL_ORDER]
 
@@ -535,8 +592,97 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
     # a re-guessed round number, the exact empirical cutoff. In elapsed time this is 15 minutes
     # (offset 3 = 3 bars * 5min after the firing bar).
     SUSTAIN_BARS = 4
-    for col in bottom_cols + top_cols:
-        out[f"{col}_active"] = out[col].fillna(False).rolling(SUSTAIN_BARS, min_periods=1).max().astype(bool)
+
+    # 2026-08-30: taker_delta_z_climax/short_term_return_z are now served by trained TabPFN
+    # meta-label models (live_evidence_signal_metalabel_20260829.py) whose proba is a genuine
+    # prediction of an outcome up to that model's own trained HORIZON forward (2h/1h respectively)
+    # -- NOT a claim that the raw trigger condition itself stays elevated-probability that long
+    # (the analysis above, which found taker_delta_z_climax bottom's RAW-trigger lift falls to
+    # 0.89x by offset 8-11, is answering a different question and is NOT contradicted by this).
+    # Hiding a model's already-computed 2h/1h-ahead prediction after only 4 bars (20min), while
+    # the outcome it actually describes is still unresolved for another 1h40m/40min, understated
+    # what the model was claiming (user-identified 2026-08-30) -- these two now use their own
+    # trained HORIZON as their sustain window instead. Must match each research script's HORIZON
+    # constant exactly (research_eth_taker_delta_climax_metalabel_tabpfn_20260829.HORIZON=24,
+    # research_eth_short_term_return_z_metalabel_tabpfn_20260829.HORIZON=12) -- live_evidence_
+    # signal_metalabel_20260829.py duplicates these same two numbers for its own proba cache TTL,
+    # same manual-sync convention already used for SUSTAIN_BARS itself (see also
+    # live_liquidation_sweep_combo_signal_20260825.py's own copy of SUSTAIN_BARS=4).
+    # dalton_rule2_balance_edge added 2026-08-30 (HORIZON=30, research_eth_dalton_rule2_balance_
+    # edge_metalabel_tabpfn_20260830.py) -- same manual-sync requirement.
+    # liquidity_sweep added 2026-08-30 (HORIZON=30/150min, standard touch-based-MFE redo --
+    # research_eth_liquidity_sweep_topdown_metalabel_final_20260830.py -- replacing the V_REBOUND-
+    # model relay bridge, which was never wired into this SUSTAIN_BARS_OVERRIDE dict in the first
+    # place since it lived entirely in dashboard/server.py's own separate ACTIVE_WINDOW logic).
+    SUSTAIN_BARS_OVERRIDE = {
+        "taker_delta_z_climax": 24, "short_term_return_z": 12,
+        "liquidity_sweep": 30, "orthogonal_combo": 24, "smt_divergence": 72,
+        "fib_extension_exhaustion": 20,
+        "demarker_extreme": 8, "kalman_deviation_meanrev": 12,
+    }
+    for name, _ in SIGNAL_ORDER:
+        n_bars = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
+        out[f"bottom_{name}_active"] = out[f"bottom_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
+        out[f"top_{name}_active"] = out[f"top_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
+
+    # --- history-strip fill window (2026-09-01, user request) -- a SEPARATE concept from _active
+    # above. _active (bottom_fired/top_fired badge, votes, net_score) is UNCHANGED: fixed bar-count
+    # per signal's own trained HORIZON. This is only for the Snapshot tab's per-bar strip
+    # (dashboard/server.py's bottom_history/top_history): a single raw-fire bar was too subtle to
+    # read at a glance, so instead fill every bar from the fire through whichever comes first --
+    # this signal's own K*ATR take-profit price (the exact same K each signal's live TabPFN
+    # metalabel's tp_price uses, see live_evidence_signal_metalabel_20260829.py::_tp_price/
+    # METALABEL_SIGNALS) actually being touched, or its trained HORIZON elapsing. User explicitly
+    # confirmed this can fill the ENTIRE visible 48-bar/4h strip when the horizon genuinely runs
+    # that long (smt_divergence's 72-bar/6h horizon exceeds it) -- no cap added, unlike the
+    # rejected middle-ground design. What must still never happen (this is built directly on top of
+    # eth_dashboard_evidence_signal_history_strip_sustain_window_bug_20260831's fix) is a genuine
+    # second re-fire silently disappearing into one indistinguishable block -- so the true raw
+    # column also rides along separately (bottom_{name}/top_{name} are already exactly that) purely
+    # so the frontend can force a visible segment boundary at each actual re-fire even mid-fill
+    # (app.js::toneStripSvg's rawFire param).
+    #
+    # K must match METALABEL_SIGNALS[name]["k"] in live_evidence_signal_metalabel_20260829.py
+    # exactly -- manually synced (not imported), same reason SUSTAIN_BARS_OVERRIDE above is: that
+    # module pulls in TabPFN/torch, which compute_signals() and its other callers must not be
+    # forced to import just for eight float constants.
+    K_OVERRIDE = {
+        "taker_delta_z_climax": 2.00, "short_term_return_z": 1.75,
+        "liquidity_sweep": 4.00, "orthogonal_combo": 3.571, "smt_divergence": 4.20,
+        "fib_extension_exhaustion": 2.35,
+        "demarker_extreme": 0.70, "kalman_deviation_meanrev": 2.5,
+    }
+
+    def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str) -> pd.Series:
+        n = len(raw)
+        filled = np.zeros(n, dtype=bool)
+        raw_arr = raw.fillna(False).to_numpy()
+        high_a, low_a, close_a, atr_a = high.to_numpy(), low.to_numpy(), close.to_numpy(), atr_pct.to_numpy()
+        for i in np.flatnonzero(raw_arr):
+            end = min(i + horizon_bars, n - 1)
+            if not np.isnan(atr_a[i]):
+                target = k * atr_a[i]
+                level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
+                for b in range(i + 1, end + 1):
+                    touched = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
+                    if touched:
+                        end = b
+                        break
+            filled[i:end + 1] = True
+        return pd.Series(filled, index=raw.index)
+
+    for name, _ in SIGNAL_ORDER:
+        if name in K_OVERRIDE:
+            horizon = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
+            out[f"bottom_{name}_fill"] = _fill_until_tp_or_horizon(out[f"bottom_{name}"], K_OVERRIDE[name], horizon, "bottom")
+            out[f"top_{name}_fill"] = _fill_until_tp_or_horizon(out[f"top_{name}"], K_OVERRIDE[name], horizon, "top")
+        else:
+            # No metalabel K for this signal (shouldn't currently happen -- SIGNAL_ORDER's names are
+            # exactly K_OVERRIDE's keys today) -- fall back to the raw column so the strip degrades
+            # to single-bar blips instead of raising.
+            out[f"bottom_{name}_fill"] = out[f"bottom_{name}"]
+            out[f"top_{name}_fill"] = out[f"top_{name}"]
+
     active_bottom_cols = [f"{c}_active" for c in bottom_cols]
     active_top_cols = [f"{c}_active" for c in top_cols]
     out["bottom_votes"] = out[active_bottom_cols].sum(axis=1).astype(int)

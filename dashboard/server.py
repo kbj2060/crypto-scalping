@@ -222,7 +222,7 @@ BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
 ETH_ODYSSEY4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "state.json"
 ETH_ODYSSEY4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "closed_trades.jsonl"
 ETH_ODYSSEY4_SHADOW_BAR_SECONDS = 300
-MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT"}
+MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
 MARKET_HISTORY_CACHE_SECONDS = 300
 SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"
@@ -1059,19 +1059,20 @@ def make_app() -> web.Application:
             sig = await asyncio.to_thread(compute_signals, df, btc_df=btc_df, funding_df=funding_df)
             latest = sig.iloc[-1] if len(sig) else None
             warmed_up = latest is not None and pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))
-            # taker_delta_z_climax / short_term_return_z / dalton_rule2_balance_edge / liquidity_sweep
-            # REPLACED with their TabPFN meta-label models' live probability (2026-08-30) -- reuses
-            # this cycle's already-fetched `df` and already-computed `latest` fire state, no separate
-            # fetch/compute_signals() call. Fail-soft: a GPU/TabPFN hiccup must not block the other
-            # signals from rendering.
+            # taker_delta_z_climax / short_term_return_z / liquidity_sweep / orthogonal_combo /
+            # smt_divergence / fib_extension_exhaustion REPLACED with their TabPFN meta-label
+            # models' live probability (2026-08-30/31; dalton_rule2_balance_edge removed 2026-08-31,
+            # see METALABEL_SIGNALS' own module docstring) -- reuses this cycle's already-fetched
+            # `df` and already-computed `latest` fire state, no separate fetch/compute_signals()
+            # call. Fail-soft: a GPU/TabPFN hiccup must not block the other signals from rendering.
             metalabels: dict[str, dict] = {}
             if warmed_up:
                 try:
-                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, latest)
+                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, sig)
                 except Exception as metalabel_exc:  # noqa: BLE001
                     print(f"evidence-signal metalabel leg failed (taker_delta_z_climax/"
-                          f"short_term_return_z/dalton_rule2_balance_edge/liquidity_sweep will read "
-                          f"as not-fired this cycle): {metalabel_exc}", flush=True)
+                          f"short_term_return_z/liquidity_sweep/orthogonal_combo/smt_divergence/"
+                          f"fib_extension_exhaustion will read as not-fired this cycle): {metalabel_exc}", flush=True)
             signals_payload = []
             for name, description in EVIDENCE_SIGNAL_ORDER:
                 bcol, tcol = f"bottom_{name}", f"top_{name}"
@@ -1090,12 +1091,37 @@ def make_app() -> web.Application:
                     "top_fired": bool(latest[tacol]) if warmed_up else None,
                     "top_last_fired_ts": _evidence_last_fired_ts(sig[tcol], latest) if warmed_up else None,
                     # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
-                    "bottom_history": sig[bacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "top_history": sig[tacol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    # 2026-08-31 fix: switched from the _active (sustain-window) column to the RAW
+                    # bcol/tcol -- using _active here made smt_divergence's 72-bar/6h sustain (which
+                    # exceeds this 48-bar/4h strip) look permanently stuck on (user report). See
+                    # eth_dashboard_evidence_signal_history_strip_sustain_window_bug_20260831.
+                    # 2026-09-01 (user follow-up): a single raw-fire bar was too subtle to read at a
+                    # glance, so this now sends the "fill" column instead (active from the fire bar
+                    # through whichever comes first, this signal's own K*ATR take-profit price or
+                    # its trained HORIZON -- see compute_signals()'s _fill_until_tp_or_horizon).
+                    # User explicitly confirmed this may fill the ENTIRE visible strip when the
+                    # horizon runs that long (no cap at EVIDENCE_SIGNAL_HISTORY_BARS this time). The
+                    # true raw column rides along separately in bottom_raw_fire/top_raw_fire purely
+                    # so the frontend can force a visible segment boundary at each actual re-fire
+                    # even mid-fill (app.js::toneStripSvg) -- otherwise a second real trigger inside
+                    # an already-active fill window would silently disappear into one block again.
+                    "bottom_history": sig[f"{bcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_history": sig[f"{tcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "bottom_raw_fire": sig[bcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
+                    "top_raw_fire": sig[tcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
                 }
                 if name in metalabels:
                     entry["model_proba"] = metalabels[name]["proba"]
                     entry["model_side"] = metalabels[name]["side"]
+                    entry["model_tp_price"] = metalabels[name].get("tp_price")
+                    # 2026-09-01: 저ATR 경고 (표시 전용, 모델/발동 로직과 무관) -- 발동봉 ATR이
+                    # 이 신호 자신의 발동시 ATR 중앙값보다 낮으면 low_atr=True. 저변동 구간에선
+                    # SL/ARM/Trail이 ATR 배수로 줄어드는데 왕복비용은 고정이라 방향이 맞아도
+                    # 수수료를 못 넘기는 비율이 커진다. 근거/실측:
+                    # docs/homer/evidence_signal_economics_tuning_protocol.md
+                    entry["model_atr_bp"] = metalabels[name].get("atr_bp")
+                    entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
+                    entry["model_low_atr"] = metalabels[name].get("low_atr")
                 signals_payload.append(entry)
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see
@@ -1446,37 +1472,46 @@ def make_app() -> web.Application:
         async with ClientSession(timeout=timeout) as session:
             while True:
                 started = time.monotonic()
-                state_payload, state_etag = dashboard_state_payload()
-                if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
-                    model_indicator_sample_state["last_sample_at"] = started
-                    raw_state = (state_payload or {}).get("state") or {}
-                    model_indicator_history.append({
-                        "sampled_at": datetime.now(timezone.utc).isoformat(),
-                        "microstructure": raw_state.get("microstructure") or {},
-                        "tail_risk": raw_state.get("tail_risk") or {},
-                    })
-                ticker_rows = await asyncio.gather(
-                    *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
-                )
-                latest_event_tickers = {
-                    asset: ticker for asset, ticker in ticker_rows if ticker is not None
-                }
-                state_changed = state_etag != last_state_etag
-                if state_changed:
-                    latest_event_state = state_payload
-                    last_state_etag = state_etag
-                payload = {
-                    "state": state_payload if state_changed else None,
-                    "tickers": latest_event_tickers,
-                }
-                encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-                for queue in tuple(event_clients):
-                    if queue.full():
-                        try:
-                            queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            pass
-                    queue.put_nowait(encoded)
+                try:
+                    state_payload, state_etag = dashboard_state_payload()
+                    if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
+                        model_indicator_sample_state["last_sample_at"] = started
+                        raw_state = (state_payload or {}).get("state") or {}
+                        model_indicator_history.append({
+                            "sampled_at": datetime.now(timezone.utc).isoformat(),
+                            "microstructure": raw_state.get("microstructure") or {},
+                            "tail_risk": raw_state.get("tail_risk") or {},
+                        })
+                    ticker_rows = await asyncio.gather(
+                        *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
+                    )
+                    latest_event_tickers = {
+                        asset: ticker for asset, ticker in ticker_rows if ticker is not None
+                    }
+                    state_changed = state_etag != last_state_etag
+                    if state_changed:
+                        latest_event_state = state_payload
+                        last_state_etag = state_etag
+                    payload = {
+                        "state": state_payload if state_changed else None,
+                        "tickers": latest_event_tickers,
+                    }
+                    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                    for queue in tuple(event_clients):
+                        if queue.full():
+                            try:
+                                queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                        queue.put_nowait(encoded)
+                except Exception as exc:  # noqa: BLE001 -- one bad cycle (a malformed state file, a
+                    # transient ticker/gather hiccup, ...) must not permanently kill this loop: it is
+                    # the sole source of SSE pushes for every connected browser tab (Ops/Snapshot
+                    # alike), so an uncaught exception here would silently freeze everyone's live
+                    # updates until the next full server restart. asyncio.CancelledError subclasses
+                    # BaseException, not Exception, so server shutdown (stop_dashboard_events's
+                    # task.cancel()) still propagates through this unaffected.
+                    print(f"publish_dashboard_events cycle failed (will retry next cycle): {exc}", flush=True)
                 await asyncio.sleep(max(0.0, EVENT_POLL_SECONDS - (time.monotonic() - started)))
 
     async def start_dashboard_events(app: web.Application) -> None:
