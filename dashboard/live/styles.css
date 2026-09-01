@@ -172,15 +172,17 @@ body {
        by construction. blur(20px) is strong enough that scrolling text/chart lines read as an
        unreadable smear, not legible content -- this is the actual load-bearing property against
        a (1)-style regression, not the opacity value.
-   (4) CURRENT: user asked for full transparency (no background color at all) so the page shows
-       through exactly. NOT done as literal 0 -- with no background, sticky content scrolling
-       underneath would show through as legible text/numbers directly behind the header's own
-       text (exactly (1)'s bug again, since blur alone doesn't fire without SOME backdrop color
-       to filter). Went further toward transparent instead: rgba(18,20,28,0.55) (was 0.82) with
-       blur bumped 20px->22px to compensate (lower opacity means blur has less opaque backdrop to
-       smear, so slightly more blur keeps the smear-not-legible property from (3) intact). If
-       asked to go further, keep dropping opacity in small steps and re-check readability of
-       scrolled text under the header at each step -- don't jump straight to 0. */
+   (4) user asked for full transparency; went partway instead (rgba(18,20,28,0.55) + blur(22px),
+       was 0.82/20px) to avoid reintroducing (1)'s bug -- scrolled content showing through as
+       legible text directly behind the header's own text, since blur alone doesn't fire without
+       SOME backdrop color to filter.
+   (5) CURRENT: user explicitly confirmed the (1)-style readability tradeoff is acceptable ("안에가
+       다 비춰도 되니까") and asked again for literal full transparency. background: none, no
+       backdrop-filter -- genuinely no paint at all, so whatever's beneath (page gradient AND
+       scrolled content) shows through exactly, sharp, matching by construction. This is a
+       deliberate, explicit user choice to prioritize zero color-mismatch over the header's own
+       text staying legible against busy scrolled content -- don't "fix" this back toward opaque
+       or blurred without asking first. */
 .top {
   display: flex;
   justify-content: space-between;
@@ -189,9 +191,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(18, 20, 28, 0.55);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: none;
 }
 
 .topbar {
@@ -218,9 +218,7 @@ body {
   position: sticky;
   top: var(--sticky-top-h);
   z-index: 40;
-  background: rgba(18, 20, 28, 0.55);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: none;
 }
 /* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
    absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
