@@ -1249,6 +1249,14 @@ balance_edge/liquidity_sweep 4개. V_REBOUND식 독립 칩(`/api/v-rebound-signa
 (원본: `docs/experiments/eth_taker_delta_climax_metalabel_20260829.md` "재사용 가능한 방법론
 템플릿" 섹션 — **다음 신호 착수 전 반드시 재확인**)
 
+> 📋 **별도 프로토콜 문서 2종** — 아래 5.x)절은 발견 경위와 함께 서술돼 있고, 절차만 뽑아
+> 재사용하려면 이쪽을 볼 것:
+> - `docs/homer/v_rebound_feeder_signal_protocol.md` — "이 신호를 다른 메타신호의 **후보풀에
+>   넣어도 되는가**"
+> - `docs/homer/evidence_signal_economics_tuning_protocol.md` — "이 신호 **자체의 경제성을
+>   어떻게 재보고 어떻게 튜닝하는가**" (2026-09-01 신설, 아래 5.9~5.11절의 절차판.
+>   Step 0~5 체크리스트 + 관측 밴드 + 8종 스코어카드)
+
 ### 1) 데이터/피쳐 빌더 (klines 전용)
 ```python
 from analyze_eth_broad_evidence_signal_sweep_20260814 import add_broad_indicators
@@ -1437,6 +1445,9 @@ TRAIN < 2025-09-01 / VAL 2025-09~12 / OOS 2026-01~03 / 예비홀드아웃(2026-0
   `docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md` 8)절.
 
 ### 5.9) ⭐ATR 정규화 라벨의 저변동성 결함 — 절대 bp 하한을 반드시 점검할 것 (2026-09-01, V_REBOUND에서 발견, **8개 증거신호 전부에 적용 권고**)
+
+> 📋 5.9~5.11절은 **발견 경위 기록**이다. 절차만 뽑은 재사용판은
+> `docs/homer/evidence_signal_economics_tuning_protocol.md`(Step 0~5 + 관측 밴드 + 스코어카드).
 
 **발견 경위**: V자반등 매 봉 재설계의 육안검증(20예시) 중 **사용자가 차트 한 칸을 직접 짚어**
 "이건 왜 트리거에 안 잡혔냐"고 물었고, 까보니 9개 트리거 전부 자기 문턱 근처에도 못 갔다 —
