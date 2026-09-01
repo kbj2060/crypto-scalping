@@ -93,6 +93,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 24,  # research_eth_taker_delta_climax_metalabel_tabpfn_20260829.HORIZON (2h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 2.00,  # 2026-08-31: the K actually baked into this train_context CSV's hit column (verified
+        "atr_median_bp": 31.5,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                     # empirically: hit==1 move_atr_mult min 2.001 / hit==0 max 1.9998) -- NOT the 2.4 the
                     # cross-signal K-calibration audit found to be the "correct" re-balanced value after
                     # the v4->v5 GAP change; that correction was never redeployed (see
@@ -105,6 +106,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 12,  # research_eth_short_term_return_z_metalabel_tabpfn_20260829.HORIZON (1h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 1.75,  # verified empirically against this train_context CSV: hit==1 move_atr_mult min 1.7522 / hit==0 max 1.7499
+        "atr_median_bp": 37.0,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
     },
     "liquidity_sweep": {
         # 2026-08-30: standard touch-based-MFE redo (research_eth_liquidity_sweep_topdown_
@@ -133,6 +135,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 30,  # research_eth_liquidity_sweep_topdown_metalabel_final_20260830.HORIZON (150min) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 4.00,  # per this signal's own module docstring above (K=4.0xATR) -- this train_context CSV
+        "atr_median_bp": 26.4,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                     # doesn't carry a move_atr_mult column to re-derive it from, unlike the other 5 signals.
     },
     "orthogonal_combo": {
@@ -162,6 +165,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 24,  # research_eth_orthogonal_combo_metalabel_tabpfn_20260830.HORIZON (2h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 3.571,  # exclude-middle HIT threshold (K_hi) -- verified empirically against this
+        "atr_median_bp": 32.3,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                      # train_context CSV: hit==1 move_atr_mult min 3.5775 / hit==0 max 1.7838. The lower
                      # (K_lo=1.786) excluded-middle boundary has no TP-price meaning, only K_hi does.
     },
@@ -186,6 +190,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 72,  # research_eth_smt_divergence_metalabel_tabpfn_20260831.HORIZON (6h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 4.20,  # verified empirically against this train_context CSV: hit==1 move_atr_mult min
+        "atr_median_bp": 24.4,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                     # 4.2059 / hit==0 max 4.1978.
     },
     "fib_extension_exhaustion": {
@@ -211,6 +216,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 20,  # research_eth_fib_extension_exhaustion_metalabel_tabpfn_20260831.HORIZON (100min) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 2.35,  # verified empirically against this train_context CSV: hit==1 move_atr_mult min
+        "atr_median_bp": 26.2,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                     # 2.3510. This signal's label ALSO has a MAE<4.70xATR (2.0xK) cap, but that's a
                     # disqualifying condition on the label, not a second price target -- TP price math
                     # below only ever uses the single profit-target K.
@@ -244,6 +250,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 8,  # research_eth_kalman_demarker_gridscreen_20260831.SIGNAL_CONFIG["demarker_extreme"]["horizon"] (40min) --
                             # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 0.70,  # this train_context CSV's own hit column threshold (peak>=0.70xATR) -- see
+        "atr_median_bp": 32.6,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
                     # eth_kalman_demarker_horizon_gap_k_screening_20260831 for the full K-sweep history.
     },
     "kalman_deviation_meanrev": {
@@ -269,6 +276,7 @@ METALABEL_SIGNALS = {
         "horizon_bars": 12,  # research_eth_kalman_demarker_gridscreen_20260831.SIGNAL_CONFIG["kalman_deviation_meanrev"]["horizon"] (1h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 2.5,  # this train_context CSV's own hit column threshold (peak>=2.5xATR).
+        "atr_median_bp": 36.6,  # 발동시 ATR 중앙값(2026-09-01 실측, HOLDOUT 이전) -- 저ATR 경고 기준선
     },
 }
 
@@ -355,7 +363,9 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
     read-only recovery (same NaN/inference/caching code as a fresh fire), not a new firing rule."""
     n = len(sig)
     if n == 0:
-        return {name: {"fired": False, "side": None, "proba": None, "tp_price": None} for name in METALABEL_SIGNALS}
+        return {name: {"fired": False, "side": None, "proba": None, "tp_price": None, "atr_bp": None,
+                       "atr_median_bp": cfg.get("atr_median_bp"), "low_atr": None}
+                for name, cfg in METALABEL_SIGNALS.items()}
     latest_ts = pd.Timestamp(sig["timestamp"].iloc[-1])
     indicator_frame = None  # built lazily, only if at least one signal actually needs a fresh call
 
@@ -372,17 +382,33 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
             indicator_frame["kalman_dev_z"] = rolling_zscore(pd.Series(kalman_dev)).to_numpy()
         return indicator_frame
 
+    def _low_atr_fields(signal_name: str, atr_pct: float) -> dict:
+        """저ATR 경고 (2026-09-01 신설). 발동봉의 ATR이 이 신호 자신의 발동시 ATR 중앙값보다
+        낮으면 low_atr=True. 근거: 저변동성 구간에서는 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데
+        왕복비용 10bp는 고정이라, 방향이 맞아도 수수료를 못 넘기는 비율이 커진다 -- 실측상
+        '방향정확도 - 수익승률' 격차가 fib 23.0pp / kalman 5.3pp / demarker 5.1pp였다
+        (docs/homer/evidence_signal_economics_tuning_protocol.md).
+
+        ⚠️이건 표시 전용 정보다. 모델 확률(proba)은 전혀 건드리지 않으며, 발동 여부도 안 바꾼다."""
+        median_bp = METALABEL_SIGNALS[signal_name].get("atr_median_bp")
+        if atr_pct is None or not np.isfinite(atr_pct) or median_bp is None:
+            return {"atr_bp": None, "atr_median_bp": median_bp, "low_atr": None}
+        atr_bp = float(atr_pct) * 1e4
+        return {"atr_bp": round(atr_bp, 1), "atr_median_bp": median_bp, "low_atr": bool(atr_bp < median_bp)}
+
     def _infer_at(signal_name: str, pos: int, side: str, bar_ts: pd.Timestamp) -> dict:
         frame = _ensure_indicator_frame()
         row = frame.iloc[pos].copy()
         row["is_bottom"] = 1 if side == "bottom" else 0
         tp_price = _tp_price(row["close"], row["atr_pct"], METALABEL_SIGNALS[signal_name]["k"], side)
+        atr_fields = _low_atr_fields(signal_name, row["atr_pct"])
         feature_cols = METALABEL_SIGNALS[signal_name].get("feature_columns", FEATURE_COLUMNS)
         if row[feature_cols].isna().any():
-            return {"fired": True, "side": side, "proba": None, "tp_price": tp_price}
+            return {"fired": True, "side": side, "proba": None, "tp_price": tp_price, **atr_fields}
         proba = _predict_proba(signal_name, row)
-        _LAST_FIRE_CACHE[signal_name] = {"bar_ts": bar_ts, "side": side, "proba": proba, "tp_price": tp_price}
-        return {"fired": True, "side": side, "proba": proba, "tp_price": tp_price}
+        _LAST_FIRE_CACHE[signal_name] = {"bar_ts": bar_ts, "side": side, "proba": proba,
+                                          "tp_price": tp_price, **atr_fields}
+        return {"fired": True, "side": side, "proba": proba, "tp_price": tp_price, **atr_fields}
 
     out: dict[str, dict] = {}
     for signal_name in METALABEL_SIGNALS:
@@ -399,7 +425,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
                 and 0 <= (latest_ts - cached["bar_ts"]).total_seconds() / 300 < horizon_bars
             )
             if cache_valid:
-                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price")}
+                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price"), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
                 continue
             out[signal_name] = _infer_at(signal_name, n - 1, side, latest_ts)
             continue
@@ -407,7 +433,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         # not currently firing on THIS bar -- afterglow window from a previous fire this process
         # itself already saw, if still within horizon_bars
         if cached is not None and 0 <= (latest_ts - cached["bar_ts"]).total_seconds() / 300 < horizon_bars:
-            out[signal_name] = {"fired": True, "side": cached["side"], "proba": cached["proba"], "tp_price": cached.get("tp_price")}
+            out[signal_name] = {"fired": True, "side": cached["side"], "proba": cached["proba"], "tp_price": cached.get("tp_price"), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
             continue
 
         # restart-recovery: no live memory of a fire, but one may still be sitting in the raw
@@ -415,7 +441,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         bottom_pos = _find_recent_raw_fire_pos(sig[bcol], horizon_bars, n) if bcol in sig.columns else None
         top_pos = _find_recent_raw_fire_pos(sig[tcol], horizon_bars, n) if tcol in sig.columns else None
         if bottom_pos is None and top_pos is None:
-            out[signal_name] = {"fired": False, "side": None, "proba": None, "tp_price": None}
+            out[signal_name] = {"fired": False, "side": None, "proba": None, "tp_price": None, "atr_bp": None, "atr_median_bp": METALABEL_SIGNALS[signal_name].get("atr_median_bp"), "low_atr": None}
             continue
         if top_pos is None or (bottom_pos is not None and bottom_pos >= top_pos):
             anchor_pos, anchor_side = bottom_pos, "bottom"

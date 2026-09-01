@@ -302,6 +302,9 @@ body {
 .meter-fill.neutral { background: var(--muted); }
 .meter-pct { font: 700 10px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
 .meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+/* 2026-09-01 저ATR 경고 (표시 전용, 모델/발동 로직 무관 -- app.js의 lowAtrText 참고).
+   meter-price와 같은 열에 한 줄 더 쌓이므로 같은 크기/줄바꿈 규칙을 따르되 색만 warn 계열. */
+.meter-lowatr { font: 700 10px/1.15 var(--font-mono); color: var(--warn, #d98a2b); white-space: nowrap; }
 
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border

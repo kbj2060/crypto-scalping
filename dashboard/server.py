@@ -1114,6 +1114,14 @@ def make_app() -> web.Application:
                     entry["model_proba"] = metalabels[name]["proba"]
                     entry["model_side"] = metalabels[name]["side"]
                     entry["model_tp_price"] = metalabels[name].get("tp_price")
+                    # 2026-09-01: 저ATR 경고 (표시 전용, 모델/발동 로직과 무관) -- 발동봉 ATR이
+                    # 이 신호 자신의 발동시 ATR 중앙값보다 낮으면 low_atr=True. 저변동 구간에선
+                    # SL/ARM/Trail이 ATR 배수로 줄어드는데 왕복비용은 고정이라 방향이 맞아도
+                    # 수수료를 못 넘기는 비율이 커진다. 근거/실측:
+                    # docs/homer/evidence_signal_economics_tuning_protocol.md
+                    entry["model_atr_bp"] = metalabels[name].get("atr_bp")
+                    entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
+                    entry["model_low_atr"] = metalabels[name].get("low_atr")
                 signals_payload.append(entry)
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see

@@ -95,6 +95,14 @@ let lastSeenProvisionalBarOpenUtc = null;
 // strip with one extra live bar every ~10s without waiting on (or duplicating) the 5-min confirmed
 // fetch. Keyed by signal name (same keys as EVIDENCE_STRIP_CHIP_IDS).
 let evidenceHistoryBySignal = {};
+// 2026-09-01 (user request): V자반등도 증거신호처럼 진행중인(아직 안 닫힌) 봉에서 신호가 뜨게 해달라는
+// 요청 -- 새 fetch/새 TabPFN 호출을 추가하는 대신, 이미 10초마다 도는 evidence-signals-provisional
+// 응답(9트리거 중 8개와 완전히 동일한 이름/정의)을 여기 저장해뒀다가 render()에서 재사용. TabPFN은
+// 여전히 CONFIRMED(닫힌 봉) 경로에서만 돔 -- 진행중 미리보기는 "트리거가 지금 형성중"만 알려줄 뿐
+// rebound/continuation 판정은 하지 않음(그 판정엔 닫힌 봉 기준 23피쳐가 필요, 증거신호 진행중
+// 미리보기가 확률 없이 발동여부만 보여주는 것과 같은 이유). local_extreme(9번째 트리거)은 구조상
+// 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
+let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see liquidationVolumeGaugeHtml()) --
@@ -855,7 +863,7 @@ function stripAxisHtml(times, timeFmtKind) {
 // single past tone can't reconstruct -- "웜업 중", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
 const STRIP_BAR_LABEL_BY_TONE = {
-  v_rebound: { good: "급등", bad: "급락", flat: "미반등", neutral: "대기" },
+  v_rebound: { good: "급등", bad: "급락", flat: "미반등", neutral: "신호 없음" },
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
@@ -957,10 +965,13 @@ function toggleSignalDetail(btn, key) {
 const MODEL_INDICATOR_MEANING = {
   v_rebound: {
     "웜업 중": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
-    "대기": "최근 30분 안에 유동성 스윕(지지/저항선을 살짝 뚫었다 되돌아온 것)이 없었어요 — 지금은 참고할 신호가 없어요.",
+    "신호 없음": "최근 30분 안에 유동성 스윕(지지/저항선을 살짝 뚫었다 되돌아온 것)이 없었어요 — 지금은 참고할 신호가 없어요.",
     "급등": "방금 하락스윕(지지선을 살짝 뚫었다 되돌아온 것) 후 TabPFN 모델이 '진짜 반등'(V자반등)이라고 판단했어요 — 30분 내 종가로 1.5×ATR 이상 반등했고, 60분 전체에서도 정점 대비 20% 이하만 반납할 거라는 판정이에요(정밀도 검증구간 62~74%, 이 라벨 평균발생률의 1.7배로 비교적 신뢰 가능한 쪽). 자세한 계산 방식은 '자세히'를 확인하세요.",
     "급락": "방금 상승스윕(저항선을 살짝 뚫었다 되돌아온 것) 후 TabPFN 모델이 '진짜 반전'(V자반등)이라고 판단했어요 — 30분 내 종가로 1.5×ATR 이상 반전했고, 60분 전체에서도 정점 대비 20% 이하만 반납할 거라는 판정이에요(정밀도 검증구간 62~74%, 1.7배로 비교적 신뢰 가능한 쪽). 자세한 계산 방식은 '자세히'를 확인하세요.",
     "미반등": "방금 유동성 스윕이 나왔지만, TabPFN 모델이 '반등 시도 자체가 없었다'고 판단했어요 — 30분 안에 종가가 1.0×ATR도 못 갔다는 뜻일 뿐, 반대방향으로 뚜렷하게 움직였다는 뜻은 아니에요(정밀도 70~75%지만 이 라벨의 다수쪽이라 실제 추가정보는 1.2배 정도로 약함). 급등/급락(진짜 반등 콜)보다 근거가 약한 판정이라 방향 없이 회색으로 표시돼요 — 자세한 계산 방식은 '자세히'를 확인하세요.",
+    "진행중(미확정) 바닥": "지금 아직 닫히지 않은 봉에서 반등 후보 트리거(9개 중 일부)가 이미 발동했어요 — 봉이 마감되고 TabPFN이 채점해야 실제 반등 콜인지 알 수 있는 예비 힌트예요. 확정 아님, 취소될 수도 있어요.",
+    "진행중(미확정) 천장": "지금 아직 닫히지 않은 봉에서 반전 후보 트리거(9개 중 일부)가 이미 발동했어요 — 봉이 마감되고 TabPFN이 채점해야 실제 반전 콜인지 알 수 있는 예비 힌트예요. 확정 아님, 취소될 수도 있어요.",
+    "진행중(미확정) 양쪽": "지금 아직 닫히지 않은 봉에서 반등과 반전 후보 트리거가 동시에 발동했어요 — 봉이 마감돼야 어느 쪽이 실제 콜이 될지(혹은 둘 다 아닐지) 알 수 있는 예비 힌트예요. 확정 아님.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
@@ -990,11 +1001,11 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
-  v_rebound: "[계산] 유동성스윕(48봉 causal 스윙 고/저 이탈 후 종가 재진입, 이 대시보드의 liquidity_sweep과 동일 정의)이 발생하면 그 순간 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력합니다. 학습 컨텍스트는 2024-01~2025-08 스윕 중 '확실한' 3,783건에 고정(라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
-    "[기준] 확률≥50%면 '반등 콜'(스윕 후 30분 내 종가로 ATR(스윕 전 기준) 1.5배 이상 반등 AND 60분 전체에서 정점 대비 20% 이하만 반납), 미만이면 '미반등 콜'(30분 안에 종가가 ATR 1배에도 못 미침 — 반등 시도 자체가 없었던 경우만이고, 반대방향으로 뚜렷하게 움직였다는 뜻은 아닙니다). 이 둘 사이(느리게 반등했거나, 반등은 했는데 많이 반납한 애매한 경우, 전체의 58%)는 라벨 자체가 없어 **학습에서 통째로 제외** — 애매한 경우를 억지로 어느 한쪽으로 분류하지 않기 위한 설계입니다. 최근 60분 안에 스윕이 없으면 '대기'.\n" +
-    "[배지 표시: 반등 콜만 급등/급락, 미반등 콜은 별도 '미반등'] 2026-08-31 두 차례 정정했습니다. 처음엔 '반등'/'반락'을 콜 이름 그대로 노출해서 상승스윕 후 반등 콜처럼 실제로는 하락이 예상되는데도 '반등'이라고 표시되며 빨간색이 뜨는 경우가 있었습니다(사용자 지적) — 그래서 반등/미반등 콜을 스윕 방향과 조합해 항상 급등(초록)/급락(빨강) 중 하나로 바꿨습니다. 그런데 미반등 콜은 '반등 시도 자체가 없었다'는 뜻일 뿐 반대방향으로 결정적으로 움직였다는 근거가 아닌데도 급등/급락이라는 강한 단어를 그대로 썼던 게 다시 지적받아(사용자 지적), 지금은 **진짜 반등(V자반등) 콜만** 스윕 방향과 조합해 급등(하락스윕 후 반등, 초록)/급락(상승스윕 후 반등, 빨강)으로 표시하고, **미반등 콜은 스윕 방향과 무관하게 항상 '미반등'**(회색, 중립 취급)으로 따로 표시합니다 — 활동-스트립을 마우스오버했을 때 나오는 막대별 라벨도 동일한 기준(백엔드 tone: good/bad/flat/neutral)으로 구분됩니다. '반락 콜'이라는 예전 이름 자체도 마치 반대방향으로 결정적으로 움직였다는 뜻처럼 들려 실제 정의와 어긋나 '미반등 콜'로 정정했습니다.\n" +
-    "[의미] 2026-08-30 사용자가 육안으로 기존 라벨('반등' 판정에 애매한 사례가 섞여 보인다는 지적)을 재검토해 라벨을 근본적으로 재설계 — 애매한 중간지대를 제외하고 확실한 양극단만 대비하도록 바꾸자 시간순으로 분리된 3개 독립 구간 전부에서 큰 폭으로 개선됐습니다: VAL AUC 0.663→**0.734**, OOS 0.667→**0.762**, 예비 홀드아웃 0.682→**0.779**(전 구간·전 시드 일관, 다만 학습에 쓰는 이벤트 자체가 전체의 42%로 줄어든 '더 쉬운 문제'라는 점도 감안해야 합니다). **콜별 정밀도**(2026-08-30, 스윕 방향과 무관하게 콜 기준으로만 측정 — 급등/급락별로 세분화된 정밀도는 아직 측정 안 함): '반등 콜' 판정은 VAL·OOS 각각 62.3%/74.1%(평균발생률 35~43% 대비 1.7배) — 상대적으로 믿을 만한 쪽입니다. '미반등 콜' 판정은 75.0%/69.8%로 숫자만 보면 높아 보이지만 원래 이 라벨의 다수쪽이라 실제 추가정보는 1.2배뿐입니다.\n" +
-    "[유의] 이 신호의 가치는 '스윕이 반전을 예측한다'는 게 아니라 '스윕이 이미 발생했다는 조건 안에서 어느 쪽으로 갈지 더 가려낸다'는 2차 정제입니다. **⚠️자동매매 경제성 게이트: 라벨을 새로 바꾼 뒤에도(ATR 트레일링스톱 방식으로 재검증) 여전히 실패했습니다**(2026-08-30, VAL·OOS를 각각 독립으로 봤을 때 둘 다 동시에 이익인 설정을 200개 이상 조합에서 하나도 찾지 못함 — 가장 좋아 보이는 조합도 한쪽 구간은 이익, 다른쪽은 손실로 갈렸습니다). 분류 정확도는 크게 올랐지만 그게 자동매매 수익으로 바로 이어지진 않았습니다. 봇 내부 상태가 아니라 대시보드 서버가 별도로 계산합니다 — 실제 매매 결정에는 연결되지 않았고, 재량 판단의 한 재료로만 쓰세요(반등 콜에서 나온 급등/급락이 미반등보다 상대적으로 더 신뢰 가능하며, 이제 화면에서도 미반등은 급등/급락과 별도 배지로 구분됩니다). 전체 방법론: docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md.",
+  v_rebound: "[계산] 9개 트리거 중 하나라도 발동(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme, OR 결합 — liquidity_sweep 하나만 게이트하던 예전 방식에서 2026-08-31 9트리거 통합으로 교체됨, 실측상 진짜 V자반등의 70.6%가 스윕 없이 발생함을 확인한 게 계기)하면 그 순간 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력합니다. 학습 컨텍스트는 9트리거 통합 TRAIN 17,961건 중 무작위 서브샘플 6,000건에 고정(자연 라벨비율 32.5%→32.8% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
+    "[기준] 확률≥50%면 '반등 콜'(트리거 후 30분 내 종가로 ATR(트리거 전 기준) 1.5배 이상 반등 AND 60분 전체에서 정점 대비 20% 이하만 반납), 미만이면 '미반등 콜'(30분 안에 종가가 ATR 1배에도 못 미침 — 반등 시도 자체가 없었던 경우만이고, 반대방향으로 뚜렷하게 움직였다는 뜻은 아닙니다). 이 둘 사이(애매한 경우)는 라벨 자체가 없어 **학습에서 통째로 제외** — 라벨 정의 자체(giveback 방식)는 9트리거 통합 이후에도 안 바뀌었습니다. 최근 60분 안에 트리거가 없으면 '신호 없음'.\n" +
+    "[배지 표시: 반등 콜만 급등/급락, 미반등 콜은 별도 '미반등'] 2026-08-31 두 차례 정정했습니다. 처음엔 '반등'/'반락'을 콜 이름 그대로 노출해서 상승 트리거 후 반등 콜처럼 실제로는 하락이 예상되는데도 '반등'이라고 표시되며 빨간색이 뜨는 경우가 있었습니다(사용자 지적) — 그래서 반등/미반등 콜을 트리거 방향과 조합해 항상 급등(초록)/급락(빨강) 중 하나로 바꿨습니다. 그런데 미반등 콜은 '반등 시도 자체가 없었다'는 뜻일 뿐 반대방향으로 결정적으로 움직였다는 근거가 아닌데도 급등/급락이라는 강한 단어를 그대로 썼던 게 다시 지적받아(사용자 지적), 지금은 **진짜 반등(V자반등) 콜만** 트리거 방향과 조합해 급등(하락 트리거 후 반등, 초록)/급락(상승 트리거 후 반등, 빨강)으로 표시하고, **미반등 콜은 트리거 방향과 무관하게 항상 '미반등'**(회색, 중립 취급)으로 따로 표시합니다 — 활동-스트립을 마우스오버했을 때 나오는 막대별 라벨도 동일한 기준(백엔드 tone: good/bad/flat/neutral)으로 구분됩니다. '반락 콜'이라는 예전 이름 자체도 마치 반대방향으로 결정적으로 움직였다는 뜻처럼 들려 실제 정의와 어긋나 '미반등 콜'로 정정했습니다.\n" +
+    "[의미] liquidity_sweep 단일 게이트이던 시절 라벨을 재설계해 VAL AUC 0.663→0.734, OOS 0.667→0.762, 홀드아웃 0.682→0.779까지 올린 뒤(2026-08-30), 2026-08-31 9트리거 통합으로 한 단계 더 개선했습니다: VAL **0.734→0.829**, OOS **0.762→0.813**, HOLDOUT **0.779→0.847**(4시드 앙상블 std 0.0004~0.0007로 매우 안정, 세 구간 전부 상회하며 HOLDOUT이 오히려 가장 높음 — 붕괴 없음). 전체 방법론: docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md(단일게이트 시절) + docs/homer/README.md의 'V자반등 9트리거 통합모델' 절(9트리거 통합 이후).\n" +
+    "[유의] 이 신호의 가치는 '트리거가 반전을 예측한다'는 게 아니라 '트리거가 이미 발생했다는 조건 안에서 어느 쪽으로 갈지 더 가려낸다'는 2차 정제입니다. **자동매매 경제성 게이트: 9트리거 통합판은 HOLDOUT까지 통과했습니다**(SL/ARM/Trail=4.0/1.5/0.1을 VAL+OOS만으로 그리드선정 후 HOLDOUT 1회 평가 — VAL n=875 +11.97bp·승률83.8%, OOS n=611 +20.96bp·승률86.7%, HOLDOUT n=1123 **+9.28bp·승률85.7%**, 이 프로젝트 역대 최고 분류+경제성 동시통과 기록. 단일게이트 시절엔 이 게이트를 통과 못 했었습니다). 다만 봇 내부 상태가 아니라 대시보드 서버가 별도로 계산합니다 — 실제 매매 결정(trading_bot.py)에는 아직 연결되지 않았고, 재량 판단의 한 재료로만 쓰세요(반등 콜에서 나온 급등/급락이 미반등보다 상대적으로 더 신뢰 가능하며, 화면에서도 미반등은 급등/급락과 별도 배지로 구분됩니다).",
   liq_pressure: "[계산] basis_raw = (선물 종가 − 현물 종가) / 현물 종가 (ETHUSDT, fapi.binance.com 선물 vs api.binance.com 현물). basis_z48 = basis_raw를 직전 48봉(4시간) 평균·표준편차로 정규화한 z값.\n" +
     "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정. 양수 극단=콘탱고(숏압박↑ 힌트), 음수 극단=백워데이션(롱압박↑ 힌트).\n" +
     "[의미] 2026-08-20에 '베이시스가 방향(다음 봉이 오를지 내릴지)을 예측하는가'로 먼저 테스트했으나 REJECTED(구간마다 부호가 뒤집힘) — 문헌(Schmeling/Schrimpf/Todorov 'Crypto Carry' BIS WP1087; He/Manela/Ross/von Wachter arXiv:2212.06888)이 원래 예측한 축은 방향이 아니라 '미래 변동성'과 '청산 크라우딩'이었습니다. 2026-08-27 그 방향으로 재검정: 변동성 예측은 이것도 부호가 안정적이지 않아 REJECTED급이었지만, 청산 크라우딩(어느 쪽이 강제청산 더 받는가)은 실제 청산 데이터(tail_risk.duckdb)로 확인한 결과 문헌과 부호까지 정확히 일치했습니다 — 베이시스 극단(양수) 이후 1h/4h 숏청산액이 유의하게 늘고(z=+3.9~+4.4) 롱청산액은 유의하게 줄었습니다(z=-4.3~-5.7), 음수 극단은 반대.\n" +
@@ -1460,6 +1471,14 @@ function renderEvidenceSignals(payload) {
     // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
     // economics config, just the label's own touch target, shown next to the state/probability.
     const modelTpText = s.model_tp_price != null ? `익절 ${fmtNum(s.model_tp_price, 2)}` : null;
+    // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
+    // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
+    // 방향이 맞아도 수수료를 못 넘기는 비율이 커진다(실측 '방향정확도-수익승률' 격차 fib 23.0pp
+    // /kalman 5.3pp/demarker 5.1pp). 표시 전용 -- 모델 확률도 발동 여부도 바꾸지 않는다.
+    // 근거: docs/homer/evidence_signal_economics_tuning_protocol.md
+    const lowAtrText = (s.model_low_atr === true && s.model_atr_bp != null)
+      ? `저변동 ATR ${fmtNum(s.model_atr_bp, 1)}bp < 평소 ${fmtNum(s.model_atr_median_bp, 1)}bp`
+      : null;
     // Evolution of this meta column, all 2026-08-31 (see eth_dashboard_evidence_signal_tp_price_
     // display_20260831 memory for the full history): joined into the status badge itself (broke its
     // fixed 64px pill sizing) -> split into badge + <small> below it (user: "not clean") -> a
@@ -1540,6 +1559,7 @@ function renderEvidenceSignals(payload) {
             <span class="meter-pct">${modelPctText || "0%"}</span>
           </div>
           ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
+          ${lowAtrText ? `<span class="meter-lowatr" title="이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ ${escapeHtml(lowAtrText)}</span>` : ""}
         </div>
       </div>
     </article>`;
@@ -1655,6 +1675,7 @@ async function refreshEvidenceSignalsProvisional() {
     const res = await fetch(API_EVIDENCE_SIGNALS_PROVISIONAL_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`evidence signals provisional ${res.status}`);
     const payload = await res.json();
+    latestEvidenceSignalsProvisional = payload; // see its declaration above -- V자반등 진행중 미리보기가 재사용
     if (payload && payload.available && payload.bar_open_utc) {
       if (lastSeenProvisionalBarOpenUtc && payload.bar_open_utc !== lastSeenProvisionalBarOpenUtc) {
         // The bar we were just previewing closed and a new one started forming -- the confirmed
@@ -2760,15 +2781,25 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 같은 어긋남이 확률 문구에서 재발하지 않음.
   const vReboundWarmedUp = !!(latestVRebound && latestVRebound.warmed_up);
   const vReboundActive = vReboundWarmedUp && !!latestVRebound.event_active;
-  const vReboundTone = vReboundActive ? (latestVRebound.tone || "warn") : "neutral";
+  // 2026-09-01 (user request): CONFIRMED 콜이 없을 때("신호 없음")만, 증거신호 진행중 미리보기가
+  // 이미 계산해둔 8개 트리거(latestEvidenceSignalsProvisional, 위 선언부 참고)를 재사용해 지금
+  // 형성중인 봉에서 트리거가 뜨고 있는지 확인 -- CONFIRMED 콜을 덮어쓰지 않음(증거신호 쪽 "절대
+  // confirmed를 덮어쓰지 않는다" 원칙과 동일). rebound/continuation 판정 없이 방향(바닥/천장)만.
+  const vFormingSignals = (latestEvidenceSignalsProvisional && latestEvidenceSignalsProvisional.available
+    && latestEvidenceSignalsProvisional.warmed_up) ? (latestEvidenceSignalsProvisional.signals || []) : [];
+  const vFormingBottom = vFormingSignals.some((s) => s.bottom_fired);
+  const vFormingTop = vFormingSignals.some((s) => s.top_fired);
+  const vReboundTone = vReboundActive ? (latestVRebound.tone || "warn")
+    : (vFormingBottom || vFormingTop) ? "warn"
+    : "neutral";
   // 2026-08-31 user request: 미반등 콜(반등 시도 자체가 없었다는 판정)을 더는 급등/급락으로 억지로
   // 묶지 않고 방향 무관 "미반등"으로 따로 표시 -- tone="flat"(백엔드 _predicted_tone, 2026-08-31
   // 개정)일 때 전용 단어. good/bad(진짜 반등 콜)만 급등/급락을 씁니다.
   const vReboundSubText = !vReboundWarmedUp ? "웜업 중"
-    : !vReboundActive ? "대기"
-    : vReboundTone === "good" ? "급등"
-    : vReboundTone === "bad" ? "급락"
-    : "미반등";
+    : vReboundActive ? (vReboundTone === "good" ? "급등" : vReboundTone === "bad" ? "급락" : "미반등")
+    : (vFormingBottom || vFormingTop)
+      ? `진행중(미확정)${vFormingBottom && vFormingTop ? " 양쪽" : vFormingBottom ? " 바닥" : " 천장"}`
+    : "신호 없음";
   // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
   // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
   // call="rebound" 그대로가 급등이므로 안 뒤집음). 그다음 실제 표시되는 쪽의 확률만 골라 보여줌 --
