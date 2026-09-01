@@ -62,14 +62,24 @@ difficulty_20260901).
 (chop이 배경상태라 156k봉->154사건, base 96.8%, AUC 0.5260), 절대 bp 하한 20/30bp, 층화추출
 (무작위와 유의차 없음), event-first 컨텍스트 샘플링(GBM −0.097).
 
-⚠️ **경제성: 현재 0.5 임계값은 경제성 게이트를 통과하지 못한다(2026-09-01 실측).** 실제 서빙
-확률(TabPFN + 동결 컨텍스트)로 재실행한 결과, 방향뒤집기 대조군이 **thr<=0.50에서는 고ARM
-구간에서도 정방향을 이긴다**(ARM=1.5의 40셀 중 VAL 정4/뒤6, OOS 정10/뒤13) -- 저ARM 노이즈수확
-아티팩트로 설명되지 않는 진짜 경고다. thr>=0.55부터 역전돼 깨끗이 통과한다(0.55: VAL 정29/뒤3,
-OOS 정19/뒤10, 선택셀 VAL+9.28bp/OOS+11.93bp; 0.60: VAL+16.05bp/OOS+11.30bp).
-0.5는 **분류 운영점**(precision 0.606/0.596, lift 4.08x/4.56x)으로는 타당하지만 그 콜을 그대로
-매매로 옮기면 안 된다. 임계값 상향은 사용자 승인 대기 중 -- 이 칩은 재량 참고용이라 일단
-0.5로 서빙한다. 전체 수치: data/research/eth_v_rebound_every_bar_tabpfn_costgate_20260901/.
+**임계값 0.60** (2026-09-01 0.50에서 상향, 사용자 승인). 실제 서빙 확률(TabPFN + 동결 컨텍스트)로
+경제성을 재실행한 결과 0.50이 게이트를 통과하지 못했다 -- 방향뒤집기 대조군이 저ARM 노이즈수확
+아티팩트가 닿지 않는 ARM=1.5 구간(40셀)에서도 정방향을 이겼다(VAL 정4/뒤6, OOS 정10/뒤13).
+0.55부터 역전되고 0.60이 가장 깨끗하다:
+
+    thr        VAL 정/뒤   OOS 정/뒤   선택셀 VAL / OOS      precision VAL/OOS
+    0.50         4 / 6      10 / 13    +0.90 / +6.81bp      0.606 / 0.596
+    0.55        29 / 3      19 / 10    +9.28 / +11.93bp     0.664 / 0.647
+    0.60        35 / 0      22 / 9     +16.05 / +11.30bp    0.713 / 0.683
+
+빈도 손실은 없다 -- 화면 기준(봉당 max 집계, 라벨 없는 봉 포함) 하루 11~12건, 신호 간격 중앙값
+약 1시간, 신호 없는 날 0%, 4시간 스트립에 평균 2.2~2.4칸. 0.50은 하루 18건으로 오히려 과했다.
+전체 수치: data/research/eth_v_rebound_every_bar_tabpfn_costgate_20260901/{report,signal_frequency}.json
+
+⚠️ **precision의 적용 범위 주의**: 위 precision은 라벨이 붙은 행(전체의 52.9%) 기준이다. 라이브는
+라벨 유무와 무관하게 모든 봉을 채점하므로, 화면에 뜨는 신호의 상당수는 결과가 v_rebound도 chop도
+아니었던(excluded-middle) 봉에 앉는다. 이는 라벨 설계에서 오는 구조적 한계로 모든 임계값에 동일
+적용되며 이 상향으로 생긴 문제가 아니다.
 
 이전(후보풀 게이트) 시절의 검증 결과 -- 이제 헤드라인이 아니라 역사 기록:
   cheap_gate VAL/OOS AUC 0.8296/0.8119 -> 4시드 안정성 -> HOLDOUT VAL/OOS/HOLDOUT
@@ -127,6 +137,15 @@ FETCH_LIMIT = 1500          # ~5.2 days at 5m -- clears the 864-bar longest indi
 SWEEP_LOOKBACK_BARS = 48    # 4h -- matches the live liquidity_sweep definition elsewhere on this dashboard
 HISTORY_BARS = 48           # 4h sparkline strip, matches this dashboard's HISTORY_BARS convention
 LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigger_labels_20260831.py
+
+# 2026-09-01: 0.50 -> 0.60. 0.50은 분류 운영점으로는 타당했지만(precision 0.606/0.596) **경제성
+# 게이트를 통과하지 못했다** -- 방향뒤집기 대조군이 저ARM 아티팩트가 닿지 않는 ARM=1.5 구간에서도
+# 정방향을 이겼다(VAL 정4/뒤6, OOS 정10/뒤13). 0.60은 두 구간 모두 깨끗이 통과하고
+# (VAL 정35/뒤0, OOS 정22/뒤9; 선택셀 VAL+16.05bp/OOS+11.30bp) precision도 가장 높다
+# (0.713/0.683). 빈도 손실도 없다 -- 화면 기준 하루 11~12건, 신호 간격 중앙값 ~1시간,
+# 신호 없는 날 0%(0.50은 하루 18건으로 오히려 과했다). 근거:
+# data/research/eth_v_rebound_every_bar_tabpfn_costgate_20260901/{report,signal_frequency}.json
+PROBA_THRESHOLD = 0.60
 
 TIER0 = [
     "is_downside", "sweep_penetration_atr", "atr", "atr_percentile_864",
@@ -349,7 +368,7 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
         candidates = candidates.assign(proba=proba)
 
         def call_of(p: float) -> str:
-            return "rebound" if p >= 0.5 else "continuation"
+            return "rebound" if p >= PROBA_THRESHOLD else "continuation"
 
         # 매 봉 스코어링에서는 봉마다 bottom/top 두 점수가 나온다. 그 봉의 "그림"은 둘 중 확률이
         # 높은 쪽으로 정한다(현행 칩이 방향 하나 + 확률 하나를 보여주는 계약을 그대로 유지).
