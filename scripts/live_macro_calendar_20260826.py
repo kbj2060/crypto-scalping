@@ -43,14 +43,15 @@ API and is deliberately NOT covered here.
   fred/releases for pmi/purchasing/manufactur/ism/markit -- only regional Fed surveys come back,
   e.g. Empire State/Philly Fed, not the national S&P Global or ISM PMI), and S&P Global's own
   press-release pages return HTTP 403 to automated fetches with no public forward calendar found.
-  Same rule-based category as EIA above -- all 5 follow day-of-month conventions this repo already
-  relies on in trading_bot_modules/omega5_live.py's event-risk governor (`_nth_weekday`/
-  `_weekday_on_or_after`, no holiday adjustment): 1st weekday for Manufacturing (S&P Global Final
-  9:45am ET + ISM 10:00am ET, same day), 3rd weekday for Services (same two sources/times), first
-  weekday on/after the 23rd for S&P Global's mid-month Flash Composite (9:45am ET). Reimplemented
-  self-contained here (this file's own convention, not cross-imported from a trading-bot module)
-  but numerically identical -- deliberately NOT holiday-adjusted, to stay consistent with the
-  already-relied-upon omega5 rule rather than quietly diverging from it.
+  Same rule-based category as EIA above -- all 5 follow day-of-month conventions (1st NYSE trading
+  day of the month for Manufacturing: S&P Global Final 9:45am ET + ISM 10:00am ET, same day; 3rd
+  trading day for Services, same two sources/times; first trading day on/after the 23rd for S&P
+  Global's mid-month Flash Composite, 9:45am ET), holiday-adjusted via pandas_market_calendars (same
+  NYSE calendar eia_events() already uses) -- an earlier version matched trading_bot_modules/
+  omega5_live.py's own plain-weekday-counting event-risk-governor rule (no holiday shift) for
+  consistency with that already-relied-upon convention, but omega5_live.py is no longer used
+  elsewhere in this repo (2026-09-01, user-confirmed), so this was switched to the more correct
+  holiday-aware form instead of preserving that limitation for its own sake.
 - 9 additional FRED releases added 2026-09-01 (same fred/release/dates mechanism as the original 5,
   each confirmed live to return near-term future dates before adding): Producer Price Index(PPI)=46,
   Advance Retail Sales=9 (NOT the derived "Selected Real Retail Sales Series"=92), Industrial
@@ -412,68 +413,64 @@ def eia_events(today: date) -> list[dict]:
     return events
 
 
-def _nth_weekday_of_month(year: int, month: int, n: int) -> date:
-    """Nth Mon-Fri day of the month (n=1 -> first weekday), NOT holiday-adjusted -- verbatim same
-    date arithmetic as trading_bot_modules/omega5_live.py::Omega5LiveAdapter._nth_weekday, kept
-    identical deliberately (see module docstring)."""
-    d = date(year, month, 1)
-    count = 0
-    while True:
-        if d.weekday() < 5:
-            count += 1
-            if count == n:
-                return d
-        d += timedelta(days=1)
-
-
-def _weekday_on_or_after(year: int, month: int, day: int) -> date:
-    """First Mon-Fri on/after the given day-of-month -- verbatim same date arithmetic as
-    Omega5LiveAdapter._weekday_on_or_after, used for the S&P Global Flash PMI's ~23rd-of-month
-    convention."""
-    d = date(year, month, day)
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return d
-
-
-# (day_rule, hour_et, minute_et, title_ko, detail) -- day_rule is a (kind, arg) pair: ("nth", n) or
-# ("on_or_after", day). All 5 share the same "no FRED release, no fetchable official calendar" gap
-# this module already handles rule-based for EIA -- verified 2026-09-01: FRED releases search
+# (day_rule, hour_et, minute_et, title_ko, detail) -- day_rule is a (kind, arg) pair: ("nth", n) ->
+# nth NYSE trading day of the month, ("on_or_after", day) -> first NYSE trading day on/after that
+# day-of-month. All 5 share the same "no FRED release, no fetchable official calendar" gap this
+# module already handles rule-based for EIA -- verified 2026-09-01: FRED releases search
 # (pmi/purchasing/manufactur/ism/markit keywords) returns none of these; S&P Global's own
-# pmi.spglobal.com press-release pages return HTTP 403 to automated fetch. Day rules match this
-# repo's existing (already relied-upon, see trading_bot_modules/omega5_live.py event-risk governor)
-# _nth_weekday/_weekday_on_or_after conventions -- reimplemented self-contained here rather than
-# cross-importing a trading-bot module, but kept numerically identical.
+# pmi.spglobal.com press-release pages return HTTP 403 to automated fetch.
+# 2026-09-01: holiday-adjusted via pandas_market_calendars (same NYSE calendar eia_events() already
+# uses), replacing an earlier plain weekday-counting version that matched trading_bot_modules/
+# omega5_live.py's own (deliberately simplified, no holiday shift) event-risk-governor rule --
+# omega5_live.py is no longer relied upon elsewhere in this repo, so there was no reason left to
+# keep that limitation. Concretely fixes e.g. 2027-01-01 (a Friday): plain weekday-counting would
+# call that "the 1st business day", but it's New Year's Day -- NYSE closed -- so the real PMI slot
+# is the next actual trading day.
 PMI_RULES = [
-    (("nth", 1), 9, 45, "S&P Global 미국 제조업 PMI(확정치)", "전월 제조업 PMI 확정치 -- 매월 첫 영업일"),
-    (("nth", 1), 10, 0, "ISM 제조업 PMI", "전월 제조업 PMI(ISM) -- 매월 첫 영업일, S&P Global 확정치와 같은 날"),
-    (("nth", 3), 9, 45, "S&P Global 미국 서비스업 PMI(확정치)", "전월 서비스업 PMI 확정치 -- 매월 3번째 영업일"),
-    (("nth", 3), 10, 0, "ISM 서비스업 PMI", "전월 서비스업 PMI(ISM) -- 매월 3번째 영업일, S&P Global 확정치와 같은 날"),
-    (("on_or_after", 23), 9, 45, "S&P Global 플래시 PMI(제조업+서비스업)", "이번 달 속보치(잠정) -- 매월 23일 이후 첫 영업일"),
+    (("nth", 1), 9, 45, "S&P Global 미국 제조업 PMI(확정치)", "전월 제조업 PMI 확정치 -- 매월 첫 거래일"),
+    (("nth", 1), 10, 0, "ISM 제조업 PMI", "전월 제조업 PMI(ISM) -- 매월 첫 거래일, S&P Global 확정치와 같은 날"),
+    (("nth", 3), 9, 45, "S&P Global 미국 서비스업 PMI(확정치)", "전월 서비스업 PMI 확정치 -- 매월 3번째 거래일"),
+    (("nth", 3), 10, 0, "ISM 서비스업 PMI", "전월 서비스업 PMI(ISM) -- 매월 3번째 거래일, S&P Global 확정치와 같은 날"),
+    (("on_or_after", 23), 9, 45, "S&P Global 플래시 PMI(제조업+서비스업)", "이번 달 속보치(잠정) -- 매월 23일 이후 첫 거래일"),
 ]
 
 
 def pmi_events(today: date) -> list[dict]:
     """Rule-based (not fetched) -- see PMI_RULES docstring above for why. Every month without
     exception (web-confirmed 2026-09-01 for the S&P Global Final Manufacturing time/cadence; the
-    other 4 share the same day-of-month conventions already established in omega5_live.py)."""
+    other 4 share the same day-of-month conventions). Holiday-aware -- see PMI_RULES docstring."""
     events = []
     try:
+        nyse = mcal.get_calendar("NYSE")
         horizon = today + timedelta(days=LOOKAHEAD_DAYS)
         year, month = today.year, today.month
         for _ in range(3):  # this month + up to 2 more, covers the 21-day horizon
+            month_start = date(year, month, 1)
+            next_month_start = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            # query a week past month-end too: a late-month holiday cluster could in principle push
+            # the "on_or_after 23rd" search (or, in a pathological month, even the 3rd trading day)
+            # past the calendar month-end -- 7 days of margin comfortably covers that.
+            window_end = next_month_start + timedelta(days=7)
+            trading_days = [d.date() for d in nyse.valid_days(str(month_start), str(window_end))]
+            trading_days_this_month = [d for d in trading_days if d < next_month_start]
+
             for day_rule, hour, minute, title, detail in PMI_RULES:
                 kind, arg = day_rule
-                release_day = (_nth_weekday_of_month(year, month, arg) if kind == "nth"
-                               else _weekday_on_or_after(year, month, arg))
-                if today <= release_day <= horizon:
+                if kind == "nth":
+                    release_day = (trading_days_this_month[arg - 1]
+                                   if len(trading_days_this_month) >= arg else None)
+                else:
+                    threshold = date(year, month, arg)
+                    candidates = [d for d in trading_days if d >= threshold]
+                    release_day = candidates[0] if candidates else None
+                if release_day is not None and today <= release_day <= horizon:
                     events.append({
                         "time_utc": _et_to_utc(release_day, hour, minute).isoformat(),
                         "category": "econ",
                         "title_ko": title,
-                        "detail": f"{detail} (FRED에 릴리스 없음, 규칙기반 추정)",
+                        "detail": f"{detail}, 거래일 기준(휴장시 다음 거래일로 이동) -- FRED에 릴리스 없음, 규칙기반 추정",
                         "importance": "high",
-                        "source": "rule-based (monthly PMI cadence, cf. omega5_live.py event-risk governor)",
+                        "source": "rule-based (monthly PMI cadence, NYSE-holiday-adjusted)",
                     })
             month += 1
             if month > 12:
