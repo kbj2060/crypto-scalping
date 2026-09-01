@@ -38,6 +38,18 @@ API and is deliberately NOT covered here.
   research). This is a RULE, not a fetched date -- same category of caveat as this repo's existing
   ISM/PMI rule-based approximations (see trading_bot_modules/omega5_live.py), flagged as such in
   the returned event's "source" field.
+- S&P Global US Manufacturing PMI (Final): confirmed 2026-09-01 that FRED carries no release for
+  this (searched fred/releases for pmi/purchasing/manufactur/ism/markit -- only regional Fed surveys
+  come back, e.g. Empire State/Philly Fed, not the national S&P Global or ISM PMI), and S&P Global's
+  own press-release pages return HTTP 403 to automated fetches with no public forward calendar
+  found. Same rule-based category as EIA above: releases 9:45am ET on the first US business day of
+  the month, every month, without exception (web-confirmed). This repo already has an identical
+  rule (`_nth_weekday`-based, no holiday adjustment) in trading_bot_modules/omega5_live.py's event-
+  risk governor (SPGLOBAL_FINAL_MANUF_9h45_ET_rule_based) -- reimplemented here self-contained
+  (this file's own convention, not cross-imported from a trading-bot module) but matching that
+  exact day-of-month logic for consistency of the underlying dates. Deliberately NOT importing
+  omega5_live.py's holiday-aware NYSE-calendar shift (unlike eia_events() above) -- kept identical
+  to the already-relied-upon omega5 rule instead of quietly diverging from it.
 - Finnhub earnings calendar (finnhub.io/api/v1/calendar/earnings), filtered to EARNINGS_WATCHLIST
   (NVDA only by default -- the one example in the user's screenshot; extend the list to widen).
 - Treasury upcoming-auctions (api.fiscaldata.treasury.gov/.../v1/accounting/od/upcoming_auctions,
@@ -369,6 +381,52 @@ def eia_events(today: date) -> list[dict]:
     return events
 
 
+SP_PMI_HOUR_ET, SP_PMI_MINUTE_ET = 9, 45
+
+
+def _nth_weekday_of_month(year: int, month: int, n: int) -> date:
+    """Nth Mon-Fri day of the month (n=1 -> first weekday), NOT holiday-adjusted -- verbatim same
+    date arithmetic as trading_bot_modules/omega5_live.py::Omega5LiveAdapter._nth_weekday, kept
+    identical deliberately (see module docstring)."""
+    d = date(year, month, 1)
+    count = 0
+    while True:
+        if d.weekday() < 5:
+            count += 1
+            if count == n:
+                return d
+        d += timedelta(days=1)
+
+
+def sp_global_pmi_events(today: date) -> list[dict]:
+    """Rule-based (not fetched): S&P Global US Manufacturing PMI (Final) -- first weekday of the
+    month, 9:45am ET, every month without exception (web-confirmed 2026-09-01). See module
+    docstring for why this is a rule (no FRED release, S&P Global's own pages block fetch)."""
+    events = []
+    try:
+        horizon = today + timedelta(days=LOOKAHEAD_DAYS)
+        year, month = today.year, today.month
+        for _ in range(3):  # this month + up to 2 more, covers the 21-day horizon
+            release_day = _nth_weekday_of_month(year, month, 1)
+            if today <= release_day <= horizon:
+                events.append({
+                    "time_utc": _et_to_utc(release_day, SP_PMI_HOUR_ET, SP_PMI_MINUTE_ET).isoformat(),
+                    "category": "econ",
+                    "title_ko": "S&P Global 미국 제조업 PMI(확정치)",
+                    "detail": "전월 제조업 PMI 확정치 발표 (9:45am ET) -- 매월 첫 영업일 고정 일정 기반 추정, "
+                              "FRED에 릴리스 없음(2026-09-01 확인) -- ISM 제조업 PMI(같은 날 10am ET)는 별도",
+                    "importance": "high",
+                    "source": "rule-based (S&P Global monthly first-business-day cadence)",
+                })
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"macro-calendar: S&P Global PMI schedule computation failed: {exc}", flush=True)
+    return events
+
+
 def fetch_finnhub_events(api_key: str | None, today: date) -> list[dict]:
     if not api_key:
         return []
@@ -452,6 +510,7 @@ def compute_macro_calendar(fred_key: str | None, eia_key: str | None, finnhub_ke
     events += fomc_events(today)
     events += fetch_fed_chair_events(today)
     events += eia_events(today)
+    events += sp_global_pmi_events(today)
     events += fetch_finnhub_events(finnhub_key, today)
     events += fetch_treasury_events(today)
     events.sort(key=lambda e: e["time_utc"])
