@@ -101,10 +101,23 @@ Feature/BTC-fetch/RSI-Wilder machinery below is unchanged from the pre-redesign 
 not reimplemented, from build_eth_5m_v_rebound_multitrigger_labels_20260831.py::main() and this
 script's own pre-existing _build_features()/_rsi_wilder().
 
-응답 스키마는 그대로 유지된다(dashboard/server.py와 app.js 무변경). 다만 매 봉 채점에서는
-이벤트/60분 활성창 개념이 사라져 `minutes_ago`는 항상 0(현재 봉), `early_confirmed`는 항상 None
-이다. `_early_confirm_pos()`와 `_multitrigger_rows()`는 같은 날 삭제됐다 -- 둘 다 이벤트/게이트
-구조에만 쓰이던 함수라 호출자가 사라졌다.
+**배지 지속성** (2026-09-01, 매 봉 전환 직후 사용자가 화면에서 "신호가 유지가 안 된다"고 보고해
+추가): 매 봉 채점에서 배지가 현재 봉만 반영하면 사건당 평균 1.2봉, 즉 대부분 5분만 떴다 사라진다
+(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측). 그래서 배지만 증거신호 8종 칩의
+`_fill_until_tp_or_horizon`과 **같은 계약**으로 유지시킨다 -- 마지막 콜을 "익절 도달(라벨의
+1.5xATR 빠른 다리) 또는 호라이즌 경과(60분/12봉)" 중 먼저 오는 쪽까지. `_badge_pos()` 참고.
+⚠️**히스토리 스트립은 봉별 기록 그대로**다 -- 지속성은 배지에만 적용된다. 스트립까지 앞으로
+칠하면 매 봉 설계의 장점(모델의 실제 봉별 판단 track)이 사라진다.
+⚠️예전 게이트 시절의 지연확인 문제는 재발하지 않는다 -- 그건 local_extreme이 30분 뒤에야
+확정되던 데서 왔고, 지금은 봉 자체에서 즉시 점수가 나온다. 여기서 늘리는 건 "이미 현재인 신호의
+표시 시간"이지 "확정이 늦는 신호"가 아니다. 룩어헤드도 없다: `_fetch_klines()`가 형성중 봉을
+이미 버리므로 익절 판정이 보는 close는 전부 확정된 과거 봉이다.
+
+응답 스키마는 그대로 유지된다(dashboard/server.py와 app.js 무변경). `minutes_ago`는 배지가
+가리키는 봉의 나이로 **원래 의미를 회복**했고(현재 봉이면 0, 유지중인 과거 콜이면 그 경과분),
+`early_confirmed`는 항상 None이다(익절 도달한 콜은 배지에서 이미 내려가므로 표시중인 콜에는
+해당 없음 -- 키만 남긴다). `_early_confirm_pos()`와 `_multitrigger_rows()`는 같은 날 삭제됐다 --
+둘 다 이벤트/게이트 구조에만 쓰이던 함수라 호출자가 사라졌다.
 """
 from __future__ import annotations
 
@@ -146,6 +159,20 @@ LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigg
 # 신호 없는 날 0%(0.50은 하루 18건으로 오히려 과했다). 근거:
 # data/research/eth_v_rebound_every_bar_tabpfn_costgate_20260901/{report,signal_frequency}.json
 PROBA_THRESHOLD = 0.60
+
+# 2026-09-01 배지 지속성. 매 봉 스코어링에서 배지가 현재 봉만 반영하면 사건당 평균 1.2봉,
+# 즉 대부분 5분만 떴다 사라진다(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측; 사용자가
+# 실제 화면에서 "유지가 안 된다"고 보고). 증거신호 8종 칩의 `_fill_until_tp_or_horizon`
+# (live_evidence_signal_dashboard_20260823.py:656)과 **같은 계약**으로 맞춘다 -- 마지막 콜을
+# "익절 도달 또는 호라이즌 경과" 중 먼저 오는 쪽까지 유지. 값은 이 신호 자신의 라벨 정의에서
+# 가져온다(research_eth_v_rebound_label_redesign_variant_screen_20260901.py: FULL_BARS/ATR_MULT).
+# ⚠️히스토리 스트립은 **봉별 기록 그대로 둔다** -- 배지만 지속시킨다. 스트립까지 앞으로 칠하면
+# 매 봉 설계의 장점(모델의 실제 봉별 판단 track)이 사라진다.
+# ⚠️예전 게이트 시절의 지연확인 문제는 재발하지 않는다 -- 그건 local_extreme이 30분 뒤에야
+# 확정되던 데서 왔고, 지금은 봉 자체에서 즉시 점수가 나온다. 여기서 늘리는 건 "이미 현재인
+# 신호의 표시 시간"이지 "확정이 늦는 신호"가 아니다.
+BADGE_HORIZON_BARS = 12   # 60분 -- 라벨의 FULL_BARS
+BADGE_ATR_MULT = 1.5      # 라벨의 ATR_MULT (빠른 다리 목표)
 
 TIER0 = [
     "is_downside", "sweep_penetration_atr", "atr", "atr_percentile_864",
@@ -308,6 +335,41 @@ def _every_bar_rows(frame: pd.DataFrame, sig: pd.DataFrame, n_tail: int) -> pd.D
     return pd.DataFrame(rows)
 
 
+def _badge_pos(best_by_pos: dict, frame: pd.DataFrame, last_pos: int,
+               threshold: float) -> int | None:
+    """배지에 띄울 콜의 위치. **가장 최근** 콜(proba>=threshold) 하나를 찾아, 아직 살아있으면
+    그 위치를, 이미 익절에 도달했으면 None을 돌려준다. 호라이즌 밖은 애초에 탐색하지 않는다.
+
+    익절 판정은 이 신호 자신의 라벨 정의를 그대로 쓴다 -- 라벨의 빠른 다리가
+    `fast_close_max - extreme >= ATR_MULT * pre_atr`(종가 기준, 앵커는 그 봉의 저가/고가)이므로
+    여기서도 **종가 기준**으로 본다. 증거신호 칩들은 intrabar 고가/저가 터치를 쓰지만 그건
+    그쪽 라벨이 그렇게 정의돼서다 -- 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md의 배리어 컨벤션
+    항목: 리플레이/표시 편의로 두 컨벤션을 섞지 말 것).
+
+    ⚠️룩어헤드 없음: `frame`은 `_fetch_klines()`가 형성중 봉을 이미 버린 **확정 봉만** 담고
+    있고, 여기서 보는 close[pos+1..last_pos]는 전부 과거의 확정 봉이다."""
+    close = frame["close"].to_numpy()
+    low, high = frame["low"].to_numpy(), frame["high"].to_numpy()
+    atr = frame["atr"].to_numpy()
+    oldest = max(0, last_pos - BADGE_HORIZON_BARS)
+    for pos in range(last_pos, oldest - 1, -1):
+        b = best_by_pos.get(pos)
+        if b is None or b["proba"] < threshold:
+            continue
+        if pos == last_pos:
+            return pos  # 방금 마감된 봉의 콜은 무조건 살아있다
+        pre_atr = atr[pos - 1] if pos >= 1 else np.nan
+        if not np.isfinite(pre_atr) or pre_atr <= 0:
+            return pos  # ATR을 못 구하면 호라이즌만으로 판정(루프 범위가 이미 보장)
+        if b["direction"] == "down":  # 지지쪽 -- 위로 반등하는 게 익절
+            reached = close[pos + 1:last_pos + 1].max() >= low[pos] + BADGE_ATR_MULT * pre_atr
+        else:                          # 저항쪽 -- 아래로 반전하는 게 익절
+            reached = close[pos + 1:last_pos + 1].min() <= high[pos] - BADGE_ATR_MULT * pre_atr
+        # 익절에 도달했으면 소멸. 더 오래된 콜은 이 콜에 이미 대체됐으므로 되살리지 않는다.
+        return None if reached else pos
+    return None
+
+
 def _predicted_tone(direction: str | None, call: str | None) -> str:
     """direction is which side the candidate leans (down=support-side, expecting an upward
     rebound; up=resistance-side, expecting a downward reversal); call is the model's rebound-vs-
@@ -330,11 +392,14 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
     have fired on the CURRENT bar -- display-only since the 2026-09-01 every-bar redesign, no longer
     gates scoring; empty string when none fired). Never raises.
 
-    2026-09-01 매 봉 스코어링 이후 스키마상 의미가 바뀐 필드(키 이름/타입은 그대로):
-      event_active -- "현재 봉 점수가 있는가"(사실상 warmed_up이면 항상 True). 이벤트 개념 없음.
-      minutes_ago  -- 항상 0. 현재 봉 자신의 점수이므로 "몇 분 전 이벤트"가 존재하지 않는다.
-      sweep_ts_utc -- 현재 봉의 타임스탬프.
-      early_confirmed -- 항상 None. 조기확정은 60분 활성창이 있을 때만 의미가 있었다."""
+    2026-09-01 매 봉 스코어링 + 배지 지속성 이후 필드 의미(키 이름/타입은 그대로):
+      event_active -- "표시할 점수가 있는가"(사실상 warmed_up이면 항상 True).
+      minutes_ago  -- **배지가 가리키는 봉의 나이**. 방금 마감된 봉의 콜이면 0, 익절/호라이즌
+                      전까지 유지되는 과거 콜이면 그 경과분. 지속성 도입으로 원래 의미 회복.
+      sweep_ts_utc -- 배지가 가리키는 봉의 타임스탬프(현재 봉일 수도, 최대 60분 전일 수도).
+      early_confirmed -- 항상 None. 익절에 도달한 콜은 배지에서 이미 내려가므로 표시중인
+                      콜에는 해당이 없다. 스키마 유지를 위해 키만 남긴다.
+      history/times -- **배지와 무관하게 봉별 기록**. 지속성은 배지에만 적용된다."""
     try:
         kl = _fetch_klines(SYMBOL)
         if kl is None or len(kl) < 900:
@@ -392,19 +457,29 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
             b = best_by_pos.get(pos)
             history.append(_predicted_tone(b["direction"], call_of(b["proba"])) if b else "neutral")
 
-        cur = best_by_pos.get(len(frame) - 1)
+        # 배지: 살아있는 최근 콜을 우선 띄우고(익절 도달/호라이즌 경과 전까지), 없으면 현재 봉
+        # 자신의 읽기로 떨어진다(대개 '미반등'). 스트립은 위에서 만든 봉별 기록 그대로.
+        last_pos = len(frame) - 1
+        badge_pos = _badge_pos(best_by_pos, frame, last_pos, PROBA_THRESHOLD)
+        if badge_pos is None:
+            badge_pos = last_pos
+
+        cur = best_by_pos.get(badge_pos)
         if cur is None:
             return {"warmed_up": True, "error": None, "event_active": False, "call": None,
                     "direction": None, "proba_rebound": None, "minutes_ago": None,
                     "sweep_ts_utc": None, "price": price, "tone": "neutral",
                     "history": history, "times": times, "triggers": None, "early_confirmed": None}
 
-        # minutes_ago는 항상 0(현재 봉 점수), early_confirmed는 개념 자체가 사라져 None.
-        # 스키마는 그대로 유지해 dashboard/server.py와 app.js를 건드리지 않는다.
+        # minutes_ago: 배지가 가리키는 봉의 나이(현재 봉이면 0) -- 지속성 도입으로 이 필드가
+        # 원래 의미를 되찾았다. early_confirmed는 표시중인 콜에는 해당 없음(익절 도달한 콜은
+        # 애초에 배지에 안 뜨므로) -- 스키마 유지를 위해 None.
         return {
             "warmed_up": True, "error": None, "event_active": True, "call": call_of(cur["proba"]),
             "direction": cur["direction"],
-            "proba_rebound": round(cur["proba"], 4), "minutes_ago": 0,
+            "proba_rebound": round(cur["proba"], 4),
+            "minutes_ago": int((frame["timestamp"].iloc[last_pos]
+                                - frame["timestamp"].iloc[badge_pos]).total_seconds() // 60),
             "sweep_ts_utc": cur["t0"].isoformat(), "price": price,
             "tone": _predicted_tone(cur["direction"], call_of(cur["proba"])),
             "history": history, "times": times, "triggers": cur["triggers"],

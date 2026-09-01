@@ -966,9 +966,9 @@ const MODEL_INDICATOR_MEANING = {
   v_rebound: {
     "웜업 중": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
     "신호 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "급등": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 바닥이고 진짜 반등(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 오르고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "급락": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 천장이고 진짜 반전(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 내리고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "미반등": "방금 마감된 5분봉에서 TabPFN 모델이 V자반등의 근거를 찾지 못했어요 — 대부분의 봉이 여기 해당하는 **평상시 상태**입니다(급등/급락은 전체 봉의 약 5%뿐). '반대방향으로 움직인다'는 뜻이 아니라 '지금은 반등/반전을 말할 근거가 없다'는 뜻이에요. 2026-09-01 매 봉 채점으로 바뀌기 전에는 트리거가 발동한 봉에서만 나오던 판정이라 지금보다 훨씬 드물었어요.",
+    "급등": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 바닥이고 진짜 반등(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 오르고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미반등'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
+    "급락": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 천장이고 진짜 반전(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 내리고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미반등'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
+    "미반등": "지금 V자반등의 근거가 없다는 뜻이에요 — 직전에 뜬 급등/급락 신호도 이미 목표(1.5×ATR)에 닿았거나 60분이 지나 내려간 상태입니다. 대부분의 봉이 여기 해당하는 **평상시 상태**예요(급등/급락은 전체 봉의 약 5%뿐). '반대방향으로 움직인다'는 뜻이 아니라 '지금은 반등/반전을 말할 근거가 없다'는 뜻이에요. 2026-09-01 매 봉 채점으로 바뀌기 전에는 트리거가 발동한 봉에서만 나오던 판정이라 지금보다 훨씬 드물었어요.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
@@ -999,6 +999,7 @@ const MODEL_INDICATOR_MEANING = {
 
 const MODEL_INDICATOR_DETAIL = {
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
+    "[배지 유지 규칙] 급등/급락 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. ⚠️**아래 막대 게이지(히스토리)는 지속성과 무관하게 봉별 기록 그대로**입니다 — 각 칸은 그 봉에서 모델이 뭐라고 봤는지를 보여주지, 신호가 유지된 구간을 칠하는 게 아닙니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
     "[기준] **확률≥60%**면 '반등 콜'(이후 30분 내 종가로 ATR(직전 기준) 1.5배 이상 반등 AND 60분 전체에서 정점 대비 20% 이하만 반납), 미만이면 '미반등 콜'(반등 근거 없음 — 반대방향으로 뚜렷하게 움직인다는 뜻은 아닙니다). 이 둘 사이(애매한 경우)는 라벨 자체가 없어 **학습에서 통째로 제외** — 라벨 정의(giveback 방식) 자체는 재설계 이후에도 안 바뀌었습니다. 매 봉이 채점되므로 대부분의 봉은 '미반등'입니다(60% 기준에서 급등/급락은 봉의 약 4.6~5.0%).\n" +
     "[배지 표시: 반등 콜만 급등/급락, 미반등 콜은 별도 '미반등'] 2026-08-31 두 차례 정정했습니다. 처음엔 '반등'/'반락'을 콜 이름 그대로 노출해서 상승 트리거 후 반등 콜처럼 실제로는 하락이 예상되는데도 '반등'이라고 표시되며 빨간색이 뜨는 경우가 있었습니다(사용자 지적) — 그래서 반등/미반등 콜을 트리거 방향과 조합해 항상 급등(초록)/급락(빨강) 중 하나로 바꿨습니다. 그런데 미반등 콜은 '반등 시도 자체가 없었다'는 뜻일 뿐 반대방향으로 결정적으로 움직였다는 근거가 아닌데도 급등/급락이라는 강한 단어를 그대로 썼던 게 다시 지적받아(사용자 지적), 지금은 **진짜 반등(V자반등) 콜만** 트리거 방향과 조합해 급등(하락 트리거 후 반등, 초록)/급락(상승 트리거 후 반등, 빨강)으로 표시하고, **미반등 콜은 트리거 방향과 무관하게 항상 '미반등'**(회색, 중립 취급)으로 따로 표시합니다 — 활동-스트립을 마우스오버했을 때 나오는 막대별 라벨도 동일한 기준(백엔드 tone: good/bad/flat/neutral)으로 구분됩니다. '반락 콜'이라는 예전 이름 자체도 마치 반대방향으로 결정적으로 움직였다는 뜻처럼 들려 실제 정의와 어긋나 '미반등 콜'로 정정했습니다.\n" +
@@ -1481,11 +1482,13 @@ function renderEvidenceSignals(payload) {
     // 2026-09-01 (user request): moved next to the horizon-badge on the title line (was stacked in
     // .meter-col on the right, see eth_dashboard_low_atr_warning_overflow_fix_20260901 memory for
     // that version's overflow saga) -- same pill shape as horizon-badge (.horizon-badge base class,
-    // low-atr-badge modifier just recolors it warn/amber), short visible text (bp value only, the
-    // full "X.Xbp < 평소 Y.Ybp" comparison + explanation lives in the title tooltip, same convention
-    // horizon-badge itself already uses for its own longer explanation).
+    // low-atr-badge modifier just recolors it warn/amber). ⚠️first cut showed only the current bp
+    // value with the "평소"(median) baseline hidden in the tooltip -- user pointed out that drops
+    // the actual context (is 22bp low for THIS signal or not depends entirely on its own median, and
+    // that varies per signal). Visible text now carries the full comparison, same as the original
+    // .meter-col text; only the plain-language explanation sentence stays in the tooltip.
     const lowAtrBadgeHtml = lowAtrText
-      ? ` <span class="horizon-badge low-atr-badge" title="${escapeHtml(lowAtrText)} — 이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ 저ATR ${fmtNum(s.model_atr_bp, 1)}bp</span>`
+      ? ` <span class="horizon-badge low-atr-badge" title="이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ ${escapeHtml(lowAtrText)}</span>`
       : "";
     // Evolution of this meta column, all 2026-08-31 (see eth_dashboard_evidence_signal_tp_price_
     // display_20260831 memory for the full history): joined into the status badge itself (broke its
