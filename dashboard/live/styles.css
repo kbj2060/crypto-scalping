@@ -152,21 +152,26 @@ body {
 
 /* 2026-09-01: sticky header (user request) -- .top (clock/session/page-tabs row) and the snapshot
    tab's coin-selector row (#snapshotTabPanel > .ops-panel-head below) both pin to the viewport top
-   while the page scrolls, stacked directly beneath each other. Fully opaque background -- an
-   EARLIER version here used a translucent rgba()+blur combo, which a user report showed let
-   scrolled content visibly show through; solid is the deliberately safer choice for a pinned
-   header whose entire job is to sit ON TOP of scrolling content. backdrop-filter blur kept purely
-   for a soft edge on any sub-pixel antialiasing seam, no longer load-bearing for opacity. z-index
-   below the 1000 used by .chart-tooltip elsewhere so tooltips still float above a pinned header.
-   2026-09-02 fix (user-reported "이질감", header read as flat black against the page's blue-tinted
-   dark gradient): base color switched from a hand-picked near-black (#14161e) to #171922, body's
-   own gradient's literal 0%-stop color (see body{} above) -- and a small radial cyan glow
-   (rgba(34,211,238,...), the same --accent hue as body's own top-left radial highlight and the
-   clock's text-shadow/active-tab glow elsewhere on this page) layered on top so the header echoes
-   the page's established cyan-glow visual language instead of reading as a plain neutral bar. The
-   radial's own gradient stops fade to transparent, but it sits ABOVE the opaque #171922 base in the
-   same background shorthand, not above the page itself -- opacity guarantee from the section above
-   is unaffected, this only changes what color that opaque layer actually is. */
+   while the page scrolls, stacked directly beneath each other. z-index below the 1000 used by
+   .chart-tooltip elsewhere so tooltips still float above a pinned header.
+   Background history (2 reversals, read in order if touching this again):
+   (1) original: translucent rgba(.92)+blur(14px) -- a user report showed scrolled content visibly
+       showing through. Root cause turned out to be the 12px GAP between the two sticky bars (see
+       app.js::syncStickyHeaderOffset's own history comment), not the translucency itself -- but at
+       the time that wasn't isolated yet, so the fix taken was blunt: full opacity.
+   (2) #171922 (body gradient's own 0%-stop) + a hand-added cyan radial approximating body's own
+       top-left glow, fully opaque -- fixed the see-through bug (gap closed, see (1)) but a user
+       screenshot showed it still read as a flat, too-dark bar against the page's actual (more
+       visibly blue-tinted, and itself a moving gradient the header can't see) background -- hand-
+       picking/approximating a fixed color to match a gradient that looks different at every scroll
+       position was never going to line up exactly.
+   (3) CURRENT: translucent rgba(18,20,28,0.82) + a much stronger blur(20px), no hand-picked color
+       at all -- once (1)'s real bug (the gap) was fixed, genuine translucency became safe again,
+       and it solves the color-matching problem structurally instead of by guessing: whatever the
+       real page gradient looks like at a given scroll position shows through and tints the header
+       automatically, exactly matching by construction. blur(20px) is strong enough that scrolling
+       text/chart lines read as an unreadable smear, not legible content -- this is the actual
+       load-bearing property against a (1)-style regression, not the opacity value. */
 .top {
   display: flex;
   justify-content: space-between;
@@ -175,9 +180,9 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: radial-gradient(ellipse 480px 140px at 15% -60%, rgba(34, 211, 238, 0.14), transparent 65%), #171922;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(18, 20, 28, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .topbar {
@@ -204,9 +209,9 @@ body {
   position: sticky;
   top: var(--sticky-top-h);
   z-index: 40;
-  background: radial-gradient(ellipse 480px 140px at 15% -60%, rgba(34, 211, 238, 0.14), transparent 65%), #171922;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(18, 20, 28, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 /* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
    absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
