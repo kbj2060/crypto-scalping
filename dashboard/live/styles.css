@@ -21,6 +21,8 @@
   --card-gap: 16px;
   --radius: 18px;
   --radius-sm: 12px;
+  --sticky-top-h: 58px; /* fallback before app.js measures .top's real height (syncStickyHeaderOffset) --
+                           kept in sync with .topbar's own min-height default below */
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   --font-display: "Space Grotesk", "Pretendard Variable", Pretendard, "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", "Pretendard Variable", Pretendard, ui-monospace, "SFMono-Regular", Consolas, monospace;
@@ -148,11 +150,24 @@ body {
   }
 }
 
+/* 2026-09-01: sticky header (user request) -- .top (clock/session/page-tabs row) and the snapshot
+   tab's coin-selector row (#snapshotTabPanel > .ops-panel-head below) both pin to the viewport top
+   while the page scrolls, stacked directly beneath each other. Solid-ish blurred background is
+   required since body's own background is a gradient, not a flat color (see body{} above) -- a
+   flat --bg fill would visibly mismatch the gradient at whatever scroll position the header sits
+   at, so a translucent blur reads as intentional instead of a seam. z-index below the 1000 used by
+   .chart-tooltip elsewhere so tooltips still float above a pinned header. */
 .top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(20, 22, 30, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .topbar {
@@ -169,6 +184,20 @@ body {
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
 .ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; position: relative; }
+/* 2026-09-01: sticky coin-selector row, snapshot tab only (this class is shared with #opsTabPanel's
+   own plain title+badge header, which is deliberately NOT pinned -- scoped to the snapshot instance
+   specifically, see .top's own comment above for the shared rationale/z-index/background approach).
+   top offset is the OTHER sticky bar's (.top) actual rendered height, kept in sync at runtime by
+   app.js::syncStickyHeaderOffset() (position:relative above still applies -- sticky establishes a
+   containing block same as relative does, so .session-alert-center's absolute centering is unaffected). */
+#snapshotTabPanel > .ops-panel-head {
+  position: sticky;
+  top: var(--sticky-top-h);
+  z-index: 40;
+  background: rgba(20, 22, 30, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
 /* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
    absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
    div / EVIDENCE badge's widths on either side, since space-between alone wouldn't land a 3rd

@@ -156,6 +156,7 @@ let lastModelIndicatorHtmlByTarget = {};
 let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
 let isScrolling = false;
 let scrollIdleTimer = 0;
+let stickyHeaderResizeTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
 // Matches CANDLE_HISTORY_POLL_MS's reasoning: the underlying data is 5m bars, so a new reading
@@ -1903,6 +1904,21 @@ function setupPageTabs() {
   }));
 }
 
+// 2026-09-01 (user request): sticky header stack -- styles.css pins .top (clock/session/page-tabs)
+// and #snapshotTabPanel > .ops-panel-head (coin-selector row) to the viewport top, stacked directly
+// beneath each other. .top's own rendered height varies by breakpoint (58px desktop -> a taller
+// multi-row stack on mobile, see styles.css's .top/.topbar media query), so the second bar's `top`
+// offset is measured at runtime into the --sticky-top-h CSS var instead of hardcoded per-breakpoint
+// -- stays correct even if either row's content ever changes height (e.g. a badge wrapping to a
+// 2nd line), not just across the one mobile breakpoint this was written against.
+function syncStickyHeaderOffset() {
+  const topEl = document.querySelector(".top");
+  if (!topEl) return;
+  const marginBottom = parseFloat(getComputedStyle(topEl).marginBottom) || 0;
+  const h = topEl.offsetHeight + marginBottom;
+  document.documentElement.style.setProperty("--sticky-top-h", `${h}px`);
+}
+
 function setupScrollRendering() {
   document.addEventListener("scroll", () => {
     isScrolling = true;
@@ -2999,6 +3015,11 @@ document.addEventListener("visibilitychange", () => {
 setupSnapshotAssetTabs();
 setupPageTabs();
 setupScrollRendering();
+syncStickyHeaderOffset();
+window.addEventListener("resize", () => {
+  window.clearTimeout(stickyHeaderResizeTimer);
+  stickyHeaderResizeTimer = window.setTimeout(syncStickyHeaderOffset, 150);
+});
 
 function showTooltip(x, y, html) {
   const t = el("chartTooltip");
