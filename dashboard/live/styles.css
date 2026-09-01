@@ -152,14 +152,21 @@ body {
 
 /* 2026-09-01: sticky header (user request) -- .top (clock/session/page-tabs row) and the snapshot
    tab's coin-selector row (#snapshotTabPanel > .ops-panel-head below) both pin to the viewport top
-   while the page scrolls, stacked directly beneath each other. Fully opaque background (#14161e,
-   a shade sampled from body's own dark gradient -- see body{} above, which is NOT a flat color, so
-   this is an approximation rather than an exact match at every scroll position) -- an EARLIER
-   version here used a translucent rgba()+blur combo, which a user report showed let scrolled
-   content visibly show through; solid is the deliberately safer choice for a pinned header whose
-   entire job is to sit ON TOP of scrolling content. backdrop-filter blur kept purely for a soft
-   edge on any sub-pixel antialiasing seam, no longer load-bearing for opacity. z-index below the
-   1000 used by .chart-tooltip elsewhere so tooltips still float above a pinned header. */
+   while the page scrolls, stacked directly beneath each other. Fully opaque background -- an
+   EARLIER version here used a translucent rgba()+blur combo, which a user report showed let
+   scrolled content visibly show through; solid is the deliberately safer choice for a pinned
+   header whose entire job is to sit ON TOP of scrolling content. backdrop-filter blur kept purely
+   for a soft edge on any sub-pixel antialiasing seam, no longer load-bearing for opacity. z-index
+   below the 1000 used by .chart-tooltip elsewhere so tooltips still float above a pinned header.
+   2026-09-02 fix (user-reported "이질감", header read as flat black against the page's blue-tinted
+   dark gradient): base color switched from a hand-picked near-black (#14161e) to #171922, body's
+   own gradient's literal 0%-stop color (see body{} above) -- and a small radial cyan glow
+   (rgba(34,211,238,...), the same --accent hue as body's own top-left radial highlight and the
+   clock's text-shadow/active-tab glow elsewhere on this page) layered on top so the header echoes
+   the page's established cyan-glow visual language instead of reading as a plain neutral bar. The
+   radial's own gradient stops fade to transparent, but it sits ABOVE the opaque #171922 base in the
+   same background shorthand, not above the page itself -- opacity guarantee from the section above
+   is unaffected, this only changes what color that opaque layer actually is. */
 .top {
   display: flex;
   justify-content: space-between;
@@ -168,7 +175,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: #14161e;
+  background: radial-gradient(ellipse 480px 140px at 15% -60%, rgba(34, 211, 238, 0.14), transparent 65%), #171922;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
@@ -197,7 +204,7 @@ body {
   position: sticky;
   top: var(--sticky-top-h);
   z-index: 40;
-  background: #14161e;
+  background: radial-gradient(ellipse 480px 140px at 15% -60%, rgba(34, 211, 238, 0.14), transparent 65%), #171922;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }

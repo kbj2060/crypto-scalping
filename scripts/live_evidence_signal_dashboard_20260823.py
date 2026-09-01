@@ -232,14 +232,23 @@ DISCLAIMER = """\
 # Ranking key is each signal's stronger side (max of bottom/top precision) at 1h; re-run that
 # script if a signal's formula changes and this order needs to be re-derived, don't hand-tweak.
 SIGNAL_ORDER = [
+    # 2026-09-02 (user request): reordered by REAL profit win rate (trade_return>0 after cost, not
+    # raw directional accuracy), per docs/homer/README.md ss5.11's cross-signal synthesis (2026-09-01,
+    # "best floor" VAL figures -- see that section for the full PF/mean/median/tail-dependence table
+    # this ordering summarizes down to a single sort key). Order affects ONLY display (this list also
+    # drives bottom_votes/top_votes via an order-independent column sum, and the CLI debug table) --
+    # no computed value depends on list order. fib_extension_exhaustion is deliberately placed LAST
+    # despite its raw 73.9% figure (which would rank #2) -- ss5.11 found its 91.1% directional accuracy
+    # masks a 23.0pp cost-erosion gap (by far the worst of the 8) and the 2026-09-01 direction-flip
+    # audit already withdrew its economics-gate claim entirely (classification/AUC only, still valid).
+    ("demarker_extreme", "DeMarker(14) high/low-based oscillator >=0.90 (top) or <=0.10 (bottom) -- 2026-08-31: Homer candidate-pool signal (not one of the original 8), TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.7527/0.7157/0.7464 (this project's best classification result). Permutation importance found bb_pctb, not dem itself, is the actual classification driver -- confirmed not a lookahead bug via a dedicated audit, see docs/homer/README.md"),
     ("orthogonal_combo", "adaptive oscillator extreme (p_fast/p_slow<=.10 or >=.90) AND (BOTTOM: taker delta_z<=-2 OR funding_z<=-2; TOP: taker delta_z>=2 only) -- 2026-08-27: bottom leg OR-merged with the former standalone funding_oscillator_combo signal after research_eth_funding_oscillator_union_combo_20260827.py showed the union beats/matches both originals' lift in two independent windows while ~3x'ing trigger frequency (funding_oscillator_combo alone had gone up to 55 days without firing); TOP deliberately excludes funding_z (its rare OOW-window fires were below-baseline and hurt lift)"),
-    ("fib_extension_exhaustion", "price extends 27.2-61.8% beyond a causally-detected 48-bar swing leg's opposite extreme (\"extension exhaustion\", betting on reversal) -- 2026-08-31: TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.605/0.620/0.621; the earlier \"thinner sample, n~190\" note was a 5.5-month-window artifact, full-history recount is bottom=1078/top=1072, see docs/homer/README.md"),
-    ("smt_divergence", "ETH breaks its own 48-bar swing low/high while BTC's does NOT (cross-asset non-confirmation)"),
-    ("liquidity_sweep", "wick pokes past prior 48-bar swing high/low, closes back inside"),
     ("short_term_return_z", "3-bar (15m) return z-score beyond +-2.5"),
     ("taker_delta_z_climax", "net aggressive taker buy/sell volume z-score beyond +-2 (standalone)"),
-    ("demarker_extreme", "DeMarker(14) high/low-based oscillator >=0.90 (top) or <=0.10 (bottom) -- 2026-08-31: Homer candidate-pool signal (not one of the original 8), TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.7527/0.7157/0.7464 (this project's best classification result). Permutation importance found bb_pctb, not dem itself, is the actual classification driver -- confirmed not a lookahead bug via a dedicated audit, see docs/homer/README.md"),
+    ("smt_divergence", "ETH breaks its own 48-bar swing low/high while BTC's does NOT (cross-asset non-confirmation)"),
+    ("liquidity_sweep", "wick pokes past prior 48-bar swing high/low, closes back inside"),
     ("kalman_deviation_meanrev", "(close - Kalman-filtered trend level)/level, rolling-288-bar z-scored, >=2.0 (top) or <=-2.0 (bottom) -- 2026-08-31: Homer candidate-pool signal, TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.6569/0.6311/0.6284, see docs/homer/README.md"),
+    ("fib_extension_exhaustion", "price extends 27.2-61.8% beyond a causally-detected 48-bar swing leg's opposite extreme (\"extension exhaustion\", betting on reversal) -- 2026-08-31: TabPFN meta-label deployed, VAL/OOS/HOLDOUT AUC 0.605/0.620/0.621; the earlier \"thinner sample, n~190\" note was a 5.5-month-window artifact, full-history recount is bottom=1078/top=1072, see docs/homer/README.md. ss2026-09-01: economics-gate claim WITHDRAWN (direction-flip audit + ss5.11's 23.0pp cost-erosion gap, worst of the 8) -- classification/AUC only, placed last in this list despite raw 73.9% profit-win-rate figure for exactly that reason."),
     # 2026-08-31: volume_wick_climax and dalton_rule2_balance_edge REMOVED from the dashboard
     # entirely (user decision) -- both accumulated consistent negative evidence across independent
     # angles after their Homer TabPFN metalabel upgrade: volume_wick_climax had this project's
