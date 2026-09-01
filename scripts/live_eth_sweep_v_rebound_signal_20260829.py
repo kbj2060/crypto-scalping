@@ -28,34 +28,67 @@ The 9 triggers (OR'd; downside=candidate for an upward rebound, upside=mirror):
   in a +-30min (+-6 bar) window. Turned out to be both the single largest AND highest-hit-rate
   trigger of the 9 (22.2% vs the others' 12-20%) in the full-history label build.
 
-Validated (data/labels/eth_5m_v_rebound_multitrigger_20260831/): cheap_gate VAL/OOS AUC
-0.8296/0.8119 (single seed) -> 4-seed stability (VAL mean=0.8289 std=0.0007, OOS mean=0.8125
-std=0.0004, all 4 seeds beat sweep-only v7b) -> HOLDOUT (classification+economics, ONE-TIME spend):
-VAL/OOS/HOLDOUT AUC 0.8292/0.8127/0.8465 (HOLDOUT is the HIGHEST of the three, no degradation;
-sweep-only v7b was 0.7342/0.7621/0.7788 for comparison) + trailing-stop economics (SL=4.0/ARM=1.5/
-Trail=0.1, selected on VAL+OOS only) VAL+11.97bp/OOS+20.96bp/HOLDOUT+9.28bp (win rate 83.8/86.7/
-85.7%, stable across splits) -- sweep-only v7b never passed its own economic gate (0/205 SL/ARM/
-Trail combos were simultaneously profitable on VAL+OOS). This is the first time this project's
-"V자반등" model family has cleared BOTH a classification bar this strong AND an economic gate.
+═══════════════════════════════════════════════════════════════════════════════════════════════
+**2026-09-01 재설계 -- 9트리거 게이트 제거, 매 5분봉 전부 채점(every-bar scoring).**
+═══════════════════════════════════════════════════════════════════════════════════════════════
+
+위 9트리거 구성은 **라벨 생성에는 그대로 유지**되지만, 라이브가 "어느 봉을 채점하는가"의 게이트
+역할에서는 제거됐다. 이제 매 5분봉이 양방향(bottom/top)으로 채점되고, 현재 봉의 확률이 항상
+표시된다. `triggers` 필드는 남지만 **표시 전용 참고정보**로 격하됐다.
+
+왜: 9트리거 중 local_extreme(호출 population의 73~76%를 공급)은 정의상
+`low[i]==min(low[i-6:i+7])`이라, 라벨의 fast_move가 요구하는 held_up 선행조건을 **100% 만족한
+봉만** 후보로 올렸다. 트리거·자산 무관하게 라벨률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은
+그 공짜 크레딧을 성능으로 계상해왔다. 라이브 인과성 자체는 깨지지 않았지만(모델이 미래를 보지는
+않음) 헤드라인 수치는 과대평가였다 -- held_up 층화 시 내부 AUC 0.66~0.69로 하락. 부수적으로
+local_extreme의 30분 지연확인이 "신호가 갑자기 과거기록과 함께 나타남" UX 문제와 경제성
+백테스트의 진입시점 비현실성(+9.28bp -> +4.75bp 정정)의 원인이기도 했다. 게이트를 없애면 모델이
+held_up을 스스로 예측해야 하고, 현재 봉에 점수가 나오므로 다음 봉 진입이 정직한 가정이 된다.
+전체 기록: docs/homer/v_rebound_open_issues_20260901.md, 메모리
+eth_v_rebound_held_up_circularity_proof_and_model_skill_check_20260901.
+
+⚠️ **게이트만 제거하면 안 된다 -- 전체 재학습이 필수다.** 후보풀로 학습한 모델을 그대로 전체 봉에
+적용하면 AUC 0.5287로 붕괴한다(이 저장소에서 "kept-only 착시"의 3번째 반복). 재학습 후 실측
+(research_eth_v_rebound_every_bar_tabpfn_confirm_20260901.py, TabPFN 3시드, VAL 전체봉 15,000행):
+    TabPFN random_18000   VAL AUC 0.6942±0.0023   라이브 사이클 6.56s
+    GBM 프록시(전체 TRAIN 182,969행)      0.6953   <- 재현 확인(−0.0011)
+    후보풀 학습을 전체봉에 적용            0.5287   <- 붕괴 기준선(+0.1655 개선)
+0.6942는 옛 헤드라인 0.8465보다 낮지만, 그 0.8465가 held_up 크레딧을 포함한 값이었고 층화 추정치
+0.66~0.69와 여기가 독립 수렴한다 -- **같은 문제를 정직하게 푼 점수**다. 라벨 정의가 달라졌으므로
+두 AUC의 직접 비교는 무효(메모리 feedback_cross_model_auc_comparison_requires_matched_label_
+difficulty_20260901).
+
+기각된 대안들(전부 실측 근거): shift 변형 라벨, 8트리거를 피쳐로 추가, 사건당 1봉 샘플링
+(chop이 배경상태라 156k봉->154사건, base 96.8%, AUC 0.5260), 절대 bp 하한 20/30bp, 층화추출
+(무작위와 유의차 없음), event-first 컨텍스트 샘플링(GBM −0.097).
+
+⚠️ **미결**: 경제성은 GBM proba로 호출 population을 뽑아 +8.01bp를 봤다 -- TabPFN 확률로
+재실행이 남아 있다. 라벨률이 32.5%->14.6%로 바뀌므로 0.5 임계값 재사용 여부도 별도 판단 필요.
+
+이전(후보풀 게이트) 시절의 검증 결과 -- 이제 헤드라인이 아니라 역사 기록:
+  cheap_gate VAL/OOS AUC 0.8296/0.8119 -> 4시드 안정성 -> HOLDOUT VAL/OOS/HOLDOUT
+  0.8292/0.8127/0.8465 + 트레일링 경제성 VAL+11.97/OOS+20.96/HOLDOUT+9.28bp(진입시점 보정 후
+  +4.75bp). 전부 held_up 크레딧을 포함한 수치다.
 
 TabPFN is in-context inference, not a saved/trained model file: every call re-fits on the SAME
-FROZEN TRAIN context (data/labels/eth_5m_v_rebound_multitrigger_20260831/tabpfn_train_context_
-frozen_multitrigger_v1_20260831.csv, 6,000 rows -- a random subsample of the full 17,961-row TRAIN
-split preserving its NATURAL ~32.7% label rate, not rebalanced, so live probabilities stay
-calibrated the same way the validated VAL/OOS/HOLDOUT numbers above were measured; sized down from
-the full TRAIN set specifically for live latency -- measured 2.88s fit+predict(1 row) on the
-server GPU with this context size, research_eth_v_rebound_multitrigger_live_latency_check_
-20260831.py, comparable to the sweep-only v7b script's own ~3s/cycle at its 3,783-row context).
-Single-seed inference (random_state=20260829, matching this script's own pre-upgrade convention --
-the 4-seed ensemble was for validation robustness, not live serving). Live inference always returns
-a continuous probability for any new candidate (the excluded middle only applies to TRAINING).
+FROZEN TRAIN context (data/labels/eth_5m_v_rebound_every_bar_20260901/tabpfn_train_context_frozen_
+every_bar_20260901.csv -- 전체 봉 TRAIN 182,969행에서 무작위 18,000행, 자연 라벨률 ~14.6%,
+재균형 안 함; freeze_eth_v_rebound_every_bar_train_context_20260901.py가 생성). 18,000행은 TabPFN
+권장 상한 1만행을 넘으므로 `ignore_pretraining_limits=True`가 필요하고, 검증 파이프라인도 처음부터
+같은 플래그로 측정했다. 라이브 사이클 6.56s는 이 엔드포인트 캐시 주기(60s)의 11%.
+Single-seed inference (random_state=20260829, matching this script's own convention -- the
+multi-seed ensembles were for validation robustness, not live serving).
 
 *** DISCRETIONARY READING AID -- NOT WIRED INTO trading_bot.py, NOT AUTOMATED ENTRY/EXIT. ***
-Feature/BTC-fetch/RSI-Wilder machinery below is otherwise unchanged from the pre-upgrade version
-(Tier0 22 + rsi = 23 features, exact same formulas) -- only trigger detection changed, from sweep-
-only to 9-way OR. Values are reused, not reimplemented, from build_eth_5m_v_rebound_multitrigger_
-labels_20260831.py::main() (candidate/trigger construction) and this script's own pre-existing
-_build_features()/_rsi_wilder() (Tier0 feature computation, untouched).
+Feature/BTC-fetch/RSI-Wilder machinery below is unchanged from the pre-redesign version (Tier0 22
++ rsi = 23 features, exact same formulas) -- only which bars get scored changed. Values are reused,
+not reimplemented, from build_eth_5m_v_rebound_multitrigger_labels_20260831.py::main() and this
+script's own pre-existing _build_features()/_rsi_wilder().
+
+응답 스키마는 그대로 유지된다(dashboard/server.py와 app.js 무변경). 다만 매 봉 채점에서는
+이벤트/60분 활성창 개념이 사라져 `minutes_ago`는 항상 0(현재 봉), `early_confirmed`는 항상 None
+이다. `_early_confirm_pos()`와 `_multitrigger_rows()`는 같은 날 삭제됐다 -- 둘 다 이벤트/게이트
+구조에만 쓰이던 함수라 호출자가 사라졌다.
 """
 from __future__ import annotations
 
@@ -78,7 +111,7 @@ from analyze_eth_creative_reversal_evidence_signals_20260814 import add_creative
 from backtest_eth_slowk_williamsr_persistence_confluence_20260814 import compute_indicators  # noqa: E402
 from live_evidence_signal_dashboard_20260823 import compute_signals  # noqa: E402
 
-TRAIN_CONTEXT_CSV = ROOT / "data/labels/eth_5m_v_rebound_multitrigger_20260831/tabpfn_train_context_frozen_multitrigger_v1_20260831.csv"
+TRAIN_CONTEXT_CSV = ROOT / "data/labels/eth_5m_v_rebound_every_bar_20260901/tabpfn_train_context_frozen_every_bar_20260901.csv"
 SWEEP_IMPL_SCRIPT = ROOT / "scripts/build_eth_5m_sweep_followthrough_v2_labels_20260829.py"
 
 FUTURES_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
@@ -87,7 +120,6 @@ BTC_SYMBOL = "BTCUSDT"
 FETCH_LIMIT = 1500          # ~5.2 days at 5m -- clears the 864-bar longest indicator warmup with margin
 SWEEP_LOOKBACK_BARS = 48    # 4h -- matches the live liquidity_sweep definition elsewhere on this dashboard
 HISTORY_BARS = 48           # 4h sparkline strip, matches this dashboard's HISTORY_BARS convention
-ACTIVE_WINDOW_MINUTES = 60  # v7b outcome window, unchanged by the trigger-side upgrade
 LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigger_labels_20260831.py
 
 TIER0 = [
@@ -131,7 +163,7 @@ def _empty(error: str) -> dict:
     return {"warmed_up": False, "error": error, "event_active": False, "call": None,
             "direction": None, "proba_rebound": None, "minutes_ago": None,
             "sweep_ts_utc": None, "price": None, "tone": "neutral", "history": [], "times": [],
-            "triggers": None}
+            "triggers": None, "early_confirmed": None}
 
 
 def _fetch_klines(symbol: str) -> pd.DataFrame | None:
@@ -194,27 +226,39 @@ def _build_features(kl: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def _multitrigger_rows(frame: pd.DataFrame, sig: pd.DataFrame) -> pd.DataFrame:
-    """Any of the 9 triggers OR'd, with generic (non-sweep-specific) direction-relative features
-    computed the same way build_eth_5m_v_rebound_multitrigger_features_tier0_20260831.py does for
-    training -- is_downside/sweep_penetration_atr/flow_aligned_delta_z are well-defined for any
-    candidate regardless of which trigger(s) fired (they describe "how extended is this bar vs.
-    the recent 48-bar range", not literally "did a sweep happen"). Returns one row per firing bar
-    with a `triggers` column listing which of the 9 fired (comma-joined, sorted)."""
+def _every_bar_rows(frame: pd.DataFrame, sig: pd.DataFrame, n_tail: int) -> pd.DataFrame:
+    """매 봉 스코어링(2026-09-01 재설계): 트리거 발동 여부와 무관하게 **최근 n_tail개 봉 전부**를
+    양쪽 방향(bottom/top)으로 채점 대상으로 만든다.
+
+    ⚠️ 이 함수가 이전 `_multitrigger_rows()`를 대체한다(같은 날 삭제 -- 게이트가 없어져 호출자가
+    사라짐). 여러 BTC/ETH 연구 스크립트 주석이 `_multitrigger_rows()`를 부호 규약의 정본으로
+    인용하는데, 그 공식(is_downside/sweep_penetration_atr/flow_aligned_delta_z --
+    penetration = (level-low) 또는 (high-level), 즉 진짜 관통에서 양수)은 아래에 **문자 그대로
+    동일하게** 옮겨져 있다. 바뀐 것은 "어느 봉을 넣는가"뿐이다.
+
+    왜 게이트를 없앴는가: 9트리거 게이트는 held_up 얽힘의 원인이었다 -- local_extreme은 정의상
+    `low[i]==min(low[i-6:i+7])`이라 라벨의 fast_move가 요구하는 선행조건(held_up)을 100%
+    만족한 봉만 공급했고, 모델은 그 공짜 크레딧을 성능으로 계상해왔다(헤드라인 AUC 0.83~0.85 중
+    상당분). 게이트를 없애면 모델이 held_up을 스스로 예측해야 해서 그 크레딧이 사라진다.
+    부수적으로 local_extreme의 30분 지연확인에서 오던 UX 문제("신호가 갑자기 과거기록과 함께
+    나타남")와 경제성 백테스트의 진입시점 비현실성도 함께 해소된다 -- 이제 현재 봉에 점수가
+    나오므로 다음 봉 진입이 정직한 가정이 된다.
+
+    `triggers` 컬럼은 유지하되 **표시 전용 정보**로 격하된다(어느 트리거가 겹쳤는지 참고용,
+    채점 대상 선정에는 더 이상 관여하지 않음). 발동이 없으면 빈 문자열."""
     n = len(frame)
-    low, high, close = frame["low"].to_numpy(), frame["high"].to_numpy(), frame["close"].to_numpy()
+    lo_i = max(0, n - n_tail)
+    low, high = frame["low"].to_numpy(), frame["high"].to_numpy()
 
     down = {name: sig[f"bottom_{name}"].fillna(False).to_numpy() for name in NAMED_TRIGGERS}
     up = {name: sig[f"top_{name}"].fillna(False).to_numpy() for name in NAMED_TRIGGERS}
-
     W = LOCAL_EXTREME_W
     local_low = np.zeros(n, dtype=bool)
     local_high = np.zeros(n, dtype=bool)
     for i in range(W, n - W):
-        seg_lo, seg_hi = low[i - W:i + W + 1], high[i - W:i + W + 1]
-        if low[i] == seg_lo.min():
+        if low[i] == low[i - W:i + W + 1].min():
             local_low[i] = True
-        if high[i] == seg_hi.max():
+        if high[i] == high[i - W:i + W + 1].max():
             local_high[i] = True
     down["local_extreme"] = local_low
     up["local_extreme"] = local_high
@@ -226,13 +270,10 @@ def _multitrigger_rows(frame: pd.DataFrame, sig: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for is_down, triggers in ((True, down), (False, up)):
-        any_fire = np.zeros(n, dtype=bool)
-        for arr in triggers.values():
-            any_fire |= arr
-        for i in np.flatnonzero(any_fire):
-            fired = sorted(name for name, arr in triggers.items() if arr[i])
+        for i in range(lo_i, n):
             level = level_low[i] if is_down else level_high[i]
             penetration = (level - low[i]) if is_down else (high[i] - level)
+            fired = sorted(name for name, arr in triggers.items() if arr[i])
             rows.append({
                 "pos": i, "timestamp": frame["timestamp"].iloc[i], "is_downside": int(is_down),
                 "sweep_penetration_atr": penetration / atr[i] if np.isfinite(atr[i]) and atr[i] > 0 else np.nan,
@@ -260,8 +301,15 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
     "direction" ("up"|"down"|None), "proba_rebound" (0-1 or None), "minutes_ago",
     "sweep_ts_utc", "price", "tone" ("good"|"bad"|"flat"|"neutral", direction x call resolved via
     _predicted_tone), "history" (oldest-to-newest tone strings, HISTORY_BARS long), "times"
-    (matching ISO timestamps), "triggers" (comma-joined names of which of the 9 triggers fired for
-    the current event, or None). Never raises."""
+    (matching ISO timestamps), "triggers" (comma-joined names of which of the 9 triggers happen to
+    have fired on the CURRENT bar -- display-only since the 2026-09-01 every-bar redesign, no longer
+    gates scoring; empty string when none fired). Never raises.
+
+    2026-09-01 매 봉 스코어링 이후 스키마상 의미가 바뀐 필드(키 이름/타입은 그대로):
+      event_active -- "현재 봉 점수가 있는가"(사실상 warmed_up이면 항상 True). 이벤트 개념 없음.
+      minutes_ago  -- 항상 0. 현재 봉 자신의 점수이므로 "몇 분 전 이벤트"가 존재하지 않는다.
+      sweep_ts_utc -- 현재 봉의 타임스탬프.
+      early_confirmed -- 항상 None. 조기확정은 60분 활성창이 있을 때만 의미가 있었다."""
     try:
         kl = _fetch_klines(SYMBOL)
         if kl is None or len(kl) < 900:
@@ -270,72 +318,72 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
 
         frame = _build_features(kl)
         sig = compute_signals(kl, btc_df=btc_kl, funding_df=None)
-        candidates = _multitrigger_rows(frame, sig)
+        # 2026-09-01 매 봉 스코어링: 트리거 게이트 제거. 최근 HISTORY_BARS+1 봉 전부를 양방향으로
+        # 채점한다(예측 비용은 예측 행수가 아니라 컨텍스트 크기가 지배 -- 314행이 1행과 같은
+        # 시간이었던 실측, research_eth_v_rebound_pool_a_context_size_tabpfn_20260901.py).
+        candidates = _every_bar_rows(frame, sig, HISTORY_BARS + 1)
         candidates = candidates.merge(frame[["timestamp"] + [c for c in FEATURES if c not in
                                        ("is_downside", "sweep_penetration_atr", "flow_aligned_delta_z")]],
                                        on="timestamp", how="left")
         candidates = candidates.dropna(subset=FEATURES)
-        if candidates.empty and frame[FEATURES + ["atr"]].tail(1).isna().any(axis=1).all():
+        if candidates.empty:
             return _empty("indicators_not_warmed_up")
 
-        now = frame["timestamp"].iloc[-1]
         price = float(frame["close"].iloc[-1])
 
-        proba_by_pos: dict[int, float] = {}
-        if not candidates.empty:
-            train = _load_train_context()
-            from tabpfn import TabPFNClassifier
-            clf = TabPFNClassifier(device="cuda", random_state=20260829)
-            clf.fit(train[FEATURES], train["label"].to_numpy())
-            proba = clf.predict_proba(candidates[FEATURES])[:, 1]
-            for pos, p in zip(candidates["pos"], proba):
-                proba_by_pos[int(pos)] = float(p)
+        train = _load_train_context()
+        from tabpfn import TabPFNClassifier
+        # ignore_pretraining_limits: TabPFN 권장 상한은 1만행인데 이 컨텍스트는 18,000행이다
+        # (전체 봉 TRAIN 182,969행에서 무작위 추출 -- 층화/event-first보다 나음이 실측됨).
+        # 검증 파이프라인도 처음부터 이 플래그를 썼다.
+        clf = TabPFNClassifier(device="cuda", random_state=20260829,
+                                ignore_pretraining_limits=True)
+        clf.fit(train[FEATURES], train["label"].to_numpy())
+        proba = clf.predict_proba(candidates[FEATURES])[:, 1]
+        candidates = candidates.assign(proba=proba)
 
         def call_of(p: float) -> str:
             return "rebound" if p >= 0.5 else "continuation"
 
-        events = []
+        # 매 봉 스코어링에서는 봉마다 bottom/top 두 점수가 나온다. 그 봉의 "그림"은 둘 중 확률이
+        # 높은 쪽으로 정한다(현행 칩이 방향 하나 + 확률 하나를 보여주는 계약을 그대로 유지).
+        best_by_pos: dict[int, dict] = {}
         for row in candidates.itertuples():
-            p_row = proba_by_pos.get(int(row.pos))
-            if p_row is None:
-                continue
-            direction = "down" if int(row.is_downside) == 1 else "up"
-            events.append({"t0": frame["timestamp"].iloc[int(row.pos)], "direction": direction,
-                            "call": call_of(p_row), "proba": p_row, "triggers": row.triggers})
-        events.sort(key=lambda e: e["t0"])
+            pos = int(row.pos)
+            prev = best_by_pos.get(pos)
+            if prev is None or row.proba > prev["proba"]:
+                best_by_pos[pos] = {
+                    "t0": frame["timestamp"].iloc[pos], "proba": float(row.proba),
+                    "direction": "down" if int(row.is_downside) == 1 else "up",
+                    "triggers": row.triggers or None,
+                }
 
-        # 2026-08-31 fix: pick the OLDEST still-unexpired event ([0]), not the newest ([-1]).
-        # With 9 triggers firing far more densely than sweep alone did, a newer candidate is
-        # almost always available before an older one's ACTIVE_WINDOW_MINUTES elapses -- always
-        # showing the newest meant a call got overwritten after a single 5min bar nearly every
-        # cycle (user-reported: "V자반등 shows for 5min then flips back to 미반등"), defeating the
-        # documented 60-minute persistence this field's own name (minutes_ago) implies. Taking the
-        # oldest active event instead lets each call actually hold the display for its intended
-        # window before yielding to whatever is next in the queue.
-        hist_bars = frame.tail(HISTORY_BARS)["timestamp"]
+        # 히스토리: 각 봉이 "그 봉 자신의" 점수로 칠해진다. 이벤트/60분창/afterglow 개념이
+        # 사라졌으므로 과거 이벤트가 이후 봉을 덮어쓰는 일도 없다 -- 지연확인 UX 문제의 원인이
+        # 구조적으로 제거됨.
         history, times = [], []
-        for bar_ts in hist_bars:
-            covering = [e for e in events if e["t0"] <= bar_ts <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
-            tone = _predicted_tone(covering[0]["direction"], covering[0]["call"]) if covering else "neutral"
-            history.append(tone)
-            times.append(bar_ts.isoformat())
+        for pos in range(max(0, len(frame) - HISTORY_BARS), len(frame)):
+            times.append(frame["timestamp"].iloc[pos].isoformat())
+            b = best_by_pos.get(pos)
+            history.append(_predicted_tone(b["direction"], call_of(b["proba"])) if b else "neutral")
 
-        current = [e for e in events if e["t0"] <= now <= e["t0"] + pd.Timedelta(minutes=ACTIVE_WINDOW_MINUTES)]
-        if not current:
+        cur = best_by_pos.get(len(frame) - 1)
+        if cur is None:
             return {"warmed_up": True, "error": None, "event_active": False, "call": None,
                     "direction": None, "proba_rebound": None, "minutes_ago": None,
                     "sweep_ts_utc": None, "price": price, "tone": "neutral",
-                    "history": history, "times": times, "triggers": None}
+                    "history": history, "times": times, "triggers": None, "early_confirmed": None}
 
-        shown = current[0]
-        minutes_ago = int((now - shown["t0"]).total_seconds() // 60)
+        # minutes_ago는 항상 0(현재 봉 점수), early_confirmed는 개념 자체가 사라져 None.
+        # 스키마는 그대로 유지해 dashboard/server.py와 app.js를 건드리지 않는다.
         return {
-            "warmed_up": True, "error": None, "event_active": True, "call": shown["call"],
-            "direction": shown["direction"],
-            "proba_rebound": round(shown["proba"], 4), "minutes_ago": minutes_ago,
-            "sweep_ts_utc": shown["t0"].isoformat(), "price": price,
-            "tone": _predicted_tone(shown["direction"], shown["call"]),
-            "history": history, "times": times, "triggers": shown["triggers"],
+            "warmed_up": True, "error": None, "event_active": True, "call": call_of(cur["proba"]),
+            "direction": cur["direction"],
+            "proba_rebound": round(cur["proba"], 4), "minutes_ago": 0,
+            "sweep_ts_utc": cur["t0"].isoformat(), "price": price,
+            "tone": _predicted_tone(cur["direction"], call_of(cur["proba"])),
+            "history": history, "times": times, "triggers": cur["triggers"],
+            "early_confirmed": None,
         }
     except Exception as e:  # noqa: BLE001 -- never raise, same contract as sibling live_* modules
         return _empty(f"compute_error: {e}")

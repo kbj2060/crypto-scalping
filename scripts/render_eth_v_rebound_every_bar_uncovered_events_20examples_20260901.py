@@ -52,7 +52,7 @@ if KOREAN_FONT.exists():
     plt.rcParams["font.family"] = fm.FontProperties(fname=str(KOREAN_FONT)).get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
-ROOT = Path("/home/kbj20/crypto-scalping")
+ROOT = Path(__file__).resolve().parents[1]
 for _p in (ROOT, ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

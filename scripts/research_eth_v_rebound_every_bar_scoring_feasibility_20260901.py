@@ -54,7 +54,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import roc_auc_score
 
-ROOT = Path("/home/kbj20/crypto-scalping")
+ROOT = Path(__file__).resolve().parents[1]
 for _p in (ROOT, ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

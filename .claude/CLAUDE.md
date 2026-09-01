@@ -107,3 +107,18 @@ pos_tp/pos_sl(TP/SL 배리어 레벨) 피쳐는 리스크사이징(margin/levera
 리스크사이징 피쳐는 실제 후보/캔들마다 달라지는 risk sidecar 예측값을 써야 한다는 원칙과 별개로, ATR/변동성 계산 자체는 고가/저가를 써도 무방하다 — 여기서 다루는 것은 라벨/피쳐 해상 시점(barrier_end_i) 판정 컨벤션이다.
 근거: 2026-08-18 h48qual/zig075 liveATR 재라벨 스크립트(scripts/research_eth_omega461_exit_head_liveatr_relabel_20260813.py)에서 이 패턴들이 동시에 깨져 있었던 게 발견됐고(배리어 판정은 위 정정으로 원래 intrabar 컨벤션이 맞았음이 확인됨), 스케일압축/무분산 리스크피쳐 2가지는 h48cons/BTC/SOL 변형 등 다수 파일에 코드 재사용/포팅으로 전파돼 있었다(그 중 다수가 실제 라이브 배포와 직결 — 자산별로 확인 필요, "research 파일이니 비라이브"라고 넘겨짚지 말 것). 전체 기록: docs/experiments/eth_odyssey4_exit_head_liveatr_barrier_and_label_reaudit_20260818.md.
 새 exit_head/포지션-상태 학습 데이터 빌더를 작성하거나 기존 걸 복사할 때는 scripts/audit_position_feature_train_inference_parity_20260818.py를 재실행해 confirmed(Pattern A) 항목이 새로 늘지 않았는지 확인한다. needs_review(Pattern B/C)는 verdict가 아니라 사람이 직접 읽고 판단해야 하는 후보 목록이다 — 특히 Pattern C(배리어 고가/저가)는 "고가/저가=항상 버그"가 아니므로, 반드시 해당 자산의 실제 라이브 barrier 컨벤션부터 확인 후 판단한다.
+Deploy/Git Two-Channel Conflict Contract
+이 저장소는 서버 배포 경로가 **둘**이고 서로를 모른다. 이 긴장 때문에 2026-08-24와 2026-09-01 두 번 실제로 대시보드가 깨졌다.
+(1) `scripts/ops/handoff.sh push` — rsync로 서버 파일을 직접 덮어쓴다. git을 전혀 거치지 않아 서버 워킹트리에 **커밋되지 않은 서빙 코드**를 남긴다.
+(2) `scripts/ops/deploy_watcher.sh` — 10분 cron. origin/main을 폴링해 CI(`syntax-check`) 통과를 확인한 뒤 `git stash push -u` → `git merge --ff-only` → `git stash pop` 사이클을 돈다.
+(1)로 배포하고 커밋하지 않은 파일이 있는 상태에서 **main이 전진하면**, (2)가 그 파일을 stash했다가 되돌리려다 같은 줄을 건드린 경우 **stash pop 충돌** → 서빙 파일에 `<<<<<<<` 마커가 문자 그대로 박힌다. watcher는 이때 설계대로 텔레그램 알림 후 정지하고 서비스는 건드리지 않는다(`deploy_watcher.sh` 224~237행) — 즉 **그 시점엔 아직 다운이 아니다**(실행 중 프로세스는 메모리에 옛 코드 보유). 이 상태에서 프로세스를 재시작하면 그제서야 크래시 루프에 빠져 다운된다. 2026-09-01 사고의 실제 다운 원인이 정확히 이 재시작이었다.
+
+**main에 머지하기 전에 반드시 `bash scripts/ops/check_deploy_drift.sh`를 돌린다.** 머지가 watcher를 깨우는 방아쇠이므로 이 시점이 유일하게 예방 가능한 지점이다. 종료코드 0(안전)이 아니면 머지하지 말고 먼저 정리한다. 라이브 파일을 `handoff.sh push`로 배포한 직후, 그리고 대시보드가 이상할 때(다른 원인 추정보다 **먼저**)도 같은 스크립트를 돌린다.
+
+**라이브 서빙 파일은 rsync만 하지 말고 커밋한다.** `dashboard/**`, `scripts/live_*.py`가 대상이다. 커밋하면 main == 배포본이 되어 stash 대상 자체가 사라진다. 서버에만 존재하는 코드는 그 자체가 리스크이고(오늘 실제로 터졌다), 커밋하면 CI 문법검사도 자동으로 걸린다.
+
+**서버 파일을 덮어쓰기 전에 반드시 로컬과 md5를 대조한다.** 이 저장소는 동시 세션이 공유하므로 서버 쪽이 더 최신일 수 있다. 대조 없이 `handoff.sh push`하면 다른 세션이 배포한 작업을 소리없이 지운다. 대조 방법: `handoff.sh launch server <job> -- /usr/bin/md5sum <경로>` (읽기 전용). 내 변경만 되돌린 사본의 해시가 서버 것과 일치하면 "로컬 = 서버 + 내 변경분"이므로 덮어써도 안전하다.
+
+**대시보드 프로세스를 죽이기 전에 디스크의 파일이 파싱되는지 먼저 확인한다.** `python -c "import ast; ast.parse(open(<파일>).read())"`. 충돌 마커가 박힌 파일 위에서 재시작하면 즉시 크래시 루프가 된다.
+
+**충돌 발견 시 조치 순서**: (1) 로컬 정상본을 `handoff.sh push`로 재전송 → (2) 서버에서 `git add <파일>`로 `UU`→`M ` 해소(워킹트리 내용은 그대로 유지됨) → (3) 다음 watcher 사이클(최대 10분)이 `restored stashed local changes / deploy OK`로 자가회복하는지 로그로 확인 → (4) curl로 서빙 바이트 재검증. `last_deployed_sha`를 손으로 쓰지 말 것 — UU만 풀어주면 watcher가 스스로 회복한다.
