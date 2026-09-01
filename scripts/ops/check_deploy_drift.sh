@@ -46,7 +46,11 @@ echo "LAST_DEPLOYED=$(cat data/live/deploy_watcher/last_deployed_sha 2>/dev/null
 echo "--- UNMERGED ---"
 git status --short | grep -E "^(UU|AA|U.|.U|DD)" || echo "(none)"
 echo "--- DIRTY_LIVE_FILES ---"
-git status --short | grep -E "^( M|M |\?\?)" | grep -E "dashboard/|scripts/live_|trading_bot" || echo "(none)"
+# 백업/스냅샷 잔재는 서빙 코드가 아니므로 제외 -- 안 그러면 매번 늑대소년이 된다
+# (.bak* / .backup* / *_backup_* / *.orig / *.pre_* 등, 2026-09-01 오탐으로 확인)
+git status --short | grep -E "^( M|M |\?\?)" \
+  | grep -E "dashboard/|scripts/live_|trading_bot" \
+  | grep -vE "\.bak|\.backup|_backup_|\.orig$|\.pre_|\.save$|~$" || echo "(none)"
 echo "--- CONFLICT_MARKERS ---"
 grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ scripts/live_*.py 2>/dev/null || echo "(none)"
 ' >/dev/null 2>&1
