@@ -16,6 +16,27 @@ BTC, compression, VWAP, wick/sweep, volume-profile, etc.) already computed by
 features.engineering.FeatureEngineer().process() -- no extra data sources needed beyond what the
 wide24 signal already fetches.
 
+2026-09-02 LABEL CHANGE (S12_K3) -- model config, the 136 feature_cols and this file's whole
+fetch/score path are UNCHANGED; only the trained artifact (and therefore the target label) differs.
+The new label is the scale-parameterized 3-class family at S=12 (1h efficiency-ratio legs, 2h
+direction anchor) with a K=3 (15min) confirm, replacing RegimeEngine's 2h/4h-scale raw label:
+    er_12=|c-c[-12]|/sum|diff|(12), er_24 likewise; net_24=c-c[-24]; slope_12=EMA(c,12).pct_change()
+    trend=(er_12>=T1)|(er_24>=T2); bull=trend&net_24>0&slope_12>0; bear=mirror; chop=rest; debounce K=3
+T1/T2 are percentile-matched on TRAIN ONLY to the old label's own firing rates, so class shares stay
+comparable (bull .228 / bear .214 / chop .558).
+
+⚠️ CLASSIFICATION ACCURACY REGRESSES AND THAT IS ACCEPTED, NOT OVERLOOKED: OOS bal_acc 0.8550 vs
+0.9108, chop precision 0.8670 vs 0.9202. It ships because the two things this label is actually for
+both improve -- evidence-signal gate quality (predicted-chop conditional lift +9.8% pooled, 14 of 16
+signal-side cells positive, vs the old label's -0.8% and 6 of 14, where it was actively HARMFUL to
+taker_delta_z_climax at -0.301 OOS) and display stability (predicted flip_rate 0.0965 vs 0.1803,
+median state 7 bars vs 3). User reviewed the side-by-side regime charts and approved on 2026-09-02.
+The OOS window used for those figures (2026-07-01~08-19) had already been consumed by ~8+ prior
+regime rounds -- a research/dev score, NOT a single-touch Fresh-Forward result.
+Full study chain: docs/experiments/eth_regime_scalping_label_geometry_20260902.md (Phase 1),
+eth_regime_label_conditional_lift_20260902.md (Phase 2), eth_regime_s12k3_label_train_20260902.md
+(Phase 3/3b). Trainer: scripts/train_eth_regime_s12k3_20260902.py.
+
 Fetch/merge logic reused verbatim from live_regime_wide24_signal_20260826.py (same DAYS_BACK=15
 warmup rationale, same Binance endpoints, same causal merge_asof direction="backward")."""
 from __future__ import annotations
@@ -39,7 +60,12 @@ from live_regime_wide24_signal_20260826 import (  # noqa: E402
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # noqa: E402
 
 HISTORY_BARS_RETURNED = 120  # matches live_regime_wide24_signal_20260826.py
-MODEL_PATH = ROOT / "tmp/eth_regime_gbm3_independent_20260826/model.joblib"
+# 2026-09-02: label swapped to S12_K3 (see the "2026-09-02 LABEL CHANGE" block in the
+# module docstring). ROLLBACK = point this single line back at
+# tmp/eth_regime_gbm3_independent_20260826/model.joblib, which is still present on the
+# server untouched; nothing else in this file or in dashboard/server.py depends on which
+# of the two artifacts is loaded (identical payload schema and class order).
+MODEL_PATH = ROOT / "tmp/eth_regime_s12k3_20260902/model.joblib"
 CLASSES3 = ["bull", "bear", "chop"]
 
 
