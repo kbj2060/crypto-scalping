@@ -165,13 +165,22 @@ body {
        visibly blue-tinted, and itself a moving gradient the header can't see) background -- hand-
        picking/approximating a fixed color to match a gradient that looks different at every scroll
        position was never going to line up exactly.
-   (3) CURRENT: translucent rgba(18,20,28,0.82) + a much stronger blur(20px), no hand-picked color
-       at all -- once (1)'s real bug (the gap) was fixed, genuine translucency became safe again,
-       and it solves the color-matching problem structurally instead of by guessing: whatever the
-       real page gradient looks like at a given scroll position shows through and tints the header
-       automatically, exactly matching by construction. blur(20px) is strong enough that scrolling
-       text/chart lines read as an unreadable smear, not legible content -- this is the actual
-       load-bearing property against a (1)-style regression, not the opacity value. */
+   (3) rgba(18,20,28,0.82) + blur(20px), no hand-picked color at all -- once (1)'s real bug (the
+       gap) was fixed, genuine translucency became safe again, and it solves the color-matching
+       problem structurally instead of by guessing: whatever the real page gradient looks like at
+       a given scroll position shows through and tints the header automatically, exactly matching
+       by construction. blur(20px) is strong enough that scrolling text/chart lines read as an
+       unreadable smear, not legible content -- this is the actual load-bearing property against
+       a (1)-style regression, not the opacity value.
+   (4) CURRENT: user asked for full transparency (no background color at all) so the page shows
+       through exactly. NOT done as literal 0 -- with no background, sticky content scrolling
+       underneath would show through as legible text/numbers directly behind the header's own
+       text (exactly (1)'s bug again, since blur alone doesn't fire without SOME backdrop color
+       to filter). Went further toward transparent instead: rgba(18,20,28,0.55) (was 0.82) with
+       blur bumped 20px->22px to compensate (lower opacity means blur has less opaque backdrop to
+       smear, so slightly more blur keeps the smear-not-legible property from (3) intact). If
+       asked to go further, keep dropping opacity in small steps and re-check readability of
+       scrolled text under the header at each step -- don't jump straight to 0. */
 .top {
   display: flex;
   justify-content: space-between;
@@ -180,9 +189,9 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(18, 20, 28, 0.82);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(18, 20, 28, 0.55);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 
 .topbar {
@@ -209,9 +218,9 @@ body {
   position: sticky;
   top: var(--sticky-top-h);
   z-index: 40;
-  background: rgba(18, 20, 28, 0.82);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(18, 20, 28, 0.55);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 /* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
    absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
