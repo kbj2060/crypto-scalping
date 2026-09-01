@@ -123,12 +123,13 @@ def main() -> int:
     assert long["timestamp"].max() < OOS_END, "HOLDOUT 누출"
     log(f"split 분포: {long['split'].value_counts().to_dict()}  "
         f"(마지막 봉 {long['timestamp'].max()}, HOLDOUT 경계 {OOS_END})")
-    # ⚠️ kl은 반드시 _vs.load_klines()로 만든다(build_all_bar_frame()이 아니라). 후자는 timestamp가
-    # tz-aware라 아래 ts_to_pos의 np.datetime64 키와 하나도 매칭되지 않아 호출 0건이 된다 --
-    # 2026-09-01 이 스크립트 첫 실행에서 실제로 그렇게 조용히 전부 스킵됐다. 기존 검증된
-    # costgate 스크립트(_bt.main())가 쓰는 것과 같은 프레임이어야 한다.
+    # ⚠️ tz_localize(None)이 필수다. build_called()의 ts_to_pos는 kl["timestamp"].to_numpy()를
+    # 키로 쓰는데, tz-aware Series의 to_numpy()는 datetime64가 아니라 **Timestamp 객체 배열**을
+    # 준다 -- 조회 키인 naive np.datetime64와 하나도 매칭되지 않아 호출이 조용히 0건이 된다
+    # (2026-09-01 이 스크립트 첫 실행에서 실제로 전 임계값 0건으로 스킵됐다). 기존 검증된
+    # _bt.main()도 같은 이유로 이 줄을 갖고 있다.
     kl = _vs.load_klines(_feas.ETH_CSV)[["timestamp", "open", "high", "low", "close"]].copy()
-    assert kl["timestamp"].dt.tz is None, "kl timestamp가 tz-aware -- ts_to_pos 매칭이 깨진다"
+    kl["timestamp"] = kl["timestamp"].dt.tz_localize(None)
 
     # === 배포 설정 그대로 fit ===
     ctx = pd.read_csv(TRAIN_CONTEXT_CSV)
