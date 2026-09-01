@@ -46,6 +46,11 @@ GITHUB_REPO="kbj2060/crypto-scalping"
 STATE_DIR="$ROOT/data/live/deploy_watcher"
 LAST_NOTIFIED_FAILED_SHA="$STATE_DIR/last_notified_failed_sha"
 HEALTH_CHECK_WAIT_SECONDS=60
+# Must match dashboard/scripts/supervise_server.sh's own defaults/env names -- the health check
+# below and that supervisor have to agree on which port "the dashboard" means.
+DASHBOARD_PORT="${DASHBOARD_PORT:-8787}"
+DASHBOARD_SIGTERM_GRACE_SECONDS=6   # then SIGKILL; see restart_dashboard()
+DASHBOARD_HEALTH_RETRIES=6          # x5s = 30s past the shared health window, for a slow respawn
 
 mkdir -p "$STATE_DIR"
 
@@ -178,9 +183,43 @@ affects '^scripts/live_eth_odyssey4_zig075_entry_veto_shadow_cleanroom_20260816\
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
 
+# The dashboard is not a systemd unit: dashboard/scripts/supervise_server.sh owns it, records its
+# child's pid here, and respawns ~3s after that child exits. So "restarting" it means killing the
+# child and letting the supervisor do the rest -- never spawn one here (a manual process would win
+# the port race and leave the supervisor stuck logging "port already in use" forever, with an
+# unsupervised orphan serving; see feedback_dashboard_server_sigterm_shutdown_hang_20260827).
+#
+# 2026-09-01: plain `kill` alone is NOT enough. dashboard/server.py has a long-standing symptom
+# where SIGTERM releases the listening socket but the process never exits (4 occurrences since
+# 2026-08-27, unrelated to uptime). The supervisor blocks on `wait "$child"`, so a hung child means
+# it never respawns -- the port stays dead until someone intervenes. That is exactly what happened
+# on 2026-09-01 18:10: this function killed the child, the process hung, and the dashboard was down
+# ~2min while this script went on to log "deploy OK". Escalate to SIGKILL if it doesn't exit.
 restart_dashboard() {
   local child_pid_file="$ROOT/data/live/dashboard_external.child.pid"
-  [[ -f "$child_pid_file" ]] && kill "$(cat "$child_pid_file")" 2>/dev/null
+  [[ -f "$child_pid_file" ]] || { log "no dashboard child pid file, nothing to restart"; return 0; }
+  local pid
+  pid="$(cat "$child_pid_file" 2>/dev/null)"
+  [[ -n "$pid" ]] || return 0
+  kill -0 "$pid" 2>/dev/null || { log "dashboard child $pid already gone"; return 0; }
+
+  kill "$pid" 2>/dev/null
+  local waited=0
+  while (( waited < DASHBOARD_SIGTERM_GRACE_SECONDS * 2 )); do
+    kill -0 "$pid" 2>/dev/null || { log "dashboard child $pid exited on SIGTERM"; return 0; }
+    sleep 0.5
+    (( waited++ ))
+  done
+  log "dashboard child $pid still alive ${DASHBOARD_SIGTERM_GRACE_SECONDS}s after SIGTERM -- sending SIGKILL"
+  kill -9 "$pid" 2>/dev/null
+}
+
+# Is the dashboard actually serving? The supervisor rebinds the port on respawn, and the failure
+# mode above is precisely "socket released, never rebound", so port ownership is the signal that
+# matters -- not an HTTP body (some endpoints re-fit models on first call and can take tens of
+# seconds, which would make a request-based probe flap).
+dashboard_listening() {
+  ss -ltn "sport = :${DASHBOARD_PORT}" 2>/dev/null | grep -q ":${DASHBOARD_PORT}"
 }
 
 restart_units() {
@@ -257,6 +296,26 @@ for unit in "${!UNITS_TO_RESTART[@]}"; do
     healthy=0
   fi
 done
+
+# 2026-09-01: the dashboard used to be invisible here -- this loop only ever asked systemd, and the
+# dashboard is not a unit. So a restart that left it dead still reached "deploy OK" below, wrote
+# last_deployed_sha, and sent a green Telegram. That is how the 18:10 outage stayed unnoticed until
+# a human happened to load the page. Give it its own check, with retries: the supervisor needs ~3s
+# to respawn and the process a few more to bind, and a SIGKILL escalation may have pushed that
+# later than the shared 60s window assumes.
+if [[ "$dashboard_changed" == "1" ]]; then
+  dash_ok=0
+  for _ in $(seq "$DASHBOARD_HEALTH_RETRIES"); do
+    if dashboard_listening; then dash_ok=1; break; fi
+    sleep 5
+  done
+  if [[ "$dash_ok" == "1" ]]; then
+    log "dashboard is listening on ${DASHBOARD_PORT}"
+  else
+    log "dashboard is NOT listening on ${DASHBOARD_PORT} after restart -- regression"
+    healthy=0
+  fi
+fi
 
 if [[ "$healthy" == "1" ]]; then
   echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
