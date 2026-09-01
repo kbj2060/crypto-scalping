@@ -225,8 +225,26 @@ def main() -> int:
             f_ok = sum(1 for g in by_split[split]["flip_grid"] if g["opt_bp"] > 0 and g["pess_bp"] > 0)
             sel[f"{split}_grid_profitable"] = {"normal": g_ok, "flipped": f_ok,
                                                "total": len(by_split[split]["grid"])}
+        # ⚠️뒤집기가 그리드에서 더 많이 수익나면 노이즈수확 아티팩트를 의심해야 한다
+        # (feedback_trailing_stop_low_arm_noise_harvest_artifact_20260901). 판별 열쇠는 **ARM**:
+        # 아티팩트는 ARM이 낮을 때(트레일이 거의 즉시 무장돼 잡음을 수확) 나타난다. 수익 조합의
+        # ARM 분포를 정방향/뒤집기 각각 찍어, 뒤집기 우위가 저ARM에 몰려 있는지 확인한다.
+        for split in by_split:
+            if by_split[split].get("insufficient"):
+                continue
+            for tag, gname in (("정방향", "grid"), ("뒤집기", "flip_grid")):
+                prof = [g for g in by_split[split][gname] if g["opt_bp"] > 0 and g["pess_bp"] > 0]
+                if not prof:
+                    continue
+                by_arm = {}
+                for g in prof:
+                    by_arm[g["arm"]] = by_arm.get(g["arm"], 0) + 1
+                sel[f"{split}_{tag}_arm_dist"] = {str(k): v for k, v in sorted(by_arm.items())}
+
         econ[f"{thr:.2f}"] = {"selection": sel,
-                              "raw": {sp: {"n": v["n"]} for sp, v in by_split.items()}}
+                              "grids": {sp: {"n": v["n"], "grid": v.get("grid"),
+                                             "flip_grid": v.get("flip_grid")}
+                                        for sp, v in by_split.items()}}
         s = sel
         log(f"  thr={thr:.2f}  SL/ARM/Trail={key[0]}/{key[1]}/{key[2]}  "
             + "  ".join(f"{sp} n={s[sp]['n']} opt{s[sp]['opt_bp']:+.2f}bp pess{s[sp]['pess_bp']:+.2f}bp "
@@ -237,6 +255,11 @@ def main() -> int:
             if k in s:
                 log(f"          {sp} 그리드 수익 조합: 정방향 {s[k]['normal']}/{s[k]['total']}  "
                     f"뒤집기 {s[k]['flipped']}/{s[k]['total']}")
+                for tag in ("정방향", "뒤집기"):
+                    dist = s.get(f"{sp}_{tag}_arm_dist")
+                    if dist:
+                        log(f"            {tag} 수익조합 ARM분포: "
+                            + "  ".join(f"ARM={a}:{n}" for a, n in dist.items()))
 
     report = {
         "signal": "v_rebound_every_bar_tabpfn_costgate_threshold", "asset": "ETHUSDT",
