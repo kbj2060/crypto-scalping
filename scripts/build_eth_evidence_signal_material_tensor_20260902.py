@@ -71,30 +71,41 @@ def main() -> int:
         f = SRC / f"{name}_causal_proba.csv"
         if not f.exists():
             log(f"⚠️ {name}: proba 없음 -- 건너뜀"); continue
-        d = pd.read_csv(f, parse_dates=["timestamp"])
+        fc = SRC / f"{name}_causal_proba_cal.csv"
+        d = pd.read_csv(fc if fc.exists() else f, parse_dates=["timestamp"])
+        if "proba_cal" not in d.columns:
+            d["proba_cal"] = d["proba"]
+        # 순위 인코딩: TRAIN 분포 기준 백분위 (고정 매핑, 인과적). BSS가 전부 0 근처라
+        # 이 신호들의 정보는 확률 수준이 아니라 **순위**에 있다 -- 그걸 직접 담는다.
+        # 백분위는 8개 신호를 같은 [0,1] 균등 척도에 올려 교차비교를 가능하게 한다.
+        trp = np.sort(d.loc[d.split == "TRAIN", "proba"].to_numpy(float))
+        d["proba_pct"] = np.searchsorted(trp, d["proba"].to_numpy(float), side="right") / max(len(trp), 1)
         d = d[d["timestamp"].isin(pos_of)].copy()
         d["i"] = [pos_of[t] for t in d["timestamp"]]
         d["dir"] = np.where(d["is_bottom"] == 1, 1.0, -1.0)
         d = d.sort_values(["i", "proba"]).drop_duplicates("i", keep="last")  # 동시발동시 확률 큰 쪽
 
-        fire = np.zeros(n); proba = np.zeros(n); age = np.ones(n)
-        dirs = np.zeros(n)
+        fire = np.zeros(n); proba = np.zeros(n); cal = np.zeros(n); pct = np.zeros(n)
+        age = np.ones(n); dirs = np.zeros(n)
         fire[d["i"].to_numpy()] = d["dir"].to_numpy()
         # 발동 봉부터 H봉 동안 유지 (새 발동이 덮어씀) -- 전부 뒤를 보지 않는 전방 채움
-        last_p = last_d = 0.0; last_i = -10**9
-        pi = {int(i): (float(p), float(dd)) for i, p, dd in
-              zip(d["i"], d["proba"], d["dir"])}
+        last = (0.0, 0.0, 0.0, 0.0); last_i = -10**9
+        pi = {int(i): (float(a), float(b), float(c2), float(dd)) for i, a, b, c2, dd in
+              zip(d["i"], d["proba"], d["proba_cal"], d["proba_pct"], d["dir"])}
         for i in range(n):
             if i in pi:
-                last_p, last_d = pi[i]; last_i = i
+                last = pi[i]; last_i = i
             elapsed = i - last_i
             if elapsed < H:
-                proba[i] = last_p; dirs[i] = last_d; age[i] = elapsed / H
+                proba[i], cal[i], pct[i], dirs[i] = last
+                age[i] = elapsed / H
             else:
-                proba[i] = 0.0; dirs[i] = 0.0; age[i] = 1.0
+                proba[i] = cal[i] = pct[i] = dirs[i] = 0.0; age[i] = 1.0
         out[f"{name}_fire"] = fire
         out[f"{name}_proba"] = proba
-        out[f"{name}_signed"] = proba * dirs
+        out[f"{name}_proba_cal"] = cal
+        out[f"{name}_pct"] = pct
+        out[f"{name}_signed"] = pct * dirs        # 교차비교 가능한 척도(백분위) x 방향
         out[f"{name}_age"] = age
         cov = float((proba > 0).mean())
         stats.append({"signal": name, "horizon": H, "n_fires": int(len(d)),
@@ -136,9 +147,12 @@ def main() -> int:
         "rows": int(len(out)), "cols": int(out.shape[1]),
         "range": [str(out.timestamp.min()), str(out.timestamp.max())],
         "columns_per_signal": ["<sig>_fire (+1 bottom / -1 top / 0)",
-                               "<sig>_proba (causal-population metalabel, held for the signal's own HORIZON)",
-                               "<sig>_signed (proba * direction)",
+                               "<sig>_proba (raw causal-population metalabel, held for the signal's own HORIZON)",
+                               "<sig>_proba_cal (isotonic/Platt calibrated on VAL; prefer this for liquidity_sweep and smt_divergence whose raw probs are badly over-spread)",
+                               "<sig>_pct (percentile of proba within this signal's TRAIN distribution -- puts all 8 on one comparable [0,1] scale; BSS~0 means the information is in the RANKING, so this is the recommended scale)",
+                               "<sig>_signed (pct * direction)",
                                "<sig>_age (elapsed/HORIZON, 1.0 = expired)"],
+        "calibration": "measured (reliability/ECE/BSS) and applied; BSS stays <=+0.057 everywhere -- these are rankers, not calibrated probability sources",
         "extra": ["regime_eth", "regime_btc  (0 bull / 1 bear / 2 chop, clean-cutoff TRAIN<=2025-08-31)"],
         "causality": "value at index i uses information through bar i's CLOSE only; standard use is entry at i+1 open",
         "population_fix": "metalabels retrained on RAW TRIGGER population (no cluster_dedup) so train==inference",
