@@ -100,23 +100,45 @@ def main() -> int:
     oos = long.loc[long["split"] == "OOS"].reset_index(drop=True)
     log(f"OOS {len(oos):,}행 -- 두 청크 크기로 5시드 앙상블 예측")
 
-    Pbt, Pl = [], []
+    # ⚠️전 행을 6행 청크로 재예측하면 43,200회 호출이라 몇 시간 걸린다(첫 시도에서 178분
+    # 무진전으로 중단). **결정이 뒤집힐 수 있는 건 임계값 근방 행뿐**이므로 거기만 재예측하면
+    # 통계적으로 동등한 답이 나온다. 근방 밖 행은 1.3e-4로는 절대 임계값을 못 넘는다.
+    models = []
+    Pbt = []
     for sd in SEEDS:
         rng = np.random.default_rng(sd)
         ctx = tr_set.iloc[np.sort(rng.choice(len(tr_set), size=min(CONTEXT_N, len(tr_set)), replace=False))]
         m = TabPFNClassifier(device="cuda", random_state=sd, ignore_pretraining_limits=True)
         m.fit(ctx[TIER0], ctx["y"].to_numpy())
+        models.append(m)
         Pbt.append(np.concatenate([m.predict_proba(oos[TIER0].iloc[k:k+BT_CHUNK])[:, 1]
                                    for k in range(0, len(oos), BT_CHUNK)]))
-        Pl.append(np.concatenate([m.predict_proba(oos[TIER0].iloc[k:k+LIVE_CHUNK])[:, 1]
-                                  for k in range(0, len(oos), LIVE_CHUNK)]))
-        log(f"  seed {sd} 완료")
+        log(f"  seed {sd} 백테스트청크 완료")
     oos["p_bt"] = np.vstack(Pbt).mean(axis=0)
-    oos["p_live"] = np.vstack(Pl).mean(axis=0)
 
-    d = np.abs(oos["p_live"] - oos["p_bt"])
+    BAND = 0.01                       # 관측 최대 확률차(1.3e-4)의 77배 -- 안전한 여유
+    band_idx = np.flatnonzero(((oos["p_bt"] - CUT).abs() <= BAND).to_numpy())
+    rng_c = np.random.default_rng(20260902)
+    ctrl_idx = rng_c.choice(len(oos), size=min(2000, len(oos)), replace=False)
+    probe_idx = np.unique(np.concatenate([band_idx, ctrl_idx]))
+    log(f"  재예측 대상: 임계값 ±{BAND} 근방 {len(band_idx):,}행 + 무작위 대조 2,000행 "
+        f"= {len(probe_idx):,}행 (전체 {len(oos):,}행 중 {len(probe_idx)/len(oos)*100:.1f}%)")
+    probe = oos.iloc[probe_idx]
+    Pl = []
+    for si, m in enumerate(models):
+        Pl.append(np.concatenate([m.predict_proba(probe[TIER0].iloc[k:k+LIVE_CHUNK])[:, 1]
+                                  for k in range(0, len(probe), LIVE_CHUNK)]))
+        log(f"  seed {SEEDS[si]} 라이브청크({LIVE_CHUNK}행) 완료")
+    oos["p_live"] = oos["p_bt"].to_numpy().copy()      # 근방 밖은 차이가 결정에 무의미
+    oos.iloc[probe_idx, oos.columns.get_loc("p_live")] = np.vstack(Pl).mean(axis=0)
+    oos["probed"] = False
+    oos.iloc[probe_idx, oos.columns.get_loc("probed")] = True
+
+    pr = oos.loc[oos["probed"]]
+    d = np.abs(pr["p_live"] - pr["p_bt"])
     log("")
-    log(f"확률 차이: max {d.max():.3e}  중앙 {np.median(d):.3e}  평균 {d.mean():.3e}")
+    log(f"확률 차이(재예측 {len(pr):,}행): max {d.max():.3e}  중앙 {np.median(d):.3e}  "
+        f"평균 {d.mean():.3e}  0 아닌 행 {int((d>0).sum()):,}")
     near = int(((oos["p_bt"] - CUT).abs() <= 1e-3).sum())
     log(f"임계값 ±1e-3 근방 행: {near:,} / {len(oos):,} ({near/len(oos)*100:.4f}%)")
 
