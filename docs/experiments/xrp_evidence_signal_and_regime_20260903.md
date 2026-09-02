@@ -189,6 +189,76 @@ BTC 승자 S24_K3은 XRP에서 **3/16으로 거의 최하위**, ETH 승자 S12_K
 ⭐XRP는 **디바운스(K=6)가 스케일보다 중요**하다 — K=6이 S6/S12/S48 모두에서 같은 스케일의
 K=1/K=3보다 낫다. BTC에서 "디바운스가 스케일보다 중요"했던 관찰과 같은 방향이다.
 
+## 7단계 · 레짐 분류기 학습 (Phase 3 + 3b) ✅
+
+`scripts/research_xrp_regime_s48k6_label_train_20260903.py`
+
+| | bal_acc | chop_R | chop_P | **pred_flip** |
+|---|---|---|---|---|
+| REF_RegimeEngine | 0.9086 | 0.9172 | 0.9224 | 0.1735 |
+| **S48_K6** | 0.8459 | 0.9078 | 0.8603 | **0.0417** |
+
+**Phase 3b — 예측-chop 게이팅 lift(실제 배포 형태)**
+
+| | 양쪽창 양수 | mean VAL | mean OOS |
+|---|---|---|---|
+| REF_RegimeEngine | 5/16 | +0.0595 | **−0.0085** |
+| **S48_K6** | **9/16** | +0.0448 | **+0.0606** |
+
+⭐ETH·BTC와 **같은 패턴**: 후보 라벨은 학습이 더 어렵지만(bal_acc 0.846 vs 0.909)
+**실제 배포 형태에서는 압승**(9/16 vs 5/16, OOS +0.0606 vs −0.0085)이고 플리커는 **4배 낮다**
+(0.0417 vs 0.1735). ⇒ **S48_K6 채택 권고.**
+
+## 8단계 · 서빙 (동결 컨텍스트 · 라이브 · 섀도우) ✅
+
+| 산출물 | 상태 |
+|---|---|
+| 동결 컨텍스트 5종 | ✅ 전부 XRP 고유 값 |
+| `live_xrp_evidence_signal_metalabel_20260903.py` | ✅ warmed_up, 5신호 |
+| `live_xrp_evidence_signal_shadow_runner_20260903.py` | ✅ 상시 가동(주문 없음) |
+
+⚠️⚠️**BTC 데이터 오염 사고 1건**을 여기서 잡았다. `prep[0]`(`load_tier0`/`load_frame`)이
+**그 모듈 자신의 TIER0_PATH**를 읽는데 str_z/taker/orthogonal은 BTC 모듈을 재사용하므로
+BTC CSV를 읽어버렸다. **행수 277,191(=BTC)이고 hit률이 BTC와 소수점까지 동일**해서 발각됐다.
+⇒ 로더를 아예 호출하지 않고 XRP CSV를 직접 읽도록 고치고, **자산 오염 가드**
+(`EXPECTED_ROWS` 대비 행수 검증)를 넣어 재발 시 즉시 죽게 했다.
+추가로 `contexts_report.json`의 `asset` 필드가 `BTCUSDT`로 남아 있던 것도 정정했다.
+
+⚠️tz 규약이 모듈마다 달랐다(demarker/taker는 naive, orthogonal은 aware) — 신호별 `TZ_AWARE` 플래그로 처리.
+
+## 9단계 · ⭐연구 구현 대조 검증 (배포 전) ✅
+
+`scripts/audit_xrp_shadow_hitmode_parity_20260903.py` — BTC에서 `HIT_SPEC` 모드 2건이 틀려
+라이브 hit률이 2.6배 과대평가된 사고를 **XRP는 배포 전에** 막는다.
+
+무작위 400지점 × 양측 = **신호당 800건**을 연구 스크립트 원본 구현과 대조:
+
+```
+✅ demarker_extreme           mode=touch                     n=800 불일치 0
+✅ kalman_deviation_meanrev   mode=touch                     n=800 불일치 0
+✅ short_term_return_z        mode=touch_mae_capped          n=800 불일치 0
+✅ taker_delta_climax         mode=touch_giveback_sustained  n=800 불일치 0
+✅ orthogonal_combo           mode=touch                     n=800 불일치 0
+⇒ 전부 일치 -- 배포 가능
+```
+
+## 10단계 · 대시보드 배선 ✅
+
+⚠️**기존 버그를 함께 고쳤다**: XRP 페이지는 그동안 **ETH 증거신호를 그대로 보여주고 있었다**
+(BTC에서 사용자가 신고했던 "비트코인 페이지에 이더리움 증거신호가 나온다"의 XRP판).
+증거신호 라우팅이 ETH/BTC만 분기했기 때문이다.
+
+- `server.py`: `/api/xrp-evidence-signals` + 캐시/락 + 로더 추가
+- `app.js`: 자산별 라우팅에 XRP 추가. XRP 라벨 사전이 아직 없어 **빈 사전으로 폴백**한다
+  (잘못된 ETH 설명을 보여주는 것보다 이름만 나오는 게 낫다)
+- 캐시버스터 `20260903-xrp-evidence`, 서빙 바이트 확인 완료
+
+## 11단계 · 결함 스캐너 ✅
+
+`audit_live_shadow_paths_defect_classes_20260903.py`에 XRP 2경로 추가(대상 16개).
+XRP 섀도우의 히트 P1/P2/P3는 **BTC 수정본과 동일한 양성 항목**이다(자기 주석·MARK_URL 상수·
+의도된 `keep.append`). 스코어러는 히트 없음.
+
 ## 남은 단계
 
 - [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)

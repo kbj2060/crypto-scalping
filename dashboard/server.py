@@ -59,6 +59,9 @@ from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_sig
 # compute_btc_evidence_signals_panel()을 새로 추가(기존 compute_btc_evidence_signals()는 섀도우
 # 러너 전용 다른 모양이라 그대로 둠). 자세한 내용은 그 함수 docstring 참고.
 from scripts.live_btc_evidence_signal_metalabel_20260902 import compute_btc_evidence_signals_panel  # noqa: E402
+# 2026-09-03: XRP 증거신호 5종. XRP 페이지는 그동안 ETH 신호를 그대로 보여주고 있었다
+# (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판). 자산별 라우팅으로 해소한다.
+from scripts.live_xrp_evidence_signal_metalabel_20260903 import compute_xrp_evidence_signals_panel  # noqa: E402
 # 2026-08-30: liquidity_sweep now trained on the SAME Tier0+rsi schema as taker/short_term_
 # return_z/dalton_rule2_balance_edge (standard touch-based-MFE redo, replacing the V_REBOUND-model
 # relay bridge this import used to be) -- it lives in METALABEL_SIGNALS above and is handled by
@@ -1003,6 +1006,8 @@ def make_app() -> web.Application:
     evidence_signal_provisional_lock = asyncio.Lock()
     btc_evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     btc_evidence_signal_lock = asyncio.Lock()
+    xrp_evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    xrp_evidence_signal_lock = asyncio.Lock()
     v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     v_rebound_lock = asyncio.Lock()
     # 2026-08-31: keyed by asset (was a single shared slot) so an ETH and a BTC request don't
@@ -1488,6 +1493,23 @@ def make_app() -> web.Application:
             btc_evidence_signal_cache["payload"] = payload
             return payload
 
+    async def load_xrp_evidence_signals() -> dict[str, Any]:
+        """XRP 코인 페이지의 메인 증거신호 패널(2026-09-03) -- load_btc_evidence_signals()의 XRP판.
+        서빙 5종(liquidity_sweep/fib_extension_exhaustion은 HOLDOUT AUC가 무작위 미만이라 제외).
+        구조/캐시 정책은 BTC판과 동일하다."""
+        now = time.monotonic()
+        cached = xrp_evidence_signal_cache["payload"]
+        if cached is not None and now - xrp_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+            return cached
+        async with xrp_evidence_signal_lock:
+            cached = xrp_evidence_signal_cache["payload"]
+            if cached is not None and time.monotonic() - xrp_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(compute_xrp_evidence_signals_panel)
+            xrp_evidence_signal_cache["ts"] = time.monotonic()
+            xrp_evidence_signal_cache["payload"] = payload
+            return payload
+
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
         scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
@@ -1858,6 +1880,10 @@ def make_app() -> web.Application:
         payload = await load_btc_evidence_signals()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_xrp_evidence_signals(request: web.Request) -> web.Response:
+        payload = await load_xrp_evidence_signals()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_v_rebound_signal(request: web.Request) -> web.Response:
         payload = await load_v_rebound_signal()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2090,6 +2116,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
+    app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)

@@ -51,6 +51,8 @@ TARGETS = [
     "scripts/live_eth_odyssey4_zig075_entry_veto_shadow_20260814.py",
     "l2_anomaly_snapshot_collector.py",
     "liq_magnet_collector.py",
+    "scripts/live_xrp_evidence_signal_metalabel_20260903.py",
+    "scripts/live_xrp_evidence_signal_shadow_runner_20260903.py",
     "dashboard/server.py",
 ]
 

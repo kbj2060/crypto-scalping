@@ -7,6 +7,7 @@ const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional"
 // 엔드포인트를 썼다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다"). SOL/XRP/HYPE는
 // 증거신호 파이프라인 자체가 없어(ETH+BTC만 존재) EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
 const API_BTC_EVIDENCE_SIGNALS_URL = "/api/btc-evidence-signals";
+const API_XRP_EVIDENCE_SIGNALS_URL = "/api/xrp-evidence-signals";
 const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc"];
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
@@ -1637,7 +1638,11 @@ function renderEvidenceSignals(payload) {
       : tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
     // 2026-09-02: BTC는 신호 정의는 ETH와 같아도 그리드스크린 K/HORIZON과 검증·경제성 수치가
     // 전부 다르므로 별도 라벨 사전을 쓴다 (BTC_EVIDENCE_SIGNAL_KO 선언부 주석 참고).
-    const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO : EVIDENCE_SIGNAL_KO;
+    // XRP는 자체 그리드스크린 K/HORIZON과 HOLDOUT 수치를 쓰므로 별도 라벨 사전이 필요하다.
+    // 아직 사전이 없으면 이름만 나오도록 폴백한다(잘못된 ETH 설명을 보여주는 것보다 낫다).
+    const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO
+      : activeSnapshotAsset === "xrp" ? {}
+      : EVIDENCE_SIGNAL_KO;
     const ko = koDict[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
     const isOpen = detailOpenKeys.has(detailKey);
@@ -1730,7 +1735,11 @@ async function refreshEvidenceSignals() {
     renderEvidenceSignals({ unsupported: true, asset: activeSnapshotAsset });
     return;
   }
-  const url = activeSnapshotAsset === "btc" ? API_BTC_EVIDENCE_SIGNALS_URL : API_EVIDENCE_SIGNALS_URL;
+  // 2026-09-03: XRP 추가. 그 전엔 XRP 페이지가 ETH 신호를 그대로 보여줬다
+  // (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판).
+  const url = activeSnapshotAsset === "btc" ? API_BTC_EVIDENCE_SIGNALS_URL
+    : activeSnapshotAsset === "xrp" ? API_XRP_EVIDENCE_SIGNALS_URL
+    : API_EVIDENCE_SIGNALS_URL;
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`evidence signals ${res.status}`);

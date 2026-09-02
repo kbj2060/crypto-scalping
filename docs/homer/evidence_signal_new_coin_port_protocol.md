@@ -15,19 +15,31 @@
 
 라벨 스크립트에서 직접 확인한 값이다(2026-09-03). **이름만 보고 같다고 가정하면 안 된다.**
 
-| 신호 | ETH HIT / H / K | BTC HIT / H / K | 같은가 |
+| 신호 | ETH HIT / H / K | BTC HIT / H / K | **XRP HIT / H / K** |
 |---|---|---|---|
-| `taker_delta_climax` | **touch** / 24 / 2.00 | **close_at_h** / 6 / 2.0 | ❌ 모드·H 전부 다름 |
-| `liquidity_sweep` | **touch** / 30 / 4.00 | **touch_giveback_sustained** / 20 / 2.0 (해상 **40봉**) | ❌ |
-| `short_term_return_z` | **touch** / 12 / 1.75 | **touch_mae_capped** / 6 / 2.0 | ❌ |
-| `fib_extension_exhaustion` | **touch_and_mae** / 20 / 2.35 | **close_at_h** / 10 / 2.75 | ❌ |
-| `orthogonal_combo` | touch(K_hi) / 24 / 3.571 | touch / 8 / 2.0 | 모드만 같음 |
-| `demarker_extreme` | touch / 8 / 0.70 | touch / 8 / 0.70 | ✅ 유일하게 동일 |
-| `kalman_deviation_meanrev` | touch / 12 / 2.5 | touch / 10 / 3.5 | 모드만 같음 |
-| `smt_divergence` | touch / 72 / 4.20 | (BTC 제외 — 교차자산 파트너 미해결) | — |
+| `taker_delta_climax` | touch / 24 / 2.00 | close_at_h / 6 / 2.0 | **giveback / 9 / 1.5** (해상 **18봉**) |
+| `liquidity_sweep` | touch / 30 / 4.00 | giveback / 20 / 2.0 (해상 40봉) | **서빙 제외** (HOLDOUT 0.4886) |
+| `short_term_return_z` | touch / 12 / 1.75 | touch_mae_capped / 6 / 2.0 | **touch_mae_capped / 12 / 1.5** |
+| `fib_extension_exhaustion` | touch_and_mae / 20 / 2.35 | close_at_h / 10 / 2.75 | **서빙 제외** (HOLDOUT 0.4738) |
+| `orthogonal_combo` | touch(K_hi) / 24 / 3.571 | touch / 8 / 2.0 | **touch_mfe / 8 / 2.0** |
+| `demarker_extreme` | touch / 8 / 0.70 | touch / 8 / 0.70 | **touch / 2 / 1.5** |
+| `kalman_deviation_meanrev` | touch / 12 / 2.5 | touch / 10 / 3.5 | **touch / 5 / 2.0** |
+| `smt_divergence` | touch / 72 / 4.20 | (제외 — 교차자산 파트너 미해결) | (제외 — 동일) |
 
-**8종 중 완전히 같은 것은 `demarker_extreme` 하나뿐이다.** BTC는 2026-09-01 그리드스크린에서
-HIT_TYPE 자체를 3번째 축으로 재탐색했다(그 축 자체가 사용자 지적으로 추가됐다).
+**3자산이 모두 일치하는 신호는 하나도 없다.** ETH·BTC만 볼 땐 `demarker_extreme`이 유일하게
+같았지만 XRP에서 H=8/K=0.70 → **H=2/K=1.5**로 갈라졌다.
+자산마다 HIT_TYPE 자체를 그리드 3번째 축으로 재탐색하기 때문이다.
+
+### ⭐레짐 라벨도 자산마다 다르다 (2026-09-03 추가)
+
+| 자산 | 승자 | 다른 자산 승자를 적용하면 |
+|---|---|---|
+| ETH | **S12_K3** | — |
+| BTC | **S24_K3** | ETH 승자가 BTC에서 3/10 최하위 |
+| XRP | **S48_K6** | BTC 승자가 XRP에서 **3/16 거의 최하위**, ETH 승자도 5/16 |
+
+XRP는 **디바운스(K=6)가 스케일보다 중요**했다(K=6이 S6/S12/S48 전부에서 같은 스케일의
+K=1/K=3보다 우월). 레짐도 증거신호와 똑같이 자산별 재스크리닝이 필수다.
 
 ## 2. HIT_TYPE 4종 — 각각 "언제 결과가 확정되는가"가 다르다
 

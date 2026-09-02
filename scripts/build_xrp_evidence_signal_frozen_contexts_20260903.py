@@ -116,7 +116,7 @@ def main() -> int:
     log(f"  {len(frame):,}행 ({frame.timestamp.min()} ~ {frame.timestamp.max()})")
 
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    report = {"asset": "BTCUSDT", "source": str(CAND_CSV.relative_to(ROOT)),
+    report = {"asset": "XRPUSDT", "source": str(CAND_CSV.relative_to(ROOT)),
               "train_end": str(TRAIN_END), "signals": {},
               "note": "라벨 정의는 각 연구 스크립트의 빌더를 그대로 import -- 재구현 없음"}
 
@@ -207,7 +207,7 @@ def main() -> int:
                     "features": feats, "n_features": len(feats),
                     "bottom": int((ctx["side"] == "bottom").sum()),
                     "top": int((ctx["side"] == "top").sum()),
-                    "btc_params": params, "artifact": str(csv.relative_to(ROOT)),
+                    "asset_params": params, "artifact": str(csv.relative_to(ROOT)),
                     "range": [str(ctx.timestamp.min()), str(ctx.timestamp.max())]}
             report["signals"][name] = info
             log(f"  ✅ TRAIN {len(ctx):,}행 (bottom {info['bottom']:,}/top {info['top']:,}) "
