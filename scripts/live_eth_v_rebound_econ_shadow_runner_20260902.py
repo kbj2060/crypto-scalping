@@ -108,7 +108,7 @@ def mark_price() -> float | None:
         return None
 
 
-def manage(s: dict[str, Any], bars: list[dict], px: float) -> None:
+def manage(s: dict[str, Any], bars: list[dict]) -> None:
     """⭐**봉 고가/저가**로 배리어를 판정한다 -- 백테스트 `sim_exit`과 같은 컨벤션.
 
     2026-09-03 수정 전에는 폴링한 마크가격 한 점(`px`)만 봤다. 그러면 봉 안에서 스톱을
@@ -242,7 +242,7 @@ def cycle(s: dict[str, Any]) -> None:
     px = mark_price()
     if px is None:
         log("⚠️마크가격 실패 -- 건너뜀"); return
-    manage(s, out.get("bars") or [], px)
+    manage(s, out.get("bars") or [])
     if out.get("warmed_up") and not out.get("error"):
         enter(s, out, px)
     else:

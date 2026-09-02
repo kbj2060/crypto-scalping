@@ -203,11 +203,25 @@ def resolve(s: dict[str, Any], bars: pd.DataFrame) -> None:
     s["pending"] = keep
 
 
+def _atr_series(bars: pd.DataFrame, period: int = 14) -> pd.Series:
+    """봉별 ATR. 인덱스가 `bars`의 행 인덱스와 정렬된다(TR이 1봉 밀리는 걸 보정)."""
+    hi, lo, cl = (bars[c].to_numpy(dtype=float) for c in ("high", "low", "close"))
+    tr = np.maximum(hi[1:] - lo[1:],
+                    np.maximum(np.abs(hi[1:] - cl[:-1]), np.abs(lo[1:] - cl[:-1])))
+    a = pd.Series(tr).rolling(period, min_periods=period).mean()
+    # tr[i-1]이 bar i에 대응하므로 앞에 NaN 하나를 붙여 bars 인덱스와 맞춘다
+    return pd.concat([pd.Series([np.nan]), a], ignore_index=True)
+
+
 def record(s: dict[str, Any], out: dict[str, Any], bars: pd.DataFrame) -> None:
     if not out.get("warmed_up") or bars is None or bars.empty:
         return
-    latest = str(bars["timestamp"].iloc[-1])
-    atr_map = {}
+    # ⚠️2026-09-03 수정: 예전엔 `rolling(14).mean().iloc[-1]`로 **항상 최신 봉의 ATR**을 썼다.
+    # `atr_map`이 봉별로 캐시하는 모양이었지만 계산값은 봉과 무관하게 동일했다.
+    # 이 ATR은 HIT 판정 문턱(`k x atr`)에 그대로 들어가므로 **신호 봉의 ATR**이어야 한다.
+    # 신호는 보통 발동 후 1~2사이클 안에 기록돼 오차가 작았지만, 러너가 지연되거나
+    # 변동성이 급변한 구간에서는 문턱이 눈에 띄게 어긋난다.
+    atr_all = _atr_series(bars)
     for name, v in out["signals"].items():
         for side, d in (v.get("fired") or {}).items():
             if "error" in d or d.get("latest_proba") is None:
@@ -221,14 +235,9 @@ def record(s: dict[str, Any], out: dict[str, Any], bars: pd.DataFrame) -> None:
             m = bars.loc[bars["timestamp"].astype(str) == bar]
             if m.empty:
                 continue
-            entry = float(m["close"].iloc[0])
-            atr = atr_map.get(bar)
-            if atr is None:
-                hi, lo, cl = (bars[c].to_numpy() for c in ("high", "low", "close"))
-                tr = np.maximum(hi[1:] - lo[1:],
-                                np.maximum(np.abs(hi[1:] - cl[:-1]), np.abs(lo[1:] - cl[:-1])))
-                atr = float(pd.Series(tr).rolling(14, min_periods=14).mean().iloc[-1])
-                atr_map[bar] = atr
+            bpos = int(m.index[0])
+            entry = float(bars["close"].iloc[bpos])
+            atr = float(atr_all.iloc[bpos])          # ⭐그 신호 봉의 ATR
             if not np.isfinite(atr) or atr <= 0:
                 continue
             s["pending"].append({"signal": name, "side": side, "bar_utc": bar,
