@@ -230,6 +230,7 @@ BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
 # retraining) as of 2026-08-14 (see scripts/live_eth_odyssey4_zig075_entry_veto_shadow_20260814.py
 # and docs/model_contracts/odyssey4_eth_entry_veto_baseline_contract_20260814.md).
 ETH_ODYSSEY4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "state.json"
+V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 ETH_ODYSSEY4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "closed_trades.jsonl"
 ETH_ODYSSEY4_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
@@ -705,6 +706,72 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
         "cumulative_return_pct": cumulative_return_pct,
         "recent_trades": recent_trades,
         "equity_curve": equity_curve,
+    }
+
+
+def v_rebound_econ_shadow_payload() -> dict[str, Any]:
+    """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
+
+    근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
+    러너: scripts/live_eth_v_rebound_econ_shadow_runner_20260902.py
+    ⚠️배포 대시보드 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
+    """
+    state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
+    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+
+    pnls: list[float] = []
+    for row in ledger:
+        try:
+            pnls.append(float(row["pnl_bp"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    n = len(pnls)
+    wins = [x for x in pnls if x > 0]
+    losses = [x for x in pnls if x <= 0]
+    equity: list[dict[str, Any]] = []
+    run = 0.0
+    peak = 0.0
+    mdd = 0.0
+    for row, v in zip([r for r in ledger if "pnl_bp" in r], pnls):
+        run += v
+        peak = max(peak, run)
+        mdd = min(mdd, run - peak)
+        equity.append({"ts": row.get("exit_utc"), "cum_bp": round(run, 2)})
+
+    return {
+        "started_utc": state.get("started_utc"),
+        "open_positions": [
+            {
+                "side": p.get("side"), "entry": p.get("entry"), "stop": p.get("stop"),
+                "best": p.get("best"), "armed": bool(p.get("armed")),
+                "proba": p.get("proba"), "opened_utc": p.get("opened_utc"),
+                "ticks": p.get("ticks"),
+            }
+            for p in positions[-10:]
+        ],
+        "n_open": len(positions),
+        "closed_trades": n,
+        "exp_bp": round(sum(pnls) / n, 2) if n else None,
+        "total_bp": round(sum(pnls), 1) if n else None,
+        "win_rate": round(len(wins) / n, 4) if n else None,
+        "payoff": (round((sum(wins) / len(wins)) / abs(sum(losses) / len(losses)), 3)
+                   if wins and losses else None),
+        "max_dd_bp": round(mdd, 1) if n else None,
+        "consec_loss": state.get("consec_loss"),
+        "equity_curve": equity[-300:],
+        "recent_trades": [
+            {
+                "side": r.get("side"), "entry_utc": r.get("entry_utc"),
+                "exit_utc": r.get("exit_utc"), "entry": r.get("entry"),
+                "exit": r.get("exit"), "pnl_bp": r.get("pnl_bp"),
+                "reason": r.get("reason"), "proba": r.get("proba"),
+            }
+            for r in ledger[-8:]
+        ],
+        "backtest_reference": {"oos_exp_bp": 7.98, "holdout_exp_bp": 6.09,
+                               "holdout_win_rate": 0.780, "holdout_payoff": 0.346},
+        "note": "섀도우 -- 주문 없음. 배포 칩(매 봉 giveback)과 다른 모델.",
     }
 
 
@@ -1844,6 +1911,15 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_multislot_shadow_payload(), etag)
 
+    async def api_v_rebound_econ_shadow(request: web.Request) -> web.Response:
+        etag = make_etag(
+            "v-rebound-econ-shadow",
+            file_signature(V_REBOUND_ECON_SHADOW_STATE_PATH),
+        )
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, v_rebound_econ_shadow_payload(), etag)
+
     async def api_eth_odyssey4_shadow(request: web.Request) -> web.Response:
         etag = make_etag(
             "eth-odyssey4-shadow",
@@ -1879,6 +1955,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
     app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
     app.router.add_get("/api/eth-odyssey4-shadow", api_eth_odyssey4_shadow)
+    app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     app.on_startup.append(start_dashboard_events)

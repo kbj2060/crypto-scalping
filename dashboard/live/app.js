@@ -1,5 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
+const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
@@ -152,6 +153,8 @@ const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
+let vrebEconShadowLastFetchAt = 0;
+const VREB_ECON_SHADOW_POLL_MS = 60000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -1853,6 +1856,74 @@ function fmtMacroCalendarTime(iso) {
   const timePart = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${datePart} ${timePart}`;
 }
+// 2026-09-02 (사용자 요청): V자반등 **경제라벨** 후보의 섀도우 원장 표시.
+// ⚠️위쪽 V자반등 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
+// 이건 주문을 내지 않는 가상 원장이고, HOLDOUT이 1회 노출로 소진돼 남은 유일한 검증 경로다.
+// 근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
+async function refreshVrebEconShadow() {
+  const now = Date.now();
+  if (now - vrebEconShadowLastFetchAt < VREB_ECON_SHADOW_POLL_MS) return;
+  vrebEconShadowLastFetchAt = now;
+  try {
+    const res = await fetch(API_VREB_ECON_SHADOW_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`vreb econ shadow ${res.status}`);
+    renderVrebEconShadow(await res.json());
+  } catch (error) {
+    console.error("V-rebound econ shadow fetch error:", error);
+    const sub = el("vrebEconShadowSub");
+    if (sub) sub.textContent = "불러오기 실패";
+  }
+}
+function renderVrebEconShadow(p) {
+  const sub = el("vrebEconShadowSub");
+  if (!p || typeof p !== "object") {
+    if (sub) sub.textContent = "데이터 없음";
+    setH("vrebEconShadowList", `<div class="macro-calendar-empty">섀도우 러너가 아직 기록을 남기지 않았습니다.</div>`);
+    return;
+  }
+  const n = Number(p.closed_trades || 0);
+  const ref = p.backtest_reference || {};
+  if (sub) {
+    sub.textContent = n
+      ? `가상 ${n}건 청산 · 보유 ${p.n_open || 0} · 백테스트 기대 HOLDOUT ${ref.holdout_exp_bp}bp`
+      : `보유 ${p.n_open || 0}건 · 아직 청산 기록 없음 (백테스트 기대 ${ref.holdout_exp_bp}bp)`;
+  }
+  const rows = [];
+  const tone = (v) => (v == null ? "neutral" : v > 0 ? "good" : "warn");
+  const bp = (v) => (v == null ? "-" : `${v > 0 ? "+" : ""}${Number(v).toFixed(2)}bp`);
+  if (n) {
+    rows.push(`<article class="ops-health-row ${tone(p.exp_bp)}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info"><strong>건당 기대값</strong>
+        <span>누적 ${bp(p.total_bp)} · 승률 ${p.win_rate == null ? "-" : (p.win_rate * 100).toFixed(1) + "%"} · 손익비 ${p.payoff ?? "-"}</span></div>
+      <span class="ops-health-status-badge">${bp(p.exp_bp)}</span>
+    </article>`);
+    rows.push(`<article class="ops-health-row neutral">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info"><strong>최대 낙폭 / 연속손실</strong>
+        <span>백테스트 HOLDOUT: ${ref.holdout_exp_bp}bp · 승률 ${(ref.holdout_win_rate * 100).toFixed(1)}% · 손익비 ${ref.holdout_payoff}</span></div>
+      <span class="ops-health-status-badge">${bp(p.max_dd_bp)} / ${p.consec_loss ?? 0}</span>
+    </article>`);
+  }
+  for (const q of (p.open_positions || [])) {
+    rows.push(`<article class="ops-health-row neutral">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info"><strong>보유 ${q.side === "long" ? "롱" : "숏"}${q.armed ? " · 무장" : ""}</strong>
+        <span>진입 ${Number(q.entry).toFixed(2)} · 손절 ${Number(q.stop).toFixed(2)} · p=${Number(q.proba).toFixed(3)}</span></div>
+      <span class="ops-health-status-badge">보유중</span>
+    </article>`);
+  }
+  for (const t of (p.recent_trades || []).slice().reverse()) {
+    rows.push(`<article class="ops-health-row ${tone(t.pnl_bp)}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info"><strong>${t.side === "long" ? "롱" : "숏"} 청산 · ${t.reason === "stop" ? "손절선" : "만기"}</strong>
+        <span>${fmtMacroCalendarTime(t.exit_utc)} · p=${t.proba == null ? "-" : Number(t.proba).toFixed(3)}</span></div>
+      <span class="ops-health-status-badge">${bp(t.pnl_bp)}</span>
+    </article>`);
+  }
+  setH("vrebEconShadowList", rows.length ? rows.join("")
+    : `<div class="macro-calendar-empty">아직 가상 진입이 없습니다 (임계값 0.8158).</div>`);
+}
 async function refreshMacroCalendar() {
   const now = Date.now();
   if (now - macroCalendarLastFetchAt < MACRO_CALENDAR_POLL_MS) return;
@@ -1921,6 +1992,7 @@ function setupPageTabs() {
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
+      vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
     }
