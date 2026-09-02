@@ -91,6 +91,7 @@ PROBA_THRESHOLD = 0.8221        # VAL 상위 5% (3시드 앙상블 기준)
 BRACKET = {"sl_atr": 5.0, "arm_atr": 1.5, "trail_atr": 0.1}
 MAX_CONCURRENT = 5
 SCORE_TAIL_BARS = 3             # 최근 몇 봉을 채점할지(현재 봉 + 여유)
+BARS_RETURNED = 60              # 러너의 배리어 판정용으로 함께 돌려주는 완결 봉 수
 
 # ⚠️2026-09-02 사용자 결정: 앙상블 5시드 -> 3시드 (GPU 절감).
 # TabPFN은 predict마다 18,000행 컨텍스트를 재인코딩하므로 GPU 비용이 **시드 수에 비례**한다.
@@ -125,7 +126,7 @@ def _load_models() -> list[Any]:
 
 def compute_signal() -> dict[str, Any]:
     """최근 봉들을 채점해 임계값을 넘은 진입 후보를 반환. 주문은 내지 않는다."""
-    empty = {"warmed_up": False, "error": None, "calls": [], "bars_scored": 0,
+    empty = {"warmed_up": False, "error": None, "calls": [], "bars": [], "bars_scored": 0,
              "threshold": PROBA_THRESHOLD, "bracket": BRACKET,
              "max_concurrent": MAX_CONCURRENT}
     try:
@@ -155,6 +156,16 @@ def compute_signal() -> dict[str, Any]:
 
         atr = frame["atr"].to_numpy()
         close = frame["close"].to_numpy()
+
+        # ⭐러너가 **봉 고가/저가**로 배리어를 판정할 수 있게 완결 봉을 함께 돌려준다.
+        # `_fetch_klines`는 형성 중인 봉을 이미 버리므로(같은 모듈 참조) 전부 확정 봉이고
+        # lookahead가 아니다. 폴링한 마크가격 한 점만 보면 봉 안에서 스톱을 스치고 되돌아온
+        # wick을 놓쳐 손실 트레이드가 통째로 사라진다 -- 백테스트 `sim_exit`은 H/L로 판정한다.
+        tail = kl.tail(BARS_RETURNED)
+        bars_out = [{"timestamp_utc": str(t), "open": float(o_), "high": float(h_),
+                     "low": float(l_), "close": float(c_)}
+                    for t, o_, h_, l_, c_ in zip(tail["timestamp"], tail["open"],
+                                                 tail["high"], tail["low"], tail["close"])]
 
         # ⚠️같은 봉에서 롱·숏이 **둘 다** 임계값을 넘는 경우가 실측 1.00%(OOS 2,593봉 중 26봉)
         # 존재한다(감사 T5). 그대로 두면 라이브에서 헤지 포지션이 열린다 -- 확률이 높은
@@ -192,8 +203,10 @@ def compute_signal() -> dict[str, Any]:
                 "trail_atr_distance": BRACKET["trail_atr"] * a,
                 "triggers_display_only": r.get("triggers", ""),
             })
-        return {**empty, "warmed_up": True, "calls": calls, "bars_scored": int(len(cand)),
+        return {**empty, "warmed_up": True, "calls": calls, "bars": bars_out,
+                "bars_scored": int(len(cand)),
                 "latest_bar_utc": str(cand["timestamp"].max()),
+                "last_closed_bar_utc": bars_out[-1]["timestamp_utc"] if bars_out else None,
                 "n_models": len(models)}
     except Exception as e:                       # noqa: BLE001
         return {**empty, "error": f"{type(e).__name__}: {e}"}

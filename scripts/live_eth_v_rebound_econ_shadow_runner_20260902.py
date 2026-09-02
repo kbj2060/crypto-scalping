@@ -9,7 +9,7 @@ HOLDOUT(2026-04~08)이 1회 노출로 소진됐다. 이 풀 정의로는 재노�
   · 라이브 피쳐 계산이 백테스트와 실제로 일치하는가(패리티)
   · 신호 빈도가 실측(13~16건/일)과 맞는가
   · 봉 지연·데이터 결측 시 거동
-  · 실시간 마크가격 기준 트레일링이 백테스트 종가 기준과 얼마나 다른가
+  · 라이브 배리어 판정이 백테스트와 실제로 일치하는가
 
 ⚠️**이 스크립트는 어떤 주문도 내지 않는다.** `core.binance_client`의 주문 함수를 import조차
 하지 않는다. 가격 조회(공개 API)와 가상 원장 기록만 한다. 실주문 배선은 사용자의 명시적
@@ -21,6 +21,17 @@ HOLDOUT(2026-04~08)이 1회 노출로 소진됐다. 이 풀 정의로는 재노�
     무장 1.5×ATR · 트레일 0.1×ATR · 동시보유 5
 
 근거: `docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md`
+
+## ⭐배리어 판정 컨벤션 (2026-09-03 수정)
+
+청산 판정은 **완결 봉의 고가/저가**로 한다 -- 백테스트 `sim_exit`과 같은 컨벤션이다.
+그 전에는 폴링한 마크가격 한 점만 봐서, 봉 안에서 스톱을 스치고 되돌아온 wick을 놓쳤다.
+그 결과 원장 9건이 **전부 양수**(평균 +69bp)로 HOLDOUT 실측 +6.09bp의 10배가 나왔는데,
+이는 좋은 소식이 아니라 손실 트레이드가 사라진 **계측 아티팩트**였다.
+루프 주기를 60→300초로 늘리면서 봉당 샘플이 5개→1개가 되어 격차가 더 커졌었다.
+
+⚠️이 수정으로 **원장의 앞 9건과 이후 기록은 계측 방식이 다르다.** `exit_basis` 필드로
+구분한다(`bar_high_low`가 새 방식). 대조 분석 시 섞지 말 것.
 
 ## 산출
 
@@ -59,9 +70,11 @@ BRACKET, MAX_CONCURRENT, SYMBOL = _SIG.BRACKET, _SIG.MAX_CONCURRENT, _SIG.SYMBOL
 STATE = ROOT / "data/live/v_rebound_econ_shadow_state.json"
 MARK_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 COST_BP = 10.0
-MAX_HOLD_BARS = 200
+MAX_HOLD_BARS = 200             # 5분봉 200개 = 1000분. `sim_exit`의 FORWARD_BARS와 같은 단위
 # 2026-09-02: 60 -> 300. 5분봉 신호를 60초마다 재채점하는 건 같은 봉을 4번 중복 채점하는
-# 낭비였다(GPU 사용률 97% 원인). 300초 = 봉당 1회. 섀도우 누적에 정보 손실 없음.
+# 낭비였다(GPU 사용률 97% 원인). 300초 = 봉당 1회.
+# ⭐2026-09-03부터 배리어 판정이 **봉 고가/저가** 기준이라 이 주기는 성과 계측에 영향이 없다
+# (예전 마크가격 폴링 방식에서는 주기가 곧 계측 해상도였다). 신호 지연에만 영향을 준다.
 LOOP_SECONDS = 300
 
 
@@ -95,46 +108,81 @@ def mark_price() -> float | None:
         return None
 
 
-def manage(s: dict[str, Any], px: float) -> None:
-    """백테스트 sim_exit과 **동일한 순서/공식**으로 가상 포지션을 갱신한다."""
+def manage(s: dict[str, Any], bars: list[dict], px: float) -> None:
+    """⭐**봉 고가/저가**로 배리어를 판정한다 -- 백테스트 `sim_exit`과 같은 컨벤션.
+
+    2026-09-03 수정 전에는 폴링한 마크가격 한 점(`px`)만 봤다. 그러면 봉 안에서 스톱을
+    스치고 되돌아온 wick을 놓쳐 **손실 트레이드가 통째로 사라진다** -- 실제로 원장 9건이
+    전부 양수(평균 +69bp)로 HOLDOUT 실측(+6.09bp)의 10배가 나왔고, 이는 좋은 소식이 아니라
+    계측 아티팩트였다. 게다가 루프 주기를 60→300초로 늘리면서 봉당 샘플이 5개→1개가 되어
+    격차가 더 커졌다.
+
+    `compute_signal()`이 돌려주는 `bars`는 `_fetch_klines`가 형성 중인 봉을 버린 뒤의
+    **완결 봉**이므로 lookahead가 아니다(CLAUDE.md의 h48qual/zig075 `evaluate_exit` 컨벤션과
+    같은 논리: resting TP/SL 주문은 닿는 즉시 체결되고, 이미 확정된 봉만 쓴다).
+
+    ⚠️`sim_exit`의 **순서를 그대로** 따른다 -- 봉마다 (1)불리한 쪽(롱=저가)으로 스톱 판정,
+    (2)그다음 유리한 쪽으로 best 갱신, (3)무장, (4)트레일 조임. 순서를 바꾸면 같은 봉에서
+    스톱을 맞았어야 할 트레이드가 살아남는다(낙관 편향).
+
+    각 포지션은 `last_bar_utc` **이후**의 봉만 처리한다. 진입 시 `last_bar_utc`는 진입 직전의
+    마지막 완결 봉이므로, 진입이 일어난 봉부터 평가된다(규격의 "다음 봉 시가" 진입과 정합).
+    """
+    if not bars:
+        log("⚠️봉 데이터 없음 -- 포지션 갱신 건너뜀")
+        return
     keep = []
     for p in s["positions"]:
         sgn = 1.0 if p["side"] == "long" else -1.0
         a = p["atr"]
-        if sgn * (px - p["best"]) > 0:
-            p["best"] = px
-        if not p["armed"] and sgn * (p["best"] - p["entry"]) >= BRACKET["arm_atr"] * a:
-            p["armed"] = True
-            log(f"  무장 {p['side']} best={p['best']:.2f}")
-        if p["armed"]:
-            ns = p["best"] - sgn * BRACKET["trail_atr"] * a
-            if sgn * (ns - p["stop"]) > 0:
-                p["stop"] = ns
-        p["ticks"] = int(p.get("ticks", 0)) + 1
-        hit = (px <= p["stop"]) if sgn > 0 else (px >= p["stop"])
-        # ⚠️2026-09-02 수정: 예전엔 `ticks >= MAX_HOLD_BARS * 5`로 틱 개수를 셌는데, 그건
-        # "1틱 = 1분"(LOOP_SECONDS=60)을 암묵 가정한 식이라 주기를 300초로 바꾸면 보유한도가
-        # 5배로 늘어난다. 벽시계 기준으로 바꿔 주기와 무관하게 만든다.
-        held_min = (datetime.now(timezone.utc)
-                    - datetime.fromisoformat(p["opened_utc"])).total_seconds() / 60.0
-        timeout = held_min >= MAX_HOLD_BARS * 5          # 200봉 x 5분 = 1000분
-        if hit or timeout:
-            exit_px = p["stop"] if hit else px
-            pnl = sgn * (exit_px - p["entry"]) / p["entry"] * 1e4 - COST_BP
-            s["ledger"].append({"entry_utc": p["entry_utc"],
-                                "exit_utc": datetime.now(timezone.utc).isoformat(),
-                                "side": p["side"], "entry": p["entry"], "exit": exit_px,
-                                "atr": a, "proba": p["proba"], "pnl_bp": round(pnl, 2),
-                                "reason": "stop" if hit else "timeout"})
-            s["consec_loss"] = 0 if pnl > 0 else s["consec_loss"] + 1
-            log(f"  청산 {p['side']} {pnl:+.2f}bp ({'stop' if hit else 'timeout'}) "
-                f"연속손실 {s['consec_loss']}")
-        else:
+        last = p.get("last_bar_utc")
+        todo = [b for b in bars if last is None or b["timestamp_utc"] > last]
+        closed = False
+        for b in todo:
+            adv = b["low"] if sgn > 0 else b["high"]          # (1) 불리한 쪽 먼저
+            if (adv <= p["stop"]) if sgn > 0 else (adv >= p["stop"]):
+                _close(s, p, p["stop"], "stop", b["timestamp_utc"])
+                closed = True
+                break
+            fav = b["high"] if sgn > 0 else b["low"]          # (2) 유리한 쪽으로 best
+            if sgn * (fav - p["best"]) > 0:
+                p["best"] = fav
+            if not p["armed"] and sgn * (p["best"] - p["entry"]) >= BRACKET["arm_atr"] * a:
+                p["armed"] = True                             # (3) 무장
+                log(f"  무장 {p['side']} best={p['best']:.2f} @{b['timestamp_utc'][:16]}")
+            if p["armed"]:                                    # (4) 트레일(한 방향으로만)
+                ns = p["best"] - sgn * BRACKET["trail_atr"] * a
+                if sgn * (ns - p["stop"]) > 0:
+                    p["stop"] = ns
+            p["bars_held"] = int(p.get("bars_held", 0)) + 1
+            p["last_bar_utc"] = b["timestamp_utc"]
+            if p["bars_held"] >= MAX_HOLD_BARS:               # 시간청산은 그 봉 종가(sim_exit 동일)
+                _close(s, p, b["close"], "timeout", b["timestamp_utc"])
+                closed = True
+                break
+        if not closed:
             keep.append(p)
     s["positions"] = keep
 
 
+def _close(s: dict[str, Any], p: dict[str, Any], exit_px: float, reason: str,
+           bar_utc: str) -> None:
+    sgn = 1.0 if p["side"] == "long" else -1.0
+    pnl = sgn * (exit_px - p["entry"]) / p["entry"] * 1e4 - COST_BP
+    s["ledger"].append({"entry_utc": p["entry_utc"], "exit_utc": bar_utc,
+                        "recorded_utc": datetime.now(timezone.utc).isoformat(),
+                        "side": p["side"], "entry": p["entry"], "exit": exit_px,
+                        "atr": p["atr"], "proba": p["proba"], "pnl_bp": round(pnl, 2),
+                        "bars_held": int(p.get("bars_held", 0)), "reason": reason,
+                        "exit_basis": "bar_high_low"})
+    s["consec_loss"] = 0 if pnl > 0 else s["consec_loss"] + 1
+    log(f"  청산 {p['side']} {pnl:+.2f}bp ({reason}, {p.get('bars_held', 0)}봉) "
+        f"연속손실 {s['consec_loss']}")
+
+
 def enter(s: dict[str, Any], out: dict[str, Any], px: float) -> None:
+    """가상 진입. `last_bar_utc`를 진입 직전 마지막 완결 봉으로 잡아, 진입이 일어난 봉부터
+    배리어 평가가 시작되게 한다."""
     slots = MAX_CONCURRENT - len(s["positions"])
     if slots <= 0:
         return
@@ -149,7 +197,8 @@ def enter(s: dict[str, Any], out: dict[str, Any], px: float) -> None:
         a = float(call["atr"])
         s["positions"].append({"entry_utc": call["timestamp_utc"], "side": call["side"],
                                "entry": px, "atr": a, "stop": px - sgn * BRACKET["sl_atr"] * a,
-                               "best": px, "armed": False, "ticks": 0,
+                               "best": px, "armed": False, "bars_held": 0,
+                               "last_bar_utc": out.get("last_closed_bar_utc"),
                                "proba": call["proba"],
                                "opened_utc": datetime.now(timezone.utc).isoformat()})
         log(f"  [가상진입] {call['side']} @{px:.2f} p={call['proba']:.4f} "
@@ -193,14 +242,15 @@ def cycle(s: dict[str, Any]) -> None:
     px = mark_price()
     if px is None:
         log("⚠️마크가격 실패 -- 건너뜀"); return
-    manage(s, px)
+    manage(s, out.get("bars") or [], px)
     if out.get("warmed_up") and not out.get("error"):
         enter(s, out, px)
     else:
         log(f"신호 이상: {out.get('error')} -- 진입 보류")
     tot = sum(t["pnl_bp"] for t in s["ledger"])
     log(f"px={px:.2f}  포지션 {len(s['positions'])}/{MAX_CONCURRENT}  "
-        f"원장 {len(s['ledger'])}건 {tot:+.0f}bp  신호 {len(out.get('calls', []))}건")
+        f"원장 {len(s['ledger'])}건 {tot:+.0f}bp  신호 {len(out.get('calls', []))}건  "
+        f"최종봉 {str(out.get('last_closed_bar_utc'))[:16]}")
 
 
 def main() -> int:
