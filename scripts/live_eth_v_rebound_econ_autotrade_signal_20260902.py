@@ -80,21 +80,39 @@ SYMBOL, BTC_SYMBOL = _LIVE.SYMBOL, "BTCUSDT"
 
 CTX_CSV = ROOT / "data/labels/eth_5m_v_rebound_econ_label_20260902/tabpfn_train_context_frozen_econ_5seed_20260902.csv"
 
-PROBA_THRESHOLD = 0.8158        # VAL 선정 (상위 5%)
+# ⚠️2026-09-02 재보정: 5시드 -> 3시드 전환에 맞춰 0.8158 -> 0.8221.
+# 규격서의 선정 **규칙**은 "VAL 상위 5%"이고 0.8158은 5시드에서 그 규칙을 구현한 값이었다.
+# 3시드는 분포가 더 넓어 0.8158을 그대로 두면 **VAL 호출이 +66%**가 된다(검증한 것과 다른 전략).
+# VAL(2025-09~12)에서 3시드 상위 5%를 다시 잡아 0.8221을 얻었고, 이때 호출 수가
+# 5시드 규격과 일치한다(3,514 vs 3,507). ⭐같은 방법으로 5시드를 재계산하니 0.8158이
+# 정확히 재현돼(차이 -0.0000) 이 보정이 원래 보정과 같은 절차임을 확인했다.
+# ⚠️OOS로 잡지 않았다 -- VAL에서만 잡았다. 측정: `diag_eth_vreb_econ_3seed_val_threshold_20260902.py`
+PROBA_THRESHOLD = 0.8221        # VAL 상위 5% (3시드 앙상블 기준)
 BRACKET = {"sl_atr": 5.0, "arm_atr": 1.5, "trail_atr": 0.1}
 MAX_CONCURRENT = 5
 SCORE_TAIL_BARS = 3             # 최근 몇 봉을 채점할지(현재 봉 + 여유)
+
+# ⚠️2026-09-02 사용자 결정: 앙상블 5시드 -> 3시드 (GPU 절감).
+# TabPFN은 predict마다 18,000행 컨텍스트를 재인코딩하므로 GPU 비용이 **시드 수에 비례**한다.
+# 상주 GPU 메모리도 같이 준다(가동 당시 6000/8192 MiB로 포화 근처였다).
+# ⚠️대가: 규격서(`eth_v_rebound_econ_label_autotrade_spec_20260902.md`)의 임계값 0.8158은
+# **5시드 앙상블 확률**로 보정된 값이고, 시드 앙상블은 VAL 분위 선정 분산을 제거하는 것이
+# 이 후보의 통과 근거였다(std 5.34 -> 0.021). 3시드는 그 분산 제거가 약해진다.
+# 실측 영향은 `docs/experiments/` 및 아래 주석 참조. 시드 선택은 **정렬 후 앞 N개**로 고정한다.
+ENSEMBLE_SEEDS = 3
 
 _MODELS: list[Any] | None = None
 
 
 def _load_models() -> list[Any]:
-    """동결 컨텍스트(시드별)로 5개 TabPFN을 적합해 캐시한다."""
+    """동결 컨텍스트(시드별)로 TabPFN을 적합해 캐시한다. 시드 수는 ENSEMBLE_SEEDS."""
     global _MODELS
     if _MODELS is not None:
         return _MODELS
     from tabpfn import TabPFNClassifier
     df = pd.read_csv(CTX_CSV)
+    keep = sorted(df["seed"].unique())[:ENSEMBLE_SEEDS]     # 정렬 후 앞 N개로 고정(재현성)
+    df = df.loc[df["seed"].isin(keep)]
     models = []
     for sd, g in df.groupby("seed"):
         clf = TabPFNClassifier(device="cuda", random_state=int(sd),

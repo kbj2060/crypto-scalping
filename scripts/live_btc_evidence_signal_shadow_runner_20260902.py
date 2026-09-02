@@ -55,7 +55,9 @@ SYMBOL = _SIG.SYMBOL
 
 STATE = ROOT / "data/live/btc_evidence_signal_shadow_state.json"
 MARK_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
-LOOP_SECONDS = 60
+# 2026-09-02: 60 -> 300. 5분봉 신호라 봉당 1회면 충분하다(GPU 절감).
+# 이 러너의 해상 판정은 봉 인덱스(pos + horizon) 기준이라 주기와 무관하다.
+LOOP_SECONDS = 300
 
 # 신호별 HIT 판정 규격 (동결 컨텍스트 리포트의 btc_params와 동일 출처)
 HIT_SPEC = {

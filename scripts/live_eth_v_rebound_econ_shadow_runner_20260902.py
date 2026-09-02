@@ -60,7 +60,9 @@ STATE = ROOT / "data/live/v_rebound_econ_shadow_state.json"
 MARK_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 COST_BP = 10.0
 MAX_HOLD_BARS = 200
-LOOP_SECONDS = 60
+# 2026-09-02: 60 -> 300. 5분봉 신호를 60초마다 재채점하는 건 같은 봉을 4번 중복 채점하는
+# 낭비였다(GPU 사용률 97% 원인). 300초 = 봉당 1회. 섀도우 누적에 정보 손실 없음.
+LOOP_SECONDS = 300
 
 
 def log(m: str) -> None:
@@ -110,8 +112,12 @@ def manage(s: dict[str, Any], px: float) -> None:
                 p["stop"] = ns
         p["ticks"] = int(p.get("ticks", 0)) + 1
         hit = (px <= p["stop"]) if sgn > 0 else (px >= p["stop"])
-        # 봉 기준 보유한도: 5분봉 200개 = 1000분. 틱은 60초라 근사로 환산
-        timeout = p["ticks"] >= MAX_HOLD_BARS * 5
+        # ⚠️2026-09-02 수정: 예전엔 `ticks >= MAX_HOLD_BARS * 5`로 틱 개수를 셌는데, 그건
+        # "1틱 = 1분"(LOOP_SECONDS=60)을 암묵 가정한 식이라 주기를 300초로 바꾸면 보유한도가
+        # 5배로 늘어난다. 벽시계 기준으로 바꿔 주기와 무관하게 만든다.
+        held_min = (datetime.now(timezone.utc)
+                    - datetime.fromisoformat(p["opened_utc"])).total_seconds() / 60.0
+        timeout = held_min >= MAX_HOLD_BARS * 5          # 200봉 x 5분 = 1000분
         if hit or timeout:
             exit_px = p["stop"] if hit else px
             pnl = sgn * (exit_px - p["entry"]) / p["entry"] * 1e4 - COST_BP
@@ -172,6 +178,16 @@ def report(s: dict[str, Any]) -> None:
     log("  [백테스트 대조] HOLDOUT 실측: 13.18건/일  기대값 +6.09bp  승률 78.0%  손익비 0.346")
 
 
+def stamp_config(s: dict[str, Any]) -> None:
+    """설정이 바뀐 채로 원장을 이어 쓰면 두 전략이 조용히 섞인다. 변경 시점을 기록한다."""
+    cur = f"{_SIG.ENSEMBLE_SEEDS}seed@{_SIG.PROBA_THRESHOLD}"
+    hist = s.setdefault("config_history", [])
+    if not hist or hist[-1]["config"] != cur:
+        hist.append({"config": cur, "since_utc": datetime.now(timezone.utc).isoformat(),
+                     "ledger_len_at_change": len(s.get("ledger", []))})
+        log(f"⚠️설정 변경 기록: {cur} (원장 {len(s.get('ledger', []))}건 이후부터 적용)")
+
+
 def cycle(s: dict[str, Any]) -> None:
     out = compute_signal()
     px = mark_price()
@@ -195,7 +211,9 @@ def main() -> int:
     s = load_state()
     if args.report:
         report(s); return 0
-    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. 임계값 {_SIG.PROBA_THRESHOLD} 한도 {MAX_CONCURRENT}")
+    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. 임계값 {_SIG.PROBA_THRESHOLD} "
+        f"시드 {_SIG.ENSEMBLE_SEEDS} 한도 {MAX_CONCURRENT} 주기 {LOOP_SECONDS}초")
+    stamp_config(s)
     if not args.loop:
         cycle(s); save_state(s); report(s); return 0
     while True:
