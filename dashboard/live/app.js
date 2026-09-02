@@ -1123,6 +1123,21 @@ const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
 ]);
 
+// ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
+//   · whale / retail_flow / liq_cascade -- trading_bot.py의 dashboard_state(봇은 ETH만 돌린다)
+//   · v_rebound                          -- ETH 전용 TabPFN 모델(/api/v-rebound-signal)
+// 자산 게이트가 없어서 XRP/BTC 탭에서도 **ETH 값이 그대로** 보이고 있었다. 사용자가 이미
+// 신고했던 "비트코인 페이지에 이더리움 증거신호가 나온다"와 같은 계열의 버그다.
+// 값을 지우고 "ETH 전용" 상태로 바꾼다 -- 다른 코인의 값인 척하는 것보다 없는 게 낫다.
+function ethOnlyIndicator(item) {
+  if (activeSnapshotAsset === "eth") return item;
+  return { ...item, tone: "neutral", proba: null, history: [], times: [],
+           subText: "ETH 전용 지표 — 이 코인은 아직 미지원",
+           derivedTag: "= ETH 전용",
+           derivedTitle: "이 지표의 데이터 출처가 ETH 전용입니다(봇 상태 또는 ETH 학습 모델). "
+             + "다른 코인 탭에서는 값을 숨깁니다 -- ETH 값을 그 코인 값인 것처럼 보여주지 않기 위해서입니다." };
+}
+
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
   // model_indicator_history only advances once per MODEL_INDICATOR_SAMPLE_SECONDS (300s server-
@@ -3196,14 +3211,14 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
     // evidence-signal list uses (user: "인라인 미터로 바꿔줘"), in the meta column next to the state,
     // instead of duplicating the same number as a plain sentence.
     renderModelIndicatorList([
-      {
+      ethOnlyIndicator({
         key: "v_rebound", label: "V자 급등락", tone: vReboundTone, subText: vReboundSubText,
         history: (latestVRebound && latestVRebound.history) || [],
         times: (latestVRebound && latestVRebound.times) || [],
         proba: vReboundProbaShown,
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
-      },
+      }),
     ], "snapSpecializedSignalList");
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -3216,19 +3231,19 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 대시보드 자체계산·탐색적",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
       },
-      {
+      ethOnlyIndicator({
         key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
-      },
+      }),
       {
         key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
         subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업 중",
         history: (latestLiquidationDirection && latestLiquidationDirection.tone_history) || [],
         times: evenlySpacedBarTimes(latestLiquidationDirection && latestLiquidationDirection.latest_ts_utc, (latestLiquidationDirection && latestLiquidationDirection.tone_history || []).length, 1),
       },
-      { key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale },
-      { key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow },
+      ethOnlyIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }),
+      ethOnlyIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }),
     ]);
   }
 }
