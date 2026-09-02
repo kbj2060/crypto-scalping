@@ -1147,43 +1147,60 @@ function ethOnlyIndicator(item) {
 
 // ⭐2026-09-03: ETH가 아닌 코인은 **그 코인 자신의** 실시간 수집기 값으로 대체한다.
 // 데이터가 없으면 ethOnlyIndicator로 폴백해 "미지원"으로 정직하게 표시한다.
-// ⚠️`hawkes_active`는 봇 내부 상태라 다른 코인엔 없다 -> "위험" 티어는 안 뜨고 Z 기반
-//   "주의"까지만 판정된다. 그 사실을 툴팁에 명시한다(숨기지 않는다).
+//
+// ⚠️표시를 ETH와 **똑같이** 맞추는 게 중요하다. 첫 판에서는 subText에 숫자를 직접 넣었는데
+// (`유입 0.552 · 방금`), ETH는 `directionalCaution()`이 만드는 **"롱 진입"/"숏 진입"/"중립"**
+// 어휘를 쓰고 `MODEL_INDICATOR_MEANING[key][subText]`가 **그 문자열로 조회**된다. 자유 문구를
+// 넣으면 (a) 칩 문구가 ETH와 달라 보이고 (b) 의미 설명이 사전에 안 걸려 사라진다.
+// 그래서 subText/valueText/톤스트립을 전부 ETH와 같은 함수·같은 모양으로 만든다.
+// 숫자와 경과시간은 `liveText`(ETH의 청산캐스케이드가 쓰는 자리)와 툴팁으로 뺀다.
 function coinIndicator(item, kind) {
   if (activeSnapshotAsset === "eth") return item;
   const d = latestCoinIndicators[activeSnapshotAsset];
   if (!d || !d.warmed_up) return ethOnlyIndicator(item);
-  const coinTag = `= ${activeSnapshotAsset.toUpperCase()} 실시간`;
+  const COIN = activeSnapshotAsset.toUpperCase();
+  const coinTag = `= ${COIN} 실시간`;
+  const ageText = (age) => (age == null ? "" : age < 1 ? "방금" : `${Math.round(age)}분 전`);
+
   if (kind === "whale" || kind === "retail_flow") {
     const mi = d.micro || {};
     const isWhale = kind === "whale";
     const v = isWhale ? mi.nif_whale : mi.nif_retail;
     const age = isWhale ? mi.nif_whale_age_min : mi.nif_retail_age_min;
     const look = mi.lookback_min || 15;
+    const hist = (isWhale ? mi.whale_history : mi.retail_history) || [];
+    const times = (mi.history_ts || []).map((t) => new Date(t).getTime());
     if (v == null) {
-      return { ...item, tone: "neutral", history: [], times: [], proba: null,
-               subText: `최근 ${look}분 내 값 없음`, derivedTag: coinTag,
-               derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 수집기의 값입니다. `
-                 + (isWhale ? "고래 흐름은 대형 체결이 있는 분에만 계산됩니다(XRP 실측 24시간 기준 약 50%의 분에만 존재)." : "") };
+      return { ...item, tone: "neutral", history: hist, times, proba: null,
+               subText: "중립", liveText: `최근 ${look}분 내 값 없음`, derivedTag: coinTag,
+               derivedTitle: `${COIN} 전용 실시간 수집기(microstructure_1m)에서 직접 읽습니다`
+                 + (isWhale ? " -- 고래 흐름은 대형 체결이 있는 분에만 계산됩니다." : ".") };
     }
-    const tone = v > 0.05 ? "good" : v < -0.05 ? "bad" : "neutral";
-    // ⚠️오래된 값을 "지금 값"인 것처럼 보여주지 않는다 -- 몇 분 전 값인지 함께 쓴다.
-    const ageText = age == null ? "" : age < 1 ? " · 방금" : ` · ${Math.round(age)}분 전`;
-    return { ...item, tone, history: [], times: [], proba: null,
-             subText: `${v > 0 ? "유입" : v < 0 ? "유출" : "중립"} ${v.toFixed(3)}${ageText}`,
+    // ⭐ETH와 **같은 함수**로 문구를 만든다(어휘 일치 -> 칩·의미사전이 ETH와 동일하게 동작).
+    const fake = isWhale ? { nif_whale: v } : { nif_retail: v };
+    return { ...item, tone: v > 0.05 ? "good" : v < -0.05 ? "bad" : "neutral",
+             history: hist, times, proba: null,
+             subText: directionalCaution(v, 0.05),
+             liveText: `${isWhale ? flowRead(fake) : retailFlowRead(fake)} (${v.toFixed(3)} · ${ageText(age)})`,
              derivedTag: coinTag,
-             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 실시간 수집기(microstructure_1m)에서 직접 읽은 값입니다`
+             derivedTitle: `${COIN} 전용 실시간 수집기(microstructure_1m)에서 직접 읽은 값입니다`
                + `(ETH처럼 봇 내부 상태가 아닙니다). 최근 ${look}분 안의 마지막 값을 쓰고 몇 분 전인지 함께 표시합니다.` };
   }
+
   if (kind === "liq_cascade") {
     const t = d.tail;
     if (!t) return ethOnlyIndicator(item);
     const z = Math.max(Number(t.z_long || 0), Number(t.z_short || 0));
-    const tone = z >= 2.0 ? "warn" : "good";
-    return { ...item, tone, history: [], times: [], proba: null,
-             subText: z >= 2.0 ? `청산 급증 감지(Z:${z.toFixed(1)})` : `평온 (Z:${z.toFixed(1)})`,
-             liveText: "", derivedTag: coinTag,
-             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 tail-risk 수집기의 Z값입니다. `
+    // ⭐ETH의 liqCascadeHint와 **같은 어휘**("위험"/"주의"/"안정"). 단 hawkes가 없으므로
+    //   "위험"은 나올 수 없다 -- 그 사실은 툴팁에 적는다(숨기지 않는다).
+    const state = z >= 2.0 ? "주의" : "안정";
+    return { ...item, tone: z >= 2.0 ? "warn" : "good",
+             history: t.cascade_history || [],
+             times: (t.history_ts || []).map((x) => new Date(x).getTime()),
+             proba: null, subText: state,
+             liveText: z >= 2.0 ? `청산 급증 감지(Z:${z.toFixed(1)}) · 캐스케이드 전환 전` : "",
+             derivedTag: coinTag,
+             derivedTitle: `${COIN} 전용 tail-risk 수집기의 Z값입니다. `
                + `⚠️봇 내부의 hawkes 판정은 이 코인에 없어 "위험" 단계는 뜨지 않고 Z 기반 "주의"까지만 판정됩니다.` };
   }
   return ethOnlyIndicator(item);

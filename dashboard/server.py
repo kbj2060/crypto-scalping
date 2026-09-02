@@ -786,6 +786,8 @@ def _locked_bp(p: dict[str, Any]) -> float | None:
 COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
+# ETH 톤 스트립과 같은 모양(app.js MICRO_HISTORY_MAX=48, 5분 간격 = 4시간)
+MICRO_STRIP_SAMPLES = 48
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -840,6 +842,26 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
                                 "nif_whale": w, "nif_whale_ts": w_ts, "nif_whale_age_min": w_age,
                                 "nif_retail": rt, "nif_retail_ts": rt_ts, "nif_retail_age_min": rt_age,
                                 "lookback_min": MICRO_LOOKBACK_MIN}
+            # ⭐톤 스트립: ETH는 48샘플 x 5분(4시간)을 쓴다(app.js MICRO_HISTORY_MAX=48).
+            # 다른 코인도 **같은 모양**으로 만들어야 칩/스트립이 ETH와 똑같아 보인다.
+            # 1분 테이블에서 5분마다 하나씩 뽑는다. 임계값은 classifyIndicators와 동일(+-0.05).
+            con = duckdb.connect(str(mpath), read_only=True)
+            try:
+                hrows = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
+                                    f"order by ts desc limit {MICRO_STRIP_SAMPLES * 5}").fetchall()
+            finally:
+                con.close()
+            if hrows:
+                picked = list(reversed(hrows))[::5][-MICRO_STRIP_SAMPLES:]
+
+                def _tone(v):
+                    if v is None:
+                        return "neutral"
+                    return "good" if v > 0.05 else ("bad" if v < -0.05 else "neutral")
+
+                out["micro"]["whale_history"] = [_tone(r[1]) for r in picked]
+                out["micro"]["retail_history"] = [_tone(r[2]) for r in picked]
+                out["micro"]["history_ts"] = [str(r[0]) for r in picked]
         tpath, ttable = cfg.get("tail_risk_db_path"), cfg.get("tail_risk_table")
         if tpath and Path(tpath).exists():
             con = duckdb.connect(str(tpath), read_only=True)
@@ -857,6 +879,20 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
                 out["tail"] = {"ts": str(r[0]), "z_long": _z(r[1], r[3], r[4]),
                                "z_short": _z(r[2], r[5], r[6]),
                                "hawkes_active": False}
+                con = duckdb.connect(str(tpath), read_only=True)
+                try:
+                    hr = con.execute(f"select ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, "
+                                     f"mu_short, sigma_short from {ttable} "
+                                     f"order by ts desc limit {MICRO_STRIP_SAMPLES * 5}").fetchall()
+                finally:
+                    con.close()
+                if hr:
+                    picked = list(reversed(hr))[::5][-MICRO_STRIP_SAMPLES:]
+                    # ⚠️hawkes가 없으니 Z만으로 판정한다 -> "위험"(bad) 티어는 나오지 않는다.
+                    out["tail"]["cascade_history"] = [
+                        ("warn" if max(_z(x[1], x[3], x[4]), _z(x[2], x[5], x[6])) >= 2.0 else "good")
+                        for x in picked]
+                    out["tail"]["history_ts"] = [str(x[0]) for x in picked]
         out["warmed_up"] = bool(out["micro"] or out["tail"])
         if not out["warmed_up"]:
             out["error"] = "no_coin_indicator_data"
