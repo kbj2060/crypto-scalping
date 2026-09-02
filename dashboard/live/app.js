@@ -1,6 +1,7 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
+const API_BTC_EV_SHADOW_URL = "/api/btc-evidence-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
@@ -155,6 +156,8 @@ let regimeBtcLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
+let btcEvShadowLastFetchAt = 0;
+const BTC_EV_SHADOW_POLL_MS = 60000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -1860,6 +1863,51 @@ function fmtMacroCalendarTime(iso) {
 // ⚠️위쪽 V자반등 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
 // 이건 주문을 내지 않는 가상 원장이고, HOLDOUT이 1회 노출로 소진돼 남은 유일한 검증 경로다.
 // 근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
+// 2026-09-02 (사용자 goal): BTC 증거신호 7종 섀도우.
+// ⚠️ETH 증거신호 칩과 **다른 자산·다른 파라미터**다 -- 2026-09-01 그리드스크린이 BTC에서
+// HIT정의/H/K/GAP을 독자 재선정했고 ETH 값과 전부 다르다.
+// ⚠️주문 없음. BTC는 경제성 통과 모델이 아직 없어 가상 매매 성과를 주장하지 않는다 --
+// 라이브 hit률이 학습 hit률을 재현하는지만 관측한다.
+async function refreshBtcEvShadow() {
+  const now = Date.now();
+  if (now - btcEvShadowLastFetchAt < BTC_EV_SHADOW_POLL_MS) return;
+  btcEvShadowLastFetchAt = now;
+  try {
+    const res = await fetch(API_BTC_EV_SHADOW_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`btc ev shadow ${res.status}`);
+    renderBtcEvShadow(await res.json());
+  } catch (error) {
+    console.error("BTC evidence shadow fetch error:", error);
+    const sub = el("btcEvShadowSub");
+    if (sub) sub.textContent = "불러오기 실패";
+  }
+}
+function renderBtcEvShadow(p) {
+  const sub = el("btcEvShadowSub");
+  if (!p || !Array.isArray(p.per_signal)) {
+    if (sub) sub.textContent = "데이터 없음";
+    setH("btcEvShadowList", `<div class="macro-calendar-empty">섀도우 러너 기록 없음.</div>`);
+    return;
+  }
+  if (sub) {
+    sub.textContent = `확정 ${p.total_resolved || 0}건 · 대기 ${p.total_pending || 0} · 신호 ${p.per_signal.length}종 · 사이클 ${p.cycles || 0}`;
+  }
+  const pct = (v) => (v == null ? "-" : `${(v * 100).toFixed(1)}%`);
+  const rows = p.per_signal.map((r) => {
+    // 라이브가 학습 hit률을 재현하는가 -- 표본이 적으면 판단 보류(중립 톤)
+    let tone = "neutral";
+    if (r.n_resolved >= 20 && r.delta != null) tone = Math.abs(r.delta) <= 0.10 ? "good" : "warn";
+    const d = r.delta == null ? "-" : `${r.delta > 0 ? "+" : ""}${(r.delta * 100).toFixed(1)}%p`;
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info"><strong>${r.signal}</strong>
+        <span>라이브 ${pct(r.live_hit_rate)} vs 학습 ${pct(r.train_hit_rate)} (${d}) · HOLDOUT AUC ${r.holdout_auc ?? "-"}</span></div>
+      <span class="ops-health-status-badge">n=${r.n_resolved}${r.n_pending ? `+${r.n_pending}` : ""}</span>
+    </article>`;
+  });
+  setH("btcEvShadowList", rows.length ? rows.join("")
+    : `<div class="macro-calendar-empty">아직 확정된 기록이 없습니다.</div>`);
+}
 async function refreshVrebEconShadow() {
   const now = Date.now();
   if (now - vrebEconShadowLastFetchAt < VREB_ECON_SHADOW_POLL_MS) return;
@@ -1993,6 +2041,7 @@ function setupPageTabs() {
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
+      btcEvShadowLastFetchAt = 0; refreshBtcEvShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
     }
@@ -3067,6 +3116,7 @@ async function tick() {
       refreshRegimeBtc();
       refreshMacroCalendar();
       refreshVrebEconShadow();
+      refreshBtcEvShadow();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();
     }

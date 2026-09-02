@@ -231,6 +231,8 @@ BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
 # and docs/model_contracts/odyssey4_eth_entry_veto_baseline_contract_20260814.md).
 ETH_ODYSSEY4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
+BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
+BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 ETH_ODYSSEY4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "closed_trades.jsonl"
 ETH_ODYSSEY4_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
@@ -706,6 +708,56 @@ def btc_multislot_shadow_payload() -> dict[str, Any]:
         "cumulative_return_pct": cumulative_return_pct,
         "recent_trades": recent_trades,
         "equity_curve": equity_curve,
+    }
+
+
+def btc_evidence_shadow_payload() -> dict[str, Any]:
+    """BTC 증거신호 7종의 섀도우(관측) 원장.
+
+    ⚠️ETH 증거신호 칩과 **다른 자산·다른 파라미터**다. 2026-09-01 그리드스크린이 BTC에서
+    HIT정의/H/K/GAP을 독자 재선정했다(ETH 값과 전부 다름).
+    ⚠️주문 없음. BTC는 경제성 게이트를 통과한 모델이 아직 없어, 이 러너는 **가상 매매 성과를
+    주장하지 않고** 라이브 hit률이 학습 hit률을 재현하는지만 관측한다.
+    근거: docs/experiments/btc_evidence_signal_and_shadow_20260902.md
+    """
+    state = load_json(BTC_EVIDENCE_SHADOW_STATE_PATH) or {}
+    ctx = (load_json(BTC_EVIDENCE_CTX_REPORT_PATH) or {}).get("signals", {})
+    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
+    pending = state.get("pending") if isinstance(state.get("pending"), list) else []
+
+    holdout_auc = {"demarker_extreme": 0.7286, "kalman_deviation_meanrev": 0.6709,
+                   "short_term_return_z": 0.6443, "taker_delta_climax": 0.6276,
+                   "orthogonal_combo": 0.5933, "fib_extension_exhaustion": 0.5657,
+                   "liquidity_sweep": 0.5214}
+    per: list[dict[str, Any]] = []
+    for name, info in sorted(ctx.items(), key=lambda kv: -holdout_auc.get(kv[0], 0.0)):
+        if "error" in info:
+            continue
+        rows = [r for r in ledger if r.get("signal") == name and r.get("hit") is not None]
+        hits = [int(r["hit"]) for r in rows]
+        live = (sum(hits) / len(hits)) if hits else None
+        train = info.get("hit_rate")
+        per.append({
+            "signal": name, "n_resolved": len(hits),
+            "live_hit_rate": round(live, 4) if live is not None else None,
+            "train_hit_rate": train,
+            "delta": round(live - train, 4) if (live is not None and train is not None) else None,
+            "holdout_auc": holdout_auc.get(name),
+            "n_pending": sum(1 for q in pending if q.get("signal") == name),
+            "btc_params": info.get("btc_params", {}),
+        })
+    return {
+        "asset": "BTCUSDT", "started_utc": state.get("started_utc"),
+        "cycles": state.get("cycles", 0),
+        "total_resolved": len([r for r in ledger if r.get("hit") is not None]),
+        "total_pending": len(pending),
+        "per_signal": per,
+        "recent": [
+            {"signal": r.get("signal"), "side": r.get("side"), "proba": r.get("proba"),
+             "hit": r.get("hit"), "bar_utc": r.get("bar_utc")}
+            for r in ledger[-8:]
+        ],
+        "note": "관측용 섀도우 -- 주문 없음. BTC는 경제성 통과 모델이 아직 없다.",
     }
 
 
@@ -1911,6 +1963,16 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_multislot_shadow_payload(), etag)
 
+    async def api_btc_evidence_shadow(request: web.Request) -> web.Response:
+        etag = make_etag(
+            "btc-evidence-shadow",
+            file_signature(BTC_EVIDENCE_SHADOW_STATE_PATH),
+            file_signature(BTC_EVIDENCE_CTX_REPORT_PATH),
+        )
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, btc_evidence_shadow_payload(), etag)
+
     async def api_v_rebound_econ_shadow(request: web.Request) -> web.Response:
         etag = make_etag(
             "v-rebound-econ-shadow",
@@ -1956,6 +2018,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
     app.router.add_get("/api/eth-odyssey4-shadow", api_eth_odyssey4_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
+    app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     app.on_startup.append(start_dashboard_events)
