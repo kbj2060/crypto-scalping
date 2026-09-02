@@ -1,9 +1,13 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
-const API_BTC_EV_SHADOW_URL = "/api/btc-evidence-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
+// BTC 코인 페이지 전용 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH
+// 엔드포인트를 썼다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다"). SOL/XRP/HYPE는
+// 증거신호 파이프라인 자체가 없어(ETH+BTC만 존재) EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
+const API_BTC_EVIDENCE_SIGNALS_URL = "/api/btc-evidence-signals";
+const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc"];
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
@@ -156,8 +160,6 @@ let regimeBtcLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
-let btcEvShadowLastFetchAt = 0;
-const BTC_EV_SHADOW_POLL_MS = 60000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -246,11 +248,25 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
+  // 2026-09-02: 증거신호도 코인탭에 따라 ETH/BTC(그 외엔 미지원)로 갈리므로 위 4개와 같은 이유로
+  // 즉시 초기화+재조회한다. resetEvidenceStripChips()는 재조회 전에 먼저 불러 이전 자산의 칩이
+  // 잠깐이라도 남아있지 않게 한다(특히 smt_divergence처럼 상대 자산엔 없는 신호의 칩).
+  latestEvidenceSignals = null;
+  evidenceLastFetchAt = 0;
+  resetEvidenceStripChips();
+  // ETH 전용 진행중(미확정) 미리보기 배지 -- renderEvidenceSignalsProvisional()가 ETH가 아닌
+  // 탭에선 더 이상 이 배지를 건드리지 않으므로(그 함수의 early-return 참고), 스위치 직후엔
+  // 여기서 직접 중립 문구로 비워 마지막으로 봤던 ETH 값이 새 탭에 남아있지 않게 한다.
+  if (asset !== "eth") {
+    const provisionalBadge = el("evidenceProvisionalBadge");
+    if (provisionalBadge) { provisionalBadge.className = "ops-badge neutral"; provisionalBadge.textContent = "진행중 미리보기 (ETH 전용)"; }
+  }
   await Promise.all([
     refreshBasisLiquiditySignal(),
     refreshLiquidationDirectionSignal(),
     refreshLiquidation5mSignal(),
     refreshLiquidationMap(),
+    refreshEvidenceSignals(),
     maybeFetchSnapshotChartHistory(),
   ]);
   if (latestMainState) render(latestMainState, latestCompactState);
@@ -1326,6 +1342,59 @@ const EVIDENCE_SIGNAL_KO = {
   },
 };
 
+// BTC 코인 페이지 전용 라벨(2026-09-02) -- ETH와 신호 정의(원시 트리거)는 같아도 그리드스크린이
+// K/HORIZON/GAP을 BTC 전용으로 재선정했고(live_btc_evidence_signal_metalabel_20260902.py 참고)
+// 검증·경제성 수치도 전부 다르므로, EVIDENCE_SIGNAL_KO의 ETH 수치를 그대로 보여주면 안 된다.
+// 근거: docs/experiments/btc_evidence_signal_economics_gate_20260902.md(§3/§6/§7),
+// scripts/live_btc_evidence_signal_shadow_runner_20260902.py(HOLDOUT_AUC).
+// ⚠️ETH와 달리 대부분 경제성 게이트를 통과하지 못했다 — BTC ATR이 ETH보다 작아 비용/ATR
+// 비율이 더 나쁘기 때문(자세한 원인은 섀도우 러너 docstring). 그래도 노출하는 건 이 대시보드의
+// 증거신호 티어가 손익 주장이 아니라 정보성(IC) 표시이기 때문 — 각 항목에 실제 판정을 명시한다.
+const BTC_EVIDENCE_SIGNAL_KO = {
+  orthogonal_combo: {
+    name: "복합 오실레이터 신호",
+    detail: "[조건] 스토캐스틱 백분위 극단 + 체결쏠림(delta_z) 극단 동시충족 (BTC 그리드스크린 H=8/K=2.0/GAP=6).\n" +
+      "[신뢰도] TRAIN hit률 42.71%(8봉 안 2.0×ATR 도달) · HOLDOUT AUC 0.5933.\n" +
+      "[경제성] VAL +1.15 / OOS +10.95 / HOLDOUT +1.47bp(승률75.4%, n=338) — 2군(VAL 숏 구간 일부 약함) 생존, 무작위진입 귀무 백분위 100%.",
+  },
+  liquidity_sweep: {
+    name: "유동성 스윕(저점·고점 사냥)",
+    detail: "[조건] 직전 100분 저점/고점을 살짝 뚫었다가 되돌림 (BTC 그리드스크린 H=20/K=2.0/GAP=6).\n" +
+      "[신뢰도] TRAIN hit률 10.22% · HOLDOUT AUC 0.5214(사실상 무작위).\n" +
+      "[경제성] 트레일링스톱 게이트 0/96 전패, HOLDOUT 미도달 — 7종 중 유일하게 방향 정보 자체가 거의 없다.",
+  },
+  short_term_return_z: {
+    name: "3봉 수익률 급변(z-score)",
+    detail: "[조건] 3봉 수익률의 z-score 극단 (BTC 그리드스크린 H=6/K=2.0/GAP=12).\n" +
+      "[신뢰도] TRAIN hit률 31.63% · HOLDOUT AUC 0.6443.\n" +
+      "[경제성] VAL +4.94 / OOS +8.98 / HOLDOUT +0.06bp(승률66.3%, n=525) — 1군 생존이나 사실상 0(비용 상쇄 수준).",
+  },
+  taker_delta_climax: {
+    name: "체결 쏠림 극단(taker delta)",
+    detail: "[조건] 순공격적 매수/매도 체결량 z-score ≥2.0/≤-2.0 (BTC 그리드스크린 H=6/K=2.0/GAP=3, ETH는 K=2.5로 별개).\n" +
+      "[신뢰도] TRAIN hit률 13.88% · HOLDOUT AUC 0.6276.\n" +
+      "[경제성] VAL +0.64 / OOS +2.90 / HOLDOUT −0.94bp(n=1,172) — 방향뒤집기는 이기지만(갭+8.81) HOLDOUT 절대수익 미통과.",
+  },
+  fib_extension_exhaustion: {
+    name: "피보나치 확장 소진",
+    detail: "[조건] 48봉 추세 방향 대비 127.2~161.8% 확장구간 터치 (BTC 그리드스크린 H=10/K=2.75/GAP=6).\n" +
+      "[신뢰도] TRAIN hit률 19.28% · HOLDOUT AUC 0.5657.\n" +
+      "[경제성] VAL +0.56 / OOS +0.35로 게이트는 겨우 통과했으나 무작위진입 대조에서 탈락(롱 OOS 갭 −3.19) — HOLDOUT 미도달, 사실상 미검증.",
+  },
+  demarker_extreme: {
+    name: "DeMarker 오실레이터 극단",
+    detail: "[조건] DeMarker(14) 극단 (BTC 그리드스크린 H=8/K=0.70/GAP=6 — K가 낮아 발동은 잦으나 변별력은 낮음, TRAIN hit률 90.03%).\n" +
+      "[신뢰도] HOLDOUT AUC 0.7286 — 7종 중 최고.\n" +
+      "[경제성] VAL +6.46 / OOS +8.91 / HOLDOUT +3.25bp(승률81.3%, n=428) — 1군 생존, 7종 중 유일하게 여유 있는 양수.",
+  },
+  kalman_deviation_meanrev: {
+    name: "칼만필터 추세이탈 평균회귀",
+    detail: "[조건] (종가-칼만필터 추세선)/추세선 z-score ≥3.5/≤-3.5 (BTC 그리드스크린 H=10/K=3.5/GAP=6, ETH는 K=2.5로 별개).\n" +
+      "[신뢰도] TRAIN hit률 14.25% · HOLDOUT AUC 0.6709.\n" +
+      "[경제성] VAL +2.41 / OOS +6.17 / HOLDOUT −1.27bp(n=1,021) — 방향뒤집기는 이기지만 HOLDOUT 절대수익 미통과.",
+  },
+};
+
 // Snapshot tab "13신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
 // index.html) can be updated from the exact same fetch/loop as the full evidenceSignalList below
 // -- one source of truth per tick, no separate poll or duplicated tone logic.
@@ -1334,6 +1403,11 @@ const EVIDENCE_STRIP_CHIP_IDS = {
   liquidity_sweep: "eviChipSweep",
   short_term_return_z: "eviChipReturnZ",
   taker_delta_z_climax: "eviChipTakerDelta",
+  // BTC 페이지(2026-09-02)는 같은 칩을 재사용하되 이름이 다르다(BTC 그리드스크린/frozen-context
+  // 리포트가 "z" 없는 축약명을 씀 -- live_btc_evidence_signal_metalabel_20260902.py::
+  // RAW_COLUMN_ALIAS 참고). smt_divergence는 BTC에 대응 신호가 없어 별칭 없음(그 칩은 BTC
+  // 탭에서 계속 "-" 중립으로 남는다 -- resetEvidenceStripChips()가 탭 전환시 정리).
+  taker_delta_climax: "eviChipTakerDelta",
   smt_divergence: "eviChipSmt",
   fib_extension_exhaustion: "eviChipFibExt",
   demarker_extreme: "eviChipDemarker",
@@ -1347,6 +1421,13 @@ function resetEvidenceStripChips() {
     chip.className = "signal-chip neutral";
     const stateEl = chip.querySelector(".signal-chip-state");
     if (stateEl) stateEl.textContent = "-";
+    // 2026-09-02: also clear the live-preview dot's own class (renderEvidenceSignalsProvisional
+    // sets it separately from the chip's own className) -- without this, switching FROM the eth
+    // tab (where a signal was live-firing) TO another coin leaves that dot stuck on "live-bottom"/
+    // "live-top" since this asset's tab no longer runs the ETH-only provisional preview at all
+    // (see that function's early-return guard) to ever clear it back.
+    const dot = chip.querySelector(".signal-chip-live-dot");
+    if (dot) dot.className = "signal-chip-live-dot";
   });
   const meaningEl = el("evidenceStripMeaning");
   if (meaningEl) { meaningEl.className = "evidence-strip-meaning hidden"; meaningEl.textContent = "-"; }
@@ -1435,6 +1516,17 @@ function evidenceSideLabel(s, { bottom, top, both, none }) {
 function renderEvidenceSignals(payload) {
   const badge = el("snapshotEvidenceBadge");
   const stripBadge = el("evidenceStripBadge");
+  // 2026-09-02: SOL/XRP/HYPE엔 증거신호 파이프라인 자체가 없다(ETH+BTC만 존재) -- 예전엔 코인탭과
+  // 무관하게 항상 ETH 데이터를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가
+  // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.
+  if (payload && payload.unsupported) {
+    latestEvidenceSignals = null;
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "미지원 자산"; }
+    if (stripBadge) { stripBadge.className = "ops-badge neutral"; stripBadge.textContent = "미지원"; }
+    setH("evidenceSignalList", `<div class="macro-calendar-empty">이 자산은 증거신호를 아직 지원하지 않습니다(ETH·BTC만 지원).</div>`);
+    resetEvidenceStripChips();
+    return;
+  }
   if (!payload || payload.error) {
     latestEvidenceSignals = null;
     if (badge) { badge.className = "ops-badge bad"; badge.textContent = "EVIDENCE UNREACHABLE"; }
@@ -1520,7 +1612,10 @@ function renderEvidenceSignals(payload) {
     // tie-break -- so without this warn check first, 혼재 rows would silently render as plain
     // good/bad and never show as the mixed-signal warning they actually are).
     const metaTone = tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
-    const ko = EVIDENCE_SIGNAL_KO[s.name] || { name: s.name };
+    // 2026-09-02: BTC는 신호 정의는 ETH와 같아도 그리드스크린 K/HORIZON과 검증·경제성 수치가
+    // 전부 다르므로 별도 라벨 사전을 쓴다 (BTC_EVIDENCE_SIGNAL_KO 선언부 주석 참고).
+    const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO : EVIDENCE_SIGNAL_KO;
+    const ko = koDict[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
     const isOpen = detailOpenKeys.has(detailKey);
     const detailText = ko.detail ? `${ko.detail}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}` : "";
@@ -1608,8 +1703,13 @@ async function refreshEvidenceSignals() {
   const now = Date.now();
   if (now - evidenceLastFetchAt < EVIDENCE_POLL_MS) return;
   evidenceLastFetchAt = now;
+  if (!EVIDENCE_SIGNAL_SUPPORTED_ASSETS.includes(activeSnapshotAsset)) {
+    renderEvidenceSignals({ unsupported: true, asset: activeSnapshotAsset });
+    return;
+  }
+  const url = activeSnapshotAsset === "btc" ? API_BTC_EVIDENCE_SIGNALS_URL : API_EVIDENCE_SIGNALS_URL;
   try {
-    const res = await fetch(API_EVIDENCE_SIGNALS_URL, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`evidence signals ${res.status}`);
     renderEvidenceSignals(await res.json());
   } catch (error) {
@@ -1629,6 +1729,13 @@ async function refreshEvidenceSignals() {
 // load_evidence_signals_provisional()'s docstring in dashboard/server.py for why this reading has
 // no lift track record of its own and can flicker before the bar closes.
 function renderEvidenceSignalsProvisional(payload) {
+  // 2026-09-02: 이 진행중(미확정) 미리보기는 ETH 전용 엔드포인트 데이터다(BTC 라이브 미리보기는
+  // 이번에 만들지 않음, 확정봉 패널만 코인탭을 따라가도록 함). BTC 탭에서 이 함수가 그대로
+  // 돌면 ETH의 실시간 발동으로 BTC 신호행/칩을 덮어써 버린다(evidence-row는 data-signal 이름으로만
+  // 찾으므로 지금 BTC 데이터가 들어있는 바로 그 행을 잘못 골라 씀) -- 그래서 탭이 ETH가 아니면
+  // DOM은 건드리지 않고 조용히 빠진다. latestEvidenceSignalsProvisional 자체(V자반등 폴백이
+  // 재사용, 위 refreshEvidenceSignalsProvisional 참고)는 이 함수 밖에서 이미 갱신되므로 영향 없음.
+  if (activeSnapshotAsset !== "eth") return;
   const badge = el("evidenceProvisionalBadge");
   const clearDots = () => {
     Object.values(EVIDENCE_STRIP_CHIP_IDS).forEach((id) => {
@@ -1862,51 +1969,6 @@ function fmtMacroCalendarTime(iso) {
 // ⚠️위쪽 V자반등 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
 // 이건 주문을 내지 않는 가상 원장이고, HOLDOUT이 1회 노출로 소진돼 남은 유일한 검증 경로다.
 // 근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
-// 2026-09-02 (사용자 goal): BTC 증거신호 7종 섀도우.
-// ⚠️ETH 증거신호 칩과 **다른 자산·다른 파라미터**다 -- 2026-09-01 그리드스크린이 BTC에서
-// HIT정의/H/K/GAP을 독자 재선정했고 ETH 값과 전부 다르다.
-// ⚠️주문 없음. BTC는 경제성 통과 모델이 아직 없어 가상 매매 성과를 주장하지 않는다 --
-// 라이브 hit률이 학습 hit률을 재현하는지만 관측한다.
-async function refreshBtcEvShadow() {
-  const now = Date.now();
-  if (now - btcEvShadowLastFetchAt < BTC_EV_SHADOW_POLL_MS) return;
-  btcEvShadowLastFetchAt = now;
-  try {
-    const res = await fetch(API_BTC_EV_SHADOW_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`btc ev shadow ${res.status}`);
-    renderBtcEvShadow(await res.json());
-  } catch (error) {
-    console.error("BTC evidence shadow fetch error:", error);
-    const sub = el("btcEvShadowSub");
-    if (sub) sub.textContent = "불러오기 실패";
-  }
-}
-function renderBtcEvShadow(p) {
-  const sub = el("btcEvShadowSub");
-  if (!p || !Array.isArray(p.per_signal)) {
-    if (sub) sub.textContent = "데이터 없음";
-    setH("btcEvShadowList", `<div class="macro-calendar-empty">섀도우 러너 기록 없음.</div>`);
-    return;
-  }
-  if (sub) {
-    sub.textContent = `확정 ${p.total_resolved || 0}건 · 대기 ${p.total_pending || 0} · 신호 ${p.per_signal.length}종 · 사이클 ${p.cycles || 0}`;
-  }
-  const pct = (v) => (v == null ? "-" : `${(v * 100).toFixed(1)}%`);
-  const rows = p.per_signal.map((r) => {
-    // 라이브가 학습 hit률을 재현하는가 -- 표본이 적으면 판단 보류(중립 톤)
-    let tone = "neutral";
-    if (r.n_resolved >= 20 && r.delta != null) tone = Math.abs(r.delta) <= 0.10 ? "good" : "warn";
-    const d = r.delta == null ? "-" : `${r.delta > 0 ? "+" : ""}${(r.delta * 100).toFixed(1)}%p`;
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info"><strong>${r.signal}</strong>
-        <span>라이브 ${pct(r.live_hit_rate)} vs 학습 ${pct(r.train_hit_rate)} (${d}) · HOLDOUT AUC ${r.holdout_auc ?? "-"}</span></div>
-      <span class="ops-health-status-badge">n=${r.n_resolved}${r.n_pending ? `+${r.n_pending}` : ""}</span>
-    </article>`;
-  });
-  setH("btcEvShadowList", rows.length ? rows.join("")
-    : `<div class="macro-calendar-empty">아직 확정된 기록이 없습니다.</div>`);
-}
 async function refreshVrebEconShadow() {
   const now = Date.now();
   if (now - vrebEconShadowLastFetchAt < VREB_ECON_SHADOW_POLL_MS) return;
@@ -2040,7 +2102,6 @@ function setupPageTabs() {
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
-      btcEvShadowLastFetchAt = 0; refreshBtcEvShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
     }
@@ -3096,7 +3157,6 @@ async function tick() {
       refreshRegimeBtc();
       refreshMacroCalendar();
       refreshVrebEconShadow();
-      refreshBtcEvShadow();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();
     }

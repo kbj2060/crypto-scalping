@@ -230,6 +230,140 @@ def compute_btc_evidence_signals() -> dict[str, Any]:
         return {**empty, "error": f"{type(e).__name__}: {e}"}
 
 
+# ⚠️2026-09-02에 이 함수를 추가하며 발견: `_meta()`의 신호 키("taker_delta_climax")가
+# `compute_signals()`의 실제 컬럼명("taker_delta_z_climax", ETH와 공유)과 다르다 --
+# build_btc_5m_evidence_signal_candidates_tier0_20260901.py는 NAMED_TRIGGERS에 "z"를 포함한
+# 이름을 쓰는데, contexts_report.json(그리고 이를 그대로 쓰는 HIT_SPEC/HOLDOUT_AUC, 섀도우
+# 러너)만 축약된 이름을 쓴다. 위 compute_btc_evidence_signals()는 `col = f"{side}_{name}"`를
+# 그대로 sig.columns에서 찾는데, "bottom_taker_delta_climax"는 존재하지 않아 항상 `continue`로
+# 건너뛴다 -- 즉 **라이브 섀도우 러너에서 taker_delta_climax가 한 번도 발동을 기록하지 못하는
+# 기존 버그**로 보인다(이 함수를 만들다 발견, 섀도우 러너 자체는 이번 변경 대상이 아니라
+# 손대지 않음 -- 사용자에게 별도 보고). 아래 신규 함수는 이 별칭 매핑으로 올바른 컬럼을 찾는다.
+RAW_COLUMN_ALIAS = {"taker_delta_climax": "taker_delta_z_climax"}
+
+# 대시보드 메인 증거신호 패널용 fill-window 파라미터. ETH의 K_OVERRIDE/SUSTAIN_BARS_OVERRIDE
+# (live_evidence_signal_dashboard_20260823.py)를 재사용하면 안 된다 -- compute_signals()는
+# 자산과 무관하게 공유되지만, 그 안의 fill-window 계산은 ETH 전용 K/HORIZON을 참조하므로 BTC
+# 프레임에 그대로 적용하면 조용히 다른 자산의 보정값이 들어간다. 아래 값은 BTC 자체 그리드스크린
+# 결과(live_btc_evidence_signal_shadow_runner_20260902.py::HIT_SPEC와 동일 출처, 이 파일이
+# import하는 대신 값만 복제 -- 순환 임포트 회피 + 러너 프로세스를 건드리지 않기 위함)다.
+FILL_SPEC = {
+    "taker_delta_climax":       {"k": 2.0,  "horizon": 6},
+    "liquidity_sweep":          {"k": 2.0,  "horizon": 20},
+    "kalman_deviation_meanrev": {"k": 3.5,  "horizon": 10},
+    "short_term_return_z":      {"k": 2.0,  "horizon": 6},
+    "orthogonal_combo":         {"k": 2.0,  "horizon": 8},
+    "demarker_extreme":         {"k": 0.70, "horizon": 8},
+    "fib_extension_exhaustion": {"k": 2.75, "horizon": 10},
+}
+PANEL_HISTORY_BARS = 48  # dashboard/server.py's EVIDENCE_SIGNAL_HISTORY_BARS(4h @ 5m)와 동일
+
+
+def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str,
+                               high: pd.Series, low: pd.Series, close: pd.Series,
+                               atr_pct: pd.Series) -> pd.Series:
+    """live_evidence_signal_dashboard_20260823.py::compute_signals()의 동명 내부함수와 같은
+    알고리즘(발동 시점부터 K*ATR% 터치 또는 HORIZON 경과 중 먼저 오는 시점까지 채움) --
+    그쪽은 ETH의 high/low/close/atr_pct를 클로저로 참조하는 중첩함수라 그대로 import할 수
+    없어(그리고 애초에 K/HORIZON도 자산별로 달라야 하므로) 순수함수로 복제했다."""
+    n = len(raw)
+    filled = np.zeros(n, dtype=bool)
+    raw_arr = raw.fillna(False).to_numpy()
+    high_a, low_a, close_a, atr_a = high.to_numpy(), low.to_numpy(), close.to_numpy(), atr_pct.to_numpy()
+    for i in np.flatnonzero(raw_arr):
+        end = min(i + horizon_bars, n - 1)
+        if not np.isnan(atr_a[i]):
+            target = k * atr_a[i]
+            level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
+            for b in range(i + 1, end + 1):
+                touched = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
+                if touched:
+                    end = b
+                    break
+        filled[i:end + 1] = True
+    return pd.Series(filled, index=raw.index)
+
+
+def compute_btc_evidence_signals_panel(history_bars: int = PANEL_HISTORY_BARS) -> dict[str, Any]:
+    """대시보드 메인 증거신호 패널(스냅샷 탭 '증거신호' 컴포넌트)용 payload -- ETH의
+    dashboard/server.py::load_evidence_signals()와 같은 모양(signals 리스트, 신호마다
+    bottom_history/top_history/bottom_raw_fire/top_raw_fire/bottom_fired/top_fired[/model_proba/
+    model_side]) 이라 프론트엔드 renderEvidenceSignals()/evidenceStripSvg()를 그대로 재사용한다.
+    위 compute_btc_evidence_signals()(섀도우 러너 전용, 그 모양에 의존하는 프로세스가 이미
+    돌고 있어 변경하지 않음)와는 별개 함수지만 _build_frame()/_load_models() 캐시는 공유한다.
+    ⚠️BTC는 ETH가 통과한 경제성 게이트를 통과하지 못했다(이 모듈 docstring +
+    docs/experiments/btc_evidence_signal_economics_gate_20260902.md 참고). 그래도 노출하는 이유는
+    이 대시보드의 증거신호 티어 자체가 애초에 손익 주장이 아니라 정보성(IC) 표시이기 때문 --
+    ETH 신호들도 전부 그 지위이고, 여기 model_proba/train_hit_rate는 참고용 확률일 뿐 매매
+    신호가 아니다(라벨 텍스트에도 명시)."""
+    empty: dict[str, Any] = {"warmed_up": False, "error": None, "signals": []}
+    try:
+        if not CTX_REPORT.exists():
+            return {**empty, "error": "frozen_contexts_missing"}
+        frame = _build_frame()
+        if frame is None:
+            return {**empty, "error": "klines_unavailable"}
+        from live_evidence_signal_dashboard_20260823 import compute_signals
+        sig = compute_signals(frame, btc_df=None, funding_df=None)
+        models = _load_models()
+
+        n = len(sig)
+        signals_payload: list[dict[str, Any]] = []
+        bottom_votes = 0
+        top_votes = 0
+        for name, m in models.items():
+            spec = FILL_SPEC.get(name)
+            raw_name = RAW_COLUMN_ALIAS.get(name, name)
+            bcol, tcol = f"bottom_{raw_name}", f"top_{raw_name}"
+            if spec is None or bcol not in sig.columns or tcol not in sig.columns:
+                continue
+            bottom_fill = _fill_until_tp_or_horizon(sig[bcol], spec["k"], spec["horizon"], "bottom",
+                                                     sig["high"], sig["low"], sig["close"], sig["atr_pct"])
+            top_fill = _fill_until_tp_or_horizon(sig[tcol], spec["k"], spec["horizon"], "top",
+                                                  sig["high"], sig["low"], sig["close"], sig["atr_pct"])
+            bottom_fired = bool(bottom_fill.iloc[-1])
+            top_fired = bool(top_fill.iloc[-1])
+            if bottom_fired:
+                bottom_votes += 1
+            if top_fired:
+                top_votes += 1
+
+            entry: dict[str, Any] = {
+                "name": name,
+                "bottom_fired": bottom_fired,
+                "top_fired": top_fired,
+                "bottom_history": bottom_fill.tail(history_bars).fillna(False).astype(bool).tolist(),
+                "top_history": top_fill.tail(history_bars).fillna(False).astype(bool).tolist(),
+                "bottom_raw_fire": sig[bcol].tail(history_bars).fillna(False).astype(bool).tolist(),
+                "top_raw_fire": sig[tcol].tail(history_bars).fillna(False).astype(bool).tolist(),
+            }
+            # 배지에 쓸 현재봉 확률 -- 원시 발동 중인 쪽만(둘 다 발동이면 ETH와 동일하게
+            # bottom 우선, dashboard/live/app.js::evidenceSideTone 참고).
+            side = "bottom" if bool(sig[bcol].iloc[-1]) else ("top" if bool(sig[tcol].iloc[-1]) else None)
+            if side is not None:
+                row = sig.iloc[[n - 1]]
+                miss = [c for c in m["features"] if c not in row.columns]
+                if not miss:
+                    X = row[m["features"]].apply(pd.to_numeric, errors="coerce")
+                    if not X.isna().any(axis=1).all():
+                        p = float(m["clf"].predict_proba(X)[:, 1][0])
+                        entry["model_proba"] = round(p, 4)
+                        entry["model_side"] = side
+            signals_payload.append(entry)
+
+        return {
+            "warmed_up": True,
+            "error": None,
+            "latest_bar_utc": str(sig["timestamp"].iloc[-1]),
+            "net_score": bottom_votes - top_votes,
+            "bottom_votes": bottom_votes,
+            "top_votes": top_votes,
+            "signals": signals_payload,
+        }
+    except Exception as e:                                     # noqa: BLE001
+        return {**empty, "error": f"{type(e).__name__}: {e}"}
+
+
 if __name__ == "__main__":
     t0 = time.time()
     r = compute_btc_evidence_signals()

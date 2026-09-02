@@ -53,6 +53,12 @@ from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
 from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
+# BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH의
+# /api/evidence-signals를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다").
+# ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
+# compute_btc_evidence_signals_panel()을 새로 추가(기존 compute_btc_evidence_signals()는 섀도우
+# 러너 전용 다른 모양이라 그대로 둠). 자세한 내용은 그 함수 docstring 참고.
+from scripts.live_btc_evidence_signal_metalabel_20260902 import compute_btc_evidence_signals_panel  # noqa: E402
 # 2026-08-30: liquidity_sweep now trained on the SAME Tier0+rsi schema as taker/short_term_
 # return_z/dalton_rule2_balance_edge (standard touch-based-MFE redo, replacing the V_REBOUND-model
 # relay bridge this import used to be) -- it lives in METALABEL_SIGNALS above and is handled by
@@ -944,6 +950,8 @@ def make_app() -> web.Application:
     evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     evidence_signal_provisional_lock = asyncio.Lock()
+    btc_evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    btc_evidence_signal_lock = asyncio.Lock()
     v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     v_rebound_lock = asyncio.Lock()
     # 2026-08-31: keyed by asset (was a single shared slot) so an ETH and a BTC request don't
@@ -1403,6 +1411,27 @@ def make_app() -> web.Application:
                 "signals": signals_payload,
             })
 
+    async def load_btc_evidence_signals() -> dict[str, Any]:
+        """BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- load_evidence_signals()의 BTC판.
+        compute_btc_evidence_signals_panel()이 klines 페치+지표 계산+TabPFN 채점을 전부 자체
+        처리하므로(BTC 전용 그리드스크린 K/HORIZON, live_btc_evidence_signal_metalabel_20260902.py
+        참고) 여기서는 캐시/락만 감싼다 -- load_evidence_signals()처럼 별도 klines 페치 단계가
+        없다. 첫 호출은 TabPFN 7개를 새로 적합(수 초)하지만 이후 같은 프로세스 안에서는
+        캐시된 모델을 재사용(그 함수의 _load_models() 참고)하므로 이 EVIDENCE_SIGNAL_CACHE_SECONDS
+        (ETH와 동일 60초) 캐시는 매 사이클의 재적합 비용이 아니라 klines 재페치+추론 비용만 아낀다."""
+        now = time.monotonic()
+        cached = btc_evidence_signal_cache["payload"]
+        if cached is not None and now - btc_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+            return cached
+        async with btc_evidence_signal_lock:
+            cached = btc_evidence_signal_cache["payload"]
+            if cached is not None and time.monotonic() - btc_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(compute_btc_evidence_signals_panel)
+            btc_evidence_signal_cache["ts"] = time.monotonic()
+            btc_evidence_signal_cache["payload"] = payload
+            return payload
+
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
         scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
@@ -1769,6 +1798,10 @@ def make_app() -> web.Application:
             )
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_btc_evidence_signals(request: web.Request) -> web.Response:
+        payload = await load_btc_evidence_signals()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_v_rebound_signal(request: web.Request) -> web.Response:
         payload = await load_v_rebound_signal()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2000,6 +2033,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
+    app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
