@@ -767,6 +767,16 @@ def btc_evidence_shadow_payload() -> dict[str, Any]:
     }
 
 
+def _locked_bp(p: dict[str, Any]) -> float | None:
+    """섀도우 포지션의 손절선이 이미 확정한 손익(bp, 왕복비용 10bp 차감). 현재가 불필요."""
+    try:
+        entry, stop = float(p["entry"]), float(p["stop"])
+        sgn = 1.0 if p.get("side") == "long" else -1.0
+        return round(sgn * (stop - entry) / entry * 1e4 - 10.0, 2)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def v_rebound_econ_shadow_payload() -> dict[str, Any]:
     """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -797,6 +807,38 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
         mdd = min(mdd, run - peak)
         equity.append({"ts": row.get("exit_utc"), "cum_bp": round(run, 2)})
 
+    # ── 사람이 바로 읽을 수 있는 해석값 (대시보드가 원시 숫자만 나열하지 않도록) ──
+    # 목표 표본: HOLDOUT 빈도(13.18건/일) x 2주. 이만큼은 모여야 백테스트와 대조가 의미 있다.
+    HOLDOUT_EXP_BP, HOLDOUT_PER_DAY = 6.09, 13.18
+    target = int(round(HOLDOUT_PER_DAY * 14))
+    days = 0.0
+    started = state.get("started_utc")
+    if started:
+        try:
+            days = max((datetime.now(timezone.utc)
+                        - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
+        except (TypeError, ValueError):
+            days = 0.0
+    exp = (sum(pnls) / n) if n else None
+    if n < 30:
+        verdict = {"tone": "neutral", "headline": "표본이 아직 적습니다",
+                   "detail": f"{n}건 청산 · 판단에는 {target}건 정도가 필요합니다"}
+    elif exp is None:
+        verdict = {"tone": "neutral", "headline": "기록 없음", "detail": ""}
+    elif exp <= 0:
+        verdict = {"tone": "bad", "headline": "백테스트에 미달합니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp"}
+    elif exp < HOLDOUT_EXP_BP * 0.5:
+        verdict = {"tone": "warn", "headline": "백테스트보다 약합니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대의 "
+                             f"{exp / HOLDOUT_EXP_BP * 100:.0f}% 수준"}
+    elif exp <= HOLDOUT_EXP_BP * 1.5:
+        verdict = {"tone": "good", "headline": "백테스트와 비슷합니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp"}
+    else:
+        verdict = {"tone": "warn", "headline": "백테스트보다 지나치게 좋습니다",
+                   "detail": f"건당 {exp:+.2f}bp — 계측이 느슨하지 않은지 먼저 의심할 것"}
+
     return {
         "started_utc": state.get("started_utc"),
         "open_positions": [
@@ -804,7 +846,10 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
                 "side": p.get("side"), "entry": p.get("entry"), "stop": p.get("stop"),
                 "best": p.get("best"), "armed": bool(p.get("armed")),
                 "proba": p.get("proba"), "opened_utc": p.get("opened_utc"),
-                "ticks": p.get("ticks"),
+                "bars_held": p.get("bars_held"),
+                # 손절선이 이미 확정한 손익. 무장 전이면 최대손실, 무장 후면 확보이익이 될 수 있다.
+                # 현재가 없이도 계산되고, "최악이어도 얼마"라는 직관적 의미를 준다.
+                "locked_bp": _locked_bp(p),
             }
             for p in positions[-10:]
         ],
@@ -828,7 +873,13 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
             for r in ledger[-8:]
         ],
         "backtest_reference": {"oos_exp_bp": 7.98, "holdout_exp_bp": 6.09,
-                               "holdout_win_rate": 0.780, "holdout_payoff": 0.346},
+                               "holdout_win_rate": 0.780, "holdout_payoff": 0.346,
+                               "holdout_trades_per_day": 13.18},
+        "days_running": days,
+        "trades_per_day": round(n / days, 2) if (n and days > 0) else None,
+        "target_trades": target,
+        "progress_pct": round(min(n / target, 1.0) * 100, 1) if target else None,
+        "verdict": verdict,
         "note": "섀도우 -- 주문 없음. 배포 칩(매 봉 giveback)과 다른 모델.",
     }
 

@@ -1425,3 +1425,96 @@ svg {
   stroke-dasharray: 4,4;
   pointer-events: none;
 }
+
+
+/* ===== V자반등 섀도우 패널 (2026-09-03 재설계) =====
+   기존엔 동일하게 생긴 행이 평평하게 나열돼 무엇이 중요한지 안 보였다.
+   판정 -> 진행도 -> 비교카드 -> 목록 순으로 시각 위계를 준다.
+   ⚠️클래스는 전부 `vshadow-` 접두 -- 기존 ops-health-* 와 충돌하지 않는다. */
+.vshadow-body { display: flex; flex-direction: column; gap: 10px; }
+
+.vshadow-verdict {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 11px 13px; border-radius: 10px;
+  border-left: 4px solid var(--muted, #8b93a7);
+  background: rgba(255, 255, 255, 0.04);
+}
+.vshadow-verdict strong { font-size: 15px; line-height: 1.35; }
+.vshadow-verdict span { font-size: 12.5px; opacity: 0.78; line-height: 1.4; }
+.vshadow-verdict.good { border-left-color: #35c07d; background: rgba(53, 192, 125, 0.10); }
+.vshadow-verdict.warn { border-left-color: #e2a33a; background: rgba(226, 163, 58, 0.10); }
+.vshadow-verdict.bad  { border-left-color: #e2564a; background: rgba(226, 86, 74, 0.10); }
+
+.vshadow-progress { display: flex; flex-direction: column; gap: 5px; }
+.vshadow-progress-top {
+  display: flex; justify-content: space-between; font-size: 12px; opacity: 0.72;
+}
+.vshadow-progress-track {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.09);
+}
+.vshadow-progress-fill {
+  height: 100%; border-radius: 3px; background: #4f8ff7;
+  transition: width 0.4s ease;
+}
+
+.vshadow-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.vshadow-card {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 9px 10px; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  border-top: 3px solid var(--muted, #8b93a7);
+}
+.vshadow-card.good { border-top-color: #35c07d; }
+.vshadow-card.warn { border-top-color: #e2a33a; }
+.vshadow-card.bad  { border-top-color: #e2564a; }
+.vshadow-card-name  { font-size: 11.5px; opacity: 0.7; }
+.vshadow-card-value { font-size: 17px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.vshadow-card-ref   { font-size: 11px; opacity: 0.6; white-space: nowrap;
+                      overflow: hidden; text-overflow: ellipsis; }
+
+.vshadow-section-title {
+  font-size: 12px; opacity: 0.68; margin-top: 2px;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.vshadow-section-title em { font-style: normal; opacity: 0.85; }
+
+.vshadow-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+.vshadow-side {
+  flex: 0 0 auto; padding: 2px 7px; border-radius: 5px;
+  font-size: 11.5px; font-weight: 600;
+}
+.vshadow-side.long  { background: rgba(53, 192, 125, 0.18); color: #4fd39a; }
+.vshadow-side.short { background: rgba(226, 86, 74, 0.18); color: #ef7d72; }
+.vshadow-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.vshadow-row-main strong { font-size: 13px; font-weight: 600; }
+.vshadow-row-main span   { font-size: 11.5px; opacity: 0.66;
+                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vshadow-row-value {
+  flex: 0 0 auto; text-align: right; font-size: 13.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0;
+}
+.vshadow-row-value em { font-style: normal; font-size: 10px; font-weight: 400; opacity: 0.55; }
+.vshadow-row-value.good { color: #4fd39a; }
+.vshadow-row-value.warn { color: #e6b45c; }
+.vshadow-row-value.bad  { color: #ef7d72; }
+
+.vshadow-empty { font-size: 12px; opacity: 0.55; padding: 7px 2px; }
+.vshadow-foot  { font-size: 11.5px; opacity: 0.55; padding-top: 3px; line-height: 1.5; }
+
+/* 좁은 화면: 비교 카드를 세로로 -- 3열이면 값이 잘린다 */
+@media (max-width: 560px) {
+  .vshadow-cards { grid-template-columns: 1fr; }
+  .vshadow-card { flex-direction: row; align-items: baseline; gap: 8px;
+                  border-top: none; border-left: 3px solid var(--muted, #8b93a7); }
+  .vshadow-card.good { border-left-color: #35c07d; }
+  .vshadow-card.warn { border-left-color: #e2a33a; }
+  .vshadow-card.bad  { border-left-color: #e2564a; }
+  .vshadow-card-name { flex: 1 1 auto; }
+  .vshadow-card-ref  { flex: 0 0 auto; }
+}

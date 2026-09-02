@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260902-header-sticky-removed">
+  <link rel="stylesheet" href="styles.css?v=20260903-vshadow-redesign">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -221,12 +221,12 @@
 
       <section class="panel ops-health-panel">
         <div class="ops-health-head">
-          <div><h3>V자반등 경제라벨 섀도우</h3><p id="vrebEconShadowSub" class="muted">불러오는 중…</p></div>
+          <div><h3>V자반등 섀도우</h3><p id="vrebEconShadowSub" class="muted">불러오는 중…</p></div>
           <div class="ops-health-head-tools">
             <span class="ops-readonly">가상 · 주문 없음</span>
           </div>
         </div>
-        <div id="vrebEconShadowList" class="ops-health-list"></div>
+        <div id="vrebEconShadowBody" class="vshadow-body"></div>
       </section>
 
       <section class="panel ops-health-panel macro-calendar-panel">
@@ -241,7 +241,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260902-btc-evidence-panel"></script>
+  <script src="./app.js?v=20260903-vshadow-redesign"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

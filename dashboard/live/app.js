@@ -1985,53 +1985,99 @@ async function refreshVrebEconShadow() {
 }
 function renderVrebEconShadow(p) {
   const sub = el("vrebEconShadowSub");
+  const body = el("vrebEconShadowBody");
+  if (!body) return;
   if (!p || typeof p !== "object") {
     if (sub) sub.textContent = "데이터 없음";
-    setH("vrebEconShadowList", `<div class="macro-calendar-empty">섀도우 러너가 아직 기록을 남기지 않았습니다.</div>`);
+    body.innerHTML = `<div class="vshadow-empty">섀도우 러너가 아직 기록을 남기지 않았습니다.</div>`;
     return;
   }
   const n = Number(p.closed_trades || 0);
   const ref = p.backtest_reference || {};
+  const v = p.verdict || {};
+  const bp = (x, d = 2) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
+  const pct = (x) => (x == null ? "-" : `${(Number(x) * 100).toFixed(1)}%`);
+
   if (sub) {
-    sub.textContent = n
-      ? `가상 ${n}건 청산 · 보유 ${p.n_open || 0} · 백테스트 기대 HOLDOUT ${ref.holdout_exp_bp}bp`
-      : `보유 ${p.n_open || 0}건 · 아직 청산 기록 없음 (백테스트 기대 ${ref.holdout_exp_bp}bp)`;
+    const days = p.days_running == null ? null : Number(p.days_running);
+    sub.textContent = days == null ? "가상 원장" : `가동 ${days.toFixed(1)}일 · 가상 원장`;
   }
-  const rows = [];
-  const tone = (v) => (v == null ? "neutral" : v > 0 ? "good" : "warn");
-  const bp = (v) => (v == null ? "-" : `${v > 0 ? "+" : ""}${Number(v).toFixed(2)}bp`);
+
+  const out = [];
+
+  // ① 한 줄 판정 -- 원시 숫자보다 먼저, 말로 답한다
+  out.push(`<div class="vshadow-verdict ${v.tone || "neutral"}">
+    <strong>${v.headline || "기록 없음"}</strong>
+    ${v.detail ? `<span>${v.detail}</span>` : ""}
+  </div>`);
+
+  // ② 진행도 -- "언제쯤 판단할 수 있나"에 답한다
+  const tgt = Number(p.target_trades || 0);
+  if (tgt) {
+    const w = Math.max(0, Math.min(100, Number(p.progress_pct || 0)));
+    out.push(`<div class="vshadow-progress">
+      <div class="vshadow-progress-top"><span>판단에 필요한 표본</span><span>${n} / ${tgt}건</span></div>
+      <div class="vshadow-progress-track"><div class="vshadow-progress-fill" style="width:${w}%"></div></div>
+    </div>`);
+  }
+
+  // ③ 핵심 3지표를 백테스트와 나란히 -- 비교 대상 없이 숫자만 보면 해석이 안 된다
+  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : a > 0 ? "warn" : "bad");
+  const cards = [
+    { name: "건당 기대값", val: n ? bp(p.exp_bp) : "-",
+      tone: n ? cardTone(p.exp_bp, ref.holdout_exp_bp) : "neutral",
+      ref: `백테스트 ${bp(ref.holdout_exp_bp)}` },
+    { name: "승률", val: n ? pct(p.win_rate) : "-",
+      tone: n ? cardTone(p.win_rate, ref.holdout_win_rate) : "neutral",
+      ref: `백테스트 ${pct(ref.holdout_win_rate)}` },
+    { name: "하루 체결", val: p.trades_per_day == null ? "-" : `${Number(p.trades_per_day).toFixed(1)}건`,
+      tone: "neutral",
+      ref: `백테스트 ${ref.holdout_trades_per_day ?? "-"}건` },
+  ];
+  out.push(`<div class="vshadow-cards">${cards.map((c) => `
+    <div class="vshadow-card ${c.tone}">
+      <span class="vshadow-card-name">${c.name}</span>
+      <strong class="vshadow-card-value">${c.val}</strong>
+      <span class="vshadow-card-ref">${c.ref}</span>
+    </div>`).join("")}</div>`);
+
+  // ④ 보유 중 -- "최악이어도 얼마"가 가장 알고 싶은 값
+  const open = p.open_positions || [];
+  out.push(`<div class="vshadow-section-title">보유 중 <em>${p.n_open || 0}건</em></div>`);
+  if (!open.length) {
+    out.push(`<div class="vshadow-empty">열린 포지션 없음</div>`);
+  } else {
+    out.push(open.map((q) => `<div class="vshadow-row">
+      <span class="vshadow-side ${q.side}">${q.side === "long" ? "롱" : "숏"}</span>
+      <div class="vshadow-row-main">
+        <strong>${q.armed ? "이익 확보됨" : "손절선 대기"}</strong>
+        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유</span>
+      </div>
+      <span class="vshadow-row-value ${Number(q.locked_bp) > 0 ? "good" : "warn"}">${bp(q.locked_bp)}
+        <em>최악 시</em></span>
+    </div>`).join(""));
+  }
+
+  // ⑤ 최근 청산 -- 시각 + 방향 + 결과만
+  const rec = (p.recent_trades || []).slice().reverse().slice(0, 5);
+  if (rec.length) {
+    out.push(`<div class="vshadow-section-title">최근 청산</div>`);
+    out.push(rec.map((t) => `<div class="vshadow-row">
+      <span class="vshadow-side ${t.side}">${t.side === "long" ? "롱" : "숏"}</span>
+      <div class="vshadow-row-main">
+        <strong>${t.reason === "stop" ? "손절선 도달" : "보유 만기"}</strong>
+        <span>${fmtMacroCalendarTime(t.exit_utc)}</span>
+      </div>
+      <span class="vshadow-row-value ${Number(t.pnl_bp) > 0 ? "good" : "bad"}">${bp(t.pnl_bp)}</span>
+    </div>`).join(""));
+  }
+
+  // ⑥ 부가 지표는 맨 아래 한 줄로 -- 평소엔 볼 필요 없다
   if (n) {
-    rows.push(`<article class="ops-health-row ${tone(p.exp_bp)}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info"><strong>건당 기대값</strong>
-        <span>누적 ${bp(p.total_bp)} · 승률 ${p.win_rate == null ? "-" : (p.win_rate * 100).toFixed(1) + "%"} · 손익비 ${p.payoff ?? "-"}</span></div>
-      <span class="ops-health-status-badge">${bp(p.exp_bp)}</span>
-    </article>`);
-    rows.push(`<article class="ops-health-row neutral">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info"><strong>최대 낙폭 / 연속손실</strong>
-        <span>백테스트 HOLDOUT: ${ref.holdout_exp_bp}bp · 승률 ${(ref.holdout_win_rate * 100).toFixed(1)}% · 손익비 ${ref.holdout_payoff}</span></div>
-      <span class="ops-health-status-badge">${bp(p.max_dd_bp)} / ${p.consec_loss ?? 0}</span>
-    </article>`);
+    out.push(`<div class="vshadow-foot">누적 ${bp(p.total_bp, 0)} · 최대낙폭 ${bp(p.max_dd_bp, 0)}
+      · 손익비 ${p.payoff ?? "-"} · 연속손실 ${p.consec_loss ?? 0}</div>`);
   }
-  for (const q of (p.open_positions || [])) {
-    rows.push(`<article class="ops-health-row neutral">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info"><strong>보유 ${q.side === "long" ? "롱" : "숏"}${q.armed ? " · 무장" : ""}</strong>
-        <span>진입 ${Number(q.entry).toFixed(2)} · 손절 ${Number(q.stop).toFixed(2)} · p=${Number(q.proba).toFixed(3)}</span></div>
-      <span class="ops-health-status-badge">보유중</span>
-    </article>`);
-  }
-  for (const t of (p.recent_trades || []).slice().reverse()) {
-    rows.push(`<article class="ops-health-row ${tone(t.pnl_bp)}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info"><strong>${t.side === "long" ? "롱" : "숏"} 청산 · ${t.reason === "stop" ? "손절선" : "만기"}</strong>
-        <span>${fmtMacroCalendarTime(t.exit_utc)} · p=${t.proba == null ? "-" : Number(t.proba).toFixed(3)}</span></div>
-      <span class="ops-health-status-badge">${bp(t.pnl_bp)}</span>
-    </article>`);
-  }
-  setH("vrebEconShadowList", rows.length ? rows.join("")
-    : `<div class="macro-calendar-empty">아직 가상 진입이 없습니다 (임계값 0.8158).</div>`);
+  body.innerHTML = out.join("");
 }
 async function refreshMacroCalendar() {
   const now = Date.now();
