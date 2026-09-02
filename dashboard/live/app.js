@@ -22,6 +22,8 @@ const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 2500;
+// 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
+const MODEL_INDICATOR_POLL_MS = 20000;
 // 2026-08-25 perf pass: split from the Live tab's own chart-render throttle (removed with the Live
 // tab) -- the Snapshot chart's own data
 // (latestLiquidationMap) only changes once per LIQUIDATION_MAP_POLL_MS (5min), so redrawing its
@@ -1153,17 +1155,25 @@ function coinIndicator(item, kind) {
   if (!d || !d.warmed_up) return ethOnlyIndicator(item);
   const coinTag = `= ${activeSnapshotAsset.toUpperCase()} 실시간`;
   if (kind === "whale" || kind === "retail_flow") {
-    const v = d.micro ? (kind === "whale" ? d.micro.nif_whale : d.micro.nif_retail) : null;
+    const mi = d.micro || {};
+    const isWhale = kind === "whale";
+    const v = isWhale ? mi.nif_whale : mi.nif_retail;
+    const age = isWhale ? mi.nif_whale_age_min : mi.nif_retail_age_min;
+    const look = mi.lookback_min || 15;
     if (v == null) {
       return { ...item, tone: "neutral", history: [], times: [], proba: null,
-               subText: "수집 중 — 아직 값 없음", derivedTag: coinTag,
-               derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 수집기의 값입니다. 이 지표는 간헐적으로만 계산됩니다(대형 체결이 있을 때).` };
+               subText: `최근 ${look}분 내 값 없음`, derivedTag: coinTag,
+               derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 수집기의 값입니다. `
+                 + (isWhale ? "고래 흐름은 대형 체결이 있는 분에만 계산됩니다(XRP 실측 24시간 기준 약 50%의 분에만 존재)." : "") };
     }
     const tone = v > 0.05 ? "good" : v < -0.05 ? "bad" : "neutral";
+    // ⚠️오래된 값을 "지금 값"인 것처럼 보여주지 않는다 -- 몇 분 전 값인지 함께 쓴다.
+    const ageText = age == null ? "" : age < 1 ? " · 방금" : ` · ${Math.round(age)}분 전`;
     return { ...item, tone, history: [], times: [], proba: null,
-             subText: `${v > 0 ? "유입" : v < 0 ? "유출" : "중립"} ${v.toFixed(3)}`,
+             subText: `${v > 0 ? "유입" : v < 0 ? "유출" : "중립"} ${v.toFixed(3)}${ageText}`,
              derivedTag: coinTag,
-             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 실시간 수집기(microstructure_1m)에서 온 값입니다. ETH처럼 봇 내부 상태가 아니라 대시보드가 직접 읽습니다.` };
+             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 실시간 수집기(microstructure_1m)에서 직접 읽은 값입니다`
+               + `(ETH처럼 봇 내부 상태가 아닙니다). 최근 ${look}분 안의 마지막 값을 쓰고 몇 분 전인지 함께 표시합니다.` };
   }
   if (kind === "liq_cascade") {
     const t = d.tail;

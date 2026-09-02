@@ -784,6 +784,8 @@ def _locked_bp(p: dict[str, Any]) -> float | None:
 
 
 COIN_INDICATOR_CACHE_SECONDS = 20
+# nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
+MICRO_LOOKBACK_MIN = 15
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -807,15 +809,37 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     try:
         mpath, mtable = cfg.get("microstructure_db_path"), cfg.get("microstructure_table")
         if mpath and Path(mpath).exists():
+            # ⚠️`nif_whale`은 **대형 체결이 있는 분에만** 계산된다 -- XRP 실측 24시간 기준
+            # whale 49.7% / retail 93.7%만 비null이다. 최신 1행만 보면 whale이 절반은 빈 값이
+            # 되어 화면이 대부분 "값 없음"이 된다. 그래서 **최근 MICRO_LOOKBACK_MIN분 안의
+            # 마지막 비null 값**을 쓰고 **몇 분 전 값인지 함께** 내려준다(오래된 값을 지금 값인
+            # 것처럼 보여주지 않기 위해서다).
             con = duckdb.connect(str(mpath), read_only=True)
             try:
-                r = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
-                                f"order by ts desc limit 1").fetchone()
+                rows = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
+                                   f"order by ts desc limit {MICRO_LOOKBACK_MIN}").fetchall()
             finally:
                 con.close()
-            if r:
-                out["micro"] = {"ts": str(r[0]), "nif_whale": float(r[1]) if r[1] is not None else None,
-                                "nif_retail": float(r[2]) if r[2] is not None else None}
+            if rows:
+                latest_ts = rows[0][0]
+
+                def _last(col_idx):
+                    for rr in rows:
+                        if rr[col_idx] is not None:
+                            age = None
+                            try:
+                                age = round((latest_ts - rr[0]).total_seconds() / 60.0, 1)
+                            except (TypeError, AttributeError):
+                                pass
+                            return float(rr[col_idx]), str(rr[0]), age
+                    return None, None, None
+
+                w, w_ts, w_age = _last(1)
+                rt, rt_ts, rt_age = _last(2)
+                out["micro"] = {"ts": str(latest_ts),
+                                "nif_whale": w, "nif_whale_ts": w_ts, "nif_whale_age_min": w_age,
+                                "nif_retail": rt, "nif_retail_ts": rt_ts, "nif_retail_age_min": rt_age,
+                                "lookback_min": MICRO_LOOKBACK_MIN}
         tpath, ttable = cfg.get("tail_risk_db_path"), cfg.get("tail_risk_table")
         if tpath and Path(tpath).exists():
             con = duckdb.connect(str(tpath), read_only=True)
