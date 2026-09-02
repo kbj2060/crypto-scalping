@@ -482,9 +482,16 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         anchor_ts = pd.Timestamp(sig["timestamp"].iloc[anchor_pos])
         out[signal_name] = _infer_at(signal_name, anchor_pos, anchor_side, anchor_ts)
 
-    # ── 익절가 도달 후처리 (2026-09-03) ──
-    # 출력 경로가 5개(신규발동/캐시재사용/afterglow/재시작복구/미발동)라 각각에 넣지 않고
+    # ── 라벨 확정 후처리 (2026-09-03) ──
+    # 출력 경로가 6개(워밍업/신규발동/캐시재사용/afterglow/재시작복구/미발동)라 각각에 넣지 않고
     # 여기서 한 번에 채운다. 경로가 늘어도 빠뜨리지 않는다.
+    #
+    # ⭐`fired`는 `compute_signals()`의 `_active` 컬럼을 **그대로 따른다**. 그 컬럼은
+    # 2026-09-03부터 각 신호 자신의 라벨 확정 규칙(터치 / 터치+MAE)을 쓴다 -- 예전처럼
+    # 고정 봉수가 아니다. 여기서 독립적으로 판단하면 칩 점등과 이 확률 표시가 어긋날 수 있는데,
+    # 그건 화면에서 가장 헷갈리는 종류의 불일치다. 단일 출처를 강제한다.
+    # ⚠️`fired=False`가 되어도 tp_price/tp_touched/bars_since_fire는 남긴다 -- 칩이 왜 꺼졌는지
+    #   ("목표 도달") 화면에 설명할 수 있어야 하기 때문이다.
     for name, o in out.items():
         fp = o.pop("fire_pos", None)
         if not o.get("fired"):
@@ -493,6 +500,10 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
             continue
         o["tp_touched"] = _tp_touched(df, fp, o.get("tp_price"), o.get("side"))
         o["bars_since_fire"] = (n - 1 - fp) if fp is not None else None
+        side = o.get("side")
+        acol = f"{'bottom' if side == 'bottom' else 'top'}_{name}_active"
+        if acol in sig.columns and not bool(sig[acol].iloc[-1]):
+            o["fired"] = False        # 라벨이 확정됨 -- 더 이상 "지금 유효한 증거"가 아니다
     return out
 
 

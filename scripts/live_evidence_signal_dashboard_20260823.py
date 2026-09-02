@@ -629,10 +629,6 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
         "fib_extension_exhaustion": 20,
         "demarker_extreme": 8, "kalman_deviation_meanrev": 12,
     }
-    for name, _ in SIGNAL_ORDER:
-        n_bars = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
-        out[f"bottom_{name}_active"] = out[f"bottom_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
-        out[f"top_{name}_active"] = out[f"top_{name}"].fillna(False).rolling(n_bars, min_periods=1).max().astype(bool)
 
     # --- history-strip fill window (2026-09-01, user request) -- a SEPARATE concept from _active
     # above. _active (bottom_fired/top_fired badge, votes, net_score) is UNCHANGED: fixed bar-count
@@ -662,7 +658,38 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
         "demarker_extreme": 0.70, "kalman_deviation_meanrev": 2.5,
     }
 
-    def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str) -> pd.Series:
+    # ⭐2026-09-03: 각 신호 **자신의 학습 라벨**이 "언제 결과가 확정되는가"를 그대로 따른다.
+    # 그 전까지 `_active`(칩 점등/votes/net_score)는 목표 도달과 무관하게 고정 봉수를 채웠고,
+    # `_fill`(히스토리 스트립)만 터치를 봤다 -- 같은 화면의 두 요소가 서로 다른 규칙을 썼다.
+    #
+    #   touch          : hit = MFE >= K*ATR. **터치하는 순간 hit=1이 확정**되고 더 볼 것이 없다.
+    #   touch_and_mae  : hit = MFE>=K AND MAE < K_LOSS_MULT*K, **둘 다 전 구간**에서 측정.
+    #                    터치만으로는 확정되지 않는다(이후 되돌림이 크면 hit=0으로 뒤집힌다).
+    #                    다만 MAE는 단조증가하므로 **MAE가 한계를 넘는 순간 hit=0이 확정**된다.
+    #
+    # 근거(각 신호의 라벨 스크립트를 직접 확인, 2026-09-03):
+    #   taker_delta_z_climax  research_..._metalabel_tabpfn_20260829.py:288 `hit = touched`
+    #                         (v5 "touched AND end_ret>0"은 AUC 하락으로 **기각**됨)
+    #   short_term_return_z   같은 파일 계열, "hit = touched (intrabar MFE_pct)"
+    #   liquidity_sweep       `high[i+1:i+H+1].max()` MFE
+    #   orthogonal_combo      move_atr_mult >= K_hi (MFE 기반. exclude-middle은 학습 전용)
+    #   smt_divergence        `high[...].max()` MFE
+    #   demarker/kalman       gridscreen에서 plain(터치) 채택 -- docs/homer/README.md:173
+    #                         "plain이 v2와 같거나 더 나음 ... plain으로 원위치"
+    #   fib_extension_exhaustion  "MFE>=K AND MAE<K_LOSS_MULT*K, both over the full window
+    #                         **regardless of which happens first**" (K_LOSS_MULT=2.0)
+    HIT_RESOLUTION = {
+        "taker_delta_z_climax": "touch", "short_term_return_z": "touch",
+        "liquidity_sweep": "touch", "orthogonal_combo": "touch",
+        "smt_divergence": "touch", "demarker_extreme": "touch",
+        "kalman_deviation_meanrev": "touch",
+        "fib_extension_exhaustion": "touch_and_mae",
+    }
+    FIB_K_LOSS_MULT = 2.0   # research_eth_fib_extension_exhaustion_metalabel_tabpfn_20260831.py:91
+
+    def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str,
+                                  mode: str = "touch") -> pd.Series:
+        """발동 봉부터 **그 신호의 라벨이 확정되는 시점**(또는 호라이즌)까지 채운다."""
         n = len(raw)
         filled = np.zeros(n, dtype=bool)
         raw_arr = raw.fillna(False).to_numpy()
@@ -671,10 +698,17 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
             end = min(i + horizon_bars, n - 1)
             if not np.isnan(atr_a[i]):
                 target = k * atr_a[i]
-                level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
+                if mode == "touch":
+                    level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
+                else:   # touch_and_mae -- 되돌림(MAE)이 한계를 넘는 순간 hit=0 확정
+                    adv = FIB_K_LOSS_MULT * target
+                    level = close_a[i] * (1 + adv) if side == "top" else close_a[i] * (1 - adv)
                 for b in range(i + 1, end + 1):
-                    touched = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
-                    if touched:
+                    if mode == "touch":
+                        done = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
+                    else:
+                        done = (high_a[b] >= level) if side == "top" else (low_a[b] <= level)
+                    if done:
                         end = b
                         break
             filled[i:end + 1] = True
@@ -683,14 +717,23 @@ def compute_signals(df: pd.DataFrame, btc_df: pd.DataFrame | None = None,
     for name, _ in SIGNAL_ORDER:
         if name in K_OVERRIDE:
             horizon = SUSTAIN_BARS_OVERRIDE.get(name, SUSTAIN_BARS)
-            out[f"bottom_{name}_fill"] = _fill_until_tp_or_horizon(out[f"bottom_{name}"], K_OVERRIDE[name], horizon, "bottom")
-            out[f"top_{name}_fill"] = _fill_until_tp_or_horizon(out[f"top_{name}"], K_OVERRIDE[name], horizon, "top")
+            mode = HIT_RESOLUTION.get(name, "touch")
+            out[f"bottom_{name}_fill"] = _fill_until_tp_or_horizon(out[f"bottom_{name}"], K_OVERRIDE[name], horizon, "bottom", mode)
+            out[f"top_{name}_fill"] = _fill_until_tp_or_horizon(out[f"top_{name}"], K_OVERRIDE[name], horizon, "top", mode)
         else:
             # No metalabel K for this signal (shouldn't currently happen -- SIGNAL_ORDER's names are
             # exactly K_OVERRIDE's keys today) -- fall back to the raw column so the strip degrades
             # to single-bar blips instead of raising.
             out[f"bottom_{name}_fill"] = out[f"bottom_{name}"]
             out[f"top_{name}_fill"] = out[f"top_{name}"]
+
+    # ⭐`_active`(칩 점등 · votes · net_score)를 `_fill`과 **같은 규칙**으로 통일한다.
+    # 예전엔 고정 봉수 rolling max였다 -- 목표가 이미 달성된 신호가 최대 6시간(smt_divergence)
+    # 동안 계속 "활성"으로 점등되고 votes/net_score에도 계속 표를 던졌다.
+    # 라벨이 확정된 사건은 더 이상 "지금 유효한 증거"가 아니다.
+    for name, _ in SIGNAL_ORDER:
+        out[f"bottom_{name}_active"] = out[f"bottom_{name}_fill"].astype(bool)
+        out[f"top_{name}_active"] = out[f"top_{name}_fill"].astype(bool)
 
     active_bottom_cols = [f"{c}_active" for c in bottom_cols]
     active_top_cols = [f"{c}_active" for c in top_cols]

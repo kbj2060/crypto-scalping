@@ -147,8 +147,73 @@ liquidity_sweep        fired=True  tp=2401.97  touched=False  bars_since=10
 `taker_delta_z_climax`는 14봉(70분) 전 발동했고 **익절가에 이미 도달**했다.
 구버전이면 24봉(2시간) 내내 활성 목표로 계속 띄웠을 상황이다.
 
+## 3부 — 내부 로직(라벨)에 맞추기
+
+사용자: *"내부 로직에 맞춰줘. 내부 로직은 목표 도달되면 어떻게 하지?"*
+
+### ⚠️먼저 2부의 진단을 정정한다
+
+같은 화면 안에 **서로 다른 규칙 두 개**가 이미 공존하고 있었다:
+
+| 컬럼 | 쓰이는 곳 | 규칙 |
+|---|---|---|
+| `_active` | **칩 점등**(bottom_fired/top_fired) · votes · net_score | 고정 봉수 `rolling(n).max()` — **목표 도달 무시** |
+| `_fill` | 히스토리 스트립 | `_fill_until_tp_or_horizon` — **터치에서 종료**(2026-09-01 신설) |
+
+2부에서 "ETH 칩은 목표 도달을 안 본다"고 쓴 것은 `_active`에 대해서는 맞지만,
+**저장소에 이미 올바른 로직(`_fill`)이 있었다**는 사실을 빠뜨렸다. 문제는 "없다"가 아니라
+**"같은 화면의 두 요소가 서로 다른 규칙을 쓴다"**였다.
+
+### 내부 로직의 답 — 신호마다 다르다 (라벨 스크립트 직접 확인)
+
+| 신호 | 라벨 HIT 정의 | 목표 도달 시 |
+|---|---|---|
+| `taker_delta_z_climax` | `hit = touched` (MFE≥2.0×ATR) ⚠️v5의 "touched AND end>0"은 AUC 하락으로 **기각**됨 | **즉시 확정** |
+| `short_term_return_z` | touched (intrabar MFE) | **즉시 확정** |
+| `liquidity_sweep` | `high[i+1:i+H+1].max()` MFE | **즉시 확정** |
+| `orthogonal_combo` | move_atr_mult ≥ K_hi (MFE 기반, exclude-middle은 학습 전용) | **즉시 확정** |
+| `smt_divergence` | `high[...].max()` MFE | **즉시 확정** |
+| `demarker_extreme` · `kalman_deviation_meanrev` | plain 터치(`peak >= K`) — README:173 "plain으로 원위치" | **즉시 확정** |
+| ⚠️`fib_extension_exhaustion` | **MFE≥K AND MAE<2.0×K, 둘 다 전 구간**("regardless of which happens first") | **확정 안 됨** — 이후 되돌림이 크면 hit=0으로 뒤집힌다 |
+
+⇒ **7종은 터치 = 사건 종료.** `fib`만 예외다. 다만 MAE는 단조증가하므로 **fib는 MAE가
+2.0×K를 넘는 순간 hit=0이 확정**된다 — 그 시점엔 종료할 수 있다.
+
+### 수정
+
+- `_active`를 `_fill`에서 유도하도록 통일했다(고정 봉수 `rolling.max()` 제거).
+  ⇒ 칩 점등 · votes · net_score가 전부 라벨 확정 규칙을 따른다.
+- `_fill_until_tp_or_horizon`에 `mode`를 추가: `touch`(7종) / `touch_and_mae`(fib).
+  fib는 터치로 끝나지 않고 **MAE 돌파에서** 끝난다.
+- 메타라벨의 `fired`를 `_active` 컬럼에 **종속**시켰다. 독립 판단하면 칩 점등과 확률 표시가
+  어긋날 수 있는데, 그건 화면에서 가장 헷갈리는 종류의 불일치다.
+  ⚠️`fired=False`가 되어도 `tp_price`/`tp_touched`/`bars_since_fire`는 남긴다 —
+  칩이 **왜** 꺼졌는지("🎯 목표 도달 · N봉 전 발동") 설명할 수 있어야 하기 때문이다.
+
+### 블래스트 반경 (명시)
+
+`_active` 변경은 **votes / net_score에도 영향**을 준다. 의도한 것이다 — 라벨이 확정된 사건은
+더 이상 "지금 유효한 증거"가 아니므로 종합 점수에 계속 표를 던지면 안 된다.
+같은 버그의 집계 레벨 판본이었다.
+
+### 검증 (9종 전부 통과)
+
+`_active`가 `_fill`에서 유도됨 / 고정 봉수 제거 / HIT_RESOLUTION 8종 / FIB_K_LOSS_MULT=2.0 /
+mode 전달 · 알고리즘 동등구현으로 **touch는 도달봉에서 종료**, **touch_and_mae는 도달해도 계속**,
+**touch_and_mae는 MAE 돌파에서 종료** 확인.
+
+**배포 전후 실측:**
+
+```
+전:  taker_delta_z_climax  fired=True   tp=2393.01  touched=True   bars_since=14
+후:  taker_delta_z_climax  fired=False  tp=2393.01  touched=True   bars_since=15   ✅ 종료됨
+     orthogonal_combo      fired=True   touched=False  (미확정 -- 계속 활성)
+     smt_divergence        fired=True   touched=False  (미확정 -- 계속 활성)
+```
+
 ## 남은 사항 (수정하지 않음, 기록만)
 
-- 목표 도달 시 **칩을 끌지**는 결정하지 않았다. 지금은 `fired=True`를 유지하되 배지로 구분한다.
-  칩을 끄면 이력이 사라지고 칩 깜빡임이 늘어난다. 사용자가 원하면 afterglow를 도달 시점에
-  끝내는 것도 한 줄이다.
+- `scripts/live_btc_evidence_signal_metalabel_20260902.py`에도 `_fill_until_tp_or_horizon`
+  복제본이 있고 **터치 전용**이다. BTC 신호들의 라벨 모드는 ETH와 다르게 재스크리닝됐으므로
+  (`taker`/`fib`는 `close_at_h`) 같은 정합화가 필요하다. 다만 BTC 패널은 현재 프론트엔드에서
+  제거된 상태라 표시 영향이 없어 이번 범위에서 뺐다.

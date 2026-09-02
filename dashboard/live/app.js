@@ -1580,7 +1580,7 @@ function renderEvidenceSignals(payload) {
       ? (tpDone ? `익절 ${fmtNum(s.model_tp_price, 2)} 도달` : `익절 ${fmtNum(s.model_tp_price, 2)}`)
       : null;
     const tpDoneBadgeHtml = tpDone
-      ? ` <span class="horizon-badge tp-done-badge" title="이 신호의 목표가에 이미 닿았습니다. 신호는 유지 창(horizon) 동안 계속 표시되지만, 노린 움직임은 이미 끝났습니다 -- 지금 진입하면 늦습니다.">🎯 목표 도달${s.model_bars_since_fire != null ? ` · ${s.model_bars_since_fire}봉 전 발동` : ""}</span>`
+      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.">🎯 목표 도달${s.model_bars_since_fire != null ? ` · ${s.model_bars_since_fire}봉 전 발동` : ""}</span>`
       : "";
     // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
     // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
