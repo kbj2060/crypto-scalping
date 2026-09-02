@@ -1562,11 +1562,19 @@ function renderEvidenceSignals(payload) {
     // (EVIDENCE_STRIP_CHIP_IDS block below: s.bottom_fired ? "바닥" : ...) and this badge's new
     // fixed width (2026-08-27 user request) -- keeps text length closer to the other badge values
     // (안정/주의/미발동/상승압력 etc.) instead of the one outlier using an English word.
-    const state = evidenceSideLabel(s, { bottom: "바닥 발동", top: "천장 발동", both: "혼재 발동", none: "미발동" });
+    // ⚠️2026-09-03: 목표 도달로 **라벨이 확정돼 꺼진** 상태와 "애초에 안 뜬" 상태를 구분한다.
+    // 그 전엔 둘 다 "미발동"으로 나가면서 확률/익절 텍스트는 남아 있어
+    // "미발동 82% 익절 2391.71 도달"처럼 서로 모순되는 줄이 떴다(사용자 신고).
+    const isResolvedByTp = !s.bottom_fired && !s.top_fired && s.model_tp_touched === true;
+    const state = isResolvedByTp
+      ? "목표 도달 · 종료"
+      : evidenceSideLabel(s, { bottom: "바닥 발동", top: "천장 발동", both: "혼재 발동", none: "미발동" });
     // taker_delta_z_climax/short_term_return_z만 갖는 필드(2026-08-30, 규칙기반 칩을 TabPFN
     // 메타라벨 모델로 교체) -- 발동 시 그 순간의 실시간 확률을 상태뱃지에 덧붙임. 발동 조건
     // 자체(bottom_fired/top_fired)는 기존 규칙 그대로(모델이 학습된 조건과 동일해야 하므로) -- 이
     // 확률은 그 발동을 "얼마나 신뢰할지"만 대체하는 것이지 "발동 여부"를 바꾸는 게 아님.
+    // ⚠️종료된 신호의 확률은 "지금"이 아니라 **발동 당시** 값이다. 그대로 "82%"라고만 쓰면
+    // 아직 유효한 예측처럼 읽힌다 -- 종료 상태에선 괄호로 과거값임을 표시한다.
     const modelPctText = s.model_proba != null ? `${Math.round(s.model_proba * 100)}%` : null;
     // 2026-08-31 user request: the price level implied by this signal's own trained K*ATR% target
     // (server-computed from the fire bar's own entry/ATR, see _tp_price in
@@ -1576,11 +1584,16 @@ function renderEvidenceSignals(payload) {
     // horizon_bars 동안(smt_divergence는 6시간) 목표 달성 여부와 무관하게 "익절 XXXX"만
     // 띄웠다 -- 이미 끝난 움직임을 보고 뒤늦게 진입하면 손해다.
     const tpDone = s.model_tp_touched === true;
+    // 종료 상태에선 state가 이미 "목표 도달"을 말하므로 여기선 가격과 방향만 남긴다
+    // (안 그러면 "목표 도달 · 종료 / 익절 2391.71 도달"로 같은 말이 두 번 나온다).
+    const sideKo = s.model_side === "bottom" ? "바닥" : s.model_side === "top" ? "천장" : null;
     const modelTpText = s.model_tp_price != null
-      ? (tpDone ? `익절 ${fmtNum(s.model_tp_price, 2)} 도달` : `익절 ${fmtNum(s.model_tp_price, 2)}`)
+      ? (isResolvedByTp
+          ? `${sideKo ? sideKo + " " : ""}${fmtNum(s.model_tp_price, 2)}`
+          : `익절 ${fmtNum(s.model_tp_price, 2)}`)
       : null;
     const tpDoneBadgeHtml = tpDone
-      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.">🎯 목표 도달${s.model_bars_since_fire != null ? ` · ${s.model_bars_since_fire}봉 전 발동` : ""}</span>`
+      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.">🎯 ${s.model_bars_since_fire != null ? `${s.model_bars_since_fire}봉 전 발동` : "목표 도달"}</span>`
       : "";
     // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
     // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
@@ -1620,7 +1633,8 @@ function renderEvidenceSignals(payload) {
     // side field is singular -- see compute_evidence_signal_metalabels()'s bottom-priority
     // tie-break -- so without this warn check first, 혼재 rows would silently render as plain
     // good/bad and never show as the mixed-signal warning they actually are).
-    const metaTone = tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
+    const metaTone = isResolvedByTp ? "neutral"
+      : tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
     // 2026-09-02: BTC는 신호 정의는 ETH와 같아도 그리드스크린 K/HORIZON과 검증·경제성 수치가
     // 전부 다르므로 별도 라벨 사전을 쓴다 (BTC_EVIDENCE_SIGNAL_KO 선언부 주석 참고).
     const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO : EVIDENCE_SIGNAL_KO;
@@ -1681,7 +1695,7 @@ function renderEvidenceSignals(payload) {
           <span class="meter-state ${metaTone}">${escapeHtml(state)}</span>
           <div class="meter-gauge">
             <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((s.model_proba != null ? s.model_proba * 100 : 0) / 100) * 100}%"></span></span>
-            <span class="meter-pct">${modelPctText || "0%"}</span>
+            <span class="meter-pct">${isResolvedByTp && modelPctText ? `(${modelPctText})` : (modelPctText || "0%")}</span>
           </div>
           ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
         </div>
