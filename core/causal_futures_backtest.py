@@ -91,6 +91,50 @@ def _resolve_trade(
     return float(1.0 - close[-1] / entry), "timeout", len(close) - 1
 
 
+def _resolve_trade_trailing(
+    *,
+    side: int,
+    entry: float,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    sl_init_move: float,
+    arm_move: float,
+    trail_move: float,
+) -> tuple[float, str, int]:
+    """ATR-trailing-stop variant of _resolve_trade: an initial stop at sl_init_move, which
+    starts trailing the best-favorable price (by trail_move) once favorable excursion reaches
+    arm_move -- never loosens. Moves are fractions of entry, matching tp_move/sl_move's units."""
+    if side > 0:
+        stop = entry * (1.0 - sl_init_move)
+        peak = entry
+        armed = False
+        for offset, (bar_high, bar_low) in enumerate(zip(high, low)):
+            if bar_low <= stop:
+                return stop / entry - 1.0, "trail_sl", offset
+            if bar_high > peak:
+                peak = bar_high
+                if not armed and (peak - entry) / entry >= arm_move:
+                    armed = True
+                if armed:
+                    stop = max(stop, peak * (1.0 - trail_move))
+        return float(close[-1] / entry - 1.0), "timeout", len(close) - 1
+
+    stop = entry * (1.0 + sl_init_move)
+    peak = entry
+    armed = False
+    for offset, (bar_high, bar_low) in enumerate(zip(high, low)):
+        if bar_high >= stop:
+            return 1.0 - stop / entry, "trail_sl", offset
+        if bar_low < peak:
+            peak = bar_low
+            if not armed and (entry - peak) / entry >= arm_move:
+                armed = True
+            if armed:
+                stop = min(stop, peak * (1.0 + trail_move))
+    return float(1.0 - close[-1] / entry), "timeout", len(close) - 1
+
+
 def simulate_single_position(
     *,
     timestamps: pd.Series | pd.DatetimeIndex,
@@ -108,12 +152,21 @@ def simulate_single_position(
     margin_fraction: float,
     leverage: float,
     roundtrip_cost_rate: float,
+    arm_moves: np.ndarray | None = None,
+    trail_moves: np.ndarray | None = None,
 ) -> BacktestResult:
     """Run a chronological, non-overlapping, mark-to-market futures simulation.
 
     A decision at bar ``i`` uses information through bar ``i`` and enters at bar
     ``i + 1`` open. ``margin_fraction * leverage`` is the account notional, and
     both the price move and execution cost are multiplied by that same notional.
+
+    By default (``arm_moves``/``trail_moves`` both omitted) exits use the fixed
+    ``tp_moves``/``sl_moves`` bracket, unchanged from the original behavior. Passing BOTH
+    ``arm_moves`` and ``trail_moves`` switches to an ATR-trailing-stop exit instead:
+    ``sl_moves`` becomes the initial stop distance, which starts trailing the best-favorable
+    price (by ``trail_moves``) once favorable excursion reaches ``arm_moves`` -- ``tp_moves``
+    is ignored in this mode but must still be passed (any finite array of the right length).
     """
     ts = pd.DatetimeIndex(timestamps)
     arrays = [
@@ -142,6 +195,15 @@ def simulate_single_position(
     if len(idxs) and np.any(np.diff(idxs) < 0):
         raise ValueError("decision_indices must be sorted")
 
+    trailing = arm_moves is not None or trail_moves is not None
+    if trailing:
+        if arm_moves is None or trail_moves is None:
+            raise ValueError("arm_moves and trail_moves must both be provided together, or neither")
+        arm_values = np.asarray(arm_moves, dtype=np.float64)
+        trail_values = np.asarray(trail_moves, dtype=np.float64)
+        if len(arm_values) != len(idxs) or len(trail_values) != len(idxs):
+            raise ValueError("arm_moves/trail_moves must align with decision_indices")
+
     open_values, high_values, low_values, close_values = arrays
     score_values, tp_values, sl_values = aligned
     notional = float(margin_fraction * leverage)
@@ -153,7 +215,7 @@ def simulate_single_position(
     skipped_while_open = 0
     rows: list[dict] = []
 
-    for decision_i, score, tp_move, sl_move in zip(idxs, score_values, tp_values, sl_values):
+    for i, (decision_i, score, tp_move, sl_move) in enumerate(zip(idxs, score_values, tp_values, sl_values)):
         if not np.isfinite(score) or not np.isfinite(tp_move) or not np.isfinite(sl_move):
             continue
         side = 1 if score >= upper_threshold else -1 if score <= lower_threshold else 0
@@ -173,15 +235,27 @@ def simulate_single_position(
             equity[filled_through + 1 : entry_i] = cash
 
         entry = float(open_values[entry_i])
-        price_move, reason, exit_offset = _resolve_trade(
-            side=side,
-            entry=entry,
-            high=high_values[entry_i : final_i + 1],
-            low=low_values[entry_i : final_i + 1],
-            close=close_values[entry_i : final_i + 1],
-            tp_move=float(tp_move),
-            sl_move=float(sl_move),
-        )
+        if trailing:
+            price_move, reason, exit_offset = _resolve_trade_trailing(
+                side=side,
+                entry=entry,
+                high=high_values[entry_i : final_i + 1],
+                low=low_values[entry_i : final_i + 1],
+                close=close_values[entry_i : final_i + 1],
+                sl_init_move=float(sl_move),
+                arm_move=float(arm_values[i]),
+                trail_move=float(trail_values[i]),
+            )
+        else:
+            price_move, reason, exit_offset = _resolve_trade(
+                side=side,
+                entry=entry,
+                high=high_values[entry_i : final_i + 1],
+                low=low_values[entry_i : final_i + 1],
+                close=close_values[entry_i : final_i + 1],
+                tp_move=float(tp_move),
+                sl_move=float(sl_move),
+            )
         exit_i = entry_i + exit_offset
 
         for bar_i in range(entry_i, exit_i + 1):
