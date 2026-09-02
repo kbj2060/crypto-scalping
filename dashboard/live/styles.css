@@ -1518,3 +1518,12 @@ svg {
   .vshadow-card-name { flex: 1 1 auto; }
   .vshadow-card-ref  { flex: 0 0 auto; }
 }
+
+
+/* 익절가 도달 배지 (2026-09-03) -- horizon-badge 기본형에 색만 바꾼 modifier.
+   ⚠️저ATR 경고(.low-atr-badge)와 나란히 설 수 있으므로 같은 pill 규격을 유지한다. */
+.horizon-badge.tp-done-badge {
+  background: rgba(79, 143, 247, 0.18);
+  color: #7fb0fb;
+  border-color: rgba(79, 143, 247, 0.42);
+}

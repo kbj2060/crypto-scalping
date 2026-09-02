@@ -1572,7 +1572,16 @@ function renderEvidenceSignals(payload) {
     // (server-computed from the fire bar's own entry/ATR, see _tp_price in
     // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
     // economics config, just the label's own touch target, shown next to the state/probability.
-    const modelTpText = s.model_tp_price != null ? `익절 ${fmtNum(s.model_tp_price, 2)}` : null;
+    // 2026-09-03: 익절가에 이미 닿았으면 그 사실을 먼저 알린다. 그 전까지는 발동 후
+    // horizon_bars 동안(smt_divergence는 6시간) 목표 달성 여부와 무관하게 "익절 XXXX"만
+    // 띄웠다 -- 이미 끝난 움직임을 보고 뒤늦게 진입하면 손해다.
+    const tpDone = s.model_tp_touched === true;
+    const modelTpText = s.model_tp_price != null
+      ? (tpDone ? `익절 ${fmtNum(s.model_tp_price, 2)} 도달` : `익절 ${fmtNum(s.model_tp_price, 2)}`)
+      : null;
+    const tpDoneBadgeHtml = tpDone
+      ? ` <span class="horizon-badge tp-done-badge" title="이 신호의 목표가에 이미 닿았습니다. 신호는 유지 창(horizon) 동안 계속 표시되지만, 노린 움직임은 이미 끝났습니다 -- 지금 진입하면 늦습니다.">🎯 목표 도달${s.model_bars_since_fire != null ? ` · ${s.model_bars_since_fire}봉 전 발동` : ""}</span>`
+      : "";
     // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
     // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
     // 방향이 맞아도 수수료를 못 넘기는 비율이 커진다(실측 '방향정확도-수익승률' 격차 fib 23.0pp
@@ -1655,7 +1664,7 @@ function renderEvidenceSignals(payload) {
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${lowAtrBadgeHtml}</strong>
+        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}

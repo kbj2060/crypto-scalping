@@ -1309,6 +1309,11 @@ def make_app() -> web.Application:
                     # SL/ARM/Trail이 ATR 배수로 줄어드는데 왕복비용은 고정이라 방향이 맞아도
                     # 수수료를 못 넘기는 비율이 커진다. 근거/실측:
                     # docs/homer/evidence_signal_economics_tuning_protocol.md
+                    # 2026-09-03: 익절가 도달 여부. 그 전까지 칩은 발동 후 horizon_bars 동안
+                    # (smt_divergence는 6시간) 무조건 유지되며 목표 달성을 보지 않았다 --
+                    # 이미 끝난 움직임을 "활성"으로 띄워 늦은 진입을 유도할 수 있었다.
+                    entry["model_tp_touched"] = metalabels[name].get("tp_touched")
+                    entry["model_bars_since_fire"] = metalabels[name].get("bars_since_fire")
                     entry["model_atr_bp"] = metalabels[name].get("atr_bp")
                     entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
                     entry["model_low_atr"] = metalabels[name].get("low_atr")

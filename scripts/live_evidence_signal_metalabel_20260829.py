@@ -302,6 +302,30 @@ def _tp_price(entry_price: float, atr_pct: float, k: float, side: str) -> float 
     return float(entry_price * (1 + move)) if side == "bottom" else float(entry_price * (1 - move))
 
 
+def _tp_touched(df: pd.DataFrame, fire_pos: int, tp_price: float | None,
+                side: str) -> bool | None:
+    """발동 이후 **익절가에 닿았는가**(봉 고가/저가 기준).
+
+    ⚠️2026-09-03 신설. 그 전까지 칩은 발동 후 `horizon_bars` 동안 무조건 유지됐고
+    (smt_divergence는 **6시간**, taker/orthogonal은 2시간), **익절가 도달 여부를 전혀 보지
+    않았다.** 그래서 목표가 이미 달성된 뒤에도 "신호 활성 · 익절 XXXX"를 계속 띄웠다 --
+    이걸 보고 뒤늦게 진입하면 손해다.
+
+    ⚠️이건 **표시 전용 사실**이다. 각 신호의 학습 라벨 HIT 정의와 반드시 같지는 않다
+    (일부 신호는 종가 기준으로 라벨링됐다). 여기서는 사람이 화면을 보고 판단할 때 의미 있는
+    "가격이 목표에 닿았나"를 고가/저가로 답한다 -- 닿음을 **더 이르게** 잡는 쪽이므로
+    늦은 진입을 막는 안전한 방향이다. 모델 확률도 발동 여부도 바꾸지 않는다.
+    """
+    if tp_price is None or fire_pos is None or not np.isfinite(tp_price):
+        return None
+    seg = df.iloc[fire_pos + 1:]                      # 발동봉 다음 봉부터(라벨 컨벤션과 동일)
+    if seg.empty:
+        return False
+    if side == "bottom":
+        return bool((seg["high"].to_numpy(dtype=float) >= tp_price).any())
+    return bool((seg["low"].to_numpy(dtype=float) <= tp_price).any())
+
+
 def _find_recent_raw_fire_pos(col: pd.Series, horizon_bars: int, n: int) -> int | None:
     """Most recent True position (0-based, positional) in `col` within the trailing horizon_bars
     window ending at n-1 (inclusive) -- used to recover a raw fire this process never saw fresh
@@ -364,9 +388,15 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
     n = len(sig)
     if n == 0:
         return {name: {"fired": False, "side": None, "proba": None, "tp_price": None, "atr_bp": None,
-                       "atr_median_bp": cfg.get("atr_median_bp"), "low_atr": None}
+                       "atr_median_bp": cfg.get("atr_median_bp"), "low_atr": None,
+                       "tp_touched": None, "bars_since_fire": None}
                 for name, cfg in METALABEL_SIGNALS.items()}
     latest_ts = pd.Timestamp(sig["timestamp"].iloc[-1])
+    _ts_index = {pd.Timestamp(t): i for i, t in enumerate(sig["timestamp"])}
+
+    def _pos_of_ts(t) -> int | None:
+        return _ts_index.get(pd.Timestamp(t))
+
     indicator_frame = None  # built lazily, only if at least one signal actually needs a fresh call
 
     def _ensure_indicator_frame():
@@ -404,11 +434,13 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         atr_fields = _low_atr_fields(signal_name, row["atr_pct"])
         feature_cols = METALABEL_SIGNALS[signal_name].get("feature_columns", FEATURE_COLUMNS)
         if row[feature_cols].isna().any():
-            return {"fired": True, "side": side, "proba": None, "tp_price": tp_price, **atr_fields}
+            return {"fired": True, "side": side, "proba": None, "tp_price": tp_price,
+                    "fire_pos": pos, **atr_fields}
         proba = _predict_proba(signal_name, row)
         _LAST_FIRE_CACHE[signal_name] = {"bar_ts": bar_ts, "side": side, "proba": proba,
-                                          "tp_price": tp_price, **atr_fields}
-        return {"fired": True, "side": side, "proba": proba, "tp_price": tp_price, **atr_fields}
+                                          "tp_price": tp_price, "fire_pos": pos, **atr_fields}
+        return {"fired": True, "side": side, "proba": proba, "tp_price": tp_price,
+                "fire_pos": pos, **atr_fields}
 
     out: dict[str, dict] = {}
     for signal_name in METALABEL_SIGNALS:
@@ -425,7 +457,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
                 and 0 <= (latest_ts - cached["bar_ts"]).total_seconds() / 300 < horizon_bars
             )
             if cache_valid:
-                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price"), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
+                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price"), "fire_pos": _pos_of_ts(cached["bar_ts"]), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
                 continue
             out[signal_name] = _infer_at(signal_name, n - 1, side, latest_ts)
             continue
@@ -433,7 +465,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         # not currently firing on THIS bar -- afterglow window from a previous fire this process
         # itself already saw, if still within horizon_bars
         if cached is not None and 0 <= (latest_ts - cached["bar_ts"]).total_seconds() / 300 < horizon_bars:
-            out[signal_name] = {"fired": True, "side": cached["side"], "proba": cached["proba"], "tp_price": cached.get("tp_price"), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
+            out[signal_name] = {"fired": True, "side": cached["side"], "proba": cached["proba"], "tp_price": cached.get("tp_price"), "fire_pos": _pos_of_ts(cached["bar_ts"]), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
             continue
 
         # restart-recovery: no live memory of a fire, but one may still be sitting in the raw
@@ -449,6 +481,18 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
             anchor_pos, anchor_side = top_pos, "top"
         anchor_ts = pd.Timestamp(sig["timestamp"].iloc[anchor_pos])
         out[signal_name] = _infer_at(signal_name, anchor_pos, anchor_side, anchor_ts)
+
+    # ── 익절가 도달 후처리 (2026-09-03) ──
+    # 출력 경로가 5개(신규발동/캐시재사용/afterglow/재시작복구/미발동)라 각각에 넣지 않고
+    # 여기서 한 번에 채운다. 경로가 늘어도 빠뜨리지 않는다.
+    for name, o in out.items():
+        fp = o.pop("fire_pos", None)
+        if not o.get("fired"):
+            o["tp_touched"] = None
+            o["bars_since_fire"] = None
+            continue
+        o["tp_touched"] = _tp_touched(df, fp, o.get("tp_price"), o.get("side"))
+        o["bars_since_fire"] = (n - 1 - fp) if fp is not None else None
     return out
 
 
