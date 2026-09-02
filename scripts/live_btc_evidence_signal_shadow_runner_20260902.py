@@ -96,7 +96,13 @@ def save_state(s: dict[str, Any]) -> None:
     tmp.replace(STATE)
 
 
-def fetch_bars(limit: int = 60) -> pd.DataFrame | None:
+# 조회 창. 최장 호라이즌은 liquidity_sweep의 20봉이라 평시엔 60봉으로도 충분했지만,
+# 러너가 창보다 오래 멈추면 신호 봉이 밀려나 pending이 **영구 미해소**가 된다.
+# 500봉 = 약 41시간까지의 다운타임을 견딘다(Binance 상한 1500).
+FETCH_BARS = 500
+
+
+def fetch_bars(limit: int = FETCH_BARS) -> pd.DataFrame | None:
     try:
         r = requests.get("https://fapi.binance.com/fapi/v1/klines",
                          params={"symbol": SYMBOL, "interval": "5m", "limit": limit}, timeout=15)
@@ -116,36 +122,84 @@ def fetch_bars(limit: int = 60) -> pd.DataFrame | None:
     return d
 
 
+def _finalize(s: dict[str, Any], p: dict[str, Any], hit: int, bars_to_result: int,
+              early: bool) -> None:
+    s["ledger"].append({**p, "hit": int(hit),
+                        "bars_to_result": int(bars_to_result),
+                        "resolved_early": bool(early),
+                        "resolved_utc": datetime.now(timezone.utc).isoformat()})
+    log(f"  확정 {p['signal']} {p['side']} p={p['proba']:.4f} -> hit={int(hit)} "
+        f"({bars_to_result}봉{', 조기' if early else ''})")
+
+
 def resolve(s: dict[str, Any], bars: pd.DataFrame) -> None:
-    """호라이즌이 지난 pending을 각 신호 자신의 HIT 정의로 판정해 원장에 확정한다."""
+    """pending을 각 신호 자신의 HIT 정의로 판정해 원장에 확정한다.
+
+    ⭐**2026-09-03 (1) touch 모드 조기 확정.** 예전엔 호라이즌이 다 지나야만 확정해서,
+    3번째 봉에서 이미 목표에 닿았어도 20봉이 끝날 때까지(최대 100분) "대기"로 남았다.
+    기록되는 결과는 어차피 같지만(구간 어디서든 닿으면 hit=1) **표시 상태가 사실과 달랐다**.
+    이제 닿는 즉시 hit=1로 확정한다 -- 결과는 동일하고 대기 목록만 정확해진다.
+    ⚠️`close_at_h`(taker/fib)는 **H봉 종가**로 판정하므로 정의상 조기 확정이 불가능하다.
+      중간에 목표를 스쳐도 종가가 미달이면 hit=0이다. 이건 결함이 아니라 그 신호의 정의다.
+
+    ⭐**(2) 창 밖 pending 만료.** 러너가 조회 창보다 오래 멈추면 신호 봉이 밀려나
+    `pos` 판정에 실패해 pending에 **영원히** 남았다. 이제 `expired`로 분리 기록한다.
+    ⚠️원장(`ledger`)이 아니라 별도 리스트에 넣는다 -- hit률 집계를 오염시키면 안 된다.
+    """
     if bars is None or bars.empty:
         return
-    ts = bars["timestamp"].to_numpy()
+    # tz-aware Series에 .to_numpy()를 쓰면 object 배열(Timestamp)이 나오고, astype이
+    # "no explicit representation of timezones" 경고를 낸다. UTC이므로 tz를 명시적으로
+    # 떼서 같은 값을 얻는다 -- 의도가 드러나고 경고도 사라진다.
+    ts = bars["timestamp"].dt.tz_localize(None).to_numpy()
+    first = pd.Timestamp(bars["timestamp"].iloc[0])
     keep = []
     for p in s["pending"]:
         spec = HIT_SPEC.get(p["signal"])
         if spec is None:
             continue
-        t0 = np.datetime64(pd.Timestamp(p["bar_utc"]).tz_convert("UTC").tz_localize(None))
-        pos = int(np.searchsorted(ts.astype("datetime64[ns]"), t0))
-        if pos >= len(bars) or str(bars["timestamp"].iloc[pos])[:16] != str(p["bar_utc"])[:16]:
-            keep.append(p); continue                            # 해당 봉이 아직 창 안에 없음
+        bar_ts = pd.Timestamp(p["bar_utc"])
+        t0 = np.datetime64(bar_ts.tz_convert("UTC").tz_localize(None))
+        pos = int(np.searchsorted(ts, t0))
+        in_win = (pos < len(bars)
+                  and str(bars["timestamp"].iloc[pos])[:16] == str(p["bar_utc"])[:16])
+        if not in_win:
+            if bar_ts < first:                                  # 창 밖으로 밀려남
+                s.setdefault("expired", []).append(
+                    {**p, "hit": None, "reason": "out_of_window",
+                     "expired_utc": datetime.now(timezone.utc).isoformat(),
+                     "note": f"조회 창({len(bars)}봉) 밖 -- 러너 다운타임 추정"})
+                s["expired"] = s["expired"][-200:]
+                log(f"  ⚠️만료 {p['signal']} {p['side']} bar={str(p['bar_utc'])[:16]} "
+                    f"-- 조회 창 밖(다운타임 추정), hit 집계에서 제외")
+            else:
+                keep.append(p)                                  # 아직 창에 안 들어옴
+            continue
+
         end = pos + spec["horizon"]
+        avail = min(end, len(bars) - 1)                         # 지금까지 확보된 봉까지만
+        seg = bars.iloc[pos + 1:avail + 1]
+        k, entry, atr = spec["k"], p["entry"], p["atr"]
+
+        if spec["mode"] == "touch" and len(seg):
+            if p["side"] == "bottom":
+                mask = seg["high"].to_numpy() >= entry + k * atr
+            else:
+                mask = seg["low"].to_numpy() <= entry - k * atr
+            if mask.any():                                      # ⭐닿는 즉시 확정
+                _finalize(s, p, 1, int(np.argmax(mask)) + 1, early=(end >= len(bars)))
+                continue
+
         if end >= len(bars):
-            keep.append(p); continue                            # 아직 미완
-        seg = bars.iloc[pos + 1:end + 1]
-        entry, atr, k = p["entry"], p["atr"], spec["k"]
+            keep.append(p)                                      # 아직 미완
+            continue
+
         if spec["mode"] == "close_at_h":
             px = float(bars["close"].iloc[end])
             hit = (px >= entry + k * atr) if p["side"] == "bottom" else (px <= entry - k * atr)
-        else:                                                   # touch (intrabar MFE)
-            if p["side"] == "bottom":
-                hit = bool((seg["high"].to_numpy() >= entry + k * atr).any())
-            else:
-                hit = bool((seg["low"].to_numpy() <= entry - k * atr).any())
-        s["ledger"].append({**p, "hit": int(hit),
-                            "resolved_utc": datetime.now(timezone.utc).isoformat()})
-        log(f"  확정 {p['signal']} {p['side']} p={p['proba']:.4f} -> hit={int(hit)}")
+            _finalize(s, p, int(hit), spec["horizon"], early=False)
+        else:
+            _finalize(s, p, 0, spec["horizon"], early=False)    # 창 전체에서 미도달
     s["pending"] = keep
 
 
@@ -185,10 +239,17 @@ def record(s: dict[str, Any], out: dict[str, Any], bars: pd.DataFrame) -> None:
 
 def report(s: dict[str, Any]) -> None:
     led = s["ledger"]
-    log(f"원장 {len(led)}건 / 대기 {len(s['pending'])}건 / 사이클 {s.get('cycles', 0)}")
+    exp = s.get("expired") or []
+    log(f"원장 {len(led)}건 / 대기 {len(s['pending'])}건 / 만료 {len(exp)}건 "
+        f"/ 사이클 {s.get('cycles', 0)}")
+    if exp:
+        log(f"  ⚠️만료 {len(exp)}건 -- 러너가 조회 창({FETCH_BARS}봉)보다 오래 멈춘 흔적. "
+            f"hit 집계에는 넣지 않는다.")
     if not led:
         log("아직 확정된 기록 없음"); return
-    df = pd.DataFrame(led)
+    df = pd.DataFrame([r for r in led if r.get("hit") is not None])
+    if df.empty:
+        log("확정 hit 없음"); return
     ctx = json.loads((ROOT / "data/labels/btc_5m_evidence_signal_live_contexts_20260902"
                       / "contexts_report.json").read_text())["signals"]
     log(f"  {'신호':26s} {'n':>4s} {'라이브hit':>9s} {'학습hit':>8s} {'차이':>7s} {'HOLDOUT AUC':>11s}")
