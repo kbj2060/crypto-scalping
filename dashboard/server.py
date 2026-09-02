@@ -136,6 +136,9 @@ from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal 
 # identically. See scripts/live_regime_btc_signal_20260902.py and
 # docs/experiments/btc_regime_s24k3_label_train_20260902.md.
 from scripts.live_regime_btc_signal_20260902 import compute_regime_btc_signal  # noqa: E402
+# 2026-09-03: XRP 레짐(S48_K6). 자산마다 교차자산 슬롯이 다르다 -- XRP는 BTC를 넣는다
+# (BTC 캐노니컬은 ETH가 들어있다). live_regime_xrp_signal_20260903.py docstring 참조.
+from scripts.live_regime_xrp_signal_20260903 import compute_regime_xrp_signal  # noqa: E402
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
 # own; computed fresh on every evidence-signal refresh. See that module's docstring for the
@@ -1024,6 +1027,8 @@ def make_app() -> web.Application:
     regime_wide24_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     regime_wide24_lock = asyncio.Lock()
     regime_btc_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    regime_xrp_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    regime_xrp_lock = asyncio.Lock()
     regime_btc_lock = asyncio.Lock()
     macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     macro_calendar_lock = asyncio.Lock()
@@ -1702,6 +1707,22 @@ def make_app() -> web.Application:
             regime_btc_cache["payload"] = payload
             return payload
 
+    async def load_regime_xrp() -> dict[str, Any]:
+        """XRP 3-class 레짐(S48_K6, 2026-09-03) -- load_regime_btc()의 XRP판.
+        같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
+        now = time.monotonic()
+        cached = regime_xrp_cache["payload"]
+        if cached is not None and now - regime_xrp_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
+            return cached
+        async with regime_xrp_lock:
+            cached = regime_xrp_cache["payload"]
+            if cached is not None and time.monotonic() - regime_xrp_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
+                return cached
+            payload = await asyncio.to_thread(compute_regime_xrp_signal)
+            regime_xrp_cache["ts"] = time.monotonic()
+            regime_xrp_cache["payload"] = payload
+            return payload
+
     async def load_macro_calendar() -> dict[str, Any]:
         """US macro/corporate event calendar for the Snapshot tab -- see scripts/live_macro_
         calendar_20260826.py docstring for the 6 sources. compute_macro_calendar() is blocking
@@ -1928,6 +1949,11 @@ def make_app() -> web.Application:
         payload = await load_regime_btc()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+
+    async def api_regime_xrp(request: web.Request) -> web.Response:
+        payload = await load_regime_xrp()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_macro_calendar(request: web.Request) -> web.Response:
         payload = await load_macro_calendar()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2124,6 +2150,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/regime-btc", api_regime_btc)
+    app.router.add_get("/api/regime-xrp", api_regime_xrp)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/session-alerts", api_session_alerts)

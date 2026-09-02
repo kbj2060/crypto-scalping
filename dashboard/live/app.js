@@ -15,6 +15,7 @@ const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_REGIME_BTC_URL = "/api/regime-btc";
+const API_REGIME_XRP_URL = "/api/regime-xrp";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
@@ -142,6 +143,7 @@ let liquidationDirectionLastFetchAt = 0;
 let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
 let latestRegimeBtc = null;
+let latestRegimeXrp = null;
 // Confirmed evidence-signals payload (2026-08-31, feeds evidenceSignalTpLevels() below) -- stashed
 // globally like latestLiquidationMap/latestRegimeWide24 so the Snapshot chart's own render cycle
 // can read it without renderEvidenceSignals() needing to know about the chart.
@@ -158,6 +160,7 @@ let activeSnapshotAsset = "eth";
 const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
+let regimeXrpLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
@@ -1978,6 +1981,23 @@ async function refreshRegimeBtc() {
   renderSnapshotChart();
 }
 
+// XRP regime overlay (2026-09-03). BTC판과 같은 구조 -- 자산마다 **별도 상태 변수**를 쓴다.
+// 하나를 공유하면 2026-08-31의 "ETH 리본이 BTC 캔들 위에 그려지던" 버그가 그대로 재현된다.
+async function refreshRegimeXrp() {
+  const now = Date.now();
+  if (now - regimeXrpLastFetchAt < REGIME_WIDE24_POLL_MS) return;
+  regimeXrpLastFetchAt = now;
+  try {
+    const res = await fetch(API_REGIME_XRP_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`regime xrp ${res.status}`);
+    latestRegimeXrp = await res.json();
+  } catch (error) {
+    console.error("Regime XRP fetch error:", error);
+    latestRegimeXrp = { warmed_up: false, error: "fetch_failed", history: [] };
+  }
+  renderSnapshotChart();
+}
+
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
@@ -2178,6 +2198,7 @@ function setupPageTabs() {
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
+      regimeXrpLastFetchAt = 0; refreshRegimeXrp();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
@@ -2490,7 +2511,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Each asset reads its OWN endpoint's state -- never share one variable across assets, which is
   // precisely the 2026-08-31 bug this structure replaces (ETH's ribbon drawn over BTC candles).
   // Assets with no classifier still fall through to the "unsupported" grey band below.
-  const REGIME_SOURCE_BY_ASSET = { eth: () => latestRegimeWide24, btc: () => latestRegimeBtc };
+  // 2026-09-03: XRP도 자체 분류기(S48_K6)를 갖게 돼 추가. 분류기 없는 자산은 아래 회색 밴드로 폴백.
+  const REGIME_SOURCE_BY_ASSET = { eth: () => latestRegimeWide24, btc: () => latestRegimeBtc,
+    xrp: () => latestRegimeXrp };
   const regimeSource = isSnapshotChart ? (REGIME_SOURCE_BY_ASSET[activeSnapshotAsset] || null) : null;
   const latestRegimeForChart = regimeSource ? regimeSource() : null;
   const regimeByTsForChart = latestRegimeForChart && latestRegimeForChart.warmed_up
@@ -3233,6 +3256,7 @@ async function tick() {
       refreshLiquidationMap();
       refreshRegimeWide24();
       refreshRegimeBtc();
+      refreshRegimeXrp();
       refreshMacroCalendar();
       refreshVrebEconShadow();
       refreshSessionAlerts();

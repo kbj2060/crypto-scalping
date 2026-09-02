@@ -259,6 +259,69 @@ BTC CSV를 읽어버렸다. **행수 277,191(=BTC)이고 hit률이 BTC와 소수
 XRP 섀도우의 히트 P1/P2/P3는 **BTC 수정본과 동일한 양성 항목**이다(자기 주석·MARK_URL 상수·
 의도된 `keep.append`). 스코어러는 히트 없음.
 
+## 12단계 · ⚠️Phase 3 BTC 오염 발견 → 정정 → 리본 배포 ✅
+
+### ⚠️⚠️Phase 3 1차 결과는 **BTC 데이터**였다
+
+리본 배선을 시작하며 모델 아티팩트를 찾다가 발각됐다. Phase 3의 상수가 이랬다:
+
+```python
+XRP_CANON = ROOT / "data/splits/year_oos/btc_features_2024_2026.csv"   # ← 이름만 XRP
+```
+
+포팅 시 `BTC_CANON` → `XRP_CANON` **변수명은 바꿨지만 경로는 남겼다.**
+동결 컨텍스트에서 잡았던 것과 **같은 오염 계열**이다.
+
+**발각 단서**: TRAIN 262,656 + OOS 9,216 = 271,872봉인데, XRP 1year 파일은 224,245행이고
+OOS 구간(2026-07-01~08-01)은 그 파일 범위(2026-02-17 종료) **밖**이라 존재할 수 없었다.
+
+⇒ 1차 Phase 3 수치(bal_acc 0.8459, 게이트 9/16)는 **무효**.
+⭐**Phase 2는 깨끗했다**(로그 "XRP evidence frame 224,245 bars") — 따라서 **라벨 선택 S48_K6은 유효**하다.
+
+### 내가 앞서 내린 판단이 틀렸다
+
+6단계에서 *"캐노니컬 피쳐 파일은 만들지 않는다 — Phase 2는 피벗 계산에 OHLC만 쓴다"*고 했다.
+Phase 2엔 맞았지만 **Phase 3은 136피쳐 전체가 필요**하다. 그래서 상류를 제대로 만들었다:
+
+- `scripts/build_xrp_raw_frame_20260903.py` — XRP 주체 + **BTC 교차자산** raw 프레임 (272,490행)
+- `scripts/build_xrp_features_20260903.py` — `FeatureEngineer().process()` → **272,490행 × 146컬럼**
+
+⭐**교차자산 슬롯**: `FeatureEngineer`는 `close_btc`/`volume_btc`/`quote_volume_btc`를 하드코딩한다.
+자산마다 그 슬롯 내용이 다르다 — ETH→BTC, **BTC→ETH**, **XRP→BTC**.
+학습과 라이브가 같은 것을 넣어야 파리티가 맞는다.
+
+### 정정된 Phase 3 (실제 XRP 데이터)
+
+| | bal_acc | chop_R | chop_P | **pred_flip** |
+|---|---|---|---|---|
+| REF_RegimeEngine | 0.9113 | 0.9342 | 0.9189 | 0.1787 |
+| **S48_K6** | 0.8644 | 0.9017 | 0.8844 | **0.0458** |
+
+**예측-chop 게이팅(실제 배포 형태)**
+
+| | 양쪽창 양수 | mean VAL | mean OOS |
+|---|---|---|---|
+| REF_RegimeEngine | **2/13** | −0.0881 | **−0.0756** |
+| **S48_K6** | **8/16** | **+0.0351** | **+0.0306** |
+
+⭐결론은 유지되고 **오히려 선명해졌다** — REF는 양쪽 창 모두 음수다.
+재발 방지로 **자산 오염 가드**(캐노니컬 행수 검증)를 Phase 3과 모델 빌더에 넣었다.
+
+### 배포
+
+| 산출물 | 내용 |
+|---|---|
+| `build_xrp_regime_s48k6_model_20260903.py` | `tmp/xrp_regime_s48k6_20260903/model.joblib` (OOS bal_acc 0.8644, flip 0.0458) |
+| `live_regime_xrp_signal_20260903.py` | 라이브 스코어러, **CROSS_SYMBOL=BTCUSDT** |
+| `server.py` | `/api/regime-xrp` + 캐시/락/로더 |
+| `app.js` | 리본 소스맵에 `xrp` 추가, `refreshRegimeXrp` **3곳 등록**(정의·자산전환·메인틱) |
+
+실측: `{"warmed_up": true, "chop_prob": 0.794, ...}`, 서빙 `app.js?v=20260903-xrp-regime`,
+`refreshRegimeXrp` 3회 / 소스맵 1회 확인.
+
+⭐자산별 **별도 상태 변수**를 쓴다(`latestRegimeXrp`). 하나를 공유하면 2026-08-31의
+"ETH 리본이 BTC 캔들 위에 그려지던" 버그가 그대로 재현된다.
+
 ## 남은 단계
 
 - [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)

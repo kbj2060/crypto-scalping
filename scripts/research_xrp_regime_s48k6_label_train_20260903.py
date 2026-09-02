@@ -63,7 +63,12 @@ from research_eth_regime_scalping_label_geometry_20260902 import (  # noqa: E402
 )
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # noqa: E402
 
-XRP_CANON = ROOT / "data/splits/year_oos/btc_features_2024_2026.csv"
+# ⚠️⚠️2026-09-03: 여기가 **BTC 캐노니컬을 가리키고 있었다**(변수명만 XRP_CANON).
+# 1차 Phase 3 결과(bal_acc 0.8459, 게이트 9/16)는 전부 BTC 데이터 위에서 나온 것이라 무효였다.
+# TRAIN 262,656 + OOS 9,216 = 271,872가 XRP 1year 파일(224,245행)로는 불가능해서 발각.
+# 동결 컨텍스트에서 잡았던 것과 **같은 오염 계열**이다 -- 포팅은 변수명을 바꿔도 경로를 남긴다.
+XRP_CANON = ROOT / "data/splits/year_oos/xrp_features_2024_2026.csv"
+EXPECTED_CANON_ROWS = 272_490      # 자산 오염 가드
 GBM3_MODEL_PATH = ROOT / "tmp/eth_regime_gbm3_independent_20260826/model.joblib"  # feature_cols source
 GBM3_HP = dict(max_depth=10, learning_rate=0.04, max_iter=400, l2_regularization=2.0)
 SEED = 7529
@@ -85,6 +90,14 @@ def load_btc_frame(feat_cols: list[str]) -> pd.DataFrame:
     df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
     df = df[(df["timestamp"] >= TRAIN_START) & (df["timestamp"] <= OOS_END)].reset_index(drop=True)
     return _with_raw_state12(df)
+
+
+def _assert_xrp_canon() -> None:
+    """⭐자산 오염 가드 -- 다른 자산 캐노니컬을 읽으면 여기서 죽는다."""
+    n = sum(1 for _ in open(XRP_CANON)) - 1
+    if abs(n - EXPECTED_CANON_ROWS) > 200:
+        raise RuntimeError(f"{XRP_CANON.name}: {n:,}행 != XRP 기대치 {EXPECTED_CANON_ROWS:,} "
+                           f"-- 다른 자산 데이터일 가능성")
 
 
 def deployed_label(df: pd.DataFrame) -> np.ndarray:
@@ -122,6 +135,7 @@ def evaluate(y: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
 
 
 def main() -> None:
+    _assert_xrp_canon()
     payload = joblib.load(GBM3_MODEL_PATH)
     feat_cols, medians = payload["feature_cols"], payload["feature_medians"]
     print(f"feature_cols from the ETH GBM3 artifact: {len(feat_cols)} (BTC canonical carries the same set)")
