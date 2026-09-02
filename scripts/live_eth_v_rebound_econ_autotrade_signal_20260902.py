@@ -39,7 +39,9 @@
     손절     entry -/+ 5.0 x ATR
     무장     +1.5 x ATR 도달 시 트레일 개시
     트레일   0.1 x ATR (한 방향으로만 조임)
-    한도     동시보유 5  (⚠️한도 3이 OOS에서 낙폭 39% 낮고 건당 기대값은 더 높았으나,
+    한도     동시보유 5
+    양방향   같은 봉에서 롱·숏이 둘 다 임계값을 넘으면 **확률 높은 쪽만** 취한다
+             (감사 T5: 실측 1.00% 발생). 동률이면 둘 다 스킵.  (⚠️한도 3이 OOS에서 낙폭 39% 낮고 건당 기대값은 더 높았으나,
              VAL이 고른 값은 5다. 사이징 재조정은 별도 결정 사항.)
 
 Usage:
@@ -135,8 +137,26 @@ def compute_signal() -> dict[str, Any]:
 
         atr = frame["atr"].to_numpy()
         close = frame["close"].to_numpy()
+
+        # ⚠️같은 봉에서 롱·숏이 **둘 다** 임계값을 넘는 경우가 실측 1.00%(OOS 2,593봉 중 26봉)
+        # 존재한다(감사 T5). 그대로 두면 라이브에서 헤지 포지션이 열린다 -- 확률이 높은
+        # 한쪽만 남긴다. 동률이면 둘 다 버린다(정보가 없다는 뜻).
+        passed = cand.loc[cand["proba"] >= PROBA_THRESHOLD].copy()
+        if len(passed):
+            keep = []
+            for ts, g in passed.groupby("timestamp"):
+                if len(g) == 1:
+                    keep.append(g.index[0])
+                    continue
+                top = g["proba"].max()
+                tied = g.loc[g["proba"] >= top - 1e-12]
+                if len(tied) == 1:
+                    keep.append(tied.index[0])
+                # 동률이면 스킵 -- 방향 정보 없음
+            passed = passed.loc[keep]
+
         calls = []
-        for _, r in cand.loc[cand["proba"] >= PROBA_THRESHOLD].iterrows():
+        for _, r in passed.iterrows():
             i = int(r["pos"])
             a = float(atr[i])
             if not np.isfinite(a) or a <= 0:
