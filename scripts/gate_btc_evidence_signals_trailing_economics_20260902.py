@@ -106,13 +106,20 @@ def run_grid(klines, fires, horizon_bars):
     ts = klines["timestamp"]
     o, h, l, c = (klines[x].to_numpy() for x in ("open", "high", "low", "close"))
 
-    # 컬럼 정규화 -- 스크립트마다 이름이 다르다
-    if "pos" in fires.columns:
-        dec = fires["pos"].to_numpy(dtype=np.int64)
-    elif "bar_idx" in fires.columns:
-        dec = fires["bar_idx"].to_numpy(dtype=np.int64)
-    else:
-        raise KeyError(f"pos/bar_idx 없음: {list(fires.columns)[:12]}")
+    # ⚠️2026-09-02 수정: 저장된 `pos`를 klines 인덱스로 그대로 쓰면 안 된다.
+    # 빌더의 `pos`는 **빌더가 받은 프레임**의 행 인덱스다. BTC는 후보 CSV가 2024-01-01부터라
+    # raw klines(2023-12-31 15:00~)보다 **108바 뒤**여서, 그대로 쓰면 모든 진입이 9시간
+    # 앞선 봉에서 일어난다(= 사실상 무작위 진입). ETH는 우연히 오프셋 0이라 안 드러났다.
+    # 타임스탬프로 직접 매핑하고 정확히 일치하는지 검증한다.
+    kl_ts = ts.to_numpy()
+    f_ts = pd.to_datetime(fires["timestamp"]).to_numpy()
+    dec = np.searchsorted(kl_ts, f_ts)
+    inb = dec < len(kl_ts)
+    if not inb.all():
+        fires, f_ts, dec = fires.loc[inb].reset_index(drop=True), f_ts[inb], dec[inb]
+    bad = int((kl_ts[dec] != f_ts).sum())
+    if bad:
+        raise ValueError(f"fires 타임스탬프가 klines에 없다: {bad}/{len(dec)}건")
     if "side" in fires.columns:
         is_long = (fires["side"].astype(str) == "bottom").to_numpy()
     elif "is_bottom" in fires.columns:
