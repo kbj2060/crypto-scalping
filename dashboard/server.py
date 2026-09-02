@@ -783,6 +783,64 @@ def _locked_bp(p: dict[str, Any]) -> float | None:
         return None
 
 
+COIN_INDICATOR_CACHE_SECONDS = 20
+
+
+def coin_indicators_payload(asset: str) -> dict[str, Any]:
+    """코인별 **실시간 지표**(수급흐름/리테일수급/청산캐스케이드) — 2026-09-03.
+
+    그 전까지 이 세 지표는 `trading_bot.py`의 dashboard_state만 읽었는데 **봇은 ETH만 돌린다**.
+    그래서 XRP/BTC 탭에서도 ETH 값이 그대로 보이고 있었다(사용자 신고 "비트코인 페이지에
+    이더리움 증거신호가 나온다"와 같은 계열).
+
+    ⭐XRP/HYPE는 전용 워커가 microstructure까지 모으므로(`supervisor_xrp_worker.sh`:
+    "microstructure + tail-risk + OI/long-short-ratio, all three") **실제 그 코인 값**을 줄 수 있다.
+    tail_risk는 COIN_CONFIG에 5코인 전부 있다.
+
+    ⚠️`hawkes_active`는 봇 내부 상태라 다른 코인에는 없다. Z 기반 "주의" 티어까지만 판정 가능하고
+    "위험"(hawkes) 티어는 뜨지 않는다 -- `hawkes_available: False`로 명시해 UI가 숨기지 않고
+    사실대로 표시하게 한다.
+    """
+    cfg = COIN_CONFIG.get(asset) or {}
+    out: dict[str, Any] = {"asset": asset, "warmed_up": False, "error": None,
+                           "micro": None, "tail": None, "hawkes_available": False}
+    try:
+        mpath, mtable = cfg.get("microstructure_db_path"), cfg.get("microstructure_table")
+        if mpath and Path(mpath).exists():
+            con = duckdb.connect(str(mpath), read_only=True)
+            try:
+                r = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
+                                f"order by ts desc limit 1").fetchone()
+            finally:
+                con.close()
+            if r:
+                out["micro"] = {"ts": str(r[0]), "nif_whale": float(r[1]) if r[1] is not None else None,
+                                "nif_retail": float(r[2]) if r[2] is not None else None}
+        tpath, ttable = cfg.get("tail_risk_db_path"), cfg.get("tail_risk_table")
+        if tpath and Path(tpath).exists():
+            con = duckdb.connect(str(tpath), read_only=True)
+            try:
+                r = con.execute(f"select ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, "
+                                f"mu_short, sigma_short from {ttable} order by ts desc limit 1").fetchone()
+            finally:
+                con.close()
+            if r:
+                def _z(v, mu, sd):
+                    try:
+                        return float((v - mu) / sd) if sd and sd > 0 else 0.0
+                    except (TypeError, ValueError):
+                        return 0.0
+                out["tail"] = {"ts": str(r[0]), "z_long": _z(r[1], r[3], r[4]),
+                               "z_short": _z(r[2], r[5], r[6]),
+                               "hawkes_active": False}
+        out["warmed_up"] = bool(out["micro"] or out["tail"])
+        if not out["warmed_up"]:
+            out["error"] = "no_coin_indicator_data"
+    except Exception as e:                                     # noqa: BLE001 -- 절대 raise 안 함
+        out["error"] = f"coin_indicators_error: {e}"
+    return out
+
+
 def v_rebound_econ_shadow_payload() -> dict[str, Any]:
     """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -1029,6 +1087,8 @@ def make_app() -> web.Application:
     regime_btc_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     regime_xrp_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     regime_xrp_lock = asyncio.Lock()
+    coin_indicator_cache: dict[str, dict] = {a: {"ts": 0.0, "payload": None} for a in COIN_CONFIG}
+    coin_indicator_locks = {a: asyncio.Lock() for a in COIN_CONFIG}
     regime_btc_lock = asyncio.Lock()
     macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     macro_calendar_lock = asyncio.Lock()
@@ -1950,6 +2010,23 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
 
+    async def load_coin_indicators(asset: str) -> dict[str, Any]:
+        slot = coin_indicator_cache[asset]
+        now = time.monotonic()
+        if slot["payload"] is not None and now - slot["ts"] < COIN_INDICATOR_CACHE_SECONDS:
+            return slot["payload"]
+        async with coin_indicator_locks[asset]:
+            if slot["payload"] is not None and time.monotonic() - slot["ts"] < COIN_INDICATOR_CACHE_SECONDS:
+                return slot["payload"]
+            payload = await asyncio.to_thread(coin_indicators_payload, asset)
+            slot["ts"] = time.monotonic()
+            slot["payload"] = payload
+            return payload
+
+    async def api_coin_indicators(request: web.Request) -> web.Response:
+        payload = await load_coin_indicators(_query_coin_asset(request))
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_regime_xrp(request: web.Request) -> web.Response:
         payload = await load_regime_xrp()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2151,6 +2228,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/regime-btc", api_regime_btc)
     app.router.add_get("/api/regime-xrp", api_regime_xrp)
+    app.router.add_get("/api/coin-indicators", api_coin_indicators)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/session-alerts", api_session_alerts)

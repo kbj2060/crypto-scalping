@@ -376,6 +376,58 @@ tone=neutral, `"ETH 전용 지표 — 이 코인은 아직 미지원"`, history/
 검증(dukpy 실행): `eth`→원본 그대로 / `xrp`·`btc`→neutral·미지원 문구·history 0·proba null.
 서빙 확인 `app.js?v=20260903-eth-only-guard`, `ethOnlyIndicator` 5회.
 
+## 14단계 · ⭐XRP 실시간 지표 배선 — "미지원"에서 **실제 XRP 값**으로 ✅
+
+사용자: *"xrp도 모두 이더리움처럼 똑같이 지원하게 해줘. 실시간 데이터도 xrp도 지원 중이지 않아?"*
+
+**맞았다.** XRP 전용 워커가 **6일 넘게** 돌고 있었다(`supervisor_xrp_worker.sh`:
+*"microstructure + tail-risk + OI/long-short-ratio, **all three**"*).
+13단계에서 이 4개를 "ETH 전용 — 미지원"으로 처리했는데, **3개는 실제로 지원 가능**했다.
+
+### 실사 (2026-09-03 06:0x, 1분 전까지 최신)
+
+| duckdb | 테이블 | 행수 | 내용 |
+|---|---|---|---|
+| `microstructure_xrp.duckdb` | `microstructure_1m_xrp` | 9,651 | **nif_whale · nif_retail** ✓ |
+| `tail_risk_xrp.duckdb` | `tail_risk_1m_xrp` | 9,648 | long/short_usd, mu, sigma ✓ |
+| `oi_lsratio_xrp.duckdb` | `oi_lsratio_5m_xrp` | 1,941 | OI · 롱숏비율 ✓ |
+| `l2_anomaly_snapshots_xrp.duckdb` | 4개 테이블 | 111k | L2 이상 ✓ |
+
+### 배선
+
+- `scripts/coin_config.py`: XRP·HYPE에 `microstructure_db_path`/`microstructure_table` 추가
+  (tail_risk는 이미 **5코인 전부** 있었다)
+- `server.py`: `coin_indicators_payload(asset)` + `/api/coin-indicators?asset=` (캐시 20초)
+  Z는 저장된 mu/sigma로 유도: `z = (long_usd_1m − mu_long) / sigma_long`
+- `app.js`: `coinIndicator(item, kind)` — ETH는 봇 state 그대로, 다른 코인은 **그 코인 duckdb** 값,
+  데이터 없으면 `ethOnlyIndicator`로 폴백해 "미지원"으로 정직하게 표시
+
+### 실측 (배포 후)
+
+```
+xrp : nif_whale 1.000  nif_retail 0.110   tail Z 확보    → 실제 XRP 값 ✅
+hype: nif_whale null   nif_retail 0.253   tail Z 확보    → 부분 지원
+btc : micro 없음(수집기 미배치)             tail Z 확보    → 수급/리테일은 "미지원"
+```
+
+⚠️**정직하게 남기는 한계 2가지**
+
+1. **`nif_whale`은 간헐적**이다 — XRP 9,651행 중 5,014행(52%)만 비null. 대형 체결이 있을 때만
+   계산된다. 값이 없으면 `"수집 중 — 아직 값 없음"`으로 표시한다(0으로 위장하지 않는다).
+2. ⚠️**`hawkes_active`는 봇 내부 상태라 다른 코인에 없다.** 청산 캐스케이드는 Z 기반
+   **"주의"까지만** 판정되고 **"위험"(hawkes) 단계는 뜨지 않는다.** 툴팁에 명시했다 — 숨기지 않는다.
+
+### 검증
+
+dukpy 실행으로 7가지 경우 확인: ETH 원본유지 / XRP 값있음(유입 0.210) /
+nif_whale null(수집 중) / 리테일(유출 −0.160) / 캐스케이드 평온(Z −0.3) /
+캐스케이드 주의(Z 2.4) / 데이터없음→미지원 폴백.
+
+### 남은 ETH 전용 1개
+
+**`v_rebound` V자 급등락** — ETH 학습 TabPFN 모델이라 데이터 배선만으로는 안 되고
+**XRP용 모델 학습이 필요하다**(별도 연구 과제). 지금은 "ETH 전용 — 미지원"으로 정직하게 표시된다.
+
 ## 남은 단계
 
 - [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)

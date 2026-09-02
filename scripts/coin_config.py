@@ -49,6 +49,12 @@ COIN_CONFIG: dict[str, dict] = {
     },
     "xrp": {
         "binance_symbol": "XRPUSDT",
+        # 2026-09-03: XRP는 전용 워커가 microstructure까지 모은다(supervisor_xrp_worker.sh의
+        # "microstructure + tail-risk + OI/long-short-ratio, all three"). nif_whale/nif_retail이
+        # 여기 있으므로 대시보드의 수급흐름/리테일수급을 XRP에서도 **실제 XRP 값**으로 띄울 수 있다.
+        # (그 전까지는 봇 state(ETH)만 읽어서 XRP 탭에도 ETH 값이 나왔다.)
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_xrp.duckdb",
+        "microstructure_table": "microstructure_1m_xrp",
         # XRP gets its own fully dedicated worker + file (scripts/ops/supervisor_xrp_worker.sh,
         # QUANT_TAIL_DB_PATH=tail_risk_xrp.duckdb) -- unlike BTC/SOL it isn't sharing a combined
         # worker/file, so no single-writer contention concern here. Confirmed live 2026-08-31:
@@ -58,6 +64,9 @@ COIN_CONFIG: dict[str, dict] = {
     },
     "hype": {
         "binance_symbol": "HYPEUSDT",
+        # HYPE도 전용 워커가 microstructure를 모은다(supervisor_hype_worker.sh) -- XRP와 같은 모양.
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_hype.duckdb",
+        "microstructure_table": "microstructure_1m_hype",
         # Own dedicated worker + file (scripts/ops/supervisor_hype_worker.sh), same shape as xrp's.
         # Confirmed live 2026-08-31: table has 4549+ rows spanning since 2026-08-28, past TRAIL_WIN's
         # 2-day warmup. NOTE: HYPEUSDT has no Binance SPOT listing (only the perp exists) -- the

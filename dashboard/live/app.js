@@ -16,6 +16,7 @@ const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_REGIME_BTC_URL = "/api/regime-btc";
 const API_REGIME_XRP_URL = "/api/regime-xrp";
+const API_COIN_INDICATORS_URL = "/api/coin-indicators";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
@@ -144,6 +145,9 @@ let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
 let latestRegimeBtc = null;
 let latestRegimeXrp = null;
+// 코인별 실시간 지표(수급흐름/리테일수급/청산캐스케이드). ETH는 봇 state를 그대로 쓰고,
+// 다른 코인은 그 코인 자신의 duckdb에서 온다 -- 자산별 슬롯(공유 금지, 2026-08-31 교훈).
+let latestCoinIndicators = {};
 // Confirmed evidence-signals payload (2026-08-31, feeds evidenceSignalTpLevels() below) -- stashed
 // globally like latestLiquidationMap/latestRegimeWide24 so the Snapshot chart's own render cycle
 // can read it without renderEvidenceSignals() needing to know about the chart.
@@ -161,6 +165,7 @@ const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
+let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
@@ -1138,6 +1143,42 @@ function ethOnlyIndicator(item) {
              + "다른 코인 탭에서는 값을 숨깁니다 -- ETH 값을 그 코인 값인 것처럼 보여주지 않기 위해서입니다." };
 }
 
+// ⭐2026-09-03: ETH가 아닌 코인은 **그 코인 자신의** 실시간 수집기 값으로 대체한다.
+// 데이터가 없으면 ethOnlyIndicator로 폴백해 "미지원"으로 정직하게 표시한다.
+// ⚠️`hawkes_active`는 봇 내부 상태라 다른 코인엔 없다 -> "위험" 티어는 안 뜨고 Z 기반
+//   "주의"까지만 판정된다. 그 사실을 툴팁에 명시한다(숨기지 않는다).
+function coinIndicator(item, kind) {
+  if (activeSnapshotAsset === "eth") return item;
+  const d = latestCoinIndicators[activeSnapshotAsset];
+  if (!d || !d.warmed_up) return ethOnlyIndicator(item);
+  const coinTag = `= ${activeSnapshotAsset.toUpperCase()} 실시간`;
+  if (kind === "whale" || kind === "retail_flow") {
+    const v = d.micro ? (kind === "whale" ? d.micro.nif_whale : d.micro.nif_retail) : null;
+    if (v == null) {
+      return { ...item, tone: "neutral", history: [], times: [], proba: null,
+               subText: "수집 중 — 아직 값 없음", derivedTag: coinTag,
+               derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 수집기의 값입니다. 이 지표는 간헐적으로만 계산됩니다(대형 체결이 있을 때).` };
+    }
+    const tone = v > 0.05 ? "good" : v < -0.05 ? "bad" : "neutral";
+    return { ...item, tone, history: [], times: [], proba: null,
+             subText: `${v > 0 ? "유입" : v < 0 ? "유출" : "중립"} ${v.toFixed(3)}`,
+             derivedTag: coinTag,
+             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 실시간 수집기(microstructure_1m)에서 온 값입니다. ETH처럼 봇 내부 상태가 아니라 대시보드가 직접 읽습니다.` };
+  }
+  if (kind === "liq_cascade") {
+    const t = d.tail;
+    if (!t) return ethOnlyIndicator(item);
+    const z = Math.max(Number(t.z_long || 0), Number(t.z_short || 0));
+    const tone = z >= 2.0 ? "warn" : "good";
+    return { ...item, tone, history: [], times: [], proba: null,
+             subText: z >= 2.0 ? `청산 급증 감지(Z:${z.toFixed(1)})` : `평온 (Z:${z.toFixed(1)})`,
+             liveText: "", derivedTag: coinTag,
+             derivedTitle: `${activeSnapshotAsset.toUpperCase()} 전용 tail-risk 수집기의 Z값입니다. `
+               + `⚠️봇 내부의 hawkes 판정은 이 코인에 없어 "위험" 단계는 뜨지 않고 Z 기반 "주의"까지만 판정됩니다.` };
+  }
+  return ethOnlyIndicator(item);
+}
+
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
   // model_indicator_history only advances once per MODEL_INDICATOR_SAMPLE_SECONDS (300s server-
@@ -2013,6 +2054,26 @@ async function refreshRegimeXrp() {
   renderSnapshotChart();
 }
 
+// ⭐2026-09-03: ETH가 아닌 코인의 수급흐름/리테일수급/청산캐스케이드를 **그 코인 자신의**
+// 실시간 수집기에서 가져온다. XRP/HYPE는 전용 워커가 microstructure까지 모으고
+// (supervisor_xrp_worker.sh), tail_risk는 COIN_CONFIG에 5코인 전부 있다.
+// ETH는 봇 state(dashboard_state.json)를 그대로 쓰므로 여기서 가져오지 않는다.
+async function refreshCoinIndicators() {
+  if (activeSnapshotAsset === "eth") return;
+  const now = Date.now();
+  if (now - coinIndicatorsLastFetchAt < MODEL_INDICATOR_POLL_MS) return;
+  coinIndicatorsLastFetchAt = now;
+  const asset = activeSnapshotAsset;
+  try {
+    const res = await fetch(`${API_COIN_INDICATORS_URL}?asset=${encodeURIComponent(asset)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`coin indicators ${res.status}`);
+    latestCoinIndicators[asset] = await res.json();
+  } catch (error) {
+    console.error("Coin indicators fetch error:", error);
+    latestCoinIndicators[asset] = { warmed_up: false, error: "fetch_failed" };
+  }
+}
+
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
@@ -2214,6 +2275,7 @@ function setupPageTabs() {
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       regimeXrpLastFetchAt = 0; refreshRegimeXrp();
+      coinIndicatorsLastFetchAt = 0; refreshCoinIndicators();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
@@ -3231,19 +3293,19 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 대시보드 자체계산·탐색적",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
       },
-      ethOnlyIndicator({
+      coinIndicator({
         key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
-      }),
+      }, "liq_cascade"),
       {
         key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
         subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업 중",
         history: (latestLiquidationDirection && latestLiquidationDirection.tone_history) || [],
         times: evenlySpacedBarTimes(latestLiquidationDirection && latestLiquidationDirection.latest_ts_utc, (latestLiquidationDirection && latestLiquidationDirection.tone_history || []).length, 1),
       },
-      ethOnlyIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }),
-      ethOnlyIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }),
+      coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
+      coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);
   }
 }
@@ -3272,6 +3334,7 @@ async function tick() {
       refreshRegimeWide24();
       refreshRegimeBtc();
       refreshRegimeXrp();
+      refreshCoinIndicators();
       refreshMacroCalendar();
       refreshVrebEconShadow();
       refreshSessionAlerts();
