@@ -559,6 +559,54 @@ v= 0.01    eth {sub:"중립"}     coin{sub:"중립"}      ✅
 `derivedTag`로 **`= XRP 실시간`** 태그가 붙는다. 데이터 출처가 ETH(봇 state)와 다르다는 걸
 알려야 하기 때문이고, ETH의 특화감지기도 `= 대시보드 자체계산` 태그를 같은 방식으로 쓴다.
 
+## 18단계 · XRP 증거신호가 "미지원"으로 나오던 원인 ✅
+
+사용자: *"'이 자산은 증거신호를 아직 지원하지 않습니다(ETH·BTC만 지원)' xrp에 이렇게 나와"*
+
+### ⚠️원인 — **허용목록에 넣는 걸 빠뜨렸다**
+
+10단계에서 XRP 증거신호를 만들고 서버 엔드포인트·URL 라우팅까지 했는데,
+그 **앞단의 게이트**를 못 봤다:
+
+```js
+const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc"];   // ← xrp 없음
+...
+if (!EVIDENCE_SIGNAL_SUPPORTED_ASSETS.includes(activeSnapshotAsset)) {
+  renderEvidenceSignals({ unsupported: true, ... });        // ← 여기서 빠져나감
+  return;
+}
+const url = activeSnapshotAsset === "xrp" ? API_XRP_...     // ← 도달하지 못함
+```
+
+라우팅은 고쳤는데 **그 위의 조기 반환**을 못 본 것이다.
+⇒ 새 자산을 붙일 땐 **라우팅과 허용목록을 함께** 봐야 한다.
+
+### 같은 계열 2건을 더 찾아 함께 고쳤다 — 하드코딩 문구
+
+낡은 안내 문구가 **또 낡지 않도록 실제 목록에서 생성**하도록 바꿨다:
+
+| 위치 | 전 | 후 |
+|---|---|---|
+| 증거신호 미지원 안내 | `(ETH·BTC만 지원)` 하드코딩 | `EVIDENCE_SIGNAL_SUPPORTED_ASSETS`에서 생성 → **`(ETH·BTC·XRP만 지원)`** |
+| 레짐 리본 미지원 툴팁 | `(ETH 전용 모델)` 하드코딩 | `REGIME_SOURCE_BY_ASSET`에서 생성 → **`(ETH·BTC·XRP 지원)`** |
+
+⭐**지원 자산 목록을 문구에 하드코딩하지 않는다** — 오늘만 이 함정에 세 번 걸렸다
+(코인탭 툴팁 → 증거신호 안내 → 레짐 툴팁). 목록이 바뀌면 문구도 저절로 따라가야 한다.
+
+⚠️`REGIME_SOURCE_BY_ASSET`은 `renderCandleSvg` 안의 `const`라 스코프를 확인했다
+(2624행 선언 ↔ 2892행 사용, 사이에 새 최상위 함수 없음 = 같은 스코프). 문법 검사로는 안 잡히는
+종류라 별도로 확인했다.
+
+### 검증
+
+```
+증거신호: 이 자산은 증거신호를 아직 지원하지 않습니다(ETH·BTC·XRP만 지원).
+레짐    : 레짐: 이 코인용 레짐분류기가 아직 없음 (ETH·BTC·XRP 지원) -- 추후 학습 예정
+```
+
+서빙 확인: 허용목록에 xrp 포함 1건 / 하드코딩 문구 잔존 **0건** /
+XRP 증거신호 API `warmed_up=True, 5종`.
+
 ## 남은 단계
 
 - [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)

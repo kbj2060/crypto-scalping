@@ -5,10 +5,12 @@ const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 // BTC 코인 페이지 전용 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH
 // 엔드포인트를 썼다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다"). SOL/XRP/HYPE는
-// 증거신호 파이프라인 자체가 없어(ETH+BTC만 존재) EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
+// 증거신호 파이프라인이 있는 자산만 EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
+// ⚠️2026-09-03: XRP 파이프라인을 만들고 URL 라우팅까지 했는데 **이 목록에 넣는 걸 빠뜨려서**
+// XRP 탭이 계속 "미지원"으로 나왔다(사용자 신고). 새 자산을 붙일 땐 라우팅과 이 목록을 함께 본다.
 const API_BTC_EVIDENCE_SIGNALS_URL = "/api/btc-evidence-signals";
 const API_XRP_EVIDENCE_SIGNALS_URL = "/api/xrp-evidence-signals";
-const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc"];
+const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc", "xrp"];   // 2026-09-03 XRP 추가
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
@@ -259,7 +261,7 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
-  // 2026-09-02: 증거신호도 코인탭에 따라 ETH/BTC(그 외엔 미지원)로 갈리므로 위 4개와 같은 이유로
+  // 2026-09-02: 증거신호도 코인탭에 따라 갈리므로(EVIDENCE_SIGNAL_SUPPORTED_ASSETS, 2026-09-03 XRP 추가) 위 4개와 같은 이유로
   // 즉시 초기화+재조회한다. resetEvidenceStripChips()는 재조회 전에 먼저 불러 이전 자산의 칩이
   // 잠깐이라도 남아있지 않게 한다(특히 smt_divergence처럼 상대 자산엔 없는 신호의 칩).
   latestEvidenceSignals = null;
@@ -1603,14 +1605,17 @@ function evidenceSideLabel(s, { bottom, top, both, none }) {
 function renderEvidenceSignals(payload) {
   const badge = el("snapshotEvidenceBadge");
   const stripBadge = el("evidenceStripBadge");
-  // 2026-09-02: SOL/XRP/HYPE엔 증거신호 파이프라인 자체가 없다(ETH+BTC만 존재) -- 예전엔 코인탭과
+  // 2026-09-02: 증거신호 파이프라인이 없는 자산(2026-09-03 기준 SOL/HYPE)이 있다 -- 예전엔 코인탭과
   // 무관하게 항상 ETH 데이터를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가
   // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.
   if (payload && payload.unsupported) {
     latestEvidenceSignals = null;
     if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "미지원 자산"; }
     if (stripBadge) { stripBadge.className = "ops-badge neutral"; stripBadge.textContent = "미지원"; }
-    setH("evidenceSignalList", `<div class="macro-calendar-empty">이 자산은 증거신호를 아직 지원하지 않습니다(ETH·BTC만 지원).</div>`);
+    // ⚠️지원 자산 목록을 **하드코딩하지 않는다** -- 예전엔 "(ETH·BTC만 지원)"이 박혀 있어
+    // XRP를 붙인 뒤에도 낡은 문구가 그대로 나왔다. 항상 실제 목록에서 만든다.
+    const supported = EVIDENCE_SIGNAL_SUPPORTED_ASSETS.map((a) => a.toUpperCase()).join("·");
+    setH("evidenceSignalList", `<div class="macro-calendar-empty">이 자산은 증거신호를 아직 지원하지 않습니다(${escapeHtml(supported)}만 지원).</div>`);
     resetEvidenceStripChips();
     return;
   }
@@ -2882,7 +2887,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     waitRect.setAttribute("fill-opacity", "0.18");
     const waitTitle = document.createElementNS(NS, "title");
     waitTitle.textContent = regimeRibbonUnsupported
-      ? "레짐: 이 코인용 레짐분류기가 아직 없음 (ETH 전용 모델) -- 추후 학습 예정"
+      // ⚠️지원 목록을 하드코딩하지 않는다 -- "(ETH 전용 모델)"이 박혀 있어 BTC·XRP 분류기를
+      // 붙인 뒤에도 낡은 문구가 남았다. 실제 소스맵에서 만든다.
+      ? `레짐: 이 코인용 레짐분류기가 아직 없음 (${Object.keys(REGIME_SOURCE_BY_ASSET).map((a) => a.toUpperCase()).join("·")} 지원) -- 추후 학습 예정`
       : "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
     waitRect.appendChild(waitTitle);
     svg.appendChild(waitRect);
