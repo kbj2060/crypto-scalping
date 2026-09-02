@@ -1730,6 +1730,27 @@ n=44~78에 홀드아웃 +0.10bp로 우연 기대치 안이다.
 DSR/PBO 도구 적용, demarker/kalman의 앙상블 편입.
 상세: `docs/experiments/eth_autotrading_promotion_audit_20260902.md`.
 
+**⭐2026-09-03 확장 — BTC·XRP도 같은 감사를 받고 10/10 붕괴했다.**
+ETH 승격감사와 BTC 게이트 작업이 같은 날 병렬로 진행돼 서로 만나지 않았고, BTC는 이 감사를
+한 번도 받지 않은 채 "3종 생존"으로 기록돼 있었다. XRP 게이트(09-03 최초 실행)도 마찬가지다.
+지연확정 대조군 결과: **XRP 5종·BTC 5종 전부 붕괴**(예: BTC `demarker_extreme`
++6.46/+8.91 → **−4.25/−2.02**, XRP `short_term_return_z` +14.25/+25.93 → **−2.75/+0.56**).
+⇒ **무효 범위에 XRP 5종·BTC 5종·ETH `short_term_return_z`가 추가된다.**
+
+⚠️**적신호 = 게이트가 "너무 완전하게" 통과할 때.** XRP는 5종 전부, ETH str_z는 96/96이
+통과했는데 이 완전함 자체가 앵커 오염의 서명이었다. 그리고 **기존 대조군 2종은 이 함정을
+못 잡는다는 것이 실측으로 재확인됐다** — 방향뒤집기 전 신호 통과, 무작위진입 귀무 백분위
+**전 신호 100.0%**. 오염된 발동집합 안에서는 앵커가 실제로 좋은 봉이라 real이 정상적으로 이긴다.
+
+⭐**부수 산출(HOLDOUT 트레이드별 분산 CI)**: BTC "3종 생존" 중 부트스트랩 95%CI가 0을 제외한
+건 `demarker_extreme` 하나뿐이었다(+3.25bp, CI [+1.33, +5.16], t=+3.37). `orthogonal_combo`
+(+1.47, CI [−1.41, +4.32])와 `short_term_return_z`(+0.06, CI [−2.43, +2.50])는 애초에 0과
+구분되지 않았다. **상위 5% 트레이드를 빼면 4/5가 음수로 뒤집힌다.**
+⇒ **평균 bp만 보고하지 말 것 — 트레이드별 CI와 상위꼬리 제외 평균을 같이 볼 것.**
+도구: `scripts/audit_xrp_btc_delayed_anchor_control_20260903.py`,
+`scripts/audit_btc_holdout_per_trade_dispersion_ci_20260903.py`
+상세: `docs/experiments/xrp_btc_delayed_anchor_control_invalidates_economics_gates_20260903.md`
+
 ### 5.17) ⭐⭐⭐⭐역선택 검정 — "예측 가능한 것"과 "수익 나는 것"이 같은지 먼저 확인할 것 (2026-09-02, 인과 발동규칙 재정의에서)
 
 필터/게이트를 학습으로 만들 때 **AUC가 좋은데 경제성이 안 나오면**, 모델을 더 키우기 전에

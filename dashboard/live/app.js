@@ -1436,33 +1436,37 @@ const EVIDENCE_SIGNAL_KO = {
 // 검증·경제성 수치도 전부 다르므로, EVIDENCE_SIGNAL_KO의 ETH 수치를 그대로 보여주면 안 된다.
 // 근거: docs/experiments/btc_evidence_signal_economics_gate_20260902.md(§3/§6/§7),
 // scripts/live_btc_evidence_signal_shadow_runner_20260902.py(HOLDOUT_AUC).
-// ⚠️ETH와 달리 대부분 경제성 게이트를 통과하지 못했다 — BTC ATR이 ETH보다 작아 비용/ATR
-// 비율이 더 나쁘기 때문(자세한 원인은 섀도우 러너 docstring). 그래도 노출하는 건 이 대시보드의
-// 증거신호 티어가 손익 주장이 아니라 정보성(IC) 표시이기 때문 — 각 항목에 실제 판정을 명시한다.
+// ⚠️⚠️2026-09-03 정정: BTC 경제성 게이트 수치는 **전부 승격근거로 무효**다. 발동 앵커를 고르는
+// cluster_dedup이 "클러스터가 끝나야 최극단 봉을 안다" = 미래참조이고, 지연확정 대조군에서
+// 5종 전부 붕괴했다(demarker +6.46/+8.91 → −4.25/−2.02). ETH가 2026-09-02에 받은 것과 같은
+// 감사이며, BTC는 그때 누락됐다가 이번에 받았다. 방향뒤집기·무작위진입 귀무는 이 함정을 못 잡는다.
+// 근거: docs/homer/README.md 5.16절, data/research/delayed_anchor_control_20260903/report.json,
+//       data/research/btc_evidence_signals_costgate_20260902/holdout_per_trade_dispersion.json
+// ⇒ 노출하는 건 이 대시보드의 증거신호 티어가 손익 주장이 아니라 정보성(IC) 표시이기 때문이다.
 const BTC_EVIDENCE_SIGNAL_KO = {
   orthogonal_combo: {
     name: "복합 오실레이터 신호",
     detail: "[조건] 스토캐스틱 백분위 극단 + 체결쏠림(delta_z) 극단 동시충족 (BTC 그리드스크린 H=8/K=2.0/GAP=6).\n" +
       "[신뢰도] TRAIN hit률 42.71%(8봉 안 2.0×ATR 도달) · HOLDOUT AUC 0.5933.\n" +
-      "[경제성] VAL +1.15 / OOS +10.95 / HOLDOUT +1.47bp(승률75.4%, n=338) — 2군(VAL 숏 구간 일부 약함) 생존, 무작위진입 귀무 백분위 100%.",
+      "[경제성] ⛔무효. VAL +1.15 / OOS +10.95 / HOLDOUT +1.47bp였으나 (a)트레이드별 95%CI [−1.41, +4.32]로 0을 포함하고 (b)지연확정 대조군에서 −7.56/−3.73으로 붕괴 — 앵커 선택이 만든 성과다.",
   },
   liquidity_sweep: {
     name: "유동성 스윕(저점·고점 사냥)",
     detail: "[조건] 직전 100분 저점/고점을 살짝 뚫었다가 되돌림 (BTC 그리드스크린 H=20/K=2.0/GAP=6).\n" +
       "[신뢰도] TRAIN hit률 10.22% · HOLDOUT AUC 0.5214(사실상 무작위).\n" +
-      "[경제성] 트레일링스톱 게이트 0/96 전패, HOLDOUT 미도달 — 7종 중 유일하게 방향 정보 자체가 거의 없다.",
+      "[경제성] 트레일링스톱 게이트 0/96 전패, HOLDOUT 미도달 — 7종 중 유일하게 (오염된 발동집합에서조차) 방향 정보가 거의 없다.",
   },
   short_term_return_z: {
     name: "3봉 수익률 급변(z-score)",
     detail: "[조건] 3봉 수익률의 z-score 극단 (BTC 그리드스크린 H=6/K=2.0/GAP=12).\n" +
       "[신뢰도] TRAIN hit률 31.63% · HOLDOUT AUC 0.6443.\n" +
-      "[경제성] VAL +4.94 / OOS +8.98 / HOLDOUT +0.06bp(승률66.3%, n=525) — 1군 생존이나 사실상 0(비용 상쇄 수준).",
+      "[경제성] ⛔무효. HOLDOUT +0.06bp는 트레이드별 95%CI [−2.43, +2.50]로 0과 구분 불가였고, 지연확정 대조군에서 −4.57/−4.16으로 붕괴했다.",
   },
   taker_delta_climax: {
     name: "체결 쏠림 극단(taker delta)",
     detail: "[조건] 순공격적 매수/매도 체결량 z-score ≥2.0/≤-2.0 (BTC 그리드스크린 H=6/K=2.0/GAP=3, ETH는 K=2.5로 별개).\n" +
       "[신뢰도] TRAIN hit률 13.88% · HOLDOUT AUC 0.6276.\n" +
-      "[경제성] VAL +0.64 / OOS +2.90 / HOLDOUT −0.94bp(n=1,172) — 방향뒤집기는 이기지만(갭+8.81) HOLDOUT 절대수익 미통과.",
+      "[경제성] ⛔무효. HOLDOUT −0.94bp(CI [−2.48, +0.58])로 이미 미통과였고, 지연확정 대조군에서도 −5.23/−5.73으로 붕괴했다.",
   },
   fib_extension_exhaustion: {
     name: "피보나치 확장 소진",
@@ -1474,13 +1478,53 @@ const BTC_EVIDENCE_SIGNAL_KO = {
     name: "DeMarker 오실레이터 극단",
     detail: "[조건] DeMarker(14) 극단 (BTC 그리드스크린 H=8/K=0.70/GAP=6 — K가 낮아 발동은 잦으나 변별력은 낮음, TRAIN hit률 90.03%).\n" +
       "[신뢰도] HOLDOUT AUC 0.7286 — 7종 중 최고.\n" +
-      "[경제성] VAL +6.46 / OOS +8.91 / HOLDOUT +3.25bp(승률81.3%, n=428) — 1군 생존, 7종 중 유일하게 여유 있는 양수.",
+      "[경제성] ⛔무효. HOLDOUT +3.25bp는 7종 중 유일하게 CI가 0을 제외했으나(t=+3.37, CI [+1.33, +5.16]), 지연확정 대조군에서 −4.25/−2.02로 붕괴 — 성과의 출처가 신호가 아니라 앵커 선택이었다.",
   },
   kalman_deviation_meanrev: {
     name: "칼만필터 추세이탈 평균회귀",
     detail: "[조건] (종가-칼만필터 추세선)/추세선 z-score ≥3.5/≤-3.5 (BTC 그리드스크린 H=10/K=3.5/GAP=6, ETH는 K=2.5로 별개).\n" +
       "[신뢰도] TRAIN hit률 14.25% · HOLDOUT AUC 0.6709.\n" +
-      "[경제성] VAL +2.41 / OOS +6.17 / HOLDOUT −1.27bp(n=1,021) — 방향뒤집기는 이기지만 HOLDOUT 절대수익 미통과.",
+      "[경제성] ⛔무효. HOLDOUT −1.27bp(CI [−3.37, +0.78])로 이미 미통과였고, 지연확정 대조군에서도 −5.41/−8.45로 붕괴했다.",
+  },
+};
+
+// 2026-09-03: XRP는 자체 그리드스크린(HIT_TYPE/H/K가 ETH·BTC와 전부 다름)과 자체 HOLDOUT
+// 수치를 쓰므로 별도 사전이 필요하다. 근거: docs/experiments/xrp_evidence_signal_and_regime_20260903.md
+// ⚠️⚠️경제성 문구를 주의해서 읽을 것 -- 2026-09-03 지연확정 대조군에서 5종 전부 붕괴했다.
+// 트레일링스톱 게이트 자체는 통과했으나(96셀 중 15~96셀), 발동 앵커를 고르는 cluster_dedup이
+// "클러스터가 끝나야 최극단 봉을 안다" = 미래참조라 그 위의 모든 게이트 수치가 승격근거로 무효다.
+// 근거: docs/homer/README.md 5.16절, data/research/delayed_anchor_control_20260903/report.json
+// ⇒ 이 칩들은 ETH와 마찬가지로 **정보성(분류 확률) 표시 전용**이며 손익 주장이 아니다.
+const XRP_EVIDENCE_SIGNAL_KO = {
+  demarker_extreme: {
+    name: "DeMarker 오실레이터 극단",
+    detail: "[조건] DeMarker(14) 극단 (XRP 그리드스크린 H=2/K=1.5/GAP=6 — 격자 경계 3회 확장 끝에 H=2가 구조적 하한으로 확정).\n" +
+      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.7018/0.6859/0.6759 — XRP 5종 중 최고. 발동봉 hit률 24.6%.\n" +
+      "[경제성] ⛔미검증. 게이트는 96/96 통과(VAL +10.69 / OOS +12.32bp)로 나왔으나 지연확정 대조군에서 −2.94/−9.18로 붕괴 — 앵커 선택이 만든 성과다.",
+  },
+  kalman_deviation_meanrev: {
+    name: "칼만필터 추세이탈 평균회귀",
+    detail: "[조건] (종가-칼만필터 추세선)/추세선 z-score ≥2.0/≤-2.0 (XRP 그리드스크린 H=5/K=2.0/GAP=6 — ETH는 K=2.5, BTC는 K=3.5로 전부 별개).\n" +
+      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6894/0.6103/0.6223.\n" +
+      "[경제성] ⛔미검증. 게이트 95/96 통과(VAL +8.80 / OOS +11.24bp)였으나 지연확정에서 −3.44/−4.15로 붕괴.",
+  },
+  short_term_return_z: {
+    name: "3봉 수익률 급변(z-score)",
+    detail: "[조건] 3봉 수익률의 z-score 극단 (XRP 그리드스크린 H=12/K=1.5/GAP=12, 해상판정 touch_mae_capped).\n" +
+      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6466/0.5753/0.6132 · TRAIN hit률 60.16%(n=2,314).\n" +
+      "[경제성] ⛔미검증. 게이트 84/96 통과(VAL +14.25 / OOS +25.93bp — XRP 최고 수치)였으나 지연확정에서 −2.75/+0.56으로 붕괴.",
+  },
+  taker_delta_climax: {
+    name: "체결 쏠림 극단(taker delta)",
+    detail: "[조건] 순공격적 매수/매도 체결량 z-score 극단 (XRP 그리드스크린 H=9/K=1.5/GAP=3, 해상판정 giveback — 확정에 18봉(2×H) 필요).\n" +
+      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6142/0.5556/0.6091 · TRAIN hit률 8.99%(n=6,742).\n" +
+      "[경제성] ⛔미검증. 게이트 18/96 통과(VAL +1.09 / OOS +1.83bp)로 원래 얇았고, 지연확정에서 −1.96/−1.03으로 붕괴.",
+  },
+  orthogonal_combo: {
+    name: "복합 오실레이터 신호",
+    detail: "[조건] 스토캐스틱 백분위 극단 + 체결쏠림(delta_z) 극단 동시충족 (XRP 그리드스크린 H=8/K=2.0/GAP=6, 해상판정 touch_mfe).\n" +
+      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.5979/0.5847/0.5599 — XRP 5종 중 최약. TRAIN hit률 41.98%(n=1,446).\n" +
+      "[경제성] ⛔미검증. 게이트 15/96 통과(VAL +3.59 / OOS +12.33bp)였으나 지연확정에서 −3.68/−2.29로 붕괴.",
   },
 };
 
@@ -1732,7 +1776,7 @@ function renderEvidenceSignals(payload) {
     // XRP는 자체 그리드스크린 K/HORIZON과 HOLDOUT 수치를 쓰므로 별도 라벨 사전이 필요하다.
     // 아직 사전이 없으면 이름만 나오도록 폴백한다(잘못된 ETH 설명을 보여주는 것보다 낫다).
     const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO
-      : activeSnapshotAsset === "xrp" ? {}
+      : activeSnapshotAsset === "xrp" ? XRP_EVIDENCE_SIGNAL_KO
       : EVIDENCE_SIGNAL_KO;
     const ko = koDict[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
