@@ -469,6 +469,52 @@ XRP 실측(24시간): `nif_retail` **93.7%** / `nif_whale` **49.7%**만 비null�
 ⚠️여전히 유효한 한계: **`hawkes_active`는 봇 내부 상태**라 XRP엔 없다. 청산 캐스케이드는
 Z 기반 **"주의"까지만** 판정되고 **"위험" 단계는 뜨지 않는다** — 툴팁에 명시했다.
 
+## 16단계 · BTC/SOL도 실시간 지표 지원 — **5코인 전부** ✅
+
+사용자: *"비트코인에도 'ETH 고정'이라고 해서 안보여. 이것도 고쳐줘"*
+
+### ⚠️내가 앞서 "BTC는 수집기 없음"이라고 한 게 틀렸다
+
+14단계에서 *"btc는 micro 수집기가 없어 수급/리테일 미지원"*이라고 썼다. **틀렸다.**
+BTC/SOL microstructure는 **메인 `microstructure.duckdb` 안의 접미사 테이블**로
+이미 수집되고 있었다 — XRP/HYPE처럼 별도 *파일*이 아니라 **같은 파일의 다른 테이블**이라
+`ls data/live/microstructure*.duckdb`로 파일만 훑을 때 안 보였다.
+
+⚠️처음 조회 때 그 파일이 `Binder Error: Referenced column "ts" not found`로 죽었는데
+(같은 파일 안의 `orderbook_decision_snapshots`가 `ts` 대신 `recorded_at_kst`를 쓴다),
+그 에러를 "이 파일은 못 읽는다"로 넘겨짚고 더 안 팠다. **에러 하나로 파일 전체를 포기한 게 실수다.**
+
+### 실사
+
+| 테이블 | 행수 | 최신 | whale 커버(24h) | retail 커버 |
+|---|---|---|---|---|
+| `microstructure_1m` (ETH) | 160,684 | 06:18 | 98.3% | 98.5% |
+| `microstructure_1m_btc` | 70,762 | 06:18 | **93.5%** | 93.5% |
+| `microstructure_1m_sol` | 70,784 | 06:18 | **90.9%** | 94.7% |
+| `microstructure_1m_xrp` | 9,651 | 06:18 | 49.7% | 93.7% |
+| `microstructure_1m_hype` | 8,780 | 06:18 | — | 있음 |
+
+**BTC/SOL의 whale 커버리지가 XRP(49.7%)보다 훨씬 좋다**(93.5% / 90.9%).
+
+### 결과 — 5코인 전부 실시간
+
+```
+eth : whale  0.552 / retail -0.109 / Z  0.00
+btc : whale -0.186 / retail -0.265 / Z -0.19   ← 새로 지원
+sol : whale  1.000 / retail  0.049 / Z  0.00   ← 새로 지원
+xrp : whale -1.000 / retail -0.097 / Z  0.00
+hype: whale  None  / retail  0.355 / Z  0.00
+```
+
+`coin_config.py`에 5코인 전부 `microstructure_db_path`/`microstructure_table`을 채웠다.
+ETH는 대시보드가 봇 state를 쓰므로 이 경로를 타지 않지만, **코인 간 대칭**을 위해 채워
+같은 코드 경로로 검증할 수 있게 했다.
+
+### 툴팁도 갱신
+
+*"수급흐름·리테일수급·청산캐스케이드 — **5코인 전부** 그 코인 자신의 실시간 수집기"*로 바꿨다.
+⚠️`hawkes` "위험" 단계가 ETH에서만 뜬다는 사실도 툴팁에 명시했다.
+
 ## 남은 단계
 
 - [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)

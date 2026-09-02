@@ -25,11 +25,20 @@ ROOT = Path(__file__).resolve().parents[1]
 COIN_CONFIG: dict[str, dict] = {
     "eth": {
         "binance_symbol": "ETHUSDT",
+        # ETH 대시보드는 봇 state(dashboard_state.json)를 그대로 쓰므로 이 경로를 타지 않지만,
+        # 코인 간 대칭을 위해 채워 둔다(다른 코인과 같은 코드 경로로 검증할 수 있다).
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure.duckdb",
+        "microstructure_table": "microstructure_1m",
         "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk.duckdb",
         "tail_risk_table": "tail_risk_1m",
     },
     "btc": {
         "binance_symbol": "BTCUSDT",
+        # 2026-09-03: BTC/SOL microstructure는 **메인 microstructure.duckdb 안의 접미사 테이블**로
+        # 이미 수집되고 있었다(XRP/HYPE처럼 별도 파일이 아니라서 처음 찾을 때 놓쳤다).
+        # 실측 최신 2026-09-03 06:18, 최근 24시간 whale 커버리지 93.5%(XRP 49.7%보다 좋다).
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure.duckdb",
+        "microstructure_table": "microstructure_1m_btc",
         # Separate FILE, not a same-file suffixed table -- the BTC/SOL tail-risk worker writes here
         # to avoid a duckdb concurrent-writer conflict with ETH's dedicated writer in
         # tail_risk_interceptor.py (2026-08-17 incident, confirmed via
@@ -40,6 +49,9 @@ COIN_CONFIG: dict[str, dict] = {
     },
     "sol": {
         "binance_symbol": "SOLUSDT",
+        # BTC와 같은 파일의 다른 접미사 테이블. 최근 24시간 whale 90.9% / retail 94.7%.
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure.duckdb",
+        "microstructure_table": "microstructure_1m_sol",
         # SAME file+worker as btc (scripts/ops/supervisor_tail_risk_btc_sol_worker.sh's
         # BOT_SYMBOLS="BTCUSDT,SOLUSDT"), separate table -- confirmed live 2026-08-31: table has
         # 19769+ rows (longer history than xrp's, same worker start as btc's), comfortably past

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260903-xrp-live-v2">
+  <link rel="stylesheet" href="styles.css?v=20260903-allcoin-indicators">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -64,7 +64,7 @@
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
       <div class="ops-panel-head">
-        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환이 적용되는 것: 청산맵·베이시스청산압박·청산방향압력·증거신호(ETH/BTC/XRP)·레짐리본(ETH/BTC/XRP)·수급흐름·리테일수급·청산캐스케이드(그 코인 전용 수집기가 있는 경우). 아직 ETH 고정: 특화감지기(V자 급등락 -- ETH 학습 모델). HYPE는 바이낸스 현물 상장이 없어 베이시스청산압박 미지원. 수집기가 없는 코인은 해당 지표가 &quot;미지원&quot;으로 표시됩니다.">
+        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 청산맵·베이시스청산압박·청산방향압력·수급흐름·리테일수급·청산캐스케이드(5코인 전부 그 코인 자신의 실시간 수집기) · 증거신호(ETH/BTC/XRP) · 레짐리본(ETH/BTC/XRP). 아직 ETH 고정: 특화감지기(V자 급등락 -- ETH 학습 모델이라 코인별 재학습 필요). HYPE는 바이낸스 현물 상장이 없어 베이시스청산압박 미지원. 참고: 청산 캐스케이드의 &quot;위험&quot;(hawkes) 단계는 봇 내부 상태라 ETH에서만 뜨고, 다른 코인은 Z 기반 &quot;주의&quot;까지만 판정됩니다.">
           <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
           <button type="button" class="asset-tab" data-asset="btc">BTC</button>
           <button type="button" class="asset-tab" data-asset="sol">SOL</button>
@@ -241,7 +241,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260903-xrp-live-v2"></script>
+  <script src="./app.js?v=20260903-allcoin-indicators"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
