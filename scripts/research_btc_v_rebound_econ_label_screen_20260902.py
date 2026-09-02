@@ -69,6 +69,11 @@ SL_GRID, ARM_GRID, TRAIL_GRID = _pf.SL_GRID, _pf.ARM_GRID, _pf.TRAIL_GRID
 # 손익비가 0.302->0.180으로 떨어지는 것이 경고였는데 놓쳤다.
 # 교정: SL 상한을 8.0으로 묶고, 선정에 **손익비 하한**을 건다.
 SL_GRID = tuple(x for x in (tuple(SL_GRID) + (6.0, 8.0)) if x <= 8.0)
+# ⭐4차 교정(2026-09-02): 앞선 두 시도가 실패한 뒤 격자를 다시 보니 **ARM 상한이 1.5**였다.
+# ARM은 이익 목표인데 BTC ATR 16bp에서 1.5x면 목표가 24bp -- 비용 10bp 대비 2.4:1뿐이다
+# (ETH는 1.5x23=35bp로 3.5:1). 나는 SL(손실 폭)만 넓혔는데 방향이 반대였다.
+# BTC가 수수료 바닥에 가깝다는 진단이 맞다면 **넓혀야 할 것은 ARM**이다.
+ARM_GRID = tuple(ARM_GRID) + (2.5, 4.0, 6.0, 8.0)
 PAYOFF_FLOOR = 0.25          # ETH 실측 0.30~0.39보다 낮게 두되 복권형(0.089)은 배제
 # ⚠️2차 확장: 1차 확장(=12.0)에서도 최적이 경계에 붙었다. 청산사유를 확인해보니
 # SL=12에서도 94.2%가 여전히 트레일링 스톱으로 나가고 보유 중앙값은 11->14봉뿐이라
@@ -82,7 +87,7 @@ ARTIFACT_FREE_MIN = 1.0
 CHUNK = 40000
 TRAIN_END = pd.Timestamp("2025-09-01", tz="UTC")
 ETH_CELL = (5.0, 1.5, 0.1)
-OUT = ROOT / "data/research/btc_v_rebound_econ_label_screen_20260902/report_payoff_floor.json"
+OUT = ROOT / "data/research/btc_v_rebound_econ_label_screen_20260902/report_arm_extended.json"
 
 # ETH Tier0와 동일 구성 (side-dependent 2개는 아래서 유도)
 BAR_FEATURES = ["atr", "atr_percentile_864", "range_width_pct", "hour_utc", "weekday",

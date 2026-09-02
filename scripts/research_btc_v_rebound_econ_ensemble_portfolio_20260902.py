@@ -59,11 +59,16 @@ SL_GRID, ARM_GRID, TRAIL_GRID = _pf.SL_GRID, _pf.ARM_GRID, _pf.TRAIL_GRID
 # ⚠️교정: 1차 시도에서 VAL이 SL=20.0(격자 최댓값)을 골라 OOS -22.18bp로 참패했다.
 # 승률 84~95%/손익비 0.089 = 변동성 매도 프로파일. 상한을 8.0으로 묶는다.
 SL_GRID = tuple(x for x in (tuple(SL_GRID) + (6.0, 8.0)) if x <= 8.0)
+# ⭐4차 교정(2026-09-02): 앞선 두 시도가 실패한 뒤 격자를 다시 보니 **ARM 상한이 1.5**였다.
+# ARM은 이익 목표인데 BTC ATR 16bp에서 1.5x면 목표가 24bp -- 비용 10bp 대비 2.4:1뿐이다
+# (ETH는 1.5x23=35bp로 3.5:1). 나는 SL(손실 폭)만 넓혔는데 방향이 반대였다.
+# BTC가 수수료 바닥에 가깝다는 진단이 맞다면 **넓혀야 할 것은 ARM**이다.
+ARM_GRID = tuple(ARM_GRID) + (2.5, 4.0, 6.0, 8.0)
 PAYOFF_FLOOR = 0.25
 FORWARD_BARS = _pf.FORWARD_BARS
 TIER0 = _sc.TIER0
 
-SCREEN_REPORT = ROOT / "data/research/btc_v_rebound_econ_label_screen_20260902/report_payoff_floor.json"
+SCREEN_REPORT = ROOT / "data/research/btc_v_rebound_econ_label_screen_20260902/report_arm_extended.json"
 COST_BP, ARTIFACT_FREE_MIN = 10.0, 1.0
 CONTEXT_N = 18000
 SEEDS = [20260829, 141592, 271828, 577215, 20260902]
@@ -74,7 +79,7 @@ CHUNK = 40000
 TRAIN_END = pd.Timestamp("2025-09-01", tz="UTC")
 VAL_END = pd.Timestamp("2026-01-01", tz="UTC")
 OOS_END = pd.Timestamp("2026-04-01", tz="UTC")
-OUT = ROOT / "data/research/btc_v_rebound_econ_portfolio_20260902/report_payoff_floor.json"
+OUT = ROOT / "data/research/btc_v_rebound_econ_portfolio_20260902/report_arm_extended.json"
 
 
 def log(m): print(f"[btc-pf] {m}", flush=True)
