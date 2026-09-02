@@ -2,7 +2,18 @@
 
 Status: `active`
 
-Last updated: 2026-09-01 KST — **트레일링스톱 경제성게이트 방향뒤집기(direction-flip) 대조군
+Last updated: 2026-09-01 KST(늦은버전) — **V자반등이 9트리거 게이트→매 봉 스코어링으로 전면
+재설계·배포됨(별도 세션), held_up 라벨얽힘·지연확인UX·진입시점비현실성 3건 전부 해결.
+정직하게 재학습한 OOS AUC=0.7051(붕괴없음)이나, 라이브가 실제로 겪는 전체봉 population으로
+경제성 재검증시 **OOS에서 방향뒤집기가 정방향을 이김(21 vs 31)** — "엣지가 있는 곳=사후에
+라벨이 붙는 봉"인데 그건 미래결과라 결정시점엔 알 수 없음. **최종판정: 분류는 유효(재량참고용),
+매매엣지는 없음.** 아래 "V자반등 9트리거 통합모델" 절(+9.28bp/+4.75bp 등 경제성 수치 전부
+포함)은 이제 역사 기록 — 최신 상태는 "V자반등 매 봉 스코어링" 절 참고. 상세:
+[[eth_v_rebound_every_bar_scoring_deployed_20260901]]. **다음 코인/신규신호 경제성게이트
+설계시 교훈**: 경제성을 라벨 붙은 부분집합이 아니라 라이브가 실제로 겪는 전체 population
+기준으로 반드시 재검증할 것 — 부분집합 기준 수치는 결정시점에 실현 불가능할 수 있다.
+
+이전 업데이트(2026-09-01 KST, 이른버전) — **트레일링스톱 경제성게이트 방향뒤집기(direction-flip) 대조군
 신설+ETH 배포신호 9개 전수 소급감사 완료**(계기: ZDC(지그재그방향) 신규 라벨 그리드서치에서
 ARM극소 조합이 노이즈수확 허위positive를 만드는 걸 발견). ETH 배포신호 8개(giveback9트리거/
 taker/str_z/liquidity_sweep_topdown/orthogonal_combo/smt_divergence/demarker_extreme/kalman_
@@ -730,11 +741,15 @@ local_extreme 진입시점 현실성 보정**(위 "V자반등 9트리거" 절 �
 전부 마이너스(-10.47/-5.85/-7.36bp)로 뒤집힘** — giveback은 원래 마진이 두꺼워 같은 보정에도
 살아남았지만 ZDC는 애초 마진(+1~6bp)이 너무 얇아 전멸. **최종 확정: 경제성게이트 FAILED.**
 
-**✅2026-09-01 최종 결정: 방향추세 신호는 giveback(wick-앵커+giveback라벨, 위 "V자반등 9트리거"
-절)로 확정, ZDC는 보류.** 분류 AUC(0.57/0.58/0.54)는 기록으로 남기되 giveback(0.83/0.81/0.85)
-대비 3분의 2 수준이라 대체 근거 없음. 상세: [[eth_v_rebound_multitrigger_zigzag_direction_
-rejected_20260901]], 경제성 보정 상세는 [[project_v_rebound_local_extreme_entry_timing_
-realism_20260901]].
+**✅2026-09-01 결정: 방향(재량참고) 지표는 giveback(wick-앵커+giveback라벨, 현재는 아래 "V자반등
+매 봉 스코어링" 절의 재설계판)으로 확정, ZDC는 보류.** 분류 AUC(ZDC 0.57/0.58/0.54)는 기록으로
+남기되 giveback(정직 재학습 후 OOS AUC 0.7051)이 여전히 우위라 대체 근거 없음. **⚠️2026-09-01
+후속 정정**: 이 결정 당시 giveback쪽 근거로 인용한 "+4.75bp 경제성"은 이후 giveback 자체가
+매 봉 스코어링으로 전면 재설계되며 "라이브 전체봉 population 기준으로는 매매 엣지 없음"으로
+재차 정정됨(아래 "매 봉 스코어링" 절 참조) — **giveback을 우위로 보는 근거는 경제성이 아니라
+분류력(OOS AUC) 격차로 다시 좁혀야 한다**, ZDC도 giveback도 자동매매 경제성은 둘 다 미달.
+상세: [[eth_v_rebound_multitrigger_zigzag_direction_rejected_20260901]], giveback 최신상태는
+[[eth_v_rebound_every_bar_scoring_deployed_20260901]].
 
 ### `short_term_return_z` (v1 최종, 한 번에 성공)
 - **라벨**: HORIZON=12(1h), intrabar MFE ≥ 1.75×ATR면 hit(지속성조건 없음), 클러스터 앵커링
@@ -2102,6 +2117,24 @@ n=16/17). 60셀이면 5% 기준 우연 기대치가 ~3개라는 점도 같이 �
 이겼다**(1h STRZ 바닥: 매칭 3.70~4.31 vs 복합 2.66~3.31). 배포신호의 발동을 줄이고 싶으면
 직교 필터를 붙이지 말고 **자기 임계값을 조일 것**. 상세:
 [eth_composite_orthogonal_filter_raw_lift_check_20260902.md](../experiments/eth_composite_orthogonal_filter_raw_lift_check_20260902.md).
+
+### 5.19) ⭐⭐⭐⭐⭐**새 코인 포팅 프로토콜** — 포팅에서만 5건이 터졌다 (2026-09-02~03, BTC)
+
+BTC 증거신호 포팅/서빙 코드에서 **결함 5건**이 실제로 터졌고 전부 "포팅"이라는 행위에서 나왔다.
+핵심: **같은 이름의 신호가 자산 간에 HIT_TYPE·H·K가 전부 다르다** — 8종 중 완전히 같은 건
+`demarker_extreme` 하나뿐이다(BTC는 HIT_TYPE 자체를 그리드 3번째 축으로 재탐색했다).
+
+| # | 증상 | 원인 |
+|---|---|---|
+| 1 | 경제성게이트 **0/672 전패** → 실은 **6/7 통과** | `pos`를 다른 파일 인덱스로 사용(오프셋 108봉) |
+| 2 | 섀도우 원장 전부 양수 **+69bp**(HOLDOUT의 10배) | 배리어를 폴링 가격 한 점으로 판정(wick 누락) |
+| 3 | 보유한도가 조용히 5배 | 틱 개수를 시간으로 환산(`ticks >= H*5`) |
+| 4 | 목표 달성 후에도 칩 **최대 6시간 활성** | `_active`가 고정 봉수, 라벨 확정 무시 |
+| 5 | 라이브 hit률 **2.6배 과대평가** | `HIT_SPEC` 모드 2건 오기 |
+
+**정본(체크리스트 11단계 + 자산별 HIT_TYPE 대조표 + 계약 5개)**:
+`docs/homer/evidence_signal_new_coin_port_protocol.md`
+⇒ SOL/XRP/HYPE로 확장할 때 **반드시 이 문서부터** 읽는다.
 
 ## 공통 교훈 (신호 무관하게 적용)
 
