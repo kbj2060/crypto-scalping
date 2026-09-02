@@ -72,6 +72,8 @@ from research_eth_regime_scalping_label_geometry_20260902 import (  # noqa: E402
 )
 
 XRP_KLINES = ROOT / "data/xrp_5m_1year.csv"
+# XRP-주체의 교차자산 파트너. BTC-주체 원본은 여기에 ETH를 넣었다.
+PARTNER_KLINES = ROOT / "data/btc_5m_1year.csv"
 ETH_KLINES = ROOT / "data/eth_5m_1year.csv"
 XRP_CANON = ROOT / "data/xrp_5m_1year.csv"   # ⭐피벗 계산에 OHLC만 쓰므로 klines 직접 사용
 XRP_FUNDING_DIR = ROOT / "data/research/funding_extracted/XRPUSDT"
@@ -92,8 +94,13 @@ def load_xrp_funding_z() -> pd.DataFrame:
     mean = f["last_funding_rate"].rolling(90, min_periods=30).mean()
     std = f["last_funding_rate"].rolling(90, min_periods=30).std()
     f["funding_z"] = (f["last_funding_rate"] - mean) / std.replace(0.0, np.nan)
-    return f[["calc_time", "funding_z"]]
-
+    out = f[["calc_time", "funding_z"]]
+    # ⚠️펀딩 CSV는 [us]인데 klines 파싱은 [ns]다. merge_asof가 dtype 일치를 요구하므로
+    # **로더 안에서** 맞춘다 -- Phase 3도 이 함수를 import하므로 여기서 고쳐야 둘 다 해결된다.
+    for _c in out.columns if hasattr(out, "columns") else []:
+        if "time" in str(_c).lower():
+            out[_c] = out[_c].astype("datetime64[ns]")
+    return out
 
 def build_xrp_pivots() -> pd.DataFrame:
     """BTC swing pivots from the CANONICAL OHLC, ETH's zigzag parameters verbatim."""
@@ -126,13 +133,8 @@ def main() -> None:
     # ⚠️교차자산 파트너 슬롯. BTC-주체 스크립트는 여기에 ETH를 넣었다(`btc_df=partner`).
     # XRP-주체이므로 BTC를 넣는다 -- 인자 이름이 `btc_df`인 건 함수 시그니처일 뿐이다
     # (FeatureEngineer의 close_btc 슬롯 명명 함정과 같은 계열, 메모리에 기록된 사항).
-    partner = pd.read_csv(ROOT / "data/btc_5m_1year.csv", usecols=["timestamp", "high", "low"], parse_dates=["timestamp"])
-    # ⚠️펀딩 CSV는 [us], klines 파싱은 [ns]라 merge_asof가 dtype 불일치로 죽는다
-    # (XRP 후보 CSV 빌더에서 이미 겪은 것과 같은 계열 -- 환경 pandas 버전 차이).
-    fz = load_xrp_funding_z()
-    tcol = "calc_time" if "calc_time" in fz.columns else fz.columns[0]
-    fz[tcol] = fz[tcol].astype(raw["timestamp"].dtype)
-    frame = compute_signals(raw, btc_df=partner, funding_df=fz)
+    partner = pd.read_csv(PARTNER_KLINES, usecols=["timestamp", "high", "low"], parse_dates=["timestamp"])
+    frame = compute_signals(raw, btc_df=partner, funding_df=load_xrp_funding_z())
     pivots = build_xrp_pivots()
     print(f"XRP evidence frame {len(frame):,} bars | pivots {len(pivots):,} "
           f"(bottom {int((pivots.pivot_type=='bottom').sum())}, top {int((pivots.pivot_type=='top').sum())})")
