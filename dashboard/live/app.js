@@ -3066,6 +3066,7 @@ async function tick() {
       refreshRegimeWide24();
       refreshRegimeBtc();
       refreshMacroCalendar();
+      refreshVrebEconShadow();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();
     }
