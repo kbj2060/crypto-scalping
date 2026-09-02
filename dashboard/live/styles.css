@@ -21,8 +21,6 @@
   --card-gap: 16px;
   --radius: 18px;
   --radius-sm: 12px;
-  --sticky-top-h: 58px; /* fallback before app.js measures .top's real height (syncStickyHeaderOffset) --
-                           kept in sync with .topbar's own min-height default below */
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   --font-display: "Space Grotesk", "Pretendard Variable", Pretendard, "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", "Pretendard Variable", Pretendard, ui-monospace, "SFMono-Regular", Consolas, monospace;
@@ -150,48 +148,11 @@ body {
   }
 }
 
-/* 2026-09-01: sticky header (user request) -- .top (clock/session/page-tabs row) and the snapshot
-   tab's coin-selector row (#snapshotTabPanel > .ops-panel-head below) both pin to the viewport top
-   while the page scrolls, stacked directly beneath each other. z-index below the 1000 used by
-   .chart-tooltip elsewhere so tooltips still float above a pinned header.
-   Background history (2 reversals, read in order if touching this again):
-   (1) original: translucent rgba(.92)+blur(14px) -- a user report showed scrolled content visibly
-       showing through. Root cause turned out to be the 12px GAP between the two sticky bars (see
-       app.js::syncStickyHeaderOffset's own history comment), not the translucency itself -- but at
-       the time that wasn't isolated yet, so the fix taken was blunt: full opacity.
-   (2) #171922 (body gradient's own 0%-stop) + a hand-added cyan radial approximating body's own
-       top-left glow, fully opaque -- fixed the see-through bug (gap closed, see (1)) but a user
-       screenshot showed it still read as a flat, too-dark bar against the page's actual (more
-       visibly blue-tinted, and itself a moving gradient the header can't see) background -- hand-
-       picking/approximating a fixed color to match a gradient that looks different at every scroll
-       position was never going to line up exactly.
-   (3) rgba(18,20,28,0.82) + blur(20px), no hand-picked color at all -- once (1)'s real bug (the
-       gap) was fixed, genuine translucency became safe again, and it solves the color-matching
-       problem structurally instead of by guessing: whatever the real page gradient looks like at
-       a given scroll position shows through and tints the header automatically, exactly matching
-       by construction. blur(20px) is strong enough that scrolling text/chart lines read as an
-       unreadable smear, not legible content -- this is the actual load-bearing property against
-       a (1)-style regression, not the opacity value.
-   (4) user asked for full transparency; went partway instead (rgba(18,20,28,0.55) + blur(22px),
-       was 0.82/20px) to avoid reintroducing (1)'s bug -- scrolled content showing through as
-       legible text directly behind the header's own text, since blur alone doesn't fire without
-       SOME backdrop color to filter.
-   (5) CURRENT: user explicitly confirmed the (1)-style readability tradeoff is acceptable ("안에가
-       다 비춰도 되니까") and asked again for literal full transparency. background: none, no
-       backdrop-filter -- genuinely no paint at all, so whatever's beneath (page gradient AND
-       scrolled content) shows through exactly, sharp, matching by construction. This is a
-       deliberate, explicit user choice to prioritize zero color-mismatch over the header's own
-       text staying legible against busy scrolled content -- don't "fix" this back toward opaque
-       or blurred without asking first. */
 .top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  background: none;
 }
 
 .topbar {
@@ -208,18 +169,6 @@ body {
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
 .ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; position: relative; }
-/* 2026-09-01: sticky coin-selector row, snapshot tab only (this class is shared with #opsTabPanel's
-   own plain title+badge header, which is deliberately NOT pinned -- scoped to the snapshot instance
-   specifically, see .top's own comment above for the shared rationale/z-index/background approach).
-   top offset is the OTHER sticky bar's (.top) actual rendered height, kept in sync at runtime by
-   app.js::syncStickyHeaderOffset() (position:relative above still applies -- sticky establishes a
-   containing block same as relative does, so .session-alert-center's absolute centering is unaffected). */
-#snapshotTabPanel > .ops-panel-head {
-  position: sticky;
-  top: var(--sticky-top-h);
-  z-index: 40;
-  background: none;
-}
 /* Session-open volatility alert (2026-08-26) + macro-event alert (2026-08-26 follow-up) --
    absolutely centered as a GROUP on .ops-panel-head's own line regardless of the empty spacer
    div / EVIDENCE badge's widths on either side, since space-between alone wouldn't land a 3rd
