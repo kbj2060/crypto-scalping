@@ -105,12 +105,97 @@ lift는 커 보이지만 **몇 건 위에 서 있는 lift인지**를 봐야 한�
 
 **3자산이 모두 일치하는 신호는 하나도 없다.** 재스크리닝이 필수임을 다시 확인했다.
 
+## 4단계 · TabPFN 메타라벨 (VAL/OOS/HOLDOUT) ✅
+
+`scripts/research_xrp_evidence_signals_metalabel_tabpfn_20260903.py` — **5신호 통합 1개 스크립트**.
+
+⭐**개별 포팅하지 않은 이유**: XRP 확정 HIT_TYPE 중 2종이 BTC와 **계열이 다르다**
+(taker: close_at_h→giveback, fib: close_at_h→touch_mfe). BTC 스크립트를 포팅하면 그 안의
+hit 계산을 손으로 다른 계열로 고쳐야 하는데, 그게 정확히 "재구현" 함정이다.
+대신 **그리드스크린이 실제로 쓴 hit 함수를 그대로 import**했다 — 선정과 학습이 같은 함수를 쓰므로
+어긋날 수가 없다. 피쳐 목록과 파생 함수도 각 BTC 모듈에서 import(모듈마다 이름이 다르다:
+`add_missing_features` / `add_derived_features` / `augment_features`).
+
+⚠️포팅 중 2건 더 터짐: ① 트리거 컬럼명이 `bottom_taker_delta_z_climax`(내 SPEC은 `_z` 누락)
+② 후보 CSV엔 원재료만 있어 `nyse_open_flag`/`er_24`/`realized_vol_ratio` 등을 파생 함수로
+만들어야 했다. 둘 다 BTC 동결 컨텍스트에서 이미 겪은 지점이다.
+
+### 결과 (HOLDOUT 1회 노출, 셀은 사전 확정)
+
+| 신호 | HIT_TYPE | H | K | 해상봉 | TRAIN n | hit률 | VAL | OOS | **HOLDOUT** |
+|---|---|---|---|---|---|---|---|---|---|
+| `demarker_extreme` | touch MFE | 6 | 2.0 | 6 | — | — | — | — | **0.6651** |
+| `kalman_deviation_meanrev` | touch MFE | 5 | 2.0 | 5 | — | — | — | — | **0.6223** |
+| `short_term_return_z` | touch_mae_capped | 12 | 1.5 | 12 | 2,314 | 0.6016 | 0.6466 | 0.5753 | **0.6132** |
+| `taker_delta_z_climax` | giveback | 9 | 1.5 | **18** | 6,742 | 0.0899 | 0.6142 | 0.5556 | **0.6091** |
+| `orthogonal_combo` | touch_mfe | 8 | 2.0 | 8 | 1,446 | 0.4198 | 0.5979 | 0.5847 | **0.5599** |
+| `liquidity_sweep` | giveback | 15 | 2.0 | **30** | 5,019 | 0.0875 | 0.5099 | 0.4601 | **0.4886** ❌ |
+| `fib_extension_exhaustion` | touch_mfe | 10 | 1.5 | 10 | 999 | 0.6086 | 0.5221 | 0.5079 | **0.4738** ❌ |
+
+⭐**`liquidity_sweep`과 `fib_extension_exhaustion`은 HOLDOUT AUC가 0.5 미만** —
+무작위보다 나쁘다. **서빙에서 제외한다.**
+(BTC에서도 `liquidity_sweep`이 0.5214로 유일하게 무작위였다 — 두 자산에서 반복되는 약점이다.)
+
+⚠️**demarker 격자 경계 경고**: 1차 실행에서 K=2.0이 격자 **상단 경계**에서 선택돼 스크립트가
+경고를 냈다. 이 저장소는 같은 실수로 ETH demarker의 진짜 최적값을 놓친 전례가 있어
+(README 5.6) K 격자를 4.0까지 확장해 재실행 중이다.
+
+## 5단계 · demarker 격자 경계 확장 (3회) ✅
+
+스크립트가 경계 경고를 낼 때마다 그 방향으로 확장했다(README 5.6 규칙).
+
+| 회차 | 격자 | 선택 | HOLDOUT AUC | 경고 |
+|---|---|---|---|---|
+| 1차 | H[6..20] K[0.4..2.0] | H=6 K=2.0 | 0.6651 | K 상단 경계 |
+| 2차 | K를 4.0까지 확장 | H=6 K=2.0 | 0.6651 | H 하단 경계 |
+| **3차** | H[2..20] K[0.4..4.0] | **H=2 K=1.5** | **0.6759** | H=2 하단 경계 |
+
+⚠️3차의 H=2 경고는 **구조적 하한**이라 더 못 넓힌다(H=1은 다음 봉 하나뿐이라 "H봉 내 터치"
+라벨이 성립하지 않는다). 미탐색 경계가 아니라 정의상 바닥이므로 여기서 확정한다.
+⭐확장 덕에 AUC가 0.6651 → **0.6759**로 올랐다 — 경계 경고를 무시했으면 놓쳤을 이득이다.
+
+## 6단계 · 레짐 라벨 (Phase 2 조건부 lift) ✅
+
+`scripts/build_xrp_regime_inputs_20260903.py` — XRP엔 상류 입력 **3개 전부 없어서** 먼저 만들었다
+(klines 1year 224,245행 갭0 / 펀딩 31개월 추출 / 캐노니컬 피쳐는 만들지 않고 klines 직접 사용 —
+Phase 2는 피벗 계산에 OHLC만 쓴다).
+
+⭐**교차자산 파트너 슬롯**: BTC-주체 스크립트는 `btc_df=eth`로 ETH를 넣었다. XRP-주체이므로
+BTC를 넣었다 — 인자 이름이 `btc_df`인 건 시그니처일 뿐이다(FeatureEngineer `close_btc` 명명 함정과 같은 계열).
+
+`scripts/research_xrp_regime_label_conditional_lift_20260903.py` — S×K 격자 재탐색 결과:
+
+| 라벨 | 양쪽창 양수 | mean VAL | mean OOS |
+|---|---|---|---|
+| ⭐**S48_K6** | **10/16** | +0.0274 | **+0.0652** |
+| S6_K6 | 8/16 | +0.0283 | +0.0420 |
+| S12_K6 | 6/16 | +0.0035 | +0.0812 |
+| S48_K3 | 6/16 | +0.0056 | +0.0607 |
+| S12_K3 (ETH 승자) | 5/16 | +0.0422 | +0.0170 |
+| S24_K3 (BTC 승자) | **3/16** | −0.0036 | −0.0121 |
+
+### ⭐⭐세 자산의 레짐 라벨이 전부 다르다
+
+| 자산 | 승자 |
+|---|---|
+| ETH | **S12_K3** |
+| BTC | **S24_K3** |
+| **XRP** | **S48_K6** |
+
+BTC 승자 S24_K3은 XRP에서 **3/16으로 거의 최하위**, ETH 승자 S12_K3도 5/16이다.
+"ETH 승자가 BTC에서 3/10 최하위"였던 것과 **정확히 같은 패턴**이 XRP에서 재현됐다.
+⇒ 레짐 라벨은 자산별 재스크리닝이 선택이 아니라 필수다.
+
+⭐XRP는 **디바운스(K=6)가 스케일보다 중요**하다 — K=6이 S6/S12/S48 모두에서 같은 스케일의
+K=1/K=3보다 낫다. BTC에서 "디바운스가 스케일보다 중요"했던 관찰과 같은 방향이다.
+
 ## 남은 단계
 
-- [ ] 3b) `demarker_extreme` / `kalman_deviation_meanrev` 격자 (실행 중)
-- [ ] 4) 신호별 TabPFN 메타라벨 → VAL/OOS/HOLDOUT
+- [x] ~~3b) demarker/kalman 격자~~ ✅ (demarker는 격자 경계 경고로 K 확장 재실행 중)
+- [x] ~~4) TabPFN 메타라벨 → VAL/OOS/HOLDOUT~~ ✅ — 5종 중 2종 HOLDOUT AUC<0.5로 **서빙 제외**
 - [ ] 5) 동결 컨텍스트 + 라이브 스코어러 + 섀도우 러너 (HIT_SPEC에 `full_window` 반영)
 - [ ] 6) 연구 구현 대조 검증 (무작위 800건, 불일치 0)
 - [ ] 7) 결함 스캐너 (`audit_live_shadow_paths_defect_classes_20260903.py`)
-- [ ] 8) 레짐 모델 (BTC S24_K3 절차 — ETH 승자 S12_K3이 BTC에서 3/10 최하위였으므로 재스크리닝 필수)
+- [x] ~~8a) 레짐 라벨 재스크리닝~~ ✅ **S48_K6** (ETH S12_K3·BTC S24_K3과 전부 다름)
+- [ ] 8b) 레짐 분류기 학습 (Phase 3)
 - [ ] 9) 대시보드 배선

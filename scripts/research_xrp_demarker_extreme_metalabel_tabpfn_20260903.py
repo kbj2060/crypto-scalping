@@ -37,7 +37,13 @@ Methodology, 2 phases:
 
   Phase A -- HORIZON x K grid screen (step 2 of the task), RAW (non-deduped) fires, OOS/HOLDOUT
   never touched here:
-    HORIZON_GRID = [6, 8, 10, 12, 16, 20], K_GRID = [0.40, 0.55, 0.70, 0.85, 1.00, 1.5, 2.0] --
+    # ⚠️2026-09-03 2차: K를 4.0까지 넓혔더니 이번엔 **HORIZON=6이 하단 경계**에서 선택됐다.
+# 경계 경고가 뜨면 그 방향으로 넓히는 게 이 저장소의 규칙이다(README 5.6). 아래로 확장한다.
+HORIZON_GRID = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20], # ⚠️2026-09-03 XRP 1차 실행에서 **K=2.0이 격자 상단 경계**에서 선택돼 스크립트 자신이 경고를
+# 냈다("K=2.0 sits at the grid EDGE -- extend the grid before treating this as final").
+# 이 저장소는 같은 실수로 ETH demarker의 진짜 최적값을 놓친 전례가 있다(README 5.6).
+# 위쪽으로 확장해 재탐색한다. 아래쪽은 1차에서 이미 탐색됐고 선택되지 않았다.
+K_GRID = [0.40, 0.55, 0.70, 0.85, 1.00, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0] --
     both centered on ETH's own H=8/K=0.70 with room on every side (this project has a standing
     "don't trust a grid boundary" lesson: ETH's own K search for this exact signal first wrongly
     converged near K=2.0 by assuming a hit-rate-far-from-50/50 split must be unstable, and only
@@ -128,8 +134,10 @@ VAL_START = pd.Timestamp("2025-09-01")
 OOS_START = pd.Timestamp("2026-01-01")
 HOLDOUT_START = pd.Timestamp("2026-04-01")
 
-HORIZON_GRID = [6, 8, 10, 12, 16, 20]
-K_GRID = [0.40, 0.55, 0.70, 0.85, 1.00, 1.5, 2.0]
+# ⚠️2026-09-03 2차: K를 4.0까지 넓혔더니 이번엔 HORIZON=6이 **하단 경계**였다.
+# 경계 경고가 뜨면 그 방향으로 넓히는 게 이 저장소 규칙이다(README 5.6).
+HORIZON_GRID = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20]
+K_GRID = [0.40, 0.55, 0.70, 0.85, 1.00, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 CLUSTER_GAP = 6  # fixed by task instruction (ETH's own final choice for this signal was GAP=12,
                  # not re-derived here -- GAP is not part of this script's grid search)
 
