@@ -217,3 +217,107 @@ mode 전달 · 알고리즘 동등구현으로 **touch는 도달봉에서 종료
   복제본이 있고 **터치 전용**이다. BTC 신호들의 라벨 모드는 ETH와 다르게 재스크리닝됐으므로
   (`taker`/`fib`는 `close_at_h`) 같은 정합화가 필요하다. 다만 BTC 패널은 현재 프론트엔드에서
   제거된 상태라 표시 영향이 없어 이번 범위에서 뺐다.
+
+
+---
+
+# 4부 — BTC 증거신호 재점검 (2026-09-03)
+
+사용자: *"비트코인은 이더리움에서 파생됐을텐데 내부 로직이 굉장히 유사할거야. 비트코인 증거신호
+재점검해줘"*
+
+**직관은 맞았지만 결론은 반대다 — 파생됐기 때문에 오히려 어긋났다.**
+BTC는 ETH에서 포팅한 뒤 **자산별로 HIT_TYPE을 재스크리닝**했는데, 섀도우 러너의 `HIT_SPEC`은
+그 재스크리닝 결과를 **일부만** 반영하고 있었다.
+
+## ⭐발견: 7종 중 2종의 라벨 모드가 틀렸다
+
+각 신호의 라벨 스크립트를 직접 읽어 대조했다.
+
+| 신호 | 실제 라벨 정의 | 러너 `HIT_SPEC` | |
+|---|---|---|---|
+| `taker_delta_climax` | `close[i+6] >= entry + 2.0×atr` | close_at_h | ✅ |
+| **`liquidity_sweep`** | **touch_giveback_sustained** | **touch** | ❌ |
+| `kalman_deviation_meanrev` | touch MFE | touch | ✅ |
+| **`short_term_return_z`** | **touch_mae_capped** | **touch** | ❌ |
+| `orthogonal_combo` | touch MFE | touch | ✅ |
+| `demarker_extreme` | touch MFE | touch | ✅ |
+| `fib_extension_exhaustion` | `close[i+10] >= entry + 2.75×atr` | close_at_h | ✅ |
+
+### `liquidity_sweep` — 가장 복잡했다
+
+```
+fast_move = close[i+1 : i+20+1].max() - entry      ← **종가** 기준(고가 아님)
+peak      = high[i+1 : i+40+1].max()
+giveback  = (peak - close[i+40]) / (peak - entry)
+hit = fast_move/atr >= 2.0  AND  giveback <= 0.20
+```
+
+⇒ 해상에 **40봉(200분)이 필요**하다(호라이즌 20이 아니라). 그리고 **조기 확정이 불가능**하다.
+러너는 고가 터치 하나로 hit=1을 찍고 있었다 -- 게다가 어제 넣은 조기 확정이 이걸 더 악화시켰다.
+
+### `short_term_return_z` — 조기 확정은 오히려 valid
+
+```
+touch_bar = [i+1, i+6]에서 처음 목표에 닿은 봉
+MAE = entry - low[i+1 : touch_bar+1].min()          ← **터치 봉까지만** 측정
+hit = 1 iff MAE <= 2.0 × atr
+```
+
+MAE를 터치 시점까지만 재므로 **그 봉에서 결과가 완전히 확정**된다. 조기 확정이 정당하다 --
+단 MAE 조건을 함께 봐야 한다.
+
+## 영향 — 러너의 존재 이유가 무효였다
+
+이 러너의 목적은 **라이브 hit률이 학습 hit률을 재현하는지** 관측하는 것이다.
+틀린 규칙은 그 비교를 통째로 망친다:
+
+| `liquidity_sweep` | hit | n | 라이브 hit률 | 학습 hit률 | 격차 |
+|---|---|---|---|---|---|
+| 정정 전(터치) | 3 | 8 | **0.375** | 0.1022 | +0.273 (엄청난 초과달성처럼 보임) |
+| **정정 후** | **1** | **7** | **0.143** | 0.1022 | **+0.041** |
+
+**2.6배 과대평가**였다. 정정 후 값이 학습 hit률에 훨씬 가깝다는 것 자체가 수정이 옳다는 방증이다.
+
+## 수정
+
+- `HIT_SPEC`에 4개 모드 정의 + 근거 주석(각 라벨 스크립트의 파일:줄 표기)
+- `resolve()`를 4모드로 재구현. **조기 확정은 결과가 그 시점에 완전히 결정되는 모드에서만**:
+
+| 모드 | 조기 확정 | 이유 |
+|---|---|---|
+| `touch` | ✅ 터치 봉 | hit=1 확정, 더 볼 것 없음 |
+| `touch_mae_capped` | ✅ 터치 봉 | MAE를 터치 시점까지만 재므로 그 봉에서 완전 확정 |
+| `close_at_h` | ❌ | H봉 **종가**로만 판정 |
+| `touch_giveback_sustained` | ❌ | `close[i+FULL_WINDOW]`가 필요 |
+
+- 해상에 필요한 봉 수를 `_resolve_bars()`로 분리(giveback만 `full_window`)
+- BTC 패널(`live_btc_evidence_signal_metalabel_20260902.py`)의 `_fill_until_tp_or_horizon`도
+  같은 `mode`를 받도록 정합화. `FILL_SPEC`에 mode/full_window 추가.
+- 틀린 규칙으로 판정됐던 **원장 10건을 pending으로 되돌려 재판정**했다
+  (상태 백업: `btc_evidence_signal_shadow_state.json.bak_pre_hitmode_fix_20260903`).
+
+## 검증 — 연구 구현과 직접 대조
+
+무작위 400 지점 × 양측 = **신호당 800건**을, 각 신호의 **연구 스크립트 원본 구현**
+(`hit_touch_mae_capped` / `hit_touch_giveback_sustained` / close_at_h / touch)과 대조:
+
+```
+✅ short_term_return_z        n=800  불일치 0
+✅ liquidity_sweep            n=800  불일치 0
+✅ taker_delta_climax         n=800  불일치 0
+✅ fib_extension_exhaustion   n=800  불일치 0
+✅ kalman_deviation_meanrev   n=800  불일치 0
+✅ demarker_extreme           n=800  불일치 0
+✅ orthogonal_combo           n=800  불일치 0
+⇒ 7모드 전부 연구 구현과 일치
+```
+
+재기동 후 실제 재판정 로그에서 `liquidity_sweep`이 **40봉**에 확정되는 것을 확인했다.
+
+## ⚠️교훈
+
+**"ETH에서 파생됐으니 로직이 같을 것"이 정확히 함정이었다.** BTC는 포팅 후
+HIT_TYPE을 자산별로 재스크리닝했고(그 재스크리닝 자체가 사용자 지적으로 추가된 축이다),
+서빙 코드는 그 결과를 부분적으로만 따라갔다.
+**포팅한 코드는 "원본과 같다"가 아니라 "어디가 달라졌나"부터 확인해야 한다.**

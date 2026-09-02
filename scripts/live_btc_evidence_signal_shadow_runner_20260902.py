@@ -60,15 +60,37 @@ MARK_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 LOOP_SECONDS = 300
 
 # 신호별 HIT 판정 규격 (동결 컨텍스트 리포트의 btc_params와 동일 출처)
+# ⚠️2026-09-03 정정: `liquidity_sweep`과 `short_term_return_z`의 mode가 **틀려 있었다**.
+# 둘 다 "touch"로 뒀는데 실제 라벨은 추가 조건이 있다 -- 그대로면 hit률이 과대평가되고,
+# 이 러너의 존재 이유(라이브 hit률 vs 학습 hit률 대조) 자체가 무효가 된다.
+# 각 값은 그 신호의 라벨 스크립트에서 직접 확인했다.
 HIT_SPEC = {
+    # close[i+6] >= entry + 2.0*atr  (research_btc_taker_delta_climax_metalabel_tabpfn:19-23)
     "taker_delta_climax":       {"horizon": 6,  "k": 2.0,  "mode": "close_at_h"},
-    "liquidity_sweep":          {"horizon": 20, "k": 2.0,  "mode": "touch"},
+    # ⭐touch_giveback_sustained (research_btc_liquidity_sweep_metalabel_tabpfn:82-85,185-203)
+    #   fast_move = close[i+1:i+20+1].max() - entry   ← **종가** 기준(고가 아님)
+    #   peak      = high[i+1:i+40+1].max()
+    #   giveback  = (peak - close[i+40]) / (peak - entry)
+    #   hit = fast_move/atr >= 2.0 AND giveback <= 0.20
+    #   ⚠️해상에 **40봉**이 필요하다(호라이즌 20이 아니라). 조기 확정 불가.
+    "liquidity_sweep":          {"horizon": 20, "k": 2.0,  "mode": "touch_giveback_sustained",
+                                 "full_window": 40, "giveback_ceiling": 0.20},
     "kalman_deviation_meanrev": {"horizon": 10, "k": 3.5,  "mode": "touch"},
-    "short_term_return_z":      {"horizon": 6,  "k": 2.0,  "mode": "touch"},
+    # ⭐touch_mae_capped (research_btc_short_term_return_z_metalabel_tabpfn:10-14,89-91)
+    #   터치 봉까지의 MAE <= 2.0*atr 이어야 hit=1. MAE를 **터치 시점까지만** 재므로
+    #   터치하는 그 봉에서 결과가 **완전히 확정**된다(조기 확정 가능).
+    "short_term_return_z":      {"horizon": 6,  "k": 2.0,  "mode": "touch_mae_capped",
+                                 "k_loss_mult": 2.0},
     "orthogonal_combo":         {"horizon": 8,  "k": 2.0,  "mode": "touch"},
     "demarker_extreme":         {"horizon": 8,  "k": 0.70, "mode": "touch"},
+    # close[i+10] >= entry + 2.75*atr (research_btc_fib_extension_exhaustion_metalabel_tabpfn:21-22)
     "fib_extension_exhaustion": {"horizon": 10, "k": 2.75, "mode": "close_at_h"},
 }
+
+
+def _resolve_bars(spec: dict) -> int:
+    """해상에 필요한 봉 수. giveback 모드만 호라이즌보다 길다(FULL_WINDOW)."""
+    return int(spec.get("full_window", spec["horizon"]))
 HOLDOUT_AUC = {"demarker_extreme": 0.7286, "kalman_deviation_meanrev": 0.6709,
                "short_term_return_z": 0.6443, "taker_delta_climax": 0.6276,
                "orthogonal_combo": 0.5933, "fib_extension_exhaustion": 0.5657,
@@ -133,26 +155,25 @@ def _finalize(s: dict[str, Any], p: dict[str, Any], hit: int, bars_to_result: in
 
 
 def resolve(s: dict[str, Any], bars: pd.DataFrame) -> None:
-    """pending을 각 신호 자신의 HIT 정의로 판정해 원장에 확정한다.
+    """pending을 **각 신호 자신의 라벨 정의 그대로** 판정해 원장에 확정한다.
 
-    ⭐**2026-09-03 (1) touch 모드 조기 확정.** 예전엔 호라이즌이 다 지나야만 확정해서,
-    3번째 봉에서 이미 목표에 닿았어도 20봉이 끝날 때까지(최대 100분) "대기"로 남았다.
-    기록되는 결과는 어차피 같지만(구간 어디서든 닿으면 hit=1) **표시 상태가 사실과 달랐다**.
-    이제 닿는 즉시 hit=1로 확정한다 -- 결과는 동일하고 대기 목록만 정확해진다.
-    ⚠️`close_at_h`(taker/fib)는 **H봉 종가**로 판정하므로 정의상 조기 확정이 불가능하다.
-      중간에 목표를 스쳐도 종가가 미달이면 hit=0이다. 이건 결함이 아니라 그 신호의 정의다.
+    ⭐2026-09-03 (1) 모드 정정. `liquidity_sweep`(touch_giveback_sustained)과
+    `short_term_return_z`(touch_mae_capped)를 "touch"로 잘못 두고 있었다 -- hit률이
+    과대평가되고, 이 러너의 존재 이유(라이브 vs 학습 hit률 대조)가 무효가 된다.
 
-    ⭐**(2) 창 밖 pending 만료.** 러너가 조회 창보다 오래 멈추면 신호 봉이 밀려나
-    `pos` 판정에 실패해 pending에 **영원히** 남았다. 이제 `expired`로 분리 기록한다.
-    ⚠️원장(`ledger`)이 아니라 별도 리스트에 넣는다 -- hit률 집계를 오염시키면 안 된다.
+    ⭐(2) 조기 확정은 **결과가 그 시점에 완전히 결정되는 모드에서만** 한다:
+      touch             터치 -> hit=1 확정 (더 볼 것 없음)
+      touch_mae_capped  터치 봉에서 MAE를 재므로 그 봉에서 hit=0/1 **완전 확정**
+      close_at_h        H봉 **종가**로만 판정 -> 조기 확정 불가
+      touch_giveback_sustained  close[i+FULL_WINDOW]가 필요 -> 조기 확정 불가
+
+    ⭐(3) 창 밖으로 밀려난 pending은 `expired`로 분리(hit 집계 미오염).
     """
     if bars is None or bars.empty:
         return
-    # tz-aware Series에 .to_numpy()를 쓰면 object 배열(Timestamp)이 나오고, astype이
-    # "no explicit representation of timezones" 경고를 낸다. UTC이므로 tz를 명시적으로
-    # 떼서 같은 값을 얻는다 -- 의도가 드러나고 경고도 사라진다.
     ts = bars["timestamp"].dt.tz_localize(None).to_numpy()
     first = pd.Timestamp(bars["timestamp"].iloc[0])
+    hi, lo, cl = (bars[c].to_numpy(dtype=float) for c in ("high", "low", "close"))
     keep = []
     for p in s["pending"]:
         spec = HIT_SPEC.get(p["signal"])
@@ -164,42 +185,68 @@ def resolve(s: dict[str, Any], bars: pd.DataFrame) -> None:
         in_win = (pos < len(bars)
                   and str(bars["timestamp"].iloc[pos])[:16] == str(p["bar_utc"])[:16])
         if not in_win:
-            if bar_ts < first:                                  # 창 밖으로 밀려남
+            if bar_ts < first:
                 s.setdefault("expired", []).append(
                     {**p, "hit": None, "reason": "out_of_window",
                      "expired_utc": datetime.now(timezone.utc).isoformat(),
                      "note": f"조회 창({len(bars)}봉) 밖 -- 러너 다운타임 추정"})
                 s["expired"] = s["expired"][-200:]
-                log(f"  ⚠️만료 {p['signal']} {p['side']} bar={str(p['bar_utc'])[:16]} "
-                    f"-- 조회 창 밖(다운타임 추정), hit 집계에서 제외")
+                log(f"  ⚠️만료 {p['signal']} {p['side']} bar={str(p['bar_utc'])[:16]} -- 조회 창 밖")
             else:
-                keep.append(p)                                  # 아직 창에 안 들어옴
+                keep.append(p)
             continue
 
-        end = pos + spec["horizon"]
-        avail = min(end, len(bars) - 1)                         # 지금까지 확보된 봉까지만
-        seg = bars.iloc[pos + 1:avail + 1]
-        k, entry, atr = spec["k"], p["entry"], p["atr"]
+        mode, k, H = spec["mode"], spec["k"], spec["horizon"]
+        need = _resolve_bars(spec)
+        entry, atr = p["entry"], p["atr"]
+        thresh = k * atr
+        end_need = pos + need
+        avail = min(end_need, len(bars) - 1)
+        down = p["side"] == "bottom"
 
-        if spec["mode"] == "touch" and len(seg):
-            if p["side"] == "bottom":
-                mask = seg["high"].to_numpy() >= entry + k * atr
-            else:
-                mask = seg["low"].to_numpy() <= entry - k * atr
-            if mask.any():                                      # ⭐닿는 즉시 확정
-                _finalize(s, p, 1, int(np.argmax(mask)) + 1, early=(end >= len(bars)))
+        # ── 조기 확정 (결과가 그 시점에 완전히 결정되는 모드만) ──
+        if mode in ("touch", "touch_mae_capped") and avail > pos:
+            seg_hi, seg_lo = hi[pos + 1:avail + 1], lo[pos + 1:avail + 1]
+            cond = (seg_hi >= entry + thresh) if down else (seg_lo <= entry - thresh)
+            if cond.any():
+                tb = int(np.argmax(cond))                    # 터치 봉(seg 기준 0-based)
+                if mode == "touch":
+                    _finalize(s, p, 1, tb + 1, early=(end_need >= len(bars)))
+                else:                                        # touch_mae_capped
+                    mae = ((entry - seg_lo[:tb + 1].min()) if down
+                           else (seg_hi[:tb + 1].max() - entry))
+                    hit = int(mae <= spec["k_loss_mult"] * atr)
+                    _finalize(s, p, hit, tb + 1, early=(end_need >= len(bars)))
                 continue
 
-        if end >= len(bars):
-            keep.append(p)                                      # 아직 미완
+        if end_need >= len(bars):
+            keep.append(p)                                    # 아직 미완
             continue
 
-        if spec["mode"] == "close_at_h":
-            px = float(bars["close"].iloc[end])
-            hit = (px >= entry + k * atr) if p["side"] == "bottom" else (px <= entry - k * atr)
-            _finalize(s, p, int(hit), spec["horizon"], early=False)
-        else:
-            _finalize(s, p, 0, spec["horizon"], early=False)    # 창 전체에서 미도달
+        # ── 창 완주 후 확정 ──
+        if mode == "close_at_h":
+            px = float(cl[pos + H])
+            hit = int((px >= entry + thresh) if down else (px <= entry - thresh))
+        elif mode == "touch_giveback_sustained":
+            # 라벨 스크립트와 동일: fast_move는 **종가** max/min, peak은 고가/저가
+            seg_cl = cl[pos + 1:pos + H + 1]
+            fast_move = (seg_cl.max() - entry) if down else (entry - seg_cl.min())
+            if fast_move / atr < k:
+                hit = 0
+            else:
+                fw = int(spec["full_window"])
+                peak = (hi[pos + 1:pos + fw + 1].max() if down
+                        else lo[pos + 1:pos + fw + 1].min())
+                end_price = float(cl[pos + fw])
+                denom = (peak - entry) if down else (entry - peak)
+                if abs(denom) <= 1e-12:
+                    hit = 0
+                else:
+                    gb = ((peak - end_price) / denom) if down else ((end_price - peak) / denom)
+                    hit = int(np.isfinite(gb) and gb <= spec["giveback_ceiling"])
+        else:                                                 # touch / touch_mae_capped 미도달
+            hit = 0
+        _finalize(s, p, hit, need, early=False)
     s["pending"] = keep
 
 

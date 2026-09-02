@@ -247,21 +247,28 @@ RAW_COLUMN_ALIAS = {"taker_delta_climax": "taker_delta_z_climax"}
 # 프레임에 그대로 적용하면 조용히 다른 자산의 보정값이 들어간다. 아래 값은 BTC 자체 그리드스크린
 # 결과(live_btc_evidence_signal_shadow_runner_20260902.py::HIT_SPEC와 동일 출처, 이 파일이
 # import하는 대신 값만 복제 -- 순환 임포트 회피 + 러너 프로세스를 건드리지 않기 위함)다.
+# ⚠️2026-09-03: `mode`를 추가했다. 그 전엔 7종 전부 터치로만 채웠는데, BTC 라벨은 자산별로
+# 재스크리닝돼 ETH와 다르다 -- taker/fib는 **종가 기준**이라 중간 터치로 끝나지 않고,
+# liquidity_sweep은 되돌림(giveback) 조건이, short_term_return_z는 MAE 상한이 더 붙는다.
+# 각 신호의 라벨 스크립트에서 직접 확인했다(근거는 shadow_runner의 HIT_SPEC 주석 참조).
 FILL_SPEC = {
-    "taker_delta_climax":       {"k": 2.0,  "horizon": 6},
-    "liquidity_sweep":          {"k": 2.0,  "horizon": 20},
-    "kalman_deviation_meanrev": {"k": 3.5,  "horizon": 10},
-    "short_term_return_z":      {"k": 2.0,  "horizon": 6},
-    "orthogonal_combo":         {"k": 2.0,  "horizon": 8},
-    "demarker_extreme":         {"k": 0.70, "horizon": 8},
-    "fib_extension_exhaustion": {"k": 2.75, "horizon": 10},
+    "taker_delta_climax":       {"k": 2.0,  "horizon": 6,  "mode": "close_at_h"},
+    "liquidity_sweep":          {"k": 2.0,  "horizon": 20, "mode": "full_window",
+                                 "full_window": 40},
+    "kalman_deviation_meanrev": {"k": 3.5,  "horizon": 10, "mode": "touch"},
+    "short_term_return_z":      {"k": 2.0,  "horizon": 6,  "mode": "touch_mae_capped",
+                                 "k_loss_mult": 2.0},
+    "orthogonal_combo":         {"k": 2.0,  "horizon": 8,  "mode": "touch"},
+    "demarker_extreme":         {"k": 0.70, "horizon": 8,  "mode": "touch"},
+    "fib_extension_exhaustion": {"k": 2.75, "horizon": 10, "mode": "close_at_h"},
 }
 PANEL_HISTORY_BARS = 48  # dashboard/server.py's EVIDENCE_SIGNAL_HISTORY_BARS(4h @ 5m)와 동일
 
 
 def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side: str,
                                high: pd.Series, low: pd.Series, close: pd.Series,
-                               atr_pct: pd.Series) -> pd.Series:
+                               atr_pct: pd.Series, mode: str = "touch",
+                               k_loss_mult: float = 2.0) -> pd.Series:
     """live_evidence_signal_dashboard_20260823.py::compute_signals()의 동명 내부함수와 같은
     알고리즘(발동 시점부터 K*ATR% 터치 또는 HORIZON 경과 중 먼저 오는 시점까지 채움) --
     그쪽은 ETH의 high/low/close/atr_pct를 클로저로 참조하는 중첩함수라 그대로 import할 수
@@ -270,15 +277,20 @@ def _fill_until_tp_or_horizon(raw: pd.Series, k: float, horizon_bars: int, side:
     filled = np.zeros(n, dtype=bool)
     raw_arr = raw.fillna(False).to_numpy()
     high_a, low_a, close_a, atr_a = high.to_numpy(), low.to_numpy(), close.to_numpy(), atr_pct.to_numpy()
+    # ⭐mode = 그 신호의 라벨이 **언제 확정되는가**.
+    #   touch            터치 봉에서 확정 -> 거기서 끝
+    #   touch_mae_capped 터치 봉까지의 MAE로 hit이 완전 확정 -> 터치 봉에서 끝
+    #   close_at_h       H봉 종가로만 판정 -> 중간 터치로 못 끝냄, 전 구간 유지
+    #   full_window      giveback이 close[i+FULL_WINDOW]를 필요로 함 -> 전 구간 유지
     for i in np.flatnonzero(raw_arr):
         end = min(i + horizon_bars, n - 1)
-        if not np.isnan(atr_a[i]):
+        if mode in ("touch", "touch_mae_capped") and not np.isnan(atr_a[i]):
             target = k * atr_a[i]
             level = close_a[i] * (1 - target) if side == "top" else close_a[i] * (1 + target)
             for b in range(i + 1, end + 1):
                 touched = (low_a[b] <= level) if side == "top" else (high_a[b] >= level)
                 if touched:
-                    end = b
+                    end = b               # MAE 상한 여부와 무관하게 **확정 시점**은 터치 봉이다
                     break
         filled[i:end + 1] = True
     return pd.Series(filled, index=raw.index)
@@ -317,10 +329,13 @@ def compute_btc_evidence_signals_panel(history_bars: int = PANEL_HISTORY_BARS) -
             bcol, tcol = f"bottom_{raw_name}", f"top_{raw_name}"
             if spec is None or bcol not in sig.columns or tcol not in sig.columns:
                 continue
-            bottom_fill = _fill_until_tp_or_horizon(sig[bcol], spec["k"], spec["horizon"], "bottom",
-                                                     sig["high"], sig["low"], sig["close"], sig["atr_pct"])
-            top_fill = _fill_until_tp_or_horizon(sig[tcol], spec["k"], spec["horizon"], "top",
-                                                  sig["high"], sig["low"], sig["close"], sig["atr_pct"])
+            fill_h = int(spec.get("full_window", spec["horizon"]))
+            bottom_fill = _fill_until_tp_or_horizon(sig[bcol], spec["k"], fill_h, "bottom",
+                                                     sig["high"], sig["low"], sig["close"],
+                                                     sig["atr_pct"], spec.get("mode", "touch"))
+            top_fill = _fill_until_tp_or_horizon(sig[tcol], spec["k"], fill_h, "top",
+                                                  sig["high"], sig["low"], sig["close"],
+                                                  sig["atr_pct"], spec.get("mode", "touch"))
             bottom_fired = bool(bottom_fill.iloc[-1])
             top_fired = bool(top_fill.iloc[-1])
             if bottom_fired:
