@@ -6,7 +6,9 @@
 `docs/experiments/eth_maker_fill_simulation_l2_20260822.md`)의 라이브 검증 축.
 시뮬 예측치(저변동 3.1~3.3bp, 고변동 역방향 조건부 3.8~4.0bp)와 실측 분포를 대조한다.
 
-- 스트림: fstream.binance.com combined — {symbol}@bookTicker + {symbol}@aggTrade
+- 스트림: fstream.binance.com combined — {symbol}@bookTicker + {symbol}@trade
+  (2026-09-02 @aggTrade에서 전환 — 바이낸스가 @aggTrade 전송을 중단했는데 구독은 에러 없이
+   수락돼 8일간 trade_msgs=0으로 조용히 실패하고 있었다. 아래 heartbeat 경고 참조.)
   (websockets, tail_risk_interceptor.py와 동일 스택/재연결 패턴).
 - 가상 주문 체결 규칙(시뮬 v1과 동일한 보수 규칙): 내 가격을 뚫는 반대측 aggressor 체결 →
   체결 / 내 가격에서의 체결은 진입 시점 L1 표시수량(=앞선 큐, bookTicker B/A) 소진 후만 /
@@ -60,7 +62,15 @@ DECISION_SYMBOL = os.environ.get(
 DECISION_POLL_S = int(os.environ.get("MAKER_SHADOW_DECISION_POLL_S", "10"))
 DECISION_MAX_AGE_S = int(os.environ.get("MAKER_SHADOW_DECISION_MAX_AGE_S", "180"))
 
-WS_URL = f"wss://fstream.binance.com/stream?streams={SYMBOL.lower()}@bookTicker/{SYMBOL.lower()}@aggTrade"
+# 2026-09-02: @aggTrade -> @trade. Binance USD-M stopped delivering @aggTrade -- the
+# subscription is still ACCEPTED (SUBSCRIBE returns result:null, no error) but zero messages
+# ever arrive, which is why this failed silently for 8+ days with trade_msgs=0 while
+# book_msgs reached 293M. Verified 2026-09-02 by direct probe: ethusdt@aggTrade and
+# btcusdt@aggTrade both deliver nothing, while ethusdt@trade delivers ~320 msg/s.
+# @trade carries the same four fields this worker uses (p/q/m/T) and is FINER grained than
+# aggTrade (individual fills rather than same-price aggregates), which is strictly better
+# for the queue-consumption fill rule.
+WS_URL = f"wss://fstream.binance.com/stream?streams={SYMBOL.lower()}@bookTicker/{SYMBOL.lower()}@trade"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("maker_fill_shadow")
@@ -239,6 +249,13 @@ class Worker:
                           self.legs_done, len(self.legs), self.book.age_s()])
         logger.info("heartbeat: book_msgs=%d trade_msgs=%d legs_done=%d active=%d book_age=%.1fs",
                     self.book_msgs, self.trade_msgs, self.legs_done, len(self.legs), self.book.age_s())
+        # 2026-09-02: the @aggTrade outage was invisible for 8+ days because a dead trade stream
+        # degrades silently -- fills simply fall back to quote_cross only, and every number the
+        # worker reports still looks plausible. Make that state LOUD instead.
+        if self.book_msgs > 100_000 and self.trade_msgs == 0:
+            logger.error("TRADE STREAM DEAD: book_msgs=%d but trade_msgs=0 -- fill rule is running "
+                         "on quote_cross only, cost figures are a biased subsample. Check the "
+                         "stream name in WS_URL.", self.book_msgs)
 
     def _sweep(self) -> None:
         for leg in self.legs:
@@ -267,7 +284,7 @@ class Worker:
                             self.book_msgs += 1
                             for leg in self.legs:
                                 leg.on_book(self.book)
-                        elif ev == "aggTrade":
+                        elif ev in ("trade", "aggTrade"):   # aggTrade kept so a restored stream still routes
                             self.trade_msgs += 1
                             px = float(data["p"]); qty = float(data["q"])
                             bm = bool(data["m"]); ex_ts = int(data["T"])
