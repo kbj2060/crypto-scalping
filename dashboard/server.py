@@ -15,7 +15,7 @@ from typing import Any
 
 import duckdb
 import pandas as pd
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
 from dotenv import load_dotenv
 
 
@@ -250,6 +250,10 @@ ETH_ODYSSEY4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_sh
 ETH_ODYSSEY4_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
+# How long a cached payload may keep being served while its (expensive) replacement computes.
+# Sized to cover a worst-case TabPFN refit (43s measured under GPU contention) with wide margin:
+# past this the payload is treated as cold again and the request blocks for a current reading.
+STALE_GRACE_SECONDS = 600
 MARKET_HISTORY_CACHE_SECONDS = 300
 SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"
 SCALP_SHADOW_STATE_SCHEMA = "eth_micro_scalp_v4.shadow_bot_step.v1"
@@ -1120,7 +1124,7 @@ def make_app() -> web.Application:
     event_clients: set[asyncio.Queue[str]] = set()
     latest_event_state: dict[str, Any] | None = None
     latest_event_tickers: dict[str, dict[str, Any]] = {}
-    market_history_cache: dict[str, tuple[float, list[dict[str, float | int]]]] = {}
+    market_history_cache: dict[str, dict[str, Any]] = {}
     market_history_locks = {asset: asyncio.Lock() for asset in MARKET_SYMBOLS}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
     evidence_signal_lock = asyncio.Lock()
@@ -1155,6 +1159,115 @@ def make_app() -> web.Application:
     macro_calendar_lock = asyncio.Lock()
     model_indicator_history: deque = deque(maxlen=MODEL_INDICATOR_HISTORY_MAX)
     model_indicator_sample_state: dict[str, float] = {"last_sample_at": 0.0}
+
+    # ---------------------------------------------------------------------------------
+    # 2026-09-03 perf pass -- stale-while-revalidate.
+    #
+    # Why: every Snapshot-tab cache declared above is keyed by asset and filled LAZILY, so
+    # the first visit to a coin paid the full cold cost of ~6 endpoints at once (a Binance
+    # klines fetch + pandas each, and for the evidence panels a TabPFN refit measured at up
+    # to 43s under GPU contention -- see the 2026-09-03 GPU-contention finding). With 5 coins
+    # in the switcher that cold surface is 5x what it was when this was ETH-only, which is
+    # exactly the "코인이 늘수록 대시보드가 느려진다" symptom this pass targets.
+    #
+    # Worse, several client poll intervals were set EQUAL to the server TTL they mirror
+    # (evidence 60s TTL vs a 300s client poll; liq-map/regime 300s vs 300s), so even the
+    # already-visited coin missed the cache on essentially every poll and paid the cold cost
+    # again. swr_cached() below keeps the REQUEST path off the COMPUTE path: once a payload
+    # exists, a request never blocks on a recompute -- it returns the stale one immediately
+    # and refreshes behind it. Only a genuinely cold cache (this process has never computed
+    # that asset) still waits.
+    #
+    # ⚠️A companion background prewarm loop was written and deployed alongside this on
+    # 2026-09-03, then REMOVED (user decision) after the server locked up that evening. The
+    # hang was traced to the WSL2 host pausing (kernel journal shows "Clock change detected"
+    # twice, no OOM, and trading_bot.py still logging normally throughout), NOT to this code
+    # -- but the loop refreshed 4 TabPFN endpoints every ~45-90s whenever a browser was
+    # connected, which was new background GPU/CPU load on a box that already has documented
+    # GPU contention, and it was not worth carrying an unproven suspect. Do not reintroduce
+    # a background warm loop here without a dedicated GPU budget for the dashboard.
+    #
+    # The per-endpoint fetch/compute bodies themselves are UNCHANGED -- they were only moved
+    # into `produce()` closures so swr_cached() can drive them.
+    # ---------------------------------------------------------------------------------
+    refresh_tasks: dict[str, asyncio.Task] = {}
+
+    def _schedule_refresh(key: str, cache: dict, lock: asyncio.Lock, ttl: float, produce) -> None:
+        """Kick one background refresh for `key`, deduped while a previous one is in flight."""
+        task = refresh_tasks.get(key)
+        if task is not None and not task.done():
+            return
+        async def _run() -> None:
+            try:
+                async with lock:
+                    if time.monotonic() - cache.get("ts", 0.0) < ttl:
+                        return  # another path refreshed it while this one queued on the lock
+                    payload = await produce()
+                    cache["payload"] = payload
+                    cache["ts"] = time.monotonic()
+            except Exception as exc:  # noqa: BLE001 -- a failed BACKGROUND refresh must never
+                # reach the client: the stale payload it was refreshing is still being served,
+                # so the correct behaviour is to log it and let the next cycle retry. Letting
+                # this raise would only kill an orphan task and lose the reason.
+                print(f"cache refresh failed for {key} (still serving stale): {exc}", flush=True)
+        refresh_tasks[key] = asyncio.create_task(_run())
+
+    async def swr_cached(key: str, cache: dict, lock: asyncio.Lock, ttl: float, produce,
+                         *, max_stale: float = 0.0) -> Any:
+        """Fresh -> serve it. Stale -> serve stale NOW and refresh behind it. Cold -> await.
+
+        `max_stale` is how far PAST `ttl` a payload may be served while its replacement is still
+        being computed, and it defaults to 0 -- i.e. this behaves exactly like the double-checked
+        lock it replaced unless a call site opts in. Only endpoints whose recompute is genuinely
+        expensive (a Binance round trip, or a TabPFN refit that has been measured at 43s under GPU
+        contention) opt in; for the endpoints that just read a local duckdb, blocking was already
+        fast and returns FRESHER data, so they keep doing that.
+
+        Past ttl + max_stale the payload is treated as cold again: at that age, blocking for a
+        current reading beats silently serving something long out of date."""
+        now = time.monotonic()
+        age = now - cache.get("ts", 0.0)
+        payload = cache.get("payload")
+        if payload is not None and age < ttl:
+            return payload
+        if payload is not None and age < ttl + max_stale:
+            _schedule_refresh(key, cache, lock, ttl, produce)
+            return payload
+        async with lock:
+            payload = cache.get("payload")
+            if payload is not None and time.monotonic() - cache.get("ts", 0.0) < ttl:
+                return payload
+            payload = await produce()
+            cache["payload"] = payload
+            cache["ts"] = time.monotonic()
+            return payload
+
+    # Shared, connection-pooled session for this process's Binance calls. Every klines/funding
+    # fetch used to open its OWN `async with ClientSession(...)` (7 of them), which means a fresh
+    # TCP+TLS handshake per call and no keep-alive reuse across endpoints or across coins -- the
+    # single biggest avoidable fixed cost once one coin switch fans out to 6 endpoints at once.
+    http_session: dict[str, ClientSession | None] = {"session": None}
+
+    def binance_session() -> ClientSession:
+        session = http_session["session"]
+        if session is None or session.closed:
+            raise web.HTTPServiceUnavailable(reason="http_session_unavailable")
+        return session
+
+    async def fetch_binance_json(url: str, params: dict, *, timeout: float = 10.0,
+                                 error_reason: str | None = None) -> Any:
+        """GET `url` on the shared pooled session and return the decoded JSON.
+
+        `error_reason` reproduces what each per-endpoint block used to do on a non-200: raise
+        HTTPBadGateway with that reason. Passing None instead returns None on a non-200, for the
+        two legs (BTC/funding, forming-bar preview) that are documented as fail-soft."""
+        async with binance_session().get(url, params=params,
+                                         timeout=ClientTimeout(total=timeout)) as response:
+            if response.status != web.HTTPOk.status_code:
+                if error_reason is None:
+                    return None
+                raise web.HTTPBadGateway(reason=error_reason)
+            return await response.json()
 
     def load_json_cached(path: Path, signature: tuple[int, int] | None = None) -> Any:
         if signature is None:
@@ -1247,23 +1360,12 @@ def make_app() -> web.Application:
             return await load_market_history_from_evidence_cache(asset)
         # sol: no evidence-signal history exists for it (those only ever cover ETH+BTC), so this
         # keeps its own independent fetch -- unchanged from before.
-        cached = market_history_cache.get(asset)
-        now = time.monotonic()
-        if cached and now - cached[0] < MARKET_HISTORY_CACHE_SECONDS:
-            return cached[1]
-        async with market_history_locks[asset]:
-            cached = market_history_cache.get(asset)
-            now = time.monotonic()
-            if cached and now - cached[0] < MARKET_HISTORY_CACHE_SECONDS:
-                return cached[1]
-            async with ClientSession(timeout=ClientTimeout(total=3)) as session:
-                async with session.get(
-                    "https://fapi.binance.com/fapi/v1/klines",
-                    params={"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 100},
-                ) as response:
-                    if response.status != web.HTTPOk.status_code:
-                        raise web.HTTPBadGateway(reason="market_history_upstream_error")
-                    rows = await response.json()
+        async def produce() -> list[dict[str, float | int]]:
+            rows = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 100},
+                timeout=3.0, error_reason="market_history_upstream_error",
+            )
             candles = [
                 {
                     "time": int(row[0]) // 1000,
@@ -1274,8 +1376,14 @@ def make_app() -> web.Application:
                 }
                 for row in rows
             ]
-            market_history_cache[asset] = (time.monotonic(), candles)
             return candles
+
+        return await swr_cached(
+            f"market_history:{asset}",
+            market_history_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            market_history_locks[asset], MARKET_HISTORY_CACHE_SECONDS, produce,
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_evidence_signals() -> dict[str, Any]:
         """Informational-only reversal-evidence-signal readout for the Snapshot tab -- NOT a
@@ -1284,26 +1392,16 @@ def make_app() -> web.Application:
         warm up orthogonal_combo's EVIDENCE_PCTRANK_WINDOW-bar percentile-rank window) than the
         chart's own /api/market-history (limit=100), so it gets its own cache rather than sharing
         market_history_cache."""
-        now = time.monotonic()
-        cached = evidence_signal_cache["payload"]
-        if cached is not None and now - evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with evidence_signal_lock:
-            cached = evidence_signal_cache["payload"]
-            if cached is not None and time.monotonic() - evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            async with ClientSession(timeout=ClientTimeout(total=10)) as session:
-                async with session.get(
-                    "https://fapi.binance.com/fapi/v1/klines",
-                    params={
-                        "symbol": EVIDENCE_SIGNAL_SYMBOL,
-                        "interval": EVIDENCE_SIGNAL_INTERVAL,
-                        "limit": EVIDENCE_FETCH_LIMIT,
-                    },
-                ) as response:
-                    if response.status != web.HTTPOk.status_code:
-                        raise web.HTTPBadGateway(reason="evidence_signal_upstream_error")
-                    raw = await response.json()
+        async def produce() -> dict[str, Any]:
+            raw = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {
+                    "symbol": EVIDENCE_SIGNAL_SYMBOL,
+                    "interval": EVIDENCE_SIGNAL_INTERVAL,
+                    "limit": EVIDENCE_FETCH_LIMIT,
+                },
+                error_reason="evidence_signal_upstream_error",
+            )
             cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
                     "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
             df = pd.DataFrame(raw, columns=cols)
@@ -1321,30 +1419,28 @@ def make_app() -> web.Application:
             # smt_divergence to not-fired when btc_df is None.
             btc_df = None
             try:
-                async with ClientSession(timeout=ClientTimeout(total=10)) as btc_session:
-                    async with btc_session.get(
-                        "https://fapi.binance.com/fapi/v1/klines",
-                        params={
-                            "symbol": EVIDENCE_SIGNAL_BTC_SYMBOL,
-                            "interval": EVIDENCE_SIGNAL_INTERVAL,
-                            "limit": EVIDENCE_FETCH_LIMIT,
-                        },
-                    ) as btc_response:
-                        if btc_response.status == web.HTTPOk.status_code:
-                            braw = await btc_response.json()
-                            bdf = pd.DataFrame(braw, columns=cols)
-                            # open/close cast+retained too (2026-08-26) so load_market_history()
-                            # can slice BTC candles straight out of this cache instead of its own
-                            # separate klines fetch -- compute_signals() itself still only reads
-                            # btc_df's high/low (smt_divergence), the extra columns are unused by it.
-                            for c in ("open", "high", "low", "close"):
-                                bdf[c] = bdf[c].astype("float64")
-                            bdf["close_time"] = bdf["close_time"].astype("int64")
-                            bdf["timestamp"] = pd.to_datetime(bdf["open_time"].astype("int64"), unit="ms", utc=True)
-                            bdf = bdf.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
-                            if len(bdf) and int(bdf.iloc[-1]["close_time"]) >= now_ms:
-                                bdf = bdf.iloc[:-1].reset_index(drop=True)
-                            btc_df = bdf[["timestamp", "open", "high", "low", "close"]]
+                braw = await fetch_binance_json(
+                    "https://fapi.binance.com/fapi/v1/klines",
+                    {
+                        "symbol": EVIDENCE_SIGNAL_BTC_SYMBOL,
+                        "interval": EVIDENCE_SIGNAL_INTERVAL,
+                        "limit": EVIDENCE_FETCH_LIMIT,
+                    },
+                )
+                if braw is not None:
+                    bdf = pd.DataFrame(braw, columns=cols)
+                    # open/close cast+retained too (2026-08-26) so load_market_history()
+                    # can slice BTC candles straight out of this cache instead of its own
+                    # separate klines fetch -- compute_signals() itself still only reads
+                    # btc_df's high/low (smt_divergence), the extra columns are unused by it.
+                    for c in ("open", "high", "low", "close"):
+                        bdf[c] = bdf[c].astype("float64")
+                    bdf["close_time"] = bdf["close_time"].astype("int64")
+                    bdf["timestamp"] = pd.to_datetime(bdf["open_time"].astype("int64"), unit="ms", utc=True)
+                    bdf = bdf.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+                    if len(bdf) and int(bdf.iloc[-1]["close_time"]) >= now_ms:
+                        bdf = bdf.iloc[:-1].reset_index(drop=True)
+                    btc_df = bdf[["timestamp", "open", "high", "low", "close"]]
             except Exception as btc_exc:  # noqa: BLE001 -- ETH signals must still render this cycle
                 print(f"evidence-signal BTC leg failed (smt_divergence family will read as "
                       f"not-fired this cycle): {btc_exc}", flush=True)
@@ -1358,21 +1454,19 @@ def make_app() -> web.Application:
             # EVIDENCE_FUNDING_Z_MIN_PERIODS imported from there).
             funding_df = None
             try:
-                async with ClientSession(timeout=ClientTimeout(total=10)) as funding_session:
-                    async with funding_session.get(
-                        EVIDENCE_SIGNAL_FUNDING_URL,
-                        params={"symbol": EVIDENCE_SIGNAL_SYMBOL, "limit": EVIDENCE_FUNDING_HISTORY_LIMIT},
-                    ) as funding_response:
-                        if funding_response.status == web.HTTPOk.status_code:
-                            fraw = await funding_response.json()
-                            fdf = pd.DataFrame(fraw)
-                            fdf["calc_time"] = pd.to_datetime(fdf["fundingTime"].astype("int64"), unit="ms", utc=True)
-                            fdf["fundingRate"] = fdf["fundingRate"].astype("float64")
-                            fdf = fdf.sort_values("calc_time").drop_duplicates("calc_time", keep="last").reset_index(drop=True)
-                            fmean = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).mean()
-                            fstd = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).std()
-                            fdf["funding_z"] = (fdf["fundingRate"] - fmean) / fstd.replace(0.0, float("nan"))
-                            funding_df = fdf[["calc_time", "funding_z"]]
+                fraw = await fetch_binance_json(
+                    EVIDENCE_SIGNAL_FUNDING_URL,
+                    {"symbol": EVIDENCE_SIGNAL_SYMBOL, "limit": EVIDENCE_FUNDING_HISTORY_LIMIT},
+                )
+                if fraw is not None:
+                    fdf = pd.DataFrame(fraw)
+                    fdf["calc_time"] = pd.to_datetime(fdf["fundingTime"].astype("int64"), unit="ms", utc=True)
+                    fdf["fundingRate"] = fdf["fundingRate"].astype("float64")
+                    fdf = fdf.sort_values("calc_time").drop_duplicates("calc_time", keep="last").reset_index(drop=True)
+                    fmean = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).mean()
+                    fstd = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).std()
+                    fdf["funding_z"] = (fdf["fundingRate"] - fmean) / fstd.replace(0.0, float("nan"))
+                    funding_df = fdf[["calc_time", "funding_z"]]
             except Exception as funding_exc:  # noqa: BLE001 -- ETH signals must still render this cycle
                 print(f"evidence-signal funding leg failed (orthogonal_combo's bottom leg will "
                       f"degrade to delta_z-only this cycle): {funding_exc}", flush=True)
@@ -1471,9 +1565,13 @@ def make_app() -> web.Application:
                 btc_df,
                 funding_df,
             )
-            evidence_signal_cache["ts"] = time.monotonic()
-            evidence_signal_cache["payload"] = payload
             return payload
+
+        return await swr_cached(
+            "evidence_signal", evidence_signal_cache, evidence_signal_lock,
+            EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_evidence_signals_provisional() -> dict[str, Any]:
         """Live PREVIEW of the CURRENTLY-FORMING 5m bar's evidence-signal state (2026-08-26, user
@@ -1518,14 +1616,12 @@ def make_app() -> web.Application:
                 down the whole provisional preview, mirroring load_evidence_signals()'s own
                 BTC-leg fail-soft handling above."""
                 try:
-                    async with ClientSession(timeout=ClientTimeout(total=10)) as session:
-                        async with session.get(
-                            "https://fapi.binance.com/fapi/v1/klines",
-                            params={"symbol": symbol, "interval": EVIDENCE_SIGNAL_INTERVAL, "limit": 2},
-                        ) as response:
-                            if response.status != web.HTTPOk.status_code:
-                                return None
-                            raw = await response.json()
+                    raw = await fetch_binance_json(
+                        "https://fapi.binance.com/fapi/v1/klines",
+                        {"symbol": symbol, "interval": EVIDENCE_SIGNAL_INTERVAL, "limit": 2},
+                    )
+                    if raw is None:
+                        return None
                 except Exception as exc:  # noqa: BLE001 -- forming-bar preview must never 500
                     print(f"evidence-signal provisional forming-bar fetch failed ({symbol}): {exc}", flush=True)
                     return None
@@ -1606,35 +1702,21 @@ def make_app() -> web.Application:
         없다. 첫 호출은 TabPFN 7개를 새로 적합(수 초)하지만 이후 같은 프로세스 안에서는
         캐시된 모델을 재사용(그 함수의 _load_models() 참고)하므로 이 EVIDENCE_SIGNAL_CACHE_SECONDS
         (ETH와 동일 60초) 캐시는 매 사이클의 재적합 비용이 아니라 klines 재페치+추론 비용만 아낀다."""
-        now = time.monotonic()
-        cached = btc_evidence_signal_cache["payload"]
-        if cached is not None and now - btc_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with btc_evidence_signal_lock:
-            cached = btc_evidence_signal_cache["payload"]
-            if cached is not None and time.monotonic() - btc_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_btc_evidence_signals_panel)
-            btc_evidence_signal_cache["ts"] = time.monotonic()
-            btc_evidence_signal_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "btc_evidence_signal", btc_evidence_signal_cache, btc_evidence_signal_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_btc_evidence_signals_panel),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_xrp_evidence_signals() -> dict[str, Any]:
         """XRP 코인 페이지의 메인 증거신호 패널(2026-09-03) -- load_btc_evidence_signals()의 XRP판.
         서빙 5종(liquidity_sweep/fib_extension_exhaustion은 HOLDOUT AUC가 무작위 미만이라 제외).
         구조/캐시 정책은 BTC판과 동일하다."""
-        now = time.monotonic()
-        cached = xrp_evidence_signal_cache["payload"]
-        if cached is not None and now - xrp_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with xrp_evidence_signal_lock:
-            cached = xrp_evidence_signal_cache["payload"]
-            if cached is not None and time.monotonic() - xrp_evidence_signal_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_xrp_evidence_signals_panel)
-            xrp_evidence_signal_cache["ts"] = time.monotonic()
-            xrp_evidence_signal_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "xrp_evidence_signal", xrp_evidence_signal_cache, xrp_evidence_signal_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_xrp_evidence_signals_panel),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
@@ -1643,18 +1725,11 @@ def make_app() -> web.Application:
         trading_bot.py. Each call re-fits TabPFN on its frozen historical context (~3s measured
         on this server's GPU, 2026-08-29) -- asyncio.to_thread so that never stalls the event loop,
         same reasoning as load_evidence_signals() above."""
-        now = time.monotonic()
-        cached = v_rebound_cache["payload"]
-        if cached is not None and now - v_rebound_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with v_rebound_lock:
-            cached = v_rebound_cache["payload"]
-            if cached is not None and time.monotonic() - v_rebound_cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_eth_sweep_v_rebound_signal)
-            v_rebound_cache["ts"] = time.monotonic()
-            v_rebound_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "v_rebound", v_rebound_cache, v_rebound_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_eth_sweep_v_rebound_signal),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_basis_liquidation_signal(asset: str = "eth") -> dict[str, Any]:
         """베이시스 청산압박 model indicator -- see scripts/live_spot_perp_basis_signal_20260827.py
@@ -1667,21 +1742,12 @@ def make_app() -> web.Application:
         asset: 2026-08-31, BTC added -- the underlying validation (basis_z48 extreme ->
         forward liquidation-volume tilt) was only ever measured on ETH; BTC's reading is exposed
         with the same exploratory caveat, not a re-validated one (see design doc section 6.5)."""
-        now = time.monotonic()
-        cache = basis_liquidation_cache.setdefault(asset, {"ts": 0.0, "payload": None})
-        cached = cache["payload"]
-        if cached is not None and now - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with basis_liquidation_locks[asset]:
-            cached = cache["payload"]
-            if cached is not None and time.monotonic() - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(
-                compute_basis_liquidation_signal, symbol=COIN_CONFIG[asset]["binance_symbol"]
-            )
-            cache["ts"] = time.monotonic()
-            cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            f"basis_liquidation:{asset}", basis_liquidation_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            basis_liquidation_locks[asset], EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_basis_liquidation_signal, symbol=COIN_CONFIG[asset]["binance_symbol"]),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_liquidation_5m_signal(asset: str = "eth") -> dict[str, Any]:
         """Liquidation $ aggregate (BAR_MINUTES=15 rolling bar, despite the module's "_5m" filename
@@ -1694,19 +1760,12 @@ def make_app() -> web.Application:
         asyncio.to_thread reasoning as load_evidence_signals() above.
 
         asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
-        now = time.monotonic()
-        cache = liquidation_5m_cache.setdefault(asset, {"ts": 0.0, "payload": None})
-        cached = cache["payload"]
-        if cached is not None and now - cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with liquidation_5m_locks[asset]:
-            cached = cache["payload"]
-            if cached is not None and time.monotonic() - cache["ts"] < LIQUIDATION_5M_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_liquidation_5m_signal, coin=asset)
-            cache["ts"] = time.monotonic()
-            cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            f"liquidation_5m:{asset}",
+            liquidation_5m_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            liquidation_5m_locks[asset], LIQUIDATION_5M_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_liquidation_5m_signal, coin=asset),
+        )
 
     async def load_liquidation_direction_signal(asset: str = "eth") -> dict[str, Any]:
         """Directional-only liquidation tilt (liq_net_z_12, contrarian sign) -- model-indicator
@@ -1715,19 +1774,12 @@ def make_app() -> web.Application:
         updates once per minute).
 
         asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
-        now = time.monotonic()
-        cache = liquidation_direction_cache.setdefault(asset, {"ts": 0.0, "payload": None})
-        cached = cache["payload"]
-        if cached is not None and now - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-            return cached
-        async with liquidation_direction_locks[asset]:
-            cached = cache["payload"]
-            if cached is not None and time.monotonic() - cache["ts"] < EVIDENCE_SIGNAL_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_liquidation_direction_signal, coin=asset)
-            cache["ts"] = time.monotonic()
-            cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            f"liquidation_direction:{asset}",
+            liquidation_direction_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            liquidation_direction_locks[asset], EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
+        )
 
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
@@ -1740,27 +1792,16 @@ def make_app() -> web.Application:
         swaps symbol. BIN_WIDTH_PCT/LOOKBACK_HOURS/etc. in that module are still ETH-tuned
         constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
         BTC's own liquidity/volatility."""
-        now = time.monotonic()
-        cache = liquidation_map_cache.setdefault(asset, {"ts": 0.0, "payload": None})
-        cached = cache["payload"]
-        if cached is not None and now - cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
-            return cached
-        async with liquidation_map_locks[asset]:
-            cached = cache["payload"]
-            if cached is not None and time.monotonic() - cache["ts"] < LIQUIDATION_MAP_CACHE_SECONDS:
-                return cached
-            async with ClientSession(timeout=ClientTimeout(total=10)) as session:
-                async with session.get(
-                    "https://fapi.binance.com/fapi/v1/klines",
-                    params={
-                        "symbol": COIN_CONFIG[asset]["binance_symbol"],
-                        "interval": LIQUIDATION_MAP_INTERVAL,
-                        "limit": LIQUIDATION_MAP_FETCH_LIMIT,
-                    },
-                ) as response:
-                    if response.status != web.HTTPOk.status_code:
-                        raise web.HTTPBadGateway(reason="liquidation_map_upstream_error")
-                    raw = await response.json()
+        async def produce() -> dict[str, Any]:
+            raw = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {
+                    "symbol": COIN_CONFIG[asset]["binance_symbol"],
+                    "interval": LIQUIDATION_MAP_INTERVAL,
+                    "limit": LIQUIDATION_MAP_FETCH_LIMIT,
+                },
+                error_reason="liquidation_map_upstream_error",
+            )
             cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
                     "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
             df = pd.DataFrame(raw, columns=cols)
@@ -1785,9 +1826,14 @@ def make_app() -> web.Application:
                 compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
             )
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
-            cache["ts"] = time.monotonic()
-            cache["payload"] = payload
             return payload
+
+        return await swr_cached(
+            f"liquidation_map:{asset}",
+            liquidation_map_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            liquidation_map_locks[asset], LIQUIDATION_MAP_CACHE_SECONDS, produce,
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_regime_wide24() -> dict[str, Any]:
         """wide24 HMM regime overlay for the Snapshot tab's liquidation-map chart -- see
@@ -1796,18 +1842,11 @@ def make_app() -> web.Application:
         (requests + pandas/HMM), so it's offloaded via asyncio.to_thread same as
         compute_liquidation_levels() above rather than converted to aiohttp -- keeps the ported
         logic identical to the validated scratchpad script it came from."""
-        now = time.monotonic()
-        cached = regime_wide24_cache["payload"]
-        if cached is not None and now - regime_wide24_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-            return cached
-        async with regime_wide24_lock:
-            cached = regime_wide24_cache["payload"]
-            if cached is not None and time.monotonic() - regime_wide24_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_regime_wide24_signal)
-            regime_wide24_cache["ts"] = time.monotonic()
-            regime_wide24_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "regime_wide24", regime_wide24_cache, regime_wide24_lock, REGIME_WIDE24_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_regime_wide24_signal),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_regime_btc() -> dict[str, Any]:
         """BTC regime overlay for the Snapshot tab when its coin switcher is on BTC -- the BTC twin
@@ -1815,54 +1854,51 @@ def make_app() -> web.Application:
         fetches from Binance and runs FeatureEngineer, both blocking), and the same never-raises
         contract (degrades to warmed_up=False so the ribbon shows its waiting state rather than
         breaking the chart)."""
-        now = time.monotonic()
-        cached = regime_btc_cache["payload"]
-        if cached is not None and now - regime_btc_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-            return cached
-        async with regime_btc_lock:
-            cached = regime_btc_cache["payload"]
-            if cached is not None and time.monotonic() - regime_btc_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_regime_btc_signal)
-            regime_btc_cache["ts"] = time.monotonic()
-            regime_btc_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "regime_btc", regime_btc_cache, regime_btc_lock, REGIME_WIDE24_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_regime_btc_signal),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_regime_xrp() -> dict[str, Any]:
         """XRP 3-class 레짐(S96_K9, 2026-09-03) -- load_regime_btc()의 XRP판.
         같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
-        now = time.monotonic()
-        cached = regime_xrp_cache["payload"]
-        if cached is not None and now - regime_xrp_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-            return cached
-        async with regime_xrp_lock:
-            cached = regime_xrp_cache["payload"]
-            if cached is not None and time.monotonic() - regime_xrp_cache["ts"] < REGIME_WIDE24_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(compute_regime_xrp_signal)
-            regime_xrp_cache["ts"] = time.monotonic()
-            regime_xrp_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "regime_xrp", regime_xrp_cache, regime_xrp_lock, REGIME_WIDE24_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_regime_xrp_signal),
+            max_stale=STALE_GRACE_SECONDS,
+        )
 
     async def load_macro_calendar() -> dict[str, Any]:
         """US macro/corporate event calendar for the Snapshot tab -- see scripts/live_macro_
         calendar_20260826.py docstring for the 6 sources. compute_macro_calendar() is blocking
         (requests, no aiohttp) and never raises (each source degrades independently), same
         asyncio.to_thread pattern as load_regime_wide24() above."""
-        now = time.monotonic()
-        cached = macro_calendar_cache["payload"]
-        if cached is not None and now - macro_calendar_cache["ts"] < MACRO_CALENDAR_CACHE_SECONDS:
-            return cached
-        async with macro_calendar_lock:
-            cached = macro_calendar_cache["payload"]
-            if cached is not None and time.monotonic() - macro_calendar_cache["ts"] < MACRO_CALENDAR_CACHE_SECONDS:
-                return cached
-            payload = await asyncio.to_thread(
-                compute_macro_calendar, os.getenv("FRED_API_KEY"), os.getenv("EIA_API_KEY"), os.getenv("FINNHUB_API_KEY")
-            )
-            macro_calendar_cache["ts"] = time.monotonic()
-            macro_calendar_cache["payload"] = payload
-            return payload
+        return await swr_cached(
+            "macro_calendar", macro_calendar_cache, macro_calendar_lock, MACRO_CALENDAR_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_macro_calendar, os.getenv("FRED_API_KEY"), os.getenv("EIA_API_KEY"), os.getenv("FINNHUB_API_KEY")),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+
+    async def start_http_session(app: web.Application) -> None:
+        http_session["session"] = ClientSession(
+            timeout=ClientTimeout(total=10),
+            connector=TCPConnector(limit=32, ttl_dns_cache=300, keepalive_timeout=60),
+        )
+
+    async def stop_http_session(app: web.Application) -> None:
+        # Cancel any in-flight background refresh FIRST: those tasks hold a reference to the
+        # session closed below, so letting them outlive it leaves pending tasks to be destroyed
+        # mid-request at loop shutdown.
+        for pending in tuple(refresh_tasks.values()):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(*refresh_tasks.values(), return_exceptions=True)
+        refresh_tasks.clear()
+        session = http_session["session"]
+        http_session["session"] = None
+        if session is not None and not session.closed:
+            await session.close()
 
     async def publish_dashboard_events(app: web.Application) -> None:
         nonlocal latest_event_state, latest_event_tickers
@@ -2072,17 +2108,11 @@ def make_app() -> web.Application:
 
 
     async def load_coin_indicators(asset: str) -> dict[str, Any]:
-        slot = coin_indicator_cache[asset]
-        now = time.monotonic()
-        if slot["payload"] is not None and now - slot["ts"] < COIN_INDICATOR_CACHE_SECONDS:
-            return slot["payload"]
-        async with coin_indicator_locks[asset]:
-            if slot["payload"] is not None and time.monotonic() - slot["ts"] < COIN_INDICATOR_CACHE_SECONDS:
-                return slot["payload"]
-            payload = await asyncio.to_thread(coin_indicators_payload, asset)
-            slot["ts"] = time.monotonic()
-            slot["payload"] = payload
-            return payload
+        return await swr_cached(
+            f"coin_indicator:{asset}", coin_indicator_cache[asset],
+            coin_indicator_locks[asset], COIN_INDICATOR_CACHE_SECONDS,
+            lambda: asyncio.to_thread(coin_indicators_payload, asset),
+        )
 
     async def api_coin_indicators(request: web.Request) -> web.Response:
         payload = await load_coin_indicators(_query_coin_asset(request))
@@ -2302,10 +2332,19 @@ def make_app() -> web.Application:
     app.router.add_get("/api/eth-odyssey4-shadow", api_eth_odyssey4_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
-    app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
+    # show_index=False to match /data/live/ below: this directory is reachable from the
+    # public tunnel, and a listing advertised every file sitting in it (e.g. the
+    # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page
+    # actually loads. The explicit /dashboard/live[/] routes above already serve the page
+    # itself, and nothing fetches a listing, so this only removes the enumeration.
+    app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=False)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
+    # start_http_session FIRST: every klines fetch below it needs the pooled session to exist.
+    # stop_http_session LAST for the mirror-image reason.
+    app.on_startup.append(start_http_session)
     app.on_startup.append(start_dashboard_events)
     app.on_cleanup.append(stop_dashboard_events)
+    app.on_cleanup.append(stop_http_session)
     return app
 
 
