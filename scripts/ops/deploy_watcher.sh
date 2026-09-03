@@ -74,6 +74,46 @@ working_tree_clean() {
   [[ -z "$(git status --porcelain)" ]]
 }
 
+# Is the dashboard actually serving? The supervisor rebinds the port on respawn, and the failure
+# mode above is precisely "socket released, never rebound", so port ownership is the signal that
+# matters -- not an HTTP body (some endpoints re-fit models on first call and can take tens of
+# seconds, which would make a request-based probe flap).
+dashboard_listening() {
+  ss -ltn "sport = :${DASHBOARD_PORT}" 2>/dev/null | grep -q ":${DASHBOARD_PORT}"
+}
+
+# 2026-09-03: 대시보드와 터널에는 **부팅 자동기동이 없었다.** WSL이 굳어 재부팅되자
+# supervisor/수집기/섀도우 23개는 살아났는데 대시보드(8787)와 cloudflared만 안 떴고,
+# 어느 계층도 그 상태를 보지 않아 사람이 페이지를 열기 전까지 아무도 몰랐다.
+#
+#   supervise_server.sh  -- server.py가 죽으면 3초 뒤 재기동. 단 **supervisor 자신이 없으면 무력**
+#   deploy_watcher.sh    -- dashboard_changed=1 일 때만 restart_dashboard()
+#   dashboard_listening  -- 그 같은 if 블록 안이라 배포가 없으면 아예 실행 안 됨
+#   watchdog_deadman/ops_watchdog -- 대시보드를 보지 않음
+#
+# 2026-09-01 사고 후 추가한 health check가 배포 경로에만 걸려 있어 교훈이 절반만 반영돼
+# 있었다. 여기서 **배포 여부와 무관하게** 매 사이클 살린다.
+# `start_external.sh`/`start_cloudflare_tunnel.sh`는 이미 중복 기동을 스스로 막으므로
+# (PID 확인 + 응답 확인 후 조기 종료) 무조건 호출해도 안전하다.
+tunnel_running() {
+  pgrep -f "[c]loudflared tunnel" >/dev/null 2>&1
+}
+
+revive_serving_if_down() {
+  if ! dashboard_listening; then
+    log "dashboard NOT listening on ${DASHBOARD_PORT} -- starting (no deploy involved)"
+    bash "$ROOT/dashboard/scripts/start_external.sh" >/dev/null 2>&1 ||       log "start_external.sh failed"
+    sleep 8
+    dashboard_listening && log "dashboard revived" ||       { log "dashboard STILL not listening after start"; send_telegram "🔴 [WATCHER] dashboard down and revive failed (port ${DASHBOARD_PORT})"; }
+  fi
+  if ! tunnel_running; then
+    log "cloudflared not running -- starting"
+    bash "$ROOT/dashboard/scripts/start_cloudflare_tunnel.sh" >/dev/null 2>&1 ||       log "start_cloudflare_tunnel.sh failed"
+    sleep 5
+    tunnel_running && log "tunnel revived" ||       { log "tunnel STILL not running"; send_telegram "🔴 [WATCHER] cloudflared down and revive failed"; }
+  fi
+}
+
 # Explicit refspec, not just "origin main": a stray local ref outside
 # refs/remotes/ (refs/codex/... -- unrelated tooling debris found in this
 # repo, not ours to clean up) makes the bare form choke on a bad object.
@@ -83,6 +123,10 @@ PRE_RUN_SHA="$(git rev-parse HEAD)"
 
 LAST_DEPLOYED_SHA_FILE="$STATE_DIR/last_deployed_sha"
 LAST_DEPLOYED_SHA="$(cat "$LAST_DEPLOYED_SHA_FILE" 2>/dev/null || true)"
+
+# ⭐배포 여부와 무관하게 먼저 살린다. "nothing to do"로 빠져나가기 **전**이어야 한다 --
+# 대부분의 사이클이 그 경로로 끝나므로, 뒤에 두면 사실상 실행되지 않는다.
+revive_serving_if_down
 
 if [[ "$LAST_DEPLOYED_SHA" == "$REMOTE_SHA" ]]; then
   log "already deployed ($REMOTE_SHA), nothing to do"
@@ -212,14 +256,6 @@ restart_dashboard() {
   done
   log "dashboard child $pid still alive ${DASHBOARD_SIGTERM_GRACE_SECONDS}s after SIGTERM -- sending SIGKILL"
   kill -9 "$pid" 2>/dev/null
-}
-
-# Is the dashboard actually serving? The supervisor rebinds the port on respawn, and the failure
-# mode above is precisely "socket released, never rebound", so port ownership is the signal that
-# matters -- not an HTTP body (some endpoints re-fit models on first call and can take tens of
-# seconds, which would make a request-based probe flap).
-dashboard_listening() {
-  ss -ltn "sport = :${DASHBOARD_PORT}" 2>/dev/null | grep -q ":${DASHBOARD_PORT}"
 }
 
 restart_units() {
