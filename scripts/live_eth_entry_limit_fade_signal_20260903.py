@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """ETH 지정가 페이드 **진입 신호** -- 동결 v1(`eth_entry_limit_fade_v1_20260903`) 라이브 채점.
 
-동결 정책 v3(`eth_entry_limit_fade_v3_l3arm1_20260903`):
+동결 정책 v4(`eth_entry_limit_fade_v4_hgb_volgate_20260903`):
     8종 raw 트리거 → **신호방향 지정가만**(arm1) depth 3.0×ATR · 대기 6봉 · 미체결 취소
-    → TabPFN 분류 5멤버 확률 > p_thr → 4슬롯 → 트레일링 SL3.0/ARM1.0/Trail0.1
+    → ⭐**필터 없이 전부 제출**하고 점수·게이트를 기록 → 트레일링 SL3.0/ARM1.0/Trail0.1
+
+⭐**배치 시점에 거르지 않는 이유**: 실측에서 `게이트만`과 `게이트+모델`의 선택이 완전히
+동일했다(고변동성 후보를 모델이 전부 통과 = 게이트 ⊆ 모델). 즉 배치 필터링에 이득이 없다.
+전부 제출하고 `pred_hgb`/`atr_pct`/`vol_pct`/`gate_p90`을 기록하면 어떤 필터든(슬롯 정책까지)
+원장에서 사후 평가할 수 있고, **증거 축적이 약 7배 빨라진다**(체결 1.34 → 약 9.2건/일).
+전진 데이터가 유일한 증거원인 상황에서 이 차이가 결정적이다.
+
+⭐v3(TabPFN)에서 바꾼 이유: ①성능 근거 없음(위 동일 선택) ②한 행 채점 68.7초·GPU 5멤버
+상주. HGB는 CPU 마이크로초다.
 
 ⚠️⚠️**v3는 승격 후보가 아니다.** 2026-09-03 전수조사에서 v1/v2의 라벨이 미래참조로 확인됐고
 (체결 봉의 **체결 이전** 고가를 진입 후 이익으로 크레딧, 전체 후보 PF 2.86→0.95), 정직한
@@ -59,7 +68,7 @@ import joblib  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-ART_DIR = ROOT / "tmp/eth_entry_limit_fade_v3_l3arm1_20260903"
+ART_DIR = ROOT / "tmp/eth_entry_limit_fade_v4_hgb_volgate_20260903"
 GBM3_PATH = ROOT / "tmp/eth_regime_s12k3_20260902/model.joblib"
 SYMBOL, BTC_SYMBOL = "ETHUSDT", "BTCUSDT"
 
@@ -272,17 +281,17 @@ def compute_entry_signal(score_tabpfn: bool = False) -> dict[str, Any]:
                           for c_ in cands])[FE_COLS]
         X = X.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
         X = X.fillna(pd.Series(A["feature_medians"]))
-        # HGB는 **대조**(v3에서 주 채점자는 TabPFN)
-        pred = np.mean([m.predict(X) for m in A["hgb_models"]], axis=0)
+        pred = np.mean([m.predict(X) for m in A["models"]], axis=0)
+        vthr = float(POL["vol_threshold_atr_pct"])
+        tau = float(POL["hgb_tau"])
         for c_, p in zip(cands, pred):
             c_["pred_hgb"] = float(p)
-            c_["pass_hgb"] = bool(p > float(POL["hgb_tau"]))
-        if score_tabpfn:
-            _score_tabpfn(X, cands, float(POL["p_threshold"]))
-        # ⚠️TabPFN 채점이 없으면 제출하지 않는다 -- v3의 주 채점자가 없는 상태이기 때문.
-        for c_ in cands:
-            c_["pass_tau"] = bool(c_.get("pred_tabpfn") is not None
-                                  and c_["pred_tabpfn"] > float(POL["p_threshold"]))
+            c_["pass_hgb"] = bool(p > tau)
+            c_["gate_p90"] = bool(c_["atr_pct"] >= vthr)
+            # ⭐전부 제출한다. 필터는 원장에서 사후 적용한다(위 docstring 참조).
+            c_["pass_tau"] = True
+        if score_tabpfn:                       # 선택적 대조 채점(기본 꺼짐)
+            _score_tabpfn(X, cands, tau)
         return {"warmed_up": True, "error": None, "last_closed_bar_utc": str(ts),
                 "close": close, "candidates": cands, "bars": _bars_out(kl)}
     except Exception as e:                                          # noqa: BLE001

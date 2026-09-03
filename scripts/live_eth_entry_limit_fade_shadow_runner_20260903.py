@@ -91,7 +91,7 @@ for _p in (ROOT, ROOT / "scripts"):
 
 _SIG = importlib.import_module("live_eth_entry_limit_fade_signal_20260903")
 
-STATE = ROOT / "data/live/entry_limit_fade_v3_shadow_state.json"
+STATE = ROOT / "data/live/entry_limit_fade_v4_shadow_state.json"
 KL1M = "https://fapi.binance.com/fapi/v1/klines"
 LOOP_SECONDS = 300                       # 5분봉 1회. 60초로 줄이면 같은 봉을 4중 채점한다.
 COST_SOURCE = "assumed_10bp"             # peg-maker 실측(>=2026-09-04) 반영 시 갱신
@@ -175,7 +175,9 @@ def post_fill_range(sd: int, lim: float, bars1m: list[dict]) -> tuple[float, flo
 
 def expire_and_fill(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
     """대기 중 지정가를 새 완결 봉에 대해 체결/만료 처리한다."""
-    wait, slots = int(pol["wait_bars"]), int(pol["slots"])
+    # ⭐섀도우는 슬롯을 걸지 않는다 -- 원장에 fi/ei가 있으므로 어떤 슬롯 정책이든 사후
+    # 재구성할 수 있다. 배치 시점에 버리면 그 정보는 영영 못 얻는다.
+    wait, slots = int(pol["wait_bars"]), 10**6
     keep = []
     for o in s["pending"]:
         todo = [b for b in bars if b["timestamp_utc"] > o["last_bar_utc"]]
@@ -263,7 +265,9 @@ def _close(s: dict[str, Any], p: dict[str, Any], px: float, reason: str, bar_utc
         "entry": p["entry"], "exit": px, "atr_pct": p["atr_pct"],
         "bars_waited": p.get("bars_waited"), "bars_held": p.get("bars_held"),
         "pnl_bp": round(net * 1e4, 3), "reason": reason,
-        "pred_hgb": p.get("pred_hgb"), "pred_tabpfn": p.get("pred_tabpfn"),
+        "pred_hgb": p.get("pred_hgb"), "pass_hgb": p.get("pass_hgb"),
+        "gate_p90": p.get("gate_p90"), "atr_pct_at_entry": p.get("atr_pct"),
+        "pred_tabpfn": p.get("pred_tabpfn"),
         "fill_5m_basis": "bar_low_high", "fill_1m_basis": p.get("fill_1m_basis"),
         "fill_1m_utc": p.get("fill_1m_utc"), "exit_basis": "L3_post_fill_then_bar_high_low",
         "cost_source": COST_SOURCE})
@@ -328,7 +332,7 @@ def cycle(s: dict[str, Any], use_tabpfn: bool) -> None:
     place(s, out, pol)
     npass = sum(1 for c in out["candidates"] if c.get("pass_tau"))
     log(f"봉 {out['last_closed_bar_utc'][:16]} close={out['close']:.2f} · 후보 {len(out['candidates'])} "
-        f"(τ통과 {npass}) · 대기 {len(s['pending'])} · 포지션 {len(s['positions'])}/{pol['slots']} · "
+        f"(τ통과 {npass}) · 대기 {len(s['pending'])} · 포지션 {len(s['positions'])} · "
         f"원장 {len(s['ledger'])}건")
 
 
@@ -343,11 +347,11 @@ def main() -> int:
         report(s); return 0
     _, CARD = _SIG._art()
     pol = CARD["policy"]
-    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. v3(L3·arm1만) depth {pol['depth_atr']}×ATR "
-        f"· 대기 {pol['wait_bars']}봉 · p_thr {pol['p_threshold']:.4f} · 슬롯 {pol['slots']} "
-        f"· 주기 {LOOP_SECONDS}초 · 청산규약 L3")
-    if not args.tabpfn:
-        log("⚠️⚠️`--tabpfn` 없이 돌리면 주 채점자가 없어 **아무것도 제출하지 않습니다.**")
+    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. v4(L3·arm1·HGB+변동성게이트) "
+        f"depth {pol['depth_atr']}×ATR · 대기 {pol['wait_bars']}봉 · 주기 {LOOP_SECONDS}초 "
+        f"· 청산규약 L3")
+    log(f"  ⭐전부 제출·전부 기록 (필터는 사후 적용): HGB τ {pol['hgb_tau']*1e4:+.2f}bp · "
+        f"변동성 p90 {pol['vol_threshold_atr_pct']:.6f}")
     if args.tabpfn:
         log(f"TabPFN 컨텍스트 구축 중...")
         log(f"  멤버 {_SIG.build_tabpfn()}개 상주")
