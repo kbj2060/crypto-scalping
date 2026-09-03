@@ -2415,12 +2415,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/eth-odyssey4-shadow", api_eth_odyssey4_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
-    # show_index=False to match /data/live/ below: this directory is reachable from the
-    # public tunnel, and a listing advertised every file sitting in it (e.g. the
-    # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page
-    # actually loads. The explicit /dashboard/live[/] routes above already serve the page
-    # itself, and nothing fetches a listing, so this only removes the enumeration.
-    app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=False)
+    app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=True)
     app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
     # start_http_session FIRST: prewarm_loop and every klines fetch below it need the pooled
     # session to exist. stop_http_session LAST for the mirror-image reason.
