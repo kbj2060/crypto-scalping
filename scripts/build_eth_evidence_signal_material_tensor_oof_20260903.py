@@ -86,23 +86,33 @@ def main() -> int:
         d["dir"] = np.where(d["is_bottom"] == 1, 1.0, -1.0)
         d = d.sort_values(["i", "proba_oof"]).drop_duplicates("i", keep="last")
 
-        fire = np.zeros(n); age = np.ones(n)
+        # ⭐`_oof_fold`: 지금 유지 중인 proba가 **어느 fold의 모델**에서 나왔는가.
+        # OOF는 fold마다 학습량이 다르다 -- fold1은 워밍업 4개월(2024-01~04)만 보고 만든 값이고
+        # final은 TRAIN 전체(<2025-09-01)를 본 모델이다. 하류 모델이 그 차이를 구분할 수 있어야
+        # "이 proba를 얼마나 믿을지"를 스스로 학습한다. 열이 없으면 전부 같은 신뢰도로 취급된다.
+        #   1~4 = fold1~4 (확장창, 뒤로 갈수록 학습량 많음) · 5 = final · 0 = 활성 신호 없음
+        FOLD_CODE = {"fold1": 1, "fold2": 2, "fold3": 3, "fold4": 4, "final": 5}
+        src = d["oof_source"].fillna("").astype(str).str.replace(r"\(.*", "", regex=True)
+        d["_fold"] = src.map(FOLD_CODE).fillna(0).astype(int)
+
+        fire = np.zeros(n); age = np.ones(n); fold = np.zeros(n)
         P = np.zeros((n, 3))                              # proba, pct, dir
-        pi = {int(i): (float(a), float(b), float(c)) for i, a, b, c in
-              zip(d["i"], d["proba_oof"], d["pct_oof"], d["dir"])}
+        pi = {int(i): (float(a), float(b), float(c), int(f)) for i, a, b, c, f in
+              zip(d["i"], d["proba_oof"], d["pct_oof"], d["dir"], d["_fold"])}
         fire[d["i"].to_numpy()] = d["dir"].to_numpy()
-        last, li = (0.0, 0.0, 0.0), -10**9
+        last, li = (0.0, 0.0, 0.0, 0), -10**9
         for i in range(n):
             if i in pi:
                 last, li = pi[i], i
             el = i - li
             if el < H:
-                P[i] = last; age[i] = el / H
+                P[i] = last[:3]; age[i] = el / H; fold[i] = last[3]
         out[f"{name}_fire"] = fire
         out[f"{name}_proba"] = P[:, 0]
         out[f"{name}_pct"] = P[:, 1]
         out[f"{name}_signed"] = P[:, 1] * P[:, 2]
         out[f"{name}_age"] = age
+        out[f"{name}_oof_fold"] = fold.astype(int)
         cov = float((P[:, 0] > 0).mean())
         stats.append({"signal": name, "horizon": H, "n_fires_oof": int(len(d)),
                       "n_fires_total": int(n_all), "warmup_dropped": int(n_all - len(d)),
@@ -133,11 +143,11 @@ def main() -> int:
             if not np.any(fc[max(0, i - H + 1):i + 1] != 0):
                 bad += 1; break
     log(f"  유지창 밖 활성값 {bad}건 (0이어야 정상) · 결측 {int(out.isna().sum().sum())}개")
-    n_exp = 1 + 5 * len(cfg) + 2                    # timestamp + 신호당 5열 + 레짐 2열
+    n_exp = 1 + 6 * len(cfg) + 2                    # timestamp + 신호당 6열 + 레짐 2열
     if out.shape[1] != n_exp:
         log(f"❌ 열 수 {out.shape[1]} != 기대 {n_exp} -- 조용한 누락이 있다")
         return 1
-    log(f"  ✅열 수 {out.shape[1]} = 기대값 (timestamp + {len(cfg)}×5 + 레짐 2)")
+    log(f"  ✅열 수 {out.shape[1]} = 기대값 (timestamp + {len(cfg)}×6 + 레짐 2)")
     warm = out.timestamp < WARMUP_END
     act_warm = sum(int((out[f"{c}_proba"][warm] > 0).sum()) for c in cfg)
     log(f"  ⭐워밍업(<{WARMUP_END.date()}) 구간 활성값 {act_warm}건 -- "
@@ -155,7 +165,11 @@ def main() -> int:
                                "<sig>_proba (OOF metalabel prob, held for the signal's own HORIZON)",
                                "<sig>_pct (percentile within that fold's own training distribution)",
                                "<sig>_signed (pct * direction)",
-                               "<sig>_age (elapsed/HORIZON, 1.0 = expired)"],
+                               "<sig>_age (elapsed/HORIZON, 1.0 = expired)",
+                               "<sig>_oof_fold (which OOF model produced the held proba: "
+                               "1-4 = expanding folds, 5 = final full-TRAIN model, 0 = inactive. "
+                               "fold1 saw only the 2024-01~04 warmup, so its probas are the least "
+                               "reliable -- downstream models can learn this weighting themselves)"],
         "extra": ["regime_eth", "regime_btc (0 bull / 1 bear / 2 chop)"],
         "causality": "value at index i uses information through bar i's CLOSE only",
         "warmup": f"before {WARMUP_END.date()} all signal columns are 0/age=1 -- no OOF value exists; EXCLUDE from downstream training",
