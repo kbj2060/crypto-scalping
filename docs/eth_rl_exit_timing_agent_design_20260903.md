@@ -1,7 +1,18 @@
 # ETH RL Exit-Timing 에이전트 설계 (2026-09-03)
 
 발단: 2026-09-03 사용자 "이 재료로 RL 모델 학습 설계해줘"
-(재료 = `data/materials/eth_evidence_signal_tensor_20260902/`, 279,634행 × 51열)
+(재료 = `data/materials/eth_evidence_signal_tensor_oof_20260903/`, 280,471행 × 41열)
+
+> ⚠️**2026-09-03 교체**: 이전 재료 `eth_evidence_signal_tensor_20260902`(279,634행 × 51열)는
+> `_proba`/`_pct`가 **TRAIN 전체에서 in-sample**이라, 그 행으로 학습하는 모든 하류 모델이
+> 지름길을 배웠다(내부검증 IC +0.4830 vs 진짜 VAL −0.0199). OOF본으로 교체하니 그 간극이
+> **+0.5029 → −0.0430으로 12배 축소**됐다. 구본은 재현용으로만 남기고 README에 폐기 사유를
+> 기록했다. 라이브 서빙은 무관하다(오염은 과거 TRAIN 행에만 있다).
+>
+> ⚠️**두 가지 제약을 설계에 반영해야 한다**: ①워밍업(<2024-05-01) 구간은 OOF 값이 없어
+> 전 컬럼이 0/age=1이므로 **학습에서 제외**한다. ②누수를 없애자 어떤 학습 함수도 원시
+> `signed` 합을 못 이겼다(격자 0/16, Ridge 3α 전부 음수) -- **저용량 헤드를 전제**할 것.
+> 전문: `docs/experiments/eth_evidence_signal_tp_truncation_vs_horizon_hold_20260903.md`
 시각 요약: https://claude.ai/code/artifact/991aaa9c-3bd4-429d-a9b3-6a68de966602
 
 ⚠️**이 문서는 착수 전 컨펌용 설계안이다.** DL 아키텍처는 항상 사전 컨펌이 필요하다는 저장소
