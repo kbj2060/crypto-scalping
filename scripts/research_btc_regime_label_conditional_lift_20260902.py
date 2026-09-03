@@ -80,7 +80,16 @@ def load_btc_funding_z() -> pd.DataFrame:
     mean = f["last_funding_rate"].rolling(90, min_periods=30).mean()
     std = f["last_funding_rate"].rolling(90, min_periods=30).std()
     f["funding_z"] = (f["last_funding_rate"] - mean) / std.replace(0.0, np.nan)
-    return f[["calc_time", "funding_z"]]
+    out = f[["calc_time", "funding_z"]].copy()
+    # ⚠️2026-09-03: 펀딩 CSV는 [us]인데 klines 파싱은 [ns]라 `compute_signals` 내부
+    # `merge_asof`가 MergeError로 죽는다(이 저장소에서 4번째 재발). **로더 안에서** 맞춘다 --
+    # Phase 3와 격자확장 감사도 이 함수를 import하므로 여기서 고쳐야 전부 해결된다.
+    # ⚠️조인 키가 `timestamp`가 아니라 `calc_time`이다 -- 이름이 아니라 dtype으로 훑는다.
+    # (XRP판 `load_xrp_funding_z`엔 이 수정이 있었고 BTC판에만 없었다.)
+    for _c in out.columns:
+        if str(out[_c].dtype).startswith("datetime64"):
+            out[_c] = out[_c].astype("datetime64[ns]")
+    return out
 
 
 def build_btc_pivots() -> pd.DataFrame:
