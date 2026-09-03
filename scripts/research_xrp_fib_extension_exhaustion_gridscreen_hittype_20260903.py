@@ -117,7 +117,7 @@ Z_95 = 1.959963984540054
 
 
 def log(msg: str) -> None:
-    print(f"[btc_fib_ext_hittype_gridscreen] {msg}", flush=True)
+    print(f"[xrp_fib_ext_hittype_gridscreen] {msg}", flush=True)
 
 
 def wilson_ci(hits: int, n: int, z: float = Z_95) -> tuple[float, float]:
@@ -326,7 +326,7 @@ def train_cv_permutation_importance(X: pd.DataFrame, y: np.ndarray, feature_cols
 
 
 def main() -> int:
-    log("loading BTC Tier0 candidate CSV...")
+    log("loading XRP Tier0 candidate CSV...")
     df = load_data()
     n = len(df)
     log(f"{n} rows loaded, {df['timestamp'].min()} -> {df['timestamp'].max()} (HOLDOUT never loaded)")

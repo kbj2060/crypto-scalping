@@ -148,7 +148,7 @@ BASE_SEED = 20260901
 
 
 def log(msg: str) -> None:
-    print(f"[btc_str_z_hittype] {msg}", flush=True)
+    print(f"[xrp_str_z_hittype] {msg}", flush=True)
 
 
 def load_frame() -> pd.DataFrame:

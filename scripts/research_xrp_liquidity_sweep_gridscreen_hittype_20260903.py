@@ -128,7 +128,7 @@ RNG_SEED = 20260901
 
 
 def log(msg: str) -> None:
-    print(f"[btc_liq_sweep_hittype_gridscreen] {msg}", flush=True)
+    print(f"[xrp_liq_sweep_hittype_gridscreen] {msg}", flush=True)
 
 
 def load_data() -> pd.DataFrame:
@@ -304,7 +304,7 @@ def eval_point(side: str, hit_type: str, horizon: int, k: float, pool_side: dict
 
 
 def main() -> int:
-    log("loading BTC Tier0 candidate CSV...")
+    log("loading XRP Tier0 candidate CSV...")
     df = load_data()
     n = len(df)
     log(f"{n} rows loaded, {df['timestamp'].min()} -> {df['timestamp'].max()} (HOLDOUT never loaded)")

@@ -141,7 +141,7 @@ TIER0_FEATURES = [
 
 
 def log(msg: str) -> None:
-    print(f"[btc_orthogonal_hittype] {msg}", flush=True)
+    print(f"[xrp_orthogonal_hittype] {msg}", flush=True)
 
 
 # ---------------------------------------------------------------------------

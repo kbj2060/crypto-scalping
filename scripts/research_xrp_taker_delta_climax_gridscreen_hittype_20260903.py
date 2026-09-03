@@ -141,7 +141,7 @@ MIN_TRAIN_HITS = 30
 
 
 def log(msg: str) -> None:
-    print(f"[btc_taker_hittype_gridscreen] {msg}", flush=True)
+    print(f"[xrp_taker_hittype_gridscreen] {msg}", flush=True)
 
 
 def load_data() -> pd.DataFrame:
@@ -349,7 +349,7 @@ def rnd(x: float, nd: int = 4):
 
 
 def main() -> int:
-    log("loading BTC Tier0 candidates CSV...")
+    log("loading XRP Tier0 candidates CSV...")
     df = load_data()
     n = len(df)
     log(f"{n} rows loaded, {df['timestamp'].min()} .. {df['timestamp'].max()}")

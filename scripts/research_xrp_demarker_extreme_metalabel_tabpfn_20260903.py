@@ -165,7 +165,7 @@ FEATURE_COLUMNS = [
 
 
 def log(msg: str) -> None:
-    print(f"[btc_demarker_extreme_tabpfn] {msg}", flush=True)
+    print(f"[xrp_demarker_extreme_tabpfn] {msg}", flush=True)
 
 
 def load_tier0() -> pd.DataFrame:
@@ -174,7 +174,7 @@ def load_tier0() -> pd.DataFrame:
                                                               # research_btc_taker_delta_climax_
                                                               # metalabel_tabpfn_20260901.py's own convention
     df = df.sort_values("timestamp").reset_index(drop=True)
-    assert df["timestamp"].diff().dropna().eq(pd.Timedelta(minutes=5)).all(), "gap/dup in BTC Tier0 rows"
+    assert df["timestamp"].diff().dropna().eq(pd.Timedelta(minutes=5)).all(), "gap/dup in XRP Tier0 rows"
     return df
 
 
@@ -507,7 +507,7 @@ def compute_permutation_importance(train: pd.DataFrame, eval_df: pd.DataFrame, f
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    log("loading BTC Tier0 CSV...")
+    log("loading XRP Tier0 CSV...")
     frame = load_tier0()
     log(f"{len(frame)} bars loaded, {frame['timestamp'].min()}..{frame['timestamp'].max()}")
 

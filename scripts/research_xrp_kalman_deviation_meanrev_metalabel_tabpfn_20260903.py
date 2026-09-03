@@ -11,7 +11,7 @@ confirmed by direct read before writing this): constant-velocity 2-state Kalman 
 (F=[[1,1],[0,1]], H=[[1,0]], Q=I*1e-5, R=[[1e-3]]) -> kalman_dev = (close-level)/level ->
 kalman_dev_z = rolling zscore (window=288, same ZSCORE_WINDOW convention used elsewhere in this
 project) -> bottom fires when kalman_dev_z<=-2.0, top when >=2.0. Pure price (close only), no
-cross-asset/funding dependency -- computed fresh here from the BTC Tier0 CSV's own `close` column
+cross-asset/funding dependency -- computed fresh here from the XRP Tier0 CSV's own `close` column
 (itself sourced from binance_data/klines/BTCUSDT/BTCUSDT-5m-api.csv, 2024-01-01 onward) rather than
 imported from any other script, since the Tier0 build
 (scripts/build_btc_5m_evidence_signal_candidates_tier0_20260901.py) explicitly EXCLUDED this
@@ -183,7 +183,7 @@ FEATURE_COLUMNS = [
 
 
 def log(msg: str) -> None:
-    print(f"[btc_kalman_deviation_meanrev_tabpfn] {msg}", flush=True)
+    print(f"[xrp_kalman_deviation_meanrev_tabpfn] {msg}", flush=True)
 
 
 def load_tier0() -> pd.DataFrame:
@@ -195,7 +195,7 @@ def load_tier0() -> pd.DataFrame:
     df["timestamp"] = df["timestamp"].dt.tz_localize(None)  # tz-aware UTC -> naive UTC, matches
                                                               # this BTC lineage's own convention
     df = df.sort_values("timestamp").reset_index(drop=True)
-    assert df["timestamp"].diff().dropna().eq(pd.Timedelta(minutes=5)).all(), "gap/dup in BTC Tier0 rows"
+    assert df["timestamp"].diff().dropna().eq(pd.Timedelta(minutes=5)).all(), "gap/dup in XRP Tier0 rows"
     return df
 
 
@@ -231,7 +231,7 @@ def add_missing_features(frame: pd.DataFrame) -> pd.DataFrame:
     """Verbatim port from research_btc_taker_delta_climax_metalabel_tabpfn_20260901.py::
     add_missing_features (itself ported from research_eth_taker_delta_climax_metalabel_tabpfn_
     20260829.py::build_indicator_frame) -- adds the handful of FEATURE_COLUMNS not already
-    present in the BTC Tier0 CSV."""
+    present in the XRP Tier0 CSV."""
     close = frame["close"]
     frame["atr_pct"] = frame["atr"] / close.clip(lower=1e-12)
 
@@ -659,7 +659,7 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
 
-    log("loading BTC Tier0 CSV...")
+    log("loading XRP Tier0 CSV...")
     frame = load_tier0()
     log(f"{len(frame)} bars loaded, {frame['timestamp'].min()} .. {frame['timestamp'].max()}")
 
