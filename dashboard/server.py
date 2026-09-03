@@ -136,7 +136,8 @@ from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal 
 # identically. See scripts/live_regime_btc_signal_20260902.py and
 # docs/experiments/btc_regime_s24k3_label_train_20260902.md.
 from scripts.live_regime_btc_signal_20260902 import compute_regime_btc_signal  # noqa: E402
-# 2026-09-03: XRP 레짐(S48_K6). 자산마다 교차자산 슬롯이 다르다 -- XRP는 BTC를 넣는다
+# 2026-09-03: XRP 레짐(S96_K9, 같은 날 S48_K6에서 교체 -- 격자 경계 감사).
+# 자산마다 교차자산 슬롯이 다르다 -- XRP는 BTC를 넣는다
 # (BTC 캐노니컬은 ETH가 들어있다). live_regime_xrp_signal_20260903.py docstring 참조.
 from scripts.live_regime_xrp_signal_20260903 import compute_regime_xrp_signal  # noqa: E402
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
@@ -1828,7 +1829,7 @@ def make_app() -> web.Application:
             return payload
 
     async def load_regime_xrp() -> dict[str, Any]:
-        """XRP 3-class 레짐(S48_K6, 2026-09-03) -- load_regime_btc()의 XRP판.
+        """XRP 3-class 레짐(S96_K9, 2026-09-03) -- load_regime_btc()의 XRP판.
         같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
         now = time.monotonic()
         cached = regime_xrp_cache["payload"]

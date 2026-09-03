@@ -18,9 +18,21 @@ CLAUDE.md의 position-feature 파리티 계약이 막으려는 바로 그 불일
 
 ## 모델
 
-`tmp/xrp_regime_s48k6_20260903/model.joblib` (S48_K6, OOS bal_acc 0.8644, pred_flip 0.0458).
-XRP 자체 재스크리닝으로 S48_K6 선택 -- ETH 승자 S12_K3은 XRP에서 5/16, BTC 승자 S24_K3은 3/16.
-REF_RegimeEngine 대비 분류는 후퇴하나 예측-chop 게이트는 압승(8/16 vs 2/13, OOS +0.0306 vs -0.0756).
+`tmp/xrp_regime_s96k9_20260903/model.joblib` (**S96_K9**, 2026-09-03 교체).
+
+⚠️**2026-09-03 교체**: 이전 `S48_K6`은 격자 상단 경계에서 뽑힌 값이었다
+(`SCALES=(6,12,24,48)`->S48, `DEBOUNCES=(1,3,6)`->K6, **둘 다 격자 끝**. 게다가 `DEBOUNCES`는
+ETH 스크립트에서 import한 것이고 K=12 배제 근거도 ETH의 lock-up 관측이었다).
+격자를 S->192 / K->12로 넓히니 `S96_K9`가 네 축 전부에서 이겼다 --
+Phase2 15/16 vs 10/16, Phase3 bal_acc 0.8676 vs 0.8364, Phase3b 13/16 OOS +0.1437 vs 10/16 +0.0466,
+플리커 0.0358 vs 0.0476. ⭐이 저장소에서 드물게 **학습가능성 트레이드오프가 없다**.
+
+승격 근거는 **미사용 창 단일 노출**(2026-04-01~06-30, 사전등록 3기준 전부 통과):
+bal_acc 0.8439>=0.8219 / pred_flip 0.0339<=0.0513 / chop_recall 0.9173>=0.85. 그 창은 소진됐다.
+감사 전문: docs/experiments/xrp_tuning_gap_grid_boundary_audit_20260903.md
+
+⚠️스케일이 4시간 -> **8시간**이 됐다(ETH S12=1h, BTC S24=2h 중 가장 느림).
+XRP는 스케일·디바운스 두 축 모두 "느릴수록 좋다"가 일관되게 나온 자산이다.
 """
 
 from __future__ import annotations
@@ -46,7 +58,7 @@ from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # n
 SYMBOL = "XRPUSDT"          # subject asset
 CROSS_SYMBOL = "BTCUSDT"    # cross-asset -> fills the *_btc columns, see the docstring trap note
 HISTORY_BARS_RETURNED = 120  # matches the ETH regime scorers
-MODEL_PATH = ROOT / "tmp/xrp_regime_s48k6_20260903/model.joblib"
+MODEL_PATH = ROOT / "tmp/xrp_regime_s96k9_20260903/model.joblib"   # 2026-09-03 S48_K6에서 교체
 CLASSES3 = ["bull", "bear", "chop"]
 
 

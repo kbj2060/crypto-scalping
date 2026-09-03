@@ -2664,7 +2664,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Each asset reads its OWN endpoint's state -- never share one variable across assets, which is
   // precisely the 2026-08-31 bug this structure replaces (ETH's ribbon drawn over BTC candles).
   // Assets with no classifier still fall through to the "unsupported" grey band below.
-  // 2026-09-03: XRP도 자체 분류기(S48_K6)를 갖게 돼 추가. 분류기 없는 자산은 아래 회색 밴드로 폴백.
+  // 2026-09-03: XRP도 자체 분류기(S96_K9)를 갖게 돼 추가. 분류기 없는 자산은 아래 회색 밴드로 폴백.
   const REGIME_SOURCE_BY_ASSET = { eth: () => latestRegimeWide24, btc: () => latestRegimeBtc,
     xrp: () => latestRegimeXrp };
   const regimeSource = isSnapshotChart ? (REGIME_SOURCE_BY_ASSET[activeSnapshotAsset] || null) : null;
