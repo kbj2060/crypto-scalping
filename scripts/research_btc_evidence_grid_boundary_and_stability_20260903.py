@@ -78,16 +78,32 @@ def load(rel):
 
 
 def chosen_of(rep):
+    """⭐리포트 스키마가 **두 종류**다 -- 중첩 구조(`global_selection`)와
+    평탄 구조(`chosen_hit_type`/`chosen_horizon`/`chosen_k`/`chosen_train_lift`).
+    fib가 후자라 k=None이 나와 포맷 오류로 죽었다(2026-09-03)."""
     g = rep.get("global_selection") or rep.get("chosen") or {}
     t = g.get("train", g)
-    return {"hit_type": g.get("hit_type"), "horizon": g.get("horizon"), "k": g.get("k"),
-            "lift_bottom": t.get("lift_bottom", t.get("train_lift_bottom")),
-            "lift_top": t.get("lift_top", t.get("train_lift_top")),
-            "hits_bottom": t.get("n_hits_bottom", t.get("n_train_bottom_hits")),
-            "hits_top": t.get("n_hits_top", t.get("n_train_top_hits"))}
+    out = {"hit_type": g.get("hit_type"), "horizon": g.get("horizon"), "k": g.get("k"),
+           "lift_bottom": t.get("lift_bottom", t.get("train_lift_bottom")),
+           "lift_top": t.get("lift_top", t.get("train_lift_top")),
+           "hits_bottom": t.get("n_hits_bottom", t.get("n_train_bottom_hits")),
+           "hits_top": t.get("n_hits_top", t.get("n_train_top_hits"))}
+    if out["hit_type"] is None:                      # 평탄 스키마
+        tl = rep.get("chosen_train_lift") or {}
+        rows = rep.get("chosen_train_rows") or []
+        by = {r.get("side"): r for r in rows if isinstance(r, dict)}
+        out = {"hit_type": rep.get("chosen_hit_type"), "horizon": rep.get("chosen_horizon"),
+               "k": rep.get("chosen_k"),
+               "lift_bottom": tl.get("bottom"), "lift_top": tl.get("top"),
+               "hits_bottom": (by.get("bottom") or {}).get("n_cand_hits"),
+               "hits_top": (by.get("top") or {}).get("n_cand_hits")}
+    return out
 
 
 def run_once(mod, out_path, seed=None, grids=None):
+    if out_path.exists():          # 이미 돌린 시드/확장은 재사용(결정론적)
+        log(f"    (재사용 {out_path.name})")
+        return chosen_of(json.loads(out_path.read_text()))
     saves = {}
     if seed is not None:
         saves["RNG_SEED"] = mod.RNG_SEED; mod.RNG_SEED = seed
@@ -107,7 +123,11 @@ def main() -> int:
     t0 = time.time()
     OUTDIR.mkdir(parents=True, exist_ok=True)
     rep = {"seeds": SEEDS, "holdout_touched": False,
-           "order": "① rng 안정성 → ② 경계 확장 (XRP에서 배운 순서)", "signals": {}}
+           "order": "① rng 안정성 → ② 경계 확장 (XRP에서 배운 순서)",
+           "deployed_win_rate_meaning":
+               "TRAIN-리프트 argmax가 배포셀과 우연히 일치한 비율. BTC 배포셀은 argmax를 "
+               "VAL 확인으로 기각하고 고른 값이라 낮은 것이 정상이며 결함이 아니다.",
+           "signals": {}}
 
     for name, spec in TARGETS.items():
         log(""); log("#" * 76); log(f"{name}  --  {spec['reason']}"); log("#" * 76)
@@ -122,14 +142,19 @@ def main() -> int:
             if c is None:
                 log(f"    seed={s}: 실패"); continue
             rows.append({"seed": s, **c})
-            log(f"    seed={s:<9} {c['hit_type']}/{c['horizon']}/{c['k']:<5} "
+            log(f"    seed={s:<9} {c['hit_type']}/{c['horizon']}/{c['k']} "
                 f"lift {c['lift_bottom']}/{c['lift_top']}")
         cells = Counter((r["hit_type"], r["horizon"], r["k"]) for r in rows)
         dep = spec["deployed"]
         dw = cells.get(dep, 0)
         log(f"    승자 분포({len(rows)}회): " +
             "  ".join(f"{c[0]}/{c[1]}/{c[2]}×{n}" for c, n in cells.most_common()))
-        log(f"    ⇒ 배포셀 승률 **{dw}/{len(rows)}**  "
+        # ⚠️**"승률"이 아니다** -- BTC 배포셀은 TRAIN-리프트 argmax가 **아니라**
+        # VAL 확인으로 argmax를 기각하고 고른 값이다(featureanalysis 문서 3종에 명시:
+        # fib는 giveback 1위가 VAL에서 top 리프트 정확히 1.0x로 붕괴, taker는 히트건수 부족,
+        # orthogonal은 OOS hit 2/5건). ⇒ 이 수치는 "TRAIN argmax가 배포셀과 우연히 일치한 비율"이며
+        # 낮다고 결함이 아니다. 진짜 발견은 argmax 자체가 시드마다 흔들린다는 것이다.
+        log(f"    ⇒ TRAIN-argmax가 배포셀과 일치 **{dw}/{len(rows)}** (배포는 VAL확인 기각 결과라 불일치가 정상)  "
             f"{'✅안정' if len(cells) == 1 else f'⚠️{len(cells)}종으로 흔들림'}")
         res["stability"] = {"per_seed": rows, "distinct": len(cells),
                             "winner_counts": [{"cell": list(c), "n": n} for c, n in cells.most_common()],
@@ -174,7 +199,7 @@ def main() -> int:
     log(""); log("=" * 80)
     log("종합 -- BTC 격자 경계 확장 / rng 안정성")
     log("=" * 80)
-    log(f"{'신호':<26}{'배포셀 승률':>12}{'승자종류':>9}  확장 결과")
+    log(f"{'신호':<26}{'argmax=배포셀':>14}{'승자종류':>9}  확장 결과")
     for name, v in rep["signals"].items():
         st = v["stability"]; ex = v.get("extension") or {}
         c = ex.get("chosen")
@@ -186,6 +211,8 @@ def main() -> int:
     log("")
     log("⚠️확장으로 선택이 바뀌어도 그 자체는 교체 근거가 아니다 -- "
         "격자 lift != 모델 품질(§5-A). TabPFN 대조 + 부트스트랩 CI가 필요하다.")
+    log("⚠️'argmax=배포셀' 비율이 낮은 것은 결함이 아니다 -- BTC 배포셀은 TRAIN argmax를 "
+        "VAL 확인으로 **기각하고** 고른 값이다(3종 featureanalysis 문서에 명시).")
     rep["runtime_sec"] = round(time.time() - t0, 1)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(rep, ensure_ascii=False, indent=2, default=str))
