@@ -110,11 +110,17 @@ def main() -> int:
         log(f"{name:26s} H={H:<3} 발동 {len(d):6,}/{n_all:6,} "
             f"(워밍업 제외 {n_all-len(d):,}) · 커버리지 {cov:.1%}")
 
+    # ⚠️2026-09-03: 이전 버전은 `if p.exists()`로 **조용히 건너뛰었고**, 서버에 parquet이 없어
+    # 레짐 2열이 통째로 빠진 41열 텐서가 만들어졌다(구본은 51열). 없으면 실패해야 한다 --
+    # 오늘 파생거래소 500행 제약도 같은 "조용히 넘어가기"로 13개 피쳐를 망가뜨렸다.
     for tag, p in (("eth", ETH_REGIME), ("btc", BTC_REGIME)):
-        if p.exists():
-            r = pd.read_parquet(p)
-            out = out.merge(r.rename(columns={"regime": f"regime_{tag}"}), on="timestamp", how="left")
-            out[f"regime_{tag}"] = out[f"regime_{tag}"].ffill().fillna(-1).astype(int)
+        if not p.exists():
+            log(f"❌ 레짐 predictions 없음: {p}")
+            return 1
+        r = pd.read_parquet(p)
+        out = out.merge(r.rename(columns={"regime": f"regime_{tag}"}), on="timestamp", how="left")
+        out[f"regime_{tag}"] = out[f"regime_{tag}"].ffill().fillna(-1).astype(int)
+        log(f"regime_{tag} 병합: chop 비중 {float((out[f'regime_{tag}']==2).mean()):.3f}")
 
     # ---- 검증 ----
     log("\n=== 검증 ===")
@@ -127,6 +133,11 @@ def main() -> int:
             if not np.any(fc[max(0, i - H + 1):i + 1] != 0):
                 bad += 1; break
     log(f"  유지창 밖 활성값 {bad}건 (0이어야 정상) · 결측 {int(out.isna().sum().sum())}개")
+    n_exp = 1 + 5 * len(cfg) + 2                    # timestamp + 신호당 5열 + 레짐 2열
+    if out.shape[1] != n_exp:
+        log(f"❌ 열 수 {out.shape[1]} != 기대 {n_exp} -- 조용한 누락이 있다")
+        return 1
+    log(f"  ✅열 수 {out.shape[1]} = 기대값 (timestamp + {len(cfg)}×5 + 레짐 2)")
     warm = out.timestamp < WARMUP_END
     act_warm = sum(int((out[f"{c}_proba"][warm] > 0).sum()) for c in cfg)
     log(f"  ⭐워밍업(<{WARMUP_END.date()}) 구간 활성값 {act_warm}건 -- "
