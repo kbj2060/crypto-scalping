@@ -102,12 +102,3 @@ data/ensemble/omega4_6_1_btc_multislot_shadow_state_20260807_regime.json
 # real LAN IPs/ports/usernames for dev<->server SSH automation -- this repo
 # is public, keep them local-only (see handoff.hosts.conf.example)
 scripts/ops/handoff.hosts.conf
-
-# Runtime GPU mutex, created/removed constantly by every TabPFN caller (the always-on
-# shadow runners included). Left untracked it got swept into deploy_watcher.sh's
-# `git stash push -u`, and a shadow runner would recreate it within a second -- so the
-# matching `git stash pop` then failed ("could not restore untracked files"), which
-# makes the watcher exit BEFORE it restarts any service. That is a silent half-deploy:
-# new code on disk, old code still running in memory. Observed 2026-09-03 (the 19:00
-# and 19:20 cycles both died right after "pulled").
-.tabpfn_gpu.lock
