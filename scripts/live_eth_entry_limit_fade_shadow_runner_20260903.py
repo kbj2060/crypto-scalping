@@ -1,9 +1,28 @@
 #!/usr/bin/env python3
-"""ETH 지정가 페이드 진입 **섀도우 러너** -- 가상 주문/체결만 기록. 주문을 내지 않는다.
+"""ETH 지정가 페이드 진입 **섀도우 러너 (v3)** -- 가상 주문/체결만 기록. 주문을 내지 않는다.
 
-동결 v1(`eth_entry_limit_fade_v1_20260903`)의 남은 검증 수단은 이것뿐이다. HOLDOUT은
-8종 신호가 각자 1회 노출로 소진했고 깊이/τ 선별에도 참고돼 진단 전용이 됐다
-(docs/experiments/eth_entry_limit_fade_model_20260903.md).
+⚠️⚠️**2026-09-03 전수조사로 v1/v2가 철회됐다.** 라벨(`trail_out`)이 **체결 봉 자체부터**
+평가해 **체결 이전 고가**를 진입 후 이익으로 크레딧했다 -- 지정가가 직전 종가보다 3 ATR
+아래라 그 봉의 고가는 거의 확실히 체결 이전이고, 실측 유리폭이 중앙 1.76 ATR·82.3%가
+ARM(1.0) 초과라 **진입 즉시 무장**됐다. 1분봉 해상으로 확증한 결과 전체 후보 팔의
+**PF 2.86 → 0.95**, 평균 +20.34 → −1.01bp였다.
+전문: `docs/experiments/eth_entry_intrabar_fill_bar_credit_artifact_20260903.md`
+
+**이 전략에는 현재 확립된 엣지가 없다.** 정직한 라벨에서 ①트리거가 무작위 봉보다 못하고
+(VAL +1.48 vs +2.87 · OOS +1.95 vs +5.45) ②독립 일수가 42~45일뿐이라 일 단위 군집 부트스트랩
+CI 하한이 VAL/OOS에서 음수이며 ③dtype 하나에 VAL 부호가 뒤집힌다.
+
+⭐**그래서 이 러너의 목적은 성과 시연이 아니라 "정직한 기반 위에서 전진 데이터를 모으는 것"**
+이다. VAL/OOS/HOLDOUT은 하루에만 수십 번 재사용돼 더 이상 어떤 판정 근거도 되지 못한다.
+신선한 표본만이 남은 셋(페이드 방향성 · arm1만>양팔 · 모델 선별력의 시드 안정성)이 진짜인지
+가릴 수 있다.
+
+## v2 → v3 변경 셋
+
+  ① **L3 정직 라벨로 학습** -- 1분봉으로 체결 시점을 특정하고 그 이후 구간만 크레딧
+  ② **arm1(신호방향)만 제출** -- 역방향 팔이 아티팩트의 최대 수혜자였다(정직 라벨에서 OOS −11.33bp)
+  ③ **청산도 L3 규약** -- 체결 봉은 `post_fill_range()`가 낸 **사후 구간만** 기여한다.
+     학습 라벨과 같은 규약이라 학습/추론 정합이 맞는다(v1/v2 섀도우는 L1이라 어긋나 있었다).
 
 ## 이 러너가 실제로 재려는 것
 
@@ -72,7 +91,7 @@ for _p in (ROOT, ROOT / "scripts"):
 
 _SIG = importlib.import_module("live_eth_entry_limit_fade_signal_20260903")
 
-STATE = ROOT / "data/live/entry_limit_fade_shadow_state.json"
+STATE = ROOT / "data/live/entry_limit_fade_v3_shadow_state.json"
 KL1M = "https://fapi.binance.com/fapi/v1/klines"
 LOOP_SECONDS = 300                       # 5분봉 1회. 60초로 줄이면 같은 봉을 4중 채점한다.
 COST_SOURCE = "assumed_10bp"             # peg-maker 실측(>=2026-09-04) 반영 시 갱신
@@ -131,6 +150,29 @@ def classify_1m(sd: int, lim: float, bars1m: list[dict]) -> tuple[str, str | Non
     return ("touch_only", touch_t) if touch_t else ("none", None)
 
 
+def post_fill_range(sd: int, lim: float, bars1m: list[dict]) -> tuple[float, float] | None:
+    """⭐**L3 규약**: 체결 봉에서 지정가에 처음 닿은 분을 찾고, **그 다음 분부터**의
+    (고가, 저가)만 돌려준다. 학습 라벨(L3)과 같은 규약이라 학습/추론 정합이 맞는다.
+
+    ⚠️왜 필요한가: v1/v2는 체결 봉 **전체**를 청산에 썼는데, 지정가가 직전 종가보다 3 ATR
+    아래라 그 봉의 고가는 **거의 확실히 체결 이전**이다(실측 유리폭 중앙 1.76 ATR, 82.3%가
+    ARM 초과). 그 결과 진입 즉시 무장돼 전체 후보 PF가 2.86으로 부풀었고, 정직하게 고치면
+    0.95였다. 섀도우가 이 규약을 안 따르면 학습과 채점이 어긋난다.
+
+    체결이 봉의 마지막 분이면 사후 구간이 없으므로 (lim, lim)을 돌려준다 -- 그 봉은 아무것도
+    기여하지 않는다는 뜻이다(실측상 체결의 36.8%가 마지막 2분에 일어난다)."""
+    k0 = None
+    for k, b in enumerate(bars1m):
+        if (b["l"] <= lim) if sd > 0 else (b["h"] >= lim):
+            k0 = k; break
+    if k0 is None:
+        return None
+    post = bars1m[k0 + 1:]
+    if not post:
+        return lim, lim
+    return max(b["h"] for b in post), min(b["l"] for b in post)
+
+
 def expire_and_fill(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
     """대기 중 지정가를 새 완결 봉에 대해 체결/만료 처리한다."""
     wait, slots = int(pol["wait_bars"]), int(pol["slots"])
@@ -148,8 +190,9 @@ def expire_and_fill(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
             if o["bars_waited"] >= wait:
                 break
         if filled_bar is not None:
-            b1 = fetch_1m(o["placed_bar_utc"], filled_bar["timestamp_utc"])
+            b1 = fetch_1m(filled_bar["timestamp_utc"], filled_bar["timestamp_utc"])
             basis_b, t1 = classify_1m(o["sd"], o["limit"], b1)
+            pf_ = post_fill_range(o["sd"], o["limit"], b1)
             if len(s["positions"]) >= slots:
                 s["skipped"] += 1                                  # slotN 의미: 슬롯 없으면 미체결
                 log(f"  [슬롯없음] {o['signal']} arm{o['arm']} 건너뜀 ({s['skipped']}건 누적)")
@@ -158,7 +201,10 @@ def expire_and_fill(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
                                    "stop": o["limit"] - o["sd"] * pol["exit"]["sl_atr"] * o["atr_abs"],
                                    "best": o["limit"], "armed": False, "bars_held": 0,
                                    "fill_1m_basis": basis_b, "fill_1m_utc": t1,
-                                   "n_1m_bars": len(b1)})
+                                   "n_1m_bars": len(b1),
+                                   # ⭐L3: 체결 봉은 **사후 구간만** 청산에 기여한다
+                                   "post_fill_high": (pf_[0] if pf_ else None),
+                                   "post_fill_low": (pf_[1] if pf_ else None)})
             log(f"  [가상체결] {o['signal']} arm{o['arm']} sd{o['sd']:+d} @{o['limit']:.2f} "
                 f"({o['bars_waited']}봉 대기, 1m판정 {basis_b})")
         elif o["bars_waited"] >= wait:
@@ -176,6 +222,13 @@ def manage(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
         sgn, a = p["sd"], p["atr_abs"]
         todo = [b for b in bars if b["timestamp_utc"] > p["entry_bar_utc"]
                 and b["timestamp_utc"] > p.get("last_bar_utc", "")]
+        # ⭐L3 규약: 아직 체결 봉을 평가하지 않았다면, 그 봉의 **사후 구간**을 먼저 처리한다.
+        # (v1/v2는 체결 봉 전체를 썼고 그게 미래참조였다. 사후 구간만이 실제로 우리 것이다.)
+        if not p.get("post_fill_done") and p.get("post_fill_high") is not None:
+            todo = [{"timestamp_utc": p["entry_bar_utc"] + "#post",
+                     "open": p["entry"], "high": p["post_fill_high"],
+                     "low": p["post_fill_low"], "close": p["entry"]}] + todo
+            p["post_fill_done"] = True
         closed = False
         for b in todo:
             adv = b["low"] if sgn > 0 else b["high"]
@@ -190,8 +243,9 @@ def manage(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
                 ns = p["best"] - sgn * ex["trail_atr"] * a
                 if sgn * (ns - p["stop"]) > 0:
                     p["stop"] = ns
-            p["bars_held"] = int(p.get("bars_held", 0)) + 1
-            p["last_bar_utc"] = b["timestamp_utc"]
+            if not b["timestamp_utc"].endswith("#post"):
+                p["bars_held"] = int(p.get("bars_held", 0)) + 1
+                p["last_bar_utc"] = b["timestamp_utc"]
             if p["bars_held"] >= int(p["horizon"]):
                 _close(s, p, b["close"], "timeout", b["timestamp_utc"]); closed = True; break
         if not closed:
@@ -211,7 +265,7 @@ def _close(s: dict[str, Any], p: dict[str, Any], px: float, reason: str, bar_utc
         "pnl_bp": round(net * 1e4, 3), "reason": reason,
         "pred_hgb": p.get("pred_hgb"), "pred_tabpfn": p.get("pred_tabpfn"),
         "fill_5m_basis": "bar_low_high", "fill_1m_basis": p.get("fill_1m_basis"),
-        "fill_1m_utc": p.get("fill_1m_utc"), "exit_basis": "bar_high_low",
+        "fill_1m_utc": p.get("fill_1m_utc"), "exit_basis": "L3_post_fill_then_bar_high_low",
         "cost_source": COST_SOURCE})
     log(f"  [청산] {p['signal']} arm{p['arm']} {net*1e4:+.2f}bp ({reason}, {p.get('bars_held')}봉, "
         f"1m판정 {p.get('fill_1m_basis')})")
@@ -257,7 +311,9 @@ def report(s: dict[str, Any]) -> None:
             f"← 격차가 크면 5분봉 가정이 낙관적이라는 뜻")
     tp = [(t["pred_tabpfn"], t["pnl_bp"]) for t in led if t.get("pred_tabpfn") is not None]
     log(f"  TabPFN 채점 {len(tp)}/{len(led)}건 · 사전등록 전환선 200건")
-    log(f"  [동결 대조] HOLDOUT +59.66bp · 체결 18.42건/일 · 비용출처 {COST_SOURCE}")
+    log(f"  [동결 대조 v3·진단] VAL +10.58 · OOS +37.06 · HOLDOUT +32.75bp "
+        f"(무필터 arm1: +4.01/+6.02/−0.99) · 비용출처 {COST_SOURCE}")
+    log("  ⚠️위 수치는 소진된 창의 진단이다. 이 러너의 목적은 전진 데이터 수집이다.")
 
 
 def cycle(s: dict[str, Any], use_tabpfn: bool) -> None:
@@ -287,8 +343,11 @@ def main() -> int:
         report(s); return 0
     _, CARD = _SIG._art()
     pol = CARD["policy"]
-    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. depth {pol['depth_atr']}×ATR · 대기 {pol['wait_bars']}봉 "
-        f"· τ {pol['tau']*1e4:.0f}bp · 슬롯 {pol['slots']} · 주기 {LOOP_SECONDS}초")
+    log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. v3(L3·arm1만) depth {pol['depth_atr']}×ATR "
+        f"· 대기 {pol['wait_bars']}봉 · p_thr {pol['p_threshold']:.4f} · 슬롯 {pol['slots']} "
+        f"· 주기 {LOOP_SECONDS}초 · 청산규약 L3")
+    if not args.tabpfn:
+        log("⚠️⚠️`--tabpfn` 없이 돌리면 주 채점자가 없어 **아무것도 제출하지 않습니다.**")
     if args.tabpfn:
         log(f"TabPFN 컨텍스트 구축 중...")
         log(f"  멤버 {_SIG.build_tabpfn()}개 상주")

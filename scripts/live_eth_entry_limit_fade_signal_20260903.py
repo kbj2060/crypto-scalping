@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """ETH 지정가 페이드 **진입 신호** -- 동결 v1(`eth_entry_limit_fade_v1_20260903`) 라이브 채점.
 
-동결 정책(model_card.json 그대로):
-    8종 raw 트리거 → 양팔 지정가 depth 3.0×ATR · 대기 6봉 · 미체결 취소
-    → HGB 5시드 평균 예측 > 40bp → 4슬롯 → 트레일링 SL3.0/ARM1.0/Trail0.1
+동결 정책 v3(`eth_entry_limit_fade_v3_l3arm1_20260903`):
+    8종 raw 트리거 → **신호방향 지정가만**(arm1) depth 3.0×ATR · 대기 6봉 · 미체결 취소
+    → TabPFN 분류 5멤버 확률 > p_thr → 4슬롯 → 트레일링 SL3.0/ARM1.0/Trail0.1
+
+⚠️⚠️**v3는 승격 후보가 아니다.** 2026-09-03 전수조사에서 v1/v2의 라벨이 미래참조로 확인됐고
+(체결 봉의 **체결 이전** 고가를 진입 후 이익으로 크레딧, 전체 후보 PF 2.86→0.95), 정직한
+라벨에서는 **트리거가 무작위 봉보다 못하고**(VAL +1.48 vs +2.87) 독립 일수가 42~45일뿐이라
+확립이 불가능했다. v3의 목적은 **정직한 기반 위에서 전진 데이터를 모으는 것**뿐이다.
+전문: `docs/experiments/eth_entry_intrabar_fill_bar_credit_artifact_20260903.md`
+
+⭐v2 대비 바뀐 것: ①L3 정직 라벨로 학습 ②**arm1(신호방향)만 제출** -- 역방향 팔이
+아티팩트의 최대 수혜자였다 ③임계값을 arm1 TRAIN 분포에서 유도
 
 이 모듈은 **후보를 만들고 채점만 한다.** 가상 원장·체결 판정은 섀도우 러너가 맡는다.
 ⚠️주문 함수를 import하지 않는다.
@@ -50,7 +59,7 @@ import joblib  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-ART_DIR = ROOT / "tmp/eth_entry_limit_fade_v1_20260903"
+ART_DIR = ROOT / "tmp/eth_entry_limit_fade_v3_l3arm1_20260903"
 GBM3_PATH = ROOT / "tmp/eth_regime_s12k3_20260902/model.joblib"
 SYMBOL, BTC_SYMBOL = "ETHUSDT", "BTCUSDT"
 
@@ -214,7 +223,7 @@ def compute_entry_signal(score_tabpfn: bool = False) -> dict[str, Any]:
         A, CARD = _art()
         FE_COLS, POL = A["feature_cols"], CARD["policy"]
         CODE, HZ = CARD["signal_code_map"], CARD["signal_horizons"]
-        depth, tau = float(POL["depth_atr"]), float(POL["tau"])
+        depth = float(POL["depth_atr"])
 
         kl, btc_kl, eth_df, btc_df = _assemble()
         if len(kl) < 1000:
@@ -246,8 +255,9 @@ def compute_entry_signal(score_tabpfn: bool = False) -> dict[str, Any]:
                 col = f"{side}_{name}"
                 if col not in srow.index or not bool(srow[col]):
                     continue
-                for arm in (1, 0):
-                    # arm=1 신호방향(bottom=아래 매수), arm=0 역방향. b6의 `sd`와 동일.
+                # ⭐v3: **arm1(신호방향)만** 제출한다. 역방향(arm0)은 L0 아티팩트의 최대
+                # 수혜자였고, 정직한 L3에서는 3창 전부 손실이다(OOS −11.33bp).
+                for arm in (1,):
                     sd = (1 if side == "bottom" else -1) * (1 if arm else -1)
                     lim = close * (1 - depth * atr_pct) if sd > 0 else close * (1 + depth * atr_pct)
                     cands.append({"signal": name, "side": side, "arm": arm, "sd": int(sd),
@@ -262,12 +272,17 @@ def compute_entry_signal(score_tabpfn: bool = False) -> dict[str, Any]:
                           for c_ in cands])[FE_COLS]
         X = X.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
         X = X.fillna(pd.Series(A["feature_medians"]))
-        pred = np.mean([m.predict(X) for m in A["models"]], axis=0)
+        # HGB는 **대조**(v3에서 주 채점자는 TabPFN)
+        pred = np.mean([m.predict(X) for m in A["hgb_models"]], axis=0)
         for c_, p in zip(cands, pred):
             c_["pred_hgb"] = float(p)
-            c_["pass_tau"] = bool(p > tau)
+            c_["pass_hgb"] = bool(p > float(POL["hgb_tau"]))
         if score_tabpfn:
-            _score_tabpfn(X, cands, tau)
+            _score_tabpfn(X, cands, float(POL["p_threshold"]))
+        # ⚠️TabPFN 채점이 없으면 제출하지 않는다 -- v3의 주 채점자가 없는 상태이기 때문.
+        for c_ in cands:
+            c_["pass_tau"] = bool(c_.get("pred_tabpfn") is not None
+                                  and c_["pred_tabpfn"] > float(POL["p_threshold"]))
         return {"warmed_up": True, "error": None, "last_closed_bar_utc": str(ts),
                 "close": close, "candidates": cands, "bars": _bars_out(kl)}
     except Exception as e:                                          # noqa: BLE001
@@ -314,7 +329,8 @@ def _tabpfn_ctx() -> list:
 
 
 def build_tabpfn(sub: int = 18000) -> int:
-    """섀도우 러너 기동 시 1회. TRAIN 구간에서만 컨텍스트를 뽑는다(동결과 동일 시드)."""
+    """섀도우 러너 기동 시 1회. ⭐v3는 **컨텍스트를 아티팩트가 들고 있으므로** fills.csv를
+    다시 읽지 않는다 -- 동결과 정확히 같은 바이트에서 멤버를 세운다(재적재 검증이 이를 확인)."""
     global _TP
     import os
     env = ROOT / ".env"
@@ -323,19 +339,14 @@ def build_tabpfn(sub: int = 18000) -> int:
             if line.startswith("TABPFN_TOKEN="):
                 os.environ["TABPFN_TOKEN"] = line.split("=", 1)[1].strip().strip('"')
     from tabpfn import TabPFNClassifier
-    A, CARD = _art()
-    D = pd.read_csv(ROOT / "tmp/eth_entry_b6_expand_20260903/fills.csv",
-                    parse_dates=["timestamp"], low_memory=False)
-    tr = (D.timestamp < pd.Timestamp(CARD["splits"]["VAL"])).to_numpy()
-    X = D[A["feature_cols"]].apply(pd.to_numeric, errors="coerce").replace(
-        [np.inf, -np.inf], np.nan).fillna(pd.Series(A["feature_medians"]))
-    lab = (D["y"].to_numpy() > float(CARD["policy"]["tau"])).astype(int)
-    itr = np.flatnonzero(tr)
+    A, _ = _art()
+    loc = {int(v): i for i, v in enumerate(A["context_index"])}
     _TP = []
     for s in A["seeds"]:
-        rs = np.random.default_rng(s).choice(itr, size=min(sub, len(itr)), replace=False)
+        rs = np.random.default_rng(s).choice(A["context_index"], size=sub, replace=False)
+        sel = np.array([loc[int(v)] for v in rs])
         m = TabPFNClassifier(device="cuda", random_state=s)
-        m.fit(X.iloc[rs].to_numpy(), lab[rs])
+        m.fit(A["context_X"][sel], A["context_y"][sel])
         _TP.append(m)
     return len(_TP)
 

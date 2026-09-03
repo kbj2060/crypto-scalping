@@ -38,7 +38,7 @@ from research_eth_entry_b1_cumulative_arms_20260903 import SEEDS, HP  # noqa: E4
 from research_eth_entry_b6_expand_20260903 import slotN  # noqa: E402
 
 B6 = ROOT / "tmp/eth_entry_b6_expand_20260903"
-L3D = ROOT / "tmp/eth_entry_1m_resolved_20260903/labels_1m.csv"
+L3D = ROOT / "tmp/eth_entry_1m_resolved_20260903/labels_1m_all.csv"
 OUT = ROOT / "tmp/eth_entry_l3_retrain_20260903"
 NSLOT, KEEP0, SUB = 4, 0.2037, 18000
 B_RND = 300
@@ -51,14 +51,17 @@ def log(m): print(f"[l3] {m}", flush=True)
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    # ⭐원 설계대로: **모든 깊이·대기**로 학습하고 depth/wait을 피쳐로 넣는다.
+    # 정책 평가만 depth3.0/wait<=6 부분집합에서 한다(b6/동결과 동일).
     LAB = pd.read_csv(L3D, parse_dates=["timestamp"])
     D = pd.read_csv(B6 / "fills.csv", parse_dates=["timestamp"], low_memory=False)
-    W = D[((D.depth == 3.0) & (D.btf <= 6)).to_numpy()].reset_index(drop=True)
-    W = W.merge(LAB[["timestamp", "signal", "arm", "y_L3"]], on=["timestamp", "signal", "arm"],
-                how="left")
+    W = D.merge(LAB[["timestamp", "signal", "arm", "depth", "btf", "y_L3"]],
+                on=["timestamp", "signal", "arm", "depth", "btf"], how="left")
     W = W[np.isfinite(W.y_L3)].reset_index(drop=True)
     y = W["y_L3"].to_numpy(float)
-    log(f"후보 팔 {len(W):,} · " + " ".join(f"{k} {v:,}" for k, v in W.split.value_counts().items()))
+    dsel = ((W.depth == 3.0) & (W.btf <= 6)).to_numpy()
+    log(f"전체 학습 모집단 {len(W):,} · 평가 후보(depth3/wait6) {int(dsel.sum()):,} · "
+        + " ".join(f"{k} {v:,}" for k, v in W.split.value_counts().items()))
 
     cfg = json.loads((ROOT / "tmp/eth_causal_population_metalabel_20260902/config.json").read_text())
     base = [c for c in cfg["features"] if c != "is_bottom"]
@@ -71,7 +74,7 @@ def main() -> int:
     X = W[FE].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
     tr = (W.split == "TRAIN").to_numpy()
     X = X.fillna(X[tr].median())
-    M = {w: (W.split == w).to_numpy() for w in W3}
+    M = {w: ((W.split == w).to_numpy() & dsel) for w in W3}   # 평가는 후보만
     log(f"피쳐 {len(FE)} · TRAIN {int(tr.sum()):,}")
 
     def run(mask, keep=None):
@@ -99,12 +102,20 @@ def main() -> int:
     lab = (y > 0.0040).astype(int)
     itr = np.flatnonzero(tr)
     Xn = X.to_numpy(np.float32)
+    # ⭐채점은 **평가 후보(dsel)만**. 임계값도 tr&dsel에서 유도하므로 나머지 12만행은 낭비다
+    # (TabPFN은 한 호출이 수 분이라 이 차이가 9배).
+    prow = np.flatnonzero(dsel)
+    Xq = Xn[prow]
+
+    def expand(v):
+        f = np.full(len(W), -np.inf); f[prow] = v; return f
+
     ps = []
     for k, sd in enumerate(SEEDS):
         rs = np.random.default_rng(sd).choice(itr, size=min(SUB, len(itr)), replace=False)
         m = TabPFNClassifier(device="cuda", random_state=sd)
         m.fit(Xn[rs], lab[rs])
-        ps.append(m.predict_proba(Xn)[:, 1])
+        ps.append(expand(m.predict_proba(Xq)[:, 1]))
         log(f"  TabPFN 멤버{k} 완료")
     scores["TabPFN 분류 5멤버"] = np.mean(ps, axis=0)
 
@@ -112,7 +123,7 @@ def main() -> int:
     print(f"{'① 무필터':22s}" + "".join(f"{nf[w][0]:+9.2f}(n{nf[w][1]:4d})" for w in W3))
     res = {}
     for nm, p in scores.items():
-        thr = float(np.quantile(p[tr], 1 - KEEP0))
+        thr = float(np.quantile(p[tr & dsel], 1 - KEEP0))
         keep = p > thr
         r = {w: run(M[w], keep) for w in W3}
         res[nm] = {"thr": thr, "perf": r, "keep": keep}
@@ -123,7 +134,7 @@ def main() -> int:
     print(f"{'모델':22s}{'유지율':>8s}" + "".join(f"{w:>12s}" for w in W3))
     for nm, p in scores.items():
         for kf in (0.05, 0.10, KEEP0, 0.30):
-            thr = float(np.quantile(p[tr], 1 - kf))
+            thr = float(np.quantile(p[tr & dsel], 1 - kf))
             r = {w: run(M[w], p > thr) for w in W3}
             print(f"{nm:22s}{kf:8.3f}" + "".join(f"{r[w][0]:+8.2f}({r[w][1]:3d})" for w in W3))
 
