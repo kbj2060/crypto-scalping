@@ -239,6 +239,51 @@ const mobileChartView = {
   followLatest: true,
 };
 
+// 2026-09-03: 코인 전환 중 스켈레톤(로딩 애니메이션).
+// 문제: setActiveSnapshotAsset()가 6개 fetch를 Promise.all로 한꺼번에 기다린 뒤에야 render()를
+// 불렀기 때문에, 전환 직후~가장 느린 fetch가 끝날 때까지 **이전 코인의 숫자가 새 코인 탭 아래에
+// 그대로 보이다가** 갑자기 통째로 바뀌었다(사용자 신고). 이전 코인 값을 새 탭 라벨 밑에 띄우는
+// 건 단순히 보기 나쁜 정도가 아니라 오독 위험이다.
+// 해결: (1) 전환 즉시(await 이전에) asset-scoped 영역 전부를 스켈레톤으로 덮고, (2) 각 영역은
+// **자기 데이터가 도착하는 순간** 개별적으로 스켈레톤을 벗는다 -- 가장 느린 fetch가 나머지를
+// 붙잡지 않는다. 영역 지정은 index.html의 data-asset-scope 속성이 단일 소스다.
+const ASSET_SCOPES = ["indicators", "evidence", "liqmap"];
+// 전환 세대 번호. 스켈레톤을 벗기 전에 이 값을 대조해서, 느리게 도착한 **이전** 전환의 응답이
+// 새 전환의 스켈레톤을 걷어내는 경쟁 상태를 막는다(코인을 빠르게 연타할 때 실제로 발생).
+let assetSwitchGeneration = 0;
+let pendingAssetScopes = new Set();
+
+function assetScopeNodes(scope) {
+  return document.querySelectorAll(`[data-asset-scope="${scope}"]`);
+}
+
+function beginAssetScopeLoading() {
+  assetSwitchGeneration += 1;
+  pendingAssetScopes = new Set(ASSET_SCOPES);
+  ASSET_SCOPES.forEach((scope) => {
+    assetScopeNodes(scope).forEach((node) => node.classList.add("asset-loading"));
+  });
+  return assetSwitchGeneration;
+}
+
+function endAssetScopeLoading(scope, generation) {
+  if (generation !== assetSwitchGeneration) return; // 이미 다음 코인으로 또 전환됨 -- 무시
+  if (!pendingAssetScopes.delete(scope)) return;
+  assetScopeNodes(scope).forEach((node) => node.classList.remove("asset-loading"));
+}
+
+// renderSnapshotChart()는 한 tick 안에서 여러 fetch 콜백(청산맵·레짐·캔들이력·증거신호)이
+// 각자 부르기 때문에 같은 SVG를 한 프레임에 여러 번 그리곤 했다. rAF로 합쳐 프레임당 1회만
+// 실제로 그린다(그리는 내용은 동일 -- 항상 최신 캐시에서 다시 읽으므로 마지막 1회면 충분).
+let snapshotChartRafId = 0;
+function scheduleSnapshotChartRender() {
+  if (snapshotChartRafId) return;
+  snapshotChartRafId = requestAnimationFrame(() => {
+    snapshotChartRafId = 0;
+    renderSnapshotChart();
+  });
+}
+
 function renderSnapshotAssetTabs() {
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.asset === activeSnapshotAsset);
@@ -261,6 +306,11 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
+  // 2026-09-03: 수급흐름/리테일수급/청산캐스케이드(비ETH 코인의 coin-indicators)도 같은 이유로
+  // 게이트를 연다. 이 게이트는 자산별이 아니라 **전역 하나**라, 열어주지 않으면 20초(MODEL_
+  // INDICATOR_POLL_MS) 안에 코인을 두 번 바꿨을 때 두 번째 코인은 자기 값을 못 받아온 채
+  // 스켈레톤만 벗겨진다.
+  coinIndicatorsLastFetchAt = 0;
   // 2026-09-02: 증거신호도 코인탭에 따라 갈리므로(EVIDENCE_SIGNAL_SUPPORTED_ASSETS, 2026-09-03 XRP 추가) 위 4개와 같은 이유로
   // 즉시 초기화+재조회한다. resetEvidenceStripChips()는 재조회 전에 먼저 불러 이전 자산의 칩이
   // 잠깐이라도 남아있지 않게 한다(특히 smt_divergence처럼 상대 자산엔 없는 신호의 칩).
@@ -274,13 +324,41 @@ async function setActiveSnapshotAsset(asset) {
     const provisionalBadge = el("evidenceProvisionalBadge");
     if (provisionalBadge) { provisionalBadge.className = "ops-badge neutral"; provisionalBadge.textContent = "진행중 미리보기 (ETH 전용)"; }
   }
+  // 레짐 리본도 코인별 모델이다. tick()이 이제 **활성 코인 것만** 가져오므로(refreshActiveRegime),
+  // 전환 시엔 새 코인의 게이트를 열어 즉시 한 번 받아온다.
+  regimeWide24LastFetchAt = 0;
+  regimeBtcLastFetchAt = 0;
+  regimeXrpLastFetchAt = 0;
+
+  // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
+  const generation = beginAssetScopeLoading();
+
+  // 영역별로 따로 해제한다. 예전처럼 Promise.all 하나로 묶으면 가장 느린 하나(보통 증거신호의
+  // TabPFN 경로)가 나머지 전부를 인질로 잡는다.
+  // ⚠️.catch()가 .then() **앞에** 있는 게 핵심이다 -- fetch가 실패해도 스켈레톤은 반드시 벗겨야
+  // 한다. 실패 시 그대로 두면 네트워크가 한 번 끊긴 것만으로 그 패널이 영원히 로딩 애니메이션에
+  // 갇힌다(각 refresh 함수는 자체 try/catch로 이미 에러를 삼키지만, 여기서 그걸 가정하지 않는다).
+  const settleScope = (scope, work) =>
+    Promise.all(work)
+      .catch((error) => console.error(`코인 전환 중 ${scope} 갱신 실패:`, error))
+      .then(() => {
+        if (latestMainState) render(latestMainState, latestCompactState);
+        endAssetScopeLoading(scope, generation);
+      });
+
   await Promise.all([
-    refreshBasisLiquiditySignal(),
-    refreshLiquidationDirectionSignal(),
-    refreshLiquidation5mSignal(),
-    refreshLiquidationMap(),
-    refreshEvidenceSignals(),
-    maybeFetchSnapshotChartHistory(),
+    settleScope("indicators", [
+      refreshBasisLiquiditySignal(),
+      refreshLiquidationDirectionSignal(),
+      refreshCoinIndicators(),
+    ]),
+    settleScope("liqmap", [
+      refreshLiquidation5mSignal(),
+      refreshLiquidationMap(),
+      maybeFetchSnapshotChartHistory(),
+      refreshActiveRegime(),
+    ]),
+    settleScope("evidence", [refreshEvidenceSignals()]),
   ]);
   if (latestMainState) render(latestMainState, latestCompactState);
 }
@@ -622,7 +700,7 @@ async function maybeFetchSnapshotChartHistory() {
   if (cached.length && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
   lastSnapshotHistoryFetchAt = now;
   await fetchBinanceHistory(activeSnapshotAsset);
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 function applyDashboardEvent(payload) {
@@ -1886,7 +1964,7 @@ async function refreshEvidenceSignals() {
   // 2026-08-31: redraw the Snapshot chart's evidenceSignalTpLevels() lines right away (same idiom
   // as refreshLiquidationMap()/refreshRegimeWide24() below) instead of waiting up to ~5s for the
   // next render() tick to pick up the updated latestEvidenceSignals.
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 // Live PREVIEW of the currently-forming bar (2026-08-26) -- small live-dot overlay on the strip
@@ -2073,7 +2151,7 @@ async function refreshLiquidationMap() {
     latestLiquidationMap = { warmed_up: false, error: "fetch_failed" };
   }
   renderLiquidationMapPanel();
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 // wide24 HMM regime overlay (2026-08-26) for the Snapshot chart -- CONFIRMED research artifact,
@@ -2091,7 +2169,7 @@ async function refreshRegimeWide24() {
     console.error("Regime wide24 fetch error:", error);
     latestRegimeWide24 = { warmed_up: false, error: "fetch_failed", history: [] };
   }
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 // BTC regime overlay (2026-09-02). Separate endpoint and separate state from latestRegimeWide24
@@ -2110,7 +2188,7 @@ async function refreshRegimeBtc() {
     console.error("Regime BTC fetch error:", error);
     latestRegimeBtc = { warmed_up: false, error: "fetch_failed", history: [] };
   }
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 // XRP regime overlay (2026-09-03). BTC판과 같은 구조 -- 자산마다 **별도 상태 변수**를 쓴다.
@@ -2127,13 +2205,24 @@ async function refreshRegimeXrp() {
     console.error("Regime XRP fetch error:", error);
     latestRegimeXrp = { warmed_up: false, error: "fetch_failed", history: [] };
   }
-  renderSnapshotChart();
+  scheduleSnapshotChartRender();
 }
 
 // ⭐2026-09-03: ETH가 아닌 코인의 수급흐름/리테일수급/청산캐스케이드를 **그 코인 자신의**
 // 실시간 수집기에서 가져온다. XRP/HYPE는 전용 워커가 microstructure까지 모으고
 // (supervisor_xrp_worker.sh), tail_risk는 COIN_CONFIG에 5코인 전부 있다.
 // ETH는 봇 state(dashboard_state.json)를 그대로 쓰므로 여기서 가져오지 않는다.
+// 2026-09-03: 레짐 리본은 renderCandleSvg()의 REGIME_SOURCE_BY_ASSET가 **활성 코인 것 하나만**
+// 그린다. 그런데 tick()은 매 사이클 3개(ETH/BTC/XRP)를 전부 받아오고 2개는 그대로 버렸다 --
+// 코인이 늘수록 그대로 늘어나는 낭비라 활성 코인 것만 받도록 좁혔다. 자산별 상태 변수를
+// 공유하지 않는 구조(refreshRegimeBtc/Xrp 주석의 2026-08-31 버그)는 그대로 유지한다.
+function refreshActiveRegime() {
+  if (activeSnapshotAsset === "eth") return refreshRegimeWide24();
+  if (activeSnapshotAsset === "btc") return refreshRegimeBtc();
+  if (activeSnapshotAsset === "xrp") return refreshRegimeXrp();
+  return Promise.resolve();   // SOL/HYPE: 학습된 레짐 모델이 아직 없다
+}
+
 async function refreshCoinIndicators() {
   if (activeSnapshotAsset === "eth") return;
   const now = Date.now();
@@ -3409,9 +3498,7 @@ async function tick() {
       refreshLiqBurstState();
       refreshLiquidationDirectionSignal();
       refreshLiquidationMap();
-      refreshRegimeWide24();
-      refreshRegimeBtc();
-      refreshRegimeXrp();
+      refreshActiveRegime();
       refreshCoinIndicators();
       refreshMacroCalendar();
       refreshVrebEconShadow();

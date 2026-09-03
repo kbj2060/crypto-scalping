@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260903-xrp-evidence-allowlist">
+  <link rel="stylesheet" href="styles.css?v=20260903-perf-swr-prewarm-skeleton">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -79,7 +79,7 @@
       </div>
 
       <section class="panel ops-health-panel signal-overview-panel">
-        <div class="signal-overview-group">
+        <div class="signal-overview-group" data-asset-scope="indicators">
           <p class="signal-overview-label">모델 내부 지표</p>
           <div class="signal-chip-subgroup">
             <p class="signal-chip-subgroup-label">방향 (롱/숏)</p>
@@ -117,7 +117,7 @@
             </div>
           </div>
         </div>
-        <div class="signal-overview-group">
+        <div class="signal-overview-group" data-asset-scope="evidence">
           <div class="signal-overview-group-head">
             <p class="signal-overview-label">증거 신호 (ETH 5분봉)</p>
             <span id="evidenceStripBadge" class="ops-badge neutral">-</span>
@@ -189,7 +189,7 @@
         </div>
       </section>
 
-      <section class="panel ops-health-panel liq-map-panel">
+      <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
           <div class="ops-health-head-tools">
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
@@ -202,11 +202,11 @@
         <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
-      <section class="panel ops-health-panel">
+      <section class="panel ops-health-panel" data-asset-scope="indicators">
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
       </section>
 
-      <section class="panel ops-health-panel">
+      <section class="panel ops-health-panel" data-asset-scope="evidence">
         <div class="ops-health-head">
           <div class="ops-health-head-tools">
             <span id="evidenceNetScoreBadge" class="ops-badge neutral">-</span>
@@ -241,7 +241,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260903-xrp-evidence-allowlist"></script>
+  <script src="./app.js?v=20260903-perf-swr-prewarm-skeleton"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
