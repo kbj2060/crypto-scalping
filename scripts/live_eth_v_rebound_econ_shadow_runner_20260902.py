@@ -139,8 +139,18 @@ def manage(s: dict[str, Any], bars: list[dict]) -> None:
         todo = [b for b in bars if last is None or b["timestamp_utc"] > last]
         closed = False
         for b in todo:
+            # 배리어 평가가 실제로 시작된 봉. `entry_utc`(신호가 난 봉)와 다를 수 있다 --
+            # SCORE_TAIL_BARS=3이라 신호는 최대 3봉 묵은 채로 처리될 수 있고, 그때 진입가는
+            # 신호봉 종가가 아니라 처리 시점의 마크가격이다. 그 지연을 숨기지 않고 기록해서
+            # bars_held가 (exit - entry_bar)로 검산되게 한다. 진입 동작 자체는 바꾸지 않는다.
+            p.setdefault("entry_bar_utc", b["timestamp_utc"])
             adv = b["low"] if sgn > 0 else b["high"]          # (1) 불리한 쪽 먼저
             if (adv <= p["stop"]) if sgn > 0 else (adv >= p["stop"]):
+                # 2026-09-04: 이 봉을 세고 나서 청산한다. 예전엔 증가 전에 break해서 스톱
+                # 청산만 마지막 봉을 빠뜨렸다(타임아웃 경로는 증가 후 청산이라 세고 있었다).
+                # 두 경로가 서로 달랐던 것이고, 스톱 경로는 여기서 끝나므로 timeout 판정에는
+                # 영향이 없다. 실측 오차 17/17건 중 상수 -1 성분이 이것이었다.
+                p["bars_held"] = int(p.get("bars_held", 0)) + 1
                 _close(s, p, p["stop"], "stop", b["timestamp_utc"])
                 closed = True
                 break
@@ -165,6 +175,18 @@ def manage(s: dict[str, Any], bars: list[dict]) -> None:
     s["positions"] = keep
 
 
+def _lag_bars(signal_utc: str | None, first_eval_utc: str | None) -> int | None:
+    """신호봉 -> 배리어 평가 시작봉 사이의 5분봉 개수. 계산 불가면 None."""
+    if not signal_utc or not first_eval_utc:
+        return None
+    try:
+        a = datetime.fromisoformat(str(signal_utc).replace("Z", "+00:00"))
+        b = datetime.fromisoformat(str(first_eval_utc).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return int((b - a).total_seconds() // 300)
+
+
 def _close(s: dict[str, Any], p: dict[str, Any], exit_px: float, reason: str,
            bar_utc: str) -> None:
     sgn = 1.0 if p["side"] == "long" else -1.0
@@ -181,6 +203,12 @@ def _close(s: dict[str, Any], p: dict[str, Any], exit_px: float, reason: str,
                         # 두 경우는 원래 완전히 다른 사건이다. 이 필드가 그 구분을 확정한다
                         # (이전 행에는 없으므로 대시보드가 가격이동 부호로 보완한다).
                         "armed": bool(p.get("armed", False)),
+                        # 배리어 평가가 시작된 봉과, 신호봉으로부터의 지연(봉 수).
+                        # bars_held는 이 봉부터 청산봉까지의 개수이므로
+                        # bars_held == (exit_utc - entry_bar_utc)/5분 + 1 로 검산된다.
+                        # signal_lag_bars>0이면 그만큼 신호가 묵은 뒤 마크가격으로 진입한 것이다.
+                        "entry_bar_utc": p.get("entry_bar_utc"),
+                        "signal_lag_bars": _lag_bars(p.get("entry_utc"), p.get("entry_bar_utc")),
                         "exit_basis": "bar_high_low"})
     s["consec_loss"] = 0 if pnl > 0 else s["consec_loss"] + 1
     log(f"  청산 {p['side']} {pnl:+.2f}bp ({reason}, {p.get('bars_held', 0)}봉) "
