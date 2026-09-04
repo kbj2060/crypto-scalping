@@ -117,6 +117,8 @@ Deploy/Git Two-Channel Conflict Contract
 
 **main에 머지하기 전에 반드시 `bash scripts/ops/check_deploy_drift.sh`를 돌린다.** 머지가 watcher를 깨우는 방아쇠이므로 이 시점이 유일하게 예방 가능한 지점이다. 종료코드 0(안전)이 아니면 머지하지 말고 먼저 정리한다. 라이브 파일을 `handoff.sh push`로 배포한 직후, 그리고 대시보드가 이상할 때(다른 원인 추정보다 **먼저**)도 같은 스크립트를 돌린다.
 
+**문서가 인용하거나 crontab·supervisor·라이브 코드가 참조하는 스크립트는 만든 세션이 그 자리에서 커밋한다.** 서버에만 두면 (2)가 merge-first라 당장 배포는 막지 않지만, 뒤늦게 같은 경로를 커밋하는 순간 폴백 stash의 pop이 "already exists"로 실패한다(2026-09-04 정리 전까지 이런 파일이 서버 227개·로컬 356개 쌓여 autostash 115회 실패). `check_deploy_drift.sh`가 서버 미추적 스크립트 개수를 경고로 보여준다.
+
 **라이브 서빙 파일은 rsync만 하지 말고 커밋한다.** `dashboard/**`, `scripts/live_*.py`가 대상이다. 커밋하면 main == 배포본이 되어 stash 대상 자체가 사라진다. 서버에만 존재하는 코드는 그 자체가 리스크이고(오늘 실제로 터졌다), 커밋하면 CI 문법검사도 자동으로 걸린다.
 
 **서버 파일을 덮어쓰기 전에 반드시 로컬과 md5를 대조한다.** 이 저장소는 동시 세션이 공유하므로 서버 쪽이 더 최신일 수 있다. 대조 없이 `handoff.sh push`하면 다른 세션이 배포한 작업을 소리없이 지운다. 대조 방법: `handoff.sh launch server <job> -- /usr/bin/md5sum <경로>` (읽기 전용). 내 변경만 되돌린 사본의 해시가 서버 것과 일치하면 "로컬 = 서버 + 내 변경분"이므로 덮어써도 안전하다.

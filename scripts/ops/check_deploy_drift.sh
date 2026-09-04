@@ -53,6 +53,11 @@ git status --short | grep -E "^( M|M |\?\?)" \
   | grep -vE "\.bak|\.backup|_backup_|\.orig$|\.pre_|\.save$|~$" || echo "(none)"
 echo "--- CONFLICT_MARKERS ---"
 grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ scripts/live_*.py 2>/dev/null || echo "(none)"
+echo "--- UNTRACKED_SCRIPTS ---"
+# 2026-09-04: 워처는 merge-first 라 미추적 파일 자체는 배포를 막지 않지만, **같은 경로를 커밋하면** 머지가
+# 거부되고 폴백 stash 의 pop 이 "already exists" 로 실패한다. 개수와 앞 5개를 알려 커밋을 재촉한다.
+git status --porcelain --untracked-files=all | grep -E "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$" | cut -c4- | sed -n "1,5p"
+echo "UNTRACKED_SCRIPT_COUNT=$(git status --porcelain --untracked-files=all | grep -cE "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$")"
 ' >/dev/null 2>&1
 
 for _ in $(seq 1 30); do
@@ -65,6 +70,8 @@ OUT="$(bash "$HANDOFF" logs server "$JOB" 2>&1)"
 markers="$(echo "$OUT" | sed -n '/--- CONFLICT_MARKERS ---/,$p' | tail -n +2 | grep -v '^(none)$' | grep -v '^$' || true)"
 unmerged="$(echo "$OUT" | sed -n '/--- UNMERGED ---/,/--- DIRTY_LIVE_FILES ---/p' | grep -vE '^---|^\(none\)$|^$' || true)"
 dirty="$(echo "$OUT" | sed -n '/--- DIRTY_LIVE_FILES ---/,/--- CONFLICT_MARKERS ---/p' | grep -vE '^---|^\(none\)$|^$' || true)"
+untracked_n="$(echo "$OUT" | grep -E '^UNTRACKED_SCRIPT_COUNT=' | tail -1 | cut -d= -f2)"
+untracked_sample="$(echo "$OUT" | sed -n '/--- UNTRACKED_SCRIPTS ---/,/^UNTRACKED_SCRIPT_COUNT=/p' | grep -vE '^---|^UNTRACKED_SCRIPT_COUNT=|^$' || true)"
 
 echo "$OUT" | grep -E "^(SERVER_HEAD|SERVER_ORIGIN|LAST_DEPLOYED)=" | sed 's/^/  /'
 echo
@@ -89,6 +96,14 @@ if [[ -n "$dirty" ]]; then
   echo "     2) 다르면 서버 쪽이 최신일 수 있다 -- 덮어쓰기 전에 반드시 내용을 먼저 확인"
   echo "     3) 머지를 미룰 수 없다면, 머지 직후 watcher 사이클(최대 10분)을 지켜본다"
   [[ "$RC" == "0" ]] && RC=1
+fi
+
+if [[ -n "$untracked_n" && "$untracked_n" != "0" ]]; then
+  echo "ℹ️  서버에 git이 모르는 스크립트가 ${untracked_n}개 있습니다 (경고만, 종료코드 무관):"
+  echo "$untracked_sample" | sed 's/^/     /'
+  echo "     같은 경로를 커밋하면 merge-first 폴백 stash 의 pop 이 실패합니다 -- 서버 사본 기준으로 커밋하고"
+  echo "     푸시 직후 서버 사본을 지운 뒤 수동 ff 머지하세요 (2026-09-04 정리 절차, 호메로스 두 채널 계약)."
+  echo
 fi
 
 if [[ "$RC" == "0" ]]; then
