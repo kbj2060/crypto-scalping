@@ -1,0 +1,64 @@
+{
+  "stage_a": [
+    {
+      "model_kind": "random_forest",
+      "ok": false,
+      "mdd": -10.2158,
+      "seconds": 184,
+      "msg": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=20 floor=19, mdd=-10.2158 floor=-8.0000"
+    },
+    {
+      "model_kind": "gradient_boosting",
+      "ok": false,
+      "mdd": -10.5852,
+      "seconds": 149,
+      "msg": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=20 floor=19, mdd=-10.5852 floor=-8.0000"
+    }
+  ],
+  "stage_b": [
+    {
+      "weights": "",
+      "parent_ok": true,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s903174_qbase",
+      "sidecar": {
+        "ok": false,
+        "mdd": -9.6622,
+        "seconds": 181,
+        "msg": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=20 floor=19, mdd=-9.6622 floor=-8.0000"
+      }
+    },
+    {
+      "weights": "0:1.5",
+      "parent_ok": true,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s903174_q0_15",
+      "sidecar": {
+        "ok": false,
+        "mdd": null,
+        "seconds": 56,
+        "msg": "RuntimeError: not enough side-split risk samples for side=-1: 8"
+      }
+    },
+    {
+      "weights": "0:2.0",
+      "parent_ok": true,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s903174_q0_20",
+      "sidecar": {
+        "ok": false,
+        "mdd": -10.0377,
+        "seconds": 110,
+        "msg": "RuntimeError: selected risk mapping failed final validation replay constraint: trades=16 floor=15, mdd=-10.0377 floor=-8.0000"
+      }
+    },
+    {
+      "weights": "0:3.0",
+      "parent_ok": true,
+      "parent_dir": "btc_omega4_3head_parent72_loose_entry_quality_swingtransition_20260806_h48qual_regime_jmredesign_20260810_e3_r30000_s903174_q0_30",
+      "sidecar": {
+        "ok": false,
+        "mdd": null,
+        "seconds": 51,
+        "msg": "RuntimeError: not enough side-split risk samples for side=1: 4"
+      }
+    }
+  ]
+}
