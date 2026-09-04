@@ -110,7 +110,7 @@ pos_tp/pos_sl(TP/SL 배리어 레벨) 피쳐는 리스크사이징(margin/levera
 Deploy/Git Two-Channel Conflict Contract
 이 저장소는 서버 배포 경로가 **둘**이고 서로를 모른다. 이 긴장 때문에 2026-08-24와 2026-09-01 두 번 실제로 대시보드가 깨졌다.
 (1) `scripts/ops/handoff.sh push` — rsync로 서버 파일을 직접 덮어쓴다. git을 전혀 거치지 않아 서버 워킹트리에 **커밋되지 않은 서빙 코드**를 남긴다.
-(2) `scripts/ops/deploy_watcher.sh` — 10분 cron. origin/main을 폴링해 CI(`syntax-check`) 통과를 확인한 뒤 `git stash push -u` → `git merge --ff-only` → `git stash pop` 사이클을 돈다.
+(2) `scripts/ops/deploy_watcher.sh` — 10분 cron. origin/main을 폴링해 CI(`syntax-check`) 통과를 확인한 뒤 `git merge --ff-only`를 **먼저** 시도하고, 머지가 "로컬 수정/미추적 파일이 덮어써진다"로 거부될 때만 `git stash push -u` → 머지 → `git stash pop` 폴백을 쓴다(2026-09-04 이전에는 항상 stash 사이클을 돌았고 그 pop이 08-12~09-04 사이 115회 실패해 autostash가 쌓였다).
 (1)로 배포하고 커밋하지 않은 파일이 있는 상태에서 **main이 전진하면**, (2)가 그 파일을 stash했다가 되돌리려다 같은 줄을 건드린 경우 **stash pop 충돌** → 서빙 파일에 `<<<<<<<` 마커가 문자 그대로 박힌다. watcher는 이때 설계대로 텔레그램 알림 후 정지하고 서비스는 건드리지 않는다(`deploy_watcher.sh`의 stash pop 블록, 2026-09-01 기준 263~275행) — 즉 **그 시점엔 아직 다운이 아니다**(실행 중 프로세스는 메모리에 옛 코드 보유). 이 상태에서 프로세스를 재시작하면 그제서야 크래시 루프에 빠져 다운된다. 2026-09-01 사고의 실제 다운 원인이 정확히 이 재시작이었다.
 
 **워처 로그의 `deploy OK`만으로 대시보드 정상이라고 판단하지 말 것 — 2026-09-01 이전 버전은 대시보드를 아예 안 봤다.** health check가 `systemctl is-active`로 systemd 유닛만 확인했는데 대시보드는 유닛이 아니라 `supervise_server.sh`가 관리한다. 그래서 대시보드가 죽어 있어도 `deploy OK`를 찍고 `last_deployed_sha`까지 갱신했다(2026-09-01 18:10 실제 발생, 약 2분 다운을 사람이 페이지를 열어보기 전까지 아무도 몰랐다). 같은 날 **포트 리슨 여부를 보는 대시보드 전용 health check를 추가**했고, `restart_dashboard()`도 plain `kill` 후 6초 안에 안 죽으면 **SIGKILL로 승격**하도록 고쳤다(`dashboard/server.py`의 고질적 SIGTERM 행 증상 — 소켓은 놓는데 프로세스가 안 죽어 supervisor의 `wait`가 안 풀리고 재기동이 막힌다). 그래도 확인은 `ss -ltn | grep 8787` 또는 curl로 직접 하는 게 원칙이다.

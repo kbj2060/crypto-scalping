@@ -111,3 +111,7 @@ scripts/ops/handoff.hosts.conf
 # new code on disk, old code still running in memory. Observed 2026-09-03 (the 19:00
 # and 19:20 cycles both died right after "pulled").
 .tabpfn_gpu.lock
+
+# 2026-09-04 (deploy_watcher autostash 사고 정리): 학습 데이터/코드의 수동 백업 사본은 git 밖에 둔다.
+*.bak_pre_extend_*
+*.pre_instrumentation_backup_*

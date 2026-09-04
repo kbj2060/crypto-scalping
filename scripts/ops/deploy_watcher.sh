@@ -265,41 +265,53 @@ restart_units() {
   return $failed
 }
 
-# This repo doubles as a live research working directory (see header
-# comment) -- stash whatever's dirty right before the merge rather than
-# refusing to deploy. Fully reversible either way: a clean pop restores it
-# exactly, and a conflicted pop leaves the stash undropped for a human to
-# resolve instead of guessing at a merge.
+# 2026-09-04: merge-first. This repo doubles as a live research working directory (see header
+# comment): the server tree routinely carries 200+ untracked research scripts plus a few modified
+# tracked files. Until today every cycle stashed all of them (`git stash push -u`) and popped them
+# back after the merge -- 115 of those pops failed between 2026-08-12 and 2026-09-04 (each leaving
+# an autostash behind and sending a Telegram, with the git error discarded), because the pop has to
+# re-create hundreds of files against a tree that may have moved under it. `git merge --ff-only`
+# itself only refuses when a file it must write is locally modified or exists untracked, so the
+# stash is needed only in that rare case. Try the merge first; fall back to the autostash only on
+# that specific refusal; log the real git error either way. Fully reversible as before: a clean pop
+# restores the stash exactly, a conflicted pop leaves it undropped for a human.
 stashed=0
-if ! working_tree_clean; then
-  stash_msg="deploy_watcher autostash $(date -Iseconds)"
-  if git stash push -u -m "$stash_msg" >/dev/null 2>&1; then
-    stashed=1
-    log "stashed local changes before pulling: $stash_msg"
-  else
-    send_telegram "⛔ [DEPLOY] could not stash local changes at ${REMOTE_SHA:0:8} -- not deploying, needs manual attention."
+merge_out="$(git merge --ff-only origin/main 2>&1)"; merge_rc=$?
+if [[ $merge_rc -ne 0 ]]; then
+  if grep -qE "would be overwritten by|untracked working tree files" <<<"$merge_out"; then
+    n_paths="$(grep -cE '^[[:space:]]+[^[:space:]]' <<<"$merge_out")"
+    log "merge refused: ${n_paths} local path(s) would be overwritten -- falling back to autostash"
+    stash_msg="deploy_watcher autostash $(date -Iseconds)"
+    if git stash push -u -m "$stash_msg" >/dev/null 2>&1; then
+      stashed=1
+      log "stashed local changes before pulling: $stash_msg"
+    else
+      log "could not stash local changes"
+      send_telegram "⛔ [DEPLOY] could not stash local changes at ${REMOTE_SHA:0:8} -- not deploying, needs manual attention."
+      exit 1
+    fi
+    merge_out="$(git merge --ff-only origin/main 2>&1)"; merge_rc=$?
+  fi
+  if [[ $merge_rc -ne 0 ]]; then
+    log "fast-forward pull failed: ${merge_out//$'\n'/ | }"
+    send_telegram "⛔ [DEPLOY] fast-forward pull failed at ${REMOTE_SHA:0:8} -- local state diverged, needs manual attention."
+    [[ "$stashed" == "1" ]] && git stash pop >/dev/null 2>&1
     exit 1
   fi
-fi
-
-if ! git merge --ff-only origin/main >/dev/null 2>&1; then
-  send_telegram "⛔ [DEPLOY] fast-forward pull failed at ${REMOTE_SHA:0:8} -- local state diverged, needs manual attention."
-  [[ "$stashed" == "1" ]] && git stash pop >/dev/null 2>&1
-  exit 1
 fi
 log "pulled to $(git rev-parse HEAD)"
 
 if [[ "$stashed" == "1" ]]; then
-  if git stash pop >/dev/null 2>&1; then
+  pop_out="$(git stash pop 2>&1)"; pop_rc=$?
+  if [[ $pop_rc -eq 0 ]]; then
     log "restored stashed local changes"
   else
-    # Conflict between the just-pulled commit and the stashed changes (would
-    # need both to touch the same lines -- rare). The stash is untouched
-    # (pop only drops on a clean apply), but the working tree may now hold a
-    # half-applied conflict, so stop here instead of restarting anything
-    # against it. Whoever's changes are stashed resolves this by hand
-    # (`git stash list`, `git stash pop`, fix conflicts).
-    send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but restoring stashed local changes conflicted -- work is safe in 'git stash list' but needs manual resolution. NOT restarting services this cycle."
+    # Conflict between the just-pulled commit and the stashed changes. The stash is untouched
+    # (pop only drops on a clean apply), but the working tree may now hold a half-applied
+    # conflict, so stop here instead of restarting anything against it. Whoever's changes are
+    # stashed resolves this by hand (`git stash list`, `git stash pop`, fix conflicts).
+    log "stash pop FAILED (stash kept for manual resolution): ${pop_out//$'\n'/ | }"
+    send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but restoring stashed local changes conflicted -- work is safe in 'git stash list' but needs manual resolution. NOT restarting services this cycle. git: $(tail -n 1 <<<"$pop_out")"
     exit 1
   fi
 fi
