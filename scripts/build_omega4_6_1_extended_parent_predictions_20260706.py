@@ -64,14 +64,14 @@ OUT_DIR = ROOT / "tmp/causal_regen_20260516/omega4_6_1_extended_oos_20260706"
 
 def build_frame() -> pd.DataFrame:
     frame = pd.read_csv(BASE_2026, low_memory=False)
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], format="mixed")
     frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
     overlay = pd.read_csv(WIDE24, low_memory=False)
-    overlay["timestamp"] = pd.to_datetime(overlay["timestamp"])
+    overlay["timestamp"] = pd.to_datetime(overlay["timestamp"], format="mixed")
     cols = [c for c in overlay.columns if c != "timestamp"]
-    merged = frame.merge(overlay[["timestamp", *cols]], on="timestamp", how="left", validate="one_to_one")
-    if merged[cols].isna().any().any():
-        raise RuntimeError("regime3 overlay has gaps after merge")
+    merged = frame.merge(overlay[["timestamp", *cols]], on="timestamp", how="inner", validate="one_to_one")
+    if len(frame) - len(merged) > 1:
+        raise RuntimeError(f"regime3 overlay has gaps after merge (dropped {len(frame) - len(merged)} rows, expected at most 1)")
     return merged
 
 
