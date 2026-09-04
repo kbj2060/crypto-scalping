@@ -265,20 +265,32 @@ def main() -> int:
         log("\n=== B. 학습 게이트 (Tier0로 역행폭 예측) ===")
         from sklearn.ensemble import HistGradientBoostingRegressor
         from scipy.stats import spearmanr
+        from tabpfn import TabPFNRegressor
         X = np.nan_to_num(LONG.iloc[P["row"].to_numpy()][T0]
                           .apply(pd.to_numeric, errors="coerce").to_numpy(float),
                           nan=0.0, posinf=0.0, neginf=0.0)
         y = P["adverse_atr"].to_numpy(float)
-        m = HistGradientBoostingRegressor(random_state=SEED, max_iter=300, learning_rate=0.05)
-        m.fit(X[tr], y[tr])
-        pv = m.predict(X[va])
-        ic = float(spearmanr(pv, y[va]).correlation)
-        log(f"  역행폭 예측 IC(VAL) = {ic:+.4f}")
+        # ⭐역행폭은 **크기** 문제다 -- 오늘 진단("Tier0는 크기는 알고 방향은 모른다")상
+        # Tier0가 정보를 가질 만한 유일한 타깃이라, 이 저장소의 기본기인 TabPFN을 꼭 대본다.
+        rngb = np.random.default_rng(SEED)
+        tri_b = np.flatnonzero(tr)
+        ctx_b = rngb.choice(tri_b, size=min(18000, len(tri_b)), replace=False)
+        MODELS = {}
+        mh = HistGradientBoostingRegressor(random_state=SEED, max_iter=300, learning_rate=0.05)
+        mh.fit(X[tr], y[tr]); MODELS["HGB_reg"] = mh.predict(X[va])
+        mt = TabPFNRegressor(device="cuda", random_state=SEED, ignore_pretraining_limits=True)
+        mt.fit(X[ctx_b], y[ctx_b]); MODELS["TabPFN_reg"] = mt.predict(X[va])
+        for mn, pvv in MODELS.items():
+            log(f"  역행폭 예측 IC(VAL) {mn:>11s} = "
+                f"{float(spearmanr(pvv, y[va]).correlation):+.4f}")
         lrn = {}
-        print(f"{'신호':>24s}{'게이트':>8s}{'n':>7s}{'전체bp':>9s}{'게이트bp':>10s}{'일t':>7s}")
-        print("-" * 67)
         vidx = np.flatnonzero(va)
-        for s_ in sigs:
+        for mname, pv in MODELS.items():
+          ic = float(spearmanr(pv, y[va]).correlation)
+          log(f"\n--- {mname} (IC {ic:+.4f}) ---")
+          print(f"{'신호':>24s}{'게이트':>8s}{'n':>7s}{'전체bp':>9s}{'게이트bp':>10s}{'일t':>7s}")
+          print("-" * 67)
+          for s_ in sigs:
             mk_v = (P["signal"].to_numpy()[vidx] == s_)
             if mk_v.sum() < 100:
                 continue
@@ -292,12 +304,17 @@ def main() -> int:
                 tt = float(cluster_t(gv, gd))
                 print(f"{s_[:23]:>24s}{gq:8.2f}{int(g.sum()):7d}{base:9.2f}"
                       f"{float(gv.mean()):10.2f}{tt:7.2f}{'  ⭐' if tt > 1.96 else ''}")
-                lrn[f"{s_}|q{gq}"] = {"n": int(g.sum()), "gated_mean_bp": float(gv.mean()),
-                                      "cluster_t": tt}
+                lrn[f"{mname}|{s_}|q{gq}"] = {"model": mname, "n": int(g.sum()),
+                                              "gated_mean_bp": float(gv.mean()),
+                                              "cluster_t": tt, "ic": ic}
         res["learned"] = lrn
-        res["adverse_pred_ic"] = ic
+        res["adverse_pred_ic"] = {m_: float(spearmanr(p_, y[va]).correlation)
+                                  for m_, p_ in MODELS.items()}
         res["n_learned_pass"] = sum(1 for v in lrn.values() if v["cluster_t"] > 1.96)
-        log(f"\n  ⭐학습 게이트 통과 {res['n_learned_pass']}/{len(lrn)}")
+        for m_ in MODELS:
+            npm = sum(1 for k_, v in lrn.items() if v["model"] == m_ and v["cluster_t"] > 1.96)
+            tot = sum(1 for k_, v in lrn.items() if v["model"] == m_)
+            log(f"  ⭐{m_:>11s} 게이트 통과 **{npm}/{tot}**")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     res.update({"n_pool": int(len(P)), "oos_touched": False,
