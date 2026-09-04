@@ -196,8 +196,9 @@ fi
 affects() { echo "$changed_files" | grep -qE "$1"; }
 # trading_bot_modules/odyssey_* (odyssey_tabm_core.py / odyssey_regime3_live.py /
 # odyssey_live_adapter.py, added 2026-08-16) is confirmed NOT imported by trading_bot.py or by
-# anything trading_bot.py imports -- it's a standalone dependency chain for the Odyssey4 shadow
-# script only (verified via sys.modules audit + forced-import-blocking tests, see
+# anything trading_bot.py imports -- it was a standalone dependency chain for the Odyssey4 shadow
+# script, which was removed 2026-09-04; the exclusion stays because the premise (trading_bot.py
+# never loads these) is unchanged (verified via sys.modules audit + forced-import-blocking tests, see
 # docs/experiments/eth_odyssey_live_cleanroom_dependency_rewrite_20260816.md). The plain
 # 'trading_bot_modules/' prefix match below would otherwise restart the real trading-bot.service
 # on every odyssey_* change, which actually happened twice on 2026-08-16 (harmless -- came back
@@ -212,18 +213,10 @@ declare -A UNITS_TO_RESTART=()
 { affects '^trading_bot\.py$' || trading_bot_modules_relevant_change; } && UNITS_TO_RESTART[trading-bot]=1
 affects '^scripts/ops_watchdog\.py$' && UNITS_TO_RESTART[ops-watchdog]=1
 affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-exporter]=1
-affects '^scripts/run_btc_multislot_shadow_loop_20260807\.py$' && UNITS_TO_RESTART[btc-multislot-shadow]=1
 affects '^scripts/live_sigma6_regime_tiebreak_shadow_20260801\.py$' && UNITS_TO_RESTART[tau1-shadow]=1
 # eth-jmlam4-shadow.service is retired (2026-08-15) but left mapped here in case the unit or its
 # script ever needs a restart during teardown; not this change's concern.
 affects '^scripts/live_eth_jmlam4_regime_swap_shadow_20260809\.py$' && UNITS_TO_RESTART[eth-jmlam4-shadow]=1
-# eth-odyssey4-shadow.service: the shadow script itself, plus the 3 Odyssey-owned modules it
-# actually depends on (trading_bot_modules_relevant_change above deliberately excludes these same
-# 3 files from the trading-bot trigger since trading_bot.py never imports them -- they need their
-# OWN restart trigger here instead, or a code change to the shadow would land on disk without the
-# running process ever picking it up, exactly what happened on 2026-08-16 with the quality-score
-# dashboard fix).
-affects '^scripts/live_eth_odyssey4_zig075_entry_veto_shadow_cleanroom_20260816\.py$|^trading_bot_modules/odyssey_(tabm_core|regime3_live|live_adapter)\.py$' && UNITS_TO_RESTART[eth-odyssey4-shadow]=1
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
 

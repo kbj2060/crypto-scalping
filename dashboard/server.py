@@ -243,23 +243,9 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 # tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
-# Shadow-only, no order submission -- standalone loop separate from trading_bot.py's
-# single-slot BTC shadow (see scripts/run_btc_multislot_shadow_loop_20260807.py).
-BTC_MULTISLOT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_state_20260807.json"
-BTC_MULTISLOT_SHADOW_LEDGER_PATH = REPO_ROOT / "data" / "ensemble" / "omega4_6_1_btc_multislot_shadow_ledger_20260807.csv"
-BTC_MULTISLOT_SHADOW_BAR_SECONDS = 300
-# Odyssey4: h48qual regime-aware exit-head guard (Odyssey3, unchanged) + zig075 SHORT
-# sustained-uptrend entry veto (Odyssey4 #1, CONFIRMED), shadow-only -- supersedes the retired
-# eth-jmlam4-shadow (regime3 HMM->JM swap, never reproduced at N=5 seeds) and eth-exithead-shadow
-# (h48qual exit_head liveATR relabel baseline, subsequently found NOT robust to walk-forward
-# retraining) as of 2026-08-14 (see scripts/live_eth_odyssey4_zig075_entry_veto_shadow_20260814.py
-# and docs/model_contracts/odyssey4_eth_entry_veto_baseline_contract_20260814.md).
-ETH_ODYSSEY4_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
-ETH_ODYSSEY4_SHADOW_TRADES_PATH = REPO_ROOT / "data" / "live" / "eth_odyssey4_shadow" / "closed_trades.jsonl"
-ETH_ODYSSEY4_SHADOW_BAR_SECONDS = 300
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
 # How long a cached payload may keep being served while its (expensive) replacement computes.
@@ -676,70 +662,6 @@ def scalp_shadow_payload(
     }
 
 
-def btc_multislot_shadow_payload() -> dict[str, Any]:
-    state = load_json(BTC_MULTISLOT_SHADOW_STATE_PATH) or {}
-    slots = state.get("slots") if isinstance(state.get("slots"), list) else []
-    last_bar = state.get("last_bar")
-    age_minutes = utc_age_minutes(last_bar, offset_seconds=BTC_MULTISLOT_SHADOW_BAR_SECONDS)
-    total_trades = 0
-    cumulative_return_pct: float | None = None
-    recent_trades: list[dict[str, Any]] = []
-    equity_curve: list[dict[str, Any]] = []
-    if BTC_MULTISLOT_SHADOW_LEDGER_PATH.exists():
-        with BTC_MULTISLOT_SHADOW_LEDGER_PATH.open("r", encoding="utf-8", newline="") as f:
-            rows = list(csv.DictReader(f))
-        total_trades = len(rows)
-        equity = 1.0
-        for row in rows:
-            try:
-                return_frac = float(row.get("trade_return_net") or 0.0)
-            except (TypeError, ValueError):
-                continue
-            equity *= 1.0 + return_frac
-            equity_curve.append(
-                {
-                    "ts": row.get("exit_timestamp"),
-                    "slot": row.get("slot"),
-                    "side": row.get("side"),
-                    "trade_return_pct": return_frac * 100.0,
-                    "cumulative_return_pct": (equity - 1.0) * 100.0,
-                }
-            )
-        cumulative_return_pct = (equity - 1.0) * 100.0
-        equity_curve = equity_curve[-500:]
-        for row in rows[-5:]:
-            try:
-                return_pct = float(row["trade_return_net"]) * 100.0
-            except (KeyError, TypeError, ValueError):
-                return_pct = None
-            recent_trades.append(
-                {
-                    "slot": row.get("slot"),
-                    "side": row.get("side"),
-                    "entry_timestamp": row.get("entry_timestamp"),
-                    "exit_timestamp": row.get("exit_timestamp"),
-                    "entry_price": row.get("entry_price"),
-                    "exit_price": row.get("exit_price"),
-                    "trade_return_pct": return_pct,
-                    "reason": row.get("reason"),
-                }
-            )
-        recent_trades.reverse()
-    return {
-        "last_bar": last_bar,
-        "age_minutes": age_minutes,
-        "stale": age_minutes is None or age_minutes >= (BTC_MULTISLOT_SHADOW_BAR_SECONDS / 60.0) * 3,
-        "bar_seconds": BTC_MULTISLOT_SHADOW_BAR_SECONDS,
-        "slot_count": len(slots),
-        "open_slots": sum(1 for s in slots if s),
-        "slots": slots,
-        "total_trades": total_trades,
-        "cumulative_return_pct": cumulative_return_pct,
-        "recent_trades": recent_trades,
-        "equity_curve": equity_curve,
-    }
-
-
 def btc_evidence_shadow_payload() -> dict[str, Any]:
     """BTC 증거신호 7종의 섀도우(관측) 원장.
 
@@ -1036,76 +958,6 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
         "progress_pct": round(min(n / target, 1.0) * 100, 1) if target else None,
         "verdict": verdict,
         "note": "섀도우 -- 주문 없음. 배포 칩(매 봉 giveback)과 다른 모델.",
-    }
-
-
-def eth_odyssey4_shadow_payload() -> dict[str, Any]:
-    state = load_json(ETH_ODYSSEY4_SHADOW_STATE_PATH) or {}
-    last_bar = state.get("last_processed_bar_ts")
-    age_minutes = utc_age_minutes(last_bar, offset_seconds=ETH_ODYSSEY4_SHADOW_BAR_SECONDS)
-    position = state.get("position") if isinstance(state.get("position"), dict) else None
-    trades = parse_jsonl(ETH_ODYSSEY4_SHADOW_TRADES_PATH)
-    total_trades = len(trades)
-    equity = state.get("equity")
-    cumulative_return_pct = (float(equity) - 1.0) * 100.0 if isinstance(equity, (int, float)) else None
-    mdd_pct = float(state["mdd"]) * 100.0 if isinstance(state.get("mdd"), (int, float)) else None
-    recent_trades: list[dict[str, Any]] = []
-    equity_curve: list[dict[str, Any]] = []
-    running_equity = 1.0
-    for row in trades:
-        try:
-            return_frac = float(row["trade_return_frac"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        running_equity *= 1.0 + return_frac
-        equity_curve.append(
-            {
-                "ts": row.get("exit_ts"),
-                "side": row.get("side"),
-                "trade_return_pct": return_frac * 100.0,
-                "cumulative_return_pct": (running_equity - 1.0) * 100.0,
-            }
-        )
-    equity_curve = equity_curve[-500:]
-    for row in trades[-5:]:
-        try:
-            return_pct = float(row["trade_return_frac"]) * 100.0
-        except (KeyError, TypeError, ValueError):
-            return_pct = None
-        recent_trades.append(
-            {
-                "source_component": row.get("source_component"),
-                "side": row.get("side"),
-                "entry_ts": row.get("entry_ts"),
-                "exit_ts": row.get("exit_ts"),
-                "entry_price": row.get("entry_price"),
-                "exit_price": row.get("exit_price"),
-                "trade_return_pct": return_pct,
-                "reason": row.get("reason"),
-            }
-        )
-    recent_trades.reverse()
-    return {
-        "last_bar": last_bar,
-        "age_minutes": age_minutes,
-        "stale": age_minutes is None or age_minutes >= (ETH_ODYSSEY4_SHADOW_BAR_SECONDS / 60.0) * 3,
-        "bar_seconds": ETH_ODYSSEY4_SHADOW_BAR_SECONDS,
-        "position_side": (position or {}).get("side", 0),
-        "position_source_component": (position or {}).get("source_component"),
-        "position": position,
-        "total_trades": total_trades,
-        "cumulative_return_pct": cumulative_return_pct,
-        "mdd_pct": mdd_pct,
-        "recent_trades": recent_trades,
-        "equity_curve": equity_curve,
-        "candidate": state.get("candidate"),
-        "order_submission_supported": state.get("order_submission_supported", False),
-        "h48qual_guard_active_bars": state.get("h48qual_guard_active_bars", 0),
-        "zig075_short_veto_bars": state.get("zig075_short_veto_bars", 0),
-        "h48qual_quality_score": state.get("last_h48qual_quality_score"),
-        "h48qual_quality_threshold": state.get("last_h48qual_quality_threshold"),
-        "zig075_quality_score": state.get("last_zig075_quality_score"),
-        "zig075_quality_threshold": state.get("last_zig075_quality_threshold"),
     }
 
 
@@ -2386,16 +2238,6 @@ def make_app() -> web.Application:
             )
         return json_response(request, payload, etag)
 
-    async def api_btc_multislot_shadow(request: web.Request) -> web.Response:
-        etag = make_etag(
-            "btc-multislot-shadow",
-            file_signature(BTC_MULTISLOT_SHADOW_STATE_PATH),
-            file_signature(BTC_MULTISLOT_SHADOW_LEDGER_PATH),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        return json_response(request, btc_multislot_shadow_payload(), etag)
-
     async def api_btc_evidence_shadow(request: web.Request) -> web.Response:
         etag = make_etag(
             "btc-evidence-shadow",
@@ -2414,16 +2256,6 @@ def make_app() -> web.Application:
         if etag_matches(request, etag):
             return json_response(request, None, etag)
         return json_response(request, v_rebound_econ_shadow_payload(), etag)
-
-    async def api_eth_odyssey4_shadow(request: web.Request) -> web.Response:
-        etag = make_etag(
-            "eth-odyssey4-shadow",
-            file_signature(ETH_ODYSSEY4_SHADOW_STATE_PATH),
-            file_signature(ETH_ODYSSEY4_SHADOW_TRADES_PATH),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        return json_response(request, eth_odyssey4_shadow_payload(), etag)
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
@@ -2460,8 +2292,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
-    app.router.add_get("/api/btc-multislot-shadow", api_btc_multislot_shadow)
-    app.router.add_get("/api/eth-odyssey4-shadow", api_eth_odyssey4_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     # show_index=False to match /data/live/ below: this directory is reachable from the
