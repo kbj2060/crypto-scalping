@@ -101,7 +101,11 @@ METALABEL_SIGNALS = {
                     # live model's own TP-price math must match to stay consistent with what it was trained on.
     },
     "short_term_return_z": {
-        "train_context": ROOT / "data/labels/eth_5m_short_term_return_z_metalabel_20260829/tabpfn_train_context_frozen_20260829.csv",
+        # 2026-09-04 인과 모집단 컨텍스트로 교체 -- 라이브는 raw 단일봉 발동에서 호출되는데 이전 컨텍스트는 클러스터 앵커 봉 학습이라
+        # 확률이 과신(캘리브레이션 기울기 <0.6)이었다. 라이브 결정 모집단(같은 측면 raw 발동이 직전 horizon_bars 안에 없는 봉)의
+        # TRAIN(<2025-09-01)만으로 재학습. 근거/수치: docs/experiments/eth_evidence_chip_accuracy_upgrade_20260904.md
+        # 이전: data/labels/eth_5m_short_term_return_z_metalabel_20260829/tabpfn_train_context_frozen_20260829.csv
+        "train_context": ROOT / "data/labels/eth_5m_evidence_chip_causal_20260904/short_term_return_z_train_context_causal_F0_live_20260904.csv",
         "seed": 20260829,
         "horizon_bars": 12,  # research_eth_short_term_return_z_metalabel_tabpfn_20260829.HORIZON (1h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
@@ -159,9 +163,16 @@ METALABEL_SIGNALS = {
         # robust to optimistic/pessimistic intrabar-ordering (~1.0-1.3bp spread), and survived its
         # single HOLDOUT exposure (+3.78bp, win91.5%, n=343 trades) -- beats liquidity_sweep in all
         # three windows, the strongest economic result of any Homer signal so far.
-        "train_context": ROOT / "data/labels/eth_5m_orthogonal_combo_metalabel_20260830/tabpfn_train_context_frozen_orthogonal_combo_20260831.csv",
+        # 2026-09-04 인과 모집단 컨텍스트로 교체 -- 라이브는 raw 단일봉 발동에서 호출되는데 이전 컨텍스트는 클러스터 앵커 봉 학습이라
+        # 확률이 과신(캘리브레이션 기울기 <0.6)이었다. 라이브 결정 모집단(같은 측면 raw 발동이 직전 horizon_bars 안에 없는 봉)의
+        # TRAIN(<2025-09-01)만으로 재학습. 근거/수치: docs/experiments/eth_evidence_chip_accuracy_upgrade_20260904.md
+        # 이전: data/labels/eth_5m_orthogonal_combo_metalabel_20260830/tabpfn_train_context_frozen_orthogonal_combo_20260831.csv
+        "train_context": ROOT / "data/labels/eth_5m_evidence_chip_causal_20260904/orthogonal_combo_train_context_causal_F0_live_20260904.csv",
         "seed": 20260829,
-        "feature_columns": ORTHOGONAL_COMBO_FEATURE_COLUMNS,
+        # 2026-09-04: 인과 컨텍스트(첫 발동 봉 학습)에서는 세션 피쳐 3개를 뺀 20피쳐가 라이브 모집단 AUC 0.585/0.622로 배포 컨텍스트
+        # (0.611/0.650)보다 나빴고, Tier0 23피쳐가 0.619/0.667·Brier 0.188/0.211로 유일하게 교체 규칙을 통과했다. 08-30 ablation의
+        # "세션 피쳐 = VAL 과적합" 판정은 앵커 모집단 기준이었다. 근거: docs/experiments/eth_evidence_chip_accuracy_upgrade_20260904.md
+        "feature_columns": FEATURE_COLUMNS,
         "horizon_bars": 24,  # research_eth_orthogonal_combo_metalabel_tabpfn_20260830.HORIZON (2h) --
                              # must match live_evidence_signal_dashboard_20260823.py's SUSTAIN_BARS_OVERRIDE
         "k": 3.571,  # exclude-middle HIT threshold (K_hi) -- verified empirically against this
@@ -270,7 +281,11 @@ METALABEL_SIGNALS = {
         # VAL +10.26bp(win71.2%)/OOS +11.00bp(win71.0%), robust to optimistic/pessimistic
         # intrabar-ordering (~1bp spread), and survived its single HOLDOUT exposure (+5.80bp,
         # win71.8%, n=925 trades) -- roughly half of VAL/OOS but clearly positive.
-        "train_context": ROOT / "data/labels/eth_5m_kalman_demarker_metalabel_20260831/tabpfn_train_context_frozen_kalman_deviation_meanrev_20260831.csv",
+        # 2026-09-04 인과 모집단 컨텍스트로 교체 -- 라이브는 raw 단일봉 발동에서 호출되는데 이전 컨텍스트는 클러스터 앵커 봉 학습이라
+        # 확률이 과신(캘리브레이션 기울기 <0.6)이었다. 라이브 결정 모집단(같은 측면 raw 발동이 직전 horizon_bars 안에 없는 봉)의
+        # TRAIN(<2025-09-01)만으로 재학습. 근거/수치: docs/experiments/eth_evidence_chip_accuracy_upgrade_20260904.md
+        # 이전: data/labels/eth_5m_kalman_demarker_metalabel_20260831/tabpfn_train_context_frozen_kalman_deviation_meanrev_20260831.csv
+        "train_context": ROOT / "data/labels/eth_5m_evidence_chip_causal_20260904/kalman_deviation_meanrev_train_context_causal_F0_live_20260904.csv",
         "seed": 20260829,
         "feature_columns": KALMAN_FEATURE_COLUMNS,
         "horizon_bars": 12,  # research_eth_kalman_demarker_gridscreen_20260831.SIGNAL_CONFIG["kalman_deviation_meanrev"]["horizon"] (1h) --
