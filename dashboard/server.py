@@ -53,6 +53,7 @@ from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
 from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
+from scripts.live_eth_fire_cont_shadow_runner_20260904 import continuation_state  # noqa: E402  (표시 전용, 호메로스 §5.23)
 # BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH의
 # /api/evidence-signals를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다").
 # ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
@@ -1543,6 +1544,25 @@ def make_app() -> web.Application:
                     entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
                     entry["model_low_atr"] = metalabels[name].get("low_atr")
                 signals_payload.append(entry)
+            # ── 발동 봉 "지속 구간" 표시 (2026-09-04, 호메로스 §5.23) ──
+            # 8종 raw 첫발동(GAP12) 봉은 경제라벨 척도(1.5 ATR 무장·5 ATR 손절)에서 반전이 아니라 **지속** 시점이었다
+            # (TRAIN 12,987건 페이드 −3.0 vs 반대 +4.7bp, P(페이드>지속)=0.446; 반대 방향 규칙 VAL +4.44/OOS +6.78bp).
+            # 화면에는 "지금이 지속 창인가(첫발동 후 ≤12봉) / 되돌림 대기인가(≤48봉)", 레짐 방향 일치, F0 경제모델
+            # (섀도우 러너 원장)의 최근 호출을 **표시 전용**으로 덧붙인다. 발동 조건·확률·net_score·투표는 불변.
+            # 첫발동 규약은 섀도우 러너와 같은 함수(continuation_state)를 써서 화면과 러너가 어긋나지 않게 한다.
+            continuation = None
+            if warmed_up:
+                try:
+                    econ_state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
+                    f0_calls = [{"entry_utc": p.get("entry_utc"), "side": p.get("side"), "proba": p.get("proba")}
+                                for p in list(econ_state.get("positions") or []) + list(econ_state.get("ledger") or [])[-50:]]
+                    continuation = await asyncio.to_thread(continuation_state, sig, regime_wide24_cache.get("payload"), f0_calls)
+                    cont_signals = continuation.get("signals") or {}
+                    for entry in signals_payload:
+                        entry["cont_first_fire_side"] = cont_signals.get(entry["name"])
+                except Exception as cont_exc:  # noqa: BLE001 -- 표시 전용, 실패해도 나머지는 그대로 렌더
+                    print(f"evidence-signal continuation block failed (display-only, skipped this cycle): {cont_exc}", flush=True)
+                    continuation = None
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see
             # api_session_alerts()'s docstring.
@@ -1556,6 +1576,7 @@ def make_app() -> web.Application:
                 "bottom_votes": int(latest["bottom_votes"]) if warmed_up else None,
                 "top_votes": int(latest["top_votes"]) if warmed_up else None,
                 "signals": signals_payload,
+                "continuation": continuation,
             }
             # Closed-bar frames only (forming bar already dropped above) -- reused by
             # load_evidence_signals_provisional() so its ~10s poll doesn't re-pull the full

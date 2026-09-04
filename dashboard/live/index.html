@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260903-swr-skeleton">
+  <link rel="stylesheet" href="styles.css?v=20260904-evidence-cont-v1">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -212,6 +212,8 @@
             <span id="evidenceNetScoreBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
+        <!-- 2026-09-04 (호메로스 §5.23): 첫발동 봉 "지속 구간 / 되돌림 대기" 해석 한 줄. app.js::renderEvidenceContinuation -->
+        <div id="evidenceContinuationLine" class="evidence-cont-line hidden" role="status"></div>
         <div id="evidenceSignalList" class="ops-health-list"></div>
       </section>
 
@@ -241,7 +243,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260903-swr-skeleton"></script>
+  <script src="./app.js?v=20260904-evidence-cont-v1"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

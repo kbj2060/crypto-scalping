@@ -1587,3 +1587,25 @@ svg {
 @media (prefers-reduced-motion: reduce) {
   [data-asset-scope].asset-loading::after { animation: none; background: rgba(255,255,255,.05); }
 }
+
+/* 2026-09-04 증거신호 패널 "지속 구간 / 되돌림 대기" 한 줄 (호메로스 §5.23) -- 헤더 아래, 목록 위.
+   .signal-meaning과 같은 시각 언어(좌측 톤 바)지만 이름을 분리해 기존 규칙과 충돌하지 않게 함. */
+.evidence-cont-line {
+  margin: 0 0 6px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: 700 11px/1.5 var(--font-sans);
+  cursor: help;
+}
+.evidence-cont-line.hidden { display: none; }
+.evidence-cont-line.good { border-left-color: var(--good); }
+.evidence-cont-line.bad { border-left-color: var(--bad); }
+.evidence-cont-line.warn { border-left-color: var(--amber); }
+.evidence-cont-line.neutral { border-left-color: var(--muted); color: var(--muted); }
+/* 이번 첫발동 사건에 기여한 신호 행의 배지 -- horizon-badge pill을 그대로 쓰고 색만 톤별로 */
+.horizon-badge.cont-badge.good { color: var(--good); background: rgba(76, 175, 125, 0.12); border-color: rgba(76, 175, 125, 0.4); }
+.horizon-badge.cont-badge.bad { color: var(--bad); background: rgba(224, 82, 82, 0.12); border-color: rgba(224, 82, 82, 0.4); }
+.horizon-badge.cont-badge.neutral { color: var(--muted); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.18); }

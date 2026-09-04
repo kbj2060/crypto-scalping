@@ -1724,9 +1724,54 @@ function evidenceSideLabel(s, { bottom, top, both, none }) {
   return s.bottom_fired && s.top_fired ? both : s.bottom_fired ? bottom : s.top_fired ? top : none;
 }
 
+// 2026-09-04 (호메로스 §5.23): 증거신호 패널 헤더 아래 "지속 구간 / 되돌림 대기" 한 줄. 서버가 섀도우 러너와
+// 같은 첫발동 규약으로 만든 payload.continuation을 그대로 그린다 -- 해석 한 줄일 뿐, 발동/확률/투표는 그대로다.
+// 근거 수치: 첫 발동 봉은 경제라벨(1.5 ATR 무장·5 ATR 손절) 척도에서 반전이 아니라 지속 시점 -- TRAIN 12,987건
+// 페이드 −3.0 vs 반대 +4.7bp, P(페이드>지속)=0.446(8종·양 측면·상승장/하락장 동일 부호). 되돌림은 첫 발동 후
+// 중앙 22~24봉 뒤 F0 경제모델이 방향을 잡을 때였다. 표시 전용(자동매매 아님). 섀도우 90일 판정 전까지 후보.
+const EVIDENCE_CONT_TITLE = "근거(호메로스 §5.23): 8종 증거신호의 첫 발동 봉은 경제라벨(1.5 ATR 무장·5 ATR 손절) 척도에서 반전이 아니라 지속 시점이었습니다. TRAIN 12,987건에서 신호 방향(페이드) −3.0bp vs 반대 방향 +4.7bp, P(페이드>지속)=0.446 — 8종·양 측면·상승장/하락장 모두 같은 부호. 반대 방향 규칙 백테스트 VAL +4.44 / OOS +6.78bp(비용 10bp 후). 되돌림은 첫 발동 후 중앙 22~24봉 뒤, F0 경제모델이 방향을 잡을 때가 시점이었습니다. 표시 전용이며 자동매매가 아닙니다(섀도우 90일 검증 중).";
+function evidenceContSideKo(s) { return s === "short" ? "숏" : s === "long" ? "롱" : "-"; }
+function evidenceContRegimeText(c) {
+  const regimeKo = { bull: "상승", bear: "하락", chop: "횡보" }[c.regime_label] || null;
+  if (c.regime_consistency === "match") return `레짐 일치(${regimeKo})`;
+  if (c.regime_consistency === "conflict") return `레짐 불일치(${regimeKo}) — 지속 약함`;
+  if (c.regime_consistency === "neutral") return `레짐 중립(${regimeKo})`;
+  return "레짐 정보 없음";
+}
+function renderEvidenceContinuation(payload) {
+  const box = el("evidenceContinuationLine");
+  if (!box) return;
+  const ok = payload && !payload.unsupported && !payload.error && payload.warmed_up;
+  const c = ok ? payload.continuation : null;
+  if (!c || !c.active) {
+    box.className = "evidence-cont-line hidden"; box.textContent = ""; box.removeAttribute("title");
+    return;
+  }
+  const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO : activeSnapshotAsset === "xrp" ? XRP_EVIDENCE_SIGNAL_KO : EVIDENCE_SIGNAL_KO;
+  const sigNames = Object.keys(c.signals || {}).map((n) => (koDict[n] || { name: n }).name).join("·");
+  const fireKo = c.fire_side === "bottom" ? "바닥" : c.fire_side === "top" ? "천장" : "양측";
+  let tone = "neutral"; let text;
+  if (c.skip_both_sides) {
+    tone = "warn";
+    text = `양측 동시 첫발동(${sigNames}) ${c.bars_since}봉 전 · 방향 정보 없음 — 지속/되돌림 판단 보류`;
+  } else if (c.phase === "continuation") {
+    tone = c.regime_consistency === "conflict" ? "warn" : c.cont_side === "short" ? "bad" : "good";
+    text = `지속 구간 ▸ ${evidenceContSideKo(c.cont_side)} · ${fireKo} 첫발동(${sigNames}) 후 ${c.bars_since}/${c.window_bars}봉 · ${evidenceContRegimeText(c)} · 페이드(${evidenceContSideKo(c.fade_side)}) 금지 구간`;
+  } else {
+    const f = c.f0_fade_call;
+    const f0Text = f ? `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} — 되돌림 진입 후보` : "F0 되돌림 신호 아직 없음";
+    tone = f ? (f.side === "long" ? "good" : "bad") : "neutral";
+    text = `되돌림 대기 ▸ ${fireKo} 첫발동(${sigNames}) 후 ${c.bars_since}봉 · 지속 창(${c.window_bars}봉) 종료 · ${f0Text}`;
+  }
+  box.className = `evidence-cont-line ${tone}`;
+  box.textContent = text;
+  box.title = EVIDENCE_CONT_TITLE;
+}
+
 function renderEvidenceSignals(payload) {
   const badge = el("snapshotEvidenceBadge");
   const stripBadge = el("evidenceStripBadge");
+  renderEvidenceContinuation(payload);   // 2026-09-04 지속 구간 한 줄 -- 모든 상태(미지원/오류/워밍업)에서 먼저 정리
   // 2026-09-02: 증거신호 파이프라인이 없는 자산(2026-09-03 기준 SOL/HYPE)이 있다 -- 예전엔 코인탭과
   // 무관하게 항상 ETH 데이터를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가
   // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.
@@ -1893,10 +1938,15 @@ function renderEvidenceSignals(payload) {
     // range+label already tells you when the CURRENT segment started, which is what that text was
     // approximating anyway.
     const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm", eviRawFire);
+    // 2026-09-04: 이번 첫발동 사건에 기여한 신호 행에만 지속/되돌림 배지 (payload.continuation과 같은 사건).
+    const contInfo = payload.continuation;
+    const contBadgeHtml = (s.cont_first_fire_side && contInfo && contInfo.active && !contInfo.skip_both_sides)
+      ? ` <span class="horizon-badge cont-badge ${contInfo.phase === "continuation" ? (contInfo.cont_side === "short" ? "bad" : "good") : "neutral"}" title="${escapeHtml(EVIDENCE_CONT_TITLE)}">${contInfo.phase === "continuation" ? `지속▸${evidenceContSideKo(contInfo.cont_side)} ${contInfo.bars_since}/${contInfo.window_bars}봉` : `되돌림 대기 ${contInfo.bars_since}봉`}</span>`
+      : "";
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}</strong>
+        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}${contBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
