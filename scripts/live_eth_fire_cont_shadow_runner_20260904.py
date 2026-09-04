@@ -221,6 +221,91 @@ def continuation_state(sig: pd.DataFrame, regime_payload: dict | None = None, f0
     return out
 
 
+
+def continuation_history(sig: pd.DataFrame, lookback: int = CONT_LOOKBACK_BARS, window: int = CONT_WINDOW_BARS) -> list[str]:
+    """특화감지기 카드의 봉별 국면 띠(표시 전용, 순수 함수). 각 봉 k에서 **그 봉까지의** 가장 최근 첫발동 사건이
+    지속 창(≤window봉) 안이면 지속 방향 톤(good=롱 지속, bad=숏 지속), 양측 동시 첫발동이면 warn, 아니면 neutral.
+    첫발동 규약은 continuation_state/러너와 같은 first_fire_mask(GAP_BARS). 미래 봉은 보지 않는다."""
+    n = len(sig)
+    if n == 0:
+        return []
+    ev_side: dict[int, set[str]] = {}
+    for s_ in SIGNALS:
+        for side in ("bottom", "top"):
+            col = f"{side}_{s_}"
+            if col not in sig.columns:
+                continue
+            for i in np.flatnonzero(first_fire_mask(sig[col].fillna(False).to_numpy(bool), GAP_BARS)):
+                ev_side.setdefault(int(i), set()).add(side)
+    tones: list[str] = []
+    last_i = -10**9; last_tone = "neutral"
+    for k in range(n):
+        if k in ev_side:
+            sd = ev_side[k]; last_i = k
+            last_tone = "warn" if len(sd) == 2 else ("bad" if "bottom" in sd else "good")
+        tones.append(last_tone if (k - last_i) <= window else "neutral")
+    return tones[-lookback:]
+
+
+def continuation_levels(kl: pd.DataFrame, event_bar_utc: str, cont_side: str, bars_since: int) -> dict[str, Any]:
+    """특화감지기 카드의 가격선(표시 전용, 순수 함수). 러너의 실제 회계와 같은 산식: 진입 = 사건 다음 봉 시가(fill_next_open),
+    ATR = atr_series(ATR_N=14, 가격단위)의 사건 봉 값, 손절 = 진입 ∓ sl_atr·ATR, 무장 = 진입 ± arm_atr·ATR(도달 후 best 대비
+    trail_atr·ATR 트레일), 만기 = MAX_HOLD_BARS. 다음 봉이 아직 없으면 진입 미확정(pending)으로 사건 봉 종가를 참고가로 준다."""
+    if cont_side not in ("long", "short") or kl is None or len(kl) == 0:
+        return {}
+    ts = kl["timestamp"].astype(str).to_numpy()
+    hit = np.flatnonzero(ts == str(event_bar_utc))
+    if len(hit) == 0:
+        return {}
+    i = int(hit[-1]); n = len(kl)
+    atr = atr_series(kl).iloc[i]
+    if not (np.isfinite(atr) and atr > 0):
+        return {}
+    sgn = 1.0 if cont_side == "long" else -1.0
+    ref_close = float(kl["close"].iloc[i])
+    if i + 1 < n:
+        entry = float(kl["open"].iloc[i + 1]); basis = "next_open"
+    else:
+        entry = ref_close; basis = "pending_next_open"
+    out = {"entry": round(entry, 2), "entry_basis": basis, "atr": round(float(atr), 2), "atr_pct": round(float(atr / ref_close), 5),
+           "stop": round(entry - sgn * BRACKET["sl_atr"] * atr, 2), "arm": round(entry + sgn * BRACKET["arm_atr"] * atr, 2),
+           "trail_dist": round(BRACKET["trail_atr"] * atr, 2), "bracket": dict(BRACKET), "max_hold_bars": MAX_HOLD_BARS,
+           "bars_left": int(max(MAX_HOLD_BARS - int(bars_since), 0))}
+    return out
+
+
+def shadow_summary(state: dict[str, Any] | None) -> dict[str, Any]:
+    """섀도우 원장 요약(표시 전용, 순수 함수). 러너 상태파일(load_state 스키마)에서 마감 건수·건당 bp(테이커/메이커)·승률·MDD·
+    미결 포지션·가동일·최근 30일 건당 bp를 계산한다. 주문은 없다 -- 숫자는 사전등록(30일 계측/90일 판정) 전까지 참고값."""
+    st = state or {}
+    ledger = st.get("ledger") if isinstance(st.get("ledger"), list) else []
+    positions = st.get("positions") if isinstance(st.get("positions"), list) else []
+    pnls, pnls_mk, exits = [], [], []
+    for r in ledger:
+        try:
+            pnls.append(float(r["pnl_bp"])); pnls_mk.append(float(r.get("pnl_maker_bp", r["pnl_bp"]))); exits.append(str(r.get("exit_utc") or ""))
+        except (KeyError, TypeError, ValueError):
+            continue
+    n = len(pnls); run = peak = mdd = 0.0
+    for v in pnls:
+        run += v; peak = max(peak, run); mdd = min(mdd, run - peak)
+    days = None; started = st.get("started_utc")
+    if started:
+        try:
+            days = max((datetime.now(timezone.utc) - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
+        except (TypeError, ValueError):
+            days = None
+    cutoff = (datetime.now(timezone.utc) - pd.Timedelta(days=30)).isoformat()
+    recent = [v for v, e in zip(pnls, exits) if e >= cutoff]
+    wins = [v for v in pnls if v > 0]
+    return {"rule": st.get("rule") or RULE_ID, "days_running": (round(days, 2) if days is not None else None), "closed_trades": n,
+            "exp_bp": (round(sum(pnls) / n, 2) if n else None), "exp_maker_bp": (round(sum(pnls_mk) / n, 2) if n else None),
+            "win_rate": (round(len(wins) / n, 3) if n else None), "total_bp": (round(sum(pnls), 1) if n else None),
+            "max_dd_bp": (round(mdd, 1) if n else None), "last30d_trades": len(recent), "last30d_exp_bp": (round(sum(recent) / len(recent), 2) if recent else None),
+            "trades_per_day": (round(n / days, 2) if (n and days) else None), "open_positions": len(positions),
+            "open_sides": sorted({str(p.get("side")) for p in positions}), "missed_bars": st.get("missed_bars"),
+            "skipped": st.get("skipped"), "backtest_ref": BACKTEST_REF}
+
 # ----------------------------------------------------------------------------- 상태
 def load_state() -> dict[str, Any]:
     if STATE.exists():
@@ -404,6 +489,20 @@ def selftest() -> int:
     sig4 = sig2.copy(); sig4.loc[55, "bottom_taker_delta_z_climax"] = False; sig4.loc[40, "bottom_taker_delta_z_climax"] = True
     c4 = continuation_state(sig4, None, None); assert c4["active"] and c4["phase"] == "fade_watch" and c4["bars_since"] == 19, c4
     assert not continuation_state(sig4.iloc[:5].reset_index(drop=True), None, None)["active"]
+    # 카드용 순수 함수 (2026-09-04): 국면 띠는 과거만 본다 / 가격선은 러너 회계와 같은 산식
+    kl_t = pd.DataFrame({"timestamp": pd.date_range("2026-01-01", periods=40, freq="5min"), "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0})
+    sig_t = pd.DataFrame({"timestamp": kl_t["timestamp"]}); sig_t[f"bottom_{SIGNALS[0]}"] = False; sig_t[f"top_{SIGNALS[1]}"] = False
+    sig_t.loc[20, f"bottom_{SIGNALS[0]}"] = True                      # 바닥 첫발동 → 숏 지속(bad) 20..32, 그 뒤 neutral
+    h = continuation_history(sig_t, lookback=40)
+    assert h[19] == "neutral" and h[20] == "bad" and h[32] == "bad" and h[33] == "neutral", h[18:35]
+    sig_t.loc[20, f"top_{SIGNALS[1]}"] = True                         # 같은 봉 양측 → warn
+    assert continuation_history(sig_t, lookback=40)[25] == "warn"
+    lv = continuation_levels(kl_t, str(kl_t["timestamp"].iloc[20]), "short", bars_since=19)
+    assert lv["entry"] == 100.0 and lv["entry_basis"] == "next_open" and abs(lv["atr"] - 2.0) < 1e-9, lv
+    assert abs(lv["stop"] - (100.0 + BRACKET["sl_atr"] * 2.0)) < 1e-9 and abs(lv["arm"] - (100.0 - BRACKET["arm_atr"] * 2.0)) < 1e-9 and lv["bars_left"] == MAX_HOLD_BARS - 19
+    assert continuation_levels(kl_t, str(kl_t["timestamp"].iloc[39]), "long", 0)["entry_basis"] == "pending_next_open"
+    sm = shadow_summary({"ledger": [{"pnl_bp": 10.0, "pnl_maker_bp": 12.2, "exit_utc": "2099-01-01T00:00:00+00:00"}, {"pnl_bp": -4.0, "exit_utc": "2000-01-01T00:00:00+00:00"}], "positions": [{"side": "long"}], "started_utc": "2026-09-04T00:00:00+00:00"})
+    assert sm["closed_trades"] == 2 and sm["exp_bp"] == 3.0 and sm["exp_maker_bp"] == 4.1 and sm["win_rate"] == 0.5 and sm["max_dd_bp"] == -4.0 and sm["last30d_trades"] == 1 and sm["open_sides"] == ["long"], sm
     print("selftest ok"); return 0
 
 

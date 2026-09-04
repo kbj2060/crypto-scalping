@@ -53,7 +53,8 @@ from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
 from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
-from scripts.live_eth_fire_cont_shadow_runner_20260904 import continuation_state  # noqa: E402  (표시 전용, 호메로스 §5.23)
+from scripts.live_eth_fire_cont_shadow_runner_20260904 import (  # noqa: E402  (표시 전용, 호메로스 §5.23·§5.27)
+    continuation_history, continuation_levels, continuation_state, shadow_summary as fire_cont_shadow_summary)
 # BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH의
 # /api/evidence-signals를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다").
 # ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
@@ -244,6 +245,8 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
+# 2026-09-04 지속 규칙 섀도우(scripts/live_eth_fire_cont_shadow_runner_20260904.py, supervisor 관리) 상태파일 -- 특화감지기 카드 표시 전용
+FIRE_CONT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "fire_cont_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
@@ -1437,6 +1440,15 @@ def make_app() -> web.Application:
                     cont_signals = continuation.get("signals") or {}
                     for entry in signals_payload:
                         entry["cont_first_fire_side"] = cont_signals.get(entry["name"])
+                    # 2026-09-04 (사용자 요청, 호메로스 §5.27) 지속 규칙 **특화감지기 카드**용 덧붙임 -- 봉별 국면 띠(과거만 봄),
+                    # 러너와 같은 산식의 가격선(다음 봉 시가 진입·5/1.5/0.1 ATR 브래킷·200봉 만기), 섀도우 원장 요약. 전부 표시 전용.
+                    try:
+                        continuation["history"] = continuation_history(sig)
+                        if continuation.get("active") and continuation.get("cont_side") and continuation.get("event_bar_utc"):
+                            continuation["levels"] = continuation_levels(df, str(continuation["event_bar_utc"]), str(continuation["cont_side"]), int(continuation.get("bars_since") or 0))
+                        continuation["shadow"] = fire_cont_shadow_summary(load_json(FIRE_CONT_SHADOW_STATE_PATH) or {})
+                    except Exception as card_exc:  # noqa: BLE001 -- 카드 부속 정보 실패는 한 줄/배지 표시에 영향 없음
+                        print(f"evidence-signal continuation card extras failed (display-only): {card_exc}", flush=True)
                 except Exception as cont_exc:  # noqa: BLE001 -- 표시 전용, 실패해도 나머지는 그대로 렌더
                     print(f"evidence-signal continuation block failed (display-only, skipped this cycle): {cont_exc}", flush=True)
                     continuation = None

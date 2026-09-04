@@ -1114,6 +1114,10 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
+  fire_cont: "[규칙] 8종 증거신호(반전 감지기)의 raw 첫발동(같은 신호·측면 직전 12봉에 발동 없음) 봉이 마감되면, 칩이 가리키는 되돌림 방향이 아니라 **그 반대(지속) 방향**으로 다음 봉 시가에 진입합니다. 바닥 발동→숏, 천장 발동→롱. 같은 봉에 양측이 동시에 첫발동하면 건너뜁니다. 모델·확률은 쓰지 않는 순수 규칙입니다.\n" +
+    "[청산] 손절 5×ATR(14) · 1.5×ATR 유리하게 가면 무장 · 무장 후 최고가/최저가 대비 0.1×ATR 트레일 · 200봉 만기. 동시 5포지션 상한.\n" +
+    "[근거] 호메로스 §5.23·§5.27: 첫발동 봉은 경제라벨 척도에서 반전이 아니라 지속 시점(TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp). 21개 결정 팔 비교에서 이 규칙만 VAL·OOS 둘 다 일군집 CI>0 (VAL +5.13 [+1.07,+9.30] / OOS +5.36 [+0.89,+9.93] bp/건, 하루 22건, 10bp 차감). L2 확률 라우팅·레짐 필터·추세 신호 추가는 이 규칙을 통계적으로 못 이겼습니다.\n" +
+    "[상태] 2026-09-04부터 섀도우(가상 원장, 주문 없음) 가동. 사전등록: 30일 계측 점검(지연·슬리피지·발동 빈도) → 90일 판정(마감+시가평가 평균 순손익 일군집 CI 하한>0이면 사이징·실행 설계 단계, 상한<0이면 폐기). 킬 스위치: 최근 30일 평균<−10bp ∧ CI 상한<0. 카드의 가격선은 러너와 같은 산식으로 대시보드가 다시 계산한 표시값입니다.",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
     "[배지 유지 규칙] 급등/급락 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
@@ -1155,6 +1159,7 @@ const MODEL_INDICATOR_DETAIL = {
 // methodology, not guessed from the signal's name -- e.g. "15분 급변"/short_term_return_z names
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
+  fire_cont: { text: "12봉 창", title: "첫발동 후 12봉(1시간)이 지속 창입니다 -- 백테스트에서 지속 거래 승자의 보유 중앙값 7봉, 54%가 12봉 안에 청산. 포지션 자체는 트레일링 청산(무장 1.5×ATR 후 0.1×ATR 트레일, 손절 5×ATR)으로 최대 200봉까지 유지됩니다." },
   // -- model indicators --
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
@@ -1739,6 +1744,39 @@ function evidenceContRegimeText(c) {
   if (c.regime_consistency === "neutral") return `레짐 중립(${regimeKo})`;
   return "레짐 정보 없음";
 }
+// 2026-09-04 (user request, 호메로스 §5.27): 지속 규칙을 특화 감지기 **카드**로 -- 한 줄(renderEvidenceContinuation)과
+// 칩 배지는 그대로 두고, 카드에는 그 줄에 없던 것을 담는다: 러너와 같은 산식의 가격선(진입/손절/무장/트레일/만기),
+// 봉별 국면 띠(과거만 봄), 섀도우 가상 원장 요약(테이커·메이커 비용 병기). 규칙이라 확률 미터는 없다.
+function fireContIndicatorItem() {
+  const p = latestEvidenceSignals;
+  const ok = p && !p.unsupported && !p.error && p.warmed_up;
+  const c = ok ? p.continuation : null;
+  const base = { key: "fire_cont", label: "지속 규칙", derivedTag: "= 규칙 · 섀도우 검증 중",
+    derivedTitle: "모델이 아니라 고정 규칙(첫발동 봉 → 지속 방향)입니다. 2026-09-04부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다. 실제 매매 결정에는 연결되지 않았습니다." };
+  if (!ok) return { ...base, tone: "neutral", subText: (p && p.error) ? "오류" : "웜업 중", history: [], times: [] };
+  const hist = (c && c.history) || [];
+  const times = evenlySpacedBarTimes(p.latest_bar_utc, hist.length, 5);
+  const sh = (c && c.shadow) || null;
+  const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
+  const shadowText = sh && sh.closed_trades != null
+    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건${sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : ""} · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)})${sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : ""}${sh.last30d_exp_bp != null ? ` · 30일 ${bp(sh.last30d_exp_bp)}` : ""} · 미결 ${sh.open_positions}${sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : ""} · 백테스트 VAL +4.4/OOS +6.8`
+    : "섀도우 원장 아직 없음 · 백테스트 VAL +4.4/OOS +6.8bp";
+  if (!c || !c.active) return { ...base, tone: "neutral", subText: "대기", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
+  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "양측 발동·보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
+  const lv = c.levels || null;
+  const sideKo = evidenceContSideKo(c.cont_side);
+  const levelText = lv && lv.entry != null
+    ? `${lv.entry_basis === "pending_next_open" ? "진입 예정(다음 봉 시가, 참고 " : "진입 "}${fmtNum(lv.entry, 2)}${lv.entry_basis === "pending_next_open" ? ")" : ""} · 손절 ${fmtNum(lv.stop, 2)}(5×ATR) · 무장 ${fmtNum(lv.arm, 2)}(1.5×ATR) · 트레일 ${fmtNum(lv.trail_dist, 2)}(0.1×ATR) · 만기 ${lv.bars_left}봉 남음`
+    : "가격선 계산 불가(ATR 웜업)";
+  if (c.phase === "continuation") {
+    const tone = c.regime_consistency === "conflict" ? "warn" : (c.cont_side === "short" ? "bad" : "good");
+    return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times,
+      liveText: `${levelText} · 창 ${c.bars_since}/${c.window_bars}봉${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
+  }
+  return { ...base, tone: "neutral", subText: "창 종료·보유만", history: hist, times,
+    liveText: `${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 기존 포지션은 트레일/만기까지 유지 · ${levelText} · ${shadowText}` };
+}
+
 function renderEvidenceContinuation(payload) {
   const box = el("evidenceContinuationLine");
   if (!box) return;
@@ -3555,6 +3593,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
+      ethOnlyIndicator(fireContIndicatorItem()),   // 2026-09-04 지속 규칙 카드 (호메로스 §5.27)
     ], "snapSpecializedSignalList");
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
