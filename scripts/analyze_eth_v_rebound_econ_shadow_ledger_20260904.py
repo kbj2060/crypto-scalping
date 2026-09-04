@@ -52,9 +52,12 @@ print("hold bars: mean %.1f median %.0f max %d | proba mean %.4f min %.4f" % (le
 print(led[["entry_utc", "exit_utc", "side", "entry", "exit", "atr", "proba", "pnl_bp", "bars_held", "reason"]].to_string())
 
 print("\n=== ② 오픈 포지션 시가평가 (최신 완결봉 종가, 비용 10bp 차감) ===")
-pos["unreal_bp"] = np.where(pos["side"] == "long", 1, -1) * (last_close - pos["entry"]) / pos["entry"] * 1e4 - COST
-pos["to_stop_bp"] = np.where(pos["side"] == "long", 1, -1) * (last_close - pos["stop"]) / last_close * 1e4
-print(pos[["entry_utc", "side", "entry", "atr", "stop", "best", "armed", "bars_held", "proba", "unreal_bp", "to_stop_bp"]].to_string())
+if len(pos):                                                   # 2026-09-05: 오픈 포지션 0건이면 컬럼이 없어 KeyError -- 건너뜀
+    pos["unreal_bp"] = np.where(pos["side"] == "long", 1, -1) * (last_close - pos["entry"]) / pos["entry"] * 1e4 - COST
+    pos["to_stop_bp"] = np.where(pos["side"] == "long", 1, -1) * (last_close - pos["stop"]) / last_close * 1e4
+    print(pos[["entry_utc", "side", "entry", "atr", "stop", "best", "armed", "bars_held", "proba", "unreal_bp", "to_stop_bp"]].to_string())
+else:
+    pos["unreal_bp"] = pd.Series(dtype=float); print("(오픈 포지션 없음)")
 mtm = np.concatenate([led["pnl_bp"].to_numpy(float), pos["unreal_bp"].to_numpy(float)])
 rep["open_positions"] = {"n": int(len(pos)), "unreal_mean_bp": round(float(pos["unreal_bp"].mean()), 2), "unreal_sum_bp": round(float(pos["unreal_bp"].sum()), 1)}
 rep["closed_plus_open_mtm"] = stats(mtm); print("마감+오픈 시가평가:", rep["closed_plus_open_mtm"])
