@@ -1691,3 +1691,14 @@ svg {
   /* 좁은 화면에서는 가격/시각 줄이 잘리는 게 말줄임보다 낫다 -- 숫자가 반쪽만 보이면 오해를 부른다 */
   .vshadow-trade-px, .vshadow-trade-ts { white-space: normal; }
 }
+
+/* 신호봉 -> 체결봉 지연 배지 (2026-09-04). 0봉(즉시 체결)이 정상이라 지연이 있는 건에만
+   붙는다 -- 매 줄에 "0봉"을 찍으면 신호 대 잡음만 나빠진다. 경고가 아니라 사실 표기이므로
+   --bad가 아니라 중립 톤을 쓴다(지연 자체가 손실은 아니다). */
+.vshadow-lag {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: .85;
+  cursor: help;
+}

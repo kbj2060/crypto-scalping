@@ -2338,11 +2338,18 @@ function vshadowRawMovePct(t) {
   const sgn = t.side === "long" ? 1 : -1;
   return (sgn * (Number(t.exit) - Number(t.entry))) / Number(t.entry) * 100;
 }
+// 화면에 찍는 "진입 시각". entry_utc는 **신호가 난 봉**이고, 실제 체결은 배리어 평가가
+// 시작된 봉(entry_bar_utc)에서 그 시점 마크가격으로 일어난다 -- 원장의 `entry` 가격이 바로
+// 그 값이다. 그래서 체결 봉을 쓴다. 그러지 않으면 같은 줄의 가격과 시각이 서로 다른 봉을
+// 가리킨다(최대 3봉 차이, SCORE_TAIL_BARS=3). entry_bar_utc가 없는 과거 행은 신호봉으로 대체.
+function vshadowFillTs(t) {
+  return t.entry_bar_utc || t.entry_utc;
+}
 function vshadowHeldText(t) {
-  // 러너의 `bars_held`를 쓰지 않는다 -- 배리어 평가 패스마다 증가해서 실제 경과 봉수를
-  // 과소계상한다(2026-09-04 실측 17/17건 불일치). 바로 옆에 찍는 두 시각에서 직접 계산하면
-  // 화면 안에서 서로 검증되고, 사용자가 눈으로 대조할 수 있다.
-  const a = Date.parse(t.entry_utc), b = Date.parse(t.exit_utc);
+  // 러너의 `bars_held`를 쓰지 않는다 -- 2026-09-04 이전 행은 스톱 청산 봉을 빠뜨려 전부
+  // 어긋나 있다(실측 17/17건). 화면에 함께 찍는 두 시각에서 직접 계산하면 서로 검증되고,
+  // 과거 행에서도 맞는다.
+  const a = Date.parse(vshadowFillTs(t)), b = Date.parse(t.exit_utc);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return "";
   const min = Math.round((b - a) / 60000);
   if (min < 60) return ` · ${min}분`;
@@ -2440,6 +2447,11 @@ function renderVrebEconShadow(p) {
       const ex = vshadowExitLabel(t);
       const move = vshadowRawMovePct(t);
       const held = vshadowHeldText(t);
+      // 신호가 묵은 뒤 들어간 건만 표시한다. 0봉(즉시 체결)이 정상이라 매 줄에 "0봉"을
+      // 찍으면 신호 대 잡음만 나빠진다.
+      const lag = Number(t.signal_lag_bars) > 0
+        ? ` <em class="vshadow-lag" title="신호가 발생한 봉과 실제 체결 봉의 간격입니다. 체결은 신호봉 종가가 아니라 처리 시점의 마크가격으로 일어납니다.">신호 ${t.signal_lag_bars}봉 전</em>`
+        : "";
       const prob = t.proba == null ? "" : ` · p ${Number(t.proba).toFixed(3)}`;
       return `<div class="vshadow-row vshadow-row-detail">
       <span class="vshadow-side ${t.side}">${t.side === "long" ? "롱" : "숏"}</span>
@@ -2447,7 +2459,7 @@ function renderVrebEconShadow(p) {
         <strong class="${ex.tone}">${ex.text}</strong>
         <span class="vshadow-trade-px">진입 ${fmtNum(t.entry, 2)} → 청산 ${fmtNum(t.exit, 2)}${
           move == null ? "" : ` <em class="${move > 0 ? "good" : "bad"}">${move > 0 ? "+" : ""}${move.toFixed(2)}%</em>`}</span>
-        <span class="vshadow-trade-ts">${fmtMacroCalendarTime(t.entry_utc)} → ${fmtMacroCalendarTime(t.exit_utc)}${held}${prob}</span>
+        <span class="vshadow-trade-ts">${fmtMacroCalendarTime(vshadowFillTs(t))} → ${fmtMacroCalendarTime(t.exit_utc)}${held}${prob}${lag}</span>
       </div>
       <span class="vshadow-row-value ${Number(t.pnl_bp) > 0 ? "good" : "bad"}">${bp(t.pnl_bp)}</span>
     </div>`;
