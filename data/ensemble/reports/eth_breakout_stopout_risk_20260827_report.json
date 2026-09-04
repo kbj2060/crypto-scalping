@@ -1,0 +1,138 @@
+{
+  "orthogonal_combo": {
+    "n_train": 953,
+    "n_oos": 39,
+    "train_base_rate": 0.6295907660020986,
+    "oos_base_rate": 0.6923076923076923,
+    "oos_balanced_accuracy": 0.5046296296296297,
+    "oos_auc": 0.5740740740740741,
+    "oos_confusion": [
+      [
+        1,
+        11
+      ],
+      [
+        2,
+        25
+      ]
+    ],
+    "internal_holdout": {
+      "n_fit": 762,
+      "n_holdout": 191,
+      "holdout_base_rate": 0.6230366492146597,
+      "holdout_balanced_accuracy": 0.5575980392156863,
+      "holdout_auc": 0.47654061624649857
+    },
+    "top10_permutation_importance_oos": [
+      [
+        "distance_to_day_high_low_pct",
+        0.02564102564102557
+      ],
+      [
+        "btc_corr_60",
+        0.02564102564102555
+      ],
+      [
+        "btc_impulse_x_eth_beta",
+        0.02564102564102555
+      ],
+      [
+        "atr_pct_rank_288",
+        0.02051282051282044
+      ],
+      [
+        "eth_btc_beta_residual_z",
+        0.01025641025641022
+      ],
+      [
+        "state7_flow_alignment",
+        0.01025641025641022
+      ],
+      [
+        "trend_prob",
+        0.010256410256410197
+      ],
+      [
+        "wick_ratio",
+        0.00512820512820511
+      ],
+      [
+        "btc_ret_3",
+        0.00512820512820511
+      ],
+      [
+        "big_trade_ratio",
+        0.0051282051282050874
+      ]
+    ],
+    "n_triggers_total": 992
+  },
+  "short_term_return_z": {
+    "n_train": 1896,
+    "n_oos": 112,
+    "train_base_rate": 0.619198312236287,
+    "oos_base_rate": 0.6517857142857143,
+    "oos_balanced_accuracy": 0.43747804706708815,
+    "oos_auc": 0.42852125043905864,
+    "oos_confusion": [
+      [
+        1,
+        38
+      ],
+      [
+        11,
+        62
+      ]
+    ],
+    "internal_holdout": {
+      "n_fit": 1516,
+      "n_holdout": 380,
+      "holdout_base_rate": 0.631578947368421,
+      "holdout_balanced_accuracy": 0.5098214285714285,
+      "holdout_auc": 0.5160714285714285
+    },
+    "top10_permutation_importance_oos": [
+      [
+        "ofi_acceleration",
+        0.019642857142857163
+      ],
+      [
+        "funding_abs",
+        0.014285714285714301
+      ],
+      [
+        "btc_ret_6",
+        0.010714285714285721
+      ],
+      [
+        "breakout_strength",
+        0.008928571428571463
+      ],
+      [
+        "btc_volume_impulse_z",
+        0.00892857142857142
+      ],
+      [
+        "range_contraction_breakout_dir",
+        0.008928571428571397
+      ],
+      [
+        "distance_to_day_high_low_pct",
+        0.007142857142857162
+      ],
+      [
+        "big_trade_ratio",
+        0.00714285714285714
+      ],
+      [
+        "wick_ratio",
+        0.00714285714285714
+      ],
+      [
+        "hurst_288",
+        0.00714285714285714
+      ]
+    ],
+    "n_triggers_total": 2008
+  }
+}
