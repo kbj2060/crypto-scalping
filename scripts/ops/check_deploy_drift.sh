@@ -67,7 +67,8 @@ done
 OUT="$(bash "$HANDOFF" logs server "$JOB" 2>&1)"
 
 # --- 2. 판정 ---
-markers="$(echo "$OUT" | sed -n '/--- CONFLICT_MARKERS ---/,$p' | tail -n +2 | grep -v '^(none)$' | grep -v '^$' || true)"
+# 2026-09-04: UNTRACKED_SCRIPTS 절이 뒤에 추가된 뒤 '$p'(끝까지)가 그 절을 마커로 오인해 RC=1 오탐 -> 절 경계로 한정
+markers="$(echo "$OUT" | sed -n '/--- CONFLICT_MARKERS ---/,/--- UNTRACKED_SCRIPTS ---/p' | grep -vE '^---|^\(none\)$|^$' || true)"
 unmerged="$(echo "$OUT" | sed -n '/--- UNMERGED ---/,/--- DIRTY_LIVE_FILES ---/p' | grep -vE '^---|^\(none\)$|^$' || true)"
 dirty="$(echo "$OUT" | sed -n '/--- DIRTY_LIVE_FILES ---/,/--- CONFLICT_MARKERS ---/p' | grep -vE '^---|^\(none\)$|^$' || true)"
 untracked_n="$(echo "$OUT" | grep -E '^UNTRACKED_SCRIPT_COUNT=' | tail -1 | cut -d= -f2)"
