@@ -2248,6 +2248,19 @@ def make_app() -> web.Application:
         return web.json_response({"ok": remove_subscription(sid)},
                                  headers={"Cache-Control": "no-cache"})
 
+    async def api_push_devices(request: web.Request) -> web.Response:
+        """등록된 구독 목록. endpoint 원문은 기기 식별 토큰이라 내보내지 않고, 프론트가 자기
+        구독인지 대조할 수 있도록 해시 id만 준다(브라우저가 같은 해시를 계산할 수 없으므로
+        endpoint의 꼬리 12자도 함께 준다 -- 그 정도면 대조는 되고 재사용은 안 된다)."""
+        rows = []
+        for sid, sub in load_subscriptions().items():
+            endpoint = str(sub.get("endpoint", ""))
+            rows.append({"id": sid, "label": sub.get("label") or "",
+                         "subscribed_utc": sub.get("subscribed_utc"),
+                         "endpoint_tail": endpoint[-12:]})
+        rows.sort(key=lambda r: r.get("subscribed_utc") or "")
+        return web.json_response({"devices": rows}, headers={"Cache-Control": "no-cache"})
+
     async def api_push_test(request: web.Request) -> web.Response:
         """구독 직후 '진짜로 뜨는가'를 확인하는 용도. 이게 없으면 사용자는 실제 신호가 날 때까지
         (조용한 장에서는 몇 시간) 설정이 됐는지 알 수 없다."""
@@ -2440,6 +2453,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)
     app.router.add_post("/api/push/unsubscribe", api_push_unsubscribe)
+    app.router.add_get("/api/push/devices", api_push_devices)
     app.router.add_post("/api/push/test", api_push_test)
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)

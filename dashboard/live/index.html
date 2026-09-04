@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260904-chip-honest-v1">
+  <link rel="stylesheet" href="styles.css?v=20260904-chip-notify-page">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -44,20 +44,80 @@
         <nav class="page-tabs" aria-label="대시보드 탭">
           <button type="button" class="page-tab active" data-page-tab="snapshot">스냅샷</button>
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
+          <button type="button" class="page-tab" data-page-tab="notify">알림</button>
         </nav>
         <div id="topClock" class="top-clock">-</div>
         <div class="top-right">
           <div id="topSession" class="ops-session top-session">-</div>
-          <!-- 알림 토글. VAPID 키가 서버에 없거나 브라우저가 푸시 미지원이면 app.js가 hidden으로
-               둔다 -- 눌러도 아무 일 없는 버튼을 남겨두면 설정이 됐는지 아닌지 알 수 없다. -->
-          <button type="button" id="pushToggle" class="push-toggle hidden"
-                  aria-pressed="false" title="알림 설정">
-            <span class="push-toggle-icon" aria-hidden="true">🔔</span>
-            <span id="pushToggleLabel" class="push-toggle-label">알림 끔</span>
-          </button>
         </div>
       </div>
     </header>
+
+    <section id="notifyTabPanel" class="ops-tab-panel hidden" aria-live="polite">
+      <div class="ops-panel-head">
+        <div>
+          <p class="eyebrow">PUSH NOTIFICATIONS</p>
+          <h2>알림</h2>
+          <p class="muted">신호를 놓치지 않도록 이 기기로 푸시를 보냅니다. 설치하면 창을 닫아도 옵니다.</p>
+        </div>
+        <div id="notifyBadge" class="ops-badge neutral">알림 -</div>
+      </div>
+
+      <section class="panel notify-panel">
+        <div class="notify-main">
+          <div class="notify-main-copy">
+            <strong id="notifyStateTitle">확인 중…</strong>
+            <span id="notifyStateDetail" class="muted">브라우저와 서버 상태를 읽고 있습니다.</span>
+          </div>
+          <div class="notify-actions">
+            <button type="button" id="notifyToggleBtn" class="notify-btn primary" disabled>확인 중…</button>
+            <button type="button" id="notifyInstallBtn" class="notify-btn hidden">앱으로 설치</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel notify-panel">
+        <h3>진단</h3>
+        <p class="muted notify-hint">알림이 안 오면 여기서 어느 단계가 막혔는지 보입니다.</p>
+        <div id="notifyChecks" class="notify-checks"></div>
+      </section>
+
+      <section class="panel notify-panel">
+        <h3>테스트</h3>
+        <p class="muted notify-hint">두 버튼이 서로 다른 구간을 검사합니다. 위는 되는데 아래가 안 되면
+          전달 문제이고, 위부터 안 되면 이 기기(브라우저·OS)가 알림을 막고 있는 것입니다.</p>
+        <div class="notify-tests">
+          <button type="button" id="notifyLocalTestBtn" class="notify-btn" disabled>
+            이 브라우저에서 바로 띄우기
+            <em>서버를 안 거칩니다 — 표시 자체가 되는지 확인</em>
+          </button>
+          <button type="button" id="notifyServerTestBtn" class="notify-btn" disabled>
+            서버에서 보내기
+            <em>실제 알림과 같은 경로 — 전달까지 확인</em>
+          </button>
+        </div>
+        <p id="notifyTestResult" class="notify-test-result"></p>
+      </section>
+
+      <section class="panel notify-panel">
+        <h3>무엇이 오나</h3>
+        <div class="notify-tiers">
+          <div class="notify-tier t1"><strong>즉시 · 소리</strong>
+            <span>실제로 일어난 일 — 포지션 개시·청산, 운영 이상</span></div>
+          <div class="notify-tier t2"><strong>즉시 · 무음</strong>
+            <span>드문 상황 — 증거신호 합의, 청산 버스트, 변동성 창</span></div>
+          <div class="notify-tier digest"><strong>요약</strong>
+            <span>화면이 달라졌을 때만 — 신호 집합·레짐·보유 현황</span></div>
+        </div>
+        <p class="muted notify-hint">아래 두 종류는 참고용 맥락입니다. 매매 신호가 아닙니다 —
+          증거신호는 경제성 검증을 통과하지 못했습니다.</p>
+      </section>
+
+      <section class="panel notify-panel">
+        <h3>등록된 기기</h3>
+        <div id="notifyDevices" class="notify-devices"><span class="muted">불러오는 중…</span></div>
+      </section>
+    </section>
 
     <section id="opsTabPanel" class="ops-tab-panel hidden" aria-live="polite">
       <div class="ops-panel-head">
@@ -261,7 +321,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260904-chip-honest-v1"></script>
+  <script src="./app.js?v=20260904-chip-notify-page"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

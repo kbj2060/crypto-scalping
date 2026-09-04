@@ -1702,3 +1702,116 @@ svg {
   opacity: .85;
   cursor: help;
 }
+
+/* 알림 탭 (2026-09-04). 토프바 토글을 여기로 옮겼다 -- 같은 기능이 두 군데 있으면 어느 쪽이
+   진짜 상태인지 헷갈린다. 진단 블록이 이 페이지의 핵심이다: 웹푸시는 조용히 실패하므로
+   (푸시 서비스 201 + 화면엔 아무것도) 어느 단계가 막혔는지 보여주지 않으면 사용자가 할 수
+   있는 일이 없다. */
+.notify-panel { display: grid; gap: 10px; }
+.notify-panel h3 { margin: 0; }
+.notify-hint { margin: 0; font-size: 11px; line-height: 1.5; }
+
+.notify-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.notify-main-copy { display: grid; gap: 3px; min-width: 0; }
+.notify-main-copy strong { font-size: 15px; color: var(--text); }
+.notify-main-copy span { font-size: 12px; line-height: 1.45; }
+.notify-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.notify-btn {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--text);
+  padding: 9px 14px;
+  font: 700 12px/1.3 var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .16s ease, background .16s ease;
+}
+.notify-btn:hover:not(:disabled) { border-color: rgba(34, 211, 238, .55); }
+.notify-btn:disabled { opacity: .45; cursor: default; }
+.notify-btn.primary { border-color: rgba(34, 211, 238, .7); background: rgba(34, 211, 238, .16); }
+.notify-btn.small { padding: 6px 10px; font-size: 11px; flex: 0 0 auto; }
+.notify-btn em {
+  display: block;
+  margin-top: 3px;
+  font: 500 10px/1.4 var(--font-sans);
+  font-style: normal;
+  color: var(--muted);
+}
+
+.notify-checks { display: grid; gap: 6px; }
+.notify-check {
+  display: grid;
+  grid-template-columns: 8px 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+.notify-check-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.notify-check.good .notify-check-dot { background: var(--good); }
+.notify-check.bad .notify-check-dot { background: var(--bad); }
+.notify-check.warn .notify-check-dot { background: var(--accent); }
+.notify-check-name { font: 700 11px/1.3 var(--font-sans); color: var(--text); }
+.notify-check-detail { font: 500 11px/1.45 var(--font-sans); color: var(--muted); min-width: 0; }
+.notify-check-mark { font: 800 10px/1 var(--font-mono); letter-spacing: .04em; color: var(--muted); }
+.notify-check.good .notify-check-mark { color: var(--good); }
+.notify-check.bad .notify-check-mark { color: var(--bad); }
+.notify-check.warn .notify-check-mark { color: var(--accent); }
+
+.notify-tests { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.notify-test-result { margin: 2px 0 0; font: 500 11px/1.5 var(--font-sans); color: var(--muted); }
+.notify-test-result.good { color: var(--good); }
+.notify-test-result.bad { color: var(--bad); }
+.notify-test-result.warn { color: var(--accent); }
+
+.notify-tiers { display: grid; gap: 6px; }
+.notify-tier {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, .02);
+}
+.notify-tier strong { font: 700 11px/1.3 var(--font-sans); }
+.notify-tier span { font: 500 11px/1.45 var(--font-sans); color: var(--muted); }
+.notify-tier.t1 { border-left-color: var(--good); }
+.notify-tier.t2 { border-left-color: var(--accent); }
+.notify-tier.digest { border-left-color: var(--line); }
+
+.notify-devices { display: grid; gap: 6px; }
+.notify-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+.notify-device.mine { border: 1px solid rgba(34, 211, 238, .35); }
+.notify-device-main { display: grid; gap: 2px; min-width: 0; }
+.notify-device-main strong { font: 700 12px/1.3 var(--font-sans); color: var(--text); }
+.notify-device-main strong em {
+  font-style: normal; font-size: 10px; color: var(--accent); margin-left: 4px;
+}
+.notify-device-main span { font: 500 10px/1.4 var(--font-mono); }
+
+@media (max-width: 720px) {
+  .notify-tests { grid-template-columns: 1fr; }
+  /* 진단 줄은 좁은 화면에서 4열이 무너진다 -- 이름/설명을 아래로 흘린다 */
+  .notify-check { grid-template-columns: 8px 1fr auto; }
+  .notify-check-detail { grid-column: 2 / -1; }
+  .notify-tier { grid-template-columns: 1fr; gap: 2px; }
+}

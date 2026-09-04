@@ -2523,12 +2523,17 @@ function renderMacroCalendar(payload) {
 
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.pageTab; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31)
+    const target = button.dataset.pageTab; // "ops" | "snapshot" | "notify" (라이브 탭 제거, 2026-08-31)
     activePageTab = target;
     el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
+    el("notifyTabPanel")?.classList.toggle("hidden", target !== "notify");
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    if (target === "ops") {
+    if (target === "notify") {
+      // 탭을 열 때마다 다시 읽는다 -- 권한이나 구독은 다른 탭/기기에서 바뀔 수 있고,
+      // 낡은 상태를 보여주면 "켰는데 꺼졌다고 나온다"는 혼란만 만든다.
+      refreshNotifyPage();
+    } else if (target === "ops") {
       opsLastFetchAt = 0; refreshOpsStatus();
     } else if (target === "snapshot") {
       evidenceLastFetchAt = 0; refreshEvidenceSignals();
@@ -3681,17 +3686,23 @@ function hideTooltip() {
   if (t) t.classList.remove("visible");
 }
 
-// ---------------------------------------------------------------------------------------
-// PWA 설치 + 웹푸시 알림 (2026-09-04)
-// 사용자 요청: "다른 작업하다가 계속 신호를 놓친다".
-// 여기는 구독 수명주기와 버튼 상태만 다룬다. 무엇을 언제 보낼지는 서버 데몬
-// (scripts/live_push_notifier_20260904.py)이 정하고, 알림 모양은 sw.js가 정한다.
-// ---------------------------------------------------------------------------------------
+
+// =======================================================================================
+// 알림 탭 (2026-09-04). 사용자 요청으로 토프바 토글에서 전용 페이지로 옮겼다.
+//
+// 이 페이지가 단순한 설정 화면이 아닌 이유: 웹푸시는 **조용히** 실패한다. 푸시 서비스가
+// 201을 돌려줘도 브라우저가 안 띄우면 사용자에게는 그냥 "알림이 안 온다"로 보이고, 서버
+// 로그만으로는 구분되지 않는다(실제로 이 기능 첫 배포 때 그 상태가 됐다 -- FCM은 201,
+// 구독도 등록, 그런데 화면에는 아무것도 안 떴다). 그래서 테스트를 두 구간으로 쪼갠다:
+//   (1) 로컬 showNotification -- 푸시 경로를 안 거치고 표시만 검사
+//   (2) 서버 발송            -- 실제 경로 전체
+// (1)이 되고 (2)가 안 되면 전달 문제, (1)부터 안 되면 이 기기가 알림을 막고 있는 것이다.
+// =======================================================================================
 const PUSH_SW_URL = "/dashboard/live/sw.js";
-let deferredInstallPrompt = null;
+const notifyState = { config: null, registration: null, subscription: null, devices: [], installPrompt: null };
 
 function urlBase64ToUint8Array(base64String) {
-  // applicationServerKey는 Uint8Array만 받는다. 서버가 주는 건 unpadded base64url이므로
+  // applicationServerKey는 Uint8Array만 받는다. 서버가 주는 건 unpadded base64url이라
   // 패딩을 되살리고 URL-safe 문자를 표준 base64로 되돌린 뒤 디코드한다.
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -3701,126 +3712,263 @@ function urlBase64ToUint8Array(base64String) {
   return out;
 }
 
-function setPushButton(state, label) {
-  const btn = el("pushToggle");
-  const lbl = el("pushToggleLabel");
-  if (!btn || !lbl) return;
-  btn.classList.remove("hidden");
-  btn.dataset.state = state;
-  btn.setAttribute("aria-pressed", state === "on" ? "true" : "false");
-  btn.disabled = state === "busy" || state === "blocked";
-  lbl.textContent = label;
+function pushSupported() {
+  // `in` 대신 값 자체를 본다 -- 안드로이드 WebView와 파이어폭스 사생활 보호 모드는 키는
+  // 노출하되 값이 undefined다. `"serviceWorker" in navigator`는 그때도 true라 통과해버린다.
+  return !!(navigator.serviceWorker && window.PushManager && window.isSecureContext);
 }
 
-async function setupPushNotifications() {
-  const btn = el("pushToggle");
-  if (!btn) return;
+function notifyCheckRow(ok, name, detail) {
+  const tone = ok === true ? "good" : ok === false ? "bad" : "warn";
+  const mark = ok === true ? "정상" : ok === false ? "문제" : "확인";
+  return `<div class="notify-check ${tone}">
+    <span class="notify-check-dot"></span>
+    <span class="notify-check-name">${name}</span>
+    <span class="notify-check-detail">${detail}</span>
+    <span class="notify-check-mark">${mark}</span>
+  </div>`;
+}
 
-  // 지원하지 않는 환경(구형 브라우저, iOS 사파리의 '탭' 상태, 비보안 컨텍스트)에서는 버튼을
-  // 아예 숨긴다. 눌러도 실패만 하는 버튼은 "설정이 안 된 건지 고장난 건지" 구분을 없앤다.
-  // `in` 대신 값 자체를 본다 -- 안드로이드 WebView와 파이어폭스 사생활 보호 모드는 키는 노출하되
-  // 값이 undefined다. `"serviceWorker" in navigator`는 그때도 true라서 통과해버린다.
-  if (!navigator.serviceWorker || !window.PushManager || !window.isSecureContext) {
-    return;
+function renderNotifyChecks() {
+  const box = el("notifyChecks");
+  if (!box) return;
+  const cfg = notifyState.config;
+  const reg = notifyState.registration;
+  const sub = notifyState.subscription;
+  const rows = [];
+
+  rows.push(notifyCheckRow(!!(navigator.serviceWorker && window.PushManager), "브라우저 지원",
+    navigator.serviceWorker && window.PushManager ? "서비스워커·푸시 사용 가능"
+      : "이 브라우저는 웹푸시를 지원하지 않습니다. iOS는 홈 화면에 추가해야 동작합니다."));
+
+  rows.push(notifyCheckRow(!!window.isSecureContext, "보안 연결",
+    window.isSecureContext ? location.protocol.replace(":", "").toUpperCase() + " 연결"
+      : "HTTPS가 아니면 브라우저가 푸시를 막습니다."));
+
+  const perm = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  rows.push(notifyCheckRow(perm === "granted" ? true : perm === "denied" ? false : null, "알림 권한",
+    perm === "granted" ? "허용됨"
+      : perm === "denied" ? "차단됨 — 주소창 자물쇠 아이콘에서 이 사이트의 알림을 허용으로 바꿔주세요."
+      : "아직 요청 전입니다."));
+
+  const swState = reg ? (reg.active ? "active" : reg.installing ? "installing" : reg.waiting ? "waiting" : "none") : "none";
+  rows.push(notifyCheckRow(swState === "active" ? true : swState === "none" ? false : null, "서비스워커",
+    swState === "active" ? "활성 — 알림을 받을 준비가 됐습니다"
+      : swState === "none" ? "등록되지 않았습니다."
+      : `${swState} 상태입니다. 잠시 뒤 다시 확인해주세요.`));
+
+  rows.push(notifyCheckRow(cfg ? !!cfg.enabled : null, "서버 설정",
+    cfg == null ? "서버 상태를 읽지 못했습니다."
+      : cfg.enabled ? "발송 키가 설정돼 있습니다"
+      : "서버에 VAPID 키가 없습니다. 관리자 설정이 필요합니다."));
+
+  rows.push(notifyCheckRow(!!sub, "이 기기 구독",
+    sub ? "구독됨" : "아직 구독하지 않았습니다. 위의 켜기 버튼을 눌러주세요."));
+
+  // 브라우저에는 구독이 있는데 서버 목록에 없으면 발송 대상이 아니다 -- 사용자 눈에는
+  // "켜져 있는데 안 온다"로 보이는 상태라 반드시 따로 짚어준다.
+  if (sub) {
+    const tail = sub.endpoint.slice(-12);
+    const known = notifyState.devices.some((d) => d.endpoint_tail === tail);
+    rows.push(notifyCheckRow(known, "서버 등록",
+      known ? "서버가 이 기기를 알고 있습니다"
+        : "브라우저에는 구독이 있는데 서버 목록에 없습니다. 껐다 다시 켜주세요."));
   }
 
-  let config;
-  try {
-    const resp = await fetch("/api/push/config", { cache: "no-store" });
-    config = await resp.json();
-  } catch (err) {
+  box.innerHTML = rows.join("");
+}
+
+function renderNotifyMain() {
+  const cfg = notifyState.config;
+  const sub = notifyState.subscription;
+  const btn = el("notifyToggleBtn");
+  const badge = el("notifyBadge");
+  const title = el("notifyStateTitle");
+  const detail = el("notifyStateDetail");
+  const perm = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+
+  let state, headline, sub_text, label, disabled = false;
+  if (!pushSupported()) {
+    state = "bad"; headline = "이 브라우저에서는 알림을 쓸 수 없습니다";
+    sub_text = "아래 진단에서 막힌 항목을 확인해주세요."; label = "사용 불가"; disabled = true;
+  } else if (cfg && !cfg.enabled) {
+    state = "bad"; headline = "서버가 알림을 보낼 수 없는 상태입니다";
+    sub_text = "서버에 발송 키가 설정되지 않았습니다."; label = "사용 불가"; disabled = true;
+  } else if (perm === "denied") {
+    state = "bad"; headline = "브라우저가 이 사이트의 알림을 차단했습니다";
+    sub_text = "주소창 자물쇠 아이콘 → 알림 → 허용으로 바꾸면 다시 켤 수 있습니다.";
+    label = "차단됨"; disabled = true;
+  } else if (sub) {
+    state = "good"; headline = "알림이 켜져 있습니다";
+    sub_text = "포지션 개시·청산과 운영 이상은 소리와 함께 즉시 옵니다."; label = "알림 끄기";
+  } else {
+    state = "neutral"; headline = "알림이 꺼져 있습니다";
+    sub_text = "켜면 이 기기로 신호가 도착합니다. 창을 닫아도 옵니다."; label = "알림 켜기";
+  }
+
+  if (title) title.textContent = headline;
+  if (detail) detail.textContent = sub_text;
+  if (btn) { btn.textContent = label; btn.disabled = disabled; btn.classList.toggle("primary", !sub); }
+  if (badge) {
+    badge.textContent = state === "good" ? "알림 켬" : state === "bad" ? "알림 불가" : "알림 끔";
+    badge.className = `ops-badge ${state}`;
+  }
+  const canTest = !!(notifyState.registration && perm === "granted");
+  const localBtn = el("notifyLocalTestBtn");
+  const serverBtn = el("notifyServerTestBtn");
+  if (localBtn) localBtn.disabled = !canTest;
+  if (serverBtn) serverBtn.disabled = !canTest || !sub;
+}
+
+function renderNotifyDevices() {
+  const box = el("notifyDevices");
+  if (!box) return;
+  const list = notifyState.devices;
+  if (!list.length) {
+    box.innerHTML = `<span class="muted">등록된 기기가 없습니다.</span>`;
     return;
   }
-  if (!config || !config.enabled || !config.vapid_public_key) return;  // 서버에 VAPID 키 없음
+  const mineTail = notifyState.subscription ? notifyState.subscription.endpoint.slice(-12) : null;
+  box.innerHTML = list.map((d) => {
+    const mine = d.endpoint_tail === mineTail;
+    const when = d.subscribed_utc ? fmtMacroCalendarTime(d.subscribed_utc) : "-";
+    // 브라우저 UA 문자열은 길고 읽기 어렵다 -- 사람이 알아볼 만한 부분만 뽑는다.
+    const name = (d.label || "").match(/(Chrome|Edg|Firefox|Safari|Android|iPhone|iPad|Windows|Macintosh)/g);
+    const pretty = name ? [...new Set(name)].join(" · ") : "알 수 없는 기기";
+    return `<div class="notify-device${mine ? " mine" : ""}">
+      <div class="notify-device-main">
+        <strong>${pretty}${mine ? " <em>이 기기</em>" : ""}</strong>
+        <span class="muted">${when} 등록 · ${d.endpoint_tail}</span>
+      </div>
+      <button type="button" class="notify-btn small" data-revoke="${d.id}">해지</button>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-revoke]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    await fetch("/api/push/unsubscribe", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: b.dataset.revoke }),
+    }).catch(() => {});
+    // 이 기기를 해지했다면 브라우저 쪽 구독도 같이 지운다 -- 서버에서만 지우면 브라우저에는
+    // 유령 구독이 남아 "켜져 있는데 안 온다" 상태가 된다.
+    const mine = notifyState.subscription
+      && notifyState.subscription.endpoint.slice(-12) === (notifyState.devices.find((d) => d.id === b.dataset.revoke) || {}).endpoint_tail;
+    if (mine) { try { await notifyState.subscription.unsubscribe(); } catch (e) { /* 이미 해지됨 */ } }
+    await refreshNotifyPage();
+  }));
+}
 
-  let registration;
+function setNotifyTestResult(text, tone) {
+  const p = el("notifyTestResult");
+  if (!p) return;
+  p.textContent = text;
+  p.className = `notify-test-result ${tone || ""}`;
+}
+
+async function refreshNotifyPage() {
+  if (!pushSupported()) { renderNotifyChecks(); renderNotifyMain(); return; }
   try {
-    registration = await navigator.serviceWorker.register(PUSH_SW_URL, { scope: "/dashboard/live/" });
+    notifyState.config = await (await fetch("/api/push/config", { cache: "no-store" })).json();
+  } catch (e) { notifyState.config = null; }
+  try {
+    notifyState.registration = (await navigator.serviceWorker.getRegistration("/dashboard/live/")) || null;
+    notifyState.subscription = notifyState.registration
+      ? await notifyState.registration.pushManager.getSubscription() : null;
+  } catch (e) { notifyState.registration = null; notifyState.subscription = null; }
+  try {
+    notifyState.devices = (await (await fetch("/api/push/devices", { cache: "no-store" })).json()).devices || [];
+  } catch (e) { notifyState.devices = []; }
+  renderNotifyChecks(); renderNotifyMain(); renderNotifyDevices();
+}
+
+async function setupNotifyPage() {
+  if (!pushSupported()) { renderNotifyChecks(); renderNotifyMain(); return; }
+  try {
+    await navigator.serviceWorker.register(PUSH_SW_URL, { scope: "/dashboard/live/" });
+    await navigator.serviceWorker.ready;   // active 상태가 될 때까지 기다린다
   } catch (err) {
     console.warn("service worker 등록 실패", err);
-    return;
   }
+  await refreshNotifyPage();
 
-  if (Notification.permission === "denied") {
-    // 한 번 거부하면 JS로는 되돌릴 수 없다 -- 브라우저 사이트 설정에서 직접 풀어야 한다.
-    setPushButton("blocked", "알림 차단됨");
-    btn.title = "브라우저 사이트 설정에서 이 사이트의 알림 권한을 허용으로 바꿔주세요.";
-    return;
-  }
-
-  const existing = await registration.pushManager.getSubscription();
-  setPushButton(existing ? "on" : "off", existing ? "알림 켬" : "알림 끔");
-
-  btn.addEventListener("click", async () => {
-    const current = await registration.pushManager.getSubscription();
-    setPushButton("busy", "처리 중…");
+  el("notifyToggleBtn")?.addEventListener("click", async () => {
+    const btn = el("notifyToggleBtn");
+    btn.disabled = true; btn.textContent = "처리 중…";
     try {
-      if (current) {
+      if (notifyState.subscription) {
         await fetch("/api/push/unsubscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription: current.toJSON() }),
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: notifyState.subscription.toJSON() }),
         });
-        await current.unsubscribe();
-        setPushButton("off", "알림 끔");
-        return;
+        await notifyState.subscription.unsubscribe();
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission === "granted") {
+          const sub = await notifyState.registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(notifyState.config.vapid_public_key),
+          });
+          await fetch("/api/push/subscribe", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subscription: sub.toJSON(), label: navigator.userAgent.slice(0, 80) }),
+          });
+        }
       }
-
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setPushButton(permission === "denied" ? "blocked" : "off",
-                      permission === "denied" ? "알림 차단됨" : "알림 끔");
-        return;
-      }
-
-      const sub = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(config.vapid_public_key),
-      });
-      await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscription: sub.toJSON(), label: navigator.userAgent.slice(0, 80) }),
-      });
-      setPushButton("on", "알림 켬");
-      // 구독 직후 테스트 발송. 조용한 장에서는 실제 신호까지 몇 시간이 걸릴 수 있어서,
-      // 이게 없으면 방금 한 설정이 실제로 동작하는지 확인할 방법이 없다.
-      await fetch("/api/push/test", { method: "POST" });
     } catch (err) {
-      console.warn("푸시 구독 실패", err);
-      setPushButton("off", "알림 실패");
+      console.warn("구독 변경 실패", err);
+      setNotifyTestResult(`설정을 바꾸지 못했습니다: ${err.message}`, "bad");
+    }
+    await refreshNotifyPage();
+  });
+
+  el("notifyLocalTestBtn")?.addEventListener("click", async () => {
+    // 푸시 경로를 통째로 건너뛰고 서비스워커에게 직접 띄우라고 한다. 이게 안 보이면
+    // 문제는 전달이 아니라 이 기기(브라우저 설정·OS 알림·집중 모드)에 있다.
+    setNotifyTestResult("띄우는 중…", "");
+    try {
+      await notifyState.registration.showNotification("로컬 테스트", {
+        body: "서버를 거치지 않고 이 브라우저가 직접 띄운 알림입니다.",
+        icon: "/dashboard/live/icons/icon-192.png",
+        badge: "/dashboard/live/icons/badge-96.png",
+        tag: "local-test",
+      });
+      setNotifyTestResult("띄웠습니다. 화면에 안 보이면 브라우저·OS의 알림 설정(집중 지원, 방해 금지)을 확인해주세요.", "warn");
+    } catch (err) {
+      setNotifyTestResult(`띄우지 못했습니다: ${err.message}`, "bad");
+    }
+  });
+
+  el("notifyServerTestBtn")?.addEventListener("click", async () => {
+    setNotifyTestResult("서버에 발송을 요청했습니다…", "");
+    try {
+      const r = await (await fetch("/api/push/test", { method: "POST" })).json();
+      setNotifyTestResult(
+        r.sent > 0
+          ? `서버가 ${r.sent}대에 보냈습니다. 몇 초 안에 도착하지 않으면 위의 로컬 테스트로 표시 자체가 되는지 먼저 확인해주세요.`
+          : `발송 대상이 없습니다 (보냄 ${r.sent} · 정리 ${r.pruned} · 실패 ${r.failed}). 알림을 껐다 다시 켜주세요.`,
+        r.sent > 0 ? "good" : "bad");
+      await refreshNotifyPage();
+    } catch (err) {
+      setNotifyTestResult(`발송 요청이 실패했습니다: ${err.message}`, "bad");
     }
   });
 }
 
-function setupInstallPrompt() {
-  // Chrome/Edge는 설치 가능해지면 beforeinstallprompt를 던진다. 기본 UI는 주소창 아이콘이라
-  // 놓치기 쉬워서, 알림 버튼 옆에 직접 띄운다. 이미 설치된 상태(standalone)면 뜨지 않는다.
-  window.addEventListener("beforeinstallprompt", (event) => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-    const bar = document.querySelector(".top-right");
-    if (!bar || el("pwaInstall")) return;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = "pwaInstall";
-    btn.className = "push-toggle";
-    btn.textContent = "앱 설치";
-    btn.title = "독립 창을 가진 데스크톱 앱으로 설치합니다.";
-    btn.addEventListener("click", async () => {
-      if (!deferredInstallPrompt) return;
-      deferredInstallPrompt.prompt();
-      await deferredInstallPrompt.userChoice;
-      deferredInstallPrompt = null;
-      btn.remove();
-    });
-    bar.appendChild(btn);
-  });
-  window.addEventListener("appinstalled", () => {
-    const btn = el("pwaInstall");
-    if (btn) btn.remove();
-  });
-}
+// PWA 설치 -- Chrome/Edge의 기본 UI는 주소창 아이콘이라 놓치기 쉬워서 알림 페이지에도 둔다.
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  notifyState.installPrompt = event;
+  const btn = el("notifyInstallBtn");
+  if (!btn) return;
+  btn.classList.remove("hidden");
+  btn.onclick = async () => {
+    if (!notifyState.installPrompt) return;
+    notifyState.installPrompt.prompt();
+    await notifyState.installPrompt.userChoice;
+    notifyState.installPrompt = null;
+    btn.classList.add("hidden");
+  };
+});
+window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.add("hidden"));
 
-setupInstallPrompt();
-setupPushNotifications();
+setupNotifyPage();
