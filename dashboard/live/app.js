@@ -2326,6 +2326,37 @@ async function refreshVrebEconShadow() {
     if (sub) sub.textContent = "불러오기 실패";
   }
 }
+// 청산 사유 표기. 2026-09-04 사용자 신고: "최근 청산이 익절인데 손절선 도달이라고 적혀있다".
+// 원인은 러너의 `reason`이 "stop" 하나로 **초기 손절과 무장 후 트레일링 익절을 둘 다** 덮는데,
+// 대시보드가 그걸 무조건 "손절선 도달"로 찍고 있었던 것이다(신고 시점 원장 17건 중 12건 오표기).
+// BRACKET이 sl_atr=5.0 / arm_atr=1.5 / trail_atr=0.1이라 무장 스톱은 항상 진입가 위이므로,
+// 두 경우는 애초에 반대 사건이다.
+function vshadowRawMovePct(t) {
+  // 비용(COST_BP) 차감 전 원시 가격 이동. pnl_bp는 비용이 빠져 있어 부호가 뒤집힐 수 있으므로
+  // (예: 원시 +8bp, 비용 10bp -> pnl -2bp) 사유 판정에는 반드시 이 값을 써야 한다.
+  if (t.entry == null || t.exit == null || !Number(t.entry)) return null;
+  const sgn = t.side === "long" ? 1 : -1;
+  return (sgn * (Number(t.exit) - Number(t.entry))) / Number(t.entry) * 100;
+}
+function vshadowHeldText(t) {
+  // 러너의 `bars_held`를 쓰지 않는다 -- 배리어 평가 패스마다 증가해서 실제 경과 봉수를
+  // 과소계상한다(2026-09-04 실측 17/17건 불일치). 바로 옆에 찍는 두 시각에서 직접 계산하면
+  // 화면 안에서 서로 검증되고, 사용자가 눈으로 대조할 수 있다.
+  const a = Date.parse(t.entry_utc), b = Date.parse(t.exit_utc);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return "";
+  const min = Math.round((b - a) / 60000);
+  if (min < 60) return ` · ${min}분`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? ` · ${h}시간 ${m}분` : ` · ${h}시간`;
+}
+function vshadowExitLabel(t) {
+  if (t.reason !== "stop") return { text: "보유 만기", tone: "neutral" };
+  // `armed`는 2026-09-04부터 러너가 원장에 남긴다. 그 이전 행에는 없으므로 가격 이동 부호로
+  // 보완한다 -- 무장 스톱은 항상 진입가 위라서 이 대체 판정은 근사가 아니라 정확히 일치한다.
+  const move = vshadowRawMovePct(t);
+  const armed = t.armed != null ? !!t.armed : (move != null && move > 0);
+  return armed ? { text: "트레일링 익절", tone: "good" } : { text: "초기 손절", tone: "bad" };
+}
 function renderVrebEconShadow(p) {
   const sub = el("vrebEconShadowSub");
   const body = el("vrebEconShadowBody");
@@ -2401,18 +2432,26 @@ function renderVrebEconShadow(p) {
     </div>`).join(""));
   }
 
-  // ⑤ 최근 청산 -- 시각 + 방향 + 결과만
+  // ⑤ 최근 청산 -- 진입가/청산가/시각까지 (2026-09-04 사용자 요청)
   const rec = (p.recent_trades || []).slice().reverse().slice(0, 5);
   if (rec.length) {
     out.push(`<div class="vshadow-section-title">최근 청산</div>`);
-    out.push(rec.map((t) => `<div class="vshadow-row">
+    out.push(rec.map((t) => {
+      const ex = vshadowExitLabel(t);
+      const move = vshadowRawMovePct(t);
+      const held = vshadowHeldText(t);
+      const prob = t.proba == null ? "" : ` · p ${Number(t.proba).toFixed(3)}`;
+      return `<div class="vshadow-row vshadow-row-detail">
       <span class="vshadow-side ${t.side}">${t.side === "long" ? "롱" : "숏"}</span>
       <div class="vshadow-row-main">
-        <strong>${t.reason === "stop" ? "손절선 도달" : "보유 만기"}</strong>
-        <span>${fmtMacroCalendarTime(t.exit_utc)}</span>
+        <strong class="${ex.tone}">${ex.text}</strong>
+        <span class="vshadow-trade-px">진입 ${fmtNum(t.entry, 2)} → 청산 ${fmtNum(t.exit, 2)}${
+          move == null ? "" : ` <em class="${move > 0 ? "good" : "bad"}">${move > 0 ? "+" : ""}${move.toFixed(2)}%</em>`}</span>
+        <span class="vshadow-trade-ts">${fmtMacroCalendarTime(t.entry_utc)} → ${fmtMacroCalendarTime(t.exit_utc)}${held}${prob}</span>
       </div>
       <span class="vshadow-row-value ${Number(t.pnl_bp) > 0 ? "good" : "bad"}">${bp(t.pnl_bp)}</span>
-    </div>`).join(""));
+    </div>`;
+    }).join(""));
   }
 
   // ⑥ 부가 지표는 맨 아래 한 줄로 -- 평소엔 볼 필요 없다

@@ -174,6 +174,13 @@ def _close(s: dict[str, Any], p: dict[str, Any], exit_px: float, reason: str,
                         "side": p["side"], "entry": p["entry"], "exit": exit_px,
                         "atr": p["atr"], "proba": p["proba"], "pnl_bp": round(pnl, 2),
                         "bars_held": int(p.get("bars_held", 0)), "reason": reason,
+                        # 2026-09-04: `reason`만으로는 "stop"이 초기 손절인지 무장 후 트레일링
+                        # 익절인지 구분되지 않아, 대시보드가 이익 청산까지 "손절선 도달"로 찍고
+                        # 있었다(사용자 신고 -- 당시 원장 17건 중 12건이 오표기). BRACKET이
+                        # arm_atr=1.5 / trail_atr=0.1이라 무장 후 스톱은 항상 진입가 위이므로
+                        # 두 경우는 원래 완전히 다른 사건이다. 이 필드가 그 구분을 확정한다
+                        # (이전 행에는 없으므로 대시보드가 가격이동 부호로 보완한다).
+                        "armed": bool(p.get("armed", False)),
                         "exit_basis": "bar_high_low"})
     s["consec_loss"] = 0 if pnl > 0 else s["consec_loss"] + 1
     log(f"  청산 {p['side']} {pnl:+.2f}bp ({reason}, {p.get('bars_held', 0)}봉) "

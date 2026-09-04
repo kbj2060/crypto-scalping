@@ -1656,3 +1656,38 @@ svg {
   .top-right { justify-content: center; flex-wrap: wrap; }
   .push-toggle { padding: 6px 10px; font-size: 10px; }
 }
+
+/* 최근 청산 상세 (2026-09-04 사용자 요청: "진입가, 청산가, 진입시간, 청산시간을 자세히").
+   기존 .vshadow-row는 한 줄짜리라 3줄이 들어가면 세로 정렬이 무너진다 -- 값(우측 bp)을 위쪽에
+   붙이고 본문만 늘어나게 한다. 비중/레버리지는 일부러 없다: 이 섀도우는 명목/증거금 개념 없이
+   bp만 회계하므로(러너의 pnl = (청산가-진입가)/진입가*1e4 - 비용), 표시하면 없는 값을 지어내는
+   것이 된다. */
+.vshadow-row.vshadow-row-detail { align-items: flex-start; }
+.vshadow-row.vshadow-row-detail .vshadow-side,
+.vshadow-row.vshadow-row-detail .vshadow-row-value { margin-top: 1px; }
+.vshadow-row-detail .vshadow-row-main { display: grid; gap: 2px; min-width: 0; }
+.vshadow-row-detail .vshadow-row-main strong.good { color: var(--good); }
+.vshadow-row-detail .vshadow-row-main strong.bad { color: var(--bad); }
+.vshadow-row-detail .vshadow-row-main strong.neutral { color: var(--text); }
+.vshadow-trade-px {
+  font: 500 11px/1.35 var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshadow-trade-px em { font-style: normal; font-weight: 700; }
+.vshadow-trade-px em.good { color: var(--good); }
+.vshadow-trade-px em.bad { color: var(--bad); }
+.vshadow-trade-ts {
+  font: 500 10px/1.35 var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  /* 좁은 화면에서는 가격/시각 줄이 잘리는 게 말줄임보다 낫다 -- 숫자가 반쪽만 보이면 오해를 부른다 */
+  .vshadow-trade-px, .vshadow-trade-ts { white-space: normal; }
+}

@@ -1010,6 +1010,14 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
                 "exit_utc": r.get("exit_utc"), "entry": r.get("entry"),
                 "exit": r.get("exit"), "pnl_bp": r.get("pnl_bp"),
                 "reason": r.get("reason"), "proba": r.get("proba"),
+                # bars_held는 일부러 내보내지 않는다: 러너의 카운터가 배리어 평가 패스마다
+                # 증가해 실제 경과 봉수를 과소계상한다(2026-09-04 실측 17/17건 불일치, 실제
+                # 3봉을 1봉으로 기록한 예까지 있었다). 프론트는 entry_utc/exit_utc 차이로
+                # 경과 시간을 직접 계산해 화면 안에서 서로 검증되게 한다.
+                # `armed`는 2026-09-04부터 러너가 기록한다. 그 이전 행에는 없으므로 None으로
+                # 나가고, 프론트가 진입가/청산가의 부호로 보완한다 -- 이 둘이 없으면 트레일링
+                # 익절과 초기 손절을 구분할 수 없다(그게 사용자가 신고한 오표기의 원인이었다).
+                "armed": r.get("armed"),
             }
             for r in ledger[-8:]
         ],
