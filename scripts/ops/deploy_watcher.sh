@@ -213,10 +213,10 @@ declare -A UNITS_TO_RESTART=()
 { affects '^trading_bot\.py$' || trading_bot_modules_relevant_change; } && UNITS_TO_RESTART[trading-bot]=1
 affects '^scripts/ops_watchdog\.py$' && UNITS_TO_RESTART[ops-watchdog]=1
 affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-exporter]=1
-affects '^scripts/live_sigma6_regime_tiebreak_shadow_20260801\.py$' && UNITS_TO_RESTART[tau1-shadow]=1
-# eth-jmlam4-shadow.service is retired (2026-08-15) but left mapped here in case the unit or its
-# script ever needs a restart during teardown; not this change's concern.
-affects '^scripts/live_eth_jmlam4_regime_swap_shadow_20260809\.py$' && UNITS_TO_RESTART[eth-jmlam4-shadow]=1
+# tau1-shadow / eth-jmlam4-shadow 재시작 배선은 2026-09-04에 제거했다. 둘 다 inactive+disabled
+# 이지만 **유닛 파일은 남아 있다** -- `systemctl restart`는 disabled 유닛도 시작시키므로(disabled는
+# 부팅 자동시작만 막는다), 배선을 남겨두면 해당 스크립트를 누가 수정하는 순간 워처가 은퇴한
+# 섀도우를 조용히 되살린다. 되살리려면 sudo systemctl enable --now 로 명시적으로 한다.
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
 

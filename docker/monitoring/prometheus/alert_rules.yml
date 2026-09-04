@@ -17,14 +17,6 @@ groups:
         annotations:
           summary: "{{ $labels.unit }}.service is not active"
 
-      - alert: ShadowSystemdUnitDown
-        expr: crypto_scalping_systemd_unit_active{unit="btc-multislot-shadow"} == 0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "{{ $labels.unit }}.service is not active (shadow-only, not order-critical)"
-
       - alert: OpsWatchdogHeartbeatStale
         expr: ops_watchdog_heartbeat_age_seconds > 300
         for: 1m

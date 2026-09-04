@@ -24,7 +24,9 @@ LIVE = ROOT / "data" / "live"
 OUT = LIVE / "ops_watchdog"
 
 STATUS_VALUE = {"OK": 1.0, "WARN": 0.5, "CRITICAL": 0.0, "BLOCKED": 0.0}
-SYSTEMD_UNITS = ["trading-bot", "tau1-shadow", "ops-watchdog", "btc-multislot-shadow"]
+# 2026-09-04: tau1-shadow(은퇴) / btc-multislot-shadow(제거)를 뺐다. 안 도는 유닛의 메트릭을
+# 계속 내보내면 대시보드와 알림에 영구 "down"이 남는다.
+SYSTEMD_UNITS = ["trading-bot", "ops-watchdog"]
 
 
 def load_json(path: Path) -> Any:
