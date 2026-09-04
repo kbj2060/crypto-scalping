@@ -4,12 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>인공지능 트레이딩 대시보드</title>
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="icons/favicon-64.png">
+  <!-- 2026-09-04 PWA: Chrome/Edge에서 "앱으로 설치"가 뜨게 하고, 설치 후에는 자체 창을 가진
+       데스크톱 앱이 된다. iOS는 apple-mobile-web-app-capable + 홈화면 추가를 해야만 웹푸시가
+       동작한다(사파리 제약, 브라우저 탭 상태로는 알림 권한 자체를 못 받는다). -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b0d13">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="트레이딩">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260904-evidence-cont-v1">
+  <link rel="stylesheet" href="styles.css?v=20260904-evidence-cont-pwa-push">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -37,7 +46,16 @@
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
         </nav>
         <div id="topClock" class="top-clock">-</div>
-        <div id="topSession" class="ops-session top-session">-</div>
+        <div class="top-right">
+          <div id="topSession" class="ops-session top-session">-</div>
+          <!-- 알림 토글. VAPID 키가 서버에 없거나 브라우저가 푸시 미지원이면 app.js가 hidden으로
+               둔다 -- 눌러도 아무 일 없는 버튼을 남겨두면 설정이 됐는지 아닌지 알 수 없다. -->
+          <button type="button" id="pushToggle" class="push-toggle hidden"
+                  aria-pressed="false" title="알림 설정">
+            <span class="push-toggle-icon" aria-hidden="true">🔔</span>
+            <span id="pushToggleLabel" class="push-toggle-label">알림 끔</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -243,7 +261,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260904-evidence-cont-v1"></script>
+  <script src="./app.js?v=20260904-evidence-cont-pwa-push"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

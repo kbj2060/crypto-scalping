@@ -1,0 +1,18 @@
+{
+  "name": "인공지능 트레이딩 대시보드",
+  "short_name": "트레이딩",
+  "description": "ETH/BTC/XRP 신호·레짐·섀도우 원장 실시간 모니터",
+  "start_url": "/dashboard/live/",
+  "scope": "/dashboard/live/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0d13",
+  "theme_color": "#0b0d13",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

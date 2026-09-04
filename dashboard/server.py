@@ -156,6 +156,17 @@ from scripts.live_macro_calendar_20260826 import compute_macro_calendar, compute
 # specialized-detector (EVIDENCE_SIGNAL_SYMBOL etc. below) are untouched -- those are trained ML
 # models with no BTC-trained artifact yet, not something a symbol swap alone can serve.
 from scripts.coin_config import COIN_CONFIG  # noqa: E402
+# 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
+# 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
+# scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
+# 계산하므로(load_evidence_signals()의 60초 캐시) 아무도 안 보고 있으면 트리거 자체가 돌지 않는다.
+from scripts.push_webpush_20260904 import (  # noqa: E402
+    add_subscription,
+    broadcast,
+    load_subscriptions,
+    remove_subscription,
+    subscription_id,
+)
 
 EVIDENCE_SIGNAL_SYMBOL = "ETHUSDT"
 EVIDENCE_SIGNAL_INTERVAL = "5m"
@@ -2008,6 +2019,18 @@ def make_app() -> web.Application:
         response.enable_compression()
         return no_cache(response)
 
+    async def pwa_asset(request: web.Request) -> web.FileResponse:
+        """sw.js / manifest를 add_static이 아니라 no-cache로 직접 서빙한다.
+
+        2026-09-01에 이 대시보드는 CSS를 고쳤는데도 화면이 안 바뀌는 사고를 겪었고 원인은
+        Cloudflare 엣지 캐시였다(eth_dashboard_low_atr_warning_overflow_fix_20260901). 서비스
+        워커가 같은 일을 당하면 훨씬 고약하다 -- 낡은 sw.js는 브라우저에 등록된 채로 남아
+        알림 동작을 계속 지배하고, app.js처럼 쿼리스트링 캐시버스터를 붙일 수도 없다
+        (등록 URL이 바뀌면 브라우저는 다른 워커로 취급한다).
+        """
+        name = request.match_info["name"]
+        return no_cache(web.FileResponse(DASHBOARD_DIR / name))
+
     async def api_state(request: web.Request) -> web.Response:
         payload, etag = dashboard_state_payload()
         return json_response(request, payload, etag)
@@ -2174,6 +2197,59 @@ def make_app() -> web.Application:
         }
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    # ---- Web Push (PWA 알림) --------------------------------------------------------
+    # 판단 로직은 여기 없다 -- scripts/live_push_notifier_20260904.py 참고. 여기는 구독 수명주기만.
+    async def api_push_config(request: web.Request) -> web.Response:
+        """브라우저가 pushManager.subscribe()에 넘길 applicationServerKey(=VAPID 공개키)를 준다.
+        키가 .env에 없으면 enabled=false로 답해서 프론트가 알림 버튼 자체를 숨기게 한다 --
+        키 없이 subscribe()를 호출하면 브라우저가 던지는 예외는 원인을 알아보기 어렵다."""
+        public_key = os.getenv("VAPID_PUBLIC_KEY", "")
+        return web.json_response(
+            {"enabled": bool(public_key and os.getenv("VAPID_PRIVATE_KEY")),
+             "vapid_public_key": public_key,
+             "subscriber_count": len(load_subscriptions())},
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    async def api_push_subscribe(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="invalid json")
+        sub = body.get("subscription") or {}
+        if not sub.get("endpoint") or not (sub.get("keys") or {}).get("p256dh"):
+            raise web.HTTPBadRequest(text="subscription must carry endpoint and keys.p256dh")
+        sid = add_subscription(sub, label=str(body.get("label", ""))[:80])
+        return web.json_response({"ok": True, "id": sid}, headers={"Cache-Control": "no-cache"})
+
+    async def api_push_unsubscribe(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(text="invalid json")
+        sub = body.get("subscription") or {}
+        sid = body.get("id") or (subscription_id(sub) if sub.get("endpoint") else None)
+        if not sid:
+            raise web.HTTPBadRequest(text="id or subscription.endpoint required")
+        return web.json_response({"ok": remove_subscription(sid)},
+                                 headers={"Cache-Control": "no-cache"})
+
+    async def api_push_test(request: web.Request) -> web.Response:
+        """구독 직후 '진짜로 뜨는가'를 확인하는 용도. 이게 없으면 사용자는 실제 신호가 날 때까지
+        (조용한 장에서는 몇 시간) 설정이 됐는지 알 수 없다."""
+        private = os.getenv("VAPID_PRIVATE_KEY", "")
+        if not private:
+            raise web.HTTPServiceUnavailable(text="VAPID_PRIVATE_KEY not configured")
+        result = await broadcast(
+            {"tier": "test", "title": "알림 설정 완료",
+             "body": "이 알림이 보이면 정상입니다. 실제 신호가 나면 같은 방식으로 도착합니다.",
+             "tag": "push-test", "url": "/dashboard/live/"},
+            private_b64=private,
+            subject=os.getenv("VAPID_SUBJECT", "mailto:kbj2060@gmail.com"),
+            ttl=60,
+        )
+        return web.json_response(result, headers={"Cache-Control": "no-cache"})
+
     async def api_trades(request: web.Request) -> web.Response:
         source_filter = request.query.get("source", "ALL").upper()
         journal_path = LIVE_DIR / "trade_journal.jsonl"
@@ -2325,6 +2401,9 @@ def make_app() -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
+    # add_static("/dashboard/live/") 보다 먼저 등록 -- aiohttp는 등록 순서대로 매칭하므로
+    # 이 둘만 no-cache 경로로 빠지고 나머지 정적 파일은 그대로 static 핸들러가 처리한다.
+    app.router.add_get("/dashboard/live/{name:sw\\.js|manifest\\.webmanifest}", pwa_asset)
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
@@ -2344,6 +2423,10 @@ def make_app() -> web.Application:
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/session-alerts", api_session_alerts)
+    app.router.add_get("/api/push/config", api_push_config)
+    app.router.add_post("/api/push/subscribe", api_push_subscribe)
+    app.router.add_post("/api/push/unsubscribe", api_push_unsubscribe)
+    app.router.add_post("/api/push/test", api_push_test)
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/ops-status", api_ops_status)

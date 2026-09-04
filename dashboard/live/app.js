@@ -3628,3 +3628,147 @@ function hideTooltip() {
   const t = el("chartTooltip");
   if (t) t.classList.remove("visible");
 }
+
+// ---------------------------------------------------------------------------------------
+// PWA 설치 + 웹푸시 알림 (2026-09-04)
+// 사용자 요청: "다른 작업하다가 계속 신호를 놓친다".
+// 여기는 구독 수명주기와 버튼 상태만 다룬다. 무엇을 언제 보낼지는 서버 데몬
+// (scripts/live_push_notifier_20260904.py)이 정하고, 알림 모양은 sw.js가 정한다.
+// ---------------------------------------------------------------------------------------
+const PUSH_SW_URL = "/dashboard/live/sw.js";
+let deferredInstallPrompt = null;
+
+function urlBase64ToUint8Array(base64String) {
+  // applicationServerKey는 Uint8Array만 받는다. 서버가 주는 건 unpadded base64url이므로
+  // 패딩을 되살리고 URL-safe 문자를 표준 base64로 되돌린 뒤 디코드한다.
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function setPushButton(state, label) {
+  const btn = el("pushToggle");
+  const lbl = el("pushToggleLabel");
+  if (!btn || !lbl) return;
+  btn.classList.remove("hidden");
+  btn.dataset.state = state;
+  btn.setAttribute("aria-pressed", state === "on" ? "true" : "false");
+  btn.disabled = state === "busy" || state === "blocked";
+  lbl.textContent = label;
+}
+
+async function setupPushNotifications() {
+  const btn = el("pushToggle");
+  if (!btn) return;
+
+  // 지원하지 않는 환경(구형 브라우저, iOS 사파리의 '탭' 상태, 비보안 컨텍스트)에서는 버튼을
+  // 아예 숨긴다. 눌러도 실패만 하는 버튼은 "설정이 안 된 건지 고장난 건지" 구분을 없앤다.
+  // `in` 대신 값 자체를 본다 -- 안드로이드 WebView와 파이어폭스 사생활 보호 모드는 키는 노출하되
+  // 값이 undefined다. `"serviceWorker" in navigator`는 그때도 true라서 통과해버린다.
+  if (!navigator.serviceWorker || !window.PushManager || !window.isSecureContext) {
+    return;
+  }
+
+  let config;
+  try {
+    const resp = await fetch("/api/push/config", { cache: "no-store" });
+    config = await resp.json();
+  } catch (err) {
+    return;
+  }
+  if (!config || !config.enabled || !config.vapid_public_key) return;  // 서버에 VAPID 키 없음
+
+  let registration;
+  try {
+    registration = await navigator.serviceWorker.register(PUSH_SW_URL, { scope: "/dashboard/live/" });
+  } catch (err) {
+    console.warn("service worker 등록 실패", err);
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    // 한 번 거부하면 JS로는 되돌릴 수 없다 -- 브라우저 사이트 설정에서 직접 풀어야 한다.
+    setPushButton("blocked", "알림 차단됨");
+    btn.title = "브라우저 사이트 설정에서 이 사이트의 알림 권한을 허용으로 바꿔주세요.";
+    return;
+  }
+
+  const existing = await registration.pushManager.getSubscription();
+  setPushButton(existing ? "on" : "off", existing ? "알림 켬" : "알림 끔");
+
+  btn.addEventListener("click", async () => {
+    const current = await registration.pushManager.getSubscription();
+    setPushButton("busy", "처리 중…");
+    try {
+      if (current) {
+        await fetch("/api/push/unsubscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: current.toJSON() }),
+        });
+        await current.unsubscribe();
+        setPushButton("off", "알림 끔");
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushButton(permission === "denied" ? "blocked" : "off",
+                      permission === "denied" ? "알림 차단됨" : "알림 끔");
+        return;
+      }
+
+      const sub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.vapid_public_key),
+      });
+      await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription: sub.toJSON(), label: navigator.userAgent.slice(0, 80) }),
+      });
+      setPushButton("on", "알림 켬");
+      // 구독 직후 테스트 발송. 조용한 장에서는 실제 신호까지 몇 시간이 걸릴 수 있어서,
+      // 이게 없으면 방금 한 설정이 실제로 동작하는지 확인할 방법이 없다.
+      await fetch("/api/push/test", { method: "POST" });
+    } catch (err) {
+      console.warn("푸시 구독 실패", err);
+      setPushButton("off", "알림 실패");
+    }
+  });
+}
+
+function setupInstallPrompt() {
+  // Chrome/Edge는 설치 가능해지면 beforeinstallprompt를 던진다. 기본 UI는 주소창 아이콘이라
+  // 놓치기 쉬워서, 알림 버튼 옆에 직접 띄운다. 이미 설치된 상태(standalone)면 뜨지 않는다.
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    const bar = document.querySelector(".top-right");
+    if (!bar || el("pwaInstall")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "pwaInstall";
+    btn.className = "push-toggle";
+    btn.textContent = "앱 설치";
+    btn.title = "독립 창을 가진 데스크톱 앱으로 설치합니다.";
+    btn.addEventListener("click", async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      btn.remove();
+    });
+    bar.appendChild(btn);
+  });
+  window.addEventListener("appinstalled", () => {
+    const btn = el("pwaInstall");
+    if (btn) btn.remove();
+  });
+}
+
+setupInstallPrompt();
+setupPushNotifications();

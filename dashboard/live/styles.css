@@ -1609,3 +1609,50 @@ svg {
 .horizon-badge.cont-badge.good { color: var(--good); background: rgba(76, 175, 125, 0.12); border-color: rgba(76, 175, 125, 0.4); }
 .horizon-badge.cont-badge.bad { color: var(--bad); background: rgba(224, 82, 82, 0.12); border-color: rgba(224, 82, 82, 0.4); }
 .horizon-badge.cont-badge.neutral { color: var(--muted); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.18); }
+/* 알림 토글 + PWA 설치 버튼 (2026-09-04) ------------------------------------------------
+   .topbar가 `1fr auto 1fr` 3열 그리드라 버튼을 그 직계 자식으로 두면 4번째 트랙이 없어 줄이
+   바뀐다. 그래서 세션 표시와 한 셀(.top-right)로 묶고, 그 안에서 flex로 배치한다. */
+.top-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.push-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .035);
+  color: var(--muted);
+  padding: 7px 11px;
+  font: 700 11px/1 var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+
+.push-toggle:hover:not(:disabled) { border-color: rgba(34, 211, 238, .5); color: var(--text); }
+
+.push-toggle[data-state="on"] {
+  border-color: rgba(34, 211, 238, .7);
+  background: rgba(34, 211, 238, .16);
+  color: var(--ink);
+}
+
+/* 차단/처리중은 눌러도 소용없으므로 비활성처럼 보이게 한다 -- 색만 바꾸고 그대로 두면
+   "눌리는데 반응이 없는" 버튼이 된다. */
+.push-toggle:disabled { opacity: .55; cursor: default; }
+.push-toggle[data-state="blocked"] { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+
+.push-toggle-icon { font-size: 12px; line-height: 1; }
+
+@media (max-width: 720px) {
+  /* 모바일에서는 .topbar가 1열이 되므로 우측 셀도 가운데 정렬로 맞춘다. */
+  .top-right { justify-content: center; flex-wrap: wrap; }
+  .push-toggle { padding: 6px 10px; font-size: 10px; }
+}
