@@ -1,6 +1,7 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
+const API_RETAIL_SHIFT_B2_URL = "/api/retail-shift-b2";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 // BTC 코인 페이지 전용 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH
@@ -173,6 +174,9 @@ let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
+let latestRetailShiftB2 = null;
+let retailShiftB2LastFetchAt = 0;
+const RETAIL_SHIFT_B2_POLL_MS = 60000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -1753,12 +1757,52 @@ function evidenceContRegimeText(c) {
 // 2026-09-04 (user request, 호메로스 §5.27): 지속 규칙을 특화 감지기 **카드**로 -- 한 줄(renderEvidenceContinuation)과
 // 칩 배지는 그대로 두고, 카드에는 그 줄에 없던 것을 담는다: 러너와 같은 산식의 가격선(진입/손절/무장/트레일/만기),
 // 봉별 국면 띠(과거만 봄), 섀도우 가상 원장 요약(테이커·메이커 비용 병기). 규칙이라 확률 미터는 없다.
+// ── retail_shift B2 (2026-09-06) ─────────────────────────────────────────────────────────────
+// 09-04 경제 축 스크린 11축 중 **유일한 새 후보**(개미 롱숏비 30분 z ≥ 2.26의 반대 방향, 호메로스 §5.28).
+// 09-05부터 섀도우 러너가 돌고 있는데 화면에는 아무 것도 없었다 -- 90일 판정 대상이 사람 눈에 안 보이면
+// 조용히 멈춰도, 계측 관문을 깨도 알 수 없다.
+// ⚠️이 신호의 30일 관문은 성과가 아니라 **계측**이다: 결정 시각에 롱숏비 행이 이미 보였는가.
+// 지연 ≤300초 비율이 95% 미만이면 사전등록상 성과 판단 자체를 하지 않는다 -- 그래서 그 수치를 먼저 띄운다.
+// 표시 전용이며 자동매매에 연결돼 있지 않다(R 러너와도 원장이 분리돼 있다).
+function retailShiftB2IndicatorItem() {
+  const base = { key: "retail_shift_b2", label: "리테일 롱숏비 급변(B2)", derivedTag: "= 규칙 · 섀도우 검증 중",
+    derivedTitle: "개미 롱숏비(count_long_short_ratio)의 30분 z가 극단(≥2.26)일 때 그 **반대** 방향으로 들어가는 고정 규칙입니다."
+      + " 2026-09-05부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다.\n\n"
+      + "30일 관문은 성과가 아니라 계측입니다 -- 라이브 수집기는 봉 시가 스냅샷이라 결정 시각(봉 마감 +12초)에 그 행이"
+      + " 아직 안 보일 수 있습니다. 공개지연 ≤300초 비율이 95% 미만이면 사전등록상 성과를 판단하지 않습니다.\n\n"
+      + "백테스트(lag1 규약, 비용 10bp 후): VAL +12.7 / OOS +12.3bp, 3.4건/일. 지속 규칙(R)과 합집합했을 때의"
+      + " 한계 기여는 VAL +6.1 / OOS +7.4bp/일이고 CI가 0을 포함합니다 — 후보이지 증명이 아닙니다.",
+    history: [], times: [] };
+  const p = latestRetailShiftB2;
+  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "불러오는 중" };
+  if (!p.available) return { ...base, tone: "neutral", subText: "원장 없음", liveText: "섀도우 원장이 아직 없습니다 · 백테스트 VAL +12.7 / OOS +12.3bp" };
+  const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
+  const k = p.known_ts || {};
+  const share300 = k.share_le_300s;
+  // 관문 문구: 표본이 얇을 때(<30행) 통과/미달을 단정하지 않는다 -- 30일 계측 자체가 아직 진행 중이다.
+  const gateText = k.n == null || !k.n
+    ? "공개지연 표본 없음"
+    : `공개지연 p50 ${k.p50}s / p95 ${k.p95}s · ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
+  const gateBad = share300 != null && k.n >= 30 && share300 < 0.95;
+  const ledgerText = p.closed_trades
+    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}`
+    : "마감 0건";
+  const openText = p.open_positions
+    ? `${p.open_positions}건 보유(${(p.open_sides || []).map(evidenceContSideKo).join("/")})`
+    : "대기";
+  const liveText = `${gateText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
+  const tone = gateBad ? "warn"
+    : p.open_positions ? ((p.open_sides || []).includes("short") && !(p.open_sides || []).includes("long") ? "bad" : "good")
+    : "neutral";
+  return { ...base, tone, subText: gateBad ? "계측 미달" : openText, liveText };
+}
+
 function fireContIndicatorItem() {
   const p = latestEvidenceSignals;
   const ok = p && !p.unsupported && !p.error && p.warmed_up;
   const c = ok ? p.continuation : null;
   const base = { key: "fire_cont", label: "지속 규칙", derivedTag: "= 규칙 · 섀도우 검증 중",
-    derivedTitle: "모델이 아니라 고정 규칙(첫발동 봉 → 지속 방향)입니다. 2026-09-04부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다. 실제 매매 결정에는 연결되지 않았습니다." };
+    derivedTitle: "모델이 아니라 고정 규칙(첫발동 봉 → 지속 방향)입니다. 2026-09-04부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다. 실제 매매 결정에는 연결되지 않았습니다.\n\n비용 단위: bp는 가격(명목) 대비이고 판정 비용은 테이커 왕복 10bp입니다. 괄호의 메이커 값은 peg 진입+테이커 청산 실측 7.8bp입니다. 증거금 기준으로 읽으면 배율만큼 커집니다(30배면 10bp = 3.00%)." };
   if (!ok) return { ...base, tone: "neutral", subText: (p && p.error) ? "오류" : "웜업 중", history: [], times: [] };
   const hist = (c && c.history) || [];
   const times = evenlySpacedBarTimes(p.latest_bar_utc, hist.length, 5);
@@ -1806,7 +1850,7 @@ function renderEvidenceContinuation(payload) {
     const f = c.f0_fade_call;
     const f0Text = f ? `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} — 되돌림 진입 후보` : "F0 되돌림 신호 아직 없음";
     tone = f ? (f.side === "long" ? "good" : "bad") : "neutral";
-    text = `되돌림 대기 ▸ ${fireKo} 첫발동(${sigNames}) 후 ${c.bars_since}봉 · 지속 창(${c.window_bars}봉) 종료 · ${f0Text}`;
+    text = `되돌림 대기 ▸ ${fireKo} 첫발동(${sigNames}) 후 ${c.bars_since}봉 · 지속 창(${c.window_bars}봉) 종료 — 규칙 밖 구간(페이드 근거 아님) · ${f0Text}`;
   }
   box.className = `evidence-cont-line ${tone}`;
   box.textContent = text;
@@ -1832,7 +1876,7 @@ const FD_ASSET = {
   // 원인은 신호가 아니라 프레임이다 -- 같은 창의 무작위 진입도 −2.2~−4.2bp다.
   btc: { eligible: false, why: "BTC는 지속 규칙 미적격 — 교차자산 이식 VAL −1.5 / OOS −2.2bp, 실행가능 셀 0/64(같은 창의 무작위 진입도 −2.2~−4.2bp). 아래 층은 참고 표시이지 진입 근거가 아닙니다." },
 };
-const FD_TITLE = "세 로직을 한 장으로 합친 판입니다. ①칩=언제(사건 감지, 방향은 못 가름) ②지속 규칙=어디로(칩 방향의 반대, 정의상 항등식) ③F0=그 다음(되돌림 시점, 첫발동 후 중앙 22~24봉 뒤). 근거: 호메로스 §5.23(첫발동 봉은 지속 시점 — TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp)·§5.27(21개 결정 팔 중 이 규칙만 VAL·OOS 둘 다 일군집 CI>0). ⚠️표시 전용이며 자동매매에 연결돼 있지 않습니다. 섀도우 90일 판정 전이고, 엣지가 얇습니다(비용 15bp면 0, 진입 1봉 지연이면 OOS CI가 0을 넘습니다).";
+const FD_TITLE = "세 로직을 한 장으로 합친 판입니다. ①칩=언제(사건 감지, 방향은 못 가름) ②지속 규칙=어디로(칩 방향의 반대, 정의상 항등식) ③F0=그 다음(되돌림 시점, 첫발동 후 중앙 22~24봉 뒤). 근거: 호메로스 §5.23(첫발동 봉은 지속 시점 — TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp)·§5.27(21개 결정 팔 중 이 규칙만 VAL·OOS 둘 다 일군집 CI>0). ⚠️표시 전용이며 자동매매에 연결돼 있지 않습니다. 섀도우 90일 판정 전이고, 엣지가 얇습니다(비용 15bp면 0, 진입 1봉 지연이면 OOS CI가 0을 넘습니다).\n\n비용 단위(§5.30): 표시된 bp는 전부 **가격(명목) 대비**입니다. 판정 비용은 테이커 왕복 10bp이고, 괄호의 메이커 값은 peg 진입+테이커 청산 실측 7.8bp입니다(트레일링 청산은 본질적으로 테이커라 진입 쪽만 절감됩니다). 같은 값을 증거금 기준으로 읽으면 배율만큼 커집니다 — 30배면 10bp = 3.00%. 단위를 섞지 마세요.\n\n지속 창이 끝나면(되돌림 대기) 그건 **규칙이 적용되지 않는 구간**이지 반대로 가라는 뜻이 아닙니다(부록 15): 짧은 지평 페이드는 승률이 실제로 오르지만(전봉 기저 50% → 53.7~56.0%, 세 창·양 측면) 손익비가 0.74~0.92라 평균이 0이고, 비용을 빼면 열 개 지평 × 세 창 = 30셀 전부 −6.5~−14.2bp였습니다.";
 
 function fdLayerRow(k, v, dim) {
   return `<div class="fd-layer${dim ? " dim" : ""}"><span class="fd-layer-k">${escapeHtml(k)}</span><span class="fd-layer-v">${escapeHtml(v)}</span></div>`;
@@ -1922,14 +1966,16 @@ function renderFinalDecision(payload) {
       `되돌림 국면 ▸ F0 ${evidenceContSideKo(f.side)}${f.proba != null ? ` ${Math.round(f.proba * 100)}%` : ""} — 되돌림 진입 후보`,
       [eventRow,
        fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉)은 종료 — 신규 지속 진입 없음`, true),
-       fdLayerRow("③ 되돌림", `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} · 첫발동 후 ${c.bars_since}봉`)],
+       fdLayerRow("③ 되돌림", `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} · 첫발동 후 ${c.bars_since}봉 — 원래 발동을 페이드하는 게 아니라 되돌아온 뒤의 새 모멘텀입니다`)],
       "", ineligible ? ref.why : foot);
     return;
   }
+  // 2026-09-06 (부록 15): 창 종료를 "이제 반대로 가라"로 읽는 것을 막는다. 짧은 지평 페이드는
+  // 승률이 실제로 오르지만(50% → 53.7~56.0%) 손익비 0.74~0.92가 정확히 지워서 비용 후 30셀 전부 음수다.
   paint("neutral", "창 종료", "지속 창 종료 · F0 되돌림 신호 아직 없음",
     [eventRow,
      fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉) 종료 — 기존 포지션은 트레일/만기까지 유지`, true),
-     fdLayerRow("③ 되돌림", `F0 신호 대기 중 · 첫발동 후 ${c.bars_since}봉`, true)], "", foot);
+     fdLayerRow("③ 되돌림", `F0 신호 대기 중 · 첫발동 후 ${c.bars_since}봉 — 창 종료는 규칙 밖 구간이지 페이드 근거가 아닙니다`, true)], "", foot);
 }
 
 function renderEvidenceSignals(payload) {
@@ -2030,10 +2076,25 @@ function renderEvidenceSignals(payload) {
     // 2026-09-03: 익절가에 이미 닿았으면 그 사실을 먼저 알린다. 그 전까지는 발동 후
     // horizon_bars 동안(smt_divergence는 6시간) 목표 달성 여부와 무관하게 "익절 XXXX"만
     // 띄웠다 -- 이미 끝난 움직임을 보고 뒤늦게 진입하면 손해다.
+    // 2026-09-06 (호메로스 §5.30): 이 익절가는 **이 신호 자신의 학습 라벨(K×ATR 터치)** 목표선이고
+    // 손절선이 없다. 그 규약대로 25,784건을 따라간 실측이 칩 −10.5 / 반대 −9.5 / **같은 측면 무작위
+    // −10.1bp**다 -- 세 방향 다 비용을 되더하면 gross ≈ 0이고 손실의 100%가 왕복 수수료다. 검증된
+    // 엣지는 방향이 아니라 **트레일링 브래킷**에서 나온다(최종 결정 카드의 손절/무장/트레일 3선).
+    // 화면이 익절가만 보여주고 손절선을 안 보여주는 것 자체가 그 손실 규약이라, 여기에 명시한다.
     const tpDone = s.model_tp_touched === true;
     // 종료 상태에선 state가 이미 "목표 도달"을 말하므로 여기선 가격과 방향만 남긴다
     // (안 그러면 "목표 도달 · 종료 / 익절 2391.71 도달"로 같은 말이 두 번 나온다).
     const sideKo = s.model_side === "bottom" ? "바닥" : s.model_side === "top" ? "천장" : null;
+    const tpTitle = [
+      "이 신호 자신의 학습 라벨(K×ATR 터치) 목표가입니다 — 손절선이 없는 규약입니다.",
+      "· 이 규약대로 익절까지 들고 간 실측(25,784건): 칩 방향 −10.5 / 반대 방향 −9.5 / 같은 측면 무작위 −10.1bp.",
+      "  세 방향 모두 비용을 되더하면 gross ≈ 0이고, 손실의 100%가 왕복 수수료입니다.",
+      "· 왕복 수수료 단위: 테이커 0.05%/편 = 10bp · peg 메이커 진입+테이커 청산 = 7.8bp(실측) · 양편 지정가 메이커 0.02%/편 = 4bp.",
+      "  같은 값을 증거금 기준으로 읽으면 배율만큼 커집니다(30배면 10bp = 3.00%) — 단위를 섞지 마세요.",
+      "· 거래소 'Realized PNL'은 청산 쪽 수수료만 반영합니다. 진입 수수료는 진입 시점에 이미 빠져 청산 화면에 안 보이므로,",
+      "  작은 익절을 시장가로 닫으면 화면은 초록인데 계좌는 늘지 않을 수 있습니다(실측 영수증: 화면 +3.29 USDT → 실 ROE −0.04~+0.86%).",
+      "· 검증된 엣지는 이 목표선이 아니라 트레일링 브래킷(손절 5×ATR · 무장 1.5× · 트레일 0.1×)에서 나옵니다 — 최종 결정 카드를 보세요.",
+    ].join("\n");
     const modelTpText = s.model_tp_price != null
       ? (isResolvedByTp
           ? `${sideKo ? sideKo + " " : ""}${fmtNum(s.model_tp_price, 2)}`
@@ -2153,7 +2214,7 @@ function renderEvidenceSignals(payload) {
             <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((shownProba != null ? shownProba * 100 : 0) / 100) * 100}%"></span></span>
             <span class="meter-pct">${pctDisplay}</span>
           </div>
-          ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
+          ${modelTpText ? `<span class="meter-price" title="${escapeHtml(tpTitle)}">${escapeHtml(modelTpText)}</span>` : ""}
         </div>
       </div>
     </article>`;
@@ -2500,6 +2561,20 @@ function fmtMacroCalendarTime(iso) {
 // ⚠️위쪽 V자반등 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
 // 이건 주문을 내지 않는 가상 원장이고, HOLDOUT이 1회 노출로 소진돼 남은 유일한 검증 경로다.
 // 근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
+async function refreshRetailShiftB2() {
+  const now = Date.now();
+  if (now - retailShiftB2LastFetchAt < RETAIL_SHIFT_B2_POLL_MS) return;
+  retailShiftB2LastFetchAt = now;
+  try {
+    const res = await fetch(API_RETAIL_SHIFT_B2_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`retail shift b2 ${res.status}`);
+    latestRetailShiftB2 = await res.json();
+  } catch (error) {
+    console.error("retail_shift B2 fetch error:", error);
+    latestRetailShiftB2 = { error: "fetch_failed" };
+  }
+}
+
 async function refreshVrebEconShadow() {
   const now = Date.now();
   if (now - vrebEconShadowLastFetchAt < VREB_ECON_SHADOW_POLL_MS) return;
@@ -3743,6 +3818,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
       ethOnlyIndicator(fireContIndicatorItem()),   // 2026-09-04 지속 규칙 카드 (호메로스 §5.27)
+      ethOnlyIndicator(retailShiftB2IndicatorItem()),  // 2026-09-06 retail_shift B2 (호메로스 §5.28)
     ], "snapSpecializedSignalList");
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -3797,6 +3873,7 @@ async function tick() {
       refreshCoinIndicators();
       refreshMacroCalendar();
       refreshVrebEconShadow();
+      refreshRetailShiftB2();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();
     }

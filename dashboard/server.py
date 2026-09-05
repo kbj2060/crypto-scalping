@@ -247,6 +247,8 @@ LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 # 2026-09-04 지속 규칙 섀도우(scripts/live_eth_fire_cont_shadow_runner_20260904.py, supervisor 관리) 상태파일 -- 특화감지기 카드 표시 전용
 FIRE_CONT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "fire_cont_shadow_state.json"
+# 2026-09-05 retail_shift(개미 롱숏비 급변의 반대) 지속 신호 B2 섀도우(scripts/live_eth_retail_shift_b2_shadow_runner_20260905.py)
+RETAIL_SHIFT_B2_STATE_PATH = REPO_ROOT / "data" / "live" / "retail_shift_b2_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
@@ -961,6 +963,59 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
         "progress_pct": round(min(n / target, 1.0) * 100, 1) if target else None,
         "verdict": verdict,
         "note": "섀도우 -- 주문 없음. 배포 칩(매 봉 giveback)과 다른 모델.",
+    }
+
+
+def retail_shift_b2_payload() -> dict[str, Any]:
+    """retail_shift 지속 신호(B2)의 섀도우 원장 + 롱숏비 공개지연(known_ts) 계측. 표시 전용, 주문 없음.
+
+    러너: scripts/live_eth_retail_shift_b2_shadow_runner_20260905.py (supervisor + crontab @reboot)
+    사전등록: docs/experiments/eth_retail_shift_b2_shadow_prereg_20260905.md (호메로스 §5.28)
+    ⚠️30일 관문이 성과가 아니라 **계측**이다 -- 결정 시각에 롱숏비 행이 이미 보였는가(지연 ≤300초 비율 <95%면
+    성과 판단 자체를 하지 않는다). 그래서 이 페이로드는 손익보다 지연 통계를 먼저 싣는다.
+    """
+    state = load_json(RETAIL_SHIFT_B2_STATE_PATH) or {}
+    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    pnls: list[float] = []
+    pnls_maker: list[float] = []
+    for row in ledger:
+        try:
+            pnls.append(float(row["pnl_bp"]))
+            pnls_maker.append(float(row.get("pnl_maker_bp", row["pnl_bp"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    n = len(pnls)
+    days = None
+    started = state.get("started_utc")
+    if started:
+        try:
+            days = max((datetime.now(timezone.utc) - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
+        except (TypeError, ValueError):
+            days = None
+    known = state.get("known_ts") if isinstance(state.get("known_ts"), dict) else {}
+    return {
+        "available": bool(state),
+        "rule": state.get("rule"),
+        "started_utc": started,
+        "days_running": (round(days, 2) if days is not None else None),
+        "last_decided_bar_utc": state.get("last_decided_bar_utc"),
+        "closed_trades": n,
+        "exp_bp": (round(sum(pnls) / n, 2) if n else None),
+        "exp_maker_bp": (round(sum(pnls_maker) / n, 2) if n else None),
+        "win_rate": (round(len([v for v in pnls if v > 0]) / n, 3) if n else None),
+        "total_bp": (round(sum(pnls), 1) if n else None),
+        "trades_per_day": (round(n / days, 2) if (n and days) else None),
+        "open_positions": len(positions),
+        "open_sides": sorted({str(pos.get("side")) for pos in positions}),
+        "decided_bars": state.get("decided_bars"),
+        "missed_bars": state.get("missed_bars"),
+        "skipped": state.get("skipped") or {},
+        # known_ts: 러너 store.delay_stats() 원문(n/p05/p50/p95/max/share_le_12s/share_le_300s/n_backfill)
+        "known_ts": known,
+        # 사전등록 기대치(판정 근거 아님, 섀도우가 재현해야 할 범위). lag1 = 라이브 규약.
+        "backtest_ref": {"val_bp": 12.68, "oos_bp": 12.28, "per_day": 3.4,
+                         "union_minus_r_val": 6.05, "union_minus_r_oos": 7.43},
     }
 
 
@@ -2275,6 +2330,12 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, v_rebound_econ_shadow_payload(), etag)
 
+    async def api_retail_shift_b2(request: web.Request) -> web.Response:
+        etag = make_etag("retail-shift-b2", file_signature(RETAIL_SHIFT_B2_STATE_PATH))
+        if etag_matches(request, etag):
+            return json_response(request, None, etag)
+        return json_response(request, retail_shift_b2_payload(), etag)
+
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -2311,6 +2372,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
+    app.router.add_get("/api/retail-shift-b2", api_retail_shift_b2)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     # show_index=False to match /data/live/ below: this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
