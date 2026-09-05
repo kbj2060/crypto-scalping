@@ -103,6 +103,26 @@ def main() -> int:
             if flag:
                 rep["warnings"].append(f"{s}/{w} gap {gap:+.3f}")
             print(f"{s:26s} {w:6s} {d['n']:>7} {d['actual']:>7.3f} {d['pred']:>7.3f} {gap:>+7.3f} {d['auc']:>7.4f}{flag}")
+    # ── 신호 × 나이 교차 (2026-09-06 추가): 위 표는 나이를 합산해서 "나이 0에서 특정 신호가 어긋나는"
+    # 경우를 못 잡는다. 사용자가 라이브에서 demarker 0.921 -> 0.705를 보고 물었다. 그 자리를 직접 잰다.
+    print()
+    print(f"{'신호':26s} {'나이':>4} " + " ".join(f"{w+' n/실제/예측/격차':>26}" for w in ("TRAIN", "VAL", "OOS")))
+    rep["per_signal_by_age"] = {}
+    for s in SIGNALS:
+        rep["per_signal_by_age"][s] = {}
+        for a in (0, 2, 4):
+            if a >= H[s]:
+                continue
+            line = f"{s:26s} {a:>4} "; cell = {}
+            for w in ("TRAIN", "VAL", "OOS"):
+                m = (R["signal"] == s).to_numpy() & (R["split"] == w).to_numpy() & (R["age"].to_numpy() == a)
+                if m.sum() < 80 or len(np.unique(y[m])) < 2:
+                    line += " " * 27; continue
+                g = float(p[m].mean() - y[m].mean())
+                cell[w] = {"n": int(m.sum()), "actual": round(float(y[m].mean()), 3), "pred": round(float(p[m].mean()), 3), "gap": round(g, 3)}
+                line += f"{m.sum():>6}/{y[m].mean():>5.3f}/{p[m].mean():>5.3f}/{g:>+6.3f}   "
+            rep["per_signal_by_age"][s][f"a{a}"] = cell
+            print(line)
     (OUT / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1))
     log(f"완료 · |격차|>0.05 경고 {len(rep['warnings'])}건: {rep['warnings']}")
     return 0
