@@ -217,11 +217,29 @@ def _close(s: dict[str, Any], p: dict[str, Any], exit_px: float, reason: str,
 
 def enter(s: dict[str, Any], out: dict[str, Any], px: float) -> None:
     """가상 진입. `last_bar_utc`를 진입 직전 마지막 완결 봉으로 잡아, 진입이 일어난 봉부터
-    배리어 평가가 시작되게 한다."""
+    배리어 평가가 시작되게 한다.
+
+    ⭐2026-09-05: **직전 완결 봉의 호출만** 받는다(백로그 일괄 진입 금지). `compute_signal`은
+    SCORE_TAIL_BARS=3봉을 재채점하므로 사이클이 밀리면 최대 3봉 묵은 호출이 남는데, 예전에는
+    그것들을 전부 **그 시점 마크가격 하나로** 진입시켰다. 그러면 서로 다른 봉의 신호가 같은
+    가격에 들어가 백테스트 규약(각 신호 봉의 다음 봉 시가)과 어긋난다 -- 09-05 재구성 감사에서
+    34건 중 4건 불일치, 한 건은 116bp 차이였다(원장 −88.5 vs 재구성 +28.0). 지속 규칙 러너
+    `live_eth_fire_cont_shadow_runner_20260904`가 쓰는 규약과 같게 맞춘다: 놓친 봉은 쫓지 않는다."""
+    last_bar = str(out.get("last_closed_bar_utc") or "")
+    sk = s.setdefault("skipped", {})
+    fresh = [c for c in out["calls"] if str(c["timestamp_utc"]) == last_bar]
+    n_stale = len(out["calls"]) - len(fresh)
+    if n_stale:
+        sk["stale_call"] = sk.get("stale_call", 0) + n_stale
+        log(f"  스킵(묵은 호출 {n_stale}건 -- 직전 완결봉 {last_bar[:16]}만 받는다)")
     slots = MAX_CONCURRENT - len(s["positions"])
     if slots <= 0:
+        if fresh:
+            sk["slots_full"] = sk.get("slots_full", 0) + len(fresh)
         return
-    for call in sorted(out["calls"], key=lambda x: -x["proba"])[:slots]:
+    if len(fresh) > slots:
+        sk["slots_full"] = sk.get("slots_full", 0) + (len(fresh) - slots)
+    for call in sorted(fresh, key=lambda x: -x["proba"])[:slots]:
         if any(p["entry_utc"] == call["timestamp_utc"] and p["side"] == call["side"]
                for p in s["positions"]):
             continue                                          # 같은 봉 중복 방지
@@ -278,6 +296,17 @@ def cycle(s: dict[str, Any]) -> None:
     if px is None:
         log("⚠️마크가격 실패 -- 건너뜀"); return
     manage(s, out.get("bars") or [])
+    # 놓친 봉 계측 (2026-09-05, 지속 규칙 러너와 같은 항목). 백로그를 쫓지 않으므로 이 값이
+    # 곧 "결정하지 못하고 흘려보낸 봉"이다 -- 30일 계측 점검에서 봉 대비 2% 미만이어야 한다.
+    _lb = str(out.get("last_closed_bar_utc") or "")
+    if _lb:
+        _prev = s.get("last_decided_bar_utc")
+        if _prev and _prev != _lb:
+            _gap = int((pd.Timestamp(_lb) - pd.Timestamp(_prev)).total_seconds() // 300) - 1
+            if _gap > 0:
+                s["missed_bars"] = s.get("missed_bars", 0) + _gap
+                log(f"⚠️놓친 봉 {_gap}개 (쫓지 않음)")
+        s["last_decided_bar_utc"] = _lb
     if out.get("warmed_up") and not out.get("error"):
         enter(s, out, px)
     else:
