@@ -47,20 +47,20 @@ powershell -ExecutionPolicy Bypass -File dashboard\scripts\open_firewall.ps1
 If you are behind a home/office router, forward external TCP port `8787` to:
 
 ```text
-192.168.0.232:8787
+192.168.1.89:8787
 ```
 
 For portless HTTP domain access, also forward external TCP port `80` to:
 
 ```text
-192.168.0.232:80
+192.168.1.89:80
 ```
 
 Then the dashboard should be reachable from outside at:
 
 ```text
-http://180.71.31.227:8787/dashboard/live/
-http://180.71.31.227/dashboard/live/
+http://222.238.86.183:8787/dashboard/live/
+http://222.238.86.183/dashboard/live/
 ```
 
 ## 4. Domain DNS
@@ -69,8 +69,8 @@ For the `thesan.xyz` domain, add these DNS records at the domain/DNS provider:
 
 ```text
 Type  Name       Value
-A     @          180.71.31.227
-A     dashboard  180.71.31.227
+A     @          222.238.86.183
+A     dashboard  222.238.86.183
 ```
 
 After DNS propagation, use:

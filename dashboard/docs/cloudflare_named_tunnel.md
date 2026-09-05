@@ -11,15 +11,20 @@ Use this when direct router port forwarding is unreliable.
 
 ```text
 Hostname: thesan.xyz
-Service:  http://192.168.0.232
+Service:  http://127.0.0.1:8787
 ```
 
 Optional:
 
 ```text
 Hostname: dashboard.thesan.xyz
-Service:  http://192.168.0.232
+Service:  http://127.0.0.1:8787
 ```
+
+The origin is `127.0.0.1` because `cloudflared` runs on the same machine as the
+dashboard, so this stays correct when the LAN IP changes (router swap, DHCP).
+It matches the live ingress rule (`originService=http://127.0.0.1:8787`) and
+`CLOUDFLARE_TUNNEL_ORIGIN_URL` in `.env`.
 
 4. Copy the tunnel token.
 

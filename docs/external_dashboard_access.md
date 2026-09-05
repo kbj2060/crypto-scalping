@@ -33,13 +33,13 @@ powershell -ExecutionPolicy Bypass -File scripts\open_dashboard_firewall.ps1
 If you are behind a home/office router, forward external TCP port `8787` to:
 
 ```text
-192.168.0.90:8787
+192.168.1.23:8787
 ```
 
 Then the dashboard should be reachable from outside at:
 
 ```text
-http://211.109.206.96:8787/dashboard/live/
+http://222.238.86.183:8787/dashboard/live/
 ```
 
 ## 4. Stop the server
