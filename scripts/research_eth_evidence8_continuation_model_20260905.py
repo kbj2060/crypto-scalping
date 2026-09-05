@@ -122,6 +122,9 @@ def day_ci(v, d, rng, B=2000):
 def main() -> int:
     t0 = time.time()
     log("프레임 빌드...")
+    # ⚠️5.23이 이미 OOS를 **풀 단위로** 보고했다(+6.78). 여기서는 같은 창을 **신호별로
+    # 분해**할 뿐이라 새로 소모하는 게 없다 -- 승격 주장이 아니라 진단이다.
+    _s1.VAL_END = pd.Timestamp("2026-04-01", tz="UTC")
     sig, feat, eth = _s1.build_sig()
     dummy = np.full(len(sig), "none", dtype=object)
     long = _s1.long_frame_for(sig, feat, dummy, dummy)
@@ -171,7 +174,12 @@ def main() -> int:
     P["net_bp"] = pn * 1e4 - COST_BP
     pnf, _ = sim_exit(entry, P["atr"].to_numpy(float), sg_fade, H, L, C, *CELL)
     P["net_fade_bp"] = pnf * 1e4 - COST_BP
-    split = P["split"].to_numpy(); tr, va = split == "TRAIN", split == "VAL"
+    # long_frame_for는 TRAIN/VAL 두 값만 매기므로 OOS를 타임스탬프로 직접 가른다
+    _ts = pd.to_datetime(P["_ts"])
+    split = np.where(_ts < pd.Timestamp("2025-09-01"), "TRAIN",
+             np.where(_ts < pd.Timestamp("2026-01-01"), "VAL", "OOS"))
+    P["split"] = split
+    tr, va, oo = split == "TRAIN", split == "VAL", split == "OOS"
     days = pd.to_datetime(P["_ts"]).dt.floor("D").to_numpy()
     log(f"⭐풀 {len(P):,}건 (TRAIN {tr.sum():,} / VAL {va.sum():,})")
     log(f"  ⭐지속 평균 TRAIN {P.loc[tr,'net_bp'].mean():+.2f} / VAL {P.loc[va,'net_bp'].mean():+.2f}bp"
@@ -188,26 +196,43 @@ def main() -> int:
     print(f"{'신호':>24s}{'VAL n':>8s}{'독립일':>7s}{'평균bp':>9s}{'일CI하한':>10s}"
           f"{'일CI상한':>10s}{'일t':>7s}")
     print("-" * 76)
+    # ⭐축 14의 진단이 "병목 = 신호별 표본"이었다. 이 규칙은 **적합되는 파라미터가 하나도
+    # 없으므로**(셀·GAP·비용·한도 전부 상속, 방향은 "반대") TRAIN도 정식 평가 창이다
+    # -- 5.23도 TRAIN +4.87을 그렇게 보고했다. TRAIN은 VAL의 약 5배다.
+    # ⚠️단, "지속 방향" 선택 자체는 5.23이 TRAIN을 보고 정한 것이므로 TRAIN은 **확증이
+    #   아니라 검정력 보강**으로만 읽는다. 독립 확증은 VAL이다.
     flat_rep, flat_pass = {}, 0
-    Pva0 = P.loc[va].reset_index(drop=True)
-    nv0, dv0 = net[va], days_all[va]
-    for s_ in SIGNALS:
-        mk = (Pva0["signal"] == s_).to_numpy()
-        if mk.sum() < 80: continue
-        v, d = nv0[mk], dv0[mk]
-        lo, hi = day_ci(v, d, rng0)
-        tt = float(cluster_t(v, d))
-        ok = lo > 0
-        flat_pass += ok
-        print(f"{s_[:23]:>24s}{int(mk.sum()):8d}{len(np.unique(d)):7d}{float(v.mean()):9.2f}"
-              f"{lo:10.2f}{hi:10.2f}{tt:7.2f}{'  ⭐' if ok else ''}")
-        flat_rep[s_] = {"n_val": int(mk.sum()), "mean_bp": float(v.mean()),
-                        "day_ci_lo": lo, "day_ci_hi": hi, "cluster_t": tt,
-                        "independent_days": int(len(np.unique(d))), "passed": bool(ok)}
-    lo_p, hi_p = day_ci(nv0, dv0, rng0)
-    log(f"  풀 전체 {float(nv0.mean()):+.2f}bp [일CI {lo_p:+.2f}, {hi_p:+.2f}] "
-        f"(독립일 {len(np.unique(dv0))})")
-    log(f"  ⭐⭐평평한 규칙 신호별 통과(CI하한>0): **{flat_pass}/{len(flat_rep)}**")
+    Pall = P.reset_index(drop=True)
+    for wname, wm in (("TRAIN", tr), ("VAL", va), ("OOS(진단)", oo),
+                      ("TRAIN+VAL+OOS", tr | va | oo)):
+        Pw = Pall.loc[wm].reset_index(drop=True)
+        nvw, dvw = net[wm], days_all[wm]
+        npass_w = 0
+        log(f"\n  [{wname}]")
+        for s_ in SIGNALS:
+            mk = (Pw["signal"] == s_).to_numpy()
+            if mk.sum() < 80: continue
+            v, d = nvw[mk], dvw[mk]
+            lo, hi = day_ci(v, d, rng0, B=1200)
+            tt = float(cluster_t(v, d))
+            ok = lo > 0
+            npass_w += ok
+            print(f"{s_[:23]:>24s}{int(mk.sum()):8d}{len(np.unique(d)):7d}{float(v.mean()):9.2f}"
+                  f"{lo:10.2f}{hi:10.2f}{tt:7.2f}{'  ⭐' if ok else ''}")
+            flat_rep.setdefault(s_, {})[wname] = {
+                "n": int(mk.sum()), "mean_bp": float(v.mean()), "day_ci_lo": lo,
+                "day_ci_hi": hi, "cluster_t": tt,
+                "independent_days": int(len(np.unique(d))), "passed": bool(ok)}
+        lo_p, hi_p = day_ci(nvw, dvw, rng0, B=1200)
+        log(f"    풀 {float(nvw.mean()):+.2f}bp [{lo_p:+.2f}, {hi_p:+.2f}] "
+            f"· 독립일 {len(np.unique(dvw))} · ⭐신호별 통과 **{npass_w}/8**")
+        if wname == "VAL":
+            flat_pass = npass_w
+    allw = sum(1 for v in flat_rep.values() if v.get("TRAIN+VAL+OOS", {}).get("passed"))
+    three = sum(1 for v in flat_rep.values()
+                if all(v.get(w, {}).get("mean_bp", -1) > 0 for w in ("TRAIN", "VAL", "OOS(진단)")))
+    log(f"\n  ⭐⭐전 구간(TRAIN+VAL+OOS) CI>0: **{allw}/8**")
+    log(f"  ⭐세 창 **각각** 평균이 양수인 신호: **{three}/8**")
 
     from sklearn.ensemble import HistGradientBoostingRegressor
     try:
