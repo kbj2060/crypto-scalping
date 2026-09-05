@@ -1,0 +1,193 @@
+{
+ "generated_utc": "2026-09-05T17:18:36.057225+00:00",
+ "per_signal": {
+  "taker_delta_z_climax": {
+   "TRAIN": {
+    "n": 61822,
+    "actual": 0.29,
+    "pred": 0.287,
+    "gap": -0.002,
+    "auc": 0.8328
+   },
+   "VAL": {
+    "n": 14354,
+    "actual": 0.294,
+    "pred": 0.279,
+    "gap": -0.015,
+    "auc": 0.7939
+   },
+   "OOS": {
+    "n": 10227,
+    "actual": 0.31,
+    "pred": 0.279,
+    "gap": -0.031,
+    "auc": 0.771
+   }
+  },
+  "short_term_return_z": {
+   "TRAIN": {
+    "n": 16771,
+    "actual": 0.259,
+    "pred": 0.254,
+    "gap": -0.005,
+    "auc": 0.8592
+   },
+   "VAL": {
+    "n": 3589,
+    "actual": 0.264,
+    "pred": 0.254,
+    "gap": -0.01,
+    "auc": 0.7924
+   },
+   "OOS": {
+    "n": 3167,
+    "actual": 0.314,
+    "pred": 0.257,
+    "gap": -0.057,
+    "auc": 0.7848
+   }
+  },
+  "liquidity_sweep": {
+   "TRAIN": {
+    "n": 86158,
+    "actual": 0.16,
+    "pred": 0.162,
+    "gap": 0.002,
+    "auc": 0.8609
+   },
+   "VAL": {
+    "n": 20541,
+    "actual": 0.166,
+    "pred": 0.164,
+    "gap": -0.002,
+    "auc": 0.8049
+   },
+   "OOS": {
+    "n": 14349,
+    "actual": 0.18,
+    "pred": 0.159,
+    "gap": -0.021,
+    "auc": 0.7856
+   }
+  },
+  "orthogonal_combo": {
+   "TRAIN": {
+    "n": 24251,
+    "actual": 0.162,
+    "pred": 0.165,
+    "gap": 0.003,
+    "auc": 0.8575
+   },
+   "VAL": {
+    "n": 5512,
+    "actual": 0.155,
+    "pred": 0.158,
+    "gap": 0.002,
+    "auc": 0.7993
+   },
+   "OOS": {
+    "n": 4267,
+    "actual": 0.196,
+    "pred": 0.164,
+    "gap": -0.031,
+    "auc": 0.8
+   }
+  },
+  "smt_divergence": {
+   "TRAIN": {
+    "n": 154256,
+    "actual": 0.261,
+    "pred": 0.261,
+    "gap": 0.0,
+    "auc": 0.8566
+   },
+   "VAL": {
+    "n": 36597,
+    "actual": 0.274,
+    "pred": 0.262,
+    "gap": -0.012,
+    "auc": 0.8081
+   },
+   "OOS": {
+    "n": 22459,
+    "actual": 0.279,
+    "pred": 0.261,
+    "gap": -0.018,
+    "auc": 0.7877
+   }
+  },
+  "fib_extension_exhaustion": {
+   "TRAIN": {
+    "n": 13058,
+    "actual": 0.265,
+    "pred": 0.26,
+    "gap": -0.005,
+    "auc": 0.8661
+   },
+   "VAL": {
+    "n": 3028,
+    "actual": 0.267,
+    "pred": 0.27,
+    "gap": 0.003,
+    "auc": 0.7988
+   },
+   "OOS": {
+    "n": 2466,
+    "actual": 0.254,
+    "pred": 0.266,
+    "gap": 0.012,
+    "auc": 0.7898
+   }
+  },
+  "demarker_extreme": {
+   "TRAIN": {
+    "n": 4869,
+    "actual": 0.446,
+    "pred": 0.436,
+    "gap": -0.011,
+    "auc": 0.8844
+   },
+   "VAL": {
+    "n": 1248,
+    "actual": 0.423,
+    "pred": 0.437,
+    "gap": 0.014,
+    "auc": 0.7729
+   },
+   "OOS": {
+    "n": 889,
+    "actual": 0.631,
+    "pred": 0.491,
+    "gap": -0.14,
+    "auc": 0.7756
+   }
+  },
+  "kalman_deviation_meanrev": {
+   "TRAIN": {
+    "n": 38018,
+    "actual": 0.161,
+    "pred": 0.163,
+    "gap": 0.002,
+    "auc": 0.8259
+   },
+   "VAL": {
+    "n": 9214,
+    "actual": 0.152,
+    "pred": 0.167,
+    "gap": 0.015,
+    "auc": 0.7934
+   },
+   "OOS": {
+    "n": 7102,
+    "actual": 0.153,
+    "pred": 0.157,
+    "gap": 0.004,
+    "auc": 0.7614
+   }
+  }
+ },
+ "warnings": [
+  "short_term_return_z/OOS gap -0.057",
+  "demarker_extreme/OOS gap -0.140"
+ ]
+}
