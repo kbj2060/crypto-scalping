@@ -1757,6 +1757,15 @@ function evidenceContRegimeText(c) {
 // 2026-09-04 (user request, 호메로스 §5.27): 지속 규칙을 특화 감지기 **카드**로 -- 한 줄(renderEvidenceContinuation)과
 // 칩 배지는 그대로 두고, 카드에는 그 줄에 없던 것을 담는다: 러너와 같은 산식의 가격선(진입/손절/무장/트레일/만기),
 // 봉별 국면 띠(과거만 봄), 섀도우 가상 원장 요약(테이커·메이커 비용 병기). 규칙이라 확률 미터는 없다.
+// 2026-09-06: 섀도우 원장 숫자를 성과로 읽지 않게 하는 공통 가드. R·B2 두 사전등록이 모두
+// **30일 계측 → 90일 판정** 구조라 1차 기준은 건수가 아니라 **일수**다(09-05 원장 전수점검의 함정 3:
+// "일수 1~2일의 일군집 CI는 숫자가 아니다"). 일수를 채워도 표본이 얇으면 2차로 막는다.
+function shadowSampleWarning(days, trades) {
+  if (days != null && Number(days) < 30) return ` ⚠️계측 ${Number(days).toFixed(1)}/30일 — 판단 불가`;
+  if (trades != null && trades > 0 && trades < 30) return " ⚠️표본 부족 — 판단 불가";
+  return "";
+}
+
 // ── retail_shift B2 (2026-09-06) ─────────────────────────────────────────────────────────────
 // 09-04 경제 축 스크린 11축 중 **유일한 새 후보**(개미 롱숏비 30분 z ≥ 2.26의 반대 방향, 호메로스 §5.28).
 // 09-05부터 섀도우 러너가 돌고 있는데 화면에는 아무 것도 없었다 -- 90일 판정 대상이 사람 눈에 안 보이면
@@ -1785,10 +1794,10 @@ function retailShiftB2IndicatorItem() {
     : `공개지연 p50 ${k.p50}s / p95 ${k.p95}s · ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
   const gateBad = share300 != null && k.n >= 30 && share300 < 0.95;
   // 2026-09-06 배포 직후 실측이 n=2에 건당 −54.8bp였다. 09-05 원장 전수점검의 첫 번째 함정이
-  // "표본 1~2건의 수치를 성과로 읽는 것"이라, 30건 미만이면 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
-  const thinSample = p.closed_trades > 0 && p.closed_trades < 30;
+  // "표본 1~2건의 수치를 성과로 읽는 것"이라, 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
+  const thinSample = shadowSampleWarning(p.days_running, p.closed_trades);
   const ledgerText = p.closed_trades
-    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}${thinSample ? " ⚠️표본 부족 — 판단 불가" : ""}`
+    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}${thinSample}`
     : "마감 0건";
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
   const openText = p.open_positions
@@ -1813,7 +1822,7 @@ function fireContIndicatorItem() {
   const sh = (c && c.shadow) || null;
   const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
   const shadowText = sh && sh.closed_trades != null
-    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건${sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : ""} · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)})${sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : ""}${sh.last30d_exp_bp != null ? ` · 30일 ${bp(sh.last30d_exp_bp)}` : ""} · 미결 ${sh.open_positions}${sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : ""} · 백테스트 VAL +4.4/OOS +6.8`
+    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건${sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : ""} · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)})${sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : ""}${sh.last30d_exp_bp != null ? ` · 30일 ${bp(sh.last30d_exp_bp)}` : ""} · 미결 ${sh.open_positions}${sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : ""} · 백테스트 VAL +4.4/OOS +6.8${shadowSampleWarning(sh.days_running, sh.closed_trades)}`
     : "섀도우 원장 아직 없음 · 백테스트 VAL +4.4/OOS +6.8bp";
   if (!c || !c.active) return { ...base, tone: "neutral", subText: "대기", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
   if (c.skip_both_sides) return { ...base, tone: "warn", subText: "양측 발동·보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
@@ -1942,7 +1951,7 @@ function renderFinalDecision(payload) {
   const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
   const refText = ref && ref.eligible ? `백테스트 VAL ${bp(ref.val)} / OOS ${bp(ref.oos)}` : "";
   const shadowText = sh && sh.closed_trades != null
-    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건 · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)}) · 미결 ${sh.open_positions}`
+    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건 · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)}) · 미결 ${sh.open_positions}${shadowSampleWarning(sh.days_running, sh.closed_trades)}`
     : "섀도우 원장 아직 없음";
   const foot = `표시 전용 · 자동매매 미연결 · 90일 판정 전 · ${shadowText}${refText ? ` · ${refText}` : ""}`;
 
