@@ -41,10 +41,10 @@ def _load(n, r):
 
 XA = _load("xa_f", "scripts/research_crossasset_fire_continuation_replication_20260905.py")
 CC = _load("cc_f", "scripts/research_crossasset_cell_calibration_and_portfolio_20260905.py")
-BR = _load("br_f", "scripts/research_crossasset_cell_boundary_risk_portfolio_20260905.py")
+BR = _load("br_f", "scripts/research_crossasset_cell_boundary_and_risk_portfolio_20260905.py")
 V2 = _load("hev2_f", "scripts/research_homer_entry_v2_20260904.py")
 C1M = _load("comp1_f", "scripts/research_eth_composite_direction_trend_pullback_20260905.py")
-sim_exit, day_boot = V2.sim_exit, V2.portfolio and V2.day_boot
+sim_exit, day_boot = V2.sim_exit, V2.day_boot
 eq_pnl, run_pf = BR.eq_pnl, BR.run_pf
 day_paired = C1M.day_paired
 OUT = ROOT / "data/research/crossasset_flip_control_final_20260905"
@@ -81,7 +81,7 @@ def main():
             Fp = run_pf(pfl[mt], D["ts"][mt], D["i"][mt] + 1, D["i"][mt] + 1 + xf[mt], 5)
             if R is None or Fp is None:
                 continue
-            dp = day_paired(R["_pnl"], R["_ts"], Fp["_pnl"], Fp["_ts"])
+            dp = day_paired(R["_pnl"], R["_ts"], Fp["_pnl"], Fp["_ts"], B=300)   # 격자 단계는 가벼운 부트스트랩
             lo, hi = day_boot(R["_pnl"], R["_ts"], 300, rng)
             grid["_".join(map(str, cell))] = {"sharpe": R["daily_sharpe_ann"], "exp_bp": R["exp_bp"], "win_rate": R["win_rate"],
                                               "flip_exp_bp": Fp["exp_bp"], "flip_win_rate": Fp["win_rate"],
