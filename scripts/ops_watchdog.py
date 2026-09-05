@@ -117,6 +117,11 @@ def recommended_action(component: str) -> str:
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
         return "scripts/ops/triage.sh; df -h ."
+    if component.startswith("shadow_"):
+        # 섀도우 러너는 systemd가 아니라 scripts/ops/supervisor_*.sh + crontab @reboot로 뜬다.
+        # pgrep/pkill 패턴은 자기 handoff 잡 명령줄에도 매칭되므로 grep -v로 걸러서 본다(2026-09-05).
+        return ("ps -eo pid,args | grep -v handoff_jobs | grep -E 'live_.*shadow.*runner|retail_shift_b2'; "
+                "ls -l data/live/*shadow*state*.json data/live/retail_shift_b2_state.json")
     if component.startswith("duckdb_"):
         return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
     return "scripts/ops/triage.sh"
@@ -347,6 +352,52 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
     })
 
 
+# ── 섀도우 러너 생존 (2026-09-06) ──────────────────────────────────────────────────────────
+# 90일 판정을 쌓고 있는 가상매매 러너가 조용히 멈추면 그 구간의 일손익 시계열이 영구히 빈다
+# (사후 복구 불가). 2026-09-05 원장 전수점검에서 **그 사망을 아무도 알리지 않는다**가 확인됐다 --
+# check_process는 trading_bot.py 하나만 보고, 푸시 알림(live_push_notifier_20260904.py)은
+# V자반등 원장의 포지션 개시/청산만 본다. 러너는 전부 5분 주기로 save_state()를 하므로 상태파일
+# mtime이 생존 신호이고, last_decided_bar_utc(가진 러너)는 "프로세스는 살아있는데 봉 결정을 못 하는"
+# 상태까지 잡는다. ⚠️러너를 은퇴시킬 때는 이 표에서도 줄을 지운다 -- 안 지우면 영구 BLOCKED다
+# (2026-09-05 진입 지정가 페이드 v4 제거가 그런 사례였다).
+SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
+    ("shadow_fire_cont_eth", "fire_cont_shadow_state.json"),
+    ("shadow_fire_cont_xrp", "fire_cont_shadow_state_xrp.json"),
+    ("shadow_fire_cont_sol", "fire_cont_shadow_state_sol.json"),
+    ("shadow_v_rebound_econ", "v_rebound_econ_shadow_state.json"),
+    ("shadow_retail_shift_b2", "retail_shift_b2_state.json"),
+    ("shadow_evidence_chip_btc", "btc_evidence_signal_shadow_state.json"),
+    ("shadow_evidence_chip_xrp", "xrp_evidence_signal_shadow_state.json"),
+)
+
+
+def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
+                        critical_minutes: float = 30) -> Check:
+    """섀도우 원장의 쓰기 신선도. 러너가 5분 봉마다 쓰므로 warn 15분(3주기)·critical 30분(6주기)."""
+    path = LIVE / filename
+    state, error = load_json(path)
+    if error:
+        return Check(component, "BLOCKED", "shadow ledger cannot be read", {"path": str(path), "error": error})
+    try:
+        write_age = max(0.0, (now_kst() - datetime.fromtimestamp(path.stat().st_mtime, KST)).total_seconds() / 60.0)
+    except OSError as exc:
+        return Check(component, "BLOCKED", "shadow ledger stat failed", {"path": str(path), "error": type(exc).__name__})
+    decided = state.get("last_decided_bar_utc")
+    decided_age = age_minutes_utc_naive(decided)
+    age = write_age if decided_age is None else max(write_age, decided_age)
+    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    pending = state.get("pending") if isinstance(state.get("pending"), list) else []
+    return Check(component, stale_status(age, warn_minutes, critical_minutes), "shadow runner ledger freshness", {
+        "path": str(path), "age_minutes": round(age, 1), "write_age_minutes": round(write_age, 1),
+        "last_decided_bar_utc": decided,
+        "decided_age_minutes": (None if decided_age is None else round(decided_age, 1)),
+        "closed_trades": len(ledger), "open_positions": len(positions), "pending": len(pending),
+        "started_utc": state.get("started_utc"), "rule": state.get("rule"),
+        "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
+    })
+
+
 def check_runtime_resources() -> Check:
     usage = shutil.disk_usage(ROOT)
     free_gib = usage.free / (1024 ** 3)
@@ -517,6 +568,8 @@ def run_once(dry_run: bool) -> list[Check]:
         # daily cron (0 1 * * *); warn/critical give ~1 and ~2 missed days of slack.
         check_duckdb_table_freshness("duckdb_altdata_fear_greed", altdata_db, "fear_greed_index", "recorded_at_utc", 1800, 2880),
         check_duckdb_table_freshness("duckdb_altdata_funding_spread", altdata_db, "cross_exchange_funding_spread", "recorded_at_utc", 1800, 2880),
+        # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
+        *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})
