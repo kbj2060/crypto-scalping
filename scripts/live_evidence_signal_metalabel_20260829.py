@@ -508,6 +508,11 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
     # ⚠️`fired=False`가 되어도 tp_price/tp_touched/bars_since_fire는 남긴다 -- 칩이 왜 꺼졌는지
     #   ("목표 도달") 화면에 설명할 수 있어야 하기 때문이다.
     for name, o in out.items():
+        # 2026-09-06: 잔여 호라이즌 표시용. 발동 봉 확률은 호라이즌 내내 재사용되는데(애프터글로우 캐시)
+        # 실측상 순위 AUC가 0.70 -> 0.60~0.64로 낡고 수준은 9~12봉 뒤 실제의 1.5배로 과대해진다
+        # (docs/experiments/eth_composite_direction_trend_pullback_results_20260905.md 부록 22).
+        # 모델은 그대로 두고, 화면이 "언제 값인지 · 얼마나 남았는지"를 말할 수 있게 상수만 실어 보낸다.
+        o["horizon_bars"] = METALABEL_SIGNALS[name]["horizon_bars"]
         fp = o.pop("fire_pos", None)
         if not o.get("fired"):
             o["tp_touched"] = None

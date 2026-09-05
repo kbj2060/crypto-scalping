@@ -1178,10 +1178,17 @@ const SIGNAL_HORIZON = {
   kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
 };
 
-function horizonBadgeHtml(key) {
+// 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
+// 제목줄이 이미 최대 3개 배지를 달고 있고 이 열은 과거에 오버플로 사고가 있었기 때문이다
+// (eth_dashboard_low_atr_warning_overflow_fix_20260901). 인자를 안 주면 기존 동작 그대로다.
+function horizonBadgeHtml(key, progress) {
   const h = SIGNAL_HORIZON[key];
   if (!h) return "";
-  return ` <span class="horizon-badge" title="${escapeHtml(h.title)}">${escapeHtml(h.text)}</span>`;
+  const text = progress ? `${h.text} · ${progress}` : h.text;
+  const title = progress
+    ? `${h.title}\n\n지금 이 발동은 그 창의 ${progress}째입니다. 옆의 확률은 **발동 봉에서 계산된 값**이고 이후 갱신되지 않습니다 -- 시간이 지날수록 과대평가입니다(실측: 9~12봉 뒤 실제의 약 1.5배).`
+    : h.title;
+  return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
 
 // Snapshot tab "12신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
@@ -1994,6 +2001,18 @@ function renderEvidenceSignals(payload) {
     // ⚠️종료된 신호의 확률은 "지금"이 아니라 **발동 당시** 값이다. 그대로 "82%"라고만 쓰면
     // 아직 유효한 예측처럼 읽힌다 -- 종료 상태에선 괄호로 과거값임을 표시한다.
     const modelPctText = s.model_proba != null ? `${Math.round(s.model_proba * 100)}%` : null;
+    // 2026-09-06 (부록 22): 확률은 **발동 봉에서 한 번** 계산되고 호라이즌 끝까지 재사용된다.
+    // 실측상 순위 AUC 0.70 -> 0.60~0.64로 낡고, 표시 확률이 실제 조건부 도달률보다 9~12봉 뒤엔
+    // +0.12(약 1.5배) 과대해진다. 모델은 그대로 두고 **언제 값인지 · 얼마나 남았는지**만 명시한다.
+    const ageBars = s.model_bars_since_fire;
+    const horizonBars = s.model_horizon_bars;
+    const leftBars = (horizonBars != null && ageBars != null) ? Math.max(horizonBars - ageBars, 0) : null;
+    const isStaleProba = ageBars != null && ageBars > 0;          // 발동 봉이 아니면 그 확률은 과거값이다
+    const pctDisplay = modelPctText
+      ? ((isResolvedByTp || isStaleProba) ? `(${modelPctText})` : modelPctText)
+      : "0%";
+    const progressText = (horizonBars != null && ageBars != null && !isResolvedByTp)
+      ? `${ageBars}/${horizonBars}봉` : null;
     // 2026-08-31 user request: the price level implied by this signal's own trained K*ATR% target
     // (server-computed from the fire bar's own entry/ATR, see _tp_price in
     // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
@@ -2011,7 +2030,7 @@ function renderEvidenceSignals(payload) {
           : `익절 ${fmtNum(s.model_tp_price, 2)}`)
       : null;
     const tpDoneBadgeHtml = tpDone
-      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.">🎯 ${s.model_bars_since_fire != null ? `${s.model_bars_since_fire}봉 전 발동` : "목표 도달"}</span>`
+      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.&#10;&#10;옆의 확률은 그 발동 봉의 값이며 이후 갱신되지 않습니다. 잔여 표기는 이 표시가 앞으로 몇 봉 더 남아있는지입니다(호라이즌 만료 시 사라짐).">🎯 ${ageBars != null ? `${ageBars}봉 전 발동` : "목표 도달"}${leftBars ? ` · 잔여 ${leftBars}봉` : ""}</span>`
       : "";
     // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
     // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
@@ -2079,7 +2098,7 @@ function renderEvidenceSignals(payload) {
       const stripStateEl = stripChip.querySelector(".signal-chip-state");
       if (stripStateEl) {
         const stripBase = evidenceSideLabel(s, { bottom: "바닥", top: "천장", both: "혼재", none: "-" });
-        stripStateEl.textContent = modelPctText && stripBase !== "-" ? `${stripBase} ${modelPctText}` : stripBase;
+        stripStateEl.textContent = modelPctText && stripBase !== "-" ? `${stripBase} ${pctDisplay}` : stripBase;
       }
     }
     evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], bottom_raw_fire: s.bottom_raw_fire || [], top_raw_fire: s.top_raw_fire || [], latest_bar_utc: payload.latest_bar_utc };
@@ -2105,7 +2124,7 @@ function renderEvidenceSignals(payload) {
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}${contBadgeHtml}</strong>
+        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}${contBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
@@ -2122,7 +2141,7 @@ function renderEvidenceSignals(payload) {
           <span class="meter-state ${metaTone}">${escapeHtml(state)}</span>
           <div class="meter-gauge">
             <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((s.model_proba != null ? s.model_proba * 100 : 0) / 100) * 100}%"></span></span>
-            <span class="meter-pct">${isResolvedByTp && modelPctText ? `(${modelPctText})` : (modelPctText || "0%")}</span>
+            <span class="meter-pct">${pctDisplay}</span>
           </div>
           ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}
         </div>

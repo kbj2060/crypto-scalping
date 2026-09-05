@@ -1420,6 +1420,9 @@ def make_app() -> web.Application:
                     # 이미 끝난 움직임을 "활성"으로 띄워 늦은 진입을 유도할 수 있었다.
                     entry["model_tp_touched"] = metalabels[name].get("tp_touched")
                     entry["model_bars_since_fire"] = metalabels[name].get("bars_since_fire")
+                    # 2026-09-06: 이 신호 자신의 학습 호라이즌(봉). 화면이 "26/30봉 · 잔여 4봉"을 말하려면
+                    # 경과(bars_since)만으론 부족하다. 표시 전용 -- 발동/확률/투표 로직과 무관.
+                    entry["model_horizon_bars"] = metalabels[name].get("horizon_bars")
                     entry["model_atr_bp"] = metalabels[name].get("atr_bp")
                     entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
                     entry["model_low_atr"] = metalabels[name].get("low_atr")
