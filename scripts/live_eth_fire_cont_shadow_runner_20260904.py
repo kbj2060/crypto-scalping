@@ -71,6 +71,42 @@ BACKTEST_REF = {"VAL": {"exp_bp": 4.44, "per_day": 24.4, "win_rate": 0.758, "pay
                 "OOS": {"exp_bp": 6.78, "per_day": 24.3, "win_rate": 0.747, "payoff": 0.39}}
 STATE = STATE_DEFAULT
 
+# ----------------------------------------------------------------------------- 자산 설정 (2026-09-05)
+# ⭐"eth" 항목은 위 모듈 상수와 **값이 완전히 같다**(selftest가 검증). 대시보드(`dashboard/server.py`)는 이 모듈을
+#   import해서 표시 함수만 부르고 configure()를 부르지 않으므로, ETH 표시·서빙 경로는 이 변경으로 바뀌지 않는다.
+# ⭐XRP/SOL은 셀·GAP·ATR·비용·발동 규칙·smt 파트너(BTC)가 ETH와 **완전히 동일**하다(자유도 0).
+#   다른 것은 심볼 · 동시보유 한도 · 상태 파일 · 레짐 태그 URL(없음)뿐이다.
+#   근거·사전등록: docs/experiments/eth_crossasset_continuation_shadow_prereg_20260905.md
+ASSET = "eth"
+ASSETS: dict[str, dict[str, Any]] = {
+    "eth": {"symbol": "ETHUSDT", "btc": "BTCUSDT", "regime_url": "http://127.0.0.1:8787/api/regime-wide24",
+            "max_concurrent": 5, "state": ROOT / "data/live/fire_cont_shadow_state.json",
+            "rule_id": "fire_cont_v1_gap12_cell5.0-1.5-0.1_cap5",
+            "backtest_ref": {"VAL": {"exp_bp": 4.44, "per_day": 24.4, "win_rate": 0.758, "payoff": 0.35},
+                             "OOS": {"exp_bp": 6.78, "per_day": 24.3, "win_rate": 0.747, "payoff": 0.39}}},
+    "xrp": {"symbol": "XRPUSDT", "btc": "BTCUSDT", "regime_url": None,
+            "max_concurrent": 2, "state": ROOT / "data/live/fire_cont_shadow_state_xrp.json",
+            "rule_id": "fire_cont_v1_xrp_gap12_cell5.0-1.5-0.1_cap2",
+            "backtest_ref": {"VAL": {"exp_bp": 2.19, "per_day": 17.6, "win_rate": 0.767},
+                             "OOS": {"exp_bp": 4.50, "per_day": 17.5, "win_rate": 0.768}}},
+    "sol": {"symbol": "SOLUSDT", "btc": "BTCUSDT", "regime_url": None,
+            "max_concurrent": 2, "state": ROOT / "data/live/fire_cont_shadow_state_sol.json",
+            "rule_id": "fire_cont_v1_sol_gap12_cell5.0-1.5-0.1_cap2",
+            "backtest_ref": {"VAL": {"exp_bp": 7.94, "per_day": 17.4, "win_rate": 0.769},
+                             "OOS": {"exp_bp": 9.56, "per_day": 17.0, "win_rate": 0.764}}},
+}
+
+
+def configure(asset: str) -> None:
+    """자산 전환 -- 모듈 상수를 재바인딩한다. configure("eth")는 모듈 기본값과 동일해야 한다(selftest 검증)."""
+    global ASSET, SYMBOL, BTC_SYMBOL, REGIME_URL, MAX_CONCURRENT, STATE_DEFAULT, STATE, RULE_ID, BACKTEST_REF
+    if asset not in ASSETS:
+        raise SystemExit(f"알 수 없는 자산 {asset} (가능: {sorted(ASSETS)})")
+    c = ASSETS[asset]
+    ASSET, SYMBOL, BTC_SYMBOL, REGIME_URL = asset, c["symbol"], c["btc"], c["regime_url"]
+    MAX_CONCURRENT, RULE_ID, BACKTEST_REF = c["max_concurrent"], c["rule_id"], c["backtest_ref"]
+    STATE_DEFAULT = STATE = c["state"]
+
 
 def log(m: str) -> None:
     print(f"[fire-cont-shadow {datetime.now(timezone.utc):%m-%d %H:%M:%S}] {m}", flush=True)
@@ -114,6 +150,8 @@ def atr_series(kl: pd.DataFrame) -> pd.Series:
 
 
 def regime_tag() -> dict[str, Any] | None:
+    if not REGIME_URL:                                             # XRP/SOL은 레짐 API가 없다 -- 태그 없이 진행(표시 전용, 최선 노력)
+        return None
     try:
         r = requests.get(REGIME_URL, timeout=4); r.raise_for_status(); j = r.json()
         if not j.get("warmed_up"):
@@ -402,7 +440,7 @@ def enter(s: dict[str, Any], bar_ts: str, fires: list[dict], px: float, atr: flo
 def cycle(s: dict[str, Any]) -> None:
     kl = fetch_klines(SYMBOL); btc = fetch_klines(BTC_SYMBOL)
     if kl is None or len(kl) < 900:
-        log("⚠️ETH klines 부족 -- 사이클 건너뜀"); return
+        log(f"⚠️{SYMBOL} klines 부족 -- 사이클 건너뜀"); return
     sig = compute_signals(kl, btc_df=btc)
     atr = atr_series(kl).to_numpy(float)
     tail = kl.tail(BARS_RETURNED)
@@ -503,6 +541,25 @@ def selftest() -> int:
     assert continuation_levels(kl_t, str(kl_t["timestamp"].iloc[39]), "long", 0)["entry_basis"] == "pending_next_open"
     sm = shadow_summary({"ledger": [{"pnl_bp": 10.0, "pnl_maker_bp": 12.2, "exit_utc": "2099-01-01T00:00:00+00:00"}, {"pnl_bp": -4.0, "exit_utc": "2000-01-01T00:00:00+00:00"}], "positions": [{"side": "long"}], "started_utc": "2026-09-04T00:00:00+00:00"})
     assert sm["closed_trades"] == 2 and sm["exp_bp"] == 3.0 and sm["exp_maker_bp"] == 4.1 and sm["win_rate"] == 0.5 and sm["max_dd_bp"] == -4.0 and sm["last30d_trades"] == 1 and sm["open_sides"] == ["long"], sm
+    # --- 자산 설정 파리티 (2026-09-05 XRP/SOL 포팅) ---
+    # ⭐ETH 항목이 모듈 기본값과 **완전히 같아야** 한다. 다르면 대시보드 표시·기존 원장 규약이 조용히 바뀐다.
+    assert ASSETS["eth"] == {"symbol": "ETHUSDT", "btc": "BTCUSDT", "regime_url": "http://127.0.0.1:8787/api/regime-wide24",
+                             "max_concurrent": 5, "state": ROOT / "data/live/fire_cont_shadow_state.json",
+                             "rule_id": "fire_cont_v1_gap12_cell5.0-1.5-0.1_cap5",
+                             "backtest_ref": {"VAL": {"exp_bp": 4.44, "per_day": 24.4, "win_rate": 0.758, "payoff": 0.35},
+                                              "OOS": {"exp_bp": 6.78, "per_day": 24.3, "win_rate": 0.747, "payoff": 0.39}}}, ASSETS["eth"]
+    _snap = (SYMBOL, BTC_SYMBOL, REGIME_URL, MAX_CONCURRENT, STATE, RULE_ID, dict(BACKTEST_REF), dict(BRACKET), GAP_BARS, ATR_N, MAX_HOLD_BARS)
+    configure("eth")
+    assert (SYMBOL, BTC_SYMBOL, REGIME_URL, MAX_CONCURRENT, STATE, RULE_ID, dict(BACKTEST_REF), dict(BRACKET), GAP_BARS, ATR_N, MAX_HOLD_BARS) == _snap, "configure('eth')가 모듈 기본값과 다르다"
+    for _a, _sym, _cap in (("xrp", "XRPUSDT", 2), ("sol", "SOLUSDT", 2)):
+        configure(_a)
+        assert (ASSET, SYMBOL, BTC_SYMBOL, MAX_CONCURRENT, REGIME_URL) == (_a, _sym, "BTCUSDT", _cap, None)
+        assert STATE.name == f"fire_cont_shadow_state_{_a}.json" and STATE != ASSETS["eth"]["state"], STATE
+        # 셀·GAP·ATR·비용·신호목록은 자산 간 **동일**해야 한다(자유도 0) -- 여기가 어긋나면 합산 판정이 무효다
+        assert BRACKET == {"sl_atr": 5.0, "arm_atr": 1.5, "trail_atr": 0.1} and GAP_BARS == 12 and ATR_N == 14 and MAX_HOLD_BARS == 200
+        assert (COST_TAKER_BP, COST_MAKER_BP) == (10.0, 7.8) and len(SIGNALS) == 8
+    assert len({ASSETS[k]["state"] for k in ASSETS}) == len(ASSETS), "상태 파일 경로 충돌"
+    configure("eth")                                                 # 원상복구 -- 이 모듈을 import한 쪽(대시보드)에 영향 없게
     print("selftest ok"); return 0
 
 
@@ -510,7 +567,9 @@ def main() -> int:
     global STATE
     ap = argparse.ArgumentParser(); ap.add_argument("--once", action="store_true"); ap.add_argument("--loop", action="store_true")
     ap.add_argument("--report", action="store_true"); ap.add_argument("--selftest", action="store_true"); ap.add_argument("--state", type=str, default=None)
+    ap.add_argument("--asset", choices=sorted(ASSETS), default="eth", help="기본 eth (기존 동작과 동일)")
     a = ap.parse_args()
+    configure(a.asset)                                             # eth면 모듈 기본값과 동일 -- 기존 배포 동작 불변
     if a.selftest:
         return selftest()
     if a.state:
@@ -518,7 +577,7 @@ def main() -> int:
     s = load_state()
     if a.report:
         report(s); return 0
-    log(f"⚠️섀도우 모드 -- 주문 없음. 규칙 {RULE_ID} · 한도 {MAX_CONCURRENT} · 발동창 {FETCH_LIMIT}봉 · 상태 {STATE}")
+    log(f"⚠️섀도우 모드 -- 주문 없음. 자산 {ASSET.upper()}({SYMBOL}) · 규칙 {RULE_ID} · 한도 {MAX_CONCURRENT} · 발동창 {FETCH_LIMIT}봉 · 상태 {STATE}")
     if not a.loop:
         cycle(s); save_state(s); report(s); return 0
     while True:
