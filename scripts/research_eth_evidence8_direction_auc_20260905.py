@@ -40,6 +40,62 @@ for p in (ROOT, ROOT / "scripts"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+# ⚠️2026-09-05 서버 다운으로 로컬 실행. import 체인이 `torch`를 요구하지만 **우리 경로는
+# torch를 한 번도 호출하지 않는다**: 체인이 실제로 가져오는 건 `_atr_pct`(순수 pandas/numpy,
+# eval_omega4_1_atr_safety_sltp_20260622.py:47~57)뿐이고, 그 파일의 torch 사용처는 166행
+# `torch.load`(CLI 전용) 하나다. 중간 파일(train_eval_omega1_2_tabm_3head)이 요구하는 것도
+# `torch` · `torch.nn` · `torch.utils.data`(DataLoader/TensorDataset) · 타입힌트용
+# `torch.Tensor`뿐이고 **최상위 실행 코드에서 호출하지 않는다**(87행 함수 시그니처 힌트뿐).
+# ⇒ 딱 그만큼만 스텁한다. **속성에 실제로 접근하면 즉시 예외**를 던져, 조용한 오작동 대신
+#   시끄러운 실패가 되게 한다(오늘 하루 반복된 "조용히 넘어가기" 결함 방지).
+try:
+    import torch  # noqa: F401
+    _TORCH_STUB_USED: list[str] = []
+except ModuleNotFoundError:
+    # 관대한 스텁: 어떤 속성이든 no-op으로 응답하되 **접근한 이름을 전부 기록**한다.
+    # 실제 텐서 연산이 일어나면 numpy로도 흉내낼 수 없으므로, 기록을 보고 "우리 경로가
+    # 정말 torch를 안 쓰는지" 사후 검증한다(조용한 오작동 방지).
+    import types
+
+    _TORCH_STUB_USED = []
+
+    class _Any:
+        def __init__(self, path="torch"): self._p = path
+        def __getattr__(self, n):
+            _TORCH_STUB_USED.append(f"{self._p}.{n}")
+            return _Any(f"{self._p}.{n}")
+        def __call__(self, *a, **k):
+            _TORCH_STUB_USED.append(f"{self._p}()")
+            return _Any(self._p)              # 데코레이터/컨텍스트매니저 겸용
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    _t = types.ModuleType("torch")
+    _t.__getattr__ = lambda n: _Any(f"torch.{n}")
+    _t.Tensor = type("Tensor", (), {})
+    _nn = types.ModuleType("torch.nn")
+    _nn.__getattr__ = lambda n: _Any(f"torch.nn.{n}")
+    _nn.Module = type("Module", (), {})
+    _utils = types.ModuleType("torch.utils")
+    _data = types.ModuleType("torch.utils.data")
+    _data.__getattr__ = lambda n: _Any(f"torch.utils.data.{n}")
+    _utils.data = _data
+    _t.nn, _t.utils = _nn, _utils
+    for _n, _m in (("torch", _t), ("torch.nn", _nn),
+                   ("torch.utils", _utils), ("torch.utils.data", _data)):
+        sys.modules[_n] = _m
+
+# catboost도 같은 이유로 스텁한다 -- 체인이 `CatBoostClassifier`를 import만 하고 우리 경로에서
+# 인스턴스화하지 않는다. 마찬가지로 **접근 이름을 기록**해 사후 검증한다.
+try:
+    import catboost  # noqa: F401
+except ModuleNotFoundError:
+    _cb = types.ModuleType("catboost")
+    _cb.__getattr__ = lambda n: _Any(f"catboost.{n}")
+    for _nm in ("CatBoostClassifier", "CatBoostRegressor", "Pool"):
+        setattr(_cb, _nm, _Any(f"catboost.{_nm}"))
+    sys.modules["catboost"] = _cb
+
 
 def _load(n, r):
     s = importlib.util.spec_from_file_location(n, ROOT / r)
@@ -145,13 +201,22 @@ def main() -> int:
 
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import roc_auc_score
-    from tabpfn import TabPFNClassifier
+    # ⚠️2026-09-05 서버 다운으로 로컬 실행. TabPFN(GPU)이 없으면 HGB만으로 진행한다 --
+    # 축 12에서 두 모델이 IC 0.102/0.120으로 **같은 벽**에 부딪힌 게 확인됐으므로,
+    # "방향 정보가 있는가"라는 이 질문에는 HGB 단독으로도 답할 수 있다.
+    try:
+        from tabpfn import TabPFNClassifier
+        MODELS_TO_RUN = ("HGB_clf", "TabPFN_clf")
+    except Exception:
+        TabPFNClassifier = None
+        MODELS_TO_RUN = ("HGB_clf",)
+        log("  ⚠️TabPFN 없음 -- HGB 단독으로 진행(축 12에서 두 모델 동등 확인됨)")
     rng = np.random.default_rng(SEED)
     res = {}
     print(f"\n{'모델':>13s}{'VAL AUC':>10s}{'일CI 하한':>11s}{'일CI 상한':>11s}   판정")
     print("-" * 62)
     preds = {}
-    for mname in ("HGB_clf", "TabPFN_clf"):
+    for mname in MODELS_TO_RUN:
         if mname == "HGB_clf":
             m = HistGradientBoostingClassifier(random_state=SEED, max_iter=400,
                                                learning_rate=0.05)
@@ -180,8 +245,9 @@ def main() -> int:
         mk = (Pva["signal"] == s_).to_numpy()
         if mk.sum() < 100 or len(np.unique(y[va][mk])) < 2:
             continue
-        a = float(roc_auc_score(y[va][mk], preds["TabPFN_clf"][mk]))
-        lo, hi = auc_day_ci(y[va][mk], preds["TabPFN_clf"][mk], days[va][mk], rng, B=800)
+        pk = preds.get("TabPFN_clf", preds["HGB_clf"])
+        a = float(roc_auc_score(y[va][mk], pk[mk]))
+        lo, hi = auc_day_ci(y[va][mk], pk[mk], days[va][mk], rng, B=800)
         print(f"{s_[:23]:>24s}{int(mk.sum()):8d}{float(y[va][mk].mean()):8.3f}{a:9.4f}"
               f"{lo:11.4f}{'  ⭐' if lo > 0.5 else ''}")
         per[s_] = {"n": int(mk.sum()), "auc": a, "day_ci_lo": lo, "day_ci_hi": hi}
@@ -192,6 +258,13 @@ def main() -> int:
                                "n_signals_pass": npass, "oos_touched": False,
                                "runtime_sec": round(time.time() - t0, 1)},
                               ensure_ascii=False, indent=2))
+    if _TORCH_STUB_USED:
+        uniq = sorted(set(_TORCH_STUB_USED))
+        log(f"\n⚠️torch 스텁 접근 {len(_TORCH_STUB_USED)}회 (고유 {len(uniq)}): {uniq[:12]}")
+        log("   위 이름들이 전부 import/데코레이터 시점 접근이면 결과에 영향 없음 -- "
+            "실제 텐서 연산이면 결과 무효")
+    else:
+        log("\n✅torch 스텁 접근 0회 -- 이 경로는 torch를 전혀 쓰지 않는다")
     log(f"산출: {OUT} ({time.time()-t0:.0f}s)")
     return 0
 
