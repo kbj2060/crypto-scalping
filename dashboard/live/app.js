@@ -1784,13 +1784,17 @@ function retailShiftB2IndicatorItem() {
     ? "공개지연 표본 없음"
     : `공개지연 p50 ${k.p50}s / p95 ${k.p95}s · ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
   const gateBad = share300 != null && k.n >= 30 && share300 < 0.95;
+  // 2026-09-06 배포 직후 실측이 n=2에 건당 −54.8bp였다. 09-05 원장 전수점검의 첫 번째 함정이
+  // "표본 1~2건의 수치를 성과로 읽는 것"이라, 30건 미만이면 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
+  const thinSample = p.closed_trades > 0 && p.closed_trades < 30;
   const ledgerText = p.closed_trades
-    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}`
+    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}${thinSample ? " ⚠️표본 부족 — 판단 불가" : ""}`
     : "마감 0건";
+  const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
   const openText = p.open_positions
     ? `${p.open_positions}건 보유(${(p.open_sides || []).map(evidenceContSideKo).join("/")})`
     : "대기";
-  const liveText = `${gateText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
+  const liveText = `${gateText}${missedText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
   const tone = gateBad ? "warn"
     : p.open_positions ? ((p.open_sides || []).includes("short") && !(p.open_sides || []).includes("long") ? "bad" : "good")
     : "neutral";
@@ -1876,7 +1880,32 @@ const FD_ASSET = {
   // 원인은 신호가 아니라 프레임이다 -- 같은 창의 무작위 진입도 −2.2~−4.2bp다.
   btc: { eligible: false, why: "BTC는 지속 규칙 미적격 — 교차자산 이식 VAL −1.5 / OOS −2.2bp, 실행가능 셀 0/64(같은 창의 무작위 진입도 −2.2~−4.2bp). 아래 층은 참고 표시이지 진입 근거가 아닙니다." },
 };
-const FD_TITLE = "세 로직을 한 장으로 합친 판입니다. ①칩=언제(사건 감지, 방향은 못 가름) ②지속 규칙=어디로(칩 방향의 반대, 정의상 항등식) ③F0=그 다음(되돌림 시점, 첫발동 후 중앙 22~24봉 뒤). 근거: 호메로스 §5.23(첫발동 봉은 지속 시점 — TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp)·§5.27(21개 결정 팔 중 이 규칙만 VAL·OOS 둘 다 일군집 CI>0). ⚠️표시 전용이며 자동매매에 연결돼 있지 않습니다. 섀도우 90일 판정 전이고, 엣지가 얇습니다(비용 15bp면 0, 진입 1봉 지연이면 OOS CI가 0을 넘습니다).\n\n비용 단위(§5.30): 표시된 bp는 전부 **가격(명목) 대비**입니다. 판정 비용은 테이커 왕복 10bp이고, 괄호의 메이커 값은 peg 진입+테이커 청산 실측 7.8bp입니다(트레일링 청산은 본질적으로 테이커라 진입 쪽만 절감됩니다). 같은 값을 증거금 기준으로 읽으면 배율만큼 커집니다 — 30배면 10bp = 3.00%. 단위를 섞지 마세요.\n\n지속 창이 끝나면(되돌림 대기) 그건 **규칙이 적용되지 않는 구간**이지 반대로 가라는 뜻이 아닙니다(부록 15): 짧은 지평 페이드는 승률이 실제로 오르지만(전봉 기저 50% → 53.7~56.0%, 세 창·양 측면) 손익비가 0.74~0.92라 평균이 0이고, 비용을 빼면 열 개 지평 × 세 창 = 30셀 전부 −6.5~−14.2bp였습니다.";
+const FD_TITLE = "세 로직을 한 장으로 합친 판입니다. ①칩=언제(사건 감지, 방향은 못 가름) ②지속 규칙=어디로(칩 방향의 반대, 정의상 항등식) ③F0=그 다음(되돌림 시점, 첫발동 후 중앙 22~24봉 뒤). 근거: 호메로스 §5.23(첫발동 봉은 지속 시점 — TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp)·§5.27(21개 결정 팔 중 이 규칙만 VAL·OOS 둘 다 일군집 CI>0). ⚠️표시 전용이며 자동매매에 연결돼 있지 않습니다. 섀도우 90일 판정 전이고, 엣지가 얇습니다(비용 15bp면 0, 진입 1봉 지연이면 OOS CI가 0을 넘습니다).\n\n④ 포지션의 크기는 사전등록 위험계약입니다 — 건당 위험 0.4%, 손절이 5×ATR이므로 명목 = min(0.004/(5·ATR%), 0.5), 레버리지 3. ETH는 동시 5칸이라 자산 총 명목이 최대 1.43이고 A4 크로스심볼 캡이 1.5입니다. ⚠️섀도우 원장은 가격 bp만 기록하므로 이 크기는 원장이 검증한 값이 아니라 계약값입니다.\n\n비용 단위(§5.30): 표시된 bp는 전부 **가격(명목) 대비**입니다. 판정 비용은 테이커 왕복 10bp이고, 괄호의 메이커 값은 peg 진입+테이커 청산 실측 7.8bp입니다(트레일링 청산은 본질적으로 테이커라 진입 쪽만 절감됩니다). 같은 값을 증거금 기준으로 읽으면 배율만큼 커집니다 — 30배면 10bp = 3.00%. 단위를 섞지 마세요.\n\n지속 창이 끝나면(되돌림 대기) 그건 **규칙이 적용되지 않는 구간**이지 반대로 가라는 뜻이 아닙니다(부록 15): 짧은 지평 페이드는 승률이 실제로 오르지만(전봉 기저 50% → 53.7~56.0%, 세 창·양 측면) 손익비가 0.74~0.92라 평균이 0이고, 비용을 빼면 열 개 지평 × 세 창 = 30셀 전부 −6.5~−14.2bp였습니다.";
+
+// 2026-09-06 (사용자 요청 "어떤 포지션을 가져가야 할지 적어줘"): 방향만이 아니라 **크기·손절까지** 한 줄로.
+// 크기는 교차자산 섀도우 사전등록(docs/experiments/eth_crossasset_continuation_shadow_prereg_20260905.md §2)의
+// 위험계약 그대로다 -- 건당 위험 0.4%, 손절이 5×ATR이므로 `notional = min(0.004/(5·atr_pct), 0.5)`, 레버리지 3.
+// ⚠️섀도우 원장은 **가격 bp만** 기록한다. 이 크기는 원장이 검증한 값이 아니라 계약값이고, 익절은 고정선이
+// 아니라 무장(1.5×ATR) 후 트레일링(0.1×ATR)이다 -- 칩의 K×ATR 익절가와 다른 축이다.
+function fdPositionRow(c, lv, ineligible, contKo, ref) {
+  if (ineligible) return fdLayerRow("④ 포지션", "진입 없음 — 이 코인은 지속 규칙 미적격", true);
+  if (!c || !c.active) return fdLayerRow("④ 포지션", "진입 없음 — 판단할 발동 사건이 없습니다", true);
+  if (c.skip_both_sides) return fdLayerRow("④ 포지션", "진입 없음 — 양측 동시 첫발동은 규칙상 스킵", true);
+  if (c.phase !== "continuation") {
+    return fdLayerRow("④ 포지션", "신규 진입 없음 — 보유분만 트레일/만기까지 유지", true);
+  }
+  if (!lv || lv.entry == null) return fdLayerRow("④ 포지션", `${contKo} 진입 — 가격선 계산 불가(ATR 웜업), 크기 산출 보류`);
+  const atrPct = lv.atr_pct != null ? Number(lv.atr_pct) : (lv.atr != null && lv.entry ? Number(lv.atr) / Number(lv.entry) : null);
+  const sizeText = atrPct && atrPct > 0
+    ? (() => {
+        const notional = Math.min(0.004 / (5 * atrPct), 0.5);      // 위험 0.4% ÷ 손절폭(5×ATR)
+        return `명목 ${(notional * 100).toFixed(0)}%×자본(증거금 ${(notional / 3 * 100).toFixed(1)}% @3배)`;
+      })()
+    : "크기 산출 불가";
+  const entryText = lv.entry_basis === "pending_next_open" ? `다음 봉 시가(참고 ${fmtNum(lv.entry, 2)})` : fmtNum(lv.entry, 2);
+  return fdLayerRow("④ 포지션",
+    `${contKo} 진입 ${entryText} · ${sizeText} · 손절 ${fmtNum(lv.stop, 2)} · 익절 고정선 없음(무장 ${fmtNum(lv.arm, 2)} 후 트레일 ${fmtNum(lv.trail_dist, 2)}) · 만기 ${lv.bars_left}봉 · 동시 ${(ref && ref.cap) || c.max_concurrent || 5}칸`);
+}
 
 function fdLayerRow(k, v, dim) {
   return `<div class="fd-layer${dim ? " dim" : ""}"><span class="fd-layer-k">${escapeHtml(k)}</span><span class="fd-layer-v">${escapeHtml(v)}</span></div>`;
@@ -1921,7 +1950,8 @@ function renderFinalDecision(payload) {
     paint("neutral", "관망", "신규 진입 근거 없음",
       [fdLayerRow("① 사건", `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음`, true),
        fdLayerRow("② 방향", "판단할 사건이 없습니다", true),
-       fdLayerRow("③ 되돌림", "해당 없음", true)], "", foot);
+       fdLayerRow("③ 되돌림", "해당 없음", true),
+       fdPositionRow(c, null, false, "-", ref)], "", foot);
     return;
   }
 
@@ -1933,7 +1963,8 @@ function renderFinalDecision(payload) {
     paint("warn", "보류", "양측 동시 첫발동 — 방향 정보 없음",
       [eventRow,
        fdLayerRow("② 방향", "바닥·천장이 같은 봉에 떠서 규칙상 진입하지 않습니다"),
-       fdLayerRow("③ 되돌림", "방향이 정해지지 않아 해당 없음", true)], "", foot);
+       fdLayerRow("③ 되돌림", "방향이 정해지지 않아 해당 없음", true),
+       fdPositionRow(c, null, false, "-", ref)], "", foot);
     return;
   }
 
@@ -1954,7 +1985,7 @@ function renderFinalDecision(payload) {
       `지속 창 ${c.bars_since}/${c.window_bars}봉 · 되돌림은 보통 첫발동 22~24봉 뒤${f0c ? ` · F0 ${evidenceContSideKo(f0c.side)} 신호 ${f0c.bars_ago}봉 전(같은 방향)` : ""}`, true);
     paint(tone, ineligible ? "미적격" : "지속",
       ineligible ? `${contKo} 지속 구간 — 다만 ${(activeSnapshotAsset || "").toUpperCase()}는 규칙 미적격` : `${contKo} 지속 ▸ 반대(${fadeKo}) 진입 금지 구간${conflict ? " · 레짐 상충으로 약함" : ""}`,
-      [eventRow, dirRow, nextRow], ineligible ? "" : levelText,
+      [eventRow, dirRow, nextRow, fdPositionRow(c, lv, ineligible, contKo, ref)], ineligible ? "" : levelText,
       ineligible ? ref.why : foot);
     return;
   }
@@ -1966,7 +1997,8 @@ function renderFinalDecision(payload) {
       `되돌림 국면 ▸ F0 ${evidenceContSideKo(f.side)}${f.proba != null ? ` ${Math.round(f.proba * 100)}%` : ""} — 되돌림 진입 후보`,
       [eventRow,
        fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉)은 종료 — 신규 지속 진입 없음`, true),
-       fdLayerRow("③ 되돌림", `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} · 첫발동 후 ${c.bars_since}봉 — 원래 발동을 페이드하는 게 아니라 되돌아온 뒤의 새 모멘텀입니다`)],
+       fdLayerRow("③ 되돌림", `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} · 첫발동 후 ${c.bars_since}봉 — 원래 발동을 페이드하는 게 아니라 되돌아온 뒤의 새 모멘텀입니다`),
+       fdPositionRow(c, lv, ineligible, contKo, ref)],
       "", ineligible ? ref.why : foot);
     return;
   }
@@ -1975,7 +2007,8 @@ function renderFinalDecision(payload) {
   paint("neutral", "창 종료", "지속 창 종료 · F0 되돌림 신호 아직 없음",
     [eventRow,
      fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉) 종료 — 기존 포지션은 트레일/만기까지 유지`, true),
-     fdLayerRow("③ 되돌림", `F0 신호 대기 중 · 첫발동 후 ${c.bars_since}봉 — 창 종료는 규칙 밖 구간이지 페이드 근거가 아닙니다`, true)], "", foot);
+     fdLayerRow("③ 되돌림", `F0 신호 대기 중 · 첫발동 후 ${c.bars_since}봉 — 창 종료는 규칙 밖 구간이지 페이드 근거가 아닙니다`, true),
+     fdPositionRow(c, lv, ineligible, contKo, ref)], "", foot);
 }
 
 function renderEvidenceSignals(payload) {
