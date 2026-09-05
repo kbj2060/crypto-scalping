@@ -76,10 +76,23 @@ MAX_HOLD_BARS = 200             # 5분봉 200개 = 1000분. `sim_exit`의 FORWAR
 # ⭐2026-09-03부터 배리어 판정이 **봉 고가/저가** 기준이라 이 주기는 성과 계측에 영향이 없다
 # (예전 마크가격 폴링 방식에서는 주기가 곧 계측 해상도였다). 신호 지연에만 영향을 준다.
 LOOP_SECONDS = 300
+# ⭐2026-09-05 드리프트 수정. `time.sleep(LOOP_SECONDS)`를 사이클 **뒤에** 걸어 실효 주기가
+# 300 + 사이클 소요(≈32초, TabPFN 5시드) = 332초였다. 봉 경계 대비 오프셋이 매 사이클 +32초씩
+# 밀려 9~10사이클(약 55분)마다 한 봉을 통째로 건너뛴다 -- 09-05 실측 오프셋 71→103→133→165→
+# 197→228→259→290→(되감김)22초, 같은 날 놓친 봉 5회/5봉(≈10%). 고정 sleep 대신 **절대 봉
+# 경계**로 자도록 바꾼다: fire_cont 러너(live_eth_fire_cont_shadow_runner_20260904.py)와 같은 규약.
+BAR_SECONDS, WAKE_OFFSET_SEC = 300, 12
 
 
 def log(m: str) -> None:
     print(f"[vreb-shadow {datetime.now(timezone.utc):%m-%d %H:%M:%S}] {m}", flush=True)
+
+
+def sleep_to_next_bar() -> None:
+    """다음 5분 경계 + WAKE_OFFSET_SEC까지 잔다. 고정 sleep과 달리 사이클 소요가 누적되지 않아
+    봉을 건너뛰지 않는다(2026-09-05 드리프트 수정, 상단 BAR_SECONDS 주석 참조)."""
+    now = time.time(); nxt = (int(now // BAR_SECONDS) + 1) * BAR_SECONDS + WAKE_OFFSET_SEC
+    time.sleep(max(1.0, nxt - now))
 
 
 def load_state() -> dict[str, Any]:
@@ -326,7 +339,7 @@ def main() -> int:
     if args.report:
         report(s); return 0
     log(f"⚠️섀도우 모드 -- 주문을 내지 않습니다. 임계값 {_SIG.PROBA_THRESHOLD} "
-        f"시드 {_SIG.ENSEMBLE_SEEDS} 한도 {MAX_CONCURRENT} 주기 {LOOP_SECONDS}초")
+        f"시드 {_SIG.ENSEMBLE_SEEDS} 한도 {MAX_CONCURRENT} 주기 봉경계+{WAKE_OFFSET_SEC}초")
     stamp_config(s)
     if not args.loop:
         cycle(s); save_state(s); report(s); return 0
@@ -337,7 +350,7 @@ def main() -> int:
             save_state(s); log("중단"); return 0
         except Exception as e:                                # noqa: BLE001
             log(f"⚠️사이클 예외: {type(e).__name__}: {e}")
-        time.sleep(LOOP_SECONDS)
+        sleep_to_next_bar()
 
 
 if __name__ == "__main__":
