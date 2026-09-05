@@ -1181,13 +1181,12 @@ const SIGNAL_HORIZON = {
 // 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
 // 제목줄이 이미 최대 3개 배지를 달고 있고 이 열은 과거에 오버플로 사고가 있었기 때문이다
 // (eth_dashboard_low_atr_warning_overflow_fix_20260901). 인자를 안 주면 기존 동작 그대로다.
-function horizonBadgeHtml(key, progress) {
+function horizonBadgeHtml(key, progress, extraTitle) {
   const h = SIGNAL_HORIZON[key];
   if (!h) return "";
   const text = progress ? `${h.text} · ${progress}` : h.text;
-  const title = progress
-    ? `${h.title}\n\n지금 이 발동은 그 창의 ${progress}째입니다. 옆의 확률은 **발동 봉에서 계산된 값**이고 이후 갱신되지 않습니다 -- 시간이 지날수록 과대평가입니다(실측: 9~12봉 뒤 실제의 약 1.5배).`
-    : h.title;
+  let title = progress ? `${h.title}\n\n지금 이 발동은 그 창의 ${progress}째입니다.` : h.title;
+  if (extraTitle) title += `\n\n${extraTitle}`;
   return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
 
@@ -2008,11 +2007,22 @@ function renderEvidenceSignals(payload) {
     const horizonBars = s.model_horizon_bars;
     const leftBars = (horizonBars != null && ageBars != null) ? Math.max(horizonBars - ageBars, 0) : null;
     const isStaleProba = ageBars != null && ageBars > 0;          // 발동 봉이 아니면 그 확률은 과거값이다
-    const pctDisplay = modelPctText
-      ? ((isResolvedByTp || isStaleProba) ? `(${modelPctText})` : modelPctText)
+    // 2026-09-06 (조치 B): `model_proba_now`는 **지금 봉 피쳐 + 나이**로 재계산한 조건부 확률이다
+    // ("남은 (H-a)봉 안에 목표에 닿는가"). 있으면 그것이 주 숫자다 -- 지금 값이므로 괄호를 치지 않는다.
+    // 없으면(아티팩트 미배포·목표 이미 도달·잔여 0) 조치 A의 규약대로 발동 봉 값을 괄호로 보여준다.
+    const nowProba = s.model_proba_now;
+    const shownProba = nowProba != null ? nowProba : s.model_proba;
+    const shownPctText = shownProba != null ? `${Math.round(shownProba * 100)}%` : null;
+    const pctDisplay = shownPctText
+      ? ((nowProba == null && (isResolvedByTp || isStaleProba)) ? `(${shownPctText})` : shownPctText)
       : "0%";
     const progressText = (horizonBars != null && ageBars != null && !isResolvedByTp)
       ? `${ageBars}/${horizonBars}봉` : null;
+    const probaNote = nowProba != null
+      ? `이 확률은 **지금 봉에서 재계산한 값**입니다 -- "남은 ${leftBars}봉 안에 목표에 닿는가". 발동 봉에서 계산된 원래 값은 ${modelPctText || "-"}였습니다. 시간이 갈수록 남은 창이 짧아지므로 같은 발동이라도 숫자는 내려갑니다.`
+      : (isStaleProba || isResolvedByTp
+          ? `옆의 확률은 **발동 봉에서 계산된 값**이고 이후 갱신되지 않습니다 -- 시간이 지날수록 과대평가입니다(실측: 9~12봉 뒤 실제의 약 1.5배).`
+          : null);
     // 2026-08-31 user request: the price level implied by this signal's own trained K*ATR% target
     // (server-computed from the fire bar's own entry/ATR, see _tp_price in
     // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
@@ -2124,7 +2134,7 @@ function renderEvidenceSignals(payload) {
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}${contBadgeHtml}</strong>
+        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText, probaNote)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}${contBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
@@ -2140,7 +2150,7 @@ function renderEvidenceSignals(payload) {
         <div class="meter-col">
           <span class="meter-state ${metaTone}">${escapeHtml(state)}</span>
           <div class="meter-gauge">
-            <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((s.model_proba != null ? s.model_proba * 100 : 0) / 100) * 100}%"></span></span>
+            <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((shownProba != null ? shownProba * 100 : 0) / 100) * 100}%"></span></span>
             <span class="meter-pct">${pctDisplay}</span>
           </div>
           ${modelTpText ? `<span class="meter-price">${escapeHtml(modelTpText)}</span>` : ""}

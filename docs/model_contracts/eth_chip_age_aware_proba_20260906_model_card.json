@@ -1,0 +1,238 @@
+{
+ "generated_utc": "2026-09-05T16:52:15.071693+00:00",
+ "purpose": "칩 확률의 나이 인지 재계산 (조치 B, 부록 22)",
+ "question": "발동 후 a봉 미달성일 때 남은 (H-a)봉 안 K*ATR 도달 확률",
+ "differs_from_current_chip": "현행 칩은 '발동 시점에 H봉 안 도달'을 묻고 값을 호라이즌 내내 고정한다",
+ "learner": "HistGradientBoostingClassifier",
+ "hyperparams": {
+  "max_iter": 400,
+  "learning_rate": 0.06,
+  "max_depth": 5,
+  "l2_regularization": 1.0
+ },
+ "seeds": [
+  20260906,
+  771103,
+  480219,
+  913057,
+  264488
+ ],
+ "features": {
+  "live_FEATURE_COLUMNS": [
+   "is_bottom",
+   "delta_z",
+   "atr_pct",
+   "atr_percentile_864",
+   "hour_utc",
+   "weekday",
+   "nyse_open_flag",
+   "p_fast",
+   "p_slow",
+   "ret3_z",
+   "vwap_dev_z",
+   "cvd_roll_roc_48",
+   "vol_z",
+   "lower_wick_ratio",
+   "upper_wick_ratio",
+   "bb_pctb",
+   "adx14",
+   "pdi",
+   "ndi",
+   "bb_width_pctile",
+   "er_24",
+   "realized_vol_ratio",
+   "rsi"
+  ],
+  "extra": [
+   "signal one-hot x8",
+   "age",
+   "bars_left"
+  ],
+  "n_total": 33,
+  "deliberate_omissions": [
+   "demarker dem",
+   "kalman kalman_dev_z",
+   "orthogonal_combo 20-feature subset"
+  ]
+ },
+ "data": {
+  "klines_range": [
+   "2024-01-01 00:00:00",
+   "2026-03-31 23:55:00"
+  ],
+  "holdout_blocked_from": "2026-04-01",
+  "splits": {
+   "TRAIN": [
+    "2024-05-01",
+    "2025-09-01"
+   ],
+   "VAL": [
+    "2025-09-01",
+    "2026-01-01"
+   ],
+   "OOS": [
+    "2026-01-01",
+    "2026-04-01"
+   ]
+  },
+  "n_first_fires": 31324,
+  "n_rows": 558212,
+  "positive_rate": 0.2334
+ },
+ "auc_overall": {
+  "TRAIN": 0.8578,
+  "VAL": 0.8124,
+  "OOS": 0.7951
+ },
+ "by_age": {
+  "a0": {
+   "TRAIN": {
+    "n": 18846,
+    "base_rate": 0.407,
+    "auc": 0.761,
+    "mean_pred": 0.405,
+    "calib_gap": -0.001
+   },
+   "VAL": {
+    "n": 4503,
+    "base_rate": 0.416,
+    "auc": 0.6973,
+    "mean_pred": 0.406,
+    "calib_gap": -0.01
+   },
+   "OOS": {
+    "n": 3285,
+    "base_rate": 0.431,
+    "auc": 0.702,
+    "mean_pred": 0.404,
+    "calib_gap": -0.027
+   }
+  },
+  "a2": {
+   "TRAIN": {
+    "n": 17452,
+    "base_rate": 0.359,
+    "auc": 0.7813,
+    "mean_pred": 0.356,
+    "calib_gap": -0.003
+   },
+   "VAL": {
+    "n": 4134,
+    "base_rate": 0.364,
+    "auc": 0.7226,
+    "mean_pred": 0.356,
+    "calib_gap": -0.008
+   },
+   "OOS": {
+    "n": 3032,
+    "base_rate": 0.384,
+    "auc": 0.7039,
+    "mean_pred": 0.344,
+    "calib_gap": -0.04
+   }
+  },
+  "a4": {
+   "TRAIN": {
+    "n": 16385,
+    "base_rate": 0.318,
+    "auc": 0.8076,
+    "mean_pred": 0.317,
+    "calib_gap": -0.0
+   },
+   "VAL": {
+    "n": 3871,
+    "base_rate": 0.321,
+    "auc": 0.7493,
+    "mean_pred": 0.319,
+    "calib_gap": -0.002
+   },
+   "OOS": {
+    "n": 2809,
+    "base_rate": 0.335,
+    "auc": 0.731,
+    "mean_pred": 0.305,
+    "calib_gap": -0.03
+   }
+  },
+  "a6": {
+   "TRAIN": {
+    "n": 15497,
+    "base_rate": 0.279,
+    "auc": 0.825,
+    "mean_pred": 0.279,
+    "calib_gap": 0.0
+   },
+   "VAL": {
+    "n": 3644,
+    "base_rate": 0.279,
+    "auc": 0.7816,
+    "mean_pred": 0.277,
+    "calib_gap": -0.002
+   },
+   "OOS": {
+    "n": 2642,
+    "base_rate": 0.293,
+    "auc": 0.7516,
+    "mean_pred": 0.266,
+    "calib_gap": -0.027
+   }
+  },
+  "a9": {
+   "TRAIN": {
+    "n": 14055,
+    "base_rate": 0.228,
+    "auc": 0.8515,
+    "mean_pred": 0.226,
+    "calib_gap": -0.002
+   },
+   "VAL": {
+    "n": 3303,
+    "base_rate": 0.232,
+    "auc": 0.8082,
+    "mean_pred": 0.225,
+    "calib_gap": -0.007
+   },
+   "OOS": {
+    "n": 2415,
+    "base_rate": 0.243,
+    "auc": 0.7772,
+    "mean_pred": 0.212,
+    "calib_gap": -0.032
+   }
+  },
+  "a12": {
+   "TRAIN": {
+    "n": 9536,
+    "base_rate": 0.25,
+    "auc": 0.8342,
+    "mean_pred": 0.249,
+    "calib_gap": -0.001
+   },
+   "VAL": {
+    "n": 2252,
+    "base_rate": 0.26,
+    "auc": 0.7839,
+    "mean_pred": 0.242,
+    "calib_gap": -0.018
+   },
+   "OOS": {
+    "n": 1569,
+    "base_rate": 0.27,
+    "auc": 0.7701,
+    "mean_pred": 0.246,
+    "calib_gap": -0.024
+   }
+  }
+ },
+ "reference_frozen_baseline_appendix22": {
+  "a0": {
+   "VAL": 0.6968,
+   "OOS": 0.7011
+  },
+  "a12": {
+   "VAL": 0.6415,
+   "OOS": 0.602
+  }
+ },
+ "leakage_guard": "VAL AUC >= 0.99 -> abort (not triggered)"
+}

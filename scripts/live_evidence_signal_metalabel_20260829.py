@@ -513,6 +513,7 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
         # (docs/experiments/eth_composite_direction_trend_pullback_results_20260905.md 부록 22).
         # 모델은 그대로 두고, 화면이 "언제 값인지 · 얼마나 남았는지"를 말할 수 있게 상수만 실어 보낸다.
         o["horizon_bars"] = METALABEL_SIGNALS[name]["horizon_bars"]
+        o["proba_now"] = None                                          # 아래에서 켜진 칩에만 채운다
         fp = o.pop("fire_pos", None)
         if not o.get("fired"):
             o["tp_touched"] = None
@@ -520,11 +521,79 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
             continue
         o["tp_touched"] = _tp_touched(df, fp, o.get("tp_price"), o.get("side"))
         o["bars_since_fire"] = (n - 1 - fp) if fp is not None else None
+        # 2026-09-06 (조치 B): 아직 목표 미달성인 **켜진 칩에만** 지금 시점 조건부 확률을 덧붙인다.
+        # 이미 도달했으면 남은 창의 질문 자체가 성립하지 않으므로 계산하지 않는다.
+        if not o["tp_touched"] and o["bars_since_fire"] is not None:
+            left = int(o["horizon_bars"]) - int(o["bars_since_fire"])
+            if left > 0:
+                try:
+                    o["proba_now"] = _age_aware_proba(name, _ensure_indicator_frame().iloc[n - 1],
+                                                      1 if o.get("side") == "bottom" else 0,
+                                                      int(o["bars_since_fire"]), left)
+                except Exception as exc:                               # noqa: BLE001 -- 표시 전용, 실패해도 기존 값 유지
+                    print(f"age-aware proba failed for {name} (display-only): {exc}", flush=True)
         side = o.get("side")
         acol = f"{'bottom' if side == 'bottom' else 'top'}_{name}_active"
         if acol in sig.columns and not bool(sig[acol].iloc[-1]):
             o["fired"] = False        # 라벨이 확정됨 -- 더 이상 "지금 유효한 증거"가 아니다
     return out
+
+
+# ----------------------------------------------------------------------------- 나이 인지 확률 (2026-09-06, 조치 B)
+# 왜: 위 `_predict_proba`가 낸 확률은 **발동 봉에서 한 번** 계산되고 호라이즌 내내 재사용된다
+# (애프터글로우 캐시). 실측상 순위 AUC가 0.697/0.701(나이0) -> 0.642/0.602(12봉)로 낡고, 표시 확률이
+# 실제 조건부 도달률보다 9~12봉 뒤 **+0.12(약 1.5배)** 과대해진다
+# (docs/experiments/eth_composite_direction_trend_pullback_results_20260905.md 부록 22).
+#
+# 이 모델은 **다른 질문**에 답한다 -- "발동 후 a봉 미달성인 지금, 남은 (H-a)봉 안에 닿는가".
+# `age`/`bars_left`를 피쳐로 넣어 학습했고 매 봉 재계산한다. 학습기는 TabPFN이 아니라 HGB다
+# (매 봉 추론이라 공유 GPU 경합을 만들 수 없다 -- 나이0 AUC 0.697/0.702로 TabPFN과 같은 수준).
+# 학습·동결: scripts/train_eth_chip_age_aware_proba_20260906.py, 카드는 아티팩트 옆 model_card.json.
+#
+# ⚠️**가산적으로 붙인다** -- 기존 `proba`(발동 봉 값)를 지우지 않는다. 아티팩트가 없으면 조용히
+# None을 돌려 화면이 기존 동작으로 폴백한다(안전 롤아웃).
+AGE_PROBA_DIR = ROOT / "data/models/eth_chip_age_aware_proba_20260906"
+_AGE_PROBA: dict[str, Any] | None = None
+_AGE_PROBA_TRIED = False
+
+
+def _age_proba_bundle() -> dict[str, Any] | None:
+    global _AGE_PROBA, _AGE_PROBA_TRIED
+    if _AGE_PROBA_TRIED:
+        return _AGE_PROBA
+    _AGE_PROBA_TRIED = True
+    try:
+        import joblib
+        _AGE_PROBA = joblib.load(AGE_PROBA_DIR / "model.joblib")
+    except Exception as exc:                                           # noqa: BLE001 -- 없으면 기존 동작 유지
+        print(f"age-aware proba artifact unavailable ({type(exc).__name__}: {exc}) -- falling back to frozen proba", flush=True)
+        _AGE_PROBA = None
+    return _AGE_PROBA
+
+
+def _age_aware_proba(signal_name: str, row: pd.Series, is_bottom: int, age: int, bars_left: int) -> float | None:
+    """지금 봉 피쳐 + 나이로 **조건부** 도달 확률. 아티팩트/피쳐가 없으면 None."""
+    b = _age_proba_bundle()
+    if b is None or signal_name not in b["signals"] or age is None or bars_left is None or bars_left <= 0:
+        return None
+    order = b["feature_order"]
+    vals = []
+    for name in order:
+        if name == "is_bottom":
+            vals.append(float(is_bottom))
+        elif name == "age":
+            vals.append(float(age))
+        elif name == "bars_left":
+            vals.append(float(bars_left))
+        elif name.startswith("sig_"):
+            vals.append(1.0 if name[4:] == signal_name else 0.0)
+        else:
+            v = row.get(name)
+            if v is None or pd.isna(v):
+                return None
+            vals.append(float(v))
+    X = np.asarray(vals, float).reshape(1, -1)
+    return float(np.mean([m.predict_proba(X)[0, 1] for m in b["models"]]))
 
 
 def _predict_proba(signal_name: str, feature_row: pd.Series) -> float:

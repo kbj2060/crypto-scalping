@@ -1423,6 +1423,9 @@ def make_app() -> web.Application:
                     # 2026-09-06: 이 신호 자신의 학습 호라이즌(봉). 화면이 "26/30봉 · 잔여 4봉"을 말하려면
                     # 경과(bars_since)만으론 부족하다. 표시 전용 -- 발동/확률/투표 로직과 무관.
                     entry["model_horizon_bars"] = metalabels[name].get("horizon_bars")
+                    # 2026-09-06 (조치 B): **지금 시점** 조건부 도달 확률(나이 인지 모델). 켜져 있고 아직
+                    # 목표 미달성인 칩에만 채워진다. 위 model_proba(발동 봉 값)는 그대로 둔다 -- 가산적.
+                    entry["model_proba_now"] = metalabels[name].get("proba_now")
                     entry["model_atr_bp"] = metalabels[name].get("atr_bp")
                     entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
                     entry["model_low_atr"] = metalabels[name].get("low_atr")
