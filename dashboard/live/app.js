@@ -1807,10 +1807,130 @@ function renderEvidenceContinuation(payload) {
   box.title = EVIDENCE_CONT_TITLE;
 }
 
+// ── 2026-09-05 (사용자 요청) 최종 결정: 세 로직을 한 장으로 ────────────────────────────────
+// ① 칩(증거신호 8종) = "언제"  -- 사건 감지. 자기 라벨 AUC 0.68~0.71로 정확하지만 **방향은 못 가른다**
+//                                (칩 확률 → 지속 이익 AUC 0.49~0.52 = 동전, 호메로스 §5.29 부록 12·13).
+// ② 지속 규칙       = "어디로" -- 칩 방향의 **반대**. 정의상 항등식(sg = −sg_fade)이라 둘은 늘 반대다.
+//                                21개 결정 팔 중 이것만 VAL·OOS 둘 다 일군집 CI>0 (§5.27).
+// ③ F0 경제모델     = "그 다음" -- 되돌림 시점. 첫발동 후 중앙 22~24봉 뒤에야 칩 방향이 맞는다
+//                                ("언젠가 되돌린다" 81% vs "먼저 되돌린다" 43%). F0는 발동 봉을 오히려
+//                                피한다(농축비 0.35~0.76, §5.23) -- 화면 칩과 F0는 같은 모델이 아니다.
+// 세 층은 전부 서버가 payload.continuation **하나**에 담아 보낸다(섀도우 러너와 같은 continuation_state).
+// 이 컴포넌트는 새 계산을 하지 않고 **읽는 순서만 정한다** -- 화면과 러너가 어긋나지 않게 하려는 규약이다.
+// ⚠️표시 전용이며 자동매매에 연결돼 있지 않다. 섀도우 90일 판정 전까지 후보다.
+const FD_ASSET = {
+  eth: { eligible: true, cap: 5, val: 4.44, oos: 6.78 },
+  xrp: { eligible: true, cap: 2, val: 2.19, oos: 4.50 },
+  sol: { eligible: true, cap: 2, val: 7.94, oos: 9.56 },
+  // BTC는 같은 규칙을 이식했을 때 음수였고(§5.29 §7), 자산별 셀을 다시 골라도 실행가능 셀이 0/64였다.
+  // 원인은 신호가 아니라 프레임이다 -- 같은 창의 무작위 진입도 −2.2~−4.2bp다.
+  btc: { eligible: false, why: "BTC는 지속 규칙 미적격 — 교차자산 이식 VAL −1.5 / OOS −2.2bp, 실행가능 셀 0/64(같은 창의 무작위 진입도 −2.2~−4.2bp). 아래 층은 참고 표시이지 진입 근거가 아닙니다." },
+};
+const FD_TITLE = "세 로직을 한 장으로 합친 판입니다. ①칩=언제(사건 감지, 방향은 못 가름) ②지속 규칙=어디로(칩 방향의 반대, 정의상 항등식) ③F0=그 다음(되돌림 시점, 첫발동 후 중앙 22~24봉 뒤). 근거: 호메로스 §5.23(첫발동 봉은 지속 시점 — TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp)·§5.27(21개 결정 팔 중 이 규칙만 VAL·OOS 둘 다 일군집 CI>0). ⚠️표시 전용이며 자동매매에 연결돼 있지 않습니다. 섀도우 90일 판정 전이고, 엣지가 얇습니다(비용 15bp면 0, 진입 1봉 지연이면 OOS CI가 0을 넘습니다).";
+
+function fdLayerRow(k, v, dim) {
+  return `<div class="fd-layer${dim ? " dim" : ""}"><span class="fd-layer-k">${escapeHtml(k)}</span><span class="fd-layer-v">${escapeHtml(v)}</span></div>`;
+}
+
+function renderFinalDecision(payload) {
+  const panel = document.querySelector(".final-decision-panel");
+  const headEl = el("fdHeadline"); const layersEl = el("fdLayers");
+  const levelsEl = el("fdLevels"); const footEl = el("fdFooter"); const verdictEl = el("fdVerdict");
+  if (!panel || !headEl || !layersEl || !levelsEl || !footEl || !verdictEl) return;
+  panel.title = FD_TITLE;
+
+  const ref = FD_ASSET[activeSnapshotAsset] || null;
+  const paint = (tone, verdict, headline, rows, levelText, footText) => {
+    panel.className = `panel ops-health-panel final-decision-panel ${tone}`;
+    verdictEl.className = `fd-verdict ${tone}`; verdictEl.textContent = verdict;
+    headEl.className = `fd-headline ${tone === "neutral" ? "muted" : tone}`; headEl.textContent = headline;
+    layersEl.innerHTML = (rows || []).join("");
+    levelsEl.className = levelText ? "fd-levels" : "fd-levels hidden";
+    levelsEl.textContent = levelText || "";
+    footEl.textContent = footText || "";
+  };
+
+  if (!payload || payload.unsupported) {
+    paint("neutral", "미지원", `${(activeSnapshotAsset || "").toUpperCase()}는 증거신호 파이프라인이 없습니다`, [], "", "");
+    return;
+  }
+  if (payload.error) { paint("neutral", "오류", "증거신호를 불러오지 못했습니다", [], "", ""); return; }
+  if (!payload.warmed_up) { paint("neutral", "웜업", "지표 웜업 중 — 판단 보류", [], "", ""); return; }
+
+  const c = payload.continuation;
+  const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO : activeSnapshotAsset === "xrp" ? XRP_EVIDENCE_SIGNAL_KO : EVIDENCE_SIGNAL_KO;
+  const sh = (c && c.shadow) || null;
+  const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
+  const refText = ref && ref.eligible ? `백테스트 VAL ${bp(ref.val)} / OOS ${bp(ref.oos)}` : "";
+  const shadowText = sh && sh.closed_trades != null
+    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건 · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)}) · 미결 ${sh.open_positions}`
+    : "섀도우 원장 아직 없음";
+  const foot = `표시 전용 · 자동매매 미연결 · 90일 판정 전 · ${shadowText}${refText ? ` · ${refText}` : ""}`;
+
+  if (!c || !c.active) {
+    paint("neutral", "관망", "신규 진입 근거 없음",
+      [fdLayerRow("① 사건", `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음`, true),
+       fdLayerRow("② 방향", "판단할 사건이 없습니다", true),
+       fdLayerRow("③ 되돌림", "해당 없음", true)], "", foot);
+    return;
+  }
+
+  const sigNames = Object.keys(c.signals || {}).map((n) => (koDict[n] || { name: n }).name).join("·");
+  const fireKo = c.fire_side === "bottom" ? "바닥" : c.fire_side === "top" ? "천장" : "양측";
+  const eventRow = fdLayerRow("① 사건", `${sigNames} ${fireKo} 첫발동 · ${c.bars_since}봉 전`);
+
+  if (c.skip_both_sides) {
+    paint("warn", "보류", "양측 동시 첫발동 — 방향 정보 없음",
+      [eventRow,
+       fdLayerRow("② 방향", "바닥·천장이 같은 봉에 떠서 규칙상 진입하지 않습니다"),
+       fdLayerRow("③ 되돌림", "방향이 정해지지 않아 해당 없음", true)], "", foot);
+    return;
+  }
+
+  const contKo = evidenceContSideKo(c.cont_side);
+  const fadeKo = evidenceContSideKo(c.fade_side);
+  const dirRow = fdLayerRow("② 방향", `${contKo} 지속 — 칩이 가리키는 ${fadeKo} 방향의 반대 · ${evidenceContRegimeText(c)}`);
+  const lv = c.levels || null;
+  const levelText = lv && lv.entry != null
+    ? `${lv.entry_basis === "pending_next_open" ? "진입 예정(다음 봉 시가, 참고 " : "진입 "}${fmtNum(lv.entry, 2)}${lv.entry_basis === "pending_next_open" ? ")" : ""} · 손절 ${fmtNum(lv.stop, 2)} · 무장 ${fmtNum(lv.arm, 2)} · 트레일 ${fmtNum(lv.trail_dist, 2)} · 만기 ${lv.bars_left}봉`
+    : "";
+  const ineligible = ref && ref.eligible === false;
+
+  if (c.phase === "continuation") {
+    const conflict = c.regime_consistency === "conflict";
+    const tone = ineligible ? "neutral" : conflict ? "warn" : (c.cont_side === "short" ? "bad" : "good");
+    const f0c = c.f0_cont_call;
+    const nextRow = fdLayerRow("③ 되돌림",
+      `지속 창 ${c.bars_since}/${c.window_bars}봉 · 되돌림은 보통 첫발동 22~24봉 뒤${f0c ? ` · F0 ${evidenceContSideKo(f0c.side)} 신호 ${f0c.bars_ago}봉 전(같은 방향)` : ""}`, true);
+    paint(tone, ineligible ? "미적격" : "지속",
+      ineligible ? `${contKo} 지속 구간 — 다만 ${(activeSnapshotAsset || "").toUpperCase()}는 규칙 미적격` : `${contKo} 지속 ▸ 반대(${fadeKo}) 진입 금지 구간${conflict ? " · 레짐 상충으로 약함" : ""}`,
+      [eventRow, dirRow, nextRow], ineligible ? "" : levelText,
+      ineligible ? ref.why : foot);
+    return;
+  }
+
+  const f = c.f0_fade_call;
+  if (f) {
+    const tone = ineligible ? "neutral" : (f.side === "long" ? "good" : "bad");
+    paint(tone, ineligible ? "미적격" : "되돌림",
+      `되돌림 국면 ▸ F0 ${evidenceContSideKo(f.side)}${f.proba != null ? ` ${Math.round(f.proba * 100)}%` : ""} — 되돌림 진입 후보`,
+      [eventRow,
+       fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉)은 종료 — 신규 지속 진입 없음`, true),
+       fdLayerRow("③ 되돌림", `F0 ${evidenceContSideKo(f.side)} 신호 ${f.bars_ago}봉 전${f.proba != null ? ` (${Math.round(f.proba * 100)}%)` : ""} · 첫발동 후 ${c.bars_since}봉`)],
+      "", ineligible ? ref.why : foot);
+    return;
+  }
+  paint("neutral", "창 종료", "지속 창 종료 · F0 되돌림 신호 아직 없음",
+    [eventRow,
+     fdLayerRow("② 방향", `${contKo} 지속 창(${c.window_bars}봉) 종료 — 기존 포지션은 트레일/만기까지 유지`, true),
+     fdLayerRow("③ 되돌림", `F0 신호 대기 중 · 첫발동 후 ${c.bars_since}봉`, true)], "", foot);
+}
+
 function renderEvidenceSignals(payload) {
   const badge = el("snapshotEvidenceBadge");
   const stripBadge = el("evidenceStripBadge");
   renderEvidenceContinuation(payload);   // 2026-09-04 지속 구간 한 줄 -- 모든 상태(미지원/오류/워밍업)에서 먼저 정리
+  renderFinalDecision(payload);          // 2026-09-05 최종 결정 카드 -- 같은 payload.continuation을 읽는 순서만 정한다
   // 2026-09-02: 증거신호 파이프라인이 없는 자산(2026-09-03 기준 SOL/HYPE)이 있다 -- 예전엔 코인탭과
   // 무관하게 항상 ETH 데이터를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가
   // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.

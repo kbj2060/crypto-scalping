@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260904-chip-notify-page">
+  <link rel="stylesheet" href="styles.css?v=20260905-final-decision">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -155,6 +155,23 @@
         </div>
         <span id="snapshotEvidenceBadge" class="ops-badge neutral">EVIDENCE -</span>
       </div>
+
+      <!-- 2026-09-05 (사용자 요청): 세 로직을 하나로 합친 **최종 결정**. app.js::renderFinalDecision.
+           ① 칩(증거신호 8종) = "언제"(사건 감지)  ② 지속 규칙 = "어디로"(방향)  ③ F0 경제모델 = "그 다음"(되돌림 시점).
+           세 층은 전부 서버가 이미 한 payload.continuation에 담아 보낸다(섀도우 러너와 같은 continuation_state 함수) --
+           이 컴포넌트는 새 계산을 하지 않고 **읽는 순서만 정한다**. 근거: 호메로스 §5.23(첫발동 봉 = 지속 시점,
+           페이드 −3.0 vs 지속 +4.7bp)·§5.27(21팔 중 지속 규칙만 VAL·OOS 둘 다 CI>0).
+           ⚠️표시 전용이며 자동매매에 연결돼 있지 않다. 섀도우 90일 판정 전까지 후보다. -->
+      <section class="panel ops-health-panel final-decision-panel" data-asset-scope="evidence">
+        <div class="fd-head">
+          <p class="fd-title">최종 결정</p>
+          <span id="fdVerdict" class="fd-verdict neutral">-</span>
+        </div>
+        <p id="fdHeadline" class="fd-headline muted">불러오는 중…</p>
+        <div id="fdLayers" class="fd-layers"></div>
+        <p id="fdLevels" class="fd-levels hidden"></p>
+        <p id="fdFooter" class="fd-footer"></p>
+      </section>
 
       <section class="panel ops-health-panel signal-overview-panel">
         <div class="signal-overview-group" data-asset-scope="indicators">
@@ -321,7 +338,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260904-fire-cont-card2"></script>
+  <script src="./app.js?v=20260905-final-decision"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
