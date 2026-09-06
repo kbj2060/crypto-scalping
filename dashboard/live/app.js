@@ -1779,6 +1779,7 @@ function retailShiftB2IndicatorItem() {
       + " 2026-09-05부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다.\n\n"
       + "30일 관문은 성과가 아니라 계측입니다 -- 라이브 수집기는 봉 시가 스냅샷이라 결정 시각(봉 마감 +12초)에 그 행이"
       + " 아직 안 보일 수 있습니다. 공개지연 ≤300초 비율이 95% 미만이면 사전등록상 성과를 판단하지 않습니다.\n\n"
+      + "z는 롱숏비 30분 변화(Δ6행)의 288행 z점수이고, |z| ≥ 2.2616(TRAIN 95분위, 동결)이면 발동합니다 — z ≤ −임계면 롱, z ≥ +임계면 숏(개미 쏠림의 반대). 같은 측면이 직전 12행 안에 이미 발동했으면 건너뜁니다(GAP12). 그래서 임계를 넘는 봉(최근 25시간 25회)보다 실제 진입(하루 2~4건)이 훨씬 적습니다.\n\n"
       + "백테스트(lag1 규약, 비용 10bp 후): VAL +12.7 / OOS +12.3bp, 3.4건/일. 지속 규칙(R)과 합집합했을 때의"
       + " 한계 기여는 VAL +6.1 / OOS +7.4bp/일이고 CI가 0을 포함합니다 — 후보이지 증명이 아닙니다.",
     history: [], times: [] };
@@ -1786,6 +1787,16 @@ function retailShiftB2IndicatorItem() {
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "불러오는 중" };
   if (!p.available) return { ...base, tone: "neutral", subText: "원장 없음", liveText: "섀도우 원장이 아직 없습니다 · 백테스트 VAL +12.7 / OOS +12.3bp" };
   const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
+  // 2026-09-06 (사용자 요청): "왜 계속 대기냐" -- 배지의 "대기"는 미결 포지션 없음이라는 뜻이라
+  // 신호가 살아있는지를 못 보여준다. 러너가 매 봉 남기는 마지막 결정(z·임계)을 맨 앞에 띄운다.
+  // 러너 재기동 전 옛 상태파일에는 last_decision 이 없으므로 그 경우를 따로 말한다.
+  const ld = p.last_decision || {};
+  const thr = ld.thresh_z != null ? Number(ld.thresh_z) : 2.2616;
+  const zNum = ld.z != null ? Number(ld.z) : null;
+  const zSign = (v, d) => `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
+  const zText = zNum != null
+    ? `z ${zSign(zNum, 2)} / 임계 ±${thr.toFixed(2)}${ld.available === false ? " · 행 미관측" : ld.backfill ? " · 백필 행" : ""}`
+    : (ld.bar_utc ? "z 계산 불가(행 부족)" : "z 미기록 — 러너 재기동 전");
   const k = p.known_ts || {};
   const share300 = k.share_le_300s;
   // 관문 문구: 표본이 얇을 때(<30행) 통과/미달을 단정하지 않는다 -- 30일 계측 자체가 아직 진행 중이다.
@@ -1802,8 +1813,8 @@ function retailShiftB2IndicatorItem() {
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
   const openText = p.open_positions
     ? `${p.open_positions}건 보유(${(p.open_sides || []).map(evidenceContSideKo).join("/")})`
-    : "대기";
-  const liveText = `${gateText}${missedText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
+    : (zNum != null ? `대기 z${zSign(zNum, 1)}` : "대기");
+  const liveText = `${zText} · ${gateText}${missedText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
   const tone = gateBad ? "warn"
     : p.open_positions ? ((p.open_sides || []).includes("short") && !(p.open_sides || []).includes("long") ? "bad" : "good")
     : "neutral";

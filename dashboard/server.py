@@ -1000,6 +1000,8 @@ def retail_shift_b2_payload() -> dict[str, Any]:
         "started_utc": started,
         "days_running": (round(days, 2) if days is not None else None),
         "last_decided_bar_utc": state.get("last_decided_bar_utc"),
+        # 2026-09-06: 러너가 남기는 마지막 결정(z·임계·행 관측 여부). 화면이 "대기"만 말하지 않도록.
+        "last_decision": state.get("last_decision") or {},
         "closed_trades": n,
         "exp_bp": (round(sum(pnls) / n, 2) if n else None),
         "exp_maker_bp": (round(sum(pnls_maker) / n, 2) if n else None),

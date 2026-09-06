@@ -274,6 +274,15 @@ def decide(s: dict[str, Any], store: LsrRows) -> None:
             else:
                 enter(s, last_str, dec, px, float(atr[-1]), float(kl["close"].iloc[-1]))
         s["last_decided_bar_utc"] = last_str
+        # 2026-09-06 텔레메트리(규칙 무변경): 대시보드가 "지금 z가 임계에서 얼마나 떨어져 있나"를
+        # 보여줄 수 있게 마지막 결정을 남긴다. 화면이 "대기"만 말하면 조건이 안 온 것과 러너가
+        # 죽은 것을 구분할 수 없다. 결정은 새 봉에서만 하므로 이 블록 안에 둔다.
+        s["last_decision"] = {"bar_utc": last_str, "decided_at_utc": datetime.now(timezone.utc).isoformat(),
+                              "z": dec.get("z"), "side": dec.get("side"), "thresh_z": THRESH_Z,
+                              "available": dec.get("available"), "backfill": dec.get("backfill"),
+                              "row_C_available": dec.get("row_C_available"), "delay_sec": dec.get("delay_sec"),
+                              "ratio": (round(float(dec["ratio"]), 4) if dec.get("ratio") is not None else None),
+                              "d6": dec.get("d6")}
     s["known_ts"] = store.delay_stats()
     tot = sum(t["pnl_bp"] for t in s["ledger"])
     log(f"봉 {last_str[:16]} z={dec.get('z') if dec else '-'} side={dec.get('side') if dec else '-'} rowC={dec.get('row_C_available') if dec else '-'} "
