@@ -1393,7 +1393,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
       : "";
     const metaHtml = (forceMeter || it.proba != null)
       ? `<div class="meter-col">
-          <span class="meter-state ${tone}">${escapeHtml(it.subText || "-")}</span>
+          <span class="meter-state ${tone}"${it.stateTitle ? ` title="${escapeHtml(it.stateTitle)}"` : ""}>${escapeHtml(it.subText || "-")}</span>
           ${gaugeHtml}
           ${it.meterNote ? `<span class="meter-price" title="${escapeHtml(it.meterNoteTitle || "")}">${escapeHtml(it.meterNote)}</span>` : ""}
         </div>`
@@ -1884,7 +1884,7 @@ function retailShiftB2IndicatorItem() {
   const p = latestRetailShiftB2;
   // 상태 어휘는 감지기 공통이다: 준비 중 = 웜업 · 소스가 값을 못 냄 = 데이터 없음 · 실패 = 오류.
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
-  if (!p.available) return { ...base, tone: "neutral", subText: "데이터 없음", liveText: `섀도우 원장이 아직 없습니다 · ${backtestRefText(12.68, 12.28)}` };
+  if (!p.available) return { ...base, tone: "neutral", subText: "데이터 없음", stateTitle: `섀도우 원장이 아직 없습니다 · ${backtestRefText(12.68, 12.28)}` };
   // 2026-09-06 (사용자 요청): "왜 계속 대기냐" -- 배지의 "대기"는 미결 포지션 없음이라는 뜻이라
   // 신호가 살아있는지를 못 보여준다. 러너가 매 봉 남기는 마지막 결정(z·임계)을 맨 앞에 띄운다.
   // 러너 재기동 전 옛 상태파일에는 last_decision 이 없으므로 그 경우를 따로 말한다.
@@ -1910,18 +1910,21 @@ function retailShiftB2IndicatorItem() {
   const ledgerText = shadowLedgerText(p);
   const ledgerTitle = [shadowLedgerTitle(p), k.n ? `공개지연 p50 ${k.p50}s · p95 ${k.p95}s${k.max != null ? ` · 최대 ${k.max}s` : ""} (표본 ${k.n}행${k.n_backfill != null ? `, 백필 ${k.n_backfill}` : ""})` : ""].filter(Boolean).join("\n");
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
-  // 보유 중이면 그 방향, 아니면 미발동 -- z 값은 배지가 아니라 liveText 맨 앞에 둔다(공통 어휘 유지).
+  // 보유 중이면 그 방향, 아니면 미발동 -- z 값은 배지가 아니라 meta 열(meterNote)에 둔다(공통 어휘 유지).
   const sides = p.open_sides || [];
   const held = p.open_positions
     ? specialDirLabel(sides.includes("long") && sides.includes("short") ? null : sides.includes("short") ? "short" : "long", "보유")
     : null;
-  const liveText = `${zText} · ${ledgerText} · ${gateText}${missedText} · ${backtestRefText(12.68, 12.28)}${thinSample}`;
+  // 데이터 줄은 화면에서 빼고 배지 툴팁으로만 남긴다(위 지속 규칙과 같은 규약).
+  const stateTitle = [`${zText} · ${gateText}${missedText}`,
+                      `${ledgerText} · ${backtestRefText(12.68, 12.28)}${thinSample}`,
+                      ledgerTitle].filter(Boolean).join("\n");
   // 확률이 아니라 z라서 게이지(%)가 아니라 meter-price 자리에 적는다 -- 확률 개념이 있는 행만 게이지를 쓴다.
   const note = zNum != null
     ? { meterNote: `z ${zSign(zNum, 2)}`, meterNoteTitle: `개미 롱숏비 30분 변화의 288행 z점수입니다. |z| ≥ ${thr.toFixed(4)} 이면 발동하고(z ≤ −임계 → 롱, ≥ +임계 → 숏), 같은 측면은 직전 12행 안에 이미 발동했으면 건너뜁니다.` }
     : {};
-  if (gateBad) return { ...base, ...note, tone: "warn", subText: "계측 미달", liveTitle: ledgerTitle, liveText };
-  return { ...base, ...note, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveTitle: ledgerTitle, liveText };
+  if (gateBad) return { ...base, ...note, tone: "warn", subText: "계측 미달", stateTitle };
+  return { ...base, ...note, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", stateTitle };
 }
 
 function fireContIndicatorItem() {
@@ -1936,8 +1939,11 @@ function fireContIndicatorItem() {
   const sh = (c && c.shadow) || null;
   const shadowText = `${shadowLedgerText(sh)} · ${backtestRefText(4.44, 6.78)}${sh ? shadowSampleWarning(sh.days_running, sh.closed_trades) : ""}`;
   const shadowTitle = shadowLedgerTitle(sh);
-  if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, liveTitle: shadowTitle, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
-  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, liveTitle: shadowTitle, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
+  // 2026-09-06 (사용자 요청): 제목 밑 데이터 줄은 세 특화감지기에서 전부 뺀다. 같은 숫자는 최종 결정
+  // 카드(가격선·④ 포지션·foot 원장)가 이미 보여준다. 여기서는 상태 배지 툴팁으로만 남긴다.
+  const tip = (head) => [head, shadowText, shadowTitle].filter(Boolean).join("\n");
+  if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, stateTitle: tip(`최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음`) };
+  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, stateTitle: tip(`같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음`) };
   const lv = c.levels || null;
   const sideKo = evidenceContSideKo(c.cont_side);
   // 2026-09-06: 무장·트레일·만기는 같은 화면의 최종 결정 카드(가격선 줄 + ④ 포지션)가 이미 보여준다.
@@ -1947,13 +1953,13 @@ function fireContIndicatorItem() {
     : "가격선 계산 불가(ATR 웜업)";
   if (c.phase === "continuation") {
     const tone = c.regime_consistency === "conflict" ? "warn" : (c.cont_side === "short" ? "bad" : "good");
-    return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times, liveTitle: shadowTitle,
+    return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times,
       meterNote: `창 ${c.bars_since}/${c.window_bars}봉`,
       meterNoteTitle: "첫 발동 후 몇 봉이 지났는지입니다. 이 창(12봉) 안에서만 신규 진입하고, 창이 끝나면 보유분만 트레일/만기까지 유지합니다.",
-      liveText: `${levelText}${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
+      stateTitle: tip(`${levelText}${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""}`) };
   }
-  return { ...base, tone: "neutral", subText: "종료", history: hist, times, liveTitle: shadowTitle,
-    liveText: `${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 기존 포지션은 트레일/만기까지 유지 · ${levelText} · ${shadowText}` };
+  return { ...base, tone: "neutral", subText: "종료", history: hist, times,
+    stateTitle: tip(`${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 보유분은 트레일/만기까지 유지 · ${levelText}`) };
 }
 
 function renderEvidenceContinuation(payload) {
