@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""⚠️**은퇴(2026-09-07)** -- 대시보드 표시·서버 러너·crontab @reboot·supervisor 전부 제거됨. 파일은 원장
+재현용으로만 남긴다(`--report`/`--parity`는 기존 `data/live/*state*.json`에 그대로 동작).
+사유: 트레일링 청산의 "걸 수 없는 스톱" 결함으로 경제성 근거가 무효화됐고(OOS +6.06 -> -10.82bp),
+청산과 무관한 경로 측정에서도 방향 정보가 없었다(지속 규칙 H200 0.5054 [0.4981,0.5127] /
+B2 H200 VAL 0.5029 · OOS 0.5186 -- 둘 다 동전). 되살리려면 그 판정부터 다시 세울 것.
+docs/experiments/eth_trailing_stop_infeasible_fill_invalidates_exit_edge_20260907.md
+docs/experiments/eth_retail_shift_b2_exitfree_path_20260907.md
+"""
 """ETH **retail_shift 지속 신호(B2)** 섀도우 러너 + 롱숏비 공개 지연(known_ts) 수집기 -- 가상 체결만 기록한다. 주문을 내지 않는다.
 
 ## 규칙 (사전등록: docs/experiments/eth_retail_shift_b2_shadow_prereg_20260905.md, 근거: 호메로스 §5.28)

@@ -1593,27 +1593,6 @@ svg {
   [data-asset-scope].asset-loading::after { animation: none; background: rgba(255,255,255,.05); }
 }
 
-/* 2026-09-04 증거신호 패널 "지속 구간 / 되돌림 대기" 한 줄 (호메로스 §5.23) -- 헤더 아래, 목록 위.
-   .signal-meaning과 같은 시각 언어(좌측 톤 바)지만 이름을 분리해 기존 규칙과 충돌하지 않게 함. */
-.evidence-cont-line {
-  margin: 0 0 6px;
-  padding: 7px 10px;
-  border-left: 2px solid var(--line);
-  border-radius: 0 6px 6px 0;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text);
-  font: 700 11px/1.5 var(--font-sans);
-  cursor: help;
-}
-.evidence-cont-line.hidden { display: none; }
-.evidence-cont-line.good { border-left-color: var(--good); }
-.evidence-cont-line.bad { border-left-color: var(--bad); }
-.evidence-cont-line.warn { border-left-color: var(--amber); }
-.evidence-cont-line.neutral { border-left-color: var(--muted); color: var(--muted); }
-/* 이번 첫발동 사건에 기여한 신호 행의 배지 -- horizon-badge pill을 그대로 쓰고 색만 톤별로 */
-.horizon-badge.cont-badge.good { color: var(--good); background: rgba(76, 175, 125, 0.12); border-color: rgba(76, 175, 125, 0.4); }
-.horizon-badge.cont-badge.bad { color: var(--bad); background: rgba(224, 82, 82, 0.12); border-color: rgba(224, 82, 82, 0.4); }
-.horizon-badge.cont-badge.neutral { color: var(--muted); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.18); }
 /* 알림 토글 + PWA 설치 버튼 (2026-09-04) ------------------------------------------------
    .topbar가 `1fr auto 1fr` 3열 그리드라 버튼을 그 직계 자식으로 두면 4번째 트랙이 없어 줄이
    바뀐다. 그래서 세션 표시와 한 셀(.top-right)로 묶고, 그 안에서 flex로 배치한다. */
@@ -1821,48 +1800,3 @@ svg {
   .notify-tier { grid-template-columns: 1fr; gap: 2px; }
 }
 
-/* 2026-09-05 최종 결정 패널 (사용자 요청) --------------------------------------------------
-   세 로직(칩=사건 · 지속 규칙=방향 · F0=되돌림)을 한 장으로 합친 카드. 새 계산은 없고 읽는 순서만
-   정한다. 클래스는 `fd-` 접두어로 격리 -- 기존 .signal-* / .ops-* / .evidence-* 와 충돌하지 않는다. */
-.final-decision-panel { border-left: 3px solid var(--line); }
-.final-decision-panel.good { border-left-color: var(--good); }
-.final-decision-panel.bad { border-left-color: var(--bad); }
-.final-decision-panel.warn { border-left-color: var(--amber); }
-.fd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.fd-title {
-  margin: 0; font: 700 11px/1.2 var(--font-sans); letter-spacing: .08em;
-  text-transform: uppercase; color: var(--muted);
-}
-.fd-verdict {
-  margin-left: auto; padding: 2px 8px; border-radius: 999px;
-  font: 700 11px/1.5 var(--font-sans); letter-spacing: .02em;
-  border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.06); color: var(--muted);
-}
-.fd-verdict.good { color: var(--good); background: rgba(76, 175, 125, 0.14); border-color: rgba(76, 175, 125, 0.45); }
-.fd-verdict.bad { color: var(--bad); background: rgba(224, 82, 82, 0.14); border-color: rgba(224, 82, 82, 0.45); }
-.fd-verdict.warn { color: var(--amber); background: rgba(214, 158, 46, 0.14); border-color: rgba(214, 158, 46, 0.45); }
-.fd-headline { margin: 0 0 8px; font: 700 15px/1.35 var(--font-sans); color: var(--text); }
-.fd-headline.good { color: var(--good); }
-.fd-headline.bad { color: var(--bad); }
-.fd-headline.warn { color: var(--amber); }
-.fd-headline.muted { color: var(--muted); font-weight: 600; font-size: 13px; }
-/* 3층 근거 -- 라벨(사건/방향/되돌림) + 내용. 좁은 화면에서는 라벨이 위로 접힌다. */
-.fd-layers { display: grid; gap: 4px; margin: 0 0 8px; }
-.fd-layer { display: grid; grid-template-columns: 62px 1fr; gap: 8px; align-items: baseline; }
-.fd-layer-k {
-  font: 700 10px/1.6 var(--font-sans); letter-spacing: .06em; color: var(--muted);
-  text-transform: uppercase; white-space: nowrap;
-}
-.fd-layer-v { font: 600 12px/1.55 var(--font-sans); color: var(--text); }
-.fd-layer.dim .fd-layer-v { color: var(--muted); font-weight: 500; }
-.fd-levels {
-  margin: 0 0 6px; padding: 6px 9px; border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  font: 600 11px/1.6 var(--font-mono, var(--font-sans)); color: var(--text);
-}
-.fd-levels.hidden { display: none; }
-.fd-footer { margin: 0; font: 500 10.5px/1.55 var(--font-sans); color: var(--muted); }
-@media (max-width: 520px) {
-  .fd-layer { grid-template-columns: 1fr; gap: 0; }
-  .fd-layer-k { line-height: 1.3; }
-}

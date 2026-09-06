@@ -53,8 +53,6 @@ from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
 from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
-from scripts.live_eth_fire_cont_shadow_runner_20260904 import (  # noqa: E402  (표시 전용, 호메로스 §5.23·§5.27)
-    continuation_history, continuation_levels, continuation_state, shadow_summary as fire_cont_shadow_summary)
 # BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH의
 # /api/evidence-signals를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다").
 # ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
@@ -245,10 +243,6 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
-# 2026-09-04 지속 규칙 섀도우(scripts/live_eth_fire_cont_shadow_runner_20260904.py, supervisor 관리) 상태파일 -- 특화감지기 카드 표시 전용
-FIRE_CONT_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "fire_cont_shadow_state.json"
-# 2026-09-05 retail_shift(개미 롱숏비 급변의 반대) 지속 신호 B2 섀도우(scripts/live_eth_retail_shift_b2_shadow_runner_20260905.py)
-RETAIL_SHIFT_B2_STATE_PATH = REPO_ROOT / "data" / "live" / "retail_shift_b2_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
@@ -966,61 +960,6 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
     }
 
 
-def retail_shift_b2_payload() -> dict[str, Any]:
-    """retail_shift 지속 신호(B2)의 섀도우 원장 + 롱숏비 공개지연(known_ts) 계측. 표시 전용, 주문 없음.
-
-    러너: scripts/live_eth_retail_shift_b2_shadow_runner_20260905.py (supervisor + crontab @reboot)
-    사전등록: docs/experiments/eth_retail_shift_b2_shadow_prereg_20260905.md (호메로스 §5.28)
-    ⚠️30일 관문이 성과가 아니라 **계측**이다 -- 결정 시각에 롱숏비 행이 이미 보였는가(지연 ≤300초 비율 <95%면
-    성과 판단 자체를 하지 않는다). 그래서 이 페이로드는 손익보다 지연 통계를 먼저 싣는다.
-    """
-    state = load_json(RETAIL_SHIFT_B2_STATE_PATH) or {}
-    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
-    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-    pnls: list[float] = []
-    pnls_maker: list[float] = []
-    for row in ledger:
-        try:
-            pnls.append(float(row["pnl_bp"]))
-            pnls_maker.append(float(row.get("pnl_maker_bp", row["pnl_bp"])))
-        except (KeyError, TypeError, ValueError):
-            continue
-    n = len(pnls)
-    days = None
-    started = state.get("started_utc")
-    if started:
-        try:
-            days = max((datetime.now(timezone.utc) - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
-        except (TypeError, ValueError):
-            days = None
-    known = state.get("known_ts") if isinstance(state.get("known_ts"), dict) else {}
-    return {
-        "available": bool(state),
-        "rule": state.get("rule"),
-        "started_utc": started,
-        "days_running": (round(days, 2) if days is not None else None),
-        "last_decided_bar_utc": state.get("last_decided_bar_utc"),
-        # 2026-09-06: 러너가 남기는 마지막 결정(z·임계·행 관측 여부). 화면이 "대기"만 말하지 않도록.
-        "last_decision": state.get("last_decision") or {},
-        "closed_trades": n,
-        "exp_bp": (round(sum(pnls) / n, 2) if n else None),
-        "exp_maker_bp": (round(sum(pnls_maker) / n, 2) if n else None),
-        "win_rate": (round(len([v for v in pnls if v > 0]) / n, 3) if n else None),
-        "total_bp": (round(sum(pnls), 1) if n else None),
-        "trades_per_day": (round(n / days, 2) if (n and days) else None),
-        "open_positions": len(positions),
-        "open_sides": sorted({str(pos.get("side")) for pos in positions}),
-        "decided_bars": state.get("decided_bars"),
-        "missed_bars": state.get("missed_bars"),
-        "skipped": state.get("skipped") or {},
-        # known_ts: 러너 store.delay_stats() 원문(n/p05/p50/p95/max/share_le_12s/share_le_300s/n_backfill)
-        "known_ts": known,
-        # 사전등록 기대치(판정 근거 아님, 섀도우가 재현해야 할 범위). lag1 = 라이브 규약.
-        "backtest_ref": {"val_bp": 12.68, "oos_bp": 12.28, "per_day": 3.4,
-                         "union_minus_r_val": 6.05, "union_minus_r_oos": 7.43},
-    }
-
-
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -1487,34 +1426,6 @@ def make_app() -> web.Application:
                     entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
                     entry["model_low_atr"] = metalabels[name].get("low_atr")
                 signals_payload.append(entry)
-            # ── 발동 봉 "지속 구간" 표시 (2026-09-04, 호메로스 §5.23) ──
-            # 8종 raw 첫발동(GAP12) 봉은 경제라벨 척도(1.5 ATR 무장·5 ATR 손절)에서 반전이 아니라 **지속** 시점이었다
-            # (TRAIN 12,987건 페이드 −3.0 vs 반대 +4.7bp, P(페이드>지속)=0.446; 반대 방향 규칙 VAL +4.44/OOS +6.78bp).
-            # 화면에는 "지금이 지속 창인가(첫발동 후 ≤12봉) / 되돌림 대기인가(≤48봉)", 레짐 방향 일치, F0 경제모델
-            # (섀도우 러너 원장)의 최근 호출을 **표시 전용**으로 덧붙인다. 발동 조건·확률·net_score·투표는 불변.
-            # 첫발동 규약은 섀도우 러너와 같은 함수(continuation_state)를 써서 화면과 러너가 어긋나지 않게 한다.
-            continuation = None
-            if warmed_up:
-                try:
-                    econ_state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
-                    f0_calls = [{"entry_utc": p.get("entry_utc"), "side": p.get("side"), "proba": p.get("proba")}
-                                for p in list(econ_state.get("positions") or []) + list(econ_state.get("ledger") or [])[-50:]]
-                    continuation = await asyncio.to_thread(continuation_state, sig, regime_wide24_cache.get("payload"), f0_calls)
-                    cont_signals = continuation.get("signals") or {}
-                    for entry in signals_payload:
-                        entry["cont_first_fire_side"] = cont_signals.get(entry["name"])
-                    # 2026-09-04 (사용자 요청, 호메로스 §5.27) 지속 규칙 **특화감지기 카드**용 덧붙임 -- 봉별 국면 띠(과거만 봄),
-                    # 러너와 같은 산식의 가격선(다음 봉 시가 진입·5/1.5/0.1 ATR 브래킷·200봉 만기), 섀도우 원장 요약. 전부 표시 전용.
-                    try:
-                        continuation["history"] = continuation_history(sig)
-                        if continuation.get("active") and continuation.get("cont_side") and continuation.get("event_bar_utc"):
-                            continuation["levels"] = continuation_levels(df, str(continuation["event_bar_utc"]), str(continuation["cont_side"]), int(continuation.get("bars_since") or 0))
-                        continuation["shadow"] = fire_cont_shadow_summary(load_json(FIRE_CONT_SHADOW_STATE_PATH) or {})
-                    except Exception as card_exc:  # noqa: BLE001 -- 카드 부속 정보 실패는 한 줄/배지 표시에 영향 없음
-                        print(f"evidence-signal continuation card extras failed (display-only): {card_exc}", flush=True)
-                except Exception as cont_exc:  # noqa: BLE001 -- 표시 전용, 실패해도 나머지는 그대로 렌더
-                    print(f"evidence-signal continuation block failed (display-only, skipped this cycle): {cont_exc}", flush=True)
-                    continuation = None
             # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
             # -- they need much faster polling than this endpoint's 5min client-side cadence, see
             # api_session_alerts()'s docstring.
@@ -1528,7 +1439,6 @@ def make_app() -> web.Application:
                 "bottom_votes": int(latest["bottom_votes"]) if warmed_up else None,
                 "top_votes": int(latest["top_votes"]) if warmed_up else None,
                 "signals": signals_payload,
-                "continuation": continuation,
             }
             # Closed-bar frames only (forming bar already dropped above) -- reused by
             # load_evidence_signals_provisional() so its ~10s poll doesn't re-pull the full
@@ -2332,12 +2242,6 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, v_rebound_econ_shadow_payload(), etag)
 
-    async def api_retail_shift_b2(request: web.Request) -> web.Response:
-        etag = make_etag("retail-shift-b2", file_signature(RETAIL_SHIFT_B2_STATE_PATH))
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        return json_response(request, retail_shift_b2_payload(), etag)
-
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -2374,7 +2278,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
     app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
-    app.router.add_get("/api/retail-shift-b2", api_retail_shift_b2)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     # show_index=False to match /data/live/ below: this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
