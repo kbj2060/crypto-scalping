@@ -1812,8 +1812,10 @@ function evidenceContRegimeText(c) {
 // **30일 계측 → 90일 판정** 구조라 1차 기준은 건수가 아니라 **일수**다(09-05 원장 전수점검의 함정 3:
 // "일수 1~2일의 일군집 CI는 숫자가 아니다"). 일수를 채워도 표본이 얇으면 2차로 막는다.
 function shadowSampleWarning(days, trades) {
-  if (days != null && Number(days) < 30) return ` ⚠️계측 ${Number(days).toFixed(1)}/30일 — 판단 불가`;
-  if (trades != null && trades > 0 && trades < 30) return " ⚠️표본 부족 — 판단 불가";
+  // 2026-09-06: "— 판단 불가" 꼬리말 제거(사용자 요청). 진행도 자체가 그 말을 하고 있고,
+  // 왜 판단하면 안 되는지는 상태 설명과 '자세히'에 있다.
+  if (days != null && Number(days) < 30) return ` ⚠️계측 ${Number(days).toFixed(1)}/30일`;
+  if (trades != null && trades > 0 && trades < 30) return " ⚠️표본 부족";
   return "";
 }
 
@@ -1903,7 +1905,7 @@ function retailShiftB2IndicatorItem() {
     : `지연 ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
   const gateBad = share300 != null && k.n >= 30 && share300 < 0.95;
   // 2026-09-06 배포 직후 실측이 n=2에 건당 −54.8bp였다. 09-05 원장 전수점검의 첫 번째 함정이
-  // "표본 1~2건의 수치를 성과로 읽는 것"이라, 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
+  // "표본 1~2건의 수치를 성과로 읽는 것"이라, 숫자 옆에 계측 진행도를 붙이고 tone도 올리지 않는다.
   const thinSample = shadowSampleWarning(p.days_running, p.closed_trades);
   const ledgerText = shadowLedgerText(p);
   const ledgerTitle = [shadowLedgerTitle(p), k.n ? `공개지연 p50 ${k.p50}s · p95 ${k.p95}s${k.max != null ? ` · 최대 ${k.max}s` : ""} (표본 ${k.n}행${k.n_backfill != null ? `, 백필 ${k.n_backfill}` : ""})` : ""].filter(Boolean).join("\n");
