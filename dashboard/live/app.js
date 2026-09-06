@@ -1334,6 +1334,13 @@ function coinIndicator(item, kind) {
   return ethOnlyIndicator(item);
 }
 
+// 2026-09-06 (사용자 신고 "V자 급등락의 미발동만 흰색"): 서버가 주는 V자 톤 **"flat"**(방향 없음)은
+// CSS에 대응 규칙이 없다(.meter-state / .signal-chip / .ops-health-row 전부 good·bad·warn·neutral 뿐).
+// 클래스는 붙지만 색 규칙이 없어 글자색이 상속돼 흰색으로 떴다 -- 같은 뜻인 다른 감지기의 `미발동`은
+// 전부 회색이다. 스트립 SVG는 이미 flat 을 neutral 과 같은 회색으로 칠하고 있었으니(toneStripSvg 의
+// fill 폴백) 배지·행·칩만 법칙에서 벗어나 있었다. 여기서 한 번에 정규화한다.
+function toneClass(tone) { return tone === "flat" ? "neutral" : (tone || "neutral"); }
+
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
   // model_indicator_history only advances once per MODEL_INDICATOR_SAMPLE_SECONDS (300s server-
@@ -1343,14 +1350,15 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
   // unchanged those writes are redundant-but-harmless); only the expensive setH() innerHTML
   // rebuild is skipped when nothing actually changed.
   const html = items.map((it) => {
+    const tone = toneClass(it.tone);                 // flat -> neutral (위 주석)
     const chipId = MODEL_CHIP_IDS[it.key];
     const chip = chipId ? el(chipId) : null;
     if (chip) {
-      chip.className = `signal-chip ${it.tone}`;
+      chip.className = `signal-chip ${tone}`;
       const stateEl = chip.querySelector(".signal-chip-state");
       if (stateEl) {
         const arrow = DIRECTIONAL_MODEL_CHIP_KEYS.has(it.key)
-          ? (it.tone === "good" ? "▲ " : it.tone === "bad" ? "▼ " : "– ")
+          ? (tone === "good" ? "▲ " : tone === "bad" ? "▼ " : "– ")
           : "";
         stateEl.textContent = `${arrow}${it.subText || "-"}`;
       }
@@ -1379,18 +1387,18 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
     // 다른 뜻이 같은 그림으로 보인다. 확률이 아닌 수치는 meter-price 자리(meterNote)에 적는다.
     const gaugeHtml = (it.probaSlot || it.proba != null)
       ? `<div class="meter-gauge">
-          <span class="meter-track"><span class="meter-fill ${it.tone}" style="width:${clamp01(it.proba || 0) * 100}%"></span></span>
+          <span class="meter-track"><span class="meter-fill ${tone}" style="width:${clamp01(it.proba || 0) * 100}%"></span></span>
           <span class="meter-pct">${it.proba != null ? `${Math.round(clamp01(it.proba) * 100)}%` : "-"}</span>
         </div>`
       : "";
     const metaHtml = (forceMeter || it.proba != null)
       ? `<div class="meter-col">
-          <span class="meter-state ${it.tone}">${escapeHtml(it.subText || "-")}</span>
+          <span class="meter-state ${tone}">${escapeHtml(it.subText || "-")}</span>
           ${gaugeHtml}
           ${it.meterNote ? `<span class="meter-price" title="${escapeHtml(it.meterNoteTitle || "")}">${escapeHtml(it.meterNote)}</span>` : ""}
         </div>`
       : `<span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>`;
-    return `<article class="ops-health-row ${it.tone}">
+    return `<article class="ops-health-row ${tone}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
         <strong>${escapeHtml(it.label)}${horizonBadgeHtml(it.key)}${derivedTag}</strong>
