@@ -1089,35 +1089,35 @@ const MODEL_INDICATOR_MEANING = {
   v_rebound: {
     "웜업": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
     "데이터 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "롱 발동": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 바닥이고 진짜 반등(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 오르고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미발동'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "숏 발동": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 천장이고 진짜 반전(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 내리고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미발동'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "미발동": "지금 V자반등의 근거가 없다는 뜻이에요 — 직전에 뜬 롱/숏 발동도 이미 목표(1.5×ATR)에 닿았거나 60분이 지나 내려간 상태입니다. 대부분의 봉이 여기 해당하는 **평상시 상태**예요(롱/숏 발동은 전체 봉의 약 5%뿐). '반대방향으로 움직인다'는 뜻이 아니라 '지금은 반등/반전을 말할 근거가 없다'는 뜻이에요. 2026-09-01 매 봉 채점으로 바뀌기 전에는 트리거가 발동한 봉에서만 나오던 판정이라 지금보다 훨씬 드물었어요.",
+    "롱 발동": "TabPFN이 '바닥이고 진짜 반등이 온다'로 채점했어요 — 30분 안 1.5×ATR 상승 판정. 목표 도달이나 60분 경과까지 유지돼요.",
+    "숏 발동": "TabPFN이 '천장이고 진짜 반전이 온다'로 채점했어요 — 30분 안 1.5×ATR 하락 판정. 목표 도달이나 60분 경과까지 유지돼요.",
+    "미발동": "지금 반등/반전을 말할 근거가 없어요 — 대부분의 봉이 여기고(발동은 약 5%), '반대로 간다'는 뜻이 아니에요.",
   },
   // 2026-09-06: 특화감지기 라벨 통일과 함께 신설. 증거신호 칩은 상태마다 설명이 있는데 이 둘은
   // 없어서, 같은 자리에 뜨는 배지인데 하나만 눌러도 아무 말이 없었다.
   fire_cont: {
     "웜업": "ATR·증거신호 계산에 필요한 봉을 모으는 중이에요 -- 잠시 후 값이 나와요.",
     "오류": "증거신호 계산에 실패했어요 -- 다음 봉에서 대부분 정상으로 돌아옵니다.",
-    "미발동": "최근 48봉 안에 8종 증거신호의 **첫 발동**이 없었다는 뜻이에요. 이 규칙은 첫 발동 봉에서만 진입하므로 대부분의 시간이 여기예요(백테스트 기준 하루 22~24건).",
-    "롱 지속": "천장 쪽 첫 발동 후 12봉 지속 창 안이고, 규칙은 칩이 가리키는 방향의 **반대**인 롱으로 갑니다(호메로스 §5.23: 첫 발동 봉은 반전이 아니라 지속 시점 -- 페이드 -3.0 vs 반대 +4.7bp). 표시 전용이고 실제 주문은 없어요(섀도우 90일 판정 전). ⚠️레짐과 방향이 어긋나면(숏인데 bear가 아니거나, 롱인데 bear) 이 배지가 **주황**으로 바뀌는데, 그건 '약하다'는 표시일 뿐 규칙은 그대로 진입합니다 — 방향 일치 셀이 더 견고했지만(축 14) 레짐 필터는 21팔 비교에서 기준을 못 이겨 채택하지 않았어요(§5.27).",
-    "숏 지속": "바닥 쪽 첫 발동 후 12봉 지속 창 안이고, 규칙은 칩이 가리키는 방향의 **반대**인 숏으로 갑니다(호메로스 §5.23). 표시 전용이고 실제 주문은 없어요(섀도우 90일 판정 전). ⚠️레짐과 방향이 어긋나면(숏인데 bear가 아니거나, 롱인데 bear) 이 배지가 **주황**으로 바뀌는데, 그건 '약하다'는 표시일 뿐 규칙은 그대로 진입합니다 — 방향 일치 셀이 더 견고했지만(축 14) 레짐 필터는 21팔 비교에서 기준을 못 이겨 채택하지 않았어요(§5.27).",
+    "미발동": "최근 48봉 안 증거신호 첫 발동이 없어요. 첫 발동 봉에서만 진입하므로 대부분이 여기예요(하루 22~24건).",
+    "롱 지속": "천장 첫 발동 후 12봉 창 안 — 칩 방향의 **반대**인 롱으로 갑니다. 표시 전용이고 주문은 없어요.",
+    "숏 지속": "바닥 첫 발동 후 12봉 창 안 — 칩 방향의 **반대**인 숏으로 갑니다. 표시 전용이고 주문은 없어요.",
     "혼재 보류": "같은 봉에 바닥·천장 신호가 동시에 첫 발동했어요. 방향 정보가 없으므로 규칙상 **진입하지 않습니다**.",
-    "종료": "지속 창(12봉)이 끝났어요. 신규 진입은 없고 보유분만 트레일/만기까지 유지합니다. ⚠️'이제 반대로 가라'는 뜻이 아니에요 -- 짧은 지평 페이드는 승률이 오르지만(50%->53.7~56.0%) 손익비 0.74~0.92가 정확히 지워서 비용 후에는 열 지평 x 세 창 30셀 전부 -6.5~-14.2bp였어요(부록 15).",
+    "종료": "지속 창(12봉)이 끝났어요. 신규 진입 없이 보유분만 유지 — '반대로 가라'는 뜻이 아니에요.",
   },
   retail_shift_b2: {
     "로딩": "값을 불러오는 중이에요.",
     "오류": "원장을 불러오지 못했어요.",
     "원장 없음": "러너가 아직 첫 결정을 기록하지 않았어요.",
-    "미발동": "개미 롱숏비의 30분 변화 z가 임계(±2.2616) 안이라 진입 조건이 아니에요. 임계를 넘어도 같은 측면이 직전 12행 안에 이미 발동했으면 건너뛰므로(GAP12), 실제 진입은 하루 2~4건뿐이에요. 지금 z 값은 아래 줄 맨 앞에 있어요.",
-    "롱 보유": "개미 계정이 숏으로 쏠린(z <= -2.2616) 반대 방향인 롱으로 섀도우 포지션을 들고 있어요. 표시 전용이고 실제 주문은 없어요.",
-    "숏 보유": "개미 계정이 롱으로 쏠린(z >= +2.2616) 반대 방향인 숏으로 섀도우 포지션을 들고 있어요. 표시 전용이고 실제 주문은 없어요.",
+    "미발동": "롱숏비 z가 임계(±2.26) 안이라 진입 조건이 아니에요. 실제 진입은 하루 2~4건뿐입니다.",
+    "롱 보유": "개미가 숏으로 쏠린(z ≤ −2.26) 반대인 롱으로 섀도우 포지션 보유 중이에요(주문 없음).",
+    "숏 보유": "개미가 롱으로 쏠린(z ≥ +2.26) 반대인 숏으로 섀도우 포지션 보유 중이에요(주문 없음).",
     "혼재 보유": "롱·숏 포지션을 동시에 들고 있어요(서로 다른 발동에서 진입한 상태).",
-    "계측 미달": "롱숏비 행이 결정 시각까지 공개되지 않은 비율이 커요(<=300초 비율 95% 미만). 사전등록상 이 구간에서는 **성과를 판단하지 않습니다** -- 라이브 타이밍이 백테스트 규약과 어긋난다는 뜻이라 손익 숫자를 읽으면 안 돼요.",
+    "계측 미달": "롱숏비 행이 결정 시각에 안 보인 비율이 커요 — 사전등록상 이 구간은 **성과를 판단하지 않습니다**.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
-    "숏압박↑": "베이시스가 콘탱고(선물이 현물보다 비쌈) 쪽 극단이에요 — 실측상 이런 국면 이후 1~4시간 숏 강제청산액이 늘고 롱 청산액은 줄어드는 경향이 있었어요(약 1개월치 탐색적 관측). 가격이 오른다는 뜻은 아니고, '숏 쪽이 청산 압박을 더 받을 수 있다'는 리스크 정보예요.",
-    "롱압박↑": "베이시스가 백워데이션(선물이 현물보다 쌈) 쪽 극단이에요 — 실측상 이런 국면 이후 1~4시간 롱 강제청산액이 늘고 숏 청산액은 줄어드는 경향이 있었어요(약 1개월치 탐색적 관측). 가격이 내린다는 뜻은 아니고, '롱 쪽이 청산 압박을 더 받을 수 있다'는 리스크 정보예요.",
+    "숏압박↑": "베이시스 콘탱고 극단 — 이후 1~4시간 숏 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
+    "롱압박↑": "베이시스 백워데이션 극단 — 이후 1~4시간 롱 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
   },
   liq_cascade: {
     "안정": "지금 진행 중인 청산 캐스케이드가 없어요 — 청산 흐름이 평소 수준이에요.",
@@ -1145,9 +1145,11 @@ const MODEL_INDICATOR_DETAIL = {
   fire_cont: "[규칙] 8종 증거신호(반전 감지기)의 raw 첫발동(같은 신호·측면 직전 12봉에 발동 없음) 봉이 마감되면, 칩이 가리키는 되돌림 방향이 아니라 **그 반대(지속) 방향**으로 다음 봉 시가에 진입합니다. 바닥 발동→숏, 천장 발동→롱. 같은 봉에 양측이 동시에 첫발동하면 건너뜁니다. 모델·확률은 쓰지 않는 순수 규칙입니다.\n" +
     "[청산] 손절 5×ATR(14) · 1.5×ATR 유리하게 가면 무장 · 무장 후 최고가/최저가 대비 0.1×ATR 트레일 · 200봉 만기. 동시 5포지션 상한.\n" +
     "[근거] 호메로스 §5.23·§5.27: 첫발동 봉은 경제라벨 척도에서 반전이 아니라 지속 시점(TRAIN 12,987건 페이드 −3.0 vs 지속 +4.7bp). 21개 결정 팔 비교에서 이 규칙만 VAL·OOS 둘 다 일군집 CI>0 (VAL +5.13 [+1.07,+9.30] / OOS +5.36 [+0.89,+9.93] bp/건, 하루 22건, 10bp 차감). L2 확률 라우팅·레짐 필터·추세 신호 추가는 이 규칙을 통계적으로 못 이겼습니다.\n" +
-    "[상태] 2026-09-04부터 섀도우(가상 원장, 주문 없음) 가동. 사전등록: 30일 계측 점검(지연·슬리피지·발동 빈도) → 90일 판정(마감+시가평가 평균 순손익 일군집 CI 하한>0이면 사이징·실행 설계 단계, 상한<0이면 폐기). 킬 스위치: 최근 30일 평균<−10bp ∧ CI 상한<0. 카드의 가격선은 러너와 같은 산식으로 대시보드가 다시 계산한 표시값입니다.",
+    "[상태] 2026-09-04부터 섀도우(가상 원장, 주문 없음) 가동. 사전등록: 30일 계측 점검(지연·슬리피지·발동 빈도) → 90일 판정(마감+시가평가 평균 순손익 일군집 CI 하한>0이면 사이징·실행 설계 단계, 상한<0이면 폐기). 킬 스위치: 최근 30일 평균<−10bp ∧ CI 상한<0. 카드의 가격선은 러너와 같은 산식으로 대시보드가 다시 계산한 표시값입니다.\n" +
+    "[레짐 배지] 지속 방향이 레짐과 어긋나면(숏인데 bear가 아니거나 롱인데 bear) 배지가 주황이 됩니다. '약하다'는 표시일 뿐 규칙은 그대로 진입합니다 — 방향 일치 셀이 더 견고했지만(축 14: 바닥 발동 ∧ bear → 숏 TRAIN +10.6 / VAL +11.4 / OOS +16.7bp) 레짐 필터 팔은 21팔 비교에서 기준을 못 이겨 채택하지 않았습니다(§5.27).\n" +
+    "[창 종료] 창이 끝난 구간은 규칙이 적용되지 않는 구간일 뿐 페이드 근거가 아닙니다 — 짧은 지평 페이드는 승률이 오르지만(전봉 기저 50% → 53.7~56.0%, 세 창·양 측면) 손익비 0.74~0.92가 정확히 상쇄해서 비용 후에는 열 지평 × 세 창 30셀 전부 −6.5~−14.2bp였습니다(부록 15).",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
-    "[배지 유지 규칙] 급등/급락 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
+    "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
     "[기준] **확률≥60%**면 '반등 콜'(이후 30분 내 종가로 ATR(직전 기준) 1.5배 이상 반등 AND 60분 전체에서 정점 대비 20% 이하만 반납), 미만이면 '미반등 콜'(반등 근거 없음 — 반대방향으로 뚜렷하게 움직인다는 뜻은 아닙니다). 이 둘 사이(애매한 경우)는 라벨 자체가 없어 **학습에서 통째로 제외** — 라벨 정의(giveback 방식) 자체는 재설계 이후에도 안 바뀌었습니다. 매 봉이 채점되므로 대부분의 봉은 '미반등'입니다(60% 기준에서 급등/급락은 봉의 약 4.6~5.0%).\n" +
     "[배지 표시: 반등 콜만 급등/급락, 미반등 콜은 별도 '미반등'] 2026-08-31 두 차례 정정했습니다. 처음엔 '반등'/'반락'을 콜 이름 그대로 노출해서 상승 트리거 후 반등 콜처럼 실제로는 하락이 예상되는데도 '반등'이라고 표시되며 빨간색이 뜨는 경우가 있었습니다(사용자 지적) — 그래서 반등/미반등 콜을 트리거 방향과 조합해 항상 급등(초록)/급락(빨강) 중 하나로 바꿨습니다. 그런데 미반등 콜은 '반등 시도 자체가 없었다'는 뜻일 뿐 반대방향으로 결정적으로 움직였다는 근거가 아닌데도 급등/급락이라는 강한 단어를 그대로 썼던 게 다시 지적받아(사용자 지적), 지금은 **진짜 반등(V자반등) 콜만** 트리거 방향과 조합해 급등(하락 트리거 후 반등, 초록)/급락(상승 트리거 후 반등, 빨강)으로 표시하고, **미반등 콜은 트리거 방향과 무관하게 항상 '미반등'**(회색, 중립 취급)으로 따로 표시합니다 — 활동-스트립을 마우스오버했을 때 나오는 막대별 라벨도 동일한 기준(백엔드 tone: good/bad/flat/neutral)으로 구분됩니다. '반락 콜'이라는 예전 이름 자체도 마치 반대방향으로 결정적으로 움직였다는 뜻처럼 들려 실제 정의와 어긋나 '미반등 콜'로 정정했습니다.\n" +
@@ -1155,6 +1157,13 @@ const MODEL_INDICATOR_DETAIL = {
     "[기준선을 50%→60%로 올린 이유, 2026-09-01] 결과 라벨이 붙은 봉을 대상으로 트레일링 스톱 경제성을 재면 50% 기준은 통과하지 못했고(방향 뒤집기 대조군이 정방향을 이김), 55%부터 역전돼 60%가 가장 깨끗했습니다. precision도 60%가 가장 높습니다(0.713/0.683). 빈도 손실도 없습니다 — 화면 기준 하루 11~12건, 신호 간격 중앙값 약 1시간, 신호 없는 날 0%(50%일 때는 하루 18건으로 오히려 과했습니다). **그래서 60%는 '분류 운영점'으로는 근거가 있습니다.**\n" +
     "[⚠️매매 신호로 쓰지 마세요 — 2026-09-01 확인] 이 칩의 경제성 수치는 전부 **결과 라벨이 붙은 봉(전체의 약 53%) 기준**입니다. 그런데 화면은 라벨 유무와 무관하게 **모든 봉**을 채점하므로, 뜨는 신호의 상당수는 결과가 '급반등'도 '횡보'도 아니었던 애매한 봉에 앉습니다. 그 전체 모집단에서 방향뒤집기 대조군을 돌려보니(ARM≥1.0 80셀 전수): VAL은 정방향 28 / 뒤집기 0으로 방향이 맞았지만, **OOS에서는 정방향 21 / 뒤집기 31로 역전**됩니다(아티팩트 무영향 구간만 보면 4 대 16). 즉 **화면에 뜨는 콜을 그대로 매매로 옮기면 최근 구간에서는 오히려 반대가 나았습니다.**\n" +
     "[유의] 위 결과가 분류 성능을 부정하는 건 아닙니다 — OOS AUC 0.7051로 '여기가 바닥/천장이다'를 가려내는 능력 자체는 유지됩니다. 무너진 건 그 판정을 트레일링 스톱 매매로 옮겼을 때의 방향성입니다. 봇 내부 상태가 아니라 대시보드 서버가 별도로 계산하며, 실제 매매 결정(trading_bot.py)에는 연결되어 있지 않습니다. **재량 판단의 참고 재료로만 쓰세요.**",
+  // 2026-09-06: 제목 밑 요약을 한두 줄로 줄이면서 옮겨온 전문. 이 감지기는 자세히 항목 자체가 없었다.
+  retail_shift_b2:
+    "[규칙] 개미 계정 롱숏비(globalLongShortAccountRatio)의 30분 변화(Δ6행)를 288행 z점수로 재고, |z| ≥ 2.2616(TRAIN 95분위, 동결)이면 그 **반대** 방향으로 다음 봉 시가에 진입합니다 — z ≤ −임계면 롱(계정이 숏으로 쏠림), z ≥ +임계면 숏. 같은 측면이 직전 12행 안에 이미 발동했으면 건너뜁니다(GAP12). 그래서 임계를 넘는 봉보다 실제 진입이 훨씬 적습니다(하루 2~4건).\n" +
+    "[청산] 지속 규칙(R)과 같은 브래킷 — 손절 5×ATR(14) · 1.5×ATR 무장 · 무장 후 0.1×ATR 트레일 · 200봉 만기.\n" +
+    "[계측이 먼저인 이유] 라이브 파생지표는 **봉 시가 스냅샷**이라 결정 시각(봉 마감 +12초)에 그 행이 아직 안 보일 수 있습니다. 30일 관문은 성과가 아니라 이 공개지연이고, ≤300초 비율이 95% 미만이면 사전등록상 성과를 판단하지 않습니다. 실측 지연은 p50 약 94초로 lag1 규약(한 봉 전 행으로 판단)이 성립합니다.\n" +
+    "[근거] 호메로스 §5.28: 경제 축 11개를 같은 틀로 스크린해서 살아남은 **유일한 새 축**입니다(나머지 통과 3축은 지속 규칙과 71~82% 겹치는 '같은 순간의 다른 이름'이었습니다). 방향이 직전 움직임과 독립(일치 0.48~0.58)이고 겹치지 않는 부분집합에서도 양수였습니다. 다만 라이브 규약(1봉 지연)으로 재면 TRAIN 차이 CI가 0을 포함해 사전 규칙을 아슬아슬하게 못 넘깁니다 — 후보이지 증명이 아닙니다.\n" +
+    "[상태] 2026-09-05부터 섀도우(가상 원장, 주문 없음) 가동. 판정은 90일 뒤 (R∪B2)−R 일손익의 일군집 CI 하한 > 0.",
   liq_pressure: "[계산] basis_raw = (선물 종가 − 현물 종가) / 현물 종가 (ETHUSDT, fapi.binance.com 선물 vs api.binance.com 현물). basis_z48 = basis_raw를 직전 48봉(4시간) 평균·표준편차로 정규화한 z값.\n" +
     "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정. 양수 극단=콘탱고(숏압박↑ 힌트), 음수 극단=백워데이션(롱압박↑ 힌트).\n" +
     "[의미] 2026-08-20에 '베이시스가 방향(다음 봉이 오를지 내릴지)을 예측하는가'로 먼저 테스트했으나 REJECTED(구간마다 부호가 뒤집힘) — 문헌(Schmeling/Schrimpf/Todorov 'Crypto Carry' BIS WP1087; He/Manela/Ross/von Wachter arXiv:2212.06888)이 원래 예측한 축은 방향이 아니라 '미래 변동성'과 '청산 크라우딩'이었습니다. 2026-08-27 그 방향으로 재검정: 변동성 예측은 이것도 부호가 안정적이지 않아 REJECTED급이었지만, 청산 크라우딩(어느 쪽이 강제청산 더 받는가)은 실제 청산 데이터(tail_risk.duckdb)로 확인한 결과 문헌과 부호까지 정확히 일치했습니다 — 베이시스 극단(양수) 이후 1h/4h 숏청산액이 유의하게 늘고(z=+3.9~+4.4) 롱청산액은 유의하게 줄었습니다(z=-4.3~-5.7), 음수 극단은 반대.\n" +
@@ -1386,7 +1395,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
       <div class="ops-health-info">
         <strong>${escapeHtml(it.label)}${horizonBadgeHtml(it.key)}${derivedTag}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
-        ${it.liveText ? `<p class="signal-meaning">${escapeHtml(it.liveText)}</p>` : ""}
+        ${it.liveText ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(it.liveTitle)}"` : ""}>${escapeHtml(it.liveText)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${toneStripSvg(it.history, times, false, false, it.key)}
           ${stripAxisHtml(times, "time")}
@@ -1823,14 +1832,23 @@ function specialDirLabel(side, word) {
 // ("섀도우 1.9일 · 마감 30건..." vs "마감 4건... · 미결 0 · 섀도우 1.0일"). 문장 순서를 하나로 고정한다:
 //   [상태 근거] · [섀도우 원장] · [계측] · [백테스트 기준] · [표본 가드]
 function shadowBp(x, d = 1) { return x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`; }
-function shadowLedgerText(sh, { withLast30 = false } = {}) {
+function shadowLedgerText(sh) {
   if (!sh || sh.closed_trades == null) return "섀도우 원장 없음";
   const days = sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-";
-  const perDay = sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : "";
-  const win = sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : "";
-  const last30 = withLast30 && sh.last30d_exp_bp != null ? ` · 30일 ${shadowBp(sh.last30d_exp_bp)}` : "";
   const sides = sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : "";
-  return `섀도우 ${days} · 마감 ${sh.closed_trades}건${perDay} · 건당 ${shadowBp(sh.exp_bp)}(메이커 ${shadowBp(sh.exp_maker_bp)})${win}${last30} · 미결 ${sh.open_positions}${sides}`;
+  return `섀도우 ${days} · ${sh.closed_trades}건 · 건당 ${shadowBp(sh.exp_bp)}(메이커 ${shadowBp(sh.exp_maker_bp)}) · 미결 ${sh.open_positions}${sides}`;
+}
+// 2026-09-06: 승률·빈도·최근 30일·총합·낙폭은 **툴팁으로** 옮긴다. 제목 밑 줄이 길다는 지적이 있었고,
+// 이 값들은 30일 계측 전까지 어차피 판단에 못 쓴다(⚠️가드가 그 말을 하고 있다).
+function shadowLedgerTitle(sh) {
+  if (!sh || sh.closed_trades == null) return "";
+  const f = [];
+  if (sh.trades_per_day != null) f.push(`빈도 ${sh.trades_per_day}건/일`);
+  if (sh.win_rate != null) f.push(`승률 ${Math.round(sh.win_rate * 100)}%`);
+  if (sh.last30d_exp_bp != null) f.push(`최근 30일 건당 ${shadowBp(sh.last30d_exp_bp)}`);
+  if (sh.total_bp != null) f.push(`누적 ${shadowBp(sh.total_bp)}`);
+  if (sh.max_dd_bp != null) f.push(`최대낙폭 ${shadowBp(sh.max_dd_bp)}`);
+  return f.length ? `섀도우 원장 상세: ${f.join(" · ")}` : "";
 }
 function backtestRefText(val, oos) {
   return `백테스트 VAL ${val > 0 ? "+" : ""}${Number(val).toFixed(1)} / OOS ${shadowBp(oos)}`;
@@ -1863,20 +1881,23 @@ function retailShiftB2IndicatorItem() {
   const thr = ld.thresh_z != null ? Number(ld.thresh_z) : 2.2616;
   const zNum = ld.z != null ? Number(ld.z) : null;
   const zSign = (v, d) => `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
+  // z 자체는 meta 열(meterNote)에 있으므로 문장에서는 임계와 행 상태만 말한다.
   const zText = zNum != null
-    ? `z ${zSign(zNum, 2)} / 임계 ±${thr.toFixed(2)}${ld.available === false ? " · 행 미관측" : ld.backfill ? " · 백필 행" : ""}`
+    ? `임계 ±${thr.toFixed(2)}${ld.available === false ? " · 행 미관측" : ld.backfill ? " · 백필 행" : ""}`
     : (ld.bar_utc ? "z 계산 불가(행 부족)" : "z 미기록 — 러너 재기동 전");
   const k = p.known_ts || {};
   const share300 = k.share_le_300s;
   // 관문 문구: 표본이 얇을 때(<30행) 통과/미달을 단정하지 않는다 -- 30일 계측 자체가 아직 진행 중이다.
   const gateText = k.n == null || !k.n
     ? "공개지연 표본 없음"
-    : `공개지연 p50 ${k.p50}s / p95 ${k.p95}s · ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
+    // 관문 자체는 ≤300s 비율이다. p50/p95 는 진단값이라 툴팁으로 보낸다(제목 밑 줄 길이).
+    : `지연 ≤300s ${share300 != null ? Math.round(share300 * 100) : "-"}%${k.n < 30 ? `(표본 ${k.n}행)` : ""}`;
   const gateBad = share300 != null && k.n >= 30 && share300 < 0.95;
   // 2026-09-06 배포 직후 실측이 n=2에 건당 −54.8bp였다. 09-05 원장 전수점검의 첫 번째 함정이
   // "표본 1~2건의 수치를 성과로 읽는 것"이라, 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
   const thinSample = shadowSampleWarning(p.days_running, p.closed_trades);
   const ledgerText = shadowLedgerText(p);
+  const ledgerTitle = [shadowLedgerTitle(p), k.n ? `공개지연 p50 ${k.p50}s · p95 ${k.p95}s${k.max != null ? ` · 최대 ${k.max}s` : ""} (표본 ${k.n}행${k.n_backfill != null ? `, 백필 ${k.n_backfill}` : ""})` : ""].filter(Boolean).join("\n");
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
   // 보유 중이면 그 방향, 아니면 미발동 -- z 값은 배지가 아니라 liveText 맨 앞에 둔다(공통 어휘 유지).
   const sides = p.open_sides || [];
@@ -1888,8 +1909,8 @@ function retailShiftB2IndicatorItem() {
   const note = zNum != null
     ? { meterNote: `z ${zSign(zNum, 2)}`, meterNoteTitle: `개미 롱숏비 30분 변화의 288행 z점수입니다. |z| ≥ ${thr.toFixed(4)} 이면 발동하고(z ≤ −임계 → 롱, ≥ +임계 → 숏), 같은 측면은 직전 12행 안에 이미 발동했으면 건너뜁니다.` }
     : {};
-  if (gateBad) return { ...base, ...note, tone: "warn", subText: "계측 미달", liveText };
-  return { ...base, ...note, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveText };
+  if (gateBad) return { ...base, ...note, tone: "warn", subText: "계측 미달", liveTitle: ledgerTitle, liveText };
+  return { ...base, ...note, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveTitle: ledgerTitle, liveText };
 }
 
 function fireContIndicatorItem() {
@@ -1902,22 +1923,25 @@ function fireContIndicatorItem() {
   const hist = (c && c.history) || [];
   const times = evenlySpacedBarTimes(p.latest_bar_utc, hist.length, 5);
   const sh = (c && c.shadow) || null;
-  const shadowText = `${shadowLedgerText(sh, { withLast30: true })} · ${backtestRefText(4.44, 6.78)}${sh ? shadowSampleWarning(sh.days_running, sh.closed_trades) : ""}`;
-  if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
-  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
+  const shadowText = `${shadowLedgerText(sh)} · ${backtestRefText(4.44, 6.78)}${sh ? shadowSampleWarning(sh.days_running, sh.closed_trades) : ""}`;
+  const shadowTitle = shadowLedgerTitle(sh);
+  if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, liveTitle: shadowTitle, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
+  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, liveTitle: shadowTitle, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
   const lv = c.levels || null;
   const sideKo = evidenceContSideKo(c.cont_side);
+  // 2026-09-06: 무장·트레일·만기는 같은 화면의 최종 결정 카드(가격선 줄 + ④ 포지션)가 이미 보여준다.
+  // 여기서는 진입·손절 두 개만 남긴다 -- 같은 숫자를 두 번 적는 것이 이 줄이 길어진 가장 큰 이유였다.
   const levelText = lv && lv.entry != null
-    ? `${lv.entry_basis === "pending_next_open" ? "진입 예정(다음 봉 시가, 참고 " : "진입 "}${fmtNum(lv.entry, 2)}${lv.entry_basis === "pending_next_open" ? ")" : ""} · 손절 ${fmtNum(lv.stop, 2)}(5×ATR) · 무장 ${fmtNum(lv.arm, 2)}(1.5×ATR) · 트레일 ${fmtNum(lv.trail_dist, 2)}(0.1×ATR) · 만기 ${lv.bars_left}봉 남음`
+    ? `${lv.entry_basis === "pending_next_open" ? "진입 예정 " : "진입 "}${fmtNum(lv.entry, 2)} · 손절 ${fmtNum(lv.stop, 2)}`
     : "가격선 계산 불가(ATR 웜업)";
   if (c.phase === "continuation") {
     const tone = c.regime_consistency === "conflict" ? "warn" : (c.cont_side === "short" ? "bad" : "good");
-    return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times,
+    return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times, liveTitle: shadowTitle,
       meterNote: `창 ${c.bars_since}/${c.window_bars}봉`,
       meterNoteTitle: "첫 발동 후 몇 봉이 지났는지입니다. 이 창(12봉) 안에서만 신규 진입하고, 창이 끝나면 보유분만 트레일/만기까지 유지합니다.",
       liveText: `${levelText}${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
   }
-  return { ...base, tone: "neutral", subText: "종료", history: hist, times,
+  return { ...base, tone: "neutral", subText: "종료", history: hist, times, liveTitle: shadowTitle,
     liveText: `${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 기존 포지션은 트레일/만기까지 유지 · ${levelText} · ${shadowText}` };
 }
 
