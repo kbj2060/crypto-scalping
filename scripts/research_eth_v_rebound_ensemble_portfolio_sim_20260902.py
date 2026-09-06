@@ -83,8 +83,15 @@ OUT = ROOT / "data/research/eth_v_rebound_ensemble_portfolio_20260902/report.jso
 def log(m): print(f"[pf] {m}", flush=True)
 
 
-def sim_exit(entry, atr, sign, H, L, C, sl, arm, trail):
-    """비관 기준 트레일링. (수익률, 청산봉오프셋) 반환."""
+def sim_exit_legacy(entry, atr, sign, H, L, C, sl, arm, trail):
+    """⚠️**결함 있는 원문 -- 동결 산출물 재현 전용. 새 연구에 쓰지 말 것.**
+
+    2026-09-07 감사: 트레일 스톱을 **시장이 이미 떠난 가격**(거래소가 거부하는 자리)에 놓고
+    그 가격에 체결까지 시켜준다. 배포 셀에서 거래의 **69.8%**가 해당, 스톱이 실제 마지막 체결가보다
+    **중앙 14.1bp 유리** -> 지속 규칙 R OOS **+6.06bp가 실행가능 가정에서 -15.75bp**가 된다.
+    라이브 섀도우 원장(39건)이 69.2%로 독립 재현.
+    전문: docs/experiments/eth_trailing_stop_infeasible_fill_invalidates_exit_edge_20260907.md
+    """
     n = len(entry)
     stop = entry - sign * sl * atr
     armed = np.zeros(n, bool); best = entry.copy()
@@ -107,6 +114,53 @@ def sim_exit(entry, atr, sign, H, L, C, sl, arm, trail):
         armed = armed | newly
         ns = best - sign * trail * atr
         u = live & armed & (sign * (ns - stop) > 0)
+        stop = np.where(u, ns, stop)
+    out = np.where(done, out, sign * (C[:, -1] - entry) / entry)
+    return out, ex
+
+
+def sim_exit(entry, atr, sign, H, L, C, sl, arm, trail, infeasible="exit"):
+    """비관 기준 트레일링. **거래소에 실제로 걸 수 있는 스톱만 인정한다** (2026-09-07 수정).
+
+    봉마다 (1)직전 스톱으로 불리한 쪽 판정 -> (2)유리한 쪽 best -> (3)무장 -> (4)트레일.
+    (4)에서 새 스톱 `ns = best - sign*trail*atr`이 그 봉 **종가보다 유리한 쪽**이면
+    (롱인데 ns > close) 그 자리엔 주문을 걸 수 없다 -- 거래소가 거부한다
+    ("Order would immediately trigger"). 그런데 원문은 걸린 것으로 치고 **그 가격에 체결까지** 시켜줬다.
+
+      infeasible='exit'   (기본) 즉시 그 봉 종가에 청산. 트레일링 스톱 운용의 충실한 모델.
+      infeasible='hold'         스톱을 올리지 않고 직전 스톱 유지 (느슨한 트레일 변형 정책).
+      infeasible='ignore'       원문(결함) 동작 = `sim_exit_legacy`.
+
+    (수익률, 청산봉오프셋) 반환."""
+    if infeasible == "ignore":
+        return sim_exit_legacy(entry, atr, sign, H, L, C, sl, arm, trail)
+    n = len(entry)
+    stop = entry - sign * sl * atr
+    armed = np.zeros(n, bool); best = entry.copy()
+    done = np.zeros(n, bool); out = np.zeros(n); ex = np.full(n, H.shape[1] - 1)
+    fav = np.where(sign[:, None] > 0, H, L)
+    adv = np.where(sign[:, None] > 0, L, H)
+    for t in range(H.shape[1]):
+        if done.all():
+            break
+        a_ = adv[:, t]
+        live = ~done
+        hit = live & np.where(sign > 0, a_ <= stop, a_ >= stop)
+        out = np.where(hit, sign * (stop - entry) / entry, out)
+        ex = np.where(hit, t, ex); done = done | hit
+        f_ = fav[:, t]
+        live = ~done
+        imp = live & (sign * (f_ - best) > 0)
+        best = np.where(imp, f_, best)
+        newly = live & ~armed & (sign * (best - entry) >= arm * atr)
+        armed = armed | newly
+        ns = best - sign * trail * atr
+        u = live & armed & (sign * (ns - stop) > 0)
+        bad = u & (sign * (ns - C[:, t]) > 0)          # 시장이 이미 떠난 자리 -> 걸 수 없다
+        if infeasible == "exit":
+            out = np.where(bad, sign * (C[:, t] - entry) / entry, out)
+            ex = np.where(bad, t, ex); done = done | bad
+        u = u & ~bad
         stop = np.where(u, ns, stop)
     out = np.where(done, out, sign * (C[:, -1] - entry) / entry)
     return out, ex

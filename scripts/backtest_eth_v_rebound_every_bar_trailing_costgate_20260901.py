@@ -87,6 +87,7 @@ def simulate_trailing_scalar(row, sl_mult, arm_mult, trail_mult, pessimistic) ->
     sign = 1.0 if side == "long" else -1.0
     stop = entry - sign * sl_mult * atr
     armed, best = False, entry
+    nonlocal_exit = [None]                             # 걸 수 없는 스톱으로 즉시 청산될 때의 수익률
     for o, h, l, c in zip(opens, highs, lows, closes):
         fav_extreme = h if side == "long" else l
         adv_extreme = l if side == "long" else h
@@ -103,14 +104,21 @@ def simulate_trailing_scalar(row, sl_mult, arm_mult, trail_mult, pessimistic) ->
             if armed:
                 new_stop = best - sign * trail_mult * atr
                 if sign * (new_stop - stop) > 0:
+                    if sign * (new_stop - c) > 0:      # 걸 수 없는 스톱 (2026-09-07) -> 종가 청산
+                        nonlocal_exit[0] = sign * (c - entry) / entry
+                        return
                     stop = new_stop
 
         if pessimistic:
             if stop_hit():
                 return sign * (stop - entry) / entry
             update_trailing()
+            if nonlocal_exit[0] is not None:
+                return nonlocal_exit[0]
         else:
             update_trailing()
+            if nonlocal_exit[0] is not None:
+                return nonlocal_exit[0]
             if stop_hit():
                 return sign * (stop - entry) / entry
     return sign * (closes[-1] - entry) / entry
@@ -129,8 +137,8 @@ def simulate_trailing_vec(entry, atr, sign, H, L, C, sl, arm, trail, pessimistic
     fav_all = np.where(sign[:, None] > 0, H, L)
     adv_all = np.where(sign[:, None] > 0, L, H)
 
-    def do_update(fav):
-        nonlocal best, armed, stop
+    def do_update(fav, cl):
+        nonlocal best, armed, stop, done, out
         live = ~done
         improve = live & (sign * (fav - best) > 0)
         best = np.where(improve, fav, best)
@@ -138,7 +146,10 @@ def simulate_trailing_vec(entry, atr, sign, H, L, C, sl, arm, trail, pessimistic
         armed = armed | newly
         new_stop = best - sign * trail * atr
         upd = live & armed & (sign * (new_stop - stop) > 0)
-        stop = np.where(upd, new_stop, stop)
+        bad = upd & (sign * (new_stop - cl) > 0)        # 걸 수 없는 스톱 (2026-09-07) -> 종가 청산
+        out = np.where(bad, sign * (cl - entry) / entry, out)
+        done = done | bad
+        stop = np.where(upd & ~bad, new_stop, stop)
 
     def do_stop(adv):
         nonlocal done, out
@@ -150,12 +161,12 @@ def simulate_trailing_vec(entry, atr, sign, H, L, C, sl, arm, trail, pessimistic
     for t in range(H.shape[1]):
         if done.all():
             break
-        fav, adv = fav_all[:, t], adv_all[:, t]
+        fav, adv, cl = fav_all[:, t], adv_all[:, t], C[:, t]
         if pessimistic:
             do_stop(adv)
-            do_update(fav)
+            do_update(fav, cl)
         else:
-            do_update(fav)
+            do_update(fav, cl)
             do_stop(adv)
     out = np.where(done, out, sign * (C[:, -1] - entry) / entry)
     return out

@@ -244,6 +244,9 @@ def manage(s: dict[str, Any], bars: list[dict], pol: dict) -> None:
             if p["armed"]:
                 ns = p["best"] - sgn * ex["trail_atr"] * a
                 if sgn * (ns - p["stop"]) > 0:
+                    if sgn * (ns - b["close"]) > 0:                   # 걸 수 없는 스톱(2026-09-07): 새 스톱이 그 봉 종가보다 유리한 쪽이면 거래소가 거부하는 자리다
+                    # ("Order would immediately trigger"). 그 봉 종가에 즉시 청산한다.
+                        _close(s, p, b["close"], "stop_infeasible", b["timestamp_utc"]); closed = True; break
                     p["stop"] = ns
             if not b["timestamp_utc"].endswith("#post"):
                 p["bars_held"] = int(p.get("bars_held", 0)) + 1

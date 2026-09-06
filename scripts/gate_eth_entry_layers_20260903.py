@@ -142,7 +142,10 @@ def trail(side, e, a, hi, lo, cl, sl, arm, tr, anchor="peak"):
 
     anchor: 트레일 폭의 기준. "peak" = peak×(1∓tr·a) (진입모델 v1 `trail_out` 규약),
     "entry" = peak ∓ tr·a·e (= best ∓ trail×ATR_abs, V자반등 경제라벨 `sim_exit`·섀도우 러너 규약).
-    두 규약은 스톱 레벨이 tr·a·(peak−e)만큼 달라 청산 봉이 바뀔 수 있다 -- 파이프라인 것을 선언해야 재현된다."""
+    두 규약은 스톱 레벨이 tr·a·(peak−e)만큼 달라 청산 봉이 바뀔 수 있다 -- 파이프라인 것을 선언해야 재현된다.
+    ⭐2026-09-07: 새 스톱이 그 봉 **종가보다 유리한 쪽**이면 거래소가 거부하는 자리이므로(걸 수 없는 스톱)
+    그 봉 종가에 즉시 청산한다. 이전 판은 그 자리에 걸린 것으로 치고 그 가격에 체결까지 시켜줬다 --
+    docs/experiments/eth_trailing_stop_infeasible_fill_invalidates_exit_edge_20260907.md"""
     off = (lambda pk: pk * tr * a) if anchor == "peak" else (lambda pk: tr * a * e)
     if side > 0:
         stop = e * (1 - sl * a); peak = e; armed = False
@@ -153,8 +156,12 @@ def trail(side, e, a, hi, lo, cl, sl, arm, tr, anchor="peak"):
                 peak = hi[k]
                 if not armed and (peak - e) / e >= arm * a:
                     armed = True
-                if armed:
-                    stop = max(stop, peak - off(peak))
+            if armed:
+                ns = peak - off(peak)
+                if ns > stop:
+                    if ns > cl[k]:                          # 걸 수 없는 스톱 (2026-09-07)
+                        return cl[k] / e - 1.0
+                    stop = ns
         return cl[-1] / e - 1.0
     stop = e * (1 + sl * a); peak = e; armed = False
     for k in range(len(cl)):
@@ -164,8 +171,12 @@ def trail(side, e, a, hi, lo, cl, sl, arm, tr, anchor="peak"):
             peak = lo[k]
             if not armed and (e - peak) / e >= arm * a:
                 armed = True
-            if armed:
-                stop = min(stop, peak + off(peak))
+        if armed:
+            ns = peak + off(peak)
+            if ns < stop:
+                if ns < cl[k]:                              # 걸 수 없는 스톱 (2026-09-07)
+                    return 1.0 - cl[k] / e
+                stop = ns
     return 1.0 - cl[-1] / e
 
 
@@ -187,6 +198,8 @@ def trail_abs(side, e, A, hi, lo, cl, sl, arm, tr):
         if armed:
             ns = best - sign * tr * A
             if sign * (ns - stop) > 0:
+                if sign * (ns - cl[k]) > 0:                 # 걸 수 없는 스톱 (2026-09-07)
+                    return sign * (cl[k] - e) / e
                 stop = ns
     return sign * (cl[-1] - e) / e
 
