@@ -280,6 +280,19 @@
               <span class="signal-chip-label">V자 급등락</span>
               <span class="signal-chip-state">-</span>
             </div>
+            <!-- 2026-09-06 (사용자 신고): 특화감지기는 셋인데 상단 요약에는 V자 하나뿐이었다.
+                 나머지 둘(지속 규칙 §5.27 · 롱숏비 급변 B2 §5.28)을 같은 행에 추가한다.
+                 상태 텍스트·색은 MODEL_CHIP_IDS 등록만으로 renderModelIndicatorList 가 채운다. -->
+            <div id="modelChipFireCont" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">지속 규칙</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="modelChipRetailShiftB2" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">롱숏비 급변</span>
+              <span class="signal-chip-state">-</span>
+            </div>
           </div>
         </div>
       </section>
@@ -338,7 +351,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260906-gauge-anim"></script>
+  <script src="./app.js?v=20260906-3chips"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

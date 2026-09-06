@@ -1256,6 +1256,8 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
+  fire_cont: "modelChipFireCont",              // 2026-09-06 상단 요약에 특화감지기 3종을 다 올린다
+  retail_shift_b2: "modelChipRetailShiftB2",
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   liq_direction: "modelChipLiqDirection",
@@ -1281,6 +1283,8 @@ const MODEL_CHIP_IDS = {
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
+  // 2026-09-06: 지속 규칙·롱숏비 급변도 방향(롱/숏) 신호다 -- 화살표를 붙여 위험도 계열과 구분한다.
+  "fire_cont", "retail_shift_b2",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
