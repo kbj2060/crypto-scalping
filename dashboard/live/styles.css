@@ -253,8 +253,11 @@ body {
    a .ops-health-status-badge at all (see .meter-col below, which now renders unconditionally for
    every row, fired or not). #snapSpecializedSignalList stays in this selector -- V자 급등락 still
    falls back to the plain badge while idle (no it.proba yet), unlike evidence signals. */
-#snapModelIndicatorList .ops-health-status-badge,
-#snapSpecializedSignalList .ops-health-status-badge {
+/* 2026-09-06: #snapSpecializedSignalList 도 이 선택자에서 빠졌다 -- 그 목록은 이제 상태와 무관하게
+   .meter-col 만 그린다(renderModelIndicatorList 의 forceMeter). 그 전에는 V자 급등락이 확률이 없는
+   동안에만 이 알약으로 떨어지고 지속 규칙·B2 는 늘 알약이라, 한 목록 안에서 행마다·상태마다 모양이
+   달랐다 -- #evidenceSignalList 가 2026-08-31 에 같은 이유로 빠진 것과 같은 정리다. */
+#snapModelIndicatorList .ops-health-status-badge {
   width: 64px;
   text-align: center;
 }

@@ -1325,7 +1325,7 @@ function coinIndicator(item, kind) {
   return ethOnlyIndicator(item);
 }
 
-function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
+function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
   // model_indicator_history only advances once per MODEL_INDICATOR_SAMPLE_SECONDS (300s server-
   // side), so most calls were rebuilding ~500 DOM nodes (9 rows x up to 48 sparkline rects each)
@@ -1362,13 +1362,23 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList") {
     // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
     // (수급 흐름/청산 캐스케이드/베이시스 청산압박/청산 방향압력, all categorical-only) keep the plain
     // .ops-health-status-badge pill, unchanged -- there's no probability to gauge for those.
-    const metaHtml = it.proba != null
+    // 2026-09-06 (사용자 요청 "스타일까지 통일"): forceMeter 목록(특화감지기)은 증거신호 목록과
+    // 같은 규칙 -- **상태와 무관하게 항상 .meter-col**을 그린다. 그 전에는 확률이 있을 때만
+    // meter-col이고 없으면 64px 알약으로 떨어져, 같은 행이 상태에 따라 모양이 바뀌고 세 행이
+    // 서로 다른 모양이었다(증거신호 목록이 2026-08-31에 같은 이유로 이미 고쳐진 문제다).
+    // 게이지 줄은 **확률 개념이 있는 행만**(probaSlot) -- 확률이 아닌 값을 % 게이지로 그리면
+    // 다른 뜻이 같은 그림으로 보인다. 확률이 아닌 수치는 meter-price 자리(meterNote)에 적는다.
+    const gaugeHtml = (it.probaSlot || it.proba != null)
+      ? `<div class="meter-gauge">
+          <span class="meter-track"><span class="meter-fill ${it.tone}" style="width:${clamp01(it.proba || 0) * 100}%"></span></span>
+          <span class="meter-pct">${it.proba != null ? `${Math.round(clamp01(it.proba) * 100)}%` : "-"}</span>
+        </div>`
+      : "";
+    const metaHtml = (forceMeter || it.proba != null)
       ? `<div class="meter-col">
           <span class="meter-state ${it.tone}">${escapeHtml(it.subText || "-")}</span>
-          <div class="meter-gauge">
-            <span class="meter-track"><span class="meter-fill ${it.tone}" style="width:${clamp01(it.proba) * 100}%"></span></span>
-            <span class="meter-pct">${Math.round(clamp01(it.proba) * 100)}%</span>
-          </div>
+          ${gaugeHtml}
+          ${it.meterNote ? `<span class="meter-price" title="${escapeHtml(it.meterNoteTitle || "")}">${escapeHtml(it.meterNote)}</span>` : ""}
         </div>`
       : `<span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>`;
     return `<article class="ops-health-row ${it.tone}">
@@ -1809,6 +1819,23 @@ function specialDirLabel(side, word) {
   return { subText: `${dir} ${word}`, tone: side === "long" ? "good" : side === "short" ? "bad" : "warn" };
 }
 
+// 섀도우 원장 한 줄 -- 지속 규칙(R)과 B2가 같은 스키마를 쓰는데 어순·단위가 서로 달랐다
+// ("섀도우 1.9일 · 마감 30건..." vs "마감 4건... · 미결 0 · 섀도우 1.0일"). 문장 순서를 하나로 고정한다:
+//   [상태 근거] · [섀도우 원장] · [계측] · [백테스트 기준] · [표본 가드]
+function shadowBp(x, d = 1) { return x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`; }
+function shadowLedgerText(sh, { withLast30 = false } = {}) {
+  if (!sh || sh.closed_trades == null) return "섀도우 원장 없음";
+  const days = sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-";
+  const perDay = sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : "";
+  const win = sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : "";
+  const last30 = withLast30 && sh.last30d_exp_bp != null ? ` · 30일 ${shadowBp(sh.last30d_exp_bp)}` : "";
+  const sides = sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : "";
+  return `섀도우 ${days} · 마감 ${sh.closed_trades}건${perDay} · 건당 ${shadowBp(sh.exp_bp)}(메이커 ${shadowBp(sh.exp_maker_bp)})${win}${last30} · 미결 ${sh.open_positions}${sides}`;
+}
+function backtestRefText(val, oos) {
+  return `백테스트 VAL ${val > 0 ? "+" : ""}${Number(val).toFixed(1)} / OOS ${shadowBp(oos)}`;
+}
+
 // ── retail_shift B2 (2026-09-06) ─────────────────────────────────────────────────────────────
 // 09-04 경제 축 스크린 11축 중 **유일한 새 후보**(개미 롱숏비 30분 z ≥ 2.26의 반대 방향, 호메로스 §5.28).
 // 09-05부터 섀도우 러너가 돌고 있는데 화면에는 아무 것도 없었다 -- 90일 판정 대상이 사람 눈에 안 보이면
@@ -1829,7 +1856,6 @@ function retailShiftB2IndicatorItem() {
   const p = latestRetailShiftB2;
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "로딩" };
   if (!p.available) return { ...base, tone: "neutral", subText: "원장 없음", liveText: "섀도우 원장이 아직 없습니다 · 백테스트 VAL +12.7 / OOS +12.3bp" };
-  const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
   // 2026-09-06 (사용자 요청): "왜 계속 대기냐" -- 배지의 "대기"는 미결 포지션 없음이라는 뜻이라
   // 신호가 살아있는지를 못 보여준다. 러너가 매 봉 남기는 마지막 결정(z·임계)을 맨 앞에 띄운다.
   // 러너 재기동 전 옛 상태파일에는 last_decision 이 없으므로 그 경우를 따로 말한다.
@@ -1850,18 +1876,20 @@ function retailShiftB2IndicatorItem() {
   // 2026-09-06 배포 직후 실측이 n=2에 건당 −54.8bp였다. 09-05 원장 전수점검의 첫 번째 함정이
   // "표본 1~2건의 수치를 성과로 읽는 것"이라, 숫자 옆에 판단 불가를 붙이고 tone도 올리지 않는다.
   const thinSample = shadowSampleWarning(p.days_running, p.closed_trades);
-  const ledgerText = p.closed_trades
-    ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}${thinSample}`
-    : "마감 0건";
+  const ledgerText = shadowLedgerText(p);
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
   // 보유 중이면 그 방향, 아니면 미발동 -- z 값은 배지가 아니라 liveText 맨 앞에 둔다(공통 어휘 유지).
   const sides = p.open_sides || [];
   const held = p.open_positions
     ? specialDirLabel(sides.includes("long") && sides.includes("short") ? null : sides.includes("short") ? "short" : "long", "보유")
     : null;
-  const liveText = `${zText} · ${gateText}${missedText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
-  if (gateBad) return { ...base, tone: "warn", subText: "계측 미달", liveText };
-  return { ...base, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveText };
+  const liveText = `${zText} · ${ledgerText} · ${gateText}${missedText} · ${backtestRefText(12.68, 12.28)}${thinSample}`;
+  // 확률이 아니라 z라서 게이지(%)가 아니라 meter-price 자리에 적는다 -- 확률 개념이 있는 행만 게이지를 쓴다.
+  const note = zNum != null
+    ? { meterNote: `z ${zSign(zNum, 2)}`, meterNoteTitle: `개미 롱숏비 30분 변화의 288행 z점수입니다. |z| ≥ ${thr.toFixed(4)} 이면 발동하고(z ≤ −임계 → 롱, ≥ +임계 → 숏), 같은 측면은 직전 12행 안에 이미 발동했으면 건너뜁니다.` }
+    : {};
+  if (gateBad) return { ...base, ...note, tone: "warn", subText: "계측 미달", liveText };
+  return { ...base, ...note, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveText };
 }
 
 function fireContIndicatorItem() {
@@ -1874,10 +1902,7 @@ function fireContIndicatorItem() {
   const hist = (c && c.history) || [];
   const times = evenlySpacedBarTimes(p.latest_bar_utc, hist.length, 5);
   const sh = (c && c.shadow) || null;
-  const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
-  const shadowText = sh && sh.closed_trades != null
-    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건${sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : ""} · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)})${sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : ""}${sh.last30d_exp_bp != null ? ` · 30일 ${bp(sh.last30d_exp_bp)}` : ""} · 미결 ${sh.open_positions}${sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : ""} · 백테스트 VAL +4.4/OOS +6.8${shadowSampleWarning(sh.days_running, sh.closed_trades)}`
-    : "섀도우 원장 아직 없음 · 백테스트 VAL +4.4/OOS +6.8bp";
+  const shadowText = `${shadowLedgerText(sh, { withLast30: true })} · ${backtestRefText(4.44, 6.78)}${sh ? shadowSampleWarning(sh.days_running, sh.closed_trades) : ""}`;
   if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
   if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
   const lv = c.levels || null;
@@ -1888,7 +1913,9 @@ function fireContIndicatorItem() {
   if (c.phase === "continuation") {
     const tone = c.regime_consistency === "conflict" ? "warn" : (c.cont_side === "short" ? "bad" : "good");
     return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times,
-      liveText: `${levelText} · 창 ${c.bars_since}/${c.window_bars}봉${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
+      meterNote: `창 ${c.bars_since}/${c.window_bars}봉`,
+      meterNoteTitle: "첫 발동 후 몇 봉이 지났는지입니다. 이 창(12봉) 안에서만 신규 진입하고, 창이 끝나면 보유분만 트레일/만기까지 유지합니다.",
+      liveText: `${levelText}${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
   }
   return { ...base, tone: "neutral", subText: "종료", history: hist, times,
     liveText: `${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 기존 포지션은 트레일/만기까지 유지 · ${levelText} · ${shadowText}` };
@@ -2004,9 +2031,7 @@ function renderFinalDecision(payload) {
   const sh = (c && c.shadow) || null;
   const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
   const refText = ref && ref.eligible ? `백테스트 VAL ${bp(ref.val)} / OOS ${bp(ref.oos)}` : "";
-  const shadowText = sh && sh.closed_trades != null
-    ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건 · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)}) · 미결 ${sh.open_positions}${shadowSampleWarning(sh.days_running, sh.closed_trades)}`
-    : "섀도우 원장 아직 없음";
+  const shadowText = `${shadowLedgerText(sh)}${sh ? shadowSampleWarning(sh.days_running, sh.closed_trades) : ""}`;
   const foot = `표시 전용 · 자동매매 미연결 · 90일 판정 전 · ${shadowText}${refText ? ` · ${refText}` : ""}`;
 
   if (!c || !c.active) {
@@ -3911,13 +3936,13 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         key: "v_rebound", label: "V자 급등락", tone: vReboundTone, subText: vReboundSubText,
         history: (latestVRebound && latestVRebound.history) || [],
         times: (latestVRebound && latestVRebound.times) || [],
-        proba: vReboundProbaShown,
+        proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
       ethOnlyIndicator(fireContIndicatorItem()),   // 2026-09-04 지속 규칙 카드 (호메로스 §5.27)
       ethOnlyIndicator(retailShiftB2IndicatorItem()),  // 2026-09-06 retail_shift B2 (호메로스 §5.28)
-    ], "snapSpecializedSignalList");
+    ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
     renderModelIndicatorList([
