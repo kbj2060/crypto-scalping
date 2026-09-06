@@ -120,8 +120,8 @@ def recommended_action(component: str) -> str:
     if component.startswith("shadow_"):
         # 섀도우 러너는 systemd가 아니라 scripts/ops/supervisor_*.sh + crontab @reboot로 뜬다.
         # pgrep/pkill 패턴은 자기 handoff 잡 명령줄에도 매칭되므로 grep -v로 걸러서 본다(2026-09-05).
-        return ("ps -eo pid,args | grep -v handoff_jobs | grep -E 'live_.*shadow.*runner|retail_shift_b2'; "
-                "ls -l data/live/*shadow*state*.json data/live/retail_shift_b2_state.json")
+        return ("ps -eo pid,args | grep -v handoff_jobs | grep -E 'live_.*shadow.*runner'; "
+                "ls -l data/live/*shadow*state*.json")
     if component.startswith("duckdb_"):
         return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
     return "scripts/ops/triage.sh"
@@ -360,12 +360,12 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
 # mtime이 생존 신호이고, last_decided_bar_utc(가진 러너)는 "프로세스는 살아있는데 봉 결정을 못 하는"
 # 상태까지 잡는다. ⚠️러너를 은퇴시킬 때는 이 표에서도 줄을 지운다 -- 안 지우면 영구 BLOCKED다
 # (2026-09-05 진입 지정가 페이드 v4 제거가 그런 사례였다).
+# 2026-09-07 은퇴: shadow_fire_cont_{eth,xrp,sol} · shadow_retail_shift_b2 (4줄) 제거.
+# 트레일링 청산의 "걸 수 없는 스톱" 결함으로 경제성 근거가 무효화됐고, 청산과 무관한 경로 측정에서도
+# 방향 정보가 없었다(지속 규칙 H200 0.5054 [0.4981,0.5127] · B2 H200 VAL 0.5029/OOS 0.5186 -- 둘 다 동전).
+# 러너 정지 + crontab @reboot + supervisor까지 함께 제거했다. 되살리려면 그 판정부터 다시 세울 것.
 SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
-    ("shadow_fire_cont_eth", "fire_cont_shadow_state.json"),
-    ("shadow_fire_cont_xrp", "fire_cont_shadow_state_xrp.json"),
-    ("shadow_fire_cont_sol", "fire_cont_shadow_state_sol.json"),
     ("shadow_v_rebound_econ", "v_rebound_econ_shadow_state.json"),
-    ("shadow_retail_shift_b2", "retail_shift_b2_state.json"),
     ("shadow_evidence_chip_btc", "btc_evidence_signal_shadow_state.json"),
     ("shadow_evidence_chip_xrp", "xrp_evidence_signal_shadow_state.json"),
 )
