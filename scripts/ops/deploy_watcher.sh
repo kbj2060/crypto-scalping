@@ -219,6 +219,34 @@ affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-e
 # 섀도우를 조용히 되살린다. 되살리려면 sudo systemctl enable --now 로 명시적으로 한다.
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
+# ⭐2026-09-07: 대시보드가 **import하는 scripts/ 모듈**도 재시작 대상이다. 그 전까지 이 조건은
+# `^dashboard/` 하나뿐이어서, dashboard/server.py가 import하는 `scripts/live_*.py`를 고쳐 배포하면
+# 워처가 머지하고 last_deployed_sha를 갱신하고 `deploy OK`까지 찍은 뒤 **대시보드를 재시작하지
+# 않았다** -- 디스크는 새 코드, 프로세스는 옛 코드를 메모리에 들고 계속 돈다.
+# 2026-09-01의 "대시보드가 죽었는데 deploy OK를 찍었다"와는 다른 실패다. 이번엔 **살아 있어서**
+# 포트 리슨 체크도 curl도 전부 초록이고, 유일한 증상은 프로세스 시작 시각이 배포보다 이르다는 것
+# 뿐이라 어느 확인 절차로도 안 잡힌다(2026-09-07 실측: HEAD/last_deployed_sha/파일 md5가 모두
+# 일치하는데 대시보드는 6h45m 전에 뜬 프로세스였다 -- 증거신호 칩 캐시 수정이 적용되지 않았다).
+#
+# 목록을 여기 하드코딩하지 않고 server.py에서 직접 읽는다 -- 이 저장소의 수동동기 상수들
+# (SUSTAIN_BARS_OVERRIDE / K_OVERRIDE)이 보여주듯 손으로 베낀 목록은 반드시 낡는다.
+# 머지 **전**의 server.py를 읽게 되는데 그게 맞다: 지금 돌고 있는 대시보드가 실제로 import한
+# 목록이기 때문이다. import 줄 자체가 바뀌는 커밋은 dashboard/를 건드리므로 위 조건에서 이미 걸린다.
+# ⚠️한계: **직접 import만** 본다. 그 모듈들이 다시 import하는 research_* 모듈이 바뀌어도
+#   재시작하지 않는다 -- 연쇄를 다 걸면 리서치 스크립트 하나 고칠 때마다 대시보드가 내려간다.
+#   (trading_bot_modules/odyssey_* 제외와 같은 판단: 안 쓰는/너무 넓은 재시작은 그 자체가 리스크다.)
+dashboard_imports_changed() {
+  local mods pat hits
+  mods="$(grep -oE '^(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT/dashboard/server.py" 2>/dev/null \
+          | sed -E 's/^(from|import) scripts\.//' | sort -u | paste -sd'|' -)"
+  [[ -n "$mods" ]] || return 1
+  pat="^scripts/(${mods})\.py$"
+  hits="$(echo "$changed_files" | grep -E "$pat" | paste -sd' ' -)"
+  [[ -n "$hits" ]] || return 1
+  log "dashboard imports changed: $hits"
+  return 0
+}
+dashboard_imports_changed && dashboard_changed=1
 
 # The dashboard is not a systemd unit: dashboard/scripts/supervise_server.sh owns it, records its
 # child's pid here, and respawns ~3s after that child exits. So "restarting" it means killing the
