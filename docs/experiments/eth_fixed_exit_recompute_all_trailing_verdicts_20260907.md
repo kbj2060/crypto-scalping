@@ -111,16 +111,41 @@ AUC 측정이라 그대로 유효하다.)
 - 즉 같은 주장을 유지하려면 모델이 **13~16bp의 선별 실력**을 새로 보태야 하는데,
   기록된 팔 AUC는 **0.5118 (VAL) / 0.5271 (OOS)**다.
 
-## 4. 아직 결함이 남은 곳 (이번에 손대지 않음)
+## 4. 라이브 섀도우 러너 4종도 수정 (같은 날, 배포 완료)
 
-**라이브/섀도우 러너 4종** — `_close(..., p["stop"], ...)`로 스톱가에 청산 기록:
-`live_eth_fire_cont_shadow_runner_20260904.py` · `live_eth_v_rebound_econ_shadow_runner_20260902.py` ·
-`live_eth_entry_limit_fade_shadow_runner_20260903.py` · `live_eth_retail_shift_b2_shadow_runner_20260905.py`
+`_close(..., p["stop"], ...)`로 스톱가에 청산 기록하던 4개 러너에 같은 검사를 넣었다. 새 사유 `stop_infeasible`로 기록한다.
 
-서빙 코드라 배포 2채널 계약(머지 전 `check_deploy_drift.sh`, md5 대조)을 거쳐야 하므로 별도 승인 대상이다.
-**고치기 전까지 섀도우 원장과 대시보드 수치는 계속 부풀려 기록된다.**
-(라이브 원장 실측: `fire_cont` 39건 stop 청산 중 **69.2%가 걸 수 없는 자리**, 기록 −0.35 → 정직 −14.28bp.
-⚠️로컬 사본 기준이며 서버에는 더 있을 수 있다.)
+| 러너 | 서버 실행 상태 |
+|---|---|
+| `live_eth_fire_cont_shadow_runner_20260904.py` | **3 프로세스**(ETH·XRP·SOL, `--asset` 분기) |
+| `live_eth_v_rebound_econ_shadow_runner_20260902.py` | 1 프로세스 |
+| `live_eth_retail_shift_b2_shadow_runner_20260905.py` | 1 프로세스 |
+| `live_eth_entry_limit_fade_shadow_runner_20260903.py` | 미가동(진입모델 v1 철회로 정지) |
+
+**파리티 검증** — 러너 `manage()` vs 수정된 `sim_exit`(무작위 경로, 원장 bp 소수 2자리 반올림 포함):
+`fire_cont` **0/400 불일치** · `v_rebound` **0/250** · `retail_b2` **0/250** (|Δ|max 5e-07 = 반올림).
+`entry_limit_fade`는 `manage(s,bars,pol)` 시그니처와 `#post` 합성봉 때문에 스모크만 — 120경로 중
+`stop_infeasible` 97건으로 경로 작동 확인. 러너 자체 `--selftest`: `fire_cont` ok · `retail_b2` ok
+(나머지 둘은 `--selftest` 플래그 자체가 없다).
+
+**영향 없음이 확인된 러너**: `live_btc_evidence_signal_shadow_runner_20260902.py` ·
+`live_xrp_evidence_signal_shadow_runner_20260903.py` — 트레일링 청산 로직 자체가 없는 신호 기록기다.
+
+**진행 중 포지션**: 수정 시점 `fire_cont` 오픈 4건이 전부 `armed=False`(스톱이 진입 −5·ATR 초기값
+= 항상 실행 가능)라 규약이 섞이는 구간이 없다. `v_rebound`·`retail_b2`는 오픈 0건이었다.
+
+**⚠️ 수정 이전 원장 기록은 옛 규약이다.** `stop_infeasible` 사유가 없는 과거 `stop` 청산 건은
+스톱가에 체결된 것으로 기록돼 있다(`fire_cont` 39건 중 69.2%가 걸 수 없는 자리, 기록 −0.35 →
+정직 −14.28bp). 원장을 소급 수정하지 않았다 — 사유 필드로 구분한다.
+
+**배포**: `check_deploy_drift.sh` 종료코드 0 → 서버 md5 4/4 로컬 일치 확인(다른 세션 변경 없음) →
+`origin/main` 기준 브랜치에 체리픽 → `push HEAD:main`. 워처가 restart 배선을 가진 유닛은
+`trading-bot`/`ops-watchdog`/`prometheus-exporter`/대시보드뿐이고 이번 변경은 `scripts/live_*`만
+건드리므로 **워처는 pull만 하고 아무 서비스도 재시작하지 않는다** — 러너 5개는 별도 재시작이 필요하다.
+
+⚠️ 브랜치를 실수로 `origin/main`이 아닌 이전 세션 커밋(`db2a5f1`) 위에 만들었다가, 그대로 밀면
+서버에 미추적으로 있던 3개 경로(`run_eth_*_20260906.py`)가 커밋돼 워처 폴백 stash pop이 깨지는
+것을 `check_deploy_drift.sh` 경고로 발견하고 `origin/main` 기준으로 다시 만들었다.
 
 그 밖에 자체 트레일링 사본을 가진 과거 백테스트/감사 스크립트 다수가 같은 결함을 갖고 있다.
 전부 이미 기각된 판정이거나 위 재계산이 커버하는 모집단이라 개별 수정은 하지 않았다 —
