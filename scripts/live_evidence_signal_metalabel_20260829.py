@@ -467,12 +467,34 @@ def compute_evidence_signal_metalabels(df: pd.DataFrame, sig: pd.DataFrame) -> d
 
         if bottom_fired_now or top_fired_now:
             side = "bottom" if bottom_fired_now else "top"
+            # ⭐2026-09-07: 캐시 유효성에 **익절가 도달 여부**를 넣는다. 그 전까지는 측면과 경과
+            # 봉수만 봐서, 앵커의 익절가가 이미 닿은 뒤 같은 측면 원시 재발동이 horizon 안에
+            # 들어오면 새 봉에서 재추론하지 않고 옛 앵커의 확률/익절가/fire_pos를 그대로 내보냈다.
+            # 화면에는 "바닥 발동"(방금 발동한 것처럼)과 **이미 닿은 옛 익절가**가 같이 떴고
+            # (app.js의 `isResolvedByTp`가 `!fired`를 요구해 "목표 도달 · 종료"로 넘어가지 못한다),
+            # tp_touched=True 때문에 나이 인지 확률(proba_now)까지 건너뛰었다. 2026-09-03에
+            # `_active`가 고친 것과 같은 결함이 **재발동 경로**로 새어들어 있었다.
+            #
+            # 근거(scripts/research_eth_chip_stale_anchor_proba_ab_20260907.py -- 2,962건/독립
+            # 616일, 두 확률을 **재발동 봉 자신의 학습 라벨 hit**라는 같은 결과로 채점):
+            #   옛 앵커 재사용   AUC 0.6799  Brier 0.2828  확률 평균 77.1% vs 실제 54.1%(+23.1pp)
+            #   재발동 봉 재추론 AUC 0.7318  Brier 0.2258  확률 평균 66.2%(+12.1pp)
+            #   차이 AUC +0.0519 일군집95%CI [+0.0360,+0.0686](0 제외), 신호 8종 중 7종에서 우세.
+            #   smt_divergence는 옛 앵커 확률의 AUC가 0.452로 **무작위보다 나빴다**.
+            # ⚠️수익성은 이 결함으로 갈리지 않는다(같은 창 짝비교 +2.20bp, CI [-0.63,+5.12]).
+            #   화면이 사실을 말하게 하는 수정이지 수익 개선이 아니다.
+            # ⚠️애프터글로우(이 봉에 발동이 없는) 경로는 **건드리지 않는다** -- 거기서는 도달한
+            #   앵커를 계속 들고 있어야 화면이 "목표 도달 · 종료"를 말할 수 있다(2026-09-03 규약).
+            # ⚠️`_tp_touched`는 tp_price/앵커 위치를 못 구하면 None을 돌려주고, 그때는 `not None`
+            #   이 True라 기존대로 캐시를 재사용한다 -- 판단할 수 없을 때 동작을 바꾸지 않는다.
+            anchor_pos = _pos_of_ts(cached["bar_ts"]) if cached is not None else None
             cache_valid = (
                 cached is not None and cached["side"] == side
                 and 0 <= (latest_ts - cached["bar_ts"]).total_seconds() / 300 < horizon_bars
+                and not _tp_touched(df, anchor_pos, cached.get("tp_price"), side)
             )
             if cache_valid:
-                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price"), "fire_pos": _pos_of_ts(cached["bar_ts"]), "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
+                out[signal_name] = {"fired": True, "side": side, "proba": cached["proba"], "tp_price": cached.get("tp_price"), "fire_pos": anchor_pos, "atr_bp": cached.get("atr_bp"), "atr_median_bp": cached.get("atr_median_bp"), "low_atr": cached.get("low_atr")}
                 continue
             out[signal_name] = _infer_at(signal_name, n - 1, side, latest_ts)
             continue
