@@ -120,7 +120,7 @@ let evidenceHistoryBySignal = {};
 let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
 let vReboundLastFetchAt = 0;
-// Long/short liquidation volume gauge (recreated 2026-08-27, see liquidationVolumeGaugeHtml()) --
+// Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
 // frontend consumer had been removed.
 let latestLiquidation5m = null;
@@ -558,47 +558,72 @@ function basisLiquiditySubText(sig) {
 // Instead: a live "감지중" cue sourced from latestLiqBurstState (already polled every ~1s for the
 // alert banner above, no new fetch here) that flags "something's happening right now" without
 // touching the $ math -- correct-by-construction rather than an approximate merge.
-function liquidationVolumeGaugeHtml() {
-  const liq5m = latestLiquidation5m;
-  const burst = latestLiqBurstState;
-  const cascadeNow = !!(burst && burst.available && burst.hawkes_active);
-  let liveCue = "";
-  if (cascadeNow) {
-    // 2026-08-27: the standalone liqBurstAlertBanner was folded into this one-line cue at user
-    // request (renderLiqBurstAlert() removed) -- same side-selection fix (max of both sides, not
-    // the possibly-stale crisis_type label) carried over, see that removed function's history in
-    // feedback_dashboard_liq_burst_alert memory if this needs revisiting.
-    const bLong = Number(burst.long_usd_1m || 0);
-    const bShort = Number(burst.short_usd_1m || 0);
-    const bUsd = Math.max(bLong, bShort);
-    const bSide = bShort > bLong ? "숏청산" : "롱청산";
-    const bPct = Math.round(clamp01(Number(burst.hawkes_decay_level) || 0) * 100);
-    const detail = bUsd > 0 ? ` · ${bSide} ${fmtUsdCompact(bUsd)} · 에너지${bPct}%` : ` · 에너지${bPct}%`;
-    liveCue = `<span class="liq-vol-gauge-live"><span class="liq-vol-gauge-live-dot" aria-hidden="true"></span>지금 감지중${detail}</span>`;
-  }
-  const tag = `<span class="liq-vol-gauge-tag">청산 규모 <span class="liq-vol-gauge-window">(최근 30분 누적)</span>${liveCue}</span>`;
-  if (!liq5m || !liq5m.warmed_up) {
-    return `<div class="liq-vol-gauge quiet">${tag}<span class="liq-vol-gauge-quiet-text">집계 중...</span></div>`;
-  }
-  const longUsd = Number(liq5m.long_usd_5m || 0);
-  const shortUsd = Number(liq5m.short_usd_5m || 0);
-  const total = longUsd + shortUsd;
-  if (!(total > 0)) {
-    return `<div class="liq-vol-gauge quiet">${tag}<span class="liq-vol-gauge-quiet-text">청산 없음 — 안정</span></div>`;
-  }
-  const longPct = (longUsd / total) * 100;
-  const shortPct = (shortUsd / total) * 100;
+// 2026-09-06 (사용자 요청): 새로고침 직후엔 "집계 중..." 텍스트만 뜨고 게이지 자체가 없다가, 데이터가
+// 오면 완성된 막대가 **툭 나타났다**. 대신 **처음부터 롱 0 · 숏 0 짜리 빈 게이지를 그려두고**, 값이
+// 도착하면 너비만 바꿔 CSS transition 으로 움직이게 한다. 그래서 innerHTML 을 매번 갈아끼우지 않고
+// (그러면 새 엘리먼트가 최종 너비로 태어나 애니메이션이 없다) **한 번 만든 뒤 제자리 갱신**한다.
+function liquidationVolumeGaugeSkeletonHtml() {
   return `<div class="liq-vol-gauge">
-      ${tag}
+      <span class="liq-vol-gauge-tag">청산 규모 <span class="liq-vol-gauge-window">(최근 30분 누적)</span><span class="liq-vol-gauge-live-slot"></span></span>
       <div class="liq-vol-gauge-track">
-        <div class="liq-vol-gauge-fill long" style="width:${longPct}%;"></div>
-        <div class="liq-vol-gauge-fill short" style="width:${shortPct}%;"></div>
+        <div class="liq-vol-gauge-fill long" style="width:0%"></div>
+        <div class="liq-vol-gauge-fill short" style="width:0%"></div>
       </div>
       <div class="liq-vol-gauge-labels">
-        <span class="liq-vol-gauge-label long">롱 ${fmtUsdCompact(longUsd)}</span>
-        <span class="liq-vol-gauge-label short">숏 ${fmtUsdCompact(shortUsd)}</span>
+        <span class="liq-vol-gauge-label long">롱 $0</span>
+        <span class="liq-vol-gauge-label short">숏 $0</span>
       </div>
     </div>`;
+}
+
+function liquidationVolumeLiveCueHtml() {
+  const burst = latestLiqBurstState;
+  if (!(burst && burst.available && burst.hawkes_active)) return "";
+  // 2026-08-27: 독립 배너였던 것을 이 한 줄로 접었다(renderLiqBurstAlert 제거). 측면은 crisis_type
+  // 라벨이 아니라 양쪽 실측 최댓값으로 고른다 -- 그 라벨은 낡을 수 있다.
+  const bLong = Number(burst.long_usd_1m || 0);
+  const bShort = Number(burst.short_usd_1m || 0);
+  const bUsd = Math.max(bLong, bShort);
+  const bSide = bShort > bLong ? "숏청산" : "롱청산";
+  const bPct = Math.round(clamp01(Number(burst.hawkes_decay_level) || 0) * 100);
+  const detail = bUsd > 0 ? ` · ${bSide} ${fmtUsdCompact(bUsd)} · 에너지${bPct}%` : ` · 에너지${bPct}%`;
+  return `<span class="liq-vol-gauge-live"><span class="liq-vol-gauge-live-dot" aria-hidden="true"></span>지금 감지중${detail}</span>`;
+}
+
+function renderLiquidationVolumeGauge() {
+  const host = el("liqVolumeGauge");
+  if (!host) return;
+  const fresh = !host.querySelector(".liq-vol-gauge-track");
+  if (fresh) host.innerHTML = liquidationVolumeGaugeSkeletonHtml();
+
+  const liq5m = latestLiquidation5m;
+  const warmed = !!(liq5m && liq5m.warmed_up);
+  const longUsd = warmed ? Number(liq5m.long_usd_5m || 0) : 0;
+  const shortUsd = warmed ? Number(liq5m.short_usd_5m || 0) : 0;
+  const total = longUsd + shortUsd;
+
+  const win = host.querySelector(".liq-vol-gauge-window");
+  if (win) win.textContent = warmed ? "(최근 30분 누적)" : "(최근 30분 누적) · 웜업";
+  const cue = host.querySelector(".liq-vol-gauge-live-slot");
+  if (cue) {
+    const html = liquidationVolumeLiveCueHtml();
+    if (cue.innerHTML !== html) cue.innerHTML = html;
+  }
+  const longEl = host.querySelector(".liq-vol-gauge-label.long");
+  const shortEl = host.querySelector(".liq-vol-gauge-label.short");
+  if (longEl) longEl.textContent = `롱 ${fmtUsdCompact(longUsd)}`;
+  if (shortEl) shortEl.textContent = `숏 ${fmtUsdCompact(shortUsd)}`;
+
+  const apply = () => {
+    const fillLong = host.querySelector(".liq-vol-gauge-fill.long");
+    const fillShort = host.querySelector(".liq-vol-gauge-fill.short");
+    if (fillLong) fillLong.style.width = total > 0 ? `${(longUsd / total) * 100}%` : "0%";
+    if (fillShort) fillShort.style.width = total > 0 ? `${(shortUsd / total) * 100}%` : "0%";
+  };
+  // 스켈레톤을 방금 만든 프레임에서 바로 최종 너비를 주면 브라우저가 중간 상태를 못 보고 즉시 그린다
+  // (transition 없음). 다음 프레임에 적용해 0% -> 실제값 전이가 실제로 보이게 한다.
+  if (fresh && typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
+  else apply();
 }
 
 // 7th model-internal indicator -- 2026-08-25, user asked for a dedicated "청산 캐스케이드" tile
@@ -3939,7 +3964,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // stays unconditional -- only the paint work below is skipped, so history strips have no gap when
   // the user switches back to Snapshot.
   if (activePageTab === "snapshot") {
-    setH("liqVolumeGauge", liquidationVolumeGaugeHtml());
+    renderLiquidationVolumeGauge();
 
     // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + the old liquidationMagnetLevel(),
     // removed 2026-08-31) used to be called ONLY from the two data-fetch functions that feed it, each
