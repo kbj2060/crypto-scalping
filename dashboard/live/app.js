@@ -1455,17 +1455,25 @@ function liquidationLevelRowHtml(lv, tag, sideClass) {
 function renderLiquidationMapPanel() {
   const map = latestLiquidationMap;
   const badge = el("liqMapBadge");
+  // 2026-09-06 (사용자 신고 "청산 규모 텍스트 위 빈 공간"): 이 패널 헤더에는 제목(h3/설명)이 없고
+  // 배지 하나뿐인데, 정상 상태에서는 그 배지가 hidden 이 된다. 그러면 .ops-health-head 의 18px 상하
+  // 패딩과 하단 경계선만 남아 약 37px 빈 줄이 생긴다. 배지가 없으면 **헤더째 접는다**.
+  const badgeHead = badge ? badge.closest(".ops-health-head") : null;
+  const setMapBadge = (tone, text) => {
+    if (badge) { badge.className = `ops-badge ${tone}`; badge.textContent = text; }
+    if (badgeHead) badgeHead.classList.toggle("hidden", !text);
+  };
   if (!map || map.error === "fetch_failed") {
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "연결 실패"; }
+    setMapBadge("bad", "연결 실패");
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">청산맵 데이터를 불러오지 못했습니다.</p>`);
     return;
   }
   if (!map.warmed_up) {
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "웜업"; }
+    setMapBadge("neutral", "웜업");
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">데이터 수집 중...</p>`);
     return;
   }
-  if (badge) { badge.className = "ops-badge neutral hidden"; badge.textContent = ""; }
+  setMapBadge("neutral", "");
 
   const liveCurrentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
   const liveRedistanced = (levels, side) => {
