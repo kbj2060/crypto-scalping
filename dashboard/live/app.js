@@ -504,7 +504,7 @@ function retailFlowRead(micro) {
 }
 
 function liqDirectionSubText(sig) {
-  if (!sig || !sig.warmed_up) return "웜업 중";
+  if (!sig || !sig.warmed_up) return "웜업";
   if (sig.direction === "bullish") return "상승압력";
   if (sig.direction === "bearish") return "하락압력";
   return "중립";
@@ -523,7 +523,7 @@ function fmtBarsAgo(bars) {
 // latestBasisLiquidation payload (server-computed, not part of classifyIndicators' micro/tail
 // inputs -- same "own fetch cycle" category as latestVRebound, see that variable's own comment).
 function basisLiquiditySubText(sig) {
-  if (!sig || !sig.warmed_up) return "웜업 중";
+  if (!sig || !sig.warmed_up) return "웜업";
   if (sig.direction === "short_pressure") return "숏압박↑";
   if (sig.direction === "long_pressure") return "롱압박↑";
   return "안정";
@@ -980,7 +980,7 @@ function stripAxisHtml(times, timeFmtKind) {
 // liqDirectionSubText/basisLiquiditySubText/liqCascadeHint/vReboundSubText above); all 8 evidence
 // signals share one vocabulary under the "evidence" key (matches evidenceSideLabel). Deliberately
 // separate from MODEL_INDICATOR_MEANING (keyed by the exact CURRENT subText, including states a
-// single past tone can't reconstruct -- "웜업 중", or liq_direction's 강한/약한 percentile-strength
+// single past tone can't reconstruct -- "웜업", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
 const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
@@ -1105,9 +1105,9 @@ const MODEL_INDICATOR_MEANING = {
     "종료": "지속 창(12봉)이 끝났어요. 신규 진입 없이 보유분만 유지 — '반대로 가라'는 뜻이 아니에요.",
   },
   retail_shift_b2: {
-    "로딩": "값을 불러오는 중이에요.",
+    "웜업": "원장을 불러오는 중이에요 — 잠시 후 값이 나와요.",
     "오류": "원장을 불러오지 못했어요.",
-    "원장 없음": "러너가 아직 첫 결정을 기록하지 않았어요.",
+    "데이터 없음": "러너가 아직 첫 결정을 기록하지 않았어요 — 가동 직후 한 봉(5분)이면 채워집니다.",
     "미발동": "롱숏비 z가 임계(±2.26) 안이라 진입 조건이 아니에요. 실제 진입은 하루 2~4건뿐입니다.",
     "롱 보유": "개미가 숏으로 쏠린(z ≤ −2.26) 반대인 롱으로 섀도우 포지션 보유 중이에요(주문 없음).",
     "숏 보유": "개미가 롱으로 쏠린(z ≥ +2.26) 반대인 숏으로 섀도우 포지션 보유 중이에요(주문 없음).",
@@ -1267,7 +1267,7 @@ const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
 function ethOnlyIndicator(item) {
   if (activeSnapshotAsset === "eth") return item;
   return { ...item, tone: "neutral", proba: null, history: [], times: [],
-           subText: "ETH 전용 지표 — 이 코인은 아직 미지원",
+           subText: "미지원",   // 2026-09-06: 상태 열은 92px nowrap이라 문장이 들어가면 넘친다. 설명은 derivedTitle에 있다.
            derivedTag: "= ETH 전용",
            derivedTitle: "이 지표의 데이터 출처가 ETH 전용입니다(봇 상태 또는 ETH 학습 모델). "
              + "다른 코인 탭에서는 값을 숨깁니다 -- ETH 값을 그 코인 값인 것처럼 보여주지 않기 위해서입니다." };
@@ -1453,7 +1453,7 @@ function renderLiquidationMapPanel() {
     return;
   }
   if (!map.warmed_up) {
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "웜업 중"; }
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "웜업"; }
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">데이터 수집 중...</p>`);
     return;
   }
@@ -1872,8 +1872,9 @@ function retailShiftB2IndicatorItem() {
       + " 한계 기여는 VAL +6.1 / OOS +7.4bp/일이고 CI가 0을 포함합니다 — 후보이지 증명이 아닙니다.",
     history: [], times: [] };
   const p = latestRetailShiftB2;
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "로딩" };
-  if (!p.available) return { ...base, tone: "neutral", subText: "원장 없음", liveText: "섀도우 원장이 아직 없습니다 · 백테스트 VAL +12.7 / OOS +12.3bp" };
+  // 상태 어휘는 감지기 공통이다: 준비 중 = 웜업 · 소스가 값을 못 냄 = 데이터 없음 · 실패 = 오류.
+  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
+  if (!p.available) return { ...base, tone: "neutral", subText: "데이터 없음", liveText: `섀도우 원장이 아직 없습니다 · ${backtestRefText(12.68, 12.28)}` };
   // 2026-09-06 (사용자 요청): "왜 계속 대기냐" -- 배지의 "대기"는 미결 포지션 없음이라는 뜻이라
   // 신호가 살아있는지를 못 보여준다. 러너가 매 봉 남기는 마지막 결정(z·임계)을 맨 앞에 띄운다.
   // 러너 재기동 전 옛 상태파일에는 last_decision 이 없으므로 그 경우를 따로 말한다.
@@ -2133,7 +2134,7 @@ function renderEvidenceSignals(payload) {
   // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.
   if (payload && payload.unsupported) {
     latestEvidenceSignals = null;
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "미지원 자산"; }
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "미지원"; }
     if (stripBadge) { stripBadge.className = "ops-badge neutral"; stripBadge.textContent = "미지원"; }
     // ⚠️지원 자산 목록을 **하드코딩하지 않는다** -- 예전엔 "(ETH·BTC만 지원)"이 박혀 있어
     // XRP를 붙인 뒤에도 낡은 문구가 그대로 나왔다. 항상 실제 목록에서 만든다.
@@ -3985,7 +3986,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       }, "liq_cascade"),
       {
         key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
-        subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업 중",
+        subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업",
         history: (latestLiquidationDirection && latestLiquidationDirection.tone_history) || [],
         times: evenlySpacedBarTimes(latestLiquidationDirection && latestLiquidationDirection.latest_ts_utc, (latestLiquidationDirection && latestLiquidationDirection.tone_history || []).length, 1),
       },
