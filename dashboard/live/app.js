@@ -983,7 +983,10 @@ function stripAxisHtml(times, timeFmtKind) {
 // single past tone can't reconstruct -- "웜업 중", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
 const STRIP_BAR_LABEL_BY_TONE = {
-  v_rebound: { good: "급등", bad: "급락", flat: "미반등", neutral: "신호 없음" },
+  // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
+  // 통일한 의미가 없다. fire_cont 는 continuation_history() 가 내는 톤 4종을 그대로 받는다.
+  v_rebound: { good: "롱 발동", bad: "숏 발동", flat: "미발동", neutral: "데이터 없음" },
+  fire_cont: { good: "롱 지속", bad: "숏 지속", warn: "혼재 보류", neutral: "미발동" },
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
@@ -1084,11 +1087,32 @@ function toggleSignalDetail(btn, key) {
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
   v_rebound: {
-    "웜업 중": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
-    "신호 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "급등": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 바닥이고 진짜 반등(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 오르고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미반등'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "급락": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 천장이고 진짜 반전(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 내리고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미반등'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
-    "미반등": "지금 V자반등의 근거가 없다는 뜻이에요 — 직전에 뜬 급등/급락 신호도 이미 목표(1.5×ATR)에 닿았거나 60분이 지나 내려간 상태입니다. 대부분의 봉이 여기 해당하는 **평상시 상태**예요(급등/급락은 전체 봉의 약 5%뿐). '반대방향으로 움직인다'는 뜻이 아니라 '지금은 반등/반전을 말할 근거가 없다'는 뜻이에요. 2026-09-01 매 봉 채점으로 바뀌기 전에는 트리거가 발동한 봉에서만 나오던 판정이라 지금보다 훨씬 드물었어요.",
+    "웜업": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
+    "데이터 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
+    "롱 발동": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 바닥이고 진짜 반등(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 오르고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미발동'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
+    "숏 발동": "방금 마감된 5분봉을 TabPFN 모델이 채점한 결과 '여기가 천장이고 진짜 반전(V자반등)이 온다'는 쪽이에요 — 앞으로 30분 안에 종가가 1.5×ATR 이상 내리고, 60분 전체로 봐도 정점 대비 20% 이하만 반납할 거라는 판정이에요. 이 표시는 **목표(1.5×ATR)에 닿거나 60분이 지날 때까지 유지**되고, 그 뒤 '미발동'으로 내려갑니다(칩의 '○분 전' 숫자가 경과 시간이에요). 자세한 계산 방식은 '자세히'를 확인하세요.",
+    "미발동": "지금 V자반등의 근거가 없다는 뜻이에요 — 직전에 뜬 롱/숏 발동도 이미 목표(1.5×ATR)에 닿았거나 60분이 지나 내려간 상태입니다. 대부분의 봉이 여기 해당하는 **평상시 상태**예요(롱/숏 발동은 전체 봉의 약 5%뿐). '반대방향으로 움직인다'는 뜻이 아니라 '지금은 반등/반전을 말할 근거가 없다'는 뜻이에요. 2026-09-01 매 봉 채점으로 바뀌기 전에는 트리거가 발동한 봉에서만 나오던 판정이라 지금보다 훨씬 드물었어요.",
+  },
+  // 2026-09-06: 특화감지기 라벨 통일과 함께 신설. 증거신호 칩은 상태마다 설명이 있는데 이 둘은
+  // 없어서, 같은 자리에 뜨는 배지인데 하나만 눌러도 아무 말이 없었다.
+  fire_cont: {
+    "웜업": "ATR·증거신호 계산에 필요한 봉을 모으는 중이에요 -- 잠시 후 값이 나와요.",
+    "오류": "증거신호 계산에 실패했어요 -- 다음 봉에서 대부분 정상으로 돌아옵니다.",
+    "미발동": "최근 48봉 안에 8종 증거신호의 **첫 발동**이 없었다는 뜻이에요. 이 규칙은 첫 발동 봉에서만 진입하므로 대부분의 시간이 여기예요(백테스트 기준 하루 22~24건).",
+    "롱 지속": "천장 쪽 첫 발동 후 12봉 지속 창 안이고, 규칙은 칩이 가리키는 방향의 **반대**인 롱으로 갑니다(호메로스 §5.23: 첫 발동 봉은 반전이 아니라 지속 시점 -- 페이드 -3.0 vs 반대 +4.7bp). 표시 전용이고 실제 주문은 없어요(섀도우 90일 판정 전). ⚠️레짐과 방향이 어긋나면(숏인데 bear가 아니거나, 롱인데 bear) 이 배지가 **주황**으로 바뀌는데, 그건 '약하다'는 표시일 뿐 규칙은 그대로 진입합니다 — 방향 일치 셀이 더 견고했지만(축 14) 레짐 필터는 21팔 비교에서 기준을 못 이겨 채택하지 않았어요(§5.27).",
+    "숏 지속": "바닥 쪽 첫 발동 후 12봉 지속 창 안이고, 규칙은 칩이 가리키는 방향의 **반대**인 숏으로 갑니다(호메로스 §5.23). 표시 전용이고 실제 주문은 없어요(섀도우 90일 판정 전). ⚠️레짐과 방향이 어긋나면(숏인데 bear가 아니거나, 롱인데 bear) 이 배지가 **주황**으로 바뀌는데, 그건 '약하다'는 표시일 뿐 규칙은 그대로 진입합니다 — 방향 일치 셀이 더 견고했지만(축 14) 레짐 필터는 21팔 비교에서 기준을 못 이겨 채택하지 않았어요(§5.27).",
+    "혼재 보류": "같은 봉에 바닥·천장 신호가 동시에 첫 발동했어요. 방향 정보가 없으므로 규칙상 **진입하지 않습니다**.",
+    "종료": "지속 창(12봉)이 끝났어요. 신규 진입은 없고 보유분만 트레일/만기까지 유지합니다. ⚠️'이제 반대로 가라'는 뜻이 아니에요 -- 짧은 지평 페이드는 승률이 오르지만(50%->53.7~56.0%) 손익비 0.74~0.92가 정확히 지워서 비용 후에는 열 지평 x 세 창 30셀 전부 -6.5~-14.2bp였어요(부록 15).",
+  },
+  retail_shift_b2: {
+    "로딩": "값을 불러오는 중이에요.",
+    "오류": "원장을 불러오지 못했어요.",
+    "원장 없음": "러너가 아직 첫 결정을 기록하지 않았어요.",
+    "미발동": "개미 롱숏비의 30분 변화 z가 임계(±2.2616) 안이라 진입 조건이 아니에요. 임계를 넘어도 같은 측면이 직전 12행 안에 이미 발동했으면 건너뛰므로(GAP12), 실제 진입은 하루 2~4건뿐이에요. 지금 z 값은 아래 줄 맨 앞에 있어요.",
+    "롱 보유": "개미 계정이 숏으로 쏠린(z <= -2.2616) 반대 방향인 롱으로 섀도우 포지션을 들고 있어요. 표시 전용이고 실제 주문은 없어요.",
+    "숏 보유": "개미 계정이 롱으로 쏠린(z >= +2.2616) 반대 방향인 숏으로 섀도우 포지션을 들고 있어요. 표시 전용이고 실제 주문은 없어요.",
+    "혼재 보유": "롱·숏 포지션을 동시에 들고 있어요(서로 다른 발동에서 진입한 상태).",
+    "계측 미달": "롱숏비 행이 결정 시각까지 공개되지 않은 비율이 커요(<=300초 비율 95% 미만). 사전등록상 이 구간에서는 **성과를 판단하지 않습니다** -- 라이브 타이밍이 백테스트 규약과 어긋난다는 뜻이라 손익 숫자를 읽으면 안 돼요.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
@@ -1766,6 +1790,25 @@ function shadowSampleWarning(days, trades) {
   return "";
 }
 
+// ══ 특화감지기 공통 신호 체계 (2026-09-06, 사용자 요청 "증거신호처럼 색부터 라벨까지 통일") ══
+// 세 감지기(V자 급등락·지속 규칙·리테일 롱숏비)가 각자 다른 말을 쓰고 있었다 --
+// 미발동을 "신호 없음"/"대기"/"미반등" 셋으로 부르고, 방향을 "급등급락"/"롱숏"/"보유(숏)" 셋으로 썼다.
+// 증거신호 칩(evidenceSideLabel/metaTone)의 규약에 맞춰 아래 하나로 통일한다.
+//
+//   문법   방향이 있으면 `<방향> <상태>` 두 어절, 없으면 상태 한 어절
+//   방향   롱 = good(초록) · 숏 = bad(빨강) · 혼재 = warn(주황)   ← 증거신호의 바닥/천장과 같은 법칙
+//   상태   발동(사건 감지) · 지속(창 안) · 보유(섀도우 포지션) — 감지기마다 실제로 하는 일이 다르므로
+//          이 한 단어만 도메인 값을 쓴다. 나머지는 전부 공통어다:
+//            미발동(neutral) · 혼재 보류(warn) · 종료(neutral) · 웜업(neutral) · 로딩(neutral)
+//            오류(neutral) · 원장 없음(neutral) · 계측 미달(warn)
+//
+// ⚠️MODEL_INDICATOR_MEANING 은 이 subText 문자열을 **키로** 쓴다 -- 라벨을 바꾸면 사전 키도 같이
+// 바꿔야 설명 줄이 사라지지 않는다(이번 통일에서 세 감지기 전부 사전을 채웠다).
+function specialDirLabel(side, word) {
+  const dir = side === "long" ? "롱" : side === "short" ? "숏" : "혼재";
+  return { subText: `${dir} ${word}`, tone: side === "long" ? "good" : side === "short" ? "bad" : "warn" };
+}
+
 // ── retail_shift B2 (2026-09-06) ─────────────────────────────────────────────────────────────
 // 09-04 경제 축 스크린 11축 중 **유일한 새 후보**(개미 롱숏비 30분 z ≥ 2.26의 반대 방향, 호메로스 §5.28).
 // 09-05부터 섀도우 러너가 돌고 있는데 화면에는 아무 것도 없었다 -- 90일 판정 대상이 사람 눈에 안 보이면
@@ -1784,7 +1827,7 @@ function retailShiftB2IndicatorItem() {
       + " 한계 기여는 VAL +6.1 / OOS +7.4bp/일이고 CI가 0을 포함합니다 — 후보이지 증명이 아닙니다.",
     history: [], times: [] };
   const p = latestRetailShiftB2;
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "불러오는 중" };
+  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "로딩" };
   if (!p.available) return { ...base, tone: "neutral", subText: "원장 없음", liveText: "섀도우 원장이 아직 없습니다 · 백테스트 VAL +12.7 / OOS +12.3bp" };
   const bp = (x, d = 1) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
   // 2026-09-06 (사용자 요청): "왜 계속 대기냐" -- 배지의 "대기"는 미결 포지션 없음이라는 뜻이라
@@ -1811,14 +1854,14 @@ function retailShiftB2IndicatorItem() {
     ? `마감 ${p.closed_trades}건${p.trades_per_day != null ? `(${p.trades_per_day}/일)` : ""} · 건당 ${bp(p.exp_bp)}(메이커 ${bp(p.exp_maker_bp)})${p.win_rate != null ? ` · 승률 ${Math.round(p.win_rate * 100)}%` : ""}${thinSample}`
     : "마감 0건";
   const missedText = p.missed_bars ? ` · 놓친 봉 ${p.missed_bars}${p.decided_bars ? `/${p.decided_bars + p.missed_bars}` : ""}` : "";
-  const openText = p.open_positions
-    ? `${p.open_positions}건 보유(${(p.open_sides || []).map(evidenceContSideKo).join("/")})`
-    : (zNum != null ? `대기 z${zSign(zNum, 1)}` : "대기");
+  // 보유 중이면 그 방향, 아니면 미발동 -- z 값은 배지가 아니라 liveText 맨 앞에 둔다(공통 어휘 유지).
+  const sides = p.open_sides || [];
+  const held = p.open_positions
+    ? specialDirLabel(sides.includes("long") && sides.includes("short") ? null : sides.includes("short") ? "short" : "long", "보유")
+    : null;
   const liveText = `${zText} · ${gateText}${missedText} · ${ledgerText} · 미결 ${p.open_positions}${p.days_running != null ? ` · 섀도우 ${Number(p.days_running).toFixed(1)}일` : ""} · 백테스트 VAL +12.7 / OOS +12.3bp`;
-  const tone = gateBad ? "warn"
-    : p.open_positions ? ((p.open_sides || []).includes("short") && !(p.open_sides || []).includes("long") ? "bad" : "good")
-    : "neutral";
-  return { ...base, tone, subText: gateBad ? "계측 미달" : openText, liveText };
+  if (gateBad) return { ...base, tone: "warn", subText: "계측 미달", liveText };
+  return { ...base, tone: held ? held.tone : "neutral", subText: held ? held.subText : "미발동", liveText };
 }
 
 function fireContIndicatorItem() {
@@ -1827,7 +1870,7 @@ function fireContIndicatorItem() {
   const c = ok ? p.continuation : null;
   const base = { key: "fire_cont", label: "지속 규칙", derivedTag: "= 규칙 · 섀도우 검증 중",
     derivedTitle: "모델이 아니라 고정 규칙(첫발동 봉 → 지속 방향)입니다. 2026-09-04부터 가상 원장(주문 없음)으로 검증 중이며 90일 판정 전입니다. 실제 매매 결정에는 연결되지 않았습니다.\n\n비용 단위: bp는 가격(명목) 대비이고 판정 비용은 테이커 왕복 10bp입니다. 괄호의 메이커 값은 peg 진입+테이커 청산 실측 7.8bp입니다. 증거금 기준으로 읽으면 배율만큼 커집니다(30배면 10bp = 3.00%)." };
-  if (!ok) return { ...base, tone: "neutral", subText: (p && p.error) ? "오류" : "웜업 중", history: [], times: [] };
+  if (!ok) return { ...base, tone: "neutral", subText: (p && p.error) ? "오류" : "웜업", history: [], times: [] };
   const hist = (c && c.history) || [];
   const times = evenlySpacedBarTimes(p.latest_bar_utc, hist.length, 5);
   const sh = (c && c.shadow) || null;
@@ -1835,8 +1878,8 @@ function fireContIndicatorItem() {
   const shadowText = sh && sh.closed_trades != null
     ? `섀도우 ${sh.days_running != null ? `${Number(sh.days_running).toFixed(1)}일` : "-"} · 마감 ${sh.closed_trades}건${sh.trades_per_day != null ? `(${sh.trades_per_day}/일)` : ""} · 건당 ${bp(sh.exp_bp)}(메이커 ${bp(sh.exp_maker_bp)})${sh.win_rate != null ? ` · 승률 ${Math.round(sh.win_rate * 100)}%` : ""}${sh.last30d_exp_bp != null ? ` · 30일 ${bp(sh.last30d_exp_bp)}` : ""} · 미결 ${sh.open_positions}${sh.open_sides && sh.open_sides.length ? `(${sh.open_sides.map(evidenceContSideKo).join("/")})` : ""} · 백테스트 VAL +4.4/OOS +6.8${shadowSampleWarning(sh.days_running, sh.closed_trades)}`
     : "섀도우 원장 아직 없음 · 백테스트 VAL +4.4/OOS +6.8bp";
-  if (!c || !c.active) return { ...base, tone: "neutral", subText: "대기", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
-  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "양측 발동·보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
+  if (!c || !c.active) return { ...base, tone: "neutral", subText: "미발동", history: hist, times, liveText: `최근 ${c ? c.lookback_bars : 48}봉 안 첫발동 없음 · ${shadowText}` };
+  if (c.skip_both_sides) return { ...base, tone: "warn", subText: "혼재 보류", history: hist, times, liveText: `같은 봉 양측 첫발동 ${c.bars_since}봉 전 → 규칙상 진입 없음 · ${shadowText}` };
   const lv = c.levels || null;
   const sideKo = evidenceContSideKo(c.cont_side);
   const levelText = lv && lv.entry != null
@@ -1847,7 +1890,7 @@ function fireContIndicatorItem() {
     return { ...base, tone, subText: `${sideKo} 지속`, history: hist, times,
       liveText: `${levelText} · 창 ${c.bars_since}/${c.window_bars}봉${c.regime_consistency === "conflict" ? " · 레짐 상충" : c.regime_consistency === "match" ? " · 레짐 일치" : ""} · ${shadowText}` };
   }
-  return { ...base, tone: "neutral", subText: "창 종료·보유만", history: hist, times,
+  return { ...base, tone: "neutral", subText: "종료", history: hist, times,
     liveText: `${sideKo} 지속 창(${c.window_bars}봉) 종료, 첫발동 ${c.bars_since}봉 전 · 기존 포지션은 트레일/만기까지 유지 · ${levelText} · ${shadowText}` };
 }
 
@@ -3780,9 +3823,11 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 2026-08-31 user request: 미반등 콜(반등 시도 자체가 없었다는 판정)을 더는 급등/급락으로 억지로
   // 묶지 않고 방향 무관 "미반등"으로 따로 표시 -- tone="flat"(백엔드 _predicted_tone, 2026-08-31
   // 개정)일 때 전용 단어. good/bad(진짜 반등 콜)만 급등/급락을 씁니다.
-  const vReboundSubText = !vReboundWarmedUp ? "웜업 중"
-    : vReboundActive ? (vReboundTone === "good" ? "급등" : vReboundTone === "bad" ? "급락" : "미반등")
-    : "신호 없음";
+  // 2026-09-06 공통 어휘로 교체(급등→롱 발동 / 급락→숏 발동 / 미반등→미발동 / 신호 없음→데이터 없음).
+  // 색 법칙은 그대로다 -- 급등=롱 방향이라 이미 good, 급락=숏이라 bad였다. 바뀌는 건 말뿐이다.
+  const vReboundSubText = !vReboundWarmedUp ? "웜업"
+    : vReboundActive ? (vReboundTone === "good" ? "롱 발동" : vReboundTone === "bad" ? "숏 발동" : "미발동")
+    : "데이터 없음";
   // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
   // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
   // call="rebound" 그대로가 급등이므로 안 뒤집음). 그다음 실제 표시되는 쪽의 확률만 골라 보여줌 --
