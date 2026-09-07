@@ -244,6 +244,10 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
+# 2026-09-07 MASHT 앵커 방향 섀도우(scripts/live_eth_masht_anchor_shadow_runner_20260907.py)
+# 표시 전용, 주문 없음. 아티팩트: data/live/masht_wbin_shadow_artifact/meta.json
+MASHT_ANCHOR_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "masht_anchor_shadow_state.json"
+MASHT_ANCHOR_ARTIFACT_PATH = REPO_ROOT / "data" / "live" / "masht_wbin_shadow_artifact" / "meta.json"
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
@@ -726,6 +730,61 @@ COIN_INDICATOR_CACHE_SECONDS = 20
 MICRO_LOOKBACK_MIN = 15
 # ETH 톤 스트립과 같은 모양(app.js MICRO_HISTORY_MAX=48, 5분 간격 = 4시간)
 MICRO_STRIP_SAMPLES = 48
+
+
+def masht_anchor_shadow_payload() -> dict[str, Any]:
+    """MASHT 앵커 방향 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
+
+    러너: scripts/live_eth_masht_anchor_shadow_runner_20260907.py (가상 원장만)
+    규칙: 앵커 any3/Wc3 -> 48봉x8채널 -> MultiRocket2016+Hydra768 -> TabPFN in-context,
+          p >= 동결임계면 지속 방향 진입, +-1% 대칭 배리어(1분봉 first-touch), 48봉 시간청산.
+    사전등록 측정치는 아티팩트 meta.json 의 `measured` 에 있다(워크포워드 상위30% 59.88%).
+    """
+    state = load_json(MASHT_ANCHOR_SHADOW_STATE_PATH) or {}
+    meta = load_json(MASHT_ANCHOR_ARTIFACT_PATH) or {}
+    if not state:
+        return {"available": False, "threshold": meta.get("entry_threshold"),
+                "breakeven_acc": meta.get("breakeven_acc"),
+                "measured": meta.get("measured", {})}
+    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    skips = state.get("skips") if isinstance(state.get("skips"), list) else []
+
+    resolved = [r for r in ledger if r.get("outcome") in ("cont", "fade")]
+    n_cont = sum(1 for r in resolved if r.get("outcome") == "cont")
+    acc = (n_cont / len(resolved)) if resolved else None
+    net = [float(r["net_taker_bp"]) for r in resolved if isinstance(r.get("net_taker_bp"), (int, float))]
+    days = 0.0
+    started = state.get("started_utc")
+    if started:
+        try:
+            days = max((datetime.now(timezone.utc)
+                        - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
+        except (TypeError, ValueError):
+            days = 0.0
+    last = skips[-1] if skips else None
+    open_sides = [p.get("side") for p in positions]
+    return {
+        "available": True,
+        "started_utc": started,
+        "days_running": round(days, 2),
+        "open_positions": len(positions),
+        # 앵커 측면(bottom/top)이 아니라 **포지션 방향**으로 준다 -- 바닥 앵커의 지속은 숏이다.
+        "open_dirs": ["short" if x == "bottom" else "long" for x in open_sides if x],
+        "closed_trades": len(ledger),
+        "resolved_trades": len(resolved),
+        "timeouts": sum(1 for r in ledger if r.get("outcome") == "timeout"),
+        "cont_hits": n_cont,
+        "accuracy": round(acc, 4) if acc is not None else None,
+        "net_taker_bp_mean": round(sum(net) / len(net), 2) if net else None,
+        "net_taker_bp_sum": round(sum(net), 1) if net else None,
+        "skips": len(skips),
+        "last_p_cont": (last or {}).get("p_cont"),
+        "last_bar_utc": (last or {}).get("bar_utc"),
+        "threshold": meta.get("entry_threshold"),
+        "breakeven_acc": meta.get("breakeven_acc"),
+        "measured": meta.get("measured", {}),
+    }
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -2252,6 +2311,13 @@ def make_app() -> web.Application:
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
+
+    async def api_masht_anchor_shadow(request: web.Request) -> web.Response:
+        etag = make_etag("masht-anchor-shadow",
+                         file_signature(MASHT_ANCHOR_SHADOW_STATE_PATH))
+        return json_response(request, masht_anchor_shadow_payload(), etag)
+
+    app.router.add_get("/api/masht-anchor-shadow", api_masht_anchor_shadow)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
