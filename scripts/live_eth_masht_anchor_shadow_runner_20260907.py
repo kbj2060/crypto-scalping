@@ -13,18 +13,41 @@
             채널: logret · path_atr · dem14 · p_fast · delta_z · ret3_z · kalman_dev_z · hl_range
             앞 7개는 측면정렬(cont_sign = +1 top / -1 bottom), 마지막은 크기
     모델    TabPFN in-context (문맥 3,555 앵커, 2024-01-04 ~ 2026-07-29 동결)
-    진입    예측 p >= **0.537178** (표본외 워크포워드 예측의 70분위 = 상위 30%)
-            방향은 **지속(continuation)** -- 바닥 앵커면 하락 계속, 천장 앵커면 상승 계속
+    진입    두 팔 (2026-09-08 되돌림 팔 추가, 사용자 요청):
+            **지속 팔**   p >= 0.537178 (표본외 워크포워드 70분위 = 상위 30%)
+                          바닥 앵커면 하락 계속(숏), 천장 앵커면 상승 계속(롱)
+            **되돌림 팔** p <= 0.521566 (하위 30%) -- 지속의 반대 방향
+                          바닥 앵커면 반등(롱), 천장 앵커면 반락(숏)
             체결가 = 다음 봉 시가 (라벨 규약 `open[t+1]`과 동일)
+            ⚠️두 팔은 **대칭이 아니다**. 워크포워드 실측:
+                지속   n=325 적중 59.69% [54.18, 65.08] 건당 +11.6bp  ✅손익분기 초과
+                되돌림 n=325 적중 52.31% [47.01, 57.38] 건당 **−3.2bp** ❌손익분기 미달
+            되돌림 팔도 정보는 있다(기저 47.28% → 52.31%, 무작위진입 귀무 p=0.018)지만
+            손익분기 53.90% 에 못 미친다. **기대치가 음수인 채로 가동한다** -- 모델 정보가
+            한쪽 꼬리에만 있다는 가설을 전방으로 검정하기 위해서다.
     청산    **±1% 대칭 배리어**, 1분봉 first-touch, 최대 48봉(4시간) 보유 후 시간청산
             ⚠️트레일링을 쓰지 않는다 -- 라벨이 고정 배리어이고, 트레일링은 2026-09-07 에
             "걸 수 없는 자리" 결함이 확인된 축이다.
     비용    원장에 총수익률·테이커 10bp·메이커 7.8bp 순손익을 전부 기록. 판정은 10bp.
             손익분기 정확도 = (100+7.8)/200 = 53.90%
 
-## 측정된 근거 (사전등록 값 -- 앞으로 이 숫자와 비교한다)
-    워크포워드(월 1회 재학습, 세 창 풀링) 상위30% 진입 정확도 **59.88% [53.94%, 64.56%]**
-      · 날블록 귀무 p=0.017 · 풀링 AUC 0.5453 · 건당 +12.0bp
+## 🔴판정 잣대 교체 (2026-09-08)
+기존 사전등록치(상위30% 정확도 59.88% · 건당 +12.0bp)는 **해소된 거래만** 본 값이었다
+(커버리지 71.3%). 어느 앵커가 해소되는지는 **결과가 정한다**. 전 앵커에 예측을 대고 미해소를
+시간청산 실현손익으로 세면 **−1.46bp [−7.53, +5.93]** 이다 -- 0 근처이고 CI 가 0을 포함한다.
+원인: **모델이 해소되지 않는 앵커를 골라낸다**(상위30% 해소율 54.1% vs 전체 71.3%).
+| | 기존 | **지금** |
+|---|---|---|
+| 지표 | 상위30% 진입 정확도 | **라이브 건당 bp**(시간청산 포함) |
+| 임계 | CI 하한 > 53.90% | **CI 하한 > 0bp** |
+| 기대치 | 56~57%(승자의 저주 할인) | **−1.46bp** |
+⭐섀도우 원장은 `outcome:"timeout"` 까지 전부 남기므로 **구조상 이미 라이브 잣대**다 --
+  백테스트를 세 번 속인 결과선택 편향이 여기서는 발생할 수 없다. 그래서 이 질문에 답할 수 있는
+  유일하게 신뢰할 만한 장치다. 판정에는 지금의 3~4배 표본(약 8~12개월)이 필요하다.
+
+## 참고: 해소분 기준 측정치 (부풀려진 값 -- 판정에 쓰지 않는다)
+    워크포워드 상위30% 진입 정확도 59.88% [53.94%, 64.56%]
+      · 날블록 귀무 p=0.017 · 풀링 AUC 0.5453 · 해소분 건당 +12.0bp
     전방 확인(2026-06-30~07-31, n=25) 64.00% [44.44%, 82.63%] · **무작위진입 귀무 p=0.282**
       → 모순되지 않으나 확증 아님. 그 창은 기저가 57.14%로 손익분기 위였다.
     ⚠️승자의 저주: 87셀에서 고른 Top-1 이다. 기대치는 할인해서 봐야 한다.
@@ -71,6 +94,7 @@ BARRIER_PCT = 1.0
 COST_TAKER_BP, COST_MAKER_BP = 10.0, 7.8
 MAX_CONCURRENT = 5
 RULE_ID = "masht_wbin_top30_20260907"
+THR_FADE_DEFAULT = 0.521566        # 표본외 워크포워드 30분위 (되돌림 팔)
 
 _CACHE: dict[str, Any] = {}
 
@@ -212,28 +236,45 @@ def resolve(s: dict[str, Any], kl1: pd.DataFrame) -> None:
         n_min = int(m.sum())
         if min(i_up, i_dn) == 10**9:
             if n_min >= H_BARS * 5:          # 시간청산 (48봉 = 240분)
-                _close(s, p, "timeout", None, n_min)
+                # 🔴2026-09-08: 이전 판은 시간청산 gross 를 **0 으로** 기록했다. 실제로는 시장가
+                #   청산이라 그 시점 손익이 실현된다. 라이브 현실 평가(부록 X)가 종가 손익을 쓰므로
+                #   원장이 그 규약과 어긋나 있었다. 청산 시점 종가로 실현손익을 남긴다.
+                _close(s, p, "timeout", None, n_min, exit_px=float(kl1["close"].to_numpy(float)[m][-1]))
             else:
                 keep.append(p)
             continue
         cont_up = p["side"] == "top"          # 천장 앵커의 지속 = 상승
         hit_cont = (i_up < i_dn) if cont_up else (i_dn < i_up)
         if min(i_up, i_dn) >= H_BARS * 5:
-            _close(s, p, "timeout", None, n_min); continue
+            _close(s, p, "timeout", None, n_min, exit_px=float(kl1["close"].to_numpy(float)[m][-1]))
+            continue
+        # outcome 은 **시장이 무엇을 했나**(cont/fade)이고, 손익은 팔에 따라 부호가 뒤집힌다.
         _close(s, p, "cont" if hit_cont else "fade", int(min(i_up, i_dn)), n_min)
     s["positions"] = keep
 
 
 def _close(s: dict[str, Any], p: dict[str, Any], outcome: str,
-           minutes: int | None, n_min: int) -> None:
-    gross = 0.0 if outcome == "timeout" else (BARRIER_PCT * 100.0 if outcome == "cont"
-                                              else -BARRIER_PCT * 100.0)
+           minutes: int | None, n_min: int, exit_px: float | None = None) -> None:
+    # 지속 팔은 outcome=="cont" 일 때 이기고, 되돌림 팔은 outcome=="fade" 일 때 이긴다.
+    bet = p.get("bet", "cont")
+    if outcome == "timeout":
+        # 시간청산 = 시장가 청산. 진입 방향 기준 실현손익(bp)을 그대로 남긴다.
+        e = p.get("entry_px") or p.get("entry_px_provisional")
+        if exit_px is None or not e:
+            gross = 0.0
+        else:
+            sgn = 1.0 if p.get("trade_dir", "long") == "long" else -1.0
+            gross = (exit_px - e) / e * 1e4 * sgn
+    else:
+        won = (outcome == "cont") if bet == "cont" else (outcome == "fade")
+        gross = BARRIER_PCT * 100.0 if won else -BARRIER_PCT * 100.0
     rec = dict(p)
-    rec.update(outcome=outcome, gross_bp=gross, minutes_to_hit=minutes,
+    rec.update(outcome=outcome, bet=bet, gross_bp=round(gross, 3), minutes_to_hit=minutes,
+               exit_px=exit_px,
                net_taker_bp=gross - COST_TAKER_BP, net_maker_bp=gross - COST_MAKER_BP,
                closed_utc=datetime.now(timezone.utc).isoformat(), bars_observed=n_min // 5)
     s["ledger"].append(rec)
-    log(f"청산 {p['entry_utc']} {p['side']} → {outcome} ({gross:+.0f}bp gross)")
+    log(f"청산 {p['entry_utc']} {p['side']} 팔={bet} → 시장 {outcome} ({gross:+.0f}bp gross)")
 
 
 def cycle(s: dict[str, Any]) -> None:
@@ -269,21 +310,32 @@ def cycle(s: dict[str, Any]) -> None:
     rec = {"bar_utc": bar_ts, "side": a["side"], "signals": a["signals"],
            "n_signals": a["n_signals"], "p_cont": p_cont, "threshold": thr,
            "atr_pct": atr, "anchor_close": entry_px}
-    if p_cont < thr:
-        rec["why"] = "below_threshold"
+    thr_f = float(art["meta"].get("entry_threshold_fade", THR_FADE_DEFAULT))
+    rec["threshold_fade"] = thr_f
+    if p_cont >= thr:
+        bet = "cont"
+    elif p_cont <= thr_f:
+        bet = "fade"
+    else:
+        rec["why"] = "between_thresholds"
         s["skips"].append(rec)
-        log(f"앵커 {bar_ts} {a['side']} p={p_cont:.4f} < {thr:.4f} → 스킵")
+        log(f"앵커 {bar_ts} {a['side']} p={p_cont:.4f} · {thr_f:.4f}<p<{thr:.4f} → 스킵")
         return
     if len(s["positions"]) >= MAX_CONCURRENT:
-        rec["why"] = "max_concurrent"; s["skips"].append(rec); return
+        rec["why"] = "max_concurrent"; rec["bet"] = bet; s["skips"].append(rec); return
     up = entry_px * (1 + BARRIER_PCT / 100.0)
     dn = entry_px * (1 - BARRIER_PCT / 100.0)
-    s["positions"].append({**rec, "entry_utc": datetime.now(timezone.utc).isoformat(),
+    # 지속 방향: 천장=상승 · 바닥=하락. 되돌림 팔은 그 반대다.
+    cont_up = a["side"] == "top"
+    take_up = cont_up if bet == "cont" else (not cont_up)
+    s["positions"].append({**rec, "bet": bet,
+                           "entry_utc": datetime.now(timezone.utc).isoformat(),
                            "entry_px_provisional": entry_px, "entry_px": None,
                            "barrier_up": up, "barrier_dn": dn,
-                           "cont_dir": "up" if a["side"] == "top" else "down"})
-    log(f"⭐진입 {bar_ts} {a['side']} p={p_cont:.4f} ≥ {thr:.4f} "
-        f"· 지속방향 {'상승' if a['side']=='top' else '하락'} · 배리어 ±{BARRIER_PCT}%")
+                           "cont_dir": "up" if cont_up else "down",
+                           "trade_dir": "long" if take_up else "short"})
+    log(f"⭐진입 {bar_ts} {a['side']} p={p_cont:.4f} · 팔={bet} "
+        f"· 방향 {'롱' if take_up else '숏'} · 배리어 ±{BARRIER_PCT}%")
 
 
 def fill_next_open(s: dict[str, Any], kl: pd.DataFrame) -> None:
@@ -310,10 +362,17 @@ def report(s: dict[str, Any]) -> None:
     print(f"열린 포지션 {len(s['positions'])} · 마감 {len(L)} · 스킵 {len(s.get('skips', []))}")
     if not len(L):
         print("아직 마감된 가상 거래 없음"); return
+    if "bet" not in L.columns:
+        L["bet"] = "cont"
     d = L[L.outcome != "timeout"]
-    acc = (d.outcome == "cont").mean() if len(d) else float("nan")
     print(f"\n마감 {len(L)} (배리어 {len(d)} · 시간청산 {(L.outcome=='timeout').sum()})")
-    print(f"지속 적중률 {acc:.2%}  (손익분기 {(100+COST_TAKER_BP)/200:.2%})")
+    print(f"손익분기 {(100+COST_TAKER_BP)/200:.2%}")
+    for b in ("cont", "fade"):
+        db = d[d.bet == b]
+        if not len(db):
+            print(f"  {b:<5} 없음"); continue
+        won = (db.outcome == "cont") if b == "cont" else (db.outcome == "fade")
+        print(f"  {b:<5} n={len(db):>4} 적중 {won.mean():.2%} · 건당 {L[L.bet==b].net_taker_bp.mean():+.2f}bp")
     for c, tag in (("net_taker_bp", "테이커 10bp"), ("net_maker_bp", "메이커 7.8bp")):
         print(f"  {tag:<12} 건당 {L[c].mean():+.2f}bp · 합계 {L[c].sum():+.0f}bp")
     print(f"\n측면별:"); print(L.groupby("side").outcome.value_counts().to_string())
