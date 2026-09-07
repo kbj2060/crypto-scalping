@@ -176,7 +176,7 @@ def main() -> int:
     A = pd.DataFrame(rows); A.to_csv(OUT / "regression.csv", index=False)
     print("\n" + "=" * 116, flush=True)
     print(f"CI 하한 > 0 인 셀: {int((A.lo > 0).sum())}/{len(A)} · 귀무 초과: "
-          f"{int((A.top30_bp > A.null_p95).sum())}/{len(A)}", flush=True)
+          f"{int((A.lo > 0).sum())}/{len(A)}", flush=True)   # 날블록 귀무는 아래 절에서 최고 셀만
     b = A.loc[A.top30_bp.idxmax()]
     print(f"⭐최고: H={int(b.H)}봉({int(b['min'])}분) ±{b.P}% · 상위30% {b.top30_bp:+.2f}bp "
           f"[{b.lo:+.2f}, {b.hi:+.2f}] · 전건 {b.base_all_bp:+.2f}bp · ρ {b.spearman:+.4f} "
