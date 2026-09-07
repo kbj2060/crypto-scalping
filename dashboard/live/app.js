@@ -2222,13 +2222,21 @@ async function refreshMashtAnchor() {
 // 규약: 라벨 어휘 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 데이터 줄 없음 §4
 // (숫자는 배지 툴팁 stateTitle 로만 -- 사용자가 09-06에 제목 밑 데이터 줄 제거를 요청했다)
 function mashtAnchorIndicatorItem() {
-  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
+  // 2026-09-07 (사용자 요청 "라벨칩·확률도 통일"): derivedTag를 이 목록의 어휘에 맞춘다 --
+  // 다른 행은 전부 `= 대시보드 자체계산`(V자) / `= 대시보드 자체계산·탐색적`(베이시스) 꼴이고,
+  // 앵커도 봇이 아니라 대시보드 쪽 러너가 계산해 섀도우로 검증 중이라 같은 틀에 들어간다.
+  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 대시보드 자체계산·섀도우",
     derivedTitle: "증거신호 3종 이상이 겹친 앵커에서 48봉 창을 랜덤 합성곱(MultiRocket+Hydra)으로 2,784열 피쳐로 바꿔"
       + " TabPFN 에 넣고, 지속(추세 계속) 확률이 임계 이상이면 그 방향으로 가상 진입합니다."
       + " 2026-09-07부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
       + "⚠️87개 모델·피쳐 조합에서 고른 Top-1이라 승자의 저주가 있습니다. 워크포워드 측정 59.88%를 그대로"
       + " 기대하면 안 되고 56~57% 정도로 봐야 합니다. 손익분기 정확도는 53.90%입니다.",
-    history: [], times: [] };
+    // 띠와 그 아래 시간 줄. 서버가 다른 감지기(basis/liq_direction)와 **같은 모양**으로
+    // tone_history + latest_ts_utc 를 준다 -- 여기가 비어 있으면 lastSegmentRangeLabel이 "-"를
+    // 돌려 이 행만 게이지 아래 시간이 없다(2026-09-07 사용자 신고).
+    history: (latestMashtAnchor && latestMashtAnchor.tone_history) || [],
+    times: evenlySpacedBarTimes(latestMashtAnchor && latestMashtAnchor.latest_ts_utc,
+                                (latestMashtAnchor && latestMashtAnchor.tone_history || []).length, 5) };
   const p = latestMashtAnchor;
   // 상태 어휘는 감지기 공통 네 단어뿐이다(규약 §1).
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };

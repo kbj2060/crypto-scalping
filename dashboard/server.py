@@ -755,6 +755,56 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
+MASHT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
+
+
+def _masht_tone_history(state: dict[str, Any], positions: list[dict], ledger: list[dict],
+                        bars: int = MASHT_STRIP_BARS) -> tuple[list[str], str | None]:
+    """최근 `bars`개 5분봉의 **보유 톤** 이력. 2026-09-07 사용자 신고("앵커 방향만 게이지 아래
+    시간이 없다")로 신설.
+
+    프론트의 `lastSegmentRangeLabel(history, times, ...)`은 history가 비면 그냥 "-"를 돌려주는데,
+    앵커 항목만 `history: []`로 만들어져 있어서 다른 감지기에는 다 있는 시간 줄이 이 행에만
+    없었다. 그래서 다른 감지기(basis/liq_direction)와 **같은 모양**으로 준다 --
+    `tone_history` + `latest_ts_utc`, 톤 어휘도 같은 good/bad/warn/neutral.
+
+    톤 규약(app.js STRIP_BAR_LABEL_BY_TONE.masht_anchor와 일치해야 한다):
+      good=롱 보유 · bad=숏 보유 · warn=혼재 보유 · neutral=미발동
+    ⚠️앵커 측면과 포지션 방향은 반대다 -- **바닥 앵커의 지속은 숏**이다(payload의 open_dirs와 동일).
+    진입은 라벨 규약대로 앵커 봉의 **다음 봉**이고, 마감분은 `bars_observed`만큼, 보유분은 끝까지 덮는다.
+    """
+    def _parse(value: Any) -> datetime | None:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    seen = [t for t in (_parse(x) for x in (state.get("seen_bars") or [])) if t]
+    end = max(seen) if seen else _parse(state.get("updated_utc"))
+    if end is None:
+        return [], None
+    end = end.replace(second=0, microsecond=0) - timedelta(minutes=end.minute % 5)
+    grid = [end - timedelta(minutes=5 * (bars - 1 - i)) for i in range(bars)]
+
+    spans: list[tuple[datetime, datetime, str]] = []
+    for row in [*ledger, *positions]:
+        anchor = _parse(row.get("bar_utc"))
+        if anchor is None:
+            continue
+        start = anchor + timedelta(minutes=5)
+        held = row.get("bars_observed")
+        stop = (start + timedelta(minutes=5 * int(held))
+                if isinstance(held, int) and held >= 0 else end + timedelta(minutes=5))
+        spans.append((start, stop, "bad" if row.get("side") == "bottom" else "good"))
+
+    history = []
+    for moment in grid:
+        tones = {tone for start, stop, tone in spans if start <= moment < stop}
+        history.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
+    return history, end.isoformat().replace("+00:00", "Z")
+
+
 def masht_anchor_shadow_payload() -> dict[str, Any]:
     """MASHT 앵커 방향 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -785,10 +835,20 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
                         - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
         except (TypeError, ValueError):
             days = 0.0
-    last = skips[-1] if skips else None
+    # 마지막 앵커의 지속확률. skips(임계 미달로 건너뛴 앵커)만 보면 **진입이 일어난 앵커에서
+    # null**이 된다 -- 러너는 진입한 앵커의 p_cont를 positions/ledger에 넣고 skips에는 안 넣는다.
+    # 그러면 게이지가 비어 다른 특화감지기와 어긋나고, 툴팁도 앵커가 있는데 "앵커 대기"로 나온다
+    # (2026-09-07 사용자 신고 "확률도 통일"). 진입·스킵·마감을 통틀어 가장 최근 앵커를 쓴다.
+    anchors = [r for r in (*skips, *positions, *ledger) if r.get("bar_utc")]
+    last = max(anchors, key=lambda r: str(r.get("bar_utc"))) if anchors else None
     open_sides = [p.get("side") for p in positions]
+    tone_history, latest_ts_utc = _masht_tone_history(state, positions, ledger)
     return {
         "available": True,
+        # 띠(strip)와 그 아래 시간 줄용 -- 다른 감지기와 같은 필드명/모양이라 프론트가 같은
+        # evenlySpacedBarTimes(latest_ts_utc, len, 5) 경로를 그대로 쓴다.
+        "tone_history": tone_history,
+        "latest_ts_utc": latest_ts_utc,
         "started_utc": started,
         "days_running": round(days, 2),
         "open_positions": len(positions),
