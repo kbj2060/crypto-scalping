@@ -43,7 +43,7 @@ class FedCalendarRowTests(unittest.TestCase):
         """이게 회귀의 핵심 -- 배포본은 이 행을 하나도 못 잡았다."""
         (ev,) = parse(row("8:30 a.m.", "Speech - Governor Christopher J. Waller", "3"))
         self.assertEqual(ev["title_ko"], "연준 이사 연설")
-        self.assertEqual(ev["importance"], "medium")   # 캘린더엔 보이되 +-30분 푸시는 안 울린다
+        self.assertEqual(ev["importance"], "high")     # 2026-09-07 사용자 요청으로 medium -> high
         self.assertEqual(ev["category"], "fed_speech")
         self.assertTrue(ev["time_utc"].startswith("2026-09-03T12:30"))  # 8:30 ET = 12:30 UTC
 
@@ -62,12 +62,22 @@ class FedCalendarRowTests(unittest.TestCase):
         self.assertEqual(ev["importance"], "high")
         self.assertTrue(ev["time_utc"].startswith("2026-09-16T18:30"))  # 2:30pm ET = 18:30 UTC
 
+    def test_fomc_minutes_and_beige_book_are_captured(self) -> None:
+        """2026-09-07 사용자 요청으로 추가. 둘 다 그 페이지의 정례 예정 항목이다."""
+        (minutes,) = parse(row("2:00 p.m.", "FOMC Minutes Meeting of September 15-16", "7"))
+        self.assertEqual(minutes["title_ko"], "FOMC 의사록")
+        self.assertEqual(minutes["importance"], "high")
+        (beige,) = parse(row("2:00 p.m.", "Beige Book", "2"))
+        self.assertEqual(beige["title_ko"], "베이지북")
+        self.assertEqual(beige["importance"], "high")
+
     def test_routine_statistical_rows_are_ignored(self) -> None:
-        """페이지의 대부분은 H.4.1/G.19 같은 정기 통계 발표다. 이걸 다 넣으면 캘린더가 잠긴다."""
+        """페이지의 대부분은 H.4.1/G.19 같은 정기 통계 발표다. 이걸 다 넣으면 캘린더도 +-30분
+        푸시 알림도 그걸로 잠긴다 -- 이 소스의 항목은 전부 importance=high이기 때문이다."""
         html = "".join(row("4:30 p.m.", c, "10") for c in (
             "H.4.1 - Factors Affecting Reserve Balances", "G.19 - Consumer Credit",
-            "Beige Book", "FOMC Minutes Meeting of September 15-16",
-            "Holiday - Labor Day"))
+            "G.17 - Industrial Production and Capacity Utilization",
+            "Z.1 - Financial Accounts of the United States", "Holiday - Labor Day"))
         self.assertEqual(parse(html), [])
 
     def test_rows_outside_the_window_are_dropped(self) -> None:

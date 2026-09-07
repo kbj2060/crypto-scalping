@@ -33,9 +33,11 @@ API and is deliberately NOT covered here.
   provide a future schedule.
   2026-09-07: the speaker filter was Chair/Chairman only, which matched NOTHING -- the Fed's
   monthly pages label rows "Speech - Governor <name>" and the word "Chair" did not appear even
-  once on the 2026-09 page. Widened to Vice Chair/Governor (user request). Governor rows are
-  importance=medium so they show on the calendar without each one firing the +-30min push alert
-  (compute_macro_event_alert only counts "high"); Chair/Vice Chair stay high.
+  once on the 2026-09 page. Widened to Vice Chair/Governor (user request). 2026-09-07 (later the
+  same day, user request): Governor rows raised medium -> high, and FOMC Minutes / Beige Book
+  added alongside the FOMC press conference. Everything from this source is now "high", i.e. it
+  all fires the +-30min push alert -- routine statistical releases (H.4.1/G.19/G.17 ...) stay
+  excluded for exactly that reason.
 - EIA Weekly Petroleum Status Report: EIA's API has no "next scheduled release" field (it serves
   data, not a release calendar), so this uses the well-known fixed cadence instead -- every
   Wednesday 10:30am ET, shifted to Thursday when that week's Monday is a US market holiday
@@ -330,21 +332,31 @@ def _parse_fed_time(value: str) -> tuple[int, int] | None:
 FED_SPEAKER_ROW = re.compile(
     r"\b(Speech|Testimony|Discussion)\s*-\s*(Vice Chair(?:\s+for\s+Supervision)?|Chair(?:man)?|Governor)\b",
     re.I)
-# FOMC 기자회견(2026-09-07 사용자 요청). 금리결정 자체는 omega6_live의 정적 목록에서 오지만
-# 기자회견은 그 30분 뒤 별도 이벤트이고, 발언이 결정문보다 시장을 더 움직이는 경우가 많다.
-FED_PRESSER_ROW = re.compile(r"\bFOMC\s+Press\s+Conference\b", re.I)
+# 연준 월별 캘린더에서 함께 뽑는 비-연설 행들(2026-09-07 사용자 요청). 전부 그 페이지에 이미
+# 있는 예정 항목이고, 각각 발표 시각이 정해져 있다.
+#   FOMC 기자회견 -- 금리결정 자체는 omega6_live의 정적 목록에서 오지만 기자회견은 그 30분 뒤
+#     별도 이벤트이고, 발언이 결정문보다 시장을 더 움직이는 경우가 많다.
+#   FOMC 의사록  -- 직전 회의의 논의 내용. 금리 경로 기대를 자주 되돌린다.
+#   베이지북     -- 각 지역연은 경기 보고. 위 둘보다는 약하지만 FOMC 2주 전 정례 발표다.
+# ⚠️여기 넣는 순간 +-30분 푸시 알림 대상이 된다(compute_macro_event_alert는 high만 센다).
+#   그래서 정기 통계 발표(H.4.1/G.19/G.17 등)는 계속 제외한다 -- 넣으면 캘린더도 알림도 잠긴다.
+FED_EXTRA_ROWS = (
+    (re.compile(r"\bFOMC\s+Press\s+Conference\b", re.I), "FOMC 기자회견", "fomc", "high"),
+    (re.compile(r"\bFOMC\s+Minutes\b", re.I), "FOMC 의사록", "fomc", "high"),
+    (re.compile(r"\bBeige\s+Book\b", re.I), "베이지북", "fed_publication", "high"),
+)
 _FED_KIND_KO = {"speech": "연설", "testimony": "증언", "discussion": "대담"}
 
 
 def _fed_role_ko(role: str) -> tuple[str, str]:
-    """(한국어 역할, importance). 이사(Governor)는 medium -- 캘린더에는 보이되 +-30분 푸시
-    알림(compute_macro_event_alert는 high만 센다)까지 매번 울리지는 않게 한다."""
+    """(한국어 역할, importance). 2026-09-07 사용자 요청으로 이사(Governor)도 high로 올렸다 --
+    그 전엔 medium이라 캘린더에만 보이고 +-30분 푸시 알림은 안 갔다."""
     normalized = role.lower()
     if normalized.startswith("vice chair"):
         return "부의장", "high"
     if normalized.startswith("chair"):
         return "의장", "high"
-    return "이사", "medium"
+    return "이사", "high"
 
 
 def _parse_fed_calendar_events(html: str, year: int, month: int, source_url: str,
@@ -355,8 +367,10 @@ def _parse_fed_calendar_events(html: str, year: int, month: int, source_url: str
     for row in parser.rows:
         content = " ".join(row["content"].split())
         speaker = FED_SPEAKER_ROW.search(content)
-        presser = None if speaker else FED_PRESSER_ROW.search(content)
-        if not speaker and not presser:
+        extra = None
+        if not speaker:
+            extra = next((row_spec for row_spec in FED_EXTRA_ROWS if row_spec[0].search(content)), None)
+        if not speaker and not extra:
             continue
         day_match = re.search(r"\b([1-9]|[12]\d|3[01])\b", row["date"])
         parsed_time = _parse_fed_time(row["time"])
@@ -374,7 +388,7 @@ def _parse_fed_calendar_events(html: str, year: int, month: int, source_url: str
             title = f"연준 {role_ko} {_FED_KIND_KO[speaker.group(1).lower()]}"
             category = "fed_speech"
         else:
-            title, importance, category = "FOMC 기자회견", "high", "fomc"
+            _pattern, title, category, importance = extra
         short_content = re.split(r"\b(?:Watch Live|At the)\b", content, maxsplit=1, flags=re.I)[0].strip()
         events.append({
             "time_utc": _et_to_utc(event_day, hour, minute).isoformat(),
