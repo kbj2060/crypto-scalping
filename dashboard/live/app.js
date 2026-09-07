@@ -2270,7 +2270,21 @@ function mashtAnchorIndicatorItem() {
                       "⚠️주문 없음 -- 가상 원장만"].filter(Boolean).join("\n");
   // 확률 개념이 있으므로 게이지 자리를 준다(규약 §3). 미발동이어도 자리를 지킨다.
   const proba = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true };
+  // 2026-09-07 (사용자 지적 "지속과 되돌림 중 하나 고르는 것"): 게이지 숫자가 **무엇의 확률인지**
+  // 화면에 없었다. 바로 위 V자 급등락의 게이지는 방향 확률인데 이 행은 지속 확률이라, 같은 자리에
+  // 같은 모양으로 붙어 있으면 같은 종류로 읽힌다. 모델은 지속/되돌림 이진 분류이므로 나머지 쪽도
+  // 같이 적어 "둘 중 하나를 고른다"는 구조가 보이게 한다.
+  // 규약 §3의 보조 수치 자리(meterNote -> .meter-price)를 쓴다 -- 지속 규칙이 `창 2/12봉`,
+  // B2가 `z −1.56`을 적던 그 자리다(둘 다 2026-09-07 제거).
+  const contPct = proba != null ? Math.round(clamp01(proba) * 100) : null;
+  const meterNote = contPct != null ? `지속 ${contPct}% · 되돌림 ${100 - contPct}%` : null;
+  const meterNoteTitle = contPct != null
+    ? "모델은 앵커 이후 움직임이 **지속**인지 **되돌림**인지 둘 중 하나를 고릅니다."
+      + " 게이지 숫자가 지속 확률이고 나머지가 되돌림 확률입니다.\n\n"
+      + "⚠️지속 확률이 임계 아래여도 **되돌림 방향으로 진입하지 않고 건너뜁니다** —"
+      + " 되돌림은 예측 대상이지 포지션이 되지는 않습니다. 그래서 상태는 롱/숏 두 가지뿐입니다."
+    : null;
+  return { ...base, tone, subText, stateTitle, proba, probaSlot: true, meterNote, meterNoteTitle };
 }
 
 async function refreshVReboundSignal() {
