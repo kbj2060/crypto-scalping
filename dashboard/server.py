@@ -721,6 +721,29 @@ def _locked_bp(p: dict[str, Any]) -> float | None:
         return None
 
 
+def _unrealized_bp(p: dict[str, Any], price: float | None) -> float | None:
+    """보유 중인 섀도우 포지션을 **지금 닫으면** 얼마인가(bp).
+
+    2026-09-07 사용자 요청. 그 전까지 이 패널은 `locked_bp`("최악이어도 얼마")만 보여줬는데,
+    그건 손절선이 확정한 값이라 시장이 어디에 있든 바뀌지 않는다 -- 보유 중인 건이 지금 이기고
+    있는지 지고 있는지는 화면에서 알 수 없었다.
+
+    ⚠️규약은 원장의 `pnl_bp`와 **똑같이** 맞춘다(방향 부호 + 왕복비용 10bp 차감). 그래야 이
+    숫자가 그대로 청산됐을 때의 값과 이어지고, 마감분 `total_bp`와 더해도 단위가 맞는다.
+    ⚠️기준가는 **최근 확정된 5분봉 종가**다(진행 중인 봉이 아님). 러너가 배리어를 평가하는
+    주기와 같아서 화면과 원장이 같은 봉을 본다. 러너의 청산 판정은 봉 고가/저가 기준이지만
+    (`exit_basis: bar_high_low`), 미실현 표시는 "지금 시장가로 닫으면"이므로 종가가 맞다.
+    """
+    if price is None:
+        return None
+    try:
+        entry = float(p["entry"])
+        sgn = 1.0 if p.get("side") == "long" else -1.0
+        return round(sgn * (float(price) - entry) / entry * 1e4 - 10.0, 2)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
@@ -839,7 +862,7 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     return out
 
 
-def v_rebound_econ_shadow_payload() -> dict[str, Any]:
+def v_rebound_econ_shadow_payload(mark: dict[str, Any] | None = None) -> dict[str, Any]:
     """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
 
     근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
@@ -849,6 +872,10 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
     state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
     ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
     positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    # 미실현 손익 기준가(최근 확정 5분봉 종가). 호출부가 안 주면 None -- 그때는 이 패널이
+    # 예전처럼 locked_bp만 보여주고 조용히 넘어간다(캐시 워밍업 전 첫 몇 초).
+    mark_price = (mark or {}).get("price")
+    unrealized_all = [v for v in (_unrealized_bp(p, mark_price) for p in positions) if v is not None]
 
     pnls: list[float] = []
     for row in ledger:
@@ -909,6 +936,8 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
                 "best": p.get("best"), "armed": bool(p.get("armed")),
                 "proba": p.get("proba"), "opened_utc": p.get("opened_utc"),
                 "bars_held": p.get("bars_held"),
+                # 지금 닫으면 얼마 -- 원장 pnl_bp와 같은 규약(왕복 10bp 차감), 5분봉마다 갱신
+                "unrealized_bp": _unrealized_bp(p, mark_price),
                 # 손절선이 이미 확정한 손익. 무장 전이면 최대손실, 무장 후면 확보이익이 될 수 있다.
                 # 현재가 없이도 계산되고, "최악이어도 얼마"라는 직관적 의미를 준다.
                 "locked_bp": _locked_bp(p),
@@ -916,6 +945,10 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
             for p in positions[-10:]
         ],
         "n_open": len(positions),
+        # 보유분 합계는 화면에 보이는 10건이 아니라 **전체** 포지션 기준이다.
+        "unrealized_total_bp": round(sum(unrealized_all), 2) if unrealized_all else None,
+        "mark_price": mark_price,
+        "mark_bar_utc": (mark or {}).get("bar_utc"),
         "closed_trades": n,
         "exp_bp": round(sum(pnls) / n, 2) if n else None,
         "total_bp": round(sum(pnls), 1) if n else None,
@@ -2233,14 +2266,39 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_evidence_shadow_payload(), etag)
 
+    def eth_closed_bar_mark() -> dict[str, Any] | None:
+        """미실현 손익 기준가 = evidence 캐시(ETH 5분봉 1500개, 60초 갱신)의 **마지막 확정봉 종가**.
+
+        추가 fetch를 만들지 않는 게 요점이다 -- 이 캐시는 증거신호 패널이 이미 계속 채우고 있다.
+        값이 5분마다 한 번 바뀌므로 미실현 표시도 5분 주기로 갱신된다(섀도우 러너의 평가 주기와 동일).
+        캐시가 아직 비어 있으면(프로세스 기동 직후) None을 돌려 **여기서 워밍업을 강제하지 않는다** --
+        그랬다간 이 가벼운 패널이 TabPFN 경로를 기다리게 된다.
+        """
+        frames = evidence_signal_cache["frames"]
+        if not frames:
+            return None
+        closed_df = frames[0]
+        if closed_df is None or closed_df.empty:
+            return None
+        row = closed_df.iloc[-1]
+        try:
+            return {"price": float(row["close"]),
+                    "bar_utc": pd.Timestamp(row["timestamp"]).isoformat()}
+        except (KeyError, TypeError, ValueError):
+            return None
+
     async def api_v_rebound_econ_shadow(request: web.Request) -> web.Response:
+        mark = eth_closed_bar_mark()
         etag = make_etag(
             "v-rebound-econ-shadow",
             file_signature(V_REBOUND_ECON_SHADOW_STATE_PATH),
+            # 봉 시각을 넣어야 원장 파일이 안 바뀐 채 봉만 넘어간 경우에도 미실현이 갱신된다.
+            # 가격 대신 봉 시각을 쓰는 이유: ETag가 5분에 한 번만 바뀌어 캐시가 제 역할을 한다.
+            (mark or {}).get("bar_utc"),
         )
         if etag_matches(request, etag):
             return json_response(request, None, etag)
-        return json_response(request, v_rebound_econ_shadow_payload(), etag)
+        return json_response(request, v_rebound_econ_shadow_payload(mark), etag)
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)

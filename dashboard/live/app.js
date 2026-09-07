@@ -2470,21 +2470,37 @@ function renderVrebEconShadow(p) {
       <span class="vshadow-card-ref">${c.ref}</span>
     </div>`).join("")}</div>`);
 
-  // ④ 보유 중 -- "최악이어도 얼마"가 가장 알고 싶은 값
+  // ④ 보유 중 -- 2026-09-07 사용자 요청으로 **미실현 손익**("지금 닫으면 얼마")이 주 숫자가 됐다.
+  //    그 전까지는 locked_bp("최악이어도 얼마")만 있었는데, 그건 손절선이 확정한 값이라 시장이
+  //    어디에 있든 바뀌지 않는다 -- 보유 중인 건이 지금 이기고 있는지 지고 있는지를 화면에서
+  //    알 수 없었다. locked_bp는 버리지 않고 본문 줄로 내린다(두 값의 의미가 서로 다르다).
+  //    기준가는 서버가 실어 보내는 **최근 확정 5분봉 종가**(mark_price)라 5분마다 갱신되고,
+  //    왕복 수수료 10bp를 뺀 원장 pnl_bp와 같은 규약이다 -- 그대로 청산됐을 때 값과 이어진다.
   const open = p.open_positions || [];
-  out.push(`<div class="vshadow-section-title">보유 중 <em>${p.n_open || 0}건</em></div>`);
+  const unrealTotal = p.unrealized_total_bp;
+  const markNote = p.mark_bar_utc
+    ? `${fmtMacroCalendarTime(p.mark_bar_utc)} 확정봉 종가 ${fmtNum(p.mark_price, 2)} 기준입니다. 왕복 수수료 10bp를 뺀 값이라 그대로 청산되면 이 숫자가 원장에 그대로 남습니다. 5분봉마다 갱신됩니다.`
+    : "기준가를 아직 못 읽었습니다(대시보드 기동 직후) — 다음 갱신에 채워집니다.";
+  out.push(`<div class="vshadow-section-title" title="${markNote}">보유 중 <em>${p.n_open || 0}건</em>${
+    unrealTotal == null ? "" : `<em class="${unrealTotal > 0 ? "good" : "bad"}">지금 청산 시 ${bp(unrealTotal)}</em>`}</div>`);
   if (!open.length) {
     out.push(`<div class="vshadow-empty">열린 포지션 없음</div>`);
   } else {
-    out.push(open.map((q) => `<div class="vshadow-row">
+    out.push(open.map((q) => {
+      const u = q.unrealized_bp;
+      const hasU = u != null;
+      // 기준가를 못 읽은 동안에는 예전 표시(최악 시)로 조용히 되돌아간다 -- 빈칸보다 낫다.
+      const tone = hasU ? (u > 0 ? "good" : "bad") : (Number(q.locked_bp) > 0 ? "good" : "warn");
+      return `<div class="vshadow-row">
       <span class="vshadow-side ${q.side}">${q.side === "long" ? "롱" : "숏"}</span>
       <div class="vshadow-row-main">
         <strong>${q.armed ? "이익 확보됨" : "손절선 대기"}</strong>
-        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유</span>
+        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유 · 최악 ${bp(q.locked_bp)}</span>
       </div>
-      <span class="vshadow-row-value ${Number(q.locked_bp) > 0 ? "good" : "warn"}">${bp(q.locked_bp)}
-        <em>최악 시</em></span>
-    </div>`).join(""));
+      <span class="vshadow-row-value ${tone}" title="${markNote}">${hasU ? bp(u) : bp(q.locked_bp)}
+        <em>${hasU ? "지금 청산 시" : "최악 시"}</em></span>
+    </div>`;
+    }).join(""));
   }
 
   // ⑤ 최근 청산 -- 진입가/청산가/시각까지 (2026-09-04 사용자 요청)

@@ -1483,6 +1483,9 @@ svg {
   display: flex; align-items: baseline; gap: 6px;
 }
 .vshadow-section-title em { font-style: normal; opacity: 0.85; }
+/* 2026-09-07: 보유분 미실현 합계. 톤 클래스에 CSS가 없으면 그냥 흰 글씨로 나가므로 여기서 준다. */
+.vshadow-section-title em.good { color: var(--good); opacity: 1; }
+.vshadow-section-title em.bad  { color: var(--bad);  opacity: 1; }
 
 .vshadow-row {
   display: flex; align-items: center; gap: 9px;
