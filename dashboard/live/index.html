@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260907-mobile2">
+  <link rel="stylesheet" href="styles.css?v=20260907-detector-removal">
 </head>
 <body>
   <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
@@ -263,17 +263,6 @@
               <span class="signal-chip-label">V자 급등락</span>
               <span class="signal-chip-state">-</span>
             </div>
-            <!-- 2026-09-07 (사용자 요청): 앵커 방향(MASHT)을 상단 요약에도 올린다. app.js는 이미
-                 MODEL_CHIP_IDS.masht_anchor -> "modelChipMashtAnchor"로 이 id를 쓰고 있었는데
-                 index.html에 요소가 없어서 el()이 null을 돌려줬고 칩이 조용히 안 그려졌다
-                 (renderModelIndicatorList는 chip이 null이면 건너뛴다 -- 오류도 안 난다).
-                 라벨은 특화감지기 목록과 같은 문자열을 쓴다(app.js::mashtAnchorIndicatorItem).
-                 index.html은 no_cache로 서빙되므로 이 변경엔 ?v= 재발급이 필요 없다. -->
-            <div id="modelChipMashtAnchor" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">앵커 방향(MASHT)</span>
-              <span class="signal-chip-state">-</span>
-            </div>
           </div>
         </div>
       </section>
@@ -330,7 +319,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260907-anchor-note"></script>
+  <script src="./app.js?v=20260908-labels-0015"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -734,33 +734,15 @@ async function maybeFetchSnapshotChartHistory() {
 
 function applyDashboardEvent(payload) {
   const tickers = payload?.tickers || {};
-  let priceMoved = false;
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);
     if (!(price > 0) || !ASSET_CONFIG[asset]) return;
-    if (asset === activeSnapshotAsset && latestLivePriceByAsset[asset] !== price) priceMoved = true;
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
   });
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
-  }
-  // ⭐2026-09-07 (사용자 신고: "현재 봉이 바로바로 안 움직이고 끊긴다"). 서버는 SSE 틱마다
-  // tickers를 보내지만 payload.state는 dashboard_state.json이 **바뀐 틱에만** 싣는다
-  // (server.py::publish_dashboard_events의 `state_payload if state_changed else None`).
-  // 그런데 아래 render() 호출은 그 state를 요구하므로, **가격만 바뀐 틱은 아무것도 다시 그리지
-  // 않았다** -- 새 가격은 latestLivePriceByAsset에 들어가지만 화면은 그대로였다. 그래서 현재
-  // 봉이 2.5초 주기가 아니라 "봇 상태가 바뀔 때"라는 불규칙한 박자로 툭툭 움직였다.
-  // 여기서는 전체 render()를 부르지 않고 **차트의 살아있는 층만** 다시 그린다(현재 봉 몸통 +
-  // 현재가 선). 비용 실측 1.47ms/회 · 노드 243개(2026-09-07, 100봉+밀도12스냅샷 기준)이고,
-  // scheduleSnapshotChartRender()가 rAF로 합치므로 한 프레임에 두 번 그리지 않는다. 탭이
-  // 숨겨져 있으면 rAF가 아예 안 돌아 낭비도 없다.
-  // ⚠️활성 코인의 가격이 실제로 바뀐 틱에만 그린다 -- 같은 값이 다시 오는 틱까지 그리면
-  //   움직이지도 않는 그림을 다시 그리는 셈이다.
-  if (priceMoved && !isScrolling && activePageTab === "snapshot") {
-    updateSnapshotCandleLive();
-    scheduleSnapshotChartRender();
   }
   if (!latestMainState || isScrolling || !payload?.state?.state) return;
   render(latestMainState, latestCompactState, { stateChanged: true });
@@ -1028,9 +1010,12 @@ function stripAxisHtml(times, timeFmtKind) {
 const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
-  v_rebound: { good: "롱 발동", bad: "숏 발동", flat: "미발동", neutral: "데이터 없음" },
+  // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
+  // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
+  // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
+  v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
   // 2026-09-07 MASHT 앵커 방향 섀도우 -- 섀도우 포지션이라 상태어는 "보유"다(규약 §1).
-  masht_anchor: { good: "롱 보유", bad: "숏 보유", warn: "혼재 보유", neutral: "미발동" },
+  masht_anchor: { good: "지속 롱", bad: "지속 숏", warn: "혼재 보유", neutral: "미발동" },
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
@@ -1132,8 +1117,8 @@ function toggleSignalDetail(btn, key) {
 const MODEL_INDICATOR_MEANING = {
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 위 masht_anchor 라벨을 바꾸면 여기도 같이 바꾼다.
   masht_anchor: {
-    "롱 보유": "앵커에서 상승 지속에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
-    "숏 보유": "앵커에서 하락 지속에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
+    "지속 롱": "천장 앵커에서 **상승이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
+    "지속 숏": "바닥 앵커에서 **하락이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
     "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
     "미발동": "앵커가 없거나 지속 확률이 진입 임계 아래입니다.",
     "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
@@ -1143,8 +1128,8 @@ const MODEL_INDICATOR_MEANING = {
   v_rebound: {
     "웜업": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
     "데이터 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "롱 발동": "TabPFN이 '바닥이고 진짜 반등이 온다'로 채점했어요 — 30분 안 1.5×ATR 상승 판정. 목표 도달이나 60분 경과까지 유지돼요.",
-    "숏 발동": "TabPFN이 '천장이고 진짜 반전이 온다'로 채점했어요 — 30분 안 1.5×ATR 하락 판정. 목표 도달이나 60분 경과까지 유지돼요.",
+    "되돌림 롱": "TabPFN이 '바닥이고 **되돌림(반등)**이 온다'로 채점했어요 — 30분 안 1.5×ATR 상승 판정. 목표 도달이나 60분 경과까지 유지돼요. ⚠️같은 봉에서 '앵커 방향'은 지속(하락 계속)을 말할 수 있어요 — 둘은 반대 주장이에요.",
+    "되돌림 숏": "TabPFN이 '천장이고 **되돌림(반락)**이 온다'로 채점했어요 — 30분 안 1.5×ATR 하락 판정. 목표 도달이나 60분 경과까지 유지돼요. ⚠️같은 봉에서 '앵커 방향'은 지속(상승 계속)을 말할 수 있어요 — 둘은 반대 주장이에요.",
     "미발동": "지금 반등/반전을 말할 근거가 없어요 — 대부분의 봉이 여기고(발동은 약 5%), '반대로 간다'는 뜻이 아니에요.",
   },
   liq_pressure: {
@@ -2222,21 +2207,13 @@ async function refreshMashtAnchor() {
 // 규약: 라벨 어휘 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 데이터 줄 없음 §4
 // (숫자는 배지 툴팁 stateTitle 로만 -- 사용자가 09-06에 제목 밑 데이터 줄 제거를 요청했다)
 function mashtAnchorIndicatorItem() {
-  // 2026-09-07 (사용자 요청 "라벨칩·확률도 통일"): derivedTag를 이 목록의 어휘에 맞춘다 --
-  // 다른 행은 전부 `= 대시보드 자체계산`(V자) / `= 대시보드 자체계산·탐색적`(베이시스) 꼴이고,
-  // 앵커도 봇이 아니라 대시보드 쪽 러너가 계산해 섀도우로 검증 중이라 같은 틀에 들어간다.
-  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 대시보드 자체계산·섀도우",
+  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
     derivedTitle: "증거신호 3종 이상이 겹친 앵커에서 48봉 창을 랜덤 합성곱(MultiRocket+Hydra)으로 2,784열 피쳐로 바꿔"
       + " TabPFN 에 넣고, 지속(추세 계속) 확률이 임계 이상이면 그 방향으로 가상 진입합니다."
       + " 2026-09-07부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
       + "⚠️87개 모델·피쳐 조합에서 고른 Top-1이라 승자의 저주가 있습니다. 워크포워드 측정 59.88%를 그대로"
       + " 기대하면 안 되고 56~57% 정도로 봐야 합니다. 손익분기 정확도는 53.90%입니다.",
-    // 띠와 그 아래 시간 줄. 서버가 다른 감지기(basis/liq_direction)와 **같은 모양**으로
-    // tone_history + latest_ts_utc 를 준다 -- 여기가 비어 있으면 lastSegmentRangeLabel이 "-"를
-    // 돌려 이 행만 게이지 아래 시간이 없다(2026-09-07 사용자 신고).
-    history: (latestMashtAnchor && latestMashtAnchor.tone_history) || [],
-    times: evenlySpacedBarTimes(latestMashtAnchor && latestMashtAnchor.latest_ts_utc,
-                                (latestMashtAnchor && latestMashtAnchor.tone_history || []).length, 5) };
+    history: [], times: [] };
   const p = latestMashtAnchor;
   // 상태 어휘는 감지기 공통 네 단어뿐이다(규약 §1).
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
@@ -2252,7 +2229,9 @@ function mashtAnchorIndicatorItem() {
   const dirs = p.open_dirs || [];
   const hasL = dirs.includes("long"), hasS = dirs.includes("short");
   const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
-  const subText = p.open_positions ? (hasL && hasS ? "혼재 보유" : hasS ? "숏 보유" : "롱 보유") : "미발동";
+  // 2026-09-08: 이 모델의 라벨은 **지속(continuation)** 이다 -- 진입 방향(롱/숏)은 앵커 측면에서 나온다.
+  // 바닥 앵커의 지속 = 하락 계속 = 숏. 라벨을 주장에 맞춰 "지속 롱/숏" 으로 쓴다.
+  const subText = p.open_positions ? (hasL && hasS ? "혼재 보유" : hasS ? "지속 숏" : "지속 롱") : "미발동";
   // 표본 가드: 일수 기준(규약 §4). 30일 계측 전에는 수치를 성과로 읽지 않는다.
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
@@ -2270,21 +2249,7 @@ function mashtAnchorIndicatorItem() {
                       "⚠️주문 없음 -- 가상 원장만"].filter(Boolean).join("\n");
   // 확률 개념이 있으므로 게이지 자리를 준다(규약 §3). 미발동이어도 자리를 지킨다.
   const proba = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  // 2026-09-07 (사용자 지적 "지속과 되돌림 중 하나 고르는 것"): 게이지 숫자가 **무엇의 확률인지**
-  // 화면에 없었다. 바로 위 V자 급등락의 게이지는 방향 확률인데 이 행은 지속 확률이라, 같은 자리에
-  // 같은 모양으로 붙어 있으면 같은 종류로 읽힌다. 모델은 지속/되돌림 이진 분류이므로 나머지 쪽도
-  // 같이 적어 "둘 중 하나를 고른다"는 구조가 보이게 한다.
-  // 규약 §3의 보조 수치 자리(meterNote -> .meter-price)를 쓴다 -- 지속 규칙이 `창 2/12봉`,
-  // B2가 `z −1.56`을 적던 그 자리다(둘 다 2026-09-07 제거).
-  const contPct = proba != null ? Math.round(clamp01(proba) * 100) : null;
-  const meterNote = contPct != null ? `지속 ${contPct}% · 되돌림 ${100 - contPct}%` : null;
-  const meterNoteTitle = contPct != null
-    ? "모델은 앵커 이후 움직임이 **지속**인지 **되돌림**인지 둘 중 하나를 고릅니다."
-      + " 게이지 숫자가 지속 확률이고 나머지가 되돌림 확률입니다.\n\n"
-      + "⚠️지속 확률이 임계 아래여도 **되돌림 방향으로 진입하지 않고 건너뜁니다** —"
-      + " 되돌림은 예측 대상이지 포지션이 되지는 않습니다. 그래서 상태는 롱/숏 두 가지뿐입니다."
-    : null;
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true, meterNote, meterNoteTitle };
+  return { ...base, tone, subText, stateTitle, proba, probaSlot: true };
 }
 
 async function refreshVReboundSignal() {
@@ -2465,21 +2430,17 @@ async function refreshCoinIndicators() {
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
 // 2026-08-27 (user request): badge date simplified to 오늘/내일 -- this list is already filtered to
-// today/tomorrow only (isWithinMacroWindowLocal below), so the literal MM/DD+weekday it used to show
+// today/tomorrow only (isTodayOrTomorrowLocal below), so the literal MM/DD+weekday it used to show
 // was redundant with that filter; 오늘/내일 says the same thing shorter and at a uniform width,
 // which also makes the badge's new fixed-width CSS (#macroCalendarList .ops-health-status-badge)
-// behave consistently instead of every badge being a different length. Falls back to MM/DD for
-// days outside the window (이 함수는 V자반등 섀도우 패널의 시각 표기에도 쓰인다).
-// 2026-09-07: 창이 3일로 늘어 "모레"를 추가한다 -- 안 그러면 모레 일정만 MM/DD로 나와
-// 배지 폭이 들쭉날쭉해지고(위 고정폭 CSS의 이유) 다른 두 개와 표기 기준도 어긋난다.
+// behave consistently instead of every badge being a different length. Falls back to MM/DD for the
+// (currently unreachable, since the list is pre-filtered) case of a caller passing another day.
 function fmtMacroCalendarTime(iso) {
   const d = new Date(iso);
   const today = new Date();
   const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
-  const dayAfter = new Date(today.getTime() + 2 * 24 * 3600 * 1000);
   const datePart = d.toDateString() === today.toDateString() ? "오늘"
     : d.toDateString() === tomorrow.toDateString() ? "내일"
-    : d.toDateString() === dayAfter.toDateString() ? "모레"
     : d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
   const timePart = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${datePart} ${timePart}`;
@@ -2598,37 +2559,21 @@ function renderVrebEconShadow(p) {
       <span class="vshadow-card-ref">${c.ref}</span>
     </div>`).join("")}</div>`);
 
-  // ④ 보유 중 -- 2026-09-07 사용자 요청으로 **미실현 손익**("지금 닫으면 얼마")이 주 숫자가 됐다.
-  //    그 전까지는 locked_bp("최악이어도 얼마")만 있었는데, 그건 손절선이 확정한 값이라 시장이
-  //    어디에 있든 바뀌지 않는다 -- 보유 중인 건이 지금 이기고 있는지 지고 있는지를 화면에서
-  //    알 수 없었다. locked_bp는 버리지 않고 본문 줄로 내린다(두 값의 의미가 서로 다르다).
-  //    기준가는 서버가 실어 보내는 **최근 확정 5분봉 종가**(mark_price)라 5분마다 갱신되고,
-  //    왕복 수수료 10bp를 뺀 원장 pnl_bp와 같은 규약이다 -- 그대로 청산됐을 때 값과 이어진다.
+  // ④ 보유 중 -- "최악이어도 얼마"가 가장 알고 싶은 값
   const open = p.open_positions || [];
-  const unrealTotal = p.unrealized_total_bp;
-  const markNote = p.mark_bar_utc
-    ? `${fmtMacroCalendarTime(p.mark_bar_utc)} 확정봉 종가 ${fmtNum(p.mark_price, 2)} 기준입니다. 왕복 수수료 10bp를 뺀 값이라 그대로 청산되면 이 숫자가 원장에 그대로 남습니다. 5분봉마다 갱신됩니다.`
-    : "기준가를 아직 못 읽었습니다(대시보드 기동 직후) — 다음 갱신에 채워집니다.";
-  out.push(`<div class="vshadow-section-title" title="${markNote}">보유 중 <em>${p.n_open || 0}건</em>${
-    unrealTotal == null ? "" : `<em class="${unrealTotal > 0 ? "good" : "bad"}">지금 청산 시 ${bp(unrealTotal)}</em>`}</div>`);
+  out.push(`<div class="vshadow-section-title">보유 중 <em>${p.n_open || 0}건</em></div>`);
   if (!open.length) {
     out.push(`<div class="vshadow-empty">열린 포지션 없음</div>`);
   } else {
-    out.push(open.map((q) => {
-      const u = q.unrealized_bp;
-      const hasU = u != null;
-      // 기준가를 못 읽은 동안에는 예전 표시(최악 시)로 조용히 되돌아간다 -- 빈칸보다 낫다.
-      const tone = hasU ? (u > 0 ? "good" : "bad") : (Number(q.locked_bp) > 0 ? "good" : "warn");
-      return `<div class="vshadow-row">
+    out.push(open.map((q) => `<div class="vshadow-row">
       <span class="vshadow-side ${q.side}">${q.side === "long" ? "롱" : "숏"}</span>
       <div class="vshadow-row-main">
         <strong>${q.armed ? "이익 확보됨" : "손절선 대기"}</strong>
-        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유 · 최악 ${bp(q.locked_bp)}</span>
+        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유</span>
       </div>
-      <span class="vshadow-row-value ${tone}" title="${markNote}">${hasU ? bp(u) : bp(q.locked_bp)}
-        <em>${hasU ? "지금 청산 시" : "최악 시"}</em></span>
-    </div>`;
-    }).join(""));
+      <span class="vshadow-row-value ${Number(q.locked_bp) > 0 ? "good" : "warn"}">${bp(q.locked_bp)}
+        <em>최악 시</em></span>
+    </div>`).join(""));
   }
 
   // ⑤ 최근 청산 -- 진입가/청산가/시각까지 (2026-09-04 사용자 요청)
@@ -2679,28 +2624,22 @@ async function refreshMacroCalendar() {
     if (sub) sub.textContent = "불러오기 실패";
   }
 }
-// 2026-08-26 user request: 보는 사람의 **로컬 달력 날짜** 기준(ET 아님) -- 필터와 화면에 찍히는
-// toLocaleString() 날짜가 같은 기준을 쓰게 해서, KST 사용자가 "내일"로 표시된 일정이 ET 기준
-// 컷오프에 걸려 사라지는 일이 없게 한다.
-// ⭐2026-09-07: 2일(오늘·내일) -> 3일(오늘·내일·모레)로 확장(사용자 요청). 2일이면 KST에서
-// 자주 빈 화면이 됐다 -- 미국 지표는 대부분 8:30am ET(=21:30 KST), 국채입찰은 1pm ET(=다음날
-// 02:00 KST)라 KST 2일 창이 미국 세션으로는 하루치 남짓밖에 안 덮는다. 실측(09-07 18:50 KST):
-// 수집된 22건 중 창 안 0건이었고 가장 이른 일정(09-09 02:00 KST 3년물 입찰)이 2시간 차로
-// 밖에 있었다. 미 노동절 휴일까지 겹쳐 "예정된 일정 없음"이 떴다.
-const MACRO_CALENDAR_WINDOW_DAYS = 3;
-function isWithinMacroWindowLocal(iso) {
+// 2026-08-26 user request: only today+tomorrow, by viewer's own local calendar day (not ET) --
+// keeps the filter and the displayed toLocaleString() dates in the same frame of reference, so a
+// KST viewer never sees an event dated "tomorrow" that got excluded by an ET-anchored cutoff.
+function isTodayOrTomorrowLocal(iso) {
   const d = new Date(iso);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const end = new Date(startOfToday.getTime() + MACRO_CALENDAR_WINDOW_DAYS * 24 * 3600 * 1000);
-  return d >= startOfToday && d < end;
+  const startOfDayAfterTomorrow = new Date(startOfToday.getTime() + 2 * 24 * 3600 * 1000);
+  return d >= startOfToday && d < startOfDayAfterTomorrow;
 }
 function renderMacroCalendar(payload) {
   const sub = el("macroCalendarSub");
   const allEvents = payload && Array.isArray(payload.events) ? payload.events : [];
-  const events = allEvents.filter((e) => isWithinMacroWindowLocal(e.time_utc))
+  const events = allEvents.filter((e) => isTodayOrTomorrowLocal(e.time_utc))
     .sort((a, b) => a.time_utc.localeCompare(b.time_utc));
-  if (sub) sub.textContent = events.length ? `오늘·내일·모레 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일·모레 예정된 일정 없음";
+  if (sub) sub.textContent = events.length ? `오늘·내일 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일 예정된 일정 없음";
   setH("macroCalendarList", events.length
     ? events.map((e) => {
         const tone = e.importance === "high" ? "warn" : "neutral";
@@ -3666,7 +3605,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 2026-09-06 공통 어휘로 교체(급등→롱 발동 / 급락→숏 발동 / 미반등→미발동 / 신호 없음→데이터 없음).
   // 색 법칙은 그대로다 -- 급등=롱 방향이라 이미 good, 급락=숏이라 bad였다. 바뀌는 건 말뿐이다.
   const vReboundSubText = !vReboundWarmedUp ? "웜업"
-    : vReboundActive ? (vReboundTone === "good" ? "롱 발동" : vReboundTone === "bad" ? "숏 발동" : "미발동")
+    : vReboundActive ? (vReboundTone === "good" ? "되돌림 롱" : vReboundTone === "bad" ? "되돌림 숏" : "미발동")
     : "데이터 없음";
   // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
   // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
@@ -4174,45 +4113,3 @@ window.addEventListener("beforeinstallprompt", (event) => {
 window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.add("hidden"));
 
 setupNotifyPage();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 터치 기기용 툴팁 (2026-09-07). 이 대시보드는 근거·계산식·주의사항을 대부분 `title` 속성에
-// 담아두는데, `title`은 **hover에서만** 뜨므로 폰에서는 그 정보가 통째로 사라진다. 2026-08-31
-// 모바일 감사에서 이미 발견됐지만 "JS 이벤트 모델을 바꿔야 한다"며 미뤄뒀던 항목이고, 이번
-// 실측에서 스냅샷 탭 한 곳에만 30자 이상 title이 26개였다.
-//
-// 개별 요소를 26곳 고치는 대신 document에 위임 핸들러 하나를 건다. hover가 없는 기기에서만
-// 동작하므로 데스크톱 동작은 그대로다(마우스에서는 브라우저 기본 툴팁이 계속 뜬다).
-// ⚠️버튼/링크는 제외한다 -- 탭하면 이미 자기 동작이 있는데 툴팁까지 겹치면 방해가 된다.
-// ⚠️preventDefault를 하지 않는다. 이 핸들러는 정보를 덧붙일 뿐 기존 상호작용을 가로채지 않는다.
-// ─────────────────────────────────────────────────────────────────────────────
-function setupTouchTooltips() {
-  if (!window.matchMedia || !window.matchMedia("(hover: none)").matches) return;
-  let bubble = null;
-  const hide = () => { if (bubble) { bubble.remove(); bubble = null; } };
-  document.addEventListener("click", (event) => {
-    const host = event.target.closest && event.target.closest("[title]");
-    if (!host || host.matches("button, a, input, select, textarea, [role=button]")) { hide(); return; }
-    const text = (host.getAttribute("title") || "").trim();
-    if (text.length < 8) { hide(); return; }
-    hide();
-    bubble = document.createElement("div");
-    bubble.className = "touch-tip";
-    bubble.textContent = text;
-    bubble.addEventListener("click", (e) => { e.stopPropagation(); hide(); });
-    document.body.appendChild(bubble);
-    // 말풍선을 화면 안으로 클램프한다. 툴팁이 화면 밖으로 나가면 없는 것과 같다.
-    const vw = document.documentElement.clientWidth;
-    const width = Math.min(320, vw - 20);
-    bubble.style.width = `${width}px`;
-    const rect = host.getBoundingClientRect();
-    bubble.style.left = `${window.scrollX + Math.max(10, Math.min(rect.left, vw - width - 10))}px`;
-    const below = window.scrollY + rect.bottom + 6;
-    const fitsBelow = rect.bottom + 6 + bubble.offsetHeight <= document.documentElement.clientHeight;
-    bubble.style.top = `${fitsBelow ? below : Math.max(window.scrollY + 6, window.scrollY + rect.top - bubble.offsetHeight - 6)}px`;
-  }, true);
-  window.addEventListener("scroll", hide, { passive: true });
-  window.addEventListener("resize", hide);
-}
-
-setupTouchTooltips();
