@@ -751,6 +751,21 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
     skips = state.get("skips") if isinstance(state.get("skips"), list) else []
 
     resolved = [r for r in ledger if r.get("outcome") in ("cont", "fade")]
+
+    def _arm(bet: str) -> dict[str, Any]:
+        """팔별 집계. 지속 팔은 outcome=='cont' 일 때 이기고 되돌림 팔은 그 반대다."""
+        rs = [r for r in resolved if r.get("bet", "cont") == bet]
+        wins = sum(1 for r in rs if (r["outcome"] == "cont") == (bet == "cont"))
+        nb = [float(r["net_taker_bp"]) for r in rs
+              if isinstance(r.get("net_taker_bp"), (int, float))]
+        op = [q for q in positions if q.get("bet", "cont") == bet]
+        return {"open": len(op),
+                "open_dirs": [q.get("trade_dir") for q in op if q.get("trade_dir")],
+                "resolved": len(rs), "wins": wins,
+                "accuracy": round(wins / len(rs), 4) if rs else None,
+                "net_taker_bp_mean": round(sum(nb) / len(nb), 2) if nb else None,
+                "net_taker_bp_sum": round(sum(nb), 1) if nb else None}
+
     n_cont = sum(1 for r in resolved if r.get("outcome") == "cont")
     acc = (n_cont / len(resolved)) if resolved else None
     net = [float(r["net_taker_bp"]) for r in resolved if isinstance(r.get("net_taker_bp"), (int, float))]
@@ -792,8 +807,11 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
                              and meta.get("entry_threshold") is not None
                              and last["p_cont"] >= meta["entry_threshold"]),
         "threshold": meta.get("entry_threshold"),
+        "threshold_fade": meta.get("entry_threshold_fade"),
         "breakeven_acc": meta.get("breakeven_acc"),
         "measured": meta.get("measured", {}),
+        # 2026-09-08 되돌림 팔 추가 -- 카드가 둘이므로 팔별로 나눠 내려준다
+        "arms": {"cont": _arm("cont"), "fade": _arm("fade")},
     }
 
 
