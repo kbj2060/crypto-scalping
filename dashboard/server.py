@@ -732,6 +732,72 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
+MASHT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
+
+
+def _masht_strip_end(state: dict[str, Any]) -> datetime | None:
+    """띠의 오른쪽 끝 = 러너가 마지막으로 본 확정 5분봉."""
+    def _parse(value: Any) -> datetime | None:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    seen = [t for t in (_parse(x) for x in (state.get("seen_bars") or [])) if t]
+    end = max(seen) if seen else _parse(state.get("updated_utc"))
+    if end is None:
+        return None
+    return end.replace(second=0, microsecond=0) - timedelta(minutes=end.minute % 5)
+
+
+def _masht_tone_history(rows: list[dict], end: datetime | None,
+                        bars: int = MASHT_STRIP_BARS) -> list[str]:
+    """한 팔의 최근 `bars`개 5분봉 보유 톤(good=롱 · bad=숏 · warn=혼재 · neutral=미보유).
+
+    2026-09-07 신설했다가 2026-09-08 `2731262`에서 소실돼 재적용한다(사용자 신고 "앵커 방향과
+    앵커 되돌림 카드에 시간이 텍스트로 표시가 안 된다"). 프론트의 `lastSegmentRangeLabel`은
+    history가 비면 그냥 "-"를 돌려주므로, 이 배열이 없으면 **그 행만** 게이지 아래 시간 줄이
+    사라진다 -- 다른 감지기(basis/liq_direction)는 같은 모양의 tone_history를 이미 준다.
+
+    ⚠️두 팔은 같은 앵커에서 **방향이 반대**다(바닥 앵커: 지속=숏, 되돌림=롱). 러너가 남기는
+      `trade_dir`을 우선 쓰고, 그 필드가 없는 옛 행만 side/bet에서 유도한다.
+    진입은 라벨 규약대로 앵커 봉의 **다음 봉**, 마감분은 `bars_observed`만큼, 보유분은 끝까지.
+    """
+    if end is None:
+        return []
+
+    def _parse(value: Any) -> datetime | None:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    spans: list[tuple[datetime, datetime, str]] = []
+    for row in rows:
+        anchor = _parse(row.get("bar_utc"))
+        if anchor is None:
+            continue
+        direction = row.get("trade_dir")
+        if direction not in ("long", "short"):
+            cont = row.get("bet", "cont") == "cont"
+            direction = ("short" if row.get("side") == "bottom" else "long") if cont \
+                else ("long" if row.get("side") == "bottom" else "short")
+        start = anchor + timedelta(minutes=5)
+        held = row.get("bars_observed")
+        stop = (start + timedelta(minutes=5 * int(held))
+                if isinstance(held, int) and held >= 0 else end + timedelta(minutes=5))
+        spans.append((start, stop, "bad" if direction == "short" else "good"))
+
+    history = []
+    for i in range(bars):
+        moment = end - timedelta(minutes=5 * (bars - 1 - i))
+        tones = {tone for start, stop, tone in spans if start <= moment < stop}
+        history.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
+    return history
+
+
 def masht_anchor_shadow_payload() -> dict[str, Any]:
     """MASHT 앵커 방향 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -751,6 +817,7 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
     skips = state.get("skips") if isinstance(state.get("skips"), list) else []
 
     resolved = [r for r in ledger if r.get("outcome") in ("cont", "fade")]
+    strip_end = _masht_strip_end(state)
 
     def _arm(bet: str) -> dict[str, Any]:
         """팔별 집계.
@@ -771,6 +838,9 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
         op = [q for q in positions if q.get("bet", "cont") == bet]
         return {"open": len(op),
                 "open_dirs": [q.get("trade_dir") for q in op if q.get("trade_dir")],
+                # 띠 + 그 아래 시간 줄용(팔별). 다른 감지기와 같은 모양이라 프론트가 같은
+                # evenlySpacedBarTimes(latest_ts_utc, n, 5) 경로를 그대로 쓴다.
+                "tone_history": _masht_tone_history([*closed, *op], strip_end),
                 # ⭐판정 지표
                 "closed": len(closed), "timeouts": len(touts),
                 "resolve_rate": round(len(rs) / len(closed), 4) if closed else None,
@@ -804,6 +874,8 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
     return {
         "available": True,
         "started_utc": started,
+        # 띠의 오른쪽 끝(최근 확정 5분봉). 프론트가 이걸 기준으로 봉 시각을 역산한다.
+        "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z") if strip_end else None,
         "days_running": round(days, 2),
         "open_positions": len(positions),
         # 앵커 측면(bottom/top)이 아니라 **포지션 방향**으로 준다 -- 바닥 앵커의 지속은 숏이다.

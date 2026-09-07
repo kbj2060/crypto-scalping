@@ -2236,6 +2236,16 @@ async function refreshMashtAnchor() {
 // ── MASHT 되돌림 팔 (2026-09-08, 사용자 요청) ─────────────────────────────────────────────
 // 지속 팔과 같은 모델·앵커·청산이고 진입 조건과 방향만 반대다.
 // ⚠️사전등록 기대치가 음수다(적중 52.31% < 손익분기 53.90%) -- 라벨·설명·자세히에 전부 명시한다.
+// 앵커 두 카드의 띠 + 그 아래 시간 줄. 서버가 팔별로 arms.<bet>.tone_history 를, 공통으로
+// latest_ts_utc 를 준다 -- 다른 감지기(basis/liq_direction)와 같은 모양이라 시각 역산도 같다.
+// ⚠️이 배열이 비면 lastSegmentRangeLabel 이 "-"를 돌려 그 행만 시간 줄이 사라진다
+//   (2026-09-08 사용자 신고 "시간 게이지가 텍스트로 표시가 안 된다").
+function mashtStrip(bet) {
+  const p = latestMashtAnchor || {};
+  const history = (((p.arms || {})[bet] || {}).tone_history) || [];
+  return { history, times: evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5) };
+}
+
 function mashtFadeIndicatorItem() {
   const base = { key: "masht_fade", label: "앵커 되돌림(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
     derivedTitle: "지속 팔과 같은 모델의 **반대 꼬리**입니다. 지속 확률이 하위 30%(≤0.5216)일 때"
@@ -2243,7 +2253,7 @@ function mashtFadeIndicatorItem() {
       + "⚠️워크포워드 실측 적중 52.31% [47.01, 57.38] · 건당 −3.2bp 로 **손익분기 53.90% 미달**입니다."
       + " 기저(47.28%)보다는 높고 무작위 진입 귀무도 넘지만(p=0.018) 비용을 못 넘습니다."
       + " '모델 정보가 한쪽 꼬리에만 있다'를 전방 검정하려고 가동합니다. 주문은 내지 않습니다.",
-    history: [], times: [] };
+    ...mashtStrip("fade") };
   const p = latestMashtAnchor;
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
   const m = p.measured || {};
@@ -2290,7 +2300,7 @@ function mashtAnchorIndicatorItem() {
       + " 2026-09-07부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
       + "⚠️87개 모델·피쳐 조합에서 고른 Top-1이라 승자의 저주가 있습니다. 워크포워드 측정 59.88%를 그대로"
       + " 기대하면 안 되고 56~57% 정도로 봐야 합니다. 손익분기 정확도는 53.90%입니다.",
-    history: [], times: [] };
+    ...mashtStrip("cont") };
   const p = latestMashtAnchor;
   // 상태 어휘는 감지기 공통 네 단어뿐이다(규약 §1).
   if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
