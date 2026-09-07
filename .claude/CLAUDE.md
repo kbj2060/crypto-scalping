@@ -52,6 +52,18 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+Event-Label Boundary Contract (사건 라벨 경계 계약)
+사건 트리거로 시작하는 라벨을 쓸 때, **피쳐 창의 끝은 라벨 탐색 시작 인덱스보다 반드시 최소 한 단위 앞서야 한다.** 라벨이 인덱스 `S`부터 배리어/수익을 탐색하면 모든 피쳐는 `S-1`까지만 본다. 같은 봉(분/5분)을 피쳐와 라벨이 공유하면 그 자체로 미래참조다 — 그 봉의 큰 움직임이 피쳐를 키우는 동시에 배리어를 때려 라벨을 정하기 때문이다.
+`S`가 파생 심볼이면 그 **조상까지** 본다. 2026-09-08 사고에서 라벨은 `first_touch(hi1, lo1, s1, ...)`, 피쳐는 `mask = span <= tmin`이었고 `s1 = s0 + tmin`이라 같은 봉을 공유했다. 정확도가 **54.7~57.4% → 50.0~54.3%**로 4pp 부풀어 있었다.
+**관찰창을 넣으면 경계도 함께 움직인다.** 결정 시점을 `s2 = s1 + OBS`로 미루면 라벨은 `s2`부터, 피쳐는 `s2-1`까지다. 기준가도 `close[s2-1]`이어야 한다.
+**OBS=0(트리거 즉시 결정)은 무효다.** 트리거는 분 `s1` *안에서* 발생하므로 그 사실을 아는 시점은 `s1` 종료 후다. `s1` 이전 종가를 기준가로 잡으면 트리거를 만든 움직임 자체가 배리어를 때린다(실측: 돌파율 0.73 vs OBS≥5의 0.50). 최소 지연은 1분이다.
+
+⭐**탐지 신호 — 이 격차를 먼저 본다**: 순열 중요도 상위가 특정 피쳐군에 몰렸는데 그 군의 **단변량 분위 효과가 평평**하고, **모델 정확도가 모델 없는 2~3피쳐 규칙보다 5pp 이상 앞서면** 상호작용이 아니라 누수를 먼저 의심한다.
+
+**새 사건 기반 데이터셋 빌더를 쓰거나 복사하면 `scripts/audit_event_label_feature_boundary_20260908.py`를 돌린다.** `--scan`은 라벨 시작 심볼의 의존 폐포와 피쳐 창 끝 심볼의 교집합을 찾고(`- 1` 조정은 안전으로 인정), `--data`는 경계 피쳐군을 빼고 재학습해 정확도 하락폭을 잰다(>2pp면 누수 강력 의심). 검출기는 `tmp/leakfixture/`의 버그판/수정판 픽스처로 검증되어 있다 — 검출기를 고치면 픽스처부터 다시 통과시킨다.
+
+라벨 정확도를 지표로 쓸 때 **bp를 정확도로 환산하지 않는다.** 2026-09-08에 `entry = level*(1 + sgn*slip)`로 슬리피지를 넣은 탓에 반대 팔에는 유리하게 들어가 "되돌림 52.9%"라는 값이 나왔다. 실제 기저는 50.0%였다. 정확도는 라벨을 직접 세서 낸다.
+
 Omega Artifact Integrity Promotion Gate
 Omega/Omega4.x 모델 업그레이드, live 후보, baseline 승격은 scripts/audit_omega_artifact_integrity_20260630.py가 exit status 0과 promotion_pass=true를 반환해야 한다.
 Parent artifact는 사용 quality threshold와 정확히 일치하는 train_predictions_qXXX.csv, validation_predictions_qXXX.csv, oos_predictions_qXXX.csv를 포함해야 한다. qXXX = round(quality_threshold * 100) zero-padded 값이다.
