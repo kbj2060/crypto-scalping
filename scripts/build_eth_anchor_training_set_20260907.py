@@ -47,6 +47,8 @@ ANCHOR = "any3/Wc3"
 MARGIN_MIN_TRAIN = 5           # TRAIN 전용 라벨 품질 필터: 두 배리어 터치 시각 차 >= 5분
 ADV_MAX = 0.5                  # 깨끗 판정: 배리어 닿기 **전** 반대 방향 최대이탈 < 0.5%
 END_MIN = 1.0                  # 깨끗 판정: 판정창 **끝점**이 그 방향으로 1.0% 이상
+END_AVG_BARS = 6               # ⭐끝점 = 마지막 6봉(30분) **평균 종가**. 단일 종가는 1봉 노이즈로
+#   라벨이 뒤집힌다(동시 세션 build_eth_anchor_labels_v2 자체검증 V4 가 12-08 23:55 에서 적발).
 EFF_MIN = 0.40                 # 깨끗 판정: **경로 효율** = 끝점진행 / 창내진폭 >= 0.40
 #   ⭐2026-09-07 사용자 지적 3차: 닿기전 역행과 끝점만 보면 "닿은 뒤 크게 왕복한" 건이 남는다
 #   (10-11 05:50 은 창내 진폭 14.8% 인데 순진행은 그 16%, 12-06 01:05 은 26%).
@@ -68,7 +70,8 @@ def path_stats(L: pd.DataFrame, pct: float, H: int, O, Hh, Lo, C):
     w = np.arange(H)[None, :] + np.minimum(i + 1, n - 1 - H)[:, None]
     hi, lo, cl = Hh[w], Lo[w], C[w]
     sgn_cont = np.where(L["side"].to_numpy() == "bottom", -1.0, 1.0)     # 지속 방향 가격 부호
-    endc = (cl[:, -1] - e) / e * 100 * sgn_cont                          # 지속 방향 기준 끝점 %
+    end_px = cl[:, -END_AVG_BARS:].mean(axis=1)                          # 마지막 30분 평균 종가
+    endc = (end_px - e) / e * 100 * sgn_cont                             # 지속 방향 기준 끝점 %
     def pre(t, cont):
         out = np.full(len(i), np.nan)
         j = np.where(np.isfinite(t) & (t < lim), np.nan_to_num(t // 5, nan=-1).astype(int), -1)
