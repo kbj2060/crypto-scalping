@@ -753,14 +753,30 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
     resolved = [r for r in ledger if r.get("outcome") in ("cont", "fade")]
 
     def _arm(bet: str) -> dict[str, Any]:
-        """팔별 집계. 지속 팔은 outcome=='cont' 일 때 이기고 되돌림 팔은 그 반대다."""
-        rs = [r for r in resolved if r.get("bet", "cont") == bet]
+        """팔별 집계.
+
+        🔴2026-09-08 판정 잣대 교체: 헤드라인은 **라이브 건당 bp**(시간청산 포함)다.
+        해소분 적중률은 참고로만 낸다 -- 어느 앵커가 해소되는지는 **결과가 정하고**,
+        모델이 해소 안 되는 쪽을 골라내서(상위30% 해소율 54.1% vs 전체 71.3%)
+        해소분만 보면 부풀려진다(백테스트 +12.0bp vs 라이브 −1.46bp).
+        """
+        closed = [r for r in ledger if r.get("bet", "cont") == bet]
+        rs = [r for r in closed if r.get("outcome") in ("cont", "fade")]
+        touts = [r for r in closed if r.get("outcome") == "timeout"]
         wins = sum(1 for r in rs if (r["outcome"] == "cont") == (bet == "cont"))
+        live = [float(r["net_taker_bp"]) for r in closed
+                if isinstance(r.get("net_taker_bp"), (int, float))]
         nb = [float(r["net_taker_bp"]) for r in rs
               if isinstance(r.get("net_taker_bp"), (int, float))]
         op = [q for q in positions if q.get("bet", "cont") == bet]
         return {"open": len(op),
                 "open_dirs": [q.get("trade_dir") for q in op if q.get("trade_dir")],
+                # ⭐판정 지표
+                "closed": len(closed), "timeouts": len(touts),
+                "resolve_rate": round(len(rs) / len(closed), 4) if closed else None,
+                "live_bp_mean": round(sum(live) / len(live), 2) if live else None,
+                "live_bp_sum": round(sum(live), 1) if live else None,
+                # 참고 (부풀려진 값)
                 "resolved": len(rs), "wins": wins,
                 "accuracy": round(wins / len(rs), 4) if rs else None,
                 "net_taker_bp_mean": round(sum(nb) / len(nb), 2) if nb else None,

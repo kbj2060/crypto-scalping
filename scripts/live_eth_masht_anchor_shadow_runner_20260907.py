@@ -31,9 +31,23 @@
     비용    원장에 총수익률·테이커 10bp·메이커 7.8bp 순손익을 전부 기록. 판정은 10bp.
             손익분기 정확도 = (100+7.8)/200 = 53.90%
 
-## 측정된 근거 (사전등록 값 -- 앞으로 이 숫자와 비교한다)
-    워크포워드(월 1회 재학습, 세 창 풀링) 상위30% 진입 정확도 **59.88% [53.94%, 64.56%]**
-      · 날블록 귀무 p=0.017 · 풀링 AUC 0.5453 · 건당 +12.0bp
+## 🔴판정 잣대 교체 (2026-09-08)
+기존 사전등록치(상위30% 정확도 59.88% · 건당 +12.0bp)는 **해소된 거래만** 본 값이었다
+(커버리지 71.3%). 어느 앵커가 해소되는지는 **결과가 정한다**. 전 앵커에 예측을 대고 미해소를
+시간청산 실현손익으로 세면 **−1.46bp [−7.53, +5.93]** 이다 -- 0 근처이고 CI 가 0을 포함한다.
+원인: **모델이 해소되지 않는 앵커를 골라낸다**(상위30% 해소율 54.1% vs 전체 71.3%).
+| | 기존 | **지금** |
+|---|---|---|
+| 지표 | 상위30% 진입 정확도 | **라이브 건당 bp**(시간청산 포함) |
+| 임계 | CI 하한 > 53.90% | **CI 하한 > 0bp** |
+| 기대치 | 56~57%(승자의 저주 할인) | **−1.46bp** |
+⭐섀도우 원장은 `outcome:"timeout"` 까지 전부 남기므로 **구조상 이미 라이브 잣대**다 --
+  백테스트를 세 번 속인 결과선택 편향이 여기서는 발생할 수 없다. 그래서 이 질문에 답할 수 있는
+  유일하게 신뢰할 만한 장치다. 판정에는 지금의 3~4배 표본(약 8~12개월)이 필요하다.
+
+## 참고: 해소분 기준 측정치 (부풀려진 값 -- 판정에 쓰지 않는다)
+    워크포워드 상위30% 진입 정확도 59.88% [53.94%, 64.56%]
+      · 날블록 귀무 p=0.017 · 풀링 AUC 0.5453 · 해소분 건당 +12.0bp
     전방 확인(2026-06-30~07-31, n=25) 64.00% [44.44%, 82.63%] · **무작위진입 귀무 p=0.282**
       → 모순되지 않으나 확증 아님. 그 창은 기저가 57.14%로 손익분기 위였다.
     ⚠️승자의 저주: 87셀에서 고른 Top-1 이다. 기대치는 할인해서 봐야 한다.
@@ -222,30 +236,41 @@ def resolve(s: dict[str, Any], kl1: pd.DataFrame) -> None:
         n_min = int(m.sum())
         if min(i_up, i_dn) == 10**9:
             if n_min >= H_BARS * 5:          # 시간청산 (48봉 = 240분)
-                _close(s, p, "timeout", None, n_min)
+                # 🔴2026-09-08: 이전 판은 시간청산 gross 를 **0 으로** 기록했다. 실제로는 시장가
+                #   청산이라 그 시점 손익이 실현된다. 라이브 현실 평가(부록 X)가 종가 손익을 쓰므로
+                #   원장이 그 규약과 어긋나 있었다. 청산 시점 종가로 실현손익을 남긴다.
+                _close(s, p, "timeout", None, n_min, exit_px=float(kl1["close"].to_numpy(float)[m][-1]))
             else:
                 keep.append(p)
             continue
         cont_up = p["side"] == "top"          # 천장 앵커의 지속 = 상승
         hit_cont = (i_up < i_dn) if cont_up else (i_dn < i_up)
         if min(i_up, i_dn) >= H_BARS * 5:
-            _close(s, p, "timeout", None, n_min); continue
+            _close(s, p, "timeout", None, n_min, exit_px=float(kl1["close"].to_numpy(float)[m][-1]))
+            continue
         # outcome 은 **시장이 무엇을 했나**(cont/fade)이고, 손익은 팔에 따라 부호가 뒤집힌다.
         _close(s, p, "cont" if hit_cont else "fade", int(min(i_up, i_dn)), n_min)
     s["positions"] = keep
 
 
 def _close(s: dict[str, Any], p: dict[str, Any], outcome: str,
-           minutes: int | None, n_min: int) -> None:
+           minutes: int | None, n_min: int, exit_px: float | None = None) -> None:
     # 지속 팔은 outcome=="cont" 일 때 이기고, 되돌림 팔은 outcome=="fade" 일 때 이긴다.
     bet = p.get("bet", "cont")
     if outcome == "timeout":
-        gross = 0.0
+        # 시간청산 = 시장가 청산. 진입 방향 기준 실현손익(bp)을 그대로 남긴다.
+        e = p.get("entry_px") or p.get("entry_px_provisional")
+        if exit_px is None or not e:
+            gross = 0.0
+        else:
+            sgn = 1.0 if p.get("trade_dir", "long") == "long" else -1.0
+            gross = (exit_px - e) / e * 1e4 * sgn
     else:
         won = (outcome == "cont") if bet == "cont" else (outcome == "fade")
         gross = BARRIER_PCT * 100.0 if won else -BARRIER_PCT * 100.0
     rec = dict(p)
-    rec.update(outcome=outcome, bet=bet, gross_bp=gross, minutes_to_hit=minutes,
+    rec.update(outcome=outcome, bet=bet, gross_bp=round(gross, 3), minutes_to_hit=minutes,
+               exit_px=exit_px,
                net_taker_bp=gross - COST_TAKER_BP, net_maker_bp=gross - COST_MAKER_BP,
                closed_utc=datetime.now(timezone.utc).isoformat(), bars_observed=n_min // 5)
     s["ledger"].append(rec)
