@@ -2359,17 +2359,21 @@ async function refreshCoinIndicators() {
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
 // 2026-08-27 (user request): badge date simplified to 오늘/내일 -- this list is already filtered to
-// today/tomorrow only (isTodayOrTomorrowLocal below), so the literal MM/DD+weekday it used to show
+// today/tomorrow only (isWithinMacroWindowLocal below), so the literal MM/DD+weekday it used to show
 // was redundant with that filter; 오늘/내일 says the same thing shorter and at a uniform width,
 // which also makes the badge's new fixed-width CSS (#macroCalendarList .ops-health-status-badge)
-// behave consistently instead of every badge being a different length. Falls back to MM/DD for the
-// (currently unreachable, since the list is pre-filtered) case of a caller passing another day.
+// behave consistently instead of every badge being a different length. Falls back to MM/DD for
+// days outside the window (이 함수는 V자반등 섀도우 패널의 시각 표기에도 쓰인다).
+// 2026-09-07: 창이 3일로 늘어 "모레"를 추가한다 -- 안 그러면 모레 일정만 MM/DD로 나와
+// 배지 폭이 들쭉날쭉해지고(위 고정폭 CSS의 이유) 다른 두 개와 표기 기준도 어긋난다.
 function fmtMacroCalendarTime(iso) {
   const d = new Date(iso);
   const today = new Date();
   const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
+  const dayAfter = new Date(today.getTime() + 2 * 24 * 3600 * 1000);
   const datePart = d.toDateString() === today.toDateString() ? "오늘"
     : d.toDateString() === tomorrow.toDateString() ? "내일"
+    : d.toDateString() === dayAfter.toDateString() ? "모레"
     : d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
   const timePart = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${datePart} ${timePart}`;
@@ -2569,22 +2573,28 @@ async function refreshMacroCalendar() {
     if (sub) sub.textContent = "불러오기 실패";
   }
 }
-// 2026-08-26 user request: only today+tomorrow, by viewer's own local calendar day (not ET) --
-// keeps the filter and the displayed toLocaleString() dates in the same frame of reference, so a
-// KST viewer never sees an event dated "tomorrow" that got excluded by an ET-anchored cutoff.
-function isTodayOrTomorrowLocal(iso) {
+// 2026-08-26 user request: 보는 사람의 **로컬 달력 날짜** 기준(ET 아님) -- 필터와 화면에 찍히는
+// toLocaleString() 날짜가 같은 기준을 쓰게 해서, KST 사용자가 "내일"로 표시된 일정이 ET 기준
+// 컷오프에 걸려 사라지는 일이 없게 한다.
+// ⭐2026-09-07: 2일(오늘·내일) -> 3일(오늘·내일·모레)로 확장(사용자 요청). 2일이면 KST에서
+// 자주 빈 화면이 됐다 -- 미국 지표는 대부분 8:30am ET(=21:30 KST), 국채입찰은 1pm ET(=다음날
+// 02:00 KST)라 KST 2일 창이 미국 세션으로는 하루치 남짓밖에 안 덮는다. 실측(09-07 18:50 KST):
+// 수집된 22건 중 창 안 0건이었고 가장 이른 일정(09-09 02:00 KST 3년물 입찰)이 2시간 차로
+// 밖에 있었다. 미 노동절 휴일까지 겹쳐 "예정된 일정 없음"이 떴다.
+const MACRO_CALENDAR_WINDOW_DAYS = 3;
+function isWithinMacroWindowLocal(iso) {
   const d = new Date(iso);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const startOfDayAfterTomorrow = new Date(startOfToday.getTime() + 2 * 24 * 3600 * 1000);
-  return d >= startOfToday && d < startOfDayAfterTomorrow;
+  const end = new Date(startOfToday.getTime() + MACRO_CALENDAR_WINDOW_DAYS * 24 * 3600 * 1000);
+  return d >= startOfToday && d < end;
 }
 function renderMacroCalendar(payload) {
   const sub = el("macroCalendarSub");
   const allEvents = payload && Array.isArray(payload.events) ? payload.events : [];
-  const events = allEvents.filter((e) => isTodayOrTomorrowLocal(e.time_utc))
+  const events = allEvents.filter((e) => isWithinMacroWindowLocal(e.time_utc))
     .sort((a, b) => a.time_utc.localeCompare(b.time_utc));
-  if (sub) sub.textContent = events.length ? `오늘·내일 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일 예정된 일정 없음";
+  if (sub) sub.textContent = events.length ? `오늘·내일·모레 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일·모레 예정된 일정 없음";
   setH("macroCalendarList", events.length
     ? events.map((e) => {
         const tone = e.importance === "high" ? "warn" : "neutral";
