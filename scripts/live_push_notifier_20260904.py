@@ -28,9 +28,14 @@ T2 즉시(무음)     드물고 강한 컨텍스트 — net_score |>=3|, 청산 
 
 재시작/장애 후 폭주 방지
 ------------------------
-두 겹으로 막는다. (1) 상태파일이 없는 **최초 실행은 현재 상태를 baseline으로 기록만 하고 아무것도
+세 겹으로 막는다. (1) 상태파일이 없는 **최초 실행은 현재 상태를 baseline으로 기록만 하고 아무것도
 보내지 않는다**. (2) 그 이후에도 EVENT_MAX_AGE_SEC보다 오래된 사건은 seen으로만 표시하고 보내지
 않는다 — 데몬이 6시간 죽어 있었다면 복구 시점에 필요한 건 그동안의 전부가 아니라 "지금"이다.
+(3) **한 key는 한 번만 나간다**(2026-09-07 신설). 감지기들은 "열려 있는 포지션"·"이상 상태인
+컴포넌트"·"창 안에 있음" 같은 **상태**를 매 사이클 다시 방출하므로, 중복 차단이 곧 사건 판정이다.
+그 전까지는 쿨다운(t1 300초)이 지나면 같은 key가 다시 나가 사건 하나가 최대 6~7번 반복됐다 --
+실측 8시간 287건. key를 만드는 쪽은 **사건마다 유일한 key**를 줄 책임이 있고(발동 봉 시각, 포지션
+개시 시각, 상태 전이 시각 …), 갱신되는 필드를 key에 넣으면 그 순간 폭주가 된다.
 """
 from __future__ import annotations
 
@@ -57,9 +62,6 @@ STATE_PATH = REPO_ROOT / "data" / "live" / "push_notifier_state.json"
 POLL_SECONDS = 45
 # 이보다 오래된 사건은 "지금"이 아니므로 조용히 seen 처리한다(재시작 폭주 방지 2단계).
 EVENT_MAX_AGE_SEC = 30 * 60
-# 같은 key가 이 시간 안에 다시 떠도 재발송하지 않는다. 플래핑하는 헬스체크 하나가 알림을
-# 도배해서 사용자가 전체를 음소거해버리는 것을 막는 장치다.
-COOLDOWN_SECONDS = {"t1": 300, "t2": 1800}
 # 다이제스트 최소 간격. 5분봉이라 신호 집합은 5분마다 바뀔 수 있는데, 그대로 내보내면
 # "변화가 있을 때만"이 사실상 5분 주기 알림이 된다.
 DIGEST_MIN_INTERVAL_SEC = 15 * 60
@@ -269,12 +271,24 @@ def detect_net_score(evidence: dict[str, Any]) -> list[Note]:
     )]
 
 
-def detect_liq_burst(burst: dict[str, Any]) -> list[Note]:
-    """청산 버스트(Hawkes) 발생. 상태가 켜져 있는 동안 updated_at은 계속 갱신되므로 key는
-    'hawkes가 켜진 그 시각'으로 고정해 한 번만 나가게 한다."""
+def detect_liq_burst(burst: dict[str, Any], state: dict[str, Any]) -> list[Note]:
+    """청산 버스트(Hawkes) **발생 순간**. 켜져 있는 동안이 아니라 켜진 그때만 알린다.
+
+    ⚠️2026-09-07 수정. 독스트링은 원래부터 "updated_at은 계속 갱신되므로 key는 켜진 그 시각으로
+    고정한다"고 적혀 있었는데, 정작 key가 `liq_burst:{updated_at}`이었다 -- 즉 계속 갱신된다고
+    설명해 놓은 바로 그 필드를 key로 썼다. 그래서 폴링마다(45초) 새 key가 되어 같은 버스트가
+    끝없이 알림을 냈다(09-07 로그: 같은 LONG_CRISIS가 07:10:27부터 9분 동안 9번).
+    상태파일에는 '켜진 시각'이 없으므로 여기서 **전이를 직접 본다** -- 직전 사이클이 inactive
+    였는데 지금 active면 그 시각을 state에 적어두고, 꺼지면 지운다. 데몬이 재시작해도 state는
+    디스크에 남으므로 진행 중인 버스트를 다시 알리지 않는다."""
     if not burst.get("available") or not burst.get("hawkes_active"):
+        state.pop("liq_burst_since", None)
         return []
-    updated = burst.get("updated_at")
+    # 켜진 첫 사이클에만 기록된다 -- 이후 updated_at이 아무리 갱신돼도 key는 그대로다.
+    updated = state.get("liq_burst_since")
+    if not updated:
+        updated = str(burst.get("updated_at") or datetime.now(timezone.utc).isoformat())
+        state["liq_burst_since"] = updated
     z_long, z_short = burst.get("z_long"), burst.get("z_short")
     detail = []
     if isinstance(z_long, (int, float)):
@@ -398,13 +412,15 @@ async def fetch_all(session, base_url: str) -> dict[str, dict[str, Any]]:
     return dict(zip(ENDPOINTS.keys(), results))
 
 
-def collect_notes(data: dict[str, dict[str, Any]]) -> list[Note]:
+def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any]) -> list[Note]:
+    """`state`는 지금은 detect_liq_burst의 전이 감지에만 쓰인다 -- 그 감지기만 '직전 사이클에
+    어땠는가'를 알아야 key를 고정할 수 있다. 나머지 감지기는 payload만으로 유일한 key를 만든다."""
     notes: list[Note] = []
     notes += detect_shadow_positions(data.get("shadow") or {})
     notes += detect_trades(data.get("trades") or {})
     notes += detect_ops_health(data.get("ops") or {})
     notes += detect_net_score(data.get("evidence") or {})
-    notes += detect_liq_burst(data.get("burst") or {})
+    notes += detect_liq_burst(data.get("burst") or {}, state)
     notes += detect_session_window(data.get("alerts") or {})
     return notes
 
@@ -416,10 +432,18 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
     seen = state["seen"]
     baseline = not state["baseline_done"]
 
-    for note in collect_notes(data):
-        last_sent = seen.get(note.key)
-        cooldown = COOLDOWN_SECONDS.get(note.tier, 1800)
-        if last_sent is not None and now - last_sent < cooldown:
+    for note in collect_notes(data, state):
+        # ⭐2026-09-07: **key 하나당 한 번만** 보낸다. 그 전까지는 COOLDOWN_SECONDS(t1 300초 /
+        # t2 1800초)가 지나면 같은 key가 다시 나갔다. 그런데 감지기들은 전부 "열려 있는 포지션",
+        # "이상 상태인 컴포넌트", "창 안에 있음"처럼 **상태**를 매 사이클 다시 방출한다 -- 위
+        # 감지기 독스트링이 하나같이 "한 번만 나간다"고 적고 있는 것도 그 전제다. 쿨다운은 그
+        # 전제를 조용히 깨서, 사건 하나를 EVENT_MAX_AGE_SEC(30분)까지 최대 6~7번 반복 발송했다.
+        # 실측(2026-09-07 서버 로그): 8시간 287건, 같은 섀도우 포지션이 07:11:12 / 07:11:58 /
+        # 07:16:31 처럼 정확히 300초 간격으로 재발송. seen은 SEEN_TTL_SEC(24시간)에 정리되므로
+        # 하루가 지나면 다시 열릴 수 있지만, 그때는 EVENT_MAX_AGE_SEC가 한 번 더 막는다.
+        # ⚠️발송 실패해도 재시도하지 않는 것은 **기존 동작 그대로**다(예전에도 broadcast 전에
+        #   seen을 찍었다). 여기서 바뀐 건 "성공한 뒤 다시 보내지 않는다" 하나뿐이다.
+        if note.key in seen:
             continue
         seen[note.key] = now
         if baseline:

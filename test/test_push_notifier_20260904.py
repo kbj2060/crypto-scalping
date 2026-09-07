@@ -139,8 +139,29 @@ class SessionAndBurstDedupTests(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_liq_burst_inactive_emits_nothing(self) -> None:
-        self.assertEqual(notifier.detect_liq_burst({"available": True, "hawkes_active": False}), [])
-        self.assertEqual(notifier.detect_liq_burst({"available": False}), [])
+        self.assertEqual(notifier.detect_liq_burst({"available": True, "hawkes_active": False}, {}), [])
+        self.assertEqual(notifier.detect_liq_burst({"available": False}, {}), [])
+
+    def test_liq_burst_key_is_pinned_to_the_moment_it_turned_on(self) -> None:
+        """수집기는 버스트가 켜져 있는 동안 updated_at을 계속 갱신한다. 그 필드를 key에 쓰면
+        폴링마다(45초) 새 사건이 되어 알림이 끝없이 나간다 -- 2026-09-07 실측 9분에 9번."""
+        state: dict = {}
+        burst = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
+                 "z_long": 3.2, "updated_at": "2026-09-07T07:10:00Z"}
+        first = notifier.detect_liq_burst(burst, state)[0].key
+        for later in ("2026-09-07T07:10:45Z", "2026-09-07T07:11:30Z", "2026-09-07T07:16:00Z"):
+            burst["updated_at"] = later
+            self.assertEqual(notifier.detect_liq_burst(burst, state)[0].key, first)
+
+    def test_liq_burst_gets_a_new_key_after_it_turns_off_and_on(self) -> None:
+        """반대 방향 과교정 방지 -- 꺼졌다 다시 켜지면 그건 새 사건이고 알려야 한다."""
+        state: dict = {}
+        burst = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
+                 "updated_at": "2026-09-07T07:10:00Z"}
+        first = notifier.detect_liq_burst(burst, state)[0].key
+        notifier.detect_liq_burst({"available": True, "hawkes_active": False}, state)   # 꺼짐
+        burst["updated_at"] = "2026-09-07T09:00:00Z"
+        self.assertNotEqual(notifier.detect_liq_burst(burst, state)[0].key, first)
 
 
 class RunCycleTests(unittest.IsolatedAsyncioTestCase):
@@ -204,6 +225,23 @@ class RunCycleTests(unittest.IsolatedAsyncioTestCase):
         self.sent.clear()
         await self._cycle(state, data)
         self.assertEqual(self.sent, [])
+
+    async def test_open_position_is_not_resent_after_the_old_cooldown_would_expire(self) -> None:
+        """이 테스트가 이번 수정의 핵심이다. 감지기는 **열려 있는 포지션**을 매 사이클 다시
+        방출하므로, 쿨다운이 지나면 같은 포지션이 또 나갔다(t1 300초 -> 사건당 최대 6~7번,
+        2026-09-07 실측 8시간 287건). seen에 있으면 시간과 무관하게 다시 보내지 않아야 한다."""
+        state = notifier.load_state()
+        await self._cycle(state, {"shadow": {"open_positions": [], "recent_trades": []}})
+        data = self._live_shadow()
+        await self._cycle(state, data)
+        self.assertEqual(len(self.sent), 1)
+        self.sent.clear()
+        # 쿨다운(300초)이 한참 지난 것처럼 seen 기록을 되돌린다. 포지션은 여전히 열려 있고
+        # opened_utc도 그대로라 감지기는 같은 노트를 또 만든다.
+        for key in state["seen"]:
+            state["seen"][key] -= 3600
+        await self._cycle(state, data)
+        self.assertEqual(self.sent, [], "열린 포지션이 쿨다운 후 재발송됐다")
 
     async def test_stale_event_is_marked_seen_but_not_sent(self) -> None:
         """재시작 폭주 방지 2단계 -- 6시간 전에 끝난 일은 지금 알릴 가치가 없다."""
