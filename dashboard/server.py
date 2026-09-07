@@ -725,84 +725,11 @@ def _locked_bp(p: dict[str, Any]) -> float | None:
         return None
 
 
-def _unrealized_bp(p: dict[str, Any], price: float | None) -> float | None:
-    """보유 중인 섀도우 포지션을 **지금 닫으면** 얼마인가(bp).
-
-    2026-09-07 사용자 요청. 그 전까지 이 패널은 `locked_bp`("최악이어도 얼마")만 보여줬는데,
-    그건 손절선이 확정한 값이라 시장이 어디에 있든 바뀌지 않는다 -- 보유 중인 건이 지금 이기고
-    있는지 지고 있는지는 화면에서 알 수 없었다.
-
-    ⚠️규약은 원장의 `pnl_bp`와 **똑같이** 맞춘다(방향 부호 + 왕복비용 10bp 차감). 그래야 이
-    숫자가 그대로 청산됐을 때의 값과 이어지고, 마감분 `total_bp`와 더해도 단위가 맞는다.
-    ⚠️기준가는 **최근 확정된 5분봉 종가**다(진행 중인 봉이 아님). 러너가 배리어를 평가하는
-    주기와 같아서 화면과 원장이 같은 봉을 본다. 러너의 청산 판정은 봉 고가/저가 기준이지만
-    (`exit_basis: bar_high_low`), 미실현 표시는 "지금 시장가로 닫으면"이므로 종가가 맞다.
-    """
-    if price is None:
-        return None
-    try:
-        entry = float(p["entry"])
-        sgn = 1.0 if p.get("side") == "long" else -1.0
-        return round(sgn * (float(price) - entry) / entry * 1e4 - 10.0, 2)
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
-
-
 COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
 # ETH 톤 스트립과 같은 모양(app.js MICRO_HISTORY_MAX=48, 5분 간격 = 4시간)
 MICRO_STRIP_SAMPLES = 48
-
-
-MASHT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
-
-
-def _masht_tone_history(state: dict[str, Any], positions: list[dict], ledger: list[dict],
-                        bars: int = MASHT_STRIP_BARS) -> tuple[list[str], str | None]:
-    """최근 `bars`개 5분봉의 **보유 톤** 이력. 2026-09-07 사용자 신고("앵커 방향만 게이지 아래
-    시간이 없다")로 신설.
-
-    프론트의 `lastSegmentRangeLabel(history, times, ...)`은 history가 비면 그냥 "-"를 돌려주는데,
-    앵커 항목만 `history: []`로 만들어져 있어서 다른 감지기에는 다 있는 시간 줄이 이 행에만
-    없었다. 그래서 다른 감지기(basis/liq_direction)와 **같은 모양**으로 준다 --
-    `tone_history` + `latest_ts_utc`, 톤 어휘도 같은 good/bad/warn/neutral.
-
-    톤 규약(app.js STRIP_BAR_LABEL_BY_TONE.masht_anchor와 일치해야 한다):
-      good=롱 보유 · bad=숏 보유 · warn=혼재 보유 · neutral=미발동
-    ⚠️앵커 측면과 포지션 방향은 반대다 -- **바닥 앵커의 지속은 숏**이다(payload의 open_dirs와 동일).
-    진입은 라벨 규약대로 앵커 봉의 **다음 봉**이고, 마감분은 `bars_observed`만큼, 보유분은 끝까지 덮는다.
-    """
-    def _parse(value: Any) -> datetime | None:
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            return None
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-    seen = [t for t in (_parse(x) for x in (state.get("seen_bars") or [])) if t]
-    end = max(seen) if seen else _parse(state.get("updated_utc"))
-    if end is None:
-        return [], None
-    end = end.replace(second=0, microsecond=0) - timedelta(minutes=end.minute % 5)
-    grid = [end - timedelta(minutes=5 * (bars - 1 - i)) for i in range(bars)]
-
-    spans: list[tuple[datetime, datetime, str]] = []
-    for row in [*ledger, *positions]:
-        anchor = _parse(row.get("bar_utc"))
-        if anchor is None:
-            continue
-        start = anchor + timedelta(minutes=5)
-        held = row.get("bars_observed")
-        stop = (start + timedelta(minutes=5 * int(held))
-                if isinstance(held, int) and held >= 0 else end + timedelta(minutes=5))
-        spans.append((start, stop, "bad" if row.get("side") == "bottom" else "good"))
-
-    history = []
-    for moment in grid:
-        tones = {tone for start, stop, tone in spans if start <= moment < stop}
-        history.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
-    return history, end.isoformat().replace("+00:00", "Z")
 
 
 def masht_anchor_shadow_payload() -> dict[str, Any]:
@@ -835,20 +762,16 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
                         - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
         except (TypeError, ValueError):
             days = 0.0
-    # 마지막 앵커의 지속확률. skips(임계 미달로 건너뛴 앵커)만 보면 **진입이 일어난 앵커에서
-    # null**이 된다 -- 러너는 진입한 앵커의 p_cont를 positions/ledger에 넣고 skips에는 안 넣는다.
-    # 그러면 게이지가 비어 다른 특화감지기와 어긋나고, 툴팁도 앵커가 있는데 "앵커 대기"로 나온다
-    # (2026-09-07 사용자 신고 "확률도 통일"). 진입·스킵·마감을 통틀어 가장 최근 앵커를 쓴다.
-    anchors = [r for r in (*skips, *positions, *ledger) if r.get("bar_utc")]
-    last = max(anchors, key=lambda r: str(r.get("bar_utc"))) if anchors else None
+    # ⚠️진입한 앵커는 skips 에 남지 않는다 -- skips[-1] 만 보면 "마지막 판정"이 낡는다.
+    #   진입/스킵/마감을 통틀어 가장 최근 결정을 고른다(사용자 지적: 라벨은 지속/되돌림 이진인데
+    #   화면이 보유 포지션만 보여주고 있었다).
+    def _bar(x):
+        return str(x.get("bar_utc") or "")
+    cands = [x for x in (skips + positions + ledger) if isinstance(x, dict) and x.get("p_cont") is not None]
+    last = max(cands, key=_bar) if cands else None
     open_sides = [p.get("side") for p in positions]
-    tone_history, latest_ts_utc = _masht_tone_history(state, positions, ledger)
     return {
         "available": True,
-        # 띠(strip)와 그 아래 시간 줄용 -- 다른 감지기와 같은 필드명/모양이라 프론트가 같은
-        # evenlySpacedBarTimes(latest_ts_utc, len, 5) 경로를 그대로 쓴다.
-        "tone_history": tone_history,
-        "latest_ts_utc": latest_ts_utc,
         "started_utc": started,
         "days_running": round(days, 2),
         "open_positions": len(positions),
@@ -864,6 +787,10 @@ def masht_anchor_shadow_payload() -> dict[str, Any]:
         "skips": len(skips),
         "last_p_cont": (last or {}).get("p_cont"),
         "last_bar_utc": (last or {}).get("bar_utc"),
+        "last_side": (last or {}).get("side"),
+        "last_entered": bool(last is not None and last.get("p_cont") is not None
+                             and meta.get("entry_threshold") is not None
+                             and last["p_cont"] >= meta["entry_threshold"]),
         "threshold": meta.get("entry_threshold"),
         "breakeven_acc": meta.get("breakeven_acc"),
         "measured": meta.get("measured", {}),
@@ -981,7 +908,7 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     return out
 
 
-def v_rebound_econ_shadow_payload(mark: dict[str, Any] | None = None) -> dict[str, Any]:
+def v_rebound_econ_shadow_payload() -> dict[str, Any]:
     """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
 
     근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
@@ -991,10 +918,6 @@ def v_rebound_econ_shadow_payload(mark: dict[str, Any] | None = None) -> dict[st
     state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
     ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
     positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-    # 미실현 손익 기준가(최근 확정 5분봉 종가). 호출부가 안 주면 None -- 그때는 이 패널이
-    # 예전처럼 locked_bp만 보여주고 조용히 넘어간다(캐시 워밍업 전 첫 몇 초).
-    mark_price = (mark or {}).get("price")
-    unrealized_all = [v for v in (_unrealized_bp(p, mark_price) for p in positions) if v is not None]
 
     pnls: list[float] = []
     for row in ledger:
@@ -1055,8 +978,6 @@ def v_rebound_econ_shadow_payload(mark: dict[str, Any] | None = None) -> dict[st
                 "best": p.get("best"), "armed": bool(p.get("armed")),
                 "proba": p.get("proba"), "opened_utc": p.get("opened_utc"),
                 "bars_held": p.get("bars_held"),
-                # 지금 닫으면 얼마 -- 원장 pnl_bp와 같은 규약(왕복 10bp 차감), 5분봉마다 갱신
-                "unrealized_bp": _unrealized_bp(p, mark_price),
                 # 손절선이 이미 확정한 손익. 무장 전이면 최대손실, 무장 후면 확보이익이 될 수 있다.
                 # 현재가 없이도 계산되고, "최악이어도 얼마"라는 직관적 의미를 준다.
                 "locked_bp": _locked_bp(p),
@@ -1064,10 +985,6 @@ def v_rebound_econ_shadow_payload(mark: dict[str, Any] | None = None) -> dict[st
             for p in positions[-10:]
         ],
         "n_open": len(positions),
-        # 보유분 합계는 화면에 보이는 10건이 아니라 **전체** 포지션 기준이다.
-        "unrealized_total_bp": round(sum(unrealized_all), 2) if unrealized_all else None,
-        "mark_price": mark_price,
-        "mark_bar_utc": (mark or {}).get("bar_utc"),
         "closed_trades": n,
         "exp_bp": round(sum(pnls) / n, 2) if n else None,
         "total_bp": round(sum(pnls), 1) if n else None,
@@ -2017,10 +1934,6 @@ def make_app() -> web.Application:
     async def index(_: web.Request) -> web.Response:
         raise web.HTTPFound("/dashboard/live/")
 
-    async def dashboard_index_redirect(_: web.Request) -> web.Response:
-        """슬래시 없는 주소 -> 슬래시 있는 주소. 이유는 라우터 등록부 주석 참고."""
-        raise web.HTTPFound("/dashboard/live/")
-
     async def dashboard_index(_: web.Request) -> web.FileResponse:
         response = web.FileResponse(DASHBOARD_DIR / "index.html")
         response.enable_compression()
@@ -2389,48 +2302,17 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_evidence_shadow_payload(), etag)
 
-    def eth_closed_bar_mark() -> dict[str, Any] | None:
-        """미실현 손익 기준가 = evidence 캐시(ETH 5분봉 1500개, 60초 갱신)의 **마지막 확정봉 종가**.
-
-        추가 fetch를 만들지 않는 게 요점이다 -- 이 캐시는 증거신호 패널이 이미 계속 채우고 있다.
-        값이 5분마다 한 번 바뀌므로 미실현 표시도 5분 주기로 갱신된다(섀도우 러너의 평가 주기와 동일).
-        캐시가 아직 비어 있으면(프로세스 기동 직후) None을 돌려 **여기서 워밍업을 강제하지 않는다** --
-        그랬다간 이 가벼운 패널이 TabPFN 경로를 기다리게 된다.
-        """
-        frames = evidence_signal_cache["frames"]
-        if not frames:
-            return None
-        closed_df = frames[0]
-        if closed_df is None or closed_df.empty:
-            return None
-        row = closed_df.iloc[-1]
-        try:
-            return {"price": float(row["close"]),
-                    "bar_utc": pd.Timestamp(row["timestamp"]).isoformat()}
-        except (KeyError, TypeError, ValueError):
-            return None
-
     async def api_v_rebound_econ_shadow(request: web.Request) -> web.Response:
-        mark = eth_closed_bar_mark()
         etag = make_etag(
             "v-rebound-econ-shadow",
             file_signature(V_REBOUND_ECON_SHADOW_STATE_PATH),
-            # 봉 시각을 넣어야 원장 파일이 안 바뀐 채 봉만 넘어간 경우에도 미실현이 갱신된다.
-            # 가격 대신 봉 시각을 쓰는 이유: ETag가 5분에 한 번만 바뀌어 캐시가 제 역할을 한다.
-            (mark or {}).get("bar_utc"),
         )
         if etag_matches(request, etag):
             return json_response(request, None, etag)
-        return json_response(request, v_rebound_econ_shadow_payload(mark), etag)
+        return json_response(request, v_rebound_econ_shadow_payload(), etag)
 
     app.router.add_get("/", index)
-    # ⭐2026-09-07: 슬래시 없는 주소는 **리다이렉트**한다. 그 전까지는 여기서도 index.html을
-    # 그대로 내보냈는데, index.html의 자산 경로가 상대경로(`styles.css`, `./app.js`)라
-    # `/dashboard/live`에서는 `/dashboard/app.js`로 풀려 **404가 났다** -- HTML은 200인데 JS도
-    # CSS도 없는 죽은 페이지가 뜬다(실측: 모든 패널이 "불러오는 중…"에서 멈춤). `/`는 원래부터
-    # 슬래시 붙은 주소로 리다이렉트하고 PWA manifest의 start_url도 슬래시가 있어서 정상 경로로는
-    # 안 걸렸지만, 주소를 직접 치거나 북마크·외부 링크로 들어오면 그대로 당한다.
-    app.router.add_get("/dashboard/live", dashboard_index_redirect)
+    app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
     # add_static("/dashboard/live/") 보다 먼저 등록 -- aiohttp는 등록 순서대로 매칭하므로
     # 이 둘만 no-cache 경로로 빠지고 나머지 정적 파일은 그대로 static 핸들러가 처리한다.

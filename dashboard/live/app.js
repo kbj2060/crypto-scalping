@@ -1016,6 +1016,8 @@ const STRIP_BAR_LABEL_BY_TONE = {
   v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
   // 2026-09-07 MASHT 앵커 방향 섀도우 -- 섀도우 포지션이라 상태어는 "보유"다(규약 §1).
   masht_anchor: { good: "지속 롱", bad: "지속 숏", warn: "혼재 보유", neutral: "미발동" },
+  // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
+  // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
@@ -1120,7 +1122,9 @@ const MODEL_INDICATOR_MEANING = {
     "지속 롱": "천장 앵커에서 **상승이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
     "지속 숏": "바닥 앵커에서 **하락이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
     "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
-    "미발동": "앵커가 없거나 지속 확률이 진입 임계 아래입니다.",
+    "지속 약함": "지속 쪽이지만 진입 임계(0.5372)에 못 미쳐 들어가지 않았습니다.",
+    "되돌림 우세": "모델이 되돌림 쪽으로 기울었습니다. 이 러너는 되돌림을 거래하지 않아 진입하지 않습니다.",
+    "미발동": "최근 앵커가 없습니다.",
     "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
     "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
     "오류": "섀도우 상태를 읽지 못했습니다.",
@@ -2228,10 +2232,17 @@ function mashtAnchorIndicatorItem() {
   }
   const dirs = p.open_dirs || [];
   const hasL = dirs.includes("long"), hasS = dirs.includes("short");
+  // 진입하지 않은 판정(지속 약함·되돌림 우세)은 **회색**이다 -- 거래하지 않으므로 방향 색을 주지 않는다.
   const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
   // 2026-09-08: 이 모델의 라벨은 **지속(continuation)** 이다 -- 진입 방향(롱/숏)은 앵커 측면에서 나온다.
   // 바닥 앵커의 지속 = 하락 계속 = 숏. 라벨을 주장에 맞춰 "지속 롱/숏" 으로 쓴다.
-  const subText = p.open_positions ? (hasL && hasS ? "혼재 보유" : hasS ? "지속 숏" : "지속 롱") : "미발동";
+  // 라벨은 지속/되돌림 이진이다. 보유 중이면 그 방향을, 아니면 **마지막 앵커의 판정**을 보여준다.
+  const lp = p.last_p_cont != null ? Number(p.last_p_cont) : null;
+  let subText;
+  if (p.open_positions) subText = hasL && hasS ? "혼재 보유" : hasS ? "지속 숏" : "지속 롱";
+  else if (lp == null) subText = "미발동";
+  else if (lp >= 0.5) subText = "지속 약함";
+  else subText = "되돌림 우세";
   // 표본 가드: 일수 기준(규약 §4). 30일 계측 전에는 수치를 성과로 읽지 않는다.
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
