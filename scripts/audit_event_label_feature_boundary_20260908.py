@@ -18,6 +18,11 @@
 경계 누수가 있으면 정확도가 크게 떨어진다. **떨어지는 폭이 곧 누수 크기**다.
 정적 스캔이 못 잡는 형태(파생 피쳐, 조인 시점)도 여기서 드러난다.
 
+## 보정 기준 (2026-09-08 실측)
+- 누수판(경로 피쳐가 트리거 분 포함): 경계 피쳐 기여 **+4.0pp** -> 🔴
+- 수정판(`s1-1` 까지): **+1.6pp** -> ⚠️needs_review (경계 인접 정보는 남아 있으나 누수는 아님)
+- 임계: >2pp 누수 강력 의심 · 1~2pp 사람이 확인 · <1pp 징후 없음
+
 사용:
     python scripts/audit_event_label_feature_boundary_20260908.py --scan scripts/build_*.py
     python scripts/audit_event_label_feature_boundary_20260908.py --data <parquet> \
