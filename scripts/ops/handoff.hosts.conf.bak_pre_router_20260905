@@ -1,0 +1,4 @@
+declare -A HOSTS=(
+  [server]="llewyn@192.168.0.232:2222|/home/llewyn/crypto-scalping|/home/llewyn/miniconda3|quant_ai"
+  [dev]="kbj20@192.168.0.90:2222|/home/kbj20/crypto-scalping|/home/kbj20/anaconda3|quant_ai"
+)
