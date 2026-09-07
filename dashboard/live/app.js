@@ -730,15 +730,33 @@ async function maybeFetchSnapshotChartHistory() {
 
 function applyDashboardEvent(payload) {
   const tickers = payload?.tickers || {};
+  let priceMoved = false;
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);
     if (!(price > 0) || !ASSET_CONFIG[asset]) return;
+    if (asset === activeSnapshotAsset && latestLivePriceByAsset[asset] !== price) priceMoved = true;
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
   });
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
+  }
+  // ⭐2026-09-07 (사용자 신고: "현재 봉이 바로바로 안 움직이고 끊긴다"). 서버는 SSE 틱마다
+  // tickers를 보내지만 payload.state는 dashboard_state.json이 **바뀐 틱에만** 싣는다
+  // (server.py::publish_dashboard_events의 `state_payload if state_changed else None`).
+  // 그런데 아래 render() 호출은 그 state를 요구하므로, **가격만 바뀐 틱은 아무것도 다시 그리지
+  // 않았다** -- 새 가격은 latestLivePriceByAsset에 들어가지만 화면은 그대로였다. 그래서 현재
+  // 봉이 2.5초 주기가 아니라 "봇 상태가 바뀔 때"라는 불규칙한 박자로 툭툭 움직였다.
+  // 여기서는 전체 render()를 부르지 않고 **차트의 살아있는 층만** 다시 그린다(현재 봉 몸통 +
+  // 현재가 선). 비용 실측 1.47ms/회 · 노드 243개(2026-09-07, 100봉+밀도12스냅샷 기준)이고,
+  // scheduleSnapshotChartRender()가 rAF로 합치므로 한 프레임에 두 번 그리지 않는다. 탭이
+  // 숨겨져 있으면 rAF가 아예 안 돌아 낭비도 없다.
+  // ⚠️활성 코인의 가격이 실제로 바뀐 틱에만 그린다 -- 같은 값이 다시 오는 틱까지 그리면
+  //   움직이지도 않는 그림을 다시 그리는 셈이다.
+  if (priceMoved && !isScrolling && activePageTab === "snapshot") {
+    updateSnapshotCandleLive();
+    scheduleSnapshotChartRender();
   }
   if (!latestMainState || isScrolling || !payload?.state?.state) return;
   render(latestMainState, latestCompactState, { stateChanged: true });
