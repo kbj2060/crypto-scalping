@@ -2494,3 +2494,21 @@ TRAIN CI 가 [−75, +20] 처럼 넓다. 2.6년 × 7일 보유 = 독립 관측 ~
 2. **체결**: `bookDepth` 가 ETH 만 있다. 상위 종목 호가 수집 또는 소액 실주문으로 꼬리 종목의
    실제 왕복비용을 재면 12bp 가정을 실측으로 대체할 수 있다.
 3. 이미 확정된 설계: **4트랜치 + 변동성타깃 + 신호가중 + k=3~5 + 일거래대금 ≥$50~200M**.
+
+### 부록 AJ 보론 — 라이브 데이터 경로는 **이미 있다**
+
+쏠림 페이드를 실제로 돌리려면 5분마다 종목별 롱숏비가 필요한데, 이 저장소에 이미 배선돼 있다.
+
+| 내 신호 | 바이낸스 엔드포인트 | 저장소 현황 |
+|---|---|---|
+| `count_long_short_ratio` (=retail_level) | `globalLongShortAccountRatio` | ✅ `oi_lsratio_collector.py:193` 이 5분 폴링 (ETH 만) |
+| `sum_toptrader_long_short_ratio` | `topLongShortPositionRatio` | ✅ 같은 수집기 194행 |
+| `count_toptrader_long_short_ratio` (최고 성능) | `topLongShortAccountRatio` | ⚠️수집기엔 없으나 `trading_bot_modules/binance_live_fetcher.py:324` 가 이미 호출 |
+
+⭐**`retail_level` 은 최고 신호와 거의 동률**(통합 표본외 +36.5 [+12.8, +61.2] p=0.001 vs
+`tt_count` +37.0 [+11.9, +63.3])이고 **이미 수집 중**이다. 순@12bp CI 하한이 **+0.8 로 0 을 넘는
+유일한 비공학 셀**이기도 하다. 구현 난이도가 가장 낮은 경로다.
+
+남는 작업은 **수집기를 40~60종목으로 확장**하는 것뿐이다(현재 심볼당 인스턴스 구조).
+⚠️API 보존이 500포인트(5분 기준 ~1.7일)뿐이라 과거는 못 받는다 — 아카이브(`binance_data/metrics`,
+2026-08-02 까지)와 라이브 수집 사이의 공백은 메꿀 수 없으므로 **확장은 빠를수록 좋다**.
