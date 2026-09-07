@@ -1675,8 +1675,19 @@ svg {
 }
 
 @media (max-width: 720px) {
-  /* 좁은 화면에서는 가격/시각 줄이 잘리는 게 말줄임보다 낫다 -- 숫자가 반쪽만 보이면 오해를 부른다 */
-  .vshadow-trade-px, .vshadow-trade-ts { white-space: normal; }
+  /* 좁은 화면에서는 가격/시각 줄이 줄바꿈되는 게 말줄임보다 낫다 -- 숫자가 반쪽만 보이면 오해를 부른다.
+     ⚠️2026-09-07: 이 규칙은 2026-09-04에 들어왔지만 **한 번도 적용된 적이 없었다.**
+     `.vshadow-row-main span`(특이도 0,1,1 · 위쪽 1499행)이 `white-space: nowrap`을 걸어두는데
+     여기 선택자는 `.vshadow-trade-ts`(0,1,0)라 졌다 -- 미디어쿼리는 특이도를 올려주지 않는다.
+     실측(375px): scrollWidth 374 vs clientWidth 216으로 "오늘 06:05 PM → 오늘 06:50 PM · 45분 ·
+     신호 1봉 전" 줄의 40%만 보였고, 안쪽 `.vshadow-lag` 배지는 right=438로 화면 밖(뷰포트 375)에
+     있었다. overflow/text-overflow도 같이 되돌려야 잘림이 실제로 없어진다. */
+  .vshadow-row-main .vshadow-trade-px,
+  .vshadow-row-main .vshadow-trade-ts {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
 }
 
 /* 신호봉 -> 체결봉 지연 배지 (2026-09-04). 0봉(즉시 체결)이 정상이라 지연이 있는 건에만
@@ -1803,3 +1814,65 @@ svg {
   .notify-tier { grid-template-columns: 1fr; gap: 2px; }
 }
 
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   모바일 최적화 2차 (2026-09-07). Playwright 375px/360px 실측으로 잡은 것만 고친다
+   -- 눈대중이 아니라 (a) 뷰포트 넘침 (b) scrollWidth>clientWidth 잘림 (c) 터치 타깃 크기
+   (d) 계산된 font-size를 전수 조사했다(1차는 2026-08-31, 같은 방법).
+
+   ⚠️여기에 새 UI를 추가할 때: 칩/배지가 들어가는 flex 헤더는 720px 이하 wrap/column 대응을
+     같이 넣고, 새 텍스트 클래스는 11px 아래로 내려가지 않게 한다.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  /* 터치 타깃. 실측 높이가 페이지탭 29px · 코인탭 30px였다 -- 손가락 접촉면(권장 44px)의
+     3분의 2다. 폭이 아니라 **높이**가 병목이라 min-height와 세로 패딩만 올린다(가로로 더
+     키우면 코인탭 5개가 375px를 다시 넘친다 -- 2026-08-31에 고친 그 헤더다). */
+  .page-tab { min-height: 40px; padding: 11px 13px; }
+  .asset-tab { height: 40px; }
+  .notify-btn { min-height: 40px; }
+
+  /* 최소 글씨. 실측에서 9~10px가 38곳 있었다. 9.5px는 모바일에서 사실상 안 읽힌다.
+     SVG 차트 안의 라벨(레짐/현재/지지1 …)은 renderCandleSvg()가 좌표와 함께 그리므로
+     여기서 건드리지 않는다 -- 크기를 키우면 라벨끼리 겹친다. */
+  .eyebrow { font-size: 11px; }
+  .signal-chip-subgroup-label { font-size: 11px; }
+  .notify-check-mark,
+  .notify-device-main span,
+  .vshadow-row-value em,
+  .meter-pct,
+  .ops-health-status-badge,
+  .detail-toggle,
+  .vshadow-trade-ts { font-size: 11px; }
+
+  /* "자세히" 토글은 실측 41x14px -- 손가락으로 정확히 누르기 어렵다. 하지만 촘촘한 행 안에
+     있어서 실제 크기를 키우면 줄 높이가 밀린다. 그래서 **보이는 크기는 그대로 두고 탭 영역만**
+     투명 pseudo-element로 44px까지 넓힌다(레이아웃 영향 0).
+     ⚠️getBoundingClientRect()는 이 확장을 못 보므로 rect 기반 감사에는 계속 41x14로 잡힌다 --
+       감사 결과가 아니라 이 주석이 근거다. */
+  .detail-toggle { position: relative; }
+  .detail-toggle::after {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 44px; height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* 터치 기기 툴팁 말풍선 (2026-09-07, app.js::setupTouchTooltips). hover가 없는 기기에서만
+   생성되므로 데스크톱에는 영향이 없다. 본문 위에 떠야 하므로 position:absolute + 높은 z-index. */
+.touch-tip {
+  position: absolute;
+  z-index: 9999;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(16, 19, 28, 0.97);
+  color: var(--text);
+  font: 500 12px/1.5 var(--font-sans);
+  white-space: pre-wrap;          /* title에 줄바꿈이 들어있는 곳이 많다 */
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  max-height: 60vh;
+  overflow-y: auto;
+}

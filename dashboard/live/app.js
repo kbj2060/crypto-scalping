@@ -4065,3 +4065,45 @@ window.addEventListener("beforeinstallprompt", (event) => {
 window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.add("hidden"));
 
 setupNotifyPage();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 터치 기기용 툴팁 (2026-09-07). 이 대시보드는 근거·계산식·주의사항을 대부분 `title` 속성에
+// 담아두는데, `title`은 **hover에서만** 뜨므로 폰에서는 그 정보가 통째로 사라진다. 2026-08-31
+// 모바일 감사에서 이미 발견됐지만 "JS 이벤트 모델을 바꿔야 한다"며 미뤄뒀던 항목이고, 이번
+// 실측에서 스냅샷 탭 한 곳에만 30자 이상 title이 26개였다.
+//
+// 개별 요소를 26곳 고치는 대신 document에 위임 핸들러 하나를 건다. hover가 없는 기기에서만
+// 동작하므로 데스크톱 동작은 그대로다(마우스에서는 브라우저 기본 툴팁이 계속 뜬다).
+// ⚠️버튼/링크는 제외한다 -- 탭하면 이미 자기 동작이 있는데 툴팁까지 겹치면 방해가 된다.
+// ⚠️preventDefault를 하지 않는다. 이 핸들러는 정보를 덧붙일 뿐 기존 상호작용을 가로채지 않는다.
+// ─────────────────────────────────────────────────────────────────────────────
+function setupTouchTooltips() {
+  if (!window.matchMedia || !window.matchMedia("(hover: none)").matches) return;
+  let bubble = null;
+  const hide = () => { if (bubble) { bubble.remove(); bubble = null; } };
+  document.addEventListener("click", (event) => {
+    const host = event.target.closest && event.target.closest("[title]");
+    if (!host || host.matches("button, a, input, select, textarea, [role=button]")) { hide(); return; }
+    const text = (host.getAttribute("title") || "").trim();
+    if (text.length < 8) { hide(); return; }
+    hide();
+    bubble = document.createElement("div");
+    bubble.className = "touch-tip";
+    bubble.textContent = text;
+    bubble.addEventListener("click", (e) => { e.stopPropagation(); hide(); });
+    document.body.appendChild(bubble);
+    // 말풍선을 화면 안으로 클램프한다. 툴팁이 화면 밖으로 나가면 없는 것과 같다.
+    const vw = document.documentElement.clientWidth;
+    const width = Math.min(320, vw - 20);
+    bubble.style.width = `${width}px`;
+    const rect = host.getBoundingClientRect();
+    bubble.style.left = `${window.scrollX + Math.max(10, Math.min(rect.left, vw - width - 10))}px`;
+    const below = window.scrollY + rect.bottom + 6;
+    const fitsBelow = rect.bottom + 6 + bubble.offsetHeight <= document.documentElement.clientHeight;
+    bubble.style.top = `${fitsBelow ? below : Math.max(window.scrollY + 6, window.scrollY + rect.top - bubble.offsetHeight - 6)}px`;
+  }, true);
+  window.addEventListener("scroll", hide, { passive: true });
+  window.addEventListener("resize", hide);
+}
+
+setupTouchTooltips();

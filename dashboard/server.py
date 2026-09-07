@@ -1898,6 +1898,10 @@ def make_app() -> web.Application:
     async def index(_: web.Request) -> web.Response:
         raise web.HTTPFound("/dashboard/live/")
 
+    async def dashboard_index_redirect(_: web.Request) -> web.Response:
+        """슬래시 없는 주소 -> 슬래시 있는 주소. 이유는 라우터 등록부 주석 참고."""
+        raise web.HTTPFound("/dashboard/live/")
+
     async def dashboard_index(_: web.Request) -> web.FileResponse:
         response = web.FileResponse(DASHBOARD_DIR / "index.html")
         response.enable_compression()
@@ -2301,7 +2305,13 @@ def make_app() -> web.Application:
         return json_response(request, v_rebound_econ_shadow_payload(mark), etag)
 
     app.router.add_get("/", index)
-    app.router.add_get("/dashboard/live", dashboard_index)
+    # ⭐2026-09-07: 슬래시 없는 주소는 **리다이렉트**한다. 그 전까지는 여기서도 index.html을
+    # 그대로 내보냈는데, index.html의 자산 경로가 상대경로(`styles.css`, `./app.js`)라
+    # `/dashboard/live`에서는 `/dashboard/app.js`로 풀려 **404가 났다** -- HTML은 200인데 JS도
+    # CSS도 없는 죽은 페이지가 뜬다(실측: 모든 패널이 "불러오는 중…"에서 멈춤). `/`는 원래부터
+    # 슬래시 붙은 주소로 리다이렉트하고 PWA manifest의 start_url도 슬래시가 있어서 정상 경로로는
+    # 안 걸렸지만, 주소를 직접 치거나 북마크·외부 링크로 들어오면 그대로 당한다.
+    app.router.add_get("/dashboard/live", dashboard_index_redirect)
     app.router.add_get("/dashboard/live/", dashboard_index)
     # add_static("/dashboard/live/") 보다 먼저 등록 -- aiohttp는 등록 순서대로 매칭하므로
     # 이 둘만 no-cache 경로로 빠지고 나머지 정적 파일은 그대로 static 핸들러가 처리한다.
