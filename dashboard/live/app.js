@@ -890,10 +890,14 @@ function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
 // in-segment text either way, so hover (unchanged mechanism, resolves to the whole segment's
 // tone/start~end range) still carries the exact label+time, same tradeoff this dashboard's other
 // compact chips already make.
-function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
+// calls (2026-09-08, optional): 봉별 **판정 단어**. 톤이 방향만 담는 신호(돌파/되돌림)에서
+// 같은 ↓ 가 "돌파"일 수도 "되돌림"일 수도 있어, 톤만으로는 세그먼트도 라벨도 구분이 안 된다.
+// 넘기지 않는 호출부는 callList[i] 가 undefined 라 "" 로 떨어져 동작이 그대로다.
+function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
   const fireList = Array.isArray(rawFire) ? rawFire : [];
+  const callList = Array.isArray(calls) ? calls : [];
   const n = Math.max(list.length, 1);
   const w = 240, h = 15, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
@@ -913,11 +917,12 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
     const tone = list[i] || "neutral";
     const isProvisionalBar = !!(provisionalLast && i === n - 1);
     const isFreshFire = !!fireList[i];
+    const call = callList[i] || "";
     const prev = segments[segments.length - 1];
-    if (prev && prev.tone === tone && !isProvisionalBar && !isFreshFire) {
+    if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar && !isFreshFire) {
       prev.end = i;
     } else {
-      segments.push({ tone, start: i, end: i, isProvisional: isProvisionalBar });
+      segments.push({ tone, call, start: i, end: i, isProvisional: isProvisionalBar });
     }
   }
 
@@ -954,7 +959,8 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
     // readable back from the DOM.
     const t = timeList[seg.start];
     const tEnd = timeList[seg.end];
-    const hoverAttrs = t ? ` data-t="${t}" data-t-end="${tEnd || t}" data-tone="${tone}" onmouseenter="showStripBarTime(this)" onmouseleave="hideStripBarTime(this)"` : "";
+    const callAttr = seg.call ? ` data-call="${escapeHtml(seg.call)}"` : "";
+    const hoverAttrs = t ? ` data-t="${t}" data-t-end="${tEnd || t}" data-tone="${tone}"${callAttr} onmouseenter="showStripBarTime(this)" onmouseleave="hideStripBarTime(this)"` : "";
     return `<rect class="${cls}" x="${x}" y="0" width="${segWidth}" height="${h}" rx="2" fill="${fill}"${hoverAttrs}/>`;
   });
   // 2026-08-27 (user request): the whole gauge blinks, but only while it's showing a genuinely
@@ -1017,10 +1023,11 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
   v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
   // 2026-09-08 돌파/되돌림 -- <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
-  // ⚠️이 사전은 **톤이 키**라 한 톤에 한 라벨뿐이다. 실제 배지는 돌파/되돌림을 구분해
-  //   "되돌림 롱"(good)도 낼 수 있어 여기 값과 어긋난다.
-  //   이 카드는 `history: []` 라 띠가 그려지지 않아 실제 화면에는 드러나지 않는다.
-  breakout_rev: { good: "돌파 ↑", bad: "돌파 ↓", warn: "혼재 보유", neutral: "미발동" },
+  // 🔴이 사전은 **톤이 키**인데 이 카드의 톤은 방향(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일
+  //   수도 "되돌림 숏"일 수도 있다. 예전 값은 양쪽 다 "돌파"라고 못박아, 배지가 "직전 되돌림↓"
+  //   인데 띠 캡션은 "돌파 ↓"로 나왔다(2026-09-08 사용자 신고). <주장>은 이제 서버가 봉별로
+  //   주는 call_history 에서 오고(stripBarLabel), 여기엔 **방향만** 남긴다.
+  breakout_rev: { good: "↑", bad: "↓", warn: "혼재 보유", neutral: "미발동" },
   // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
   // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
@@ -1045,20 +1052,32 @@ function stripTimeFmtByKind(kind) {
 // tone stays the same, mirroring toneStripSvg's own segment-merge grouping (the still-forming
 // provisional bar is always its own 1-wide segment there too, so no special-casing needed here --
 // walking backward from index n-1 can only ever include OTHER already-confirmed bars).
-function lastSegmentRangeLabel(tones, times, key, timeFmtKind, rawFire) {
+// 2026-09-08: 띠 캡션의 라벨은 <주장> <방향> 두 축이다. 톤 사전이 방향(또는 단일 어휘)을 주고,
+// 봉별 판정 단어(call)가 있으면 그 앞에 붙인다 -- "되돌림 ↓". 방향이 없는 톤(warn/neutral)은
+// 그 자체가 완결된 상태어("혼재 보유"/"미발동")라 단어를 덧붙이지 않는다.
+function stripBarLabel(key, tone, call) {
+  const base = (STRIP_BAR_LABEL_BY_TONE[key] || {})[tone] || "";
+  if (!base || !call || (tone !== "good" && tone !== "bad")) return base;
+  return `${call} ${base}`;
+}
+
+function lastSegmentRangeLabel(tones, times, key, timeFmtKind, rawFire, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
   const fireList = Array.isArray(rawFire) ? rawFire : [];
+  const callList = Array.isArray(calls) ? calls : [];
   const n = list.length;
   if (n === 0) return "-";
   const lastTone = list[n - 1] || "neutral";
+  const lastCall = callList[n - 1] || "";
   let start = n - 1;
   // 2026-09-01: also stop at a rawFire boundary (mirrors toneStripSvg's own segment-merge guard)
   // -- once `start` itself is a genuine re-fire bar, that's where its segment begins, so the walk
   // must not continue past it even if the tone on both sides matches.
-  while (start > 0 && list[start - 1] === lastTone && !fireList[start]) start--;
+  while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall
+         && !fireList[start]) start--;
   const fmt = stripTimeFmtByKind(timeFmtKind);
-  const barLabel = (STRIP_BAR_LABEL_BY_TONE[key] || {})[lastTone] || "";
+  const barLabel = stripBarLabel(key, lastTone, lastCall);
   const rangeText = start === n - 1 ? fmt(timeList[n - 1]) : `${fmt(timeList[start])}~${fmt(timeList[n - 1])}`;
   return barLabel ? `${barLabel} · ${rangeText}` : rangeText;
 }
@@ -1079,7 +1098,7 @@ function showStripBarTime(rectEl) {
   const fmt = stripTimeFmtByKind(label.getAttribute("data-fmt"));
   const key = rectEl.closest("svg")?.getAttribute("data-key");
   const tone = rectEl.getAttribute("data-tone");
-  const barLabel = key && tone ? (STRIP_BAR_LABEL_BY_TONE[key] || {})[tone] : null;
+  const barLabel = key && tone ? stripBarLabel(key, tone, rectEl.getAttribute("data-call") || "") : null;
   const rangeText = startIso === endIso ? fmt(startIso) : `${fmt(startIso)}~${fmt(endIso)}`;
   label.textContent = barLabel ? `${barLabel} · ${rangeText}` : rangeText;
 }
@@ -1303,7 +1322,7 @@ const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
 // 값을 지우고 "ETH 전용" 상태로 바꾼다 -- 다른 코인의 값인 척하는 것보다 없는 게 낫다.
 function ethOnlyIndicator(item) {
   if (activeSnapshotAsset === "eth") return item;
-  return { ...item, tone: "neutral", proba: null, history: [], times: [],
+  return { ...item, tone: "neutral", proba: null, history: [], times: [], callHistory: [],
            subText: "미지원",   // 2026-09-06: 상태 열은 92px nowrap이라 문장이 들어가면 넘친다. 설명은 derivedTitle에 있다.
            derivedTag: "= ETH 전용",
            derivedTitle: "이 지표의 데이터 출처가 ETH 전용입니다(봇 상태 또는 ETH 학습 모델). "
@@ -1410,7 +1429,8 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
     const times = it.times || [];
     // 2026-08-31 user request: default caption shows the LAST segment's own range+label, not just
     // "지금 시간" -- see lastSegmentRangeLabel().
-    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time");
+    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time", undefined,
+                                                   it.callHistory);
     // 2026-08-31: optional `it.proba` (0-1) opts an item into the same inline probability meter
     // renderEvidenceSignals() uses (see .meter-col in styles.css) -- state text, then the meter bar,
     // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
@@ -1442,7 +1462,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         ${it.liveText ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(it.liveTitle)}"` : ""}>${escapeHtml(it.liveText)}</p>` : ""}
         <div class="evidence-strip-wrap">
-          ${toneStripSvg(it.history, times, false, false, it.key)}
+          ${toneStripSvg(it.history, times, false, false, it.key, undefined, it.callHistory)}
           ${stripAxisHtml(times, "time")}
         </div>
         <div class="strip-time-row">
@@ -2331,8 +2351,11 @@ function breakoutRevIndicatorItem() {
   // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
   // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
   const history = p.tone_history || [];
+  // 봉별 판정 단어(돌파/되돌림/혼재). 톤은 방향만 담으므로 이게 있어야 띠 캡션이 배지와 같은
+  // 말을 한다(2026-09-08 사용자 신고: 배지 "직전 되돌림↓" vs 띠 "돌파 ↓").
+  const callHistory = p.call_history || [];
   const times = evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5);
-  return { ...base, history, times, tone, subText, stateTitle,
+  return { ...base, history, times, callHistory, tone, subText, stateTitle,
            proba, probaSlot: true, meterNote, meterNoteTitle };
 }
 

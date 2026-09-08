@@ -746,16 +746,19 @@ def _br_parse(v: Any) -> datetime | None:
 
 
 def _breakout_tone_history(rows: list[dict], end: datetime,
-                           bars: int = BREAKOUT_STRIP_BARS) -> list[str]:
-    """최근 `bars`개 5분봉의 톤. good=롱 · bad=숏 · warn=혼재 · neutral=판정 없음.
+                           bars: int = BREAKOUT_STRIP_BARS) -> tuple[list[str], list[str]]:
+    """최근 `bars`개 5분봉의 (톤, 판정). 톤 good=롱 · bad=숏 · warn=혼재 · neutral=판정 없음.
 
     ⭐**게이트와 무관하게 전 판정을 칠한다**(2026-09-08 게이트 제거 + 사용자 요청
       "직전 되돌림이나 약 신호도 타임 게이지에 표시"). 확신 등급도 걸러내지 않는다 --
       띠는 "언제 무슨 판정이 있었나"의 기록이고, 셀 여부는 배지·게이지가 말한다.
     ⚠️배리어가 중앙값 5분에 해소되므로 대부분의 판정은 **한 칸**으로 나타난다.
       그래서 최소 한 칸은 반드시 칠한다(안 그러면 짧은 판정이 띠에서 통째로 사라진다).
+    🔴톤은 **매매 방향**(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일 수도 "되돌림 숏"일 수도
+      있어서, 톤만으로 띠 캡션을 만들면 단어가 배지와 어긋난다(2026-09-08 사용자 신고:
+      배지 "직전 되돌림↓" vs 띠 "돌파 ↓"). 그래서 판정 단어를 **봉별로 함께** 돌려준다.
     """
-    spans: list[tuple[datetime, datetime, str]] = []
+    spans: list[tuple[datetime, datetime, str, str]] = []
     for r in rows:
         t0 = _br_parse(r.get("trigger_utc"))
         if t0 is None:
@@ -763,14 +766,18 @@ def _breakout_tone_history(rows: list[dict], end: datetime,
         t0 = t0.replace(second=0, microsecond=0) - timedelta(minutes=t0.minute % 5)
         t1 = _br_parse(r.get("exit_utc")) or (end + timedelta(minutes=5))
         t1 = max(t1, t0 + timedelta(minutes=5))          # 최소 한 칸
-        up = bool(r.get("dir_up")) == (str(r.get("call")) == "돌파")
-        spans.append((t0, t1, "good" if up else "bad"))
-    out = []
+        call = str(r.get("call") or "")
+        up = bool(r.get("dir_up")) == (call == "돌파")
+        spans.append((t0, t1, "good" if up else "bad", call))
+    tones_out, calls_out = [], []
     for i in range(bars):
         moment = end - timedelta(minutes=5 * (bars - 1 - i))
-        tones = {t for a, b, t in spans if a <= moment < b}
-        out.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
-    return out
+        hit = [(t, c) for a, b, t, c in spans if a <= moment < b]
+        tones = {t for t, _ in hit}
+        calls = {c for _, c in hit if c}
+        tones_out.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
+        calls_out.append("혼재" if len(calls) > 1 else (calls.pop() if calls else ""))
+    return tones_out, calls_out
 
 
 def _age_min(ts: Any) -> float | None:
@@ -836,8 +843,9 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
 
     now = datetime.now(timezone.utc)
     strip_end = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
+    strip_tones, strip_calls = _breakout_tone_history([*closed[-400:], *positions], strip_end)
     return {**base, "available": True,
-            "tone_history": _breakout_tone_history([*closed[-400:], *positions], strip_end),
+            "tone_history": strip_tones, "call_history": strip_calls,
             "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z"),
             "watching": len(watching), "open_positions": len(positions),
             "open_dirs": [_dir(q) for q in positions],
