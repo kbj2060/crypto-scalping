@@ -248,6 +248,12 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 # 표시 전용, 주문 없음. 아티팩트: data/live/masht_wbin_shadow_artifact/meta.json
 MASHT_ANCHOR_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "masht_anchor_shadow_state.json"
 MASHT_ANCHOR_ARTIFACT_PATH = REPO_ROOT / "data" / "live" / "masht_wbin_shadow_artifact" / "meta.json"
+# 2026-09-08 돌파/되돌림 앵커 섀도우(scripts/live_eth_breakout_reversal_shadow_runner_20260908.py)
+# 표시 전용, 주문 없음. 커버리지 상한을 두지 않는다 -- 전 트리거에 판정을 내고 확신 등급만 표시한다.
+BREAKOUT_REV_STATE_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_state.json"
+BREAKOUT_REV_LEDGER_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_ledger.jsonl"
+BREAKOUT_REV_ARTIFACT_PATH = (REPO_ROOT / "data" / "live"
+                              / "breakout_reversal_shadow_artifact" / "meta.json")
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
@@ -796,6 +802,74 @@ def _masht_tone_history(rows: list[dict], end: datetime | None,
         tones = {tone for start, stop, tone in spans if start <= moment < stop}
         history.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
     return history
+
+
+def breakout_reversal_shadow_payload() -> dict[str, Any]:
+    """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
+
+    러너: scripts/live_eth_breakout_reversal_shadow_runner_20260908.py
+    규칙: 앵커 first_fire -> 15분 안에 ±0.75×ATR 최초 터치가 **발현**(방향은 관측값) ->
+          69피쳐(전부 트리거 봉 직전 봉 기준) -> HGB 5시드 평균 -> 1시간 안에 ±0.25% 중
+          먼저 닿는 쪽이 돌파/되돌림. 시간청산이면 12봉 뒤 종가 부호.
+    ⭐**커버리지 상한이 없다** -- 전 트리거에 판정을 내므로 "어느 사건이 해소되는가"를 결과가
+      정하는 편향(MASHT 에서 실제 발생)이 구조상 생기지 않는다.
+    ⚠️정확도는 **셔플 귀무와 함께** 읽는다. 창마다 클래스 균형이 달라 귀무가 .515~.570 로 움직인다.
+    """
+    meta = load_json(BREAKOUT_REV_ARTIFACT_PATH) or {}
+    state = load_json(BREAKOUT_REV_STATE_PATH) or {}
+    prereg = (meta.get("prereg") or {}).get("cov100") or {}
+    base = {"available": False, "prereg": prereg, "rule_id": meta.get("rule_id"),
+            "barrier_pct": meta.get("barrier_pct"), "horizon_bars": meta.get("horizon_bars"),
+            "tiers": meta.get("confidence_tiers")}
+    if not state:
+        return base
+    rows = parse_jsonl(BREAKOUT_REV_LEDGER_PATH)
+    closed = [r for r in rows if r.get("outcome") in ("cont", "fade", "timeout")]
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    watching = state.get("watching") if isinstance(state.get("watching"), list) else []
+
+    def _acc(rs: list[dict]) -> float | None:
+        ok = [bool(r.get("correct")) for r in rs if r.get("correct") is not None]
+        return round(sum(ok) / len(ok), 4) if ok else None
+
+    days = 0.0
+    if closed:
+        try:
+            t0 = datetime.fromisoformat(str(closed[0].get("trigger_utc")).replace(" ", "T"))
+            t1 = datetime.fromisoformat(str(closed[-1].get("trigger_utc")).replace(" ", "T"))
+            days = max((t1 - t0).total_seconds() / 86400.0, 0.0)
+        except (TypeError, ValueError):
+            days = 0.0
+    tiers = {}
+    for t in ("강", "중", "약", "미약"):
+        q = [r for r in closed if r.get("tier") == t]
+        if q:
+            tiers[t] = {"n": len(q), "acc": _acc(q)}
+    # 마지막 판정: 미해소 포지션이 있으면 그중 최신, 없으면 원장 최신
+    cands = [x for x in (positions + closed) if isinstance(x, dict) and x.get("p_breakout") is not None]
+    last = max(cands, key=lambda x: str(x.get("trigger_utc") or "")) if cands else None
+    gross = [float(r["gross_bp"]) for r in closed if isinstance(r.get("gross_bp"), (int, float))]
+    # 매매 방향 = 발현 방향 XOR 되돌림콜 (돌파면 발현 방향 그대로, 되돌림이면 반대)
+    def _dir(q: dict) -> str:
+        up = bool(q.get("dir_up")) == (str(q.get("call")) == "돌파")
+        return "long" if up else "short"
+
+    return {**base, "available": True,
+            "watching": len(watching), "open_positions": len(positions),
+            "open_dirs": [_dir(q) for q in positions],
+            "open_calls": [q.get("call") for q in positions],
+            "closed": len(closed), "days_running": round(days, 2),
+            "per_day": round(len(closed) / days, 1) if days > 0.5 else None,
+            "accuracy": _acc(closed),
+            "outcomes": {k: sum(1 for r in closed if r.get("outcome") == k)
+                         for k in ("cont", "fade", "timeout")},
+            "gross_bp_mean": round(sum(gross) / len(gross), 2) if gross else None,
+            "by_tier": tiers,
+            "last": ({"trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
+                      "dir_up": bool(last.get("dir_up")), "call": last.get("call"),
+                      "p_breakout": last.get("p_breakout"), "tier": last.get("tier"),
+                      "trig_min": last.get("trig_min"),
+                      "resolved": last.get("outcome") is not None} if last else None)}
 
 
 def masht_anchor_shadow_payload() -> dict[str, Any]:
@@ -2434,6 +2508,14 @@ def make_app() -> web.Application:
         return json_response(request, masht_anchor_shadow_payload(), etag)
 
     app.router.add_get("/api/masht-anchor-shadow", api_masht_anchor_shadow)
+
+    async def api_breakout_reversal_shadow(request: web.Request) -> web.Response:
+        etag = make_etag("breakout-reversal-shadow",
+                         file_signature(BREAKOUT_REV_STATE_PATH),
+                         file_signature(BREAKOUT_REV_LEDGER_PATH))
+        return json_response(request, breakout_reversal_shadow_payload(), etag)
+
+    app.router.add_get("/api/breakout-reversal-shadow", api_breakout_reversal_shadow)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
