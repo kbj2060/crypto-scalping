@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ETH 앵커 **돌파/되돌림 섀도우 러너** -- 가상 체결만 기록한다. 주문을 내지 않는다. (2026-09-08)
 
-사용자: *"정보량을 일 10건으로 제한하진 말고 first_fire · T=0.75 · 배리어 0.25% · H=1시간 ·
+사용자: *"정보량을 일 10건으로 제한하진 말고 first_fire · T=0.75 · H=1시간 ·
         HGB 모델로 새도우 러너와 대시보드에 카드 추가해줘"*
 → **커버리지 상한을 두지 않는다.** 발현한 전 트리거에 판정을 내고 확신 등급만 표시한다.
 
@@ -10,7 +10,9 @@
     발현    앵커 다음 봉 시가 기준 **15분 안에 ±0.75×ATR** 최초 터치.
             그 분이 트리거, 터치한 쪽이 **발현 방향**(관측값이지 예측 대상이 아니다). 22.1건/일
     판정    발현 방향으로 계속 가나(**돌파**) 되돌아오나(**되돌림**) -- 1시간 안에
-            진입가 ±0.25% 중 먼저 닿는 쪽. 시간청산이면 12봉 뒤 종가 부호.
+            진입가 **±0.8×ATR** 중 먼저 닿는 쪽. 시간청산이면 12봉 뒤 종가 부호.
+            (2026-09-08 개정 2: 절대 ±0.25% 에서 ATR 상대로. 저ATR 구간의 시간청산 25%→3%,
+             고ATR 의 돌파율 불균형 0.334→0.46 이 해소된다.)
     피쳐    69개, 전부 **트리거 봉 bt 의 직전 봉 bt-1** 기준.
             🔴경로 피쳐는 트리거 분 s1 을 **포함하지 않는다**(CLAUDE.md 사건 라벨 경계 계약).
     모델    HGB 5시드 평균. 모델 축은 2026-09-08 종결 -- TabPFN/TabICL/LightGBM/고전GBM 전부
@@ -131,7 +133,7 @@ def tier_of(conf: float, tiers: dict) -> str:
 def _strategy_fields(meta, entry, sgn, p, conf) -> dict[str, Any]:
     """사전등록 매매 규칙(meta.strategy)의 진입 정보 -- 종이거래로만 기록한다.
 
-    ⚠️라벨(±0.25% 대칭)을 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 57~63%다.
+    ⚠️라벨(±0.8×ATR 대칭)을 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 56~59%다.
       그래서 매매 브라켓은 **비대칭**(TP 20 / SL 50)이고 확신 게이트가 붙는다.
       라벨 축과 매매 축을 혼동하지 말 것 -- 정확도가 귀무를 이기는 것과 돈이 되는 것은 다르다.
     """
@@ -259,6 +261,13 @@ def cycle(s: dict[str, Any]) -> None:
         if fb < 900 or bt >= len(ts5):
             log(f"   {w['anchor_utc']} 피쳐 창 부족(fb={fb}) → 폐기"); continue
         entry = ref * (1 + sgn * T)
+        # ⭐2026-09-08 개정 2: 배리어가 **사건별 ATR 상대**다(P = k × atr_at_anchor).
+        #   절대 0.25% 는 ATR 구간마다 난이도가 딴판이었다 -- 저ATR 시간청산 25.3% ·
+        #   고ATR 돌파율 0.334(불균형). meta.barrier_mode 없으면 옛 절대값으로 되돌아간다.
+        if meta.get("barrier_mode") == "atr_relative":
+            P = w["atr_pct"] * float(meta["barrier_k_atr"])
+        else:
+            P = float(meta["barrier_pct"]) / 100.0
         ev = {"T_atr": T, "trig_min": float(tmin), "dir_up": 1.0 if sgn > 0 else 0.0,
               "atr_at_anchor": w["atr_pct"], "n_signals": float(w["n_signals"]),
               "side_bottom": 1.0 if w["side"] == "bottom" else 0.0, "signals": w["signals"]}
@@ -271,12 +280,12 @@ def cycle(s: dict[str, Any]) -> None:
         X = np.nan_to_num(vec.reshape(1, -1), nan=0.0, posinf=0.0, neginf=0.0)
         p = float(np.mean([m.predict_proba(X)[0, 1] for m in models]))
         conf = abs(p - 0.5); tier = tier_of(conf, meta["confidence_tiers"])
-        P = meta["barrier_pct"] / 100.0
         pos = {"rule_id": RULE_ID, "anchor_utc": w["anchor_utc"], "side": w["side"],
                "n_signals": w["n_signals"], "signals": [k for k, v in w["signals"].items() if v],
                "trigger_utc": str(pd.Timestamp(ts1[s1])), "trig_min": tmin,
                "dir_up": bool(sgn > 0), "atr_pct": w["atr_pct"], "T_atr": T,
                "entry_px": entry, "ref_px": ref, "p_breakout": p, "confidence": conf,
+               "barrier_pct": P * 100,          # 이 사건에 실제로 쓴 배리어(%)
                "tier": tier, "call": "돌파" if p > 0.5 else "되돌림",
                "barrier_up": entry * (1 + P), "barrier_dn": entry * (1 - P),
                "s1_utc": str(pd.Timestamp(ts1[s1])), "bt_utc": str(pd.Timestamp(ts5[bt])),
@@ -393,16 +402,20 @@ def report() -> int:
         A = R[R["strat_net_bp"].notna()]
         print(f"\n   ⭐매매규칙 {st.get('id')} "
               f"(TP{st.get('tp_bp')}/SL{st.get('sl_bp')}·비용{st.get('cost_bp')}bp·손익분기승률 85.7%)")
-        if st.get("gate_threshold", 0) <= 0:
+        if st.get("status") == "suspended":
+            print(f"      🔴매매 규칙 **보류**(2026-09-08) -- ATR 상대 배리어로 바꾸자 브라켓 격자가 "
+                  f"{ng.get('grid_pass', 0)}/{ng.get('grid_total', 0)} 통과로 무너졌다. "
+                  f"기록만 하고 판정 근거로 쓰지 않는다(최선칸도 {ng.get('bp_per_trade', 0):+.2f}bp/건).")
+        elif st.get("gate_threshold", 0) <= 0:
             print(f"      ⚠️게이트 제거됨(사용자 지정) -- 전 트리거 기록. "
-                  f"백테스트 기대 {ng.get('bp_per_trade', 0):+.2f}bp/건 · {ng.get('bp_per_day', 0):+.1f}bp/일")
+                  f"백테스트 기대 {ng.get('bp_per_trade', 0):+.2f}bp/건")
         if len(A):
             print(f"      [전건] {len(A)}건 · 건당 {A['strat_net_bp'].mean():+.2f}bp "
                   f"(백테스트 {ng.get('bp_per_trade', 0):+.2f}) · 승률 {A['strat_win'].mean()*100:.1f}% "
                   f"(백테스트 {ng.get('winrate', 0)*100:.1f}%) · 일 {A['strat_net_bp'].sum()/days:+.2f}bp")
             print(f"             해소 {dict(A['strat_outcome'].value_counts())}")
         # 사전등록 부분집합은 계속 따로 낸다 -- 게이트를 지워도 그 질문은 살아 있다
-        if "strat_gate_prereg" in R.columns:
+        if "strat_gate_prereg" in R.columns and st.get("status") != "suspended":
             S = A[A["strat_gate_prereg"] == True]
             thr = st.get("gate_threshold_prereg")
             print(f"      [사전등록 부분집합 |p-.5|≥{thr:.4f}] {len(S)}건/{len(A)}건 "
@@ -422,7 +435,8 @@ def selftest() -> int:
     models, meta = load_models()
     assert len(meta["features"]) == 69, meta["features"]
     assert meta["anchor"] == "first_fire" and meta["t_mult"] == 0.75
-    assert abs(meta["barrier_pct"] - 0.25) < 1e-9 and meta["horizon_bars"] == 12
+    assert meta["barrier_mode"] == "atr_relative" and abs(meta["barrier_k_atr"] - 0.8) < 1e-9
+    assert meta["horizon_bars"] == 12
     X = np.zeros((1, 69), np.float32)
     p = float(np.mean([m.predict_proba(X)[0, 1] for m in models]))
     assert 0.0 < p < 1.0, p

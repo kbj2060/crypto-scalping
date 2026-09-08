@@ -7,7 +7,7 @@
     발현    앵커 다음 봉 시가를 기준가로, **15분(3봉) 안에 ±0.75×ATR** 최초 터치.
             그 분이 트리거이고 터치한 쪽이 **발현 방향**(예측 대상 아님, 관측값).
             실측 22.1건/일 (앵커의 88%).
-    라벨    트리거 분부터 **1시간(12봉)** 안에 진입가 ±0.25% 중 먼저 닿는 쪽.
+    라벨    트리거 분부터 **1시간(12봉)** 안에 진입가 **±0.8×ATR** 중 먼저 닿는 쪽.
             발현 방향 = 돌파(1) · 반대 = 되돌림(0) · 시간청산이면 12봉 뒤 종가 부호.
     피쳐    69개 (아래 FEATURES 순서 고정). 모두 **트리거 봉 bt 의 직전 봉 bt-1** 기준.
     모델    HistGradientBoostingClassifier 5시드 평균.
@@ -40,19 +40,27 @@ import build_eth_anchor_label_dataset_20260907 as B  # noqa: E402
 DS = ROOT / "tmp/eth_breakout_atr_state_20260908_s1/dataset_v2.parquet"
 KL1 = ROOT / "binance_data/klines/ETHUSDT/ETHUSDT-1m-api.csv"
 OUT = ROOT / "data/live/breakout_reversal_shadow_artifact"
-ANCHOR, T_MULT, P, H, W_TRIG = "first_fire", 0.75, 0.0025, 12, 3
+ANCHOR, T_MULT, H, W_TRIG = "first_fire", 0.75, 12, 3
+# ⭐2026-09-08 개정: 배리어를 **ATR 상대**로 바꾼다(P = K_ATR × atr_at_anchor).
+#   절대 0.25% 는 ATR 구간마다 질문의 난이도가 딴판이었다 --
+#     저ATR: 배리어/ATR 2.33× · 시간청산 25.3% · 돌파율 0.515
+#     고ATR: 배리어/ATR 0.46× · 시간청산  0.0% · 돌파율 **0.334**(심한 불균형)
+#   고ATR "정확도 69.1%"의 대부분이 클래스 불균형이었다(셔플 귀무 66.1%, 초과 +3.0pp).
+#   0.8×ATR 로 바꾸면 돌파율이 전 구간 0.46~0.47 로 균등해지고 시간청산이 9.5%→3.2% 로 준다.
+K_ATR = 0.8
 SEEDS = [106645, 305610, 517758, 761154, 961476]   # 시드검정 20개에서 뽑은 5개(무작위 추출본)
 CHUNK = 4000
-RULE_ID = "breakout_reversal_ff075_p025_h1h_20260908"
+RULE_ID = "breakout_reversal_ff075_atr08_h1h_20260908"
 
 # 사전등록 기대치 -- 시드 20개 단일시드 평균과 셔플 귀무 (research_eth_breakout_seed_robustness_20260908)
 PREREG = {
-    "cov100": {"acc": {"VAL": 0.5748, "OOS": 0.6046, "HOLDOUT_SPENT": 0.5716},
-               "null": {"VAL": 0.5457, "OOS": 0.5697, "HOLDOUT_SPENT": 0.5157},
+    # 2026-09-08 시드 20개 워크포워드 실측 (research_eth_breakout_atr08_validate_20260908)
+    "cov100": {"acc": {"VAL": 0.5643, "OOS": 0.5934, "HOLDOUT_SPENT": 0.5823},
+               "null": {"VAL": 0.5371, "OOS": 0.5490, "HOLDOUT_SPENT": 0.5312},
                "per_day": 22.1},
-    "cov50":  {"acc": {"VAL": 0.6363, "OOS": 0.6693, "HOLDOUT_SPENT": 0.6335},
-               "null": {"VAL": 0.5454, "OOS": 0.5674, "HOLDOUT_SPENT": 0.5150},
-               "per_day": 12.0},
+    "cov50":  {"acc": {"VAL": 0.6136, "OOS": 0.6570, "HOLDOUT_SPENT": 0.6323},
+               "null": {"VAL": 0.5399, "OOS": 0.5508, "HOLDOUT_SPENT": 0.5298},
+               "per_day": 11.6},
 }
 
 
@@ -90,6 +98,7 @@ def build_xy():
     s1 = np.searchsorted(ts1, d["timestamp"].to_numpy())
     bt = np.searchsorted(ts5, ts1[np.clip(s1, 0, len(ts1) - 1)], side="right") - 1
     okm = (s1 > 0) & (s1 + H * 5 < len(ts1)) & (bt + H < len(C5)) & (bt >= 1)
+    P = d["atr_at_anchor"].to_numpy(float) * K_ATR          # 사건별 배리어
     tu, td = first_touch(hi1, lo1, np.where(okm, s1, 0), entry * (1 + P), entry * (1 - P), H * 5)
     big = 1 << 30
     uo, do_ = tu >= 0, td >= 0
@@ -142,7 +151,9 @@ def main() -> int:
              "low": float(np.quantile(conf, 0.25))}
     meta = {
         "rule_id": RULE_ID, "created_utc": datetime.now(timezone.utc).isoformat(),
-        "anchor": ANCHOR, "t_mult": T_MULT, "barrier_pct": P * 100, "horizon_bars": H,
+        "anchor": ANCHOR, "t_mult": T_MULT, "horizon_bars": H,
+        "barrier_mode": "atr_relative", "barrier_k_atr": K_ATR,
+        "barrier_pct": None,          # 절대 배리어는 더 이상 쓰지 않는다(개정 전 0.25%)
         "watch_bars": W_TRIG, "seeds": SEEDS, "features": feats,
         "n_train": int(len(fit)), "breakout_rate": float(y[fit].mean()),
         "train_span": [str(d["timestamp"].iloc[0]), str(d["timestamp"].iloc[-1])],
