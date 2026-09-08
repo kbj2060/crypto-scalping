@@ -2306,7 +2306,12 @@ function breakoutRevIndicatorItem() {
       meterNoteTitle = "가장 최근 발현으로부터 경과한 시간입니다. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.";
     }
   }
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true, meterNote, meterNoteTitle };
+  // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
+  // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
+  const history = p.tone_history || [];
+  const times = evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5);
+  return { ...base, history, times, tone, subText, stateTitle,
+           proba, probaSlot: true, meterNote, meterNoteTitle };
 }
 
 async function refreshVReboundSignal() {

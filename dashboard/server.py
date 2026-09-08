@@ -734,6 +734,45 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
+BREAKOUT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
+
+
+def _br_parse(v: Any) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(v).replace(" ", "T").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _breakout_tone_history(rows: list[dict], end: datetime,
+                           bars: int = BREAKOUT_STRIP_BARS) -> list[str]:
+    """최근 `bars`개 5분봉의 톤. good=롱 · bad=숏 · warn=혼재 · neutral=판정 없음.
+
+    ⭐**게이트와 무관하게 전 판정을 칠한다**(2026-09-08 게이트 제거 + 사용자 요청
+      "직전 되돌림이나 약 신호도 타임 게이지에 표시"). 확신 등급도 걸러내지 않는다 --
+      띠는 "언제 무슨 판정이 있었나"의 기록이고, 셀 여부는 배지·게이지가 말한다.
+    ⚠️배리어가 중앙값 5분에 해소되므로 대부분의 판정은 **한 칸**으로 나타난다.
+      그래서 최소 한 칸은 반드시 칠한다(안 그러면 짧은 판정이 띠에서 통째로 사라진다).
+    """
+    spans: list[tuple[datetime, datetime, str]] = []
+    for r in rows:
+        t0 = _br_parse(r.get("trigger_utc"))
+        if t0 is None:
+            continue
+        t0 = t0.replace(second=0, microsecond=0) - timedelta(minutes=t0.minute % 5)
+        t1 = _br_parse(r.get("exit_utc")) or (end + timedelta(minutes=5))
+        t1 = max(t1, t0 + timedelta(minutes=5))          # 최소 한 칸
+        up = bool(r.get("dir_up")) == (str(r.get("call")) == "돌파")
+        spans.append((t0, t1, "good" if up else "bad"))
+    out = []
+    for i in range(bars):
+        moment = end - timedelta(minutes=5 * (bars - 1 - i))
+        tones = {t for a, b, t in spans if a <= moment < b}
+        out.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
+    return out
+
+
 def _age_min(ts: Any) -> float | None:
     """UTC 문자열 -> 지금까지 경과 분. 원장은 tz 표기가 없는 UTC 문자열이다."""
     try:
@@ -795,7 +834,11 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
         up = bool(q.get("dir_up")) == (str(q.get("call")) == "돌파")
         return "long" if up else "short"
 
+    now = datetime.now(timezone.utc)
+    strip_end = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
     return {**base, "available": True,
+            "tone_history": _breakout_tone_history([*closed[-400:], *positions], strip_end),
+            "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z"),
             "watching": len(watching), "open_positions": len(positions),
             "open_dirs": [_dir(q) for q in positions],
             "open_calls": [q.get("call") for q in positions],
