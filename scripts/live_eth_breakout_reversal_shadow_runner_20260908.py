@@ -128,6 +128,24 @@ def tier_of(conf: float, tiers: dict) -> str:
            "약" if conf >= tiers["low"] else "미약"
 
 
+def _strategy_fields(meta, entry, sgn, p, conf) -> dict[str, Any]:
+    """사전등록 매매 규칙(meta.strategy)의 진입 정보 -- 종이거래로만 기록한다.
+
+    ⚠️라벨(±0.25% 대칭)을 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 57~63%다.
+      그래서 매매 브라켓은 **비대칭**(TP 20 / SL 50)이고 확신 게이트가 붙는다.
+      라벨 축과 매매 축을 혼동하지 말 것 -- 정확도가 귀무를 이기는 것과 돈이 되는 것은 다르다.
+    """
+    st = meta.get("strategy")
+    if not st:
+        return {}
+    side = 1.0 if ((p > 0.5) == (sgn > 0)) else -1.0     # 돌파면 발현 방향, 되돌림이면 반대
+    return {"strat_id": st["id"], "strat_gate": bool(conf >= st["gate_threshold"]),
+            "strat_side": "long" if side > 0 else "short",
+            "strat_tp_px": entry * (1 + side * st["tp_bp"] / 1e4),
+            "strat_sl_px": entry * (1 - side * st["sl_bp"] / 1e4),
+            "strat_side_sign": side}
+
+
 def load_state() -> dict[str, Any]:
     if STATE.exists():
         try:
@@ -257,6 +275,7 @@ def cycle(s: dict[str, Any]) -> None:
                "tier": tier, "call": "돌파" if p > 0.5 else "되돌림",
                "barrier_up": entry * (1 + P), "barrier_dn": entry * (1 - P),
                "s1_utc": str(pd.Timestamp(ts1[s1])), "bt_utc": str(pd.Timestamp(ts5[bt])),
+               **_strategy_fields(meta, entry, sgn, p, conf),
                "deadline_utc": str(pd.Timestamp(ts5[bt]) + pd.Timedelta(minutes=5 * meta["horizon_bars"])),
                "opened_utc": datetime.now(timezone.utc).isoformat()}
         if len(s["positions"]) >= MAX_OPEN:
@@ -287,18 +306,48 @@ def resolve(s: dict[str, Any], ts1, hi1, lo1, ts5, C5) -> None:
         if cont or fade:
             k = min(tu, td)
             _close(s, p, "cont" if cont else "fade",
-                   p["barrier_up"] if up_first else p["barrier_dn"], str(pd.Timestamp(ts1[i0 + k])))
+                   p["barrier_up"] if up_first else p["barrier_dn"], str(pd.Timestamp(ts1[i0 + k])),
+                   _strategy_outcome(p, hi1, lo1, ts1, C5, ts5, meta))
             continue
         bi = ts5i.get_indexer([pd.Timestamp(p["bt_utc"])])[0]
         if bi >= 0 and bi + meta["horizon_bars"] < len(C5):
             x = bi + meta["horizon_bars"]
-            _close(s, p, "timeout", float(C5[x]), str(pd.Timestamp(ts5[x])))
+            _close(s, p, "timeout", float(C5[x]), str(pd.Timestamp(ts5[x])),
+                   _strategy_outcome(p, hi1, lo1, ts1, C5, ts5, meta))
             continue
         keep.append(p)
     s["positions"] = keep
 
 
-def _close(s, p, outcome, exit_px, exit_utc) -> None:
+def _strategy_outcome(p, hi1, lo1, ts1, C5, ts5, meta) -> dict[str, Any]:
+    """TP/SL 브라켓을 1분봉 first-touch 로 판정. 같은 분에 양쪽이면 **비관적(SL 우선)**."""
+    st = meta.get("strategy")
+    if not st or p.get("strat_side_sign") is None:
+        return {}
+    i0 = pd.DatetimeIndex(ts1).get_indexer([pd.Timestamp(p["s1_utc"])])[0]
+    if i0 < 0:
+        return {}
+    end = min(i0 + st["horizon_bars"] * 5, len(ts1))
+    side = float(p["strat_side_sign"]); tp_px = p["strat_tp_px"]; sl_px = p["strat_sl_px"]
+    tph = (hi1[i0:end] >= tp_px) if side > 0 else (lo1[i0:end] <= tp_px)
+    slh = (lo1[i0:end] <= sl_px) if side > 0 else (hi1[i0:end] >= sl_px)
+    a = int(np.flatnonzero(tph)[0]) if tph.any() else 1 << 30
+    b = int(np.flatnonzero(slh)[0]) if slh.any() else 1 << 30
+    if a == (1 << 30) and b == (1 << 30):
+        bi = pd.DatetimeIndex(ts5).get_indexer([pd.Timestamp(p["bt_utc"])])[0]
+        if bi < 0 or bi + st["horizon_bars"] >= len(C5):
+            return {}
+        gross = (float(C5[bi + st["horizon_bars"]]) - p["entry_px"]) / p["entry_px"] * 1e4 * side
+        oc = "timeout"
+    else:
+        oc = "tp" if a < b else "sl"          # 동시면 SL -- 비관적
+        gross = st["tp_bp"] if a < b else -st["sl_bp"]
+    return {"strat_outcome": oc, "strat_gross_bp": float(gross),
+            "strat_net_bp": float(gross - st["cost_bp"]),
+            "strat_win": bool(gross - st["cost_bp"] > 0)}
+
+
+def _close(s, p, outcome, exit_px, exit_utc, strat=None) -> None:
     sgn = 1.0 if p["dir_up"] else -1.0
     gross = (exit_px - p["entry_px"]) / p["entry_px"] * 1e4 * sgn
     correct = (outcome == "cont") if p["p_breakout"] > 0.5 else (outcome == "fade")
@@ -308,7 +357,8 @@ def _close(s, p, outcome, exit_px, exit_utc) -> None:
            "gross_bp": gross, "net_taker_bp": gross - COST_TAKER_BP,
            "net_maker_bp": gross - COST_MAKER_BP,
            "label_breakout": int(outcome == "cont") if outcome != "timeout" else int(gross > 0),
-           "correct": bool(correct), "closed_utc": datetime.now(timezone.utc).isoformat()}
+           "correct": bool(correct), "closed_utc": datetime.now(timezone.utc).isoformat(),
+           **(strat or {})}
     append_ledger(rec)
     s["closed"] = s.get("closed", 0) + 1
     log(f"   해소 {p['trigger_utc']} → {outcome} · 총 {gross:+.1f}bp · "
@@ -332,6 +382,19 @@ def report() -> int:
           f"(사전등록 VAL {pr['acc']['VAL']:.4f} / OOS {pr['acc']['OOS']:.4f} / HOLD {pr['acc']['HOLDOUT_SPENT']:.4f})")
     print(f"   ⚠️셔플 귀무 {pr['null']['VAL']:.4f}~{pr['null']['OOS']:.4f} -- 정확도는 이것과 함께 읽는다")
     print(f"   해소 내역 {dict(R['outcome'].value_counts())}")
+    if "strat_gate" in R.columns and "strat_net_bp" in R.columns:
+        S = R[(R["strat_gate"] == True) & R["strat_net_bp"].notna()]
+        st = meta.get("strategy", {}); pr = (st.get("prereg") or {}).get("OOS", {})
+        print(f"\n   ⭐사전등록 매매규칙 {st.get('id')} "
+              f"(TP{st.get('tp_bp')}/SL{st.get('sl_bp')}·비용{st.get('cost_bp')}bp·손익분기승률 85.7%)")
+        if len(S):
+            print(f"      게이트 통과 {len(S)}건/{len(R)}건 (커버 {len(S)/len(R)*100:.1f}% · 사전등록 28.0%)")
+            print(f"      건당 {S['strat_net_bp'].mean():+.2f}bp (사전등록 {pr.get('bp_per_trade', 0):+.2f}) · "
+                  f"승률 {S['strat_win'].mean()*100:.1f}% (사전등록 {pr.get('winrate', 0)*100:.1f}%) · "
+                  f"일 {S['strat_net_bp'].sum()/days:+.2f}bp (사전등록 {pr.get('bp_per_day', 0):+.2f})")
+            print(f"      해소 {dict(S['strat_outcome'].value_counts())}")
+        else:
+            print("      게이트 통과 건 아직 없음")
     for t in ("강", "중", "약", "미약"):
         q = R[R["tier"] == t]
         if len(q):
