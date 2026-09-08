@@ -244,10 +244,6 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
-# 2026-09-07 MASHT 앵커 방향 섀도우(scripts/live_eth_masht_anchor_shadow_runner_20260907.py)
-# 표시 전용, 주문 없음. 아티팩트: data/live/masht_wbin_shadow_artifact/meta.json
-MASHT_ANCHOR_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "masht_anchor_shadow_state.json"
-MASHT_ANCHOR_ARTIFACT_PATH = REPO_ROOT / "data" / "live" / "masht_wbin_shadow_artifact" / "meta.json"
 # 2026-09-08 돌파/되돌림 앵커 섀도우(scripts/live_eth_breakout_reversal_shadow_runner_20260908.py)
 # 표시 전용, 주문 없음. 커버리지 상한을 두지 않는다 -- 전 트리거에 판정을 내고 확신 등급만 표시한다.
 BREAKOUT_REV_STATE_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_state.json"
@@ -738,72 +734,6 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
-MASHT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
-
-
-def _masht_strip_end(state: dict[str, Any]) -> datetime | None:
-    """띠의 오른쪽 끝 = 러너가 마지막으로 본 확정 5분봉."""
-    def _parse(value: Any) -> datetime | None:
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            return None
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-    seen = [t for t in (_parse(x) for x in (state.get("seen_bars") or [])) if t]
-    end = max(seen) if seen else _parse(state.get("updated_utc"))
-    if end is None:
-        return None
-    return end.replace(second=0, microsecond=0) - timedelta(minutes=end.minute % 5)
-
-
-def _masht_tone_history(rows: list[dict], end: datetime | None,
-                        bars: int = MASHT_STRIP_BARS) -> list[str]:
-    """한 팔의 최근 `bars`개 5분봉 보유 톤(good=롱 · bad=숏 · warn=혼재 · neutral=미보유).
-
-    2026-09-07 신설했다가 2026-09-08 `2731262`에서 소실돼 재적용한다(사용자 신고 "앵커 방향과
-    앵커 되돌림 카드에 시간이 텍스트로 표시가 안 된다"). 프론트의 `lastSegmentRangeLabel`은
-    history가 비면 그냥 "-"를 돌려주므로, 이 배열이 없으면 **그 행만** 게이지 아래 시간 줄이
-    사라진다 -- 다른 감지기(basis/liq_direction)는 같은 모양의 tone_history를 이미 준다.
-
-    ⚠️두 팔은 같은 앵커에서 **방향이 반대**다(바닥 앵커: 지속=숏, 되돌림=롱). 러너가 남기는
-      `trade_dir`을 우선 쓰고, 그 필드가 없는 옛 행만 side/bet에서 유도한다.
-    진입은 라벨 규약대로 앵커 봉의 **다음 봉**, 마감분은 `bars_observed`만큼, 보유분은 끝까지.
-    """
-    if end is None:
-        return []
-
-    def _parse(value: Any) -> datetime | None:
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            return None
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-    spans: list[tuple[datetime, datetime, str]] = []
-    for row in rows:
-        anchor = _parse(row.get("bar_utc"))
-        if anchor is None:
-            continue
-        direction = row.get("trade_dir")
-        if direction not in ("long", "short"):
-            cont = row.get("bet", "cont") == "cont"
-            direction = ("short" if row.get("side") == "bottom" else "long") if cont \
-                else ("long" if row.get("side") == "bottom" else "short")
-        start = anchor + timedelta(minutes=5)
-        held = row.get("bars_observed")
-        stop = (start + timedelta(minutes=5 * int(held))
-                if isinstance(held, int) and held >= 0 else end + timedelta(minutes=5))
-        spans.append((start, stop, "bad" if direction == "short" else "good"))
-
-    history = []
-    for i in range(bars):
-        moment = end - timedelta(minutes=5 * (bars - 1 - i))
-        tones = {tone for start, stop, tone in spans if start <= moment < stop}
-        history.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
-    return history
-
-
 def breakout_reversal_shadow_payload() -> dict[str, Any]:
     """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -812,7 +742,7 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
           69피쳐(전부 트리거 봉 직전 봉 기준) -> HGB 5시드 평균 -> 1시간 안에 ±0.25% 중
           먼저 닿는 쪽이 돌파/되돌림. 시간청산이면 12봉 뒤 종가 부호.
     ⭐**커버리지 상한이 없다** -- 전 트리거에 판정을 내므로 "어느 사건이 해소되는가"를 결과가
-      정하는 편향(MASHT 에서 실제 발생)이 구조상 생기지 않는다.
+      정하는 편향이 구조상 생기지 않는다(2026-09-07 앵커 방향 섀도우가 여기서 무너졌다).
     ⚠️정확도는 **셔플 귀무와 함께** 읽는다. 창마다 클래스 균형이 달라 귀무가 .515~.570 로 움직인다.
     """
     meta = load_json(BREAKOUT_REV_ARTIFACT_PATH) or {}
@@ -870,111 +800,6 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
                       "p_breakout": last.get("p_breakout"), "tier": last.get("tier"),
                       "trig_min": last.get("trig_min"),
                       "resolved": last.get("outcome") is not None} if last else None)}
-
-
-def masht_anchor_shadow_payload() -> dict[str, Any]:
-    """MASHT 앵커 방향 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
-
-    러너: scripts/live_eth_masht_anchor_shadow_runner_20260907.py (가상 원장만)
-    규칙: 앵커 any3/Wc3 -> 48봉x8채널 -> MultiRocket2016+Hydra768 -> TabPFN in-context,
-          p >= 동결임계면 지속 방향 진입, +-1% 대칭 배리어(1분봉 first-touch), 48봉 시간청산.
-    사전등록 측정치는 아티팩트 meta.json 의 `measured` 에 있다(워크포워드 상위30% 59.88%).
-    """
-    state = load_json(MASHT_ANCHOR_SHADOW_STATE_PATH) or {}
-    meta = load_json(MASHT_ANCHOR_ARTIFACT_PATH) or {}
-    if not state:
-        return {"available": False, "threshold": meta.get("entry_threshold"),
-                "breakeven_acc": meta.get("breakeven_acc"),
-                "measured": meta.get("measured", {})}
-    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
-    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-    skips = state.get("skips") if isinstance(state.get("skips"), list) else []
-
-    resolved = [r for r in ledger if r.get("outcome") in ("cont", "fade")]
-    strip_end = _masht_strip_end(state)
-
-    def _arm(bet: str) -> dict[str, Any]:
-        """팔별 집계.
-
-        🔴2026-09-08 판정 잣대 교체: 헤드라인은 **라이브 건당 bp**(시간청산 포함)다.
-        해소분 적중률은 참고로만 낸다 -- 어느 앵커가 해소되는지는 **결과가 정하고**,
-        모델이 해소 안 되는 쪽을 골라내서(상위30% 해소율 54.1% vs 전체 71.3%)
-        해소분만 보면 부풀려진다(백테스트 +12.0bp vs 라이브 −1.46bp).
-        """
-        closed = [r for r in ledger if r.get("bet", "cont") == bet]
-        rs = [r for r in closed if r.get("outcome") in ("cont", "fade")]
-        touts = [r for r in closed if r.get("outcome") == "timeout"]
-        wins = sum(1 for r in rs if (r["outcome"] == "cont") == (bet == "cont"))
-        live = [float(r["net_taker_bp"]) for r in closed
-                if isinstance(r.get("net_taker_bp"), (int, float))]
-        nb = [float(r["net_taker_bp"]) for r in rs
-              if isinstance(r.get("net_taker_bp"), (int, float))]
-        op = [q for q in positions if q.get("bet", "cont") == bet]
-        return {"open": len(op),
-                "open_dirs": [q.get("trade_dir") for q in op if q.get("trade_dir")],
-                # 띠 + 그 아래 시간 줄용(팔별). 다른 감지기와 같은 모양이라 프론트가 같은
-                # evenlySpacedBarTimes(latest_ts_utc, n, 5) 경로를 그대로 쓴다.
-                "tone_history": _masht_tone_history([*closed, *op], strip_end),
-                # ⭐판정 지표
-                "closed": len(closed), "timeouts": len(touts),
-                "resolve_rate": round(len(rs) / len(closed), 4) if closed else None,
-                "live_bp_mean": round(sum(live) / len(live), 2) if live else None,
-                "live_bp_sum": round(sum(live), 1) if live else None,
-                # 참고 (부풀려진 값)
-                "resolved": len(rs), "wins": wins,
-                "accuracy": round(wins / len(rs), 4) if rs else None,
-                "net_taker_bp_mean": round(sum(nb) / len(nb), 2) if nb else None,
-                "net_taker_bp_sum": round(sum(nb), 1) if nb else None}
-
-    n_cont = sum(1 for r in resolved if r.get("outcome") == "cont")
-    acc = (n_cont / len(resolved)) if resolved else None
-    net = [float(r["net_taker_bp"]) for r in resolved if isinstance(r.get("net_taker_bp"), (int, float))]
-    days = 0.0
-    started = state.get("started_utc")
-    if started:
-        try:
-            days = max((datetime.now(timezone.utc)
-                        - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
-        except (TypeError, ValueError):
-            days = 0.0
-    # ⚠️진입한 앵커는 skips 에 남지 않는다 -- skips[-1] 만 보면 "마지막 판정"이 낡는다.
-    #   진입/스킵/마감을 통틀어 가장 최근 결정을 고른다(사용자 지적: 라벨은 지속/되돌림 이진인데
-    #   화면이 보유 포지션만 보여주고 있었다).
-    def _bar(x):
-        return str(x.get("bar_utc") or "")
-    cands = [x for x in (skips + positions + ledger) if isinstance(x, dict) and x.get("p_cont") is not None]
-    last = max(cands, key=_bar) if cands else None
-    open_sides = [p.get("side") for p in positions]
-    return {
-        "available": True,
-        "started_utc": started,
-        # 띠의 오른쪽 끝(최근 확정 5분봉). 프론트가 이걸 기준으로 봉 시각을 역산한다.
-        "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z") if strip_end else None,
-        "days_running": round(days, 2),
-        "open_positions": len(positions),
-        # 앵커 측면(bottom/top)이 아니라 **포지션 방향**으로 준다 -- 바닥 앵커의 지속은 숏이다.
-        "open_dirs": ["short" if x == "bottom" else "long" for x in open_sides if x],
-        "closed_trades": len(ledger),
-        "resolved_trades": len(resolved),
-        "timeouts": sum(1 for r in ledger if r.get("outcome") == "timeout"),
-        "cont_hits": n_cont,
-        "accuracy": round(acc, 4) if acc is not None else None,
-        "net_taker_bp_mean": round(sum(net) / len(net), 2) if net else None,
-        "net_taker_bp_sum": round(sum(net), 1) if net else None,
-        "skips": len(skips),
-        "last_p_cont": (last or {}).get("p_cont"),
-        "last_bar_utc": (last or {}).get("bar_utc"),
-        "last_side": (last or {}).get("side"),
-        "last_entered": bool(last is not None and last.get("p_cont") is not None
-                             and meta.get("entry_threshold") is not None
-                             and last["p_cont"] >= meta["entry_threshold"]),
-        "threshold": meta.get("entry_threshold"),
-        "threshold_fade": meta.get("entry_threshold_fade"),
-        "breakeven_acc": meta.get("breakeven_acc"),
-        "measured": meta.get("measured", {}),
-        # 2026-09-08 되돌림 팔 추가 -- 카드가 둘이므로 팔별로 나눠 내려준다
-        "arms": {"cont": _arm("cont"), "fade": _arm("fade")},
-    }
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -2502,12 +2327,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
 
-    async def api_masht_anchor_shadow(request: web.Request) -> web.Response:
-        etag = make_etag("masht-anchor-shadow",
-                         file_signature(MASHT_ANCHOR_SHADOW_STATE_PATH))
-        return json_response(request, masht_anchor_shadow_payload(), etag)
-
-    app.router.add_get("/api/masht-anchor-shadow", api_masht_anchor_shadow)
 
     async def api_breakout_reversal_shadow(request: web.Request) -> web.Response:
         etag = make_etag("breakout-reversal-shadow",

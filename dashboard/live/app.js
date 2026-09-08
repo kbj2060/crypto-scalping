@@ -118,10 +118,6 @@ let evidenceHistoryBySignal = {};
 // 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
 let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
-let latestMashtAnchor = null;   // 2026-09-07 MASHT 앵커 방향 섀도우(표시 전용)
-let mashtAnchorLastFetchAt = 0;
-const MASHT_ANCHOR_POLL_MS = 60000;
-const API_MASHT_ANCHOR_URL = "/api/masht-anchor-shadow";
 // 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
 // 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
 let latestBreakoutRev = null;
@@ -1020,14 +1016,9 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
   // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
   v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
-  // 2026-09-07 MASHT 앵커 방향 섀도우 -- 섀도우 포지션이라 상태어는 "보유"다(규약 §1).
-  masht_anchor: { good: "지속 롱", bad: "지속 숏", warn: "혼재 보유", neutral: "미발동" },
-  masht_fade: { good: "되돌림 롱", bad: "되돌림 숏", warn: "혼재 보유", neutral: "미발동" },
-  // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
-  // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
-  // 2026-09-08 돌파/되돌림 -- MASHT 와 같은 <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
+  // 2026-09-08 돌파/되돌림 -- <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
   // ⚠️이 사전은 **톤이 키**라 한 톤에 한 라벨뿐이다. 실제 배지는 돌파/되돌림을 구분해
-  //   "되돌림 롱"(good)도 낼 수 있어 여기 값과 어긋난다 -- masht_anchor 도 같은 한계다.
+  //   "되돌림 롱"(good)도 낼 수 있어 여기 값과 어긋난다.
   //   이 카드는 `history: []` 라 띠가 그려지지 않아 실제 화면에는 드러나지 않는다.
   breakout_rev: { good: "돌파 롱", bad: "돌파 숏", warn: "혼재 보유", neutral: "미발동" },
   // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
@@ -1131,18 +1122,7 @@ function toggleSignalDetail(btn, key) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // ⚠️키는 subText 문자열이다(규약 §5-1) -- 위 masht_anchor 라벨을 바꾸면 여기도 같이 바꾼다.
-  masht_anchor: {
-    "지속 롱": "천장 앵커에서 **상승이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
-    "지속 숏": "바닥 앵커에서 **하락이 계속된다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
-    "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
-    "지속 약함": "지속 쪽이지만 진입 임계(0.5372)에 못 미쳐 들어가지 않았습니다.",
-    "되돌림 우세": "모델이 되돌림 쪽으로 기울었습니다. 이 카드(지속 팔)는 진입하지 않습니다 — 되돌림은 아래 별도 카드가 담당합니다.",
-    "미발동": "최근 앵커가 없습니다.",
-    "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
-    "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
-    "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
+  // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
   // 2026-09-08 돌파/되돌림. ⚠️키는 subText 문자열이다(규약 §5-1).
   breakout_rev: {
     "돌파 롱": "상승으로 발현한 뒤 **계속 오른다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
@@ -1154,30 +1134,6 @@ const MODEL_INDICATOR_MEANING = {
     "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
     "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
     "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
-  // 2026-09-08 되돌림 팔 (사용자 요청). ⚠️사전등록 기대치가 **음수**다 -- 카드에 명시한다.
-  masht_fade: {
-    "되돌림 롱": "바닥 앵커에서 **반등**에 걸어 가상 보유 중입니다. ⚠️이 팔은 워크포워드 실측 적중 52.31%로 손익분기 53.90%에 미달합니다.",
-    "되돌림 숏": "천장 앵커에서 **반락**에 걸어 가상 보유 중입니다. ⚠️이 팔은 워크포워드 실측 적중 52.31%로 손익분기 53.90%에 미달합니다.",
-    "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
-    "되돌림 약함": "되돌림 쪽이지만 진입 임계(0.5216)를 넘지 못해 들어가지 않았습니다.",
-    "지속 우세": "모델이 지속 쪽으로 기울었습니다 — 이 카드(되돌림 팔)는 진입하지 않습니다.",
-    "미발동": "최근 앵커가 없습니다.",
-    "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
-    "데이터 없음": "섀도우 원장이 아직 없습니다.",
-    "오류": "섀도우 상태를 읽지 못했습니다.",
-    "되돌림 우세": "모델이 되돌림 쪽으로 기울었습니다. 이 러너는 되돌림을 거래하지 않아 진입하지 않습니다.",
-    "미발동": "최근 앵커가 없습니다.",
-    "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
-    "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
-    "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
-  v_rebound: {
-    "웜업": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
-    "데이터 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "되돌림 롱": "TabPFN이 '바닥이고 **되돌림(반등)**이 온다'로 채점했어요 — 30분 안 1.5×ATR 상승 판정. 목표 도달이나 60분 경과까지 유지돼요. ⚠️같은 봉에서 '앵커 방향'은 지속(하락 계속)을 말할 수 있어요 — 둘은 반대 주장이에요.",
-    "되돌림 숏": "TabPFN이 '천장이고 **되돌림(반락)**이 온다'로 채점했어요 — 30분 안 1.5×ATR 하락 판정. 목표 도달이나 60분 경과까지 유지돼요. ⚠️같은 봉에서 '앵커 방향'은 지속(상승 계속)을 말할 수 있어요 — 둘은 반대 주장이에요.",
-    "미발동": "지금 반등/반전을 말할 근거가 없어요 — 대부분의 봉이 여기고(발동은 약 5%), '반대로 간다'는 뜻이 아니에요.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
@@ -1226,13 +1182,6 @@ const MODEL_INDICATOR_DETAIL = {
     "정확도는 반드시 그 창의 귀무와 함께 읽어야 합니다.\n" +
     "⭐커버리지 상한을 두지 않습니다. 전 트리거에 판정을 내므로 '어느 사건이 해소되는가'를 결과가 정하는 " +
     "편향이 구조상 생기지 않습니다.",
-  masht_fade: "[규칙] 지속 팔과 **같은 모델·같은 앵커·같은 청산**입니다. 다른 것은 진입 조건과 방향뿐입니다 — 지속 확률이 **0.5216 이하**(표본외 예측 하위 30%)일 때, 지속의 **반대 방향**으로 가상 진입합니다. 바닥 앵커면 반등(롱), 천장 앵커면 반락(숏).\n" +
-    "[⚠️왜 기대치가 음수인가] 워크포워드 실측에서 두 팔은 **대칭이 아닙니다**. 지속 팔은 적중 59.69% [54.18, 65.08]로 건당 +11.6bp인데, 되돌림 팔은 **52.31% [47.01, 57.38]**로 건당 **−3.2bp**입니다. 손익분기가 53.90%인데 그 아래입니다.\n" +
-    "[그런데 왜 돌리나] 되돌림 팔에도 **정보는 있습니다** — 기저 되돌림률 47.28%를 52.31%로 올리고 무작위 진입 귀무를 넘습니다(p=0.018). 다만 그 정보량이 비용을 못 넘습니다. \"모델의 정보가 한쪽 꼬리에만 있다\"는 가설을 전방 데이터로 검정하려고 가동합니다. **주문은 내지 않습니다.**",
-  masht_anchor: "[규칙] 증거신호 8종 중 **3종 이상이 3봉(15분) 안에 발동**하고 마지막 발동이 그 봉이면 앵커로 봅니다(GAP 12봉 중복제거). 그 앵커 봉을 포함한 **48봉 창 × 8채널**(로그수익·ATR정규화 경로·DeMarker·%K백분위·테이커델타z·3봉수익z·칼만편차z·고저폭)을 만들고, MultiRocket 2,016열 + Hydra 768열 = **2,784열**의 랜덤 합성곱 피쳐로 바꿔 TabPFN(사전학습 표형 파운데이션 모델, in-context)에 넣습니다. 문맥은 3,555개 앵커(2024-01-04~2026-07-29)로 동결돼 있고 라이브에서 갱신하지 않습니다.\n" +
-    "[진입] 지속 확률이 **0.5372** 이상이면(표본외 예측의 상위 30%) 지속 방향으로 다음 봉 시가에 가상 진입합니다 — 바닥 앵커면 하락 계속(숏), 천장 앵커면 상승 계속(롱). 청산은 ±1% 대칭 배리어를 1분봉 first-touch로 판정하고 48봉(4시간)이면 시간청산합니다. 트레일링은 쓰지 않습니다.\n" +
-    "[근거] 월 1회 재학습 walk-forward(각 예측이 그 시점 이전 데이터만 사용)에서 상위 30% 진입 정확도 **59.88% [53.94%, 64.56%]**, 날 블록 셔플 귀무 p=0.017, 건당 +12.0bp입니다. 비용 왕복 7.8bp·±1% 배리어에서 **손익분기 정확도는 53.90%**입니다.\n" +
-    "[한계] ⚠️이 후보는 87개 셀에서 고른 Top-1이라 승자의 저주가 있습니다 — 기대치는 59.88%가 아니라 56~57% 정도로 봐야 합니다. 안 쓴 31일(2026-06-30~07-31) 전방 확인에서는 상위30% 64.00%가 나왔지만 n=25라 **무작위 진입 귀무를 못 넘었고(p=0.282)**, 그 구간은 기저(항상 지속)가 57.14%로 손익분기 위여서 아무것도 고르지 않는 전략이 총합에서 더 벌었습니다. 확증이 아니라 검증 중인 후보입니다.",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
     "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
@@ -1276,8 +1225,6 @@ const MODEL_INDICATOR_DETAIL = {
 const SIGNAL_HORIZON = {
   // -- model indicators --
   breakout_rev: { text: "1시간", title: "발현(트리거) 시점부터 ±0.25% 배리어를 1분봉 first-touch 로 판정하고, 12봉(1시간) 안에 어느 쪽도 닿지 않으면 12봉 뒤 종가 부호로 정합니다." },
-  masht_fade: { text: "4시간", title: "지속 팔과 같은 청산 규약입니다 — ±1% 배리어를 1분봉 first-touch로 판정하고 48봉(4시간) 시간청산." },
-  masht_anchor: { text: "4시간", title: "진입 후 ±1% 배리어를 1분봉 first-touch로 판정하고, 48봉(4시간) 안에 어느 쪽도 닿지 않으면 시간청산합니다. 라벨 학습 규약과 같은 지평입니다." },
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
   liq_direction: { text: "상태", title: "고정 예측 시간창 없이 매분 갱신되는 현재 청산 방향압력 -- 5·15분 지평 IC는 유의했으나(탐색적), 손익 결합 검정(8개 지평)은 전부 순손실" },
@@ -1311,8 +1258,6 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
-  masht_anchor: "modelChipMashtAnchor",   // 2026-09-07 상단 요약
-  masht_fade: "modelChipMashtFade",      // 2026-09-08 되돌림 팔
   breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
@@ -1339,7 +1284,7 @@ const MODEL_CHIP_IDS = {
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
-  "masht_anchor", "masht_fade", "breakout_rev",
+"breakout_rev",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
@@ -2262,20 +2207,6 @@ async function refreshEvidenceSignalsProvisional() {
   }
 }
 
-async function refreshMashtAnchor() {
-  const now = Date.now();
-  if (now - mashtAnchorLastFetchAt < MASHT_ANCHOR_POLL_MS) return;
-  mashtAnchorLastFetchAt = now;
-  try {
-    const res = await fetch(API_MASHT_ANCHOR_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`masht anchor ${res.status}`);
-    latestMashtAnchor = await res.json();
-  } catch (error) {
-    console.error("MASHT anchor shadow fetch error:", error);
-    latestMashtAnchor = { error: "fetch_failed" };
-  }
-}
-
 async function refreshBreakoutRev() {
   const now = Date.now();
   if (now - breakoutRevLastFetchAt < BREAKOUT_REV_POLL_MS) return;
@@ -2343,130 +2274,6 @@ function breakoutRevIndicatorItem() {
                       "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]
     .filter(Boolean).join("\n");
   return { ...base, tone, subText, stateTitle };
-}
-
-// ── MASHT 앵커 방향 섀도우 (2026-09-07) ────────────────────────────────────────────────
-// 규약: 라벨 어휘 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 데이터 줄 없음 §4
-// (숫자는 배지 툴팁 stateTitle 로만 -- 사용자가 09-06에 제목 밑 데이터 줄 제거를 요청했다)
-// ── MASHT 되돌림 팔 (2026-09-08, 사용자 요청) ─────────────────────────────────────────────
-// 지속 팔과 같은 모델·앵커·청산이고 진입 조건과 방향만 반대다.
-// ⚠️사전등록 기대치가 음수다(적중 52.31% < 손익분기 53.90%) -- 라벨·설명·자세히에 전부 명시한다.
-// 앵커 두 카드의 띠 + 그 아래 시간 줄. 서버가 팔별로 arms.<bet>.tone_history 를, 공통으로
-// latest_ts_utc 를 준다 -- 다른 감지기(basis/liq_direction)와 같은 모양이라 시각 역산도 같다.
-// ⚠️이 배열이 비면 lastSegmentRangeLabel 이 "-"를 돌려 그 행만 시간 줄이 사라진다
-//   (2026-09-08 사용자 신고 "시간 게이지가 텍스트로 표시가 안 된다").
-function mashtStrip(bet) {
-  const p = latestMashtAnchor || {};
-  const history = (((p.arms || {})[bet] || {}).tone_history) || [];
-  return { history, times: evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5) };
-}
-
-function mashtFadeIndicatorItem() {
-  const base = { key: "masht_fade", label: "앵커 되돌림(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
-    derivedTitle: "지속 팔과 같은 모델의 **반대 꼬리**입니다. 지속 확률이 하위 30%(≤0.5216)일 때"
-      + " 지속의 반대 방향으로 가상 진입합니다.\n\n"
-      + "⚠️워크포워드 실측 적중 52.31% [47.01, 57.38] · 건당 −3.2bp 로 **손익분기 53.90% 미달**입니다."
-      + " 기저(47.28%)보다는 높고 무작위 진입 귀무도 넘지만(p=0.018) 비용을 못 넘습니다."
-      + " '모델 정보가 한쪽 꼬리에만 있다'를 전방 검정하려고 가동합니다. 주문은 내지 않습니다.",
-    ...mashtStrip("fade") };
-  const p = latestMashtAnchor;
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
-  const m = p.measured || {};
-  const fa = (m.fade_arm || {});
-  const refText = fa.top30_acc != null
-    ? `워크포워드 ${(fa.top30_acc * 100).toFixed(2)}% (손익분기 ${((p.breakeven_acc ?? 0.539) * 100).toFixed(2)}%)` : "";
-  if (!p.available) return { ...base, tone: "neutral", subText: "데이터 없음",
-                             stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
-  const arm = (p.arms && p.arms.fade) || {};
-  const dirs = arm.open_dirs || [];
-  const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  const lp = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  const thrF = p.threshold_fade != null ? Number(p.threshold_fade) : 0.521566;
-  const tone = arm.open ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
-  let subText;
-  if (arm.open) subText = hasL && hasS ? "혼재 보유" : hasS ? "되돌림 숏" : "되돌림 롱";
-  else if (lp == null) subText = "미발동";
-  else if (lp <= thrF) subText = "되돌림 약함";     // 임계 아래지만 보유 없음(마감됨)
-  else if (lp < 0.5) subText = "되돌림 약함";
-  else subText = "지속 우세";
-  const days = Number(p.days_running || 0);
-  const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  const liveText = arm.live_bp_mean != null
-    ? `라이브 건당 ${arm.live_bp_mean > 0 ? "+" : ""}${arm.live_bp_mean.toFixed(2)}bp (마감 ${arm.closed}, 시간청산 ${arm.timeouts})`
-    : "마감 거래 없음";
-  const accText = arm.accuracy != null
-    ? `참고·해소분 적중 ${(arm.accuracy * 100).toFixed(1)}% (${arm.wins}/${arm.resolved})` : "";
-  const bpText = "";
-  const stateTitle = [
-    `마지막 앵커 p ${lp != null ? lp.toFixed(4) : "-"} / 되돌림 임계 ≤${thrF.toFixed(4)} · 보유 ${arm.open || 0}`,
-    `${liveText}${guard}`,
-    accText,
-    "판정: 라이브 건당 bp · CI 하한 > 0 · 사전등록 기대 **−3.2bp**",
-    "⚠️두 팔 다 기대치 음수 · 주문 없음 -- 가상 원장만",
-  ].filter(Boolean).join("\n");
-  const proba = lp != null ? 1 - lp : null;      // 되돌림 확률
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true };
-}
-
-function mashtAnchorIndicatorItem() {
-  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
-    derivedTitle: "증거신호 3종 이상이 겹친 앵커에서 48봉 창을 랜덤 합성곱(MultiRocket+Hydra)으로 2,784열 피쳐로 바꿔"
-      + " TabPFN 에 넣고, 지속(추세 계속) 확률이 임계 이상이면 그 방향으로 가상 진입합니다."
-      + " 2026-09-07부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
-      + "⚠️87개 모델·피쳐 조합에서 고른 Top-1이라 승자의 저주가 있습니다. 워크포워드 측정 59.88%를 그대로"
-      + " 기대하면 안 되고 56~57% 정도로 봐야 합니다. 손익분기 정확도는 53.90%입니다.",
-    ...mashtStrip("cont") };
-  const p = latestMashtAnchor;
-  // 상태 어휘는 감지기 공통 네 단어뿐이다(규약 §1).
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
-  const thr = p.threshold != null ? Number(p.threshold) : null;
-  const be = p.breakeven_acc != null ? Number(p.breakeven_acc) : 0.539;
-  const m = p.measured || {};
-  const lr = m.live_realistic || {};
-  const refText = lr.cont_bp != null
-    ? `사전등록 라이브 ${lr.cont_bp > 0 ? "+" : ""}${lr.cont_bp}bp [${lr.cont_ci ? lr.cont_ci.join(", ") : "-"}]` : "";
-  if (!p.available) {
-    return { ...base, tone: "neutral", subText: "데이터 없음",
-             stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
-  }
-  const dirs = p.open_dirs || [];
-  const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  // 진입하지 않은 판정(지속 약함·되돌림 우세)은 **회색**이다 -- 거래하지 않으므로 방향 색을 주지 않는다.
-  const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
-  // 2026-09-08: 이 모델의 라벨은 **지속(continuation)** 이다 -- 진입 방향(롱/숏)은 앵커 측면에서 나온다.
-  // 바닥 앵커의 지속 = 하락 계속 = 숏. 라벨을 주장에 맞춰 "지속 롱/숏" 으로 쓴다.
-  // 라벨은 지속/되돌림 이진이다. 보유 중이면 그 방향을, 아니면 **마지막 앵커의 판정**을 보여준다.
-  const lp = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  let subText;
-  if (p.open_positions) subText = hasL && hasS ? "혼재 보유" : hasS ? "지속 숏" : "지속 롱";
-  else if (lp == null) subText = "미발동";
-  else if (lp >= 0.5) subText = "지속 약함";
-  else subText = "되돌림 우세";
-  // 표본 가드: 일수 기준(규약 §4). 30일 계측 전에는 수치를 성과로 읽지 않는다.
-  const days = Number(p.days_running || 0);
-  const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  // 🔴2026-09-08 판정 잣대 교체: 헤드라인은 **라이브 건당 bp**(시간청산 포함).
-  // 해소분 적중률은 결과 선택으로 부풀려진다(백테스트 +12.0bp vs 라이브 −1.46bp).
-  const armC = (p.arms && p.arms.cont) || {};
-  const liveText = armC.live_bp_mean != null
-    ? `라이브 건당 ${armC.live_bp_mean > 0 ? "+" : ""}${armC.live_bp_mean.toFixed(2)}bp (마감 ${armC.closed}, 시간청산 ${armC.timeouts})`
-    : "마감 거래 없음";
-  const accText = armC.accuracy != null
-    ? `참고·해소분 적중 ${(armC.accuracy * 100).toFixed(1)}% (${armC.wins}/${armC.resolved}, 해소율 ${armC.resolve_rate != null ? (armC.resolve_rate * 100).toFixed(0) : "-"}%)`
-    : "";
-  const bpText = "";
-  const lastText = p.last_p_cont != null
-    ? `마지막 앵커 p ${Number(p.last_p_cont).toFixed(4)} / 임계 ${thr != null ? thr.toFixed(4) : "-"}`
-    : "앵커 대기";
-  const stateTitle = [`${lastText} · 보유 ${p.open_positions}`,
-                      `${liveText}${guard}`,
-                      accText,
-                      "판정: 라이브 건당 bp · CI 하한 > 0 · 사전등록 기대 **−1.46bp** [−7.53, +5.93]",
-                      "⚠️해소분 59.88%/+12.0bp 는 결과선택으로 부풀려진 값 — 판정에 쓰지 않음",
-                      "⚠️주문 없음 -- 가상 원장만"].filter(Boolean).join("\n");
-  // 확률 개념이 있으므로 게이지 자리를 준다(규약 §3). 미발동이어도 자리를 지킨다.
-  const proba = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true };
 }
 
 async function refreshVReboundSignal() {
@@ -2892,7 +2699,6 @@ function setupPageTabs() {
       evidenceLastFetchAt = 0; refreshEvidenceSignals();
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
-      mashtAnchorLastFetchAt = 0; refreshMashtAnchor();
       breakoutRevLastFetchAt = 0; refreshBreakoutRev();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
@@ -3912,8 +3718,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
-      ethOnlyIndicator(mashtAnchorIndicatorItem()),   // 2026-09-07 MASHT 앵커 방향 섀도우
-      ethOnlyIndicator(mashtFadeIndicatorItem()),    // 2026-09-08 MASHT 되돌림 팔
       ethOnlyIndicator(breakoutRevIndicatorItem()),  // 2026-09-08 돌파/되돌림
     ], "snapSpecializedSignalList", { forceMeter: true });
 
@@ -3960,7 +3764,6 @@ async function tick() {
       refreshEvidenceSignals();
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
-      refreshMashtAnchor();          // 2026-09-07 MASHT 앵커 섀도우
       refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
