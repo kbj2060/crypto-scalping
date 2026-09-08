@@ -2237,12 +2237,15 @@ function breakoutRevIndicatorItem() {
       + "⚠️창마다 클래스 균형이 달라 원시 정확도끼리 비교하면 안 됩니다.",
     history: [], times: [] };
   const p = latestBreakoutRev;
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
+  // 규약 §3: forceMeter 목록은 **상태와 무관하게 같은 모양**이어야 한다. 운영 상태에서
+  // probaSlot 을 빼면 게이지 줄이 사라져 행 높이가 달라진다(V자가 "미발동이어도 자리를 지킨다"와 같은 이유).
+  if (!p || p.error) return { ...base, tone: "neutral", probaSlot: true, proba: null,
+                              subText: p && p.error ? "오류" : "웜업" };
   const pr = p.prereg || {}; const pa = pr.acc || {}; const pn = pr.null || {};
   const refText = pa.OOS != null
     ? `사전등록 OOS ${(pa.OOS * 100).toFixed(1)}% (귀무 ${(pn.OOS * 100).toFixed(1)}%)` : "";
   if (!p.available) {
-    return { ...base, tone: "neutral", subText: "데이터 없음",
+    return { ...base, tone: "neutral", probaSlot: true, proba: null, subText: "데이터 없음",
              stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
   }
   const dirs = p.open_dirs || [];
@@ -2283,7 +2286,27 @@ function breakoutRevIndicatorItem() {
                       `${refText} · 전건 판정(커버리지 상한 없음)`,
                       "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]
     .filter(Boolean).join("\n");
-  return { ...base, tone, subText, stateTitle };
+  // 미터 칸(규약 §3): 상태 → 게이지 → 수치. 셋 다 채워야 다른 감지기와 모양이 맞는다.
+  // 게이지는 **지금 배지가 주장하는 쪽의 확률**이다(돌파면 p, 되돌림이면 1−p) -- 되돌림인데
+  // 44% 로 그리면 배지와 그림이 서로 다른 말을 한다.
+  // ⚠️배지가 "미발동"인데 게이지·수치가 남아 있으면 서로 다른 말을 한다 -- 보유 중도 아니고
+  //   직전 판정도 오래됐으면(2시간 초과) 셋을 함께 비운다.
+  const showNum = Boolean(p.open_positions) || fresh;
+  const pb = showNum && last && last.p_breakout != null ? Number(last.p_breakout) : null;
+  const proba = pb == null ? null : (pb > 0.5 ? pb : 1 - pb);
+  // 수치 줄: 보유 중이면 남은 지평, 유휴면 직전 판정 경과. 확률이 아니므로 meter-price 자리다.
+  let meterNote = null, meterNoteTitle = "";
+  if (showNum && ageMin != null) {
+    const a = Math.round(ageMin);
+    if (p.open_positions) {
+      meterNote = `보유 ${Math.min(a, 60)}/60분`;
+      meterNoteTitle = "발현 시점부터 경과한 시간 / 시간청산까지의 지평(1시간). 배리어 ±0.25%에 닿으면 그 전에 끝납니다.";
+    } else {
+      meterNote = a < 60 ? `${a}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`;
+      meterNoteTitle = "가장 최근 발현으로부터 경과한 시간입니다. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.";
+    }
+  }
+  return { ...base, tone, subText, stateTitle, proba, probaSlot: true, meterNote, meterNoteTitle };
 }
 
 async function refreshVReboundSignal() {
