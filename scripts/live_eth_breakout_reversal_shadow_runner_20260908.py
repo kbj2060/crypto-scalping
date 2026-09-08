@@ -139,7 +139,12 @@ def _strategy_fields(meta, entry, sgn, p, conf) -> dict[str, Any]:
     if not st:
         return {}
     side = 1.0 if ((p > 0.5) == (sgn > 0)) else -1.0     # 돌파면 발현 방향, 되돌림이면 반대
+    # ⭐2026-09-08 게이트 제거(사용자 지정): gate_threshold=0.0 이라 전건이 통과한다.
+    #   `strat_conf` 를 함께 남기므로 사후에 **어떤 임계로도** 재계산할 수 있다 --
+    #   사전등록 임계는 meta.strategy.gate_threshold_prereg 에 보존돼 있다.
     return {"strat_id": st["id"], "strat_gate": bool(conf >= st["gate_threshold"]),
+            "strat_conf": float(conf),
+            "strat_gate_prereg": bool(conf >= st.get("gate_threshold_prereg", st["gate_threshold"])),
             "strat_side": "long" if side > 0 else "short",
             "strat_tp_px": entry * (1 + side * st["tp_bp"] / 1e4),
             "strat_sl_px": entry * (1 - side * st["sl_bp"] / 1e4),
@@ -382,19 +387,30 @@ def report() -> int:
           f"(사전등록 VAL {pr['acc']['VAL']:.4f} / OOS {pr['acc']['OOS']:.4f} / HOLD {pr['acc']['HOLDOUT_SPENT']:.4f})")
     print(f"   ⚠️셔플 귀무 {pr['null']['VAL']:.4f}~{pr['null']['OOS']:.4f} -- 정확도는 이것과 함께 읽는다")
     print(f"   해소 내역 {dict(R['outcome'].value_counts())}")
-    if "strat_gate" in R.columns and "strat_net_bp" in R.columns:
-        S = R[(R["strat_gate"] == True) & R["strat_net_bp"].notna()]
-        st = meta.get("strategy", {}); pr = (st.get("prereg") or {}).get("OOS", {})
-        print(f"\n   ⭐사전등록 매매규칙 {st.get('id')} "
+    if "strat_net_bp" in R.columns:
+        st = meta.get("strategy", {}); ng = st.get("prereg_nogate") or {}
+        pr = (st.get("prereg") or {}).get("OOS", {})
+        A = R[R["strat_net_bp"].notna()]
+        print(f"\n   ⭐매매규칙 {st.get('id')} "
               f"(TP{st.get('tp_bp')}/SL{st.get('sl_bp')}·비용{st.get('cost_bp')}bp·손익분기승률 85.7%)")
-        if len(S):
-            print(f"      게이트 통과 {len(S)}건/{len(R)}건 (커버 {len(S)/len(R)*100:.1f}% · 사전등록 28.0%)")
-            print(f"      건당 {S['strat_net_bp'].mean():+.2f}bp (사전등록 {pr.get('bp_per_trade', 0):+.2f}) · "
-                  f"승률 {S['strat_win'].mean()*100:.1f}% (사전등록 {pr.get('winrate', 0)*100:.1f}%) · "
-                  f"일 {S['strat_net_bp'].sum()/days:+.2f}bp (사전등록 {pr.get('bp_per_day', 0):+.2f})")
-            print(f"      해소 {dict(S['strat_outcome'].value_counts())}")
-        else:
-            print("      게이트 통과 건 아직 없음")
+        if st.get("gate_threshold", 0) <= 0:
+            print(f"      ⚠️게이트 제거됨(사용자 지정) -- 전 트리거 기록. "
+                  f"백테스트 기대 {ng.get('bp_per_trade', 0):+.2f}bp/건 · {ng.get('bp_per_day', 0):+.1f}bp/일")
+        if len(A):
+            print(f"      [전건] {len(A)}건 · 건당 {A['strat_net_bp'].mean():+.2f}bp "
+                  f"(백테스트 {ng.get('bp_per_trade', 0):+.2f}) · 승률 {A['strat_win'].mean()*100:.1f}% "
+                  f"(백테스트 {ng.get('winrate', 0)*100:.1f}%) · 일 {A['strat_net_bp'].sum()/days:+.2f}bp")
+            print(f"             해소 {dict(A['strat_outcome'].value_counts())}")
+        # 사전등록 부분집합은 계속 따로 낸다 -- 게이트를 지워도 그 질문은 살아 있다
+        if "strat_gate_prereg" in R.columns:
+            S = A[A["strat_gate_prereg"] == True]
+            thr = st.get("gate_threshold_prereg")
+            print(f"      [사전등록 부분집합 |p-.5|≥{thr:.4f}] {len(S)}건/{len(A)}건 "
+                  f"(커버 {len(S)/max(len(A),1)*100:.1f}% · 사전등록 28.0%)")
+            if len(S):
+                print(f"             건당 {S['strat_net_bp'].mean():+.2f}bp (사전등록 {pr.get('bp_per_trade', 0):+.2f}) · "
+                      f"승률 {S['strat_win'].mean()*100:.1f}% · 일 {S['strat_net_bp'].sum()/days:+.2f}bp "
+                      f"(사전등록 {pr.get('bp_per_day', 0):+.2f})")
     for t in ("강", "중", "약", "미약"):
         q = R[R["tier"] == t]
         if len(q):
