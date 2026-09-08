@@ -1007,8 +1007,15 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
         equity.append({"ts": row.get("exit_utc"), "cum_bp": round(run, 2)})
 
     # ── 사람이 바로 읽을 수 있는 해석값 (대시보드가 원시 숫자만 나열하지 않도록) ──
-    # 목표 표본: HOLDOUT 빈도(13.18건/일) x 2주. 이만큼은 모여야 백테스트와 대조가 의미 있다.
-    HOLDOUT_EXP_BP, HOLDOUT_PER_DAY = 6.09, 13.18
+    # ⚠️2026-09-08 기준선 갱신. 이전 값(+6.09bp / 13.18건 / 승률 78.0%)은 **legacy `sim_exit`**
+    # (걸 수 없는 자리에 트레일 스톱을 놓고 그 가격에 체결시키던 결함판)으로 계산돼 무효다.
+    # 2026-09-07 수정 회계(`infeasible="exit"`)로 **같은 창(2026-04~08)·같은 서빙 규격**
+    # (동결 컨텍스트 3시드 p>=0.8221 · 셀 5.0/1.5/0.1 · 상한 200봉 · 동시보유 5 · 비용 10bp)을
+    # 재계산한 값으로 교체했다. 근거: docs/experiments/eth_v_rebound_econ_hold_cap_removal_20260908.md
+    # ⇒ 이 후보의 백테스트 기대값은 **음수**다. 카드가 묻는 것도 "백테스트만큼 버는가"가 아니라
+    #   "백테스트가 예고한 손실과 일치하는가"로 바뀐다.
+    # 목표 표본: 백테스트 빈도(12.41건/일) x 2주.
+    HOLDOUT_EXP_BP, HOLDOUT_PER_DAY = -8.42, 12.41
     target = int(round(HOLDOUT_PER_DAY * 14))
     days = 0.0
     started = state.get("started_utc")
@@ -1024,19 +1031,20 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
                    "detail": f"{n}건 청산 · 판단에는 {target}건 정도가 필요합니다"}
     elif exp is None:
         verdict = {"tone": "neutral", "headline": "기록 없음", "detail": ""}
+    elif exp <= HOLDOUT_EXP_BP * 2:
+        verdict = {"tone": "bad", "headline": "백테스트보다 더 나쁩니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)의 "
+                             f"{exp / HOLDOUT_EXP_BP:.1f}배 손실"}
+    elif exp <= HOLDOUT_EXP_BP:
+        verdict = {"tone": "bad", "headline": "백테스트가 예고한 손실대로입니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)"}
     elif exp <= 0:
-        verdict = {"tone": "bad", "headline": "백테스트에 미달합니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp"}
-    elif exp < HOLDOUT_EXP_BP * 0.5:
-        verdict = {"tone": "warn", "headline": "백테스트보다 약합니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대의 "
-                             f"{exp / HOLDOUT_EXP_BP * 100:.0f}% 수준"}
-    elif exp <= HOLDOUT_EXP_BP * 1.5:
-        verdict = {"tone": "good", "headline": "백테스트와 비슷합니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp"}
+        verdict = {"tone": "bad", "headline": "손실이지만 백테스트보다는 낫습니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)"}
     else:
-        verdict = {"tone": "warn", "headline": "백테스트보다 지나치게 좋습니다",
-                   "detail": f"건당 {exp:+.2f}bp — 계측이 느슨하지 않은지 먼저 의심할 것"}
+        verdict = {"tone": "warn", "headline": "백테스트(손실 기대)와 어긋납니다",
+                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계). "
+                             f"표본이 작거나 계측이 느슨하지 않은지 먼저 의심할 것"}
 
     return {
         "started_utc": state.get("started_utc"),
@@ -1085,9 +1093,14 @@ def v_rebound_econ_shadow_payload() -> dict[str, Any]:
             }
             for r in ledger[-8:]
         ],
-        "backtest_reference": {"oos_exp_bp": 7.98, "holdout_exp_bp": 6.09,
-                               "holdout_win_rate": 0.780, "holdout_payoff": 0.346,
-                               "holdout_trades_per_day": 13.18},
+        # 2026-09-08 갱신 -- 전부 수정 회계(`infeasible="exit"`) 재계산값, 동시보유 5 순차 포트폴리오.
+        # OOS 2026-01~03 / HOLDOUT 2026-04~08, 라이브와 같은 3시드 서빙 규격.
+        "backtest_reference": {"oos_exp_bp": -9.05, "holdout_exp_bp": -8.42,
+                               "holdout_win_rate": 0.698, "holdout_payoff": 0.306,
+                               "holdout_trades_per_day": 12.41,
+                               "accounting": "fixed_20260907",
+                               "note": "2026-09-07 스톱 회계 수정본으로 재계산 "
+                                       "(이전 +6.09bp/13.18건/78.0%는 결함 회계 값)"},
         "days_running": days,
         "trades_per_day": round(n / days, 2) if (n and days > 0) else None,
         "target_trades": target,

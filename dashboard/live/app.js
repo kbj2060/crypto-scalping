@@ -2647,10 +2647,14 @@ function renderVrebEconShadow(p) {
   }
 
   // ③ 핵심 3지표를 백테스트와 나란히 -- 비교 대상 없이 숫자만 보면 해석이 안 된다
-  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : a > 0 ? "warn" : "bad");
+  // ⚠️2026-09-08: 백테스트 기준선이 **음수**로 바뀌었다(스톱 회계 수정). "기준선보다 높다=좋다"가
+  // 더는 성립하지 않으므로 기대값 타일은 **절대 부호**로 판정한다 -- 손실이면 bad, 양수면
+  // "백테스트(손실 기대)와 어긋남"이라 warn이다. 승률만 기준선과 비교한다(일치성 점검).
+  const expTone = (a) => (a == null ? "neutral" : a > 0 ? "warn" : "bad");
+  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : "warn");
   const cards = [
     { name: "건당 기대값", val: n ? bp(p.exp_bp) : "-",
-      tone: n ? cardTone(p.exp_bp, ref.holdout_exp_bp) : "neutral",
+      tone: n ? expTone(p.exp_bp) : "neutral",
       ref: `백테스트 ${bp(ref.holdout_exp_bp)}` },
     { name: "승률", val: n ? pct(p.win_rate) : "-",
       tone: n ? cardTone(p.win_rate, ref.holdout_win_rate) : "neutral",
