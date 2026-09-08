@@ -734,6 +734,17 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
+def _age_min(ts: Any) -> float | None:
+    """UTC 문자열 -> 지금까지 경과 분. 원장은 tz 표기가 없는 UTC 문자열이다."""
+    try:
+        dt = datetime.fromisoformat(str(ts).replace(" ", "T"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1)
+
+
 def breakout_reversal_shadow_payload() -> dict[str, Any]:
     """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -795,7 +806,8 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
                          for k in ("cont", "fade", "timeout")},
             "gross_bp_mean": round(sum(gross) / len(gross), 2) if gross else None,
             "by_tier": tiers,
-            "last": ({"trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
+            "last": ({"age_min": _age_min(last.get("trigger_utc")),
+                      "trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
                       "dir_up": bool(last.get("dir_up")), "call": last.get("call"),
                       "p_breakout": last.get("p_breakout"), "tier": last.get("tier"),
                       "trig_min": last.get("trig_min"),

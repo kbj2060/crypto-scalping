@@ -1130,7 +1130,9 @@ const MODEL_INDICATOR_MEANING = {
     "되돌림 롱": "하락으로 발현했지만 **되돌아온다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
     "되돌림 숏": "상승으로 발현했지만 **되돌아온다**에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
     "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
-    "미발동": "발현(15분 안 ±0.75×ATR)이 아직 없습니다.",
+    "직전 돌파": "지금은 보유 중이 아니고, 가장 최근 판정이 **돌파**였습니다. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "직전 되돌림": "지금은 보유 중이 아니고, 가장 최근 판정이 **되돌림**이었습니다. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "미발동": "2시간 넘게 발현(15분 안 ±0.75×ATR)이 없습니다.",
     "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
     "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
     "오류": "섀도우 상태를 읽지 못했습니다.",
@@ -2248,16 +2250,24 @@ function breakoutRevIndicatorItem() {
   const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
   const calls = p.open_calls || [];
   const claim = calls.length && calls.every((c) => c === calls[0]) ? calls[0] : null;
+  const last = p.last || null;
+  // ⭐라벨 배리어(±0.25%)가 ATR 의 ~1.7배라 **중앙값 5분**에 해소된다 -- 하루 22건이 발동해도
+  //   포지션이 열려 있는 시간은 24시간 중 18%뿐이다. 보유 중일 때만 보여주면 82% 를 "미발동"으로
+  //   덮어버려 "신호가 안 뜬다"로 읽힌다(2026-09-08 사용자 신고). 그래서 유휴일 때는
+  //   **직전 판정**을 회색으로 보여준다. 2시간이 지나면 그때 비로소 "미발동"이다.
+  const ageMin = last && last.age_min != null ? Number(last.age_min) : null;
+  const fresh = ageMin != null && ageMin <= 120;
   let subText;
-  if (!p.open_positions) subText = "미발동";
-  else if (hasL && hasS) subText = "혼재 보유";
-  else subText = `${claim || "돌파"} ${hasS ? "숏" : "롱"}`;
+  if (p.open_positions) subText = hasL && hasS ? "혼재 보유" : `${claim || "돌파"} ${hasS ? "숏" : "롱"}`;
+  else if (fresh && last.call) subText = `직전 ${last.call}`;
+  else subText = "미발동";
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  const last = p.last || null;
   const lastText = last
-    ? `마지막 발현 ${String(last.trigger_utc || "").slice(5, 16)} ${last.dir_up ? "상승" : "하락"}`
-      + `(${last.trig_min}분) → ${last.call} p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
+    ? `마지막 발현 ${String(last.trigger_utc || "").slice(5, 16)}`
+      + `${ageMin != null ? `(${ageMin < 60 ? `${Math.round(ageMin)}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`})` : ""}`
+      + ` ${last.dir_up ? "상승" : "하락"}(${last.trig_min}분) → ${last.call}`
+      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
     : "발현 대기";
   const ledText = p.closed
     ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
