@@ -46,8 +46,18 @@ import retest_omega4_6_1_extended_oos_20260706 as retest  # noqa: E402
 from replay_omega4_6_1_greedy_router_20260706 import greedy_replay, prepare_component  # noqa: E402
 
 WIDE24_DIR = ROOT / "data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530"
-CUT_DIR = ROOT / "data/ensemble/supervised/omega461_regimegbm_cut2509_20260909"
-CUT_PREFIX = "regime3_s12k3_cut2509_"
+# 후보 arm 은 argv 로 고른다:
+#   (기본) s12k3   -- S12_K3 라벨 + GBM   (라벨과 모델급을 동시에 바꾼 arm)
+#   balgbm         -- balancedish 라벨 유지 + GBM (모델급만 바꾼 arm, 라벨 교란 제거)
+_ARM = sys.argv[1] if len(sys.argv) > 1 else "s12k3"
+_ARMS = {
+    "s12k3": ("data/ensemble/supervised/omega461_regimegbm_cut2509_20260909", "regime3_s12k3_cut2509_"),
+    "balgbm": ("data/ensemble/supervised/omega461_balgbm_cut2509_20260909", "regime3_balgbm_cut2509_"),
+}
+if _ARM not in _ARMS:
+    raise SystemExit(f"unknown arm {_ARM!r}; choose one of {sorted(_ARMS)}")
+CUT_DIR = ROOT / _ARMS[_ARM][0]
+CUT_PREFIX = _ARMS[_ARM][1]
 CUT_ROUTE_COLS = [f"{CUT_PREFIX}{c}_prob" for c in ("bull", "bear", "chop")]
 
 BASE_CSVS = {
@@ -59,7 +69,7 @@ SPLITS = {
     "validation": ("2025-10-01 00:00:00", "2025-12-31 23:55:00"),
     "oos": ("2026-01-01 00:00:00", "2026-02-28 23:55:00"),
 }
-OUT = ROOT / "tmp/omega461_regimegbm_rebuild_20260909/phase1_routing_ab"
+OUT = ROOT / f"tmp/omega461_regimegbm_rebuild_20260909/phase1_routing_ab_{_ARM}"
 
 
 def load_frame(start: str, end: str) -> pd.DataFrame:
@@ -116,6 +126,7 @@ def metrics(ledger: pd.DataFrame) -> dict:
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    print(f"[arm] {_ARM}  후보 접두사 {CUT_PREFIX}", flush=True)
     device = parent._device("cpu")
     fee, slip = omega._load_fee_slip()
     results = {}
@@ -132,7 +143,7 @@ def main() -> int:
               f"{ {k: [round(a,3), round(b,3)] for k,(a,b) in shares.items()} }", flush=True)
 
         split_res = {"bars": int(len(frame)), "route_agreement": agree, "expert_shares_A_B": shares}
-        for arm, route in (("A_wide24_baseline", rA), ("B_cut2509_candidate", rB)):
+        for arm, route in (("A_wide24_baseline", rA), (f"B_{_ARM}_candidate", rB)):
             d = OUT / split / arm
             write_predictions(frame, route, d, device)
             comps = {}
@@ -148,7 +159,7 @@ def main() -> int:
             print(f"  {arm:22s} PnL {m['pnl']:+8.2f}%  MDD {m['mdd']:+7.2f}%  "
                   f"{m['trades']:3d}건  WR {m['wr']*100:5.1f}%  {m['source_component']}", flush=True)
 
-        a, b = split_res["A_wide24_baseline"], split_res["B_cut2509_candidate"]
+        a, b = split_res["A_wide24_baseline"], split_res[f"B_{_ARM}_candidate"]
         split_res["delta"] = {"pnl_pp": b["pnl"] - a["pnl"], "mdd_pp": b["mdd"] - a["mdd"],
                              "trades": b["trades"] - a["trades"]}
         print(f"  Δ(B-A): PnL {split_res['delta']['pnl_pp']:+.2f}pp  "

@@ -1,8 +1,8 @@
 # Omega4.6.1-RegimeGBM Rebuild Data Contract
 
-Status: `phase1_complete` — Phase 0 완료, Phase 1 진단 = 무신호(VAL 열세/OOS 우세, 표본 12~29건). Phase 2 착수 판단 대기
+Status: `phase1_complete` — 후보 2종 비교 완료. **balgbm(라벨 유지+모델급 교체)이 s12k3보다 명확히 우세**하나 결정 축은 여전히 무신호. Phase 2 착수 판단 대기
 
-Last updated: 2026-09-09 KST (Phase 1 결과 반영)
+Last updated: 2026-09-09 KST (balgbm arm 추가 반영)
 
 하위 프로젝트 개설: 2026-09-09, 사용자 지시 "오메가 4.6.1을 전신으로 레짐을 대시보드 GBM으로
 재구성하자". 이 문서는 이 라인의 **살아있는 단일 진실 소스**다 — 세션 시작 시 먼저 읽고, 상태를
@@ -260,6 +260,32 @@ cost_stress
 못 본 봉 분포를 받는다. Phase 2 의 재학습이 바로 그 불일치를 없앤다. 따라서 이 결과는
 "후보가 나쁘다"가 아니라 **"이 진단으로는 판별 불가"**이며, Phase 2 착수는 이 숫자가 아니라
 사전 논거와 비용으로 결정한다.
+
+## 후보 arm 2종 비교 (2026-09-09)
+
+전문: `docs/experiments/omega461_regimegbm_balancedish_model_swap_20260909.md`
+
+| arm | 무엇을 바꾸나 | 접두사 | 아티팩트 |
+|---|---|---|---|
+| **s12k3** | 라벨 + 모델급 동시 | `regime3_s12k3_cut2509_` | `regime_cut2509_model.joblib` |
+| **balgbm** | **모델급만**(라벨 balancedish 유지) | `regime3_balgbm_cut2509_` | `regime_balgbm_cut2509_model.joblib` |
+
+| 축 | wide24 HMM(전신) | s12k3 | **balgbm** |
+|---|---|---|---|
+| 같은 라벨 분류 κ (OOS) | 0.5074 | — | **0.9620** |
+| 안정성 flip (OOS) | 0.1263 | 0.0978 | **0.0497** |
+| 변동성 분리력 (OOS h12) | 1.600 | 1.109 ❌ | **1.773** |
+| 방향 정보 (OOS h48, bp) | **+18.2** | +17.4 | +9.4 ❌ |
+| 라우팅 PnL (VAL / OOS) | 기준 | −25.86 / +41.03pp ❌ | −24.10 / +80.33pp ❌ |
+| 라우팅 MDD (VAL / OOS) | 기준 | +2.65 / −1.50pp ❌ | **+3.73 / +5.24pp ✅** |
+
+**핵심 발견**: s12k3 arm 의 변동성 분리력 붕괴(h288 에서 0.918 로 역전)는 **모델급이 아니라
+라벨 탓**이었다. balancedish 를 유지하면 GBM 이 HMM 보다 더 잘 분리한다. 따라서 이 라인의
+후보는 **balgbm 으로 교체**한다 — s12k3 arm 은 보류.
+
+**그러나 결정 축은 두 arm 모두 무신호다** — PnL 부호가 VAL/OOS 에서 반대이고 표본이 11~29건.
+계약의 `validation_only` 규칙상 어느 후보도 선택되지 않는다. balgbm 은 **MDD 가 두 창 모두
+개선**되는 첫 일관 신호를 냈지만, 그것만으로 승격 근거가 되지는 않는다.
 
 ## 단계 계획
 
