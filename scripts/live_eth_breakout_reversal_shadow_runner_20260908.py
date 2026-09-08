@@ -63,7 +63,9 @@ MET_EP = {"retail": ("globalLongShortAccountRatio", "longShortRatio"),
 COST_TAKER_BP, COST_MAKER_BP = 10.0, 7.8
 MAX_OPEN = 40                      # 폭주 가드일 뿐 -- 판정 자체엔 상한을 두지 않는다
 MIN_BARS5 = 1200
-RULE_ID = "breakout_reversal_ff075_p025_h1h_20260908"
+# 🔴규칙 이름은 **아티팩트에서 읽는다**(상수로 두지 않는다). 2026-09-08 배리어 개정 때
+#   상수가 `..._p025_...` 그대로 남아, ±0.8×ATR 로 채점한 행이 옛 이름으로 원장에 찍혔다 --
+#   두 라벨 정의를 가를 유일한 필드가 거짓말을 하고 있었다(대시보드가 barrier_pct 로 우회 중).
 _C: dict[str, Any] = {}
 
 
@@ -280,7 +282,7 @@ def cycle(s: dict[str, Any]) -> None:
         X = np.nan_to_num(vec.reshape(1, -1), nan=0.0, posinf=0.0, neginf=0.0)
         p = float(np.mean([m.predict_proba(X)[0, 1] for m in models]))
         conf = abs(p - 0.5); tier = tier_of(conf, meta["confidence_tiers"])
-        pos = {"rule_id": RULE_ID, "anchor_utc": w["anchor_utc"], "side": w["side"],
+        pos = {"rule_id": meta["rule_id"], "anchor_utc": w["anchor_utc"], "side": w["side"],
                "n_signals": w["n_signals"], "signals": [k for k, v in w["signals"].items() if v],
                "trigger_utc": str(pd.Timestamp(ts1[s1])), "trig_min": tmin,
                "dir_up": bool(sgn > 0), "atr_pct": w["atr_pct"], "T_atr": T,
@@ -388,7 +390,7 @@ def report() -> int:
         print("해소된 건 없음"); return 0
     _, meta = load_models()
     pr = meta["prereg"]["cov100"]
-    print(f"규칙 {RULE_ID} · 해소 {len(R):,}건 "
+    print(f"규칙 {meta['rule_id']} · 해소 {len(R):,}건 "
           f"({R['trigger_utc'].min()[:16]} ~ {R['trigger_utc'].max()[:16]})")
     days = max((pd.Timestamp(R['trigger_utc'].max()) - pd.Timestamp(R['trigger_utc'].min())).days, 1)
     print(f"   빈도 {len(R)/days:.1f}건/일 (사전등록 {pr['per_day']}건/일)")

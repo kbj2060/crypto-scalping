@@ -2322,11 +2322,16 @@ function breakoutRevIndicatorItem() {
       + ` = 앞으로 ${lastArrow === "↑" ? "오른다" : "내린다"}`
       + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
     : "발현 대기";
+  // ⚠️원장 집계는 **현행 라벨 정의 행만** 센다(server.py::_br_current_label). 2026-09-08
+  //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
+  //   서로 다른 두 질문의 답을 평균한 값이 된다. 제외 건수를 화면에 밝힌다.
+  const staleText = p.stale_closed ? ` · 옛 배리어 ${p.stale_closed}건 제외` : "";
   const ledText = p.closed
     ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
       + `${p.per_day != null ? ` · ${p.per_day}건/일` : ""}`
       + ` (돌파 ${p.outcomes.cont} / 되돌림 ${p.outcomes.fade} / 시간청산 ${p.outcomes.timeout})`
-    : "해소된 건 없음";
+      + staleText
+    : `해소된 건 없음${staleText}`;
   const tierText = Object.entries(p.by_tier || {})
     .map(([k, v]) => `${k} ${(v.acc * 100).toFixed(0)}%(${v.n})`).join(" · ");
   // 문장 순서 고정(규약 §4): 근거 → 원장 → 계측 → 백테스트 → 가드

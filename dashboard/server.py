@@ -791,13 +791,36 @@ def _age_min(ts: Any) -> float | None:
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1)
 
 
+def _br_current_label(r: dict, meta: dict) -> bool:
+    """이 원장 행이 **지금 아티팩트의 라벨 정의**로 채점됐는가.
+
+    🔴rule_id 로는 못 가른다. 2026-09-08 배리어 개정(절대 ±0.25% → ±0.8×ATR) 때 러너의
+      RULE_ID 상수가 `..._p025_...` 그대로 남아, 개정 후 행도 옛 이름으로 찍혔다.
+      그래서 **행이 실제로 쓴 배리어**로 판정한다(러너는 행마다 barrier_pct 를 남긴다).
+    ⚠️옛 러너는 barrier_pct 를 아예 안 남겼다 -- 그 행들은 절대 배리어 시절이다.
+    """
+    bp = r.get("barrier_pct")
+    if meta.get("barrier_mode") == "atr_relative":
+        atr = r.get("atr_pct")
+        if bp is None or not atr:
+            return False
+        return abs(float(bp) - float(atr) * float(meta["barrier_k_atr"]) * 100) < 1e-6
+    want = meta.get("barrier_pct")
+    if want is None:
+        return True                       # 아티팩트가 배리어를 안 밝히면 가를 근거가 없다
+    return bp is None or abs(float(bp) - float(want)) < 1e-9
+
+
 def breakout_reversal_shadow_payload() -> dict[str, Any]:
     """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
     러너: scripts/live_eth_breakout_reversal_shadow_runner_20260908.py
     규칙: 앵커 first_fire -> 15분 안에 ±0.75×ATR 최초 터치가 **발현**(방향은 관측값) ->
-          69피쳐(전부 트리거 봉 직전 봉 기준) -> HGB 5시드 평균 -> 1시간 안에 ±0.25% 중
+          69피쳐(전부 트리거 봉 직전 봉 기준) -> HGB 5시드 평균 -> 1시간 안에 ±0.8×ATR 중
           먼저 닿는 쪽이 돌파/되돌림. 시간청산이면 12봉 뒤 종가 부호.
+    ⚠️원장에는 **옛 배리어(절대 ±0.25%)로 채점된 행이 섞여 있다**(2026-09-08 개정 전).
+      집계는 현행 라벨 정의 행만 센다(_br_current_label) -- 서로 다른 질문의 답을 한 분모에
+      넣으면 그 비율은 아무 질문의 답도 아니다. 띠는 기록이므로 전 행을 그대로 칠한다.
     ⭐**커버리지 상한이 없다** -- 전 트리거에 판정을 내므로 "어느 사건이 해소되는가"를 결과가
       정하는 편향이 구조상 생기지 않는다(2026-09-07 앵커 방향 섀도우가 여기서 무너졌다).
     ⚠️정확도는 **셔플 귀무와 함께** 읽는다. 창마다 클래스 균형이 달라 귀무가 .515~.570 로 움직인다.
@@ -811,7 +834,8 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
     if not state:
         return base
     rows = parse_jsonl(BREAKOUT_REV_LEDGER_PATH)
-    closed = [r for r in rows if r.get("outcome") in ("cont", "fade", "timeout")]
+    closed_all = [r for r in rows if r.get("outcome") in ("cont", "fade", "timeout")]
+    closed = [r for r in closed_all if _br_current_label(r, meta)]
     positions = state.get("positions") if isinstance(state.get("positions"), list) else []
     watching = state.get("watching") if isinstance(state.get("watching"), list) else []
 
@@ -833,7 +857,7 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
         if q:
             tiers[t] = {"n": len(q), "acc": _acc(q)}
     # 마지막 판정: 미해소 포지션이 있으면 그중 최신, 없으면 원장 최신
-    cands = [x for x in (positions + closed) if isinstance(x, dict) and x.get("p_breakout") is not None]
+    cands = [x for x in (positions + closed_all) if isinstance(x, dict) and x.get("p_breakout") is not None]
     last = max(cands, key=lambda x: str(x.get("trigger_utc") or "")) if cands else None
     gross = [float(r["gross_bp"]) for r in closed if isinstance(r.get("gross_bp"), (int, float))]
     # 매매 방향 = 발현 방향 XOR 되돌림콜 (돌파면 발현 방향 그대로, 되돌림이면 반대)
@@ -843,14 +867,16 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
 
     now = datetime.now(timezone.utc)
     strip_end = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
-    strip_tones, strip_calls = _breakout_tone_history([*closed[-400:], *positions], strip_end)
+    # 띠는 "언제 무슨 판정이 있었나"의 기록이라 옛 배리어 행도 그대로 칠한다(집계만 가른다).
+    strip_tones, strip_calls = _breakout_tone_history([*closed_all[-400:], *positions], strip_end)
     return {**base, "available": True,
             "tone_history": strip_tones, "call_history": strip_calls,
             "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z"),
             "watching": len(watching), "open_positions": len(positions),
             "open_dirs": [_dir(q) for q in positions],
             "open_calls": [q.get("call") for q in positions],
-            "closed": len(closed), "days_running": round(days, 2),
+            "closed": len(closed), "stale_closed": len(closed_all) - len(closed),
+            "days_running": round(days, 2),
             "per_day": round(len(closed) / days, 1) if days > 0.5 else None,
             "accuracy": _acc(closed),
             "outcomes": {k: sum(1 for r in closed if r.get("outcome") == k)
