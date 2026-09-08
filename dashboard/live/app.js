@@ -2254,7 +2254,6 @@ function breakoutRevIndicatorItem() {
   }
   const dirs = p.open_dirs || [];
   const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
   const calls = p.open_calls || [];
   // 🔴폴백 버그(2026-09-08 사용자 신고): 판정이 섞였는데 방향이 같으면 claim 이 null 이 되고
   //   예전 코드는 `claim || "돌파"` 로 **조용히 돌파라고 썼다**. 되돌림 포지션에 "돌파" 배지가
@@ -2270,13 +2269,20 @@ function breakoutRevIndicatorItem() {
   // 방향은 **화살표**로 쓴다(사용자 요청 2026-09-08): ↑ 롱 · ↓ 숏.
   // `돌파 숏` 은 발현 방향을 모르면 뜻이 안 통했다("돌파"가 상방으로 읽힌다는 신고).
   const lastArrow = last ? (Boolean(last.dir_up) === (last.call === "돌파") ? "↑" : "↓") : "";
-  let subText;
+  let subText, tone;
   if (p.open_positions) {
     subText = hasL && hasS ? "혼재 보유"
       : `${claim || (last && last.call) || "돌파"} ${hasS ? "↓" : "↑"}`;
+    tone = hasL && hasS ? "warn" : hasS ? "bad" : "good";
   } else if (fresh && last && last.call) {
     subText = `직전 ${last.call}${lastArrow}`;
-  } else subText = "미발동";
+    // ⭐2026-09-08 사용자 요청: "상승한다고 하는건 초록, 하락한다고 하는건 빨강".
+    //   유휴 상태도 **직전 판정의 예측 방향**으로 칠한다(↑=good · ↓=bad).
+    //   규약 §2 의 "방향 없음 = neutral" 은 방향이 **없을 때** 규칙이다 -- 직전 판정에는
+    //   방향이 있다. 게이트를 제거해 이 카드가 매매가 아니라 **참고 지표**가 됐으므로,
+    //   "진입 안 했으면 회색"이던 MASHT 관행(삭제됨)은 더 이상 적용하지 않는다.
+    tone = lastArrow === "↑" ? "good" : "bad";
+  } else { subText = "미발동"; tone = "neutral"; }
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
   const lastText = last
