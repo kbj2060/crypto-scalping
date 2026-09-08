@@ -28,14 +28,9 @@ T2 즉시(무음)     드물고 강한 컨텍스트 — net_score |>=3|, 청산 
 
 재시작/장애 후 폭주 방지
 ------------------------
-세 겹으로 막는다. (1) 상태파일이 없는 **최초 실행은 현재 상태를 baseline으로 기록만 하고 아무것도
+두 겹으로 막는다. (1) 상태파일이 없는 **최초 실행은 현재 상태를 baseline으로 기록만 하고 아무것도
 보내지 않는다**. (2) 그 이후에도 EVENT_MAX_AGE_SEC보다 오래된 사건은 seen으로만 표시하고 보내지
 않는다 — 데몬이 6시간 죽어 있었다면 복구 시점에 필요한 건 그동안의 전부가 아니라 "지금"이다.
-(3) **한 key는 한 번만 나간다**(2026-09-07 신설). 감지기들은 "열려 있는 포지션"·"이상 상태인
-컴포넌트"·"창 안에 있음" 같은 **상태**를 매 사이클 다시 방출하므로, 중복 차단이 곧 사건 판정이다.
-그 전까지는 쿨다운(t1 300초)이 지나면 같은 key가 다시 나가 사건 하나가 최대 6~7번 반복됐다 --
-실측 8시간 287건. key를 만드는 쪽은 **사건마다 유일한 key**를 줄 책임이 있고(발동 봉 시각, 포지션
-개시 시각, 상태 전이 시각 …), 갱신되는 필드를 key에 넣으면 그 순간 폭주가 된다.
 """
 from __future__ import annotations
 
@@ -62,6 +57,9 @@ STATE_PATH = REPO_ROOT / "data" / "live" / "push_notifier_state.json"
 POLL_SECONDS = 45
 # 이보다 오래된 사건은 "지금"이 아니므로 조용히 seen 처리한다(재시작 폭주 방지 2단계).
 EVENT_MAX_AGE_SEC = 30 * 60
+# 같은 key가 이 시간 안에 다시 떠도 재발송하지 않는다. 플래핑하는 헬스체크 하나가 알림을
+# 도배해서 사용자가 전체를 음소거해버리는 것을 막는 장치다.
+COOLDOWN_SECONDS = {"t1": 300, "t2": 1800}
 # 다이제스트 최소 간격. 5분봉이라 신호 집합은 5분마다 바뀔 수 있는데, 그대로 내보내면
 # "변화가 있을 때만"이 사실상 5분 주기 알림이 된다.
 DIGEST_MIN_INTERVAL_SEC = 15 * 60
@@ -242,6 +240,13 @@ def detect_ops_health(ops: dict[str, Any]) -> list[Note]:
 # ------------------------------------------------------------------------------------------
 NET_SCORE_THRESHOLD = 3
 
+# 2026-09-08 사용자 지정: net_score · liq_burst 만 보낸다.
+# 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 이름만 다시 넣으면 된다.
+# ⚠️`ops`/`supervisor` 를 끄면 **대시보드·봇이 죽어도 알림이 오지 않는다**.
+#   운영 헬스는 deploy_watcher 의 텔레그램과 대시보드 화면으로만 확인하게 된다.
+ENABLED_DETECTORS = {"net_score", "liq_burst"}
+DIGEST_ENABLED = False
+
 
 def detect_net_score(evidence: dict[str, Any]) -> list[Note]:
     """증거신호 합의가 |net_score| >= 3인 봉.
@@ -259,46 +264,40 @@ def detect_net_score(evidence: dict[str, Any]) -> list[Note]:
         want = "bottom" if net > 0 else "top"
         if sig.get(f"{want}_last_fired_ts") == bar:
             firing.append(sig.get("name"))
-    names = ", ".join(n for n in firing if n) or "-"
+    names = " · ".join(n for n in firing if n) or "-"
     price = evidence.get("price")
-    price_txt = f"ETH {price:,.0f} · " if isinstance(price, (int, float)) else ""
+    price_txt = f" · ETH {price:,.0f}" if isinstance(price, (int, float)) else ""
+    # 문구는 **한 줄 제목 + 한 줄 본문**으로 짧게 (2026-09-08 사용자 요청).
+    # ⚠️"참고용" 꼬리말은 남긴다 -- 알림이 사실상의 매매 트리거로 읽히는 것을 막는
+    #   모듈 docstring 의 설계 원칙이다(증거신호 8종은 경제성 게이트 전수 실패).
     return [Note(
         f"net_score:{bar}:{net}", "t2",
-        f"{side} 증거 {abs(net)}표 합의",
-        f"{price_txt}{names}\n※ 방향 정보 아님 — 참고용 컨텍스트입니다.",
+        f"{side} {abs(net)}표{price_txt}",
+        f"{names} · 참고용",
         tag="net-score",
         event_ts=parse_utc(bar),
     )]
 
 
-def detect_liq_burst(burst: dict[str, Any], state: dict[str, Any]) -> list[Note]:
-    """청산 버스트(Hawkes) **발생 순간**. 켜져 있는 동안이 아니라 켜진 그때만 알린다.
-
-    ⚠️2026-09-07 수정. 독스트링은 원래부터 "updated_at은 계속 갱신되므로 key는 켜진 그 시각으로
-    고정한다"고 적혀 있었는데, 정작 key가 `liq_burst:{updated_at}`이었다 -- 즉 계속 갱신된다고
-    설명해 놓은 바로 그 필드를 key로 썼다. 그래서 폴링마다(45초) 새 key가 되어 같은 버스트가
-    끝없이 알림을 냈다(09-07 로그: 같은 LONG_CRISIS가 07:10:27부터 9분 동안 9번).
-    상태파일에는 '켜진 시각'이 없으므로 여기서 **전이를 직접 본다** -- 직전 사이클이 inactive
-    였는데 지금 active면 그 시각을 state에 적어두고, 꺼지면 지운다. 데몬이 재시작해도 state는
-    디스크에 남으므로 진행 중인 버스트를 다시 알리지 않는다."""
+def detect_liq_burst(burst: dict[str, Any]) -> list[Note]:
+    """청산 버스트(Hawkes) 발생. 상태가 켜져 있는 동안 updated_at은 계속 갱신되므로 key는
+    'hawkes가 켜진 그 시각'으로 고정해 한 번만 나가게 한다."""
     if not burst.get("available") or not burst.get("hawkes_active"):
-        state.pop("liq_burst_since", None)
         return []
-    # 켜진 첫 사이클에만 기록된다 -- 이후 updated_at이 아무리 갱신돼도 key는 그대로다.
-    updated = state.get("liq_burst_since")
-    if not updated:
-        updated = str(burst.get("updated_at") or datetime.now(timezone.utc).isoformat())
-        state["liq_burst_since"] = updated
+    updated = burst.get("updated_at")
     z_long, z_short = burst.get("z_long"), burst.get("z_short")
-    detail = []
-    if isinstance(z_long, (int, float)):
-        detail.append(f"롱청산 z={z_long:+.1f}")
-    if isinstance(z_short, (int, float)):
-        detail.append(f"숏청산 z={z_short:+.1f}")
+    ct = str(burst.get("crisis_type") or "")
+    kind = "롱청산" if "LONG" in ct else "숏청산" if "SHORT" in ct else "청산"
+    # 큰 쪽 z 를 제목에 올리고 나머지는 본문 -- 알림 목록에서 제목만 봐도 크기가 읽힌다.
+    zs = [(abs(z), lab, z) for z, lab in ((z_long, "롱"), (z_short, "숏"))
+          if isinstance(z, (int, float))]
+    zs.sort(reverse=True)
+    head = f" z{zs[0][2]:+.1f}" if zs else ""
+    rest = " · ".join(f"{lab} z{z:+.1f}" for _, lab, z in zs[1:])
     return [Note(
         f"liq_burst:{updated}", "t2",
-        f"청산 버스트 {burst.get('crisis_type') or ''}".strip(),
-        " · ".join(detail) or "청산이 군집 발생 중입니다.",
+        f"{kind} 버스트{head}",
+        f"{rest + ' · ' if rest else ''}참고용",
         tag="liq-burst",
         event_ts=parse_utc(updated),
     )]
@@ -412,16 +411,18 @@ async def fetch_all(session, base_url: str) -> dict[str, dict[str, Any]]:
     return dict(zip(ENDPOINTS.keys(), results))
 
 
-def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any]) -> list[Note]:
-    """`state`는 지금은 detect_liq_burst의 전이 감지에만 쓰인다 -- 그 감지기만 '직전 사이클에
-    어땠는가'를 알아야 key를 고정할 수 있다. 나머지 감지기는 payload만으로 유일한 key를 만든다."""
+def collect_notes(data: dict[str, dict[str, Any]]) -> list[Note]:
+    """ENABLED_DETECTORS 에 든 것만 수집한다(2026-09-08 사용자 지정)."""
+    plan = (("shadow", detect_shadow_positions, "shadow"),
+            ("trade", detect_trades, "trades"),
+            ("ops", detect_ops_health, "ops"),
+            ("net_score", detect_net_score, "evidence"),
+            ("liq_burst", detect_liq_burst, "burst"),
+            ("session", detect_session_window, "alerts"))
     notes: list[Note] = []
-    notes += detect_shadow_positions(data.get("shadow") or {})
-    notes += detect_trades(data.get("trades") or {})
-    notes += detect_ops_health(data.get("ops") or {})
-    notes += detect_net_score(data.get("evidence") or {})
-    notes += detect_liq_burst(data.get("burst") or {}, state)
-    notes += detect_session_window(data.get("alerts") or {})
+    for name, fn, src in plan:
+        if name in ENABLED_DETECTORS:
+            notes += fn(data.get(src) or {})
     return notes
 
 
@@ -432,18 +433,10 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
     seen = state["seen"]
     baseline = not state["baseline_done"]
 
-    for note in collect_notes(data, state):
-        # ⭐2026-09-07: **key 하나당 한 번만** 보낸다. 그 전까지는 COOLDOWN_SECONDS(t1 300초 /
-        # t2 1800초)가 지나면 같은 key가 다시 나갔다. 그런데 감지기들은 전부 "열려 있는 포지션",
-        # "이상 상태인 컴포넌트", "창 안에 있음"처럼 **상태**를 매 사이클 다시 방출한다 -- 위
-        # 감지기 독스트링이 하나같이 "한 번만 나간다"고 적고 있는 것도 그 전제다. 쿨다운은 그
-        # 전제를 조용히 깨서, 사건 하나를 EVENT_MAX_AGE_SEC(30분)까지 최대 6~7번 반복 발송했다.
-        # 실측(2026-09-07 서버 로그): 8시간 287건, 같은 섀도우 포지션이 07:11:12 / 07:11:58 /
-        # 07:16:31 처럼 정확히 300초 간격으로 재발송. seen은 SEEN_TTL_SEC(24시간)에 정리되므로
-        # 하루가 지나면 다시 열릴 수 있지만, 그때는 EVENT_MAX_AGE_SEC가 한 번 더 막는다.
-        # ⚠️발송 실패해도 재시도하지 않는 것은 **기존 동작 그대로**다(예전에도 broadcast 전에
-        #   seen을 찍었다). 여기서 바뀐 건 "성공한 뒤 다시 보내지 않는다" 하나뿐이다.
-        if note.key in seen:
+    for note in collect_notes(data):
+        last_sent = seen.get(note.key)
+        cooldown = COOLDOWN_SECONDS.get(note.tier, 1800)
+        if last_sent is not None and now - last_sent < cooldown:
             continue
         seen[note.key] = now
         if baseline:
@@ -458,8 +451,8 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
                                  urgency="high" if note.tier == "t1" else "normal")
         log(f"[{note.tier}] {note.title} -> {result}")
 
-    digest = build_digest(data.get("evidence") or {}, data.get("regime") or {},
-                          data.get("shadow") or {})
+    digest = (build_digest(data.get("evidence") or {}, data.get("regime") or {},
+                           data.get("shadow") or {}) if DIGEST_ENABLED else None)
     if digest:
         fingerprint, note = digest
         changed = fingerprint != state["digest_fingerprint"]
