@@ -77,13 +77,16 @@ def metric_features(met: dict[str, np.ndarray], ts_met, ts5):
     return out
 
 
-def path_features(hi1, lo1, cl1, bcl, s0, tmin, ref, sgn, atr, T):
+def path_features(hi1, lo1, cl1, bcl, s0, tmin, ref, sgn, atr, T, nmove=None):
     """v2_mv_* 11개. 🔴경로는 트리거 분 s1 을 **포함하지 않는다**(tmin-1 까지).
 
     같은 1분봉을 피쳐와 라벨이 공유하면 그 자체로 미래참조다 -- 그 봉의 큰 움직임이 피쳐를
     키우는 동시에 배리어를 때려 라벨을 정하기 때문이다(CLAUDE.md 사건 라벨 경계 계약).
+
+    `nmove`: 발현 창(분). 아티팩트의 `emergence_window_min` 을 넘긴다 -- 창이 60분인데
+    span 이 15면 tmin>=15 인 사건의 경로가 통째로 잘린다. 안 넘기면 옛 기본값(15).
     """
-    span = np.arange(NMOVE)
+    span = np.arange(int(nmove or NMOVE))
     j0 = s0 + span
     mask = span <= (tmin - 1)
     c = cl1[np.clip(j0, 0, len(cl1) - 1)]

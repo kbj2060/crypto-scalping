@@ -802,11 +802,16 @@ def _age_min(ts: Any) -> float | None:
 def _br_current_label(r: dict, meta: dict) -> bool:
     """이 원장 행이 **지금 아티팩트의 라벨 정의**로 채점됐는가.
 
-    🔴rule_id 로는 못 가른다. 2026-09-08 배리어 개정(절대 ±0.25% → ±0.8×ATR) 때 러너의
-      RULE_ID 상수가 `..._p025_...` 그대로 남아, 개정 후 행도 옛 이름으로 찍혔다.
-      그래서 **행이 실제로 쓴 배리어**로 판정한다(러너는 행마다 barrier_pct 를 남긴다).
-    ⚠️옛 러너는 barrier_pct 를 아예 안 남겼다 -- 그 행들은 절대 배리어 시절이다.
+    ⭐**rule_id 로 가른다.** 2026-09-09 부터 러너가 아티팩트의 rule_id 를 그대로 찍으므로
+      이게 유일하게 정확한 기준이다. 발현창 15분/60분처럼 **배리어가 같고 모집단만 다른**
+      개정은 배리어로는 못 가른다.
+    ⚠️2026-09-08 이전 행은 러너의 RULE_ID 상수가 뒤처져 옛 이름으로 찍혀 있다 -- 전부 제외된다.
+      아티팩트에 rule_id 가 없을 때만 배리어로 되짚는 폴백을 남긴다.
     """
+    rid = meta.get("rule_id")
+    if rid:
+        return r.get("rule_id") == rid    # 러너가 아티팩트의 rule_id 를 그대로 찍는다
+    # 아티팩트에 rule_id 가 없을 때만 배리어로 되짚는다(옛 원장 호환).
     bp = r.get("barrier_pct")
     if meta.get("barrier_mode") == "atr_relative":
         atr = r.get("atr_pct")
@@ -815,7 +820,7 @@ def _br_current_label(r: dict, meta: dict) -> bool:
         return abs(float(bp) - float(atr) * float(meta["barrier_k_atr"]) * 100) < 1e-6
     want = meta.get("barrier_pct")
     if want is None:
-        return True                       # 아티팩트가 배리어를 안 밝히면 가를 근거가 없다
+        return True
     return bp is None or abs(float(bp) - float(want)) < 1e-9
 
 

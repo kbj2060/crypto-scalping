@@ -230,9 +230,12 @@ def cycle(s: dict[str, Any]) -> None:
         log(f"앵커 {a['anchor_utc']} {a['side']} · 신호 {a['n_signals']}종 · 발현 감시 시작")
     s["seen_anchor_ts"] = s["seen_anchor_ts"][-400:]
 
-    # ---------- 2) 발현 감시 (앵커 다음 봉 시가 기준 15분) ----------
+    # ---------- 2) 발현 감시 (앵커 다음 봉 시가 기준, 창은 아티팩트가 정한다) ----------
     tsl = pd.DatetimeIndex(ts5); ts1i = pd.DatetimeIndex(ts1)
     still = []
+    # ⭐발현 창은 **아티팩트가 정한다**(코드 상수 아님). RULE_ID 와 같은 종류의 표류를 막는다 --
+    #   2026-09-08 에 상수가 뒤처져 라벨 정의가 이름과 어긋났던 전례가 있다.
+    NM = int(meta.get("emergence_window_min", LF.NMOVE))
     for w in s["watching"]:
         ai = tsl.get_indexer([pd.Timestamp(w["anchor_utc"])])[0]
         if ai < 0 or ai + 1 >= len(ts5):
@@ -243,17 +246,17 @@ def cycle(s: dict[str, Any]) -> None:
             still.append(w); continue
         T = w["atr_pct"] * meta["t_mult"]
         up, dn = ref * (1 + T), ref * (1 - T)
-        end = min(s0 + LF.NMOVE, len(ts1))
+        end = min(s0 + NM, len(ts1))
         seg_u = np.flatnonzero(hi1[s0:end] >= up); seg_d = np.flatnonzero(lo1[s0:end] <= dn)
         tu = int(seg_u[0]) if len(seg_u) else 1 << 30
         td = int(seg_d[0]) if len(seg_d) else 1 << 30
         if tu == td:                                        # 같은 분 양방향 -- 학습과 동일하게 버림
             log(f"   {w['anchor_utc']} 같은 분 양방향 → 폐기"); continue
         if tu == (1 << 30) and td == (1 << 30):
-            if end - s0 < LF.NMOVE:
+            if end - s0 < NM:
                 still.append(w)                             # 창이 아직 안 찼다
             else:
-                log(f"   {w['anchor_utc']} 15분 내 미발현 → 폐기")
+                log(f"   {w['anchor_utc']} {NM}분 내 미발현 → 폐기")
             continue
         sgn = 1.0 if tu < td else -1.0
         tmin = min(tu, td)
@@ -273,7 +276,7 @@ def cycle(s: dict[str, Any]) -> None:
         ev = {"T_atr": T, "trig_min": float(tmin), "dir_up": 1.0 if sgn > 0 else 0.0,
               "atr_at_anchor": w["atr_pct"], "n_signals": float(w["n_signals"]),
               "side_bottom": 1.0 if w["side"] == "bottom" else 0.0, "signals": w["signals"]}
-        pathf = LF.path_features(hi1, lo1, cl1, bcl, s0, tmin, ref, sgn, w["atr_pct"], T)
+        pathf = LF.path_features(hi1, lo1, cl1, bcl, s0, tmin, ref, sgn, w["atr_pct"], T, nmove=NM)
         levf = LF.level_features(LV, atr5, fb, entry, sgn)
         try:
             vec, _ = LF.assemble(meta["features"], F, XS, ts5, fb, pathf, levf, ev)

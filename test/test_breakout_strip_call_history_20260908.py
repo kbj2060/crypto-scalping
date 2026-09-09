@@ -66,6 +66,16 @@ class BreakoutLedgerLabelRegime(unittest.TestCase):
     ATR = {"barrier_mode": "atr_relative", "barrier_k_atr": 0.8}
     ABS = {"barrier_pct": 0.25}
 
+    def test_rule_id_wins_over_barrier_when_the_artifact_has_one(self):
+        """2026-09-09: 발현창 15분/60분은 **배리어가 같고 모집단만 다르다** -- 배리어로는 못 가른다.
+        러너가 아티팩트의 rule_id 를 찍으므로 그게 유일하게 정확한 기준이다."""
+        meta = {"rule_id": "br_w60", "barrier_mode": "atr_relative", "barrier_k_atr": 0.8}
+        cur = {"rule_id": "br_w60", "atr_pct": 0.002, "barrier_pct": 0.16}
+        old = {"rule_id": "br_w15", "atr_pct": 0.002, "barrier_pct": 0.16}   # 배리어는 같다
+        self.assertTrue(server._br_current_label(cur, meta))
+        self.assertFalse(server._br_current_label(old, meta))
+        self.assertFalse(server._br_current_label({"atr_pct": 0.002}, meta))  # rule_id 없는 옛 행
+
     def test_atr_row_matching_its_own_atr_is_current(self):
         r = {"atr_pct": 0.0022577, "barrier_pct": 0.0022577 * 0.8 * 100}
         self.assertTrue(server._br_current_label(r, self.ATR))
