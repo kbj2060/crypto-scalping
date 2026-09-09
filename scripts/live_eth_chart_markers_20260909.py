@@ -71,6 +71,30 @@ def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label:
             {"kind": kind, "label": label, "side": "bottom" if tone == "good" else "top"})
 
 
+def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
+    """연속 봉으로 이어지는 같은 (kind, side) 이벤트는 **첫 봉만** 남긴다.
+
+    2026-09-10 사용자 요청("이벤트 트리거 발동 시점에만 삼각형 표시"). 세 출처가 전부 봉별
+    **상태**라 조건이 유지되는 동안 매 봉 이벤트가 나온다 -- 극점은 `grade != '-' & ~gated`,
+    V자반등/돌파되돌림은 톤이 good/bad 인 봉. 실제로 V자반등이 09-09 15:20~15:35 네 봉 연속으로
+    찍히고 있었다. 증거신호 스트립에서 같은 성질을 고친 것과 같은 이야기다(커밋 3033dec).
+    ⚠️창 왼쪽 끝은 직전 봉을 볼 수 없어, 이미 진행 중이던 발동도 발동 시점으로 그린다. 6시간
+      창이라 실용상 무시할 수 있고, 그 자리에 신호가 살아 있다는 것 자체는 사실이다.
+    grade(극점 강/중/약)는 키에 넣지 않는다 -- 한 발동 안에서 등급이 오르내려도 발동은 하나다.
+    """
+    prev: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for t in times:
+        cur: set[tuple[str, str]] = set()
+        for ev in grid[t].get("events", []):
+            key = (str(ev.get("kind", "")), str(ev.get("side", "")))
+            cur.add(key)
+            if key not in prev:
+                out.append(dict(ev, t=t))
+        prev = cur
+    return out
+
+
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
                           breakout: dict | None = None) -> dict[str, Any]:
     """청산맵 72봉에 정렬된 마커. 절대 예외를 올리지 않는다."""
@@ -130,7 +154,7 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
             "times": times,
             "ev_bottom": [int(x) for x in bot[lo:]], "ev_top": [int(x) for x in top[lo:]],
             "ev_bottom_names": names_b, "ev_top_names": names_t,
-            "events": [dict(ev, t=k) for k in times for ev in grid[k].get("events", [])],
+            "events": _onset_only(grid, times),
             "n_signals_total": len(B.SIGNALS),
         }
     except Exception as e:  # noqa: BLE001 -- 차트 렌더를 절대 깨지 않는다
