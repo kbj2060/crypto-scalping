@@ -2458,7 +2458,9 @@ function extremeDetectorIndicatorItem() {
   const p = latestExtreme;
   const base = { key: "extreme_detector", label: "극점 탐지기", probaSlot: true,
                  derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델(HGB 5시드)로 매 봉 계산합니다. "
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델로 매 봉 계산합니다(워커). "
+                   + "2026-09-10 v2: `강` 등급은 극점 확률과 손실가중 헤드가 **둘 다** 강 컷을 넘을 "
+                   + "때만 줍니다 — 못 넘으면 `약`으로 강등합니다. 표본외 강 정밀도 .582→.689. "
                    + "매매에는 연결돼 있지 않습니다." };
   if (!p || p.error || !p.available) {
     return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
@@ -2472,6 +2474,16 @@ function extremeDetectorIndicatorItem() {
     p.signals ? `발동 신호: ${p.signals}` : "",
     p.gated_now ? `강한 추세 구간이라 억제 중 (추세분위 ${p.trend_q})` : "",
     `발동봉 기저 ${(Number(p.base_rate) * 100).toFixed(1)}% · 무작위 봉 2.9% · AUC ${p.auc_oos}`,
+    // 2026-09-10 v2 이중조건 -- 켜져 있다는 사실과 강등 이유를 화면이 말해야 한다.
+    p.costw_rule_id
+      ? (p.proba_costw != null
+          ? `이중조건: 극점 ${(Number(p.proba) * 100).toFixed(1)}% · 손실가중 ${(Number(p.proba_costw) * 100).toFixed(1)}%`
+            + (p.costw_cut != null ? ` (강 기준 ${(Number(p.costw_cut) * 100).toFixed(1)}%)` : "")
+          : "이중조건 적용 중 — `강`은 두 헤드가 모두 동의할 때만 줍니다")
+      : "",
+    p.dual_demoted
+      ? "↓ 극점 확률은 `강`이지만 손실가중 헤드가 «빗나가면 비싼 자리»로 봐서 `약`으로 내렸습니다"
+      : "",
     "⚠️매매 신호가 아니라 위치 정보입니다 — 이 등급으로 매매하면 비용 여유가 없습니다",
   ].filter(Boolean).join("\n");
   return { ...base,

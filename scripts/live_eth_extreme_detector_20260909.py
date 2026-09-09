@@ -220,8 +220,12 @@ def compute_eth_extreme_detector() -> dict:
             # 커버리지도 4.29 -> 4.93건/일 늘어난다. 셋 다 실측해서 고른 것이다.
             demote = (A.grade == "강") & (P2 < cw["meta"]["cuts"]["강"])
             A.loc[demote, "grade"] = "약"
+            # 화면이 "왜 약으로 내려갔는지"를 말할 수 있어야 한다 -- 이 플래그가 없으면
+            # 사용자는 이중조건이 켜져 있는지조차 알 수 없다(2026-09-10 사용자 지적).
+            A["dual_demoted"] = demote
         else:
             A["p2"] = np.nan
+            A["dual_demoted"] = False
         # 게이트는 **전 등급 그대로** 유지한다. 강 면제안(이중조건이 대신)도 실측했으나
         # 배포 형태에서 강 안의 역추세 콜이 n=8 로 너무 적어(정밀도 .625) 면제를 정당화하지
         # 못했다. 이번 변경은 `강` 을 더 엄격하게 만드는 쪽으로만 간다.
@@ -238,7 +242,8 @@ def compute_eth_extreme_detector() -> dict:
             if k not in by_ts or r.p > by_ts[k]["p"]:
                 by_ts[k] = {"p": float(r.p), "long": bool(r.long_), "grade": r.grade,
                             "names": r.names_,
-                            "p2": (float(r.p2) if r.p2 == r.p2 else None)}
+                            "p2": (float(r.p2) if r.p2 == r.p2 else None),
+                            "dual_demoted": bool(r.dual_demoted)}
         history, times = [], []
         for t in ts_all.iloc[-HISTORY_BARS:]:
             # 🔴반드시 tz 를 붙여 내보낸다. 자바스크립트 `new Date("...T06:10:00")` 는 오프셋이
@@ -260,6 +265,8 @@ def compute_eth_extreme_detector() -> dict:
             "proba": round(cur["p"], 4) if cur else None,
             "signals": cur["names"] if cur else None,
             "proba_costw": (round(cur["p2"], 4) if (cur and cur.get("p2") is not None) else None),
+            "costw_cut": ((cw["meta"].get("cuts") or {}).get("강") if cw else None),
+            "dual_demoted": bool(cur.get("dual_demoted")) if cur else False,
             "costw_rule_id": (cw["meta"].get("rule_id") if cw else None),
             "gated_now": gated_now, "trend_q": round(float(A[A._ts == last_ts]._tq.iloc[0]), 3)
                           if (A._ts == last_ts).any() else None,
