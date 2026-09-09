@@ -76,6 +76,10 @@ OUT = ROOT / "tmp/omega461_regimegbm_rebuild_20260909/tabicl_direction"
 # Phase 2 스윕(run_omega461_regimespine_phase2_sweep_20260909.sh)이 실제로 쓴 라벨 계약.
 DIR_LBL = (ROOT / "tmp/causal_regen_20260516/omega_current_only_all_label_candidate_parent_screen_20260629"
            / "label_contracts/zigzag_action_labels_20260531")
+# h48qual 의 quality 라벨 계약. zig075 는 `same_as_direction` 이라 이 경로를 쓰지 않는다
+# (같은 X·같은 y 를 두 번 적합하는 셈이라 축퇴 — quality_proba = direction_proba 로 두면 된다).
+QUAL_LBL = (ROOT / "tmp/causal_regen_20260516/omega_zigzag_fix_all_solutions_20260630/label_contracts"
+            / "sltp_h48_conservative_padded_to_zigzag_timestamps")
 
 # ⚠️ 2026-09-09 발견 — 라우팅은 balnobb 가 아니라 **wide24** 다.
 # regimespine 래퍼는 `omega._load_omega_frames` / `omega._numeric_feature_cols` 두 개만 패치한다.
@@ -204,7 +208,8 @@ def _select_ctx(y: np.ndarray, pool: np.ndarray, n_ctx: int, balanced: bool,
                  "counts": {int(c): int((y[sel] == c).sum()) for c in classes}}
 
 
-def _make_model(kind: str, n_estimators: int, seed: int, device: str):
+def _make_model(kind: str, n_estimators: int, seed: int, device: str,
+                fit_mode: str | None = None):
     """모델 팩토리. 두 팔은 **같은 컨텍스트·같은 질의 행**을 받는다 — 모델만 다르다.
 
     tabpfn — 2026-09-09 사용자 지시로 추가. 이 저장소가 오래 들고 있던 "TabPFN 상한 18,000행"은
@@ -223,9 +228,12 @@ def _make_model(kind: str, n_estimators: int, seed: int, device: str):
                                 device=device, offload_mode="auto", batch_size=2, verbose=False)
     if kind == "tabpfn":
         from tabpfn import TabPFNClassifier
+        # fit_mode="fit_with_cache" 는 컨텍스트를 미리 인코딩해 **반복 단일행 질의**를 싸게 만든다.
+        # 결정층 리플레이가 봉마다 exit 를 부르므로 거기서만 쓴다(실측 1,758ms → 136ms, 13배).
+        kw = {} if fit_mode is None else {"fit_mode": fit_mode}
         return TabPFNClassifier(n_estimators=int(n_estimators), random_state=int(seed),
                                 device=device, memory_saving_mode="auto",
-                                balance_probabilities=False)
+                                balance_probabilities=False, **kw)
     raise ValueError(f"unknown model kind: {kind}")
 
 
@@ -258,7 +266,7 @@ def _fit_predict(x_ctx: pd.DataFrame, y_ctx: np.ndarray, x_q: pd.DataFrame, *,
 
 
 def _incumbent(val_raw: pd.DataFrame, x_val: pd.DataFrame, base_cols: list[str], comp: str,
-               seed: int, qidx: np.ndarray) -> dict | None:
+               seed: int, qidx: np.ndarray, head: str = "direction") -> dict | None:
     """Phase 2 balnobb 부모 번들의 direction head — 같은 VAL 행, 같은 라우팅."""
     import torch
     pdir = (ROOT / "tmp/causal_regen_20260516" /
@@ -275,8 +283,8 @@ def _incumbent(val_raw: pd.DataFrame, x_val: pd.DataFrame, base_cols: list[str],
     dev = parent._device("cpu")
     preds = {e: parent._predict_payload(bundle["models"][e], x_val, device=dev) for e in hard.EXPERT_NAMES}
     route = np.argmax(val_raw[ROUTE_COLS_SPINE].to_numpy(np.float64), axis=1).astype(np.int64)
-    direction = parent._routed(preds, route, "direction", 3)
-    return {"bundle": str(bp), "pred": np.argmax(direction, axis=1).astype(np.int64)[qidx]}
+    routed = parent._routed(preds, route, head, 3)
+    return {"bundle": str(bp), "pred": np.argmax(routed, axis=1).astype(np.int64)[qidx]}
 
 
 def _run_ladder(*, arm: str, x_tr, y_tr, xq, yq, route_tr, route_q, n_ctx_list,
@@ -356,6 +364,9 @@ def main() -> int:
     ap.add_argument("--n-estimators", type=int, default=16)
     ap.add_argument("--balance-context", default="balanced", choices=["balanced", "raw"],
                     help="balanced: 클래스당 동수 하향표집(현직의 class_weight='balanced' 와 짝을 맞춤)")
+    ap.add_argument("--target", default="direction", choices=["direction", "quality"],
+                    help="어느 헤드를 재는가. quality 는 h48qual 전용 — zig075 는 라벨이 direction 과 "
+                         "같아 축퇴한다. 행·피쳐·평가 구조는 두 타깃이 동일하고 y 만 바뀐다")
     ap.add_argument("--model", default="tabicl", choices=["tabicl", "tabpfn"],
                     help="같은 컨텍스트·같은 질의 행에서 모델만 교체한 짝지은 비교")
     ap.add_argument("--ladder", default="", help="쉼표 구분 컨텍스트 크기(0=전량). 비우면 기본 사다리")
@@ -372,18 +383,28 @@ def main() -> int:
     balanced = str(args.balance_context) == "balanced"
 
     base_cols = spine._install(args.component)
-    # 라벨/품질 모드는 Phase 2 스윕과 같은 계약을 쓴다. direction head 게이트라 quality 는
-    # 사용하지 않으므로 `same_as_direction`(zig075 arm 이 실제로 쓴 값)으로 고정한다.
+    # 라벨 계약은 Phase 2 스윕과 동일하게 맞춘다.
+    #   target=direction : quality 를 쓰지 않으므로 `same_as_direction` 으로 고정(비용 절약)
+    #   target=quality   : h48qual arm 이 실제로 쓴 `quality_label_action` + 별도 라벨 디렉토리
+    if str(args.target) == "quality":
+        if args.component != "h48qual":
+            raise SystemExit("--target quality 는 h48qual 전용이다 "
+                             "(zig075 는 quality 라벨이 direction 과 같아 축퇴한다)")
+        q_mode, q_dir = "quality_label_action", QUAL_LBL
+    else:
+        q_mode, q_dir = "same_as_direction", None
     frames = p72._prepare_frames(
         disable_tp_sl=False, direction_label_dir=DIR_LBL,
-        quality_mode="same_as_direction", quality_label_dir=None,
+        quality_mode=q_mode, quality_label_dir=q_dir,
         quality_min_edge=0.0010, quality_max_mae=0.0100,
         quality_min_mfe_mae=1.20, quality_max_hold_bars=288)
     train_raw, val_raw = frames["train_raw"], frames["val_raw"]
+    ycol = "omega4_quality_action" if str(args.target) == "quality" else "zigzag_action"
     x_tr = parent._base_input(train_raw, base_cols)
-    y_tr = train_raw["zigzag_action"].to_numpy(np.int64)
+    y_tr = train_raw[ycol].to_numpy(np.int64)
     x_va = parent._base_input(val_raw, base_cols)
-    y_va = val_raw["zigzag_action"].to_numpy(np.int64)
+    y_va = val_raw[ycol].to_numpy(np.int64)
+    print(f"\n[타깃] {args.target} · y 컬럼 {ycol} · 라벨계약 {q_mode}", flush=True)
     print(f"\n[데이터] TRAIN {len(y_tr):,}행 · VAL {len(y_va):,}행 · 피쳐 {x_tr.shape[1]}열", flush=True)
     print(f"  TRAIN 클래스 분포 {np.bincount(y_tr, minlength=3).tolist()}  "
           f"VAL {np.bincount(y_va, minlength=3).tolist()}", flush=True)
@@ -398,6 +419,7 @@ def main() -> int:
 
     rep: dict[str, Any] = {
         "component": args.component, "seeds": seeds, "query_seed": int(args.query_seed),
+        "target": str(args.target), "y_column": ycol, "quality_mode": q_mode,
         "model": str(args.model),
         "n_estimators": int(args.n_estimators), "balance_context": str(args.balance_context),
         "n_train": int(len(y_tr)), "n_val": int(len(y_va)), "n_query": int(len(yq)),
@@ -421,7 +443,7 @@ def main() -> int:
     for seed in seeds:
         print(f"\n{'='*96}\n[시드 {seed}]", flush=True)
         one: dict[str, Any] = {}
-        inc = _incumbent(val_raw, x_va, base_cols, args.component, seed, qidx)
+        inc = _incumbent(val_raw, x_va, base_cols, args.component, seed, qidx, str(args.target))
         if inc is None:
             print("  현직 번들 없음 — 이 시드는 K2 판정 제외", flush=True)
             one["incumbent"] = None
@@ -439,7 +461,7 @@ def main() -> int:
                 n_estimators=int(args.n_estimators), device=str(args.device),
                 kind=str(args.model))
         rep["per_seed"][str(seed)] = one
-        (OUT / f"{args.model}_direction_{args.component}_5seed.json").write_text(
+        (OUT / f"{args.model}_{args.target}_{args.component}_5seed.json").write_text(
             json.dumps(rep, indent=2, ensure_ascii=False, default=float), encoding="utf-8")
 
     # ── 시드 집계 · 킬 게이트 ──
@@ -534,7 +556,7 @@ def main() -> int:
               f" — 통과해도 채택 근거는 아니다(정확도 개선이 경제 이득으로 이어지지 않은 사례가 "
               f"이 저장소에 반복돼 있다)", flush=True)
 
-    pth = OUT / f"{args.model}_direction_{args.component}_5seed.json"
+    pth = OUT / f"{args.model}_{args.target}_{args.component}_5seed.json"
     pth.write_text(json.dumps(rep, indent=2, ensure_ascii=False, default=float), encoding="utf-8")
     print(f"\n산출물: {pth}", flush=True)
     return 0
