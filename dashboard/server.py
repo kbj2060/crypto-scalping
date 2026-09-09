@@ -51,7 +51,6 @@ from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v
 # 표본외 161일 정밀도 강 66.0%(1.46건/일) · 중 53.2% · 약 32.1% (발동봉 기저 24.2% · 무작위 봉 2.9%).
 # 🔴강한 추세 구간(ret144 7일 분위 상하 20%)에서는 콜을 억제한다 -- 게이트 없이는 순 -3.36bp,
 #   중립 구간만 쓰면 +2.27bp. 표시 전용이고 매매 트리거가 아니다.
-from scripts.live_eth_extreme_detector_20260909 import compute_eth_extreme_detector  # noqa: E402
 # 2026-09-09 청산맵 신호 마커: 차트(72봉)와 **같은 타임스탬프 격자**로 증거신호 종수 + 이벤트
 # 트리거를 내보낸다. 신호마다 이력 창이 48봉으로 제각각이라 그대로 얹으면 정렬이 어긋난다.
 from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noqa: E402
@@ -252,6 +251,11 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
+# 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
+# (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
+EXTREME_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_extreme_detector_state.json"
+EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
+
 # 2026-09-08 돌파/되돌림 앵커 섀도우(scripts/live_eth_breakout_reversal_shadow_runner_20260908.py)
 # 표시 전용, 주문 없음. 커버리지 상한을 두지 않는다 -- 전 트리거에 판정을 내고 확신 등급만 표시한다.
 BREAKOUT_REV_STATE_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_state.json"
@@ -822,6 +826,24 @@ def _br_current_label(r: dict, meta: dict) -> bool:
     if want is None:
         return True
     return bp is None or abs(float(bp) - float(want)) < 1e-9
+
+
+def extreme_detector_payload() -> dict[str, Any]:
+    """워커 상태 파일. 워커가 멈추면 조용히 옛 값을 보여주지 않고 «데이터 없음» 으로 떨어진다.
+
+    ⚠️15분(5분봉 3개)을 넘으면 워커가 죽은 것이다 -- 인라인 폴백은 두지 않는다.
+      폴백을 두면 워커가 죽어도 표는 정상으로 보이고, 대신 대시보드가 5초씩 느려진다
+      (그게 이 구조를 만든 이유다). 죽었으면 죽었다고 보이는 편이 낫다.
+    """
+    st = load_json(EXTREME_DETECTOR_STATE_PATH)
+    if not st:
+        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
+                "subText": "데이터 없음", "grade": None, "proba": None, "history": [], "times": []}
+    age = _age_min(st.get("updated_utc"))
+    if age is not None and age > EXTREME_DETECTOR_MAX_AGE_MIN:
+        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
+                "tone": "neutral", "subText": "데이터 없음"}
+    return {**st, "stale_min": round(age, 1) if age is not None else None}
 
 
 def breakout_reversal_shadow_payload() -> dict[str, Any]:
@@ -1808,13 +1830,17 @@ def make_app() -> web.Application:
         )
 
     async def load_extreme_detector() -> dict[str, Any]:
-        """극점 탐지기 -- scripts/live_eth_extreme_detector_20260909.py 참고.
-        자체 klines(3000봉, 추세분위 2016봉 롤링에 필요) + 동결 HGB 5시드. 실측 ~1.1초라
-        GPU 를 쓰는 v_rebound 보다 가볍지만 같은 이유로 to_thread 에 둔다."""
+        """극점 탐지기 -- **워커가 쓴 상태 파일을 읽기만 한다**(2026-09-10).
+
+        전에는 이 자리에서 모델을 인라인으로 돌렸다. 모델을 TabPFN v3 로 올리면 0.49초가
+        5.14초가 되고(10.6배, 서버 실측) 그 GPU 를 V자 TabPFN·증거신호가 공유한다.
+        이 모델은 5분봉마다 한 번만 새 점수가 필요하므로 채점을 워커로 뺐다 --
+        scripts/live_eth_extreme_detector_worker_20260910.py. 다른 모델 카드와 같은 구조다.
+        """
         return await swr_cached(
             "extreme_detector", extreme_detector_cache, extreme_detector_lock,
             EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_eth_extreme_detector),
+            lambda: asyncio.to_thread(extreme_detector_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
 
