@@ -69,9 +69,7 @@ for p in TARGET_PATHS:
 
 from trading_bot_modules.binance_live_fetcher import BinanceLiveFetcher
 from trading_bot_modules.ensemble_predictor import EnsemblePredictor
-from trading_bot_modules.async_jsonl_writer import AsyncJsonlWriter
 from trading_bot_modules.process_lock import acquire_trading_bot_process_lock
-from trading_bot_modules.state_transition_gate import StateTransitionGate
 from trading_bot_modules.task_supervisor import AsyncTaskSupervisor
 from trading_bot_modules.runtime_shutdown import shutdown_runtime_resources
 from trading_bot_modules.duckdb_access import serialized_duckdb_access
@@ -81,7 +79,7 @@ from trading_bot_modules.execution_health import (
     ExecutionAlertDeduper,
     build_execution_alert,
 )
-from trading_bot_modules.portfolio_risk import PortfolioRiskConfig, PortfolioRiskManager
+from trading_bot_modules.portfolio_risk import PortfolioRiskConfig, PortfolioRiskManager, portfolio_cap_trace
 from trading_bot_modules.orderbook_recorder import OrderBookRecorder
 from trading_bot_modules.live_io import (
     _append_jsonl,
@@ -133,7 +131,6 @@ from trading_bot_modules.omega4_6_1_shadow_state import (
 )
 from trading_bot_modules.omega4_6_1_btc_cmamba_entry_gate import BtcCmambaEntryGate
 from trading_bot_modules.btc_swing_transition_live import BtcSwingTransitionLiveFeature
-from trading_bot_modules.v15_conformal_sleeve_adapter import ConformalSleeveV15Adapter
 from trading_bot_modules.v21_2_jackpot_adapter import JackpotRunnerV21_2Adapter
 
 try:
@@ -172,18 +169,13 @@ from features.engineering import FeatureEngineer
 from features.elite import RegimeEngine
 from enhanced_trading_engine import EnhancedTradingEngine
 from ensemble.microstructure_wnc_sleeve import (
-    MicrostructureSleeveConfig,
     microstructure_sleeve_decision,
     predict_microstructure_proba,
 )
 from ensemble.trend_bull_bear_sleeve import (
-    TrendSleeveConfig,
-    class_prob as _trend_class_prob,
     predict_trend_proba,
     trend_sleeve_decision,
 )
-from ensemble.macro_trend_sleeve import MacroTrendSleeveConfig, macro_trend_decision
-from ensemble.learned_execution_policy import predict_learned_execution
 from ensemble.fully_learned_governor_policy import (
     ACTION_CASH as FULLY_LEARNED_ACTION_CASH,
     ACTION_LONG as FULLY_LEARNED_ACTION_LONG,
@@ -191,7 +183,6 @@ from ensemble.fully_learned_governor_policy import (
     prepare_features as prepare_fully_learned_governor_features,
     predict_policy_frame as predict_fully_learned_governor_frame,
 )
-from ensemble.train_trade_candidate_detector import FEATURE_COLS as EVENT_DETECTOR_FEATURE_COLS
 from ensemble.train_rl_dsac_agent import DSACRouter, DSAC_STATE_DIM, GaussianActor
 
 try:
@@ -213,25 +204,6 @@ except Exception:
 # ── HFT 마이크로스트럭처 및 꼬리 위험 요격기 ──
 from microstructure_scanner import MicrostructureScanner
 from tail_risk_interceptor import TailRiskInterceptor
-
-try:
-    from scripts.eval_sniper_day_ensemble_oos_2026 import (
-        DEFAULT_SNIPER_CKPT as FINAL_GOVERNOR_SNIPER_CKPT,
-        _action_side as _final_sniper_action_side,
-        _load_discrete_actor as _load_final_sniper_actor,
-        _sniper_action as _final_sniper_action,
-    )
-except ImportError:
-    FINAL_GOVERNOR_SNIPER_CKPT = "/home/llewyn/crypto-scalping/data/ensemble/ckpt/regime_rl_meta_controller_v3/best.pth"
-
-    def _final_sniper_action_side(*_args: object, **_kwargs: object) -> int:
-        return 0
-
-    def _load_final_sniper_actor(*_args: object, **_kwargs: object) -> object:
-        raise RuntimeError("optional sniper ensemble is unavailable; quarantined regime-v2 dependency is not loaded")
-
-    def _final_sniper_action(*_args: object, **_kwargs: object) -> tuple[float, int]:
-        return 0.0, 0
 
 try:
     from scripts.train_event_masked_rl_meta_controller import (
@@ -273,75 +245,6 @@ except Exception:
     def _lifecycle_bucket_from_vec(_vec, _thresholds):
         return "neutral"
 try:
-    from scripts import train_eval_clean_base_deep_constant_gross_v1 as _deep_cg
-except Exception:
-    class _UnavailableDeepConstantGross:
-        @staticmethod
-        def _row_features(*_args, **_kwargs):
-            raise RuntimeError("deep_constant_gross_removed")
-
-    _deep_cg = _UnavailableDeepConstantGross()
-try:
-    from scripts import train_eval_clean_base_deep_gated_gross_v2 as _deep_dgg
-except Exception:
-    class _UnavailableDeepGatedGross:
-        @staticmethod
-        def _row_signal(*_args, **_kwargs):
-            raise RuntimeError("deep_gated_gross_removed")
-
-    _deep_dgg = _UnavailableDeepGatedGross()
-try:
-    from scripts import train_eval_clean_base_deep_state_hybrid_v2 as _deep_v2
-except Exception:
-    class _UnavailableDeepV2:
-        LOOKBACK = 0
-        ENSEMBLE_EMBED_DIM = 0
-        N_CLUSTERS = 0
-
-        class EnhancedGRUStateEncoder:
-            def __init__(self, *_args, **_kwargs):
-                raise RuntimeError("deep_state_hybrid_v2_removed")
-
-        class GRUSeedEnsemble:
-            def __init__(self, *_args, **_kwargs):
-                raise RuntimeError("deep_state_hybrid_v2_removed")
-
-        @staticmethod
-        def _deep_predict_v2(*_args, **_kwargs):
-            raise RuntimeError("deep_state_hybrid_v2_removed")
-
-    _deep_v2 = _UnavailableDeepV2()
-try:
-    from scripts import train_eval_clean_base_deep_state_hybrid_v1 as _deep_v1
-except Exception:
-    class _UnavailableDeepV1:
-        LOOKBACK = 0
-        EMBED_DIM = 0
-        N_CLUSTERS = 0
-
-        class base:
-            @staticmethod
-            def _stress(*_args, **_kwargs):
-                return {}
-
-        @staticmethod
-        def _transform_sequence_matrix(*_args, **_kwargs):
-            raise RuntimeError("deep_state_hybrid_v1_removed")
-
-        @staticmethod
-        def _sequence_tensor(*_args, **_kwargs):
-            raise RuntimeError("deep_state_hybrid_v1_removed")
-
-        @staticmethod
-        def _state_features(*_args, **_kwargs):
-            raise RuntimeError("deep_state_hybrid_v1_removed")
-
-        @staticmethod
-        def _predict_heads(*_args, **_kwargs):
-            raise RuntimeError("deep_state_hybrid_v1_removed")
-
-    _deep_v1 = _UnavailableDeepV1()
-try:
     from scripts import train_eval_deep_state_safe_cap_reallocator_v15_context_router as _deep_state_v15
 except Exception:
     class _UnavailableDeepStateV15:
@@ -354,29 +257,6 @@ except Exception:
             raise RuntimeError("deep_state_context_router_removed")
 
     _deep_state_v15 = _UnavailableDeepStateV15()
-try:
-    from scripts import train_eval_deep_state_safe_cap_reallocator_v17_adaptive_calibrator as _deep_state_v17
-    from scripts.train_eval_deep_state_safe_cap_reallocator_v17_adaptive_calibrator import (
-        AdaptiveCalibrator,
-        AdaptiveConfig,
-    )
-except Exception:
-    class AdaptiveConfig:
-        pass
-
-    class AdaptiveCalibrator:
-        pass
-
-    class _UnavailableDeepStateV17:
-        @staticmethod
-        def _meta_frame(*_args, **_kwargs):
-            raise RuntimeError("deep_state_adaptive_calibrator_removed")
-
-        @staticmethod
-        def _adaptive_q(*_args, **_kwargs):
-            raise RuntimeError("deep_state_adaptive_calibrator_removed")
-
-    _deep_state_v17 = _UnavailableDeepStateV17()
 try:
     from scripts.train_eval_hf_no_limit_exit_governor import (
         _exit_probability_vec as _lifecycle_exit_probability_vec,
@@ -432,7 +312,6 @@ from trading_bot_modules.runtime_config import (
     CONSOLE_LOG_COLOR,
     CONSOLE_LOG_COMPACT,
     CONSOLE_LOG_HEALTH_INTERVAL_SEC,
-    CONSOLE_LOG_MODEL_TRACE,
     CONSOLE_LOG_REFRESH,
     DAILY_TRADE_REPORT_STATE_PATH,
     DASHBOARD_EVENTS_PATH,
@@ -462,8 +341,6 @@ from trading_bot_modules.runtime_config import (
     ENSEMBLE_TRACKER_SLIP_RATE,
     ENSEMBLE_TRACKER_STATE_PATH,
     FINAL_GOVERNOR_AI_FEATURE_GROUPS,
-    FINAL_GOVERNOR_AI_FEATURE_STALE_SEC,
-    FINAL_GOVERNOR_AI_TIMING_LOG_ENABLE,
     FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_REAL_EXECUTION,
     FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION,
     FINAL_GOVERNOR_ALPHA2_1_AUDIT_PATH,
@@ -485,43 +362,12 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_BUFFER_BARS,
     FINAL_GOVERNOR_CLEAN_REGIME4_STICKY_ENABLE,
     FINAL_GOVERNOR_CLEAN_REGIME4_STICKY_MODEL_PATH,
-    FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_ENABLE,
     FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_MODEL_PATH,
     FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_REPORT_PATH,
-    FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_REQUIRED,
     FINAL_GOVERNOR_DDH2_AUDIT_PATH,
-    FINAL_GOVERNOR_DDH2_ENSEMBLE_ENABLE,
     FINAL_GOVERNOR_DDH2_REPORT_PATH,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_FEE,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_NOTIONAL,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_SLIP,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_ENABLE,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_REPORT_PATH,
-    FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_TARGET_NOTIONAL,
-    FINAL_GOVERNOR_DEEP_GATED_GROSS_COST3_FEE,
-    FINAL_GOVERNOR_DEEP_GATED_GROSS_COST3_SLIP,
-    FINAL_GOVERNOR_DEEP_GATED_GROSS_ENABLE,
-    FINAL_GOVERNOR_DEEP_GATED_GROSS_MODEL_PATH,
-    FINAL_GOVERNOR_DEEP_GATED_GROSS_REPORT_PATH,
-    FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_AUDIT_PATH,
-    FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_ENABLE,
     FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_MODEL_PATH,
-    FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_REPORT_PATH,
-    FINAL_GOVERNOR_DSAC_OVERLAY_CKPT_PATH,
-    FINAL_GOVERNOR_DSAC_OVERLAY_COST_BUFFER,
-    FINAL_GOVERNOR_DSAC_OVERLAY_COST_GATE_ENABLE,
-    FINAL_GOVERNOR_DSAC_OVERLAY_ENABLE,
-    FINAL_GOVERNOR_DSAC_OVERLAY_MODE,
-    FINAL_GOVERNOR_DSAC_OVERLAY_SCALE,
-    FINAL_GOVERNOR_DSAC_OVERLAY_THRESHOLD,
     FINAL_GOVERNOR_DUST_ENTRY_EXPOSURE,
-    FINAL_GOVERNOR_EVENT_DETECTOR_PATH,
-    FINAL_GOVERNOR_EXECUTION_POLICY_ENABLE,
-    FINAL_GOVERNOR_EXECUTION_POLICY_IGNORE_MAX_HOLD,
-    FINAL_GOVERNOR_EXECUTION_POLICY_LOW_QUALITY,
-    FINAL_GOVERNOR_EXECUTION_POLICY_PATH,
-    FINAL_GOVERNOR_EXECUTION_POLICY_QUALITY_OVERLAY,
-    FINAL_GOVERNOR_EXECUTION_POLICY_TAIL_QUALITY,
     FINAL_GOVERNOR_FULLY_LEARNED_ENABLE,
     FINAL_GOVERNOR_FULLY_LEARNED_FALLBACK_ENABLE,
     FINAL_GOVERNOR_FULLY_LEARNED_FALLBACK_EXIT_SUBMODEL_ENABLE,
@@ -547,24 +393,7 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_LIVE_COMPLETED_BAR_NEXT_OPEN_PROXY,
     FINAL_GOVERNOR_LIVE_MODEL_BARS,
     FINAL_GOVERNOR_LIVE_PROCESS_BARS,
-    FINAL_GOVERNOR_MACRO_BOOTSTRAP_CURRENT,
-    FINAL_GOVERNOR_MACRO_ENABLE,
-    FINAL_GOVERNOR_MACRO_LEVERAGE,
-    FINAL_GOVERNOR_MACRO_LOCKOUT_BARS,
-    FINAL_GOVERNOR_MACRO_LOCKOUT_ON_ANY_CLOSE,
-    FINAL_GOVERNOR_MACRO_LOCKOUT_UNTIL_SIGNAL_CHANGE,
     FINAL_GOVERNOR_MACRO_LOOKBACK_BARS,
-    FINAL_GOVERNOR_MACRO_NOTIONAL,
-    FINAL_GOVERNOR_MACRO_PERSIST_UPDATES,
-    FINAL_GOVERNOR_MACRO_STOP_LOSS,
-    FINAL_GOVERNOR_MACRO_TAKE_PROFIT,
-    FINAL_GOVERNOR_MACRO_THRESHOLD,
-    FINAL_GOVERNOR_MACRO_TRAILING_ARM,
-    FINAL_GOVERNOR_MACRO_TRAILING_GAP,
-    FINAL_GOVERNOR_MACRO_UPDATE_BARS,
-    FINAL_GOVERNOR_MANIFEST_PATH,
-    FINAL_GOVERNOR_MICRO_ENABLE,
-    FINAL_GOVERNOR_MICRO_MODEL_PATH,
     FINAL_GOVERNOR_MIN_ENTRY_EXPOSURE,
     FINAL_GOVERNOR_NEXT_OPEN_EXECUTION_ENABLE,
     FINAL_GOVERNOR_NEXT_OPEN_MAX_DELAY_SEC,
@@ -587,6 +416,7 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_MICROSTRUCTURE_SCANNER_ENABLE,
     FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_ORDERBOOK_RECORDER_ENABLE,
     FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_REAL_EXECUTION_ENABLE,
+    FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_SHADOW_PORTFOLIO_CAP_ENABLE,
     FINAL_GOVERNOR_OMEGA4_6_1_SOL_NOTIONAL_MULTIPLIER,
     FINAL_GOVERNOR_OMEGA4_6_1_ZIG075_BUNDLE_PATH,
     FINAL_GOVERNOR_OMEGA4_6_1_ZIG075_SIDECAR_PATH,
@@ -603,7 +433,6 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_OMEGA5_SOURCE_PARENT_REPORT_PATH,
     FINAL_GOVERNOR_OMEGA5_TWO_STAGE_VETO_REPORT_PATH,
     FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH,
-    FINAL_GOVERNOR_POLICY_PATH,
     FINAL_GOVERNOR_PORTFOLIO_BTC_SHARE,
     FINAL_GOVERNOR_PORTFOLIO_ETH_OMEGA461_SUBSHARE,
     FINAL_GOVERNOR_PORTFOLIO_ETH_SHARE,
@@ -615,19 +444,7 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_REGIME_PREDICTOR_ENABLE,
     FINAL_GOVERNOR_REGIME_PREDICTOR_MODEL_PATH,
     FINAL_GOVERNOR_RUNTIME_STATE_PATH,
-    FINAL_GOVERNOR_SAFE_LEARNED_CAP_AUDIT_PATH,
-    FINAL_GOVERNOR_SAFE_LEARNED_CAP_ENABLE,
-    FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE,
-    FINAL_GOVERNOR_SNIPER_ENABLE,
-    FINAL_GOVERNOR_SNIPER_MODEL_PATH,
     FINAL_GOVERNOR_TIMING_LOG_ENABLE,
-    FINAL_GOVERNOR_TREND_ENABLE,
-    FINAL_GOVERNOR_TREND_MODEL_PATH,
-    FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_DISABLE,
-    FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_FEE,
-    FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_SLIP,
-    FINAL_GOVERNOR_V1_5_COST_FIREWALL_ENABLE,
-    FINAL_GOVERNOR_V1_5_COST_FIREWALL_STRESS_SLEEVE_MULT,
     FINAL_GOVERNOR_V21_2_JACKPOT_AUDIT_PATH,
     FINAL_GOVERNOR_V21_2_JACKPOT_ENABLE,
     FINAL_GOVERNOR_V21_2_JACKPOT_MODEL_PATH,
@@ -641,11 +458,6 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_V21_MODEL_PATH,
     FINAL_GOVERNOR_V21_PURE_MODE,
     FINAL_GOVERNOR_V21_REPORT_PATH,
-    FINAL_GOVERNOR_V22_1_AUDIT_PATH,
-    FINAL_GOVERNOR_V22_1_ENABLE,
-    FINAL_GOVERNOR_V22_1_MODEL_PATH,
-    FINAL_GOVERNOR_V22_1_REPORT_PATH,
-    FINAL_GOVERNOR_V22_1_REQUIRED,
     FINAL_GOVERNOR_V31_AUDIT_PATH,
     FINAL_GOVERNOR_V31_DEEP_NOTIONAL,
     FINAL_GOVERNOR_V31_ENABLE,
@@ -2983,33 +2795,10 @@ class FinalGovernorRuntime:
         self.notional = float(FINAL_GOVERNOR_NOTIONAL)
         self.leverage = float(FINAL_GOVERNOR_LEVERAGE)
         self.window_bars = int(max(100, FINAL_GOVERNOR_WINDOW_BARS))
-        self.macro_cfg = MacroTrendSleeveConfig(
-            lookback_bars=int(FINAL_GOVERNOR_MACRO_LOOKBACK_BARS),
-            threshold=float(FINAL_GOVERNOR_MACRO_THRESHOLD),
-            persist_updates=int(FINAL_GOVERNOR_MACRO_PERSIST_UPDATES),
-            update_bars=int(FINAL_GOVERNOR_MACRO_UPDATE_BARS),
-            notional_exposure=float(FINAL_GOVERNOR_MACRO_NOTIONAL),
-            leverage=float(FINAL_GOVERNOR_MACRO_LEVERAGE),
-            min_history_bars=int(FINAL_GOVERNOR_MACRO_LOOKBACK_BARS),
-            bootstrap_current=bool(FINAL_GOVERNOR_MACRO_BOOTSTRAP_CURRENT),
-            take_profit=float(FINAL_GOVERNOR_MACRO_TAKE_PROFIT),
-            stop_loss=float(FINAL_GOVERNOR_MACRO_STOP_LOSS),
-            trailing_arm=float(FINAL_GOVERNOR_MACRO_TRAILING_ARM),
-            trailing_gap=float(FINAL_GOVERNOR_MACRO_TRAILING_GAP),
-            lockout_bars=int(FINAL_GOVERNOR_MACRO_LOCKOUT_BARS),
-            lockout_until_signal_change=bool(FINAL_GOVERNOR_MACRO_LOCKOUT_UNTIL_SIGNAL_CHANGE),
-            lockout_on_any_close=bool(FINAL_GOVERNOR_MACRO_LOCKOUT_ON_ANY_CLOSE),
-        )
         self.owner: str = ""
         self.owner_regime: str = ""
         self.peak_unrealized: float = 0.0
         self.last_prepared_frame_for_health: pd.DataFrame | None = None
-        self.macro_lockout_signal: int = 0
-        self.macro_lockout_bars_left: int = 0
-        self.active_macro_take_profit: float = float(FINAL_GOVERNOR_MACRO_TAKE_PROFIT)
-        self.active_macro_stop_loss: float = float(FINAL_GOVERNOR_MACRO_STOP_LOSS)
-        self.active_macro_max_hold_bars: int = 0
-        self.active_macro_quality_score: float = 0.0
         self.active_fully_learned_take_profit: float = 0.0
         self.active_fully_learned_stop_loss: float = 0.0
         self.active_fully_learned_max_hold_bars: int = 0
@@ -3096,37 +2885,11 @@ class FinalGovernorRuntime:
         self.lifecycle_v1_policy_path = self._repo_path(FINAL_GOVERNOR_LIFECYCLE_V1_POLICY_PATH)
         self.lifecycle_v1_exit_model_path = self._repo_path(FINAL_GOVERNOR_LIFECYCLE_V1_EXIT_MODEL_PATH)
         self.lifecycle_v1_model_path = self._repo_path(FINAL_GOVERNOR_LIFECYCLE_V1_MODEL_PATH)
-        self.conformal_veto_v1_5_enabled = bool(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_ENABLE)
-        self.conformal_veto_v1_5_required = bool(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_REQUIRED)
         self.conformal_veto_v1_5_model_path = self._repo_path(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_MODEL_PATH)
         self.conformal_veto_v1_5_report_path = self._repo_path(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_REPORT_PATH)
-        self.conformal_veto_v1_5_adapter: ConformalSleeveV15Adapter | None = None
-        self.deep_gated_gross_enabled = bool(FINAL_GOVERNOR_DEEP_GATED_GROSS_ENABLE)
-        self.deep_gated_gross_model_path = self._repo_path(FINAL_GOVERNOR_DEEP_GATED_GROSS_MODEL_PATH)
-        self.deep_gated_gross_report_path = self._repo_path(FINAL_GOVERNOR_DEEP_GATED_GROSS_REPORT_PATH)
-        self.deep_gated_gross_report: dict = {}
-        self.deep_gated_gross_payload: dict | None = None
-        self.deep_gated_gross_deep_model = None
         self.deep_gated_gross_cfg: dict = {}
-        self.safe_learned_cap_enabled = bool(FINAL_GOVERNOR_SAFE_LEARNED_CAP_ENABLE)
-        self.safe_learned_cap_audit_path = self._repo_path(FINAL_GOVERNOR_SAFE_LEARNED_CAP_AUDIT_PATH)
         self.safe_learned_cap_candidate: dict = {}
-        self.deep_state_adaptive_calibrator_enabled = bool(FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_ENABLE)
-        self.deep_state_adaptive_calibrator_model_path = self._repo_path(
-            FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_MODEL_PATH
-        )
-        self.deep_state_adaptive_calibrator_report_path = self._repo_path(
-            FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_REPORT_PATH
-        )
-        self.deep_state_adaptive_calibrator_audit_path = self._repo_path(
-            FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_AUDIT_PATH
-        )
-        self.deep_state_adaptive_calibrator_payload: dict | None = None
-        self.deep_state_adaptive_calibrator_report: dict = {}
         self.deep_state_router_models = None
-        self.deep_state_adaptive_calibrator: AdaptiveCalibrator | None = None
-        self.deep_state_adaptive_config: AdaptiveConfig | dict | None = None
-        self.deep_state_adaptive_future_rolling_q: float | None = None
         self.v21_enabled = bool(FINAL_GOVERNOR_V21_ENABLE)
         self.v21_pure_mode = bool(FINAL_GOVERNOR_V21_PURE_MODE)
         self.v21_bypass_cooldown = bool(FINAL_GOVERNOR_V21_BYPASS_COOLDOWN)
@@ -3144,12 +2907,6 @@ class FinalGovernorRuntime:
         self.v21_stop_config: dict = {}
         self.v21_cap_candidate: dict = {}
         self.v21_path_model: dict | None = None
-        self.v22_1_enabled = bool(FINAL_GOVERNOR_V22_1_ENABLE)
-        self.v22_1_required = bool(FINAL_GOVERNOR_V22_1_REQUIRED)
-        self.v22_1_model_path = self._repo_path(FINAL_GOVERNOR_V22_1_MODEL_PATH)
-        self.v22_1_report_path = self._repo_path(FINAL_GOVERNOR_V22_1_REPORT_PATH)
-        self.v22_1_audit_path = self._repo_path(FINAL_GOVERNOR_V22_1_AUDIT_PATH)
-        self.v22_1_adapter: object | None = None
         self.v21_2_jackpot_enabled = bool(FINAL_GOVERNOR_V21_2_JACKPOT_ENABLE)
         self.v21_2_jackpot_required = bool(FINAL_GOVERNOR_V21_2_JACKPOT_REQUIRED)
         self.v21_2_jackpot_model_path = self._repo_path(FINAL_GOVERNOR_V21_2_JACKPOT_MODEL_PATH)
@@ -3184,211 +2941,12 @@ class FinalGovernorRuntime:
         self.alpha2_1_teacher_buckets: tuple[float, ...] = ()
         self.v21_scout_heads: dict | None = None
         self.v21_feature_cols: list[str] = []
-        self.ddh2_ensemble_enabled = bool(FINAL_GOVERNOR_DDH2_ENSEMBLE_ENABLE)
         self.ddh2_report_path = self._repo_path(FINAL_GOVERNOR_DDH2_REPORT_PATH)
         self.ddh2_audit_path = self._repo_path(FINAL_GOVERNOR_DDH2_AUDIT_PATH)
         self.ddh2_report: dict = {}
         self.ddh2_audit: dict = {}
         self.ddh2_config: dict = {}
         self.ddh2_fallback_dd_block_active: bool = False
-        if self.conformal_veto_v1_5_enabled:
-            try:
-                missing = [
-                    p for p in (self.conformal_veto_v1_5_model_path, self.conformal_veto_v1_5_report_path)
-                    if not os.path.exists(p)
-                ]
-                if missing:
-                    raise FileNotFoundError(",".join(missing))
-                adapter = ConformalSleeveV15Adapter.load(
-                    self.conformal_veto_v1_5_model_path,
-                    self.conformal_veto_v1_5_report_path,
-                )
-                self.conformal_veto_v1_5_adapter = adapter
-                logger.info(
-                    "SYSTEM conformal_veto_v1_5=ON model=%s report=%s config=%s",
-                    self.conformal_veto_v1_5_model_path,
-                    self.conformal_veto_v1_5_report_path,
-                    str(adapter.selected_config.get("name", "")),
-                )
-            except Exception as e:
-                self.conformal_veto_v1_5_enabled = False
-                self.conformal_veto_v1_5_adapter = None
-                logger.error(
-                    "SYSTEM conformal_veto_v1_5=BLOCKED reason=bad_required_artifact path=%s err=%s",
-                    self.conformal_veto_v1_5_model_path,
-                    e,
-                )
-                if self.conformal_veto_v1_5_required:
-                    raise RuntimeError(
-                        f"required_conformal_veto_v1_5_artifact_unavailable:{self.conformal_veto_v1_5_model_path}"
-                    ) from e
-        if self.ddh2_ensemble_enabled:
-            try:
-                missing = [
-                    p for p in (self.ddh2_report_path, self.ddh2_audit_path)
-                    if not os.path.exists(p)
-                ]
-                if missing:
-                    raise FileNotFoundError(",".join(missing))
-                with open(self.ddh2_audit_path, "r", encoding="utf-8") as f:
-                    self.ddh2_audit = json.load(f)
-                if str(self.ddh2_audit.get("status", "")).lower() != "pass":
-                    raise ValueError(f"ddh2_audit_not_pass:{self.ddh2_audit.get('blocking', [])}")
-                with open(self.ddh2_report_path, "r", encoding="utf-8") as f:
-                    self.ddh2_report = json.load(f)
-                self.ddh2_config = dict(self.ddh2_report.get("model_config", {}) or {})
-                if not self.ddh2_config:
-                    raise ValueError("ddh2_model_config_missing")
-                self._validate_ddh2_full_1x_artifacts()
-                logger.info(
-                    "SYSTEM ddh2_ensemble=ON report=%s audit=%s warnings=%s",
-                    self.ddh2_report_path,
-                    self.ddh2_audit_path,
-                    ",".join(str(x) for x in list(self.ddh2_audit.get("warnings", []) or [])),
-                )
-            except Exception as e:
-                self.ddh2_ensemble_enabled = False
-                self.ddh2_report = {}
-                self.ddh2_audit = {}
-                self.ddh2_config = {}
-                logger.error("SYSTEM ddh2_ensemble=BLOCKED reason=bad_required_artifact path=%s err=%s", self.ddh2_report_path, e)
-                raise RuntimeError(f"required_ddh2_artifact_unavailable:{self.ddh2_report_path}") from e
-        if self.deep_gated_gross_enabled:
-            try:
-                missing = [
-                    p for p in (self.deep_gated_gross_model_path, self.deep_gated_gross_report_path)
-                    if not os.path.exists(p)
-                ]
-                if missing:
-                    raise FileNotFoundError(",".join(missing))
-                with open(self.deep_gated_gross_report_path, "r", encoding="utf-8") as f:
-                    self.deep_gated_gross_report = json.load(f)
-                payload = joblib.load(self.deep_gated_gross_model_path)
-                _deep_v1.LOOKBACK = _deep_v2.LOOKBACK
-                _deep_v1.EMBED_DIM = _deep_v2.ENSEMBLE_EMBED_DIM
-                _deep_v1.N_CLUSTERS = _deep_v2.N_CLUSTERS
-                seq_features = list(payload.get("sequence_features") or [])
-                if not seq_features:
-                    raise ValueError("missing_sequence_features")
-                torch_model_path = str(payload.get("torch_model") or "")
-                if torch_model_path and not os.path.isabs(torch_model_path):
-                    torch_model_path = self._repo_path(torch_model_path)
-                if not torch_model_path or not os.path.exists(torch_model_path):
-                    raise FileNotFoundError(torch_model_path or "missing_torch_model")
-                state = torch.load(torch_model_path, map_location="cpu")
-                encoders = []
-                for sd in list(state.get("models") or []):
-                    model = _deep_v2.EnhancedGRUStateEncoder(input_dim=len(seq_features))
-                    model.load_state_dict(sd)
-                    model.eval()
-                    encoders.append(model)
-                if not encoders:
-                    raise ValueError("missing_gru_ensemble_state")
-                deep_model = _deep_v2.GRUSeedEnsemble(encoders)
-                deep_model.eval()
-                self.deep_gated_gross_payload = payload
-                self.deep_gated_gross_deep_model = deep_model
-                self.deep_gated_gross_cfg = dict(
-                    payload.get("selected_parent_config", {})
-                    or payload.get("selected_config", {})
-                    or self.deep_gated_gross_report.get("selected_parent_config", {})
-                    or self.deep_gated_gross_report.get("selected_config", {})
-                    or {}
-                )
-                cap_candidate = dict(
-                    payload.get("selected_cap_candidate", {})
-                    or dict(self.deep_gated_gross_report.get("selected", {}) or {}).get("candidate", {})
-                    or {}
-                )
-                if self.safe_learned_cap_enabled:
-                    if not cap_candidate:
-                        raise ValueError("safe_cap_candidate_missing")
-                    if os.path.exists(self.safe_learned_cap_audit_path):
-                        with open(self.safe_learned_cap_audit_path, "r", encoding="utf-8") as f:
-                            cap_audit = json.load(f)
-                        if str(cap_audit.get("status", "")).lower() != "pass":
-                            raise ValueError(f"safe_cap_audit_not_pass:{cap_audit.get('blocking', [])}")
-                    self.safe_learned_cap_candidate = cap_candidate
-                logger.info(
-                    "SYSTEM deep_gated_gross=ON model=%s report=%s config=%s safe_cap=%s",
-                    self.deep_gated_gross_model_path,
-                    self.deep_gated_gross_report_path,
-                    self.deep_gated_gross_cfg.get("name", ""),
-                    self.safe_learned_cap_candidate.get("name", "OFF") if self.safe_learned_cap_enabled else "OFF",
-                )
-            except Exception as e:
-                logger.warning("SYSTEM deep_gated_gross=OFF reason=bad_artifact path=%s err=%s", self.deep_gated_gross_model_path, e)
-                self.deep_gated_gross_enabled = False
-                self.safe_learned_cap_enabled = False
-                self.safe_learned_cap_candidate = {}
-                self.deep_gated_gross_payload = None
-                self.deep_gated_gross_deep_model = None
-                self.deep_gated_gross_cfg = {}
-        if self.deep_state_adaptive_calibrator_enabled:
-            try:
-                missing = [
-                    p for p in (
-                        self.deep_state_adaptive_calibrator_model_path,
-                        self.deep_state_adaptive_calibrator_report_path,
-                        self.deep_state_adaptive_calibrator_audit_path,
-                    )
-                    if not os.path.exists(p)
-                ]
-                if missing:
-                    raise FileNotFoundError(",".join(missing))
-                with open(self.deep_state_adaptive_calibrator_audit_path, "r", encoding="utf-8") as f:
-                    adaptive_audit = json.load(f)
-                if str(adaptive_audit.get("status", "")).lower() != "pass":
-                    raise ValueError(f"adaptive_calibrator_audit_not_pass:{adaptive_audit.get('blocking', [])}")
-                with open(self.deep_state_adaptive_calibrator_report_path, "r", encoding="utf-8") as f:
-                    self.deep_state_adaptive_calibrator_report = json.load(f)
-                main_mod = sys.modules.get("__main__")
-                if main_mod is not None:
-                    setattr(main_mod, "AdaptiveConfig", AdaptiveConfig)
-                    setattr(main_mod, "AdaptiveCalibrator", AdaptiveCalibrator)
-                adaptive_payload = joblib.load(self.deep_state_adaptive_calibrator_model_path)
-                router_models = adaptive_payload.get("router_models") if isinstance(adaptive_payload, dict) else None
-                calibrator = adaptive_payload.get("adaptive_calibrator") if isinstance(adaptive_payload, dict) else None
-                cfg = adaptive_payload.get("selected_config") if isinstance(adaptive_payload, dict) else None
-                if router_models is None or calibrator is None or cfg is None:
-                    raise ValueError("adaptive_calibrator_payload_incomplete")
-                payload_base_model = str(adaptive_payload.get("base_model", "") or "")
-                if payload_base_model:
-                    resolved_base = os.path.abspath(self._repo_path(payload_base_model))
-                    active_base = os.path.abspath(self.deep_gated_gross_model_path)
-                    if resolved_base != active_base:
-                        logger.warning(
-                            "SYSTEM adaptive_calibrator base_mismatch active_dgg=%s payload_base=%s",
-                            active_base,
-                            resolved_base,
-                        )
-                self.deep_state_adaptive_calibrator_payload = adaptive_payload
-                self.deep_state_router_models = router_models
-                self.deep_state_adaptive_calibrator = calibrator
-                self.deep_state_adaptive_config = cfg
-                rolling_q = adaptive_payload.get("future_rolling_q")
-                self.deep_state_adaptive_future_rolling_q = (
-                    float(rolling_q) if rolling_q is not None and np.isfinite(float(rolling_q)) else None
-                )
-                logger.info(
-                    "SYSTEM deep_state_adaptive_calibrator=ON model=%s config=%s audit=%s",
-                    self.deep_state_adaptive_calibrator_model_path,
-                    str(self._adaptive_calibrator_cfg_get(cfg, "name", "")),
-                    self.deep_state_adaptive_calibrator_audit_path,
-                )
-            except Exception as e:
-                logger.warning(
-                    "SYSTEM deep_state_adaptive_calibrator=OFF reason=bad_artifact path=%s err=%s",
-                    self.deep_state_adaptive_calibrator_model_path,
-                    e,
-                )
-                self.deep_state_adaptive_calibrator_enabled = False
-                self.deep_state_adaptive_calibrator_payload = None
-                self.deep_state_adaptive_calibrator_report = {}
-                self.deep_state_router_models = None
-                self.deep_state_adaptive_calibrator = None
-                self.deep_state_adaptive_config = None
-                self.deep_state_adaptive_future_rolling_q = None
         if self.v21_enabled:
             try:
                 missing = [
@@ -3445,8 +3003,6 @@ class FinalGovernorRuntime:
                 self.v21_path_model = path_model
                 self.v21_scout_heads = learned_heads if adapter_version == "v22_1_learned_scout" else None
                 self.v21_feature_cols = feature_cols
-                if self.safe_learned_cap_enabled and cap_candidate:
-                    self.safe_learned_cap_candidate = cap_candidate
                 if dict(payload.get("selected_parent_config", {}) or {}):
                     self.deep_gated_gross_cfg = dict(payload.get("selected_parent_config", {}) or self.deep_gated_gross_cfg)
                 logger.info(
@@ -3475,8 +3031,6 @@ class FinalGovernorRuntime:
                 self.v21_path_model = None
                 self.v21_scout_heads = None
                 self.v21_feature_cols = []
-        if self.v22_1_enabled:
-            raise RuntimeError("v22_1_adapter_was_removed")
         if self.v21_2_jackpot_enabled:
             try:
                 adapter = JackpotRunnerV21_2Adapter.load(
@@ -3629,65 +3183,6 @@ class FinalGovernorRuntime:
                 raise RuntimeError(f"required_alpha2_1_artifact_unavailable:{self.alpha2_1_teacher_model_path}") from e
         else:
             logger.info("SYSTEM alpha2_1=OFF reason=disabled_by_env")
-        self.dsac_overlay_enabled = bool(FINAL_GOVERNOR_DSAC_OVERLAY_ENABLE)
-        self.dsac_overlay_ckpt_path = self._repo_path(FINAL_GOVERNOR_DSAC_OVERLAY_CKPT_PATH)
-        self.dsac_overlay_mode = str(FINAL_GOVERNOR_DSAC_OVERLAY_MODE or "half_if_opposite").strip().lower()
-        self.dsac_overlay_threshold = float(np.clip(FINAL_GOVERNOR_DSAC_OVERLAY_THRESHOLD, 0.0, 1.0))
-        self.dsac_overlay_scale = float(np.clip(FINAL_GOVERNOR_DSAC_OVERLAY_SCALE, 0.0, 1.0))
-        self.dsac_overlay_cost_gate_enabled = bool(FINAL_GOVERNOR_DSAC_OVERLAY_COST_GATE_ENABLE)
-        self.dsac_overlay_cost_buffer = float(max(0.0, FINAL_GOVERNOR_DSAC_OVERLAY_COST_BUFFER))
-        self.dsac_overlay_router: DSACRouter | None = None
-        self.dsac_overlay_ckpt_meta: dict = {}
-        if self.dsac_overlay_enabled:
-            try:
-                if not os.path.exists(self.dsac_overlay_ckpt_path):
-                    raise FileNotFoundError(self.dsac_overlay_ckpt_path)
-                dsac_ckpt = torch.load(self.dsac_overlay_ckpt_path, map_location=self.device)
-                state_dim = int(dsac_ckpt.get("state_dim", DSAC_STATE_DIM) or DSAC_STATE_DIM)
-                actor = GaussianActor(state_dim=state_dim).to(self.device)
-                actor.load_state_dict(dsac_ckpt["actor"])
-                actor.eval()
-                self.dsac_overlay_router = DSACRouter(actor, device=self.device)
-                self.dsac_overlay_ckpt_meta = {
-                    "epoch": int(dsac_ckpt.get("epoch", 0) or 0),
-                    "global_step": int(dsac_ckpt.get("global_step", 0) or 0),
-                    "state_dim": int(state_dim),
-                    "best_val_pnl": float(_safe_float(dsac_ckpt.get("best_val_pnl", 0.0), 0.0)),
-                }
-                logger.info(
-                    "SYSTEM dsac_overlay=ON ckpt=%s mode=%s threshold=%.3f scale=%.3f cost_buffer=%.4f",
-                    self.dsac_overlay_ckpt_path,
-                    self.dsac_overlay_mode,
-                    self.dsac_overlay_threshold,
-                    self.dsac_overlay_scale,
-                    self.dsac_overlay_cost_buffer,
-                )
-            except Exception as e:
-                logger.warning("SYSTEM dsac_overlay=OFF reason=bad_artifact path=%s err=%s", self.dsac_overlay_ckpt_path, e)
-                self.dsac_overlay_enabled = False
-                self.dsac_overlay_router = None
-                self.dsac_overlay_ckpt_meta = {}
-        self.deep_constant_gross_enabled = bool(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_ENABLE)
-        self.deep_constant_gross_report_path = self._repo_path(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_REPORT_PATH)
-        self.deep_constant_gross_target_notional = float(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_TARGET_NOTIONAL)
-        self.deep_constant_gross_cost3_notional = float(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_NOTIONAL)
-        self.deep_constant_gross_report: dict = {}
-        if self.deep_constant_gross_enabled:
-            if os.path.exists(self.deep_constant_gross_report_path):
-                try:
-                    with open(self.deep_constant_gross_report_path, "r", encoding="utf-8") as f:
-                        self.deep_constant_gross_report = json.load(f)
-                    cfg = dict(self.deep_constant_gross_report.get("selected_config", {}) or {})
-                    if "target_notional" in cfg:
-                        self.deep_constant_gross_target_notional = float(cfg.get("target_notional") or self.deep_constant_gross_target_notional)
-                    if "cost3_notional" in cfg:
-                        self.deep_constant_gross_cost3_notional = float(cfg.get("cost3_notional") or self.deep_constant_gross_cost3_notional)
-                except Exception as e:
-                    logger.warning("SYSTEM deep_constant_gross=OFF reason=bad_report path=%s err=%s", self.deep_constant_gross_report_path, e)
-                    self.deep_constant_gross_enabled = False
-            else:
-                logger.warning("SYSTEM deep_constant_gross=OFF reason=missing_report path=%s", self.deep_constant_gross_report_path)
-                self.deep_constant_gross_enabled = False
         if bool(FINAL_GOVERNOR_LIFECYCLE_V1_ENABLE):
             missing = [
                 p for p in (self.lifecycle_v1_policy_path, self.lifecycle_v1_exit_model_path, self.lifecycle_v1_model_path)
@@ -3878,24 +3373,11 @@ class FinalGovernorRuntime:
                 self.clean_regime4_sticky_bundle = joblib.load(self.clean_regime4_sticky_path)
             else:
                 logger.warning("SYSTEM clean_regime4_sticky=OFF reason=missing_model path=%s", self.clean_regime4_sticky_path)
-        self.execution_policy_bundle: dict | None = None
-        self.execution_policy_path = self._repo_path(FINAL_GOVERNOR_EXECUTION_POLICY_PATH)
-        if bool(FINAL_GOVERNOR_EXECUTION_POLICY_ENABLE and self.fully_learned_policy_bundle is None):
-            if os.path.exists(self.execution_policy_path):
-                self.execution_policy_bundle = joblib.load(self.execution_policy_path)
-            else:
-                logger.warning("SYSTEM execution_policy=OFF reason=missing_model path=%s", self.execution_policy_path)
         self.runtime_state_path = self._repo_path(FINAL_GOVERNOR_RUNTIME_STATE_PATH)
         self.last_exit_bar: int = -10**9
         self.bar_counter: int = 0
         self._load_runtime_state()
 
-        self.micro_bundle: dict | None = None
-        self.micro_cfg: MicrostructureSleeveConfig | None = None
-        self.trend_bundle: dict | None = None
-        self.trend_cfg: TrendSleeveConfig | None = None
-        self.event_detector: dict | None = None
-        self.event_feature_cols = list(EVENT_DETECTOR_FEATURE_COLS)
         self.regime_predictor_bundle: dict | None = None
         self.regime_predictor_path = self._repo_path(FINAL_GOVERNOR_REGIME_PREDICTOR_MODEL_PATH)
         if bool(FINAL_GOVERNOR_REGIME_PREDICTOR_ENABLE):
@@ -3904,55 +3386,6 @@ class FinalGovernorRuntime:
                 "forbidden legacy regime features. Use clean_regime4_state24_sticky090_v2_* only."
             )
 
-        self.sniper_actor = None
-        self.sniper_ckpt = None
-        self.manifest = None
-        self.active_regimes: list[str] = []
-        if self.fully_learned_policy_bundle is None and bool(
-            FINAL_GOVERNOR_SNIPER_ENABLE or FINAL_GOVERNOR_TREND_ENABLE or FINAL_GOVERNOR_MICRO_ENABLE
-        ):
-            micro_path = self._repo_file_path(FINAL_GOVERNOR_MICRO_MODEL_PATH)
-            trend_path = self._repo_file_path(FINAL_GOVERNOR_TREND_MODEL_PATH)
-            event_path = self._repo_file_path(FINAL_GOVERNOR_EVENT_DETECTOR_PATH)
-            if bool(FINAL_GOVERNOR_MICRO_ENABLE or FINAL_GOVERNOR_TREND_ENABLE) and (
-                micro_path is None or trend_path is None or event_path is None
-            ):
-                logger.warning(
-                    "SYSTEM sniper_trend_micro=OFF reason=missing_or_invalid_artifacts micro=%s trend=%s event=%s",
-                    self._repo_path(FINAL_GOVERNOR_MICRO_MODEL_PATH),
-                    self._repo_path(FINAL_GOVERNOR_TREND_MODEL_PATH),
-                    self._repo_path(FINAL_GOVERNOR_EVENT_DETECTOR_PATH),
-                )
-            elif bool(FINAL_GOVERNOR_MICRO_ENABLE or FINAL_GOVERNOR_TREND_ENABLE):
-                self.micro_bundle = joblib.load(micro_path)
-                self.micro_cfg = MicrostructureSleeveConfig(**dict(self.micro_bundle.get("config", {})))
-                self.trend_bundle = joblib.load(trend_path)
-                self.trend_cfg = TrendSleeveConfig(**dict(self.trend_bundle.get("config", {})))
-                if self.ddh2_ensemble_enabled:
-                    self.micro_cfg = self._ddh2_override_micro_config(self.micro_cfg)
-                    self.trend_cfg = self._ddh2_override_trend_config(self.trend_cfg)
-                with open(event_path, "rb") as f:
-                    self.event_detector = pickle.load(f)
-                self.event_feature_cols = list(self.event_detector.get("feature_cols", EVENT_DETECTOR_FEATURE_COLS))
-            if bool(FINAL_GOVERNOR_SNIPER_ENABLE):
-                sniper_path = self._repo_file_path(FINAL_GOVERNOR_SNIPER_MODEL_PATH)
-                manifest_path = self._repo_file_path(FINAL_GOVERNOR_MANIFEST_PATH)
-                policy_path = self._repo_file_path(FINAL_GOVERNOR_POLICY_PATH)
-                if sniper_path is None or manifest_path is None or policy_path is None:
-                    logger.warning(
-                        "SYSTEM sniper=OFF reason=missing_or_invalid_artifacts sniper=%s manifest=%s policy=%s",
-                        self._repo_path(FINAL_GOVERNOR_SNIPER_MODEL_PATH),
-                        self._repo_path(FINAL_GOVERNOR_MANIFEST_PATH),
-                        self._repo_path(FINAL_GOVERNOR_POLICY_PATH),
-                    )
-                else:
-                    self.sniper_actor, self.sniper_ckpt = _load_final_sniper_actor(sniper_path, self.device)
-                    self.manifest, policy = _load_final_manifest_policy(
-                        manifest_path,
-                        policy_path,
-                        ["bull", "bear", "chop", "whipsaw", "normal"],
-                    )
-                    self.active_regimes = [r for r in list(policy.active_regimes) if r in {"bull", "bear"}]
         logger.info(
             "SYSTEM governor=FINAL_RUNTIME device=%s omega5=%s alpha2_1=%s lifecycle_v1=%s v21_2=%s v31=%s fully_learned=%s fully_learned_fallback=%s primary_low_conf_tp=%.4f primary_low_conf_thr=%.4f fallback_tp_scale=%.4f fallback_exit_submodel=%s fully_learned_scale=%s clean4=%s tp_sl_score=%s sniper=%s trend=%s micro=%s regime_pred=%s exec_policy=%s alpha3_contract=%s mark_parity=%s cooldown_parity=%s",
             self.device,
@@ -3970,11 +3403,11 @@ class FinalGovernorRuntime:
             dict(self.fully_learned_scale_runtime or {}).get("name", "OFF"),
             self.clean_regime4_sticky_path if self.clean_regime4_sticky_bundle is not None else "OFF",
             self.fully_learned_tp_sl_score_path if self.fully_learned_tp_sl_score_bundle is not None else "OFF",
-            self._repo_path(FINAL_GOVERNOR_SNIPER_MODEL_PATH) if bool(FINAL_GOVERNOR_SNIPER_ENABLE and self.fully_learned_policy_bundle is None) else "OFF",
-            self._repo_path(FINAL_GOVERNOR_TREND_MODEL_PATH) if bool(FINAL_GOVERNOR_TREND_ENABLE and self.fully_learned_policy_bundle is None) else "OFF",
-            self._repo_path(FINAL_GOVERNOR_MICRO_MODEL_PATH) if bool(FINAL_GOVERNOR_MICRO_ENABLE and self.fully_learned_policy_bundle is None) else "OFF",
+            "OFF",
+            "OFF",
+            "OFF",
             self.regime_predictor_path if self.regime_predictor_bundle is not None else "OFF",
-            self.execution_policy_path if self.execution_policy_bundle is not None else "OFF",
+            "OFF",
             FINAL_GOVERNOR_ALPHA3_LIVE_CONTRACT_ID,
             bool(FINAL_GOVERNOR_ALPHA3_CSV_MARK_PARITY_ENABLE),
             bool(FINAL_GOVERNOR_ALPHA3_CSV_COOLDOWN_PARITY_ENABLE),
@@ -4097,134 +3530,8 @@ class FinalGovernorRuntime:
             raise RuntimeError(f"invalid fully learned scale summary: {summary_path}") from e
         return None
 
-    def _validate_ddh2_full_1x_artifacts(self) -> None:
-        raise RuntimeError("ddh2_removed")
-
     def _ddh2_cfg_float(self, key: str, default: float = 0.0) -> float:
         return _safe_float(dict(self.ddh2_config or {}).get(key, default), default)
-
-    def _ddh2_cfg_int(self, key: str, default: int = 0) -> int:
-        return int(float(self._ddh2_cfg_float(key, float(default))))
-
-    def _ddh2_override_micro_config(self, cfg: MicrostructureSleeveConfig) -> MicrostructureSleeveConfig:
-        values = dict(cfg.__dict__)
-        cfg_map = dict(self.ddh2_config or {})
-        if self._ddh2_cfg_float("micro_max_notional", 0.0) > 0.0:
-            values["max_notional_exposure"] = self._ddh2_cfg_float("micro_max_notional", cfg.max_notional_exposure)
-        if self._ddh2_cfg_float("micro_max_leverage", 0.0) > 0.0:
-            values["max_leverage"] = self._ddh2_cfg_float("micro_max_leverage", cfg.max_leverage)
-        if "micro_entry_confidence" in cfg_map:
-            values["entry_confidence"] = self._ddh2_cfg_float("micro_entry_confidence", cfg.entry_confidence)
-        if "micro_entry_gap" in cfg_map:
-            values["entry_gap"] = self._ddh2_cfg_float("micro_entry_gap", cfg.entry_gap)
-        if self._ddh2_cfg_float("micro_whipsaw_mult_cap", 0.0) > 0.0:
-            values["whipsaw_notional_mult"] = min(
-                float(values.get("whipsaw_notional_mult", cfg.whipsaw_notional_mult)),
-                self._ddh2_cfg_float("micro_whipsaw_mult_cap", cfg.whipsaw_notional_mult),
-            )
-        if self._ddh2_cfg_float("micro_chop_mult_cap", 0.0) > 0.0:
-            values["chop_notional_mult"] = min(
-                float(values.get("chop_notional_mult", cfg.chop_notional_mult)),
-                self._ddh2_cfg_float("micro_chop_mult_cap", cfg.chop_notional_mult),
-            )
-        return MicrostructureSleeveConfig(**values)
-
-    def _ddh2_override_trend_config(self, cfg: TrendSleeveConfig) -> TrendSleeveConfig:
-        values = dict(cfg.__dict__)
-        cfg_map = dict(self.ddh2_config or {})
-        if self._ddh2_cfg_float("trend_max_notional", 0.0) > 0.0:
-            values["max_notional_exposure"] = self._ddh2_cfg_float("trend_max_notional", cfg.max_notional_exposure)
-        if self._ddh2_cfg_float("trend_max_leverage", 0.0) > 0.0:
-            values["max_leverage"] = self._ddh2_cfg_float("trend_max_leverage", cfg.max_leverage)
-        if "trend_entry_confidence" in cfg_map:
-            values["entry_confidence"] = self._ddh2_cfg_float("trend_entry_confidence", cfg.entry_confidence)
-        if "trend_entry_gap" in cfg_map:
-            values["entry_gap"] = self._ddh2_cfg_float("trend_entry_gap", cfg.entry_gap)
-        return TrendSleeveConfig(**values)
-
-    def _ddh2_cost_stress_mult(self, meta_router) -> float:
-        fee_mult = _safe_float(getattr(meta_router, "trade_fee", 0.0005), 0.0005) / max(0.0005, 1e-12)
-        slip_mult = _safe_float(getattr(meta_router, "trade_slip", 0.0002), 0.0002) / max(0.0002, 1e-12)
-        return float(max(1.0, fee_mult, slip_mult))
-
-    def _ddh2_extra_gap(self, meta_router, scale: float) -> float:
-        return float(max(0.0, self._ddh2_cost_stress_mult(meta_router) - 1.0) * max(0.0, float(scale)))
-
-    @staticmethod
-    def _ddh2_trend_edge(side: str, *, no_p: float, long_p: float, short_p: float) -> float:
-        if str(side).upper() == "LONG":
-            return float(long_p - max(short_p, 0.35 * no_p))
-        if str(side).upper() == "SHORT":
-            return float(short_p - max(long_p, 0.35 * no_p))
-        return 0.0
-
-    def _ddh2_regime_extra_gap(self, meta_router, *, source: str, regime: str) -> float:
-        r = str(regime or "").lower()
-        if source == "trend":
-            if r == "bull":
-                return self._ddh2_extra_gap(meta_router, self._ddh2_cfg_float("trend_bull_cost_mult_gap_scale", 0.0))
-            if r == "bear":
-                return self._ddh2_extra_gap(meta_router, self._ddh2_cfg_float("trend_bear_cost_mult_gap_scale", 0.0))
-            return 0.0
-        if r == "whipsaw":
-            return self._ddh2_extra_gap(meta_router, self._ddh2_cfg_float("micro_whipsaw_cost_mult_gap_scale", 0.0))
-        if r == "normal":
-            return self._ddh2_extra_gap(meta_router, self._ddh2_cfg_float("micro_normal_cost_mult_gap_scale", 0.0))
-        if r == "chop":
-            return self._ddh2_extra_gap(meta_router, self._ddh2_cfg_float("micro_chop_cost_mult_gap_scale", 0.0))
-        return 0.0
-
-    def _ddh2_fallback_dd_blocks(self, meta_router) -> tuple[bool, dict]:
-        block = self._ddh2_cfg_float("fallback_account_dd_block", 0.0)
-        release = self._ddh2_cfg_float("fallback_account_dd_release", 0.0)
-        stress_mult = self._ddh2_cost_stress_mult(meta_router)
-        if stress_mult >= 3.0 and self._ddh2_cfg_float("fallback_cost3_account_dd_block", 0.0) > 0.0:
-            block = self._ddh2_cfg_float("fallback_cost3_account_dd_block", block)
-            release = self._ddh2_cfg_float("fallback_cost3_account_dd_release", release)
-        elif stress_mult >= 2.0 and self._ddh2_cfg_float("fallback_cost2_account_dd_block", 0.0) > 0.0:
-            block = self._ddh2_cfg_float("fallback_cost2_account_dd_block", block)
-            release = self._ddh2_cfg_float("fallback_cost2_account_dd_release", release)
-        equity = max(_safe_float(getattr(meta_router, "cur_equity", 1.0), 1.0), 1e-12)
-        peak = max(_safe_float(getattr(meta_router, "peak_equity", 1.0), 1.0), 1e-12)
-        account_dd = max(0.0, 1.0 - equity / peak)
-        active = bool(self.ddh2_fallback_dd_block_active)
-        if block <= 0.0:
-            active = False
-        elif active and release > 0.0 and release < block and account_dd <= release:
-            active = False
-        elif (not active) and account_dd >= block:
-            active = True
-        elif release <= 0.0 or release >= block:
-            active = bool(account_dd >= block)
-        changed = active != bool(self.ddh2_fallback_dd_block_active)
-        self.ddh2_fallback_dd_block_active = bool(active)
-        if changed:
-            self._save_runtime_state()
-        return bool(active), {
-            "enabled": bool(self.ddh2_ensemble_enabled and block > 0.0),
-            "active": bool(active),
-            "account_dd": float(account_dd),
-            "block": float(block),
-            "release": float(release),
-            "stress_mult": float(stress_mult),
-        }
-
-    def _ddh2_should_continue_after_lifecycle(self, decision: tuple[int, float, float, float, dict, str]) -> bool:
-        if not self.ddh2_ensemble_enabled:
-            return False
-        try:
-            action, exposure, fraction, _exec_lev, info, _regime = decision
-        except Exception:
-            return False
-        if int(action) != 0 or float(exposure or 0.0) > 1e-12 or float(fraction or 0.0) > 1e-12:
-            return False
-        source = str(dict(info or {}).get("source", ""))
-        signal = str(dict(info or {}).get("position_signal", ""))
-        return bool(signal in {"HOLD", ""} and (source.startswith("lifecycle_v1|") or source.startswith("v22_1")))
-
-    @staticmethod
-    def _class_prob(proba: np.ndarray, classes: list[int], idx: int, cls: int) -> float:
-        return float(proba[idx, classes.index(cls)]) if cls in classes else 0.0
 
     @staticmethod
     def _action_from_side(side: str) -> int:
@@ -4512,27 +3819,12 @@ class FinalGovernorRuntime:
             )
         if "evt_candidate_label" not in frame.columns:
             frame["evt_candidate_label"] = 0
-        if self.event_detector is not None:
-            for col in self.event_feature_cols:
-                if col not in frame.columns:
-                    frame[col] = 0.0
-            x = frame[self.event_feature_cols].replace([np.inf, -np.inf], np.nan)
-            med = x.median(numeric_only=True)
-            x = x.fillna(med).fillna(0.0)
-            probs = self.event_detector["model"].predict_proba(x)
-            frame["evt_det_available"] = 1
-            frame["evt_det_none_prob"] = probs[:, 0]
-            frame["evt_det_long_prob"] = probs[:, 1]
-            frame["evt_det_short_prob"] = probs[:, 2]
-            frame["evt_det_prob_max"] = probs.max(axis=1)
-            frame["evt_det_edge"] = frame["evt_det_long_prob"] - frame["evt_det_short_prob"]
-        else:
-            frame["evt_det_available"] = 0
-            frame["evt_det_none_prob"] = 1.0
-            frame["evt_det_long_prob"] = 0.0
-            frame["evt_det_short_prob"] = 0.0
-            frame["evt_det_prob_max"] = 1.0
-            frame["evt_det_edge"] = 0.0
+        frame["evt_det_available"] = 0
+        frame["evt_det_none_prob"] = 1.0
+        frame["evt_det_long_prob"] = 0.0
+        frame["evt_det_short_prob"] = 0.0
+        frame["evt_det_prob_max"] = 1.0
+        frame["evt_det_edge"] = 0.0
         frame = _ensure_final_event_aliases(frame)
         self.last_prepared_frame_for_health = frame.tail(min(len(frame), 1200)).copy()
         return frame
@@ -5147,113 +4439,6 @@ class FinalGovernorRuntime:
             "loss_streak": int(getattr(meta_router, "loss_streak", 0) or 0),
         }
 
-    def _lifecycle_v1_apply_conformal_veto_v1_5(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        current_notional: float,
-    ) -> tuple[float, str, dict]:
-        cap = float(min(
-            float(self.lifecycle_v1_cfg.get("max_notional", 3.6) or 3.6),
-            float(self.lifecycle_v1_risk_cfg.get("max_notional", 3.6) or 3.6),
-            float(getattr(meta_router, "exposure_cap", 5.0) or 5.0),
-            3.6,
-        ))
-        n0 = float(np.clip(float(current_notional), 0.0, cap))
-        meta = {
-            "enabled": bool(self.conformal_veto_v1_5_enabled),
-            "applied": False,
-            "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
-            "model_version": "V1.5",
-            "model": str(self.conformal_veto_v1_5_model_path),
-            "report": str(self.conformal_veto_v1_5_report_path),
-            "input_notional": float(n0),
-            "output_notional": float(n0),
-            "cap": float(cap),
-        }
-        adapter = self.conformal_veto_v1_5_adapter
-        if not bool(self.conformal_veto_v1_5_enabled) or adapter is None or n0 <= 1e-12:
-            return float(n0), "noop", meta
-        ctx = self._lifecycle_v1_daily_context(meta_router, frame)
-        try:
-            decision = adapter.decide(frame, dec, ctx, n0, max_total_notional=cap)
-        except Exception as e:
-            meta.update({"blocked": True, "reason": "conformal_veto_v1_5_signal_error", "error": str(e)})
-            logger.warning("SYSTEM conformal_veto_v1_5 signal failed: %s", e)
-            return float(n0), "conformal_veto_v1_5_signal_error", meta
-        core_raw = float(decision.core_notional)
-        sleeve_raw = float(decision.sleeve_notional)
-        core_notional = float(np.clip(core_raw if np.isfinite(core_raw) else n0, 0.0, cap))
-        sleeve_notional_in = float(max(0.0, sleeve_raw if np.isfinite(sleeve_raw) else 0.0))
-        sleeve_notional = float(min(sleeve_notional_in, max(0.0, cap - core_notional)))
-        fee = float(getattr(meta_router, "trade_fee", 0.0) or 0.0)
-        slip = float(getattr(meta_router, "trade_slip", 0.0) or 0.0)
-        cost3_mode = bool(
-            fee >= float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_FEE)
-            or slip >= float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_SLIP)
-        )
-        stress_state = bool(self._lifecycle_v1_stress_state(frame))
-        firewall_reason = ""
-        firewall_action = str(decision.action)
-        firewall_applied = False
-        if bool(FINAL_GOVERNOR_V1_5_COST_FIREWALL_ENABLE) and sleeve_notional > 1e-12:
-            if cost3_mode and bool(FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_DISABLE):
-                sleeve_notional = 0.0
-                firewall_reason = "cost3_disable_sleeve"
-                firewall_action = "COST_FIREWALL_DISABLE_SLEEVE"
-                firewall_applied = True
-            elif stress_state:
-                stress_mult = float(np.clip(float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_STRESS_SLEEVE_MULT), 0.0, 1.0))
-                capped_sleeve = float(sleeve_notional * stress_mult)
-                if capped_sleeve < sleeve_notional - 1e-12:
-                    sleeve_notional = capped_sleeve
-                    firewall_reason = "stress_cap_sleeve"
-                    firewall_action = "COST_FIREWALL_STRESS_CAP_SLEEVE"
-                    firewall_applied = True
-        out = float(np.clip(core_notional + sleeve_notional, 0.0, cap))
-        active_sleeve = bool(sleeve_notional > 1e-12)
-        edit = "conformal_veto_v1_5_add_same_side" if active_sleeve else "conformal_veto_v1_5_core"
-        if decision.action == "CONFORMAL_VETO":
-            edit = "conformal_veto_v1_5_veto"
-        if firewall_applied:
-            edit = "conformal_veto_v1_5_cost_firewall"
-        meta.update(
-            {
-                "applied": True,
-                "action": str(firewall_action),
-                "raw_action": str(decision.action),
-                "reason": str(firewall_reason or decision.reason),
-                "raw_reason": str(decision.reason),
-                "core_notional": float(core_notional),
-                "sleeve_notional": float(sleeve_notional),
-                "raw_sleeve_notional": float(sleeve_notional_in),
-                "sleeve_fraction": float(sleeve_notional / max(core_notional, 1e-12)),
-                "raw_sleeve_fraction": float(decision.sleeve_fraction),
-                "sleeve_exit_bars": int(decision.sleeve_exit_bars),
-                "output_notional": float(out),
-                "cost_firewall": {
-                    "enabled": bool(FINAL_GOVERNOR_V1_5_COST_FIREWALL_ENABLE),
-                    "applied": bool(firewall_applied),
-                    "reason": str(firewall_reason),
-                    "cost3_mode": bool(cost3_mode),
-                    "stress_state": bool(stress_state),
-                    "fee": float(fee),
-                    "slip": float(slip),
-                    "cost3_fee_threshold": float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_FEE),
-                    "cost3_slip_threshold": float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_COST3_SLIP),
-                    "stress_sleeve_mult": float(FINAL_GOVERNOR_V1_5_COST_FIREWALL_STRESS_SLEEVE_MULT),
-                    "input_sleeve_notional": float(sleeve_notional_in),
-                    "output_sleeve_notional": float(sleeve_notional),
-                },
-                "features": dict(decision.features),
-                "predictions": dict(decision.predictions),
-                "selected_config": dict(adapter.selected_config),
-            }
-        )
-        return float(out), edit, meta
-
     def _lifecycle_v1_apply_risk_gates(
         self,
         meta_router,
@@ -5336,180 +4521,6 @@ class FinalGovernorRuntime:
             or abs(self._lifecycle_v1_row_float(row, "ai_adverse_risk")) > 0.75
         )
 
-    def _deep_gated_gross_live_signal(self, frame: pd.DataFrame, dec: pd.Series, current_notional: float, account_ctx: dict) -> dict | None:
-        payload = self.deep_gated_gross_payload
-        deep_model = self.deep_gated_gross_deep_model
-        if payload is None or deep_model is None or frame is None or len(frame) == 0:
-            return None
-        seq_features = list(payload.get("sequence_features") or [])
-        if not seq_features:
-            return None
-        work = frame.copy()
-        for col in seq_features:
-            if col not in work.columns:
-                work[col] = 0.0
-        try:
-            scaled = _deep_v1._transform_sequence_matrix(work, seq_features, payload["sequence_scaler"])
-            i = int(len(work) - 1)
-            side = int(getattr(dec, "side", 0) or 0)
-            close = float(pd.to_numeric(work["close"], errors="coerce").replace([np.inf, -np.inf], np.nan).ffill().iloc[-1])
-            ctx = {
-                "trade_id": 0,
-                "entry_idx": i,
-                "core_exit_idx": i,
-                "side": side,
-                "entry_price": close,
-                "core_notional": float(current_notional),
-                "base_notional": float(getattr(dec, "notional_exposure", current_notional) or current_notional),
-                "leverage": float(getattr(dec, "leverage", 1.0) or 1.0),
-                "quality": float(getattr(dec, "quality_score", 0.0) or 0.0),
-                "confidence": float(getattr(dec, "confidence", 0.0) or 0.0),
-                "timestamp": str(work["timestamp"].iloc[i]) if "timestamp" in work.columns else str(i),
-            }
-            seq = _deep_v1._sequence_tensor(scaled, [ctx], lookback=_deep_v2.LOOKBACK)
-            deep_meta = dict(payload.get("deep_meta", {}) or {})
-            deep = _deep_v2._deep_predict_v2(
-                deep_model,
-                seq,
-                list(deep_meta.get("target_mean") or [0.0, 0.0, 0.0]),
-                list(deep_meta.get("target_std") or [1.0, 1.0, 1.0]),
-            )
-            _deep_v1.LOOKBACK = _deep_v2.LOOKBACK
-            _deep_v1.EMBED_DIM = _deep_v2.ENSEMBLE_EMBED_DIM
-            _deep_v1.N_CLUSTERS = _deep_v2.N_CLUSTERS
-            state_df = _deep_v1._state_features(payload["state_model"], deep)
-            row = _deep_cg._row_features(
-                work,
-                ctx,
-                state_df,
-                0,
-                float(account_ctx.get("account_dd", 0.0) or 0.0),
-                float(account_ctx.get("daily_dd_proxy", 0.0) or 0.0),
-                int(account_ctx.get("loss_streak", 0) or 0),
-            )
-            same_pred, adverse_pred = _deep_v1._predict_heads(payload["head_model"], row)
-            signal = _deep_dgg._row_signal(row, same_pred, adverse_pred)
-            return {
-                "same_pred": float(same_pred),
-                "adverse_pred": float(adverse_pred),
-                "conviction": float(signal.get("conviction", 0.0) or 0.0),
-                "adverse": float(signal.get("adverse", 0.0) or 0.0),
-                "deep_same": float(signal.get("deep_same", 0.0) or 0.0),
-                "deep_full": float(signal.get("deep_full", 0.0) or 0.0),
-                "deep_adverse": float(signal.get("deep_adverse", 0.0) or 0.0),
-                "state_cluster_distance": float(row.get("state_cluster_distance", 0.0) or 0.0),
-            }
-        except Exception as e:
-            logger.warning("SYSTEM deep_gated_gross signal failed: %s", e)
-            return None
-
-    def _lifecycle_v1_apply_deep_gated_gross(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        current_notional: float,
-    ) -> tuple[float, str, dict]:
-        cfg = dict(self.deep_gated_gross_cfg or self.deep_gated_gross_report.get("selected_config", {}) or {})
-        report_gate = dict(self.deep_gated_gross_report.get("promotion_gate", {}) or {})
-        meta = {
-            "enabled": bool(self.deep_gated_gross_enabled),
-            "applied": False,
-            "model_id": str(self.deep_gated_gross_report.get("model_id", "clean_base_deep_gated_gross_v2")),
-            "model": str(self.deep_gated_gross_model_path),
-            "report": str(self.deep_gated_gross_report_path),
-            "selected_config": str(cfg.get("name", "")),
-            "target_500_pnl": bool(report_gate.get("target_500_pnl", False)),
-            "input_notional": float(current_notional),
-        }
-        if not bool(self.deep_gated_gross_enabled):
-            return float(current_notional), "noop", meta
-
-        cap = float(min(
-            float(self.lifecycle_v1_cfg.get("max_notional", 3.6) or 3.6),
-            float(self.lifecycle_v1_risk_cfg.get("max_notional", 3.6) or 3.6),
-            float(getattr(meta_router, "exposure_cap", 5.0) or 5.0),
-        ))
-        account_ctx = self._lifecycle_v1_daily_context(meta_router, frame)
-        signal = self._deep_gated_gross_live_signal(frame, dec, current_notional, account_ctx)
-        if signal is None:
-            meta.update({"error": "signal_unavailable", "cap": float(cap)})
-            return float(current_notional), "noop", meta
-
-        high_notional = float(cfg.get("high_notional", 3.6) or 3.6)
-        mid_notional = float(cfg.get("mid_notional", 3.0) or 3.0)
-        defensive_notional = float(cfg.get("defensive_notional", 3.0) or 3.0)
-        high_threshold = float(cfg.get("high_threshold", -0.006) or -0.006)
-        mid_threshold = float(cfg.get("mid_threshold", -0.012) or -0.012)
-        adverse_cut = float(cfg.get("adverse_cut", 99.0) or 99.0)
-        deep_full_floor = float(cfg.get("deep_full_floor", -0.010) or -0.010)
-        cost3_notional = float(cfg.get("cost3_notional", 0.0) or 0.0)
-        cost3_mode = bool(
-            float(getattr(meta_router, "trade_fee", 0.0) or 0.0) >= float(FINAL_GOVERNOR_DEEP_GATED_GROSS_COST3_FEE)
-            or float(getattr(meta_router, "trade_slip", 0.0) or 0.0) >= float(FINAL_GOVERNOR_DEEP_GATED_GROSS_COST3_SLIP)
-        )
-        stress_state = bool(
-            self._lifecycle_v1_stress_state(frame)
-            or _deep_v1.base._stress(frame, int(len(frame) - 1))
-            or float(account_ctx.get("account_dd", 0.0) or 0.0) >= 0.30
-        )
-        reasons: list[str] = []
-        if stress_state:
-            reasons.append("stress_state")
-        if float(signal["adverse"]) >= adverse_cut:
-            reasons.append("deep_or_head_adverse_cut")
-        if float(signal["deep_full"]) < deep_full_floor:
-            reasons.append("deep_full_floor")
-
-        if cost3_mode:
-            out = float(cost3_notional)
-            bucket = "COST3_CAPITAL_PRESERVE" if out <= 1e-12 else "COST3_LOW_NOTIONAL"
-            reasons.append("cost3_capital_preserve")
-        elif stress_state or float(signal["adverse"]) >= adverse_cut or float(signal["deep_full"]) < deep_full_floor:
-            out = float(defensive_notional)
-            bucket = "DEFENSIVE"
-        elif float(signal["conviction"]) >= high_threshold:
-            out = float(high_notional)
-            bucket = "HIGH"
-            reasons.append("deep_high_conviction")
-        elif float(signal["conviction"]) >= mid_threshold:
-            out = float(mid_notional)
-            bucket = "MID"
-            reasons.append("deep_mid_conviction")
-        else:
-            out = float(defensive_notional)
-            bucket = "DEFENSIVE"
-            reasons.append("deep_low_conviction")
-
-        out = float(np.clip(out, 0.0, cap))
-        edit = "deep_gated_gross_cost3_preserve" if cost3_mode and out <= 1e-12 else f"deep_gated_gross_{bucket.lower()}"
-        meta.update(
-            {
-                "applied": True,
-                "cap": float(cap),
-                "output_notional": float(out),
-                "edit": str(edit),
-                "bucket": str(bucket),
-                "reasons": list(reasons),
-                "cost3_mode": bool(cost3_mode),
-                "stress_state": bool(stress_state),
-                "fee_rate": float(getattr(meta_router, "trade_fee", 0.0) or 0.0),
-                "slippage_rate": float(getattr(meta_router, "trade_slip", 0.0) or 0.0),
-                "high_notional": float(high_notional),
-                "mid_notional": float(mid_notional),
-                "defensive_notional": float(defensive_notional),
-                "cost3_notional": float(cost3_notional),
-                "high_threshold": float(high_threshold),
-                "mid_threshold": float(mid_threshold),
-                "adverse_cut": float(adverse_cut),
-                "deep_full_floor": float(deep_full_floor),
-                "account_context": dict(account_ctx),
-                "signal": dict(signal),
-            }
-        )
-        return float(out), str(edit), meta
-
     @staticmethod
     def _safe_cap_bin(value: float, cuts: list[float]) -> int:
         try:
@@ -5563,87 +4574,6 @@ class FinalGovernorRuntime:
             return "|".join((action_key, edge3))
         return "|".join((action_key, edge3))
 
-    def _lifecycle_v1_apply_safe_learned_cap(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        current_notional: float,
-        deep_gated_gross_meta: dict | None,
-    ) -> tuple[float, str, dict]:
-        cand = dict(self.safe_learned_cap_candidate or {})
-        cap_map = dict(cand.get("cap_map", {}) or {})
-        meta = {
-            "enabled": bool(self.safe_learned_cap_enabled),
-            "applied": False,
-            "blocked": False,
-            "model_id": "clean_base_deep_gated_gross_v2_safe_cap_buckets",
-            "candidate": str(cand.get("name", "")),
-            "input_notional": float(current_notional),
-        }
-        if (
-            not bool(self.safe_learned_cap_enabled)
-            or not cand
-            or not cap_map
-            or current_notional <= 1e-12
-            or not bool((deep_gated_gross_meta or {}).get("applied", False))
-        ):
-            return float(current_notional), "noop", meta
-
-        router_cap = float(max(float(getattr(meta_router, "exposure_cap", 5.0) or 5.0), 1.0))
-        candidate_max = float(cand.get("max_notional", router_cap) or router_cap)
-        fallback_cap = float(cand.get("fallback_cap", min(3.6, candidate_max)) or min(3.6, candidate_max))
-        scheme = str(cand.get("scheme", "action_edge3") or "action_edge3")
-        thresholds = dict(cand.get("thresholds", {}) or {})
-        action_bucket = str((deep_gated_gross_meta or {}).get("bucket", "") or "UNKNOWN").upper()
-        side = int(np.sign(int(getattr(dec, "side", 0) or 0)))
-        edge = self._safe_cap_edge_proxy(frame, deep_gated_gross_meta)
-        bucket = self._safe_learned_cap_bucket(
-            frame,
-            scheme=scheme,
-            action_bucket=action_bucket,
-            side=side,
-            edge=edge,
-            thresholds=thresholds,
-        )
-        learned_cap = float(cap_map.get(bucket, fallback_cap))
-        learned_cap = float(np.clip(learned_cap, 0.0, min(candidate_max, router_cap)))
-        planned = float(np.clip(float(current_notional) * learned_cap / 3.6, 0.0, learned_cap))
-        gate_mode = str(cand.get("gate_notional_mode", "final") or "final").lower()
-        gate_notional = float(current_notional) if gate_mode == "base" else float(planned)
-        fee = float(getattr(meta_router, "trade_fee", 0.0) or 0.0)
-        slip = float(getattr(meta_router, "trade_slip", 0.0) or 0.0)
-        cost_buffer = float(cand.get("cost_buffer", 0.0035) or 0.0035)
-        expected_edge = float(edge * max(gate_notional, 0.0))
-        cost_hurdle = float(2.0 * (fee + slip) * max(gate_notional, 0.0) + cost_buffer)
-        meta.update(
-            {
-                "applied": True,
-                "scheme": scheme,
-                "bucket": bucket,
-                "action_bucket": action_bucket,
-                "edge": float(edge),
-                "learned_cap": float(learned_cap),
-                "fallback_cap": float(fallback_cap),
-                "candidate_max_notional": float(candidate_max),
-                "output_notional": float(planned),
-                "gate_mode": gate_mode,
-                "gate_notional": float(gate_notional),
-                "expected_equity_edge": float(expected_edge),
-                "cost_hurdle": float(cost_hurdle),
-                "cost_buffer": float(cost_buffer),
-                "fee_rate": float(fee),
-                "slippage_rate": float(slip),
-            }
-        )
-        if expected_edge <= cost_hurdle:
-            meta.update({"blocked": True, "reason": "safe_learned_cap_cost_gate_block", "output_notional": 0.0})
-            return 0.0, "safe_learned_cap_cost_gate_block", meta
-        edit = "safe_learned_cap_boost" if planned > current_notional + 1e-12 else "safe_learned_cap_base"
-        meta["reason"] = edit
-        return float(planned), edit, meta
-
     def _lifecycle_v21_available(self) -> bool:
         base_ready = bool(
             self.v21_enabled
@@ -5664,10 +4594,7 @@ class FinalGovernorRuntime:
         return True
 
     def _lifecycle_v21_pure_active(self) -> bool:
-        return bool((self._v21_2_jackpot_available() or self._lifecycle_v22_1_available() or self._lifecycle_v21_available()) and self.v21_pure_mode)
-
-    def _lifecycle_v22_1_available(self) -> bool:
-        return bool(self.v22_1_enabled and self.v22_1_adapter is not None)
+        return bool((self._v21_2_jackpot_available() or self._lifecycle_v21_available()) and self.v21_pure_mode)
 
     def _v21_2_jackpot_available(self) -> bool:
         return bool(
@@ -5675,82 +4602,6 @@ class FinalGovernorRuntime:
             and self.v21_2_jackpot_adapter is not None
             and self.v21_2_parent_bundle is not None
         )
-
-    def _lifecycle_v22_1_cap_plan(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        base_notional: float,
-        deep_gated_gross_meta: dict | None,
-    ) -> dict:
-        adapter = self.v22_1_adapter
-        cand = dict(adapter.cap_candidate if adapter is not None else {})
-        cap_map = dict(cand.get("cap_map", {}) or {})
-        router_cap = float(max(float(getattr(meta_router, "exposure_cap", 5.0) or 5.0), 1.0))
-        meta = {
-            "candidate": str(cand.get("name", "")),
-            "input_notional": float(base_notional),
-            "planned_notional": 0.0,
-            "cost_pass": False,
-        }
-        if (
-            adapter is None
-            or not cand
-            or not cap_map
-            or float(base_notional) <= 1e-12
-            or not bool((deep_gated_gross_meta or {}).get("applied", False))
-        ):
-            meta["reason"] = "cap_plan_unavailable"
-            return meta
-        candidate_max = float(cand.get("max_notional", router_cap) or router_cap)
-        fallback_cap = float(cand.get("fallback_cap", min(3.6, candidate_max)) or min(3.6, candidate_max))
-        scheme = str(cand.get("scheme", "action_edge3") or "action_edge3")
-        thresholds = dict(cand.get("thresholds", {}) or {})
-        action_bucket = str((deep_gated_gross_meta or {}).get("bucket", "") or "UNKNOWN").upper()
-        side = int(np.sign(int(getattr(dec, "side", 0) or 0)))
-        edge = self._safe_cap_edge_proxy(frame, deep_gated_gross_meta)
-        bucket = self._safe_learned_cap_bucket(
-            frame,
-            scheme=scheme,
-            action_bucket=action_bucket,
-            side=side,
-            edge=edge,
-            thresholds=thresholds,
-        )
-        learned_cap = float(cap_map.get(bucket, fallback_cap))
-        learned_cap = float(np.clip(learned_cap, 0.0, min(candidate_max, router_cap)))
-        planned = float(np.clip(float(base_notional) * learned_cap / 3.6, 0.0, learned_cap))
-        gate_mode = str(cand.get("gate_notional_mode", "final") or "final").lower()
-        gate_notional = float(base_notional) if gate_mode == "base" else float(planned)
-        fee = float(getattr(meta_router, "trade_fee", 0.0) or 0.0)
-        slip = float(getattr(meta_router, "trade_slip", 0.0) or 0.0)
-        cost_buffer = float(cand.get("cost_buffer", 0.0035) or 0.0035)
-        expected_edge = float(edge * max(gate_notional, 0.0))
-        cost_hurdle = float(2.0 * (fee + slip) * max(gate_notional, 0.0) + cost_buffer)
-        meta.update(
-            {
-                "reason": "cap_plan",
-                "scheme": scheme,
-                "bucket": bucket,
-                "action_bucket": action_bucket,
-                "edge": float(edge),
-                "learned_cap": float(learned_cap),
-                "fallback_cap": float(fallback_cap),
-                "candidate_max_notional": float(candidate_max),
-                "planned_notional": float(planned),
-                "gate_mode": gate_mode,
-                "gate_notional": float(gate_notional),
-                "expected_equity_edge": float(expected_edge),
-                "cost_hurdle": float(cost_hurdle),
-                "cost_buffer": float(cost_buffer),
-                "fee_rate": float(fee),
-                "slippage_rate": float(slip),
-                "cost_pass": bool(expected_edge > cost_hurdle),
-            }
-        )
-        return meta
 
     def _lifecycle_v21_cap_plan(
         self,
@@ -6018,156 +4869,6 @@ class FinalGovernorRuntime:
             return 999.0, reasons
         return float(np.clip(stop, 0.0025, 0.0300)), reasons
 
-    def _lifecycle_v22_1_apply_entry_layer(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        pre_adaptive_notional: float,
-        v17_notional: float,
-        current_notional: float,
-        deep_gated_gross_meta: dict | None,
-        adaptive_calibrator_meta: dict | None,
-        safe_cap_meta: dict | None,
-    ) -> tuple[float, str, dict]:
-        adapter = self.v22_1_adapter
-        meta = {
-            "enabled": bool(self._lifecycle_v22_1_available()),
-            "applied": False,
-            "blocked": False,
-            "model_id": "deep_state_safe_cap_reallocator_v22_1_scout_param_grid",
-            "model_version": "V22.1",
-            "adapter_version": "v22_1_learned_scout",
-            "model": str(self.v22_1_model_path),
-            "report": str(self.v22_1_report_path),
-            "audit": str(self.v22_1_audit_path),
-            "pure_mode": bool(self.v21_pure_mode),
-            "input_notional": float(current_notional),
-            "parent_notional": float(pre_adaptive_notional),
-            "v17_notional": float(v17_notional),
-        }
-        if adapter is None:
-            return float(current_notional), "", meta
-        ledger = self._lifecycle_v21_ledger_row(
-            meta_router,
-            frame,
-            dec=dec,
-            pre_adaptive_notional=pre_adaptive_notional,
-            v17_notional=v17_notional,
-            deep_gated_gross_meta=deep_gated_gross_meta,
-            adaptive_calibrator_meta=adaptive_calibrator_meta,
-        )
-        try:
-            ledger, path_meta = adapter.attach_path_predictions(frame, ledger, _deep_state_v15._feature_matrix)
-        except Exception as e:
-            logger.warning("SYSTEM v22_1 path prediction failed closed: %s", e)
-            meta.update(
-                {
-                    "blocked": True,
-                    "reason": "v22_1_path_prediction_failed",
-                    "error": str(e),
-                    "output_notional": 0.0,
-                    "path_model": {
-                        "enabled": True,
-                        "applied": False,
-                        "reason": "path_prediction_failed",
-                        "error": str(e),
-                    },
-                }
-            )
-            return 0.0, "", meta
-        row = ledger.iloc[0]
-        cap_plan_v17 = self._lifecycle_v22_1_cap_plan(
-            meta_router,
-            frame,
-            dec=dec,
-            base_notional=max(float(v17_notional), 0.0),
-            deep_gated_gross_meta=deep_gated_gross_meta,
-        )
-        bucket = str((safe_cap_meta or {}).get("bucket", "") or cap_plan_v17.get("bucket", ""))
-        if float(current_notional) > 1e-12:
-            stop_raw, stop_reasons = adapter.stop_for_row(row, bucket, sleeve="core")
-            scout_prob, scout_frac, _ = adapter.learned_scores(ledger)
-            meta.update(
-                {
-                    "applied": True,
-                    "sleeve": "core",
-                    "output_notional": float(current_notional),
-                    "bucket": bucket,
-                    "path_model": dict(path_meta),
-                    "cap_plan": dict(cap_plan_v17),
-                    "stop_raw": float(stop_raw),
-                    "stop_reasons": list(stop_reasons),
-                    "scout_prob": float(scout_prob),
-                    "scout_frac": float(scout_frac),
-                    "scout": {
-                        "adapter": "v22_1_learned_scout",
-                        "source": "core_no_scout",
-                        "scout_prob": float(scout_prob),
-                        "scout_frac": float(scout_frac),
-                        "probability_threshold": float(adapter.learned_config.get("probability_threshold", 0.0) or 0.0),
-                        "cost_pass": bool(cap_plan_v17.get("cost_pass", False)),
-                    },
-                    "learned_config": dict(adapter.learned_config),
-                    "stop_config": dict(adapter.stop_config),
-                }
-            )
-            return float(current_notional), "core", meta
-
-        parent_n = max(float(pre_adaptive_notional), 0.0)
-        cap_plan_parent = self._lifecycle_v22_1_cap_plan(
-            meta_router,
-            frame,
-            dec=dec,
-            base_notional=parent_n,
-            deep_gated_gross_meta=deep_gated_gross_meta,
-        )
-        router_cap = float(max(float(getattr(meta_router, "exposure_cap", 5.0) or 5.0), 1.0))
-        fee = float(getattr(meta_router, "trade_fee", 0.0) or 0.0)
-        slip = float(getattr(meta_router, "trade_slip", 0.0) or 0.0)
-        scout_n, scout_meta = adapter.scout_decision(
-            ledger,
-            cap_plan=cap_plan_parent,
-            fee=fee,
-            slip=slip,
-            router_cap=router_cap,
-        )
-        bucket = str(cap_plan_parent.get("bucket", bucket))
-        if scout_n <= 1e-12:
-            meta.update(
-                {
-                    "blocked": True,
-                    "reason": str(scout_meta.get("reason", "v22_1_scout_block")),
-                    "scout": dict(scout_meta),
-                    "scout_prob": float(scout_meta.get("scout_prob", 0.0) or 0.0),
-                    "scout_frac": float(scout_meta.get("scout_frac", 0.0) or 0.0),
-                    "path_model": dict(path_meta),
-                }
-            )
-            return 0.0, "", meta
-
-        stop_raw, stop_reasons = adapter.stop_for_row(row, bucket, sleeve="scout")
-        meta.update(
-            {
-                "applied": True,
-                "sleeve": "scout",
-                "reason": "v22_1_learned_near_miss_scout",
-                "output_notional": float(scout_n),
-                "bucket": bucket,
-                "path_model": dict(path_meta),
-                "cap_plan": dict(cap_plan_parent),
-                "scout": dict(scout_meta),
-                "scout_prob": float(scout_meta.get("scout_prob", 0.0) or 0.0),
-                "scout_frac": float(scout_meta.get("scout_frac", 0.0) or 0.0),
-                "stop_raw": float(stop_raw),
-                "stop_reasons": list(stop_reasons),
-                "learned_config": dict(adapter.learned_config),
-                "stop_config": dict(adapter.stop_config),
-            }
-        )
-        return float(scout_n), "scout", meta
-
     def _lifecycle_v21_apply_entry_layer(
         self,
         meta_router,
@@ -6388,12 +5089,6 @@ class FinalGovernorRuntime:
         return float(scout_n), "scout", meta
 
     @staticmethod
-    def _adaptive_calibrator_cfg_get(cfg: AdaptiveConfig | dict | None, key: str, default=None):
-        if isinstance(cfg, dict):
-            return cfg.get(key, default)
-        return getattr(cfg, key, default)
-
-    @staticmethod
     def _adaptive_calibrator_regime(row) -> str:
         if hasattr(row, "get"):
             for name in ("bull", "bear", "chop", "whipsaw", "normal"):
@@ -6449,278 +5144,6 @@ class FinalGovernorRuntime:
                 }
             ]
         )
-
-    def _lifecycle_v1_apply_deep_state_adaptive_calibrator(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        dec: pd.Series,
-        current_notional: float,
-        deep_gated_gross_meta: dict | None,
-    ) -> tuple[float, str, dict]:
-        cfg = self.deep_state_adaptive_config
-        cal = self.deep_state_adaptive_calibrator
-        models = self.deep_state_router_models
-        meta = {
-            "enabled": bool(self.deep_state_adaptive_calibrator_enabled),
-            "applied": False,
-            "blocked": False,
-            "model_id": "deep_state_safe_cap_reallocator_v17_adaptive_calibrator",
-            "model": str(self.deep_state_adaptive_calibrator_model_path),
-            "report": str(self.deep_state_adaptive_calibrator_report_path),
-            "audit": str(self.deep_state_adaptive_calibrator_audit_path),
-            "selected_config": str(self._adaptive_calibrator_cfg_get(cfg, "name", "")),
-            "input_notional": float(current_notional),
-        }
-        if (
-            not bool(self.deep_state_adaptive_calibrator_enabled)
-            or cfg is None
-            or cal is None
-            or models is None
-            or frame is None
-            or len(frame) == 0
-            or current_notional <= 1e-12
-            or not bool((deep_gated_gross_meta or {}).get("applied", False))
-        ):
-            return float(current_notional), "noop", meta
-        try:
-            ledger = self._adaptive_calibrator_ledger_row(
-                meta_router,
-                frame,
-                dec=dec,
-                current_notional=current_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-            )
-            x = _deep_state_v15._feature_matrix(frame, ledger)
-            pred = _deep_state_v15._predict_router(models, x)
-            meta_frame = _deep_state_v17._meta_frame(frame, ledger, cal.risk_cuts)
-            qv = _deep_state_v17._adaptive_q(meta_frame, cal, cfg, self.deep_state_adaptive_future_rolling_q)
-            pred_pnl = float(pred["pred_pnl"][0]) if len(pred["pred_pnl"]) else 0.0
-            adaptive_q = float(qv[0]) if len(qv) else 0.0
-            lower = float(pred_pnl - adaptive_q)
-            lower_block = float(self._adaptive_calibrator_cfg_get(cfg, "lower_block", -0.006) or -0.006)
-            lower_keep = float(self._adaptive_calibrator_cfg_get(cfg, "lower_keep", -0.002) or -0.002)
-            shrink_scale = float(self._adaptive_calibrator_cfg_get(cfg, "shrink_scale", 0.70) or 0.70)
-            shrink_scale = float(np.clip(shrink_scale, 0.0, 1.0))
-            if lower < lower_block:
-                scale = 0.0
-                reason = "adaptive_calibrator_block"
-            elif lower < lower_keep:
-                scale = shrink_scale
-                reason = "adaptive_calibrator_shrink"
-            else:
-                scale = 1.0
-                reason = "adaptive_calibrator_keep"
-            out = float(np.clip(float(current_notional) * scale, 0.0, float(current_notional)))
-            meta.update(
-                {
-                    "applied": True,
-                    "blocked": bool(scale <= 1e-12),
-                    "reason": reason,
-                    "output_notional": float(out),
-                    "router_scale": float(scale),
-                    "adaptive_q": float(adaptive_q),
-                    "adaptive_lower": float(lower),
-                    "adaptive_pred_pnl": float(pred_pnl),
-                    "adaptive_mode": str(self._adaptive_calibrator_cfg_get(cfg, "mode", "")),
-                    "future_rolling_q": (
-                        None
-                        if self.deep_state_adaptive_future_rolling_q is None
-                        else float(self.deep_state_adaptive_future_rolling_q)
-                    ),
-                    "lower_block": float(lower_block),
-                    "lower_keep": float(lower_keep),
-                    "shrink_scale": float(shrink_scale),
-                    "pred_adverse": float(pred["pred_adverse"][0]) if len(pred["pred_adverse"]) else 0.0,
-                    "cost2_survival": float(pred["cost2_survival"][0]) if len(pred["cost2_survival"]) else 0.0,
-                    "cost3_survival": float(pred["cost3_survival"][0]) if len(pred["cost3_survival"]) else 0.0,
-                    "cluster": int(pred["cluster"][0]) if len(pred["cluster"]) else 0,
-                    "cluster_score": float(pred["cluster_score"][0]) if len(pred["cluster_score"]) else 0.0,
-                    "anomaly_score": float(pred["anomaly_score"][0]) if len(pred["anomaly_score"]) else 0.0,
-                    "risk_score": float(meta_frame["risk"].iloc[0]) if len(meta_frame) else 0.0,
-                    "risk_bin": str(meta_frame["risk_bin"].iloc[0]) if len(meta_frame) else "",
-                }
-            )
-            return float(out), reason, meta
-        except Exception as e:
-            meta.update({"error": str(e), "output_notional": float(current_notional)})
-            logger.warning("SYSTEM deep_state_adaptive_calibrator signal failed: %s", e)
-            return float(current_notional), "noop", meta
-
-    def _lifecycle_v1_apply_deep_constant_gross(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        current_notional: float,
-    ) -> tuple[float, str, dict]:
-        report_cfg = dict(self.deep_constant_gross_report.get("selected_config", {}) or {})
-        report_gate = dict(self.deep_constant_gross_report.get("promotion_gate", {}) or {})
-        meta = {
-            "enabled": bool(self.deep_constant_gross_enabled),
-            "applied": False,
-            "model_id": str(self.deep_constant_gross_report.get("model_id", "clean_base_deep_constant_gross_v1")),
-            "report": str(self.deep_constant_gross_report_path),
-            "selected_config": str(report_cfg.get("name", "")),
-            "target_500_pnl": bool(report_gate.get("target_500_pnl", False)),
-            "input_notional": float(current_notional),
-            "target_notional": float(self.deep_constant_gross_target_notional),
-            "cost3_notional": float(self.deep_constant_gross_cost3_notional),
-        }
-        if not bool(self.deep_constant_gross_enabled):
-            return float(current_notional), "noop", meta
-
-        cap = float(min(
-            float(self.lifecycle_v1_cfg.get("max_notional", 3.6) or 3.6),
-            float(self.lifecycle_v1_risk_cfg.get("max_notional", 3.6) or 3.6),
-            float(getattr(meta_router, "exposure_cap", 5.0) or 5.0),
-        ))
-        target = float(np.clip(float(self.deep_constant_gross_target_notional), 0.0, cap))
-        cost3_mode = bool(
-            float(getattr(meta_router, "trade_fee", 0.0) or 0.0) >= float(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_FEE)
-            or float(getattr(meta_router, "trade_slip", 0.0) or 0.0) >= float(FINAL_GOVERNOR_DEEP_CONSTANT_GROSS_COST3_SLIP)
-        )
-        stress_state = bool(self._lifecycle_v1_stress_state(frame))
-        if cost3_mode:
-            out = float(np.clip(float(self.deep_constant_gross_cost3_notional), 0.0, cap))
-            edit = "deep_constant_gross_cost3_preserve" if out <= 1e-12 else "deep_constant_gross_cost3_low"
-        elif stress_state:
-            out = float(np.clip(min(float(current_notional), target), 0.0, cap))
-            edit = "deep_constant_gross_defensive"
-        else:
-            out = target
-            edit = "deep_constant_gross_open"
-        meta.update(
-            {
-                "applied": True,
-                "cap": float(cap),
-                "output_notional": float(out),
-                "edit": str(edit),
-                "cost3_mode": bool(cost3_mode),
-                "stress_state": bool(stress_state),
-                "fee_rate": float(getattr(meta_router, "trade_fee", 0.0) or 0.0),
-                "slippage_rate": float(getattr(meta_router, "trade_slip", 0.0) or 0.0),
-            }
-        )
-        return float(out), str(edit), meta
-
-    def _dsac_overlay_features(self, frame: pd.DataFrame) -> dict:
-        if frame is None or len(frame) == 0:
-            return {}
-        row = frame.iloc[-1]
-        features: dict[str, float] = {}
-        for col, val in row.items():
-            if str(col) == "timestamp":
-                continue
-            try:
-                x = float(val)
-            except Exception:
-                continue
-            if np.isfinite(x):
-                features[str(col)] = float(x)
-        return features
-
-    def _dsac_overlay_edge_proxy(self, frame: pd.DataFrame, deep_gated_gross_meta: dict | None) -> float:
-        vals: list[float] = []
-        signal = dict((deep_gated_gross_meta or {}).get("signal", {}) or {})
-        for key in ("same_pred", "deep_same", "deep_full", "conviction"):
-            vals.append(_safe_float(signal.get(key, 0.0), 0.0))
-        finite = [float(x) for x in vals if np.isfinite(float(x))]
-        return float(max([0.0] + finite))
-
-    def _lifecycle_v1_apply_dsac_overlay(
-        self,
-        meta_router,
-        frame: pd.DataFrame,
-        *,
-        side: int,
-        current_notional: float,
-        deep_gated_gross_meta: dict | None,
-    ) -> tuple[float, str, dict]:
-        cap = float(min(
-            float(self.lifecycle_v1_cfg.get("max_notional", 3.6) or 3.6),
-            float(self.lifecycle_v1_risk_cfg.get("max_notional", 3.6) or 3.6),
-            float(getattr(meta_router, "exposure_cap", 5.0) or 5.0),
-        ))
-        n0 = float(np.clip(float(current_notional), 0.0, cap))
-        meta = {
-            "enabled": bool(self.dsac_overlay_enabled),
-            "applied": False,
-            "blocked": False,
-            "checkpoint": str(self.dsac_overlay_ckpt_path),
-            "checkpoint_meta": dict(self.dsac_overlay_ckpt_meta),
-            "mode": str(self.dsac_overlay_mode),
-            "threshold": float(self.dsac_overlay_threshold),
-            "scale": float(self.dsac_overlay_scale),
-            "cost_gate_enabled": bool(self.dsac_overlay_cost_gate_enabled),
-            "cost_buffer": float(self.dsac_overlay_cost_buffer),
-            "input_notional": float(n0),
-            "output_notional": float(n0),
-        }
-        if not bool(self.dsac_overlay_enabled) or self.dsac_overlay_router is None or n0 <= 1e-12:
-            return float(n0), "noop", meta
-
-        dsac_side = 0
-        dsac_score = 0.0
-        dsac_info: dict = {}
-        try:
-            action_int, _dsac_leverage, info = self.dsac_overlay_router.decide(
-                self._dsac_overlay_features(frame),
-                {"type": None, "entry_price": 0.0, "unrealized": 0.0, "mdd": 0.0, "hold_count": 0.0},
-            )
-            dsac_info = dict(info or {})
-            dsac_side = 1 if int(action_int) == 1 else (-1 if int(action_int) == 2 else 0)
-            dsac_score = float(_safe_float(dsac_info.get("score", abs(_safe_float(dsac_info.get("raw_action", 0.0), 0.0))), 0.0))
-        except Exception as e:
-            meta.update({"error": str(e), "output_notional": float(n0)})
-            logger.warning("SYSTEM dsac_overlay signal failed: %s", e)
-            return float(n0), "dsac_signal_error", meta
-
-        edge = self._dsac_overlay_edge_proxy(frame, deep_gated_gross_meta)
-        fee = float(getattr(meta_router, "trade_fee", 0.0) or 0.0)
-        slip = float(getattr(meta_router, "trade_slip", 0.0) or 0.0)
-        expected_edge = float(edge * n0)
-        round_trip_hurdle = float(2.0 * (fee + slip) * n0 + self.dsac_overlay_cost_buffer)
-        meta.update(
-            {
-                "dsac_action": int(action_int),
-                "dsac_side": int(dsac_side),
-                "dsac_score": float(dsac_score),
-                "dsac_info": dsac_info,
-                "core_side": int(side),
-                "edge_proxy": float(edge),
-                "expected_edge": float(expected_edge),
-                "round_trip_hurdle": float(round_trip_hurdle),
-                "fee_rate": float(fee),
-                "slippage_rate": float(slip),
-            }
-        )
-        if bool(self.dsac_overlay_cost_gate_enabled) and expected_edge <= round_trip_hurdle:
-            meta.update(
-                {
-                    "applied": True,
-                    "blocked": True,
-                    "reason": "dsac_cost_gate_block",
-                    "output_notional": 0.0,
-                }
-            )
-            return 0.0, "dsac_cost_gate_block", meta
-
-        out = float(n0)
-        edit = "dsac_confirm"
-        if (
-            self.dsac_overlay_mode == "half_if_opposite"
-            and int(dsac_side) == -int(side)
-            and float(dsac_score) >= float(self.dsac_overlay_threshold)
-        ):
-            out = float(np.clip(n0 * self.dsac_overlay_scale, 0.0, cap))
-            edit = "dsac_half_opposite"
-            meta.update({"applied": True, "reason": edit})
-        else:
-            meta.update({"applied": False, "reason": edit})
-        meta["output_notional"] = float(out)
-        return float(out), str(edit), meta
 
     def _reset_lifecycle_v1_position_state(self) -> None:
         self.active_lifecycle_v1_base_notional = 0.0
@@ -7283,7 +5706,7 @@ class FinalGovernorRuntime:
                 else:
                     gross_raw = (entry_px - mark_px * (1.0 + slip)) / max(entry_px, 1e-12)
                 gross_mark_unrealized = float(gross_raw * float(exposure))
-        unrealized = float(gross_mark_unrealized if bool(self.conformal_veto_v1_5_enabled) else net_unrealized)
+        unrealized = float(net_unrealized)
         if bool(FINAL_GOVERNOR_ALPHA3_CSV_MARK_PARITY_ENABLE) and str(self.active_lifecycle_v1_scout_model_version or "") in {"V21.2", "V31"}:
             unrealized = float(gross_mark_unrealized)
         self.peak_unrealized = max(float(self.peak_unrealized), unrealized)
@@ -7420,16 +5843,12 @@ class FinalGovernorRuntime:
                 hard_stop = abs(float(FINAL_GOVERNOR_LIFECYCLE_V1_EXIT_HARD_STOP))
                 v21_stop_raw = abs(float(self.active_lifecycle_v1_v21_stop_raw or 999.0))
                 v21_stop_reasons = list(self.active_lifecycle_v1_v21_stop_reasons or [])
-                active_stop_cfg = (
-                    dict(self.v22_1_adapter.stop_config)
-                    if self._lifecycle_v22_1_available() and self.v22_1_adapter is not None
-                    else dict(self.v21_stop_config or {})
-                )
+                active_stop_cfg = dict(self.v21_stop_config or {})
                 v21_min_hold = int(max(1, float(active_stop_cfg.get("min_hold_bars", 1) or 1)))
                 close = False
                 reason = "lifecycle_v1_hold"
                 if (
-                    (self._lifecycle_v22_1_available() or self._lifecycle_v21_available())
+                    self._lifecycle_v21_available()
                     and self.active_lifecycle_v1_v21_sleeve
                     and v21_stop_raw < 100.0
                     and hold_bars >= v21_min_hold
@@ -7477,8 +5896,7 @@ class FinalGovernorRuntime:
             "gross_mark_unrealized": float(gross_mark_unrealized),
             "unrealized_basis": (
                 "gross_mark_backtest_parity"
-                if bool(self.conformal_veto_v1_5_enabled)
-                or (
+                if (
                     bool(FINAL_GOVERNOR_ALPHA3_CSV_MARK_PARITY_ENABLE)
                     and str(self.active_lifecycle_v1_scout_model_version or "") in {"V21.2", "V31"}
                 )
@@ -7495,12 +5913,12 @@ class FinalGovernorRuntime:
             "mark_contract": "csv_exit_side_slippage_mark" if bool(FINAL_GOVERNOR_ALPHA3_CSV_MARK_PARITY_ENABLE) else "router_net_mark",
             "cooldown_contract": "csv_parent_and_deep_cooldown" if bool(FINAL_GOVERNOR_ALPHA3_CSV_COOLDOWN_PARITY_ENABLE) else "native_deep_cooldown_only_for_v31",
             "v21": {
-                "enabled": bool(self._lifecycle_v22_1_available() or self._lifecycle_v21_available()),
+                "enabled": bool(self._lifecycle_v21_available()),
                 "pure_mode": bool(self._lifecycle_v21_pure_active()),
-                "model_id": str(self.v22_1_adapter.model_id if self._lifecycle_v22_1_available() and self.v22_1_adapter is not None else self.v21_model_id),
+                "model_id": str(self.v21_model_id),
                 "model_version": "Alpha3",
-                "adapter_version": "v22_1_learned_scout" if self._lifecycle_v22_1_available() else str(self.v21_adapter_version),
-                "model": str(self.v22_1_model_path if self._lifecycle_v22_1_available() else self.v21_model_path),
+                "adapter_version": str(self.v21_adapter_version),
+                "model": str(self.v21_model_path),
                 "sleeve": str(self.active_lifecycle_v1_v21_sleeve),
                 "stop_raw": float(self.active_lifecycle_v1_v21_stop_raw),
                 "peak_raw": float(self.active_lifecycle_v1_v21_peak_raw),
@@ -7508,7 +5926,7 @@ class FinalGovernorRuntime:
                 "legacy_hard_stop_disabled": bool(self._lifecycle_v21_pure_active() and self.v21_disable_legacy_hard_stop),
             },
             "conformal_veto_v1_5": {
-                "enabled": bool(self.conformal_veto_v1_5_enabled),
+                "enabled": False,
                 "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
                 "model": str(self.conformal_veto_v1_5_model_path),
                 "report": str(self.conformal_veto_v1_5_report_path),
@@ -7717,8 +6135,8 @@ class FinalGovernorRuntime:
                 "confidence": entry_confidence,
                 "model_version": "Alpha3",
                 "model_id": FINAL_GOVERNOR_ALPHA3_MODEL_ID,
-                "model_path": str(self.conformal_veto_v1_5_model_path) if bool(self.conformal_veto_v1_5_enabled) else str(self.active_lifecycle_v1_scout_model_path or self.v21_model_path),
-                "model_sleeve": str(self.active_lifecycle_v1_conformal_sleeve_action if bool(self.conformal_veto_v1_5_enabled) else self.active_lifecycle_v1_v21_sleeve),
+                "model_path": str(self.active_lifecycle_v1_scout_model_path or self.v21_model_path),
+                "model_sleeve": str(self.active_lifecycle_v1_v21_sleeve),
                 "scout_prob": float(self.active_lifecycle_v1_scout_prob),
                 "scout_frac": float(self.active_lifecycle_v1_scout_frac),
                 "scout_probability_threshold": float(self.active_lifecycle_v1_scout_probability_threshold),
@@ -7746,8 +6164,8 @@ class FinalGovernorRuntime:
             "confidence": entry_confidence,
             "model_version": "Alpha3",
             "model_id": FINAL_GOVERNOR_ALPHA3_MODEL_ID,
-            "model_path": str(self.conformal_veto_v1_5_model_path) if bool(self.conformal_veto_v1_5_enabled) else str(self.active_lifecycle_v1_scout_model_path or self.v21_model_path),
-            "model_sleeve": str(self.active_lifecycle_v1_conformal_sleeve_action if bool(self.conformal_veto_v1_5_enabled) else self.active_lifecycle_v1_v21_sleeve),
+            "model_path": str(self.active_lifecycle_v1_scout_model_path or self.v21_model_path),
+            "model_sleeve": str(self.active_lifecycle_v1_v21_sleeve),
             "scout_prob": float(self.active_lifecycle_v1_scout_prob),
             "scout_frac": float(self.active_lifecycle_v1_scout_frac),
             "scout_probability_threshold": float(self.active_lifecycle_v1_scout_probability_threshold),
@@ -7763,11 +6181,7 @@ class FinalGovernorRuntime:
         dec, _base_values = latest
         side = int(dec.side)
         action = 1 if side > 0 else (2 if side < 0 else 0)
-        entry_decision_logic = (
-            "clean_base_causal_sleeve_conformal_veto_v1_5"
-            if bool(self.conformal_veto_v1_5_enabled)
-            else "clean_base_lifecycle_v1"
-        )
+        entry_decision_logic = "clean_base_lifecycle_v1"
         trace = {
             "decision_logic": entry_decision_logic,
             "model": os.path.basename(str(self.lifecycle_v1_model_path)),
@@ -7833,9 +6247,9 @@ class FinalGovernorRuntime:
                 "owner": "",
                 "regime": regime,
                 "decision_logic": entry_decision_logic,
-                "model_version": "V1.5" if bool(self.conformal_veto_v1_5_enabled) else ("V22.1" if self.v21_adapter_version == "v22_1_learned_scout" else "V21"),
-                "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5" if bool(self.conformal_veto_v1_5_enabled) else str(self.v21_model_id or "deep_state_safe_cap_reallocator_v21_nearmiss_scout_stop"),
-                "model_path": str(self.conformal_veto_v1_5_model_path) if bool(self.conformal_veto_v1_5_enabled) else str(self.v21_model_path),
+                "model_version": "V22.1" if self.v21_adapter_version == "v22_1_learned_scout" else "V21",
+                "model_id": str(self.v21_model_id or "deep_state_safe_cap_reallocator_v21_nearmiss_scout_stop"),
+                "model_path": str(self.v21_model_path),
                 "model_sleeve": "",
                 "scout_prob": 0.0,
                 "scout_frac": 0.0,
@@ -7866,41 +6280,6 @@ class FinalGovernorRuntime:
         dec = gated_dec
         action = 1 if int(dec.side) > 0 else (2 if int(dec.side) < 0 else 0)
 
-        v15_base_risk_applied = False
-        v15_base_risk_reasons: list[str] = []
-        v15_base_risk_ctx: dict = {}
-        if bool(self.conformal_veto_v1_5_enabled):
-            base_after_risk, v15_risk_blocked, v15_base_risk_reasons, v15_base_risk_ctx = self._lifecycle_v1_apply_risk_gates(
-                meta_router,
-                frame,
-                float(dec.notional_exposure),
-            )
-            v15_base_risk_applied = True
-            trace["base_notional_before_risk"] = float(dec.notional_exposure)
-            trace["base_notional_after_risk"] = float(base_after_risk)
-            trace["risk_reasons"] = list(v15_base_risk_reasons)
-            trace["risk_context"] = dict(v15_base_risk_ctx)
-            if v15_risk_blocked:
-                info = {
-                    "agent": "FINAL_GOVERNOR",
-                    "source": "lifecycle_v1|risk_block",
-                    "position_signal": "HOLD",
-                    "position_reason": "|".join(v15_base_risk_reasons) or "lifecycle_v1_risk_block",
-                    "score": float(dec.quality_score),
-                    "conviction": float(dec.confidence),
-                    "owner": "",
-                    "regime": regime,
-                    "decision_logic": entry_decision_logic,
-                    "model_version": "V1.5",
-                    "model_id": "clean_base_causal_sleeve_conformal_veto_v1_5",
-                    "model_path": str(self.conformal_veto_v1_5_model_path),
-                    "model_sleeve": "",
-                    "sleeve_trace": trace,
-                }
-                return 0, 0.0, 0.0, 1.0, info, regime.upper()
-            dec = dec.copy()
-            dec.loc["notional_exposure"] = float(base_after_risk)
-
         if self._v21_2_jackpot_available():
             adapter = self.v21_2_jackpot_adapter
             cap = float(adapter.max_entry_notional() if adapter is not None else 2.75)
@@ -7909,59 +6288,9 @@ class FinalGovernorRuntime:
             edit_meta = {"entry_bucket": "v21_2_parent", "entry_hazard": 0.0, "entry_support": 0}
         else:
             effective_notional, edit, edit_meta = self._lifecycle_v1_entry_edit(frame, dec)
-        conformal_veto_v1_5_meta: dict = {}
-        if bool(self.conformal_veto_v1_5_enabled) and not self._v21_2_jackpot_available():
-            override_notional, override_edit, conformal_veto_v1_5_meta = self._lifecycle_v1_apply_conformal_veto_v1_5(
-                meta_router,
-                frame,
-                dec=dec,
-                current_notional=effective_notional,
-            )
-            if conformal_veto_v1_5_meta.get("applied"):
-                effective_notional = float(override_notional)
-                if str(override_edit) != "conformal_veto_v1_5_core":
-                    edit = str(override_edit)
-        pre_deep_gated_gross_notional = float(effective_notional)
-        deep_gated_gross_meta: dict = {}
-        if bool(self.deep_gated_gross_enabled) and not self._v21_2_jackpot_available():
-            override_notional, override_edit, deep_gated_gross_meta = self._lifecycle_v1_apply_deep_gated_gross(
-                meta_router,
-                frame,
-                dec=dec,
-                current_notional=effective_notional,
-            )
-            if deep_gated_gross_meta.get("applied"):
-                effective_notional = float(override_notional)
-                edit = str(override_edit)
         pre_adaptive_calibrator_notional = float(effective_notional)
-        adaptive_calibrator_meta: dict = {}
-        if bool(self.deep_state_adaptive_calibrator_enabled) and not self._v21_2_jackpot_available():
-            override_notional, override_edit, adaptive_calibrator_meta = self._lifecycle_v1_apply_deep_state_adaptive_calibrator(
-                meta_router,
-                frame,
-                dec=dec,
-                current_notional=effective_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-            )
-            if adaptive_calibrator_meta.get("applied") or adaptive_calibrator_meta.get("blocked"):
-                effective_notional = float(override_notional)
-                if adaptive_calibrator_meta.get("blocked") or float(adaptive_calibrator_meta.get("router_scale", 1.0) or 1.0) < 1.0:
-                    edit = str(override_edit)
         pre_safe_cap_notional = float(effective_notional)
-        safe_cap_meta: dict = {}
         safe_cap_risk_cap: float | None = None
-        if bool(self.safe_learned_cap_enabled) and not self._v21_2_jackpot_available():
-            override_notional, override_edit, safe_cap_meta = self._lifecycle_v1_apply_safe_learned_cap(
-                meta_router,
-                frame,
-                dec=dec,
-                current_notional=effective_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-            )
-            if safe_cap_meta.get("applied") or safe_cap_meta.get("blocked"):
-                effective_notional = float(override_notional)
-                edit = str(override_edit)
-                safe_cap_risk_cap = float(safe_cap_meta.get("candidate_max_notional", 0.0) or 0.0)
         v21_entry_meta: dict = {}
         v21_sleeve = ""
         if self._v21_2_jackpot_available():
@@ -7992,18 +6321,6 @@ class FinalGovernorRuntime:
             }
             override_notional = float(effective_notional)
             override_sleeve = "core"
-        elif self._lifecycle_v22_1_available():
-            override_notional, override_sleeve, v21_entry_meta = self._lifecycle_v22_1_apply_entry_layer(
-                meta_router,
-                frame,
-                dec=dec,
-                pre_adaptive_notional=pre_adaptive_calibrator_notional,
-                v17_notional=pre_safe_cap_notional,
-                current_notional=effective_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-                adaptive_calibrator_meta=adaptive_calibrator_meta,
-                safe_cap_meta=safe_cap_meta,
-            )
         elif self._lifecycle_v21_available():
             override_notional, override_sleeve, v21_entry_meta = self._lifecycle_v21_apply_entry_layer(
                 meta_router,
@@ -8012,9 +6329,9 @@ class FinalGovernorRuntime:
                 pre_adaptive_notional=pre_adaptive_calibrator_notional,
                 v17_notional=pre_safe_cap_notional,
                 current_notional=effective_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-                adaptive_calibrator_meta=adaptive_calibrator_meta,
-                safe_cap_meta=safe_cap_meta,
+                deep_gated_gross_meta=None,
+                adaptive_calibrator_meta=None,
+                safe_cap_meta=None,
             )
         if v21_entry_meta and (
             v21_entry_meta.get("applied") or (self._lifecycle_v21_pure_active() and v21_entry_meta.get("blocked"))
@@ -8026,51 +6343,11 @@ class FinalGovernorRuntime:
                     edit = "v22_1_learned_scout" if v21_entry_meta.get("model_version") == "V22.1" else "v21_near_miss_scout"
                     safe_cap_risk_cap = float(v21_entry_meta.get("output_notional", 0.0) or 0.0)
                 elif v21_sleeve == "core":
-                    safe_cap_risk_cap = float((safe_cap_meta or {}).get("candidate_max_notional", safe_cap_risk_cap or 0.0) or 0.0)
+                    safe_cap_risk_cap = float(safe_cap_risk_cap or 0.0)
             else:
                 edit = str(v21_entry_meta.get("reason", "v21_entry_block"))
                 safe_cap_risk_cap = 0.0
-        pre_constant_gross_notional = float(effective_notional)
-        constant_gross_meta: dict = {}
-        if (
-            not self._lifecycle_v21_pure_active()
-            and not deep_gated_gross_meta.get("applied")
-            and not safe_cap_meta.get("applied")
-            and bool(self.deep_constant_gross_enabled)
-        ):
-            override_notional, override_edit, constant_gross_meta = self._lifecycle_v1_apply_deep_constant_gross(
-                meta_router,
-                frame,
-                current_notional=effective_notional,
-            )
-            effective_notional = float(override_notional)
-            if constant_gross_meta.get("applied"):
-                edit = str(override_edit)
-        pre_dsac_overlay_notional = float(effective_notional)
-        dsac_overlay_meta: dict = {}
-        if not self._lifecycle_v21_pure_active() and bool(self.dsac_overlay_enabled):
-            override_notional, override_edit, dsac_overlay_meta = self._lifecycle_v1_apply_dsac_overlay(
-                meta_router,
-                frame,
-                side=side,
-                current_notional=effective_notional,
-                deep_gated_gross_meta=deep_gated_gross_meta,
-            )
-            effective_notional = float(override_notional)
-            if dsac_overlay_meta.get("applied"):
-                edit = str(override_edit)
-        if bool(self.conformal_veto_v1_5_enabled) and v15_base_risk_applied:
-            risk_blocked = False
-            risk_reasons = list(v15_base_risk_reasons)
-            risk_ctx = dict(v15_base_risk_ctx)
-            risk_ctx.update(
-                {
-                    "risk_adjusted_notional": float(effective_notional),
-                    "v1_5_risk_order": "base_risk_before_lifecycle_edit_and_conformal_sleeve",
-                    "v1_5_total_notional_after_sleeve": float(effective_notional),
-                }
-            )
-        elif self._lifecycle_v21_pure_active() and self.v21_bypass_runtime_risk_gates:
+        if self._lifecycle_v21_pure_active() and self.v21_bypass_runtime_risk_gates:
             risk_ctx = self._lifecycle_v1_daily_context(meta_router, frame)
             leverage_cap = float(max(float(getattr(meta_router, "exposure_cap", 5.0) or 5.0), 1.0))
             effective_notional = float(np.clip(float(effective_notional), 0.0, leverage_cap))
@@ -8094,36 +6371,13 @@ class FinalGovernorRuntime:
                 effective_notional,
                 max_notional_override=safe_cap_risk_cap,
             )
-        if deep_gated_gross_meta:
-            deep_gated_gross_meta["pre_override_notional"] = float(pre_deep_gated_gross_notional)
-            deep_gated_gross_meta["post_risk_notional"] = float(effective_notional)
-        if adaptive_calibrator_meta:
-            adaptive_calibrator_meta["pre_override_notional"] = float(pre_adaptive_calibrator_notional)
-            adaptive_calibrator_meta["post_risk_notional"] = float(effective_notional)
-        if safe_cap_meta:
-            safe_cap_meta["pre_override_notional"] = float(pre_safe_cap_notional)
-            safe_cap_meta["post_risk_notional"] = float(effective_notional)
-        if constant_gross_meta:
-            constant_gross_meta["pre_override_notional"] = float(pre_constant_gross_notional)
-            constant_gross_meta["post_risk_notional"] = float(effective_notional)
-        if dsac_overlay_meta:
-            dsac_overlay_meta["pre_overlay_notional"] = float(pre_dsac_overlay_notional)
-            dsac_overlay_meta["post_risk_notional"] = float(effective_notional)
         if v21_entry_meta:
             v21_entry_meta["post_risk_notional"] = float(effective_notional)
-        if conformal_veto_v1_5_meta:
-            conformal_veto_v1_5_meta["post_risk_notional"] = float(effective_notional)
         trace.update(
             {
                 "risk_reasons": list(risk_reasons),
                 "risk_context": dict(risk_ctx),
-                "conformal_veto_v1_5": dict(conformal_veto_v1_5_meta),
-                "deep_gated_gross": dict(deep_gated_gross_meta),
-                "deep_state_adaptive_calibrator": dict(adaptive_calibrator_meta),
-                "safe_learned_cap": dict(safe_cap_meta),
                 "v21_nearmiss_scout_stop": dict(v21_entry_meta),
-                "deep_constant_gross": dict(constant_gross_meta),
-                "dsac_overlay": dict(dsac_overlay_meta),
             }
         )
         if risk_blocked:
@@ -8131,15 +6385,6 @@ class FinalGovernorRuntime:
                 block_prefix = "v22_1_scout_param_grid" if v21_entry_meta.get("model_version") == "V22.1" else "v21_nearmiss_scout_stop"
                 block_source = f"{block_prefix}|entry_block"
                 block_reason = str(v21_entry_meta.get("reason", "v21_entry_block"))
-            elif adaptive_calibrator_meta.get("blocked"):
-                block_source = "lifecycle_v1|adaptive_calibrator_block"
-                block_reason = str(adaptive_calibrator_meta.get("reason", "adaptive_calibrator_block"))
-            elif safe_cap_meta.get("blocked"):
-                block_source = "lifecycle_v1|safe_learned_cap_block"
-                block_reason = str(safe_cap_meta.get("reason", "safe_learned_cap_cost_gate_block"))
-            elif dsac_overlay_meta.get("blocked"):
-                block_source = "lifecycle_v1|dsac_overlay_block"
-                block_reason = str(dsac_overlay_meta.get("reason", ""))
             else:
                 block_source = "lifecycle_v1|risk_block"
                 block_reason = ""
@@ -8162,20 +6407,10 @@ class FinalGovernorRuntime:
             risk_reasons.append("router_exposure_cap")
             trace["risk_reasons"] = list(risk_reasons)
             trace["risk_context"] = {**dict(risk_ctx), "router_exposure_cap": float(leverage_cap), "risk_adjusted_notional": float(effective_notional)}
-            if "deep_gated_gross" in trace:
-                trace["deep_gated_gross"] = {**dict(trace.get("deep_gated_gross", {}) or {}), "post_router_cap_notional": float(effective_notional)}
-            if "deep_state_adaptive_calibrator" in trace:
-                trace["deep_state_adaptive_calibrator"] = {**dict(trace.get("deep_state_adaptive_calibrator", {}) or {}), "post_router_cap_notional": float(effective_notional)}
-            if "safe_learned_cap" in trace:
-                trace["safe_learned_cap"] = {**dict(trace.get("safe_learned_cap", {}) or {}), "post_router_cap_notional": float(effective_notional)}
             if "conformal_veto_v1_5" in trace:
                 trace["conformal_veto_v1_5"] = {**dict(trace.get("conformal_veto_v1_5", {}) or {}), "post_router_cap_notional": float(effective_notional)}
             if "v21_nearmiss_scout_stop" in trace:
                 trace["v21_nearmiss_scout_stop"] = {**dict(trace.get("v21_nearmiss_scout_stop", {}) or {}), "post_router_cap_notional": float(effective_notional)}
-            if "deep_constant_gross" in trace:
-                trace["deep_constant_gross"] = {**dict(trace.get("deep_constant_gross", {}) or {}), "post_router_cap_notional": float(effective_notional)}
-            if "dsac_overlay" in trace:
-                trace["dsac_overlay"] = {**dict(trace.get("dsac_overlay", {}) or {}), "post_router_cap_notional": float(effective_notional)}
         entry_dust_floor = float(np.clip(float(FINAL_GOVERNOR_DUST_ENTRY_EXPOSURE), 0.0, leverage_cap))
         entry_min_floor = float(np.clip(float(FINAL_GOVERNOR_MIN_ENTRY_EXPOSURE), 0.0, leverage_cap))
         if entry_min_floor > 0.0 and entry_dust_floor > entry_min_floor:
@@ -8220,13 +6455,8 @@ class FinalGovernorRuntime:
             trace["risk_context"] = dict(risk_ctx)
             trace["effective_notional_before_min_entry_floor"] = float(pre_floor_notional)
             for layer_key in (
-                "deep_gated_gross",
-                "deep_state_adaptive_calibrator",
-                "safe_learned_cap",
                 "conformal_veto_v1_5",
                 "v21_nearmiss_scout_stop",
-                "deep_constant_gross",
-                "dsac_overlay",
             ):
                 if layer_key in trace:
                     trace[layer_key] = {
@@ -8292,24 +6522,10 @@ class FinalGovernorRuntime:
             self.active_lifecycle_v1_scout_frac = 0.0
             self.active_lifecycle_v1_scout_probability_threshold = 0.0
             self.active_lifecycle_v1_scout_cost_pass = False
-        if conformal_veto_v1_5_meta.get("applied"):
-            self.active_lifecycle_v1_conformal_core_notional = float(
-                conformal_veto_v1_5_meta.get("core_notional", effective_notional) or 0.0
-            )
-            self.active_lifecycle_v1_conformal_sleeve_notional = float(
-                conformal_veto_v1_5_meta.get("sleeve_notional", 0.0) or 0.0
-            )
-            self.active_lifecycle_v1_conformal_sleeve_exit_bars = int(
-                conformal_veto_v1_5_meta.get("sleeve_exit_bars", 0) or 0
-            )
-            self.active_lifecycle_v1_conformal_sleeve_action = str(
-                conformal_veto_v1_5_meta.get("action", "") or ""
-            )
-        else:
-            self.active_lifecycle_v1_conformal_core_notional = 0.0
-            self.active_lifecycle_v1_conformal_sleeve_notional = 0.0
-            self.active_lifecycle_v1_conformal_sleeve_exit_bars = 0
-            self.active_lifecycle_v1_conformal_sleeve_action = ""
+        self.active_lifecycle_v1_conformal_core_notional = 0.0
+        self.active_lifecycle_v1_conformal_sleeve_notional = 0.0
+        self.active_lifecycle_v1_conformal_sleeve_exit_bars = 0
+        self.active_lifecycle_v1_conformal_sleeve_action = ""
         self._save_runtime_state()
         trace.update(
             {
@@ -8336,13 +6552,10 @@ class FinalGovernorRuntime:
             else ("v22_1_scout_param_grid" if active_scout_model_version == "V22.1" else "v21_nearmiss_scout_stop")
         )
         active_scout_model_path = str((v21_entry_meta or {}).get("model", self.v21_model_path))
-        v15_applied = bool(conformal_veto_v1_5_meta.get("applied"))
-        v15_model_id = str(conformal_veto_v1_5_meta.get("model_id", "clean_base_causal_sleeve_conformal_veto_v1_5"))
-        v15_model_path = str(conformal_veto_v1_5_meta.get("model", self.conformal_veto_v1_5_model_path))
         sub_decision_logic = (
             active_scout_model_id
             if v21_entry_meta.get("applied")
-            else (v15_model_id if v15_applied else "clean_base_lifecycle_v1")
+            else "clean_base_lifecycle_v1"
         )
         decision_logic = FINAL_GOVERNOR_ALPHA3_MODEL_ID
         trace["decision_logic"] = decision_logic
@@ -8358,16 +6571,9 @@ class FinalGovernorRuntime:
             trace["model_version"] = active_scout_model_version
             trace["model_path"] = active_scout_model_path
             trace["scout_adapter_version"] = str((v21_entry_meta or {}).get("adapter_version", self.v21_adapter_version))
-        elif v15_applied:
-            trace["model_version"] = "V1.5"
-            trace["model_path"] = v15_model_path
         if v21_entry_meta.get("applied"):
             source = f"alpha3|{active_scout_prefix}|entry_{self.active_lifecycle_v1_v21_sleeve or 'core'}"
             reason = f"alpha2_1_{active_scout_prefix}_entry_{self.active_lifecycle_v1_v21_sleeve or 'core'}"
-        elif v15_applied:
-            sleeve_action = str(conformal_veto_v1_5_meta.get("action", "NO_SLEEVE") or "NO_SLEEVE").lower()
-            source = f"conformal_veto_v1_5|entry_{sleeve_action}"
-            reason = f"conformal_veto_v1_5_entry_{sleeve_action}"
         else:
             source = f"lifecycle_v1|entry_{edit}"
             reason = f"lifecycle_v1_entry_{edit}"
@@ -8723,9 +6929,14 @@ class FinalGovernorRuntime:
         _eth_notional = float(dec.notional_exposure) * float(FINAL_GOVERNOR_OMEGA4_6_1_ETH_NOTIONAL_MULTIPLIER)
         _eth_leverage = _eth_notional / max(float(dec.margin_fraction), 1e-12)
         # Shared portfolio notional cap (opt-in via FINAL_GOVERNOR_OMEGA4_6_1_ETH_PORTFOLIO_CAP_ENABLE).
-        # self.omega4_6_1_portfolio_risk stays None unless that flag is set, so this is a no-op today.
+        # self.omega4_6_1_portfolio_risk stays None unless that flag is set. The server .env DOES set
+        # it (the cap has been binding ETH since at least 2026-08-20) -- read the effective config from
+        # the "SYSTEM portfolio_cap" startup log line, never from the code default.
+        _portfolio_cap: dict = {}
         if self.omega4_6_1_portfolio_risk is not None:
             _approved_notional = self.omega4_6_1_portfolio_risk.scale_to_budget("eth_omega461", _eth_notional)
+            _portfolio_cap = portfolio_cap_trace(self.omega4_6_1_portfolio_risk, "eth_omega461", _eth_notional)
+            _log_portfolio_cap("eth", _portfolio_cap)
             if _approved_notional < self.omega4_6_1_portfolio_risk.config.min_notional:
                 info = {
                     "agent": "FINAL_GOVERNOR",
@@ -8740,6 +6951,7 @@ class FinalGovernorRuntime:
                     "decision_logic": OMEGA4_6_1_MODEL_ID,
                     "model_version": OMEGA4_6_1_MODEL_VERSION,
                     "model_id": OMEGA4_6_1_MODEL_ID,
+                    "portfolio_cap": _portfolio_cap,
                 }
                 return 0, 0.0, 0.0, 1.0, info, regime.upper()
             if _approved_notional < _eth_notional - 1e-9:
@@ -8828,6 +7040,7 @@ class FinalGovernorRuntime:
             "quality_score": float(dec.quality_score),
             "confidence": float(dec.confidence),
             "sleeve_trace": dict(dec.trace or {}),
+            "portfolio_cap": _portfolio_cap,
         }
         return action, _eth_notional, float(dec.margin_fraction), _eth_leverage, info, regime.upper()
 
@@ -9320,40 +7533,6 @@ class FinalGovernorRuntime:
         }
         return 0, 0.0, 0.0, 1.0, info, regime.upper()
 
-    def _sniper_env(self, frame: pd.DataFrame, meta_router, current_price: float) -> ExpertMetaTradingEnv:
-        env = ExpertMetaTradingEnv(
-            frame,
-            self.manifest,
-            self._repo_path(FINAL_GOVERNOR_MANIFEST_PATH),
-            self.active_regimes,
-            self.device,
-            phase="val",
-            window_bars=min(self.window_bars, len(frame)),
-            action_mode="all",
-            manual_close_mode="always",
-            gate_mode="soft",
-            enable_fade_expert=True,
-            fade_min_abs_action=0.35,
-            target_min_trades_per_day=5.0,
-            target_max_trades_per_day=20.0,
-            enable_risk_engine=False,
-        )
-        env.reset(0)
-        last = len(frame) - 1
-        env.trade_env.current_step = last
-        env.trade_env.end_step = last
-        if meta_router.pos in {"LONG", "SHORT"}:
-            env.trade_env.pos = meta_router.pos
-            env.trade_env.entry_price = float(meta_router.entry_price or current_price or 0.0)
-            env.trade_env.hold_count = int(meta_router.hold_count or 0)
-            env.trade_env.entry_idx = max(0, last - int(meta_router.hold_count or 0))
-            env.trade_env.current_notional_exposure = float(meta_router.current_leverage or 0.0)
-            env.trade_env.current_margin_fraction = float(meta_router.position_fraction or 0.0)
-            env.trade_env.current_leverage = float(meta_router.execution_leverage or 1.0)
-            env.trade_env.unrealized_pnl = float(meta_router._net_pnl_frac(current_price))
-            env.position_regime = self.owner_regime or self._raw_regime_from_row(frame.iloc[-1]) or "normal"
-        return env
-
     def _load_runtime_state(self) -> None:
         path = str(getattr(self, "runtime_state_path", "") or "")
         if not path or not os.path.exists(path):
@@ -9363,12 +7542,6 @@ class FinalGovernorRuntime:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.macro_lockout_signal = int(data.get("macro_lockout_signal", 0) or 0)
-            self.macro_lockout_bars_left = int(data.get("macro_lockout_bars_left", 0) or 0)
-            self.active_macro_take_profit = float(data.get("active_macro_take_profit", self.active_macro_take_profit) or 0.0)
-            self.active_macro_stop_loss = float(data.get("active_macro_stop_loss", self.active_macro_stop_loss) or 0.0)
-            self.active_macro_max_hold_bars = int(data.get("active_macro_max_hold_bars", self.active_macro_max_hold_bars) or 0)
-            self.active_macro_quality_score = float(data.get("active_macro_quality_score", self.active_macro_quality_score) or 0.0)
             self.owner = str(data.get("owner", self.owner) or "")
             self.owner_regime = str(data.get("owner_regime", self.owner_regime) or "")
             self.active_fully_learned_take_profit = float(data.get("active_fully_learned_take_profit", self.active_fully_learned_take_profit) or 0.0)
@@ -9580,12 +7753,6 @@ class FinalGovernorRuntime:
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             payload = {
-                "macro_lockout_signal": int(self.macro_lockout_signal),
-                "macro_lockout_bars_left": int(self.macro_lockout_bars_left),
-                "active_macro_take_profit": float(self.active_macro_take_profit),
-                "active_macro_stop_loss": float(self.active_macro_stop_loss),
-                "active_macro_max_hold_bars": int(self.active_macro_max_hold_bars),
-                "active_macro_quality_score": float(self.active_macro_quality_score),
                 "owner": str(self.owner),
                 "owner_regime": str(self.owner_regime),
                 "active_fully_learned_take_profit": float(self.active_fully_learned_take_profit),
@@ -10021,252 +8188,9 @@ class FinalGovernorRuntime:
             self.owner_regime = regime
             self.peak_unrealized = 0.0
             return
-        if FINAL_GOVERNOR_MACRO_ENABLE:
-            self.owner = "macro"
-            self.owner_regime = "macro"
-            self.peak_unrealized = 0.0
-            return
         self.owner = "trend" if regime in self.TREND_REGIMES else "micro"
         self.owner_regime = regime
         self.peak_unrealized = 0.0
-
-    def _arm_macro_lockout(self, signal: int) -> None:
-        sig = int(np.sign(signal))
-        if sig == 0:
-            return
-        if bool(self.macro_cfg.lockout_until_signal_change):
-            self.macro_lockout_signal = sig
-        self.macro_lockout_bars_left = max(int(self.macro_lockout_bars_left), int(self.macro_cfg.lockout_bars))
-        self._save_runtime_state()
-
-    def _arm_macro_close_lockout(self, signal: int) -> None:
-        if not bool(getattr(self.macro_cfg, "lockout_on_any_close", False)):
-            return
-        sig = int(np.sign(signal))
-        if sig != 0 and bool(self.macro_cfg.lockout_until_signal_change):
-            self.macro_lockout_signal = sig
-        self.macro_lockout_bars_left = max(int(self.macro_lockout_bars_left), int(self.macro_cfg.lockout_bars))
-        self._save_runtime_state()
-
-    def _macro_lockout_active(self, signal: int) -> bool:
-        sig = int(np.sign(signal))
-        changed = False
-        if self.macro_lockout_bars_left > 0:
-            self.macro_lockout_bars_left -= 1
-            changed = True
-        if self.macro_lockout_signal and (sig == 0 or sig != self.macro_lockout_signal):
-            self.macro_lockout_signal = 0
-            self.macro_lockout_bars_left = 0
-            changed = True
-        if changed:
-            self._save_runtime_state()
-        return bool(
-            (self.macro_lockout_signal and sig == self.macro_lockout_signal)
-            or self.macro_lockout_bars_left > 0
-        )
-
-    @staticmethod
-    def _macro_fixed_risk(macro) -> dict:
-        return {
-            "notional_exposure": float(macro.notional_exposure),
-            "leverage": float(macro.leverage),
-            "position_fraction": float(macro.position_fraction),
-            "take_profit": float(FINAL_GOVERNOR_MACRO_TAKE_PROFIT),
-            "stop_loss": float(FINAL_GOVERNOR_MACRO_STOP_LOSS),
-            "max_hold_bars": 0,
-            "quality_score": 0.0,
-            "confidence": 0.0,
-            "model": "fixed_macro_config",
-        }
-
-    def _macro_learned_risk(self, frame: pd.DataFrame, macro) -> dict:
-        if self.execution_policy_bundle is None:
-            return self._macro_fixed_risk(macro)
-        side = 1 if str(macro.side).upper() == "LONG" else -1
-        learned = predict_learned_execution(
-            self.execution_policy_bundle,
-            frame.iloc[-1],
-            source="macro",
-            side=side,
-            macro_momentum=float(macro.momentum),
-        )
-        risk = learned.to_risk_decision()
-        if bool(FINAL_GOVERNOR_EXECUTION_POLICY_IGNORE_MAX_HOLD):
-            risk["max_hold_bars"] = 0
-        if bool(FINAL_GOVERNOR_EXECUTION_POLICY_QUALITY_OVERLAY):
-            q = float(risk.get("quality_score", 0.0) or 0.0)
-            if q >= float(FINAL_GOVERNOR_EXECUTION_POLICY_TAIL_QUALITY):
-                risk["notional_exposure"] = max(float(risk.get("notional_exposure", 0.0) or 0.0), 3.0)
-                risk["leverage"] = max(float(risk.get("leverage", 1.0) or 1.0), 5.0)
-                risk["take_profit"] = max(float(risk.get("take_profit", 0.0) or 0.0), 1.25)
-            elif q < float(FINAL_GOVERNOR_EXECUTION_POLICY_LOW_QUALITY):
-                risk["notional_exposure"] = min(float(risk.get("notional_exposure", 0.0) or 0.0), 1.00)
-                risk["leverage"] = min(float(risk.get("leverage", 1.0) or 1.0), 3.0)
-                risk["take_profit"] = min(float(risk.get("take_profit", 0.0) or 0.0), 0.10)
-            else:
-                risk["notional_exposure"] = min(float(risk.get("notional_exposure", 0.0) or 0.0), 2.00)
-                risk["leverage"] = min(float(risk.get("leverage", 1.0) or 1.0), 4.0)
-                risk["take_profit"] = min(max(float(risk.get("take_profit", 0.0) or 0.0), 0.10), 0.35)
-            risk["position_fraction"] = float(
-                np.clip(float(risk["notional_exposure"]) / max(float(risk["leverage"]), 1e-8), 0.0, 1.0)
-            )
-        risk["model"] = os.path.basename(str(self.execution_policy_path))
-        return risk
-
-    def _manage_open_position(
-        self,
-        *,
-        meta_router,
-        current_price: float,
-        regime: str,
-        trend_proba: np.ndarray,
-        trend_classes: list[int],
-        micro_proba: np.ndarray,
-        micro_classes: list[int],
-        sniper_env: ExpertMetaTradingEnv | None,
-        frame: pd.DataFrame,
-        ) -> tuple[int, float, float, float, dict]:
-        pos = str(meta_router.pos or "")
-        action_hold = self._action_from_side(pos)
-        net_unrealized = float(meta_router._net_pnl_frac(current_price))
-        raw_unrealized = _price_return_frac(pos, float(meta_router.entry_price or 0.0), float(current_price or 0.0))
-        unrealized = raw_unrealized if self.owner in {"trend", "micro"} else net_unrealized
-        self.peak_unrealized = max(float(self.peak_unrealized), unrealized)
-        hold_bars = int(meta_router.hold_count or 0)
-        idx = -1
-        close = False
-        reason = ""
-
-        if self.owner == "macro":
-            macro = macro_trend_decision(frame, self.macro_cfg)
-            close = (not macro.allow_entry) or str(macro.side).upper() != pos
-            reason = "macro_signal_close" if close else "macro_hold"
-            take_profit = float(self.active_macro_take_profit or self.macro_cfg.take_profit)
-            stop_loss = float(self.active_macro_stop_loss or self.macro_cfg.stop_loss)
-            max_hold = int(self.active_macro_max_hold_bars or 0)
-            if not close and take_profit > 0.0 and unrealized >= take_profit:
-                close = True
-                reason = "macro_take_profit"
-                self._arm_macro_lockout(int(macro.signal))
-            elif not close and stop_loss > 0.0 and unrealized <= -abs(stop_loss):
-                close = True
-                reason = "macro_stop_loss"
-                self._arm_macro_lockout(int(macro.signal))
-            elif not close and max_hold > 0 and hold_bars >= max_hold:
-                close = True
-                reason = "macro_max_hold"
-            elif (
-                not close
-                and self.macro_cfg.trailing_arm > 0.0
-                and self.macro_cfg.trailing_gap > 0.0
-                and self.peak_unrealized >= float(self.macro_cfg.trailing_arm)
-                and unrealized <= self.peak_unrealized - float(self.macro_cfg.trailing_gap)
-            ):
-                close = True
-                reason = "macro_trailing_take_profit"
-                self._arm_macro_lockout(int(macro.signal))
-            if close:
-                self._arm_macro_close_lockout(int(macro.signal))
-        elif self.owner == "trend":
-            if not bool(FINAL_GOVERNOR_TREND_ENABLE):
-                close = True
-                reason = "trend_disabled_close"
-            else:
-                no_p = _trend_class_prob(trend_proba, trend_classes, idx, 0)
-                long_p = _trend_class_prob(trend_proba, trend_classes, idx, 1)
-                short_p = _trend_class_prob(trend_proba, trend_classes, idx, 2)
-                close = (
-                    regime not in self.TREND_REGIMES
-                    or unrealized <= -self.trend_cfg.stop_loss
-                    or unrealized >= self.trend_cfg.take_profit
-                    or (
-                        self.peak_unrealized >= self.trend_cfg.trailing_stop * 1.15
-                        and unrealized <= self.peak_unrealized - self.trend_cfg.trailing_stop
-                    )
-                    or hold_bars >= int(self.trend_cfg.max_hold_bars)
-                    or (pos == "LONG" and short_p >= self.trend_cfg.entry_confidence + 0.10)
-                    or (pos == "SHORT" and long_p >= self.trend_cfg.entry_confidence + 0.10)
-                    or (pos == "LONG" and no_p >= long_p + 0.08)
-                    or (pos == "SHORT" and no_p >= short_p + 0.08)
-                )
-                reason = "trend_close" if close else "trend_hold"
-        elif self.owner == "micro":
-            if not bool(FINAL_GOVERNOR_MICRO_ENABLE):
-                close = True
-                reason = "micro_disabled_close"
-            else:
-                long_p = self._class_prob(micro_proba, micro_classes, idx, 1)
-                short_p = self._class_prob(micro_proba, micro_classes, idx, 2)
-                close = (
-                    unrealized <= -self.micro_cfg.stop_loss
-                    or unrealized >= self.micro_cfg.take_profit
-                    or (
-                        self.peak_unrealized >= self.micro_cfg.trailing_stop * 1.15
-                        and unrealized <= self.peak_unrealized - self.micro_cfg.trailing_stop
-                    )
-                    or hold_bars >= int(self.micro_cfg.max_hold_bars)
-                    or (pos == "LONG" and short_p >= self.micro_cfg.entry_confidence + 0.12)
-                    or (pos == "SHORT" and long_p >= self.micro_cfg.entry_confidence + 0.12)
-                )
-                reason = "micro_close" if close else "micro_hold"
-        else:
-            if not bool(FINAL_GOVERNOR_SNIPER_ENABLE):
-                close = True
-                reason = "sniper_disabled_close"
-            else:
-                if sniper_env is None:
-                    close = True
-                    reason = "sniper_env_missing_close"
-                else:
-                    _, sniper_action = _final_sniper_action(sniper_env, self.sniper_actor, self.sniper_ckpt, self.device)
-                    close = int(sniper_action) == int(FINAL_ACT_CLOSE)
-                    reason = "sniper_close" if close else "sniper_hold"
-
-        if close:
-            self.last_exit_bar = self.bar_counter
-            info = {
-                "agent": "FINAL_GOVERNOR",
-                "source": f"{self.owner or 'sniper'}|{reason}",
-                "position_signal": "EXIT",
-                "position_reason": reason,
-                "score": abs(unrealized),
-                "conviction": abs(unrealized),
-                "owner": self.owner or "sniper",
-                "regime": regime,
-                "decision_logic": "ddh2_v22_1_sniper_trend_micro_full_1x" if self.ddh2_ensemble_enabled else "oos_parity_sniper_trend_micro",
-                "raw_unrealized": float(raw_unrealized),
-                "net_unrealized": float(net_unrealized),
-            }
-            self.owner = ""
-            self.owner_regime = ""
-            self.peak_unrealized = 0.0
-            self.active_macro_take_profit = float(FINAL_GOVERNOR_MACRO_TAKE_PROFIT)
-            self.active_macro_stop_loss = float(FINAL_GOVERNOR_MACRO_STOP_LOSS)
-            self.active_macro_max_hold_bars = 0
-            self.active_macro_quality_score = 0.0
-            self._save_runtime_state()
-            return 0, 0.0, 0.0, 1.0, info
-
-        exposure = float(meta_router.current_leverage or self.notional)
-        fraction = float(meta_router.position_fraction or min(exposure / max(self.leverage, 1e-8), 1.0))
-        exec_lev = float(meta_router.execution_leverage or self.leverage)
-        info = {
-            "agent": "FINAL_GOVERNOR",
-            "source": f"{self.owner or 'sniper'}|{reason}",
-            "position_signal": "HOLD",
-            "position_reason": reason,
-            "score": abs(unrealized),
-            "conviction": abs(unrealized),
-            "owner": self.owner or "sniper",
-            "regime": regime,
-            "decision_logic": "ddh2_v22_1_sniper_trend_micro_full_1x" if self.ddh2_ensemble_enabled else "oos_parity_sniper_trend_micro",
-            "raw_unrealized": float(raw_unrealized),
-            "net_unrealized": float(net_unrealized),
-            "take_profit": float(self.active_macro_take_profit) if self.owner == "macro" else None,
-            "stop_loss": float(self.active_macro_stop_loss) if self.owner == "macro" else None,
-            "quality_score": float(self.active_macro_quality_score) if self.owner == "macro" else None,
-        }
-        return action_hold, exposure, fraction, exec_lev, info
 
     def decide(
         self,
@@ -10545,6 +8469,20 @@ def _omega461_shadow_action_for_pos(pos: str | None) -> int:
     return 0
 
 
+def _log_portfolio_cap(asset_key: str, trace: dict) -> None:
+    logger.info(
+        "SYSTEM portfolio_cap asset=%s requested=%.4f approved=%.4f budget=%s cap=%s share=%s scaled=%s blocked=%s",
+        asset_key,
+        float(trace.get("requested_notional", 0.0) or 0.0),
+        float(trace.get("approved_notional", 0.0) or 0.0),
+        trace.get("asset_budget"),
+        trace.get("total_notional_cap"),
+        trace.get("asset_share"),
+        bool(trace.get("scaled", False)),
+        bool(trace.get("blocked", False)),
+    )
+
+
 def _omega461_shadow_decorate_trade_row(row: dict, *, asset_key: str, cfg: dict, real_execution_result: dict | None = None) -> dict:
     out = dict(row or {})
     out["asset"] = str(asset_key)
@@ -10628,6 +8566,7 @@ def _omega461_shadow_audit_context(
             if real_execution_result is not None
             else {"enabled": False, "dry_run": True, "status": "shadow_only", "orders": []}
         ),
+        "portfolio_cap": dict(active.get("portfolio_cap", {}) or {}),
     }
 
 
@@ -10761,7 +8700,6 @@ def _omega461_persisted_open_assets(state_dir: Path) -> list[str]:
 # ════════════════════════════════════════════════════════════════
 async def main(use_local=False):
     fetcher = None
-    journal_writer = None
     task_supervisor = None
     ms_scanner = None
     ms_scanner_sol = None
@@ -10773,9 +8711,7 @@ async def main(use_local=False):
         # and validated on); account_symbol is USDT-M -- settlement currency matches the price series
         # the strategy operates on.
         fetcher      = BinanceLiveFetcher(limit=max(7000, int(FINAL_GOVERNOR_BUFFER_BARS)), account_symbol="ETH/USDT:USDT")
-        journal_writer = AsyncJsonlWriter()
-        journal_writer.start()
-        transition_gate = StateTransitionGate()
+        transition_gate = asyncio.Lock()
         task_supervisor = AsyncTaskSupervisor(
             on_error=lambda name, error: logger.error("background_task_failed name=%s error=%s", name, error)
         )
@@ -10811,27 +8747,17 @@ async def main(use_local=False):
             str(_orderbook_status.get("path", "")),
         )
         _pending_next_open_intent = {}
-        if FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE:
-            _pending_next_open_intent = _read_json_safe(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
-            if _pending_next_open_intent:
-                logger.info(
-                    "SYSTEM pending_next_open_intent=LOADED execute_at=%s action=%s source=%s",
-                    str(_pending_next_open_intent.get("execute_at_kst", "")),
-                    str(_pending_next_open_intent.get("final_action", "")),
-                    str(_pending_next_open_intent.get("source", "")),
-                )
-        else:
-            _stale_pending_next_open = _read_json_safe(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
-            if _stale_pending_next_open:
-                logger.info(
-                    "SYSTEM pending_next_open_intent=DISCARDED reason=backtest_next_open_contract execute_at=%s action=%s",
-                    str(_stale_pending_next_open.get("execute_at_kst", "")),
-                    str(_stale_pending_next_open.get("final_action", "")),
-                )
-                try:
-                    os.remove(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
-                except OSError:
-                    pass
+        _stale_pending_next_open = _read_json_safe(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
+        if _stale_pending_next_open:
+            logger.info(
+                "SYSTEM pending_next_open_intent=DISCARDED reason=backtest_next_open_contract execute_at=%s action=%s",
+                str(_stale_pending_next_open.get("execute_at_kst", "")),
+                str(_stale_pending_next_open.get("final_action", "")),
+            )
+            try:
+                os.remove(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
+            except OSError:
+                pass
     
         # ── Final Governor: Lifecycle V1 first; fully learned and legacy stacks remain as fallback. ──
         meta_router = GovernorPositionRouter()
@@ -10857,6 +8783,14 @@ async def main(use_local=False):
         )
         if bool(FINAL_GOVERNOR_OMEGA4_6_1_ETH_PORTFOLIO_CAP_ENABLE):
             final_governor.omega4_6_1_portfolio_risk = omega461_portfolio_risk
+        logger.info(
+            "SYSTEM portfolio_cap total_notional_cap=%s budgets=%s eth_real_path=%s sol_btc_executor_path=%s sol_btc_shadow_path=%s",
+            omega461_portfolio_risk.config.total_notional_cap,
+            {k: omega461_portfolio_risk.asset_budget(k) for k in ("eth_omega461", "eth_sigma3_1h", "btc", "sol")},
+            bool(FINAL_GOVERNOR_OMEGA4_6_1_ETH_PORTFOLIO_CAP_ENABLE),
+            bool(FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_REAL_EXECUTION_ENABLE),
+            bool(FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_SHADOW_PORTFOLIO_CAP_ENABLE),
+        )
         if bool(FINAL_GOVERNOR_OMEGA4_6_1_SHADOW_ASSETS_ENABLE):
             for _asset_key, _asset_cfg in OMEGA4_6_1_SHADOW_ASSET_CONFIG.items():
                 if _asset_key == "sol" and not bool(FINAL_GOVERNOR_OMEGA4_6_1_SOL_ENABLE):
@@ -11024,10 +8958,10 @@ async def main(use_local=False):
             "SYSTEM mode=FINAL_GOVERNOR stack=%s legacy_macro_sniper=%s trend=%s micro=%s next_open=%s scheduled_next_open=%s fetch_delay=%.2fs console=compact",
             FINAL_GOVERNOR_ALPHA43_STICKY_MODEL_ID if final_governor.fully_learned_policy_bundle is not None else "lifecycle_v1_clean_base",
             not bool(final_governor.fully_learned_policy_bundle is not None),
-            bool(FINAL_GOVERNOR_TREND_ENABLE),
-            bool(FINAL_GOVERNOR_MICRO_ENABLE),
+            False,
+            False,
             bool(FINAL_GOVERNOR_NEXT_OPEN_EXECUTION_ENABLE),
-            bool(FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE),
+            False,
             float(FINAL_GOVERNOR_BAR_FETCH_DELAY_SEC),
         )
         _prev_meta_pos: str | None = None
@@ -11109,7 +9043,7 @@ async def main(use_local=False):
                     if not use_local:
                         reconcile_now = time.time()
                         if (reconcile_now - _last_exchange_reconcile_ts) >= 15.0:
-                            async with transition_gate.transition("exchange_reconcile"):
+                            async with transition_gate:
                                 exchange_position_state, restored = await _fetch_exchange_position()
                                 _last_exchange_reconcile_ts = reconcile_now
                                 # A resting exchange TP/SL order (see BinanceFuturesExecutionAdapter.
@@ -11144,7 +9078,7 @@ async def main(use_local=False):
                                     _reconcile_close_payload = getattr(meta_router, "_last_reconcile_close_payload", None)
                                     if _reconcile_close_payload:
                                         _prev_meta_pos = meta_router.pos
-                                        await journal_writer.append_many(
+                                        _append_jsonl_many(
                                             TRADE_JOURNAL_PATH, [dict(_reconcile_close_payload)]
                                         )
                                         if final_governor.owner == OMEGA4_6_1_OWNER:
@@ -11698,17 +9632,16 @@ async def main(use_local=False):
             return str(value)
     
         async def _execute_pending_next_open(eth_buffer) -> None:
-            nonlocal _prev_meta_pos, _pending_next_open_intent
+            nonlocal _pending_next_open_intent
     
-            if not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE:
-                if _pending_next_open_intent:
-                    logger.info("SYSTEM pending_next_open dropped: disabled by backtest_next_open_contract")
-                    _pending_next_open_intent = {}
-                    try:
-                        os.remove(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
-                    except OSError:
-                        pass
-                return
+            if _pending_next_open_intent:
+                logger.info("SYSTEM pending_next_open dropped: disabled by backtest_next_open_contract")
+                _pending_next_open_intent = {}
+                try:
+                    os.remove(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
+                except OSError:
+                    pass
+            return
     
             intent = dict(_pending_next_open_intent or {})
             if not intent or eth_buffer is None or len(eth_buffer) == 0:
@@ -11968,11 +9901,11 @@ async def main(use_local=False):
                 trade_rows.append(dict(resize_payload))
     
             if trade_rows:
-                await journal_writer.append_many(TRADE_JOURNAL_PATH, trade_rows)
+                _append_jsonl_many(TRADE_JOURNAL_PATH, trade_rows)
             if audit_rows:
-                await journal_writer.append_many(POSITION_ACCOUNTING_AUDIT_PATH, audit_rows)
+                _append_jsonl_many(POSITION_ACCOUNTING_AUDIT_PATH, audit_rows)
             if prev_meta_pos != new_pos:
-                await journal_writer.append(DASHBOARD_EVENTS_PATH, {
+                _append_jsonl(DASHBOARD_EVENTS_PATH, {
                     "ts": str(execution_time_kst),
                     "event": transition_label,
                     "from": prev_meta_pos,
@@ -12193,8 +10126,14 @@ async def main(use_local=False):
                             cand_notional *= float(FINAL_GOVERNOR_OMEGA4_6_1_SOL_NOTIONAL_MULTIPLIER)
                             cand_leverage = cand_notional / max(cand_margin_fraction, 1e-12)
                         risk_blocked = False
-                        if ctx.get("executor") is not None:
+                        portfolio_cap: dict = {}
+                        # Executor present (SOL_BTC_REAL_EXECUTION_ENABLE) or the explicit shadow opt-in:
+                        # both apply the same per-asset prealloc budget, so the journal records what the
+                        # real path would size regardless of which of the two flags is on.
+                        if ctx.get("executor") is not None or bool(FINAL_GOVERNOR_OMEGA4_6_1_SOL_BTC_SHADOW_PORTFOLIO_CAP_ENABLE):
                             approved_notional = omega461_portfolio_risk.scale_to_budget(asset_key, cand_notional)
+                            portfolio_cap = portfolio_cap_trace(omega461_portfolio_risk, asset_key, cand_notional)
+                            _log_portfolio_cap(asset_key, portfolio_cap)
                             if approved_notional < omega461_portfolio_risk.config.min_notional:
                                 risk_blocked = True
                             elif approved_notional < cand_notional - 1e-9:
@@ -12234,6 +10173,7 @@ async def main(use_local=False):
                                 "reason": reason,
                                 "entry_price": price,
                                 "last_checked_bar_ts": str(processed["timestamp"].iloc[-1]),
+                                "portfolio_cap": portfolio_cap,
                             }
                         else:
                             reason = "omega4_6_1_shadow_portfolio_risk_blocked"
@@ -12336,8 +10276,8 @@ async def main(use_local=False):
                         )
                         rows.append(_omega461_shadow_decorate_trade_row(open_row, asset_key=asset_key, cfg=cfg, real_execution_result=real_execution_result))
                     if rows:
-                        await journal_writer.append_many(TRADE_JOURNAL_PATH, rows)
-                        await journal_writer.append(DASHBOARD_EVENTS_PATH, {
+                        _append_jsonl_many(TRADE_JOURNAL_PATH, rows)
+                        _append_jsonl(DASHBOARD_EVENTS_PATH, {
                             "ts": str(timestamp_kst),
                             "event": transition,
                             "from": prev_pos,
@@ -12617,7 +10557,7 @@ async def main(use_local=False):
                         _pipe_health["warnings"] = _warnings
                     _pipe_loop = asyncio.get_running_loop()
                     await _pipe_loop.run_in_executor(None, _atomic_write_json, DATA_PIPELINE_HEALTH_PATH, _pipe_health)
-                    await journal_writer.append(DATA_PIPELINE_HEALTH_JSONL_PATH, _pipe_health)
+                    _append_jsonl(DATA_PIPELINE_HEALTH_JSONL_PATH, _pipe_health)
                     if DATA_PIPELINE_FEATURE_SNAPSHOT_ENABLE and write_feature_snapshot:
                         _snapshot_frame = getattr(final_governor, "last_prepared_frame_for_health", None)
                         if not isinstance(_snapshot_frame, pd.DataFrame) or not len(_snapshot_frame):
@@ -12625,7 +10565,7 @@ async def main(use_local=False):
                         _feature_snapshot = _build_decision_feature_snapshot(_snapshot_frame, _pipe_active, _pipe_health)
                         if _feature_snapshot:
                             await _pipe_loop.run_in_executor(None, _atomic_write_json, DATA_PIPELINE_FEATURE_SNAPSHOT_PATH, _feature_snapshot)
-                            await journal_writer.append(DATA_PIPELINE_FEATURE_SNAPSHOT_JSONL_PATH, _feature_snapshot)
+                            _append_jsonl(DATA_PIPELINE_FEATURE_SNAPSHOT_JSONL_PATH, _feature_snapshot)
                         await _pipe_loop.run_in_executor(
                             None,
                             _write_decision_feature_frame_snapshot,
@@ -12683,13 +10623,10 @@ async def main(use_local=False):
                     else FINAL_GOVERNOR_ALLOW_LATE_NEXT_OPEN_SHADOW_EXECUTION
                 )
                 if (
-                    (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE)
-                    and (
-                        _execution_delay_sec < -2.0
-                        or (
-                            (not _allow_late_next_open_fill)
-                            and _execution_delay_sec > float(max(0.0, _max_next_open_delay))
-                        )
+                    _execution_delay_sec < -2.0
+                    or (
+                        (not _allow_late_next_open_fill)
+                        and _execution_delay_sec > float(max(0.0, _max_next_open_delay))
                     )
                 ):
                     if not use_local:
@@ -12739,7 +10676,7 @@ async def main(use_local=False):
                         write_feature_snapshot=False,
                     )
                     return
-                if (not FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE) and _next_open_delay_late:
+                if _next_open_delay_late:
                     (logger.warning if _real_exchange_execution else logger.info)(
                         "SYSTEM next_open_execution late_fill_allowed: signal=%s execution=%s delay=%.2fs max=%.2fs mode=%s late_allowed=%s",
                         decision_time_kst,
@@ -13027,176 +10964,6 @@ async def main(use_local=False):
             _prev_trade_snapshot = meta_router.position_snapshot()
             _decision_made_at_kst = pd.Timestamp.now(tz="Asia/Seoul")
     
-            def _target_side_from_action(action: int) -> str | None:
-                if int(action) == 1:
-                    return "LONG"
-                if int(action) == 2:
-                    return "SHORT"
-                return None
-    
-            _target_side = _target_side_from_action(int(_fa))
-            _current_side = str(meta_router.pos or "")
-            _schedule_required = False
-            if _target_side is None:
-                _schedule_required = bool(meta_router.pos is not None)
-            elif float(_target_exposure) > 1e-12:
-                _schedule_required = bool(_current_side != _target_side)
-                if not _schedule_required and meta_router.pos is not None:
-                    _schedule_required = bool(
-                        abs(float(_target_fraction) - float(meta_router.position_fraction or 0.0)) > 1e-9
-                        or abs(float(_target_exec_leverage) - float(meta_router.execution_leverage or 1.0)) > 1e-9
-                        or abs(float(_target_exposure) - float(meta_router.current_leverage or 0.0)) > 1e-9
-                    )
-    
-            if FINAL_GOVERNOR_SCHEDULE_NEXT_BAR_OPEN_ENABLE and _next_open_execution and _schedule_required:
-                # Backtest contract: a signal from the completed signal bar fills at
-                # the immediately next bar open. Do not add another bar here.
-                _pending_execute_at = pd.Timestamp(decision_time_kst)
-                if _pending_execute_at.tzinfo is not None:
-                    _pending_execute_at = _pending_execute_at.tz_convert("Asia/Seoul").tz_localize(None)
-                _pending_execute_at = _pending_execute_at + pd.Timedelta(minutes=5)
-                _decision_made_cmp = pd.Timestamp(_decision_made_at_kst)
-                if _decision_made_cmp.tzinfo is not None:
-                    _decision_made_cmp = _decision_made_cmp.tz_convert("Asia/Seoul").tz_localize(None)
-                if _pending_execute_at <= _decision_made_cmp:
-                    logger.warning(
-                        "SYSTEM pending_next_open not_scheduled: reason=missed_exact_next_open signal=%s execute_at=%s decision_made=%s action=%s exposure=%.4f",
-                        str(decision_time_kst),
-                        str(_pending_execute_at),
-                        str(_decision_made_at_kst),
-                        int(_fa),
-                        float(_target_exposure),
-                    )
-                    _pending_next_open_intent = {}
-                    try:
-                        os.remove(FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH)
-                    except OSError:
-                        pass
-                    return
-                _existing_execute_at = None
-                if _pending_next_open_intent:
-                    try:
-                        _existing_execute_at = pd.Timestamp(_pending_next_open_intent.get("execute_at_kst", ""))
-                        if _existing_execute_at.tzinfo is not None:
-                            _existing_execute_at = _existing_execute_at.tz_convert("Asia/Seoul").tz_localize(None)
-                    except Exception:
-                        _existing_execute_at = None
-                if _existing_execute_at is not None and _existing_execute_at >= _pending_execute_at:
-                    logger.info(
-                        "SYSTEM pending_next_open preserved: existing_execute_at=%s new_execute_at=%s action=%s exposure=%.4f",
-                        str(_existing_execute_at),
-                        str(_pending_execute_at),
-                        int(_fa),
-                        float(_target_exposure),
-                    )
-                    return
-                _pending_trace = dict(_active_info.get("sleeve_trace", {}) or {})
-                _pending_audit_context = {
-                    "ledger_ts_kind": "scheduled_next_bar_open_pending",
-                    "decision_made_at_kst": str(_decision_made_at_kst),
-                    "decision_bar_ts": str(decision_time_kst),
-                    "decision_bar_utc": str(_bar_value(_signal_bar, "timestamp", "")),
-                    "decision_bar_open": _bar_float(_signal_bar, "open", decision_price),
-                    "decision_bar_high": _bar_float(_signal_bar, "high", decision_price),
-                    "decision_bar_low": _bar_float(_signal_bar, "low", decision_price),
-                    "decision_bar_close": _bar_float(_signal_bar, "close", decision_price),
-                    "decision_bar_volume": _bar_float(_signal_bar, "volume", 0.0),
-                    "decision_bar_is_complete": True,
-                    "decision_price": float(decision_price),
-                    "decision_price_source": "eth_buffer.close[-2]",
-                    "scheduled_execute_at_kst": str(_pending_execute_at),
-                    "execution_price_source": "scheduled_next_bar_open",
-                    "ai_timing": dict(_sleeve_info.get("ai_timing", {}) or {}),
-                    "sleeve_trace": dict(_pending_trace),
-                }
-                _pending_scout_layer = dict(_pending_trace.get("v21_nearmiss_scout_stop", {}) or {})
-                _pending_scout = dict(_pending_scout_layer.get("scout", {}) or {})
-                _pending_audit_context.update(
-                    {
-                        "model_version": str(_active_info.get("model_version", _pending_trace.get("model_version", "")) or ""),
-                        "model_id": str(_active_info.get("model_id", _pending_trace.get("decision_logic", "")) or ""),
-                        "model_path": str(_active_info.get("model_path", _pending_trace.get("model_path", "")) or ""),
-                        "model_sleeve": str(_active_info.get("model_sleeve", _pending_trace.get("v21_sleeve", "")) or ""),
-                        "scout_prob": float(
-                            _active_info.get(
-                                "scout_prob",
-                                _pending_scout.get("scout_prob", _pending_scout.get("probability", 0.0)),
-                            )
-                            or 0.0
-                        ),
-                        "scout_frac": float(_active_info.get("scout_frac", _pending_scout.get("scout_frac", 0.0)) or 0.0),
-                        "scout_probability_threshold": float(
-                            _active_info.get(
-                                "scout_probability_threshold",
-                                _pending_scout.get("probability_threshold", 0.0),
-                            )
-                            or 0.0
-                        ),
-                        "scout_cost_pass": bool(_active_info.get("scout_cost_pass", _pending_scout.get("cost_pass", False))),
-                        "learned_config": dict(_pending_scout_layer.get("learned_config", _pending_scout.get("learned_config", {})) or {}),
-                    }
-                )
-                _pending_v31_trace = dict(_pending_trace.get("v31", {}) or {})
-                _pending_alpha2_trace = dict(_pending_trace.get("alpha2_1", {}) or {})
-                _pending_audit_context.update(
-                    {
-                        "v31_q_long": float(_pending_v31_trace.get("q_long", 0.0) or 0.0),
-                        "v31_q_short": float(_pending_v31_trace.get("q_short", 0.0) or 0.0),
-                        "v31_edge": float(_pending_v31_trace.get("edge", 0.0) or 0.0),
-                        "v31_margin": float(_pending_v31_trace.get("margin", 0.0) or 0.0),
-                        "v31_selected_side": str(_pending_v31_trace.get("selected_side", "") or ""),
-                        "v31_pass_gate": bool(_pending_v31_trace.get("pass_gate", False)),
-                        "parent_action": int(
-                            _pending_alpha2_trace.get("parent_action_before", _pending_trace.get("base_action", _pending_v31_trace.get("parent_action", 0))) or 0
-                        ),
-                        "parent_side": int(
-                            _pending_alpha2_trace.get("parent_side_before", _pending_trace.get("base_side", _pending_v31_trace.get("parent_side", 0))) or 0
-                        ),
-                        "teacher_gate_result": str(
-                            _pending_alpha2_trace.get("reason", _pending_v31_trace.get("teacher_gate_result", "")) or ""
-                        ),
-                        "teacher_pred_action": int(_pending_alpha2_trace.get("teacher_pred_action", 0) or 0),
-                        "teacher_confidence": float(_pending_alpha2_trace.get("teacher_confidence", 0.0) or 0.0),
-                        "teacher_quality": float(_pending_alpha2_trace.get("teacher_quality", 0.0) or 0.0),
-                        "teacher_keep_parent": bool(_pending_alpha2_trace.get("keep_parent", False)),
-                    }
-                )
-                _active_info["scheduled_execution"] = True
-                _active_info["decision_made_at_kst"] = str(_decision_made_at_kst)
-                _active_info["scheduled_execute_at_kst"] = str(_pending_execute_at)
-                _active_info["execution_bar_ts"] = str(_pending_execute_at)
-                _active_info["execution_price_source"] = "scheduled_next_bar_open"
-                _pending_next_open_intent = _jsonable({
-                    "schema_version": "pending_next_open_intent.v1",
-                    "created_at": pd.Timestamp.now(tz="Asia/Seoul").isoformat(),
-                    "decision_made_at_kst": str(_decision_made_at_kst),
-                    "signal_bar_ts": str(decision_time_kst),
-                    "execute_at_kst": str(_pending_execute_at),
-                    "final_action": int(_fa),
-                    "target_exposure": float(_target_exposure),
-                    "target_fraction": float(_target_fraction),
-                    "target_exec_leverage": float(_target_exec_leverage),
-                    "decision_price": float(decision_price),
-                    "source": str(_governor_source),
-                    "regime_name": str(regime_name),
-                    "hold_reason": str(_hold_reason),
-                    "active_info": dict(_active_info),
-                    "audit_context": _pending_audit_context,
-                })
-                _loop = asyncio.get_running_loop()
-                await _loop.run_in_executor(None, _atomic_write_json, FINAL_GOVERNOR_PENDING_NEXT_OPEN_PATH, _pending_next_open_intent)
-                logger.info(
-                    "SYSTEM pending_next_open scheduled: decision_made=%s signal=%s execute_at=%s action=%s exposure=%.4f fraction=%.4f lev=%.2f source=%s",
-                    str(_decision_made_at_kst),
-                    str(decision_time_kst),
-                    str(_pending_execute_at),
-                    int(_fa),
-                    float(_target_exposure),
-                    float(_target_fraction),
-                    float(_target_exec_leverage),
-                    str(_governor_source),
-                )
-                return
             _active_info.setdefault("decision_made_at_kst", str(_decision_made_at_kst))
             _lifecycle_v1_decision = (
                 str(_governor_source).startswith("lifecycle_v1|")
@@ -13410,6 +11177,7 @@ async def main(use_local=False):
                     )
                     or {}
                 ),
+                "portfolio_cap": dict(_active_info.get("portfolio_cap", {}) or {}),
             }
             _v31_audit_trace = dict(_sleeve_trace.get("v31", {}) or {})
             _alpha2_audit_trace = dict(_sleeve_trace.get("alpha2_1", {}) or {})
@@ -13856,72 +11624,17 @@ async def main(use_local=False):
                             "active_entry_bucket": str(final_governor.active_lifecycle_v1_entry_bucket),
                             "active_entry_hazard": float(final_governor.active_lifecycle_v1_entry_hazard),
                             "active_entry_support": int(final_governor.active_lifecycle_v1_entry_support),
-                            "deep_gated_gross": {
-                                "enabled": bool(final_governor.deep_gated_gross_enabled),
-                                "model": str(final_governor.deep_gated_gross_model_path),
-                                "report": str(final_governor.deep_gated_gross_report_path),
-                                "selected_config": str(
-                                    dict(final_governor.deep_gated_gross_cfg or {}).get("name", "")
-                                ),
-                                "high_notional": float(dict(final_governor.deep_gated_gross_cfg or {}).get("high_notional", 0.0) or 0.0),
-                                "mid_notional": float(dict(final_governor.deep_gated_gross_cfg or {}).get("mid_notional", 0.0) or 0.0),
-                                "defensive_notional": float(dict(final_governor.deep_gated_gross_cfg or {}).get("defensive_notional", 0.0) or 0.0),
-                                "cost3_notional": float(dict(final_governor.deep_gated_gross_cfg or {}).get("cost3_notional", 0.0) or 0.0),
-                            },
-                            "deep_state_adaptive_calibrator": {
-                                "enabled": bool(final_governor.deep_state_adaptive_calibrator_enabled),
-                                "model": str(final_governor.deep_state_adaptive_calibrator_model_path),
-                                "report": str(final_governor.deep_state_adaptive_calibrator_report_path),
-                                "audit": str(final_governor.deep_state_adaptive_calibrator_audit_path),
-                                "selected_config": str(
-                                    final_governor._adaptive_calibrator_cfg_get(
-                                        final_governor.deep_state_adaptive_config,
-                                        "name",
-                                        "",
-                                    )
-                                ),
-                                "future_rolling_q": (
-                                    None
-                                    if final_governor.deep_state_adaptive_future_rolling_q is None
-                                    else float(final_governor.deep_state_adaptive_future_rolling_q)
-                                ),
-                            },
                             "scout_layer": {
-                                "enabled": bool(final_governor._lifecycle_v22_1_available() or final_governor._lifecycle_v21_available()),
-                                "model_version": "V22.1" if final_governor._lifecycle_v22_1_available() else ("V22.1" if final_governor.v21_adapter_version == "v22_1_learned_scout" else "V21"),
-                                "model_id": str(final_governor.v22_1_adapter.model_id if final_governor._lifecycle_v22_1_available() and final_governor.v22_1_adapter is not None else final_governor.v21_model_id),
-                                "adapter_version": "v22_1_learned_scout" if final_governor._lifecycle_v22_1_available() else str(final_governor.v21_adapter_version),
-                                "model": str(final_governor.v22_1_model_path if final_governor._lifecycle_v22_1_available() else final_governor.v21_model_path),
-                                "report": str(final_governor.v22_1_report_path if final_governor._lifecycle_v22_1_available() else final_governor.v21_report_path),
-                                "audit": str(final_governor.v22_1_audit_path if final_governor._lifecycle_v22_1_available() else final_governor.v21_audit_path),
-                                "selected_config": str(
-                                    (
-                                        dict(final_governor.v22_1_adapter.learned_config or {}).get("name", "")
-                                        if final_governor._lifecycle_v22_1_available() and final_governor.v22_1_adapter is not None
-                                        else dict(final_governor.v21_scout_config or {}).get("name", "")
-                                    )
-                                ),
+                                "enabled": bool(final_governor._lifecycle_v21_available()),
+                                "model_version": "V22.1" if final_governor.v21_adapter_version == "v22_1_learned_scout" else "V21",
+                                "model_id": str(final_governor.v21_model_id),
+                                "adapter_version": str(final_governor.v21_adapter_version),
+                                "model": str(final_governor.v21_model_path),
+                                "report": str(final_governor.v21_report_path),
+                                "audit": str(final_governor.v21_audit_path),
+                                "selected_config": str(dict(final_governor.v21_scout_config or {}).get("name", "")),
                                 "active_sleeve": str(final_governor.active_lifecycle_v1_v21_sleeve),
                                 "active_stop_raw": float(final_governor.active_lifecycle_v1_v21_stop_raw),
-                            },
-                            "deep_constant_gross": {
-                                "enabled": bool(final_governor.deep_constant_gross_enabled),
-                                "report": str(final_governor.deep_constant_gross_report_path),
-                                "selected_config": str(
-                                    dict(final_governor.deep_constant_gross_report.get("selected_config", {}) or {}).get("name", "")
-                                ),
-                                "target_notional": float(final_governor.deep_constant_gross_target_notional),
-                                "cost3_notional": float(final_governor.deep_constant_gross_cost3_notional),
-                            },
-                            "dsac_overlay": {
-                                "enabled": bool(final_governor.dsac_overlay_enabled),
-                                "checkpoint": str(final_governor.dsac_overlay_ckpt_path),
-                                "checkpoint_meta": dict(final_governor.dsac_overlay_ckpt_meta),
-                                "mode": str(final_governor.dsac_overlay_mode),
-                                "threshold": float(final_governor.dsac_overlay_threshold),
-                                "scale": float(final_governor.dsac_overlay_scale),
-                                "cost_gate_enabled": bool(final_governor.dsac_overlay_cost_gate_enabled),
-                                "cost_buffer": float(final_governor.dsac_overlay_cost_buffer),
                             },
                         },
                         "fully_learned": {
@@ -13947,37 +11660,8 @@ async def main(use_local=False):
                             "active_quality_score": float(final_governor.active_omega4_6_1_quality_score),
                             "active_confidence": float(final_governor.active_omega4_6_1_confidence),
                         },
-                        "macro": {
-                            "enabled": bool(FINAL_GOVERNOR_MACRO_ENABLE and final_governor.fully_learned_policy_bundle is None),
-                            "lookback_bars": int(FINAL_GOVERNOR_MACRO_LOOKBACK_BARS),
-                            "threshold": float(FINAL_GOVERNOR_MACRO_THRESHOLD),
-                            "persist_updates": int(FINAL_GOVERNOR_MACRO_PERSIST_UPDATES),
-                            "update_bars": int(FINAL_GOVERNOR_MACRO_UPDATE_BARS),
-                            "notional_cap": float(FINAL_GOVERNOR_MACRO_NOTIONAL),
-                            "leverage": float(FINAL_GOVERNOR_MACRO_LEVERAGE),
-                            "take_profit": float(FINAL_GOVERNOR_MACRO_TAKE_PROFIT),
-                            "stop_loss": float(FINAL_GOVERNOR_MACRO_STOP_LOSS),
-                            "trailing_arm": float(FINAL_GOVERNOR_MACRO_TRAILING_ARM),
-                            "trailing_gap": float(FINAL_GOVERNOR_MACRO_TRAILING_GAP),
-                            "lockout_bars": int(FINAL_GOVERNOR_MACRO_LOCKOUT_BARS),
-                            "lockout_on_any_close": bool(FINAL_GOVERNOR_MACRO_LOCKOUT_ON_ANY_CLOSE),
-                            "lockout_signal": int(final_governor.macro_lockout_signal),
-                            "lockout_bars_left": int(final_governor.macro_lockout_bars_left),
-                            "execution_policy": {
-                                "enabled": bool(final_governor.execution_policy_bundle is not None),
-                                "model": os.path.basename(str(final_governor.execution_policy_path)),
-                                "ignore_max_hold": bool(FINAL_GOVERNOR_EXECUTION_POLICY_IGNORE_MAX_HOLD),
-                                "quality_overlay": bool(FINAL_GOVERNOR_EXECUTION_POLICY_QUALITY_OVERLAY),
-                                "low_quality": float(FINAL_GOVERNOR_EXECUTION_POLICY_LOW_QUALITY),
-                                "tail_quality": float(FINAL_GOVERNOR_EXECUTION_POLICY_TAIL_QUALITY),
-                                "active_take_profit": float(final_governor.active_macro_take_profit),
-                                "active_stop_loss": float(final_governor.active_macro_stop_loss),
-                                "active_max_hold_bars": int(final_governor.active_macro_max_hold_bars),
-                                "active_quality_score": float(final_governor.active_macro_quality_score),
-                            },
-                        },
                         "ddh2_ensemble": {
-                            "enabled": bool(final_governor.ddh2_ensemble_enabled),
+                            "enabled": False,
                             "report": str(final_governor.ddh2_report_path),
                             "audit": str(final_governor.ddh2_audit_path),
                             "audit_status": str(final_governor.ddh2_audit.get("status", "")),
@@ -13986,24 +11670,6 @@ async def main(use_local=False):
                             "micro_cost_gap_buffer": float(final_governor._ddh2_cfg_float("micro_cost_gap_buffer", 0.0)),
                             "fallback_account_dd_block": float(final_governor._ddh2_cfg_float("fallback_account_dd_block", 0.0)),
                             "fallback_account_dd_release": float(final_governor._ddh2_cfg_float("fallback_account_dd_release", 0.0)),
-                        },
-                        "sniper": {
-                            "enabled": bool(FINAL_GOVERNOR_SNIPER_ENABLE and final_governor.fully_learned_policy_bundle is None),
-                            "checkpoint": os.path.basename(str(FINAL_GOVERNOR_SNIPER_MODEL_PATH)),
-                            "notional_cap": float(FINAL_GOVERNOR_NOTIONAL),
-                            "leverage": float(FINAL_GOVERNOR_LEVERAGE),
-                        },
-                        "trend": {
-                            "enabled": bool(FINAL_GOVERNOR_TREND_ENABLE and final_governor.fully_learned_policy_bundle is None),
-                            "model": os.path.basename(str(FINAL_GOVERNOR_TREND_MODEL_PATH)),
-                            "notional_cap": float(FINAL_GOVERNOR_NOTIONAL),
-                            "leverage": float(FINAL_GOVERNOR_LEVERAGE),
-                        },
-                        "micro": {
-                            "enabled": bool(FINAL_GOVERNOR_MICRO_ENABLE and final_governor.fully_learned_policy_bundle is None),
-                            "model": os.path.basename(str(FINAL_GOVERNOR_MICRO_MODEL_PATH)),
-                            "notional_cap": float(FINAL_GOVERNOR_NOTIONAL),
-                            "leverage": float(FINAL_GOVERNOR_LEVERAGE),
                         },
                         "agreement_count": int(_active_info.get("agreement_count", 0)),
                         "net_score": float(_active_info.get("net_score", _active_info.get("score", 0.0))),
@@ -14158,11 +11824,11 @@ async def main(use_local=False):
                 _loop = asyncio.get_running_loop()
                 await _loop.run_in_executor(None, _atomic_write_json, DASHBOARD_STATE_PATH, _dashboard_state)
                 if _trade_journal_rows:
-                    await journal_writer.append_many(TRADE_JOURNAL_PATH, _trade_journal_rows)
+                    _append_jsonl_many(TRADE_JOURNAL_PATH, _trade_journal_rows)
                 if _position_accounting_audit_rows:
-                    await journal_writer.append_many(POSITION_ACCOUNTING_AUDIT_PATH, _position_accounting_audit_rows)
+                    _append_jsonl_many(POSITION_ACCOUNTING_AUDIT_PATH, _position_accounting_audit_rows)
                 if _position_closed or (_prev_meta_pos is None and _new_pos is not None):
-                    await journal_writer.append(DASHBOARD_EVENTS_PATH, {
+                    _append_jsonl(DASHBOARD_EVENTS_PATH, {
                         "ts": str(current_time_kst),
                         "event": _transition_label,
                         "from": prev_meta_pos,
@@ -14175,7 +11841,7 @@ async def main(use_local=False):
                         "open_trade": _open_trade_payload,
                     })
                 elif _resized:
-                    await journal_writer.append(DASHBOARD_EVENTS_PATH, {
+                    _append_jsonl(DASHBOARD_EVENTS_PATH, {
                         "ts": str(current_time_kst),
                         "event": "RESIZE",
                         "from": _prev_meta_pos,
@@ -14247,17 +11913,17 @@ async def main(use_local=False):
             "SYSTEM governor=READY stack=%s lifecycle=%s adaptive=%s fully_learned=%s legacy_macro_sniper=%s ai=%s",
             FINAL_GOVERNOR_ALPHA43_STICKY_MODEL_ID
             if final_governor.fully_learned_policy_bundle is not None
-            else ("ddh2_v22_1_sniper_trend_micro_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_v17_adaptive_calibrator"),
+            else "lifecycle_v1_v17_adaptive_calibrator",
             os.path.basename(str(FINAL_GOVERNOR_LIFECYCLE_V1_MODEL_PATH)),
             os.path.basename(str(FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_MODEL_PATH)),
             os.path.basename(str(FINAL_GOVERNOR_FULLY_LEARNED_POLICY_PATH)),
-            bool(FINAL_GOVERNOR_SNIPER_ENABLE or FINAL_GOVERNOR_MACRO_ENABLE),
+            False,
             ",".join(FINAL_GOVERNOR_AI_FEATURE_GROUPS),
         )
         logger.info(
             "SYSTEM governor_legacy trend=%s micro=%s",
-            bool(FINAL_GOVERNOR_TREND_ENABLE),
-            bool(FINAL_GOVERNOR_MICRO_ENABLE),
+            False,
+            False,
         )
 
         if not use_local and fetcher.account_status().get("ready"):
@@ -14302,7 +11968,7 @@ async def main(use_local=False):
                 )
                 _boot_reconcile_close_payload = getattr(meta_router, "_last_reconcile_close_payload", None)
                 if _boot_reconcile_close_payload:
-                    await journal_writer.append_many(
+                    _append_jsonl_many(
                         TRADE_JOURNAL_PATH, [dict(_boot_reconcile_close_payload)]
                     )
                     if final_governor.owner == OMEGA4_6_1_OWNER:
@@ -14390,14 +12056,14 @@ async def main(use_local=False):
                 logger.info(
                     "SYSTEM live_loop=START mode=%s governor=%s legacy_macro_sniper=%s trend=%s micro=%s",
                     "local" if use_local else "exchange",
-                    "ddh2_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_clean_base",
-                    bool(FINAL_GOVERNOR_SNIPER_ENABLE or FINAL_GOVERNOR_MACRO_ENABLE),
-                    bool(FINAL_GOVERNOR_TREND_ENABLE),
-                    bool(FINAL_GOVERNOR_MICRO_ENABLE),
+                    "lifecycle_v1_clean_base",
+                    False,
+                    False,
+                    False,
                 )
                 first_run = False
 
-            async with transition_gate.transition("pending_next_open"):
+            async with transition_gate:
                 await _execute_pending_next_open(eth_buffer)
             _process_eth_buffer = eth_buffer
             _process_btc_buffer = btc_buffer
@@ -14412,7 +12078,7 @@ async def main(use_local=False):
                 processed_df = processed_full_df.tail(int(max(600, FINAL_GOVERNOR_LIVE_MODEL_BARS))).copy()
             _process_sec = time.perf_counter() - _process_t0
             _run_t0 = time.perf_counter()
-            async with transition_gate.transition("bar_cycle"):
+            async with transition_gate:
                 await _run_cycle(processed_df, eth_buffer)
             _run_cycle_sec = time.perf_counter() - _run_t0
             if FINAL_GOVERNOR_TIMING_LOG_ENABLE:
@@ -14442,7 +12108,6 @@ async def main(use_local=False):
         ]
         await shutdown_runtime_resources(
             task_supervisor=task_supervisor,
-            journal_writer=journal_writer,
             scanners=(ms_scanner, ms_scanner_sol, ms_scanner_btc),
             tail_interceptor=tr_interceptor,
             fetchers=(*shadow_fetchers, fetcher),

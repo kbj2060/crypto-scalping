@@ -35,18 +35,18 @@ if str(ROOT / "scripts") not in sys.path:
 import eval_omega4_1_atr_safety_sltp_20260622 as _atr_eval  # noqa: E402
 import train_eval_omega1_2_tabm_3head_20260603 as _parent  # noqa: E402
 import train_eval_omega1_2_tabm_diffusion_risk_20260603 as _omega  # noqa: E402
-import train_eval_omega1_2_tabm_diffusion_risk_sol_20260707 as _omega_sol  # noqa: E402
-import train_eval_omega1_2_tabm_diffusion_risk_btc_20260708 as _omega_btc  # noqa: E402
 import train_eval_omega4_2_risk_sidecar_20260622 as _sidecar  # noqa: E402
 import train_omega1_regime3_expert_direction_head_volpca_20260602 as _hard  # noqa: E402
 
-# Exposed so trading_bot.py can pass each asset's OWN copy into Omega461LiveAdapter instead of
-# silently defaulting to the ETH module above (found 2026-07-20, same failure class as the
-# regime3 bug -- these per-asset files already existed but nothing referenced them live).
-SOL_BASE_TEMPLATE = dict(_omega_sol.BASE_TEMPLATE)
-SOL_EXPERT_SCALES = dict(_omega_sol.EXPERT_SCALES)
-BTC_BASE_TEMPLATE = dict(_omega_btc.BASE_TEMPLATE)
-BTC_EXPERT_SCALES = dict(_omega_btc.EXPERT_SCALES)
+# Exposed so trading_bot.py can pass each asset's OWN sizing template into Omega461LiveAdapter
+# instead of silently defaulting to the ETH module above (found 2026-07-20, same failure class as
+# the regime3 bug -- the per-asset files already existed but nothing referenced them live).
+# The SOL/BTC trainer forks these were read from carried byte-identical values to the ETH module,
+# so they are inlined here rather than importing two 443-line training scripts for two dicts.
+SOL_BASE_TEMPLATE = dict(_omega.BASE_TEMPLATE)
+SOL_EXPERT_SCALES = dict(_omega.EXPERT_SCALES)
+BTC_BASE_TEMPLATE = dict(_omega.BASE_TEMPLATE)
+BTC_EXPERT_SCALES = dict(_omega.EXPERT_SCALES)
 from trading_bot_modules.omega4_6_2_source_parent_live import (  # noqa: E402
     DEFAULT_CURRENT_REGIME_PATH as _DEFAULT_CURRENT_REGIME_PATH,
     Regime3CurrentLiveFeatures as _Regime3CurrentLiveFeatures,

@@ -8,7 +8,6 @@ from typing import Any
 async def shutdown_runtime_resources(
     *,
     task_supervisor: Any = None,
-    journal_writer: Any = None,
     scanners: Iterable[Any] = (),
     tail_interceptor: Any = None,
     fetchers: Iterable[Any] = (),
@@ -24,7 +23,6 @@ async def shutdown_runtime_resources(
                 on_error(label, resource, error)
 
     await _await_close("task_supervisor", task_supervisor)
-    await _await_close("journal_writer", journal_writer)
 
     for resource in [*scanners, tail_interceptor]:
         if resource is None:

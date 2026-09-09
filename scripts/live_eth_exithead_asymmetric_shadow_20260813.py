@@ -149,10 +149,6 @@ def now_kst() -> pd.Timestamp:
     return pd.Timestamp.now(tz=KST)
 
 
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
 def write_json(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -369,7 +365,7 @@ def process_bar(state: dict, frame: pd.DataFrame, adapter: Omega461LiveAdapter, 
 
 
 def run(args: argparse.Namespace) -> None:
-    ensure_dir(OUT_DIR)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     print("[init] loading asymmetric exit-head-swap Omega4.6.1 adapter (h48qual q050 = new liveATR "
           "relabel exit_head, zig075 q075 = fully original live, regime3 = original live HMM) -- "
           "research/shadow only, the only overnight exit-head candidate that survived VAL+OOS without "

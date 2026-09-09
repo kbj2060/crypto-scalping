@@ -95,10 +95,6 @@ def now_kst() -> datetime:
     return datetime.now(tz=KST)
 
 
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
 def write_json(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -371,7 +367,7 @@ def process_bar(state: dict, bar_ts: pd.Timestamp, feat_row: pd.Series, regime_d
 
 
 def run(args: argparse.Namespace) -> None:
-    ensure_dir(OUT_DIR)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     model = joblib.load(MODEL_DIR / "model.joblib")
     meta = json.loads((MODEL_DIR / "feature_cols.json").read_text(encoding="utf-8"))
     feature_cols = meta["feature_cols"]

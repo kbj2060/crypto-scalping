@@ -114,10 +114,6 @@ def now_kst() -> pd.Timestamp:
     return pd.Timestamp.now(tz=KST)
 
 
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
 def write_json(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -428,7 +424,7 @@ def process_bar(state: dict, frame: pd.DataFrame, adapter: Omega461LiveAdapter, 
 
 
 def run(args: argparse.Namespace) -> None:
-    ensure_dir(OUT_DIR)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     print("[init] loading JM-swapped Omega4.6.1 adapter (h48qual q070 / zig075 q080, CORRECTGATE "
           "sidecars -- shadow-only due to n=11 significance + dataset-lineage gaps, not a sizing "
           "problem, see module docstring)", flush=True)

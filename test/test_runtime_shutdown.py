@@ -27,7 +27,6 @@ class _SyncResource:
 
 def test_shutdown_continues_after_partial_resource_failures():
     supervisor = _AsyncResource(fail=True)
-    writer = _AsyncResource()
     scanner = _SyncResource(fail=True)
     tail = _SyncResource()
     first_fetcher = _AsyncResource(fail=True)
@@ -37,7 +36,6 @@ def test_shutdown_continues_after_partial_resource_failures():
     asyncio.run(
         shutdown_runtime_resources(
             task_supervisor=supervisor,
-            journal_writer=writer,
             scanners=(scanner,),
             tail_interceptor=tail,
             fetchers=(first_fetcher, second_fetcher),
@@ -46,7 +44,6 @@ def test_shutdown_continues_after_partial_resource_failures():
     )
 
     assert supervisor.closed is True
-    assert writer.closed is True
     assert scanner.stopped is True
     assert tail.stopped is True
     assert first_fetcher.closed is True
