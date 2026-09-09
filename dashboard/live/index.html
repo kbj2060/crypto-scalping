@@ -18,27 +18,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260909-liqmap-mobile">
+  <link rel="stylesheet" href="styles.css?v=20260909-axis-legend">
 </head>
 <body>
-  <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
-       -- it was rebuilding this same 8-node <defs>/<linearGradient>/<stop>x6 with a fresh random id
-       every single call despite the stops (VIRIDIS_STOPS in app.js) being constant. id is resolved
-       document-wide by SVG url(#...) references, so candleSvg/candleSvgSnapshot (each wiped and
-       rebuilt independently) can both reference #viridisGradient without redefining it. -->
-  <svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true">
-    <defs>
-      <linearGradient id="viridisGradient" x1="0%" x2="100%" y1="0%" y2="0%">
-        <stop offset="0%" stop-color="rgb(68,1,84)"></stop>
-        <stop offset="20%" stop-color="rgb(65,68,135)"></stop>
-        <stop offset="40%" stop-color="rgb(42,120,142)"></stop>
-        <stop offset="60%" stop-color="rgb(34,168,132)"></stop>
-        <stop offset="80%" stop-color="rgb(122,209,81)"></stop>
-        <stop offset="100%" stop-color="rgb(253,231,37)"></stop>
-      </linearGradient>
-    </defs>
-  </svg>
-  <main class="app">
+    <main class="app">
     <header class="top">
       <div class="topbar">
         <nav class="page-tabs" aria-label="대시보드 탭">
@@ -284,6 +267,7 @@
           </div>
         </div>
         <div id="liqVolumeGauge"></div>
+        <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -329,7 +313,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260909-liqmap-mobile"></script>
+  <script src="./app.js?v=20260909-axis-legend"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

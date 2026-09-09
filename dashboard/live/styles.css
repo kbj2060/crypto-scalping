@@ -576,6 +576,25 @@ body {
 
 /* Liquidation map panel (2026-08-24) -- price-ladder list, resistance above the current-price row,
    support below, matching how the chart overlay's lines read top-to-bottom. */
+
+/* 청산 밀도 가이드 (2026-09-09 사용자 요청: SVG 인셋 -> 차트 위).
+   기존 SVG 인셋은 오른쪽 위 y=0..34 를 차지해 같은 자리에 새로 생긴 증거신호 **천장 레인**을
+   덮었다. 그라디언트 스톱은 삭제한 #viridisGradient 와 **같은 값**이어야 범례가 히트맵을
+   정직하게 설명한다(app.js 의 viridisColor 와 같은 색 계열). */
+.liq-density-legend { display: flex; align-items: center; gap: 10px; padding: 0 4px 6px; }
+.liq-density-legend-title { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.liq-density-legend-scale { display: flex; align-items: center; gap: 6px; flex: 1; max-width: 240px; }
+.liq-density-legend-end { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.liq-density-legend-bar {
+  flex: 1; height: 8px; border-radius: 2px;
+  background: linear-gradient(90deg, rgb(68,1,84) 0%, rgb(65,68,135) 20%, rgb(42,120,142) 40%,
+    rgb(34,168,132) 60%, rgb(122,209,81) 80%, rgb(253,231,37) 100%);
+}
+@media (max-width: 720px) {
+  .liq-density-legend { gap: 8px; padding: 0 2px 4px; }
+  .liq-density-legend-scale { max-width: none; }
+}
+
 .liq-level-list { padding: 4px 0 12px; }
 .liq-level-row {
   display: grid;

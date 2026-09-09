@@ -3094,6 +3094,21 @@ function updateSnapshotCandleLive() {
   }
 }
 
+// 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 styles.css 의
+// .liq-density-legend-bar 가 #viridisGradient 와 같은 스톱으로 그린다 -- 두 곳이 같은 색이어야
+// 범례가 히트맵을 정직하게 설명한다.
+function renderLiqDensityLegend(hasDensity) {
+  const host = el("liqDensityLegend");
+  if (!host) return;
+  host.hidden = !hasDensity;
+  if (!hasDensity) { host.innerHTML = ""; return; }
+  const html = `<span class="liq-density-legend-title">청산 밀도</span>`
+    + `<span class="liq-density-legend-scale"><span class="liq-density-legend-end">낮음</span>`
+    + `<span class="liq-density-legend-bar"></span>`
+    + `<span class="liq-density-legend-end">높음</span></span>`;
+  if (host.innerHTML !== html) host.innerHTML = html;
+}
+
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
 // bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as a density
 // profile strip plus a single line for the nearest support/resistance level (2026-08-24: the full
@@ -3118,7 +3133,9 @@ function renderSnapshotChart() {
   const candles = fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
-  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, liquidationDensityHistory());
+  const densityHistory = liquidationDensityHistory();
+  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, densityHistory);
+  renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
 // wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
@@ -3393,26 +3410,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     line.setAttribute("class", "chart-grid");
     svg.appendChild(line);
 
-    // Skip the tick's price label (not the gridline) when a resistance/support/current-price tag
-    // already sits here -- both are text anchored in the same right-edge column (tag box spans
-    // w-mr+4..w-mr+4+boxW, tick text ends at w-6), so without this a grid number like "2520.0"
-    // renders directly on top of a tag box like "2526.1", especially once several tags cascade
-    // near an edge (see priceLabels above).
-    const collidesWithPriceTag = priceLabels.some(p => {
-      const py = p.adjustedY !== undefined ? p.adjustedY : p.realY;
-      return Math.abs(y - py) < minGap;
-    });
-
-    if (!mobileChart && !collidesWithPriceTag) {
-      const txt = document.createElementNS(NS, "text");
-      txt.setAttribute("x", w - 6); txt.setAttribute("y", y + 4);
-      txt.setAttribute("text-anchor", "end");
-      txt.setAttribute("font-size", "13");
-      txt.setAttribute("font-weight", "700");
-      txt.setAttribute("fill", "var(--muted)");
-      txt.textContent = fmtNum(t, 1);
-      svg.appendChild(txt);
-    }
+    // 2026-09-09 사용자 요청: **y축 가격 눈금 라벨을 없앤다**(격자선은 유지).
+    //   현재/롱익절/지지선 같은 **라인 태그**는 priceLabels 로 계속 그린다 -- 그쪽이 실제로
+    //   읽는 값이고, 눈금 숫자는 같은 오른쪽 열에서 그 태그와 자리를 다투기만 했다.
+    //   (그래서 있던 collidesWithPriceTag 충돌 회피도 함께 사라진다 -- 눈금이 없으면 충돌도 없다)
   });
 
   const xTickCount = isMobileChartMode() ? 4 : 6;
@@ -3706,58 +3707,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(pTxt);
   });
 
-  // Liquidation-density color legend -- top-right inset over the plot, 2026-08-25 user request
-  // ("오른쪽 위에 색깔별로 크기를 표시해줘"). Labeled 낮음/높음 (low/high), not a $ scale like
-  // Coinglass's own colorbar: weightPct here is a synthetic, percentile-clipped RELATIVE density
-  // (compute_raw_bins() has no real notional/OI data to draw from -- see its docstring), so a dollar
-  // figure would misrepresent it as real magnitude. pointer-events:none so it never blocks the
-  // hover/tooltip layer appended right after this.
-  if ((densityHistory || []).length) {
-    const legendW = mobileChart ? 56 : 72, legendH = 8;
-    // legendY nudged up 2026-08-27 (user report: covering candle wicks near the top of the price
-    // range) -- backing box now sits flush with the SVG's top edge (y=0) instead of dipping well
-    // into the plot area below mt.
-    const legendX = w - mr - legendW - 6, legendY = mt - 4;
-    const legendGroup = document.createElementNS(NS, "g");
-    legendGroup.setAttribute("pointer-events", "none");
-
-    // #viridisGradient is a static, document-level <defs> in index.html (hoisted 2026-08-25) --
-    // not recreated here every call.
-    const backing = document.createElementNS(NS, "rect");
-    backing.setAttribute("x", legendX - 6); backing.setAttribute("y", legendY - 16);
-    backing.setAttribute("width", legendW + 12); backing.setAttribute("height", 34);
-    backing.setAttribute("rx", "4"); backing.setAttribute("fill", "var(--chart-bg)");
-    backing.setAttribute("opacity", "0.78");
-    legendGroup.appendChild(backing);
-
-    const title = document.createElementNS(NS, "text");
-    title.setAttribute("x", legendX + legendW / 2); title.setAttribute("y", legendY - 6);
-    title.setAttribute("text-anchor", "middle"); title.setAttribute("font-size", "9.5");
-    title.setAttribute("fill", "var(--muted)");
-    title.textContent = "청산 밀도";
-    legendGroup.appendChild(title);
-
-    const bar = document.createElementNS(NS, "rect");
-    bar.setAttribute("x", legendX); bar.setAttribute("y", legendY);
-    bar.setAttribute("width", legendW); bar.setAttribute("height", legendH);
-    bar.setAttribute("rx", "2"); bar.setAttribute("fill", "url(#viridisGradient)");
-    legendGroup.appendChild(bar);
-
-    const lowLabel = document.createElementNS(NS, "text");
-    lowLabel.setAttribute("x", legendX); lowLabel.setAttribute("y", legendY + legendH + 10);
-    lowLabel.setAttribute("font-size", "9"); lowLabel.setAttribute("fill", "var(--muted)");
-    lowLabel.textContent = "낮음";
-    legendGroup.appendChild(lowLabel);
-
-    const highLabel = document.createElementNS(NS, "text");
-    highLabel.setAttribute("x", legendX + legendW); highLabel.setAttribute("y", legendY + legendH + 10);
-    highLabel.setAttribute("text-anchor", "end"); highLabel.setAttribute("font-size", "9");
-    highLabel.setAttribute("fill", "var(--muted)");
-    highLabel.textContent = "높음";
-    legendGroup.appendChild(highLabel);
-
-    svg.appendChild(legendGroup);
-  }
+  // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
+  //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
+  //   증거신호 **천장 레인**(y=mt+3)을 오른쪽 끝에서 덮었다. mt 를 키워 자리를 만들면
+  //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
+  //   렌더는 renderLiqDensityLegend() -- index.html 의 #liqDensityLegend 를 채운다.
 
   // Create Hover Layer on Top
   const hoverGroup = document.createElementNS(NS, "g");
