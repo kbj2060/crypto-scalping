@@ -228,7 +228,7 @@ def _load_train_context() -> pd.DataFrame:
 
 def _empty(error: str) -> dict:
     return {"warmed_up": False, "error": error, "event_active": False, "call": None,
-            "direction": None, "proba_rebound": None, "minutes_ago": None,
+            "direction": None, "tp_price": None, "proba_rebound": None, "minutes_ago": None,
             "sweep_ts_utc": None, "price": None, "tone": "neutral", "history": [], "times": [],
             "triggers": None, "early_confirmed": None}
 
@@ -350,6 +350,23 @@ def _every_bar_rows(frame: pd.DataFrame, sig: pd.DataFrame, n_tail: int) -> pd.D
     return pd.DataFrame(rows)
 
 
+def _call_target_price(pos: int, direction: str, frame: pd.DataFrame) -> float | None:
+    """이 콜의 라벨 목표가(익절가). 라벨의 빠른 다리 그대로 -- 앵커는 발동봉의 저가(지지쪽)/
+    고가(저항쪽), 폭은 **직전 봉** ATR 의 BADGE_ATR_MULT 배다.
+
+    `_call_end_pos()` 의 익절 판정과 이 함수 하나를 공유한다. 2026-09-10 대시보드가 이 값을
+    화면에 적기 시작하면서 분리했다 -- 같은 수식을 두 곳에 두면 반드시 어긋난다(증거신호
+    스트립에서 톤 유도를 복붙해뒀다가 겪은 것과 같은 부류).
+    ATR 을 못 구하면 None -- 호출부가 판정을 호라이즌으로만 하거나 화면에서 익절가를 뺀다."""
+    atr = frame["atr"].to_numpy()
+    pre_atr = atr[pos - 1] if pos >= 1 else np.nan
+    if not np.isfinite(pre_atr) or pre_atr <= 0:
+        return None
+    if direction == "down":  # 지지쪽 -- 위로 반등하는 게 익절
+        return float(frame["low"].to_numpy()[pos] + BADGE_ATR_MULT * pre_atr)
+    return float(frame["high"].to_numpy()[pos] - BADGE_ATR_MULT * pre_atr)
+
+
 def _call_end_pos(pos: int, direction: str, frame: pd.DataFrame, last_pos: int) -> int:
     """콜 하나가 표시되는 **마지막 봉 위치**. 익절에 닿은 봉, 없으면 호라이즌 끝(확정봉 범위 내).
 
@@ -365,18 +382,15 @@ def _call_end_pos(pos: int, direction: str, frame: pd.DataFrame, last_pos: int) 
     ⚠️룩어헤드 없음: `frame`은 `_fetch_klines()`가 형성중 봉을 이미 버린 **확정 봉만** 담고
     있고, 여기서 보는 close[pos+1..horizon_end]는 전부 과거의 확정 봉이다."""
     horizon_end = min(pos + BADGE_HORIZON_BARS, last_pos)
-    atr = frame["atr"].to_numpy()
-    pre_atr = atr[pos - 1] if pos >= 1 else np.nan
-    if not np.isfinite(pre_atr) or pre_atr <= 0:
+    target = _call_target_price(pos, direction, frame)
+    if target is None:
         return horizon_end  # ATR을 못 구하면 호라이즌으로만 판정
     close = frame["close"].to_numpy()
     if direction == "down":  # 지지쪽 -- 위로 반등하는 게 익절
-        target = frame["low"].to_numpy()[pos] + BADGE_ATR_MULT * pre_atr
         for b in range(pos + 1, horizon_end + 1):
             if close[b] >= target:
                 return b
     else:                    # 저항쪽 -- 아래로 반전하는 게 익절
-        target = frame["high"].to_numpy()[pos] - BADGE_ATR_MULT * pre_atr
         for b in range(pos + 1, horizon_end + 1):
             if close[b] <= target:
                 return b
@@ -410,7 +424,8 @@ def _predicted_tone(direction: str | None, call: str | None) -> str:
 
 def compute_eth_sweep_v_rebound_signal() -> dict:
     """Returns {"warmed_up", "error", "event_active", "call" ("rebound"|"continuation"|None),
-    "direction" ("up"|"down"|None), "proba_rebound" (0-1 or None), "minutes_ago",
+    "direction" ("up"|"down"|None), "tp_price" (라벨 1.5xATR 목표가, 반등 콜일 때만; else None),
+    "proba_rebound" (0-1 or None), "minutes_ago",
     "sweep_ts_utc", "price", "tone" ("good"|"bad"|"flat"|"neutral", direction x call resolved via
     _predicted_tone), "history" (oldest-to-newest tone strings, HISTORY_BARS long), "times"
     (matching ISO timestamps), "triggers" (comma-joined names of which of the 9 triggers happen to
@@ -506,16 +521,21 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
         cur = best_by_pos.get(badge_pos)
         if cur is None:
             return {"warmed_up": True, "error": None, "event_active": False, "call": None,
-                    "direction": None, "proba_rebound": None, "minutes_ago": None,
+                    "direction": None, "tp_price": None, "proba_rebound": None, "minutes_ago": None,
                     "sweep_ts_utc": None, "price": price, "tone": "neutral",
                     "history": history, "times": times, "triggers": None, "early_confirmed": None}
 
         # minutes_ago: 배지가 가리키는 봉의 나이(현재 봉이면 0) -- 지속성 도입으로 이 필드가
         # 원래 의미를 되찾았다. early_confirmed는 표시중인 콜에는 해당 없음(익절 도달한 콜은
         # 애초에 배지에 안 뜨므로) -- 스키마 유지를 위해 None.
+        # 익절가(2026-09-10 사용자 요청 "증거신호 라벨처럼 익절 가격을 확률 아래에"). 반등 콜일
+        # 때만 낸다 -- continuation 은 이 목표에 **안 닿는다**는 판정이라 익절가를 적으면 거짓말이다.
+        tp_price = (_call_target_price(badge_pos, cur["direction"], frame)
+                    if call_of(cur["proba"]) == "rebound" else None)
         return {
             "warmed_up": True, "error": None, "event_active": True, "call": call_of(cur["proba"]),
             "direction": cur["direction"],
+            "tp_price": round(tp_price, 2) if tp_price is not None else None,
             "proba_rebound": round(cur["proba"], 4),
             "minutes_ago": int((frame["timestamp"].iloc[last_pos]
                                 - frame["timestamp"].iloc[badge_pos]).total_seconds() // 60),

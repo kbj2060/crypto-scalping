@@ -1037,6 +1037,37 @@ function stripAxisHtml(times, timeFmtKind) {
 // separate from MODEL_INDICATOR_MEANING (keyed by the exact CURRENT subText, including states a
 // single past tone can't reconstruct -- "웜업", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
+// 2026-09-10 사용자 요청: "V자 급등락과 앵커 돌파/되돌림도 증거신호 라벨처럼 익절 가격을 확률
+// 아래에, 같은 포맷으로". 증거신호의 `익절 {가격}` (renderEvidenceSignals) 과 같은 문자열을
+// 같은 자리(.meter-price, 규약 §3의 "확률이 아닌 수치")에 놓는다. 세 카드가 이제 한 포맷이다.
+// ⚠️세 신호의 목표가는 **각자 자기 라벨**에서 온다 -- 증거신호 K×ATR 터치(intrabar), V자
+//   1.5×ATR 빠른 다리(종가), 돌파/되돌림 ±0.8×ATR 배리어(intrabar). 같은 포맷이라고 같은
+//   규약이 아니다. 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md 배리어 컨벤션 항목).
+function tpPriceText(px) {
+  return px == null ? null : `익절 ${fmtNum(px, 2)}`;
+}
+
+const V_REBOUND_TP_TITLE = [
+  "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
+  "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
+  "· 판정은 **종가 기준**입니다 — 이 라벨이 종가로 정의돼서이며, 증거신호의 intrabar 터치와 다릅니다.",
+  "· 호라이즌 60분(12봉) 안에 못 닿으면 그대로 만료됩니다.",
+  "· ⚠️검증된 매매 엣지가 아닙니다: 수정회계 라벨 재학습(2026-09-08)에서 AUC는 +0.03~0.07 개선됐지만",
+  "  경제성 랭킹은 0이었고, 선정된 팔이 세 창 모두 무작위 진입 이하였습니다.",
+  "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
+].join("\n");
+
+const BREAKOUT_TP_TITLE = [
+  "이 판정의 라벨 배리어(진입가 ±0.8×ATR) 중 **매매 방향 쪽** 목표가입니다.",
+  "· 매매 방향 = 발현 방향 XOR 되돌림콜 — 돌파면 발현 방향 그대로, 되돌림이면 반대입니다.",
+  "· 손절선은 반대쪽 같은 폭입니다(대칭 라벨이라 따로 적을 값이 없습니다).",
+  "· 호라이즌 1시간(12봉) 안에 어느 쪽도 안 닿으면 시간청산이고, 그때는 12봉 뒤 종가 부호로 채점합니다.",
+  "· ⚠️이 대칭 배리어를 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 56~59%입니다 —",
+  "  라벨은 채점용이지 매매 규칙이 아닙니다. 실제 매매 브래킷은 별도 축이고 현재 보류 상태입니다.",
+  "· 러너가 사건마다 기록한 배리어를 그대로 읽습니다 — 2026-09-08 배리어 개정 전 행에 지금 ATR을",
+  "  덮어씌우지 않기 위해서입니다(옛 배리어 행은 집계에서도 제외됩니다).",
+].join("\n");
+
 const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
   // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
@@ -2457,17 +2488,17 @@ function breakoutRevIndicatorItem() {
   const showNum = Boolean(p.open_positions) || fresh;
   const pb = showNum && last && last.p_breakout != null ? Number(last.p_breakout) : null;
   const proba = pb == null ? null : (pb > 0.5 ? pb : 1 - pb);
-  // 수치 줄: 보유 중이면 남은 지평, 유휴면 직전 판정 경과. 확률이 아니므로 meter-price 자리다.
+  // 수치 줄(규약 §3, 확률이 아닌 수치): 2026-09-10 사용자 요청으로 **익절가**를 적는다 --
+  // 증거신호·V자와 같은 `익절 {가격}` 포맷. 여기 있던 경과/보유 시간은 이미 상태 배지 툴팁의
+  // 첫 줄(lastText)에 그대로 있으므로 잃는 정보가 없고, 보유 중 진행도만 이 툴팁에 옮겨 담는다.
   let meterNote = null, meterNoteTitle = "";
-  if (showNum && ageMin != null) {
-    const a = Math.round(ageMin);
-    if (p.open_positions) {
-      meterNote = `보유 ${Math.min(a, 60)}/60분`;
-      meterNoteTitle = "터치 시점부터 경과한 시간 / 시간청산까지의 지평(1시간). 배리어(±0.8×ATR)에 닿으면 그 전에 끝납니다.";
-    } else {
-      meterNote = a < 60 ? `${a}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`;
-      meterNoteTitle = "가장 최근 터치로부터 경과한 시간입니다. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.";
-    }
+  if (showNum && last && last.tp_price != null) {
+    meterNote = tpPriceText(last.tp_price);
+    const a = ageMin != null ? Math.round(ageMin) : null;
+    meterNoteTitle = (p.open_positions && a != null
+      ? `보유 ${Math.min(a, 60)}/60분 — 터치 시점부터 경과 / 시간청산까지의 지평.\n`
+      : a != null ? `가장 최근 터치로부터 ${a < 60 ? `${a}분` : `${(ageMin / 60).toFixed(1)}시간`} 경과. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.\n` : "")
+      + BREAKOUT_TP_TITLE;
   }
   // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
   // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
@@ -3977,6 +4008,10 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         history: (latestVRebound && latestVRebound.history) || [],
         times: (latestVRebound && latestVRebound.times) || [],
         proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
+        // 익절가(2026-09-10): 서버가 반등 콜일 때만 tp_price 를 준다 -- continuation 은 이 목표에
+        // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
+        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price),
+        meterNoteTitle: V_REBOUND_TP_TITLE,
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),

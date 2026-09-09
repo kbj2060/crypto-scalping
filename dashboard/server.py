@@ -900,6 +900,15 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
         up = bool(q.get("dir_up")) == (str(q.get("call")) == "돌파")
         return "long" if up else "short"
 
+    def _tp_price(q: dict) -> float | None:
+        """이 판정의 라벨 목표가 = **매매 방향 쪽** 배리어(진입가 ±0.8xATR, 러너가 사건마다
+        기록한 barrier_up/barrier_dn 그대로). 손절선은 반대쪽 같은 폭이다 -- 대칭 라벨이라
+        따로 적을 값이 없다. 2026-09-10 사용자 요청("증거신호 라벨처럼 익절 가격을 확률 아래에").
+        ⚠️여기서 새로 계산하지 않는다 -- 러너가 2026-09-08 배리어 개정 전후 행을 섞어 갖고 있어
+          (stale_closed 참조) 지금 ATR 로 되계산하면 옛 행에 틀린 값을 붙인다."""
+        px = q.get("barrier_up") if _dir(q) == "long" else q.get("barrier_dn")
+        return round(float(px), 2) if isinstance(px, (int, float)) else None
+
     now = datetime.now(timezone.utc)
     strip_end = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
     # 띠는 "언제 무슨 판정이 있었나"의 기록이라 옛 배리어 행도 그대로 칠한다(집계만 가른다).
@@ -922,7 +931,7 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
                       "trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
                       "dir_up": bool(last.get("dir_up")), "call": last.get("call"),
                       "p_breakout": last.get("p_breakout"), "tier": last.get("tier"),
-                      "trig_min": last.get("trig_min"),
+                      "trig_min": last.get("trig_min"), "tp_price": _tp_price(last),
                       "resolved": last.get("outcome") is not None} if last else None)}
 
 
