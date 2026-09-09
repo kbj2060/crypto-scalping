@@ -279,6 +279,20 @@
         </div>
       </section>
 
+      <!-- 2026-09-10 사용자 요청: 청산맵 바로 위에 현 계좌/포지션 요약. 숫자는 거래소 실계좌
+           (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
+           패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>내 계좌</h3><p id="snapAcctBalance" class="muted">-</p></div>
+          <div class="ops-health-head-tools">
+            <span id="snapAcctSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+          </div>
+        </div>
+        <div id="snapAcctPosition" class="ops-health-list"></div>
+      </section>
+
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
           <div class="ops-health-head-tools">
@@ -332,7 +346,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260910-dualcond-0420"></script>
+  <script src="./app.js?v=20260910-acctline-0700"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

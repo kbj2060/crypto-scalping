@@ -196,6 +196,11 @@ let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
+// 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
+// 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
+let latestBinanceAccount = null;
+let binanceAccountLastFetchAt = 0;
+const BINANCE_ACCOUNT_POLL_MS = 30000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -317,6 +322,8 @@ async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
   renderSnapshotAssetTabs();
+  // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
+  renderSnapshotAccount();
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
@@ -853,8 +860,62 @@ function renderOpsStatus(payload) {
   }).join(""));
 }
 
+// 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
+// ASSET_CONFIG 는 eth/sol/btc 만 담고 있어 xrp/hype 는 관례대로 <TICKER>USDT 로 만든다.
+function snapshotAccountPosition() {
+  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  return (latestBinanceAccount?.positions || []).find((p) => p.symbol === symbol) || null;
+}
+
+// 스냅샷 탭 청산맵 바로 위 요약. ops 탭 패널의 축약판이라 payload 를 공유한다(추가 요청 없음).
+function renderSnapshotAccount() {
+  const summary = el("snapAcctSummary");
+  if (!el("snapAcctPosition")) return;
+  if (!latestBinanceAccount) {
+    if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
+    setT("snapAcctBalance", "-");
+    setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
+    return;
+  }
+  const b = latestBinanceAccount.balance || {};
+  setT("snapAcctBalance", `지갑 ${fmtUsd(b.wallet)} · 가용 ${fmtUsd(b.available)} · 미실현 ${fmtUsd(b.unrealized)}`);
+  const pos = snapshotAccountPosition();
+  const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
+  if (summary) {
+    // 색 법칙: 롱 good · 숏 bad · 없음 neutral (5번째 색을 만들지 않는다)
+    summary.textContent = pos ? (pos.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
+    summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
+  }
+  const otherNote = others > 0
+    ? `<p class="muted">다른 코인에 ${others}종목을 더 보유 중입니다 -- 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
+    : "";
+  if (!pos) {
+    setH("snapAcctPosition", `<p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}`);
+    return;
+  }
+  const tone = pos.unrealized_pnl > 0 ? "good" : pos.unrealized_pnl < 0 ? "bad" : "neutral";
+  const gapPct = Number(pos.entry_price) > 0
+    ? ((Number(pos.mark_price) - Number(pos.entry_price)) / Number(pos.entry_price)) * 100 * (pos.side === "LONG" ? 1 : -1)
+    : 0;
+  setH("snapAcctPosition", `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(pos.symbol)} ${pos.side === "LONG" ? "롱" : "숏"} x${escapeHtml(pos.leverage)}</strong>
+        <span>진입 ${fmtUsd(pos.entry_price)} -> 현재 ${fmtUsd(pos.mark_price)} (${gapPct >= 0 ? "+" : ""}${gapPct.toFixed(2)}%) · 청산가 ${fmtUsd(pos.liquidation_price)} · 수량 ${escapeHtml(pos.qty)}</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${fmtUsd(pos.unrealized_pnl)}</span>
+        <small>${fmtTs(pos.entry_at)} 진입</small>
+      </div>
+    </article>${otherNote}`);
+}
+
 // 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {
+  // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
+  latestBinanceAccount = payload?.ok ? payload : null;
+  renderSnapshotAccount();
+  renderSnapshotChart();
   const summary = el("acctSummary");
   if (!payload?.ok) {
     const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
@@ -912,6 +973,10 @@ function fmtUsd(value) {
 }
 
 async function refreshBinanceAccount() {
+  // ops 탭(refreshOpsStatus)과 스냅샷 탭(tick) 양쪽에서 부르므로 자체 게이트를 둔다.
+  const now = Date.now();
+  if (now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
+  binanceAccountLastFetchAt = now;
   try {
     const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-store" });
     renderBinanceAccount(await res.json());
@@ -3358,7 +3423,10 @@ function renderSnapshotChart() {
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
   const densityHistory = liquidationDensityHistory();
-  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, densityHistory);
+  // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
+  // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
+  const entryPrice = Number(snapshotAccountPosition()?.entry_price || 0);
+  renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels, densityHistory);
   renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
@@ -4253,6 +4321,7 @@ async function tick() {
       refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
+      refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
