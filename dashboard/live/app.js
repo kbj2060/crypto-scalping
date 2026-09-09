@@ -120,6 +120,12 @@ let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
 // 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
 // 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
+// 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
+let latestChartMarkers = null;
+let chartMarkersLastFetchAt = 0;
+const CHART_MARKERS_POLL_MS = 60000;
+const API_CHART_MARKERS_URL = "/api/chart-markers";
+
 // 2026-09-09 극점 탐지기(표시 전용). 증거신호 8종을 피쳐로 쓴 "±60분 국소 극점일 확률" 모델.
 let latestExtreme = null;
 let extremeLastFetchAt = 0;
@@ -2272,6 +2278,20 @@ async function refreshEvidenceSignalsProvisional() {
   }
 }
 
+async function refreshChartMarkers() {
+  const now = Date.now();
+  if (now - chartMarkersLastFetchAt < CHART_MARKERS_POLL_MS) return;
+  chartMarkersLastFetchAt = now;
+  try {
+    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`chart markers ${res.status}`);
+    latestChartMarkers = await res.json();
+  } catch (error) {
+    console.error("Chart markers fetch error:", error);
+    latestChartMarkers = { available: false, error: "fetch_failed" };
+  }
+}
+
 async function refreshExtremeDetector() {
   const now = Date.now();
   if (now - extremeLastFetchAt < EXTREME_POLL_MS) return;
@@ -2878,6 +2898,7 @@ function setupPageTabs() {
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       breakoutRevLastFetchAt = 0; refreshBreakoutRev();
       extremeLastFetchAt = 0; refreshExtremeDetector();
+      chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
       liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
@@ -3543,6 +3564,81 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(lbl);
   });
 
+  // ── 청산맵 신호 마커 (2026-09-09, 설계 3안 비교 후 C안 하이브리드 채택) ──────────────
+  // 증거신호는 **고정 레인**(종수를 진하기로), 이벤트 트리거만 **봉 밀착 삼각형**.
+  // 근거(87일 실측): 이 창은 72봉·6시간이고 컬럼 피치가 14.5px 뿐인데 증거신호는 6시간당
+  // 중앙 10개·90분위 22개가 발동한다. 전부 봉에 붙이면 90분위 창에서 2.2컬럼당 하나가 되어
+  // 캔들을 덮는다. 이벤트 트리거는 6시간당 0.7~5.5개뿐이라 봉에 붙여도 흩어지지 않는다.
+  // 정보 등급도 다르다 -- 증거신호는 배경, 이벤트 트리거는 주장이다.
+  // ⚠️ETH 전용. 다른 코인은 레인 자체를 그리지 않는다 -- 빈 레인은 "신호 없음"으로 오독된다.
+  const cm = latestChartMarkers;
+  if (isSnapshotChart && cm && cm.available && Array.isArray(cm.times)) {
+    // 격자 정합은 **UTC epoch** 로 맞춘다(문자열 포맷 비교는 tz 표기 차이로 조용히 어긋난다).
+    const idxByEpoch = new Map();
+    candles.forEach((c, i) => idxByEpoch.set(c.time, i));
+    const LANE_H = 6;
+    const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
+    const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
+    ["top", "bottom"].forEach(side => {
+      const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
+      const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
+      (counts || []).forEach((n, k) => {
+        if (!n) return;
+        const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
+        if (idx === undefined) return;
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", xAt(idx)); rect.setAttribute("y", LANE_Y[side]);
+        rect.setAttribute("width", bw); rect.setAttribute("height", LANE_H);
+        rect.setAttribute("rx", "1.5");
+        rect.setAttribute("fill", laneFill[side]);
+        // 진하기 = 동시발동 종수(1종 0.50 → 4종+ 0.95). 색을 새로 만들지 않는다(표시 규약 §2).
+        rect.setAttribute("fill-opacity", (0.35 + 0.15 * Math.min(n, 4)).toFixed(2));
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = `${side === "top" ? "천장" : "바닥"} 증거신호 ${n}종`
+          + `${(names && names[k]) ? ` · ${names[k]}` : ""}`;
+        rect.appendChild(ti);
+        svg.appendChild(rect);
+      });
+      const lab = document.createElementNS(NS, "text");
+      lab.setAttribute("x", ml - 6);
+      lab.setAttribute("y", LANE_Y[side] + LANE_H - 1);
+      lab.setAttribute("text-anchor", "end");
+      lab.setAttribute("font-size", "9");
+      lab.setAttribute("fill", "var(--muted)");
+      lab.textContent = side === "top" ? "천장" : "바닥";
+      svg.appendChild(lab);
+    });
+
+    // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
+    // 같은 봉에서 저널 마커와 겹치지 않게 한다(스택 25px). 저널보다 한 치수 작게(±5) 그려
+    // 실제 체결이 시각적으로 우선하게 둔다. 글자 라벨은 붙이지 않는다 -- 6시간당 최대 11개라
+    // "진입/청산" 처럼 글자를 넣으면 글자밭이 된다.
+    (cm.events || []).forEach(ev => {
+      if (mobileChart && ev.grade === "약") return;   // 피치 3.5px -- 모바일은 강/중만
+      const idx = idxByEpoch.get(Date.parse(ev.t) / 1000);
+      if (idx === undefined || !candles[idx]) return;
+      const isBottom = ev.side === "bottom";
+      const sideKey = isBottom ? "bottom" : "top";
+      const count = markerCounts[sideKey][idx] || 0;
+      markerCounts[sideKey][idx] = count + 1;
+      const baseLineY = yAt(isBottom ? candles[idx].low : candles[idx].high);
+      const mY = isBottom ? baseLineY + 12 + count * 25 : baseLineY - 12 - count * 25;
+      const marker = document.createElementNS(NS, "polygon");
+      marker.setAttribute("points", isBottom ? "0,-5 -5,5 5,5" : "0,5 -5,-5 5,-5");
+      marker.setAttribute("transform", `translate(${xAt(idx) + bw / 2},${mY})`);
+      marker.setAttribute("fill", isBottom ? "var(--good)" : "var(--bad)");
+      marker.setAttribute("fill-opacity", ev.grade === "약" ? "0.55" : "0.95");
+      marker.setAttribute("stroke", "var(--chart-bg)");
+      marker.setAttribute("stroke-width", "1");
+      const ti = document.createElementNS(NS, "title");
+      ti.textContent = `${ev.label}${ev.grade ? ` ${ev.grade}등급` : ""}`
+        + ` · ${isBottom ? "바닥" : "천장"}`
+        + `${ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : ""}`;
+      marker.appendChild(ti);
+      svg.appendChild(marker);
+    });
+  }
+
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
@@ -3945,6 +4041,7 @@ async function tick() {
       refreshVReboundSignal();
       refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
+      refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
       refreshLiqBurstState();
