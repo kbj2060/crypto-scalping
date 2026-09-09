@@ -1654,10 +1654,52 @@ const VOTE_LIFT_BY_SIDE = {
   bottom: { 1: 1.81, 2: 2.10, 3: 2.32, 4: 2.72 },
   top: { 1: 1.58, 2: 1.85, 3: 1.89, 4: 2.07 },
 };
+// 🔴2026-09-10 정정: 위 lift 는 **반전 사건이 일어나는가(분류)** 기준이고 단조증가가 맞다.
+// 그러나 **손익 기준으로는 반대다.** 순환이동 귀무(발동 군집·개수를 보존한 채 가격 정렬만 파괴)
+// 대비 초과수익을 815일에서 재면 겹칠수록 좋아지지 않는다:
+//     바닥  1종 +0.20 / 2종 +1.04 / 3종+ +0.60 bp (H=1시간),  H=4시간에서는 3종+ 가 **-5.91**
+//     천장  1종 +0.21 / 2종 -0.56 / 3종+ -2.28 bp,            H=4시간 3종+ **-5.99**
+// 즉 3종 이상 동시발동은 두 측면 모두에서 가장 나쁘다. 화면이 "겹칠수록 신뢰도가 높아진다"고만
+// 쓰면 사용자가 그걸 진입 근거로 읽는다 -- 그래서 두 축을 문장에서 분리한다.
+// scripts/research_eth_signal_confluence_null_20260910.py
+const VOTE_ECON_BY_SIDE = {   // 동시발동 개수별 귀무 대비 초과 bp (H=1시간 / H=4시간)
+  bottom: { 1: [0.20, 1.96], 2: [1.04, 1.29], 3: [0.60, -5.91], 4: [0.60, -5.91] },
+  top: { 1: [0.21, -2.78], 2: [-0.56, 1.07], 3: [-2.28, -5.99], 4: [-2.28, -5.99] },
+};
 function voteLiftNote(side, votes) {
   const capped = Math.min(Math.max(Math.round(votes), 1), 4);
   const lift = VOTE_LIFT_BY_SIDE[side][capped];
-  return `실측: ${side === "bottom" ? "바닥" : "천장"} 신호 ${capped}개↑ 동시발동 구간 lift ${lift.toFixed(2)}배(무작위 대비) — 신호가 겹칠수록 신뢰도가 실제로 높아짐이 확인됨`;
+  const [e1, e4] = VOTE_ECON_BY_SIDE[side][capped];
+  const sideKo = side === "bottom" ? "바닥" : "천장";
+  return `실측: ${sideKo} 신호 ${capped}개↑ 동시발동 구간 lift ${lift.toFixed(2)}배(무작위 대비) — `
+    + `이건 **반전 사건이 일어나는가(분류)** 기준입니다. `
+    + `⚠️손익은 다릅니다: 같은 구간의 귀무 대비 초과수익은 ${e1 >= 0 ? "+" : ""}${e1.toFixed(2)}bp/건`
+    + `(H=1시간), ${e4 >= 0 ? "+" : ""}${e4.toFixed(2)}bp(H=4시간)이고 왕복비용은 10bp입니다. `
+    + `겹칠수록 좋아지지도 않습니다 — 3종 이상 동시발동이 두 측면 모두에서 가장 나쁩니다.`;
+}
+// 2026-09-10 실측 -- 17개 칩을 **하나의 잣대**로 읽기 위한 공통 스케일.
+// 각 칩이 켜졌을 때 그 방향으로 1시간 들고 갔을 때의 **귀무 대비 초과** bp/건.
+// 귀무는 순환이동(발동 간격·군집·개수를 그대로 보존한 채 가격 정렬만 파괴) B=600, ETH 815일.
+// ⭐16셀 중 왕복비용(테이커 10bp·메이커 7.8bp)을 넘는 셀은 **0개**다. 최대가 +3.53bp.
+const EVIDENCE_EXCESS_BP = {
+  demarker_extreme: { bottom: 3.53, top: -1.15 },
+  fib_extension_exhaustion: { bottom: 3.48, top: -3.22 },
+  kalman_deviation_meanrev: { bottom: -0.07, top: -1.18 },
+  liquidity_sweep: { bottom: -1.21, top: -0.24 },
+  orthogonal_combo: { bottom: 3.13, top: 2.26 },
+  short_term_return_z: { bottom: 2.54, top: -3.50 },
+  smt_divergence: { bottom: -0.46, top: -0.16 },
+  taker_delta_z_climax: { bottom: 2.05, top: -1.11 },
+};
+function evidenceExcessNote(name) {
+  const e = EVIDENCE_EXCESS_BP[name];
+  if (!e) return "";
+  const f = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
+  return `[공통잣대] 이 칩이 켜졌을 때 그 방향으로 1시간 들고 가면 귀무 대비 `
+    + `바닥 ${f(e.bottom)} / 천장 ${f(e.top)} per 건입니다(ETH 815일, 순환이동 귀무 B=600). `
+    + `왕복비용은 테이커 10bp·메이커 7.8bp — 증거신호 8종 16셀 중 비용선을 넘는 셀은 0개, `
+    + `최대가 +3.53bp입니다. 지금 화면에서 비용선에 닿는 신호는 특화감지기의 '극점 탐지기' 하나뿐 `
+    + `(상위10% 기준 H=4시간 +9.78bp)입니다. 이 칩들은 매매 근거가 아니라 맥락으로 쓰세요.`;
 }
 // 2026-08-31 user request: "증거신호 제목 바로 아래에 있는 신호 설명은 모두 제거해줘. 증거신호에
 // 있는 나머지 텍스트들 모두 정리 요약해서 줄여줘" -- desc 필드 삭제(제목 바로 아래 렌더링 자체를
@@ -2116,7 +2158,11 @@ function renderEvidenceSignals(payload) {
     const ko = koDict[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
     const isOpen = detailOpenKeys.has(detailKey);
-    const detailText = ko.detail ? `${ko.detail}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}` : "";
+    // 공통 잣대(귀무 대비 초과 bp)는 ETH 815일에서만 쟀다 -- BTC/XRP 사전에는 붙이지 않는다.
+    const excessNote = koDict === EVIDENCE_SIGNAL_KO ? evidenceExcessNote(s.name) : "";
+    const detailText = ko.detail
+      ? `${ko.detail}${excessNote ? `\n${excessNote}` : ""}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}`
+      : "";
     // 발동 중일 때 바로 보이는 의미(클릭 불필요) -- 2026-08-24 사용자 요청, 2026-08-31 축약(제목
     // 아래 desc 줄 제거에 맞춰 이 문구도 desc 인용 없이 짧게 -- 상세 설명은 "자세히"에 있음).
     const meaningText = evidenceSideLabel(s, {
