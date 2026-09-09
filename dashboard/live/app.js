@@ -120,6 +120,11 @@ let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
 // 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
 // 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
+// 2026-09-09 극점 탐지기(표시 전용). 증거신호 8종을 피쳐로 쓴 "±60분 국소 극점일 확률" 모델.
+let latestExtreme = null;
+let extremeLastFetchAt = 0;
+const EXTREME_POLL_MS = 60000;
+const API_EXTREME_URL = "/api/extreme-detector";
 let latestBreakoutRev = null;
 let breakoutRevLastFetchAt = 0;
 const BREAKOUT_REV_POLL_MS = 60000;
@@ -1016,6 +1021,9 @@ function stripAxisHtml(times, timeFmtKind) {
 // single past tone can't reconstruct -- "웜업", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
 const STRIP_BAR_LABEL_BY_TONE = {
+  // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
+  // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
+  extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
   // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
@@ -1141,6 +1149,13 @@ function toggleSignalDetail(btn, key) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
+  // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
+  extreme_detector: {
+    "바닥 발동": "지금 봉이 **앞으로 60분간 안 깨질 저점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
+    "천장 발동": "지금 봉이 **앞으로 60분간 안 넘길 고점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
+    "미발동": "지금 봉은 등급을 받지 못했습니다. 강한 추세 구간에서는 판정을 억제합니다.",
+    "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
+  },
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
   // 2026-09-08 돌파/되돌림. ⚠️키는 subText 문자열이다(규약 §5-1).
   breakout_rev: {
@@ -1190,6 +1205,20 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
+  extreme_detector:
+    "증거신호 8종의 발동 여부·동시발동 수에 오실레이터·체결·ATR분위·레인지 내 위치·BTC 상대 등 "
+    + "38개 피쳐를 더해, '이 봉이 ±60분 국소 극점일 확률'을 HGB 5시드로 예측합니다. "
+    + "학습은 2026-03-31 까지이고 그 뒤 161일이 표본외입니다(AUC 0.7099).\n\n"
+    + "[등급별 실측 정밀도] 강 66.0%(하루 1.46건) · 중 53.2%(1.46건) · 약 32.1%(4.29건). "
+    + "증거신호 발동봉 기저가 24.2%, 무작위 봉은 2.9%입니다. 약 등급은 기저 대비 +7.9pp 뿐이라 "
+    + "참고용으로만 보세요.\n\n"
+    + "[추세 게이트] 강한 추세 구간(12시간 수익률의 7일 롤링 분위 상하 20%)에서는 콜을 억제합니다. "
+    + "억제되는 양이 하루 4.39건입니다. 근거: 강한 상승에서의 천장 콜은 정확도 51.6%로 반반인데 "
+    + "적중하면 +10.8bp, 빗나가면 -60.7bp로 완전히 비대칭이었습니다(순 -23.8bp). 추세를 피쳐로 "
+    + "넣고 재학습해도 안 고쳐져(역추세 비중 30.8→30.2%) 하드 게이트로 막습니다.\n\n"
+    + "⚠️매매 트리거가 아닙니다. 이 등급대로 매매하면 표본외 순 +2.27bp(강+중, 2.93건/일)로 "
+    + "거래비용 여유가 없습니다. 게이트 없이는 -3.36bp 였습니다. '여기가 국소 극단일 확률'을 "
+    + "주는 것이지 '사거나 팔라'가 아닙니다.",
   breakout_rev: "[규칙] 증거신호 8종 중 **어느 하나가 처음 발동**하면 앵커입니다(신호별 GAP 중복제거, 25.2건/일). " +
     "앵커 다음 봉 시가를 기준으로 **15분 안에 ±0.75×ATR** 를 먼저 건드리는 쪽이 **발현 방향**입니다 — " +
     "이건 예측이 아니라 관측값이고, 앵커의 88%가 발현합니다(22.1건/일).\n" +
@@ -1292,6 +1321,7 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
+  extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
   breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
@@ -2242,6 +2272,53 @@ async function refreshEvidenceSignalsProvisional() {
   }
 }
 
+async function refreshExtremeDetector() {
+  const now = Date.now();
+  if (now - extremeLastFetchAt < EXTREME_POLL_MS) return;
+  extremeLastFetchAt = now;
+  try {
+    const res = await fetch(API_EXTREME_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`extreme detector ${res.status}`);
+    latestExtreme = await res.json();
+  } catch (error) {
+    console.error("Extreme detector fetch error:", error);
+    latestExtreme = { error: "fetch_failed" };
+  }
+}
+
+// ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
+// 규약: 라벨 §1(측면 어휘) · 색 §2(바닥=good/천장=bad/그 외 neutral) · 제목 밑 데이터 줄 없음 §4
+// ⭐5번째 색을 만들지 않는다 -- 억제/미발동은 전부 neutral 이다.
+function extremeDetectorIndicatorItem() {
+  const p = latestExtreme;
+  const base = { key: "extreme_detector", label: "극점 탐지기", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델(HGB 5시드)로 매 봉 계산합니다. "
+                   + "매매에는 연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
+             proba: null, history: [], times: [] };
+  }
+  const gradeText = p.grade ? `${p.grade} 등급` : (p.gated_now ? "추세구간 억제" : null);
+  const prec = (p.precision || {})[p.grade];
+  const stateTitle = [
+    p.grade ? `${p.grade} 등급 · 확률 ${(Number(p.proba) * 100).toFixed(1)}%` : "등급 없음",
+    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (하루 ${(p.per_day || {})[p.grade]}건)` : "",
+    p.signals ? `발동 신호: ${p.signals}` : "",
+    p.gated_now ? `강한 추세 구간이라 억제 중 (추세분위 ${p.trend_q})` : "",
+    `발동봉 기저 ${(Number(p.base_rate) * 100).toFixed(1)}% · 무작위 봉 2.9% · AUC ${p.auc_oos}`,
+    "⚠️매매 신호가 아니라 위치 정보입니다 — 이 등급으로 매매하면 비용 여유가 없습니다",
+  ].filter(Boolean).join("\n");
+  return { ...base,
+    tone: p.tone === "good" || p.tone === "bad" ? p.tone : "neutral",
+    subText: p.subText || "미발동",
+    proba: p.proba != null ? Number(p.proba) : null,
+    meterNote: gradeText, meterNoteTitle: prec != null
+      ? `표본외 실측 정밀도 ${(prec * 100).toFixed(1)}%` : "강한 추세 구간에서는 콜을 내지 않습니다",
+    stateTitle,
+    history: p.history || [], times: p.times || [] };
+}
+
 async function refreshBreakoutRev() {
   const now = Date.now();
   if (now - breakoutRevLastFetchAt < BREAKOUT_REV_POLL_MS) return;
@@ -2800,6 +2877,7 @@ function setupPageTabs() {
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       breakoutRevLastFetchAt = 0; refreshBreakoutRev();
+      extremeLastFetchAt = 0; refreshExtremeDetector();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
       liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
@@ -3819,6 +3897,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
       ethOnlyIndicator(breakoutRevIndicatorItem()),  // 2026-09-08 돌파/되돌림
+      ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -3865,6 +3944,7 @@ async function tick() {
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
       refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
+      refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
       refreshLiqBurstState();

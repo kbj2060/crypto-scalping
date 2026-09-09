@@ -47,6 +47,11 @@ from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
 # a frozen historical TabPFN context, NOT from trading_bot.py's dashboard_state.json -- computed
 # dashboard-side so it never touches the live bot.
 from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v_rebound_signal  # noqa: E402
+# 2026-09-09 극점 탐지기: 증거신호 8종을 피쳐로 쓴 "이 봉이 ±60분 국소 극점일 확률" 모델.
+# 표본외 161일 정밀도 강 66.0%(1.46건/일) · 중 53.2% · 약 32.1% (발동봉 기저 24.2% · 무작위 봉 2.9%).
+# 🔴강한 추세 구간(ret144 7일 분위 상하 20%)에서는 콜을 억제한다 -- 게이트 없이는 순 -3.36bp,
+#   중립 구간만 쓰면 +2.27bp. 표시 전용이고 매매 트리거가 아니다.
+from scripts.live_eth_extreme_detector_20260909 import compute_eth_extreme_detector  # noqa: E402
 # taker_delta_z_climax / short_term_return_z evidence-signal chips REPLACED in-place with their
 # TabPFN meta-label models' live probability (2026-08-30, user decision -- unlike V_REBOUND above,
 # these stay in the "증거 신호" row and reuse the klines/compute_signals() this endpoint already
@@ -1189,6 +1194,8 @@ def make_app() -> web.Application:
     xrp_evidence_signal_lock = asyncio.Lock()
     v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     v_rebound_lock = asyncio.Lock()
+    extreme_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    extreme_detector_lock = asyncio.Lock()
     # 2026-08-31: keyed by asset (was a single shared slot) so an ETH and a BTC request don't
     # evict each other's cached reading -- same per-asset dict/lock shape as market_history_cache/
     # market_history_locks above.
@@ -1790,6 +1797,17 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
+    async def load_extreme_detector() -> dict[str, Any]:
+        """극점 탐지기 -- scripts/live_eth_extreme_detector_20260909.py 참고.
+        자체 klines(3000봉, 추세분위 2016봉 롤링에 필요) + 동결 HGB 5시드. 실측 ~1.1초라
+        GPU 를 쓰는 v_rebound 보다 가볍지만 같은 이유로 to_thread 에 둔다."""
+        return await swr_cached(
+            "extreme_detector", extreme_detector_cache, extreme_detector_lock,
+            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(compute_eth_extreme_detector),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+
     async def load_basis_liquidation_signal(asset: str = "eth") -> dict[str, Any]:
         """베이시스 청산압박 model indicator -- see scripts/live_spot_perp_basis_signal_20260827.py
         docstring for the liquidation-crowding validation (exploratory, ~1 month) and why this is
@@ -2137,6 +2155,10 @@ def make_app() -> web.Application:
         payload = await load_v_rebound_signal()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_extreme_detector(request: web.Request) -> web.Response:
+        payload = await load_extreme_detector()
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     def _query_coin_asset(request: web.Request) -> str:
         """Shared `?asset=` parsing for the 4 Snapshot-tab signals wired to multiple coins
         (2026-08-31) -- raises the same 400 shape as api_market_history()'s existing
@@ -2441,6 +2463,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
+    app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
