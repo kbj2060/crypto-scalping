@@ -162,6 +162,9 @@ from scripts.live_macro_calendar_20260826 import compute_macro_calendar, compute
 # specialized-detector (EVIDENCE_SIGNAL_SYMBOL etc. below) are untouched -- those are trained ML
 # models with no BTC-trained artifact yet, not something a symbol swap alone can serve.
 from scripts.coin_config import COIN_CONFIG  # noqa: E402
+# 2026-09-10: 거래소 계정 자체(수동 매매 포함)를 읽는 유일한 경로. trade_journal.jsonl은
+# trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
+from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -276,6 +279,9 @@ EVENT_POLL_SECONDS = 2.5
 # past this the payload is treated as cold again and the request blocks for a current reading.
 STALE_GRACE_SECONDS = 600
 MARKET_HISTORY_CACHE_SECONDS = 300
+# 3 + N개의 서명 GET(weight 5씩)이라 폴링 자체는 싸다. 포지션은 실시간성이 필요하고
+# 체결내역은 안 변하지만, 캐시를 둘로 쪼개는 값어치는 없어서 한 페이로드 30초로 묶었다.
+BINANCE_ACCOUNT_CACHE_SECONDS = 30
 SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"
 SCALP_SHADOW_STATE_SCHEMA = "eth_micro_scalp_v4.shadow_bot_step.v1"
 SCALP_SHADOW_SUMMARY_SCHEMA = "eth_micro_scalp_v4.shadow_bot.v1"
@@ -1242,6 +1248,8 @@ def make_app() -> web.Application:
     latest_event_tickers: dict[str, dict[str, Any]] = {}
     market_history_cache: dict[str, dict[str, Any]] = {}
     market_history_locks = {asset: asyncio.Lock() for asset in MARKET_SYMBOLS}
+    binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    binance_account_lock = asyncio.Lock()
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
     evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -2430,6 +2438,17 @@ def make_app() -> web.Application:
             }
         return json_response(request, payloads[source_filter], etag)
 
+    async def api_binance_account(request: web.Request) -> web.Response:
+        """실계좌 잔고/포지션/왕복거래(진입·청산 시각). 키에 Futures 읽기 권한이 없으면
+        ok=false + hint로 내려가고, 프런트는 그 문구를 그대로 보여준다."""
+        payload = await swr_cached(
+            "binance_account", binance_account_cache, binance_account_lock,
+            BINANCE_ACCOUNT_CACHE_SECONDS,
+            lambda: fetch_account(binance_session(), list(MARKET_SYMBOLS.values())),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_ops_status(request: web.Request) -> web.Response:
         ops_dir = LIVE_DIR / "ops_watchdog"
         health_path = ops_dir / "health_snapshot.json"
@@ -2585,6 +2604,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/push/test", api_push_test)
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
+    app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)

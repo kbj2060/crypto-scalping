@@ -121,6 +121,20 @@
         </div>
         <div id="opsHealthList" class="ops-health-list"></div>
       </section>
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>바이낸스 계정</h3><p id="acctBalanceText" class="muted">-</p></div>
+          <div class="ops-health-head-tools">
+            <span id="acctSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+          </div>
+        </div>
+        <div id="acctPositions" class="ops-health-list"></div>
+        <div class="ops-health-head" style="margin-top:12px">
+          <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
+        </div>
+        <div id="acctTrades" class="ops-health-list"></div>
+      </section>
     </section>
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">

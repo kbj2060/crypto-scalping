@@ -1,5 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
+const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
@@ -852,10 +853,76 @@ function renderOpsStatus(payload) {
   }).join(""));
 }
 
+// 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
+function renderBinanceAccount(payload) {
+  const summary = el("acctSummary");
+  if (!payload?.ok) {
+    const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
+    if (summary) { summary.textContent = "연결 안 됨"; summary.className = "ops-health-summary bad"; }
+    setT("acctBalanceText", msg);
+    setH("acctPositions", "");
+    setH("acctTrades", "");
+    return;
+  }
+  const b = payload.balance || {};
+  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)} · 미실현 ${fmtUsd(b.unrealized)}`);
+  const positions = payload.positions || [];
+  const trades = payload.trades || [];
+  if (summary) {
+    summary.textContent = positions.length ? `보유 ${positions.length}종목` : "포지션 없음";
+    summary.className = `ops-health-summary ${positions.length ? "good" : "neutral"}`;
+  }
+  setH("acctPositions", positions.length ? positions.map((p) => {
+    const tone = p.unrealized_pnl > 0 ? "good" : p.unrealized_pnl < 0 ? "bad" : "neutral";
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)}</strong>
+        <span>진입 ${fmtUsd(p.entry_price)} → 현재 ${fmtUsd(p.mark_price)} · 청산가 ${fmtUsd(p.liquidation_price)} · 수량 ${escapeHtml(p.qty)}</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${fmtUsd(p.unrealized_pnl)}</span>
+        <small>${fmtTs(p.entry_at)} 진입</small>
+      </div>
+    </article>`;
+  }).join("") : '<p class="muted">열려 있는 포지션이 없습니다.</p>');
+  setH("acctTrades", trades.length ? trades.slice(0, 20).map((t) => {
+    const tone = !t.closed ? "warn" : t.net_pnl > 0 ? "good" : t.net_pnl < 0 ? "bad" : "neutral";
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"}</strong>
+        <span>${fmtTs(t.entry_at)} 진입 → ${t.closed ? `${fmtTs(t.exit_at)} 청산` : "보유 중"} · ${escapeHtml(t.fills)}회 체결</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${t.closed ? fmtUsd(t.net_pnl) : "-"}</span>
+        <small>수수료 ${fmtUsd(t.commission)}</small>
+      </div>
+    </article>`;
+  }).join("") : '<p class="muted">체결 내역이 없습니다.</p>');
+}
+
+function fmtUsd(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n >= 0 ? "" : "-"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 10 ? 4 : 2 })}`;
+}
+
+async function refreshBinanceAccount() {
+  try {
+    const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-store" });
+    renderBinanceAccount(await res.json());
+  } catch (error) {
+    console.error("Binance account fetch error:", error);
+    renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
+  }
+}
+
 async function refreshOpsStatus() {
   const now = Date.now();
   if (now - opsLastFetchAt < OPS_POLL_MS) return;
   opsLastFetchAt = now;
+  refreshBinanceAccount();
   try {
     const res = await fetch(API_OPS_STATUS_URL, { cache: "no-store", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
     if (res.status === 304) return;
