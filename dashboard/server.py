@@ -24,6 +24,9 @@ sys.path.insert(0, str(REPO_ROOT))
 # Macro calendar (2026-08-26) needs FRED/EIA/Finnhub API keys from .env -- no other endpoint in
 # this file has needed a real secret before, so .env was never loaded here until now.
 load_dotenv(REPO_ROOT / ".env")
+# 주의: 이건 import 시점에 .env를 os.environ에 한 번 굽는다. 실행 중인 프로세스는 옛 값을
+# 계속 들고 있으므로 .env를 고쳤으면 대시보드를 재기동해야 반영된다(2026-09-10 바이낸스 키
+# 교체 때 실제로 걸렸다). dashboard/ 아래가 바뀌면 deploy_watcher.sh가 알아서 재기동한다.
 # Reuses the exact, already-verified signal formulas from the standalone CLI dashboard rather
 # than re-deriving them here -- see that module's docstring for formula provenance (each formula
 # transcribed verbatim from the 2026-08-14 research scripts). compute_signals/bars_since_last_true
