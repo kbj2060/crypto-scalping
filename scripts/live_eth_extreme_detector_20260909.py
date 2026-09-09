@@ -199,7 +199,10 @@ def compute_eth_extreme_detector() -> dict:
                             "names": r.names_}
         history, times = [], []
         for t in ts_all.iloc[-HISTORY_BARS:]:
-            times.append(pd.Timestamp(t).isoformat())
+            # 🔴반드시 tz 를 붙여 내보낸다. 자바스크립트 `new Date("...T06:10:00")` 는 오프셋이
+            #   없으면 **로컬 시간**으로 파싱해서 KST 브라우저에서 9시간 어긋난다(2026-09-09
+            #   사용자 신고). 다른 신호(v_rebound 등)는 tz-aware UTC 로 내보내고 있었다.
+            times.append(pd.Timestamp(t).tz_localize("UTC").isoformat())
             b = by_ts.get(t)
             history.append(("good" if b["long"] else "bad") if b else "neutral")
         cur = by_ts.get(last_ts)
@@ -216,7 +219,7 @@ def compute_eth_extreme_detector() -> dict:
             "signals": cur["names"] if cur else None,
             "gated_now": gated_now, "trend_q": round(float(A[A._ts == last_ts]._tq.iloc[0]), 3)
                           if (A._ts == last_ts).any() else None,
-            "latest_ts_utc": pd.Timestamp(last_ts).isoformat(),
+            "latest_ts_utc": pd.Timestamp(last_ts).tz_localize("UTC").isoformat(),
             "history": history, "times": times,
             "precision": meta.get("precision"), "per_day": meta.get("per_day"),
             "base_rate": meta.get("base_rate"), "auc_oos": meta.get("auc_oos"),
