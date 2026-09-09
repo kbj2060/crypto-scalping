@@ -3581,23 +3581,46 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 격자 정합은 **UTC epoch** 로 맞춘다(문자열 포맷 비교는 tz 표기 차이로 조용히 어긋난다).
     const idxByEpoch = new Map();
     candles.forEach((c, i) => idxByEpoch.set(c.time, i));
-    const LANE_H = 6;
+    // 2026-09-09 모바일 신고("천장·바닥 게이지가 잘 안 보이고 청산 밀도에 가려진다"):
+    //   원인 둘. (1) 레인은 히트맵 **위에** 그려지지만 히트맵이 fill-opacity 0.85 비리디스
+    //   밴드라 반투명 레인이 대비로 지워진다. (2) 모바일 기본 34봉에서 bw≈6.8px 인데
+    //   rx=1.5 라운딩이 그 폭을 먹어 점처럼 보인다(최대 축소 72봉이면 bw 3.2px).
+    //   → 레인마다 **불투명 트랙**을 깔아 히트맵을 끊고, 모바일에선 높이를 키우고 라운딩을
+    //     빼고 최소 폭을 보장하고 불투명도 하한을 올린다.
+    const LANE_H = mobileChart ? 9 : 6;
     const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
+    // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
+    // 3.8px 밖에 안 남아 점처럼 보인다(2026-09-09 신고) -- 9px 미만은 각지게 그린다.
+    const laneRx = bw >= 9 ? "1.5" : "0";
+    const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
+    const opaBase = mobileChart ? 0.55 : 0.35, opaStep = mobileChart ? 0.11 : 0.15;
+    const laneX0 = xAt(0), laneX1 = xAt(candles.length - 1) + bw;
     ["top", "bottom"].forEach(side => {
       const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
       const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
+      // 불투명 트랙 -- 청산 밀도 밴드가 레인 아래로 비치지 않게 끊는다(모바일 신고의 핵심).
+      const track = document.createElementNS(NS, "rect");
+      track.setAttribute("x", laneX0); track.setAttribute("y", LANE_Y[side]);
+      track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
+      track.setAttribute("height", LANE_H);
+      track.setAttribute("rx", "1.5");
+      track.setAttribute("fill", "var(--chart-bg)");
+      track.setAttribute("fill-opacity", "0.92");
+      track.setAttribute("data-lane-track", side);
+      svg.appendChild(track);
       (counts || []).forEach((n, k) => {
         if (!n) return;
         const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
         if (idx === undefined) return;
         const rect = document.createElementNS(NS, "rect");
         rect.setAttribute("x", xAt(idx)); rect.setAttribute("y", LANE_Y[side]);
-        rect.setAttribute("width", bw); rect.setAttribute("height", LANE_H);
-        rect.setAttribute("rx", "1.5");
+        rect.setAttribute("width", laneW); rect.setAttribute("height", LANE_H);
+        rect.setAttribute("rx", laneRx);
         rect.setAttribute("fill", laneFill[side]);
-        // 진하기 = 동시발동 종수(1종 0.50 → 4종+ 0.95). 색을 새로 만들지 않는다(표시 규약 §2).
-        rect.setAttribute("fill-opacity", (0.35 + 0.15 * Math.min(n, 4)).toFixed(2));
+        // 진하기 = 동시발동 종수. 색을 새로 만들지 않는다(표시 규약 §2).
+        // 데스크톱 1종 0.50 → 4종+ 0.95 · 모바일 1종 0.66 → 4종+ 0.99(대비 확보).
+        rect.setAttribute("fill-opacity", Math.min(opaBase + opaStep * Math.min(n, 4), 1).toFixed(2));
         const ti = document.createElementNS(NS, "title");
         ti.textContent = `${side === "top" ? "천장" : "바닥"} 증거신호 ${n}종`
           + `${(names && names[k]) ? ` · ${names[k]}` : ""}`;
