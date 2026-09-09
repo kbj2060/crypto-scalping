@@ -507,10 +507,6 @@ from trading_bot_modules.runtime_config import (
     FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_ENABLE,
     FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_MODEL_PATH,
     FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_REPORT_PATH,
-    FINAL_GOVERNOR_DISABLED_V13_1_ENABLE,
-    FINAL_GOVERNOR_DISABLED_V13_1_MODEL_PATH,
-    FINAL_GOVERNOR_DISABLED_V13_1_REPORT_PATH,
-    FINAL_GOVERNOR_DISABLED_V13_1_REQUIRED,
     FINAL_GOVERNOR_DSAC_OVERLAY_CKPT_PATH,
     FINAL_GOVERNOR_DSAC_OVERLAY_COST_BUFFER,
     FINAL_GOVERNOR_DSAC_OVERLAY_COST_GATE_ENABLE,
@@ -3049,20 +3045,6 @@ class FinalGovernorRuntime:
         self.active_omega4_6_1_mae: float = 0.0
         self.active_omega4_6_1_tp_order_id: str = ""
         self.active_omega4_6_1_sl_order_id: str = ""
-        self.active_v13_1_take_profit: float = 0.0
-        self.active_v13_1_stop_loss: float = 0.0
-        self.active_v13_1_max_hold_bars: int = 0
-        self.active_v13_1_cooldown_bars: int = 0
-        self.active_v13_1_quality_score: float = 0.0
-        self.active_v13_1_confidence: float = 0.0
-        self.active_v13_1_notional: float = 0.0
-        self.active_v13_1_leverage: float = 1.0
-        self.active_v13_1_lane: str = ""
-        self.active_v13_1_probability: float = 0.0
-        self.active_v13_1_threshold: float = 0.0
-        self.active_v13_1_regime: str = ""
-        self.active_v13_1_regime_multiplier: float = 1.0
-        self.v13_1_cooldown_left: int = 0
         self.active_lifecycle_v1_base_notional: float = 0.0
         self.active_lifecycle_v1_effective_notional: float = 0.0
         self.active_lifecycle_v1_leverage: float = 1.0
@@ -3119,11 +3101,6 @@ class FinalGovernorRuntime:
         self.conformal_veto_v1_5_model_path = self._repo_path(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_MODEL_PATH)
         self.conformal_veto_v1_5_report_path = self._repo_path(FINAL_GOVERNOR_CONFORMAL_VETO_V1_5_REPORT_PATH)
         self.conformal_veto_v1_5_adapter: ConformalSleeveV15Adapter | None = None
-        self.disabled_v13_1_enabled = bool(FINAL_GOVERNOR_DISABLED_V13_1_ENABLE)
-        self.disabled_v13_1_required = bool(FINAL_GOVERNOR_DISABLED_V13_1_REQUIRED)
-        self.disabled_v13_1_model_path = self._repo_path(FINAL_GOVERNOR_DISABLED_V13_1_MODEL_PATH)
-        self.disabled_v13_1_report_path = self._repo_path(FINAL_GOVERNOR_DISABLED_V13_1_REPORT_PATH)
-        self.disabled_v13_1_adapter: object | None = None
         self.deep_gated_gross_enabled = bool(FINAL_GOVERNOR_DEEP_GATED_GROSS_ENABLE)
         self.deep_gated_gross_model_path = self._repo_path(FINAL_GOVERNOR_DEEP_GATED_GROSS_MODEL_PATH)
         self.deep_gated_gross_report_path = self._repo_path(FINAL_GOVERNOR_DEEP_GATED_GROSS_REPORT_PATH)
@@ -3214,8 +3191,6 @@ class FinalGovernorRuntime:
         self.ddh2_audit: dict = {}
         self.ddh2_config: dict = {}
         self.ddh2_fallback_dd_block_active: bool = False
-        if self.disabled_v13_1_enabled:
-            raise RuntimeError("disabled_v13_1_adapter_was_removed")
         if self.conformal_veto_v1_5_enabled:
             try:
                 missing = [
@@ -7282,286 +7257,6 @@ class FinalGovernorRuntime:
         }
         return action, float(notional), float(fraction), float(leverage), info, regime.upper()
 
-    def _reset_v13_1_position_state(self) -> None:
-        self.active_v13_1_take_profit = 0.0
-        self.active_v13_1_stop_loss = 0.0
-        self.active_v13_1_max_hold_bars = 0
-        self.active_v13_1_cooldown_bars = 0
-        self.active_v13_1_quality_score = 0.0
-        self.active_v13_1_confidence = 0.0
-        self.active_v13_1_notional = 0.0
-        self.active_v13_1_leverage = 1.0
-        self.active_v13_1_lane = ""
-        self.active_v13_1_probability = 0.0
-        self.active_v13_1_threshold = 0.0
-        self.active_v13_1_regime = ""
-        self.active_v13_1_regime_multiplier = 1.0
-
-    def _v13_1_available(self) -> bool:
-        return bool(self.disabled_v13_1_enabled and self.disabled_v13_1_adapter is not None)
-
-    def _decide_v13_1_entry(
-        self,
-        frame: pd.DataFrame,
-        *,
-        meta_router,
-        regime: str,
-        raw_regime: str,
-    ) -> tuple[int, float, float, float, dict, str] | None:
-        adapter = self.disabled_v13_1_adapter
-        if adapter is None:
-            return None
-        if self.v13_1_cooldown_left > 0:
-            self.v13_1_cooldown_left -= 1
-            self._save_runtime_state()
-            info = {
-                "agent": "FINAL_GOVERNOR",
-                "source": "disabled_v13_1|cooldown",
-                "position_signal": "HOLD",
-                "position_reason": "disabled_v13_1_cooldown",
-                "score": 0.0,
-                "conviction": 0.0,
-                "owner": "",
-                "regime": regime,
-                "decision_logic": "disabled_v13_1_model",
-                "model_version": "Disabled V13.1",
-                "model_id": str(adapter.model_id),
-                "model_path": str(self.disabled_v13_1_model_path),
-                "model_sleeve": "",
-                "sleeve_trace": {
-                    "decision_logic": "disabled_v13_1_model",
-                    "cooldown_left": int(self.v13_1_cooldown_left),
-                },
-            }
-            return 0, 0.0, 0.0, 1.0, info, regime.upper()
-        ctx = self._lifecycle_v1_daily_context(meta_router, frame)
-        try:
-            decision = adapter.decide(
-                frame,
-                account_drawdown=float(ctx.get("account_dd", 0.0) or 0.0),
-                loss_cooldown_left=0,
-                leverage_cap=float(max(float(getattr(meta_router, "exposure_cap", 5.0) or 5.0), 1.0)),
-            )
-        except Exception as e:
-            logger.warning("SYSTEM disabled_v13_1 signal failed closed: %s", e)
-            info = {
-                "agent": "FINAL_GOVERNOR",
-                "source": "disabled_v13_1|signal_error",
-                "position_signal": "HOLD",
-                "position_reason": "disabled_v13_1_signal_error",
-                "score": 0.0,
-                "conviction": 0.0,
-                "owner": "",
-                "regime": regime,
-                "decision_logic": "disabled_v13_1_model",
-                "model_version": "Disabled V13.1",
-                "model_id": str(adapter.model_id),
-                "model_path": str(self.disabled_v13_1_model_path),
-                "model_sleeve": "",
-                "sleeve_trace": {"error": str(e), "raw_regime": raw_regime},
-            }
-            return 0, 0.0, 0.0, 1.0, info, regime.upper()
-        trace = dict(decision.trace)
-        trace.update(
-            {
-                "raw_regime": raw_regime,
-                "legacy_regime_removed": str(regime),
-                "risk_context": dict(ctx),
-            }
-        )
-        if int(decision.action) == 0 or int(decision.side) == 0 or float(decision.notional_exposure) <= 1e-12:
-            info = {
-                "agent": "FINAL_GOVERNOR",
-                "source": f"disabled_v13_1|{decision.reason}",
-                "position_signal": "HOLD",
-                "position_reason": str(decision.reason),
-                "score": float(decision.probability),
-                "conviction": float(decision.confidence),
-                "owner": "",
-                "regime": decision.regime,
-                "decision_logic": "disabled_v13_1_model",
-                "quality_score": float(decision.quality_score),
-                "confidence": float(decision.confidence),
-                "model_version": "Disabled V13.1",
-                "model_id": str(adapter.model_id),
-                "model_path": str(self.disabled_v13_1_model_path),
-                "model_sleeve": str(decision.lane),
-                "sleeve_trace": trace,
-            }
-            return 0, 0.0, 0.0, 1.0, info, decision.regime.upper()
-
-        self.owner = "disabled_v13_1"
-        self.owner_regime = str(decision.regime)
-        self.peak_unrealized = 0.0
-        self.active_v13_1_take_profit = float(decision.take_profit)
-        self.active_v13_1_stop_loss = float(decision.stop_loss)
-        self.active_v13_1_max_hold_bars = int(decision.max_hold_bars)
-        self.active_v13_1_cooldown_bars = int(decision.cooldown_bars)
-        self.active_v13_1_quality_score = float(decision.quality_score)
-        self.active_v13_1_confidence = float(decision.confidence)
-        self.active_v13_1_notional = float(decision.notional_exposure)
-        self.active_v13_1_leverage = float(decision.leverage)
-        self.active_v13_1_lane = str(decision.lane)
-        self.active_v13_1_probability = float(decision.probability)
-        self.active_v13_1_threshold = float(decision.threshold)
-        self.active_v13_1_regime = str(decision.regime)
-        self.active_v13_1_regime_multiplier = float(decision.regime_multiplier)
-        self._save_runtime_state()
-        info = {
-            "agent": "FINAL_GOVERNOR",
-            "source": f"disabled_v13_1|entry_{decision.lane}",
-            "position_signal": "LONG_ENTRY" if int(decision.action) == 1 else "SHORT_ENTRY",
-            "position_reason": f"disabled_v13_1_entry_{decision.lane}",
-            "score": float(decision.probability),
-            "conviction": float(decision.confidence),
-            "owner": "disabled_v13_1",
-            "regime": decision.regime,
-            "decision_logic": "disabled_v13_1_model",
-            "take_profit": float(decision.take_profit),
-            "stop_loss": float(decision.stop_loss),
-            "max_hold_bars": int(decision.max_hold_bars),
-            "cooldown_bars": int(decision.cooldown_bars),
-            "quality_score": float(decision.quality_score),
-            "confidence": float(decision.confidence),
-            "model_version": "Disabled V13.1",
-            "model_id": str(adapter.model_id),
-            "model_path": str(self.disabled_v13_1_model_path),
-            "model_sleeve": str(decision.lane),
-            "scout_prob": float(decision.probability) if decision.lane == "scout" else 0.0,
-            "scout_frac": float(decision.notional_exposure),
-            "scout_probability_threshold": float(decision.threshold) if decision.lane == "scout" else 0.0,
-            "scout_cost_pass": True,
-            "sleeve_trace": trace,
-        }
-        return (
-            int(decision.action),
-            float(decision.notional_exposure),
-            float(decision.position_fraction),
-            float(decision.leverage),
-            info,
-            decision.regime.upper(),
-        )
-
-    def _manage_v13_1_position(
-        self,
-        *,
-        meta_router,
-        current_price: float,
-        regime: str,
-        frame: pd.DataFrame,
-    ) -> tuple[int, float, float, float, dict, str]:
-        pos = str(meta_router.pos or "")
-        action_hold = self._action_from_side(pos)
-        exposure = float(meta_router.current_leverage or self.active_v13_1_notional or 0.0)
-        exec_lev = float(meta_router.execution_leverage or self.active_v13_1_leverage or 1.0)
-        fraction = float(meta_router.position_fraction or min(exposure / max(exec_lev, 1e-8), 1.0))
-        mark_math = meta_router._trade_math(
-            pos,
-            float(meta_router.entry_price or 0.0),
-            float(current_price or 0.0),
-            exposure,
-            entry_liquidity=str(getattr(meta_router, "entry_execution_liquidity", "") or ""),
-        )
-        gross_unrealized = float(mark_math.get("gross_return_frac", 0.0) or 0.0) * float(exposure)
-        net_unrealized = float(meta_router._net_pnl_frac(current_price))
-        self.peak_unrealized = max(float(self.peak_unrealized), gross_unrealized)
-        hold_bars = int(meta_router.hold_count or 0)
-        close = False
-        reason = "disabled_v13_1_hold"
-        if exposure <= 1e-12:
-            close = True
-            reason = "disabled_v13_1_reconcile_close"
-        elif self.active_v13_1_take_profit > 0.0 and gross_unrealized >= float(self.active_v13_1_take_profit):
-            close = True
-            reason = "learned_take_profit"
-        elif self.active_v13_1_stop_loss > 0.0 and gross_unrealized <= -abs(float(self.active_v13_1_stop_loss)):
-            close = True
-            reason = "learned_stop_loss"
-        elif self.active_v13_1_max_hold_bars > 0 and hold_bars >= int(self.active_v13_1_max_hold_bars):
-            close = True
-            reason = "learned_max_hold"
-
-        trace = {
-            "decision_logic": "disabled_v13_1_model",
-            "model_version": "Disabled V13.1",
-            "model_id": "disabled_v13_1_model",
-            "model": str(self.disabled_v13_1_model_path),
-            "report": str(self.disabled_v13_1_report_path),
-            "lane": str(self.active_v13_1_lane),
-            "entry_regime": str(self.active_v13_1_regime),
-            "current_regime": str(regime),
-            "regime_multiplier": float(self.active_v13_1_regime_multiplier),
-            "take_profit": float(self.active_v13_1_take_profit),
-            "stop_loss": float(self.active_v13_1_stop_loss),
-            "max_hold_bars": int(self.active_v13_1_max_hold_bars),
-            "age_bars": int(hold_bars),
-            "gross_mark_unrealized": float(gross_unrealized),
-            "net_unrealized": float(net_unrealized),
-            "unrealized_basis": "gross_mark_backtest_parity",
-            "peak_unrealized": float(self.peak_unrealized),
-            "probability": float(self.active_v13_1_probability),
-            "threshold": float(self.active_v13_1_threshold),
-            "quality_score": float(self.active_v13_1_quality_score),
-            "confidence": float(self.active_v13_1_confidence),
-            "regime_predictor": dict(frame.attrs.get("regime_predictor_trace", {}) or {}),
-        }
-        if close:
-            self.last_exit_bar = self.bar_counter
-            self.v13_1_cooldown_left = int(max(0, self.active_v13_1_cooldown_bars))
-            trace["cooldown_armed_bars"] = int(self.v13_1_cooldown_left)
-            info = {
-                "agent": "FINAL_GOVERNOR",
-                "source": f"disabled_v13_1|{reason}",
-                "position_signal": "EXIT",
-                "position_reason": reason,
-                "score": float(abs(gross_unrealized)),
-                "conviction": float(self.active_v13_1_confidence),
-                "owner": "disabled_v13_1",
-                "regime": regime,
-                "decision_logic": "disabled_v13_1_model",
-                "quality_score": float(self.active_v13_1_quality_score),
-                "confidence": float(self.active_v13_1_confidence),
-                "model_version": "Disabled V13.1",
-                "model_id": "disabled_v13_1_model",
-                "model_path": str(self.disabled_v13_1_model_path),
-                "model_sleeve": str(self.active_v13_1_lane),
-                "scout_prob": float(self.active_v13_1_probability) if self.active_v13_1_lane == "scout" else 0.0,
-                "scout_frac": float(self.active_v13_1_notional),
-                "scout_probability_threshold": float(self.active_v13_1_threshold) if self.active_v13_1_lane == "scout" else 0.0,
-                "scout_cost_pass": True,
-                "sleeve_trace": trace,
-            }
-            self.owner = ""
-            self.owner_regime = ""
-            self.peak_unrealized = 0.0
-            self._reset_v13_1_position_state()
-            self._save_runtime_state()
-            return 0, 0.0, 0.0, 1.0, info, regime.upper()
-
-        info = {
-            "agent": "FINAL_GOVERNOR",
-            "source": "disabled_v13_1|hold",
-            "position_signal": "HOLD",
-            "position_reason": reason,
-            "score": float(abs(gross_unrealized)),
-            "conviction": float(self.active_v13_1_confidence),
-            "owner": "disabled_v13_1",
-            "regime": regime,
-            "decision_logic": "disabled_v13_1_model",
-            "quality_score": float(self.active_v13_1_quality_score),
-            "confidence": float(self.active_v13_1_confidence),
-            "model_version": "Disabled V13.1",
-            "model_id": "disabled_v13_1_model",
-            "model_path": str(self.disabled_v13_1_model_path),
-            "model_sleeve": str(self.active_v13_1_lane),
-            "scout_prob": float(self.active_v13_1_probability) if self.active_v13_1_lane == "scout" else 0.0,
-            "scout_frac": float(self.active_v13_1_notional),
-            "scout_probability_threshold": float(self.active_v13_1_threshold) if self.active_v13_1_lane == "scout" else 0.0,
-            "scout_cost_pass": True,
-            "sleeve_trace": trace,
-        }
-        return action_hold, exposure, fraction, exec_lev, info, regime.upper()
-
     def _manage_lifecycle_v1_position(self, *, meta_router, current_price: float, regime: str, frame: pd.DataFrame) -> tuple[int, float, float, float, dict, str]:
         pos = str(meta_router.pos or "")
         action_hold = self._action_from_side(pos)
@@ -9783,20 +9478,6 @@ class FinalGovernorRuntime:
             self.active_omega4_6_1_sl_order_id = str(
                 data.get("active_omega4_6_1_sl_order_id", self.active_omega4_6_1_sl_order_id) or ""
             )
-            self.active_v13_1_take_profit = float(data.get("active_v13_1_take_profit", self.active_v13_1_take_profit) or 0.0)
-            self.active_v13_1_stop_loss = float(data.get("active_v13_1_stop_loss", self.active_v13_1_stop_loss) or 0.0)
-            self.active_v13_1_max_hold_bars = int(data.get("active_v13_1_max_hold_bars", self.active_v13_1_max_hold_bars) or 0)
-            self.active_v13_1_cooldown_bars = int(data.get("active_v13_1_cooldown_bars", self.active_v13_1_cooldown_bars) or 0)
-            self.active_v13_1_quality_score = float(data.get("active_v13_1_quality_score", self.active_v13_1_quality_score) or 0.0)
-            self.active_v13_1_confidence = float(data.get("active_v13_1_confidence", self.active_v13_1_confidence) or 0.0)
-            self.active_v13_1_notional = float(data.get("active_v13_1_notional", self.active_v13_1_notional) or 0.0)
-            self.active_v13_1_leverage = float(data.get("active_v13_1_leverage", self.active_v13_1_leverage) or 1.0)
-            self.active_v13_1_lane = str(data.get("active_v13_1_lane", self.active_v13_1_lane) or "")
-            self.active_v13_1_probability = float(data.get("active_v13_1_probability", self.active_v13_1_probability) or 0.0)
-            self.active_v13_1_threshold = float(data.get("active_v13_1_threshold", self.active_v13_1_threshold) or 0.0)
-            self.active_v13_1_regime = str(data.get("active_v13_1_regime", self.active_v13_1_regime) or "")
-            self.active_v13_1_regime_multiplier = float(data.get("active_v13_1_regime_multiplier", self.active_v13_1_regime_multiplier) or 1.0)
-            self.v13_1_cooldown_left = int(data.get("v13_1_cooldown_left", self.v13_1_cooldown_left) or 0)
             self.active_lifecycle_v1_base_notional = float(data.get("active_lifecycle_v1_base_notional", self.active_lifecycle_v1_base_notional) or 0.0)
             self.active_lifecycle_v1_effective_notional = float(data.get("active_lifecycle_v1_effective_notional", self.active_lifecycle_v1_effective_notional) or 0.0)
             self.active_lifecycle_v1_leverage = float(data.get("active_lifecycle_v1_leverage", self.active_lifecycle_v1_leverage) or 1.0)
@@ -9944,20 +9625,6 @@ class FinalGovernorRuntime:
                 "active_omega4_6_1_mae": float(self.active_omega4_6_1_mae),
                 "active_omega4_6_1_tp_order_id": str(self.active_omega4_6_1_tp_order_id or ""),
                 "active_omega4_6_1_sl_order_id": str(self.active_omega4_6_1_sl_order_id or ""),
-                "active_v13_1_take_profit": float(self.active_v13_1_take_profit),
-                "active_v13_1_stop_loss": float(self.active_v13_1_stop_loss),
-                "active_v13_1_max_hold_bars": int(self.active_v13_1_max_hold_bars),
-                "active_v13_1_cooldown_bars": int(self.active_v13_1_cooldown_bars),
-                "active_v13_1_quality_score": float(self.active_v13_1_quality_score),
-                "active_v13_1_confidence": float(self.active_v13_1_confidence),
-                "active_v13_1_notional": float(self.active_v13_1_notional),
-                "active_v13_1_leverage": float(self.active_v13_1_leverage),
-                "active_v13_1_lane": str(self.active_v13_1_lane),
-                "active_v13_1_probability": float(self.active_v13_1_probability),
-                "active_v13_1_threshold": float(self.active_v13_1_threshold),
-                "active_v13_1_regime": str(self.active_v13_1_regime),
-                "active_v13_1_regime_multiplier": float(self.active_v13_1_regime_multiplier),
-                "v13_1_cooldown_left": int(self.v13_1_cooldown_left),
                 "active_lifecycle_v1_base_notional": float(self.active_lifecycle_v1_base_notional),
                 "active_lifecycle_v1_effective_notional": float(self.active_lifecycle_v1_effective_notional),
                 "active_lifecycle_v1_leverage": float(self.active_lifecycle_v1_leverage),
@@ -10273,8 +9940,6 @@ class FinalGovernorRuntime:
             changed = bool(
                 self.owner
                 or self.owner_regime
-                or self.active_v13_1_notional > 0.0
-                or self.active_v13_1_lane
                 or self.active_lifecycle_v1_effective_notional > 0.0
                 or self.active_lifecycle_v1_base_notional > 0.0
                 or self.active_lifecycle_v1_edit
@@ -10292,7 +9957,6 @@ class FinalGovernorRuntime:
             self.owner = ""
             self.owner_regime = ""
             self.peak_unrealized = 0.0
-            self._reset_v13_1_position_state()
             self._reset_lifecycle_v1_position_state()
             self._reset_fully_learned_position_state()
             self._reset_omega5_position_state()
@@ -10304,11 +9968,6 @@ class FinalGovernorRuntime:
             return
         self._recover_lifecycle_v1_state_from_open_journal(meta_router, regime)
         if self.owner:
-            return
-        if self._v13_1_available() and self.active_v13_1_notional > 0.0:
-            self.owner = "disabled_v13_1"
-            self.owner_regime = str(self.active_v13_1_regime or regime)
-            self.peak_unrealized = 0.0
             return
         if self._lifecycle_v1_available() and self.active_lifecycle_v1_effective_notional > 0.0:
             self.owner = "lifecycle_v1"
@@ -10676,22 +10335,6 @@ class FinalGovernorRuntime:
                             regime=regime,
                             raw_regime=raw_regime,
                         )
-        if meta_router.pos in {"LONG", "SHORT"} and self.owner == "disabled_v13_1":
-            return self._manage_v13_1_position(
-                meta_router=meta_router,
-                current_price=current_price,
-                regime=regime,
-                frame=frame,
-            )
-        if self._v13_1_available() and meta_router.pos not in {"LONG", "SHORT"}:
-            v13_1_decision = self._decide_v13_1_entry(
-                frame,
-                meta_router=meta_router,
-                regime=regime,
-                raw_regime=raw_regime,
-            )
-            if v13_1_decision is not None:
-                return v13_1_decision
         if self._lifecycle_v21_pure_active() and meta_router.pos in {"LONG", "SHORT"} and self.owner != "lifecycle_v1":
             self.owner = "lifecycle_v1"
             self.owner_regime = regime
@@ -14200,21 +13843,6 @@ async def main(use_local=False):
                             "execution_leverage": float(_target_exec_leverage),
                         },
                         "regime_predictor": dict(_regime_predictor_trace),
-                        "disabled_v13_1": {
-                            "enabled": bool(final_governor._v13_1_available()),
-                            "model_version": "Disabled V13.1",
-                            "model_id": "disabled_v13_1_model",
-                            "model": str(final_governor.disabled_v13_1_model_path),
-                            "report": str(final_governor.disabled_v13_1_report_path),
-                            "cooldown_left": int(final_governor.v13_1_cooldown_left),
-                            "active_notional": float(final_governor.active_v13_1_notional),
-                            "active_leverage": float(final_governor.active_v13_1_leverage),
-                            "active_lane": str(final_governor.active_v13_1_lane),
-                            "active_probability": float(final_governor.active_v13_1_probability),
-                            "active_threshold": float(final_governor.active_v13_1_threshold),
-                            "active_regime": str(final_governor.active_v13_1_regime),
-                            "active_regime_multiplier": float(final_governor.active_v13_1_regime_multiplier),
-                        },
                         "lifecycle_v1": {
                             "enabled": bool(final_governor._lifecycle_v1_available()),
                             "model": os.path.basename(str(final_governor.lifecycle_v1_model_path)),
@@ -14619,11 +14247,7 @@ async def main(use_local=False):
             "SYSTEM governor=READY stack=%s lifecycle=%s adaptive=%s fully_learned=%s legacy_macro_sniper=%s ai=%s",
             FINAL_GOVERNOR_ALPHA43_STICKY_MODEL_ID
             if final_governor.fully_learned_policy_bundle is not None
-            else (
-                "disabled_v13_1"
-                if final_governor._v13_1_available()
-                else ("ddh2_v22_1_sniper_trend_micro_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_v17_adaptive_calibrator")
-            ),
+            else ("ddh2_v22_1_sniper_trend_micro_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_v17_adaptive_calibrator"),
             os.path.basename(str(FINAL_GOVERNOR_LIFECYCLE_V1_MODEL_PATH)),
             os.path.basename(str(FINAL_GOVERNOR_DEEP_STATE_ADAPTIVE_CALIBRATOR_MODEL_PATH)),
             os.path.basename(str(FINAL_GOVERNOR_FULLY_LEARNED_POLICY_PATH)),
@@ -14766,9 +14390,7 @@ async def main(use_local=False):
                 logger.info(
                     "SYSTEM live_loop=START mode=%s governor=%s legacy_macro_sniper=%s trend=%s micro=%s",
                     "local" if use_local else "exchange",
-                    "disabled_v13_1"
-                    if final_governor._v13_1_available()
-                    else ("ddh2_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_clean_base"),
+                    "ddh2_full_1x" if final_governor.ddh2_ensemble_enabled else "lifecycle_v1_clean_base",
                     bool(FINAL_GOVERNOR_SNIPER_ENABLE or FINAL_GOVERNOR_MACRO_ENABLE),
                     bool(FINAL_GOVERNOR_TREND_ENABLE),
                     bool(FINAL_GOVERNOR_MICRO_ENABLE),
