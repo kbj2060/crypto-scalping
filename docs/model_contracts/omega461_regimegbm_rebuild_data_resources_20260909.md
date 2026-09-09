@@ -13,7 +13,8 @@
 | 캐노니컬 피쳐 2025 | `data/splits/year_oos/training_features_2025.csv` | 2025 | 부모 TRAIN/VAL | active | 234MB. 전신 부모가 실제로 쓴 프레임 |
 | 캐노니컬 피쳐 2026 | `data/splits/year_oos/training_features_2026_rebuilt.csv` | 2026-01-01~08-30 | OOS | active | 145MB. `ou_halflife`/`kel`/`evt_excess_z`/`btc_corr_60`/`dual_momentum`가 alpha6/7 vintage와 어긋남(ou_halflife corr **-0.03**) |
 | wide24 레짐 사이드카 (전신) | `data/ensemble/supervised/regime3_current_hmm_sensitive_balancedish_20260530/training_features_{2024,2025,2026_rebuilt}_regime3_current_sensitive_hmm_wide24.csv` | 2024~2026-08 | **전신** 레짐 6컬럼 | active(비교 기준선) | 이 라인이 교체하려는 대상. 삭제·수정 금지 — 전신이 라이브에서 사용 중 |
-| 신규 레짐 사이드카 | (Phase 0에서 생성) | — | 이 라인의 레짐 6컬럼 | 미검증 | 새 접두사 필요 — wide24 접두사 재사용 금지(전신과 충돌) |
+| **레짐 사이드카 (채택)** | `data/ensemble/supervised/omega461_balgbm_cut2509_20260909/training_features_{2024,2025,2026_rebuilt}_regime3_balgbm_cut2509_sidecar.csv` | 2024~2026-08 | **이 라인의 레짐 6컬럼** | **active(채택)** | balancedish 라벨 + HGB. 컷오프 ≤2025-09-30, TRAIN 창은 purged 5-fold OOF. 모델 `tmp/omega461_regimegbm_rebuild_20260909/regime_balgbm_cut2509_model.joblib` |
+| 레짐 사이드카 (s12k3) | `data/ensemble/supervised/omega461_regimegbm_cut2509_20260909/...regime3_s12k3_cut2509_sidecar.csv` | 2024~2026-08 | 대조 arm | **closed-negative** | OOS h288 변동성비 0.924 CI[0.897,0.967] — chop 태그 역전이 유의. 2026-09-09 종료 |
 | 전신 부모 예측 | `tmp/causal_regen_20260516/omega4_3head_parent72_loose_entry_quality_20260620_*/{train,validation,oos}_predictions_q{050,075}.csv` | TRAIN 78,510 / VAL 26,490 / OOS 16,832 | 비교 기준선 | active | `validation`은 `_oof_` 접두사, `oos`는 없음 — 두 네이밍 모두 흡수해야 함 |
 
 ## 모델 아티팩트
