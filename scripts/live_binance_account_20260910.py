@@ -20,12 +20,50 @@ from urllib.parse import urlencode
 FAPI = "https://fapi.binance.com"
 RECV_WINDOW_MS = 5000
 QTY_EPS = 1e-9
-DEFAULT_TRADE_LIMIT = 200
+DEFAULT_TRADE_LIMIT = 1000  # Binance max; 잘리면 payload.trades_truncated=True
 
 
-def _sign(params: dict[str, Any], secret: str) -> str:
-    query = urlencode({**params, "recvWindow": RECV_WINDOW_MS, "timestamp": int(time.time() * 1000)})
+def _sign(params: dict[str, Any], secret: str, offset_ms: int = 0) -> str:
+    stamp = int(time.time() * 1000) + offset_ms
+    query = urlencode({**params, "recvWindow": RECV_WINDOW_MS, "timestamp": stamp})
     return f"{query}&signature={hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()}"
+
+
+async def _clock_offset(session) -> int:
+    """Binance rejects any request whose timestamp runs even ~1s AHEAD of its own clock, no matter
+    how large recvWindow is. WSL2 clocks drift (2026-09-10: measured 1000ms ahead), so anchor every
+    signature to /fapi/v1/time instead of the local clock. Unsigned, weight 1."""
+    try:
+        async with session.get(f"{FAPI}/fapi/v1/time") as response:
+            return int((await response.json())["serverTime"]) - int(time.time() * 1000)
+    except Exception:
+        return 0
+
+
+def _split_flips(fills: Iterable[dict[str, Any]]) -> Iterable[dict[str, Any]]:
+    """Split any fill that closes the open position AND opens the opposite one in one go.
+
+    One-way mode allows a reversal in a single order (short 2 -> BUY 5 -> long 3), and such a fill
+    steps over net==0 instead of landing on it. Without this the fold never ends the trip and merges
+    every later trade into one bogus round trip -- 2026-09-10 first run reported the live ETH LONG
+    as a 98-fill SHORT. realizedPnl belongs entirely to the closing half; commission is prorated.
+    """
+    net = 0.0
+    for fill in fills:
+        qty = float(fill["qty"])
+        direction = 1.0 if fill["side"] == "BUY" else -1.0
+        closing = min(qty, abs(net)) if net * direction < 0 else 0.0
+        # 양 끝을 QTY_EPS로 막는다: 0.3-0.1=0.19999999999999998 같은 잔여분 때문에 완전 청산이
+        # "거의 청산 + 1e-17 신규진입"으로 쪼개져 수량 0짜리 유령 왕복이 생겼다(2026-09-10 실계좌 5건).
+        if QTY_EPS < closing < qty - QTY_EPS:
+            for part, realized in ((closing, fill["realizedPnl"]), (qty - closing, "0")):
+                yield {**fill, "qty": str(part), "realizedPnl": realized,
+                       "commission": str(float(fill["commission"]) * part / qty)}
+        else:
+            yield fill
+        net += qty * direction
+        if abs(net) < QTY_EPS:
+            net = 0.0  # 잔여 1e-16이 다음 체결을 가짜 뒤집기로 쪼개 유령 왕복을 만든다
 
 
 def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -33,14 +71,29 @@ def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     when it returns to 0. realizedPnl/commission are summed over every fill in between, so a
     scaled-in or partially-closed position still reports one entry time and one exit time.
 
-    ponytail: one-way mode only (BUY=+qty, SELL=-qty). Hedge mode holds LONG and SHORT open at the
-    same time and would need a net per positionSide -- split on f["positionSide"] if the account
-    ever switches (futures_change_position_mode).
+    Folded per (symbol, positionSide): this account runs in HEDGE mode, where a LONG and a SHORT
+    position are open at the same time and netting them together is meaningless (2026-09-10: doing
+    that reported the live ETH LONG as a 98-fill SHORT). "BOTH" is one-way mode, where a single
+    fill can flip the position instead -- see _split_flips.
     """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for fill in sorted(fills, key=lambda f: (int(f["time"]), int(f["id"]))):
+        groups.setdefault((fill["symbol"], fill.get("positionSide", "BOTH")), []).append(fill)
+    trips: list[dict[str, Any]] = []
+    for group in groups.values():
+        trips.extend(_fold(group))
+    trips.sort(key=lambda t: t["entry_time"])
+    return trips
+
+
+def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One (symbol, positionSide) stream, oldest first. BUY=+qty / SELL=-qty throughout: a hedge
+    LONG stream stays >=0 and a hedge SHORT stream stays <=0, so the same zero-crossing test ends
+    a trip in every mode."""
     trips: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     net = 0.0
-    for fill in sorted(fills, key=lambda f: (int(f["time"]), int(f["id"]))):
+    for fill in _split_flips(fills):
         signed_qty = float(fill["qty"]) * (1.0 if fill["side"] == "BUY" else -1.0)
         if current is None:
             current = {
@@ -72,10 +125,10 @@ def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return trips
 
 
-async def _get(session, path: str, params: dict[str, Any], key: str, secret: str) -> Any:
+async def _get(session, path: str, params: dict[str, Any], key: str, secret: str, offset_ms: int = 0) -> Any:
     """Signed GET. Returns the decoded JSON, or {"__error__": ...} rather than raising -- a revoked
     key or a futures-disabled key must degrade the panel, never take the whole dashboard down."""
-    url = f"{FAPI}{path}?{_sign(params, secret)}"
+    url = f"{FAPI}{path}?{_sign(params, secret, offset_ms)}"
     try:
         async with session.get(url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
@@ -95,16 +148,24 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     if not (key and secret):
         return {"ok": False, "error": "BINANCE_API_KEY/BINANCE_SECRET_KEY가 .env에 없습니다."}
 
-    balance = await _get(session, "/fapi/v2/account", {}, key, secret)
+    offset = await _clock_offset(session)
+    balance = await _get(session, "/fapi/v2/account", {}, key, secret, offset)
     if "__error__" in balance:
-        return {"ok": False, "error": balance["__error__"],
-                "hint": "API 키에 Futures 읽기 권한(Enable Futures)이 켜져 있는지 확인하세요."}
+        error = balance["__error__"]
+        # 힌트는 실제로 그 오류일 때만. 예전엔 모든 실패에 "선물 권한 확인"을 붙여
+        # 시계 드리프트(-1021)까지 권한 문제로 오인하게 만들었다.
+        hint = ("API 키에 Futures 읽기 권한(Enable Futures)이 켜져 있는지, 그리고 IP 접근 제한에"
+                " 이 서버 주소가 들어 있는지 확인하세요." if "-2015" in error or "permissions" in error
+                else "서버 시계가 바이낸스와 어긋났습니다(NTP 동기화 확인)." if "-1021" in error or "Timestamp" in error
+                else None)
+        return {"ok": False, "error": error, **({"hint": hint} if hint else {})}
 
-    risk = await _get(session, "/fapi/v2/positionRisk", {}, key, secret)
+    risk = await _get(session, "/fapi/v2/positionRisk", {}, key, secret, offset)
     positions = [] if isinstance(risk, dict) else [
         {
             "symbol": p["symbol"],
-            "side": "LONG" if float(p["positionAmt"]) > 0 else "SHORT",
+            "side": p.get("positionSide") if p.get("positionSide") in ("LONG", "SHORT")
+                    else ("LONG" if float(p["positionAmt"]) > 0 else "SHORT"),
             "qty": abs(float(p["positionAmt"])),
             "entry_price": float(p["entryPrice"]),
             "mark_price": float(p["markPrice"]),
@@ -118,10 +179,15 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     ]
 
     trips: list[dict[str, Any]] = []
+    truncated: list[str] = []
     for symbol in symbols:
-        fills = await _get(session, "/fapi/v1/userTrades", {"symbol": symbol, "limit": trade_limit}, key, secret)
+        fills = await _get(session, "/fapi/v1/userTrades", {"symbol": symbol, "limit": trade_limit}, key, secret, offset)
         if isinstance(fills, dict) or not fills:
             continue
+        # 정확히 limit개면 그 앞이 잘렸다는 뜻 -- 창 밖에서 열린 포지션은 중간부터 접히므로
+        # 가장 오래된 왕복 하나는 진입가/방향이 틀릴 수 있다. 숨기지 말고 알린다.
+        if len(fills) >= trade_limit:
+            truncated.append(symbol)
         trips.extend(round_trips(fills))
     for trip in trips:
         trip["entry_at"] = _iso(trip["entry_time"])
@@ -130,9 +196,9 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
 
     # An open position's entry time: the still-open round trip for that symbol knows the first fill,
     # which positionRisk's updateTime does not (that moves on every scale-in and funding settlement).
-    open_entry = {t["symbol"]: t["entry_at"] for t in trips if not t["closed"]}
+    open_entry = {(t["symbol"], t["side"]): t["entry_at"] for t in trips if not t["closed"]}
     for position in positions:
-        position["entry_at"] = open_entry.get(position["symbol"]) or position["updated_at"]
+        position["entry_at"] = open_entry.get((position["symbol"], position["side"])) or position["updated_at"]
 
     return {
         "ok": True,
@@ -145,6 +211,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         },
         "positions": positions,
         "trades": trips,
+        "trades_truncated": truncated,
     }
 
 
@@ -166,7 +233,41 @@ def _self_check() -> None:
     assert not opened["closed"] and opened["side"] == "SHORT", opened
     assert opened["max_qty"] == 3.0 and opened["exit_time"] is None, opened
     assert round_trips([]) == []
-    print("self-check ok:", len(trips), "round trips")
+
+    # 한 체결로 숏 2 -> 롱 3 뒤집기. 쪼개지 않으면 두 거래가 한 왕복으로 뭉친다.
+    flip = [
+        {"symbol": "ETHUSDT", "id": 1, "time": 1000, "side": "SELL", "price": "2000", "qty": "2", "realizedPnl": "0", "commission": "1.6"},
+        {"symbol": "ETHUSDT", "id": 2, "time": 2000, "side": "BUY", "price": "1900", "qty": "5", "realizedPnl": "200", "commission": "3.8"},
+        {"symbol": "ETHUSDT", "id": 3, "time": 3000, "side": "SELL", "price": "2000", "qty": "3", "realizedPnl": "300", "commission": "2.4"},
+    ]
+    a, b = round_trips(flip)
+    assert a["side"] == "SHORT" and (a["entry_time"], a["exit_time"]) == (1000, 2000), a
+    assert abs(a["realized_pnl"] - 200.0) < 1e-9 and abs(a["commission"] - 3.12) < 1e-9, a
+    assert b["side"] == "LONG" and (b["entry_time"], b["exit_time"]) == (2000, 3000), b
+    assert b["max_qty"] == 3.0 and abs(b["realized_pnl"] - 300.0) < 1e-9, b
+    # 헤지 모드: 롱과 숏이 동시에 열린다. 합치면 net이 0을 안 밟아 한 덩어리가 된다.
+    hedge = [
+        {"symbol": "ETHUSDT", "id": 1, "time": 1000, "side": "BUY", "price": "2000", "qty": "2", "realizedPnl": "0", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 2, "time": 1500, "side": "SELL", "price": "2000", "qty": "2", "realizedPnl": "0", "commission": "0", "positionSide": "SHORT"},
+        {"symbol": "ETHUSDT", "id": 3, "time": 2000, "side": "SELL", "price": "2100", "qty": "2", "realizedPnl": "200", "commission": "0", "positionSide": "LONG"},
+    ]
+    h = round_trips(hedge)
+    assert len(h) == 2, h
+    long_trip = next(t for t in h if t["side"] == "LONG")
+    short_trip = next(t for t in h if t["side"] == "SHORT")
+    assert long_trip["closed"] and (long_trip["entry_time"], long_trip["exit_time"]) == (1000, 2000), long_trip
+    assert not short_trip["closed"] and short_trip["max_qty"] == 2.0, short_trip
+    # 부동소수 잔여분(0.3-0.1=0.19999999999999998)이 완전 청산을 가짜 뒤집기로 쪼개면 안 된다.
+    residue = [
+        {"symbol": "ETHUSDT", "id": 1, "time": 1000, "side": "BUY", "price": "2000", "qty": "0.3", "realizedPnl": "0", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 2, "time": 2000, "side": "SELL", "price": "2100", "qty": "0.1", "realizedPnl": "10", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 3, "time": 3000, "side": "SELL", "price": "2100", "qty": "0.2", "realizedPnl": "20", "commission": "0", "positionSide": "LONG"},
+    ]
+    r = round_trips(residue)
+    assert len(r) == 1 and r[0]["closed"] and r[0]["exit_time"] == 3000, r
+    assert not any(t["max_qty"] <= QTY_EPS for t in r), r
+    print("self-check ok:", len(trips), "round trips, flip split into 2, hedge split into", len(h),
+          ", residue folds into", len(r))
 
 
 if __name__ == "__main__":

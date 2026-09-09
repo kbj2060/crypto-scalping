@@ -886,7 +886,10 @@ function renderBinanceAccount(payload) {
       </div>
     </article>`;
   }).join("") : '<p class="muted">열려 있는 포지션이 없습니다.</p>');
-  setH("acctTrades", trades.length ? trades.slice(0, 20).map((t) => {
+  // 이력이 잘리면 가장 오래된 왕복은 창 밖에서 열렸을 수 있어 진입가/방향이 틀릴 수 있다.
+  const truncNote = (payload.trades_truncated || []).length
+    ? `<p class="muted">${escapeHtml((payload.trades_truncated || []).join(", "))}는 체결 이력이 잘려 가장 오래된 왕복이 부정확할 수 있습니다.</p>` : "";
+  setH("acctTrades", trades.length ? truncNote + trades.slice(0, 20).map((t) => {
     const tone = !t.closed ? "warn" : t.net_pnl > 0 ? "good" : t.net_pnl < 0 ? "bad" : "neutral";
     return `<article class="ops-health-row ${tone}">
       <span class="ops-health-dot" aria-hidden="true"></span>
