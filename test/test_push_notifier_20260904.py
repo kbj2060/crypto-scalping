@@ -128,6 +128,25 @@ class SustainWindowTrapTests(unittest.TestCase):
         self.assertEqual(len(notifier.detect_net_score(_evidence("T1", net=-3, signals=[]))), 1)
 
 
+class EnabledDetectorsTests(unittest.TestCase):
+    """운영 스위치를 고정한다. 이걸 바꾸면 이 테스트가 먼저 깨져 '의도한 변경'임을 확인하게 된다.
+
+    2026-09-08 에 감지기 여럿을 끄면서 아래 RunCycleTests 가 통째로 깨졌는데 아무도 몰랐다
+    (테스트가 꺼진 감지기의 알림을 단언하고 있었다). 스위치와 테스트를 따로 두는 이유다.
+    """
+
+    def test_production_switch_is_what_we_think_it_is(self) -> None:
+        self.assertEqual(notifier.ENABLED_DETECTORS,
+                         {"net_score", "v_rebound", "breakout_rev"})
+
+    def test_liq_burst_is_off(self) -> None:
+        """2026-09-09 사용자 지정. 감지기 함수는 남아 있지만 알림으로는 안 나간다."""
+        self.assertNotIn("liq_burst", notifier.ENABLED_DETECTORS)
+        live = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
+                "z_long": 4.2, "updated_at": "2026-09-09T00:00:00Z"}
+        self.assertEqual(notifier.collect_notes({"burst": live}, {}), [])
+
+
 class SessionAndBurstDedupTests(unittest.TestCase):
     def test_session_window_keys_once_per_market_per_day(self) -> None:
         """창 안에 있는 동안 매 폴링마다 active로 보이므로 key가 하루 단위로 고정돼야 한다."""
@@ -141,6 +160,10 @@ class SessionAndBurstDedupTests(unittest.TestCase):
     def test_liq_burst_inactive_emits_nothing(self) -> None:
         self.assertEqual(notifier.detect_liq_burst({"available": True, "hawkes_active": False}, {}), [])
         self.assertEqual(notifier.detect_liq_burst({"available": False}, {}), [])
+        # 꺼진 상태를 보면 다음 발생이 새 사건이 되도록 흔적을 지운다
+        st = {"liq_burst_since": "2026-09-07T07:10:00Z"}
+        notifier.detect_liq_burst({"available": True, "hawkes_active": False}, st)
+        self.assertNotIn("liq_burst_since", st)
 
     def test_liq_burst_key_is_pinned_to_the_moment_it_turned_on(self) -> None:
         """수집기는 버스트가 켜져 있는 동안 updated_at을 계속 갱신한다. 그 필드를 key에 쓰면
@@ -165,11 +188,25 @@ class SessionAndBurstDedupTests(unittest.TestCase):
 
 
 class RunCycleTests(unittest.IsolatedAsyncioTestCase):
+    """run_cycle 자체(기준선·중복제거·경과시간·다이제스트)를 검사한다.
+
+    ⚠️운영 스위치(ENABLED_DETECTORS / DIGEST_ENABLED)와 **분리**한다. 이 테스트들이 보는 것은
+      "어떤 감지기를 켜뒀나"가 아니라 "켜진 감지기의 노트를 사이클이 어떻게 다루나"다.
+      2026-09-08 에 스위치를 좁히면서 이 클래스가 통째로 깨졌던 게 둘을 묶어둔 탓이다.
+    """
+
+    ALL = {"shadow", "trade", "ops", "net_score", "liq_burst",
+           "v_rebound", "breakout_rev", "session"}
+
     def setUp(self) -> None:
         self.sent: list[dict] = []
         self.tmpdir = Path(tempfile.mkdtemp())
         self._orig_state = notifier.STATE_PATH
         self._orig_broadcast = notifier.broadcast
+        self._orig_enabled = notifier.ENABLED_DETECTORS
+        self._orig_digest = notifier.DIGEST_ENABLED
+        notifier.ENABLED_DETECTORS = self.ALL
+        notifier.DIGEST_ENABLED = True
         notifier.STATE_PATH = self.tmpdir / "state.json"
 
         async def fake_broadcast(payload, **kwargs):
@@ -181,6 +218,8 @@ class RunCycleTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         notifier.STATE_PATH = self._orig_state
         notifier.broadcast = self._orig_broadcast
+        notifier.ENABLED_DETECTORS = self._orig_enabled
+        notifier.DIGEST_ENABLED = self._orig_digest
 
     async def _cycle(self, state, data):
         async def fake_fetch(_session, _base):

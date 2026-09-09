@@ -57,9 +57,6 @@ STATE_PATH = REPO_ROOT / "data" / "live" / "push_notifier_state.json"
 POLL_SECONDS = 45
 # 이보다 오래된 사건은 "지금"이 아니므로 조용히 seen 처리한다(재시작 폭주 방지 2단계).
 EVENT_MAX_AGE_SEC = 30 * 60
-# 같은 key가 이 시간 안에 다시 떠도 재발송하지 않는다. 플래핑하는 헬스체크 하나가 알림을
-# 도배해서 사용자가 전체를 음소거해버리는 것을 막는 장치다.
-COOLDOWN_SECONDS = {"t1": 300, "t2": 1800}
 # 다이제스트 최소 간격. 5분봉이라 신호 집합은 5분마다 바뀔 수 있는데, 그대로 내보내면
 # "변화가 있을 때만"이 사실상 5분 주기 알림이 된다.
 DIGEST_MIN_INTERVAL_SEC = 15 * 60
@@ -282,12 +279,19 @@ def detect_net_score(evidence: dict[str, Any]) -> list[Note]:
     )]
 
 
-def detect_liq_burst(burst: dict[str, Any]) -> list[Note]:
+def detect_liq_burst(burst: dict[str, Any], state: dict[str, Any]) -> list[Note]:
     """청산 버스트(Hawkes) 발생. 상태가 켜져 있는 동안 updated_at은 계속 갱신되므로 key는
-    'hawkes가 켜진 그 시각'으로 고정해 한 번만 나가게 한다."""
+    'hawkes가 켜진 그 시각'으로 고정해 한 번만 나가게 한다.
+
+    🔴2026-09-09 회귀 복구: 09-07 에 넣은 이 고정이 그 뒤 시그니처가 1인자로 줄면서 사라져
+      key 가 다시 `liq_burst:{updated_at}` 이었다 -- 주석만 남고 코드는 되돌아간 상태였다.
+      켜져 있는 내내 폴링마다 새 사건이 된다(09-07 실측 9분에 9번). 지금은 알림에서 꺼져
+      있지만(ENABLED_DETECTORS), 다시 켜면 그대로 재발하므로 코드를 고쳐 둔다.
+    """
     if not burst.get("available") or not burst.get("hawkes_active"):
+        state.pop("liq_burst_since", None)          # 꺼지면 다음 발생은 새 사건이다
         return []
-    updated = burst.get("updated_at")
+    updated = state.setdefault("liq_burst_since", burst.get("updated_at"))
     z_long, z_short = burst.get("z_long"), burst.get("z_short")
     ct = str(burst.get("crisis_type") or "")
     kind = "롱청산" if "LONG" in ct else "숏청산" if "SHORT" in ct else "청산"
@@ -461,20 +465,24 @@ async def fetch_all(session, base_url: str) -> dict[str, dict[str, Any]]:
     return dict(zip(ENDPOINTS.keys(), results))
 
 
-def collect_notes(data: dict[str, dict[str, Any]]) -> list[Note]:
-    """ENABLED_DETECTORS 에 든 것만 수집한다(2026-09-08 사용자 지정)."""
-    plan = (("shadow", detect_shadow_positions, "shadow"),
-            ("trade", detect_trades, "trades"),
-            ("ops", detect_ops_health, "ops"),
-            ("net_score", detect_net_score, "evidence"),
-            ("liq_burst", detect_liq_burst, "burst"),
-            ("v_rebound", detect_v_rebound, "vreb"),
-            ("breakout_rev", detect_breakout_rev, "breakout"),
-            ("session", detect_session_window, "alerts"))
+def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any] | None = None) -> list[Note]:
+    """ENABLED_DETECTORS 에 든 것만 수집한다(2026-09-08 사용자 지정).
+
+    `state` 는 사이클 사이에 남아야 하는 감지기만 쓴다(liq_burst 의 켜진 시각 고정).
+    """
+    st = state if state is not None else {}
+    plan = (("shadow", detect_shadow_positions, "shadow", False),
+            ("trade", detect_trades, "trades", False),
+            ("ops", detect_ops_health, "ops", False),
+            ("net_score", detect_net_score, "evidence", False),
+            ("liq_burst", detect_liq_burst, "burst", True),
+            ("v_rebound", detect_v_rebound, "vreb", False),
+            ("breakout_rev", detect_breakout_rev, "breakout", False),
+            ("session", detect_session_window, "alerts", False))
     notes: list[Note] = []
-    for name, fn, src in plan:
+    for name, fn, src, needs_state in plan:
         if name in ENABLED_DETECTORS:
-            notes += fn(data.get(src) or {})
+            notes += fn(data.get(src) or {}, st) if needs_state else fn(data.get(src) or {})
     return notes
 
 
@@ -485,10 +493,13 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
     seen = state["seen"]
     baseline = not state["baseline_done"]
 
-    for note in collect_notes(data):
-        last_sent = seen.get(note.key)
-        cooldown = COOLDOWN_SECONDS.get(note.tier, 1800)
-        if last_sent is not None and now - last_sent < cooldown:
+    for note in collect_notes(data, state):
+        # 🔴2026-09-09 회귀 복구: 한 key 는 **한 번만** 보낸다.
+        #   쿨다운 방식은 감지기가 **지속 상태**(열려 있는 포지션)를 매 사이클 다시 방출하는 걸
+        #   못 견딘다 -- 쿨다운이 지나면 같은 사건이 또 나갔다(09-07 실측 8시간 287건).
+        #   09-07 에 고쳤는데 그 뒤 되돌려져 있었다. seen 은 나이로 정리되므로(prune_seen)
+        #   무한히 자라지 않고, TTL 이 지난 뒤 같은 사건이 또 나면 그건 새 사건으로 본다.
+        if note.key in seen:
             continue
         seen[note.key] = now
         if baseline:
