@@ -904,10 +904,9 @@ function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
 // calls (2026-09-08, optional): 봉별 **판정 단어**. 톤이 방향만 담는 신호(돌파/되돌림)에서
 // 같은 ↓ 가 "돌파"일 수도 "되돌림"일 수도 있어, 톤만으로는 세그먼트도 라벨도 구분이 안 된다.
 // 넘기지 않는 호출부는 callList[i] 가 undefined 라 "" 로 떨어져 동작이 그대로다.
-function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire, calls) {
+function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
-  const fireList = Array.isArray(rawFire) ? rawFire : [];
   const callList = Array.isArray(calls) ? calls : [];
   const n = Math.max(list.length, 1);
   const w = 240, h = 15, gap = 1.5;
@@ -916,32 +915,27 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire, c
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
   // array entry, see evidenceStripSvg's liveTone param) never merges into the segment before it even
   // when its tone happens to match -- keeps evidence-bar-provisional's softened fill scoped to only
-  // the genuinely-unconfirmed portion instead of bleeding across a whole merged block. 2026-09-01
-  // (user request): a bar where the signal genuinely re-fired (rawFire[i] -- independent of tone,
-  // see evidenceStripSvg's fill-window history) also never merges backward, so a second real
-  // trigger inside an already-active fill window still shows as a visible new segment boundary
-  // instead of silently vanishing into one long block. Callers that don't pass rawFire (model
-  // indicators etc.) get fireList=[] -- fireList[i] is always undefined/falsy, so behavior is
-  // unchanged for them.
-  // 🔴2026-09-10 fix (user report "연속으로 같은 신호가 나왔는데 게이지가 하나로 안 합쳐진다"):
-  // the 2026-09-01 rule above reads rawFire as an EVENT column, but all 8 raw columns are LEVEL
-  // (threshold) conditions -- `dem <= 0.10`, `kalman_dev_z <= -2.0`, ... (see
-  // scripts/live_evidence_signal_dashboard_20260823.py::compute_signals) with no edge detection or
-  // dedup, so they stay true on EVERY bar the condition keeps holding. Measured over 224,353 bars
-  // (2023-12~2026-02): 30.9% of all fire bars have the previous bar firing too (demarker_extreme
-  // 69.5%, runs up to 24 bars = 2h), and each was being split into its own 1-bar segment even
-  // though the signal never stopped firing. Breaking on the RISING EDGE only keeps the 2026-09-01
-  // intent intact -- a condition that went false and true again inside a still-lit fill window is a
-  // genuine re-trigger and still gets its boundary -- while one continuous hold merges into one
-  // segment. fireList[-1] is undefined (falsy) so bar 0 is unaffected; it starts a segment anyway.
+  // the genuinely-unconfirmed portion instead of bleeding across a whole merged block.
+  // 🔴2026-09-10 (user report, twice: "연속으로 같은 신호가 나왔는데 게이지가 하나로 안 합쳐진다"
+  // -> "아직도 게이지 칸이 끊겨서 나온다"): the 2026-09-01 rawFire boundary is GONE. Two reasons.
+  // (1) It read rawFire as an EVENT column, but all 8 raw columns are LEVEL (threshold) conditions
+  //     -- `dem <= 0.10`, `kalman_dev_z <= -2.0`, ... (live_evidence_signal_dashboard_20260823.py::
+  //     compute_signals) with no edge detection or dedup -- so they stay true on EVERY bar the
+  //     condition holds. Measured over 224,353 bars: 30.9% of fire bars had the previous bar firing
+  //     too (demarker_extreme 69.5%, runs up to 24 bars = 2h), each split into its own 1-bar cell.
+  // (2) Worse, the tone is bottom-wins (see evidenceStripSvg) so a TOP-side fire inside a lit
+  //     BOTTOM window broke the strip with **no visible reason at all** -- same green on both
+  //     sides of the break. taker_delta_z_climax 2026-09-09 23:25 / 00:35 were exactly this.
+  // Segments now merge purely on what the eye can see (tone + call). Every boundary therefore has
+  // a visible cause, and 혼재(both sides lit) is its own warn tone rather than hiding under 바닥.
+  // Re-fire timing still lives in the caption/hover, which read the same segments.
   const segments = [];
   for (let i = 0; i < n; i++) {
     const tone = list[i] || "neutral";
     const isProvisionalBar = !!(provisionalLast && i === n - 1);
-    const isFreshFire = !!fireList[i] && !fireList[i - 1];
     const call = callList[i] || "";
     const prev = segments[segments.length - 1];
-    if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar && !isFreshFire) {
+    if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar) {
       prev.end = i;
     } else {
       segments.push({ tone, call, start: i, end: i, isProvisional: isProvisionalBar });
@@ -994,21 +988,27 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire, c
   return `<svg class="evidence-strip${liveFiring ? " evidence-strip-live" : ""}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${keyAttr}>${bars.join("")}</svg>`;
 }
 
+// 한 봉의 톤. 스트립(evidenceStripSvg)과 축·캡션(renderEvidenceSignals 의 eviTones)이 반드시 같은
+// 값을 써야 해서 함수로 묶었다 -- 예전엔 같은 삼항식이 두 곳에 복붙돼 있었다.
+function evidenceBarTone(bottomLit, topLit) {
+  return bottomLit && topLit ? "warn" : bottomLit ? "good" : topLit ? "bad" : "neutral";
+}
+
 // liveTone/liveIso (2026-08-26, optional) append one extra bar for the still-forming (unconfirmed)
 // bar after latestIso, sourced from the provisional preview -- see refreshEvidenceSignalsProvisional,
 // which re-calls this every ~10s reusing the SAME confirmed bottomHist/topHist/latestIso (cached in
 // evidenceHistoryBySignal) so the 47 confirmed bars don't flicker, only the new live one changes.
-function evidenceStripSvg(bottomHist, topHist, latestIso, stepMinutes, liveTone, liveIso, key, bottomRawFire, topRawFire) {
+// 2026-09-10 (user choice "완전 병합 + 혼재 주황"): both-sides-lit is its own warn tone. It used to
+// fall through to "good" (bottom wins), which hid 혼재 on the strip even while the row's own badge
+// and meaning line said 혼재 -- evidenceSideTone() has returned "warn" for the live/provisional bar
+// all along, so the confirmed bars were the odd ones out. Colors stay inside 표시 규약 §2's four
+// (롱=good / 숏=bad / 혼재=warn / 없음=neutral); no 5th color.
+function evidenceStripSvg(bottomHist, topHist, latestIso, stepMinutes, liveTone, liveIso, key) {
   const n = Math.max(bottomHist.length, topHist.length, 1);
-  const tones = Array.from({ length: n }, (_, i) => (bottomHist[i] ? "good" : topHist[i] ? "bad" : "neutral"));
+  const tones = Array.from({ length: n }, (_, i) => evidenceBarTone(bottomHist[i], topHist[i]));
   const times = evenlySpacedBarTimes(latestIso, n, stepMinutes);
-  // 2026-09-01: bottomHist/topHist are now the "fill" window (see dashboard/server.py), which can
-  // stay lit across several genuine re-fires -- rawFire[i] marks the bars where the signal's RAW
-  // (un-filled) column actually fired, so toneStripSvg can force a visible break there. Optional:
-  // undefined for callers that don't pass these (bottomRawFire?.[i] is undefined -> falsy).
-  const rawFire = Array.from({ length: n }, (_, i) => !!(bottomRawFire?.[i] || topRawFire?.[i]));
-  if (liveTone) { tones.push(liveTone); times.push(liveIso || ""); rawFire.push(false); }
-  return toneStripSvg(tones, times, !!liveTone, !!liveTone && liveTone !== "neutral", key, rawFire);
+  if (liveTone) { tones.push(liveTone); times.push(liveIso || ""); }
+  return toneStripSvg(tones, times, !!liveTone, !!liveTone && liveTone !== "neutral", key);
 }
 
 // 2026-08-31 user request: a persistent time axis under each history strip, instead of only
@@ -1086,24 +1086,18 @@ function stripBarLabel(key, tone, call) {
   return `${call} ${base}`;
 }
 
-function lastSegmentRangeLabel(tones, times, key, timeFmtKind, rawFire, calls) {
+function lastSegmentRangeLabel(tones, times, key, timeFmtKind, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
-  const fireList = Array.isArray(rawFire) ? rawFire : [];
   const callList = Array.isArray(calls) ? calls : [];
   const n = list.length;
   if (n === 0) return "-";
   const lastTone = list[n - 1] || "neutral";
   const lastCall = callList[n - 1] || "";
   let start = n - 1;
-  // 2026-09-01: also stop at a rawFire boundary (mirrors toneStripSvg's own segment-merge guard)
-  // -- once `start` itself is a genuine re-fire bar, that's where its segment begins, so the walk
-  // must not continue past it even if the tone on both sides matches.
-  // 2026-09-10: rising edge only, same fix + reasoning as toneStripSvg's merge guard above -- a
-  // level condition that simply keeps holding is not a re-fire. Without this the caption
-  // under-reported its own segment's start ("5분 전부터" for a signal firing for 2 hours).
-  while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall
-         && !(fireList[start] && !fireList[start - 1])) start--;
+  // 2026-09-10: the rawFire stop is gone with toneStripSvg's (see there) -- this walk mirrors the
+  // strip's grouping exactly, so caption and strip can never disagree about where a segment began.
+  while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall) start--;
   const fmt = stripTimeFmtByKind(timeFmtKind);
   const barLabel = stripBarLabel(key, lastTone, lastCall);
   const rangeText = start === n - 1 ? fmt(timeList[n - 1]) : `${fmt(timeList[start])}~${fmt(timeList[n - 1])}`;
@@ -1492,8 +1486,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
     const times = it.times || [];
     // 2026-08-31 user request: default caption shows the LAST segment's own range+label, not just
     // "지금 시간" -- see lastSegmentRangeLabel().
-    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time", undefined,
-                                                   it.callHistory);
+    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time", it.callHistory);
     // 2026-08-31: optional `it.proba` (0-1) opts an item into the same inline probability meter
     // renderEvidenceSignals() uses (see .meter-col in styles.css) -- state text, then the meter bar,
     // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
@@ -1525,7 +1518,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         ${it.liveText ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(it.liveTitle)}"` : ""}>${escapeHtml(it.liveText)}</p>` : ""}
         <div class="evidence-strip-wrap">
-          ${toneStripSvg(it.history, times, false, false, it.key, undefined, it.callHistory)}
+          ${toneStripSvg(it.history, times, false, false, it.key, it.callHistory)}
           ${stripAxisHtml(times, "time")}
         </div>
         <div class="strip-time-row">
@@ -2111,28 +2104,25 @@ function renderEvidenceSignals(payload) {
         stripStateEl.textContent = modelPctText && stripBase !== "-" ? `${stripBase} ${pctDisplay}` : stripBase;
       }
     }
-    evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], bottom_raw_fire: s.bottom_raw_fire || [], top_raw_fire: s.top_raw_fire || [], latest_bar_utc: payload.latest_bar_utc };
+    evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], latest_bar_utc: payload.latest_bar_utc };
     // eviTones/eviTimes mirror evidenceStripSvg's own internal tone derivation (bottom_history[i] ->
     // good, top_history[i] -> bad, else neutral) -- recomputed here (not returned by that function,
     // which keeps its plain-string contract for the provisional-refresh outerHTML-replace call site)
     // so the axis/default-caption below can share the exact same tone/time arrays it draws from.
     const eviN = Math.max((s.bottom_history || []).length, (s.top_history || []).length, 1);
-    const eviTones = Array.from({ length: eviN }, (_, i) => (s.bottom_history?.[i] ? "good" : s.top_history?.[i] ? "bad" : "neutral"));
+    const eviTones = Array.from({ length: eviN }, (_, i) => evidenceBarTone(s.bottom_history?.[i], s.top_history?.[i]));
     const eviTimes = evenlySpacedBarTimes(payload.latest_bar_utc, eviN, 5);
-    // 2026-09-01: same rawFire derivation as evidenceStripSvg, needed here too so the default
-    // caption's segment boundary matches what the strip visually shows (see toneStripSvg).
-    const eviRawFire = Array.from({ length: eviN }, (_, i) => !!(s.bottom_raw_fire?.[i] || s.top_raw_fire?.[i]));
     // 2026-08-31 user request: drop the old "바닥 {ts} · 천장 {ts}" last-fired caption -- this
     // range+label already tells you when the CURRENT segment started, which is what that text was
     // approximating anyway.
-    const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm", eviRawFire);
+    const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm");
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
         <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText, probaNote)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
-          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
+          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence")}
           ${stripAxisHtml(eviTimes, "hm")}
           <small class="evidence-strip-caption">
             <span class="strip-time-now" data-fmt="hm" data-default="${escapeHtml(defaultRangeText)}">${escapeHtml(defaultRangeText)}</span>
@@ -2256,7 +2246,7 @@ function renderEvidenceSignalsProvisional(payload) {
     const svgEl = row?.querySelector(".evidence-strip-wrap > svg.evidence-strip");
     if (svgEl) {
       const liveTone = evidenceSideTone(s);
-      svgEl.outerHTML = evidenceStripSvg(hist.bottom_history, hist.top_history, hist.latest_bar_utc, 5, liveTone, payload.bar_open_utc, "evidence", hist.bottom_raw_fire, hist.top_raw_fire);
+      svgEl.outerHTML = evidenceStripSvg(hist.bottom_history, hist.top_history, hist.latest_bar_utc, 5, liveTone, payload.bar_open_utc, "evidence");
     }
     const timeLabel = row?.querySelector(".strip-time-now");
     if (timeLabel) {
