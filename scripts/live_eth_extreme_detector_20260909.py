@@ -9,6 +9,16 @@
 게이트    🔴강한 추세 구간(ret144 7일 롤링 분위 ≥0.80 / ≤0.20)에서는 콜을 억제한다.
          표본외 161일 실측: 강한상승 천장 콜 정밀도 51.6% 인데 적중 +10.8 / 빗나감 -60.7bp.
          게이트 없음 -3.36bp → 중립 구간만 +2.27bp.
+이중조건  ⭐2026-09-10 v2: `강` 은 **손실가중 헤드(p2)도 강 컷을 넘을 때만** 준다.
+         못 넘으면 `약` 으로 강등한다. 게이트는 전 등급 그대로 유지한다.
+         실측(표본외 80일, 배포 아티팩트 p1 실점수):
+             강  정밀도 .5816 -> .6889 (건수 맞춰도 .600 -> .689)  1.76 -> 1.12건/일
+             중  .5122 그대로            약  .3401 -> .3468, 4.29 -> 4.93건/일
+         ⭐v2 가 버린 콜의 정밀도 .333 · 새로 고른 콜 .600 (겹침 67%) -- 다른 걸 고른다.
+         보강: HGB 통제 실험 10시드 짝비교 +1.76pp(건수매칭, t=2.63; 원시 +2.61pp t=4.13,
+         10/10 양수) · 추세 정의 4가지 순환성 통과(역추세 비중 -40~-76%).
+         ⚠️불일치쌍 이항검정은 p=.185 -- 이 창 하나로는 유의수준 미달이다. 방향은 일관.
+         사이드카가 없으면 동작은 v1 과 완전히 같다(하위호환).
 
 ⚠️어휘: 이 칩은 **사건의 측면**(바닥/천장)을 말하는 자리라 증거신호 어휘를 쓴다
    (`바닥 발동`/`천장 발동`/`미발동`). 포지션 방향을 말하는 다른 특화감지기의 롱/숏과 다르다
@@ -27,6 +37,7 @@ from live_evidence_signal_dashboard_20260823 import compute_signals  # noqa: E40
 import build_eth_anchor_label_dataset_20260907 as B  # noqa: E402
 
 ART = ROOT / "data/live/eth_extreme_detector_artifact"
+COSTW_ART = ROOT / "data/live/eth_extreme_detector_costw_artifact"   # p2 손실가중 헤드
 KLINES = "https://fapi.binance.com/fapi/v1/klines"
 SYMBOL, BTC_SYMBOL = "ETHUSDT", "BTCUSDT"
 FETCH_BARS = 3000          # 2페이지 -- 추세분위(2016봉 롤링)와 atr 분위에 필요
@@ -130,6 +141,19 @@ def load_artifact() -> dict | None:
     return _CACHE["art"]
 
 
+def load_costw() -> dict | None:
+    """손실가중 헤드(p2). 없으면 None -- 그 경우 등급 규칙은 v1 과 완전히 같다."""
+    if "costw" in _CACHE:
+        return _CACHE["costw"]
+    try:
+        import joblib, json
+        meta = json.loads((COSTW_ART / "meta.json").read_text())
+        _CACHE["costw"] = {"models": joblib.load(COSTW_ART / "model.joblib"), "meta": meta}
+    except Exception:
+        _CACHE["costw"] = None
+    return _CACHE["costw"]
+
+
 def _fetch(symbol: str) -> pd.DataFrame | None:
     """3000봉을 두 번에 나눠 받는다(호출당 1500 상한). 형성 중인 봉은 버린다."""
     frames, end = [], None
@@ -184,6 +208,23 @@ def compute_eth_extreme_detector() -> dict:
             P += m.predict_proba(A[FEATS])[:, 1] / len(art["models"])
         A = A.assign(p=P)
         A["grade"] = grade_of(A.p.to_numpy(), meta["cuts"])
+        # ⭐v2 이중조건: 손실가중 헤드도 강 컷을 넘어야 `강`. 못 넘으면 `중` 으로 강등한다.
+        cw = load_costw()
+        if cw is not None:
+            P2 = np.zeros(len(A))
+            for m in cw["models"]:
+                P2 += m.predict_proba(A[FEATS])[:, 1] / len(cw["models"])
+            A["p2"] = P2
+            # 강등은 `약` 으로 보낸다 -- `중` 으로 보내면 중 정밀도가 .512 -> .477 로 희석된다
+            # (강등분이 원래 중보다 나쁘다). 약(.340)에 넣으면 오히려 .347 로 오르고
+            # 커버리지도 4.29 -> 4.93건/일 늘어난다. 셋 다 실측해서 고른 것이다.
+            demote = (A.grade == "강") & (P2 < cw["meta"]["cuts"]["강"])
+            A.loc[demote, "grade"] = "약"
+        else:
+            A["p2"] = np.nan
+        # 게이트는 **전 등급 그대로** 유지한다. 강 면제안(이중조건이 대신)도 실측했으나
+        # 배포 형태에서 강 안의 역추세 콜이 n=8 로 너무 적어(정밀도 .625) 면제를 정당화하지
+        # 못했다. 이번 변경은 `강` 을 더 엄격하게 만드는 쪽으로만 간다.
         A["gated"] = gated_of(A._tq.to_numpy(), A._long.to_numpy())
         live = A[(A.grade != "-") & (~A.gated)]
         ts_all = pd.to_datetime(sig["timestamp"])
@@ -196,7 +237,8 @@ def compute_eth_extreme_detector() -> dict:
             k = r.ts_
             if k not in by_ts or r.p > by_ts[k]["p"]:
                 by_ts[k] = {"p": float(r.p), "long": bool(r.long_), "grade": r.grade,
-                            "names": r.names_}
+                            "names": r.names_,
+                            "p2": (float(r.p2) if r.p2 == r.p2 else None)}
         history, times = [], []
         for t in ts_all.iloc[-HISTORY_BARS:]:
             # 🔴반드시 tz 를 붙여 내보낸다. 자바스크립트 `new Date("...T06:10:00")` 는 오프셋이
@@ -217,6 +259,8 @@ def compute_eth_extreme_detector() -> dict:
             "grade": cur["grade"] if cur else None,
             "proba": round(cur["p"], 4) if cur else None,
             "signals": cur["names"] if cur else None,
+            "proba_costw": (round(cur["p2"], 4) if (cur and cur.get("p2") is not None) else None),
+            "costw_rule_id": (cw["meta"].get("rule_id") if cw else None),
             "gated_now": gated_now, "trend_q": round(float(A[A._ts == last_ts]._tq.iloc[0]), 3)
                           if (A._ts == last_ts).any() else None,
             "latest_ts_utc": pd.Timestamp(last_ts).tz_localize("UTC").isoformat(),
