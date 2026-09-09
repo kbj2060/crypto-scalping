@@ -122,6 +122,12 @@ def recommended_action(component: str) -> str:
         # pgrep/pkill 패턴은 자기 handoff 잡 명령줄에도 매칭되므로 grep -v로 걸러서 본다(2026-09-05).
         return ("ps -eo pid,args | grep -v handoff_jobs | grep -E 'live_.*shadow.*runner'; "
                 "ls -l data/live/*shadow*state*.json")
+    if component == "extreme_detector_worker":
+        # supervisor 스크립트가 중복 실행 가드를 갖고 있어 그냥 다시 켜도 안전하다
+        # (이미 돌고 있으면 스스로 exit 1). 2026-09-10 장애 때 이 명령으로 복구했다.
+        return ("ps -eo pid,args | grep -v handoff_jobs | grep live_eth_extreme_detector_worker; "
+                "nohup setsid bash scripts/ops/supervisor_extreme_detector_worker.sh "
+                ">> logs/supervisor/extreme_detector_worker_manual.log 2>&1 < /dev/null &")
     if component.startswith("duckdb_"):
         return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
     return "scripts/ops/triage.sh"
@@ -398,6 +404,51 @@ def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
     })
 
 
+# 2026-09-10: 극점 탐지기 워커. SHADOW_RUNNERS 표에 못 넣는 이유는 상태 파일 모양이 다르기
+# 때문이다 -- 섀도우 원장은 last_decided_bar_utc/ledger/positions 를 담지만 이 워커는
+# updated_utc 하나로 신선도를 말한다(scripts/live_eth_extreme_detector_worker_20260910.py).
+EXTREME_DETECTOR_STATE = "eth_extreme_detector_state.json"
+EXTREME_DETECTOR_SIGNATURE = "live_eth_extreme_detector_worker_20260910.py"
+
+
+def check_extreme_detector_worker(warn_minutes: float = 5, critical_minutes: float = 15) -> Check:
+    """극점 탐지기 워커의 채점 신선도.
+
+    ⭐critical 15분은 임의 값이 아니다 -- dashboard/server.py 의 EXTREME_DETECTOR_MAX_AGE_MIN
+      과 **같은 값**이라, CRITICAL 이 뜨는 순간이 화면 카드가 «데이터 없음» 으로 떨어지는
+      순간이다. 그쪽을 바꾸면 여기도 같이 바꾼다. warn 5분은 60초 주기 기준 5주기.
+    왜 필요한가(2026-09-10 실장애): 워커가 01:46 에 죽었는데 **아무도 살리지 않았다**.
+      supervisor 스크립트와 crontab @reboot 는 있지만 재부팅 때만 뜬다. 죽은 걸 알아챈 건
+      사용자가 화면에서 오류를 본 19분 뒤였다. 그 직전 사이클이 5s -> 245s 로 늘어지고 있었는데
+      (CPU 경합) 그 열화도 이 체크의 warn 구간에 걸린다.
+    ⚠️워치독은 **알리기만 한다**. 되살리는 건 recommended_action 의 명령이다.
+    """
+    path = LIVE / EXTREME_DETECTOR_STATE
+    state, error = load_json(path)
+    if error:
+        return Check("extreme_detector_worker", "BLOCKED", "worker state cannot be read",
+                     {"path": str(path), "error": error})
+    # age_minutes(=parse_kst) 가 아니라 이쪽을 쓴다: 워커가 tzinfo 를 빠뜨리고 쓰는 날이 와도
+    # 필드명대로 UTC 로 읽는다(parse_kst 는 naive 를 KST 로 봐서 9시간 어긋난다).
+    age = age_minutes_utc_naive(state.get("updated_utc"))
+    if age is None:
+        return Check("extreme_detector_worker", "BLOCKED", "worker state has no updated_utc",
+                     {"path": str(path)})
+    alive = EXTREME_DETECTOR_SIGNATURE in process_args()
+    status = stale_status(age, warn_minutes, critical_minutes)
+    # 프로세스가 사라졌으면 신선도가 아직 창 안이어도 곧 깨진다 -- 최소 WARN 으로 올린다.
+    if not alive and status == "OK":
+        status = "WARN"
+    return Check("extreme_detector_worker", status, "extreme detector worker scoring freshness", {
+        "path": str(path), "age_minutes": round(age, 1), "process_present": alive,
+        "signature": EXTREME_DETECTOR_SIGNATURE,
+        "latest_ts_utc": state.get("latest_ts_utc"), "rule_id": state.get("rule_id"),
+        "tone": state.get("tone"), "grade": state.get("grade"),
+        "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
+        "dashboard_stale_cutoff_min": 15.0,
+    })
+
+
 def check_runtime_resources() -> Check:
     usage = shutil.disk_usage(ROOT)
     free_gib = usage.free / (1024 ** 3)
@@ -570,6 +621,8 @@ def run_once(dry_run: bool) -> list[Check]:
         check_duckdb_table_freshness("duckdb_altdata_funding_spread", altdata_db, "cross_exchange_funding_spread", "recorded_at_utc", 1800, 2880),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
+        # 2026-09-10: 극점 탐지기 워커(섀도우 원장 모양이 아니라 별도 체크).
+        check_extreme_detector_worker(),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})
