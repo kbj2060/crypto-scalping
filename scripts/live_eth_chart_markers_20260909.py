@@ -96,7 +96,8 @@ def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
 
 
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
-                          breakout: dict | None = None) -> dict[str, Any]:
+                          breakout: dict | None = None,
+                          extreme: dict | None = None) -> dict[str, Any]:
     """청산맵 72봉에 정렬된 마커. 절대 예외를 올리지 않는다."""
     asset = (asset or "eth").lower()
     if asset not in SUPPORTED:
@@ -126,26 +127,20 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         grid = {_iso(t): {"t": _iso(t)} for t in ts.iloc[lo:]}
         times = list(grid.keys())
 
-        # 극점 탐지기 -- 같은 klines 로 계산해 격자가 어긋날 여지를 없앤다
-        art = LD.load_artifact()
-        if art is not None:
-            A = LD.build_rows(sig, btc)
-            if not A.empty:
-                P = np.zeros(len(A))
-                for m in art["models"]:
-                    P += m.predict_proba(A[LD.FEATS])[:, 1] / len(art["models"])
-                A = A.assign(p=P)
-                A["grade"] = LD.grade_of(A.p.to_numpy(), art["meta"]["cuts"])
-                A["gated"] = LD.gated_of(A._tq.to_numpy(), A._long.to_numpy())
-                live = A[(A.grade != "-") & (~A.gated)]
-                for r in live.rename(columns={"_ts": "ts_", "_long": "long_"}).itertuples():
-                    key = _iso(r.ts_)
-                    if key not in grid:
-                        continue
-                    grid[key].setdefault("events", []).append(
-                        {"kind": "extreme", "label": "극점", "grade": r.grade,
-                         "p": round(float(r.p), 4),
-                         "side": "bottom" if bool(r.long_) else "top"})
+        # 🔴2026-09-10 장애 수정: 극점 탐지기를 여기서 **채점하지 않는다**. 다른 두 신호와 똑같이
+        #   이미 계산된 페이로드(워커 상태 파일)를 얹기만 한다.
+        #   원인: 다른 세션이 이날 01:00 극점 아티팩트를 HGB -> TabPFN 으로 올렸다
+        #   (model.joblib 1.8MB -> 1.08GB, meta.model="tabpfn"). 그 세션은 같은 이유로 채점을
+        #   워커로 뺐는데(4c3805d) 이 함수만 인라인으로 남아 있었다. 서버 실측:
+        #     load_artifact 415.9s + 5모델 predict 71.9s = 1회 488s. 캐시 TTL 이 60초라
+        #     듀티사이클 814% -- asyncio.to_thread 의 기본 풀(16스레드)이 몇 분 만에 고갈되고
+        #     to_thread 를 쓰는 모든 엔드포인트(증거신호 포함)가 영원히 큐에 걸렸다.
+        #     증상: /api/state 는 2ms 인데 /api/evidence-signals 는 끝나지 않음(사용자 신고
+        #     "증거신호가 대시보드에 안 나온다"). klines 0.16s·compute_signals 0.09s 로 나머지는
+        #     전부 무죄였다.
+        #   ⚠️봉별 등급(강/중/약)과 확률은 워커 이력에 없어서 여기서 사라진다 -- 삼각형의 위치와
+        #     측면은 그대로다. 등급을 되살리려면 워커가 등급 이력을 내보내야 한다(다른 세션 파일).
+        _merge_history(grid, extreme, "extreme", "극점")
         _merge_history(grid, v_rebound, "v_rebound", "V자반등")
         _merge_history(grid, breakout, "breakout_rev", "돌파/되돌림")
         return {

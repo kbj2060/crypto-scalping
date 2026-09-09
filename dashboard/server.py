@@ -1856,15 +1856,19 @@ def make_app() -> web.Application:
     async def load_chart_markers(asset: str = "eth") -> dict[str, Any]:
         """청산맵 차트 마커 -- scripts/live_eth_chart_markers_20260909.py 참고.
         ETH 전용이다(다른 코인은 unsupported 로 비운다 -- 빈 레인은 "신호 없음"으로 오독된다).
-        V자반등·돌파/되돌림은 **이미 계산된 페이로드를 재사용**한다(추가 GPU/원장 읽기 없음)."""
+        V자반등·돌파/되돌림·**극점**은 이미 계산된 페이로드를 재사용한다(추가 모델 실행 없음).
+        ⚠️극점을 여기서 인라인으로 채점하면 안 된다 -- 2026-09-10 그 인라인 호출이 TabPFN
+          아티팩트(1.08GB)를 60초마다 로드해 to_thread 풀을 고갈시켰고 증거신호를 포함한 모든
+          계산 엔드포인트가 멈췄다. 자세한 실측은 live_eth_chart_markers_20260909.py 주석."""
         if (asset or "eth").lower() != "eth":
             return compute_chart_markers(asset)
         vr = await load_v_rebound_signal()
         bo = breakout_reversal_shadow_payload()
+        ex = await load_extreme_detector()
         return await swr_cached(
             "chart_markers", chart_markers_cache, chart_markers_lock,
             EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, bo),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, bo, ex),
             max_stale=STALE_GRACE_SECONDS,
         )
 
