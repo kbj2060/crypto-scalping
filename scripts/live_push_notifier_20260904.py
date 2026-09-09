@@ -240,11 +240,11 @@ def detect_ops_health(ops: dict[str, Any]) -> list[Note]:
 # ------------------------------------------------------------------------------------------
 NET_SCORE_THRESHOLD = 3
 
-# 2026-09-08 사용자 지정: net_score · liq_burst 만 보낸다.
-# 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 이름만 다시 넣으면 된다.
+# 2026-09-09 사용자 지정: **청산 버스트 제거**. net_score · v_rebound · breakout_rev 만 보낸다.
+# 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 "liq_burst" 를 다시 넣으면 된다.
 # ⚠️`ops`/`supervisor` 를 끄면 **대시보드·봇이 죽어도 알림이 오지 않는다**.
 #   운영 헬스는 deploy_watcher 의 텔레그램과 대시보드 화면으로만 확인하게 된다.
-ENABLED_DETECTORS = {"net_score", "liq_burst", "v_rebound", "breakout_rev"}
+ENABLED_DETECTORS = {"net_score", "v_rebound", "breakout_rev"}
 # 돌파/되돌림은 판정이 하루 22~23건이라 전건 알림은 폭주다. 확신 등급으로 거른다.
 # 라이브 실측(09-03~07): 강 1.2건/일 · 중 4.8 · 약 8.0 · 미약 9.4 -> 강+중 = 하루 6건.
 BREAKOUT_TIERS = {"강", "중"}
