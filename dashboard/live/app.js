@@ -1,5 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
+const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
@@ -118,10 +119,28 @@ let evidenceHistoryBySignal = {};
 // 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
 let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
-let latestMashtAnchor = null;   // 2026-09-07 MASHT 앵커 방향 섀도우(표시 전용)
-let mashtAnchorLastFetchAt = 0;
-const MASHT_ANCHOR_POLL_MS = 60000;
-const API_MASHT_ANCHOR_URL = "/api/masht-anchor-shadow";
+// 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
+// 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
+// 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
+let latestChartMarkers = null;
+let chartMarkersLastFetchAt = 0;
+const CHART_MARKERS_POLL_MS = 60000;
+const API_CHART_MARKERS_URL = "/api/chart-markers";
+
+// 2026-09-09 극점 탐지기(표시 전용). 증거신호 8종을 피쳐로 쓴 "±60분 국소 극점일 확률" 모델.
+let latestExtreme = null;
+let extremeLastFetchAt = 0;
+const EXTREME_POLL_MS = 60000;
+// 2026-09-10 24시간 변동성 전망 -- **시간봉** 신호라 자주 받을 이유가 없다(워커 주기 300초).
+let latestVolForecast = null;
+let volForecastLastFetchAt = 0;
+const API_VOL_FORECAST_URL = "/api/vol-forecast";
+const VOL_FORECAST_POLL_MS = 120000;
+const API_EXTREME_URL = "/api/extreme-detector";
+let latestBreakoutRev = null;
+let breakoutRevLastFetchAt = 0;
+const BREAKOUT_REV_POLL_MS = 60000;
+const API_BREAKOUT_REV_URL = "/api/breakout-reversal-shadow";
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -834,10 +853,76 @@ function renderOpsStatus(payload) {
   }).join(""));
 }
 
+// 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
+function renderBinanceAccount(payload) {
+  const summary = el("acctSummary");
+  if (!payload?.ok) {
+    const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
+    if (summary) { summary.textContent = "연결 안 됨"; summary.className = "ops-health-summary bad"; }
+    setT("acctBalanceText", msg);
+    setH("acctPositions", "");
+    setH("acctTrades", "");
+    return;
+  }
+  const b = payload.balance || {};
+  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)} · 미실현 ${fmtUsd(b.unrealized)}`);
+  const positions = payload.positions || [];
+  const trades = payload.trades || [];
+  if (summary) {
+    summary.textContent = positions.length ? `보유 ${positions.length}종목` : "포지션 없음";
+    summary.className = `ops-health-summary ${positions.length ? "good" : "neutral"}`;
+  }
+  setH("acctPositions", positions.length ? positions.map((p) => {
+    const tone = p.unrealized_pnl > 0 ? "good" : p.unrealized_pnl < 0 ? "bad" : "neutral";
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)}</strong>
+        <span>진입 ${fmtUsd(p.entry_price)} → 현재 ${fmtUsd(p.mark_price)} · 청산가 ${fmtUsd(p.liquidation_price)} · 수량 ${escapeHtml(p.qty)}</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${fmtUsd(p.unrealized_pnl)}</span>
+        <small>${fmtTs(p.entry_at)} 진입</small>
+      </div>
+    </article>`;
+  }).join("") : '<p class="muted">열려 있는 포지션이 없습니다.</p>');
+  setH("acctTrades", trades.length ? trades.slice(0, 20).map((t) => {
+    const tone = !t.closed ? "warn" : t.net_pnl > 0 ? "good" : t.net_pnl < 0 ? "bad" : "neutral";
+    return `<article class="ops-health-row ${tone}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"}</strong>
+        <span>${fmtTs(t.entry_at)} 진입 → ${t.closed ? `${fmtTs(t.exit_at)} 청산` : "보유 중"} · ${escapeHtml(t.fills)}회 체결</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${t.closed ? fmtUsd(t.net_pnl) : "-"}</span>
+        <small>수수료 ${fmtUsd(t.commission)}</small>
+      </div>
+    </article>`;
+  }).join("") : '<p class="muted">체결 내역이 없습니다.</p>');
+}
+
+function fmtUsd(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n >= 0 ? "" : "-"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 10 ? 4 : 2 })}`;
+}
+
+async function refreshBinanceAccount() {
+  try {
+    const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-store" });
+    renderBinanceAccount(await res.json());
+  } catch (error) {
+    console.error("Binance account fetch error:", error);
+    renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
+  }
+}
+
 async function refreshOpsStatus() {
   const now = Date.now();
   if (now - opsLastFetchAt < OPS_POLL_MS) return;
   opsLastFetchAt = now;
+  refreshBinanceAccount();
   try {
     const res = await fetch(API_OPS_STATUS_URL, { cache: "no-store", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
     if (res.status === 304) return;
@@ -888,10 +973,13 @@ function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
 // in-segment text either way, so hover (unchanged mechanism, resolves to the whole segment's
 // tone/start~end range) still carries the exact label+time, same tradeoff this dashboard's other
 // compact chips already make.
-function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
+// calls (2026-09-08, optional): 봉별 **판정 단어**. 톤이 방향만 담는 신호(돌파/되돌림)에서
+// 같은 ↓ 가 "돌파"일 수도 "되돌림"일 수도 있어, 톤만으로는 세그먼트도 라벨도 구분이 안 된다.
+// 넘기지 않는 호출부는 callList[i] 가 undefined 라 "" 로 떨어져 동작이 그대로다.
+function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
-  const fireList = Array.isArray(rawFire) ? rawFire : [];
+  const callList = Array.isArray(calls) ? calls : [];
   const n = Math.max(list.length, 1);
   const w = 240, h = 15, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
@@ -899,23 +987,30 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
   // array entry, see evidenceStripSvg's liveTone param) never merges into the segment before it even
   // when its tone happens to match -- keeps evidence-bar-provisional's softened fill scoped to only
-  // the genuinely-unconfirmed portion instead of bleeding across a whole merged block. 2026-09-01
-  // (user request): a bar where the signal genuinely re-fired (rawFire[i] -- independent of tone,
-  // see evidenceStripSvg's fill-window history) also never merges backward, so a second real
-  // trigger inside an already-active fill window still shows as a visible new segment boundary
-  // instead of silently vanishing into one long block. Callers that don't pass rawFire (model
-  // indicators etc.) get fireList=[] -- fireList[i] is always undefined/falsy, so behavior is
-  // unchanged for them.
+  // the genuinely-unconfirmed portion instead of bleeding across a whole merged block.
+  // 🔴2026-09-10 (user report, twice: "연속으로 같은 신호가 나왔는데 게이지가 하나로 안 합쳐진다"
+  // -> "아직도 게이지 칸이 끊겨서 나온다"): the 2026-09-01 rawFire boundary is GONE. Two reasons.
+  // (1) It read rawFire as an EVENT column, but all 8 raw columns are LEVEL (threshold) conditions
+  //     -- `dem <= 0.10`, `kalman_dev_z <= -2.0`, ... (live_evidence_signal_dashboard_20260823.py::
+  //     compute_signals) with no edge detection or dedup -- so they stay true on EVERY bar the
+  //     condition holds. Measured over 224,353 bars: 30.9% of fire bars had the previous bar firing
+  //     too (demarker_extreme 69.5%, runs up to 24 bars = 2h), each split into its own 1-bar cell.
+  // (2) Worse, the tone is bottom-wins (see evidenceStripSvg) so a TOP-side fire inside a lit
+  //     BOTTOM window broke the strip with **no visible reason at all** -- same green on both
+  //     sides of the break. taker_delta_z_climax 2026-09-09 23:25 / 00:35 were exactly this.
+  // Segments now merge purely on what the eye can see (tone + call). Every boundary therefore has
+  // a visible cause, and 혼재(both sides lit) is its own warn tone rather than hiding under 바닥.
+  // Re-fire timing still lives in the caption/hover, which read the same segments.
   const segments = [];
   for (let i = 0; i < n; i++) {
     const tone = list[i] || "neutral";
     const isProvisionalBar = !!(provisionalLast && i === n - 1);
-    const isFreshFire = !!fireList[i];
+    const call = callList[i] || "";
     const prev = segments[segments.length - 1];
-    if (prev && prev.tone === tone && !isProvisionalBar && !isFreshFire) {
+    if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar) {
       prev.end = i;
     } else {
-      segments.push({ tone, start: i, end: i, isProvisional: isProvisionalBar });
+      segments.push({ tone, call, start: i, end: i, isProvisional: isProvisionalBar });
     }
   }
 
@@ -952,7 +1047,8 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
     // readable back from the DOM.
     const t = timeList[seg.start];
     const tEnd = timeList[seg.end];
-    const hoverAttrs = t ? ` data-t="${t}" data-t-end="${tEnd || t}" data-tone="${tone}" onmouseenter="showStripBarTime(this)" onmouseleave="hideStripBarTime(this)"` : "";
+    const callAttr = seg.call ? ` data-call="${escapeHtml(seg.call)}"` : "";
+    const hoverAttrs = t ? ` data-t="${t}" data-t-end="${tEnd || t}" data-tone="${tone}"${callAttr} onmouseenter="showStripBarTime(this)" onmouseleave="hideStripBarTime(this)"` : "";
     return `<rect class="${cls}" x="${x}" y="0" width="${segWidth}" height="${h}" rx="2" fill="${fill}"${hoverAttrs}/>`;
   });
   // 2026-08-27 (user request): the whole gauge blinks, but only while it's showing a genuinely
@@ -964,21 +1060,27 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire) {
   return `<svg class="evidence-strip${liveFiring ? " evidence-strip-live" : ""}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${keyAttr}>${bars.join("")}</svg>`;
 }
 
+// 한 봉의 톤. 스트립(evidenceStripSvg)과 축·캡션(renderEvidenceSignals 의 eviTones)이 반드시 같은
+// 값을 써야 해서 함수로 묶었다 -- 예전엔 같은 삼항식이 두 곳에 복붙돼 있었다.
+function evidenceBarTone(bottomLit, topLit) {
+  return bottomLit && topLit ? "warn" : bottomLit ? "good" : topLit ? "bad" : "neutral";
+}
+
 // liveTone/liveIso (2026-08-26, optional) append one extra bar for the still-forming (unconfirmed)
 // bar after latestIso, sourced from the provisional preview -- see refreshEvidenceSignalsProvisional,
 // which re-calls this every ~10s reusing the SAME confirmed bottomHist/topHist/latestIso (cached in
 // evidenceHistoryBySignal) so the 47 confirmed bars don't flicker, only the new live one changes.
-function evidenceStripSvg(bottomHist, topHist, latestIso, stepMinutes, liveTone, liveIso, key, bottomRawFire, topRawFire) {
+// 2026-09-10 (user choice "완전 병합 + 혼재 주황"): both-sides-lit is its own warn tone. It used to
+// fall through to "good" (bottom wins), which hid 혼재 on the strip even while the row's own badge
+// and meaning line said 혼재 -- evidenceSideTone() has returned "warn" for the live/provisional bar
+// all along, so the confirmed bars were the odd ones out. Colors stay inside 표시 규약 §2's four
+// (롱=good / 숏=bad / 혼재=warn / 없음=neutral); no 5th color.
+function evidenceStripSvg(bottomHist, topHist, latestIso, stepMinutes, liveTone, liveIso, key) {
   const n = Math.max(bottomHist.length, topHist.length, 1);
-  const tones = Array.from({ length: n }, (_, i) => (bottomHist[i] ? "good" : topHist[i] ? "bad" : "neutral"));
+  const tones = Array.from({ length: n }, (_, i) => evidenceBarTone(bottomHist[i], topHist[i]));
   const times = evenlySpacedBarTimes(latestIso, n, stepMinutes);
-  // 2026-09-01: bottomHist/topHist are now the "fill" window (see dashboard/server.py), which can
-  // stay lit across several genuine re-fires -- rawFire[i] marks the bars where the signal's RAW
-  // (un-filled) column actually fired, so toneStripSvg can force a visible break there. Optional:
-  // undefined for callers that don't pass these (bottomRawFire?.[i] is undefined -> falsy).
-  const rawFire = Array.from({ length: n }, (_, i) => !!(bottomRawFire?.[i] || topRawFire?.[i]));
-  if (liveTone) { tones.push(liveTone); times.push(liveIso || ""); rawFire.push(false); }
-  return toneStripSvg(tones, times, !!liveTone, !!liveTone && liveTone !== "neutral", key, rawFire);
+  if (liveTone) { tones.push(liveTone); times.push(liveIso || ""); }
+  return toneStripSvg(tones, times, !!liveTone, !!liveTone && liveTone !== "neutral", key);
 }
 
 // 2026-08-31 user request: a persistent time axis under each history strip, instead of only
@@ -1007,12 +1109,55 @@ function stripAxisHtml(times, timeFmtKind) {
 // separate from MODEL_INDICATOR_MEANING (keyed by the exact CURRENT subText, including states a
 // single past tone can't reconstruct -- "웜업", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
+// 2026-09-10 사용자 요청: "V자 급등락과 앵커 돌파/되돌림도 증거신호 라벨처럼 익절 가격을 확률
+// 아래에, 같은 포맷으로". 증거신호의 `익절 {가격}` (renderEvidenceSignals) 과 같은 문자열을
+// 같은 자리(.meter-price, 규약 §3의 "확률이 아닌 수치")에 놓는다. 세 카드가 이제 한 포맷이다.
+// ⚠️세 신호의 목표가는 **각자 자기 라벨**에서 온다 -- 증거신호 K×ATR 터치(intrabar), V자
+//   1.5×ATR 빠른 다리(종가), 돌파/되돌림 ±0.8×ATR 배리어(intrabar). 같은 포맷이라고 같은
+//   규약이 아니다. 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md 배리어 컨벤션 항목).
+function tpPriceText(px) {
+  return px == null ? null : `익절 ${fmtNum(px, 2)}`;
+}
+
+const V_REBOUND_TP_TITLE = [
+  "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
+  "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
+  "· 판정은 **종가 기준**입니다 — 이 라벨이 종가로 정의돼서이며, 증거신호의 intrabar 터치와 다릅니다.",
+  "· 호라이즌 60분(12봉) 안에 못 닿으면 그대로 만료됩니다.",
+  "· ⚠️검증된 매매 엣지가 아닙니다: 수정회계 라벨 재학습(2026-09-08)에서 AUC는 +0.03~0.07 개선됐지만",
+  "  경제성 랭킹은 0이었고, 선정된 팔이 세 창 모두 무작위 진입 이하였습니다.",
+  "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
+].join("\n");
+
+const BREAKOUT_TP_TITLE = [
+  "이 판정의 라벨 배리어(진입가 ±0.8×ATR) 중 **매매 방향 쪽** 목표가입니다.",
+  "· 매매 방향 = 발현 방향 XOR 되돌림콜 — 돌파면 발현 방향 그대로, 되돌림이면 반대입니다.",
+  "· 손절선은 반대쪽 같은 폭입니다(대칭 라벨이라 따로 적을 값이 없습니다).",
+  "· 호라이즌 1시간(12봉) 안에 어느 쪽도 안 닿으면 시간청산이고, 그때는 12봉 뒤 종가 부호로 채점합니다.",
+  "· ⚠️이 대칭 배리어를 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 56~59%입니다 —",
+  "  라벨은 채점용이지 매매 규칙이 아닙니다. 실제 매매 브래킷은 별도 축이고 현재 보류 상태입니다.",
+  "· 러너가 사건마다 기록한 배리어를 그대로 읽습니다 — 2026-09-08 배리어 개정 전 행에 지금 ATR을",
+  "  덮어씌우지 않기 위해서입니다(옛 배리어 행은 집계에서도 제외됩니다).",
+].join("\n");
+
 const STRIP_BAR_LABEL_BY_TONE = {
+  // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
+  // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
+  extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
-  v_rebound: { good: "롱 발동", bad: "숏 발동", flat: "미발동", neutral: "데이터 없음" },
-  // 2026-09-07 MASHT 앵커 방향 섀도우 -- 섀도우 포지션이라 상태어는 "보유"다(규약 §1).
-  masht_anchor: { good: "롱 보유", bad: "숏 보유", warn: "혼재 보유", neutral: "미발동" },
+  // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
+  // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
+  // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
+  v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
+  // 2026-09-08 돌파/되돌림 -- <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
+  // 🔴이 사전은 **톤이 키**인데 이 카드의 톤은 방향(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일
+  //   수도 "되돌림 숏"일 수도 있다. 예전 값은 양쪽 다 "돌파"라고 못박아, 배지가 "직전 되돌림↓"
+  //   인데 띠 캡션은 "돌파 ↓"로 나왔다(2026-09-08 사용자 신고). <주장>은 이제 서버가 봉별로
+  //   주는 call_history 에서 오고(stripBarLabel), 여기엔 **방향만** 남긴다.
+  breakout_rev: { good: "↑", bad: "↓", warn: "혼재 보유", neutral: "미발동" },
+  // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
+  // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
@@ -1035,20 +1180,29 @@ function stripTimeFmtByKind(kind) {
 // tone stays the same, mirroring toneStripSvg's own segment-merge grouping (the still-forming
 // provisional bar is always its own 1-wide segment there too, so no special-casing needed here --
 // walking backward from index n-1 can only ever include OTHER already-confirmed bars).
-function lastSegmentRangeLabel(tones, times, key, timeFmtKind, rawFire) {
+// 2026-09-08: 띠 캡션의 라벨은 <주장> <방향> 두 축이다. 톤 사전이 방향(또는 단일 어휘)을 주고,
+// 봉별 판정 단어(call)가 있으면 그 앞에 붙인다 -- "되돌림 ↓". 방향이 없는 톤(warn/neutral)은
+// 그 자체가 완결된 상태어("혼재 보유"/"미발동")라 단어를 덧붙이지 않는다.
+function stripBarLabel(key, tone, call) {
+  const base = (STRIP_BAR_LABEL_BY_TONE[key] || {})[tone] || "";
+  if (!base || !call || (tone !== "good" && tone !== "bad")) return base;
+  return `${call} ${base}`;
+}
+
+function lastSegmentRangeLabel(tones, times, key, timeFmtKind, calls) {
   const list = Array.isArray(tones) ? tones : [];
   const timeList = Array.isArray(times) ? times : [];
-  const fireList = Array.isArray(rawFire) ? rawFire : [];
+  const callList = Array.isArray(calls) ? calls : [];
   const n = list.length;
   if (n === 0) return "-";
   const lastTone = list[n - 1] || "neutral";
+  const lastCall = callList[n - 1] || "";
   let start = n - 1;
-  // 2026-09-01: also stop at a rawFire boundary (mirrors toneStripSvg's own segment-merge guard)
-  // -- once `start` itself is a genuine re-fire bar, that's where its segment begins, so the walk
-  // must not continue past it even if the tone on both sides matches.
-  while (start > 0 && list[start - 1] === lastTone && !fireList[start]) start--;
+  // 2026-09-10: the rawFire stop is gone with toneStripSvg's (see there) -- this walk mirrors the
+  // strip's grouping exactly, so caption and strip can never disagree about where a segment began.
+  while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall) start--;
   const fmt = stripTimeFmtByKind(timeFmtKind);
-  const barLabel = (STRIP_BAR_LABEL_BY_TONE[key] || {})[lastTone] || "";
+  const barLabel = stripBarLabel(key, lastTone, lastCall);
   const rangeText = start === n - 1 ? fmt(timeList[n - 1]) : `${fmt(timeList[start])}~${fmt(timeList[n - 1])}`;
   return barLabel ? `${barLabel} · ${rangeText}` : rangeText;
 }
@@ -1069,7 +1223,7 @@ function showStripBarTime(rectEl) {
   const fmt = stripTimeFmtByKind(label.getAttribute("data-fmt"));
   const key = rectEl.closest("svg")?.getAttribute("data-key");
   const tone = rectEl.getAttribute("data-tone");
-  const barLabel = key && tone ? (STRIP_BAR_LABEL_BY_TONE[key] || {})[tone] : null;
+  const barLabel = key && tone ? stripBarLabel(key, tone, rectEl.getAttribute("data-call") || "") : null;
   const rangeText = startIso === endIso ? fmt(startIso) : `${fmt(startIso)}~${fmt(endIso)}`;
   label.textContent = barLabel ? `${barLabel} · ${rangeText}` : rangeText;
 }
@@ -1112,27 +1266,46 @@ function toggleSignalDetail(btn, key) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // ⚠️키는 subText 문자열이다(규약 §5-1) -- 위 masht_anchor 라벨을 바꾸면 여기도 같이 바꾼다.
-  masht_anchor: {
-    "롱 보유": "앵커에서 상승 지속에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
-    "숏 보유": "앵커에서 하락 지속에 걸어 가상 보유 중입니다. 주문은 내지 않습니다.",
-    "혼재 보유": "양방향 가상 포지션이 동시에 열려 있습니다.",
-    "미발동": "앵커가 없거나 지속 확률이 진입 임계 아래입니다.",
+  // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
+  extreme_detector: {
+    "바닥 발동": "지금 봉이 **앞으로 60분간 안 깨질 저점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
+    "천장 발동": "지금 봉이 **앞으로 60분간 안 넘길 고점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
+    "미발동": "지금 봉은 등급을 받지 못했습니다. 강한 추세 구간에서는 판정을 억제합니다.",
+    "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
+  },
+  // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
+  // 2026-09-08 돌파/되돌림. ⚠️키는 subText 문자열이다(규약 §5-1).
+  breakout_rev: {
+    // ⚠️설명은 **예측(앞으로 어떻게 되나)을 먼저** 쓴다. 화살표·색과 같은 방향이어야 한다.
+    //   이전에는 "**하락**으로 발현했지만…"처럼 **관측**을 굵게 앞세워, ↑ 배지인데 첫 단어가
+    //   "하락"이라 서로 다른 말로 읽혔다(2026-09-08 사용자 신고 "되돌림 위가 왜 하락이야?").
+    //   관측(발현)은 뒤에 덧붙인다. 화살표 = 예측 방향 = 색.
+    "돌파 ↑": "앞으로 오른다는 판정입니다 — 상단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
+    "돌파 ↓": "앞으로 내린다는 판정입니다 — 하단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
+    "되돌림 ↑": "앞으로 오른다는 판정입니다 — 하단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
+    "되돌림 ↓": "앞으로 내린다는 판정입니다 — 상단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
+    "혼재 보유": "방향이 반대인 가상 포지션이 동시에 열려 있습니다.",
+    "직전 돌파↑": "직전 판정은 앞으로 오른다였습니다(상단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "직전 돌파↓": "직전 판정은 앞으로 내린다였습니다(하단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "직전 되돌림↑": "직전 판정은 앞으로 오른다였습니다(하단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "직전 되돌림↓": "직전 판정은 앞으로 내린다였습니다(상단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
+    "미발동": "2시간 넘게 상단·하단 터치(1시간 안 ±0.75×ATR)가 없습니다.",
     "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
     "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
     "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
-  v_rebound: {
-    "웜업": "가격 데이터를 충분히 모으는 중이에요 — 잠시 후 값이 나와요.",
-    "데이터 없음": "방금 마감된 봉의 지표 일부가 아직 계산되지 않아 채점을 건너뛰었어요 — 드문 경우이고, 다음 봉에서 정상으로 돌아와요.",
-    "롱 발동": "TabPFN이 '바닥이고 진짜 반등이 온다'로 채점했어요 — 30분 안 1.5×ATR 상승 판정. 목표 도달이나 60분 경과까지 유지돼요.",
-    "숏 발동": "TabPFN이 '천장이고 진짜 반전이 온다'로 채점했어요 — 30분 안 1.5×ATR 하락 판정. 목표 도달이나 60분 경과까지 유지돼요.",
-    "미발동": "지금 반등/반전을 말할 근거가 없어요 — 대부분의 봉이 여기고(발동은 약 5%), '반대로 간다'는 뜻이 아니에요.",
   },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
     "숏압박↑": "베이시스 콘탱고 극단 — 이후 1~4시간 숏 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
     "롱압박↑": "베이시스 백워데이션 극단 — 이후 1~4시간 롱 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
+  },
+  vol_forecast: {
+    "안정": "앞으로 24시간 변동성이 지금 수준을 유지할 가능성이 높아요 — 평소 크기로 다뤄도 되는 국면이에요.",
+    "주의": "앞으로 24시간 변동성이 커질 신호가 일부 보여요 — 손절폭을 조금 넓게 잡는 게 안전해요.",
+    "위험": "앞으로 24시간 변동성이 1.3배 이상 확장될 확률이 높아요 — 크기를 줄이거나 손절폭을 넓히세요.",
+    "웜업": "변동성 전망 워커가 아직 첫 계산을 끝내지 않았어요.",
+    "데이터 없음": "변동성 전망 워커가 값을 내지 못하고 있어요.",
+    "오류": "변동성 전망을 불러오지 못했어요.",
   },
   liq_cascade: {
     "안정": "지금 진행 중인 청산 캐스케이드가 없어요 — 청산 흐름이 평소 수준이에요.",
@@ -1157,10 +1330,52 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
-  masht_anchor: "[규칙] 증거신호 8종 중 **3종 이상이 3봉(15분) 안에 발동**하고 마지막 발동이 그 봉이면 앵커로 봅니다(GAP 12봉 중복제거). 그 앵커 봉을 포함한 **48봉 창 × 8채널**(로그수익·ATR정규화 경로·DeMarker·%K백분위·테이커델타z·3봉수익z·칼만편차z·고저폭)을 만들고, MultiRocket 2,016열 + Hydra 768열 = **2,784열**의 랜덤 합성곱 피쳐로 바꿔 TabPFN(사전학습 표형 파운데이션 모델, in-context)에 넣습니다. 문맥은 3,555개 앵커(2024-01-04~2026-07-29)로 동결돼 있고 라이브에서 갱신하지 않습니다.\n" +
-    "[진입] 지속 확률이 **0.5372** 이상이면(표본외 예측의 상위 30%) 지속 방향으로 다음 봉 시가에 가상 진입합니다 — 바닥 앵커면 하락 계속(숏), 천장 앵커면 상승 계속(롱). 청산은 ±1% 대칭 배리어를 1분봉 first-touch로 판정하고 48봉(4시간)이면 시간청산합니다. 트레일링은 쓰지 않습니다.\n" +
-    "[근거] 월 1회 재학습 walk-forward(각 예측이 그 시점 이전 데이터만 사용)에서 상위 30% 진입 정확도 **59.88% [53.94%, 64.56%]**, 날 블록 셔플 귀무 p=0.017, 건당 +12.0bp입니다. 비용 왕복 7.8bp·±1% 배리어에서 **손익분기 정확도는 53.90%**입니다.\n" +
-    "[한계] ⚠️이 후보는 87개 셀에서 고른 Top-1이라 승자의 저주가 있습니다 — 기대치는 59.88%가 아니라 56~57% 정도로 봐야 합니다. 안 쓴 31일(2026-06-30~07-31) 전방 확인에서는 상위30% 64.00%가 나왔지만 n=25라 **무작위 진입 귀무를 못 넘었고(p=0.282)**, 그 구간은 기저(항상 지속)가 57.14%로 손익분기 위여서 아무것도 고르지 않는 전략이 총합에서 더 벌었습니다. 확증이 아니라 검증 중인 후보입니다.",
+  extreme_detector:
+    "증거신호 8종의 발동 여부·동시발동 수에 오실레이터·체결·ATR분위·레인지 내 위치·BTC 상대 등 "
+    + "38개 피쳐를 더해, '이 봉이 ±60분 국소 극점일 확률'을 HGB 5시드로 예측합니다. "
+    + "학습은 2026-03-31 까지이고 그 뒤 161일이 표본외입니다(AUC 0.7099).\n\n"
+    + "[등급별 실측 정밀도] 강 66.0%(하루 1.46건) · 중 53.2%(1.46건) · 약 32.1%(4.29건). "
+    + "증거신호 발동봉 기저가 24.2%, 무작위 봉은 2.9%입니다. 약 등급은 기저 대비 +7.9pp 뿐이라 "
+    + "참고용으로만 보세요.\n\n"
+    + "[추세 게이트] 강한 추세 구간(12시간 수익률의 7일 롤링 분위 상하 20%)에서는 콜을 억제합니다. "
+    + "억제되는 양이 하루 4.39건입니다. 근거: 강한 상승에서의 천장 콜은 정확도 51.6%로 반반인데 "
+    + "적중하면 +10.8bp, 빗나가면 -60.7bp로 완전히 비대칭이었습니다(순 -23.8bp). 추세를 피쳐로 "
+    + "넣고 재학습해도 안 고쳐져(역추세 비중 30.8→30.2%) 하드 게이트로 막습니다.\n\n"
+    + "⚠️매매 트리거가 아닙니다. 이 등급대로 매매하면 표본외 순 +2.27bp(강+중, 2.93건/일)로 "
+    + "거래비용 여유가 없습니다. 게이트 없이는 -3.36bp 였습니다. '여기가 국소 극단일 확률'을 "
+    + "주는 것이지 '사거나 팔라'가 아닙니다.",
+  breakout_rev: "[규칙] 증거신호 8종 중 **어느 하나가 처음 발동**하면 앵커입니다(신호별 GAP 중복제거, 25.2건/일). " +
+    "앵커 다음 봉 시가(기준가)에서 **1시간 안에 ±0.75×ATR** 밴드 중 먼저 닿는 쪽이 " +
+    "**상단 터치 / 하단 터치**입니다 — 예측이 아니라 관측값이고, 앵커의 99.3%가 터치합니다(25.0건/일). " +
+    "창은 2026-09-09 에 15분에서 1시간으로 넓혔습니다 — 커버리지가 88.6%→99.3% 로 오르고, " +
+    "기존(15분 안 터치) 사건의 성적은 시드 폭 안에서 그대로였습니다.\n" +
+    "🔴**«어느 쪽으로 갔나»가 아니라 «어느 밴드를 먼저 스쳤나»입니다.** 1분봉 고가·저가 기준이라 " +
+    "꼬리 하나로 정해지고, 한 번 정해지면 뒤에 무슨 일이 있어도 안 바뀝니다. 그래서 눈과 자주 어긋납니다 — " +
+    "신호를 발동시킨 **앵커 봉 자신의 방향과는 49.5%**(사실상 동전), 터치까지의 순변동과는 22.9% 어긋납니다. " +
+    "«하단 터치» 사건의 23.3%는 15분 뒤 종가가 오히려 기준가보다 높습니다. 터치 그 순간과는 1.4%만 어긋납니다.\n" +
+    "터치한 그 순간부터 **1시간 안에 진입가 ±0.8×ATR**(사건별, 중앙값 0.212%) 중 어느 쪽에 먼저 닿는지를 맞힙니다. 터치한 방향 쪽이면 " +
+    "**돌파**, 반대면 **되돌림**입니다. 1시간 안에 어느 쪽도 안 닿으면 12봉 뒤 종가 부호로 정합니다.\n" +
+    "[피쳐] 69개 — 5분봉 가격·거래량 24 · BTC 동조 · 터치까지의 경로 · 레벨 맥락 · 포지셔닝 메트릭 12 · 신호 원핫 8. " +
+    "전부 **트리거 봉의 직전 봉**까지만 봅니다. 🔴경로 피쳐는 트리거 분 자체를 포함하지 않습니다 — " +
+    "같은 1분봉을 피쳐와 라벨이 공유하면 그 봉의 큰 움직임이 피쳐를 키우는 동시에 배리어를 때려 미래참조가 됩니다.\n" +
+    "[모델] HistGradientBoosting 5시드 평균. 모델 축은 2026-09-08 종결했습니다 — TabPFN·TabICL·" +
+    "LightGBM·고전 GBM 을 같은 프로토콜로 전부 돌렸는데 모델간 격차(1.3~4.0pp)가 같은 모델의 시드·" +
+    "정렬순서 변동폭과 같았습니다. 회귀(1시간 뒤 수익률)는 분류에 2.6~5.1pp 뒤집니다 — 이 신호는 " +
+    "드리프트가 아니라 **먼저 닿는 쪽**을 압니다.\n" +
+    "[검정] 시드 20개 워크포워드에서 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813, " +
+    "셔플 귀무 .5350 / .5424 / .5231 대비 초과 +2.5 / +4.5 / +5.8pp. **20개 시드 전부 세 창 동시에 귀무 위**입니다" +
+    "(B=32 셔플, 시드 판정 OK 2 · FLAG 1 · FAIL 0).\n" +
+    "⚠️2026-09-08 배리어 개정(절대 ±0.25% → ±0.8×ATR) 이전 기준선(VAL .5748 / OOS .6046 / HOLDOUT .5716, " +
+    "B=100 p=0.010)은 **무효**입니다 — 다른 질문이었습니다. 절대 배리어는 ATR 구간마다 난이도가 딴판이라 " +
+    "고ATR 의 높은 정확도가 대부분 클래스 불균형이었습니다(돌파율 0.334). 0.8×ATR 로 바꾸자 전 구간 돌파율이 " +
+    "0.46~0.47 로 균등해지고 시간청산율이 9.5%→3.2% 로 떨어졌습니다.\n" +
+    "🔴대가로 **매매 규칙은 보류**됐습니다. 브라켓 격자가 0/196 통과(절대 배리어는 10/196, 최선 +2.53bp) — " +
+    "배리어가 좁아져 최적 TP 가 20→15bp 로 내려갔고 TP 15bp 에서는 비용 10bp 가 수익의 67% 입니다. " +
+    "이 카드는 **참고 지표**이고 종이거래 기록은 판정 근거로 쓰지 않습니다.\n" +
+    "⚠️**원시 정확도끼리 비교하지 마십시오.** 창마다 클래스 균형이 달라 셔플 귀무가 .515~.570 사이를 움직입니다 — " +
+    "정확도는 반드시 그 창의 귀무와 함께 읽어야 합니다.\n" +
+    "⭐커버리지 상한을 두지 않습니다. 전 트리거에 판정을 내므로 '어느 사건이 해소되는가'를 결과가 정하는 " +
+    "편향이 구조상 생기지 않습니다.",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
     "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
@@ -1203,7 +1418,7 @@ const MODEL_INDICATOR_DETAIL = {
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
   // -- model indicators --
-  masht_anchor: { text: "4시간", title: "진입 후 ±1% 배리어를 1분봉 first-touch로 판정하고, 48봉(4시간) 안에 어느 쪽도 닿지 않으면 시간청산합니다. 라벨 학습 규약과 같은 지평입니다." },
+  breakout_rev: { text: "1시간", title: "터치(트리거) 시점부터 ±0.8×ATR 배리어를 1분봉 first-touch 로 판정하고, 12봉(1시간) 안에 어느 쪽도 닿지 않으면 12봉 뒤 종가 부호로 정합니다. 배리어는 사건마다 그 시점 ATR 로 정해집니다(중앙값 0.212%) -- 2026-09-08 개정 전에는 절대 ±0.25% 였습니다." },
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
   liq_direction: { text: "상태", title: "고정 예측 시간창 없이 매분 갱신되는 현재 청산 방향압력 -- 5·15분 지평 IC는 유의했으나(탐색적), 손익 결합 검정(8개 지평)은 전부 순손실" },
@@ -1237,9 +1452,11 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
-  masht_anchor: "modelChipMashtAnchor",   // 2026-09-07 상단 요약
+  extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
+  breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
+  vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
   liq_direction: "modelChipLiqDirection",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
@@ -1263,7 +1480,7 @@ const MODEL_CHIP_IDS = {
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
-  "masht_anchor",
+"breakout_rev",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
@@ -1274,7 +1491,7 @@ const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
 // 값을 지우고 "ETH 전용" 상태로 바꾼다 -- 다른 코인의 값인 척하는 것보다 없는 게 낫다.
 function ethOnlyIndicator(item) {
   if (activeSnapshotAsset === "eth") return item;
-  return { ...item, tone: "neutral", proba: null, history: [], times: [],
+  return { ...item, tone: "neutral", proba: null, history: [], times: [], callHistory: [],
            subText: "미지원",   // 2026-09-06: 상태 열은 92px nowrap이라 문장이 들어가면 넘친다. 설명은 derivedTitle에 있다.
            derivedTag: "= ETH 전용",
            derivedTitle: "이 지표의 데이터 출처가 ETH 전용입니다(봇 상태 또는 ETH 학습 모델). "
@@ -1381,7 +1598,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
     const times = it.times || [];
     // 2026-08-31 user request: default caption shows the LAST segment's own range+label, not just
     // "지금 시간" -- see lastSegmentRangeLabel().
-    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time");
+    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time", it.callHistory);
     // 2026-08-31: optional `it.proba` (0-1) opts an item into the same inline probability meter
     // renderEvidenceSignals() uses (see .meter-col in styles.css) -- state text, then the meter bar,
     // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
@@ -1413,7 +1630,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         ${it.liveText ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(it.liveTitle)}"` : ""}>${escapeHtml(it.liveText)}</p>` : ""}
         <div class="evidence-strip-wrap">
-          ${toneStripSvg(it.history, times, false, false, it.key)}
+          ${toneStripSvg(it.history, times, false, false, it.key, it.callHistory)}
           ${stripAxisHtml(times, "time")}
         </div>
         <div class="strip-time-row">
@@ -1518,10 +1735,52 @@ const VOTE_LIFT_BY_SIDE = {
   bottom: { 1: 1.81, 2: 2.10, 3: 2.32, 4: 2.72 },
   top: { 1: 1.58, 2: 1.85, 3: 1.89, 4: 2.07 },
 };
+// 🔴2026-09-10 정정: 위 lift 는 **반전 사건이 일어나는가(분류)** 기준이고 단조증가가 맞다.
+// 그러나 **손익 기준으로는 반대다.** 순환이동 귀무(발동 군집·개수를 보존한 채 가격 정렬만 파괴)
+// 대비 초과수익을 815일에서 재면 겹칠수록 좋아지지 않는다:
+//     바닥  1종 +0.20 / 2종 +1.04 / 3종+ +0.60 bp (H=1시간),  H=4시간에서는 3종+ 가 **-5.91**
+//     천장  1종 +0.21 / 2종 -0.56 / 3종+ -2.28 bp,            H=4시간 3종+ **-5.99**
+// 즉 3종 이상 동시발동은 두 측면 모두에서 가장 나쁘다. 화면이 "겹칠수록 신뢰도가 높아진다"고만
+// 쓰면 사용자가 그걸 진입 근거로 읽는다 -- 그래서 두 축을 문장에서 분리한다.
+// scripts/research_eth_signal_confluence_null_20260910.py
+const VOTE_ECON_BY_SIDE = {   // 동시발동 개수별 귀무 대비 초과 bp (H=1시간 / H=4시간)
+  bottom: { 1: [0.20, 1.96], 2: [1.04, 1.29], 3: [0.60, -5.91], 4: [0.60, -5.91] },
+  top: { 1: [0.21, -2.78], 2: [-0.56, 1.07], 3: [-2.28, -5.99], 4: [-2.28, -5.99] },
+};
 function voteLiftNote(side, votes) {
   const capped = Math.min(Math.max(Math.round(votes), 1), 4);
   const lift = VOTE_LIFT_BY_SIDE[side][capped];
-  return `실측: ${side === "bottom" ? "바닥" : "천장"} 신호 ${capped}개↑ 동시발동 구간 lift ${lift.toFixed(2)}배(무작위 대비) — 신호가 겹칠수록 신뢰도가 실제로 높아짐이 확인됨`;
+  const [e1, e4] = VOTE_ECON_BY_SIDE[side][capped];
+  const sideKo = side === "bottom" ? "바닥" : "천장";
+  return `실측: ${sideKo} 신호 ${capped}개↑ 동시발동 구간 lift ${lift.toFixed(2)}배(무작위 대비) — `
+    + `이건 **반전 사건이 일어나는가(분류)** 기준입니다. `
+    + `⚠️손익은 다릅니다: 같은 구간의 귀무 대비 초과수익은 ${e1 >= 0 ? "+" : ""}${e1.toFixed(2)}bp/건`
+    + `(H=1시간), ${e4 >= 0 ? "+" : ""}${e4.toFixed(2)}bp(H=4시간)이고 왕복비용은 10bp입니다. `
+    + `겹칠수록 좋아지지도 않습니다 — 3종 이상 동시발동이 두 측면 모두에서 가장 나쁩니다.`;
+}
+// 2026-09-10 실측 -- 17개 칩을 **하나의 잣대**로 읽기 위한 공통 스케일.
+// 각 칩이 켜졌을 때 그 방향으로 1시간 들고 갔을 때의 **귀무 대비 초과** bp/건.
+// 귀무는 순환이동(발동 간격·군집·개수를 그대로 보존한 채 가격 정렬만 파괴) B=600, ETH 815일.
+// ⭐16셀 중 왕복비용(테이커 10bp·메이커 7.8bp)을 넘는 셀은 **0개**다. 최대가 +3.53bp.
+const EVIDENCE_EXCESS_BP = {
+  demarker_extreme: { bottom: 3.53, top: -1.15 },
+  fib_extension_exhaustion: { bottom: 3.48, top: -3.22 },
+  kalman_deviation_meanrev: { bottom: -0.07, top: -1.18 },
+  liquidity_sweep: { bottom: -1.21, top: -0.24 },
+  orthogonal_combo: { bottom: 3.13, top: 2.26 },
+  short_term_return_z: { bottom: 2.54, top: -3.50 },
+  smt_divergence: { bottom: -0.46, top: -0.16 },
+  taker_delta_z_climax: { bottom: 2.05, top: -1.11 },
+};
+function evidenceExcessNote(name) {
+  const e = EVIDENCE_EXCESS_BP[name];
+  if (!e) return "";
+  const f = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
+  return `[공통잣대] 이 칩이 켜졌을 때 그 방향으로 1시간 들고 가면 귀무 대비 `
+    + `바닥 ${f(e.bottom)} / 천장 ${f(e.top)} per 건입니다(ETH 815일, 순환이동 귀무 B=600). `
+    + `왕복비용은 테이커 10bp·메이커 7.8bp — 증거신호 8종 16셀 중 비용선을 넘는 셀은 0개, `
+    + `최대가 +3.53bp입니다. 지금 화면에서 비용선에 닿는 신호는 특화감지기의 '극점 탐지기' 하나뿐 `
+    + `(상위10% 기준 H=4시간 +9.78bp)입니다. 이 칩들은 매매 근거가 아니라 맥락으로 쓰세요.`;
 }
 // 2026-08-31 user request: "증거신호 제목 바로 아래에 있는 신호 설명은 모두 제거해줘. 증거신호에
 // 있는 나머지 텍스트들 모두 정리 요약해서 줄여줘" -- desc 필드 삭제(제목 바로 아래 렌더링 자체를
@@ -1980,7 +2239,11 @@ function renderEvidenceSignals(payload) {
     const ko = koDict[s.name] || { name: s.name };
     const detailKey = `evidence:${s.name}`;
     const isOpen = detailOpenKeys.has(detailKey);
-    const detailText = ko.detail ? `${ko.detail}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}` : "";
+    // 공통 잣대(귀무 대비 초과 bp)는 ETH 815일에서만 쟀다 -- BTC/XRP 사전에는 붙이지 않는다.
+    const excessNote = koDict === EVIDENCE_SIGNAL_KO ? evidenceExcessNote(s.name) : "";
+    const detailText = ko.detail
+      ? `${ko.detail}${excessNote ? `\n${excessNote}` : ""}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}`
+      : "";
     // 발동 중일 때 바로 보이는 의미(클릭 불필요) -- 2026-08-24 사용자 요청, 2026-08-31 축약(제목
     // 아래 desc 줄 제거에 맞춰 이 문구도 desc 인용 없이 짧게 -- 상세 설명은 "자세히"에 있음).
     const meaningText = evidenceSideLabel(s, {
@@ -1999,28 +2262,25 @@ function renderEvidenceSignals(payload) {
         stripStateEl.textContent = modelPctText && stripBase !== "-" ? `${stripBase} ${pctDisplay}` : stripBase;
       }
     }
-    evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], bottom_raw_fire: s.bottom_raw_fire || [], top_raw_fire: s.top_raw_fire || [], latest_bar_utc: payload.latest_bar_utc };
+    evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], latest_bar_utc: payload.latest_bar_utc };
     // eviTones/eviTimes mirror evidenceStripSvg's own internal tone derivation (bottom_history[i] ->
     // good, top_history[i] -> bad, else neutral) -- recomputed here (not returned by that function,
     // which keeps its plain-string contract for the provisional-refresh outerHTML-replace call site)
     // so the axis/default-caption below can share the exact same tone/time arrays it draws from.
     const eviN = Math.max((s.bottom_history || []).length, (s.top_history || []).length, 1);
-    const eviTones = Array.from({ length: eviN }, (_, i) => (s.bottom_history?.[i] ? "good" : s.top_history?.[i] ? "bad" : "neutral"));
+    const eviTones = Array.from({ length: eviN }, (_, i) => evidenceBarTone(s.bottom_history?.[i], s.top_history?.[i]));
     const eviTimes = evenlySpacedBarTimes(payload.latest_bar_utc, eviN, 5);
-    // 2026-09-01: same rawFire derivation as evidenceStripSvg, needed here too so the default
-    // caption's segment boundary matches what the strip visually shows (see toneStripSvg).
-    const eviRawFire = Array.from({ length: eviN }, (_, i) => !!(s.bottom_raw_fire?.[i] || s.top_raw_fire?.[i]));
     // 2026-08-31 user request: drop the old "바닥 {ts} · 천장 {ts}" last-fired caption -- this
     // range+label already tells you when the CURRENT segment started, which is what that text was
     // approximating anyway.
-    const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm", eviRawFire);
+    const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm");
     return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
         <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText, probaNote)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}</strong>
         ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
         <div class="evidence-strip-wrap">
-          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence", s.bottom_raw_fire || [], s.top_raw_fire || [])}
+          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence")}
           ${stripAxisHtml(eviTimes, "hm")}
           <small class="evidence-strip-caption">
             <span class="strip-time-now" data-fmt="hm" data-default="${escapeHtml(defaultRangeText)}">${escapeHtml(defaultRangeText)}</span>
@@ -2144,7 +2404,7 @@ function renderEvidenceSignalsProvisional(payload) {
     const svgEl = row?.querySelector(".evidence-strip-wrap > svg.evidence-strip");
     if (svgEl) {
       const liveTone = evidenceSideTone(s);
-      svgEl.outerHTML = evidenceStripSvg(hist.bottom_history, hist.top_history, hist.latest_bar_utc, 5, liveTone, payload.bar_open_utc, "evidence", hist.bottom_raw_fire, hist.top_raw_fire);
+      svgEl.outerHTML = evidenceStripSvg(hist.bottom_history, hist.top_history, hist.latest_bar_utc, 5, liveTone, payload.bar_open_utc, "evidence");
     }
     const timeLabel = row?.querySelector(".strip-time-now");
     if (timeLabel) {
@@ -2186,65 +2446,252 @@ async function refreshEvidenceSignalsProvisional() {
   }
 }
 
-async function refreshMashtAnchor() {
+async function refreshChartMarkers() {
   const now = Date.now();
-  if (now - mashtAnchorLastFetchAt < MASHT_ANCHOR_POLL_MS) return;
-  mashtAnchorLastFetchAt = now;
+  if (now - chartMarkersLastFetchAt < CHART_MARKERS_POLL_MS) return;
+  chartMarkersLastFetchAt = now;
   try {
-    const res = await fetch(API_MASHT_ANCHOR_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`masht anchor ${res.status}`);
-    latestMashtAnchor = await res.json();
+    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`chart markers ${res.status}`);
+    latestChartMarkers = await res.json();
   } catch (error) {
-    console.error("MASHT anchor shadow fetch error:", error);
-    latestMashtAnchor = { error: "fetch_failed" };
+    console.error("Chart markers fetch error:", error);
+    latestChartMarkers = { available: false, error: "fetch_failed" };
   }
 }
 
-// ── MASHT 앵커 방향 섀도우 (2026-09-07) ────────────────────────────────────────────────
-// 규약: 라벨 어휘 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 데이터 줄 없음 §4
-// (숫자는 배지 툴팁 stateTitle 로만 -- 사용자가 09-06에 제목 밑 데이터 줄 제거를 요청했다)
-function mashtAnchorIndicatorItem() {
-  const base = { key: "masht_anchor", label: "앵커 방향(MASHT)", derivedTag: "= 모델 · 섀도우 검증 중",
-    derivedTitle: "증거신호 3종 이상이 겹친 앵커에서 48봉 창을 랜덤 합성곱(MultiRocket+Hydra)으로 2,784열 피쳐로 바꿔"
-      + " TabPFN 에 넣고, 지속(추세 계속) 확률이 임계 이상이면 그 방향으로 가상 진입합니다."
-      + " 2026-09-07부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
-      + "⚠️87개 모델·피쳐 조합에서 고른 Top-1이라 승자의 저주가 있습니다. 워크포워드 측정 59.88%를 그대로"
-      + " 기대하면 안 되고 56~57% 정도로 봐야 합니다. 손익분기 정확도는 53.90%입니다.",
+async function refreshExtremeDetector() {
+  const now = Date.now();
+  if (now - extremeLastFetchAt < EXTREME_POLL_MS) return;
+  extremeLastFetchAt = now;
+  try {
+    const res = await fetch(API_EXTREME_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`extreme detector ${res.status}`);
+    latestExtreme = await res.json();
+  } catch (error) {
+    console.error("Extreme detector fetch error:", error);
+    latestExtreme = { error: "fetch_failed" };
+  }
+}
+
+async function refreshVolForecast() {
+  const now = Date.now();
+  if (now - volForecastLastFetchAt < VOL_FORECAST_POLL_MS) return;
+  volForecastLastFetchAt = now;
+  try {
+    const res = await fetch(API_VOL_FORECAST_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`vol forecast ${res.status}`);
+    latestVolForecast = await res.json();
+  } catch (error) {
+    console.error("Vol forecast fetch error:", error);
+    latestVolForecast = { error: "fetch_failed" };
+  }
+}
+
+// ── 24시간 변동성 전망 (2026-09-10) ─────────────────────────────────────────────────
+// 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
+//       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
+// ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
+function volForecastIndicatorItem() {
+  const p = latestVolForecast;
+  const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 Binance 5분봉(과거 변동성)과 "
+                   + "Deribit DVOL(내재변동성)로 계산합니다. 방향이 아니라 변동성만 예측하며 매매에 "
+                   + "연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
+             proba: null, history: [], times: [] };
+  }
+  const prec = (p.precision_holdout || {})[p.grade];
+  const auc = p.auc || {};
+  const stateTitle = [
+    `${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
+    `내재변동성(DVOL) ${p.dvol} · 실현변동성 24h ${p.rv24} · 격차(VRP) ${p.vrp > 0 ? "+" : ""}${p.vrp}`,
+    `예측 실현변동성 ${p.rv_fwd_pred}`,
+    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
+    `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
+    "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
+  ].filter(Boolean).join("\n");
+  return { ...base, tone: p.tone === "warn" ? "warn" : "neutral", subText: p.grade,
+           proba: Number(p.proba), stateTitle,
+           history: p.history || [], times: p.times || [] };
+}
+
+// ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
+// 규약: 라벨 §1(측면 어휘) · 색 §2(바닥=good/천장=bad/그 외 neutral) · 제목 밑 데이터 줄 없음 §4
+// ⭐5번째 색을 만들지 않는다 -- 억제/미발동은 전부 neutral 이다.
+function extremeDetectorIndicatorItem() {
+  const p = latestExtreme;
+  const base = { key: "extreme_detector", label: "극점 탐지기", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델로 매 봉 계산합니다(워커). "
+                   + "2026-09-10 v2: `강` 등급은 극점 확률과 손실가중 헤드가 **둘 다** 강 컷을 넘을 "
+                   + "때만 줍니다 — 못 넘으면 `약`으로 강등합니다. 표본외 강 정밀도 .582→.689. "
+                   + "매매에는 연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
+             proba: null, history: [], times: [] };
+  }
+  const gradeText = p.grade ? `${p.grade} 등급` : (p.gated_now ? "추세구간 억제" : null);
+  const prec = (p.precision || {})[p.grade];
+  const stateTitle = [
+    p.grade ? `${p.grade} 등급 · 확률 ${(Number(p.proba) * 100).toFixed(1)}%` : "등급 없음",
+    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (하루 ${(p.per_day || {})[p.grade]}건)` : "",
+    p.signals ? `발동 신호: ${p.signals}` : "",
+    p.gated_now ? `강한 추세 구간이라 억제 중 (추세분위 ${p.trend_q})` : "",
+    `발동봉 기저 ${(Number(p.base_rate) * 100).toFixed(1)}% · 무작위 봉 2.9% · AUC ${p.auc_oos}`,
+    // 2026-09-10 v2 이중조건 -- 켜져 있다는 사실과 강등 이유를 화면이 말해야 한다.
+    p.costw_rule_id
+      ? (p.proba_costw != null
+          ? `이중조건: 극점 ${(Number(p.proba) * 100).toFixed(1)}% · 손실가중 ${(Number(p.proba_costw) * 100).toFixed(1)}%`
+            + (p.costw_cut != null ? ` (강 기준 ${(Number(p.costw_cut) * 100).toFixed(1)}%)` : "")
+          : "이중조건 적용 중 — `강`은 두 헤드가 모두 동의할 때만 줍니다")
+      : "",
+    p.dual_demoted
+      ? "↓ 극점 확률은 `강`이지만 손실가중 헤드가 «빗나가면 비싼 자리»로 봐서 `약`으로 내렸습니다"
+      : "",
+    "⚠️매매 신호가 아니라 위치 정보입니다 — 이 등급으로 매매하면 비용 여유가 없습니다",
+  ].filter(Boolean).join("\n");
+  return { ...base,
+    tone: p.tone === "good" || p.tone === "bad" ? p.tone : "neutral",
+    subText: p.subText || "미발동",
+    proba: p.proba != null ? Number(p.proba) : null,
+    meterNote: gradeText, meterNoteTitle: prec != null
+      ? `표본외 실측 정밀도 ${(prec * 100).toFixed(1)}%` : "강한 추세 구간에서는 콜을 내지 않습니다",
+    stateTitle,
+    history: p.history || [], times: p.times || [] };
+}
+
+async function refreshBreakoutRev() {
+  const now = Date.now();
+  if (now - breakoutRevLastFetchAt < BREAKOUT_REV_POLL_MS) return;
+  breakoutRevLastFetchAt = now;
+  try {
+    const res = await fetch(API_BREAKOUT_REV_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`breakout rev ${res.status}`);
+    latestBreakoutRev = await res.json();
+  } catch (error) {
+    console.error("Breakout/reversal shadow fetch error:", error);
+    latestBreakoutRev = { error: "fetch_failed" };
+  }
+}
+
+// ── 돌파/되돌림 앵커 섀도우 (2026-09-08) ──────────────────────────────────────────────
+// 규약: 라벨 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 제목 밑 데이터 줄 없음 §4
+// ⭐커버리지 상한이 없다 -- 발현한 전 트리거에 판정을 낸다. 그래서 "판단 보류" 상태가 없다.
+// ⚠️정확도는 반드시 그 창의 **셔플 귀무**와 함께 읽는다(창마다 클래스 균형이 다르다).
+function breakoutRevIndicatorItem() {
+  const base = { key: "breakout_rev", label: "앵커 돌파/되돌림", derivedTag: "= 모델 · 섀도우 검증 중",
+    derivedTitle: "증거신호가 처음 발동한 뒤 1시간 안에 ±0.75×ATR 밴드 중 먼저 닿는 쪽이"
+      + " 상단 터치 / 하단 터치입니다(예측이 아니라 관측값). 그 방향으로 계속 가는지(돌파)"
+      + " 되돌아오는지(되돌림)를 1시간 ±0.8×ATR 배리어로 판정합니다"
+      + "(사건별, 중앙값 0.212%). 2026-09-08부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
+      + "시드 20개 워크포워드 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813 (셔플 귀무 .5350 / .5424 / .5231"
+      + " 대비 +2.5 / +4.5 / +5.8pp). 20개 시드 전부 세 창 동시에 귀무 위(B=32).\n"
+      + "⚠️창마다 클래스 균형이 달라 원시 정확도끼리 비교하면 안 됩니다.\n"
+      + "⚠️배리어 개정(09-08) 전 기준선은 무효입니다 — 매매 규칙도 그때 보류됐습니다('자세히' 참조).",
     history: [], times: [] };
-  const p = latestMashtAnchor;
-  // 상태 어휘는 감지기 공통 네 단어뿐이다(규약 §1).
-  if (!p || p.error) return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업" };
-  const thr = p.threshold != null ? Number(p.threshold) : null;
-  const be = p.breakeven_acc != null ? Number(p.breakeven_acc) : 0.539;
-  const m = p.measured || {};
-  const refText = m.walkforward_top30_acc != null
-    ? `워크포워드 ${(m.walkforward_top30_acc * 100).toFixed(1)}% (손익분기 ${(be * 100).toFixed(1)}%)` : "";
+  const p = latestBreakoutRev;
+  // 규약 §3: forceMeter 목록은 **상태와 무관하게 같은 모양**이어야 한다. 운영 상태에서
+  // probaSlot 을 빼면 게이지 줄이 사라져 행 높이가 달라진다(V자가 "미발동이어도 자리를 지킨다"와 같은 이유).
+  if (!p || p.error) return { ...base, tone: "neutral", probaSlot: true, proba: null,
+                              subText: p && p.error ? "오류" : "웜업" };
+  const pr = p.prereg || {}; const pa = pr.acc || {}; const pn = pr.null || {};
+  const refText = pa.OOS != null
+    ? `사전등록 OOS ${(pa.OOS * 100).toFixed(1)}% (귀무 ${(pn.OOS * 100).toFixed(1)}%)` : "";
   if (!p.available) {
-    return { ...base, tone: "neutral", subText: "데이터 없음",
+    return { ...base, tone: "neutral", probaSlot: true, proba: null, subText: "데이터 없음",
              stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
   }
   const dirs = p.open_dirs || [];
   const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  const tone = p.open_positions ? (hasL && hasS ? "warn" : hasS ? "bad" : "good") : "neutral";
-  const subText = p.open_positions ? (hasL && hasS ? "혼재 보유" : hasS ? "숏 보유" : "롱 보유") : "미발동";
-  // 표본 가드: 일수 기준(규약 §4). 30일 계측 전에는 수치를 성과로 읽지 않는다.
+  const calls = p.open_calls || [];
+  // 🔴폴백 버그(2026-09-08 사용자 신고): 판정이 섞였는데 방향이 같으면 claim 이 null 이 되고
+  //   예전 코드는 `claim || "돌파"` 로 **조용히 돌파라고 썼다**. 되돌림 포지션에 "돌파" 배지가
+  //   붙는 조합이다. 폴백을 **가장 최근 판정**으로 바꾼다.
+  const claim = calls.length && calls.every((c) => c === calls[0]) ? calls[0] : null;
+  const last = p.last || null;
+  // ⭐라벨 배리어(±0.8×ATR, 중앙값 0.212%)라 **중앙값 5분**에 해소된다 -- 하루 22건이 발동해도
+  //   포지션이 열려 있는 시간은 24시간 중 18%뿐이다. 보유 중일 때만 보여주면 82% 를 "미발동"으로
+  //   덮어버려 "신호가 안 뜬다"로 읽힌다(2026-09-08 사용자 신고). 그래서 유휴일 때는
+  //   **직전 판정**을 회색으로 보여준다. 2시간이 지나면 그때 비로소 "미발동"이다.
+  const ageMin = last && last.age_min != null ? Number(last.age_min) : null;
+  const fresh = ageMin != null && ageMin <= 120;
+  // 방향은 **화살표**로 쓴다(사용자 요청 2026-09-08): ↑ 롱 · ↓ 숏.
+  // `돌파 숏` 은 발현 방향을 모르면 뜻이 안 통했다("돌파"가 상방으로 읽힌다는 신고).
+  const lastArrow = last ? (Boolean(last.dir_up) === (last.call === "돌파") ? "↑" : "↓") : "";
+  let subText, tone;
+  if (p.open_positions) {
+    subText = hasL && hasS ? "혼재 보유"
+      : `${claim || (last && last.call) || "돌파"} ${hasS ? "↓" : "↑"}`;
+    tone = hasL && hasS ? "warn" : hasS ? "bad" : "good";
+  } else if (fresh && last && last.call) {
+    subText = `직전 ${last.call}${lastArrow}`;
+    // ⭐2026-09-08 사용자 요청: "상승한다고 하는건 초록, 하락한다고 하는건 빨강".
+    //   유휴 상태도 **직전 판정의 예측 방향**으로 칠한다(↑=good · ↓=bad).
+    //   규약 §2 의 "방향 없음 = neutral" 은 방향이 **없을 때** 규칙이다 -- 직전 판정에는
+    //   방향이 있다. 게이트를 제거해 이 카드가 매매가 아니라 **참고 지표**가 됐으므로,
+    //   "진입 안 했으면 회색"이던 MASHT 관행(삭제됨)은 더 이상 적용하지 않는다.
+    tone = lastArrow === "↑" ? "good" : "bad";
+  } else { subText = "미발동"; tone = "neutral"; }
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  const accText = p.accuracy != null
-    ? `적중 ${(p.accuracy * 100).toFixed(1)}% (${p.cont_hits}/${p.resolved_trades})`
-    : "마감 거래 없음";
-  const bpText = p.net_taker_bp_mean != null
-    ? ` · 건당 ${p.net_taker_bp_mean > 0 ? "+" : ""}${p.net_taker_bp_mean.toFixed(1)}bp(10bp 차감)` : "";
-  const lastText = p.last_p_cont != null
-    ? `마지막 앵커 p ${Number(p.last_p_cont).toFixed(4)} / 임계 ${thr != null ? thr.toFixed(4) : "-"}`
-    : "앵커 대기";
-  const stateTitle = [`${lastText} · 보유 ${p.open_positions} · 마감 ${p.closed_trades}`,
-                      `${accText}${bpText}${guard}`,
-                      `${refText}${m.dayblock_null_p != null ? ` · 귀무 p=${m.dayblock_null_p}` : ""}`,
-                      "⚠️주문 없음 -- 가상 원장만"].filter(Boolean).join("\n");
-  // 확률 개념이 있으므로 게이지 자리를 준다(규약 §3). 미발동이어도 자리를 지킨다.
-  const proba = p.last_p_cont != null ? Number(p.last_p_cont) : null;
-  return { ...base, tone, subText, stateTitle, proba, probaSlot: true };
+  const lastText = last
+    ? `마지막 터치 ${String(last.trigger_utc || "").slice(5, 16)}`
+      + `${ageMin != null ? `(${ageMin < 60 ? `${Math.round(ageMin)}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`})` : ""}`
+      + ` ${last.dir_up ? "상단" : "하단"} 터치(${last.trig_min}분) → ${last.call}`
+      + ` = 앞으로 ${lastArrow === "↑" ? "오른다" : "내린다"}`
+      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
+    : "터치 대기";
+  // ⚠️원장 집계는 **현행 라벨 정의 행만** 센다(server.py::_br_current_label). 2026-09-08
+  //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
+  //   서로 다른 두 질문의 답을 평균한 값이 된다. 제외 건수를 화면에 밝힌다.
+  const staleText = p.stale_closed ? ` · 옛 배리어 ${p.stale_closed}건 제외` : "";
+  const ledText = p.closed
+    ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
+      + `${p.per_day != null ? ` · ${p.per_day}건/일` : ""}`
+      + ` (돌파 ${p.outcomes.cont} / 되돌림 ${p.outcomes.fade} / 시간청산 ${p.outcomes.timeout})`
+      + staleText
+    : `해소된 건 없음${staleText}`;
+  const tierText = Object.entries(p.by_tier || {})
+    .map(([k, v]) => `${k} ${(v.acc * 100).toFixed(0)}%(${v.n})`).join(" · ");
+  // 문장 순서 고정(규약 §4): 근거 → 원장 → 계측 → 백테스트 → 가드
+  const stateTitle = [`${lastText} · 보유 ${p.open_positions} · 감시 ${p.watching}`,
+                      `${ledText}${guard}`,
+                      tierText ? `확신 등급별 ${tierText}` : "",
+                      `${refText} · 전건 판정(커버리지 상한 없음)`,
+                      "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]
+    .filter(Boolean).join("\n");
+  // 미터 칸(규약 §3): 상태 → 게이지 → 수치. 셋 다 채워야 다른 감지기와 모양이 맞는다.
+  // 게이지는 **지금 배지가 주장하는 쪽의 확률**이다(돌파면 p, 되돌림이면 1−p) -- 되돌림인데
+  // 44% 로 그리면 배지와 그림이 서로 다른 말을 한다.
+  // ⚠️배지가 "미발동"인데 게이지·수치가 남아 있으면 서로 다른 말을 한다 -- 보유 중도 아니고
+  //   직전 판정도 오래됐으면(2시간 초과) 셋을 함께 비운다.
+  const showNum = Boolean(p.open_positions) || fresh;
+  const pb = showNum && last && last.p_breakout != null ? Number(last.p_breakout) : null;
+  const proba = pb == null ? null : (pb > 0.5 ? pb : 1 - pb);
+  // 수치 줄(규약 §3, 확률이 아닌 수치): 2026-09-10 사용자 요청으로 **익절가**를 적는다 --
+  // 증거신호·V자와 같은 `익절 {가격}` 포맷. 여기 있던 경과/보유 시간은 이미 상태 배지 툴팁의
+  // 첫 줄(lastText)에 그대로 있으므로 잃는 정보가 없고, 보유 중 진행도만 이 툴팁에 옮겨 담는다.
+  let meterNote = null, meterNoteTitle = "";
+  if (showNum && last && last.tp_price != null) {
+    meterNote = tpPriceText(last.tp_price);
+    const a = ageMin != null ? Math.round(ageMin) : null;
+    meterNoteTitle = (p.open_positions && a != null
+      ? `보유 ${Math.min(a, 60)}/60분 — 터치 시점부터 경과 / 시간청산까지의 지평.\n`
+      : a != null ? `가장 최근 터치로부터 ${a < 60 ? `${a}분` : `${(ageMin / 60).toFixed(1)}시간`} 경과. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.\n` : "")
+      + BREAKOUT_TP_TITLE;
+  }
+  // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
+  // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
+  const history = p.tone_history || [];
+  // 봉별 판정 단어(돌파/되돌림/혼재). 톤은 방향만 담으므로 이게 있어야 띠 캡션이 배지와 같은
+  // 말을 한다(2026-09-08 사용자 신고: 배지 "직전 되돌림↓" vs 띠 "돌파 ↓").
+  const callHistory = p.call_history || [];
+  const times = evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5);
+  return { ...base, history, times, callHistory, tone, subText, stateTitle,
+           proba, probaSlot: true, meterNote, meterNoteTitle };
 }
 
 async function refreshVReboundSignal() {
@@ -2535,10 +2982,14 @@ function renderVrebEconShadow(p) {
   }
 
   // ③ 핵심 3지표를 백테스트와 나란히 -- 비교 대상 없이 숫자만 보면 해석이 안 된다
-  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : a > 0 ? "warn" : "bad");
+  // ⚠️2026-09-08: 백테스트 기준선이 **음수**로 바뀌었다(스톱 회계 수정). "기준선보다 높다=좋다"가
+  // 더는 성립하지 않으므로 기대값 타일은 **절대 부호**로 판정한다 -- 손실이면 bad, 양수면
+  // "백테스트(손실 기대)와 어긋남"이라 warn이다. 승률만 기준선과 비교한다(일치성 점검).
+  const expTone = (a) => (a == null ? "neutral" : a > 0 ? "warn" : "bad");
+  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : "warn");
   const cards = [
     { name: "건당 기대값", val: n ? bp(p.exp_bp) : "-",
-      tone: n ? cardTone(p.exp_bp, ref.holdout_exp_bp) : "neutral",
+      tone: n ? expTone(p.exp_bp) : "neutral",
       ref: `백테스트 ${bp(ref.holdout_exp_bp)}` },
     { name: "승률", val: n ? pct(p.win_rate) : "-",
       tone: n ? cardTone(p.win_rate, ref.holdout_win_rate) : "neutral",
@@ -2670,7 +3121,10 @@ function setupPageTabs() {
       evidenceLastFetchAt = 0; refreshEvidenceSignals();
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
-      mashtAnchorLastFetchAt = 0; refreshMashtAnchor();
+      breakoutRevLastFetchAt = 0; refreshBreakoutRev();
+      extremeLastFetchAt = 0; refreshExtremeDetector();
+      volForecastLastFetchAt = 0; refreshVolForecast();
+      chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
       liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
@@ -2861,6 +3315,21 @@ function updateSnapshotCandleLive() {
   }
 }
 
+// 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 styles.css 의
+// .liq-density-legend-bar 가 #viridisGradient 와 같은 스톱으로 그린다 -- 두 곳이 같은 색이어야
+// 범례가 히트맵을 정직하게 설명한다.
+function renderLiqDensityLegend(hasDensity) {
+  const host = el("liqDensityLegend");
+  if (!host) return;
+  host.hidden = !hasDensity;
+  if (!hasDensity) { host.innerHTML = ""; return; }
+  const html = `<span class="liq-density-legend-title">청산 밀도</span>`
+    + `<span class="liq-density-legend-scale"><span class="liq-density-legend-end">낮음</span>`
+    + `<span class="liq-density-legend-bar"></span>`
+    + `<span class="liq-density-legend-end">높음</span></span>`;
+  if (host.innerHTML !== html) host.innerHTML = html;
+}
+
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
 // bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as a density
 // profile strip plus a single line for the nearest support/resistance level (2026-08-24: the full
@@ -2885,7 +3354,9 @@ function renderSnapshotChart() {
   const candles = fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
-  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, liquidationDensityHistory());
+  const densityHistory = liquidationDensityHistory();
+  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, densityHistory);
+  renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
 // wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
@@ -3160,26 +3631,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     line.setAttribute("class", "chart-grid");
     svg.appendChild(line);
 
-    // Skip the tick's price label (not the gridline) when a resistance/support/current-price tag
-    // already sits here -- both are text anchored in the same right-edge column (tag box spans
-    // w-mr+4..w-mr+4+boxW, tick text ends at w-6), so without this a grid number like "2520.0"
-    // renders directly on top of a tag box like "2526.1", especially once several tags cascade
-    // near an edge (see priceLabels above).
-    const collidesWithPriceTag = priceLabels.some(p => {
-      const py = p.adjustedY !== undefined ? p.adjustedY : p.realY;
-      return Math.abs(y - py) < minGap;
-    });
-
-    if (!mobileChart && !collidesWithPriceTag) {
-      const txt = document.createElementNS(NS, "text");
-      txt.setAttribute("x", w - 6); txt.setAttribute("y", y + 4);
-      txt.setAttribute("text-anchor", "end");
-      txt.setAttribute("font-size", "13");
-      txt.setAttribute("font-weight", "700");
-      txt.setAttribute("fill", "var(--muted)");
-      txt.textContent = fmtNum(t, 1);
-      svg.appendChild(txt);
-    }
+    // 2026-09-09 사용자 요청: **y축 가격 눈금 라벨을 없앤다**(격자선은 유지).
+    //   현재/롱익절/지지선 같은 **라인 태그**는 priceLabels 로 계속 그린다 -- 그쪽이 실제로
+    //   읽는 값이고, 눈금 숫자는 같은 오른쪽 열에서 그 태그와 자리를 다투기만 했다.
+    //   (그래서 있던 collidesWithPriceTag 충돌 회피도 함께 사라진다 -- 눈금이 없으면 충돌도 없다)
   });
 
   const xTickCount = isMobileChartMode() ? 4 : 6;
@@ -3336,6 +3791,104 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(lbl);
   });
 
+  // ── 청산맵 신호 마커 (2026-09-09, 설계 3안 비교 후 C안 하이브리드 채택) ──────────────
+  // 증거신호는 **고정 레인**(종수를 진하기로), 이벤트 트리거만 **봉 밀착 삼각형**.
+  // 근거(87일 실측): 이 창은 72봉·6시간이고 컬럼 피치가 14.5px 뿐인데 증거신호는 6시간당
+  // 중앙 10개·90분위 22개가 발동한다. 전부 봉에 붙이면 90분위 창에서 2.2컬럼당 하나가 되어
+  // 캔들을 덮는다. 이벤트 트리거는 6시간당 0.7~5.5개뿐이라 봉에 붙여도 흩어지지 않는다.
+  // 정보 등급도 다르다 -- 증거신호는 배경, 이벤트 트리거는 주장이다.
+  // ⚠️ETH 전용. 다른 코인은 레인 자체를 그리지 않는다 -- 빈 레인은 "신호 없음"으로 오독된다.
+  const cm = latestChartMarkers;
+  if (isSnapshotChart && cm && cm.available && Array.isArray(cm.times)) {
+    // 격자 정합은 **UTC epoch** 로 맞춘다(문자열 포맷 비교는 tz 표기 차이로 조용히 어긋난다).
+    const idxByEpoch = new Map();
+    candles.forEach((c, i) => idxByEpoch.set(c.time, i));
+    // 2026-09-09 모바일 신고("천장·바닥 게이지가 잘 안 보이고 청산 밀도에 가려진다"):
+    //   원인 둘. (1) 레인은 히트맵 **위에** 그려지지만 히트맵이 fill-opacity 0.85 비리디스
+    //   밴드라 반투명 레인이 대비로 지워진다. (2) 모바일 기본 34봉에서 bw≈6.8px 인데
+    //   rx=1.5 라운딩이 그 폭을 먹어 점처럼 보인다(최대 축소 72봉이면 bw 3.2px).
+    //   → 레인마다 **불투명 트랙**을 깔아 히트맵을 끊고, 모바일에선 높이를 키우고 라운딩을
+    //     빼고 최소 폭을 보장하고 불투명도 하한을 올린다.
+    const LANE_H = mobileChart ? 9 : 6;
+    const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
+    const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
+    // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
+    // 3.8px 밖에 안 남아 점처럼 보인다(2026-09-09 신고) -- 9px 미만은 각지게 그린다.
+    const laneRx = bw >= 9 ? "1.5" : "0";
+    const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
+    const opaBase = mobileChart ? 0.55 : 0.35, opaStep = mobileChart ? 0.11 : 0.15;
+    const laneX0 = xAt(0), laneX1 = xAt(candles.length - 1) + bw;
+    ["top", "bottom"].forEach(side => {
+      const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
+      const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
+      // 불투명 트랙 -- 청산 밀도 밴드가 레인 아래로 비치지 않게 끊는다(모바일 신고의 핵심).
+      const track = document.createElementNS(NS, "rect");
+      track.setAttribute("x", laneX0); track.setAttribute("y", LANE_Y[side]);
+      track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
+      track.setAttribute("height", LANE_H);
+      track.setAttribute("rx", "1.5");
+      track.setAttribute("fill", "var(--chart-bg)");
+      track.setAttribute("fill-opacity", "0.92");
+      track.setAttribute("data-lane-track", side);
+      svg.appendChild(track);
+      (counts || []).forEach((n, k) => {
+        if (!n) return;
+        const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
+        if (idx === undefined) return;
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", xAt(idx)); rect.setAttribute("y", LANE_Y[side]);
+        rect.setAttribute("width", laneW); rect.setAttribute("height", LANE_H);
+        rect.setAttribute("rx", laneRx);
+        rect.setAttribute("fill", laneFill[side]);
+        // 진하기 = 동시발동 종수. 색을 새로 만들지 않는다(표시 규약 §2).
+        // 데스크톱 1종 0.50 → 4종+ 0.95 · 모바일 1종 0.66 → 4종+ 0.99(대비 확보).
+        rect.setAttribute("fill-opacity", Math.min(opaBase + opaStep * Math.min(n, 4), 1).toFixed(2));
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = `${side === "top" ? "천장" : "바닥"} 증거신호 ${n}종`
+          + `${(names && names[k]) ? ` · ${names[k]}` : ""}`;
+        rect.appendChild(ti);
+        svg.appendChild(rect);
+      });
+      const lab = document.createElementNS(NS, "text");
+      lab.setAttribute("x", ml - 6);
+      lab.setAttribute("y", LANE_Y[side] + LANE_H - 1);
+      lab.setAttribute("text-anchor", "end");
+      lab.setAttribute("font-size", "9");
+      lab.setAttribute("fill", "var(--muted)");
+      lab.textContent = side === "top" ? "천장" : "바닥";
+      svg.appendChild(lab);
+    });
+
+    // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
+    // 같은 봉에서 저널 마커와 겹치지 않게 한다(스택 25px). 저널보다 한 치수 작게(±5) 그려
+    // 실제 체결이 시각적으로 우선하게 둔다. 글자 라벨은 붙이지 않는다 -- 6시간당 최대 11개라
+    // "진입/청산" 처럼 글자를 넣으면 글자밭이 된다.
+    (cm.events || []).forEach(ev => {
+      if (mobileChart && ev.grade === "약") return;   // 피치 3.5px -- 모바일은 강/중만
+      const idx = idxByEpoch.get(Date.parse(ev.t) / 1000);
+      if (idx === undefined || !candles[idx]) return;
+      const isBottom = ev.side === "bottom";
+      const sideKey = isBottom ? "bottom" : "top";
+      const count = markerCounts[sideKey][idx] || 0;
+      markerCounts[sideKey][idx] = count + 1;
+      const baseLineY = yAt(isBottom ? candles[idx].low : candles[idx].high);
+      const mY = isBottom ? baseLineY + 12 + count * 25 : baseLineY - 12 - count * 25;
+      const marker = document.createElementNS(NS, "polygon");
+      marker.setAttribute("points", isBottom ? "0,-5 -5,5 5,5" : "0,5 -5,-5 5,-5");
+      marker.setAttribute("transform", `translate(${xAt(idx) + bw / 2},${mY})`);
+      marker.setAttribute("fill", isBottom ? "var(--good)" : "var(--bad)");
+      marker.setAttribute("fill-opacity", ev.grade === "약" ? "0.55" : "0.95");
+      marker.setAttribute("stroke", "var(--chart-bg)");
+      marker.setAttribute("stroke-width", "1");
+      const ti = document.createElementNS(NS, "title");
+      ti.textContent = `${ev.label}${ev.grade ? ` ${ev.grade}등급` : ""}`
+        + ` · ${isBottom ? "바닥" : "천장"}`
+        + `${ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : ""}`;
+      marker.appendChild(ti);
+      svg.appendChild(marker);
+    });
+  }
+
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
@@ -3375,58 +3928,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(pTxt);
   });
 
-  // Liquidation-density color legend -- top-right inset over the plot, 2026-08-25 user request
-  // ("오른쪽 위에 색깔별로 크기를 표시해줘"). Labeled 낮음/높음 (low/high), not a $ scale like
-  // Coinglass's own colorbar: weightPct here is a synthetic, percentile-clipped RELATIVE density
-  // (compute_raw_bins() has no real notional/OI data to draw from -- see its docstring), so a dollar
-  // figure would misrepresent it as real magnitude. pointer-events:none so it never blocks the
-  // hover/tooltip layer appended right after this.
-  if ((densityHistory || []).length) {
-    const legendW = mobileChart ? 56 : 72, legendH = 8;
-    // legendY nudged up 2026-08-27 (user report: covering candle wicks near the top of the price
-    // range) -- backing box now sits flush with the SVG's top edge (y=0) instead of dipping well
-    // into the plot area below mt.
-    const legendX = w - mr - legendW - 6, legendY = mt - 4;
-    const legendGroup = document.createElementNS(NS, "g");
-    legendGroup.setAttribute("pointer-events", "none");
-
-    // #viridisGradient is a static, document-level <defs> in index.html (hoisted 2026-08-25) --
-    // not recreated here every call.
-    const backing = document.createElementNS(NS, "rect");
-    backing.setAttribute("x", legendX - 6); backing.setAttribute("y", legendY - 16);
-    backing.setAttribute("width", legendW + 12); backing.setAttribute("height", 34);
-    backing.setAttribute("rx", "4"); backing.setAttribute("fill", "var(--chart-bg)");
-    backing.setAttribute("opacity", "0.78");
-    legendGroup.appendChild(backing);
-
-    const title = document.createElementNS(NS, "text");
-    title.setAttribute("x", legendX + legendW / 2); title.setAttribute("y", legendY - 6);
-    title.setAttribute("text-anchor", "middle"); title.setAttribute("font-size", "9.5");
-    title.setAttribute("fill", "var(--muted)");
-    title.textContent = "청산 밀도";
-    legendGroup.appendChild(title);
-
-    const bar = document.createElementNS(NS, "rect");
-    bar.setAttribute("x", legendX); bar.setAttribute("y", legendY);
-    bar.setAttribute("width", legendW); bar.setAttribute("height", legendH);
-    bar.setAttribute("rx", "2"); bar.setAttribute("fill", "url(#viridisGradient)");
-    legendGroup.appendChild(bar);
-
-    const lowLabel = document.createElementNS(NS, "text");
-    lowLabel.setAttribute("x", legendX); lowLabel.setAttribute("y", legendY + legendH + 10);
-    lowLabel.setAttribute("font-size", "9"); lowLabel.setAttribute("fill", "var(--muted)");
-    lowLabel.textContent = "낮음";
-    legendGroup.appendChild(lowLabel);
-
-    const highLabel = document.createElementNS(NS, "text");
-    highLabel.setAttribute("x", legendX + legendW); highLabel.setAttribute("y", legendY + legendH + 10);
-    highLabel.setAttribute("text-anchor", "end"); highLabel.setAttribute("font-size", "9");
-    highLabel.setAttribute("fill", "var(--muted)");
-    highLabel.textContent = "높음";
-    legendGroup.appendChild(highLabel);
-
-    svg.appendChild(legendGroup);
-  }
+  // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
+  //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
+  //   증거신호 **천장 레인**(y=mt+3)을 오른쪽 끝에서 덮었다. mt 를 키워 자리를 만들면
+  //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
+  //   렌더는 renderLiqDensityLegend() -- index.html 의 #liqDensityLegend 를 채운다.
 
   // Create Hover Layer on Top
   const hoverGroup = document.createElementNS(NS, "g");
@@ -3600,7 +4106,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 2026-09-06 공통 어휘로 교체(급등→롱 발동 / 급락→숏 발동 / 미반등→미발동 / 신호 없음→데이터 없음).
   // 색 법칙은 그대로다 -- 급등=롱 방향이라 이미 good, 급락=숏이라 bad였다. 바뀌는 건 말뿐이다.
   const vReboundSubText = !vReboundWarmedUp ? "웜업"
-    : vReboundActive ? (vReboundTone === "good" ? "롱 발동" : vReboundTone === "bad" ? "숏 발동" : "미발동")
+    : vReboundActive ? (vReboundTone === "good" ? "되돌림 롱" : vReboundTone === "bad" ? "되돌림 숏" : "미발동")
     : "데이터 없음";
   // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
   // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
@@ -3686,10 +4192,15 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         history: (latestVRebound && latestVRebound.history) || [],
         times: (latestVRebound && latestVRebound.times) || [],
         proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
+        // 익절가(2026-09-10): 서버가 반등 콜일 때만 tp_price 를 준다 -- continuation 은 이 목표에
+        // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
+        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price),
+        meterNoteTitle: V_REBOUND_TP_TITLE,
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
-      ethOnlyIndicator(mashtAnchorIndicatorItem()),   // 2026-09-07 MASHT 앵커 방향 섀도우
+      ethOnlyIndicator(breakoutRevIndicatorItem()),  // 2026-09-08 돌파/되돌림
+      ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -3707,6 +4218,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
+      ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
       {
         key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
         subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업",
@@ -3735,7 +4247,10 @@ async function tick() {
       refreshEvidenceSignals();
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
-      refreshMashtAnchor();          // 2026-09-07 MASHT 앵커 섀도우
+      refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
+      refreshExtremeDetector();      // 2026-09-09 극점 탐지기
+      refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
+      refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
       refreshLiqBurstState();

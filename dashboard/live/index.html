@@ -18,27 +18,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260907-detector-removal">
+  <link rel="stylesheet" href="styles.css?v=20260909-legend-right">
 </head>
 <body>
-  <!-- 2026-08-25 perf pass: liquidation-density gradient hoisted out of renderCandleSvg() (app.js)
-       -- it was rebuilding this same 8-node <defs>/<linearGradient>/<stop>x6 with a fresh random id
-       every single call despite the stops (VIRIDIS_STOPS in app.js) being constant. id is resolved
-       document-wide by SVG url(#...) references, so candleSvg/candleSvgSnapshot (each wiped and
-       rebuilt independently) can both reference #viridisGradient without redefining it. -->
-  <svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true">
-    <defs>
-      <linearGradient id="viridisGradient" x1="0%" x2="100%" y1="0%" y2="0%">
-        <stop offset="0%" stop-color="rgb(68,1,84)"></stop>
-        <stop offset="20%" stop-color="rgb(65,68,135)"></stop>
-        <stop offset="40%" stop-color="rgb(42,120,142)"></stop>
-        <stop offset="60%" stop-color="rgb(34,168,132)"></stop>
-        <stop offset="80%" stop-color="rgb(122,209,81)"></stop>
-        <stop offset="100%" stop-color="rgb(253,231,37)"></stop>
-      </linearGradient>
-    </defs>
-  </svg>
-  <main class="app">
+    <main class="app">
     <header class="top">
       <div class="topbar">
         <nav class="page-tabs" aria-label="대시보드 탭">
@@ -138,6 +121,20 @@
         </div>
         <div id="opsHealthList" class="ops-health-list"></div>
       </section>
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>바이낸스 계정</h3><p id="acctBalanceText" class="muted">-</p></div>
+          <div class="ops-health-head-tools">
+            <span id="acctSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+          </div>
+        </div>
+        <div id="acctPositions" class="ops-health-list"></div>
+        <div class="ops-health-head" style="margin-top:12px">
+          <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
+        </div>
+        <div id="acctTrades" class="ops-health-list"></div>
+      </section>
     </section>
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
@@ -190,6 +187,11 @@
               <div id="modelChipLiqCascade" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
                 <span class="signal-chip-label">청산 캐스케이드</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <div id="modelChipVolForecast" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">변동성 전망</span>
                 <span class="signal-chip-state">-</span>
               </div>
             </div>
@@ -263,6 +265,16 @@
               <span class="signal-chip-label">V자 급등락</span>
               <span class="signal-chip-state">-</span>
             </div>
+            <div id="modelChipExtreme" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">극점 탐지기</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="modelChipBreakoutRev" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">앵커 돌파/되돌림</span>
+              <span class="signal-chip-state">-</span>
+            </div>
           </div>
         </div>
       </section>
@@ -274,6 +286,7 @@
           </div>
         </div>
         <div id="liqVolumeGauge"></div>
+        <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -319,7 +332,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=202609072037"></script>
+  <script src="./app.js?v=20260910-dualcond-0420"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

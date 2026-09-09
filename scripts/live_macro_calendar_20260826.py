@@ -27,10 +27,17 @@ API and is deliberately NOT covered here.
   release_id=95 because FRED's release-date feed can differ from the survey's published schedule.
 - FOMC: trading_bot_modules/omega6_live.py::L6_FOMC_DECISION_DATES -- official Fed calendar,
   already verified/covers all of 2026, 2:00pm ET announcement.
-- Federal Reserve Chair appearances: official monthly HTML pages at
-  federalreserve.gov/newsevents/YYYY-month.htm. This is scraped for scheduled
-  Speech/Testimony/Discussion rows whose speaker is labelled Chair/Chairman; the Fed RSS feed is
-  a publication feed and does not provide a future schedule.
+- Federal Reserve appearances + FOMC press conference: official monthly HTML pages at
+  federalreserve.gov/newsevents/YYYY-month.htm. Scraped for scheduled Speech/Testimony/Discussion
+  rows AND the FOMC Press Conference row; the Fed RSS feed is a publication feed and does not
+  provide a future schedule.
+  2026-09-07: the speaker filter was Chair/Chairman only, which matched NOTHING -- the Fed's
+  monthly pages label rows "Speech - Governor <name>" and the word "Chair" did not appear even
+  once on the 2026-09 page. Widened to Vice Chair/Governor (user request). 2026-09-07 (later the
+  same day, user request): Governor rows raised medium -> high, and FOMC Minutes / Beige Book
+  added alongside the FOMC press conference. Everything from this source is now "high", i.e. it
+  all fires the +-30min push alert -- routine statistical releases (H.4.1/G.19/G.17 ...) stay
+  excluded for exactly that reason.
 - EIA Weekly Petroleum Status Report: EIA's API has no "next scheduled release" field (it serves
   data, not a release calendar), so this uses the well-known fixed cadence instead -- every
   Wednesday 10:30am ET, shifted to Thursday when that week's Monday is a US market holiday
@@ -320,16 +327,50 @@ def _parse_fed_time(value: str) -> tuple[int, int] | None:
     return hour, minute
 
 
-def _parse_fed_chair_events(html: str, year: int, month: int, source_url: str,
-                             today: date, horizon: date) -> list[dict]:
+# 연준 월별 캘린더에서 뽑을 행. "Vice Chair"를 "Chair"보다 먼저 둬야 한다 -- 뒤에 두면
+# `Chair`가 "Vice Chair"의 뒷부분을 먼저 집어 역할을 의장으로 잘못 읽는다.
+FED_SPEAKER_ROW = re.compile(
+    r"\b(Speech|Testimony|Discussion)\s*-\s*(Vice Chair(?:\s+for\s+Supervision)?|Chair(?:man)?|Governor)\b",
+    re.I)
+# 연준 월별 캘린더에서 함께 뽑는 비-연설 행들(2026-09-07 사용자 요청). 전부 그 페이지에 이미
+# 있는 예정 항목이고, 각각 발표 시각이 정해져 있다.
+#   FOMC 기자회견 -- 금리결정 자체는 omega6_live의 정적 목록에서 오지만 기자회견은 그 30분 뒤
+#     별도 이벤트이고, 발언이 결정문보다 시장을 더 움직이는 경우가 많다.
+#   FOMC 의사록  -- 직전 회의의 논의 내용. 금리 경로 기대를 자주 되돌린다.
+#   베이지북     -- 각 지역연은 경기 보고. 위 둘보다는 약하지만 FOMC 2주 전 정례 발표다.
+# ⚠️여기 넣는 순간 +-30분 푸시 알림 대상이 된다(compute_macro_event_alert는 high만 센다).
+#   그래서 정기 통계 발표(H.4.1/G.19/G.17 등)는 계속 제외한다 -- 넣으면 캘린더도 알림도 잠긴다.
+FED_EXTRA_ROWS = (
+    (re.compile(r"\bFOMC\s+Press\s+Conference\b", re.I), "FOMC 기자회견", "fomc", "high"),
+    (re.compile(r"\bFOMC\s+Minutes\b", re.I), "FOMC 의사록", "fomc", "high"),
+    (re.compile(r"\bBeige\s+Book\b", re.I), "베이지북", "fed_publication", "high"),
+)
+_FED_KIND_KO = {"speech": "연설", "testimony": "증언", "discussion": "대담"}
+
+
+def _fed_role_ko(role: str) -> tuple[str, str]:
+    """(한국어 역할, importance). 2026-09-07 사용자 요청으로 이사(Governor)도 high로 올렸다 --
+    그 전엔 medium이라 캘린더에만 보이고 +-30분 푸시 알림은 안 갔다."""
+    normalized = role.lower()
+    if normalized.startswith("vice chair"):
+        return "부의장", "high"
+    if normalized.startswith("chair"):
+        return "의장", "high"
+    return "이사", "high"
+
+
+def _parse_fed_calendar_events(html: str, year: int, month: int, source_url: str,
+                                today: date, horizon: date) -> list[dict]:
     parser = _FedCalendarParser()
     parser.feed(html)
     events: list[dict] = []
-    chair_row = re.compile(r"\b(Speech|Testimony|Discussion)\s*-\s*(?:Chair|Chairman)\b", re.I)
     for row in parser.rows:
         content = " ".join(row["content"].split())
-        match = chair_row.search(content)
-        if not match:
+        speaker = FED_SPEAKER_ROW.search(content)
+        extra = None
+        if not speaker:
+            extra = next((row_spec for row_spec in FED_EXTRA_ROWS if row_spec[0].search(content)), None)
+        if not speaker and not extra:
             continue
         day_match = re.search(r"\b([1-9]|[12]\d|3[01])\b", row["date"])
         parsed_time = _parse_fed_time(row["time"])
@@ -342,26 +383,27 @@ def _parse_fed_chair_events(html: str, year: int, month: int, source_url: str,
         if not (today <= event_day <= horizon):
             continue
         hour, minute = parsed_time
-        kind = match.group(1).lower()
-        title = {
-            "speech": "연준 의장 연설",
-            "testimony": "연준 의장 증언",
-            "discussion": "연준 의장 대담",
-        }[kind]
+        if speaker:
+            role_ko, importance = _fed_role_ko(speaker.group(2))
+            title = f"연준 {role_ko} {_FED_KIND_KO[speaker.group(1).lower()]}"
+            category = "fed_speech"
+        else:
+            _pattern, title, category, importance = extra
         short_content = re.split(r"\b(?:Watch Live|At the)\b", content, maxsplit=1, flags=re.I)[0].strip()
         events.append({
             "time_utc": _et_to_utc(event_day, hour, minute).isoformat(),
-            "category": "fed_speech",
+            "category": category,
             "title_ko": title,
             "detail": f"{short_content} -- 미 연준 공식 월별 HTML 캘린더",
-            "importance": "high",
+            "importance": importance,
             "source": source_url,
         })
     return events
 
 
-def fetch_fed_chair_events(today: date) -> list[dict]:
-    """Fetch scheduled Chair speech/testimony/discussion rows from the Fed's monthly HTML pages."""
+def fetch_fed_calendar_events(today: date) -> list[dict]:
+    """Fetch scheduled Chair/Vice Chair/Governor appearances and the FOMC press conference from
+    the Fed's monthly HTML pages."""
     horizon = today + timedelta(days=LOOKAHEAD_DAYS)
     events: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -376,7 +418,7 @@ def fetch_fed_chair_events(today: date) -> list[dict]:
                 timeout=10,
             )
             resp.raise_for_status()
-            for event in _parse_fed_chair_events(resp.text, year, month_number, url, today, horizon):
+            for event in _parse_fed_calendar_events(resp.text, year, month_number, url, today, horizon):
                 key = (event["time_utc"], event["detail"])
                 if key not in seen:
                     seen.add(key)
@@ -562,7 +604,7 @@ def compute_macro_calendar(fred_key: str | None, eia_key: str | None, finnhub_ke
     events += fetch_fred_events(fred_key, today)
     events += fetch_michigan_events(today)
     events += fomc_events(today)
-    events += fetch_fed_chair_events(today)
+    events += fetch_fed_calendar_events(today)
     events += eia_events(today)
     events += pmi_events(today)
     events += fetch_finnhub_events(finnhub_key, today)
