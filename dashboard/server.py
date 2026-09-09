@@ -256,6 +256,12 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 EXTREME_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_extreme_detector_state.json"
 EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 
+# 2026-09-10 24시간 변동성 전망 -- 새 정보원(Deribit DVOL)을 쓰는 첫 지표. 워커가 채점한다
+# (scripts/live_eth_vol_forecast_worker_20260910.py · supervisor_vol_forecast_worker.sh).
+# ⚠️시간봉 신호라 워커 주기가 300초다 -- 5분봉 카드보다 신선도 기준을 넉넉히 둔다.
+VOL_FORECAST_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_vol_forecast_state.json"
+VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
+
 # 2026-09-08 돌파/되돌림 앵커 섀도우(scripts/live_eth_breakout_reversal_shadow_runner_20260908.py)
 # 표시 전용, 주문 없음. 커버리지 상한을 두지 않는다 -- 전 트리거에 판정을 내고 확신 등급만 표시한다.
 BREAKOUT_REV_STATE_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_state.json"
@@ -846,6 +852,19 @@ def extreme_detector_payload() -> dict[str, Any]:
     return {**st, "stale_min": round(age, 1) if age is not None else None}
 
 
+def vol_forecast_payload() -> dict[str, Any]:
+    """24시간 변동성 전망 워커 상태 파일. 극점 탐지기와 같은 구조 -- 인라인 폴백 없음."""
+    st = load_json(VOL_FORECAST_STATE_PATH)
+    if not st:
+        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
+                "subText": "데이터 없음", "grade": None, "proba": None, "history": [], "times": []}
+    age = _age_min(st.get("updated_utc"))
+    if age is not None and age > VOL_FORECAST_MAX_AGE_MIN:
+        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
+                "tone": "neutral", "subText": "데이터 없음"}
+    return {**st, "stale_min": round(age, 1) if age is not None else None}
+
+
 def breakout_reversal_shadow_payload() -> dict[str, Any]:
     """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
 
@@ -1234,6 +1253,8 @@ def make_app() -> web.Application:
     v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     v_rebound_lock = asyncio.Lock()
     extreme_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    vol_forecast_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    vol_forecast_lock = asyncio.Lock()
     extreme_detector_lock = asyncio.Lock()
     chart_markers_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     chart_markers_lock = asyncio.Lock()
@@ -1853,6 +1874,15 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
+    async def load_vol_forecast() -> dict[str, Any]:
+        """24시간 변동성 전망 -- 워커가 쓴 상태 파일을 읽기만 한다(모델 인라인 금지)."""
+        return await swr_cached(
+            "vol_forecast", vol_forecast_cache, vol_forecast_lock,
+            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(vol_forecast_payload),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+
     async def load_chart_markers(asset: str = "eth") -> dict[str, Any]:
         """청산맵 차트 마커 -- scripts/live_eth_chart_markers_20260909.py 참고.
         ETH 전용이다(다른 코인은 unsupported 로 비운다 -- 빈 레인은 "신호 없음"으로 오독된다).
@@ -2223,6 +2253,9 @@ def make_app() -> web.Application:
         payload = await load_extreme_detector()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_vol_forecast(request: web.Request) -> web.Response:
+        return web.json_response(await load_vol_forecast())
+
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2532,6 +2565,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
+    app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)

@@ -130,6 +130,11 @@ const API_CHART_MARKERS_URL = "/api/chart-markers";
 let latestExtreme = null;
 let extremeLastFetchAt = 0;
 const EXTREME_POLL_MS = 60000;
+// 2026-09-10 24시간 변동성 전망 -- **시간봉** 신호라 자주 받을 이유가 없다(워커 주기 300초).
+let latestVolForecast = null;
+let volForecastLastFetchAt = 0;
+const API_VOL_FORECAST_URL = "/api/vol-forecast";
+const VOL_FORECAST_POLL_MS = 120000;
 const API_EXTREME_URL = "/api/extreme-detector";
 let latestBreakoutRev = null;
 let breakoutRevLastFetchAt = 0;
@@ -1227,6 +1232,14 @@ const MODEL_INDICATOR_MEANING = {
     "숏압박↑": "베이시스 콘탱고 극단 — 이후 1~4시간 숏 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
     "롱압박↑": "베이시스 백워데이션 극단 — 이후 1~4시간 롱 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
   },
+  vol_forecast: {
+    "안정": "앞으로 24시간 변동성이 지금 수준을 유지할 가능성이 높아요 — 평소 크기로 다뤄도 되는 국면이에요.",
+    "주의": "앞으로 24시간 변동성이 커질 신호가 일부 보여요 — 손절폭을 조금 넓게 잡는 게 안전해요.",
+    "위험": "앞으로 24시간 변동성이 1.3배 이상 확장될 확률이 높아요 — 크기를 줄이거나 손절폭을 넓히세요.",
+    "웜업": "변동성 전망 워커가 아직 첫 계산을 끝내지 않았어요.",
+    "데이터 없음": "변동성 전망 워커가 값을 내지 못하고 있어요.",
+    "오류": "변동성 전망을 불러오지 못했어요.",
+  },
   liq_cascade: {
     "안정": "지금 진행 중인 청산 캐스케이드가 없어요 — 청산 흐름이 평소 수준이에요.",
     "주의": "한쪽 청산량이 평소보다 급증했지만 아직 본격적인 캐스케이드로 번지진 않았어요.",
@@ -1376,6 +1389,7 @@ const MODEL_CHIP_IDS = {
   breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
+  vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
   liq_direction: "modelChipLiqDirection",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
@@ -2393,6 +2407,50 @@ async function refreshExtremeDetector() {
   }
 }
 
+async function refreshVolForecast() {
+  const now = Date.now();
+  if (now - volForecastLastFetchAt < VOL_FORECAST_POLL_MS) return;
+  volForecastLastFetchAt = now;
+  try {
+    const res = await fetch(API_VOL_FORECAST_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`vol forecast ${res.status}`);
+    latestVolForecast = await res.json();
+  } catch (error) {
+    console.error("Vol forecast fetch error:", error);
+    latestVolForecast = { error: "fetch_failed" };
+  }
+}
+
+// ── 24시간 변동성 전망 (2026-09-10) ─────────────────────────────────────────────────
+// 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
+//       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
+// ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
+function volForecastIndicatorItem() {
+  const p = latestVolForecast;
+  const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 Binance 5분봉(과거 변동성)과 "
+                   + "Deribit DVOL(내재변동성)로 계산합니다. 방향이 아니라 변동성만 예측하며 매매에 "
+                   + "연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
+             proba: null, history: [], times: [] };
+  }
+  const prec = (p.precision_holdout || {})[p.grade];
+  const auc = p.auc || {};
+  const stateTitle = [
+    `${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
+    `내재변동성(DVOL) ${p.dvol} · 실현변동성 24h ${p.rv24} · 격차(VRP) ${p.vrp > 0 ? "+" : ""}${p.vrp}`,
+    `예측 실현변동성 ${p.rv_fwd_pred}`,
+    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
+    `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
+    "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
+  ].filter(Boolean).join("\n");
+  return { ...base, tone: p.tone === "warn" ? "warn" : "neutral", subText: p.grade,
+           proba: Number(p.proba), stateTitle,
+           history: p.history || [], times: p.times || [] };
+}
+
 // ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
 // 규약: 라벨 §1(측면 어휘) · 색 §2(바닥=good/천장=bad/그 외 neutral) · 제목 밑 데이터 줄 없음 §4
 // ⭐5번째 색을 만들지 않는다 -- 억제/미발동은 전부 neutral 이다.
@@ -2986,6 +3044,7 @@ function setupPageTabs() {
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       breakoutRevLastFetchAt = 0; refreshBreakoutRev();
       extremeLastFetchAt = 0; refreshExtremeDetector();
+      volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
@@ -4080,6 +4139,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
+      ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
       {
         key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
         subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업",
@@ -4110,6 +4170,7 @@ async function tick() {
       refreshVReboundSignal();
       refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
+      refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
