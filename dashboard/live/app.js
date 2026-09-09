@@ -923,11 +923,22 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, rawFire, c
   // instead of silently vanishing into one long block. Callers that don't pass rawFire (model
   // indicators etc.) get fireList=[] -- fireList[i] is always undefined/falsy, so behavior is
   // unchanged for them.
+  // 🔴2026-09-10 fix (user report "연속으로 같은 신호가 나왔는데 게이지가 하나로 안 합쳐진다"):
+  // the 2026-09-01 rule above reads rawFire as an EVENT column, but all 8 raw columns are LEVEL
+  // (threshold) conditions -- `dem <= 0.10`, `kalman_dev_z <= -2.0`, ... (see
+  // scripts/live_evidence_signal_dashboard_20260823.py::compute_signals) with no edge detection or
+  // dedup, so they stay true on EVERY bar the condition keeps holding. Measured over 224,353 bars
+  // (2023-12~2026-02): 30.9% of all fire bars have the previous bar firing too (demarker_extreme
+  // 69.5%, runs up to 24 bars = 2h), and each was being split into its own 1-bar segment even
+  // though the signal never stopped firing. Breaking on the RISING EDGE only keeps the 2026-09-01
+  // intent intact -- a condition that went false and true again inside a still-lit fill window is a
+  // genuine re-trigger and still gets its boundary -- while one continuous hold merges into one
+  // segment. fireList[-1] is undefined (falsy) so bar 0 is unaffected; it starts a segment anyway.
   const segments = [];
   for (let i = 0; i < n; i++) {
     const tone = list[i] || "neutral";
     const isProvisionalBar = !!(provisionalLast && i === n - 1);
-    const isFreshFire = !!fireList[i];
+    const isFreshFire = !!fireList[i] && !fireList[i - 1];
     const call = callList[i] || "";
     const prev = segments[segments.length - 1];
     if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar && !isFreshFire) {
@@ -1088,8 +1099,11 @@ function lastSegmentRangeLabel(tones, times, key, timeFmtKind, rawFire, calls) {
   // 2026-09-01: also stop at a rawFire boundary (mirrors toneStripSvg's own segment-merge guard)
   // -- once `start` itself is a genuine re-fire bar, that's where its segment begins, so the walk
   // must not continue past it even if the tone on both sides matches.
+  // 2026-09-10: rising edge only, same fix + reasoning as toneStripSvg's merge guard above -- a
+  // level condition that simply keeps holding is not a re-fire. Without this the caption
+  // under-reported its own segment's start ("5분 전부터" for a signal firing for 2 hours).
   while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall
-         && !fireList[start]) start--;
+         && !(fireList[start] && !fireList[start - 1])) start--;
   const fmt = stripTimeFmtByKind(timeFmtKind);
   const barLabel = stripBarLabel(key, lastTone, lastCall);
   const rangeText = start === n - 1 ? fmt(timeList[n - 1]) : `${fmt(timeList[start])}~${fmt(timeList[n - 1])}`;
