@@ -32,7 +32,10 @@ import numpy as np
 import pandas as pd
 import requests
 
-ROOT = Path("/home/kbj20/crypto-scalping")
+# 🔴경로를 하드코딩하지 않는다. 2026-09-11 배포에서 **개발 머신의 홈 경로**를 박아
+#   서버(리눅스 계정이 다르다)에서 FileNotFoundError 로 워커가 못 떴다.
+#   다른 라이브 워커와 같은 관례로 스크립트 위치에서 유도한다.
+ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / "data/live/eth_position_sizing_state.json"
 CAL = ROOT / "data/live/eth_position_sizing_calib.json"
 SYMBOL = "ETHUSDT"
