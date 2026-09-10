@@ -35,13 +35,20 @@ ROOT = Path("/home/kbj20/crypto-scalping")
 KDIR = ROOT / "binance_data/klines"
 MDIR = ROOT / "binance_data/metrics"
 BASE = "https://data.binance.vision/data/futures/um"
-START, END = pd.Timestamp("2023-12-01"), pd.Timestamp("2026-08-31")
+START, END = pd.Timestamp("2021-12-01"), pd.Timestamp("2026-08-31")
+# ⭐2021-12-01 은 **metrics 아카이브의 실제 시작일**이다(2021-11-01 은 404, 12-01 부터 200).
+# klines 는 더 이르지만 롱숏비가 없으면 이 전략엔 쓸 수 없으므로 metrics 시작에 맞춘다.
 UA = {"User-Agent": "research/1.0"}
-WORKERS = 8
+WORKERS = 16          # 작은 파일 다수라 IO 바운드
 
 # 아카이브 → 저장소 컬럼명
 RENAME = {"open_time": "timestamp", "count": "trades",
           "taker_buy_volume": "taker_buy_base", "taker_buy_quote_volume": "taker_buy_quote"}
+# 🔴**2021-12 이전 월별 klines 에는 헤더 행이 없다** (바이낸스가 2022-01 부터 헤더를 넣었다).
+# 헤더로 읽으면 첫 데이터 행이 컬럼명이 되고 rename 이 안 먹어 KeyError → except 가 삼킨다.
+# 2026-09-10 에 이 때문에 **124종 전부에서 정확히 2021-12 만** 조용히 빠졌다.
+ARCH_COLS = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+             "quote_volume", "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"]
 COLS = ["timestamp", "open", "high", "low", "close", "volume", "close_time",
         "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
 
@@ -66,11 +73,19 @@ def get(url: str, tries=3):
 
 
 def klines(sym: str) -> int:
+    """⚠️기존 파일이 있으면 **건너뛰지 않고 뒤로 이어붙인다** — 확장 구간 수집이므로
+    '있음 = 완비' 가 아니다. 기존 커버 범위를 읽어 **없는 달만** 받고 병합한다."""
     out = KDIR / sym / f"{sym}-5m-api.csv"
-    if out.exists():
-        log(f"  {sym} klines 이미 있음 — 건너뜀")
-        return 0
     months = pd.date_range(START, END, freq="MS").strftime("%Y-%m").tolist()
+    prev = None
+    if out.exists():
+        prev = pd.read_csv(out, parse_dates=["timestamp"])
+        have = set(prev["timestamp"].dt.strftime("%Y-%m").unique())
+        months = [m for m in months if m not in have]
+        if not months:
+            log(f"  {sym} klines 이미 완비 ({prev.timestamp.min().date()} → {prev.timestamp.max().date()})")
+            return 0
+        log(f"  {sym} klines 기존 {len(have)}개월 · 추가 {len(months)}개월")
     parts = {}
     with ThreadPoolExecutor(WORKERS) as ex:
         fs = {ex.submit(get, f"{BASE}/monthly/klines/{sym}/5m/{sym}-5m-{m}.zip"): m for m in months}
@@ -80,21 +95,30 @@ def klines(sym: str) -> int:
                 continue
             try:
                 z = zipfile.ZipFile(io.BytesIO(b))
-                parts[fs[f]] = pd.read_csv(io.BytesIO(z.read(z.namelist()[0])))
-            except Exception:
-                pass
+                raw = z.read(z.namelist()[0])
+                headerless = not raw[:9].startswith(b"open_time")   # 구형 파일 판별
+                parts[fs[f]] = pd.read_csv(io.BytesIO(raw), header=None, names=ARCH_COLS) \
+                    if headerless else pd.read_csv(io.BytesIO(raw))
+            except Exception as e:
+                log(f"    ⚠️{sym} {fs[f]} 파싱 실패: {type(e).__name__} {e}")
     if not parts:
         log(f"  🔴 {sym} klines 0개월 — 수집 실패")
         return 0
     d = pd.concat([parts[m] for m in sorted(parts)], ignore_index=True).rename(columns=RENAME)
     d["timestamp"] = pd.to_datetime(d["timestamp"], unit="ms")
-    d = d.sort_values("timestamp").drop_duplicates("timestamp", keep="last")
     for c in COLS:
         if c not in d.columns:
             d[c] = 0
+    if prev is not None:
+        d = pd.concat([prev[COLS], d[COLS]], ignore_index=True)
+    d = d.sort_values("timestamp").drop_duplicates("timestamp", keep="last")
     out.parent.mkdir(parents=True, exist_ok=True)
     d[COLS].to_csv(out, index=False)
-    log(f"  ✅ {sym} klines {len(parts)}개월 · {len(d):,}봉 · {d.timestamp.min()} → {d.timestamp.max()}")
+    got = set(d["timestamp"].dropna().dt.strftime("%Y-%m"))
+    miss = [m for m in months if m not in got]
+    log(f"  ✅ {sym} klines +{len(parts)}개월 · 총 {len(d):,}봉 · "
+        f"{d.timestamp.min()} → {d.timestamp.max()}"
+        + (f"  🔴미확보 {len(miss)}개월 {miss[:4]}" if miss else ""))
     return len(d)
 
 
