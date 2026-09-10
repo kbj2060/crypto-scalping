@@ -169,11 +169,8 @@
                 <span class="signal-chip-label">리테일 수급</span>
                 <span class="signal-chip-state">-</span>
               </div>
-              <div id="modelChipLiqSize" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">청산 규모</span>
-                <span class="signal-chip-state">-</span>
-              </div>
+              <!-- 2026-09-11 청산 규모 칩 제거(사용자 지시). 같은 데이터가 청산맵 차트의
+                   봉별 청산 레인에 있고, 판단에 쓰는 숫자는 청산 위험 패널이 담는다. -->
               <div id="modelChipBasisLiq" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
                 <span class="signal-chip-label">베이시스 청산압박</span>
@@ -361,7 +358,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260911-restore"></script>
+  <script src="./app.js?v=20260911-nosizechip"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

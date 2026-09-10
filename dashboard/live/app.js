@@ -4426,13 +4426,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
       ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
-      {
-        key: "liq_size", label: "청산 규모", tone: liqSizeTone(latestLiquidation5m),
-        subText: liqSizeSubText(latestLiquidation5m),
-        // 이력은 봉별 청산 레인과 같은 데이터(5분봉)라 차트와 화면이 같은 이야기를 한다.
-        history: liqSizeToneHistory(latestLiquidation5mHist),
-        times: (latestLiquidation5mHist || []).slice(-48).map((b) => Date.parse(b.ts)),
-      },
+      // 2026-09-11 청산 규모 칩 제거(사용자 지시) -- 같은 데이터가 청산맵 차트의
+      //   봉별 청산 레인에 이미 있고, 청산 위험 패널이 판단에 쓰는 숫자를 담는다.
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);
