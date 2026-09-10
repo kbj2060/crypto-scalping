@@ -139,6 +139,12 @@ let volForecastLastFetchAt = 0;
 const API_VOL_FORECAST_URL = "/api/vol-forecast";
 const VOL_FORECAST_POLL_MS = 120000;
 const API_EXTREME_URL = "/api/extreme-detector";
+// 2026-09-11 횡보→추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
+// 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
+let latestBreakoutDetector = null;
+let breakoutDetectorLastFetchAt = 0;
+const API_BREAKOUT_DETECTOR_URL = "/api/breakout-detector";
+const BREAKOUT_DETECTOR_POLL_MS = 60000;
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -1342,6 +1348,8 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
   // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
   extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
+  // 2026-09-11 전환 탐지기. 방향 축이 없고 **단계**가 축이다 -- warn=경보(선행), bad=탐지(즉시).
+  breakout_detector: { bad: "돌파 발동", warn: "돌파 경보", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
   // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
@@ -1466,6 +1474,15 @@ const MODEL_INDICATOR_MEANING = {
     "미발동": "지금 봉은 등급을 받지 못했습니다. 강한 추세 구간에서는 판정을 억제합니다.",
     "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
   },
+  // 2026-09-11 전환 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
+  breakout_detector: {
+    "돌파 발동": "횡보가 방금 깨졌습니다 — 지금 반대 방향 포지션이면 청산을 먼저 보세요. 방향은 말하지 않습니다.",
+    "돌파 경보": "돌파 직전에 늘던 체결·거래대금 패턴이 보입니다 — 앞으로 약 2시간, 새 진입을 미룰 구간이에요.",
+    "미발동": "압축(횡보)이 유지되고 있거나 감시 구간 밖이에요.",
+    "웜업": "전환 탐지 워커가 아직 첫 계산을 끝내지 않았어요.",
+    "데이터 없음": "전환 탐지 워커가 값을 내지 못하고 있어요.",
+    "오류": "시세를 읽지 못해 이번 봉을 채점하지 못했어요.",
+  },
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
@@ -1504,6 +1521,24 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
+  breakout_detector:
+    "횡보(압축) 구간이 추세로 넘어가는 **시점**만 잡습니다. 방향은 예측하지 않습니다 -- 이 저장소에서 "
+    + "방향 축은 닫혔습니다(MFE-MAE 상관 +0.000). 입력은 공개 kline 의 체결 건수(n)와 거래대금(qv) "
+    + "뿐이고, 호가창은 기여가 1/6 수준이라 뺐습니다.\n\n"
+    + "[경보 = 신호등 3개] 합치지 않고 각자 켜집니다. 지평이 달라 뜻이 다르기 때문입니다. "
+    + "체결속도 3봉지속(z2016 q99) → 앞 2시간 lift 5.75x · 체결속도(z864 q99) → 앞 5~15분 3.65x · "
+    + "거래대금(z2016 q99) → 앞 30분 3.06x. 전반 8.56x / 후반 8.58x 로 갈리지 않고, 63셀 전부 2배 "
+    + "이상이었습니다(셀 순위 상관 +0.708).\n\n"
+    + "[탐지 = 2종 AND] 거래대금·체결속도 z288 q90 이 **둘 다** 넘을 때만. 포착률 98.4%, 지연 5분"
+    + "(1봉), 감지 시점 진행률 6.08%(전체 이동폭 대비), 헛발동 하루 39.8회. volexp 자체는 뺐습니다 -- "
+    + "전환의 정의에 쓰인 양이라 기여가 정의상 보장된 것이고, 넣으면 진행률이 11.51%로 느려집니다.\n\n"
+    + "[순서] 경보→탐지→전환이 실제로 그 순서로 431건 중 143건(33.2%). 순환이동 귀무는 20.0%"
+    + "(q95 25.8%), p=0.000 입니다.\n\n"
+    + "[전환 뒤] 같은 방향 지속 77.2%(1시간)→62.9%(1일), 큰 반전 29.2%(1일). "
+    + "⚠️그래서 **반대 포지션은 청산까지**입니다. 뒤집어서 따라가라는 근거는 없습니다.\n\n"
+    + "⚠️매매 트리거가 아닙니다. 임계는 압축 봉만 모아 후행 2016봉 분위로 매 봉 다시 냅니다"
+    + "(전역 분위를 쓰면 미래참조입니다 -- 그 교체로 lift 가 7.71x→5.75x 로 내려갔습니다). "
+    + "단일 자산·단일 연도(ETH 2026-01~09, 압축 봉 29,778 · 전환 431건) 표본입니다.",
   extreme_detector:
     "증거신호 8종의 발동 여부·동시발동 수에 오실레이터·체결·ATR분위·레인지 내 위치·BTC 상대 등 "
     + "38개 피쳐를 더해, '이 봉이 ±60분 국소 극점일 확률'을 HGB 5시드로 예측합니다. "
@@ -1574,6 +1609,7 @@ const SIGNAL_HORIZON = {
   taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
   liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
   demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
+  breakout_detector: { text: "경보 2시간 · 탐지 5분", title: "두 층이 다른 일을 한다. **경보**는 압축 구간에서 체결속도·거래대금 급등을 보고 «앞으로 2시간 안에 큰 움직임이 올 상위 5%» 를 가리킨다(인과 임계 실측 lift 5.75x / 3.65x / 3.06x, 실제 선행 중앙 15분). **탐지**는 예측이 아니라 즉시 인지다 -- 전환이 시작되면 5분(1봉) 안에 켜진다(포착률 98.4%, 감지 시점 진행률 6.08%)." },
   kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
 };
 
@@ -2702,6 +2738,61 @@ function extremeDetectorIndicatorItem() {
     history: p.history || [], times: p.times || [] };
 }
 
+// 2026-09-11 횡보→추세 전환 탐지기. 확률 개념이 없으므로 게이지를 두지 않는다(규약 §3) --
+// 숫자는 meterNote(경보 N/3 · 탐지 N/2)와 상태 배지 툴팁으로 간다.
+function breakoutDetectorIndicatorItem() {
+  const p = latestBreakoutDetector;
+  const base = { key: "breakout_detector", label: "횡보→추세 전환",
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 5분봉 마감마다 공개 kline 으로 계산합니다. "
+                   + "방향은 예측하지 않습니다 -- 전환이 «온다/왔다»만 말합니다. 매매에 연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    const sub = !p ? "웜업"
+      : (p.error === "worker_fetch_failed" ? "오류"
+        : (p.error === "fetch_failed" ? "오류" : "데이터 없음"));
+    return { ...base, tone: "neutral", subText: sub, history: [], times: [] };
+  }
+  const lights = (p.alert && p.alert.lights) || [];
+  const lit = (p.alert && p.alert.lit) || 0;
+  const det = p.detect || {};
+  const meterNote = det.on ? `탐지 ${det.count}/${(det.signals || []).length}`
+    : (lit ? `경보 ${lit}/${lights.length}`
+      : (p.volexp != null ? `volexp ${Number(p.volexp).toFixed(2)}` : null));
+  const stateTitle = [
+    det.on ? "탐지: 거래대금·체결속도가 둘 다 q90 을 넘었습니다 — 전환이 시작됐습니다"
+      : (lit ? `경보 ${lit}등 — 아직 전환은 확인되지 않았습니다` : "발동 없음"),
+    ...lights.map((l) => `${l.on ? "● " : "○ "}${l.name} (${l.horizon} · lift ${l.lift}x)`
+      + (l.z != null && l.threshold != null ? ` z ${l.z} / 기준 ${l.threshold}` : "")),
+    ...((det.signals || []).map((x) => `${x.on ? "▲ " : "△ "}탐지 ${x.name}`
+      + (x.z != null && x.threshold != null ? ` z ${x.z} / 기준 ${x.threshold}` : ""))),
+    p.volexp != null ? `변동성 확장비 ${Number(p.volexp).toFixed(3)} (압축 < 0.70 · 전환 >= 1.80)` : "",
+    p.compressed ? "지금 압축(횡보) 구간입니다" : (p.watch ? "직전 1시간 안에 압축이 있어 감시 중입니다" : "감시 구간 밖입니다"),
+    "⚠️방향은 말하지 않습니다. 반대 포지션이면 청산까지 — 뒤집어 따라가라는 근거는 없습니다.",
+  ].filter(Boolean).join("\n");
+  return { ...base,
+    tone: p.tone === "bad" || p.tone === "warn" ? p.tone : "neutral",
+    subText: p.subText || "미발동",
+    meterNote,
+    meterNoteTitle: det.on ? "탐지는 2종 AND 입니다 — 둘 다 켜져야 발동합니다"
+      : "경보 신호등 3개는 지평이 달라 합치지 않습니다",
+    stateTitle,
+    history: p.history || [], times: p.times || [] };
+}
+
+async function refreshBreakoutDetector() {
+  const now = Date.now();
+  if (now - breakoutDetectorLastFetchAt < BREAKOUT_DETECTOR_POLL_MS) return;
+  breakoutDetectorLastFetchAt = now;
+  try {
+    const res = await fetch(API_BREAKOUT_DETECTOR_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`breakout detector ${res.status}`);
+    latestBreakoutDetector = await res.json();
+  } catch (error) {
+    console.error("Breakout detector fetch error:", error);
+    latestBreakoutDetector = { error: "fetch_failed" };
+  }
+}
+
 async function refreshVReboundSignal() {
   const now = Date.now();
   if (now - vReboundLastFetchAt < V_REBOUND_POLL_MS) return;
@@ -3128,6 +3219,7 @@ function setupPageTabs() {
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       extremeLastFetchAt = 0; refreshExtremeDetector();
+      breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
@@ -4315,6 +4407,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
       ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
+      ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 횡보→추세 전환
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -4363,6 +4456,7 @@ async function tick() {
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
+      refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
