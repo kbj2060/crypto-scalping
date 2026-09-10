@@ -644,6 +644,7 @@ class GovernorPositionRouter:
             "scout_probability_threshold": _safe_float(ctx.get("scout_probability_threshold", 0.0), 0.0),
             "scout_cost_pass": bool(ctx.get("scout_cost_pass", False)),
             "learned_config": dict(ctx.get("learned_config", {}) or {}),
+            "portfolio_cap": dict(ctx.get("portfolio_cap", {}) or {}),
             "take_profit": _safe_float(ctx.get("take_profit", 0.0), 0.0),
             "stop_loss": _safe_float(ctx.get("stop_loss", 0.0), 0.0),
             "max_hold_bars": int(ctx.get("max_hold_bars", 0) or 0),
