@@ -585,9 +585,14 @@ body {
    기존 SVG 인셋은 오른쪽 위 y=0..34 를 차지해 같은 자리에 새로 생긴 증거신호 **천장 레인**을
    덮었다. 그라디언트 스톱은 app.js 의 DENSITY_STOPS 와 **같은 값**이어야 범례가 히트맵을
    정직하게 설명한다(app.js 의 densityColor 와 같은 색 계열). */
-.liq-density-legend { display: flex; align-items: center; justify-content: flex-end;
-  gap: 10px; padding: 0 4px 6px; }   /* 2026-09-09: 오른쪽 끝 정렬(사용자 요청) --
-     SVG 인셋 시절에도 플롯 오른쪽 위였으므로 원래 자리로 돌아온 셈이다 */
+.liq-density-legend { display: flex; align-items: center; gap: 10px; }
+.liq-density-legend[hidden] { display: none; }   /* author display:flex 가 UA 의 hidden 을 이기므로 명시 */
+/* 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를 중앙에":
+   범례가 전용 행에서 `.ops-health-head` 안으로 들어왔다. 헤드는 space-between 이고 배지가
+   오른쪽에 있으므로, 범례에 flex:1 을 주면 남은 폭 전체를 차지하며 내용이 가운데 정렬된다.
+   패딩 18 -> 10 으로 빈 행 높이도 줄인다. (2026-09-09 의 오른쪽 끝 정렬은 이 지시로 대체됨) */
+.liq-map-panel .ops-health-head { padding: 10px 18px; }
+.liq-map-panel .ops-health-head .liq-density-legend { flex: 1; justify-content: center; }
 .liq-density-legend-title { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .liq-density-legend-scale { display: flex; align-items: center; gap: 6px; width: 200px; max-width: 45%; }
 .liq-density-legend-end { font-size: 10px; color: var(--muted); white-space: nowrap; }

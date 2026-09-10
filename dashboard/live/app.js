@@ -3310,10 +3310,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const mobileChart = isMobileChartMode();
   const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
   const h = mobileChart ? Math.max(parentH, 260) : 400;
-  // 2026-09-10 사용자 요청 "레짐 게이지 칸을 좀 더 크게": mb 40 -> 56.
-  // 하단 여백 안의 것들(x축 눈금·라벨·레짐 리본)은 전부 `h - mb` 상대 오프셋이라
-  // 여백만 늘리면 통째로 내려가고 리본이 커질 자리가 생긴다. 플롯 영역은 340 -> 324.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 20, mb = 56;
+  // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
+  // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
+  // 2026-09-10 mb 40 -> 56 (레짐 리본 20px 확보).
+  // 2026-09-11 사용자 요청 "증거신호 레인을 청산맵 밖으로": 레인이 플롯 **위에 겹쳐** 그려져
+  //   캔들을 가리던 것을 여백으로 뺐다. mt 20 -> 22(천장 레인 자리), mb 56 -> 74(바닥 레인
+  //   자리). 레인이 플롯에서 30px 를 돌려주므로 실제 캔들 영역 손실은 324 -> 304 로 20px 뿐이다.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 74;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3390,9 +3393,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
   // (swap this placeholder out once a real BTC regime classifier is trained).
   const regimeRibbonUnsupported = isSnapshotChart && !regimeSource;
-  // 리본 높이 8 -> 20 (2.5배). 배치: y = h-mb+28 = 372, 바닥 392, SVG 400 이라 8px 여유.
-  // x축 라벨 baseline 은 h-mb+21 = 365 이므로 7px 간격이 남는다(겹치지 않는다).
-  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 20;
+  // 리본 높이 20. 2026-09-11 바닥 레인이 h-mb+28 로 들어오면서 리본은 +28 -> **+50** 으로 내려갔다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
+  // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
+  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -3723,7 +3727,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   높이가 곧 캔들을 가리는 면적이다 -- 상·하 15px 씩이면 데스크톱 플롯 324 중
     //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
     const LANE_H = 15;
-    const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
+    // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
+    //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
+    const LANE_Y = { top: mt - 3 - LANE_H, bottom: h - mb + 28 };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
     // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
     // 3.8px 밖에 안 남아 점처럼 보인다(2026-09-09 신고) -- 9px 미만은 각지게 그린다.
@@ -3844,7 +3850,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
   //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
-  //   증거신호 **천장 레인**(y=mt+3)을 오른쪽 끝에서 덮었다. mt 를 키워 자리를 만들면
+  //   증거신호 **천장 레인**(당시 y=mt+3, 2026-09-11 에 mt-3-LANE_H 로 이동)을 덮었다.
   //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
   //   렌더는 renderLiqDensityLegend() -- index.html 의 #liqDensityLegend 를 채운다.
 

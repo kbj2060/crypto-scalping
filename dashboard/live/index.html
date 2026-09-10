@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260911-lane20">
+  <link rel="stylesheet" href="styles.css?v=20260911-lanesout">
 </head>
 <body>
     <main class="app">
@@ -290,12 +290,15 @@
 
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
+          <!-- 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를
+               중앙에": 이 행에는 배지 하나만 오른쪽에 있어 좌측 대부분이 비어 있었다. 범례를
+               전용 행에서 여기로 옮겨 그 자리를 채운다(행 하나가 줄어든다). -->
+          <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
           <div class="ops-health-head-tools">
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
         <div id="liqVolumeGauge"></div>
-        <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -341,7 +344,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260911-lane15"></script>
+  <script src="./app.js?v=20260911-lanesout"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
