@@ -1956,4 +1956,26 @@ svg {
   .acct-perf-svg { height: 78px; }
 }
 
-/* 2026-09-11 청산 위험 패널 제거로 .liqrisk-* 스타일도 함께 제거(사용자 지시). */
+/* 청산 위험 카드 (2026-09-11 사용자 "텍스트 말고 그림이나 그래프로") -- 텍스트 나열이라
+   한눈에 안 들어온다는 지적. 지평별 확률을 가로 막대로 세로 정렬해 길이로 비교하게 한다.
+   색은 기존 변수만 쓴다(새 색 만들지 않음). 방향 없는 카드라 good/bad 대신 warn/muted 계열. */
+.liqrisk { display: grid; gap: 7px; padding: 10px 12px; }
+.liqrisk-row { display: grid; grid-template-columns: 46px 1fr 46px; align-items: center; gap: 8px; }
+.liqrisk-label { font: 700 11px/1 var(--font-mono); color: var(--muted); }
+.liqrisk-track { height: 10px; border-radius: 3px; background: rgba(255,255,255,.07);
+  overflow: hidden; position: relative; }
+.liqrisk-fill { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.liqrisk-fill.warn { background: var(--warn); }
+.liqrisk-fill.bad { background: var(--bad); }
+.liqrisk-val { font: 800 11.5px/1 var(--font-mono); text-align: right; color: var(--text); }
+.liqrisk-val.warn { color: var(--warn); }
+.liqrisk-val.bad { color: var(--bad); }
+/* 크기 비교 막대: 권장(1배) 지점을 눈금으로 찍어 "얼마나 넘었나"를 길이로 본다 */
+.liqrisk-size { display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 8px;
+  margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--soft-line); }
+.liqrisk-size-track { height: 10px; border-radius: 3px; background: rgba(255,255,255,.07);
+  position: relative; overflow: hidden; }
+.liqrisk-size-fill { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.liqrisk-size-fill.warn { background: var(--warn); }
+.liqrisk-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--line); }
+.liqrisk-note { font: 600 10.5px/1.4 var(--font-sans); color: var(--muted); padding: 2px 12px 0; }
