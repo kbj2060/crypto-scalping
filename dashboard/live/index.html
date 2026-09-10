@@ -287,22 +287,8 @@
         </div>
         <div id="snapAcctPosition" class="ops-health-list"></div>
       </section>
-
-      <!-- 2026-09-11 크기 가늠자. 실계좌 12왕복 분해에서 -286.82 와 +22.97 을 가른 것이
-           "지금 크기가 권장의 몇 배인가" 하나였다(docs/user_entry_size_decomposition_20260911.md).
-           🔴수익을 예측하지 않는다 -- 검정된 것은 위험 축뿐이다(무작위 진입 82,167건에서
-           평균 명목 동일 조건에 SD -18% · 50배 청산 도달률 13.9%->9.1%).
-           방향이 없는 카드라 good/bad(롱/숏 전용 색)을 쓰지 않고 neutral/warn 만 쓴다. -->
-      <section class="panel ops-health-panel">
-        <div class="ops-health-head">
-          <div><h3>청산 위험</h3><p id="sizingSub" class="muted">-</p></div>
-          <div class="ops-health-head-tools">
-            <span id="sizingSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">지금 크기로 청산에 닿을 확률 · 과거 실측 · 5분 갱신</span>
-          </div>
-        </div>
-        <div id="sizingBody" class="ops-health-list"></div>
-      </section>
+      <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
+           있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
 
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
@@ -361,7 +347,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260911-liqriskchip"></script>
+  <script src="./app.js?v=20260911-liqriskonly"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -151,6 +151,8 @@ let vReboundLastFetchAt = 0;
 // frontend consumer had been removed.
 let latestLiquidation5m = null;
 let latestLiquidation5mHist = [];
+// 2026-09-11 청산 위험 칩(liqRiskIndicatorItem)이 읽는다. 패널은 제거됐지만 조회는 유지.
+let latestPositionSizing = null;
 let liquidation5mLastFetchAt = 0;
 // 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
 // dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
@@ -1070,10 +1072,10 @@ async function refreshBinanceAccount() {
   }
   try {
     const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-store" });
-    renderPositionSizing(await res.json());
+    latestPositionSizing = await res.json();
   } catch (error) {
     console.error("Position sizing fetch error:", error);
-    renderPositionSizing({ available: false, error: "fetch_failed" });
+    latestPositionSizing = { available: false, error: "fetch_failed" };
   }
 }
 
@@ -4805,86 +4807,6 @@ window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.
 
 setupNotifyPage();
 
-// 청산 위험 카드(scripts/live_eth_position_sizing_worker_20260911.py).
-// 2026-09-11 사용자 "텍스트 말고 그림이나 그래프로 -- 한 눈에 보이지가 않아".
-// 지평별 확률을 **가로 막대**로 세로 정렬해 길이로 비교하게 한다. 크기는 권장(1배) 눈금이 있는
-// 막대로 "얼마나 넘었나"를 보여준다. 방향 없는 카드라 good/bad(롱·숏 전용) 대신 muted/warn/bad 계열.
-function renderPositionSizing(payload) {
-  const sub = el("sizingSub");
-  const summary = el("sizingSummary");
-  const body = el("sizingBody");
-  if (!body) return;
-  if (!payload || payload.available !== true) {
-    const why = payload?.error === "worker_state_missing" ? "웜업" : "데이터 없음";
-    if (sub) sub.textContent = "-";
-    if (summary) { summary.textContent = why; summary.className = "ops-health-summary neutral"; }
-    body.innerHTML = "";
-    return;
-  }
-  const eq = Number(payload.vol_equivalent_qty);
-  const pos = (latestBinanceAccount?.positions || [])
-    .find((p) => p.symbol === "ETHUSDT" && Math.abs(Number(p.qty) || 0) > 0);
-  const tp = payload.touch_prob;
-  const grid = tp?.dist_grid_bp;
-  const probAt = (h, side, distBp) => {
-    const r = tp?.horizons?.[h];
-    if (!r || !grid || !grid.length || !r[side]) return null;
-    const a = r[side];
-    if (distBp <= grid[0]) return a[0];
-    if (distBp >= grid[grid.length - 1]) return a[a.length - 1];
-    for (let i = 1; i < grid.length; i += 1) {
-      if (distBp <= grid[i]) {
-        const t = (distBp - grid[i - 1]) / (grid[i] - grid[i - 1]);
-        return a[i - 1] + t * (a[i] - a[i - 1]);
-      }
-    }
-    return null;
-  };
-  // 확률 -> 톤. 10% 이상 주의, 30% 이상 위험. 막대 길이는 sqrt 로 눌러 작은 값도 보이게.
-  const tone = (v) => (v === null ? "" : v >= 0.3 ? "bad" : v >= 0.1 ? "warn" : "");
-  const width = (v) => (v === null ? 0 : Math.min(100, Math.sqrt(v) * 100));
-  const pctText = (v) => (v === null ? "-" : `${(v * 100).toFixed(v < 0.1 ? 1 : 0)}%`);
-  const bar = (label, v) => `<div class="liqrisk-row">`
-    + `<span class="liqrisk-label">${label}</span>`
-    + `<span class="liqrisk-track"><i class="liqrisk-fill ${tone(v)}" style="width:${width(v).toFixed(1)}%"></i></span>`
-    + `<span class="liqrisk-val ${tone(v)}">${pctText(v)}</span></div>`;
+// 2026-09-11 청산 위험 **패널** 제거 -- 지표 행의 칩(liqRiskIndicatorItem)이 대신한다.
+// 조회(latestPositionSizing)는 칩이 쓰므로 유지한다.
 
-  if (sub) sub.textContent = `변동성 분위 ${Math.round((payload.atr_pct_percentile || 0) * 100)}%`
-    + ` · 비슷한 구간 ${(tp?.band_bars || 0).toLocaleString()}봉 실측`;
-
-  if (pos) {
-    const qty = Math.abs(Number(pos.qty));
-    const side = pos.side === "LONG" ? "롱" : "숏";
-    const mark = Number(pos.mark_price), liq = Number(pos.liquidation_price);
-    const liqBp = mark > 0 && liq > 0 ? Math.abs(mark - liq) / mark * 1e4 : NaN;
-    const p1 = Number.isFinite(liqBp) ? probAt("1h", side, liqBp) : null;
-    const p4 = Number.isFinite(liqBp) ? probAt("4h", side, liqBp) : null;
-    const p24 = Number.isFinite(liqBp) ? probAt("24h", side, liqBp) : null;
-    if (summary) {
-      summary.textContent = p4 === null ? "계측 미달" : `4시간 ${pctText(p4)}`;
-      summary.className = `ops-health-summary ${p4 !== null && p4 >= 0.1 ? "warn" : "neutral"}`;
-    }
-    // 크기 막대: 권장(1배)을 눈금으로. 3배를 가득으로 보고 넘으면 100%에서 멈춘다.
-    const mult = eq > 0 ? qty / eq : null;
-    const sizeW = mult === null ? 0 : Math.min(100, (mult / 3) * 100);
-    body.innerHTML = `<div class="liqrisk">`
-      + bar("1시간", p1) + bar("4시간", p4) + bar("24시간", p24)
-      + (mult === null ? "" : `<div class="liqrisk-size">`
-        + `<span class="liqrisk-label">크기</span>`
-        + `<span class="liqrisk-size-track">`
-          + `<i class="liqrisk-size-fill ${mult > 1.25 ? "warn" : ""}" style="width:${sizeW.toFixed(1)}%"></i>`
-          + `<i class="liqrisk-mark" style="left:33.3%" title="권장 크기(1배)"></i></span>`
-        + `<span class="liqrisk-val ${mult > 1.25 ? "warn" : ""}">${mult.toFixed(1)}배</span></div>`)
-      + `</div>`
-      + `<div class="liqrisk-note">${side} ${qty.toFixed(2)} ETH · 청산선까지 ${Math.round(liqBp)}bp`
-      + ` · 권장 ${eq.toFixed(2)} ETH · 확률은 과거 실측 빈도</div>`;
-  } else {
-    if (summary) { summary.textContent = "포지션 없음"; summary.className = "ops-health-summary neutral"; }
-    const r = tp?.horizons; const i200 = grid ? grid.indexOf(200) : -1;
-    const g = (h) => (r && i200 >= 0 ? r[h]["롱"][i200] : null);
-    body.innerHTML = `<div class="liqrisk">`
-      + bar("1시간", g("1h")) + bar("4시간", g("4h")) + bar("24시간", g("24h")) + `</div>`
-      + `<div class="liqrisk-note">50배 기준(청산선 200bp) 예시 · 권장 크기 ${eq.toFixed(2)} ETH`
-      + ` · 포지션이 생기면 실제 청산선으로 계산합니다</div>`;
-  }
-}
