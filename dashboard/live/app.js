@@ -2725,6 +2725,18 @@ function breakoutRevIndicatorItem() {
   //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
   //   서로 다른 두 질문의 답을 평균한 값이 된다. 제외 건수를 화면에 밝힌다.
   const staleText = p.stale_closed ? ` · 옛 배리어 ${p.stale_closed}건 제외` : "";
+  // ⚠️2026-09-10: 여기 숫자 두 개는 **다른 축**이다. 이름 없이 내보내면 반드시 오해된다.
+  //   gross_bp_mean = 라벨 축("발현 방향으로 계속 갔는가", sgn=dir_up) -- 되돌림을 맞히면 음수.
+  //   trade_bp_mean = 매매 축(판정 방향으로 들어갔다면, 비용 전) -- 맞히면 양수.
+  //   실측 09-10: 라벨 −8.6bp / 매매 +8.6bp 로 부호가 정확히 반대였다.
+  //   🔴그리고 매매 축은 액면 그대로 읽으면 안 된다 -- 라벨이 발현 분부터 배리어를 재는데
+  //     진입은 그 5분봉 마감 후에야 가능해서, 상당수가 **진입 전에** 해소된다(실측 5/6건).
+  const axisText = [
+    p.gross_bp_mean != null ? `지속이동 ${p.gross_bp_mean > 0 ? "+" : ""}${p.gross_bp_mean}bp(손익 아님)` : "",
+    p.trade_bp_mean != null ? `판정방향 손익 ${p.trade_bp_mean > 0 ? "+" : ""}${p.trade_bp_mean}bp(비용 전)` : "",
+    p.feasible_total ? `체결가능 ${p.feasible_fills}/${p.feasible_total}건`
+      + `${p.feasible_fills < p.feasible_total ? " ⚠️나머지는 진입 전 해소라 실현 불가" : ""}` : "",
+  ].filter(Boolean).join(" · ");
   const ledText = p.closed
     ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
       + `${p.per_day != null ? ` · ${p.per_day}건/일` : ""}`
@@ -2736,6 +2748,7 @@ function breakoutRevIndicatorItem() {
   // 문장 순서 고정(규약 §4): 근거 → 원장 → 계측 → 백테스트 → 가드
   const stateTitle = [`${lastText} · 보유 ${p.open_positions} · 감시 ${p.watching}`,
                       `${ledText}${guard}`,
+                      axisText,
                       tierText ? `확신 등급별 ${tierText}` : "",
                       `${refText} · 전건 판정(커버리지 상한 없음)`,
                       "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]

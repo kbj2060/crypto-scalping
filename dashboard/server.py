@@ -922,7 +922,39 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
     # 마지막 판정: 미해소 포지션이 있으면 그중 최신, 없으면 원장 최신
     cands = [x for x in (positions + closed_all) if isinstance(x, dict) and x.get("p_breakout") is not None]
     last = max(cands, key=lambda x: str(x.get("trigger_utc") or "")) if cands else None
+    # ⚠️`gross_bp` 는 손익이 아니다. 러너가 `sgn = dir_up` 으로 곱하므로(빌더도 동일 규약)
+    #   **"발현 방향으로 계속 갔는가"** 를 재는 라벨 공간 지표다 -- 되돌림을 맞히면 정의상 음수다.
+    #   실제로 09-10 원장 6건에서 맞힌 5건이 전부 음수, 틀린 1건이 양수였다(완전 반전).
+    #   이 값만 화면에 내보내면 "맞힐수록 나빠 보이는" 표가 된다. 매매 축을 함께 낸다.
     gross = [float(r["gross_bp"]) for r in closed if isinstance(r.get("gross_bp"), (int, float))]
+
+    # 매매 축: 판정 방향으로 실제 들어갔다면 얼마였나(비용 전). strat_side_sign 은 러너가
+    # `(p>0.5) == dir_up ? +1 : -1` 로 넣는다 -- 돌파면 발현 방향, 되돌림이면 반대.
+    def _trade_bp(r: dict) -> float | None:
+        e, x, s = r.get("entry_px"), r.get("exit_px"), r.get("strat_side_sign")
+        if not isinstance(e, (int, float)) or not isinstance(x, (int, float)):
+            return None
+        if not isinstance(s, (int, float)) or not e:
+            return None
+        return (float(x) - float(e)) / float(e) * 1e4 * float(s)
+
+    trade = [v for v in (_trade_bp(r) for r in closed) if v is not None]
+
+    # 🔴체결 가능성: 라벨은 **발현 분(s1)** 부터 배리어를 재는데, 진입은 그 5분봉이 마감해야
+    #   가능하다. 배리어가 ±0.8×ATR(중앙값 5분 해소)이라 상당수가 **진입 전에** 해소된다 --
+    #   2026-09-10 실측 5/6건. 그 건들의 손익은 실현 불가이므로 개수를 밝힌다
+    #   (호메로스 "체결 이후만 크레딧" 규칙 · 매매 팔이 br_atr08_suspended 인 이유이기도 하다).
+    def _feasible(r: dict) -> bool | None:
+        bt, ex = r.get("bt_utc"), r.get("exit_utc")
+        if not bt or not ex:
+            return None
+        try:
+            b = datetime.fromisoformat(str(bt)); x = datetime.fromisoformat(str(ex))
+        except ValueError:
+            return None
+        return x >= b + timedelta(minutes=5)
+
+    feas = [v for v in (_feasible(r) for r in closed) if v is not None]
     # 매매 방향 = 발현 방향 XOR 되돌림콜 (돌파면 발현 방향 그대로, 되돌림이면 반대)
     def _dir(q: dict) -> str:
         up = bool(q.get("dir_up")) == (str(q.get("call")) == "돌파")
@@ -954,6 +986,9 @@ def breakout_reversal_shadow_payload() -> dict[str, Any]:
             "outcomes": {k: sum(1 for r in closed if r.get("outcome") == k)
                          for k in ("cont", "fade", "timeout")},
             "gross_bp_mean": round(sum(gross) / len(gross), 2) if gross else None,
+            "trade_bp_mean": round(sum(trade) / len(trade), 2) if trade else None,
+            "feasible_fills": sum(1 for v in feas if v),
+            "feasible_total": len(feas),
             "by_tier": tiers,
             "last": ({"age_min": _age_min(last.get("trigger_utc")),
                       "trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
