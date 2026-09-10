@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +30,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT if (ROOT / "binance_data").exists() else Path(subprocess.run(
     ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
     capture_output=True, text=True).stdout.strip()).parent
-PANEL = DATA / "tmp/eth_liqmap_sr_panel_20260911/sr_panel_5m.parquet"
+# 패널 경로를 인자로 받는다 -- 레벨 출처(청산맵 / 거래량 프로파일)를 바꿔 끼우려고.
+PANEL = Path(sys.argv[1]) if len(sys.argv) > 1 else \
+    DATA / "tmp/eth_liqmap_sr_panel_20260911/sr_panel_5m.parquet"
 K5 = DATA / "binance_data/klines/{}USDT/{}USDT-5m-api.csv"
 H, DELTA, TAU, K_ATR = 12, 0.0015, 0.002, 0.8
 SEEDS = [20260911, 7, 131, 977, 20250401]
