@@ -269,6 +269,11 @@ EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 VOL_FORECAST_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_vol_forecast_state.json"
 VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
 
+# 2026-09-11 횡보→추세 전환 탐지기 -- 방향은 예측하지 않는다(그 축은 닫혔다). 워커가 채점한다
+# (scripts/live_eth_breakout_detector_worker_20260911.py · supervisor_breakout_detector.sh).
+BREAKOUT_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_breakout_detector_state.json"
+BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초에 도는 워커다
+
 # 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
 # (scripts/live_eth_position_sizing_worker_20260911.py). 읽기만 한다.
 # 🔴수익을 예측하지 않는다. 검정된 것은 위험 축뿐이다(무작위 진입 82,167건에서 평균 명목 동일
@@ -805,6 +810,29 @@ def vol_forecast_payload() -> dict[str, Any]:
     return {**st, "stale_min": round(age, 1) if age is not None else None}
 
 
+def breakout_detector_payload() -> dict[str, Any]:
+    """횡보→추세 전환 탐지기 워커 상태. 극점 탐지기와 같은 구조 -- 인라인 폴백 없음.
+
+    ⚠️`ok: False` 는 워커가 외부 kline 조회에 실패한 사이클이다(워커는 그래도 상태를 쓴다).
+      그때 옛 톤을 그대로 보여주면 화면이 «지금 조용하다»고 거짓말을 한다 -- 오류로 떨어뜨린다.
+    """
+    st = load_json(BREAKOUT_DETECTOR_STATE_PATH)
+    if not st:
+        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
+                "subText": "데이터 없음", "history": [], "times": []}
+    if not st.get("ok"):
+        return {**st, "available": False, "error": "worker_fetch_failed", "tone": "neutral",
+                "subText": "오류", "history": [], "times": []}
+    age = _age_min(st.get("updated_utc"))
+    if age is not None and age > BREAKOUT_DETECTOR_MAX_AGE_MIN:
+        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
+                "tone": "neutral", "subText": "데이터 없음"}
+    # `available` 은 **여기서** 찍는다(워커가 아니라). 신선도를 판정하는 쪽이 찍어야
+    # 워커 버전이 달라도 계약이 안 깨진다 -- api_liq_burst_state 가 쓰는 것과 같은 방식이다.
+    return {**st, "available": True,
+            "stale_min": round(age, 1) if age is not None else None}
+
+
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
@@ -1122,7 +1150,9 @@ def make_app() -> web.Application:
     v_rebound_lock = asyncio.Lock()
     extreme_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     vol_forecast_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    breakout_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     vol_forecast_lock = asyncio.Lock()
+    breakout_detector_lock = asyncio.Lock()
     position_sizing_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     position_sizing_lock = asyncio.Lock()
     extreme_detector_lock = asyncio.Lock()
@@ -1755,6 +1785,15 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
+    async def load_breakout_detector() -> dict[str, Any]:
+        """횡보→추세 전환 탐지기 -- 워커가 쓴 상태 파일을 읽기만 한다(계산 인라인 금지)."""
+        return await swr_cached(
+            "breakout_detector", breakout_detector_cache, breakout_detector_lock,
+            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(breakout_detector_payload),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+
     async def load_chart_markers(asset: str = "eth") -> dict[str, Any]:
         """청산맵 차트 마커 -- scripts/live_eth_chart_markers_20260909.py 참고.
         ETH 전용이다(다른 코인은 unsupported 로 비운다 -- 빈 레인은 "신호 없음"으로 오독된다).
@@ -2149,6 +2188,10 @@ def make_app() -> web.Application:
     async def api_vol_forecast(request: web.Request) -> web.Response:
         return web.json_response(await load_vol_forecast())
 
+    async def api_breakout_detector(request: web.Request) -> web.Response:
+        return web.json_response(await load_breakout_detector(),
+                                 headers={"Cache-Control": "no-cache"})
+
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2460,6 +2503,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
+    app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
