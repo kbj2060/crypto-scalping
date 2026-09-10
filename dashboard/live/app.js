@@ -1,7 +1,7 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
+const API_POSITION_SIZING_URL = "/api/position-sizing";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
-const API_EXIT_ADVISOR_URL = "/api/position-exit-advisor";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
@@ -1063,55 +1063,14 @@ async function refreshBinanceAccount() {
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
   }
   try {
-    const res = await fetch(API_EXIT_ADVISOR_URL, { cache: "no-store" });
-    renderExitAdvisor(await res.json());
+    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-store" });
+    renderPositionSizing(await res.json());
   } catch (error) {
-    console.error("Exit advisor fetch error:", error);
-    renderExitAdvisor({ available: false, error: "fetch_failed", positions: [] });
+    console.error("Position sizing fetch error:", error);
+    renderPositionSizing({ available: false, error: "fetch_failed" });
   }
 }
 
-// 청산 감시자(scripts/live_position_exit_advisor_20260910.py) -- 어휘는 포지션 행동(익절/부분익절/손절/감축/보유)과
-// 긴급도(즉시/권고/참고). 극점 탐지기의 «바닥/천장 발동·강/중/약»과 일부러 겹치지 않게 했다(사용자 지정).
-function renderExitAdvisor(payload) {
-  const summary = el("exitAdvisorSummary");
-  const positions = payload?.positions || [];
-  if (!payload?.available) {
-    const why = payload?.error === "worker_stale" ? `워커 지연 ${payload.stale_min}분`
-      : payload?.error === "worker_state_missing" ? "워커 미가동" : (payload?.error || "데이터 없음");
-    if (summary) { summary.textContent = why; summary.className = "ops-health-summary bad"; }
-    setH("exitAdvisorList", `<p class="muted">판정 없음 (${escapeHtml(why)})</p>`);
-    return;
-  }
-  const urgent = positions.filter((p) => p.verdict !== "보유");
-  if (summary) {
-    summary.textContent = !positions.length ? "포지션 없음"
-      : urgent.length ? urgent.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${p.verdict}`).join(" · ") : "전부 보유";
-    summary.className = `ops-health-summary ${!positions.length ? "neutral" : urgent.length ? (urgent.some((p) => p.tone === "bad") ? "bad" : "warn") : "good"}`;
-  }
-  const rules = payload.rules || {};
-  // 종합 모델 성적은 숨기지 않는다 -- 사전등록 게이트(G1 ΔAUC CI · G2 시드 · G3 정책) 통과 여부를 그대로 쓴다.
-  const m = payload.model;
-  const modelNote = m ? `<p class="muted">종합 모델 ${escapeHtml(m.rule_id || "")} · OOS AUC ${m.auc?.B?.OOS != null ? Number(m.auc.B.OOS).toFixed(3) : "-"}` +
-      ` (포지션 상태만 ${m.auc?.A?.OOS != null ? Number(m.auc.A.OOS).toFixed(3) : "-"})` +
-      ` · 정책 OOS ${m.policy?.OOS ? `${Number(m.policy.OOS.B_model).toFixed(1)}bp vs 보유 ${Number(m.policy.OOS.hold_to_cap).toFixed(1)} / 무작위 ${Number(m.policy.OOS.random_same_rate).toFixed(1)}` : "-"}` +
-      ` · 사전등록 게이트 ${m.gate?.gate_pass ? "통과" : "미통과"}` +
-      (m.selective?.hi ? ` · 확신 상위 콜(권고) 표본외 정밀도 OOS ${(m.selective.hi.OOS.precision * 100).toFixed(1)}% / 홀드아웃 ${(m.selective.hi.HOLDOUT.precision * 100).toFixed(1)}%, 체크포인트의 ${(m.selective.hi.OOS.exit_call_rate * 100).toFixed(1)}%에서만 말함` : "") +
-      ` · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`
-    : `<p class="muted">종합 모델 아티팩트 없음 -- 규칙 v1 로만 판정 중 · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`;
-  setH("exitAdvisorList", positions.length ? positions.map((p) => `<article class="ops-health-row ${escapeHtml(p.tone)}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)} → ${escapeHtml(p.verdict)}${p.urgency !== "-" ? ` (${escapeHtml(p.urgency)})` : ""}</strong>
-        <span>${escapeHtml(p.reason)}${p.entry_at_truncated ? " · ⚠️진입 시각 불확실(체결 이력 잘림)" : ""}</span>
-      </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${Number(p.move_bp) >= 0 ? "+" : ""}${escapeHtml(p.move_bp)}bp</span>
-        <small>${p.p_exit != null ? `청산확률 ${Number(p.p_exit).toFixed(2)} · ` : ""}${escapeHtml(p.hold_bars)}봉 · ATR ${escapeHtml(p.atr_bp)}bp${p.liq_dist_bp != null ? ` · 청산가 ${escapeHtml(p.liq_dist_bp)}bp` : ""}</small>
-      </div>
-    </article>`).join("") + modelNote
-    : `<p class="muted">열려 있는 ETH 포지션이 없습니다 · 갱신 ${fmtTs(payload.updated_utc)}</p>` + modelNote);
-}
 
 async function refreshOpsStatus() {
   const now = Date.now();
@@ -4678,3 +4637,58 @@ window.addEventListener("beforeinstallprompt", (event) => {
 window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.add("hidden"));
 
 setupNotifyPage();
+
+// 크기 가늠자(scripts/live_eth_position_sizing_worker_20260911.py) -- 위험 눈금이지 알파가 아니다.
+// 계좌 포지션과의 결합은 여기서 한다(서버는 상태파일만 준다). 방향 없는 카드라 색은 neutral/warn 만 쓴다.
+function renderPositionSizing(payload) {
+  const sub = el("sizingSub");
+  const summary = el("sizingSummary");
+  const body = el("sizingBody");
+  if (!body) return;
+  if (!payload || payload.available !== true) {
+    const why = payload?.error === "worker_stale" ? "데이터 없음"
+      : payload?.error === "worker_state_missing" ? "웜업" : "데이터 없음";
+    if (sub) sub.textContent = "-";
+    if (summary) { summary.textContent = why; summary.className = "ops-health-summary neutral"; }
+    body.innerHTML = "";
+    return;
+  }
+  const eq = Number(payload.vol_equivalent_qty);
+  const pos = (latestBinanceAccount?.positions || [])
+    .find((p) => p.symbol === "ETHUSDT" && Math.abs(Number(p.qty) || 0) > 0);
+  const rows = [];
+  const fmtBp = (v) => `${Math.round(v)}bp`;
+  if (sub) {
+    sub.textContent = `변동성 분위 ${Math.round((payload.atr_pct_percentile || 0) * 100)}%`
+      + ` · 변동성 등가 수량 ${eq.toFixed(3)} ETH`;
+  }
+  if (pos) {
+    const qty = Math.abs(Number(pos.qty));
+    const mult = eq > 0 ? qty / eq : NaN;
+    const warn = !(mult >= 0.8 && mult <= 1.25);
+    if (summary) {
+      summary.textContent = `권장의 ${mult.toFixed(2)}배`;
+      summary.className = `ops-health-summary ${warn ? "warn" : "neutral"}`;
+    }
+    const side = pos.side === "LONG" ? "롱_bp" : "숏_bp";
+    const mark = Number(pos.mark_price);
+    const liq = Number(pos.liquidation_price);
+    const liqBp = mark > 0 && liq > 0 ? Math.abs(mark - liq) / mark * 1e4 : NaN;
+    const h4 = payload.horizons?.["4h"];
+    if (h4 && Number.isFinite(liqBp)) {
+      const q90 = Number(h4["0.9"][side]);
+      const q95 = Number(h4["0.95"][side]);
+      rows.push(`현재 ${qty.toFixed(3)} ETH · 권장 ${eq.toFixed(3)} ETH`);
+      rows.push(`청산선 ${fmtBp(liqBp)} · 4시간 90분위 불리이탈 ${fmtBp(q90)}`
+        + ` (${Math.round(q90 / liqBp * 100)}%)`);
+      if (q95 > liqBp) rows.push("4시간 95분위가 청산선을 넘습니다");
+    }
+  } else {
+    if (summary) { summary.textContent = "포지션 없음"; summary.className = "ops-health-summary neutral"; }
+    rows.push(`변동성 등가 수량 ${eq.toFixed(3)} ETH (기준 ${Number(payload.base_qty).toFixed(3)})`);
+    const h4 = payload.horizons?.["4h"];
+    if (h4) rows.push(`4시간 90분위 불리이탈 롱 ${fmtBp(h4["0.9"]["롱_bp"])} · 숏 ${fmtBp(h4["0.9"]["숏_bp"])}`);
+  }
+  rows.push("같은 위험이 되는 권장 수량입니다. 수익 예측이 아니라 위험 눈금입니다.");
+  body.innerHTML = rows.map((t) => `<div class="ops-health-row"><span>${t}</span></div>`).join("");
+}

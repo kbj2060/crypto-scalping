@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -111,7 +112,11 @@ def compute(kl: pd.DataFrame, cal: dict, base_qty: float) -> dict:
     return out
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """`--loop` 없이 부르면 1회 계산 후 종료한다(스모크·수동 확인용).
+    supervisor 는 `--loop` 를 붙인다 — pgrep 중복검사도 그 문자열에 의존한다."""
+    argv = list(argv if argv is not None else sys.argv[1:])
+    loop = "--loop" in argv
     cal = load_calib()
     base_qty = float(os.getenv("SIZING_BASE_QTY", BASE_QTY_DEFAULT))
     log(f"기준 수량 {base_qty} ETH · 주기 {PERIOD_S}s")
@@ -129,6 +134,8 @@ def main() -> int:
             except Exception as e:
                 log(f"계산 실패 {type(e).__name__}: {e}")
                 STATE.write_text(json.dumps({"ok": False, "error": str(e)[:200]}, ensure_ascii=False))
+        if not loop:
+            return 0
         time.sleep(PERIOD_S - (time.time() % PERIOD_S))
     return 0
 

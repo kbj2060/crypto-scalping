@@ -268,6 +268,13 @@ EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 VOL_FORECAST_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_vol_forecast_state.json"
 VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
 
+# 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
+# (scripts/live_eth_position_sizing_worker_20260911.py). 읽기만 한다.
+# 🔴수익을 예측하지 않는다. 검정된 것은 위험 축뿐이다(무작위 진입 82,167건에서 평균 명목 동일
+#   조건에 표준편차 -18% · 50배 청산 도달률 13.9%->9.1%). 카드 문구도 그렇게 쓴다.
+POSITION_SIZING_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_position_sizing_state.json"
+POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
+
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
@@ -797,6 +804,21 @@ def vol_forecast_payload() -> dict[str, Any]:
     return {**st, "stale_min": round(age, 1) if age is not None else None}
 
 
+def position_sizing_payload() -> dict[str, Any]:
+    """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
+    `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
+    새로 만들 이유가 없다. 여기서는 파일 하나만 읽는다(요청 경로 계산 금지, 2026-09-10 실장애)."""
+    st = load_json(POSITION_SIZING_STATE_PATH)
+    if not st or not st.get("ok"):
+        return {"available": False, "error": "worker_state_missing", "subText": "데이터 없음"}
+    age = _age_min(st.get("generated_at"))
+    if age is not None and age > POSITION_SIZING_MAX_AGE_MIN:
+        return {**st, "available": False, "error": "worker_stale",
+                "stale_min": round(age, 1), "subText": "데이터 없음"}
+    return {**st, "available": True,
+            "stale_min": round(age, 1) if age is not None else None}
+
+
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
     """코인별 **실시간 지표**(수급흐름/리테일수급/청산캐스케이드) — 2026-09-03.
 
@@ -1100,6 +1122,8 @@ def make_app() -> web.Application:
     extreme_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     vol_forecast_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     vol_forecast_lock = asyncio.Lock()
+    position_sizing_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+    position_sizing_lock = asyncio.Lock()
     extreme_detector_lock = asyncio.Lock()
     chart_markers_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     chart_markers_lock = asyncio.Lock()
@@ -2097,6 +2121,14 @@ def make_app() -> web.Application:
         payload = await load_extreme_detector()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_position_sizing(request: web.Request) -> web.Response:
+        payload = await swr_cached(
+            "position_sizing", position_sizing_cache, position_sizing_lock,
+            30.0, lambda: asyncio.to_thread(position_sizing_payload),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_vol_forecast(request: web.Request) -> web.Response:
         return web.json_response(await load_vol_forecast())
 
@@ -2432,6 +2464,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
+    app.router.add_get("/api/position-sizing", api_position_sizing)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
