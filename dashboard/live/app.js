@@ -2646,6 +2646,72 @@ async function refreshVolForecast() {
 // 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
 //       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
 // ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
+// ── 청산 위험 (2026-09-11, 청산 규모 칩을 대체) ─────────────────────────────────────
+// 규약: 색 §2 위험/주의=warn·안정=neutral(**5번째 색 없음**) · 확률 개념이 있으므로 게이지 사용.
+// ⭐방향 신호가 아니다 — 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
+// 확률은 모델이 아니라 **지금과 비슷한 변동성 구간의 과거 실측 빈도**다.
+function liqRiskIndicatorItem() {
+  const base = { key: "liq_risk", label: "청산 위험", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 실계좌 포지션의 청산선 거리와 "
+                   + "과거 실측 분포로 계산합니다. 방향도 수익도 예측하지 않습니다." };
+  const d = latestPositionSizing;
+  if (!d || d.available !== true) {
+    return { ...base, tone: "neutral",
+             subText: d && d.error === "worker_state_missing" ? "웜업" : "데이터 없음",
+             proba: null, history: [], times: [] };
+  }
+  const tp = d.touch_prob;
+  const grid = tp && tp.dist_grid_bp;
+  const pos = ((latestBinanceAccount && latestBinanceAccount.positions) || [])
+    .find((x) => x.symbol === "ETHUSDT" && Math.abs(Number(x.qty) || 0) > 0);
+  const at = (h, side, dist) => {
+    const r = tp && tp.horizons && tp.horizons[h];
+    if (!r || !grid || !grid.length || !r[side]) return null;
+    const a = r[side];
+    if (dist <= grid[0]) return a[0];
+    if (dist >= grid[grid.length - 1]) return a[a.length - 1];
+    for (let i = 1; i < grid.length; i += 1) {
+      if (dist <= grid[i]) {
+        const t = (dist - grid[i - 1]) / (grid[i] - grid[i - 1]);
+        return a[i - 1] + t * (a[i] - a[i - 1]);
+      }
+    }
+    return null;
+  };
+  const eq = Number(d.vol_equivalent_qty) || 0;
+  if (!pos) {
+    return { ...base, tone: "neutral", subText: "포지션 없음", proba: null, history: [], times: [],
+             stateTitle: "열린 ETH 포지션이 없습니다.\n지금 변동성 기준 권장 크기 "
+               + eq.toFixed(2) + " ETH" };
+  }
+  const side = pos.side === "LONG" ? "롱" : "숏";
+  const mark = Number(pos.mark_price), liq = Number(pos.liquidation_price);
+  const liqBp = mark > 0 && liq > 0 ? Math.abs(mark - liq) / mark * 1e4 : NaN;
+  const p4 = Number.isFinite(liqBp) ? at("4h", side, liqBp) : null;
+  if (p4 === null || p4 === undefined) {
+    return { ...base, tone: "neutral", subText: "계측 미달", proba: null, history: [], times: [] };
+  }
+  const grade = p4 >= 0.3 ? "위험" : p4 >= 0.1 ? "주의" : "안정";
+  const fmt = (v) => (v === null || v === undefined ? "-"
+    : (v * 100).toFixed(v < 0.1 ? 1 : 0) + "%");
+  const qty = Math.abs(Number(pos.qty));
+  const mult = eq > 0 ? qty / eq : null;
+  const stateTitle = [
+    grade + " · 지금 크기로 4시간 안에 청산선에 닿을 확률 " + fmt(p4),
+    "1시간 " + fmt(at("1h", side, liqBp)) + " · 4시간 " + fmt(p4)
+      + " · 24시간 " + fmt(at("24h", side, liqBp)),
+    side + " " + qty.toFixed(2) + " ETH · 청산선까지 " + Math.round(liqBp) + "bp",
+    mult === null ? "" : "같은 위험이 되는 크기 " + eq.toFixed(2) + " ETH (현재 "
+      + mult.toFixed(1) + "배)",
+    "비슷한 변동성 구간 " + ((tp && tp.band_bars) || 0).toLocaleString()
+      + "봉의 실측 빈도입니다 — 모델 외삽이 아닙니다",
+    "⚠️방향도 수익도 예측하지 않습니다 — 크기 판단용입니다",
+  ].filter(Boolean).join("\n");
+  return { ...base, tone: grade === "안정" ? "neutral" : "warn", subText: grade,
+           proba: p4, stateTitle, history: [], times: [] };
+}
+
 function volForecastIndicatorItem() {
   const p = latestVolForecast;
   const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,

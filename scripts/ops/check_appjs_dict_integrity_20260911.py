@@ -40,6 +40,22 @@ for n in allk:
     if lost and not (set(lost) <= EXPECTED_REMOVED): bad=True
     print(f"{n:34s} {len(a):>5} {len(b):>5}  {mark}")
 print()
+# ⭐호출되는데 정의가 없는 최상위 함수 잡기 (2026-09-11 실장애: liqRiskIndicatorItem 이
+# 호출만 남고 정의가 빠져 대시보드가 죽었다. 여러 단계 편집 중 한 단계가 파일에 안 써졌는데
+# 그대로 진행한 게 원인 -- 중괄호 균형·사전 검사·HTTP200 전부 통과했다).
+src=open('dashboard/live/app.js').read()
+defined=set(re.findall(r'^(?:async )?function ([A-Za-z_$][\w$]*)', src, re.M))
+defined |= set(re.findall(r'^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(', src, re.M))
+defined |= set(re.findall(r'(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=', src))
+called=set(re.findall(r'\b([A-Za-z_$][\w$]*)\s*\(', src))
+# 내장·DOM·라이브러리는 제외: 정의부가 우리 파일에 있는 이름만 본다
+suspects=sorted(n for n in called if n.endswith(('IndicatorItem','SubText','Tone','Html','Item'))
+                and n not in defined)
+if suspects:
+    print(f"🔴 호출되는데 정의 없음: {suspects}"); bad=True
+else:
+    print("✅ 호출-정의 대조: 이상 없음")
+
 print("🔴 의도치 않은 소실 있음" if bad else
       f"✅ 의도한 제거({', '.join(sorted(EXPECTED_REMOVED)) or '없음'}) 외 소실 없음")
 sys.exit(1 if bad else 0)
