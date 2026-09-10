@@ -60,12 +60,20 @@ from live_regime_wide24_signal_20260826 import (  # noqa: E402
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # noqa: E402
 
 HISTORY_BARS_RETURNED = 120  # matches live_regime_wide24_signal_20260826.py
-# 2026-09-02: label swapped to S12_K3 (see the "2026-09-02 LABEL CHANGE" block in the
-# module docstring). ROLLBACK = point this single line back at
-# tmp/eth_regime_gbm3_independent_20260826/model.joblib, which is still present on the
-# server untouched; nothing else in this file or in dashboard/server.py depends on which
-# of the two artifacts is loaded (identical payload schema and class order).
-MODEL_PATH = ROOT / "tmp/eth_regime_s12k3_20260902/model.joblib"
+# 2026-09-02: label swapped to S12_K3. 2026-09-10: swapped again to **balnobb** (user directive
+# "balnobb으로 대시보드도 교체해줘") -- the label adopted as the Omega4.6.1 regime spine, retrained
+# on THIS dashboard's TRAIN range (2024-01-01~2026-06-30) rather than reusing the Omega artifact,
+# whose 2025-09-30 cutoff exists only to protect that line's VAL/OOS and would leave the dashboard
+# 11 months stale. balnobb = balancedish(ADX16/slope15) minus the BB chop-override line, which was
+# flipping 42.2% of trend candidates to chop (driven 100% by BB; the ADX term can never fire).
+#   measured on 2026-07-01~08-19 (unseen by both models), predicted-label stability:
+#     s12k3  flip 0.0965 · 1,389 transitions      balnobb  flip 0.0781 · 1,124   <- calmer, not noisier
+#   prediction agreement 80.3%. No serving debounce needed (K=0); the contract's "1,674
+#   transitions / 48% runs<=5" figure was the cut2509 model on the Omega OOS window, not this one.
+# ROLLBACK = point this single line back at tmp/eth_regime_s12k3_20260902/model.joblib, which stays
+# on the server untouched; nothing else in this file or in dashboard/server.py depends on which
+# artifact is loaded (identical payload schema and class order).
+MODEL_PATH = ROOT / "tmp/eth_regime_balnobb_20260910/model.joblib"
 CLASSES3 = ["bull", "bear", "chop"]
 
 

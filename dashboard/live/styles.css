@@ -527,6 +527,10 @@ body {
    model-indicator panels, both via toneStripSvg()) -- width:100% now fully governs. */
 /* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
    too tall) -> settled on 15px, the midpoint, per explicit user request each step. */
+/* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
+   too tall) -> settled on 15px, the midpoint, per explicit user request each step.
+   2026-09-10: 20px 로 올렸다가 사용자 지시로 되돌림 -- 키울 대상은 이 패널 띠가 아니라
+   청산맵 차트 **안**의 증거신호 레인(app.js LANE_H)이었다. */
 .evidence-strip { display: block; width: 100%; height: 15px; }
 /* 2026-08-31 user request: a persistent time axis under the strip (design candidate "01 눈금 축")
    so roughly-when is visible without hovering -- see stripAxisHtml() in app.js, 5 evenly spaced
@@ -579,18 +583,24 @@ body {
 
 /* 청산 밀도 가이드 (2026-09-09 사용자 요청: SVG 인셋 -> 차트 위).
    기존 SVG 인셋은 오른쪽 위 y=0..34 를 차지해 같은 자리에 새로 생긴 증거신호 **천장 레인**을
-   덮었다. 그라디언트 스톱은 삭제한 #viridisGradient 와 **같은 값**이어야 범례가 히트맵을
-   정직하게 설명한다(app.js 의 viridisColor 와 같은 색 계열). */
-.liq-density-legend { display: flex; align-items: center; justify-content: flex-end;
-  gap: 10px; padding: 0 4px 6px; }   /* 2026-09-09: 오른쪽 끝 정렬(사용자 요청) --
-     SVG 인셋 시절에도 플롯 오른쪽 위였으므로 원래 자리로 돌아온 셈이다 */
+   덮었다. 그라디언트 스톱은 app.js 의 DENSITY_STOPS 와 **같은 값**이어야 범례가 히트맵을
+   정직하게 설명한다(app.js 의 densityColor 와 같은 색 계열). */
+.liq-density-legend { display: flex; align-items: center; gap: 10px; }
+.liq-density-legend[hidden] { display: none; }   /* author display:flex 가 UA 의 hidden 을 이기므로 명시 */
+/* 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를 중앙에":
+   범례가 전용 행에서 `.ops-health-head` 안으로 들어왔다. 헤드는 space-between 이고 배지가
+   오른쪽에 있으므로, 범례에 flex:1 을 주면 남은 폭 전체를 차지하며 내용이 가운데 정렬된다.
+   패딩 18 -> 10 으로 빈 행 높이도 줄인다. (2026-09-09 의 오른쪽 끝 정렬은 이 지시로 대체됨) */
+.liq-map-panel .ops-health-head { padding: 10px 18px; }
+.liq-map-panel .ops-health-head .liq-density-legend { flex: 1; justify-content: center; }
 .liq-density-legend-title { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .liq-density-legend-scale { display: flex; align-items: center; gap: 6px; width: 200px; max-width: 45%; }
 .liq-density-legend-end { font-size: 10px; color: var(--muted); white-space: nowrap; }
 .liq-density-legend-bar {
   flex: 1; height: 8px; border-radius: 2px;
-  background: linear-gradient(90deg, rgb(68,1,84) 0%, rgb(65,68,135) 20%, rgb(42,120,142) 40%,
-    rgb(34,168,132) 60%, rgb(122,209,81) 80%, rgb(253,231,37) 100%);
+  /* app.js DENSITY_STOPS 와 **같은 값**이어야 한다(하드코딩된 사본). 2026-09-10 viridis 폐기. */
+  background: linear-gradient(90deg, rgb(18,20,27) 0%, rgb(30,44,62) 25%, rgb(46,78,104) 50%,
+    rgb(58,108,152) 75%, rgb(96,156,208) 100%);
 }
 @media (max-width: 720px) {
   .liq-density-legend { gap: 8px; padding: 0 2px 4px; }
@@ -1157,7 +1167,11 @@ body {
   position: relative;
   overflow: hidden;
   margin-top: 12px;
-  background: var(--chart-bg);
+  /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
+     제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
+     (index.html 에 .chart-container 는 1개, .market-chart-wrap 은 DOM/JS 에 0회 = 죽은 셀렉터)
+     선택자를 새로 만들지 않고 선언만 지웠다. 아래 inset box-shadow 는 남긴다 -- 차트 영역
+     경계를 그리는 1px 테두리이고 "검정 배경"과 별개다. */
   border-radius: var(--radius);
   box-shadow:
     inset 0 0 0 1px rgba(203, 209, 227, 0.075),
@@ -1896,4 +1910,48 @@ svg {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
   max-height: 60vh;
   overflow-y: auto;
+}
+
+/* ── 「내 계좌」 시각 요약 (2026-09-11) ─────────────────────────────────────────
+   사용자 요청 "텍스트 말고 그래프나 그림으로 바로 알 수 있게" -> 목업 6안 중 C x E 혼합 채택.
+   왼쪽 큰 숫자 셋 + 노출 막대, 오른쪽 왕복 손익 막대 + 누적선.
+   색은 기존 4색(good/bad/warn/neutral)만 쓴다 -- 새 색을 만들지 않는다(표시 규약 §2). */
+/* 🔴2026-09-11 사용자 신고 "왼쪽 한 쪽에 정보들이 쏠려 있어. WIDTH를 최대로":
+   `#snapAcctPosition` 은 `.ops-health-list` 이고 그 클래스가 **데스크톱에서 2열 그리드**다
+   (L192, 720px 이하에선 1열). 그래서 이 카드가 패널의 **왼쪽 절반**에만 들어갔다.
+   이 목록만 1열로 되돌린다 -- 증거신호/모델지표 목록의 2열은 그대로 둔다. */
+#snapAcctPosition { grid-template-columns: 1fr; }
+.acct-viz { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 24px; padding: 16px 18px; align-items: start; }
+.acct-left { min-width: 0; }
+/* 폭 전체를 쓰게 되면 flex+고정 gap 은 숫자 셋이 왼쪽에 뭉친다 -- 균등 분배로 편다 */
+.acct-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.acct-stat { display: grid; gap: 2px; }
+.acct-stat b { font: 800 30px/1.05 var(--font-sans); letter-spacing: -0.01em; }
+.acct-stat span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.acct-expo { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.acct-expo > span:first-child { font-size: 11.5px; color: var(--muted); }
+.acct-expo-track { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08);
+  overflow: hidden; min-width: 60px; }
+.acct-expo-fill { display: block; height: 100%; border-radius: 4px; }
+.acct-expo b { font: 700 13px/1 var(--font-mono); }
+.acct-pos-line { margin: 12px 0 2px; font-size: 12.5px; color: var(--text); }
+.acct-pos-sub { margin: 0; font-size: 11.5px; color: var(--muted); }
+.acct-perf { min-width: 0; }
+.acct-perf-head { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+/* preserveAspectRatio="none" -- 폭은 패널을 따라가고 높이는 여기서 고정한다 */
+.acct-perf-svg { display: block; width: 100%; height: 96px; }
+.acct-perf-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+.acct-stat b.good, .acct-expo b.good, .acct-perf b.good, .acct-perf-note .good { color: var(--good); }
+.acct-stat b.bad, .acct-expo b.bad, .acct-perf b.bad, .acct-perf-note .bad { color: var(--bad); }
+.acct-stat b.warn, .acct-expo b.warn { color: var(--amber); }
+.acct-stat b.neutral { color: var(--muted); }
+.acct-expo-fill.bad { background: var(--bad); }
+.acct-expo-fill.warn { background: var(--amber); }
+@media (max-width: 720px) {
+  /* 좁은 화면에선 좌우 2분할이 둘 다 뭉개진다 -- 위아래로 쌓는다 */
+  .acct-viz { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .acct-stats { gap: 10px; }
+  .acct-stat b { font-size: 25px; }
+  .acct-perf-svg { height: 78px; }
 }

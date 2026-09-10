@@ -63,8 +63,9 @@ class PortfolioRiskManager:
     own check, and even that isn't needed here since `target_exposure` from the governor already
     represents the desired TOTAL exposure for that position, not an incremental add-on.
 
-    Usage (not yet wired into trading_bot.py -- call this immediately before `execute_to_target`
-    for each asset):
+    Usage (wired in trading_bot.py: ETH real path behind FINAL_GOVERNOR_OMEGA4_6_1_ETH_PORTFOLIO_CAP_ENABLE,
+    BTC/SOL behind SOL_BTC_REAL_EXECUTION_ENABLE or SOL_BTC_SHADOW_PORTFOLIO_CAP_ENABLE -- call this
+    immediately before `execute_to_target` for each asset):
 
         risk = PortfolioRiskManager(PortfolioRiskConfig(
             total_notional_cap=3.0,
@@ -92,6 +93,10 @@ class PortfolioRiskManager:
             return None
         return self.config.total_notional_cap * self._shares.get(asset, 0.0)
 
+    def asset_share(self, asset: str) -> float:
+        """Normalized share of `total_notional_cap` reserved for `asset` (0.0 for unknown keys)."""
+        return float(self._shares.get(asset, 0.0))
+
     def check(self, asset: str, requested_exposure: float) -> PortfolioRiskDecision:
         """Reports whether `requested_exposure` fits within `asset`'s own budget, without
         modifying it. Use `scale_to_budget` if you want the shrunk value directly."""
@@ -116,3 +121,28 @@ class PortfolioRiskManager:
         if budget is None:
             return requested_exposure
         return min(requested_exposure, max(0.0, budget))
+
+
+def portfolio_cap_trace(risk: PortfolioRiskManager, asset: str, requested_exposure: float) -> dict:
+    """JSON-safe record of one budget check, for the trade journal and the SYSTEM log.
+
+    The A4 cross-symbol cap line (docs/eth_cross_symbol_exposure_cap_design_20260831.md) is evaluated
+    from the live journal by comparing the notional the strategy asked for against what the budget
+    approved, so both are recorded explicitly -- the journal's own `notional_exposure` is the FINAL
+    size after every later modifier (chop soft-size, finalize_sizing) and cannot be inverted back to
+    the requested value on its own. Pure function of the manager's config; no state is touched.
+    """
+    decision = risk.check(asset, requested_exposure)
+    approved = risk.scale_to_budget(asset, requested_exposure)
+    cap = risk.config.total_notional_cap
+    return {
+        "asset_key": str(asset),
+        "total_notional_cap": None if cap is None else float(cap),
+        "asset_share": None if cap is None else risk.asset_share(asset),
+        "asset_budget": None if decision.asset_budget is None else float(decision.asset_budget),
+        "requested_notional": float(requested_exposure),
+        "approved_notional": float(approved),
+        "scaled": bool(approved < float(requested_exposure) - 1e-9),
+        "blocked": bool(approved < risk.config.min_notional),
+        "reason": str(decision.reason),
+    }

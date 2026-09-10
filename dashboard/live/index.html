@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260909-legend-right">
+  <link rel="stylesheet" href="styles.css?v=20260911-acctfull">
 </head>
 <body>
     <main class="app">
@@ -130,14 +130,6 @@
           </div>
         </div>
         <div id="acctPositions" class="ops-health-list"></div>
-        <div class="ops-health-head" style="margin-top:12px" title="실계좌 ETH 포지션을 5분봉마다 판정합니다(주문 없음, 집행은 사람). ①생존 규칙(청산가까지 5분 ATR 3배 안 · 24h 변동성 위험 등급에서 하루 1σ 안)을 먼저 보고 ②종합 모델이 «지금 청산이 24봉 상한 보유보다 낫다» 확률을 냅니다. 입력: 증거신호 8종·극점 탐지기 p1/p2·24h 변동성 전망·돌파/되돌림 봉피쳐·포지셔닝 메트릭·시각 + 포지션 상태(미실현·정점·최저·보유봉). 청산맵·청산버스트·V자반등·칩메타라벨·레짐은 과거 재구성이 안 돼 제외. 확률 ≥τ 익절/손절, 부분 기준 이상은 부분익절/감축. 가격이 아니라 «지금»만 말합니다. 모델 성적과 사전등록 게이트 결과는 카드 하단에 그대로 표시합니다.">
-          <div><h3>청산 감시자</h3><p id="exitAdvisorText" class="muted">실계좌 ETH 포지션을 5분마다 종합 모델로 판정 · 익절/부분익절/손절/감축/보유 · 집행은 사람</p></div>
-          <div class="ops-health-head-tools">
-            <span id="exitAdvisorSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">종합 모델 + 생존 규칙 · 주문 없음</span>
-          </div>
-        </div>
-        <div id="exitAdvisorList" class="ops-health-list"></div>
         <div class="ops-health-head" style="margin-top:12px">
           <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
         </div>
@@ -278,23 +270,35 @@
               <span class="signal-chip-label">극점 탐지기</span>
               <span class="signal-chip-state">-</span>
             </div>
-            <div id="modelChipBreakoutRev" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">앵커 돌파/되돌림</span>
-              <span class="signal-chip-state">-</span>
-            </div>
           </div>
         </div>
       </section>
 
+      <!-- 2026-09-10 사용자 요청: 청산맵 바로 위에 현 계좌/포지션 요약. 숫자는 거래소 실계좌
+           (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
+           패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
+      <section class="panel ops-health-panel">
+        <div class="ops-health-head">
+          <div><h3>내 계좌</h3><p id="snapAcctBalance" class="muted">-</p></div>
+          <div class="ops-health-head-tools">
+            <span id="snapAcctSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+          </div>
+        </div>
+        <div id="snapAcctPosition" class="ops-health-list"></div>
+      </section>
+
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
+          <!-- 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를
+               중앙에": 이 행에는 배지 하나만 오른쪽에 있어 좌측 대부분이 비어 있었다. 범례를
+               전용 행에서 여기로 옮겨 그 자리를 채운다(행 하나가 줄어든다). -->
+          <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
           <div class="ops-health-head-tools">
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
         <div id="liqVolumeGauge"></div>
-        <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -340,7 +344,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260910-exit-advisor-selective"></script>
+  <script src="./app.js?v=20260911-acctviz"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

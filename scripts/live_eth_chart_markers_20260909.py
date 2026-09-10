@@ -96,7 +96,6 @@ def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
 
 
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
-                          breakout: dict | None = None,
                           extreme: dict | None = None) -> dict[str, Any]:
     """청산맵 72봉에 정렬된 마커. 절대 예외를 올리지 않는다."""
     asset = (asset or "eth").lower()
@@ -142,7 +141,6 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         #     측면은 그대로다. 등급을 되살리려면 워커가 등급 이력을 내보내야 한다(다른 세션 파일).
         _merge_history(grid, extreme, "extreme", "극점")
         _merge_history(grid, v_rebound, "v_rebound", "V자반등")
-        _merge_history(grid, breakout, "breakout_rev", "돌파/되돌림")
         return {
             "available": True, "asset": asset, "bars": CHART_BARS,
             "latest_ts_utc": times[-1] if times else None,

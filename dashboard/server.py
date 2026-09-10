@@ -268,17 +268,6 @@ EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 VOL_FORECAST_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_vol_forecast_state.json"
 VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
 
-# 2026-09-10 포지션 청산 감시자 -- 실계좌 포지션을 5분봉마다 판정하는 워커의 상태 파일
-# (scripts/live_position_exit_advisor_20260910.py · supervisor_position_exit_advisor.sh). 읽기만 한다.
-EXIT_ADVISOR_STATE_PATH = REPO_ROOT / "data" / "live" / "position_exit_advisor_state.json"
-EXIT_ADVISOR_MAX_AGE_MIN = 15.0            # 5분봉 3개
-
-# 2026-09-08 돌파/되돌림 앵커 섀도우(scripts/live_eth_breakout_reversal_shadow_runner_20260908.py)
-# 표시 전용, 주문 없음. 커버리지 상한을 두지 않는다 -- 전 트리거에 판정을 내고 확신 등급만 표시한다.
-BREAKOUT_REV_STATE_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_state.json"
-BREAKOUT_REV_LEDGER_PATH = REPO_ROOT / "data" / "live" / "breakout_reversal_shadow_ledger.jsonl"
-BREAKOUT_REV_ARTIFACT_PATH = (REPO_ROOT / "data" / "live"
-                              / "breakout_reversal_shadow_artifact" / "meta.json")
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 EVENT_POLL_SECONDS = 2.5
@@ -766,52 +755,6 @@ MICRO_LOOKBACK_MIN = 15
 MICRO_STRIP_SAMPLES = 48
 
 
-BREAKOUT_STRIP_BARS = 48   # 다른 감지기 띠와 같은 길이(5분봉 48개 = 4시간)
-
-
-def _br_parse(v: Any) -> datetime | None:
-    try:
-        dt = datetime.fromisoformat(str(v).replace(" ", "T").replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def _breakout_tone_history(rows: list[dict], end: datetime,
-                           bars: int = BREAKOUT_STRIP_BARS) -> tuple[list[str], list[str]]:
-    """최근 `bars`개 5분봉의 (톤, 판정). 톤 good=롱 · bad=숏 · warn=혼재 · neutral=판정 없음.
-
-    ⭐**게이트와 무관하게 전 판정을 칠한다**(2026-09-08 게이트 제거 + 사용자 요청
-      "직전 되돌림이나 약 신호도 타임 게이지에 표시"). 확신 등급도 걸러내지 않는다 --
-      띠는 "언제 무슨 판정이 있었나"의 기록이고, 셀 여부는 배지·게이지가 말한다.
-    ⚠️배리어가 중앙값 5분에 해소되므로 대부분의 판정은 **한 칸**으로 나타난다.
-      그래서 최소 한 칸은 반드시 칠한다(안 그러면 짧은 판정이 띠에서 통째로 사라진다).
-    🔴톤은 **매매 방향**(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일 수도 "되돌림 숏"일 수도
-      있어서, 톤만으로 띠 캡션을 만들면 단어가 배지와 어긋난다(2026-09-08 사용자 신고:
-      배지 "직전 되돌림↓" vs 띠 "돌파 ↓"). 그래서 판정 단어를 **봉별로 함께** 돌려준다.
-    """
-    spans: list[tuple[datetime, datetime, str, str]] = []
-    for r in rows:
-        t0 = _br_parse(r.get("trigger_utc"))
-        if t0 is None:
-            continue
-        t0 = t0.replace(second=0, microsecond=0) - timedelta(minutes=t0.minute % 5)
-        t1 = _br_parse(r.get("exit_utc")) or (end + timedelta(minutes=5))
-        t1 = max(t1, t0 + timedelta(minutes=5))          # 최소 한 칸
-        call = str(r.get("call") or "")
-        up = bool(r.get("dir_up")) == (call == "돌파")
-        spans.append((t0, t1, "good" if up else "bad", call))
-    tones_out, calls_out = [], []
-    for i in range(bars):
-        moment = end - timedelta(minutes=5 * (bars - 1 - i))
-        hit = [(t, c) for a, b, t, c in spans if a <= moment < b]
-        tones = {t for t, _ in hit}
-        calls = {c for _, c in hit if c}
-        tones_out.append("warn" if len(tones) > 1 else (tones.pop() if tones else "neutral"))
-        calls_out.append("혼재" if len(calls) > 1 else (calls.pop() if calls else ""))
-    return tones_out, calls_out
-
-
 def _age_min(ts: Any) -> float | None:
     """UTC 문자열 -> 지금까지 경과 분. 원장은 tz 표기가 없는 UTC 문자열이다."""
     try:
@@ -821,31 +764,6 @@ def _age_min(ts: Any) -> float | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1)
-
-
-def _br_current_label(r: dict, meta: dict) -> bool:
-    """이 원장 행이 **지금 아티팩트의 라벨 정의**로 채점됐는가.
-
-    ⭐**rule_id 로 가른다.** 2026-09-09 부터 러너가 아티팩트의 rule_id 를 그대로 찍으므로
-      이게 유일하게 정확한 기준이다. 발현창 15분/60분처럼 **배리어가 같고 모집단만 다른**
-      개정은 배리어로는 못 가른다.
-    ⚠️2026-09-08 이전 행은 러너의 RULE_ID 상수가 뒤처져 옛 이름으로 찍혀 있다 -- 전부 제외된다.
-      아티팩트에 rule_id 가 없을 때만 배리어로 되짚는 폴백을 남긴다.
-    """
-    rid = meta.get("rule_id")
-    if rid:
-        return r.get("rule_id") == rid    # 러너가 아티팩트의 rule_id 를 그대로 찍는다
-    # 아티팩트에 rule_id 가 없을 때만 배리어로 되짚는다(옛 원장 호환).
-    bp = r.get("barrier_pct")
-    if meta.get("barrier_mode") == "atr_relative":
-        atr = r.get("atr_pct")
-        if bp is None or not atr:
-            return False
-        return abs(float(bp) - float(atr) * float(meta["barrier_k_atr"]) * 100) < 1e-6
-    want = meta.get("barrier_pct")
-    if want is None:
-        return True
-    return bp is None or abs(float(bp) - float(want)) < 1e-9
 
 
 def extreme_detector_payload() -> dict[str, Any]:
@@ -877,106 +795,6 @@ def vol_forecast_payload() -> dict[str, Any]:
         return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
                 "tone": "neutral", "subText": "데이터 없음"}
     return {**st, "stale_min": round(age, 1) if age is not None else None}
-
-
-def exit_advisor_payload() -> dict[str, Any]:
-    """포지션 청산 감시자 워커 상태 파일. 극점 탐지기와 같은 구조 -- 인라인 폴백 없음."""
-    st = load_json(EXIT_ADVISOR_STATE_PATH)
-    if not st:
-        return {"available": False, "error": "worker_state_missing", "positions": []}
-    age = _age_min(st.get("updated_utc"))
-    if age is not None and age > EXIT_ADVISOR_MAX_AGE_MIN:
-        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1)}
-    return {**st, "stale_min": round(age, 1) if age is not None else None}
-
-
-def breakout_reversal_shadow_payload() -> dict[str, Any]:
-    """돌파/되돌림 앵커 섀도우의 가상 원장. 주문은 내지 않는다 -- 표시 전용.
-
-    러너: scripts/live_eth_breakout_reversal_shadow_runner_20260908.py
-    규칙: 앵커 first_fire -> 15분 안에 ±0.75×ATR 최초 터치가 **발현**(방향은 관측값) ->
-          69피쳐(전부 트리거 봉 직전 봉 기준) -> HGB 5시드 평균 -> 1시간 안에 ±0.8×ATR 중
-          먼저 닿는 쪽이 돌파/되돌림. 시간청산이면 12봉 뒤 종가 부호.
-    ⚠️원장에는 **옛 배리어(절대 ±0.25%)로 채점된 행이 섞여 있다**(2026-09-08 개정 전).
-      집계는 현행 라벨 정의 행만 센다(_br_current_label) -- 서로 다른 질문의 답을 한 분모에
-      넣으면 그 비율은 아무 질문의 답도 아니다. 띠는 기록이므로 전 행을 그대로 칠한다.
-    ⭐**커버리지 상한이 없다** -- 전 트리거에 판정을 내므로 "어느 사건이 해소되는가"를 결과가
-      정하는 편향이 구조상 생기지 않는다(2026-09-07 앵커 방향 섀도우가 여기서 무너졌다).
-    ⚠️정확도는 **셔플 귀무와 함께** 읽는다. 창마다 클래스 균형이 달라 귀무가 .515~.570 로 움직인다.
-    """
-    meta = load_json(BREAKOUT_REV_ARTIFACT_PATH) or {}
-    state = load_json(BREAKOUT_REV_STATE_PATH) or {}
-    prereg = (meta.get("prereg") or {}).get("cov100") or {}
-    base = {"available": False, "prereg": prereg, "rule_id": meta.get("rule_id"),
-            "barrier_pct": meta.get("barrier_pct"), "horizon_bars": meta.get("horizon_bars"),
-            "tiers": meta.get("confidence_tiers")}
-    if not state:
-        return base
-    rows = parse_jsonl(BREAKOUT_REV_LEDGER_PATH)
-    closed_all = [r for r in rows if r.get("outcome") in ("cont", "fade", "timeout")]
-    closed = [r for r in closed_all if _br_current_label(r, meta)]
-    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-    watching = state.get("watching") if isinstance(state.get("watching"), list) else []
-
-    def _acc(rs: list[dict]) -> float | None:
-        ok = [bool(r.get("correct")) for r in rs if r.get("correct") is not None]
-        return round(sum(ok) / len(ok), 4) if ok else None
-
-    days = 0.0
-    if closed:
-        try:
-            t0 = datetime.fromisoformat(str(closed[0].get("trigger_utc")).replace(" ", "T"))
-            t1 = datetime.fromisoformat(str(closed[-1].get("trigger_utc")).replace(" ", "T"))
-            days = max((t1 - t0).total_seconds() / 86400.0, 0.0)
-        except (TypeError, ValueError):
-            days = 0.0
-    tiers = {}
-    for t in ("강", "중", "약", "미약"):
-        q = [r for r in closed if r.get("tier") == t]
-        if q:
-            tiers[t] = {"n": len(q), "acc": _acc(q)}
-    # 마지막 판정: 미해소 포지션이 있으면 그중 최신, 없으면 원장 최신
-    cands = [x for x in (positions + closed_all) if isinstance(x, dict) and x.get("p_breakout") is not None]
-    last = max(cands, key=lambda x: str(x.get("trigger_utc") or "")) if cands else None
-    gross = [float(r["gross_bp"]) for r in closed if isinstance(r.get("gross_bp"), (int, float))]
-    # 매매 방향 = 발현 방향 XOR 되돌림콜 (돌파면 발현 방향 그대로, 되돌림이면 반대)
-    def _dir(q: dict) -> str:
-        up = bool(q.get("dir_up")) == (str(q.get("call")) == "돌파")
-        return "long" if up else "short"
-
-    def _tp_price(q: dict) -> float | None:
-        """이 판정의 라벨 목표가 = **매매 방향 쪽** 배리어(진입가 ±0.8xATR, 러너가 사건마다
-        기록한 barrier_up/barrier_dn 그대로). 손절선은 반대쪽 같은 폭이다 -- 대칭 라벨이라
-        따로 적을 값이 없다. 2026-09-10 사용자 요청("증거신호 라벨처럼 익절 가격을 확률 아래에").
-        ⚠️여기서 새로 계산하지 않는다 -- 러너가 2026-09-08 배리어 개정 전후 행을 섞어 갖고 있어
-          (stale_closed 참조) 지금 ATR 로 되계산하면 옛 행에 틀린 값을 붙인다."""
-        px = q.get("barrier_up") if _dir(q) == "long" else q.get("barrier_dn")
-        return round(float(px), 2) if isinstance(px, (int, float)) else None
-
-    now = datetime.now(timezone.utc)
-    strip_end = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
-    # 띠는 "언제 무슨 판정이 있었나"의 기록이라 옛 배리어 행도 그대로 칠한다(집계만 가른다).
-    strip_tones, strip_calls = _breakout_tone_history([*closed_all[-400:], *positions], strip_end)
-    return {**base, "available": True,
-            "tone_history": strip_tones, "call_history": strip_calls,
-            "latest_ts_utc": strip_end.isoformat().replace("+00:00", "Z"),
-            "watching": len(watching), "open_positions": len(positions),
-            "open_dirs": [_dir(q) for q in positions],
-            "open_calls": [q.get("call") for q in positions],
-            "closed": len(closed), "stale_closed": len(closed_all) - len(closed),
-            "days_running": round(days, 2),
-            "per_day": round(len(closed) / days, 1) if days > 0.5 else None,
-            "accuracy": _acc(closed),
-            "outcomes": {k: sum(1 for r in closed if r.get("outcome") == k)
-                         for k in ("cont", "fade", "timeout")},
-            "gross_bp_mean": round(sum(gross) / len(gross), 2) if gross else None,
-            "by_tier": tiers,
-            "last": ({"age_min": _age_min(last.get("trigger_utc")),
-                      "trigger_utc": last.get("trigger_utc"), "side": last.get("side"),
-                      "dir_up": bool(last.get("dir_up")), "call": last.get("call"),
-                      "p_breakout": last.get("p_breakout"), "tier": last.get("tier"),
-                      "trig_min": last.get("trig_min"), "tp_price": _tp_price(last),
-                      "resolved": last.get("outcome") is not None} if last else None)}
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -1913,19 +1731,18 @@ def make_app() -> web.Application:
     async def load_chart_markers(asset: str = "eth") -> dict[str, Any]:
         """청산맵 차트 마커 -- scripts/live_eth_chart_markers_20260909.py 참고.
         ETH 전용이다(다른 코인은 unsupported 로 비운다 -- 빈 레인은 "신호 없음"으로 오독된다).
-        V자반등·돌파/되돌림·**극점**은 이미 계산된 페이로드를 재사용한다(추가 모델 실행 없음).
+        V자반등·**극점**은 이미 계산된 페이로드를 재사용한다(추가 모델 실행 없음).
         ⚠️극점을 여기서 인라인으로 채점하면 안 된다 -- 2026-09-10 그 인라인 호출이 TabPFN
           아티팩트(1.08GB)를 60초마다 로드해 to_thread 풀을 고갈시켰고 증거신호를 포함한 모든
           계산 엔드포인트가 멈췄다. 자세한 실측은 live_eth_chart_markers_20260909.py 주석."""
         if (asset or "eth").lower() != "eth":
             return compute_chart_markers(asset)
         vr = await load_v_rebound_signal()
-        bo = breakout_reversal_shadow_payload()
         ex = await load_extreme_detector()
         return await swr_cached(
             "chart_markers", chart_markers_cache, chart_markers_lock,
             EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, bo, ex),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2283,10 +2100,6 @@ def make_app() -> web.Application:
     async def api_vol_forecast(request: web.Request) -> web.Response:
         return web.json_response(await load_vol_forecast())
 
-    async def api_exit_advisor(request: web.Request) -> web.Response:
-        # 작은 상태 파일 읽기만(모델 인라인 금지 규칙) -- 캐시/lock 없이 매 요청 최신 판정.
-        return web.json_response(exit_advisor_payload(), headers={"Cache-Control": "no-cache"})
-
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
@@ -2593,22 +2406,12 @@ def make_app() -> web.Application:
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
-
-
-    async def api_breakout_reversal_shadow(request: web.Request) -> web.Response:
-        etag = make_etag("breakout-reversal-shadow",
-                         file_signature(BREAKOUT_REV_STATE_PATH),
-                         file_signature(BREAKOUT_REV_LEDGER_PATH))
-        return json_response(request, breakout_reversal_shadow_payload(), etag)
-
-    app.router.add_get("/api/breakout-reversal-shadow", api_breakout_reversal_shadow)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
     app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
-    app.router.add_get("/api/position-exit-advisor", api_exit_advisor)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)

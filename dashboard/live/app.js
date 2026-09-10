@@ -120,8 +120,6 @@ let evidenceHistoryBySignal = {};
 // 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
 let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
-// 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
-// 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
 let chartMarkersLastFetchAt = 0;
@@ -138,10 +136,6 @@ let volForecastLastFetchAt = 0;
 const API_VOL_FORECAST_URL = "/api/vol-forecast";
 const VOL_FORECAST_POLL_MS = 120000;
 const API_EXTREME_URL = "/api/extreme-detector";
-let latestBreakoutRev = null;
-let breakoutRevLastFetchAt = 0;
-const BREAKOUT_REV_POLL_MS = 60000;
-const API_BREAKOUT_REV_URL = "/api/breakout-reversal-shadow";
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -197,6 +191,11 @@ let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 let vrebEconShadowLastFetchAt = 0;
 const VREB_ECON_SHADOW_POLL_MS = 60000;
+// 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
+// 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
+let latestBinanceAccount = null;
+let binanceAccountLastFetchAt = 0;
+const BINANCE_ACCOUNT_POLL_MS = 30000;
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
@@ -318,6 +317,8 @@ async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
   renderSnapshotAssetTabs();
+  // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
+  renderSnapshotAccount();
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
@@ -854,8 +855,145 @@ function renderOpsStatus(payload) {
   }).join(""));
 }
 
+// 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
+// ASSET_CONFIG 는 eth/sol/btc 만 담고 있어 xrp/hype 는 관례대로 <TICKER>USDT 로 만든다.
+function snapshotAccountPosition() {
+  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  return (latestBinanceAccount?.positions || []).find((p) => p.symbol === symbol) || null;
+}
+
+// 스냅샷 탭 청산맵 바로 위 요약. ops 탭 패널의 축약판이라 payload 를 공유한다(추가 요청 없음).
+// 「내 계좌」 시각 요약 (2026-09-11, 사용자 요청 "텍스트 말고 그래프나 그림으로 보면 바로
+// 알 수 있게끔" -> 목업 3안 x 2회 뒤 "C와 E를 잘 섞어서").
+//   왼쪽(C안) 큰 숫자 셋(청산까지·미실현·증거금) + 노출 막대 + 포지션 한 줄
+//   오른쪽(E안) 왕복 손익 막대 + 누적선 + 최악 한 건 강조
+// ⭐이 배치를 고른 이유: 실측에서 **승률 58%(7/12)인데 실현 -$287** 이고 그 손실이 사실상
+//   **한 건(-$536, 나머지 11건 합 +$249)** 이었다. 숫자 나열로는 절대 안 보이는 사실이라
+//   오른쪽 막대에 그 한 건을 명시적으로 짚어준다.
+// 색 규약 §2 준수 -- good/bad/warn/neutral 넷만 쓴다(5번째 색 없음).
+// 목업: scripts/plot_account_panel_mockup_ce_20260911.py · docs/charts/account_panel_mockup_ce_20260911.png
+function acctRiskTone(liqPct) {
+  return liqPct < 3 ? "bad" : liqPct < 6 ? "warn" : "good";
+}
+
+// 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
+function acctPerfSvg(net) {
+  if (!net.length) return "";
+  const W = 300, H = 96, zero = H * 0.52, pad = 2;
+  const peak = Math.max(...net.map((v) => Math.abs(v)), 1e-9);
+  const bw = (W - pad * 2) / net.length;
+  const sc = (H * 0.40) / peak;
+  let cum = 0;
+  const pts = [];
+  const bars = net.map((v, i) => {
+    cum += v;
+    const x = pad + i * bw;
+    const hgt = Math.max(Math.abs(v) * sc, 0.8);
+    const y = v >= 0 ? zero - hgt : zero;
+    pts.push(`${(x + bw * 0.36).toFixed(1)},${(zero - cum * sc).toFixed(1)}`);
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.72).toFixed(1)}" `
+      + `height="${hgt.toFixed(1)}" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.9"></rect>`;
+  }).join("");
+  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+    + bars
+    + `<line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--line)" stroke-width="1"></line>`
+    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.6"></polyline>`
+    + `</svg>`;
+}
+
+function renderSnapshotAccount() {
+  const summary = el("snapAcctSummary");
+  if (!el("snapAcctPosition")) return;
+  if (!latestBinanceAccount) {
+    if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
+    setT("snapAcctBalance", "-");
+    setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
+    return;
+  }
+  const b = latestBinanceAccount.balance || {};
+  const wallet = Number(b.wallet) || 0;
+  const upnl = Number(b.unrealized) || 0;
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)} · 순자산 ${fmtUsd(wallet + upnl)}`);
+  const pos = snapshotAccountPosition();
+  const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
+  if (summary) {
+    summary.textContent = pos ? (pos.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
+    summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
+  }
+
+  // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
+  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol);
+  const net = closed.map((t) => Number(t.net_pnl) || 0);
+  const wins = net.filter((v) => v > 0).length;
+  const total = net.reduce((x, y) => x + y, 0);
+  let worstIdx = -1;
+  net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
+  const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
+  const perf = net.length
+    ? `<div class="acct-perf">
+         <p class="acct-perf-head">왕복 ${net.length}건 · 승률 ${Math.round(wins / net.length * 100)}% ·
+            누적 <b class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</b></p>
+         ${acctPerfSvg(net)}
+         ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
+            ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
+                 · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
+            : ""}
+       </div>`
+    : `<div class="acct-perf"><p class="muted">닫힌 왕복이 아직 없습니다.</p></div>`;
+
+  const otherNote = others > 0
+    ? `<p class="muted">다른 코인에 ${others}종목을 더 보유 중입니다 -- 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
+    : "";
+  if (!pos) {
+    setH("snapAcctPosition", `<div class="acct-viz">
+        <div class="acct-left"><p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label
+          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}</div>
+        ${perf}
+      </div>`);
+    return;
+  }
+
+  const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
+  const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
+  const usedPct = wallet > 0 ? (Number(b.margin) || 0) / wallet * 100 : 0;
+  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
+  const expo = wallet > 0 ? (Number(pos.notional) || 0) / wallet : 0;
+  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
+  const stat = (val, lab, tone) =>
+    `<div class="acct-stat"><b class="${tone}">${val}</b><span>${lab}</span></div>`;
+  setH("snapAcctPosition", `<div class="acct-viz">
+      <div class="acct-left">
+        <div class="acct-stats">
+          ${stat(`${liqPct.toFixed(2)}%`, "청산까지", acctRiskTone(liqPct))}
+          ${stat(`${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(1)}%`, `미실현 ${fmtUsd(upnl)}`,
+                 upnl < 0 ? "bad" : upnl > 0 ? "good" : "neutral")}
+          ${stat(`${usedPct.toFixed(0)}%`, "증거금 사용",
+                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good")}
+        </div>
+        <div class="acct-expo">
+          <span>노출</span>
+          <span class="acct-expo-track"><span class="acct-expo-fill ${expo > 15 ? "bad" : "warn"}"
+            style="width:${Math.min(expo / EXPO_CAP * 100, 100).toFixed(1)}%"></span></span>
+          <b class="${expo > 15 ? "bad" : "warn"}">${expo.toFixed(1)}배</b>
+        </div>
+        <p class="acct-pos-line"><strong>${escapeHtml(pos.symbol)}
+          ${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</strong>
+          · 수량 ${escapeHtml(pos.qty)}</p>
+        <p class="acct-pos-sub">진입 ${fmtUsd(pos.entry_price)} → 현재 ${fmtUsd(mark)}
+          · 청산 ${fmtUsd(liq)} · 지갑 ${fmtUsd(wallet)}</p>
+      </div>
+      ${perf}
+    </div>${otherNote}`);
+}
+
+
 // 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {
+  // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
+  latestBinanceAccount = payload?.ok ? payload : null;
+  renderSnapshotAccount();
+  renderSnapshotChart();
   const summary = el("acctSummary");
   if (!payload?.ok) {
     const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
@@ -913,6 +1051,10 @@ function fmtUsd(value) {
 }
 
 async function refreshBinanceAccount() {
+  // ops 탭(refreshOpsStatus)과 스냅샷 탭(tick) 양쪽에서 부르므로 자체 게이트를 둔다.
+  const now = Date.now();
+  if (now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
+  binanceAccountLastFetchAt = now;
   try {
     const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-store" });
     renderBinanceAccount(await res.json());
@@ -1172,6 +1314,35 @@ function tpPriceText(px) {
   return px == null ? null : `익절 ${fmtNum(px, 2)}`;
 }
 
+// 2026-09-10 (사용자 요청): "이미 급등락한 봉 다음 봉에 신호가 와서 의미가 없다".
+//   V자 확률 판정은 **닫힌 봉 23피쳐**가 있어야 해서 앞당길 수 없다(TabPFN 재적합 GPU ~3초,
+//   10초 주기로 돌리면 to_thread 풀이 고갈된다 -- 09-10 실장애). 대신 이미 10초마다 도는
+//   evidence-signals-provisional 이 **형성 중인 봉에서 어떤 트리거가 떴는지**는 알고 있으므로
+//   그것만 확률 없이 보여준다. 증거신호 칩이 확률 없이 발동 여부만 깜빡이는 것과 같은 계약이다.
+//   ⚠️확정 판정과 절대 섞지 않는다 -- 미확정 값은 봉이 닫힐 때까지 바뀐다(repainting).
+function provisionalTriggerNote() {
+  const p = latestEvidenceSignalsProvisional;
+  if (!p || p.error || !p.available || !p.warmed_up) return null;
+  const sigs = Array.isArray(p.signals) ? p.signals : [];
+  const firing = sigs.filter((s) => evidenceSideTone(s) !== "neutral");
+  if (!firing.length) return null;
+  return `진행중 ${firing.length}종`;
+}
+
+// 위 요약의 툴팁 -- 어떤 트리거인지와 "왜 확률이 없는지"를 밝힌다.
+function provisionalTriggerTitle() {
+  const p = latestEvidenceSignalsProvisional;
+  const sigs = Array.isArray(p && p.signals) ? p.signals : [];
+  const firing = sigs.filter((s) => evidenceSideTone(s) !== "neutral");
+  if (!firing.length) return null;
+  // EVIDENCE_SIGNAL_KO[x] 는 {name, detail, ...} 객체다 -- .name 을 꺼내야 한다([object Object] 방지).
+  const names = firing.map((s) => ((EVIDENCE_SIGNAL_KO || {})[s.name] || {}).name || s.name).join(" · ");
+  return [`아직 안 닫힌 ${fmtShortTs(p.bar_open_utc)} 봉에서 트리거 ${firing.length}종이 형성 중: ${names}`,
+          "⚠️미확정입니다 -- 고가/저가/거래량이 봉 마감까지 계속 바뀌어 발동이 사라질 수 있습니다.",
+          "확률(되돌림/지속 판정)은 닫힌 봉 23피쳐가 있어야 나오므로 여기에는 없습니다 --",
+          "봉이 닫히면 위 배지와 미터에 확정 판정이 뜹니다."].join("\n");
+}
+
 const V_REBOUND_TP_TITLE = [
   "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
   "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
@@ -1180,17 +1351,6 @@ const V_REBOUND_TP_TITLE = [
   "· ⚠️검증된 매매 엣지가 아닙니다: 수정회계 라벨 재학습(2026-09-08)에서 AUC는 +0.03~0.07 개선됐지만",
   "  경제성 랭킹은 0이었고, 선정된 팔이 세 창 모두 무작위 진입 이하였습니다.",
   "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
-].join("\n");
-
-const BREAKOUT_TP_TITLE = [
-  "이 판정의 라벨 배리어(진입가 ±0.8×ATR) 중 **매매 방향 쪽** 목표가입니다.",
-  "· 매매 방향 = 발현 방향 XOR 되돌림콜 — 돌파면 발현 방향 그대로, 되돌림이면 반대입니다.",
-  "· 손절선은 반대쪽 같은 폭입니다(대칭 라벨이라 따로 적을 값이 없습니다).",
-  "· 호라이즌 1시간(12봉) 안에 어느 쪽도 안 닿으면 시간청산이고, 그때는 12봉 뒤 종가 부호로 채점합니다.",
-  "· ⚠️이 대칭 배리어를 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 56~59%입니다 —",
-  "  라벨은 채점용이지 매매 규칙이 아닙니다. 실제 매매 브래킷은 별도 축이고 현재 보류 상태입니다.",
-  "· 러너가 사건마다 기록한 배리어를 그대로 읽습니다 — 2026-09-08 배리어 개정 전 행에 지금 ATR을",
-  "  덮어씌우지 않기 위해서입니다(옛 배리어 행은 집계에서도 제외됩니다).",
 ].join("\n");
 
 const STRIP_BAR_LABEL_BY_TONE = {
@@ -1203,12 +1363,6 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
   // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
   v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
-  // 2026-09-08 돌파/되돌림 -- <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
-  // 🔴이 사전은 **톤이 키**인데 이 카드의 톤은 방향(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일
-  //   수도 "되돌림 숏"일 수도 있다. 예전 값은 양쪽 다 "돌파"라고 못박아, 배지가 "직전 되돌림↓"
-  //   인데 띠 캡션은 "돌파 ↓"로 나왔다(2026-09-08 사용자 신고). <주장>은 이제 서버가 봉별로
-  //   주는 call_history 에서 오고(stripBarLabel), 여기엔 **방향만** 남긴다.
-  breakout_rev: { good: "↑", bad: "↓", warn: "혼재 보유", neutral: "미발동" },
   // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
   // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
@@ -1327,26 +1481,6 @@ const MODEL_INDICATOR_MEANING = {
     "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
   },
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
-  // 2026-09-08 돌파/되돌림. ⚠️키는 subText 문자열이다(규약 §5-1).
-  breakout_rev: {
-    // ⚠️설명은 **예측(앞으로 어떻게 되나)을 먼저** 쓴다. 화살표·색과 같은 방향이어야 한다.
-    //   이전에는 "**하락**으로 발현했지만…"처럼 **관측**을 굵게 앞세워, ↑ 배지인데 첫 단어가
-    //   "하락"이라 서로 다른 말로 읽혔다(2026-09-08 사용자 신고 "되돌림 위가 왜 하락이야?").
-    //   관측(발현)은 뒤에 덧붙인다. 화살표 = 예측 방향 = 색.
-    "돌파 ↑": "앞으로 오른다는 판정입니다 — 상단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
-    "돌파 ↓": "앞으로 내린다는 판정입니다 — 하단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
-    "되돌림 ↑": "앞으로 오른다는 판정입니다 — 하단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
-    "되돌림 ↓": "앞으로 내린다는 판정입니다 — 상단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
-    "혼재 보유": "방향이 반대인 가상 포지션이 동시에 열려 있습니다.",
-    "직전 돌파↑": "직전 판정은 앞으로 오른다였습니다(상단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 돌파↓": "직전 판정은 앞으로 내린다였습니다(하단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 되돌림↑": "직전 판정은 앞으로 오른다였습니다(하단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 되돌림↓": "직전 판정은 앞으로 내린다였습니다(상단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "미발동": "2시간 넘게 상단·하단 터치(1시간 안 ±0.75×ATR)가 없습니다.",
-    "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
-    "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
-    "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
     "숏압박↑": "베이시스 콘탱고 극단 — 이후 1~4시간 숏 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
@@ -1397,38 +1531,6 @@ const MODEL_INDICATOR_DETAIL = {
     + "⚠️매매 트리거가 아닙니다. 이 등급대로 매매하면 표본외 순 +2.27bp(강+중, 2.93건/일)로 "
     + "거래비용 여유가 없습니다. 게이트 없이는 -3.36bp 였습니다. '여기가 국소 극단일 확률'을 "
     + "주는 것이지 '사거나 팔라'가 아닙니다.",
-  breakout_rev: "[규칙] 증거신호 8종 중 **어느 하나가 처음 발동**하면 앵커입니다(신호별 GAP 중복제거, 25.2건/일). " +
-    "앵커 다음 봉 시가(기준가)에서 **1시간 안에 ±0.75×ATR** 밴드 중 먼저 닿는 쪽이 " +
-    "**상단 터치 / 하단 터치**입니다 — 예측이 아니라 관측값이고, 앵커의 99.3%가 터치합니다(25.0건/일). " +
-    "창은 2026-09-09 에 15분에서 1시간으로 넓혔습니다 — 커버리지가 88.6%→99.3% 로 오르고, " +
-    "기존(15분 안 터치) 사건의 성적은 시드 폭 안에서 그대로였습니다.\n" +
-    "🔴**«어느 쪽으로 갔나»가 아니라 «어느 밴드를 먼저 스쳤나»입니다.** 1분봉 고가·저가 기준이라 " +
-    "꼬리 하나로 정해지고, 한 번 정해지면 뒤에 무슨 일이 있어도 안 바뀝니다. 그래서 눈과 자주 어긋납니다 — " +
-    "신호를 발동시킨 **앵커 봉 자신의 방향과는 49.5%**(사실상 동전), 터치까지의 순변동과는 22.9% 어긋납니다. " +
-    "«하단 터치» 사건의 23.3%는 15분 뒤 종가가 오히려 기준가보다 높습니다. 터치 그 순간과는 1.4%만 어긋납니다.\n" +
-    "터치한 그 순간부터 **1시간 안에 진입가 ±0.8×ATR**(사건별, 중앙값 0.212%) 중 어느 쪽에 먼저 닿는지를 맞힙니다. 터치한 방향 쪽이면 " +
-    "**돌파**, 반대면 **되돌림**입니다. 1시간 안에 어느 쪽도 안 닿으면 12봉 뒤 종가 부호로 정합니다.\n" +
-    "[피쳐] 69개 — 5분봉 가격·거래량 24 · BTC 동조 · 터치까지의 경로 · 레벨 맥락 · 포지셔닝 메트릭 12 · 신호 원핫 8. " +
-    "전부 **트리거 봉의 직전 봉**까지만 봅니다. 🔴경로 피쳐는 트리거 분 자체를 포함하지 않습니다 — " +
-    "같은 1분봉을 피쳐와 라벨이 공유하면 그 봉의 큰 움직임이 피쳐를 키우는 동시에 배리어를 때려 미래참조가 됩니다.\n" +
-    "[모델] HistGradientBoosting 5시드 평균. 모델 축은 2026-09-08 종결했습니다 — TabPFN·TabICL·" +
-    "LightGBM·고전 GBM 을 같은 프로토콜로 전부 돌렸는데 모델간 격차(1.3~4.0pp)가 같은 모델의 시드·" +
-    "정렬순서 변동폭과 같았습니다. 회귀(1시간 뒤 수익률)는 분류에 2.6~5.1pp 뒤집니다 — 이 신호는 " +
-    "드리프트가 아니라 **먼저 닿는 쪽**을 압니다.\n" +
-    "[검정] 시드 20개 워크포워드에서 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813, " +
-    "셔플 귀무 .5350 / .5424 / .5231 대비 초과 +2.5 / +4.5 / +5.8pp. **20개 시드 전부 세 창 동시에 귀무 위**입니다" +
-    "(B=32 셔플, 시드 판정 OK 2 · FLAG 1 · FAIL 0).\n" +
-    "⚠️2026-09-08 배리어 개정(절대 ±0.25% → ±0.8×ATR) 이전 기준선(VAL .5748 / OOS .6046 / HOLDOUT .5716, " +
-    "B=100 p=0.010)은 **무효**입니다 — 다른 질문이었습니다. 절대 배리어는 ATR 구간마다 난이도가 딴판이라 " +
-    "고ATR 의 높은 정확도가 대부분 클래스 불균형이었습니다(돌파율 0.334). 0.8×ATR 로 바꾸자 전 구간 돌파율이 " +
-    "0.46~0.47 로 균등해지고 시간청산율이 9.5%→3.2% 로 떨어졌습니다.\n" +
-    "🔴대가로 **매매 규칙은 보류**됐습니다. 브라켓 격자가 0/196 통과(절대 배리어는 10/196, 최선 +2.53bp) — " +
-    "배리어가 좁아져 최적 TP 가 20→15bp 로 내려갔고 TP 15bp 에서는 비용 10bp 가 수익의 67% 입니다. " +
-    "이 카드는 **참고 지표**이고 종이거래 기록은 판정 근거로 쓰지 않습니다.\n" +
-    "⚠️**원시 정확도끼리 비교하지 마십시오.** 창마다 클래스 균형이 달라 셔플 귀무가 .515~.570 사이를 움직입니다 — " +
-    "정확도는 반드시 그 창의 귀무와 함께 읽어야 합니다.\n" +
-    "⭐커버리지 상한을 두지 않습니다. 전 트리거에 판정을 내므로 '어느 사건이 해소되는가'를 결과가 정하는 " +
-    "편향이 구조상 생기지 않습니다.",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
     "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
@@ -1471,7 +1573,6 @@ const MODEL_INDICATOR_DETAIL = {
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
   // -- model indicators --
-  breakout_rev: { text: "1시간", title: "터치(트리거) 시점부터 ±0.8×ATR 배리어를 1분봉 first-touch 로 판정하고, 12봉(1시간) 안에 어느 쪽도 닿지 않으면 12봉 뒤 종가 부호로 정합니다. 배리어는 사건마다 그 시점 ATR 로 정해집니다(중앙값 0.212%) -- 2026-09-08 개정 전에는 절대 ±0.25% 였습니다." },
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
   liq_direction: { text: "상태", title: "고정 예측 시간창 없이 매분 갱신되는 현재 청산 방향압력 -- 5·15분 지평 IC는 유의했으나(탐색적), 손익 결합 검정(8개 지평)은 전부 순손실" },
@@ -1506,7 +1607,6 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
   extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
-  breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
@@ -1533,7 +1633,6 @@ const MODEL_CHIP_IDS = {
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
-"breakout_rev",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
@@ -2616,137 +2715,6 @@ function extremeDetectorIndicatorItem() {
     history: p.history || [], times: p.times || [] };
 }
 
-async function refreshBreakoutRev() {
-  const now = Date.now();
-  if (now - breakoutRevLastFetchAt < BREAKOUT_REV_POLL_MS) return;
-  breakoutRevLastFetchAt = now;
-  try {
-    const res = await fetch(API_BREAKOUT_REV_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`breakout rev ${res.status}`);
-    latestBreakoutRev = await res.json();
-  } catch (error) {
-    console.error("Breakout/reversal shadow fetch error:", error);
-    latestBreakoutRev = { error: "fetch_failed" };
-  }
-}
-
-// ── 돌파/되돌림 앵커 섀도우 (2026-09-08) ──────────────────────────────────────────────
-// 규약: 라벨 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 제목 밑 데이터 줄 없음 §4
-// ⭐커버리지 상한이 없다 -- 발현한 전 트리거에 판정을 낸다. 그래서 "판단 보류" 상태가 없다.
-// ⚠️정확도는 반드시 그 창의 **셔플 귀무**와 함께 읽는다(창마다 클래스 균형이 다르다).
-function breakoutRevIndicatorItem() {
-  const base = { key: "breakout_rev", label: "앵커 돌파/되돌림", derivedTag: "= 모델 · 섀도우 검증 중",
-    derivedTitle: "증거신호가 처음 발동한 뒤 1시간 안에 ±0.75×ATR 밴드 중 먼저 닿는 쪽이"
-      + " 상단 터치 / 하단 터치입니다(예측이 아니라 관측값). 그 방향으로 계속 가는지(돌파)"
-      + " 되돌아오는지(되돌림)를 1시간 ±0.8×ATR 배리어로 판정합니다"
-      + "(사건별, 중앙값 0.212%). 2026-09-08부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
-      + "시드 20개 워크포워드 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813 (셔플 귀무 .5350 / .5424 / .5231"
-      + " 대비 +2.5 / +4.5 / +5.8pp). 20개 시드 전부 세 창 동시에 귀무 위(B=32).\n"
-      + "⚠️창마다 클래스 균형이 달라 원시 정확도끼리 비교하면 안 됩니다.\n"
-      + "⚠️배리어 개정(09-08) 전 기준선은 무효입니다 — 매매 규칙도 그때 보류됐습니다('자세히' 참조).",
-    history: [], times: [] };
-  const p = latestBreakoutRev;
-  // 규약 §3: forceMeter 목록은 **상태와 무관하게 같은 모양**이어야 한다. 운영 상태에서
-  // probaSlot 을 빼면 게이지 줄이 사라져 행 높이가 달라진다(V자가 "미발동이어도 자리를 지킨다"와 같은 이유).
-  if (!p || p.error) return { ...base, tone: "neutral", probaSlot: true, proba: null,
-                              subText: p && p.error ? "오류" : "웜업" };
-  const pr = p.prereg || {}; const pa = pr.acc || {}; const pn = pr.null || {};
-  const refText = pa.OOS != null
-    ? `사전등록 OOS ${(pa.OOS * 100).toFixed(1)}% (귀무 ${(pn.OOS * 100).toFixed(1)}%)` : "";
-  if (!p.available) {
-    return { ...base, tone: "neutral", probaSlot: true, proba: null, subText: "데이터 없음",
-             stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
-  }
-  const dirs = p.open_dirs || [];
-  const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  const calls = p.open_calls || [];
-  // 🔴폴백 버그(2026-09-08 사용자 신고): 판정이 섞였는데 방향이 같으면 claim 이 null 이 되고
-  //   예전 코드는 `claim || "돌파"` 로 **조용히 돌파라고 썼다**. 되돌림 포지션에 "돌파" 배지가
-  //   붙는 조합이다. 폴백을 **가장 최근 판정**으로 바꾼다.
-  const claim = calls.length && calls.every((c) => c === calls[0]) ? calls[0] : null;
-  const last = p.last || null;
-  // ⭐라벨 배리어(±0.8×ATR, 중앙값 0.212%)라 **중앙값 5분**에 해소된다 -- 하루 22건이 발동해도
-  //   포지션이 열려 있는 시간은 24시간 중 18%뿐이다. 보유 중일 때만 보여주면 82% 를 "미발동"으로
-  //   덮어버려 "신호가 안 뜬다"로 읽힌다(2026-09-08 사용자 신고). 그래서 유휴일 때는
-  //   **직전 판정**을 회색으로 보여준다. 2시간이 지나면 그때 비로소 "미발동"이다.
-  const ageMin = last && last.age_min != null ? Number(last.age_min) : null;
-  const fresh = ageMin != null && ageMin <= 120;
-  // 방향은 **화살표**로 쓴다(사용자 요청 2026-09-08): ↑ 롱 · ↓ 숏.
-  // `돌파 숏` 은 발현 방향을 모르면 뜻이 안 통했다("돌파"가 상방으로 읽힌다는 신고).
-  const lastArrow = last ? (Boolean(last.dir_up) === (last.call === "돌파") ? "↑" : "↓") : "";
-  let subText, tone;
-  if (p.open_positions) {
-    subText = hasL && hasS ? "혼재 보유"
-      : `${claim || (last && last.call) || "돌파"} ${hasS ? "↓" : "↑"}`;
-    tone = hasL && hasS ? "warn" : hasS ? "bad" : "good";
-  } else if (fresh && last && last.call) {
-    subText = `직전 ${last.call}${lastArrow}`;
-    // ⭐2026-09-08 사용자 요청: "상승한다고 하는건 초록, 하락한다고 하는건 빨강".
-    //   유휴 상태도 **직전 판정의 예측 방향**으로 칠한다(↑=good · ↓=bad).
-    //   규약 §2 의 "방향 없음 = neutral" 은 방향이 **없을 때** 규칙이다 -- 직전 판정에는
-    //   방향이 있다. 게이트를 제거해 이 카드가 매매가 아니라 **참고 지표**가 됐으므로,
-    //   "진입 안 했으면 회색"이던 MASHT 관행(삭제됨)은 더 이상 적용하지 않는다.
-    tone = lastArrow === "↑" ? "good" : "bad";
-  } else { subText = "미발동"; tone = "neutral"; }
-  const days = Number(p.days_running || 0);
-  const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  const lastText = last
-    ? `마지막 터치 ${String(last.trigger_utc || "").slice(5, 16)}`
-      + `${ageMin != null ? `(${ageMin < 60 ? `${Math.round(ageMin)}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`})` : ""}`
-      + ` ${last.dir_up ? "상단" : "하단"} 터치(${last.trig_min}분) → ${last.call}`
-      + ` = 앞으로 ${lastArrow === "↑" ? "오른다" : "내린다"}`
-      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
-    : "터치 대기";
-  // ⚠️원장 집계는 **현행 라벨 정의 행만** 센다(server.py::_br_current_label). 2026-09-08
-  //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
-  //   서로 다른 두 질문의 답을 평균한 값이 된다. 제외 건수를 화면에 밝힌다.
-  const staleText = p.stale_closed ? ` · 옛 배리어 ${p.stale_closed}건 제외` : "";
-  const ledText = p.closed
-    ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
-      + `${p.per_day != null ? ` · ${p.per_day}건/일` : ""}`
-      + ` (돌파 ${p.outcomes.cont} / 되돌림 ${p.outcomes.fade} / 시간청산 ${p.outcomes.timeout})`
-      + staleText
-    : `해소된 건 없음${staleText}`;
-  const tierText = Object.entries(p.by_tier || {})
-    .map(([k, v]) => `${k} ${(v.acc * 100).toFixed(0)}%(${v.n})`).join(" · ");
-  // 문장 순서 고정(규약 §4): 근거 → 원장 → 계측 → 백테스트 → 가드
-  const stateTitle = [`${lastText} · 보유 ${p.open_positions} · 감시 ${p.watching}`,
-                      `${ledText}${guard}`,
-                      tierText ? `확신 등급별 ${tierText}` : "",
-                      `${refText} · 전건 판정(커버리지 상한 없음)`,
-                      "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]
-    .filter(Boolean).join("\n");
-  // 미터 칸(규약 §3): 상태 → 게이지 → 수치. 셋 다 채워야 다른 감지기와 모양이 맞는다.
-  // 게이지는 **지금 배지가 주장하는 쪽의 확률**이다(돌파면 p, 되돌림이면 1−p) -- 되돌림인데
-  // 44% 로 그리면 배지와 그림이 서로 다른 말을 한다.
-  // ⚠️배지가 "미발동"인데 게이지·수치가 남아 있으면 서로 다른 말을 한다 -- 보유 중도 아니고
-  //   직전 판정도 오래됐으면(2시간 초과) 셋을 함께 비운다.
-  const showNum = Boolean(p.open_positions) || fresh;
-  const pb = showNum && last && last.p_breakout != null ? Number(last.p_breakout) : null;
-  const proba = pb == null ? null : (pb > 0.5 ? pb : 1 - pb);
-  // 수치 줄(규약 §3, 확률이 아닌 수치): 2026-09-10 사용자 요청으로 **익절가**를 적는다 --
-  // 증거신호·V자와 같은 `익절 {가격}` 포맷. 여기 있던 경과/보유 시간은 이미 상태 배지 툴팁의
-  // 첫 줄(lastText)에 그대로 있으므로 잃는 정보가 없고, 보유 중 진행도만 이 툴팁에 옮겨 담는다.
-  let meterNote = null, meterNoteTitle = "";
-  if (showNum && last && last.tp_price != null) {
-    meterNote = tpPriceText(last.tp_price);
-    const a = ageMin != null ? Math.round(ageMin) : null;
-    meterNoteTitle = (p.open_positions && a != null
-      ? `보유 ${Math.min(a, 60)}/60분 — 터치 시점부터 경과 / 시간청산까지의 지평.\n`
-      : a != null ? `가장 최근 터치로부터 ${a < 60 ? `${a}분` : `${(ageMin / 60).toFixed(1)}시간`} 경과. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.\n` : "")
-      + BREAKOUT_TP_TITLE;
-  }
-  // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
-  // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
-  const history = p.tone_history || [];
-  // 봉별 판정 단어(돌파/되돌림/혼재). 톤은 방향만 담으므로 이게 있어야 띠 캡션이 배지와 같은
-  // 말을 한다(2026-09-08 사용자 신고: 배지 "직전 되돌림↓" vs 띠 "돌파 ↓").
-  const callHistory = p.call_history || [];
-  const times = evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5);
-  return { ...base, history, times, callHistory, tone, subText, stateTitle,
-           proba, probaSlot: true, meterNote, meterNoteTitle };
-}
-
 async function refreshVReboundSignal() {
   const now = Date.now();
   if (now - vReboundLastFetchAt < V_REBOUND_POLL_MS) return;
@@ -3174,7 +3142,6 @@ function setupPageTabs() {
       evidenceLastFetchAt = 0; refreshEvidenceSignals();
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
-      breakoutRevLastFetchAt = 0; refreshBreakoutRev();
       extremeLastFetchAt = 0; refreshExtremeDetector();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
@@ -3369,7 +3336,7 @@ function updateSnapshotCandleLive() {
 }
 
 // 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 styles.css 의
-// .liq-density-legend-bar 가 #viridisGradient 와 같은 스톱으로 그린다 -- 두 곳이 같은 색이어야
+// .liq-density-legend-bar 가 DENSITY_STOPS 와 같은 스톱을 하드코딩한다 -- 두 곳이 같아야
 // 범례가 히트맵을 정직하게 설명한다.
 function renderLiqDensityLegend(hasDensity) {
   const host = el("liqDensityLegend");
@@ -3408,7 +3375,10 @@ function renderSnapshotChart() {
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
   const densityHistory = liquidationDensityHistory();
-  renderCandleSvg(svg, candles, [], 0, currentPrice, riskLevels, densityHistory);
+  // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
+  // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
+  const entryPrice = Number(snapshotAccountPosition()?.entry_price || 0);
+  renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels, densityHistory);
   renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
@@ -3431,29 +3401,39 @@ function fmtDateTick(ts) {
   return `${hh}:${mm}`;
 }
 
-// Sequential colormap (matplotlib viridis stops) for the liquidation density heatmap band --
-// 2026-08-25, replaces the old dual-hue support/orange scheme so density alone (not which side)
-// drives color, matching Coinglass's liquidation-heatmap convention the user asked to replicate.
-// Dark purple at t=0 reads as near-background (low density fades out); bright yellow at t=1 pops.
-const VIRIDIS_STOPS = [
-  [0.0, [68, 1, 84]],
-  [0.2, [65, 68, 135]],
-  [0.4, [42, 120, 142]],
-  [0.6, [34, 168, 132]],
-  [0.8, [122, 209, 81]],
-  [1.0, [253, 231, 37]],
+// 청산 밀도 히트맵 컬러맵 (2026-09-10 교체). 이전엔 matplotlib **viridis**(보라->파랑->초록
+// ->노랑)였는데 사용자 지적 "청산밀도 색깔이 너무 어지러운 색깔이야. 봉 차트 색과 잘 조화롭게".
+// viridis 의 초록(34,168,132)·연두(122,209,81)·노랑(253,231,37) 구간이 캔들의 상승 초록
+// (--good #6bab84)·경고 앰버(--amber)와 정면으로 부딪혔다 -- 배경 띠가 캔들보다 튀었다.
+//
+// 교체 원칙 셋:
+//   1. **단색(쿨) 램프**: 밝기만 단조 증가시키고 색상은 안 바꾼다 -> 배경으로 읽힌다.
+//   2. **초록/빨강/노랑 금지**: 밀도는 방향이 없다(2026-08-25 에 dual-hue 를 뺀 이유).
+//      캔들 색과 겹치면 밀도가 방향 정보로 오독된다.
+//   3. t=0 은 패널 배경(#13151c 대역)에 녹고, t=1 은 채도를 낮춘 스틸블루라
+//      --accent(#22d3ee, 가격선)보다 덜 튄다.
+// 휘도 단조 확인: 20.2 -> 41.9 -> 71.5 -> 98.0 -> 144.0
+// 캔들색 이격 확인(RGB 유클리드, 전 구간 60 이상): 상승초록 #6bab84 최소 69 · 하락빨강
+// #cf6a5c 최소 145. 첫 안(상단 122,178,196)은 초록과 48 까지 붙어서 더 파랑으로 밀었다.
+// ⚠️styles.css 의 `.liq-density-legend-bar` 그라디언트가 이 값을 하드코딩한다 -- 같이 고칠 것.
+const DENSITY_STOPS = [
+  [0.0, [18, 20, 27]],
+  [0.25, [30, 44, 62]],
+  [0.5, [46, 78, 104]],
+  [0.75, [58, 108, 152]],
+  [1.0, [96, 156, 208]],
 ];
-function viridisColor(t) {
+function densityColor(t) {
   t = clamp01(t);
-  for (let i = 0; i < VIRIDIS_STOPS.length - 1; i++) {
-    const [t0, c0] = VIRIDIS_STOPS[i], [t1, c1] = VIRIDIS_STOPS[i + 1];
+  for (let i = 0; i < DENSITY_STOPS.length - 1; i++) {
+    const [t0, c0] = DENSITY_STOPS[i], [t1, c1] = DENSITY_STOPS[i + 1];
     if (t <= t1) {
       const f = (t - t0) / (t1 - t0 || 1);
       const rgb = c0.map((v, k) => Math.round(v + (c1[k] - v) * f));
       return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
     }
   }
-  const last = VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1][1];
+  const last = DENSITY_STOPS[DENSITY_STOPS.length - 1][1];
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
@@ -3463,7 +3443,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const mobileChart = isMobileChartMode();
   const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
   const h = mobileChart ? Math.max(parentH, 260) : 400;
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 20, mb = 40;
+  // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
+  // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
+  // 2026-09-10 mb 40 -> 56 (레짐 리본 20px 확보).
+  // 2026-09-11 사용자 요청 "증거신호 레인을 청산맵 밖으로": 레인이 플롯 **위에 겹쳐** 그려져
+  //   캔들을 가리던 것을 여백으로 뺐다. mt 20 -> 22(천장 레인 자리), mb 56 -> 74(바닥 레인
+  //   자리). 레인이 플롯에서 30px 를 돌려주므로 실제 캔들 영역 손실은 324 -> 304 로 20px 뿐이다.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 74;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3540,13 +3526,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
   // (swap this placeholder out once a real BTC regime classifier is trained).
   const regimeRibbonUnsupported = isSnapshotChart && !regimeSource;
-  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 8;
+  // 리본 높이 20. 2026-09-11 바닥 레인이 h-mb+28 로 들어오면서 리본은 +28 -> **+50** 으로 내려갔다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
+  // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
+  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
   // bar (capped at 30% of chart width, "left 70% stays clean for candles") with a full-width
   // background band, color intensity encoding density via a single sequential colormap
-  // (viridisColor) -- matches Coinglass's liquidation-heatmap convention at the user's explicit
+  // (densityColor) -- matches Coinglass's liquidation-heatmap convention at the user's explicit
   // request ("전체폭으로 가자"), reversing that earlier candle-clean design (twice rejected before
   // for the opposite reason -- widening the bar ate into candle space; a full-width BACKGROUND
   // band is a different tradeoff the user chose knowingly). Candles are opaque and painted after
@@ -3587,7 +3576,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", x0); rect.setAttribute("y", top);
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
-    rect.setAttribute("fill", viridisColor(t));
+    rect.setAttribute("fill", densityColor(t));
     rect.setAttribute("fill-opacity", "0.85");
     svg.appendChild(rect);
   };
@@ -3747,7 +3736,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
     const ribbonLabel = document.createElementNS(NS, "text");
     ribbonLabel.setAttribute("x", ml - 6);
-    ribbonLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H - 1);
+    // 리본이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
+    ribbonLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H / 2 + 3);
     ribbonLabel.setAttribute("text-anchor", "end");
     ribbonLabel.setAttribute("font-size", "9");
     ribbonLabel.setAttribute("fill", "var(--muted)");
@@ -3862,8 +3852,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   rx=1.5 라운딩이 그 폭을 먹어 점처럼 보인다(최대 축소 72봉이면 bw 3.2px).
     //   → 레인마다 **불투명 트랙**을 깔아 히트맵을 끊고, 모바일에선 높이를 키우고 라운딩을
     //     빼고 최소 폭을 보장하고 불투명도 하한을 올린다.
-    const LANE_H = mobileChart ? 9 : 6;
-    const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
+    // 2026-09-10 데스크톱 6 / 모바일 9 -> 20(레짐 리본과 동일)으로 키웠다가, 2026-09-11
+    // 사용자 지시로 **15** 로 낮췄다. 모바일이 데스크톱보다 컸던 건 2026-09-09 가시성
+    // 신고("천장·바닥 게이지가 잘 안 보이고 청산 밀도에 가려진다") 때문인데 15 면 그 이유가
+    // 해소되므로 한 값으로 통일한다.
+    // ⚠️레인은 플롯 **위에 겹쳐** 그린다(레짐 리본과 달리 하단 여백 밖이 아니다). 그래서
+    //   높이가 곧 캔들을 가리는 면적이다 -- 상·하 15px 씩이면 데스크톱 플롯 324 중
+    //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
+    const LANE_H = 15;
+    // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
+    //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
+    const LANE_Y = { top: mt - 3 - LANE_H, bottom: h - mb + 28 };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
     // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
     // 3.8px 밖에 안 남아 점처럼 보인다(2026-09-09 신고) -- 9px 미만은 각지게 그린다.
@@ -3904,7 +3903,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       });
       const lab = document.createElementNS(NS, "text");
       lab.setAttribute("x", ml - 6);
-      lab.setAttribute("y", LANE_Y[side] + LANE_H - 1);
+      // 레인이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
+      lab.setAttribute("y", LANE_Y[side] + LANE_H / 2 + 3);
       lab.setAttribute("text-anchor", "end");
       lab.setAttribute("font-size", "9");
       lab.setAttribute("fill", "var(--muted)");
@@ -3983,7 +3983,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
   //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
-  //   증거신호 **천장 레인**(y=mt+3)을 오른쪽 끝에서 덮었다. mt 를 키워 자리를 만들면
+  //   증거신호 **천장 레인**(당시 y=mt+3, 2026-09-11 에 mt-3-LANE_H 로 이동)을 덮었다.
   //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
   //   렌더는 renderLiqDensityLegend() -- index.html 의 #liqDensityLegend 를 채운다.
 
@@ -4247,12 +4247,14 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
         // 익절가(2026-09-10): 서버가 반등 콜일 때만 tp_price 를 준다 -- continuation 은 이 목표에
         // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
-        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price),
-        meterNoteTitle: V_REBOUND_TP_TITLE,
+        // 익절가와 "진행중 N종"을 같은 자리에 둔다(규약 §3: 확률 아닌 수치는 meterNote).
+        // 둘 다 있으면 · 로 잇고, 익절가가 없는 상태(continuation 판정)에서도 진행중은 보인다.
+        meterNote: [tpPriceText(latestVRebound && latestVRebound.tp_price),
+                    provisionalTriggerNote()].filter(Boolean).join(" · ") || null,
+        meterNoteTitle: [V_REBOUND_TP_TITLE, provisionalTriggerTitle()].filter(Boolean).join("\n\n"),
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
-      ethOnlyIndicator(breakoutRevIndicatorItem()),  // 2026-09-08 돌파/되돌림
       ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
@@ -4300,9 +4302,9 @@ async function tick() {
       refreshEvidenceSignals();
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
-      refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
+      refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
