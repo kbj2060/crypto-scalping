@@ -1043,7 +1043,11 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
   const timeList = Array.isArray(times) ? times : [];
   const callList = Array.isArray(calls) ? calls : [];
   const n = Math.max(list.length, 1);
-  const w = 240, h = 15, gap = 1.5;
+  // 2026-09-10 사용자 요청 "증거신호 게이지 칸도 크기를 키워줘": 15 -> 20.
+  // 같은 날 키운 레짐 리본(REGIME_RIBBON_H=20)과 높이를 맞춘다. CSS `.evidence-strip`
+  // 높이도 같이 20 으로 올린다 -- preserveAspectRatio="none" 이라 둘이 어긋나면
+  // 막대의 rx=2 둥근 모서리가 타원으로 늘어난다(1:1 유지가 목적).
+  const w = 240, h = 20, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
 
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
@@ -3203,7 +3207,7 @@ function updateSnapshotCandleLive() {
 }
 
 // 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 styles.css 의
-// .liq-density-legend-bar 가 #viridisGradient 와 같은 스톱으로 그린다 -- 두 곳이 같은 색이어야
+// .liq-density-legend-bar 가 DENSITY_STOPS 와 같은 스톱을 하드코딩한다 -- 두 곳이 같아야
 // 범례가 히트맵을 정직하게 설명한다.
 function renderLiqDensityLegend(hasDensity) {
   const host = el("liqDensityLegend");
@@ -3268,29 +3272,39 @@ function fmtDateTick(ts) {
   return `${hh}:${mm}`;
 }
 
-// Sequential colormap (matplotlib viridis stops) for the liquidation density heatmap band --
-// 2026-08-25, replaces the old dual-hue support/orange scheme so density alone (not which side)
-// drives color, matching Coinglass's liquidation-heatmap convention the user asked to replicate.
-// Dark purple at t=0 reads as near-background (low density fades out); bright yellow at t=1 pops.
-const VIRIDIS_STOPS = [
-  [0.0, [68, 1, 84]],
-  [0.2, [65, 68, 135]],
-  [0.4, [42, 120, 142]],
-  [0.6, [34, 168, 132]],
-  [0.8, [122, 209, 81]],
-  [1.0, [253, 231, 37]],
+// 청산 밀도 히트맵 컬러맵 (2026-09-10 교체). 이전엔 matplotlib **viridis**(보라->파랑->초록
+// ->노랑)였는데 사용자 지적 "청산밀도 색깔이 너무 어지러운 색깔이야. 봉 차트 색과 잘 조화롭게".
+// viridis 의 초록(34,168,132)·연두(122,209,81)·노랑(253,231,37) 구간이 캔들의 상승 초록
+// (--good #6bab84)·경고 앰버(--amber)와 정면으로 부딪혔다 -- 배경 띠가 캔들보다 튀었다.
+//
+// 교체 원칙 셋:
+//   1. **단색(쿨) 램프**: 밝기만 단조 증가시키고 색상은 안 바꾼다 -> 배경으로 읽힌다.
+//   2. **초록/빨강/노랑 금지**: 밀도는 방향이 없다(2026-08-25 에 dual-hue 를 뺀 이유).
+//      캔들 색과 겹치면 밀도가 방향 정보로 오독된다.
+//   3. t=0 은 패널 배경(#13151c 대역)에 녹고, t=1 은 채도를 낮춘 스틸블루라
+//      --accent(#22d3ee, 가격선)보다 덜 튄다.
+// 휘도 단조 확인: 20.2 -> 41.9 -> 71.5 -> 98.0 -> 144.0
+// 캔들색 이격 확인(RGB 유클리드, 전 구간 60 이상): 상승초록 #6bab84 최소 69 · 하락빨강
+// #cf6a5c 최소 145. 첫 안(상단 122,178,196)은 초록과 48 까지 붙어서 더 파랑으로 밀었다.
+// ⚠️styles.css 의 `.liq-density-legend-bar` 그라디언트가 이 값을 하드코딩한다 -- 같이 고칠 것.
+const DENSITY_STOPS = [
+  [0.0, [18, 20, 27]],
+  [0.25, [30, 44, 62]],
+  [0.5, [46, 78, 104]],
+  [0.75, [58, 108, 152]],
+  [1.0, [96, 156, 208]],
 ];
-function viridisColor(t) {
+function densityColor(t) {
   t = clamp01(t);
-  for (let i = 0; i < VIRIDIS_STOPS.length - 1; i++) {
-    const [t0, c0] = VIRIDIS_STOPS[i], [t1, c1] = VIRIDIS_STOPS[i + 1];
+  for (let i = 0; i < DENSITY_STOPS.length - 1; i++) {
+    const [t0, c0] = DENSITY_STOPS[i], [t1, c1] = DENSITY_STOPS[i + 1];
     if (t <= t1) {
       const f = (t - t0) / (t1 - t0 || 1);
       const rgb = c0.map((v, k) => Math.round(v + (c1[k] - v) * f));
       return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
     }
   }
-  const last = VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1][1];
+  const last = DENSITY_STOPS[DENSITY_STOPS.length - 1][1];
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
@@ -3388,7 +3402,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
   // bar (capped at 30% of chart width, "left 70% stays clean for candles") with a full-width
   // background band, color intensity encoding density via a single sequential colormap
-  // (viridisColor) -- matches Coinglass's liquidation-heatmap convention at the user's explicit
+  // (densityColor) -- matches Coinglass's liquidation-heatmap convention at the user's explicit
   // request ("전체폭으로 가자"), reversing that earlier candle-clean design (twice rejected before
   // for the opposite reason -- widening the bar ate into candle space; a full-width BACKGROUND
   // band is a different tradeoff the user chose knowingly). Candles are opaque and painted after
@@ -3429,7 +3443,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", x0); rect.setAttribute("y", top);
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
-    rect.setAttribute("fill", viridisColor(t));
+    rect.setAttribute("fill", densityColor(t));
     rect.setAttribute("fill-opacity", "0.85");
     svg.appendChild(rect);
   };
