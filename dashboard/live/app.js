@@ -1187,6 +1187,35 @@ function tpPriceText(px) {
   return px == null ? null : `익절 ${fmtNum(px, 2)}`;
 }
 
+// 2026-09-10 (사용자 요청): "이미 급등락한 봉 다음 봉에 신호가 와서 의미가 없다".
+//   V자 확률 판정은 **닫힌 봉 23피쳐**가 있어야 해서 앞당길 수 없다(TabPFN 재적합 GPU ~3초,
+//   10초 주기로 돌리면 to_thread 풀이 고갈된다 -- 09-10 실장애). 대신 이미 10초마다 도는
+//   evidence-signals-provisional 이 **형성 중인 봉에서 어떤 트리거가 떴는지**는 알고 있으므로
+//   그것만 확률 없이 보여준다. 증거신호 칩이 확률 없이 발동 여부만 깜빡이는 것과 같은 계약이다.
+//   ⚠️확정 판정과 절대 섞지 않는다 -- 미확정 값은 봉이 닫힐 때까지 바뀐다(repainting).
+function provisionalTriggerNote() {
+  const p = latestEvidenceSignalsProvisional;
+  if (!p || p.error || !p.available || !p.warmed_up) return null;
+  const sigs = Array.isArray(p.signals) ? p.signals : [];
+  const firing = sigs.filter((s) => evidenceSideTone(s) !== "neutral");
+  if (!firing.length) return null;
+  return `진행중 ${firing.length}종`;
+}
+
+// 위 요약의 툴팁 -- 어떤 트리거인지와 "왜 확률이 없는지"를 밝힌다.
+function provisionalTriggerTitle() {
+  const p = latestEvidenceSignalsProvisional;
+  const sigs = Array.isArray(p && p.signals) ? p.signals : [];
+  const firing = sigs.filter((s) => evidenceSideTone(s) !== "neutral");
+  if (!firing.length) return null;
+  // EVIDENCE_SIGNAL_KO[x] 는 {name, detail, ...} 객체다 -- .name 을 꺼내야 한다([object Object] 방지).
+  const names = firing.map((s) => ((EVIDENCE_SIGNAL_KO || {})[s.name] || {}).name || s.name).join(" · ");
+  return [`아직 안 닫힌 ${fmtShortTs(p.bar_open_utc)} 봉에서 트리거 ${firing.length}종이 형성 중: ${names}`,
+          "⚠️미확정입니다 -- 고가/저가/거래량이 봉 마감까지 계속 바뀌어 발동이 사라질 수 있습니다.",
+          "확률(되돌림/지속 판정)은 닫힌 봉 23피쳐가 있어야 나오므로 여기에는 없습니다 --",
+          "봉이 닫히면 위 배지와 미터에 확정 판정이 뜹니다."].join("\n");
+}
+
 const V_REBOUND_TP_TITLE = [
   "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
   "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
@@ -4287,8 +4316,11 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
         // 익절가(2026-09-10): 서버가 반등 콜일 때만 tp_price 를 준다 -- continuation 은 이 목표에
         // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
-        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price),
-        meterNoteTitle: V_REBOUND_TP_TITLE,
+        // 익절가와 "진행중 N종"을 같은 자리에 둔다(규약 §3: 확률 아닌 수치는 meterNote).
+        // 둘 다 있으면 · 로 잇고, 익절가가 없는 상태(continuation 판정)에서도 진행중은 보인다.
+        meterNote: [tpPriceText(latestVRebound && latestVRebound.tp_price),
+                    provisionalTriggerNote()].filter(Boolean).join(" · ") || null,
+        meterNoteTitle: [V_REBOUND_TP_TITLE, provisionalTriggerTitle()].filter(Boolean).join("\n\n"),
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
