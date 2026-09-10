@@ -4739,16 +4739,18 @@ window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.
 
 setupNotifyPage();
 
-// 크기 가늠자(scripts/live_eth_position_sizing_worker_20260911.py) -- 위험 눈금이지 알파가 아니다.
-// 계좌 포지션과의 결합은 여기서 한다(서버는 상태파일만 준다). 방향 없는 카드라 색은 neutral/warn 만 쓴다.
+// 크기 가늠자(scripts/live_eth_position_sizing_worker_20260911.py) — **위험도 카드**다.
+// 2026-09-11 사용자: "크기 예측이면 위험도 예측이라고 생각해도 되지 않나?" — 맞다. 그래서
+// 헤드라인을 「청산 확률」로 바꿨다. 초판은 「권장의 몇 배」·「90분위 불리이탈」 같은 중간
+// 단계를 앞세워 정체를 가렸다. 확률은 지금과 비슷한 변동성 구간 11만+ 봉의 **실측 빈도**다.
+// 방향 없는 카드라 색은 neutral/warn 만 쓴다(good/bad 는 롱·숏 전용).
 function renderPositionSizing(payload) {
   const sub = el("sizingSub");
   const summary = el("sizingSummary");
   const body = el("sizingBody");
   if (!body) return;
   if (!payload || payload.available !== true) {
-    const why = payload?.error === "worker_stale" ? "데이터 없음"
-      : payload?.error === "worker_state_missing" ? "웜업" : "데이터 없음";
+    const why = payload?.error === "worker_state_missing" ? "웜업" : "데이터 없음";
     if (sub) sub.textContent = "-";
     if (summary) { summary.textContent = why; summary.className = "ops-health-summary neutral"; }
     body.innerHTML = "";
@@ -4757,39 +4759,57 @@ function renderPositionSizing(payload) {
   const eq = Number(payload.vol_equivalent_qty);
   const pos = (latestBinanceAccount?.positions || [])
     .find((p) => p.symbol === "ETHUSDT" && Math.abs(Number(p.qty) || 0) > 0);
+  const tp = payload.touch_prob;
   const rows = [];
-  const fmtBp = (v) => `${Math.round(v)}bp`;
-  if (sub) {
-    sub.textContent = `변동성 분위 ${Math.round((payload.atr_pct_percentile || 0) * 100)}%`
-      + ` · 변동성 등가 수량 ${eq.toFixed(3)} ETH`;
-  }
+  // 거리 격자에서 선형 보간해 청산선 거리의 도달 확률을 읽는다.
+  const probAt = (h, side, distBp) => {
+    const r = tp?.horizons?.[h]; const g = tp?.dist_grid_bp;
+    if (!r || !g || !g.length) return null;
+    const arr = r[side]; if (!arr) return null;
+    if (distBp <= g[0]) return arr[0];
+    if (distBp >= g[g.length - 1]) return arr[arr.length - 1];
+    for (let i = 1; i < g.length; i += 1) {
+      if (distBp <= g[i]) {
+        const t = (distBp - g[i - 1]) / (g[i] - g[i - 1]);
+        return arr[i - 1] + t * (arr[i] - arr[i - 1]);
+      }
+    }
+    return null;
+  };
+  const pct = (v) => (v === null ? "-" : `${(v * 100).toFixed(v < 0.1 ? 1 : 0)}%`);
+  if (sub) sub.textContent = `변동성 분위 ${Math.round((payload.atr_pct_percentile || 0) * 100)}%`
+    + ` · 비슷한 구간 ${(tp?.band_bars || 0).toLocaleString()}봉 실측`;
+
   if (pos) {
     const qty = Math.abs(Number(pos.qty));
-    const mult = eq > 0 ? qty / eq : NaN;
-    const warn = !(mult >= 0.8 && mult <= 1.25);
-    if (summary) {
-      summary.textContent = `권장의 ${mult.toFixed(2)}배`;
-      summary.className = `ops-health-summary ${warn ? "warn" : "neutral"}`;
-    }
-    const side = pos.side === "LONG" ? "롱_bp" : "숏_bp";
-    const mark = Number(pos.mark_price);
-    const liq = Number(pos.liquidation_price);
+    const side = pos.side === "LONG" ? "롱" : "숏";
+    const mark = Number(pos.mark_price), liq = Number(pos.liquidation_price);
     const liqBp = mark > 0 && liq > 0 ? Math.abs(mark - liq) / mark * 1e4 : NaN;
-    const h4 = payload.horizons?.["4h"];
-    if (h4 && Number.isFinite(liqBp)) {
-      const q90 = Number(h4["0.9"][side]);
-      const q95 = Number(h4["0.95"][side]);
-      rows.push(`현재 ${qty.toFixed(3)} ETH · 권장 ${eq.toFixed(3)} ETH`);
-      rows.push(`청산선 ${fmtBp(liqBp)} · 4시간 90분위 불리이탈 ${fmtBp(q90)}`
-        + ` (${Math.round(q90 / liqBp * 100)}%)`);
-      if (q95 > liqBp) rows.push("4시간 95분위가 청산선을 넘습니다");
+    const p4 = Number.isFinite(liqBp) ? probAt("4h", side, liqBp) : null;
+    if (summary) {
+      summary.textContent = p4 === null ? "계측 미달" : `4시간 청산 확률 ${pct(p4)}`;
+      summary.className = `ops-health-summary ${p4 !== null && p4 >= 0.1 ? "warn" : "neutral"}`;
+    }
+    if (Number.isFinite(liqBp)) {
+      rows.push(`청산선까지 ${Math.round(liqBp)}bp (${(liqBp / 100).toFixed(2)}%)`);
+      rows.push(`청산 확률 — 1시간 ${pct(probAt("1h", side, liqBp))}`
+        + ` · 4시간 ${pct(p4)} · 24시간 ${pct(probAt("24h", side, liqBp))}`);
+    }
+    if (eq > 0) {
+      const mult = qty / eq;
+      rows.push(`현재 ${qty.toFixed(2)} ETH · 같은 위험이 되는 크기 ${eq.toFixed(2)} ETH`
+        + ` (${mult.toFixed(1)}배)`);
     }
   } else {
     if (summary) { summary.textContent = "포지션 없음"; summary.className = "ops-health-summary neutral"; }
-    rows.push(`변동성 등가 수량 ${eq.toFixed(3)} ETH (기준 ${Number(payload.base_qty).toFixed(3)})`);
-    const h4 = payload.horizons?.["4h"];
-    if (h4) rows.push(`4시간 90분위 불리이탈 롱 ${fmtBp(h4["0.9"]["롱_bp"])} · 숏 ${fmtBp(h4["0.9"]["숏_bp"])}`);
+    rows.push(`지금 변동성 기준 권장 크기 ${eq.toFixed(2)} ETH (기준 ${Number(payload.base_qty).toFixed(2)})`);
+    const g = tp?.dist_grid_bp; const r = tp?.horizons?.["4h"];
+    if (g && r) {
+      const i200 = g.indexOf(200);
+      if (i200 >= 0) rows.push(`50배 기준(청산선 약 200bp) 4시간 청산 확률 롱 ${pct(r["롱"][i200])}`
+        + ` · 숏 ${pct(r["숏"][i200])}`);
+    }
   }
-  rows.push("같은 위험이 되는 권장 수량입니다. 수익 예측이 아니라 위험 눈금입니다.");
+  rows.push("방향이 아니라 위험만 봅니다. 확률은 과거 실측 빈도입니다.");
   body.innerHTML = rows.map((t) => `<div class="ops-health-row"><span>${t}</span></div>`).join("");
 }

@@ -9,6 +9,9 @@
    [검증](../docs/what_magnitude_accuracy_means_for_sizing_20260911.md): 24/24 셀에서 상수 대조군 우위,
    표본외 보정격차 중앙 0.004(q=0.9 목표 초과 10% vs 실제 8.8~10.7%). 표본 40,749.
 ③ **변동성 등가 수량** = 기준수량 × (기준 atr_pct / 현재 atr_pct) — 역변동성 사이징 그대로.
+④ **청산 도달 확률 곡선** — 지금과 비슷한 변동성 구간(atr_pct ±15%)의 과거 봉에서
+   "진입 후 H시간 안에 역방향으로 d bp 이상 밀린 비율"을 거리 격자마다 그대로 센다.
+   ⚠️모델 외삽이 아니라 **경험분포**다. 프런트가 포지션의 청산선 거리로 조회한다.
    [검증](../docs/sizing_rules_random_entry_20260911.md): 무작위 진입 82,167건에서 평균 명목 동일 조건에
    표준편차 −18% · 하위1% −22% · **50배 청산 도달률 13.9%→9.1%**.
 
@@ -42,9 +45,15 @@ SYMBOL = "ETHUSDT"
 PERIOD_S = 300
 ATR_BARS = 288                      # 24시간
 HOLDS = {"1h": 12, "4h": 48, "24h": 288}
+# 청산 도달 확률을 조회할 거리 격자(bp). 50배 레버(≈200bp)·25배(≈400bp) 부근을 촘촘히.
+DIST_GRID_BP = [50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 700, 1000, 1500, 2000]
+VOL_BAND = 0.15                     # 현재 atr_pct 대비 ±15% 를 "비슷한 국면"으로 본다
 QS = (0.5, 0.9, 0.95)
 BASE_QTY_DEFAULT = 2.727            # 실계좌 관측 중앙 수량 — 사용자가 바꿀 수 있는 기준점
 CALIB_END = "2025-08-31"            # 계수 적합 구간의 끝(그 뒤는 건드리지 않는다)
+
+
+_TOUCH_CACHE: dict = {}
 
 
 def log(m):
@@ -112,6 +121,39 @@ def compute(kl: pd.DataFrame, cal: dict, base_qty: float) -> dict:
             cell[str(q)] = {"롱_bp": float(k["롱"] * ap * np.sqrt(H) * 1e4),
                             "숏_bp": float(k["숏"] * ap * np.sqrt(H) * 1e4)}
         out["horizons"][name] = cell
+    out["touch_prob"] = touch_probability(ap)
+    return out
+
+
+def touch_probability(cur_ap: float) -> dict:
+    """⭐**청산에 닿을 확률** — 이 카드가 실제로 답해야 하는 질문.
+
+    지금과 비슷한 변동성 구간(atr_pct ±15%)의 과거 봉에서, 진입 후 H시간 안에
+    역방향으로 d bp 이상 밀린 **비율을 그대로 센다**. 모델도 분포 가정도 없다.
+    캐시: atr_pct 는 24시간 평균이라 5분 주기로 거의 안 변한다. 밴드가 같으면 재사용."""
+    key = round(cur_ap, 6)
+    if _TOUCH_CACHE.get("key") == key:
+        return _TOUCH_CACHE["val"]
+    p = ROOT / "binance_data/klines/ETHUSDT/ETHUSDT-5m-api.csv"
+    d = pd.read_csv(p, usecols=["timestamp", "high", "low", "close"], parse_dates=["timestamp"])
+    d = d.dropna(subset=["timestamp"]).sort_values("timestamp")
+    c = d["close"].to_numpy(float); hi = d["high"].to_numpy(float); lo = d["low"].to_numpy(float)
+    atr = pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(ATR_BARS, min_periods=200).mean().to_numpy()
+    ap = atr / np.maximum(c, 1e-9)
+    band = np.flatnonzero((ap > cur_ap * (1 - VOL_BAND)) & (ap < cur_ap * (1 + VOL_BAND)))
+    out = {"band_bars": int(len(band)), "vol_band_pct": VOL_BAND, "dist_grid_bp": DIST_GRID_BP,
+           "horizons": {}}
+    for name, H in HOLDS.items():
+        idx = band[(band > 0) & (band < len(c) - H - 1)]
+        if len(idx) < 500:
+            continue
+        mae_l = np.array([(c[i] - lo[i + 1:i + 1 + H].min()) / c[i] for i in idx]) * 1e4
+        mae_s = np.array([(hi[i + 1:i + 1 + H].max() - c[i]) / c[i] for i in idx]) * 1e4
+        out["horizons"][name] = {
+            "n": int(len(idx)),
+            "롱": [float((mae_l >= dd).mean()) for dd in DIST_GRID_BP],
+            "숏": [float((mae_s >= dd).mean()) for dd in DIST_GRID_BP]}
+    _TOUCH_CACHE.update(key=key, val=out)
     return out
 
 
