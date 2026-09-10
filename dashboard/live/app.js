@@ -2705,12 +2705,21 @@ function breakoutRevIndicatorItem() {
   } else { subText = "미발동"; tone = "neutral"; }
   const days = Number(p.days_running || 0);
   const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
+  // 2026-09-10 사용자 신고("15:50에 한 번 떴는데 아직도 라벨이 떠 있나?"): 칩이 유휴일 때
+  //   직전 판정을 2시간(fresh) 유지하는 건 09-08 요청 그대로 맞다. 문제는 **툴팁이 그 판정을
+  //   현재형으로** 말해 아직 살아 있는 신호처럼 읽힌 것이다. payload 가 이미 주는 `resolved` 를
+  //   문구로 드러낸다 -- 이미 배리어에 닿아 끝난 건이면 "예측"이 아니라 "기록"이다.
+  //   ⚠️칩 subText 에는 넣지 않는다: 상태 열이 92px·nowrap 이라 글자를 더하면 넘친다(규약 §3).
+  const horizonMin = Number(p.horizon_bars || 0) * 5;
+  const lastPhase = !last ? ""
+    : last.resolved ? " · 해소됨(지난 판정)"
+    : horizonMin > 0 ? ` · 판정 중(${horizonMin}분 배리어)` : " · 판정 중";
   const lastText = last
     ? `마지막 터치 ${String(last.trigger_utc || "").slice(5, 16)}`
       + `${ageMin != null ? `(${ageMin < 60 ? `${Math.round(ageMin)}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`})` : ""}`
       + ` ${last.dir_up ? "상단" : "하단"} 터치(${last.trig_min}분) → ${last.call}`
       + ` = 앞으로 ${lastArrow === "↑" ? "오른다" : "내린다"}`
-      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]`
+      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]${lastPhase}`
     : "터치 대기";
   // ⚠️원장 집계는 **현행 라벨 정의 행만** 센다(server.py::_br_current_label). 2026-09-08
   //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
