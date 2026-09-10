@@ -1157,7 +1157,11 @@ body {
   position: relative;
   overflow: hidden;
   margin-top: 12px;
-  background: var(--chart-bg);
+  /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
+     제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
+     (index.html 에 .chart-container 는 1개, .market-chart-wrap 은 DOM/JS 에 0회 = 죽은 셀렉터)
+     선택자를 새로 만들지 않고 선언만 지웠다. 아래 inset box-shadow 는 남긴다 -- 차트 영역
+     경계를 그리는 1px 테두리이고 "검정 배경"과 별개다. */
   border-radius: var(--radius);
   box-shadow:
     inset 0 0 0 1px rgba(203, 209, 227, 0.075),
