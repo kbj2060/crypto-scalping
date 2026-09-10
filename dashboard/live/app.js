@@ -3300,7 +3300,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const mobileChart = isMobileChartMode();
   const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
   const h = mobileChart ? Math.max(parentH, 260) : 400;
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 20, mb = 40;
+  // 2026-09-10 사용자 요청 "레짐 게이지 칸을 좀 더 크게": mb 40 -> 56.
+  // 하단 여백 안의 것들(x축 눈금·라벨·레짐 리본)은 전부 `h - mb` 상대 오프셋이라
+  // 여백만 늘리면 통째로 내려가고 리본이 커질 자리가 생긴다. 플롯 영역은 340 -> 324.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 20, mb = 56;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3377,7 +3380,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
   // (swap this placeholder out once a real BTC regime classifier is trained).
   const regimeRibbonUnsupported = isSnapshotChart && !regimeSource;
-  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 8;
+  // 리본 높이 8 -> 20 (2.5배). 배치: y = h-mb+28 = 372, 바닥 392, SVG 400 이라 8px 여유.
+  // x축 라벨 baseline 은 h-mb+21 = 365 이므로 7px 간격이 남는다(겹치지 않는다).
+  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = 20;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -3584,7 +3589,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
     const ribbonLabel = document.createElementNS(NS, "text");
     ribbonLabel.setAttribute("x", ml - 6);
-    ribbonLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H - 1);
+    // 리본이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
+    ribbonLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H / 2 + 3);
     ribbonLabel.setAttribute("text-anchor", "end");
     ribbonLabel.setAttribute("font-size", "9");
     ribbonLabel.setAttribute("fill", "var(--muted)");
