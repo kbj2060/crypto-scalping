@@ -157,15 +157,17 @@ def survival(x: dict) -> tuple[str, str, str] | None:
     return None
 
 
-def model_verdict(p: float, u: float, n: int, tau: float, tau_partial: float) -> tuple[str, str, str]:
-    """종합 모델 p -> 판정. p 는 '지금 청산이 24봉 상한 보유보다 낫다' 확률."""
+def model_verdict(p: float, u: float, n: int, thr_hi: float, thr_mid: float) -> tuple[str, str, str]:
+    """종합 모델 p -> 판정. p 는 '지금 청산이 24봉 상한 보유보다 낫다' 확률.
+    선택적 모드(2026-09-10 스윕 후): 확신 상위에서만 말한다 -- p ≥ thr_hi(VAL 상위 2.5%) 권고, p ≥ thr_mid(상위 10%) 참고.
+    표본외 정밀도 hi 58.4%(OOS)/58.0%(HOLDOUT), mid 56.5%/55.6% -- 전체 커버리지 AUC 는 0.535 다."""
     bp = f"{u * 1e4:+.0f}bp"
     if n >= RULES["time_cap_bars"]:
         return ("익절" if u > 0 else "손절"), "참고", f"{n}봉 보유: 24봉 상한(모델 지평) 초과, 미실현 {bp}"
-    if p >= tau:
-        return ("익절" if u > 0 else "손절"), "권고", f"종합 모델 청산확률 {p:.2f} ≥ {tau:.2f}, 미실현 {bp}"
-    if p >= tau_partial:
-        return ("부분익절" if u > 0 else "감축"), "참고", f"종합 모델 청산확률 {p:.2f}(부분 기준 {tau_partial:.2f}), 미실현 {bp}"
+    if p >= thr_hi:
+        return ("익절" if u > 0 else "손절"), "권고", f"종합 모델 청산확률 {p:.2f} ≥ {thr_hi:.2f}(확신 상위), 미실현 {bp}"
+    if p >= thr_mid:
+        return ("부분익절" if u > 0 else "감축"), "참고", f"종합 모델 청산확률 {p:.2f} ≥ {thr_mid:.2f}, 미실현 {bp}"
     return "보유", "-", f"종합 모델 청산확률 {p:.2f} · 미실현 {bp} · {n}봉"
 
 
@@ -243,7 +245,9 @@ def cycle(prev: dict) -> dict:
         if sv:
             verdict, urgency, reason = sv
         elif p is not None:
-            verdict, urgency, reason = model_verdict(p, x["u"], x["n"], model["meta"]["tau"], model["meta"]["tau_partial"])
+            sl = model["meta"].get("selective") or {}
+            verdict, urgency, reason = model_verdict(p, x["u"], x["n"], sl.get("hi", {}).get("p_threshold", model["meta"]["tau"]),
+                                                    sl.get("mid", {}).get("p_threshold", model["meta"]["tau_partial"]))
         else:
             verdict, urgency, reason = rule
         row = {
@@ -272,6 +276,7 @@ def cycle(prev: dict) -> dict:
     return {"available": True, "error": None, "updated_utc": now, "latest_bar_utc": str(kl["timestamp"].iloc[-1]),
             "symbol": SYMBOL, "positions": out, "rules": RULES,
             "model": ({"rule_id": mm.get("rule_id"), "tau": mm.get("tau"), "tau_partial": mm.get("tau_partial"),
+                       "selective": mm.get("selective"), "decision_mode": mm.get("decision_mode"),
                        "auc": mm.get("auc"), "policy": mm.get("policy"), "gate": mm.get("gate"),
                        "excluded_inputs": mm.get("excluded_inputs")} if mm else None),
             "inputs": {"extreme": bool(extreme), "vol_forecast": bool(vol), "liq_burst": bool(burst)}}

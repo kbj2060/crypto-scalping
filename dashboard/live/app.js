@@ -953,7 +953,9 @@ function renderExitAdvisor(payload) {
   const modelNote = m ? `<p class="muted">종합 모델 ${escapeHtml(m.rule_id || "")} · OOS AUC ${m.auc?.B?.OOS != null ? Number(m.auc.B.OOS).toFixed(3) : "-"}` +
       ` (포지션 상태만 ${m.auc?.A?.OOS != null ? Number(m.auc.A.OOS).toFixed(3) : "-"})` +
       ` · 정책 OOS ${m.policy?.OOS ? `${Number(m.policy.OOS.B_model).toFixed(1)}bp vs 보유 ${Number(m.policy.OOS.hold_to_cap).toFixed(1)} / 무작위 ${Number(m.policy.OOS.random_same_rate).toFixed(1)}` : "-"}` +
-      ` · 사전등록 게이트 ${m.gate?.gate_pass ? "통과" : "미통과"} · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`
+      ` · 사전등록 게이트 ${m.gate?.gate_pass ? "통과" : "미통과"}` +
+      (m.selective?.hi ? ` · 확신 상위 콜(권고) 표본외 정밀도 OOS ${(m.selective.hi.OOS.precision * 100).toFixed(1)}% / 홀드아웃 ${(m.selective.hi.HOLDOUT.precision * 100).toFixed(1)}%, 체크포인트의 ${(m.selective.hi.OOS.exit_call_rate * 100).toFixed(1)}%에서만 말함` : "") +
+      ` · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`
     : `<p class="muted">종합 모델 아티팩트 없음 -- 규칙 v1 로만 판정 중 · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`;
   setH("exitAdvisorList", positions.length ? positions.map((p) => `<article class="ops-health-row ${escapeHtml(p.tone)}">
       <span class="ops-health-dot" aria-hidden="true"></span>
