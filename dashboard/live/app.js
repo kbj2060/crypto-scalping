@@ -4086,10 +4086,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   1픽셀 미만으로 사라진다.
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     const LIQ_Y = h - mb + 72, LIQ_H = 18, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
+    //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
+    //   레인이 통째로 안 그려졌다. 차트의 다른 코드가 전부 `c.time * 1000` 을 쓰는 이유다.
     const liqByTs = new Map();
     liqBars.forEach((b) => {
       const t = Date.parse(b.ts);
-      if (Number.isFinite(t)) liqByTs.set(t, b);
+      if (Number.isFinite(t)) liqByTs.set(Math.floor(t / 1000), b);
     });
     let liqPeak = 0;
     candles.forEach((c) => {
@@ -4116,7 +4119,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           rect.setAttribute("fill", color);
           rect.setAttribute("fill-opacity", b.partial ? "0.42" : "0.85");
           const title = document.createElementNS(NS, "title");
-          title.textContent = fmtDateTick(c.time) + " 롱청산 " + fmtUsdCompact(lu)
+          title.textContent = fmtDateTick(c.time * 1000) + " 롱청산 " + fmtUsdCompact(lu)
             + " · 숏청산 " + fmtUsdCompact(su) + " · " + b.events + "건"
             + (b.partial ? " (진행 중)" : "");
           rect.appendChild(title);
