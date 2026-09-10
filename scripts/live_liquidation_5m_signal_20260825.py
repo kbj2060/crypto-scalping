@@ -59,6 +59,8 @@ for _p in (ROOT, ROOT / "scripts"):
 from coin_config import COIN_CONFIG  # noqa: E402
 
 BAR_MINUTES = 30  # widened from 15 2026-08-27 (previously 5->15 on 2026-08-25), see docstring
+# 차트 오버레이 전용 봉 길이. 캔들이 5분이므로 게이지의 BAR_MINUTES 와 분리한다(2026-09-11).
+CHART_BAR_MINUTES = 5
 FETCH_ROWS = 60  # 2x BAR_MINUTES of buffer -- filtering to the current bar happens in Python
                   # below (against already tz_convert'd timestamps), not in the SQL WHERE clause,
                   # to sidestep the duckdb-session-local-timezone quirk this repo has been bitten
@@ -68,6 +70,75 @@ FETCH_ROWS = 60  # 2x BAR_MINUTES of buffer -- filtering to the current bar happ
 def _bar_start(now_utc: datetime) -> datetime:
     floored_minute = (now_utc.minute // BAR_MINUTES) * BAR_MINUTES
     return now_utc.replace(minute=floored_minute, second=0, microsecond=0)
+
+
+def compute_liquidation_5m_history(coin: str = "eth", bars: int = 96) -> dict:
+    """봉별 청산 금액 **시계열** (2026-09-11, 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가").
+
+    `compute_liquidation_5m_signal()` 은 **현재 봉 하나**만 준다(게이지용). 차트에 얹으려면
+    지나간 봉들도 있어야 해서 같은 소스(`tail_risk_1m`, 완결된 분마다 한 행)를 **5분 경계로**
+    묶어 돌려준다. 경계는 게이지와 같은 시계 정렬이라 두 표시가 어긋나지 않는다.
+
+    🔴**게이지의 `BAR_MINUTES` 를 쓰지 않는다.** 그 상수는 누적 게이지용으로 5→15→30분까지
+    넓어졌다(윗 도크스트링 참조). 차트 캔들은 **5분**이라 그대로 쓰면 봉이 어긋난다.
+    여기서는 `CHART_BAR_MINUTES = 5` 로 고정한다 -- 차트에 얹는 값이므로 캔들과 같아야 한다.
+
+    ⚠️**마지막 봉은 진행 중**이라 값이 계속 는다. `partial` 로 표시해 프런트가 구분하게 한다 --
+    다 찬 봉과 같은 높이로 그리면 "방금 청산이 줄었다"는 착시가 생긴다.
+    재시도/에러 규약은 `compute_liquidation_5m_signal()` 과 동일하다(never raises).
+    """
+    cfg = COIN_CONFIG[coin]
+    db_path, table = cfg["tail_risk_db_path"], cfg["tail_risk_table"]
+    empty = {"warmed_up": False, "bars": [], "error": None}
+    if not db_path.exists():
+        return {**empty, "error": "db_missing"}
+    import duckdb
+    need_minutes = int(bars) * CHART_BAR_MINUTES + CHART_BAR_MINUTES
+    df = None
+    last_error: Exception | None = None
+    for attempt, delay in enumerate((0.0, 0.4, 0.8, 1.6)):
+        if delay:
+            time.sleep(delay)
+        try:
+            con = duckdb.connect(str(db_path), read_only=True)
+            try:
+                df = con.execute(
+                    f"""
+                    SELECT ts, long_usd_1m, short_usd_1m, liq_event_count_1m
+                    FROM {table}
+                    ORDER BY ts DESC
+                    LIMIT ?
+                    """,
+                    [need_minutes],
+                ).df()
+            finally:
+                con.close()
+            last_error = None
+            break
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+    if last_error is not None:
+        return {**empty, "error": f"db_read_error: {last_error}"}
+    if df is None or df.empty:
+        return {**empty, "error": "no_rows"}
+    d = df.copy()
+    d["ts"] = pd.to_datetime(d["ts"], utc=True)
+    d = d.set_index("ts").sort_index()
+    g = d.resample(f"{CHART_BAR_MINUTES}min", label="left", closed="left").sum(numeric_only=True)
+    now = datetime.now(timezone.utc)
+    # 진행 중 봉 경계도 5분 기준으로 따로 계산한다(_bar_start 는 게이지의 BAR_MINUTES 를 쓴다).
+    cur = now.replace(second=0, microsecond=0) - timedelta(
+        minutes=now.minute % CHART_BAR_MINUTES)
+    out = []
+    for ts, row in g.tail(int(bars)).iterrows():
+        out.append({
+            "ts": ts.isoformat(),
+            "long_usd": float(row.get("long_usd_1m", 0.0) or 0.0),
+            "short_usd": float(row.get("short_usd_1m", 0.0) or 0.0),
+            "events": int(row.get("liq_event_count_1m", 0) or 0),
+            "partial": bool(ts.to_pydatetime() >= cur),
+        })
+    return {"warmed_up": True, "bars": out, "bar_minutes": CHART_BAR_MINUTES, "error": None}
 
 
 def compute_liquidation_5m_signal(coin: str = "eth") -> dict:

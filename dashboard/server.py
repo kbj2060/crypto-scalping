@@ -84,7 +84,8 @@ from scripts.live_spot_perp_basis_signal_20260827 import compute_basis_liquidati
 # tail_risk.duckdb's own per-minute persisted history read-only, same "computed here, not from
 # trading_bot.py's dashboard_state.json" category as OI 급변 above. See that module's docstring for
 # why this can't just be 5x the trailing 1-minute value the bot already exposes.
-from scripts.live_liquidation_5m_signal_20260825 import compute_liquidation_5m_signal  # noqa: E402
+from scripts.live_liquidation_5m_signal_20260825 import (  # noqa: E402
+    compute_liquidation_5m_signal, compute_liquidation_5m_history)
 # Directional-only liquidation tilt reading (liq_net_z_12, contrarian sign convention) -- model-
 # indicator tier like OI 급변, NOT an evidence-signal-tier chip. See that module's docstring for
 # the pre-registered formula it reuses and why it carries no PnL/economic claim.
@@ -1133,6 +1134,8 @@ def make_app() -> web.Application:
     basis_liquidation_cache: dict[str, dict[str, Any]] = {}
     basis_liquidation_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
     liquidation_5m_cache: dict[str, dict[str, Any]] = {}
+    liquidation_5m_hist_cache: dict[str, dict[str, Any]] = {}
+    liquidation_5m_hist_lock = asyncio.Lock()
     liquidation_5m_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
     liquidation_direction_cache: dict[str, dict[str, Any]] = {}
     liquidation_direction_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
@@ -2121,6 +2124,20 @@ def make_app() -> web.Application:
         payload = await load_extreme_detector()
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_liquidation_5m_history(request: web.Request) -> web.Response:
+        """봉별 청산 금액 시계열 -- 청산맵 캔들 위에 얹는다(2026-09-11 사용자 요청).
+        게이지(/api/liquidation-5m-signal)는 현재 봉 하나만 주므로 지나간 봉은 여기서 온다.
+        duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
+        asset = _query_coin_asset(request)
+        payload = await swr_cached(
+            f"liq5m_hist_{asset}",
+            liquidation_5m_hist_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
+            liquidation_5m_hist_lock, 30.0,
+            lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, 96),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
             "position_sizing", position_sizing_cache, position_sizing_lock,
@@ -2465,6 +2482,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/position-sizing", api_position_sizing)
+    app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)

@@ -24,6 +24,9 @@ const API_COIN_INDICATORS_URL = "/api/coin-indicators";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
+// 2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가" -- 게이지는 현재 봉 하나만
+// 주므로 지나간 봉은 이 이력에서 온다. 캔들과 같은 **5분** 정렬이다(게이지 BAR_MINUTES=30 과 별개).
+const API_LIQUIDATION_5M_HIST_URL = "/api/liquidation-5m-history";
 const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 2500;
 // 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
@@ -141,6 +144,7 @@ let vReboundLastFetchAt = 0;
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
 // frontend consumer had been removed.
 let latestLiquidation5m = null;
+let latestLiquidation5mHist = [];
 let liquidation5mLastFetchAt = 0;
 // 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
 // dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
@@ -325,6 +329,7 @@ async function setActiveSnapshotAsset(asset) {
   latestBasisLiquidation = null;
   latestLiquidationDirection = null;
   latestLiquidation5m = null;
+  latestLiquidation5mHist = [];
   latestLiquidationMap = null;
   basisLiquidationLastFetchAt = 0;
   liquidationDirectionLastFetchAt = 0;
@@ -2696,6 +2701,11 @@ async function refreshLiquidation5mSignal() {
     const res = await fetch(`${API_LIQUIDATION_5M_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`liquidation 5m signal ${res.status}`);
     latestLiquidation5m = await res.json();
+    try {
+      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+      const jh = await rh.json();
+      latestLiquidation5mHist = (jh && jh.warmed_up && Array.isArray(jh.bars)) ? jh.bars : [];
+    } catch (e) { latestLiquidation5mHist = []; }
   } catch (error) {
     console.error("Liquidation 5m signal fetch error:", error);
     latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
@@ -3396,7 +3406,7 @@ function densityColor(t) {
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
-function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = []) {
+function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = []) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   const parentH = svg.parentElement ? svg.parentElement.clientHeight : 0;
   const mobileChart = isMobileChartMode();
@@ -3408,7 +3418,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-11 사용자 요청 "증거신호 레인을 청산맵 밖으로": 레인이 플롯 **위에 겹쳐** 그려져
   //   캔들을 가리던 것을 여백으로 뺐다. mt 20 -> 22(천장 레인 자리), mb 56 -> 74(바닥 레인
   //   자리). 레인이 플롯에서 30px 를 돌려주므로 실제 캔들 영역 손실은 324 -> 304 로 20px 뿐이다.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 74;
+  // 2026-09-11 mb 74 -> 92: 봉별 청산 레인 18px. 레인은 **플롯 밖**이다 -- 09-11 사용자 요청
+  //   "증거신호 레인을 청산맵 밖으로"와 같은 원칙으로 캔들을 가리지 않는다.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 92;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -4063,6 +4075,72 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     priceBadgeRect.style.display = "none";
     priceBadgeText.style.display = "none";
   };
+
+  // ── 봉별 청산 레인 (2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가") ──
+  // 데이터: /api/liquidation-5m-history -- tail_risk_1m 의 실제 @forceOrder 체결을 5분으로 접은 것.
+  // 🔴게이지(/api/liquidation-5m-signal)는 BAR_MINUTES=30 이다. 여기는 캔들과 같은 **5분**이라야
+  //   봉이 안 어긋난다 -- compute_liquidation_5m_history() 가 CHART_BAR_MINUTES=5 로 따로 접는다.
+  // 레인은 플롯 **밖**(하단 여백)에 둔다 -- 09-11 "증거신호 레인을 청산맵 밖으로"와 같은 원칙.
+  // 색은 표시 규약 그대로 롱=good / 숏=bad. 위로 롱청산, 아래로 숏청산인 발산형.
+  // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
+  //   1픽셀 미만으로 사라진다.
+  if (Array.isArray(liqBars) && liqBars.length && candles.length) {
+    const LIQ_Y = h - mb + 72, LIQ_H = 18, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    const liqByTs = new Map();
+    liqBars.forEach((b) => {
+      const t = Date.parse(b.ts);
+      if (Number.isFinite(t)) liqByTs.set(t, b);
+    });
+    let liqPeak = 0;
+    candles.forEach((c) => {
+      const b = liqByTs.get(c.time);
+      if (b) liqPeak = Math.max(liqPeak, Number(b.long_usd) || 0, Number(b.short_usd) || 0);
+    });
+    if (liqPeak > 0) {
+      const liqHalf = LIQ_H / 2 - 1;
+      const liqScale = (v) => (v > 0 ? Math.max(1, liqHalf * Math.log1p(v) / Math.log1p(liqPeak)) : 0);
+      candles.forEach((c, i) => {
+        const b = liqByTs.get(c.time);
+        if (!b) return;
+        const lu = Number(b.long_usd) || 0, su = Number(b.short_usd) || 0;
+        if (lu <= 0 && su <= 0) return;
+        [["long", lu, "var(--good)"], ["short", su, "var(--bad)"]].forEach((spec) => {
+          const kind = spec[0], v = spec[1], color = spec[2];
+          if (v <= 0) return;
+          const hgt = liqScale(v);
+          const rect = document.createElementNS(NS, "rect");
+          rect.setAttribute("x", xAt(i));
+          rect.setAttribute("y", kind === "long" ? LIQ_MID - hgt : LIQ_MID);
+          rect.setAttribute("width", Math.max(1, bw));
+          rect.setAttribute("height", hgt);
+          rect.setAttribute("fill", color);
+          rect.setAttribute("fill-opacity", b.partial ? "0.42" : "0.85");
+          const title = document.createElementNS(NS, "title");
+          title.textContent = fmtDateTick(c.time) + " 롱청산 " + fmtUsdCompact(lu)
+            + " · 숏청산 " + fmtUsdCompact(su) + " · " + b.events + "건"
+            + (b.partial ? " (진행 중)" : "");
+          rect.appendChild(title);
+          svg.appendChild(rect);
+        });
+      });
+      const liqMidLine = document.createElementNS(NS, "line");
+      liqMidLine.setAttribute("x1", ml); liqMidLine.setAttribute("x2", ml + cw);
+      liqMidLine.setAttribute("y1", LIQ_MID); liqMidLine.setAttribute("y2", LIQ_MID);
+      liqMidLine.setAttribute("stroke", "var(--line)"); liqMidLine.setAttribute("stroke-width", "1");
+      svg.appendChild(liqMidLine);
+      const liqLbl = document.createElementNS(NS, "text");
+      liqLbl.setAttribute("x", ml - 6); liqLbl.setAttribute("y", LIQ_MID + 3);
+      liqLbl.setAttribute("text-anchor", "end"); liqLbl.setAttribute("font-size", "9");
+      liqLbl.setAttribute("fill", "var(--muted)");
+      liqLbl.textContent = "청산";
+      svg.appendChild(liqLbl);
+      const liqPeakLbl = document.createElementNS(NS, "text");
+      liqPeakLbl.setAttribute("x", ml + cw + 6); liqPeakLbl.setAttribute("y", LIQ_MID + 3);
+      liqPeakLbl.setAttribute("font-size", "9"); liqPeakLbl.setAttribute("fill", "var(--muted)");
+      liqPeakLbl.textContent = "최대 " + fmtUsdCompact(liqPeak);
+      svg.appendChild(liqPeakLbl);
+    }
+  }
 }
 
 function render(state, compactState = null, { stateChanged = true } = {}) {
