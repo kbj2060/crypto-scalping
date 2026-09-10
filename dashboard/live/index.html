@@ -130,6 +130,14 @@
           </div>
         </div>
         <div id="acctPositions" class="ops-health-list"></div>
+        <div class="ops-health-head" style="margin-top:12px" title="실계좌 ETH 포지션을 5분봉마다 규칙으로 판정합니다(학습 모델 아님, 주문 없음). 우선순위: ①생존(청산가까지 5분 ATR 3배 안 · 24h 변동성 위험 등급에서 하루 1σ 안) ②논거 무효화(진입 근거였던 극점 봉의 극값을 종가로 이탈, 12봉 안) · 역방향 청산 캐스케이드 · 24봉 시간 상한 ③익절(반대 방향 극점 탐지 강=익절·중=부분익절 · 정점 반납 ATR 1배). 가격이 아니라 «지금»만 말합니다. 정점 반납·시간 상한 파라미터는 아직 미검증 초기값입니다.">
+          <div><h3>청산 감시자</h3><p id="exitAdvisorText" class="muted">실계좌 ETH 포지션을 5분마다 판정 · 익절/부분익절/손절/감축/보유 · 집행은 사람</p></div>
+          <div class="ops-health-head-tools">
+            <span id="exitAdvisorSummary" class="ops-health-summary">-</span>
+            <span class="ops-readonly">규칙 판정 · 주문 없음</span>
+          </div>
+        </div>
+        <div id="exitAdvisorList" class="ops-health-list"></div>
         <div class="ops-health-head" style="margin-top:12px">
           <div><h3>최근 거래</h3><p class="muted">체결 내역을 왕복 단위로 묶은 것 · 진입→청산 시각</p></div>
         </div>
@@ -332,7 +340,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260910-dualcond-0420"></script>
+  <script src="./app.js?v=20260910-exit-advisor"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

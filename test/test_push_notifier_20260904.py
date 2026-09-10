@@ -136,8 +136,23 @@ class EnabledDetectorsTests(unittest.TestCase):
     """
 
     def test_production_switch_is_what_we_think_it_is(self) -> None:
+        # 2026-09-10 exit_advice 추가: 실계좌 포지션 청산 감시자 판정(T1, 판정 변화시 1회).
         self.assertEqual(notifier.ENABLED_DETECTORS,
-                         {"net_score", "v_rebound", "breakout_rev"})
+                         {"net_score", "v_rebound", "breakout_rev", "exit_advice"})
+
+    def test_exit_advice_fires_once_per_verdict_change(self) -> None:
+        pos = {"key": "ETHUSDT:LONG:2026-09-10T01:00:00+00:00", "symbol": "ETHUSDT", "side": "LONG",
+               "verdict": "익절", "urgency": "권고", "reason": "반대 방향 극점 탐지(등급 강), 미실현 +35bp",
+               "move_bp": 35.2, "hold_bars": 7, "since_utc": "2026-09-10T02:00:00+00:00"}
+        hold = {**pos, "side": "SHORT", "verdict": "보유", "urgency": "-"}
+        adv = {"available": True, "positions": [pos, hold]}
+        notes = notifier.detect_exit_advice(adv)
+        self.assertEqual(len(notes), 1)                       # 보유는 알리지 않는다
+        self.assertEqual(notes[0].tier, "t1")
+        self.assertEqual(notes[0].key, notifier.detect_exit_advice(adv)[0].key)  # 같은 판정 = 같은 key
+        changed = {**adv, "positions": [{**pos, "verdict": "손절", "since_utc": "2026-09-10T02:05:00+00:00"}]}
+        self.assertNotEqual(notes[0].key, notifier.detect_exit_advice(changed)[0].key)
+        self.assertEqual(notifier.detect_exit_advice({**adv, "available": False}), [])
 
     def test_liq_burst_is_off(self) -> None:
         """2026-09-09 사용자 지정. 감지기 함수는 남아 있지만 알림으로는 안 나간다."""

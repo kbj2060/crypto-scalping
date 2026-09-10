@@ -241,7 +241,7 @@ NET_SCORE_THRESHOLD = 3
 # 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 "liq_burst" 를 다시 넣으면 된다.
 # ⚠️`ops`/`supervisor` 를 끄면 **대시보드·봇이 죽어도 알림이 오지 않는다**.
 #   운영 헬스는 deploy_watcher 의 텔레그램과 대시보드 화면으로만 확인하게 된다.
-ENABLED_DETECTORS = {"net_score", "v_rebound", "breakout_rev"}
+ENABLED_DETECTORS = {"net_score", "v_rebound", "breakout_rev", "exit_advice"}
 # 돌파/되돌림은 판정이 하루 22~23건이라 전건 알림은 폭주다. 확신 등급으로 거른다.
 # 라이브 실측(09-03~07): 강 1.2건/일 · 중 4.8 · 약 8.0 · 미약 9.4 -> 강+중 = 하루 6건.
 BREAKOUT_TIERS = {"강", "중"}
@@ -355,6 +355,26 @@ def detect_breakout_rev(b: dict[str, Any]) -> list[Note]:
                  tag="breakout-rev", event_ts=parse_utc(str(ts).replace(" ", "T") + "Z"))]
 
 
+def detect_exit_advice(adv: dict[str, Any]) -> list[Note]:
+    """청산 감시자 판정이 «보유»에서 바뀐 순간. T1(소리) -- 실계좌 포지션에 대한 행동 권고다.
+
+    key 는 (포지션, 판정, 판정이 시작된 시각) -- 워커가 같은 판정을 5분마다 다시 내도
+    since_utc 가 고정이라 한 번만 나간다. 판정이 바뀌면 since_utc 가 새로 찍혀 다시 나간다.
+    """
+    if not adv.get("available"):
+        return []
+    notes = []
+    for p in adv.get("positions") or []:
+        if p.get("verdict") in (None, "보유"):
+            continue
+        side = "롱" if p.get("side") == "LONG" else "숏"
+        head = f"{p.get('symbol')} {side} → {p['verdict']} ({p.get('urgency')})"
+        body = f"{p.get('reason')} · {p.get('hold_bars')}봉 보유 · 집행은 사람"
+        notes.append(Note(f"exit_advice:{p.get('key')}:{p['verdict']}:{p.get('since_utc')}", "t1", head, body,
+                          tag=f"exit-advice-{p.get('side')}", event_ts=parse_utc(p.get("since_utc"))))
+    return notes
+
+
 def detect_session_window(alerts: dict[str, Any]) -> list[Note]:
     """세션 개장 변동성 창 진입. 창 안에 있는 동안 매 폴링마다 active로 보이므로, key를
     (시장, 그날 날짜)로 만들어 창당 한 번만 알린다."""
@@ -446,6 +466,7 @@ ENDPOINTS = {
     "alerts": "/api/session-alerts",
     "vreb": "/api/v-rebound-signal",
     "breakout": "/api/breakout-reversal-shadow",
+    "exit_advisor": "/api/position-exit-advisor",
 }
 
 
@@ -478,6 +499,7 @@ def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any] | None 
             ("liq_burst", detect_liq_burst, "burst", True),
             ("v_rebound", detect_v_rebound, "vreb", False),
             ("breakout_rev", detect_breakout_rev, "breakout", False),
+            ("exit_advice", detect_exit_advice, "exit_advisor", False),
             ("session", detect_session_window, "alerts", False))
     notes: list[Note] = []
     for name, fn, src, needs_state in plan:

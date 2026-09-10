@@ -1,6 +1,7 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
+const API_EXIT_ADVISOR_URL = "/api/position-exit-advisor";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
@@ -919,6 +920,47 @@ async function refreshBinanceAccount() {
     console.error("Binance account fetch error:", error);
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
   }
+  try {
+    const res = await fetch(API_EXIT_ADVISOR_URL, { cache: "no-store" });
+    renderExitAdvisor(await res.json());
+  } catch (error) {
+    console.error("Exit advisor fetch error:", error);
+    renderExitAdvisor({ available: false, error: "fetch_failed", positions: [] });
+  }
+}
+
+// 청산 감시자(scripts/live_position_exit_advisor_20260910.py) -- 어휘는 포지션 행동(익절/부분익절/손절/감축/보유)과
+// 긴급도(즉시/권고/참고). 극점 탐지기의 «바닥/천장 발동·강/중/약»과 일부러 겹치지 않게 했다(사용자 지정).
+function renderExitAdvisor(payload) {
+  const summary = el("exitAdvisorSummary");
+  const positions = payload?.positions || [];
+  if (!payload?.available) {
+    const why = payload?.error === "worker_stale" ? `워커 지연 ${payload.stale_min}분`
+      : payload?.error === "worker_state_missing" ? "워커 미가동" : (payload?.error || "데이터 없음");
+    if (summary) { summary.textContent = why; summary.className = "ops-health-summary bad"; }
+    setH("exitAdvisorList", `<p class="muted">판정 없음 (${escapeHtml(why)})</p>`);
+    return;
+  }
+  const urgent = positions.filter((p) => p.verdict !== "보유");
+  if (summary) {
+    summary.textContent = !positions.length ? "포지션 없음"
+      : urgent.length ? urgent.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${p.verdict}`).join(" · ") : "전부 보유";
+    summary.className = `ops-health-summary ${!positions.length ? "neutral" : urgent.length ? (urgent.some((p) => p.tone === "bad") ? "bad" : "warn") : "good"}`;
+  }
+  const rules = payload.rules || {};
+  setH("exitAdvisorList", positions.length ? positions.map((p) => `<article class="ops-health-row ${escapeHtml(p.tone)}">
+      <span class="ops-health-dot" aria-hidden="true"></span>
+      <div class="ops-health-info">
+        <strong>${escapeHtml(p.symbol)} ${p.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(p.leverage)} → ${escapeHtml(p.verdict)}${p.urgency !== "-" ? ` (${escapeHtml(p.urgency)})` : ""}</strong>
+        <span>${escapeHtml(p.reason)}${p.entry_at_truncated ? " · ⚠️진입 시각 불확실(체결 이력 잘림)" : ""}</span>
+      </div>
+      <div class="ops-health-meta">
+        <span class="ops-health-status-badge">${Number(p.move_bp) >= 0 ? "+" : ""}${escapeHtml(p.move_bp)}bp</span>
+        <small>${escapeHtml(p.hold_bars)}봉 · ATR ${escapeHtml(p.atr_bp)}bp${p.liq_dist_bp != null ? ` · 청산가 ${escapeHtml(p.liq_dist_bp)}bp` : ""}</small>
+      </div>
+    </article>`).join("") + (rules.validated === false
+      ? `<p class="muted">정점 반납(ATR ${escapeHtml(rules.arm_atr)}/${escapeHtml(rules.trail_atr)}배)·시간 상한 ${escapeHtml(rules.time_cap_bars)}봉은 미검증 초기값 · 갱신 ${fmtTs(payload.updated_utc)}</p>` : "")
+    : `<p class="muted">열려 있는 ETH 포지션이 없습니다 · 갱신 ${fmtTs(payload.updated_utc)}</p>`);
 }
 
 async function refreshOpsStatus() {
