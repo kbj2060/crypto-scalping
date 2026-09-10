@@ -119,8 +119,6 @@ let evidenceHistoryBySignal = {};
 // 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
 let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
-// 2026-09-08 돌파/되돌림 앵커 섀도우(표시 전용). ⭐커버리지 상한이 없다 -- 발현한 전 트리거에
-// 판정을 내고 확신 등급만 표시한다. 그래서 "판단 보류" 상태가 없다.
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
 let chartMarkersLastFetchAt = 0;
@@ -137,10 +135,6 @@ let volForecastLastFetchAt = 0;
 const API_VOL_FORECAST_URL = "/api/vol-forecast";
 const VOL_FORECAST_POLL_MS = 120000;
 const API_EXTREME_URL = "/api/extreme-detector";
-let latestBreakoutRev = null;
-let breakoutRevLastFetchAt = 0;
-const BREAKOUT_REV_POLL_MS = 60000;
-const API_BREAKOUT_REV_URL = "/api/breakout-reversal-shadow";
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -1226,17 +1220,6 @@ const V_REBOUND_TP_TITLE = [
   "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
 ].join("\n");
 
-const BREAKOUT_TP_TITLE = [
-  "이 판정의 라벨 배리어(진입가 ±0.8×ATR) 중 **매매 방향 쪽** 목표가입니다.",
-  "· 매매 방향 = 발현 방향 XOR 되돌림콜 — 돌파면 발현 방향 그대로, 되돌림이면 반대입니다.",
-  "· 손절선은 반대쪽 같은 폭입니다(대칭 라벨이라 따로 적을 값이 없습니다).",
-  "· 호라이즌 1시간(12봉) 안에 어느 쪽도 안 닿으면 시간청산이고, 그때는 12봉 뒤 종가 부호로 채점합니다.",
-  "· ⚠️이 대칭 배리어를 그대로 매매하면 손익분기 승률이 70%인데 실측 정확도는 56~59%입니다 —",
-  "  라벨은 채점용이지 매매 규칙이 아닙니다. 실제 매매 브래킷은 별도 축이고 현재 보류 상태입니다.",
-  "· 러너가 사건마다 기록한 배리어를 그대로 읽습니다 — 2026-09-08 배리어 개정 전 행에 지금 ATR을",
-  "  덮어씌우지 않기 위해서입니다(옛 배리어 행은 집계에서도 제외됩니다).",
-].join("\n");
-
 const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
   // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
@@ -1247,12 +1230,6 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
   // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
   v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
-  // 2026-09-08 돌파/되돌림 -- <주장> <방향> 어순. 상태어는 섀도우 포지션이라 "보유".
-  // 🔴이 사전은 **톤이 키**인데 이 카드의 톤은 방향(↑/↓)만 담는다 -- 같은 ↓ 가 "돌파 숏"일
-  //   수도 "되돌림 숏"일 수도 있다. 예전 값은 양쪽 다 "돌파"라고 못박아, 배지가 "직전 되돌림↓"
-  //   인데 띠 캡션은 "돌파 ↓"로 나왔다(2026-09-08 사용자 신고). <주장>은 이제 서버가 봉별로
-  //   주는 call_history 에서 오고(stripBarLabel), 여기엔 **방향만** 남긴다.
-  breakout_rev: { good: "↑", bad: "↓", warn: "혼재 보유", neutral: "미발동" },
   // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
   // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
@@ -1371,26 +1348,6 @@ const MODEL_INDICATOR_MEANING = {
     "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
   },
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
-  // 2026-09-08 돌파/되돌림. ⚠️키는 subText 문자열이다(규약 §5-1).
-  breakout_rev: {
-    // ⚠️설명은 **예측(앞으로 어떻게 되나)을 먼저** 쓴다. 화살표·색과 같은 방향이어야 한다.
-    //   이전에는 "**하락**으로 발현했지만…"처럼 **관측**을 굵게 앞세워, ↑ 배지인데 첫 단어가
-    //   "하락"이라 서로 다른 말로 읽혔다(2026-09-08 사용자 신고 "되돌림 위가 왜 하락이야?").
-    //   관측(발현)은 뒤에 덧붙인다. 화살표 = 예측 방향 = 색.
-    "돌파 ↑": "앞으로 오른다는 판정입니다 — 상단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
-    "돌파 ↓": "앞으로 내린다는 판정입니다 — 하단 터치였고 그 방향이 이어진다고 봅니다. 주문은 내지 않습니다.",
-    "되돌림 ↑": "앞으로 오른다는 판정입니다 — 하단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
-    "되돌림 ↓": "앞으로 내린다는 판정입니다 — 상단 터치였지만 되돌아온다고 봅니다. 주문은 내지 않습니다.",
-    "혼재 보유": "방향이 반대인 가상 포지션이 동시에 열려 있습니다.",
-    "직전 돌파↑": "직전 판정은 앞으로 오른다였습니다(상단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 돌파↓": "직전 판정은 앞으로 내린다였습니다(하단 터치 → 그대로 이어진다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 되돌림↑": "직전 판정은 앞으로 오른다였습니다(하단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "직전 되돌림↓": "직전 판정은 앞으로 내린다였습니다(상단 터치 → 되돌아온다). 지금은 보유 중이 아닙니다 — 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.",
-    "미발동": "2시간 넘게 상단·하단 터치(1시간 안 ±0.75×ATR)가 없습니다.",
-    "웜업": "섀도우 러너가 아직 첫 사이클을 돌지 않았습니다.",
-    "데이터 없음": "섀도우 원장 파일이 아직 없습니다.",
-    "오류": "섀도우 상태를 읽지 못했습니다.",
-  },
   liq_pressure: {
     "안정": "현물-선물 가격차(베이시스)가 평소 범위 안이라, 어느 한쪽이 특별히 강제청산 압박을 더 받을 조짐은 안 보여요.",
     "숏압박↑": "베이시스 콘탱고 극단 — 이후 1~4시간 숏 강제청산이 늘던 국면이에요(1개월 탐색적). 가격 예측이 아니라 리스크 정보.",
@@ -1441,38 +1398,6 @@ const MODEL_INDICATOR_DETAIL = {
     + "⚠️매매 트리거가 아닙니다. 이 등급대로 매매하면 표본외 순 +2.27bp(강+중, 2.93건/일)로 "
     + "거래비용 여유가 없습니다. 게이트 없이는 -3.36bp 였습니다. '여기가 국소 극단일 확률'을 "
     + "주는 것이지 '사거나 팔라'가 아닙니다.",
-  breakout_rev: "[규칙] 증거신호 8종 중 **어느 하나가 처음 발동**하면 앵커입니다(신호별 GAP 중복제거, 25.2건/일). " +
-    "앵커 다음 봉 시가(기준가)에서 **1시간 안에 ±0.75×ATR** 밴드 중 먼저 닿는 쪽이 " +
-    "**상단 터치 / 하단 터치**입니다 — 예측이 아니라 관측값이고, 앵커의 99.3%가 터치합니다(25.0건/일). " +
-    "창은 2026-09-09 에 15분에서 1시간으로 넓혔습니다 — 커버리지가 88.6%→99.3% 로 오르고, " +
-    "기존(15분 안 터치) 사건의 성적은 시드 폭 안에서 그대로였습니다.\n" +
-    "🔴**«어느 쪽으로 갔나»가 아니라 «어느 밴드를 먼저 스쳤나»입니다.** 1분봉 고가·저가 기준이라 " +
-    "꼬리 하나로 정해지고, 한 번 정해지면 뒤에 무슨 일이 있어도 안 바뀝니다. 그래서 눈과 자주 어긋납니다 — " +
-    "신호를 발동시킨 **앵커 봉 자신의 방향과는 49.5%**(사실상 동전), 터치까지의 순변동과는 22.9% 어긋납니다. " +
-    "«하단 터치» 사건의 23.3%는 15분 뒤 종가가 오히려 기준가보다 높습니다. 터치 그 순간과는 1.4%만 어긋납니다.\n" +
-    "터치한 그 순간부터 **1시간 안에 진입가 ±0.8×ATR**(사건별, 중앙값 0.212%) 중 어느 쪽에 먼저 닿는지를 맞힙니다. 터치한 방향 쪽이면 " +
-    "**돌파**, 반대면 **되돌림**입니다. 1시간 안에 어느 쪽도 안 닿으면 12봉 뒤 종가 부호로 정합니다.\n" +
-    "[피쳐] 69개 — 5분봉 가격·거래량 24 · BTC 동조 · 터치까지의 경로 · 레벨 맥락 · 포지셔닝 메트릭 12 · 신호 원핫 8. " +
-    "전부 **트리거 봉의 직전 봉**까지만 봅니다. 🔴경로 피쳐는 트리거 분 자체를 포함하지 않습니다 — " +
-    "같은 1분봉을 피쳐와 라벨이 공유하면 그 봉의 큰 움직임이 피쳐를 키우는 동시에 배리어를 때려 미래참조가 됩니다.\n" +
-    "[모델] HistGradientBoosting 5시드 평균. 모델 축은 2026-09-08 종결했습니다 — TabPFN·TabICL·" +
-    "LightGBM·고전 GBM 을 같은 프로토콜로 전부 돌렸는데 모델간 격차(1.3~4.0pp)가 같은 모델의 시드·" +
-    "정렬순서 변동폭과 같았습니다. 회귀(1시간 뒤 수익률)는 분류에 2.6~5.1pp 뒤집니다 — 이 신호는 " +
-    "드리프트가 아니라 **먼저 닿는 쪽**을 압니다.\n" +
-    "[검정] 시드 20개 워크포워드에서 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813, " +
-    "셔플 귀무 .5350 / .5424 / .5231 대비 초과 +2.5 / +4.5 / +5.8pp. **20개 시드 전부 세 창 동시에 귀무 위**입니다" +
-    "(B=32 셔플, 시드 판정 OK 2 · FLAG 1 · FAIL 0).\n" +
-    "⚠️2026-09-08 배리어 개정(절대 ±0.25% → ±0.8×ATR) 이전 기준선(VAL .5748 / OOS .6046 / HOLDOUT .5716, " +
-    "B=100 p=0.010)은 **무효**입니다 — 다른 질문이었습니다. 절대 배리어는 ATR 구간마다 난이도가 딴판이라 " +
-    "고ATR 의 높은 정확도가 대부분 클래스 불균형이었습니다(돌파율 0.334). 0.8×ATR 로 바꾸자 전 구간 돌파율이 " +
-    "0.46~0.47 로 균등해지고 시간청산율이 9.5%→3.2% 로 떨어졌습니다.\n" +
-    "🔴대가로 **매매 규칙은 보류**됐습니다. 브라켓 격자가 0/196 통과(절대 배리어는 10/196, 최선 +2.53bp) — " +
-    "배리어가 좁아져 최적 TP 가 20→15bp 로 내려갔고 TP 15bp 에서는 비용 10bp 가 수익의 67% 입니다. " +
-    "이 카드는 **참고 지표**이고 종이거래 기록은 판정 근거로 쓰지 않습니다.\n" +
-    "⚠️**원시 정확도끼리 비교하지 마십시오.** 창마다 클래스 균형이 달라 셔플 귀무가 .515~.570 사이를 움직입니다 — " +
-    "정확도는 반드시 그 창의 귀무와 함께 읽어야 합니다.\n" +
-    "⭐커버리지 상한을 두지 않습니다. 전 트리거에 판정을 내므로 '어느 사건이 해소되는가'를 결과가 정하는 " +
-    "편향이 구조상 생기지 않습니다.",
   v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
     "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
     "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
@@ -1515,7 +1440,6 @@ const MODEL_INDICATOR_DETAIL = {
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
   // -- model indicators --
-  breakout_rev: { text: "1시간", title: "터치(트리거) 시점부터 ±0.8×ATR 배리어를 1분봉 first-touch 로 판정하고, 12봉(1시간) 안에 어느 쪽도 닿지 않으면 12봉 뒤 종가 부호로 정합니다. 배리어는 사건마다 그 시점 ATR 로 정해집니다(중앙값 0.212%) -- 2026-09-08 개정 전에는 절대 ±0.25% 였습니다." },
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
   liq_direction: { text: "상태", title: "고정 예측 시간창 없이 매분 갱신되는 현재 청산 방향압력 -- 5·15분 지평 IC는 유의했으나(탐색적), 손익 결합 검정(8개 지평)은 전부 순손실" },
@@ -1550,7 +1474,6 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
   extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
-  breakout_rev: "modelChipBreakoutRev",  // 2026-09-08 돌파/되돌림
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
@@ -1577,7 +1500,6 @@ const MODEL_CHIP_IDS = {
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
   "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
-"breakout_rev",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
@@ -2660,159 +2582,6 @@ function extremeDetectorIndicatorItem() {
     history: p.history || [], times: p.times || [] };
 }
 
-async function refreshBreakoutRev() {
-  const now = Date.now();
-  if (now - breakoutRevLastFetchAt < BREAKOUT_REV_POLL_MS) return;
-  breakoutRevLastFetchAt = now;
-  try {
-    const res = await fetch(API_BREAKOUT_REV_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`breakout rev ${res.status}`);
-    latestBreakoutRev = await res.json();
-  } catch (error) {
-    console.error("Breakout/reversal shadow fetch error:", error);
-    latestBreakoutRev = { error: "fetch_failed" };
-  }
-}
-
-// ── 돌파/되돌림 앵커 섀도우 (2026-09-08) ──────────────────────────────────────────────
-// 규약: 라벨 §1 · 색 §2(롱=good/숏=bad/혼재=warn/운영=neutral) · 제목 밑 데이터 줄 없음 §4
-// ⭐커버리지 상한이 없다 -- 발현한 전 트리거에 판정을 낸다. 그래서 "판단 보류" 상태가 없다.
-// ⚠️정확도는 반드시 그 창의 **셔플 귀무**와 함께 읽는다(창마다 클래스 균형이 다르다).
-function breakoutRevIndicatorItem() {
-  const base = { key: "breakout_rev", label: "앵커 돌파/되돌림", derivedTag: "= 모델 · 섀도우 검증 중",
-    derivedTitle: "증거신호가 처음 발동한 뒤 1시간 안에 ±0.75×ATR 밴드 중 먼저 닿는 쪽이"
-      + " 상단 터치 / 하단 터치입니다(예측이 아니라 관측값). 그 방향으로 계속 가는지(돌파)"
-      + " 되돌아오는지(되돌림)를 1시간 ±0.8×ATR 배리어로 판정합니다"
-      + "(사건별, 중앙값 0.212%). 2026-09-08부터 가상 원장(주문 없음)으로 검증 중입니다.\n\n"
-      + "시드 20개 워크포워드 전건 VAL .5602 / OOS .5875 / HOLDOUT .5813 (셔플 귀무 .5350 / .5424 / .5231"
-      + " 대비 +2.5 / +4.5 / +5.8pp). 20개 시드 전부 세 창 동시에 귀무 위(B=32).\n"
-      + "⚠️창마다 클래스 균형이 달라 원시 정확도끼리 비교하면 안 됩니다.\n"
-      + "⚠️배리어 개정(09-08) 전 기준선은 무효입니다 — 매매 규칙도 그때 보류됐습니다('자세히' 참조).",
-    history: [], times: [] };
-  const p = latestBreakoutRev;
-  // 규약 §3: forceMeter 목록은 **상태와 무관하게 같은 모양**이어야 한다. 운영 상태에서
-  // probaSlot 을 빼면 게이지 줄이 사라져 행 높이가 달라진다(V자가 "미발동이어도 자리를 지킨다"와 같은 이유).
-  if (!p || p.error) return { ...base, tone: "neutral", probaSlot: true, proba: null,
-                              subText: p && p.error ? "오류" : "웜업" };
-  const pr = p.prereg || {}; const pa = pr.acc || {}; const pn = pr.null || {};
-  const refText = pa.OOS != null
-    ? `사전등록 OOS ${(pa.OOS * 100).toFixed(1)}% (귀무 ${(pn.OOS * 100).toFixed(1)}%)` : "";
-  if (!p.available) {
-    return { ...base, tone: "neutral", probaSlot: true, proba: null, subText: "데이터 없음",
-             stateTitle: `섀도우 원장이 아직 없습니다 · ${refText}` };
-  }
-  const dirs = p.open_dirs || [];
-  const hasL = dirs.includes("long"), hasS = dirs.includes("short");
-  const calls = p.open_calls || [];
-  // 🔴폴백 버그(2026-09-08 사용자 신고): 판정이 섞였는데 방향이 같으면 claim 이 null 이 되고
-  //   예전 코드는 `claim || "돌파"` 로 **조용히 돌파라고 썼다**. 되돌림 포지션에 "돌파" 배지가
-  //   붙는 조합이다. 폴백을 **가장 최근 판정**으로 바꾼다.
-  const claim = calls.length && calls.every((c) => c === calls[0]) ? calls[0] : null;
-  const last = p.last || null;
-  // ⭐라벨 배리어(±0.8×ATR, 중앙값 0.212%)라 **중앙값 5분**에 해소된다 -- 하루 22건이 발동해도
-  //   포지션이 열려 있는 시간은 24시간 중 18%뿐이다. 보유 중일 때만 보여주면 82% 를 "미발동"으로
-  //   덮어버려 "신호가 안 뜬다"로 읽힌다(2026-09-08 사용자 신고). 그래서 유휴일 때는
-  //   **직전 판정**을 회색으로 보여준다. 2시간이 지나면 그때 비로소 "미발동"이다.
-  const ageMin = last && last.age_min != null ? Number(last.age_min) : null;
-  const fresh = ageMin != null && ageMin <= 120;
-  // 방향은 **화살표**로 쓴다(사용자 요청 2026-09-08): ↑ 롱 · ↓ 숏.
-  // `돌파 숏` 은 발현 방향을 모르면 뜻이 안 통했다("돌파"가 상방으로 읽힌다는 신고).
-  const lastArrow = last ? (Boolean(last.dir_up) === (last.call === "돌파") ? "↑" : "↓") : "";
-  let subText, tone;
-  if (p.open_positions) {
-    subText = hasL && hasS ? "혼재 보유"
-      : `${claim || (last && last.call) || "돌파"} ${hasS ? "↓" : "↑"}`;
-    tone = hasL && hasS ? "warn" : hasS ? "bad" : "good";
-  } else if (fresh && last && last.call) {
-    subText = `직전 ${last.call}${lastArrow}`;
-    // ⭐2026-09-08 사용자 요청: "상승한다고 하는건 초록, 하락한다고 하는건 빨강".
-    //   유휴 상태도 **직전 판정의 예측 방향**으로 칠한다(↑=good · ↓=bad).
-    //   규약 §2 의 "방향 없음 = neutral" 은 방향이 **없을 때** 규칙이다 -- 직전 판정에는
-    //   방향이 있다. 게이트를 제거해 이 카드가 매매가 아니라 **참고 지표**가 됐으므로,
-    //   "진입 안 했으면 회색"이던 MASHT 관행(삭제됨)은 더 이상 적용하지 않는다.
-    tone = lastArrow === "↑" ? "good" : "bad";
-  } else { subText = "미발동"; tone = "neutral"; }
-  const days = Number(p.days_running || 0);
-  const guard = days < 30 ? ` · ⚠️계측 ${Math.floor(days)}/30일` : "";
-  // 2026-09-10 사용자 신고("15:50에 한 번 떴는데 아직도 라벨이 떠 있나?"): 칩이 유휴일 때
-  //   직전 판정을 2시간(fresh) 유지하는 건 09-08 요청 그대로 맞다. 문제는 **툴팁이 그 판정을
-  //   현재형으로** 말해 아직 살아 있는 신호처럼 읽힌 것이다. payload 가 이미 주는 `resolved` 를
-  //   문구로 드러낸다 -- 이미 배리어에 닿아 끝난 건이면 "예측"이 아니라 "기록"이다.
-  //   ⚠️칩 subText 에는 넣지 않는다: 상태 열이 92px·nowrap 이라 글자를 더하면 넘친다(규약 §3).
-  const horizonMin = Number(p.horizon_bars || 0) * 5;
-  const lastPhase = !last ? ""
-    : last.resolved ? " · 해소됨(지난 판정)"
-    : horizonMin > 0 ? ` · 판정 중(${horizonMin}분 배리어)` : " · 판정 중";
-  const lastText = last
-    ? `마지막 터치 ${String(last.trigger_utc || "").slice(5, 16)}`
-      + `${ageMin != null ? `(${ageMin < 60 ? `${Math.round(ageMin)}분 전` : `${(ageMin / 60).toFixed(1)}시간 전`})` : ""}`
-      + ` ${last.dir_up ? "상단" : "하단"} 터치(${last.trig_min}분) → ${last.call}`
-      + ` = 앞으로 ${lastArrow === "↑" ? "오른다" : "내린다"}`
-      + ` p=${Number(last.p_breakout).toFixed(4)} [${last.tier}]${lastPhase}`
-    : "터치 대기";
-  // ⚠️원장 집계는 **현행 라벨 정의 행만** 센다(server.py::_br_current_label). 2026-09-08
-  //   배리어 개정(절대 ±0.25% → ±0.8×ATR) 전 행이 섞여 있어, 한 분모에 넣으면 그 비율이
-  //   서로 다른 두 질문의 답을 평균한 값이 된다. 제외 건수를 화면에 밝힌다.
-  const staleText = p.stale_closed ? ` · 옛 배리어 ${p.stale_closed}건 제외` : "";
-  // ⚠️2026-09-10: 여기 숫자 두 개는 **다른 축**이다. 이름 없이 내보내면 반드시 오해된다.
-  //   gross_bp_mean = 라벨 축("발현 방향으로 계속 갔는가", sgn=dir_up) -- 되돌림을 맞히면 음수.
-  //   trade_bp_mean = 매매 축(판정 방향으로 들어갔다면, 비용 전) -- 맞히면 양수.
-  //   실측 09-10: 라벨 −8.6bp / 매매 +8.6bp 로 부호가 정확히 반대였다.
-  //   🔴그리고 매매 축은 액면 그대로 읽으면 안 된다 -- 라벨이 발현 분부터 배리어를 재는데
-  //     진입은 그 5분봉 마감 후에야 가능해서, 상당수가 **진입 전에** 해소된다(실측 5/6건).
-  const axisText = [
-    p.gross_bp_mean != null ? `지속이동 ${p.gross_bp_mean > 0 ? "+" : ""}${p.gross_bp_mean}bp(손익 아님)` : "",
-    p.trade_bp_mean != null ? `판정방향 손익 ${p.trade_bp_mean > 0 ? "+" : ""}${p.trade_bp_mean}bp(비용 전)` : "",
-    p.feasible_total ? `체결가능 ${p.feasible_fills}/${p.feasible_total}건`
-      + `${p.feasible_fills < p.feasible_total ? " ⚠️나머지는 진입 전 해소라 실현 불가" : ""}` : "",
-  ].filter(Boolean).join(" · ");
-  const ledText = p.closed
-    ? `원장 ${p.closed}건 적중 ${(Number(p.accuracy) * 100).toFixed(1)}%`
-      + `${p.per_day != null ? ` · ${p.per_day}건/일` : ""}`
-      + ` (돌파 ${p.outcomes.cont} / 되돌림 ${p.outcomes.fade} / 시간청산 ${p.outcomes.timeout})`
-      + staleText
-    : `해소된 건 없음${staleText}`;
-  const tierText = Object.entries(p.by_tier || {})
-    .map(([k, v]) => `${k} ${(v.acc * 100).toFixed(0)}%(${v.n})`).join(" · ");
-  // 문장 순서 고정(규약 §4): 근거 → 원장 → 계측 → 백테스트 → 가드
-  const stateTitle = [`${lastText} · 보유 ${p.open_positions} · 감시 ${p.watching}`,
-                      `${ledText}${guard}`,
-                      axisText,
-                      tierText ? `확신 등급별 ${tierText}` : "",
-                      `${refText} · 전건 판정(커버리지 상한 없음)`,
-                      "⚠️정확도는 그 창의 셔플 귀무와 함께 읽습니다 — 창마다 클래스 균형이 다릅니다"]
-    .filter(Boolean).join("\n");
-  // 미터 칸(규약 §3): 상태 → 게이지 → 수치. 셋 다 채워야 다른 감지기와 모양이 맞는다.
-  // 게이지는 **지금 배지가 주장하는 쪽의 확률**이다(돌파면 p, 되돌림이면 1−p) -- 되돌림인데
-  // 44% 로 그리면 배지와 그림이 서로 다른 말을 한다.
-  // ⚠️배지가 "미발동"인데 게이지·수치가 남아 있으면 서로 다른 말을 한다 -- 보유 중도 아니고
-  //   직전 판정도 오래됐으면(2시간 초과) 셋을 함께 비운다.
-  const showNum = Boolean(p.open_positions) || fresh;
-  const pb = showNum && last && last.p_breakout != null ? Number(last.p_breakout) : null;
-  const proba = pb == null ? null : (pb > 0.5 ? pb : 1 - pb);
-  // 수치 줄(규약 §3, 확률이 아닌 수치): 2026-09-10 사용자 요청으로 **익절가**를 적는다 --
-  // 증거신호·V자와 같은 `익절 {가격}` 포맷. 여기 있던 경과/보유 시간은 이미 상태 배지 툴팁의
-  // 첫 줄(lastText)에 그대로 있으므로 잃는 정보가 없고, 보유 중 진행도만 이 툴팁에 옮겨 담는다.
-  let meterNote = null, meterNoteTitle = "";
-  if (showNum && last && last.tp_price != null) {
-    meterNote = tpPriceText(last.tp_price);
-    const a = ageMin != null ? Math.round(ageMin) : null;
-    meterNoteTitle = (p.open_positions && a != null
-      ? `보유 ${Math.min(a, 60)}/60분 — 터치 시점부터 경과 / 시간청산까지의 지평.\n`
-      : a != null ? `가장 최근 터치로부터 ${a < 60 ? `${a}분` : `${(ageMin / 60).toFixed(1)}시간`} 경과. 배리어가 중앙값 5분에 해소돼 포지션은 짧게만 열립니다.\n` : "")
-      + BREAKOUT_TP_TITLE;
-  }
-  // 띠(타임 게이지): 게이트·확신등급과 무관하게 **전 판정**을 칠한다(사용자 요청).
-  // 서버가 5분봉 48칸 톤을 주고, 시간축은 다른 감지기와 같은 헬퍼로 만든다.
-  const history = p.tone_history || [];
-  // 봉별 판정 단어(돌파/되돌림/혼재). 톤은 방향만 담으므로 이게 있어야 띠 캡션이 배지와 같은
-  // 말을 한다(2026-09-08 사용자 신고: 배지 "직전 되돌림↓" vs 띠 "돌파 ↓").
-  const callHistory = p.call_history || [];
-  const times = evenlySpacedBarTimes(p.latest_ts_utc, history.length, 5);
-  return { ...base, history, times, callHistory, tone, subText, stateTitle,
-           proba, probaSlot: true, meterNote, meterNoteTitle };
-}
-
 async function refreshVReboundSignal() {
   const now = Date.now();
   if (now - vReboundLastFetchAt < V_REBOUND_POLL_MS) return;
@@ -3240,7 +3009,6 @@ function setupPageTabs() {
       evidenceLastFetchAt = 0; refreshEvidenceSignals();
       evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
-      breakoutRevLastFetchAt = 0; refreshBreakoutRev();
       extremeLastFetchAt = 0; refreshExtremeDetector();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
@@ -4324,7 +4092,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
-      ethOnlyIndicator(breakoutRevIndicatorItem()),  // 2026-09-08 돌파/되돌림
       ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
@@ -4372,7 +4139,6 @@ async function tick() {
       refreshEvidenceSignals();
       refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
-      refreshBreakoutRev();          // 2026-09-08 돌파/되돌림 섀도우
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)

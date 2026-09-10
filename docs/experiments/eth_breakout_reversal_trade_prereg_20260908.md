@@ -1,5 +1,8 @@
 # 돌파/되돌림 매매 규칙 **사전등록** (2026-09-08)
 
+> 🔴**2026-09-10 철회됨** — `eth_breakout_reversal_withdrawn_20260910.md` 참조.
+> 아래 숫자는 당시 기대치 그대로 보존한다(고치지 않는다).
+
 동결 ID `br_tp20sl50_thr0117_20260908` · 아티팩트 `data/live/breakout_reversal_shadow_artifact/meta.json` 의 `strategy` 블록
 · 종이거래 기록: `data/live/breakout_reversal_shadow_ledger.jsonl` 의 `strat_*` 필드
 

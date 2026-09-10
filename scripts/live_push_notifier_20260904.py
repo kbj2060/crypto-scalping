@@ -237,14 +237,12 @@ def detect_ops_health(ops: dict[str, Any]) -> list[Note]:
 # ------------------------------------------------------------------------------------------
 NET_SCORE_THRESHOLD = 3
 
-# 2026-09-09 사용자 지정: **청산 버스트 제거**. net_score · v_rebound · breakout_rev 만 보낸다.
+# 2026-09-09 사용자 지정: **청산 버스트 제거**. net_score · v_rebound 만 보낸다.
 # 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 "liq_burst" 를 다시 넣으면 된다.
 # ⚠️`ops`/`supervisor` 를 끄면 **대시보드·봇이 죽어도 알림이 오지 않는다**.
 #   운영 헬스는 deploy_watcher 의 텔레그램과 대시보드 화면으로만 확인하게 된다.
-ENABLED_DETECTORS = {"net_score", "v_rebound", "breakout_rev"}
-# 돌파/되돌림은 판정이 하루 22~23건이라 전건 알림은 폭주다. 확신 등급으로 거른다.
-# 라이브 실측(09-03~07): 강 1.2건/일 · 중 4.8 · 약 8.0 · 미약 9.4 -> 강+중 = 하루 6건.
-BREAKOUT_TIERS = {"강", "중"}
+# 2026-09-10 앵커 돌파/되돌림 감지기 제거 -- 신호 자체가 철회됐다(B라벨 재학습 AUC 0.50).
+ENABLED_DETECTORS = {"net_score", "v_rebound"}
 DIGEST_ENABLED = False
 
 
@@ -333,26 +331,6 @@ def detect_v_rebound(v: dict[str, Any]) -> list[Note]:
     return [Note(f"v_rebound:{ts}", "t2", head, " · ".join(body),
                  tag="v-rebound", event_ts=parse_utc(ts))]
 
-
-def detect_breakout_rev(b: dict[str, Any]) -> list[Note]:
-    """앵커 돌파/되돌림 판정. **확신 강·중만** 보낸다(BREAKOUT_TIERS).
-
-    ⚠️전건은 하루 22~23건이고 40%가 '미약'(동전던지기)이다 -- 그대로 보내면 알림이 무의미해진다.
-    key 는 트리거 시각이라 판정 하나에 한 번만 나간다.
-    """
-    last = b.get("last") or {}
-    ts, call, tier = last.get("trigger_utc"), last.get("call"), last.get("tier")
-    if not b.get("available") or not ts or tier not in BREAKOUT_TIERS:
-        return []
-    up = bool(last.get("dir_up")) == (call == "돌파")     # 예측 방향(↑ 오른다)
-    p = last.get("p_breakout")
-    head = f"앵커 {call} {'↑' if up else '↓'} · 확신 {tier}"
-    body = [f"{'상승' if last.get('dir_up') else '하락'} 발현 {last.get('trig_min')}분"]
-    if isinstance(p, (int, float)):
-        body.append(f"p {(p if call == '돌파' else 1 - p):.2f}")
-    body.append("참고용")
-    return [Note(f"breakout:{ts}", "t2", head, " · ".join(body),
-                 tag="breakout-rev", event_ts=parse_utc(str(ts).replace(" ", "T") + "Z"))]
 
 
 def detect_session_window(alerts: dict[str, Any]) -> list[Note]:
@@ -445,7 +423,6 @@ ENDPOINTS = {
     "burst": "/api/liq-burst-state",
     "alerts": "/api/session-alerts",
     "vreb": "/api/v-rebound-signal",
-    "breakout": "/api/breakout-reversal-shadow",
 }
 
 
@@ -477,7 +454,6 @@ def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any] | None 
             ("net_score", detect_net_score, "evidence", False),
             ("liq_burst", detect_liq_burst, "burst", True),
             ("v_rebound", detect_v_rebound, "vreb", False),
-            ("breakout_rev", detect_breakout_rev, "breakout", False),
             ("session", detect_session_window, "alerts", False))
     notes: list[Note] = []
     for name, fn, src, needs_state in plan:
