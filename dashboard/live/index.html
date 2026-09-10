@@ -130,11 +130,11 @@
           </div>
         </div>
         <div id="acctPositions" class="ops-health-list"></div>
-        <div class="ops-health-head" style="margin-top:12px" title="실계좌 ETH 포지션을 5분봉마다 규칙으로 판정합니다(학습 모델 아님, 주문 없음). 우선순위: ①생존(청산가까지 5분 ATR 3배 안 · 24h 변동성 위험 등급에서 하루 1σ 안) ②논거 무효화(진입 근거였던 극점 봉의 극값을 종가로 이탈, 12봉 안) · 역방향 청산 캐스케이드 · 24봉 시간 상한 ③익절(반대 방향 극점 탐지 강=익절·중=부분익절 · 정점 반납 ATR 1배). 가격이 아니라 «지금»만 말합니다. 정점 반납·시간 상한 파라미터는 아직 미검증 초기값입니다.">
-          <div><h3>청산 감시자</h3><p id="exitAdvisorText" class="muted">실계좌 ETH 포지션을 5분마다 판정 · 익절/부분익절/손절/감축/보유 · 집행은 사람</p></div>
+        <div class="ops-health-head" style="margin-top:12px" title="실계좌 ETH 포지션을 5분봉마다 판정합니다(주문 없음, 집행은 사람). ①생존 규칙(청산가까지 5분 ATR 3배 안 · 24h 변동성 위험 등급에서 하루 1σ 안)을 먼저 보고 ②종합 모델이 «지금 청산이 24봉 상한 보유보다 낫다» 확률을 냅니다. 입력: 증거신호 8종·극점 탐지기 p1/p2·24h 변동성 전망·돌파/되돌림 봉피쳐·포지셔닝 메트릭·시각 + 포지션 상태(미실현·정점·최저·보유봉). 청산맵·청산버스트·V자반등·칩메타라벨·레짐은 과거 재구성이 안 돼 제외. 확률 ≥τ 익절/손절, 부분 기준 이상은 부분익절/감축. 가격이 아니라 «지금»만 말합니다. 모델 성적과 사전등록 게이트 결과는 카드 하단에 그대로 표시합니다.">
+          <div><h3>청산 감시자</h3><p id="exitAdvisorText" class="muted">실계좌 ETH 포지션을 5분마다 종합 모델로 판정 · 익절/부분익절/손절/감축/보유 · 집행은 사람</p></div>
           <div class="ops-health-head-tools">
             <span id="exitAdvisorSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">규칙 판정 · 주문 없음</span>
+            <span class="ops-readonly">종합 모델 + 생존 규칙 · 주문 없음</span>
           </div>
         </div>
         <div id="exitAdvisorList" class="ops-health-list"></div>
@@ -340,7 +340,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260910-exit-advisor"></script>
+  <script src="./app.js?v=20260910-exit-advisor-model"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

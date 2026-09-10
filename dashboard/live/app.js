@@ -948,6 +948,13 @@ function renderExitAdvisor(payload) {
     summary.className = `ops-health-summary ${!positions.length ? "neutral" : urgent.length ? (urgent.some((p) => p.tone === "bad") ? "bad" : "warn") : "good"}`;
   }
   const rules = payload.rules || {};
+  // 종합 모델 성적은 숨기지 않는다 -- 사전등록 게이트(G1 ΔAUC CI · G2 시드 · G3 정책) 통과 여부를 그대로 쓴다.
+  const m = payload.model;
+  const modelNote = m ? `<p class="muted">종합 모델 ${escapeHtml(m.rule_id || "")} · OOS AUC ${m.auc?.B?.OOS != null ? Number(m.auc.B.OOS).toFixed(3) : "-"}` +
+      ` (포지션 상태만 ${m.auc?.A?.OOS != null ? Number(m.auc.A.OOS).toFixed(3) : "-"})` +
+      ` · 정책 OOS ${m.policy?.OOS ? `${Number(m.policy.OOS.B_model).toFixed(1)}bp vs 보유 ${Number(m.policy.OOS.hold_to_cap).toFixed(1)} / 무작위 ${Number(m.policy.OOS.random_same_rate).toFixed(1)}` : "-"}` +
+      ` · 사전등록 게이트 ${m.gate?.gate_pass ? "통과" : "미통과"} · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`
+    : `<p class="muted">종합 모델 아티팩트 없음 -- 규칙 v1 로만 판정 중 · 상한 ${escapeHtml(rules.time_cap_bars)}봉</p>`;
   setH("exitAdvisorList", positions.length ? positions.map((p) => `<article class="ops-health-row ${escapeHtml(p.tone)}">
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
@@ -956,11 +963,10 @@ function renderExitAdvisor(payload) {
       </div>
       <div class="ops-health-meta">
         <span class="ops-health-status-badge">${Number(p.move_bp) >= 0 ? "+" : ""}${escapeHtml(p.move_bp)}bp</span>
-        <small>${escapeHtml(p.hold_bars)}봉 · ATR ${escapeHtml(p.atr_bp)}bp${p.liq_dist_bp != null ? ` · 청산가 ${escapeHtml(p.liq_dist_bp)}bp` : ""}</small>
+        <small>${p.p_exit != null ? `청산확률 ${Number(p.p_exit).toFixed(2)} · ` : ""}${escapeHtml(p.hold_bars)}봉 · ATR ${escapeHtml(p.atr_bp)}bp${p.liq_dist_bp != null ? ` · 청산가 ${escapeHtml(p.liq_dist_bp)}bp` : ""}</small>
       </div>
-    </article>`).join("") + (rules.validated === false
-      ? `<p class="muted">정점 반납(ATR ${escapeHtml(rules.arm_atr)}/${escapeHtml(rules.trail_atr)}배)·시간 상한 ${escapeHtml(rules.time_cap_bars)}봉은 미검증 초기값 · 갱신 ${fmtTs(payload.updated_utc)}</p>` : "")
-    : `<p class="muted">열려 있는 ETH 포지션이 없습니다 · 갱신 ${fmtTs(payload.updated_utc)}</p>`);
+    </article>`).join("") + modelNote
+    : `<p class="muted">열려 있는 ETH 포지션이 없습니다 · 갱신 ${fmtTs(payload.updated_utc)}</p>` + modelNote);
 }
 
 async function refreshOpsStatus() {
