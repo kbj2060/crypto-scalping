@@ -63,22 +63,26 @@ def load() -> tuple[pd.DataFrame, list[str], np.ndarray, dict[str, np.ndarray]]:
     return A, feats, idx, bars
 
 
-def lab_extreme(idx, bars, bottom, ref):
-    """«이 봉이 국소 극점인가» -- 이후 W봉이 기준가를 깨지 않았는가. A: 저가/고가, B: 종가."""
+def lab_extreme(idx, bars, bottom, ref, grace: int = 0):
+    """«이 봉이 국소 극점인가» -- 이후 W봉이 기준가를 깨지 않았는가. A: 저가/고가, B: 종가.
+
+    `grace` = 진입 직후 봐주는 봉 수. 탐지가 몇 봉 이르거나 늦어도 인정하겠다는 뜻이다.
+    창을 `i+1+grace … i+W+grace` 로 **통째로 민다** -- 창 길이를 W 로 유지해야 g 끼리 비교된다
+    (창을 줄이면 쉬워져서 양성률이 오르는 게 grace 효과처럼 보인다).
+    ⚠️인과적이다: 종가에 들어가 첫 grace봉을 무조건 견딘다. «그 몇 봉 중 최저가에 산다»가 아니다.
+    """
     hi, lo, n = bars["hi"], bars["lo"], len(bars["cl"])
     y = np.full(len(idx), -1)
-    ok = (idx + W_EXTREME < n) & (idx > 0)
+    ok = (idx + W_EXTREME + grace < n) & (idx > 0)
     for k in np.flatnonzero(ok):
-        i = idx[k]
-        if bottom[k]:
-            y[k] = int(lo[i + 1:i + 1 + W_EXTREME].min() >= ref[k])
-        else:
-            y[k] = int(hi[i + 1:i + 1 + W_EXTREME].max() <= ref[k])
+        a, b = idx[k] + 1 + grace, idx[k] + 1 + W_EXTREME + grace
+        y[k] = int(lo[a:b].min() >= ref[k]) if bottom[k] else int(hi[a:b].max() <= ref[k])
     return y
 
 
-def lab_v_rebound(idx, bars, bottom, ref):
+def lab_v_rebound(idx, bars, bottom, ref, grace: int = 0):
     """realized_outcome 그대로 -- 기준가만 인자로 뺐다(A=장중극점 / B=종가)."""
+    assert grace == 0, "V자반등에는 grace 팔을 정의하지 않았다"
     hi, lo, cl, atr, n = bars["hi"], bars["lo"], bars["cl"], bars["atr"], len(bars["cl"])
     y = np.full(len(idx), -1)
     ok = (idx + FULL < n) & (idx > 0)
@@ -130,16 +134,27 @@ def main() -> int:
     # ⭐"한 틱도 안 내려간다"는 B라벨은 양성률 1.2% 로 퇴화한다 -- 실제 손절 여유를 준 팔을 같이 낸다.
     #   bottom 은 cl - t*ATR, top 은 cl + t*ATR 을 기준가로 쓰면 lab_extreme 이 그대로 재사용된다.
     atr_at = bars["atr"][idx - 1]
-    arms = {"극점": [("B 종가", refB)] + [(f"B 종가-{t}ATR", refB + np.where(bottom, -t, t) * atr_at)
-                                        for t in (0.5, 1.0)],
-            "V자반등": [("B 종가", refB)]}
+    tol = lambda t: refB + np.where(bottom, -t, t) * atr_at        # noqa: E731
+
+    def best_close(g):
+        """오라클 기준가 -- i..i+g 중 **가장 좋은 종가**. 결정 시점엔 어느 봉인지 모른다."""
+        w = np.stack([bars["cl"][np.minimum(idx + j, len(bars["cl"]) - 1)] for j in range(g + 1)])
+        return np.where(bottom, w.min(0), w.max(0)) + np.where(bottom, -0.5, 0.5) * atr_at
+
+    # 사용자 질문(2026-09-10): «딱 그 한 봉이 아니라 3봉쯤 오차를 줘도 그런가».
+    #   인과적 형태는 «들어가서 첫 g봉은 견딘다»(grace)이고, «g봉 중 최저가에 산다»는 오라클이다.
+    arms = {"극점": [("B 종가", refB, 0)] + [(f"B 종가∓{t}ATR", tol(t), 0) for t in (0.5, 1.0)]
+                   + [(f"B ∓0.5ATR 유예{g}봉", tol(0.5), g) for g in (1, 2, 3)]
+                   + [("B ∓1.0ATR 유예3봉", tol(1.0), 3)]
+                   + [("B 오라클 3봉최저", best_close(3), 3)],
+            "V자반등": [("B 종가", refB, 0)]}
 
     rows = []
     for trig, fn in (("극점", lab_extreme), ("V자반등", lab_v_rebound)):
         ya = fn(idx, bars, bottom, refA)
         rows += [(trig, *r) for r in fit_eval(X, ya, ya, ts, "A학습·A평가")]
-        for bname, bref in arms[trig]:
-            yb = fn(idx, bars, bottom, bref)
+        for bname, bref, g in arms[trig]:
+            yb = fn(idx, bars, bottom, bref, g)
             ok = (ya >= 0) & (yb >= 0)
             print(f"[{trig}] {bname}: 유효 {ok.sum():,}행 · A양성률 {ya[ok].mean():.3f} · "
                   f"B양성률 {yb[ok].mean():.3f} · 라벨 일치율 {(ya[ok] == yb[ok]).mean():.3f}")
