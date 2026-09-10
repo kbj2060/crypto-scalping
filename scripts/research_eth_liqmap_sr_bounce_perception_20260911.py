@@ -32,7 +32,7 @@ DATA = ROOT if (ROOT / "binance_data").exists() else Path(subprocess.run(
 PANEL = DATA / "tmp/eth_liqmap_sr_panel_20260911/sr_panel_5m.parquet"
 KL5 = DATA / "binance_data/klines/ETHUSDT/ETHUSDT-5m-api.csv"
 H, SHIFT = 12, 20_000
-TAUS = (0.001, 0.002, 0.005)
+TAUS = (0.0005, 0.001, 0.0015, 0.002, 0.003, 0.005, 0.0075, 0.01)
 
 
 def race(hi, lo, start, up, dn, span):
@@ -75,7 +75,7 @@ def main() -> int:
         y = race(hi, lo, idx + 1, cl * (1 + t), cl * (1 - t), H)
         r = y >= 0
         base[t] = float(y[r].mean())
-        print(f"무조건부 기준선 ±{t*100:.1f}%: 아무 봉에서나 위 먼저 {base[t]:.4f} "
+        print(f"무조건부 기준선 ±{t*100:.2f}%: 아무 봉에서나 위 먼저 {base[t]:.4f} "
               f"(= 아래 먼저 {1-base[t]:.4f}) · n={r.sum():,}")
 
     for side, px_col, is_res in (("저항", "r1_px", True), ("지지", "s1_px", False)):
@@ -102,7 +102,7 @@ def main() -> int:
                 ci = boot_ci(rev.astype(float), np.asarray(days)[r], rng)
                 # 기준선: 저항 반전 = 아래 먼저 · 지지 반전 = 위 먼저
                 bl = (1 - base[t]) if is_res else base[t]
-                print(f"   ±{t*100:.1f}%: 해소 {r.mean():.3f} · **반전 {rev.mean():.3f}** "
+                print(f"   ±{t*100:.2f}%: 해소 {r.mean():.3f} · **반전 {rev.mean():.3f}** "
                       f"(일군집 95%CI [{ci[0]:.3f}, {ci[1]:.3f}]) · "
                       f"기준선 {bl:.3f} -> **초과 {(rev.mean()-bl)*100:+.1f}pp**")
                 keep.setdefault(t, {})[lbl] = (dd[ev][r], rev)
@@ -118,8 +118,8 @@ def main() -> int:
                 ma, mb = ba == g, bb == g
                 if ma.sum() >= 50 and mb.sum() >= 50:
                     num += ma.sum() * (ra[ma].mean() - rb[mb].mean()); wsum += ma.sum()
-            print(f"     ±{t*100:.1f}%: {num/wsum*100:+.2f}pp (가중 n={int(wsum):,})" if wsum
-                  else f"     ±{t*100:.1f}%: 층 부족")
+            print(f"     ±{t*100:.2f}%: {num/wsum*100:+.2f}pp (가중 n={int(wsum):,})" if wsum
+                  else f"     ±{t*100:.2f}%: 층 부족")
     return 0
 
 
