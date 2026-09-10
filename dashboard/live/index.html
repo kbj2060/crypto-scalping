@@ -169,9 +169,9 @@
                 <span class="signal-chip-label">리테일 수급</span>
                 <span class="signal-chip-state">-</span>
               </div>
-              <div id="modelChipLiqDirection" class="signal-chip neutral">
+              <div id="modelChipLiqSize" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">청산 방향압력</span>
+                <span class="signal-chip-label">청산 규모</span>
                 <span class="signal-chip-state">-</span>
               </div>
               <div id="modelChipBasisLiq" class="signal-chip neutral">
@@ -314,7 +314,8 @@
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
-        <div id="liqVolumeGauge"></div>
+        <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
+             같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -360,7 +361,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260911-liqbars2"></script>
+  <script src="./app.js?v=20260911-liqsize2"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
