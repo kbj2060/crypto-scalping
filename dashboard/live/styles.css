@@ -1911,3 +1911,41 @@ svg {
   max-height: 60vh;
   overflow-y: auto;
 }
+
+/* ── 「내 계좌」 시각 요약 (2026-09-11) ─────────────────────────────────────────
+   사용자 요청 "텍스트 말고 그래프나 그림으로 바로 알 수 있게" -> 목업 6안 중 C x E 혼합 채택.
+   왼쪽 큰 숫자 셋 + 노출 막대, 오른쪽 왕복 손익 막대 + 누적선.
+   색은 기존 4색(good/bad/warn/neutral)만 쓴다 -- 새 색을 만들지 않는다(표시 규약 §2). */
+.acct-viz { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 18px; padding: 16px 18px; align-items: start; }
+.acct-left { min-width: 0; }
+.acct-stats { display: flex; gap: 26px; flex-wrap: wrap; }
+.acct-stat { display: grid; gap: 2px; }
+.acct-stat b { font: 800 30px/1.05 var(--font-sans); letter-spacing: -0.01em; }
+.acct-stat span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.acct-expo { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.acct-expo > span:first-child { font-size: 11.5px; color: var(--muted); }
+.acct-expo-track { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08);
+  overflow: hidden; min-width: 60px; }
+.acct-expo-fill { display: block; height: 100%; border-radius: 4px; }
+.acct-expo b { font: 700 13px/1 var(--font-mono); }
+.acct-pos-line { margin: 12px 0 2px; font-size: 12.5px; color: var(--text); }
+.acct-pos-sub { margin: 0; font-size: 11.5px; color: var(--muted); }
+.acct-perf { min-width: 0; }
+.acct-perf-head { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+/* preserveAspectRatio="none" -- 폭은 패널을 따라가고 높이는 여기서 고정한다 */
+.acct-perf-svg { display: block; width: 100%; height: 96px; }
+.acct-perf-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+.acct-stat b.good, .acct-expo b.good, .acct-perf b.good, .acct-perf-note .good { color: var(--good); }
+.acct-stat b.bad, .acct-expo b.bad, .acct-perf b.bad, .acct-perf-note .bad { color: var(--bad); }
+.acct-stat b.warn, .acct-expo b.warn { color: var(--amber); }
+.acct-stat b.neutral { color: var(--muted); }
+.acct-expo-fill.bad { background: var(--bad); }
+.acct-expo-fill.warn { background: var(--amber); }
+@media (max-width: 720px) {
+  /* 좁은 화면에선 좌우 2분할이 둘 다 뭉개진다 -- 위아래로 쌓는다 */
+  .acct-viz { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .acct-stats { gap: 18px; }
+  .acct-stat b { font-size: 25px; }
+  .acct-perf-svg { height: 78px; }
+}

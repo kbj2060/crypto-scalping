@@ -862,6 +862,44 @@ function snapshotAccountPosition() {
 }
 
 // 스냅샷 탭 청산맵 바로 위 요약. ops 탭 패널의 축약판이라 payload 를 공유한다(추가 요청 없음).
+// 「내 계좌」 시각 요약 (2026-09-11, 사용자 요청 "텍스트 말고 그래프나 그림으로 보면 바로
+// 알 수 있게끔" -> 목업 3안 x 2회 뒤 "C와 E를 잘 섞어서").
+//   왼쪽(C안) 큰 숫자 셋(청산까지·미실현·증거금) + 노출 막대 + 포지션 한 줄
+//   오른쪽(E안) 왕복 손익 막대 + 누적선 + 최악 한 건 강조
+// ⭐이 배치를 고른 이유: 실측에서 **승률 58%(7/12)인데 실현 -$287** 이고 그 손실이 사실상
+//   **한 건(-$536, 나머지 11건 합 +$249)** 이었다. 숫자 나열로는 절대 안 보이는 사실이라
+//   오른쪽 막대에 그 한 건을 명시적으로 짚어준다.
+// 색 규약 §2 준수 -- good/bad/warn/neutral 넷만 쓴다(5번째 색 없음).
+// 목업: scripts/plot_account_panel_mockup_ce_20260911.py · docs/charts/account_panel_mockup_ce_20260911.png
+function acctRiskTone(liqPct) {
+  return liqPct < 3 ? "bad" : liqPct < 6 ? "warn" : "good";
+}
+
+// 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
+function acctPerfSvg(net) {
+  if (!net.length) return "";
+  const W = 300, H = 96, zero = H * 0.52, pad = 2;
+  const peak = Math.max(...net.map((v) => Math.abs(v)), 1e-9);
+  const bw = (W - pad * 2) / net.length;
+  const sc = (H * 0.40) / peak;
+  let cum = 0;
+  const pts = [];
+  const bars = net.map((v, i) => {
+    cum += v;
+    const x = pad + i * bw;
+    const hgt = Math.max(Math.abs(v) * sc, 0.8);
+    const y = v >= 0 ? zero - hgt : zero;
+    pts.push(`${(x + bw * 0.36).toFixed(1)},${(zero - cum * sc).toFixed(1)}`);
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.72).toFixed(1)}" `
+      + `height="${hgt.toFixed(1)}" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.9"></rect>`;
+  }).join("");
+  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+    + bars
+    + `<line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--line)" stroke-width="1"></line>`
+    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.6"></polyline>`
+    + `</svg>`;
+}
+
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
@@ -872,37 +910,82 @@ function renderSnapshotAccount() {
     return;
   }
   const b = latestBinanceAccount.balance || {};
-  setT("snapAcctBalance", `지갑 ${fmtUsd(b.wallet)} · 가용 ${fmtUsd(b.available)} · 미실현 ${fmtUsd(b.unrealized)}`);
+  const wallet = Number(b.wallet) || 0;
+  const upnl = Number(b.unrealized) || 0;
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)} · 순자산 ${fmtUsd(wallet + upnl)}`);
   const pos = snapshotAccountPosition();
   const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
   if (summary) {
-    // 색 법칙: 롱 good · 숏 bad · 없음 neutral (5번째 색을 만들지 않는다)
     summary.textContent = pos ? (pos.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
     summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
   }
+
+  // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
+  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol);
+  const net = closed.map((t) => Number(t.net_pnl) || 0);
+  const wins = net.filter((v) => v > 0).length;
+  const total = net.reduce((x, y) => x + y, 0);
+  let worstIdx = -1;
+  net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
+  const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
+  const perf = net.length
+    ? `<div class="acct-perf">
+         <p class="acct-perf-head">왕복 ${net.length}건 · 승률 ${Math.round(wins / net.length * 100)}% ·
+            누적 <b class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</b></p>
+         ${acctPerfSvg(net)}
+         ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
+            ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
+                 · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
+            : ""}
+       </div>`
+    : `<div class="acct-perf"><p class="muted">닫힌 왕복이 아직 없습니다.</p></div>`;
+
   const otherNote = others > 0
     ? `<p class="muted">다른 코인에 ${others}종목을 더 보유 중입니다 -- 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
     : "";
   if (!pos) {
-    setH("snapAcctPosition", `<p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}`);
+    setH("snapAcctPosition", `<div class="acct-viz">
+        <div class="acct-left"><p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label
+          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}</div>
+        ${perf}
+      </div>`);
     return;
   }
-  const tone = pos.unrealized_pnl > 0 ? "good" : pos.unrealized_pnl < 0 ? "bad" : "neutral";
-  const gapPct = Number(pos.entry_price) > 0
-    ? ((Number(pos.mark_price) - Number(pos.entry_price)) / Number(pos.entry_price)) * 100 * (pos.side === "LONG" ? 1 : -1)
-    : 0;
-  setH("snapAcctPosition", `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(pos.symbol)} ${pos.side === "LONG" ? "롱" : "숏"} x${escapeHtml(pos.leverage)}</strong>
-        <span>진입 ${fmtUsd(pos.entry_price)} -> 현재 ${fmtUsd(pos.mark_price)} (${gapPct >= 0 ? "+" : ""}${gapPct.toFixed(2)}%) · 청산가 ${fmtUsd(pos.liquidation_price)} · 수량 ${escapeHtml(pos.qty)}</span>
+
+  const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
+  const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
+  const usedPct = wallet > 0 ? (Number(b.margin) || 0) / wallet * 100 : 0;
+  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
+  const expo = wallet > 0 ? (Number(pos.notional) || 0) / wallet : 0;
+  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
+  const stat = (val, lab, tone) =>
+    `<div class="acct-stat"><b class="${tone}">${val}</b><span>${lab}</span></div>`;
+  setH("snapAcctPosition", `<div class="acct-viz">
+      <div class="acct-left">
+        <div class="acct-stats">
+          ${stat(`${liqPct.toFixed(2)}%`, "청산까지", acctRiskTone(liqPct))}
+          ${stat(`${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(1)}%`, `미실현 ${fmtUsd(upnl)}`,
+                 upnl < 0 ? "bad" : upnl > 0 ? "good" : "neutral")}
+          ${stat(`${usedPct.toFixed(0)}%`, "증거금 사용",
+                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good")}
+        </div>
+        <div class="acct-expo">
+          <span>노출</span>
+          <span class="acct-expo-track"><span class="acct-expo-fill ${expo > 15 ? "bad" : "warn"}"
+            style="width:${Math.min(expo / EXPO_CAP * 100, 100).toFixed(1)}%"></span></span>
+          <b class="${expo > 15 ? "bad" : "warn"}">${expo.toFixed(1)}배</b>
+        </div>
+        <p class="acct-pos-line"><strong>${escapeHtml(pos.symbol)}
+          ${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</strong>
+          · 수량 ${escapeHtml(pos.qty)}</p>
+        <p class="acct-pos-sub">진입 ${fmtUsd(pos.entry_price)} → 현재 ${fmtUsd(mark)}
+          · 청산 ${fmtUsd(liq)} · 지갑 ${fmtUsd(wallet)}</p>
       </div>
-      <div class="ops-health-meta">
-        <span class="ops-health-status-badge">${fmtUsd(pos.unrealized_pnl)}</span>
-        <small>${fmtTs(pos.entry_at)} 진입</small>
-      </div>
-    </article>${otherNote}`);
+      ${perf}
+    </div>${otherNote}`);
 }
+
 
 // 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {
