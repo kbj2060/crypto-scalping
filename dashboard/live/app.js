@@ -70,7 +70,7 @@ const setH = (id, html) => { const target = el(id); if (target) target.innerHTML
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 // Snapshot tab: same 5 model indicators (bot-state ones only -- see the "own fetch cycle" model
-// indicators like liq_pressure, which carry their own server-provided
+// indicators like liq_pressure/liq_direction, which carry their own server-provided
 // tone_history instead), but as a tone-per-bar strip (matching the evidence signals' activity-strip
 // graph) instead of a continuous sparkline. Stores the ALREADY-COMPUTED tone string
 // ("good"/"bad"/"neutral") from each render() pass rather than re-deriving it from raw values
@@ -529,32 +529,11 @@ function retailFlowRead(micro) {
   return "리테일 수급은 뚜렷하지 않음";
 }
 
-// 2026-09-11 청산 방향압력(예측·손익 8지평 전패) -> 청산 규모(사실)로 교체. 사용자 지시.
-// 게이지와 **같은 원천·같은 창**(latestLiquidation5m, 30분 누적)이라 두 표시가 어긋나지 않는다.
-function liqSizeSubText(liq5m) {
-  if (!liq5m || !liq5m.warmed_up) return "웜업";
-  const lu = Number(liq5m.long_usd_5m || 0), su = Number(liq5m.short_usd_5m || 0);
-  if (lu <= 0 && su <= 0) return "미발생";
-  const hi = Math.max(lu, su), lo = Math.min(lu, su);
-  if (hi > 0 && lo / hi >= 0.8) return "혼재 청산";   // 양쪽 차이 20% 이내
-  return lu > su ? "롱 청산" : "숏 청산";
-}
-
-function liqSizeTone(liq5m) {
-  const t = liqSizeSubText(liq5m);
-  return t === "롱 청산" ? "good" : t === "숏 청산" ? "bad"
-    : t === "혼재 청산" ? "warn" : "neutral";
-}
-
-// 이력 스트립: 봉별 청산 레인과 **같은 데이터**(5분봉)를 톤으로 접는다 -- 다른 칩과 같은 모양.
-function liqSizeToneHistory(bars, n = 48) {
-  return (bars || []).slice(-n).map((b) => {
-    const lu = Number(b.long_usd) || 0, su = Number(b.short_usd) || 0;
-    if (lu <= 0 && su <= 0) return "neutral";
-    const hi = Math.max(lu, su), lo = Math.min(lu, su);
-    if (hi > 0 && lo / hi >= 0.8) return "warn";
-    return lu > su ? "good" : "bad";
-  });
+function liqDirectionSubText(sig) {
+  if (!sig || !sig.warmed_up) return "웜업";
+  if (sig.direction === "bullish") return "상승압력";
+  if (sig.direction === "bearish") return "하락압력";
+  return "중립";
 }
 
 function fmtBarsAgo(bars) {
@@ -1125,7 +1104,7 @@ async function refreshOpsStatus() {
 // happening. Shared by both the evidence-signal strips (bottom/top fired -> tone) and the
 // Snapshot tab's model-indicator strips (thresholded value -> tone).
 // Builds an oldest-to-newest array of ISO timestamps for a strip whose bars are known to be evenly
-// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines, liq_size at
+// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines, liq_direction at
 // 1-min tail_risk_1m rows) -- the payload only ever sends the LATEST bar's timestamp, so the rest
 // are derived by walking back stepMinutes at a time. Returns [] if latestIso is missing (not warmed
 // up yet), so hover-time silently does nothing rather than showing a wrong guess.
@@ -1287,7 +1266,7 @@ function stripAxisHtml(times, timeFmtKind) {
 // liqDirectionSubText/basisLiquiditySubText/liqCascadeHint/vReboundSubText above); all 8 evidence
 // signals share one vocabulary under the "evidence" key (matches evidenceSideLabel). Deliberately
 // separate from MODEL_INDICATOR_MEANING (keyed by the exact CURRENT subText, including states a
-// single past tone can't reconstruct -- "웜업" 같은 운영 상태
+// single past tone can't reconstruct -- "웜업", or liq_direction's 강한/약한 percentile-strength
 // qualifier, which isn't stored per history bar, only tone is).
 // 2026-09-10 사용자 요청: "V자 급등락과 앵커 돌파/되돌림도 증거신호 라벨처럼 익절 가격을 확률
 // 아래에, 같은 포맷으로". 증거신호의 `익절 {가격}` (renderEvidenceSignals) 과 같은 문자열을
@@ -1352,9 +1331,7 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
-  // 2026-09-11 청산 방향압력 -> 청산 규모 교체(사용자 지시). 색은 표시 규약 그대로 측면을 가리킨다:
-  //   롱=good / 숏=bad. 예측이 아니라 **실제 일어난 강제청산 금액**이다.
-  liq_size: { good: "롱 청산", bad: "숏 청산", warn: "혼재 청산", neutral: "미발생" },
+  liq_direction: { good: "상승압력", bad: "하락압력", neutral: "중립" },
   whale: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   retail_flow: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   evidence: { good: "바닥 발동", bad: "천장 발동", warn: "혼재 발동", neutral: "미발동" },
@@ -1486,13 +1463,11 @@ const MODEL_INDICATOR_MEANING = {
     "주의": "한쪽 청산량이 평소보다 급증했지만 아직 본격적인 캐스케이드로 번지진 않았어요.",
     "위험": "한쪽 포지션들이 연쇄적으로 강제청산되며 캐스케이드가 실제로 진행 중이에요 — 그 방향으로 가격이 더 튈 수 있어요.",
   },
-  liq_size: {
-    "롱 청산": "최근 30분 강제청산이 롱(매수) 쪽에 더 많았어요 — 롱 포지션이 강제로 정리됐다는 사실이에요.",
-    "숏 청산": "최근 30분 강제청산이 숏(매도) 쪽에 더 많았어요 — 숏 포지션이 강제로 정리됐다는 사실이에요.",
-    "혼재 청산": "롱과 숏 청산 금액이 비슷해요 — 어느 한쪽이 몰린 상황은 아니에요.",
-    "미발생": "최근 30분 동안 강제청산이 없었어요.",
-    "웜업": "청산 스트림을 아직 채우는 중이에요.",
-  },,
+  liq_direction: {
+    "상승압력": "최근 강제청산이 롱(매수) 쪽에 몰려 있어요 — 투매가 소진되며 반등할 수 있다는 컨트래리언 해석이에요. 실제로 오를지는 검증되지 않았어요.",
+    "하락압력": "최근 강제청산이 숏(매도) 쪽에 몰려 있어요 — 숏스퀴즈가 소진되며 눌릴 수 있다는 컨트래리언 해석이에요. 실제로 내릴지는 검증되지 않았어요.",
+    "중립": "롱/숏 청산이 어느 한쪽으로 뚜렷하게 쏠려 있지 않아요.",
+  },
   whale: {
     "롱 진입": "큰 금액 단위 거래가 최근 5분간 매수 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
     "숏 진입": "큰 금액 단위 거래가 최근 5분간 매도 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
@@ -1536,16 +1511,74 @@ const MODEL_INDICATOR_DETAIL = {
   liq_cascade: "[계산] 최근 1분 롱/숏 청산 금액을 각각 30분 과거 평균·표준편차로 정규화한 Z값 중 큰 쪽(z_peak). z_peak이 임계값(3.5)을 넘으면 그 순간부터 '캐스케이드 진행중'으로 전환되고, 이후 시간이 지나며 지수적으로 감쇠합니다(현재 파라미터 기준 반감기 약 2~3분). 감쇠된 에너지가 임계값의 35% 아래로 내려가면 캐스케이드가 종료된 것으로 판정합니다. 2026-08-27부터(ETH만) Z값 조건에 더해 그 쪽 청산 금액이 최소 $10,000 이상이어야 전환됩니다 — 청산이 성긴(대부분 분(分)이 $0) 데이터라 조용한 구간이 이어지면 평균·표준편차 자체가 거의 0으로 붕괴해, 그 직후엔 평범한 청산 하나에도 Z값만으로는 오검출되던 문제를 막기 위함입니다.\n" +
     "[기준] 캐스케이드 진행중이면 위험 · 아직 진행중은 아니지만 Z≥2.0(청산 급증)이면 주의 · 그 외 안정.\n" +
     "[의미] 예측이 아니라 '지금 이 순간 실제로 캐스케이드가 벌어지고 있는가'를 가공 없이 그대로 보여주는 원시 상태값입니다. 방향(롱/숏)이나 에너지 잔량(감쇠율) 같은 세부 숫자는 화면에 안 나옵니다 — 안정/주의/위험 배지만으로 충분하다는 판단(사용자 요청으로 정리)이라, 이 지표는 '지금 캐스케이드가 있는가/없는가'만 한눈에 보는 용도입니다.",
-  liq_size: "[계산] 최근 30분 동안 바이낸스 @forceOrder 스트림에 찍힌 강제청산 체결 금액을 롱/숏으로 나눠 합산합니다(tail_risk_1m, 완결된 분마다 1행).\n" +
-    "[갱신 주기] 원천이 1분에 1행이라 최소 1분에 한 번 바뀝니다. 이력 스트립은 5분봉 단위입니다(청산맵 차트의 청산 레인과 같은 데이터·같은 정렬).\n" +
-    "[기준] 금액이 더 큰 쪽을 표시합니다. 두 쪽 차이가 20% 안이면 '혼재 청산', 청산이 아예 없으면 '미발생'입니다.\n" +
-    "[의미] **예측이 아니라 이미 일어난 사실**입니다. 강제청산은 그 방향 포지션이 손절선에 닿아 시장가로 정리됐다는 뜻이라, 규모가 크면 그만큼 실제 매물/매수가 시장에 나왔다는 기록입니다. 이 지표만으로 다음 방향을 읽지 마세요 — 같은 원천으로 방향을 예측하던 이전 지표(청산 방향압력)는 손익 검정 8개 지평에서 전부 순손실이라 2026-09-11 에 제거했습니다.",
+  liq_direction: "[계산] liq_net_z_12 = (최근 12분 롱청산 합 − 숏청산 합) / (최근 2일 총청산 롤링평균 + 1% 여유값). 양수면 롱청산 우세, 음수면 숏청산 우세.\n" +
+    "[갱신 주기] 원천 데이터(tail_risk_1m)가 1분마다 1행씩 쌓이고 서버도 60초 캐시를 걸어서, 이 값은 최소 1분에 한 번만 바뀝니다 — 수급 흐름처럼 몇 초 단위로 바뀌는 지표가 아닙니다. 그래프도 1분×48칸, 즉 최근 48분을 보여줍니다.\n" +
+    "[기준] 부호로 방향(상승압력/하락압력), 최근 이력 대비 백분위(상하위 10% 안이면 '강한', 25~75% 사이면 '약한')로 세기를 표시.\n" +
+    "[의미] 컨트래리언 해석입니다 — 롱청산이 몰리면(강제매도 소진) 상승압력, 숏청산이 몰리면(숏스퀴즈 소진) 하락압력으로 읽습니다. **2026-08-25 정식 IC 검증(37일, n>10,200)**: 5분·15분 지평은 forward-return과의 상관이 통계적으로 유의(순열검정 z=+2.96/+2.50, 전반·후반 구간 모두 같은 부호), 1시간 지평은 근소 미달(z=+1.91)이지만 상관 크기 자체는 문턱을 넘고 전반/후반 부호·크기도 일관돼(+0.041/+0.035) 표본부족(정식 문턱 56일의 66%) 때문으로 보입니다 — 방향 정보 자체는 탄탄합니다. 다만 **같은 원천 데이터로 스윕과 결합해 실제 손익을 검정한 결과(§14, 08-25)는 8개 지평 전부 비용 차감 후 순손실**이었습니다(15분 -9.19bp~2시간 -5.00bp, taker 10bp 기준) — 통계적으로 진짜인 정보와 수수료를 넘기고 이익이 나는지는 별개 질문입니다. 방향 부호는 참고할 만하지만 이 신호 하나만으로 매매를 결정할 만큼 이익을 낸다는 근거는 없습니다 — 수급 흐름과 마찬가지로 재량 판단의 한 재료로만 쓰세요.\n" +
+    "[유의] 09-15 정식 게이트(56일치 데이터, §13/§14 포함)가 이 조기 IC 결과를 대체합니다 — 지금 수치는 37일치 조기 계산입니다.",
+  whale: "[계산] 최근 5분간 체결을 건당 금액 기준으로 큰손/소액으로 나눠, 큰손 거래만 (매수금액−매도금액)/(매수금액+매도금액)으로 계산 (-1~+1).\n" +
+    "[기준] +0.2 이상 강하게 매수유입 · +0.05~0.2 매수유입 · -0.05~-0.2 매도유입 · -0.2 이하 강하게 매도.\n" +
+    "[의미] 큰 금액 단위 거래(개인 소액 매매와 구분)가 최근 5분간 실제로 어느 방향으로 체결됐는지를 보여줍니다. '포지션'이 아니라 '최근 흐름'이라는 점에 유의하세요.",
+  retail_flow: "[계산] 위 '수급 흐름'과 같은 함수·같은 5분창에서 나온 리테일(소액) 쪽 짝 — (매수금액−매도금액)/(매수금액+매도금액), 소액 체결만 (-1~+1).\n" +
+    "[기준] +0.2 이상 강하게 매수유입 · +0.05~0.2 매수유입 · -0.05~-0.2 매도유입 · -0.2 이하 강하게 매도.\n" +
+    "[의미] **2026-08-25 검증**: 1~15분 초단기 지평에서 통계적으로 유의한 방향 정보가 있습니다(5개 지평 전부 유의, 노이즈로 설명되는 수준을 훨씬 넘음). 다만 시장가로 그대로 매매하면 비용(10bp)이 총이익보다 커서 45개 지평×조합 전부 순손실이었습니다(4차례 재검증 포함, min_periods 계산결함까지 잡아낸 뒤 재확인) — 방향 정보 자체는 진짜지만 수수료를 넘길 만큼 크지는 않다는 뜻으로, 재량 판단 참고용입니다. 수급 흐름(고래)과는 상관 0.36 정도로 상당히 다른 정보라 같이 보면 유용합니다 — 둘이 같은 방향을 가리키면 좀 더 무게를 둘 근거, 엇갈리면 큰손/리테일이 다르게 움직이고 있다는 뜻입니다.",
+};
+
+// 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
+// looking prediction/detection window, shown as a small badge next to its name (see
+// horizonBadgeHtml() below, used by both renderModelIndicatorList and renderEvidenceSignals).
+// Covers both model-indicator keys (MODEL_CHIP_IDS below) and evidence-signal keys
+// (EVIDENCE_STRIP_CHIP_IDS further down) in one lookup since neither namespace collides.
+// "상태" (not a number) marks signals whose live formula is a continuous current-state gauge with
+// no fixed forward horizon baked in -- forcing a number onto those would overstate what they
+// actually claim; each entry's title cites the specific research this is grounded in (verified
+// against each script's own docstring/detail text above and this repo's evidence-signal scorecard
+// methodology, not guessed from the signal's name -- e.g. "15분 급변"/short_term_return_z names
+// its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
+const SIGNAL_HORIZON = {
+  // -- model indicators --
+  v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
+  liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
+  liq_direction: { text: "상태", title: "고정 예측 시간창 없이 매분 갱신되는 현재 청산 방향압력 -- 5·15분 지평 IC는 유의했으나(탐색적), 손익 결합 검정(8개 지평)은 전부 순손실" },
+  liq_cascade: { text: "상태", title: "예측이 아니라 '지금 캐스케이드가 진행 중인가'를 보여주는 현재 상태값(반감기 약 2~3분으로 감쇠)" },
+  whale: { text: "상태", title: "최근 5분간 큰손 체결 순유입 방향 -- 고정 예측 시간창 없는 현재 흐름 지표(방향-IC 검정 4개 지평 전부 무정보)" },
+  retail_flow: { text: "상태", title: "최근 5분간 리테일 체결 순유입 방향 -- 1~15분 지평 방향-IC는 유의했으나 수수료 반영 손익은 전부 순손실, 고정 예측 시간창은 없음" },
+  // -- evidence signals (모두 이 저장소 표준 스코어카드: 1시간/4시간/8시간 중 1시간이 대표 지평) --
+  orthogonal_combo: { text: "2시간", title: "발동 조건 자체는 오실레이터(p_fast/p_slow) 이중극단+delta_z/funding_z 확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 3.57xATR 이상 강하게 도달할 확률'로 평가(2026-08-31 교체, 이 저장소 분류·경제성 둘 다 역대 최고 성적)" },
+  fib_extension_exhaustion: { text: "100분", title: "발동 조건 자체는 48봉 스윙 반대극값 기준 27.2~61.8% 확장(소진)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '100분 안 2.35xATR 도달(같은 구간 대형역행 없이) 확률'로 평가(2026-08-31 교체, 이 저장소 최초로 라벨에 최대역행폭(MAE) 상한 적용)" },
+  smt_divergence: { text: "6시간", title: "발동 조건 자체는 ETH-BTC 48봉 스윙 교차자산 비확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '6시간 안 4.2xATR 도달 확률'로 평가(2026-08-31 교체, 이 저장소 분류 AUC 역대 최고)" },
+  short_term_return_z: { text: "1시간", title: "발동 조건 자체는 15분(3봉) 수익률 급변이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 1.75xATR 도달 확률'로 평가" },
+  taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
+  liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
+  demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
+  kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
+};
+
+// 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
+// 제목줄이 이미 최대 3개 배지를 달고 있고 이 열은 과거에 오버플로 사고가 있었기 때문이다
+// (eth_dashboard_low_atr_warning_overflow_fix_20260901). 인자를 안 주면 기존 동작 그대로다.
+function horizonBadgeHtml(key, progress, extraTitle) {
+  const h = SIGNAL_HORIZON[key];
+  if (!h) return "";
+  const text = progress ? `${h.text} · ${progress}` : h.text;
+  let title = progress ? `${h.title}\n\n지금 이 발동은 그 창의 ${progress}째입니다.` : h.title;
+  if (extraTitle) title += `\n\n${extraTitle}`;
+  return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+}
+
+// Snapshot tab "12신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
+// index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
+const MODEL_CHIP_IDS = {
+  v_rebound: "modelChipVRebound",
+  extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
+  liq_pressure: "modelChipBasisLiq",
+  liq_cascade: "modelChipLiqCascade",
   vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
-  liq_size: "modelChipLiqSize",
+  liq_direction: "modelChipLiqDirection",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
-// whale/retail_flow/liq_pressure/v_rebound are directional (tone:
+// whale/liq_direction/retail_flow/liq_pressure/v_rebound are directional (tone:
 // good=롱 쪽/bad=숏 쪽/neutral=무신호); liq_cascade is risk-level (tone: good=안정/warn=주의/
 // bad=위험). Both families reuse the same colors, so a bare red chip is ambiguous ("숏" vs
 // "위험") -- 2026-08-24 사용자 리포트. Prefixing an explicit ▲/▼/– arrow on the directional chips
@@ -1563,7 +1596,7 @@ const MODEL_INDICATOR_DETAIL = {
 // entirely (tested null / flagged non-independent, see classifyIndicators()'s own comment) -- no
 // longer members of either family here.
 const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
-  "whale", "retail_flow", "liq_pressure", "v_rebound",
+  "whale", "liq_direction", "retail_flow", "liq_pressure", "v_rebound",
 ]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
@@ -2711,7 +2744,14 @@ async function refreshLiquidationDirectionSignal() {
   const now = Date.now();
   if (now - liquidationDirectionLastFetchAt < LIQUIDATION_DIRECTION_POLL_MS) return;
   liquidationDirectionLastFetchAt = now;
-  // 2026-09-11 청산 방향압력 제거 -- 더는 화면에서 쓰지 않으므로 폴링도 멈춘다.
+  try {
+    const res = await fetch(`${API_LIQUIDATION_DIRECTION_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`liquidation direction signal ${res.status}`);
+    latestLiquidationDirection = await res.json();
+  } catch (error) {
+    console.error("Liquidation direction signal fetch error:", error);
+    latestLiquidationDirection = { warmed_up: false, error: "fetch_failed" };
+  }
 }
 
 // Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
@@ -4182,14 +4222,16 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 청산 방향압력 (2026-08-25) -- fetched separately by refreshLiquidationDirectionSignal(), same
   // external-fetch category as latestVRebound above. Directional model-indicator, NOT evidence-
   // signal tier -- see scripts/live_liquidation_direction_signal_20260825.py docstring.
-  const liqSizeTotal = latestLiquidation5m && latestLiquidation5m.warmed_up
-    ? (Number(latestLiquidation5m.long_usd_5m || 0) + Number(latestLiquidation5m.short_usd_5m || 0))
-    : 0;
+  const liqDirWarmedUp = !!(latestLiquidationDirection && latestLiquidationDirection.warmed_up);
+  const liqDirTone = liqDirWarmedUp
+    ? (latestLiquidationDirection.direction === "bullish" ? "good"
+      : latestLiquidationDirection.direction === "bearish" ? "bad" : "neutral")
+    : "neutral";
 
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
   // otherwise), so it's gated the same way as tick()'s Snapshot-only fetches above. Data
-  // accumulation (pushToneHistory calls above this block)
+  // accumulation (pushToneHistory calls above this block, liqDirTone derivation)
   // stays unconditional -- only the paint work below is skipped, so history strips have no gap when
   // the user switches back to Snapshot.
   if (activePageTab === "snapshot") {
@@ -4270,13 +4312,10 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       }, "liq_cascade"),
       ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
       {
-        key: "liq_size", label: "청산 규모", tone: liqSizeTone(latestLiquidation5m),
-        subText: liqSizeSubText(latestLiquidation5m),
-        // 이력은 봉별 청산 레인과 같은 데이터(5분봉)라 차트와 화면이 같은 이야기를 한다.
-        history: liqSizeToneHistory(latestLiquidation5mHist),
-        times: (latestLiquidation5mHist || []).slice(-48).map((b) => Date.parse(b.ts)),
-        liveText: liqSizeTotal > 0 ? `롱 ${fmtUsdCompact(Number(latestLiquidation5m.long_usd_5m || 0))}`
-          + ` · 숏 ${fmtUsdCompact(Number(latestLiquidation5m.short_usd_5m || 0))}` : "",
+        key: "liq_direction", label: "청산 방향압력", tone: liqDirTone,
+        subText: liqDirWarmedUp ? liqDirectionSubText(latestLiquidationDirection) : "웜업",
+        history: (latestLiquidationDirection && latestLiquidationDirection.tone_history) || [],
+        times: evenlySpacedBarTimes(latestLiquidationDirection && latestLiquidationDirection.latest_ts_utc, (latestLiquidationDirection && latestLiquidationDirection.tone_history || []).length, 1),
       },
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
