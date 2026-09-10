@@ -1916,10 +1916,16 @@ svg {
    사용자 요청 "텍스트 말고 그래프나 그림으로 바로 알 수 있게" -> 목업 6안 중 C x E 혼합 채택.
    왼쪽 큰 숫자 셋 + 노출 막대, 오른쪽 왕복 손익 막대 + 누적선.
    색은 기존 4색(good/bad/warn/neutral)만 쓴다 -- 새 색을 만들지 않는다(표시 규약 §2). */
+/* 🔴2026-09-11 사용자 신고 "왼쪽 한 쪽에 정보들이 쏠려 있어. WIDTH를 최대로":
+   `#snapAcctPosition` 은 `.ops-health-list` 이고 그 클래스가 **데스크톱에서 2열 그리드**다
+   (L192, 720px 이하에선 1열). 그래서 이 카드가 패널의 **왼쪽 절반**에만 들어갔다.
+   이 목록만 1열로 되돌린다 -- 증거신호/모델지표 목록의 2열은 그대로 둔다. */
+#snapAcctPosition { grid-template-columns: 1fr; }
 .acct-viz { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 18px; padding: 16px 18px; align-items: start; }
+  gap: 24px; padding: 16px 18px; align-items: start; }
 .acct-left { min-width: 0; }
-.acct-stats { display: flex; gap: 26px; flex-wrap: wrap; }
+/* 폭 전체를 쓰게 되면 flex+고정 gap 은 숫자 셋이 왼쪽에 뭉친다 -- 균등 분배로 편다 */
+.acct-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .acct-stat { display: grid; gap: 2px; }
 .acct-stat b { font: 800 30px/1.05 var(--font-sans); letter-spacing: -0.01em; }
 .acct-stat span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
@@ -1945,7 +1951,7 @@ svg {
 @media (max-width: 720px) {
   /* 좁은 화면에선 좌우 2분할이 둘 다 뭉개진다 -- 위아래로 쌓는다 */
   .acct-viz { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
-  .acct-stats { gap: 18px; }
+  .acct-stats { gap: 10px; }
   .acct-stat b { font-size: 25px; }
   .acct-perf-svg { height: 78px; }
 }
