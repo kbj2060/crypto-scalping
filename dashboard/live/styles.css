@@ -527,10 +527,11 @@ body {
    model-indicator panels, both via toneStripSvg()) -- width:100% now fully governs. */
 /* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
    too tall) -> settled on 15px, the midpoint, per explicit user request each step. */
-/* 2026-09-10 사용자 요청 "증거신호 게이지 칸도 크기를 키워줘": 15 -> 20px.
-   같은 날 키운 레짐 리본(REGIME_RIBBON_H=20)과 높이를 맞췄다. app.js toneStripSvg 의
-   viewBox h 도 20 이다 -- preserveAspectRatio="none" 이라 둘이 어긋나면 rx=2 가 늘어난다. */
-.evidence-strip { display: block; width: 100%; height: 20px; }
+/* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
+   too tall) -> settled on 15px, the midpoint, per explicit user request each step.
+   2026-09-10: 20px 로 올렸다가 사용자 지시로 되돌림 -- 키울 대상은 이 패널 띠가 아니라
+   청산맵 차트 **안**의 증거신호 레인(app.js LANE_H)이었다. */
+.evidence-strip { display: block; width: 100%; height: 15px; }
 /* 2026-08-31 user request: a persistent time axis under the strip (design candidate "01 눈금 축")
    so roughly-when is visible without hovering -- see stripAxisHtml() in app.js, 5 evenly spaced
    ticks. Matches .evidence-strip-caption's font/color so the two read as one family; smaller

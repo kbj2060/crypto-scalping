@@ -1043,11 +1043,7 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
   const timeList = Array.isArray(times) ? times : [];
   const callList = Array.isArray(calls) ? calls : [];
   const n = Math.max(list.length, 1);
-  // 2026-09-10 사용자 요청 "증거신호 게이지 칸도 크기를 키워줘": 15 -> 20.
-  // 같은 날 키운 레짐 리본(REGIME_RIBBON_H=20)과 높이를 맞춘다. CSS `.evidence-strip`
-  // 높이도 같이 20 으로 올린다 -- preserveAspectRatio="none" 이라 둘이 어긋나면
-  // 막대의 rx=2 둥근 모서리가 타원으로 늘어난다(1:1 유지가 목적).
-  const w = 240, h = 20, gap = 1.5;
+  const w = 240, h = 15, gap = 1.5;
   const bw = Math.max((w - gap * (n - 1)) / n, 1);
 
   // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
@@ -3719,7 +3715,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   rx=1.5 라운딩이 그 폭을 먹어 점처럼 보인다(최대 축소 72봉이면 bw 3.2px).
     //   → 레인마다 **불투명 트랙**을 깔아 히트맵을 끊고, 모바일에선 높이를 키우고 라운딩을
     //     빼고 최소 폭을 보장하고 불투명도 하한을 올린다.
-    const LANE_H = mobileChart ? 9 : 6;
+    // 2026-09-10 사용자 요청 "청산맵에 있는 증거신호 게이지 칸을 청산맵에 있는 레짐 게이지
+    // 칸의 크기만큼": 데스크톱 6 / 모바일 9 -> **20**, 같은 차트의 레짐 리본
+    // (REGIME_RIBBON_H=20)과 동일하게 맞춘다. 모바일이 데스크톱보다 컸던 건 2026-09-09
+    // 가시성 신고 때문인데, 20 이면 그 이유가 해소되므로 한 값으로 통일한다.
+    // ⚠️레인은 플롯 **위에 겹쳐** 그린다(리본과 달리 하단 여백 밖이 아니다). 상·하 20px
+    //   씩이라 데스크톱 플롯 324 중 40px(12%)을 덮는다 -- 캔들이 극단까지 갈 때 가려진다.
+    const LANE_H = 20;
     const LANE_Y = { top: mt + 3, bottom: h - mb - 3 - LANE_H };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
     // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
@@ -3761,7 +3763,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       });
       const lab = document.createElementNS(NS, "text");
       lab.setAttribute("x", ml - 6);
-      lab.setAttribute("y", LANE_Y[side] + LANE_H - 1);
+      // 레인이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
+      lab.setAttribute("y", LANE_Y[side] + LANE_H / 2 + 3);
       lab.setAttribute("text-anchor", "end");
       lab.setAttribute("font-size", "9");
       lab.setAttribute("fill", "var(--muted)");
