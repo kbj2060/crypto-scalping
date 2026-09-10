@@ -56,6 +56,20 @@ if suspects:
 else:
     print("✅ 호출-정의 대조: 이상 없음")
 
+# ⭐가장 싼 진짜 검사: 파일 전체를 실제로 파싱한다 (2026-09-11 실장애 2건째 --
+# 사전에 쉼표가 둘(`},,`) 들어가 app.js 전체가 SyntaxError 였다. 정규식 검사기는
+# 키 목록도 중괄호 균형도 전부 통과시켰다). esprima 는 ES2020 미지원이라 문법 검사에
+# 영향 없는 최신 표기만 등가 치환한다. ponytail: 브라우저 실행(playwright)이 이 머신에
+# 시스템 라이브러리 부족으로 안 뜬다 -- 뜨면 콘솔 오류 확인으로 올리는 게 맞다.
+import esprima
+_s = re.sub(r"\?\.(?=[(\[])", "", src)
+_s = re.sub(r"\?\.", ".", _s).replace("??=", "||=").replace("??", "||")
+try:
+    esprima.parseScript(_s)
+    print("✅ 문법 파싱: 통과")
+except Exception as e:
+    print(f"🔴 문법 오류 -- 이 파일은 브라우저에서 아예 로드되지 않는다: {e}"); bad=True
+
 print("🔴 의도치 않은 소실 있음" if bad else
       f"✅ 의도한 제거({', '.join(sorted(EXPECTED_REMOVED)) or '없음'}) 외 소실 없음")
 sys.exit(1 if bad else 0)
