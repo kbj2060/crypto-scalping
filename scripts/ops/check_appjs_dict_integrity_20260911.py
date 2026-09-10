@@ -3,6 +3,11 @@
 중괄호 균형·HTTP200·자산 서빙 검사는 전부 통과한다. 키 목록만이 그걸 잡는다."""
 import re, subprocess, sys
 
+# 이번 변경에서 **의도적으로** 제거한 키. 인자로 넘긴다:
+#   python3 check_appjs_dict_integrity_20260911.py liq_direction liq_size
+# 비워두면 어떤 소실도 실패로 본다.
+EXPECTED_REMOVED = set(sys.argv[1:])
+
 def dicts(src):
     out={}
     lines=src.split('\n')
@@ -32,8 +37,9 @@ for n in allk:
     if b is None: print(f"{n:34s} {len(a):>5} {'-':>5}  🔴사전 자체 소실"); bad=True; continue
     lost=sorted(set(a)-set(b)); add=sorted(set(b)-set(a))
     mark="✅" if not lost and not add else ("🔴 소실 "+str(lost) if lost else "＋"+str(add))
-    if lost and not (set(lost) <= {"liq_direction"}): bad=True
+    if lost and not (set(lost) <= EXPECTED_REMOVED): bad=True
     print(f"{n:34s} {len(a):>5} {len(b):>5}  {mark}")
 print()
-print("🔴 의도치 않은 소실 있음" if bad else "✅ 의도한 변경(liq_direction) 외 소실 없음")
+print("🔴 의도치 않은 소실 있음" if bad else
+      f"✅ 의도한 제거({', '.join(sorted(EXPECTED_REMOVED)) or '없음'}) 외 소실 없음")
 sys.exit(1 if bad else 0)

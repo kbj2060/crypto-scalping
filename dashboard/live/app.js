@@ -535,33 +535,7 @@ function retailFlowRead(micro) {
   return "리테일 수급은 뚜렷하지 않음";
 }
 
-// 2026-09-11 청산 방향압력(예측·손익 8지평 전패) -> 청산 규모(사실)로 교체.
-// 게이지와 같은 원천·같은 창(latestLiquidation5m, 30분 누적)이라 두 표시가 어긋나지 않는다.
-function liqSizeSubText(liq5m) {
-  if (!liq5m || !liq5m.warmed_up) return "웜업";
-  const lu = Number(liq5m.long_usd_5m || 0), su = Number(liq5m.short_usd_5m || 0);
-  if (lu <= 0 && su <= 0) return "미발생";
-  const hi = Math.max(lu, su), lo = Math.min(lu, su);
-  if (hi > 0 && lo / hi >= 0.8) return "혼재 청산";
-  return lu > su ? "롱 청산" : "숏 청산";
-}
-
-function liqSizeTone(liq5m) {
-  const t = liqSizeSubText(liq5m);
-  return t === "롱 청산" ? "good" : t === "숏 청산" ? "bad"
-    : t === "혼재 청산" ? "warn" : "neutral";
-}
-
-// 이력 스트립: 봉별 청산 레인과 같은 데이터(5분봉)를 톤으로 접는다 -- 다른 칩과 같은 모양.
-function liqSizeToneHistory(bars, n = 48) {
-  return (bars || []).slice(-n).map((b) => {
-    const lu = Number(b.long_usd) || 0, su = Number(b.short_usd) || 0;
-    if (lu <= 0 && su <= 0) return "neutral";
-    const hi = Math.max(lu, su), lo = Math.min(lu, su);
-    if (hi > 0 && lo / hi >= 0.8) return "warn";
-    return lu > su ? "good" : "bad";
-  });
-}
+// 2026-09-11 청산 규모 칩은 청산 위험(liqRiskIndicatorItem)으로 교체됨 -- 헬퍼 제거.
 
 function fmtBarsAgo(bars) {
   if (bars === null || bars === undefined) return "발화 이력 없음";
@@ -1131,7 +1105,7 @@ async function refreshOpsStatus() {
 // happening. Shared by both the evidence-signal strips (bottom/top fired -> tone) and the
 // Snapshot tab's model-indicator strips (thresholded value -> tone).
 // Builds an oldest-to-newest array of ISO timestamps for a strip whose bars are known to be evenly
-// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines, liq_size at
+// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines, liq_risk at
 // 1-min tail_risk_1m rows) -- the payload only ever sends the LATEST bar's timestamp, so the rest
 // are derived by walking back stepMinutes at a time. Returns [] if latestIso is missing (not warmed
 // up yet), so hover-time silently does nothing rather than showing a wrong guess.
@@ -1361,7 +1335,8 @@ const STRIP_BAR_LABEL_BY_TONE = {
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   // 2026-09-11 청산 방향압력 -> 청산 규모(사용자 지시). 색은 표시 규약 그대로 측면을 가리킨다.
-  liq_size: { good: "롱 청산", bad: "숏 청산", warn: "혼재 청산", neutral: "미발생" },
+  // 2026-09-11 청산 규모 -> 청산 위험. 방향 신호가 아니라 위험도 어휘(안정/주의/위험)를 쓴다.
+  liq_risk: { warn: "주의", bad: "위험", neutral: "안정" },
   whale: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   retail_flow: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   evidence: { good: "바닥 발동", bad: "천장 발동", warn: "혼재 발동", neutral: "미발동" },
@@ -1502,12 +1477,14 @@ const MODEL_INDICATOR_MEANING = {
     "주의": "한쪽 청산량이 평소보다 급증했지만 아직 본격적인 캐스케이드로 번지진 않았어요.",
     "위험": "한쪽 포지션들이 연쇄적으로 강제청산되며 캐스케이드가 실제로 진행 중이에요 — 그 방향으로 가격이 더 튈 수 있어요.",
   },
-  liq_size: {
-    "롱 청산": "최근 30분 강제청산이 롱(매수) 쪽에 더 많았어요 — 롱 포지션이 강제로 정리됐다는 사실이에요.",
-    "숏 청산": "최근 30분 강제청산이 숏(매도) 쪽에 더 많았어요 — 숏 포지션이 강제로 정리됐다는 사실이에요.",
-    "혼재 청산": "롱과 숏 청산 금액이 비슷해요 — 어느 한쪽이 몰린 상황은 아니에요.",
-    "미발생": "최근 30분 동안 강제청산이 없었어요.",
-  },
+  liq_risk: {
+    "안정": "지금 크기로 4시간 안에 청산선에 닿을 확률이 10% 미만이에요.",
+    "주의": "지금 크기로 4시간 안에 청산선에 닿을 확률이 10%를 넘어요 — 크기를 줄이면 그만큼 내려가요.",
+    "위험": "지금 크기로 4시간 안에 청산선에 닿을 확률이 30%를 넘어요.",
+    "포지션 없음": "열린 ETH 포지션이 없어요. 포지션이 생기면 실제 청산선으로 계산해요.",
+    "계측 미달": "청산가를 못 읽어 확률을 낼 수 없어요.",
+    "웜업": "청산 확률 계산에 쓸 자료를 아직 채우는 중이에요.",
+  },,
   whale: {
     "롱 진입": "큰 금액 단위 거래가 최근 5분간 매수 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
     "숏 진입": "큰 금액 단위 거래가 최근 5분간 매도 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
@@ -1597,7 +1574,7 @@ const SIGNAL_HORIZON = {
   // -- model indicators --
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
-  liq_size: { text: "30분 누적", title: "예측이 아니라 최근 30분 실제 강제청산 금액(롱/숏) -- 일어난 사실의 기록" },
+  liq_risk: { text: "4시간", title: "지금 크기로 4시간 안에 청산선에 닿을 확률 -- 비슷한 변동성 구간의 과거 실측 빈도(모델 아님)" },
   liq_cascade: { text: "상태", title: "예측이 아니라 '지금 캐스케이드가 진행 중인가'를 보여주는 현재 상태값(반감기 약 2~3분으로 감쇠)" },
   whale: { text: "상태", title: "최근 5분간 큰손 체결 순유입 방향 -- 고정 예측 시간창 없는 현재 흐름 지표(방향-IC 검정 4개 지평 전부 무정보)" },
   retail_flow: { text: "상태", title: "최근 5분간 리테일 체결 순유입 방향 -- 1~15분 지평 방향-IC는 유의했으나 수수료 반영 손익은 전부 순손실, 고정 예측 시간창은 없음" },
@@ -1633,7 +1610,7 @@ const MODEL_CHIP_IDS = {
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
-  liq_size: "modelChipLiqSize",
+  liq_risk: "modelChipLiqRisk",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
@@ -4340,7 +4317,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 청산 방향압력 (2026-08-25) -- fetched separately by refreshLiquidationDirectionSignal(), same
   // external-fetch category as latestVRebound above. Directional model-indicator, NOT evidence-
   // signal tier -- see scripts/live_liquidation_direction_signal_20260825.py docstring.
-  // 2026-09-11 청산 방향압력 제거 -- 청산 규모 칩은 liqSizeTone()/liqSizeSubText() 가 직접 계산한다.
+  // 2026-09-11 청산 방향압력 제거 -- 청산 위험 칩은 liqRiskIndicatorItem() 이 직접 계산한다.
 
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
@@ -4426,13 +4403,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
       ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
-      {
-        key: "liq_size", label: "청산 규모", tone: liqSizeTone(latestLiquidation5m),
-        subText: liqSizeSubText(latestLiquidation5m),
-        // 이력은 봉별 청산 레인과 같은 데이터(5분봉)라 차트와 화면이 같은 이야기를 한다.
-        history: liqSizeToneHistory(latestLiquidation5mHist),
-        times: (latestLiquidation5mHist || []).slice(-48).map((b) => Date.parse(b.ts)),
-      },
+      liqRiskIndicatorItem(),   // 2026-09-11 청산 규모 -> 청산 위험 교체(사용자 지시)
+
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);
