@@ -129,6 +129,42 @@ def main() -> int:
     for nm, m in (("라벨=1", okn & (y_ext_low == 1)), ("라벨=0", okn & (y_ext_low == 0))):
         v = (reb_cl / atr_pct)[m]
         print(f"  ATR 배수(종가기준) {nm}: 중앙 {np.median(v):.2f}배 · 상위25% {np.percentile(v,75):.2f}배")
+
+    # ── 3차 질문(사용자): "고가에서 샀다고 가정하는 게 문제다. 신호는 봉 중간에 나서 실제
+    #    진입은 더 낮은 가격이었다 -- 성적이 부풀려진 것 아닌가" ──
+    # ⭐맞다. V자 라벨의 빠른 다리는 **발동봉의 극점**에서 1.5×ATR 을 잰다. 극점은 체결 불가능한
+    #   값이고, 가장 이른 체결 가능 가격은 **그 봉의 종가**다. 앵커만 바꿔 라벨률과 "봉 크기
+    #   단일피쳐"의 AUC 를 비교하면, 성적 중 얼마가 기계적인지가 그대로 나온다.
+    print("\n\n══ 앵커: 극점(현행) vs 발동봉 종가(체결가능) ══")
+    fmin_c, fmax_c = fwd_min(cl, FAST), fwd_max(cl, FAST)
+    rng_atr = (hi - lo) / atr
+    okA = np.isfinite(atr) & (atr > 0) & np.isfinite(fmin_c) & np.isfinite(rng_atr)
+    VAL = (d.timestamp >= pd.Timestamp("2025-09-01")) & (d.timestamp <= pd.Timestamp("2025-12-31"))
+    VAL = okA & VAL.to_numpy()
+
+    def auc_of(score, y, m):
+        ss, yy = score[m], y[m].astype(int)
+        r = pd.Series(ss).rank().to_numpy(); n1 = int(yy.sum()); n0 = len(yy) - n1
+        return float("nan") if n1 == 0 or n0 == 0 else (r[yy == 1].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)
+
+    arms = (("천장(급락) 극점앵커", fmin_c <= hi - ATR_MULT * atr),
+            ("천장(급락) 종가앵커", fmin_c <= cl - ATR_MULT * atr),
+            ("바닥(급등) 극점앵커", fmax_c >= lo + ATR_MULT * atr),
+            ("바닥(급등) 종가앵커", fmax_c >= cl + ATR_MULT * atr))
+    print(f"  {'':24} {'전체 라벨률':>10} {'VAL 라벨률':>10} {'VAL 단일피쳐 AUC':>16}")
+    for nm, y in arms:
+        print(f"  {nm:24} {y[okA].mean():>10.1%} {y[VAL].mean():>10.1%} {auc_of(rng_atr, y, VAL):>16.4f}")
+    print("  ⭐단일피쳐 = 발동봉 레인지÷ATR **하나뿐**. 배포 모델은 23피쳐 TabPFN VAL AUC 0.6942.")
+    print("  ⚠️여기 라벨은 빠른 다리만이다(giveback<=0.20 제외) -- 방향은 같아도 수치는 다르다.")
+
+    print("\n  발동봉 크기별 천장쪽 라벨률(극점 → 종가 앵커)")
+    for a_, b_ in ((0, 1), (1, 2), (2, 3), (3, 4), (4, 6), (6, 100)):
+        m = okA & (rng_atr >= a_) & (rng_atr < b_)
+        if m.sum() < 50:
+            continue
+        A = (fmin_c <= hi - ATR_MULT * atr)[m].mean()
+        B = (fmin_c <= cl - ATR_MULT * atr)[m].mean()
+        print(f"    {a_:>2}~{b_:<4} n={m.sum():>7,}  {A:>6.1%} → {B:>6.1%}  ({A/B if B else float('nan'):.1f}배)")
     return 0
 
 
