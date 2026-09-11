@@ -884,8 +884,10 @@ function acctRiskTone(liqPct) {
 // 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
 function acctPerfSvg(net, labels) {
   if (!net.length) return "";
-  // 🔴preserveAspectRatio="none" 를 쓰지 않는다. 폭만 늘어나면 "둥근 4px"이 타원이 되고
-  //   2px 선이 굵어진다. viewBox 비율을 CSS aspect-ratio 로 고정해 **균일 확대**만 쓴다.
+  // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
+  // 🔴그래서 **확대에 걸리면 안 되는 것들은 확대를 끈다**: 선 두께는 vector-effect 로 고정하고,
+  //   끝점은 원 대신 **길이 0 짜리 둥근 캡 선**으로 그린다(캡은 stroke 라 늘어나지 않아 정원이다).
+  //   막대 모서리 4px 만 세로로 살짝 늘어나는데, 24px 막대에선 눈에 띄지 않는다.
   const W = 320, H = 104, zero = H * 0.54, padX = 3, padY = 8;
   let cum = 0;
   const cums = net.map((v) => (cum += v));
@@ -920,15 +922,20 @@ function acctPerfSvg(net, labels) {
     return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
       + `fill="transparent"><title>${escapeHtml(t)}</title></rect>`;
   }).join("");
-  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" role="img" `
+  // 길이 0 + round cap = 지름이 stroke-width 인 정원. non-scaling 이라 늘어나지 않는다.
+  const dot = (w, color, op) => `<line x1="${lastX.toFixed(1)}" y1="${lastY.toFixed(1)}" `
+    + `x2="${lastX.toFixed(1)}" y2="${lastY.toFixed(1)}" stroke="${color}" stroke-width="${w}" `
+    + `stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="${op}"></line>`;
+  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" `
     + `aria-label="닫힌 왕복 ${net.length}건의 건당 손익 막대와 누적 손익 선">`
     + `<path d="${area}" fill="var(--ink)" opacity="0.08"></path>`
     + bars
-    + `<line x1="${padX}" y1="${zero}" x2="${W - padX}" y2="${zero}" stroke="var(--soft-line)" stroke-width="1"></line>`
+    + `<line x1="${padX}" y1="${zero}" x2="${W - padX}" y2="${zero}" stroke="var(--soft-line)" `
+    + `stroke-width="1" vector-effect="non-scaling-stroke"></line>`
     + `<polyline points="${line.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" `
-    + `stroke-linejoin="round" stroke-linecap="round" opacity="0.72"></polyline>`
-    + `<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="var(--ink)" `
-    + `stroke="var(--panel-strong)" stroke-width="2"></circle>`
+    + `stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.72"></polyline>`
+    + dot(12, "var(--panel-strong)", "1")      // 2px 표면 링
+    + dot(8, "var(--ink)", "0.9")              // 끝점 8px
     + hits
     + `</svg>`;
 }
