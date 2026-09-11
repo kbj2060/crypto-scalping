@@ -1432,8 +1432,22 @@ function stripAxisHtml(times, timeFmtKind) {
 // ⚠️세 신호의 목표가는 **각자 자기 라벨**에서 온다 -- 증거신호 K×ATR 터치(intrabar), V자
 //   1.5×ATR 빠른 다리(종가), 돌파/되돌림 ±0.8×ATR 배리어(intrabar). 같은 포맷이라고 같은
 //   규약이 아니다. 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md 배리어 컨벤션 항목).
-function tpPriceText(px) {
-  return px == null ? null : `익절 ${fmtNum(px, 2)}`;
+// 🔴2026-09-11 사용자 지적 "급락인데 익절이 현재가 위에 있다". 계산은 맞다 -- 익절가는 라벨
+//   그대로 **발동봉의 극점**에서 1.5×ATR 이다. 발동봉이 크면 그 목표를 같은 봉이 이미 지나쳐
+//   버려서, 앞으로 갈 자리처럼 보이던 숫자가 실제로는 뒤에 있다. 실측: 발동봉 레인지가 ATR 의
+//   2~3배면 38.6%, 6배 이상이면 **86.6%** 가 발동봉 종가에서 이미 도달해 있다(전체 7.65%).
+//   숫자를 숨기지 않고 **이미 지났다고 말한다** -- 라벨 목표 자체는 그 값이 맞기 때문이다.
+function tpPriceText(px, reached) {
+  return px == null ? null : `익절 ${fmtNum(px, 2)}${reached ? " (도달)" : ""}`;
+}
+
+// 익절가가 콜 방향 기준으로 이미 지났는가. direction="up" 은 반등=하락이라 현재가가 목표
+// 이하이면 도달, "down" 은 그 반대다.
+function tpAlreadyReached(vr) {
+  if (!vr || vr.tp_price == null) return false;
+  const px = Number(vr.price), tp = Number(vr.tp_price);
+  if (!Number.isFinite(px) || !Number.isFinite(tp)) return false;
+  return vr.direction === "up" ? px <= tp : px >= tp;
 }
 
 const V_REBOUND_TP_TITLE = [
@@ -1441,6 +1455,8 @@ const V_REBOUND_TP_TITLE = [
   "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
   "· 판정은 **종가 기준**입니다 — 이 라벨이 종가로 정의돼서이며, 증거신호의 intrabar 터치와 다릅니다.",
   "· 호라이즌 60분(12봉) 안에 못 닿으면 그대로 만료됩니다.",
+  "· 「(도달)」은 발동봉이 커서 **그 봉 안에서 이미 목표를 지나친** 경우입니다 — 앵커가 봉의",
+  "  고가/저가라 생기는 일이고, 발동봉 레인지가 ATR의 6배를 넘으면 86.6%가 여기 해당합니다.",
   "· ⚠️검증된 매매 엣지가 아닙니다: 수정회계 라벨 재학습(2026-09-08)에서 AUC는 +0.03~0.07 개선됐지만",
   "  경제성 랭킹은 0이었고, 선정된 팔이 세 창 모두 무작위 진입 이하였습니다.",
   "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
@@ -4646,7 +4662,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
         // 2026-09-11 "진행중 N종" 제거(사용자 지시). 미확정 트리거는 봉이 닫힐 때까지 바뀌는
         // 값이라, 확정 판정 옆에 붙어 있으면 같은 칩이 두 신뢰도의 숫자를 같이 말하게 된다.
-        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price),
+        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price,
+                              tpAlreadyReached(latestVRebound)),
         meterNoteTitle: V_REBOUND_TP_TITLE,
         derivedTag: "= 대시보드 자체계산",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
