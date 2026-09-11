@@ -1096,7 +1096,9 @@ function renderSnapshotAccount() {
   //   -- 실제는 39.6%. 이 값은 정의상 거의 항상 100% 근처라 **아무것도 재고 있지 않았다**.
   //   이제 수집기가 initial_margin(totalInitialMargin)을 그대로 싣는다. 옛 상태파일을 만나면
   //   순자산−가용으로 되짚는다(바이낸스 정의상 같은 값이고, 실측으로 368.60 일치 확인).
-  const equity = wallet + upnl;                       // = totalMarginBalance
+  // equity 는 이 함수 앞쪽(991행)에서 이미 선언돼 있다 -- 같은 식(wallet + upnl)이고
+  // wallet/upnl 이 const 라 값이 바뀔 수 없으므로 그대로 쓴다. 여기서 다시 const 로
+  // 선언하면 **같은 스코프 중복 선언**이라 app.js 전체가 SyntaxError 로 죽는다(2026-09-11 실장애).
   const usedMargin = Number.isFinite(Number(b.initial_margin)) ? Number(b.initial_margin)
     : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
   const usedPct = equity > 0 ? usedMargin / equity * 100 : 0;
