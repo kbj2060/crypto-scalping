@@ -7,16 +7,25 @@
 
 경보(예측)  피쳐 3종을 **각자 독립 신호등**으로 켠다(합치지 않는다 — 지평이 달라 뜻이 다르다).
             압축 구간에서만 감시. 새 진입 억제용.
+            ⚠️경보 쪽 lift 5.75/3.65/3.06x 는 **자명한 대리 타깃**(앞 24봉 실현변동성) 값이다 —
+              atr_pct 단독으로 lift 7.01 이 나오는 라벨이었다. 경보는 모델로 교체 예정.
 탐지(즉시)  피쳐 2종(거래대금·체결속도) z288 q90 **AND**. 보유 중 반대 방향 돌파면 즉시 청산용.
+            2026-09-11 **압축 게이트 제거**(감시창 + 압축봉 전용 임계 둘 다). 아래 §정정 참조.
 
 성적(ETH 2026-01~09, 압축 봉 29,778 · 전환 431건 · 앞만 보는 타깃 · 순환이동 귀무):
   경보  3봉지속 z2016 q99 → 앞 2시간 상위5% (전역분위 연구 7.71x / **인과 임계 5.75x**)
         전반 8.56x / 후반 8.58x · 63셀 전부 2x 이상 · 셀 순위 상관 +0.708
   경보  인과 임계로 재현: 3봉지속 5.75x(하루 1.6회) · 체결속도 3.65x · 거래대금 3.06x
         경보 ON 시 앞 2시간 상위5% 확률 28.75%(기저 5%) · 실제 선행 중앙 15분
-  탐지  2종 AND q90 → 포착률 98.4% · 지연 1봉(5분) · **진행률 6.08%** · 헛발동 39.8회/일
-        (진행률 = 감지 시점 이동폭 / 전체 이동폭. 사용자 실제 사고는 15% 였다)
-        volexp 포함 3종이면 진행률 11.51% · 헛발동 28.2회 — 조용해지는 대가가 지연이다
+  탐지  2종 AND q90. volexp 포함 3종이면 느려진다(12봉 롤링이라 구조적 지연) — 뺀 채로 둔다.
+
+🔴**수치 정정 + 게이트 제거 (2026-09-11)**
+  옛 표기 «포착률 98.4% · 지연 5분 · 진행률 6.08%» 는 **volexp 1.80 교차**의 포착률이었다.
+  사용자가 실제로 손실을 보는 «큰 이동»(앞 24봉 최대이탈 상위 5%) 기준으로 다시 재면:
+      압축 게이트 있음(옛 배포)   사건 포착 47.9 / 50.5 / 52.8%  · 발동 32.8회/일
+      압축 게이트 없음(현재)      사건 포착 82.3 / 82.3 / 82.9%  · 발동 25.1회/일
+  **더 많이 잡으면서 덜 울린다** — 게이트는 기저만 낮추고 실력도 깎고 있었다.
+  (VAL/OOS/FWD = 2025-09~12 / 2026-01~03 / 2026-04~. 사건 751/572/1046건)
 
 ⚠️리드타임을 주장하지 않는다 — 앞선 측정의 "-25분"은 탐색 창 폭의 산물이었다.
 ⚠️입력은 공개 kline 의 n(체결 건수)·quote_volume 뿐이다. 호가는 기여 없음(166건 검정).
@@ -80,8 +89,6 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     lr = np.diff(np.log(c), prepend=np.log(c[0]))
     volexp = (pd.Series(lr).rolling(12).std() / pd.Series(lr).rolling(288).std()).to_numpy()
     comp = volexp < COMPRESS
-    # 탐지 감시창: 돌파 봉은 이미 volexp 가 올라 압축이 아니다 — 직전 1시간 내 압축이면 감시한다
-    watch = pd.Series(comp).rolling(12, min_periods=1).max().to_numpy() == 1
 
     def _z(col: str, w: int) -> np.ndarray:
         s = pd.to_numeric(d[col], errors="coerce")
@@ -100,10 +107,23 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     def _thr(x: np.ndarray, q: float) -> float:
         return _thr_at(x, q, len(d) - 1)
 
+    def _thr_all_at(x: np.ndarray, q: float, j: int) -> float:
+        """**탐지** 임계 — 압축 봉이 아니라 **전 봉**에서 후행 창 분위를 낸다.
+
+        2026-09-11 압축 게이트 제거와 함께 바뀌었다. 게이트가 있던 판은 임계도 압축 봉만
+        모아 쟀는데, 둘을 같이 풀어야 실측 우위가 나온다(사건 포착 50.5%→82.3%,
+        발동 32.8→25.1회/일 — 더 많이 잡으면서 **덜** 울린다).
+        """
+        v = x[:j + 1][np.isfinite(x[:j + 1])][-QWIN:]
+        return float(np.nanquantile(v, q)) if len(v) >= 200 else np.inf
+
+    def _thr_all(x: np.ndarray, q: float) -> float:
+        return _thr_all_at(x, q, len(d) - 1)
+
     i = len(d) - 1
     out: dict[str, Any] = {"timestamp": str(d["timestamp"].iloc[i]), "close": float(c[i]),
                            "volexp": float(volexp[i]) if np.isfinite(volexp[i]) else None,
-                           "compressed": bool(comp[i]), "watch": bool(watch[i])}
+                           "compressed": bool(comp[i])}
     alerts = []
     for label, col, w, smooth, q, horizon, lift in ALERT:
         x = _z(col, w)
@@ -117,8 +137,8 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     dets = []
     for label, col, w, q in DETECT:
         x = _z(col, w)
-        thr = _thr(x, q)
-        on = bool(watch[i] and np.isfinite(x[i]) and x[i] >= thr)
+        thr = _thr_all(x, q)
+        on = bool(np.isfinite(x[i]) and x[i] >= thr)
         dets.append({"name": label, "on": on,
                      "z": None if not np.isfinite(x[i]) else round(float(x[i]), 3),
                      "threshold": None if not np.isfinite(thr) else round(thr, 3)})
@@ -146,7 +166,7 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     for j in range(max(i - HIST_BARS + 1, 0), i + 1):
         lit_j = sum(bool(comp[j] and np.isfinite(x[j]) and x[j] >= _thr_at(x, a[4], j))
                     for x, a in zip(alert_v, ALERT))
-        det_j = all(bool(watch[j] and np.isfinite(x[j]) and x[j] >= _thr_at(x, dd[3], j))
+        det_j = all(bool(np.isfinite(x[j]) and x[j] >= _thr_all_at(x, dd[3], j))
                     for x, dd in zip(detect_v, DETECT))
         hist.append("bad" if det_j else ("warn" if lit_j else "neutral"))
         times.append(str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat()))
@@ -204,9 +224,18 @@ def _self_check() -> None:
     b.loc[b.index[-1], ["o", "h", "l", "c"]] = float(b["c"].iloc[-1]) + 14.0
     rb = compute_signals(b)
     assert rb["compressed"] is False, rb                        # 돌파 봉은 압축이 아니고
-    assert rb["watch"] is True, rb                              # 감시창 안이며
     assert rb["detect"]["on"] is True, rb["detect"]             # 2종 AND 가 켜진다
     assert rb["state"] == "돌파 진행", rb["state"]
+
+    # 2026-09-11 압축 게이트 제거의 핵심 검사 — **압축이 한 번도 없던 구간**에서도 탐지가
+    # 켜져야 한다. 옛 판은 `watch`(직전 1시간 내 압축)가 없으면 무조건 꺼졌다.
+    e = _mk(quiet=0)                                            # 뒤쪽도 조용하지 않다
+    e.loc[e.index[-3:], "n"] = 60000
+    e.loc[e.index[-3:], "qv"] = 6.0e7
+    re_ = compute_signals(e)
+    assert re_["compressed"] is False, re_                      # 압축 구간이 아닌데도
+    assert re_["detect"]["on"] is True, re_["detect"]           # 탐지는 켜진다(게이트 제거)
+    assert "watch" not in re_, sorted(re_)                      # 감시창 키는 사라졌다
 
     # 화면 계약: 톤 4색 안 · 띠 길이 · 마지막 칸이 현재 톤 · 세 단계가 색으로 갈린다
     for r, want_tone, want_sub in ((base, "neutral", "미발동"),
@@ -216,7 +245,7 @@ def _self_check() -> None:
         assert len(r["history"]) == len(r["times"]) == HIST_BARS, len(r["history"])
         assert r["history"][-1] == r["tone"], (r["history"][-1], r["tone"])
         assert set(r["history"]) <= {"good", "bad", "warn", "neutral"}, set(r["history"])
-    print("self-check OK  (평탄→무발동 · 체결만급등→경보(AND 미성립) · 거래대금+돌파→탐지 · 화면 계약)")
+    print("self-check OK  (평탄→무발동 · 체결만급등→AND미성립 · 돌파→탐지 · **비압축에서도 탐지** · 화면 계약)")
 
 
 if __name__ == "__main__":
