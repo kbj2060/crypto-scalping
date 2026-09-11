@@ -882,28 +882,98 @@ function acctRiskTone(liqPct) {
 }
 
 // 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
-function acctPerfSvg(net) {
+function acctPerfSvg(net, meta) {
   if (!net.length) return "";
-  const W = 300, H = 96, zero = H * 0.52, pad = 2;
-  const peak = Math.max(...net.map((v) => Math.abs(v)), 1e-9);
-  const bw = (W - pad * 2) / net.length;
-  const sc = (H * 0.40) / peak;
+  // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
+  // 🔴그래서 **확대에 걸리면 안 되는 것들은 확대를 끈다**: 선 두께는 vector-effect 로 고정하고,
+  //   끝점은 원 대신 **길이 0 짜리 둥근 캡 선**으로 그린다(캡은 stroke 라 늘어나지 않아 정원이다).
+  //   막대 모서리 4px 만 세로로 살짝 늘어나는데, 24px 막대에선 눈에 띄지 않는다.
+  const W = 320, H = 104, zero = H * 0.54, padX = 3, padY = 8;
   let cum = 0;
-  const pts = [];
+  const cums = net.map((v) => (cum += v));
+  // 🔴막대와 누적선이 **같은 축**을 쓴다(둘 다 USD). 그러니 상한도 둘을 함께 봐야 한다 --
+  //   옛 판은 건당 최대값만 봐서 누적선이 SVG 밖으로 잘려 나갈 수 있었다.
+  const peak = Math.max(...net.map(Math.abs), ...cums.map(Math.abs), 1e-9);
+  const bw = (W - padX * 2) / net.length;
+  const sc = (H / 2 - padY) / peak;
+  const xAt = (i) => padX + i * bw;
+  const yAt = (v) => zero - v * sc;
+  // 막대: 24px 상한 · 인접 막대 사이 2px 표면 간격(테두리를 그리지 않는다)
+  const bwFill = Math.min(24, Math.max(1.5, bw - 2));
   const bars = net.map((v, i) => {
-    cum += v;
-    const x = pad + i * bw;
-    const hgt = Math.max(Math.abs(v) * sc, 0.8);
-    const y = v >= 0 ? zero - hgt : zero;
-    pts.push(`${(x + bw * 0.36).toFixed(1)},${(zero - cum * sc).toFixed(1)}`);
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.72).toFixed(1)}" `
-      + `height="${hgt.toFixed(1)}" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.9"></rect>`;
+    const x = xAt(i) + (bw - bwFill) / 2;
+    const h = Math.max(Math.abs(v) * sc, 1);
+    const r = Math.min(4, bwFill / 2, h);          // 바깥 끝만 둥글고 **기준선 쪽은 각지게**
+    const up = v >= 0;
+    const tip = up ? zero - h : zero + h;
+    const d = up
+      ? `M${x} ${zero}V${tip + r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip + r}V${zero}Z`
+      : `M${x} ${zero}V${tip - r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip - r}V${zero}Z`;
+    return `<path d="${d}" fill="var(--${up ? "good" : "bad"})" opacity="0.9"></path>`;
   }).join("");
-  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+  // 누적선 아래 워시 -- 계열 색이 아니라 중립 잉크다(누적은 손익 방향이 아니라 '합계'다).
+  const line = cums.map((c, i) => `${(xAt(i) + bw / 2).toFixed(1)},${yAt(c).toFixed(1)}`);
+  const area = `M${xAt(0) + bw / 2} ${zero}L${line.join("L")}L${xAt(net.length - 1) + bw / 2} ${zero}Z`;
+  const lastX = xAt(net.length - 1) + bw / 2, lastY = yAt(cums[net.length - 1]);
+  // 값은 점마다 찍지 않는다 -- 끝점 하나만 점으로 표시하고 숫자는 위 칩과 툴팁이 가진다.
+  // 히트 영역은 막대가 아니라 **칸 전체 높이**다(얇은 막대를 정조준하게 만들지 않는다).
+  // 키보드로도 같은 내용이 나와야 하므로 tabindex 를 준다 -- 툴팁이 값의 유일한 통로가 되면 안 된다.
+  const hits = net.map((v, i) => {
+    const m = (meta && meta[i]) || {};
+    const rows = [
+      `${m.when || `${i + 1}번째 왕복`}${m.side ? " · " + m.side : ""}`,
+      m.qty ? `수량 ${m.qty} ETH · ${fmtUsd(m.notional)}` : "",
+      m.entry && m.exit ? `진입 ${fmtUsd(m.entry)} → 청산 ${fmtUsd(m.exit)}` : "",
+      `손익 <b class="${v < 0 ? "bad" : "good"}">${v >= 0 ? "+" : ""}${fmtUsd(v)}</b>`
+        + ` · 누적 ${fmtUsd(cums[i])}`,
+    ].filter(Boolean);
+    // 앞 세 줄은 사용자 데이터라 이스케이프하고, 마지막 줄의 <b> 만 우리가 넣은 마크업이다.
+    const html = rows.map((r, k) => (k === rows.length - 1 ? r : escapeHtml(r))).join("<br>");
+    return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
+      + `fill="transparent" tabindex="0" data-tip="${escapeHtml(html)}"></rect>`;
+  }).join("");
+  // 길이 0 + round cap = 지름이 stroke-width 인 정원. non-scaling 이라 늘어나지 않는다.
+  const dot = (w, color, op) => `<line x1="${lastX.toFixed(1)}" y1="${lastY.toFixed(1)}" `
+    + `x2="${lastX.toFixed(1)}" y2="${lastY.toFixed(1)}" stroke="${color}" stroke-width="${w}" `
+    + `stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="${op}"></line>`;
+  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" `
+    + `aria-label="닫힌 왕복 ${net.length}건의 건당 손익 막대와 누적 손익 선">`
+    + `<path d="${area}" fill="var(--ink)" opacity="0.08"></path>`
     + bars
-    + `<line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--line)" stroke-width="1"></line>`
-    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.6"></polyline>`
+    + `<line x1="${padX}" y1="${zero}" x2="${W - padX}" y2="${zero}" stroke="var(--soft-line)" `
+    + `stroke-width="1" vector-effect="non-scaling-stroke"></line>`
+    + `<polyline points="${line.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" `
+    + `stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.72"></polyline>`
+    + dot(12, "var(--panel-strong)", "1")      // 2px 표면 링
+    + dot(8, "var(--ink)", "0.9")              // 끝점 8px
+    + hits
     + `</svg>`;
+}
+
+// 계좌 차트 툴팁. 🔴카드는 30초마다 innerHTML 로 통째로 다시 그려진다 -- 막대마다 리스너를
+// 달면 매번 새로 달아야 하고 옛 것이 샌다. 컨테이너(#snapAcctPosition)는 안 바뀌므로 위임한다.
+function bindAcctChartTip() {
+  const host = el("snapAcctPosition");
+  if (!host || host.dataset.tipBound) return;
+  host.dataset.tipBound = "1";
+  const tipOf = (t) => (t && t.closest ? t.closest(".acct-plot") : null)?.querySelector(".acct-tip");
+  const show = (target, clientX) => {
+    const tip = tipOf(target);
+    if (!tip || !target.dataset.tip) return;
+    tip.innerHTML = target.dataset.tip;
+    tip.hidden = false;
+    const box = tip.parentElement.getBoundingClientRect();
+    const r = target.getBoundingClientRect();
+    const x = (clientX === null || clientX === undefined ? r.left + r.width / 2 : clientX) - box.left;
+    tip.style.left = `${Math.max(0, Math.min(box.width - tip.offsetWidth, x - tip.offsetWidth / 2))}px`;
+  };
+  const hide = (target) => { const tip = tipOf(target); if (tip) tip.hidden = true; };
+  host.addEventListener("mousemove", (e) => {
+    if (e.target.dataset && e.target.dataset.tip) show(e.target, e.clientX);
+  });
+  host.addEventListener("mouseout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
+  host.addEventListener("focusin", (e) => { if (e.target.dataset && e.target.dataset.tip) show(e.target, null); });
+  host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
 }
 
 function renderSnapshotAccount() {
@@ -918,7 +988,8 @@ function renderSnapshotAccount() {
   const b = latestBinanceAccount.balance || {};
   const wallet = Number(b.wallet) || 0;
   const upnl = Number(b.unrealized) || 0;
-  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)} · 순자산 ${fmtUsd(wallet + upnl)}`);
+  const equity = wallet + upnl;
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)}`);
   const pos = snapshotAccountPosition();
   const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
   if (summary) {
@@ -926,70 +997,146 @@ function renderSnapshotAccount() {
     summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
   }
 
+  // ── 히어로: 숫자 하나가 헤드라인이다 ─────────────────────────────────────────
+  // 옛 판은 같은 크기 숫자 셋을 나란히 둬서 무엇부터 볼지 알 수 없었다. 순자산을 키우고
+  // 나머지는 타일로 내린다. 미실현은 색 글씨가 아니라 **알약**이라 흑백으로 봐도 읽힌다.
+  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
+  const dTone = upnl > 0 ? "good" : upnl < 0 ? "bad" : "neutral";
+  const hero = `<div class="acct-hero">
+      <span class="acct-eyebrow">순자산</span>
+      <div class="acct-figure">${fmtUsd(equity)}</div>
+      <span class="acct-delta ${dTone}">${upnl > 0 ? "▲" : upnl < 0 ? "▼" : "–"} ${fmtUsd(upnl)}
+        <i>${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(2)}%</i></span>
+    </div>`;
+
   // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
   const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol);
+  // 🔴/api/binance-account 는 **최신순**으로 준다. 그대로 그리면 누적선이 시간을 거꾸로 달린다.
+  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol)
+    .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
   const net = closed.map((t) => Number(t.net_pnl) || 0);
+  // 툴팁이 "날짜와 크기 등"을 보여줘야 하므로(사용자 지시) 라벨 문자열이 아니라 원장을 넘긴다.
+  const netMeta = closed.map((t) => {
+    const d = new Date(Number(t.exit_time) || 0);
+    const qty = Number(t.max_qty) || 0, px = Number(t.exit_price) || 0;
+    return {
+      when: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()} `
+        + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      side: t.side === "LONG" ? "롱" : "숏", qty, notional: qty * px,
+      entry: Number(t.entry_price) || 0, exit: px,
+    };
+  });
   const wins = net.filter((v) => v > 0).length;
   const total = net.reduce((x, y) => x + y, 0);
   let worstIdx = -1;
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
+  const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
+  // 기간을 적는다(사용자 지시). ⚠️"이번 달 전부"라고 단정하지 않는다 -- 거래소는 시간 조건을
+  // 안 주면 최근 구간만 돌려주므로, 여기 있는 건 **조회된 범위**지 계좌의 전체 이력이 아니다.
+  const spanText = (() => {
+    if (!closed.length) return "";
+    const a = new Date(Number(closed[0].exit_time) || 0);
+    const b = new Date(Number(closed[closed.length - 1].exit_time) || 0);
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "";
+    const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+    const thisMonth = b.getMonth() === new Date().getMonth() && b.getFullYear() === new Date().getFullYear();
+    const range = sameMonth ? `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getDate()}일`
+      : `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getMonth() + 1}월 ${b.getDate()}일`;
+    return (sameMonth && thisMonth ? "이번 달 · " : "") + range;
+  })();
+  // 계열이 둘(건당 막대 · 누적선)이므로 범례를 항상 둔다. 적록 2색형에서 이익/손실 색 차이가
+  // ΔE 6.3 이라 **색만으로는 부족**하다 -- 영선 위/아래 위치와 이 범례가 보조 부호다.
+  // 글씨는 계열 색을 입지 않는다(규약): 색은 옆의 견본이 지고 글자는 muted 잉크다.
+  const legend = `<div class="acct-legend">
+      <span><i class="sw good"></i>이익</span>
+      <span><i class="sw bad"></i>손실</span>
+      <span><i class="sw ln"></i>누적</span>
+    </div>`;
   const perf = net.length
-    ? `<div class="acct-perf">
-         <p class="acct-perf-head">왕복 ${net.length}건 · 승률 ${Math.round(wins / net.length * 100)}% ·
-            누적 <b class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</b></p>
-         ${acctPerfSvg(net)}
+    ? `<section class="acct-perf">
+         <div class="acct-chips">
+           ${chip(net.length, "왕복")}
+           ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
+           ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
+         </div>
+         <figure class="acct-plot">
+           <div class="acct-plot-head">${legend}
+             ${spanText ? `<span class="acct-span" title="거래소가 시간 조건 없이 돌려주는 최근 구간의 기록입니다 — 이보다 과거는 조회 조건을 따로 줘야 나옵니다.">${escapeHtml(spanText)}</span>` : ""}
+           </div>
+           ${acctPerfSvg(net, netMeta)}
+           <div class="acct-tip" hidden></div>
+         </figure>
          ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
-       </div>`
-    : `<div class="acct-perf"><p class="muted">닫힌 왕복이 아직 없습니다.</p></div>`;
+       </section>`
+    : `<section class="acct-perf"><div class="acct-empty">닫힌 왕복이 아직 없습니다.</div></section>`;
 
   const otherNote = others > 0
-    ? `<p class="muted">다른 코인에 ${others}종목을 더 보유 중입니다 -- 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
+    ? `<p class="acct-foot">다른 코인에 ${others}종목을 더 보유 중입니다 — 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
     : "";
   if (!pos) {
-    setH("snapAcctPosition", `<div class="acct-viz">
-        <div class="acct-left"><p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label
-          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}</div>
-        ${perf}
-      </div>`);
+    setH("snapAcctPosition", `<div class="acct-card">
+        <div class="acct-main">${hero}
+          <div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
+            || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</div>
+        </div>${perf}
+      </div>${otherNote}`);
+    bindAcctChartTip();
     return;
   }
 
   const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
+  const entry = Number(pos.entry_price) || 0;
   const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
   const usedPct = wallet > 0 ? (Number(b.margin) || 0) / wallet * 100 : 0;
-  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
   const expo = wallet > 0 ? (Number(pos.notional) || 0) / wallet : 0;
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
-  const stat = (val, lab, tone) =>
-    `<div class="acct-stat"><b class="${tone}">${val}</b><span>${lab}</span></div>`;
-  setH("snapAcctPosition", `<div class="acct-viz">
-      <div class="acct-left">
-        <div class="acct-stats">
-          ${stat(`${liqPct.toFixed(2)}%`, "청산까지", acctRiskTone(liqPct))}
-          ${stat(`${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(1)}%`, `미실현 ${fmtUsd(upnl)}`,
-                 upnl < 0 ? "bad" : upnl > 0 ? "good" : "neutral")}
-          ${stat(`${usedPct.toFixed(0)}%`, "증거금 사용",
-                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good")}
-        </div>
-        <div class="acct-expo">
-          <span>노출</span>
-          <span class="acct-expo-track"><span class="acct-expo-fill ${expo > 15 ? "bad" : "warn"}"
-            style="width:${Math.min(expo / EXPO_CAP * 100, 100).toFixed(1)}%"></span></span>
-          <b class="${expo > 15 ? "bad" : "warn"}">${expo.toFixed(1)}배</b>
-        </div>
-        <p class="acct-pos-line"><strong>${escapeHtml(pos.symbol)}
-          ${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</strong>
-          · 수량 ${escapeHtml(pos.qty)}</p>
-        <p class="acct-pos-sub">진입 ${fmtUsd(pos.entry_price)} → 현재 ${fmtUsd(mark)}
-          · 청산 ${fmtUsd(liq)} · 지갑 ${fmtUsd(wallet)}</p>
+  const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
+  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
+  const tile = (lab, val, tone, fill) => `<div class="acct-tile">
+      <span class="acct-tile-lab">${lab}</span>
+      <b class="acct-tile-val ${tone}">${val}</b>
+      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
+    </div>`;
+  const tiles = `<div class="acct-tiles">
+      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL)}
+      ${tile("증거금 사용", `${usedPct.toFixed(0)}%`,
+             usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100)}
+      ${tile("노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP)}
+    </div>`;
+
+  // ⭐청산 거리 게이지 -- 롱/숏 모두 **왼쪽 끝이 청산**이 되도록 접는다.
+  //   0 = 청산가 · 0.5 = 진입가 · 1 = 진입에서 청산 거리만큼 이익 난 가격.
+  //   측면마다 부등호를 뒤집지 않아도 되고, 눈은 "왼쪽에 가까울수록 위험"만 기억하면 된다.
+  const span = Math.abs(entry - liq) * 2;
+  const safe = span > 0 ? clamp01(Math.abs(mark - liq) / span) : 0;
+  const sideTone = pos.side === "LONG" ? "good" : "bad";
+  const position = `<div class="acct-pos" data-side="${pos.side === "LONG" ? "long" : "short"}">
+      <div class="acct-pos-head">
+        <b>${escapeHtml(pos.symbol)}</b>
+        <span class="acct-tag ${sideTone}">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
+        <span class="acct-pos-qty">${escapeHtml(pos.qty)}</span>
       </div>
+      <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
+        <span class="acct-gauge-track"></span>
+        <span class="acct-gauge-entry"></span>
+        <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+      </div>
+      <div class="acct-gauge-legend">
+        <span class="bad">청산 ${fmtUsd(liq)}</span>
+        <span>진입 ${fmtUsd(entry)}</span>
+        <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
+      </div>
+    </div>`;
+
+  setH("snapAcctPosition", `<div class="acct-card">
+      <div class="acct-main">${hero}${tiles}${position}</div>
       ${perf}
     </div>${otherNote}`);
+  bindAcctChartTip();
 }
 
 
@@ -1593,7 +1740,6 @@ const MODEL_CHIP_IDS = {
   extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
-  vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
@@ -1842,9 +1988,12 @@ function renderLiquidationMapPanel() {
       .filter((lv) => side === "support" ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
       .map((lv) => ({ ...lv, distance_pct: (lv.price - liveCurrentPrice) / liveCurrentPrice * 100 }));
   };
-  const resistanceRows = liveRedistanced(map.resistance_levels, "resistance").slice().reverse()
+  // 2026-09-11 사용자 요청: 각 측면 **3개**만. 원 배열은 현재가에서 가까운 순이므로
+  // 자르고 나서 뒤집는다(저항은 먼 것이 위, 가까운 것이 현재가 줄 바로 위로 온다).
+  const SR_ROWS = 3;
+  const resistanceRows = liveRedistanced(map.resistance_levels, "resistance").slice(0, SR_ROWS).reverse()
     .map((lv, i, arr) => liquidationLevelRowHtml(lv, `저항${arr.length - i}`, "liq-resistance"));
-  const supportRows = liveRedistanced(map.support_levels, "support")
+  const supportRows = liveRedistanced(map.support_levels, "support").slice(0, SR_ROWS)
     .map((lv, i) => liquidationLevelRowHtml(lv, `지지${i + 1}`, "liq-support"));
   const currentRow = `<div class="liq-level-row liq-current">
       <span class="liq-level-tag">현재가</span>
@@ -2623,34 +2772,27 @@ async function refreshVolForecast() {
   }
 }
 
-// ── 24시간 변동성 전망 (2026-09-10) ─────────────────────────────────────────────────
-// 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
-//       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
-// ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
-function volForecastIndicatorItem() {
+// ── 24시간 변동성 전망 (2026-09-10, 2026-09-11 칩 -> 차트 리본) ────────────────────
+// 규약: 색 §2 위험/주의=warn(주황) · 안정도 같은 주황을 옅게 -- **5번째 색을 만들지 않는다**.
+// ⭐방향 신호가 아니다. 리본은 renderCandleSvg() 안에서 레짐 리본 바로 아래에 그린다.
+// 칩이 갖고 있던 숫자는 전부 이 툴팁으로 옮겼다 -- 칩을 지워도 근거가 사라지지 않게.
+function volForecastRibbonTitle(nBars) {
   const p = latestVolForecast;
-  const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 Binance 5분봉(과거 변동성)과 "
-                   + "Deribit DVOL(내재변동성)로 계산합니다. 방향이 아니라 변동성만 예측하며 매매에 "
-                   + "연결돼 있지 않습니다." };
-  if (!p || p.error || !p.available) {
-    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
-             proba: null, history: [], times: [] };
-  }
+  if (!p || p.error || !p.available) return "변동성 전망: 웜업 중이거나 갱신 실패";
   const prec = (p.precision_holdout || {})[p.grade];
   const auc = p.auc || {};
-  const stateTitle = [
-    `${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
+  // 칩이 없어졌어도 쉬운 말 설명은 남긴다 -- MODEL_INDICATOR_MEANING 은 그대로 쓴다(키=등급).
+  const plain = (MODEL_INDICATOR_MEANING.vol_forecast || {})[p.grade] || "";
+  return [
+    `변동성 전망 ${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
     `내재변동성(DVOL) ${p.dvol} · 실현변동성 24h ${p.rv24} · 격차(VRP) ${p.vrp > 0 ? "+" : ""}${p.vrp}`,
     `예측 실현변동성 ${p.rv_fwd_pred}`,
     prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
     `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
+    `시간봉 신호입니다 — 한 시간이 5분봉 12개에 같은 색으로 깔립니다 (${nBars}봉 채색)`,
+    plain,
     "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
   ].filter(Boolean).join("\n");
-  return { ...base, tone: p.tone === "warn" ? "warn" : "neutral", subText: p.grade,
-           proba: Number(p.proba), stateTitle,
-           history: p.history || [], times: p.times || [] };
 }
 
 // ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
@@ -3495,7 +3637,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-11 mb 92 -> 112: 청산 레인을 레짐 리본 높이(20px)만큼 키웠다(사용자 요청).
   //   레인 18 -> 38px. 여백도 같이 20px 늘려야 리본과 안 겹친다.
   //   대가: 캔들 영역 ch 가 286 -> 266 으로 20px 줄어든다.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 112;
+  // 2026-09-11 mb 112 -> 134: 변동성 전망 리본 20px(사용자 요청 "레짐과 같은 스타일로").
+  //   칩을 없애고 리본으로 옮긴 것이라 화면의 정보량은 그대로다.
+  // 2026-09-11(2차) mb 134 -> 140: 레짐과 변동성 리본 사이 간격 2 -> 6px(사용자 요청).
+  //   대가: 캔들 영역 ch 가 266 -> 238(데스크톱), 126 -> 98(모바일 최소높이)로 줄어든다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 바닥 레인 +28~+43 · 레짐 +50~+70 ·
+  //   변동성 +76~+96 · 청산 레인 +100~+138.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 140;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3576,6 +3724,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
   // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
   const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
+  // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
+  const VOL_RIBBON_Y = h - mb + 76, VOL_RIBBON_H = 20;   // 레짐(+50~+70)과 6px 간격
+  const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
+    && latestVolForecast && latestVolForecast.available
+    && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -3819,6 +3972,84 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(waitLabel);
   }
 
+  // ── 변동성 전망 리본 (2026-09-11, 칩을 대체) ────────────────────────────────────
+  // 사용자: "변동성 전망도 청산맵 아래 레짐과 같은 스타일로 주황색으로 칠하고 칩은 제거".
+  // 🔴이 신호는 **시간봉**이다(피쳐가 resample("1h")). 캔들은 5분이라 시각으로 접어 칠한다 --
+  //   한 시간이 12개 봉에 같은 색으로 깔린다. 청산 레인의 5분 키와 혼동하면 안 된다.
+  // ⭐등급을 색 하나로 뭉개지 않는다: 「위험」 홀드아웃 정밀도 0.793 vs 「주의」 0.161 이라
+  //   같은 주황으로 칠하면 16% 짜리가 79% 처럼 보인다. 진하기로 셋을 가른다.
+  if (volRibbonOn && candles.length) {
+    const vf = latestVolForecast;
+    const grades = Array.isArray(vf.grades) ? vf.grades : [];
+    const probas = Array.isArray(vf.probas) ? vf.probas : [];
+    const byHour = new Map();
+    vf.times.forEach((iso, i) => {
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return;
+      byHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
+    });
+    // 2026-09-11 사용자: "평소엔 회색, 경고면 중간 주황, 위험이면 강한 주황".
+    // ⭐색은 등급이 정하고, **진하기만** 등급 안에서 확률로 미세하게 움직인다 -- 등급만
+    //   쓰면 조용한 구간이 통째로 같은 색이라 칩이 "안 움직인다"던 문제가 그대로 옮겨온다.
+    // grades/cuts 가 아직 없는 낡은 워커 상태파일이면 tone 두 단계로 물러선다(빈 리본 금지).
+    const cuts = latestVolForecast.cuts || {};
+    const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
+    const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
+    // [색, 최소 진하기, 최대 진하기]
+    // 🔴회색은 **레짐 chop 과 같은 값**을 쓴다(사용자 요청). 색상은 원래도 같은 #8b91a6
+    //   이었고 달라 보인 건 투명도였다 -- 레짐은 0.55~1.00, 여기는 0.14~0.26 이었다.
+    //   REGIME_DOMINANT_COLOR.chop 을 직접 참조해 둘이 영영 어긋나지 않게 한다.
+    // 회색이 진해진 만큼 주황도 같은 대역으로 올리고, 주의/위험은 **농도로** 가른다
+    //   (같은 대역에서 투명도만으로는 둘이 안 구분된다).
+    const STYLE = { "안정": [REGIME_DOMINANT_COLOR.chop, 0.55, 1.00],
+                    "주의": ["#dc8f4a", 0.62, 0.86],
+                    "위험": ["#b8541a", 0.88, 1.00] };
+    const styleOf = (v) => {
+      const g = v.grade || (v.tone === "warn" ? "주의" : "안정");
+      const sp = STYLE[g] || STYLE["안정"];
+      const q = Number(v.p);
+      let f = 0.5;                                     // 확률을 모르면 등급의 중간값
+      if (rampOk && Number.isFinite(q)) {
+        f = g === "안정" ? q / c1
+          : g === "주의" ? (q - c1) / (c2 - c1)
+          : (q - c2) / (1 - c2);
+      }
+      return { color: sp[0], opacity: sp[1] + (sp[2] - sp[1]) * clamp01(f) };
+    };
+    let drew = 0;
+    candles.forEach((c, i) => {
+      const v = byHour.get(Math.floor(c.time / 3600) * 3600);
+      if (!v) return;
+      drew += 1;
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
+      rect.setAttribute("width", Math.max(1, bw)); rect.setAttribute("height", VOL_RIBBON_H);
+      rect.setAttribute("rx", "1.5");
+      const st = styleOf(v);
+      rect.setAttribute("fill", st.color);
+      rect.setAttribute("fill-opacity", st.opacity.toFixed(2));
+      const title = document.createElementNS(NS, "title");
+      title.textContent = fmtDateTick(c.time * 1000) + " 변동성 전망 "
+        + (v.grade || (v.tone === "warn" ? "주의 이상" : "안정"))
+        + (v.p === undefined || v.p === null ? ""
+          : " · 확장 확률 " + (v.p * 100).toFixed(1) + "%");
+      rect.appendChild(title);
+      svg.appendChild(rect);
+    });
+    const volLabel = document.createElementNS(NS, "text");
+    volLabel.setAttribute("x", ml - 6);
+    volLabel.setAttribute("y", VOL_RIBBON_Y + VOL_RIBBON_H / 2 + 3);
+    volLabel.setAttribute("text-anchor", "end");
+    volLabel.setAttribute("font-size", "9");
+    volLabel.setAttribute("fill", "var(--muted)");
+    volLabel.textContent = "변동성";
+    const labelTitle = document.createElementNS(NS, "title");
+    // 칩이 툴팁에 갖고 있던 숫자를 여기로 옮긴다 -- 칩을 지워도 정보가 사라지지 않게.
+    labelTitle.textContent = volForecastRibbonTitle(drew);
+    volLabel.appendChild(labelTitle);
+    svg.appendChild(volLabel);
+  }
+
   // Candles
   candles.forEach((c, i) => {
     const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
@@ -4043,7 +4274,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const vLine = document.createElementNS(NS, "line");
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
-  vLine.setAttribute("y2", regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
+  vLine.setAttribute("y2", volRibbonOn ? VOL_RIBBON_Y + VOL_RIBBON_H
+    : regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -4160,7 +4392,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
-    const LIQ_Y = h - mb + 72, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    const LIQ_Y = h - mb + 100, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
     //   레인이 통째로 안 그려졌다. 차트의 다른 코드가 전부 `c.time * 1000` 을 쓰는 이유다.
@@ -4385,7 +4617,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
-      ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);
