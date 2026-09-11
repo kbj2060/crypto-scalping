@@ -191,8 +191,8 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
                      "on": all(x["on"] for x in dets),      # AND
                      "active": d_act, "sustain_left_min": d_left * 5,
                      "sustain_min": SUSTAIN["detect"] * 5}
-    out["state"] = ("돌파 진행" if out["detect"]["on"] else
-                    ("돌파 예고" if prewarn.get("on") else "미발동"))
+    out["state"] = ("전환 발동" if out["detect"]["on"] else
+                    ("전환 예고" if prewarn.get("on") else "미발동"))
 
     # ── 화면 계약 (규약 §1~3). 톤은 4색 안에서만 쓴다.
     #    **카드 2장**으로 나눴다(2026-09-11 사용자 결정) — 각 카드가 축 하나씩 갖는다.
@@ -208,9 +208,9 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
         pw.append("warn" if _sustain(pw_hist, j, SUSTAIN["prewarn"])[0] else "neutral")
         times.append(str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat()))
     out["tone"] = hist[-1]
-    out["subText"] = "돌파 발동" if out["detect"]["active"] else "미발동"
+    out["subText"] = "전환 발동" if out["detect"]["active"] else "미발동"
     prewarn["tone"] = pw[-1]
-    prewarn["subText"] = ("돌파 예고" if (prewarn.get("on") or prewarn.get("active"))
+    prewarn["subText"] = ("전환 예고" if (prewarn.get("on") or prewarn.get("active"))
                           else ("미발동" if prewarn.get("available") else "웜업"))
     prewarn["history"], prewarn["times"] = pw, times
     out["history"], out["times"] = hist, times
@@ -265,7 +265,7 @@ def _self_check() -> None:
     rb = compute_signals(b)
     assert rb["compressed"] is False, rb                        # 돌파 봉은 압축이 아니고
     assert rb["detect"]["on"] is True, rb["detect"]             # 2종 AND 가 켜진다
-    assert rb["state"] == "돌파 진행", rb["state"]
+    assert rb["state"] == "전환 발동", rb["state"]
 
     # 2026-09-11 압축 게이트 제거의 핵심 검사 — **압축이 한 번도 없던 구간**에서도 탐지가
     # 켜져야 한다. 옛 판은 `watch`(직전 1시간 내 압축)가 없으면 무조건 꺼졌다.
@@ -293,11 +293,11 @@ def _self_check() -> None:
 
     # 화면 계약: 카드 2장이라 띠도 2개 · 각 띠는 자기 색만 쓴다
     # ⚠️base(평탄 합성)는 지속창 안에 우연히 발동이 들 수 있다 -- 고정값 대신 **내부 정합**을 본다
-    assert rb["tone"] == "bad" and rb["subText"] == "돌파 발동", (rb["tone"], rb["subText"])
+    assert rb["tone"] == "bad" and rb["subText"] == "전환 발동", (rb["tone"], rb["subText"])
     for r in (base, rb):
         want = "bad" if r["detect"]["active"] else "neutral"
         assert r["tone"] == want, (r["tone"], r["detect"])
-        assert r["subText"] == ("돌파 발동" if r["detect"]["active"] else "미발동"), r["subText"]
+        assert r["subText"] == ("전환 발동" if r["detect"]["active"] else "미발동"), r["subText"]
         assert len(r["history"]) == len(r["times"]) == HIST_BARS, len(r["history"])
         assert r["history"][-1] == r["tone"], (r["history"][-1], r["tone"])
         assert set(r["history"]) <= {"bad", "neutral"}, set(r["history"])   # 탐지 띠는 2색
