@@ -35,6 +35,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -44,16 +45,33 @@ import numpy as np
 import pandas as pd
 import requests
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+import eth_breakout_features33_20260911 as F33            # noqa: E402  학습과 **같은** 빌더
+
 KLINES = "https://fapi.binance.com/fapi/v1/klines"
+# 예고 모델(사이드카). 디렉터리가 없으면 예고 없이 그대로 돈다 -- 되돌리기 = 디렉터리 삭제.
+PREWARN_DIR = ROOT / "data" / "live" / "eth_breakout_prewarn_artifact"
+PREWARN_Q = 0.90              # 확률의 후행 분위 -- 커버리지 10%
+_MODELS: dict[str, Any] = {}
+
+
+def _prewarn_models() -> tuple[list, dict] | tuple[None, None]:
+    """아티팩트를 **한 번만** 읽는다. 없으면 (None, None) -- 호출부가 예고를 건너뛴다."""
+    if "v" not in _MODELS:
+        try:
+            import joblib
+            meta = json.loads((PREWARN_DIR / "meta.json").read_text(encoding="utf-8"))
+            models = [joblib.load(PREWARN_DIR / f"hgb_{sd}.joblib") for sd in meta["seeds"]]
+            _MODELS["v"] = (models, meta)
+        except Exception:                                  # 신뢰경계: 아티팩트 부재/손상
+            _MODELS["v"] = (None, None)
+    return _MODELS["v"]
 SYMBOL = "ETHUSDT"
 FETCH_BARS = 4200            # z2016(7일) + 압축분위 창 + 여유
 COMPRESS = 0.70              # volexp < 0.70 = 압축(횡보) — 이 구간에서만 감시
 QWIN = 2016                  # 임계 분위를 재는 후행 창(인과)
-# 경보: (피쳐, z창, 평활봉, 분위, 최적지평 표기, 실측 lift)
-# lift 는 **인과 임계 백테스트** 값이다(전역 분위 연구값 7.71/3.85/3.70 보다 낮다).
-ALERT = [("체결속도 3봉지속", "n", 2016, 3, 0.99, "앞 2시간", 5.75),
-         ("체결속도", "n", 864, 1, 0.99, "앞 5~15분", 3.65),
-         ("거래대금", "qv", 2016, 1, 0.99, "앞 30분", 3.06)]
 # 탐지: 2종 AND · z288 · q90
 # volexp 는 뺐다 — 전환의 **정의**(volexp>=1.8 교차)에 쓰인 양이라 기여가 정의상 보장된
 # 것이지 정보가 아니고, 넣으면 진행률이 6.08% → 11.51% 로 느려진다(12봉 롤링이라 구조적 지연).
@@ -79,7 +97,7 @@ def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
             break
     d = pd.DataFrame(out, columns=["ot", "o", "h", "l", "c", "v", "ct", "qv", "n", "tbv", "tbq", "x"])
     d["timestamp"] = pd.to_datetime(d.ot, unit="ms")
-    for cc in ("o", "h", "l", "c", "qv"):
+    for cc in ("o", "h", "l", "c", "qv", "tbq"):   # tbq 누락 시 피쳐가 터진다
         d[cc] = d[cc].astype(float)
     d["n"] = d["n"].astype(int)
     return d.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
@@ -95,19 +113,6 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     def _z(col: str, w: int) -> np.ndarray:
         s = pd.to_numeric(d[col], errors="coerce")
         return ((s - s.rolling(w).mean()) / s.rolling(w).std()).to_numpy()
-
-    def _thr_at(x: np.ndarray, q: float, j: int) -> float:
-        """봉 j 시점의 임계 — 압축 봉만 모아 후행 창에서 분위를 낸다. 미래를 안 본다.
-
-        띠(history)도 이 함수로 그린다. 지금 임계로 과거를 칠하면 임계가 움직일 때마다
-        과거 칸 색이 바뀐다 — 사용자가 본 적 없는 그림이 된다.
-        """
-        m = comp[:j + 1] & np.isfinite(x[:j + 1])
-        v = x[:j + 1][m][-QWIN:]
-        return float(np.nanquantile(v, q)) if len(v) >= 200 else np.inf
-
-    def _thr(x: np.ndarray, q: float) -> float:
-        return _thr_at(x, q, len(d) - 1)
 
     def _thr_all_at(x: np.ndarray, q: float, j: int) -> float:
         """**탐지** 임계 — 압축 봉이 아니라 **전 봉**에서 후행 창 분위를 낸다.
@@ -126,16 +131,30 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     out: dict[str, Any] = {"timestamp": str(d["timestamp"].iloc[i]), "close": float(c[i]),
                            "volexp": float(volexp[i]) if np.isfinite(volexp[i]) else None,
                            "compressed": bool(comp[i])}
-    alerts = []
-    for label, col, w, smooth, q, horizon, lift in ALERT:
-        x = _z(col, w)
-        if smooth > 1:
-            x = pd.Series(x).rolling(smooth).min().to_numpy()
-        thr = _thr(x, q)
-        on = bool(comp[i] and np.isfinite(x[i]) and x[i] >= thr)
-        alerts.append({"name": label, "horizon": horizon, "lift": lift, "on": on,
-                       "z": None if not np.isfinite(x[i]) else round(float(x[i]), 3),
-                       "threshold": None if not np.isfinite(thr) else round(thr, 3)})
+    # ── 예고: «앞으로 30분 이내에 탐지기가 발동하나» (HGB 5시드 동결 앙상블)
+    #    2026-09-11 옛 경보 신호등 3종을 교체했다 -- 그 lift 5.75x 는 «앞 24봉 실현변동성»
+    #    이라는 자명한 대리 타깃 값이었고(atr_pct 단독 7.01), 전환 기준으로는 무작위였다.
+    models, meta = _prewarn_models()
+    prewarn: dict[str, Any] = {"available": False}
+    pw_hist = np.zeros(len(d), bool)
+    if models:
+        feat = F33.build_features(d.rename(columns={
+            "o": "open", "h": "high", "l": "low", "c": "close",
+            "qv": "quote_volume", "n": "trades", "tbq": "taker_buy_quote"}))
+        Xf = feat[meta["features"]].to_numpy(np.float32)
+        good = np.isfinite(Xf).all(axis=1)
+        sc = np.full(len(d), np.nan)
+        if good.any():
+            sc[good] = np.mean([m.predict_proba(Xf[good])[:, 1] for m in models], axis=0)
+        # 임계도 **후행 분위**다(규칙과 같은 인과 규약). 지금 임계로 과거를 칠하지 않는다.
+        pth = pd.Series(sc).rolling(QWIN, min_periods=200).quantile(PREWARN_Q).shift(1).to_numpy()
+        pw_hist = np.isfinite(sc) & np.isfinite(pth) & (sc >= pth)
+        prewarn = {"available": bool(np.isfinite(sc[i])),
+                   "proba": None if not np.isfinite(sc[i]) else round(float(sc[i]), 4),
+                   "threshold": None if not np.isfinite(pth[i]) else round(float(pth[i]), 4),
+                   "on": bool(pw_hist[i]), "horizon": "앞으로 30분 이내",
+                   "base_rate": meta.get("base_rate_train"),
+                   "precision": meta.get("oos_precision_cov10_worst_seed")}
     dets = []
     for label, col, w, q in DETECT:
         x = _z(col, w)
@@ -144,37 +163,31 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
         dets.append({"name": label, "on": on,
                      "z": None if not np.isfinite(x[i]) else round(float(x[i]), 3),
                      "threshold": None if not np.isfinite(thr) else round(thr, 3)})
-    # 경보는 신호등 3개다 — 합치지 않는다. 각자 지평이 달라 뜻이 다르다.
-    out["alert"] = {"lights": alerts, "lit": sum(a["on"] for a in alerts)}
+    out["prewarn"] = prewarn
     out["detect"] = {"signals": dets, "count": sum(x["on"] for x in dets),
                      "on": all(x["on"] for x in dets)}      # AND
     out["state"] = ("돌파 진행" if out["detect"]["on"] else
-                    (f"경보 {out['alert']['lit']}등" if out["alert"]["lit"] else
-                     ("횡보 감시" if out["compressed"] else "감시 밖")))
+                    ("돌파 예고" if prewarn.get("on") else "미발동"))
 
     # ── 화면 계약 (규약 §1~3). 톤은 4색 안에서만 쓴다.
-    #    탐지=bad · 경보=warn · 그 외=neutral. 이 행에는 방향 축이 자체가 없어서
-    #    (방향은 예측하지 않는다) 빨강이 «숏»으로 읽힐 여지가 없다 — 두 단계를 색으로
-    #    가르지 않으면 경보→탐지 경계가 띠에서 사라진다(규약 §5-5: 이유 없는 경계 금지).
-    alert_v, detect_v = [], []
-    for label, col, w, smooth, q, horizon, lift in ALERT:
-        x = _z(col, w)
-        if smooth > 1:
-            x = pd.Series(x).rolling(smooth).min().to_numpy()
-        alert_v.append(x)
-    for label, col, w, q in DETECT:
-        detect_v.append(_z(col, w))
-    hist, times = [], []
+    #    **카드 2장**으로 나눴다(2026-09-11 사용자 결정) — 각 카드가 축 하나씩 갖는다.
+    #      경보기: warn / neutral  (예고 확률)
+    #      탐지기: bad  / neutral  (발동 여부)
+    #    그래서 띠도 둘이다. 한 띠에 warn·bad 를 섞으면 어느 카드의 색인지 못 읽는다.
+    detect_v = [_z(col, w) for _, col, w, _q in DETECT]
+    hist, pw, times = [], [], []
     for j in range(max(i - HIST_BARS + 1, 0), i + 1):
-        lit_j = sum(bool(comp[j] and np.isfinite(x[j]) and x[j] >= _thr_at(x, a[4], j))
-                    for x, a in zip(alert_v, ALERT))
         det_j = all(bool(np.isfinite(x[j]) and x[j] >= _thr_all_at(x, dd[3], j))
                     for x, dd in zip(detect_v, DETECT))
-        hist.append("bad" if det_j else ("warn" if lit_j else "neutral"))
+        hist.append("bad" if det_j else "neutral")
+        pw.append("warn" if bool(pw_hist[j]) else "neutral")
         times.append(str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat()))
     out["tone"] = hist[-1]
-    out["subText"] = ("돌파 발동" if out["detect"]["on"] else
-                      ("돌파 경보" if out["alert"]["lit"] else "미발동"))
+    out["subText"] = "돌파 발동" if out["detect"]["on"] else "미발동"
+    prewarn["tone"] = pw[-1]
+    prewarn["subText"] = ("돌파 예고" if prewarn.get("on")
+                          else ("미발동" if prewarn.get("available") else "웜업"))
+    prewarn["history"], prewarn["times"] = pw, times
     out["history"], out["times"] = hist, times
     return out
 
@@ -200,24 +213,24 @@ def _mk(n: int = 3400, quiet: int = 120, seed: int = 0) -> pd.DataFrame:
     cnt = rng.normal(5000, 250, n)
     return pd.DataFrame({"timestamp": pd.date_range("2026-01-01", periods=n, freq="5min"),
                          "o": c, "h": c + 0.5, "l": c - 0.5, "c": c,
-                         "qv": cnt * 1000.0, "n": cnt.astype(int)})
+                         "qv": cnt * 1000.0, "n": cnt.astype(int),
+                         "tbq": cnt * 500.0})     # 테이커 매수 대금 -- 피쳐 빌더가 요구한다
 
 
 def _self_check() -> None:
     d = _mk()
     base = compute_signals(d)
     assert base["compressed"] is True, base                     # 뒤쪽이 조용하므로 압축
-    assert base["alert"]["lit"] == 0, base["alert"]             # 평탄하면 아무 등도 안 켜진다
     assert base["detect"]["on"] is False, base["detect"]
+    assert "alert" not in base, sorted(base)                    # 옛 경보 3종은 제거됐다
+    assert "prewarn" in base, sorted(base)
 
     # 체결 건수만 급등 — 거래대금은 그대로다. 탐지는 2종 **AND** 라 켜지면 안 된다.
-    # (첫 판에서는 n·qv 를 같이 올려 «경보» 시나리오가 실은 탐지까지 켜고 있었다 —
-    #  그래서 AND 게이트를 한 번도 시험하지 못했다. 한 쪽만 올려야 그게 검사가 된다.)
+    # (첫 판에서는 n·qv 를 같이 올려 한쪽만 올리는 경우를 한 번도 시험하지 못했다.)
     a = d.copy()
     a.loc[a.index[-3:], "n"] = 60000
     ra = compute_signals(a)
     assert ra["compressed"] is True, ra                         # 가격이 안 움직였으니 여전히 압축
-    assert ra["alert"]["lit"] >= 2, ra["alert"]                 # 체결속도 계열 등이 켜진다
     assert ra["detect"]["count"] == 1, ra["detect"]             # 한 쪽만 — AND 미성립
     assert ra["detect"]["on"] is False, ra["detect"]
 
@@ -231,23 +244,41 @@ def _self_check() -> None:
 
     # 2026-09-11 압축 게이트 제거의 핵심 검사 — **압축이 한 번도 없던 구간**에서도 탐지가
     # 켜져야 한다. 옛 판은 `watch`(직전 1시간 내 압축)가 없으면 무조건 꺼졌다.
-    e = _mk(quiet=0)                                            # 뒤쪽도 조용하지 않다
+    e = _mk(quiet=0)
     e.loc[e.index[-3:], "n"] = 60000
     e.loc[e.index[-3:], "qv"] = 6.0e7
     re_ = compute_signals(e)
-    assert re_["compressed"] is False, re_                      # 압축 구간이 아닌데도
-    assert re_["detect"]["on"] is True, re_["detect"]           # 탐지는 켜진다(게이트 제거)
-    assert "watch" not in re_, sorted(re_)                      # 감시창 키는 사라졌다
+    assert re_["compressed"] is False, re_
+    assert re_["detect"]["on"] is True, re_["detect"]
+    assert "watch" not in re_, sorted(re_)
 
-    # 화면 계약: 톤 4색 안 · 띠 길이 · 마지막 칸이 현재 톤 · 세 단계가 색으로 갈린다
+    # ⭐사이드카 계약: 아티팩트가 없어도 **탐지는 그대로 돌아야** 한다(되돌리기 = 디렉터리 삭제)
+    global PREWARN_DIR
+    keep = PREWARN_DIR
+    PREWARN_DIR = ROOT / "data" / "live" / "__없는_디렉터리__"
+    _MODELS.clear()
+    try:
+        rn = compute_signals(b)
+        assert rn["detect"]["on"] is True, rn["detect"]          # 탐지는 그대로
+        assert rn["prewarn"]["available"] is False, rn["prewarn"]  # 예고만 빠진다
+        assert rn["prewarn"]["subText"] == "웜업", rn["prewarn"]
+    finally:
+        PREWARN_DIR = keep
+        _MODELS.clear()
+
+    # 화면 계약: 카드 2장이라 띠도 2개 · 각 띠는 자기 색만 쓴다
     for r, want_tone, want_sub in ((base, "neutral", "미발동"),
-                                   (ra, "warn", "돌파 경보"), (rb, "bad", "돌파 발동")):
+                                   (rb, "bad", "돌파 발동")):
         assert r["tone"] == want_tone, (r["state"], r["tone"])
         assert r["subText"] == want_sub, r["subText"]
         assert len(r["history"]) == len(r["times"]) == HIST_BARS, len(r["history"])
         assert r["history"][-1] == r["tone"], (r["history"][-1], r["tone"])
-        assert set(r["history"]) <= {"good", "bad", "warn", "neutral"}, set(r["history"])
-    print("self-check OK  (평탄→무발동 · 체결만급등→AND미성립 · 돌파→탐지 · **비압축에서도 탐지** · 화면 계약)")
+        assert set(r["history"]) <= {"bad", "neutral"}, set(r["history"])   # 탐지 띠는 2색
+        pwh = r["prewarn"].get("history")
+        if pwh is not None:
+            assert len(pwh) == HIST_BARS, len(pwh)
+            assert set(pwh) <= {"warn", "neutral"}, set(pwh)                # 경보 띠는 2색
+    print("self-check OK  (경보3종 제거 · AND 게이트 · 비압축 탐지 · 띠 2개 분리 · 색 분리)")
 
 
 if __name__ == "__main__":

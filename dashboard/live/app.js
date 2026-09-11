@@ -1461,7 +1461,9 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
   extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
   // 2026-09-11 전환 탐지기. 방향 축이 없고 **단계**가 축이다 -- warn=경보(선행), bad=탐지(즉시).
-  breakout_detector: { bad: "돌파 발동", warn: "돌파 경보", neutral: "미발동" },
+  breakout_detector: { bad: "돌파 발동", neutral: "미발동" },
+  // 2026-09-11 경보기(예고 모델). 축이 하나(warn/neutral)라 §5-4 문제 없음.
+  breakout_prewarn: { warn: "돌파 예고", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
   // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
@@ -1597,9 +1599,15 @@ const MODEL_INDICATOR_MEANING = {
     "데이터 없음": "모델 아티팩트나 시세를 읽지 못했습니다.",
   },
   // 2026-09-11 전환 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
+  breakout_prewarn: {
+    "돌파 예고": "앞으로 30분 안에 전환이 시작될 확률이 상위 10%에 들었어요 — 새 진입을 미룰 구간입니다.",
+    "미발동": "앞으로 30분 안에 전환이 올 확률이 평소 수준이에요.",
+    "웜업": "예고 모델이 아직 첫 계산을 끝내지 않았어요.",
+    "데이터 없음": "예고 모델이 값을 내지 못하고 있어요.",
+    "오류": "시세를 읽지 못해 이번 봉을 채점하지 못했어요.",
+  },
   breakout_detector: {
     "돌파 발동": "추세 전환이 방금 시작됐습니다 — 반대 방향 포지션이면 청산을 먼저 보세요. 방향은 말하지 않습니다.",
-    "돌파 경보": "돌파 직전에 늘던 체결·거래대금 패턴이 보입니다 — 앞으로 약 2시간, 새 진입을 미룰 구간이에요.",
     "미발동": "체결속도·거래대금이 아직 평소 수준이에요.",
     "웜업": "전환 탐지 워커가 아직 첫 계산을 끝내지 않았어요.",
     "데이터 없음": "전환 탐지 워커가 값을 내지 못하고 있어요.",
@@ -1733,7 +1741,9 @@ const SIGNAL_HORIZON = {
   taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
   liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
   demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
-  breakout_detector: { text: "경보 2시간 · 탐지 5분", title: "두 층이 다른 일을 한다. **경보**는 압축 구간에서 체결속도·거래대금 급등을 보고 앞으로 큰 움직임이 올 자리를 가리킨다(lift 5.75x / 3.65x / 3.06x -- 다만 이건 «앞 24봉 실현변동성»이라는 자명한 대리 타깃 값이라 모델 교체 예정이다). **탐지**는 예측이 아니라 즉시 인지다 -- 2026-09-11 압축 게이트를 제거해 큰 이동 사건 포착이 50% 대에서 82% 로 올랐고 발동은 33.9 → 25.1회/일 로 줄었다." },
+  breakout_detector: { text: "탐지 = 즉시", title: "예측이 아니라 즉시 인지다 -- 거래대금·체결속도 z288 이 **둘 다** 후행 q90 을 넘으면 켜진다. 2026-09-11 압축 게이트를 제거해 전환 사건 포착이 26.7% -> 92.0%(OOS, 176건 중 162건)로 오르고 발동은 33.9 -> 25.1회/일 로 줄었다. 발동 2,085회 중 813회가 사건 창 안이다(정밀도 39.0%)." },
+  // 2026-09-11 경보기(예고 모델). 옛 «경보 2시간» 은 자명한 대리 타깃 값이라 교체했다.
+  breakout_prewarn: { text: "예고 = 30분", title: "앞으로 30분 이내에 **탐지기가 발동할** 확률이다(HGB 5시드 동결 앙상블, 33피쳐). 커버리지 10%(하루 약 28.8회)에서 표본외 정밀도 78.5%, 기저 22.9% -- lift 3.43x. 임계는 확률의 후행 2016봉 분위 q90 이라 인과적이다. ⚠️«탐지기가 켜진다»이지 «큰 이동이 온다»가 아니다 -- 탐지기 자체 정밀도가 39.0% 라 그 위로 못 간다." },
   kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
 };
 
@@ -2856,46 +2866,76 @@ function extremeDetectorIndicatorItem() {
     history: p.history || [], times: p.times || [] };
 }
 
-// 2026-09-11 추세 전환 탐지기(2026-09-11 압축 게이트 제거로 «횡보→» 전제가 빠졌다).
-// 확률 개념이 없으므로 게이지를 두지 않는다(규약 §3) --
-// 숫자는 meterNote(경보 N/3 · 탐지 N/2)와 상태 배지 툴팁으로 간다.
+// 2026-09-11 추세 전환 **탐지기** — 발동 여부 한 축. 확률이 없으므로 게이지 없음(규약 §3).
+// 예고는 별도 카드(breakoutPrewarnIndicatorItem)로 뺐다 — 카드당 축 하나.
 function breakoutDetectorIndicatorItem() {
   const p = latestBreakoutDetector;
   const base = { key: "breakout_detector", label: "추세 전환 탐지기",
                  derivedTag: "= 대시보드 자체계산",
                  derivedTitle: "봇 내부 상태가 아니라 전용 워커가 5분봉 마감마다 공개 kline 으로 계산합니다. "
-                   + "방향은 예측하지 않습니다 -- 전환이 «온다/왔다»만 말합니다. 매매에 연결돼 있지 않습니다." };
+                   + "방향은 예측하지 않습니다 -- 전환이 «왔다»만 말합니다. 매매에 연결돼 있지 않습니다." };
   if (!p || p.error || !p.available) {
     const sub = !p ? "웜업"
       : (p.error === "worker_fetch_failed" ? "오류"
         : (p.error === "fetch_failed" ? "오류" : "데이터 없음"));
     return { ...base, tone: "neutral", subText: sub, history: [], times: [] };
   }
-  const lights = (p.alert && p.alert.lights) || [];
-  const lit = (p.alert && p.alert.lit) || 0;
   const det = p.detect || {};
   const meterNote = det.on ? `탐지 ${det.count}/${(det.signals || []).length}`
-    : (lit ? `경보 ${lit}/${lights.length}`
-      : (p.volexp != null ? `volexp ${Number(p.volexp).toFixed(2)}` : null));
+    : (p.volexp != null ? `volexp ${Number(p.volexp).toFixed(2)}` : null);
   const stateTitle = [
-    det.on ? "탐지: 거래대금·체결속도가 둘 다 q90 을 넘었습니다 — 전환이 시작됐습니다"
-      : (lit ? `경보 ${lit}등 — 아직 전환은 확인되지 않았습니다` : "발동 없음"),
-    ...lights.map((l) => `${l.on ? "● " : "○ "}${l.name} (${l.horizon} · lift ${l.lift}x)`
-      + (l.z != null && l.threshold != null ? ` z ${l.z} / 기준 ${l.threshold}` : "")),
-    ...((det.signals || []).map((x) => `${x.on ? "▲ " : "△ "}탐지 ${x.name}`
+    det.on ? "거래대금·체결속도가 둘 다 q90 을 넘었습니다 — 전환이 시작됐습니다" : "발동 없음",
+    ...((det.signals || []).map((x) => `${x.on ? "▲ " : "△ "}${x.name}`
       + (x.z != null && x.threshold != null ? ` z ${x.z} / 기준 ${x.threshold}` : ""))),
     p.volexp != null ? `변동성 확장비 ${Number(p.volexp).toFixed(3)} (압축 < 0.70 · 전환 >= 1.80)` : "",
-    p.compressed ? "지금 압축(횡보) 구간입니다" : (p.watch ? "직전 1시간 안에 압축이 있어 감시 중입니다" : "감시 구간 밖입니다"),
+    "전환 사건 176건 중 162건 포착(재현율 92.0%) · 발동 2,085회 중 813회가 사건 창 안(정밀도 39.0%)",
     "⚠️방향은 말하지 않습니다. 반대 포지션이면 청산까지 — 뒤집어 따라가라는 근거는 없습니다.",
   ].filter(Boolean).join("\n");
   return { ...base,
-    tone: p.tone === "bad" || p.tone === "warn" ? p.tone : "neutral",
+    tone: p.tone === "bad" ? "bad" : "neutral",
     subText: p.subText || "미발동",
     meterNote,
-    meterNoteTitle: det.on ? "탐지는 2종 AND 입니다 — 둘 다 켜져야 발동합니다"
-      : "경보 신호등 3개는 지평이 달라 합치지 않습니다",
+    meterNoteTitle: "탐지는 2종 AND 입니다 — 둘 다 켜져야 발동합니다",
     stateTitle,
     history: p.history || [], times: p.times || [] };
+}
+
+// 2026-09-11 추세 전환 **경보기** — «앞으로 30분 이내에 탐지기가 발동할 확률»(HGB 5시드 동결).
+// 옛 경보 신호등 3종을 교체했다: 그 lift 5.75x 는 «앞 24봉 실현변동성»이라는 자명한 대리
+// 타깃 값이었고(atr_pct 단독 7.01), 전환 기준으로 재면 1.98~2.53 으로 무작위 수준이었다.
+// ⭐확률 축이 생겼으므로 게이지를 둔다(규약 §3 — 확률인 행만 게이지).
+function breakoutPrewarnIndicatorItem() {
+  const p = latestBreakoutDetector;
+  const w = (p && p.prewarn) || null;
+  const base = { key: "breakout_prewarn", label: "추세 전환 경보기", probaSlot: true,
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "전용 워커가 5분봉 마감마다 33개 피쳐를 만들어 동결된 HGB 5시드에 넣습니다. "
+                   + "방향은 예측하지 않습니다 -- «곧 전환이 온다»만 말합니다. 매매에 연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available || !w || !w.available) {
+    const sub = !p ? "웜업"
+      : (p.error ? "오류" : (w && w.subText) || "데이터 없음");
+    return { ...base, tone: "neutral", subText: sub, proba: null, history: [], times: [] };
+  }
+  const pct = w.proba != null ? (Number(w.proba) * 100).toFixed(1) : null;
+  const stateTitle = [
+    w.on ? `예고 발동 — 확률 ${pct}% 가 후행 임계 ${(Number(w.threshold) * 100).toFixed(1)}% 를 넘었습니다`
+      : `미발동 — 확률 ${pct}% · 후행 임계 ${(Number(w.threshold) * 100).toFixed(1)}%`,
+    `타깃: ${w.horizon} 탐지기가 한 번이라도 발동하는가`,
+    w.precision != null
+      ? `표본외 실측 정밀도 ${(Number(w.precision) * 100).toFixed(1)}% (기저 ${(Number(w.base_rate) * 100).toFixed(1)}%) · 커버리지 10% = 하루 약 28.8회`
+      : "",
+    "임계는 확률의 **후행 2016봉 분위** q90 입니다 — 전역 분위를 쓰면 미래참조입니다",
+    "⚠️«탐지기가 켜진다»이지 «큰 이동이 온다»가 아닙니다. 탐지기 자체의 정밀도가 39.0% 라 "
+      + "그 이상으로 올라갈 수 없습니다.",
+  ].filter(Boolean).join("\n");
+  return { ...base,
+    tone: w.tone === "warn" ? "warn" : "neutral",
+    subText: w.subText || "미발동",
+    proba: w.proba != null ? Number(w.proba) : null,
+    meterNote: pct != null ? `예고 ${pct}%` : null,
+    meterNoteTitle: "앞으로 30분 이내에 탐지기가 발동할 확률입니다(HGB 5시드 평균)",
+    stateTitle,
+    history: w.history || [], times: w.times || [] };
 }
 
 async function refreshBreakoutDetector() {
@@ -4616,7 +4656,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
       }),
       ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
-      ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 횡보→추세 전환
+      ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
+      ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
