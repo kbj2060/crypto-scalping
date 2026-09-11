@@ -1,6 +1,5 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
-const API_POSITION_SIZING_URL = "/api/position-sizing";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
@@ -151,8 +150,6 @@ let vReboundLastFetchAt = 0;
 // frontend consumer had been removed.
 let latestLiquidation5m = null;
 let latestLiquidation5mHist = [];
-// 2026-09-11 청산 위험 칩(liqRiskIndicatorItem)이 읽는다. 패널은 제거됐지만 조회는 유지.
-let latestPositionSizing = null;
 let liquidation5mLastFetchAt = 0;
 // 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
 // dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
@@ -537,7 +534,7 @@ function retailFlowRead(micro) {
   return "리테일 수급은 뚜렷하지 않음";
 }
 
-// 2026-09-11 청산 규모 칩은 청산 위험(liqRiskIndicatorItem)으로 교체됨 -- 헬퍼 제거.
+// 2026-09-11 청산 규모 칩 제거(중복 지표). 대체 칩 없이 자리를 비운다 -- 헬퍼도 함께 제거됨.
 
 function fmtBarsAgo(bars) {
   if (bars === null || bars === undefined) return "발화 이력 없음";
@@ -1070,13 +1067,6 @@ async function refreshBinanceAccount() {
     console.error("Binance account fetch error:", error);
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
   }
-  try {
-    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-store" });
-    latestPositionSizing = await res.json();
-  } catch (error) {
-    console.error("Position sizing fetch error:", error);
-    latestPositionSizing = { available: false, error: "fetch_failed" };
-  }
 }
 
 
@@ -1107,8 +1097,7 @@ async function refreshOpsStatus() {
 // happening. Shared by both the evidence-signal strips (bottom/top fired -> tone) and the
 // Snapshot tab's model-indicator strips (thresholded value -> tone).
 // Builds an oldest-to-newest array of ISO timestamps for a strip whose bars are known to be evenly
-// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines, liq_risk at
-// 1-min tail_risk_1m rows) -- the payload only ever sends the LATEST bar's timestamp, so the rest
+// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines) -- the payload only ever sends the LATEST bar's timestamp, so the rest
 // are derived by walking back stepMinutes at a time. Returns [] if latestIso is missing (not warmed
 // up yet), so hover-time silently does nothing rather than showing a wrong guess.
 function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
@@ -1338,7 +1327,6 @@ const STRIP_BAR_LABEL_BY_TONE = {
   liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
   // 2026-09-11 청산 방향압력 -> 청산 규모(사용자 지시). 색은 표시 규약 그대로 측면을 가리킨다.
   // 2026-09-11 청산 규모 -> 청산 위험. 방향 신호가 아니라 위험도 어휘(안정/주의/위험)를 쓴다.
-  liq_risk: { warn: "주의", bad: "위험", neutral: "안정" },
   whale: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   retail_flow: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
   evidence: { good: "바닥 발동", bad: "천장 발동", warn: "혼재 발동", neutral: "미발동" },
@@ -1479,15 +1467,6 @@ const MODEL_INDICATOR_MEANING = {
     "주의": "한쪽 청산량이 평소보다 급증했지만 아직 본격적인 캐스케이드로 번지진 않았어요.",
     "위험": "한쪽 포지션들이 연쇄적으로 강제청산되며 캐스케이드가 실제로 진행 중이에요 — 그 방향으로 가격이 더 튈 수 있어요.",
   },
-  liq_risk: {
-    "안정": "지금 크기로 4시간 안에 청산선에 닿을 확률이 10% 미만이에요.",
-    "주의": "지금 크기로 4시간 안에 청산선에 닿을 확률이 10%를 넘어요 — 크기를 줄이면 그만큼 내려가요.",
-    "위험": "지금 크기로 4시간 안에 청산선에 닿을 확률이 30%를 넘어요.",
-    "포지션 없음": "열린 ETH 포지션이 없어요. 포지션이 생기면 실제 청산선으로 계산해요.",
-    "계측 미달": "청산가를 못 읽어 확률을 낼 수 없어요.",
-    "웜업": "청산 확률 계산에 쓸 자료를 아직 채우는 중이에요.",
-    "데이터 없음": "청산 확률 계산기와 연결이 끊겼어요.",
-  },
   whale: {
     "롱 진입": "큰 금액 단위 거래가 최근 5분간 매수 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
     "숏 진입": "큰 금액 단위 거래가 최근 5분간 매도 쪽으로 쏠렸어요 — 개인 소액 매매와는 구분된 흐름이에요.",
@@ -1577,7 +1556,6 @@ const SIGNAL_HORIZON = {
   // -- model indicators --
   v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
   liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
-  liq_risk: { text: "4시간", title: "지금 크기로 4시간 안에 청산선에 닿을 확률 -- 비슷한 변동성 구간의 과거 실측 빈도(모델 아님)" },
   liq_cascade: { text: "상태", title: "예측이 아니라 '지금 캐스케이드가 진행 중인가'를 보여주는 현재 상태값(반감기 약 2~3분으로 감쇠)" },
   whale: { text: "상태", title: "최근 5분간 큰손 체결 순유입 방향 -- 고정 예측 시간창 없는 현재 흐름 지표(방향-IC 검정 4개 지평 전부 무정보)" },
   retail_flow: { text: "상태", title: "최근 5분간 리테일 체결 순유입 방향 -- 1~15분 지평 방향-IC는 유의했으나 수수료 반영 손익은 전부 순손실, 고정 예측 시간창은 없음" },
@@ -1613,7 +1591,6 @@ const MODEL_CHIP_IDS = {
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
-  liq_risk: "modelChipLiqRisk",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
@@ -2647,110 +2624,6 @@ async function refreshVolForecast() {
 // 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
 //       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
 // ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
-// ── 청산 위험 (2026-09-11, 청산 규모 칩을 대체) ─────────────────────────────────────
-// 규약: 색 §2 위험/주의=warn·안정=neutral(**5번째 색 없음**) · 확률 개념이 있으므로 게이지 사용.
-// ⭐방향 신호가 아니다 — 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
-// 확률은 모델이 아니라 **지금과 비슷한 변동성 구간의 과거 실측 빈도**다.
-function liqRiskIndicatorItem() {
-  const base = { key: "liq_risk", label: "청산 위험", probaSlot: true,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 실계좌 포지션의 청산선 거리와 "
-                   + "과거 실측 분포로 계산합니다. 방향도 수익도 예측하지 않습니다." };
-  const d = latestPositionSizing;
-  if (!d || d.available !== true) {
-    return { ...base, tone: "neutral",
-             subText: d && d.error === "worker_state_missing" ? "웜업" : "데이터 없음",
-             proba: null, history: [], times: [] };
-  }
-  const tp = d.touch_prob;
-  const grid = tp && tp.dist_grid_bp;
-  const pos = ((latestBinanceAccount && latestBinanceAccount.positions) || [])
-    .find((x) => x.symbol === "ETHUSDT" && Math.abs(Number(x.qty) || 0) > 0);
-  const at = (h, side, dist) => {
-    const r = tp && tp.horizons && tp.horizons[h];
-    if (!r || !grid || !grid.length || !r[side]) return null;
-    const a = r[side];
-    if (dist <= grid[0]) return a[0];
-    if (dist >= grid[grid.length - 1]) return a[a.length - 1];
-    for (let i = 1; i < grid.length; i += 1) {
-      if (dist <= grid[i]) {
-        const t = (dist - grid[i - 1]) / (grid[i] - grid[i - 1]);
-        return a[i - 1] + t * (a[i] - a[i - 1]);
-      }
-    }
-    return null;
-  };
-  const fmtPct = (v) => (v === null || v === undefined ? "-"
-    : (v * 100).toFixed(v < 0.1 ? 1 : 0) + "%");
-  const eq = Number(d.vol_equivalent_qty) || 0;
-  const baseQty = Number(d.base_qty) || 0;
-  const px = Number(d.price) || 0;
-  // 2026-09-11 포지션이 없어도 5분마다 숫자가 나와야 한다(사용자 지적). 다만 **가정이 들어간
-  // 숫자는 툴팁에만** 둔다 -- 본문은 가정 없는 권장 크기, 툴팁은 "지갑 전액 증거금·교차" 가정의
-  // 청산 확률. 실제 관측(50배·청산선 222bp)이 이 식과 정합했다(당시 순자산 ~510USDT).
-  const MMR = 0.005;                                   // ETHUSDT 1티어 유지증거금률
-  const wallet = Number(latestBinanceAccount?.balance?.wallet) || 0;
-  const ifEntered = (q) => {
-    const notional = q * px;
-    if (!(notional > 0) || !(wallet > 0)) return null;
-    const liq = (wallet / notional - MMR) * 1e4;
-    if (!(liq > 0)) return null;
-    // 방향을 모르니 롱/숏 중 불리한 쪽으로 읽는다.
-    const worse = (h) => {
-      const l = at(h, "롱", liq), sh = at(h, "숏", liq);
-      return l === null || sh === null ? (l === null ? sh : l) : Math.max(l, sh);
-    };
-    return { q, liq, p4: worse("4h"), p24: worse("24h") };
-  };
-  const scenarioTitle = () => {
-    const rows = [["평소", baseQty], ["권장", eq], ["평소×3", baseQty * 3], ["평소×6", baseQty * 6]]
-      .map(([n, q]) => [n, ifEntered(q)]).filter(([, r]) => r)
-      .map(([n, r]) => "  " + n + " " + r.q.toFixed(2) + " ETH → 청산선 "
-        + Math.round(r.liq) + "bp · 4시간 " + fmtPct(r.p4) + " · 24시간 " + fmtPct(r.p24));
-    if (!rows.length) return "";
-    return ["지금 들어간다면 (지갑 " + wallet.toFixed(0)
-      + " USDT 전액 증거금·교차 가정, 롱/숏 중 불리한 쪽)"].concat(rows).join("\n");
-  };
-  if (!pos) {
-    const mult = baseQty > 0 ? eq / baseQty : null;
-    return { ...base, tone: "neutral", subText: "포지션 없음", proba: null, history: [], times: [],
-             meterNote: eq > 0 ? "권장 " + eq.toFixed(2) + " ETH" : "",
-             meterNoteTitle: mult === null ? "" : "평소 크기 " + baseQty.toFixed(2) + " ETH 의 "
-               + mult.toFixed(2) + "배입니다 — 지금 변동성이 평소보다 "
-               + (mult >= 1 ? "낮아 그만큼 더 실을 수 있습니다" : "높아 그만큼 줄여야 합니다"),
-             stateTitle: ["열린 ETH 포지션이 없어 지금 청산 위험은 0 입니다.",
-               "지금 변동성 기준 권장 크기 " + eq.toFixed(2) + " ETH", scenarioTitle()]
-               .filter(Boolean).join("\n\n") };
-  }
-  const side = pos.side === "LONG" ? "롱" : "숏";
-  const mark = Number(pos.mark_price), liq = Number(pos.liquidation_price);
-  const liqBp = mark > 0 && liq > 0 ? Math.abs(mark - liq) / mark * 1e4 : NaN;
-  const p4 = Number.isFinite(liqBp) ? at("4h", side, liqBp) : null;
-  if (p4 === null || p4 === undefined) {
-    return { ...base, tone: "neutral", subText: "계측 미달", proba: null, history: [], times: [] };
-  }
-  const grade = p4 >= 0.3 ? "위험" : p4 >= 0.1 ? "주의" : "안정";
-  const qty = Math.abs(Number(pos.qty));
-  const mult = eq > 0 ? qty / eq : null;
-  const stateTitle = [
-    grade + " · 지금 크기로 4시간 안에 청산선에 닿을 확률 " + fmtPct(p4),
-    "1시간 " + fmtPct(at("1h", side, liqBp)) + " · 4시간 " + fmtPct(p4)
-      + " · 24시간 " + fmtPct(at("24h", side, liqBp)),
-    side + " " + qty.toFixed(2) + " ETH · 청산선까지 " + Math.round(liqBp) + "bp",
-    mult === null ? "" : "같은 위험이 되는 크기 " + eq.toFixed(2) + " ETH (현재 "
-      + mult.toFixed(1) + "배)",
-    "비슷한 변동성 구간 " + ((tp && tp.band_bars) || 0).toLocaleString()
-      + "봉의 실측 빈도입니다 — 모델 외삽이 아닙니다",
-    "⚠️방향도 수익도 예측하지 않습니다 — 크기 판단용입니다",
-  ].filter(Boolean).join("\n");
-  return { ...base, tone: grade === "위험" ? "bad" : grade === "주의" ? "warn" : "neutral", subText: grade,
-           proba: p4, stateTitle, history: [], times: [],
-           // 포지션이 있을 땐 가정이 필요 없다 -- 실제 수량과 권장의 배수를 그대로 적는다.
-           meterNote: mult === null ? "" : "권장의 " + mult.toFixed(1) + "배",
-           meterNoteTitle: "지금 " + qty.toFixed(2) + " ETH · 지금 변동성 기준 권장 "
-             + eq.toFixed(2) + " ETH" };
-}
-
 function volForecastIndicatorItem() {
   const p = latestVolForecast;
   const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,
@@ -4424,7 +4297,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 청산 방향압력 (2026-08-25) -- fetched separately by refreshLiquidationDirectionSignal(), same
   // external-fetch category as latestVRebound above. Directional model-indicator, NOT evidence-
   // signal tier -- see scripts/live_liquidation_direction_signal_20260825.py docstring.
-  // 2026-09-11 청산 방향압력 제거 -- 청산 위험 칩은 liqRiskIndicatorItem() 이 직접 계산한다.
+  // 2026-09-11 청산 방향압력 칩 제거(예측·손익 8지평 전패). 대체 칩 없이 자리를 비운다.
 
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
@@ -4510,8 +4383,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
       ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
-      liqRiskIndicatorItem(),   // 2026-09-11 청산 규모 -> 청산 위험 교체(사용자 지시)
-
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);
@@ -4912,6 +4783,5 @@ window.addEventListener("appinstalled", () => el("notifyInstallBtn")?.classList.
 
 setupNotifyPage();
 
-// 2026-09-11 청산 위험 **패널** 제거 -- 지표 행의 칩(liqRiskIndicatorItem)이 대신한다.
-// 조회(latestPositionSizing)는 칩이 쓰므로 유지한다.
+// 2026-09-11 청산 위험 패널·칩 모두 제거(사용자 지시). /api/position-sizing 은 아직 살아 있다.
 
