@@ -1091,21 +1091,38 @@ function renderSnapshotAccount() {
   const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
   const entry = Number(pos.entry_price) || 0;
   const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
-  const usedPct = wallet > 0 ? (Number(b.margin) || 0) / wallet * 100 : 0;
-  const expo = wallet > 0 ? (Number(pos.notional) || 0) / wallet : 0;
+  // 🔴2026-09-11 정정(사용자 지적). b.margin 은 바이낸스 totalMarginBalance = **순자산**
+  //   (지갑+미실현)이지 사용 증거금이 아니다. 그걸 쓰던 탓에 "증거금 사용"이 98.6% 로 떴다
+  //   -- 실제는 39.6%. 이 값은 정의상 거의 항상 100% 근처라 **아무것도 재고 있지 않았다**.
+  //   이제 수집기가 initial_margin(totalInitialMargin)을 그대로 싣는다. 옛 상태파일을 만나면
+  //   순자산−가용으로 되짚는다(바이낸스 정의상 같은 값이고, 실측으로 368.60 일치 확인).
+  const equity = wallet + upnl;                       // = totalMarginBalance
+  const usedMargin = Number.isFinite(Number(b.initial_margin)) ? Number(b.initial_margin)
+    : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
+  const usedPct = equity > 0 ? usedMargin / equity * 100 : 0;
+  // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
+  //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
+  const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
   // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  const tile = (lab, val, tone, fill) => `<div class="acct-tile">
+  const tile = (lab, val, tone, fill, title) => `<div class="acct-tile"${
+      title ? ` title="${escapeHtml(title)}"` : ""}>
       <span class="acct-tile-lab">${lab}</span>
       <b class="acct-tile-val ${tone}">${val}</b>
       <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
     </div>`;
   const tiles = `<div class="acct-tiles">
-      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL)}
+      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
+             `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
+               (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
       ${tile("증거금 사용", `${usedPct.toFixed(0)}%`,
-             usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100)}
-      ${tile("노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP)}
+             usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
+             `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
+               fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
+      ${tile("계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+             `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
+               pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
     </div>`;
 
   // ⭐청산 거리 게이지 -- 롱/숏 모두 **왼쪽 끝이 청산**이 되도록 접는다.
