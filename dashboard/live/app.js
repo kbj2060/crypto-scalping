@@ -897,12 +897,13 @@ function acctPerfSvg(net) {
     const y = v >= 0 ? zero - hgt : zero;
     pts.push(`${(x + bw * 0.36).toFixed(1)},${(zero - cum * sc).toFixed(1)}`);
     return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.72).toFixed(1)}" `
-      + `height="${hgt.toFixed(1)}" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.9"></rect>`;
+      + `height="${hgt.toFixed(1)}" rx="1.2" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.88"></rect>`;
   }).join("");
   return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
     + bars
     + `<line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--line)" stroke-width="1"></line>`
-    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.6"></polyline>`
+    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.5" `
+    + `stroke-linejoin="round" stroke-linecap="round"></polyline>`
     + `</svg>`;
 }
 
@@ -918,13 +919,26 @@ function renderSnapshotAccount() {
   const b = latestBinanceAccount.balance || {};
   const wallet = Number(b.wallet) || 0;
   const upnl = Number(b.unrealized) || 0;
-  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)} · 순자산 ${fmtUsd(wallet + upnl)}`);
+  const equity = wallet + upnl;
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)}`);
   const pos = snapshotAccountPosition();
   const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
   if (summary) {
     summary.textContent = pos ? (pos.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
     summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
   }
+
+  // ── 히어로: 숫자 하나가 헤드라인이다 ─────────────────────────────────────────
+  // 옛 판은 같은 크기 숫자 셋을 나란히 둬서 무엇부터 볼지 알 수 없었다. 순자산을 키우고
+  // 나머지는 타일로 내린다. 미실현은 색 글씨가 아니라 **알약**이라 흑백으로 봐도 읽힌다.
+  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
+  const dTone = upnl > 0 ? "good" : upnl < 0 ? "bad" : "neutral";
+  const hero = `<div class="acct-hero">
+      <span class="acct-eyebrow">순자산</span>
+      <div class="acct-figure">${fmtUsd(equity)}</div>
+      <span class="acct-delta ${dTone}">${upnl > 0 ? "▲" : upnl < 0 ? "▼" : "–"} ${fmtUsd(upnl)}
+        <i>${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(2)}%</i></span>
+    </div>`;
 
   // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
   const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
@@ -935,59 +949,81 @@ function renderSnapshotAccount() {
   let worstIdx = -1;
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
+  const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
   const perf = net.length
-    ? `<div class="acct-perf">
-         <p class="acct-perf-head">왕복 ${net.length}건 · 승률 ${Math.round(wins / net.length * 100)}% ·
-            누적 <b class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</b></p>
+    ? `<section class="acct-perf">
+         <div class="acct-chips">
+           ${chip(net.length, "왕복")}
+           ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
+           ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
+         </div>
          ${acctPerfSvg(net)}
          ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
-       </div>`
-    : `<div class="acct-perf"><p class="muted">닫힌 왕복이 아직 없습니다.</p></div>`;
+       </section>`
+    : `<section class="acct-perf"><div class="acct-empty">닫힌 왕복이 아직 없습니다.</div></section>`;
 
   const otherNote = others > 0
-    ? `<p class="muted">다른 코인에 ${others}종목을 더 보유 중입니다 -- 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
+    ? `<p class="acct-foot">다른 코인에 ${others}종목을 더 보유 중입니다 — 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
     : "";
   if (!pos) {
-    setH("snapAcctPosition", `<div class="acct-viz">
-        <div class="acct-left"><p class="muted">${ASSET_CONFIG[activeSnapshotAsset]?.label
-          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</p>${otherNote}</div>
-        ${perf}
-      </div>`);
+    setH("snapAcctPosition", `<div class="acct-card">
+        <div class="acct-main">${hero}
+          <div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
+            || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</div>
+        </div>${perf}
+      </div>${otherNote}`);
     return;
   }
 
   const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
+  const entry = Number(pos.entry_price) || 0;
   const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
   const usedPct = wallet > 0 ? (Number(b.margin) || 0) / wallet * 100 : 0;
-  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
   const expo = wallet > 0 ? (Number(pos.notional) || 0) / wallet : 0;
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
-  const stat = (val, lab, tone) =>
-    `<div class="acct-stat"><b class="${tone}">${val}</b><span>${lab}</span></div>`;
-  setH("snapAcctPosition", `<div class="acct-viz">
-      <div class="acct-left">
-        <div class="acct-stats">
-          ${stat(`${liqPct.toFixed(2)}%`, "청산까지", acctRiskTone(liqPct))}
-          ${stat(`${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(1)}%`, `미실현 ${fmtUsd(upnl)}`,
-                 upnl < 0 ? "bad" : upnl > 0 ? "good" : "neutral")}
-          ${stat(`${usedPct.toFixed(0)}%`, "증거금 사용",
-                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good")}
-        </div>
-        <div class="acct-expo">
-          <span>노출</span>
-          <span class="acct-expo-track"><span class="acct-expo-fill ${expo > 15 ? "bad" : "warn"}"
-            style="width:${Math.min(expo / EXPO_CAP * 100, 100).toFixed(1)}%"></span></span>
-          <b class="${expo > 15 ? "bad" : "warn"}">${expo.toFixed(1)}배</b>
-        </div>
-        <p class="acct-pos-line"><strong>${escapeHtml(pos.symbol)}
-          ${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</strong>
-          · 수량 ${escapeHtml(pos.qty)}</p>
-        <p class="acct-pos-sub">진입 ${fmtUsd(pos.entry_price)} → 현재 ${fmtUsd(mark)}
-          · 청산 ${fmtUsd(liq)} · 지갑 ${fmtUsd(wallet)}</p>
+  const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
+  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
+  const tile = (lab, val, tone, fill) => `<div class="acct-tile">
+      <span class="acct-tile-lab">${lab}</span>
+      <b class="acct-tile-val ${tone}">${val}</b>
+      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
+    </div>`;
+  const tiles = `<div class="acct-tiles">
+      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL)}
+      ${tile("증거금 사용", `${usedPct.toFixed(0)}%`,
+             usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100)}
+      ${tile("노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP)}
+    </div>`;
+
+  // ⭐청산 거리 게이지 -- 롱/숏 모두 **왼쪽 끝이 청산**이 되도록 접는다.
+  //   0 = 청산가 · 0.5 = 진입가 · 1 = 진입에서 청산 거리만큼 이익 난 가격.
+  //   측면마다 부등호를 뒤집지 않아도 되고, 눈은 "왼쪽에 가까울수록 위험"만 기억하면 된다.
+  const span = Math.abs(entry - liq) * 2;
+  const safe = span > 0 ? clamp01(Math.abs(mark - liq) / span) : 0;
+  const sideTone = pos.side === "LONG" ? "good" : "bad";
+  const position = `<div class="acct-pos" data-side="${pos.side === "LONG" ? "long" : "short"}">
+      <div class="acct-pos-head">
+        <b>${escapeHtml(pos.symbol)}</b>
+        <span class="acct-tag ${sideTone}">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
+        <span class="acct-pos-qty">${escapeHtml(pos.qty)}</span>
       </div>
+      <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
+        <span class="acct-gauge-track"></span>
+        <span class="acct-gauge-entry"></span>
+        <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+      </div>
+      <div class="acct-gauge-legend">
+        <span class="bad">청산 ${fmtUsd(liq)}</span>
+        <span>진입 ${fmtUsd(entry)}</span>
+        <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
+      </div>
+    </div>`;
+
+  setH("snapAcctPosition", `<div class="acct-card">
+      <div class="acct-main">${hero}${tiles}${position}</div>
       ${perf}
     </div>${otherNote}`);
 }

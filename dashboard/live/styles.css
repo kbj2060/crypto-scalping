@@ -1921,61 +1921,106 @@ svg {
    (L192, 720px 이하에선 1열). 그래서 이 카드가 패널의 **왼쪽 절반**에만 들어갔다.
    이 목록만 1열로 되돌린다 -- 증거신호/모델지표 목록의 2열은 그대로 둔다. */
 #snapAcctPosition { grid-template-columns: 1fr; }
-.acct-viz { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 24px; padding: 16px 18px; align-items: start; }
-.acct-left { min-width: 0; }
-/* 폭 전체를 쓰게 되면 flex+고정 gap 은 숫자 셋이 왼쪽에 뭉친다 -- 균등 분배로 편다 */
-.acct-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.acct-stat { display: grid; gap: 2px; }
-.acct-stat b { font: 800 30px/1.05 var(--font-sans); letter-spacing: -0.01em; }
-.acct-stat span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
-.acct-expo { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.acct-expo > span:first-child { font-size: 11.5px; color: var(--muted); }
-.acct-expo-track { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08);
-  overflow: hidden; min-width: 60px; }
-.acct-expo-fill { display: block; height: 100%; border-radius: 4px; }
-.acct-expo b { font: 700 13px/1 var(--font-mono); }
-.acct-pos-line { margin: 12px 0 2px; font-size: 12.5px; color: var(--text); }
-.acct-pos-sub { margin: 0; font-size: 11.5px; color: var(--muted); }
-.acct-perf { min-width: 0; }
-.acct-perf-head { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+/* ── 내 계좌 카드 (2026-09-11 전면 재설계, 사용자 "디자인이 너무 올드해") ──────────
+   옛 판의 문제: 같은 크기 숫자 셋이 나란히 있어 **무엇부터 볼지 알 수 없었다**. 노출 막대만
+   따로 생겨 리듬이 깨졌고, 색 글씨로만 상태를 말해 흑백/저시력에서 정보가 사라졌다.
+   새 구조: ①순자산 히어로 하나 ②같은 모양 타일 셋(라벨·값·레일) ③청산 거리 게이지.
+   색은 기존 변수만 쓴다 -- 새 색을 만들지 않는다(표시 규약). */
+.acct-card { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 20px; padding: 18px 20px 20px; align-items: start; }
+.acct-main { min-width: 0; display: grid; gap: 16px; }
+
+/* 히어로 -- 숫자 하나가 헤드라인이다 */
+.acct-hero { display: grid; gap: 4px; }
+.acct-eyebrow { font: 700 10.5px/1 var(--font-sans); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted); }
+.acct-figure { font: 600 40px/1.02 var(--font-display); letter-spacing: -0.025em;
+  color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 미실현은 색 글씨가 아니라 알약이다 -- 배경이 있으면 흑백으로 봐도 덩어리로 읽힌다 */
+.acct-delta { justify-self: start; display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 3px 9px; border-radius: 999px; font: 700 12px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums; border: 1px solid var(--soft-line); }
+.acct-delta i { font-style: normal; opacity: 0.72; }
+.acct-delta.good { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent);
+  border-color: color-mix(in srgb, var(--good) 34%, transparent); }
+.acct-delta.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 13%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 34%, transparent); }
+.acct-delta.neutral { color: var(--muted); background: var(--glass); }
+
+/* 타일 셋 -- 라벨·값·레일이 같은 모양이라 눈이 세로로 훑힌다 */
+.acct-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.acct-tile { display: grid; gap: 7px; padding: 11px 12px 12px; border-radius: var(--radius-sm);
+  background: var(--glass); border: 1px solid var(--soft-line); }
+.acct-tile-lab { font: 600 10.5px/1 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.acct-tile-val { font: 700 21px/1 var(--font-display); letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums; }
+.acct-rail { display: block; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.09);
+  overflow: hidden; }
+.acct-rail i { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.acct-tile-val.good { color: var(--good); }
+.acct-tile-val.warn { color: var(--amber); }
+.acct-tile-val.bad { color: var(--bad); }
+.acct-rail i.good { background: var(--good); }
+.acct-rail i.warn { background: var(--amber); }
+.acct-rail i.bad { background: var(--bad); }
+
+/* 포지션 블록 -- 왼쪽 레일 색이 측면을 말한다(글씨를 안 읽어도 보인다) */
+.acct-pos { position: relative; padding: 12px 14px 13px 16px; border-radius: var(--radius-sm);
+  background: var(--glass); border: 1px solid var(--soft-line); overflow: hidden; }
+.acct-pos::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.acct-pos[data-side="long"]::before { background: var(--good); }
+.acct-pos[data-side="short"]::before { background: var(--bad); }
+.acct-pos-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 11px; }
+.acct-pos-head b { font: 700 13px/1 var(--font-display); letter-spacing: 0.01em; color: var(--text); }
+.acct-tag { padding: 2px 7px; border-radius: 6px; font: 700 10.5px/1.35 var(--font-mono);
+  border: 1px solid var(--soft-line); }
+.acct-tag.good { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.acct-tag.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 13%, transparent); }
+.acct-pos-qty { margin-left: auto; font: 600 11.5px/1 var(--font-mono); color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+
+/* ⭐청산 거리 게이지: 0=청산가 · 0.5=진입가 · 1=진입에서 청산 거리만큼 이익.
+   롱/숏 둘 다 **왼쪽 끝이 청산**이라 측면마다 읽는 법을 바꾸지 않아도 된다. */
+.acct-gauge { position: relative; height: 8px; }
+.acct-gauge-track { display: block; height: 100%; border-radius: 999px; overflow: hidden;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 42%, transparent),
+    color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgba(255,255,255,0.06)); }
+.acct-gauge-entry { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1.5px;
+  background: var(--line); transform: translateX(-50%); }
+.acct-gauge-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ink); border: 2px solid var(--bg); transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px var(--line); }
+.acct-gauge-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px;
+  font: 600 10.5px/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.acct-gauge-legend .bad { color: var(--bad); }
+.acct-gauge-now { color: var(--text); }
+
+/* 성과 */
+.acct-perf { min-width: 0; display: grid; gap: 9px; align-content: start; }
+.acct-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.acct-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 9px;
+  border-radius: 8px; background: var(--glass); border: 1px solid var(--soft-line); }
+.acct-chip b { font: 700 12.5px/1 var(--font-mono); color: var(--text);
+  font-variant-numeric: tabular-nums; }
+.acct-chip > span { font: 600 10px/1 var(--font-sans); color: var(--muted); }
+.acct-chip .good { color: var(--good); }
+.acct-chip .bad { color: var(--bad); }
 /* preserveAspectRatio="none" -- 폭은 패널을 따라가고 높이는 여기서 고정한다 */
-.acct-perf-svg { display: block; width: 100%; height: 96px; }
-.acct-perf-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
-.acct-stat b.good, .acct-expo b.good, .acct-perf b.good, .acct-perf-note .good { color: var(--good); }
-.acct-stat b.bad, .acct-expo b.bad, .acct-perf b.bad, .acct-perf-note .bad { color: var(--bad); }
-.acct-stat b.warn, .acct-expo b.warn { color: var(--amber); }
-.acct-stat b.neutral { color: var(--muted); }
-.acct-expo-fill.bad { background: var(--bad); }
-.acct-expo-fill.warn { background: var(--amber); }
+.acct-perf-svg { display: block; width: 100%; height: 92px; }
+.acct-perf-note { margin: 0; font-size: 11px; color: var(--muted); }
+.acct-perf-note .good { color: var(--good); }
+.acct-perf-note .bad { color: var(--bad); }
+.acct-empty { padding: 14px; border-radius: var(--radius-sm); background: var(--glass);
+  border: 1px dashed var(--soft-line); font-size: 12px; color: var(--muted); }
+.acct-foot { margin: 0; padding: 0 20px 16px; font-size: 11px; color: var(--muted); }
+
 @media (max-width: 720px) {
   /* 좁은 화면에선 좌우 2분할이 둘 다 뭉개진다 -- 위아래로 쌓는다 */
-  .acct-viz { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
-  .acct-stats { gap: 10px; }
-  .acct-stat b { font-size: 25px; }
-  .acct-perf-svg { height: 78px; }
+  .acct-card { grid-template-columns: 1fr; gap: 14px; padding: 14px 14px 16px; }
+  .acct-figure { font-size: 32px; }
+  .acct-tiles { gap: 8px; }
+  .acct-tile { padding: 9px 10px 10px; }
+  .acct-tile-val { font-size: 18px; }
+  .acct-perf-svg { height: 76px; }
+  .acct-foot { padding: 0 14px 14px; }
 }
-
-/* 청산 위험 카드 (2026-09-11 사용자 "텍스트 말고 그림이나 그래프로") -- 텍스트 나열이라
-   한눈에 안 들어온다는 지적. 지평별 확률을 가로 막대로 세로 정렬해 길이로 비교하게 한다.
-   색은 기존 변수만 쓴다(새 색 만들지 않음). 방향 없는 카드라 good/bad 대신 warn/muted 계열. */
-.liqrisk { display: grid; gap: 7px; padding: 10px 12px; }
-.liqrisk-row { display: grid; grid-template-columns: 46px 1fr 46px; align-items: center; gap: 8px; }
-.liqrisk-label { font: 700 11px/1 var(--font-mono); color: var(--muted); }
-.liqrisk-track { height: 10px; border-radius: 3px; background: rgba(255,255,255,.07);
-  overflow: hidden; position: relative; }
-.liqrisk-fill { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
-.liqrisk-fill.warn { background: var(--warn); }
-.liqrisk-fill.bad { background: var(--bad); }
-.liqrisk-val { font: 800 11.5px/1 var(--font-mono); text-align: right; color: var(--text); }
-.liqrisk-val.warn { color: var(--warn); }
-.liqrisk-val.bad { color: var(--bad); }
-/* 크기 비교 막대: 권장(1배) 지점을 눈금으로 찍어 "얼마나 넘었나"를 길이로 본다 */
-.liqrisk-size { display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 8px;
-  margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--soft-line); }
-.liqrisk-size-track { height: 10px; border-radius: 3px; background: rgba(255,255,255,.07);
-  position: relative; overflow: hidden; }
-.liqrisk-size-fill { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
-.liqrisk-size-fill.warn { background: var(--warn); }
-.liqrisk-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--line); }
-.liqrisk-note { font: 600 10.5px/1.4 var(--font-sans); color: var(--muted); padding: 2px 12px 0; }
