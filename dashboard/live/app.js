@@ -882,7 +882,7 @@ function acctRiskTone(liqPct) {
 }
 
 // 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
-function acctPerfSvg(net, labels) {
+function acctPerfSvg(net, meta) {
   if (!net.length) return "";
   // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
   // 🔴그래서 **확대에 걸리면 안 되는 것들은 확대를 끈다**: 선 두께는 vector-effect 로 고정하고,
@@ -916,11 +916,21 @@ function acctPerfSvg(net, labels) {
   const area = `M${xAt(0) + bw / 2} ${zero}L${line.join("L")}L${xAt(net.length - 1) + bw / 2} ${zero}Z`;
   const lastX = xAt(net.length - 1) + bw / 2, lastY = yAt(cums[net.length - 1]);
   // 값은 점마다 찍지 않는다 -- 끝점 하나만 점으로 표시하고 숫자는 위 칩과 툴팁이 가진다.
+  // 히트 영역은 막대가 아니라 **칸 전체 높이**다(얇은 막대를 정조준하게 만들지 않는다).
+  // 키보드로도 같은 내용이 나와야 하므로 tabindex 를 준다 -- 툴팁이 값의 유일한 통로가 되면 안 된다.
   const hits = net.map((v, i) => {
-    const t = `${labels && labels[i] ? labels[i] + " · " : `${i + 1}번째 왕복 · `}`
-      + `${v >= 0 ? "+" : ""}${fmtUsd(v)} · 누적 ${fmtUsd(cums[i])}`;
+    const m = (meta && meta[i]) || {};
+    const rows = [
+      `${m.when || `${i + 1}번째 왕복`}${m.side ? " · " + m.side : ""}`,
+      m.qty ? `수량 ${m.qty} ETH · ${fmtUsd(m.notional)}` : "",
+      m.entry && m.exit ? `진입 ${fmtUsd(m.entry)} → 청산 ${fmtUsd(m.exit)}` : "",
+      `손익 <b class="${v < 0 ? "bad" : "good"}">${v >= 0 ? "+" : ""}${fmtUsd(v)}</b>`
+        + ` · 누적 ${fmtUsd(cums[i])}`,
+    ].filter(Boolean);
+    // 앞 세 줄은 사용자 데이터라 이스케이프하고, 마지막 줄의 <b> 만 우리가 넣은 마크업이다.
+    const html = rows.map((r, k) => (k === rows.length - 1 ? r : escapeHtml(r))).join("<br>");
     return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
-      + `fill="transparent"><title>${escapeHtml(t)}</title></rect>`;
+      + `fill="transparent" tabindex="0" data-tip="${escapeHtml(html)}"></rect>`;
   }).join("");
   // 길이 0 + round cap = 지름이 stroke-width 인 정원. non-scaling 이라 늘어나지 않는다.
   const dot = (w, color, op) => `<line x1="${lastX.toFixed(1)}" y1="${lastY.toFixed(1)}" `
@@ -938,6 +948,32 @@ function acctPerfSvg(net, labels) {
     + dot(8, "var(--ink)", "0.9")              // 끝점 8px
     + hits
     + `</svg>`;
+}
+
+// 계좌 차트 툴팁. 🔴카드는 30초마다 innerHTML 로 통째로 다시 그려진다 -- 막대마다 리스너를
+// 달면 매번 새로 달아야 하고 옛 것이 샌다. 컨테이너(#snapAcctPosition)는 안 바뀌므로 위임한다.
+function bindAcctChartTip() {
+  const host = el("snapAcctPosition");
+  if (!host || host.dataset.tipBound) return;
+  host.dataset.tipBound = "1";
+  const tipOf = (t) => (t && t.closest ? t.closest(".acct-plot") : null)?.querySelector(".acct-tip");
+  const show = (target, clientX) => {
+    const tip = tipOf(target);
+    if (!tip || !target.dataset.tip) return;
+    tip.innerHTML = target.dataset.tip;
+    tip.hidden = false;
+    const box = tip.parentElement.getBoundingClientRect();
+    const r = target.getBoundingClientRect();
+    const x = (clientX === null || clientX === undefined ? r.left + r.width / 2 : clientX) - box.left;
+    tip.style.left = `${Math.max(0, Math.min(box.width - tip.offsetWidth, x - tip.offsetWidth / 2))}px`;
+  };
+  const hide = (target) => { const tip = tipOf(target); if (tip) tip.hidden = true; };
+  host.addEventListener("mousemove", (e) => {
+    if (e.target.dataset && e.target.dataset.tip) show(e.target, e.clientX);
+  });
+  host.addEventListener("mouseout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
+  host.addEventListener("focusin", (e) => { if (e.target.dataset && e.target.dataset.tip) show(e.target, null); });
+  host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
 }
 
 function renderSnapshotAccount() {
@@ -979,14 +1015,36 @@ function renderSnapshotAccount() {
   const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol)
     .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
   const net = closed.map((t) => Number(t.net_pnl) || 0);
-  const netLabels = closed.map((t) => (t.exit_time ? fmtDateTick(Number(t.exit_time)) + " " : "")
-    + (t.side === "LONG" ? "롱" : "숏"));
+  // 툴팁이 "날짜와 크기 등"을 보여줘야 하므로(사용자 지시) 라벨 문자열이 아니라 원장을 넘긴다.
+  const netMeta = closed.map((t) => {
+    const d = new Date(Number(t.exit_time) || 0);
+    const qty = Number(t.max_qty) || 0, px = Number(t.exit_price) || 0;
+    return {
+      when: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()} `
+        + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      side: t.side === "LONG" ? "롱" : "숏", qty, notional: qty * px,
+      entry: Number(t.entry_price) || 0, exit: px,
+    };
+  });
   const wins = net.filter((v) => v > 0).length;
   const total = net.reduce((x, y) => x + y, 0);
   let worstIdx = -1;
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
   const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
+  // 기간을 적는다(사용자 지시). ⚠️"이번 달 전부"라고 단정하지 않는다 -- 거래소는 시간 조건을
+  // 안 주면 최근 구간만 돌려주므로, 여기 있는 건 **조회된 범위**지 계좌의 전체 이력이 아니다.
+  const spanText = (() => {
+    if (!closed.length) return "";
+    const a = new Date(Number(closed[0].exit_time) || 0);
+    const b = new Date(Number(closed[closed.length - 1].exit_time) || 0);
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "";
+    const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+    const thisMonth = b.getMonth() === new Date().getMonth() && b.getFullYear() === new Date().getFullYear();
+    const range = sameMonth ? `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getDate()}일`
+      : `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getMonth() + 1}월 ${b.getDate()}일`;
+    return (sameMonth && thisMonth ? "이번 달 · " : "") + range;
+  })();
   // 계열이 둘(건당 막대 · 누적선)이므로 범례를 항상 둔다. 적록 2색형에서 이익/손실 색 차이가
   // ΔE 6.3 이라 **색만으로는 부족**하다 -- 영선 위/아래 위치와 이 범례가 보조 부호다.
   // 글씨는 계열 색을 입지 않는다(규약): 색은 옆의 견본이 지고 글자는 muted 잉크다.
@@ -1002,7 +1060,13 @@ function renderSnapshotAccount() {
            ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
            ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
          </div>
-         <figure class="acct-plot">${legend}${acctPerfSvg(net, netLabels)}</figure>
+         <figure class="acct-plot">
+           <div class="acct-plot-head">${legend}
+             ${spanText ? `<span class="acct-span" title="거래소가 시간 조건 없이 돌려주는 최근 구간의 기록입니다 — 이보다 과거는 조회 조건을 따로 줘야 나옵니다.">${escapeHtml(spanText)}</span>` : ""}
+           </div>
+           ${acctPerfSvg(net, netMeta)}
+           <div class="acct-tip" hidden></div>
+         </figure>
          ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
@@ -1020,6 +1084,7 @@ function renderSnapshotAccount() {
             || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</div>
         </div>${perf}
       </div>${otherNote}`);
+    bindAcctChartTip();
     return;
   }
 
@@ -1071,6 +1136,7 @@ function renderSnapshotAccount() {
       <div class="acct-main">${hero}${tiles}${position}</div>
       ${perf}
     </div>${otherNote}`);
+  bindAcctChartTip();
 }
 
 
