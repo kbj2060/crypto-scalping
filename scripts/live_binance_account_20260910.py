@@ -205,7 +205,12 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "balance": {
             "wallet": float(balance["totalWalletBalance"]),
+            # 🔴`margin` 은 **순자산**(지갑+미실현)이지 사용 증거금이 아니다. 2026-09-11 에
+            # 대시보드가 이걸 "증거금 사용"으로 읽어 98.6%(실제 39.6%)를 띄웠다.
+            # 사용/유지 증거금은 별도 필드라 아래에 이름 그대로 싣는다.
             "margin": float(balance["totalMarginBalance"]),
+            "initial_margin": float(balance["totalInitialMargin"]),
+            "maint_margin": float(balance["totalMaintMargin"]),
             "available": float(balance["availableBalance"]),
             "unrealized": float(balance["totalUnrealizedProfit"]),
         },

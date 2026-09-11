@@ -104,6 +104,31 @@ def main() -> int:
         else:
             nc2, rc2 = rate(np.isfinite(y), y)
             print(f"\n══ V자반등 {tag} ══\n  기저 라벨률 {rc2:.4f} (n={nc2:,})")
+
+    # ── 2차 질문(사용자): "매매는 논외, '이 봉이 극점이고 반등락이 온다'는 신호로만 쓴다면?" ──
+    # 그러면 체결 가능성 논점은 **빠진다**. 대신 남는 질문은 하나다:
+    # 배포 라벨은 "안 깨질 저점"만 요구하고 **반등 크기를 전혀 요구하지 않는다**.
+    # 그래서 라벨=1 이 실제로 얼마나 되튀는지를 잰다. 되튀지 않으면 "반등락이 온다"는 읽기가
+    # 라벨에 근거가 없다. ⚠️저가 기준 되튐은 라벨과 기계적으로 얽히므로(라벨이 전방 저가를
+    # low[t] 위로 묶는다) **종가 기준 되튐**을 같이 본다 -- 사람이 화면 보고 반응하는 시점이다.
+    print("\n\n══ '극점 = 반등락 온다' 가 라벨에 있는가 (바닥쪽) ══")
+    reb_lo = (fmax12 - lo) / lo * 100.0
+    reb_cl = (fmax12 - cl) / cl * 100.0
+    okr = np.isfinite(y_ext_low) & np.isfinite(reb_lo) & np.isfinite(reb_cl)
+    lab1, lab0 = okr & (y_ext_low == 1), okr & (y_ext_low == 0)
+    print(f"  {'':22s} {'중앙':>8} {'상위25%':>8} {'>=0.2%':>8} {'>=0.5%':>8} {'>=1.0%':>8}")
+    for nm, m, x in (("라벨=1 · 저가기준", lab1, reb_lo), ("라벨=0 · 저가기준", lab0, reb_lo),
+                     ("라벨=1 · **종가기준**", lab1, reb_cl), ("라벨=0 · 종가기준", lab0, reb_cl),
+                     ("전체(무조건) · 종가", okr, reb_cl)):
+        v = x[m]
+        print(f"  {nm:22s} {np.median(v):7.3f}% {np.percentile(v,75):7.3f}% "
+              f"{(v>=0.2).mean():7.1%} {(v>=0.5).mean():7.1%} {(v>=1.0).mean():7.1%}")
+    # 변동성 통제: 되튐을 그 시점 ATR 로 나눠 같은 국면끼리 비교한다.
+    atr_pct = atr / np.maximum(cl, 1e-9) * 100.0
+    okn = okr & np.isfinite(atr_pct) & (atr_pct > 0)
+    for nm, m in (("라벨=1", okn & (y_ext_low == 1)), ("라벨=0", okn & (y_ext_low == 0))):
+        v = (reb_cl / atr_pct)[m]
+        print(f"  ATR 배수(종가기준) {nm}: 중앙 {np.median(v):.2f}배 · 상위25% {np.percentile(v,75):.2f}배")
     return 0
 
 
