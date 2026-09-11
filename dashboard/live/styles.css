@@ -1934,8 +1934,9 @@ svg {
 .acct-hero { display: grid; gap: 4px; }
 .acct-eyebrow { font: 700 10.5px/1 var(--font-sans); letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--muted); }
-.acct-figure { font: 600 40px/1.02 var(--font-display); letter-spacing: -0.025em;
-  color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 큰 단독 숫자엔 디스플레이 서체도 tabular-nums 도 쓰지 않는다 -- 장식으로 읽히고
+   등폭 숫자는 디스플레이 크기에서 헐거워 보인다. 본문과 같은 sans, 비례 숫자. */
+.acct-figure { font: 600 40px/1.02 var(--font-sans); letter-spacing: -0.025em; color: var(--ink); }
 /* 미실현은 색 글씨가 아니라 알약이다 -- 배경이 있으면 흑백으로 봐도 덩어리로 읽힌다 */
 .acct-delta { justify-self: start; display: inline-flex; align-items: baseline; gap: 6px;
   padding: 3px 9px; border-radius: 999px; font: 700 12px/1 var(--font-mono);
@@ -1952,8 +1953,7 @@ svg {
 .acct-tile { display: grid; gap: 7px; padding: 11px 12px 12px; border-radius: var(--radius-sm);
   background: var(--glass); border: 1px solid var(--soft-line); }
 .acct-tile-lab { font: 600 10.5px/1 var(--font-sans); color: var(--muted); white-space: nowrap; }
-.acct-tile-val { font: 700 21px/1 var(--font-display); letter-spacing: -0.015em;
-  font-variant-numeric: tabular-nums; }
+.acct-tile-val { font: 700 21px/1 var(--font-sans); letter-spacing: -0.015em; }
 .acct-rail { display: block; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.09);
   overflow: hidden; }
 .acct-rail i { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
@@ -2005,8 +2005,21 @@ svg {
 .acct-chip > span { font: 600 10px/1 var(--font-sans); color: var(--muted); }
 .acct-chip .good { color: var(--good); }
 .acct-chip .bad { color: var(--bad); }
-/* preserveAspectRatio="none" -- 폭은 패널을 따라가고 높이는 여기서 고정한다 */
-.acct-perf-svg { display: block; width: 100%; height: 92px; }
+/* 차트도 카드의 다른 면과 같은 유리 타일에 앉힌다 */
+.acct-plot { margin: 0; padding: 10px 12px 8px; border-radius: var(--radius-sm);
+  background: var(--glass); border: 1px solid var(--soft-line); }
+/* 🔴높이를 px 로 못박고 폭만 늘리면 비균일 확대가 된다 -- 둥근 4px 이 타원이 되고 2px 선이
+   굵어진다. 비율을 고정해 **균일 확대**만 쓴다(viewBox 320x104 와 같은 비율). */
+.acct-perf-svg { display: block; width: 100%; height: auto; aspect-ratio: 320 / 104; }
+/* 범례: 계열이 둘이면 항상 둔다. 글씨는 계열 색을 입지 않고 옆의 견본이 색을 진다. */
+.acct-legend { display: flex; gap: 12px; margin-bottom: 2px;
+  font: 600 10px/1 var(--font-sans); color: var(--muted); }
+.acct-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.acct-legend .sw { width: 8px; height: 8px; border-radius: 2px; }
+.acct-legend .sw.good { background: var(--good); }
+.acct-legend .sw.bad { background: var(--bad); }
+.acct-legend .sw.ln { width: 12px; height: 2px; border-radius: 2px;
+  background: var(--ink); opacity: 0.72; }
 .acct-perf-note { margin: 0; font-size: 11px; color: var(--muted); }
 .acct-perf-note .good { color: var(--good); }
 .acct-perf-note .bad { color: var(--bad); }
@@ -2021,6 +2034,6 @@ svg {
   .acct-tiles { gap: 8px; }
   .acct-tile { padding: 9px 10px 10px; }
   .acct-tile-val { font-size: 18px; }
-  .acct-perf-svg { height: 76px; }
+  .acct-plot { padding: 8px 10px 6px; }
   .acct-foot { padding: 0 14px 14px; }
 }

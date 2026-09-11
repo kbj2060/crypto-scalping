@@ -882,28 +882,54 @@ function acctRiskTone(liqPct) {
 }
 
 // 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
-function acctPerfSvg(net) {
+function acctPerfSvg(net, labels) {
   if (!net.length) return "";
-  const W = 300, H = 96, zero = H * 0.52, pad = 2;
-  const peak = Math.max(...net.map((v) => Math.abs(v)), 1e-9);
-  const bw = (W - pad * 2) / net.length;
-  const sc = (H * 0.40) / peak;
+  // 🔴preserveAspectRatio="none" 를 쓰지 않는다. 폭만 늘어나면 "둥근 4px"이 타원이 되고
+  //   2px 선이 굵어진다. viewBox 비율을 CSS aspect-ratio 로 고정해 **균일 확대**만 쓴다.
+  const W = 320, H = 104, zero = H * 0.54, padX = 3, padY = 8;
   let cum = 0;
-  const pts = [];
+  const cums = net.map((v) => (cum += v));
+  // 🔴막대와 누적선이 **같은 축**을 쓴다(둘 다 USD). 그러니 상한도 둘을 함께 봐야 한다 --
+  //   옛 판은 건당 최대값만 봐서 누적선이 SVG 밖으로 잘려 나갈 수 있었다.
+  const peak = Math.max(...net.map(Math.abs), ...cums.map(Math.abs), 1e-9);
+  const bw = (W - padX * 2) / net.length;
+  const sc = (H / 2 - padY) / peak;
+  const xAt = (i) => padX + i * bw;
+  const yAt = (v) => zero - v * sc;
+  // 막대: 24px 상한 · 인접 막대 사이 2px 표면 간격(테두리를 그리지 않는다)
+  const bwFill = Math.min(24, Math.max(1.5, bw - 2));
   const bars = net.map((v, i) => {
-    cum += v;
-    const x = pad + i * bw;
-    const hgt = Math.max(Math.abs(v) * sc, 0.8);
-    const y = v >= 0 ? zero - hgt : zero;
-    pts.push(`${(x + bw * 0.36).toFixed(1)},${(zero - cum * sc).toFixed(1)}`);
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.72).toFixed(1)}" `
-      + `height="${hgt.toFixed(1)}" rx="1.2" fill="var(--${v < 0 ? "bad" : "good"})" opacity="0.88"></rect>`;
+    const x = xAt(i) + (bw - bwFill) / 2;
+    const h = Math.max(Math.abs(v) * sc, 1);
+    const r = Math.min(4, bwFill / 2, h);          // 바깥 끝만 둥글고 **기준선 쪽은 각지게**
+    const up = v >= 0;
+    const tip = up ? zero - h : zero + h;
+    const d = up
+      ? `M${x} ${zero}V${tip + r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip + r}V${zero}Z`
+      : `M${x} ${zero}V${tip - r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip - r}V${zero}Z`;
+    return `<path d="${d}" fill="var(--${up ? "good" : "bad"})" opacity="0.9"></path>`;
   }).join("");
-  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+  // 누적선 아래 워시 -- 계열 색이 아니라 중립 잉크다(누적은 손익 방향이 아니라 '합계'다).
+  const line = cums.map((c, i) => `${(xAt(i) + bw / 2).toFixed(1)},${yAt(c).toFixed(1)}`);
+  const area = `M${xAt(0) + bw / 2} ${zero}L${line.join("L")}L${xAt(net.length - 1) + bw / 2} ${zero}Z`;
+  const lastX = xAt(net.length - 1) + bw / 2, lastY = yAt(cums[net.length - 1]);
+  // 값은 점마다 찍지 않는다 -- 끝점 하나만 점으로 표시하고 숫자는 위 칩과 툴팁이 가진다.
+  const hits = net.map((v, i) => {
+    const t = `${labels && labels[i] ? labels[i] + " · " : `${i + 1}번째 왕복 · `}`
+      + `${v >= 0 ? "+" : ""}${fmtUsd(v)} · 누적 ${fmtUsd(cums[i])}`;
+    return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
+      + `fill="transparent"><title>${escapeHtml(t)}</title></rect>`;
+  }).join("");
+  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" role="img" `
+    + `aria-label="닫힌 왕복 ${net.length}건의 건당 손익 막대와 누적 손익 선">`
+    + `<path d="${area}" fill="var(--ink)" opacity="0.08"></path>`
     + bars
-    + `<line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--line)" stroke-width="1"></line>`
-    + `<polyline points="${pts.join(" ")}" fill="none" stroke="var(--amber)" stroke-width="1.5" `
-    + `stroke-linejoin="round" stroke-linecap="round"></polyline>`
+    + `<line x1="${padX}" y1="${zero}" x2="${W - padX}" y2="${zero}" stroke="var(--soft-line)" stroke-width="1"></line>`
+    + `<polyline points="${line.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" `
+    + `stroke-linejoin="round" stroke-linecap="round" opacity="0.72"></polyline>`
+    + `<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="var(--ink)" `
+    + `stroke="var(--panel-strong)" stroke-width="2"></circle>`
+    + hits
     + `</svg>`;
 }
 
@@ -942,14 +968,26 @@ function renderSnapshotAccount() {
 
   // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
   const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol);
+  // 🔴/api/binance-account 는 **최신순**으로 준다. 그대로 그리면 누적선이 시간을 거꾸로 달린다.
+  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol)
+    .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
   const net = closed.map((t) => Number(t.net_pnl) || 0);
+  const netLabels = closed.map((t) => (t.exit_time ? fmtDateTick(Number(t.exit_time)) + " " : "")
+    + (t.side === "LONG" ? "롱" : "숏"));
   const wins = net.filter((v) => v > 0).length;
   const total = net.reduce((x, y) => x + y, 0);
   let worstIdx = -1;
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
   const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
+  // 계열이 둘(건당 막대 · 누적선)이므로 범례를 항상 둔다. 적록 2색형에서 이익/손실 색 차이가
+  // ΔE 6.3 이라 **색만으로는 부족**하다 -- 영선 위/아래 위치와 이 범례가 보조 부호다.
+  // 글씨는 계열 색을 입지 않는다(규약): 색은 옆의 견본이 지고 글자는 muted 잉크다.
+  const legend = `<div class="acct-legend">
+      <span><i class="sw good"></i>이익</span>
+      <span><i class="sw bad"></i>손실</span>
+      <span><i class="sw ln"></i>누적</span>
+    </div>`;
   const perf = net.length
     ? `<section class="acct-perf">
          <div class="acct-chips">
@@ -957,7 +995,7 @@ function renderSnapshotAccount() {
            ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
            ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
          </div>
-         ${acctPerfSvg(net)}
+         <figure class="acct-plot">${legend}${acctPerfSvg(net, netLabels)}</figure>
          ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
