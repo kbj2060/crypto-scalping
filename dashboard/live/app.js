@@ -1467,7 +1467,10 @@ const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
   // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
   // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
-  v_rebound: { good: "되돌림 롱", bad: "되돌림 숏", flat: "미발동", neutral: "데이터 없음" },
+  // 2026-09-11 "되돌림" 폐기(사용자 지적). 라벨의 giveback(되돌림)은 **20% 이하로 억제돼야
+  // 하는 조건**이라, 발동을 "되돌림"이라 부르면 같은 단어가 한 칩에서 정반대 두 뜻이 된다.
+  // 칩 이름(V자 급등락)·툴팁과 같은 어휘로 통일한다.
+  v_rebound: { good: "급등", bad: "급락", flat: "미발동", neutral: "데이터 없음" },
   // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
   // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
   liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
@@ -1580,6 +1583,13 @@ function toggleSignalDetail(btn, key) {
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
   // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
+  v_rebound: {
+    "급등": "앞으로 60분 안에 **위로 터질** 확률이 높다는 뜻입니다 — 30분 안에 종가 기준 1.5×ATR 이상 오르고, 그 정점을 20% 넘게 반납하지 않는 움직임을 말합니다.",
+    "급락": "앞으로 60분 안에 **아래로 터질** 확률이 높다는 뜻입니다 — 판정 기준은 급등과 같고 방향만 반대입니다.",
+    "미발동": "확률이 기준선(60%)에 못 미쳐 어느 쪽도 부르지 않았습니다.",
+    "웜업": "V자 모델이 아직 첫 채점을 끝내지 않았습니다.",
+    "데이터 없음": "V자 모델 값을 읽지 못했습니다.",
+  },
   extreme_detector: {
     "바닥 발동": "지금 봉이 **앞으로 60분간 안 깨질 저점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
     "천장 발동": "지금 봉이 **앞으로 60분간 안 넘길 고점**일 확률이 높다는 뜻입니다. 매매 신호가 아니라 위치 정보입니다.",
@@ -4503,7 +4513,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 2026-09-06 공통 어휘로 교체(급등→롱 발동 / 급락→숏 발동 / 미반등→미발동 / 신호 없음→데이터 없음).
   // 색 법칙은 그대로다 -- 급등=롱 방향이라 이미 good, 급락=숏이라 bad였다. 바뀌는 건 말뿐이다.
   const vReboundSubText = !vReboundWarmedUp ? "웜업"
-    : vReboundActive ? (vReboundTone === "good" ? "되돌림 롱" : vReboundTone === "bad" ? "되돌림 숏" : "미발동")
+    : vReboundActive ? (vReboundTone === "good" ? "급등" : vReboundTone === "bad" ? "급락" : "미발동")
     : "데이터 없음";
   // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
   // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
