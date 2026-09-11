@@ -830,6 +830,399 @@ def joint_arm() -> int:
     return 0
 
 
+# ────────────────────────── 탐지기 HGB 모델 (사용자 지시: 규칙만 있고 모델이 없었다)
+DET_W = 3          # 판정창 15분. 탐지는 **선행 0** — «지금 가고 있나»를 본다
+
+
+def detector_arm() -> int:
+    """배포된 탐지 규칙(2종 AND, 게이트 제거판) vs HGB 모델.
+
+    ⭐**발동 빈도를 맞춰** 겨룬다. 규칙이 창마다 실제로 켜지는 비율을 그대로 모델 커버리지로
+      쓴다 — 더 자주 켜는 쪽이 그냥 많이 잡아 보이는 걸 막는다.
+    ⭐탐지는 lift 만으로 못 판정한다. 같은 포착률이라도 **늦게** 켜지면 쓸모가 없다.
+      그래서 사건 단위로 지연(봉)과 진행률(켜진 시점 이동폭 / 사건 전체 이동폭)을 같이 낸다.
+    """
+    global DET_W
+    DET_W = int(_arg("--det-w", str(DET_W)))     # 판정창을 바꿔가며 본다(15/30/60분)
+    p = R.build()
+    feats = R.feature_cols(p)
+    X = p[feats].to_numpy(np.float32)
+    c = pd.read_csv(R.KL5, usecols=["close"]).close.to_numpy(float)
+    logc = np.log(np.maximum(c, 1e-12))
+    atr = p["atr_pct"].to_numpy()
+    p["win"] = ""
+    for nm, a_, b_ in R.WINDOWS:
+        p.loc[(p.timestamp >= a_) & (p.timestamp <= b_), "win"] = nm
+    _, mv = lead_move(logc, atr, 0, DET_W)                  # 선행 0 = 탐지
+    ok = (np.isfinite(atr) & np.isfinite(mv) & (p.win != "").to_numpy()
+          & np.isfinite(p[feats]).all(axis=1).to_numpy())
+    y, _ = label_windows(p, mv, ok)
+    emb = 2 * DET_W
+    for nm, _, _ in R.WINDOWS:
+        i = np.flatnonzero((p.win == nm).to_numpy())
+        if len(i) > emb:
+            ok[i[-emb:]] = False
+
+    # 배포된 탐지 규칙 재현 — 게이트 제거판(2026-09-11 배포). 전 봉 후행 2016 분위 q90 AND.
+    rule = np.ones(len(p), bool)
+    for col in ("qv", "n"):
+        x = p[f"z_{col}_288"].to_numpy(float)
+        thr = pd.Series(x).rolling(2016, min_periods=200).quantile(0.90).shift(1).to_numpy()
+        rule &= np.isfinite(x) & np.isfinite(thr) & (x >= thr)
+
+    idx = {w: np.flatnonzero(ok & (p.win == w).to_numpy()) for w in R.EVAL_WINS}
+    tr = np.flatnonzero(ok & (p.win == "TRAIN").to_numpy())
+    rng = np.random.default_rng(SEED)
+    seeds = rng.integers(1, 10**6, NSEED).tolist()
+    print(f"[탐지 모델] HGB · 무작위 시드 {seeds} · 피쳐 {len(feats)} · 판정창 {DET_W*5}분 · 선행 0")
+    sc = np.zeros((len(seeds), len(p)))
+    for si, sd in enumerate(seeds):
+        sc[si] = R.hgb(int(sd)).fit(X[tr], y[tr]).predict_proba(X)[:, 1]
+        print(f"  seed {sd} 학습 완료", flush=True)
+
+    def ev_metrics(fire, i, yy):
+        """사건 단위 포착률·지연·진행률. 사건 = 라벨의 상승 엣지, 창 = [t, t+DET_W]."""
+        ev = np.flatnonzero(yy & ~np.r_[False, yy[:-1]])
+        caught, delays, prog = 0, [], []
+        for t in ev:
+            hi = min(t + DET_W, len(i) - 1)
+            w = np.flatnonzero(fire[t:hi + 1])
+            if not len(w):
+                continue
+            caught += 1
+            delays.append(int(w[0]))
+            seg = c[i[t]:i[hi] + 1]
+            tot = float(np.max(np.abs(seg - seg[0]))) if len(seg) else 0.0
+            prog.append(abs(c[i[t + int(w[0])]] - c[i[t]]) / tot if tot > 0 else np.nan)
+        return (caught / max(len(ev), 1), float(np.median(delays)) if delays else np.nan,
+                float(np.nanmedian(prog)) if prog else np.nan, len(ev))
+
+    print(f"\n  {'창':>4s} {'사건':>5s} {'팔':>10s} {'발동/일':>7s} {'정밀도':>7s} "
+          f"{'사건포착':>8s} {'지연':>6s} {'진행률':>7s}")
+    for w in R.EVAL_WINS:
+        i = idx[w]
+        yy = y[i]
+        rf = rule[i]
+        cov = float(rf.mean())                       # ⭐모델 커버리지를 규칙 발동률에 맞춘다
+        rp = float(yy[rf].mean()) if rf.any() else np.nan
+        rr = ev_metrics(rf, i, yy)
+        print(f"  {w:>4s} {rr[3]:5d} {'규칙(배포)':>10s} {cov*288:7.1f} {rp*100:6.1f}% "
+              f"{rr[0]*100:7.1f}% {rr[1]*5:5.0f}분 {rr[2]*100:6.1f}%")
+        rows = []
+        for si in range(len(seeds)):
+            x = sc[si][i]
+            k = max(int(round(np.isfinite(x).sum() * cov)), 1)
+            cut = np.partition(x[np.isfinite(x)], -k)[-k]
+            f = np.isfinite(x) & (x >= cut)
+            m_ = ev_metrics(f, i, yy)
+            rows.append((float(yy[f].mean()), m_[0], m_[1], m_[2]))
+        a = np.array(rows)
+        print(f"  {'':>4s} {'':>5s} {'HGB 최악':>10s} {cov*288:7.1f} {a[:, 0].min()*100:6.1f}% "
+              f"{a[:, 1].min()*100:7.1f}% {a[:, 2].max()*5:5.0f}분 {a[:, 3].max()*100:6.1f}%")
+        print(f"  {'':>4s} {'':>5s} {'HGB 평균':>10s} {cov*288:7.1f} {a[:, 0].mean()*100:6.1f}% "
+              f"{a[:, 1].mean()*100:7.1f}% {a[:, 2].mean()*5:5.0f}분 {a[:, 3].mean()*100:6.1f}%")
+        # ⭐반대 방향 맞춤 — **규칙과 같은 포착률**을 내려면 모델이 몇 번 울려야 하나.
+        #   발동 빈도를 맞추면 «덜 잡는다»가 되고, 포착률을 맞추면 «더/덜 울린다»가 된다.
+        #   둘 다 봐야 교체 판단이 선다.
+        need = []
+        for si in range(len(seeds)):
+            x = sc[si][i]
+            fin_ = np.isfinite(x)
+            lo, hi = cov, 1.0
+            for _ in range(24):                       # 이분 탐색: 목표 포착률을 내는 최소 커버리지
+                mid = (lo + hi) / 2
+                k = max(int(round(fin_.sum() * mid)), 1)
+                cut = np.partition(x[fin_], -k)[-k]
+                f = fin_ & (x >= cut)
+                if ev_metrics(f, i, yy)[0] >= rr[0]:
+                    hi = mid
+                else:
+                    lo = mid
+            k = max(int(round(fin_.sum() * hi)), 1)
+            cut = np.partition(x[fin_], -k)[-k]
+            f = fin_ & (x >= cut)
+            m_ = ev_metrics(f, i, yy)
+            need.append((hi, float(yy[f].mean()), m_[0], m_[2]))
+        nd = np.array(need)
+        print(f"  {'':>4s} {'':>5s} {'HGB@포착맞춤':>10s} {nd[:, 0].max()*288:7.1f} "
+              f"{nd[:, 1].min()*100:6.1f}% {nd[:, 2].min()*100:7.1f}% {'':>5s}  "
+              f"진행률 {nd[:, 3].max()*100:5.1f}%  (규칙 포착 {rr[0]*100:.1f}% 를 내는 최소 발동)")
+    return 0
+
+
+# ────────── 탐지기 발동을 라벨로 쓰는 경보 (사용자 제안 2026-09-11)
+def predetect_arm() -> int:
+    """«30분 뒤 15분 안에 **탐지기가 켜지나**» 를 맞히는 모델.
+
+    ⭐장점: 라벨이 촘촘하다(기저 ~24% vs 큰이동 5%) — 학습 신호가 5배다.
+    🔴함정: 탐지기는 정답이 아니다. 큰 이동 기준 정밀도가 16~18% 라 발동의 80%+ 는
+      큰 이동으로 안 이어진다. 탐지기를 라벨로 쓰면 **그 헛발동까지 배운다**.
+      ⇒ 학습은 탐지기로 하되 **채점은 큰 이동으로** 한다. 두 지표를 나란히 찍는다.
+    """
+    lead, w_ = CANDS[1]                       # 선행 30분 · 판정창 15분
+    p = R.build()
+    feats = R.feature_cols(p)
+    X = p[feats].to_numpy(np.float32)
+    c = pd.read_csv(R.KL5, usecols=["close"]).close.to_numpy(float)
+    logc = np.log(np.maximum(c, 1e-12))
+    atr = p["atr_pct"].to_numpy()
+    p["win"] = ""
+    for nm, a_, b_ in R.WINDOWS:
+        p.loc[(p.timestamp >= a_) & (p.timestamp <= b_), "win"] = nm
+
+    # 배포된 탐지 규칙(게이트 제거판) 재현
+    fire = np.ones(len(p), bool)
+    for col in ("qv", "n"):
+        x = p[f"z_{col}_288"].to_numpy(float)
+        thr = pd.Series(x).rolling(2016, min_periods=200).quantile(0.90).shift(1).to_numpy()
+        fire &= np.isfinite(x) & np.isfinite(thr) & (x >= thr)
+    # 라벨 A(사용자 제안): (t+lead, t+lead+w_] 안에 탐지기가 한 번이라도 켜지나
+    fwd_fire = pd.Series(fire[::-1]).rolling(w_, min_periods=1).max()[::-1].to_numpy().astype(bool)
+    y_det = np.r_[fwd_fire[lead + 1:], np.zeros(lead + 1, bool)]
+    # 라벨 B(현행 경보): 같은 창의 큰 이동 — **채점 기준**
+    _, mv = lead_move(logc, atr, lead, lead + w_)
+    ok = (np.isfinite(atr) & np.isfinite(mv) & (p.win != "").to_numpy()
+          & np.isfinite(p[feats]).all(axis=1).to_numpy())
+    y_mv, _ = label_windows(p, mv, ok)
+    emb = 2 * (lead + w_)
+    for nm, _, _ in R.WINDOWS:
+        i = np.flatnonzero((p.win == nm).to_numpy())
+        if len(i) > emb:
+            ok[i[-emb:]] = False
+    idx = {w: np.flatnonzero(ok & (p.win == w).to_numpy()) for w in R.EVAL_WINS}
+    tr = np.flatnonzero(ok & (p.win == "TRAIN").to_numpy())
+    print(f"[탐지기-라벨 경보] 선행 {lead*5}분 · 판정창 {w_*5}분 · TRAIN {len(tr):,}")
+    print(f"  기저  탐지기라벨 {y_det[tr].mean()*100:5.2f}%"
+          f"   큰이동라벨 {y_mv[tr].mean()*100:5.2f}%")
+    # ⭐라벨 자명성 — 최고 단변량이 높을수록 «자명한» 라벨이다(저장소 규율)
+    for tag, yy in (("탐지기라벨", y_det), ("큰이동라벨", y_mv)):
+        i = idx["VAL"]
+        best = max((float(np.nanmax([R.lift_at(p[f].to_numpy(float)[i], yy[i], 0.10)[0],
+                                     R.lift_at(-p[f].to_numpy(float)[i], yy[i], 0.10)[0]])), f)
+                   for f in feats)
+        print(f"  {tag} 최고 단변량(cov 10%) lift {best[0]:.2f} ({best[1]})")
+
+    rng = np.random.default_rng(SEED)
+    seeds = rng.integers(1, 10**6, NSEED).tolist()
+    res = {}
+    for tag, ytr in (("A 탐지기로 학습", y_det), ("B 큰이동으로 학습", y_mv)):
+        sc = np.zeros((len(seeds), len(p)))
+        for si, sd in enumerate(seeds):
+            sc[si] = R.hgb(int(sd)).fit(X[tr], ytr[tr]).predict_proba(X)[:, 1]
+        res[tag] = sc
+        print(f"  {tag} 학습 완료", flush=True)
+
+    print(f"\n  {'팔':>16s} " + "  ".join(f"{w:^26s}" for w in R.EVAL_WINS))
+    print(f"  {'':>16s} " + "  ".join(f"{'탐지기적중':>10s} {'큰이동정밀':>14s}" for _ in R.EVAL_WINS))
+    for tag, sc in res.items():
+        cells = []
+        for w in R.EVAL_WINS:
+            i = idx[w]
+            a = []
+            for si in range(len(seeds)):
+                x = sc[si][i]
+                k = max(int(round(np.isfinite(x).sum() * 0.10)), 1)
+                cut = np.partition(x[np.isfinite(x)], -k)[-k]
+                f = np.isfinite(x) & (x >= cut)
+                a.append((float(y_det[i][f].mean()), float(y_mv[i][f].mean())))
+            a = np.array(a)
+            cells.append(f"{a[:, 0].min()*100:9.1f}% {a[:, 1].min()*100:13.1f}%")
+        print(f"  {tag:>16s} " + "  ".join(cells))
+    for w in R.EVAL_WINS:
+        i = idx[w]
+        print(f"  (기저 {w}) 탐지기 {y_det[i].mean()*100:.1f}% · 큰이동 {y_mv[i].mean()*100:.1f}%",
+              end="   ")
+    print()
+    return 0
+
+
+# ────────── «앞으로 N분 이내에 탐지기가 발동하나» (사용자 지시 2026-09-11, 누적창)
+def prewarn_arm() -> int:
+    """라벨 = (t, t+H] **안에 한 번이라도** 탐지 발동. H = 6봉(30분) · 12봉(1시간).
+
+    앞판은 고정 슬라이스((t+lead, t+lead+3])였다. 사용자가 «N분 이내»로 바꾸라고 해서
+    누적창으로 고쳤다 — 결정 시점 바로 다음 봉부터 센다(피쳐는 t 까지, 라벨은 t+1 부터).
+    ⚠️누적이라 **기저가 크게 오른다**. 정밀도를 기저와 나란히 봐야 한다.
+    ⭐«N분 이내»는 실제 리드타임을 숨긴다 — 경보가 몇 분 전에 울렸는지 중앙값을 같이 낸다.
+    """
+    p = R.build()
+    feats = R.feature_cols(p)
+    X = p[feats].to_numpy(np.float32)
+    p["win"] = ""
+    for nm, a_, b_ in R.WINDOWS:
+        p.loc[(p.timestamp >= a_) & (p.timestamp <= b_), "win"] = nm
+    fire = np.ones(len(p), bool)
+    for col in ("qv", "n"):
+        x = p[f"z_{col}_288"].to_numpy(float)
+        thr = pd.Series(x).rolling(2016, min_periods=200).quantile(0.90).shift(1).to_numpy()
+        fire &= np.isfinite(x) & np.isfinite(thr) & (x >= thr)
+    ev_all = fire & ~np.r_[False, fire[:-1]]                 # 발동 묶음의 시작
+    base_ok = np.isfinite(p[feats]).all(axis=1).to_numpy() & (p.win != "").to_numpy()
+    rng = np.random.default_rng(SEED)
+    seeds = rng.integers(1, 10**6, NSEED).tolist()
+
+    for H in (6, 12):
+        fwd = pd.Series(fire[::-1]).rolling(H, min_periods=1).max()[::-1].to_numpy().astype(bool)
+        y = np.r_[fwd[1:], False]                            # (t, t+H] 안에 발동
+        ok = base_ok.copy()
+        for nm, _, _ in R.WINDOWS:
+            i2 = np.flatnonzero((p.win == nm).to_numpy())
+            if len(i2) > 2 * H:
+                ok[i2[-2 * H:]] = False
+        idx = {w: np.flatnonzero(ok & (p.win == w).to_numpy()) for w in R.EVAL_WINS}
+        tr = np.flatnonzero(ok & (p.win == "TRAIN").to_numpy())
+        sc = np.zeros((len(seeds), len(p)))
+        for si, sd in enumerate(seeds):
+            sc[si] = R.hgb(int(sd)).fit(X[tr], y[tr]).predict_proba(X)[:, 1]
+        print(f"\n=== 앞으로 {H*5}분 이내에 탐지 발동 ===  TRAIN {len(tr):,}", flush=True)
+        print("  " + " · ".join(f"{w} 기저 {y[idx[w]].mean()*100:.1f}% "
+                                f"(발동묶음 {int(ev_all[idx[w]].sum())}건)" for w in R.EVAL_WINS))
+        print(f"  {'커버':>5s} {'경보/일':>7s}  " + "  ".join(f"{w:^30s}" for w in R.EVAL_WINS))
+        print(f"  {'':>5s} {'':>7s}  " + "  ".join(
+            f"{'정밀도':>7s} {'묶음예고':>8s} {'리드중앙':>10s}" for _ in R.EVAL_WINS))
+        for cv in (0.05, 0.10, 0.15, 0.20, 0.30):
+            cells = []
+            for w in R.EVAL_WINS:
+                i2 = idx[w]
+                yy = y[i2]
+                ev = np.flatnonzero(ev_all[i2])
+                per = []
+                for si in range(len(seeds)):
+                    x = sc[si][i2]
+                    fin = np.isfinite(x)
+                    k = max(int(round(fin.sum() * cv)), 1)
+                    cut = np.partition(x[fin], -k)[-k]
+                    f = fin & (x >= cut)
+                    leads = []
+                    for e in ev:
+                        lo = max(e - H, 0)
+                        w_ = np.flatnonzero(f[lo:e])          # 창 안 경보들
+                        if len(w_):
+                            leads.append(e - (lo + int(w_[0])))   # **가장 이른** 경보 기준
+                    per.append((float(yy[f].mean()), len(leads) / max(len(ev), 1),
+                                float(np.median(leads)) if leads else np.nan))
+                a = np.array(per)
+                cells.append(f"{a[:, 0].min()*100:6.1f}% {a[:, 1].min()*100:7.1f}% "
+                             f"{np.nanmin(a[:, 2])*5:8.0f}분")
+            print(f"  {cv*100:4.0f}% {cv*288:7.1f}  " + "  ".join(cells), flush=True)
+    return 0
+
+
+# ────────── 라그/변화율 피쳐 + **누수 검사 우선** (사용자 지시 2026-09-11)
+LAG_BASE = ("z_n_96", "z_n_288", "z_qv_96", "z_qv_288")
+
+
+def lag_feats(p: pd.DataFrame) -> pd.DataFrame:
+    """같은 피쳐의 **과거값과의 차이**. 전부 뒤만 본다 — shift(k) 는 t-k 를 가져온다.
+
+    지금 33개 중 시간 변화를 담은 건 7개뿐이라(volexp_d1/d12 · min3 4개 · comp_age)
+    «체결이 달아오르는 중인가» 라는 방향성이 거의 안 들어간다. 그걸 직접 넣는다.
+    """
+    F = {}
+    for b in LAG_BASE:
+        x = p[b].astype(float)
+        for k in (1, 3, 12):
+            F[f"{b}_d{k}"] = x - x.shift(k)          # t 와 t-k 만 쓴다
+        # 12봉 회귀 기울기 — 닫힌형(공분산/분산). rolling 은 t-11..t 만 본다.
+        t_ = np.arange(12, dtype=float)
+        tc = t_ - t_.mean()
+        den = float((tc ** 2).sum())
+        F[f"{b}_slope12"] = x.rolling(12).apply(
+            lambda v, tc=tc, den=den: float(np.dot(v - v.mean(), tc) / den), raw=True)
+    return pd.DataFrame(F, index=p.index)
+
+
+def lag_arm() -> int:
+    """⭐누수 검사를 **먼저** 통과해야 성능을 잰다(사용자 지시)."""
+    p = R.build()
+    base_f = R.feature_cols(p)
+    lf = lag_feats(p)
+    for c_ in lf.columns:
+        p[c_] = lf[c_].to_numpy()
+    new_f = list(lf.columns)
+    allf = base_f + new_f
+    print(f"[누수 검사] 기존 {len(base_f)} + 신규 {len(new_f)} = {len(allf)}개")
+
+    # ── 검사 1: 절단 불변성. 봉 t 의 피쳐는 t 이후 데이터가 없어도 **같아야** 한다.
+    rng = np.random.default_rng(SEED)
+    idx_test = rng.choice(np.arange(300_000, len(p) - 100), 3, replace=False)
+    bad = 0
+    for t in idx_test:
+        cut = p.iloc[:t + 1].copy()
+        lf_cut = lag_feats(cut)
+        for c_ in new_f:
+            a, b = float(lf_cut[c_].iloc[-1]), float(p[c_].iloc[t])
+            if not (np.isnan(a) and np.isnan(b)) and abs(a - b) > 1e-9:
+                print(f"  🔴절단 불변성 위반 t={t} {c_}: 절단 {a} vs 전체 {b}")
+                bad += 1
+    print(f"  검사1 절단 불변성 : {'통과' if not bad else 'FAIL'} "
+          f"(3지점 x {len(new_f)}피쳐 = {3*len(new_f)}칸)")
+
+    # ── 검사 2: 명시적 미래 변조. t 이후를 난수로 덮어도 t 의 값이 안 변해야 한다.
+    q = p.copy()
+    t0 = int(idx_test[0])
+    for b in LAG_BASE:
+        v = q[b].to_numpy(float).copy()
+        v[t0 + 1:] = rng.normal(0, 5, len(v) - t0 - 1)
+        q[b] = v
+    lf_q = lag_feats(q)
+    bad2 = sum(1 for c_ in new_f
+               if not np.allclose(lf_q[c_].iloc[t0], p[c_].iloc[t0], equal_nan=True, atol=1e-9))
+    print(f"  검사2 미래 변조 불변: {'통과' if not bad2 else f'FAIL ({bad2}개 변함)'}")
+
+    # ── 검사 3: 단변량 상한. 라벨(30분 이내 탐지 발동)에 대해 AUC>=0.95 면 누수다.
+    fire = np.ones(len(p), bool)
+    for col in ("qv", "n"):
+        x = p[f"z_{col}_288"].to_numpy(float)
+        thr = pd.Series(x).rolling(2016, min_periods=200).quantile(0.90).shift(1).to_numpy()
+        fire &= np.isfinite(x) & np.isfinite(thr) & (x >= thr)
+    fwd = pd.Series(fire[::-1]).rolling(6, min_periods=1).max()[::-1].to_numpy().astype(bool)
+    y = np.r_[fwd[1:], False]
+    p["win"] = ""
+    for nm, a_, b_ in R.WINDOWS:
+        p.loc[(p.timestamp >= a_) & (p.timestamp <= b_), "win"] = nm
+    ok = np.isfinite(p[allf]).all(axis=1).to_numpy() & (p.win != "").to_numpy()
+    for nm, _, _ in R.WINDOWS:
+        i2 = np.flatnonzero((p.win == nm).to_numpy())
+        if len(i2) > 12:
+            ok[i2[-12:]] = False
+    iv = np.flatnonzero(ok & (p.win == "VAL").to_numpy())
+    worst = max((abs(R.auc(p[f].to_numpy(float)[iv], y[iv]) - 0.5) + 0.5, f) for f in new_f)
+    print(f"  검사3 단변량 상한  : 최고 |AUC| {worst[0]:.4f} ({worst[1]}) "
+          f"{'통과' if worst[0] < 0.95 else '🔴FAIL'}")
+    # ── 검사 4: 라벨 경계. 피쳐는 t 까지, 라벨은 t+1 부터.
+    assert not np.array_equal(y, fire), "라벨이 자기 봉을 그대로 쓰고 있다"
+    print(f"  검사4 라벨 경계    : 통과 (피쳐 <= t, 라벨 (t, t+6])")
+    if bad or bad2 or worst[0] >= 0.95:
+        print("\n🔴누수 검사 실패 — 성능 측정을 하지 않는다.")
+        return 1
+
+    # ── 통과했으므로 성능 비교
+    idx = {w: np.flatnonzero(ok & (p.win == w).to_numpy()) for w in R.EVAL_WINS}
+    tr = np.flatnonzero(ok & (p.win == "TRAIN").to_numpy())
+    seeds = np.random.default_rng(SEED).integers(1, 10**6, NSEED).tolist()
+    print(f"\n[성능] 라벨 = 30분 이내 탐지 발동 · TRAIN {len(tr):,} · 시드 {len(seeds)}개")
+    print("  " + " · ".join(f"{w} 기저 {y[idx[w]].mean()*100:.1f}%" for w in R.EVAL_WINS))
+    for tag, cols in (("기존 33", base_f), (f"기존+라그 {len(allf)}", allf)):
+        Xs = p[cols].to_numpy(np.float32)
+        out = []
+        for sd in seeds:
+            sc = R.hgb(int(sd)).fit(Xs[tr], y[tr]).predict_proba(Xs)[:, 1]
+            row = []
+            for w in R.EVAL_WINS:
+                i2 = idx[w]
+                x = sc[i2]
+                k = max(int(round(len(x) * 0.10)), 1)
+                cut = np.partition(x, -k)[-k]
+                row.append(float(y[i2][x >= cut].mean()))
+            out.append(row)
+        a = np.array(out)
+        print(f"  {tag:16s} " + "  ".join(
+            f"{w} {a[:, k].min()*100:5.1f}%" for k, w in enumerate(R.EVAL_WINS))
+            + "   [커버 10% 정밀도 · 시드최악]", flush=True)
+    return 0
+
+
 if __name__ == "__main__":
     if "--self-check" in sys.argv:
         _self_check()
@@ -843,5 +1236,13 @@ if __name__ == "__main__":
         raise SystemExit(tabpfn_arm())
     elif "--joint" in sys.argv:
         raise SystemExit(joint_arm())
+    elif "--detector" in sys.argv:
+        raise SystemExit(detector_arm())
+    elif "--predetect" in sys.argv:
+        raise SystemExit(predetect_arm())
+    elif "--prewarn" in sys.argv:
+        raise SystemExit(prewarn_arm())
+    elif "--lag" in sys.argv:
+        raise SystemExit(lag_arm())
     else:
         raise SystemExit(main())
