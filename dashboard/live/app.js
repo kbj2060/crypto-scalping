@@ -2680,11 +2680,47 @@ function liqRiskIndicatorItem() {
     }
     return null;
   };
+  const fmtPct = (v) => (v === null || v === undefined ? "-"
+    : (v * 100).toFixed(v < 0.1 ? 1 : 0) + "%");
   const eq = Number(d.vol_equivalent_qty) || 0;
+  const baseQty = Number(d.base_qty) || 0;
+  const px = Number(d.price) || 0;
+  // 2026-09-11 포지션이 없어도 5분마다 숫자가 나와야 한다(사용자 지적). 다만 **가정이 들어간
+  // 숫자는 툴팁에만** 둔다 -- 본문은 가정 없는 권장 크기, 툴팁은 "지갑 전액 증거금·교차" 가정의
+  // 청산 확률. 실제 관측(50배·청산선 222bp)이 이 식과 정합했다(당시 순자산 ~510USDT).
+  const MMR = 0.005;                                   // ETHUSDT 1티어 유지증거금률
+  const wallet = Number(latestBinanceAccount?.balance?.wallet) || 0;
+  const ifEntered = (q) => {
+    const notional = q * px;
+    if (!(notional > 0) || !(wallet > 0)) return null;
+    const liq = (wallet / notional - MMR) * 1e4;
+    if (!(liq > 0)) return null;
+    // 방향을 모르니 롱/숏 중 불리한 쪽으로 읽는다.
+    const worse = (h) => {
+      const l = at(h, "롱", liq), sh = at(h, "숏", liq);
+      return l === null || sh === null ? (l === null ? sh : l) : Math.max(l, sh);
+    };
+    return { q, liq, p4: worse("4h"), p24: worse("24h") };
+  };
+  const scenarioTitle = () => {
+    const rows = [["평소", baseQty], ["권장", eq], ["평소×3", baseQty * 3], ["평소×6", baseQty * 6]]
+      .map(([n, q]) => [n, ifEntered(q)]).filter(([, r]) => r)
+      .map(([n, r]) => "  " + n + " " + r.q.toFixed(2) + " ETH → 청산선 "
+        + Math.round(r.liq) + "bp · 4시간 " + fmtPct(r.p4) + " · 24시간 " + fmtPct(r.p24));
+    if (!rows.length) return "";
+    return ["지금 들어간다면 (지갑 " + wallet.toFixed(0)
+      + " USDT 전액 증거금·교차 가정, 롱/숏 중 불리한 쪽)"].concat(rows).join("\n");
+  };
   if (!pos) {
+    const mult = baseQty > 0 ? eq / baseQty : null;
     return { ...base, tone: "neutral", subText: "포지션 없음", proba: null, history: [], times: [],
-             stateTitle: "열린 ETH 포지션이 없습니다.\n지금 변동성 기준 권장 크기 "
-               + eq.toFixed(2) + " ETH" };
+             meterNote: eq > 0 ? "권장 " + eq.toFixed(2) + " ETH" : "",
+             meterNoteTitle: mult === null ? "" : "평소 크기 " + baseQty.toFixed(2) + " ETH 의 "
+               + mult.toFixed(2) + "배입니다 — 지금 변동성이 평소보다 "
+               + (mult >= 1 ? "낮아 그만큼 더 실을 수 있습니다" : "높아 그만큼 줄여야 합니다"),
+             stateTitle: ["열린 ETH 포지션이 없어 지금 청산 위험은 0 입니다.",
+               "지금 변동성 기준 권장 크기 " + eq.toFixed(2) + " ETH", scenarioTitle()]
+               .filter(Boolean).join("\n\n") };
   }
   const side = pos.side === "LONG" ? "롱" : "숏";
   const mark = Number(pos.mark_price), liq = Number(pos.liquidation_price);
@@ -2694,14 +2730,12 @@ function liqRiskIndicatorItem() {
     return { ...base, tone: "neutral", subText: "계측 미달", proba: null, history: [], times: [] };
   }
   const grade = p4 >= 0.3 ? "위험" : p4 >= 0.1 ? "주의" : "안정";
-  const fmt = (v) => (v === null || v === undefined ? "-"
-    : (v * 100).toFixed(v < 0.1 ? 1 : 0) + "%");
   const qty = Math.abs(Number(pos.qty));
   const mult = eq > 0 ? qty / eq : null;
   const stateTitle = [
-    grade + " · 지금 크기로 4시간 안에 청산선에 닿을 확률 " + fmt(p4),
-    "1시간 " + fmt(at("1h", side, liqBp)) + " · 4시간 " + fmt(p4)
-      + " · 24시간 " + fmt(at("24h", side, liqBp)),
+    grade + " · 지금 크기로 4시간 안에 청산선에 닿을 확률 " + fmtPct(p4),
+    "1시간 " + fmtPct(at("1h", side, liqBp)) + " · 4시간 " + fmtPct(p4)
+      + " · 24시간 " + fmtPct(at("24h", side, liqBp)),
     side + " " + qty.toFixed(2) + " ETH · 청산선까지 " + Math.round(liqBp) + "bp",
     mult === null ? "" : "같은 위험이 되는 크기 " + eq.toFixed(2) + " ETH (현재 "
       + mult.toFixed(1) + "배)",
@@ -2710,7 +2744,11 @@ function liqRiskIndicatorItem() {
     "⚠️방향도 수익도 예측하지 않습니다 — 크기 판단용입니다",
   ].filter(Boolean).join("\n");
   return { ...base, tone: grade === "위험" ? "bad" : grade === "주의" ? "warn" : "neutral", subText: grade,
-           proba: p4, stateTitle, history: [], times: [] };
+           proba: p4, stateTitle, history: [], times: [],
+           // 포지션이 있을 땐 가정이 필요 없다 -- 실제 수량과 권장의 배수를 그대로 적는다.
+           meterNote: mult === null ? "" : "권장의 " + mult.toFixed(1) + "배",
+           meterNoteTitle: "지금 " + qty.toFixed(2) + " ETH · 지금 변동성 기준 권장 "
+             + eq.toFixed(2) + " ETH" };
 }
 
 function volForecastIndicatorItem() {
