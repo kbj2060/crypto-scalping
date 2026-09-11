@@ -1838,9 +1838,12 @@ function renderLiquidationMapPanel() {
       .filter((lv) => side === "support" ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
       .map((lv) => ({ ...lv, distance_pct: (lv.price - liveCurrentPrice) / liveCurrentPrice * 100 }));
   };
-  const resistanceRows = liveRedistanced(map.resistance_levels, "resistance").slice().reverse()
+  // 2026-09-11 사용자 요청: 각 측면 **3개**만. 원 배열은 현재가에서 가까운 순이므로
+  // 자르고 나서 뒤집는다(저항은 먼 것이 위, 가까운 것이 현재가 줄 바로 위로 온다).
+  const SR_ROWS = 3;
+  const resistanceRows = liveRedistanced(map.resistance_levels, "resistance").slice(0, SR_ROWS).reverse()
     .map((lv, i, arr) => liquidationLevelRowHtml(lv, `저항${arr.length - i}`, "liq-resistance"));
-  const supportRows = liveRedistanced(map.support_levels, "support")
+  const supportRows = liveRedistanced(map.support_levels, "support").slice(0, SR_ROWS)
     .map((lv, i) => liquidationLevelRowHtml(lv, `지지${i + 1}`, "liq-support"));
   const currentRow = `<div class="liq-level-row liq-current">
       <span class="liq-level-tag">현재가</span>
@@ -3486,8 +3489,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   대가: 캔들 영역 ch 가 286 -> 266 으로 20px 줄어든다.
   // 2026-09-11 mb 112 -> 134: 변동성 전망 리본 20px(사용자 요청 "레짐과 같은 스타일로").
   //   칩을 없애고 리본으로 옮긴 것이라 화면의 정보량은 그대로다.
-  //   대가: 캔들 영역 ch 가 266 -> 244(데스크톱), 126 -> 104(모바일 최소높이)로 줄어든다.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 134;
+  // 2026-09-11(2차) mb 134 -> 140: 레짐과 변동성 리본 사이 간격 2 -> 6px(사용자 요청).
+  //   대가: 캔들 영역 ch 가 266 -> 238(데스크톱), 126 -> 98(모바일 최소높이)로 줄어든다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 바닥 레인 +28~+43 · 레짐 +50~+70 ·
+  //   변동성 +76~+96 · 청산 레인 +100~+138.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 140;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3569,7 +3575,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
   const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  const VOL_RIBBON_Y = h - mb + 72, VOL_RIBBON_H = 20;
+  const VOL_RIBBON_Y = h - mb + 76, VOL_RIBBON_H = 20;   // 레짐(+50~+70)과 6px 간격
   const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
     && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
@@ -3832,23 +3838,28 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (!Number.isFinite(t)) return;
       byHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
     });
-    // ⭐진하기는 **확률의 연속 함수**다. 등급만 쓰면 조용한 구간이 통째로 같은 색이라
-    //   칩이 "안 움직인다"던 문제가 그대로 옮겨온다. 등급 경계(cuts)에서 0.40 / 0.70 을
-    //   지나도록 구간별 선형 보간한다 -- 경계가 눈에 보이면서 그 안에서도 매시간 숨 쉰다.
+    // 2026-09-11 사용자: "평소엔 회색, 경고면 중간 주황, 위험이면 강한 주황".
+    // ⭐색은 등급이 정하고, **진하기만** 등급 안에서 확률로 미세하게 움직인다 -- 등급만
+    //   쓰면 조용한 구간이 통째로 같은 색이라 칩이 "안 움직인다"던 문제가 그대로 옮겨온다.
     // grades/cuts 가 아직 없는 낡은 워커 상태파일이면 tone 두 단계로 물러선다(빈 리본 금지).
     const cuts = latestVolForecast.cuts || {};
     const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
     const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
-    const OPACITY = { "위험": 0.85, "주의": 0.5, "안정": 0.16 };
-    const opacityOf = (v) => {
+    // [색, 최소 진하기, 최대 진하기] -- 안정만 회색이고 나머지는 같은 주황의 두 세기다.
+    const STYLE = { "안정": ["var(--muted)", 0.14, 0.26],
+                    "주의": ["var(--warn)", 0.42, 0.58],
+                    "위험": ["var(--warn)", 0.78, 0.92] };
+    const styleOf = (v) => {
+      const g = v.grade || (v.tone === "warn" ? "주의" : "안정");
+      const sp = STYLE[g] || STYLE["안정"];
       const q = Number(v.p);
+      let f = 0.5;                                     // 확률을 모르면 등급의 중간값
       if (rampOk && Number.isFinite(q)) {
-        if (q <= c1) return 0.10 + 0.30 * (q / c1);
-        if (q <= c2) return 0.40 + 0.30 * ((q - c1) / (c2 - c1));
-        return Math.min(0.92, 0.70 + 0.22 * ((q - c2) / (1 - c2)));
+        f = g === "안정" ? q / c1
+          : g === "주의" ? (q - c1) / (c2 - c1)
+          : (q - c2) / (1 - c2);
       }
-      if (v.grade && OPACITY[v.grade] !== undefined) return OPACITY[v.grade];
-      return v.tone === "warn" ? 0.7 : 0.16;
+      return { color: sp[0], opacity: sp[1] + (sp[2] - sp[1]) * clamp01(f) };
     };
     let drew = 0;
     candles.forEach((c, i) => {
@@ -3859,8 +3870,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
       rect.setAttribute("width", Math.max(1, bw)); rect.setAttribute("height", VOL_RIBBON_H);
       rect.setAttribute("rx", "1.5");
-      rect.setAttribute("fill", "var(--warn)");
-      rect.setAttribute("fill-opacity", opacityOf(v).toFixed(2));
+      const st = styleOf(v);
+      rect.setAttribute("fill", st.color);
+      rect.setAttribute("fill-opacity", st.opacity.toFixed(2));
       const title = document.createElementNS(NS, "title");
       title.textContent = fmtDateTick(c.time * 1000) + " 변동성 전망 "
         + (v.grade || (v.tone === "warn" ? "주의 이상" : "안정"))
@@ -4225,7 +4237,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
-    const LIQ_Y = h - mb + 94, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    const LIQ_Y = h - mb + 100, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
     //   레인이 통째로 안 그려졌다. 차트의 다른 코드가 전부 `c.time * 1000` 을 쓰는 이유다.
