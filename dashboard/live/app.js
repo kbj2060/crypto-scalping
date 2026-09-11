@@ -1590,7 +1590,6 @@ const MODEL_CHIP_IDS = {
   extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
-  vol_forecast: "modelChipVolForecast",   // 2026-09-10 변동성 전망
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
@@ -2620,34 +2619,27 @@ async function refreshVolForecast() {
   }
 }
 
-// ── 24시간 변동성 전망 (2026-09-10) ─────────────────────────────────────────────────
-// 규약: 라벨 §1(운영 4단어) · 색 §2(위험/주의=warn · 안정=neutral, **5번째 색 없음**) ·
-//       제목 밑 데이터 줄 없음 §4(숫자는 stateTitle 툴팁으로)
-// ⭐방향 신호가 아니다 -- 「위험도」 그룹 어휘(안정/주의/위험)를 쓰고 롱/숏을 쓰지 않는다.
-function volForecastIndicatorItem() {
+// ── 24시간 변동성 전망 (2026-09-10, 2026-09-11 칩 -> 차트 리본) ────────────────────
+// 규약: 색 §2 위험/주의=warn(주황) · 안정도 같은 주황을 옅게 -- **5번째 색을 만들지 않는다**.
+// ⭐방향 신호가 아니다. 리본은 renderCandleSvg() 안에서 레짐 리본 바로 아래에 그린다.
+// 칩이 갖고 있던 숫자는 전부 이 툴팁으로 옮겼다 -- 칩을 지워도 근거가 사라지지 않게.
+function volForecastRibbonTitle(nBars) {
   const p = latestVolForecast;
-  const base = { key: "vol_forecast", label: "변동성 전망", probaSlot: true,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 Binance 5분봉(과거 변동성)과 "
-                   + "Deribit DVOL(내재변동성)로 계산합니다. 방향이 아니라 변동성만 예측하며 매매에 "
-                   + "연결돼 있지 않습니다." };
-  if (!p || p.error || !p.available) {
-    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
-             proba: null, history: [], times: [] };
-  }
+  if (!p || p.error || !p.available) return "변동성 전망: 웜업 중이거나 갱신 실패";
   const prec = (p.precision_holdout || {})[p.grade];
   const auc = p.auc || {};
-  const stateTitle = [
-    `${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
+  // 칩이 없어졌어도 쉬운 말 설명은 남긴다 -- MODEL_INDICATOR_MEANING 은 그대로 쓴다(키=등급).
+  const plain = (MODEL_INDICATOR_MEANING.vol_forecast || {})[p.grade] || "";
+  return [
+    `변동성 전망 ${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
     `내재변동성(DVOL) ${p.dvol} · 실현변동성 24h ${p.rv24} · 격차(VRP) ${p.vrp > 0 ? "+" : ""}${p.vrp}`,
     `예측 실현변동성 ${p.rv_fwd_pred}`,
     prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
     `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
+    `시간봉 신호입니다 — 한 시간이 5분봉 12개에 같은 색으로 깔립니다 (${nBars}봉 채색)`,
+    plain,
     "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
   ].filter(Boolean).join("\n");
-  return { ...base, tone: p.tone === "warn" ? "warn" : "neutral", subText: p.grade,
-           proba: Number(p.proba), stateTitle,
-           history: p.history || [], times: p.times || [] };
 }
 
 // ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
@@ -3492,7 +3484,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-11 mb 92 -> 112: 청산 레인을 레짐 리본 높이(20px)만큼 키웠다(사용자 요청).
   //   레인 18 -> 38px. 여백도 같이 20px 늘려야 리본과 안 겹친다.
   //   대가: 캔들 영역 ch 가 286 -> 266 으로 20px 줄어든다.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 112;
+  // 2026-09-11 mb 112 -> 134: 변동성 전망 리본 20px(사용자 요청 "레짐과 같은 스타일로").
+  //   칩을 없애고 리본으로 옮긴 것이라 화면의 정보량은 그대로다.
+  //   대가: 캔들 영역 ch 가 266 -> 244(데스크톱), 126 -> 104(모바일 최소높이)로 줄어든다.
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 134;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
   const viewport = visibleCandleWindow(candles);
@@ -3573,6 +3568,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
   // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
   const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
+  // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
+  const VOL_RIBBON_Y = h - mb + 72, VOL_RIBBON_H = 20;
+  const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
+    && latestVolForecast && latestVolForecast.available
+    && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -3816,6 +3816,73 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(waitLabel);
   }
 
+  // ── 변동성 전망 리본 (2026-09-11, 칩을 대체) ────────────────────────────────────
+  // 사용자: "변동성 전망도 청산맵 아래 레짐과 같은 스타일로 주황색으로 칠하고 칩은 제거".
+  // 🔴이 신호는 **시간봉**이다(피쳐가 resample("1h")). 캔들은 5분이라 시각으로 접어 칠한다 --
+  //   한 시간이 12개 봉에 같은 색으로 깔린다. 청산 레인의 5분 키와 혼동하면 안 된다.
+  // ⭐등급을 색 하나로 뭉개지 않는다: 「위험」 홀드아웃 정밀도 0.793 vs 「주의」 0.161 이라
+  //   같은 주황으로 칠하면 16% 짜리가 79% 처럼 보인다. 진하기로 셋을 가른다.
+  if (volRibbonOn && candles.length) {
+    const vf = latestVolForecast;
+    const grades = Array.isArray(vf.grades) ? vf.grades : [];
+    const probas = Array.isArray(vf.probas) ? vf.probas : [];
+    const byHour = new Map();
+    vf.times.forEach((iso, i) => {
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return;
+      byHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
+    });
+    // ⭐진하기는 **확률의 연속 함수**다. 등급만 쓰면 조용한 구간이 통째로 같은 색이라
+    //   칩이 "안 움직인다"던 문제가 그대로 옮겨온다. 등급 경계(cuts)에서 0.40 / 0.70 을
+    //   지나도록 구간별 선형 보간한다 -- 경계가 눈에 보이면서 그 안에서도 매시간 숨 쉰다.
+    // grades/cuts 가 아직 없는 낡은 워커 상태파일이면 tone 두 단계로 물러선다(빈 리본 금지).
+    const cuts = latestVolForecast.cuts || {};
+    const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
+    const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
+    const OPACITY = { "위험": 0.85, "주의": 0.5, "안정": 0.16 };
+    const opacityOf = (v) => {
+      const q = Number(v.p);
+      if (rampOk && Number.isFinite(q)) {
+        if (q <= c1) return 0.10 + 0.30 * (q / c1);
+        if (q <= c2) return 0.40 + 0.30 * ((q - c1) / (c2 - c1));
+        return Math.min(0.92, 0.70 + 0.22 * ((q - c2) / (1 - c2)));
+      }
+      if (v.grade && OPACITY[v.grade] !== undefined) return OPACITY[v.grade];
+      return v.tone === "warn" ? 0.7 : 0.16;
+    };
+    let drew = 0;
+    candles.forEach((c, i) => {
+      const v = byHour.get(Math.floor(c.time / 3600) * 3600);
+      if (!v) return;
+      drew += 1;
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
+      rect.setAttribute("width", Math.max(1, bw)); rect.setAttribute("height", VOL_RIBBON_H);
+      rect.setAttribute("rx", "1.5");
+      rect.setAttribute("fill", "var(--warn)");
+      rect.setAttribute("fill-opacity", opacityOf(v).toFixed(2));
+      const title = document.createElementNS(NS, "title");
+      title.textContent = fmtDateTick(c.time * 1000) + " 변동성 전망 "
+        + (v.grade || (v.tone === "warn" ? "주의 이상" : "안정"))
+        + (v.p === undefined || v.p === null ? ""
+          : " · 확장 확률 " + (v.p * 100).toFixed(1) + "%");
+      rect.appendChild(title);
+      svg.appendChild(rect);
+    });
+    const volLabel = document.createElementNS(NS, "text");
+    volLabel.setAttribute("x", ml - 6);
+    volLabel.setAttribute("y", VOL_RIBBON_Y + VOL_RIBBON_H / 2 + 3);
+    volLabel.setAttribute("text-anchor", "end");
+    volLabel.setAttribute("font-size", "9");
+    volLabel.setAttribute("fill", "var(--muted)");
+    volLabel.textContent = "변동성";
+    const labelTitle = document.createElementNS(NS, "title");
+    // 칩이 툴팁에 갖고 있던 숫자를 여기로 옮긴다 -- 칩을 지워도 정보가 사라지지 않게.
+    labelTitle.textContent = volForecastRibbonTitle(drew);
+    volLabel.appendChild(labelTitle);
+    svg.appendChild(volLabel);
+  }
+
   // Candles
   candles.forEach((c, i) => {
     const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
@@ -4040,7 +4107,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const vLine = document.createElementNS(NS, "line");
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
-  vLine.setAttribute("y2", regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
+  vLine.setAttribute("y2", volRibbonOn ? VOL_RIBBON_Y + VOL_RIBBON_H
+    : regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -4157,7 +4225,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
-    const LIQ_Y = h - mb + 72, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    const LIQ_Y = h - mb + 94, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
     //   레인이 통째로 안 그려졌다. 차트의 다른 코드가 전부 `c.time * 1000` 을 쓰는 이유다.
@@ -4382,7 +4450,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
         liveText: liqCascadeLiveDetail(tail),
       }, "liq_cascade"),
-      ethOnlyIndicator(volForecastIndicatorItem()),   // 2026-09-10 24시간 변동성 전망(ETH 학습)
       coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
       coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
     ]);

@@ -146,7 +146,14 @@ def compute_eth_vol_forecast() -> dict:
             "rv_fwd_pred": round(float(np.exp(M["reg"].predict(X[-1:])[0])), 2),
             "latest_ts_utc": pd.Timestamp(d.index[-1]).tz_localize("UTC").isoformat(),
             "history": [("warn" if g in ("위험", "주의") else "neutral") for g in tail["grade"]],
+            # 2026-09-11 칩을 없애고 차트 리본으로 옮기면서 추가. tone 만으로는 「위험」(홀드아웃
+            # 정밀도 0.793)과 「주의」(0.161)가 같은 색으로 뭉개진다 -- 리본은 등급별로 칠한다.
+            "grades": [str(g) for g in tail["grade"]],
+            "probas": [round(float(v), 4) for v in tail["p"]],
             "times": [pd.Timestamp(t).tz_localize("UTC").isoformat() for t in tail.index],
+            # 리본이 확률을 연속 진하기로 칠하려면 등급 경계값이 필요하다(등급만으론 계단이라
+            # 조용한 구간이 통째로 같은 색이 된다 -- 칩이 "안 움직인다"던 것과 같은 문제).
+            "cuts": meta.get("cuts"),
             "auc": meta.get("auc"), "precision_holdout": meta.get("precision_holdout"),
             "base_rate_holdout": meta.get("base_rate_holdout"),
             "horizon_hours": meta.get("horizon_hours"), "expand_k": meta.get("expand_k"),
