@@ -3845,10 +3845,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const cuts = latestVolForecast.cuts || {};
     const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
     const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
-    // [색, 최소 진하기, 최대 진하기] -- 안정만 회색이고 나머지는 같은 주황의 두 세기다.
-    const STYLE = { "안정": ["var(--muted)", 0.14, 0.26],
-                    "주의": ["var(--warn)", 0.42, 0.58],
-                    "위험": ["var(--warn)", 0.78, 0.92] };
+    // [색, 최소 진하기, 최대 진하기]
+    // 🔴회색은 **레짐 chop 과 같은 값**을 쓴다(사용자 요청). 색상은 원래도 같은 #8b91a6
+    //   이었고 달라 보인 건 투명도였다 -- 레짐은 0.55~1.00, 여기는 0.14~0.26 이었다.
+    //   REGIME_DOMINANT_COLOR.chop 을 직접 참조해 둘이 영영 어긋나지 않게 한다.
+    // 회색이 진해진 만큼 주황도 같은 대역으로 올리고, 주의/위험은 **농도로** 가른다
+    //   (같은 대역에서 투명도만으로는 둘이 안 구분된다).
+    const STYLE = { "안정": [REGIME_DOMINANT_COLOR.chop, 0.55, 1.00],
+                    "주의": ["#dc8f4a", 0.62, 0.86],
+                    "위험": ["#b8541a", 0.88, 1.00] };
     const styleOf = (v) => {
       const g = v.grade || (v.tone === "warn" ? "주의" : "안정");
       const sp = STYLE[g] || STYLE["안정"];
