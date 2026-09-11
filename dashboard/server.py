@@ -252,6 +252,43 @@ MODEL_INDICATOR_SAMPLE_SECONDS = 300  # 5 min, matching the evidence-signal stri
 MODEL_INDICATOR_HISTORY_MAX = 48  # 4h at the sample interval above -- same window as evidence signals
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
+
+# 2026-09-12: 이 띠는 프로세스 메모리(deque)에만 있었다. 배포 워처가 main 전진마다 대시보드를
+# 재기동하는데(실측 2026-09-11 하루 12회) 48칸 × 5분 = 4시간을 다시 채워야 해서, 사용자가
+# 새로고침할 때마다 «브라우저에 쌓여 있던 과거가 갑자기 사라지는» 증상이 났다. 브라우저는
+# 라이브 틱으로 40칸까지 누적하는데 새로고침 후 씨앗(서버 deque)은 10칸뿐이었기 때문이다.
+MODEL_INDICATOR_HISTORY_PATH = LIVE_DIR / "model_indicator_history.json"
+
+
+def load_model_indicator_history() -> list[dict]:
+    """재기동 때 띠를 복원한다. **창(4h)을 벗어난 샘플은 버린다** —
+    이틀 전 값을 '최근 4시간'이라고 그리면 화면이 거짓말을 한다."""
+    try:
+        rows = json.loads(MODEL_INDICATOR_HISTORY_PATH.read_text())
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=MODEL_INDICATOR_SAMPLE_SECONDS * MODEL_INDICATOR_HISTORY_MAX)
+    fresh = []
+    for r in rows:
+        try:
+            if datetime.fromisoformat(r["sampled_at"]) >= cutoff:
+                fresh.append(r)
+        except Exception:
+            continue
+    return fresh[-MODEL_INDICATOR_HISTORY_MAX:]
+
+
+def save_model_indicator_history(rows: list[dict]) -> None:
+    """원자적 교체 — 쓰는 도중 죽어도 반쪽 파일이 남지 않는다(그러면 복원이 통째로 실패한다)."""
+    try:
+        tmp = MODEL_INDICATOR_HISTORY_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(rows))
+        tmp.replace(MODEL_INDICATOR_HISTORY_PATH)
+    except Exception as exc:  # 띠 하나 때문에 이벤트 발행 루프를 죽이지 않는다
+        print(f"model_indicator_history save failed: {exc}", flush=True)
 # 2026-08-27: tail_risk_interceptor.py's event-triggered sibling of dashboard_state.json's
 # tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
@@ -1181,8 +1218,21 @@ def make_app() -> web.Application:
     regime_btc_lock = asyncio.Lock()
     macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     macro_calendar_lock = asyncio.Lock()
-    model_indicator_history: deque = deque(maxlen=MODEL_INDICATOR_HISTORY_MAX)
-    model_indicator_sample_state: dict[str, float] = {"last_sample_at": 0.0}
+    _mih_restored = load_model_indicator_history()
+    model_indicator_history: deque = deque(_mih_restored, maxlen=MODEL_INDICATOR_HISTORY_MAX)
+    # 복원분의 나이만큼 시계를 되돌려 둔다 → 다음 샘플이 «원래 찍혔어야 할 때» 찍힌다.
+    # 0.0 으로 두면 기동 즉시 한 칸이 더 찍혀, 재기동이 잦을수록 칸 간격이 들쭉날쭉해진다.
+    _mih_age = MODEL_INDICATOR_SAMPLE_SECONDS
+    if _mih_restored:
+        try:
+            _mih_age = min(MODEL_INDICATOR_SAMPLE_SECONDS, max(0.0, (
+                datetime.now(timezone.utc)
+                - datetime.fromisoformat(_mih_restored[-1]["sampled_at"])).total_seconds()))
+        except Exception:
+            pass
+    model_indicator_sample_state: dict[str, float] = {
+        "last_sample_at": time.monotonic() - _mih_age
+    }
 
     # ---------------------------------------------------------------------------------
     # 2026-09-03 perf pass -- stale-while-revalidate.
@@ -1998,6 +2048,7 @@ def make_app() -> web.Application:
                             "microstructure": raw_state.get("microstructure") or {},
                             "tail_risk": raw_state.get("tail_risk") or {},
                         })
+                        save_model_indicator_history(list(model_indicator_history))
                     ticker_rows = await asyncio.gather(
                         *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
                     )
