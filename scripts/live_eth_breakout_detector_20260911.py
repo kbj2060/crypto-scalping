@@ -54,6 +54,18 @@ KLINES = "https://fapi.binance.com/fapi/v1/klines"
 # 예고 모델(사이드카). 디렉터리가 없으면 예고 없이 그대로 돈다 -- 되돌리기 = 디렉터리 삭제.
 PREWARN_DIR = ROOT / "data" / "live" / "eth_breakout_prewarn_artifact"
 PREWARN_Q = 0.90              # 확률의 후행 분위 -- 커버리지 10%
+# 지속시간(2026-09-11 사용자 요청): 한 번 울리면 그 신호의 «수명» 동안 게이지를 채워 둔다.
+# 값은 각 신호가 **주장하는 창**과 같게 맞춘다 -- 경보는 «앞으로 30분», 탐지는 판정창 15분.
+SUSTAIN = {"prewarn": 6, "detect": 3}
+
+
+def _sustain(fired: np.ndarray, i: int, bars: int) -> tuple[bool, int]:
+    """봉 i 기준 (활성인가, 남은 봉수). 마지막 발동 이후 bars 봉 동안 활성으로 본다."""
+    w = fired[max(i - bars + 1, 0):i + 1]
+    if not w.any():
+        return (False, 0)
+    since = len(w) - 1 - int(np.flatnonzero(w)[-1])
+    return (True, bars - since)
 _MODELS: dict[str, Any] = {}
 
 
@@ -149,7 +161,10 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
         # 임계도 **후행 분위**다(규칙과 같은 인과 규약). 지금 임계로 과거를 칠하지 않는다.
         pth = pd.Series(sc).rolling(QWIN, min_periods=200).quantile(PREWARN_Q).shift(1).to_numpy()
         pw_hist = np.isfinite(sc) & np.isfinite(pth) & (sc >= pth)
-        prewarn = {"available": bool(np.isfinite(sc[i])),
+        p_act, p_left = _sustain(pw_hist, i, SUSTAIN["prewarn"])
+        prewarn = {"active": p_act, "sustain_left_min": p_left * 5,
+                   "sustain_min": SUSTAIN["prewarn"] * 5,
+                   "available": bool(np.isfinite(sc[i])),
                    "proba": None if not np.isfinite(sc[i]) else round(float(sc[i]), 4),
                    "threshold": None if not np.isfinite(pth[i]) else round(float(pth[i]), 4),
                    "on": bool(pw_hist[i]), "horizon": "앞으로 30분 이내",
@@ -164,8 +179,18 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
                      "z": None if not np.isfinite(x[i]) else round(float(x[i]), 3),
                      "threshold": None if not np.isfinite(thr) else round(thr, 3)})
     out["prewarn"] = prewarn
+    # 지속 판정은 최근 몇 봉만 필요하다 -- 전 구간에 _thr_all_at 를 돌리면 O(n x 창) 이라 느리다
+    _zc = {(col, w): _z(col, w) for _lb, col, w, _q in DETECT}
+    det_fire = np.zeros(len(d), bool)
+    for j in range(max(i - max(SUSTAIN.values()), 0), i + 1):
+        det_fire[j] = all(bool(np.isfinite(_zc[(col, w)][j])
+                               and _zc[(col, w)][j] >= _thr_all_at(_zc[(col, w)], q, j))
+                          for _lb, col, w, q in DETECT)
+    d_act, d_left = _sustain(det_fire, i, SUSTAIN["detect"])
     out["detect"] = {"signals": dets, "count": sum(x["on"] for x in dets),
-                     "on": all(x["on"] for x in dets)}      # AND
+                     "on": all(x["on"] for x in dets),      # AND
+                     "active": d_act, "sustain_left_min": d_left * 5,
+                     "sustain_min": SUSTAIN["detect"] * 5}
     out["state"] = ("돌파 진행" if out["detect"]["on"] else
                     ("돌파 예고" if prewarn.get("on") else "미발동"))
 
@@ -179,13 +204,13 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     for j in range(max(i - HIST_BARS + 1, 0), i + 1):
         det_j = all(bool(np.isfinite(x[j]) and x[j] >= _thr_all_at(x, dd[3], j))
                     for x, dd in zip(detect_v, DETECT))
-        hist.append("bad" if det_j else "neutral")
-        pw.append("warn" if bool(pw_hist[j]) else "neutral")
+        hist.append("bad" if _sustain(det_fire, j, SUSTAIN["detect"])[0] else "neutral")
+        pw.append("warn" if _sustain(pw_hist, j, SUSTAIN["prewarn"])[0] else "neutral")
         times.append(str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat()))
     out["tone"] = hist[-1]
-    out["subText"] = "돌파 발동" if out["detect"]["on"] else "미발동"
+    out["subText"] = "돌파 발동" if out["detect"]["active"] else "미발동"
     prewarn["tone"] = pw[-1]
-    prewarn["subText"] = ("돌파 예고" if prewarn.get("on")
+    prewarn["subText"] = ("돌파 예고" if (prewarn.get("on") or prewarn.get("active"))
                           else ("미발동" if prewarn.get("available") else "웜업"))
     prewarn["history"], prewarn["times"] = pw, times
     out["history"], out["times"] = hist, times
@@ -267,10 +292,12 @@ def _self_check() -> None:
         _MODELS.clear()
 
     # 화면 계약: 카드 2장이라 띠도 2개 · 각 띠는 자기 색만 쓴다
-    for r, want_tone, want_sub in ((base, "neutral", "미발동"),
-                                   (rb, "bad", "돌파 발동")):
-        assert r["tone"] == want_tone, (r["state"], r["tone"])
-        assert r["subText"] == want_sub, r["subText"]
+    # ⚠️base(평탄 합성)는 지속창 안에 우연히 발동이 들 수 있다 -- 고정값 대신 **내부 정합**을 본다
+    assert rb["tone"] == "bad" and rb["subText"] == "돌파 발동", (rb["tone"], rb["subText"])
+    for r in (base, rb):
+        want = "bad" if r["detect"]["active"] else "neutral"
+        assert r["tone"] == want, (r["tone"], r["detect"])
+        assert r["subText"] == ("돌파 발동" if r["detect"]["active"] else "미발동"), r["subText"]
         assert len(r["history"]) == len(r["times"]) == HIST_BARS, len(r["history"])
         assert r["history"][-1] == r["tone"], (r["history"][-1], r["tone"])
         assert set(r["history"]) <= {"bad", "neutral"}, set(r["history"])   # 탐지 띠는 2색

@@ -2910,11 +2910,15 @@ function breakoutDetectorIndicatorItem() {
     "전환 사건 176건 중 162건 포착(재현율 92.0%) · 발동 2,085회 중 813회가 사건 창 안(정밀도 39.0%)",
     "⚠️방향은 말하지 않습니다. 반대 포지션이면 청산까지 — 뒤집어 따라가라는 근거는 없습니다.",
   ].filter(Boolean).join("\n");
-  return { ...base,
+  return { ...base, probaSlot: true,
     tone: p.tone === "bad" ? "bad" : "neutral",
     subText: p.subText || "미발동",
-    meterNote,
-    meterNoteTitle: "탐지는 2종 AND 입니다 — 둘 다 켜져야 발동합니다",
+    // ⚠️이 게이지는 **확률이 아니라 활성 여부(0/1)** 다 -- 규약 §3 예외라 툴팁에 성격을 밝힌다.
+    proba: det.active ? 1 : 0,
+    meterNote: det.active ? `탐지 지속 ${det.sustain_left_min}분` : meterNote,
+    meterNoteTitle: det.active
+      ? `발동 후 ${det.sustain_min}분 동안 게이지를 채워 둡니다 -- 신호의 수명입니다(확률 아님)`
+      : "탐지는 2종 AND 입니다 — 둘 다 켜져야 발동합니다. 게이지는 활성 여부(0/1)이지 확률이 아닙니다",
     stateTitle,
     history: p.history || [], times: p.times || [] };
 }
@@ -2950,9 +2954,12 @@ function breakoutPrewarnIndicatorItem() {
   return { ...base,
     tone: w.tone === "warn" ? "warn" : "neutral",
     subText: w.subText || "미발동",
-    proba: w.proba != null ? Number(w.proba) : null,
-    meterNote: pct != null ? `예고 ${pct}%` : null,
-    meterNoteTitle: "앞으로 30분 이내에 탐지기가 발동할 확률입니다(HGB 5시드 평균)",
+    // 2026-09-11 사용자 요청: 울리면 **지속시간 동안 게이지를 채워 둔다**. 비활성일 때만 실제 확률.
+    proba: w.active ? 1 : (w.proba != null ? Number(w.proba) : null),
+    meterNote: w.active ? `예고 지속 ${w.sustain_left_min}분` : (pct != null ? `예고 ${pct}%` : null),
+    meterNoteTitle: w.active
+      ? `발동 후 ${w.sustain_min}분 동안 게이지를 채워 둡니다 -- 신호의 수명입니다. 현재 확률 ${pct}%`
+      : "앞으로 30분 이내에 탐지기가 발동할 확률입니다(HGB 5시드 평균)",
     stateTitle,
     history: w.history || [], times: w.times || [] };
 }
