@@ -94,14 +94,16 @@ def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
     current: dict[str, Any] | None = None
     net = 0.0
     for fill in _split_flips(fills):
-        signed_qty = float(fill["qty"]) * (1.0 if fill["side"] == "BUY" else -1.0)
+        qty = float(fill["qty"])
+        price = float(fill["price"])
+        signed_qty = qty * (1.0 if fill["side"] == "BUY" else -1.0)
         if current is None:
             current = {
                 "symbol": fill["symbol"],
                 "side": "LONG" if signed_qty > 0 else "SHORT",
                 "entry_time": int(fill["time"]),
-                "entry_price": float(fill["price"]),
                 "max_qty": 0.0,
+                "qty_in": 0.0, "qty_out": 0.0, "_in": 0.0, "_out": 0.0,
                 "realized_pnl": 0.0,
                 "commission": 0.0,
                 "fills": 0,
@@ -109,20 +111,52 @@ def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "exit_price": None,
                 "closed": False,
             }
+        # 진입가/청산가는 **각 다리의 VWAP** 이다. 2026-09-12 이전에는 첫 체결가/마지막 체결가를
+        # 그대로 실었는데, 물타기나 분할청산이 섞이면 그 둘은 그 왕복의 평균단가가 아니다 --
+        # 실계좌 19왕복 중 6건에서 (청산가−진입가)×방향 의 부호가 realizedPnl 과 어긋났다.
+        # 포지션을 **키우는** 체결이 진입 다리, **줄이는** 체결이 청산 다리다(_split_flips 가
+        # 0을 넘는 체결을 미리 쪼개므로 한 체결이 양쪽에 걸치지 않는다).
+        opening = net == 0.0 or (signed_qty > 0) == (net > 0)
+        if opening:
+            current["qty_in"] += qty; current["_in"] += price * qty
+        else:
+            current["qty_out"] += qty; current["_out"] += price * qty
         net += signed_qty
         current["max_qty"] = max(current["max_qty"], abs(net))
         current["realized_pnl"] += float(fill["realizedPnl"])
         current["commission"] += float(fill["commission"])
         current["fills"] += 1
         if abs(net) < QTY_EPS:
-            current.update(exit_time=int(fill["time"]), exit_price=float(fill["price"]), closed=True)
-            current["net_pnl"] = current["realized_pnl"] - current["commission"]
-            trips.append(current)
+            current.update(exit_time=int(fill["time"]), closed=True)
+            trips.append(_finish(current))
             current, net = None, 0.0
     if current is not None:
-        current["net_pnl"] = current["realized_pnl"] - current["commission"]
-        trips.append(current)
+        trips.append(_finish(current))
     return trips
+
+
+def _finish(trip: dict[str, Any]) -> dict[str, Any]:
+    """VWAP 을 확정하고 **자기검증 값**을 싣는다.
+
+    완전히 닫힌 왕복은 진입 수량 == 청산 수량이므로 회계 항등식이 성립한다:
+        realizedPnl 합 = (청산VWAP − 진입VWAP) × 수량 × 방향부호
+    (펀딩은 realizedPnl 이 아니라 income 에 따로 잡히므로 이 식에 안 들어간다.)
+    어긋난 폭을 `pnl_check_bp` 로 남겨 두면, 원장을 읽는 쪽이 그 줄을 믿어도 되는지 스스로 안다.
+    """
+    trip["entry_price"] = trip["_in"] / trip["qty_in"] if trip["qty_in"] else None
+    trip["exit_price"] = trip["_out"] / trip["qty_out"] if trip["qty_out"] else None
+    trip["net_pnl"] = trip["realized_pnl"] - trip["commission"]
+    trip["price_basis"] = "leg_vwap"
+    sign = 1.0 if trip["side"] == "LONG" else -1.0
+    if trip["closed"] and trip["entry_price"] and trip["exit_price"] and trip["qty_out"]:
+        implied = (trip["exit_price"] - trip["entry_price"]) * trip["qty_out"] * sign
+        notional = trip["entry_price"] * trip["qty_out"]
+        trip["pnl_check_bp"] = round((trip["realized_pnl"] - implied) / notional * 1e4, 4) if notional else None
+    else:
+        trip["pnl_check_bp"] = None
+    for k in ("_in", "_out"):
+        trip.pop(k, None)
+    return trip
 
 
 async def _get(session, path: str, params: dict[str, Any], key: str, secret: str, offset_ms: int = 0) -> Any:
@@ -233,11 +267,30 @@ def _self_check() -> None:
     closed, opened = trips
     assert closed["closed"] and closed["side"] == "LONG"
     assert (closed["entry_time"], closed["exit_time"]) == (1000, 4000), closed
-    assert closed["entry_price"] == 2000.0 and closed["max_qty"] == 2.0, closed
+    # 2000 과 1900 에 한 개씩 담았으니 진입 VWAP 은 1950, 2100/2200 에 하나씩 풀었으니 청산 2150.
+    # 첫 체결가(2000)를 쓰던 옛 판은 여기서 2000 을 줬고, 그래서 (청산−진입) 이 손익과 안 맞았다.
+    assert closed["entry_price"] == 1950.0 and closed["exit_price"] == 2150.0, closed
+    assert closed["qty_in"] == 2.0 and closed["qty_out"] == 2.0 and closed["max_qty"] == 2.0, closed
     assert abs(closed["realized_pnl"] - 400.0) < 1e-9 and abs(closed["net_pnl"] - 396.72) < 1e-9, closed
+    # 회계 항등식: (2150 − 1950) × 2 = 400 = realizedPnl 합 → 어긋남 0
+    assert abs(closed["pnl_check_bp"]) < 1e-6, closed
+    assert closed["price_basis"] == "leg_vwap"
     assert not opened["closed"] and opened["side"] == "SHORT", opened
     assert opened["max_qty"] == 3.0 and opened["exit_time"] is None, opened
     assert round_trips([]) == []
+
+    # 실계좌에서 실제로 나온 모양의 회귀 시험: 물타기로 담았다가 **첫 체결가보다 낮은 값에**
+    # 다 풀었는데 손익은 양수다. 첫/마지막 체결가를 쓰던 옛 판은 LONG 인데 (청산 2459 < 진입 2489)
+    # 라 부호가 손익과 어긋났다(2026-09-03 건). VWAP 으로 보면 진입 2429.9 < 청산 2459 로 맞는다.
+    scaled = [
+        {"symbol": "ETHUSDT", "id": 1, "time": 1000, "side": "BUY", "price": "2489.79", "qty": "1", "realizedPnl": "0", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 2, "time": 2000, "side": "BUY", "price": "2400.00", "qty": "2", "realizedPnl": "0", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 3, "time": 3000, "side": "SELL", "price": "2459.06", "qty": "3", "realizedPnl": "87.45", "commission": "0", "positionSide": "LONG"},
+    ]
+    t = round_trips(scaled)[0]
+    assert abs(t["entry_price"] - 2429.93) < 0.01 and t["exit_price"] == 2459.06, t
+    assert (t["exit_price"] - t["entry_price"]) > 0 and t["realized_pnl"] > 0, "부호가 손익과 같아야 한다"
+    assert abs(t["pnl_check_bp"]) < 1.0, t          # 항등식 오차 1bp 이내
 
     # 한 체결로 숏 2 -> 롱 3 뒤집기. 쪼개지 않으면 두 거래가 한 왕복으로 뭉친다.
     flip = [
