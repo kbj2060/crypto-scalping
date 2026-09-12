@@ -76,13 +76,22 @@ def series(d: pd.DataFrame) -> dict[str, np.ndarray]:
 
 
 def hit_stats(sig: np.ndarray, nxt: np.ndarray) -> tuple[float, int, float, float]:
-    """적중률·표본·다음봉 평균 |수익|bp·gross bp."""
+    """적중률 · 표본 · 다음봉 평균 |수익|bp · **건당 실제 기대수익 bp**.
+
+    🔴gross 를 `(2a−1)·E|r|` 로 내면 안 된다 — 그 식은 **이긴 봉과 진 봉의 크기가 같다**고
+    가정한다. 되돌림 베팅에서는 그게 깨진다(ETH 95~99% 대역 실측: 이긴 봉 36.66bp vs
+    진 봉 **47.89bp**). 자주 이기고 **크게 진다**. 그 식을 쓰면 ETH 대역이 6.24bp 로 보이는데
+    실제 평균 부호수익은 **0.76bp**, 8배 과대평가다(2026-09-12 첫 판이 이걸 밟았다).
+    대칭 배리어(TP=SL)라면 그 식이 맞다 — 고정 지평 수익에는 안 맞는다.
+    """
     m = sig != 0
     if m.sum() == 0:
         return float("nan"), 0, float("nan"), float("nan")
-    a = float((np.sign(nxt[m]) == sig[m]).mean())
+    win = np.sign(nxt[m]) == sig[m]
+    a = float(win.mean())
     e = float(np.abs(nxt[m]).mean()) * 1e4
-    return a, int(m.sum()), e, (2 * a - 1) * e
+    signed = float((np.where(win, 1.0, -1.0) * np.abs(nxt[m])).mean()) * 1e4
+    return a, int(m.sum()), e, signed
 
 
 def shift_null(sig: np.ndarray, nxt: np.ndarray, b: int = NSHIFT) -> tuple[float, float]:
@@ -103,15 +112,21 @@ def run(symbol: str, start: str, end: str, verbose: bool = True) -> dict:
     nxt = r[1:]
     a, n, e, g = hit_stats(sig, nxt)
     nul, p = shift_null(sig, nxt)
-    need = {k: (1 + c / e) / 2 for k, c in COST.items()}
+    win = np.sign(nxt[sig != 0]) == sig[sig != 0]
+    ew = float(np.abs(nxt[sig != 0])[win].mean()) * 1e4
+    el = float(np.abs(nxt[sig != 0])[~win].mean()) * 1e4
+    # 손익 비대칭을 반영한 손익분기 적중률: a·E_win − (1−a)·E_loss = 비용
+    need = {k: (c + el) / (ew + el) for k, c in COST.items()}
     res = {"symbol": symbol, "n": n, "hit": a, "null": nul, "p": p, "abs_bp": e, "gross_bp": g,
            "need_taker": need["테이커"], "net_taker": g - COST["테이커"],
+           "e_win_bp": ew, "e_loss_bp": el,
            "lag1_ret_corr": float(np.corrcoef(r[:-1], r[1:])[0, 1]),
            "lag1_sign_corr": float(np.corrcoef(np.sign(r[:-1]), np.sign(r[1:]))[0, 1]),
            "start": str(ts[0]), "end": str(ts[-1])}
     if verbose:
         print(f"{symbol:<12}n={n:>7,} 적중 {a:.4f} (귀무 {nul:.4f}, p={p:.3f}) · "
-              f"E|r| {e:>6.2f}bp · gross {g:>6.2f} · 필요 {need['테이커']:.3f} · 순익 {g - 10:>7.2f}")
+              f"이긴봉 {ew:>6.2f} / 진봉 {el:>6.2f}bp · **건당 {g:>5.2f}bp** · "
+              f"필요 {need['테이커']:.3f} · 순익 {g - 10:>7.2f}")
     return res
 
 
@@ -125,12 +140,12 @@ def eth_conditioning(start: str, end: str) -> None:
     mag = np.abs(r[:-1])                       # 직전 봉 «크기»
     for name, cond in (("테이커 불균형 |imb| 십분위", flow), ("직전 봉 크기 |r| 십분위", mag)):
         print(f"\n--- ETH · {name} ---")
-        print(f"{'십분위':>7}{'n':>8}{'적중':>8}{'E|r|bp':>9}{'gross':>8}{'필요a*':>8}{'순익10':>9}")
+        print(f"{'십분위':>7}{'n':>8}{'적중':>8}{'E|r|bp':>9}{'건당bp':>8}{'순익peg':>8}{'순익10':>9}")
         q = pd.qcut(cond, 10, labels=False, duplicates="drop")
         for k in range(int(np.nanmax(q)) + 1):
             m = q == k
             a, n, e, g = hit_stats(sig[m], nxt[m])
-            print(f"{k+1:>7}{n:>8,}{a:>8.4f}{e:>9.2f}{g:>8.2f}{(1+10/e)/2:>8.3f}{g-10:>9.2f}")
+            print(f"{k+1:>7}{n:>8,}{a:>8.4f}{e:>9.2f}{g:>8.2f}{g-5.52:>8.2f}{g-10:>9.2f}")
 
 
 def band_test(symbols: list[str], start: str, end: str, lo_q: float = 0.95, hi_q: float = 0.99) -> None:
@@ -187,7 +202,12 @@ def main() -> int:
         assert hit_stats(-np.sign(r2[:-1]), r2[1:])[0] == 0.0
         a_, n_, e_, g_ = hit_stats(np.array([1.0, 1.0]), np.array([0.01, -0.01]))
         assert n_ == 2 and a_ == 0.5 and abs(e_ - 100.0) < 1e-9 and abs(g_) < 1e-9, (a_, e_, g_)
-        print("selftest OK — 되돌림/지속 극단 · gross=(2a−1)E|r|")
+        # 🔴비대칭에서 두 식이 갈린다: 이겨서 +1bp 두 번, 져서 −10bp 한 번
+        a2, _, e2, g2 = hit_stats(np.array([1.0, 1.0, 1.0]), np.array([1e-4, 1e-4, -1e-3]))
+        assert abs(a2 - 2/3) < 1e-9 and abs(g2 - (1 + 1 - 10) / 3) < 1e-6, (a2, g2)
+        naive = (2 * a2 - 1) * e2                      # +1.33bp
+        assert abs(naive - g2) > 2.0 and naive > 0 > g2, (naive, g2)   # 실제는 −2.67bp: 부호까지 뒤집힌다
+        print("selftest OK — 되돌림/지속 극단 · 건당 기대수익은 실제 부호수익 평균(비대칭 반영)")
         return 0
 
     print(f"=== 15분 되돌림 «직전 봉 반대» · {a.start} ~ {a.end} ===")
