@@ -409,15 +409,6 @@ function fmtNum(v, d = 2) {
   return Number(v || 0).toFixed(d);
 }
 
-function fmtPct(v, d = 2) {
-  const n = Number(v || 0);
-  const s = n >= 0 ? "+" : "";
-  return `${s}${n.toFixed(d)}%`;
-}
-
-function fmtPctNoPlus(v, d = 2) {
-  return `${Number(v || 0).toFixed(d)}%`;
-}
 
 function fmtUsdCompact(v) {
   const n = Number(v || 0);
@@ -536,12 +527,6 @@ function retailFlowRead(micro) {
 
 // 2026-09-11 청산 규모 칩 제거(중복 지표). 대체 칩 없이 자리를 비운다 -- 헬퍼도 함께 제거됨.
 
-function fmtBarsAgo(bars) {
-  if (bars === null || bars === undefined) return "발화 이력 없음";
-  if (bars === 0) return "지금";
-  const min = bars * 5;
-  return min < 60 ? `${min}분 전` : `${(min / 60).toFixed(1)}시간 전`;
-}
 
 // 2026-08-27: replaces toxRead/toxHint (독성/toxicity chip removed -- shadow_toxicity_score was
 // independently confirmed uninformative on both direction and volatility-framing axes, see
@@ -716,12 +701,6 @@ function classifyIndicators(micro, tail) {
   };
 }
 
-function setMeter(fillId, value01, tone = "good") {
-  const fill = el(fillId);
-  if (!fill) return;
-  fill.style.width = `${Math.round(clamp01(value01) * 100)}%`;
-  fill.className = tone;
-}
 
 function niceStep(span, targetTicks = 4) {
   const rough = span / Math.max(targetTicks, 1);
@@ -3584,9 +3563,11 @@ function updateSnapshotCandleLive() {
   }
 }
 
-// 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 styles.css 의
-// .liq-density-legend-bar 가 DENSITY_STOPS 와 같은 스톱을 하드코딩한다 -- 두 곳이 같아야
-// 범례가 히트맵을 정직하게 설명한다.
+// 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 DENSITY_STOPS 에서
+// 바로 만든다 -- CSS 에 사본을 두면 둘이 어긋나도 아무도 모른다(2026-09-12 에 실제로 겪음).
+const densityLegendGradient = () => "linear-gradient(90deg, "
+  + DENSITY_STOPS.map(([t, c], i) => `rgba(${c[0]},${c[1]},${c[2]},${i ? 1 : 0}) ${t * 100}%`).join(", ") + ")";
+
 function renderLiqDensityLegend(hasDensity) {
   const host = el("liqDensityLegend");
   if (!host) return;
@@ -3594,7 +3575,7 @@ function renderLiqDensityLegend(hasDensity) {
   if (!hasDensity) { host.innerHTML = ""; return; }
   const html = `<span class="liq-density-legend-title">청산 밀도</span>`
     + `<span class="liq-density-legend-scale"><span class="liq-density-legend-end">낮음</span>`
-    + `<span class="liq-density-legend-bar"></span>`
+    + `<span class="liq-density-legend-bar" style="background:${densityLegendGradient()}"></span>`
     + `<span class="liq-density-legend-end">높음</span></span>`;
   if (host.innerHTML !== html) host.innerHTML = html;
 }
@@ -3640,7 +3621,11 @@ function renderSnapshotChart() {
 // 넣을 순 없어?"). Dominant-class color (not a 3-way blend) matches the categorical tone convention
 // the evidence-signal strips use elsewhere; opacity scales with confidence so an uncertain reading
 // fades rather than asserting a false-confident color.
-const REGIME_DOMINANT_COLOR = { bull: "#5abc80", bear: "#d4786c", chop: "#8b91a6" };
+// 토큰을 복사하지 않고 읽는다 -- 하드코딩 사본은 2026-09-12 에 두 번 따로 고쳐야 했다.
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const REGIME_DOMINANT_COLOR = { get bull() { return cssVar("--good"); },
+                                get bear() { return cssVar("--bad"); },
+                                get chop() { return cssVar("--muted"); } };
 function regimeDominant(r) {
   return r.bull_prob >= r.bear_prob && r.bull_prob >= r.chop_prob ? "bull"
     : r.bear_prob >= r.chop_prob ? "bear" : "chop";

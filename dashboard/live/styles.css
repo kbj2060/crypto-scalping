@@ -601,9 +601,7 @@ body {
 .liq-density-legend-end { font-size: 10px; color: var(--muted); white-space: nowrap; }
 .liq-density-legend-bar {
   flex: 1; height: 8px; border-radius: 2px;
-  /* app.js DENSITY_STOPS 와 **같은 값**이어야 한다(하드코딩된 사본). 2026-09-10 viridis 폐기. */
-  background: linear-gradient(90deg, rgba(30,44,62,0) 0%, rgb(30,44,62) 25%, rgb(46,78,104) 50%,
-    rgb(58,108,152) 75%, rgb(96,156,208) 100%);
+  /* 그라디언트는 app.js 가 DENSITY_STOPS 에서 만들어 인라인으로 넣는다 -- 사본을 두지 않는다. */
 }
 @media (max-width: 720px) {
   .liq-density-legend { gap: 8px; padding: 0 2px 4px; }
