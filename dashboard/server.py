@@ -301,6 +301,7 @@ def save_model_indicator_history(rows: list[dict]) -> None:
 # 근처에 정체한다. 보이는 동안 디스크에 붙여 둔다. 화면에는 쓰지 않는다 -- 축적이 목적이다.
 ACCOUNT_TRIP_LEDGER_PATH = LIVE_DIR / "account_round_trips.jsonl"
 ACCOUNT_TRIP_RECORD_SECONDS = 300.0
+ACCOUNT_TRIP_CHECK_TOL_BP = 0.5   # 올바른 폴딩은 0.0000 이다. 0.5 는 부동소수 여유일 뿐이다
 
 
 def trip_key(trip: dict) -> str:
@@ -309,34 +310,81 @@ def trip_key(trip: dict) -> str:
     return f"{trip.get('symbol')}|{trip.get('side')}|{trip.get('entry_time')}"
 
 
-def load_account_trip_keys() -> set[str]:
-    """이미 적어 둔 왕복의 신원. 깨진 줄 하나가 원장 전체를 버리게 두지 않는다 --
-    그 줄의 왕복은 seen 에 안 들어가므로 아직 API 창 안에 있으면 다음 주기에 다시 적힌다."""
+def trip_span(trip: dict) -> tuple[str, str, int, int]:
+    """(심볼, 측면, 진입ms, 청산ms). 청산이 없으면 진입 한 점으로 본다."""
+    entry = int(trip.get("entry_time") or 0)
+    exit_ms = trip.get("exit_time")
+    return (str(trip.get("symbol")), str(trip.get("side")), entry,
+            int(exit_ms) if exit_ms else entry)
+
+
+def load_account_trip_keys() -> dict[str, tuple[str, str, int, int]]:
+    """이미 적어 둔 왕복의 신원 → 구간. 깨진 줄 하나가 원장 전체를 버리게 두지 않는다 --
+    그 줄의 왕복은 seen 에 안 들어가므로 아직 API 창 안에 있으면 다음 주기에 다시 적힌다.
+
+    2026-09-12: 키만 담던 것을 **구간까지** 담게 바꿨다. 키(진입시각)만으로는 중복을 못 막는다 --
+    아래 record_account_trips 주석 참조."""
     try:
         lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
     except FileNotFoundError:
-        return set()
+        return {}
     except Exception as exc:
         print(f"account_round_trips read failed: {exc}", flush=True)
-        return set()
-    keys: set[str] = set()
+        return {}
+    index: dict[str, tuple[str, str, int, int]] = {}
     for line in lines:
         try:
-            keys.add(trip_key(json.loads(line)))
+            trip = json.loads(line)
+            index[trip_key(trip)] = trip_span(trip)
         except Exception:
             continue
-    return keys
+    return index
 
 
-def record_account_trips(payload: dict, seen: set[str]) -> int:
+def overlaps_recorded(trip: dict, seen: dict[str, tuple[str, str, int, int]]) -> bool:
+    """같은 심볼·측면으로 **시간이 겹치는** 왕복이 이미 있는가.
+
+    한 방향 포지션은 같은 시각에 둘일 수 없으므로 겹침은 «같은 왕복» 이라는 뜻이다.
+    """
+    symbol, side, lo, hi = trip_span(trip)
+    for sym2, side2, lo2, hi2 in seen.values():
+        if sym2 == symbol and side2 == side and lo <= hi2 and lo2 <= hi:
+            return True
+    return False
+
+
+def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int]]) -> int:
     """종료된 왕복 중 처음 보는 것만 덧붙인다(append-only). 반환값은 새로 적은 건수.
 
     미청산 왕복은 적지 않는다 -- 나중에 청산되면 exit/net_pnl 이 채워지므로 지금 적으면
-    같은 왕복의 반쪽 판이 원장에 영구히 남는다."""
+    같은 왕복의 반쪽 판이 원장에 영구히 남는다.
+
+    🔴키(진입시각)만으로는 중복을 못 막는다. 거래소 조회가 체결 스트림의 **시작을 자르면**
+    폴딩이 포지션 한가운데서 시작해 같은 포지션을 «더 늦게 진입한 더 작은 왕복» 으로 만든다.
+    키가 다르니 그대로 또 적히고, 원장이 같은 거래를 두 번 센다. 2026-09-12 실측으로 28줄 중
+    10줄이 그런 조각이었고, 그 조각들의 +355.02 USDT 가 원장 합계 +232.32 를 만들고 있었다
+    (검증된 18줄만 보면 −122.70). 그래서 **시간 겹침**으로도 막는다."""
     if not (isinstance(payload, dict) and payload.get("ok")):
         return 0
-    fresh = [t for t in payload.get("trades") or []
-             if t.get("closed") and trip_key(t) not in seen]
+    fresh = []
+    for trip in payload.get("trades") or []:
+        if not trip.get("closed") or trip_key(trip) in seen:
+            continue
+        if overlaps_recorded(trip, seen):
+            print(f"account_round_trips: 겹침으로 건너뜀 {trip_key(trip)} "
+                  f"(절단된 체결 스트림의 조각으로 보인다)", flush=True)
+            continue
+        # 🔴회계 항등식이 안 맞으면 적지 않는다. 완전히 닫힌 왕복은
+        #   realizedPnl 합 = (청산VWAP − 진입VWAP) × 수량 × 방향부호 가 **정확히** 성립한다
+        # (2026-09-12 재구성한 67건 전부 ±0.0000bp). 그래서 0 이 아닌 값 자체가 폴딩이 잘못됐다는
+        # 신호다 -- 겹치지 않는 «빈 구간» 에 생긴 유령 왕복은 겹침 가드가 못 잡는데 이게 잡는다
+        # (실측: 재시작 직후 09-10 04:53 SHORT 가 −1.04bp 로 다시 생겼고, 거래소 전체 폴딩에는 없다).
+        check = trip.get("pnl_check_bp")
+        if check is None or abs(float(check)) > ACCOUNT_TRIP_CHECK_TOL_BP:
+            print(f"account_round_trips: 항등식 불일치로 건너뜀 {trip_key(trip)} "
+                  f"(check={check}bp) -- 체결 스트림이 잘린 것으로 보인다", flush=True)
+            continue
+        fresh.append(trip)
     if not fresh:
         return 0
     now = datetime.now(timezone.utc).isoformat()
@@ -347,7 +395,7 @@ def record_account_trips(payload: dict, seen: set[str]) -> int:
     except Exception as exc:
         print(f"account_round_trips append failed: {exc}", flush=True)
         return 0
-    seen.update(trip_key(t) for t in fresh)
+    seen.update({trip_key(t): trip_span(t) for t in fresh})
     return len(fresh)
 
 
