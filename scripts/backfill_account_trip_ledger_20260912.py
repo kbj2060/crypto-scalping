@@ -73,6 +73,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--lookback-days", type=int, default=14)
+    ap.add_argument("--dump", action="store_true", help="추가될 줄을 전부 찍는다")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -122,6 +123,37 @@ def main() -> int:
         lo, hi = min(int(t["entry_time"]) for t in add), max(int(t["entry_time"]) for t in add)
         print(f"\n추가 구간 {A._iso(lo)} ~ {A._iso(hi)} · 순손익 합 {sum(t['net_pnl'] for t in add):+.2f} USDT")
         print(f"원장 {len(rows)} → **{len(rows) + len(add)}줄**")
+    # 🔴쓰기 전 불변식: 같은 symbol+side 왕복은 시간이 겹칠 수 없다(한 방향 포지션은 하나뿐).
+    # 겹침 가드가 이미 후보를 걸렀지만, 기존 줄끼리의 겹침과 **후보끼리의** 겹침은 아직 안 봤다.
+    # 09-11 스냅샷 백필 4줄은 exit_time 이 비어 있어 가드가 점 구간으로 약해지므로 더 필요하다.
+    merged = rows + add
+    viol = []
+    for i, x in enumerate(merged):
+        for y in merged[i + 1:]:
+            if x.get("symbol") == y.get("symbol") and x.get("side") == y.get("side"):
+                x0, x1 = span(x); y0, y1 = span(y)
+                if x0 <= y1 and y0 <= x1:
+                    viol.append((x, y))
+    print(f"\n불변식(같은 측면 시간 겹침 없음): 위반 {len(viol)}건")
+    for x, y in viol[:10]:
+        print(f"   ⚠️{A._iso(x['entry_time'])}~{A._iso(x.get('exit_time'))} ↔ "
+              f"{A._iso(y['entry_time'])}~{A._iso(y.get('exit_time'))} [{x.get('side')}]")
+    noexit = [r for r in rows if not r.get("exit_time")]
+    print(f"exit_time 없는 기존 줄 {len(noexit)}건 — 이 줄들은 «포함» 으로만 걸러진다:")
+    for r in noexit:
+        near = min(add, key=lambda t: abs(int(t["entry_time"]) - int(r["entry_time"])), default=None)
+        gap = abs(int(near["entry_time"]) - int(r["entry_time"])) / 60000 if near else None
+        print(f"   {r.get('entry_at') or r['entry_time']} {r.get('side')} — 가장 가까운 후보까지 "
+              f"{gap:.0f}분" if gap is not None else "   후보 없음")
+    if a.dump:
+        print("\n추가될 줄:")
+        for t in add:
+            print(f"   {A._iso(t['entry_time'])} ~ {A._iso(t.get('exit_time'))} {t['side']:<5} "
+                  f"수량 {t['max_qty']:>8.3f} 진입 {t['entry_price']:>9.2f} 청산 {t['exit_price']:>9.2f} "
+                  f"순익 {t['net_pnl']:>9.2f} check {t['pnl_check_bp']}")
+    if viol:
+        print("\n⛔불변식 위반이 있어 반영하지 않는다.")
+        return 5
     if not a.apply:
         print("\n미리보기만 했다. 반영하려면 --apply")
         return 0
