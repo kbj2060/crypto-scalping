@@ -2064,6 +2064,8 @@ svg {
 .exit-frac input[type="range"] { width: 110px; accent-color: var(--good); cursor: pointer; }
 .exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
   text-align: right; font-variant-numeric: tabular-nums; }
+.exit-frac select { padding: 5px 8px; font: 700 11px/1.2 var(--font-sans); }
+.exit-frac b.entry-was { min-width: 0; text-align: left; white-space: nowrap; }
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }

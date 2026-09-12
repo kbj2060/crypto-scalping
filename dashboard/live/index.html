@@ -287,6 +287,22 @@
           </div>
           <!-- 2026-09-13 분할 진입. 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다 --
                09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다. -->
+          <!-- 2026-09-13 보유시간이 크기를 정한다. 학습된 MAE 분위 모델이 «이 시장에서 이만큼
+               들고 있으면 이 정도 역행을 각오해야 한다»를 주고, 그 역수가 허용 레버리지다.
+               세 상한(원장·순자산·모델)의 **작은 쪽**을 쓰므로 이 선택이 크기를 키우지는 않는다. -->
+          <div class="manual-entry-row actions">
+            <label class="exit-frac" for="snapHold">
+              <span class="entry-cap">보유 예정</span>
+              <select id="snapHold" class="notify-btn small" aria-label="보유 예정 시간">
+                <option value="60">1시간</option>
+                <option value="120">2시간</option>
+                <option value="240">4시간</option>
+                <option value="480">8시간</option>
+                <option value="1440" selected>1일</option>
+              </select>
+              <b id="snapHoldRisk" class="entry-was">—</b>
+            </label>
+          </div>
           <div class="manual-entry-row actions">
             <label class="exit-frac" for="snapEntryFrac">
               <span class="entry-cap">진입 비율</span>
@@ -383,7 +399,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-margin"></script>
+  <script src="./app.js?v=20260913-risk"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

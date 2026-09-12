@@ -111,6 +111,37 @@ def leverage_for(models: dict, X: pd.DataFrame, mult: float,
     return np.minimum(cap, safety * 100.0 / safe_mae(models, X, mult))
 
 
+_CACHE: dict = {}
+
+
+def load_model():
+    """아티팩트를 한 번만 읽어 캐시한다. 없으면 None -- 호출부가 옛 경로로 떨어진다."""
+    if "art" not in _CACHE:
+        try:
+            import joblib
+            _CACHE["art"] = joblib.load(ARTIFACT)
+        except Exception:      # noqa: BLE001 -- 없거나 깨졌으면 «모델 없음»으로 취급
+            _CACHE["art"] = None
+    return _CACHE["art"]
+
+
+def safe_mae_now(closes, quote_vol, trades, highs, lows, ts, hold_minutes: float,
+                 side: str) -> float | None:
+    """지금 상태에서 `hold_minutes` 동안 각오해야 할 역행폭(%). 모델이 없으면 None.
+
+    호출부(대시보드)가 5분봉을 그대로 넘긴다. 피쳐 빌더는 학습과 **같은 함수**다."""
+    art = load_model()
+    if art is None:
+        return None
+    X = svm.build_features(ts, closes, quote_vol, trades, highs, lows)
+    row = X.iloc[[-1]].copy()
+    if not np.isfinite(row.to_numpy(dtype=float)).all():
+        return None
+    row["log_h"] = np.log(max(1.0, float(hold_minutes)))
+    row["side"] = 1 if side.upper() == "LONG" else -1
+    return float(safe_mae(art["models"], row, art["mult"])[0])
+
+
 def train() -> int:
     from sklearn.ensemble import HistGradientBoostingRegressor
     import joblib

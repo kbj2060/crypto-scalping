@@ -5186,6 +5186,8 @@ function manualEntryPlanHtml(data) {
 
   (plan.notes || []).forEach((note) => parts.push(`<div class="entry-note">⚠ ${escapeHtml(note)}</div>`));
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
+  const er = (data.cap || {}).risk;
+  if (er) parts.push(`<div class="entry-cap">${escapeHtml(riskLine(er))}</div>`);
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
                  : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
@@ -5207,10 +5209,23 @@ function sliderPct(id) {
 const manualExitPct = () => sliderPct("snapExitFrac");
 const manualEntryPct = () => sliderPct("snapEntryFrac");
 
+// 보유 예정 시간. **크기를 정하는 입력**이라 진입·청산이 같은 값을 쓴다.
+const manualHoldMin = () => Number(el("snapHold")?.value) || 1440;
+
 async function manualEntryFetch(side, kind = "entry") {
-  const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`;
+  const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
+    + `&hold=${manualHoldMin()}`;
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-store" });
   return res.json();
+}
+
+// 위험 모델이 무엇을 말하는지 한 줄로. 모델이 없으면 그 사실을 그대로 쓴다.
+function riskLine(r) {
+  if (!r) return "";
+  if (!r.available) return `위험모델 없음 (${r.reason || "?"}) — 기존 상한만 적용`;
+  const who = { survival: "생존(청산거리)", growth: "성장(켈리 하한)",
+                cap: "정책상한" }[r.binding] || r.binding;
+  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → 최대 ${r.leverage}배 · ${who}이 묶음`;
 }
 
 // 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
@@ -5228,6 +5243,15 @@ function manualExitPlanHtml(plan) {
   if (move != null) {
     parts.push(entryNote(`이 가격이면 진입가 대비 ${move > 0 ? "+" : ""}${move}% (수수료 전)`,
       move >= 0 ? null : "bad"));
+  }
+  const r = plan.risk;
+  if (r && r.available && r.required_fraction > 0) {
+    parts.push(entryNote(
+      `${r.hold_min}분 더 들 생각이면 명목 ${Math.round(r.allowed_notional).toLocaleString()} 까지가 한도입니다`
+      + ` (지금 ${Math.round(r.current_notional).toLocaleString()}) — `
+      + `최소 ${Math.round(100 * r.required_fraction)}% 는 닫아야 합니다`, "bad"));
+  } else if (r) {
+    parts.push(`<div class="entry-cap">${escapeHtml(riskLine(r))}</div>`);
   }
   if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
   // 시장가로 전환된 경우엔 이유를 **위쪽에** 띄운다 -- 비용이 더 드는 선택이라 묻히면 안 된다.
@@ -5292,6 +5316,13 @@ async function manualEntryRefreshSize() {
       ? `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 ${capQty.toFixed(3)} ETH`
       : `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
+    // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
+    const hb = el("snapHoldRisk");
+    if (hb) {
+      const r = (data.cap || {}).risk;
+      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배`
+        : (r ? "모델 없음" : "—");
+    }
   } catch (err) {
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
     setMode("확인 실패");
@@ -5329,7 +5360,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct };
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin() };
   btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
     + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문");
   btn.hidden = false;
@@ -5375,7 +5406,7 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
-    const q = `&pct=${pending.pct ?? 100}`;
+    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`;
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
       { method: "POST", cache: "no-store" });
@@ -5397,6 +5428,11 @@ el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "
 el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
+el("snapHold")?.addEventListener("change", () => {
+  manualEntryClearConfirm();          // 보유시간이 바뀌면 크기가 바뀐다 -- 다른 계획이다
+  manualEntryRefreshSize();
+});
+
 for (const [slider, label, kind] of [["snapExitFrac", "snapExitFracVal", "exit"],
                                      ["snapEntryFrac", "snapEntryFracVal", "entry"]]) {
   el(slider)?.addEventListener("input", () => {

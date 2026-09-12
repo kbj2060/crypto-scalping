@@ -174,6 +174,11 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, build_entry_plan, build_exit_plan, exec_enabled, load_filters,
     realized_vol_bpm)
 from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
+# 2026-09-13 보유시간 조건부 위험 사이징. 모델이 없으면 safe_mae_now 가 None 을 주고
+# 호출부가 기존 상한 경로로 떨어진다 -- 모델 부재가 진입을 막지는 않는다.
+from scripts.live_eth_mae_quantile_model_20260913 import safe_mae_now  # noqa: E402
+from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
+    entry_notional, exit_fraction_required)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2654,7 +2659,7 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
-    async def assemble_entry_plan(side: str, fraction: float = 1.0):
+    async def assemble_entry_plan(side: str, fraction: float = 1.0, hold_min: int = 1440):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -2686,12 +2691,24 @@ def make_app() -> web.Application:
             # 줄어든다 -- 소급 초과가 생기지 않는다. 어느 쪽이 묶었는지 화면에 남긴다.
             cap_ledger = cap.get("cap_notional_usdt") if cap.get("available") else None
             cap_equity = equity * SIZING_CAP_EQUITY_X if equity > 0 else None
-            binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity")) if v]
+            # 2026-09-13 세 번째 상한: 보유시간 조건부 위험 모델. 있으면 같이 경쟁시킨다.
+            risk = await risk_sizing(symbol, hold_min, side)
+            cap_model = None
+            if risk.get("available") and equity > 0:
+                e = entry_notional(equity, risk["safe_mae_pct"], existing_notional=existing)
+                cap_model = e["total_notional"]
+                risk.update(leverage=round(e["leverage"], 2), binding=e["binding"],
+                            survival_x=round(e["survival_x"], 2),
+                            growth_x=round(e["growth_x"], 2) if e["growth_x"] else None)
+            binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
+                                           (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
             if cap_notional is not None:
                 cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
                            cap_ledger_usdt=round(cap_ledger, 2) if cap_ledger else None,
+                           cap_model_usdt=round(cap_model, 2) if cap_model else None,
+                           risk=risk,
                            equity_x=SIZING_CAP_EQUITY_X,
                            liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
                            binding=min(binding)[1])
@@ -2718,7 +2735,7 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac)
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -2750,7 +2767,7 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac)
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2765,6 +2782,40 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
+    HOLD_CHOICES = (60, 120, 240, 480, 1440)
+
+    def query_hold(request: web.Request) -> int:
+        """의도한 보유시간(분). 크기를 정하는 입력이다 -- 모르면 가장 보수적인 값을 쓴다."""
+        try:
+            h = int(float(request.query.get("hold") or 0))
+        except (TypeError, ValueError):
+            h = 0
+        return h if h in HOLD_CHOICES else max(HOLD_CHOICES)
+
+    async def risk_sizing(symbol: str, hold_min: int, side: str) -> dict[str, Any]:
+        """지금 상태·이 보유시간에서 허용 명목. 모델이 없거나 데이터가 모자라면 available=False."""
+        try:
+            kl = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {"symbol": symbol, "interval": "5m", "limit": 520},
+                timeout=6.0, error_reason=None)
+            if not kl or len(kl) < 420:
+                return {"available": False, "reason": "klines_short"}
+            rows = kl[:-1]                      # 미완결 봉 제외
+            import numpy as _np
+            ts = pd.to_datetime([int(r[0]) for r in rows], unit="ms")
+            mae = await asyncio.to_thread(
+                safe_mae_now,
+                _np.array([float(r[4]) for r in rows]), _np.array([float(r[7]) for r in rows]),
+                _np.array([float(r[8]) for r in rows]), _np.array([float(r[2]) for r in rows]),
+                _np.array([float(r[3]) for r in rows]), ts, float(hold_min), side)
+            if mae is None or not (mae > 0):
+                return {"available": False, "reason": "model_unavailable"}
+            return {"available": True, "safe_mae_pct": round(float(mae), 3),
+                    "hold_min": hold_min}
+        except Exception as exc:  # noqa: BLE001 -- 사이징 보조값이지 필수가 아니다
+            return {"available": False, "reason": f"{type(exc).__name__}"}
+
     def query_fraction(request: web.Request) -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
         이상하면 None -- 호출부가 400 을 낸다.
@@ -2778,7 +2829,8 @@ def make_app() -> web.Application:
             return None
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
-    async def assemble_exit_plan(position_side: str, fraction: float = 1.0):
+    async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
+                                 hold_min: int = 1440):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -2818,6 +2870,23 @@ def make_app() -> web.Application:
                 mark_price=float(position.get("mark_price") or 0.0),
                 vol_bpm=vol_bpm, fraction=fraction)
             plan["unrealized_pnl"] = position.get("unrealized_pnl")
+            # 남은 보유시간 기준 위험 한도. 넘었으면 «최소 이만큼은 닫아야 한다»를 준다.
+            acct = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
+                                    produce_account, max_stale=STALE_GRACE_SECONDS)
+            eq = float((acct.get("balance") or {}).get("margin") or 0.0)
+            cur_notional = sum(abs(float(p.get("notional") or 0.0))
+                               for p in (acct.get("positions") or [])
+                               if p.get("symbol") == symbol)
+            risk = await risk_sizing(symbol, hold_min, position_side)
+            if risk.get("available") and eq > 0 and cur_notional > 0:
+                r = exit_fraction_required(eq, risk["safe_mae_pct"], cur_notional)
+                plan["risk"] = {**risk, "required_fraction": round(r["required_fraction"], 4),
+                                "allowed_notional": round(r["allowed_notional"], 2),
+                                "excess_notional": round(r["excess_notional"], 2),
+                                "current_notional": round(cur_notional, 2),
+                                "leverage": round(r["leverage"], 2), "binding": r["binding"]}
+            else:
+                plan["risk"] = risk
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None
@@ -2832,7 +2901,7 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, error = await assemble_exit_plan(side, frac)
+        plan, error = await assemble_exit_plan(side, frac, query_hold(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
@@ -2859,7 +2928,7 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
-        plan, error = await assemble_exit_plan(side, frac)
+        plan, error = await assemble_exit_plan(side, frac, query_hold(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
