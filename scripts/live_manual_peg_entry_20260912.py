@@ -90,7 +90,8 @@ def _floor_to(value: float, grid: float) -> float:
 def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended_qty: float,
                      cap_notional: float | None, filters: dict[str, float],
                      symbol: str = "ETHUSDT", existing_notional: float = 0.0,
-                     equity: float = 0.0, leverage: float = 0.0) -> dict[str, Any]:
+                     equity: float = 0.0, leverage: float = 0.0,
+                     fraction: float = 1.0) -> dict[str, Any]:
     """보낼 주문 하나를 만든다. **순수 함수** -- 네트워크도 시계도 안 본다(그래야 검사가 된다).
 
     peg 는 «내가 메이커로 남는 가격»이다: 롱은 최우선 매수호가, 숏은 최우선 매도호가.
@@ -109,6 +110,11 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
         raise ValueError(f"side must be LONG/SHORT, got {side!r}")
     if not (best_bid > 0 and best_ask > 0 and best_ask >= best_bid):
         raise ValueError(f"bad book: bid={best_bid} ask={best_ask}")
+    # 분할 진입 비율(2026-09-13 사용자 요청). 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다.
+    # 09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다.
+    # 범위를 벗어나면 막는다 -- 조용히 1.0 으로 자르면 3분의 1만 넣으려던 게 전량이 된다.
+    if not (0.0 < float(fraction) <= 1.0):
+        raise ValueError(f"fraction must be in (0, 1], got {fraction!r}")
 
     price = _floor_to(best_bid, filters["tick"]) if side == "LONG" else best_ask
     notes: list[str] = []
@@ -124,6 +130,16 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
             qty = room / price
             notes.append(f"상한까지 남은 여유 {room:,.0f} USDT 로 줄였습니다"
                          f" (기존 {existing_notional:,.0f} + 신규 = 상한 {cap_notional:,.0f})")
+    # 🔴비율은 **상한에 자른 뒤** 곱한다. 권고량에 곱하면 뜻이 어긋난다 -- 권고가 상한을
+    # 크게 넘는 구간(새 상한 6.7배에서는 절반쯤)에서는 «33%» 를 넣어도 상한의 71% 가
+    # 들어간다(2026-09-13 실측). 그래서 슬라이더의 뜻은 «권고 중 얼마»가 아니라
+    # **«지금 넣을 수 있는 양 중 얼마»** 다. 칸마다 남은 여유에 비례하므로 반복해 넣어도
+    # 상한을 넘지 않고, 반대로 가면 남겨 둔 여유로 대응할 수 있다.
+    available_qty = qty          # 상한에 자른 «지금 넣을 수 있는 양»
+    if float(fraction) < 1.0:
+        qty = available_qty * float(fraction)
+        notes.append(f"지금 넣을 수 있는 {available_qty:.3f} ETH 중 {int(round(100*fraction))}%"
+                     f" 만 넣습니다 (나머지 {available_qty - qty:.3f} 는 남겨 둡니다)")
     qty = _floor_to(qty, filters["step"])
 
     blocked = None
@@ -155,6 +171,12 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
         # 교차 마진 근사. 거래소 실제 청산가와 0.5pp 안쪽으로 맞았다(실측).
         "liq_distance_pct": round(100 * equity / total_notional, 1) if equity and total_notional else None,
         "cap_used_pct": round(100 * total_notional / cap_notional, 0) if cap_notional else None,
+        "fraction": round(float(fraction), 4),
+        # 비율 적용 **전**, 상한까지 자른 양. 화면이 «이 중 얼마»를 쓴다.
+        "available_qty": round(available_qty, 8),
+        # 이번 주문 뒤에 상한까지 남는 여유. 분할 진입의 다음 칸을 가늠하는 값이다.
+        "cap_room_after_usdt": (round(max(0.0, cap_notional - total_notional), 2)
+                                if cap_notional else None),
         "fallback_after_sec": FALLBACK_SEC,
         "fallback": "taker",           # 사용자 선택 b: 미체결이면 테이커 전환
         "cap_notional_usdt": cap_notional,
@@ -430,7 +452,47 @@ def _self_check() -> None:
                            best_ask=2470.01, filters=f, fraction=0.05)
     assert tiny["blocked"] and ("비율" in tiny["blocked"] or "최소" in tiny["blocked"]), tiny
 
-    print("통과 52/52 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 + 변동성 마감 + 부분 청산")
+    # ── 분할 진입 ────────────────────────────────────────────────────────────
+    CAP = 7299.0
+    one = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                           recommended_qty=6.14, cap_notional=CAP, filters=f)
+    assert one["fraction"] == 1.0, one
+    # available_qty 는 «권고»가 아니라 «상한에 자른 뒤 넣을 수 있는 양»이다
+    assert abs(one["available_qty"] - one["quantity"]) < f["step"], one
+    assert one["available_qty"] < 6.14, "권고 6.14 는 상한을 넘으므로 잘려야 한다"
+    assert one["notional_usdt"] <= CAP + 1e-6, "전량이어도 상한은 넘지 않는다"
+
+    # 3분할: 각 칸이 상한 여유를 줄여 가고, 세 번 넣어도 상한을 안 넘는다.
+    held = 0.0
+    for i in range(3):
+        t = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                             recommended_qty=6.14, cap_notional=CAP, filters=f,
+                             existing_notional=held, fraction=1 / 3)
+        assert t["total_notional_usdt"] <= CAP + 1e-6, (i, t["total_notional_usdt"])
+        assert t["cap_room_after_usdt"] >= 0, t
+        held = t["total_notional_usdt"]
+    assert held <= CAP + 1e-6 and held > 0, held
+
+    # 분할이면 «권고 중 몇 %»를 노트로 말해 준다
+    third = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                             recommended_qty=6.14, cap_notional=CAP, filters=f, fraction=1 / 3)
+    assert third["quantity"] < one["quantity"], (third["quantity"], one["quantity"])
+    assert any("33%" in n and "넣을 수 있는" in n for n in third["notes"]), third["notes"]
+    # 비율은 상한에 자른 **뒤** 곱한다 -- 권고가 상한을 넘어도 한 칸이 상한을 삼키지 않는다
+    cap_qty = CAP / 2470.01
+    assert third["quantity"] < cap_qty * 0.4, (third["quantity"], cap_qty)
+
+    # 범위를 벗어난 비율은 조용히 자르지 않고 막는다
+    for bad in (0.0, -0.2, 1.5):
+        try:
+            build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                             recommended_qty=6.14, cap_notional=CAP, filters=f, fraction=bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"막았어야 한다: fraction={bad}")
+
+    print("통과 66/66 — 진입(분할 포함) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
 
 
 if __name__ == "__main__":

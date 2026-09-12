@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-partial">
+  <link rel="stylesheet" href="styles.css?v=20260913-split">
 </head>
 <body>
     <main class="app">
@@ -285,6 +285,16 @@
             <span id="snapEntrySize" class="muted">크기 확인 중…</span>
             <span id="snapEntryMode" class="ops-readonly">미리보기 전용</span>
           </div>
+          <!-- 2026-09-13 분할 진입. 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다 --
+               09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다. -->
+          <div class="manual-entry-row actions">
+            <label class="exit-frac" for="snapEntryFrac">
+              <span class="entry-cap">진입 비율</span>
+              <input type="range" id="snapEntryFrac" min="10" max="100" step="10" value="100"
+                     aria-label="진입 비율">
+              <b id="snapEntryFracVal">100%</b>
+            </label>
+          </div>
           <div class="manual-entry-row actions">
             <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
             <button type="button" id="snapEntryShort" class="notify-btn short">숏 진입</button>
@@ -373,7 +383,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-partial"></script>
+  <script src="./app.js?v=20260913-split"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

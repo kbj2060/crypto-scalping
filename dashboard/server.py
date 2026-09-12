@@ -1015,10 +1015,22 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 #      **명목 ÷ 순자산**이다.
 # ⇒ 교차 마진에서 `청산까지 거리 ≈ 순자산 / 총명목` 이므로(실측 1,065/7,642=13.9% vs
 #   거래소 13.48%), 총명목을 순자산의 N 배로 캡하면 **청산 거리에 1/N 하한**이 생긴다.
-#   워커 실측 역행폭 95분위: 1시간 1.14% · 4시간 2.39% · 24시간 6.59%.
-#   12.5배(=청산 8%)면 4시간 95분위의 3.3배 여유, 24시간 95분위도 견딘다.
+# 🔴2026-09-13 하향 12.5 -> 6.7 (사용자 결정). 12.5 는 «역행폭 **95분위**»로 골랐는데
+#   그게 틀린 잣대였다 — 청산은 꼬리 사건이라 95분위가 아니라 꼬리를 봐야 하고,
+#   보유시간도 «24시간»으로 가정했지 실제 분포를 안 봤다(실제: 중앙 1.12시간이지만
+#   **최대 9일**, 1일 초과가 7.4%).
+#   실측 재계산 — ETH 1분봉 869일 MAE 를 **원장 68왕복의 실제 보유시간에 그대로 대입**:
+#     청산거리  레버리지   68건 중 «최소 1회 이상 청산»(전구간 / 저변동구간만)
+#        8%      12.5배          60.6%  /  49.5%     <- 옛 값. 동전 던지기다.
+#       15%       6.7배          18.4%  /  19.0%     <- 채택
+#       20%       5.0배          10.2%  /  15.8%
+#   ⚠️**«변동성이 낮으니 안전»은 틀렸다**. 상한이 묶이는 저변동 구간(하위 5.68%)의
+#   1일 MAE 는 중앙이 낮지만(2.79% vs 3.43%) **99분위는 더 높다(21.82% vs 16.10%)**.
+#   역변동성 사이징은 꼬리가 가장 두꺼운 구간에 레버리지를 가장 많이 싣는다 —
+#   그래서 저변동으로 조건부를 걸어도 8% 는 49.5% 로 거의 안 내려간다.
+#   근거 스크립트: research_sizing_cap_liquidation_risk_20260913.py
 # 두 상한의 **작은 쪽**을 쓴다 — 순자산 연동이 주 방어선, 원장 기반은 보조.
-SIZING_CAP_EQUITY_X = 12.5
+SIZING_CAP_EQUITY_X = 6.7
 
 
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
@@ -2637,7 +2649,7 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
-    async def assemble_entry_plan(side: str):
+    async def assemble_entry_plan(side: str, fraction: float = 1.0):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -2680,7 +2692,7 @@ def make_app() -> web.Application:
                 recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
                 cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
-                equity=equity, leverage=leverage)
+                equity=equity, leverage=leverage, fraction=fraction)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
@@ -2694,7 +2706,11 @@ def make_app() -> web.Application:
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
-        plan, cap, sizing, error = await assemble_entry_plan(side)
+        frac = query_fraction(request)
+        if frac is None:
+            return web.json_response({"ok": False, "error": "bad_pct",
+                                      "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -2713,6 +2729,10 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        frac = query_fraction(request)
+        if frac is None:
+            return web.json_response({"ok": False, "error": "bad_pct",
+                                      "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
@@ -2720,7 +2740,9 @@ def make_app() -> web.Application:
         if manual_entry_state.get("phase") in ("working", "submitting"):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
-        plan, cap, sizing, error = await assemble_entry_plan(side)
+        # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
+        # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2735,9 +2757,10 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
-    def exit_fraction(request: web.Request) -> float | None:
-        """쿼리의 청산 비율(%)을 0<f<=1 로 바꾼다. 이상하면 None -- 호출부가 400 을 낸다.
-        **조용히 1.0 으로 떨어뜨리지 않는다**: 절반만 닫으려던 요청이 전량이 되면 안 된다."""
+    def query_fraction(request: web.Request) -> float | None:
+        """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
+        이상하면 None -- 호출부가 400 을 낸다.
+        **조용히 1.0 으로 떨어뜨리지 않는다**: 일부만 하려던 요청이 전량이 되면 안 된다."""
         raw = request.query.get("pct")
         if raw in (None, ""):
             return 1.0
@@ -2797,7 +2820,7 @@ def make_app() -> web.Application:
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
-        frac = exit_fraction(request)
+        frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
@@ -2815,7 +2838,7 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
-        frac = exit_fraction(request)
+        frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
