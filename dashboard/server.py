@@ -1003,6 +1003,7 @@ def position_sizing_payload() -> dict[str, Any]:
 # 진짜 지렛대는 배수가 아니라 균일성이고, 재량을 얼마나 남길지는 사람이 정한다.
 SIZING_CAP_MULT = 2.0
 SIZING_CAP_MIN_TRIPS = 10   # 이보다 적으면 중앙값이 표본 하나에 휘둘린다 -- 상한을 만들지 않는다
+SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizing_cap 주석 참조
 
 # 🔴2026-09-12 저녁 수정: 원장 기반 상한만 두면 세 가지가 깨진다(실제로 터졌다).
 #   ① **기준이 움직인다** — 왕복이 19→68 건이 되자 중앙 명목이 6,790→4,346 으로 내려가
@@ -1078,18 +1079,29 @@ def sizing_cap() -> dict[str, Any]:
         lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
     except Exception:
         return {"available": False, "reason": "ledger_missing"}
-    notionals = []
+    trips = []
     for line in lines:
         try:
             trip = json.loads(line)
-            notionals.append(abs(float(trip["max_qty"]) * float(trip["entry_price"])))
+            trips.append((int(trip.get("entry_time") or 0),
+                          abs(float(trip["max_qty"]) * float(trip["entry_price"]))))
         except Exception:
             continue          # 깨진 줄 하나가 상한을 통째로 못 내게 하지 않는다
-    if len(notionals) < SIZING_CAP_MIN_TRIPS:
+    if len(trips) < SIZING_CAP_MIN_TRIPS:
         return {"available": False, "reason": "not_enough_trips",
-                "trips": len(notionals), "need": SIZING_CAP_MIN_TRIPS}
+                "trips": len(trips), "need": SIZING_CAP_MIN_TRIPS}
+    # 🔴2026-09-13: **최근 창**만 본다. 이력 전체에 묶으면 상한이 톱니처럼 계속 조여진다 --
+    #   원장은 자라기만 하고, 과거 거래가 지금보다 작으면 중앙값이 계속 내려가 결국 정상
+    #   매매까지 막는다. 실제로 왕복이 19→68건이 되자(백필) 중앙 명목 6,790→4,346,
+    #   상한 13,579→8,692 로 떨어져 **낮에 정당하게 잡은 포지션이 소급 초과**가 됐다.
+    #   실측(68왕복): 전체 중앙 4,346 vs 최근 30건 6,774 -- 옛 거래가 지금 규모와 무관하다
+    #   (하위 12건이 646~1,194 USDT). 최근 30건 ×2 = 13,549 는 순자산 ×12.5 = 13,083 과
+    #   2% 안에서 만난다 -- 독립인 두 기준이 같은 값을 가리킨다.
+    trips.sort()
+    notionals = [v for _, v in trips[-SIZING_CAP_WINDOW:]]
     median = statistics.median(notionals)
-    return {"available": True, "trips": len(notionals), "mult": SIZING_CAP_MULT,
+    return {"available": True, "trips": len(notionals), "trips_total": len(trips),
+            "window": SIZING_CAP_WINDOW, "mult": SIZING_CAP_MULT,
             "median_notional_usdt": round(median, 2),
             "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
 

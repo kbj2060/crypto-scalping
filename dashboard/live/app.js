@@ -5226,18 +5226,31 @@ async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   const mode = el("snapEntryMode");
   if (!line) return;
+  // 🔴2026-09-13: 실패하면 배지를 **반드시 바꾼다**. 예전엔 조기 return 해서 배지가 HTML
+  //   초기값("미리보기 전용")이나 마지막 성공값에 굳었다 -- 화면이 "게이트가 꺼져 있다"고
+  //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
+  //   **실패 시 이전 값을 남기는 UI 는 조용히 거짓말한다.**
+  const setMode = (text) => { if (mode) mode.textContent = text; };
   try {
     const data = await manualEntryFetch("LONG");
-    if (!data.ok) { line.textContent = `크기 없음 — ${data.error || data.detail || ""}`; return; }
+    if (!data.ok) {
+      const why = data.detail === "worker_stale" ? "크기 워커 정지"
+        : data.error === "sizing_unavailable" ? "크기 데이터 없음"
+        : (data.error || "알 수 없음");
+      line.textContent = `크기 확인 실패 — ${why}`;
+      setMode("확인 실패");
+      return;
+    }
     const plan = data.plan || {};
     const cap = data.cap || {};
     const capQty = cap.available && plan.price ? cap.cap_notional_usdt / plan.price : null;
     line.textContent = capQty
       ? `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 ${capQty.toFixed(3)} ETH`
       : `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
-    if (mode) mode.textContent = plan.dry_run ? "미리보기 전용" : "실주문 활성";
+    setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
   } catch (err) {
-    line.textContent = "크기 확인 실패";
+    line.textContent = "크기 확인 실패 — 서버 응답 없음";
+    setMode("확인 실패");
   }
 }
 
