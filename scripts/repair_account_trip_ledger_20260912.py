@@ -133,6 +133,16 @@ def main() -> int:
     by = {key(t): t for t in trips}
     print(f"거래소 재계산 왕복 {len(trips)}건")
 
+    # 무결성은 «틀린 값» 만이 아니라 «빠진 줄» 도 포함한다. 대시보드는 켜져 있는 동안 본 왕복만
+    # 적으므로, 거래소가 아직 들고 있는데 원장에 없는 왕복이 쌓인다. 표본 수가 이 저장소의
+    # 구속조건이라(2026-09-12 탐지 벽) 몇 건이 빠졌는지는 그 자체로 보고할 값이다.
+    have = {key(r) for r in rows}
+    missing = [t for t in trips if t.get("closed") and key(t) not in have]
+    if missing:
+        span = f"{A._iso(min(int(t['entry_time']) for t in missing))} ~ {A._iso(max(int(t['entry_time']) for t in missing))}"
+        print(f"ℹ️거래소에는 있는데 원장에 없는 **종료된 왕복 {len(missing)}건** ({span})")
+        print(f"   순손익 합 {sum(t['net_pnl'] for t in missing):+.2f} USDT · 이 스크립트는 **추가하지 않는다**(수리 전용)")
+
     out, fixed, unmatched = [], 0, 0
     for r in rows:
         t = by.get(key(r))
