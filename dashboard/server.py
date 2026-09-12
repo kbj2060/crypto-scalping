@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import os
+import statistics
 import sys
 import time
 from collections import deque
@@ -169,6 +170,8 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 # 2026-09-10: 거래소 계정 자체(수동 매매 포함)를 읽는 유일한 경로. trade_journal.jsonl은
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
+from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
+    build_entry_plan, exec_enabled, load_filters)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -939,8 +942,41 @@ def position_sizing_payload() -> dict[str, Any]:
     if age is not None and age > POSITION_SIZING_MAX_AGE_MIN:
         return {**st, "available": False, "error": "worker_stale",
                 "stale_min": round(age, 1), "subText": "데이터 없음"}
-    return {**st, "available": True,
+    return {**st, "available": True, "cap": sizing_cap(),
             "stale_min": round(age, 1) if age is not None else None}
+
+
+# 2026-09-12 단건 상한. 실계좌 19왕복에서 크기–수익 상관이 −0.494 이고, 한 건(중앙의 5.2배·
+# 28.4배 레버리지)이 이익 합 전부보다 큰 손실을 냈다. 방향·시점·청산을 그대로 두고 크기만 잘라
+# 보면 상한 1.0~3.0×중앙 **전 구간**이 누적 −96.4 → +121~155 USDT 로 뒤집힌다(칼날 위가 아니다).
+# 역변동성은 답이 아니다 -- 사용자는 이미 그렇게 잡고 있고(명목–ATR 상관 −0.745), 최악의 한 건이
+# 정확히 그 규칙이 «가장 크게 잡아라»라고 말한 자리였다(ATR 0.276% = 5분위). 그래서 아무것도
+# 예측하지 않아도 되는 개입만 남긴다. 근거: research_sizing_counterfactual_two_ledgers_20260912.py
+SIZING_CAP_MULT = 2.0
+SIZING_CAP_MIN_TRIPS = 10   # 이보다 적으면 중앙값이 표본 하나에 휘둘린다 -- 상한을 만들지 않는다
+
+
+def sizing_cap() -> dict[str, Any]:
+    """왕복 원장에서 중앙 명목을 읽어 상한을 낸다. **현재가는 곱하지 않는다** --
+    ETH 수량 환산은 가격을 이미 들고 있는 프런트가 한다(요청 경로 계산 금지 원칙)."""
+    try:
+        lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
+    except Exception:
+        return {"available": False, "reason": "ledger_missing"}
+    notionals = []
+    for line in lines:
+        try:
+            trip = json.loads(line)
+            notionals.append(abs(float(trip["max_qty"]) * float(trip["entry_price"])))
+        except Exception:
+            continue          # 깨진 줄 하나가 상한을 통째로 못 내게 하지 않는다
+    if len(notionals) < SIZING_CAP_MIN_TRIPS:
+        return {"available": False, "reason": "not_enough_trips",
+                "trips": len(notionals), "need": SIZING_CAP_MIN_TRIPS}
+    median = statistics.median(notionals)
+    return {"available": True, "trips": len(notionals), "mult": SIZING_CAP_MULT,
+            "median_notional_usdt": round(median, 2),
+            "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
 
 
 def coin_indicators_payload(asset: str) -> dict[str, Any]:
@@ -2516,6 +2552,36 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
+    async def api_manual_entry_preview(request: web.Request) -> web.Response:
+        """«이 버튼을 누르면 나갈 주문». 1단계에서는 게이트가 닫혀 있어 **보내지 않는다**.
+
+        미리보기가 실주문과 **같은 함수**(build_entry_plan)를 통과한다 -- 다른 경로로 만든
+        미리보기는 실주문을 검증하지 못한다(대조군이 안 덮는 경로는 검증 안 된 것)."""
+        side = (request.query.get("side") or "").upper()
+        if side not in ("LONG", "SHORT"):
+            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        symbol = MARKET_SYMBOLS["eth"]
+        try:
+            sizing = await asyncio.to_thread(position_sizing_payload)
+            if not sizing.get("available"):
+                return web.json_response({"ok": False, "error": "sizing_unavailable",
+                                          "detail": sizing.get("error")}, status=503)
+            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                            {"symbol": symbol}, error_reason="book_ticker_failed")
+            filters = await load_filters(binance_session(), symbol)
+            cap = sizing.get("cap") or {}
+            plan = build_entry_plan(
+                side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
+                recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
+                cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
+                filters=filters, symbol=symbol)
+        except Exception as exc:  # noqa: BLE001 -- 미리보기 실패가 대시보드를 죽이면 안 된다
+            return web.json_response({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=502)
+        return web.json_response({"ok": True, "plan": plan, "cap": cap,
+                                  "recommended_qty": sizing.get("vol_equivalent_qty"),
+                                  "exec_enabled": exec_enabled()},
+                                 headers={"Cache-Control": "no-cache"})
+
     async def api_ops_status(request: web.Request) -> web.Response:
         ops_dir = LIVE_DIR / "ops_watchdog"
         health_path = ops_dir / "health_snapshot.json"
@@ -2664,6 +2730,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
+    app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
     app.router.add_get("/api/position-sizing", api_position_sizing)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)

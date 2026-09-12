@@ -81,7 +81,38 @@ def main() -> int:
         assert len(after) == 3, f"깨진 줄 때문에 원장을 버렸다: {after}"
         assert record(payload(trip(4000)), after) == 1, "깨진 줄 뒤에도 계속 적을 수 있다"
 
-    print("통과 8/8 — 왕복 원장 계약 유지")
+    # ── 단건 상한 (2026-09-12) ────────────────────────────────────────────────
+    # 왕복이 SIZING_CAP_MIN_TRIPS 미만이면 상한을 **만들지 않는다** -- 3건짜리 중앙값은
+    # 표본 하나에 휘둘리고, 그걸로 크기를 자르면 결과선택 편향이다.
+    with tempfile.TemporaryDirectory() as td:
+        m.ACCOUNT_TRIP_LEDGER_PATH = pathlib.Path(td) / "trips.jsonl"
+
+        assert m.sizing_cap() == {"available": False, "reason": "ledger_missing"}
+
+        def write(qtys, price=1000.0):
+            m.ACCOUNT_TRIP_LEDGER_PATH.write_text("".join(
+                json.dumps({"symbol": "ETHUSDT", "side": "LONG", "entry_time": 1000 + i,
+                            "max_qty": q, "entry_price": price}) + "\n"
+                for i, q in enumerate(qtys)))
+
+        write([1.0] * (m.SIZING_CAP_MIN_TRIPS - 1))
+        cap = m.sizing_cap()
+        assert cap["available"] is False and cap["reason"] == "not_enough_trips", cap
+        assert cap["trips"] == m.SIZING_CAP_MIN_TRIPS - 1, cap
+
+        # 명목 1,000 짜리 10건 + 명목 50,000 짜리 1건 → 중앙은 1,000 이고 이상치에 안 끌린다
+        write([1.0] * 10 + [50.0])
+        cap = m.sizing_cap()
+        assert cap["available"] and cap["trips"] == 11, cap
+        assert cap["median_notional_usdt"] == 1000.0, cap
+        assert cap["cap_notional_usdt"] == m.SIZING_CAP_MULT * 1000.0, cap
+
+        # 깨진 줄이 섞여도 나머지로 상한을 낸다
+        with m.ACCOUNT_TRIP_LEDGER_PATH.open("a") as fh:
+            fh.write("{절반만 쓰다 죽은 줄\n")
+        assert m.sizing_cap()["trips"] == 11, m.sizing_cap()
+
+    print("통과 13/13 — 왕복 원장 + 단건 상한 계약 유지")
     return 0
 
 

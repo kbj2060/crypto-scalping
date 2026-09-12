@@ -5090,3 +5090,78 @@ setupNotifyPage();
 
 // 2026-09-11 청산 위험 패널·칩 모두 제거(사용자 지시). /api/position-sizing 은 아직 살아 있다.
 
+
+// ── 2026-09-12 수동 진입(1단계: 미리보기 전용) ──────────────────────────────────
+// 왜: 실계좌 19왕복에서 손실은 방향이 아니라 **크기**에서 왔다(상관 −0.494). 한 건이
+// 중앙 명목의 5.2배·28.4배 레버리지로 −548.88 을 냈고, 그것만 잘라도 누적이 뒤집힌다.
+// 버튼이 크기를 정하면 진입 순간의 재량이 사라진다.
+// 지금은 주문이 나가지 않는다 -- 서버 게이트(DASHBOARD_MANUAL_EXEC_ENABLED)가 닫혀 있고,
+// 미리보기는 실주문과 **같은 함수**(build_entry_plan)를 통과한다.
+const MANUAL_ENTRY_REFRESH_MS = 60000;
+
+function manualEntryPlanText(data) {
+  const plan = data.plan || {};
+  const cap = data.cap || {};
+  const dir = plan.positionSide === "LONG" ? "롱" : "숏";
+  const rows = [
+    `${dir}  ${plan.quantity} ETH  @ ${Number(plan.price).toLocaleString()}  (${Number(plan.notional_usdt).toLocaleString()} USDT)`,
+    `주문  ${plan.type} ${plan.timeInForce}(post-only) · 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`,
+  ];
+  if (cap.available) {
+    rows.push(`상한  ${Number(cap.cap_notional_usdt).toLocaleString()} USDT — 중앙 명목의 ${cap.mult}배 (왕복 ${cap.trips}건 기준)`);
+  }
+  (plan.notes || []).forEach((note) => rows.push(`      ${note}`));
+  if (plan.blocked) rows.push(`막힘  ${plan.blocked}`);
+  rows.push(plan.dry_run
+    ? "※ 미리보기 전용 — 주문은 나가지 않았습니다."
+    : "※ 실주문 게이트가 열려 있습니다.");
+  return rows.join("\n");
+}
+
+async function manualEntryFetch(side) {
+  const res = await fetch(`/api/manual-entry/preview?side=${side}`, { cache: "no-store" });
+  return res.json();
+}
+
+async function manualEntryPreview(side) {
+  const box = el("snapEntryResult");
+  const buttons = [el("snapEntryLong"), el("snapEntryShort")];
+  if (!box) return;
+  buttons.forEach((btn) => { if (btn) btn.disabled = true; });
+  box.hidden = false;
+  box.textContent = "확인 중…";
+  try {
+    const data = await manualEntryFetch(side);
+    box.textContent = data.ok ? manualEntryPlanText(data) : `실패: ${data.error || data.detail || "알 수 없음"}`;
+  } catch (err) {
+    box.textContent = `실패: ${err && err.message ? err.message : err}`;
+  } finally {
+    buttons.forEach((btn) => { if (btn) btn.disabled = false; });
+  }
+}
+
+async function manualEntryRefreshSize() {
+  const line = el("snapEntrySize");
+  const mode = el("snapEntryMode");
+  if (!line) return;
+  try {
+    const data = await manualEntryFetch("LONG");
+    if (!data.ok) { line.textContent = `크기 없음 — ${data.error || data.detail || ""}`; return; }
+    const plan = data.plan || {};
+    const cap = data.cap || {};
+    const capQty = cap.available && plan.price ? cap.cap_notional_usdt / plan.price : null;
+    line.textContent = capQty
+      ? `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 ${capQty.toFixed(3)} ETH`
+      : `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
+    if (mode) mode.textContent = plan.dry_run ? "미리보기 전용" : "실주문 활성";
+  } catch (err) {
+    line.textContent = "크기 확인 실패";
+  }
+}
+
+el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG"));
+el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT"));
+if (el("snapEntryPlan")) {
+  manualEntryRefreshSize();
+  setInterval(manualEntryRefreshSize, MANUAL_ENTRY_REFRESH_MS);
+}
