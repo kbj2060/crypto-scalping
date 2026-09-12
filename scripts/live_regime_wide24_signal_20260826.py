@@ -113,23 +113,37 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
 
 
 def _fetch_data_api(path: str, symbol: str, start_ms: int, end_ms: int, field_map: dict) -> pd.DataFrame:
+    """`/futures/data/*` 를 **endTime 을 뒤로 밀며 역방향으로** 페이징한다.
+
+    ⚠️이 엔드포인트군은 `startTime` 을 **무시하고** endTime 기준 최근 500행(5m 기준 41.7시간)만
+      돌려준다 -- 2026-09-12 전수 실측에서 5코인(ETH/BTC/SOL/XRP/HYPE) x 4채널 20/20 전부
+      동일했다(3일·7일·28일 전을 요청해도 첫 행이 같음). 그래서 `startTime=cur` 로 전진하는
+      페이징은 첫 호출의 41.7시간만 받고 루프가 끝나며, DAYS_BACK 이 몇이든 실제로는 1.7일치만
+      모인다. 여기서는 조용히 0 이 되지는 않았다(merge_asof + dropna 로 **버려졌다**) --
+      대신 15일 요구가 말없이 1.7일로 줄어 있었다.
+    `endTime` 은 **존중된다**(같은 실측). 보존 한계는 약 30.9일이고, 가장 오래된 데이터는
+      2026-08-12 10:50 UTC 였다 -- 그보다 앞을 요청하면 빈 배열이 온다.
+    """
     out: list = []
-    cur = start_ms
-    while cur < end_ms:
-        params = {"symbol": symbol, "period": "5m", "limit": 500, "startTime": cur, "endTime": end_ms}
+    seen: set[int] = set()
+    cursor_end = end_ms
+    while cursor_end > start_ms:
+        params = {"symbol": symbol, "period": "5m", "limit": 500, "endTime": cursor_end}
         r = requests.get(f"{FAPI}{path}", params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
         if not data:
             break
-        out.extend(data)
-        last_ts = int(data[-1]["timestamp"])
-        if last_ts <= cur:
+        fresh = [row for row in data if int(row["timestamp"]) not in seen]
+        if not fresh:
+            break  # 보존 한계에 닿으면 같은 창이 반복해서 온다
+        out.extend(fresh)
+        seen.update(int(row["timestamp"]) for row in fresh)
+        oldest = min(int(row["timestamp"]) for row in data)
+        if oldest <= start_ms:
             break
-        cur = last_ts + 1
+        cursor_end = oldest - 1
         time.sleep(0.15)
-        if len(data) < 500:
-            break
     df = pd.DataFrame(out)
     if df.empty:
         raise RuntimeError(f"{path} returned no data")
