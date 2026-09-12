@@ -1004,6 +1004,20 @@ def position_sizing_payload() -> dict[str, Any]:
 SIZING_CAP_MULT = 2.0
 SIZING_CAP_MIN_TRIPS = 10   # 이보다 적으면 중앙값이 표본 하나에 휘둘린다 -- 상한을 만들지 않는다
 
+# 🔴2026-09-12 저녁 수정: 원장 기반 상한만 두면 세 가지가 깨진다(실제로 터졌다).
+#   ① **기준이 움직인다** — 왕복이 19→68 건이 되자 중앙 명목이 6,790→4,346 으로 내려가
+#      상한이 13,579→8,692 가 됐고, 낮에 정당하게 잡은 포지션이 **소급해서 초과**가 됐다.
+#   ② **자기참조다** — 상한을 «사용자가 해온 크기의 중앙값»에 묶었는데 고치려는 대상이
+#      바로 그 습관이다.
+#   ③ **자산과 무관하다** — 계좌가 반토막 나도 상한은 그대로인데, 실제 위험은 명목이 아니라
+#      **명목 ÷ 순자산**이다.
+# ⇒ 교차 마진에서 `청산까지 거리 ≈ 순자산 / 총명목` 이므로(실측 1,065/7,642=13.9% vs
+#   거래소 13.48%), 총명목을 순자산의 N 배로 캡하면 **청산 거리에 1/N 하한**이 생긴다.
+#   워커 실측 역행폭 95분위: 1시간 1.14% · 4시간 2.39% · 24시간 6.59%.
+#   12.5배(=청산 8%)면 4시간 95분위의 3.3배 여유, 24시간 95분위도 견딘다.
+# 두 상한의 **작은 쪽**을 쓴다 — 순자산 연동이 주 방어선, 원장 기반은 보조.
+SIZING_CAP_EQUITY_X = 12.5
+
 
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
                      equity: float) -> dict[str, Any]:
@@ -2634,11 +2648,24 @@ def make_app() -> web.Application:
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
-            cap = sizing.get("cap") or {}
+            cap = dict(sizing.get("cap") or {})
+            # 두 상한의 **작은 쪽**. 순자산 연동은 원장이 자라도 안 변하고 자산이 줄면 같이
+            # 줄어든다 -- 소급 초과가 생기지 않는다. 어느 쪽이 묶었는지 화면에 남긴다.
+            cap_ledger = cap.get("cap_notional_usdt") if cap.get("available") else None
+            cap_equity = equity * SIZING_CAP_EQUITY_X if equity > 0 else None
+            binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity")) if v]
+            cap_notional = min(v for v, _ in binding) if binding else None
+            if cap_notional is not None:
+                cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
+                           cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
+                           cap_ledger_usdt=round(cap_ledger, 2) if cap_ledger else None,
+                           equity_x=SIZING_CAP_EQUITY_X,
+                           liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
+                           binding=min(binding)[1])
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
-                cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
+                cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
                 equity=equity, leverage=leverage)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)

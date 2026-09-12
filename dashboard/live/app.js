@@ -3650,12 +3650,14 @@ function fmtDateTick(ts) {
 //      캔들 색과 겹치면 밀도가 방향 정보로 오독된다.
 //   3. t=0 은 알파 0 이라 배경에 그대로 녹고, t=1 은 채도를 낮춘 스틸블루라
 //      --accent(#22d3ee, 가격선)보다 덜 튄다.
-// 2026-09-12: 패널 명도 계단(b5a4790)으로 t=0 이 어두운 구멍이 됐다. 처음엔 t=0 색을 패널에
-// 맞췄지만(a468170) 렌더 실측에서 격차 23.1 이 남았다 -- .panel 이 세로 그라디언트라(glass-strong
-// 흰 오버레이) 실제 패널색이 위아래로 다르고, 어떤 단일 색도 전 구간에 맞지 않는다.
-// 그래서 색이 아니라 **알파**로 녹인다: fill-opacity 를 t 에 비례시켜 t=0 을 완전 투명으로 둔다.
-// 배경이 무엇이든 정확히 녹고, 첫 구간 분해능도 알파 램프가 되살린다(색 압축이 불필요해졌다).
-// t=0 색은 다음 스톱과 같게 둬서 페이드 중 색상 이동이 없다.
+// 2026-09-12: 패널 명도 계단(b5a4790)으로 t=0 칸이 어두운 구멍이 됐다. 고침은 두 번 틀렸다 --
+// (1) t=0 색을 패널에 맞추기(a468170): .panel 이 세로 그라디언트라 실제 패널색이 위아래로 달라
+//     어떤 단일 색도 전 구간에 안 맞는다(렌더 실측 격차 23.1 잔존).
+// (2) fill-opacity 를 t 에 비례시키기: densityClip 이 **양수 밀도의 90분위**라 대부분의 칸이
+//     t<0.25 에 몰린다 -- t=0.1 이 0.85 에서 0.34 로 깎여 **히트맵 전체가 사라졌다**(사용자 신고).
+// 정답은 단순하다: 밀도 0 인 칸은 **그리지 않는다**(drawDensitySeg 의 `if (!(t > 0)) return`).
+// 안 그리면 배경이 그대로 비쳐 어떤 패널색에도 정확히 녹고, 밀도가 있는 칸은 원래 0.85 를 지킨다.
+// t=0 색은 이제 안 쓰이지만 다음 스톱과 같게 둬 보간 시작점의 색상 이동을 없앤다.
 // 휘도 단조 확인(t>0): 41.9 -> 71.5 -> 98.0 -> 144.0
 // 캔들색 이격 확인(RGB 유클리드, 전 구간 60 이상): 상승초록 #5abc80 최소 86 · 하락빨강
 // #d4786c 최소 157(채도 상향 후 초록 #5abc80 은 최소 86). 첫 안(상단 122,178,196)은
@@ -3834,14 +3836,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     : 1;
   const drawDensitySeg = (x0, x1, top, bottom, t) => {
     if (x1 <= x0) return;
+    // 밀도 0 인 칸은 **그리지 않는다**. 칠하면 패널 위에 띠로 남고(2026-09-12 b5a4790 으로
+    // 패널이 밝아진 뒤 «어두운 구멍» 으로 드러났다), 안 그리면 배경이 그대로 비쳐 패널의
+    // 세로 그라디언트가 어떻든 정확히 녹는다. 알파를 t 에 비례시키는 건 잘못된 고침이었다 --
+    // densityClip 이 양수 밀도의 90분위라 대부분의 칸이 t<0.25 에 몰려 히트맵 전체가 흐려졌다.
+    if (!(t > 0)) return;
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", x0); rect.setAttribute("y", top);
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
     rect.setAttribute("fill", densityColor(t));
-    // t=0 은 완전 투명이라 패널의 세로 그라디언트가 어떻든 정확히 녹는다. 단일 색으로는
-    // 불가능했던 부분이다(패널이 위아래로 밝기가 달라 한 값이 전 구간에 맞지 않는다).
-    // 덤으로 첫 구간 분해능이 돌아온다 -- 알파 0->0.85 가 휘도 압축을 대신한다.
-    rect.setAttribute("fill-opacity", String(0.85 * Math.min(1, t / 0.25)));
+    rect.setAttribute("fill-opacity", "0.85");
     svg.appendChild(rect);
   };
   const sortedDensityHistory = (densityHistory || []).slice().sort((a, b) => a.tsMs - b.tsMs);
@@ -5159,9 +5163,19 @@ function manualEntryPlanHtml(data) {
     }
     if (cap.available && plan.cap_used_pct != null) {
       const beforeCap = 100 * (b.notional_usdt || 0) / cap.cap_notional_usdt;
+      // 어느 상한이 묶었는지 **말해준다** -- 오늘 겪은 혼란이 정확히 "왜 막혔는지 모른다"였다.
+      // 순자산 연동이 묶으면 그 자체가 위험 문구가 된다(상한 = 청산 거리 하한).
+      const why = cap.binding === "equity"
+        ? `순자산 ${won(cap.equity_x ? cap.cap_equity_usdt / cap.equity_x : 0)} × ${cap.equity_x}배`
+          + `\n= 청산까지 최소 ${cap.liq_floor_pct}% 를 남기는 선`
+        : `왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`;
+      const other = cap.binding === "equity" && cap.cap_ledger_usdt
+        ? `\n(원장 기준은 ${won(cap.cap_ledger_usdt)} USDT — 더 큰 쪽이라 안 묶음)`
+        : cap.binding === "ledger" && cap.cap_equity_usdt
+          ? `\n(순자산 기준은 ${won(cap.cap_equity_usdt)} USDT — 더 큰 쪽이라 안 묶음)` : "";
       tiles.push(entryTile("상한 사용", entryVal(beforeCap, plan.cap_used_pct, (x) => `${Number(x).toFixed(0)}%`),
         plan.cap_used_pct >= 100 ? "warn" : "good", plan.cap_used_pct / 100, beforeCap / 100,
-        `상한 ${won(cap.cap_notional_usdt)} USDT = 왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`));
+        `상한 ${won(cap.cap_notional_usdt)} USDT = ${why}${other}`));
     }
     if (tiles.length) {
       parts.push(`<div class="entry-cap">진입 후 계좌 — 순자산 ${escapeHtml(won(pr.equity_usdt))} USDT 는 그대로 (진입 자체는 손익 0)</div>`);
