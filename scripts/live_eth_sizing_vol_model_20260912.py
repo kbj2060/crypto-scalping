@@ -22,7 +22,19 @@ in-context learner 라 «학습된 모델»이 없고 매 예측마다 5,000행 
 (적합 0.7초 / 1행 예측 57.8초). 워커 주기 300초의 19% 를 한 코어가 계속 먹는다.
 GBM 은 같은 일을 ~0.001초에 한다. 재보고 안 쓰기로 한 것이지 안 재본 게 아니다.
 
+## 2026-09-12 확장 — 10피쳐 → 22피쳐 (가격기하 12열 추가)
+재료 스택 41열(증거신호·트리거·문맥·극점확률)과 **같은 타깃·분할·모델·지표**로 붙여 보니
+41열이 더 나았다(산포 .4775 → .4544 · 분기 5/5 · 일블록 부트 100%). 그런데 **이득의 대부분이
+가격기하 12열**이었고(−3.1% vs 41열 전부 −5.0%) 그 12열은 **klines 만으로 계산된다** —
+나머지는 compute_signals·BTC·펀딩·극점 아티팩트를 끌어와야 해서 아래 «파일 하나» 설계가 깨진다.
+그래서 12열만 넣었다: 표본외 107,862행에서 1/ATR288 산포 .6116 → **.4634**,
+|z|>3 1.42% → **0.74%**, |z|>5 0.29% → **0.09%**. 분기 4/5 개선 · 부트 CI [−.0266,−.0043] · 99.8%.
+검정: research_eth_sizing_features_stack_vs_deployed_20260912.py
+⚠️**피쳐를 바꾸면 아티팩트를 반드시 다시 학습해야 한다** — `load_model` 이 피쳐 목록을
+대조하므로 옛 아티팩트는 거절되고 워커가 조용히 1/ATR 로 떨어진다(죽지는 않는다).
+
 학습: python scripts/live_eth_sizing_vol_model_20260912.py --train
+검증: 같은 파일 --verify (배포된 아티팩트를 그 기계의 데이터로 표본외 재검)
 점검: python scripts/live_eth_sizing_vol_model_20260912.py
 """
 from __future__ import annotations
@@ -39,19 +51,30 @@ KL_CSV = ROOT / "binance_data" / "klines" / "ETHUSDT" / "ETHUSDT-5m-api.csv"
 HOLD = 48                       # 4시간 -- 타깃 지평(실계좌 왕복 중앙 간격에 가깝다)
 TRAIN_END = "2025-08-31"
 SEEDS = (990143, 220759, 380136, 923411, 331386, 602160, 700199, 982044)  # 랜덤 추출, 리포트에 고정
+# 2026-09-12 확장: 가격기하 12열 추가(10 → 22). 재료 스택 41열 비교에서 **이득의 대부분이
+# 이 12열**이었다(산포 −3.1% vs 41열 전부 −5.0%). 나머지는 compute_signals·BTC·펀딩·극점
+# 아티팩트를 끌어와야 해서 «학습과 라이브가 같은 함수 하나» 설계가 깨진다 — 그래서 안 넣는다.
+# 근거: research_eth_sizing_features_stack_vs_deployed_20260912.py
 FEATURES = ["atr288", "rv12", "rv48", "rv288", "volexp",
-            "hour_sin", "hour_cos", "dow", "qv_z", "nt_z"]
-WARMUP = 400                    # 288 롤링 + 여유. 이보다 짧은 프레임은 거절한다
+            "hour_sin", "hour_cos", "dow", "qv_z", "nt_z"] + [
+    f"{k}{w}" for w in (12, 48, 144) for k in ("ret", "pos_in_range", "dist_lo", "dist_hi")]
+WARMUP = 400                    # 288 롤링(+기하 144) + 여유. 이보다 짧은 프레임은 거절한다
 
 
 def build_features(ts: pd.Series, close: np.ndarray, quote_vol: np.ndarray,
-                   trades: np.ndarray) -> pd.DataFrame:
+                   trades: np.ndarray, high: np.ndarray, low: np.ndarray) -> pd.DataFrame:
     """**순수 함수** — 전부 해당 봉까지의 정보만 본다. 학습과 라이브가 이 함수 하나를 공유한다.
 
     로그를 씌우는 것들(atr·rv)은 양수·우편향이고 크기가 1/예측 이라 **비율 오차**가 중요하다.
     volexp(단기/장기 비)는 이미 비율이라 그대로 둔다.
+
+    ⚠️`high`/`low` 는 2026-09-12 에 **필수 인자로** 추가했다(기본값을 두고 종가로 떨어지게 하면
+    호출부가 조용히 다른 피쳐를 만든다 — 이 파일이 애초에 막으려던 사고 유형이다).
+    종가만으로 만든 변형도 재봤는데 산포 −2.5% 로 고저판(−3.1%)보다 나빴다.
     """
     c = np.asarray(close, float)
+    hi = np.asarray(high, float)
+    lo = np.asarray(low, float)
     lr = np.diff(np.log(np.maximum(c, 1e-12)), prepend=0.0)
     tr = np.abs(np.diff(c, prepend=c[0]))
     f = {}
@@ -69,6 +92,15 @@ def build_features(ts: pd.Series, close: np.ndarray, quote_vol: np.ndarray,
     for arr, nm in ((quote_vol, "qv"), (trades, "nt")):
         s = pd.Series(np.asarray(arr, float))
         f[f"{nm}_z"] = ((s - s.rolling(288).mean()) / s.rolling(288).std()).to_numpy()
+    # 가격기하 — 「어디에 서 있나」. 변동성 수준(atr·rv)이 못 담는 축이다.
+    cs = pd.Series(c)
+    for w in (12, 48, 144):
+        rmin = pd.Series(lo).rolling(w).min().to_numpy()
+        rmax = pd.Series(hi).rolling(w).max().to_numpy()
+        f[f"ret{w}"] = (cs / cs.shift(w) - 1).to_numpy()
+        f[f"pos_in_range{w}"] = (c - rmin) / np.maximum(rmax - rmin, 1e-9)
+        f[f"dist_lo{w}"] = (c - rmin) / np.maximum(c, 1e-9)
+        f[f"dist_hi{w}"] = (rmax - c) / np.maximum(c, 1e-9)
     out = pd.DataFrame(f)[FEATURES]
     assert list(out.columns) == FEATURES, "피쳐 순서 계약 위반"
     return out
@@ -99,11 +131,12 @@ def train() -> int:
     import joblib
     from sklearn.ensemble import HistGradientBoostingRegressor
 
-    d = pd.read_csv(KL_CSV, usecols=["timestamp", "close", "quote_volume", "trades"],
+    d = pd.read_csv(KL_CSV, usecols=["timestamp", "close", "high", "low", "quote_volume", "trades"],
                     parse_dates=["timestamp"]).dropna(subset=["timestamp"])
     d = d.sort_values("timestamp").reset_index(drop=True)
     X = build_features(d["timestamp"], d["close"].to_numpy(float),
-                       d["quote_volume"].to_numpy(float), d["trades"].to_numpy(float))
+                       d["quote_volume"].to_numpy(float), d["trades"].to_numpy(float),
+                       d["high"].to_numpy(float), d["low"].to_numpy(float))
     lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
     y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
 
@@ -130,6 +163,46 @@ def train() -> int:
     return 0
 
 
+def verify() -> int:
+    """배포된 아티팩트를 **그 기계의 데이터로** 표본외 재검한다(2026-09-12).
+
+    학습 CSV 길이가 기계마다 다르다(로컬 385k · 서버 175k). 연구 수치를 다른 기계에서
+    그대로 주장하면 안 되므로, 배포 직후 이 자리에서 다시 낸다. 현행 이전 공식인 1/ATR288 과
+    같은 행에서 비교한다 — 수량이 1/예측 이므로 지표는 **실현변동성/예측의 산포**다.
+    """
+    import joblib
+    from scipy.stats import spearmanr
+    art = joblib.load(ARTIFACT)
+    d = pd.read_csv(KL_CSV, usecols=["timestamp", "close", "high", "low", "quote_volume", "trades"],
+                    parse_dates=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    X = build_features(d["timestamp"], d["close"].to_numpy(float),
+                       d["quote_volume"].to_numpy(float), d["trades"].to_numpy(float),
+                       d["high"].to_numpy(float), d["low"].to_numpy(float))
+    lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
+    y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
+    ts = d["timestamp"].to_numpy()
+    te = (np.isfinite(y) & (y > 0) & (ts > np.datetime64(TRAIN_END + "T23:59:59"))
+          & np.isfinite(X.to_numpy(float)).all(1))
+    if te.sum() < 1000:
+        print(f"표본외 {te.sum()}행 — 너무 적어 판정하지 않는다")
+        return 1
+    pred = predict_vol(art["models"], X[te])
+    atr = np.exp(X["atr288"].to_numpy())[te]
+    yt = y[te]
+    print(f"아티팩트 피쳐 {len(art['features'])} · 학습 {art['n_train']:,}행 · "
+          f"표본외 {te.sum():,}행 ({str(ts[te][0])[:10]} ~ {str(ts[te][-1])[:10]})")
+    print("               스피어만    산포   |z|>3   |z|>5")
+    for nm, v in (("1/ATR288", atr), ("모델", pred)):
+        z = yt / np.maximum(v, 1e-12)
+        z = z / np.median(z)
+        print("%-12s %8.4f %7.4f %6.2f%% %6.2f%%" % (
+            nm, spearmanr(v, yt).statistic, np.std(z), (z > 3).mean() * 100, (z > 5).mean() * 100))
+    mult = art["ref_pred"] / pred
+    print("수량 배수(기준/예측): 5%% %.2f · 중앙 %.2f · 95%% %.2f" % (
+        np.percentile(mult, 5), np.median(mult), np.percentile(mult, 95)))
+    return 0
+
+
 def _self_check() -> None:
     """네트워크·아티팩트 없이 도는 계약 검사."""
     n = 900
@@ -137,8 +210,10 @@ def _self_check() -> None:
     rng = np.random.default_rng(0)
     c = 2000 * np.exp(np.cumsum(rng.normal(0, 0.0008, n)))
     qv = np.abs(rng.normal(1e6, 2e5, n)); nt = np.abs(rng.normal(5000, 800, n))
+    hi = c * (1 + np.abs(rng.normal(0, 0.0006, n)))      # 고가 ≥ 종가 ≥ 저가
+    lo = c * (1 - np.abs(rng.normal(0, 0.0006, n)))
 
-    X = build_features(ts, c, qv, nt)
+    X = build_features(ts, c, qv, nt, hi, lo)
     assert list(X.columns) == FEATURES, X.columns
     assert len(X) == n
     assert np.isfinite(X.to_numpy(float)[WARMUP:]).all(), "워밍업 뒤에는 결측이 없어야 한다"
@@ -146,7 +221,7 @@ def _self_check() -> None:
     # ⭐인과성: 앞부분만 잘라 만든 피쳐가 전체판의 같은 구간과 일치해야 한다.
     #   미래를 보는 항이 하나라도 있으면 여기서 어긋난다.
     m = 700
-    Xp = build_features(ts[:m], c[:m], qv[:m], nt[:m])
+    Xp = build_features(ts[:m], c[:m], qv[:m], nt[:m], hi[:m], lo[:m])
     a, b = X.iloc[WARMUP:m].to_numpy(float), Xp.iloc[WARMUP:].to_numpy(float)
     assert np.allclose(a, b, rtol=1e-9, atol=1e-12), f"인과성 위반 최대차 {np.abs(a - b).max():.3g}"
 
@@ -156,6 +231,14 @@ def _self_check() -> None:
     assert X["atr288"].iloc[-1] < 0, "atr288 이 로그가 아니다"
     # volexp 는 비율이라 양수
     assert X["volexp"].iloc[-1] > 0
+    # 2026-09-12 추가한 가격기하 12열
+    assert len(FEATURES) == 22 and "pos_in_range144" in FEATURES, FEATURES
+    for w in (12, 48, 144):
+        v = X[f"pos_in_range{w}"].to_numpy()[WARMUP:]
+        assert (v >= -1e-9).all() and (v <= 1 + 1e-9).all(), f"pos_in_range{w} 가 [0,1] 밖"
+        assert (X[f"dist_lo{w}"].to_numpy()[WARMUP:] >= -1e-9).all(), f"dist_lo{w} 음수"
+        assert (X[f"dist_hi{w}"].to_numpy()[WARMUP:] >= -1e-9).all(), f"dist_hi{w} 음수"
+        assert X[f"ret{w}"].nunique() > 100, f"ret{w} 가 죽은 피쳐다"
 
     class _Stub:
         def __init__(self, v): self.v = v
@@ -163,10 +246,12 @@ def _self_check() -> None:
     p = predict_vol([_Stub(np.log(0.001)), _Stub(np.log(0.004))], X.iloc[-3:])
     assert np.allclose(p, 0.002), f"로그평균(기하평균)이 아니다: {p}"
 
-    print("통과 8/8 — 피쳐 계약 · 인과성 · 로그스케일 · 기하평균")
+    print("통과 9/9 — 피쳐 계약(22열) · 인과성 · 로그스케일 · 기하평균 · 가격기하 범위")
 
 
 if __name__ == "__main__":
     if "--train" in sys.argv:
         raise SystemExit(train())
+    if "--verify" in sys.argv:
+        raise SystemExit(verify())
     _self_check()

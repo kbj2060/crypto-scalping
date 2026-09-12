@@ -988,14 +988,36 @@ def position_sizing_payload() -> dict[str, Any]:
     return {**out, "cap": sizing_cap()} if out.get("available") else out
 
 
-# 2026-09-12 단건 상한. 실계좌 19왕복에서 크기–수익 상관이 −0.494 이고, 한 건(중앙의 5.2배·
-# 28.4배 레버리지)이 이익 합 전부보다 큰 손실을 냈다. 방향·시점·청산을 그대로 두고 크기만 잘라
-# 보면 상한 1.0~3.0×중앙 **전 구간**이 누적 −96.4 → +121~155 USDT 로 뒤집힌다(칼날 위가 아니다).
-# 역변동성은 답이 아니다 -- 사용자는 이미 그렇게 잡고 있고(명목–ATR 상관 −0.745), 최악의 한 건이
-# 정확히 그 규칙이 «가장 크게 잡아라»라고 말한 자리였다(ATR 0.276% = 5분위). 그래서 아무것도
-# 예측하지 않아도 되는 개입만 남긴다. 근거: research_sizing_counterfactual_two_ledgers_20260912.py
+# 2026-09-12 단건 상한. ⚠️이 값은 처음 19왕복에서 골랐는데 **그 원장이 틀려 있었다** --
+# 진입/청산가가 첫/마지막 체결가였고(다리별 VWAP 아님) 절단된 체결 스트림이 만든 중복 왕복이
+# 섞여 있었다. 수리·재구성 후 68왕복으로 다시 쟀고(research_sizing_cap_mult_68trips_20260912.py)
+# **2.0x 를 유지**한다. 근거가 바뀌었으므로 옛 숫자는 쓰지 말 것:
+#   · 🔴크기 매칭 없이 비교하면 답이 뒤집힌다 -- 미매칭 최고는 4.0x(누적 483.80)인데 평균 노출을
+#     맞추면 4.0x 는 531.55 로 하위권이고 0.5x 가 637.59 로 최고다(2026-09-06 짝비교 규율).
+#   · 크기 매칭 후 곡선은 **단조**(조일수록 누적↑·t↑·MDD↓)라 내부 최적점이 없다. 다만 1.0~2.5x 는
+#     565~577 로 사실상 동률 고원이고 2.0x 가 그 안에 있다.
+#   · 2.0x 를 쓰는 이유는 최고점이어서가 아니라 **부트스트랩 2.5% 하한이 양수로 남는 가장 느슨한
+#     값**이기 때문이다(2.0x +22.48 / 2.5x −62.00, B=2000 왕복 재표집).
+#   · 시간 앞뒤 절반 **양방향 이월** 확인(앞→뒤 451.96 vs 그쪽 상한없음 146.53).
+# 더 조이면 기대값은 낫지만 그건 상한이 아니라 사실상 균일 크기다(68건 중 34~42건을 자른다).
+# 진짜 지렛대는 배수가 아니라 균일성이고, 재량을 얼마나 남길지는 사람이 정한다.
 SIZING_CAP_MULT = 2.0
 SIZING_CAP_MIN_TRIPS = 10   # 이보다 적으면 중앙값이 표본 하나에 휘둘린다 -- 상한을 만들지 않는다
+SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizing_cap 주석 참조
+
+# 🔴2026-09-12 저녁 수정: 원장 기반 상한만 두면 세 가지가 깨진다(실제로 터졌다).
+#   ① **기준이 움직인다** — 왕복이 19→68 건이 되자 중앙 명목이 6,790→4,346 으로 내려가
+#      상한이 13,579→8,692 가 됐고, 낮에 정당하게 잡은 포지션이 **소급해서 초과**가 됐다.
+#   ② **자기참조다** — 상한을 «사용자가 해온 크기의 중앙값»에 묶었는데 고치려는 대상이
+#      바로 그 습관이다.
+#   ③ **자산과 무관하다** — 계좌가 반토막 나도 상한은 그대로인데, 실제 위험은 명목이 아니라
+#      **명목 ÷ 순자산**이다.
+# ⇒ 교차 마진에서 `청산까지 거리 ≈ 순자산 / 총명목` 이므로(실측 1,065/7,642=13.9% vs
+#   거래소 13.48%), 총명목을 순자산의 N 배로 캡하면 **청산 거리에 1/N 하한**이 생긴다.
+#   워커 실측 역행폭 95분위: 1시간 1.14% · 4시간 2.39% · 24시간 6.59%.
+#   12.5배(=청산 8%)면 4시간 95분위의 3.3배 여유, 24시간 95분위도 견딘다.
+# 두 상한의 **작은 쪽**을 쓴다 — 순자산 연동이 주 방어선, 원장 기반은 보조.
+SIZING_CAP_EQUITY_X = 12.5
 
 
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
@@ -1057,18 +1079,29 @@ def sizing_cap() -> dict[str, Any]:
         lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
     except Exception:
         return {"available": False, "reason": "ledger_missing"}
-    notionals = []
+    trips = []
     for line in lines:
         try:
             trip = json.loads(line)
-            notionals.append(abs(float(trip["max_qty"]) * float(trip["entry_price"])))
+            trips.append((int(trip.get("entry_time") or 0),
+                          abs(float(trip["max_qty"]) * float(trip["entry_price"]))))
         except Exception:
             continue          # 깨진 줄 하나가 상한을 통째로 못 내게 하지 않는다
-    if len(notionals) < SIZING_CAP_MIN_TRIPS:
+    if len(trips) < SIZING_CAP_MIN_TRIPS:
         return {"available": False, "reason": "not_enough_trips",
-                "trips": len(notionals), "need": SIZING_CAP_MIN_TRIPS}
+                "trips": len(trips), "need": SIZING_CAP_MIN_TRIPS}
+    # 🔴2026-09-13: **최근 창**만 본다. 이력 전체에 묶으면 상한이 톱니처럼 계속 조여진다 --
+    #   원장은 자라기만 하고, 과거 거래가 지금보다 작으면 중앙값이 계속 내려가 결국 정상
+    #   매매까지 막는다. 실제로 왕복이 19→68건이 되자(백필) 중앙 명목 6,790→4,346,
+    #   상한 13,579→8,692 로 떨어져 **낮에 정당하게 잡은 포지션이 소급 초과**가 됐다.
+    #   실측(68왕복): 전체 중앙 4,346 vs 최근 30건 6,774 -- 옛 거래가 지금 규모와 무관하다
+    #   (하위 12건이 646~1,194 USDT). 최근 30건 ×2 = 13,549 는 순자산 ×12.5 = 13,083 과
+    #   2% 안에서 만난다 -- 독립인 두 기준이 같은 값을 가리킨다.
+    trips.sort()
+    notionals = [v for _, v in trips[-SIZING_CAP_WINDOW:]]
     median = statistics.median(notionals)
-    return {"available": True, "trips": len(notionals), "mult": SIZING_CAP_MULT,
+    return {"available": True, "trips": len(notionals), "trips_total": len(trips),
+            "window": SIZING_CAP_WINDOW, "mult": SIZING_CAP_MULT,
             "median_notional_usdt": round(median, 2),
             "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
 
@@ -2627,11 +2660,24 @@ def make_app() -> web.Application:
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
-            cap = sizing.get("cap") or {}
+            cap = dict(sizing.get("cap") or {})
+            # 두 상한의 **작은 쪽**. 순자산 연동은 원장이 자라도 안 변하고 자산이 줄면 같이
+            # 줄어든다 -- 소급 초과가 생기지 않는다. 어느 쪽이 묶었는지 화면에 남긴다.
+            cap_ledger = cap.get("cap_notional_usdt") if cap.get("available") else None
+            cap_equity = equity * SIZING_CAP_EQUITY_X if equity > 0 else None
+            binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity")) if v]
+            cap_notional = min(v for v, _ in binding) if binding else None
+            if cap_notional is not None:
+                cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
+                           cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
+                           cap_ledger_usdt=round(cap_ledger, 2) if cap_ledger else None,
+                           equity_x=SIZING_CAP_EQUITY_X,
+                           liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
+                           binding=min(binding)[1])
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
-                cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
+                cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
                 equity=equity, leverage=leverage)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)

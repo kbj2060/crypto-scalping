@@ -120,7 +120,8 @@ def model_equivalent_qty(kl: pd.DataFrame, base_qty: float, art) -> tuple[float,
     try:
         X = svm.build_features(kl["timestamp"], kl["c"].to_numpy(float),
                               pd.to_numeric(kl["q"], errors="coerce").to_numpy(float),
-                              pd.to_numeric(kl["n"], errors="coerce").to_numpy(float))
+                              pd.to_numeric(kl["n"], errors="coerce").to_numpy(float),
+                              kl["h"].to_numpy(float), kl["l"].to_numpy(float))
         row = X.iloc[[-1]]
         if not np.isfinite(row.to_numpy(float)).all():
             return float("nan"), {"used": False, "reason": "feature_nan"}
