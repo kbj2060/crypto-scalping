@@ -42,10 +42,12 @@ import research_eth_stack_all_models_20260912 as S  # noqa: E402
 
 FEES = {"사용자 4bp": 4.0, "실측 5.52bp": 5.52}
 WARM, MIN_TRAIN = 900, 20_000
+PANEL = RD.PANEL          # --panel 로 갈아끼운다(기간 확장판 비교용)
+WALK_FROM = "2024-07"     # --walk-from
 
 
 def signed_bp(H: int) -> np.ndarray:
-    p = pd.read_parquet(RD.PANEL)
+    p = pd.read_parquet(PANEL)
     o = p["open"].to_numpy(float); c = p["close"].to_numpy(float)
     n = len(p)
     ent = np.roll(o, -1); ent[-1] = np.nan
@@ -60,7 +62,7 @@ def walk_pnl(X: pd.DataFrame, ts: np.ndarray, y: np.ndarray) -> np.ndarray:
     months = pd.PeriodIndex(pd.to_datetime(ts), freq="M")
     out = np.full(len(y), np.nan)
     Xv = X.to_numpy(np.float32)
-    for m in [u for u in months.unique() if u >= pd.Period("2024-07", "M")]:
+    for m in [u for u in months.unique() if u >= pd.Period(WALK_FROM, "M")]:
         te = (months == m) & np.isfinite(y)
         tr = (months < m) & np.isfinite(y)
         tr[np.arange(len(tr)) < WARM] = False
@@ -81,16 +83,33 @@ def block_stats(v: np.ndarray, idx: np.ndarray, H: int, fee: float) -> dict:
     rng = np.random.default_rng(20260912)
     bs = np.array([np.concatenate([by[b] for b in rng.choice(ub, len(ub))]).mean() - fee
                    for _ in range(1000)])
-    first = np.array([by[b][0] for b in ub])
-    t = ((first.mean() - fee) / (first.std(ddof=1) / np.sqrt(len(first)))) if len(first) > 2 else np.nan
+    # 🔴블록당 **첫 거래 하나**를 뽑던 초판은 임의 선택이라 대표성이 없다 — 순익이 −0.89bp 인
+    # 셀에서 t=2.07 이 나왔다(2026-09-13 발견). **블록 평균**을 쓰면 그런 모순이 사라진다.
+    bm = np.array([by[b].mean() for b in ub])
+    t = ((bm.mean() - fee) / (bm.std(ddof=1) / np.sqrt(len(bm)))) if len(bm) > 2 else np.nan
     return {"blocks": int(len(ub)), "boot_lo": float(np.percentile(bs, 2.5)),
             "t_indep": float(t), "net": float(v.mean() - fee)}
 
 
+def period_split(v: np.ndarray, ts_sel: np.ndarray, cut: str = "2024-01-01") -> tuple[float, float]:
+    """구간을 갈라 본다. 기간을 늘렸을 때 **늘린 구간에서 부호가 뒤집히면** 그 효과는 시기 한정이다
+    (이 저장소는 같은 패턴을 세 번 봤다)."""
+    e = pd.DatetimeIndex(ts_sel) < pd.Timestamp(cut)
+    a = float(v[e].mean()) if e.sum() > 200 else float("nan")
+    b = float(v[~e].mean()) if (~e).sum() > 200 else float("nan")
+    return a, b
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    global PANEL, WALK_FROM
+    ap.add_argument("--panel", default=None, help="다른 기간으로 만든 패널 디렉토리")
+    ap.add_argument("--walk-from", default=WALK_FROM)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    if a.panel:
+        PANEL = Path(a.panel) / "panel_5m.parquet"
+    WALK_FROM = a.walk_from
     if a.selftest:
         y = signed_bp(12)
         p = pd.read_parquet(RD.PANEL)
@@ -99,6 +118,10 @@ def main() -> int:
         assert abs(y[i] - exp) < 1e-9, (y[i], exp)
         st = block_stats(np.full(300, 10.0), np.arange(300), 12, 4.0)
         assert st["blocks"] == 25 and abs(st["net"] - 6.0) < 1e-9, st
+        # 블록 평균 t 는 «순익이 음수면 t 도 음수»여야 한다(첫거래 방식은 이걸 어겼다)
+        rngq = np.random.default_rng(0)
+        vv = rngq.normal(1.0, 5.0, 600); st2 = block_stats(vv, np.arange(600), 12, 4.0)
+        assert (st2["net"] < 0) == (st2["t_indep"] < 0), st2
         X, _ = S.build()
         ctx = [c for c in X.columns if not c.startswith(("ev_", "trg_"))]
         assert not any(c.startswith(("ev_", "trg_")) for c in ctx)
@@ -106,6 +129,7 @@ def main() -> int:
         print(f"selftest OK — 부호bp 라벨 · 블록 집계 · 연속 하위값 {len(ctx)}열(이진 제외)")
         return 0
 
+    S.RD.PANEL = PANEL                      # 스택 빌더도 같은 패널을 보게 한다
     X, ts = S.build()
     ctx = [c for c in X.columns if not c.startswith(("ev_", "trg_"))]
     X = X[ctx]
@@ -120,7 +144,7 @@ def main() -> int:
         for fname, fee in FEES.items():
             print(f"  비용 {fname}")
             print(f"{'임계 c':>8}{'거래율':>8}{'n':>8}{'독립블록':>9}{'적중':>8}{'건당bp':>9}"
-                  f"{'순익':>8}{'부트2.5%':>10}{'독립t':>8}")
+                  f"{'순익':>8}{'부트2.5%':>10}{'블록t':>8}{'~2023':>9}{'2024~':>9}")
             for c in (0.0, 2.0, 5.0, 10.0, 20.0, 40.0):
                 bet = np.where(pred > c, 1.0, np.where(pred < -c, -1.0, 0.0))
                 m = ok & (bet != 0)
@@ -129,9 +153,10 @@ def main() -> int:
                 idx = np.flatnonzero(m)
                 v = bet[m] * y[m]
                 st = block_stats(v, idx, H, fee)
+                e, l = period_split(v, ts[idx])
                 print(f"{c:>8.1f}{m.sum()/ok.sum():>8.1%}{m.sum():>8,}{st['blocks']:>9,}"
                       f"{(v > 0).mean():>8.4f}{v.mean():>9.2f}{st['net']:>8.2f}"
-                      f"{st['boot_lo']:>10.2f}{st['t_indep']:>8.2f}")
+                      f"{st['boot_lo']:>10.2f}{st['t_indep']:>8.2f}{e:>9.2f}{l:>9.2f}")
         print()
     return 0
 

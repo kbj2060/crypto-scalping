@@ -231,20 +231,25 @@ def _selftest() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2024-01-01")
+    ap.add_argument("--out", default=None,
+                    help="산출 디렉토리(기본 OUT). 기간을 바꿔 만들 때는 반드시 다르게 준다 --"
+                         "덮어쓰면 그 패널로 낸 기존 결과가 재현 불가가 된다")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         _selftest()
         return 0
     P, meta = build(a.start)
-    OUT.mkdir(parents=True, exist_ok=True)
-    P.to_parquet(OUT / "panel_5m.parquet", index=False)
+    out = Path(a.out) if a.out else OUT
+    meta["start"] = a.start
+    out.mkdir(parents=True, exist_ok=True)
+    P.to_parquet(out / "panel_5m.parquet", index=False)
     cov = pd.DataFrame({"column": P.columns, "notna": P.notna().sum().to_numpy(),
                         "nonzero": [int((P[c] != 0).sum()) if pd.api.types.is_numeric_dtype(P[c]) else -1
                                     for c in P.columns]})
-    cov.to_csv(OUT / "coverage.csv", index=False)
-    (OUT / "README.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    log(f"저장 {OUT} — {meta['rows']:,}행 × {meta['cols']}열 {meta['range']}")
+    cov.to_csv(out / "coverage.csv", index=False)
+    (out / "README.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"저장 {out} — {meta['rows']:,}행 × {meta['cols']}열 {meta['range']}")
     return 0
 
 
