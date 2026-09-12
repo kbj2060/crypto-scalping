@@ -2674,7 +2674,10 @@ def make_app() -> web.Application:
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
             existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
             equity = float((account.get("balance") or {}).get("margin") or 0.0)
-            leverage = max((float(p.get("leverage") or 0.0) for p in positions), default=0.0)
+            # 포지션이 없으면 positions 가 비어 있다 -- 그때도 설정 레버리지는 알아야
+            # «증거금 얼마»를 말할 수 있다(교차 마진에서 증거금 = 명목/레버리지).
+            leverage = (max((float(p.get("leverage") or 0.0) for p in positions), default=0.0)
+                        or float((account.get("leverage_by_symbol") or {}).get(symbol) or 0.0))
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)

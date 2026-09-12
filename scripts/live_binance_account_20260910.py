@@ -211,6 +211,10 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         }
         for p in risk if float(p["positionAmt"]) != 0.0
     ]
+    # 심볼별 설정 레버리지. **포지션이 없어도** 읽을 수 있어야 한다 -- 위 목록은 수량 0 을
+    # 걸러내므로, 진입 미리보기가 거기서 레버리지를 찾으면 «증거금 0» 이 나온다(2026-09-13 실측).
+    leverage_by_symbol = {} if isinstance(risk, dict) else {
+        p["symbol"]: float(p.get("leverage") or 0.0) for p in risk if p.get("leverage")}
 
     trips: list[dict[str, Any]] = []
     truncated: list[str] = []
@@ -249,6 +253,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
             "unrealized": float(balance["totalUnrealizedProfit"]),
         },
         "positions": positions,
+        "leverage_by_symbol": leverage_by_symbol,
         "trades": trips,
         "trades_truncated": truncated,
     }
