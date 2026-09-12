@@ -289,6 +289,64 @@ def save_model_indicator_history(rows: list[dict]) -> None:
         tmp.replace(MODEL_INDICATOR_HISTORY_PATH)
     except Exception as exc:  # 띠 하나 때문에 이벤트 발행 루프를 죽이지 않는다
         print(f"model_indicator_history save failed: {exc}", flush=True)
+
+
+# 2026-09-12: 바이낸스 userTrades 는 **7일 롤링**이라 그 앞의 왕복은 API 에서 그냥 사라진다
+# (실측: 09-11 에 보이던 2026-09-03~04 건이 09-12 조회에는 없다). 이 왕복이 «크기 배분이
+# 손익을 얼마나 갈랐나»를 재는 유일한 표본인데, 원천이 스스로를 지우고 있어서 표본이 15건
+# 근처에 정체한다. 보이는 동안 디스크에 붙여 둔다. 화면에는 쓰지 않는다 -- 축적이 목적이다.
+ACCOUNT_TRIP_LEDGER_PATH = LIVE_DIR / "account_round_trips.jsonl"
+ACCOUNT_TRIP_RECORD_SECONDS = 300.0
+
+
+def trip_key(trip: dict) -> str:
+    """왕복 하나의 신원. **이 계좌는 헤지 모드**라 같은 심볼에 LONG/SHORT 가 동시에 열린다 --
+    side 를 빼면 서로 다른 두 왕복이 한 건으로 뭉개진다."""
+    return f"{trip.get('symbol')}|{trip.get('side')}|{trip.get('entry_time')}"
+
+
+def load_account_trip_keys() -> set[str]:
+    """이미 적어 둔 왕복의 신원. 깨진 줄 하나가 원장 전체를 버리게 두지 않는다 --
+    그 줄의 왕복은 seen 에 안 들어가므로 아직 API 창 안에 있으면 다음 주기에 다시 적힌다."""
+    try:
+        lines = ACCOUNT_TRIP_LEDGER_PATH.read_text().splitlines()
+    except FileNotFoundError:
+        return set()
+    except Exception as exc:
+        print(f"account_round_trips read failed: {exc}", flush=True)
+        return set()
+    keys: set[str] = set()
+    for line in lines:
+        try:
+            keys.add(trip_key(json.loads(line)))
+        except Exception:
+            continue
+    return keys
+
+
+def record_account_trips(payload: dict, seen: set[str]) -> int:
+    """종료된 왕복 중 처음 보는 것만 덧붙인다(append-only). 반환값은 새로 적은 건수.
+
+    미청산 왕복은 적지 않는다 -- 나중에 청산되면 exit/net_pnl 이 채워지므로 지금 적으면
+    같은 왕복의 반쪽 판이 원장에 영구히 남는다."""
+    if not (isinstance(payload, dict) and payload.get("ok")):
+        return 0
+    fresh = [t for t in payload.get("trades") or []
+             if t.get("closed") and trip_key(t) not in seen]
+    if not fresh:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with ACCOUNT_TRIP_LEDGER_PATH.open("a") as handle:
+            for trip in fresh:
+                handle.write(json.dumps({**trip, "recorded_at": now}, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        print(f"account_round_trips append failed: {exc}", flush=True)
+        return 0
+    seen.update(trip_key(t) for t in fresh)
+    return len(fresh)
+
+
 # 2026-08-27: tail_risk_interceptor.py's event-triggered sibling of dashboard_state.json's
 # tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
@@ -1175,6 +1233,8 @@ def make_app() -> web.Application:
     market_history_locks = {asset: asyncio.Lock() for asset in MARKET_SYMBOLS}
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     binance_account_lock = asyncio.Lock()
+    # last_at 0.0 + time.monotonic() ⇒ 기동 직후 첫 주기에 바로 한 번 적는다.
+    account_trip_state: dict[str, Any] = {"last_at": 0.0, "seen": load_account_trip_keys()}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
     evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -2031,6 +2091,27 @@ def make_app() -> web.Application:
         if session is not None and not session.closed:
             await session.close()
 
+    async def produce_account() -> dict[str, Any]:
+        """계좌 조회는 여기 한 곳뿐이다 -- 화면 요청이든 원장 주기든 같은 캐시를 통과하므로
+        조회가 두 벌로 갈라지지 않는다. 원장 기록을 이 안에 둔 이유도 같다."""
+        payload = await fetch_account(binance_session(), list(MARKET_SYMBOLS.values()))
+        added = record_account_trips(payload, account_trip_state["seen"])
+        if added:
+            print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
+        return payload
+
+    async def keep_trip_ledger() -> None:
+        """브라우저가 닫혀 있어도 돌아야 한다 -- 사라지는 쪽은 거래소의 7일 창이지 화면이 아니다.
+
+        별도 태스크로 떼는 이유: 부르는 쪽(publish_dashboard_events)은 모든 탭의 SSE 유일
+        공급원이라, 서명 요청 3~4개를 그 안에서 기다리면 화면 갱신이 함께 밀린다."""
+        try:
+            await swr_cached("binance_account", binance_account_cache, binance_account_lock,
+                             BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
+                             max_stale=STALE_GRACE_SECONDS)
+        except Exception as exc:  # noqa: BLE001 -- 키 만료·네트워크·시계드리프트 전부 여기로 온다
+            print(f"account_round_trips cycle failed (will retry next cycle): {exc}", flush=True)
+
     async def publish_dashboard_events(app: web.Application) -> None:
         nonlocal latest_event_state, latest_event_tickers
         last_state_etag = ""
@@ -2049,6 +2130,13 @@ def make_app() -> web.Application:
                             "tail_risk": raw_state.get("tail_risk") or {},
                         })
                         save_model_indicator_history(list(model_indicator_history))
+                    if started - account_trip_state["last_at"] >= ACCOUNT_TRIP_RECORD_SECONDS:
+                        account_trip_state["last_at"] = started
+                        running = refresh_tasks.get("account_trips")
+                        if running is None or running.done():
+                            # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에
+                            # 이 태스크까지 취소해 준다(따로 종료 코드를 만들지 않는다).
+                            refresh_tasks["account_trips"] = asyncio.create_task(keep_trip_ledger())
                     ticker_rows = await asyncio.gather(
                         *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
                     )
@@ -2423,7 +2511,7 @@ def make_app() -> web.Application:
         payload = await swr_cached(
             "binance_account", binance_account_cache, binance_account_lock,
             BINANCE_ACCOUNT_CACHE_SECONDS,
-            lambda: fetch_account(binance_session(), list(MARKET_SYMBOLS.values())),
+            produce_account,
             max_stale=STALE_GRACE_SECONDS,
         )
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
