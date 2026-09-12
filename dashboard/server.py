@@ -460,6 +460,9 @@ SCALP_REUSE_MODES = {
 }
 
 
+NOCACHE = {"Cache-Control": "no-cache"}
+
+
 def file_signature(path: Path) -> tuple[int, int] | None:
     try:
         stat = path.stat()
@@ -504,7 +507,7 @@ def parse_jsonl(path: Path) -> list[dict]:
 def row_ts(row: dict) -> float:
     raw = row.get("closed_at") or row.get("ts") or row.get("opened_at") or ""
     try:
-        return time.mktime(time.strptime(str(raw).replace("T", " ")[:19], "%Y-%m-%d %H:%M:%S"))
+        return datetime.fromisoformat(str(raw)[:19]).timestamp()
     except ValueError:
         return 0.0
 
@@ -878,73 +881,63 @@ def _age_min(ts: Any) -> float | None:
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1)
 
 
-def extreme_detector_payload() -> dict[str, Any]:
-    """워커 상태 파일. 워커가 멈추면 조용히 옛 값을 보여주지 않고 «데이터 없음» 으로 떨어진다.
+def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_utc",
+                   require_ok: bool = False, stamp_available: bool = False,
+                   bare_missing: bool = False, extra_missing: dict | None = None) -> dict[str, Any]:
+    """워커 상태 파일을 신선도까지 판정해 돌려준다.
 
-    ⚠️15분(5분봉 3개)을 넘으면 워커가 죽은 것이다 -- 인라인 폴백은 두지 않는다.
-      폴백을 두면 워커가 죽어도 표는 정상으로 보이고, 대신 대시보드가 5초씩 느려진다
-      (그게 이 구조를 만든 이유다). 죽었으면 죽었다고 보이는 편이 낫다.
+    ⚠️인라인 폴백은 두지 않는다. 폴백을 두면 워커가 죽어도 표는 정상으로 보이고 대신
+      대시보드가 5초씩 느려진다(그게 이 구조를 만든 이유다) -- 죽었으면 죽었다고 보여야 한다.
+    `available` 은 워커가 아니라 **여기서** 찍는다. 신선도를 판정하는 쪽이 찍어야 워커
+      버전이 달라도 계약이 안 깨진다(api_liq_burst_state 와 같은 방식).
+    `require_ok` 는 워커가 외부 조회에 실패한 사이클(`ok: False`)을 오류로 떨어뜨린다 --
+      그때 옛 톤을 그대로 보이면 화면이 «지금 조용하다»고 거짓말을 한다.
     """
-    st = load_json(EXTREME_DETECTOR_STATE_PATH)
+    # `extra_missing` 은 **결측/조회실패에만** 얹는다. stale 은 워커가 쓴 값을 그대로 보여주므로
+    # 빈 history/times 로 덮으면 안 된다(차분 테스트로 확인한 원 동작).
+    base = {"available": False, "error": "worker_state_missing",
+            **({} if bare_missing else {"tone": "neutral"}), "subText": "데이터 없음"}
+    st = load_json(path)
     if not st:
-        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
-                "subText": "데이터 없음", "grade": None, "proba": None, "history": [], "times": []}
-    age = _age_min(st.get("updated_utc"))
-    if age is not None and age > EXTREME_DETECTOR_MAX_AGE_MIN:
-        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
-                "tone": "neutral", "subText": "데이터 없음"}
-    return {**st, "stale_min": round(age, 1) if age is not None else None}
+        return {**base, **(extra_missing or {})}
+    if require_ok and not st.get("ok"):
+        # bare_missing 계열은 워커 상태를 얹지 않고 결측과 같은 모양으로 떨어뜨린다(원 동작).
+        return {**base, **(extra_missing or {})} if bare_missing else {
+            **st, **base, **(extra_missing or {}),
+            "error": "worker_fetch_failed", "subText": "오류"}
+    age = _age_min(st.get(ts_field))
+    stale = round(age, 1) if age is not None else None
+    if age is not None and age > max_age_min:
+        return {**st, **base, "error": "worker_stale", "stale_min": stale}
+    return {**st, **({"available": True} if stamp_available else {}), "stale_min": stale}
+
+
+def extreme_detector_payload() -> dict[str, Any]:
+    return worker_payload(EXTREME_DETECTOR_STATE_PATH, EXTREME_DETECTOR_MAX_AGE_MIN,
+                          extra_missing={"grade": None, "proba": None, "history": [], "times": []})
 
 
 def vol_forecast_payload() -> dict[str, Any]:
-    """24시간 변동성 전망 워커 상태 파일. 극점 탐지기와 같은 구조 -- 인라인 폴백 없음."""
-    st = load_json(VOL_FORECAST_STATE_PATH)
-    if not st:
-        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
-                "subText": "데이터 없음", "grade": None, "proba": None, "history": [], "times": []}
-    age = _age_min(st.get("updated_utc"))
-    if age is not None and age > VOL_FORECAST_MAX_AGE_MIN:
-        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
-                "tone": "neutral", "subText": "데이터 없음"}
-    return {**st, "stale_min": round(age, 1) if age is not None else None}
+    """24시간 변동성 전망 워커 상태. 극점 탐지기와 같은 구조."""
+    return worker_payload(VOL_FORECAST_STATE_PATH, VOL_FORECAST_MAX_AGE_MIN,
+                          extra_missing={"grade": None, "proba": None, "history": [], "times": []})
 
 
 def breakout_detector_payload() -> dict[str, Any]:
-    """횡보→추세 전환 탐지기 워커 상태. 극점 탐지기와 같은 구조 -- 인라인 폴백 없음.
-
-    ⚠️`ok: False` 는 워커가 외부 kline 조회에 실패한 사이클이다(워커는 그래도 상태를 쓴다).
-      그때 옛 톤을 그대로 보여주면 화면이 «지금 조용하다»고 거짓말을 한다 -- 오류로 떨어뜨린다.
-    """
-    st = load_json(BREAKOUT_DETECTOR_STATE_PATH)
-    if not st:
-        return {"available": False, "error": "worker_state_missing", "tone": "neutral",
-                "subText": "데이터 없음", "history": [], "times": []}
-    if not st.get("ok"):
-        return {**st, "available": False, "error": "worker_fetch_failed", "tone": "neutral",
-                "subText": "오류", "history": [], "times": []}
-    age = _age_min(st.get("updated_utc"))
-    if age is not None and age > BREAKOUT_DETECTOR_MAX_AGE_MIN:
-        return {**st, "available": False, "error": "worker_stale", "stale_min": round(age, 1),
-                "tone": "neutral", "subText": "데이터 없음"}
-    # `available` 은 **여기서** 찍는다(워커가 아니라). 신선도를 판정하는 쪽이 찍어야
-    # 워커 버전이 달라도 계약이 안 깨진다 -- api_liq_burst_state 가 쓰는 것과 같은 방식이다.
-    return {**st, "available": True,
-            "stale_min": round(age, 1) if age is not None else None}
+    """횡보->추세 전환 탐지기 워커 상태."""
+    return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
+                          require_ok=True, stamp_available=True,
+                          extra_missing={"history": [], "times": []})
 
 
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
     새로 만들 이유가 없다. 여기서는 파일 하나만 읽는다(요청 경로 계산 금지, 2026-09-10 실장애)."""
-    st = load_json(POSITION_SIZING_STATE_PATH)
-    if not st or not st.get("ok"):
-        return {"available": False, "error": "worker_state_missing", "subText": "데이터 없음"}
-    age = _age_min(st.get("generated_at"))
-    if age is not None and age > POSITION_SIZING_MAX_AGE_MIN:
-        return {**st, "available": False, "error": "worker_stale",
-                "stale_min": round(age, 1), "subText": "데이터 없음"}
-    return {**st, "available": True, "cap": sizing_cap(),
-            "stale_min": round(age, 1) if age is not None else None}
+    out = worker_payload(POSITION_SIZING_STATE_PATH, POSITION_SIZING_MAX_AGE_MIN,
+                         ts_field="generated_at", require_ok=True, stamp_available=True,
+                         bare_missing=True)
+    return {**out, "cap": sizing_cap()} if out.get("available") else out
 
 
 # 2026-09-12 단건 상한. 실계좌 19왕복에서 크기–수익 상관이 −0.494 이고, 한 건(중앙의 5.2배·
@@ -2347,12 +2340,12 @@ def make_app() -> web.Application:
         if asset not in MARKET_SYMBOLS:
             raise web.HTTPBadRequest(reason="unsupported_market_history_asset")
         candles = await load_market_history(asset)
-        return web.json_response({"asset": asset, "candles": candles}, headers={"Cache-Control": "no-cache"})
+        return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
 
     async def api_model_indicator_history(request: web.Request) -> web.Response:
         return web.json_response(
             {"samples": list(model_indicator_history), "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
-            headers={"Cache-Control": "no-cache"},
+            headers=NOCACHE,
         )
 
     async def api_evidence_signals(request: web.Request) -> web.Response:
@@ -2362,9 +2355,9 @@ def make_app() -> web.Application:
             return web.json_response(
                 {"error": "evidence_signal_upstream_error", "detail": "Binance klines fetch failed."},
                 status=web.HTTPBadGateway.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_evidence_signals_provisional(request: web.Request) -> web.Response:
         try:
@@ -2373,25 +2366,25 @@ def make_app() -> web.Application:
             return web.json_response(
                 {"available": False, "error": "evidence_signal_provisional_upstream_error"},
                 status=web.HTTPBadGateway.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_btc_evidence_signals(request: web.Request) -> web.Response:
         payload = await load_btc_evidence_signals()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_xrp_evidence_signals(request: web.Request) -> web.Response:
         payload = await load_xrp_evidence_signals()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_v_rebound_signal(request: web.Request) -> web.Response:
         payload = await load_v_rebound_signal()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_extreme_detector(request: web.Request) -> web.Response:
         payload = await load_extreme_detector()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_5m_history(request: web.Request) -> web.Response:
         """봉별 청산 금액 시계열 -- 청산맵 캔들 위에 얹는다(2026-09-11 사용자 요청).
@@ -2405,7 +2398,7 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, 96),
             max_stale=STALE_GRACE_SECONDS,
         )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
@@ -2413,18 +2406,18 @@ def make_app() -> web.Application:
             30.0, lambda: asyncio.to_thread(position_sizing_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_vol_forecast(request: web.Request) -> web.Response:
         return web.json_response(await load_vol_forecast())
 
     async def api_breakout_detector(request: web.Request) -> web.Response:
         return web.json_response(await load_breakout_detector(),
-                                 headers={"Cache-Control": "no-cache"})
+                                 headers=NOCACHE)
 
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     def _query_coin_asset(request: web.Request) -> str:
         """Shared `?asset=` parsing for the 4 Snapshot-tab signals wired to multiple coins
@@ -2437,15 +2430,15 @@ def make_app() -> web.Application:
 
     async def api_basis_liquidation_signal(request: web.Request) -> web.Response:
         payload = await load_basis_liquidation_signal(_query_coin_asset(request))
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_5m_signal(request: web.Request) -> web.Response:
         payload = await load_liquidation_5m_signal(_query_coin_asset(request))
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_direction_signal(request: web.Request) -> web.Response:
         payload = await load_liquidation_direction_signal(_query_coin_asset(request))
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_map(request: web.Request) -> web.Response:
         try:
@@ -2454,17 +2447,17 @@ def make_app() -> web.Application:
             return web.json_response(
                 {"error": "liquidation_map_upstream_error", "detail": "Binance klines fetch failed."},
                 status=web.HTTPBadGateway.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_regime_wide24(request: web.Request) -> web.Response:
         payload = await load_regime_wide24()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_regime_btc(request: web.Request) -> web.Response:
         payload = await load_regime_btc()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
 
     async def load_coin_indicators(asset: str) -> dict[str, Any]:
@@ -2476,15 +2469,15 @@ def make_app() -> web.Application:
 
     async def api_coin_indicators(request: web.Request) -> web.Response:
         payload = await load_coin_indicators(_query_coin_asset(request))
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_regime_xrp(request: web.Request) -> web.Response:
         payload = await load_regime_xrp()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_macro_calendar(request: web.Request) -> web.Response:
         payload = await load_macro_calendar()
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liq_burst_state(request: web.Request) -> web.Response:
         # load_json_cached() keys off (mtime, size), not a timer -- so this serves the freshest
@@ -2492,11 +2485,11 @@ def make_app() -> web.Application:
         # docstring) without needing its own cache TTL/lock here.
         payload = load_json_cached(LIQ_BURST_STATE_PATH)
         if not payload:
-            return web.json_response({"available": False}, headers={"Cache-Control": "no-cache"})
+            return web.json_response({"available": False}, headers=NOCACHE)
         # tail_risk_interceptor.py's _write_liq_burst_state() never sets "available" itself (it
         # always writes on success) -- the frontend's renderLiqBurstAlert() checks payload.available
         # to distinguish this from the {"available": False} fallback above, so stamp it here.
-        return web.json_response({**payload, "available": True}, headers={"Cache-Control": "no-cache"})
+        return web.json_response({**payload, "available": True}, headers=NOCACHE)
 
     async def api_session_alerts(request: web.Request) -> web.Response:
         """Split out of /api/evidence-signals (2026-08-27, user report: badges only updated on a
@@ -2511,7 +2504,7 @@ def make_app() -> web.Application:
             "session_volatility_alert": compute_session_volatility_alert(),
             "macro_event_alert": compute_macro_event_alert(macro_cal.get("events", [])),
         }
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     # ---- Web Push (PWA 알림) --------------------------------------------------------
     # 판단 로직은 여기 없다 -- scripts/live_push_notifier_20260904.py 참고. 여기는 구독 수명주기만.
@@ -2524,7 +2517,7 @@ def make_app() -> web.Application:
             {"enabled": bool(public_key and os.getenv("VAPID_PRIVATE_KEY")),
              "vapid_public_key": public_key,
              "subscriber_count": len(load_subscriptions())},
-            headers={"Cache-Control": "no-cache"},
+            headers=NOCACHE,
         )
 
     async def api_push_subscribe(request: web.Request) -> web.Response:
@@ -2536,7 +2529,7 @@ def make_app() -> web.Application:
         if not sub.get("endpoint") or not (sub.get("keys") or {}).get("p256dh"):
             raise web.HTTPBadRequest(text="subscription must carry endpoint and keys.p256dh")
         sid = add_subscription(sub, label=str(body.get("label", ""))[:80])
-        return web.json_response({"ok": True, "id": sid}, headers={"Cache-Control": "no-cache"})
+        return web.json_response({"ok": True, "id": sid}, headers=NOCACHE)
 
     async def api_push_unsubscribe(request: web.Request) -> web.Response:
         try:
@@ -2548,7 +2541,7 @@ def make_app() -> web.Application:
         if not sid:
             raise web.HTTPBadRequest(text="id or subscription.endpoint required")
         return web.json_response({"ok": remove_subscription(sid)},
-                                 headers={"Cache-Control": "no-cache"})
+                                 headers=NOCACHE)
 
     async def api_push_devices(request: web.Request) -> web.Response:
         """등록된 구독 목록. endpoint 원문은 기기 식별 토큰이라 내보내지 않고, 프론트가 자기
@@ -2561,7 +2554,7 @@ def make_app() -> web.Application:
                          "subscribed_utc": sub.get("subscribed_utc"),
                          "endpoint_tail": endpoint[-12:]})
         rows.sort(key=lambda r: r.get("subscribed_utc") or "")
-        return web.json_response({"devices": rows}, headers={"Cache-Control": "no-cache"})
+        return web.json_response({"devices": rows}, headers=NOCACHE)
 
     async def api_push_test(request: web.Request) -> web.Response:
         """구독 직후 '진짜로 뜨는가'를 확인하는 용도. 이게 없으면 사용자는 실제 신호가 날 때까지
@@ -2577,7 +2570,7 @@ def make_app() -> web.Application:
             subject=os.getenv("VAPID_SUBJECT", "mailto:kbj2060@gmail.com"),
             ttl=60,
         )
-        return web.json_response(result, headers={"Cache-Control": "no-cache"})
+        return web.json_response(result, headers=NOCACHE)
 
     async def api_trades(request: web.Request) -> web.Response:
         source_filter = request.query.get("source", "ALL").upper()
@@ -2605,7 +2598,7 @@ def make_app() -> web.Application:
             produce_account,
             max_stale=STALE_GRACE_SECONDS,
         )
-        return web.json_response(payload, headers={"Cache-Control": "no-cache"})
+        return web.json_response(payload, headers=NOCACHE)
 
     async def assemble_entry_plan(side: str):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
@@ -2658,7 +2651,7 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": sizing.get("vol_equivalent_qty"),
                                   "exec_enabled": exec_enabled()},
-                                 headers={"Cache-Control": "no-cache"})
+                                 headers=NOCACHE)
 
     async def api_manual_entry_submit(request: web.Request) -> web.Response:
         """실주문. **POST 전용 + confirm=1 필수 + 게이트가 켜져 있어야** 나간다.
@@ -2691,14 +2684,14 @@ def make_app() -> web.Application:
         refresh_tasks["manual_entry"] = asyncio.create_task(
             run_entry(binance_session(), plan, manual_entry_state))
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
-                                 headers={"Cache-Control": "no-cache"})
+                                 headers=NOCACHE)
 
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
         return web.json_response({"ok": True, "state": manual_entry_state,
                                   "exec_enabled": exec_enabled()},
-                                 headers={"Cache-Control": "no-cache"})
+                                 headers=NOCACHE)
 
     async def api_ops_status(request: web.Request) -> web.Response:
         ops_dir = LIVE_DIR / "ops_watchdog"
@@ -2733,7 +2726,7 @@ def make_app() -> web.Application:
             return web.json_response(
                 {"error": "unsupported_scalp_shadow_asset"},
                 status=web.HTTPBadRequest.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
         state_path = LIVE_DIR / config["state_file"]
         database_path = LIVE_DIR / config["database_file"]
@@ -2755,7 +2748,7 @@ def make_app() -> web.Application:
                     "detail": "Scalp shadow data contract is unavailable.",
                 },
                 status=web.HTTPServiceUnavailable.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
         return json_response(request, payload, etag)
 
@@ -2766,7 +2759,7 @@ def make_app() -> web.Application:
             return web.json_response(
                 {"error": "unsupported_scalp_reuse_mode"},
                 status=web.HTTPBadRequest.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
         state_path = LIVE_DIR / config["state_file"]
         database_path = LIVE_DIR / config["database_file"]
@@ -2788,7 +2781,7 @@ def make_app() -> web.Application:
                     "detail": "Scalp reuse shadow data contract is unavailable.",
                 },
                 status=web.HTTPServiceUnavailable.status_code,
-                headers={"Cache-Control": "no-cache"},
+                headers=NOCACHE,
             )
         return json_response(request, payload, etag)
 
