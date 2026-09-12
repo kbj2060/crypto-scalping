@@ -172,6 +172,7 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     build_entry_plan, exec_enabled, load_filters)
+from scripts.live_manual_peg_execute_20260912 import run_entry  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -1271,6 +1272,8 @@ def make_app() -> web.Application:
     binance_account_lock = asyncio.Lock()
     # last_at 0.0 + time.monotonic() ⇒ 기동 직후 첫 주기에 바로 한 번 적는다.
     account_trip_state: dict[str, Any] = {"last_at": 0.0, "seen": load_account_trip_keys()}
+    # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
+    manual_entry_state: dict[str, Any] = {"phase": "idle"}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
     evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -2582,6 +2585,59 @@ def make_app() -> web.Application:
                                   "exec_enabled": exec_enabled()},
                                  headers={"Cache-Control": "no-cache"})
 
+    async def api_manual_entry_submit(request: web.Request) -> web.Response:
+        """실주문. **POST 전용 + confirm=1 필수 + 게이트가 켜져 있어야** 나간다.
+
+        POST 인 이유: GET 이면 링크 미리보기·프리페치·주소창 재방문이 그대로 주문이 된다.
+        confirm 을 받는 이유: 프런트의 2단 확인을 서버에서 한 번 더 건다 -- 프런트만 믿으면
+        프런트 버그가 곧 오발주다."""
+        side = (request.query.get("side") or "").upper()
+        if side not in ("LONG", "SHORT"):
+            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
+                                     status=403)
+        if manual_entry_state.get("phase") in ("working", "submitting"):
+            return web.json_response({"ok": False, "error": "already_working",
+                                      "state": manual_entry_state}, status=409)
+        symbol = MARKET_SYMBOLS["eth"]
+        try:
+            sizing = await asyncio.to_thread(position_sizing_payload)
+            if not sizing.get("available"):
+                return web.json_response({"ok": False, "error": "sizing_unavailable"}, status=503)
+            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                            {"symbol": symbol}, error_reason="book_ticker_failed")
+            filters = await load_filters(binance_session(), symbol)
+            cap = sizing.get("cap") or {}
+            plan = build_entry_plan(
+                side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
+                recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
+                cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
+                filters=filters, symbol=symbol)
+        except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
+            return web.json_response({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=502)
+        if plan.get("blocked"):
+            return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
+                                     status=400)
+        manual_entry_state.clear()
+        manual_entry_state.update(phase="submitting", side=side, plan=plan,
+                                  started_at=datetime.now(timezone.utc).isoformat())
+        # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에 취소해 준다.
+        refresh_tasks["manual_entry"] = asyncio.create_task(
+            run_entry(binance_session(), plan, manual_entry_state))
+        return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
+                                 headers={"Cache-Control": "no-cache"})
+
+    async def api_manual_entry_status(request: web.Request) -> web.Response:
+        """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
+        보여준다. 주문은 최대 하나만 동시에 둔다."""
+        return web.json_response({"ok": True, "state": manual_entry_state,
+                                  "exec_enabled": exec_enabled()},
+                                 headers={"Cache-Control": "no-cache"})
+
     async def api_ops_status(request: web.Request) -> web.Response:
         ops_dir = LIVE_DIR / "ops_watchdog"
         health_path = ops_dir / "health_snapshot.json"
@@ -2731,6 +2787,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
+    app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
+    app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_get("/api/position-sizing", api_position_sizing)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)

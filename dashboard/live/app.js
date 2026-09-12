@@ -5130,9 +5130,12 @@ async function manualEntryPreview(side) {
   buttons.forEach((btn) => { if (btn) btn.disabled = true; });
   box.hidden = false;
   box.textContent = "확인 중…";
+  manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
   try {
     const data = await manualEntryFetch(side);
     box.textContent = data.ok ? manualEntryPlanText(data) : `실패: ${data.error || data.detail || "알 수 없음"}`;
+    // 게이트가 꺼져 있으면 확인 버튼을 아예 띄우지 않는다 -- 눌러도 403 이라 헛걸음이다.
+    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {});
   } catch (err) {
     box.textContent = `실패: ${err && err.message ? err.message : err}`;
   } finally {
@@ -5159,8 +5162,97 @@ async function manualEntryRefreshSize() {
   }
 }
 
+// ── 2026-09-12 2단계: 실주문 (2단 확인) ────────────────────────────────────────
+// 진입 버튼은 계획을 **보여주기만** 하고, 주문은 확인 버튼에서만 나간다. 오클릭 한 번이
+// 주문이 되지 않게 하는 것이 목적이라 확인 버튼은 기본 숨김이고 창이 지나면 사라진다.
+// 서버도 confirm=1 을 따로 요구하므로 이 화면 로직이 깨져도 실수로 주문이 나가지 않는다.
+const CONFIRM_WINDOW_MS = 15000;
+const STATUS_POLL_MS = 3000;
+let manualEntryPending = null;
+let manualEntryTimer = null;
+
+const MANUAL_ENTRY_PHASE_KO = {
+  submitting: "주문 전송 중…",
+  working: "peg 지정가 대기 중 — 미체결분은 120초 뒤 테이커 전환",
+  filled_maker: "✅ 전량 메이커 체결 (peg)",
+  filled_taker: "✅ 체결 — 일부/전부 테이커 전환",
+  rejected: "거부됨 — post-only 가 테이커가 될 상황이라 거절했습니다(주문 안 나감)",
+  taker_failed: "🔴 테이커 전환 실패",
+  error: "🔴 오류",
+  idle: "대기",
+};
+
+function manualEntryClearConfirm() {
+  manualEntryPending = null;
+  if (manualEntryTimer) { clearTimeout(manualEntryTimer); manualEntryTimer = null; }
+  const btn = el("snapEntryConfirm");
+  if (btn) { btn.hidden = true; btn.textContent = ""; }
+}
+
+function manualEntryArmConfirm(side, plan) {
+  const btn = el("snapEntryConfirm");
+  if (!btn || plan.blocked) return;
+  manualEntryPending = { side, quantity: plan.quantity };
+  btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH 주문`;
+  btn.hidden = false;
+  if (manualEntryTimer) clearTimeout(manualEntryTimer);
+  manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
+}
+
+function manualEntryStateText(state) {
+  const phase = state?.phase || "idle";
+  const rows = [MANUAL_ENTRY_PHASE_KO[phase] || phase];
+  if (state?.quantity !== undefined) {
+    rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ETH` +
+      (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
+  }
+  if (state?.error) rows.push(`사유: ${state.error}`);
+  return rows.join("\n");
+}
+
+async function manualEntryPollStatus() {
+  const box = el("snapEntryResult");
+  if (!box) return;
+  try {
+    const res = await fetch("/api/manual-entry/status", { cache: "no-store" });
+    const data = await res.json();
+    box.textContent = manualEntryStateText(data.state);
+    const phase = data.state?.phase;
+    if (phase === "submitting" || phase === "working") {
+      setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
+    } else {
+      manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
+    }
+  } catch (err) {
+    box.textContent = `상태 조회 실패: ${err && err.message ? err.message : err}`;
+  }
+}
+
+async function manualEntrySubmit() {
+  const pending = manualEntryPending;
+  const box = el("snapEntryResult");
+  if (!pending || !box) return;
+  manualEntryClearConfirm();
+  box.hidden = false;
+  box.textContent = "주문 전송 중…";
+  try {
+    const res = await fetch(`/api/manual-entry/submit?side=${pending.side}&confirm=1`,
+      { method: "POST", cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) {
+      box.textContent = `주문 실패: ${data.detail || data.error || res.status}`;
+      return;
+    }
+    box.textContent = manualEntryStateText(data.state);
+    setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
+  } catch (err) {
+    box.textContent = `주문 실패: ${err && err.message ? err.message : err}`;
+  }
+}
+
 el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG"));
 el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT"));
+el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 if (el("snapEntryPlan")) {
   manualEntryRefreshSize();
   setInterval(manualEntryRefreshSize, MANUAL_ENTRY_REFRESH_MS);
