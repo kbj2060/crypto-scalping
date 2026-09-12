@@ -73,6 +73,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--lookback-days", type=int, default=14)
+    ap.add_argument("--rebuild", action="store_true",
+                    help="거래소 구간 안에서 키가 안 맞는 기존 줄(절단 조각)을 버리고 다시 세운다")
     ap.add_argument("--dump", action="store_true", help="추가될 줄을 전부 찍는다")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -97,6 +99,29 @@ def main() -> int:
         else asyncio.run(RP.fetch_trips(symbols, start))
     closed = [t for t in trips if t.get("closed")]
     print(f"거래소 종료 왕복 {len(closed)}건")
+
+    # --rebuild: 거래소 재계산본이 덮는 구간은 **그것이 정본**이다. 키가 안 맞는 기존 줄은
+    # 체결 스트림이 잘려 생긴 조각(같은 포지션을 늦게 시작했거나 여러 개를 뭉쳤다)이므로 버린다.
+    # 2026-09-12 실측: 미검증 10줄 중 8줄이 검증된 줄과 시간이 겹쳤고, 그 10줄의 +355.02 USDT 가
+    # 원장 합계 +232.32 를 만들고 있었다(검증된 18줄만 보면 −122.70).
+    drop = []
+    if a.rebuild and closed:
+        lo = min(int(t["entry_time"]) for t in closed)
+        hi = max(int(t.get("exit_time") or t["entry_time"]) for t in closed)
+        keep = []
+        for r in rows:
+            r0, r1 = span(r)
+            if key(r) not in {key(t) for t in closed} and lo <= r0 and r1 <= hi:
+                drop.append(r)
+            else:
+                keep.append(r)
+        rows = keep
+        have = {key(r) for r in rows}
+        print(f"재구성: 거래소 구간 {A._iso(lo)} ~ {A._iso(hi)} 안에서 키가 안 맞는 {len(drop)}줄 제거")
+        for r in drop:
+            print(f"   버림: {A._iso(r['entry_time'])}~{A._iso(r.get('exit_time'))} {r.get('side'):<5} "
+                  f"fills {int(r.get('fills') or 0):>3} 수량 {float(r['max_qty']):>7.3f} "
+                  f"순익 {float(r.get('net_pnl') or 0):>8.2f} basis={r.get('price_basis')}")
 
     add, skip_key, skip_ov, skip_chk = [], 0, [], []
     for t in closed:
@@ -160,9 +185,21 @@ def main() -> int:
     if not add:
         return 0
     shutil.copy2(RP.LEDGER, RP.LEDGER.with_suffix(f".jsonl.bak_backfill_{time.strftime('%Y%m%d_%H%M%S')}"))
-    with RP.LEDGER.open("a") as handle:          # 덧붙이기만 -- 동시 append 를 잃지 않는다
-        for t in add:
-            handle.write(json.dumps(t, ensure_ascii=False) + "\n")
+    if drop:
+        # 줄을 버리므로 덧붙이기로는 안 되고 통째로 다시 쓴다. 읽기~쓰기 사이에 대시보드가
+        # 붙였을지 모르는 줄을 잃지 않도록, **지금 다시 읽어** 원래 목록에 없던 줄은 살린다.
+        now_rows = RP.load_ledger()
+        dropped = {key(r) for r in drop}
+        final = sorted([r for r in now_rows if key(r) not in dropped] + add,
+                       key=lambda r: int(r["entry_time"]))
+        tmp = RP.LEDGER.with_suffix(".jsonl.tmp")
+        tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in final), encoding="utf-8")
+        import os
+        os.replace(tmp, RP.LEDGER)
+    else:
+        with RP.LEDGER.open("a") as handle:      # 덧붙이기만 -- 동시 append 를 잃지 않는다
+            for t in add:
+                handle.write(json.dumps(t, ensure_ascii=False) + "\n")
     total = len(RP.LEDGER.read_text().splitlines())
     print(f"\n반영 완료 — {RP.LEDGER} 현재 {total}줄 (원본은 .bak_backfill_* 로 보관)")
     return 0
