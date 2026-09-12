@@ -1,14 +1,17 @@
 :root {
-  --bg: #0b0d13;
-  --panel: rgba(21, 23, 31, 0.82);
-  --panel-strong: rgba(27, 30, 40, 0.92);
-  --chart-bg: #090a10;
+  /* 2026-09-12 명도 계단: 배경 L*9.2 -> 패널 15.0 -> panel-strong 20.6 (층당 ~6).
+     이전엔 bg 3.7 / 패널 6.9 로 계단이 3.2 뿐이라 전부 한 평면으로 눌렸고,
+     --chart-bg(2.8)가 --bg 보다 어두워 차트가 페이지 아래로 가라앉았다. */
+  --bg: #161a22;
+  --panel: rgba(35, 41, 50, 0.82);
+  --panel-strong: rgba(46, 52, 62, 0.92);
+  --chart-bg: #171b23;
   --glass: rgba(255, 255, 255, 0.05);
   --glass-strong: rgba(255, 255, 255, 0.08);
   --text: #eef0f6;
   --muted: #8b91a6;
   --good: #6bab84;
-  --bad: #cf6a5c;
+  --bad: #d4786c;
   --warn: #dc8f4a;
   --amber: #f2b84b;
   --accent: #22d3ee;
@@ -44,7 +47,7 @@ html {
 body {
   background:
     radial-gradient(ellipse 900px 520px at 12% -8%, rgba(34, 211, 238, 0.1), transparent 55%),
-    linear-gradient(180deg, #171922 0%, var(--bg) 46%, #0a0b10 100%);
+    linear-gradient(180deg, #1d222b 0%, var(--bg) 46%, #13171f 100%);
   color: var(--text);
   font-family: var(--font-sans);
   margin: 0;
@@ -69,13 +72,13 @@ body {
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--bad) 62%, transparent);
   border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, rgba(207, 106, 92, 0.22), rgba(27, 30, 40, 0.96));
+  background: linear-gradient(90deg, rgba(212, 120, 108, 0.22), rgba(46, 52, 62, 0.96));
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
 .execution-alert-banner.hidden { display: none; }
-.execution-alert-banner.blocked { border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: linear-gradient(90deg, rgba(220, 143, 74, 0.22), rgba(27, 30, 40, 0.96)); }
-.execution-alert-banner.disabled { border-color: var(--line); background: linear-gradient(90deg, rgba(148, 154, 173, 0.14), rgba(27, 30, 40, 0.94)); }
+.execution-alert-banner.blocked { border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: linear-gradient(90deg, rgba(220, 143, 74, 0.22), rgba(46, 52, 62, 0.96)); }
+.execution-alert-banner.disabled { border-color: var(--line); background: linear-gradient(90deg, rgba(148, 154, 173, 0.14), rgba(46, 52, 62, 0.94)); }
 .execution-alert-icon {
   display: grid;
   place-items: center;
@@ -715,7 +718,7 @@ body {
   border-radius: var(--radius);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
-    rgba(15, 17, 23, 0.66);
+    rgba(39, 44, 54, 0.66);
   backdrop-filter: blur(18px) saturate(1.18);
 }
 .shadow-slot-range { display: grid; gap: 12px; padding: 4px 6px 0; }
@@ -1057,7 +1060,7 @@ body {
   border-radius: var(--radius);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
-    rgba(15, 17, 23, 0.66);
+    rgba(39, 44, 54, 0.66);
   backdrop-filter: blur(18px) saturate(1.18);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.055),
@@ -1429,7 +1432,7 @@ svg {
 
 .chart-tooltip {
   position: absolute;
-  background: rgba(15, 17, 23, 0.96);
+  background: rgba(45, 51, 61, 0.96);
   color: #fff;
   padding: 8px 12px;
   border-radius: 6px;
@@ -1602,7 +1605,7 @@ svg {
   inset: 0;
   z-index: 2;
   border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, rgba(27,30,40,.55), rgba(21,23,31,.55));
+  background: linear-gradient(180deg, rgba(62,70,81,.55), rgba(42,48,58,.55));
   border: 1px solid var(--soft-line);
 }
 
@@ -1903,7 +1906,7 @@ svg {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(16, 19, 28, 0.97);
+  background: rgba(45, 51, 61, 0.97);
   color: var(--text);
   font: 500 12px/1.5 var(--font-sans);
   white-space: pre-wrap;          /* title에 줄바꿈이 들어있는 곳이 많다 */
