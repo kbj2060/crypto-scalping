@@ -5159,9 +5159,19 @@ function manualEntryPlanHtml(data) {
     }
     if (cap.available && plan.cap_used_pct != null) {
       const beforeCap = 100 * (b.notional_usdt || 0) / cap.cap_notional_usdt;
+      // 어느 상한이 묶었는지 **말해준다** -- 오늘 겪은 혼란이 정확히 "왜 막혔는지 모른다"였다.
+      // 순자산 연동이 묶으면 그 자체가 위험 문구가 된다(상한 = 청산 거리 하한).
+      const why = cap.binding === "equity"
+        ? `순자산 ${won(cap.equity_x ? cap.cap_equity_usdt / cap.equity_x : 0)} × ${cap.equity_x}배`
+          + `\n= 청산까지 최소 ${cap.liq_floor_pct}% 를 남기는 선`
+        : `왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`;
+      const other = cap.binding === "equity" && cap.cap_ledger_usdt
+        ? `\n(원장 기준은 ${won(cap.cap_ledger_usdt)} USDT — 더 큰 쪽이라 안 묶음)`
+        : cap.binding === "ledger" && cap.cap_equity_usdt
+          ? `\n(순자산 기준은 ${won(cap.cap_equity_usdt)} USDT — 더 큰 쪽이라 안 묶음)` : "";
       tiles.push(entryTile("상한 사용", entryVal(beforeCap, plan.cap_used_pct, (x) => `${Number(x).toFixed(0)}%`),
         plan.cap_used_pct >= 100 ? "warn" : "good", plan.cap_used_pct / 100, beforeCap / 100,
-        `상한 ${won(cap.cap_notional_usdt)} USDT = 왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`));
+        `상한 ${won(cap.cap_notional_usdt)} USDT = ${why}${other}`));
     }
     if (tiles.length) {
       parts.push(`<div class="entry-cap">진입 후 계좌 — 순자산 ${escapeHtml(won(pr.equity_usdt))} USDT 는 그대로 (진입 자체는 손익 0)</div>`);
