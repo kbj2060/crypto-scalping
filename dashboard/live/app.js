@@ -5361,8 +5361,12 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   if (!btn || plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin() };
+  // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
+  // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
+  const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
+  const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
   btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
-    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문");
+    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
