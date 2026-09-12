@@ -45,6 +45,7 @@ for _p in (ROOT, ROOT / "scripts"):
 import build_eth_signal_trigger_material_panel_20260912 as P  # noqa: E402
 
 PANEL = P.OUT / "panel_5m.parquet"
+XPROB = ROOT / "tmp/eth_extreme_prob_cleancut_20260912/prob.parquet"
 OUT = ROOT / "tmp/eth_rule_direction_20260912"
 HS = (12, 48)
 KS = (0.8, 1.5)
@@ -125,7 +126,30 @@ def atoms(p: pd.DataFrame) -> tuple[dict[str, tuple[np.ndarray, int]], dict[str,
     D["바닥:2종이상"] = (p["ev_n_bottom"].to_numpy() >= 2, +1)
     D["천장:2종이상"] = (p["ev_n_top"].to_numpy() >= 2, -1)
 
+    # 극점 탐지기 확률 — **누수 없이 다시 매긴 판**을 쓴다.
+    # 배포 아티팩트(data/live/eth_extreme_detector_artifact)는 train_span 이 2026-03-31 까지라
+    # 여기 VAL 과 OOS 앞 3개월을 학습에 포함한다. 그대로 조건에 걸면 판정이 무효다.
+    gate = np.zeros(len(p), bool)
+    if XPROB.exists():
+        X = pd.read_parquet(XPROB)
+        cuts = json.loads((XPROB.parent / "meta.json").read_text(encoding="utf-8"))["cuts_from_TRAIN"]
+        ts = p["timestamp"].to_numpy()
+        pos = pd.Series(np.arange(len(p)), index=pd.DatetimeIndex(ts))
+        for lg, sd, sgn in ((1, "바닥", +1), (0, "천장", -1)):
+            sub = X[X["long"] == lg]
+            i = pos.reindex(pd.DatetimeIndex(sub["timestamp"].to_numpy())).to_numpy()
+            ok = np.isfinite(i)
+            i = i[ok].astype(int)
+            pr = np.full(len(p), np.nan); pr[i] = sub["p"].to_numpy()[ok]
+            for g in ("강", "중", "약"):
+                D[f"{sd}:극점{g}"] = (np.isfinite(pr) & (pr >= cuts[g]), sgn)
+            D[f"{sd}:극점하위"] = (np.isfinite(pr) & (pr < cuts["약"]), sgn)
+            tq = np.full(len(p), np.nan); tq[i] = sub["tq"].to_numpy()[ok]
+            gate |= np.isfinite(tq) & ((tq >= 0.80) | (tq <= 0.20))
+
     F: dict[str, np.ndarray] = {}
+    F["게이트억제"] = gate            # 강한 추세 구간(ret144 7일분위 ≥0.8 또는 ≤0.2) — 배포 탐지기의 하드 게이트
+    F["게이트정상"] = ~gate
     F["돌파탐지"] = p["trg_breakout"].to_numpy() > 0
     F["변동성확장"] = p["trg_vol_expand"].to_numpy() > 0
     F["추세레짐"] = p["trg_regime_trend"].to_numpy() > 0
