@@ -1311,57 +1311,20 @@ def make_app() -> web.Application:
     event_clients: set[asyncio.Queue[str]] = set()
     latest_event_state: dict[str, Any] | None = None
     latest_event_tickers: dict[str, dict[str, Any]] = {}
+    # swr_cached 가 캐시를 키로 소유하지만, 이 셋은 swr 밖에서도 읽으므로 남긴다
+    # (market_history: 부분 갱신 / evidence_signal: frames / binance_account: 원장 기록).
     market_history_cache: dict[str, dict[str, Any]] = {}
-    market_history_locks = {asset: asyncio.Lock() for asset in MARKET_SYMBOLS}
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    binance_account_lock = asyncio.Lock()
     # last_at 0.0 + time.monotonic() ⇒ 기동 직후 첫 주기에 바로 한 번 적는다.
     account_trip_state: dict[str, Any] = {"last_at": 0.0, "seen": load_account_trip_keys()}
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
-    evidence_signal_lock = asyncio.Lock()
     evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     evidence_signal_provisional_lock = asyncio.Lock()
-    btc_evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    btc_evidence_signal_lock = asyncio.Lock()
-    xrp_evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    xrp_evidence_signal_lock = asyncio.Lock()
-    v_rebound_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    v_rebound_lock = asyncio.Lock()
-    extreme_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    vol_forecast_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    breakout_detector_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    vol_forecast_lock = asyncio.Lock()
-    breakout_detector_lock = asyncio.Lock()
-    position_sizing_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    position_sizing_lock = asyncio.Lock()
-    extreme_detector_lock = asyncio.Lock()
-    chart_markers_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    chart_markers_lock = asyncio.Lock()
-    # 2026-08-31: keyed by asset (was a single shared slot) so an ETH and a BTC request don't
-    # evict each other's cached reading -- same per-asset dict/lock shape as market_history_cache/
-    # market_history_locks above.
-    basis_liquidation_cache: dict[str, dict[str, Any]] = {}
-    basis_liquidation_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
-    liquidation_5m_cache: dict[str, dict[str, Any]] = {}
-    liquidation_5m_hist_cache: dict[str, dict[str, Any]] = {}
-    liquidation_5m_hist_lock = asyncio.Lock()
-    liquidation_5m_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
-    liquidation_direction_cache: dict[str, dict[str, Any]] = {}
-    liquidation_direction_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
-    liquidation_map_cache: dict[str, dict[str, Any]] = {}
-    liquidation_map_locks = {asset: asyncio.Lock() for asset in COIN_CONFIG}
-    regime_wide24_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    regime_wide24_lock = asyncio.Lock()
-    regime_btc_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    regime_xrp_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    regime_xrp_lock = asyncio.Lock()
-    coin_indicator_cache: dict[str, dict] = {a: {"ts": 0.0, "payload": None} for a in COIN_CONFIG}
-    coin_indicator_locks = {a: asyncio.Lock() for a in COIN_CONFIG}
-    regime_btc_lock = asyncio.Lock()
-    macro_calendar_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    macro_calendar_lock = asyncio.Lock()
+    # 2026-08-31: 자산별로 키를 나눈다(원래는 공유 슬롯 하나였다) -- ETH 요청과 BTC 요청이
+    # 서로의 캐시를 밀어내지 않게. 2026-09-12 부터 그 dict/Lock 은 swr_cached 가 f"...:{asset}"
+    # 키로 직접 소유하므로 여기서 선언하지 않는다.
     _mih_restored = load_model_indicator_history()
     model_indicator_history: deque = deque(_mih_restored, maxlen=MODEL_INDICATOR_HISTORY_MAX)
     # 복원분의 나이만큼 시계를 되돌려 둔다 → 다음 샘플이 «원래 찍혔어야 할 때» 찍힌다.
@@ -1430,8 +1393,11 @@ def make_app() -> web.Application:
                 print(f"cache refresh failed for {key} (still serving stale): {exc}", flush=True)
         refresh_tasks[key] = asyncio.create_task(_run())
 
-    async def swr_cached(key: str, cache: dict, lock: asyncio.Lock, ttl: float, produce,
-                         *, max_stale: float = 0.0) -> Any:
+    swr_store: dict[str, dict] = {}
+    swr_locks: dict[str, asyncio.Lock] = {}
+
+    async def swr_cached(key: str, ttl: float, produce, *, max_stale: float = 0.0,
+                         cache: dict | None = None) -> Any:
         """Fresh -> serve it. Stale -> serve stale NOW and refresh behind it. Cold -> await.
 
         `max_stale` is how far PAST `ttl` a payload may be served while its replacement is still
@@ -1442,7 +1408,14 @@ def make_app() -> web.Application:
         fast and returns FRESHER data, so they keep doing that.
 
         Past ttl + max_stale the payload is treated as cold again: at that age, blocking for a
-        current reading beats silently serving something long out of date."""
+        current reading beats silently serving something long out of date.
+
+        캐시와 락은 `key` 로 여기서 소유한다 -- 호출부마다 dict 와 Lock 을 손으로 선언해
+        넘길 이유가 없다. `cache` 를 넘기는 건 그 dict 를 swr 밖에서도 읽는 세 곳뿐이다
+        (market_history / evidence_signal 의 frames / binance_account)."""
+        if cache is None:
+            cache = swr_store.setdefault(key, {"ts": 0.0, "payload": None})
+        lock = swr_locks.setdefault(key, asyncio.Lock())
         now = time.monotonic()
         age = now - cache.get("ts", 0.0)
         payload = cache.get("payload")
@@ -1597,9 +1570,8 @@ def make_app() -> web.Application:
             return candles
 
         return await swr_cached(
-            f"market_history:{asset}",
-            market_history_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            market_history_locks[asset], MARKET_HISTORY_CACHE_SECONDS, produce,
+            f"market_history:{asset}", MARKET_HISTORY_CACHE_SECONDS, produce,
+            cache=market_history_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -1792,8 +1764,8 @@ def make_app() -> web.Application:
             return payload
 
         return await swr_cached(
-            "evidence_signal", evidence_signal_cache, evidence_signal_lock,
-            EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
+            "evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
+            cache=evidence_signal_cache,
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -1927,7 +1899,7 @@ def make_app() -> web.Application:
         캐시된 모델을 재사용(그 함수의 _load_models() 참고)하므로 이 EVIDENCE_SIGNAL_CACHE_SECONDS
         (ETH와 동일 60초) 캐시는 매 사이클의 재적합 비용이 아니라 klines 재페치+추론 비용만 아낀다."""
         return await swr_cached(
-            "btc_evidence_signal", btc_evidence_signal_cache, btc_evidence_signal_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "btc_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_btc_evidence_signals_panel),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -1937,7 +1909,7 @@ def make_app() -> web.Application:
         서빙 5종(liquidity_sweep/fib_extension_exhaustion은 HOLDOUT AUC가 무작위 미만이라 제외).
         구조/캐시 정책은 BTC판과 동일하다."""
         return await swr_cached(
-            "xrp_evidence_signal", xrp_evidence_signal_cache, xrp_evidence_signal_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "xrp_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_xrp_evidence_signals_panel),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -1950,7 +1922,7 @@ def make_app() -> web.Application:
         on this server's GPU, 2026-08-29) -- asyncio.to_thread so that never stalls the event loop,
         same reasoning as load_evidence_signals() above."""
         return await swr_cached(
-            "v_rebound", v_rebound_cache, v_rebound_lock, EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "v_rebound", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_eth_sweep_v_rebound_signal),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -1964,8 +1936,7 @@ def make_app() -> web.Application:
         scripts/live_eth_extreme_detector_worker_20260910.py. 다른 모델 카드와 같은 구조다.
         """
         return await swr_cached(
-            "extreme_detector", extreme_detector_cache, extreme_detector_lock,
-            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "extreme_detector", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(extreme_detector_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -1973,8 +1944,7 @@ def make_app() -> web.Application:
     async def load_vol_forecast() -> dict[str, Any]:
         """24시간 변동성 전망 -- 워커가 쓴 상태 파일을 읽기만 한다(모델 인라인 금지)."""
         return await swr_cached(
-            "vol_forecast", vol_forecast_cache, vol_forecast_lock,
-            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "vol_forecast", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(vol_forecast_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -1982,8 +1952,7 @@ def make_app() -> web.Application:
     async def load_breakout_detector() -> dict[str, Any]:
         """횡보→추세 전환 탐지기 -- 워커가 쓴 상태 파일을 읽기만 한다(계산 인라인 금지)."""
         return await swr_cached(
-            "breakout_detector", breakout_detector_cache, breakout_detector_lock,
-            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "breakout_detector", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(breakout_detector_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2000,8 +1969,7 @@ def make_app() -> web.Application:
         vr = await load_v_rebound_signal()
         ex = await load_extreme_detector()
         return await swr_cached(
-            "chart_markers", chart_markers_cache, chart_markers_lock,
-            EVIDENCE_SIGNAL_CACHE_SECONDS,
+            "chart_markers", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2018,8 +1986,7 @@ def make_app() -> web.Application:
         forward liquidation-volume tilt) was only ever measured on ETH; BTC's reading is exposed
         with the same exploratory caveat, not a re-validated one (see design doc section 6.5)."""
         return await swr_cached(
-            f"basis_liquidation:{asset}", basis_liquidation_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            basis_liquidation_locks[asset], EVIDENCE_SIGNAL_CACHE_SECONDS,
+            f"basis_liquidation:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_basis_liquidation_signal, symbol=COIN_CONFIG[asset]["binance_symbol"]),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2036,9 +2003,7 @@ def make_app() -> web.Application:
 
         asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
         return await swr_cached(
-            f"liquidation_5m:{asset}",
-            liquidation_5m_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            liquidation_5m_locks[asset], LIQUIDATION_5M_SIGNAL_CACHE_SECONDS,
+            f"liquidation_5m:{asset}", LIQUIDATION_5M_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_liquidation_5m_signal, coin=asset),
         )
 
@@ -2050,9 +2015,7 @@ def make_app() -> web.Application:
 
         asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
         return await swr_cached(
-            f"liquidation_direction:{asset}",
-            liquidation_direction_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            liquidation_direction_locks[asset], EVIDENCE_SIGNAL_CACHE_SECONDS,
+            f"liquidation_direction:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
         )
 
@@ -2104,9 +2067,7 @@ def make_app() -> web.Application:
             return payload
 
         return await swr_cached(
-            f"liquidation_map:{asset}",
-            liquidation_map_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            liquidation_map_locks[asset], LIQUIDATION_MAP_CACHE_SECONDS, produce,
+            f"liquidation_map:{asset}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2118,7 +2079,7 @@ def make_app() -> web.Application:
         compute_liquidation_levels() above rather than converted to aiohttp -- keeps the ported
         logic identical to the validated scratchpad script it came from."""
         return await swr_cached(
-            "regime_wide24", regime_wide24_cache, regime_wide24_lock, REGIME_WIDE24_CACHE_SECONDS,
+            "regime_wide24", REGIME_WIDE24_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_regime_wide24_signal),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2130,7 +2091,7 @@ def make_app() -> web.Application:
         contract (degrades to warmed_up=False so the ribbon shows its waiting state rather than
         breaking the chart)."""
         return await swr_cached(
-            "regime_btc", regime_btc_cache, regime_btc_lock, REGIME_WIDE24_CACHE_SECONDS,
+            "regime_btc", REGIME_WIDE24_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_regime_btc_signal),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2139,7 +2100,7 @@ def make_app() -> web.Application:
         """XRP 3-class 레짐(S96_K9, 2026-09-03) -- load_regime_btc()의 XRP판.
         같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
         return await swr_cached(
-            "regime_xrp", regime_xrp_cache, regime_xrp_lock, REGIME_WIDE24_CACHE_SECONDS,
+            "regime_xrp", REGIME_WIDE24_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_regime_xrp_signal),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2150,7 +2111,7 @@ def make_app() -> web.Application:
         (requests, no aiohttp) and never raises (each source degrades independently), same
         asyncio.to_thread pattern as load_regime_wide24() above."""
         return await swr_cached(
-            "macro_calendar", macro_calendar_cache, macro_calendar_lock, MACRO_CALENDAR_CACHE_SECONDS,
+            "macro_calendar", MACRO_CALENDAR_CACHE_SECONDS,
             lambda: asyncio.to_thread(compute_macro_calendar, os.getenv("FRED_API_KEY"), os.getenv("EIA_API_KEY"), os.getenv("FINNHUB_API_KEY")),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2190,9 +2151,8 @@ def make_app() -> web.Application:
         별도 태스크로 떼는 이유: 부르는 쪽(publish_dashboard_events)은 모든 탭의 SSE 유일
         공급원이라, 서명 요청 3~4개를 그 안에서 기다리면 화면 갱신이 함께 밀린다."""
         try:
-            await swr_cached("binance_account", binance_account_cache, binance_account_lock,
-                             BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
-                             max_stale=STALE_GRACE_SECONDS)
+            await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
+                             max_stale=STALE_GRACE_SECONDS, cache=binance_account_cache)
         except Exception as exc:  # noqa: BLE001 -- 키 만료·네트워크·시계드리프트 전부 여기로 온다
             print(f"account_round_trips cycle failed (will retry next cycle): {exc}", flush=True)
 
@@ -2392,9 +2352,7 @@ def make_app() -> web.Application:
         duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
         asset = _query_coin_asset(request)
         payload = await swr_cached(
-            f"liq5m_hist_{asset}",
-            liquidation_5m_hist_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
-            liquidation_5m_hist_lock, 30.0,
+            f"liq5m_hist_{asset}", 30.0,
             lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, 96),
             max_stale=STALE_GRACE_SECONDS,
         )
@@ -2402,8 +2360,7 @@ def make_app() -> web.Application:
 
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
-            "position_sizing", position_sizing_cache, position_sizing_lock,
-            30.0, lambda: asyncio.to_thread(position_sizing_payload),
+            "position_sizing", 30.0, lambda: asyncio.to_thread(position_sizing_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
         return web.json_response(payload, headers=NOCACHE)
@@ -2462,8 +2419,7 @@ def make_app() -> web.Application:
 
     async def load_coin_indicators(asset: str) -> dict[str, Any]:
         return await swr_cached(
-            f"coin_indicator:{asset}", coin_indicator_cache[asset],
-            coin_indicator_locks[asset], COIN_INDICATOR_CACHE_SECONDS,
+            f"coin_indicator:{asset}", COIN_INDICATOR_CACHE_SECONDS,
             lambda: asyncio.to_thread(coin_indicators_payload, asset),
         )
 
@@ -2593,9 +2549,8 @@ def make_app() -> web.Application:
         """실계좌 잔고/포지션/왕복거래(진입·청산 시각). 키에 Futures 읽기 권한이 없으면
         ok=false + hint로 내려가고, 프런트는 그 문구를 그대로 보여준다."""
         payload = await swr_cached(
-            "binance_account", binance_account_cache, binance_account_lock,
-            BINANCE_ACCOUNT_CACHE_SECONDS,
-            produce_account,
+            "binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
+            cache=binance_account_cache,
             max_stale=STALE_GRACE_SECONDS,
         )
         return web.json_response(payload, headers=NOCACHE)
@@ -2613,8 +2568,7 @@ def make_app() -> web.Application:
             if not sizing.get("available"):
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
-            account = await swr_cached("binance_account", binance_account_cache,
-                                       binance_account_lock, BINANCE_ACCOUNT_CACHE_SECONDS,
+            account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
                                        produce_account, max_stale=STALE_GRACE_SECONDS)
             positions = [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
