@@ -105,6 +105,8 @@ async def fetch_trips(symbols: list[str], start_ms: int) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--lookback-days", type=int, default=14,
+                    help="첫 왕복보다 이만큼 앞에서 체결을 받기 시작한다(스트림 절단 방지)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -122,7 +124,10 @@ def main() -> int:
     rows = load_ledger()
     key = lambda t: f"{t.get('symbol')}|{t.get('side')}|{t.get('entry_time')}"   # noqa: E731
     symbols = sorted({r["symbol"] for r in rows})
-    start = min(int(r["entry_time"]) for r in rows) - 3600_000
+    # 🔴체결 스트림의 **시작이 잘리면** 첫 왕복이 창 이전에 열린 포지션의 꼬리가 되어 진입/청산
+    # 다리가 뒤섞인다(1시간만 앞서 받았던 첫 실행: 항등식 이탈 49bp). 넉넉히 앞에서 시작해
+    # 창 안에서 포지션이 0 으로 돌아가는 지점부터 접히게 한다.
+    start = min(int(r["entry_time"]) for r in rows) - a.lookback_days * 86400_000
     print(f"원장 {len(rows)}줄 · 심볼 {symbols} · {start} 부터 체결 재수신")
     trips = asyncio.run(fetch_trips(symbols, start))
     by = {key(t): t for t in trips}
@@ -157,8 +162,17 @@ def main() -> int:
     print(f"\n가격 갱신 {fixed}줄 · API 창 밖 {unmatched}줄")
     print(f"부호 불일치: {mismatch(rows)} → **{mismatch(out)}**")
     print(f"회계 항등식 검증 가능 {len(ver)}/{len(out)}줄 · 1bp 초과 이탈 {len(off)}줄")
-    for r in off[:5]:
-        print(f"   ⚠️{r.get('entry_at') or r.get('entry_time')} {r.get('side')} 이탈 {r['pnl_check_bp']}bp")
+    for r in off[:8]:
+        print(f"   ⚠️이탈 {r['pnl_check_bp']:>10.2f}bp  {r.get('entry_at') or r.get('entry_time')} {r.get('side')}")
+    bad = [r for r in out
+           if r.get("entry_price") and r.get("exit_price") and r.get("net_pnl") is not None
+           and (r["exit_price"] - r["entry_price"]) * (1 if r.get("side") == "LONG" else -1) * r["net_pnl"] < 0]
+    if bad:
+        print("\n남은 부호 불일치 — 어떤 줄이고 왜 못 고쳤나")
+        for r in bad:
+            print(f"   {r.get('entry_at') or r.get('entry_time')} {r.get('side'):<5} "
+                  f"진입 {r['entry_price']:>9.2f} 청산 {r['exit_price']:>9.2f} 손익 {r['net_pnl']:>9.2f} "
+                  f"basis={r.get('price_basis')} check={r.get('pnl_check_bp')}")
     if not a.apply:
         print("\n미리보기만 했다. 반영하려면 --apply")
         return 0
