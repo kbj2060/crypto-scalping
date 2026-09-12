@@ -2060,6 +2060,10 @@ svg {
 .manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
 .manual-entry-row.exit-row { gap: 10px; border-top: 1px solid var(--soft-line); padding-top: 8px; }
 .manual-entry-row[hidden] { display: none; }
+.exit-frac { display: flex; align-items: center; gap: 8px; }
+.exit-frac input[type="range"] { width: 110px; accent-color: var(--good); cursor: pointer; }
+.exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
+  text-align: right; font-variant-numeric: tabular-nums; }
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }

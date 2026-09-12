@@ -2735,7 +2735,19 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
-    async def assemble_exit_plan(position_side: str):
+    def exit_fraction(request: web.Request) -> float | None:
+        """쿼리의 청산 비율(%)을 0<f<=1 로 바꾼다. 이상하면 None -- 호출부가 400 을 낸다.
+        **조용히 1.0 으로 떨어뜨리지 않는다**: 절반만 닫으려던 요청이 전량이 되면 안 된다."""
+        raw = request.query.get("pct")
+        if raw in (None, ""):
+            return 1.0
+        try:
+            pct = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return pct / 100.0 if 0.0 < pct <= 100.0 else None
+
+    async def assemble_exit_plan(position_side: str, fraction: float = 1.0):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -2773,7 +2785,7 @@ def make_app() -> web.Application:
                 filters=filters, symbol=symbol,
                 entry_price=float(position.get("entry_price") or 0.0),
                 mark_price=float(position.get("mark_price") or 0.0),
-                vol_bpm=vol_bpm)
+                vol_bpm=vol_bpm, fraction=fraction)
             plan["unrealized_pnl"] = position.get("unrealized_pnl")
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
@@ -2785,7 +2797,11 @@ def make_app() -> web.Application:
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
-        plan, error = await assemble_exit_plan(side)
+        frac = exit_fraction(request)
+        if frac is None:
+            return web.json_response({"ok": False, "error": "bad_pct",
+                                      "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        plan, error = await assemble_exit_plan(side, frac)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
@@ -2799,6 +2815,10 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        frac = exit_fraction(request)
+        if frac is None:
+            return web.json_response({"ok": False, "error": "bad_pct",
+                                      "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
@@ -2806,7 +2826,9 @@ def make_app() -> web.Application:
         if manual_entry_state.get("phase") in ("working", "submitting"):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
-        plan, error = await assemble_exit_plan(side)
+        # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
+        # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
+        plan, error = await assemble_exit_plan(side, frac)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):

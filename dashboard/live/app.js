@@ -5197,8 +5197,17 @@ function entryNote(text, tone) {
   return `<div class="entry-note${tone ? " " + tone : ""}">${escapeHtml(text)}</div>`;
 }
 
+// 청산 비율(%)을 읽는 **유일한** 곳. 미리보기와 실주문이 같은 값을 쓰게 한다.
+// 서버도 같은 값을 다시 검증하고 포지션을 다시 읽는다 -- 여기 값은 «요청»이지 «수량»이 아니다.
+function manualExitPct() {
+  const el0 = el("snapExitFrac");
+  const v = el0 ? Number(el0.value) : 100;
+  return Number.isFinite(v) && v > 0 && v <= 100 ? v : 100;
+}
+
 async function manualEntryFetch(side, kind = "entry") {
-  const res = await fetch(`/api/manual-${kind}/preview?side=${side}`, { cache: "no-store" });
+  const q = kind === "exit" ? `&pct=${manualExitPct()}` : "";
+  const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-store" });
   return res.json();
 }
 
@@ -5207,7 +5216,11 @@ async function manualEntryFetch(side, kind = "entry") {
 function manualExitPlanHtml(plan) {
   const side = plan.position_side === "LONG" ? "롱" : "숏";
   const move = plan.exit_move_pct;
-  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>`
+  const pct = Math.round(100 * (plan.fraction ?? 1));
+  const of = pct < 100
+    ? ` <span class="entry-was">${plan.position_qty} 중 ${pct}% · 남김 ${plan.remaining_qty}</span>`
+    : "";
+  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>${of}`
     + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
     + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
   if (move != null) {
@@ -5313,9 +5326,10 @@ function manualEntryClearConfirm() {
 function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
-  manualEntryPending = { side, quantity: plan.quantity, kind };
+  const pct = kind === "exit" ? Math.round(100 * (plan.fraction ?? 1)) : 100;
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct };
   btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
-    + (kind === "exit" ? "청산" : "주문");
+    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
@@ -5359,8 +5373,9 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
+    const q = pending.kind === "exit" ? `&pct=${pending.pct ?? 100}` : "";
     const res = await fetch(
-      `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1`,
+      `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
       { method: "POST", cache: "no-store" });
     const data = await res.json();
     if (!data.ok) {
@@ -5379,6 +5394,12 @@ el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT"
 el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "exit"));
 el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
+el("snapExitFrac")?.addEventListener("input", () => {
+  const lab = el("snapExitFracVal");
+  if (lab) lab.textContent = `${manualExitPct()}%`;
+  // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
+  if (manualEntryPending?.kind === "exit") manualEntryClearConfirm();
+});
 
 // 포지션이 열린 측면의 청산 버튼만 띄운다. latestBinanceAccount 는 계좌 패널이 이미
 // 주기적으로 받아 두는 값이라 여기서 따로 요청하지 않는다(없으면 그냥 숨긴 채 둔다).

@@ -191,7 +191,7 @@ def exit_deadline_sec(vol_bpm: float | None) -> float:
 def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float, best_ask: float,
                     filters: dict[str, float], symbol: str = "ETHUSDT",
                     entry_price: float = 0.0, mark_price: float = 0.0,
-                    vol_bpm: float | None = None) -> dict[str, Any]:
+                    vol_bpm: float | None = None, fraction: float = 1.0) -> dict[str, Any]:
     """열린 포지션 하나를 **메이커로 닫는** 주문을 만든다. 순수 함수 -- build_entry_plan 과 같다.
 
     🔴`reduceOnly` 를 보내지 않는다. 이 계좌는 헤지 모드고 바이낸스는 헤지 모드에서
@@ -206,10 +206,17 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
         raise ValueError(f"position_side must be LONG/SHORT, got {position_side!r}")
     if not (best_bid > 0 and best_ask > 0 and best_ask >= best_bid):
         raise ValueError(f"bad book: bid={best_bid} ask={best_ask}")
+    # 부분 청산 비율. 범위를 벗어나면 **막는다** -- 조용히 1.0 으로 자르면 «절반만 닫으려던
+    # 주문이 전량»이 되고, 0 으로 자르면 «닫았다고 생각했는데 안 닫힘»이 된다. 둘 다 나쁘다.
+    if not (0.0 < float(fraction) <= 1.0):
+        raise ValueError(f"fraction must be in (0, 1], got {fraction!r}")
 
     closing_long = position_side == "LONG"
     price = best_ask if closing_long else _floor_to(best_bid, filters["tick"])
-    qty = _floor_to(max(0.0, float(position_qty)), filters["step"])
+    held = max(0.0, float(position_qty))
+    # 전량이면 곱셈을 아예 안 한다 -- 부동소수로 한 스텝 모자라 «거의 전량»이 남는 걸 막는다.
+    want = held if float(fraction) >= 1.0 else held * float(fraction)
+    qty = min(_floor_to(want, filters["step"]), _floor_to(held, filters["step"]))
     deadline = exit_deadline_sec(vol_bpm)
     # 극단 변동성이면 지정가를 걸지 않는다. 비용이 아니라 확실성을 사는 선택이라
     # 화면에 이유를 그대로 남긴다(조용히 시장가로 바꾸지 않는다).
@@ -217,8 +224,9 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
 
     blocked = None
     if qty <= 0 or qty < filters["min_qty"]:
-        blocked = "닫을 포지션이 없습니다" if position_qty <= 0 else \
-                  f"남은 수량이 최소 {filters['min_qty']} 미만이라 지정가로 못 닫습니다"
+        blocked = ("닫을 포지션이 없습니다" if held <= 0 else
+                   f"{int(round(100 * fraction))}% 는 {qty} ETH 라 최소 {filters['min_qty']} 미만입니다"
+                   " -- 비율을 올리세요")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
         # 지정가로는 못 보낸다. 조용히 시장가로 바꾸지 않고 화면에 그대로 말한다.
         blocked = (f"명목 {qty * price:,.0f} 가 최소 {filters['min_notional']:,.0f} USDT 미만입니다"
@@ -237,7 +245,9 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
         "notional_usdt": round(notional, 2),
         "reference_price": round(price, 8),   # 시장가일 때도 화면이 «대략 얼마»를 말할 수 있게
         "position_side": position_side,
-        "position_qty": round(float(position_qty), 8),
+        "position_qty": round(held, 8),
+        "fraction": round(float(fraction), 4),
+        "remaining_qty": round(max(0.0, held - qty), 8),
         "entry_price": entry_price or None,
         "mark_price": mark_price or None,
         # 이 가격에 닫으면 수수료 전 몇 % 인가. 화면이 «왜 지금 닫나»를 말할 수 있게 한다.
@@ -386,7 +396,41 @@ def _self_check() -> None:
     assert EXIT_DEADLINE_MIN <= n["fallback_after_sec"] < EXIT_DEADLINE_MAX, n["fallback_after_sec"]
     assert n["vol_bpm"] == 12.0
 
-    print("통과 33/33 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 + 변동성 연동 마감")
+    # ── 부분 청산 ────────────────────────────────────────────────────────────
+    full = build_exit_plan(position_side="LONG", position_qty=2.693, best_bid=2470.00,
+                           best_ask=2470.01, filters=f)
+    assert full["quantity"] == 2.693 and full["fraction"] == 1.0, full
+    assert full["remaining_qty"] == 0.0, "전량이면 남는 게 없어야 한다(부동소수 포함)"
+
+    half = build_exit_plan(position_side="LONG", position_qty=2.693, best_bid=2470.00,
+                           best_ask=2470.01, filters=f, fraction=0.5)
+    assert half["quantity"] == 1.346, half["quantity"]          # 1.3465 -> 스텝 0.001 내림
+    assert half["remaining_qty"] == 1.347, half["remaining_qty"]
+    assert abs(half["quantity"] + half["remaining_qty"] - 2.693) < 1e-9, "합이 포지션이어야"
+    assert half["positionSide"] == "LONG" and half["side"] == "SELL"
+
+    # 비율은 **절대** 포지션을 넘지 않는다(헤지 모드엔 reduceOnly 가 없어 이게 유일한 방어)
+    for fr in (0.1, 0.25, 0.5, 0.75, 0.99, 1.0):
+        x = build_exit_plan(position_side="SHORT", position_qty=3.025, best_bid=2470.00,
+                            best_ask=2470.01, filters=f, fraction=fr)
+        assert x["quantity"] <= 3.025 + 1e-12, (fr, x["quantity"])
+
+    # 범위를 벗어나면 조용히 자르지 않고 막는다
+    for bad in (0.0, -0.5, 1.01, 2.0):
+        try:
+            build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                            best_ask=2470.01, filters=f, fraction=bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"막았어야 한다: fraction={bad}")
+
+    # 너무 작은 비율은 최소수량/최소명목에 걸려 막히고, 이유가 비율을 가리켜야 한다
+    tiny = build_exit_plan(position_side="LONG", position_qty=0.01, best_bid=2470.00,
+                           best_ask=2470.01, filters=f, fraction=0.05)
+    assert tiny["blocked"] and ("비율" in tiny["blocked"] or "최소" in tiny["blocked"]), tiny
+
+    print("통과 52/52 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 + 변동성 마감 + 부분 청산")
 
 
 if __name__ == "__main__":
