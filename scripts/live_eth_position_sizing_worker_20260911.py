@@ -35,6 +35,12 @@ import numpy as np
 import pandas as pd
 import requests
 
+# 2026-09-12: 전방 변동성 예측 모델. **피쳐 빌더를 이 모듈 하나로 공유**한다 --
+# 학습과 라이브가 따로 만들면 조용히 어긋나고, 그 어긋남은 에러가 아니라
+# «좀 이상한 수량»으로만 나타난다.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
+
 # 🔴경로를 하드코딩하지 않는다. 2026-09-11 배포에서 **개발 머신의 홈 경로**를 박아
 #   서버(리눅스 계정이 다르다)에서 FileNotFoundError 로 워커가 못 떴다.
 #   다른 라이브 워커와 같은 관례로 스크립트 위치에서 유도한다.
@@ -70,8 +76,8 @@ def fetch_klines(limit=1500) -> pd.DataFrame | None:
     except Exception as e:
         log(f"klines 실패 {type(e).__name__}"); return None
     d["timestamp"] = pd.to_datetime(d["t"], unit="ms")
-    for x in ("o", "h", "l", "c"):
-        d[x] = pd.to_numeric(d[x])
+    for x in ("o", "h", "l", "c", "q", "n"):   # q/n 은 사이징 모델 피쳐(거래대금·체결수)
+        d[x] = pd.to_numeric(d[x], errors="coerce")
     return d
 
 
@@ -102,18 +108,50 @@ def load_calib() -> dict:
     return out
 
 
-def compute(kl: pd.DataFrame, cal: dict, base_qty: float) -> dict:
+def model_equivalent_qty(kl: pd.DataFrame, base_qty: float, art) -> tuple[float, dict]:
+    """전방 변동성을 **예측해서** 크기를 낸다(2026-09-12). 실패하면 (nan, 사유) -- 호출부가
+    현행 `1/ATR` 로 떨어진다. 여기서 예외를 올리면 워커가 죽고 화면이 통째로 빈다.
+
+    근거(표본외 18,024건): 1/ATR 청산 도달률 7.72% → 모델 6.11%, 손익 SD −12.3%.
+    시드 8/8 · 분기 5/5 · 겹침 제거에서도 −11.2% · 일 군집 부트 CI 0 배제.
+    """
+    if art is None:
+        return float("nan"), {"used": False, "reason": "artifact_missing"}
+    try:
+        X = svm.build_features(kl["timestamp"], kl["c"].to_numpy(float),
+                              pd.to_numeric(kl["q"], errors="coerce").to_numpy(float),
+                              pd.to_numeric(kl["n"], errors="coerce").to_numpy(float))
+        row = X.iloc[[-1]]
+        if not np.isfinite(row.to_numpy(float)).all():
+            return float("nan"), {"used": False, "reason": "feature_nan"}
+        pred = float(svm.predict_vol(art["models"], row)[0])
+        if not (pred > 0):
+            return float("nan"), {"used": False, "reason": "bad_prediction"}
+        return base_qty * (art["ref_pred"] / pred), {
+            "used": True, "pred_vol": pred, "ref_pred": float(art["ref_pred"]),
+            "seeds": len(art["seeds"]), "train_end": art["train_end"]}
+    except Exception as e:  # noqa: BLE001
+        return float("nan"), {"used": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def compute(kl: pd.DataFrame, cal: dict, base_qty: float, art=None) -> dict:
     c = kl["c"].to_numpy(float)
     atr = pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(ATR_BARS, min_periods=200).mean().to_numpy()
     ap = float(atr[-1] / max(c[-1], 1e-9))
     hist = atr[np.isfinite(atr)] / c[np.isfinite(atr)]
     pct = float((hist <= ap).mean()) if len(hist) else float("nan")
     ref = float(cal["atr_pct_ref"])
-    eq_qty = base_qty * (ref / ap) if ap > 0 else float("nan")
+    formula_qty = base_qty * (ref / ap) if ap > 0 else float("nan")
+    model_qty, model_info = model_equivalent_qty(kl, base_qty, art)
+    # 모델이 못 나오면 조용히 공식으로 간다. **어느 쪽을 썼는지 상태파일에 남긴다** --
+    # 안 남기면 "모델 배포했는데 왜 숫자가 그대로지"를 나중에 못 푼다.
+    eq_qty = model_qty if np.isfinite(model_qty) else formula_qty
     out = {"ok": True, "generated_at": pd.Timestamp.utcnow().isoformat(),
            "price": float(c[-1]), "atr_pct": ap, "atr_pct_percentile": pct,
            "atr_pct_ref": ref, "base_qty": base_qty,
-           "vol_equivalent_qty": eq_qty, "horizons": {}}
+           "vol_equivalent_qty": eq_qty,
+           "vol_equivalent_qty_formula": formula_qty,     # 대조용 -- 둘을 나란히 본다
+           "sizing_model": model_info, "horizons": {}}
     for name, H in HOLDS.items():
         cell = {}
         for q in QS:
@@ -164,17 +202,23 @@ def main(argv: list[str] | None = None) -> int:
     loop = "--loop" in argv
     cal = load_calib()
     base_qty = float(os.getenv("SIZING_BASE_QTY", BASE_QTY_DEFAULT))
-    log(f"기준 수량 {base_qty} ETH · 주기 {PERIOD_S}s")
+    art = svm.load_model()      # 없으면 None -> compute 가 현행 1/ATR 공식으로 떨어진다
+    log(f"기준 수량 {base_qty} ETH · 주기 {PERIOD_S}s · 사이징 모델 " +
+        (f"적재됨(시드 {len(art['seeds'])}, 학습 ≤{art['train_end']})" if art
+         else "없음 — 1/ATR 공식 사용"))
     while True:
         kl = fetch_klines()
         if kl is not None and len(kl) > ATR_BARS:
             try:
-                st = compute(kl, cal, base_qty)
+                st = compute(kl, cal, base_qty, art)
                 STATE.parent.mkdir(parents=True, exist_ok=True)
                 STATE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
                 h = st["horizons"]["4h"]["0.9"]
+                mi = st["sizing_model"]
                 log(f"atr_pct {st['atr_pct']:.5f}(분위 {st['atr_pct_percentile']:.0%}) · "
-                    f"변동성등가 수량 {st['vol_equivalent_qty']:.3f} ETH · "
+                    f"수량 {st['vol_equivalent_qty']:.3f} ETH "
+                    f"({'모델' if mi.get('used') else '공식:' + str(mi.get('reason'))}"
+                    f", 공식이면 {st['vol_equivalent_qty_formula']:.3f}) · "
                     f"4h 불리이탈 q90 롱 {h['롱_bp']:.0f}bp / 숏 {h['숏_bp']:.0f}bp")
             except Exception as e:
                 log(f"계산 실패 {type(e).__name__}: {e}")
