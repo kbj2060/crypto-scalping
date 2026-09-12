@@ -93,16 +93,12 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
             break
 
     if status not in TERMINAL:
-        cancel = await signed(session, "DELETE", "/fapi/v1/order",
-                              {**common, "orderId": state["order_id"]}, key, secret, offset)
-        # 취소 직전에 체결됐을 수 있다. 취소 응답이 아니라 **다시 조회한 값**을 믿는다.
-        final = await signed(session, "GET", "/fapi/v1/order",
-                             {**common, "orderId": state["order_id"]}, key, secret, offset)
-        if "__error__" not in final:
-            state["filled"] = executed_qty(final)
-        elif "__error__" in cancel:
-            state.update(phase="error", error=f"취소 실패: {cancel['__error__']}", done_at=now_iso())
+        confirmed = await ensure_closed(session, common, state["order_id"], key, secret, offset)
+        if confirmed is None:
+            state.update(phase="error", done_at=now_iso(),
+                         error=f"주문 {state['order_id']} 취소를 확인하지 못했습니다 — 직접 확인하세요")
             return state
+        state["filled"] = confirmed
 
     remaining = round(float(plan["quantity"]) - state["filled"], 8)
     if remaining <= 0:
@@ -119,6 +115,26 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
     state.update(phase="filled_taker", taker_qty=remaining, filled=float(plan["quantity"]),
                  taker_order_id=taker.get("orderId"), done_at=now_iso())
     return state
+
+
+async def ensure_closed(session, common: dict, oid, key: str, secret: str, offset: int,
+                        tries: int = 3) -> float | None:
+    """주문이 **더 이상 살아있지 않음을 확인**하고 확정 체결량을 돌려준다. 확인 못 하면 None.
+
+    🔴리페그 루프에서 이걸 건너뛰면 «취소 실패 -> 그래도 재호가» 가 되어 지정가 주문이
+    겹겹이 살아남는다. 2026-09-13 모의 거래소 검증에서 실제로 **41개**가 동시에 살아 있었다
+    (2.0 ETH 포지션에 82 ETH 어치 매도 주문). 취소 응답이 아니라 **재조회 상태**를 믿는다 --
+    취소 직전에 체결됐을 수도 있고, 취소가 실패했는데 주문은 멀쩡할 수도 있다.
+    """
+    for _ in range(max(1, tries)):
+        await signed(session, "DELETE", "/fapi/v1/order",
+                     {**common, "orderId": oid}, key, secret, offset)
+        final = await signed(session, "GET", "/fapi/v1/order",
+                             {**common, "orderId": oid}, key, secret, offset)
+        if "__error__" not in final and str(final.get("status") or "") in TERMINAL:
+            return executed_qty(final)
+        await asyncio.sleep(min(POLL_SEC, 1.0))
+    return None
 
 
 REPEG_MAX = 40          # 3초 폴링 × 120초면 40회가 물리적 상한. 폭주 방지용 이중 안전장치.
@@ -221,13 +237,14 @@ async def run_exit(session, plan: dict, state: dict) -> dict:
                 break
 
         if status not in TERMINAL:
-            await signed(session, "DELETE", "/fapi/v1/order",
-                         {**common, "orderId": oid}, key, secret, offset)
-            # 취소 직전에 체결됐을 수 있다. 취소 응답이 아니라 **다시 조회한 값**을 믿는다.
-            final = await signed(session, "GET", "/fapi/v1/order",
-                                 {**common, "orderId": oid}, key, secret, offset)
-            if "__error__" not in final:
-                this_filled = executed_qty(final)
+            confirmed = await ensure_closed(session, common, oid, key, secret, offset)
+            if confirmed is None:
+                # 살아 있는지 아닌지를 모르는 채로 **또 걸면 안 된다**. 여기서 멈추고 사람에게 넘긴다.
+                state.update(phase="error", filled=done, repegs=repegs,
+                             error=f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요",
+                             done_at=now_iso())
+                return state
+            this_filled = confirmed
 
         done = round(done + this_filled, 8)
         state["filled"] = done
