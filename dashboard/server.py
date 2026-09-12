@@ -957,6 +957,58 @@ SIZING_CAP_MULT = 2.0
 SIZING_CAP_MIN_TRIPS = 10   # 이보다 적으면 중앙값이 표본 하나에 휘둘린다 -- 상한을 만들지 않는다
 
 
+def entry_projection(plan: dict, account: dict, positions: list, existing: float,
+                     equity: float) -> dict[str, Any]:
+    """«이 주문을 넣으면 계좌 카드가 어떻게 바뀌나» -- 사용자 요청(2026-09-12).
+
+    계좌 카드가 실제로 띄우는 **세 타일과 같은 정의**를 쓴다(app.js 의 tiles 참조):
+      · 증거금 사용 = 사용증거금 ÷ 순자산     · 계좌 노출 = 명목 ÷ 순자산
+      · 청산까지    = |마크 − 청산가| ÷ 마크
+    정의가 어긋나면 «미리보기에서 본 숫자»와 «진입 후 카드»가 달라져 신뢰를 잃는다.
+
+    청산 후 거리는 거래소가 준 **현재 청산가에서 비례 축소**한다 -- 교차 마진에서 거리는
+    대략 순자산÷총명목이므로 명목이 커진 비율만큼 좁아진다. 순수 근사식(순자산÷총명목)보다
+    실측값에 앵커된 이 쪽이 낫다(실측 13.48% vs 근사 13.9%). 포지션이 없으면 근사로 떨어진다.
+    """
+    balance = account.get("balance") or {}
+    used = balance.get("initial_margin")
+    used = float(used) if used is not None else max(
+        0.0, float(balance.get("margin") or 0.0) - float(balance.get("available") or 0.0))
+    available = float(balance.get("available") or 0.0)
+    add_margin = float(plan.get("margin_usdt") or 0.0)
+    total = float(plan.get("total_notional_usdt") or 0.0)
+
+    liq_before = None
+    for position in positions:
+        mark, liq = float(position.get("mark_price") or 0.0), float(position.get("liquidation_price") or 0.0)
+        if mark > 0 and liq > 0:
+            distance = abs(mark - liq) / mark * 100.0
+            liq_before = distance if liq_before is None else min(liq_before, distance)
+    if liq_before is not None and total > 0 and existing > 0:
+        liq_after = liq_before * existing / total
+    elif equity > 0 and total > 0:
+        liq_after = 100.0 * equity / total
+    else:
+        liq_after = None
+
+    def side(margin_used: float, notional: float, liq: float | None) -> dict[str, Any]:
+        return {
+            "margin_usdt": round(margin_used, 2),
+            "margin_used_pct": round(100 * margin_used / equity, 1) if equity else None,
+            "available_usdt": round(equity - margin_used, 2) if equity else None,
+            "notional_usdt": round(notional, 2),
+            "exposure_x": round(notional / equity, 2) if equity else None,
+            "liq_pct": round(liq, 2) if liq is not None else None,
+        }
+
+    return {
+        "equity_usdt": round(equity, 2),
+        "available_before_usdt": round(available, 2),
+        "before": side(used, existing, liq_before),
+        "after": side(used + add_margin, total, liq_after),
+    }
+
+
 def sizing_cap() -> dict[str, Any]:
     """왕복 원장에서 중앙 명목을 읽어 상한을 낸다. **현재가는 곱하지 않는다** --
     ETH 수량 환산은 가격을 이미 들고 있는 프런트가 한다(요청 경로 계산 금지 원칙)."""
@@ -2587,6 +2639,7 @@ def make_app() -> web.Application:
                 cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
                 filters=filters, symbol=symbol, existing_notional=existing,
                 equity=equity, leverage=leverage)
+            plan["projection"] = entry_projection(plan, account, positions, existing, equity)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, cap, sizing, None

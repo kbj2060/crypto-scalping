@@ -5121,24 +5121,32 @@ function manualEntryPlanText(data) {
   const rows = [`${dir}  ${plan.quantity} ETH  @ ${Number(plan.price).toLocaleString()}`, ""];
 
   if (plan.margin_usdt) {
-    const pct = plan.margin_pct_of_equity != null ? ` · 순자산의 ${plan.margin_pct_of_equity}%` : "";
-    rows.push(`내 돈(증거금)  ${won(plan.margin_usdt)} USDT${pct}`);
+    rows.push(`내 돈(증거금)  ${won(plan.margin_usdt)} USDT` +
+      (plan.leverage ? `   — 명목 ${won(plan.notional_usdt)} ÷ 설정 ${plan.leverage}배` : ""));
   }
-  rows.push(`빌린 것 포함    ${won(plan.notional_usdt)} USDT` +
-    (plan.leverage ? `  (설정 ${plan.leverage}배)` : ""));
 
-  if (plan.existing_notional_usdt > 0) {
-    rows.push(`기존 포지션     ${won(plan.existing_notional_usdt)} USDT`);
-    rows.push(`합산 노출       ${won(plan.total_notional_usdt)} USDT` +
-      (plan.effective_leverage ? `  ·  실효 ${plan.effective_leverage}배` : ""));
-  } else if (plan.effective_leverage) {
-    rows.push(`실효 레버리지   ${plan.effective_leverage}배  (명목 ÷ 순자산)`);
-  }
-  if (plan.liq_distance_pct != null) {
-    rows.push(`청산까지        약 ${plan.liq_distance_pct}%  — 이만큼 반대로 가면 전부 잃습니다`);
+  // ⭐«지금 → 진입 후» -- 계좌 카드의 세 타일과 **같은 정의**로 나란히 놓는다. 명목만 보여주면
+  // 그게 내 계좌에 무슨 일을 하는지 안 보인다(사용자: "한 번에 와닿지가 않아").
+  const pr = plan.projection;
+  if (pr && pr.before && pr.after) {
+    const arrow = (a, b, unit, dp) => {
+      if (a == null || b == null) return null;
+      const f = (x) => (dp ? Number(x).toFixed(dp) : won(x)) + unit;
+      return `${f(a).padStart(9)}  →  ${f(b)}`;
+    };
+    const lines = [
+      ["증거금 사용", arrow(pr.before.margin_used_pct, pr.after.margin_used_pct, "%", 1)],
+      ["계좌 노출  ", arrow(pr.before.exposure_x, pr.after.exposure_x, "배", 2)],
+      ["청산까지   ", arrow(pr.before.liq_pct, pr.after.liq_pct, "%", 2)],
+      ["가용 잔고  ", arrow(pr.before.available_usdt, pr.after.available_usdt, " USDT", 0)],
+    ].filter(([, v]) => v);
+    if (lines.length) {
+      rows.push("", `진입 후 계좌 (순자산 ${won(pr.equity_usdt)} USDT 는 그대로)`);
+      lines.forEach(([lab, v]) => rows.push(`  ${lab}  ${v}`));
+    }
   }
   if (cap.available && plan.cap_used_pct != null) {
-    rows.push(`상한 사용       ${plan.cap_used_pct}%  (${won(cap.cap_notional_usdt)} USDT 중)`);
+    rows.push(`  상한 사용     ${plan.cap_used_pct}%  (${won(cap.cap_notional_usdt)} USDT 중)`);
   }
 
   rows.push("", `주문  peg 지정가(메이커) · 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`);
