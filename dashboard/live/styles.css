@@ -2051,5 +2051,22 @@ svg {
 /* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
-.manual-entry-result { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--glass); color: var(--fg); font: 600 11px/1.6 var(--font-mono); white-space: pre-wrap; overflow-x: auto; }
+.manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
+/* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
+   눈금(u)은 이전 값의 자리다 -- 값이 늘든 줄든 같은 읽기 규칙이라 측면마다 뒤집지 않아도 된다. */
+.entry-head { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.entry-head b { font: 700 17px/1 var(--font-display); letter-spacing: 0.01em; }
+.entry-head span { font: 600 11.5px/1 var(--font-mono); color: var(--muted); }
+.entry-cap { font: 600 10.5px/1.5 var(--font-sans); color: var(--muted); }
+.entry-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .entry-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
+.entry-arrow { font: 600 11px/1 var(--font-sans); color: var(--muted); margin: 0 3px; }
+.acct-rail.entry-rail { position: relative; overflow: visible; }
+.acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
+.acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;
+  background: var(--muted); opacity: .85; text-decoration: none; }
+.entry-note { font: 600 11px/1.55 var(--font-sans); padding: 8px 10px; border-radius: 8px;
+  background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
+.entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+.entry-note.live { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }

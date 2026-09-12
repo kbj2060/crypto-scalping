@@ -5114,48 +5114,87 @@ const MANUAL_ENTRY_REFRESH_MS = 60000;
 // 교차 마진이라 청산 거리는 순자산/총명목으로 정해진다 -- 설정 레버리지는 거기 안 들어간다.
 const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
-function manualEntryPlanText(data) {
+// ⭐계좌 카드의 .acct-tile 을 **그대로** 쓴다(사용자 요청). 미리보기가 다른 모양·다른 지표를
+// 쓰면 진입 후 카드를 봤을 때 "아까 본 게 뭐였지"가 된다. 같은 정의·같은 디자인이면
+// 미리보기가 말 그대로 «진입 후의 그 카드»가 된다.
+// 눈금(u)이 이전 값의 자리다 -- 값이 늘든(증거금) 줄든(청산까지) 읽는 규칙이 하나다.
+const ENTRY_EXPO_CAP = 30;   // 계좌 카드와 같은 만재 기준
+const ENTRY_LIQ_FULL = 10;
+
+function entryTile(lab, valHtml, tone, fillAfter, fillBefore, title) {
+  const tick = fillBefore == null ? ""
+    : `<u style="left:${(clamp01(fillBefore) * 100).toFixed(1)}%"></u>`;
+  return `<div class="acct-tile"${title ? ` title="${escapeHtml(title)}"` : ""}>
+      <span class="acct-tile-lab">${escapeHtml(lab)}</span>
+      <b class="acct-tile-val ${tone}">${valHtml}</b>
+      <span class="acct-rail entry-rail"><i class="${tone}" style="width:${
+        (clamp01(fillAfter) * 100).toFixed(1)}%"></i>${tick}</span>
+    </div>`;
+}
+
+function entryVal(before, after, fmt) {
+  const now = escapeHtml(fmt(after));
+  if (before == null) return now;
+  return `<span class="entry-was">${escapeHtml(fmt(before))}</span>` +
+         `<span class="entry-arrow">→</span>${now}`;
+}
+
+function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
-  const rows = [`${dir}  ${plan.quantity} ETH  @ ${Number(plan.price).toLocaleString()}`, ""];
+  const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ETH</b>
+      <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
+      <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
+        plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
+    </div>`];
 
-  if (plan.margin_usdt) {
-    rows.push(`내 돈(증거금)  ${won(plan.margin_usdt)} USDT` +
-      (plan.leverage ? `   — 명목 ${won(plan.notional_usdt)} ÷ 설정 ${plan.leverage}배` : ""));
-  }
-
-  // ⭐«지금 → 진입 후» -- 계좌 카드의 세 타일과 **같은 정의**로 나란히 놓는다. 명목만 보여주면
-  // 그게 내 계좌에 무슨 일을 하는지 안 보인다(사용자: "한 번에 와닿지가 않아").
   const pr = plan.projection;
   if (pr && pr.before && pr.after) {
-    const arrow = (a, b, unit, dp) => {
-      if (a == null || b == null) return null;
-      const f = (x) => (dp ? Number(x).toFixed(dp) : won(x)) + unit;
-      return `${f(a).padStart(9)}  →  ${f(b)}`;
-    };
-    const lines = [
-      ["증거금 사용", arrow(pr.before.margin_used_pct, pr.after.margin_used_pct, "%", 1)],
-      ["계좌 노출  ", arrow(pr.before.exposure_x, pr.after.exposure_x, "배", 2)],
-      ["청산까지   ", arrow(pr.before.liq_pct, pr.after.liq_pct, "%", 2)],
-      ["가용 잔고  ", arrow(pr.before.available_usdt, pr.after.available_usdt, " USDT", 0)],
-    ].filter(([, v]) => v);
-    if (lines.length) {
-      rows.push("", `진입 후 계좌 (순자산 ${won(pr.equity_usdt)} USDT 는 그대로)`);
-      lines.forEach(([lab, v]) => rows.push(`  ${lab}  ${v}`));
+    const b = pr.before;
+    const a = pr.after;
+    const tiles = [];
+    if (a.liq_pct != null) {
+      tiles.push(entryTile("청산까지", entryVal(b.liq_pct, a.liq_pct, (x) => `${Number(x).toFixed(2)}%`),
+        acctRiskTone(a.liq_pct), a.liq_pct / ENTRY_LIQ_FULL,
+        b.liq_pct == null ? null : b.liq_pct / ENTRY_LIQ_FULL,
+        "이만큼 반대로 가면 전부 잃습니다.\n교차증거금이라 지갑 전체가 버팁니다."));
+    }
+    if (a.margin_used_pct != null) {
+      tiles.push(entryTile("증거금 사용", entryVal(b.margin_used_pct, a.margin_used_pct, (x) => `${Number(x).toFixed(0)}%`),
+        a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
+        a.margin_used_pct / 100, b.margin_used_pct == null ? null : b.margin_used_pct / 100,
+        `사용 ${won(a.margin_usdt)} ÷ 순자산 ${won(pr.equity_usdt)} USDT`));
+    }
+    if (a.exposure_x != null) {
+      tiles.push(entryTile("계좌 노출", entryVal(b.exposure_x, a.exposure_x, (x) => `${Number(x).toFixed(1)}배`),
+        a.exposure_x > 15 ? "bad" : "warn", a.exposure_x / ENTRY_EXPO_CAP,
+        b.exposure_x == null ? null : b.exposure_x / ENTRY_EXPO_CAP,
+        `명목 ${won(a.notional_usdt)} ÷ 순자산 ${won(pr.equity_usdt)} USDT\n설정 레버리지와 다른 값입니다.`));
+    }
+    if (cap.available && plan.cap_used_pct != null) {
+      const beforeCap = 100 * (b.notional_usdt || 0) / cap.cap_notional_usdt;
+      tiles.push(entryTile("상한 사용", entryVal(beforeCap, plan.cap_used_pct, (x) => `${Number(x).toFixed(0)}%`),
+        plan.cap_used_pct >= 100 ? "warn" : "good", plan.cap_used_pct / 100, beforeCap / 100,
+        `상한 ${won(cap.cap_notional_usdt)} USDT = 왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`));
+    }
+    if (tiles.length) {
+      parts.push(`<div class="entry-cap">진입 후 계좌 — 순자산 ${escapeHtml(won(pr.equity_usdt))} USDT 는 그대로 (진입 자체는 손익 0)</div>`);
+      parts.push(`<div class="entry-tiles">${tiles.join("")}</div>`);
     }
   }
-  if (cap.available && plan.cap_used_pct != null) {
-    rows.push(`  상한 사용     ${plan.cap_used_pct}%  (${won(cap.cap_notional_usdt)} USDT 중)`);
-  }
 
-  rows.push("", `주문  peg 지정가(메이커) · 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`);
-  (plan.notes || []).forEach((note) => rows.push(`⚠ ${note}`));
-  if (plan.blocked) rows.push(`🔴 막힘  ${plan.blocked}`);
-  rows.push(plan.dry_run
-    ? "※ 미리보기 전용 — 주문은 나가지 않습니다."
-    : "※ 확인 버튼을 누르면 실제 주문이 나갑니다.");
-  return rows.join("\n");
+  (plan.notes || []).forEach((note) => parts.push(`<div class="entry-note">⚠ ${escapeHtml(note)}</div>`));
+  if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
+  parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
+    plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
+                 : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
+    plan.fallback_after_sec}초 후 테이커 전환</div>`);
+  return parts.join("");
+}
+
+function entryNote(text, tone) {
+  return `<div class="entry-note${tone ? " " + tone : ""}">${escapeHtml(text)}</div>`;
 }
 
 async function manualEntryFetch(side) {
@@ -5169,15 +5208,16 @@ async function manualEntryPreview(side) {
   if (!box) return;
   buttons.forEach((btn) => { if (btn) btn.disabled = true; });
   box.hidden = false;
-  box.textContent = "확인 중…";
+  box.innerHTML = entryNote("확인 중…");
   manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
   try {
     const data = await manualEntryFetch(side);
-    box.textContent = data.ok ? manualEntryPlanText(data) : `실패: ${data.error || data.detail || "알 수 없음"}`;
+    box.innerHTML = data.ok ? manualEntryPlanHtml(data)
+      : entryNote(`실패: ${data.error || data.detail || "알 수 없음"}`, "bad");
     // 게이트가 꺼져 있으면 확인 버튼을 아예 띄우지 않는다 -- 눌러도 403 이라 헛걸음이다.
     if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {});
   } catch (err) {
-    box.textContent = `실패: ${err && err.message ? err.message : err}`;
+    box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
     buttons.forEach((btn) => { if (btn) btn.disabled = false; });
   }
@@ -5256,7 +5296,8 @@ async function manualEntryPollStatus() {
   try {
     const res = await fetch("/api/manual-entry/status", { cache: "no-store" });
     const data = await res.json();
-    box.textContent = manualEntryStateText(data.state);
+    box.innerHTML = entryNote(manualEntryStateText(data.state),
+      /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
     const phase = data.state?.phase;
     if (phase === "submitting" || phase === "working") {
       setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
@@ -5264,7 +5305,7 @@ async function manualEntryPollStatus() {
       manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
     }
   } catch (err) {
-    box.textContent = `상태 조회 실패: ${err && err.message ? err.message : err}`;
+    box.innerHTML = entryNote(`상태 조회 실패: ${err && err.message ? err.message : err}`, "bad");
   }
 }
 
@@ -5274,19 +5315,19 @@ async function manualEntrySubmit() {
   if (!pending || !box) return;
   manualEntryClearConfirm();
   box.hidden = false;
-  box.textContent = "주문 전송 중…";
+  box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
     const res = await fetch(`/api/manual-entry/submit?side=${pending.side}&confirm=1`,
       { method: "POST", cache: "no-store" });
     const data = await res.json();
     if (!data.ok) {
-      box.textContent = `주문 실패: ${data.detail || data.error || res.status}`;
+      box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
       return;
     }
-    box.textContent = manualEntryStateText(data.state);
+    box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
-    box.textContent = `주문 실패: ${err && err.message ? err.message : err}`;
+    box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
   }
 }
 
