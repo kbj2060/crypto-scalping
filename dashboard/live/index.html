@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260911-accttip">
+  <link rel="stylesheet" href="styles.css?v=20260912-entrysize">
 </head>
 <body>
     <main class="app">
@@ -276,6 +276,21 @@
           </div>
         </div>
         <div id="snapAcctPosition" class="ops-health-list"></div>
+        <!-- 2026-09-12 수동 진입 1단계. **크기를 화면이 정한다** -- 재량 사이징이 실계좌 손실의
+             출처였다(크기–수익 상관 −0.494, 한 건 −548.88 이 이익 합 전부보다 컸다).
+             지금은 미리보기 전용: 서버 게이트 DASHBOARD_MANUAL_EXEC_ENABLED 가 닫혀 있어
+             버튼을 눌러도 주문이 나가지 않는다. -->
+        <div id="snapEntryPlan" class="manual-entry">
+          <div class="manual-entry-row">
+            <span id="snapEntrySize" class="muted">크기 확인 중…</span>
+            <span id="snapEntryMode" class="ops-readonly">미리보기 전용</span>
+          </div>
+          <div class="manual-entry-row">
+            <button type="button" id="snapEntryLong" class="notify-btn">롱 진입</button>
+            <button type="button" id="snapEntryShort" class="notify-btn">숏 진입</button>
+          </div>
+          <pre id="snapEntryResult" class="manual-entry-result" hidden></pre>
+        </div>
       </section>
       <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
            있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
@@ -337,7 +352,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260911-tpreached"></script>
+  <script src="./app.js?v=20260912-entrysize"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

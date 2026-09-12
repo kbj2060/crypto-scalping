@@ -2055,3 +2055,9 @@ svg {
   .acct-perf-svg { min-height: 84px; }
   .acct-foot { padding: 0 14px 14px; }
 }
+
+/* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
+.manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
+.manual-entry-result { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--glass); color: var(--fg); font: 600 11px/1.6 var(--font-mono); white-space: pre-wrap; overflow-x: auto; }
