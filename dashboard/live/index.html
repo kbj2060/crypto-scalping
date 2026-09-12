@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-sidebtn">
+  <link rel="stylesheet" href="styles.css?v=20260913-pegexit">
 </head>
 <body>
     <main class="app">
@@ -289,6 +289,14 @@
             <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
             <button type="button" id="snapEntryShort" class="notify-btn short">숏 진입</button>
           </div>
+          <!-- 2026-09-13 peg 청산. 진입 버튼과 **같은 색·같은 모양**이라 오클릭이 실돈 사고가
+               될 수 있어 별도 행 + 라벨로 가른다(실제 방어는 2단 확인이다). 포지션이 있는
+               측면의 버튼만 뜬다 -- 없는 측면을 누르면 서버가 no_position 으로 막는다. -->
+          <div class="manual-entry-row actions exit-row" id="snapExitRow" hidden>
+            <span class="entry-cap">포지션 닫기</span>
+            <button type="button" id="snapExitLong" class="notify-btn long" hidden>롱 청산</button>
+            <button type="button" id="snapExitShort" class="notify-btn short" hidden>숏 청산</button>
+          </div>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
                «진입 후의 그 카드»가 되도록. 옛 판은 고정폭 텍스트라 계좌 패널과 따로 놀았다. -->
           <div id="snapEntryResult" class="manual-entry-result" hidden></div>
@@ -360,7 +368,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-liqramp"></script>
+  <script src="./app.js?v=20260913-pegexit"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

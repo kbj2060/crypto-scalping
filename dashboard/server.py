@@ -171,8 +171,8 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    build_entry_plan, exec_enabled, load_filters)
-from scripts.live_manual_peg_execute_20260912 import run_entry  # noqa: E402
+    build_entry_plan, build_exit_plan, exec_enabled, load_filters)
+from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2734,6 +2734,77 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
+    async def assemble_exit_plan(position_side: str):
+        """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
+
+        수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
+        (-1106) 과청산을 막는 게 수량밖에 없다. 캐시된 값을 쓰면 이미 닫힌 포지션을
+        다시 닫으려다 반대 방향으로 열릴 수 있다."""
+        symbol = MARKET_SYMBOLS["eth"]
+        try:
+            account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
+                                       produce_account, max_stale=STALE_GRACE_SECONDS)
+            match = [p for p in (account.get("positions") or [])
+                     if p.get("symbol") == symbol and p.get("side") == position_side]
+            if not match:
+                return None, ({"error": "no_position",
+                               "detail": f"{position_side} 포지션이 없습니다"}, 400)
+            position = match[0]
+            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                            {"symbol": symbol}, error_reason="book_ticker_failed")
+            filters = await load_filters(binance_session(), symbol)
+            plan = build_exit_plan(
+                position_side=position_side, position_qty=float(position.get("qty") or 0.0),
+                best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
+                filters=filters, symbol=symbol,
+                entry_price=float(position.get("entry_price") or 0.0),
+                mark_price=float(position.get("mark_price") or 0.0))
+            plan["unrealized_pnl"] = position.get("unrealized_pnl")
+        except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
+            return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
+        return plan, None
+
+    async def api_manual_exit_preview(request: web.Request) -> web.Response:
+        """«이 버튼을 누르면 나갈 청산 주문». 진입과 같은 함수를 지나므로 미리보기가
+        실주문을 실제로 검증한다."""
+        side = (request.query.get("side") or "").upper()
+        if side not in ("LONG", "SHORT"):
+            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        plan, error = await assemble_exit_plan(side)
+        if error:
+            return web.json_response({"ok": False, **error[0]}, status=error[1])
+        return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
+                                 headers=NOCACHE)
+
+    async def api_manual_exit_submit(request: web.Request) -> web.Response:
+        """실제 청산. 진입과 **같은 방어**를 건다: POST 전용 + confirm=1 + 게이트.
+        상태 dict 도 진입과 공유한다 -- 수동 주문이 동시에 둘 나가지 않는 보호가 따라온다."""
+        side = (request.query.get("side") or "").upper()
+        if side not in ("LONG", "SHORT"):
+            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
+                                     status=403)
+        if manual_entry_state.get("phase") in ("working", "submitting"):
+            return web.json_response({"ok": False, "error": "already_working",
+                                      "state": manual_entry_state}, status=409)
+        plan, error = await assemble_exit_plan(side)
+        if error:
+            return web.json_response({"ok": False, **error[0]}, status=error[1])
+        if plan.get("blocked"):
+            return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
+                                     status=400)
+        manual_entry_state.clear()
+        manual_entry_state.update(phase="submitting", kind="exit", side=side, plan=plan,
+                                  started_at=datetime.now(timezone.utc).isoformat())
+        refresh_tasks["manual_entry"] = asyncio.create_task(
+            run_exit(binance_session(), plan, manual_entry_state))
+        return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
+                                 headers=NOCACHE)
+
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
@@ -2892,6 +2963,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
     app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
+    app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
+    app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/position-sizing", api_position_sizing)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)

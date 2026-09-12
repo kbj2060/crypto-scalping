@@ -5197,25 +5197,46 @@ function entryNote(text, tone) {
   return `<div class="entry-note${tone ? " " + tone : ""}">${escapeHtml(text)}</div>`;
 }
 
-async function manualEntryFetch(side) {
-  const res = await fetch(`/api/manual-entry/preview?side=${side}`, { cache: "no-store" });
+async function manualEntryFetch(side, kind = "entry") {
+  const res = await fetch(`/api/manual-${kind}/preview?side=${side}`, { cache: "no-store" });
   return res.json();
 }
 
-async function manualEntryPreview(side) {
+// 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
+// 어느 가격에 닫는가»와 «지금 닫으면 몇 %인가»가 전부라 따로 그린다.
+function manualExitPlanHtml(plan) {
+  const side = plan.position_side === "LONG" ? "롱" : "숏";
+  const move = plan.exit_move_pct;
+  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>`
+    + `<span>${Number(plan.price).toFixed(2)} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
+  if (move != null) {
+    parts.push(entryNote(`이 가격이면 진입가 대비 ${move > 0 ? "+" : ""}${move}% (수수료 전)`,
+      move >= 0 ? null : "bad"));
+  }
+  if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
+  parts.push(`<div class="entry-cap">${plan.dry_run
+    ? "미리보기 전용 — 주문은 나가지 않습니다."
+    : "확인 버튼을 누르면 실제 청산 주문이 나갑니다."} · peg 지정가(메이커), 호가가 달아나면 `
+    + `재호가하고 ${plan.fallback_after_sec}초 뒤에도 남으면 테이커 전환</div>`);
+  return parts.join("");
+}
+
+async function manualEntryPreview(side, kind = "entry") {
   const box = el("snapEntryResult");
-  const buttons = [el("snapEntryLong"), el("snapEntryShort")];
+  const buttons = [el("snapEntryLong"), el("snapEntryShort"),
+                   el("snapExitLong"), el("snapExitShort")];
   if (!box) return;
   buttons.forEach((btn) => { if (btn) btn.disabled = true; });
   box.hidden = false;
   box.innerHTML = entryNote("확인 중…");
   manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
   try {
-    const data = await manualEntryFetch(side);
-    box.innerHTML = data.ok ? manualEntryPlanHtml(data)
-      : entryNote(`실패: ${data.error || data.detail || "알 수 없음"}`, "bad");
+    const data = await manualEntryFetch(side, kind);
+    box.innerHTML = data.ok
+      ? (kind === "exit" ? manualExitPlanHtml(data.plan || {}) : manualEntryPlanHtml(data))
+      : entryNote(`실패: ${data.detail || data.error || "알 수 없음"}`, "bad");
     // 게이트가 꺼져 있으면 확인 버튼을 아예 띄우지 않는다 -- 눌러도 403 이라 헛걸음이다.
-    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {});
+    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {}, kind);
   } catch (err) {
     box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
@@ -5282,11 +5303,12 @@ function manualEntryClearConfirm() {
   if (btn) { btn.hidden = true; btn.textContent = ""; }
 }
 
-function manualEntryArmConfirm(side, plan) {
+function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
-  manualEntryPending = { side, quantity: plan.quantity };
-  btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH 주문`;
+  manualEntryPending = { side, quantity: plan.quantity, kind };
+  btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
+    + (kind === "exit" ? "청산" : "주문");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
@@ -5330,7 +5352,8 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
-    const res = await fetch(`/api/manual-entry/submit?side=${pending.side}&confirm=1`,
+    const res = await fetch(
+      `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1`,
       { method: "POST", cache: "no-store" });
     const data = await res.json();
     if (!data.ok) {
@@ -5344,10 +5367,31 @@ async function manualEntrySubmit() {
   }
 }
 
-el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG"));
-el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT"));
+el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG", "entry"));
+el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "entry"));
+el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "exit"));
+el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
+
+// 포지션이 열린 측면의 청산 버튼만 띄운다. latestBinanceAccount 는 계좌 패널이 이미
+// 주기적으로 받아 두는 값이라 여기서 따로 요청하지 않는다(없으면 그냥 숨긴 채 둔다).
+function manualExitSyncButtons() {
+  const row = el("snapExitRow");
+  if (!row) return;
+  // 서버의 청산 경로는 ETH 전용이다(assemble_exit_plan 이 MARKET_SYMBOLS["eth"] 고정).
+  const sym = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
+  const open = (latestBinanceAccount?.positions || [])
+    .filter((p) => p.symbol === sym && Number(p.qty) > 0)
+    .map((p) => p.side);
+  const hasLong = open.includes("LONG");
+  const hasShort = open.includes("SHORT");
+  const bl = el("snapExitLong"); if (bl) bl.hidden = !hasLong;
+  const bs = el("snapExitShort"); if (bs) bs.hidden = !hasShort;
+  row.hidden = !(hasLong || hasShort);
+}
 if (el("snapEntryPlan")) {
   manualEntryRefreshSize();
-  setInterval(manualEntryRefreshSize, MANUAL_ENTRY_REFRESH_MS);
+  manualExitSyncButtons();
+  setInterval(() => { manualEntryRefreshSize(); manualExitSyncButtons(); },
+              MANUAL_ENTRY_REFRESH_MS);
 }

@@ -140,6 +140,64 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     }
 
 
+def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float, best_ask: float,
+                    filters: dict[str, float], symbol: str = "ETHUSDT",
+                    entry_price: float = 0.0, mark_price: float = 0.0) -> dict[str, Any]:
+    """열린 포지션 하나를 **메이커로 닫는** 주문을 만든다. 순수 함수 -- build_entry_plan 과 같다.
+
+    🔴`reduceOnly` 를 보내지 않는다. 이 계좌는 헤지 모드고 바이낸스는 헤지 모드에서
+    reduceOnly 를 거부한다(-1106). 헤지 모드의 청산은 «측면 반전 + **같은** positionSide»
+    이고, 안전장치는 플래그가 아니라 **수량**이다 -- 그래서 호출부가 방금 읽은 포지션
+    수량을 넘겨야 하고 여기서 그 위로는 절대 안 올린다.
+
+    메이커 가격은 진입의 거울이다: 롱을 닫으면 SELL 이라 최우선 **매도**호가,
+    숏을 닫으면 BUY 라 최우선 **매수**호가. 한 틱이라도 더 공격적이면 GTX 가 거부한다.
+    """
+    if position_side not in ("LONG", "SHORT"):
+        raise ValueError(f"position_side must be LONG/SHORT, got {position_side!r}")
+    if not (best_bid > 0 and best_ask > 0 and best_ask >= best_bid):
+        raise ValueError(f"bad book: bid={best_bid} ask={best_ask}")
+
+    closing_long = position_side == "LONG"
+    price = best_ask if closing_long else _floor_to(best_bid, filters["tick"])
+    qty = _floor_to(max(0.0, float(position_qty)), filters["step"])
+
+    blocked = None
+    if qty <= 0 or qty < filters["min_qty"]:
+        blocked = "닫을 포지션이 없습니다" if position_qty <= 0 else \
+                  f"남은 수량이 최소 {filters['min_qty']} 미만이라 지정가로 못 닫습니다"
+    elif filters["min_notional"] and qty * price < filters["min_notional"]:
+        # 지정가로는 못 보낸다. 조용히 시장가로 바꾸지 않고 화면에 그대로 말한다.
+        blocked = (f"명목 {qty * price:,.0f} 가 최소 {filters['min_notional']:,.0f} USDT 미만입니다"
+                   " -- 이 크기는 시장가로 닫아야 합니다")
+
+    notional = qty * price
+    move = ((price - entry_price) / entry_price if closing_long else
+            (entry_price - price) / entry_price) if entry_price > 0 else None
+    return {
+        "symbol": symbol,
+        "side": "SELL" if closing_long else "BUY",
+        "positionSide": position_side,   # 반전하지 않는다 -- 반전하면 청산이 아니라 신규 진입이다
+        "type": "LIMIT",
+        "timeInForce": "GTX",
+        "price": round(price, 8),
+        "quantity": round(qty, 8),
+        "notional_usdt": round(notional, 2),
+        "position_side": position_side,
+        "position_qty": round(float(position_qty), 8),
+        "entry_price": entry_price or None,
+        "mark_price": mark_price or None,
+        # 이 가격에 닫으면 수수료 전 몇 % 인가. 화면이 «왜 지금 닫나»를 말할 수 있게 한다.
+        "exit_move_pct": round(100 * move, 3) if move is not None else None,
+        "fallback_after_sec": FALLBACK_SEC,
+        "fallback": "taker",
+        "repeg": True,                   # 진입과 다르다 -- 아래 주석 참조
+        "notes": [],
+        "blocked": blocked,
+        "dry_run": not exec_enabled(),
+    }
+
+
 def _self_check() -> None:
     f = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
 
@@ -210,7 +268,31 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: {bad}")
 
-    print("통과 11/11 — 진입 계획 + 합산 상한 + 화면 설명값 계약 유지")
+    # ── 청산 계획 ────────────────────────────────────────────────────────────
+    f = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
+    x = build_exit_plan(position_side="LONG", position_qty=2.693, best_bid=2470.00,
+                        best_ask=2470.01, filters=f, entry_price=2400.0)
+    assert x["side"] == "SELL" and x["positionSide"] == "LONG", x
+    assert x["price"] == 2470.01, x                      # 롱 청산 = 최우선 매도호가
+    assert "reduceOnly" not in x, "헤지 모드에서 reduceOnly 는 -1106 로 거부된다"
+    assert x["quantity"] == 2.693 and x["blocked"] is None, x
+    assert abs(x["exit_move_pct"] - 2.917) < 0.01, x
+
+    x = build_exit_plan(position_side="SHORT", position_qty=3.025, best_bid=2470.00,
+                        best_ask=2470.01, filters=f, entry_price=2500.0)
+    assert x["side"] == "BUY" and x["positionSide"] == "SHORT", x
+    assert x["price"] == 2470.00, x                      # 숏 청산 = 최우선 매수호가
+    assert x["exit_move_pct"] > 0, "진입보다 싸게 되사면 이익이다"
+
+    # 수량은 포지션 위로 절대 안 올라간다(헤지 모드엔 reduceOnly 가 없어 이게 유일한 안전장치)
+    x = build_exit_plan(position_side="LONG", position_qty=0.0015, best_bid=2470.00,
+                        best_ask=2470.01, filters=f)
+    assert x["quantity"] == 0.001 and "최소" in (x["blocked"] or ""), x
+    x = build_exit_plan(position_side="LONG", position_qty=0.0,
+                        best_bid=2470.00, best_ask=2470.01, filters=f)
+    assert x["blocked"] == "닫을 포지션이 없습니다", x
+
+    print("통과 16/16 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 계약 유지")
 
 
 if __name__ == "__main__":
