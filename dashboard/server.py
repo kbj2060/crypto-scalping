@@ -171,7 +171,8 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    build_entry_plan, build_exit_plan, exec_enabled, load_filters)
+    EXIT_VOL_WINDOW, build_entry_plan, build_exit_plan, exec_enabled, load_filters,
+    realized_vol_bpm)
 from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
@@ -2753,12 +2754,26 @@ def make_app() -> web.Application:
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
+            # 마감 시간을 정하는 실현변동성. 실패해도 청산을 막지 않는다 -- None 이면
+            # exit_deadline_sec 이 보수적으로 최대(120초)를 쓴다.
+            vol_bpm = None
+            try:
+                kl = await fetch_binance_json(
+                    "https://fapi.binance.com/fapi/v1/klines",
+                    {"symbol": symbol, "interval": "1m", "limit": EXIT_VOL_WINDOW + 2},
+                    timeout=5.0, error_reason=None)
+                if kl:
+                    # 마지막 봉은 **미완결**이라 버린다. 종가는 인덱스 4.
+                    vol_bpm = realized_vol_bpm([float(row[4]) for row in kl[:-1]])
+            except Exception:  # noqa: BLE001 -- 변동성은 있으면 좋은 값이지 필수가 아니다
+                vol_bpm = None
             plan = build_exit_plan(
                 position_side=position_side, position_qty=float(position.get("qty") or 0.0),
                 best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 filters=filters, symbol=symbol,
                 entry_price=float(position.get("entry_price") or 0.0),
-                mark_price=float(position.get("mark_price") or 0.0))
+                mark_price=float(position.get("mark_price") or 0.0),
+                vol_bpm=vol_bpm)
             plan["unrealized_pnl"] = position.get("unrealized_pnl")
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)

@@ -19,11 +19,35 @@
 """
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
 FAPI = "https://fapi.binance.com"
-FALLBACK_SEC = 120.0          # 섀도우 워커의 MAKER_SHADOW_TIMEOUT_S 와 같은 값
+FALLBACK_SEC = 120.0          # 진입 기본값. 섀도우 워커의 MAKER_SHADOW_TIMEOUT_S 와 같은 값
+
+# ── 청산 마감을 변동성에 연동한다(2026-09-13, 사용자 요청) ──────────────────────
+# 근거: 섀도우 7,982legs 를 1분봉 실현변동성과 조인해 보니 **체결 시간이 변동성에 강하게
+# 반비례**한다(순위상관 -0.429). 변동성 5분위별 중앙 체결시간 15.2 / 5.4 / 4.5 / 3.2 / 1.8초.
+# 그래서 고정 120초는 빠른 장에서 필요량의 60배를 기다리는 셈이고, 청산에서 그 초과분은
+# **포지션을 든 채 노출되는 시간**이다.
+# 곡선은 적합해서 뽑았다: 중앙체결시간 ≈ 52.0 / vol^1.472. 마감은 그 ~29배(체결 분포의
+# 중앙 4.1초 대비 99% 82.4초 = 20배에 여유를 더한 값)로 잡아 K=1500 을 쓴다.
+# 실측 검증: K=1500 에서 메이커 체결 중 **0.03%(2건)** 만 잘리고, 그 2건은 원래 8.203bp 를
+# 내던 건이라 테이커 5.0bp 로 바뀌면 오히려 미세하게 유리하다(전체 평균 -0.0008bp).
+EXIT_DEADLINE_K = 1500.0
+EXIT_DEADLINE_EXP = 1.472
+EXIT_DEADLINE_MIN = 15.0
+EXIT_DEADLINE_MAX = 120.0
+EXIT_VOL_WINDOW = 30          # 1분봉 개수. 수익률 30개를 쓰므로 종가는 31개 필요하다.
+
+# 🔴이 값을 넘으면 **지정가를 아예 안 걸고 시장가로 닫는다**(사용자 요청).
+# 정직하게: 비용으로는 손해다. 직전 1분이 29.5bp 움직인 상위 1% 구간에서도 peg 는
+# 0.5초에 3.26bp 로 체결돼 테이커 5.0bp 보다 싸다(비용-변동성 순위상관 +0.026 = 사실상 0).
+# 그럼에도 두는 이유는 비용이 아니라 **확실성**이다 -- 급락 중에 «닫혔나»를 확인하느라
+# 초를 세는 상황을 없애는 값이고, 그 대가가 약 1.7bp 다. 30 은 1분봉 869일 기준 99.3분위
+# (하루 약 9.7분)라 평상시엔 발동하지 않는다.
+EXIT_TAKER_VOL_BPM = 30.0
 _filters: dict[str, dict[str, float]] = {}
 
 
@@ -140,9 +164,34 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     }
 
 
+def realized_vol_bpm(closes: list[float]) -> float | None:
+    """1분봉 종가들로 실현변동성(bp/√분). 표본이 모자라면 None -- **0 이 아니다**.
+    0 으로 돌리면 «변동성 없음»이 되어 마감이 최대로 늘어나는데, 실제로는 «모른다»다."""
+    px = [float(c) for c in closes if c and float(c) > 0]
+    if len(px) < 10:
+        return None
+    rets = [math.log(px[i] / px[i - 1]) for i in range(1, len(px))]
+    n = len(rets)
+    mean = sum(rets) / n
+    var = sum((r - mean) ** 2 for r in rets) / (n - 1)
+    return math.sqrt(var) * 1e4
+
+
+def exit_deadline_sec(vol_bpm: float | None) -> float:
+    """변동성이 클수록 짧은 마감. 변동성을 모르면 보수적으로 최대값을 쓴다.
+
+    빠른 장이 위험해서가 아니라 **빠른 장에서는 어차피 즉시 체결되기 때문**이다 --
+    남는 시간은 이득 없이 노출만 늘린다. 상단 주석의 실측 근거 참조."""
+    if vol_bpm is None or vol_bpm <= 0:
+        return EXIT_DEADLINE_MAX
+    raw = EXIT_DEADLINE_K / (vol_bpm ** EXIT_DEADLINE_EXP)
+    return min(EXIT_DEADLINE_MAX, max(EXIT_DEADLINE_MIN, raw))
+
+
 def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float, best_ask: float,
                     filters: dict[str, float], symbol: str = "ETHUSDT",
-                    entry_price: float = 0.0, mark_price: float = 0.0) -> dict[str, Any]:
+                    entry_price: float = 0.0, mark_price: float = 0.0,
+                    vol_bpm: float | None = None) -> dict[str, Any]:
     """열린 포지션 하나를 **메이커로 닫는** 주문을 만든다. 순수 함수 -- build_entry_plan 과 같다.
 
     🔴`reduceOnly` 를 보내지 않는다. 이 계좌는 헤지 모드고 바이낸스는 헤지 모드에서
@@ -161,6 +210,10 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
     closing_long = position_side == "LONG"
     price = best_ask if closing_long else _floor_to(best_bid, filters["tick"])
     qty = _floor_to(max(0.0, float(position_qty)), filters["step"])
+    deadline = exit_deadline_sec(vol_bpm)
+    # 극단 변동성이면 지정가를 걸지 않는다. 비용이 아니라 확실성을 사는 선택이라
+    # 화면에 이유를 그대로 남긴다(조용히 시장가로 바꾸지 않는다).
+    market = vol_bpm is not None and vol_bpm >= EXIT_TAKER_VOL_BPM
 
     blocked = None
     if qty <= 0 or qty < filters["min_qty"]:
@@ -178,20 +231,24 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
         "symbol": symbol,
         "side": "SELL" if closing_long else "BUY",
         "positionSide": position_side,   # 반전하지 않는다 -- 반전하면 청산이 아니라 신규 진입이다
-        "type": "LIMIT",
-        "timeInForce": "GTX",
-        "price": round(price, 8),
+        "type": "MARKET" if market else "LIMIT",
+        **({} if market else {"timeInForce": "GTX", "price": round(price, 8)}),
         "quantity": round(qty, 8),
         "notional_usdt": round(notional, 2),
+        "reference_price": round(price, 8),   # 시장가일 때도 화면이 «대략 얼마»를 말할 수 있게
         "position_side": position_side,
         "position_qty": round(float(position_qty), 8),
         "entry_price": entry_price or None,
         "mark_price": mark_price or None,
         # 이 가격에 닫으면 수수료 전 몇 % 인가. 화면이 «왜 지금 닫나»를 말할 수 있게 한다.
         "exit_move_pct": round(100 * move, 3) if move is not None else None,
-        "fallback_after_sec": FALLBACK_SEC,
+        "fallback_after_sec": round(deadline, 1),
         "fallback": "taker",
-        "repeg": True,                   # 진입과 다르다 -- 아래 주석 참조
+        "repeg": not market,             # 진입과 다르다 -- 위 주석 참조
+        "vol_bpm": round(vol_bpm, 2) if vol_bpm is not None else None,
+        "market_reason": (f"변동성 {vol_bpm:.1f} ≥ {EXIT_TAKER_VOL_BPM:.0f} bp/√분 — "
+                          "지정가를 걸지 않고 즉시 시장가로 닫습니다"
+                          f" (비용은 메이커보다 약 1.7bp 비쌉니다)") if market else None,
         "notes": [],
         "blocked": blocked,
         "dry_run": not exec_enabled(),
@@ -292,7 +349,44 @@ def _self_check() -> None:
                         best_bid=2470.00, best_ask=2470.01, filters=f)
     assert x["blocked"] == "닫을 포지션이 없습니다", x
 
-    print("통과 16/16 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 계약 유지")
+    # ── 변동성 연동 마감 ─────────────────────────────────────────────────────
+    assert exit_deadline_sec(None) == EXIT_DEADLINE_MAX, "모르면 보수적으로 최대"
+    assert exit_deadline_sec(0.0) == EXIT_DEADLINE_MAX
+    prev = 1e9
+    for v in (2.0, 5.25, 9.97, 17.74, 30.0, 100.0):
+        t = exit_deadline_sec(v)
+        assert t <= prev, f"변동성이 오르면 마감은 줄어야 한다: {v}"
+        assert EXIT_DEADLINE_MIN <= t <= EXIT_DEADLINE_MAX, t
+        prev = t
+    # 실측 적합점(위 주석의 표와 같은 값이어야 한다)
+    assert exit_deadline_sec(5.25) == EXIT_DEADLINE_MAX, exit_deadline_sec(5.25)
+    assert abs(exit_deadline_sec(9.97) - 50.8) < 1.0, exit_deadline_sec(9.97)
+    assert abs(exit_deadline_sec(17.74) - 21.8) < 1.0, exit_deadline_sec(17.74)
+    assert exit_deadline_sec(30.0) == EXIT_DEADLINE_MIN
+
+    # 변동성 추정: 일정한 값이면 0, 표본 부족이면 None(0 이 아니다)
+    assert realized_vol_bpm([100.0] * 31) == 0.0
+    assert realized_vol_bpm([100.0, 101.0]) is None, "표본 부족은 None"
+    assert realized_vol_bpm([]) is None
+    noisy = realized_vol_bpm([100.0 * (1.001 ** (i % 2)) for i in range(31)])
+    assert noisy and noisy > 0
+
+    # 극단 변동성이면 시장가 계획이 되고 지정가 필드가 사라진다
+    m = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                        best_ask=2470.01, filters=f, vol_bpm=45.0)
+    assert m["type"] == "MARKET" and "price" not in m and "timeInForce" not in m, m
+    assert m["repeg"] is False and m["market_reason"], m
+    assert m["reference_price"] == 2470.01, "시장가여도 화면이 쓸 참조가는 남긴다"
+
+    # 보통 변동성이면 지정가 + 줄어든 마감
+    n = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                        best_ask=2470.01, filters=f, vol_bpm=12.0)
+    assert n["type"] == "LIMIT" and n["timeInForce"] == "GTX", n
+    assert n["repeg"] is True and n["market_reason"] is None
+    assert EXIT_DEADLINE_MIN <= n["fallback_after_sec"] < EXIT_DEADLINE_MAX, n["fallback_after_sec"]
+    assert n["vol_bpm"] == 12.0
+
+    print("통과 33/33 — 진입 계획 + 합산 상한 + 화면 설명값 + 청산 계획 + 변동성 연동 마감")
 
 
 if __name__ == "__main__":

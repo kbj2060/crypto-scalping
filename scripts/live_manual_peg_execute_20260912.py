@@ -158,12 +158,31 @@ async def run_exit(session, plan: dict, state: dict) -> dict:
     common = {"symbol": plan["symbol"], "side": plan["side"], "positionSide": plan["positionSide"]}
     pside = plan["positionSide"]
     total = float(plan["quantity"])
+
+    # 극단 변동성이면 계획 자체가 MARKET 이다(build_exit_plan). 지정가를 걸지 않고 바로 닫는다.
+    if plan.get("type") == "MARKET":
+        state.update(phase="working", kind="exit", quantity=total, filled=0.0, repegs=0,
+                     market_reason=plan.get("market_reason"))
+        taker = await signed(session, "POST", "/fapi/v1/order",
+                             {**common, "type": "MARKET", "quantity": total}, key, secret, offset)
+        if "__error__" in taker:
+            state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"],
+                         done_at=now_iso())
+            return state
+        state.update(phase="filled_taker", taker_qty=total, filled=total,
+                     taker_order_id=taker.get("orderId"), done_at=now_iso())
+        return state
+
     price = float(plan["price"])
     done = 0.0
     repegs = 0
-    deadline = time.monotonic() + FALLBACK_SEC
+    # 마감은 **계획이 정한다** -- 변동성에 따라 15~120초로 달라진다(build_exit_plan 주석 참조).
+    # 모듈 상수를 그대로 쓰면 변동성 연동이 조용히 무력화된다.
+    window = float(plan.get("fallback_after_sec") or FALLBACK_SEC)
+    deadline = time.monotonic() + window
     state.update(phase="working", kind="exit", quantity=total, filled=0.0,
-                 limit_price=price, repegs=0)
+                 limit_price=price, repegs=0, deadline_sec=window,
+                 vol_bpm=plan.get("vol_bpm"))
 
     while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX:
         remaining = round(total - done, 8)
@@ -257,7 +276,22 @@ def _self_check() -> None:
     assert drifted("SHORT", 2470.00, 2469.50, 2469.60) is False
     assert REPEG_MAX * POLL_SEC >= FALLBACK_SEC, \
         "리페그 상한이 마감보다 먼저 걸리면 남은 시간을 못 쓴다"
-    print("통과 11/11 — 집행 보조 함수 + 청산 리페그 판정 계약 유지")
+
+    # 계획이 마감을 정한다 -- 모듈 상수로 되돌아가면 변동성 연동이 무력화된다.
+    from scripts.live_manual_peg_entry_20260912 import build_exit_plan, exit_deadline_sec
+    f = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
+    fast = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                           best_ask=2470.01, filters=f, vol_bpm=17.74)
+    assert fast["fallback_after_sec"] < FALLBACK_SEC, fast["fallback_after_sec"]
+    assert float(fast.get("fallback_after_sec") or FALLBACK_SEC) == fast["fallback_after_sec"]
+    extreme = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                              best_ask=2470.01, filters=f, vol_bpm=45.0)
+    assert extreme["type"] == "MARKET", "극단 변동성은 지정가를 건너뛴다"
+    assert "price" not in extreme, "MARKET 계획에 price 가 있으면 run_exit 이 옛 경로를 탄다"
+    calm = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
+                           best_ask=2470.01, filters=f, vol_bpm=None)
+    assert calm["fallback_after_sec"] == exit_deadline_sec(None) == 120.0
+    print("통과 17/17 — 집행 보조 함수 + 청산 리페그 판정 + 변동성 마감 계약 유지")
 
 
 if __name__ == "__main__":

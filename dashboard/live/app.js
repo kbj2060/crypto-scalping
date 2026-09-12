@@ -5208,16 +5208,23 @@ function manualExitPlanHtml(plan) {
   const side = plan.position_side === "LONG" ? "롱" : "숏";
   const move = plan.exit_move_pct;
   const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>`
-    + `<span>${Number(plan.price).toFixed(2)} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
+    + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
+    + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
   if (move != null) {
     parts.push(entryNote(`이 가격이면 진입가 대비 ${move > 0 ? "+" : ""}${move}% (수수료 전)`,
       move >= 0 ? null : "bad"));
   }
   if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
+  // 시장가로 전환된 경우엔 이유를 **위쪽에** 띄운다 -- 비용이 더 드는 선택이라 묻히면 안 된다.
+  if (plan.market_reason) parts.push(entryNote(plan.market_reason, "live"));
+  const vol = plan.vol_bpm != null ? ` · 변동성 ${plan.vol_bpm} bp/√분` : "";
+  const how = plan.type === "MARKET"
+    ? "시장가 즉시 체결"
+    : `peg 지정가(메이커), 호가가 달아나면 재호가하고 ${plan.fallback_after_sec}초 뒤에도 `
+      + "남으면 테이커 전환";
   parts.push(`<div class="entry-cap">${plan.dry_run
     ? "미리보기 전용 — 주문은 나가지 않습니다."
-    : "확인 버튼을 누르면 실제 청산 주문이 나갑니다."} · peg 지정가(메이커), 호가가 달아나면 `
-    + `재호가하고 ${plan.fallback_after_sec}초 뒤에도 남으면 테이커 전환</div>`);
+    : "확인 버튼을 누르면 실제 청산 주문이 나갑니다."} · ${how}${vol}</div>`);
   return parts.join("");
 }
 
