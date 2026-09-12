@@ -148,10 +148,16 @@ def main() -> int:
     assert len(out) == len(rows), "줄 수가 변했다"
 
     def mismatch(rs):
+        """가격 방향과 **realizedPnl** 의 부호가 어긋나는 줄 수.
+
+        ⚠️`net_pnl`(= realized − 수수료)로 재면 안 된다. 소액 승리는 수수료가 먹어 순손익만
+        음수가 되는데(예: LONG 2446.40→2448.82 · 1.359개 → 총이익 3.29, 수수료 ~2.7 → 순 −0.04)
+        그건 기록 오류가 아니라 정상이다. 첫 판이 이걸 «불일치»로 세어 4건을 헛되이 남겼다.
+        """
         n = 0
         for r in rs:
-            ep, xp, pnl = r.get("entry_price"), r.get("exit_price"), r.get("net_pnl")
-            if ep and xp and pnl is not None:
+            ep, xp, pnl = r.get("entry_price"), r.get("exit_price"), r.get("realized_pnl")
+            if ep and xp and pnl:
                 s = 1 if r.get("side") == "LONG" else -1
                 if (xp - ep) * s * pnl < 0:
                     n += 1
@@ -165,13 +171,13 @@ def main() -> int:
     for r in off[:8]:
         print(f"   ⚠️이탈 {r['pnl_check_bp']:>10.2f}bp  {r.get('entry_at') or r.get('entry_time')} {r.get('side')}")
     bad = [r for r in out
-           if r.get("entry_price") and r.get("exit_price") and r.get("net_pnl") is not None
-           and (r["exit_price"] - r["entry_price"]) * (1 if r.get("side") == "LONG" else -1) * r["net_pnl"] < 0]
+           if r.get("entry_price") and r.get("exit_price") and r.get("realized_pnl")
+           and (r["exit_price"] - r["entry_price"]) * (1 if r.get("side") == "LONG" else -1) * r["realized_pnl"] < 0]
     if bad:
         print("\n남은 부호 불일치 — 어떤 줄이고 왜 못 고쳤나")
         for r in bad:
             print(f"   {r.get('entry_at') or r.get('entry_time')} {r.get('side'):<5} "
-                  f"진입 {r['entry_price']:>9.2f} 청산 {r['exit_price']:>9.2f} 손익 {r['net_pnl']:>9.2f} "
+                  f"진입 {r['entry_price']:>9.2f} 청산 {r['exit_price']:>9.2f} 총이익 {r.get('realized_pnl'):>9.2f} "
                   f"basis={r.get('price_basis')} check={r.get('pnl_check_bp')}")
     if not a.apply:
         print("\n미리보기만 했다. 반영하려면 --apply")
