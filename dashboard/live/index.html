@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-capwindow">
+  <link rel="stylesheet" href="styles.css?v=20260913-sidebtn">
 </head>
 <body>
     <main class="app">
@@ -285,9 +285,9 @@
             <span id="snapEntrySize" class="muted">크기 확인 중…</span>
             <span id="snapEntryMode" class="ops-readonly">미리보기 전용</span>
           </div>
-          <div class="manual-entry-row">
-            <button type="button" id="snapEntryLong" class="notify-btn">롱 진입</button>
-            <button type="button" id="snapEntryShort" class="notify-btn">숏 진입</button>
+          <div class="manual-entry-row actions">
+            <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
+            <button type="button" id="snapEntryShort" class="notify-btn short">숏 진입</button>
           </div>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
                «진입 후의 그 카드»가 되도록. 옛 판은 고정폭 텍스트라 계좌 패널과 따로 놀았다. -->
@@ -295,7 +295,7 @@
           <!-- 2026-09-12 2단 확인. 진입 버튼은 «보여주기»만 하고, 실제 주문은 이 버튼에서만
                나간다. 한 번의 오클릭이 주문이 되지 않게 하는 게 목적이라 기본은 숨김이고
                미리보기를 본 뒤에만 잠깐 나타난다(CONFIRM_WINDOW_MS). -->
-          <div class="manual-entry-row">
+          <div class="manual-entry-row actions">
             <button type="button" id="snapEntryConfirm" class="notify-btn primary" hidden></button>
           </div>
         </div>

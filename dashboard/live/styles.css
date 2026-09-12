@@ -2049,6 +2049,19 @@ svg {
 /* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
+/* 2026-09-13 롱/숏 버튼을 화면 전역 규약(롱=--good, 숏=--bad)에 맞추고 가운데로 모은다.
+   중앙정렬은 .actions 행에만 건다 -- 같은 .manual-entry-row 를 쓰는 크기/배지 행은
+   space-between 이 맞다.
+   숏 글자만 --bad(#d4786c) 가 아니라 #dd8b80 이다: 버튼 배경이 흰 4% 라 패널보다 밝아
+   --bad 는 대비 4.15 로 AA 미달이고 이 값이 5.00 이다(롱 --good 은 5.53 로 그대로 통과).
+   hover 에 배경 틴트를 주지 않는 것도 대비 때문이다 -- 12% 만 줘도 롱 4.48/숏 4.26 으로
+   둘 다 미달로 떨어진다. 그래서 기존 .notify-btn:hover 처럼 테두리만 바꾼다. */
+.manual-entry-row.actions { justify-content: center; }
+.manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
+.notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
+.notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 .manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
 /* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
    눈금(u)은 이전 값의 자리다 -- 값이 늘든 줄든 같은 읽기 규칙이라 측면마다 뒤집지 않아도 된다. */
