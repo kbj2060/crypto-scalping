@@ -161,12 +161,52 @@ def main() -> int:
     except AssertionError as e:
         fails.append("진입: " + str(e))
 
+    # 6) 주문 접수 자체가 실패 -> 조용히 재시도하지 않고 멈춰야 한다
+    fx = FakeExchange(fill_after=99, fail=("place",))
+    st = run(dict(BASE), fx)
+    try:
+        check("접수실패", st, fx, 2.0)
+        assert st["phase"] == "rejected", st
+        assert len(fx.placed) == 0 and len(fx.market_orders) == 0, "실패했는데 뭔가 나갔다"
+    except AssertionError as e:
+        fails.append(str(e))
+
+    # 7) 취소 후 재조회가 실패 -> 체결량을 모르는 채로 잔량을 계산하면 안 된다
+    fx = FakeExchange(fill_after=99, fail=("get_after_cancel",))
+    st = run(dict(BASE), fx, drift=True)
+    try:
+        check("재조회실패", st, fx, 2.0)
+    except AssertionError as e:
+        fails.append(str(e))
+
+    # 8) 부분 청산(비율) 계획도 총량을 넘지 않는다
+    fx = FakeExchange(fill_after=1)
+    half = {**BASE, "quantity": 1.0}
+    st = run(half, fx)
+    try:
+        f, t, placed = check("부분청산", st, fx, 1.0)
+        assert placed <= 1.0 + 1e-9, f"계획 1.0 인데 {placed} 나갔다"
+    except AssertionError as e:
+        fails.append(str(e))
+
+    # 9) 시장가 계획(극단 변동성)은 지정가를 아예 안 건다
+    fx = FakeExchange(fill_after=1)
+    mk = {k: v for k, v in BASE.items() if k not in ("price", "timeInForce")}
+    mk["type"] = "MARKET"
+    st = run(mk, fx)
+    try:
+        check("시장가계획", st, fx, 2.0)
+        assert len(fx.placed) == 0, "MARKET 계획인데 지정가가 나갔다"
+        assert len(fx.market_orders) == 1 and st["phase"] == "filled_taker", st
+    except AssertionError as e:
+        fails.append(str(e))
+
     if fails:
         print(f"🔴 불변식 위반 {len(fails)}건")
         for f in fails:
             print("   -", f)
         return 1
-    print("통과 5/5 — 과청산 없음 · 중복 주문 없음 · 항상 종료")
+    print("통과 9/9 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤")
     return 0
 
 
