@@ -10,7 +10,7 @@
   --glass-strong: rgba(255, 255, 255, 0.08);
   --text: #eef0f6;
   --muted: #8b91a6;
-  --good: #6bab84;
+  --good: #5abc80;
   --bad: #d4786c;
   --warn: #dc8f4a;
   --amber: #f2b84b;
@@ -602,7 +602,7 @@ body {
 .liq-density-legend-bar {
   flex: 1; height: 8px; border-radius: 2px;
   /* app.js DENSITY_STOPS 와 **같은 값**이어야 한다(하드코딩된 사본). 2026-09-10 viridis 폐기. */
-  background: linear-gradient(90deg, rgb(32,37,46) 0%, rgb(30,44,62) 25%, rgb(46,78,104) 50%,
+  background: linear-gradient(90deg, rgba(30,44,62,0) 0%, rgb(30,44,62) 25%, rgb(46,78,104) 50%,
     rgb(58,108,152) 75%, rgb(96,156,208) 100%);
 }
 @media (max-width: 720px) {
@@ -836,7 +836,6 @@ body {
   overflow: hidden;
   animation: fadeInUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  backdrop-filter: blur(18px) saturate(1.15);
 }
 
 .panel:hover {
@@ -1200,12 +1199,6 @@ svg {
 .line { fill: none; stroke: var(--accent); stroke-width: 2.5; }
 .chart-grid { stroke: var(--line); stroke-width: 1; opacity: 0.82; }
 
-@media (min-width: 721px) {
-  .panel {
-    backdrop-filter: none;
-  }
-}
-
 @media (max-width: 960px) {
   .charts { grid-template-columns: 1fr; }
   .trade-journal-row { grid-template-columns: 1fr; gap: 8px; }
@@ -1221,7 +1214,6 @@ svg {
     overflow-x: hidden;
   }
 
-  .panel,
   .chart-ai-ribbon {
     backdrop-filter: none;
   }

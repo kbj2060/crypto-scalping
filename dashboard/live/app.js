@@ -3640,7 +3640,7 @@ function renderSnapshotChart() {
 // 넣을 순 없어?"). Dominant-class color (not a 3-way blend) matches the categorical tone convention
 // the evidence-signal strips use elsewhere; opacity scales with confidence so an uncertain reading
 // fades rather than asserting a false-confident color.
-const REGIME_DOMINANT_COLOR = { bull: "#6bab84", bear: "#cf6a5c", chop: "#8b91a6" };
+const REGIME_DOMINANT_COLOR = { bull: "#5abc80", bear: "#d4786c", chop: "#8b91a6" };
 function regimeDominant(r) {
   return r.bull_prob >= r.bear_prob && r.bull_prob >= r.chop_prob ? "bull"
     : r.bear_prob >= r.chop_prob ? "bear" : "chop";
@@ -3657,24 +3657,27 @@ function fmtDateTick(ts) {
 // 청산 밀도 히트맵 컬러맵 (2026-09-10 교체). 이전엔 matplotlib **viridis**(보라->파랑->초록
 // ->노랑)였는데 사용자 지적 "청산밀도 색깔이 너무 어지러운 색깔이야. 봉 차트 색과 잘 조화롭게".
 // viridis 의 초록(34,168,132)·연두(122,209,81)·노랑(253,231,37) 구간이 캔들의 상승 초록
-// (--good #6bab84)·경고 앰버(--amber)와 정면으로 부딪혔다 -- 배경 띠가 캔들보다 튀었다.
+// (--good)·경고 앰버(--amber)와 정면으로 부딪혔다 -- 배경 띠가 캔들보다 튀었다.
 //
 // 교체 원칙 셋:
 //   1. **단색(쿨) 램프**: 밝기만 단조 증가시키고 색상은 안 바꾼다 -> 배경으로 읽힌다.
 //   2. **초록/빨강/노랑 금지**: 밀도는 방향이 없다(2026-08-25 에 dual-hue 를 뺀 이유).
 //      캔들 색과 겹치면 밀도가 방향 정보로 오독된다.
-//   3. t=0 은 패널 배경에 녹고, t=1 은 채도를 낮춘 스틸블루라
+//   3. t=0 은 알파 0 이라 배경에 그대로 녹고, t=1 은 채도를 낮춘 스틸블루라
 //      --accent(#22d3ee, 가격선)보다 덜 튄다.
-// 2026-09-12: 패널 명도 계단(b5a4790)으로 배경이 (19,21,29)->(33,38,47) 로 올라가서 옛 t=0
-// (18,20,27) 은 더 이상 녹지 않고 거리 31 의 어두운 구멍이 됐다. t=0 을 (32,37,46) 으로 올려
-// 패널거리 2 를 회복한다(옛 관계와 동일). 대가는 첫 구간 압축이다: 휘도 증가가 +21.7 -> +5.4 라
-// 낮은 밀도 구간의 분해능이 떨어진다 -- 램프 전체 재유도 대신 최소 수정을 택한 결과다.
-// 휘도 단조 확인: 36.5 -> 41.9 -> 71.5 -> 98.0 -> 144.0
-// 캔들색 이격 확인(RGB 유클리드, 전 구간 60 이상): 상승초록 #6bab84 최소 69 · 하락빨강
-// #d4786c 최소 157. 첫 안(상단 122,178,196)은 초록과 48 까지 붙어서 더 파랑으로 밀었다.
+// 2026-09-12: 패널 명도 계단(b5a4790)으로 t=0 이 어두운 구멍이 됐다. 처음엔 t=0 색을 패널에
+// 맞췄지만(a468170) 렌더 실측에서 격차 23.1 이 남았다 -- .panel 이 세로 그라디언트라(glass-strong
+// 흰 오버레이) 실제 패널색이 위아래로 다르고, 어떤 단일 색도 전 구간에 맞지 않는다.
+// 그래서 색이 아니라 **알파**로 녹인다: fill-opacity 를 t 에 비례시켜 t=0 을 완전 투명으로 둔다.
+// 배경이 무엇이든 정확히 녹고, 첫 구간 분해능도 알파 램프가 되살린다(색 압축이 불필요해졌다).
+// t=0 색은 다음 스톱과 같게 둬서 페이드 중 색상 이동이 없다.
+// 휘도 단조 확인(t>0): 41.9 -> 71.5 -> 98.0 -> 144.0
+// 캔들색 이격 확인(RGB 유클리드, 전 구간 60 이상): 상승초록 #5abc80 최소 86 · 하락빨강
+// #d4786c 최소 157(채도 상향 후 초록 #5abc80 은 최소 86). 첫 안(상단 122,178,196)은
+// 초록과 48 까지 붙어서 더 파랑으로 밀었다.
 // ⚠️styles.css 의 `.liq-density-legend-bar` 그라디언트가 이 값을 하드코딩한다 -- 같이 고칠 것.
 const DENSITY_STOPS = [
-  [0.0, [32, 37, 46]],
+  [0.0, [30, 44, 62]],
   [0.25, [30, 44, 62]],
   [0.5, [46, 78, 104]],
   [0.75, [58, 108, 152]],
@@ -3850,7 +3853,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     rect.setAttribute("x", x0); rect.setAttribute("y", top);
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
     rect.setAttribute("fill", densityColor(t));
-    rect.setAttribute("fill-opacity", "0.85");
+    // t=0 은 완전 투명이라 패널의 세로 그라디언트가 어떻든 정확히 녹는다. 단일 색으로는
+    // 불가능했던 부분이다(패널이 위아래로 밝기가 달라 한 값이 전 구간에 맞지 않는다).
+    // 덤으로 첫 구간 분해능이 돌아온다 -- 알파 0->0.85 가 휘도 압축을 대신한다.
+    rect.setAttribute("fill-opacity", String(0.85 * Math.min(1, t / 0.25)));
     svg.appendChild(rect);
   };
   const sortedDensityHistory = (densityHistory || []).slice().sort((a, b) => a.tsMs - b.tsMs);
