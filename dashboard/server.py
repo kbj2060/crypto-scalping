@@ -301,6 +301,7 @@ def save_model_indicator_history(rows: list[dict]) -> None:
 # 근처에 정체한다. 보이는 동안 디스크에 붙여 둔다. 화면에는 쓰지 않는다 -- 축적이 목적이다.
 ACCOUNT_TRIP_LEDGER_PATH = LIVE_DIR / "account_round_trips.jsonl"
 ACCOUNT_TRIP_RECORD_SECONDS = 300.0
+ACCOUNT_TRIP_CHECK_TOL_BP = 0.5   # 올바른 폴딩은 0.0000 이다. 0.5 는 부동소수 여유일 뿐이다
 
 
 def trip_key(trip: dict) -> str:
@@ -372,6 +373,16 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
         if overlaps_recorded(trip, seen):
             print(f"account_round_trips: 겹침으로 건너뜀 {trip_key(trip)} "
                   f"(절단된 체결 스트림의 조각으로 보인다)", flush=True)
+            continue
+        # 🔴회계 항등식이 안 맞으면 적지 않는다. 완전히 닫힌 왕복은
+        #   realizedPnl 합 = (청산VWAP − 진입VWAP) × 수량 × 방향부호 가 **정확히** 성립한다
+        # (2026-09-12 재구성한 67건 전부 ±0.0000bp). 그래서 0 이 아닌 값 자체가 폴딩이 잘못됐다는
+        # 신호다 -- 겹치지 않는 «빈 구간» 에 생긴 유령 왕복은 겹침 가드가 못 잡는데 이게 잡는다
+        # (실측: 재시작 직후 09-10 04:53 SHORT 가 −1.04bp 로 다시 생겼고, 거래소 전체 폴딩에는 없다).
+        check = trip.get("pnl_check_bp")
+        if check is None or abs(float(check)) > ACCOUNT_TRIP_CHECK_TOL_BP:
+            print(f"account_round_trips: 항등식 불일치로 건너뜀 {trip_key(trip)} "
+                  f"(check={check}bp) -- 체결 스트림이 잘린 것으로 보인다", flush=True)
             continue
         fresh.append(trip)
     if not fresh:
