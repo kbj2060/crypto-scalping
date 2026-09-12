@@ -87,12 +87,23 @@ class OiLsRatioCollector:
                 top_pos_ls_ratio DOUBLE,
                 top_pos_ls_long_account DOUBLE,
                 top_pos_ls_short_account DOUBLE,
+                top_acct_ls_ratio DOUBLE,
+                top_acct_ls_long_account DOUBLE,
+                top_acct_ls_short_account DOUBLE,
+                taker_ls_ratio DOUBLE,
+                taker_buy_vol DOUBLE,
+                taker_sell_vol DOUBLE,
                 sources_ok INTEGER,
                 collected_at TIMESTAMPTZ,
                 schema_version INTEGER
             )
             """
         )
+        # 2026-09-12 schema_version 3: ttc(topLongShortAccountRatio) + tkv(takerlongshortRatio)
+        # 6컬럼 추가. 이미 쌓인 행은 NULL 로 남고 backfill_oi_lsratio_ttc_tkv_20260912.py 가 채운다.
+        for col in ("top_acct_ls_ratio", "top_acct_ls_long_account", "top_acct_ls_short_account",
+                    "taker_ls_ratio", "taker_buy_vol", "taker_sell_vol"):
+            con.execute(f"ALTER TABLE {self._table} ADD COLUMN IF NOT EXISTS {col} DOUBLE")
         row = con.execute(f"SELECT MAX(ts) FROM {self._table}").fetchone()
         if row and row[0] is not None:
             self._last_stored_ts_ms = int(row[0].timestamp() * 1000)
@@ -105,6 +116,8 @@ class OiLsRatioCollector:
         "sum_open_interest", "sum_open_interest_value",
         "global_ls_ratio", "global_ls_long_account", "global_ls_short_account",
         "top_pos_ls_ratio", "top_pos_ls_long_account", "top_pos_ls_short_account",
+        "top_acct_ls_ratio", "top_acct_ls_long_account", "top_acct_ls_short_account",
+        "taker_ls_ratio", "taker_buy_vol", "taker_sell_vol",
     )
 
     def _db_upsert_rows(self, rows: list[dict]) -> None:
@@ -141,7 +154,7 @@ class OiLsRatioCollector:
                     merged_row.append(new_v if new_v is not None else ex_cols.get(c))
                 merged_row.append(max(int(ex_sources_ok or 0), int(r.get("sources_ok", 0))))
                 merged_row.append(datetime.now(timezone.utc))
-                merged_row.append(2)  # schema_version 2: upsert/COALESCE fill-in (2026-08-22)
+                merged_row.append(3)  # schema_version 3: ttc/tkv 채널 추가 (2026-09-12)
                 merged.append(merged_row)
 
             con.execute(f"DELETE FROM {self._table} WHERE ts IN ({placeholders})", ts_list)
@@ -151,8 +164,10 @@ class OiLsRatioCollector:
                     ts, symbol, sum_open_interest, sum_open_interest_value,
                     global_ls_ratio, global_ls_long_account, global_ls_short_account,
                     top_pos_ls_ratio, top_pos_ls_long_account, top_pos_ls_short_account,
+                    top_acct_ls_ratio, top_acct_ls_long_account, top_acct_ls_short_account,
+                    taker_ls_ratio, taker_buy_vol, taker_sell_vol,
                     sources_ok, collected_at, schema_version
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 merged,
             )
@@ -192,6 +207,8 @@ class OiLsRatioCollector:
         oi = self._fetch_one("/futures/data/openInterestHist")
         gls = self._fetch_one("/futures/data/globalLongShortAccountRatio")
         tls = self._fetch_one("/futures/data/topLongShortPositionRatio")
+        tac = self._fetch_one("/futures/data/topLongShortAccountRatio")
+        tkv = self._fetch_one("/futures/data/takerlongshortRatio")
 
         by_ts: dict[int, dict] = {}
 
@@ -219,7 +236,21 @@ class OiLsRatioCollector:
             "top_pos_ls_short_account": float(r["shortAccount"]),
         })
 
-        self._last_poll_ok_sources = sum(x is not None for x in (oi, gls, tls))
+        _merge(tac, lambda r: {
+            "top_acct_ls_ratio": float(r["longShortRatio"]),
+            "top_acct_ls_long_account": float(r["longAccount"]),
+            "top_acct_ls_short_account": float(r["shortAccount"]),
+        })
+        # ⚠️takerlongshortRatio 는 필드명이 다르고(buySellRatio/buyVol/sellVol) 공개가 한 봉
+        # 늦다(2026-09-12 실측: 다른 넷이 17:10 일 때 이것만 17:05). 같은 5분 격자라 ts 로
+        # 자연히 맞물리며, 최신 한 봉만 다음 폴에서 채워진다 -- upsert 가 그걸 처리한다.
+        _merge(tkv, lambda r: {
+            "taker_ls_ratio": float(r["buySellRatio"]),
+            "taker_buy_vol": float(r["buyVol"]),
+            "taker_sell_vol": float(r["sellVol"]),
+        })
+
+        self._last_poll_ok_sources = sum(x is not None for x in (oi, gls, tls, tac, tkv))
 
         out = []
         for ts_ms, entry in sorted(by_ts.items()):
@@ -252,7 +283,7 @@ class OiLsRatioCollector:
                 if rows:
                     await loop.run_in_executor(None, self._db_upsert_rows, rows)
                 logger.info(
-                    "oi_lsratio(%s) poll: sources_ok=%d/3 upserted_rows=%d",
+                    "oi_lsratio(%s) poll: sources_ok=%d/5 upserted_rows=%d",
                     self._api_symbol, self._last_poll_ok_sources, len(rows),
                 )
             except Exception as e:
@@ -279,4 +310,4 @@ class OiLsRatioCollector:
             return f"[oi_lsratio {self._api_symbol}] disabled"
         age = time.time() - self._last_poll_ts if self._last_poll_ts else None
         age_txt = f"{age:.0f}s ago" if age is not None else "never"
-        return f"[oi_lsratio {self._api_symbol}] last_poll={age_txt} sources_ok={self._last_poll_ok_sources}/3"
+        return f"[oi_lsratio {self._api_symbol}] last_poll={age_txt} sources_ok={self._last_poll_ok_sources}/5"
