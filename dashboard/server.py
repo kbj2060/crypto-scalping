@@ -2555,20 +2555,28 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers={"Cache-Control": "no-cache"})
 
-    async def api_manual_entry_preview(request: web.Request) -> web.Response:
-        """«이 버튼을 누르면 나갈 주문». 1단계에서는 게이트가 닫혀 있어 **보내지 않는다**.
+    async def assemble_entry_plan(side: str):
+        """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
+        두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
-        미리보기가 실주문과 **같은 함수**(build_entry_plan)를 통과한다 -- 다른 경로로 만든
-        미리보기는 실주문을 검증하지 못한다(대조군이 안 덮는 경로는 검증 안 된 것)."""
-        side = (request.query.get("side") or "").upper()
-        if side not in ("LONG", "SHORT"):
-            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        반환: (plan, cap, sizing, error). error 는 (본문, HTTP상태) 또는 None.
+        계좌를 같이 읽는 이유 둘: (1) 상한을 **합산 포지션**에 걸어야 하고
+        (2) 화면이 «현금 얼마·레버리지 몇 배·청산까지 몇 %»를 말할 수 있어야 한다."""
         symbol = MARKET_SYMBOLS["eth"]
         try:
             sizing = await asyncio.to_thread(position_sizing_payload)
             if not sizing.get("available"):
-                return web.json_response({"ok": False, "error": "sizing_unavailable",
-                                          "detail": sizing.get("error")}, status=503)
+                return None, {}, {}, ({"error": "sizing_unavailable",
+                                       "detail": sizing.get("error")}, 503)
+            account = await swr_cached("binance_account", binance_account_cache,
+                                       binance_account_lock, BINANCE_ACCOUNT_CACHE_SECONDS,
+                                       produce_account, max_stale=STALE_GRACE_SECONDS)
+            positions = [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
+            # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
+            # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
+            existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
+            equity = float((account.get("balance") or {}).get("margin") or 0.0)
+            leverage = max((float(p.get("leverage") or 0.0) for p in positions), default=0.0)
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
@@ -2577,9 +2585,23 @@ def make_app() -> web.Application:
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
                 cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
-                filters=filters, symbol=symbol)
-        except Exception as exc:  # noqa: BLE001 -- 미리보기 실패가 대시보드를 죽이면 안 된다
-            return web.json_response({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=502)
+                filters=filters, symbol=symbol, existing_notional=existing,
+                equity=equity, leverage=leverage)
+        except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
+            return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
+        return plan, cap, sizing, None
+
+    async def api_manual_entry_preview(request: web.Request) -> web.Response:
+        """«이 버튼을 누르면 나갈 주문». 1단계에서는 게이트가 닫혀 있어 **보내지 않는다**.
+
+        미리보기가 실주문과 **같은 함수**(build_entry_plan)를 통과한다 -- 다른 경로로 만든
+        미리보기는 실주문을 검증하지 못한다(대조군이 안 덮는 경로는 검증 안 된 것)."""
+        side = (request.query.get("side") or "").upper()
+        if side not in ("LONG", "SHORT"):
+            return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        plan, cap, sizing, error = await assemble_entry_plan(side)
+        if error:
+            return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": sizing.get("vol_equivalent_qty"),
                                   "exec_enabled": exec_enabled()},
@@ -2603,22 +2625,9 @@ def make_app() -> web.Application:
         if manual_entry_state.get("phase") in ("working", "submitting"):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
-        symbol = MARKET_SYMBOLS["eth"]
-        try:
-            sizing = await asyncio.to_thread(position_sizing_payload)
-            if not sizing.get("available"):
-                return web.json_response({"ok": False, "error": "sizing_unavailable"}, status=503)
-            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                            {"symbol": symbol}, error_reason="book_ticker_failed")
-            filters = await load_filters(binance_session(), symbol)
-            cap = sizing.get("cap") or {}
-            plan = build_entry_plan(
-                side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
-                recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
-                cap_notional=cap.get("cap_notional_usdt") if cap.get("available") else None,
-                filters=filters, symbol=symbol)
-        except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
-            return web.json_response({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=502)
+        plan, cap, sizing, error = await assemble_entry_plan(side)
+        if error:
+            return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)

@@ -65,11 +65,21 @@ def _floor_to(value: float, grid: float) -> float:
 
 def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended_qty: float,
                      cap_notional: float | None, filters: dict[str, float],
-                     symbol: str = "ETHUSDT") -> dict[str, Any]:
+                     symbol: str = "ETHUSDT", existing_notional: float = 0.0,
+                     equity: float = 0.0, leverage: float = 0.0) -> dict[str, Any]:
     """보낼 주문 하나를 만든다. **순수 함수** -- 네트워크도 시계도 안 본다(그래야 검사가 된다).
 
     peg 는 «내가 메이커로 남는 가격»이다: 롱은 최우선 매수호가, 숏은 최우선 매도호가.
     한 틱 더 공격적으로 가면 테이커가 되어 post-only(GTX)가 거부한다.
+
+    🔴상한은 **합산 포지션**에 건다(2026-09-12 수정). 주문 하나에만 걸면 나눠 넣어서
+    얼마든지 넘길 수 있는데, 막아야 할 대상은 −548.88 을 만든 그 왕복의 `max_qty` 14.273 --
+    즉 **왕복 중 최대 포지션**이지 주문 크기가 아니다. 실제로 기존 숏 3.025(7,642)가 열린
+    상태에서 2.693(6,803)을 더하면 14,444 로 상한 13,579 를 넘고 있었다.
+
+    equity/leverage 는 **화면 설명용**이다. 교차 마진이라 청산 거리는 대략
+    `순자산 / 총명목` 이고(실측 1,065/7,642 = 13.9% vs 거래소 13.48%), 설정 레버리지는
+    거기 안 들어간다 -- 그건 잠기는 증거금만 정한다.
     """
     if side not in ("LONG", "SHORT"):
         raise ValueError(f"side must be LONG/SHORT, got {side!r}")
@@ -79,18 +89,29 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     price = _floor_to(best_bid, filters["tick"]) if side == "LONG" else best_ask
     notes: list[str] = []
     qty = max(0.0, float(recommended_qty))
+    existing_notional = max(0.0, float(existing_notional))
 
-    if cap_notional and qty * price > cap_notional:
-        qty = cap_notional / price
-        notes.append(f"상한 적용: 명목 {cap_notional:,.0f} USDT")
+    if cap_notional:
+        room = cap_notional - existing_notional
+        if room <= 0:
+            qty = 0.0
+            notes.append(f"기존 포지션 {existing_notional:,.0f} USDT 가 이미 상한을 채웠습니다")
+        elif qty * price > room:
+            qty = room / price
+            notes.append(f"상한까지 남은 여유 {room:,.0f} USDT 로 줄였습니다"
+                         f" (기존 {existing_notional:,.0f} + 신규 = 상한 {cap_notional:,.0f})")
     qty = _floor_to(qty, filters["step"])
 
     blocked = None
     if qty < filters["min_qty"] or qty <= 0:
-        blocked = f"수량이 최소 {filters['min_qty']} 미만"
+        blocked = ("상한 여유가 없습니다" if cap_notional and existing_notional >= cap_notional
+                   else f"수량이 최소 {filters['min_qty']} 미만")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
         blocked = f"명목이 최소 {filters['min_notional']:,.0f} USDT 미만"
 
+    notional = qty * price
+    total_notional = notional + existing_notional
+    margin = notional / leverage if leverage else 0.0
     return {
         "symbol": symbol,
         "side": "BUY" if side == "LONG" else "SELL",
@@ -99,7 +120,17 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
         "timeInForce": "GTX",          # post-only -- 테이커가 되면 체결 대신 거부된다
         "price": round(price, 8),
         "quantity": round(qty, 8),
-        "notional_usdt": round(qty * price, 2),
+        "notional_usdt": round(notional, 2),
+        # ── 화면이 «이게 무슨 뜻인지»를 말할 수 있게 하는 값들 ────────────────────
+        "margin_usdt": round(margin, 2),                       # 실제로 잠기는 현금
+        "margin_pct_of_equity": round(100 * margin / equity, 1) if equity else None,
+        "leverage": leverage or None,                          # 거래소 설정값
+        "existing_notional_usdt": round(existing_notional, 2),
+        "total_notional_usdt": round(total_notional, 2),
+        "effective_leverage": round(total_notional / equity, 2) if equity else None,
+        # 교차 마진 근사. 거래소 실제 청산가와 0.5pp 안쪽으로 맞았다(실측).
+        "liq_distance_pct": round(100 * equity / total_notional, 1) if equity and total_notional else None,
+        "cap_used_pct": round(100 * total_notional / cap_notional, 0) if cap_notional else None,
         "fallback_after_sec": FALLBACK_SEC,
         "fallback": "taker",           # 사용자 선택 b: 미체결이면 테이커 전환
         "cap_notional_usdt": cap_notional,
@@ -134,6 +165,36 @@ def _self_check() -> None:
                             recommended_qty=2.0, cap_notional=15201.0, filters=f)
     assert plan["quantity"] == 2.0 and not plan["notes"], plan
 
+    # 🔴상한은 **합산**에 건다. 실제로 겪은 값으로 검사한다: 기존 7,642 가 열린 채
+    # 6,803 을 더하면 14,444 로 13,579 를 넘었는데 예전 코드는 그냥 통과시켰다.
+    plan = build_entry_plan(side="SHORT", best_bid=2526.08, best_ask=2526.09,
+                            recommended_qty=2.693, cap_notional=13579.31, filters=f,
+                            existing_notional=7641.6, equity=1064.69, leverage=30.0)
+    assert plan["total_notional_usdt"] <= 13579.31 + 1e-6, plan
+    assert plan["quantity"] < 2.693, "기존 포지션만큼 줄어야 한다"
+    assert plan["notes"], "줄였으면 이유를 남긴다"
+
+    # 기존 포지션이 이미 상한을 채웠으면 아예 막는다
+    plan = build_entry_plan(side="SHORT", best_bid=2526.08, best_ask=2526.09,
+                            recommended_qty=2.0, cap_notional=13579.31, filters=f,
+                            existing_notional=14000.0, equity=1064.69, leverage=30.0)
+    assert plan["quantity"] == 0.0 and plan["blocked"], plan
+
+    # 화면 설명값: 증거금은 **설정 레버리지**로 나눈 값, 청산 근사는 순자산/총명목
+    plan = build_entry_plan(side="SHORT", best_bid=2526.08, best_ask=2526.09,
+                            recommended_qty=2.693, cap_notional=None, filters=f,
+                            existing_notional=0.0, equity=1064.69, leverage=30.0)
+    assert abs(plan["margin_usdt"] - plan["notional_usdt"] / 30.0) < 0.01, plan
+    assert plan["effective_leverage"] == round(plan["notional_usdt"] / 1064.69, 2), plan
+    # 순자산 1,064.69 / 명목 6,802 ≈ 15.6% -- 거래소 실측(13.48% @ 7,642)과 같은 눈금
+    assert 10.0 < plan["liq_distance_pct"] < 20.0, plan
+    assert plan["margin_pct_of_equity"] is not None, plan
+
+    # equity/leverage 를 모르면 설명값은 None 이지 0 이 아니다(0 은 "레버리지 0배"로 읽힌다)
+    plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                            recommended_qty=1.0, cap_notional=None, filters=f)
+    assert plan["effective_leverage"] is None and plan["liq_distance_pct"] is None, plan
+
     # 최소 명목 미달은 조용히 보내지 않고 막는다
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
                             recommended_qty=0.005, cap_notional=None, filters=f)
@@ -149,7 +210,7 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: {bad}")
 
-    print("통과 6/6 — 수동 진입 계획 계약 유지")
+    print("통과 11/11 — 진입 계획 + 합산 상한 + 화면 설명값 계약 유지")
 
 
 if __name__ == "__main__":

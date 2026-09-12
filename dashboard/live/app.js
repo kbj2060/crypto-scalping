@@ -5103,22 +5103,44 @@ setupNotifyPage();
 // 미리보기는 실주문과 **같은 함수**(build_entry_plan)를 통과한다.
 const MANUAL_ENTRY_REFRESH_MS = 60000;
 
+// 숫자가 스스로 뜻을 말하게 쓴다 -- 분모·일상단위·결정연결까지(2026-09-11 사용자 지시).
+// 「6,802 USDT」는 명목이지 내 돈이 아니고, 「30배」는 청산 거리가 아니라 잠기는 증거금이다.
+// 교차 마진이라 청산 거리는 순자산/총명목으로 정해진다 -- 설정 레버리지는 거기 안 들어간다.
+const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
 function manualEntryPlanText(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
-  const rows = [
-    `${dir}  ${plan.quantity} ETH  @ ${Number(plan.price).toLocaleString()}  (${Number(plan.notional_usdt).toLocaleString()} USDT)`,
-    `주문  ${plan.type} ${plan.timeInForce}(post-only) · 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`,
-  ];
-  if (cap.available) {
-    rows.push(`상한  ${Number(cap.cap_notional_usdt).toLocaleString()} USDT — 중앙 명목의 ${cap.mult}배 (왕복 ${cap.trips}건 기준)`);
+  const rows = [`${dir}  ${plan.quantity} ETH  @ ${Number(plan.price).toLocaleString()}`, ""];
+
+  if (plan.margin_usdt) {
+    const pct = plan.margin_pct_of_equity != null ? ` · 순자산의 ${plan.margin_pct_of_equity}%` : "";
+    rows.push(`내 돈(증거금)  ${won(plan.margin_usdt)} USDT${pct}`);
   }
-  (plan.notes || []).forEach((note) => rows.push(`      ${note}`));
-  if (plan.blocked) rows.push(`막힘  ${plan.blocked}`);
+  rows.push(`빌린 것 포함    ${won(plan.notional_usdt)} USDT` +
+    (plan.leverage ? `  (설정 ${plan.leverage}배)` : ""));
+
+  if (plan.existing_notional_usdt > 0) {
+    rows.push(`기존 포지션     ${won(plan.existing_notional_usdt)} USDT`);
+    rows.push(`합산 노출       ${won(plan.total_notional_usdt)} USDT` +
+      (plan.effective_leverage ? `  ·  실효 ${plan.effective_leverage}배` : ""));
+  } else if (plan.effective_leverage) {
+    rows.push(`실효 레버리지   ${plan.effective_leverage}배  (명목 ÷ 순자산)`);
+  }
+  if (plan.liq_distance_pct != null) {
+    rows.push(`청산까지        약 ${plan.liq_distance_pct}%  — 이만큼 반대로 가면 전부 잃습니다`);
+  }
+  if (cap.available && plan.cap_used_pct != null) {
+    rows.push(`상한 사용       ${plan.cap_used_pct}%  (${won(cap.cap_notional_usdt)} USDT 중)`);
+  }
+
+  rows.push("", `주문  peg 지정가(메이커) · 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`);
+  (plan.notes || []).forEach((note) => rows.push(`⚠ ${note}`));
+  if (plan.blocked) rows.push(`🔴 막힘  ${plan.blocked}`);
   rows.push(plan.dry_run
-    ? "※ 미리보기 전용 — 주문은 나가지 않았습니다."
-    : "※ 실주문 게이트가 열려 있습니다.");
+    ? "※ 미리보기 전용 — 주문은 나가지 않습니다."
+    : "※ 확인 버튼을 누르면 실제 주문이 나갑니다.");
   return rows.join("\n");
 }
 
