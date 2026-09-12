@@ -34,6 +34,7 @@ GBM 은 같은 일을 ~0.001초에 한다. 재보고 안 쓰기로 한 것이지
 대조하므로 옛 아티팩트는 거절되고 워커가 조용히 1/ATR 로 떨어진다(죽지는 않는다).
 
 학습: python scripts/live_eth_sizing_vol_model_20260912.py --train
+검증: 같은 파일 --verify (배포된 아티팩트를 그 기계의 데이터로 표본외 재검)
 점검: python scripts/live_eth_sizing_vol_model_20260912.py
 """
 from __future__ import annotations
@@ -162,6 +163,46 @@ def train() -> int:
     return 0
 
 
+def verify() -> int:
+    """배포된 아티팩트를 **그 기계의 데이터로** 표본외 재검한다(2026-09-12).
+
+    학습 CSV 길이가 기계마다 다르다(로컬 385k · 서버 175k). 연구 수치를 다른 기계에서
+    그대로 주장하면 안 되므로, 배포 직후 이 자리에서 다시 낸다. 현행 이전 공식인 1/ATR288 과
+    같은 행에서 비교한다 — 수량이 1/예측 이므로 지표는 **실현변동성/예측의 산포**다.
+    """
+    import joblib
+    from scipy.stats import spearmanr
+    art = joblib.load(ARTIFACT)
+    d = pd.read_csv(KL_CSV, usecols=["timestamp", "close", "high", "low", "quote_volume", "trades"],
+                    parse_dates=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    X = build_features(d["timestamp"], d["close"].to_numpy(float),
+                       d["quote_volume"].to_numpy(float), d["trades"].to_numpy(float),
+                       d["high"].to_numpy(float), d["low"].to_numpy(float))
+    lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
+    y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
+    ts = d["timestamp"].to_numpy()
+    te = (np.isfinite(y) & (y > 0) & (ts > np.datetime64(TRAIN_END + "T23:59:59"))
+          & np.isfinite(X.to_numpy(float)).all(1))
+    if te.sum() < 1000:
+        print(f"표본외 {te.sum()}행 — 너무 적어 판정하지 않는다")
+        return 1
+    pred = predict_vol(art["models"], X[te])
+    atr = np.exp(X["atr288"].to_numpy())[te]
+    yt = y[te]
+    print(f"아티팩트 피쳐 {len(art['features'])} · 학습 {art['n_train']:,}행 · "
+          f"표본외 {te.sum():,}행 ({str(ts[te][0])[:10]} ~ {str(ts[te][-1])[:10]})")
+    print("               스피어만    산포   |z|>3   |z|>5")
+    for nm, v in (("1/ATR288", atr), ("모델", pred)):
+        z = yt / np.maximum(v, 1e-12)
+        z = z / np.median(z)
+        print("%-12s %8.4f %7.4f %6.2f%% %6.2f%%" % (
+            nm, spearmanr(v, yt).statistic, np.std(z), (z > 3).mean() * 100, (z > 5).mean() * 100))
+    mult = art["ref_pred"] / pred
+    print("수량 배수(기준/예측): 5%% %.2f · 중앙 %.2f · 95%% %.2f" % (
+        np.percentile(mult, 5), np.median(mult), np.percentile(mult, 95)))
+    return 0
+
+
 def _self_check() -> None:
     """네트워크·아티팩트 없이 도는 계약 검사."""
     n = 900
@@ -211,4 +252,6 @@ def _self_check() -> None:
 if __name__ == "__main__":
     if "--train" in sys.argv:
         raise SystemExit(train())
+    if "--verify" in sys.argv:
+        raise SystemExit(verify())
     _self_check()
