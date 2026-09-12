@@ -25,7 +25,7 @@
 # ## 사용법
 #   bash scripts/ops/check_deploy_drift.sh
 #
-# 종료코드: 0 = 안전, 1 = 위험(충돌 마커 또는 커밋되지 않은 라이브 파일 존재)
+# 종료코드: 0 = 안전, 1 = 위험(충돌 마커 또는 커밋되지 않은 라이브 파일 존재), 2 = 판정 불가(서버를 못 읽음)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -38,7 +38,7 @@ echo "=== 배포 드리프트 점검 ==="
 echo
 
 # --- 1. 서버 상태 조회 (읽기 전용) ---
-bash "$HANDOFF" launch server "$JOB" -- /bin/bash -c '
+LAUNCH_ERR="$(bash "$HANDOFF" launch server "$JOB" -- /bin/bash -c '
 cd /home/llewyn/crypto-scalping
 echo "SERVER_HEAD=$(git rev-parse --short HEAD)"
 echo "SERVER_ORIGIN=$(git rev-parse --short origin/main)"
@@ -58,13 +58,30 @@ echo "--- UNTRACKED_SCRIPTS ---"
 # 거부되고 폴백 stash 의 pop 이 "already exists" 로 실패한다. 개수와 앞 5개를 알려 커밋을 재촉한다.
 git status --porcelain --untracked-files=all | grep -E "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$" | cut -c4- | sed -n "1,5p"
 echo "UNTRACKED_SCRIPT_COUNT=$(git status --porcelain --untracked-files=all | grep -cE "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$")"
-' >/dev/null 2>&1
+' 2>&1 >/dev/null)"
 
 for _ in $(seq 1 30); do
   sleep 3
   bash "$HANDOFF" status server "$JOB" 2>&1 | grep -q "STOPPED" && break
 done
 OUT="$(bash "$HANDOFF" logs server "$JOB" 2>&1)"
+
+# --- 1b. 도달 게이트 ---
+# 2026-09-12: 서버에 못 닿아도 초록을 띄우던 결함을 막는다. OUT 이 비면 아래 grep 이 전부 빈 값이 되고
+# markers/unmerged/dirty 가 모두 false 라서 RC=0 "✅ 안전"이 나왔다. 실제로 워크트리에
+# handoff.hosts.conf 가 없어 launch 가 매번 실패했는데 안전 판정이 떴고, 그 상태로 main 머지가 나갔다.
+# 침묵(= 아무 문제 없음)과 무응답(= 아무것도 모름)을 구분해야 한다 -- 도달 증거를 요구한다.
+if ! echo "$OUT" | grep -qE '^SERVER_HEAD=[0-9a-f]{7,}'; then
+  echo "⛔ 판정 불가: 서버 상태를 읽지 못했습니다 -- 이 결과로 머지 여부를 판단하지 마세요."
+  if [[ -n "${LAUNCH_ERR:-}" ]]; then
+    echo "   launch 오류:"; echo "$LAUNCH_ERR" | head -5 | sed 's/^/     /'
+  fi
+  if [[ -n "$OUT" ]]; then
+    echo "   받은 응답:"; echo "$OUT" | head -5 | sed 's/^/     /'
+  fi
+  echo "   흔한 원인: 이 체크아웃에 scripts/ops/handoff.hosts.conf 가 없음 (gitignored -- 워크트리마다 따로 둔다)."
+  exit 2
+fi
 
 # --- 2. 판정 ---
 # 2026-09-04: UNTRACKED_SCRIPTS 절이 뒤에 추가된 뒤 '$p'(끝까지)가 그 절을 마커로 오인해 RC=1 오탐 -> 절 경계로 한정
