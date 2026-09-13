@@ -133,6 +133,9 @@ def run_plan(d, a) -> int:
     use_stop = not a.no_stop
     arms = [("단일 90만(전량)", 1.0, None), ("절반 45만만", 0.5, None)]
     arms += [(f"45/45 · −{p:.1f}%", 0.5, p / 100) for p in (1.0, 1.5, 2.0, 3.0)]
+    arms += [(f"−{p:.1f}% · {fb}분후채움", 0.5, p / 100, fb)
+             for p in (1.0, 1.5, 2.0) for fb in (30, 60)]
+    arms = [(x + (None,))[:4] if len(x) == 3 else x for x in arms]
     acc = float(a.acc.split(",")[0])
     print(f"1분봉 {len(d):,} · 보유 {a.hold}분 · 정확도 {acc} · 씨드 {a.seeds} · "
           f"손절 {'평단 3%(재무장)' if use_stop else '없음'}")
@@ -144,21 +147,21 @@ def run_plan(d, a) -> int:
             continue
         idx = np.arange(lo_i, hi_i, a.every)
         truth = np.where(c[idx + a.hold] >= c[idx], 1.0, -1.0)
-        res = {nm: [] for nm, _, _ in arms}
+        res = {nm: [] for nm, *_ in arms}
         for sdd in range(a.seeds):
             rng = np.random.default_rng(SEED + 1000 * sdd)
             sides = np.where(rng.random(len(idx)) < acc, truth, -truth)
             base = None
-            for nm, first, pct in arms:
+            for nm, first, pct, fb in arms:
                 r = simulate_plan(d, idx, sides, pct=pct, hold=a.hold, first=first,
-                                  use_stop=use_stop)
+                                  use_stop=use_stop, fallback=fb)
                 base = r["net_bp"] if base is None else base
                 res[nm].append((r["net_bp"] - base, r["net_bp"], r["expo"], r["fill"],
                                 r["stop"], r["p05"], r["worst"]))
         print(f"{wname}  (진입 {len(idx):,}건)")
         print(f"{'팔':>16} {'Δ단일bp':>12} {'노출':>6} {'추가체결':>8} {'손절률':>7} "
               f"{'하위5%':>9} {'최악':>9}")
-        for nm, _, _ in arms:
+        for nm, *_ in arms:
             v = np.array(res[nm]); m = v[:, 0].mean()
             se = v[:, 0].std(ddof=1) / np.sqrt(len(v)) if v[:, 0].std() > 0 else 0.0
             print(f"{nm:>16} {m:>7.2f}±{se:<4.2f} {v[:, 2].mean():>6.2f} "
@@ -227,12 +230,14 @@ def main() -> int:
 STOP_PCT, STOP_SLIP_BP, TAKER_BP = 0.03, 14.0, 4.5
 
 
-def simulate_plan(d, idx, sides, *, pct, hold, first=0.5, use_stop=True):
+def simulate_plan(d, idx, sides, *, pct, hold, first=0.5, use_stop=True, fallback=None):
     """칸0 즉시 `first`, 칸1 은 `-pct` 지정가에 나머지. 미체결이면 **덜 산 채로** 끝난다.
 
     봉 안 순서: 롱이 내려갈 때 −1.5% 지정가가 −3.72% 손절보다 **먼저** 닿는다(물리적으로
     가까운 쪽이 먼저다) -- 낙관 가정이 아니라 순서가 정해져 있다. 그래서 체결 -> 손절 순.
-    `first=1.0` 이면 단일 진입, `pct=None` 이면 칸1 없음(= `first` 크기 단일)."""
+    `first=1.0` 이면 단일 진입, `pct=None` 이면 칸1 없음(= `first` 크기 단일).
+    ⭐`fallback=T` 면 T 분 안에 지정가가 안 닿아도 **그때 시장가로 나머지를 채운다** --
+    사용자 전제(«어차피 상한까지 넣는다»)가 이쪽이다. 미체결 소멸판과 노출이 완전히 다르다."""
     c = d.close.to_numpy(float); hi = d.high.to_numpy(float); lo = d.low.to_numpy(float)
     net, expo, fills, stops = [], [], [], []
     for i, s in zip(idx, sides):
@@ -245,10 +250,14 @@ def simulate_plan(d, idx, sides, *, pct, hold, first=0.5, use_stop=True):
         t_fill, out, texit = None, None, hold
         for t in range(hold):
             b = i + 1 + t
-            if lvl is not None and (lo[b] <= lvl if s > 0 else hi[b] >= lvl):
+            hit = lvl is not None and (lo[b] <= lvl if s > 0 else hi[b] >= lvl)
+            late = lvl is not None and fallback is not None and t >= fallback
+            if hit or late:
+                p_add = lvl if hit else c[b]          # 늦으면 그 시점 현재가에 시장가
                 add = 1.0 - first
-                avg = (avg * size + lvl * add) / (size + add)
-                size += add; cost += add * (MAKER_BP + EXIT_BP) / 1e4
+                avg = (avg * size + p_add * add) / (size + add)
+                size += add
+                cost += add * ((MAKER_BP if hit else TAKER_BP) + EXIT_BP) / 1e4
                 t_fill, lvl = t, None
                 stop = avg * (1 - s * STOP_PCT) if use_stop else None
             if stop is not None and (lo[b] <= stop if s > 0 else hi[b] >= stop):
