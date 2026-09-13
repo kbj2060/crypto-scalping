@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import math
 import pathlib
 import sys
 
@@ -62,6 +63,51 @@ FILL_K, FILL_EXP = 52.0, 1.472       # 중앙 체결시간(초) ≈ 52 / vol^1.4
 MAKER_BP, TAKER_BP = 2.0, 5.0
 # ponytail: 재조정 무거래 밴드는 고정 25%. 비용(왕복 5.88bp) 대 파산감소로 최적화하면 더 낫다.
 REBALANCE_BAND = 0.25
+
+
+EULER_GAMMA = 0.5772156649
+
+
+def expected_max_drawdown(L: float, move_bp: float, sd_bp: float, acc: float,
+                          hold_min: int, cost_bp: float | None = None) -> float:
+    """1년 경로의 **중앙 최대낙폭**. 파산이 아니라 이게 실제로 배수를 묶는 값이다.
+
+    🔴왜 파산이 아니라 MDD 인가(2026-09-14 실측, research_ruin_term_in_objective_20260914):
+      · 손절 3% 에서 단일거래 파산은 L >= 1/0.03 = 33.3배에서만 가능한데 하드캡이 25배다.
+        **가용 구간 전체에서 항상 0인 죽은 항**이라 목적함수에 넣을 게 없다.
+      · 경로 파산도 손절이 있으면 L=25 까지 실측 0.000 이다.
+      · 그런데 L=16 에서 **파산율 0% 인데 1년 중앙 계좌가 0.013배**다(중앙 MDD 1.000).
+        파산 항을 넣었다면 «안전»이라고 답했을 자리다. 죽이는 건 파산이 아니라 낙폭이다.
+
+    식은 표류 있는 랜덤워크의 기대 최대낙폭이다
+    (Magdon-Ismail·Atiya·Pratap·Abu-Mostafa 2004, *On the Maximum Drawdown of a Brownian Motion*):
+        로그낙폭 ≈ (v / 2g) · (ln(2·g²·n / v) + γ)
+    g=건당 로그성장 · v=건당 로그수익 분산 ≈ (L·σ)² · n=연간 거래수. **셋 다 이미 있는 값**이라
+    새 표가 필요 없다. 적합은 스케일 1개(k=1.038≈1)뿐이고 **표본외 검증**(H=60·1440)에서
+    상관 0.964 · 평균절대오차 0.048 이었다.
+
+    🔴**분기가 둘이다.** 위 식은 «표류가 잡음을 이기는» 구간의 점근식이라, 실력이 낮거나
+    배수가 커서 2g²n/v 가 작아지면 못 쓴다. 그 구간은 표류 없는 랜덤워크로 보는 게 맞다:
+        로그낙폭 ≈ σ_g · √(π·n/8)
+    처음엔 저표류 칸을 조용히 버리고 검증했다가 «전 구간 오차 0.048» 이라는 낙관적인 수를
+    얻었다. 버린 칸을 되살려 **140칸 전부**로 재면 상관 0.896 · 평균절대오차 0.068 이다.
+    (고표류 65칸 0.030 · 저표류 75칸 0.101 -- 저표류 쪽이 거칠다는 걸 숨기지 않는다.)
+
+    ⚠️화면은 **구간(밴드)으로** 읽어야지 소수점을 믿으면 안 된다.
+    g <= 0 이면 표류가 없으므로 저표류 분기로 간다.
+    """
+    if cost_bp is None:
+        cost_bp = expected_cost_bp(hold_min)
+    g = growth_per_trade(L, move_bp, sd_bp, acc, cost_bp)
+    v = (L * sd_bp / 1e4) ** 2
+    n = min(735.0, 525_600.0 / max(1, int(hold_min)))
+    if v <= 0 or L <= 0:
+        return 1.0
+    # 전환점은 ln(arg) = 1, 즉 arg = e. 그 아래는 로그항이 음수가 되어 식이 뒤집힌다.
+    arg = 2.0 * g * g * n / v if g > 0 else 0.0
+    log_dd = ((v / (2.0 * g)) * (math.log(arg) + EULER_GAMMA) if arg > math.e
+              else math.sqrt(v) * math.sqrt(math.pi * n / 8.0))
+    return float(min(1.0, 1.0 - math.exp(-log_dd)))
 
 
 def stop_hit_rate(hold_min: int, side: str = "LONG") -> float:
@@ -433,6 +479,9 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
         "hold_by_acc": sens,
         "stop_risk": stop_risk(stop_pct=STOP_LOSS_PCT, leverage=L or 0.0, hold_min=H, side=side),
         "cost_bp": row["cost_bp"], "funding_bp": row["funding_bp"],
+        # 🔴«파산»이 아니라 이 값이 배수를 묶는다. 실측 L=16 은 파산 0% 인데 계좌가 1.3% 남았다.
+        "expected_mdd": round(expected_max_drawdown(
+            L or 0.0, row["move_bp"], row["sd_bp"], acc, H, row["cost_bp"]), 2),
         "size_source": "MAE 분위 모델(방향 가정 없음)",
         "tranche_reason": ("일괄 — 분할은 «같은 평균 노출의 작은 단일 진입»에 869일 6/6 칸 전패,"
                            " 생존선 위에서는 파산도 못 줄였습니다. 노출을 낮추려면 배수를 낮춥니다"),
@@ -575,6 +624,26 @@ def _self_check() -> None:
     # 1440분을 들면서 하루 2건은 불가능하다 -- 빈도가 지평 상한에 묶여야 한다
     assert stop_risk(stop_pct=0.03, leverage=6.0, hold_min=1440)["trades_per_year"] == 365
     assert stop_risk(stop_pct=0.03, leverage=6.0, hold_min=60)["trades_per_year"] == 735
+    # ── 기대 최대낙폭 (2026-09-14 파산항 연구) ──────────────────────────────
+    # 🔴파산이 아니라 이 값이 배수를 묶는다. 배수가 오르면 낙폭도 단조 증가해야 한다.
+    # 🔴**실측 대조**: research_ruin_term_in_objective_20260914 의 테이프 표본
+    #    (869일 · H=240 · a=0.62 · b=92.6bp · sd=141.7bp)에서 잰 1년 중앙 MDD 다.
+    #    파라미터를 바꾸면 기준값도 바뀌므로 **같은 표본값으로** 불러야 한다.
+    TAPE_B, TAPE_SD = 92.6, 141.7
+    truth = {2: 0.321, 3: 0.453, 4: 0.567, 6: 0.743, 8: 0.861, 10: 0.935}
+    for L, want in truth.items():
+        got = expected_max_drawdown(L, TAPE_B, TAPE_SD, 0.62, 240)
+        assert abs(got - want) < 0.10, (L, got, want)
+    mdds = [expected_max_drawdown(L, TAPE_B, TAPE_SD, 0.62, 240) for L in truth]
+    assert all(a <= b for a, b in zip(mdds, mdds[1:])), "배수가 오르면 낙폭도 올라야 한다"
+    # 🔴저표류 분기가 **1.0 으로 포화되지 않아야** 한다 -- 처음 판이 그래서 못 썼다.
+    assert expected_max_drawdown(4, 38.8, 59.5, 0.62, 240) < 0.99, "저표류 분기가 죽었다"
+    # 실력이 오르면 같은 배수의 낙폭이 준다
+    assert (expected_max_drawdown(6, TAPE_B, TAPE_SD, 0.66, 240)
+            < expected_max_drawdown(6, TAPE_B, TAPE_SD, 0.60, 240))
+    # 배수가 0 이면 낙폭을 말할 대상이 없다
+    assert expected_max_drawdown(0.0, TAPE_B, TAPE_SD, 0.66, 240) == 1.0
+
     sr = stop_risk(stop_pct=0.03, leverage=6.0)
     assert sr["per_stop_pct"] == 18.0, sr           # 3% × 6배
     assert sr["liq_unreachable"] is True, "3% < 16.7% 이므로 청산은 도달 불가"

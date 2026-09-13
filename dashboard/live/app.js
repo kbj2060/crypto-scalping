@@ -5270,6 +5270,14 @@ function tradePlanLines(tp) {
            + ` · 연 ${sr.expected_stops_per_year}회 예상`
          : ` — 청산거리 ${rx.liq_distance_pct}%`)
       + ` · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`);
+    // 🔴«파산»이 아니라 이 값이 배수를 묶는다(2026-09-14). 실측 L=16 은 파산 0% 인데
+    // 1년 중앙 계좌가 0.013배였다. 소수점은 못 믿으니 10%p 밴드로 말한다.
+    if (rx.expected_mdd != null) {
+      const lo = Math.max(0, Math.round(100 * rx.expected_mdd / 10) * 10 - 10);
+      const hi = Math.min(100, lo + 20);
+      out.push(`이 배수로 1년 굴리면 중간에 겪을 최대 낙폭 **약 ${lo}~${hi}%**`
+        + ` (파산은 손절이 막지만 낙폭은 안 막습니다)`);
+    }
     if (sr.available) {
       out.push(sr.liq_unreachable
         ? `청산선 ${sr.liq_distance_pct}% 는 손절(3%)이 먼저 와서 **도달 불가** — 위험은 손절 반복에서 옵니다`
