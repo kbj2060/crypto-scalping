@@ -5214,6 +5214,16 @@ function entryNote(text, tone) {
 function tradePlanLines(tp) {
   if (!tp) return [];
   const out = [];
+  // ⭐처방: 세 값을 한 줄로. 이게 «이번 진입을 어떻게 하라»의 전부다.
+  const rx = tp.prescription;
+  if (rx && rx.available) {
+    const hb = Object.entries(rx.hold_by_acc || {})
+      .map(([a, m]) => `${Math.round(100 * Number(a))}%→${m}분`).join(" ");
+    out.push(`처방 ${rx.leverage}배 · ${rx.hold_min}분 · ${rx.tranches}회(일괄)`
+      + ` — 청산거리 ${rx.liq_distance_pct}% · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`
+      + ` (실력 ${Math.round(100 * rx.acc_assumed)}% 가정${hb ? `, 가정별 보유 ${hb}` : ""})`);
+    out.push(`크기는 ${rx.size_source} · 분할 ${rx.tranche_reason}`);
+  }
   const h = tp.hold || {};
   if (h.available) {
     const cur = (h.table || []).find((r) => r.hold_min === tp.hold_min);

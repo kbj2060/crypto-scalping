@@ -243,6 +243,32 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_prescription_is_attached_and_always_lump(self) -> None:
+        """처방(배수·보유·분할)이 진입·청산 미리보기에 실리고, 분할은 **항상 1** 이다.
+
+        분할이 1 이 아니게 되면 869일 크기매칭 실험(6/6 전패)을 다시 돌려야 한다는 뜻이므로
+        여기서 잡는다. 배수는 방향 가정과 무관해야 하므로 그 사실도 같이 고정한다.
+        """
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                for path in ("/api/manual-entry/preview?side=LONG&hold=240",
+                             "/api/manual-exit/preview?side=LONG&hold=240"):
+                    body = await (await client.get(path)).json()
+                    rx = (body.get("plan") or {}).get("trade_plan", {}).get("prescription") or {}
+                    self.assertTrue(rx.get("available"), f"{path}: {rx}")
+                    self.assertEqual(rx["tranches"], 1, "분할은 자유 변수가 아니다")
+                    self.assertIn(rx["hold_min"], HOLDS, rx)
+                    self.assertGreater(rx["leverage"], 0, rx)
+                    self.assertAlmostEqual(rx["liq_distance_pct"], 100.0 / rx["leverage"],
+                                           delta=0.1, msg=str(rx))
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),
